@@ -1,0 +1,17 @@
+{
+  "exportedAt": "2026-06-04T12:00:00.000Z",
+  "decisions": [
+    {
+      "key": "common.save",
+      "lang": "ta",
+      "action": "approve",
+      "value": "சேமிக்கவும்"
+    },
+    {
+      "key": "common.cancel",
+      "lang": "te",
+      "action": "keep-english",
+      "value": "Cancel"
+    }
+  ]
+}

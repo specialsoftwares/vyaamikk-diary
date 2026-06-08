@@ -1,0 +1,25 @@
+rules_version = '2';
+
+// =============================================================
+// Vyaamikk Diary — DEVELOPMENT Firestore rules
+//
+// Deploy ONLY to a dev Firebase project. DO NOT use in production.
+//
+// Shared-dev mode bypasses Firebase Auth (we use a mock OTP and a
+// deterministic uid derived from the phone number). That means we have
+// no `request.auth.uid` to constrain access against, so dev rules are
+// intentionally permissive — anyone with the dev Firebase config can
+// read and write any document in the project.
+//
+// For production, deploy `firestore.rules` (NOT this file). That ruleset
+// requires real Firebase Auth and restricts each user to their own
+// documents.
+// =============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}

@@ -1,0 +1,323 @@
+import React, { useCallback, useEffect, useState } from "react";
+import { ActivityIndicator, StyleSheet, View } from "react-native";
+import { useLocalSearchParams, useRouter } from "expo-router";
+
+import {
+  clearAuthWrapperChallenge,
+  clearAuthWrapperProgress,
+  loadAuthWrapperChallenge,
+  markAuthWrapperEmailComplete,
+  markAuthWrapperEmailPending,
+  saveAuthWrapperChallenge,
+} from "@/auth-v2/authWrapperProgress";
+import { EmailEntryScreen } from "@/auth-v2/screens/EmailEntryScreen";
+import { OtpVerificationScreen } from "@/auth-v2/screens/OtpVerificationScreen";
+import { PhoneEntryScreen } from "@/auth-v2/screens/PhoneEntryScreen";
+import { sendOtpForWrapper } from "@/auth-v2/services/authWrapperService";
+import type { AuthV2PhoneDraft, AuthV2Step } from "@/auth-v2/types";
+import { DEFAULT_AUTH_V2_COUNTRY_CODE } from "@/auth-v2/types";
+import { toE164FromDraft } from "@/auth-v2/phoneValidation";
+import { AppError, userFacingMessage } from "@/domain/errors";
+import { useAuth } from "@/state/auth";
+import { useT } from "@/i18n";
+import {
+  consentPatchForProfile,
+  savePendingConsent,
+} from "@/services/consent/legalConsentService";
+import type { OtpChallenge } from "@/services/auth/types";
+
+/**
+ * Premium Indigo auth wrapper — sole sign-in entry for the app.
+ */
+export function AuthFlowGate() {
+  const t = useT();
+  const router = useRouter();
+  const { step: paramStep, from: paramFrom } = useLocalSearchParams<{
+    step?: string;
+    from?: string;
+  }>();
+  const { status, user, startOtp, confirmOtp, updateProfile, signOut } = useAuth();
+
+  const [hydrated, setHydrated] = useState(false);
+  const [step, setStep] = useState<AuthV2Step>("phone");
+  const [phoneDraft, setPhoneDraft] = useState<AuthV2PhoneDraft>({
+    countryCode: DEFAULT_AUTH_V2_COUNTRY_CODE,
+    localNumber: "",
+  });
+  const [phoneE164, setPhoneE164] = useState<string | null>(null);
+  const [challenge, setChallenge] = useState<OtpChallenge | null>(null);
+  const [devHint, setDevHint] = useState<string | null>(null);
+  const [emailDraft, setEmailDraft] = useState("");
+  const [emailHint, setEmailHint] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [privacyAccepted, setPrivacyAccepted] = useState(false);
+
+  const handoffToApp = useCallback(() => {
+    router.replace("/");
+  }, [router]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (status === "loading") return;
+
+      if (status === "signed_in" && user) {
+        if (user.profileCompletedAt) {
+          handoffToApp();
+          return;
+        }
+        if (user.businessEmail?.trim()) {
+          await markAuthWrapperEmailComplete(user.uid);
+          handoffToApp();
+          return;
+        }
+        setEmailDraft(user.businessEmail ?? "");
+        setStep("email");
+        if (!cancelled) setHydrated(true);
+        return;
+      }
+
+      const snap = await loadAuthWrapperChallenge();
+      if (snap && !cancelled) {
+        setPhoneE164(snap.phoneE164);
+        setChallenge({
+          verificationId: snap.verificationId,
+          phoneE164: snap.phoneE164,
+          devCodeHint: snap.devCodeHint,
+        });
+        setDevHint(snap.devCodeHint);
+        setStep("otp");
+      }
+      if (!cancelled) setHydrated(true);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [status, user, router, handoffToApp, paramStep]);
+
+  useEffect(() => {
+    if (status === "signed_in" && user && !user.profileCompletedAt && paramStep === "email") {
+      setStep("email");
+      setEmailDraft(user.businessEmail ?? "");
+    }
+  }, [paramStep, status, user]);
+
+  const handleContinueToConfirm = () => {
+    setError(null);
+    try {
+      const e164 = toE164FromDraft(phoneDraft.countryCode, phoneDraft.localNumber);
+      setPhoneE164(e164);
+      setStep("confirm");
+    } catch (e) {
+      setError(userFacingMessage(e));
+    }
+  };
+
+  const handleConfirmSend = async () => {
+    if (!phoneE164 || !termsAccepted || !privacyAccepted) return;
+    setError(null);
+    setLoading(true);
+    try {
+      await savePendingConsent(phoneE164, "auth_v2_phone_confirm");
+      const next = await sendOtpForWrapper(phoneE164);
+      setChallenge(next);
+      setDevHint(next.devCodeHint);
+      await saveAuthWrapperChallenge({
+        phoneE164: next.phoneE164,
+        verificationId: next.verificationId,
+        devCodeHint: next.devCodeHint,
+      });
+      setStep("otp");
+    } catch (e) {
+      setError(userFacingMessage(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyOtp = async (code: string) => {
+    if (!challenge) return;
+    setError(null);
+    setLoading(true);
+    try {
+      const profile = await confirmOtp(challenge, code);
+      await clearAuthWrapperChallenge();
+      setChallenge(null);
+
+      const consentPatch = await consentPatchForProfile(profile);
+      if (consentPatch) {
+        await updateProfile(consentPatch);
+      }
+
+      if (profile.businessEmail?.trim()) {
+        await markAuthWrapperEmailComplete(profile.uid);
+        handoffToApp();
+        return;
+      }
+
+      await markAuthWrapperEmailPending(profile.uid);
+      setEmailDraft(profile.businessEmail ?? "");
+      setStep("email");
+    } catch (e) {
+      if (e instanceof AppError && e.code === "account_pending_deletion") {
+        router.replace({
+          pathname: "/(auth)/account-pending-deletion",
+          params: {
+            phoneE164: String(e.details?.phoneE164 ?? challenge.phoneE164),
+            deletionScheduledFor: String(e.details?.deletionScheduledFor ?? ""),
+          },
+        });
+        return;
+      }
+      setError(userFacingMessage(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResend = async () => {
+    if (!phoneE164) return;
+    setError(null);
+    setResending(true);
+    try {
+      const next = await startOtp(phoneE164);
+      setChallenge(next);
+      setDevHint(next.devCodeHint);
+      await saveAuthWrapperChallenge({
+        phoneE164: next.phoneE164,
+        verificationId: next.verificationId,
+        devCodeHint: next.devCodeHint,
+      });
+    } catch (e) {
+      setError(userFacingMessage(e));
+    } finally {
+      setResending(false);
+    }
+  };
+
+  const handleEmailContinue = async () => {
+    const trimmed = emailDraft.trim().toLowerCase();
+    if (!user) return;
+    setError(null);
+    setEmailHint(null);
+    setLoading(true);
+    try {
+      await updateProfile({ businessEmail: trimmed });
+      await markAuthWrapperEmailComplete(user.uid);
+      handoffToApp();
+    } catch (e) {
+      if (e instanceof AppError && e.code === "email_already_linked") {
+        setError(e.message);
+        return;
+      }
+      if (e instanceof AppError && e.code === "email_pending_deletion") {
+        setError(e.message);
+        return;
+      }
+      setError(userFacingMessage(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resetToPhone = async () => {
+    setStep("phone");
+    setChallenge(null);
+    setPhoneE164(null);
+    setError(null);
+    await clearAuthWrapperChallenge();
+    if (status === "signed_in") {
+      await signOut();
+    }
+  };
+
+  if (!hydrated || status === "loading") {
+    return (
+      <View style={styles.boot}>
+        <ActivityIndicator size="large" color="#FFFFFF" />
+      </View>
+    );
+  }
+
+  if (step === "phone" || step === "confirm") {
+    return (
+      <PhoneEntryScreen
+        draft={phoneDraft}
+        onDraftChange={setPhoneDraft}
+        step={step}
+        termsAccepted={termsAccepted}
+        privacyAccepted={privacyAccepted}
+        onTermsAcceptedChange={setTermsAccepted}
+        onPrivacyAcceptedChange={setPrivacyAccepted}
+        onContinueToConfirm={handleContinueToConfirm}
+        onConfirmSend={() => void handleConfirmSend()}
+        onBackFromConfirm={() => setStep("phone")}
+        loading={loading}
+        error={error}
+      />
+    );
+  }
+
+  if (step === "otp" && challenge && phoneE164) {
+    return (
+      <OtpVerificationScreen
+        phoneE164={phoneE164}
+        devCodeHint={devHint}
+        onVerify={(code) => void handleVerifyOtp(code)}
+        onResend={() => void handleResend()}
+        onChangeNumber={() => void resetToPhone()}
+        loading={loading}
+        resending={resending}
+        error={error}
+      />
+    );
+  }
+
+  if (step === "email") {
+    const backFromProfile = paramFrom === "profile";
+    return (
+      <EmailEntryScreen
+        value={emailDraft}
+        onChange={setEmailDraft}
+        onContinue={() => void handleEmailContinue()}
+        onBack={
+          backFromProfile
+            ? () => router.replace("/(auth)/complete-profile")
+            : undefined
+        }
+        loading={loading}
+        error={error}
+        hint={user?.businessEmail ? t("authV2.email.prefilledHint") : null}
+      />
+    );
+  }
+
+  return (
+    <PhoneEntryScreen
+      draft={phoneDraft}
+      onDraftChange={setPhoneDraft}
+      step="phone"
+      termsAccepted={termsAccepted}
+      privacyAccepted={privacyAccepted}
+      onTermsAcceptedChange={setTermsAccepted}
+      onPrivacyAcceptedChange={setPrivacyAccepted}
+      onContinueToConfirm={handleContinueToConfirm}
+      onConfirmSend={() => void handleConfirmSend()}
+      onBackFromConfirm={() => setStep("phone")}
+      error={t("errors.sessionExpired")}
+    />
+  );
+}
+
+const styles = StyleSheet.create({
+  boot: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#12152E",
+  },
+});

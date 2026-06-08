@@ -1,25 +1,101 @@
 {
   "expo": {
-    "name": "vyaamikk-diary",
+    "name": "Vyaamikk Diary",
     "slug": "vyaamikk-diary",
+    "scheme": "vyaamikkdiary",
     "version": "1.0.0",
+    "jsEngine": "hermes",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.specialsoftwares.vyaamikkdiary",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Vyaamikk Diary can attach optional location footprints to records you save while the app is open, so you can view them on Calendar & Maps. Location is not collected in the background.",
+        "NSPhotoLibraryUsageDescription": "Vyaamikk Diary needs access to your photo library so you can attach an official letterhead image for letterhead PDFs.",
+        "NSPhotoLibraryAddUsageDescription": "Vyaamikk Diary can save exported PDFs to your photo library if you choose to.",
+        "NSCameraUsageDescription": "Vyaamikk Diary uses the camera only when you choose to attach a letterhead image, cash-paid receipt photo, or customer photo to your own business records.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
+      "softwareKeyboardLayoutMode": "resize",
+      "package": "com.specialsoftwares.vyaamikkdiary",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#EEF1FF",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
+      ]
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "@react-native-firebase/app",
+      "@react-native-firebase/auth",
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "useFrameworks": "static"
+          }
+        }
+      ],
+      [
+        "expo-router",
+        {
+          "headers": {
+            "Cross-Origin-Embedder-Policy": "credentialless",
+            "Cross-Origin-Opener-Policy": "same-origin"
+          }
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#FFFFFF",
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain"
+        }
+      ],
+      "expo-secure-store",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Vyaamikk Diary can attach optional location footprints to records you save while the app is open, so you can view them on Calendar & Maps. Location is not collected in the background.",
+          "isIosBackgroundLocationEnabled": false,
+          "isAndroidBackgroundLocationEnabled": false
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#3B41C5"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Vyaamikk Diary needs access to your photo library so you can attach an official letterhead image for letterhead PDFs.",
+          "cameraPermission": "Vyaamikk Diary uses the camera only when you choose to attach a letterhead image, cash-paid receipt photo, or customer photo to your own business records."
+        }
+      ],
+      "@react-native-community/datetimepicker",
+      "expo-sqlite",
+      "expo-font"
+    ],
+    "extra": {
+      "router": {}
     }
   }
 }

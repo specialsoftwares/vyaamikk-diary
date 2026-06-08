@@ -1,0 +1,155 @@
+rules_version = '2';
+
+// Vyaamikk Diary — Firestore security rules
+//
+// Identity model:
+//   users/{uid}              -> the signed-in user's profile (1:1 with auth uid).
+//   users/{uid}/entries/{id} -> diary entries owned by {uid}.
+//   phoneIndex/{phoneE164}   -> reverse index, mobile -> uid. Used inside the
+//                               server-side resolve transaction. Phones are
+//                               PII, so this collection is locked down and
+//                               never readable by clients.
+//   ueidIndex/{ueid}         -> claim ledger, ueid -> { uid }. Locked down so
+//                               UEIDs are not publicly enumerable.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // ---- User profile ---------------------------------------------------
+    match /users/{uid} {
+      allow read: if isOwner(uid);
+      // Profile create/update is performed by the server-side resolve
+      // transaction; in a strict prod setup these should be moved behind
+      // a Cloud Function and writes from clients disallowed.
+      allow create: if isOwner(uid);
+      allow update: if isOwner(uid)
+                    && request.resource.data.uid == uid
+                    && request.resource.data.ueid == resource.data.ueid;
+      allow delete: if false; // accounts are soft-deleted only
+
+      // ---- Diary entries ------------------------------------------------
+      match /entries/{entryId} {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid)
+                      && request.resource.data.userId == uid
+                      && request.resource.data.title is string
+                      && request.resource.data.title.size() > 0
+                      && request.resource.data.title.size() <= 120;
+        allow update: if isOwner(uid)
+                      && request.resource.data.userId == uid;
+        allow delete: if isOwner(uid); // permanent hard-delete by owner
+      }
+
+      // ---- Professional service packs (user briefs for external pros) ---
+      match /professionalPacks/{packId} {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid)
+                      && request.resource.data.userId == uid
+                      && request.resource.data.title is string
+                      && request.resource.data.title.size() > 0
+                      && request.resource.data.title.size() <= 200;
+        allow update: if isOwner(uid)
+                      && request.resource.data.userId == uid;
+        allow delete: if isOwner(uid);
+      }
+
+      // ---- Letterhead documents (generated/saved letter PDFs) ------------
+      match /letterheadDocs/{docId} {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid);
+        allow update: if isOwner(uid);
+        allow delete: if isOwner(uid);
+      }
+
+      // ---- Letterhead template config (single doc per user) -------------
+      match /config/{configId} {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid);
+        allow update: if isOwner(uid);
+        allow delete: if isOwner(uid);
+      }
+
+      // ---- Customer Credit / EMI ----------------------------------------
+      match /customerCreditRecords/{recordId} {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid)
+                      && request.resource.data.userId == uid;
+        allow update: if isOwner(uid)
+                      && request.resource.data.userId == uid;
+        allow delete: if isOwner(uid);
+      }
+
+      // ---- Purchase orders -----------------------------------------------
+      match /purchaseOrders/{orderId} {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid)
+                      && request.resource.data.userId == uid;
+        allow update: if isOwner(uid)
+                      && request.resource.data.userId == uid;
+        allow delete: if isOwner(uid);
+      }
+
+      // ---- Per-user serial counters (credit, PO, etc.) -------------------
+      match /counters/{counterId} {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid);
+        allow update: if isOwner(uid);
+        allow delete: if false;
+      }
+
+      // ---- Save coordination locks (metadata only — no record bodies) -----
+      match /_saveLocks/{clientRecordId} {
+        allow read: if isOwner(uid)
+                    && resource.data.userId == uid;
+        allow create: if isOwner(uid)
+                      && request.resource.data.userId == uid
+                      && request.resource.data.clientRecordId == clientRecordId
+                      && request.resource.data.status in ['in_flight', 'done', 'failed'];
+        allow update: if isOwner(uid)
+                      && request.resource.data.userId == uid
+                      && request.resource.data.clientRecordId == clientRecordId;
+        allow delete: if false;
+      }
+
+      // ---- Trusted devices (app installation registry) ------------------
+      match /trustedDevices/{deviceId} {
+        allow read: if isOwner(uid);
+        allow create: if isOwner(uid);
+        allow update: if isOwner(uid);
+        allow delete: if false;
+      }
+    }
+
+    // ---- Reverse indexes are server-owned. -----------------------------
+    // Clients must never read or modify these directly. They are written
+    // exclusively from within the server resolve transaction (which runs
+    // under an admin context in production).
+    match /phoneIndex/{phone} {
+      allow read, write: if false;
+    }
+    match /ueidIndex/{ueid} {
+      allow read, write: if false;
+    }
+    match /emailIndex/{emailHash} {
+      allow read, write: if false;
+    }
+
+    // ---- Retired mobiles (tombstones after deletion / mobile change) ----
+    match /retiredPhones/{phone} {
+      allow read, write: if false;
+    }
+
+    // ---- Pending email verifications (server-owned) ---------------------
+    match /pendingEmailVerifications/{verificationId} {
+      allow read, write: if false;
+    }
+  }
+}
