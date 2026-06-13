@@ -339,34 +339,23 @@ async function swapPhoneNumber(
 }
 
 export const firebaseAuthService: AuthService = {
-  async startOtp(_phoneE164: PhoneE164): Promise<OtpChallenge> {
-    // INTEGRATION SEAM:
-    //   Real phone OTP in React Native requires a native verifier.
-    //   Install `@react-native-firebase/auth` (or wire a custom SMS
-    //   gateway) and call `verifyPhoneNumber` here. Return an OtpChallenge
-    //   whose `verificationId` round-trips into `confirmOtp`.
-    log.error("startOtp called but native phone verifier is not wired up");
-    throw new AppError(
-      "auth_not_configured",
-      "Production phone OTP is not wired in this build."
-    );
+  async startOtp(phoneE164: PhoneE164): Promise<OtpChallenge> {
+    return startNativePhoneOtp(phoneE164);
   },
 
-  async confirmOtp(_challenge: OtpChallenge, _code: string): Promise<AuthResult> {
-    // INTEGRATION SEAM:
-    //   1. Build a PhoneAuthCredential from (verificationId, code).
-    //   2. await signInWithCredential(getFirebaseAuth(), credential).
-    //   3. const authUid = getFirebaseAuth().currentUser!.uid.
-    //   4. return resolveOrCreateUser(authUid, phoneE164);
-    throw new AppError(
-      "auth_not_configured",
-      "Production phone OTP is not wired in this build."
-    );
+  async confirmOtp(challenge: OtpChallenge, code: string): Promise<AuthResult> {
+    await confirmNativePhoneOtp(challenge, code);
+    const phone = normalizePhoneE164(challenge.phoneE164);
+    if (useIdentityCallables()) {
+      return callResolveOrCreateUserByPhone(phone);
+    }
+    throw new AppError("auth_not_configured", "Identity callables not available.");
   },
 
   async signOut(): Promise<void> {
     try {
       await getFirebaseAuth().signOut();
+      await signOutNativePhoneAuth();
     } catch (e) {
       log.warn("signOut failed", e);
     }

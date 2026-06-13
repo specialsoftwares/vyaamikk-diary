@@ -1,7 +1,7 @@
 # Production Readiness — Auth & Identity Track
 
-**Date:** 2026-06-04  
-**Status:** Structurally ready — requires EAS dev build + Firebase deploy + device QA
+**Date:** 2026-06-04 (OTP wiring verified on disk 2026-06-08)  
+**Status:** OTP client wiring complete in repo — requires EAS dev build + Firebase deploy + device QA
 
 ---
 
@@ -11,7 +11,7 @@
 |-------|------|--------|
 | 1 | `@react-native-firebase/auth` integration | ✅ Code |
 | 1 | `nativePhoneAuth.ts` lazy loader | ✅ |
-| 1 | `firebase.ts` OTP wired | ✅ |
+| 1 | `firebase.ts` OTP wired (`startOtp`, `confirmOtp`, `signOut`) | ✅ Verified in repo |
 | 1 | Dev modes unchanged (mock `123456`) | ✅ |
 | 1 | `eas.json` dev/production profiles | ✅ |
 | 2 | `functions/` Cloud Functions project | ✅ |
@@ -29,8 +29,11 @@
 
 ## 1. Production OTP status
 
-- **Before:** `startOtp` / `confirmOtp` threw `auth_not_configured`.
-- **After:** Production path calls `startNativePhoneOtp` → SMS via native Firebase Auth → `confirmNativePhoneOtp` → `callResolveOrCreateUserByPhone` Cloud Function.
+- **Before:** `startOtp` / `confirmOtp` threw `auth_not_configured` (imports existed but methods were stubs).
+- **Now (verified in `firebase.ts`):**
+  - `startOtp` → `startNativePhoneOtp(phoneE164)`
+  - `confirmOtp` → `confirmNativePhoneOtp` → `callResolveOrCreateUserByPhone` when `useIdentityCallables()` is true; otherwise throws `Identity callables not available.`
+  - `signOut` → JS Firebase sign-out, then `signOutNativePhoneAuth()`
 - **Expo Go:** Still cannot test real OTP (native module not linked). Use EAS dev build.
 
 ## 2. Native Firebase Auth integration
@@ -83,7 +86,7 @@ See `docs/NATIVE_FIREBASE_SETUP.md`.
 |------|--------|
 | `src/services/auth/nativePhoneAuth.ts` | New — native OTP |
 | `src/services/auth/identityCallable.ts` | New — CF client |
-| `src/services/auth/firebase.ts` | OTP + CF resolve + skip client emailIndex |
+| `src/services/auth/firebase.ts` | `startOtp` / `confirmOtp` / `signOut` wired to native helpers + CF resolve; skip client emailIndex in prod |
 | `src/services/auth/emailVerificationService.ts` | Calls `startEmailVerification` CF |
 
 ## 8. Dev / shared-dev behaviour preserved
