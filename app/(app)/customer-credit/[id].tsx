@@ -25,6 +25,7 @@ import { deleteRecordPermanently } from "@/services/records/permanentDeletion";
 import { shareDukaanText } from "@/services/share/shareTextService";
 import { isShareUserCancelled } from "@/utils/shareDismissed";
 import { formatShortDate } from "@/utils/date";
+import { formatAmount } from "@/utils/formatters/formatAmount";
 import {
   computeCreditSummary,
   isReceivable,
@@ -136,20 +137,7 @@ export default function CustomerCreditDetailScreen() {
     }, [load])
   );
 
-  const fmtMoney = useCallback(
-    (value: number) => {
-      try {
-        return new Intl.NumberFormat(locale, {
-          style: "currency",
-          currency: "INR",
-          maximumFractionDigits: 2,
-        }).format(value);
-      } catch {
-        return `₹${value.toFixed(2)}`;
-      }
-    },
-    [locale]
-  );
+  const fmtMoney = useCallback((value: number) => formatAmount(value), []);
 
   const summary = useMemo(
     () => (record ? computeCreditSummary(record) : null),

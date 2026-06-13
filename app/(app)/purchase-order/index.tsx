@@ -29,6 +29,7 @@ import { userFacingMessage } from "@/domain/errors";
 import { useAppFeedback } from "@/feedback/AppFeedback";
 import { deleteRecordPermanently } from "@/services/records/permanentDeletion";
 import { formatShortDate } from "@/utils/date";
+import { formatAmount } from "@/utils/formatters/formatAmount";
 import { requestComposerPickerReturn } from "@/navigation";
 import type { PurchaseOrder } from "@/domain/purchaseOrder";
 import { getPurchaseOrderRepository } from "@/services/purchaseOrder";
@@ -45,8 +46,8 @@ export default function PurchaseOrderListScreen() {
   const router = useRouter();
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
+  const pdfLocale = lang === "hi" ? "hi-IN" : "en-IN";
   const { fromPicker } = useLocalSearchParams<{ fromPicker?: string }>();
-  const locale = lang === "hi" ? "hi-IN" : "en-IN";
 
   const [orders, setOrders] = useState<PurchaseOrder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -115,20 +116,7 @@ export default function PurchaseOrderListScreen() {
     [orders]
   );
 
-  const fmtMoney = useCallback(
-    (value: number) => {
-      try {
-        return new Intl.NumberFormat(locale, {
-          style: "currency",
-          currency: "INR",
-          maximumFractionDigits: 2,
-        }).format(value);
-      } catch {
-        return `₹${value.toFixed(2)}`;
-      }
-    },
-    [locale]
-  );
+  const fmtMoney = useCallback((value: number) => formatAmount(value), []);
 
   const onRegenerate = useCallback(
     async (po: PurchaseOrder) => {
@@ -146,7 +134,7 @@ export default function PurchaseOrderListScreen() {
         }
         const html = buildPurchaseOrderHtml({
           po,
-          locale,
+          locale: pdfLocale,
           labels: purchaseOrderPdfLabels(t),
           logoDataUri,
         });
@@ -167,7 +155,7 @@ export default function PurchaseOrderListScreen() {
         setBusyId(null);
       }
     },
-    [user, locale, t]
+    [user, pdfLocale, t]
   );
 
   const onCancel = useCallback(

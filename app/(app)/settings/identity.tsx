@@ -21,6 +21,7 @@ import { ProfileYourDetailsEditPanel } from "@/components/profile/ProfileYourDet
 import { ProfileYourDetailsViewCard } from "@/components/profile/ProfileYourDetailsViewCard";
 import { Banner,
   Header,
+  Loader,
   PermissionRationaleModal,
   PremiumActionButton,
   Screen, LocaleUiText } from "@/components/ui";
@@ -350,7 +351,29 @@ export default function BusinessIdentityScreen() {
     void handleSubmit(onSave)();
   }, [showSaveFooter, handleSubmit, onSave]);
 
-  if (!user || !baseline) return null;
+  if (!user) {
+    return (
+      <Screen>
+        <Loader message={t("common.loading")} />
+      </Screen>
+    );
+  }
+
+  if (!baseline) {
+    return (
+      <Screen>
+        <Header
+          variant="executive"
+          title={t("identity.title")}
+          subtitle={t("identity.subtitle")}
+          showBack
+          backFrom={from === "you" ? "you" : "settings"}
+          fallback="/(app)/(tabs)/you"
+        />
+        <Loader message={t("common.loading")} />
+      </Screen>
+    );
+  }
 
   const memberSinceMs = user.createdAt ?? Date.now();
 

@@ -1,4 +1,4 @@
-import { addMonths, startOfDay, subDays } from "date-fns";
+import { addMonths, subDays, addDays } from "date-fns";
 
 import type { BusinessEntryType } from "@/domain/businessEntry";
 import {
@@ -12,6 +12,7 @@ export type RecordDatePolicyId =
   | "cash_paid"
   | "payment_request_created"
   | "event_past_15"
+  | "material_receipt_7d"
   | "freight_event"
   | "supporting_past_optional"
   | "reminder_future_3m";
@@ -25,12 +26,15 @@ export type RecordDatePolicyErrorCode =
 
 const CASH_LOOKBACK_DAYS = 30;
 const EVENT_LOOKBACK_DAYS = 15;
+const MATERIAL_RECEIPT_WINDOW_DAYS = 7;
 const FREIGHT_WINDOW_DAYS = 15;
 const REMINDER_FORWARD_MONTHS = 3;
 
 export interface RecordDatePolicyValidateOptions {
   /** When editing, unchanged calendar day passes even if outside current window. */
   existingMs?: number | null;
+  /** Record entry anchor for receipt-date windows (defaults to today). */
+  recordEntryAnchorMs?: number | null;
 }
 
 export interface RecordDatePickerBounds {
@@ -87,6 +91,16 @@ export function validateRecordDate(
       const min = calendarDayStartMs(subDays(reference, EVENT_LOOKBACK_DAYS));
       return validateWindow(day, min, today, options);
     }
+    case "material_receipt_7d": {
+      const anchor = calendarDayStartMs(
+        new Date(options?.recordEntryAnchorMs ?? reference)
+      );
+      const min = calendarDayStartMs(subDays(new Date(anchor), MATERIAL_RECEIPT_WINDOW_DAYS));
+      const max = calendarDayStartMs(addDays(new Date(anchor), MATERIAL_RECEIPT_WINDOW_DAYS));
+      const err = validateWindow(day, min, max, options);
+      if (err === "future" || err === "too_old") return err;
+      return null;
+    }
     case "freight_event": {
       const min = calendarDayStartMs(subDays(reference, FREIGHT_WINDOW_DAYS));
       const max = calendarDayStartMs(subDays(reference, -FREIGHT_WINDOW_DAYS));
@@ -117,7 +131,8 @@ export function validateRecordDate(
 
 export function getRecordDatePickerBounds(
   policyId: RecordDatePolicyId,
-  reference: Date = new Date()
+  reference: Date = new Date(),
+  options?: Pick<RecordDatePolicyValidateOptions, "recordEntryAnchorMs">
 ): RecordDatePickerBounds | null {
   const today = calendarDayStartMs(reference);
 
@@ -137,6 +152,19 @@ export function getRecordDatePickerBounds(
         minimumDate: new Date(calendarDayStartMs(subDays(reference, EVENT_LOOKBACK_DAYS))),
         maximumDate: new Date(today),
       };
+    case "material_receipt_7d": {
+      const anchor = calendarDayStartMs(
+        new Date(options?.recordEntryAnchorMs ?? reference)
+      );
+      return {
+        minimumDate: new Date(
+          calendarDayStartMs(subDays(new Date(anchor), MATERIAL_RECEIPT_WINDOW_DAYS))
+        ),
+        maximumDate: new Date(
+          calendarDayStartMs(addDays(new Date(anchor), MATERIAL_RECEIPT_WINDOW_DAYS))
+        ),
+      };
+    }
     case "freight_event":
       return {
         minimumDate: new Date(calendarDayStartMs(subDays(reference, FREIGHT_WINDOW_DAYS))),
@@ -183,9 +211,11 @@ export function policyForField(
       if (field === "entryDate") return "event_past_15";
       return null;
     case "material_dispatched":
-    case "material_received":
     case "material_return":
       if (field === "entryDate") return "event_past_15";
+      return null;
+    case "material_received":
+      if (field === "entryDate") return "material_receipt_7d";
       return null;
     case "outward_freight_details":
       if (field === "billDate" || field === "entryDate") return "freight_event";
@@ -204,4 +234,4 @@ export function paymentRequestCreatedDateMs(reference: Date = new Date()): numbe
   return normalizeRecordDayMs(calendarDayStartMs(reference));
 }
 
-export { CASH_LOOKBACK_DAYS, EVENT_LOOKBACK_DAYS, FREIGHT_WINDOW_DAYS, REMINDER_FORWARD_MONTHS };
+export { CASH_LOOKBACK_DAYS, EVENT_LOOKBACK_DAYS, MATERIAL_RECEIPT_WINDOW_DAYS, FREIGHT_WINDOW_DAYS, REMINDER_FORWARD_MONTHS };

@@ -22,10 +22,11 @@ import { Banner,
   Screen, LocaleUiText } from "@/components/ui";
 import { useAuth } from "@/state/auth";
 import { useAppRefresh } from "@/hooks/useAppRefresh";
-import { useI18n, useT } from "@/i18n";
+import { useT } from "@/i18n";
 import { radius, spacing, typography, useThemedStyles } from "@/theme";
 import { userFacingMessage } from "@/domain/errors";
 import { formatShortDate } from "@/utils/date";
+import { formatAmount } from "@/utils/formatters/formatAmount";
 import { requestComposerPickerReturn } from "@/navigation";
 import {
   computeCreditSummary,
@@ -52,12 +53,10 @@ function statusKey(status: CustomerCreditStatus): string {
 
 export default function CustomerCreditListScreen() {
   const t = useT();
-  const { lang } = useI18n();
   const router = useRouter();
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
   const { fromPicker } = useLocalSearchParams<{ fromPicker?: string }>();
-  const locale = lang === "hi" ? "hi-IN" : "en-IN";
 
   const [records, setRecords] = useState<CustomerCreditRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -117,18 +116,8 @@ export default function CustomerCreditListScreen() {
   );
 
   const fmtMoney = useCallback(
-    (value: number) => {
-      try {
-        return new Intl.NumberFormat(locale, {
-          style: "currency",
-          currency: "INR",
-          maximumFractionDigits: 0,
-        }).format(value);
-      } catch {
-        return `₹${value.toFixed(0)}`;
-      }
-    },
-    [locale]
+    (value: number) => formatAmount(value, { maximumFractionDigits: 0 }),
+    []
   );
 
   const goNew = useCallback(() => router.push("/(app)/customer-credit/form"), [router]);

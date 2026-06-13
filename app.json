@@ -11,6 +11,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.specialsoftwares.vyaamikkdiary",
+      "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Vyaamikk Diary can attach optional location footprints to records you save while the app is open, so you can view them on Calendar & Maps. Location is not collected in the background.",
         "NSPhotoLibraryUsageDescription": "Vyaamikk Diary needs access to your photo library so you can attach an official letterhead image for letterhead PDFs.",
@@ -22,6 +23,7 @@
     "android": {
       "softwareKeyboardLayoutMode": "resize",
       "package": "com.specialsoftwares.vyaamikkdiary",
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "backgroundColor": "#EEF1FF",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -61,7 +63,7 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#FFFFFF",
+          "backgroundColor": "#1E1B4B",
           "image": "./assets/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain"

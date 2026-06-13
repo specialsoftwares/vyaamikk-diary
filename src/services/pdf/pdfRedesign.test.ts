@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 
+import { pdfIssuerBlock } from "./pdfComponents";
 import { buildPdfFooterLine, pdfFooterHtml } from "./pdfLayout";
 import { PDF_ATTRIBUTION } from "./pdfTheme";
 import { pdfShortFooterHtml } from "./pdfFooter";
@@ -56,6 +57,25 @@ assert.ok(businessTpl.includes("pdfDocumentHeader"), "business entry uses docume
 assert.ok(businessTpl.includes("pdfIssuerBlock"), "business entry uses issuer block");
 assert.ok(businessBodies.includes("pdfKeyFactsBlock"), "business bodies use key facts");
 assert.ok(businessBodies.includes("ewayBillNumber"), "movement PDF includes e-way bill field");
+
+const issuerHtml = pdfIssuerBlock({
+  branding: {
+    displayName: "Ravi Sharma",
+    businessName: "Sharma Plastics",
+    ueid: "VYD-2026-TEST01",
+    mobile: "+91 98765 43210",
+    email: "accounts@sharmaplastics.in",
+    includeLogo: false,
+    logoDataUri: null,
+    legal: { page: "Page" },
+  },
+  issuerLabel: "Vyaamikk User Profile",
+});
+assert.ok(issuerHtml.includes("Ravi Sharma"), "profile shows name");
+assert.ok(issuerHtml.includes("Sharma Plastics"), "profile shows business");
+assert.ok(issuerHtml.includes("Mobile"), "profile shows mobile label");
+assert.ok(issuerHtml.includes("Email"), "profile shows email label");
+assert.ok(!issuerHtml.includes("undefined"), "profile has no undefined");
 
 assert.ok(proTpl.includes("buildPdfHtmlDocument"), "pro pack uses document shell");
 assert.ok(proTpl.includes("user-created brief"), "pro pack has restrained brief note");

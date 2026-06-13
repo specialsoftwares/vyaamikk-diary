@@ -26,6 +26,7 @@ import {
 } from "@/domain/customerCredit";
 import type { Lang } from "@/i18n/types";
 import { pdfLabel } from "@/services/pdf/pdfLabels";
+import { formatAmount } from "@/utils/formatters/formatAmount";
 import { formatINRInWords } from "@/utils/money/inrWords";
 
 export type CustomerCreditPdfVariant =
@@ -272,16 +273,8 @@ function esc(value: string | number | null | undefined): string {
     .replace(/"/g, "&quot;");
 }
 
-function fmtMoney(value: number, locale: string): string {
-  try {
-    return new Intl.NumberFormat(locale, {
-      style: "currency",
-      currency: "INR",
-      maximumFractionDigits: 2,
-    }).format(value);
-  } catch {
-    return `₹${value.toFixed(2)}`;
-  }
+function fmtMoney(value: number, _locale: string): string {
+  return formatAmount(value);
 }
 
 function fmtDate(ms: number, locale: string): string {

@@ -223,7 +223,12 @@ export function formValuesToEntryParts(
     case "material_received": {
       const receivedAtPostal = buildIndianPostalFromForm("receivedAt", values);
       const supplierPostal = buildIndianPostalFromForm("party", values);
+      const dispatchFromPostal = buildIndianPostalFromForm("dispatchFrom", values);
       const receivedLocation = legacyLine("receivedAt", values, "receivedLocation");
+      const dispatchFromLocation = legacyLine("dispatchFrom", values, "dispatchFromLocation");
+      const ewayRaw =
+        typeof values.ewayBillNumber === "string" ? values.ewayBillNumber.trim() : "";
+      const ewayBillNumber = ewayRaw ? normalizeEwayBillInput(ewayRaw) : null;
       return {
         ueid,
         entryType,
@@ -243,6 +248,8 @@ export function formValuesToEntryParts(
           receivedLocation,
           receivedAtPostal,
           supplierPostal,
+          dispatchFromPostal,
+          ewayBillNumber,
           checkedBy: typeof values.checkedBy === "string" ? values.checkedBy : null,
           qualityStatus: values.qualityStatus as import("@/domain/businessEntry").MaterialQualityStatus,
           issueNote: typeof values.issueNote === "string" ? values.issueNote : null,

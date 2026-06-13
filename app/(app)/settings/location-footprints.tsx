@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Linking, Platform, StyleSheet, Switch, Text, View } from "react-native";
+import { Linking, Platform, StyleSheet, Switch, View } from "react-native";
 
-import { Banner, Card, Header, PermissionRationaleModal, Screen, LocaleUiText } from "@/components/ui";
+import { Banner, Card, ErrorState, Header, Loader, PermissionRationaleModal, Screen, LocaleUiText } from "@/components/ui";
 import { useAuth } from "@/state/auth";
 import { useT } from "@/i18n";
 import type { LocationFootprintPreferences } from "@/domain/locationFootprintPreferences";
@@ -11,12 +11,17 @@ import {
   syncLocationFootprintPermissionStatus,
 } from "@/services/location/locationFootprintPreferences";
 import { locationService } from "@/services/location";
+import { createLogger } from "@/utils/logger";
 import { spacing, typography, useThemedStyles } from "@/theme";
+
+const log = createLogger("settings/locationFootprints");
 
 export default function LocationFootprintsSettingsScreen() {
   const t = useT();
   const { user } = useAuth();
   const [prefs, setPrefs] = useState<LocationFootprintPreferences | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [showRationale, setShowRationale] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -38,11 +43,24 @@ export default function LocationFootprintsSettingsScreen() {
   );
 
   const reload = useCallback(async () => {
-    if (!user?.uid) return;
-    await syncLocationFootprintPermissionStatus(user.uid);
-    const next = await loadLocationFootprintPreferences(user.uid);
-    setPrefs(next);
-  }, [user?.uid]);
+    if (!user?.uid) {
+      setPrefs(null);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setLoadError(null);
+    try {
+      await syncLocationFootprintPermissionStatus(user.uid);
+      const next = await loadLocationFootprintPreferences(user.uid);
+      setPrefs(next);
+    } catch (e) {
+      log.warn("preferences load failed", e);
+      setLoadError(t("locationFootprints.loadError"));
+    } finally {
+      setLoading(false);
+    }
+  }, [user?.uid, t]);
 
   useEffect(() => {
     void reload();
@@ -89,7 +107,59 @@ export default function LocationFootprintsSettingsScreen() {
     }
   };
 
-  if (!user || !prefs) return null;
+  if (!user) {
+    return (
+      <Screen>
+        <Loader message={t("common.loading")} />
+      </Screen>
+    );
+  }
+
+  if (loading && !prefs) {
+    return (
+      <Screen scroll form>
+        <Header
+          variant="executive"
+          title={t("locationFootprints.settings.title")}
+          showBack
+          backFrom="settings"
+        />
+        <Loader message={t("locationFootprints.loading")} />
+      </Screen>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <Screen scroll form>
+        <Header
+          variant="executive"
+          title={t("locationFootprints.settings.title")}
+          showBack
+          backFrom="settings"
+        />
+        <ErrorState
+          message={loadError}
+          onRetry={() => void reload()}
+          retryLabel={t("common.retry")}
+        />
+      </Screen>
+    );
+  }
+
+  if (!prefs) {
+    return (
+      <Screen scroll form>
+        <Header
+          variant="executive"
+          title={t("locationFootprints.settings.title")}
+          showBack
+          backFrom="settings"
+        />
+        <Loader message={t("locationFootprints.loading")} />
+      </Screen>
+    );
+  }
 
   return (
     <Screen scroll form>
@@ -104,7 +174,7 @@ export default function LocationFootprintsSettingsScreen() {
       <Card style={styles.section}>
         <View>
           <LocaleUiText style={styles.rowLabel}>{t("locationFootprints.settings.osPermission")}</LocaleUiText>
-          <Text style={styles.status}>{permissionLabel(prefs.locationPermissionStatus)}</Text>
+          <LocaleUiText style={styles.status}>{permissionLabel(prefs.locationPermissionStatus)}</LocaleUiText>
           <LocaleUiText style={styles.rowHint}>{t("locationFootprints.settings.osHint")}</LocaleUiText>
           {prefs.locationPermissionStatus !== "granted" ? (
             <LocaleUiText

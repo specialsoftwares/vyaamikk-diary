@@ -208,7 +208,14 @@ export default function BootScreen() {
   }
 
   if (dbStatus === "loading" || phase === "preparing") {
-    return null;
+    return (
+      <View
+        style={[
+          styles.container,
+          { justifyContent: "center" },
+        ]}
+      />
+    );
   }
 
   const showLegacySpinner =

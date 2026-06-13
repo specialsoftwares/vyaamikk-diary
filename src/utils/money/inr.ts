@@ -1,3 +1,5 @@
+import { formatAmount, type FormatAmountOptions } from "@/utils/formatters/formatAmount";
+
 /**
  * Indian rupee (INR) parsing and display.
  * Amounts are stored as decimal rupees (not paise).
@@ -42,16 +44,15 @@ export function parseINRInputOrNaN(raw: unknown): number {
 /** Format rupees for display (default Indian grouping, e.g. ₹2,00,000). */
 export function formatINR(
   amount: number,
-  options?: { locale?: string; withSymbol?: boolean }
+  options?: { locale?: string; withSymbol?: boolean } & Pick<
+    FormatAmountOptions,
+    "minimumFractionDigits" | "maximumFractionDigits"
+  >
 ): string {
-  const locale = options?.locale ?? "en-IN";
-  const withSymbol = options?.withSymbol ?? true;
-  if (!Number.isFinite(amount)) {
-    return withSymbol ? "₹—" : "—";
-  }
-  const formatted = new Intl.NumberFormat(locale, {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  }).format(amount);
-  return withSymbol ? `₹${formatted}` : formatted;
+  void options?.locale;
+  return formatAmount(amount, {
+    withSymbol: options?.withSymbol ?? true,
+    minimumFractionDigits: options?.minimumFractionDigits,
+    maximumFractionDigits: options?.maximumFractionDigits,
+  });
 }

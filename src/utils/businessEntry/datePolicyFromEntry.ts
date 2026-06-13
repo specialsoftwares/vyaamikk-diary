@@ -37,6 +37,11 @@ export function datePolicyOptionsFromEntry(entry: BusinessEntry): DatePolicySche
         ...base,
         existingReminderAtMs: entry.reminder?.at,
       };
+    case "material_received":
+      return {
+        ...base,
+        recordCreatedAtMs: entry.createdAt,
+      };
     default:
       return base;
   }

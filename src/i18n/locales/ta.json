@@ -347,7 +347,7 @@
       "clusterCount": "இந்த இடத்தில் {{count}} பதிவுகள்",
       "tapMarkerHint": "பதிவு விவரங்களுக்கு மார்க்கரைத் தட்டவும். "
     },
-    "tabLabel": "நாட்காட்டி & வரைபடங்கள்",
+    "tabLabel": "நாட்காட்டி",
     "screenTitle": "நாட்காட்டி & வரைபடங்கள்",
     "screenSubtitle": "தேதி மற்றும் இருப்பிட தடயங்களின்படி பதிவுகளை மதிப்பாய்வு செய்யவும்",
     "modeCalendar": "நாட்காட்டி",
@@ -547,8 +547,8 @@
       "generic": "நுழைவு — {{date}}"
     },
     "summary": {
-      "cash": "₹{{amount}} to {{name}}",
-      "paymentRequest": "{{party}} · ₹{{pending}} pending · {{invoice}}",
+      "cash": "{{amount}} to {{name}}",
+      "paymentRequest": "{{party}} · {{pending}} pending · {{invoice}}",
       "freight": "{{bill}} → {{destination}}"
     },
     "freightDisclaimer": "Structured transporter / dispatch information for sharing — not a transport contract or marketplace.",

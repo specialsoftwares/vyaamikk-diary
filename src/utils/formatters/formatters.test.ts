@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { formatAmount } from "./formatAmount";
+import { formatAmount, formatAmountDisplay } from "./formatAmount";
 import { formatNumber } from "./formatNumber";
 import { formatEntryDate, formatShortDate } from "./formatDate";
 import { formatTime } from "./formatTime";
@@ -36,6 +36,11 @@ function run() {
   assert.equal(pdfLabel("date", { uiLang: "gu" }), "તારીખ");
   assert.equal(pdfLabel("date", { uiLang: "hi" }), "Date");
   assert.equal(pdfLabel("tax", { uiLang: "gu" }), "Tax");
+
+  assert.equal(formatAmountDisplay("₹2,00,000"), "₹2,00,000");
+  assert.equal(formatAmountDisplay(1500), "₹1,500");
+  assert.match(formatAmountDisplay("1500"), /₹1,500/);
+  assert.doesNotMatch(formatAmountDisplay(1500), /₹₹/);
 
   console.log("formatters.test.ts: ok");
 }

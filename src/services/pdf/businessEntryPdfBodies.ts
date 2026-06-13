@@ -244,14 +244,16 @@ export function buildBusinessEntryBody(
         },
         { label: "Quality", value: strVal(p.qualityStatus) },
       ];
-      const loc =
-        formatPdfPostalLine(p.receivedAtPostal, strVal(p.receivedLocation)) ||
-        formatPdfPostalLine(p.supplierPostal, null);
+      const fromLine = formatPdfPostalLine(p.dispatchFromPostal, null);
+      const toLine = formatPdfPostalLine(p.receivedAtPostal, strVal(p.receivedLocation));
+      const route =
+        fromLine && toLine ? `${fromLine} → ${toLine}` : fromLine || toLine;
       return (
         pdfKeyFactsBlock("Key details", keyFacts) +
         pdfSection(
           "Receipt details",
-          pdfKvRow("Location", loc) +
+          pdfKvRow("Route", route) +
+            pdfKvRow("E-way Bill No.", strVal(p.ewayBillNumber)) +
             pdfKvRow("Invoice / bill", strVal(p.invoiceBill)) +
             pdfKvRow("Checked by", strVal(p.checkedBy)) +
             pdfKvRow("Issue note", strVal(p.issueNote))

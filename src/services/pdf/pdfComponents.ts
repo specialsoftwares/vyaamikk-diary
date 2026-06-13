@@ -61,11 +61,26 @@ export function pdfIssuerBlock(input: PdfIssuerInput): string {
     branding.includeLogo && branding.logoDataUri
       ? `<img class="pdf-issuer-logo" src="${branding.logoDataUri}" alt=""/>`
       : "";
-  const name = branding.businessName?.trim() || branding.displayName?.trim() || "—";
-  const personLine =
-    branding.businessName?.trim() && branding.displayName?.trim()
-      ? `<div class="pdf-issuer-line">${escapeHtml(branding.displayName)}</div>`
-      : "";
+
+  const name = branding.displayName?.trim() || null;
+  const business = branding.businessName?.trim() || null;
+  const mobile = branding.mobile?.trim() || null;
+  const email = branding.email?.trim() || null;
+
+  const rows: Array<[string, string]> = [];
+  if (name) rows.push(["Name", name]);
+  if (business) rows.push(["Business", business]);
+  if (mobile) rows.push(["Mobile", mobile]);
+  if (email) rows.push(["Email", email]);
+  if (!rows.length) rows.push(["Name", "—"]);
+
+  const detailLines = rows
+    .map(
+      ([label, value]) =>
+        `<div class="pdf-issuer-line"><span class="pdf-issuer-k">${escapeHtml(label)}</span> ${escapeHtml(value)}</div>`
+    )
+    .join("");
+
   const ueidLine =
     showUeid && branding.ueid
       ? `<div class="pdf-issuer-line">Ref: ${escapeHtml(branding.ueid)}</div>`
@@ -75,8 +90,7 @@ export function pdfIssuerBlock(input: PdfIssuerInput): string {
     ${logo}
     <div class="pdf-issuer-body">
       <div class="pdf-issuer-label">${escapeHtml(issuerLabel)}</div>
-      <div class="pdf-issuer-name">${escapeHtml(name)}</div>
-      ${personLine}
+      ${detailLines}
       ${ueidLine}
     </div>
   </div>`;

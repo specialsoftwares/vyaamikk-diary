@@ -152,6 +152,10 @@ export interface MaterialReceivedPayload {
   qualityStatus: MaterialQualityStatus;
   issueNote: string | null;
   paymentFollowUp: boolean;
+  /** Source dispatch PIN / location for goods receipt. */
+  dispatchFromPostal?: IndianPostalLocation | null;
+  /** User-entered E-way bill number — optional. */
+  ewayBillNumber?: string | null;
 }
 
 /** Return / replacement movement — same family as dispatch/receipt/freight. */

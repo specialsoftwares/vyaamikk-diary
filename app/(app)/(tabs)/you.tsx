@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useFocusEffect, useNavigation, useRouter } from "expo-router";
 
+import { creatableMattersForCategory } from "@/domain/professionalPackCreatable";
+
 import { Banner, LastRefreshedHint, Screen, SmartHeadline } from "@/components/ui";
 import { SyncStatusBanner } from "@/components/sync/SyncStatusBanner";
 import { ComposerPickerSheet } from "@/components/composer/ComposerPickerSheet";
@@ -202,22 +204,24 @@ export default function YouTab() {
     ) => {
       if (routesToCustomerCredit) {
         router.push({
-          pathname: "/(app)/customer-credit",
+          pathname: "/(app)/customer-credit/form",
           params: { fromPicker: "1" },
         });
         return;
       }
       if (routesToPurchaseOrder) {
         router.push({
-          pathname: "/(app)/purchase-order",
+          pathname: "/(app)/purchase-order/form",
           params: { fromPicker: "1" },
         });
         return;
       }
       if (routesToProfessionalPack) {
+        const matters = creatableMattersForCategory("ca_tax");
+        const matter = matters[0]?.type ?? "gst_return_support";
         router.push({
-          pathname: "/(app)/professional-pack",
-          params: { fromPicker: "1" },
+          pathname: "/(app)/professional-pack/form",
+          params: { category: "ca_tax", matter, fromPicker: "1" },
         });
         return;
       }

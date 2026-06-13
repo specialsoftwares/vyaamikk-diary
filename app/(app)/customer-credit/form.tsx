@@ -30,6 +30,7 @@ import { formDateRowStyle, formFieldLabelStyle, formNestedCardStyle } from "@/th
 import { spacing, typography, useTheme, useThemeColors, useThemedStyles } from "@/theme";
 import { userFacingMessage } from "@/domain/errors";
 import { formatShortDate } from "@/utils/date";
+import { formatAmount } from "@/utils/formatters/formatAmount";
 import { requestComposerPickerReturn } from "@/navigation";
 import {
   computeChargesBreakdown,
@@ -470,20 +471,7 @@ export default function CustomerCreditFormScreen() {
     }
   }, [saleDate, firstDueDate]);
 
-  const fmtMoney = useCallback(
-    (v: number) => {
-      try {
-        return new Intl.NumberFormat(locale, {
-          style: "currency",
-          currency: "INR",
-          maximumFractionDigits: 2,
-        }).format(v);
-      } catch {
-        return `₹${v.toFixed(2)}`;
-      }
-    },
-    [locale]
-  );
+  const fmtMoney = useCallback((v: number) => formatAmount(v), []);
 
   const updateProduct = useCallback((idx: number, patch: Partial<ProductDraft>) => {
     setProducts((prev) => prev.map((p, i) => (i === idx ? { ...p, ...patch } : p)));

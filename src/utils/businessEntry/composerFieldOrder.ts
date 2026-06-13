@@ -19,7 +19,16 @@ export const COMPOSER_FIELD_ORDER: Partial<Record<BusinessEntryType, string[]>> 
     "lrGrNumber",
     "vehicleNumber",
   ],
-  material_received: ["entryDate", "supplierName", "materialName", "quantity", "unit"],
+  material_received: [
+    "entryDate",
+    "supplierName",
+    "dispatchFromPin",
+    "receivedAtPin",
+    "ewayBillNumber",
+    "materialName",
+    "quantity",
+    "unit",
+  ],
   payment_request: [
     "entryDate",
     "partyName",

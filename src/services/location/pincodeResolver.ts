@@ -11,21 +11,21 @@ import { createLogger } from "@/utils/logger";
 const log = createLogger("pincode");
 
 const DEFAULT_API = "https://api.postalpincode.in/pincode";
+const API_TIMEOUT_MS = 4_000;
+const OFFLINE_LOOKUP_TIMEOUT_MS = 2_500;
+
 const inflight = new Map<string, Promise<PincodeResolution>>();
+const sessionCache = new Map<string, PincodeResolution>();
 
-/** Indian PIN: six digits, first digit 1–9 (no leading zero). */
-export const INDIAN_PIN_REGEX = /^[1-9]\d{5}$/;
-
-/** Trim spaces; keep digits only for validation. */
-export function normalizeIndianPinInput(raw: string): string {
-  return raw.replace(/\s/g, "").replace(/\D/g, "").slice(0, 6);
-}
-
-/** Format check after normalizing — does not prove the PIN exists. */
-export function isValidIndianPincode(pinCode: string): boolean {
-  const pin = normalizeIndianPinInput(pinCode);
-  return INDIAN_PIN_REGEX.test(pin);
-}
+import {
+  isValidIndianPincode,
+  normalizeIndianPinInput,
+} from "@/domain/indianPincodeInput";
+export {
+  INDIAN_PIN_REGEX,
+  isValidIndianPincode,
+  normalizeIndianPinInput,
+} from "@/domain/indianPincodeInput";
 
 function emptyResolution(pinCode: string, source: PincodeResolution["source"]): PincodeResolution {
   return {
@@ -40,7 +40,6 @@ function emptyResolution(pinCode: string, source: PincodeResolution["source"]): 
   };
 }
 
-/** Title-case ALL-CAPS district/state from offline DB. */
 function formatIndianPlaceName(value: string | null | undefined): string | null {
   const trimmed = value?.trim();
   if (!trimmed) return null;
@@ -74,13 +73,42 @@ function buildResolution(
   };
 }
 
-async function getOfflineLookup() {
-  return getSharedIndiaPincodeOfflineLookup();
+function logLookupDiagnostic(input: {
+  pin: string;
+  cacheHit: boolean;
+  source: PincodeResolution["source"];
+  durationMs: number;
+  success: boolean;
+  timedOut?: boolean;
+}): void {
+  if (env.isProduction) return;
+  log.debug("pin_lookup", {
+    pin: input.pin.slice(0, 2) + "****",
+    cache_hit: input.cacheHit,
+    source: input.source,
+    durationMs: input.durationMs,
+    success: input.success,
+    timeout: input.timedOut ?? false,
+  });
+}
+
+async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("pin_lookup_timeout")), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 async function fetchFromOfflineDb(pinCode: string): Promise<PincodeResolution | null> {
   try {
-    const lookup = await getOfflineLookup();
+    const lookup = await withTimeout(getSharedIndiaPincodeOfflineLookup(), OFFLINE_LOOKUP_TIMEOUT_MS);
     const response = lookup.getByPincode(pinCode, { limit: 50 });
     if (!response.success || !response.data?.data?.length) {
       return null;
@@ -98,8 +126,8 @@ async function fetchFromOfflineDb(pinCode: string): Promise<PincodeResolution | 
       first.state ?? null,
       first.country ?? "India"
     );
-  } catch (e) {
-    if (!env.isProduction) log.debug("offline lookup failed");
+  } catch {
+    if (!env.isProduction) log.debug("offline lookup skipped or timed out");
     return null;
   }
 }
@@ -132,7 +160,7 @@ async function fetchFromApi(pinCode: string): Promise<PincodeResolution | null> 
   const base = env.expoPublicPincodeApiUrl?.trim() || DEFAULT_API;
   const url = `${base.replace(/\/$/, "")}/${pinCode}`;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 10_000);
+  const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
   try {
     const res = await fetch(url, {
       method: "GET",
@@ -163,8 +191,8 @@ async function fetchFromApi(pinCode: string): Promise<PincodeResolution | null> 
       first.State?.trim() || null,
       first.Country?.trim() || "India"
     );
-  } catch (e) {
-    if (!env.isProduction) log.debug("api lookup failed");
+  } catch {
+    if (!env.isProduction) log.debug("api lookup failed or timed out");
     return null;
   } finally {
     clearTimeout(timer);
@@ -172,24 +200,58 @@ async function fetchFromApi(pinCode: string): Promise<PincodeResolution | null> 
 }
 
 async function resolveUncached(pinCode: string): Promise<PincodeResolution> {
-  const offline = await fetchFromOfflineDb(pinCode);
+  const started = Date.now();
+  let timedOut = false;
+
+  let offline: PincodeResolution | null = null;
+  try {
+    offline = await fetchFromOfflineDb(pinCode);
+  } catch {
+    timedOut = true;
+  }
   if (offline?.success) {
     await pincodeCacheRepository.set(offline);
+    sessionCache.set(pinCode, offline);
+    logLookupDiagnostic({
+      pin: pinCode,
+      cacheHit: false,
+      source: "offline",
+      durationMs: Date.now() - started,
+      success: true,
+    });
     return offline;
   }
 
   const api = await fetchFromApi(pinCode);
   if (api?.success) {
     await pincodeCacheRepository.set(api);
+    sessionCache.set(pinCode, api);
+    logLookupDiagnostic({
+      pin: pinCode,
+      cacheHit: false,
+      source: "api",
+      durationMs: Date.now() - started,
+      success: true,
+    });
     return api;
   }
 
-  return emptyResolution(pinCode, "manual");
+  const manual = emptyResolution(pinCode, "manual");
+  sessionCache.set(pinCode, manual);
+  logLookupDiagnostic({
+    pin: pinCode,
+    cacheHit: false,
+    source: "manual",
+    durationMs: Date.now() - started,
+    success: false,
+    timedOut,
+  });
+  return manual;
 }
 
 /**
  * Resolve Indian PIN → district/state/localities.
- * Order: memory dedupe → SQLite cache → offline DB (CDN) → API → manual fallback.
+ * Order: session cache → in-flight dedupe → SQLite cache → offline DB (CDN) → API → manual fallback.
  */
 export async function resolveIndianPincode(pinCode: string): Promise<PincodeResolution> {
   const pin = normalizeIndianPinInput(pinCode);
@@ -197,8 +259,28 @@ export async function resolveIndianPincode(pinCode: string): Promise<PincodeReso
     return emptyResolution(pin, "manual");
   }
 
+  const sessionHit = sessionCache.get(pin);
+  if (sessionHit) {
+    logLookupDiagnostic({
+      pin,
+      cacheHit: true,
+      source: sessionHit.source,
+      durationMs: 0,
+      success: sessionHit.success,
+    });
+    return { ...sessionHit, source: sessionHit.success ? "cache" : sessionHit.source };
+  }
+
   const cached = await pincodeCacheRepository.get(pin);
   if (cached) {
+    sessionCache.set(pin, cached);
+    logLookupDiagnostic({
+      pin,
+      cacheHit: true,
+      source: "cache",
+      durationMs: 0,
+      success: cached.success,
+    });
     return { ...cached, source: "cache" };
   }
 
@@ -208,4 +290,15 @@ export async function resolveIndianPincode(pinCode: string): Promise<PincodeReso
   const promise = resolveUncached(pin).finally(() => inflight.delete(pin));
   inflight.set(pin, promise);
   return promise;
+}
+
+/** Resolve multiple PINs in parallel (e.g. route forms). */
+export async function resolveIndianPincodesParallel(
+  pinCodes: string[]
+): Promise<Map<string, PincodeResolution>> {
+  const unique = [...new Set(pinCodes.map(normalizeIndianPinInput).filter(isValidIndianPincode))];
+  const entries = await Promise.all(
+    unique.map(async (pin) => [pin, await resolveIndianPincode(pin)] as const)
+  );
+  return new Map(entries);
 }

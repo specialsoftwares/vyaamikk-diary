@@ -36,6 +36,7 @@ import { useT, useI18n } from "@/i18n";
 import { todayStartMs } from "@/utils/date";
 import { cashPaidDatePickerDates } from "@/utils/businessEntry/cashPaidDate";
 import { parseINRInput } from "@/utils/money/inr";
+import { normalizeEwayBillInput } from "@/utils/businessEntry/ewayBill";
 import { formatINRWithWords, inrWordsLocaleFromLang } from "@/utils/money/inrWords";
 import { firstComposerFieldError } from "@/utils/businessEntry/composerFieldOrder";
 import { useFormFieldNavigation, useFormFocus } from "@/components/inputSafety/FormFocusManager";
@@ -115,8 +116,9 @@ export function BusinessComposerForm({
       ...datePolicyOptions,
       existingCashPaidDateMs:
         datePolicyOptions?.existingCashPaidDateMs ?? existingCashPaidDateMs ?? undefined,
+      recordCreatedAtMs: recordCreatedAtMs ?? todayStartMs(),
     }),
-    [datePolicyOptions, existingCashPaidDateMs]
+    [datePolicyOptions, existingCashPaidDateMs, recordCreatedAtMs]
   );
 
   const schema = useMemo(
@@ -125,8 +127,16 @@ export function BusinessComposerForm({
   );
 
   const pickerBounds = useCallback(
-    (policyId: RecordDatePolicyId) => getRecordDatePickerBounds(policyId),
-    []
+    (policyId: RecordDatePolicyId) => {
+      if (policyId === "material_receipt_7d") {
+        const anchor = recordCreatedAtMs ?? todayStartMs();
+        return getRecordDatePickerBounds(policyId, new Date(anchor), {
+          recordEntryAnchorMs: anchor,
+        });
+      }
+      return getRecordDatePickerBounds(policyId);
+    },
+    [recordCreatedAtMs]
   );
 
   const cashDateBounds = useMemo(
@@ -195,6 +205,9 @@ export function BusinessComposerForm({
           qualityStatus: "ok",
           issueNote: "",
           receivedLocation: "",
+          dispatchFromLocation: "",
+          ewayBillNumber: "",
+          ...postalFormDefaults("dispatchFrom"),
           ...postalFormDefaults("receivedAt"),
           ...postalFormDefaults("party"),
         };
@@ -610,26 +623,60 @@ export function BusinessComposerForm({
       case "material_received":
         return (
           <>
+            {recordCreatedAtMs ? (
+              <ComposerRecordedOnField recordedAtMs={recordCreatedAtMs} />
+            ) : null}
             {policyDateField(
               "entryDate",
               t("composer.receiptDate"),
-              "event_past_15",
-              t("datePolicy.hints.materialEvent")
+              "material_receipt_7d",
+              t("datePolicy.hints.materialReceipt7d")
             )}
             {field("supplierName", t("composer.supplierName"))}
             {field("materialName", t("composer.materialName"))}
             {field("quantity", t("composer.quantity"), { keyboard: "numeric" })}
             {field("unit", t("composer.unit"))}
             <PostalLocationSection
+              prefix="dispatchFrom"
+              pinLabel={t("postal.goodsMovedFromPin")}
+              manualLocationLabel={t("postal.manualFrom")}
+              control={control}
+              setValue={setValue}
+              getValues={getValues}
+              fields={fieldBindings}
+              legacyLocationField="dispatchFromLocation"
+              required
+            />
+            <PostalLocationSection
               prefix="receivedAt"
-              pinLabel={t("postal.receivedAtPinOptional")}
+              pinLabel={t("postal.receivedAtPin")}
               manualLocationLabel={t("postal.manualReceivedAt")}
               control={control}
               setValue={setValue}
               getValues={getValues}
               fields={fieldBindings}
               legacyLocationField="receivedLocation"
+              required
             />
+            {fieldBindings.wrap(
+              "ewayBillNumber",
+              <Controller
+                control={control}
+                name="ewayBillNumber"
+                render={({ field: { onChange, value } }) => (
+                  <TextField
+                    navFieldKey="ewayBillNumber"
+                    label={t("materialMovement.ewayBillLabel")}
+                    placeholder={t("common.optional")}
+                    value={value == null ? "" : String(value)}
+                    onChangeText={(text) => onChange(normalizeEwayBillInput(text))}
+                    keyboardType="number-pad"
+                    maxLength={12}
+                    error={fieldBindings.errorFor("ewayBillNumber")}
+                  />
+                )}
+              />
+            )}
             <PostalLocationSection
               prefix="party"
               pinLabel={t("postal.supplierPinOptional")}

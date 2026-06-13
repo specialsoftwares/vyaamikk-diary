@@ -586,8 +586,8 @@
       "generic": "एंट्री — {{date}}"
     },
     "summary": {
-      "cash": "₹{{amount}} — {{name}}",
-      "paymentRequest": "{{party}} · ₹{{pending}} बकाया · {{invoice}}",
+      "cash": "{{amount}} — {{name}}",
+      "paymentRequest": "{{party}} · {{pending}} बकाया · {{invoice}}",
       "freight": "{{bill}} → {{destination}}"
     },
     "paymentRequestDisclaimer": "बकाया / भुगतान अनुरोध का संरचित रिकॉर्ड — पेमेंट गेटवे, ऋण या कानूनी नोटिस नहीं।",
@@ -732,7 +732,7 @@
     "viewOnMap": "मैप पर देखें"
   },
   "calendarMaps": {
-    "tabLabel": "कैलेंडर और मैप",
+    "tabLabel": "कैलेंडर",
     "screenTitle": "कैलेंडर और मैप",
     "screenSubtitle": "तारीख और स्थान के अनुसार रिकॉर्ड देखें",
     "screenLead": "तारीख चुनकर रिकॉर्ड देखें, या मैप पर GPS और फ्रेट/प्रेषण PIN के अनुमानित क्षेत्र — लाइव ट्रैकिंग नहीं।",

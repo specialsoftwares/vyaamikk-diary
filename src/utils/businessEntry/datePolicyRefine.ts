@@ -34,6 +34,7 @@ export function normalizePolicyDateField(
   }
   if (
     policyId === "event_past_15" ||
+    policyId === "material_receipt_7d" ||
     policyId === "freight_event" ||
     policyId === "reminder_future_3m"
   ) {

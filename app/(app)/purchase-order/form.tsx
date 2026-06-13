@@ -26,6 +26,7 @@ import { formDateRowStyle, formFieldLabelStyle, formNestedCardStyle } from "@/th
 import { spacing, typography, useTheme, useThemedStyles } from "@/theme";
 import { userFacingMessage } from "@/domain/errors";
 import { formatShortDate } from "@/utils/date";
+import { formatAmount } from "@/utils/formatters/formatAmount";
 import { requestComposerPickerReturn } from "@/navigation";
 import {
   computePurchaseOrderTax,
@@ -379,17 +380,10 @@ export default function PurchaseOrderFormScreen() {
     [cleanItems, taxApplicable, effectiveGstRate, vendorGstin, buyerGstin]
   );
 
-  const totalDisplay = useMemo(() => {
-    try {
-      return new Intl.NumberFormat(locale, {
-        style: "currency",
-        currency: "INR",
-        maximumFractionDigits: 2,
-      }).format(taxSummary.grandTotal);
-    } catch {
-      return `₹${taxSummary.grandTotal.toFixed(2)}`;
-    }
-  }, [taxSummary.grandTotal, locale]);
+  const totalDisplay = useMemo(
+    () => formatAmount(taxSummary.grandTotal),
+    [taxSummary.grandTotal]
+  );
 
   const amountWords = useMemo(
     () => formatINRInWords(taxSummary.grandTotal, locale === "hi-IN" ? "hi-IN" : "en-IN"),

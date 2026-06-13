@@ -2,23 +2,16 @@ import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 
-import { Header, Loader, Screen, LocaleUiText } from "@/components/ui";
+import { Header, Loader, Screen, LocaleUiText, ErrorState } from "@/components/ui";
 import { useBusinessInsightsDashboard } from "@/hooks/useBusinessInsightsDashboard";
 import { useAuth } from "@/state/auth";
 import { useT } from "@/i18n";
 import { getCurrentFinancialYear } from "@/utils/financialYear";
+import { formatAmount } from "@/utils/formatters/formatAmount";
 import { spacing, typography, useThemedStyles } from "@/theme";
 
 function fmtMoney(v: number) {
-  try {
-    return new Intl.NumberFormat("en-IN", {
-      style: "currency",
-      currency: "INR",
-      maximumFractionDigits: 0,
-    }).format(v);
-  } catch {
-    return `₹${v}`;
-  }
+  return formatAmount(v, { maximumFractionDigits: 0 });
 }
 
 export default function InsightsCashPaidScreen() {
@@ -27,7 +20,7 @@ export default function InsightsCashPaidScreen() {
   const { user } = useAuth();
   const { fy } = useLocalSearchParams<{ fy?: string }>();
   const selectedFy = fy ? Number(fy) : getCurrentFinancialYear();
-  const { data, loading } = useBusinessInsightsDashboard(user?.uid, user?.ueid, selectedFy);
+  const { data, loading, error, reload } = useBusinessInsightsDashboard(user?.uid, user?.ueid, selectedFy);
 
   const styles = useThemedStyles((c) =>
     StyleSheet.create({
@@ -45,7 +38,11 @@ export default function InsightsCashPaidScreen() {
   return (
     <Screen scroll>
       <Header title={t("businessInsights.cashPaidTitle")} showBack onBackPress={() => router.back()} />
-      {loading || !cash ? (
+      {loading ? (
+        <Loader message={t("common.loading")} />
+      ) : error ? (
+        <ErrorState message={error} onRetry={() => void reload()} retryLabel={t("common.retry")} />
+      ) : !cash ? (
         <Loader message={t("common.loading")} />
       ) : (
         <>

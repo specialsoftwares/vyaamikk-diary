@@ -3,7 +3,7 @@ import { Alert, StyleSheet, Text, View } from "react-native";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import * as Sharing from "expo-sharing";
 
-import { Banner, Button, Card, Header, Loader, Screen, LocaleUiText } from "@/components/ui";
+import { Banner, Button, Card, ErrorState, Header, Loader, Screen, LocaleUiText } from "@/components/ui";
 import type { ProfessionalServicePack } from "@/domain/professionalPack";
 import { userFacingMessage } from "@/domain/errors";
 import { useAppFeedback } from "@/feedback/AppFeedback";
@@ -36,6 +36,8 @@ export default function ProfessionalPackDetailScreen() {
   const { id, from } = useLocalSearchParams<{ id: string; from?: string }>();
   const [pack, setPack] = useState<ProfessionalServicePack | null>(null);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [notFound, setNotFound] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -51,9 +53,16 @@ export default function ProfessionalPackDetailScreen() {
   const load = useCallback(async () => {
     if (!user || !id) return;
     setLoading(true);
+    setFetchError(null);
+    setNotFound(false);
     try {
       const found = await getProfessionalPackRepository().getById(user.uid, String(id));
       setPack(found);
+      setNotFound(!found);
+    } catch (e) {
+      setPack(null);
+      setNotFound(false);
+      setFetchError(userFacingMessage(e));
     } finally {
       setLoading(false);
     }
@@ -183,7 +192,20 @@ export default function ProfessionalPackDetailScreen() {
     );
   }
 
-  if (!pack) {
+  if (fetchError) {
+    return (
+      <Screen scroll>
+        <Header title={t("proPack.detailTitle")} showBack backFrom={from ?? "pro_pack"} />
+        <ErrorState
+          message={t("proPack.fetchError")}
+          onRetry={() => void load()}
+          retryLabel={t("common.retry")}
+        />
+      </Screen>
+    );
+  }
+
+  if (notFound || !pack) {
     return (
       <Screen>
         <Header title={t("errors.notFound")} showBack backFrom="pro_pack" />

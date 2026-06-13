@@ -96,6 +96,7 @@ export function movementRouteSummary(entry: BusinessEntry): string | null {
     }
     case "material_received": {
       const from =
+        postalPin(p.dispatchFromPostal) ||
         postalPin(p.supplierPostal) ||
         (typeof p.receivedLocation === "string" ? p.receivedLocation : null);
       const to = postalPin(p.receivedAtPostal) || from;

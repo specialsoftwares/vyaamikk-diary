@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useFocusEffect } from "expo-router";
 
 import {
@@ -18,7 +18,10 @@ import { getLetterheadDocumentRepository } from "@/services/letterhead";
 import { getProfessionalPackRepository } from "@/services/professionalPack";
 import { dedupeDiaryEntries } from "@/services/dashboard/diaryRecordCounts";
 import { dedupeProfessionalPacks } from "@/services/professionalPack/dedupe";
+import { createLogger } from "@/utils/logger";
 import { useT } from "@/i18n";
+
+const log = createLogger("hooks/businessInsights");
 
 export function useBusinessInsightsDashboard(
   userId: string | null | undefined,
@@ -28,13 +31,21 @@ export function useBusinessInsightsDashboard(
   const t = useT();
   const [data, setData] = useState<BusinessInsightsDashboard | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const requestIdRef = useRef(0);
 
   const load = useCallback(async () => {
     if (!userId || !ueid) {
+      setData(null);
+      setError(null);
       setLoading(false);
       return;
     }
+
+    const requestId = ++requestIdRef.current;
     setLoading(true);
+    setError(null);
+
     try {
       const [entries, letterheadDocs, proPacks, draftsCount] = await Promise.all([
         getDiaryRepository()
@@ -61,10 +72,18 @@ export function useBusinessInsightsDashboard(
         dash.savedPdfTotal,
         selectedFy
       );
+      if (requestId !== requestIdRef.current) return;
       setData(next);
       scheduleInsightRebuild(userId, ueid);
+    } catch (e) {
+      if (requestId !== requestIdRef.current) return;
+      log.warn("dashboard load failed", e);
+      setData(null);
+      setError(t("businessInsights.loadError"));
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) {
+        setLoading(false);
+      }
     }
   }, [userId, ueid, selectedFy, t]);
 
@@ -74,9 +93,5 @@ export function useBusinessInsightsDashboard(
     }, [load])
   );
 
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  return { data, loading, reload: load };
+  return { data, loading, error, reload: load };
 }

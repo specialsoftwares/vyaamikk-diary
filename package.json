@@ -1,6 +1,14 @@
 {
   "name": "vyaamikk-diary",
   "version": "1.0.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/specialsoftwares/vyaamikk-diary.git"
+  },
+  "bugs": {
+    "url": "https://github.com/specialsoftwares/vyaamikk-diary/issues"
+  },
+  "homepage": "https://github.com/specialsoftwares/vyaamikk-diary#readme",
   "main": "expo-router/entry",
   "scripts": {
     "start": "expo start",
@@ -80,6 +88,7 @@
     "expo-constants": "~18.0.13",
     "expo-file-system": "~19.0.23",
     "expo-font": "~14.0.12",
+    "expo-glass-effect": "~0.1.10",
     "expo-haptics": "~15.0.8",
     "expo-image-picker": "~17.0.11",
     "expo-linear-gradient": "~15.0.8",

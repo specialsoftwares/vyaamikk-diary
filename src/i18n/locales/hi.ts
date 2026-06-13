@@ -615,8 +615,8 @@ const hi: Translations = {
       generic: "एंट्री — {{date}}",
     },
     summary: {
-      cash: "₹{{amount}} — {{name}}",
-      paymentRequest: "{{party}} · ₹{{pending}} बकाया · {{invoice}}",
+      cash: "{{amount}} — {{name}}",
+      paymentRequest: "{{party}} · {{pending}} बकाया · {{invoice}}",
       freight: "{{bill}} → {{destination}}",
     },
     paymentRequestDisclaimer:
@@ -769,7 +769,7 @@ const hi: Translations = {
   },
 
   calendarMaps: {
-    tabLabel: "कैलेंडर और मैप",
+    tabLabel: "कैलेंडर",
     screenTitle: "कैलेंडर और मैप",
     screenSubtitle: "तारीख और स्थान के अनुसार रिकॉर्ड देखें",
     screenLead:

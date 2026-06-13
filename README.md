@@ -1,5 +1,7 @@
 # Vyaamikk Diary
 
+**Repository:** [github.com/specialsoftwares/vyaamikk-diary](https://github.com/specialsoftwares/vyaamikk-diary)
+
 **by SPECIAL SOFTWARES**
 
 A simple digital diary to record daily work, business activity, issues, production

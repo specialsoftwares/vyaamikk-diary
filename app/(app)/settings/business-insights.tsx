@@ -6,24 +6,17 @@ import { FySelector } from "@/components/insights/FySelector";
 import { InsightsCategoryRow } from "@/components/insights/InsightsCategoryRow";
 import { InsightsOverviewTiles } from "@/components/insights/InsightsOverviewTiles";
 import { SettingsNavGroup } from "@/components/settings/SettingsNavCard";
-import { Header, Loader, Screen, LocaleUiText } from "@/components/ui";
+import { Header, Loader, Screen, LocaleUiText, ErrorState } from "@/components/ui";
 import { useBusinessInsightsDashboard } from "@/hooks/useBusinessInsightsDashboard";
 import { useAuth } from "@/state/auth";
 import { useT } from "@/i18n";
 import { getCurrentFinancialYear } from "@/utils/financialYear";
+import { formatAmount } from "@/utils/formatters/formatAmount";
 import { spacing, typography, useThemedStyles } from "@/theme";
 import { formatRecapTitle } from "@/services/insights/fyRecapService";
 
 function fmtMoney(v: number) {
-  try {
-    return new Intl.NumberFormat("en-IN", {
-      style: "currency",
-      currency: "INR",
-      maximumFractionDigits: 0,
-    }).format(v);
-  } catch {
-    return `₹${v}`;
-  }
+  return formatAmount(v, { maximumFractionDigits: 0 });
 }
 
 export default function BusinessInsightsScreen() {
@@ -31,7 +24,7 @@ export default function BusinessInsightsScreen() {
   const router = useRouter();
   const { user } = useAuth();
   const [selectedFy, setSelectedFy] = useState(getCurrentFinancialYear());
-  const { data, loading } = useBusinessInsightsDashboard(user?.uid, user?.ueid, selectedFy);
+  const { data, loading, error, reload } = useBusinessInsightsDashboard(user?.uid, user?.ueid, selectedFy);
 
   const styles = useThemedStyles((c) =>
     StyleSheet.create({
@@ -69,7 +62,11 @@ export default function BusinessInsightsScreen() {
         availableFys={data?.availableFys ?? [selectedFy]}
         onSelect={setSelectedFy}
       />
-      {loading || !data ? (
+      {loading ? (
+        <Loader message={t("common.loading")} />
+      ) : error ? (
+        <ErrorState message={error} onRetry={() => void reload()} retryLabel={t("common.retry")} />
+      ) : !data ? (
         <Loader message={t("common.loading")} />
       ) : (
         <>

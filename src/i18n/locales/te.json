@@ -347,7 +347,7 @@
       "clusterCount": "ఈ స్థలంలో {{count}} రికార్డులు",
       "tapMarkerHint": "రికార్డ్ వివరాల కోసం మార్కర్‌ను నొక్కండి. "
     },
-    "tabLabel": "క్యాలెండర్ & మ్యాప్స్",
+    "tabLabel": "క్యాలెండర్",
     "screenTitle": "క్యాలెండర్ & మ్యాప్స్",
     "screenSubtitle": "తేదీ మరియు స్థాన పాదముద్రల వారీగా రికార్డులను సమీక్షించండి",
     "modeCalendar": "క్యాలెండర్",
@@ -547,8 +547,8 @@
       "generic": "ప్రవేశం — {{date}}"
     },
     "summary": {
-      "cash": "₹{{amount}} to {{name}}",
-      "paymentRequest": "{{party}} · ₹{{pending}} pending · {{invoice}}",
+      "cash": "{{amount}} to {{name}}",
+      "paymentRequest": "{{party}} · {{pending}} pending · {{invoice}}",
       "freight": "{{bill}} → {{destination}}"
     },
     "freightDisclaimer": "Structured transporter / dispatch information for sharing — not a transport contract or marketplace.",

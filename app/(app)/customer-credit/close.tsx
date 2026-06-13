@@ -23,6 +23,7 @@ import { formDateRowStyle, formFieldLabelStyle } from "@/theme/formLayer";
 import { spacing, typography, useTheme, useThemedStyles } from "@/theme";
 import { userFacingMessage } from "@/domain/errors";
 import { formatShortDate } from "@/utils/date";
+import { formatAmount } from "@/utils/formatters/formatAmount";
 import {
   computeCreditSummary,
   isPaymentDateAllowed,
@@ -147,20 +148,7 @@ export default function CustomerCreditCloseScreen() {
     [record]
   );
 
-  const fmtMoney = useCallback(
-    (v: number) => {
-      try {
-        return new Intl.NumberFormat(locale, {
-          style: "currency",
-          currency: "INR",
-          maximumFractionDigits: 2,
-        }).format(v);
-      } catch {
-        return `₹${v.toFixed(2)}`;
-      }
-    },
-    [locale]
-  );
+  const fmtMoney = useCallback((v: number) => formatAmount(v), []);
 
   const modeOptions: SelectOption[] = [
     { value: "cash", label: t("customerCredit.payCash") },

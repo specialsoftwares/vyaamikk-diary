@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 
 import { EmptyState,
+  ErrorState,
   Header,
   LastRefreshedHint,
   Screen,
@@ -35,6 +36,7 @@ export function StatutoryInformationScreen() {
   const [view, setView] = useState<StatutoryTabViewModel | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const hasLoadedOnceRef = useRef(false);
 
   const styles = useThemedStyles((c) =>
@@ -98,6 +100,7 @@ export function StatutoryInformationScreen() {
     async (mode: "mount" | "refresh" = "mount") => {
       if (!user?.uid) {
         setView(null);
+        setLoadError(null);
         setLoading(false);
         setRefreshing(false);
         hasLoadedOnceRef.current = false;
@@ -108,10 +111,13 @@ export function StatutoryInformationScreen() {
       } else if (!hasLoadedOnceRef.current) {
         setLoading(true);
       }
+      setLoadError(null);
       try {
         const vm = await buildStatutoryTabViewModel(user.uid, t, filter);
         setView(vm);
         hasLoadedOnceRef.current = true;
+      } catch {
+        setLoadError(t("statutory.loadError"));
       } finally {
         setLoading(false);
         setRefreshing(false);
@@ -200,13 +206,21 @@ export function StatutoryInformationScreen() {
 
       <LastRefreshedHint message={refreshNote} />
 
-      {loading && !view ? (
+      {loading && !view && !loadError ? (
         <SkeletonLoadingPanel loading slowMessage={t("skeleton.stillLoading")}>
           <SkeletonList count={4} Item={SkeletonStatutoryCard} />
         </SkeletonLoadingPanel>
       ) : null}
 
-      {!loading && view ? (
+      {loadError ? (
+        <ErrorState
+          message={loadError}
+          onRetry={() => void load("refresh")}
+          retryLabel={t("common.retry")}
+        />
+      ) : null}
+
+      {!loading && !loadError && view ? (
         <>
           {URGENCY_ORDER.map((u) => {
             const items = view.upcoming[u];

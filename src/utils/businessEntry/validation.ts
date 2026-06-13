@@ -50,6 +50,7 @@ export type DatePolicySchemaOptions = {
   existingInvoiceDateMs?: number | null;
   existingDueDateMs?: number | null;
   existingReminderAtMs?: number | null;
+  recordCreatedAtMs?: number | null;
 };
 
 function existingMs(
@@ -425,21 +426,44 @@ export function buildMaterialReceivedSchema(opts?: DatePolicySchemaOptions) {
       invoiceBill: z.null().optional(),
       vehicleNumber: z.null().optional(),
       receivedLocation: trimOpt(200),
+      dispatchFromLocation: trimOpt(200),
       checkedBy: z.null().optional(),
       qualityStatus: z.enum(["ok", "short", "damaged", "rejected", "pending_issue"]),
       issueNote: trimOpt(1000),
       paymentFollowUp: z.literal(false).default(false),
       reminder: z.null().optional(),
       notes: trimOpt(5000),
+      ewayBillNumber: z.string().optional().default(""),
+      ...postalFormShape("dispatchFrom"),
       ...postalFormShape("receivedAt"),
       ...postalFormShape("party"),
     })
     .superRefine((d, ctx) => {
-      refineRecordDatePolicy("event_past_15", "entryDate", d.entryDate, ctx, {
+      refineRecordDatePolicy("material_receipt_7d", "entryDate", d.entryDate, ctx, {
         existingMs: existingMs(opts, "existingEntryDateMs"),
+        recordEntryAnchorMs: opts?.recordCreatedAtMs ?? undefined,
       });
+      refineRequiredPostalLine(
+        d as Record<string, unknown>,
+        "dispatchFrom",
+        "dispatchFromLocation",
+        ctx,
+        "materialMovement.fromPinRequired"
+      );
+      refineRequiredPostalLine(
+        d as Record<string, unknown>,
+        "receivedAt",
+        "receivedLocation",
+        ctx,
+        "composer.deliveryRequired"
+      );
+      refinePostalPin(d as Record<string, unknown>, "dispatchFrom", ctx);
       refinePostalPin(d as Record<string, unknown>, "receivedAt", ctx);
       refinePostalPin(d as Record<string, unknown>, "party", ctx);
+      const ewayMsg = ewayBillValidationMessage(d.ewayBillNumber);
+      if (ewayMsg) {
+        ctx.addIssue({ code: "custom", message: ewayMsg, path: ["ewayBillNumber"] });
+      }
     })
     .superRefine((d, ctx) => {
       if (d.qualityStatus !== "ok" && !d.issueNote) {

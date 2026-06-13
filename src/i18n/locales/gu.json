@@ -347,7 +347,7 @@
       "clusterCount": "આ સ્થાન પર {{count}} રેકોર્ડ",
       "tapMarkerHint": "રેકોર્ડ વિગતો માટે માર્કરને ટેપ કરો. "
     },
-    "tabLabel": "કેલેન્ડર અને નકશા",
+    "tabLabel": "કેલેન્ડર",
     "screenTitle": "કેલેન્ડર અને નકશા",
     "screenSubtitle": "તારીખ અને સ્થાન ફૂટપ્રિન્ટ્સ દ્વારા રેકોર્ડની સમીક્ષા કરો",
     "modeCalendar": "કેલેન્ડર",
@@ -547,8 +547,8 @@
       "generic": "પ્રવેશ — {{date}}"
     },
     "summary": {
-      "cash": "₹{{amount}} to {{name}}",
-      "paymentRequest": "{{party}} · ₹{{pending}} pending · {{invoice}}",
+      "cash": "{{amount}} to {{name}}",
+      "paymentRequest": "{{party}} · {{pending}} pending · {{invoice}}",
       "freight": "{{bill}} → {{destination}}"
     },
     "freightDisclaimer": "Structured transporter / dispatch information for sharing — not a transport contract or marketplace.",

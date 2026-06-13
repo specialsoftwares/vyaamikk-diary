@@ -15,7 +15,7 @@ import React, {
   useMemo,
   useState,
 } from "react";
-import { Appearance, useColorScheme } from "react-native";
+import { Appearance, Platform, useColorScheme } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { useLocaleFontRevision } from "@/i18n/LocaleFontProvider";
@@ -95,6 +95,19 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     () => (resolvedMode === "dark" ? darkColors : lightColors),
     [resolvedMode]
   );
+
+  // Keep RN Appearance in sync with the in-app preference so native chrome
+  // (NativeTabs / Liquid Glass) does not infer scheme from screen content.
+  useEffect(() => {
+    if (!ready || Platform.OS === "web") return;
+    if (mode === "system") {
+      Appearance.setColorScheme(null);
+    } else if (mode === "dark") {
+      Appearance.setColorScheme("dark");
+    } else {
+      Appearance.setColorScheme("light");
+    }
+  }, [mode, ready]);
 
   const setMode = useCallback(async (next: ThemeMode) => {
     setModeState(next);

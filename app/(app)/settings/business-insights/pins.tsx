@@ -2,7 +2,7 @@ import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 
-import { Header, Loader, Screen, LocaleUiText } from "@/components/ui";
+import { Header, Loader, Screen, LocaleUiText, ErrorState } from "@/components/ui";
 import { useBusinessInsightsDashboard } from "@/hooks/useBusinessInsightsDashboard";
 import { useAuth } from "@/state/auth";
 import { useT } from "@/i18n";
@@ -16,7 +16,7 @@ export default function InsightsPinsScreen() {
   const { user } = useAuth();
   const { fy } = useLocalSearchParams<{ fy?: string }>();
   const selectedFy = fy ? Number(fy) : getCurrentFinancialYear();
-  const { data, loading } = useBusinessInsightsDashboard(user?.uid, user?.ueid, selectedFy);
+  const { data, loading, error, reload } = useBusinessInsightsDashboard(user?.uid, user?.ueid, selectedFy);
 
   const styles = useThemedStyles((c) =>
     StyleSheet.create({
@@ -35,7 +35,11 @@ export default function InsightsPinsScreen() {
   return (
     <Screen scroll>
       <Header title={t("businessInsights.pinsTitle")} showBack onBackPress={() => router.back()} />
-      {loading || !data ? (
+      {loading ? (
+        <Loader message={t("common.loading")} />
+      ) : error ? (
+        <ErrorState message={error} onRetry={() => void reload()} retryLabel={t("common.retry")} />
+      ) : !data ? (
         <Loader message={t("common.loading")} />
       ) : data.pins.length === 0 ? (
         <LocaleUiText style={styles.empty}>{t("businessInsights.emptyPins")}</LocaleUiText>

@@ -2,7 +2,7 @@ import React, { useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 
-import { Header, Loader, Screen, LocaleUiText } from "@/components/ui";
+import { Header, Loader, Screen, LocaleUiText, ErrorState } from "@/components/ui";
 import { useBusinessInsightsDashboard } from "@/hooks/useBusinessInsightsDashboard";
 import { useAuth } from "@/state/auth";
 import { useT } from "@/i18n";
@@ -18,7 +18,7 @@ export default function InsightsCustomersScreen() {
   const { user } = useAuth();
   const { fy } = useLocalSearchParams<{ fy?: string }>();
   const selectedFy = fy ? Number(fy) : getCurrentFinancialYear();
-  const { data, loading } = useBusinessInsightsDashboard(user?.uid, user?.ueid, selectedFy);
+  const { data, loading, error, reload } = useBusinessInsightsDashboard(user?.uid, user?.ueid, selectedFy);
   const [filter, setFilter] = useState<Filter>("all");
 
   const styles = useThemedStyles((c) =>
@@ -67,7 +67,11 @@ export default function InsightsCustomersScreen() {
           </Pressable>
         ))}
       </View>
-      {loading || !data ? (
+      {loading ? (
+        <Loader message={t("common.loading")} />
+      ) : error ? (
+        <ErrorState message={error} onRetry={() => void reload()} retryLabel={t("common.retry")} />
+      ) : !data ? (
         <Loader message={t("common.loading")} />
       ) : rows.length === 0 ? (
         <LocaleUiText style={styles.empty}>{t("businessInsights.emptyCustomers")}</LocaleUiText>

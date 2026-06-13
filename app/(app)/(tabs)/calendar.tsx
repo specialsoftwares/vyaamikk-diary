@@ -21,7 +21,7 @@ import {
 } from "@/components/calendarMaps/CalendarMapsModeSwitch";
 import { DeferredCalendarMapsMapPanel } from "@/components/calendarMaps/DeferredCalendarMapsMapPanel";
 import { SignatureHeroSurface } from "@/components/signature";
-import { EmptyState, Header, LastRefreshedHint, Screen, SkeletonList, SkeletonLoadingPanel, LocaleUiText } from "@/components/ui";
+import { EmptyState, ErrorState, Header, LastRefreshedHint, Screen, SkeletonList, SkeletonLoadingPanel, LocaleUiText } from "@/components/ui";
 import { useCalendarMapsData } from "@/hooks/useCalendarMapsData";
 import { useAppRefresh } from "@/hooks/useAppRefresh";
 import { useAuth } from "@/state/auth";
@@ -245,7 +245,13 @@ export default function CalendarMapsTab() {
           {t("calendar.entriesOn", { date: selectedDateLabel })}
         </LocaleUiText>
 
-        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        {error ? (
+          <ErrorState
+            message={t("calendarMaps.loadError")}
+            onRetry={() => void reload("refresh")}
+            retryLabel={t("common.retry")}
+          />
+        ) : null}
         {loading && dayView.isEmpty ? (
           <SkeletonLoadingPanel loading slowMessage={t("skeleton.stillLoading")}>
             <SkeletonList count={4} />

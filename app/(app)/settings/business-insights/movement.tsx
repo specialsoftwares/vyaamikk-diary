@@ -2,7 +2,7 @@ import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 
-import { Header, Loader, Screen, LocaleUiText } from "@/components/ui";
+import { Header, Loader, Screen, LocaleUiText, ErrorState } from "@/components/ui";
 import { useBusinessInsightsDashboard } from "@/hooks/useBusinessInsightsDashboard";
 import { useAuth } from "@/state/auth";
 import { useT } from "@/i18n";
@@ -15,7 +15,7 @@ export default function InsightsMovementScreen() {
   const { user } = useAuth();
   const { fy } = useLocalSearchParams<{ fy?: string }>();
   const selectedFy = fy ? Number(fy) : getCurrentFinancialYear();
-  const { data, loading } = useBusinessInsightsDashboard(user?.uid, user?.ueid, selectedFy);
+  const { data, loading, error, reload } = useBusinessInsightsDashboard(user?.uid, user?.ueid, selectedFy);
 
   const styles = useThemedStyles((c) =>
     StyleSheet.create({
@@ -44,7 +44,11 @@ export default function InsightsMovementScreen() {
     <Screen scroll>
       <Header title={t("businessInsights.movementTitle")} showBack onBackPress={() => router.back()} />
       <LocaleUiText style={styles.hint}>{t("businessInsights.cardDistanceHint")}</LocaleUiText>
-      {loading || !d ? (
+      {loading ? (
+        <Loader message={t("common.loading")} />
+      ) : error ? (
+        <ErrorState message={error} onRetry={() => void reload()} retryLabel={t("common.retry")} />
+      ) : !d ? (
         <Loader message={t("common.loading")} />
       ) : (
         <>

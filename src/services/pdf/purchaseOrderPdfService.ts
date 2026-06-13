@@ -16,6 +16,7 @@ import {
 } from "@/domain/purchaseOrder";
 import { assertEnglishOnlyPdf, clearEnglishOnlyPdfContext } from "@/services/pdf/pdfLabels";
 import { formatINRInWords } from "@/utils/money/inrWords";
+import { formatAmount } from "@/utils/formatters/formatAmount";
 import { gstinStateName } from "@/utils/gst/gstin";
 
 export interface PurchaseOrderPdfLabels {
@@ -124,16 +125,8 @@ function esc(value: string | number | null | undefined): string {
     .replace(/"/g, "&quot;");
 }
 
-function fmtMoney(value: number, locale: string): string {
-  try {
-    return new Intl.NumberFormat(locale, {
-      style: "currency",
-      currency: "INR",
-      maximumFractionDigits: 2,
-    }).format(value);
-  } catch {
-    return `₹${value.toFixed(2)}`;
-  }
+function fmtMoney(value: number, _locale: string): string {
+  return formatAmount(value);
 }
 
 function fmtDate(ms: number, locale: string): string {

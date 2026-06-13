@@ -1,5 +1,6 @@
 import type { UserProfile } from "@/domain/types";
 import { readProfileLogoDataUri } from "@/services/profileLogo/storage";
+import { formatDisplayPhone } from "@/utils/phone";
 import { defaultPdfLegalFooterLabels, pdfLegalLabelsFromT, type PdfLegalFooterLabels } from "./pdfLegalFooter";
 import { pdfUserProfileHeaderHtml, type PdfUserProfileLabels } from "./pdfLayout";
 
@@ -7,6 +8,8 @@ export interface UserPdfBranding {
   displayName: string;
   businessName: string | null;
   ueid: string;
+  mobile: string | null;
+  email: string | null;
   includeLogo: boolean;
   logoDataUri: string | null;
   legal: PdfLegalFooterLabels;
@@ -40,6 +43,8 @@ export async function getUserPdfBranding(
     displayName: user.displayName?.trim() || "—",
     businessName: user.businessName?.trim() || null,
     ueid: user.ueid,
+    mobile: user.phoneE164?.trim() ? formatDisplayPhone(user.phoneE164) : null,
+    email: user.businessEmail?.trim() || null,
     includeLogo: includeLogo && Boolean(logoDataUri),
     logoDataUri,
     legal,

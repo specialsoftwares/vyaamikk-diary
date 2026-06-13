@@ -56,8 +56,10 @@ export function formValuesFromEntry(entry: BusinessEntry): Record<string, unknow
   if (entry.entryType === "material_received") {
     return {
       ...base,
+      ...indianPostalToFormDefaults("dispatchFrom", parseIndianPostalFromStored(p.dispatchFromPostal)),
       ...indianPostalToFormDefaults("receivedAt", parseIndianPostalFromStored(p.receivedAtPostal)),
       ...indianPostalToFormDefaults("party", parseIndianPostalFromStored(p.supplierPostal)),
+      ewayBillNumber: p.ewayBillNumber ?? "",
     };
   }
   return base;
