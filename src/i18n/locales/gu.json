@@ -469,6 +469,23 @@
     "routeFrom": "થી",
     "routeTo": "થી"
   },
+  "cashPaid": {
+    "receiverMobile": {
+      "label": "પ્રાપ્તકર્તા મોબાઈલ",
+      "placeholder": "10 અંકનો મોબાઈલ નંબર",
+      "helper": "Full Legal Record PDF માટે જરૂરી. ફક્ત ભારતીય નંબર (+91).",
+      "errorInvalid": "માન્ય 10 અંકનો ભારતીય મોબાઈલ નંબર દાખલ કરો."
+    },
+    "denomination": {
+      "sectionLabel": "નોટ વિગત (વૈકલ્પિક)",
+      "helper": "PDF પર નોટ ગણતરી દાખલ કરો. કુલ રકમથી ભિન્ન હોઈ શકે — સેવ મંજૂર.",
+      "note500": "₹500 ની નોટ",
+      "note200": "₹200 ની નોટ",
+      "note100": "₹100 ની નોટ",
+      "note50": "₹50 ની નોટ",
+      "mismatchWarning": "નોટ કુલ રકમ સાથે મેળ ખાતું નથી. તમે સેવ કરી શકો; Full Legal PDF માટે મેળ જરૂરી હોઈ શકે."
+    }
+  },
   "composer": {
     "saveDraft": "Save draft",
     "paymentPeriodDueBeforeInvoice": "Due date must be on or after the invoice date.",

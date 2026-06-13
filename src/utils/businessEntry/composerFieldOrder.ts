@@ -3,7 +3,17 @@ import type { FieldErrors } from "react-hook-form";
 
 /** Scroll / focus order for validation errors (top to bottom). */
 export const COMPOSER_FIELD_ORDER: Partial<Record<BusinessEntryType, string[]>> = {
-  business_cash_given: ["paymentDate", "amount", "givenToName", "purpose"],
+  business_cash_given: [
+    "paymentDate",
+    "amount",
+    "givenToName",
+    "receiverMobile",
+    "count500",
+    "count200",
+    "count100",
+    "count50",
+    "purpose",
+  ],
   work_update_issue: ["entryDate", "workDone", "issueProblem", "reminder"],
   staff_matter: ["entryDate", "staffName", "matterDetails"],
   material_dispatched: [

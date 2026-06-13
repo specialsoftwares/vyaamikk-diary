@@ -2,13 +2,31 @@
 
 Confirmed from codebase inspection (2026-06-04). Not theoretical.
 
+## Firestore letterhead base64 size limit
+
+**Status: resolved (Storage migration).**
+
+Letterhead template images now upload to Firebase Storage (`users/{uid}/letterhead/…`) with `letterheadImageStoragePath` as the canonical Firestore field. Legacy inline `imageDataUri` is migrated idempotently via `runLetterheadStorageMigrationForUser()`. See `docs/STORAGE_SECURITY.md`.
+
 ## PO serial allocation
 
 **Status: transaction-protected (safe).**
 
-`firebasePurchaseOrderRepository.allocateSerial` in `src/services/purchaseOrder/firebase.ts` uses Firestore `runTransaction` on `users/{uid}/counters/{counterId}`. Retry with the same idempotency key does not allocate a new serial (covered by `saveLock.test.ts`).
+`firebasePurchaseOrderRepository.allocateSerial` in `src/services/purchaseOrder/firebase.ts` uses Firestore `runTransaction` on `users/{uid}/counters/purchaseOrder`. Retry with the same idempotency key does not allocate a new serial (covered by `saveLock.test.ts`).
 
 **Risk if bypassed:** duplicate PO serial numbers under concurrent creates with different idempotency keys.
+
+## Cash Paid voucher (CPV) serial allocation
+
+**Status: transaction-protected (safe).**
+
+`allocateCashPaidVoucherSerial` uses Firestore `runTransaction` on `users/{uid}/counters/cashPaidVouchers` with financial-year rollover (`CPV/YYYY-YY/XXXX`). An existing serial on the record is reused on PDF re-export. See `src/services/cashPaid/cashPaidVoucherSerial.firebase.ts`.
+
+## Firebase Storage PDF backup path
+
+**Status: rules only — not enabled in V1 app.**
+
+`storage.rules` allows `users/{uid}/pdfs/{recordId}/…` for future cloud PDF backup. The mobile app does not upload PDFs to Storage in V1.
 
 ## Auth session vs Firebase token expiry
 

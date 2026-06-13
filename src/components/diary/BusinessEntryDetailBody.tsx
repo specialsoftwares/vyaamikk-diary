@@ -11,6 +11,7 @@ import { entryHasGpsFootprint, manualLocationTextFromEntry } from "@/utils/locat
 import { Button } from "@/components/ui";
 import { LocaleUiText } from "@/components/ui/LocaleUiText";
 import { cashPaidPhotoAttachment } from "@/services/attachments/cashPaidPhotoService";
+import { formatReceiverMobileForPdf } from "@/utils/phone/receiverMobile";
 
 export function BusinessEntryDetailBody({
   entry,
@@ -84,7 +85,18 @@ export function BusinessEntryDetailBody({
           label={t("composer.amount")}
           value={formatINRWithWords(Number(p.amount), amountLocale)}
         />,
-        <Field key="g" label={t("composer.givenToName")} value={p.givenToName as string} />,
+        <Field key="g" label={t("composer.givenToName")} value={p.givenToName as string} />
+      );
+      if (p.receiverMobile) {
+        rows.push(
+          <Field
+            key="rm"
+            label={t("cashPaid.receiverMobile.label")}
+            value={formatReceiverMobileForPdf(String(p.receiverMobile))}
+          />
+        );
+      }
+      rows.push(
         <Field key="p" label={t("composer.purpose")} value={p.purpose as string} />,
         <Field key="m" label={t("composer.paymentMode")} value="Cash" />
       );

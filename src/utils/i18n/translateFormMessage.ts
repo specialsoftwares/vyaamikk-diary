@@ -4,7 +4,11 @@ export function translateFormMessage(
   raw: string
 ): string {
   if (!raw) return raw;
-  if (raw.startsWith("composer.") || raw.startsWith("datePolicy.")) {
+  if (
+    raw.startsWith("composer.") ||
+    raw.startsWith("datePolicy.") ||
+    raw.startsWith("cashPaid.")
+  ) {
     try {
       return t(raw);
     } catch {

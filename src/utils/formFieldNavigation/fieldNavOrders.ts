@@ -25,7 +25,7 @@ export function isMultilineFieldKey(fieldKey: string, explicitMultiline?: boolea
 
 /** Keyboard next-field order for composer record types (text inputs only). */
 export const COMPOSER_NAV_FIELD_ORDER: Partial<Record<BusinessEntryType, string[]>> = {
-  business_cash_given: ["amount", "givenToName", "purpose"],
+  business_cash_given: ["amount", "givenToName", "receiverMobile", "count500", "count200", "count100", "count50", "purpose"],
   work_update_issue: ["workDone", "issueProblem", "sitePlace"],
   staff_matter: ["staffName", "matterDetails"],
   material_dispatched: [

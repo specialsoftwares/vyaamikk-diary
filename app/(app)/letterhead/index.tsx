@@ -161,7 +161,7 @@ export default function LetterheadGateScreen() {
           <Card style={styles.preview}>
             <View style={styles.imageFrame}>
               <Image
-                source={{ uri: config.imageDataUri }}
+                source={{ uri: config.imageDataUri ?? undefined }}
                 style={styles.image}
                 resizeMode="contain"
                 accessible

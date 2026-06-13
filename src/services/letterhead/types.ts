@@ -26,8 +26,19 @@ export interface LetterheadConfig {
   /** Original image dimensions in pixels — useful for preview-time aspect. */
   imageWidth: number;
   imageHeight: number;
-  /** Full data URI: e.g. `data:image/png;base64,iVBOR...` */
-  imageDataUri: string;
+  /**
+   * Legacy inline base64 (e.g. `data:image/png;base64,...`). Superseded by
+   * `letterheadImageStoragePath` when migrated to Firebase Storage.
+   */
+  imageDataUri?: string | null;
+  /** Canonical Firebase Storage object path for the template image. */
+  letterheadImageStoragePath?: string | null;
+  /** Optional cached download URL for the storage object. */
+  letterheadImageDownloadUrl?: string | null;
+  /** When the storage-backed template image was last written. */
+  letterheadImageUpdatedAt?: number | null;
+  /** When legacy inline base64 was migrated to Storage (one-time). */
+  letterheadStorageMigratedAt?: number | null;
   margins: LetterheadMargins;
   /**
    * Optional user-scoped reusable assets stored as data URIs. Kept on the

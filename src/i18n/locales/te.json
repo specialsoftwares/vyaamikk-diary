@@ -469,6 +469,23 @@
     "routeFrom": "నుండి",
     "routeTo": "కు"
   },
+  "cashPaid": {
+    "receiverMobile": {
+      "label": "స్వీకరించిన వ్యక్తి మొబైల్",
+      "placeholder": "10 అంకెల మొబైల్ నంబర్",
+      "helper": "Full Legal Record PDF కోసం అవసరం. భారత నంబర్లు మాత్రమే (+91).",
+      "errorInvalid": "చెల్లుబాటు అయ్యే 10 అంకెల భారతీయ మొబైల్ నంబర్ నమోదు చేయండి."
+    },
+    "denomination": {
+      "sectionLabel": "నోట్ వివరాలు (ఐచ్ఛికం)",
+      "helper": "PDF లో నోట్ లెక్కలు నమోదు చేయండి. మొత్తంతో తేడా ఉండవచ్చు — సేవ్ అనుమతి.",
+      "note500": "₹500 నోట్లు",
+      "note200": "₹200 నోట్లు",
+      "note100": "₹100 నోట్లు",
+      "note50": "₹50 నోట్లు",
+      "mismatchWarning": "నోట్ మొత్తం మొత్తం మొత్తానికి సరిపోలడం లేదు. మీరు సేవ్ చేయవచ్చు; Full Legal PDF సరిపోలడం అవసరం కావచ్చు."
+    }
+  },
   "composer": {
     "saveDraft": "Save draft",
     "paymentPeriodDueBeforeInvoice": "Due date must be on or after the invoice date.",

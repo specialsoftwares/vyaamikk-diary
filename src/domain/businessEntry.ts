@@ -33,6 +33,18 @@ export interface AttachmentRef {
   uri: string;
   mimeType: string | null;
   name: string | null;
+  storagePath?: string | null;
+  downloadUrl?: string | null;
+  downloadUrlUpdatedAt?: number | null;
+}
+
+/** Optional cash note counts for Full Legal Record PDF. */
+export interface CashDenominationBreakdown {
+  500: number;
+  200: number;
+  100: number;
+  50: number;
+  total: number;
 }
 
 export interface EntryLocation {
@@ -103,10 +115,18 @@ export interface BusinessCashGivenPayload {
   paymentMode: string;
   settlementStatus: CashSettlementStatus;
   contactMobile: string | null;
+  receiverMobile?: string | null;
   businessRef: string | null;
   siteRef: string | null;
   expectedSettlementDate: number | null;
   remarks: string | null;
+  denominationBreakdown?: CashDenominationBreakdown | null;
+  cashPaidVoucherSerial?: string | null;
+  cashPaidVoucherSerialYear?: string | null;
+  cashPaidVoucherSerialAllocatedAt?: number | null;
+  photoAttachmentStoragePath?: string | null;
+  photoAttachmentDownloadUrl?: string | null;
+  photoAttachmentCapturedAt?: number | null;
 }
 
 export interface MaterialDispatchedPayload {

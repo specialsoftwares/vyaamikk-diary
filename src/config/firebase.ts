@@ -10,12 +10,14 @@
 import { initializeApp, getApps, type FirebaseApp } from "firebase/app";
 import { getFirestore, type Firestore } from "firebase/firestore";
 import { getAuth, type Auth } from "firebase/auth";
+import { getStorage, type FirebaseStorage } from "firebase/storage";
 
 import { env, isFirebaseConfigured } from "./env";
 
 let cachedApp: FirebaseApp | null = null;
 let cachedDb: Firestore | null = null;
 let cachedAuth: Auth | null = null;
+let cachedStorage: FirebaseStorage | null = null;
 
 export class FirebaseNotConfiguredError extends Error {
   constructor() {
@@ -55,4 +57,10 @@ export function getFirebaseDb(): Firestore {
   if (cachedDb) return cachedDb;
   cachedDb = getFirestore(getFirebaseApp());
   return cachedDb;
+}
+
+export function getFirebaseStorage(): FirebaseStorage {
+  if (cachedStorage) return cachedStorage;
+  cachedStorage = getStorage(getFirebaseApp());
+  return cachedStorage;
 }

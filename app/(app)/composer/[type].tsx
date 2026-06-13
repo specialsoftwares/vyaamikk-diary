@@ -25,6 +25,10 @@ import {
   persistCashPaidPhoto,
   removeCashPaidPhotoFile,
 } from "@/services/attachments/cashPaidPhotoService";
+import {
+  clearCashPaidPhotoStorageFields,
+  uploadCashPaidPhotoToStorage,
+} from "@/services/attachments/cashPaidPhotoStorage";
 import { userFacingMessage } from "@/domain/errors";
 import { useAppFeedback } from "@/feedback/AppFeedback";
 import { useAuth } from "@/state/auth";
@@ -439,23 +443,51 @@ export default function ComposerScreen() {
       uid: string,
       entryId: string,
       baseAttachments: AttachmentRef[],
-      photoState: CashPaidPhotoFieldState
-    ): Promise<AttachmentRef[]> => {
-      if (!photoState.picked && !photoState.removeExisting) return baseAttachments;
+      photoState: CashPaidPhotoFieldState,
+      basePayload: import("@/domain/businessEntry").BusinessCashGivenPayload
+    ): Promise<{
+      attachments: AttachmentRef[];
+      payload: import("@/domain/businessEntry").BusinessCashGivenPayload;
+      photoUploadFailed: boolean;
+    }> => {
+      if (!photoState.picked && !photoState.removeExisting) {
+        return { attachments: baseAttachments, payload: basePayload, photoUploadFailed: false };
+      }
       let attachments = [...baseAttachments];
+      let payload = { ...basePayload };
+      let photoUploadFailed = false;
+
       if (photoState.removeExisting) {
         await removeCashPaidPhotoFile(attachments);
         attachments = attachments.filter((a) => a.id !== CASH_PAID_ATTACHMENT_ID);
+        payload = { ...payload, ...clearCashPaidPhotoStorageFields() };
       }
+
       if (photoState.picked) {
         await removeCashPaidPhotoFile(attachments);
-        const ref = await persistCashPaidPhoto(uid, entryId, photoState.picked);
-        attachments = [
-          ...attachments.filter((a) => a.id !== CASH_PAID_ATTACHMENT_ID),
-          ref,
-        ];
+        const localRef = await persistCashPaidPhoto(uid, entryId, photoState.picked);
+        try {
+          const uploaded = await uploadCashPaidPhotoToStorage({
+            userId: uid,
+            recordId: entryId,
+            picked: photoState.picked,
+            localAttachment: localRef,
+          });
+          attachments = [
+            ...attachments.filter((a) => a.id !== CASH_PAID_ATTACHMENT_ID),
+            uploaded.attachment,
+          ];
+          payload = { ...payload, ...uploaded.payloadPatch };
+        } catch {
+          attachments = [
+            ...attachments.filter((a) => a.id !== CASH_PAID_ATTACHMENT_ID),
+            localRef,
+          ];
+          photoUploadFailed = true;
+        }
       }
-      return attachments;
+
+      return { attachments, payload, photoUploadFailed };
     },
     []
   );
@@ -495,15 +527,21 @@ export default function ComposerScreen() {
           autoEntryTitle(saveEntryType, parts.entryDate, parts.payload, t);
 
         if (editingId) {
-          const attachments =
-            saveEntryType === "business_cash_given"
-              ? await resolveCashPaidAttachments(
-                  user.uid,
-                  editingId,
-                  editingAttachmentsRef.current,
-                  cashPaidPhotoState
-                )
-              : editingAttachmentsRef.current;
+          let cashPayload = parts.payload as import("@/domain/businessEntry").BusinessCashGivenPayload;
+          let attachments = editingAttachmentsRef.current;
+          let photoUploadFailed = false;
+          if (saveEntryType === "business_cash_given") {
+            const resolved = await resolveCashPaidAttachments(
+              user.uid,
+              editingId,
+              editingAttachmentsRef.current,
+              cashPaidPhotoState,
+              cashPayload
+            );
+            attachments = resolved.attachments;
+            cashPayload = resolved.payload;
+            photoUploadFailed = resolved.photoUploadFailed;
+          }
           const updated = await updateEntryLocalFirst(user.uid, {
             id: editingId,
             title,
@@ -511,10 +549,13 @@ export default function ComposerScreen() {
             notes: parts.notes,
             reminder: parts.reminder,
             location,
-            payload: parts.payload,
+            payload: saveEntryType === "business_cash_given" ? cashPayload : parts.payload,
             attachments,
           });
           editingAttachmentsRef.current = updated.attachments ?? [];
+          if (photoUploadFailed) {
+            feedback.showWarning(t("composer.cashPaidPhotoUploadFailed"));
+          }
           if (activeDraftId) {
             await formDraftsRepository.markConverted(user.uid, activeDraftId);
           }
@@ -585,13 +626,22 @@ export default function ComposerScreen() {
           saveEntryType === "business_cash_given" &&
           (cashPaidPhotoState.picked || cashPaidPhotoState.removeExisting)
         ) {
-          const attachments = await resolveCashPaidAttachments(
+          const cashPayload = entry.payload as import("@/domain/businessEntry").BusinessCashGivenPayload;
+          const resolved = await resolveCashPaidAttachments(
             user.uid,
             entry.id,
             entry.attachments ?? [],
-            cashPaidPhotoState
+            cashPaidPhotoState,
+            cashPayload
           );
-          entry = await updateEntryLocalFirst(user.uid, { id: entry.id, attachments });
+          entry = await updateEntryLocalFirst(user.uid, {
+            id: entry.id,
+            attachments: resolved.attachments,
+            payload: resolved.payload,
+          });
+          if (resolved.photoUploadFailed) {
+            feedback.showWarning(t("composer.cashPaidPhotoUploadFailed"));
+          }
         }
         if (activeDraftId) {
           await formDraftsRepository.markConverted(user.uid, activeDraftId);

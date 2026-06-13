@@ -2,6 +2,12 @@ import type { BusinessEntry, PaymentRequestPayload } from "@/domain/businessEntr
 import { outwardFormValuesFromEntry } from "@/utils/businessEntry/outwardMovement";
 import { indianPostalToFormDefaults, parseIndianPostalFromStored } from "@/utils/location/postalForm";
 
+function receiverMobileToFormValue(stored: unknown): string {
+  if (typeof stored !== "string" || !stored.trim()) return "";
+  const m = stored.match(/^\+91(\d{10})$/);
+  return m ? m[1] : stored.replace(/\D/g, "").slice(-10);
+}
+
 /** Map stored entry → composer form values for edit / refresh flows. */
 export function formValuesFromEntry(entry: BusinessEntry): Record<string, unknown> {
   const p = entry.payload as unknown as Record<string, unknown>;
@@ -44,13 +50,28 @@ export function formValuesFromEntry(entry: BusinessEntry): Record<string, unknow
       p.paymentDate != null && Number(p.paymentDate) > 0
         ? Number(p.paymentDate)
         : entry.entryDate;
+    const breakdown = p.denominationBreakdown as
+      | { 500?: number; 200?: number; 100?: number; 50?: number }
+      | null
+      | undefined;
     return {
       title: entry.title,
       paymentDate: payDate,
       amount: p.amount,
       givenToName: p.givenToName,
+      receiverMobile: receiverMobileToFormValue(p.receiverMobile),
+      count500: breakdown?.[500] ?? "",
+      count200: breakdown?.[200] ?? "",
+      count100: breakdown?.[100] ?? "",
+      count50: breakdown?.[50] ?? "",
       purpose: p.purpose,
       notes: entry.notes,
+      cashPaidVoucherSerial: p.cashPaidVoucherSerial ?? null,
+      cashPaidVoucherSerialYear: p.cashPaidVoucherSerialYear ?? null,
+      cashPaidVoucherSerialAllocatedAt: p.cashPaidVoucherSerialAllocatedAt ?? null,
+      photoAttachmentStoragePath: p.photoAttachmentStoragePath ?? null,
+      photoAttachmentDownloadUrl: p.photoAttachmentDownloadUrl ?? null,
+      photoAttachmentCapturedAt: p.photoAttachmentCapturedAt ?? null,
     };
   }
   if (entry.entryType === "material_received") {

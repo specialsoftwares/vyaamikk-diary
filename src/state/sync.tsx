@@ -18,6 +18,8 @@ import {
 } from "@/sync/sessionSyncGate";
 import { localEntriesRepository } from "@/repositories/localEntriesRepository";
 import { syncQueueRepository } from "@/repositories/syncQueueRepository";
+import { isFirebaseConfigured } from "@/config/env";
+import { runLetterheadStorageMigrationForUser } from "@/services/letterhead/letterheadStorageMigration";
 import { useAuth } from "@/state/auth";
 import { useLocalDb } from "@/state/localDb";
 import { createLogger } from "@/utils/logger";
@@ -144,6 +146,9 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       void refreshPending();
       void pullFromCloud();
       void flush();
+      if (isFirebaseConfigured()) {
+        void runLetterheadStorageMigrationForUser(user.uid);
+      }
     });
     return () => task.cancel();
   }, [dbStatus, authStatus, user?.uid, pullFromCloud, flush, refreshPending]);

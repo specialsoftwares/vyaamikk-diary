@@ -2574,6 +2574,50 @@
       "datePolicy.errors.freight_event.too_old": {
         "reason": "domain-sensitive",
         "english": "Freight date can be within 15 days before or after today."
+      },
+      "cashPaid.receiverMobile.label": {
+        "reason": "domain-sensitive",
+        "english": "Receiver mobile"
+      },
+      "cashPaid.receiverMobile.placeholder": {
+        "reason": "domain-sensitive",
+        "english": "10-digit mobile number"
+      },
+      "cashPaid.receiverMobile.helper": {
+        "reason": "domain-sensitive",
+        "english": "Required for Full Legal Record PDF. India numbers only (+91)."
+      },
+      "cashPaid.receiverMobile.errorInvalid": {
+        "reason": "domain-sensitive",
+        "english": "Enter a valid 10-digit Indian mobile number."
+      },
+      "cashPaid.denomination.sectionLabel": {
+        "reason": "domain-sensitive",
+        "english": "Cash note breakdown (optional)"
+      },
+      "cashPaid.denomination.helper": {
+        "reason": "domain-sensitive",
+        "english": "Enter note counts if you want them on the PDF. Totals may differ from amount — save is allowed."
+      },
+      "cashPaid.denomination.note500": {
+        "reason": "domain-sensitive",
+        "english": "₹500 notes"
+      },
+      "cashPaid.denomination.note200": {
+        "reason": "domain-sensitive",
+        "english": "₹200 notes"
+      },
+      "cashPaid.denomination.note100": {
+        "reason": "domain-sensitive",
+        "english": "₹100 notes"
+      },
+      "cashPaid.denomination.note50": {
+        "reason": "domain-sensitive",
+        "english": "₹50 notes"
+      },
+      "cashPaid.denomination.mismatchWarning": {
+        "reason": "domain-sensitive",
+        "english": "Note breakdown total does not match the amount. You can still save; Full Legal PDF may require a match."
       }
     },
     "te": {
@@ -5148,6 +5192,50 @@
       "datePolicy.errors.freight_event.too_old": {
         "reason": "domain-sensitive",
         "english": "Freight date can be within 15 days before or after today."
+      },
+      "cashPaid.receiverMobile.label": {
+        "reason": "domain-sensitive",
+        "english": "Receiver mobile"
+      },
+      "cashPaid.receiverMobile.placeholder": {
+        "reason": "domain-sensitive",
+        "english": "10-digit mobile number"
+      },
+      "cashPaid.receiverMobile.helper": {
+        "reason": "domain-sensitive",
+        "english": "Required for Full Legal Record PDF. India numbers only (+91)."
+      },
+      "cashPaid.receiverMobile.errorInvalid": {
+        "reason": "domain-sensitive",
+        "english": "Enter a valid 10-digit Indian mobile number."
+      },
+      "cashPaid.denomination.sectionLabel": {
+        "reason": "domain-sensitive",
+        "english": "Cash note breakdown (optional)"
+      },
+      "cashPaid.denomination.helper": {
+        "reason": "domain-sensitive",
+        "english": "Enter note counts if you want them on the PDF. Totals may differ from amount — save is allowed."
+      },
+      "cashPaid.denomination.note500": {
+        "reason": "domain-sensitive",
+        "english": "₹500 notes"
+      },
+      "cashPaid.denomination.note200": {
+        "reason": "domain-sensitive",
+        "english": "₹200 notes"
+      },
+      "cashPaid.denomination.note100": {
+        "reason": "domain-sensitive",
+        "english": "₹100 notes"
+      },
+      "cashPaid.denomination.note50": {
+        "reason": "domain-sensitive",
+        "english": "₹50 notes"
+      },
+      "cashPaid.denomination.mismatchWarning": {
+        "reason": "domain-sensitive",
+        "english": "Note breakdown total does not match the amount. You can still save; Full Legal PDF may require a match."
       }
     },
     "gu": {
@@ -7722,6 +7810,50 @@
       "datePolicy.errors.freight_event.too_old": {
         "reason": "domain-sensitive",
         "english": "Freight date can be within 15 days before or after today."
+      },
+      "cashPaid.receiverMobile.label": {
+        "reason": "domain-sensitive",
+        "english": "Receiver mobile"
+      },
+      "cashPaid.receiverMobile.placeholder": {
+        "reason": "domain-sensitive",
+        "english": "10-digit mobile number"
+      },
+      "cashPaid.receiverMobile.helper": {
+        "reason": "domain-sensitive",
+        "english": "Required for Full Legal Record PDF. India numbers only (+91)."
+      },
+      "cashPaid.receiverMobile.errorInvalid": {
+        "reason": "domain-sensitive",
+        "english": "Enter a valid 10-digit Indian mobile number."
+      },
+      "cashPaid.denomination.sectionLabel": {
+        "reason": "domain-sensitive",
+        "english": "Cash note breakdown (optional)"
+      },
+      "cashPaid.denomination.helper": {
+        "reason": "domain-sensitive",
+        "english": "Enter note counts if you want them on the PDF. Totals may differ from amount — save is allowed."
+      },
+      "cashPaid.denomination.note500": {
+        "reason": "domain-sensitive",
+        "english": "₹500 notes"
+      },
+      "cashPaid.denomination.note200": {
+        "reason": "domain-sensitive",
+        "english": "₹200 notes"
+      },
+      "cashPaid.denomination.note100": {
+        "reason": "domain-sensitive",
+        "english": "₹100 notes"
+      },
+      "cashPaid.denomination.note50": {
+        "reason": "domain-sensitive",
+        "english": "₹50 notes"
+      },
+      "cashPaid.denomination.mismatchWarning": {
+        "reason": "domain-sensitive",
+        "english": "Note breakdown total does not match the amount. You can still save; Full Legal PDF may require a match."
       }
     }
   }

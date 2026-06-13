@@ -469,6 +469,23 @@
     "routeFrom": "இருந்து",
     "routeTo": "செய்ய"
   },
+  "cashPaid": {
+    "receiverMobile": {
+      "label": "பெறுநர் மொபைல்",
+      "placeholder": "10 இலக்க மொபைல் எண்",
+      "helper": "Full Legal Record PDF க்கு தேவை. இந்திய எண்கள் மட்டும் (+91).",
+      "errorInvalid": "செல்லுபடியாகும் 10 இலக்க இந்திய மொபைல் எண்ணை உள்ளிடவும்."
+    },
+    "denomination": {
+      "sectionLabel": "பணக் குறிப்பு விவரம் (விரும்பினால்)",
+      "helper": "PDF இல் குறிப்பு எண்ணிக்கையை உள்ளிடவும். தொகையுடன் வேறுபடலாம் — சேமிப்பு அனுமதி.",
+      "note500": "₹500 குறிப்புகள்",
+      "note200": "₹200 குறிப்புகள்",
+      "note100": "₹100 குறிப்புகள்",
+      "note50": "₹50 குறிப்புகள்",
+      "mismatchWarning": "குறிப்பு மொத்தம் தொகையுடன் பொருந்தவில்லை. சேமிக்கலாம்; Full Legal PDF பொருந்துதல் தேவைப்படலாம்."
+    }
+  },
   "composer": {
     "saveDraft": "Save draft",
     "paymentPeriodDueBeforeInvoice": "Due date must be on or after the invoice date.",

@@ -629,6 +629,25 @@ const en = {
     routeTo: "To",
   },
 
+  cashPaid: {
+    receiverMobile: {
+      label: "Receiver mobile",
+      placeholder: "10-digit mobile number",
+      helper: "Required for Full Legal Record PDF. India numbers only (+91).",
+      errorInvalid: "Enter a valid 10-digit Indian mobile number.",
+    },
+    denomination: {
+      sectionLabel: "Cash note breakdown (optional)",
+      helper: "Enter note counts if you want them on the PDF. Totals may differ from amount — save is allowed.",
+      note500: "₹500 notes",
+      note200: "₹200 notes",
+      note100: "₹100 notes",
+      note50: "₹50 notes",
+      mismatchWarning:
+        "Note breakdown total does not match the amount. You can still save; Full Legal PDF may require a match.",
+    },
+  },
+
   composer: {
     invalid: "Unknown entry type",
     groups: {
@@ -672,6 +691,8 @@ const en = {
     cashPaidPhotoPermission: "Allow camera or photo library access to attach a receipt.",
     cashPaidPhotoTooLarge: "Image is too large. Choose a smaller photo.",
     cashPaidPhotoReadFailed: "Could not read the selected photo.",
+    cashPaidPhotoUploadFailed:
+      "Record saved. Photo upload could not be completed. Try again.",
     sitePlace: "Site / place",
     quantityOutput: "Quantity / output",
     responsiblePerson: "Responsible person",

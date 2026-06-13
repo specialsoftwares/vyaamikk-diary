@@ -34,6 +34,7 @@ import type {
   LetterheadDocumentInput,
 } from "@/services/letterhead";
 import { marginsToInches } from "@/services/letterhead";
+import { resolveLetterheadImageSource } from "@/services/letterhead/letterheadImageResolver";
 
 import { assertEnglishOnlyPdf, clearEnglishOnlyPdfContext } from "@/services/pdf/pdfLabels";
 import { escapeHtml, escapeHtmlAttr } from "@/utils/escapeHtml";
@@ -72,8 +73,8 @@ export async function buildLetterheadHtml(
   const { config, doc, labels, locale = "en-IN" } = input;
   const warnings: string[] = [];
 
-  const templateSrc = config.imageDataUri?.trim();
-  if (!templateSrc) {
+  const { uri: templateSrc } = await resolveLetterheadImageSource(config);
+  if (!templateSrc?.trim()) {
     throw new Error("Letterhead template image is missing.");
   }
 

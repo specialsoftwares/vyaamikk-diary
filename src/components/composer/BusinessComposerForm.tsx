@@ -43,6 +43,7 @@ import { useFormFieldNavigation, useFormFocus } from "@/components/inputSafety/F
 import { COMPOSER_NAV_FIELD_ORDER } from "@/utils/formFieldNavigation/fieldNavOrders";
 import {
   getSchemaForType,
+  denominationTotalMismatch,
   type DatePolicySchemaOptions,
 } from "@/utils/businessEntry/validation";
 import {
@@ -164,6 +165,16 @@ export function BusinessComposerForm({
         marginTop: -spacing.xs,
         marginBottom: spacing.md,
       },
+      denominationRow: {
+        flexDirection: "row",
+        flexWrap: "wrap",
+        gap: spacing.sm,
+      },
+      denominationField: {
+        flexGrow: 1,
+        flexBasis: "45%",
+        minWidth: 120,
+      },
     })
   );
 
@@ -184,6 +195,11 @@ export function BusinessComposerForm({
           ...base,
           amount: "",
           givenToName: "",
+          receiverMobile: "",
+          count500: "",
+          count200: "",
+          count100: "",
+          count50: "",
           purpose: "",
           paymentDate: todayStartMs(),
         };
@@ -285,8 +301,37 @@ export function BusinessComposerForm({
     name: "amount",
     disabled: entryType !== "business_cash_given",
   });
+  const cashCount500 = useWatch({
+    control,
+    name: "count500",
+    disabled: entryType !== "business_cash_given",
+  });
+  const cashCount200 = useWatch({
+    control,
+    name: "count200",
+    disabled: entryType !== "business_cash_given",
+  });
+  const cashCount100 = useWatch({
+    control,
+    name: "count100",
+    disabled: entryType !== "business_cash_given",
+  });
+  const cashCount50 = useWatch({
+    control,
+    name: "count50",
+    disabled: entryType !== "business_cash_given",
+  });
   const parsedCashAmount =
     entryType === "business_cash_given" ? parseINRInput(cashAmountRaw) : null;
+  const denominationMismatch =
+    entryType === "business_cash_given" &&
+    parsedCashAmount != null &&
+    denominationTotalMismatch(parsedCashAmount, {
+      count500: cashCount500 === "" || cashCount500 == null ? null : Number(cashCount500),
+      count200: cashCount200 === "" || cashCount200 == null ? null : Number(cashCount200),
+      count100: cashCount100 === "" || cashCount100 == null ? null : Number(cashCount100),
+      count50: cashCount50 === "" || cashCount50 == null ? null : Number(cashCount50),
+    });
 
   const { registerAnchor, scrollToField, focusHandlersForField } = useKeyboardAwareFieldScroll({
     scrollRef,
@@ -516,6 +561,58 @@ export function BusinessComposerForm({
                 )}
               />
             )}
+            {fieldBindings.wrap(
+              "receiverMobile",
+              <Controller
+                control={control}
+                name="receiverMobile"
+                render={({ field: { onChange, value } }) => (
+                  <TextField
+                    label={t("cashPaid.receiverMobile.label")}
+                    placeholder={t("cashPaid.receiverMobile.placeholder")}
+                    value={value == null ? "" : String(value)}
+                    onChangeText={onChange}
+                    keyboardType="phone-pad"
+                    error={fieldBindings.errorFor("receiverMobile")}
+                  />
+                )}
+              />
+            )}
+            <LocaleUiText style={styles.hint}>{t("cashPaid.receiverMobile.helper")}</LocaleUiText>
+            <LocaleUiText style={styles.hint}>{t("cashPaid.denomination.sectionLabel")}</LocaleUiText>
+            <LocaleUiText style={styles.hint}>{t("cashPaid.denomination.helper")}</LocaleUiText>
+            <View style={styles.denominationRow}>
+              {(
+                [
+                  ["count500", "cashPaid.denomination.note500"],
+                  ["count200", "cashPaid.denomination.note200"],
+                  ["count100", "cashPaid.denomination.note100"],
+                  ["count50", "cashPaid.denomination.note50"],
+                ] as const
+              ).map(([name, labelKey]) =>
+                fieldBindings.wrap(
+                  name,
+                  <View key={name} style={styles.denominationField}>
+                    <Controller
+                      control={control}
+                      name={name}
+                      render={({ field: { onChange, value } }) => (
+                        <TextField
+                          label={t(labelKey)}
+                          value={value == null ? "" : String(value)}
+                          onChangeText={onChange}
+                          keyboardType="number-pad"
+                          error={fieldBindings.errorFor(name)}
+                        />
+                      )}
+                    />
+                  </View>
+                )
+              )}
+            </View>
+            {denominationMismatch ? (
+              <Banner tone="warning" message={t("cashPaid.denomination.mismatchWarning")} />
+            ) : null}
             {cashPaidPhoto ? (
               <CashPaidPhotoField
                 existingUri={cashPaidPhoto.existingUri}

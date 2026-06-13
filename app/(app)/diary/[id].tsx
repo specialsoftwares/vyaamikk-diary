@@ -28,6 +28,7 @@ import { formatEntryDate, formatRelative } from "@/utils/date";
 import { shareBusinessEntryText } from "@/services/share/shareTextService";
 import { isShareUserCancelled } from "@/utils/shareDismissed";
 import { pdfService } from "@/services/pdf/pdfService";
+import { exportCashPaidPdf } from "@/services/diary/exportCashPaidPdf";
 import { regenerateEntryPdf } from "@/services/diary/regenerateEntryPdf";
 
 export default function EntryDetailScreen() {
@@ -168,6 +169,15 @@ export default function EntryDetailScreen() {
     setActionError(null);
     setExporting(true);
     try {
+      if (entry.entryType === "business_cash_given") {
+        const updated = await exportCashPaidPdf(user.uid, entry, {
+          user,
+          uiLang: lang,
+          t,
+        });
+        setEntry(updated);
+        return;
+      }
       if (entry.pdfUri) {
         await pdfService.share({
           uri: entry.pdfUri,
