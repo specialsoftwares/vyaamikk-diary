@@ -18,6 +18,11 @@ import { normaliseUserProfile } from "./normalizeProfile";
 import { createLogger } from "@/utils/logger";
 
 import type { AuthResult } from "./types";
+import {
+  routeResolveByPhoneResponse,
+  type DeletionPendingResponse,
+  type ResolveByPhoneResponse,
+} from "./reactivationRouting";
 
 const log = createLogger("auth/identityCallable");
 
@@ -124,19 +129,17 @@ interface ResolveByPhoneRequest {
   phoneE164: PhoneE164;
 }
 
-interface ResolveByPhoneResponse {
-  profile: Record<string, unknown>;
-  isNewUser: boolean;
-}
+export type { DeletionPendingResponse, ResolveByPhoneResponse } from "./reactivationRouting";
 
 /** Post-OTP identity resolve — server writes indexes via Admin SDK. */
 export async function callResolveOrCreateUserByPhone(
   phoneE164: PhoneE164
 ): Promise<AuthResult> {
-  const data = await callFunction<ResolveByPhoneRequest, ResolveByPhoneResponse>(
+  const raw = await callFunction<ResolveByPhoneRequest, ResolveByPhoneResponse>(
     "resolveOrCreateUserByPhone",
     { phoneE164 }
   );
+  const data = routeResolveByPhoneResponse(raw);
   const uid = String(data.profile.uid ?? "");
   if (!uid) {
     throw new AppError("unknown", "Identity service returned an invalid profile.");
@@ -201,4 +204,37 @@ export async function callCompleteAccountDeletion(uid: string): Promise<Complete
     "completeAccountDeletion",
     { uid }
   );
+}
+
+export interface StartAccountReactivationResponse {
+  verificationId: string;
+  maskedEmail: string;
+  requiresEmailVerification: true;
+}
+
+export async function callStartAccountReactivation(): Promise<StartAccountReactivationResponse> {
+  return callFunction<Record<string, never>, StartAccountReactivationResponse>(
+    "startAccountReactivation",
+    {}
+  );
+}
+
+export interface CompleteAccountReactivationResponse {
+  profile: Record<string, unknown>;
+  isNewUser: false;
+}
+
+export async function callCompleteAccountReactivation(): Promise<AuthResult> {
+  const data = await callFunction<
+    Record<string, never>,
+    CompleteAccountReactivationResponse
+  >("completeAccountReactivation", {});
+  const uid = String(data.profile.uid ?? "");
+  if (!uid) {
+    throw new AppError("unknown", "Reactivation returned an invalid profile.");
+  }
+  return {
+    profile: normaliseUserProfile(uid, data.profile),
+    isNewUser: false,
+  };
 }

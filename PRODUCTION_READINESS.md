@@ -148,3 +148,14 @@ eas build --profile development --platform ios
 ---
 
 **Store-readiness:** NOT claimed until real-device OTP + deployed Functions + hosted legal pages are verified.
+
+---
+
+## Final pre-build corrections (2026-06-08)
+
+| Item | Status |
+|------|--------|
+| Human-readable PDF export filenames (`src/services/pdf/pdfFileNames.ts`) | ✅ Wired on diary, CPV, PO, letterhead, Dukaan, pro-pack exports |
+| Cash Paid denomination / bank-note bifurcation removed | ✅ UI, validation, export, PDF Mode B |
+| Dev placeholder banners hidden in production UI | ✅ Mock OTP banner dev-only; backend banner removed; dev reset `__DEV__`-only |
+| Deletion-mode reactivation hardened | ✅ `resolveOrCreateUserByPhone` returns `deletion_pending`; `startAccountReactivation` + `completeAccountReactivation` callables; Firestore rules block client status changes |

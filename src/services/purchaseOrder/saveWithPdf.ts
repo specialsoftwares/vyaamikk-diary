@@ -20,6 +20,7 @@ import type { SaveIdempotencyContext } from "@/services/records/saveIdempotency"
 import { releaseProcessSaveLock } from "@/services/records/saveIdempotency";
 import { syncInsightsFromPurchaseOrder } from "@/services/insights/insightSync";
 import { invalidateGlobalSearchIndex } from "@/services/search/globalSearchRepository";
+import { dayKey } from "@/utils/date";
 
 import { getPurchaseOrderRepository } from "./index";
 import type { CreatePurchaseOrderInput, UpdatePurchaseOrderInput } from "./types";
@@ -121,7 +122,17 @@ export async function savePurchaseOrderWithPdf(
             completedSteps,
             clientRecordId: params.create?.clientRecordId,
           },
-          () => pdfService.generate({ html, fileNameHint: `${saved.poNumber}` })
+          () =>
+            pdfService.generate({
+              html,
+              fileNameHint: `${saved.poNumber}`,
+              fileName: {
+                documentType: "purchaseOrder",
+                supplierName: saved.vendorName,
+                poSerial: saved.poNumber,
+                date: dayKey(saved.poDate),
+              },
+            })
         );
         completedSteps = pdfStep.completedSteps;
         if (pdfStep.ran && pdfStep.result) {

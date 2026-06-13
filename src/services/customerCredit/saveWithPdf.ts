@@ -19,6 +19,7 @@ import { releaseProcessSaveLock } from "@/services/records/saveIdempotency";
 import { syncInsightsFromCustomerCredit } from "@/services/insights/insightSync";
 import { syncCreditReminder } from "@/services/customerCredit/reminders";
 import { invalidateGlobalSearchIndex } from "@/services/search/globalSearchRepository";
+import { dayKey } from "@/utils/date";
 
 import { getCustomerCreditRepository } from "./index";
 import type { CreateCustomerCreditInput, UpdateCustomerCreditInput } from "./types";
@@ -226,7 +227,16 @@ export async function saveCustomerCreditWithPdf(
             completedSteps,
             clientRecordId: params.create?.clientRecordId,
           },
-          () => pdfService.generate({ html, fileNameHint: saved!.recordNumber })
+          () =>
+            pdfService.generate({
+              html,
+              fileNameHint: saved!.recordNumber,
+              fileName: {
+                documentType: "dukaan",
+                customerName: saved!.customerName,
+                date: dayKey(saved!.saleDate ?? saved!.createdAt),
+              },
+            })
         );
         completedSteps = pdfStep.completedSteps;
         if (pdfStep.ran && pdfStep.result) {

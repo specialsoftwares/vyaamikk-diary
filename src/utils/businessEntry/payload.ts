@@ -1,4 +1,4 @@
-import type { BusinessEntry, BusinessEntryType, CashDenominationBreakdown } from "@/domain/businessEntry";
+import type { BusinessEntry, BusinessEntryType } from "@/domain/businessEntry";
 import { mergeComposerLocationWithLabel } from "@/services/location/locationRecordService";
 import {
   buildIndianPostalFromForm,
@@ -11,35 +11,6 @@ import { parseINRInput } from "@/utils/money/inr";
 import { normalizeCashPaidDayMs } from "@/utils/businessEntry/cashPaidDate";
 import { normalizeEwayBillInput } from "@/utils/businessEntry/ewayBill";
 import { normalizeReceiverMobile } from "@/utils/phone/receiverMobile";
-
-function parseDenominationCount(value: unknown): number | null {
-  if (value === "" || value === undefined || value === null) return null;
-  const n = typeof value === "number" ? Math.floor(value) : Math.floor(Number(value));
-  return Number.isFinite(n) && n >= 0 ? n : null;
-}
-
-function buildDenominationBreakdown(
-  values: Record<string, unknown>
-): CashDenominationBreakdown | null {
-  const c500 = parseDenominationCount(values.count500);
-  const c200 = parseDenominationCount(values.count200);
-  const c100 = parseDenominationCount(values.count100);
-  const c50 = parseDenominationCount(values.count50);
-  if (c500 == null && c200 == null && c100 == null && c50 == null) return null;
-  const breakdown = {
-    500: c500 ?? 0,
-    200: c200 ?? 0,
-    100: c100 ?? 0,
-    50: c50 ?? 0,
-    total: 0,
-  };
-  breakdown.total =
-    breakdown[500] * 500 +
-    breakdown[200] * 200 +
-    breakdown[100] * 100 +
-    breakdown[50] * 50;
-  return breakdown;
-}
 
 function optionalString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
@@ -162,7 +133,6 @@ export function formValuesToEntryParts(
               ? null
               : Number(values.expectedSettlementDate),
           remarks: typeof values.remarks === "string" ? values.remarks : null,
-          denominationBreakdown: buildDenominationBreakdown(values),
           cashPaidVoucherSerial: optionalString(values.cashPaidVoucherSerial),
           cashPaidVoucherSerialYear: optionalString(values.cashPaidVoucherSerialYear),
           cashPaidVoucherSerialAllocatedAt: optionalNumber(

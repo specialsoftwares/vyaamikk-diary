@@ -17,6 +17,31 @@ const RETIRED_PHONES = "retiredPhones";
 
 const DELETION_GRACE_MS = 15 * 24 * 60 * 60 * 1000;
 
+function maskEmail(email: string): string {
+  const v = email.trim();
+  const at = v.indexOf("@");
+  if (at <= 0) return "***";
+  const local = v.slice(0, at);
+  const domain = v.slice(at + 1);
+  const maskedLocal = local.length <= 2 ? `${local[0] ?? "*"}***` : `${local.slice(0, 2)}***`;
+  const dot = domain.indexOf(".");
+  const maskedDomain =
+    dot > 0 ? `${domain.slice(0, 1)}***${domain.slice(dot)}` : `${domain.slice(0, 2)}***`;
+  return `${maskedLocal}@${maskedDomain}`;
+}
+
+function minimalSafeProfile(p: UserProfileDoc): Pick<
+  UserProfileDoc,
+  "uid" | "status" | "deletionScheduledFor" | "phoneE164"
+> {
+  return {
+    uid: p.uid,
+    status: p.status,
+    deletionScheduledFor: p.deletionScheduledFor,
+    phoneE164: p.phoneE164,
+  };
+}
+
 function isPendingDeletion(p: UserProfileDoc): boolean {
   return p.status === "pending_deletion";
 }
@@ -84,10 +109,26 @@ export const resolveOrCreateUserByPhone = onCall(
         }
         const profile = existingSnap.data() as UserProfileDoc;
         if (deletionBlocked(profile)) {
-          throw new HttpsError(
-            "failed-precondition",
-            "This account is scheduled for deletion."
-          );
+          const scheduled =
+            profile.deletionScheduledFor ??
+            (profile.deletionRequestedAt ?? 0) + DELETION_GRACE_MS;
+          const maskedEmail = profile.businessEmail?.trim()
+            ? maskEmail(profile.businessEmail)
+            : null;
+          tx.update(userRef, {
+            reactivationPhoneVerifiedAt: now,
+            updatedAt: now,
+          });
+          return {
+            status: "deletion_pending" as const,
+            requiresReactivation: true as const,
+            requiresEmailVerification: true as const,
+            maskedEmail,
+            deletionScheduledFor: scheduled,
+            policyTextVersion: "2026-06" as const,
+            profile: minimalSafeProfile(profile),
+            isNewUser: false as const,
+          };
         }
         if (!isActive(profile) && !isPendingDeletion(profile)) {
           throw new HttpsError(

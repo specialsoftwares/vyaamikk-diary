@@ -139,6 +139,11 @@ export async function saveLetterheadCreateWithPdf(
             fileNameHint: params.t("letterhead.fileNameHint", {
               date: dayKey(params.docInput.date),
             }),
+            fileName: {
+              documentType: "letterhead",
+              businessName: params.user.businessName ?? params.user.displayName ?? undefined,
+              date: dayKey(params.docInput.date),
+            },
           })
       );
       completedSteps = pdfStep.completedSteps;

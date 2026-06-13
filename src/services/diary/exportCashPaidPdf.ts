@@ -3,16 +3,14 @@ import { Alert } from "react-native";
 import type { BusinessCashGivenPayload, BusinessEntry } from "@/domain/businessEntry";
 import type { UserProfile } from "@/domain/types";
 import type { Lang } from "@/i18n/types";
-import {
-  allocateCashPaidVoucherSerial,
-  validateDenominationForFullLegal,
-} from "@/services/cashPaid";
+import { allocateCashPaidVoucherSerial } from "@/services/cashPaid";
 import { mergeEntryPdfGeneration } from "@/services/diary/mergeEntryUpdate";
 import { getDiaryRepository } from "@/services/diary/index";
 import {
   generateCashPaidVoucherPdf,
   type CashPaidPdfMode,
 } from "@/services/pdf/cashPaidPdfService";
+import { buildPdfFileName } from "@/services/pdf/pdfFileNames";
 import { pdfService } from "@/services/pdf/pdfService";
 
 function pickCashPaidPdfMode(): Promise<CashPaidPdfMode | null> {
@@ -49,12 +47,6 @@ export async function exportCashPaidPdf(
   }
 
   const payload = entry.payload as BusinessCashGivenPayload;
-  if (mode === "fullLegalRecord") {
-    const validationError = validateDenominationForFullLegal(payload.amount, payload.denominationBreakdown);
-    if (validationError) {
-      throw new Error(validationError);
-    }
-  }
 
   const paymentDateMs = payload.paymentDate ?? entry.entryDate;
   const allocation = await allocateCashPaidVoucherSerial(
@@ -85,7 +77,7 @@ export async function exportCashPaidPdf(
     workingEntry = { ...entry, payload: nextPayload };
   }
 
-  const { html, fileNameHint } = await generateCashPaidVoucherPdf({
+  const { html, fileName } = await generateCashPaidVoucherPdf({
     entry: workingEntry,
     user: options.user,
     mode,
@@ -93,17 +85,18 @@ export async function exportCashPaidPdf(
     uiLang: options.uiLang,
   });
 
-  const pdf = await pdfService.generate({ html, fileNameHint });
+  const pdf = await pdfService.generate({
+    html,
+    fileNameHint: buildPdfFileName(fileName).replace(/\.pdf$/, ""),
+    fileName,
+  });
   const withPdf = mergeEntryPdfGeneration(workingEntry, pdf.uri);
   const saved = await getDiaryRepository().update(userId, {
     id: entry.id,
     pdfUri: withPdf.pdfUri,
   });
 
-  await pdfService.share({
-    uri: pdf.uri,
-    fileName: `${fileNameHint}.pdf`,
-  });
+  await pdfService.share(pdf);
 
   return saved;
 }

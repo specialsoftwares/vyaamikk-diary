@@ -23,6 +23,12 @@ import { AppError, toAppError } from "@/domain/errors";
 import { createLogger } from "@/utils/logger";
 import { safePdfLogMeta } from "@/utils/pdfSafeLog";
 
+import {
+  buildPdfFileName,
+  buildPdfFileNameFromHint,
+  type PdfFileNameInput,
+} from "./pdfFileNames";
+
 const log = createLogger("pdf");
 
 export interface GeneratePdfInput {
@@ -33,6 +39,8 @@ export interface GeneratePdfInput {
    * filename. Sanitized internally.
    */
   fileNameHint: string;
+  /** Structured filename input; when set, overrides fileNameHint formatting. */
+  fileName?: PdfFileNameInput;
 }
 
 export interface GeneratedPdf {
@@ -42,13 +50,11 @@ export interface GeneratedPdf {
   fileName: string;
 }
 
-function sanitizeFileName(input: string): string {
-  const cleaned = input
-    .normalize("NFKD")
-    .replace(/[^A-Za-z0-9-_ ]+/g, "")
-    .trim()
-    .replace(/\s+/g, "-");
-  return cleaned.length > 0 ? `${cleaned}.pdf` : `Vyaamikk-Diary.pdf`;
+function resolvePdfFileName(input: GeneratePdfInput): string {
+  if (input.fileName) {
+    return buildPdfFileName(input.fileName);
+  }
+  return buildPdfFileNameFromHint(input.fileNameHint);
 }
 
 export const pdfService = {
@@ -75,7 +81,7 @@ export const pdfService = {
         "pdf generated",
         safePdfLogMeta({ fileNameHint: input.fileNameHint })
       );
-      return { uri, fileName: sanitizeFileName(input.fileNameHint) };
+      return { uri, fileName: resolvePdfFileName(input) };
     } catch (e) {
       log.warn("pdf generate failed");
       throw toAppError(e, "save_failed");

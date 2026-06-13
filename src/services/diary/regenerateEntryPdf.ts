@@ -8,6 +8,7 @@ import {
 } from "@/services/pdf/businessEntryPdfTemplate";
 import { getUserPdfBranding } from "@/services/pdf/userPdfBranding";
 import { pdfService } from "@/services/pdf/pdfService";
+import { buildPdfFileNameForBusinessEntry } from "@/services/pdf/pdfFileNames";
 import { dayKey } from "@/utils/date";
 
 import { getDiaryRepository } from "./index";
@@ -41,6 +42,10 @@ export async function regenerateEntryPdf(
   const pdf = await pdfService.generate({
     html,
     fileNameHint: options.fileNameHint.replace("{{date}}", dayKey(entry.entryDate)),
+    fileName: buildPdfFileNameForBusinessEntry(entry, {
+      businessName: options.user.businessName,
+      date: dayKey(entry.entryDate),
+    }),
   });
   return getDiaryRepository().update(userId, { id: entry.id, pdfUri: pdf.uri });
 }

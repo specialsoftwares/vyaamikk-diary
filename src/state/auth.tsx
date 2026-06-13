@@ -99,6 +99,8 @@ interface AuthApi extends AuthState {
   signOut(): Promise<void>;
   requestAccountDeletion(): Promise<import("@/domain/accountDeletion").AccountDeletionResult>;
   cancelAccountDeletion(phoneE164: PhoneE164): Promise<UserProfile>;
+  /** Save session after production account reactivation (post email verify). */
+  finishReactivation(profile: UserProfile): Promise<UserProfile>;
   acknowledgeUEID(): void;
   updateProfile(patch: ProfilePatch): Promise<UserProfile>;
   /** Persist usage heartbeat (`lastActiveAt` only — never login fields). */
@@ -303,6 +305,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const finishReactivation = useCallback(
+    async (profile: UserProfile) => {
+      const session = await saveSession(profile);
+      setState({
+        status: "signed_in",
+        session,
+        user: session.user,
+        justCreated: false,
+      });
+      void import("@/services/device/trustedDeviceRegistry").then((m) =>
+        m.recordTrustedDeviceLogin(profile)
+      );
+      return profile;
+    },
+    [saveSession]
+  );
+
   const acknowledgeUEID = useCallback(() => {
     setState((s) => ({ ...s, justCreated: false }));
   }, []);
@@ -381,6 +400,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       hardDevSignOut,
       requestAccountDeletion,
       cancelAccountDeletion,
+      finishReactivation,
       acknowledgeUEID,
       updateProfile,
       touchLastActive,
@@ -393,6 +413,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       hardDevSignOut,
       requestAccountDeletion,
       cancelAccountDeletion,
+      finishReactivation,
       acknowledgeUEID,
       updateProfile,
       touchLastActive,

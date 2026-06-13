@@ -7,10 +7,10 @@
 import type {
   BusinessCashGivenPayload,
   BusinessEntry,
-  CashDenominationBreakdown,
 } from "@/domain/businessEntry";
 import type { UserProfile } from "@/domain/types";
 import type { Lang } from "@/i18n/types";
+import { buildPdfFileName, type PdfFileNameInput } from "@/services/pdf/pdfFileNames";
 import { cashPaidPhotoAttachment } from "@/services/attachments/cashPaidPhotoService";
 import { amountInWordsForVoucher } from "@/services/pdf/amountInWords";
 import { pdfIssuerBlock } from "@/services/pdf/pdfComponents";
@@ -23,10 +23,8 @@ import {
   type PdfLegalFooterLabels,
 } from "@/services/pdf/pdfLegalFooter";
 import { getPdfLabels, pdfLabel } from "@/services/pdf/pdfLabels";
-import { pdfDataTable } from "@/services/pdf/pdfTable";
 import { pdfKvRow, pdfSection } from "@/services/pdf/pdfSections";
 import { getUserPdfBranding } from "@/services/pdf/userPdfBranding";
-import { denominationTotal } from "@/services/cashPaid/cashPaidVoucherSerial";
 import { escapeHtml } from "@/utils/escapeHtml";
 import { formatAmount } from "@/utils/formatters/formatAmount";
 import { dayKey } from "@/utils/date";
@@ -49,7 +47,7 @@ export interface GenerateCashPaidVoucherPdfInput {
 
 export interface GenerateCashPaidVoucherPdfResult {
   html: string;
-  fileNameHint: string;
+  fileName: PdfFileNameInput;
 }
 
 function strVal(v: unknown): string | null {
@@ -108,32 +106,6 @@ function signatureBlock(label: string, nameHint: string | null): string {
     <div class="cpv-signature-line"></div>
     <div class="cpv-signature-caption">Signature</div>
   </div>`;
-}
-
-function denominationTable(
-  breakdown: CashDenominationBreakdown,
-  labels: CashPaidLabels
-): string {
-  const rows: Array<Record<string, string | number>> = ([500, 200, 100, 50] as const).map(
-    (note) => ({
-      note: formatAmount(note, { withSymbol: true }),
-      count: breakdown[note],
-      amount: formatAmount(note * breakdown[note]),
-    })
-  );
-  rows.push({
-    note: "Total",
-    count: "",
-    amount: formatAmount(denominationTotal(breakdown)),
-  });
-  return pdfDataTable(
-    [
-      { key: "note", label: labels.noteValue, width: "34%" },
-      { key: "count", label: labels.noteCount, align: "center", width: "22%" },
-      { key: "amount", label: labels.noteAmount, align: "right", width: "44%" },
-    ],
-    rows
-  );
 }
 
 function witnessSection(labels: CashPaidLabels): string {
@@ -291,14 +263,6 @@ export async function generateCashPaidVoucherPdf(
       </div>`
     : "";
 
-  const denominationBlock =
-    mode === "fullLegalRecord" && payload.denominationBreakdown
-      ? `<div class="pdf-section">
-          <div class="pdf-section-label">${escapeHtml(labels.denomination)}</div>
-          ${denominationTable(payload.denominationBreakdown, labels)}
-        </div>`
-      : "";
-
   const witnessBlock = mode === "fullLegalRecord" ? witnessSection(labels) : "";
 
   const disclaimer = t("legal.disclaimerNotParty");
@@ -325,7 +289,6 @@ export async function generateCashPaidVoucherPdf(
     ${pdfSection(labels.purpose, pdfKvRow(labels.purpose, payload.purpose))}
     ${pdfSection(pdfLabel("details", { uiLang }), detailsRows)}
     ${photoBlock}
-    ${denominationBlock}
     <div class="cpv-signatures">
       ${signatureBlock(labels.preparedBy, branding.displayName)}
       ${signatureBlock(labels.receivedBy, payload.givenToName)}
@@ -346,8 +309,12 @@ export async function generateCashPaidVoucherPdf(
     },
   });
 
-  const modeSuffix = mode === "fullLegalRecord" ? "Legal" : "Field";
-  const fileNameHint = `CPV-${cpvSerial.replace(/\//g, "-")}-${modeSuffix}-${dayKey(paymentDateMs)}`;
+  const fileName: PdfFileNameInput = {
+    documentType: "cashPaid",
+    receiverName: payload.givenToName,
+    cpvSerial: cpvSerial.replace(/\//g, "-"),
+    date: dayKey(paymentDateMs),
+  };
 
-  return { html, fileNameHint };
+  return { html, fileName };
 }

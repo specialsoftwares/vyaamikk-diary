@@ -7,6 +7,7 @@ import {
 } from "@/services/pdf/businessEntryPdfTemplate";
 import { getUserPdfBranding } from "@/services/pdf/userPdfBranding";
 import { pdfService } from "@/services/pdf/pdfService";
+import { buildPdfFileNameForBusinessEntry } from "@/services/pdf/pdfFileNames";
 import { dayKey } from "@/utils/date";
 import { entryListSummary } from "@/utils/businessEntry/display";
 
@@ -310,7 +311,15 @@ async function finishComposerSavePipeline(
           completedSteps,
           clientRecordId: input.clientRecordId,
         },
-        () => pdfService.generate({ html, fileNameHint })
+        () =>
+          pdfService.generate({
+            html,
+            fileNameHint,
+            fileName: buildPdfFileNameForBusinessEntry(entry, {
+              businessName: options.user.businessName,
+              date: dayKey(entry.entryDate),
+            }),
+          })
       );
       completedSteps = pdfStep.completedSteps;
       if (pdfStep.ran && pdfStep.result) {

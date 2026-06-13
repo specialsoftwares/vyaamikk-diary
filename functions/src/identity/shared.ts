@@ -68,6 +68,9 @@ export interface UserProfileDoc {
   deletionRequestedAt: number | null;
   deletionScheduledFor: number | null;
   deletionCompletedAt: number | null;
+  reactivationRequestedAt: number | null;
+  reactivationPhoneVerifiedAt: number | null;
+  reactivationEmailVerifiedAt: number | null;
   retiredUeid: boolean;
   businessNameChangeCount: number;
   emailChangeCount: number;
@@ -111,6 +114,9 @@ export function freshProfileShell(
     deletionRequestedAt: null,
     deletionScheduledFor: null,
     deletionCompletedAt: null,
+    reactivationRequestedAt: null,
+    reactivationPhoneVerifiedAt: null,
+    reactivationEmailVerifiedAt: null,
     retiredUeid: false,
     businessNameChangeCount: 0,
     emailChangeCount: 0,

@@ -21,3 +21,8 @@ export {
   completeAccountDeletion,
   scheduledDeletionCleanup,
 } from "./deletion/lifecycle";
+
+export {
+  startAccountReactivation,
+  completeAccountReactivation,
+} from "./reactivation/accountReactivation";

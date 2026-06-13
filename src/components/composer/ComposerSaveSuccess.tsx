@@ -10,6 +10,7 @@ import { useAppFeedback } from "@/feedback/AppFeedback";
 import { useAuth } from "@/state/auth";
 import { useI18n, useT } from "@/i18n";
 import { pdfService } from "@/services/pdf/pdfService";
+import { buildPdfFileName, buildPdfFileNameForBusinessEntry } from "@/services/pdf/pdfFileNames";
 import { regenerateEntryPdf } from "@/services/diary/regenerateEntryPdf";
 import { accentKeyForEntryType } from "@/theme/categoryAccentResolver";
 import { shareBusinessEntryText } from "@/services/share/shareTextService";
@@ -128,7 +129,9 @@ export function ComposerSaveSuccess({
     setExporting(true);
     try {
       if (entry.pdfUri) {
-        const fileName = entry.title.replace(/\s+/g, "-") + ".pdf";
+        const fileName = buildPdfFileName(
+          buildPdfFileNameForBusinessEntry(entry, { businessName: user.businessName })
+        );
         await pdfService.share({ uri: entry.pdfUri, fileName });
         return;
       }
@@ -141,7 +144,9 @@ export function ComposerSaveSuccess({
       });
       setEntry(updated);
       if (updated.pdfUri) {
-        const fileName = updated.title.replace(/\s+/g, "-") + ".pdf";
+        const fileName = buildPdfFileName(
+          buildPdfFileNameForBusinessEntry(updated, { businessName: user.businessName })
+        );
         await pdfService.share({ uri: updated.pdfUri, fileName });
       }
     } catch (e) {

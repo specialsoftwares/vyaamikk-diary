@@ -169,6 +169,7 @@ export function AuthFlowGate() {
           params: {
             phoneE164: String(e.details?.phoneE164 ?? challenge.phoneE164),
             deletionScheduledFor: String(e.details?.deletionScheduledFor ?? ""),
+            maskedEmail: String(e.details?.maskedEmail ?? ""),
           },
         });
         return;

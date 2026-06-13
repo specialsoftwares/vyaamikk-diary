@@ -1,6 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-import type { CashDenominationBreakdown } from "@/domain/businessEntry";
 import { AppError } from "@/domain/errors";
 import { getFinancialYearForDate } from "@/utils/financialYear";
 
@@ -55,32 +54,6 @@ async function readCounter(userId: string): Promise<StoredCounter | null> {
 
 async function writeCounter(userId: string, counter: StoredCounter): Promise<void> {
   await AsyncStorage.setItem(counterKey(userId), JSON.stringify(counter));
-}
-
-export function denominationTotal(breakdown: CashDenominationBreakdown): number {
-  return (
-    breakdown[500] * 500 +
-    breakdown[200] * 200 +
-    breakdown[100] * 100 +
-    breakdown[50] * 50
-  );
-}
-
-export function validateDenominationForFullLegal(
-  amount: number,
-  breakdown: CashDenominationBreakdown | null | undefined
-): string | null {
-  if (!breakdown) {
-    return "Enter a denomination breakdown before exporting a Full Legal Record PDF.";
-  }
-  const computed = denominationTotal(breakdown);
-  if (computed !== amount) {
-    return "Denomination note total must match the cash amount.";
-  }
-  if (breakdown.total !== computed) {
-    return "Denomination total must match the note counts.";
-  }
-  return null;
 }
 
 /** Local-mock serial allocation with FY rollover. */

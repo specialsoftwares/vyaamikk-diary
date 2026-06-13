@@ -158,6 +158,6 @@ export async function forceClearAllSessions(): Promise<void> {
   }
   const remaining = await sessionStore.load();
   if (remaining) {
-    throw new Error("Session could not be cleared — try again or reinstall the dev build.");
+    throw new Error("Session could not be cleared. Please try again.");
   }
 }

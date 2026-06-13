@@ -23,6 +23,19 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == uid;
     }
 
+    function protectedIdentityFieldsUnchanged() {
+      return request.resource.data.status == resource.data.get('status', 'active')
+        && request.resource.data.deletionRequestedAt == resource.data.get('deletionRequestedAt', null)
+        && request.resource.data.deletionScheduledFor == resource.data.get('deletionScheduledFor', null)
+        && request.resource.data.deletionCompletedAt == resource.data.get('deletionCompletedAt', null)
+        && request.resource.data.reactivationRequestedAt == resource.data.get('reactivationRequestedAt', null)
+        && request.resource.data.reactivationPhoneVerifiedAt == resource.data.get('reactivationPhoneVerifiedAt', null)
+        && request.resource.data.reactivationEmailVerifiedAt == resource.data.get('reactivationEmailVerifiedAt', null)
+        && request.resource.data.ueid == resource.data.ueid
+        && request.resource.data.phoneE164 == resource.data.phoneE164
+        && request.resource.data.emailHash == resource.data.get('emailHash', null);
+    }
+
     // ---- User profile ---------------------------------------------------
     match /users/{uid} {
       allow read: if isOwner(uid);
@@ -32,7 +45,7 @@ service cloud.firestore {
       allow create: if isOwner(uid);
       allow update: if isOwner(uid)
                     && request.resource.data.uid == uid
-                    && request.resource.data.ueid == resource.data.ueid;
+                    && protectedIdentityFieldsUnchanged();
       allow delete: if false; // accounts are soft-deleted only
 
       // ---- Diary entries ------------------------------------------------

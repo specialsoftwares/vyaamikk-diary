@@ -177,6 +177,11 @@ export async function saveProfessionalPackWithPdf(
               fileNameHint: options.t("proPack.fileNameHint", {
                 date: dayKey(pack.matterDate),
               }),
+              fileName: {
+                documentType: "professionalBrief",
+                titleOrParty: pack.title,
+                date: dayKey(pack.matterDate),
+              },
             })
         );
         completedSteps = pdfStep.completedSteps;

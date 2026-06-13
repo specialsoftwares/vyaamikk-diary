@@ -1215,10 +1215,22 @@ const en = {
       "Mobile {{phone}} has a pending deletion. It will be final on {{date}} ({{days}}-day period). You cannot use the app until you cancel deletion or wait for it to complete.",
     footnote:
       "After deletion completes, the same number can register again with a new Vyaamikk ID. Old records will not return. PDFs already shared outside the app cannot be recalled.",
+    reactivateFootnote:
+      "To keep this account, verify your registered business email. Your Vyaamikk ID and records will be preserved.",
     cancelDeletion: "Cancel deletion & keep my account",
+    reactivateAccount: "Reactivate my account",
+    reactivateStep: "Verify email",
+    reactivateEmailTitle: "Confirm your business email",
+    reactivateEmailBody:
+      "Enter the verification code sent to {{email}} to reactivate your account.",
+    reactivateEmailHint:
+      "In development, use code 000000 when the email provider is not configured.",
+    verifyAndReactivate: "Verify & reactivate account",
     backToLogin: "Back to login",
     cancelSuccessTitle: "Deletion cancelled",
     cancelSuccessBody: "Your account is active again. Sign in to continue.",
+    reactivateSuccessTitle: "Account reactivated",
+    reactivateSuccessBody: "Your account is active again. Welcome back.",
     dateUnknown: "the scheduled date",
   },
 

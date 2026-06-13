@@ -27,6 +27,7 @@ import { radius, spacing, typography, useThemedStyles } from "@/theme";
 import { formatEntryDate, formatRelative } from "@/utils/date";
 import { shareBusinessEntryText } from "@/services/share/shareTextService";
 import { isShareUserCancelled } from "@/utils/shareDismissed";
+import { buildPdfFileName, buildPdfFileNameForBusinessEntry } from "@/services/pdf/pdfFileNames";
 import { pdfService } from "@/services/pdf/pdfService";
 import { exportCashPaidPdf } from "@/services/diary/exportCashPaidPdf";
 import { regenerateEntryPdf } from "@/services/diary/regenerateEntryPdf";
@@ -179,9 +180,12 @@ export default function EntryDetailScreen() {
         return;
       }
       if (entry.pdfUri) {
+        const fileName = buildPdfFileName(
+          buildPdfFileNameForBusinessEntry(entry, { businessName: user.businessName })
+        );
         await pdfService.share({
           uri: entry.pdfUri,
-          fileName: entry.title.replace(/\s+/g, "-") + ".pdf",
+          fileName,
         });
         return;
       }
@@ -194,9 +198,12 @@ export default function EntryDetailScreen() {
       });
       setEntry(updated);
       if (updated.pdfUri) {
+        const fileName = buildPdfFileName(
+          buildPdfFileNameForBusinessEntry(updated, { businessName: user.businessName })
+        );
         await pdfService.share({
           uri: updated.pdfUri,
-          fileName: updated.title.replace(/\s+/g, "-") + ".pdf",
+          fileName,
         });
       }
     } catch (e) {

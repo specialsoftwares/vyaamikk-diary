@@ -1,12 +1,10 @@
 import { getActiveBackend } from "@/config/env";
 
 export {
-  denominationTotal,
   formatCashPaidFinancialYearLabel,
   formatCpvSerial,
   mockAllocateCashPaidVoucherSerial,
   parseCpvSerial,
-  validateDenominationForFullLegal,
   type CashPaidVoucherSerialResult,
 } from "./cashPaidVoucherSerial";
 

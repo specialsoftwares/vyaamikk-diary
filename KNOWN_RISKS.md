@@ -59,3 +59,23 @@ Previously `app/index.tsx` returned `null` during DB prepare (white flash risk).
 **Status: hardened paths reviewed.**
 
 Critical paths (`sessionStore`, `saveIdempotency`, `readStoredLang`, location prefs, recent searches, FY recap) already use try/catch with safe defaults. Corrupted keys may leave stale data until explicit clear — acceptable for non-critical caches.
+
+## Cash Paid denomination fields (legacy records)
+
+**Status: removed from UX/PDF (2026-06-08).**
+
+Composer no longer collects note counts. Full Legal Record PDF no longer renders a denomination table. Older dev records may still contain `denominationBreakdown` in Firestore — ignored on read/export; no migration required.
+
+## Deletion-mode account reactivation
+
+**Status: backend-enforced (2026-06-08).**
+
+Pending-deletion login returns `deletion_pending` from `resolveOrCreateUserByPhone`. Production reactivation requires fresh phone OTP (native auth session) plus email verification via `startAccountReactivation` → `verifyAndBindEmail` → `completeAccountReactivation`. Client cannot set `status: active` directly — Firestore rules block lifecycle field writes.
+
+**Remaining QA:** Emulator/device E2E for reactivation after Functions deploy.
+
+## Firebase Storage JS SDK (letterhead / CPV photos)
+
+**Status: active — real-device upload QA still required.**
+
+Letterhead images and Cash Paid receipt photos upload via `firebase/storage` JS SDK (not `@react-native-firebase/storage`). Validate upload/share on iOS/Android dev builds after freeing disk space for native Storage SDK if desired.

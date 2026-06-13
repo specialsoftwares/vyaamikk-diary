@@ -41,8 +41,13 @@ export async function cancelAccountDeletion(profile: UserProfile): Promise<UserP
   let next: UserProfile;
   if (backend === "local-mock") {
     next = await cancelMock(profile.uid);
-  } else if (backend === "firebase-production" || backend === "firebase-shared-dev") {
+  } else if (backend === "firebase-shared-dev") {
     next = await cancelFirestore(profile.uid, profile);
+  } else if (backend === "firebase-production") {
+    throw new AppError(
+      "permission_denied",
+      "Cancel deletion directly is not allowed. Use account reactivation with email verification."
+    );
   } else {
     next = applyProfilePatch(profile, cancelDeletionPatch() as ProfilePatch);
   }

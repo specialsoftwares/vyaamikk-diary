@@ -149,47 +149,6 @@ const inrAmountField = z.preprocess(
   z.number().positive("Enter an amount greater than zero.")
 );
 
-const denominationCountField = z.preprocess(
-  (val) => {
-    if (val === "" || val === undefined || val === null) return null;
-    const n = typeof val === "number" ? Math.floor(val) : Math.floor(Number(val));
-    return Number.isFinite(n) && n >= 0 ? n : null;
-  },
-  z.number().int().min(0).nullable().optional()
-);
-
-export type DenominationCountValues = {
-  count500?: number | null;
-  count200?: number | null;
-  count100?: number | null;
-  count50?: number | null;
-};
-
-export function denominationBreakdownTotal(values: DenominationCountValues): number | null {
-  const anySet =
-    values.count500 != null ||
-    values.count200 != null ||
-    values.count100 != null ||
-    values.count50 != null;
-  if (!anySet) return null;
-  return (
-    (values.count500 ?? 0) * 500 +
-    (values.count200 ?? 0) * 200 +
-    (values.count100 ?? 0) * 100 +
-    (values.count50 ?? 0) * 50
-  );
-}
-
-/** Non-blocking check — save allows mismatch; form shows warning; PDF may block separately. */
-export function denominationTotalMismatch(
-  amount: number,
-  values: DenominationCountValues
-): boolean {
-  const total = denominationBreakdownTotal(values);
-  if (total == null) return false;
-  return total !== amount;
-}
-
 export function buildCashGivenSchema(existingPaymentDateMs?: number | null) {
   const opts: DatePolicySchemaOptions = { existingCashPaidDateMs: existingPaymentDateMs };
   return z
@@ -211,10 +170,6 @@ export function buildCashGivenSchema(existingPaymentDateMs?: number | null) {
         }),
       purpose: trimReq(500, "What was this for?"),
       paymentDate: z.number().int().positive(),
-      count500: denominationCountField,
-      count200: denominationCountField,
-      count100: denominationCountField,
-      count50: denominationCountField,
       notes: trimOpt(5000),
     })
     .superRefine((d, ctx) => {
