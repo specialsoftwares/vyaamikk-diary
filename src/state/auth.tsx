@@ -41,24 +41,52 @@ const log = createLogger("state/auth");
 const SESSION_REVALIDATION_MS = 6_000;
 
 async function revalidateSessionProfile(
-  phoneE164: PhoneE164,
+  user: UserProfile,
   backend: ActiveBackend
-): Promise<{ profile: UserProfile | null; timedOut: boolean }> {
+): Promise<{ profile: UserProfile | null; unverified: boolean }> {
   const timeout = new Promise<{ kind: "timeout" }>((resolve) => {
     setTimeout(() => resolve({ kind: "timeout" }), SESSION_REVALIDATION_MS);
   });
-  const load = loadLiveProfileForSession(phoneE164, backend)
+  const load = loadProfileForBootRevalidation(user, backend)
     .then((profile) => ({ kind: "ok" as const, profile }))
     .catch((e) => {
+      // Transient failure (offline, bridge unavailable) must NOT sign the
+      // user out — only a confirmed missing/blocked profile does that.
       log.warn("session revalidation failed", e);
-      return { kind: "ok" as const, profile: null };
+      return { kind: "timeout" as const };
     });
 
   const result = await Promise.race([load, timeout]);
   if (result.kind === "timeout") {
-    return { profile: null, timedOut: true };
+    return { profile: null, unverified: true };
   }
-  return { profile: result.profile, timedOut: false };
+  return { profile: result.profile, unverified: false };
+}
+
+async function loadProfileForBootRevalidation(
+  user: UserProfile,
+  backend: ActiveBackend
+): Promise<UserProfile | null> {
+  if (backend === "local-mock") {
+    const { loadMockProfileByPhone } = await import("@/services/auth/mock");
+    return loadMockProfileByPhone(user.phoneE164);
+  }
+  if (backend === "firebase-production") {
+    // Production rules lock phoneIndex down, so the profile must be read
+    // by uid — which requires the JS-SDK auth bridge to be established.
+    const { ensureJsAuthSession } = await import("@/services/auth/jsAuthBridge");
+    const bridged = await ensureJsAuthSession();
+    if (!bridged) {
+      throw new Error("JS auth bridge unavailable — keeping cached session");
+    }
+    const { loadProfileByUidFirestore } = await import("@/services/auth/profileByPhone");
+    return loadProfileByUidFirestore(user.uid);
+  }
+  if (backend === "firebase-shared-dev") {
+    const { loadProfileByPhoneFirestore } = await import("@/services/auth/profileByPhone");
+    return loadProfileByPhoneFirestore(user.phoneE164);
+  }
+  return null;
 }
 
 async function loadLiveProfileForSession(
@@ -134,13 +162,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (session) {
           let user = session.user;
           const backend = getActiveBackend();
-          const { profile: live, timedOut } = await revalidateSessionProfile(
-            user.phoneE164,
+          const { profile: live, unverified } = await revalidateSessionProfile(
+            user,
             backend
           );
 
-          if (timedOut) {
-            log.warn("session revalidation timed out — using cached session for boot");
+          if (unverified) {
+            log.warn("session revalidation unverified — using cached session for boot");
             setState({
               status: "signed_in",
               session,
@@ -307,6 +335,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const finishReactivation = useCallback(
     async (profile: UserProfile) => {
+      if (getActiveBackend() === "firebase-production") {
+        void import("@/services/auth/jsAuthBridge").then((m) =>
+          m.ensureJsAuthSession()
+        );
+      }
       const session = await saveSession(profile);
       setState({
         status: "signed_in",

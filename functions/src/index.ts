@@ -10,6 +10,8 @@ export {
   claimMobile,
 } from "./identity/resolveOrCreateUserByPhone";
 
+export { mintClientAuthToken } from "./identity/mintClientAuthToken";
+
 export {
   startEmailVerification,
   verifyAndBindEmail,

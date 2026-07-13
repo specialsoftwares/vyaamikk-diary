@@ -347,7 +347,13 @@ export const firebaseAuthService: AuthService = {
     await confirmNativePhoneOtp(challenge, code);
     const phone = normalizePhoneE164(challenge.phoneE164);
     if (useIdentityCallables()) {
-      return callResolveOrCreateUserByPhone(phone);
+      const result = await callResolveOrCreateUserByPhone(phone);
+      // Bridge the native session to the JS SDK so Firestore/Storage
+      // requests carry request.auth (rules require it). Non-fatal: the
+      // record layer surfaces its own retryable error if this fails.
+      const { ensureJsAuthSession } = await import("./jsAuthBridge");
+      await ensureJsAuthSession();
+      return result;
     }
     throw new AppError("auth_not_configured", "Identity callables not available.");
   },
@@ -372,6 +378,10 @@ export const firebaseAuthService: AuthService = {
   },
 
   async updateProfile(uid: string, patch: ProfilePatch): Promise<UserProfile> {
+    if (useIdentityCallables()) {
+      const { ensureJsAuthSession } = await import("./jsAuthBridge");
+      await ensureJsAuthSession();
+    }
     const db = getFirebaseDb();
     const ref = doc(db, USERS_COLLECTION, uid);
     const snap = await getDoc(ref);

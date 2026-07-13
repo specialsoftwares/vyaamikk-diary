@@ -9,7 +9,8 @@
 
 import { initializeApp, getApps, type FirebaseApp } from "firebase/app";
 import { getFirestore, type Firestore } from "firebase/firestore";
-import { getAuth, type Auth } from "firebase/auth";
+import { getAuth, initializeAuth, type Auth, type Persistence } from "firebase/auth";
+import * as firebaseAuthModule from "firebase/auth";
 import { getStorage, type FirebaseStorage } from "firebase/storage";
 
 import { env, isFirebaseConfigured } from "./env";
@@ -47,9 +48,56 @@ export function getFirebaseApp(): FirebaseApp {
   return cachedApp;
 }
 
+function isNativePlatform(): boolean {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { Platform } = require("react-native") as { Platform: { OS: string } };
+    return Platform.OS === "ios" || Platform.OS === "android";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * React Native persistence for the JS SDK auth session.
+ *
+ * Third-party typing boundary: `getReactNativePersistence` exists at runtime
+ * in the React Native build of firebase/auth (selected via package exports),
+ * but the browser type declarations that TypeScript resolves do not declare
+ * it, so we read it off the module namespace with an explicit shape.
+ */
+function tryReactNativePersistence(): Persistence | null {
+  if (!isNativePlatform()) return null;
+  try {
+    const authModule = firebaseAuthModule as unknown as {
+      getReactNativePersistence?: (storage: unknown) => Persistence;
+    };
+    if (typeof authModule.getReactNativePersistence !== "function") return null;
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const asyncStorage = require("@react-native-async-storage/async-storage") as {
+      default: unknown;
+    };
+    return authModule.getReactNativePersistence(asyncStorage.default);
+  } catch {
+    return null;
+  }
+}
+
 export function getFirebaseAuth(): Auth {
   if (cachedAuth) return cachedAuth;
-  cachedAuth = getAuth(getFirebaseApp());
+  const app = getFirebaseApp();
+  const persistence = tryReactNativePersistence();
+  if (persistence) {
+    try {
+      // Persist the bridged custom-token session across app restarts.
+      cachedAuth = initializeAuth(app, { persistence });
+    } catch {
+      // Auth was already initialized for this app instance.
+      cachedAuth = getAuth(app);
+    }
+  } else {
+    cachedAuth = getAuth(app);
+  }
   return cachedAuth;
 }
 

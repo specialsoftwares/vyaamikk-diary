@@ -150,6 +150,26 @@ export async function callResolveOrCreateUserByPhone(
   };
 }
 
+export interface MintClientAuthTokenResponse {
+  token: string;
+}
+
+/**
+ * Mint a custom token for the native-auth uid so the firebase JS SDK
+ * (Firestore/Storage) can sign in as the same user. Must be called over
+ * the native functions SDK so request.auth carries the native session.
+ */
+export async function callMintClientAuthToken(): Promise<MintClientAuthTokenResponse> {
+  const data = await callFunction<Record<string, never>, MintClientAuthTokenResponse>(
+    "mintClientAuthToken",
+    {}
+  );
+  if (!data?.token) {
+    throw new AppError("unknown", "Auth bridge returned an empty token.");
+  }
+  return data;
+}
+
 export interface StartEmailVerificationRequest {
   email: string;
 }

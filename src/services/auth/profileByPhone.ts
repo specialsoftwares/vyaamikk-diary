@@ -22,3 +22,20 @@ export async function loadProfileByPhoneFirestore(
   if (!userSnap.exists()) return null;
   return normaliseUserProfile(uid, userSnap.data() as Record<string, unknown>);
 }
+
+/**
+ * Resolve the signed-in user's own profile directly by uid.
+ *
+ * Production rules lock phoneIndex down (`allow read: if false`), so the
+ * phone-index path above only works with permissive dev rules. Owners can
+ * always read users/{uid}, which is what production session revalidation
+ * must use.
+ */
+export async function loadProfileByUidFirestore(
+  uid: string
+): Promise<UserProfile | null> {
+  const db = getFirebaseDb();
+  const userSnap = await getDoc(doc(db, USERS, uid));
+  if (!userSnap.exists()) return null;
+  return normaliseUserProfile(uid, userSnap.data() as Record<string, unknown>);
+}
