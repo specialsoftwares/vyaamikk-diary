@@ -159,3 +159,54 @@ eas build --profile development --platform ios
 | Cash Paid denomination / bank-note bifurcation removed | ✅ UI, validation, export, PDF Mode B |
 | Dev placeholder banners hidden in production UI | ✅ Mock OTP banner dev-only; backend banner removed; dev reset `__DEV__`-only |
 | Deletion-mode reactivation hardened | ✅ `resolveOrCreateUserByPhone` returns `deletion_pending`; `startAccountReactivation` + `completeAccountReactivation` callables; Firestore rules block client status changes |
+
+---
+
+## Re-initialization audit (2026-07-14)
+
+Full report: `docs/PRELAUNCH_HARDENING_REPORT.md`. Architecture:
+`docs/REINITIALIZATION_ARCHITECTURE_MAP.md`. Device QA: `docs/PRELAUNCH_DEVICE_QA.md`.
+
+### New P0 found and fixed in repo: JS-SDK auth bridge
+
+The production OTP session lives only in `@react-native-firebase/auth`, but
+Firestore/Storage run on the firebase JS SDK, which was **never signed in** — so in
+a production build every direct record write (customer credit, PO, letterhead,
+professional pack, diary sync) and every Storage upload was `request.auth == null`
+→ permission-denied. Boot revalidation also read the client-forbidden `phoneIndex`,
+which would have signed users out on every relaunch.
+
+Fixed:
+
+- `functions/src/identity/mintClientAuthToken.ts` — new callable (asia-south1),
+  mints a custom token for the native uid.
+- `src/services/auth/jsAuthBridge.ts` — `ensureJsAuthSession()` signs the JS SDK in
+  via `signInWithCustomToken`; verified uid match; single-flight; never throws.
+- `src/config/firebase.ts` — JS auth uses AsyncStorage persistence on native.
+- Wired at OTP confirm, boot revalidation (now reads own `users/{uid}` instead of
+  `phoneIndex`), `updateProfile`, `finishReactivation`.
+- Boot revalidation now keeps the cached session on transient failure and only
+  signs out on a confirmed missing/blocked profile.
+
+**Deployment prerequisites (not yet done — Firebase CLI login expired):**
+
+1. `firebase login --reauth`
+2. `firebase deploy --only firestore:rules --project vyaamikk-diary`
+3. `firebase deploy --only storage --project vyaamikk-diary`
+4. `firebase deploy --only functions --project vyaamikk-diary`
+5. Grant the functions runtime service account **Service Account Token Creator**
+   (required by `createCustomToken`).
+6. Firebase Console → Firestore → Rules → confirm published timestamp (Test-Mode
+   expiry recovery).
+
+### Other corrections (2026-07-14)
+
+| Item | Status |
+|------|--------|
+| `app.json`: duplicate location permissions + unused `RECORD_AUDIO` removed; `expo-image-picker` `microphonePermission: false` | ✅ |
+| Accidental `// loading={busy}` on Dukaan PDF button reverted | ✅ |
+| Test matrix: typecheck + functions build + 32 tsx suites | ✅ all pass |
+| `npm run lint` | ⚠ alias for typecheck only — no ESLint pass exists |
+| Grievance officer name / registered address in `src/config/legal.ts` | ❌ still placeholders — owner input required before store submission |
+| i18n | ⚠ hi missing 67 keys (consent/materialMovement/workTeam); ta/te/gu missing 22 (English fallback works) |
+| App Check / crash reporting | ❌ not installed (P2, post-candidate) |

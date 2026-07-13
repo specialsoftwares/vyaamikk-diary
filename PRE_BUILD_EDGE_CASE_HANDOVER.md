@@ -1,7 +1,33 @@
 # Pre-Build Edge Case Handover
 
-**Date:** 2026-06-08  
+**Date:** 2026-06-08 · **Updated:** 2026-07-14 (re-initialization audit)
 **Scope:** Final corrections before Firebase deploy + EAS build
+
+---
+
+## 2026-07-14 update — JS-SDK auth bridge (P0)
+
+Recon proved that production builds could sign in but **could not save any cloud
+record or upload any image**: Firestore/Storage run on the firebase JS SDK, whose
+auth was never signed in (`request.auth == null` → rules deny), and boot
+revalidation read the client-forbidden `phoneIndex` (would sign users out on every
+relaunch). Fixed:
+
+- `functions/src/identity/mintClientAuthToken.ts` (new callable, asia-south1)
+- `src/services/auth/jsAuthBridge.ts` (new) — `ensureJsAuthSession()`
+- `src/config/firebase.ts` — AsyncStorage persistence for JS auth on native
+- `src/state/auth.tsx` — boot revalidation by own uid; transient failure keeps
+  cached session
+- Wired at OTP confirm, boot, `updateProfile`, `finishReactivation`
+- Test: `npm run test:js-auth-bridge`
+
+**Before any EAS production-mode build:** deploy functions, grant the runtime
+service account *Service Account Token Creator*, deploy Firestore + Storage rules,
+and pass device QA A9/A14 (`docs/PRELAUNCH_DEVICE_QA.md`).
+
+Also fixed 2026-07-14: `app.json` duplicate location permissions + unused
+`RECORD_AUDIO` removed (`expo-image-picker` plugin `microphonePermission: false`);
+accidental `// loading={busy}` regression on the Dukaan detail screen reverted.
 
 ---
 

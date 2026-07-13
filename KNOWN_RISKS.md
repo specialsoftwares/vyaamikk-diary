@@ -36,6 +36,20 @@ App boot restores session from SecureStore (`vyd_session_v2`) without `onAuthSta
 
 **Mitigation today:** existing `userFacingMessage` on save paths; no silent swallow.
 
+## JS-SDK auth bridge (production Firestore/Storage access)
+
+**Status: fixed in repo (2026-07-14) — deployment + device QA pending.**
+
+Production phone auth lives in `@react-native-firebase/auth`; Firestore/Storage use the firebase JS SDK. Before 2026-07-14 the JS SDK was never signed in, so all direct record writes and Storage uploads in production were `request.auth == null` → denied by rules, and boot revalidation read the client-forbidden `phoneIndex` (would sign users out on relaunch). Fixed via `mintClientAuthToken` callable + `signInWithCustomToken` (`src/services/auth/jsAuthBridge.ts`), AsyncStorage persistence for the JS session, and uid-based boot revalidation.
+
+**Residual risk:** the bridge depends on the callable being deployed and the functions service account holding *Service Account Token Creator*. If the bridge fails at runtime, records surface retryable errors and diary stays local-first (no data loss). Device QA items A9/A14 must pass before release.
+
+## `npm run lint` is not ESLint
+
+**Status: honest limitation.**
+
+`lint` aliases `typecheck` (`tsc --noEmit`). There is no ESLint pass in this repo.
+
 ## `_saveLocks` non-atomic acquisition across devices
 
 **Status: intentional architecture — not changed this pass.**
@@ -78,4 +92,22 @@ Pending-deletion login returns `deletion_pending` from `resolveOrCreateUserByPho
 
 **Status: active — real-device upload QA still required.**
 
-Letterhead images and Cash Paid receipt photos upload via `firebase/storage` JS SDK (not `@react-native-firebase/storage`). Validate upload/share on iOS/Android dev builds after freeing disk space for native Storage SDK if desired.
+Letterhead images and Cash Paid receipt photos upload via `firebase/storage` JS SDK (not `@react-native-firebase/storage`). Upload mechanism is base64 `uploadString()` — deliberately avoids the unreliable `fetch(file://).blob()` pattern on React Native. Requires the JS auth bridge (above). Validate upload/share on iOS/Android dev builds (QA S1–S8).
+
+## Legal config placeholders
+
+**Status: blocking store submission — owner input required.**
+
+`src/config/legal.ts` still contains `[GRIEVANCE OFFICER NAME…]` and `[REGISTERED ADDRESS…]` placeholders plus a provisional effective date. `assertProductionConfig()` blocks only URL/support-email placeholders, not these. Real values must be supplied before store release.
+
+## i18n coverage gaps (English fallback)
+
+**Status: P2 — no crash, no raw keys.**
+
+Versus `en` (2,401 leaf keys): `hi` missing 67 (whole `consent`, `materialMovement`, `workTeam` sections); `ta`/`te`/`gu` each missing 22 (incl. `consent` prefixes on the mandatory pre-OTP consent screen). Missing keys render in English via i18next fallback.
+
+## App Check and crash reporting absent
+
+**Status: P2 — post-candidate.**
+
+No `@react-native-firebase/app-check`, Crashlytics, or Sentry installed. Rollout checklist in `docs/PRELAUNCH_HARDENING_REPORT.md`. Do not enable App Check enforcement before verified tokens reach Firebase.
