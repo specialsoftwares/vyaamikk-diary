@@ -31,12 +31,24 @@ import { sessionStore, forceClearAllSessions, type AuthSession } from "@/service
 import { toAppError } from "@/domain/errors";
 import { clearMasterDataSessionCache } from "@/services/masterData";
 import { createLogger } from "@/utils/logger";
-import { getActiveBackend, type ActiveBackend } from "@/config/env";
+import {
+  env,
+  getActiveBackend,
+  getResolvedEnvironment,
+  type ActiveBackend,
+} from "@/config/env";
+import { formatRuntimeDiagnostics } from "@/config/runtimeEnvironment";
 import { isLoginBlockedAccount } from "@/services/accountDeletion/accountStatus";
 import { useLocalDb } from "@/state/localDb";
 import { clearAuthWrapperProgress } from "@/auth-v2/authWrapperProgress";
 
 const log = createLogger("state/auth");
+
+// Print resolved runtime + backend once at module load (no secrets).
+log.info(
+  "runtime environment",
+  formatRuntimeDiagnostics(getResolvedEnvironment(), env.firebase.projectId)
+);
 
 const SESSION_REVALIDATION_MS = 6_000;
 
@@ -103,11 +115,6 @@ async function loadLiveProfileForSession(
   }
   return null;
 }
-
-// Print which backend is in use once, at module load. This makes
-// "why don't my profile changes sync across devices?" answerable in
-// 5 seconds by checking the Metro console.
-log.info("active backend", { backend: getActiveBackend() });
 
 export type AuthStatus = "loading" | "signed_out" | "signed_in";
 

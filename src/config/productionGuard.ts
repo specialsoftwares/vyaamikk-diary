@@ -1,11 +1,19 @@
-import { env, getActiveBackend, isFirebaseConfigured } from "@/config/env";
+import {
+  env,
+  getActiveBackend,
+  getResolvedEnvironment,
+  isFirebaseConfigured,
+} from "@/config/env";
 import { findLegalConfigBlockers } from "@/config/legal";
+import { assertRuntimeBackendIsolation } from "@/config/runtimeEnvironment";
 
 /**
  * Fail fast on production builds that would run mock auth, local-only storage,
  * or placeholder legal URLs / support email.
  */
 export function assertProductionConfig(): void {
+  assertRuntimeBackendIsolation(getResolvedEnvironment());
+
   if (!env.isProduction) return;
 
   if (!isFirebaseConfigured()) {

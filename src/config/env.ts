@@ -3,6 +3,13 @@ import {
   LEGAL_OPERATOR,
   PUBLIC_BRAND,
 } from "./brand";
+import {
+  assertRuntimeBackendIsolation,
+  buildResolvedEnvironment,
+  type ActiveBackend,
+  type ResolvedEnvironment,
+  type RuntimeSignals,
+} from "./runtimeEnvironment";
 
 /**
  * Environment configuration.
@@ -12,32 +19,84 @@ import {
  * that must remain server-side (e.g. Firebase Admin keys, SMS secrets).
  */
 
-type AppMode = "development" | "production";
-
 function readString(key: string, fallback = ""): string {
   // process.env access pattern is required for Expo's static inlining.
   const value = process.env[key];
   return typeof value === "string" && value.length > 0 ? value : fallback;
 }
 
-const rawMode = readString("EXPO_PUBLIC_APP_MODE", "development");
-const APP_MODE: AppMode = rawMode === "production" ? "production" : "development";
+function readRuntimeSignals(): RuntimeSignals {
+  if (_testRuntimeSignals) {
+    return _testRuntimeSignals;
+  }
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const Constants = require("expo-constants").default as {
+      appOwnership?: string | null;
+    };
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { Platform } = require("react-native") as {
+      Platform: { OS: string };
+    };
+    return {
+      appOwnership: Constants.appOwnership ?? null,
+      isDev: typeof __DEV__ !== "undefined" ? __DEV__ : false,
+      platform: Platform.OS,
+    };
+  } catch {
+    return {
+      appOwnership: null,
+      isDev: typeof __DEV__ !== "undefined" ? __DEV__ : false,
+      platform: "node",
+    };
+  }
+}
+
+let _testRuntimeSignals: RuntimeSignals | null = null;
+
+/** Test-only override for runtime detection (Node unit tests). */
+export function __setRuntimeSignalsForTests(signals: RuntimeSignals | null): void {
+  _testRuntimeSignals = signals;
+}
+
+const firebaseConfig = {
+  apiKey: readString("EXPO_PUBLIC_FIREBASE_API_KEY"),
+  authDomain: readString("EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN"),
+  projectId: readString("EXPO_PUBLIC_FIREBASE_PROJECT_ID"),
+  storageBucket: readString("EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET"),
+  messagingSenderId: readString("EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID"),
+  appId: readString("EXPO_PUBLIC_FIREBASE_APP_ID"),
+  functionsRegion: readString("EXPO_PUBLIC_FIREBASE_FUNCTIONS_REGION", "asia-south1"),
+};
+
+function computeFirebaseConfigured(): boolean {
+  return Boolean(
+    firebaseConfig.apiKey &&
+      firebaseConfig.authDomain &&
+      firebaseConfig.projectId &&
+      firebaseConfig.appId &&
+      firebaseConfig.messagingSenderId
+  );
+}
+
+const resolvedEnvironment: ResolvedEnvironment = buildResolvedEnvironment({
+  bundledAppModeRaw: readString("EXPO_PUBLIC_APP_MODE", "development"),
+  devBackendRaw: readString("EXPO_PUBLIC_DEV_BACKEND", "local-mock"),
+  firebaseConfigured: computeFirebaseConfigured(),
+  signals: readRuntimeSignals(),
+});
+
+assertRuntimeBackendIsolation(resolvedEnvironment);
 
 export const env = {
-  appMode: APP_MODE,
-  isProduction: APP_MODE === "production",
-  isDevelopment: APP_MODE === "development",
+  /** Value bundled by Metro / EAS before runtime correction. */
+  bundledAppMode: resolvedEnvironment.bundledAppMode,
+  appMode: resolvedEnvironment.effectiveAppMode,
+  runtimeKind: resolvedEnvironment.runtime,
+  isProduction: resolvedEnvironment.isProduction,
+  isDevelopment: resolvedEnvironment.isDevelopment,
 
-  firebase: {
-    apiKey: readString("EXPO_PUBLIC_FIREBASE_API_KEY"),
-    authDomain: readString("EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN"),
-    projectId: readString("EXPO_PUBLIC_FIREBASE_PROJECT_ID"),
-    storageBucket: readString("EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET"),
-    messagingSenderId: readString("EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID"),
-    appId: readString("EXPO_PUBLIC_FIREBASE_APP_ID"),
-    /** Cloud Functions region (default asia-south1 for India). */
-    functionsRegion: readString("EXPO_PUBLIC_FIREBASE_FUNCTIONS_REGION", "asia-south1"),
-  },
+  firebase: firebaseConfig,
 
   /** Optional override for PIN resolver (defaults to public postalpincode.in-style API). */
   expoPublicPincodeApiUrl: readString("EXPO_PUBLIC_PINCODE_API_URL"),
@@ -82,35 +141,15 @@ export const env = {
  * silently falling back to mock storage (which would lose data).
  */
 export function isFirebaseConfigured(): boolean {
-  const f = env.firebase;
-  return Boolean(
-    f.apiKey && f.authDomain && f.projectId && f.appId && f.messagingSenderId
-  );
+  return computeFirebaseConfigured();
 }
 
-/**
- * Which backend the auth + diary layers are actually using right now.
- *
- *   • "firebase-production" — real Firebase Auth + Firestore.
- *   • "firebase-shared-dev" — mock OTP (`123456`) + real Firestore. The
- *     correct mode for cross-device dev testing.
- *   • "local-mock"          — mock OTP + AsyncStorage. Single-device dev;
- *     profile data does NOT sync across devices.
- *   • "not-configured"      — production mode requested but Firebase
- *     config is missing.
- *
- * Screens can render a small banner using this so testers always know
- * which world they're in.
- */
-export type ActiveBackend =
-  | "firebase-production"
-  | "firebase-shared-dev"
-  | "local-mock"
-  | "not-configured";
+export type { ActiveBackend };
 
 export function getActiveBackend(): ActiveBackend {
-  if (env.isProduction) {
-    return isFirebaseConfigured() ? "firebase-production" : "not-configured";
-  }
-  return isFirebaseConfigured() ? "firebase-shared-dev" : "local-mock";
+  return resolvedEnvironment.getActiveBackend();
+}
+
+export function getResolvedEnvironment(): ResolvedEnvironment {
+  return resolvedEnvironment;
 }

@@ -13,6 +13,7 @@
   "scripts": {
     "start": "expo start",
     "start:expo-go": "EXPO_NO_REDIRECT_PAGE=1 REACT_NATIVE_PACKAGER_HOSTNAME=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo 127.0.0.1) expo start --go --lan --port 8081",
+    "start:prod-dev-client": "EXPO_PUBLIC_APP_MODE=production REACT_NATIVE_PACKAGER_HOSTNAME=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo 127.0.0.1) expo start --dev-client --lan --port 8081",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
@@ -66,6 +67,8 @@
     "test:pdf-gujarati": "npx --yes tsx src/services/pdf/pdfGujarati.test.ts",
     "test:native-phone-auth": "npx --yes tsx src/services/auth/nativePhoneAuth.test.ts",
     "test:js-auth-bridge": "npx --yes tsx src/services/auth/jsAuthBridge.test.ts",
+    "test:env-resolution": "npx --yes tsx src/config/runtimeEnvironment.test.ts",
+    "test:env-shell-precedence": "npx --yes tsx scripts/test-env-shell-precedence.ts",
     "test:firestore-rules": "firebase emulators:exec --only firestore --project vyaamikk-diary-rules-test \"npx --yes tsx firestore.rules.test.ts\"",
     "test:legal-consent": "npx --yes tsx src/services/consent/legalConsent.test.ts",
     "functions:build": "npm --prefix functions run build",
