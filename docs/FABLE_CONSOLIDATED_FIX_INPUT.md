@@ -11,13 +11,13 @@
 
 | Field | Value |
 |-------|-------|
-| Reproduction | `firebase deploy --only firestore:rules` fails with HTTP 401 |
-| Root cause | Firebase CLI credentials expired / not logged in |
-| Files | `firestore.rules`, `.firebaserc`, `firebase.json` |
-| Verification done | Rules compile locally; no `allow read, write: if true`; no `request.time` expiry; UID isolation `isOwner(uid)`; `phoneIndex`/`ueidIndex`/`emailIndex`/`retiredPhones`/`pendingEmailVerifications` → `if false` |
-| Correction | Operator: `firebase login --reauth` then `firebase deploy --only firestore:rules --project vyaamikk-diary` |
-| Regression risk | Low if same rules file |
-| Test | Firebase Console → Rules → verify published timestamp |
+| Status | ✅ **Complete** (2026-07-15 01:14 IST) |
+| Project ID | `vyaamikk-diary` |
+| Deploy command | `firebase deploy --only firestore:rules --project vyaamikk-diary` |
+| Rules compile + release | ✅ Successful |
+| Local rules audit | No `allow read, write: if true`; no `request.time` expiry; UID isolation `isOwner(uid)`; server collections `if false` |
+| `firestore.rules` modified | **No** — deployed as-is from repo |
+| Firebase Console timestamp | ⏳ **Pending** operator verification |
 | Rules test suite | **None exists** — consider adding emulator tests in future pass |
 
 ### F-SEC-02 — Expo Go dev backend must not hit production Firestore unauthenticated
@@ -170,14 +170,15 @@
 | Gate | Status |
 |------|--------|
 | Firestore rules verified locally | ✅ |
-| Firestore rules deployed | ❌ — operator auth |
+| Firestore rules deployed | ✅ `vyaamikk-diary` — 2026-07-15 01:14 IST |
+| Firebase Console rules timestamp | ⏳ Pending operator check |
 | Reproducible freeze captured live | ❌ — static hypothesis only |
 | Blocking overlay defect identified | ✅ hypothesis `CurtainSheet` |
 | Language multiple implementations | ✅ primary + deprecated `LanguageToggle` |
 | Tab implementation documented | ✅ `NativeTabs` unstable API |
 | Bundle audit complete | ✅ |
 | Edge matrix complete | ✅ |
-| Safe to proceed with consolidated Fable implementation | **Yes** — after operator Firestore deploy |
+| Safe to proceed with consolidated Fable implementation | **Yes** — Firestore rules deployed; Console timestamp check pending |
 
 ---
 

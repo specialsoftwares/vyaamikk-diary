@@ -1,7 +1,7 @@
 # Production Readiness — Auth & Identity Track
 
-**Date:** 2026-06-04 (OTP wiring verified on disk 2026-06-08)  
-**Status:** OTP client wiring complete in repo — requires EAS dev build + Firebase deploy + device QA
+**Date:** 2026-06-04 (OTP wiring verified on disk 2026-06-08) · **Firestore rules deployed:** 2026-07-15 01:14 IST (UTC+5:30)  
+**Status:** OTP client wiring complete in repo — Firestore production rules deployed to `vyaamikk-diary`; requires EAS dev build + remaining Firebase deploys + device QA
 
 ---
 
@@ -20,7 +20,7 @@
 | 2 | `retireIdentity` / `completeAccountDeletion` | ✅ |
 | 2 | `scheduledDeletionCleanup` | ✅ |
 | 2 | Client `identityCallable.ts` | ✅ |
-| 3 | `firestore.rules` — index collections blocked | ✅ |
+| 3 | `firestore.rules` — index collections blocked | ✅ Deployed to `vyaamikk-diary` 2026-07-15 |
 | 3 | `retiredPhones` / `pendingEmailVerifications` server-owned | ✅ |
 | 4 | Legal URL defaults → `vyaamikk.specialsoftwares.in` | ✅ |
 | 4 | `.env.example` updated | ✅ |
@@ -80,6 +80,18 @@ See `docs/NATIVE_FIREBASE_SETUP.md`.
 - `phoneIndex`, `ueidIndex`, `emailIndex`: client read/write **false** (unchanged).
 - Added `retiredPhones`, `pendingEmailVerifications`: client read/write **false**.
 
+### Production rules deployment (2026-07-15)
+
+| Field | Value |
+|-------|-------|
+| **Project ID** | `vyaamikk-diary` |
+| **Deploy time** | 2026-07-15 01:14 IST (UTC+5:30) — operator-confirmed successful `firebase deploy --only firestore:rules` |
+| **Rules file** | `firestore.rules` (unchanged in repo) |
+| **Compile + release** | ✅ Rules compiled and released successfully |
+| **No test-mode expiry** | ✅ Local `firestore.rules` contains no `request.time < timestamp.date(...)` |
+| **No public wildcard** | ✅ Local `firestore.rules` contains no `allow read, write: if true` (permissive rules remain in `firestore.rules.dev` only) |
+| **Firebase Console timestamp** | ⏳ **Pending** — operator should confirm published timestamp in Firebase Console → Firestore → Rules |
+
 ## 7. Client auth service changes
 
 | File | Change |
@@ -106,7 +118,7 @@ Defaults now point to `https://vyaamikk.specialsoftwares.in/{privacy,terms,delet
 ## 10. Remaining blockers
 
 1. **Device QA** — real OTP on iOS/Android dev build not run here.
-2. **Firebase deploy** — Functions + production rules must be deployed to live project.
+2. **Firebase deploy** — ~~Firestore production rules~~ ✅ deployed 2026-07-15; Functions + Storage rules still required.
 3. **Native config files** — `google-services.json` / `GoogleService-Info.plist` required for builds.
 4. **Email delivery provider** — `verifyAndBindEmail` rejects non-emulator codes until SendGrid/etc. wired.
 5. **Hosted legal pages** — URLs set in config; pages must exist and be reviewed.
@@ -188,16 +200,16 @@ Fixed:
 - Boot revalidation now keeps the cached session on transient failure and only
   signs out on a confirmed missing/blocked profile.
 
-**Deployment prerequisites (not yet done — Firebase CLI login expired):**
+**Deployment prerequisites:**
 
-1. `firebase login --reauth`
-2. `firebase deploy --only firestore:rules --project vyaamikk-diary`
+1. ~~`firebase login --reauth`~~ ✅ (2026-07-15)
+2. ~~`firebase deploy --only firestore:rules --project vyaamikk-diary`~~ ✅ (2026-07-15 01:14 IST)
 3. `firebase deploy --only storage --project vyaamikk-diary`
 4. `firebase deploy --only functions --project vyaamikk-diary`
 5. Grant the functions runtime service account **Service Account Token Creator**
    (required by `createCustomToken`).
-6. Firebase Console → Firestore → Rules → confirm published timestamp (Test-Mode
-   expiry recovery).
+6. Firebase Console → Firestore → Rules → confirm published timestamp ⏳ **pending**
+   (Test-Mode expiry recovery — rules deploy succeeded; Console check not yet recorded).
 
 ### Other corrections (2026-07-14)
 

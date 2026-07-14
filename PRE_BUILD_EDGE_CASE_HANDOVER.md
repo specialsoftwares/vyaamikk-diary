@@ -1,7 +1,23 @@
 # Pre-Build Edge Case Handover
 
-**Date:** 2026-06-08 · **Updated:** 2026-07-14 (re-initialization audit)
+**Date:** 2026-06-08 · **Updated:** 2026-07-15 (Firestore production rules deployed)
 **Scope:** Final corrections before Firebase deploy + EAS build
+
+---
+
+## 2026-07-15 update — Firestore production rules deployed
+
+Production `firestore.rules` compiled and released successfully to Firebase project **`vyaamikk-diary`** on **2026-07-15 01:14 IST (UTC+5:30)** via `firebase deploy --only firestore:rules --project vyaamikk-diary` (after `firebase login --reauth`).
+
+| Check | Status |
+|-------|--------|
+| Project ID | `vyaamikk-diary` |
+| Rules compiled + released | ✅ |
+| No test-mode expiry in local production rules | ✅ (no `request.time < timestamp.date(...)`) |
+| No public wildcard in local production rules | ✅ (no `allow read, write: if true`; permissive rules remain in `firestore.rules.dev` only) |
+| Firebase Console published timestamp | ⏳ **Pending** operator verification |
+
+`firestore.rules` was **not modified** for this deploy — repo file matches what was released.
 
 ---
 
@@ -22,7 +38,8 @@ relaunch). Fixed:
 - Test: `npm run test:js-auth-bridge`
 
 **Before any EAS production-mode build:** deploy functions, grant the runtime
-service account *Service Account Token Creator*, deploy Firestore + Storage rules,
+service account *Service Account Token Creator*, ~~deploy Firestore~~ ✅ Firestore
+rules deployed 2026-07-15, deploy Storage rules,
 and pass device QA A9/A14 (`docs/PRELAUNCH_DEVICE_QA.md`).
 
 Also fixed 2026-07-14: `app.json` duplicate location permissions + unused
