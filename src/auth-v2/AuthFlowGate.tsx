@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, StyleSheet, View } from "react-native";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Platform, StyleSheet, Text, TextInput, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 
 import {
@@ -24,7 +24,16 @@ import {
   consentPatchForProfile,
   savePendingConsent,
 } from "@/services/consent/legalConsentService";
+import {
+  completeBusinessEmailBind,
+  requiresServerEmailBinding,
+  startBusinessEmailVerification,
+} from "@/services/auth/bindBusinessEmail";
+import { Banner, Button, LocaleUiText } from "@/components/ui";
+import { spacing, typography } from "@/theme";
 import type { OtpChallenge } from "@/services/auth/types";
+
+const EMAIL_CODE_LENGTH = 6;
 
 /**
  * Premium Indigo auth wrapper — sole sign-in entry for the app.
@@ -36,10 +45,11 @@ export function AuthFlowGate() {
     step?: string;
     from?: string;
   }>();
-  const { status, user, startOtp, confirmOtp, updateProfile, signOut } = useAuth();
+  const { status, user, startOtp, confirmOtp, updateProfile, applyServerProfile, signOut } =
+    useAuth();
 
   const [hydrated, setHydrated] = useState(false);
-  const [step, setStep] = useState<AuthV2Step>("phone");
+  const [step, setStep] = useState<AuthV2Step | "email_verify">("phone");
   const [phoneDraft, setPhoneDraft] = useState<AuthV2PhoneDraft>({
     countryCode: DEFAULT_AUTH_V2_COUNTRY_CODE,
     localNumber: "",
@@ -49,6 +59,9 @@ export function AuthFlowGate() {
   const [devHint, setDevHint] = useState<string | null>(null);
   const [emailDraft, setEmailDraft] = useState("");
   const [emailHint, setEmailHint] = useState<string | null>(null);
+  const [emailVerificationId, setEmailVerificationId] = useState<string | null>(null);
+  const [emailCode, setEmailCode] = useState("");
+  const emailCodeInputRef = useRef<TextInput>(null);
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -207,6 +220,14 @@ export function AuthFlowGate() {
     setEmailHint(null);
     setLoading(true);
     try {
+      if (requiresServerEmailBinding()) {
+        const { verificationId } = await startBusinessEmailVerification(trimmed);
+        setEmailVerificationId(verificationId);
+        setEmailCode("");
+        setStep("email_verify");
+        setTimeout(() => emailCodeInputRef.current?.focus(), 280);
+        return;
+      }
       await updateProfile({ businessEmail: trimmed });
       await markAuthWrapperEmailComplete(user.uid);
       handoffToApp();
@@ -219,6 +240,22 @@ export function AuthFlowGate() {
         setError(e.message);
         return;
       }
+      setError(userFacingMessage(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyEmailCode = async () => {
+    if (!user || !emailVerificationId || emailCode.length !== EMAIL_CODE_LENGTH) return;
+    setError(null);
+    setLoading(true);
+    try {
+      const profile = await completeBusinessEmailBind(emailVerificationId, emailCode);
+      await applyServerProfile(profile);
+      await markAuthWrapperEmailComplete(profile.uid);
+      handoffToApp();
+    } catch (e) {
       setError(userFacingMessage(e));
     } finally {
       setLoading(false);
@@ -278,6 +315,58 @@ export function AuthFlowGate() {
     );
   }
 
+  if (step === "email_verify") {
+    const emailVerifyComplete = emailCode.length === EMAIL_CODE_LENGTH;
+    return (
+      <View style={styles.boot}>
+        <View style={styles.emailVerifyCard}>
+          <LocaleUiText style={styles.emailVerifyTitle}>
+            {t("pendingDeletion.reactivateEmailTitle")}
+          </LocaleUiText>
+          <LocaleUiText style={styles.emailVerifyBody}>
+            {t("pendingDeletion.reactivateEmailHint")}
+          </LocaleUiText>
+          {error ? <Banner tone="danger" message={error} /> : null}
+          <TextInput
+            ref={emailCodeInputRef}
+            style={styles.emailCodeInput}
+            value={emailCode}
+            onChangeText={(text) =>
+              setEmailCode(text.replace(/\D/g, "").slice(0, EMAIL_CODE_LENGTH))
+            }
+            keyboardType="number-pad"
+            maxLength={EMAIL_CODE_LENGTH}
+            autoComplete="one-time-code"
+            textContentType="oneTimeCode"
+            placeholder={t("otp.codePlaceholder")}
+            editable={!loading}
+            returnKeyType="done"
+            onSubmitEditing={() => {
+              if (emailVerifyComplete) void handleVerifyEmailCode();
+            }}
+          />
+          <Button
+            label={t("pendingDeletion.verifyAndReactivate")}
+            onPress={() => void handleVerifyEmailCode()}
+            loading={loading}
+            disabled={!emailVerifyComplete}
+          />
+          <Button
+            label={t("common.back")}
+            variant="ghost"
+            onPress={() => {
+              setStep("email");
+              setEmailVerificationId(null);
+              setEmailCode("");
+              setError(null);
+            }}
+            disabled={loading}
+          />
+        </View>
+      </View>
+    );
+  }
+
   if (step === "email") {
     const backFromProfile = paramFrom === "profile";
     return (
@@ -320,5 +409,36 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#12152E",
+    padding: spacing.lg,
+  },
+  emailVerifyCard: {
+    width: "100%",
+    maxWidth: 400,
+    gap: spacing.md,
+  },
+  emailVerifyTitle: {
+    ...typography.titleMd,
+    color: "#FFFFFF",
+    textAlign: "center",
+  },
+  emailVerifyBody: {
+    ...typography.body,
+    color: "rgba(255,255,255,0.72)",
+    textAlign: "center",
+    lineHeight: 22,
+  },
+  emailCodeInput: {
+    ...typography.mono,
+    fontSize: 24,
+    letterSpacing: 6,
+    textAlign: "center",
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+    color: "#FFFFFF",
+    backgroundColor: "rgba(255,255,255,0.06)",
+    ...(Platform.OS === "android" ? { textAlignVertical: "center" as const } : {}),
   },
 });

@@ -131,6 +131,8 @@ interface AuthApi extends AuthState {
   finishReactivation(profile: UserProfile): Promise<UserProfile>;
   acknowledgeUEID(): void;
   updateProfile(patch: ProfilePatch): Promise<UserProfile>;
+  /** Refresh session from a server-returned profile (email bind, reactivation). */
+  applyServerProfile(profile: UserProfile): Promise<UserProfile>;
   /** Persist usage heartbeat (`lastActiveAt` only — never login fields). */
   touchLastActive(): Promise<void>;
 }
@@ -375,6 +377,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [state.session, saveSession]
   );
 
+  const applyServerProfile = useCallback(
+    async (profile: UserProfile): Promise<UserProfile> => {
+      const session = await saveSession(profile, { preserveSignedInAt: true });
+      setState((s) => ({
+        ...s,
+        status: "signed_in",
+        session,
+        user: session.user,
+      }));
+      return session.user;
+    },
+    [saveSession]
+  );
+
   const sessionRef = useRef(state.session);
   const statusRef = useRef(state.status);
   sessionRef.current = state.session;
@@ -436,6 +452,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       finishReactivation,
       acknowledgeUEID,
       updateProfile,
+      applyServerProfile,
       touchLastActive,
     }),
     [
@@ -449,6 +466,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       finishReactivation,
       acknowledgeUEID,
       updateProfile,
+      applyServerProfile,
       touchLastActive,
     ]
   );

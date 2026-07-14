@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  Platform,
   ScrollView,
   StyleSheet,
   Switch,
@@ -47,8 +48,15 @@ import {
 } from "@/utils/profile/identityDraft";
 import type { ProfilePatch } from "@/services/auth/types";
 import {
+  completeBusinessEmailBind,
+  requiresServerEmailBinding,
+  startBusinessEmailVerification,
+} from "@/services/auth/bindBusinessEmail";
+import { stripServerOwnedProfilePatchKeys } from "@/services/auth/clientProfilePatchPayload";
+import {
   MAX_BUSINESS_NAME_CHANGES,
   MAX_EMAIL_CHANGES,
+  assertCanEditProfileField,
   canEditProfileField,
 } from "@/domain/profileUpdatePolicy";
 import { enrichProfilePatchWithPolicy } from "@/utils/profile/applyProfileUpdatePolicy";
@@ -71,11 +79,13 @@ const identitySchema = z.object({
 
 type IdentityForm = z.infer<typeof identitySchema>;
 
+const EMAIL_CODE_LENGTH = 6;
+
 export default function BusinessIdentityScreen() {
   const t = useT();
   const router = useRouter();
   const { from } = useLocalSearchParams<{ from?: string }>();
-  const { user, updateProfile } = useAuth();
+  const { user, updateProfile, applyServerProfile } = useAuth();
   const scrollRef = useRef<ScrollView>(null);
   const displayNameRef = useRef<TextInput>(null);
 
@@ -97,6 +107,13 @@ export default function BusinessIdentityScreen() {
   const [showPermission, setShowPermission] = useState(false);
   const [showDisplayNameError, setShowDisplayNameError] = useState(false);
   const [detailsEditing, setDetailsEditing] = useState(false);
+  const [emailVerifyPending, setEmailVerifyPending] = useState<{
+    verificationId: string;
+    email: string;
+    policyPatch: ProfilePatch;
+  } | null>(null);
+  const [emailVerifyCode, setEmailVerifyCode] = useState("");
+  const [emailVerifyBusy, setEmailVerifyBusy] = useState(false);
 
   const styles = useThemedStyles((c) =>
     StyleSheet.create({
@@ -121,6 +138,29 @@ export default function BusinessIdentityScreen() {
       toggleTitle: { ...typography.bodyStrong, color: c.text },
       toggleSub: { ...typography.caption, color: c.textMuted },
       err: { ...typography.caption, color: c.danger, marginBottom: spacing.sm },
+      emailVerifyBlock: {
+        marginTop: spacing.lg,
+        padding: spacing.md,
+        borderRadius: radius.md,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: c.divider,
+        gap: spacing.sm,
+      },
+      emailVerifyTitle: { ...typography.bodyStrong, color: c.text },
+      emailVerifyHint: { ...typography.caption, color: c.textMuted, lineHeight: 18 },
+      emailCodeInput: {
+        ...typography.mono,
+        fontSize: 22,
+        letterSpacing: 6,
+        textAlign: "center",
+        paddingVertical: spacing.md,
+        paddingHorizontal: spacing.md,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: c.divider,
+        color: c.text,
+        ...(Platform.OS === "android" ? { textAlignVertical: "center" as const } : {}),
+      },
     })
   );
 
@@ -283,12 +323,25 @@ export default function BusinessIdentityScreen() {
         return;
       }
 
+      const newEmail = formSnapshot.businessEmail.trim().toLowerCase() || null;
+      const baselineEmail = baseline.businessEmail.trim().toLowerCase() || null;
+      const emailChanged = newEmail !== baselineEmail;
+      const serverEmailBind = emailChanged && newEmail && requiresServerEmailBinding();
+
+      if (serverEmailBind) {
+        assertCanEditProfileField(user, "businessEmail");
+      }
+
       setSaving(true);
       setError(null);
       try {
         const patch: ProfilePatch =
           buildIdentityProfilePatch(user, baseline, formSnapshot, includeLogoOnPdf, logoDraft) ??
           {};
+
+        if (serverEmailBind) {
+          delete patch.businessEmail;
+        }
 
         const logoOp = pendingLogoSave(user, logoDraft);
         if (logoOp.kind === "persist") {
@@ -304,14 +357,33 @@ export default function BusinessIdentityScreen() {
 
         if (
           Object.keys(patch).length === 0 &&
-          !hasLogoFieldChange(logoDraft, baseline)
+          !hasLogoFieldChange(logoDraft, baseline) &&
+          !serverEmailBind
         ) {
           return;
         }
 
-        const next = await updateProfile(
-          enrichProfilePatchWithPolicy(user, patch, "settings")
-        );
+        let next = user;
+        if (Object.keys(patch).length > 0 || hasLogoFieldChange(logoDraft, baseline)) {
+          next = await updateProfile(
+            enrichProfilePatchWithPolicy(user, patch, "settings")
+          );
+        }
+
+        if (serverEmailBind) {
+          const policyPatch = enrichProfilePatchWithPolicy(
+            user,
+            { businessEmail: newEmail },
+            "settings"
+          );
+          const { verificationId } = await startBusinessEmailVerification(newEmail);
+          setEmailVerifyPending({ verificationId, email: newEmail, policyPatch });
+          setEmailVerifyCode("");
+          setLogoDraft({ status: "unchanged" });
+          setDetailsEditing(false);
+          return;
+        }
+
         setLogoDraft({ status: "unchanged" });
         const nextBaseline = snapshotIdentityBaseline(next);
         setBaseline(nextBaseline);
@@ -345,6 +417,52 @@ export default function BusinessIdentityScreen() {
       showSaveSuccess,
     ]
   );
+
+  const onVerifyEmailChange = useCallback(async () => {
+    if (!user || !emailVerifyPending || emailVerifyCode.length !== EMAIL_CODE_LENGTH) return;
+    setEmailVerifyBusy(true);
+    setError(null);
+    try {
+      const serverProfile = await completeBusinessEmailBind(
+        emailVerifyPending.verificationId,
+        emailVerifyCode
+      );
+      let next = await applyServerProfile(serverProfile);
+      const metadataPatch = stripServerOwnedProfilePatchKeys(
+        emailVerifyPending.policyPatch,
+        { production: true }
+      );
+      if (Object.keys(metadataPatch).length > 0) {
+        next = await updateProfile(metadataPatch);
+      }
+      const nextBaseline = snapshotIdentityBaseline(next);
+      setBaseline(nextBaseline);
+      setIncludeLogoOnPdf(nextBaseline.includeLogoOnPdf);
+      reset({
+        salutation: (next.salutation ?? "none") as ProfileSalutationId,
+        displayName: next.displayName ?? "",
+        businessName: next.businessName ?? "",
+        workType: next.workType ?? "",
+        businessEmail: next.businessEmail ?? "",
+        designation: next.designation ?? "",
+      });
+      setEmailVerifyPending(null);
+      setEmailVerifyCode("");
+      showSaveSuccess();
+    } catch (e) {
+      setError(userFacingMessage(e));
+    } finally {
+      setEmailVerifyBusy(false);
+    }
+  }, [
+    user,
+    emailVerifyPending,
+    emailVerifyCode,
+    applyServerProfile,
+    updateProfile,
+    reset,
+    showSaveSuccess,
+  ]);
 
   const onPrimaryPress = useCallback(() => {
     if (!showSaveFooter) return;
@@ -422,6 +540,46 @@ export default function BusinessIdentityScreen() {
       <ProfileIdentityHeroCard user={user} memberSinceMs={memberSinceMs} />
 
       {error ? <Text style={styles.err}>{error}</Text> : null}
+
+      {emailVerifyPending ? (
+        <View style={styles.emailVerifyBlock}>
+          <LocaleUiText style={styles.emailVerifyTitle}>
+            {t("pendingDeletion.reactivateEmailTitle")}
+          </LocaleUiText>
+          <LocaleUiText style={styles.emailVerifyHint}>
+            {t("pendingDeletion.reactivateEmailHint")}
+          </LocaleUiText>
+          <TextInput
+            style={styles.emailCodeInput}
+            value={emailVerifyCode}
+            onChangeText={(text) =>
+              setEmailVerifyCode(text.replace(/\D/g, "").slice(0, EMAIL_CODE_LENGTH))
+            }
+            keyboardType="number-pad"
+            maxLength={EMAIL_CODE_LENGTH}
+            autoComplete="one-time-code"
+            textContentType="oneTimeCode"
+            placeholder={t("otp.codePlaceholder")}
+            editable={!emailVerifyBusy}
+          />
+          <PremiumActionButton
+            label={t("pendingDeletion.verifyAndReactivate")}
+            onPress={() => void onVerifyEmailChange()}
+            variant="primary"
+            loading={emailVerifyBusy}
+            disabled={emailVerifyCode.length !== EMAIL_CODE_LENGTH || emailVerifyBusy}
+          />
+          <PremiumActionButton
+            label={t("common.cancel")}
+            onPress={() => {
+              setEmailVerifyPending(null);
+              setEmailVerifyCode("");
+            }}
+            variant="ghost"
+            disabled={emailVerifyBusy}
+          />
+        </View>
+      ) : null}
 
       {detailsEditing ? (
         <ProfileYourDetailsEditPanel

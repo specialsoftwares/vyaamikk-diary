@@ -120,6 +120,80 @@ async function main() {
     );
     check("safe profile patch allowed", true);
 
+    // --- Production-shaped setDoc merge (minimal changed fields) ---
+    await seedUser("merge-safe");
+    await assertSucceeds(
+      setDoc(
+        doc(authedDb("merge-safe"), "users", "merge-safe"),
+        {
+          displayName: "Merge Safe",
+          profileCompletedAt: Date.now(),
+          updatedAt: Date.now(),
+        },
+        { merge: true }
+      )
+    );
+    check("production-shaped setDoc merge safe patch allowed", true);
+
+    // --- Consent + last-active style patches ---
+    await assertSucceeds(
+      setDoc(
+        doc(authedDb("merge-safe"), "users", "merge-safe"),
+        {
+          legalConsents: [
+            {
+              consentVersion: "2026-01",
+              termsVersion: "2026-01",
+              privacyVersion: "2026-01",
+              effectiveDate: "2026-01-01",
+              acceptedAt: Date.now(),
+              sourceScreen: "auth",
+            },
+          ],
+          lastActiveAt: Date.now(),
+          updatedAt: Date.now(),
+        },
+        { merge: true }
+      )
+    );
+    check("consent and last-active merge patch allowed", true);
+
+    // --- Client email identity tamper denied ---
+    await seedUser("email-guard", { emailHash: null });
+    await assertFails(
+      updateDoc(doc(authedDb("email-guard"), "users", "email-guard"), {
+        emailHash: "deadbeef",
+        updatedAt: Date.now(),
+      })
+    );
+    check("client emailHash change denied", true);
+
+    await assertFails(
+      updateDoc(doc(authedDb("email-guard"), "users", "email-guard"), {
+        emailVerifiedAt: Date.now(),
+        updatedAt: Date.now(),
+      })
+    );
+    check("client emailVerifiedAt change denied", true);
+
+    // --- Legacy W4/W8 enrichment payload denied ---
+    await assertFails(
+      setDoc(
+        doc(authedDb("email-guard"), "users", "email-guard"),
+        {
+          businessEmail: "new@example.com",
+          normalizedEmail: "new@example.com",
+          emailHash: "cafebabe",
+          emailStatus: "verification_pending",
+          emailLinkedAt: Date.now(),
+          emailVerifiedAt: null,
+          updatedAt: Date.now(),
+        },
+        { merge: true }
+      )
+    );
+    check("legacy client email enrichment payload denied", true);
+
     // --- Deletion request (active -> pending_deletion) ---
     await assertSucceeds(
       updateDoc(doc(authedDb("alice"), "users", "alice"), {
@@ -128,6 +202,7 @@ async function main() {
         deletionScheduledFor: Date.now() + 86_400_000,
         deletionCompletedAt: null,
         retiredUeid: false,
+        mobileHash: "abc12345",
         updatedAt: Date.now(),
       })
     );
@@ -271,6 +346,15 @@ async function main() {
       })
     );
     check("legacy profile without status can write business data", true);
+
+    await assertSucceeds(
+      setDoc(
+        doc(authedDb("legacy"), "users", "legacy"),
+        { displayName: "Legacy Display", updatedAt: Date.now() },
+        { merge: true }
+      )
+    );
+    check("legacy profile safe root merge without status materialized", true);
   } finally {
     await testEnv.cleanup();
   }

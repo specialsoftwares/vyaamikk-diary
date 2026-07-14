@@ -39,6 +39,7 @@
     "test:pdf-redesign": "npx --yes tsx src/services/pdf/pdfRedesign.test.ts",
     "test:identity-email": "npx --yes tsx src/services/auth/emailLink.test.ts",
     "test:identity-mobile": "npx --yes tsx src/services/auth/identity.mobile.test.ts",
+    "test:client-profile-patch": "npx --yes tsx src/services/auth/clientProfilePatchPayload.test.ts",
     "test:auth-wrapper": "npx --yes tsx src/config/authWrapper.test.ts",
     "dev:reset-local": "npx --yes tsx scripts/dev-reset-cli.ts local",
     "dev:reset-firebase": "npx --yes tsx scripts/dev-reset-cli.ts firebase",

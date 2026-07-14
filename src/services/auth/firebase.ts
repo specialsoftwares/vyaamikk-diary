@@ -35,6 +35,11 @@ import {
   commitFirestoreEmailIndexOps,
   lookupFirestoreEmailIndex,
 } from "./emailIndexFirestore";
+import {
+  buildClientProfileFirestoreWrite,
+  findRejectedProductionPatchKeys,
+  stripServerOwnedProfilePatchKeys,
+} from "./clientProfilePatchPayload";
 import { profileDocumentMergeFields } from "./profileFirestorePayload";
 import {
   finalizeDeletionIfDue,
@@ -378,28 +383,46 @@ export const firebaseAuthService: AuthService = {
   },
 
   async updateProfile(uid: string, patch: ProfilePatch): Promise<UserProfile> {
-    if (useIdentityCallables()) {
+    const production = useIdentityCallables();
+    if (production) {
       const { ensureJsAuthSession } = await import("./jsAuthBridge");
       await ensureJsAuthSession();
+      const rejected = findRejectedProductionPatchKeys(patch);
+      if (rejected.length > 0) {
+        throw new AppError(
+          "permission_denied",
+          "This profile field must be updated through the server identity service."
+        );
+      }
     }
     const db = getFirebaseDb();
     const ref = doc(db, USERS_COLLECTION, uid);
     const snap = await getDoc(ref);
     if (!snap.exists()) throw new AppError("not_found", "User profile not found.");
     const existing = normaliseUserProfile(uid, snap.data() as Record<string, unknown>);
-    const skipClientEmailIndex = useIdentityCallables();
-    const linkedPatch = await enrichPatchWithEmailLink(
-      existing,
-      patch,
-      skipClientEmailIndex ? async () => null : lookupFirestoreEmailIndex,
-      skipClientEmailIndex
-        ? async () => {
-            /* production: emailIndex via verifyAndBindEmail Cloud Function */
-          }
-        : commitFirestoreEmailIndexOps
-    );
+
+    const safePatch = production
+      ? stripServerOwnedProfilePatchKeys(patch, { production: true })
+      : patch;
+
+    const linkedPatch = production
+      ? safePatch
+      : await enrichPatchWithEmailLink(
+          existing,
+          safePatch,
+          lookupFirestoreEmailIndex,
+          commitFirestoreEmailIndexOps
+        );
+
     const next = applyProfilePatch(existing, linkedPatch);
-    await setDoc(ref, profileDocumentMergeFields(next), { merge: true });
+    if (production) {
+      const write = buildClientProfileFirestoreWrite(existing, next, { production: true });
+      if (write) {
+        await setDoc(ref, write, { merge: true });
+      }
+    } else {
+      await setDoc(ref, profileDocumentMergeFields(next), { merge: true });
+    }
     return next;
   },
 
