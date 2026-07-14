@@ -1,14 +1,23 @@
 import en from "./locales/en.json";
-import hi from "./locales/hi.json";
-import ta from "./locales/ta.json";
-import te from "./locales/te.json";
-import gu from "./locales/gu.json";
-import { I18N_RESOURCES } from "./i18n";
 import { SUPPORTED_LANGS, type Lang } from "./types";
 
 type JsonTree = Record<string, unknown>;
 
-const LOCALES: Record<Lang, JsonTree> = { en, hi, ta, te, gu };
+/** Dynamic imports keep non-English payloads out of the eager boot path. */
+async function loadLocaleTree(lang: Lang): Promise<JsonTree> {
+  switch (lang) {
+    case "en":
+      return en as JsonTree;
+    case "hi":
+      return (await import("./locales/hi.json")).default as JsonTree;
+    case "ta":
+      return (await import("./locales/ta.json")).default as JsonTree;
+    case "te":
+      return (await import("./locales/te.json")).default as JsonTree;
+    case "gu":
+      return (await import("./locales/gu.json")).default as JsonTree;
+  }
+}
 
 function flattenKeys(node: unknown, prefix = "", out: string[] = []): string[] {
   if (typeof node === "string") {
@@ -31,18 +40,33 @@ export interface LocaleValidationReport {
 }
 
 /** Dev-only sanity check — missing keys are OK (English fallback handles them). */
-export function validateLocaleSetup(): LocaleValidationReport {
-  const registered = SUPPORTED_LANGS.filter(
-    (lang) => Boolean(I18N_RESOURCES[lang]?.translation)
-  );
-  const missingRegistration = SUPPORTED_LANGS.filter((lang) => !registered.includes(lang));
+export async function validateLocaleSetup(): Promise<LocaleValidationReport> {
+  const trees = new Map<Lang, JsonTree>();
+  const registered: Lang[] = [];
+  const missingRegistration: Lang[] = [];
+
+  for (const lang of SUPPORTED_LANGS) {
+    try {
+      const tree = await loadLocaleTree(lang);
+      if (tree && Object.keys(tree).length > 0) {
+        trees.set(lang, tree);
+        registered.push(lang);
+      } else {
+        missingRegistration.push(lang);
+      }
+    } catch {
+      missingRegistration.push(lang);
+    }
+  }
 
   const enKeys = flattenKeys(en);
   const missingKeys: Partial<Record<Lang, string[]>> = {};
 
   for (const lang of SUPPORTED_LANGS) {
     if (lang === "en") continue;
-    const localeKeys = new Set(flattenKeys(LOCALES[lang]));
+    const tree = trees.get(lang);
+    if (!tree) continue;
+    const localeKeys = new Set(flattenKeys(tree));
     const missing = enKeys.filter((key) => !localeKeys.has(key));
     if (missing.length > 0) missingKeys[lang] = missing.slice(0, 20);
   }
@@ -53,8 +77,13 @@ export function validateLocaleSetup(): LocaleValidationReport {
 
 export function assertLocalesInDev(): void {
   if (!__DEV__) return;
-  const report = validateLocaleSetup();
-  if (!report.ok) {
-    console.warn("[i18n] locale validation failed", report);
-  }
+  void validateLocaleSetup()
+    .then((report) => {
+      if (!report.ok) {
+        console.warn("[i18n] locale validation failed", report);
+      }
+    })
+    .catch((e) => {
+      console.warn("[i18n] locale validation errored", e);
+    });
 }

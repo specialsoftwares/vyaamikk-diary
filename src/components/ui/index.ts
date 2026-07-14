@@ -27,7 +27,6 @@ export { SubtlePatternCorner } from "./SubtlePatternCorner";
 export { ErrorState } from "./ErrorState";
 export { Header } from "./Header";
 export { LocaleUiText } from "./LocaleUiText";
-export { LanguageToggle } from "./LanguageToggle";
 export { LastRefreshedHint } from "./LastRefreshedHint";
 export { Loader } from "./Loader";
 export {

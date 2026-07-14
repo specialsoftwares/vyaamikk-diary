@@ -26,7 +26,7 @@
 | Intro splash | ✅ | — | ❓ | ❓ | |
 | Location onboarding | ✅ | — | ❓ | 🔧 | Native permission |
 | Native tabs navigation | ✅ | — | 📱 | 🔧 Liquid Glass | Expo Go ≠ native tab chrome |
-| Language switch | ✅ | 🧪 i18n | 📱 | 📱 | Dev reload path |
+| Language switch | ✅ | 🧪 i18n + language-transition | 📱 smoke | 📱 | Central controller; no DevSettings.reload |
 | Theme / appearance | ✅ | — | 📱 | 📱 | `useTheme` segmented control |
 
 ## You dashboard
@@ -34,8 +34,8 @@
 | Workflow | Static | Test | Expo Go | Dev build | Notes |
 |----------|--------|------|---------|-----------|-------|
 | Dashboard stats | ✅ | — | 📱 | ❓ | |
-| Hero identity card flip | ✅ | — | ❓ | ❓ | `animatingRef` risk |
-| New Record picker curtain | ✅ | — | ❓ | ❓ | `CurtainSheet` teardown risk |
+| Hero identity card flip | ✅ | 🧪 flip-lock | 📱 smoke | ❓ | Lock recovery implemented — native stress pending |
+| New Record picker curtain | ✅ | 🧪 curtain-phases | 📱 smoke | ❓ | Phase teardown implemented |
 | Global search | ✅ | — | ❓ | ❓ | |
 | Swipe delete row | ✅ | — | ❓ | ❓ | |
 

@@ -3,7 +3,13 @@
  *
  * Existing screens import `useI18n`, `useT`, and `translate` unchanged.
  * UI language is persisted under `vyd_language_v1` (legacy `vyd_lang_v1` read).
- * All five locale bundles are registered at init; missing keys fall back to English.
+ *
+ * Language switching runs through ONE deterministic transition controller
+ * (`languageTransitionController.ts`): every selector calls `setLang`, which
+ * rejects duplicates while a transition is in flight, loads the target locale
+ * bundle + script font BEFORE committing, applies the language, persists only
+ * after success, and always tears the transition overlay down (success,
+ * failure, timeout, unmount). No DevSettings.reload — remount-key bump only.
  */
 
 import React, {
@@ -15,13 +21,17 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { InteractionManager } from "react-native";
+import { AccessibilityInfo, InteractionManager } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-import { changeAppLanguage, i18n, initI18n, translateSync } from "./i18n";
-import { LanguageSwitchScreen } from "./LanguageSwitchScreen";
-import { LANGUAGE_SWITCH_MIN_HOLD_MS, waitMs } from "./languageSwitchMessages";
-import { reloadAppAfterLanguageChange } from "./reloadApp";
+import { changeAppLanguage, ensureLocaleBundle, i18n, initI18n, translateSync } from "./i18n";
+import { LanguageTransitionOverlay } from "./LanguageTransitionOverlay";
+import {
+  createLanguageTransitionController,
+  type LanguageTransitionController,
+  type LanguageTransitionPhase,
+} from "./languageTransitionController";
+import { ensureScriptFontLoaded } from "./localeFonts";
 import { assertLocalesInDev } from "./validateLocales";
 import {
   isLang,
@@ -35,9 +45,9 @@ import {
 export type { Lang };
 export { SUPPORTED_LANGS, LANG_NATIVE_LABELS };
 
-/** @deprecated All bundles load at init. Kept for backward compatibility. */
+/** @deprecated Bundles now load lazily per language. Kept for backward compatibility. */
 export async function ensureHiDictionary(): Promise<void> {
-  await initI18n();
+  await ensureLocaleBundle("hi");
 }
 
 export function translate(
@@ -81,14 +91,26 @@ async function persistLang(lang: Lang): Promise<void> {
 export function I18nProvider({ children }: { children: React.ReactNode }) {
   const [lang, setLangState] = useState<Lang>("en");
   const [ready, setReady] = useState(false);
-  const [switching, setSwitching] = useState(false);
-  const [switchingToLang, setSwitchingToLang] = useState<Lang | null>(null);
+  const [transitionPhase, setTransitionPhase] = useState<LanguageTransitionPhase>("idle");
+  const [overlayLang, setOverlayLang] = useState<Lang | null>(null);
   const [revision, setRevision] = useState(0);
   const [mountKey, setMountKey] = useState(0);
-  const switchInFlightRef = useRef(false);
+  const reduceMotionRef = useRef(false);
+  const pendingInstantRef = useRef(false);
+  const overlayShownResolveRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     assertLocalesInDev();
+  }, []);
+
+  useEffect(() => {
+    void AccessibilityInfo.isReduceMotionEnabled().then((v) => {
+      reduceMotionRef.current = v;
+    });
+    const sub = AccessibilityInfo.addEventListener("reduceMotionChanged", (v) => {
+      reduceMotionRef.current = v;
+    });
+    return () => sub.remove();
   }, []);
 
   useEffect(() => {
@@ -106,9 +128,12 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
     (async () => {
       try {
         const stored = await readStoredLang();
-        await initI18n(stored);
-        if (cancelled) return;
+        await initI18n("en");
         if (stored !== "en") {
+          // Load the active language's resources (locale bundle + script
+          // font) before first paint — font failure falls back to system.
+          await ensureScriptFontLoaded(stored);
+          if (cancelled) return;
           await changeAppLanguage(stored);
         }
         if (cancelled) return;
@@ -126,57 +151,76 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const completeLanguageSwitch = useCallback(
-    async (next: Lang, paintedAtMs: number) => {
-      if (switchInFlightRef.current) return;
-      switchInFlightRef.current = true;
-      try {
-        await persistLang(next);
+  const controllerRef = useRef<LanguageTransitionController | null>(null);
+  if (controllerRef.current === null) {
+    controllerRef.current = createLanguageTransitionController({
+      applyLanguage: async (next) => {
+        // Resources first: locale bundle failure aborts the switch (throws);
+        // font failure is non-fatal (system font renders the script).
+        await ensureLocaleBundle(next);
+        await ensureScriptFontLoaded(next);
         await changeAppLanguage(next);
         setLangState(next);
         setRevision((n) => n + 1);
+      },
+      persistLanguage: persistLang,
+      settle: async () => {
         setMountKey((k) => k + 1);
-
         await new Promise<void>((resolve) => {
           InteractionManager.runAfterInteractions(() => resolve());
         });
+      },
+      waitForOverlayIn: () =>
+        new Promise<void>((resolve) => {
+          overlayShownResolveRef.current = resolve;
+        }),
+      onPhaseChange: (phase, target) => {
+        setTransitionPhase(phase);
+        // Reduce Motion: no overlay — the language applies instantly.
+        if (phase === "preparing" && target && !pendingInstantRef.current) {
+          setOverlayLang(target);
+        }
+        // Overlay unmount is driven by handleOverlayHidden after fade-out;
+        // pointer events are already released when `active` flips false.
+      },
+    });
+  }
+  const controller = controllerRef.current;
 
-        const elapsed = Date.now() - paintedAtMs;
-        const holdRemaining = Math.max(0, LANGUAGE_SWITCH_MIN_HOLD_MS - elapsed);
-        if (holdRemaining > 0) await waitMs(holdRemaining);
+  useEffect(() => {
+    return () => controller.dispose();
+  }, [controller]);
 
-        const reloaded = await reloadAppAfterLanguageChange();
-        if (reloaded) return;
+  const handleOverlayShown = useCallback(() => {
+    overlayShownResolveRef.current?.();
+    overlayShownResolveRef.current = null;
+  }, []);
 
-        setSwitchingToLang(null);
-      } catch (e) {
-        if (__DEV__) console.warn("[i18n] language switch failed", e);
-        setSwitchingToLang(null);
-      } finally {
-        setSwitching(false);
-        switchInFlightRef.current = false;
-      }
-    },
-    []
-  );
+  const handleOverlayHidden = useCallback(() => {
+    setOverlayLang(null);
+  }, []);
 
-  const handleBufferPainted = useCallback(
-    (paintedAtMs: number) => {
-      const next = switchingToLang;
-      if (!next) return;
-      void completeLanguageSwitch(next, paintedAtMs);
-    },
-    [switchingToLang, completeLanguageSwitch]
-  );
+  const langRef = useRef(lang);
+  langRef.current = lang;
 
   const setLang = useCallback(
     (next: Lang) => {
-      if (!isLang(next) || next === lang || switchingToLang !== null) return;
-      setSwitching(true);
-      setSwitchingToLang(next);
+      if (!isLang(next)) return;
+      const instant = reduceMotionRef.current;
+      pendingInstantRef.current = instant;
+      void controller.request(next, langRef.current, { instant }).then((result) => {
+        if (result.status === "applied" && instant) {
+          AccessibilityInfo.announceForAccessibility(LANG_NATIVE_LABELS[next]);
+        }
+        if (result.status === "failed" && __DEV__) {
+          console.warn(`[i18n] language switch to ${next} failed`);
+        }
+      });
     },
-    [lang, switchingToLang]
+    [controller]
   );
+
+  const switching = transitionPhase !== "idle";
 
   const t = useCallback(
     (key: string, vars?: Record<string, string | number>) => {
@@ -197,13 +241,16 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <I18nContext.Provider value={api}>
-      {switchingToLang ? (
-        <LanguageSwitchScreen
-          targetLang={switchingToLang}
-          onPainted={handleBufferPainted}
-        />
-      ) : ready ? (
+      {ready ? (
         <React.Fragment key={`i18n-${mountKey}`}>{children}</React.Fragment>
+      ) : null}
+      {overlayLang ? (
+        <LanguageTransitionOverlay
+          targetLang={overlayLang}
+          active={switching}
+          onShown={handleOverlayShown}
+          onHidden={handleOverlayHidden}
+        />
       ) : null}
     </I18nContext.Provider>
   );

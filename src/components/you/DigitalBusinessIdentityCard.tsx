@@ -14,6 +14,7 @@ import {
 } from "react-native";
 import Animated, {
   Easing,
+  cancelAnimation,
   interpolate,
   runOnJS,
   useAnimatedStyle,
@@ -26,6 +27,12 @@ import { ProfileAvatar } from "@/components/profile/ProfileAvatar";
 import { DashboardGreetingHeroSurface } from "@/components/you/DashboardGreetingHeroSurface";
 import type { UserProfile } from "@/domain/types";
 import { useIdentityCardTrustStats } from "@/hooks/useIdentityCardTrustStats";
+import { useStuckBusyRecovery } from "@/hooks/useStuckBusyRecovery";
+import {
+  FLIP_LOCK_TIMEOUT_SLACK_MS,
+  createFlipLockController,
+  type FlipLockController,
+} from "./identityCardFlipController";
 import { useT } from "@/i18n";
 import { executivePressFeedback } from "@/theme/executiveLayer";
 import { radius, spacing, typography, useTheme, useThemedStyles } from "@/theme";
@@ -109,18 +116,75 @@ export function DigitalBusinessIdentityCard({
   const [sharing, setSharing] = useState(false);
   const [isBack, setIsBack] = useState(false);
   const [stageHeight, setStageHeight] = useState(STAGE_FALLBACK_HEIGHT);
-  const animatingRef = useRef(false);
   const shareLockRef = useRef(false);
+  const shareLockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const measuredHeights = useRef({ front: 0, back: 0 });
   const flipProgress = useSharedValue(0);
+  const flipProgressRef = useRef(flipProgress);
+  flipProgressRef.current = flipProgress;
+
+  // Single idempotent lock-release mechanism for the flip animation.
+  // Releases from: timing callback (any finished value), blur, unmount, and
+  // a defensive timeout that also snaps transforms to the nearest stable side.
+  const flipLockRef = useRef<FlipLockController | null>(null);
+  if (flipLockRef.current === null) {
+    flipLockRef.current = createFlipLockController({
+      timeoutMs: FLIP_MS + FLIP_LOCK_TIMEOUT_SLACK_MS,
+      scheduleTimeout: (fn, ms) => {
+        const id = setTimeout(fn, ms);
+        return () => clearTimeout(id);
+      },
+      onForcedRelease: () => {
+        const progress = flipProgressRef.current;
+        cancelAnimation(progress);
+        const settled = progress.value >= 0.5 ? 1 : 0;
+        progress.value = settled;
+        setIsBack(settled === 1);
+      },
+    });
+  }
+  const flipLock = flipLockRef.current;
+
+  const releaseShareLock = useCallback(() => {
+    if (shareLockTimerRef.current) {
+      clearTimeout(shareLockTimerRef.current);
+      shareLockTimerRef.current = null;
+    }
+    shareLockRef.current = false;
+  }, []);
+
+  /** Tracked timer (cleared on blur/unmount) — replaces the untracked 400ms setTimeout. */
+  const armShareLockRelease = useCallback(() => {
+    if (shareLockTimerRef.current) clearTimeout(shareLockTimerRef.current);
+    shareLockTimerRef.current = setTimeout(() => {
+      shareLockTimerRef.current = null;
+      shareLockRef.current = false;
+    }, 400);
+  }, []);
+
+  const shareRecovery = useStuckBusyRecovery(
+    useCallback(() => {
+      // Share.share can hang on iOS after sheet dismissal — recover on
+      // refocus / app-active so the card never stays disabled.
+      setSharing(false);
+      releaseShareLock();
+    }, [releaseShareLock])
+  );
 
   useFocusEffect(
     useCallback(() => {
       setPeriod(getGreetingPeriod());
       flipProgress.value = 0;
       setIsBack(false);
-      animatingRef.current = false;
-    }, [flipProgress])
+      flipLock.release();
+      return () => {
+        // Blur mid-animation: stop the worklet and release the lock so the
+        // card is responsive when the tab regains focus.
+        cancelAnimation(flipProgress);
+        flipLock.release();
+        releaseShareLock();
+      };
+    }, [flipProgress, flipLock, releaseShareLock])
   );
 
   useEffect(() => {
@@ -128,6 +192,17 @@ export function DigitalBusinessIdentityCard({
     const sub = AccessibilityInfo.addEventListener("reduceMotionChanged", setReduceMotion);
     return () => sub.remove();
   }, []);
+
+  useEffect(() => {
+    return () => {
+      flipLock.dispose();
+      cancelAnimation(flipProgressRef.current);
+      if (shareLockTimerRef.current) {
+        clearTimeout(shareLockTimerRef.current);
+        shareLockTimerRef.current = null;
+      }
+    };
+  }, [flipLock]);
 
   const syncStageHeight = useCallback(() => {
     const next = Math.max(measuredHeights.current.front, measuredHeights.current.back);
@@ -296,29 +371,41 @@ export function DigitalBusinessIdentityCard({
     })
   );
 
-  const endFlipAnimation = useCallback((back: boolean) => {
-    animatingRef.current = false;
-    setIsBack(back);
-  }, []);
+  const settleFlip = useCallback(
+    (target: number, finished: boolean) => {
+      if (!flipLock.release()) return;
+      if (finished) {
+        setIsBack(target >= 0.5);
+        return;
+      }
+      // Interrupted/cancelled: restore a stable transform on the nearest side
+      // so neither face is stuck mid-rotation intercepting touches.
+      const progress = flipProgressRef.current;
+      const settled = progress.value >= 0.5 ? 1 : 0;
+      progress.value = settled;
+      setIsBack(settled === 1);
+    },
+    [flipLock]
+  );
 
   const toggleFlip = useCallback(() => {
-    if (animatingRef.current || sharing || shareLockRef.current) return;
-    animatingRef.current = true;
+    if (sharing || shareLockRef.current) return;
+    if (!flipLock.acquire()) return;
     const next = flipProgress.value < 0.5 ? 1 : 0;
     if (reduceMotion) {
       flipProgress.value = next;
       setIsBack(next >= 0.5);
-      animatingRef.current = false;
+      flipLock.release();
       return;
     }
     flipProgress.value = withTiming(
       next,
       { duration: FLIP_MS, easing: FLIP_EASING },
       (finished) => {
-        if (finished) runOnJS(endFlipAnimation)(next >= 0.5);
+        runOnJS(settleFlip)(next, finished === true);
       }
     );
-  }, [flipProgress, reduceMotion, sharing, endFlipAnimation]);
+  }, [flipProgress, reduceMotion, sharing, flipLock, settleFlip]);
 
   const frontFaceStyle = useAnimatedStyle(() => {
     const rotateY = interpolate(flipProgress.value, [0, 1], [0, 180]);
@@ -339,6 +426,7 @@ export function DigitalBusinessIdentityCard({
   const onShare = useCallback(async () => {
     if (!user || sharing) return;
     setSharing(true);
+    shareRecovery.markPending();
     try {
       const message = buildBusinessIdentityShareMessage(user, t);
       await Share.share({
@@ -348,9 +436,10 @@ export function DigitalBusinessIdentityCard({
     } catch {
       // dismissed
     } finally {
+      shareRecovery.clearPending();
       setSharing(false);
     }
-  }, [user, sharing, t]);
+  }, [user, sharing, t, shareRecovery]);
 
   const onManageInSettings = useCallback(() => {
     router.push({
@@ -464,9 +553,7 @@ export function DigitalBusinessIdentityCard({
         }}
         onPress={() => {
           void onShare();
-          setTimeout(() => {
-            shareLockRef.current = false;
-          }, 400);
+          armShareLockRelease();
         }}
         disabled={sharing || !user}
         style={({ pressed }) => [styles.shareBtn, pressed && styles.shareBtnPressed]}
@@ -498,9 +585,7 @@ export function DigitalBusinessIdentityCard({
         }}
         onPress={() => {
           onManageInSettings();
-          setTimeout(() => {
-            shareLockRef.current = false;
-          }, 400);
+          armShareLockRelease();
         }}
         style={styles.manageLink}
         accessibilityRole="link"

@@ -1,8 +1,8 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AppState } from "react-native";
-import { useFocusEffect, useRouter } from "expo-router";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "expo-router";
 
 import { PremiumActionButton } from "@/components/ui/PremiumActionButton";
+import { useStuckBusyRecovery } from "@/hooks/useStuckBusyRecovery";
 import { PremiumSuccessPrompt } from "@/components/ui/PremiumSuccessPrompt";
 import type { BusinessEntry } from "@/domain/businessEntry";
 import { userFacingMessage } from "@/domain/errors";
@@ -35,32 +35,15 @@ export function ComposerSaveSuccess({
   const [entry, setEntry] = useState(entryProp);
   const [exporting, setExporting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const exportingRef = useRef(false);
 
   useEffect(() => {
     setEntry(entryProp);
   }, [entryProp]);
 
   /** Share sheet / app switch can leave `exporting` stuck on iOS when the promise never settles. */
-  useFocusEffect(
-    useCallback(() => {
-      if (exportingRef.current) {
-        exportingRef.current = false;
-        setExporting(false);
-      }
-      return undefined;
-    }, [])
+  const shareRecovery = useStuckBusyRecovery(
+    useCallback(() => setExporting(false), [])
   );
-
-  useEffect(() => {
-    const sub = AppState.addEventListener("change", (state) => {
-      if (state === "active" && exportingRef.current) {
-        exportingRef.current = false;
-        setExporting(false);
-      }
-    });
-    return () => sub.remove();
-  }, []);
 
   const locale = "en-IN" as const;
 
@@ -125,7 +108,7 @@ export function ComposerSaveSuccess({
   const onPdf = useCallback(async () => {
     if (!user) return;
     setActionError(null);
-    exportingRef.current = true;
+    shareRecovery.markPending();
     setExporting(true);
     try {
       if (entry.pdfUri) {
@@ -156,10 +139,10 @@ export function ComposerSaveSuccess({
         feedback.showError(msg, t("composer.saveSuccess.exportFailedTitle"));
       }
     } finally {
-      exportingRef.current = false;
+      shareRecovery.clearPending();
       setExporting(false);
     }
-  }, [entry, user, locale, t, feedback]);
+  }, [entry, user, locale, t, feedback, shareRecovery]);
 
   const pdfLabel = entry.pdfUri
     ? t("composer.saveSuccess.viewPdf")

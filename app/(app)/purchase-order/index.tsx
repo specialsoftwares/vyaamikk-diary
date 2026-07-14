@@ -23,6 +23,7 @@ import { Banner,
   Screen, LocaleUiText } from "@/components/ui";
 import { useAuth } from "@/state/auth";
 import { useAppRefresh } from "@/hooks/useAppRefresh";
+import { useStuckBusyRecovery } from "@/hooks/useStuckBusyRecovery";
 import { useI18n, useT } from "@/i18n";
 import { radius, spacing, typography, useThemedStyles } from "@/theme";
 import { userFacingMessage } from "@/domain/errors";
@@ -56,6 +57,10 @@ export default function PurchaseOrderListScreen() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const hasLoadedOnce = useRef(false);
   const feedback = useAppFeedback();
+  // Recover `busyId` if the iOS share-sheet promise never settles.
+  const shareRecovery = useStuckBusyRecovery(
+    useCallback(() => setBusyId(null), [])
+  );
 
   const styles = useThemedStyles((c) =>
     StyleSheet.create({
@@ -123,6 +128,7 @@ export default function PurchaseOrderListScreen() {
       if (!user) return;
       setActionError(null);
       setBusyId(po.id);
+      shareRecovery.markPending();
       try {
         let logoDataUri: string | null = null;
         if (po.useLogo && user.profileLogo?.localUri) {
@@ -152,10 +158,11 @@ export default function PurchaseOrderListScreen() {
       } catch (e) {
         setActionError(userFacingMessage(e) || t("purchaseOrder.errGenerate"));
       } finally {
+        shareRecovery.clearPending();
         setBusyId(null);
       }
     },
-    [user, pdfLocale, t]
+    [user, pdfLocale, t, shareRecovery]
   );
 
   const onCancel = useCallback(

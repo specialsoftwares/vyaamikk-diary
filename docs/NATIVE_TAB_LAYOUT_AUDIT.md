@@ -40,8 +40,8 @@ import { Icon, Label, NativeTabs, VectorIcon } from "expo-router/unstable-native
 |----------|---------------|----------------|
 | `tintColor` | `#4338CA` (brand indigo) | Low — active tint only |
 | `iconColor` | `colors.textMuted` from theme | Low |
-| `labelStyle.default.fontSize` | `11` | **Medium** — may fight system dynamic type / Liquid Glass label metrics |
-| `labelStyle.selected.fontSize` | `11` | **Medium** — same |
+| `labelStyle.default.fontSize` | *(removed)* | **Fixed** — custom `fontSize: 11` removed; system typography only (colors retained) |
+| `labelStyle.selected.fontSize` | *(removed)* | **Fixed** — see above |
 | Custom letter spacing | None on labels | Low |
 | Forced tab widths | None | Low |
 | Horizontal padding | None custom | Low |
@@ -94,6 +94,6 @@ Material 3 bottom navigation via native tabs API. Verify:
 
 ## Recommended Fable tasks (P1)
 
-1. Native dev build screenshot comparison: default label style vs current `fontSize: 11`.
-2. If spacing confirmed off, drop custom `labelStyle` sizes and rely on system typography tokens.
-3. Document final tab spec in `PRODUCTION_READINESS.md` after native verification only.
+1. ~~Drop custom `labelStyle` font sizes~~ ✅ Implemented — colors only in `_layout.tsx`
+2. Native dev build screenshot comparison on **iOS 26 Liquid Glass** — **pending** (Apple Developer team not yet available)
+3. Document final tab spec in `PRODUCTION_READINESS.md` after native verification only

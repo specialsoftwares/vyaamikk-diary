@@ -38,10 +38,9 @@
 |-------|-------|
 | Evidence | Prior `permission-denied` on OTP in Expo Go when default was `firebase-shared-dev` |
 | Files | `src/config/env.ts` (`EXPO_PUBLIC_DEV_BACKEND` opt-in) |
-| Status | **Fixed in prior session** — default `local-mock` (uncommitted in working tree) |
-| Production rules live | ✅ Hardened rules deployed — Expo Go must stay on `local-mock` or permissive dev project |
-| Test | Expo Go login `123456` → no Firestore writes |
-| Marked complete | ❌ **No** — environment isolation not verified end-to-end in this pass |
+| Status | ✅ **Complete** (commit `3bc2e2e`) — runtime isolation in `runtimeEnvironment.ts` |
+| Test | `npm run test:env-resolution`, `npm run test:env-shell-precedence` |
+| Marked complete | ✅ Expo Go → `local-mock`; dev client → `firebase-production` fail-closed |
 
 ---
 
@@ -51,24 +50,17 @@
 
 | Field | Value |
 |-------|-------|
-| Symptom | Content frozen; native tab bar may still work |
-| Reproduction steps | You → + New Record → open picker → dismiss via drag/backdrop/select → tap dashboard buttons |
-| Root cause | `teardown()` only when spring `finished===true`; `rendered` Modal keeps full-screen `Pressable` (`CurtainSheet.tsx` L247–268) |
-| File | `src/components/ui/CurtainSheet.tsx` |
-| Function | `springClose`, `teardown`, `useEffect` on `visible` |
-| Correction | On `finished===false`, force `teardown()`; add max close timeout (~400ms); set backdrop `Pressable` `pointerEvents` to `none` when `isClosing` or opacity≈0 |
-| Regression risk | Medium — animation timing |
-| Test | Operator matrix #1, #9; automated: mount/unmount cycle test with mocked Reanimated |
+| Status | ✅ **Implemented** |
+| Correction | `curtainSheetPhases.ts` + `CurtainSheet.tsx` phase model; 450ms timeout; `pointerEvents` gating |
+| Test | `npm run test:curtain-phases` |
+| Device verify | ☐ Native dev build operator matrix |
 
 ### F-FRZ-02 — Identity card flip `animatingRef` lock
 
 | Field | Value |
 |-------|-------|
-| Reproduction | You tab → rapid flip hero card → interrupt (tab switch mid-animation) |
-| Root cause | `animatingRef` cleared only when `withTiming` `finished===true` (`DigitalBusinessIdentityCard.tsx` L304–320) |
-| Correction | Reset on `useFocusEffect` blur; handle `finished===false`; optional `cancelAnimation` |
-| Regression risk | Low |
-| Test | Manual flip stress on You tab |
+| Status | ✅ **Implemented** — `identityCardFlipController.ts` |
+| Test | `npm run test:flip-lock` |
 
 ---
 
@@ -78,20 +70,14 @@
 
 | Field | Value |
 |-------|-------|
-| Evidence | Multiple remount paths; 1200ms hold; dev `DevSettings.reload`; weak visual |
-| Files to consolidate | `src/i18n/index.tsx`, `LanguageSwitchScreen.tsx`, `reloadApp.ts`, `LanguageToggle.tsx` |
-| Design | See `docs/LANGUAGE_TRANSITION_REDESIGN.md` |
-| Correction | Implement 550–650ms state machine with Reduce Motion + rollback |
-| Test | `npm run test:i18n`; manual rapid switch |
+| Status | ✅ **Implemented** |
+| Test | `npm run test:language-transition`, `npm run test:i18n` |
 
-### F-LANG-02 — Remove or wire deprecated LanguageToggle
+### F-LANG-02 — Remove deprecated LanguageToggle
 
 | Field | Value |
 |-------|-------|
-| File | `src/components/ui/LanguageToggle.tsx` |
-| Issue | No `switching` guard — competes with `LanguageSelector` |
-| Correction | Delete export or delegate to controller with lock |
-| Test | Grep ensure no imports |
+| Status | ✅ **Removed** — file deleted; export removed from `ui/index.ts` |
 
 ---
 
@@ -101,10 +87,7 @@
 
 | Field | Value |
 |-------|-------|
-| File | `app/(app)/(tabs)/_layout.tsx` L70–73 |
-| Issue | `fontSize: 11` may conflict with Liquid Glass system metrics |
-| Correction | A/B test removing custom `labelStyle` sizes on EAS dev build |
-| Test | Screenshot compare iOS 26 device — **not Expo Go** |
+| Status | ✅ **Partial** — custom `fontSize` removed; **Liquid Glass geometry verify pending** on physical iOS 26 device |
 
 ---
 
@@ -114,29 +97,20 @@
 
 | Field | Value |
 |-------|-------|
-| Files | `src/i18n/i18n.ts` |
-| Evidence | 5 JSON ~900KB+ eager; 3850 modules; 12.4MB HBC |
-| Correction | Dynamic import per lang; keep `en` eager |
-| Test | `expo export` size compare |
+| Status | ✅ **Implemented** — `ensureLocaleBundle` dynamic import |
+| Export HBC | Unchanged 12.4 MB; runtime init reduced |
 
 ### F-PERF-02 — Lazy script fonts
 
 | Field | Value |
 |-------|-------|
-| File | `src/i18n/LocaleFontProvider.tsx` |
-| Evidence | 12 Noto TTF loaded at startup |
-| Correction | Load active script family only |
-| Test | First-open timing on Expo Go |
+| Status | ✅ **Implemented** — `localeFonts.ts` per-script load |
 
 ### F-PERF-03 — iOS share-sheet exporting guard (diary detail)
 
 | Field | Value |
 |-------|-------|
-| File | `app/(app)/diary/[id].tsx` `onExportPdf` L168–216 |
-| Evidence | `ComposerSaveSuccess.tsx` L44–63 has guard; diary does not |
-| Correction | Extract `useShareSheetBusyGuard` hook; apply to diary + other share callers |
-| Regression risk | Low |
-| Test | Manual iOS share dismiss |
+| Status | ✅ **Implemented** — `useStuckBusyRecovery` on diary + other share callers |
 
 ---
 
@@ -189,14 +163,14 @@
 | Client rules compatibility (`11503ce`) | ✅ In repo |
 | Firebase Console rules timestamp | ✅ Verified |
 | Production smoke testing | ❌ Not complete |
-| Expo Go environment isolation | ❌ Not complete |
+| Expo Go environment isolation | ✅ Complete (`3bc2e2e`) |
 | Native OTP verification on device | ❌ Not complete |
 | App Check | ❌ Not installed |
 | Storage rules verification | ❌ Not complete |
-| Fable runtime pass | ❌ Not complete |
-| Reproducible freeze captured live | ❌ — static hypothesis only |
-| Blocking overlay defect identified | ✅ hypothesis `CurtainSheet` |
-| Language multiple implementations | ✅ primary + deprecated `LanguageToggle` |
+| Fable runtime pass | ✅ Implemented — **native device matrix pending** |
+| Reproducible freeze captured live | ❌ — root cause fixed statically; operator verify pending |
+| Blocking overlay defect identified | ✅ **Fixed** `CurtainSheet` |
+| Language multiple implementations | ✅ **Single controller** |
 | Tab implementation documented | ✅ `NativeTabs` unstable API |
 | Bundle audit complete | ✅ |
 | Edge matrix complete | ✅ |

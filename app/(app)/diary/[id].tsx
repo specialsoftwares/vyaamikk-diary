@@ -16,6 +16,7 @@ import { isComposerEntryType } from "@/domain/composerOptions";
 import { entryHasPdfExport, entryTypeLabelKey } from "@/utils/businessEntry/display";
 import { freightDefaultsFromDispatch } from "@/utils/businessEntry/freightFromDispatch";
 import { userFacingMessage } from "@/domain/errors";
+import { useStuckBusyRecovery } from "@/hooks/useStuckBusyRecovery";
 import { getDiaryRepository } from "@/services/diary";
 import { updateEntryLocalFirst } from "@/services/diary/localFirst";
 import { stripGpsFromLocation } from "@/services/location/locationRecordService";
@@ -49,6 +50,11 @@ export default function EntryDetailScreen() {
   const [linkedDispatchStale, setLinkedDispatchStale] = useState(false);
   const [refreshingLink, setRefreshingLink] = useState(false);
   const [removingGps, setRemovingGps] = useState(false);
+  // iOS share-sheet promise can hang after dismissal, stranding `exporting`
+  // past its `finally` — recover on refocus / app-active (see hook docs).
+  const shareRecovery = useStuckBusyRecovery(
+    useCallback(() => setExporting(false), [])
+  );
   const styles = useThemedStyles((colors) =>
     StyleSheet.create({
       bannerWrap: { marginBottom: spacing.md },
@@ -169,6 +175,7 @@ export default function EntryDetailScreen() {
     if (!entry || !user) return;
     setActionError(null);
     setExporting(true);
+    shareRecovery.markPending();
     try {
       if (entry.entryType === "business_cash_given") {
         const updated = await exportCashPaidPdf(user.uid, entry, {
@@ -211,6 +218,7 @@ export default function EntryDetailScreen() {
         setActionError(userFacingMessage(e) || t("pdf.entryExportFailed"));
       }
     } finally {
+      shareRecovery.clearPending();
       setExporting(false);
     }
   };

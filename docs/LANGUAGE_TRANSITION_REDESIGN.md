@@ -1,30 +1,24 @@
 # Language Transition Redesign (Design Only)
 
 **Date:** 2026-07-15  
-**Status:** Design for Fable 5 implementation pass — **not implemented** in this diagnostic.
+**Status:** ✅ **Implemented** in Fable runtime pass — see `languageTransitionController.ts`, `LanguageTransitionOverlay.tsx`, lazy `i18n.ts` + `localeFonts.ts`.
 
 ---
 
 ## Current architecture map
 
-### Single primary path (active in Settings)
+### Single primary path (active — all selectors)
 
 | Step | File | Function / component |
 |------|------|---------------------|
-| UI trigger | `src/components/settings/LanguageSelector.tsx` | `onSelect` → `setLang(next)` with `switching` guard |
-| State machine (inline) | `src/i18n/index.tsx` `I18nProvider` | `setLang` → `setSwitchingToLang` → renders `LanguageSwitchScreen` |
-| Buffer screen | `src/i18n/LanguageSwitchScreen.tsx` | Full-screen indigo buffer; `onPainted` after double `rAF` |
-| Apply language | `src/i18n/index.tsx` `completeLanguageSwitch` | `persistLang` → `changeAppLanguage` → `setLangState` → `setMountKey` bump |
-| Hold timing | `src/i18n/languageSwitchMessages.ts` | `LANGUAGE_SWITCH_MIN_HOLD_MS = 1200` |
-| Reload | `src/i18n/reloadApp.ts` | `DevSettings.reload()` in `__DEV__` (Expo Go) |
-| Font swap | `src/i18n/LocaleFontProvider.tsx` | `useFonts` loads **all** Noto script families at startup; `setLocaleFontFamily` on lang change |
-| i18n engine | `src/i18n/i18n.ts` | All 5 locale JSON bundles registered eagerly at `initI18n` |
-
-### Secondary / competing path (deprecated, still exported)
-
-| File | Issue |
-|------|-------|
-| `src/components/ui/LanguageToggle.tsx` | Marked `@deprecated`; **no `switching` lock**; calls `setLang` directly. Exported from `src/components/ui/index.ts` but **not imported** by any `app/**` screen in current tree. Risk: future re-use without guard. |
+| UI trigger | `src/components/settings/LanguageSelector.tsx` | `onSelect` → `setLang(next)` |
+| Controller | `src/i18n/languageTransitionController.ts` | `idle` → `preparing` → `switching` → `settling` → `idle` (~600ms visible) |
+| Provider entry | `src/i18n/index.tsx` `I18nProvider.setLang` | **Only public switching entry point** |
+| Overlay | `src/i18n/LanguageTransitionOverlay.tsx` | Fade in/out; `pointerEvents="none"` when hiding; **400ms hide fallback** |
+| Locale load | `src/i18n/i18n.ts` `ensureLocaleBundle` | Dynamic `import()` per lang; `en` eager only |
+| Font load | `src/i18n/localeFonts.ts` | Per-script family on demand; system-font fallback |
+| Font apply | `src/i18n/LocaleFontProvider.tsx` | Active language only |
+| Removed | `LanguageSwitchScreen.tsx`, `reloadApp.ts`, `LanguageToggle.tsx` | No `DevSettings.reload()` in language path |
 
 ### Multiple remount triggers on switch
 

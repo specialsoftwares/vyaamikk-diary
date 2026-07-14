@@ -1,38 +1,14 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { Platform } from "react-native";
-import { useFonts } from "expo-font";
-import {
-  NotoSansDevanagari_400Regular,
-  NotoSansDevanagari_500Medium,
-  NotoSansDevanagari_600SemiBold,
-} from "@expo-google-fonts/noto-sans-devanagari";
-import {
-  NotoSansTamil_400Regular,
-  NotoSansTamil_500Medium,
-  NotoSansTamil_600SemiBold,
-} from "@expo-google-fonts/noto-sans-tamil";
-import {
-  NotoSansTelugu_400Regular,
-  NotoSansTelugu_500Medium,
-  NotoSansTelugu_600SemiBold,
-} from "@expo-google-fonts/noto-sans-telugu";
-import {
-  NotoSansGujarati_400Regular,
-  NotoSansGujarati_500Medium,
-  NotoSansGujarati_600SemiBold,
-} from "@expo-google-fonts/noto-sans-gujarati";
 
-import { setLocaleFontFamily, type LocaleFontFamily } from "@/theme/localeTypography";
-import { useI18n, type Lang } from "./index";
-
-const SCRIPT_LANGS = new Set<Lang>(["hi", "ta", "te", "gu"]);
-
-const FONT_BY_LANG: Record<"hi" | "ta" | "te" | "gu", LocaleFontFamily> = {
-  hi: "NotoSansDevanagari_400Regular",
-  ta: "NotoSansTamil_400Regular",
-  te: "NotoSansTelugu_400Regular",
-  gu: "NotoSansGujarati_400Regular",
-};
+import { setLocaleFontFamily } from "@/theme/localeTypography";
+import {
+  FONT_BY_LANG,
+  ensureScriptFontLoaded,
+  isScriptLang,
+  resolveLoadedLocaleFont,
+} from "./localeFonts";
+import { useI18n } from "./index";
 
 const SYSTEM_FONT = Platform.select({
   ios: "System",
@@ -54,34 +30,44 @@ export function useLocaleFontRevision(): number {
   return useContext(LocaleFontContext).revision;
 }
 
-function resolveLocaleFont(lang: Lang, fontsLoaded: boolean): LocaleFontFamily | undefined {
-  if (!fontsLoaded || !SCRIPT_LANGS.has(lang)) return undefined;
-  return FONT_BY_LANG[lang as "hi" | "ta" | "te" | "gu"];
-}
-
-/** Loads script fonts and rebuilds typography tokens for Hindi/Tamil/Telugu/Gujarati UI. */
+/**
+ * Resolves the script font for the active language only.
+ *
+ * The language transition controller preloads the target script font BEFORE
+ * committing a switch, and the boot path preloads the stored language's font
+ * before first paint — so this provider normally finds the font already
+ * cached. The load-on-lang-change effect below is a safety net; while a font
+ * loads (or if it fails), the system font renders the script correctly — no
+ * blank text.
+ */
 export function LocaleFontProvider({ children }: { children: React.ReactNode }) {
   const { lang } = useI18n();
   const [revision, setRevision] = useState(0);
-  const [fontsLoaded] = useFonts({
-    NotoSansDevanagari_400Regular,
-    NotoSansDevanagari_500Medium,
-    NotoSansDevanagari_600SemiBold,
-    NotoSansTamil_400Regular,
-    NotoSansTamil_500Medium,
-    NotoSansTamil_600SemiBold,
-    NotoSansTelugu_400Regular,
-    NotoSansTelugu_500Medium,
-    NotoSansTelugu_600SemiBold,
-    NotoSansGujarati_400Regular,
-    NotoSansGujarati_500Medium,
-    NotoSansGujarati_600SemiBold,
-  });
-
-  const fontFamily = useMemo(
-    () => resolveLocaleFont(lang, fontsLoaded) ?? SYSTEM_FONT,
-    [lang, fontsLoaded]
+  const [fontFamily, setFontFamily] = useState<string>(
+    () => resolveLoadedLocaleFont(lang) ?? SYSTEM_FONT
   );
+
+  useEffect(() => {
+    if (!isScriptLang(lang)) {
+      setFontFamily(SYSTEM_FONT);
+      return;
+    }
+    const loaded = resolveLoadedLocaleFont(lang);
+    if (loaded) {
+      setFontFamily(loaded);
+      return;
+    }
+    // Safety net: transition/boot should have preloaded this already.
+    let cancelled = false;
+    setFontFamily(SYSTEM_FONT);
+    void ensureScriptFontLoaded(lang).then((ok) => {
+      if (cancelled) return;
+      setFontFamily(ok ? FONT_BY_LANG[lang] : SYSTEM_FONT);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [lang]);
 
   useEffect(() => {
     setLocaleFontFamily(fontFamily);

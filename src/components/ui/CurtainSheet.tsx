@@ -29,6 +29,12 @@ import Animated, {
   type WithSpringConfig,
 } from "react-native-reanimated";
 
+import {
+  createCurtainPhaseController,
+  type CurtainPhase,
+  type CurtainPhaseController,
+} from "./curtainSheetPhases";
+
 /** Flat deep indigo curtain surface — no gradients. */
 export const CURTAIN_SURFACE = "#1E1B4B";
 
@@ -77,6 +83,12 @@ export interface CurtainSheetProps {
 /**
  * Premium bottom curtain — Reanimated spring open/close, 1:1 header drag,
  * overlay opacity synced to sheet travel on the UI thread.
+ *
+ * Lifecycle is driven by an explicit phase model (closed → opening → open →
+ * closing → closed, see curtainSheetPhases.ts). Teardown is guaranteed even
+ * when the close spring is cancelled or reports `finished === false`, backed
+ * by a defensive timeout — so the modal and its full-screen backdrop can
+ * never remain mounted as an invisible touch blocker after dismissal.
  */
 export const CurtainSheet = forwardRef<CurtainSheetHandle, CurtainSheetProps>(
   function CurtainSheet(
@@ -97,12 +109,9 @@ export const CurtainSheet = forwardRef<CurtainSheetHandle, CurtainSheetProps>(
     const closedY = screenHeight;
     const sheetHeight = screenHeight - openY;
 
-    const [rendered, setRendered] = useState(false);
-    const tornDownRef = useRef(false);
-    const prevVisibleRef = useRef(false);
+    const [phase, setPhase] = useState<CurtainPhase>("closed");
     const onCloseRef = useRef(onClose);
     const onHardwareBackRef = useRef(onHardwareBack);
-    const afterCloseRef = useRef<(() => void) | null>(null);
     onCloseRef.current = onClose;
     onHardwareBackRef.current = onHardwareBack;
 
@@ -110,32 +119,54 @@ export const CurtainSheet = forwardRef<CurtainSheetHandle, CurtainSheetProps>(
     const dragStartY = useSharedValue(closedY);
     const isClosing = useSharedValue(false);
 
-    const teardown = useCallback(() => {
-      if (tornDownRef.current) return;
-      tornDownRef.current = true;
-      isClosing.value = false;
-      cancelAnimation(translateY);
-      translateY.value = closedY;
-      setRendered(false);
-      onCloseRef.current();
-      const next = afterCloseRef.current;
-      afterCloseRef.current = null;
-      next?.();
-    }, [closedY, isClosing, translateY]);
+    // Geometry refs so the (stable) controller callbacks always see current values.
+    const closedYRef = useRef(closedY);
+    closedYRef.current = closedY;
+    const translateYRef = useRef(translateY);
+    translateYRef.current = translateY;
+    const isClosingRef = useRef(isClosing);
+    isClosingRef.current = isClosing;
+
+    const controllerRef = useRef<CurtainPhaseController | null>(null);
+    if (controllerRef.current === null) {
+      controllerRef.current = createCurtainPhaseController({
+        onPhaseChange: setPhase,
+        onTeardown: () => {
+          // Reset animation state and release everything for the parent.
+          cancelAnimation(translateYRef.current);
+          translateYRef.current.value = closedYRef.current;
+          isClosingRef.current.value = false;
+          onCloseRef.current();
+        },
+        scheduleTimeout: (fn, ms) => {
+          const id = setTimeout(fn, ms);
+          return () => clearTimeout(id);
+        },
+      });
+    }
+    const controller = controllerRef.current;
+
+    const handleOpenSettled = useCallback(() => {
+      controller.handleOpenSettled();
+    }, [controller]);
+
+    const handleCloseSettled = useCallback(() => {
+      controller.handleCloseSettled();
+    }, [controller]);
 
     const springClose = useCallback(
       (afterClose?: () => void) => {
-        if (isClosing.value || tornDownRef.current) return;
+        if (!controller.requestClose(afterClose)) return;
+        // Phase is now "closing": backdrop + sheet pointerEvents are released
+        // on this same render pass; the spring callback fires regardless of
+        // `finished`, and the controller timeout covers a dropped callback.
         isClosing.value = true;
-        afterCloseRef.current = afterClose ?? null;
         cancelAnimation(translateY);
-        translateY.value = withSpring(closedY, CURTAIN_CLOSE_SPRING, (finished) => {
-          if (finished) {
-            runOnJS(teardown)();
-          }
+        translateY.value = withSpring(closedY, CURTAIN_CLOSE_SPRING, () => {
+          runOnJS(handleCloseSettled)();
         });
       },
-      [closedY, isClosing, teardown, translateY]
+      [closedY, controller, handleCloseSettled, isClosing, translateY]
     );
 
     const springCloseFromGesture = useCallback(() => {
@@ -147,39 +178,42 @@ export const CurtainSheet = forwardRef<CurtainSheetHandle, CurtainSheetProps>(
       translateY.value = withSpring(openY, CURTAIN_OPEN_SPRING);
     }, [openY, translateY]);
 
-    const springOpen = useCallback(() => {
-      tornDownRef.current = false;
-      isClosing.value = false;
-      cancelAnimation(translateY);
-      translateY.value = closedY;
-      translateY.value = withSpring(openY, CURTAIN_OPEN_SPRING);
-    }, [closedY, isClosing, openY, translateY]);
-
     useImperativeHandle(ref, () => ({ close: springClose }), [springClose]);
 
+    // Drive phases from the `visible` prop.
     useEffect(() => {
-      const opening = visible && !prevVisibleRef.current;
-      prevVisibleRef.current = visible;
-
       if (visible) {
-        if (opening) {
-          tornDownRef.current = false;
-        }
-        setRendered(true);
-        return;
-      }
-      if (rendered) {
+        controller.requestOpen();
+      } else if (controller.getPhase() !== "closed") {
         springClose();
       }
-    }, [visible, rendered, springClose]);
+    }, [visible, controller, springClose]);
 
+    // Run the open spring once the modal content is mounted ("opening" phase).
     useEffect(() => {
-      if (!rendered || !visible) return;
+      if (phase !== "opening") return;
       const frame = requestAnimationFrame(() => {
-        springOpen();
+        isClosing.value = false;
+        cancelAnimation(translateY);
+        translateY.value = closedY;
+        translateY.value = withSpring(openY, CURTAIN_OPEN_SPRING, () => {
+          runOnJS(handleOpenSettled)();
+        });
       });
       return () => cancelAnimationFrame(frame);
-    }, [rendered, visible, springOpen, screenHeight]);
+    }, [phase, closedY, openY, isClosing, translateY, handleOpenSettled, screenHeight]);
+
+    // Unmount: clear controller timers and stop worklets. onClose is not
+    // called here — the parent owning `visible` is going away with us.
+    useEffect(() => {
+      return () => {
+        controller.dispose();
+        cancelAnimation(translateYRef.current);
+      };
+    }, [controller]);
+
+    const rendered = phase !== "closed";
+    const closing = phase === "closing";
 
     useEffect(() => {
       if (!rendered) return;
@@ -262,9 +296,13 @@ export const CurtainSheet = forwardRef<CurtainSheetHandle, CurtainSheetProps>(
           />
           <Pressable
             style={StyleSheet.absoluteFill}
+            pointerEvents={closing ? "none" : "auto"}
+            disabled={closing}
             onPress={() => springClose()}
             accessibilityRole="button"
             accessibilityLabel="Close"
+            accessibilityElementsHidden={closing}
+            importantForAccessibility={closing ? "no-hide-descendants" : "auto"}
           />
           <Animated.View
             style={[
@@ -273,6 +311,7 @@ export const CurtainSheet = forwardRef<CurtainSheetHandle, CurtainSheetProps>(
               sheetAnimatedStyle,
               sheetStyle,
             ]}
+            pointerEvents={closing ? "none" : "auto"}
             accessibilityViewIsModal
             accessibilityLabel={accessibilityLabel}
           >

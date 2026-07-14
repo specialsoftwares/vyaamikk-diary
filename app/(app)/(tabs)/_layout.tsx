@@ -67,9 +67,12 @@ export default function TabsLayout() {
         <NativeTabs
           tintColor={TAB_ACTIVE_TINT}
           iconColor={colors.textMuted}
+          // Label sizing intentionally left to the system: a hard-coded
+          // fontSize fought iOS 26 Liquid Glass / Dynamic Type label metrics
+          // (docs/NATIVE_TAB_LAYOUT_AUDIT.md). Colors only.
           labelStyle={{
-            default: { color: colors.textMuted, fontSize: 11 },
-            selected: { color: TAB_ACTIVE_TINT, fontSize: 11 },
+            default: { color: colors.textMuted },
+            selected: { color: TAB_ACTIVE_TINT },
           }}
         >
           <NativeTabs.Trigger name="calendar">

@@ -1,6 +1,6 @@
 # Metro Bundle Audit
 
-**Date:** 2026-07-15  
+**Date:** 2026-07-15 (baseline) · **Re-audit:** 2026-07-15 post-Fable lazy locale/fonts pass
 **Method:** `npx expo export --platform ios --output-dir .expo-export-audit` (LAN dev environment; export audit dir gitignored).
 
 ---
@@ -27,7 +27,18 @@
 | 12.4 MB | `entry-*.hbc` | `node_modules/expo-router/entry.js` — entire app graph |
 | 1.31 MB | `6e435534…` (TTF) | `MaterialCommunityIcons.ttf` via `@expo/vector-icons` |
 | ~220 KB × N | Noto/Barlow TTF variants | `@expo-google-fonts/*` via `LocaleFontProvider` + boot fonts |
-| 128–204 KB each | Locale JSON (source) | `src/i18n/locales/{en,hi,ta,te,gu}.json` — **eager** in `src/i18n/i18n.ts` |
+| 128–204 KB each | Locale JSON (source) | `src/i18n/locales/*.json` — **en eager only**; hi/ta/te/gu via dynamic `import()` |
+
+### Post-Fable runtime startup (not export size)
+
+| Change | Before | After |
+|--------|--------|-------|
+| Locale registration at `initI18n` | All 5 bundles parsed | **en only**; others on demand |
+| Script fonts at boot | 12 Noto TTF via `useFonts` | **Active script family only** via `localeFonts.ts` |
+| iOS export HBC | 12.4 MB | **12.4 MB** (unchanged — dynamic imports remain in graph) |
+| First-paint work | Parse ~900KB+ JSON + load all Noto | Parse en JSON + system font fallback |
+
+**Honest note:** `expo export` still lists all locale/font assets as reachable chunks. The win is **runtime** init and language-switch loading order, not smaller offline export yet.
 
 Full listing command used:
 

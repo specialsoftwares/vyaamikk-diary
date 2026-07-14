@@ -33,6 +33,7 @@ import { Banner,
   SkeletonLoadingPanel, LocaleUiText } from "@/components/ui";
 import { useAuth } from "@/state/auth";
 import { useAppRefresh } from "@/hooks/useAppRefresh";
+import { useStuckBusyRecovery } from "@/hooks/useStuckBusyRecovery";
 import { useI18n, useT } from "@/i18n";
 import {
   radius,
@@ -68,6 +69,10 @@ export default function LetterheadHistoryScreen() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const { requestDelete, isDeleting } = useRecordDelete(user?.uid ?? null);
+  // Recover `busyId` if the iOS share-sheet promise never settles.
+  const shareRecovery = useStuckBusyRecovery(
+    useCallback(() => setBusyId(null), [])
+  );
 
   const styles = useThemedStyles((colors) =>
     StyleSheet.create({
@@ -149,6 +154,7 @@ export default function LetterheadHistoryScreen() {
     }
     setActionError(null);
     setBusyId(item.id);
+    shareRecovery.markPending();
     try {
       const { html } = await buildLetterheadHtml({
         config,
@@ -180,9 +186,10 @@ export default function LetterheadHistoryScreen() {
     } catch (e) {
       setActionError(userFacingMessage(e) || t("letterhead.createGenerateFailed"));
     } finally {
+      shareRecovery.clearPending();
       setBusyId(null);
     }
-  }, [user, config, lang, t, router]);
+  }, [user, config, lang, t, router, shareRecovery]);
 
   const onEdit = useCallback(
     (item: LetterheadDocument) => {

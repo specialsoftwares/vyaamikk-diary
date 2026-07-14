@@ -127,11 +127,11 @@ Defaults now point to `https://vyaamikk.specialsoftwares.in/{privacy,terms,delet
 | Hardened Firestore rules (`9c4369a`) live in production | ✅ Complete — deployed 2026-07-15 ~02:02 IST |
 | Client rules compatibility (`11503ce`) | ✅ Complete — in repo; server email bind + patch-only writes |
 | Production smoke testing | ❌ Not complete |
-| Expo Go environment isolation | ❌ Not complete (`src/config/env.ts` local-mock default uncommitted) |
+| Expo Go environment isolation | ✅ Complete (`3bc2e2e`) |
 | Native OTP verification on device | ❌ Not complete |
 | App Check | ❌ Not installed |
 | Storage rules verification / deploy | ❌ Not complete |
-| Fable runtime pass | ❌ Not complete |
+| Fable runtime pass | ✅ Implemented — native device verification pending |
 | Device QA — real OTP on iOS/Android dev build | ❌ Not run |
 | Firebase deploy — Functions | ❌ Still required |
 | Native config files — `google-services.json` / `GoogleService-Info.plist` | ❌ Required for builds |

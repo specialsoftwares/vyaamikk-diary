@@ -3,6 +3,8 @@
 **Date:** 2026-07-15  
 **Scope:** Read-mostly static + export audit. Manual device reproduction matrix is documented for operator execution; this pass did **not** claim live freeze reproduction without operator evidence.
 
+**Fable implementation (2026-07-15):** `CurtainSheet` phase model + guaranteed teardown, `DigitalBusinessIdentityCard` flip-lock recovery, central language transition controller, `useStuckBusyRecovery` on PDF share callers. **Operator matrix still required** on physical device / native dev build — Expo Go manual smoke only.
+
 ## Symptom signature
 
 Reported pattern: **tab bar remains tappable; screen content/buttons stop responding**. Scrolling may or may not work. Hardware back may still work depending on overlay type.
@@ -60,11 +62,11 @@ Language changed recently: Y/N
 
 | Property | Value |
 |----------|-------|
-| File | `src/components/ui/CurtainSheet.tsx` |
-| Trigger | New Record picker (`ComposerPickerSheet`), any `CurtainSheet` consumer |
-| Mechanism | `Modal` uses hardcoded `visible` while `rendered===true`. Full-screen `Pressable` (`StyleSheet.absoluteFill`, L263–268) captures all touches outside sheet. Teardown only runs when Reanimated spring close callback reports `finished===true` (L132–136). If spring is interrupted/cancelled, `teardown()` may never run → invisible touch trap. |
-| Tab bar still works? | **Plausible** on iOS native tabs: modal may cover tab **content** VC while native tab bar remains in separate native hierarchy. |
-| Evidence | `rendered` decoupled from `visible`; `springClose` early-returns when `isClosing` (L128); no timeout fallback teardown. |
+| File | `src/components/ui/CurtainSheet.tsx` + `src/components/ui/curtainSheetPhases.ts` |
+| Root cause (confirmed statically) | `teardown()` only when spring `finished===true`; `rendered` Modal kept full-screen `Pressable` after interrupted close |
+| **Fix implemented** | Explicit phases `closed` → `opening` → `open` → `closing`; backdrop/sheet `pointerEvents="none"` when `closing`; idempotent `handleCloseSettled`; **450ms defensive timeout**; `dispose()` on unmount |
+| Test | `npm run test:curtain-phases` |
+| Device verification | ☐ Operator matrix #1, #9 on **native dev build** (Expo Go smoke only — not claimed as production validation) |
 
 **Used by:** `src/components/composer/ComposerPickerSheet.tsx` (You tab `pickerOpen` state, `app/(app)/(tabs)/you.tsx` L436–444).
 
@@ -72,17 +74,20 @@ Language changed recently: Y/N
 
 | Property | Value |
 |----------|-------|
-| File | `src/components/you/DigitalBusinessIdentityCard.tsx` |
-| Mechanism | `animatingRef.current` set `true` on flip start (L306–307). Cleared only in Reanimated `withTiming` callback when `finished===true` (L317–319). If animation interrupted, flip locks; outer `Pressable` (L516–523) still captures touches across hero card area. |
-| Scope | Hero card region on You tab only — not whole screen. |
+| File | `src/components/you/DigitalBusinessIdentityCard.tsx` + `identityCardFlipController.ts` |
+| Root cause (confirmed statically) | `animatingRef` cleared only when `withTiming` `finished===true` |
+| **Fix implemented** | `createFlipLockController` — idempotent release; **880ms defensive timeout** (`FLIP_MS + 300`); blur/unmount `cancelAnimation` + release; `finished===false` snaps to nearest stable side |
+| Test | `npm run test:flip-lock` |
+| Device verification | ☐ You tab flip stress on native device |
 
 ### P1 hypothesis — iOS share sheet / `exporting` stuck
 
 | Property | Value |
 |----------|-------|
-| File | `app/(app)/diary/[id].tsx` `onExportPdf` (L168–216) |
-| Mechanism | `setExporting(true)` with `finally` cleanup, but `pdfService.share` await may never settle on iOS after share sheet dismiss. `PremiumActionButton` `loading`/`disabled` can block subsequent actions on detail screen. |
-| Mitigation exists elsewhere | `src/components/composer/ComposerSaveSuccess.tsx` L44–63 has `useFocusEffect` + `AppState` guard — **not replicated** on diary detail. |
+| Files | `app/(app)/diary/[id].tsx`, `ComposerSaveSuccess.tsx`, `letterhead/history.tsx`, `purchase-order/index.tsx`, `customer-credit/[id].tsx`, `DigitalBusinessIdentityCard.tsx` |
+| Root cause (confirmed statically) | `await share(...)` may never settle after iOS share sheet dismiss |
+| **Fix implemented** | Shared `useStuckBusyRecovery` hook — resets busy state on screen refocus + `AppState` active |
+| Device verification | ☐ iOS share dismiss on native device |
 
 ### P2 — Calendar map/calendar dual layer
 
@@ -137,15 +142,17 @@ See consolidated report for details.
 | Finding | Status |
 |---------|--------|
 | Reproducible live freeze sequence captured | **Not confirmed** — requires operator matrix |
-| Blocking overlay defect identified statically | **Yes — hypothesis** `CurtainSheet` teardown gap |
+| Blocking overlay defect identified statically | **Yes — root cause confirmed** `CurtainSheet` teardown gap |
+| CurtainSheet / flip-lock fixes implemented | **Yes** — commit `Fix: harden runtime interactions and language transitions` |
 | Loading-state stuck without `finally` | **Not found** in audited handlers |
-| Share-sheet `exporting` stuck on iOS | **Known class** — partial mitigation on composer success only |
+| Share-sheet `exporting` stuck on iOS | **Mitigation implemented** — `useStuckBusyRecovery`; native iOS verify pending |
 
 ---
 
 ## Recommended Fable implementation order
 
-1. `CurtainSheet` — add guaranteed teardown (timeout + `finished===false` fallback + backdrop `pointerEvents` gating).
-2. `DigitalBusinessIdentityCard` — reset `animatingRef` on focus/blur and `finished===false`.
-3. Extract share-sheet guard hook; apply to `diary/[id].tsx` and any other `pdfService.share` callers.
-4. Operator runs reproduction matrix after fixes to confirm.
+1. ~~`CurtainSheet` — guaranteed teardown~~ ✅ Implemented
+2. ~~`DigitalBusinessIdentityCard` — flip lock recovery~~ ✅ Implemented
+3. ~~Share-sheet guard hook~~ ✅ `useStuckBusyRecovery` applied
+4. ~~Language transition controller~~ ✅ Implemented
+5. **Operator** runs reproduction matrix after fixes on **native dev build**

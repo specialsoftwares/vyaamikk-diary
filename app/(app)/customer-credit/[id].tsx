@@ -18,6 +18,7 @@ import { Banner,
   Screen, LocaleUiText } from "@/components/ui";
 import { useAuth } from "@/state/auth";
 import { useI18n, useT } from "@/i18n";
+import { useStuckBusyRecovery } from "@/hooks/useStuckBusyRecovery";
 import { radius, spacing, typography, useThemedStyles } from "@/theme";
 import { userFacingMessage } from "@/domain/errors";
 import { useAppFeedback } from "@/feedback/AppFeedback";
@@ -73,6 +74,10 @@ export default function CustomerCreditDetailScreen() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const hasLoadedOnce = useRef(false);
+  // Recover `busy` if the iOS share-sheet promise never settles.
+  const shareRecovery = useStuckBusyRecovery(
+    useCallback(() => setBusy(false), [])
+  );
 
   const styles = useThemedStyles((c) =>
     StyleSheet.create({
@@ -160,6 +165,7 @@ export default function CustomerCreditDetailScreen() {
       if (!user || !record) return;
       setActionError(null);
       setBusy(true);
+      shareRecovery.markPending();
       try {
         const html = await buildCreditPdfHtml({ record, variant, user, t, locale, uiLang: lang });
         const pdf = await pdfService.generate({
@@ -184,10 +190,11 @@ export default function CustomerCreditDetailScreen() {
       } catch (e) {
         setActionError(userFacingMessage(e) || t("customerCredit.errGenerate"));
       } finally {
+        shareRecovery.clearPending();
         setBusy(false);
       }
     },
-    [user, record, t, locale, lang]
+    [user, record, t, locale, lang, shareRecovery]
   );
 
   const onSetStatus = useCallback(
