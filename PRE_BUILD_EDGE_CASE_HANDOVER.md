@@ -1,25 +1,39 @@
 # Pre-Build Edge Case Handover
 
-**Date:** 2026-06-08 · **Updated:** 2026-07-15 (Firestore production rules deployed)
+**Date:** 2026-06-08 · **Updated:** 2026-07-15 (hardened Firestore rules live — Console verified)
 **Scope:** Final corrections before Firebase deploy + EAS build
 
 ---
 
-## 2026-07-15 update — Firestore production rules deployed
+## 2026-07-15 update — Hardened Firestore rules live in production
 
-Production `firestore.rules` compiled and released successfully to Firebase project **`vyaamikk-diary`** on **2026-07-15 01:14 IST (UTC+5:30)** via `firebase deploy --only firestore:rules --project vyaamikk-diary` (after `firebase login --reauth`).
+Hardened `firestore.rules` from commit **`9c4369a`** compiled and released successfully to Firebase project **`vyaamikk-diary`** on **2026-07-15 ~02:02 IST (UTC+5:30)** via `firebase deploy --only firestore:rules --project vyaamikk-diary` (authenticated as **`support.vyd@specialsoftwares.com`**). Only Firestore rules were deployed — no Functions, Storage, Hosting, or indexes.
+
+Client compatibility changes from commit **`11503ce`** (server email bind + patch-only profile writes) are in the app repo and align with the live rules; they were not part of the Firebase deploy payload.
 
 | Check | Status |
 |-------|--------|
 | Project ID | `vyaamikk-diary` |
+| Rules commit | `9c4369a` |
+| Client compatibility commit | `11503ce` (repo only) |
+| Pre-deploy `npm run test:firestore-rules` | ✅ All **25** checks passed |
 | Rules compiled + released | ✅ |
-| No test-mode expiry in local production rules | ✅ (no `request.time < timestamp.date(...)`) |
-| No public wildcard in local production rules | ✅ (no `allow read, write: if true`; permissive rules remain in `firestore.rules.dev` only) |
-| Firebase Console published timestamp | ⏳ **Pending** operator verification |
+| Deploy scope | Firestore rules only |
+| No test-mode expiry in production rules | ✅ |
+| No public wildcard in production rules | ✅ |
+| Firebase Console published timestamp | ✅ **Verified** — matches ~02:02 IST deployment |
 
-`firestore.rules` was **not modified** for this deploy — repo file matches what was released.
+**Completed blockers:** Firestore hardening (`9c4369a`), client rules compatibility (`11503ce`).
+
+**Still open (not marked complete):** production smoke testing, Expo Go environment isolation, native OTP verification on device, App Check, Storage rules verification/deploy, Fable runtime pass.
+
+`firestore.rules` was **not modified** for this deploy — repo file at `9c4369a` matches what was released.
 
 ---
+
+## 2026-07-15 update — Earlier rules deploy (superseded)
+
+An earlier deploy on 2026-07-15 01:14 IST preceded the hardened rules commit. The **authoritative** production revision is the **~02:02 IST** deployment of `9c4369a`.
 
 ## 2026-07-14 update — JS-SDK auth bridge (P0)
 
@@ -38,8 +52,8 @@ relaunch). Fixed:
 - Test: `npm run test:js-auth-bridge`
 
 **Before any EAS production-mode build:** deploy functions, grant the runtime
-service account *Service Account Token Creator*, ~~deploy Firestore~~ ✅ Firestore
-rules deployed 2026-07-15, deploy Storage rules,
+service account *Service Account Token Creator*, ~~deploy hardened Firestore rules~~ ✅
+live 2026-07-15 ~02:02 IST (`9c4369a` + client compat `11503ce`), deploy Storage rules,
 and pass device QA A9/A14 (`docs/PRELAUNCH_DEVICE_QA.md`).
 
 Also fixed 2026-07-14: `app.json` duplicate location permissions + unused

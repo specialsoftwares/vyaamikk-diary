@@ -1,7 +1,7 @@
 # Production Readiness — Auth & Identity Track
 
-**Date:** 2026-06-04 (OTP wiring verified on disk 2026-06-08) · **Firestore rules deployed:** 2026-07-15 01:14 IST (UTC+5:30)  
-**Status:** OTP client wiring complete in repo — Firestore production rules deployed to `vyaamikk-diary`; requires EAS dev build + remaining Firebase deploys + device QA
+**Date:** 2026-06-04 (OTP wiring verified on disk 2026-06-08) · **Hardened Firestore rules live:** 2026-07-15 ~02:02 IST (UTC+5:30)  
+**Status:** OTP client wiring complete in repo — hardened Firestore rules (`9c4369a`) + client compatibility (`11503ce`) deployed to `vyaamikk-diary`; requires EAS dev build + remaining Firebase deploys + device QA
 
 ---
 
@@ -20,7 +20,8 @@
 | 2 | `retireIdentity` / `completeAccountDeletion` | ✅ |
 | 2 | `scheduledDeletionCleanup` | ✅ |
 | 2 | Client `identityCallable.ts` | ✅ |
-| 3 | `firestore.rules` — index collections blocked | ✅ Deployed to `vyaamikk-diary` 2026-07-15 |
+| 3 | `firestore.rules` — hardened production rules (`9c4369a`) | ✅ Live on `vyaamikk-diary` 2026-07-15 ~02:02 IST |
+| 3 | Client profile patch compatibility (`11503ce`) | ✅ In repo — server email bind + minimal merge writes |
 | 3 | `retiredPhones` / `pendingEmailVerifications` server-owned | ✅ |
 | 4 | Legal URL defaults → `vyaamikk.specialsoftwares.in` | ✅ |
 | 4 | `.env.example` updated | ✅ |
@@ -80,17 +81,21 @@ See `docs/NATIVE_FIREBASE_SETUP.md`.
 - `phoneIndex`, `ueidIndex`, `emailIndex`: client read/write **false** (unchanged).
 - Added `retiredPhones`, `pendingEmailVerifications`: client read/write **false**.
 
-### Production rules deployment (2026-07-15)
+### Hardened production rules deployment (2026-07-15 ~02:02 IST)
 
 | Field | Value |
 |-------|-------|
 | **Project ID** | `vyaamikk-diary` |
-| **Deploy time** | 2026-07-15 01:14 IST (UTC+5:30) — operator-confirmed successful `firebase deploy --only firestore:rules` |
-| **Rules file** | `firestore.rules` (unchanged in repo) |
+| **Rules commit** | `9c4369a` — Security: harden production Firestore access rules |
+| **Client compatibility commit** | `11503ce` — Fix: route email identity writes through server (in app repo; not part of rules deploy) |
+| **Deploy time** | 2026-07-15 ~02:02 IST (UTC+5:30) |
+| **Deploy account** | `support.vyd@specialsoftwares.com` |
+| **Deploy scope** | Firestore rules only (`firebase deploy --only firestore:rules`) — no Functions, Storage, Hosting, or indexes |
+| **Pre-deploy tests** | ✅ All **25** `npm run test:firestore-rules` checks passed |
 | **Compile + release** | ✅ Rules compiled and released successfully |
-| **No test-mode expiry** | ✅ Local `firestore.rules` contains no `request.time < timestamp.date(...)` |
-| **No public wildcard** | ✅ Local `firestore.rules` contains no `allow read, write: if true` (permissive rules remain in `firestore.rules.dev` only) |
-| **Firebase Console timestamp** | ⏳ **Pending** — operator should confirm published timestamp in Firebase Console → Firestore → Rules |
+| **No test-mode expiry** | ✅ `firestore.rules` contains no `request.time < timestamp.date(...)` |
+| **No public wildcard** | ✅ `firestore.rules` contains no `allow read, write: if true` (permissive rules remain in `firestore.rules.dev` only) |
+| **Firebase Console timestamp** | ✅ **Verified** — newest Rules revision matches this deployment (Firebase Console → Firestore Database → Rules) |
 
 ## 7. Client auth service changes
 
@@ -117,12 +122,22 @@ Defaults now point to `https://vyaamikk.specialsoftwares.in/{privacy,terms,delet
 
 ## 10. Remaining blockers
 
-1. **Device QA** — real OTP on iOS/Android dev build not run here.
-2. **Firebase deploy** — ~~Firestore production rules~~ ✅ deployed 2026-07-15; Functions + Storage rules still required.
-3. **Native config files** — `google-services.json` / `GoogleService-Info.plist` required for builds.
-4. **Email delivery provider** — `verifyAndBindEmail` rejects non-emulator codes until SendGrid/etc. wired.
-5. **Hosted legal pages** — URLs set in config; pages must exist and be reviewed.
-6. **Account deletion E2E** — validate grace → `completeAccountDeletion` on device after deploy.
+| Blocker | Status |
+|---------|--------|
+| Hardened Firestore rules (`9c4369a`) live in production | ✅ Complete — deployed 2026-07-15 ~02:02 IST |
+| Client rules compatibility (`11503ce`) | ✅ Complete — in repo; server email bind + patch-only writes |
+| Production smoke testing | ❌ Not complete |
+| Expo Go environment isolation | ❌ Not complete (`src/config/env.ts` local-mock default uncommitted) |
+| Native OTP verification on device | ❌ Not complete |
+| App Check | ❌ Not installed |
+| Storage rules verification / deploy | ❌ Not complete |
+| Fable runtime pass | ❌ Not complete |
+| Device QA — real OTP on iOS/Android dev build | ❌ Not run |
+| Firebase deploy — Functions | ❌ Still required |
+| Native config files — `google-services.json` / `GoogleService-Info.plist` | ❌ Required for builds |
+| Email delivery provider — `verifyAndBindEmail` non-emulator codes | ❌ Until SendGrid/etc. wired |
+| Hosted legal pages — counsel review | ❌ Required before store submission |
+| Account deletion E2E on device | ❌ Validate after Functions deploy |
 
 ## 11. Commands to run
 
@@ -203,13 +218,13 @@ Fixed:
 **Deployment prerequisites:**
 
 1. ~~`firebase login --reauth`~~ ✅ (2026-07-15)
-2. ~~`firebase deploy --only firestore:rules --project vyaamikk-diary`~~ ✅ (2026-07-15 01:14 IST)
-3. `firebase deploy --only storage --project vyaamikk-diary`
-4. `firebase deploy --only functions --project vyaamikk-diary`
-5. Grant the functions runtime service account **Service Account Token Creator**
+2. ~~`firebase deploy --only firestore:rules --project vyaamikk-diary`~~ ✅ (2026-07-15 ~02:02 IST — hardened rules `9c4369a`; 25 emulator tests passed; account `support.vyd@specialsoftwares.com`)
+3. ~~Client compatibility (`11503ce`)~~ ✅ — server email bind + minimal profile merge writes
+4. ~~Firebase Console → Firestore → Rules → published timestamp~~ ✅ Verified 2026-07-15
+5. `firebase deploy --only storage --project vyaamikk-diary`
+6. `firebase deploy --only functions --project vyaamikk-diary`
+7. Grant the functions runtime service account **Service Account Token Creator**
    (required by `createCustomToken`).
-6. Firebase Console → Firestore → Rules → confirm published timestamp ⏳ **pending**
-   (Test-Mode expiry recovery — rules deploy succeeded; Console check not yet recorded).
 
 ### Other corrections (2026-07-14)
 

@@ -7,18 +7,30 @@
 
 ## P0 Security
 
-### F-SEC-01 — Deploy production Firestore rules
+### F-SEC-01 — Deploy hardened production Firestore rules
 
 | Field | Value |
 |-------|-------|
-| Status | ✅ **Complete** (2026-07-15 01:14 IST) |
+| Status | ✅ **Complete** (2026-07-15 ~02:02 IST) |
+| Rules commit | `9c4369a` — Security: harden production Firestore access rules |
+| Client compatibility commit | `11503ce` — Fix: route email identity writes through server (repo; aligns with live rules) |
 | Project ID | `vyaamikk-diary` |
+| Deploy account | `support.vyd@specialsoftwares.com` |
 | Deploy command | `firebase deploy --only firestore:rules --project vyaamikk-diary` |
+| Deploy scope | Firestore rules only — no Functions, Storage, Hosting, or indexes |
+| Pre-deploy tests | ✅ All **25** `npm run test:firestore-rules` checks passed |
 | Rules compile + release | ✅ Successful |
-| Local rules audit | No `allow read, write: if true`; no `request.time` expiry; UID isolation `isOwner(uid)`; server collections `if false` |
-| `firestore.rules` modified | **No** — deployed as-is from repo |
-| Firebase Console timestamp | ⏳ **Pending** operator verification |
-| Rules test suite | **None exists** — consider adding emulator tests in future pass |
+| Local rules audit | No `allow read, write: if true`; no `request.time` expiry; UID isolation `isOwner(uid)`; server collections `if false`; client profile allowlist + deletion path |
+| `firestore.rules` modified at deploy | **No** — deployed from commit `9c4369a` |
+| Firebase Console timestamp | ✅ **Verified** — newest Rules revision matches ~02:02 IST deployment |
+
+### F-SEC-01b — Client profile write compatibility with hardened rules
+
+| Field | Value |
+|-------|-------|
+| Status | ✅ **Complete** (commit `11503ce` in repo) |
+| Change | Production email bind via `verifyAndBindEmail`; patch-only Firestore merges; server-owned fields stripped from client writes |
+| Live dependency | Requires app build shipping `11503ce`; rules alone do not implement client patches |
 
 ### F-SEC-02 — Expo Go dev backend must not hit production Firestore unauthenticated
 
@@ -26,8 +38,10 @@
 |-------|-------|
 | Evidence | Prior `permission-denied` on OTP in Expo Go when default was `firebase-shared-dev` |
 | Files | `src/config/env.ts` (`EXPO_PUBLIC_DEV_BACKEND` opt-in) |
-| Status | **Fixed in prior session** — default `local-mock` |
+| Status | **Fixed in prior session** — default `local-mock` (uncommitted in working tree) |
+| Production rules live | ✅ Hardened rules deployed — Expo Go must stay on `local-mock` or permissive dev project |
 | Test | Expo Go login `123456` → no Firestore writes |
+| Marked complete | ❌ **No** — environment isolation not verified end-to-end in this pass |
 
 ---
 
@@ -169,16 +183,24 @@
 
 | Gate | Status |
 |------|--------|
-| Firestore rules verified locally | ✅ |
-| Firestore rules deployed | ✅ `vyaamikk-diary` — 2026-07-15 01:14 IST |
-| Firebase Console rules timestamp | ⏳ Pending operator check |
+| Firestore rules hardened (`9c4369a`) verified locally | ✅ |
+| Firestore rules emulator tests (25 checks) | ✅ Passed before deploy |
+| Firestore rules deployed live | ✅ `vyaamikk-diary` — 2026-07-15 ~02:02 IST; account `support.vyd@specialsoftwares.com`; rules only |
+| Client rules compatibility (`11503ce`) | ✅ In repo |
+| Firebase Console rules timestamp | ✅ Verified |
+| Production smoke testing | ❌ Not complete |
+| Expo Go environment isolation | ❌ Not complete |
+| Native OTP verification on device | ❌ Not complete |
+| App Check | ❌ Not installed |
+| Storage rules verification | ❌ Not complete |
+| Fable runtime pass | ❌ Not complete |
 | Reproducible freeze captured live | ❌ — static hypothesis only |
 | Blocking overlay defect identified | ✅ hypothesis `CurtainSheet` |
 | Language multiple implementations | ✅ primary + deprecated `LanguageToggle` |
 | Tab implementation documented | ✅ `NativeTabs` unstable API |
 | Bundle audit complete | ✅ |
 | Edge matrix complete | ✅ |
-| Safe to proceed with consolidated Fable implementation | **Yes** — Firestore rules deployed; Console timestamp check pending |
+| Safe to proceed with consolidated Fable implementation | **Yes** — hardened Firestore rules live; runtime/smoke/OTP/App Check/Storage still open |
 
 ---
 
