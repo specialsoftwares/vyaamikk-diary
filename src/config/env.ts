@@ -105,6 +105,16 @@ export const env = {
     appName: readString("EXPO_PUBLIC_APP_NAME", APP_BRAND_NAME),
     owner: readString("EXPO_PUBLIC_BRAND_OWNER", PUBLIC_BRAND),
     legalOperator: readString("EXPO_PUBLIC_LEGAL_OPERATOR", LEGAL_OPERATOR),
+    /**
+     * Provisional development host only — final canonical origin is an owner
+     * decision between specialsoftwares.com and vyaamikk.specialsoftwares.in
+     * (see docs/WEBSITE_STORE_INTEGRATION.md). Do not treat these defaults as
+     * published production DNS.
+     */
+    websiteUrl: readString(
+      "EXPO_PUBLIC_WEBSITE_URL",
+      "https://vyaamikk.specialsoftwares.in"
+    ),
     privacyUrl: readString(
       "EXPO_PUBLIC_PRIVACY_URL",
       "https://vyaamikk.specialsoftwares.in/privacy"
@@ -113,25 +123,44 @@ export const env = {
       "EXPO_PUBLIC_TERMS_URL",
       "https://vyaamikk.specialsoftwares.in/terms"
     ),
-    /** Single public page hosting both Terms of Use and Privacy Policy. */
+    /**
+     * Legal hub / website home. Lovable site has no combined `/legal` route —
+     * default points at `/` (home). Prefer privacy + terms for policy links.
+     */
     legalUrl: readString(
       "EXPO_PUBLIC_LEGAL_URL",
-      "https://vyaamikk.specialsoftwares.in/legal"
+      "https://vyaamikk.specialsoftwares.in/"
     ),
+    supportUrl: readString(
+      "EXPO_PUBLIC_SUPPORT_URL",
+      "https://vyaamikk.specialsoftwares.in/support"
+    ),
+    contactUrl: readString(
+      "EXPO_PUBLIC_CONTACT_URL",
+      "https://vyaamikk.specialsoftwares.in/contact"
+    ),
+    /** Approved product support mailbox. */
     supportEmail: readString(
       "EXPO_PUBLIC_SUPPORT_EMAIL",
-      "support@specialsoftwares.in"
+      "support.vyd@specialsoftwares.com"
     ),
-    /** Google Play / web account & data deletion request URL (required before store release). */
+    /** Google Play / web account & data deletion request URL. */
     accountDeletionUrl: readString(
       "EXPO_PUBLIC_ACCOUNT_DELETION_URL",
       "https://vyaamikk.specialsoftwares.in/delete-account"
     ),
-    /** App Store / Play / landing page — used in business identity share text. */
+    /**
+     * Pre-launch download / launch-status page (not a live App Store or Play
+     * Store listing). Used in share text until store URLs are live.
+     */
     installUrl: readString(
       "EXPO_PUBLIC_APP_INSTALL_URL",
       "https://vyaamikk.specialsoftwares.in/download"
     ),
+    /** Empty until a real App Store listing exists — never render as an active store badge. */
+    appStoreUrl: readString("EXPO_PUBLIC_APP_STORE_URL", ""),
+    /** Empty until a real Play Store listing exists — never render as an active store badge. */
+    playStoreUrl: readString("EXPO_PUBLIC_PLAY_STORE_URL", ""),
   },
 } as const;
 

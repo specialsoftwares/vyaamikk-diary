@@ -2,8 +2,7 @@ import React from "react";
 import { LocaleUiText } from "@/components/ui/LocaleUiText";
 import { StyleSheet, View } from "react-native";
 
-import { env } from "@/config/env";
-import { openSafeExternalUrl } from "@/utils/safeUrl";
+import { openPublicLinkOrExplain } from "@/config/publicLinks";
 import { useT } from "@/i18n";
 import { spacing, typography, useThemedStyles } from "@/theme";
 
@@ -22,8 +21,8 @@ export function LegalConsentFooter({ style }: LegalConsentFooterProps) {
     })
   );
 
-  const openTerms = () => void openSafeExternalUrl(env.brand.termsUrl);
-  const openPrivacy = () => void openSafeExternalUrl(env.brand.privacyUrl);
+  const openTerms = () => void openPublicLinkOrExplain("terms");
+  const openPrivacy = () => void openPublicLinkOrExplain("privacy");
 
   return (
     <View style={[styles.wrap, style]}>

@@ -7,7 +7,7 @@ import { LANDING_CTA } from "@/components/landing/landingCopy";
 import { LANDING_COLORS, LANDING_LAYOUT, landingTypography } from "@/components/landing/landingTokens";
 import { useLandingFadeIn } from "@/components/landing/useLandingMotion";
 import { getAuthEntryHref } from "@/config/authWrapper";
-import { legal } from "@/config/legal";
+import { getSupportEmail } from "@/config/publicLinks";
 import { radius, spacing } from "@/theme";
 
 export function LandingCTA() {
@@ -15,7 +15,7 @@ export function LandingCTA() {
   const fade = useLandingFadeIn(480);
 
   const contactCompany = () => {
-    const mailto = `mailto:${legal.supportEmail}?subject=${encodeURIComponent("Vyaamikk Diary — business enquiry")}`;
+    const mailto = `mailto:${getSupportEmail()}?subject=${encodeURIComponent("Vyaamikk Diary — business enquiry")}`;
     void Linking.openURL(mailto);
   };
 

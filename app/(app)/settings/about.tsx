@@ -5,7 +5,7 @@ import { useRouter } from "expo-router";
 
 import { BrandMomentsTagline } from "@/components/brand/BrandMomentsTagline";
 import { env } from "@/config/env";
-import { openSafeExternalUrl } from "@/utils/safeUrl";
+import { openPublicLinkOrExplain } from "@/config/publicLinks";
 import { Card, Header, Screen, LocaleUiText } from "@/components/ui";
 import { useT } from "@/i18n";
 import { spacing, typography, useThemedStyles } from "@/theme";
@@ -52,8 +52,8 @@ export default function AboutScreen() {
     })
   );
 
-  const openUrl = (url: string) => {
-    void openSafeExternalUrl(url);
+  const openUrl = (kind: "privacy" | "support" | "contact") => {
+    void openPublicLinkOrExplain(kind);
   };
 
   return (
@@ -92,7 +92,7 @@ export default function AboutScreen() {
       <Card style={styles.linksCard}>
         <Pressable
           style={styles.linkRow}
-          onPress={() => openUrl(env.brand.privacyUrl)}
+          onPress={() => openUrl("privacy")}
         >
           <LocaleUiText style={styles.linkLabel}>{t("legal.linkPrivacy")}</LocaleUiText>
           <Text style={styles.linkChevron}>{">"}</Text>
@@ -100,6 +100,11 @@ export default function AboutScreen() {
         <View style={styles.divider} />
         <Pressable style={styles.linkRow} onPress={() => router.push("/(app)/settings/terms")}>
           <LocaleUiText style={styles.linkLabel}>{t("legal.linkTerms")}</LocaleUiText>
+          <Text style={styles.linkChevron}>{">"}</Text>
+        </Pressable>
+        <View style={styles.divider} />
+        <Pressable style={styles.linkRow} onPress={() => openUrl("support")}>
+          <LocaleUiText style={styles.linkLabel}>{t("about.supportTitle")}</LocaleUiText>
           <Text style={styles.linkChevron}>{">"}</Text>
         </Pressable>
         <View style={styles.divider} />

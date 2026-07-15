@@ -4,14 +4,13 @@ import { useRouter } from "expo-router";
 
 import { getActiveBackend } from "@/config/env";
 import { DELETION_GRACE_DAYS } from "@/domain/identityLifecycle";
-import { legal } from "@/config/legal";
+import { openPublicLinkOrExplain } from "@/config/publicLinks";
 import { getAuthEntryHref } from "@/config/authWrapper";
 import { Banner, Button, Card, Header, Screen, TextField, LocaleUiText } from "@/components/ui";
 import { useAuth } from "@/state/auth";
 import { useT } from "@/i18n";
 import { spacing, typography, useThemedStyles } from "@/theme";
 import { userFacingMessage } from "@/domain/errors";
-import { openSafeExternalUrl } from "@/utils/safeUrl";
 
 const CONFIRMATION_TEXT = "DELETE";
 
@@ -101,7 +100,11 @@ export default function DeleteAccountScreen() {
   };
 
   const openWebDeletion = () => {
-    void openSafeExternalUrl(legal.accountDeletionUrl);
+    void openPublicLinkOrExplain("accountDeletion", {
+      title: t("deleteAccount.title"),
+      unavailableMessage:
+        "The web account-deletion page is not configured yet. Use in-app deletion, or contact support.",
+    });
   };
 
   return (

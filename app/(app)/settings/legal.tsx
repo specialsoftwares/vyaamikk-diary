@@ -4,10 +4,9 @@ import { useRouter } from "expo-router";
 
 import { SettingsNavCard, SettingsNavGroup } from "@/components/settings";
 import { Header, Screen, LocaleUiText } from "@/components/ui";
-import { legal } from "@/config/legal";
+import { openPublicLinkOrExplain } from "@/config/publicLinks";
 import { useT } from "@/i18n";
 import { spacing, typography, useThemedStyles } from "@/theme";
-import { openSafeExternalUrl } from "@/utils/safeUrl";
 
 export default function LegalHubScreen() {
   const t = useT();
@@ -37,7 +36,7 @@ export default function LegalHubScreen() {
           embedded
         />
       </SettingsNavGroup>
-      <Pressable onPress={() => void openSafeExternalUrl(legal.legalHubUrl)}>
+      <Pressable onPress={() => void openPublicLinkOrExplain("websiteHome")}>
         <LocaleUiText style={styles.webLink}>{t("legal.viewerHostedHub")}</LocaleUiText>
       </Pressable>
     </Screen>

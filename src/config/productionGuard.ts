@@ -30,11 +30,20 @@ export function assertProductionConfig(): void {
   }
 
   const urlBlockers = findLegalConfigBlockers().filter(
-    (b) => b.includes("example.com") || b.includes(".example") || b.includes("support email")
+    (b) =>
+      b.includes("example.com") ||
+      b.includes(".example") ||
+      b.includes("support email") ||
+      b.includes("privacy:") ||
+      b.includes("terms:") ||
+      b.includes("accountDeletion:") ||
+      b.includes("download:") ||
+      b.includes("forbidden") ||
+      b.includes("/auth")
   );
   if (urlBlockers.length > 0) {
     throw new Error(
-      `Production build has placeholder legal URLs or support email:\n${urlBlockers.join("\n")}`
+      `Production build has incomplete or unsafe public/legal links:\n${urlBlockers.join("\n")}`
     );
   }
 }

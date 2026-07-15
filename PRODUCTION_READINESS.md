@@ -137,6 +137,10 @@ Defaults now point to `https://vyaamikk.specialsoftwares.in/{privacy,terms,delet
 | Native config files — `google-services.json` / `GoogleService-Info.plist` | ❌ Required for builds |
 | Email delivery provider — `verifyAndBindEmail` non-emulator codes | ❌ Until SendGrid/etc. wired |
 | Hosted legal pages — counsel review | ❌ Required before store submission |
+| Marketing/legal website (Lovable) | ✅ **Built** (TanStack Start / CF Workers) — **pre-launch, unpublished**; canonical domain pending; see `docs/WEBSITE_STORE_INTEGRATION.md` |
+| Public website DNS / publication | ❌ Not complete |
+| Final canonical domain (`.com` vs `.in`) | ❌ Owner decision pending |
+| App Store / Play Store live listing URLs | ❌ Empty by design until listings exist |
 | Account deletion E2E on device | ❌ Validate after Functions deploy |
 
 ## 11. Commands to run

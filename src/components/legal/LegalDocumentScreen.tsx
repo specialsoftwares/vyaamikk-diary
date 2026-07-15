@@ -7,10 +7,10 @@ import {
   type LegalSection,
 } from "@/content/legal/documents";
 import { legal, legalDocumentTitle, type LegalDocumentId } from "@/config/legal";
+import { openPublicLinkOrExplain, getSupportEmail } from "@/config/publicLinks";
 import { Card, Header, Screen, LocaleUiText } from "@/components/ui";
 import { useT } from "@/i18n";
 import { spacing, typography, useThemedStyles } from "@/theme";
-import { openSafeExternalUrl } from "@/utils/safeUrl";
 
 function sectionsFor(doc: LegalDocumentId): LegalSection[] {
   return doc === "privacy" ? PRIVACY_POLICY_SECTIONS : TERMS_OF_USE_SECTIONS;
@@ -37,7 +37,8 @@ export function LegalDocumentScreen({ doc, showBack = true }: LegalDocumentScree
     })
   );
 
-  const hostedUrl = doc === "privacy" ? legal.privacyUrl : legal.termsUrl;
+  const hostedKind = doc === "privacy" ? "privacy" : "terms";
+  const supportEmail = getSupportEmail();
 
   return (
     <Screen scroll>
@@ -64,12 +65,12 @@ export function LegalDocumentScreen({ doc, showBack = true }: LegalDocumentScree
             ))}
           </View>
         ))}
-        <Pressable onPress={() => void openSafeExternalUrl(hostedUrl)}>
+        <Pressable onPress={() => void openPublicLinkOrExplain(hostedKind)}>
           <LocaleUiText style={styles.webLink}>{t("legal.viewerHostedLink")}</LocaleUiText>
         </Pressable>
-        <Pressable onPress={() => void Linking.openURL(`mailto:${legal.supportEmail}`)}>
+        <Pressable onPress={() => void Linking.openURL(`mailto:${supportEmail}`)}>
           <LocaleUiText style={styles.webLink}>
-            {t("legal.contactPlaceholder", { email: legal.supportEmail })}
+            {t("legal.contactPlaceholder", { email: supportEmail })}
           </LocaleUiText>
         </Pressable>
       </Card>

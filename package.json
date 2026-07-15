@@ -69,6 +69,7 @@
     "test:js-auth-bridge": "npx --yes tsx src/services/auth/jsAuthBridge.test.ts",
     "test:env-resolution": "npx --yes tsx src/config/runtimeEnvironment.test.ts",
     "test:env-shell-precedence": "npx --yes tsx scripts/test-env-shell-precedence.ts",
+    "test:public-links": "npx --yes tsx src/config/publicLinks.test.ts",
     "test:curtain-phases": "npx --yes tsx src/components/ui/curtainSheetPhases.test.ts",
     "test:flip-lock": "npx --yes tsx src/components/you/identityCardFlipController.test.ts",
     "test:language-transition": "npx --yes tsx src/i18n/languageTransitionController.test.ts",

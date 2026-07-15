@@ -15,7 +15,7 @@ import { LANDING_COLORS, LANDING_LAYOUT, landingTypography } from "@/components/
 import type { LandingSectionKey } from "@/components/landing/LandingNavBar";
 import { DESIGNED_BY_LINE, PUBLIC_BRAND } from "@/config/brand";
 import { legal } from "@/config/legal";
-import { openSafeExternalUrl } from "@/utils/safeUrl";
+import { getSupportEmail, openPublicLinkOrExplain } from "@/config/publicLinks";
 import { spacing } from "@/theme";
 
 interface LandingFooterProps {
@@ -32,11 +32,11 @@ export function LandingFooter({ onNavigateSection }: LandingFooterProps) {
   };
 
   const openDeletion = () => {
-    void openSafeExternalUrl(legal.accountDeletionUrl);
+    void openPublicLinkOrExplain("accountDeletion");
   };
 
   const mailSupport = () => {
-    void Linking.openURL(`mailto:${legal.supportEmail}`);
+    void Linking.openURL(`mailto:${getSupportEmail()}`);
   };
 
   const mailGrievance = () => {
@@ -90,7 +90,7 @@ export function LandingFooter({ onNavigateSection }: LandingFooterProps) {
             <>
               <Text style={styles.staticLine}>{PUBLIC_BRAND}</Text>
               {link("Contact support", mailSupport)}
-              {link(legal.supportEmail, mailSupport)}
+              {link(getSupportEmail(), mailSupport)}
               <Text style={styles.staticLine}>Grievance Officer</Text>
               <Text style={styles.mutedLine}>{legal.grievanceOfficer.name}</Text>
               {link(legal.grievanceOfficer.email, mailGrievance)}
