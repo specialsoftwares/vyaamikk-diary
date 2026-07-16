@@ -131,3 +131,25 @@ npm --prefix functions run build
 - Unrelated Firestore record schemas
 - PDF layout/content (except CPV denomination removal)
 - en-IN formatters, boot animation, tab destinations, language switching architecture
+
+---
+
+## 2026-07-16 — Core runtime audit (verified results only)
+
+Authoritative write-up: `docs/CORE_RUNTIME_STABILIZATION_AUDIT.md`. Executable device checklist: `docs/CORE_MANUAL_QA_MATRIX.md`.
+
+**Preserved contracts:** `900c46e`, `0b12fb4`, `bfc2968`, `4a1a529`, `4d04786` — not reverted or weakened.
+
+**Confirmed repo fixes this pass:**
+
+1. **P1** — Process-wide `sessionSyncGate` now clears on sign-out / fresh sign-in / uid switch (`shouldClearSyncLockOnAuthTransition` in `SyncProvider`). Prevents permanent sync no-op after session-expired lock + re-login.
+2. **P2** — Landing/legal mailto uses `openSafeMailto` (normalize + catch) so `Linking.openURL` failures cannot become unhandled rejections.
+
+**Not marked complete (still open for device / deploy):**
+
+- Native OTP + JS auth bridge on EAS client
+- Deletion pending → in-app email verification reactivation on production Firebase
+- Storage rules deploy + dual-device conflict QA
+- Full tab/language/modal stress on physical devices (matrix §B–D)
+
+**Explicit non-actions this pass:** no push, no EAS build, no Firebase/DNS/console changes, no Expo upgrades, protected unstaged `src/i18n/i18n.ts` / `validateLocales.ts` / `.expo-export-audit/` left alone.

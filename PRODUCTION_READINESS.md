@@ -243,3 +243,21 @@ Fixed:
 | Grievance officer name / registered address in `src/config/legal.ts` | ❌ still placeholders — owner input required before store submission |
 | i18n | ⚠ hi missing 67 keys (consent/materialMovement/workTeam); ta/te/gu missing 22 (English fallback works) |
 | App Check / crash reporting | ❌ not installed (P2, post-candidate) |
+
+---
+
+## 2026-07-16 — Core runtime stabilization (verified in repo)
+
+Full evidence: `docs/CORE_RUNTIME_STABILIZATION_AUDIT.md`. Manual device steps: `docs/CORE_MANUAL_QA_MATRIX.md`.
+
+| Item | Status |
+|------|--------|
+| Stable root providers (`4a1a529`) | ✅ Preserved — always LocalDb→Auth→Sync |
+| Language / touch-trap (`bfc2968`) | ✅ Preserved — no I18n remount |
+| Public origin + link validation (`0b12fb4`, `900c46e`, `4d04786`) | ✅ Preserved |
+| Session sync lock cleared on auth identity transition | ✅ Fixed in repo — `syncLockIdentityPolicy` + SyncProvider |
+| Mailto opener fail-soft | ✅ Fixed in repo — `openSafeMailto` |
+| Automated regression batch (providers, links, language, consent, sync-lock, mailto, save-idempotency, reactivation, env, typecheck) | ✅ Pass |
+| Device OTP / deletion / dual-device sync QA | ❌ Not executed this pass — matrix pending |
+| `expo-doctor` dependency skew | ⚠ Reported only — no version bump |
+| Unstaged locale-loader (`i18n.ts`, `validateLocales.ts`) | ⚠ Left uncommitted; not part of readiness claim |
