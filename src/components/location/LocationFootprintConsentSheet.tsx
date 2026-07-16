@@ -4,6 +4,7 @@ import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { PremiumActionButton } from "@/components/ui/PremiumActionButton";
+import { isConsentDismissDisabled } from "@/components/location/consentSheetDismissPolicy";
 import { useT } from "@/i18n";
 import { radius, spacing, typography, useThemedStyles } from "@/theme";
 
@@ -66,7 +67,7 @@ export function LocationFootprintConsentSheet({
               label={t("locationFootprints.consent.notNow")}
               variant="ghost"
               onPress={onNotNow}
-              disabled={busy}
+              disabled={isConsentDismissDisabled(busy)}
             />
           </View>
         </Pressable>

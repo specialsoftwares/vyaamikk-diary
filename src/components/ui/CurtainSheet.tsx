@@ -289,7 +289,10 @@ export const CurtainSheet = forwardRef<CurtainSheetHandle, CurtainSheetProps>(
         onRequestClose={() => springClose()}
         statusBarTranslucent
       >
-        <GestureHandlerRootView style={styles.root}>
+        <GestureHandlerRootView
+          style={styles.root}
+          pointerEvents={closing ? "box-none" : "auto"}
+        >
           <Animated.View
             pointerEvents="none"
             style={[styles.backdrop, backdropAnimatedStyle]}

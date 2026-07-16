@@ -73,7 +73,14 @@ export async function shouldShowLocationFootprintConsent(
   userId: string
 ): Promise<boolean> {
   const prefs = await loadLocationFootprintPreferences(userId);
-  return prefs.locationConsentShownAt == null;
+  const shownAt = prefs.locationConsentShownAt;
+  // Defensive: only a finite timestamp counts as "already shown". Corrupt
+  // upgrade leftovers (non-number) must not leave the host oscillating or
+  // permanently suppressing a dismissible sheet incorrectly.
+  if (typeof shownAt === "number" && Number.isFinite(shownAt) && shownAt > 0) {
+    return false;
+  }
+  return true;
 }
 
 export async function markLocationFootprintConsentShown(

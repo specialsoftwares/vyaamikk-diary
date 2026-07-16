@@ -73,6 +73,8 @@
     "test:curtain-phases": "npx --yes tsx src/components/ui/curtainSheetPhases.test.ts",
     "test:flip-lock": "npx --yes tsx src/components/you/identityCardFlipController.test.ts",
     "test:language-transition": "npx --yes tsx src/i18n/languageTransitionController.test.ts",
+    "test:language-overlay-touch": "npx --yes tsx src/i18n/languageOverlayTouchPolicy.test.ts",
+    "test:consent-dismiss": "npx --yes tsx src/components/location/consentSheetDismissPolicy.test.ts",
     "test:firestore-rules": "firebase emulators:exec --only firestore --project vyaamikk-diary-rules-test \"npx --yes tsx firestore.rules.test.ts\"",
     "test:legal-consent": "npx --yes tsx src/services/consent/legalConsent.test.ts",
     "functions:build": "npm --prefix functions run build",

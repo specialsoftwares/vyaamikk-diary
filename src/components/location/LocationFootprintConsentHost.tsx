@@ -33,7 +33,9 @@ export function LocationFootprintConsentHost() {
 
   React.useEffect(() => {
     const sub = AppState.addEventListener("change", (state: AppStateStatus) => {
-      if (state === "active") void syncPermission();
+      if (state !== "active") return;
+      setBusy(false);
+      void syncPermission();
     });
     return () => sub.remove();
   }, [syncPermission]);
@@ -80,20 +82,23 @@ export function LocationFootprintConsentHost() {
           locationFootprintsEnabled: true,
         });
       }
-      setVisible(false);
     } finally {
+      // Dismiss in finally so a hung/rejected permission prompt cannot leave
+      // a full-screen Modal capturing tab and content touches.
+      setVisible(false);
       setBusy(false);
     }
   }, [user?.uid]);
 
-  const onNotNow = useCallback(async () => {
-    if (user?.uid) {
-      await saveLocationFootprintPreferences(user.uid, {
-        locationFootprintsEnabled: false,
-        locationConsentDeclinedAt: Date.now(),
-      });
-    }
+  const onNotNow = useCallback(() => {
+    // Release the Modal synchronously before any AsyncStorage work so a
+    // hung write cannot trap touches.
     setVisible(false);
+    if (!user?.uid) return;
+    void saveLocationFootprintPreferences(user.uid, {
+      locationFootprintsEnabled: false,
+      locationConsentDeclinedAt: Date.now(),
+    });
   }, [user?.uid]);
 
   return (
@@ -101,7 +106,7 @@ export function LocationFootprintConsentHost() {
       visible={visible}
       busy={busy}
       onAllow={() => void onAllow()}
-      onNotNow={() => void onNotNow()}
+      onNotNow={onNotNow}
     />
   );
 }

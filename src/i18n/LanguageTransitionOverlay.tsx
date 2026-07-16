@@ -16,6 +16,7 @@ import {
   LANGUAGE_SWITCH_SURFACE,
   LANGUAGE_SWITCH_WAIT,
 } from "./languageSwitchMessages";
+import { languageOverlayPointerEvents } from "./languageOverlayTouchPolicy";
 
 const FADE_IN_MS = 150;
 const FADE_OUT_MS = 150;
@@ -37,10 +38,10 @@ interface LanguageTransitionOverlayProps {
  * Full-screen transition layer rendered ABOVE the app tree during a language
  * switch (the tree stays mounted underneath — no full-tree replacement).
  *
- * Touch policy: intercepts touches only while `active`; the moment the
- * fade-out starts, pointerEvents flips to "none" so a slow or failed
- * animation can never block interaction. Unmount is guaranteed by a fallback
- * timer even if the Animated callback never fires.
+ * Touch policy: intercepts touches only while `active`; the moment `active`
+ * flips false (controller → idle), pointerEvents becomes "none" on that same
+ * render — not after a post-paint `hiding` update. Fade-out / unmount are
+ * still guaranteed by a fallback timer if the Animated callback is dropped.
  */
 export function LanguageTransitionOverlay({
   targetLang,
@@ -63,6 +64,14 @@ export function LanguageTransitionOverlay({
   }, [active]);
 
   useEffect(() => {
+    // Never fade in when already inactive (batched idle-before-paint race).
+    if (!active || hiding) {
+      if (!shownFiredRef.current) {
+        shownFiredRef.current = true;
+        onShownRef.current();
+      }
+      return;
+    }
     Animated.timing(opacity, {
       toValue: 1,
       duration: FADE_IN_MS,
@@ -73,7 +82,7 @@ export function LanguageTransitionOverlay({
       shownFiredRef.current = true;
       onShownRef.current();
     });
-  }, [opacity]);
+  }, [active, hiding, opacity]);
 
   useEffect(() => {
     if (!hiding) return;
@@ -100,11 +109,13 @@ export function LanguageTransitionOverlay({
     ? [styles.message, { fontFamily: scriptFont }]
     : styles.message;
 
+  const pointerEvents = languageOverlayPointerEvents({ active, hiding });
+
   return (
     <Animated.View
       style={[styles.root, { opacity }]}
-      pointerEvents={hiding ? "none" : "auto"}
-      accessibilityViewIsModal={!hiding}
+      pointerEvents={pointerEvents}
+      accessibilityViewIsModal={pointerEvents === "auto"}
     >
       <StatusBar
         barStyle="light-content"

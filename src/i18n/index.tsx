@@ -9,7 +9,8 @@
  * rejects duplicates while a transition is in flight, loads the target locale
  * bundle + script font BEFORE committing, applies the language, persists only
  * after success, and always tears the transition overlay down (success,
- * failure, timeout, unmount). No DevSettings.reload — remount-key bump only.
+ * failure, timeout, unmount). No DevSettings.reload and no full-tree remount
+ * of Auth/LocalDb/Sync — LocaleFontProvider + i18n revision refresh the UI.
  */
 
 import React, {
@@ -21,11 +22,12 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { AccessibilityInfo, InteractionManager } from "react-native";
+import { AccessibilityInfo, AppState, InteractionManager } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { changeAppLanguage, ensureLocaleBundle, i18n, initI18n, translateSync } from "./i18n";
 import { LanguageTransitionOverlay } from "./LanguageTransitionOverlay";
+import { LANGUAGE_OVERLAY_UNMOUNT_FAILSAFE_MS } from "./languageOverlayTouchPolicy";
 import {
   createLanguageTransitionController,
   type LanguageTransitionController,
@@ -94,7 +96,6 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
   const [transitionPhase, setTransitionPhase] = useState<LanguageTransitionPhase>("idle");
   const [overlayLang, setOverlayLang] = useState<Lang | null>(null);
   const [revision, setRevision] = useState(0);
-  const [mountKey, setMountKey] = useState(0);
   const reduceMotionRef = useRef(false);
   const pendingInstantRef = useRef(false);
   const overlayShownResolveRef = useRef<(() => void) | null>(null);
@@ -163,9 +164,20 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
         setLangState(next);
         setRevision((n) => n + 1);
       },
-      persistLanguage: persistLang,
+      persistLanguage: async (next) => {
+        // Bound persist so a hung AsyncStorage write cannot leave the
+        // transition (and overlay) stuck in "switching" forever.
+        await Promise.race([
+          persistLang(next),
+          new Promise<void>((resolve) => setTimeout(resolve, 1500)),
+        ]);
+      },
       settle: async () => {
-        setMountKey((k) => k + 1);
+        // Intentionally NO full-tree remount key. Remounting children of
+        // I18nProvider would recreate LocalDbProvider / AuthProvider /
+        // SyncProvider (design forbids this) and can leave navigation and
+        // touches wedged after a language switch. LocaleFontProvider + the
+        // revision bump above already refresh script fonts and `t()`.
         await new Promise<void>((resolve) => {
           InteractionManager.runAfterInteractions(() => resolve());
         });
@@ -199,6 +211,27 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
   const handleOverlayHidden = useCallback(() => {
     setOverlayLang(null);
   }, []);
+
+  // Failsafe: controller is idle but overlay still mounted (dropped fade-out
+  // callback). Force unmount so a full-screen layer cannot linger.
+  useEffect(() => {
+    if (transitionPhase !== "idle" || !overlayLang) return;
+    const id = setTimeout(() => setOverlayLang(null), LANGUAGE_OVERLAY_UNMOUNT_FAILSAFE_MS);
+    return () => clearTimeout(id);
+  }, [transitionPhase, overlayLang]);
+
+  // Resume recovery: if a transition somehow left the overlay mounted while
+  // idle, clear it when the app returns to the foreground.
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state !== "active") return;
+      if (controller.getPhase() === "idle") {
+        setOverlayLang(null);
+        setTransitionPhase("idle");
+      }
+    });
+    return () => sub.remove();
+  }, [controller]);
 
   const langRef = useRef(lang);
   langRef.current = lang;
@@ -241,9 +274,7 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <I18nContext.Provider value={api}>
-      {ready ? (
-        <React.Fragment key={`i18n-${mountKey}`}>{children}</React.Fragment>
-      ) : null}
+      {ready ? children : null}
       {overlayLang ? (
         <LanguageTransitionOverlay
           targetLang={overlayLang}
