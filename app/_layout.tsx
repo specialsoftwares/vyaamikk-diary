@@ -1,13 +1,13 @@
 import "react-native-gesture-handler";
 import React from "react";
-import { Stack, usePathname } from "expo-router";
+import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 
 import { assertProductionConfig } from "@/config/productionGuard";
-import { isPublicLightweightRoute } from "@/config/publicRoutes";
+import { decideRootDataProviders } from "@/config/rootDataProviders";
 import { AppFeedbackProvider } from "@/feedback/AppFeedback";
 import { LocalDbProvider } from "@/state/localDb";
 import { AuthProvider } from "@/state/auth";
@@ -20,18 +20,49 @@ import { i18n } from "@/i18n/i18n";
 
 assertProductionConfig();
 
+/** Pathname must never gate this — see `decideRootDataProviders`. */
+const rootDataProviders = decideRootDataProviders();
+if (
+  !rootDataProviders.mountLocalDb ||
+  !rootDataProviders.mountAuth ||
+  !rootDataProviders.mountSync ||
+  !rootDataProviders.mountAppFeedback
+) {
+  throw new Error(
+    "Root LocalDb/Auth/Sync/AppFeedback providers must always mount (path-gated mounts crash useAuth consumers)."
+  );
+}
+
 SplashScreen.preventAutoHideAsync().catch(() => {
   // No-op — splash hide is best-effort.
 });
 
-function SharedShellProviders({ children }: { children: React.ReactNode }) {
+/**
+ * Single stable provider tree for the entire app.
+ *
+ * LocalDb → Auth → Sync → AppFeedback must remain mounted across public
+ * routes, authenticated routes, redirects, and language transitions.
+ * Path-gated provider swaps previously unmounted AuthProvider while
+ * Expo Router kept `app/(app)/_layout` (a `useAuth` consumer) alive.
+ *
+ * Order matters: AuthProvider reads LocalDb; SyncProvider reads Auth + LocalDb.
+ */
+function RootProviders({ children }: { children: React.ReactNode }) {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <ThemeProvider>
           <I18nextProvider i18n={i18n}>
             <I18nProvider>
-              <LocaleFontProvider>{children}</LocaleFontProvider>
+              <LocaleFontProvider>
+                <LocalDbProvider>
+                  <AuthProvider>
+                    <SyncProvider>
+                      <AppFeedbackProvider>{children}</AppFeedbackProvider>
+                    </SyncProvider>
+                  </AuthProvider>
+                </LocalDbProvider>
+              </LocaleFontProvider>
             </I18nProvider>
           </I18nextProvider>
         </ThemeProvider>
@@ -40,32 +71,11 @@ function SharedShellProviders({ children }: { children: React.ReactNode }) {
   );
 }
 
-function AppProviders({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
-  const isPublicRoute = isPublicLightweightRoute(pathname);
-
-  if (isPublicRoute) {
-    return <SharedShellProviders>{children}</SharedShellProviders>;
-  }
-
-  return (
-    <SharedShellProviders>
-      <LocalDbProvider>
-        <AuthProvider>
-          <SyncProvider>
-            <AppFeedbackProvider>{children}</AppFeedbackProvider>
-          </SyncProvider>
-        </AuthProvider>
-      </LocalDbProvider>
-    </SharedShellProviders>
-  );
-}
-
 export default function RootLayout() {
   return (
-    <AppProviders>
+    <RootProviders>
       <ThemedAppShell />
-    </AppProviders>
+    </RootProviders>
   );
 }
 

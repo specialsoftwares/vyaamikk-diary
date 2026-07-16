@@ -1,6 +1,10 @@
 /**
- * Routes that must render without LocalDb / Auth / Sync providers.
- * Used for public marketing and legal viewer pages on web.
+ * Public marketing / legal route classification (layout chrome, splash, etc.).
+ *
+ * IMPORTANT: This must NOT gate root Auth / LocalDb / Sync providers.
+ * Expo Router keeps authenticated layouts mounted across transitions; skipping
+ * AuthProvider on these paths caused `useAuth must be used within <AuthProvider>`.
+ * See `decideRootDataProviders` in `rootDataProviders.ts`.
  */
 export function isPublicLightweightRoute(pathname: string): boolean {
   const path = pathname.split("?")[0]?.split("#")[0] ?? pathname;
