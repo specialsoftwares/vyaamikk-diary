@@ -85,5 +85,15 @@ export function classifyPublicUrl(
     };
   }
 
+  if (/specialsoftwares\.in/i.test(url)) {
+    return {
+      kind,
+      url,
+      status: "malformed",
+      canOpen: false,
+      reason: `Retired .in hostname for ${kind} — use vyaamikk.specialsoftwares.com.`,
+    };
+  }
+
   return { kind, url, status: "ready", canOpen: true };
 }

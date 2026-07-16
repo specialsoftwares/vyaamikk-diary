@@ -72,12 +72,23 @@ function testAuthRouteForbidden() {
   }
 }
 
+function testRetiredInHostnameRejected() {
+  const r = classifyPublicUrl(
+    "privacy",
+    "https://vyaamikk.specialsoftwares.in/privacy"
+  );
+  assert.equal(r.status, "malformed");
+  assert.equal(r.canOpen, false);
+  assert.match(r.reason ?? "", /\.in/);
+}
+
 function main() {
   testValidHttpsReady();
   testMissingValues();
   testMalformedValues();
   testPrelaunchEmptyStoreUrls();
   testAuthRouteForbidden();
+  testRetiredInHostnameRejected();
   console.log("publicLinks.test.ts: ok");
 }
 

@@ -70,6 +70,7 @@
     "test:env-resolution": "npx --yes tsx src/config/runtimeEnvironment.test.ts",
     "test:env-shell-precedence": "npx --yes tsx scripts/test-env-shell-precedence.ts",
     "test:public-links": "npx --yes tsx src/config/publicLinks.test.ts",
+    "test:external-https": "npx --yes tsx src/utils/externalHttpsUrl.test.ts",
     "test:root-providers": "npx --yes tsx src/config/rootDataProviders.test.ts",
     "test:curtain-phases": "npx --yes tsx src/components/ui/curtainSheetPhases.test.ts",
     "test:flip-lock": "npx --yes tsx src/components/you/identityCardFlipController.test.ts",

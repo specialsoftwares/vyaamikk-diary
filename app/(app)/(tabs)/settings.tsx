@@ -10,9 +10,7 @@ import {
   SettingsNavGroup,
 } from "@/components/settings";
 import { Screen, SkeletonLoadingPanel, SkeletonSettingsSection, LocaleUiText } from "@/components/ui";
-import { env } from "@/config/env";
 import { getAuthEntryHref } from "@/config/authWrapper";
-import { openSafeExternalUrl } from "@/utils/safeUrl";
 import { useAuth } from "@/state/auth";
 import { useT } from "@/i18n";
 import { spacing, typography, useThemedStyles } from "@/theme";
@@ -64,12 +62,6 @@ export default function SettingsTab() {
       },
     })
   );
-
-  const openLink = (url: string) => {
-    void openSafeExternalUrl(url).then((ok) => {
-      if (!ok) Alert.alert(t("common.error"));
-    });
-  };
 
   const confirmSignOut = () => {
     Alert.alert(t("settings.signOutPrompt"), t("settings.signOutBody"), [

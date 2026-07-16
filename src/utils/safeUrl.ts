@@ -1,27 +1,52 @@
 import { Linking } from "react-native";
 
-/**
- * Allow only http(s) links for in-app browser / external opens.
- */
-const ALLOWED_SCHEMES = /^https?:\/\//i;
+import {
+  isSafeExternalUrl,
+  normalizeOpenableHttpsUrl,
+} from "@/utils/externalHttpsUrl";
 
-export function isSafeExternalUrl(url: string): boolean {
-  const trimmed = url.trim();
-  if (!trimmed) return false;
-  if (/^(javascript|data|file|vbscript):/i.test(trimmed)) return false;
-  return ALLOWED_SCHEMES.test(trimmed);
+export {
+  EXTERNAL_OPEN_FAILED_MESSAGE,
+  isSafeExternalUrl,
+  normalizeOpenableHttpsUrl,
+} from "@/utils/externalHttpsUrl";
+
+/**
+ * External HTTPS opener for website / legal destinations.
+ *
+ * Never throws. Serializes overlapping opens (repeated taps join the in-flight
+ * promise) and always clears the lock in `finally`. Uses a bound
+ * `Linking.openURL` call — unbound breaks RN `_validateURL`.
+ */
+
+let inFlight: Promise<boolean> | null = null;
+
+export async function openSafeExternalUrl(url: unknown): Promise<boolean> {
+  const normalized = normalizeOpenableHttpsUrl(url);
+  if (!normalized) return false;
+
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const task = (async () => {
+    try {
+      await Linking.openURL(normalized);
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+
+  inFlight = task;
+  try {
+    return await task;
+  } finally {
+    if (inFlight === task) inFlight = null;
+  }
 }
 
-/**
- * Open http(s) URLs in the system browser.
- * Uses a bound call — passing `Linking.openURL` unbound breaks RN's internal `_validateURL`.
- */
-export async function openSafeExternalUrl(url: string): Promise<boolean> {
-  if (!isSafeExternalUrl(url)) return false;
-  try {
-    await Linking.openURL(url);
-    return true;
-  } catch {
-    return false;
-  }
+/** Test-only: clear the in-flight lock between cases. */
+export function __resetExternalOpenInFlightForTests(): void {
+  inFlight = null;
 }
