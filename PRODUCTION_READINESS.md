@@ -23,7 +23,7 @@
 | 3 | `firestore.rules` — hardened production rules (`9c4369a`) | ✅ Live on `vyaamikk-diary` 2026-07-15 ~02:02 IST |
 | 3 | Client profile patch compatibility (`11503ce`) | ✅ In repo — server email bind + minimal merge writes |
 | 3 | `retiredPhones` / `pendingEmailVerifications` server-owned | ✅ |
-| 4 | Legal URL defaults → `vyaamikk.specialsoftwares.in` | ✅ |
+| 4 | Legal URL defaults → `vyaamikk.specialsoftwares.com` | ✅ |
 | 4 | `.env.example` updated | ✅ |
 
 ---
@@ -116,7 +116,7 @@ See `docs/NATIVE_FIREBASE_SETUP.md`.
 
 ## 9. Legal URL status
 
-Defaults now point to `https://vyaamikk.specialsoftwares.in/{privacy,terms,delete-account,legal}` and `support@specialsoftwares.in`.
+Defaults now point to `https://vyaamikk.specialsoftwares.com/{privacy,terms,support,contact,delete-account,download}` and `support.vyd@specialsoftwares.com`.
 
 **Counsel review** of hosted page content is still required before store submission.
 
@@ -137,10 +137,12 @@ Defaults now point to `https://vyaamikk.specialsoftwares.in/{privacy,terms,delet
 | Native config files — `google-services.json` / `GoogleService-Info.plist` | ❌ Required for builds |
 | Email delivery provider — `verifyAndBindEmail` non-emulator codes | ❌ Until SendGrid/etc. wired |
 | Hosted legal pages — counsel review | ❌ Required before store submission |
-| Marketing/legal website (Lovable) | ✅ **Built** (TanStack Start / CF Workers) — **pre-launch, unpublished**; canonical domain pending; see `docs/WEBSITE_STORE_INTEGRATION.md` |
-| Public website DNS / publication | ❌ Not complete |
-| Final canonical domain (`.com` vs `.in`) | ❌ Owner decision pending |
+| Marketing/legal website (Lovable) | ✅ **Published** at `https://vyaamikk.specialsoftwares.com` — see `docs/WEBSITE_STORE_INTEGRATION.md` |
+| Public website DNS / publication | ✅ Complete |
+| Final canonical domain | ✅ `https://vyaamikk.specialsoftwares.com` |
 | App Store / Play Store live listing URLs | ❌ Empty by design until listings exist |
+| LLPIN / registered office / Grievance Officer | ❌ Pending counsel |
+| OG image / CSP / HSTS / Data Safety alignment | ❌ Pending website hardening |
 | Account deletion E2E on device | ❌ Validate after Functions deploy |
 
 ## 11. Commands to run

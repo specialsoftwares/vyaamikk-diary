@@ -106,38 +106,36 @@ export const env = {
     owner: readString("EXPO_PUBLIC_BRAND_OWNER", PUBLIC_BRAND),
     legalOperator: readString("EXPO_PUBLIC_LEGAL_OPERATOR", LEGAL_OPERATOR),
     /**
-     * Provisional development host only — final canonical origin is an owner
-     * decision between specialsoftwares.com and vyaamikk.specialsoftwares.in
-     * (see docs/WEBSITE_STORE_INTEGRATION.md). Do not treat these defaults as
-     * published production DNS.
+     * Authoritative production origin (published):
+     * https://vyaamikk.specialsoftwares.com — see docs/WEBSITE_STORE_INTEGRATION.md.
      */
     websiteUrl: readString(
       "EXPO_PUBLIC_WEBSITE_URL",
-      "https://vyaamikk.specialsoftwares.in"
+      "https://vyaamikk.specialsoftwares.com"
     ),
     privacyUrl: readString(
       "EXPO_PUBLIC_PRIVACY_URL",
-      "https://vyaamikk.specialsoftwares.in/privacy"
+      "https://vyaamikk.specialsoftwares.com/privacy"
     ),
     termsUrl: readString(
       "EXPO_PUBLIC_TERMS_URL",
-      "https://vyaamikk.specialsoftwares.in/terms"
+      "https://vyaamikk.specialsoftwares.com/terms"
     ),
     /**
-     * Legal hub / website home. Lovable site has no combined `/legal` route —
+     * Legal hub / website home. Site has no combined `/legal` route —
      * default points at `/` (home). Prefer privacy + terms for policy links.
      */
     legalUrl: readString(
       "EXPO_PUBLIC_LEGAL_URL",
-      "https://vyaamikk.specialsoftwares.in/"
+      "https://vyaamikk.specialsoftwares.com/"
     ),
     supportUrl: readString(
       "EXPO_PUBLIC_SUPPORT_URL",
-      "https://vyaamikk.specialsoftwares.in/support"
+      "https://vyaamikk.specialsoftwares.com/support"
     ),
     contactUrl: readString(
       "EXPO_PUBLIC_CONTACT_URL",
-      "https://vyaamikk.specialsoftwares.in/contact"
+      "https://vyaamikk.specialsoftwares.com/contact"
     ),
     /** Approved product support mailbox. */
     supportEmail: readString(
@@ -147,7 +145,7 @@ export const env = {
     /** Google Play / web account & data deletion request URL. */
     accountDeletionUrl: readString(
       "EXPO_PUBLIC_ACCOUNT_DELETION_URL",
-      "https://vyaamikk.specialsoftwares.in/delete-account"
+      "https://vyaamikk.specialsoftwares.com/delete-account"
     ),
     /**
      * Pre-launch download / launch-status page (not a live App Store or Play
@@ -155,7 +153,7 @@ export const env = {
      */
     installUrl: readString(
       "EXPO_PUBLIC_APP_INSTALL_URL",
-      "https://vyaamikk.specialsoftwares.in/download"
+      "https://vyaamikk.specialsoftwares.com/download"
     ),
     /** Empty until a real App Store listing exists — never render as an active store badge. */
     appStoreUrl: readString("EXPO_PUBLIC_APP_STORE_URL", ""),

@@ -25,11 +25,11 @@ Client compatibility changes from commit **`11503ce`** (server email bind + patc
 
 **Completed blockers:** Firestore hardening (`9c4369a`), client rules compatibility (`11503ce`).
 
-**Still open (not marked complete):** production smoke testing, native OTP verification on device, App Check, Storage rules verification/deploy, **native-device interaction matrix** (Liquid Glass tabs, share-sheet iOS, production OTP), **public website deployment / DNS / final canonical domain**, LLPIN/registered-office/grievance details, OG image, CSP/HSTS, privacy-label/Data-Safety alignment, final store URLs.
+**Still open (not marked complete):** production smoke testing, native OTP verification on device, App Check, Storage rules verification/deploy, **native-device interaction matrix** (Liquid Glass tabs, share-sheet iOS, production OTP), LLPIN/registered-office/grievance details, OG image, CSP/HSTS, privacy-label/Data-Safety alignment, final store listing URLs.
 
 **Completed (2026-07-15 Fable pass):** Expo Go environment isolation (`3bc2e2e`); runtime interaction hardening (CurtainSheet, flip lock, language controller, share recovery).
 
-**Completed (2026-07-16 website integration):** Mobile public-link layer + inventory documented in `docs/WEBSITE_STORE_INTEGRATION.md`. Lovable marketing/legal site is **implemented and buildable** but remains **pre-launch / unpublished**; support email aligned to `support.vyd@specialsoftwares.com`; empty App Store / Play Store URLs preserved; `/auth` blocked as an end-user destination.
+**Completed (2026-07-16 website integration):** Mobile public-link layer documented in `docs/WEBSITE_STORE_INTEGRATION.md`. Production origin **`https://vyaamikk.specialsoftwares.com`** published; support email `support.vyd@specialsoftwares.com`; empty App Store / Play Store URLs preserved; `/auth` blocked as an end-user destination. Legacy `vyaamikk.specialsoftwares.in` retired from mobile defaults.
 
 `firestore.rules` was **not modified** for this deploy — repo file at `9c4369a` matches what was released.
 

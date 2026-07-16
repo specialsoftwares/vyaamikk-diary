@@ -15,10 +15,7 @@ export const LEGAL_ENTITY_NAME = LEGAL_OPERATOR;
 export const LEGAL_ENTITY_ADDRESS =
   "[REGISTERED ADDRESS — Delhi NCR, India — confirm with counsel]";
 
-/**
- * Provisional public website origin from env — not a final canonical-domain
- * decision. Owner must choose specialsoftwares.com vs vyaamikk.specialsoftwares.in.
- */
+/** Public website origin from env (production: https://vyaamikk.specialsoftwares.com). */
 export const LEGAL_PUBLIC_WEBSITE = env.brand.websiteUrl;
 
 export const LEGAL_GRIEVANCE_OFFICER = {

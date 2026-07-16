@@ -2,10 +2,8 @@
  * Mobile-side public website / store link resolver.
  *
  * Derives every end-user external destination from EXPO_PUBLIC_* values
- * (via `env.brand`). Does not invent a final canonical host — provisional
- * development defaults may still use a known path structure, but the owner
- * must confirm `specialsoftwares.com` vs `vyaamikk.specialsoftwares.in`
- * before public launch (see docs/WEBSITE_STORE_INTEGRATION.md).
+ * (via `env.brand`). Authoritative production origin:
+ * https://vyaamikk.specialsoftwares.com (see docs/WEBSITE_STORE_INTEGRATION.md).
  *
  * Website `/auth` is a Developer Integration Sign-In (MCP/OAuth) and must
  * never be used as a mobile-app or end-user destination.

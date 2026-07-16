@@ -13,7 +13,7 @@ function testValidHttpsReady() {
     "download",
   ];
   for (const kind of kinds) {
-    const r = classifyPublicUrl(kind, `https://vyaamikk.specialsoftwares.in/${kind}`);
+    const r = classifyPublicUrl(kind, `https://vyaamikk.specialsoftwares.com/${kind}`);
     assert.equal(r.status, "ready", kind);
     assert.equal(r.canOpen, true, kind);
   }
@@ -59,10 +59,10 @@ function testPrelaunchEmptyStoreUrls() {
 
 function testAuthRouteForbidden() {
   const cases = [
-    "https://vyaamikk.specialsoftwares.in/auth",
-    "https://vyaamikk.specialsoftwares.in/auth/",
-    "https://specialsoftwares.com/auth?x=1",
-    "https://specialsoftwares.com/auth#fragment",
+    "https://vyaamikk.specialsoftwares.com/auth",
+    "https://vyaamikk.specialsoftwares.com/auth/",
+    "https://vyaamikk.specialsoftwares.com/auth?x=1",
+    "https://vyaamikk.specialsoftwares.com/auth#fragment",
   ];
   for (const url of cases) {
     const r = classifyPublicUrl("websiteHome", url);
