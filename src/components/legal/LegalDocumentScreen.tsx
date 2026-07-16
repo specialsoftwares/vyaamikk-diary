@@ -1,5 +1,5 @@
 import React from "react";
-import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import {
   PRIVACY_POLICY_SECTIONS,
@@ -10,6 +10,7 @@ import { legal, legalDocumentTitle, type LegalDocumentId } from "@/config/legal"
 import { openPublicLinkOrExplain, getSupportEmail } from "@/config/publicLinks";
 import { Card, Header, Screen, LocaleUiText } from "@/components/ui";
 import { useT } from "@/i18n";
+import { openSafeMailto } from "@/utils/safeMailto";
 import { spacing, typography, useThemedStyles } from "@/theme";
 
 function sectionsFor(doc: LegalDocumentId): LegalSection[] {
@@ -68,7 +69,7 @@ export function LegalDocumentScreen({ doc, showBack = true }: LegalDocumentScree
         <Pressable onPress={() => void openPublicLinkOrExplain(hostedKind)}>
           <LocaleUiText style={styles.webLink}>{t("legal.viewerHostedLink")}</LocaleUiText>
         </Pressable>
-        <Pressable onPress={() => void Linking.openURL(`mailto:${supportEmail}`)}>
+        <Pressable onPress={() => void openSafeMailto(supportEmail)}>
           <LocaleUiText style={styles.webLink}>
             {t("legal.contactPlaceholder", { email: supportEmail })}
           </LocaleUiText>

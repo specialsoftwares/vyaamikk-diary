@@ -1,5 +1,5 @@
 import React from "react";
-import { Linking, Platform, StyleSheet, Text, View } from "react-native";
+import { Platform, StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 
 import { LandingButton } from "@/components/landing/LandingButton";
@@ -8,6 +8,7 @@ import { LANDING_COLORS, LANDING_LAYOUT, landingTypography } from "@/components/
 import { useLandingFadeIn } from "@/components/landing/useLandingMotion";
 import { getAuthEntryHref } from "@/config/authWrapper";
 import { getSupportEmail } from "@/config/publicLinks";
+import { openSafeMailto } from "@/utils/safeMailto";
 import { radius, spacing } from "@/theme";
 
 export function LandingCTA() {
@@ -16,7 +17,7 @@ export function LandingCTA() {
 
   const contactCompany = () => {
     const mailto = `mailto:${getSupportEmail()}?subject=${encodeURIComponent("Vyaamikk Diary — business enquiry")}`;
-    void Linking.openURL(mailto);
+    void openSafeMailto(mailto);
   };
 
   return (

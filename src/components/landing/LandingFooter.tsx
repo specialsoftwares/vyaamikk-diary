@@ -1,6 +1,5 @@
 import React from "react";
 import {
-  Linking,
   Platform,
   Pressable,
   StyleSheet,
@@ -16,6 +15,7 @@ import type { LandingSectionKey } from "@/components/landing/LandingNavBar";
 import { DESIGNED_BY_LINE, PUBLIC_BRAND } from "@/config/brand";
 import { legal } from "@/config/legal";
 import { getSupportEmail, openPublicLinkOrExplain } from "@/config/publicLinks";
+import { openSafeMailto } from "@/utils/safeMailto";
 import { spacing } from "@/theme";
 
 interface LandingFooterProps {
@@ -36,11 +36,11 @@ export function LandingFooter({ onNavigateSection }: LandingFooterProps) {
   };
 
   const mailSupport = () => {
-    void Linking.openURL(`mailto:${getSupportEmail()}`);
+    void openSafeMailto(getSupportEmail());
   };
 
   const mailGrievance = () => {
-    void Linking.openURL(`mailto:${legal.grievanceOfficer.email}`);
+    void openSafeMailto(legal.grievanceOfficer.email);
   };
 
   const column = (title: string, children: React.ReactNode) => (
