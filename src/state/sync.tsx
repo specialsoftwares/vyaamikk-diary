@@ -4,6 +4,7 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -16,6 +17,7 @@ import {
   sessionSyncGate,
   type SyncLockReason,
 } from "@/sync/sessionSyncGate";
+import { shouldClearSyncLockOnAuthTransition } from "@/sync/syncLockIdentityPolicy";
 import { localEntriesRepository } from "@/repositories/localEntriesRepository";
 import { syncQueueRepository } from "@/repositories/syncQueueRepository";
 import { isFirebaseConfigured } from "@/config/env";
@@ -55,8 +57,29 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   const [pulling, setPulling] = useState(false);
   const [offline, setOffline] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
+  const identityRef = useRef<{
+    status: typeof authStatus;
+    uid: string | null;
+  }>({ status: authStatus, uid: user?.uid ?? null });
 
   useEffect(() => sessionSyncGate.subscribe(setLockReason), []);
+
+  // Process-wide sync lock must not survive logout / account switch.
+  useEffect(() => {
+    const prev = identityRef.current;
+    const next = { status: authStatus, uid: user?.uid ?? null };
+    if (
+      shouldClearSyncLockOnAuthTransition({
+        prevStatus: prev.status,
+        nextStatus: next.status,
+        prevUid: prev.uid,
+        nextUid: next.uid,
+      })
+    ) {
+      sessionSyncGate.unlock();
+    }
+    identityRef.current = next;
+  }, [authStatus, user?.uid]);
 
   useEffect(() => {
     const unsub = NetInfo.addEventListener((s) => {
