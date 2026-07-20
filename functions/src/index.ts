@@ -19,6 +19,7 @@ export {
 } from "./email/verification";
 
 export {
+  ensureAccountDeletionJob,
   retireIdentity,
   completeAccountDeletion,
   scheduledDeletionCleanup,

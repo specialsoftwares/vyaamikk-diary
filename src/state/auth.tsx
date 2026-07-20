@@ -188,6 +188,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
 
           if (!live || isLoginBlockedAccount(live)) {
+            const { applyLocalDeletionPolicy } = await import(
+              "@/services/accountDeletion/localDevicePolicy"
+            );
+            await applyLocalDeletionPolicy({
+              cachedUser: user,
+              liveUser: live,
+              liveMissingOrDeleted: !live || isLoginBlockedAccount(live),
+            });
             await forceClearAllSessions();
             setState((s) => ({ ...s, status: "signed_out" }));
             return;

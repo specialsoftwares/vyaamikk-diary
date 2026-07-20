@@ -5,6 +5,7 @@ import type { AccountDeletionResult, AccountDeletionScope } from "@/domain/accou
 import type { UserProfile } from "@/domain/types";
 import { loadMockRegistry, saveMockRegistry } from "@/services/auth/mockRegistry";
 import { emailIndexStatusPatch } from "@/services/auth/emailLink";
+import { callEnsureAccountDeletionJob } from "@/services/auth/identityCallable";
 import { applyProfilePatch, normaliseUserProfile } from "@/services/auth/normalizeProfile";
 import { normalizePhoneE164 } from "@/utils/mobileHash";
 import { createLogger } from "@/utils/logger";
@@ -43,7 +44,7 @@ async function markPendingFirestore(profile: UserProfile): Promise<UserProfile> 
 
 /**
  * Start deletion grace period — account stays in registry; login blocked until
- * completion or cancel.
+ * completion or cancel. Does not purge local SQLite during grace.
  */
 export async function markAccountPendingDeletion(
   profile: UserProfile
@@ -57,6 +58,13 @@ export async function markAccountPendingDeletion(
     next = await markPendingMock(profile);
   } else if (backend === "firebase-production" || backend === "firebase-shared-dev") {
     next = await markPendingFirestore(profile);
+    try {
+      await callEnsureAccountDeletionJob();
+    } catch (e) {
+      // Ledger is also bootstrapped by the scheduled worker; do not fail the
+      // user-facing pending request if the ensure callable is briefly down.
+      log.warn("ensureAccountDeletionJob failed (scheduler can bootstrap)", e);
+    }
   } else {
     next = applyProfilePatch(profile, pendingDeletionPatch(profile));
   }

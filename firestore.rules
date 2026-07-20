@@ -328,5 +328,10 @@ service cloud.firestore {
     match /pendingEmailVerifications/{verificationId} {
       allow read, write: if false;
     }
+
+    // ---- Account deletion ledger (Admin / Functions only) ---------------
+    match /deletionJobs/{uid} {
+      allow read, write: if false;
+    }
   }
 }

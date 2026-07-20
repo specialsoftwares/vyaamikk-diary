@@ -226,6 +226,21 @@ export async function callCompleteAccountDeletion(uid: string): Promise<Complete
   );
 }
 
+export interface EnsureDeletionJobResponse {
+  ok: true;
+  generation: number;
+  graceExpiresAt: number;
+  status: string;
+}
+
+/** Create/refresh server-owned deletionJobs/{uid} after pending_deletion is set. */
+export async function callEnsureAccountDeletionJob(): Promise<EnsureDeletionJobResponse> {
+  return callFunction<Record<string, never>, EnsureDeletionJobResponse>(
+    "ensureAccountDeletionJob",
+    {}
+  );
+}
+
 export interface StartAccountReactivationResponse {
   verificationId: string;
   maskedEmail: string;

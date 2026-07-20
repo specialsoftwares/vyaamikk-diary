@@ -2,6 +2,7 @@ import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { randomBytes } from "node:crypto";
 
 import { getAdminDb } from "../admin";
+import { cancelDeletionJob } from "../deletion/finalPurge";
 import {
   applyLoginTimestamps,
   normalizePhoneE164,
@@ -180,6 +181,9 @@ export const completeAccountReactivation = onCall({ region: "asia-south1" }, asy
       reactivationEmailVerifiedAt: now,
     };
   });
+
+  // Cancel durable purge job so a leased/scheduled worker cannot continue.
+  await cancelDeletionJob(authUid, "reactivated");
 
   return { profile: result, isNewUser: false as const };
 });
