@@ -49,9 +49,17 @@ export function throwEmailOtpError(
     | "resource-exhausted"
     | "not-found"
     | "deadline-exceeded"
-    | "aborted" = "failed-precondition"
+    | "aborted" = "failed-precondition",
+  details?: Record<string, string | number | boolean | null>
 ): never {
-  throw new HttpsError(httpsCode, EMAIL_OTP_USER_MESSAGES[code], { code });
+  throw new HttpsError(httpsCode, EMAIL_OTP_USER_MESSAGES[code], { code, ...details });
+}
+
+function cooldownDetails(resendAvailableAt: number, now = Date.now()) {
+  return {
+    resendAvailableAt,
+    retryAfterSeconds: Math.max(0, Math.ceil((resendAvailableAt - now) / 1000)),
+  };
 }
 
 function rateDocId(kind: string, key: string): string {
@@ -218,6 +226,23 @@ export async function createOrRotateEmailChallenge(input: {
     normalizeEmailStrict(String(user.emailVerificationLockedEmail ?? "")) === normalized
   ) {
     throwEmailOtpError("EMAIL_OTP_LOCKED");
+  }
+
+  // Enforce resend cooldown before burning rate-limit budget.
+  {
+    const priorAll = await db.collection(PENDING_COLLECTION).where("userId", "==", authUid).get();
+    for (const d of priorAll.docs) {
+      const data = d.data() as ChallengeDoc;
+      if (data.purpose !== purpose || data.status !== "active") continue;
+      if (data.normalizedEmail !== normalized) continue;
+      if (now < data.resendAvailableAt) {
+        throwEmailOtpError(
+          "EMAIL_OTP_COOLDOWN",
+          "resource-exhausted",
+          cooldownDetails(data.resendAvailableAt, now)
+        );
+      }
+    }
   }
 
   await assertSendRateLimits(db, authUid, normalized, now);
@@ -526,7 +551,11 @@ export async function resendEmailChallenge(input: {
   if (pending.userId !== input.uid) throwEmailOtpError("FORBIDDEN", "permission-denied");
   if (pending.status !== "active") throwEmailOtpError("CONFLICT", "aborted");
   if (Date.now() < pending.resendAvailableAt) {
-    throwEmailOtpError("EMAIL_OTP_COOLDOWN", "resource-exhausted");
+    throwEmailOtpError(
+      "EMAIL_OTP_COOLDOWN",
+      "resource-exhausted",
+      cooldownDetails(pending.resendAvailableAt)
+    );
   }
   return createOrRotateEmailChallenge({
     uid: input.uid,

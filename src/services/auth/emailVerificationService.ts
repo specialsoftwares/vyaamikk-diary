@@ -27,7 +27,7 @@ export interface EmailVerificationStartResult {
   resendAvailableAt?: number;
   version?: number;
   message?: string;
-  devCodeHint?: string;
+  devCodeHint?: string | null;
 }
 
 /** True when a trusted email OTP path is available. */

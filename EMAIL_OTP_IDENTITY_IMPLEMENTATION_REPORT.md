@@ -1,7 +1,7 @@
 # Email OTP Identity — Implementation Report
 
 **Date:** 2026-07-21  
-**Commits:** (filled at commit time)
+**Commits:** this change (`fix(auth): align mock email OTP and add resend countdown`); prior `83fa1d3`, `81f8ae6`
 
 ## Architecture
 
@@ -9,7 +9,7 @@
 - **Mandatory secondary identity:** exactly one verified email per account.
 - **Authoritative binding:** `one account ↔ one mobile ↔ one verified email`.
 - **OTP authority:** Firebase Cloud Functions v2 callables (`asia-south1`) with Admin SDK transactions.
-- **Local-mock:** guarded in-process OTP adapter (`EXPO_PUBLIC_LOCAL_MOCK_EMAIL_OTP` / Metro `__DEV__` + `activeBackend===local-mock` + development mode). Never marks verified from client booleans alone; uses challenge/consume path.
+- **Local-mock:** guarded in-process OTP adapter. Deterministic OTP is **`000000`** and is accepted **only** when all of the following are true: `activeBackend === "local-mock"`, effective app mode is `development`, bundled mode is not production, and `EXPO_PUBLIC_LOCAL_MOCK_EMAIL_OTP=1` is explicitly set. `__DEV__` / Expo Go alone do **not** enable the mock OTP.
 
 ## Route state machine
 
@@ -58,10 +58,17 @@ Abstraction in `functions/src/email/provider.ts`:
 - Binding-index gaps repaired only on successful server verify.
 - Conflicting legacy FNV vs SHA-256 indexes: admin remediation documented (do not auto-pick owner).
 
-## Reviewer account
+## Reviewer / Expo Go local-mock OTP
 
-- Expo Go local-mock: deterministic OTP `246810` when guards pass.
-- Document steps in deployment checklist; no universal production bypass.
+- Set `EXPO_PUBLIC_LOCAL_MOCK_EMAIL_OTP=1` (e.g. in shell before `npm run start:expo-go`).
+- Deterministic email OTP: **`000000`** (legacy `246810` is rejected).
+- UI shows `Development OTP: 000000` only under the same guard.
+- Resend countdown uses authoritative `resendAvailableAt` (`Resend OTP in 00:30` …); OTP validity shown separately (`Code valid for MM:SS`).
+- Production / Firebase / shared-dev never accept `000000` via `assertDeterministicLocalMockOtpAllowed`.
+
+## UX fix note (follow-up)
+
+Commit `fix(auth): align mock email OTP and add resend countdown` standardizes the mock OTP to `000000`, removes `__DEV__`-only unlock, and replaces vague cooldown messaging with a live authoritative countdown.
 
 ## Session revocation (recovery)
 
@@ -83,7 +90,13 @@ Abstraction in `functions/src/email/provider.ts`:
 
 ## Tests run
 
-See completion report in chat / checklist.
+- `npm run typecheck`
+- `npm run test:local-mock-email-otp`
+- `npm run test:otp-countdown`
+- `npm run test:email-otp-crypto`
+- `npm run test:identity-route-state`
+
+Manual (operator): Expo Go with `EXPO_PUBLIC_LOCAL_MOCK_EMAIL_OTP=1` — verify `000000`, live `Resend OTP in MM:SS`, auto-enable at zero, successful resend invalidates prior OTP.
 
 ## Protected paths
 

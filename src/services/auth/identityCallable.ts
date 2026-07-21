@@ -105,6 +105,19 @@ async function callFunction<TRequest, TResponse>(
       e && typeof e === "object" && "message" in e
         ? String((e as { message: string }).message)
         : "Identity service unavailable.";
+    const details = extractCallableDetails(e);
+    const serverCode = typeof details?.code === "string" ? details.code : null;
+
+    if (serverCode === "EMAIL_OTP_COOLDOWN" || code === "functions/resource-exhausted") {
+      if (serverCode === "EMAIL_OTP_COOLDOWN" || details?.resendAvailableAt != null) {
+        throw new AppError("email_otp_cooldown", message || "Resend is not available yet.", e, {
+          resendAvailableAt:
+            typeof details?.resendAvailableAt === "number" ? details.resendAvailableAt : null,
+          retryAfterSeconds:
+            typeof details?.retryAfterSeconds === "number" ? details.retryAfterSeconds : null,
+        });
+      }
+    }
     if (code === "functions/unauthenticated") {
       throw new AppError("permission_denied", "Sign in again to continue.");
     }
@@ -119,6 +132,21 @@ async function callFunction<TRequest, TResponse>(
     }
     throw new AppError("unknown", message);
   }
+}
+
+function extractCallableDetails(e: unknown): Record<string, unknown> | undefined {
+  if (!e || typeof e !== "object") return undefined;
+  const err = e as {
+    details?: unknown;
+    customData?: { details?: unknown };
+  };
+  if (err.details && typeof err.details === "object") {
+    return err.details as Record<string, unknown>;
+  }
+  if (err.customData?.details && typeof err.customData.details === "object") {
+    return err.customData.details as Record<string, unknown>;
+  }
+  return undefined;
 }
 
 export function useIdentityCallables(): boolean {

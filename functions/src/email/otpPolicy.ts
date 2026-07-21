@@ -31,7 +31,7 @@ export type EmailOtpServerErrorCode =
 export const EMAIL_OTP_USER_MESSAGES: Record<EmailOtpServerErrorCode, string> = {
   EMAIL_INVALID: "Enter a valid email address.",
   EMAIL_ALREADY_BOUND: "This email cannot be used. Try a different address.",
-  EMAIL_OTP_COOLDOWN: "Please wait before requesting another code.",
+  EMAIL_OTP_COOLDOWN: "Resend is not available yet.",
   EMAIL_OTP_EXPIRED: "That code has expired. Request a new one.",
   EMAIL_OTP_INVALID: "Incorrect code. Please try again.",
   EMAIL_OTP_LOCKED:

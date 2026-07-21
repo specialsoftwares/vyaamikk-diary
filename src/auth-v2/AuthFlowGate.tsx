@@ -1,5 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Platform, StyleSheet, Text, TextInput, View } from "react-native";
+import {
+  ActivityIndicator,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 
 import {
@@ -26,14 +34,35 @@ import {
 } from "@/services/consent/legalConsentService";
 import {
   completeBusinessEmailBind,
+  resendBusinessEmailVerification,
   startBusinessEmailVerification,
 } from "@/services/auth/bindBusinessEmail";
+import { shouldShowLocalMockEmailOtpHint } from "@/services/auth/localMockEmailOtp";
 import { hasAuthoritativeVerifiedEmail } from "@/auth/identityRouteState";
+import {
+  useAuthoritativeCountdown,
+  useAuthoritativeResendCountdown,
+} from "@/hooks/useAuthoritativeResendCountdown";
+import { formatOtpCountdownMmSs } from "@/utils/otpCountdownFormat";
 import { Banner, Button, LocaleUiText } from "@/components/ui";
 import { spacing, typography } from "@/theme";
 import type { OtpChallenge } from "@/services/auth/types";
 
 const EMAIL_CODE_LENGTH = 6;
+
+/** Prefer receipt-anchored retry duration when present (avoids clock skew). */
+function authoritativeResendAvailableAt(details?: {
+  resendAvailableAt?: unknown;
+  retryAfterSeconds?: unknown;
+}): number | null {
+  const retry = details?.retryAfterSeconds;
+  if (typeof retry === "number" && Number.isFinite(retry) && retry >= 0) {
+    return Date.now() + Math.ceil(retry) * 1000;
+  }
+  const until = details?.resendAvailableAt;
+  if (typeof until === "number" && Number.isFinite(until)) return until;
+  return null;
+}
 
 /**
  * Premium Indigo auth wrapper — sole sign-in entry for the app.
@@ -61,12 +90,22 @@ export function AuthFlowGate() {
   const [emailHint, setEmailHint] = useState<string | null>(null);
   const [emailVerificationId, setEmailVerificationId] = useState<string | null>(null);
   const [emailCode, setEmailCode] = useState("");
+  const [emailResendAvailableAt, setEmailResendAvailableAt] = useState<number | null>(null);
+  const [emailExpiresAt, setEmailExpiresAt] = useState<number | null>(null);
   const emailCodeInputRef = useRef<TextInput>(null);
+  const emailVerifyInFlightRef = useRef(false);
+  const emailResendInFlightRef = useRef(false);
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [privacyAccepted, setPrivacyAccepted] = useState(false);
+
+  const { remainingSeconds: emailResendRemaining, canResend: emailCanResend } =
+    useAuthoritativeResendCountdown(step === "email_verify" ? emailResendAvailableAt : null);
+  const emailValidityRemaining = useAuthoritativeCountdown(
+    step === "email_verify" ? emailExpiresAt : null
+  );
 
   const handoffToApp = useCallback(() => {
     router.replace("/");
@@ -220,16 +259,27 @@ export function AuthFlowGate() {
     setEmailHint(null);
     setLoading(true);
     try {
-      const { verificationId, devCodeHint } = await startBusinessEmailVerification(
-        user.uid,
-        trimmed
-      );
+      const { verificationId, devCodeHint, resendAvailableAt, expiresAt } =
+        await startBusinessEmailVerification(user.uid, trimmed);
       setEmailVerificationId(verificationId);
       setEmailCode("");
-      if (devCodeHint) setEmailHint(`Development OTP: ${devCodeHint}`);
+      setEmailResendAvailableAt(resendAvailableAt ?? Date.now() + 30_000);
+      setEmailExpiresAt(expiresAt ?? Date.now() + 15 * 60_000);
+      if (devCodeHint && shouldShowLocalMockEmailOtpHint()) {
+        setEmailHint(`Development OTP: ${devCodeHint}`);
+      } else {
+        setEmailHint(null);
+      }
       setStep("email_verify");
       setTimeout(() => emailCodeInputRef.current?.focus(), 280);
     } catch (e) {
+      if (e instanceof AppError && e.code === "email_otp_cooldown") {
+        const until = authoritativeResendAvailableAt(e.details);
+        if (until != null) setEmailResendAvailableAt(until);
+        setError(null);
+        setStep("email_verify");
+        return;
+      }
       if (e instanceof AppError && e.code === "email_already_linked") {
         setError(e.message);
         return;
@@ -244,8 +294,43 @@ export function AuthFlowGate() {
     }
   };
 
+  const handleEmailResend = async () => {
+    if (!user || !emailVerificationId || emailResendInFlightRef.current) return;
+    if (emailResendAvailableAt != null && Date.now() < emailResendAvailableAt) return;
+    emailResendInFlightRef.current = true;
+    setError(null);
+    setResending(true);
+    try {
+      const next = await resendBusinessEmailVerification(
+        user.uid,
+        emailVerificationId,
+        emailDraft.trim().toLowerCase()
+      );
+      setEmailVerificationId(next.verificationId);
+      setEmailCode("");
+      setEmailResendAvailableAt(next.resendAvailableAt ?? Date.now() + 30_000);
+      setEmailExpiresAt(next.expiresAt ?? Date.now() + 15 * 60_000);
+      if (next.devCodeHint && shouldShowLocalMockEmailOtpHint()) {
+        setEmailHint(`Development OTP: ${next.devCodeHint}`);
+      }
+    } catch (e) {
+      if (e instanceof AppError && e.code === "email_otp_cooldown") {
+        const until = authoritativeResendAvailableAt(e.details);
+        if (until != null) setEmailResendAvailableAt(until);
+        setError(null);
+        return;
+      }
+      setError(userFacingMessage(e));
+    } finally {
+      emailResendInFlightRef.current = false;
+      setResending(false);
+    }
+  };
+
   const handleVerifyEmailCode = async () => {
     if (!user || !emailVerificationId || emailCode.length !== EMAIL_CODE_LENGTH) return;
+    if (emailVerifyInFlightRef.current) return;
+    emailVerifyInFlightRef.current = true;
     setError(null);
     setLoading(true);
     try {
@@ -265,9 +350,25 @@ export function AuthFlowGate() {
       setError(userFacingMessage(e));
       setEmailCode("");
     } finally {
+      emailVerifyInFlightRef.current = false;
       setLoading(false);
     }
   };
+
+  // Auto-verify once per completed code entry — dedupe Strict Mode / rerenders.
+  const lastAutoSubmittedEmailCodeRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (step !== "email_verify") return;
+    if (emailCode.length < EMAIL_CODE_LENGTH) {
+      lastAutoSubmittedEmailCodeRef.current = null;
+      return;
+    }
+    if (emailCode.length !== EMAIL_CODE_LENGTH) return;
+    if (lastAutoSubmittedEmailCodeRef.current === emailCode) return;
+    lastAutoSubmittedEmailCodeRef.current = emailCode;
+    void handleVerifyEmailCode();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fire on completed code only
+  }, [emailCode, step]);
 
   const resetToPhone = async () => {
     setStep("phone");
@@ -324,6 +425,7 @@ export function AuthFlowGate() {
 
   if (step === "email_verify") {
     const emailVerifyComplete = emailCode.length === EMAIL_CODE_LENGTH;
+    const showDevHint = Boolean(emailHint && shouldShowLocalMockEmailOtpHint());
     return (
       <View style={styles.boot}>
         <View style={styles.emailVerifyCard}>
@@ -333,6 +435,14 @@ export function AuthFlowGate() {
           <LocaleUiText style={styles.emailVerifyBody}>
             {t("pendingDeletion.reactivateEmailHint")}
           </LocaleUiText>
+          {showDevHint ? <Banner tone="info" message={emailHint!} /> : null}
+          {emailValidityRemaining > 0 ? (
+            <LocaleUiText style={styles.emailTiming}>
+              {`Code valid for ${formatOtpCountdownMmSs(emailValidityRemaining)}`}
+            </LocaleUiText>
+          ) : (
+            <LocaleUiText style={styles.emailTiming}>Code expired — request a new one.</LocaleUiText>
+          )}
           {error ? <Banner tone="danger" message={error} /> : null}
           <TextInput
             ref={emailCodeInputRef}
@@ -356,8 +466,25 @@ export function AuthFlowGate() {
             label={t("pendingDeletion.verifyAndReactivate")}
             onPress={() => void handleVerifyEmailCode()}
             loading={loading}
-            disabled={!emailVerifyComplete}
+            disabled={!emailVerifyComplete || loading}
           />
+          <View style={styles.emailResendRow}>
+            {emailResendRemaining > 0 ? (
+              <LocaleUiText style={styles.emailTiming}>
+                {`Resend OTP in ${formatOtpCountdownMmSs(emailResendRemaining)}`}
+              </LocaleUiText>
+            ) : (
+              <Pressable
+                onPress={() => void handleEmailResend()}
+                disabled={!emailCanResend || resending || loading}
+                accessibilityRole="button"
+              >
+                <Text style={[styles.emailResendLink, (resending || loading) && { opacity: 0.5 }]}>
+                  {resending ? t("otp.resending") : t("otp.resend")}
+                </Text>
+              </Pressable>
+            )}
+          </View>
           <Button
             label={t("common.back")}
             variant="ghost"
@@ -365,9 +492,12 @@ export function AuthFlowGate() {
               setStep("email");
               setEmailVerificationId(null);
               setEmailCode("");
+              setEmailResendAvailableAt(null);
+              setEmailExpiresAt(null);
+              setEmailHint(null);
               setError(null);
             }}
-            disabled={loading}
+            disabled={loading || resending}
           />
         </View>
       </View>
@@ -447,5 +577,20 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     backgroundColor: "rgba(255,255,255,0.06)",
     ...(Platform.OS === "android" ? { textAlignVertical: "center" as const } : {}),
+  },
+  emailTiming: {
+    ...typography.caption,
+    color: "rgba(255,255,255,0.75)",
+    textAlign: "center",
+  },
+  emailResendRow: {
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 28,
+  },
+  emailResendLink: {
+    ...typography.captionStrong,
+    color: "#A5B4FC",
+    textAlign: "center",
   },
 });

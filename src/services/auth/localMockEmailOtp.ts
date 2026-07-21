@@ -1,6 +1,6 @@
 /**
  * Guarded local-mock email OTP — never used when activeBackend is Firebase.
- * Development OTP is compiled only when every guard below passes.
+ * Deterministic OTP is `000000` and only when every explicit safety condition passes.
  */
 
 import { AppError } from "@/domain/errors";
@@ -12,6 +12,7 @@ import {
   EMAIL_OTP_MAX_ATTEMPTS,
   EMAIL_OTP_RESEND_COOLDOWN_MS,
   EMAIL_OTP_TTL_MS,
+  LOCAL_MOCK_DETERMINISTIC_EMAIL_OTP,
 } from "@/services/auth/emailOtpConstants";
 import { createLogger } from "@/utils/logger";
 
@@ -37,21 +38,37 @@ const emailIndex = new Map<string, string>(); // hash -> uid
 const byUidActive = new Map<string, string>(); // uid -> challengeId
 
 /**
- * All four must be true — never infer safety from __DEV__ or Expo Go alone.
+ * All conditions required — never infer safety from `__DEV__` or Expo Go alone.
+ * Requires explicit `EXPO_PUBLIC_LOCAL_MOCK_EMAIL_OTP=1`.
  */
 export function isApprovedLocalMockEmailOtpEnvironment(): boolean {
   const resolved = getResolvedEnvironment();
   if (resolved.getActiveBackend() !== "local-mock") return false;
+  if (getActiveBackend() !== "local-mock") return false;
   if (resolved.effectiveAppMode !== "development") return false;
   if (resolved.bundledAppMode === "production") return false;
-  // Explicit opt-in OR classic Metro __DEV__ under local-mock development.
-  const isDevBundle =
-    typeof __DEV__ !== "undefined"
-      ? __DEV__
-      : process.env.NODE_ENV !== "production";
-  if (process.env.EXPO_PUBLIC_LOCAL_MOCK_EMAIL_OTP !== "1" && !isDevBundle) return false;
-  if (getActiveBackend() !== "local-mock") return false;
+  if (resolved.isProduction) return false;
+  if (process.env.EXPO_PUBLIC_LOCAL_MOCK_EMAIL_OTP !== "1") return false;
   return true;
+}
+
+/**
+ * Production / shared-dev / preview guard: deterministic OTP must never be accepted
+ * outside the explicit local-mock development opt-in.
+ */
+export function assertDeterministicLocalMockOtpAllowed(code: string): void {
+  if (code.trim() !== LOCAL_MOCK_DETERMINISTIC_EMAIL_OTP) return;
+  if (!isApprovedLocalMockEmailOtpEnvironment()) {
+    throw new AppError(
+      "permission_denied",
+      "This verification code cannot be used in this environment."
+    );
+  }
+}
+
+/** Whether the UI may show `Development OTP: 000000`. */
+export function shouldShowLocalMockEmailOtpHint(): boolean {
+  return isApprovedLocalMockEmailOtpEnvironment();
 }
 
 function requireLocalMock(): void {
@@ -64,8 +81,13 @@ function requireLocalMock(): void {
 }
 
 function generateCode(): string {
-  // Deterministic only in approved local-mock; never shipped as production secret.
-  return "246810";
+  requireLocalMock();
+  return LOCAL_MOCK_DETERMINISTIC_EMAIL_OTP;
+}
+
+function supersedeChallenge(prev: LocalMockEmailChallenge): void {
+  prev.status = "superseded";
+  prev.code = "";
 }
 
 export async function localMockStartEmailOtp(
@@ -78,7 +100,8 @@ export async function localMockStartEmailOtp(
   resendAvailableAt: number;
   version: number;
   sent: boolean;
-  devCodeHint: string;
+  /** Only returned under approved local-mock guard. */
+  devCodeHint: string | null;
 }> {
   requireLocalMock();
   if (!isValidEmailSyntax(rawEmail)) {
@@ -96,18 +119,33 @@ export async function localMockStartEmailOtp(
     const prev = challenges.get(prevId);
     if (prev && prev.status === "active") {
       if (prev.lockUntil && prev.lockUntil > Date.now() && prev.normalizedEmail === normalized) {
-        throw new AppError("permission_denied", "Too many incorrect attempts. Wait 1 hour or use a different email.");
+        throw new AppError(
+          "permission_denied",
+          "Too many incorrect attempts. Wait 1 hour or use a different email."
+        );
       }
       if (Date.now() < prev.resendAvailableAt && prev.normalizedEmail === normalized) {
-        throw new AppError("permission_denied", "Please wait before requesting another code.");
+        throw new AppError(
+          "email_otp_cooldown",
+          "Resend is not available yet.",
+          null,
+          {
+            resendAvailableAt: prev.resendAvailableAt,
+            retryAfterSeconds: Math.max(
+              0,
+              Math.ceil((prev.resendAvailableAt - Date.now()) / 1000)
+            ),
+          }
+        );
       }
-      prev.status = "superseded";
+      supersedeChallenge(prev);
     }
   }
 
   const now = Date.now();
-  const challengeId = `local_email_${uid}_${now}`;
   const version = (prevId ? (challenges.get(prevId)?.version ?? 0) : 0) + 1;
+  // Include version so same-ms resends never collide and prior challenges stay addressable.
+  const challengeId = `local_email_${uid}_${now}_v${version}`;
   const code = generateCode();
   const challenge: LocalMockEmailChallenge = {
     challengeId,
@@ -133,7 +171,7 @@ export async function localMockStartEmailOtp(
     resendAvailableAt: challenge.resendAvailableAt,
     version,
     sent: true,
-    devCodeHint: code,
+    devCodeHint: shouldShowLocalMockEmailOtpHint() ? LOCAL_MOCK_DETERMINISTIC_EMAIL_OTP : null,
   };
 }
 
@@ -144,22 +182,26 @@ export async function localMockVerifyEmailOtp(
   applyProfile: (patch: Partial<UserProfile>) => Promise<UserProfile>
 ): Promise<UserProfile> {
   requireLocalMock();
+  assertDeterministicLocalMockOtpAllowed(code);
+
   const challenge = challenges.get(challengeId);
   if (!challenge || challenge.uid !== uid) {
     throw new AppError("not_found", "Verification expired or not found.");
   }
   if (challenge.status === "consumed") {
-    // idempotent
     return applyProfile({});
   }
   if (challenge.status === "superseded") {
     throw new AppError("permission_denied", "That code is no longer valid. Request a new one.");
   }
   if (challenge.status === "locked" || (challenge.lockUntil && challenge.lockUntil > Date.now())) {
-    throw new AppError("permission_denied", "Too many incorrect attempts. Wait 1 hour or use a different email.");
+    throw new AppError(
+      "permission_denied",
+      "Too many incorrect attempts. Wait 1 hour or use a different email."
+    );
   }
   if (challenge.expiresAt < Date.now()) {
-    challenge.status = "superseded";
+    supersedeChallenge(challenge);
     throw new AppError("permission_denied", "That code has expired. Request a new one.");
   }
   if (code.trim() !== challenge.code) {
@@ -168,7 +210,10 @@ export async function localMockVerifyEmailOtp(
       challenge.status = "locked";
       challenge.lockUntil = Date.now() + EMAIL_OTP_LOCK_MS;
       challenge.code = "";
-      throw new AppError("permission_denied", "Too many incorrect attempts. Wait 1 hour or use a different email.");
+      throw new AppError(
+        "permission_denied",
+        "Too many incorrect attempts. Wait 1 hour or use a different email."
+      );
     }
     throw new AppError("invalid_otp", "Incorrect code. Please try again.");
   }
@@ -199,4 +244,11 @@ export function resetLocalMockEmailOtpForTests(): void {
   challenges.clear();
   emailIndex.clear();
   byUidActive.clear();
+}
+
+/** Test helper — inspect active challenge plaintext (tests only). */
+export function __peekLocalMockChallengeForTests(
+  challengeId: string
+): LocalMockEmailChallenge | undefined {
+  return challenges.get(challengeId);
 }

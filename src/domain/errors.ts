@@ -17,6 +17,7 @@ export type AppErrorCode =
   | "account_pending_deletion"
   | "email_already_linked"
   | "email_pending_deletion"
+  | "email_otp_cooldown"
   | "save_failed"
   | "delete_failed"
   | "unknown";
@@ -76,6 +77,8 @@ export function userFacingMessage(e: unknown): string {
       case "email_already_linked":
       case "email_pending_deletion":
         return e.message;
+      case "email_otp_cooldown":
+        return e.message || "Resend is not available yet.";
       case "save_failed":
         return "Couldn't save right now. Please try again.";
       case "delete_failed":

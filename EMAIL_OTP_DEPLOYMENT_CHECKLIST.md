@@ -42,7 +42,7 @@
 
 ## Reviewer
 
-- [ ] Expo Go: local-mock OTP `246810` after phone auth
+- [ ] Expo Go: local-mock OTP `000000` only when `EXPO_PUBLIC_LOCAL_MOCK_EMAIL_OTP=1`
 - [ ] Or pre-verify reviewer email via Admin for shared-dev/prod test project only
 
 ## Monitoring / rollback
