@@ -102,7 +102,7 @@ export function useCalendarMapsData(
     void reload("mount");
   }, [reload]);
 
-  /** Start PIN DB warm when user opens Map (deferred — never on Calendar-only view). */
+  /** Start PIN DB warm when user opens Map (deferred — never on Calendar-only / tab mount). */
   useEffect(() => {
     if (!mapActive || !userId || pinWarmStartedRef.current) return;
     pinWarmStartedRef.current = true;

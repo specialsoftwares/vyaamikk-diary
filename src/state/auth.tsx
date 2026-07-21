@@ -41,6 +41,16 @@ import { formatRuntimeDiagnostics } from "@/config/runtimeEnvironment";
 import { isLoginBlockedAccount } from "@/services/accountDeletion/accountStatus";
 import { useLocalDb } from "@/state/localDb";
 import { clearAuthWrapperProgress } from "@/auth-v2/authWrapperProgress";
+import {
+  beginFirstActionFreezeSession,
+  endFirstActionFreezeSession,
+  markFirstActionFreeze,
+} from "@/diagnostics/firstActionFreezeDiag";
+import {
+  claimSessionLastActiveTouch,
+  clearSessionLastActiveTouch,
+  releaseSessionLastActiveTouch,
+} from "@/services/auth/sessionLastActiveTouch";
 
 const log = createLogger("state/auth");
 
@@ -292,6 +302,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       log.warn("auth signOut error", e);
     }
     if (uid) await clearAuthWrapperProgress(uid);
+    clearSessionLastActiveTouch(uid);
+    endFirstActionFreezeSession();
     await forceClearAllSessions();
     clearMasterDataSessionCache();
     setState({
@@ -306,6 +318,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!__DEV__) return;
     const uid = state.session?.user.uid;
     if (uid) await clearAuthWrapperProgress(uid);
+    clearSessionLastActiveTouch(uid);
+    endFirstActionFreezeSession();
     await forceClearAllSessions();
     clearMasterDataSessionCache();
     setState({
@@ -414,26 +428,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const touchLastActive = useCallback(async () => {
     const current = sessionRef.current;
     if (!current || statusRef.current !== "signed_in") return;
-    const now = Date.now();
-    const prev = current.user.lastActiveAt ?? current.lastActiveAt ?? 0;
-    if (now - prev < 60_000) return;
-
-    const user: UserProfile = { ...current.user, lastActiveAt: now };
-    const session: AuthSession = { ...current, lastActiveAt: now, user };
-    await sessionStore.save(session);
-    sessionRef.current = session;
-
-    setState((s) => {
-      if (s.status !== "signed_in") return s;
-      return { ...s, session, user: session.user };
+    const previousAt = current.user.lastActiveAt ?? current.lastActiveAt ?? 0;
+    const claim = claimSessionLastActiveTouch({
+      uid: current.user.uid,
+      previousAt,
     });
+    if (claim.now == null) return;
+    const now = claim.now;
+
+    markFirstActionFreeze("lastActiveAt_claimed", { previousAt });
 
     try {
-      void getAuthService()
-        .updateProfile(current.user.uid, { lastActiveAt: now })
-        .catch((e) => log.warn("touchLastActive profile sync failed", e));
-    } catch (e) {
-      log.warn("touchLastActive profile sync failed", e);
+      const user: UserProfile = { ...current.user, lastActiveAt: now };
+      const session: AuthSession = { ...current, lastActiveAt: now, user };
+      await sessionStore.save(session);
+      sessionRef.current = session;
+
+      setState((s) => {
+        if (s.status !== "signed_in") return s;
+        return { ...s, session, user: session.user };
+      });
+
+      try {
+        void getAuthService()
+          .updateProfile(current.user.uid, { lastActiveAt: now })
+          .catch((e) => log.warn("touchLastActive profile sync failed", e));
+      } catch (e) {
+        log.warn("touchLastActive profile sync failed", e);
+      }
+      markFirstActionFreeze("lastActiveAt_written");
+    } finally {
+      releaseSessionLastActiveTouch(current.user.uid);
     }
   }, []);
 
@@ -449,7 +474,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (state.status !== "signed_in" || !state.session) return;
+    beginFirstActionFreezeSession("auth_signed_in");
+    markFirstActionFreeze("auth_signed_in_effect", {
+      uidLen: state.session.user.uid.length,
+    });
     const task = InteractionManager.runAfterInteractions(() => {
+      markFirstActionFreeze("auth_after_interactions");
       void touchRef.current();
     });
     return () => task.cancel();

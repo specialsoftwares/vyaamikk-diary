@@ -20,8 +20,9 @@ import {
 import { shouldClearSyncLockOnAuthTransition } from "@/sync/syncLockIdentityPolicy";
 import { localEntriesRepository } from "@/repositories/localEntriesRepository";
 import { syncQueueRepository } from "@/repositories/syncQueueRepository";
-import { isFirebaseConfigured } from "@/config/env";
+import { getActiveBackend } from "@/config/env";
 import { runLetterheadStorageMigrationForUser } from "@/services/letterhead/letterheadStorageMigration";
+import { markFirstActionFreeze } from "@/diagnostics/firstActionFreezeDiag";
 import { useAuth } from "@/state/auth";
 import { useLocalDb } from "@/state/localDb";
 import { createLogger } from "@/utils/logger";
@@ -166,12 +167,17 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     if (dbStatus !== "ready" || authStatus !== "signed_in" || !user) return;
     if (!isBootNavigationSettled()) return;
     const task = InteractionManager.runAfterInteractions(() => {
+      markFirstActionFreeze("sync_background_start", { uidLen: user.uid.length });
+      // Fire-and-forget: never await on the interaction / navigation path.
       void refreshPending();
       void pullFromCloud();
       void flush();
-      if (isFirebaseConfigured()) {
+      // Policy inside migration skips local-mock; still gate here so we never
+      // even schedule Firebase work when the active backend is local-mock.
+      if (getActiveBackend() !== "local-mock") {
         void runLetterheadStorageMigrationForUser(user.uid);
       }
+      markFirstActionFreeze("sync_background_scheduled");
     });
     return () => task.cancel();
   }, [dbStatus, authStatus, user?.uid, pullFromCloud, flush, refreshPending]);

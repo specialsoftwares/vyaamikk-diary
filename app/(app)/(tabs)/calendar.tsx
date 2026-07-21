@@ -25,7 +25,6 @@ import { EmptyState, ErrorState, Header, LastRefreshedHint, Screen, SkeletonList
 import { useCalendarMapsData } from "@/hooks/useCalendarMapsData";
 import { useAppRefresh } from "@/hooks/useAppRefresh";
 import { useAuth } from "@/state/auth";
-import { scheduleDeferredIndiaPincodeWarm } from "@/services/location/pincodeOfflineLookup";
 import { useT } from "@/i18n";
 import type { CalendarMapRecord, CalendarMarkedDots } from "@/services/calendarMaps";
 import { navigateToCalendarMapRecord } from "@/services/calendarMaps/calendarMapsRouting";
@@ -57,9 +56,10 @@ export default function CalendarMapsTab() {
     if (mode === "map") setMapEverOpened(true);
   }, [mode]);
 
-  useEffect(() => {
-    if (user?.uid) scheduleDeferredIndiaPincodeWarm(2500);
-  }, [user?.uid]);
+  // PIN offline DB must NOT warm on Calendar/tab mount — NativeTabs keeps all
+  // tab screens alive (freezeContents=false), and the ~multi-second JS parse
+  // freezes every non-tab Pressable after login. Warm only when Map is opened
+  // (see useCalendarMapsData mapActive) or a form resolves a PIN.
 
   const {
     loading,
