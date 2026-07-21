@@ -20,6 +20,13 @@ export {
 } from "./email/verification";
 
 export {
+  startAccountRecovery,
+  completeAccountRecovery,
+  openManualRecoveryCase,
+  resolveManualRecoveryCase,
+} from "./recovery/accountRecovery";
+
+export {
   ensureAccountDeletionJob,
   retireIdentity,
   completeAccountDeletion,
