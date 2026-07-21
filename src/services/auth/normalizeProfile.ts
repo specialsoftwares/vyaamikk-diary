@@ -67,6 +67,16 @@ export function normaliseUserProfile(
           : undefined,
     emailLinkedAt: raw.emailLinkedAt == null ? null : Number(raw.emailLinkedAt),
     emailVerifiedAt: raw.emailVerifiedAt == null ? null : Number(raw.emailVerifiedAt),
+    emailBindingVersion:
+      raw.emailBindingVersion == null ? null : Number(raw.emailBindingVersion),
+    identityUpdatedAt:
+      raw.identityUpdatedAt == null ? null : Number(raw.identityUpdatedAt),
+    emailVerificationLockUntil:
+      raw.emailVerificationLockUntil == null
+        ? null
+        : Number(raw.emailVerificationLockUntil),
+    recoveryPending: raw.recoveryPending === true,
+    coolingOffUntil: raw.coolingOffUntil == null ? null : Number(raw.coolingOffUntil),
     mobileHash: typeof raw.mobileHash === "string" ? raw.mobileHash : null,
     language: raw.language === "en" || raw.language === "hi" ? raw.language : null,
     profileCompletedAt:

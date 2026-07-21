@@ -7,6 +7,11 @@ import { formDraftsRepository } from "@/repositories/formDraftsRepository";
 import { activeRouteRepository } from "@/repositories/activeRouteRepository";
 import { resolveAuthOnboardingHref } from "@/boot/resolveAuthOnboardingRoute";
 import { getAuthEntryHref, needsAuthWrapperEmailCompletion } from "@/config/authWrapper";
+import {
+  canAccessDashboard,
+  hrefForIdentityRouteState,
+  resolveIdentityRouteState,
+} from "@/auth/identityRouteState";
 import { isBootDraftPromptSnoozed } from "@/services/drafts/draftBootSnooze";
 import { hrefForDraft } from "@/services/drafts/draftRoutes";
 
@@ -47,13 +52,30 @@ export async function resolveBootDestination(
     return { kind: "route", href: getAuthEntryHref() };
   }
 
+  // Authoritative identity gate — never flash dashboard before verified email.
   if (await needsAuthWrapperEmailCompletion(input.user)) {
-    return { kind: "route", href: "/(auth)/v2" };
+    const state = resolveIdentityRouteState({
+      signedIn: true,
+      user: input.user,
+      onboardingIncomplete: true,
+    });
+    const href = hrefForIdentityRouteState(state) ?? "/(auth)/v2?step=email";
+    return { kind: "route", href: href as Href };
   }
 
   const onboardingHref = await resolveAuthOnboardingHref(input.user);
   if (onboardingHref) {
     return { kind: "route", href: onboardingHref };
+  }
+
+  const identityState = resolveIdentityRouteState({
+    signedIn: true,
+    user: input.user,
+    onboardingIncomplete: false,
+  });
+  if (!canAccessDashboard(identityState)) {
+    const href = hrefForIdentityRouteState(identityState) ?? getAuthEntryHref();
+    return { kind: "route", href: href as Href };
   }
 
   const uid = input.user.uid;

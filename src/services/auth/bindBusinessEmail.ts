@@ -1,44 +1,36 @@
 /**
- * Production business-email binding via Cloud Functions (Admin SDK).
- *
- * Clients collect and normalize email for UX; authoritative hash, index claim,
- * and verified timestamps are written only by `verifyAndBindEmail`.
+ * Production business-email binding via Cloud Functions / guarded local-mock OTP.
+ * Clients never mark emailVerified themselves.
  */
 
-import { AppError } from "@/domain/errors";
 import type { UserProfile } from "@/domain/types";
-import { normalizeEmail } from "@/utils/emailHash";
-
 import {
-  callStartEmailVerification,
-  callVerifyAndBindEmail,
-  useIdentityCallables,
-} from "./identityCallable";
+  completeEmailOtpVerification,
+  requiresServerEmailBinding as requiresTrustedEmailBackend,
+  startEmailOtpVerification,
+} from "./emailVerificationService";
 
 export function requiresServerEmailBinding(): boolean {
-  return useIdentityCallables();
+  return requiresTrustedEmailBackend();
 }
 
 export async function startBusinessEmailVerification(
+  uid: string,
   rawEmail: string
-): Promise<{ verificationId: string }> {
-  const normalized = normalizeEmail(rawEmail);
-  if (!normalized.includes("@")) {
-    throw new AppError("save_failed", "A valid email address is required.");
-  }
-  const result = await callStartEmailVerification(normalized);
-  if (!result.verificationId) {
-    throw new AppError(
-      "unknown",
-      result.message ?? "Could not start email verification. Please try again."
-    );
-  }
-  return { verificationId: result.verificationId };
+): Promise<{ verificationId: string; devCodeHint?: string; resendAvailableAt?: number }> {
+  const result = await startEmailOtpVerification(uid, rawEmail);
+  return {
+    verificationId: result.challengeId,
+    devCodeHint: result.devCodeHint,
+    resendAvailableAt: result.resendAvailableAt,
+  };
 }
 
 export async function completeBusinessEmailBind(
+  uid: string,
   verificationId: string,
-  code: string
+  code: string,
+  applyLocalProfile: (patch: Partial<UserProfile>) => Promise<UserProfile>
 ): Promise<UserProfile> {
-  return callVerifyAndBindEmail(verificationId, code);
+  return completeEmailOtpVerification(uid, verificationId, code, applyLocalProfile);
 }

@@ -14,6 +14,7 @@ export { mintClientAuthToken } from "./identity/mintClientAuthToken";
 
 export {
   startEmailVerification,
+  resendEmailVerification,
   verifyAndBindEmail,
   changeVerifiedEmail,
 } from "./email/verification";

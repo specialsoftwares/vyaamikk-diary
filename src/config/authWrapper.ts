@@ -3,9 +3,9 @@ import type { Href } from "expo-router";
 import type { UserProfile } from "@/domain/types";
 import {
   clearAuthWrapperProgress,
-  isAuthWrapperEmailPending,
   markAuthWrapperEmailComplete,
 } from "@/auth-v2/authWrapperProgress";
+import { hasAuthoritativeVerifiedEmail } from "@/auth/identityRouteState";
 
 /** Single Indigo auth entry — Auth Wrapper v2 is the only shipped sign-in UI. */
 export const AUTH_ENTRY_HREF: Href = "/(auth)/v2";
@@ -21,17 +21,17 @@ export function getAuthEntryHref(): Href {
 }
 
 /**
- * Signed-in user started auth but has not finished the email step yet.
- * Existing users with `businessEmail` are treated as complete.
+ * Signed-in user must complete server-authoritative email verification.
+ * Presence of `businessEmail` alone is NOT sufficient.
  */
 export async function needsAuthWrapperEmailCompletion(
   user: UserProfile
 ): Promise<boolean> {
-  if (user.businessEmail?.trim()) {
+  if (hasAuthoritativeVerifiedEmail(user)) {
     await markAuthWrapperEmailComplete(user.uid);
     return false;
   }
-  return isAuthWrapperEmailPending(user.uid);
+  return true;
 }
 
 export async function clearAuthWrapperStateForUser(uid: string): Promise<void> {

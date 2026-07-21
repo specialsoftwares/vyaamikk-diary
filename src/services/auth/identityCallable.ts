@@ -176,26 +176,43 @@ export interface StartEmailVerificationRequest {
 
 export interface StartEmailVerificationResponse {
   sent: boolean;
+  challengeId?: string;
   verificationId?: string;
+  maskedEmail?: string;
+  expiresAt?: number;
+  resendAvailableAt?: number;
+  version?: number;
   message?: string;
-}
-
-export async function callStartEmailVerification(
-  email: string
-): Promise<StartEmailVerificationResponse> {
-  return callFunction<StartEmailVerificationRequest, StartEmailVerificationResponse>(
-    "startEmailVerification",
-    { email }
-  );
+  devCodeHint?: string;
 }
 
 export interface VerifyAndBindEmailRequest {
   verificationId: string;
+  challengeId?: string;
   code: string;
 }
 
 export interface VerifyAndBindEmailResponse {
   profile: Record<string, unknown>;
+}
+
+export async function callStartEmailVerification(
+  email: string,
+  idempotencyKey?: string
+): Promise<StartEmailVerificationResponse> {
+  return callFunction<
+    { email: string; idempotencyKey?: string },
+    StartEmailVerificationResponse
+  >("startEmailVerification", { email, idempotencyKey });
+}
+
+export async function callResendEmailVerification(
+  challengeId: string
+): Promise<StartEmailVerificationResponse> {
+  return callFunction<{ challengeId: string }, StartEmailVerificationResponse>(
+    "resendEmailVerification",
+    { challengeId }
+  );
 }
 
 export async function callVerifyAndBindEmail(
@@ -204,7 +221,7 @@ export async function callVerifyAndBindEmail(
 ): Promise<UserProfile> {
   const data = await callFunction<VerifyAndBindEmailRequest, VerifyAndBindEmailResponse>(
     "verifyAndBindEmail",
-    { verificationId, code }
+    { verificationId, code, challengeId: verificationId }
   );
   const uid = String(data.profile.uid ?? "");
   return normaliseUserProfile(uid, data.profile);

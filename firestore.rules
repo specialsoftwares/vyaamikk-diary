@@ -306,6 +306,12 @@ service cloud.firestore {
                       && trustedDeviceUpdateValid(deviceId);
         allow delete: if false;
       }
+
+      // ---- Security history (server-written; owner may read status) -----
+      match /securityEvents/{eventId} {
+        allow read: if isOwner(uid);
+        allow write: if false;
+      }
     }
 
     // ---- Server-owned reverse indexes -----------------------------------
@@ -317,6 +323,27 @@ service cloud.firestore {
     }
     match /emailIndex/{emailHash} {
       allow read, write: if false;
+    }
+
+    match /emailBindings/{emailHash} {
+      allow read, write: if false;
+    }
+
+    match /emailOtpRateLimits/{id} {
+      allow read, write: if false;
+    }
+
+    match /emailChangeSessions/{id} {
+      allow read, write: if false;
+    }
+
+    match /accountRecoverySessions/{id} {
+      allow read, write: if false;
+    }
+
+    match /manualRecoveryCases/{id} {
+      allow read: if isSignedIn() && resource.data.uid == request.auth.uid;
+      allow write: if false;
     }
 
     // ---- Retired mobiles ------------------------------------------------

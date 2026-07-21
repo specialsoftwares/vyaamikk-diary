@@ -1,13 +1,43 @@
 import { fnv1a } from "@/utils/ueid";
+import { sha256Hex } from "@/utils/sha256Hex";
 
-/** Canonical email form for storage and uniqueness checks. */
+const EMAIL_MAX_LEN = 254;
+const EMAIL_LOCAL_MAX = 64;
+
+/**
+ * Normalize for uniqueness: trim, lowercase ASCII (entire address).
+ * Does NOT strip Gmail dots or plus aliases.
+ */
 export function normalizeEmail(raw: string): string {
   return raw.trim().toLowerCase();
 }
 
-/** Stable hash for email index keys — store hash, not plain email, in shared indexes. */
+/** Syntax + length gate used before OTP send. */
+export function isValidEmailSyntax(raw: string): boolean {
+  const normalized = normalizeEmail(raw);
+  if (!normalized || normalized.length > EMAIL_MAX_LEN) return false;
+  const at = normalized.indexOf("@");
+  if (at <= 0 || at !== normalized.lastIndexOf("@")) return false;
+  const local = normalized.slice(0, at);
+  const domain = normalized.slice(at + 1);
+  if (!local || local.length > EMAIL_LOCAL_MAX) return false;
+  if (!domain || !domain.includes(".") || domain.startsWith(".") || domain.endsWith(".")) {
+    return false;
+  }
+  // Practical RFC-ish check — not a full RFC parser.
+  return /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/i.test(
+    normalized
+  );
+}
+
+/** Authoritative binding key — SHA-256 of normalized email. */
 export function hashEmail(normalizedEmail: string): string {
-  return fnv1a(normalizedEmail).toString(16).padStart(8, "0");
+  return sha256Hex(normalizeEmail(normalizedEmail));
+}
+
+/** Legacy FNV-1a key (pre-SHA-256 indexes) — read-only remediation lookups. */
+export function legacyHashEmailFnv(normalizedEmail: string): string {
+  return fnv1a(normalizeEmail(normalizedEmail)).toString(16).padStart(8, "0");
 }
 
 /** Mask email for UI display (settings summaries, support-facing hints). */

@@ -376,7 +376,7 @@ export default function BusinessIdentityScreen() {
             { businessEmail: newEmail },
             "settings"
           );
-          const { verificationId } = await startBusinessEmailVerification(newEmail);
+          const { verificationId } = await startBusinessEmailVerification(user.uid, newEmail);
           setEmailVerifyPending({ verificationId, email: newEmail, policyPatch });
           setEmailVerifyCode("");
           setLogoDraft({ status: "unchanged" });
@@ -424,8 +424,13 @@ export default function BusinessIdentityScreen() {
     setError(null);
     try {
       const serverProfile = await completeBusinessEmailBind(
+        user.uid,
         emailVerifyPending.verificationId,
-        emailVerifyCode
+        emailVerifyCode,
+        async (patch) => {
+          if (Object.keys(patch).length === 0) return user;
+          return updateProfile(patch);
+        }
       );
       let next = await applyServerProfile(serverProfile);
       const metadataPatch = stripServerOwnedProfilePatchKeys(

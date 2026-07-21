@@ -26,9 +26,9 @@ import {
 } from "@/services/consent/legalConsentService";
 import {
   completeBusinessEmailBind,
-  requiresServerEmailBinding,
   startBusinessEmailVerification,
 } from "@/services/auth/bindBusinessEmail";
+import { hasAuthoritativeVerifiedEmail } from "@/auth/identityRouteState";
 import { Banner, Button, LocaleUiText } from "@/components/ui";
 import { spacing, typography } from "@/theme";
 import type { OtpChallenge } from "@/services/auth/types";
@@ -78,11 +78,11 @@ export function AuthFlowGate() {
       if (status === "loading") return;
 
       if (status === "signed_in" && user) {
-        if (user.profileCompletedAt) {
+        if (hasAuthoritativeVerifiedEmail(user) && user.profileCompletedAt) {
           handoffToApp();
           return;
         }
-        if (user.businessEmail?.trim()) {
+        if (hasAuthoritativeVerifiedEmail(user)) {
           await markAuthWrapperEmailComplete(user.uid);
           handoffToApp();
           return;
@@ -166,7 +166,7 @@ export function AuthFlowGate() {
         await updateProfile(consentPatch);
       }
 
-      if (profile.businessEmail?.trim()) {
+      if (hasAuthoritativeVerifiedEmail(profile)) {
         await markAuthWrapperEmailComplete(profile.uid);
         handoffToApp();
         return;
@@ -220,17 +220,15 @@ export function AuthFlowGate() {
     setEmailHint(null);
     setLoading(true);
     try {
-      if (requiresServerEmailBinding()) {
-        const { verificationId } = await startBusinessEmailVerification(trimmed);
-        setEmailVerificationId(verificationId);
-        setEmailCode("");
-        setStep("email_verify");
-        setTimeout(() => emailCodeInputRef.current?.focus(), 280);
-        return;
-      }
-      await updateProfile({ businessEmail: trimmed });
-      await markAuthWrapperEmailComplete(user.uid);
-      handoffToApp();
+      const { verificationId, devCodeHint } = await startBusinessEmailVerification(
+        user.uid,
+        trimmed
+      );
+      setEmailVerificationId(verificationId);
+      setEmailCode("");
+      if (devCodeHint) setEmailHint(`Development OTP: ${devCodeHint}`);
+      setStep("email_verify");
+      setTimeout(() => emailCodeInputRef.current?.focus(), 280);
     } catch (e) {
       if (e instanceof AppError && e.code === "email_already_linked") {
         setError(e.message);
@@ -251,12 +249,21 @@ export function AuthFlowGate() {
     setError(null);
     setLoading(true);
     try {
-      const profile = await completeBusinessEmailBind(emailVerificationId, emailCode);
+      const profile = await completeBusinessEmailBind(
+        user.uid,
+        emailVerificationId,
+        emailCode,
+        async (patch) => {
+          if (Object.keys(patch).length === 0) return user;
+          return updateProfile(patch);
+        }
+      );
       await applyServerProfile(profile);
       await markAuthWrapperEmailComplete(profile.uid);
       handoffToApp();
     } catch (e) {
       setError(userFacingMessage(e));
+      setEmailCode("");
     } finally {
       setLoading(false);
     }

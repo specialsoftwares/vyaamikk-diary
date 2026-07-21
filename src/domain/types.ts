@@ -66,7 +66,7 @@ export interface UserProfile {
   businessEmail: string | null;
   /** Canonical normalized form of `businessEmail` (lowercase trim). */
   normalizedEmail?: string | null;
-  /** FNV-1a hash of `normalizedEmail` for index lookups. */
+  /** SHA-256 hex of `normalizedEmail` for emailBindings / emailIndex keys. */
   emailHash?: string | null;
   /** Trust level for recovery / security communication. */
   emailStatus?: EmailStatus;
@@ -74,6 +74,16 @@ export interface UserProfile {
   emailLinkedAt?: number | null;
   /** When email was verified (null until verification succeeds). */
   emailVerifiedAt?: number | null;
+  /** Server-authoritative binding generation (increments on email replace). */
+  emailBindingVersion?: number | null;
+  /** Server identity mutation clock. */
+  identityUpdatedAt?: number | null;
+  /** Active email-verification cycle lock (wrong OTP ×3). */
+  emailVerificationLockUntil?: number | null;
+  /** Automated / manual recovery in progress. */
+  recoveryPending?: boolean;
+  /** High-risk action cooling-off after recovery (server ms). */
+  coolingOffUntil?: number | null;
   /** User-selected app language. UI mirrors this to local storage too. */
   language: LangCode | null;
   /**
