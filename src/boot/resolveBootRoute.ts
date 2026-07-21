@@ -60,11 +60,26 @@ export async function resolveBootDestination(
       onboardingIncomplete: true,
     });
     const href = hrefForIdentityRouteState(state) ?? "/(auth)/v2?step=email";
+    const { markBootWizardStep } = await import("@/auth/onboardingGuardPolicy");
+    await markBootWizardStep(
+      state === "emailPendingVerification" ? "emailOtp" : "emailEntry",
+      input.user.uid
+    );
     return { kind: "route", href: href as Href };
   }
 
   const onboardingHref = await resolveAuthOnboardingHref(input.user);
   if (onboardingHref) {
+    const { markBootWizardStep } = await import("@/auth/onboardingGuardPolicy");
+    if (String(onboardingHref).includes("complete-profile")) {
+      await markBootWizardStep("businessIdentity", input.user.uid);
+    } else if (String(onboardingHref).includes("ueid")) {
+      await markBootWizardStep("ueidRelease", input.user.uid);
+    } else if (String(onboardingHref).includes("onboarding-intro")) {
+      await markBootWizardStep("onboardingIntro", input.user.uid);
+    } else if (String(onboardingHref).includes("location-onboarding")) {
+      await markBootWizardStep("locationFootprint", input.user.uid);
+    }
     return { kind: "route", href: onboardingHref };
   }
 

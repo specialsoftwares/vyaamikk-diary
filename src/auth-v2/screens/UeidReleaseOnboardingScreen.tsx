@@ -57,7 +57,14 @@ export function UeidReleaseOnboardingScreen({ user }: UeidReleaseOnboardingScree
   };
 
   const onBackToProfile = () => {
-    router.replace("/(auth)/complete-profile");
+    void (async () => {
+      const { markReviewingWizardStep } = await import("@/auth/onboardingGuardPolicy");
+      await markReviewingWizardStep("businessIdentity", user.uid, {
+        phoneE164: user.phoneE164,
+        verifiedEmail: user.normalizedEmail ?? user.businessEmail,
+      });
+      router.replace("/(auth)/complete-profile");
+    })();
   };
 
   return (

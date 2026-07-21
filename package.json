@@ -85,6 +85,7 @@
     "test:letterhead-migration-policy": "npx --yes tsx src/services/letterhead/letterheadMigrationPolicy.test.ts",
     "test:first-action-freeze": "npx --yes tsx src/diagnostics/firstActionFreeze.regression.test.ts",
     "test:identity-route-state": "npx --yes tsx src/auth/identityRouteState.test.ts",
+    "test:onboarding-wizard": "npx --yes tsx src/auth/onboardingWizard.test.ts",
     "test:email-otp-crypto": "npx --yes tsx src/services/auth/emailOtpPolicy.crypto.test.ts",
     "test:local-mock-email-otp": "npx --yes tsx src/services/auth/localMockEmailOtp.test.ts",
     "test:otp-countdown": "npx --yes tsx src/utils/otpCountdownFormat.test.ts",

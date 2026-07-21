@@ -13,6 +13,7 @@ interface OnboardingV2ShellProps {
   footer?: React.ReactNode;
   onBack?: () => void;
   showBack?: boolean;
+  headerTop?: React.ReactNode;
 }
 
 /** Premium indigo shell for post-auth onboarding (identity → UEID → footprint). */
@@ -24,6 +25,7 @@ export function OnboardingV2Shell({
   footer,
   onBack,
   showBack = true,
+  headerTop,
 }: OnboardingV2ShellProps) {
   const { tokens } = useAuthV2Theme();
 
@@ -34,9 +36,12 @@ export function OnboardingV2Shell({
       onBack={onBack}
       showBack={showBack}
       headerTop={
-        stageLabel ? (
-          <Text style={[styles.stage, { color: tokens.muted }]}>{stageLabel}</Text>
-        ) : null
+        <>
+          {headerTop}
+          {stageLabel ? (
+            <Text style={[styles.stage, { color: tokens.muted }]}>{stageLabel}</Text>
+          ) : null}
+        </>
       }
       footer={footer}
     >

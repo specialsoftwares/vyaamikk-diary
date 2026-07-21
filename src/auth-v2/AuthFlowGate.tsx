@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
+  BackHandler,
   Platform,
   Pressable,
   StyleSheet,
@@ -18,6 +20,7 @@ import {
   markAuthWrapperEmailPending,
   saveAuthWrapperChallenge,
 } from "@/auth-v2/authWrapperProgress";
+import { WizardProgress } from "@/auth-v2/components/WizardProgress";
 import { EmailEntryScreen } from "@/auth-v2/screens/EmailEntryScreen";
 import { OtpVerificationScreen } from "@/auth-v2/screens/OtpVerificationScreen";
 import { PhoneEntryScreen } from "@/auth-v2/screens/PhoneEntryScreen";
@@ -40,6 +43,20 @@ import {
 import { shouldShowLocalMockEmailOtpHint } from "@/services/auth/localMockEmailOtp";
 import { hasAuthoritativeVerifiedEmail } from "@/auth/identityRouteState";
 import {
+  markContinuingWizardStep,
+  markReviewingWizardStep,
+} from "@/auth/onboardingGuardPolicy";
+import {
+  clearOnboardingNavigationState,
+  loadOnboardingNavigationState,
+} from "@/auth/onboardingNavigationStore";
+import { clearOnboardingProfileDraft } from "@/auth/onboardingProfileDraft";
+import {
+  isPreDashboardOnboardingIncomplete,
+  sameEmailAddress,
+  type OnboardingWizardStep,
+} from "@/auth/onboardingWizard";
+import {
   useAuthoritativeCountdown,
   useAuthoritativeResendCountdown,
 } from "@/hooks/useAuthoritativeResendCountdown";
@@ -49,6 +66,13 @@ import { spacing, typography } from "@/theme";
 import type { OtpChallenge } from "@/services/auth/types";
 
 const EMAIL_CODE_LENGTH = 6;
+
+function localDigitsFromE164(e164: string): string {
+  const digits = e164.replace(/\D/g, "");
+  if (digits.length === 12 && digits.startsWith("91")) return digits.slice(2);
+  if (digits.length === 10) return digits;
+  return digits.slice(-10);
+}
 
 /** Prefer receipt-anchored retry duration when present (avoids clock skew). */
 function authoritativeResendAvailableAt(details?: {
@@ -64,15 +88,37 @@ function authoritativeResendAvailableAt(details?: {
   return null;
 }
 
+function uiStepToWizard(step: AuthV2Step | "email_verify"): OnboardingWizardStep {
+  switch (step) {
+    case "phone":
+      return "mobileEntry";
+    case "confirm":
+      return "phoneConfirm";
+    case "otp":
+      return "phoneOtp";
+    case "email":
+      return "emailEntry";
+    case "email_verify":
+      return "emailOtp";
+    default:
+      return "mobileEntry";
+  }
+}
+
 /**
  * Premium Indigo auth wrapper — sole sign-in entry for the app.
  */
 export function AuthFlowGate() {
   const t = useT();
   const router = useRouter();
-  const { step: paramStep, from: paramFrom } = useLocalSearchParams<{
+  const {
+    step: paramStep,
+    from: paramFrom,
+    intent: paramIntent,
+  } = useLocalSearchParams<{
     step?: string;
     from?: string;
+    intent?: string;
   }>();
   const { status, user, startOtp, confirmOtp, updateProfile, applyServerProfile, signOut } =
     useAuth();
@@ -95,6 +141,7 @@ export function AuthFlowGate() {
   const emailCodeInputRef = useRef<TextInput>(null);
   const emailVerifyInFlightRef = useRef(false);
   const emailResendInFlightRef = useRef(false);
+  const reviewingRef = useRef(false);
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -107,28 +154,147 @@ export function AuthFlowGate() {
     step === "email_verify" ? emailExpiresAt : null
   );
 
+  const goToBusinessIdentity = useCallback(async () => {
+    if (user) {
+      await markContinuingWizardStep("businessIdentity", user.uid, {
+        phoneE164: user.phoneE164,
+        verifiedEmail: user.normalizedEmail ?? user.businessEmail,
+      });
+    }
+    router.replace("/(auth)/complete-profile");
+  }, [router, user]);
+
   const handoffToApp = useCallback(() => {
     router.replace("/");
   }, [router]);
+
+  const abandonWizardAndSignOut = useCallback(() => {
+    Alert.alert(
+      "Sign out and start again?",
+      "This abandons the current incomplete registration on this device. You can sign in again with any mobile number.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Sign out",
+          style: "destructive",
+          onPress: () => {
+            void (async () => {
+              const uid = user?.uid;
+              await clearOnboardingNavigationState();
+              await clearAuthWrapperProgress(uid);
+              if (uid) await clearOnboardingProfileDraft(uid);
+              await signOut();
+              setStep("phone");
+              setChallenge(null);
+              setPhoneE164(null);
+              setEmailDraft("");
+              setEmailVerificationId(null);
+              setEmailCode("");
+              setError(null);
+              reviewingRef.current = false;
+            })();
+          },
+        },
+      ]
+    );
+  }, [signOut, user?.uid]);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       if (status === "loading") return;
 
+      const nav = await loadOnboardingNavigationState();
+      const reviewRequested =
+        paramIntent === "review" ||
+        paramFrom === "profile" ||
+        nav?.intent === "reviewPreviousStep";
+      reviewingRef.current = Boolean(reviewRequested);
+
       if (status === "signed_in" && user) {
-        if (hasAuthoritativeVerifiedEmail(user) && user.profileCompletedAt) {
-          handoffToApp();
+        const onboardingIncomplete = isPreDashboardOnboardingIncomplete(user, {
+          locationConsentShown: false,
+        });
+
+        // Fully past email+profile gates → leave auth wrapper (boot continues).
+        if (hasAuthoritativeVerifiedEmail(user) && user.profileCompletedAt && !reviewRequested) {
+          await clearOnboardingNavigationState();
+          if (!cancelled) handoffToApp();
           return;
         }
-        if (hasAuthoritativeVerifiedEmail(user)) {
-          await markAuthWrapperEmailComplete(user.uid);
-          handoffToApp();
+
+        // Deliberate review of an earlier auth step — never bounce to boot.
+        if (reviewRequested) {
+          if (user.phoneE164) {
+            setPhoneE164(user.phoneE164);
+            setPhoneDraft({
+              countryCode: DEFAULT_AUTH_V2_COUNTRY_CODE,
+              localNumber: localDigitsFromE164(user.phoneE164),
+            });
+            setTermsAccepted(true);
+            setPrivacyAccepted(true);
+          }
+          setEmailDraft(user.businessEmail ?? user.normalizedEmail ?? "");
+          let reviewUi: AuthV2Step | "email_verify" = "email";
+          if (paramStep === "email_verify" || nav?.currentStep === "emailOtp") {
+            reviewUi = "email_verify";
+          } else if (
+            paramStep === "phone" ||
+            nav?.currentStep === "mobileEntry" ||
+            nav?.currentStep === "phoneConfirm" ||
+            nav?.currentStep === "phoneOtp"
+          ) {
+            reviewUi =
+              nav?.currentStep === "phoneOtp"
+                ? "otp"
+                : nav?.currentStep === "phoneConfirm"
+                  ? "confirm"
+                  : "phone";
+          } else {
+            reviewUi = "email";
+          }
+          setStep(reviewUi);
+          await markReviewingWizardStep(uiStepToWizard(reviewUi), user.uid, {
+            phoneE164: user.phoneE164,
+            verifiedEmail: hasAuthoritativeVerifiedEmail(user)
+              ? user.normalizedEmail ?? user.businessEmail
+              : null,
+          });
+          if (!cancelled) setHydrated(true);
           return;
         }
-        setEmailDraft(user.businessEmail ?? "");
-        setStep("email");
-        if (!cancelled) setHydrated(true);
+
+        // Continue / boot into wrapper: land on email until verified; then profile.
+        if (!hasAuthoritativeVerifiedEmail(user)) {
+          setEmailDraft(user.businessEmail ?? "");
+          if (user.phoneE164) {
+            setPhoneE164(user.phoneE164);
+            setPhoneDraft({
+              countryCode: DEFAULT_AUTH_V2_COUNTRY_CODE,
+              localNumber: localDigitsFromE164(user.phoneE164),
+            });
+          }
+          setStep(
+            user.emailStatus === "verification_pending" &&
+              (user.normalizedEmail || user.businessEmail)
+              ? "email"
+              : "email"
+          );
+          await markContinuingWizardStep("emailEntry", user.uid, {
+            phoneE164: user.phoneE164,
+          });
+          if (!cancelled) setHydrated(true);
+          return;
+        }
+
+        // Email verified, profile still incomplete → leave wrapper for profile
+        // (do NOT replace "/" here when already mid-wizard review — handled above).
+        if (onboardingIncomplete) {
+          if (!cancelled) await goToBusinessIdentity();
+          return;
+        }
+
+        if (!cancelled) handoffToApp();
         return;
       }
 
@@ -142,6 +308,10 @@ export function AuthFlowGate() {
         });
         setDevHint(snap.devCodeHint);
         setStep("otp");
+        setPhoneDraft({
+          countryCode: DEFAULT_AUTH_V2_COUNTRY_CODE,
+          localNumber: localDigitsFromE164(snap.phoneE164),
+        });
       }
       if (!cancelled) setHydrated(true);
     })();
@@ -149,21 +319,129 @@ export function AuthFlowGate() {
     return () => {
       cancelled = true;
     };
-  }, [status, user, router, handoffToApp, paramStep]);
+    // Intentionally omit `step` — hydration must not re-run on every local step change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, user?.uid, paramStep, paramFrom, paramIntent, handoffToApp, goToBusinessIdentity]);
 
   useEffect(() => {
-    if (status === "signed_in" && user && !user.profileCompletedAt && paramStep === "email") {
+    if (status === "signed_in" && user && paramStep === "email" && reviewingRef.current) {
       setStep("email");
-      setEmailDraft(user.businessEmail ?? "");
+      setEmailDraft(user.businessEmail ?? user.normalizedEmail ?? "");
     }
   }, [paramStep, status, user]);
+
+  // Hardware Back — one logical wizard step (never no-op loop).
+  useEffect(() => {
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (step === "phone") return false;
+      if (step === "confirm") {
+        setStep("phone");
+        return true;
+      }
+      if (step === "otp") {
+        setStep("confirm");
+        return true;
+      }
+      if (step === "email_verify") {
+        setStep("email");
+        setEmailCode("");
+        return true;
+      }
+      if (step === "email") {
+        void (async () => {
+          await goBackFromEmail();
+        })();
+        return true;
+      }
+      return false;
+    });
+    return () => sub.remove();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, status, user]);
+
+  const goBackFromEmail = async () => {
+    reviewingRef.current = true;
+    if (user?.phoneE164) {
+      setPhoneE164(user.phoneE164);
+      setPhoneDraft({
+        countryCode: DEFAULT_AUTH_V2_COUNTRY_CODE,
+        localNumber: localDigitsFromE164(user.phoneE164),
+      });
+      setTermsAccepted(true);
+      setPrivacyAccepted(true);
+    }
+    setError(null);
+    setStep("phone");
+    await markReviewingWizardStep("mobileEntry", user?.uid ?? null, {
+      phoneE164: user?.phoneE164 ?? phoneE164,
+    });
+  };
+
+  const beginPhoneChangeSession = async (nextE164: string) => {
+    const previousUid = user?.uid;
+    await clearOnboardingNavigationState();
+    await clearAuthWrapperProgress(previousUid);
+    if (previousUid) await clearOnboardingProfileDraft(previousUid);
+    if (status === "signed_in") {
+      await signOut();
+    }
+    setEmailDraft("");
+    setEmailVerificationId(null);
+    setEmailCode("");
+    setEmailHint(null);
+    setEmailResendAvailableAt(null);
+    setEmailExpiresAt(null);
+    setPhoneE164(nextE164);
+    reviewingRef.current = false;
+  };
 
   const handleContinueToConfirm = () => {
     setError(null);
     try {
       const e164 = toE164FromDraft(phoneDraft.countryCode, phoneDraft.localNumber);
+      // Same verified mobile while reviewing — skip OTP and return to email.
+      if (
+        status === "signed_in" &&
+        user?.phoneE164 &&
+        e164 === user.phoneE164 &&
+        reviewingRef.current
+      ) {
+        setPhoneE164(e164);
+        setStep("email");
+        void markContinuingWizardStep("emailEntry", user.uid, { phoneE164: e164 });
+        return;
+      }
+      // Changing a previously verified mobile — confirm isolation, then re-OTP.
+      if (status === "signed_in" && user?.phoneE164 && e164 !== user.phoneE164) {
+        Alert.alert(
+          "Change mobile number?",
+          "Email verification and later onboarding steps must be completed again for the new number. The previous incomplete session will not carry over.",
+          [
+            { text: "Cancel", style: "cancel" },
+            {
+              text: "Continue",
+              style: "destructive",
+              onPress: () => {
+                void (async () => {
+                  setLoading(true);
+                  try {
+                    await beginPhoneChangeSession(e164);
+                    setStep("confirm");
+                  } catch (err) {
+                    setError(userFacingMessage(err));
+                  } finally {
+                    setLoading(false);
+                  }
+                })();
+              },
+            },
+          ]
+        );
+        return;
+      }
       setPhoneE164(e164);
       setStep("confirm");
+      void markContinuingWizardStep("phoneConfirm", user?.uid ?? null, { phoneE164: e164 });
     } catch (e) {
       setError(userFacingMessage(e));
     }
@@ -184,6 +462,9 @@ export function AuthFlowGate() {
         devCodeHint: next.devCodeHint,
       });
       setStep("otp");
+      await markContinuingWizardStep("phoneOtp", user?.uid ?? null, {
+        phoneE164: next.phoneE164,
+      });
     } catch (e) {
       setError(userFacingMessage(e));
     } finally {
@@ -205,15 +486,25 @@ export function AuthFlowGate() {
         await updateProfile(consentPatch);
       }
 
+      if (hasAuthoritativeVerifiedEmail(profile) && profile.profileCompletedAt) {
+        await markAuthWrapperEmailComplete(profile.uid);
+        await clearOnboardingNavigationState();
+        handoffToApp();
+        return;
+      }
+
       if (hasAuthoritativeVerifiedEmail(profile)) {
         await markAuthWrapperEmailComplete(profile.uid);
-        handoffToApp();
+        await goToBusinessIdentity();
         return;
       }
 
       await markAuthWrapperEmailPending(profile.uid);
       setEmailDraft(profile.businessEmail ?? "");
       setStep("email");
+      await markContinuingWizardStep("emailEntry", profile.uid, {
+        phoneE164: profile.phoneE164,
+      });
     } catch (e) {
       if (e instanceof AppError && e.code === "account_pending_deletion") {
         router.replace({
@@ -259,6 +550,28 @@ export function AuthFlowGate() {
     setEmailHint(null);
     setLoading(true);
     try {
+      // Same already-verified email — continue to profile without a new OTP.
+      if (
+        hasAuthoritativeVerifiedEmail(user) &&
+        sameEmailAddress(trimmed, user.normalizedEmail ?? user.businessEmail ?? "")
+      ) {
+        await goToBusinessIdentity();
+        return;
+      }
+
+      // Changing a verified email during incomplete onboarding — clear verified status.
+      if (
+        hasAuthoritativeVerifiedEmail(user) &&
+        !sameEmailAddress(trimmed, user.normalizedEmail ?? user.businessEmail ?? "")
+      ) {
+        await updateProfile({
+          businessEmail: trimmed,
+          normalizedEmail: trimmed,
+          emailStatus: "verification_pending",
+          emailVerifiedAt: null,
+        });
+      }
+
       const { verificationId, devCodeHint, resendAvailableAt, expiresAt } =
         await startBusinessEmailVerification(user.uid, trimmed);
       setEmailVerificationId(verificationId);
@@ -271,6 +584,10 @@ export function AuthFlowGate() {
         setEmailHint(null);
       }
       setStep("email_verify");
+      reviewingRef.current = false;
+      await markContinuingWizardStep("emailOtp", user.uid, {
+        phoneE164: user.phoneE164,
+      });
       setTimeout(() => emailCodeInputRef.current?.focus(), 280);
     } catch (e) {
       if (e instanceof AppError && e.code === "email_otp_cooldown") {
@@ -345,7 +662,7 @@ export function AuthFlowGate() {
       );
       await applyServerProfile(profile);
       await markAuthWrapperEmailComplete(profile.uid);
-      handoffToApp();
+      await goToBusinessIdentity();
     } catch (e) {
       setError(userFacingMessage(e));
       setEmailCode("");
@@ -373,12 +690,25 @@ export function AuthFlowGate() {
   const resetToPhone = async () => {
     setStep("phone");
     setChallenge(null);
-    setPhoneE164(null);
     setError(null);
     await clearAuthWrapperChallenge();
-    if (status === "signed_in") {
-      await signOut();
+    // "Change number" from OTP before sign-in — stay local.
+    if (status !== "signed_in") {
+      setPhoneE164(null);
+      return;
     }
+    // Signed-in review: keep session; user must confirm to switch numbers later.
+    if (user?.phoneE164) {
+      setPhoneE164(user.phoneE164);
+      setPhoneDraft({
+        countryCode: DEFAULT_AUTH_V2_COUNTRY_CODE,
+        localNumber: localDigitsFromE164(user.phoneE164),
+      });
+    }
+    reviewingRef.current = true;
+    await markReviewingWizardStep("mobileEntry", user?.uid ?? null, {
+      phoneE164: user?.phoneE164 ?? null,
+    });
   };
 
   if (!hydrated || status === "loading") {
@@ -388,6 +718,9 @@ export function AuthFlowGate() {
       </View>
     );
   }
+
+  const phoneVerifiedChip = status === "signed_in" && Boolean(user?.phoneE164);
+  const emailVerifiedChip = hasAuthoritativeVerifiedEmail(user);
 
   if (step === "phone" || step === "confirm") {
     return (
@@ -402,6 +735,7 @@ export function AuthFlowGate() {
         onContinueToConfirm={handleContinueToConfirm}
         onConfirmSend={() => void handleConfirmSend()}
         onBackFromConfirm={() => setStep("phone")}
+        onBack={undefined}
         loading={loading}
         error={error}
       />
@@ -429,6 +763,11 @@ export function AuthFlowGate() {
     return (
       <View style={styles.boot}>
         <View style={styles.emailVerifyCard}>
+          <WizardProgress
+            step="emailOtp"
+            verifiedMobile={phoneVerifiedChip}
+            verifiedEmail={emailVerifiedChip}
+          />
           <LocaleUiText style={styles.emailVerifyTitle}>
             {t("pendingDeletion.reactivateEmailTitle")}
           </LocaleUiText>
@@ -490,36 +829,49 @@ export function AuthFlowGate() {
             variant="ghost"
             onPress={() => {
               setStep("email");
-              setEmailVerificationId(null);
               setEmailCode("");
-              setEmailResendAvailableAt(null);
-              setEmailExpiresAt(null);
-              setEmailHint(null);
               setError(null);
+              void markReviewingWizardStep("emailEntry", user?.uid ?? null);
             }}
             disabled={loading || resending}
           />
+          <Pressable onPress={abandonWizardAndSignOut} accessibilityRole="button">
+            <Text style={styles.signOutLink}>Sign out and start again</Text>
+          </Pressable>
         </View>
       </View>
     );
   }
 
   if (step === "email") {
-    const backFromProfile = paramFrom === "profile";
     return (
-      <EmailEntryScreen
-        value={emailDraft}
-        onChange={setEmailDraft}
-        onContinue={() => void handleEmailContinue()}
-        onBack={
-          backFromProfile
-            ? () => router.replace("/(auth)/complete-profile")
-            : undefined
-        }
-        loading={loading}
-        error={error}
-        hint={user?.businessEmail ? t("authV2.email.prefilledHint") : null}
-      />
+      <View style={{ flex: 1 }}>
+        <EmailEntryScreen
+          value={emailDraft}
+          onChange={setEmailDraft}
+          onContinue={() => void handleEmailContinue()}
+          onBack={() => void goBackFromEmail()}
+          loading={loading}
+          error={error}
+          hint={
+            emailVerifiedChip
+              ? "Email verified — edit only if you need a different address (re-verification required)."
+              : user?.businessEmail
+                ? t("authV2.email.prefilledHint")
+                : null
+          }
+        />
+        <View style={styles.wizardChrome}>
+          <WizardProgress
+            step="emailEntry"
+            verifiedMobile={phoneVerifiedChip}
+            verifiedEmail={emailVerifiedChip}
+          />
+          <Pressable onPress={abandonWizardAndSignOut} accessibilityRole="button">
+            <Text style={styles.signOutLink}>Sign out and start again</Text>
+          </Pressable>
+        </View>
+      </View>
     );
   }
 
@@ -592,5 +944,19 @@ const styles = StyleSheet.create({
     ...typography.captionStrong,
     color: "#A5B4FC",
     textAlign: "center",
+  },
+  wizardChrome: {
+    position: "absolute",
+    left: spacing.lg,
+    right: spacing.lg,
+    bottom: spacing.xl,
+    gap: spacing.sm,
+    pointerEvents: "box-none",
+  },
+  signOutLink: {
+    ...typography.caption,
+    color: "rgba(255,255,255,0.7)",
+    textAlign: "center",
+    textDecorationLine: "underline",
   },
 });
