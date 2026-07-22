@@ -1,7 +1,7 @@
 # MASTER AUTH ONBOARDING EXECUTION TRACKER
 
 **Repo:** `/Users/shivamsaurav/Vyaamikk Diary`  
-**Updated:** 2026-07-23  
+**Updated:** 2026-07-23 (Pass 2)
 **Protected (never touch/stage):** `src/i18n/i18n.ts`, `src/i18n/validateLocales.ts`, `.expo-export-audit/`, `.env`
 
 ## Commits in this master pass
@@ -10,7 +10,8 @@
 |------|---------|
 | `9296abf` | fix(auth): harden mobile entry and OTP challenge flow |
 | `e936126` | feat(auth): add offline, quarantine, and device integrity policy modules |
-| `ceb0016` | docs(auth): add master pre-dashboard hardening tracker and reports |
+| `8c1879f` | docs(auth): add master pre-dashboard hardening tracker and reports |
+| _(Pass 2)_ | See git log after Pass 2 focused commits |
 
 Prior related: `f812352`, `d58dc52`, `81f8ae6`, `83fa1d3`, `4db7c86`
 
@@ -18,52 +19,60 @@ Prior related: `f812352`, `d58dc52`, `81f8ae6`, `83fa1d3`, `4db7c86`
 
 Protected paths remain unstaged.
 
-## Requirement roll-up
+## Pass 2 requirement roll-up
 
-| Section | Status | Evidence |
-|---------|--------|----------|
-| §2 State machine / wizard intent | IMPLEMENTED / TESTED | `onboardingWizard*`, prior `f812352` |
-| §3–5 Mobile entry/confirm/send | IMPLEMENTED / TESTED | `phoneValidation*`, PhoneEntry/Confirm |
-| §6–13 Mobile OTP | IMPLEMENTED (local-mock) / PARTIAL (Firebase SMS) | `localMockMobileOtp*`, OtpVerificationScreen |
-| §14 Dev OTP guards | TESTED | mobile+email `000000` + flags |
-| §15 App Check / integrity SDK | EXTERNALLY BLOCKED | abstraction only |
-| §16 SMS template | EXTERNALLY BLOCKED | provider |
-| §17–19 Routing / readiness | IMPLEMENTED / PARTIAL | boot + freeze fix; login card polish PARTIAL |
-| §20–24 Device/offline | PARTIAL / EXTERNALLY BLOCKED | policies + trustedDevices; email gate missing |
-| §25–29 SIM/root/quarantine | PARTIAL | policy modules; server quarantine incomplete |
-| §30–35 Email OTP | IMPLEMENTED / PARTIAL | HMAC path exists; navigate-then-send UX PARTIAL; UI hint removed |
-| §36–40 Recovery/cooling-off | IMPLEMENTED | `81f8ae6` + tests |
-| §41–43 Reversible wizard/drafts | IMPLEMENTED / TESTED | `f812352` + drafts |
-| §44–52 Profile review/PIN/image/GSTIN | PARTIAL / NOT STARTED | Individual/Business toggle exists; review/PIN/image missing |
-| §53 Rules trust boundary | IMPLEMENTED | rules present; deploy EXTERNALLY BLOCKED |
-| §54 Error taxonomy | PARTIAL | AppError expanded earlier; full MOBILE_* codes TBD |
-| §55–60 Automated matrix | PARTIAL / TESTED | new unit tests; emulator suite not run |
-| §61–62 Manual/perf | EXTERNALLY BLOCKED | device not run this session |
-| §63 Docs | IMPLEMENTED | AUTH_* reports + this tracker |
-| §64 Validation | TESTED | typecheck + focused tests |
-| §65 Commits | IN PROGRESS | focused commits |
+| Item | Status | Files / runtime / tests |
+|------|--------|-------------------------|
+| §2.1–2.3 Identity Individual\|Business | TESTED | `profileIdentityModel.ts`, `BusinessIdentityScreen.tsx`; `test:onboarding-pass2` |
+| §2.4 PIN lookup + confirm + stale | TESTED | `pinConfirmation.ts` + screen; stale requestId in `test:onboarding-pass2` |
+| §2.5 Mandatory image/logo | IMPLEMENTED | `identityMedia.ts`, `identityMediaValidation.ts`, screen camera/gallery/crop/persist; HEIC rejected; durable store via `persistProfileLogoFromPicker` |
+| §2.6 GSTIN optional + states | TESTED | `gstinVerificationState.ts`; formatInvalid blocks submit; verificationUnavailable honest label |
+| §2.7 Autosaved draft v2 | IMPLEMENTED | `onboardingProfileDraftV2.ts` keyed uid+env+kind+schema; migrates v1 |
+| §2.8 Final review + Edit | IMPLEMENTED | `ProfileReviewScreen.tsx`, `app/(auth)/profile-review.tsx`, wizard step `profileReview` |
+| §2.9 Atomic Complete Profile | TESTED | `completeOnboardingProfile.ts` + Logic; single-flight; snapshot before `profileCompletedAt`; `test:complete-onboarding-profile` |
+| §3 Email navigate-first | TESTED | `emailOtpSendMachine.ts` + `AuthFlowGate.tsx`; `test:email-otp-send-machine` |
+| §4 Central offline guard | TESTED | `offlineCapabilityGuard.ts` wired save/pdf/share/sync; `test:onboarding-pass2` |
+| §5 Server 21-day quarantine | IMPLEMENTED | `functions/.../mobileQuarantine.ts` + binding hooks; scheduled TTL deploy EXTERNALLY BLOCKED; `test:mobile-quarantine-unit` |
+| §5 Rebind during quarantine | IMPLEMENTED | rebind callable + unit tests; production deploy EXTERNALLY BLOCKED |
+| §6 New-device security source | IMPLEMENTED | `functions/.../newDeviceSecurity.ts` + client mock; provider deploy EXTERNALLY BLOCKED; `test:new-device-security-unit` |
+| §7 Root/jailbreak SDK | EXTERNALLY BLOCKED | fail-closed `deviceIntegrity.ts` + `deviceIntegrity.testAdapter.ts`; no SDK in package.json |
+| §8 Remediation routing | IMPLEMENTED | `profileRemediation.ts` + `resolveAuthOnboardingRoute.ts` + complete-profile stay |
+| §9 Issuer PDF snapshot | IMPLEMENTED | `issuerIdentitySnapshot.ts` + per-PDF disclosure helper; wired at completion |
+| §10 Automated tests | TESTED | see Commands |
+| §11 Validation | TESTED | typecheck + focused suites; functions:build ok; Expo export / physical device not run |
+| Manual device / SMS / Resend / App Check | EXTERNALLY BLOCKED | unchanged |
 
-## Commands run
+## Commands run (Pass 2)
 
 ```
 npm run typecheck
-npm run test:phone-validation
-npm run test:local-mock-mobile-otp
-npm run test:local-mock-email-otp
-npm run test:auth-policy-matrix
+npm run functions:build
+npm run test:onboarding-pass2
+npm run test:email-otp-send-machine
+npm run test:complete-onboarding-profile
+npm run test:mobile-quarantine-unit
+npm run test:new-device-security-unit
 npm run test:onboarding-wizard
-npm run test:cooling-off
-npm run test:otp-countdown
 npm run test:identity-route-state
+npm run test:auth-policy-matrix
+npm run test:client-profile-patch
+npm run test:local-mock-email-otp
+npm run test:phone-validation
 ```
 
-## External blockers (do not claim done)
+## External blockers (honest)
 
-- Production SMS / Resend secrets & DNS
+- Production SMS / Resend secrets & DNS / security-email acceptance in prod
 - App Check package + enforcement
-- Functions/rules production deploy
-- Firestore TTL console
-- New-device security email + This wasn’t me
-- Integrity SDK wiring
+- Functions/rules production deploy + Firestore TTL for quarantine release
+- Public hosting for “This wasn’t me” HTTP link (handler source exists)
+- Integrity SDK wiring + physical verification
 - Physical iOS/Android acceptance matrix
-- Profile review + mandatory image/PIN completion pipeline
+- Expo export not re-run this pass
+
+## Runtime paths (Pass 2)
+
+1. Email Send OTP → dismiss keyboard → `/email_verify` immediately → background send (`sending`\|`challengeCreated`\|`failed`)
+2. Profile → Complete Profile form → Review → atomic complete → UEID (not dashboard)
+3. Mutations → `assertLiveMutationAllowed` in saveCoordinator / pdfService / share / syncEngine
+4. Phone bind CF → `assertMobileNotQuarantined` before claim

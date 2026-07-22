@@ -32,6 +32,22 @@
 | Email OTP HMAC/bindings | Prior `83fa1d3` |
 | Recovery + cooling-off | Prior `81f8ae6` |
 
+## Pass 2 source work (2026-07-23 continuation)
+
+| Area | Status |
+|------|--------|
+| Individual/Business identity + review + atomic complete | Done (runtime + tests) |
+| PIN confirm + stale protection + mandatory media | Done |
+| GSTIN optional with honest verificationUnavailable | Done (no official provider) |
+| Draft v2 autosave (uid/env/kind/schema) | Done |
+| Email navigate-first / send-in-background machine | Done |
+| Central offline capability guard on save/pdf/share/sync | Done |
+| Server mobile quarantine + rebind (source + unit tests) | Done; deploy/TTL EXTERNALLY BLOCKED |
+| New-device security events + wasn't-me tokens (source) | Done; email provider deploy EXTERNALLY BLOCKED |
+| Issuer identity snapshot + per-PDF disclosure helper | Done |
+| Legacy profile remediation routing | Done |
+| Integrity test adapter (still fail-closed in prod) | Done; SDK EXTERNALLY BLOCKED |
+
 ## Explicitly not production-ready claims
 
 - SMS provider / Resend production delivery
