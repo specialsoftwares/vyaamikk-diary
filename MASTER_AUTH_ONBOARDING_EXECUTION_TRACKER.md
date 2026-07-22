@@ -18,8 +18,8 @@
 | `a7455cf` | feat(auth): complete new-device security event handling |
 | `49d6cf7` | docs(auth): update Pass 2 tracker and test scripts |
 | `a4234c1` | docs(auth): record Pass 2 commit hashes in tracker |
-| _(pending)_ | fix(auth): sync in-memory wizard navigation owner (stabilization) |
-| _(pending)_ | docs(auth): update nav stabilization report and tracker |
+| `c297eb1` | fix(auth): sync in-memory wizard navigation owner |
+| `7c8df61` | docs(auth): record navigation stabilization ownership model |
 
 Prior related: `f812352`, `d58dc52`, `81f8ae6`, `83fa1d3`, `4db7c86`
 
