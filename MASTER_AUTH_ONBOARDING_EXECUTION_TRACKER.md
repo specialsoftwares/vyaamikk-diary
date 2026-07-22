@@ -1,7 +1,7 @@
 # MASTER AUTH ONBOARDING EXECUTION TRACKER
 
 **Repo:** `/Users/shivamsaurav/Vyaamikk Diary`  
-**Updated:** 2026-07-23 (Pass 2)
+**Updated:** 2026-07-23 (Pass 2 + nav stabilization)
 **Protected (never touch/stage):** `src/i18n/i18n.ts`, `src/i18n/validateLocales.ts`, `.expo-export-audit/`, `.env`
 
 ## Commits in this master pass
@@ -17,12 +17,28 @@
 | `88c4067` | feat(auth): enforce mobile quarantine and rebind transactions |
 | `a7455cf` | feat(auth): complete new-device security event handling |
 | `49d6cf7` | docs(auth): update Pass 2 tracker and test scripts |
+| `a4234c1` | docs(auth): record Pass 2 commit hashes in tracker |
+| _(pending)_ | fix(auth): sync in-memory wizard navigation owner (stabilization) |
+| _(pending)_ | docs(auth): update nav stabilization report and tracker |
 
 Prior related: `f812352`, `d58dc52`, `81f8ae6`, `83fa1d3`, `4db7c86`
 
 ## §1 Git safety — IMPLEMENTED
 
 Protected paths remain unstaged.
+
+## Navigation stabilization (shared JS) — IMPLEMENTED
+
+| Item | Status | Evidence |
+|------|--------|----------|
+| Sync review intent in memory | DONE | `wizardNavigationController.ts` |
+| AsyncStorage secondary / non-blocking | DONE | `persistSecondary` fire-and-forget |
+| Decision priority order | DONE | See `AUTH_ONBOARDING_VISUAL_FLOW_STABILIZATION.md` |
+| Constrain AuthFlowGate / complete-profile / app-layout | DONE | Sync `shouldSuppressForward*` |
+| No Step N of M | DONE | Account / Identity / Review stages |
+| Race tests | DONE | `npm run test:wizard-nav-race` |
+| Expo Go (FR off) | PENDING device confirmation | Metro `start:expo-go` available |
+| Dev-build paired comparison | **NOT YET PROVEN** | Explicitly pending — does not block shared-code fix |
 
 ## Pass 2 requirement roll-up
 
