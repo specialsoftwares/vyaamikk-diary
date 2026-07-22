@@ -11,7 +11,12 @@
 | `9296abf` | fix(auth): harden mobile entry and OTP challenge flow |
 | `e936126` | feat(auth): add offline, quarantine, and device integrity policy modules |
 | `8c1879f` | docs(auth): add master pre-dashboard hardening tracker and reports |
-| _(Pass 2)_ | See git log after Pass 2 focused commits |
+| `941e756` | feat(onboarding): complete individual and business identity profiles |
+| `63787ee` | fix(auth): complete navigate-first email otp delivery flow |
+| `15edc78` | feat(auth): enforce offline capability restrictions centrally |
+| `88c4067` | feat(auth): enforce mobile quarantine and rebind transactions |
+| `a7455cf` | feat(auth): complete new-device security event handling |
+| `49d6cf7` | docs(auth): update Pass 2 tracker and test scripts |
 
 Prior related: `f812352`, `d58dc52`, `81f8ae6`, `83fa1d3`, `4db7c86`
 
