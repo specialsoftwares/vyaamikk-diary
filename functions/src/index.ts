@@ -1,5 +1,5 @@
 /**
- * Vyaamikk Diary — Cloud Functions (identity, email, deletion).
+ * Vyaamikk Diary — Cloud Functions (identity, email, deletion, security).
  *
  * Deploy: firebase deploy --only functions
  * Emulator: npm run serve (from functions/)
@@ -11,6 +11,11 @@ export {
 } from "./identity/resolveOrCreateUserByPhone";
 
 export { mintClientAuthToken } from "./identity/mintClientAuthToken";
+
+export {
+  checkMobileQuarantine,
+  rebindQuarantinedMobileCallable,
+} from "./identity/mobileQuarantine";
 
 export {
   startEmailVerification,
@@ -37,3 +42,10 @@ export {
   startAccountReactivation,
   completeAccountReactivation,
 } from "./reactivation/accountReactivation";
+
+export {
+  registerNewDeviceSecurityEvent,
+  retryNewDeviceSecurityEmail,
+  handleWasNotMeToken,
+  handleWasNotMeTokenHttp,
+} from "./security/newDeviceSecurity";

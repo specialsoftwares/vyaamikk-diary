@@ -327,6 +327,8 @@ export const sharedDevAuthService: AuthService = {
     //      set    phoneIndex/{newPhone} = { uid: currentUid }
     //      update users/{currentUid}.phoneE164 = newPhone
     //   4. UEID and uid are NEVER touched.
+    // NOTE: shared-dev client path does not enforce mobile quarantine —
+    // server (mobileQuarantine.ts) must assert before production bind.
     let releasedPhone: PhoneE164 | null = null;
     const profile = await runTransaction(db, async (tx) => {
       const userRef = doc(db, USERS_COLLECTION, currentUid);

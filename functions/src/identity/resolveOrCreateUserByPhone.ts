@@ -3,6 +3,10 @@ import type { Transaction } from "firebase-admin/firestore";
 
 import { getAdminDb } from "../admin";
 import {
+  assertMobileNotQuarantined,
+  sha256MobileHash,
+} from "./mobileQuarantine";
+import {
   applyLoginTimestamps,
   freshProfileShell,
   generateUEID,
@@ -87,6 +91,7 @@ export const resolveOrCreateUserByPhone = onCall(
     }
 
     const phone = normalizePhoneE164(rawPhone);
+    const mobileHash = sha256MobileHash(phone);
     const db = getAdminDb();
 
     const result = await db.runTransaction(async (tx) => {
@@ -94,6 +99,11 @@ export const resolveOrCreateUserByPhone = onCall(
       const phoneSnap = await tx.get(phoneRef);
       const userRef = db.collection(USERS).doc(authUid);
       const now = Date.now();
+
+      // Block registration / re-bind while mobile is in quarantine (hash-keyed).
+      // Existing same-uid login still requires the number not be quarantined for a
+      // different former owner — assert is cheap and neutral on miss.
+      await assertMobileNotQuarantined(tx, mobileHash, now);
 
       if (phoneSnap.exists) {
         const { uid } = phoneSnap.data() as { uid: string };

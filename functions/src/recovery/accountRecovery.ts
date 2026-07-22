@@ -16,6 +16,11 @@ import {
 import { verifyEmailOtpDigest } from "../email/otpCrypto";
 import { EMAIL_OTP_USER_MESSAGES } from "../email/otpPolicy";
 import { resolveEmailProvider } from "../email/provider";
+import {
+  assertMobileNotQuarantined,
+  sha256MobileHash,
+} from "../identity/mobileQuarantine";
+import { normalizePhoneE164 } from "../identity/shared";
 
 const RECOVERY_SESSIONS = "accountRecoverySessions";
 const SUPPORT_CASES = "manualRecoveryCases";
@@ -258,8 +263,13 @@ export const completeAccountRecovery = onCall({ region: "asia-south1" }, async (
       return { failed: true as const, attempt: failed, lockUntil };
     }
 
-    // Phone uniqueness
-    const phoneIndexRef = db.collection("phoneIndex").doc(newPhoneE164);
+    // Phone uniqueness + quarantine (server must enforce; hash never raw E.164)
+    const newPhoneNorm = normalizePhoneE164(newPhoneE164);
+    const newMobileHash = sha256MobileHash(newPhoneNorm);
+    const now = Date.now();
+    await assertMobileNotQuarantined(tx, newMobileHash, now);
+
+    const phoneIndexRef = db.collection("phoneIndex").doc(newPhoneNorm);
     const phoneSnap = await tx.get(phoneIndexRef);
     if (phoneSnap.exists) {
       const owner = (phoneSnap.data() as { uid?: string }).uid;
@@ -267,20 +277,19 @@ export const completeAccountRecovery = onCall({ region: "asia-south1" }, async (
     }
 
     const oldPhone = String(user.phoneE164 ?? "");
-    const now = Date.now();
     const coolingOffUntil = now + COOLING_OFF_MS;
     const recoveryDeviceId =
       typeof request.data?.recoveryDeviceId === "string" && request.data.recoveryDeviceId
         ? request.data.recoveryDeviceId
         : randomBytes(8).toString("hex");
 
-    if (oldPhone && oldPhone !== newPhoneE164) {
-      tx.delete(db.collection("phoneIndex").doc(oldPhone));
+    if (oldPhone && normalizePhoneE164(oldPhone) !== newPhoneNorm) {
+      tx.delete(db.collection("phoneIndex").doc(normalizePhoneE164(oldPhone)));
     }
-    tx.set(phoneIndexRef, { uid, phoneE164: newPhoneE164, updatedAt: now });
+    tx.set(phoneIndexRef, { uid, phoneE164: newPhoneNorm, updatedAt: now });
 
     tx.update(userRef, {
-      phoneE164: newPhoneE164,
+      phoneE164: newPhoneNorm,
       mobileLinkedAt: now,
       mobileChangedAt: now,
       mobileChangeCount: Number(user.mobileChangeCount ?? 0) + 1,

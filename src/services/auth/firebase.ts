@@ -280,6 +280,10 @@ async function allocateUeidInTransaction(tx: Transaction, authUid: string): Prom
  *   - update users/{currentUid}.phoneE164 = newPhone
  *
  * UEID is preserved.
+ *
+ * NOTE: This client path is not authoritative for mobile quarantine.
+ * Server must enforce assertMobileNotQuarantined + startMobileQuarantine
+ * (see functions/src/identity/mobileQuarantine.ts) before any production bind.
  */
 async function swapPhoneNumber(
   currentUid: string,

@@ -35,7 +35,11 @@ export function readActivePhoneUid(registry: RegistryShape, phone: PhoneE164): s
   return registry.phoneIndex[normalized] ?? null;
 }
 
-/** Atomically rebind mobile for an existing account (uid and UEID unchanged). */
+/** Atomically rebind mobile for an existing account (uid and UEID unchanged).
+ *
+ * Local-mock only — server must enforce mobile quarantine before production bind
+ * (functions/src/identity/mobileQuarantine.ts).
+ */
 export async function applyMockMobileChange(
   registry: RegistryShape,
   existing: UserProfile,

@@ -3,6 +3,9 @@
  *
  * Self-service mobile change is NOT exposed in the consumer app UI.
  * These helpers remain for manual support tooling, migration scripts, and tests.
+ *
+ * NOTE: Local/admin mock paths do not enforce mobile quarantine.
+ * Server (functions/src/identity/mobileQuarantine.ts) must assert before bind.
  */
 
 import { getAuthService } from "./index";
