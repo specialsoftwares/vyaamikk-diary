@@ -63,6 +63,9 @@ export const pdfService = {
    * sanitized filename. Does NOT log any HTML content.
    */
   async generate(input: GeneratePdfInput): Promise<GeneratedPdf> {
+    const { assertLiveMutationAllowed } = await import("@/auth/offlineCapabilityGuard");
+    assertLiveMutationAllowed("pdf");
+
     if (!input.html || input.html.length === 0) {
       throw new AppError("save_failed", "PDF content is empty.");
     }
@@ -94,6 +97,9 @@ export const pdfService = {
    * "Vyaamikk-Diary-Entry-….pdf" instead of a random Print* name.
    */
   async share(pdf: GeneratedPdf): Promise<void> {
+    const { assertLiveMutationAllowed } = await import("@/auth/offlineCapabilityGuard");
+    assertLiveMutationAllowed("share");
+
     if (!(await Sharing.isAvailableAsync())) {
       throw new AppError("save_failed", "Sharing is not available on this device.");
     }

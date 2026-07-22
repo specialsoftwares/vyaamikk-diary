@@ -31,6 +31,8 @@ export async function shareBusinessEntryText(
   entry: BusinessEntry,
   opts: ShareTextOptions
 ): Promise<void> {
+  const { assertLiveMutationAllowed } = await import("@/auth/offlineCapabilityGuard");
+  assertLiveMutationAllowed("share");
   const message = buildBusinessEntryShareText(entry, opts);
   await Share.share({ message, title: entry.title });
 }

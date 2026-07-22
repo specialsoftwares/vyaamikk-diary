@@ -63,6 +63,10 @@ export async function beginCoordinatedSave(
   ctx: SaveIdempotencyContext,
   options: BeginCoordinatedSaveOptions = {}
 ): Promise<BeginCoordinatedSaveResult> {
+  // Central capability gate — blocks create/edit even if UI is bypassed.
+  const { assertLiveMutationAllowed } = await import("@/auth/offlineCapabilityGuard");
+  assertLiveMutationAllowed(options.isUpdate ? "edit" : "create");
+
   const processLockKey =
     options.processLockKey ?? ctx.idempotencyKey ?? ctx.clientRecordId;
 

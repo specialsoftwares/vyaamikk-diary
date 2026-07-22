@@ -188,12 +188,22 @@ export const syncEngine = {
   async flush(userId: string): Promise<{ synced: number; failed: number }> {
     if (sessionSyncGate.isLocked()) return { synced: 0, failed: 0 };
 
+    // Validate session/device capability before uploading mutations.
+    const { assertLiveMutationAllowed, recordConnectivity, recordSuccessfulOnlineValidation } =
+      await import("@/auth/offlineCapabilityGuard");
+    const net = await NetInfo.fetch();
+    recordConnectivity(Boolean(net.isConnected));
+    if (!net.isConnected) {
+      assertLiveMutationAllowed("sync"); // may throw OFFLINE_READ_ONLY after 24h
+      return { synced: 0, failed: 0 };
+    }
+    // Online: require capability (revoked sessions still blocked).
+    assertLiveMutationAllowed("sync");
+    recordSuccessfulOnlineValidation();
+
     if (flushChain) return flushChain;
 
     flushChain = (async () => {
-      const net = await NetInfo.fetch();
-      if (!net.isConnected) return { synced: 0, failed: 0 };
-
       try {
         await ensurePendingQueued(userId);
         return await processQueue(userId);
