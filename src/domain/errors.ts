@@ -20,6 +20,7 @@ export type AppErrorCode =
   | "email_otp_cooldown"
   | "save_failed"
   | "delete_failed"
+  | "offline_read_only"
   | "unknown";
 
 export class AppError extends Error {
@@ -83,6 +84,11 @@ export function userFacingMessage(e: unknown): string {
         return "Couldn't save right now. Please try again.";
       case "delete_failed":
         return "Couldn't delete right now. Please try again.";
+      case "offline_read_only":
+        return (
+          e.message ||
+          "You can view existing records, but creating, editing, deleting, PDF generation, sharing, and sync are unavailable until you reconnect and this device is re-validated."
+        );
       default:
         return e.message || "Something went wrong.";
     }

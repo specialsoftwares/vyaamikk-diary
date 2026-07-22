@@ -133,6 +133,31 @@ export function normaliseUserProfile(
     legalConsents: Array.isArray(raw.legalConsents)
       ? (raw.legalConsents as LegalConsentRecord[])
       : [],
+    accountKind:
+      raw.accountKind === "individual" || raw.accountKind === "business"
+        ? raw.accountKind
+        : raw.businessName
+          ? "business"
+          : raw.displayName
+            ? "individual"
+            : null,
+    pinCode: typeof raw.pinCode === "string" ? raw.pinCode : null,
+    pinLocality: typeof raw.pinLocality === "string" ? raw.pinLocality : null,
+    pinDistrict: typeof raw.pinDistrict === "string" ? raw.pinDistrict : null,
+    pinState: typeof raw.pinState === "string" ? raw.pinState : null,
+    gstin: typeof raw.gstin === "string" ? raw.gstin : null,
+    gstinVerificationState:
+      typeof raw.gstinVerificationState === "string"
+        ? (raw.gstinVerificationState as UserProfile["gstinVerificationState"])
+        : null,
+    issuerIdentitySnapshotId:
+      typeof raw.issuerIdentitySnapshotId === "string"
+        ? raw.issuerIdentitySnapshotId
+        : null,
+    onboardingProfileVersion:
+      raw.onboardingProfileVersion == null
+        ? null
+        : Number(raw.onboardingProfileVersion),
   };
 }
 
@@ -298,6 +323,51 @@ export function applyProfilePatch(user: UserProfile, patch: ProfilePatch): UserP
   }
   if (patch.legalConsents !== undefined) {
     next.legalConsents = patch.legalConsents;
+    changed = true;
+  }
+  if (patch.accountKind !== undefined && patch.accountKind !== user.accountKind) {
+    next.accountKind = patch.accountKind ?? null;
+    changed = true;
+  }
+  if (patch.pinCode !== undefined && patch.pinCode !== user.pinCode) {
+    next.pinCode = patch.pinCode ?? null;
+    changed = true;
+  }
+  if (patch.pinLocality !== undefined && patch.pinLocality !== user.pinLocality) {
+    next.pinLocality = patch.pinLocality ?? null;
+    changed = true;
+  }
+  if (patch.pinDistrict !== undefined && patch.pinDistrict !== user.pinDistrict) {
+    next.pinDistrict = patch.pinDistrict ?? null;
+    changed = true;
+  }
+  if (patch.pinState !== undefined && patch.pinState !== user.pinState) {
+    next.pinState = patch.pinState ?? null;
+    changed = true;
+  }
+  if (patch.gstin !== undefined && patch.gstin !== user.gstin) {
+    next.gstin = patch.gstin ?? null;
+    changed = true;
+  }
+  if (
+    patch.gstinVerificationState !== undefined &&
+    patch.gstinVerificationState !== user.gstinVerificationState
+  ) {
+    next.gstinVerificationState = patch.gstinVerificationState ?? null;
+    changed = true;
+  }
+  if (
+    patch.issuerIdentitySnapshotId !== undefined &&
+    patch.issuerIdentitySnapshotId !== user.issuerIdentitySnapshotId
+  ) {
+    next.issuerIdentitySnapshotId = patch.issuerIdentitySnapshotId ?? null;
+    changed = true;
+  }
+  if (
+    patch.onboardingProfileVersion !== undefined &&
+    patch.onboardingProfileVersion !== user.onboardingProfileVersion
+  ) {
+    next.onboardingProfileVersion = patch.onboardingProfileVersion ?? null;
     changed = true;
   }
 

@@ -2,6 +2,10 @@ import type { Href } from "expo-router";
 
 import type { UserProfile } from "@/domain/types";
 import { loadLocationFootprintPreferences } from "@/services/location/locationFootprintPreferences";
+import {
+  hrefForProfileRemediation,
+  resolveProfileRemediation,
+} from "@/onboarding/profileRemediation";
 
 /**
  * Ordered onboarding gates after sign-in (local profile flags only).
@@ -10,6 +14,14 @@ import { loadLocationFootprintPreferences } from "@/services/location/locationFo
 export async function resolveAuthOnboardingHref(
   user: UserProfile
 ): Promise<Href | null> {
+  // Legacy / incomplete v2 profile — remediate before dashboard (no flash).
+  if (user.profileCompletedAt) {
+    const remediation = resolveProfileRemediation(user);
+    if (remediation !== "fullyCompliant" && remediation !== "emailRemediationRequired") {
+      return hrefForProfileRemediation(remediation);
+    }
+  }
+
   if (!user.profileCompletedAt) {
     return "/(auth)/complete-profile";
   }

@@ -76,6 +76,24 @@ export interface ProfilePatch {
   profileChangeHistory?: ProfileChangeHistoryEntry[];
   lastProfileEditedAt?: number | null;
   legalConsents?: LegalConsentRecord[];
+  accountKind?: "individual" | "business" | null;
+  pinCode?: string | null;
+  pinLocality?: string | null;
+  pinDistrict?: string | null;
+  pinState?: string | null;
+  gstin?: string | null;
+  gstinVerificationState?:
+    | "notProvided"
+    | "formatInvalid"
+    | "formatValid"
+    | "verificationPending"
+    | "officiallyVerified"
+    | "verificationUnavailable"
+    | "verificationFailed"
+    | "identityMismatch"
+    | null;
+  issuerIdentitySnapshotId?: string | null;
+  onboardingProfileVersion?: number | null;
 }
 
 export interface AuthService {

@@ -31,6 +31,15 @@ export const CLIENT_PROFILE_PATCH_ALLOWLIST = [
   "updatedAt",
   "emailStatus",
   "emailLinkedAt",
+  "accountKind",
+  "pinCode",
+  "pinLocality",
+  "pinDistrict",
+  "pinState",
+  "gstin",
+  "gstinVerificationState",
+  "issuerIdentitySnapshotId",
+  "onboardingProfileVersion",
 ] as const;
 
 export type ClientAllowlistedPatchKey = (typeof CLIENT_PROFILE_PATCH_ALLOWLIST)[number];

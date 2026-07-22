@@ -79,6 +79,15 @@ service cloud.firestore {
         'updatedAt',
         'emailStatus',
         'emailLinkedAt',
+        'accountKind',
+        'pinCode',
+        'pinLocality',
+        'pinDistrict',
+        'pinState',
+        'gstin',
+        'gstinVerificationState',
+        'issuerIdentitySnapshotId',
+        'onboardingProfileVersion',
       ]);
     }
 

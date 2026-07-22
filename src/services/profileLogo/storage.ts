@@ -63,6 +63,12 @@ export async function persistProfileLogoFromPicker(
         : "image/jpeg");
 
   if (!ALLOWED_MIME.has(mime)) {
+    if (mime.includes("heic") || mime.includes("heif")) {
+      throw new AppError(
+        "unknown",
+        "HEIC images could not be processed. Please choose a JPG or PNG."
+      );
+    }
     throw new AppError("unknown", "Unsupported image type. Use JPEG or PNG.");
   }
 

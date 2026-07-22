@@ -48,7 +48,8 @@ function baseUser(over: Partial<UserProfile> = {}): UserProfile {
 assert.equal(previousWizardStep("mobileEntry"), null);
 assert.equal(previousWizardStep("emailEntry"), "phoneOtp");
 assert.equal(previousWizardStep("businessIdentity"), "emailOtp");
-assert.equal(previousWizardStep("ueidRelease"), "businessIdentity");
+assert.equal(previousWizardStep("profileReview"), "businessIdentity");
+assert.equal(previousWizardStep("ueidRelease"), "profileReview");
 
 const progress = wizardProgressLabel("businessIdentity");
 assert.equal(progress.current, 6);
@@ -153,6 +154,7 @@ const chain: OnboardingWizardStep[] = [
   "locationFootprint",
   "onboardingIntro",
   "ueidRelease",
+  "profileReview",
   "businessIdentity",
   "emailOtp",
   "emailEntry",

@@ -17,6 +17,7 @@ export type OnboardingWizardStep =
   | "emailEntry"
   | "emailOtp"
   | "businessIdentity"
+  | "profileReview"
   | "ueidRelease"
   | "onboardingIntro"
   | "locationFootprint";
@@ -33,6 +34,7 @@ export const ONBOARDING_WIZARD_STEPS: readonly OnboardingWizardStep[] = [
   "emailEntry",
   "emailOtp",
   "businessIdentity",
+  "profileReview",
   "ueidRelease",
   "onboardingIntro",
   "locationFootprint",
@@ -149,6 +151,8 @@ export function hrefForWizardStep(step: OnboardingWizardStep): Href {
       };
     case "businessIdentity":
       return "/(auth)/complete-profile";
+    case "profileReview":
+      return "/(auth)/profile-review";
     case "ueidRelease":
       return "/(auth)/ueid";
     case "onboardingIntro":
@@ -165,8 +169,9 @@ export function hrefForWizardStep(step: OnboardingWizardStep): Href {
  */
 export function wizardStepFromRoute(
   pathname: string,
-  params?: { step?: string }
+  params?: { step?: string; section?: string }
 ): OnboardingWizardStep | null {
+  if (pathname.includes("profile-review")) return "profileReview";
   if (pathname.includes("complete-profile")) return "businessIdentity";
   if (pathname.includes("/ueid")) return "ueidRelease";
   if (pathname.includes("onboarding-intro")) return "onboardingIntro";

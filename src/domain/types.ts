@@ -138,6 +138,29 @@ export interface UserProfile {
   lastProfileEditedAt?: number | null;
   /** Affirmative Terms / Privacy consent log (registration and re-consent). */
   legalConsents?: LegalConsentRecord[];
+  /** Explicit Individual | Business identity (authoritative). */
+  accountKind?: "individual" | "business" | null;
+  /** Confirmed PIN / location from onboarding (document-facing). */
+  pinCode?: string | null;
+  pinLocality?: string | null;
+  pinDistrict?: string | null;
+  pinState?: string | null;
+  /** Optional GSTIN + honest verification state. */
+  gstin?: string | null;
+  gstinVerificationState?:
+    | "notProvided"
+    | "formatInvalid"
+    | "formatValid"
+    | "verificationPending"
+    | "officiallyVerified"
+    | "verificationUnavailable"
+    | "verificationFailed"
+    | "identityMismatch"
+    | null;
+  /** Latest immutable issuer-identity snapshot id for PDFs. */
+  issuerIdentitySnapshotId?: string | null;
+  /** Onboarding profile schema version (2 = PIN/image/GSTIN pipeline). */
+  onboardingProfileVersion?: number | null;
 }
 
 export type DiaryCategory =
