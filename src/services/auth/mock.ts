@@ -51,6 +51,10 @@ import { throwPendingDeletionLoginBlocked } from "@/services/auth/identityErrors
 import { hashMobileE164, normalizePhoneE164 } from "@/utils/mobileHash";
 import { deriveMockUidFromPhone } from "@/utils/ueid";
 import { createLogger } from "@/utils/logger";
+import {
+  localMockConfirmMobileOtp,
+  localMockStartMobileOtp,
+} from "@/services/auth/localMockMobileOtp";
 
 import type {
   AuthService,
@@ -60,26 +64,24 @@ import type {
 } from "./types";
 
 const log = createLogger("auth/mock");
-const MOCK_OTP = "123456";
 
 export { loadMockProfileByPhone, __resetMockRegistry } from "@/services/auth/mockRegistry";
 
 export const mockAuthService: AuthService = {
   async startOtp(phoneE164: PhoneE164): Promise<OtpChallenge> {
     log.info("startOtp", { phone: phoneE164 });
-    await new Promise((r) => setTimeout(r, 400));
+    const result = await localMockStartMobileOtp(phoneE164, "login");
     return {
-      verificationId: `mock_${Date.now()}`,
-      phoneE164,
-      devCodeHint: MOCK_OTP,
+      verificationId: result.verificationId,
+      phoneE164: result.phoneE164,
+      devCodeHint: null,
+      expiresAt: result.expiresAt,
+      resendAvailableAt: result.resendAvailableAt,
     };
   },
 
   async confirmOtp(challenge: OtpChallenge, code: string): Promise<AuthResult> {
-    await new Promise((r) => setTimeout(r, 400));
-    if (code.trim() !== MOCK_OTP) {
-      throw new AppError("invalid_otp", "Incorrect OTP.");
-    }
+    await localMockConfirmMobileOtp(challenge, code, "login");
 
     const phone = normalizePhoneE164(challenge.phoneE164);
     const registry = await loadMockRegistry();
@@ -189,11 +191,13 @@ export const mockAuthService: AuthService = {
 
   async startMobileChange(newPhoneE164: PhoneE164): Promise<OtpChallenge> {
     log.info("startMobileChange", { phone: newPhoneE164 });
-    await new Promise((r) => setTimeout(r, 400));
+    const result = await localMockStartMobileOtp(newPhoneE164, "mobile_change_new");
     return {
-      verificationId: `mock_chg_${Date.now()}`,
-      phoneE164: newPhoneE164,
-      devCodeHint: MOCK_OTP,
+      verificationId: result.verificationId,
+      phoneE164: result.phoneE164,
+      devCodeHint: null,
+      expiresAt: result.expiresAt,
+      resendAvailableAt: result.resendAvailableAt,
     };
   },
 
@@ -202,10 +206,7 @@ export const mockAuthService: AuthService = {
     challenge: OtpChallenge,
     code: string
   ): Promise<UserProfile> {
-    await new Promise((r) => setTimeout(r, 400));
-    if (code.trim() !== MOCK_OTP) {
-      throw new AppError("invalid_otp", "Incorrect OTP.");
-    }
+    await localMockConfirmMobileOtp(challenge, code, "mobile_change_new");
 
     const newPhone = normalizePhoneE164(challenge.phoneE164);
     const registry = await loadMockRegistry();

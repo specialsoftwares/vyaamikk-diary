@@ -37,17 +37,18 @@ export function PhoneConfirmCard({
       <Text style={[styles.phone, { color: tokens.heading }]}>{displayPhone}</Text>
       <LocaleUiText style={[styles.hint, { color: tokens.body }]}>{t("authV2.confirm.hint")}</LocaleUiText>
       <AuthV2PrimaryButton
-        label={t("authV2.confirm.confirm")}
+        label="Send OTP"
         loading={loading}
-        loadingLabel={t("authV2.phone.sending")}
+        loadingLabel="Sending OTP…"
         onPress={onConfirm}
+        disabled={loading}
         activeBg={tokens.ctaActiveBg}
         activeText={tokens.ctaActiveText}
         mutedBg={tokens.ctaMutedBg}
         mutedText={tokens.ctaMutedText}
       />
       <AuthV2PrimaryButton
-        label={t("authV2.confirm.goBack")}
+        label="Edit"
         onPress={onBack}
         disabled={loading}
         activeBg={tokens.ctaMutedBg}

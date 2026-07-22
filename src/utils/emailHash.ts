@@ -5,16 +5,27 @@ const EMAIL_MAX_LEN = 254;
 const EMAIL_LOCAL_MAX = 64;
 
 /**
- * Normalize for uniqueness: trim, lowercase ASCII (entire address).
+ * Normalize for uniqueness: lowercase ASCII (entire address).
  * Does NOT strip Gmail dots or plus aliases.
+ * Leading/trailing spaces are NOT auto-trimmed here for input validation —
+ * use `emailHasIllegalWhitespace` / require the user to correct spaces first.
+ * Server uniqueness still lowercases after the user provides a clean address.
  */
 export function normalizeEmail(raw: string): string {
   return raw.trim().toLowerCase();
 }
 
+/** Reject leading/trailing/embedded illegal whitespace without auto-fixing. */
+export function emailHasIllegalWhitespace(raw: string): boolean {
+  if (raw !== raw.trim()) return true;
+  if (/\s/.test(raw)) return true;
+  return false;
+}
+
 /** Syntax + length gate used before OTP send. */
 export function isValidEmailSyntax(raw: string): boolean {
-  const normalized = normalizeEmail(raw);
+  if (emailHasIllegalWhitespace(raw)) return false;
+  const normalized = raw.toLowerCase();
   if (!normalized || normalized.length > EMAIL_MAX_LEN) return false;
   const at = normalized.indexOf("@");
   if (at <= 0 || at !== normalized.lastIndexOf("@")) return false;
@@ -24,7 +35,6 @@ export function isValidEmailSyntax(raw: string): boolean {
   if (!domain || !domain.includes(".") || domain.startsWith(".") || domain.endsWith(".")) {
     return false;
   }
-  // Practical RFC-ish check — not a full RFC parser.
   return /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/i.test(
     normalized
   );

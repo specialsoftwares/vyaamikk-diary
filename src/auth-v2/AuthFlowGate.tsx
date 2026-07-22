@@ -138,6 +138,10 @@ export function AuthFlowGate() {
   const [emailCode, setEmailCode] = useState("");
   const [emailResendAvailableAt, setEmailResendAvailableAt] = useState<number | null>(null);
   const [emailExpiresAt, setEmailExpiresAt] = useState<number | null>(null);
+  const [mobileExpiresAt, setMobileExpiresAt] = useState<number | null>(null);
+  const [mobileResendAvailableAt, setMobileResendAvailableAt] = useState<number | null>(null);
+  const [mobileLockUntil, setMobileLockUntil] = useState<number | null>(null);
+  const [mobileOtpDigits, setMobileOtpDigits] = useState("");
   const emailCodeInputRef = useRef<TextInput>(null);
   const emailVerifyInFlightRef = useRef(false);
   const emailResendInFlightRef = useRef(false);
@@ -454,16 +458,30 @@ export function AuthFlowGate() {
     try {
       await savePendingConsent(phoneE164, "auth_v2_phone_confirm");
       const next = await sendOtpForWrapper(phoneE164);
-      setChallenge(next);
-      setDevHint(next.devCodeHint);
+      setChallenge({ ...next, devCodeHint: null });
+      setDevHint(null);
+      setMobileExpiresAt(next.expiresAt ?? Date.now() + 10 * 60_000);
+      setMobileResendAvailableAt(next.resendAvailableAt ?? Date.now() + 30_000);
+      setMobileLockUntil(null);
+      setMobileOtpDigits("");
       await saveAuthWrapperChallenge({
         phoneE164: next.phoneE164,
         verificationId: next.verificationId,
-        devCodeHint: next.devCodeHint,
+        devCodeHint: null,
       });
       setStep("otp");
       await markContinuingWizardStep("phoneOtp", user?.uid ?? null, {
         phoneE164: next.phoneE164,
+      });
+      const { saveMobileOtpDigitSnapshot } = await import(
+        "@/services/auth/mobileOtpSecureDigits"
+      );
+      await saveMobileOtpDigitSnapshot({
+        phoneE164: next.phoneE164,
+        verificationId: next.verificationId,
+        digits: "",
+        expiresAt: next.expiresAt ?? Date.now() + 10 * 60_000,
+        resendAvailableAt: next.resendAvailableAt ?? Date.now() + 30_000,
       });
     } catch (e) {
       setError(userFacingMessage(e));
@@ -505,6 +523,10 @@ export function AuthFlowGate() {
       await markContinuingWizardStep("emailEntry", profile.uid, {
         phoneE164: profile.phoneE164,
       });
+      const { clearMobileOtpDigitSnapshot } = await import(
+        "@/services/auth/mobileOtpSecureDigits"
+      );
+      await clearMobileOtpDigitSnapshot();
     } catch (e) {
       if (e instanceof AppError && e.code === "account_pending_deletion") {
         router.replace({
@@ -516,6 +538,13 @@ export function AuthFlowGate() {
           },
         });
         return;
+      }
+      if (e instanceof AppError && e.code === "too_many_attempts") {
+        const until = e.details?.lockUntil;
+        if (typeof until === "number") setMobileLockUntil(until);
+      }
+      if (e instanceof AppError && (e.code === "invalid_otp" || e.code === "otp_expired")) {
+        setMobileOtpDigits("");
       }
       setError(userFacingMessage(e));
     } finally {
@@ -529,14 +558,33 @@ export function AuthFlowGate() {
     setResending(true);
     try {
       const next = await startOtp(phoneE164);
-      setChallenge(next);
-      setDevHint(next.devCodeHint);
+      setChallenge({ ...next, devCodeHint: null });
+      setDevHint(null);
+      setMobileOtpDigits("");
+      setMobileExpiresAt(next.expiresAt ?? Date.now() + 10 * 60_000);
+      setMobileResendAvailableAt(next.resendAvailableAt ?? Date.now() + 30_000);
+      setMobileLockUntil(null);
       await saveAuthWrapperChallenge({
         phoneE164: next.phoneE164,
         verificationId: next.verificationId,
-        devCodeHint: next.devCodeHint,
+        devCodeHint: null,
+      });
+      const { saveMobileOtpDigitSnapshot } = await import(
+        "@/services/auth/mobileOtpSecureDigits"
+      );
+      await saveMobileOtpDigitSnapshot({
+        phoneE164: next.phoneE164,
+        verificationId: next.verificationId,
+        digits: "",
+        expiresAt: next.expiresAt ?? Date.now() + 10 * 60_000,
+        resendAvailableAt: next.resendAvailableAt ?? Date.now() + 30_000,
       });
     } catch (e) {
+      if (e instanceof AppError && e.details?.resendAvailableAt != null) {
+        setMobileResendAvailableAt(Number(e.details.resendAvailableAt));
+        setError(null);
+        return;
+      }
       setError(userFacingMessage(e));
     } finally {
       setResending(false);
@@ -579,7 +627,8 @@ export function AuthFlowGate() {
       setEmailResendAvailableAt(resendAvailableAt ?? Date.now() + 30_000);
       setEmailExpiresAt(expiresAt ?? Date.now() + 15 * 60_000);
       if (devCodeHint && shouldShowLocalMockEmailOtpHint()) {
-        setEmailHint(`Development OTP: ${devCodeHint}`);
+        // Spec: never display development OTP in the UI.
+        setEmailHint(null);
       } else {
         setEmailHint(null);
       }
@@ -628,7 +677,7 @@ export function AuthFlowGate() {
       setEmailResendAvailableAt(next.resendAvailableAt ?? Date.now() + 30_000);
       setEmailExpiresAt(next.expiresAt ?? Date.now() + 15 * 60_000);
       if (next.devCodeHint && shouldShowLocalMockEmailOtpHint()) {
-        setEmailHint(`Development OTP: ${next.devCodeHint}`);
+        setEmailHint(null);
       }
     } catch (e) {
       if (e instanceof AppError && e.code === "email_otp_cooldown") {
@@ -746,10 +795,41 @@ export function AuthFlowGate() {
     return (
       <OtpVerificationScreen
         phoneE164={phoneE164}
-        devCodeHint={devHint}
+        devCodeHint={null}
+        expiresAt={mobileExpiresAt ?? challenge.expiresAt ?? null}
+        resendAvailableAt={mobileResendAvailableAt ?? challenge.resendAvailableAt ?? null}
+        lockUntil={mobileLockUntil}
+        initialDigits={mobileOtpDigits}
+        onDigitsChange={(digits) => {
+          setMobileOtpDigits(digits);
+          void (async () => {
+            const { saveMobileOtpDigitSnapshot } = await import(
+              "@/services/auth/mobileOtpSecureDigits"
+            );
+            await saveMobileOtpDigitSnapshot({
+              phoneE164,
+              verificationId: challenge.verificationId,
+              digits,
+              expiresAt: mobileExpiresAt ?? Date.now() + 10 * 60_000,
+              resendAvailableAt: mobileResendAvailableAt ?? Date.now() + 30_000,
+            });
+          })();
+        }}
         onVerify={(code) => void handleVerifyOtp(code)}
         onResend={() => void handleResend()}
-        onChangeNumber={() => void resetToPhone()}
+        onChangeNumber={() => {
+          void (async () => {
+            const { localMockCancelMobileOtp } = await import(
+              "@/services/auth/localMockMobileOtp"
+            );
+            localMockCancelMobileOtp(phoneE164);
+            const { clearMobileOtpDigitSnapshot } = await import(
+              "@/services/auth/mobileOtpSecureDigits"
+            );
+            await clearMobileOtpDigitSnapshot();
+            await resetToPhone();
+          })();
+        }}
         loading={loading}
         resending={resending}
         error={error}

@@ -85,7 +85,7 @@ async function main() {
 
   {
     const start = await localMockStartEmailOtp("u1", "owner@example.com");
-    assert.equal(start.devCodeHint, LOCAL_MOCK_DETERMINISTIC_EMAIL_OTP);
+    assert.equal(start.devCodeHint, null, "UI must not receive development OTP hint");
     assert.ok(start.resendAvailableAt > Date.now());
     assert.ok(start.expiresAt > start.resendAvailableAt);
     const remaining = remainingSecondsUntil(start.resendAvailableAt);

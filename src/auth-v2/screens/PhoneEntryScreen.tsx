@@ -1,13 +1,13 @@
 import React, { useMemo, useState } from "react";
-import { StyleSheet, Text, TextInput, View } from "react-native";
+import { Keyboard, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { LegalConsentCheckboxes } from "@/components/legal/LegalConsentCheckboxes";
 import { PhoneConfirmCard } from "@/auth-v2/components/PhoneConfirmCard";
 import { AuthShell } from "@/auth-v2/components/AuthShell";
 import { AuthV2PrimaryButton } from "@/auth-v2/components/AuthV2PrimaryButton";
 import {
+  acceptLocalMobileInput,
   isValidIndianLocalMobile,
-  sanitizeLocalMobileInput,
   toE164FromDraft,
 } from "@/auth-v2/phoneValidation";
 import { authV2Tokens } from "@/auth-v2/theme/authV2Theme";
@@ -55,6 +55,7 @@ export function PhoneEntryScreen({
   const { resolvedMode, colors } = useTheme();
   const tokens = authV2Tokens(colors, resolvedMode === "dark");
   const [focused, setFocused] = useState(false);
+  const [formatError, setFormatError] = useState<string | null>(null);
 
   const valid = useMemo(
     () =>
@@ -74,12 +75,18 @@ export function PhoneEntryScreen({
     }
   }, [draft, valid]);
 
+  const handleContinue = () => {
+    Keyboard.dismiss();
+    onContinueToConfirm();
+  };
+
   const footer =
     step === "phone" ? (
       <>
         {!online ? (
           <Banner tone="warning" message={t("common.offlineHint")} />
         ) : null}
+        {formatError ? <Banner tone="danger" message={formatError} /> : null}
         {error ? <Banner tone="danger" message={error} /> : null}
         <LegalConsentCheckboxes
           variant="auth"
@@ -92,8 +99,8 @@ export function PhoneEntryScreen({
           label={t("authV2.phone.continue")}
           loading={loading}
           loadingLabel={t("authV2.phone.checking")}
-          disabled={!valid || !online || !consentReady}
-          onPress={onContinueToConfirm}
+          disabled={!valid || !online || !consentReady || loading}
+          onPress={handleContinue}
           testID="auth-v2-phone-continue"
           activeBg={tokens.ctaActiveBg}
           activeText={tokens.ctaActiveText}
@@ -109,7 +116,7 @@ export function PhoneEntryScreen({
       subtitle={t("authV2.phone.subtitle")}
       footer={footer}
       onBack={step === "confirm" ? onBackFromConfirm : onBack}
-      showBack
+      showBack={step === "confirm" ? true : Boolean(onBack)}
     >
       <View style={styles.row}>
         <View
@@ -133,20 +140,30 @@ export function PhoneEntryScreen({
             },
           ]}
           value={draft.localNumber}
-          onChangeText={(text) =>
+          onChangeText={(text) => {
+            const accepted = acceptLocalMobileInput(text);
+            if (accepted == null) {
+              setFormatError(
+                "Enter exactly 10 digits (0–9). Spaces, dashes, +91, or other characters are not accepted."
+              );
+              return;
+            }
+            setFormatError(null);
             onDraftChange({
               ...draft,
-              localNumber: sanitizeLocalMobileInput(text),
-            })
-          }
+              localNumber: accepted,
+            });
+          }}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           placeholder={t("login.mobilePlaceholder")}
           placeholderTextColor={tokens.placeholder}
-          keyboardType="phone-pad"
+          keyboardType="number-pad"
           maxLength={10}
           autoComplete="tel"
           textContentType="telephoneNumber"
+          editable={!loading && step === "phone"}
+          accessibilityLabel="Mobile number, 10 digits"
           testID="auth-v2-phone-input"
         />
       </View>

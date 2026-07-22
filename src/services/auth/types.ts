@@ -15,10 +15,14 @@ export interface OtpChallenge {
   verificationId: string;
   phoneE164: PhoneE164;
   /**
-   * In development we surface the mock OTP code (e.g. "123456") so
-   * QA/manual testers don't need an SMS gateway. Always null in production.
+   * Must remain null on user-facing surfaces. Local-mock OTP is documented
+   * for controlled testers only (`000000` under explicit env flag).
    */
   devCodeHint: string | null;
+  /** Authoritative expiry (ms) when provided by adapter. */
+  expiresAt?: number;
+  /** Authoritative resend availability (ms). */
+  resendAvailableAt?: number;
 }
 
 /**

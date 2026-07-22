@@ -107,11 +107,18 @@ export const sharedDevAuthService: AuthService = {
     return {
       verificationId: `sdev_${Date.now()}`,
       phoneE164,
-      devCodeHint: MOCK_OTP,
+      // Shared-dev must never expose OTP in UI; deterministic 000000 is forbidden here.
+      devCodeHint: null,
     };
   },
 
   async confirmOtp(challenge: OtpChallenge, code: string): Promise<AuthResult> {
+    if (code.trim() === "000000") {
+      throw new AppError(
+        "permission_denied",
+        "This verification code cannot be used in this environment."
+      );
+    }
     if (code.trim() !== MOCK_OTP) {
       throw new AppError("invalid_otp", "Incorrect OTP.");
     }
@@ -296,7 +303,8 @@ export const sharedDevAuthService: AuthService = {
     return {
       verificationId: `sdev_chg_${Date.now()}`,
       phoneE164: newPhoneE164,
-      devCodeHint: MOCK_OTP,
+      // Shared-dev must never expose OTP in UI; deterministic 000000 is forbidden here.
+      devCodeHint: null,
     };
   },
 

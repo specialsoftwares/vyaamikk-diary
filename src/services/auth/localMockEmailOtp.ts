@@ -66,9 +66,9 @@ export function assertDeterministicLocalMockOtpAllowed(code: string): void {
   }
 }
 
-/** Whether the UI may show `Development OTP: 000000`. */
+/** Whether the UI may show a development OTP — always false (testers use docs only). */
 export function shouldShowLocalMockEmailOtpHint(): boolean {
-  return isApprovedLocalMockEmailOtpEnvironment();
+  return false;
 }
 
 function requireLocalMock(): void {
@@ -171,7 +171,7 @@ export async function localMockStartEmailOtp(
     resendAvailableAt: challenge.resendAvailableAt,
     version,
     sent: true,
-    devCodeHint: shouldShowLocalMockEmailOtpHint() ? LOCAL_MOCK_DETERMINISTIC_EMAIL_OTP : null,
+    devCodeHint: null,
   };
 }
 
