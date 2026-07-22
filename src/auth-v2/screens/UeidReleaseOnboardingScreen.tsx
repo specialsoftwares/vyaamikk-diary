@@ -7,6 +7,7 @@ import * as Clipboard from "expo-clipboard";
 import { AuthV2PrimaryButton } from "@/auth-v2/components/AuthV2PrimaryButton";
 import { OnboardingV2Shell } from "@/auth-v2/components/OnboardingV2Shell";
 import { useAuthV2Theme } from "@/auth-v2/hooks/useAuthV2Theme";
+import { markReviewingWizardStep } from "@/auth/onboardingGuardPolicy";
 import { env } from "@/config/env";
 import { useAuth } from "@/state/auth";
 import { useT } from "@/i18n";
@@ -57,14 +58,11 @@ export function UeidReleaseOnboardingScreen({ user }: UeidReleaseOnboardingScree
   };
 
   const onBackToProfile = () => {
-    void (async () => {
-      const { markReviewingWizardStep } = await import("@/auth/onboardingGuardPolicy");
-      await markReviewingWizardStep("businessIdentity", user.uid, {
-        phoneE164: user.phoneE164,
-        verifiedEmail: user.normalizedEmail ?? user.businessEmail,
-      });
-      router.replace("/(auth)/complete-profile");
-    })();
+    markReviewingWizardStep("businessIdentity", user.uid, {
+      phoneE164: user.phoneE164,
+      verifiedEmail: user.normalizedEmail ?? user.businessEmail,
+    });
+    router.replace("/(auth)/complete-profile");
   };
 
   return (

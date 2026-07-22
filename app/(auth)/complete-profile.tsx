@@ -6,10 +6,13 @@ import {
   type BusinessIdentitySection,
 } from "@/auth-v2/screens/BusinessIdentityScreen";
 import {
-  isReviewingPreviousStep,
-  loadOnboardingNavigationState,
-} from "@/auth/onboardingNavigationStore";
-import { markBootWizardStep } from "@/auth/onboardingGuardPolicy";
+  markBootWizardStep,
+  shouldSuppressForwardOnboardingGuardSync,
+} from "@/auth/onboardingGuardPolicy";
+import {
+  getWizardSnapshot,
+  isReviewIntentActive,
+} from "@/auth/wizardNavigationController";
 import { useAuth } from "@/state/auth";
 
 const SECTIONS = new Set<string>([
@@ -35,35 +38,45 @@ export default function CompleteProfileScreen() {
   const initialSection = parseSection(params.section);
 
   useEffect(() => {
+    if (!user) {
+      router.replace("/");
+      return;
+    }
+
+    // Sync-first: never forward while user is reviewing this or an earlier step.
+    if (shouldSuppressForwardOnboardingGuardSync("businessIdentity")) {
+      return;
+    }
+    if (
+      isReviewIntentActive() &&
+      getWizardSnapshot().currentLogicalStep === "businessIdentity"
+    ) {
+      return;
+    }
+
     let cancelled = false;
     (async () => {
-      if (!user) {
-        if (!cancelled) router.replace("/");
-        return;
-      }
-      const nav = await loadOnboardingNavigationState();
-      // Reviewing this step after profileCompletedAt — stay put.
-      if (isReviewingPreviousStep(nav) && nav?.currentStep === "businessIdentity") {
-        return;
-      }
       // Remediation: profileCompletedAt set but v2 fields missing — stay here.
       const { resolveProfileRemediation } = await import("@/onboarding/profileRemediation");
+      if (cancelled) return;
+      if (shouldSuppressForwardOnboardingGuardSync("businessIdentity")) return;
+
       const remediation = resolveProfileRemediation(user);
       if (
         user.profileCompletedAt &&
         remediation !== "fullyCompliant" &&
         remediation !== "emailRemediationRequired"
       ) {
-        await markBootWizardStep("businessIdentity", user.uid);
+        markBootWizardStep("businessIdentity", user.uid);
         return;
       }
-      // Boot/continue after profile complete → advance via boot index (idempotent).
+      // Boot/continue after profile complete → advance (idempotent).
       if (user.profileCompletedAt && !user.ueidReleasedAt) {
-        const target = "/(auth)/ueid";
-        if (!cancelled) router.replace(target);
+        if (shouldSuppressForwardOnboardingGuardSync("businessIdentity")) return;
+        if (!cancelled) router.replace("/(auth)/ueid");
         return;
       }
-      await markBootWizardStep("businessIdentity", user.uid);
+      markBootWizardStep("businessIdentity", user.uid);
     })();
     return () => {
       cancelled = true;
@@ -71,7 +84,6 @@ export default function CompleteProfileScreen() {
   }, [user, router]);
 
   if (!user) return null;
-  // Allow render while async review check runs; screen itself handles drafts.
 
   return <BusinessIdentityScreen initialSection={initialSection} />;
 }

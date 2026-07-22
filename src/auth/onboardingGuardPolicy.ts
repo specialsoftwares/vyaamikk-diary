@@ -1,6 +1,9 @@
 /**
  * Shared helpers for pre-dashboard screen guards — distinguish boot/continue
  * redirects from deliberate earlier-step review.
+ *
+ * Canonical owner: wizardNavigationController (in-memory, synchronous).
+ * AsyncStorage persistence is secondary and must not gate review decisions.
  */
 
 import type { Href } from "expo-router";
@@ -16,68 +19,105 @@ import {
 import {
   isReviewingPreviousStep,
   loadOnboardingNavigationState,
-  setOnboardingWizardStep,
   type OnboardingNavigationState,
 } from "@/auth/onboardingNavigationStore";
+import {
+  dispatchWizardNav,
+  getWizardSnapshot,
+  isReviewIntentActive,
+  shouldSuppressForwardGuard,
+} from "@/auth/wizardNavigationController";
 import type { UserProfile } from "@/domain/types";
 
 export async function readWizardNav(): Promise<OnboardingNavigationState | null> {
+  const snap = getWizardSnapshot();
+  if (snap.hasActiveSession) {
+    return {
+      uid: snap.uid,
+      currentStep: snap.currentLogicalStep,
+      intent: snap.navigationIntent,
+      phoneE164: snap.phoneE164,
+      verifiedEmail: snap.verifiedEmail,
+      updatedAt: snap.updatedAt,
+    };
+  }
   return loadOnboardingNavigationState();
 }
 
 /**
  * Whether a screen’s continuous useEffect should force-navigate away.
- * Review intent: never force forward. Boot/continue: only if current step
- * is behind the resume target (idempotent compare happens at call site).
+ * Sync-first: in-memory review / in-flight transition always wins.
  */
+export function shouldSuppressForwardOnboardingGuardSync(
+  screenStep: OnboardingWizardStep
+): boolean {
+  return shouldSuppressForwardGuard(screenStep);
+}
+
+/** @deprecated Prefer sync variant — kept for call sites still awaiting. */
 export async function shouldSuppressForwardOnboardingGuard(
   screenStep: OnboardingWizardStep
 ): Promise<boolean> {
+  if (shouldSuppressForwardGuard(screenStep)) return true;
   const nav = await loadOnboardingNavigationState();
   if (!isReviewingPreviousStep(nav)) return false;
   if (nav && nav.currentStep === screenStep) return true;
-  // Reviewing a different earlier step — this screen shouldn’t steal focus.
   if (nav && canVisitWizardStep(nav.currentStep, screenStep)) return true;
   return isReviewingPreviousStep(nav);
 }
 
-export async function markReviewingWizardStep(
+/**
+ * Mark review intent synchronously in memory, then persist in background.
+ * Callers must router.replace only when the returned shouldNavigate is true
+ * (or use the returned href).
+ */
+export function markReviewingWizardStep(
   step: OnboardingWizardStep,
   uid: string | null,
   extras?: { phoneE164?: string | null; verifiedEmail?: string | null }
-): Promise<void> {
-  await setOnboardingWizardStep({
+): void {
+  dispatchWizardNav({
+    type: "REVIEW",
     step,
-    intent: "reviewPreviousStep",
     uid,
     phoneE164: extras?.phoneE164,
     verifiedEmail: extras?.verifiedEmail,
   });
 }
 
-export async function markContinuingWizardStep(
+export function markContinuingWizardStep(
   step: OnboardingWizardStep,
   uid: string | null,
   extras?: { phoneE164?: string | null; verifiedEmail?: string | null }
-): Promise<void> {
-  await setOnboardingWizardStep({
+): void {
+  dispatchWizardNav({
+    type: "CONTINUE",
     step,
-    intent: "continueForward",
     uid,
     phoneE164: extras?.phoneE164,
     verifiedEmail: extras?.verifiedEmail,
   });
 }
 
-export async function markBootWizardStep(
+export function markBootWizardStep(
   step: OnboardingWizardStep,
   uid: string | null
-): Promise<void> {
-  await setOnboardingWizardStep({
+): void {
+  dispatchWizardNav({
+    type: "BOOT",
     step,
-    intent: "bootResolution",
     uid,
   });
+}
+
+/** Clears in-memory session and secondary persistence. */
+export function clearWizardNavigationSession(): void {
+  dispatchWizardNav({ type: "CLEAR" });
+}
+
+/** Sync review check — memory first. */
+export function isActivelyReviewingWizardStep(): boolean {
+  return isReviewIntentActive();
 }
 
 export function dashboardBlockedHref(

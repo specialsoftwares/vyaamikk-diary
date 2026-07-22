@@ -6,11 +6,11 @@ import { useAuth } from "@/state/auth";
 import { markIntroSplashSeen } from "@/services/introSplashStorage";
 import { loadLocationFootprintPreferences } from "@/services/location/locationFootprintPreferences";
 import {
-  clearOnboardingNavigationState,
-  isReviewingPreviousStep,
-  loadOnboardingNavigationState,
-} from "@/auth/onboardingNavigationStore";
-import { markBootWizardStep, markContinuingWizardStep } from "@/auth/onboardingGuardPolicy";
+  clearWizardNavigationSession,
+  markBootWizardStep,
+  markContinuingWizardStep,
+  shouldSuppressForwardOnboardingGuardSync,
+} from "@/auth/onboardingGuardPolicy";
 
 export default function OnboardingIntroScreen() {
   const router = useRouter();
@@ -18,15 +18,20 @@ export default function OnboardingIntroScreen() {
   const [allowRender, setAllowRender] = useState(false);
 
   useEffect(() => {
+    if (!user) {
+      router.replace("/");
+      return;
+    }
+    if (shouldSuppressForwardOnboardingGuardSync("onboardingIntro")) {
+      setAllowRender(true);
+      return;
+    }
     let cancelled = false;
     (async () => {
-      if (!user) {
-        if (!cancelled) router.replace("/");
+      if (shouldSuppressForwardOnboardingGuardSync("onboardingIntro")) {
+        if (!cancelled) setAllowRender(true);
         return;
       }
-      const nav = await loadOnboardingNavigationState();
-      const reviewing =
-        isReviewingPreviousStep(nav) && nav?.currentStep === "onboardingIntro";
 
       if (!user.profileCompletedAt) {
         if (!cancelled) router.replace("/(auth)/complete-profile");
@@ -36,18 +41,19 @@ export default function OnboardingIntroScreen() {
         if (!cancelled) router.replace("/(auth)/ueid");
         return;
       }
-      if (user.onboardingIntroSeenAt && !reviewing) {
+      if (user.onboardingIntroSeenAt) {
         const prefs = await loadLocationFootprintPreferences(user.uid);
-        if (!cancelled) {
-          router.replace(
-            prefs.locationConsentShownAt == null
-              ? "/(auth)/location-onboarding"
-              : "/(app)/(tabs)/you"
-          );
+        if (cancelled || shouldSuppressForwardOnboardingGuardSync("onboardingIntro")) {
+          return;
         }
+        router.replace(
+          prefs.locationConsentShownAt == null
+            ? "/(auth)/location-onboarding"
+            : "/(app)/(tabs)/you"
+        );
         return;
       }
-      await markBootWizardStep("onboardingIntro", user.uid);
+      markBootWizardStep("onboardingIntro", user.uid);
       if (!cancelled) setAllowRender(true);
     })();
     return () => {
@@ -65,11 +71,11 @@ export default function OnboardingIntroScreen() {
     await markIntroSplashSeen(user.uid);
     const prefs = await loadLocationFootprintPreferences(user.uid);
     if (prefs.locationConsentShownAt == null) {
-      await markContinuingWizardStep("locationFootprint", user.uid);
+      markContinuingWizardStep("locationFootprint", user.uid);
       router.replace("/(auth)/location-onboarding");
       return;
     }
-    await clearOnboardingNavigationState();
+    clearWizardNavigationSession();
     router.replace("/(app)/(tabs)/you");
   };
 

@@ -52,8 +52,19 @@ assert.equal(previousWizardStep("profileReview"), "businessIdentity");
 assert.equal(previousWizardStep("ueidRelease"), "profileReview");
 
 const progress = wizardProgressLabel("businessIdentity");
-assert.equal(progress.current, 6);
-assert.ok(progress.label.includes("6"));
+assert.equal(progress.current, 2);
+assert.equal(progress.total, 3);
+assert.equal(progress.label, "Identity");
+assert.equal(progress.stage, "identity");
+assert.ok(!/\bStep\s+\d+\s+of\s+\d+\b/i.test(progress.label));
+
+const emailProgress = wizardProgressLabel("emailEntry");
+assert.equal(emailProgress.label, "Account");
+assert.equal(emailProgress.stage, "account");
+
+const reviewProgress = wizardProgressLabel("profileReview");
+assert.equal(reviewProgress.label, "Review");
+assert.equal(reviewProgress.stage, "review");
 
 // Max authorized / no forward skip
 assert.equal(maxAuthorizedWizardStep(null), "mobileEntry");

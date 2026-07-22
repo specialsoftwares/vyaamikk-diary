@@ -12,7 +12,7 @@
   "main": "expo-router/entry",
   "scripts": {
     "start": "expo start",
-    "start:expo-go": "EXPO_NO_REDIRECT_PAGE=1 REACT_NATIVE_PACKAGER_HOSTNAME=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo 127.0.0.1) expo start --go --lan --port 8081",
+    "start:expo-go": "EXPO_NO_REDIRECT_PAGE=1 EXPO_PUBLIC_LOCAL_MOCK_MOBILE_OTP=1 EXPO_PUBLIC_LOCAL_MOCK_EMAIL_OTP=1 REACT_NATIVE_PACKAGER_HOSTNAME=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo 127.0.0.1) expo start --go --lan --port 8081",
     "start:prod-dev-client": "EXPO_PUBLIC_APP_MODE=production REACT_NATIVE_PACKAGER_HOSTNAME=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo 127.0.0.1) expo start --dev-client --lan --port 8081",
     "android": "expo start --android",
     "ios": "expo start --ios",
@@ -86,6 +86,7 @@
     "test:first-action-freeze": "npx --yes tsx src/diagnostics/firstActionFreeze.regression.test.ts",
     "test:identity-route-state": "npx --yes tsx src/auth/identityRouteState.test.ts",
     "test:onboarding-wizard": "npx --yes tsx src/auth/onboardingWizard.test.ts",
+    "test:wizard-nav-race": "npx --yes tsx src/auth/wizardNavigationController.race.test.ts",
     "test:phone-validation": "npx --yes tsx src/auth-v2/phoneValidation.test.ts",
     "test:local-mock-mobile-otp": "npx --yes tsx src/services/auth/localMockMobileOtp.test.ts",
     "test:auth-policy-matrix": "npx --yes tsx src/auth/authPolicyMatrix.test.ts",

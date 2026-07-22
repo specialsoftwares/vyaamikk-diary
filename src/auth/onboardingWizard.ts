@@ -48,17 +48,37 @@ export function wizardStepCount(): number {
   return ONBOARDING_WIZARD_STEPS.length;
 }
 
-/** Human progress (1-based) for UI such as “Step 3 of 9”. */
+/**
+ * Contextual progress — Account / Identity / Review (no numeric “Step N of M”).
+ * `current`/`total` retained as stage ordinals for tests only.
+ */
 export function wizardProgressLabel(step: OnboardingWizardStep): {
   current: number;
   total: number;
   label: string;
+  stage: "account" | "identity" | "review";
 } {
-  const current = wizardStepIndex(step) + 1;
-  const total = wizardStepCount();
-  return { current, total, label: `Step ${current} of ${total}` };
+  // Lazy import avoided — stage mapping stays local to prevent cycles.
+  let stage: "account" | "identity" | "review" = "account";
+  if (
+    step === "businessIdentity"
+  ) {
+    stage = "identity";
+  } else if (
+    step === "profileReview" ||
+    step === "ueidRelease" ||
+    step === "onboardingIntro" ||
+    step === "locationFootprint"
+  ) {
+    stage = "review";
+  }
+  const stageIndex = stage === "account" ? 1 : stage === "identity" ? 2 : 3;
+  const label =
+    stage === "account" ? "Account" : stage === "identity" ? "Identity" : "Review";
+  return { current: stageIndex, total: 3, label, stage };
 }
 
+/** Ordered previous step in the forward wizard list (not always the Back target). */
 export function previousWizardStep(
   step: OnboardingWizardStep
 ): OnboardingWizardStep | null {

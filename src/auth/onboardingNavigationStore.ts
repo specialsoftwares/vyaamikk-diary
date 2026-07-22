@@ -1,7 +1,7 @@
 /**
- * Persisted wizard navigation — current step + intent, separate from
- * server identity completion. Survives screen remounts; cleared on
- * first dashboard entry / sign-out restart.
+ * Persisted wizard navigation — secondary durable copy of the in-memory
+ * wizardNavigationController. Survives process death; cleared on first
+ * dashboard entry / sign-out. Must never be awaited on the Back critical path.
  */
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -65,6 +65,10 @@ export async function clearOnboardingNavigationState(): Promise<void> {
   await AsyncStorage.removeItem(KEY);
 }
 
+/**
+ * Compatibility writer — prefers the in-memory controller when available.
+ * Prefer markReviewingWizardStep / markContinuingWizardStep / dispatchWizardNav.
+ */
 export async function setOnboardingWizardStep(input: {
   step: OnboardingWizardStep;
   intent: OnboardingNavigationIntent;
@@ -72,18 +76,42 @@ export async function setOnboardingWizardStep(input: {
   phoneE164?: string | null;
   verifiedEmail?: string | null;
 }): Promise<OnboardingNavigationState> {
-  const prev = await loadOnboardingNavigationState();
-  const next: OnboardingNavigationState = {
-    uid: input.uid !== undefined ? input.uid : prev?.uid ?? null,
-    currentStep: input.step,
-    intent: input.intent,
-    phoneE164: input.phoneE164 !== undefined ? input.phoneE164 : prev?.phoneE164 ?? null,
-    verifiedEmail:
-      input.verifiedEmail !== undefined ? input.verifiedEmail : prev?.verifiedEmail ?? null,
-    updatedAt: Date.now(),
+  const { dispatchWizardNav } = await import("@/auth/wizardNavigationController");
+  if (input.intent === "reviewPreviousStep") {
+    dispatchWizardNav({
+      type: "REVIEW",
+      step: input.step,
+      uid: input.uid,
+      phoneE164: input.phoneE164,
+      verifiedEmail: input.verifiedEmail,
+    });
+  } else if (input.intent === "continueForward") {
+    dispatchWizardNav({
+      type: "CONTINUE",
+      step: input.step,
+      uid: input.uid,
+      phoneE164: input.phoneE164,
+      verifiedEmail: input.verifiedEmail,
+    });
+  } else {
+    dispatchWizardNav({
+      type: "BOOT",
+      step: input.step,
+      uid: input.uid,
+      phoneE164: input.phoneE164,
+      verifiedEmail: input.verifiedEmail,
+    });
+  }
+  const { getWizardSnapshot } = await import("@/auth/wizardNavigationController");
+  const snap = getWizardSnapshot();
+  return {
+    uid: snap.uid,
+    currentStep: snap.currentLogicalStep,
+    intent: snap.navigationIntent,
+    phoneE164: snap.phoneE164,
+    verifiedEmail: snap.verifiedEmail,
+    updatedAt: snap.updatedAt,
   };
-  await saveOnboardingNavigationState(next);
-  return next;
 }
 
 /** True when a deliberate Back/review should suppress boot-style forward redirects. */

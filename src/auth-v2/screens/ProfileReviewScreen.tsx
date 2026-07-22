@@ -79,29 +79,25 @@ export function ProfileReviewScreen() {
   }
 
   const goEdit = (section: BusinessIdentitySection) => {
-    void (async () => {
-      await markReviewingWizardStep("businessIdentity", user.uid, {
-        phoneE164: user.phoneE164,
-        verifiedEmail: user.normalizedEmail ?? user.businessEmail,
-      });
-      router.replace({
-        pathname: "/(auth)/complete-profile",
-        params: { section, intent: "review" },
-      });
-    })();
+    markReviewingWizardStep("businessIdentity", user.uid, {
+      phoneE164: user.phoneE164,
+      verifiedEmail: user.normalizedEmail ?? user.businessEmail,
+    });
+    router.replace({
+      pathname: "/(auth)/complete-profile",
+      params: { section, intent: "review" },
+    });
   };
 
   const goBack = () => {
-    void (async () => {
-      await markReviewingWizardStep("businessIdentity", user.uid, {
-        phoneE164: user.phoneE164,
-        verifiedEmail: user.normalizedEmail ?? user.businessEmail,
-      });
-      router.replace({
-        pathname: "/(auth)/complete-profile",
-        params: { intent: "review" },
-      });
-    })();
+    markReviewingWizardStep("businessIdentity", user.uid, {
+      phoneE164: user.phoneE164,
+      verifiedEmail: user.normalizedEmail ?? user.businessEmail,
+    });
+    router.replace({
+      pathname: "/(auth)/complete-profile",
+      params: { intent: "review" },
+    });
   };
 
   const onComplete = async () => {
@@ -115,7 +111,7 @@ export function ProfileReviewScreen() {
         draft,
         updateProfile,
       });
-      await markContinuingWizardStep("ueidRelease", user.uid, {
+      markContinuingWizardStep("ueidRelease", user.uid, {
         phoneE164: user.phoneE164,
         verifiedEmail: user.normalizedEmail ?? user.businessEmail,
       });

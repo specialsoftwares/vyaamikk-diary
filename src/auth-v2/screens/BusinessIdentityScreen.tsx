@@ -24,7 +24,6 @@ import {
   markContinuingWizardStep,
   markReviewingWizardStep,
 } from "@/auth/onboardingGuardPolicy";
-import { clearOnboardingNavigationState } from "@/auth/onboardingNavigationStore";
 import type { OnboardingAccountKind } from "@/auth/onboardingWizard";
 import {
   clearOnboardingProfileDraftV2,
@@ -388,7 +387,7 @@ export function BusinessIdentityScreen({
     setSubmitting(true);
     try {
       await saveOnboardingProfileDraftV2(current);
-      await markContinuingWizardStep("profileReview", user.uid, {
+      markContinuingWizardStep("profileReview", user.uid, {
         phoneE164: user.phoneE164,
         verifiedEmail: user.normalizedEmail ?? user.businessEmail,
       });
@@ -401,23 +400,22 @@ export function BusinessIdentityScreen({
   };
 
   const goBack = () => {
-    void (async () => {
-      await persistDraftNow();
-      await markReviewingWizardStep("emailEntry", user.uid, {
-        phoneE164: user.phoneE164,
-        verifiedEmail: hasAuthoritativeVerifiedEmail(user)
-          ? user.normalizedEmail ?? user.businessEmail
-          : null,
-      });
-      router.replace({
-        pathname: "/(auth)/v2",
-        params: { step: "email", intent: "review", from: "profile" },
-      });
-    })();
+    // Sync review intent BEFORE route replace — eliminates AsyncStorage race.
+    markReviewingWizardStep("emailEntry", user.uid, {
+      phoneE164: user.phoneE164,
+      verifiedEmail: hasAuthoritativeVerifiedEmail(user)
+        ? user.normalizedEmail ?? user.businessEmail
+        : null,
+    });
+    router.replace({
+      pathname: "/(auth)/v2",
+      params: { step: "email", intent: "review", from: "profile" },
+    });
+    void persistDraftNow();
   };
 
   const goBackFromReadOnly = () => {
-    void markContinuingWizardStep("ueidRelease", user.uid);
+    markContinuingWizardStep("ueidRelease", user.uid);
     router.replace("/(auth)/ueid");
   };
 
@@ -432,7 +430,10 @@ export function BusinessIdentityScreen({
           style: "destructive",
           onPress: () => {
             void (async () => {
-              await clearOnboardingNavigationState();
+              const { clearWizardNavigationSession } = await import(
+                "@/auth/onboardingGuardPolicy"
+              );
+              clearWizardNavigationSession();
               await clearOnboardingProfileDraftV2(user.uid);
               await signOut();
               router.replace("/(auth)/v2");
