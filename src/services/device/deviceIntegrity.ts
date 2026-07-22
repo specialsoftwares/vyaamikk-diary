@@ -1,6 +1,11 @@
 /**
  * Device integrity abstraction — fail closed when detection is inconclusive.
  * Does not claim perfect root/jailbreak detection.
+ *
+ * Soft-audit: package.json has no Play Integrity / App Attest / jailbreak SDK.
+ * Do not add random npm deps. Until a vetted SDK is wired, `probeDeviceIntegrity`
+ * returns `unavailable` and login stays blocked (fail-closed). Tests may inject
+ * `deviceIntegrity.testAdapter.ts` — never use that adapter in production paths.
  */
 
 export type DeviceIntegrityVerdict =
