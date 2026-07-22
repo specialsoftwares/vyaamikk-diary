@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   BackHandler,
+  Keyboard,
   Platform,
   Pressable,
   StyleSheet,
@@ -51,6 +52,16 @@ import {
   loadOnboardingNavigationState,
 } from "@/auth/onboardingNavigationStore";
 import { clearOnboardingProfileDraft } from "@/auth/onboardingProfileDraft";
+import {
+  beginEmailOtpSend,
+  canVerifyEmailOtp,
+  completeEmailOtpSend,
+  createEmailOtpSendMachine,
+  failEmailOtpSend,
+  isBackBlockedDuringEmailSend,
+  setRetainedDigits,
+  type EmailOtpSendMachine,
+} from "@/auth/emailOtpSendMachine";
 import {
   isPreDashboardOnboardingIncomplete,
   sameEmailAddress,
@@ -145,7 +156,11 @@ export function AuthFlowGate() {
   const emailCodeInputRef = useRef<TextInput>(null);
   const emailVerifyInFlightRef = useRef(false);
   const emailResendInFlightRef = useRef(false);
+  const emailSendInFlightRef = useRef(false);
   const reviewingRef = useRef(false);
+  const [emailSendMachine, setEmailSendMachine] = useState<EmailOtpSendMachine>(() =>
+    createEmailOtpSendMachine()
+  );
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -347,8 +362,12 @@ export function AuthFlowGate() {
         return true;
       }
       if (step === "email_verify") {
+        if (isBackBlockedDuringEmailSend(emailSendMachine)) {
+          return true; // block while send in flight
+        }
         setStep("email");
         setEmailCode("");
+        setEmailSendMachine(createEmailOtpSendMachine());
         return true;
       }
       if (step === "email") {
@@ -361,7 +380,7 @@ export function AuthFlowGate() {
     });
     return () => sub.remove();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, status, user]);
+  }, [step, status, user, emailSendMachine]);
 
   const goBackFromEmail = async () => {
     reviewingRef.current = true;
@@ -385,7 +404,13 @@ export function AuthFlowGate() {
     const previousUid = user?.uid;
     await clearOnboardingNavigationState();
     await clearAuthWrapperProgress(previousUid);
-    if (previousUid) await clearOnboardingProfileDraft(previousUid);
+    if (previousUid) {
+      await clearOnboardingProfileDraft(previousUid);
+      const { clearOnboardingProfileDraftV2 } = await import(
+        "@/onboarding/onboardingProfileDraftV2"
+      );
+      await clearOnboardingProfileDraftV2(previousUid);
+    }
     if (status === "signed_in") {
       await signOut();
     }
@@ -594,20 +619,35 @@ export function AuthFlowGate() {
   const handleEmailContinue = async () => {
     const trimmed = emailDraft.trim().toLowerCase();
     if (!user) return;
+    if (emailSendInFlightRef.current) return;
     setError(null);
     setEmailHint(null);
-    setLoading(true);
-    try {
-      // Same already-verified email — continue to profile without a new OTP.
-      if (
-        hasAuthoritativeVerifiedEmail(user) &&
-        sameEmailAddress(trimmed, user.normalizedEmail ?? user.businessEmail ?? "")
-      ) {
-        await goToBusinessIdentity();
-        return;
-      }
 
-      // Changing a verified email during incomplete onboarding — clear verified status.
+    // Same already-verified email — continue to profile without a new OTP.
+    if (
+      hasAuthoritativeVerifiedEmail(user) &&
+      sameEmailAddress(trimmed, user.normalizedEmail ?? user.businessEmail ?? "")
+    ) {
+      await goToBusinessIdentity();
+      return;
+    }
+
+    // Navigate-first: dismiss keyboard, show OTP screen, send in background.
+    Keyboard.dismiss();
+    emailSendInFlightRef.current = true;
+    const started = beginEmailOtpSend(emailSendMachine);
+    const generation = started.generation;
+    setEmailSendMachine(started);
+    setEmailVerificationId(null);
+    setEmailCode("");
+    setStep("email_verify");
+    reviewingRef.current = false;
+    await markContinuingWizardStep("emailOtp", user.uid, {
+      phoneE164: user.phoneE164,
+    });
+    setTimeout(() => emailCodeInputRef.current?.focus(), 280);
+
+    try {
       if (
         hasAuthoritativeVerifiedEmail(user) &&
         !sameEmailAddress(trimmed, user.normalizedEmail ?? user.businessEmail ?? "")
@@ -620,43 +660,104 @@ export function AuthFlowGate() {
         });
       }
 
-      const { verificationId, devCodeHint, resendAvailableAt, expiresAt } =
+      const { verificationId, resendAvailableAt, expiresAt } =
         await startBusinessEmailVerification(user.uid, trimmed);
+
+      const completed = completeEmailOtpSend(started, generation, {
+        challengeId: verificationId,
+        expiresAt: expiresAt ?? Date.now() + 15 * 60_000,
+        resendAvailableAt: resendAvailableAt ?? Date.now() + 30_000,
+      });
+      if (!completed) {
+        // Late response after abandonment — do not create a hidden challenge.
+        return;
+      }
+      setEmailSendMachine(completed);
       setEmailVerificationId(verificationId);
-      setEmailCode("");
       setEmailResendAvailableAt(resendAvailableAt ?? Date.now() + 30_000);
       setEmailExpiresAt(expiresAt ?? Date.now() + 15 * 60_000);
-      if (devCodeHint && shouldShowLocalMockEmailOtpHint()) {
-        // Spec: never display development OTP in the UI.
-        setEmailHint(null);
-      } else {
-        setEmailHint(null);
-      }
-      setStep("email_verify");
-      reviewingRef.current = false;
-      await markContinuingWizardStep("emailOtp", user.uid, {
-        phoneE164: user.phoneE164,
-      });
-      setTimeout(() => emailCodeInputRef.current?.focus(), 280);
+      setEmailHint(null);
     } catch (e) {
       if (e instanceof AppError && e.code === "email_otp_cooldown") {
         const until = authoritativeResendAvailableAt(e.details);
         if (until != null) setEmailResendAvailableAt(until);
+        const completed = completeEmailOtpSend(started, generation, {
+          challengeId: emailVerificationId ?? `cooldown_${generation}`,
+          expiresAt: emailExpiresAt ?? Date.now() + 15 * 60_000,
+          resendAvailableAt: until ?? Date.now() + 30_000,
+        });
+        // Cooldown means a prior challenge may still be valid — stay on OTP with failed send UX if no id.
+        if (!emailVerificationId) {
+          const failed = failEmailOtpSend(
+            started,
+            generation,
+            "OTP could not be sent"
+          );
+          if (failed) setEmailSendMachine(failed);
+        } else if (completed) {
+          setEmailSendMachine(completed);
+        }
         setError(null);
-        setStep("email_verify");
         return;
       }
       if (e instanceof AppError && e.code === "email_already_linked") {
+        const failed = failEmailOtpSend(started, generation, e.message);
+        if (failed) setEmailSendMachine(failed);
         setError(e.message);
         return;
       }
       if (e instanceof AppError && e.code === "email_pending_deletion") {
+        const failed = failEmailOtpSend(started, generation, e.message);
+        if (failed) setEmailSendMachine(failed);
         setError(e.message);
         return;
       }
+      const failed = failEmailOtpSend(
+        started,
+        generation,
+        "OTP could not be sent"
+      );
+      if (failed) setEmailSendMachine(failed);
+      setError("OTP could not be sent");
+    } finally {
+      emailSendInFlightRef.current = false;
+    }
+  };
+
+  const handleEmailRetrySend = async () => {
+    if (!user) return;
+    if (emailSendInFlightRef.current) return;
+    setError(null);
+    emailSendInFlightRef.current = true;
+    const started = beginEmailOtpSend(emailSendMachine);
+    const generation = started.generation;
+    setEmailSendMachine(started);
+    try {
+      const trimmed = emailDraft.trim().toLowerCase();
+      const { verificationId, resendAvailableAt, expiresAt } =
+        await startBusinessEmailVerification(user.uid, trimmed);
+      const completed = completeEmailOtpSend(started, generation, {
+        challengeId: verificationId,
+        expiresAt: expiresAt ?? Date.now() + 15 * 60_000,
+        resendAvailableAt: resendAvailableAt ?? Date.now() + 30_000,
+      });
+      if (!completed) return;
+      setEmailSendMachine(
+        setRetainedDigits(completed, emailSendMachine.retainedDigits || emailCode)
+      );
+      setEmailVerificationId(verificationId);
+      setEmailResendAvailableAt(resendAvailableAt ?? Date.now() + 30_000);
+      setEmailExpiresAt(expiresAt ?? Date.now() + 15 * 60_000);
+    } catch (e) {
+      const failed = failEmailOtpSend(
+        started,
+        generation,
+        "OTP could not be sent"
+      );
+      if (failed) setEmailSendMachine(failed);
       setError(userFacingMessage(e));
     } finally {
-      setLoading(false);
+      emailSendInFlightRef.current = false;
     }
   };
 
@@ -694,7 +795,11 @@ export function AuthFlowGate() {
   };
 
   const handleVerifyEmailCode = async () => {
-    if (!user || !emailVerificationId || emailCode.length !== EMAIL_CODE_LENGTH) return;
+    if (!user || emailCode.length !== EMAIL_CODE_LENGTH) return;
+    if (!canVerifyEmailOtp(emailSendMachine) || !emailVerificationId) {
+      setError("Wait until the OTP is sent, then verify.");
+      return;
+    }
     if (emailVerifyInFlightRef.current) return;
     emailVerifyInFlightRef.current = true;
     setError(null);
@@ -711,6 +816,7 @@ export function AuthFlowGate() {
       );
       await applyServerProfile(profile);
       await markAuthWrapperEmailComplete(profile.uid);
+      setEmailSendMachine(createEmailOtpSendMachine());
       await goToBusinessIdentity();
     } catch (e) {
       setError(userFacingMessage(e));
@@ -721,20 +827,23 @@ export function AuthFlowGate() {
     }
   };
 
-  // Auto-verify once per completed code entry — dedupe Strict Mode / rerenders.
+  // Auto-verify only when a challenge exists — never while sending.
   const lastAutoSubmittedEmailCodeRef = useRef<string | null>(null);
   useEffect(() => {
     if (step !== "email_verify") return;
     if (emailCode.length < EMAIL_CODE_LENGTH) {
       lastAutoSubmittedEmailCodeRef.current = null;
+      setEmailSendMachine((m) => setRetainedDigits(m, emailCode));
       return;
     }
     if (emailCode.length !== EMAIL_CODE_LENGTH) return;
+    setEmailSendMachine((m) => setRetainedDigits(m, emailCode));
+    if (!canVerifyEmailOtp(emailSendMachine)) return;
     if (lastAutoSubmittedEmailCodeRef.current === emailCode) return;
     lastAutoSubmittedEmailCodeRef.current = emailCode;
     void handleVerifyEmailCode();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fire on completed code only
-  }, [emailCode, step]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fire on completed code + challenge only
+  }, [emailCode, step, emailSendMachine.state, emailVerificationId]);
 
   const resetToPhone = async () => {
     setStep("phone");
@@ -839,7 +948,9 @@ export function AuthFlowGate() {
 
   if (step === "email_verify") {
     const emailVerifyComplete = emailCode.length === EMAIL_CODE_LENGTH;
-    const showDevHint = Boolean(emailHint && shouldShowLocalMockEmailOtpHint());
+    const sending = emailSendMachine.state === "sending";
+    const sendFailed = emailSendMachine.state === "failed";
+    const canVerify = canVerifyEmailOtp(emailSendMachine) && Boolean(emailVerificationId);
     return (
       <View style={styles.boot}>
         <View style={styles.emailVerifyCard}>
@@ -852,17 +963,23 @@ export function AuthFlowGate() {
             {t("pendingDeletion.reactivateEmailTitle")}
           </LocaleUiText>
           <LocaleUiText style={styles.emailVerifyBody}>
-            {t("pendingDeletion.reactivateEmailHint")}
+            {emailDraft.trim().toLowerCase()}
           </LocaleUiText>
-          {showDevHint ? <Banner tone="info" message={emailHint!} /> : null}
-          {emailValidityRemaining > 0 ? (
+          {sending ? (
+            <LocaleUiText style={styles.emailTiming}>Sending OTP…</LocaleUiText>
+          ) : null}
+          {sendFailed ? (
+            <Banner tone="danger" message="OTP could not be sent" />
+          ) : null}
+          {!sending && !sendFailed && emailValidityRemaining > 0 ? (
             <LocaleUiText style={styles.emailTiming}>
               {`Code valid for ${formatOtpCountdownMmSs(emailValidityRemaining)}`}
             </LocaleUiText>
-          ) : (
+          ) : null}
+          {!sending && !sendFailed && emailValidityRemaining <= 0 && emailExpiresAt ? (
             <LocaleUiText style={styles.emailTiming}>Code expired — request a new one.</LocaleUiText>
-          )}
-          {error ? <Banner tone="danger" message={error} /> : null}
+          ) : null}
+          {error && !sendFailed ? <Banner tone="danger" message={error} /> : null}
           <TextInput
             ref={emailCodeInputRef}
             style={styles.emailCodeInput}
@@ -878,15 +995,24 @@ export function AuthFlowGate() {
             editable={!loading}
             returnKeyType="done"
             onSubmitEditing={() => {
-              if (emailVerifyComplete) void handleVerifyEmailCode();
+              if (emailVerifyComplete && canVerify) void handleVerifyEmailCode();
             }}
           />
-          <Button
-            label={t("pendingDeletion.verifyAndReactivate")}
-            onPress={() => void handleVerifyEmailCode()}
-            loading={loading}
-            disabled={!emailVerifyComplete || loading}
-          />
+          {sendFailed ? (
+            <Button
+              label="Retry sending"
+              onPress={() => void handleEmailRetrySend()}
+              loading={sending}
+              disabled={sending}
+            />
+          ) : (
+            <Button
+              label={t("pendingDeletion.verifyAndReactivate")}
+              onPress={() => void handleVerifyEmailCode()}
+              loading={loading}
+              disabled={!emailVerifyComplete || loading || !canVerify || sending}
+            />
+          )}
           <View style={styles.emailResendRow}>
             {emailResendRemaining > 0 ? (
               <LocaleUiText style={styles.emailTiming}>
@@ -895,7 +1021,7 @@ export function AuthFlowGate() {
             ) : (
               <Pressable
                 onPress={() => void handleEmailResend()}
-                disabled={!emailCanResend || resending || loading}
+                disabled={!emailCanResend || resending || loading || sending || !canVerify}
                 accessibilityRole="button"
               >
                 <Text style={[styles.emailResendLink, (resending || loading) && { opacity: 0.5 }]}>
