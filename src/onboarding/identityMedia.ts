@@ -2,6 +2,7 @@
  * Profile image / business logo selection + validation for onboarding.
  */
 
+import { Platform } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system/legacy";
 
@@ -48,47 +49,31 @@ function inferMime(asset: ImagePicker.ImagePickerAsset): string {
   return "application/octet-stream";
 }
 
-export async function pickIdentityMedia(
-  source: IdentityMediaSource
+const PICKER_OPTS: ImagePicker.ImagePickerOptions = {
+  mediaTypes: ["images"],
+  allowsEditing: true,
+  aspect: [1, 1],
+  // Keep under typical profile-logo budget after crop; avoid base64 bridge cost.
+  quality: 0.8,
+  base64: false,
+  exif: false,
+};
+
+async function fileByteLength(uri: string): Promise<number> {
+  try {
+    const info = await FileSystem.getInfoAsync(uri);
+    if (info.exists && "size" in info && typeof info.size === "number") {
+      return info.size;
+    }
+  } catch {
+    // content:// URIs may omit size — persist path re-checks after copy.
+  }
+  return 0;
+}
+
+async function finalizePickedAsset(
+  asset: ImagePicker.ImagePickerAsset
 ): Promise<PickedLogoAsset & { width: number; height: number }> {
-  const pickerOpts: ImagePicker.ImagePickerOptions = {
-    mediaTypes: ["images"],
-    allowsEditing: true,
-    aspect: [1, 1],
-    quality: 0.85,
-    base64: true,
-    exif: false,
-  };
-
-  let result: ImagePicker.ImagePickerResult;
-  if (source === "camera") {
-    const perm = await ImagePicker.requestCameraPermissionsAsync();
-    if (!perm.granted) {
-      throw new IdentityMediaError(
-        "permission_denied",
-        "Camera permission is required to take a profile photo."
-      );
-    }
-    result = await ImagePicker.launchCameraAsync({
-      ...pickerOpts,
-      cameraType: ImagePicker.CameraType.front,
-    });
-  } else {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      throw new IdentityMediaError(
-        "permission_denied",
-        "Photo library permission is required to choose an image."
-      );
-    }
-    result = await ImagePicker.launchImageLibraryAsync(pickerOpts);
-  }
-
-  if (result.canceled || !result.assets?.[0]) {
-    throw new IdentityMediaError("cancelled", "Image selection cancelled.");
-  }
-
-  const asset = result.assets[0];
   const mime = inferMime(asset);
   try {
     assertSupportedIdentityMime(mime, asset.fileName);
@@ -117,13 +102,8 @@ export async function pickIdentityMedia(
   if (!asset.uri?.trim()) {
     throw new IdentityMediaError("empty", "Selected image reference is empty.");
   }
-  if (!asset.base64) {
-    throw new IdentityMediaError(
-      "corrupted",
-      "Could not read the selected image. Please try another file."
-    );
-  }
-  const approxBytes = Math.ceil((asset.base64.length * 3) / 4);
+
+  const approxBytes = await fileByteLength(asset.uri);
   if (approxBytes > MAX_PROFILE_LOGO_BYTES) {
     throw new IdentityMediaError(
       "too_large",
@@ -131,14 +111,91 @@ export async function pickIdentityMedia(
     );
   }
 
+  const candidate = validateIdentityMediaCandidate({
+    mimeType: mime,
+    fileName: asset.fileName,
+    width: w,
+    height: h,
+    approxBytes,
+    uri: asset.uri,
+    base64: null,
+  });
+  if (!candidate.ok) {
+    throw new IdentityMediaError(candidate.reason, candidate.message);
+  }
+
   return {
     uri: asset.uri,
-    base64: asset.base64,
+    base64: null,
     mimeType: mime,
     fileName: asset.fileName ?? null,
     width: asset.width ?? 0,
     height: asset.height ?? 0,
   };
+}
+
+/**
+ * Recover a picker/camera result if Android destroyed the Activity while the
+ * system UI owned the foreground (same pattern as letterhead / customer photo).
+ */
+async function recoverPendingPickerAsset(): Promise<ImagePicker.ImagePickerAsset | null> {
+  try {
+    const pending = await ImagePicker.getPendingResultAsync();
+    if (pending && "assets" in pending && pending.assets?.[0]) {
+      return pending.assets[0];
+    }
+  } catch {
+    // Older runtimes / web — ignore.
+  }
+  return null;
+}
+
+export async function pickIdentityMedia(
+  source: IdentityMediaSource
+): Promise<PickedLogoAsset & { width: number; height: number }> {
+  const pendingAsset = await recoverPendingPickerAsset();
+  if (pendingAsset) {
+    return finalizePickedAsset(pendingAsset);
+  }
+
+  let result: ImagePicker.ImagePickerResult;
+  if (source === "camera") {
+    const current = await ImagePicker.getCameraPermissionsAsync();
+    const perm = current.granted
+      ? current
+      : await ImagePicker.requestCameraPermissionsAsync();
+    if (!perm.granted) {
+      throw new IdentityMediaError(
+        "permission_denied",
+        "Camera permission is required to take a profile photo."
+      );
+    }
+    result = await ImagePicker.launchCameraAsync({
+      ...PICKER_OPTS,
+      cameraType: ImagePicker.CameraType.front,
+    });
+  } else {
+    // iOS needs Photos permission. Android Photo Picker typically does not —
+    // still request when not granted, but do not hard-fail Android when the
+    // legacy storage permission is denied.
+    const current = await ImagePicker.getMediaLibraryPermissionsAsync();
+    if (!current.granted) {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted && Platform.OS !== "android") {
+        throw new IdentityMediaError(
+          "permission_denied",
+          "Photo library permission is required to choose an image."
+        );
+      }
+    }
+    result = await ImagePicker.launchImageLibraryAsync(PICKER_OPTS);
+  }
+
+  if (result.canceled || !result.assets?.[0]) {
+    throw new IdentityMediaError("cancelled", "Image selection cancelled.");
+  }
+
+  return finalizePickedAsset(result.assets[0]);
 }
 
 export async function confirmAndPersistIdentityMedia(

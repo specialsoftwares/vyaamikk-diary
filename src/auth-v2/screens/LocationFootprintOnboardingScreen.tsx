@@ -42,6 +42,7 @@ export function LocationFootprintOnboardingScreen({
             activeText={tokens.ctaActiveText}
             mutedBg={tokens.ctaMutedBg}
             mutedText={tokens.ctaMutedText}
+            mutedBorder={tokens.ctaMutedBorder}
           />
           <AuthV2SecondaryButton
             label={t("onboarding.location.notNow")}

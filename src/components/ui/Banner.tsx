@@ -29,7 +29,12 @@ export function Banner({ tone = "info", title, message }: BannerProps) {
       ]}
     >
       {title ? <Text style={[styles.title, { color: palette.fg }]}>{title}</Text> : null}
-      <Text style={[styles.message, { color: palette.fg }]}>{message}</Text>
+      <Text
+        style={[styles.message, { color: palette.fg }]}
+        selectable
+      >
+        {message}
+      </Text>
     </View>
   );
 }
@@ -69,5 +74,8 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   title: { ...typography.bodyStrong },
-  message: { ...typography.body },
+  message: {
+    ...typography.body,
+    lineHeight: 22,
+  },
 });

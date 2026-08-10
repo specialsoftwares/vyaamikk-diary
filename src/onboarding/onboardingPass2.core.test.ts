@@ -138,6 +138,7 @@ function baseUser(over: Partial<UserProfile> = {}): UserProfile {
       accountKind: "business",
       businessName: "Analytical Engines",
       displayName: "Ada Lovelace",
+      constitution: "Proprietorship",
     }),
   });
   assert.equal(biz.ok, true);
@@ -170,6 +171,41 @@ function baseUser(over: Partial<UserProfile> = {}): UserProfile {
   assert.equal(identity.primaryName, "Analytical Engines");
   assert.equal(identity.accountOwnerName, "Ada Lovelace");
   assert.equal(identity.constitution, "Proprietorship");
+}
+
+{
+  const sole = validateOnboardingDraftForCompletion({
+    signedIn: true,
+    emailVerified: true,
+    phoneE164: "+919876543210",
+    email: "ada@example.com",
+    draft: baseDraft({
+      accountKind: "business",
+      businessName: "",
+      displayName: "Ada Lovelace",
+      constitution: "Individual Professional / Sole Practice",
+    }),
+  });
+  assert.equal(sole.ok, true);
+}
+
+{
+  const identity = buildDocumentFacingIdentity({
+    draft: baseDraft({
+      accountKind: "business",
+      businessName: "",
+      displayName: "Ada Lovelace",
+      constitution: "Individual Professional / Sole Practice",
+    }),
+    phoneE164: "+919876543210",
+    email: "ada@example.com",
+    snapshotVersion: 1,
+    now: 10,
+  });
+  assert.equal(identity.accountKind, "business");
+  assert.equal(identity.primaryName, "Ada Lovelace");
+  assert.equal(identity.accountOwnerName, "Ada Lovelace");
+  assert.equal(identity.constitution, "Individual Professional / Sole Practice");
 }
 
 // --- GSTIN ---
@@ -278,7 +314,7 @@ function baseUser(over: Partial<UserProfile> = {}): UserProfile {
     width: 400,
     height: 400,
     approxBytes: 1000,
-    uri: "file://x.jpg",
+    uri: "",
     base64: null,
   });
   assert.equal(corrupt.ok, false);
@@ -293,6 +329,16 @@ function baseUser(over: Partial<UserProfile> = {}): UserProfile {
   });
   assert.equal(okImg.ok, true);
 
+  const okUriOnly = validateIdentityMediaCandidate({
+    mimeType: "image/jpeg",
+    width: 400,
+    height: 400,
+    approxBytes: 1000,
+    uri: "file://x.jpg",
+    base64: null,
+  });
+  assert.equal(okUriOnly.ok, true);
+
   const noLogo = validateOnboardingDraftForCompletion({
     signedIn: true,
     emailVerified: true,
@@ -300,7 +346,7 @@ function baseUser(over: Partial<UserProfile> = {}): UserProfile {
     email: "a@b.co",
     draft: baseDraft({ profileLogo: null, logoPersisted: false }),
   });
-  assert.equal(noLogo.ok, false);
+  assert.equal(noLogo.ok, true, "profile image is optional for V1 onboarding completion");
 }
 
 // --- PDF disclosure ---

@@ -20,10 +20,10 @@ import {
   type OnboardingNavigationIntent,
   type OnboardingWizardStep,
 } from "@/auth/onboardingWizard";
-import type { OnboardingNavigationState } from "@/auth/onboardingNavigationStore";
 import {
   clearOnboardingNavigationState,
   saveOnboardingNavigationState,
+  type OnboardingNavigationState,
 } from "@/auth/onboardingNavigationStore";
 
 export type WizardProgressStage = "account" | "identity" | "review";
@@ -205,12 +205,12 @@ export function wizardStageHeading(step: OnboardingWizardStep): string {
 export function wizardStageModel(step: OnboardingWizardStep): {
   stage: WizardProgressStage;
   heading: string;
-  stages: Array<{
+  stages: {
     id: WizardProgressStage;
     label: string;
     active: boolean;
     reached: boolean;
-  }>;
+  }[];
 } {
   const stage = wizardProgressStage(step);
   const activeIndex = STAGE_ORDER.indexOf(stage);

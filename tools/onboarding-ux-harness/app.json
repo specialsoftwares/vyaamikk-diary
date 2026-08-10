@@ -1,0 +1,14 @@
+{
+  "expo": {
+    "name": "Vyaamikk UX Harness",
+    "slug": "vyaamikk-onboarding-ux-harness",
+    "scheme": "vyaamikk-ux-harness",
+    "version": "0.0.0-dev",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": false
+    },
+    "android": {}
+  }
+}

@@ -14,6 +14,11 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 
+import { AuthActionZone } from "@/auth-v2/components/AuthActionZone";
+import {
+  AUTH_ACTION_ZONE_ABOVE,
+  AUTH_ACTION_ZONE_BELOW,
+} from "@/auth-v2/components/authActionZoneLayout";
 import { authV2GradientStops, authV2Tokens } from "@/auth-v2/theme/authV2Theme";
 import { FormFocusProvider } from "@/components/inputSafety/FormFocusManager";
 import { spacing, typography, useTheme } from "@/theme";
@@ -28,11 +33,17 @@ interface AuthShellProps {
   contentStyle?: StyleProp<ViewStyle>;
   /** Row above the title (e.g. stage label + language toggle). */
   headerTop?: React.ReactNode;
+  /**
+   * `end` — pinned near the device edge (business onboarding).
+   * `actionZone` — lower-middle cluster shared with verifying/verified.
+   */
+  footerPlacement?: "end" | "actionZone";
 }
 
 /**
  * Auth/onboarding shell — one keyboard strategy on iOS (KAV padding only).
  * Do not stack automaticallyAdjustKeyboardInsets here; it pushes content off-screen.
+ * Action-zone placement keeps auth CTAs in the verifying/verified focal band.
  */
 export function AuthShell({
   title,
@@ -43,12 +54,14 @@ export function AuthShell({
   showBack = true,
   contentStyle,
   headerTop,
+  footerPlacement = "end",
 }: AuthShellProps) {
   const insets = useSafeAreaInsets();
   const { resolvedMode, colors } = useTheme();
   const isDark = resolvedMode === "dark";
   const tokens = authV2Tokens(colors, isDark);
   const gradient = authV2GradientStops(isDark);
+  const useActionZone = footerPlacement === "actionZone" && Boolean(footer);
 
   return (
     <LinearGradient colors={gradient} style={styles.root}>
@@ -75,7 +88,7 @@ export function AuthShell({
           <ScrollView
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
-            contentContainerStyle={[styles.scroll, contentStyle]}
+            contentContainerStyle={[styles.scroll, useActionZone && styles.scrollZone, contentStyle]}
             showsVerticalScrollIndicator={false}
           >
             {headerTop}
@@ -86,9 +99,21 @@ export function AuthShell({
               <Text style={[styles.subtitle, { color: tokens.body }]}>{subtitle}</Text>
             ) : null}
             {children}
+            {useActionZone ? (
+              <>
+                <View style={styles.zoneAbove} />
+                <AuthActionZone>{footer}</AuthActionZone>
+                <View
+                  style={[
+                    styles.zoneBelow,
+                    { minHeight: Math.max(insets.bottom, spacing.md) },
+                  ]}
+                />
+              </>
+            ) : null}
           </ScrollView>
 
-          {footer ? (
+          {!useActionZone && footer ? (
             <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, spacing.lg) }]}>
               {footer}
             </View>
@@ -119,6 +144,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.xl,
     flexGrow: 1,
+  },
+  scrollZone: {
+    paddingBottom: spacing.sm,
+  },
+  zoneAbove: {
+    flexGrow: AUTH_ACTION_ZONE_ABOVE,
+    flexShrink: 1,
+    flexBasis: 0,
+    minHeight: 24,
+  },
+  zoneBelow: {
+    flexGrow: AUTH_ACTION_ZONE_BELOW,
+    flexShrink: 1,
+    flexBasis: 0,
   },
   title: {
     ...typography.displayMd,

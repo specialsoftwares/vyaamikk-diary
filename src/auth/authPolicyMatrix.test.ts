@@ -60,10 +60,28 @@ assert.equal(
   "uncertain_treat_as_new"
 );
 
-assert.equal(isLoginAllowedByIntegrity({ verdict: "trusted", reason: "", limitation: "" }), true);
 assert.equal(
-  isLoginAllowedByIntegrity({ verdict: "inconclusive", reason: "", limitation: "" }),
+  isLoginAllowedByIntegrity({ verdict: "trusted", reason: "", limitation: "", dormant: false }),
+  true
+);
+assert.equal(
+  isLoginAllowedByIntegrity({
+    verdict: "inconclusive",
+    reason: "",
+    limitation: "",
+    dormant: false,
+  }),
   false
+);
+// Dormant / unconfigured probes must not block login (SDK not wired).
+assert.equal(
+  isLoginAllowedByIntegrity({
+    verdict: "unavailable",
+    reason: "",
+    limitation: "",
+    dormant: true,
+  }),
+  true
 );
 
 console.log("authPolicyMatrix.test.ts: ok");

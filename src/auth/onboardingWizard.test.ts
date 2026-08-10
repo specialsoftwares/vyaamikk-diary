@@ -13,8 +13,7 @@ import {
   wizardStepIndex,
   type OnboardingWizardStep,
 } from "./onboardingWizard";
-import type { UserProfile } from "@/domain/types";
-import { DEFAULT_PDF_BRANDING } from "@/domain/types";
+import { DEFAULT_PDF_BRANDING, type UserProfile } from "@/domain/types";
 
 function baseUser(over: Partial<UserProfile> = {}): UserProfile {
   return {

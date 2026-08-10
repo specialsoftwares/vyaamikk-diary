@@ -61,9 +61,18 @@ export function applyPinLookupResult(input: {
     return { status: "invalid_format" };
   }
   if (!input.resolution.success) {
-    return input.resolution.source === "manual"
-      ? { status: "unavailable", requestId: input.requestId, pinCode: input.pinCode }
-      : { status: "not_found", requestId: input.requestId, pinCode: input.pinCode };
+    if (input.resolution.errorClass === "not_found") {
+      return { status: "not_found", requestId: input.requestId, pinCode: input.pinCode };
+    }
+    if (
+      input.resolution.errorClass === "timeout" ||
+      input.resolution.errorClass === "transport" ||
+      input.resolution.errorClass === "parse" ||
+      input.resolution.source === "manual"
+    ) {
+      return { status: "unavailable", requestId: input.requestId, pinCode: input.pinCode };
+    }
+    return { status: "not_found", requestId: input.requestId, pinCode: input.pinCode };
   }
   const district = input.resolution.district?.trim() ?? "";
   const state = input.resolution.state?.trim() ?? "";

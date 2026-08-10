@@ -81,6 +81,7 @@ export function UeidReleaseOnboardingScreen({ user }: UeidReleaseOnboardingScree
             activeText={tokens.ctaActiveText}
             mutedBg={tokens.ctaMutedBg}
             mutedText={tokens.ctaMutedText}
+            mutedBorder={tokens.ctaMutedBorder}
           />
           <LocaleUiText style={[styles.continueRequired, { color: tokens.muted }]}>
             {t("onboarding.ueid.continueRequired")}

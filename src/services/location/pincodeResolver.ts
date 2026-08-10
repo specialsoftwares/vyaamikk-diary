@@ -1,17 +1,21 @@
 import type { PincodeResolution } from "@/domain/indianPostal";
-import { getSharedIndiaPincodeOfflineLookup } from "@/services/location/pincodeOfflineLookup";
+import {
+  getSharedIndiaPincodeOfflineLookup,
+  isIndiaPincodeOfflineLookupReady,
+  scheduleDeferredIndiaPincodeWarm,
+} from "@/services/location/pincodeOfflineLookup";
+import { shouldQueryOfflinePincodeOnInteractivePath } from "@/services/location/pincodeWarmPolicy";
 import { env } from "@/config/env";
 import { pincodeCacheRepository } from "@/services/location/pincodeCacheRepository";
 export {
   scheduleDeferredIndiaPincodeWarm,
   warmIndiaPincodeOfflineLookup,
 } from "@/services/location/pincodeOfflineLookup";
+import { lookupPostalPincodeApi } from "@/services/location/postalPincodeApi";
 import { createLogger } from "@/utils/logger";
 
 const log = createLogger("pincode");
 
-const DEFAULT_API = "https://api.postalpincode.in/pincode";
-const API_TIMEOUT_MS = 4_000;
 const OFFLINE_LOOKUP_TIMEOUT_MS = 2_500;
 
 const inflight = new Map<string, Promise<PincodeResolution>>();
@@ -107,6 +111,12 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 }
 
 async function fetchFromOfflineDb(pinCode: string): Promise<PincodeResolution | null> {
+  // Critical: do not cold-start india-pincode here. First decompress/parse blocks
+  // the JS thread long enough that Camera/Gallery taps appear dead and
+  // "Looking up PIN…" freezes until the event loop can run again.
+  if (!shouldQueryOfflinePincodeOnInteractivePath(isIndiaPincodeOfflineLookupReady())) {
+    return null;
+  }
   try {
     const lookup = await withTimeout(getSharedIndiaPincodeOfflineLookup(), OFFLINE_LOOKUP_TIMEOUT_MS);
     const response = lookup.getByPincode(pinCode, { limit: 50 });
@@ -132,71 +142,11 @@ async function fetchFromOfflineDb(pinCode: string): Promise<PincodeResolution | 
   }
 }
 
-interface PostOfficeRow {
-  Name?: string;
-  District?: string;
-  State?: string;
-  Country?: string;
-  Pincode?: string;
-}
-
-interface PostalPincodeApiPayload {
-  Status?: string;
-  PostOffice?: PostOfficeRow[];
-}
-
-function unwrapPostalPincodePayload(json: unknown): PostalPincodeApiPayload | null {
-  if (Array.isArray(json)) {
-    const first = json[0];
-    return first && typeof first === "object" ? (first as PostalPincodeApiPayload) : null;
-  }
-  if (json && typeof json === "object") {
-    return json as PostalPincodeApiPayload;
-  }
-  return null;
-}
-
-async function fetchFromApi(pinCode: string): Promise<PincodeResolution | null> {
-  const base = env.expoPublicPincodeApiUrl?.trim() || DEFAULT_API;
-  const url = `${base.replace(/\/$/, "")}/${pinCode}`;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, {
-      method: "GET",
-      signal: controller.signal,
-      headers: { Accept: "application/json" },
-    });
-    if (!res.ok) return null;
-    const json = await res.json();
-    const payload = unwrapPostalPincodePayload(json);
-    if (
-      payload?.Status !== "Success" ||
-      !Array.isArray(payload.PostOffice) ||
-      !payload.PostOffice.length
-    ) {
-      return null;
-    }
-    const localities = [
-      ...new Set(
-        payload.PostOffice.map((o) => o.Name?.trim()).filter((n): n is string => Boolean(n))
-      ),
-    ];
-    const first = payload.PostOffice[0];
-    return buildResolution(
-      pinCode,
-      "api",
-      localities,
-      first.District?.trim() || null,
-      first.State?.trim() || null,
-      first.Country?.trim() || "India"
-    );
-  } catch {
-    if (!env.isProduction) log.debug("api lookup failed or timed out");
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
+async function fetchFromApi(pinCode: string): Promise<PincodeResolution> {
+  const lookup = await lookupPostalPincodeApi(pinCode, {
+    baseUrl: env.expoPublicPincodeApiUrl?.trim() || undefined,
+  });
+  return lookup.resolution;
 }
 
 async function resolveUncached(pinCode: string): Promise<PincodeResolution> {
@@ -223,9 +173,11 @@ async function resolveUncached(pinCode: string): Promise<PincodeResolution> {
   }
 
   const api = await fetchFromApi(pinCode);
-  if (api?.success) {
+  if (api.success) {
     await pincodeCacheRepository.set(api);
     sessionCache.set(pinCode, api);
+    // Warm offline DB after a successful interactive API hit — never before.
+    scheduleDeferredIndiaPincodeWarm(2_000);
     logLookupDiagnostic({
       pin: pinCode,
       cacheHit: false,
@@ -236,17 +188,24 @@ async function resolveUncached(pinCode: string): Promise<PincodeResolution> {
     return api;
   }
 
-  const manual = emptyResolution(pinCode, "manual");
-  sessionCache.set(pinCode, manual);
+  // Still schedule a deferred warm so later lookups can go offline without
+  // blocking this failed interactive attempt.
+  scheduleDeferredIndiaPincodeWarm(2_000);
+
+  // Cache durable not-found; never cache transport/timeout (retry next tap).
+  if (api.errorClass === "not_found") {
+    sessionCache.set(pinCode, api);
+  }
+
   logLookupDiagnostic({
     pin: pinCode,
     cacheHit: false,
-    source: "manual",
+    source: "api",
     durationMs: Date.now() - started,
     success: false,
-    timedOut,
+    timedOut: timedOut || api.errorClass === "timeout",
   });
-  return manual;
+  return api;
 }
 
 /**

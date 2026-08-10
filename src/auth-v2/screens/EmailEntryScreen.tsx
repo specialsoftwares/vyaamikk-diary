@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from "react";
-import { StyleSheet, Text, TextInput, View } from "react-native";
+import { StyleSheet, TextInput } from "react-native";
 
 import { AuthShell } from "@/auth-v2/components/AuthShell";
 import { AuthV2PrimaryButton } from "@/auth-v2/components/AuthV2PrimaryButton";
@@ -8,6 +8,7 @@ import { useT } from "@/i18n";
 import { spacing, typography, useTheme } from "@/theme";
 import { useIsOnline } from "@/state/network";
 import { Banner, LocaleUiText } from "@/components/ui";
+import { OnboardingInlineMessage } from "@/auth-v2/components/OnboardingInlineMessage";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -19,6 +20,10 @@ interface EmailEntryScreenProps {
   loading?: boolean;
   error?: string | null;
   hint?: string | null;
+  /** Optional chrome above the title (e.g. wizard progress). */
+  headerTop?: React.ReactNode;
+  /** Optional controls below the primary footer actions (normal document flow). */
+  belowFooter?: React.ReactNode;
 }
 
 export function EmailEntryScreen({
@@ -29,6 +34,8 @@ export function EmailEntryScreen({
   loading = false,
   error = null,
   hint = null,
+  headerTop = null,
+  belowFooter = null,
 }: EmailEntryScreenProps) {
   const t = useT();
   const online = useIsOnline();
@@ -48,11 +55,13 @@ export function EmailEntryScreen({
       subtitle={t("authV2.email.subtitle")}
       onBack={onBack}
       showBack={Boolean(onBack)}
+      headerTop={headerTop}
+      footerPlacement="actionZone"
       footer={
         <>
-          {hint ? <Banner tone="info" message={hint} /> : null}
+          {hint ? <OnboardingInlineMessage tone="muted" message={hint} /> : null}
           {!online ? <Banner tone="warning" message={t("common.offlineHint")} /> : null}
-          {error ? <Banner tone="danger" message={error} /> : null}
+          {error ? <OnboardingInlineMessage tone="danger" message={error} /> : null}
           <AuthV2PrimaryButton
             label={t("authV2.email.continue")}
             loading={loading}
@@ -64,10 +73,12 @@ export function EmailEntryScreen({
             activeText={tokens.ctaActiveText}
             mutedBg={tokens.ctaMutedBg}
             mutedText={tokens.ctaMutedText}
+            mutedBorder={tokens.ctaMutedBorder}
           />
           <LocaleUiText style={[styles.footnote, { color: tokens.muted }]}>
             {t("authV2.email.footnote")}
           </LocaleUiText>
+          {belowFooter}
         </>
       }
     >

@@ -157,6 +157,7 @@ export function ProfileReviewScreen() {
             activeText={tokens.ctaActiveText}
             mutedBg={tokens.ctaMutedBg}
             mutedText={tokens.ctaMutedText}
+            mutedBorder={tokens.ctaMutedBorder}
           />
           <Text style={[styles.note, { color: tokens.muted }]}>
             Mobile {maskMobile(user.phoneE164)} stays linked to this account.

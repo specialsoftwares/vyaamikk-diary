@@ -56,9 +56,9 @@ export function userFacingMessage(e: unknown): string {
       case "invalid_phone":
         return "Please enter a valid 10-digit mobile number.";
       case "invalid_otp":
-        return "Incorrect OTP. Please try again.";
+        return e.message || "Incorrect OTP. Please try again.";
       case "otp_expired":
-        return "OTP expired. Please request a new code.";
+        return e.message || "OTP expired. Please request a new code.";
       case "otp_send_failed":
         return e.message || "Could not send the verification code. Try again.";
       case "auth_failed":
@@ -70,7 +70,7 @@ export function userFacingMessage(e: unknown): string {
       case "session_expired":
         return "Your session expired. Please log in again.";
       case "not_found":
-        return "We couldn't find that entry.";
+        return e.message || "We couldn't find that entry.";
       case "permission_denied":
         return e.message || "You don't have permission to perform this action.";
       case "account_pending_deletion":

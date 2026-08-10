@@ -1,14 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
+  AccessibilityInfo,
   ActivityIndicator,
   Alert,
   BackHandler,
   Keyboard,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -21,15 +20,52 @@ import {
   markAuthWrapperEmailPending,
   saveAuthWrapperChallenge,
 } from "@/auth-v2/authWrapperProgress";
-import { WizardProgress } from "@/auth-v2/components/WizardProgress";
+import {
+  phoneFallbackMayClaimSessionExpired,
+  resolveAuthFlowGateRenderBranch,
+} from "@/auth-v2/authFlowGateRenderDecision";
+import { VerificationSuccessAck } from "@/auth-v2/components/VerificationSuccessAck";
+import {
+  ONBOARDING_MIN_VERIFYING_REDUCED_MS,
+  ONBOARDING_MIN_VERIFYING_VISIBLE_MS,
+} from "@/auth-v2/theme/onboardingMotion";
 import { EmailEntryScreen } from "@/auth-v2/screens/EmailEntryScreen";
+import { EmailOtpScreen } from "@/auth-v2/screens/EmailOtpScreen";
 import { OtpVerificationScreen } from "@/auth-v2/screens/OtpVerificationScreen";
 import { PhoneEntryScreen } from "@/auth-v2/screens/PhoneEntryScreen";
+import { onboardingMark, onboardingMeasure } from "@/auth-v2/onboardingPerfProbe";
 import { sendOtpForWrapper } from "@/auth-v2/services/authWrapperService";
-import type { AuthV2PhoneDraft, AuthV2Step } from "@/auth-v2/types";
-import { DEFAULT_AUTH_V2_COUNTRY_CODE } from "@/auth-v2/types";
+import {
+  getNativeAuthUid,
+  isChallengeAutoVerified,
+  observePostSendAuthForChallenge,
+  subscribeNativeAuthState,
+} from "@/services/auth/nativePhoneAuth";
+import { phonesMatchE164 } from "@/services/auth/phoneChallengeAuthInvariant";
+import {
+  assertPhoneSendProvenance,
+  resolveFreshPhoneSendTarget,
+  resolveResendPhoneSendTarget,
+} from "@/services/auth/phoneSendProvenance";
+import {
+  DEFAULT_AUTH_V2_COUNTRY_CODE,
+  type AuthV2PhoneDraft,
+  type AuthV2Step,
+} from "@/auth-v2/types";
 import { toE164FromDraft } from "@/auth-v2/phoneValidation";
 import { AppError, userFacingMessage } from "@/domain/errors";
+import {
+  authFlowDiagnosticCode,
+  authFlowErrorTitle,
+  canRetryAccountSetupWithoutSms,
+  resolveAuthFlowPhase,
+} from "@/services/auth/authFlowErrorPresentation";
+import {
+  formatPhoneAuthCopyDiagnostics,
+  formatPhoneAuthDisplayMessage,
+  phoneAuthDiagnosticId,
+} from "@/services/auth/nativePhoneAuthErrors";
+import * as Clipboard from "expo-clipboard";
 import { useAuth } from "@/state/auth";
 import { useT } from "@/i18n";
 import {
@@ -54,7 +90,6 @@ import {
   dispatchWizardNav,
   getWizardSnapshot,
   isReviewIntentActive,
-  shouldSuppressForwardGuard,
 } from "@/auth/wizardNavigationController";
 import {
   beginEmailOtpSend,
@@ -75,12 +110,9 @@ import {
   useAuthoritativeCountdown,
   useAuthoritativeResendCountdown,
 } from "@/hooks/useAuthoritativeResendCountdown";
-import { formatOtpCountdownMmSs } from "@/utils/otpCountdownFormat";
-import { Banner, Button, LocaleUiText } from "@/components/ui";
 import { spacing, typography } from "@/theme";
 import type { OtpChallenge } from "@/services/auth/types";
-
-const EMAIL_CODE_LENGTH = 6;
+import { EMAIL_OTP_LENGTH } from "@/services/auth/emailOtpConstants";
 
 function localDigitsFromE164(e164: string): string {
   const digits = e164.replace(/\D/g, "");
@@ -140,6 +172,8 @@ export function AuthFlowGate() {
 
   const [hydrated, setHydrated] = useState(false);
   const [step, setStep] = useState<AuthV2Step | "email_verify">("phone");
+  /** True only after THIS registration challenge completed phone auth + identity. */
+  const [phoneChallengeProven, setPhoneChallengeProven] = useState(false);
   const [phoneDraft, setPhoneDraft] = useState<AuthV2PhoneDraft>({
     countryCode: DEFAULT_AUTH_V2_COUNTRY_CODE,
     localNumber: "",
@@ -157,10 +191,19 @@ export function AuthFlowGate() {
   const [mobileResendAvailableAt, setMobileResendAvailableAt] = useState<number | null>(null);
   const [mobileLockUntil, setMobileLockUntil] = useState<number | null>(null);
   const [mobileOtpDigits, setMobileOtpDigits] = useState("");
-  const emailCodeInputRef = useRef<TextInput>(null);
+  const [verificationVisual, setVerificationVisual] = useState<null | {
+    kind: "mobile" | "email";
+    phase: "verifying" | "success";
+  }>(null);
+  const [reduceMotion, setReduceMotion] = useState(false);
+  const afterAckRef = useRef<(() => void) | null>(null);
+  const ackConsumedRef = useRef(false);
+  const verifyStartedAtRef = useRef(0);
   const emailVerifyInFlightRef = useRef(false);
   const emailResendInFlightRef = useRef(false);
   const emailSendInFlightRef = useRef(false);
+  const mobileVerifyInFlightRef = useRef(false);
+  const autoVerifyHandledRef = useRef<string | null>(null);
   const reviewingRef = useRef(false);
   const [emailSendMachine, setEmailSendMachine] = useState<EmailOtpSendMachine>(() =>
     createEmailOtpSendMachine()
@@ -168,8 +211,118 @@ export function AuthFlowGate() {
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorDiagnostic, setErrorDiagnostic] = useState<string | null>(null);
+  const [errorTitle, setErrorTitle] = useState<string | null>(null);
+  const [phoneAuthError, setPhoneAuthError] = useState<AppError | null>(null);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [privacyAccepted, setPrivacyAccepted] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void AccessibilityInfo.isReduceMotionEnabled().then((v) => {
+      if (!cancelled) setReduceMotion(v);
+    });
+    const sub = AccessibilityInfo.addEventListener("reduceMotionChanged", setReduceMotion);
+    return () => {
+      cancelled = true;
+      sub.remove();
+    };
+  }, []);
+
+  const finishVerificationAck = useCallback(() => {
+    if (ackConsumedRef.current) return;
+    ackConsumedRef.current = true;
+    const next = afterAckRef.current;
+    afterAckRef.current = null;
+    setVerificationVisual(null);
+    next?.();
+  }, []);
+
+  const beginVerificationProcess = useCallback((kind: "mobile" | "email") => {
+    verifyStartedAtRef.current = Date.now();
+    ackConsumedRef.current = false;
+    setVerificationVisual({ kind, phase: "verifying" });
+  }, []);
+
+  const abortVerificationProcess = useCallback(() => {
+    afterAckRef.current = null;
+    setVerificationVisual(null);
+  }, []);
+
+  const resolveVerificationSuccess = useCallback(
+    (kind: "mobile" | "email", then: () => void) => {
+      ackConsumedRef.current = false;
+      afterAckRef.current = then;
+      const minVisible = reduceMotion
+        ? ONBOARDING_MIN_VERIFYING_REDUCED_MS
+        : ONBOARDING_MIN_VERIFYING_VISIBLE_MS;
+      const wait = Math.max(0, minVisible - (Date.now() - verifyStartedAtRef.current));
+      const reveal = () => {
+        onboardingMark(kind === "mobile" ? "mobileVerifiedUI" : "emailVerifiedUI");
+        setVerificationVisual({ kind, phase: "success" });
+      };
+      if (wait === 0) reveal();
+      else setTimeout(reveal, wait);
+    },
+    [reduceMotion]
+  );
+
+  const wrapWithAck = (node: React.ReactElement) => (
+    <View style={{ flex: 1 }}>
+      {node}
+      {verificationVisual ? (
+        <VerificationSuccessAck
+          kind={verificationVisual.kind}
+          phase={verificationVisual.phase}
+          reducedMotion={reduceMotion}
+          onDone={finishVerificationAck}
+        />
+      ) : null}
+    </View>
+  );
+
+  const clearFlowError = useCallback(() => {
+    setError(null);
+    setErrorDiagnostic(null);
+    setErrorTitle(null);
+    setPhoneAuthError(null);
+  }, []);
+
+  const applyFlowError = useCallback((e: unknown) => {
+    const appErr = e instanceof AppError ? e : null;
+    const phase = resolveAuthFlowPhase(e);
+    const isNativePhoneAuthFailure =
+      Boolean(appErr?.details?.firebaseAuthCode) ||
+      Boolean(appErr?.details?.redactedNativeMessage) ||
+      appErr?.code === "otp_send_failed" ||
+      appErr?.code === "otp_expired" ||
+      appErr?.code === "invalid_otp" ||
+      appErr?.code === "invalid_phone" ||
+      appErr?.code === "too_many_attempts" ||
+      appErr?.code === "auth_not_configured";
+    // Prefer AppError.message for post-auth; keep sticky Firebase diagnostics for send/verify.
+    const body =
+      phase === "post_auth"
+        ? userFacingMessage(e)
+        : isNativePhoneAuthFailure
+          ? formatPhoneAuthDisplayMessage(e)
+          : userFacingMessage(e);
+    setErrorTitle(authFlowErrorTitle(e));
+    setError(body);
+    setErrorDiagnostic(
+      authFlowDiagnosticCode(e) || (appErr ? phoneAuthDiagnosticId(appErr) : null)
+    );
+    setPhoneAuthError(appErr);
+  }, []);
+
+  const copyPhoneAuthDiagnostics = useCallback(async () => {
+    if (!phoneAuthError) return;
+    try {
+      await Clipboard.setStringAsync(formatPhoneAuthCopyDiagnostics(phoneAuthError));
+    } catch {
+      // Best-effort clipboard; ignore failures.
+    }
+  }, [phoneAuthError]);
 
   const { remainingSeconds: emailResendRemaining, canResend: emailCanResend } =
     useAuthoritativeResendCountdown(step === "email_verify" ? emailResendAvailableAt : null);
@@ -178,8 +331,12 @@ export function AuthFlowGate() {
   );
 
   const goToBusinessIdentity = useCallback(() => {
-    // Re-check sync review — never forward over user-directed Back.
-    if (isReviewIntentActive() || shouldSuppressForwardGuard("businessIdentity")) {
+    // Only user-directed Back/review may suppress this intentional continue.
+    // Do NOT consult shouldSuppressForwardGuard here: that mount/boot helper
+    // returns true for continueForward when memory still says emailOtp/emailEntry,
+    // which would permanently no-op after a successful email verify (vc10 stuck
+    // "Email verified" chip on email_verify with Verify disabled).
+    if (isReviewIntentActive()) {
       return;
     }
     if (user) {
@@ -213,11 +370,12 @@ export function AuthFlowGate() {
               await signOut();
               setStep("phone");
               setChallenge(null);
+              setPhoneChallengeProven(false);
               setPhoneE164(null);
               setEmailDraft("");
               setEmailVerificationId(null);
               setEmailCode("");
-              setError(null);
+              clearFlowError();
               reviewingRef.current = false;
             })();
           },
@@ -280,6 +438,13 @@ export function AuthFlowGate() {
       };
 
       if (status === "signed_in" && user) {
+        // OTP post-auth continuation owns navigation — do not race to Email
+        // while verify/consent/bridge is still in flight.
+        if (mobileVerifyInFlightRef.current) {
+          if (!cancelled) setHydrated(true);
+          return;
+        }
+
         const onboardingIncomplete = isPreDashboardOnboardingIncomplete(user, {
           locationConsentShown: false,
         });
@@ -331,6 +496,8 @@ export function AuthFlowGate() {
               localNumber: localDigitsFromE164(user.phoneE164),
             });
           }
+          // Returning mid-onboarding: phone was already proven for this identity.
+          setPhoneChallengeProven(Boolean(user.phoneE164));
           setStep("email");
           markContinuingWizardStep("emailEntry", user.uid, {
             phoneE164: user.phoneE164,
@@ -340,12 +507,10 @@ export function AuthFlowGate() {
         }
 
         // Email verified, profile still incomplete → profile route only if not reviewing.
+        // Use review intent only (not shouldSuppressForwardGuard): a persisted
+        // continueForward@emailOtp session must still advance after verify/restart.
         if (onboardingIncomplete) {
-          if (
-            isReviewIntentActive() ||
-            shouldSuppressForwardGuard("businessIdentity") ||
-            reviewingRef.current
-          ) {
+          if (isReviewIntentActive() || reviewingRef.current) {
             if (!cancelled) setHydrated(true);
             return;
           }
@@ -435,7 +600,7 @@ export function AuthFlowGate() {
       setTermsAccepted(true);
       setPrivacyAccepted(true);
     }
-    setError(null);
+    clearFlowError();
     setStep("phone");
   };
 
@@ -453,6 +618,7 @@ export function AuthFlowGate() {
     if (status === "signed_in") {
       await signOut();
     }
+    setPhoneChallengeProven(false);
     setEmailDraft("");
     setEmailVerificationId(null);
     setEmailCode("");
@@ -464,7 +630,7 @@ export function AuthFlowGate() {
   };
 
   const handleContinueToConfirm = () => {
-    setError(null);
+    clearFlowError();
     try {
       const e164 = toE164FromDraft(phoneDraft.countryCode, phoneDraft.localNumber);
       // Same verified mobile while reviewing — skip OTP and return to email.
@@ -496,7 +662,7 @@ export function AuthFlowGate() {
                     await beginPhoneChangeSession(e164);
                     setStep("confirm");
                   } catch (err) {
-                    setError(userFacingMessage(err));
+                    applyFlowError(err);
                   } finally {
                     setLoading(false);
                   }
@@ -511,19 +677,53 @@ export function AuthFlowGate() {
       setStep("confirm");
       void markContinuingWizardStep("phoneConfirm", user?.uid ?? null, { phoneE164: e164 });
     } catch (e) {
-      setError(userFacingMessage(e));
+      applyFlowError(e);
     }
   };
 
   const handleConfirmSend = async () => {
-    if (!phoneE164 || !termsAccepted || !privacyAccepted) return;
-    setError(null);
+    if (!termsAccepted || !privacyAccepted) return;
+    // Keep any previous OTP-send error visible until success or a new failure replaces it.
     setLoading(true);
+    onboardingMark("sendStarted");
     try {
-      await savePendingConsent(phoneE164, "auth_v2_phone_confirm");
-      const next = await sendOtpForWrapper(phoneE164);
+      // Display + send must share one canonical E.164 from the confirmed draft.
+      // Profile / prior challenge / stale native session must never select the target.
+      const confirmedFromDraft = toE164FromDraft(
+        phoneDraft.countryCode,
+        phoneDraft.localNumber
+      );
+      const provenance = resolveFreshPhoneSendTarget({
+        confirmedPhoneE164: confirmedFromDraft,
+        statePhoneE164: phoneE164,
+        profilePhoneE164: user?.phoneE164 ?? null,
+        priorChallengePhoneE164: challenge?.phoneE164 ?? null,
+      });
+      assertPhoneSendProvenance(provenance);
+      const sendPhone = provenance.firebaseSendPhoneE164;
+      setPhoneE164(sendPhone);
+
+      await savePendingConsent(sendPhone, "auth_v2_phone_confirm");
+      const next = await sendOtpForWrapper(sendPhone);
+      if (!phonesMatchE164(next.phoneE164, sendPhone)) {
+        throw new AppError(
+          "auth_failed",
+          "Could not send the verification code because the confirmed number did not match the send target. Go back and confirm your mobile number again.",
+          undefined,
+          {
+            authPhase: "send",
+            failureDomain: "auth",
+            diagnosticCode: "PHONE_SEND_TARGET_MISMATCH",
+            confirmedPhoneSuffix: sendPhone.replace(/\D/g, "").slice(-4),
+            challengePhoneSuffix: String(next.phoneE164).replace(/\D/g, "").slice(-4),
+          }
+        );
+      }
+      clearFlowError();
       setChallenge({ ...next, devCodeHint: null });
       setDevHint(null);
+      setPhoneChallengeProven(false);
+      autoVerifyHandledRef.current = null;
       setMobileExpiresAt(next.expiresAt ?? Date.now() + 10 * 60_000);
       setMobileResendAvailableAt(next.resendAvailableAt ?? Date.now() + 30_000);
       setMobileLockUntil(null);
@@ -533,6 +733,8 @@ export function AuthFlowGate() {
         verificationId: next.verificationId,
         devCodeHint: null,
       });
+      onboardingMark("challengeReady");
+      onboardingMeasure("sendStarted", "challengeReady", "sendStarted → challengeReady");
       setStep("otp");
       markContinuingWizardStep("phoneOtp", user?.uid ?? null, {
         phoneE164: next.phoneE164,
@@ -548,51 +750,102 @@ export function AuthFlowGate() {
         resendAvailableAt: next.resendAvailableAt ?? Date.now() + 30_000,
       });
     } catch (e) {
-      setError(userFacingMessage(e));
+      applyFlowError(e);
     } finally {
       setLoading(false);
     }
   };
 
+  const continueAfterPhoneProfile = useCallback(
+    async (profile: import("@/domain/types").UserProfile) => {
+      // Authoritative profile from confirm — do not wait for React session commit.
+      // CRITICAL: do NOT clear `challenge` before leaving step "otp". Clearing first
+      // leaves step==="otp" && !challenge across await gaps → false sessionExpired
+      // fallthrough (Stage-8 clean-room / first_time_create).
+      await applyServerProfile(profile);
+      const consentPatch = await consentPatchForProfile(profile);
+      let nextProfile = profile;
+      if (consentPatch) {
+        nextProfile = await updateProfile(consentPatch, { user: profile });
+      }
+
+      setPhoneChallengeProven(true);
+
+      if (hasAuthoritativeVerifiedEmail(nextProfile) && nextProfile.profileCompletedAt) {
+        await markAuthWrapperEmailComplete(nextProfile.uid);
+        resolveVerificationSuccess("mobile", () => {
+          void (async () => {
+            clearWizardNavigationSession();
+            await clearAuthWrapperChallenge();
+            setChallenge(null);
+            handoffToApp();
+          })();
+        });
+        return;
+      }
+
+      if (hasAuthoritativeVerifiedEmail(nextProfile)) {
+        await markAuthWrapperEmailComplete(nextProfile.uid);
+        resolveVerificationSuccess("mobile", () => {
+          void (async () => {
+            goToBusinessIdentity();
+            await clearAuthWrapperChallenge();
+            setChallenge(null);
+          })();
+        });
+        return;
+      }
+
+      await markAuthWrapperEmailPending(nextProfile.uid);
+      setEmailDraft(nextProfile.businessEmail ?? "");
+      markContinuingWizardStep("emailEntry", nextProfile.uid, {
+        phoneE164: nextProfile.phoneE164,
+      });
+      resolveVerificationSuccess("mobile", () => {
+        void (async () => {
+          onboardingMeasure("mobileVerifiedUI", "emailScreenVisible", "mobileVerifiedUI → emailScreenVisible");
+          setStep("email");
+          await clearAuthWrapperChallenge();
+          setChallenge(null);
+          const { clearMobileOtpDigitSnapshot } = await import(
+            "@/services/auth/mobileOtpSecureDigits"
+          );
+          await clearMobileOtpDigitSnapshot();
+        })();
+      });
+    },
+    [applyServerProfile, goToBusinessIdentity, handoffToApp, resolveVerificationSuccess, updateProfile]
+  );
+
   const handleVerifyOtp = async (code: string) => {
     if (!challenge) return;
-    setError(null);
+    if (mobileVerifyInFlightRef.current) return;
+    mobileVerifyInFlightRef.current = true;
+    clearFlowError();
+    beginVerificationProcess("mobile");
     setLoading(true);
     try {
       const profile = await confirmOtp(challenge, code);
-      await clearAuthWrapperChallenge();
-      setChallenge(null);
-
-      const consentPatch = await consentPatchForProfile(profile);
-      if (consentPatch) {
-        await updateProfile(consentPatch);
+      if (
+        phoneE164 &&
+        profile.phoneE164 &&
+        !phonesMatchE164(profile.phoneE164, phoneE164)
+      ) {
+        throw new AppError(
+          "auth_failed",
+          "This device signed in with a different mobile number than the one being verified. Sign out and start again.",
+          undefined,
+          {
+            authPhase: "post_auth",
+            diagnosticCode: "AUTH_PHONE_CHALLENGE_MISMATCH",
+            failureDomain: "auth",
+          }
+        );
       }
-
-      if (hasAuthoritativeVerifiedEmail(profile) && profile.profileCompletedAt) {
-        await markAuthWrapperEmailComplete(profile.uid);
-        clearWizardNavigationSession();
-        handoffToApp();
-        return;
-      }
-
-      if (hasAuthoritativeVerifiedEmail(profile)) {
-        await markAuthWrapperEmailComplete(profile.uid);
-        goToBusinessIdentity();
-        return;
-      }
-
-      await markAuthWrapperEmailPending(profile.uid);
-      setEmailDraft(profile.businessEmail ?? "");
-      setStep("email");
-      markContinuingWizardStep("emailEntry", profile.uid, {
-        phoneE164: profile.phoneE164,
-      });
-      const { clearMobileOtpDigitSnapshot } = await import(
-        "@/services/auth/mobileOtpSecureDigits"
-      );
-      await clearMobileOtpDigitSnapshot();
+      await continueAfterPhoneProfile(profile);
     } catch (e) {
       if (e instanceof AppError && e.code === "account_pending_deletion") {
+        abortVerificationProcess();
         router.replace({
           pathname: "/(auth)/account-pending-deletion",
           params: {
@@ -607,21 +860,111 @@ export function AuthFlowGate() {
         const until = e.details?.lockUntil;
         if (typeof until === "number") setMobileLockUntil(until);
       }
-      if (e instanceof AppError && (e.code === "invalid_otp" || e.code === "otp_expired")) {
+      if (e instanceof AppError && e.code === "otp_expired") {
         setMobileOtpDigits("");
       }
-      setError(userFacingMessage(e));
+      abortVerificationProcess();
+      applyFlowError(e);
     } finally {
       setLoading(false);
+      mobileVerifyInFlightRef.current = false;
     }
   };
 
-  const handleResend = async () => {
+  /** Post-auth identity retry — reuses Firebase session; does not resend SMS. */
+  const handleRetryAccountSetup = async () => {
     if (!phoneE164) return;
-    setError(null);
+    if (mobileVerifyInFlightRef.current) return;
+    if (!getNativeAuthUid()) {
+      applyFlowError(
+        new AppError(
+          "auth_failed",
+          "Your phone sign-in is no longer active. Request a new verification code.",
+          undefined,
+          {
+            authPhase: "post_auth",
+            failureDomain: "auth",
+            diagnosticCode: "RETRY_REQUIRES_NEW_OTP",
+            firebaseUserPresent: false,
+          }
+        )
+      );
+      return;
+    }
+    mobileVerifyInFlightRef.current = true;
+    clearFlowError();
+    beginVerificationProcess("mobile");
+    setLoading(true);
+    try {
+      const { callResolveOrCreateUserByPhone } = await import("@/services/auth/identityCallable");
+      const { requireJsAuthSessionForFirestore } = await import("@/services/auth/jsAuthBridge");
+      const result = await callResolveOrCreateUserByPhone(phoneE164);
+      // Same readiness barrier as confirmOtp — never continue on a soft bridge miss.
+      await requireJsAuthSessionForFirestore("retry_account_setup");
+      await applyServerProfile(result.profile);
+      await continueAfterPhoneProfile(result.profile);
+    } catch (e) {
+      abortVerificationProcess();
+      applyFlowError(e);
+    } finally {
+      setLoading(false);
+      mobileVerifyInFlightRef.current = false;
+    }
+  };
+
+  // Challenge-scoped post-send instant verification only — never complete on
+  // pre-existing/stale currentUser at OTP mount.
+  useEffect(() => {
+    if (step !== "otp" || !challenge) return;
+    const attemptKey = challenge.verificationId;
+    const tryInstantContinue = () => {
+      if (autoVerifyHandledRef.current === attemptKey) return;
+      if (mobileVerifyInFlightRef.current) return;
+      const marker = observePostSendAuthForChallenge(challenge);
+      if (!marker && !isChallengeAutoVerified(challenge)) return;
+      autoVerifyHandledRef.current = attemptKey;
+      void handleVerifyOtp("");
+    };
+    // If instant verification completed during send, marker may already exist.
+    tryInstantContinue();
+    const unsub = subscribeNativeAuthState(() => {
+      tryInstantContinue();
+    });
+    return () => {
+      unsub();
+    };
+    // handleVerifyOtp closes over challenge; rebind when challenge identity changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, challenge?.verificationId]);
+
+  const handleResend = async () => {
+    if (!challenge?.phoneE164) return;
+    // Keep prior failure visible until this resend succeeds or a new failure replaces it.
     setResending(true);
     try {
-      const next = await startOtp(phoneE164);
+      // Resend MUST target the active challenge phone — never profile / stale state.
+      const provenance = resolveResendPhoneSendTarget({
+        activeChallengePhoneE164: challenge.phoneE164,
+        statePhoneE164: phoneE164,
+      });
+      assertPhoneSendProvenance(provenance);
+      const sendPhone = provenance.firebaseSendPhoneE164;
+      setPhoneE164(sendPhone);
+
+      const next = await startOtp(sendPhone);
+      if (!phonesMatchE164(next.phoneE164, sendPhone)) {
+        throw new AppError(
+          "auth_failed",
+          "Could not resend the verification code for this challenge. Request a new code from the start.",
+          undefined,
+          {
+            authPhase: "send",
+            failureDomain: "auth",
+            diagnosticCode: "PHONE_SEND_TARGET_MISMATCH",
+          }
+        );
+      }
+      clearFlowError();
       setChallenge({ ...next, devCodeHint: null });
       setDevHint(null);
       setMobileOtpDigits("");
@@ -646,10 +989,10 @@ export function AuthFlowGate() {
     } catch (e) {
       if (e instanceof AppError && e.details?.resendAvailableAt != null) {
         setMobileResendAvailableAt(Number(e.details.resendAvailableAt));
-        setError(null);
+        clearFlowError();
         return;
       }
-      setError(userFacingMessage(e));
+      applyFlowError(e);
     } finally {
       setResending(false);
     }
@@ -659,7 +1002,7 @@ export function AuthFlowGate() {
     const trimmed = emailDraft.trim().toLowerCase();
     if (!user) return;
     if (emailSendInFlightRef.current) return;
-    setError(null);
+    clearFlowError();
     setEmailHint(null);
 
     // Same already-verified email — continue to profile without a new OTP.
@@ -684,21 +1027,11 @@ export function AuthFlowGate() {
     markContinuingWizardStep("emailOtp", user.uid, {
       phoneE164: user.phoneE164,
     });
-    setTimeout(() => emailCodeInputRef.current?.focus(), 280);
+    onboardingMark("emailScreenVisible");
 
     try {
-      if (
-        hasAuthoritativeVerifiedEmail(user) &&
-        !sameEmailAddress(trimmed, user.normalizedEmail ?? user.businessEmail ?? "")
-      ) {
-        await updateProfile({
-          businessEmail: trimmed,
-          normalizedEmail: trimmed,
-          emailStatus: "verification_pending",
-          emailVerifiedAt: null,
-        });
-      }
-
+      // Server startEmailVerification is authoritative for pending/cleared verified
+      // state — never client-write emailStatus / emailVerifiedAt in production.
       const { verificationId, resendAvailableAt, expiresAt } =
         await startBusinessEmailVerification(user.uid, trimmed);
 
@@ -736,28 +1069,33 @@ export function AuthFlowGate() {
         } else if (completed) {
           setEmailSendMachine(completed);
         }
-        setError(null);
+        clearFlowError();
         return;
       }
       if (e instanceof AppError && e.code === "email_already_linked") {
         const failed = failEmailOtpSend(started, generation, e.message);
         if (failed) setEmailSendMachine(failed);
-        setError(e.message);
+        applyFlowError(e);
         return;
       }
       if (e instanceof AppError && e.code === "email_pending_deletion") {
         const failed = failEmailOtpSend(started, generation, e.message);
         if (failed) setEmailSendMachine(failed);
-        setError(e.message);
+        applyFlowError(e);
         return;
       }
-      const failed = failEmailOtpSend(
-        started,
-        generation,
-        "OTP could not be sent"
-      );
+      const sendFailure =
+        e instanceof AppError
+          ? e.message
+          : "OTP could not be sent";
+      const failed = failEmailOtpSend(started, generation, sendFailure);
       if (failed) setEmailSendMachine(failed);
-      setError("OTP could not be sent");
+      if (e instanceof AppError) {
+        applyFlowError(e);
+      } else {
+        clearFlowError();
+        setError(sendFailure);
+      }
     } finally {
       emailSendInFlightRef.current = false;
     }
@@ -766,7 +1104,7 @@ export function AuthFlowGate() {
   const handleEmailRetrySend = async () => {
     if (!user) return;
     if (emailSendInFlightRef.current) return;
-    setError(null);
+    clearFlowError();
     emailSendInFlightRef.current = true;
     const started = beginEmailOtpSend(emailSendMachine);
     const generation = started.generation;
@@ -794,7 +1132,7 @@ export function AuthFlowGate() {
         "OTP could not be sent"
       );
       if (failed) setEmailSendMachine(failed);
-      setError(userFacingMessage(e));
+      applyFlowError(e);
     } finally {
       emailSendInFlightRef.current = false;
     }
@@ -804,7 +1142,7 @@ export function AuthFlowGate() {
     if (!user || !emailVerificationId || emailResendInFlightRef.current) return;
     if (emailResendAvailableAt != null && Date.now() < emailResendAvailableAt) return;
     emailResendInFlightRef.current = true;
-    setError(null);
+    clearFlowError();
     setResending(true);
     try {
       const next = await resendBusinessEmailVerification(
@@ -823,10 +1161,10 @@ export function AuthFlowGate() {
       if (e instanceof AppError && e.code === "email_otp_cooldown") {
         const until = authoritativeResendAvailableAt(e.details);
         if (until != null) setEmailResendAvailableAt(until);
-        setError(null);
+        clearFlowError();
         return;
       }
-      setError(userFacingMessage(e));
+      applyFlowError(e);
     } finally {
       emailResendInFlightRef.current = false;
       setResending(false);
@@ -834,14 +1172,16 @@ export function AuthFlowGate() {
   };
 
   const handleVerifyEmailCode = async () => {
-    if (!user || emailCode.length !== EMAIL_CODE_LENGTH) return;
+    if (!user || emailCode.length !== EMAIL_OTP_LENGTH) return;
     if (!canVerifyEmailOtp(emailSendMachine) || !emailVerificationId) {
+      clearFlowError();
       setError("Wait until the OTP is sent, then verify.");
       return;
     }
     if (emailVerifyInFlightRef.current) return;
     emailVerifyInFlightRef.current = true;
-    setError(null);
+    clearFlowError();
+    beginVerificationProcess("email");
     setLoading(true);
     try {
       const profile = await completeBusinessEmailBind(
@@ -855,11 +1195,17 @@ export function AuthFlowGate() {
       );
       await applyServerProfile(profile);
       await markAuthWrapperEmailComplete(profile.uid);
-      setEmailSendMachine(createEmailOtpSendMachine());
-      goToBusinessIdentity();
+      // Route after success settle — never before authoritative bind.
+      // Mount/boot suppress guard must still not wrap this continue (vc10).
+      resolveVerificationSuccess("email", () => {
+        goToBusinessIdentity();
+        setEmailCode("");
+        setEmailVerificationId(null);
+        setEmailSendMachine(createEmailOtpSendMachine());
+      });
     } catch (e) {
-      setError(userFacingMessage(e));
-      setEmailCode("");
+      abortVerificationProcess();
+      applyFlowError(e);
     } finally {
       emailVerifyInFlightRef.current = false;
       setLoading(false);
@@ -870,12 +1216,12 @@ export function AuthFlowGate() {
   const lastAutoSubmittedEmailCodeRef = useRef<string | null>(null);
   useEffect(() => {
     if (step !== "email_verify") return;
-    if (emailCode.length < EMAIL_CODE_LENGTH) {
+    if (emailCode.length < EMAIL_OTP_LENGTH) {
       lastAutoSubmittedEmailCodeRef.current = null;
       setEmailSendMachine((m) => setRetainedDigits(m, emailCode));
       return;
     }
-    if (emailCode.length !== EMAIL_CODE_LENGTH) return;
+    if (emailCode.length !== EMAIL_OTP_LENGTH) return;
     setEmailSendMachine((m) => setRetainedDigits(m, emailCode));
     if (!canVerifyEmailOtp(emailSendMachine)) return;
     if (lastAutoSubmittedEmailCodeRef.current === emailCode) return;
@@ -887,7 +1233,7 @@ export function AuthFlowGate() {
   const resetToPhone = async () => {
     setStep("phone");
     setChallenge(null);
-    setError(null);
+    clearFlowError();
     await clearAuthWrapperChallenge();
     // "Change number" from OTP before sign-in — stay local.
     if (status !== "signed_in") {
@@ -908,7 +1254,20 @@ export function AuthFlowGate() {
     });
   };
 
-  if (!hydrated || status === "loading") {
+  // Chip means THIS challenge (or completed registration identity) was proven —
+  // not merely that some AuthProvider session exists.
+  const emailVerifiedChip = hasAuthoritativeVerifiedEmail(user);
+
+  const renderBranch = resolveAuthFlowGateRenderBranch({
+    hydrated,
+    status,
+    step,
+    challengePresent: Boolean(challenge),
+    phoneE164Present: Boolean(phoneE164),
+    mobileVerifyInFlight: mobileVerifyInFlightRef.current || loading,
+  });
+
+  if (renderBranch === "boot" || renderBranch === "otp_transition") {
     return (
       <View style={styles.boot}>
         <ActivityIndicator size="large" color="#FFFFFF" />
@@ -916,11 +1275,8 @@ export function AuthFlowGate() {
     );
   }
 
-  const phoneVerifiedChip = status === "signed_in" && Boolean(user?.phoneE164);
-  const emailVerifiedChip = hasAuthoritativeVerifiedEmail(user);
-
-  if (step === "phone" || step === "confirm") {
-    return (
+  if (renderBranch === "phone_confirm" && (step === "phone" || step === "confirm")) {
+    return wrapWithAck(
       <PhoneEntryScreen
         draft={phoneDraft}
         onDraftChange={setPhoneDraft}
@@ -932,22 +1288,24 @@ export function AuthFlowGate() {
         onContinueToConfirm={handleContinueToConfirm}
         onConfirmSend={() => void handleConfirmSend()}
         onBackFromConfirm={() => {
-          setError(null);
+          // Keep OTP-send failure visible after Edit / Back so diagnostics stay on screen.
           setStep("phone");
         }}
         onBack={undefined}
         loading={loading}
         error={error}
+        errorTitle={errorTitle}
+        errorDiagnostic={errorDiagnostic}
+        onCopyErrorDiagnostics={() => void copyPhoneAuthDiagnostics()}
       />
     );
   }
 
-  if (step === "otp" && challenge && phoneE164) {
-    return (
+  if (renderBranch === "otp" && challenge && phoneE164) {
+    return wrapWithAck(
       <OtpVerificationScreen
-        phoneE164={phoneE164}
+        phoneE164={challenge.phoneE164}
         devCodeHint={null}
-        expiresAt={mobileExpiresAt ?? challenge.expiresAt ?? null}
         resendAvailableAt={mobileResendAvailableAt ?? challenge.resendAvailableAt ?? null}
         lockUntil={mobileLockUntil}
         initialDigits={mobileOtpDigits}
@@ -970,7 +1328,7 @@ export function AuthFlowGate() {
         onResend={() => void handleResend()}
         onChangeNumber={() => {
           void (async () => {
-            setError(null);
+            clearFlowError();
             try {
               const { localMockCancelMobileOtp } = await import(
                 "@/services/auth/localMockMobileOtp"
@@ -989,146 +1347,88 @@ export function AuthFlowGate() {
         loading={loading}
         resending={resending}
         error={error}
+        errorTitle={errorTitle}
+        errorDiagnostic={errorDiagnostic}
+        onCopyErrorDiagnostics={() => void copyPhoneAuthDiagnostics()}
+        onRetryAccountSetup={
+          canRetryAccountSetupWithoutSms(phoneAuthError)
+            ? () => void handleRetryAccountSetup()
+            : undefined
+        }
       />
     );
   }
 
-  if (step === "email_verify") {
-    const emailVerifyComplete = emailCode.length === EMAIL_CODE_LENGTH;
+  if (renderBranch === "email_verify") {
     const sending = emailSendMachine.state === "sending";
     const sendFailed = emailSendMachine.state === "failed";
     const canVerify = canVerifyEmailOtp(emailSendMachine) && Boolean(emailVerificationId);
-    return (
-      <View style={styles.boot}>
-        <View style={styles.emailVerifyCard}>
-          <WizardProgress
-            step="emailOtp"
-            verifiedMobile={phoneVerifiedChip}
-            verifiedEmail={emailVerifiedChip}
-          />
-          <LocaleUiText style={styles.emailVerifyTitle}>
-            {t("pendingDeletion.reactivateEmailTitle")}
-          </LocaleUiText>
-          <LocaleUiText style={styles.emailVerifyBody}>
-            {emailDraft.trim().toLowerCase()}
-          </LocaleUiText>
-          {sending ? (
-            <LocaleUiText style={styles.emailTiming}>Sending OTP…</LocaleUiText>
-          ) : null}
-          {sendFailed ? (
-            <Banner tone="danger" message="OTP could not be sent" />
-          ) : null}
-          {!sending && !sendFailed && emailValidityRemaining > 0 ? (
-            <LocaleUiText style={styles.emailTiming}>
-              {`Code valid for ${formatOtpCountdownMmSs(emailValidityRemaining)}`}
-            </LocaleUiText>
-          ) : null}
-          {!sending && !sendFailed && emailValidityRemaining <= 0 && emailExpiresAt ? (
-            <LocaleUiText style={styles.emailTiming}>Code expired — request a new one.</LocaleUiText>
-          ) : null}
-          {error && !sendFailed ? <Banner tone="danger" message={error} /> : null}
-          <TextInput
-            ref={emailCodeInputRef}
-            style={styles.emailCodeInput}
-            value={emailCode}
-            onChangeText={(text) =>
-              setEmailCode(text.replace(/\D/g, "").slice(0, EMAIL_CODE_LENGTH))
-            }
-            keyboardType="number-pad"
-            maxLength={EMAIL_CODE_LENGTH}
-            autoComplete="one-time-code"
-            textContentType="oneTimeCode"
-            placeholder={t("otp.codePlaceholder")}
-            editable={!loading}
-            returnKeyType="done"
-            onSubmitEditing={() => {
-              if (emailVerifyComplete && canVerify) void handleVerifyEmailCode();
-            }}
-          />
-          {sendFailed ? (
-            <Button
-              label="Retry sending"
-              onPress={() => void handleEmailRetrySend()}
-              loading={sending}
-              disabled={sending}
-            />
-          ) : (
-            <Button
-              label={t("pendingDeletion.verifyAndReactivate")}
-              onPress={() => void handleVerifyEmailCode()}
-              loading={loading}
-              disabled={!emailVerifyComplete || loading || !canVerify || sending}
-            />
-          )}
-          <View style={styles.emailResendRow}>
-            {emailResendRemaining > 0 ? (
-              <LocaleUiText style={styles.emailTiming}>
-                {`Resend OTP in ${formatOtpCountdownMmSs(emailResendRemaining)}`}
-              </LocaleUiText>
-            ) : (
-              <Pressable
-                onPress={() => void handleEmailResend()}
-                disabled={!emailCanResend || resending || loading || sending || !canVerify}
-                accessibilityRole="button"
-              >
-                <Text style={[styles.emailResendLink, (resending || loading) && { opacity: 0.5 }]}>
-                  {resending ? t("otp.resending") : t("otp.resend")}
-                </Text>
-              </Pressable>
-            )}
-          </View>
-          <Button
-            label={t("common.back")}
-            variant="ghost"
-            onPress={() => {
-              setStep("email");
-              setEmailCode("");
-              setError(null);
-              void markReviewingWizardStep("emailEntry", user?.uid ?? null);
-            }}
-            disabled={loading || resending}
-          />
-          <Pressable onPress={abandonWizardAndSignOut} accessibilityRole="button">
-            <Text style={styles.signOutLink}>Sign out and start again</Text>
-          </Pressable>
-        </View>
-      </View>
+    return wrapWithAck(
+      <EmailOtpScreen
+        email={emailDraft.trim().toLowerCase()}
+        code={emailCode}
+        onCodeChange={setEmailCode}
+        onVerify={() => void handleVerifyEmailCode()}
+        onResend={() => void handleEmailResend()}
+        onRetrySend={() => void handleEmailRetrySend()}
+        onBack={() => {
+          setStep("email");
+          setEmailCode("");
+          clearFlowError();
+          void markReviewingWizardStep("emailEntry", user?.uid ?? null);
+        }}
+        sending={sending}
+        sendFailed={sendFailed}
+        loading={loading}
+        resending={resending}
+        canVerify={canVerify}
+        resendRemaining={emailResendRemaining}
+        canResend={emailCanResend}
+        validityRemaining={emailValidityRemaining}
+        expired={emailValidityRemaining <= 0 && Boolean(emailExpiresAt)}
+        error={error}
+      />
     );
   }
 
   if (step === "email") {
-    return (
-      <View style={{ flex: 1 }}>
-        <EmailEntryScreen
-          value={emailDraft}
-          onChange={setEmailDraft}
-          onContinue={() => void handleEmailContinue()}
-          onBack={() => void goBackFromEmail()}
-          loading={loading}
-          error={error}
-          hint={
-            emailVerifiedChip
-              ? "Email verified — edit only if you need a different address (re-verification required)."
-              : user?.businessEmail
-                ? t("authV2.email.prefilledHint")
-                : null
-          }
-        />
-        <View style={styles.wizardChrome}>
-          <WizardProgress
-            step="emailEntry"
-            verifiedMobile={phoneVerifiedChip}
-            verifiedEmail={emailVerifiedChip}
-          />
-          <Pressable onPress={abandonWizardAndSignOut} accessibilityRole="button">
+    return wrapWithAck(
+      <EmailEntryScreen
+        value={emailDraft}
+        onChange={setEmailDraft}
+        onContinue={() => void handleEmailContinue()}
+        onBack={() => void goBackFromEmail()}
+        loading={loading}
+        error={error}
+        hint={
+          emailVerifiedChip
+            ? "Email verified — edit only if you need a different address (re-verification required)."
+            : user?.businessEmail
+              ? t("authV2.email.prefilledHint")
+              : null
+        }
+        belowFooter={
+          <Pressable
+            onPress={abandonWizardAndSignOut}
+            accessibilityRole="button"
+            style={styles.signOutInFlow}
+          >
             <Text style={styles.signOutLink}>Sign out and start again</Text>
           </Pressable>
-        </View>
-      </View>
+        }
+      />
     );
   }
 
-  return (
+  // phone_fallback — only claim session expiry when signed_out (or explicitly set).
+  const claimExpired = phoneFallbackMayClaimSessionExpired({
+    status,
+    explicitSessionExpired: Boolean(
+      phoneAuthError?.details?.diagnosticCode === "SESSION_EXPIRED" ||
+        (error != null && error === t("errors.sessionExpired"))
+    ),
+  });
+  return wrapWithAck(
     <PhoneEntryScreen
       draft={phoneDraft}
       onDraftChange={setPhoneDraft}
@@ -1140,7 +1440,10 @@ export function AuthFlowGate() {
       onContinueToConfirm={handleContinueToConfirm}
       onConfirmSend={() => void handleConfirmSend()}
       onBackFromConfirm={() => setStep("phone")}
-      error={t("errors.sessionExpired")}
+      error={claimExpired ? t("errors.sessionExpired") : error}
+      errorTitle={errorTitle}
+      errorDiagnostic={errorDiagnostic}
+      onCopyErrorDiagnostics={() => void copyPhoneAuthDiagnostics()}
     />
   );
 }
@@ -1153,58 +1456,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#12152E",
     padding: spacing.lg,
   },
-  emailVerifyCard: {
-    width: "100%",
-    maxWidth: 400,
-    gap: spacing.md,
-  },
-  emailVerifyTitle: {
-    ...typography.titleMd,
-    color: "#FFFFFF",
-    textAlign: "center",
-  },
-  emailVerifyBody: {
-    ...typography.body,
-    color: "rgba(255,255,255,0.72)",
-    textAlign: "center",
-    lineHeight: 22,
-  },
-  emailCodeInput: {
-    ...typography.mono,
-    fontSize: 24,
-    letterSpacing: 6,
-    textAlign: "center",
+  signOutInFlow: {
     paddingVertical: spacing.md,
-    paddingHorizontal: spacing.md,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.2)",
-    color: "#FFFFFF",
-    backgroundColor: "rgba(255,255,255,0.06)",
-    ...(Platform.OS === "android" ? { textAlignVertical: "center" as const } : {}),
-  },
-  emailTiming: {
-    ...typography.caption,
-    color: "rgba(255,255,255,0.75)",
-    textAlign: "center",
-  },
-  emailResendRow: {
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: 28,
-  },
-  emailResendLink: {
-    ...typography.captionStrong,
-    color: "#A5B4FC",
-    textAlign: "center",
-  },
-  wizardChrome: {
-    position: "absolute",
-    left: spacing.lg,
-    right: spacing.lg,
-    bottom: spacing.xl,
-    gap: spacing.sm,
-    pointerEvents: "box-none",
+    marginTop: spacing.sm,
   },
   signOutLink: {
     ...typography.caption,

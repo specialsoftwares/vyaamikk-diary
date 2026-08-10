@@ -10,6 +10,7 @@ import {
 } from "./completeOnboardingProfileLogic";
 import type { OnboardingProfileDraftV2 } from "./profileIdentityModel";
 import type { UserProfile } from "@/domain/types";
+import type { ProfilePatch } from "@/services/auth/types";
 import { AppError } from "@/domain/errors";
 
 function draft(over: Partial<OnboardingProfileDraftV2> = {}): OnboardingProfileDraftV2 {
@@ -150,6 +151,31 @@ async function main() {
     (e: unknown) => e instanceof AppError && e.code === "save_failed"
   );
   assert.equal(rolledBack, false); // draft retained on failure
+
+  __resetCompleteOnboardingFlightForTests();
+  let professionalPatch: ProfilePatch | undefined;
+  await completeOnboardingProfileWithDeps({
+    user: user(),
+    draft: draft({
+      accountKind: "business",
+      displayName: "Shivam Saurav",
+      businessName: "",
+      constitution: "Individual Professional / Sole Practice",
+    }),
+    updateProfile: async (patch) => {
+      professionalPatch = patch;
+      return user({ profileCompletedAt: patch.profileCompletedAt ?? 1 });
+    },
+    persistSnapshot: async () => undefined,
+    assertDurableLogo: async () => undefined,
+    clearDraft: async () => undefined,
+    now: 200,
+  });
+  assert.ok(professionalPatch);
+  assert.equal(professionalPatch.accountKind, "business");
+  assert.equal(professionalPatch.workType, "Individual Professional / Sole Practice");
+  assert.equal(professionalPatch.businessName, "Shivam Saurav");
+  assert.notEqual(professionalPatch.accountKind, "individual");
 
   console.log("completeOnboardingProfile.test.ts: ok");
 }

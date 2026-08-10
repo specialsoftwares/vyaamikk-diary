@@ -19,6 +19,8 @@ interface LedgerVMarkSvgProps {
   leftTrailLen: number;
   rightTrailLen: number;
   leftArmLen: number;
+  strokeColor?: string;
+  cutFill?: string;
 }
 
 /** Static SVG mark — no Reanimated props (Expo Go safe). */
@@ -31,12 +33,14 @@ export function LedgerVMarkSvg({
   leftTrailLen,
   rightTrailLen,
   leftArmLen,
+  strokeColor = V_STROKE.color,
+  cutFill = LEDGER_CUT.fill,
 }: LedgerVMarkSvgProps) {
   return (
     <Svg width={size} height={size} viewBox={`0 0 ${LEDGER_V_VIEWBOX} ${LEDGER_V_VIEWBOX}`}>
       <Path
         d={V_PATH_D}
-        stroke={V_STROKE.color}
+        stroke={strokeColor}
         strokeWidth={V_STROKE.width}
         strokeLinejoin={V_STROKE.linejoin}
         strokeMiterlimit={V_STROKE.miterlimit}
@@ -48,7 +52,7 @@ export function LedgerVMarkSvg({
         y={LEDGER_CUT.y}
         width={LEDGER_CUT.width}
         height={LEDGER_CUT.height}
-        fill={LEDGER_CUT.fill}
+        fill={cutFill}
       />
       <Line
         x1={GOLD_RULE.x1}

@@ -1,64 +1,63 @@
 import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 
-import { spacing, typography } from "@/theme";
 import type { OnboardingWizardStep } from "@/auth/onboardingWizard";
-import { wizardStageModel } from "@/auth/wizardNavigationController";
+import {
+  onboardingJourneyIndex,
+  onboardingJourneyStage,
+  shouldShowOnboardingProgress,
+  type IdentityPhase,
+} from "@/auth-v2/onboardingJourney";
+import {
+  ONBOARDING_JOURNEY_STAGES,
+  onboardingJourneyLabel,
+} from "@/auth-v2/theme/onboardingMotion";
+import { spacing, typography } from "@/theme";
 
 interface WizardProgressProps {
   step: OnboardingWizardStep;
   tone?: "light" | "dark";
   verifiedMobile?: boolean;
   verifiedEmail?: boolean;
+  identityPhase?: IdentityPhase;
 }
 
 /**
- * Contextual Account / Identity / Review chrome bound to the visible logical step.
- * Never shows numeric “Step N of M”.
+ * Subtle Profile → Location bar. Hidden during phone/email authentication.
  */
 export function WizardProgress({
   step,
   tone = "dark",
-  verifiedMobile,
-  verifiedEmail,
+  identityPhase = "details",
 }: WizardProgressProps) {
-  const model = wizardStageModel(step);
-  const muted = tone === "dark" ? "rgba(255,255,255,0.65)" : "#64748B";
-  const active = tone === "dark" ? "#C7D2FE" : "#4338CA";
-  const chip = tone === "dark" ? "rgba(165,180,252,0.25)" : "rgba(99,102,241,0.12)";
-  const chipText = tone === "dark" ? "#C7D2FE" : "#4338CA";
-  const track = tone === "dark" ? "rgba(255,255,255,0.2)" : "rgba(15,23,42,0.12)";
+  if (!shouldShowOnboardingProgress(step)) return null;
+  const stage = onboardingJourneyStage(step, identityPhase);
+  if (!stage) return null;
+  const activeIndex = onboardingJourneyIndex(stage);
+  const muted = tone === "dark" ? "rgba(255,255,255,0.42)" : "#64748B";
+  const active = tone === "dark" ? "rgba(224,231,255,0.88)" : "#312E81";
+  const track = tone === "dark" ? "rgba(255,255,255,0.1)" : "rgba(15,23,42,0.1)";
+  const fill = tone === "dark" ? "rgba(165,180,252,0.7)" : "#4338CA";
+  const progress = (activeIndex + 1) / ONBOARDING_JOURNEY_STAGES.length;
 
   return (
-    <View style={styles.wrap} accessibilityRole="summary">
-      <Text style={[styles.label, { color: muted }]}>{model.heading}</Text>
-      <View style={styles.stages} accessibilityRole="text">
-        {model.stages.map((s, index) => (
-          <React.Fragment key={s.id}>
-            {index > 0 ? <View style={[styles.connector, { backgroundColor: track }]} /> : null}
-            <Text
-              style={[
-                styles.stage,
-                { color: s.active ? active : muted },
-                s.active && styles.stageActive,
-              ]}
-            >
-              {s.label}
-            </Text>
-          </React.Fragment>
-        ))}
+    <View style={styles.wrap} accessibilityRole="summary" testID="onboarding-business-progress">
+      <View style={[styles.track, { backgroundColor: track }]}>
+        <View style={[styles.fill, { width: `${Math.round(progress * 100)}%`, backgroundColor: fill }]} />
       </View>
-      <View style={styles.chips}>
-        {verifiedMobile ? (
-          <Text style={[styles.chip, { backgroundColor: chip, color: chipText }]}>
-            Mobile verified
+      <View style={styles.labels}>
+        {ONBOARDING_JOURNEY_STAGES.map((id, index) => (
+          <Text
+            key={id}
+            style={[
+              styles.stage,
+              { color: index === activeIndex ? active : muted },
+              index === activeIndex && styles.stageActive,
+            ]}
+          >
+            {onboardingJourneyLabel(id)}
           </Text>
-        ) : null}
-        {verifiedEmail ? (
-          <Text style={[styles.chip, { backgroundColor: chip, color: chipText }]}>
-            Email verified
-          </Text>
-        ) : null}
+        ))}
       </View>
     </View>
   );
@@ -66,39 +65,31 @@ export function WizardProgress({
 
 const styles = StyleSheet.create({
   wrap: {
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
     paddingHorizontal: spacing.lg,
     marginHorizontal: -spacing.lg,
-    gap: spacing.xs,
+    gap: 6,
   },
-  label: {
-    ...typography.micro,
-    letterSpacing: 0.8,
-    textTransform: "uppercase",
-  },
-  stages: {
-    flexDirection: "row",
-    alignItems: "center",
-    flexWrap: "wrap",
-    gap: spacing.xs,
-  },
-  stage: {
-    ...typography.caption,
-  },
-  stageActive: {
-    fontWeight: "700",
-  },
-  connector: {
-    width: 12,
+  track: {
     height: 2,
     borderRadius: 1,
-  },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs },
-  chip: {
-    ...typography.caption,
     overflow: "hidden",
-    borderRadius: 8,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
+  },
+  fill: {
+    height: "100%",
+    borderRadius: 1,
+  },
+  labels: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+  },
+  stage: {
+    ...typography.micro,
+    letterSpacing: 0.6,
+    textTransform: "uppercase",
+    fontSize: 10,
+  },
+  stageActive: {
+    fontWeight: "600",
   },
 });

@@ -6,11 +6,11 @@
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-import type {
-  OnboardingNavigationIntent,
-  OnboardingWizardStep,
+import {
+  ONBOARDING_WIZARD_STEPS,
+  type OnboardingNavigationIntent,
+  type OnboardingWizardStep,
 } from "@/auth/onboardingWizard";
-import { ONBOARDING_WIZARD_STEPS } from "@/auth/onboardingWizard";
 
 const KEY = "vyd_onboarding_wizard_nav_v1";
 

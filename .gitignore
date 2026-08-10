@@ -100,3 +100,6 @@ scripts/translate-locales-report.md
 # Screenshot source originals (regenerate public-site locally)
 assets/*.HEIC
 assets/*.heic
+
+# Local EAS download folder (never commit)
+builds/

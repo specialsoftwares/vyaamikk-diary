@@ -5,8 +5,7 @@ import {
   coolingOffRemainingMs,
   isInRecoveryCoolingOff,
 } from "./coolingOffPolicy";
-import type { UserProfile } from "@/domain/types";
-import { DEFAULT_PDF_BRANDING } from "@/domain/types";
+import { DEFAULT_PDF_BRANDING, type UserProfile } from "@/domain/types";
 
 const user = {
   uid: "u1",

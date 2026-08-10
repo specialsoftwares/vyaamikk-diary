@@ -4,6 +4,7 @@
 
 import type { ProfileLogoRef } from "@/domain/types";
 import type { OnboardingAccountKind } from "@/auth/onboardingWizard";
+import { isIndividualProfessionalPractice } from "@/onboarding/businessConstitution";
 
 export type GstinVerificationState =
   | "notProvided"
@@ -81,7 +82,57 @@ export type ProfileCompletionBlocker =
   | "logo_required"
   | "logo_not_persisted"
   | "gstin_invalid"
+  | "constitution_required"
   | "ok";
+
+/** Identity substep — name/kind only. Profile image is optional. */
+export function isIdentityDetailsContinueEnabled(input: {
+  displayName: string;
+  accountKind: OnboardingAccountKind | string;
+  businessName: string;
+  constitution?: string;
+  gstin?: string;
+  gstinVerificationState?: GstinVerificationState;
+  submitting?: boolean;
+}): boolean {
+  if (input.submitting) return false;
+  if (!input.displayName.trim()) return false;
+  if (input.accountKind === "business") {
+    if (!(input.constitution ?? "").trim()) return false;
+    const professional = isIndividualProfessionalPractice(input.constitution ?? "");
+    if (!professional && !input.businessName.trim()) return false;
+    if ((input.gstin ?? "").trim() && input.gstinVerificationState === "formatInvalid") {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Save & continue must stay disabled while PIN lookup/confirmation is incomplete
+ * or media persistence is in flight — never only fail after tap.
+ */
+export function isIdentityContinueEnabled(input: {
+  submitting: boolean;
+  mediaBusy: boolean;
+  pinStatus:
+    | "idle"
+    | "invalid_format"
+    | "looking_up"
+    | "choices"
+    | "ready_to_confirm"
+    | "not_found"
+    | "unavailable"
+    | "confirmed";
+  confirmedLocation: ConfirmedPinLocation | null;
+  pinCode: string;
+}): boolean {
+  if (input.submitting || input.mediaBusy) return false;
+  if (input.pinStatus === "looking_up") return false;
+  if (!input.confirmedLocation) return false;
+  if (input.confirmedLocation.pinCode !== input.pinCode) return false;
+  return true;
+}
 
 export function validateOnboardingDraftForCompletion(input: {
   signedIn: boolean;
@@ -102,7 +153,7 @@ export function validateOnboardingDraftForCompletion(input: {
   }
   const d = input.draft;
   if (!d.accountKind) {
-    return { ok: false, blocker: "account_kind_missing", message: "Choose Individual or Business." };
+    return { ok: false, blocker: "account_kind_missing", message: "Business profile is required." };
   }
   if (!d.displayName.trim()) {
     return {
@@ -114,11 +165,22 @@ export function validateOnboardingDraftForCompletion(input: {
           : "Enter your full legal name.",
     };
   }
-  if (d.accountKind === "business" && !d.businessName.trim()) {
+  if (d.accountKind === "business" && !d.constitution.trim()) {
+    return {
+      ok: false,
+      blocker: "constitution_required",
+      message: "Select the business / practice type.",
+    };
+  }
+  if (
+    d.accountKind === "business" &&
+    !isIndividualProfessionalPractice(d.constitution) &&
+    !d.businessName.trim()
+  ) {
     return {
       ok: false,
       blocker: "business_name_required",
-      message: "Enter the legal business name.",
+      message: "Enter the business / firm / practice name.",
     };
   }
   if (!/^[1-9]\d{5}$/.test(d.pinCode)) {
@@ -138,16 +200,7 @@ export function validateOnboardingDraftForCompletion(input: {
       message: "PIN changed after confirmation. Confirm the location again.",
     };
   }
-  if (!d.profileLogo?.localUri || !d.logoPersisted) {
-    return {
-      ok: false,
-      blocker: "logo_required",
-      message:
-        d.accountKind === "business"
-          ? "Add a business logo before completing your profile."
-          : "Add a profile image before completing your profile.",
-    };
-  }
+  // Profile image / logo is optional for V1 onboarding completion.
   if (d.gstin.trim() && d.gstinVerificationState === "formatInvalid") {
     return {
       ok: false,
@@ -156,6 +209,19 @@ export function validateOnboardingDraftForCompletion(input: {
     };
   }
   return { ok: true };
+}
+
+/** Persist explicit practice/firm name; sole practice may reuse legal name — never invent a firm. */
+export function resolvePersistedBusinessName(
+  draft: Pick<OnboardingProfileDraftV2, "accountKind" | "businessName" | "constitution" | "displayName">
+): string | null {
+  if (draft.accountKind !== "business") return null;
+  const explicit = draft.businessName.trim();
+  if (explicit) return explicit;
+  if (isIndividualProfessionalPractice(draft.constitution)) {
+    return draft.displayName.trim() || null;
+  }
+  return null;
 }
 
 export function buildDocumentFacingIdentity(input: {
@@ -167,10 +233,14 @@ export function buildDocumentFacingIdentity(input: {
 }): DocumentFacingIdentity {
   const d = input.draft;
   const loc = d.confirmedLocation!;
+  const professional =
+    d.accountKind === "business" && isIndividualProfessionalPractice(d.constitution);
+  const practiceFacingName =
+    d.businessName.trim() || (professional ? d.displayName.trim() : "");
   return {
     accountKind: d.accountKind,
     primaryName:
-      d.accountKind === "business" ? d.businessName.trim() : d.displayName.trim(),
+      d.accountKind === "business" ? practiceFacingName : d.displayName.trim(),
     accountOwnerName: d.accountKind === "business" ? d.displayName.trim() : null,
     phoneE164: input.phoneE164,
     email: input.email,

@@ -46,6 +46,7 @@ export function PhoneConfirmCard({
         activeText={tokens.ctaActiveText}
         mutedBg={tokens.ctaMutedBg}
         mutedText={tokens.ctaMutedText}
+            mutedBorder={tokens.ctaMutedBorder}
       />
       <AuthV2PrimaryButton
         label="Edit"
@@ -55,6 +56,7 @@ export function PhoneConfirmCard({
         activeText={tokens.heading}
         mutedBg={tokens.ctaMutedBg}
         mutedText={tokens.ctaMutedText}
+            mutedBorder={tokens.ctaMutedBorder}
       />
     </View>
   );

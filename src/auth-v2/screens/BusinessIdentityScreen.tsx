@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
-  Image,
   Pressable,
   StyleSheet,
   Text,
@@ -12,9 +11,17 @@ import { useRouter } from "expo-router";
 
 import { AuthV2PrimaryButton } from "@/auth-v2/components/AuthV2PrimaryButton";
 import { AuthV2SecondaryButton } from "@/auth-v2/components/AuthV2SecondaryButton";
+import { BusinessConstitutionField } from "@/auth-v2/components/BusinessConstitutionField";
+import { LocationConfirmationCard } from "@/auth-v2/components/LocationConfirmationCard";
+import { OnboardingInlineMessage } from "@/auth-v2/components/OnboardingInlineMessage";
 import { OnboardingV2Shell } from "@/auth-v2/components/OnboardingV2Shell";
 import { OnboardingV2TextField } from "@/auth-v2/components/OnboardingV2TextField";
 import { WizardProgress } from "@/auth-v2/components/WizardProgress";
+import {
+  deriveIdentityPhaseFromDraft,
+  type IdentityPhase,
+} from "@/auth-v2/onboardingJourney";
+import { onboardingMark, onboardingMeasure } from "@/auth-v2/onboardingPerfProbe";
 import { useAuthV2Theme } from "@/auth-v2/hooks/useAuthV2Theme";
 import { isOnboardingIdentityLocked } from "@/domain/profileUpdatePolicy";
 import { Banner } from "@/components/ui";
@@ -26,19 +33,22 @@ import {
 } from "@/auth/onboardingGuardPolicy";
 import type { OnboardingAccountKind } from "@/auth/onboardingWizard";
 import {
+  isIndividualProfessionalPractice,
+  NEW_REGISTRATION_ACCOUNT_KIND,
+} from "@/onboarding/businessConstitution";
+import {
   clearOnboardingProfileDraftV2,
   loadOnboardingProfileDraftV2,
   saveOnboardingProfileDraftV2,
 } from "@/onboarding/onboardingProfileDraftV2";
-import { transformProfileDraftV2ForAccountKind } from "@/onboarding/transformProfileDraftV2";
 import {
+  isIdentityContinueEnabled,
+  isIdentityDetailsContinueEnabled,
   validateOnboardingDraftForCompletion,
   type OnboardingProfileDraftV2,
 } from "@/onboarding/profileIdentityModel";
-import {
-  evaluateGstinInput,
-  gstinUserFacingLabel,
-} from "@/onboarding/gstinVerificationState";
+import { evaluateGstinInput } from "@/onboarding/gstinVerificationState";
+import { normalizeGstin } from "@/utils/gst/gstin";
 import {
   acceptPinInput,
   applyPinLookupResult,
@@ -46,11 +56,6 @@ import {
   nextPinLookupRequestId,
   type PinLookupUiState,
 } from "@/onboarding/pinConfirmation";
-import {
-  confirmAndPersistIdentityMedia,
-  IdentityMediaError,
-  pickIdentityMedia,
-} from "@/onboarding/identityMedia";
 import { resolveIndianPincode } from "@/services/location/pincodeResolver";
 import { useAuth } from "@/state/auth";
 import { useT } from "@/i18n";
@@ -82,8 +87,9 @@ export function BusinessIdentityScreen({
   const [draft, setDraft] = useState<OnboardingProfileDraftV2 | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [mediaBusy, setMediaBusy] = useState(false);
+  const mediaBusy = false;
   const [pinUi, setPinUi] = useState<PinLookupUiState>({ status: "idle" });
+  const [identityPhase, setIdentityPhase] = useState<IdentityPhase>("details");
   const [ready, setReady] = useState(false);
 
   const draftRef = useRef<OnboardingProfileDraftV2 | null>(null);
@@ -105,9 +111,9 @@ export function BusinessIdentityScreen({
         return;
       }
       const preferred: OnboardingAccountKind =
-        user.accountKind === "individual" || user.accountKind === "business"
-          ? user.accountKind
-          : "business";
+        user.profileCompletedAt && user.accountKind === "individual"
+          ? "individual"
+          : NEW_REGISTRATION_ACCOUNT_KIND;
       let loaded = await loadOnboardingProfileDraftV2(user.uid, preferred);
       if (
         preferred === "business" &&
@@ -120,6 +126,9 @@ export function BusinessIdentityScreen({
         }
       }
       if (cancelled) return;
+      if (!user.profileCompletedAt && loaded.accountKind !== NEW_REGISTRATION_ACCOUNT_KIND) {
+        loaded = { ...loaded, accountKind: NEW_REGISTRATION_ACCOUNT_KIND };
+      }
       if (!loaded.displayName.trim() && user.displayName?.trim()) {
         loaded = { ...loaded, displayName: user.displayName.trim() };
       }
@@ -136,6 +145,15 @@ export function BusinessIdentityScreen({
       } else if (loaded.pinCode.length === 6) {
         setPinUi({ status: "idle" });
       }
+      setIdentityPhase(
+        deriveIdentityPhaseFromDraft({
+          displayName: loaded.displayName,
+          accountKind: loaded.accountKind,
+          businessName: loaded.businessName,
+          confirmedLocationPin: loaded.confirmedLocation?.pinCode ?? null,
+          pinCode: loaded.pinCode,
+        })
+      );
       setReady(true);
     })();
     return () => {
@@ -175,6 +193,7 @@ export function BusinessIdentityScreen({
       pinLookupTimerRef.current = setTimeout(() => {
         const requestId = nextPinLookupRequestId();
         latestPinRequestIdRef.current = requestId;
+        onboardingMark("lookupStarted");
         setPinUi({ status: "looking_up", requestId, pinCode });
         void (async () => {
           const resolution = await resolveIndianPincode(pinCode);
@@ -196,12 +215,23 @@ export function BusinessIdentityScreen({
               confirmedLocation: null,
             });
           } else if (next.status === "ready_to_confirm" && current) {
+            const location = confirmPinLocation({
+              pinCode: next.pinCode,
+              locality: next.locality,
+              district: next.district,
+              state: next.state,
+              source: next.source,
+            });
             syncDraft({
               ...current,
               pinLocalityChoices: next.locality ? [next.locality] : [],
               selectedLocality: next.locality,
-              confirmedLocation: null,
+              confirmedLocation: location,
+              pinCode: location.pinCode,
             });
+            setPinUi({ status: "confirmed", location });
+            onboardingMark("confirmationRendered");
+            return;
           } else if (
             (next.status === "not_found" || next.status === "unavailable") &&
             current
@@ -230,29 +260,6 @@ export function BusinessIdentityScreen({
     syncDraft(next);
   };
 
-  const switchAccountKind = (nextKind: OnboardingAccountKind) => {
-    if (nextKind === accountKind || readOnly) return;
-    const current = draftRef.current!;
-    const { draft: transformed, clearedMeaningful } =
-      transformProfileDraftV2ForAccountKind(current, nextKind);
-    const apply = () => {
-      syncDraft(transformed);
-      void saveOnboardingProfileDraftV2(transformed);
-    };
-    if (clearedMeaningful) {
-      Alert.alert(
-        "Switch to Individual?",
-        "Business name, constitution, and GSTIN will be cleared from this draft.",
-        [
-          { text: "Cancel", style: "cancel" },
-          { text: "Switch", style: "destructive", onPress: apply },
-        ]
-      );
-      return;
-    }
-    apply();
-  };
-
   const onPinChange = (raw: string) => {
     if (readOnly) return;
     const accepted = acceptPinInput(raw);
@@ -270,6 +277,7 @@ export function BusinessIdentityScreen({
     );
     if (pinChanged) {
       setPinUi({ status: "idle" });
+      if (accepted.length === 6) onboardingMark("pinValid");
       runPinLookup(accepted);
     }
   };
@@ -319,52 +327,12 @@ export function BusinessIdentityScreen({
 
   const onGstinChange = (raw: string) => {
     if (readOnly) return;
-    const { normalized, state } = evaluateGstinInput(raw);
-    // Preserve raw when invalid/whitespace so format checks stay honest; otherwise store normalized.
-    const stored =
-      state === "formatInvalid" || state === "notProvided"
-        ? raw.toUpperCase().slice(0, 20)
-        : normalized;
+    const normalized = normalizeGstin(raw);
+    const { state } = evaluateGstinInput(normalized);
     patchDraft({
-      gstin: stored,
+      gstin: normalized,
       gstinVerificationState: state,
     });
-  };
-
-  const onPickMedia = async (source: "camera" | "library") => {
-    if (readOnly || mediaBusy) return;
-    setMediaBusy(true);
-    setServerError(null);
-    try {
-      const asset = await pickIdentityMedia(source);
-      // Preview first; durable flag only after persist.
-      patchDraft({
-        logoPreviewUri: asset.uri,
-        logoPersisted: false,
-      });
-      const persisted = await confirmAndPersistIdentityMedia(user.uid, asset);
-      patchDraft({
-        profileLogo: persisted,
-        logoPreviewUri: persisted.localUri,
-        logoPersisted: true,
-      });
-    } catch (e) {
-      if (e instanceof IdentityMediaError && e.reason === "cancelled") {
-        return;
-      }
-      // Keep non-image fields; reset only media persistence flags if persist failed mid-way.
-      const current = draftRef.current;
-      if (current && !current.logoPersisted) {
-        patchDraft({
-          logoPreviewUri: current.profileLogo?.localUri ?? null,
-        });
-      }
-      setServerError(
-        e instanceof IdentityMediaError ? e.message : userFacingMessage(e)
-      );
-    } finally {
-      setMediaBusy(false);
-    }
   };
 
   const onContinue = async () => {
@@ -400,6 +368,10 @@ export function BusinessIdentityScreen({
   };
 
   const goBack = () => {
+    if (identityPhase === "location" && !readOnly) {
+      setIdentityPhase("details");
+      return;
+    }
     // Sync review intent BEFORE route replace — eliminates AsyncStorage race.
     markReviewingWizardStep("emailEntry", user.uid, {
       phoneE164: user.phoneE164,
@@ -444,29 +416,21 @@ export function BusinessIdentityScreen({
     );
   };
 
-  const previewUri = draft.logoPreviewUri ?? draft.profileLogo?.localUri ?? null;
-  const nameLabel =
-    accountKind === "business"
-      ? "Account owner's full legal name"
-      : "Full legal name";
-  const mediaLabel = accountKind === "business" ? "Business logo" : "Profile image";
-
   const pinStatusMessage = (() => {
     switch (pinUi.status) {
       case "looking_up":
-        return "Looking up PIN…";
+      case "choices":
+      case "ready_to_confirm":
+        // Dedicated confirmation / spinner UI renders these states.
+        return null;
       case "invalid_format":
         return "Enter a valid 6-digit PIN.";
       case "not_found":
-        return "PIN not found. Check the code and try again.";
+        return "Couldn't find this PIN. Check and try again.";
       case "unavailable":
-        return "PIN lookup unavailable. Try again shortly.";
-      case "choices":
-        return "Select your locality, then confirm.";
-      case "ready_to_confirm":
-        return `${pinUi.locality ? `${pinUi.locality}, ` : ""}${pinUi.district}, ${pinUi.state}`;
+        return "Couldn't look up the PIN right now. Try again.";
       case "confirmed":
-        return `${pinUi.location.locality ? `${pinUi.location.locality}, ` : ""}${pinUi.location.district}, ${pinUi.location.state}`;
+        return null;
       default:
         return null;
     }
@@ -476,16 +440,50 @@ export function BusinessIdentityScreen({
     pinUi.status === "ready_to_confirm" ||
     (pinUi.status === "choices" && Boolean(draft.selectedLocality));
 
+  const detailsEnabled = isIdentityDetailsContinueEnabled({
+    displayName: draft.displayName,
+    accountKind,
+    businessName: draft.businessName,
+    constitution: draft.constitution,
+    gstin: draft.gstin,
+    gstinVerificationState: draft.gstinVerificationState,
+    submitting,
+  });
+  const continueEnabled = isIdentityContinueEnabled({
+    submitting,
+    mediaBusy,
+    pinStatus: pinUi.status,
+    confirmedLocation: draft.confirmedLocation,
+    pinCode: draft.pinCode,
+  });
+
+  const onDetailsContinue = () => {
+    if (!detailsEnabled) return;
+    onboardingMark("identityContinueTap");
+    void persistDraftNow();
+    setIdentityPhase("location");
+    onboardingMeasure("identityContinueTap", "identityContinueTap", "identityContinueTap → locationVisible");
+  };
+
   return (
     <OnboardingV2Shell
       stageLabel={t("onboarding.stages.buildIdentity")}
-      title={t("onboarding.stages.buildIdentity")}
-      subtitle={t("onboarding.profile.v2Body")}
+      title={
+        identityPhase === "location"
+          ? "Confirm your location"
+          : "Tell us about your business or practice"
+      }
+      subtitle={
+        identityPhase === "location"
+          ? "Enter your 6-digit PIN. We'll confirm the place."
+          : "These details help Vyaamikk identify your business, firm or professional practice on records and documents."
+      }
       onBack={goBack}
       headerTop={
         <WizardProgress
           step="businessIdentity"
           tone="dark"
+          identityPhase={identityPhase}
           verifiedMobile
           verifiedEmail={hasAuthoritativeVerifiedEmail(user)}
         />
@@ -499,21 +497,27 @@ export function BusinessIdentityScreen({
             activeText={tokens.ctaActiveText}
             mutedBg={tokens.ctaMutedBg}
             mutedText={tokens.ctaMutedText}
+            mutedBorder={tokens.ctaMutedBorder}
           />
         ) : (
           <>
-            {serverError ? <Banner tone="danger" message={serverError} /> : null}
+            {serverError ? (
+              <OnboardingInlineMessage tone="danger" message={serverError} />
+            ) : null}
             <AuthV2PrimaryButton
               label={t("onboarding.profile.continue")}
               loading={submitting}
               loadingLabel={t("authV2.email.saving")}
-              disabled={submitting || mediaBusy}
-              onPress={() => void onContinue()}
+              disabled={identityPhase === "details" ? !detailsEnabled : !continueEnabled}
+              onPress={() =>
+                identityPhase === "details" ? onDetailsContinue() : void onContinue()
+              }
               testID="complete-profile-continue"
               activeBg={tokens.ctaActiveBg}
               activeText={tokens.ctaActiveText}
               mutedBg={tokens.ctaMutedBg}
               mutedText={tokens.ctaMutedText}
+            mutedBorder={tokens.ctaMutedBorder}
             />
             <Text style={[styles.note, { color: tokens.muted }]}>
               {t("onboarding.profile.mobileNote", { phone: maskMobile(user.phoneE164) })}
@@ -531,76 +535,46 @@ export function BusinessIdentityScreen({
         <Banner tone="info" message={t("onboarding.profile.lockedAfterUeid")} />
       ) : null}
 
-      {!readOnly ? (
-        <View style={styles.kindRow}>
-          {(["individual", "business"] as const).map((kind) => {
-            const active = accountKind === kind;
-            return (
-              <Pressable
-                key={kind}
-                onPress={() => switchAccountKind(kind)}
-                style={[
-                  styles.kindChip,
-                  {
-                    backgroundColor: active ? tokens.ctaActiveBg : tokens.cardBg,
-                    borderColor: tokens.cardBorder,
-                  },
-                ]}
-                accessibilityRole="button"
-                accessibilityState={{ selected: active }}
-              >
-                <Text
-                  style={{
-                    color: active ? tokens.ctaActiveText : tokens.body,
-                    ...typography.captionStrong,
-                  }}
-                >
-                  {kind === "individual" ? "Individual" : "Business"}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-      ) : null}
-
       <View
         style={[styles.form, readOnly && styles.readOnly]}
         pointerEvents={readOnly ? "none" : "auto"}
       >
-        <OnboardingV2TextField
-          navFieldKey="displayName"
-          label={nameLabel}
-          required
-          value={draft.displayName}
-          onChangeText={(v) => patchDraft({ displayName: v })}
-          placeholder="Full legal name"
-          autoCapitalize="words"
-          maxLength={80}
-          editable={!readOnly}
-        />
-
-        {accountKind === "business" ? (
+        {identityPhase === "details" ? (
           <>
             <OnboardingV2TextField
-              navFieldKey="businessName"
-              label="Legal business name"
+              navFieldKey="displayName"
+              label="Your full legal name"
               required
+              value={draft.displayName}
+              onChangeText={(v) => patchDraft({ displayName: v })}
+              placeholder="Account owner / authorised person"
+              autoCapitalize="words"
+              maxLength={80}
+              editable={!readOnly}
+            />
+            <OnboardingV2TextField
+              navFieldKey="businessName"
+              label={
+                isIndividualProfessionalPractice(draft.constitution)
+                  ? "Practice / professional name"
+                  : "Business / firm / practice name"
+              }
+              required={!isIndividualProfessionalPractice(draft.constitution)}
               value={draft.businessName}
               onChangeText={(v) => patchDraft({ businessName: v })}
-              placeholder="Registered business name"
+              placeholder={
+                isIndividualProfessionalPractice(draft.constitution)
+                  ? "e.g. Shivam Saurav, Advocate"
+                  : "e.g. Sharma Hardware"
+              }
               autoCapitalize="words"
               maxLength={120}
               editable={!readOnly}
             />
-            <OnboardingV2TextField
-              navFieldKey="constitution"
-              label="Constitution (optional)"
+            <BusinessConstitutionField
               value={draft.constitution}
-              onChangeText={(v) => patchDraft({ constitution: v })}
-              placeholder="e.g. Proprietorship, Private Limited"
-              autoCapitalize="words"
-              maxLength={120}
-              editable={!readOnly}
+              onChange={(v) => patchDraft({ constitution: v })}
+              disabled={readOnly}
             />
             <OnboardingV2TextField
               navFieldKey="gstin"
@@ -609,124 +583,101 @@ export function BusinessIdentityScreen({
               onChangeText={onGstinChange}
               placeholder="15-character GSTIN"
               autoCapitalize="characters"
-              maxLength={20}
+              autoCorrect={false}
+              maxLength={15}
               editable={!readOnly}
             />
-            {draft.gstin.trim() ? (
-              <Text style={[styles.helper, { color: tokens.muted }]}>
-                {gstinUserFacingLabel(draft.gstinVerificationState)}
+            {draft.gstin.trim() && draft.gstinVerificationState === "formatInvalid" ? (
+              <Text style={[styles.helper, { color: tokens.danger }]}>
+                Enter a valid 15-character GSTIN, or leave blank.
               </Text>
             ) : null}
           </>
-        ) : null}
-
-        <View style={styles.sectionGap}>
-          <Text style={[styles.sectionLabel, { color: tokens.muted }]}>{mediaLabel}</Text>
-          <View style={styles.mediaRow}>
-            <View
-              style={[
-                styles.mediaPreview,
-                { backgroundColor: tokens.cardBg, borderColor: tokens.cardBorder },
-              ]}
-            >
-              {previewUri ? (
-                <Image source={{ uri: previewUri }} style={styles.mediaImage} />
-              ) : (
-                <Text style={[styles.mediaPlaceholder, { color: tokens.muted }]}>
-                  No image
+        ) : (
+          <>
+            <OnboardingV2TextField
+              navFieldKey="pinCode"
+              label="PIN code"
+              required
+              value={draft.pinCode}
+              onChangeText={onPinChange}
+              placeholder="6-digit PIN"
+              keyboardType={"number-pad" as "default"}
+              maxLength={6}
+              editable={!readOnly}
+            />
+            {pinUi.status === "looking_up" ? (
+              <View style={styles.pinLookupRow}>
+                <ActivityIndicator color={tokens.ctaActiveText} />
+                <Text style={[styles.helper, { color: tokens.muted, marginTop: 0 }]}>
+                  Looking up…
                 </Text>
-              )}
-              {mediaBusy ? (
-                <View style={styles.mediaBusy}>
-                  <ActivityIndicator color={tokens.ctaActiveText} />
+              </View>
+            ) : pinStatusMessage ? (
+              <OnboardingInlineMessage tone="muted" message={pinStatusMessage} />
+            ) : null}
+
+            {pinUi.status === "choices" ? (
+              <View style={styles.pinConfirmCard}>
+                <Text style={[styles.sectionLabel, { color: tokens.body }]}>
+                  Select your locality
+                </Text>
+                <View style={styles.localityList}>
+                  {pinUi.localities.map((loc) => {
+                    const selected = draft.selectedLocality === loc;
+                    return (
+                      <Pressable
+                        key={loc}
+                        onPress={() => selectLocality(loc)}
+                        style={[
+                          styles.localityChip,
+                          {
+                            backgroundColor: selected ? tokens.ctaActiveBg : tokens.cardBg,
+                            borderColor: tokens.cardBorder,
+                          },
+                        ]}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected }}
+                      >
+                        <Text
+                          style={{
+                            color: selected ? tokens.ctaActiveText : tokens.body,
+                            ...typography.caption,
+                          }}
+                        >
+                          {loc}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
                 </View>
-              ) : null}
-            </View>
-            <View style={styles.mediaActions}>
-              <AuthV2SecondaryButton
-                label="Camera"
-                disabled={readOnly || mediaBusy}
-                onPress={() => void onPickMedia("camera")}
+                <AuthV2SecondaryButton
+                  label="Confirm location"
+                  disabled={readOnly || !canConfirmPin}
+                  onPress={onConfirmPin}
+                />
+              </View>
+            ) : null}
+
+            {pinUi.status === "ready_to_confirm" ? (
+              <LocationConfirmationCard
+                locality={pinUi.locality}
+                district={pinUi.district}
+                state={pinUi.state}
+                confirmed={false}
               />
-              <AuthV2SecondaryButton
-                label="Gallery"
-                disabled={readOnly || mediaBusy}
-                onPress={() => void onPickMedia("library")}
-              />
-              {draft.logoPersisted ? (
-                <Text style={[styles.helper, { color: tokens.muted }]}>Saved on device</Text>
-              ) : previewUri ? (
-                <Text style={[styles.helper, { color: tokens.danger }]}>
-                  Image not saved yet
-                </Text>
-              ) : null}
-            </View>
-          </View>
-        </View>
+            ) : null}
 
-        <OnboardingV2TextField
-          navFieldKey="pinCode"
-          label="PIN code"
-          required
-          value={draft.pinCode}
-          onChangeText={onPinChange}
-          placeholder="6-digit PIN"
-          keyboardType={"number-pad" as "default"}
-          maxLength={6}
-          editable={!readOnly}
-        />
-        {pinStatusMessage ? (
-          <Text style={[styles.helper, { color: tokens.muted }]}>{pinStatusMessage}</Text>
-        ) : null}
-
-        {pinUi.status === "choices" ? (
-          <View style={styles.localityList}>
-            {pinUi.localities.map((loc) => {
-              const selected = draft.selectedLocality === loc;
-              return (
-                <Pressable
-                  key={loc}
-                  onPress={() => selectLocality(loc)}
-                  style={[
-                    styles.localityChip,
-                    {
-                      backgroundColor: selected ? tokens.ctaActiveBg : tokens.cardBg,
-                      borderColor: tokens.cardBorder,
-                    },
-                  ]}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected }}
-                >
-                  <Text
-                    style={{
-                      color: selected ? tokens.ctaActiveText : tokens.body,
-                      ...typography.caption,
-                    }}
-                  >
-                    {loc}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        ) : null}
-
-        {canConfirmPin || pinUi.status === "confirmed" ? (
-          <View style={styles.confirmRow}>
             {pinUi.status === "confirmed" ? (
-              <Banner
-                tone="info"
-                message={`Confirmed: ${pinUi.location.district}, ${pinUi.location.state}`}
+              <LocationConfirmationCard
+                locality={pinUi.location.locality}
+                district={pinUi.location.district}
+                state={pinUi.location.state}
+                confirmed
               />
-            ) : (
-              <AuthV2SecondaryButton
-                label="Confirm location"
-                disabled={readOnly || !canConfirmPin}
-                onPress={onConfirmPin}
-              />
-            )}
-          </View>
-        ) : null}
+            ) : null}
+          </>
+        )}
       </View>
     </OnboardingV2Shell>
   );
@@ -772,7 +723,21 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.35)",
   },
   mediaActions: { flex: 1, gap: spacing.sm },
-  localityList: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs, marginBottom: spacing.sm },
+  pinLookupRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  pinConfirmCard: {
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+    padding: spacing.md,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(255,255,255,0.18)",
+  },
+  localityList: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs },
   localityChip: {
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,

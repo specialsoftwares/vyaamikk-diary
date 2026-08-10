@@ -1,3 +1,6 @@
+# Isolated Expo Go presentation host — never ship in Play/EAS binaries
+tools/onboarding-ux-harness/
+
 # Dependencies
 node_modules/
 
@@ -57,12 +60,14 @@ Thumbs.db
 .env.*
 !.env.example
 
-# Firebase / Google credentials
+# Firebase / Google credentials (uploaded via EAS file env GOOGLE_SERVICES_JSON instead)
 serviceAccount*.json
 *service-account*.json
 firebase-admin*.json
 firebase-adminsdk*.json
 google-credentials*.json
+google-services.json
+GoogleService-Info.plist
 firebase-debug.log
 firebase-debug.*.log
 *.local

@@ -1,0 +1,9 @@
+{
+  "name": "vyaamikk-onboarding-ux-harness",
+  "version": "0.0.0-dev",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "start": "EXPO_NO_TELEMETRY=1 ../../node_modules/.bin/expo start --go --lan --port 8091 --clear"
+  }
+}

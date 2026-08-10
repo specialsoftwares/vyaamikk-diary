@@ -16,7 +16,7 @@ interface OnboardingV2TextFieldProps extends Omit<TextInputProps, "style"> {
   editable?: boolean;
   autoCapitalize?: "none" | "sentences" | "words" | "characters";
   autoCorrect?: boolean;
-  keyboardType?: "default" | "email-address";
+  keyboardType?: TextInputProps["keyboardType"];
   maxLength?: number;
   /** Registers with FormFocusProvider for return-key navigation. */
   navFieldKey?: string;

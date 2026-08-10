@@ -7,6 +7,7 @@ import type { UserProfile } from "@/domain/types";
 import type { ProfilePatch } from "@/services/auth/types";
 import {
   buildDocumentFacingIdentity,
+  resolvePersistedBusinessName,
   validateOnboardingDraftForCompletion,
   type OnboardingProfileDraftV2,
 } from "@/onboarding/profileIdentityModel";
@@ -72,8 +73,7 @@ async function completeOnce(input: CompleteOnboardingInput): Promise<CompleteOnb
 
   const patch: ProfilePatch = {
     displayName: input.draft.displayName.trim(),
-    businessName:
-      input.draft.accountKind === "business" ? input.draft.businessName.trim() : null,
+    businessName: resolvePersistedBusinessName(input.draft),
     workType:
       input.draft.accountKind === "business" && input.draft.constitution.trim()
         ? input.draft.constitution.trim()

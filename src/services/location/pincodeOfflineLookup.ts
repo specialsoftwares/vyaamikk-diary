@@ -17,6 +17,7 @@ import { getIndiaPincode } from "india-pincode/browser";
 export { shouldWarmIndiaPincodeOnCalendarTabMount } from "./pincodeWarmPolicy";
 
 let lookupPromise: ReturnType<typeof getIndiaPincode> | null = null;
+let lookupReady = false;
 let deferredWarmScheduled = false;
 
 /** True once a load has been started (in flight or complete). */
@@ -24,9 +25,19 @@ export function isIndiaPincodeLookupStarted(): boolean {
   return lookupPromise != null;
 }
 
+/**
+ * True only after the offline DB has finished decompressing/parsing.
+ * Interactive PIN lookup must NOT cold-start the DB — that work blocks the JS
+ * thread for seconds/minutes and freezes Camera/Gallery/Pressables.
+ */
+export function isIndiaPincodeOfflineLookupReady(): boolean {
+  return lookupReady;
+}
+
 /** Test-only reset. */
 export function resetIndiaPincodeOfflineLookupForTests(): void {
   lookupPromise = null;
+  lookupReady = false;
   deferredWarmScheduled = false;
 }
 
@@ -36,8 +47,9 @@ export function warmIndiaPincodeOfflineLookup(): void {
 }
 
 /**
- * Warm after interactions + idle delay — for Map mode only.
+ * Warm after interactions + idle delay — for Map mode / post-response only.
  * Never call from Calendar-only / post-login tab mount.
+ * Never await this from the interactive PIN path.
  */
 export function scheduleDeferredIndiaPincodeWarm(delayMs = 4000): void {
   if (deferredWarmScheduled || lookupPromise) return;
@@ -52,7 +64,16 @@ export function scheduleDeferredIndiaPincodeWarm(delayMs = 4000): void {
 /** Await the shared offline lookup (deduped across resolver + map coords). */
 export function getSharedIndiaPincodeOfflineLookup() {
   if (!lookupPromise) {
-    lookupPromise = getIndiaPincode();
+    lookupPromise = getIndiaPincode()
+      .then((db) => {
+        lookupReady = true;
+        return db;
+      })
+      .catch((err) => {
+        lookupPromise = null;
+        lookupReady = false;
+        throw err;
+      });
   }
   return lookupPromise;
 }

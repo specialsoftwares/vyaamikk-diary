@@ -123,6 +123,21 @@ const otpBack = dispatchWizardNav({ type: "BACK", from: "emailOtp", uid: "u1" })
 assert.equal(otpBack.targetStep, "emailEntry");
 assert.equal(otpBack.snapshot.navigationIntent, "reviewPreviousStep");
 
+// --- Email verify success must not be blocked by mount-guard semantics ---
+// continueForward@emailOtp makes shouldSuppressForwardGuard(businessIdentity)=true
+// (correct for boot/mount steals). Intentional post-verify continue must still
+// mark businessIdentity and navigate — AuthFlowGate.goToBusinessIdentity uses
+// isReviewIntentActive only, not shouldSuppressForwardGuard.
+reset();
+markContinuingWizardStep("emailOtp", "u1");
+assert.equal(shouldSuppressForwardGuard("businessIdentity"), true);
+assert.equal(isReviewIntentActive(), false);
+markContinuingWizardStep("businessIdentity", "u1", {
+  verifiedEmail: "owner@example.com",
+});
+assert.equal(getWizardSnapshot().currentLogicalStep, "businessIdentity");
+assert.equal(getWizardSnapshot().navigationIntent, "continueForward");
+
 // --- Progress from visible logical step only (no Step N of M) ---
 reset();
 assert.equal(wizardProgressStage("emailEntry"), "account");

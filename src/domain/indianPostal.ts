@@ -18,6 +18,8 @@ export interface IndianPostalLocation {
 
 export type PincodeResolutionSource = "cache" | "offline" | "api" | "manual";
 
+export type PincodeResolutionErrorClass = "not_found" | "timeout" | "transport" | "parse";
+
 export interface PincodeResolution {
   pinCode: string;
   success: boolean;
@@ -27,4 +29,6 @@ export interface PincodeResolution {
   district: string | null;
   state: string | null;
   country: string;
+  /** Present only on unsuccessful lookups — distinguishes network vs unknown PIN. */
+  errorClass?: PincodeResolutionErrorClass;
 }

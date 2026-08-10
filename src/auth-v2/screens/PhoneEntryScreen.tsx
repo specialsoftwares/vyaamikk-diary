@@ -1,23 +1,28 @@
 import React, { useMemo, useState } from "react";
 import { Keyboard, StyleSheet, Text, TextInput, View } from "react-native";
 
+import { isAuthLegalConsentReady } from "@/components/legal/authConsentLine";
 import { LegalConsentCheckboxes } from "@/components/legal/LegalConsentCheckboxes";
 import { PhoneConfirmCard } from "@/auth-v2/components/PhoneConfirmCard";
 import { AuthShell } from "@/auth-v2/components/AuthShell";
+import { PhoneEntryBrandSignature } from "@/auth-v2/components/PhoneEntryBrandSignature";
 import { AuthV2PrimaryButton } from "@/auth-v2/components/AuthV2PrimaryButton";
+import { OnboardingInlineMessage } from "@/auth-v2/components/OnboardingInlineMessage";
 import {
-  acceptLocalMobileInput,
+  ingestIndianMobileFieldInput,
+  isPhoneContinueEnabled,
   isValidIndianLocalMobile,
   toE164FromDraft,
 } from "@/auth-v2/phoneValidation";
+import { onboardingMark } from "@/auth-v2/onboardingPerfProbe";
 import { authV2Tokens } from "@/auth-v2/theme/authV2Theme";
-import type { AuthV2PhoneDraft } from "@/auth-v2/types";
-import { DEFAULT_AUTH_V2_COUNTRY_CODE } from "@/auth-v2/types";
+import { DEFAULT_AUTH_V2_COUNTRY_CODE, type AuthV2PhoneDraft } from "@/auth-v2/types";
 import { useT } from "@/i18n";
 import { formatDisplayPhone } from "@/utils/phone";
 import { spacing, typography, useTheme } from "@/theme";
 import { useIsOnline } from "@/state/network";
 import { Banner } from "@/components/ui";
+import { PhoneAuthErrorPanel } from "@/auth-v2/components/PhoneAuthErrorPanel";
 
 interface PhoneEntryScreenProps {
   draft: AuthV2PhoneDraft;
@@ -33,6 +38,12 @@ interface PhoneEntryScreenProps {
   onBack?: () => void;
   loading?: boolean;
   error?: string | null;
+  errorTitle?: string | null;
+  /** Safe Firebase Auth code e.g. auth/missing-client-identifier */
+  errorDiagnostic?: string | null;
+  onCopyErrorDiagnostics?: () => void;
+  /** Presentation host without legal routes (dev harness). */
+  onOpenLegalDocument?: (doc: import("@/config/legal").LegalDocumentId) => void;
 }
 
 export function PhoneEntryScreen({
@@ -43,12 +54,16 @@ export function PhoneEntryScreen({
   privacyAccepted,
   onTermsAcceptedChange,
   onPrivacyAcceptedChange,
-  onContinueToConfirm,
+  onContinueToConfirm: _onContinueToConfirm,
   onConfirmSend,
   onBackFromConfirm,
   onBack,
   loading = false,
   error = null,
+  errorTitle = null,
+  errorDiagnostic = null,
+  onCopyErrorDiagnostics,
+  onOpenLegalDocument,
 }: PhoneEntryScreenProps) {
   const t = useT();
   const online = useIsOnline();
@@ -56,6 +71,7 @@ export function PhoneEntryScreen({
   const tokens = authV2Tokens(colors, resolvedMode === "dark");
   const [focused, setFocused] = useState(false);
   const [formatError, setFormatError] = useState<string | null>(null);
+  const [consentPrompt, setConsentPrompt] = useState(false);
 
   const valid = useMemo(
     () =>
@@ -64,7 +80,8 @@ export function PhoneEntryScreen({
     [draft.countryCode, draft.localNumber]
   );
 
-  const consentReady = termsAccepted && privacyAccepted;
+  const consentReady = isAuthLegalConsentReady(termsAccepted, privacyAccepted);
+  const continueEnabled = isPhoneContinueEnabled({ valid, online, loading });
 
   const displayPhone = useMemo(() => {
     if (!valid) return "";
@@ -75,39 +92,71 @@ export function PhoneEntryScreen({
     }
   }, [draft, valid]);
 
-  const handleContinue = () => {
+  const handlePrimary = () => {
     Keyboard.dismiss();
-    onContinueToConfirm();
+    if (!consentReady) {
+      setConsentPrompt(true);
+      return;
+    }
+    setConsentPrompt(false);
+    onboardingMark("continueTap");
+    // Happy path: send immediately. Confirm card remains for number-change review.
+    onConfirmSend();
   };
 
   const footer =
     step === "phone" ? (
       <>
-        {!online ? (
-          <Banner tone="warning" message={t("common.offlineHint")} />
+        {!online ? <Banner tone="warning" message={t("common.offlineHint")} /> : null}
+        {formatError ? <OnboardingInlineMessage tone="danger" message={formatError} /> : null}
+        {consentPrompt && !consentReady ? (
+          <OnboardingInlineMessage
+            tone="danger"
+            message="Accept Terms and Privacy to continue."
+          />
         ) : null}
-        {formatError ? <Banner tone="danger" message={formatError} /> : null}
-        {error ? <Banner tone="danger" message={error} /> : null}
+        <PhoneAuthErrorPanel
+          title={errorTitle}
+          message={error}
+          diagnostic={errorDiagnostic}
+          onCopyDiagnostics={onCopyErrorDiagnostics}
+        />
         <LegalConsentCheckboxes
-          variant="auth"
+          variant="authCompact"
           termsAccepted={termsAccepted}
           privacyAccepted={privacyAccepted}
-          onTermsAcceptedChange={onTermsAcceptedChange}
-          onPrivacyAcceptedChange={onPrivacyAcceptedChange}
+          onOpenDocument={onOpenLegalDocument}
+          onTermsAcceptedChange={(v) => {
+            onTermsAcceptedChange(v);
+            if (v && privacyAccepted) setConsentPrompt(false);
+          }}
+          onPrivacyAcceptedChange={(v) => {
+            onPrivacyAcceptedChange(v);
+            if (v && termsAccepted) setConsentPrompt(false);
+          }}
         />
         <AuthV2PrimaryButton
           label={t("authV2.phone.continue")}
           loading={loading}
-          loadingLabel={t("authV2.phone.checking")}
-          disabled={!valid || !online || !consentReady || loading}
-          onPress={handleContinue}
+          loadingLabel={t("authV2.phone.sending")}
+          disabled={!continueEnabled}
+          onPress={handlePrimary}
           testID="auth-v2-phone-continue"
           activeBg={tokens.ctaActiveBg}
           activeText={tokens.ctaActiveText}
           mutedBg={tokens.ctaMutedBg}
           mutedText={tokens.ctaMutedText}
+            mutedBorder={tokens.ctaMutedBorder}
         />
+        <PhoneEntryBrandSignature />
       </>
+    ) : error ? (
+      <PhoneAuthErrorPanel
+        title={errorTitle}
+        message={error}
+        diagnostic={errorDiagnostic}
+        onCopyDiagnostics={onCopyErrorDiagnostics}
+      />
     ) : null;
 
   return (
@@ -115,6 +164,8 @@ export function PhoneEntryScreen({
       title={t("authV2.phone.title")}
       subtitle={t("authV2.phone.subtitle")}
       footer={footer}
+      footerPlacement="actionZone"
+      headerTop={null}
       onBack={step === "confirm" ? onBackFromConfirm : onBack}
       showBack={step === "confirm" ? true : Boolean(onBack)}
     >
@@ -141,28 +192,36 @@ export function PhoneEntryScreen({
           ]}
           value={draft.localNumber}
           onChangeText={(text) => {
-            const accepted = acceptLocalMobileInput(text);
-            if (accepted == null) {
-              setFormatError(
-                "Enter exactly 10 digits (0–9). Spaces, dashes, +91, or other characters are not accepted."
-              );
+            const ingested = ingestIndianMobileFieldInput(text);
+            if (ingested.status === "rejected") {
+              setFormatError(ingested.reason);
               return;
             }
             setFormatError(null);
             onDraftChange({
               ...draft,
-              localNumber: accepted,
+              localNumber: ingested.status === "empty" ? "" : ingested.localDigits,
             });
+            const nextValid =
+              draft.countryCode === DEFAULT_AUTH_V2_COUNTRY_CODE &&
+              ingested.status === "complete";
+            if (nextValid) onboardingMark("phoneInputValid");
           }}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           placeholder={t("login.mobilePlaceholder")}
           placeholderTextColor={tokens.placeholder}
-          keyboardType="number-pad"
-          maxLength={10}
+          keyboardType="phone-pad"
+          inputMode="numeric"
+          maxLength={18}
           autoComplete="tel"
           textContentType="telephoneNumber"
+          importantForAutofill="yes"
           editable={!loading && step === "phone"}
+          returnKeyType="done"
+          onSubmitEditing={() => {
+            if (continueEnabled) handlePrimary();
+          }}
           accessibilityLabel="Mobile number, 10 digits"
           testID="auth-v2-phone-input"
         />
@@ -170,7 +229,10 @@ export function PhoneEntryScreen({
       {step === "confirm" && displayPhone ? (
         <PhoneConfirmCard
           displayPhone={displayPhone}
-          onConfirm={() => void onConfirmSend()}
+          onConfirm={() => {
+            onboardingMark("continueTap");
+            void onConfirmSend();
+          }}
           onBack={onBackFromConfirm}
           loading={loading}
         />

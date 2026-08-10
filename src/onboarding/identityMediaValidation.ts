@@ -61,7 +61,10 @@ export function validateIdentityMediaCandidate(input: {
         return { ok: false, reason: "too_small", message: "Image too small." };
       }
     }
-    if (!input.base64) {
+    // Prefer file URI persistence (no base64 bridge). Base64 remains accepted
+    // when present; URI-only candidates are valid when size is known or unknown
+    // (persist path re-validates after copy).
+    if (!input.base64 && !input.uri?.trim()) {
       return { ok: false, reason: "corrupted", message: "Unreadable image data." };
     }
     if (input.approxBytes > MAX_PROFILE_LOGO_BYTES) {
