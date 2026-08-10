@@ -46,10 +46,38 @@ export function getNativeAuthUid(): string | null {
   }
 }
 
+/** Safe snapshot for diagnostics — never includes tokens. */
+export function getJsAuthBridgeSnapshot(): {
+  nativeUidPresent: boolean;
+  nativeUidSuffix: string | null;
+  jsUidPresent: boolean;
+  jsUidSuffix: string | null;
+  uidsMatch: boolean | null;
+} {
+  const nativeUid = getNativeAuthUid();
+  let jsUid: string | null = null;
+  try {
+    jsUid = getFirebaseAuth().currentUser?.uid ?? null;
+  } catch {
+    jsUid = null;
+  }
+  const nativeUidSuffix = nativeUid && nativeUid.length >= 6 ? nativeUid.slice(-6) : null;
+  const jsUidSuffix = jsUid && jsUid.length >= 6 ? jsUid.slice(-6) : null;
+  return {
+    nativeUidPresent: Boolean(nativeUid),
+    nativeUidSuffix,
+    jsUidPresent: Boolean(jsUid),
+    jsUidSuffix,
+    uidsMatch: nativeUid && jsUid ? nativeUid === jsUid : null,
+  };
+}
+
 async function establishJsAuthSession(): Promise<boolean> {
   const nativeUid = getNativeAuthUid();
   if (!nativeUid) {
-    log.warn("ensureJsAuthSession: no native auth session to bridge");
+    log.warn("ensureJsAuthSession: no native auth session to bridge", {
+      ...getJsAuthBridgeSnapshot(),
+    });
     return false;
   }
 
@@ -60,11 +88,15 @@ async function establishJsAuthSession(): Promise<boolean> {
   const { token } = await callMintClientAuthToken();
   const cred = await signInWithCustomToken(auth, token);
   if (cred.user.uid !== nativeUid) {
-    log.error("ensureJsAuthSession: uid mismatch after custom-token sign-in");
+    log.error("ensureJsAuthSession: uid mismatch after custom-token sign-in", {
+      ...getJsAuthBridgeSnapshot(),
+    });
     await auth.signOut();
     return false;
   }
-  log.info("ensureJsAuthSession: JS SDK session established");
+  log.info("ensureJsAuthSession: JS SDK session established", {
+    ...getJsAuthBridgeSnapshot(),
+  });
   return true;
 }
 
@@ -87,7 +119,14 @@ export async function ensureJsAuthSession(): Promise<boolean> {
   if (!inFlight) {
     inFlight = establishJsAuthSession()
       .catch((e) => {
-        log.warn("ensureJsAuthSession failed", e);
+        const code =
+          e && typeof e === "object" && "code" in e
+            ? String((e as { code: string }).code)
+            : "unknown";
+        log.warn("ensureJsAuthSession failed", {
+          code,
+          ...getJsAuthBridgeSnapshot(),
+        });
         return false;
       })
       .finally(() => {
@@ -95,4 +134,31 @@ export async function ensureJsAuthSession(): Promise<boolean> {
       });
   }
   return inFlight;
+}
+
+/**
+ * Production Firestore/Storage readiness: bridge must succeed.
+ * Throws a structured AppError instead of allowing a raw permission-denied.
+ */
+export async function requireJsAuthSessionForFirestore(phase: string): Promise<void> {
+  if (getActiveBackend() !== "firebase-production") return;
+  const ok = await ensureJsAuthSession();
+  if (ok) return;
+  const { AppError } = await import("@/domain/errors");
+  const snap = getJsAuthBridgeSnapshot();
+  throw new AppError(
+    "auth_failed",
+    "Your phone sign-in succeeded, but secure cloud access is not ready yet. Please try again.",
+    undefined,
+    {
+      authPhase: "post_auth",
+      failureDomain: "firestore",
+      diagnosticCode: "JS_AUTH_BRIDGE_FAILED",
+      phase,
+      nativeUidPresent: snap.nativeUidPresent,
+      jsUidPresent: snap.jsUidPresent,
+      uidsMatch: snap.uidsMatch,
+      retryAccountSetup: true,
+    }
+  );
 }

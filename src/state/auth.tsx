@@ -147,7 +147,10 @@ interface AuthApi extends AuthState {
   /** Save session after production account reactivation (post email verify). */
   finishReactivation(profile: UserProfile): Promise<UserProfile>;
   acknowledgeUEID(): void;
-  updateProfile(patch: ProfilePatch): Promise<UserProfile>;
+  updateProfile(
+    patch: ProfilePatch,
+    opts?: { user?: UserProfile }
+  ): Promise<UserProfile>;
   /** Refresh session from a server-returned profile (email bind, reactivation). */
   applyServerProfile(profile: UserProfile): Promise<UserProfile>;
   /** Persist usage heartbeat (`lastActiveAt` only — never login fields). */
@@ -391,13 +394,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const updateProfile = useCallback(
-    async (patch: ProfilePatch): Promise<UserProfile> => {
-      const current = state.session?.user;
+    async (
+      patch: ProfilePatch,
+      opts?: { /** Authoritative user when React session state has not committed yet. */ user?: UserProfile }
+    ): Promise<UserProfile> => {
+      const current = opts?.user ?? state.session?.user;
       if (!current) throw toAppError(new Error("Not signed in."));
       try {
         const next = await getAuthService().updateProfile(current.uid, patch);
         const session = await saveSession(next, { preserveSignedInAt: true });
-        setState((s) => ({ ...s, session, user: session.user }));
+        setState((s) => ({
+          ...s,
+          status: "signed_in",
+          session,
+          user: session.user,
+        }));
         return session.user;
       } catch (e) {
         throw toAppError(e);
