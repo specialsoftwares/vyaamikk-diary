@@ -2,14 +2,14 @@
  * Deterministic device-integrity adapter for unit/integration tests.
  *
  * Soft-audit (package.json): no Play Integrity / App Attest / jailbreak SDK is
- * declared. Do NOT add random npm deps. Production remains fail-closed via
- * `probeDeviceIntegrity()` in deviceIntegrity.ts until a vetted SDK is wired.
+ * declared. Do NOT add random npm deps. Production probe remains dormant until
+ * a vetted SDK is wired — do not claim fail-closed login today.
  */
 
 import type { DeviceIntegrityResult, DeviceIntegrityVerdict } from "./deviceIntegrity";
 
 const LIMITATION =
-  "Test adapter only. Production must use a real integrity SDK and stay fail-closed when unavailable.";
+  "Test adapter only. Production probe is dormant until a real integrity SDK is wired.";
 
 export function createDeterministicIntegrityAdapter(
   verdict: DeviceIntegrityVerdict,
@@ -19,6 +19,8 @@ export function createDeterministicIntegrityAdapter(
     verdict,
     reason,
     limitation: LIMITATION,
+    // Test adapters simulate an active (non-dormant) enforcement path.
+    dormant: false,
   });
 }
 

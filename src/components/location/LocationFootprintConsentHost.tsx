@@ -1,30 +1,28 @@
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useState } from "react";
 import { AppState, type AppStateStatus } from "react-native";
-import { useFocusEffect, usePathname } from "expo-router";
+import { useFocusEffect } from "expo-router";
 
 import { LocationFootprintConsentSheet } from "@/components/location/LocationFootprintConsentSheet";
+import { LOCATION_FOOTPRINT_AUTO_PROMPT_ENABLED_V1 } from "@/components/location/locationFootprintAutoPrompt";
 import { useAuth } from "@/state/auth";
 import {
-  loadLocationFootprintPreferences,
-  markLocationFootprintConsentShown,
   saveLocationFootprintPreferences,
-  shouldShowLocationFootprintConsent,
   syncLocationFootprintPermissionStatus,
 } from "@/services/location/locationFootprintPreferences";
 import { locationService } from "@/services/location";
 
-const TAB_SEGMENT = /\(tabs\)\/(you|calendar|settings)/;
-
 /**
- * One-time in-app explanation before any native location permission request.
- * Foreground footprints only — never blocks app use.
+ * Location footprint consent host — V1 dormant for auto-prompt.
+ * Mounted under the tab shell for capability retention, but does NOT open a
+ * sheet merely because profileCompletedAt is set or locationConsentShownAt is
+ * missing (including reinstall). Native permission is only requested from an
+ * explicit Allow action if/when a later contextual phase re-enables prompting.
  */
 export function LocationFootprintConsentHost() {
   const { user } = useAuth();
-  const pathname = usePathname();
+  // Force closed while V1 auto-prompt is disabled (visible state retained for Allow handlers).
   const [visible, setVisible] = useState(false);
   const [busy, setBusy] = useState(false);
-  const checkingRef = useRef(false);
 
   const syncPermission = useCallback(async () => {
     if (!user?.uid) return;
@@ -40,31 +38,15 @@ export function LocationFootprintConsentHost() {
     return () => sub.remove();
   }, [syncPermission]);
 
-  const tryShow = useCallback(async () => {
-    if (!user?.profileCompletedAt || !user.ueidReleasedAt || !user.onboardingIntroSeenAt) {
-      return;
-    }
-    if (!user.uid) return;
-    if (pathname.includes("composer")) return;
-    if (!TAB_SEGMENT.test(pathname)) return;
-    if (checkingRef.current) return;
-    checkingRef.current = true;
-    try {
-      const show = await shouldShowLocationFootprintConsent(user.uid);
-      if (!show) return;
-      setVisible(true);
-      await markLocationFootprintConsentShown(user.uid);
-    } finally {
-      checkingRef.current = false;
-    }
-  }, [user, pathname]);
-
+  // V1 contract: after Profile Review → Workspace Ready → You, do NOT auto-open
+  // a GPS/location footprint sheet. Missing locationConsentShownAt (including
+  // reinstall) must not interrupt the workspace. Host stays mounted/dormant;
+  // permission is only requested from an explicit Allow action if this sheet
+  // is shown later by a bounded contextual phase — never fake-set shownAt here.
   useFocusEffect(
     useCallback(() => {
       void syncPermission();
-      const id = setTimeout(() => void tryShow(), 1100);
-      return () => clearTimeout(id);
-    }, [tryShow, syncPermission])
+    }, [syncPermission])
   );
 
   const onAllow = useCallback(async () => {
@@ -103,7 +85,7 @@ export function LocationFootprintConsentHost() {
 
   return (
     <LocationFootprintConsentSheet
-      visible={visible}
+      visible={LOCATION_FOOTPRINT_AUTO_PROMPT_ENABLED_V1 ? visible : false}
       busy={busy}
       onAllow={() => void onAllow()}
       onNotNow={onNotNow}

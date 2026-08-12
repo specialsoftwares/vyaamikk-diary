@@ -8,19 +8,35 @@ import { isLang, SUPPORTED_LANGS } from "./types";
 const NS = "translation" as const;
 
 /**
- * English is the only eagerly-registered bundle (fallback language, required
- * for first paint). The other locale payloads (~130–200KB JSON each) load on
- * demand via dynamic import — at boot for a stored non-English preference, or
- * during a language transition before the switch commits.
+ * English is the only eagerly-registered i18n bundle (fallback language,
+ * required for first paint). Other locales are registered into i18next on
+ * demand — at boot for a stored non-English preference, or during a language
+ * transition before the switch commits.
+ *
+ * Loaders use synchronous `require()` of explicit `.json` paths (not
+ * `import()`). Metro's async-require chunks for JSON are fragile under Expo Go
+ * HMR ("Requiring unknown module N") after graph changes; require keeps the
+ * payloads in the main bundle while still delaying `addResourceBundle` until
+ * the language is actually needed.
  */
 type LocaleModule = { default?: Record<string, unknown> } & Record<string, unknown>;
 
-const LOCALE_LOADERS: Record<Exclude<Lang, "en">, () => Promise<LocaleModule>> = {
-  hi: () => import("./locales/hi.json"),
-  ta: () => import("./locales/ta.json"),
-  te: () => import("./locales/te.json"),
-  gu: () => import("./locales/gu.json"),
-};
+function loadLocaleModule(lang: Exclude<Lang, "en">): LocaleModule {
+  switch (lang) {
+    case "hi":
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      return require("./locales/hi.json") as LocaleModule;
+    case "ta":
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      return require("./locales/ta.json") as LocaleModule;
+    case "te":
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      return require("./locales/te.json") as LocaleModule;
+    case "gu":
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      return require("./locales/gu.json") as LocaleModule;
+  }
+}
 
 const bundleLoads = new Map<Lang, Promise<void>>();
 
@@ -76,9 +92,13 @@ export async function ensureLocaleBundle(lang: Lang): Promise<void> {
 
   let load = bundleLoads.get(lang);
   if (!load) {
-    load = LOCALE_LOADERS[lang]()
-      .then((mod) => {
+    load = Promise.resolve()
+      .then(() => {
+        const mod = loadLocaleModule(lang);
         const data = (mod.default ?? mod) as Record<string, unknown>;
+        if (!data || typeof data !== "object" || Object.keys(data).length === 0) {
+          throw new Error(`[i18n] locale bundle empty: ${lang}`);
+        }
         i18n.addResourceBundle(lang, NS, data, true, true);
       })
       .catch((e: unknown) => {

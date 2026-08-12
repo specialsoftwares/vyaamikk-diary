@@ -116,7 +116,39 @@ assert.equal(
       profileCompletedAt: 1,
     })
   ),
-  "ueidRelease"
+  "profileReview"
+);
+
+assert.equal(
+  isPreDashboardOnboardingIncomplete(
+    baseUser({
+      businessEmail: "a@b.co",
+      normalizedEmail: "a@b.co",
+      emailStatus: "verified",
+      emailVerifiedAt: 1,
+      profileCompletedAt: 1,
+    }),
+    { locationConsentShown: false }
+  ),
+  false,
+  "missing locationConsentShownAt must not block dashboard after profile complete"
+);
+
+assert.equal(
+  isPreDashboardOnboardingIncomplete(
+    baseUser({
+      businessEmail: "a@b.co",
+      normalizedEmail: "a@b.co",
+      emailStatus: "verified",
+      emailVerifiedAt: 1,
+      profileCompletedAt: 1,
+      ueidReleasedAt: null,
+      onboardingIntroSeenAt: null,
+    }),
+    { locationConsentShown: false }
+  ),
+  false,
+  "missing ueidReleasedAt / onboardingIntroSeenAt must not block dashboard"
 );
 
 assert.equal(

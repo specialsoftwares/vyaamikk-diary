@@ -38,8 +38,10 @@ const emailIndex = new Map<string, string>(); // hash -> uid
 const byUidActive = new Map<string, string>(); // uid -> challengeId
 
 /**
- * All conditions required — never infer safety from `__DEV__` or Expo Go alone.
- * Requires explicit `EXPO_PUBLIC_LOCAL_MOCK_EMAIL_OTP=1`.
+ * Local-mock email OTP is allowed when active backend is local-mock in
+ * development. Expo Go is allowed without the explicit env flag (no real email
+ * provider in that runtime). Other local-mock runtimes still require
+ * `EXPO_PUBLIC_LOCAL_MOCK_EMAIL_OTP=1`.
  */
 export function isApprovedLocalMockEmailOtpEnvironment(): boolean {
   const resolved = getResolvedEnvironment();
@@ -48,6 +50,7 @@ export function isApprovedLocalMockEmailOtpEnvironment(): boolean {
   if (resolved.effectiveAppMode !== "development") return false;
   if (resolved.bundledAppMode === "production") return false;
   if (resolved.isProduction) return false;
+  if (resolved.runtime === "expo-go") return true;
   if (process.env.EXPO_PUBLIC_LOCAL_MOCK_EMAIL_OTP !== "1") return false;
   return true;
 }

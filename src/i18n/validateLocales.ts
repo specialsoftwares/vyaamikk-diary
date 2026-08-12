@@ -3,19 +3,27 @@ import { SUPPORTED_LANGS, type Lang } from "./types";
 
 type JsonTree = Record<string, unknown>;
 
-/** Dynamic imports keep non-English payloads out of the eager boot path. */
-async function loadLocaleTree(lang: Lang): Promise<JsonTree> {
+/**
+ * Read locale JSON via static `require` paths (not dynamic `import()`).
+ * Metro async chunks for JSON are unreliable under Expo Go HMR.
+ * This does NOT register bundles into i18next — validation is read-only.
+ */
+function loadLocaleTree(lang: Lang): JsonTree {
   switch (lang) {
     case "en":
       return en as JsonTree;
     case "hi":
-      return (await import("./locales/hi.json")).default as JsonTree;
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      return require("./locales/hi.json") as JsonTree;
     case "ta":
-      return (await import("./locales/ta.json")).default as JsonTree;
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      return require("./locales/ta.json") as JsonTree;
     case "te":
-      return (await import("./locales/te.json")).default as JsonTree;
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      return require("./locales/te.json") as JsonTree;
     case "gu":
-      return (await import("./locales/gu.json")).default as JsonTree;
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      return require("./locales/gu.json") as JsonTree;
   }
 }
 
@@ -47,7 +55,7 @@ export async function validateLocaleSetup(): Promise<LocaleValidationReport> {
 
   for (const lang of SUPPORTED_LANGS) {
     try {
-      const tree = await loadLocaleTree(lang);
+      const tree = loadLocaleTree(lang);
       if (tree && Object.keys(tree).length > 0) {
         trees.set(lang, tree);
         registered.push(lang);

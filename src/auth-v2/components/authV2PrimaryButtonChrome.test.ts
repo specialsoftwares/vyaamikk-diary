@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 
+import { AUTH_SECONDARY_ACTIVE } from "@/actionSystem/authSecondaryActive";
 import { authV2Tokens } from "@/auth-v2/theme/authV2Theme";
-import { lightColors } from "@/theme/palettes";
+import { darkColors, lightColors } from "@/theme/palettes";
 import { resolveAuthV2PrimaryChrome } from "./authV2PrimaryButtonChrome";
 
 assert.equal(resolveAuthV2PrimaryChrome({ disabled: true, loading: false }), "muted");
@@ -18,5 +19,13 @@ assert.notEqual(dark.ctaMutedBg.toLowerCase(), "#9ca3af");
 assert.notEqual(dark.ctaMutedBg.toLowerCase(), "gray");
 assert.notEqual(dark.ctaActiveBg, dark.ctaMutedBg);
 assert.ok(dark.ctaActiveBg.startsWith("#"));
+
+/** Secondary-active must stay safe even when device palette is dark (poisoned link). */
+const poisoned = authV2Tokens(darkColors, true);
+assert.equal(poisoned.link, darkColors.primaryLight);
+assert.equal(poisoned.secondaryActiveFg, AUTH_SECONDARY_ACTIVE.fg);
+assert.notEqual(poisoned.secondaryActiveFg, poisoned.link);
+assert.equal(poisoned.secondaryActiveBorder, AUTH_SECONDARY_ACTIVE.border);
+assert.equal(poisoned.secondaryActiveFill, AUTH_SECONDARY_ACTIVE.fill);
 
 console.log("authV2PrimaryButtonChrome.test.ts: ok");

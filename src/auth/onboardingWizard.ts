@@ -105,11 +105,10 @@ export function maxAuthorizedWizardStep(
   }
 
   if (!user.profileCompletedAt) return "businessIdentity";
-  if (!user.ueidReleasedAt) return "ueidRelease";
-  if (!user.onboardingIntroSeenAt) return "onboardingIntro";
-  if (!opts?.locationConsentShown) return "locationFootprint";
-  // Fully onboarded — wizard should be cleared; treat location as max.
-  return "locationFootprint";
+  // Post-profile UEID reveal / Intro / GPS footprint are no longer mandatory.
+  // Keep opts typed for callers; ignore acknowledgement flags for V1.
+  void opts?.locationConsentShown;
+  return "profileReview";
 }
 
 /**
@@ -129,10 +128,9 @@ export function resumeWizardStep(
     return "emailEntry";
   }
   if (!user.profileCompletedAt) return "businessIdentity";
-  if (!user.ueidReleasedAt) return "ueidRelease";
-  if (!user.onboardingIntroSeenAt) return "onboardingIntro";
-  if (!opts?.locationConsentShown) return "locationFootprint";
-  return "locationFootprint";
+  // Profile complete → mandatory onboarding done (ack flags ignored for V1).
+  void opts?.locationConsentShown;
+  return "profileReview";
 }
 
 export function canVisitWizardStep(
@@ -150,9 +148,8 @@ export function isPreDashboardOnboardingIncomplete(
   if (!user) return true;
   if (!hasAuthoritativeVerifiedEmail(user)) return true;
   if (!user.profileCompletedAt) return true;
-  if (!user.ueidReleasedAt) return true;
-  if (!user.onboardingIntroSeenAt) return true;
-  if (!opts?.locationConsentShown) return true;
+  // V1: do not block on ueidReleasedAt / onboardingIntroSeenAt / locationConsentShown.
+  void opts?.locationConsentShown;
   return false;
 }
 

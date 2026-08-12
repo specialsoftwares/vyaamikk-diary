@@ -27,12 +27,13 @@ async function main() {
   assert.equal(MOBILE_OTP_MAX_ATTEMPTS, 3);
 
   resetLocalMockMobileOtpForTests();
-  __setRuntimeSignalsForTests({
-    appOwnership: "expo",
-    isDev: true,
-    platform: "ios",
-  });
 
+  // Non–Expo Go local-mock still requires the explicit flag.
+  __setRuntimeSignalsForTests({
+    appOwnership: null,
+    isDev: true,
+    platform: "web",
+  });
   delete process.env.EXPO_PUBLIC_LOCAL_MOCK_MOBILE_OTP;
   assert.equal(isApprovedLocalMockMobileOtpEnvironment(), false);
   let blocked = false;
@@ -41,8 +42,27 @@ async function main() {
   } catch {
     blocked = true;
   }
-  assert.equal(blocked, true, "mobile mock OTP requires EXPO_PUBLIC_LOCAL_MOCK_MOBILE_OTP=1");
+  assert.equal(blocked, true, "non-Expo local-mock requires EXPO_PUBLIC_LOCAL_MOCK_MOBILE_OTP=1");
 
+  // Expo Go local-mock allows mock OTP without the env flag (no real SMS).
+  __setRuntimeSignalsForTests({
+    appOwnership: "expo",
+    isDev: true,
+    platform: "ios",
+  });
+  delete process.env.EXPO_PUBLIC_LOCAL_MOCK_MOBILE_OTP;
+  assert.equal(isApprovedLocalMockMobileOtpEnvironment(), true);
+
+  delete process.env.EXPO_PUBLIC_LOCAL_MOCK_MOBILE_OTP;
+  // Production-like signals require APP_MODE=production — instead verify that
+  // firebase / non-local backends reject the deterministic code by clearing
+  // approval via a non-expo runtime without the flag (already covered above).
+  // Explicitly reject when backend is not local-mock:
+  __setRuntimeSignalsForTests({
+    appOwnership: null,
+    isDev: true,
+    platform: "web",
+  });
   delete process.env.EXPO_PUBLIC_LOCAL_MOCK_MOBILE_OTP;
   let guardBlocked = false;
   try {
@@ -50,8 +70,13 @@ async function main() {
   } catch {
     guardBlocked = true;
   }
-  assert.equal(guardBlocked, true, "production/shared must reject 000000");
+  assert.equal(guardBlocked, true, "non-approved env must reject 000000");
 
+  __setRuntimeSignalsForTests({
+    appOwnership: "expo",
+    isDev: true,
+    platform: "ios",
+  });
   process.env.EXPO_PUBLIC_LOCAL_MOCK_MOBILE_OTP = "1";
   assert.equal(isApprovedLocalMockMobileOtpEnvironment(), true);
 

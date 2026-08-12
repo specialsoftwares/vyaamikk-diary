@@ -120,10 +120,19 @@
       "placeholder": "Email address",
       "continue": "Continue",
       "saving": "Saving…",
-      "footnote": "Email verification by link is not enabled yet.",
+      "footnote": "We will email a 6-digit verification code to confirm this address.",
       "prefilledHint": "We will use the email already saved on your account.",
       "linkNotice": "This email will be linked to your Vyaamikk account."
+    },
+    "emailOtp": {
+      "title": "Confirm your business email",
+      "verify": "Verify email",
+      "verifying": "Verifying…"
     }
+  },
+  "consent": {
+    "termsPrefix": "I agree to the",
+    "privacyPrefix": "I agree to the"
   },
   "login": {
     "heading": "Sign in to your diary",
@@ -978,8 +987,6 @@
     "pdfPrivacy": "PDF Privacy",
     "terms": "Terms of Use",
     "deleteAccount": "Delete Account",
-    "deleteAccountAndData": "Delete Account & Data",
-    "deleteAccountSubtitle": "Permanently remove your account and app-controlled data",
     "logout": "Logout",
     "signingOut": "Signing out…",
     "signOutPrompt": "Sign out?",
@@ -1083,7 +1090,7 @@
     "versionLine": "App version v{{version}}"
   },
   "deleteAccount": {
-    "title": "Delete Account & Data",
+    "title": "Delete Account",
     "bannerTitle": "This action is permanent and cannot be undone",
     "bannerBody": "This deletes your Vyaamikk Diary account — not a sign-out. Your records, drafts, profile, and synced data will be removed according to the scope below.",
     "scopeTitle_deviceOnly": "Delete from this device only",
@@ -1101,9 +1108,9 @@
     "confirmWord": "DELETE",
     "confirmButton": "Delete my account",
     "confirmPrompt": "Delete your account permanently?",
-    "confirmPromptBody": "Your account enters a {{days}}-day pending-deletion period. Business writes are blocked while pending. You are signed out now. To keep the account, complete reactivation with identity verification in the app (not by email reply alone).",
+    "confirmPromptBody": "Your account enters a {{days}}-day deletion period. You are signed out now. You can cancel before the scheduled date by signing in with the same mobile number.",
     "resultGraceTitle": "Deletion scheduled",
-    "result_grace": "Account deletion is pending. Business activity stays blocked until the period ends or you reactivate in the app with the required identity verification. An email reply alone does not cancel deletion.",
+    "result_grace": "Account deletion is in progress. Sign in with the same number before the deadline to cancel, or wait until deletion completes to register fresh.",
     "resultPartialTitle": "Deleted on this device",
     "result_pending": "Deleted from this device. Server deletion is pending or incomplete. Try again later or contact support.",
     "result_failed": "Deleted from this device. Server deletion failed. Try again or contact support.",
@@ -1112,9 +1119,9 @@
   "pendingDeletion": {
     "step": "Account status",
     "title": "Account deletion is in progress",
-    "body": "Mobile {{phone}} has a pending deletion. It will be final on {{date}} ({{days}}-day period). Business writes are blocked. You cannot use the diary until you reactivate in the app or wait for deletion to complete.",
+    "body": "Mobile {{phone}} has a pending deletion. It will be final on {{date}} ({{days}}-day period). You cannot use the app until you cancel deletion or wait for it to complete.",
     "footnote": "After deletion completes, the same number can register again with a new Vyaamikk ID. Old records will not return. PDFs already shared outside the app cannot be recalled.",
-    "reactivateFootnote": "To keep this account, complete reactivation with identity verification in the app. Your Vyaamikk ID and records will be preserved. Emailing support alone does not cancel deletion.",
+    "reactivateFootnote": "To keep this account, verify your registered business email. Your Vyaamikk ID and records will be preserved.",
     "cancelDeletion": "Cancel deletion & keep my account",
     "reactivateAccount": "Reactivate my account",
     "reactivateStep": "Verify email",
@@ -1156,10 +1163,8 @@
       "salutationRequiredA11y": "Title — required",
       "namePlaceholder": "e.g. Asha Sharma",
       "businessLabel": "Business / profession name",
-      "businessLabelOptional": "Business / profession name (optional)",
       "businessPlaceholder": "Shop, company, LLP, or your professional name — individuals may use their own name",
       "fieldLabel": "Field of work",
-      "fieldLabelOptional": "Field of work (optional)",
       "fieldPlaceholder": "e.g. Plastics manufacturing, Legal practice, Site contracting",
       "emailLabel": "Business / professional email",
       "emailPlaceholder": "e.g. you@gmail.com or office@yourfirm.in",
@@ -1319,14 +1324,7 @@
     "linkPrivacy": "Privacy Policy",
     "linkTerms": "Terms of Use",
     "linkDisclaimer": "Disclaimer / Legal Notice",
-    "viewerMeta": "Effective {{effectiveDate}} · {{entity}} · Version {{version}}",
-    "viewerHostedLink": "View full policy on our website",
-    "viewerHostedHub": "Open legal hub on our website",
     "linkDeleteAccount": "Delete Account"
-  },
-  "consent": {
-    "termsPrefix": "I agree to the",
-    "privacyPrefix": "I have read and agree to the"
   },
   "proPack": {
     "title": "Professional Service Pack",
@@ -1337,6 +1335,7 @@
     "formSubtitle": "Enter facts you want your professional to review. All fields marked in the form are required unless labelled optional.",
     "formDisclaimer": "This brief is based solely on information you enter. It is for sharing with an independent CA, CS, or lawyer and must be verified by them before use. The app does not verify facts, file returns, or create a professional-client relationship.",
     "invalid": "Invalid pack",
+    "errSaveInProgress": "Save already in progress. Wait a moment, then try again.",
     "openHistory": "View saved professional packs",
     "historyTitle": "Professional packs",
     "historySubtitle": "Saved briefs for sharing with your professionals",
@@ -1575,6 +1574,7 @@
     "editMetaBanner": "Editing a saved letterhead. The original date is kept; this will become version {{version}} (created {{created}}).",
     "createGenerating": "Generating PDF…",
     "createGenerateFailed": "Couldn't generate the letterhead PDF.",
+    "errSaveInProgress": "Save already in progress. Wait a moment, then try again.",
     "subjectRequired": "Add a subject before generating the PDF.",
     "bodyRequired": "Enter the letter body before generating the PDF.",
     "nameRequired": "Add a sender name (or set one in your profile) before generating.",
@@ -1857,6 +1857,7 @@
     "errGenerate": "Could not generate the document. Please try again.",
     "errSaveInProgress": "Save already in progress. Wait a moment, then try again.",
     "errSavedPdfFailed": "Record saved. PDF could not be generated. Open the record and tap Generate PDF to try again.",
+    "saveInProgress": "Still saving… please wait a moment.",
     "reminderTitle": "Payment due",
     "reminderBody": "A customer payment is due today ({{recordNumber}}).",
     "closureTitle": "Close account",
@@ -2112,6 +2113,7 @@
     "errContactEmail": "Enter a valid contact email.",
     "errGstRate": "Select or enter a GST rate.",
     "errGenerate": "Couldn't generate the purchase order PDF.",
+    "errSaveInProgress": "Save already in progress. Wait a moment, then try again.",
     "generating": "Generating PDF…",
     "createShare": "Generate & share PO",
     "updateShare": "Update & share PO",
@@ -2585,11 +2587,7 @@
   },
   "language": {
     "en": "English",
-    "hi": "हिन्दी",
-    "ta": "தமிழ்",
-    "te": "తెలుగు",
-    "gu": "ગુજરાતી",
-    "toggleAriaLabel": "Switch language",
-    "selectorAriaLabel": "App language"
+    "hi": "हिंदी",
+    "toggleAriaLabel": "Switch language"
   }
 }

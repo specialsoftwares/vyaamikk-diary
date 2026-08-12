@@ -51,13 +51,13 @@ async function main() {
   assert.equal(LEGACY_LOCAL_MOCK_EMAIL_OTP, "246810");
 
   resetLocalMockEmailOtpForTests();
-  __setRuntimeSignalsForTests({
-    appOwnership: "expo",
-    isDev: true,
-    platform: "ios",
-  });
 
-  // Without explicit flag — must refuse (no __DEV__ bypass).
+  // Non–Expo Go local-mock still requires the explicit flag.
+  __setRuntimeSignalsForTests({
+    appOwnership: null,
+    isDev: true,
+    platform: "web",
+  });
   delete process.env.EXPO_PUBLIC_LOCAL_MOCK_EMAIL_OTP;
   assert.equal(isApprovedLocalMockEmailOtpEnvironment(), false);
   let blocked = false;
@@ -66,12 +66,26 @@ async function main() {
   } catch {
     blocked = true;
   }
-  assert.equal(blocked, true, "mock OTP must require EXPO_PUBLIC_LOCAL_MOCK_EMAIL_OTP=1");
+  assert.equal(blocked, true, "non-Expo local-mock requires EXPO_PUBLIC_LOCAL_MOCK_EMAIL_OTP=1");
+
+  // Expo Go local-mock allows mock email OTP without the env flag.
+  __setRuntimeSignalsForTests({
+    appOwnership: "expo",
+    isDev: true,
+    platform: "ios",
+  });
+  delete process.env.EXPO_PUBLIC_LOCAL_MOCK_EMAIL_OTP;
+  assert.equal(isApprovedLocalMockEmailOtpEnvironment(), true);
 
   process.env.EXPO_PUBLIC_LOCAL_MOCK_EMAIL_OTP = "1";
   assert.equal(isApprovedLocalMockEmailOtpEnvironment(), true);
 
-  // Deterministic OTP guard rejects outside env even if somehow called.
+  // Deterministic OTP guard rejects outside approved env.
+  __setRuntimeSignalsForTests({
+    appOwnership: null,
+    isDev: true,
+    platform: "web",
+  });
   delete process.env.EXPO_PUBLIC_LOCAL_MOCK_EMAIL_OTP;
   let guardBlocked = false;
   try {
@@ -79,7 +93,12 @@ async function main() {
   } catch {
     guardBlocked = true;
   }
-  assert.equal(guardBlocked, true, "production/shared mode must never accept 000000");
+  assert.equal(guardBlocked, true, "non-approved env must never accept 000000");
+  __setRuntimeSignalsForTests({
+    appOwnership: "expo",
+    isDev: true,
+    platform: "ios",
+  });
   process.env.EXPO_PUBLIC_LOCAL_MOCK_EMAIL_OTP = "1";
   assertDeterministicLocalMockOtpAllowed(LOCAL_MOCK_DETERMINISTIC_EMAIL_OTP);
 

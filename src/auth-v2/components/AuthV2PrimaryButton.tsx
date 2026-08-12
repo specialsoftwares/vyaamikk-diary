@@ -1,6 +1,12 @@
 import React from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text } from "react-native";
 
+import {
+  ACTION_PRESS_OPACITY,
+  resolveActionInteraction,
+  resolveActionLoadingLabel,
+  type ActionPurpose,
+} from "@/actionSystem";
 import { resolveAuthV2PrimaryChrome } from "@/auth-v2/components/authV2PrimaryButtonChrome";
 import { radius, typography } from "@/theme";
 
@@ -16,6 +22,8 @@ interface AuthV2PrimaryButtonProps {
   mutedBg: string;
   mutedText: string;
   mutedBorder?: string;
+  /** Optional semantic metadata — Stage 1 does not change chrome by itself. */
+  purpose?: ActionPurpose;
 }
 
 export function AuthV2PrimaryButton({
@@ -30,34 +38,38 @@ export function AuthV2PrimaryButton({
   mutedBg,
   mutedText,
   mutedBorder,
+  purpose: _purpose,
 }: AuthV2PrimaryButtonProps) {
   const chrome = resolveAuthV2PrimaryChrome({ disabled, loading });
   const visuallyDisabled = chrome === "muted";
-  const blocked = disabled || loading;
+  const interaction = resolveActionInteraction({ disabled, loading });
   const bg = visuallyDisabled ? mutedBg : activeBg;
   const fg = visuallyDisabled ? mutedText : activeText;
+  const displayLabel = resolveActionLoadingLabel({ label, loading, loadingLabel });
 
   return (
     <Pressable
-      onPress={blocked ? undefined : onPress}
-      disabled={blocked}
+      onPress={interaction.pressable ? onPress : undefined}
+      disabled={!interaction.pressable}
       testID={testID}
-      accessibilityRole="button"
-      accessibilityState={{ disabled: visuallyDisabled, busy: loading }}
-      android_ripple={blocked ? undefined : { color: "rgba(15,23,42,0.12)" }}
+      accessibilityRole={interaction.accessibilityRole}
+      accessibilityState={interaction.accessibilityState}
+      android_ripple={
+        interaction.pressable ? { color: "rgba(15,23,42,0.12)" } : undefined
+      }
       style={({ pressed }) => [
         styles.btn,
         {
           backgroundColor: bg,
           borderColor: visuallyDisabled && mutedBorder ? mutedBorder : "transparent",
-          opacity: pressed && !blocked ? 0.92 : 1,
+          opacity: pressed && interaction.pressable ? ACTION_PRESS_OPACITY : 1,
         },
       ]}
     >
       {loading ? (
         <>
           <ActivityIndicator color={fg} size="small" />
-          <Text style={[styles.label, { color: fg }]}>{loadingLabel ?? label}</Text>
+          <Text style={[styles.label, { color: fg }]}>{displayLabel}</Text>
         </>
       ) : (
         <Text style={[styles.label, { color: fg }]}>{label}</Text>

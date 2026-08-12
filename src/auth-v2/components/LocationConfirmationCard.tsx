@@ -31,7 +31,7 @@ export function LocationConfirmationCard({
         <Text style={[styles.sub, { color: tokens.body }]}>{subtitle}</Text>
       ) : null}
       {confirmed ? (
-        <Text style={[styles.ok, { color: tokens.link }]}>✓ Confirmed</Text>
+        <Text style={[styles.ok, { color: tokens.secondaryActiveFg }]}>✓ Confirmed</Text>
       ) : null}
     </View>
   );

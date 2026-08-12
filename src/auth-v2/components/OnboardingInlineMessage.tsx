@@ -16,7 +16,8 @@ export function OnboardingInlineMessage({
   testID,
 }: OnboardingInlineMessageProps) {
   const { tokens } = useAuthV2Theme();
-  const color = tone === "danger" ? tokens.danger : tone === "info" ? tokens.link : tokens.muted;
+  const color =
+    tone === "danger" ? tokens.danger : tone === "info" ? tokens.secondaryAction : tokens.muted;
   return (
     <View style={styles.wrap} accessibilityLiveRegion="polite">
       <Text style={[styles.text, { color }]} testID={testID}>

@@ -84,7 +84,10 @@ export function appendProfileChangeHistory(
   return [...prev, entry].slice(-maxEntries);
 }
 
-/** Identity fields frozen after UEID release during first-time onboarding. */
+/**
+ * Identity fields frozen after authoritative profile completion.
+ * (Historically keyed off ueidReleasedAt; V1 locks on profileCompletedAt.)
+ */
 export function isOnboardingIdentityLocked(user: UserProfile): boolean {
-  return Boolean(user.ueidReleasedAt);
+  return Boolean(user.profileCompletedAt || user.ueidReleasedAt);
 }

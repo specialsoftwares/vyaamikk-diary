@@ -4,7 +4,6 @@ import { useRouter } from "expo-router";
 import { LocationFootprintOnboardingScreen } from "@/auth-v2/screens/LocationFootprintOnboardingScreen";
 import { useAuth } from "@/state/auth";
 import {
-  loadLocationFootprintPreferences,
   markLocationFootprintConsentShown,
   saveLocationFootprintPreferences,
   syncLocationFootprintPermissionStatus,
@@ -12,11 +11,14 @@ import {
 import { locationService } from "@/services/location";
 import {
   clearWizardNavigationSession,
-  markBootWizardStep,
-  markReviewingWizardStep,
   shouldSuppressForwardOnboardingGuardSync,
 } from "@/auth/onboardingGuardPolicy";
 
+/**
+ * Dormant GPS footprint onboarding — no longer a mandatory post-profile gate.
+ * Normal entry replaces to You without requiring locationConsentShownAt.
+ * Contextual consent remains available via LocationFootprintConsentHost.
+ */
 export default function LocationOnboardingScreen() {
   const router = useRouter();
   const { user } = useAuth();
@@ -43,37 +45,21 @@ export default function LocationOnboardingScreen() {
         if (!cancelled) router.replace("/(auth)/complete-profile");
         return;
       }
-      if (!user.ueidReleasedAt) {
-        if (!cancelled) router.replace("/(auth)/ueid");
-        return;
-      }
-      if (!user.onboardingIntroSeenAt) {
-        if (!cancelled) router.replace("/(auth)/onboarding-intro");
-        return;
-      }
-      const prefs = await loadLocationFootprintPreferences(user.uid);
-      if (cancelled || shouldSuppressForwardOnboardingGuardSync("locationFootprint")) {
-        return;
-      }
-      if (prefs.locationConsentShownAt != null) {
-        clearWizardNavigationSession();
-        router.replace("/(app)/(tabs)/you");
-        return;
-      }
-      markBootWizardStep("locationFootprint", user.uid);
-      if (!cancelled) setReady(true);
+
+      // V1: GPS footprint is not mandatory — leave dormant route.
+      clearWizardNavigationSession();
+      if (!cancelled) router.replace("/(app)/(tabs)/you");
     })();
     return () => {
       cancelled = true;
     };
   }, [user, router]);
 
-  if (
-    !ready ||
-    !user?.profileCompletedAt ||
-    !user.ueidReleasedAt ||
-    !user.onboardingIntroSeenAt
-  ) {
+  if (!ready || !user?.profileCompletedAt) {
+    return null;
+  }
+
+  if (!shouldSuppressForwardOnboardingGuardSync("locationFootprint")) {
     return null;
   }
 
@@ -111,8 +97,8 @@ export default function LocationOnboardingScreen() {
   };
 
   const onBack = () => {
-    markReviewingWizardStep("onboardingIntro", user.uid);
-    router.replace("/(auth)/onboarding-intro");
+    clearWizardNavigationSession();
+    router.replace("/(app)/(tabs)/you");
   };
 
   return (

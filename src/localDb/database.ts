@@ -13,7 +13,12 @@ export function getLocalDatabase(): SQLite.SQLiteDatabase {
 
 export function openLocalDatabase(): SQLite.SQLiteDatabase {
   if (!db) {
-    db = SQLite.openDatabaseSync(DB_NAME);
+    try {
+      db = SQLite.openDatabaseSync(DB_NAME);
+    } catch (e) {
+      db = null;
+      throw e instanceof Error ? e : new Error(String(e));
+    }
   }
   return db;
 }

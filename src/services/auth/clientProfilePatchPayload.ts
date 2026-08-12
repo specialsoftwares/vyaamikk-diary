@@ -29,8 +29,6 @@ export const CLIENT_PROFILE_PATCH_ALLOWLIST = [
   "lastProfileEditedAt",
   "legalConsents",
   "updatedAt",
-  "emailStatus",
-  "emailLinkedAt",
   "accountKind",
   "pinCode",
   "pinLocality",

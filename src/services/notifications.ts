@@ -25,14 +25,18 @@ const log = createLogger("notifications");
 export type NotifPermissionStatus = "granted" | "denied" | "undetermined";
 
 // Ensure foreground notifications surface as banners/sounds.
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
+try {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+    }),
+  });
+} catch (e) {
+  log.warn("setNotificationHandler failed at module load", e);
+}
 
 let androidChannelEnsured = false;
 

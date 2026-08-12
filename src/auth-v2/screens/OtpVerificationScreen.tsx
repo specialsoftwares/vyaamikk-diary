@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 
 import { AuthShell } from "@/auth-v2/components/AuthShell";
+import { AuthTertiaryTextAction } from "@/auth-v2/components/AuthTertiaryTextAction";
 import { AuthV2PrimaryButton } from "@/auth-v2/components/AuthV2PrimaryButton";
 import { OnboardingInlineMessage } from "@/auth-v2/components/OnboardingInlineMessage";
 import { OnboardingOtpCells } from "@/auth-v2/components/OnboardingOtpCells";
@@ -12,9 +13,9 @@ import {
   shouldAutoVerifyOtp,
 } from "@/auth-v2/otp/onboardingOtpModel";
 import { onboardingMark } from "@/auth-v2/onboardingPerfProbe";
-import { authV2Tokens } from "@/auth-v2/theme/authV2Theme";
+import { useAuthV2Theme } from "@/auth-v2/hooks/useAuthV2Theme";
 import { useT } from "@/i18n";
-import { spacing, typography, useTheme } from "@/theme";
+import { spacing, typography } from "@/theme";
 import { useIsOnline } from "@/state/network";
 import { LocaleUiText } from "@/components/ui";
 import { PhoneAuthErrorPanel } from "@/auth-v2/components/PhoneAuthErrorPanel";
@@ -50,6 +51,12 @@ interface OtpVerificationScreenProps {
   lockUntil?: number | null;
   initialDigits?: string;
   onDigitsChange?: (digits: string) => void;
+  /** Optional title override (e.g. contact_change: Verify your new mobile number). */
+  title?: string;
+  /** Optional subtitle override. Defaults to masked destination line. */
+  subtitle?: string;
+  /** Change-number control label override. */
+  changeNumberLabel?: string;
 }
 
 export function OtpVerificationScreen({
@@ -69,16 +76,21 @@ export function OtpVerificationScreen({
   lockUntil = null,
   initialDigits = "",
   onDigitsChange,
+  title,
+  subtitle,
+  changeNumberLabel,
 }: OtpVerificationScreenProps) {
   const t = useT();
   const online = useIsOnline();
-  const { resolvedMode, colors } = useTheme();
-  const tokens = authV2Tokens(colors, resolvedMode === "dark");
+  const { tokens } = useAuthV2Theme();
   const [code, setCode] = useState(initialDigits);
   const lastAutoRef = useRef<string | null>(null);
   const verifyInFlightRef = useRef(false);
 
   const displayPhone = formatDisplayPhone(phoneE164);
+  const resolvedTitle = title ?? t("authV2.otp.title");
+  const resolvedSubtitle = subtitle ?? `Code sent to ${displayPhone}`;
+  const resolvedChangeNumber = changeNumberLabel ?? t("authV2.otp.changeNumber");
 
   const { remainingSeconds: resendRemaining, canResend } =
     useAuthoritativeResendCountdown(resendAvailableAt);
@@ -144,8 +156,8 @@ export function OtpVerificationScreen({
 
   return (
     <AuthShell
-      title={t("authV2.otp.title")}
-      subtitle={`Code sent to ${displayPhone}`}
+      title={resolvedTitle}
+      subtitle={resolvedSubtitle}
       onBack={onChangeNumber}
       headerTop={null}
       footerPlacement="actionZone"
@@ -166,19 +178,13 @@ export function OtpVerificationScreen({
               onCopyDiagnostics={onCopyErrorDiagnostics}
             />
             {onRetryAccountSetup ? (
-              <Pressable
+              <AuthTertiaryTextAction
+                label="Try again (no new SMS)"
                 onPress={onRetryAccountSetup}
                 disabled={loading}
-                accessibilityRole="button"
+                purpose="retry"
                 accessibilityLabel="Try account setup again"
-                style={styles.retryWrap}
-              >
-                <Text
-                  style={[styles.retryLink, { color: tokens.secondaryAction }, loading && { opacity: 0.5 }]}
-                >
-                  Try again (no new SMS)
-                </Text>
-              </Pressable>
+              />
             ) : null}
             {lockRemaining > 0 ? (
               <OnboardingInlineMessage
@@ -194,6 +200,7 @@ export function OtpVerificationScreen({
                 disabled={!online || loading || lockRemaining > 0}
                 onPress={() => invokeVerify(code)}
                 testID="auth-v2-otp-verify"
+                purpose="retry"
                 activeBg={tokens.ctaActiveBg}
                 activeText={tokens.ctaActiveText}
                 mutedBg={tokens.ctaMutedBg}
@@ -226,7 +233,8 @@ export function OtpVerificationScreen({
             {`Resend OTP in ${formatOtpCountdownMmSs(resendRemaining)}`}
           </LocaleUiText>
         ) : (
-          <Pressable
+          <AuthTertiaryTextAction
+            label={resending ? t("otp.resending") : "Resend OTP"}
             onPress={() => {
               if (!canResend && resendAvailableAt != null) return;
               if (resending || loading) return;
@@ -234,35 +242,21 @@ export function OtpVerificationScreen({
               onResend();
             }}
             disabled={resendBlocked}
-            accessibilityRole="button"
+            loading={resending}
+            purpose="retry"
             accessibilityLabel="Resend OTP"
-            accessibilityState={{ disabled: resendBlocked }}
-            hitSlop={8}
-            style={styles.secondaryHit}
-          >
-            <Text
-              style={[
-                styles.resendLink,
-                { color: resendBlocked ? tokens.secondaryActionMuted : tokens.secondaryAction },
-              ]}
-            >
-              {resending ? t("otp.resending") : "Resend OTP"}
-            </Text>
-          </Pressable>
+            testID="auth-v2-otp-resend"
+          />
         )}
       </View>
 
-      <Pressable
+      <AuthTertiaryTextAction
+        label={resolvedChangeNumber}
         onPress={onChangeNumber}
-        style={styles.changeNumber}
-        accessibilityRole="button"
-        accessibilityLabel={t("authV2.otp.changeNumber")}
-        hitSlop={8}
-      >
-        <LocaleUiText style={[styles.changeNumberText, { color: tokens.tertiaryAction }]}>
-          {t("authV2.otp.changeNumber")}
-        </LocaleUiText>
-      </Pressable>
+        purpose="navigate"
+        accessibilityLabel={resolvedChangeNumber}
+        textStyle={styles.changeNumberText}
+      />
     </AuthShell>
   );
 }
@@ -277,22 +271,6 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     minHeight: 44,
   },
-  secondaryHit: {
-    minHeight: 44,
-    minWidth: 44,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: spacing.sm,
-  },
   resendHint: { ...typography.captionStrong },
-  resendLink: { ...typography.captionStrong },
-  retryWrap: { alignItems: "center", paddingVertical: spacing.xs, minHeight: 44, justifyContent: "center" },
-  retryLink: { ...typography.captionStrong },
-  changeNumber: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: spacing.sm,
-    minHeight: 44,
-  },
   changeNumberText: { ...typography.caption },
 });

@@ -37,7 +37,9 @@ export function LocationFootprintOnboardingScreen({
             label={t("onboarding.location.allow")}
             onPress={onAllow}
             loading={busy}
+            loadingLabel="Continuing…"
             disabled={busy}
+            purpose="advance"
             activeBg={tokens.ctaActiveBg}
             activeText={tokens.ctaActiveText}
             mutedBg={tokens.ctaMutedBg}
@@ -48,6 +50,7 @@ export function LocationFootprintOnboardingScreen({
             label={t("onboarding.location.notNow")}
             onPress={onNotNow}
             disabled={busy}
+            purpose="navigate"
           />
         </View>
       }

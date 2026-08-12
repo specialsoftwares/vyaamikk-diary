@@ -26,6 +26,12 @@ interface VerificationSuccessAckProps {
   phase?: VerificationAckPhase;
   reducedMotion?: boolean;
   onDone: () => void;
+  /** Override verifying headline (default: Vyaamikk is verifying…). */
+  verifyingLabel?: string;
+  /** Optional second line under verifying (e.g. securing new mobile). */
+  verifyingDetail?: string;
+  /** Override success headline. */
+  successLabel?: string;
 }
 
 /**
@@ -37,8 +43,14 @@ export function VerificationSuccessAck({
   phase = "success",
   reducedMotion = false,
   onDone,
+  verifyingLabel,
+  verifyingDetail,
+  successLabel: successLabelOverride,
 }: VerificationSuccessAckProps) {
-  const successLabel = kind === "mobile" ? "Mobile verified" : "Email verified";
+  const successLabel =
+    successLabelOverride ??
+    (kind === "mobile" ? "Mobile number verified" : "Email verified");
+  const verifyingText = verifyingLabel ?? "Vyaamikk is verifying…";
   const hold = reducedMotion ? ONBOARDING_SUCCESS_ACK_REDUCED_MS : ONBOARDING_SUCCESS_ACK_MS;
   const pulse = useSharedValue(0.35);
 
@@ -63,9 +75,9 @@ export function VerificationSuccessAck({
 
   useEffect(() => {
     if (phase === "verifying") {
-      AccessibilityInfo.announceForAccessibility("Vyaamikk is verifying");
+      AccessibilityInfo.announceForAccessibility(verifyingText);
     }
-  }, [phase]);
+  }, [phase, verifyingText]);
 
   const ringStyle = useAnimatedStyle(() => ({
     opacity: pulse.value,
@@ -83,7 +95,10 @@ export function VerificationSuccessAck({
         {phase === "verifying" ? (
           <>
             <Animated.View style={[styles.ring, ringStyle]} />
-            <Text style={styles.label}>Vyaamikk is verifying</Text>
+            <Text style={styles.label}>{verifyingText}</Text>
+            {verifyingDetail ? (
+              <Text style={styles.detail}>{verifyingDetail}</Text>
+            ) : null}
           </>
         ) : (
           <>
@@ -135,5 +150,12 @@ const styles = StyleSheet.create({
     ...typography.titleMd,
     color: "#FFFFFF",
     textAlign: "center",
+  },
+  detail: {
+    ...typography.caption,
+    color: "rgba(255,255,255,0.72)",
+    textAlign: "center",
+    lineHeight: 20,
+    maxWidth: 280,
   },
 });

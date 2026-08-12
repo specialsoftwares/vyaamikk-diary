@@ -3,9 +3,9 @@ import { StyleSheet, TextInput } from "react-native";
 
 import { AuthShell } from "@/auth-v2/components/AuthShell";
 import { AuthV2PrimaryButton } from "@/auth-v2/components/AuthV2PrimaryButton";
-import { authV2Tokens } from "@/auth-v2/theme/authV2Theme";
+import { useAuthV2Theme } from "@/auth-v2/hooks/useAuthV2Theme";
 import { useT } from "@/i18n";
-import { spacing, typography, useTheme } from "@/theme";
+import { spacing, typography } from "@/theme";
 import { useIsOnline } from "@/state/network";
 import { Banner, LocaleUiText } from "@/components/ui";
 import { OnboardingInlineMessage } from "@/auth-v2/components/OnboardingInlineMessage";
@@ -39,8 +39,7 @@ export function EmailEntryScreen({
 }: EmailEntryScreenProps) {
   const t = useT();
   const online = useIsOnline();
-  const { resolvedMode, colors } = useTheme();
-  const tokens = authV2Tokens(colors, resolvedMode === "dark");
+  const { tokens } = useAuthV2Theme();
   const inputRef = useRef<TextInput>(null);
   const [focused, setFocused] = useState(false);
 
@@ -69,6 +68,7 @@ export function EmailEntryScreen({
             disabled={!valid || !online}
             onPress={onContinue}
             testID="auth-v2-email-continue"
+            purpose="advance"
             activeBg={tokens.ctaActiveBg}
             activeText={tokens.ctaActiveText}
             mutedBg={tokens.ctaMutedBg}
@@ -88,7 +88,7 @@ export function EmailEntryScreen({
           styles.input,
           {
             backgroundColor: tokens.inputBg,
-            borderColor: focused ? tokens.primary : tokens.inputBorder,
+            borderColor: focused ? tokens.secondaryActiveFg : tokens.inputBorder,
             color: tokens.inputText,
           },
         ]}

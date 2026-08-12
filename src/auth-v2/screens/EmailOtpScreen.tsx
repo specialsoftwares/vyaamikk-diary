@@ -1,14 +1,15 @@
 import React, { useRef } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 
 import { AuthShell } from "@/auth-v2/components/AuthShell";
+import { AuthTertiaryTextAction } from "@/auth-v2/components/AuthTertiaryTextAction";
 import { AuthV2PrimaryButton } from "@/auth-v2/components/AuthV2PrimaryButton";
 import { OnboardingInlineMessage } from "@/auth-v2/components/OnboardingInlineMessage";
 import { OnboardingOtpCells } from "@/auth-v2/components/OnboardingOtpCells";
-import { authV2Tokens } from "@/auth-v2/theme/authV2Theme";
+import { useAuthV2Theme } from "@/auth-v2/hooks/useAuthV2Theme";
 import { EMAIL_OTP_LENGTH } from "@/services/auth/emailOtpConstants";
 import { useT } from "@/i18n";
-import { spacing, typography, useTheme } from "@/theme";
+import { spacing, typography } from "@/theme";
 import { useIsOnline } from "@/state/network";
 import { Banner, LocaleUiText } from "@/components/ui";
 import { formatOtpCountdownMmSs } from "@/utils/otpCountdownFormat";
@@ -54,10 +55,10 @@ export function EmailOtpScreen({
 }: EmailOtpScreenProps) {
   const t = useT();
   const online = useIsOnline();
-  const { resolvedMode, colors } = useTheme();
-  const tokens = authV2Tokens(colors, resolvedMode === "dark");
+  const { tokens } = useAuthV2Theme();
   const inFlightRef = useRef(false);
   const complete = code.length === EMAIL_OTP_LENGTH;
+  const resendBlocked = !canResend || resending || loading || sending;
 
   return (
     <AuthShell
@@ -74,12 +75,14 @@ export function EmailOtpScreen({
               label="Retry sending"
               onPress={onRetrySend}
               loading={sending}
+              loadingLabel="Sending OTP…"
               disabled={sending}
+              purpose="retry"
               activeBg={tokens.ctaActiveBg}
               activeText={tokens.ctaActiveText}
               mutedBg={tokens.ctaMutedBg}
               mutedText={tokens.ctaMutedText}
-            mutedBorder={tokens.ctaMutedBorder}
+              mutedBorder={tokens.ctaMutedBorder}
             />
           ) : (
             <AuthV2PrimaryButton
@@ -99,11 +102,12 @@ export function EmailOtpScreen({
                 }
               }}
               testID="auth-v2-email-otp-verify"
+              purpose="advance"
               activeBg={tokens.ctaActiveBg}
               activeText={tokens.ctaActiveText}
               mutedBg={tokens.ctaMutedBg}
               mutedText={tokens.ctaMutedText}
-            mutedBorder={tokens.ctaMutedBorder}
+              mutedBorder={tokens.ctaMutedBorder}
             />
           )}
         </>
@@ -134,23 +138,22 @@ export function EmailOtpScreen({
 
       <View style={styles.resendRow}>
         {resendRemaining > 0 ? (
-          <LocaleUiText style={[styles.resendHint, { color: tokens.muted }]}>
+          <LocaleUiText style={[styles.resendHint, { color: tokens.secondaryActionMuted }]}>
             {`Resend OTP in ${formatOtpCountdownMmSs(resendRemaining)}`}
           </LocaleUiText>
         ) : (
-          <Pressable
+          <AuthTertiaryTextAction
+            label={resending ? t("otp.resending") : t("otp.resend")}
             onPress={() => {
-              if (!canResend || resending || loading || sending) return;
+              if (resendBlocked) return;
               onResend();
             }}
-            disabled={!canResend || resending || loading || sending}
-            accessibilityRole="button"
+            disabled={resendBlocked}
+            loading={resending}
+            purpose="retry"
             accessibilityLabel="Resend email OTP"
-          >
-            <Text style={[styles.resendLink, { color: tokens.link }, resending && { opacity: 0.5 }]}>
-              {resending ? t("otp.resending") : t("otp.resend")}
-            </Text>
-          </Pressable>
+            testID="auth-v2-email-otp-resend"
+          />
         )}
       </View>
     </AuthShell>
@@ -161,8 +164,7 @@ const styles = StyleSheet.create({
   resendRow: {
     alignItems: "center",
     marginTop: spacing.md,
-    minHeight: 28,
+    minHeight: 44,
   },
   resendHint: { ...typography.caption },
-  resendLink: { ...typography.captionStrong },
 });

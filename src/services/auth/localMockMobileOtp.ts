@@ -41,7 +41,7 @@ function requireEnv(): void {
   if (!isApprovedLocalMockMobileOtpEnvironment()) {
     throw new AppError(
       "permission_denied",
-      "Local-mock mobile OTP is not available in this environment. Set EXPO_PUBLIC_LOCAL_MOCK_MOBILE_OTP=1."
+      "Local-mock mobile OTP is off. Restart with: npm run start:expo-go (includes EXPO_PUBLIC_LOCAL_MOCK_MOBILE_OTP=1)."
     );
   }
 }

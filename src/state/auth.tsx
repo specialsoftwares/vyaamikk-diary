@@ -55,10 +55,14 @@ import {
 const log = createLogger("state/auth");
 
 // Print resolved runtime + backend once at module load (no secrets).
-log.info(
-  "runtime environment",
-  formatRuntimeDiagnostics(getResolvedEnvironment(), env.firebase.projectId)
-);
+try {
+  log.info(
+    "runtime environment",
+    formatRuntimeDiagnostics(getResolvedEnvironment(), env.firebase.projectId)
+  );
+} catch (e) {
+  log.warn("runtime environment log skipped", e);
+}
 
 const SESSION_REVALIDATION_MS = 6_000;
 
@@ -232,6 +236,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             user,
             justCreated: false,
           });
+
+          // Finish Auth=B / profile=A mobile rebind if a prior attempt was interrupted.
+          if (backend === "firebase-production") {
+            void import("@/services/auth/reconcilePendingMobileContactChange")
+              .then(async (m) => {
+                if (cancelled) return;
+                const next = await m.reconcilePendingMobileContactChange(user);
+                if (!next || cancelled) return;
+                const nextSession = {
+                  ...session,
+                  user: next,
+                };
+                await sessionStore.save(nextSession);
+                if (cancelled) return;
+                setState({
+                  status: "signed_in",
+                  session: nextSession,
+                  user: next,
+                  justCreated: false,
+                });
+              })
+              .catch((e) => {
+                log.warn("pending mobile contact reconcile deferred", e);
+              });
+          }
         } else {
           setState((s) => ({ ...s, status: "signed_out" }));
         }

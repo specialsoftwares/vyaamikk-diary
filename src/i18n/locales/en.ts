@@ -137,10 +137,24 @@ const en = {
       placeholder: "Email address",
       continue: "Continue",
       saving: "Saving…",
-      footnote: "Email verification by link is not enabled yet.",
+      footnote: "We will email a 6-digit verification code to confirm this address.",
       prefilledHint: "We will use the email already saved on your account.",
       linkNotice: "This email will be linked to your Vyaamikk account.",
     },
+    emailOtp: {
+      title: "Confirm your business email",
+      verify: "Verify email",
+      verifying: "Verifying…",
+    },
+  },
+
+  /**
+   * Prefixes for LegalConsentCheckboxes — composed with settings.terms /
+   * settings.privacy link labels (not duplicated here).
+   */
+  consent: {
+    termsPrefix: "I agree to the",
+    privacyPrefix: "I agree to the",
   },
 
   login: {

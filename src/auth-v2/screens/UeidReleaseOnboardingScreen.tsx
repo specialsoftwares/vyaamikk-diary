@@ -7,11 +7,10 @@ import * as Clipboard from "expo-clipboard";
 import { AuthV2PrimaryButton } from "@/auth-v2/components/AuthV2PrimaryButton";
 import { OnboardingV2Shell } from "@/auth-v2/components/OnboardingV2Shell";
 import { useAuthV2Theme } from "@/auth-v2/hooks/useAuthV2Theme";
-import { markReviewingWizardStep } from "@/auth/onboardingGuardPolicy";
+import { markReviewingWizardStep, clearWizardNavigationSession } from "@/auth/onboardingGuardPolicy";
 import { env } from "@/config/env";
 import { useAuth } from "@/state/auth";
 import { useT } from "@/i18n";
-import { loadLocationFootprintPreferences } from "@/services/location/locationFootprintPreferences";
 import { spacing, typography } from "@/theme";
 import { maskMobile } from "@/utils/phone";
 
@@ -36,22 +35,13 @@ export function UeidReleaseOnboardingScreen({ user }: UeidReleaseOnboardingScree
   const onContinue = async () => {
     setContinuing(true);
     try {
+      // Optional acknowledgement if this dormant surface is shown — not required for app entry.
       if (!user.ueidReleasedAt) {
         await updateProfile({ ueidReleasedAt: Date.now() });
       }
       acknowledgeUEID();
-
-      if (!user.onboardingIntroSeenAt) {
-        router.replace("/(auth)/onboarding-intro");
-        return;
-      }
-
-      const prefs = await loadLocationFootprintPreferences(user.uid);
-      if (prefs.locationConsentShownAt == null) {
-        router.replace("/(auth)/location-onboarding");
-      } else {
-        router.replace("/(app)/(tabs)/you");
-      }
+      clearWizardNavigationSession();
+      router.replace("/(app)/(tabs)/you");
     } finally {
       setContinuing(false);
     }

@@ -353,18 +353,44 @@ export const firebaseAuthService: AuthService = {
   },
 
   async confirmOtp(challenge: OtpChallenge, code: string): Promise<AuthResult> {
+    log.info("confirmOtp phase", {
+      phase: "OTP_VERIFY_START",
+      verificationIdPresent: Boolean(challenge.verificationId),
+    });
     await confirmNativePhoneOtp(challenge, code);
+    log.info("confirmOtp phase", {
+      phase: "FIREBASE_SIGN_IN_SUCCESS",
+      firebaseUserPresent: true,
+    });
     const phone = normalizePhoneE164(challenge.phoneE164);
     if (useIdentityCallables()) {
-      const result = await callResolveOrCreateUserByPhone(phone);
-      // Bridge the native session to the JS SDK so Firestore/Storage
-      // requests carry request.auth (rules require it). Non-fatal: the
-      // record layer surfaces its own retryable error if this fails.
-      const { ensureJsAuthSession } = await import("./jsAuthBridge");
-      await ensureJsAuthSession();
-      return result;
+      try {
+        const result = await callResolveOrCreateUserByPhone(phone);
+        // Bridge MUST succeed before AuthProvider marks signed_in / Email mounts.
+        // Otherwise users/{uid} reads are denied (request.auth null) and surface
+        // as "Missing or insufficient permissions."
+        const { requireJsAuthSessionForFirestore } = await import("./jsAuthBridge");
+        await requireJsAuthSessionForFirestore("post_phone_identity");
+        return result;
+      } catch (e) {
+        // Firebase phone auth already succeeded — preserve that boundary in diagnostics.
+        if (e instanceof AppError) {
+          throw new AppError(e.code, e.message, e.cause ?? e, {
+            ...e.details,
+            authPhase: e.details?.authPhase ?? "post_auth",
+            firebaseSignInSucceeded: true,
+            diagnosticCode:
+              (typeof e.details?.diagnosticCode === "string" && e.details.diagnosticCode) ||
+              `POST_AUTH:${e.code}`,
+          });
+        }
+        throw e;
+      }
     }
-    throw new AppError("auth_not_configured", "Identity callables not available.");
+    throw new AppError("auth_not_configured", "Identity callables not available.", undefined, {
+      authPhase: "post_auth",
+      diagnosticCode: "IDENTITY_CALLABLES_DISABLED",
+    });
   },
 
   async signOut(): Promise<void> {
@@ -389,8 +415,8 @@ export const firebaseAuthService: AuthService = {
   async updateProfile(uid: string, patch: ProfilePatch): Promise<UserProfile> {
     const production = useIdentityCallables();
     if (production) {
-      const { ensureJsAuthSession } = await import("./jsAuthBridge");
-      await ensureJsAuthSession();
+      const { requireJsAuthSessionForFirestore } = await import("./jsAuthBridge");
+      await requireJsAuthSessionForFirestore("update_profile");
       const rejected = findRejectedProductionPatchKeys(patch);
       if (rejected.length > 0) {
         throw new AppError(
@@ -401,50 +427,154 @@ export const firebaseAuthService: AuthService = {
     }
     const db = getFirebaseDb();
     const ref = doc(db, USERS_COLLECTION, uid);
-    const snap = await getDoc(ref);
-    if (!snap.exists()) throw new AppError("not_found", "User profile not found.");
-    const existing = normaliseUserProfile(uid, snap.data() as Record<string, unknown>);
+    try {
+      const snap = await getDoc(ref);
+      if (!snap.exists()) throw new AppError("not_found", "User profile not found.");
+      const existing = normaliseUserProfile(uid, snap.data() as Record<string, unknown>);
 
-    const safePatch = production
-      ? stripServerOwnedProfilePatchKeys(patch, { production: true })
-      : patch;
+      const safePatch = production
+        ? stripServerOwnedProfilePatchKeys(patch, { production: true })
+        : patch;
 
-    const linkedPatch = production
-      ? safePatch
-      : await enrichPatchWithEmailLink(
-          existing,
-          safePatch,
-          lookupFirestoreEmailIndex,
-          commitFirestoreEmailIndexOps
-        );
+      const linkedPatch = production
+        ? safePatch
+        : await enrichPatchWithEmailLink(
+            existing,
+            safePatch,
+            lookupFirestoreEmailIndex,
+            commitFirestoreEmailIndexOps
+          );
 
-    const next = applyProfilePatch(existing, linkedPatch);
-    if (production) {
-      const write = buildClientProfileFirestoreWrite(existing, next, { production: true });
-      if (write) {
-        await setDoc(ref, write, { merge: true });
+      const next = applyProfilePatch(existing, linkedPatch);
+      if (production) {
+        const write = buildClientProfileFirestoreWrite(existing, next, { production: true });
+        if (write) {
+          await setDoc(ref, write, { merge: true });
+        }
+      } else {
+        await setDoc(ref, profileDocumentMergeFields(next), { merge: true });
       }
-    } else {
-      await setDoc(ref, profileDocumentMergeFields(next), { merge: true });
+      return next;
+    } catch (e) {
+      if (e instanceof AppError) throw e;
+      const code =
+        e && typeof e === "object" && "code" in e
+          ? String((e as { code: string }).code)
+          : "";
+      if (code === "permission-denied" || /insufficient permissions/i.test(String((e as Error)?.message ?? e))) {
+        throw new AppError(
+          "permission_denied",
+          "Cloud profile access was denied. Sign out and try again, or retry after secure session setup.",
+          e,
+          {
+            authPhase: "post_auth",
+            failureDomain: "firestore",
+            operation: "update_profile",
+            pathKind: "users/{uid}",
+            firebaseCode: "permission-denied",
+            phase: "email_onboarding",
+          }
+        );
+      }
+      throw e;
     }
-    return next;
   },
 
   async startMobileChange(newPhoneE164: PhoneE164): Promise<OtpChallenge> {
-    throw new AppError(
-      "permission_denied",
-      "Mobile number change is support/admin-only and not available in the app."
+    const phone = normalizePhoneE164(newPhoneE164);
+    const { getNativeAuthUid, getNativeAuthPhoneE164 } = await import("./nativePhoneAuth");
+    const uid = getNativeAuthUid();
+    if (!uid) {
+      throw new AppError(
+        "auth_failed",
+        "You must stay signed in to change your verified mobile number."
+      );
+    }
+    const currentPhone = getNativeAuthPhoneE164();
+    if (currentPhone && currentPhone === phone) {
+      throw new AppError(
+        "invalid_phone",
+        "Enter a different mobile number than your current verified number."
+      );
+    }
+
+    // Server preflight BEFORE mutating Auth — reject collisions without Auth risk.
+    const { preflightProductionMobileChange } = await import(
+      "./reconcilePendingMobileContactChange"
     );
+    await preflightProductionMobileChange(phone);
+
+    const { startNativePhoneContactChangeOtp, NATIVE_CONTACT_CHANGE_PURPOSE } = await import(
+      "./nativePhoneContactChange"
+    );
+    const challenge = await startNativePhoneContactChangeOtp(phone);
+    log.info("startMobileChange challenge issued", {
+      purpose: NATIVE_CONTACT_CHANGE_PURPOSE,
+      uidSuffix: uid.slice(-6),
+    });
+    return challenge;
   },
 
   async confirmMobileChange(
-    _currentUid: string,
-    _challenge: OtpChallenge,
-    _code: string
+    currentUid: string,
+    challenge: OtpChallenge,
+    code: string
   ): Promise<UserProfile> {
+    const {
+      confirmNativePhoneContactChangeUpdate,
+      NATIVE_CONTACT_CHANGE_PURPOSE,
+    } = await import("./nativePhoneContactChange");
+    const { getNativeAuthPhoneE164 } = await import("./nativePhoneAuth");
+    const oldPhone = getNativeAuthPhoneE164();
+
+    // 1) Update CURRENT Firebase Auth user phone to B (preserves UID).
+    const updated = await confirmNativePhoneContactChangeUpdate(challenge, code);
+    if (updated.uid !== currentUid) {
+      throw new AppError(
+        "auth_failed",
+        "Mobile change could not preserve your account. No server change was applied."
+      );
+    }
+
+    // 2) Persist pending + 3) force bridge + 4) atomic server bind.
+    // If server bind fails, pending remains; boot reconciles. Never return to
+    // Review as success while Auth=B and profile still A.
+    const { completeServerMobileBindAfterAuthUpdate } = await import(
+      "./reconcilePendingMobileContactChange"
+    );
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const profile = await completeServerMobileBindAfterAuthUpdate({
+          uid: currentUid,
+          oldPhoneE164: (oldPhone ?? challenge.phoneE164) as PhoneE164,
+          newerPhoneE164: updated.phoneE164,
+          operationId: `client_${challenge.verificationId}`,
+        });
+        log.info("confirmMobileChange complete", {
+          purpose: NATIVE_CONTACT_CHANGE_PURPOSE,
+          uidSuffix: profile.uid.slice(-6),
+          ueid: profile.ueid,
+          attempt,
+        });
+        return profile;
+      } catch (e) {
+        lastError = e;
+        await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+      }
+    }
     throw new AppError(
-      "permission_denied",
-      "Mobile number change is support/admin-only and not available in the app."
+      lastError instanceof AppError ? lastError.code : "unknown",
+      lastError instanceof AppError
+        ? lastError.message
+        : "Your mobile was verified, but account update is still finishing. Keep the app open and retry.",
+      lastError instanceof Error ? lastError : undefined,
+      {
+        ...(lastError instanceof AppError ? lastError.details : {}),
+        purpose: NATIVE_CONTACT_CHANGE_PURPOSE,
+        mobileChangeRecoveryRequired: true,
+        authPhase: "post_auth",
+      }
     );
   },
 };

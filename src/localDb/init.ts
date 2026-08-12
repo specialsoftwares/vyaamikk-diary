@@ -120,3 +120,10 @@ export function isLocalDatabaseReady(): boolean {
 export function getLocalDatabaseInitError(): Error | null {
   return initError;
 }
+
+/** Allows Clear local beta data + Retry to reopen/migrate the DB again. */
+export function resetLocalDatabaseInitStateForStartup(): void {
+  initPromise = null;
+  ready = false;
+  initError = null;
+}

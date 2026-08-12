@@ -88,7 +88,18 @@ export function AuthShell({
           <ScrollView
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
-            contentContainerStyle={[styles.scroll, useActionZone && styles.scrollZone, contentStyle]}
+            contentContainerStyle={[
+              styles.scroll,
+              useActionZone && styles.scrollZone,
+              // Sticky end footer sits outside the scroll view — keep body clear of it.
+              !useActionZone && footer
+                ? {
+                    paddingBottom:
+                      spacing.xl + 112 + Math.max(insets.bottom, spacing.lg),
+                  }
+                : null,
+              contentStyle,
+            ]}
             showsVerticalScrollIndicator={false}
           >
             {headerTop}

@@ -7,8 +7,10 @@ import { getActiveBackend, getResolvedEnvironment } from "@/config/env";
 import { LOCAL_MOCK_DETERMINISTIC_MOBILE_OTP } from "@/services/auth/mobileOtpConstants";
 
 /**
- * All conditions required — never infer safety from `__DEV__` or Expo Go alone.
- * Requires explicit `EXPO_PUBLIC_LOCAL_MOCK_MOBILE_OTP=1`.
+ * Local-mock mobile OTP is allowed only when the active backend is local-mock
+ * in development. Expo Go cannot deliver real SMS, so it is allowed without the
+ * explicit env flag. Other local-mock runtimes still require
+ * `EXPO_PUBLIC_LOCAL_MOCK_MOBILE_OTP=1`.
  */
 export function isApprovedLocalMockMobileOtpEnvironment(): boolean {
   const resolved = getResolvedEnvironment();
@@ -17,6 +19,7 @@ export function isApprovedLocalMockMobileOtpEnvironment(): boolean {
   if (resolved.effectiveAppMode !== "development") return false;
   if (resolved.bundledAppMode === "production") return false;
   if (resolved.isProduction) return false;
+  if (resolved.runtime === "expo-go") return true;
   if (process.env.EXPO_PUBLIC_LOCAL_MOCK_MOBILE_OTP !== "1") return false;
   return true;
 }

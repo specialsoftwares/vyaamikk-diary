@@ -5,6 +5,11 @@ import {
   BusinessIdentityScreen,
   type BusinessIdentitySection,
 } from "@/auth-v2/screens/BusinessIdentityScreen";
+import { ReviewSectionEditorScreen } from "@/auth-v2/screens/ReviewSectionEditorScreen";
+import {
+  isReviewEditIntent,
+  parseReviewEditTarget,
+} from "@/auth-v2/reviewEditIntent";
 import {
   markBootWizardStep,
   shouldSuppressForwardOnboardingGuardSync,
@@ -34,14 +39,23 @@ function parseSection(raw: string | string[] | undefined): BusinessIdentitySecti
 export default function CompleteProfileScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const params = useLocalSearchParams<{ section?: string | string[]; intent?: string }>();
+  const params = useLocalSearchParams<{
+    section?: string | string[];
+    intent?: string | string[];
+  }>();
   const initialSection = parseSection(params.section);
+  const reviewEditTarget = isReviewEditIntent(params.intent)
+    ? parseReviewEditTarget(params.section)
+    : null;
 
   useEffect(() => {
     if (!user) {
       router.replace("/");
       return;
     }
+
+    // Targeted Review edit owns its own Back/Save → Review contract.
+    if (reviewEditTarget) return;
 
     // Sync-first: never forward while user is reviewing this or an earlier step.
     if (shouldSuppressForwardOnboardingGuardSync("businessIdentity")) {
@@ -56,7 +70,6 @@ export default function CompleteProfileScreen() {
 
     let cancelled = false;
     (async () => {
-      // Remediation: profileCompletedAt set but v2 fields missing — stay here.
       const { resolveProfileRemediation } = await import("@/onboarding/profileRemediation");
       if (cancelled) return;
       if (shouldSuppressForwardOnboardingGuardSync("businessIdentity")) return;
@@ -70,10 +83,9 @@ export default function CompleteProfileScreen() {
         markBootWizardStep("businessIdentity", user.uid);
         return;
       }
-      // Boot/continue after profile complete → advance (idempotent).
-      if (user.profileCompletedAt && !user.ueidReleasedAt) {
+      if (user.profileCompletedAt) {
         if (shouldSuppressForwardOnboardingGuardSync("businessIdentity")) return;
-        if (!cancelled) router.replace("/(auth)/ueid");
+        if (!cancelled) router.replace("/(app)/(tabs)/you");
         return;
       }
       markBootWizardStep("businessIdentity", user.uid);
@@ -81,9 +93,13 @@ export default function CompleteProfileScreen() {
     return () => {
       cancelled = true;
     };
-  }, [user, router]);
+  }, [user, router, reviewEditTarget]);
 
   if (!user) return null;
+
+  if (reviewEditTarget) {
+    return <ReviewSectionEditorScreen target={reviewEditTarget} />;
+  }
 
   return <BusinessIdentityScreen initialSection={initialSection} />;
 }

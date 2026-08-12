@@ -1,10 +1,8 @@
 import React, { useMemo } from "react";
 import {
   ActivityIndicator,
-  Platform,
   Pressable,
   StyleSheet,
-  Text,
   View,
   type GestureResponderEvent,
   type StyleProp,
@@ -12,6 +10,15 @@ import {
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 
+import {
+  ACTION_PRESS_SCALE,
+  resolveActionInteraction,
+  resolveActionLoadingLabel,
+  resolvePrimaryLoadingChrome,
+  shouldRetainLoadingContext,
+  type ActionPurpose,
+  type ActionVisualFamily,
+} from "@/actionSystem";
 import { LocaleUiText } from "@/components/ui/LocaleUiText";
 import {
   premiumBorderColor,
@@ -41,6 +48,8 @@ export interface PremiumActionButtonProps {
   size?: PremiumButtonSize;
   shape?: PremiumButtonShape;
   loading?: boolean;
+  /** When set with loading, spinner + label retain context and primary keeps active chrome. */
+  loadingLabel?: string;
   disabled?: boolean;
   fullWidth?: boolean;
   /** Slightly tighter horizontal padding — same height as `size`. */
@@ -49,6 +58,9 @@ export interface PremiumActionButtonProps {
   testID?: string;
   leftSlot?: React.ReactNode;
   accessibilityLabel?: string;
+  /** Optional Stage 1 semantic metadata — does not change visuals by itself. */
+  purpose?: ActionPurpose;
+  visual?: ActionVisualFamily;
 }
 
 const SIZE_LG = { paddingVertical: 14, paddingHorizontal: spacing.xl, minHeight: 52 };
@@ -63,6 +75,7 @@ export function PremiumActionButton({
   size = "lg",
   shape = "rounded",
   loading = false,
+  loadingLabel,
   disabled = false,
   fullWidth = true,
   compact = false,
@@ -70,10 +83,21 @@ export function PremiumActionButton({
   testID,
   leftSlot,
   accessibilityLabel,
+  purpose: _purpose,
+  visual: _visual,
 }: PremiumActionButtonProps) {
   const { resolvedMode, colors } = useTheme();
   const isDark = resolvedMode === "dark";
-  const isDisabled = disabled || loading;
+  const interaction = resolveActionInteraction({ disabled, loading });
+  const retainLoadingContext = shouldRetainLoadingContext({ loading, loadingLabel });
+  const retainActiveChrome = retainLoadingContext;
+  const chrome = resolvePrimaryLoadingChrome({
+    disabled,
+    loading,
+    retainActiveChrome,
+  });
+  const visuallyMuted = chrome === "muted";
+  const displayLabel = resolveActionLoadingLabel({ label, loading, loadingLabel });
   const corner = shape === "pill" ? radius.pill : radius.lg;
   const sizing =
     size === "lg"
@@ -85,7 +109,7 @@ export function PremiumActionButton({
         : SIZE_MD;
 
   const palette = useMemo(() => {
-    if (isDisabled) {
+    if (visuallyMuted) {
       return {
         fg: colors.textSubtle,
         useGradient: false,
@@ -152,7 +176,7 @@ export function PremiumActionButton({
           elevation: "soft" as const,
         };
     }
-  }, [variant, isDisabled, colors, isDark, resolvedMode]);
+  }, [variant, visuallyMuted, colors, isDark, resolvedMode]);
 
   const styles = useThemedStyles(() =>
     StyleSheet.create({
@@ -201,7 +225,7 @@ export function PremiumActionButton({
         ...typography.bodyStrong,
         color: palette.fg,
         letterSpacing: variant === "primary" ? 0.15 : 0,
-        ...(variant === "primary" && !isDisabled
+        ...(variant === "primary" && !visuallyMuted
           ? {
               textShadowColor: isDark ? "rgba(0,0,0,0.3)" : "rgba(42,47,154,0.2)",
               textShadowOffset: { width: 0, height: 1 },
@@ -230,7 +254,14 @@ export function PremiumActionButton({
         </>
       ) : null}
       {loading ? (
-        <ActivityIndicator color={palette.fg} />
+        <>
+          <ActivityIndicator color={palette.fg} />
+          {retainLoadingContext ? (
+            <LocaleUiText style={styles.label} maxFontSizeMultiplier={1.25}>
+              {displayLabel}
+            </LocaleUiText>
+          ) : null}
+        </>
       ) : (
         <>
           {leftSlot ? <View style={styles.slot}>{leftSlot}</View> : null}
@@ -246,7 +277,7 @@ export function PremiumActionButton({
     ? (palette.gradient as readonly [string, string, ...string[]])
     : null;
 
-  const inner = gradientColors && !isDisabled ? (
+  const inner = gradientColors && !visuallyMuted ? (
     <LinearGradient
       colors={gradientColors}
       start={{ x: 0.5, y: 0 }}
@@ -262,19 +293,19 @@ export function PremiumActionButton({
   return (
     <Pressable
       testID={testID}
-      accessibilityRole="button"
+      accessibilityRole={interaction.accessibilityRole}
       accessibilityLabel={accessibilityLabel ?? label}
-      accessibilityState={{ disabled: isDisabled, busy: loading }}
-      onPress={isDisabled ? undefined : onPress}
+      accessibilityState={interaction.accessibilityState}
+      onPress={interaction.pressable ? onPress : undefined}
       android_ripple={
-        isDisabled || variant === "ghost"
+        !interaction.pressable || variant === "ghost"
           ? undefined
           : { color: colors.primaryLight }
       }
       style={({ pressed }) => [
         styles.pressable,
         style,
-        pressed && !isDisabled && { transform: [{ scale: 0.97 }] },
+        pressed && interaction.pressable && { transform: [{ scale: ACTION_PRESS_SCALE }] },
       ]}
     >
       <View style={styles.shell}>{inner}</View>

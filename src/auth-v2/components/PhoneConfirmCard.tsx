@@ -2,10 +2,11 @@ import React from "react";
 import { LocaleUiText } from "@/components/ui/LocaleUiText";
 import { StyleSheet, Text, View } from "react-native";
 
+import { AuthSecondaryActiveButton } from "@/auth-v2/components/AuthSecondaryActiveButton";
 import { AuthV2PrimaryButton } from "@/auth-v2/components/AuthV2PrimaryButton";
-import { authV2Tokens } from "@/auth-v2/theme/authV2Theme";
+import { useAuthV2Theme } from "@/auth-v2/hooks/useAuthV2Theme";
 import { useT } from "@/i18n";
-import { spacing, typography, useTheme } from "@/theme";
+import { spacing, typography } from "@/theme";
 
 interface PhoneConfirmCardProps {
   displayPhone: string;
@@ -21,8 +22,7 @@ export function PhoneConfirmCard({
   loading = false,
 }: PhoneConfirmCardProps) {
   const t = useT();
-  const { resolvedMode, colors } = useTheme();
-  const tokens = authV2Tokens(colors, resolvedMode === "dark");
+  const { tokens } = useAuthV2Theme();
 
   return (
     <View
@@ -42,21 +42,19 @@ export function PhoneConfirmCard({
         loadingLabel="Sending OTP…"
         onPress={onConfirm}
         disabled={loading}
+        purpose="advance"
         activeBg={tokens.ctaActiveBg}
         activeText={tokens.ctaActiveText}
         mutedBg={tokens.ctaMutedBg}
         mutedText={tokens.ctaMutedText}
-            mutedBorder={tokens.ctaMutedBorder}
+        mutedBorder={tokens.ctaMutedBorder}
       />
-      <AuthV2PrimaryButton
+      <AuthSecondaryActiveButton
         label="Edit"
         onPress={onBack}
         disabled={loading}
-        activeBg={tokens.ctaMutedBg}
-        activeText={tokens.heading}
-        mutedBg={tokens.ctaMutedBg}
-        mutedText={tokens.ctaMutedText}
-            mutedBorder={tokens.ctaMutedBorder}
+        purpose="modify"
+        testID="auth-v2-phone-confirm-edit"
       />
     </View>
   );

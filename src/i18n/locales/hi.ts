@@ -135,10 +135,20 @@ const hi: Translations = {
       placeholder: "ईमेल पता",
       continue: "आगे बढ़ें",
       saving: "सहेज रहे हैं…",
-      footnote: "ईमेल लिंक से सत्यापन अभी सक्षम नहीं है।",
+      footnote: "हम इस पते की पुष्टि के लिए 6 अंकों का सत्यापन कोड ईमेल करेंगे।",
       prefilledHint: "यह ईमेल पहले से आपके Vyaamikk खाते से जुड़ा है।",
       linkNotice: "यह ईमेल आपके Vyaamikk खाते से जुड़ेगा।",
     },
+    emailOtp: {
+      title: "अपने व्यावसायिक ईमेल की पुष्टि करें",
+      verify: "ईमेल सत्यापित करें",
+      verifying: "सत्यापन हो रहा है…",
+    },
+  },
+
+  consent: {
+    termsPrefix: "मैं सहमत हूँ",
+    privacyPrefix: "मैं सहमत हूँ",
   },
 
   login: {

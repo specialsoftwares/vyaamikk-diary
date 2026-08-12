@@ -70,14 +70,19 @@ export { loadMockProfileByPhone, __resetMockRegistry } from "@/services/auth/moc
 export const mockAuthService: AuthService = {
   async startOtp(phoneE164: PhoneE164): Promise<OtpChallenge> {
     log.info("startOtp", { phone: phoneE164 });
-    const result = await localMockStartMobileOtp(phoneE164, "login");
-    return {
-      verificationId: result.verificationId,
-      phoneE164: result.phoneE164,
-      devCodeHint: null,
-      expiresAt: result.expiresAt,
-      resendAvailableAt: result.resendAvailableAt,
-    };
+    try {
+      const result = await localMockStartMobileOtp(phoneE164, "login");
+      return {
+        verificationId: result.verificationId,
+        phoneE164: result.phoneE164,
+        devCodeHint: null,
+        expiresAt: result.expiresAt,
+        resendAvailableAt: result.resendAvailableAt,
+      };
+    } catch (e) {
+      log.warn("startOtp failed", e instanceof Error ? e.message : e);
+      throw e;
+    }
   },
 
   async confirmOtp(challenge: OtpChallenge, code: string): Promise<AuthResult> {

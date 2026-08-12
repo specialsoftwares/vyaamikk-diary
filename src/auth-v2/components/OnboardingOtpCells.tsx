@@ -59,7 +59,7 @@ export function OnboardingOtpCells({
                   borderColor: error
                     ? tokens.danger
                     : focused
-                      ? tokens.link
+                      ? tokens.secondaryActiveFg
                       : tokens.inputBorder,
                 },
               ]}

@@ -15,6 +15,8 @@ interface ButtonProps {
   variant?: Variant;
   size?: Size;
   loading?: boolean;
+  /** Passthrough — retains label context when set (Premium Action System contract). */
+  loadingLabel?: string;
   disabled?: boolean;
   fullWidth?: boolean;
   style?: StyleProp<ViewStyle>;
@@ -39,6 +41,7 @@ export function Button({
   variant = "primary",
   size = "lg",
   loading = false,
+  loadingLabel,
   disabled = false,
   fullWidth = true,
   style,
@@ -53,6 +56,7 @@ export function Button({
       size={size as PremiumButtonSize}
       shape="rounded"
       loading={loading}
+      loadingLabel={loadingLabel}
       disabled={disabled}
       fullWidth={fullWidth}
       style={style}

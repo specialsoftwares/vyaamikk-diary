@@ -9,6 +9,7 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 
+import { AuthTertiaryTextAction } from "@/auth-v2/components/AuthTertiaryTextAction";
 import { AuthV2PrimaryButton } from "@/auth-v2/components/AuthV2PrimaryButton";
 import { AuthV2SecondaryButton } from "@/auth-v2/components/AuthV2SecondaryButton";
 import { BusinessConstitutionField } from "@/auth-v2/components/BusinessConstitutionField";
@@ -513,6 +514,7 @@ export function BusinessIdentityScreen({
                 identityPhase === "details" ? onDetailsContinue() : void onContinue()
               }
               testID="complete-profile-continue"
+              purpose="advance"
               activeBg={tokens.ctaActiveBg}
               activeText={tokens.ctaActiveText}
               mutedBg={tokens.ctaMutedBg}
@@ -522,11 +524,13 @@ export function BusinessIdentityScreen({
             <Text style={[styles.note, { color: tokens.muted }]}>
               {t("onboarding.profile.mobileNote", { phone: maskMobile(user.phoneE164) })}
             </Text>
-            <Pressable onPress={abandon} accessibilityRole="button">
-              <Text style={[styles.signOut, { color: tokens.muted }]}>
-                Sign out and start again
-              </Text>
-            </Pressable>
+            <AuthTertiaryTextAction
+              label="Sign out and start again"
+              onPress={abandon}
+              purpose="navigate"
+              accessibilityLabel="Sign out and start again"
+              textStyle={{ color: tokens.muted }}
+            />
           </>
         )
       }
@@ -655,6 +659,7 @@ export function BusinessIdentityScreen({
                   label="Confirm location"
                   disabled={readOnly || !canConfirmPin}
                   onPress={onConfirmPin}
+                  purpose="advance"
                 />
               </View>
             ) : null}

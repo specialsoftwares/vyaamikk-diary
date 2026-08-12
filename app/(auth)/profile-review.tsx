@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useRef } from "react";
 import { useRouter } from "expo-router";
 
 import { ProfileReviewScreen } from "@/auth-v2/screens/ProfileReviewScreen";
@@ -8,10 +8,15 @@ import {
 } from "@/auth/onboardingGuardPolicy";
 import { useAuth } from "@/state/auth";
 
-/** Profile review — confirm document-facing identity before Complete Profile. */
+/**
+ * Profile review — confirm document-facing identity before Confirm & continue.
+ * Does not steal navigation when profileCompletedAt flips during the in-screen
+ * workspace-ready success sequence (that screen owns exactly-once replace → You).
+ */
 export default function ProfileReviewRoute() {
   const router = useRouter();
   const { user } = useAuth();
+  const wasCompleteOnMountRef = useRef(Boolean(user?.profileCompletedAt));
 
   useEffect(() => {
     if (!user) {
@@ -21,22 +26,12 @@ export default function ProfileReviewRoute() {
     if (shouldSuppressForwardOnboardingGuardSync("profileReview")) {
       return;
     }
-    let cancelled = false;
-    (async () => {
-      if (shouldSuppressForwardOnboardingGuardSync("profileReview")) return;
-      if (user.profileCompletedAt && !user.ueidReleasedAt) {
-        if (!cancelled) router.replace("/(auth)/ueid");
-        return;
-      }
-      if (user.profileCompletedAt && user.ueidReleasedAt) {
-        if (!cancelled) router.replace("/(auth)/ueid");
-        return;
-      }
-      markBootWizardStep("profileReview", user.uid);
-    })();
-    return () => {
-      cancelled = true;
-    };
+    // Cold/wrong-stack resume only — leave in-flight Confirm success alone.
+    if (wasCompleteOnMountRef.current && user.profileCompletedAt) {
+      router.replace("/(app)/(tabs)/you");
+      return;
+    }
+    markBootWizardStep("profileReview", user.uid);
   }, [user, router]);
 
   if (!user) return null;

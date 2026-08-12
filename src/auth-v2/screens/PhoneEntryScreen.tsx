@@ -15,11 +15,11 @@ import {
   toE164FromDraft,
 } from "@/auth-v2/phoneValidation";
 import { onboardingMark } from "@/auth-v2/onboardingPerfProbe";
-import { authV2Tokens } from "@/auth-v2/theme/authV2Theme";
+import { useAuthV2Theme } from "@/auth-v2/hooks/useAuthV2Theme";
 import { DEFAULT_AUTH_V2_COUNTRY_CODE, type AuthV2PhoneDraft } from "@/auth-v2/types";
 import { useT } from "@/i18n";
 import { formatDisplayPhone } from "@/utils/phone";
-import { spacing, typography, useTheme } from "@/theme";
+import { spacing, typography } from "@/theme";
 import { useIsOnline } from "@/state/network";
 import { Banner } from "@/components/ui";
 import { PhoneAuthErrorPanel } from "@/auth-v2/components/PhoneAuthErrorPanel";
@@ -67,8 +67,7 @@ export function PhoneEntryScreen({
 }: PhoneEntryScreenProps) {
   const t = useT();
   const online = useIsOnline();
-  const { resolvedMode, colors } = useTheme();
-  const tokens = authV2Tokens(colors, resolvedMode === "dark");
+  const { tokens } = useAuthV2Theme();
   const [focused, setFocused] = useState(false);
   const [formatError, setFormatError] = useState<string | null>(null);
   const [consentPrompt, setConsentPrompt] = useState(false);
@@ -142,6 +141,7 @@ export function PhoneEntryScreen({
           disabled={!continueEnabled}
           onPress={handlePrimary}
           testID="auth-v2-phone-continue"
+          purpose="advance"
           activeBg={tokens.ctaActiveBg}
           activeText={tokens.ctaActiveText}
           mutedBg={tokens.ctaMutedBg}
@@ -174,7 +174,7 @@ export function PhoneEntryScreen({
           style={[
             styles.codeBox,
             {
-              borderColor: focused ? tokens.link : tokens.inputBorder,
+              borderColor: focused ? tokens.secondaryActiveFg : tokens.inputBorder,
               backgroundColor: tokens.inputBg,
             },
           ]}
@@ -185,7 +185,7 @@ export function PhoneEntryScreen({
           style={[
             styles.input,
             {
-              borderColor: focused ? tokens.link : tokens.inputBorder,
+              borderColor: focused ? tokens.secondaryActiveFg : tokens.inputBorder,
               backgroundColor: tokens.inputBg,
               color: tokens.inputText,
             },
