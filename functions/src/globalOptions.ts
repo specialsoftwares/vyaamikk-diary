@@ -14,4 +14,9 @@ import { setGlobalOptions } from "firebase-functions/v2";
 setGlobalOptions({
   cpu: "gcf_gen1",
   concurrency: 1,
+  // Quota "total allowable CPU per region" = Σ cpu × maxInstances.
+  // Unset maxInstances defaults to 100 per service and blocks rollout.
+  // 3 instances/function is ample for Internal Testing scale; raise
+  // per-function later if a public rollout needs more headroom.
+  maxInstances: 3,
 });
