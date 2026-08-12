@@ -1141,13 +1141,10 @@ export default function PurchaseOrderFormScreen() {
       <View style={styles.actions}>
         <Button
           label={
-            submitting
-              ? t("purchaseOrder.generating")
-              : isEditing
-                ? t("purchaseOrder.updateShare")
-                : t("purchaseOrder.createShare")
+            isEditing ? t("purchaseOrder.updateShare") : t("purchaseOrder.createShare")
           }
           loading={submitting}
+          loadingLabel={t("purchaseOrder.generating")}
           onPress={onSubmit}
         />
       </View>

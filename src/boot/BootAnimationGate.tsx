@@ -3,7 +3,12 @@ import { StyleSheet, View } from "react-native";
 import { useFonts, Barlow_300Light } from "@expo-google-fonts/barlow";
 import { BarlowCondensed_700Bold } from "@expo-google-fonts/barlow-condensed";
 
-import { BRAND_SURFACE } from "@/config/brandMotion";
+import {
+  BOOT_BRAND_MIN_MS,
+  BOOT_REDUCED_MOTION_MS,
+  BRAND_SURFACE,
+  canReleaseBootToApp,
+} from "@/config/brandMotion";
 import {
   useBootReducedMotion,
   VyaamikkBootAnimation,
@@ -27,7 +32,8 @@ interface BootAnimationGateProps {
 
 /**
  * Coordinates boot presentation with boot readiness.
- * Entry gate: animationDone && bootReady && routeResolved && !bootError
+ * Entry gate: brandMinElapsed && bootReady && routeResolved && !bootError
+ * (does not force a ready user to wait the full choreography).
  */
 export function BootAnimationGate({
   visible,
@@ -43,18 +49,26 @@ export function BootAnimationGate({
     Barlow_300Light,
     BarlowCondensed_700Bold,
   });
-  const [animationDone, setAnimationDone] = useState(false);
+  const [brandMinElapsed, setBrandMinElapsed] = useState(false);
   const [showHoldMessage, setShowHoldMessage] = useState(false);
 
-  const canEnterApp =
-    animationDone && bootReady && routeResolved && !bootError;
+  const canEnterApp = canReleaseBootToApp({
+    brandMinElapsed,
+    bootReady,
+    routeResolved,
+    bootError,
+  });
 
   useEffect(() => {
     if (!visible) {
-      setAnimationDone(false);
+      setBrandMinElapsed(false);
       setShowHoldMessage(false);
+      return;
     }
-  }, [visible]);
+    const minMs = reducedMotion ? BOOT_REDUCED_MOTION_MS : BOOT_BRAND_MIN_MS;
+    const timer = setTimeout(() => setBrandMinElapsed(true), minMs);
+    return () => clearTimeout(timer);
+  }, [visible, reducedMotion]);
 
   useEffect(() => {
     if (bootError && visible) {
@@ -63,19 +77,19 @@ export function BootAnimationGate({
   }, [bootError, onHoldTimeout, visible]);
 
   useEffect(() => {
-    if (!animationDone || canEnterApp) {
+    if (!brandMinElapsed || canEnterApp) {
       setShowHoldMessage(false);
       return;
     }
     const timer = setTimeout(() => setShowHoldMessage(true), BOOT_HOLD_MESSAGE_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [animationDone, canEnterApp]);
+  }, [brandMinElapsed, canEnterApp]);
 
   useEffect(() => {
-    if (!animationDone || canEnterApp) return;
+    if (!brandMinElapsed || canEnterApp) return;
     const timer = setTimeout(() => onHoldTimeout(), BOOT_HOLD_TIMEOUT_MS);
     return () => clearTimeout(timer);
-  }, [animationDone, canEnterApp, onHoldTimeout]);
+  }, [brandMinElapsed, canEnterApp, onHoldTimeout]);
 
   if (!visible) return null;
 
@@ -88,7 +102,7 @@ export function BootAnimationGate({
       releaseToApp={canEnterApp}
       showHoldMessage={showHoldMessage}
       reducedMotion={reducedMotion}
-      onAnimationDone={() => setAnimationDone(true)}
+      onAnimationDone={() => undefined}
       onBlackMidpoint={onBlackMidpoint}
       onExitComplete={onExitComplete}
     />
@@ -99,6 +113,5 @@ const styles = StyleSheet.create({
   fontHold: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: BRAND_SURFACE,
-    zIndex: 100,
   },
 });

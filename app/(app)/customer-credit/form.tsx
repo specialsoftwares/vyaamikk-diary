@@ -1491,13 +1491,10 @@ export default function CustomerCreditFormScreen() {
       <View style={styles.actions}>
         <Button
           label={
-            submitting
-              ? t("customerCredit.generating")
-              : isEditing
-                ? t("customerCredit.updateShare")
-                : t("customerCredit.createShare")
+            isEditing ? t("customerCredit.updateShare") : t("customerCredit.createShare")
           }
           loading={submitting}
+          loadingLabel={t("customerCredit.generating")}
           onPress={onSubmit}
         />
       </View>

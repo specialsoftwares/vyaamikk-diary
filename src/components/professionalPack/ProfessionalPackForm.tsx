@@ -12,8 +12,7 @@ import { useFormFieldNavigation } from "@/components/inputSafety/FormFocusManage
 import { Button, TextField, LocaleUiText } from "@/components/ui";
 import { masterKeyForProPackField } from "@/services/masterData/fieldKeys";
 import type { MasterFieldKey } from "@/services/masterData";
-import type { MatterTypeDef } from "@/domain/professionalPack";
-import type { ProfessionalCategory } from "@/domain/professionalPack";
+import type { MatterTypeDef, ProfessionalCategory } from "@/domain/professionalPack";
 import type { BusinessEntry } from "@/domain/businessEntry";
 import { useT } from "@/i18n";
 import { formDateRowStyle, formFieldLabelStyle } from "@/theme/formLayer";
@@ -340,8 +339,9 @@ export function ProfessionalPackForm({
       />
 
       <Button
-        label={saving ? t("common.loading") : t("common.save")}
+        label={t("common.save")}
         loading={saving}
+        loadingLabel="Saving…"
         disabled={saving || saveBlocked}
         onPress={handleSubmit(
           async (v) => {

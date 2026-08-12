@@ -163,6 +163,7 @@ export default function ComposerScreen() {
   const linkStyles = useThemedStyles((c) =>
     StyleSheet.create({
       saveDraft: { ...typography.captionStrong, color: c.primary },
+      saveDraftDisabled: { color: c.textMuted, opacity: 0.55 },
       saveDraftHidden: { opacity: 0 },
     })
   );
@@ -744,8 +745,16 @@ export default function ComposerScreen() {
       disabled={draftSaving || saving}
       hitSlop={8}
       accessibilityRole="button"
+      accessibilityState={{ disabled: draftSaving || saving, busy: draftSaving }}
     >
-      <LocaleUiText style={linkStyles.saveDraft}>{t("composer.saveDraft")}</LocaleUiText>
+      <LocaleUiText
+        style={[
+          linkStyles.saveDraft,
+          (draftSaving || saving) && linkStyles.saveDraftDisabled,
+        ]}
+      >
+        {draftSaving ? "Saving…" : t("composer.saveDraft")}
+      </LocaleUiText>
     </Pressable>
   ) : (
     <View style={linkStyles.saveDraftHidden} accessibilityElementsHidden>

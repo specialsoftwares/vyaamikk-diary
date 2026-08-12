@@ -27,6 +27,8 @@ import type {
 const log = createLogger("purchaseOrder/mock");
 const KEY_PREFIX = "vyd_po_v1_";
 const SERIAL_PREFIX = "vyd_po_serial_v1_";
+/** In-process create mutex per user — protects concurrent local-mock retries. */
+const createGates = new Map<string, Promise<void>>();
 
 function keyFor(userId: string): string {
   return `${KEY_PREFIX}${userId}`;
@@ -89,69 +91,85 @@ export const mockPurchaseOrderRepository: PurchaseOrderRepository = {
   async create(userId, input) {
     if (!userId) throw new AppError("permission_denied", "Not signed in.");
     const id = stableRecordId(input.clientRecordId, "po");
-    const all = await loadAll(userId);
-    const hit = all.find((p) => p.id === id);
-    if (hit) return hit;
+    // Serialize creates per user so concurrent retries cannot allocate multiple serials.
+    const gateKey = `po_create_${userId}`;
+    const prev = createGates.get(gateKey) ?? Promise.resolve();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    createGates.set(
+      gateKey,
+      prev.then(() => gate)
+    );
+    await prev;
+    try {
+      const all = await loadAll(userId);
+      const hit = all.find((p) => p.id === id);
+      if (hit) return hit;
 
-    const serial = await this.allocateSerial(userId);
-    const now = Date.now();
-    const po: PurchaseOrder = {
-      id,
-      userId,
-      ueid: input.ueid,
-      serial,
-      poNumber: formatPoNumber(serial),
-      status: "active",
-      poDate: input.poDate,
-      vendorName: input.vendorName.trim(),
-      vendorGstin: input.vendorGstin ?? null,
-      vendorAddress: input.vendorAddress ?? null,
-      vendorPin: input.vendorPin ?? null,
-      vendorState: input.vendorState ?? null,
-      vendorContactName: input.vendorContactName ?? null,
-      vendorContactPhone: input.vendorContactPhone ?? null,
-      vendorContactEmail: input.vendorContactEmail ?? null,
-      buyerName: input.buyerName.trim(),
-      buyerAddress: input.buyerAddress ?? null,
-      buyerGstin: input.buyerGstin ?? null,
-      buyerPin: input.buyerPin ?? null,
-      buyerState: input.buyerState ?? null,
-      authorizedBy: input.authorizedBy ?? null,
-      authorizedDesignation: input.authorizedDesignation ?? null,
-      shipSameAsBuyer: input.shipSameAsBuyer ?? false,
-      shipName: input.shipName ?? null,
-      shipAddress: input.shipAddress ?? null,
-      shipPin: input.shipPin ?? null,
-      shipState: input.shipState ?? null,
-      shipContact: input.shipContact ?? null,
-      deliveryLocation: input.deliveryLocation ?? null,
-      billingLocation: input.billingLocation ?? null,
-      expectedDeliveryDate: input.expectedDeliveryDate ?? null,
-      taxApplicable: input.taxApplicable ?? "none",
-      gstRate: input.gstRate ?? null,
-      useLogo: input.useLogo ?? false,
-      items: input.items,
-      total: input.total ?? computePurchaseOrderTotal(input.items),
-      deliveryTerms: input.deliveryTerms ?? null,
-      paymentTerms: input.paymentTerms ?? null,
-      freightTerms: input.freightTerms ?? null,
-      referenceNumber: input.referenceNumber ?? null,
-      notes: input.notes ?? null,
-      terms: input.terms ?? null,
-      pdfUri: input.pdfUri ?? null,
-      firstGeneratedAt: now,
-      lastEditedAt: null,
-      version: 1,
-      editHistory: [{ version: 1, at: now, action: "created" }],
-      cancelledAt: null,
-      createdAt: now,
-      updatedAt: now,
-      deletedAt: null,
-    };
-    all.unshift(po);
-    await persist(userId, all);
-    log.info("po created");
-    return po;
+      const serial = await this.allocateSerial(userId);
+      const now = Date.now();
+      const po: PurchaseOrder = {
+        id,
+        userId,
+        ueid: input.ueid,
+        serial,
+        poNumber: formatPoNumber(serial),
+        status: "active",
+        poDate: input.poDate,
+        vendorName: input.vendorName.trim(),
+        vendorGstin: input.vendorGstin ?? null,
+        vendorAddress: input.vendorAddress ?? null,
+        vendorPin: input.vendorPin ?? null,
+        vendorState: input.vendorState ?? null,
+        vendorContactName: input.vendorContactName ?? null,
+        vendorContactPhone: input.vendorContactPhone ?? null,
+        vendorContactEmail: input.vendorContactEmail ?? null,
+        buyerName: input.buyerName.trim(),
+        buyerAddress: input.buyerAddress ?? null,
+        buyerGstin: input.buyerGstin ?? null,
+        buyerPin: input.buyerPin ?? null,
+        buyerState: input.buyerState ?? null,
+        authorizedBy: input.authorizedBy ?? null,
+        authorizedDesignation: input.authorizedDesignation ?? null,
+        shipSameAsBuyer: input.shipSameAsBuyer ?? false,
+        shipName: input.shipName ?? null,
+        shipAddress: input.shipAddress ?? null,
+        shipPin: input.shipPin ?? null,
+        shipState: input.shipState ?? null,
+        shipContact: input.shipContact ?? null,
+        deliveryLocation: input.deliveryLocation ?? null,
+        billingLocation: input.billingLocation ?? null,
+        expectedDeliveryDate: input.expectedDeliveryDate ?? null,
+        taxApplicable: input.taxApplicable ?? "none",
+        gstRate: input.gstRate ?? null,
+        useLogo: input.useLogo ?? false,
+        items: input.items,
+        total: input.total ?? computePurchaseOrderTotal(input.items),
+        deliveryTerms: input.deliveryTerms ?? null,
+        paymentTerms: input.paymentTerms ?? null,
+        freightTerms: input.freightTerms ?? null,
+        referenceNumber: input.referenceNumber ?? null,
+        notes: input.notes ?? null,
+        terms: input.terms ?? null,
+        pdfUri: input.pdfUri ?? null,
+        firstGeneratedAt: now,
+        lastEditedAt: null,
+        version: 1,
+        editHistory: [{ version: 1, at: now, action: "created" }],
+        cancelledAt: null,
+        createdAt: now,
+        updatedAt: now,
+        deletedAt: null,
+      };
+      all.unshift(po);
+      await persist(userId, all);
+      log.info("po created");
+      return po;
+    } finally {
+      release();
+    }
   },
 
   async update(userId, input) {

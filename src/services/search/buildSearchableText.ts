@@ -7,7 +7,7 @@ import type { BusinessEntry } from "@/domain/businessEntry";
 import type { ProfessionalServicePack } from "@/domain/professionalPack";
 import type { CustomerCreditRecord } from "@/domain/customerCredit";
 import type { LetterheadDocument } from "@/services/letterhead";
-import { formatEntryDate } from "@/utils/date";
+import { dayKey, formatEntryDate } from "@/utils/date";
 import { buildSearchableLocationText } from "@/utils/location/entryLocation";
 import {
   appendAmount,
@@ -46,11 +46,11 @@ function appendDocumentHistory(parts: string[], entry: BusinessEntry): void {
   const dh = entry.documentHistory;
   if (!dh) return;
   if (dh.versionNumber) appendText(parts, `v${dh.versionNumber}`);
-  if (dh.firstGeneratedAt) appendText(parts, new Date(dh.firstGeneratedAt).toISOString().slice(0, 10));
-  if (dh.lastGeneratedAt) appendText(parts, new Date(dh.lastGeneratedAt).toISOString().slice(0, 10));
+  if (dh.firstGeneratedAt) appendText(parts, dayKey(dh.firstGeneratedAt));
+  if (dh.lastGeneratedAt) appendText(parts, dayKey(dh.lastGeneratedAt));
   for (const gen of dh.pdfGenerationHistory ?? []) {
     appendText(parts, `pdf v${gen.versionNumber}`);
-    appendText(parts, new Date(gen.generatedAt).toISOString().slice(0, 10));
+    appendText(parts, dayKey(gen.generatedAt));
   }
   for (const edit of dh.editHistory ?? []) {
     appendText(parts, edit.previousSummary);
@@ -70,8 +70,8 @@ export function buildEntrySearchableText(entry: BusinessEntry): string {
   if (locText) appendText(parts, locText);
   if (entry.location?.gps?.addressLabel) appendText(parts, entry.location.gps.addressLabel);
   if (entry.reminder?.note) appendText(parts, entry.reminder.note);
-  appendText(parts, new Date(entry.entryDate).toISOString().slice(0, 10));
-  appendText(parts, new Date(entry.updatedAt).toISOString().slice(0, 10));
+  appendText(parts, dayKey(entry.entryDate));
+  appendText(parts, dayKey(entry.updatedAt));
 
   const p = entry.payload as unknown as Record<string, unknown>;
   appendRecordValues(parts, p);
@@ -168,7 +168,7 @@ export function buildLetterheadSearchableText(doc: LetterheadDocument): string {
   appendText(parts, inp.name);
   appendText(parts, inp.designation);
   appendText(parts, inp.place);
-  appendText(parts, new Date(inp.date).toISOString().slice(0, 10));
+  appendText(parts, dayKey(inp.date));
   return normalizeSearchText(parts.join(" "));
 }
 
@@ -194,9 +194,9 @@ export function buildCustomerCreditSearchableText(record: CustomerCreditRecord):
   appendText(parts, record.remarks);
   appendAmount(parts, record.saleAmount);
   if (record.emiAmount) appendAmount(parts, record.emiAmount);
-  appendText(parts, new Date(record.saleDate).toISOString().slice(0, 10));
+  appendText(parts, dayKey(record.saleDate));
   if (record.firstDueDate) {
-    appendText(parts, new Date(record.firstDueDate).toISOString().slice(0, 10));
+    appendText(parts, dayKey(record.firstDueDate));
   }
   for (const p of record.products) {
     appendText(parts, p.productName);

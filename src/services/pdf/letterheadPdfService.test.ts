@@ -47,4 +47,21 @@ assert(
   "letterhead must drive the writable area via @page margins for multi-page safety"
 );
 
+assert(
+  serviceSource.includes("escapeHtml"),
+  "letterhead matter HTML must escape user-controlled fields"
+);
+assert(
+  !serviceSource.includes("pdfFooterHtml"),
+  "letterhead matter must not use the general PDF corporate footer"
+);
+// Strip block comments so documentation that *forbids* branding does not trip the check.
+const letterheadCodeOnly = serviceSource.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+assert(
+  !/Generated using Vyaamikk|SPECIAL SOFTWARES|Ananya Engineered|pdfFooterHtml/i.test(
+    letterheadCodeOnly
+  ),
+  "letterhead matter executable code must not embed platform branding or operator metadata"
+);
+
 console.log("letterheadPdfService.test.ts: ok");

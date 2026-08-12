@@ -217,6 +217,21 @@ async function run(): Promise<void> {
   const serialAfterDup = await mockPurchaseOrderRepository.allocateSerial(userId);
   assert.equal(serialAfterDup, 2, "serial increments only once per successful create");
 
+  // --- PO: ten concurrent creates with the same clientRecordId → one doc, one serial ---
+  await clearStorage();
+  const poBurstId = "po_burst_concurrent";
+  const burst = await Promise.all(
+    Array.from({ length: 10 }, () =>
+      mockPurchaseOrderRepository.create(userId, minimalPoInput(poBurstId))
+    )
+  );
+  const burstIds = new Set(burst.map((p) => p.id));
+  const burstSerials = new Set(burst.map((p) => p.serial));
+  assert.equal(burstIds.size, 1, "concurrent creates share one document id");
+  assert.equal(burstSerials.size, 1, "concurrent creates share one serial");
+  assert.equal((await mockPurchaseOrderRepository.list(userId)).length, 1);
+  assert.equal(await mockPurchaseOrderRepository.allocateSerial(userId), 2);
+
   // --- Customer Credit: rapid save → one record ---
   await clearStorage();
   const crId = "cr_hardening_1";

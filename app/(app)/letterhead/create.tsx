@@ -15,8 +15,7 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import type { ScrollView } from "react-native";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View, type ScrollView } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { Controller, useForm } from "react-hook-form";
@@ -864,21 +863,17 @@ export default function LetterheadCreateScreen() {
         />
         {!isEditing ? (
           <Button
-            label={savingDraft ? t("letterhead.draftSaving") : t("letterhead.draftSave")}
+            label={t("letterhead.draftSave")}
             variant="secondary"
             loading={savingDraft}
+            loadingLabel={t("letterhead.draftSaving")}
             onPress={() => void onSaveDraft()}
           />
         ) : null}
         <Button
-          label={
-            submitting
-              ? t("letterhead.createGenerating")
-              : isEditing
-                ? t("letterhead.editShare")
-                : t("letterhead.createShare")
-          }
+          label={isEditing ? t("letterhead.editShare") : t("letterhead.createShare")}
           loading={submitting}
+          loadingLabel={t("letterhead.createGenerating")}
           onPress={onSubmit}
         />
       </View>

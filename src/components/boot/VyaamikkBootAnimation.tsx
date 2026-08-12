@@ -141,6 +141,8 @@ export interface VyaamikkBootAnimationProps {
   releaseToApp: boolean;
   showHoldMessage?: boolean;
   reducedMotion?: boolean;
+  /** Presentation override only. Production boot omits this (uses BOOT_ANIMATION_MS). */
+  sequenceDurationMs?: number;
   onAnimationDone: () => void;
   onBlackMidpoint: () => void;
   onExitComplete: () => void;
@@ -150,6 +152,7 @@ export function VyaamikkBootAnimation({
   releaseToApp,
   showHoldMessage = false,
   reducedMotion = false,
+  sequenceDurationMs,
   onAnimationDone,
   onBlackMidpoint,
   onExitComplete,
@@ -164,7 +167,8 @@ export function VyaamikkBootAnimation({
   const releaseToAppRef = useRef(releaseToApp);
   releaseToAppRef.current = releaseToApp;
 
-  const duration = reducedMotion ? BOOT_REDUCED_MOTION_MS : BOOT_ANIMATION_MS;
+  const duration =
+    sequenceDurationMs ?? (reducedMotion ? BOOT_REDUCED_MOTION_MS : BOOT_ANIMATION_MS);
   const frozenMs = holdFinalFrame ? duration : elapsedMs;
   const displayMarkScale = resolveDisplayMarkScale(frame.markScale, frozenMs, reducedMotion);
   const markCenter = getMarkCenter(displayMarkScale);
@@ -203,7 +207,8 @@ export function VyaamikkBootAnimation({
 
   useEffect(() => {
     if (!releaseToApp) return;
-    if (phaseRef.current === "holding") {
+    // Gate may release after brand minimum while choreography is still playing.
+    if (phaseRef.current === "holding" || phaseRef.current === "playing") {
       beginExit();
     }
   }, [releaseToApp, beginExit]);

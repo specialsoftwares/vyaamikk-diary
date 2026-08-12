@@ -6,7 +6,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 
-import { assertProductionConfig } from "@/config/productionGuard";
+import { BootstrapRoot } from "@/startup/BootstrapRoot";
 import { decideRootDataProviders } from "@/config/rootDataProviders";
 import { AppFeedbackProvider } from "@/feedback/AppFeedback";
 import { LocalDbProvider } from "@/state/localDb";
@@ -18,36 +18,34 @@ import { ThemeProvider, useTheme } from "@/theme";
 import { I18nextProvider } from "react-i18next";
 import { i18n } from "@/i18n/i18n";
 
-assertProductionConfig();
-
-/** Pathname must never gate this — see `decideRootDataProviders`. */
-const rootDataProviders = decideRootDataProviders();
-if (
-  !rootDataProviders.mountLocalDb ||
-  !rootDataProviders.mountAuth ||
-  !rootDataProviders.mountSync ||
-  !rootDataProviders.mountAppFeedback
-) {
-  throw new Error(
-    "Root LocalDb/Auth/Sync/AppFeedback providers must always mount (path-gated mounts crash useAuth consumers)."
-  );
-}
-
+/**
+ * Keep splash visible until BootstrapRoot hides it on success or controlled failure.
+ * Never call assertProductionConfig() at module scope — that terminated Android.
+ */
 SplashScreen.preventAutoHideAsync().catch(() => {
   // No-op — splash hide is best-effort.
 });
+
+/** Pathname must never gate this — see `decideRootDataProviders`. */
+const rootDataProviders = decideRootDataProviders();
 
 /**
  * Single stable provider tree for the entire app.
  *
  * LocalDb → Auth → Sync → AppFeedback must remain mounted across public
  * routes, authenticated routes, redirects, and language transitions.
- * Path-gated provider swaps previously unmounted AuthProvider while
- * Expo Router kept `app/(app)/_layout` (a `useAuth` consumer) alive.
- *
- * Order matters: AuthProvider reads LocalDb; SyncProvider reads Auth + LocalDb.
  */
 function RootProviders({ children }: { children: React.ReactNode }) {
+  // Soft-check only — BootstrapRoot already enforced this fail-closed in-UI.
+  if (
+    !rootDataProviders.mountLocalDb ||
+    !rootDataProviders.mountAuth ||
+    !rootDataProviders.mountSync ||
+    !rootDataProviders.mountAppFeedback
+  ) {
+    return null;
+  }
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
@@ -73,16 +71,14 @@ function RootProviders({ children }: { children: React.ReactNode }) {
 
 export default function RootLayout() {
   return (
-    <RootProviders>
-      <ThemedAppShell />
-    </RootProviders>
+    <BootstrapRoot>
+      <RootProviders>
+        <ThemedAppShell />
+      </RootProviders>
+    </BootstrapRoot>
   );
 }
 
-/**
- * Inner shell that consumes the theme so the StatusBar + Stack
- * background follow light/dark live.
- */
 function ThemedAppShell() {
   const { resolvedMode, colors } = useTheme();
   return (

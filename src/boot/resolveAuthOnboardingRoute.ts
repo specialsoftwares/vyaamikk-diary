@@ -1,15 +1,19 @@
 import type { Href } from "expo-router";
 
 import type { UserProfile } from "@/domain/types";
-import { loadLocationFootprintPreferences } from "@/services/location/locationFootprintPreferences";
 import {
   hrefForProfileRemediation,
   resolveProfileRemediation,
 } from "@/onboarding/profileRemediation";
+import { isValidUEID } from "@/utils/ueid";
 
 /**
  * Ordered onboarding gates after sign-in (local profile flags only).
  * Does not include draft continuation — handled by resolveBootDestination.
+ *
+ * V1 public release: after authoritative profile completion (+ identity integrity),
+ * resolve to the app. UEID reveal / Intro / GPS footprint acknowledgements are
+ * no longer mandatory blocking gates (fields retained for compatibility).
  */
 export async function resolveAuthOnboardingHref(
   user: UserProfile
@@ -26,17 +30,10 @@ export async function resolveAuthOnboardingHref(
     return "/(auth)/complete-profile";
   }
 
-  if (!user.ueidReleasedAt) {
+  // Distinguish UEID identity integrity from UEID *reveal acknowledgement*.
+  // Missing/malformed UEID is not silently treated as onboarded.
+  if (!user.ueid || !isValidUEID(user.ueid)) {
     return "/(auth)/ueid";
-  }
-
-  if (!user.onboardingIntroSeenAt) {
-    return "/(auth)/onboarding-intro";
-  }
-
-  const locPrefs = await loadLocationFootprintPreferences(user.uid);
-  if (locPrefs.locationConsentShownAt == null) {
-    return "/(auth)/location-onboarding";
   }
 
   return null;

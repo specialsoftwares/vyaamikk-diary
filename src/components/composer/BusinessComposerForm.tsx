@@ -765,8 +765,9 @@ export function BusinessComposerForm({
       {validationBanner ? <Banner tone="warning" message={validationBanner} /> : null}
       <PremiumCard elevated={false}>{renderFields()}</PremiumCard>
       <Button
-        label={saving ? t("common.loading") : t("common.save")}
+        label={t("common.save")}
         loading={saving}
+        loadingLabel="Saving…"
         disabled={saving}
         onPress={handleSubmit(
           (v) => {
