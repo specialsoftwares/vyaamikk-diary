@@ -5,6 +5,9 @@
  * Emulator: npm run serve (from functions/)
  */
 
+// Side-effect import FIRST: applies global cpu/concurrency to every function.
+import "./globalOptions";
+
 export {
   resolveOrCreateUserByPhone,
   claimMobile,
