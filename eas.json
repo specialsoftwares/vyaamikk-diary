@@ -1,35 +1,50 @@
 {
   "cli": {
     "version": ">= 16.0.0",
-    "appVersionSource": "remote"
+    "appVersionSource": "local"
   },
   "build": {
-    "development": {
-      "developmentClient": true,
-      "distribution": "internal",
-      "ios": { "simulator": false },
-      "android": { "buildType": "apk" },
-      "env": {
-        "EXPO_PUBLIC_APP_MODE": "development"
-      }
-    },
-    "development-production-otp": {
-      "developmentClient": true,
-      "distribution": "internal",
-      "ios": { "simulator": false },
-      "android": { "buildType": "apk" },
-      "env": {
-        "EXPO_PUBLIC_APP_MODE": "production"
-      }
-    },
     "preview": {
       "distribution": "internal",
+      "environment": "preview",
       "env": {
         "EXPO_PUBLIC_APP_MODE": "production"
       }
     },
     "production": {
       "autoIncrement": true,
+      "environment": "production",
+      "env": {
+        "EXPO_PUBLIC_APP_MODE": "production"
+      },
+      "android": {
+        "buildType": "app-bundle"
+      }
+    },
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "environment": "development",
+      "ios": {
+        "simulator": false
+      },
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_APP_MODE": "production"
+      }
+    },
+    "development-production-otp": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "environment": "development",
+      "ios": {
+        "simulator": false
+      },
+      "android": {
+        "buildType": "apk"
+      },
       "env": {
         "EXPO_PUBLIC_APP_MODE": "production"
       }

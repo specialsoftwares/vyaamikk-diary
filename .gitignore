@@ -81,6 +81,7 @@ local-exports/
 tmp/
 temp/
 .cache/
+.expo-export-audit/
 
 # Editor (local only)
 .vscode/settings.json

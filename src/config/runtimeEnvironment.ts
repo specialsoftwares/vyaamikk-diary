@@ -103,9 +103,19 @@ export function resolveEffectiveAppMode(
       const detail = rawWasEmpty
         ? "EXPO_PUBLIC_APP_MODE is missing (defaults to development)."
         : `EXPO_PUBLIC_APP_MODE=${bundled}.`;
+      const runtimeHint =
+        runtime === "development-client"
+          ? "Detected runtime: development-client (native Expo Dev Client + Metro __DEV__). " +
+            "Local-mock OTP is Expo Go only. Start Metro with: npm run start:prod-dev-client " +
+            "(or rebuild the EAS development / development-production-otp profile, which bake APP_MODE=production)."
+          : runtime === "store-or-standalone"
+            ? "Detected runtime: store-or-standalone (preview/production APK/AAB). " +
+              "Rebuild with EAS profile preview or production (both set EXPO_PUBLIC_APP_MODE=production). " +
+              "Do not enable local-mock OTP in these binaries."
+            : `Detected runtime: ${runtime}.`;
       throw new RuntimeConfigurationError(
-        `Production-like runtime requires EXPO_PUBLIC_APP_MODE=production (${detail}) ` +
-          "For Metro with a production dev client, run: npm run start:prod-dev-client"
+        `Invalid configuration for this binary. ${runtimeHint} ` +
+          `Required: EXPO_PUBLIC_APP_MODE=production. Current: ${detail}`
       );
     }
     return "production";

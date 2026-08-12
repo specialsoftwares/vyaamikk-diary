@@ -238,6 +238,56 @@ async function main(): Promise<void> {
       .sort((a, b) => a - b),
   };
 
+  function duplicateSerials(kind: string, rows: { docId: string; serial?: number }[]) {
+    const bySerial = new Map<number, string[]>();
+    for (const row of rows) {
+      const s = row.serial ?? 0;
+      if (s <= 0) continue;
+      const list = bySerial.get(s) ?? [];
+      list.push(row.docId);
+      bySerial.set(s, list);
+    }
+    return [...bySerial.entries()]
+      .filter(([, ids]) => ids.length > 1)
+      .map(([serial, docIds]) => ({ kind, serial, docIds }));
+  }
+
+  const duplicatePaymentIds: { creditDocId: string; clientPaymentId: string; count: number }[] =
+    [];
+  for (const c of creditRecords) {
+    const payments = Array.isArray(c.data.payments) ? (c.data.payments as Record<string, unknown>[]) : [];
+    const counts = new Map<string, number>();
+    for (const p of payments) {
+      const pid = String(p.clientPaymentId ?? "").trim();
+      if (!pid) continue;
+      counts.set(pid, (counts.get(pid) ?? 0) + 1);
+    }
+    for (const [clientPaymentId, count] of counts) {
+      if (count > 1) {
+        duplicatePaymentIds.push({ creditDocId: c.docId, clientPaymentId, count });
+      }
+    }
+  }
+
+  const missingClientRecordIds = {
+    purchase_orders: purchaseOrders.filter((p) => !String(p.data.clientRecordId ?? "").trim()).length,
+    customer_credit: creditRecords.filter((c) => !String(c.data.clientRecordId ?? "").trim()).length,
+    letterhead_docs: letterheads.filter((l) => !String(l.data.clientRecordId ?? "").trim()).length,
+  };
+
+  const letterheadMatterLinkAnomalies = letterheads
+    .map((l) => {
+      const clientRecordId = String(l.data.clientRecordId ?? "").trim();
+      const linkedEntryId = String(l.data.linkedDiaryEntryId ?? l.data.diaryEntryId ?? "").trim();
+      if (!clientRecordId) return null;
+      const expected = `${clientRecordId}_matter`;
+      if (linkedEntryId && linkedEntryId !== expected) {
+        return { docId: l.docId, clientRecordId, linkedEntryId, expected };
+      }
+      return null;
+    })
+    .filter(Boolean);
+
   const report = {
     mode: "dry-run-identify-only",
     projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID,
@@ -250,9 +300,16 @@ async function main(): Promise<void> {
       customer_credit_records: creditRecords.length,
     },
     blankPayloadIds,
+    missingClientRecordIds,
     idMismatches,
     duplicateGroups,
     duplicateSummary: formatDuplicateSummary(duplicateGroups),
+    duplicateSerials: [
+      ...duplicateSerials("purchase_order", poRows),
+      ...duplicateSerials("customer_credit", creditRows),
+    ],
+    duplicatePaymentIds,
+    letterheadMatterLinkAnomalies,
     serialSnapshots: {
       purchase_order_max: Math.max(0, ...serialGaps.purchase_orders),
       customer_credit_max: Math.max(0, ...serialGaps.customer_credit),
@@ -263,6 +320,7 @@ async function main(): Promise<void> {
       "Prefer in-app permanent delete so local caches stay consistent.",
       "After cleanup, re-run: npm run audit:records -- --user <uid>",
       "Escalate before touching production user accounts.",
+      "There is no auto-repair command in this repository — do not invent one against production.",
     ],
     recommendations: [
       duplicateGroups.length > 0
@@ -273,6 +331,15 @@ async function main(): Promise<void> {
         : null,
       idMismatches.length > 0
         ? "Payload id differs from doc id — repair on next update or manual cleanup."
+        : null,
+      Object.values(missingClientRecordIds).some((n) => n > 0)
+        ? "Some records lack clientRecordId — older schema; reads must remain tolerant."
+        : null,
+      duplicatePaymentIds.length > 0
+        ? "Duplicate clientPaymentId values found inside credit ledgers."
+        : null,
+      letterheadMatterLinkAnomalies.length > 0
+        ? "Letterhead diary link diverges from `${clientRecordId}_matter`."
         : null,
     ].filter(Boolean),
   };

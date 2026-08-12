@@ -151,7 +151,24 @@ function testDevClientRejectsDevelopmentBundledMode() {
       }),
     (error: unknown) =>
       error instanceof RuntimeConfigurationError &&
-      error.message.includes("start:prod-dev-client")
+      error.message.includes("start:prod-dev-client") &&
+      error.message.includes("development-client")
+  );
+}
+
+function testStoreRejectsDevelopmentBundledMode() {
+  assert.throws(
+    () =>
+      buildResolvedEnvironment({
+        bundledAppModeRaw: "development",
+        devBackendRaw: "local-mock",
+        firebaseConfigured,
+        signals: storeSignals,
+      }),
+    (error: unknown) =>
+      error instanceof RuntimeConfigurationError &&
+      error.message.includes("store-or-standalone") &&
+      error.message.includes("preview")
   );
 }
 
@@ -196,6 +213,7 @@ function main() {
   testInvalidModeRejectedInProductionLikeRuntime();
   testMissingModeFailsInProductionLikeRuntime();
   testDevClientRejectsDevelopmentBundledMode();
+  testStoreRejectsDevelopmentBundledMode();
   testMockOtpDisabledOutsideExpoGo();
   testSharedDevOnlyOnWebDev();
   console.log("runtimeEnvironment.test.ts: ok");

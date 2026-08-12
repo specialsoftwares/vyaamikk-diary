@@ -1,49 +1,9 @@
-import {
-  env,
-  getActiveBackend,
-  getResolvedEnvironment,
-  isFirebaseConfigured,
-} from "@/config/env";
-import { findLegalConfigBlockers } from "@/config/legal";
-import { assertRuntimeBackendIsolation } from "@/config/runtimeEnvironment";
-
 /**
- * Fail fast on production builds that would run mock auth, local-only storage,
- * or placeholder legal URLs / support email.
+ * Backward-compatible production guard entry.
+ * Implementation lives in src/startup/guards.ts (structured, non-crashing).
  */
-export function assertProductionConfig(): void {
-  assertRuntimeBackendIsolation(getResolvedEnvironment());
-
-  if (!env.isProduction) return;
-
-  if (!isFirebaseConfigured()) {
-    throw new Error(
-      "Production build requires EXPO_PUBLIC_FIREBASE_* configuration. Refusing to start in not-configured mode."
-    );
-  }
-
-  const backend = getActiveBackend();
-  if (backend !== "firebase-production") {
-    throw new Error(
-      `Production build cannot use backend "${backend}". Use real Firebase Auth + Firestore only.`
-    );
-  }
-
-  const urlBlockers = findLegalConfigBlockers().filter(
-    (b) =>
-      b.includes("example.com") ||
-      b.includes(".example") ||
-      b.includes("support email") ||
-      b.includes("privacy:") ||
-      b.includes("terms:") ||
-      b.includes("accountDeletion:") ||
-      b.includes("download:") ||
-      b.includes("forbidden") ||
-      b.includes("/auth")
-  );
-  if (urlBlockers.length > 0) {
-    throw new Error(
-      `Production build has incomplete or unsafe public/legal links:\n${urlBlockers.join("\n")}`
-    );
-  }
-}
+export {
+  assertProductionConfig,
+  evaluateProductionConfig,
+  evaluateRuntimeBackendIsolation,
+} from "@/startup/guards";
