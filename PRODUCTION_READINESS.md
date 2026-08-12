@@ -1,5 +1,9 @@
 # Production Readiness — Auth & Identity Track
 
+> **Superseded for channel / release readiness.**  
+> Use [`STABILIZATION_AND_RELEASE_READINESS.md`](./STABILIZATION_AND_RELEASE_READINESS.md) (2026-07-24) as the authoritative status.  
+> This file remains as historical auth-track notes. Do not treat “source exists” or older “deployed” claims here as current proof without re-verification.
+
 **Date:** 2026-06-04 (OTP wiring verified on disk 2026-06-08) · **Hardened Firestore rules live:** 2026-07-15 ~02:02 IST (UTC+5:30)  
 **Status:** OTP client wiring complete in repo — hardened Firestore rules (`9c4369a`) + client compatibility (`11503ce`) deployed to `vyaamikk-diary`; requires EAS dev build + remaining Firebase deploys + device QA
 

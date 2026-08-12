@@ -1,8 +1,10 @@
 # MASTER AUTH ONBOARDING EXECUTION TRACKER
 
 **Repo:** `/Users/shivamsaurav/Vyaamikk Diary`  
-**Updated:** 2026-07-23 (Pass 2 + nav stabilization)
+**Updated:** 2026-07-24 (stabilization pass — see `STABILIZATION_AND_RELEASE_READINESS.md`)  
 **Protected (never touch/stage):** `src/i18n/i18n.ts`, `src/i18n/validateLocales.ts`, `.expo-export-audit/`, `.env`
+
+Channel / release readiness for this repo is tracked in **`STABILIZATION_AND_RELEASE_READINESS.md`**. This file remains the auth/onboarding execution tracker.
 
 ## Commits in this master pass
 

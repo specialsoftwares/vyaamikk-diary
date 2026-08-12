@@ -9,6 +9,7 @@ import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-nati
 import Animated, { FadeInRight, FadeOutLeft } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { logStage2ActionSystemProvenance } from "@/actionSystem/stage2RuntimeProvenance";
 import { EmailEntryScreen } from "@/auth-v2/screens/EmailEntryScreen";
 import { EmailOtpScreen } from "@/auth-v2/screens/EmailOtpScreen";
 import { OtpVerificationScreen } from "@/auth-v2/screens/OtpVerificationScreen";
@@ -39,8 +40,30 @@ import {
   type PinChoicePreview,
   type PinUi,
 } from "./IdentityLocationPreview";
+import { YouPreview } from "./YouPreview";
+import { ReviewSectionEditPreview } from "./ReviewSectionEditPreview";
+import { WorkspacePhasePreview } from "./WorkspacePhasePreview";
+import {
+  createInitialHarnessReviewSession,
+} from "./harnessReviewSession";
+import {
+  nextHarnessScreenAfterIdentityContinue,
+  shouldNavigateHarnessYouAfterWorkspaceReady,
+  simulateHarnessProfileCompletion,
+} from "@/auth-v2/preview/harnessPostLocationHandoff";
+import {
+  harnessDefaultEntryScreen,
+  harnessPhaseControlLabel,
+  restartHarnessOnboardingReview,
+} from "@/auth-v2/preview/harnessReviewRestart";
+import {
+  ProfileReviewPresentation,
+  type ProfileReviewEditSection,
+} from "@/auth-v2/screens/ProfileReviewPresentation";
+import type { ReviewEditTarget } from "@/auth-v2/reviewEditIntent";
 
 const BOOT_FAST_MS = 720;
+const OWNER_ACCEPTANCE_SESSION = createInitialHarnessReviewSession();
 
 type VerifyLatencyPreset = "fast" | "typical" | "slow";
 const VERIFY_LATENCY_MS: Record<VerifyLatencyPreset, number> = {
@@ -61,7 +84,12 @@ export type HarnessScreenId =
   | "location"
   | "location_lookup"
   | "location_confirmed"
-  | "location_error";
+  | "location_error"
+  | "profile_review"
+  | "review_edit"
+  | "workspace_preparing"
+  | "workspace_ready"
+  | "you_preview";
 
 const FIXTURES: { id: HarnessScreenId; label: string }[] = [
   { id: "boot_current", label: "Splash 3600ms" },
@@ -76,14 +104,46 @@ const FIXTURES: { id: HarnessScreenId; label: string }[] = [
   { id: "location_lookup", label: "PIN looking up" },
   { id: "location_confirmed", label: "PIN confirmed" },
   { id: "location_error", label: "PIN network" },
+  { id: "profile_review", label: "Profile review" },
+  { id: "you_preview", label: "You preview" },
 ];
 
 export function HarnessApp() {
   const insets = useSafeAreaInsets();
   const { ready } = useI18n();
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [screen, setScreen] = useState<HarnessScreenId>("phone");
+  // Owner-acceptance default: Review (not terminal You). HMR may still preserve
+  // prior screen — use Restart onboarding review to recover deterministically.
+  const [screen, setScreen] = useState<HarnessScreenId>(harnessDefaultEntryScreen());
+  const [reviewEditTarget, setReviewEditTarget] = useState<ReviewEditTarget | null>(null);
+  const [reviewJourneyKey, setReviewJourneyKey] = useState(0);
+  const [logoUri, setLogoUri] = useState<string | null>(OWNER_ACCEPTANCE_SESSION.logoUri);
+  const [verifiedPhoneE164, setVerifiedPhoneE164] = useState(
+    OWNER_ACCEPTANCE_SESSION.phoneE164
+  );
+  const [verifiedEmail, setVerifiedEmail] = useState(OWNER_ACCEPTANCE_SESSION.email);
+  const pinLookupCountRef = useRef(0);
   const [verifyLatency, setVerifyLatency] = useState<VerifyLatencyPreset>("typical");
+  const workspaceYouNavigatedRef = useRef(false);
+
+  useEffect(() => {
+    logStage2ActionSystemProvenance("HarnessApp");
+  }, []);
+
+  const onReviewSuccessNavigate = useCallback(() => {
+    if (
+      !shouldNavigateHarnessYouAfterWorkspaceReady({
+        phase: "ready",
+        alreadyNavigated: workspaceYouNavigatedRef.current,
+      })
+    ) {
+      return;
+    }
+    workspaceYouNavigatedRef.current = true;
+    console.log("[ux-harness-obs] workspaceReady→you_preview (no production write)");
+    setScreen("you_preview");
+  }, []);
+
   const [phoneDraft, setPhoneDraft] = useState<AuthV2PhoneDraft>({
     countryCode: DEFAULT_AUTH_V2_COUNTRY_CODE,
     localNumber: "",
@@ -93,14 +153,18 @@ export function HarnessApp() {
   const [otp, setOtp] = useState("");
   const [email, setEmail] = useState("");
   const [emailCode, setEmailCode] = useState("");
-  const [displayName, setDisplayName] = useState("");
-  const [businessName, setBusinessName] = useState("");
-  const [constitution, setConstitution] = useState("");
-  const [gstin, setGstin] = useState("");
-  const [gstinState, setGstinState] = useState<GstinVerificationState>("notProvided");
-  const [pinCode, setPinCode] = useState("");
-  const [pinUi, setPinUi] = useState<PinUi>("idle");
-  const [confirmedPin, setConfirmedPin] = useState<ConfirmedPinPreview | null>(null);
+  const [displayName, setDisplayName] = useState(OWNER_ACCEPTANCE_SESSION.displayName);
+  const [businessName, setBusinessName] = useState(OWNER_ACCEPTANCE_SESSION.businessName);
+  const [constitution, setConstitution] = useState(OWNER_ACCEPTANCE_SESSION.constitution);
+  const [gstin, setGstin] = useState(OWNER_ACCEPTANCE_SESSION.gstin);
+  const [gstinState, setGstinState] = useState<GstinVerificationState>(
+    OWNER_ACCEPTANCE_SESSION.gstinState
+  );
+  const [pinCode, setPinCode] = useState(OWNER_ACCEPTANCE_SESSION.pinCode);
+  const [pinUi, setPinUi] = useState<PinUi>("confirmed");
+  const [confirmedPin, setConfirmedPin] = useState<ConfirmedPinPreview | null>(
+    OWNER_ACCEPTANCE_SESSION.confirmedPin
+  );
   const [pinChoices, setPinChoices] = useState<PinChoicePreview | null>(null);
   const [selectedLocality, setSelectedLocality] = useState<string | null>(null);
   const [mobileVisual, setMobileVisual] = useState<VerificationVisualPhase>("idle");
@@ -110,6 +174,46 @@ export function HarnessApp() {
   const pinTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pinRequestId = useRef(0);
   const verifyStartedAt = useRef(0);
+
+  const restartOnboardingReview = useCallback(() => {
+    const snapshot = {
+      displayName,
+      businessName,
+      constitution,
+      gstin,
+      pinCode,
+      phoneE164: verifiedPhoneE164,
+      email: verifiedEmail,
+      logoUri,
+    };
+    const next = restartHarnessOnboardingReview({
+      session: snapshot,
+      reviewJourneyKey,
+    });
+    // Preserve CURRENT session fields — do not re-seed fixtures.
+    workspaceYouNavigatedRef.current = next.workspaceYouNavigated;
+    setReviewEditTarget(next.reviewEditTarget);
+    setReviewJourneyKey(next.reviewJourneyKey);
+    setMobileVisual("idle");
+    setEmailVisual("idle");
+    lastOtpSubmit.current = null;
+    lastEmailSubmit.current = null;
+    setScreen(next.screen);
+    setDrawerOpen(false);
+    console.log(
+      "[ux-harness-obs] restart→profile_review (session preserved, no production write)"
+    );
+  }, [
+    displayName,
+    businessName,
+    constitution,
+    gstin,
+    pinCode,
+    verifiedPhoneE164,
+    verifiedEmail,
+    logoUri,
+    reviewJourneyKey,
+  ]);
 
   const logProbe = (label: string, start: number) => {
     const ms = Math.round((globalThis.performance?.now?.() ?? Date.now()) - start);
@@ -200,7 +304,7 @@ export function HarnessApp() {
       lastOtpSubmit.current = null;
     }
     if (id === "email" || id === "email_otp") {
-      setEmail(id === "email" ? "" : "owner@example.com");
+      setEmail(id === "email" ? "" : email.trim());
       setEmailCode("");
       lastEmailSubmit.current = null;
     }
@@ -212,10 +316,10 @@ export function HarnessApp() {
       setGstinState("notProvided");
     }
     if (id.startsWith("location")) {
-      setDisplayName("Ada Lovelace");
-      setBusinessName("Sharma Hardware");
-      setConstitution("Proprietorship");
-      setPinCode(id === "location" ? "" : "201016");
+      setDisplayName(displayName.trim() || "Ada Lovelace");
+      setBusinessName(businessName.trim() || "Sharma Hardware");
+      setConstitution(constitution.trim() || "Proprietorship");
+      setPinCode(id === "location" ? "" : pinCode.trim() || "201016");
       setPinUi(
         id === "location_lookup"
           ? "looking_up"
@@ -227,9 +331,31 @@ export function HarnessApp() {
       );
       setConfirmedPin(
         id === "location_confirmed"
-          ? { locality: "Crossing Republik", district: "Ghaziabad", state: "Uttar Pradesh" }
+          ? confirmedPin ?? {
+              locality: "Crossing Republik",
+              district: "Ghaziabad",
+              state: "Uttar Pradesh",
+            }
           : null
       );
+    }
+    if (id === "profile_review" || id === "you_preview") {
+      if (id === "profile_review") {
+        workspaceYouNavigatedRef.current = false;
+        setReviewEditTarget(null);
+        setReviewJourneyKey((k) => k + 1);
+      }
+      // Fill only empty fields — never wipe committed owner session values.
+      setDisplayName((v) => v.trim() || OWNER_ACCEPTANCE_SESSION.displayName);
+      setBusinessName((v) => v.trim() || OWNER_ACCEPTANCE_SESSION.businessName);
+      setConstitution((v) => v.trim() || OWNER_ACCEPTANCE_SESSION.constitution);
+      setPinCode((v) => v.trim() || OWNER_ACCEPTANCE_SESSION.pinCode);
+      setPinUi("confirmed");
+      setConfirmedPin((prev) => prev ?? OWNER_ACCEPTANCE_SESSION.confirmedPin);
+      setVerifiedEmail((v) => v.trim() || OWNER_ACCEPTANCE_SESSION.email);
+    }
+    if (id === "workspace_preparing" || id === "workspace_ready") {
+      workspaceYouNavigatedRef.current = false;
     }
   };
 
@@ -307,7 +433,9 @@ export function HarnessApp() {
             ? "location"
             : screen === "phone_sending"
               ? "phone"
-              : screen
+              : screen === "profile_review"
+                ? `profile_review-${reviewJourneyKey}`
+                : screen
         }
         entering={FadeInRight.duration(ONBOARDING_SCREEN_MS)}
         exiting={FadeOutLeft.duration(ONBOARDING_SCREEN_MS)}
@@ -371,6 +499,11 @@ export function HarnessApp() {
                 phase={mobileVisual === "success" ? "success" : "verifying"}
                 onDone={() => {
                   setMobileVisual((p) => reduceVerificationVisual(p, "success_settled"));
+                  if (phoneDraft.localNumber.trim().length >= 10) {
+                    setVerifiedPhoneE164(
+                      `${phoneDraft.countryCode}${phoneDraft.localNumber.replace(/\D/g, "")}`
+                    );
+                  }
                   setScreen("email");
                 }}
               />
@@ -395,7 +528,7 @@ export function HarnessApp() {
         {screen === "email_otp" ? (
           <View style={styles.fill}>
             <EmailOtpScreen
-              email={email.trim().toLowerCase() || "owner@example.com"}
+              email={email.trim().toLowerCase()}
               code={emailCode}
               onCodeChange={(d) => {
                 setEmailCode(d);
@@ -417,6 +550,8 @@ export function HarnessApp() {
                 phase={emailVisual === "success" ? "success" : "verifying"}
                 onDone={() => {
                   setEmailVisual((p) => reduceVerificationVisual(p, "success_settled"));
+                  const nextEmail = email.trim().toLowerCase();
+                  if (nextEmail) setVerifiedEmail(nextEmail);
                   setScreen("identity");
                 }}
               />
@@ -462,7 +597,12 @@ export function HarnessApp() {
                 setConfirmedPin(null);
                 return;
               }
-              Alert.alert("Preview", "Location confirmed. No production profile write.");
+              // DEV only: carry session location into shared Review presentation.
+              // No production profile write — Alert removed so owner can proceed.
+              console.log(
+                "[ux-harness-obs] locationContinue→profile_review (no production write)"
+              );
+              setScreen(nextHarnessScreenAfterIdentityContinue("location"));
             }}
             onBack={() => {
               if (phase === "location") {
@@ -473,6 +613,116 @@ export function HarnessApp() {
             }}
           />
         ) : null}
+
+        {screen === "profile_review" ? (
+          <ProfileReviewPresentation
+            key={`harness-review-${reviewJourneyKey}`}
+            model={{
+              accountKind: "business",
+              displayName,
+              businessName,
+              constitution,
+              gstin,
+              gstinVerificationState: gstinState,
+              pinCode,
+              confirmedLocation: confirmedPin
+                ? {
+                    locality: confirmedPin.locality,
+                    district: confirmedPin.district,
+                    state: confirmedPin.state,
+                  }
+                : null,
+              phoneE164: verifiedPhoneE164,
+              email: verifiedEmail,
+              emailVerified: Boolean(verifiedEmail.trim()),
+              logoPreviewUri: logoUri,
+              logoPersisted: Boolean(logoUri),
+            }}
+            onConfirmPersist={async () => {
+              // Persist/simulate only — WorkspaceReadyAck owns You navigation.
+              await simulateHarnessProfileCompletion();
+            }}
+            onSuccessNavigate={onReviewSuccessNavigate}
+            onBack={() => setScreen("location_confirmed")}
+            onEdit={(section: ProfileReviewEditSection) => {
+              setReviewEditTarget(section);
+              setScreen("review_edit");
+            }}
+          />
+        ) : null}
+
+        {screen === "workspace_preparing" ? (
+          <WorkspacePhasePreview phase="preparing" />
+        ) : null}
+        {screen === "workspace_ready" ? <WorkspacePhasePreview phase="ready" /> : null}
+
+        {screen === "review_edit" && reviewEditTarget ? (
+          <ReviewSectionEditPreview
+            target={reviewEditTarget}
+            model={{
+              displayName,
+              businessName,
+              constitution,
+              gstin,
+              gstinState,
+              pinCode,
+              confirmedPin,
+              phoneE164: verifiedPhoneE164,
+              email: verifiedEmail,
+              logoUri,
+            }}
+            pinLookupSpy={() => {
+              pinLookupCountRef.current += 1;
+              console.log(
+                `[ux-harness-obs] pinLookupCalls=${pinLookupCountRef.current} target=${reviewEditTarget}`
+              );
+            }}
+            onPickLogoLocal={async () => {
+              try {
+                const { pickIdentityMedia } = await import("@/onboarding/identityMedia");
+                const picked = await pickIdentityMedia("library");
+                return picked.uri;
+              } catch (e) {
+                const msg = String(e);
+                if (!/cancel/i.test(msg)) {
+                  console.log("[ux-harness-obs] logoPickFailed", msg);
+                }
+                return null;
+              }
+            }}
+            onSave={(patch) => {
+              if (patch.displayName != null) setDisplayName(patch.displayName);
+              if (patch.businessName != null) setBusinessName(patch.businessName);
+              if (patch.constitution != null) setConstitution(patch.constitution);
+              if (patch.gstin != null) setGstin(patch.gstin);
+              if (patch.gstinState != null) setGstinState(patch.gstinState);
+              if (patch.pinCode != null) setPinCode(patch.pinCode);
+              if (patch.confirmedPin !== undefined) setConfirmedPin(patch.confirmedPin);
+              if (patch.logoUri !== undefined) setLogoUri(patch.logoUri);
+              if (patch.phoneE164 != null) setVerifiedPhoneE164(patch.phoneE164);
+              if (patch.email != null) setVerifiedEmail(patch.email);
+              if (__DEV__) {
+                console.log("[review-state] Review rendered after session patch");
+              }
+              setReviewEditTarget(null);
+              setScreen("profile_review");
+            }}
+            onCommit={(patch) => {
+              // Authoritative bind reconciliation — NO navigation (ordering contract).
+              if (patch.phoneE164 != null) setVerifiedPhoneE164(patch.phoneE164);
+              if (patch.email != null) setVerifiedEmail(patch.email);
+              if (__DEV__) {
+                console.log("[review-state] profile reconciled (harness session)");
+              }
+            }}
+            onBack={() => {
+              setReviewEditTarget(null);
+              setScreen("profile_review");
+            }}
+          />
+        ) : null}
+
+        {screen === "you_preview" ? <YouPreview displayName={displayName} /> : null}
       </Animated.View>
 
       <View style={[styles.drawerWrap, { top: Math.max(insets.top, 8) }]}>
@@ -491,6 +741,40 @@ export function HarnessApp() {
               Verify latency preset is PREVIEW ONLY. Production uses real async completion.
               Success settle {ONBOARDING_SUCCESS_ACK_MS}ms · transition {ONBOARDING_SCREEN_MS}ms
             </Text>
+            <Text style={styles.drawerSection}>ONBOARDING UX</Text>
+            <Pressable
+              onPress={restartOnboardingReview}
+              style={styles.restartBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Restart onboarding review"
+            >
+              <Text style={styles.restartBtnText}>Restart onboarding review</Text>
+            </Pressable>
+            <View style={styles.chipRowWrap}>
+              {(
+                [
+                  "profile_review",
+                  "workspace_preparing",
+                  "workspace_ready",
+                  "you_preview",
+                ] as const
+              ).map((id) => (
+                <Pressable
+                  key={id}
+                  onPress={() => {
+                    if (id === "profile_review") {
+                      restartOnboardingReview();
+                      return;
+                    }
+                    applyFixture(id);
+                    setDrawerOpen(false);
+                  }}
+                  style={[styles.chip, screen === id && styles.chipOn]}
+                >
+                  <Text style={styles.chipText}>{harnessPhaseControlLabel(id)}</Text>
+                </Pressable>
+              ))}
+            </View>
             <View style={styles.chipRowWrap}>
               {(["fast", "typical", "slow"] as const).map((p) => (
                 <Pressable
@@ -564,6 +848,22 @@ const styles = StyleSheet.create({
   },
   drawerTitle: { ...typography.captionStrong, color: "#F8FAFC" },
   drawerHint: { ...typography.micro, color: "rgba(255,255,255,0.65)" },
+  drawerSection: {
+    ...typography.micro,
+    color: "rgba(165,180,252,0.9)",
+    fontWeight: "700",
+    marginTop: 4,
+  },
+  restartBtn: {
+    alignSelf: "flex-start",
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(165,180,252,0.55)",
+    backgroundColor: "rgba(165,180,252,0.16)",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  restartBtnText: { ...typography.captionStrong, color: "#E0E7FF" },
   chipRow: { gap: 6, paddingVertical: 4 },
   chipRowWrap: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
   chip: {

@@ -2,210 +2,128 @@
 
 **Repository:** [github.com/specialsoftwares/vyaamikk-diary](https://github.com/specialsoftwares/vyaamikk-diary)
 
-**by SPECIAL SOFTWARES**
+**by SPECIAL SOFTWARES** · Legally operated by Ananya Engineered Industrial Components & Pay Systems LLP
 
-A simple digital diary to record daily work, business activity, issues, production
-notes, site updates and follow-ups. Built as an independent, mobile-first V1 with
-its own clean identity system — the Vyaamikk ID (UEID).
+> **All your business needs, in one place.** · We support your business.
 
-> Positioning: *Record your daily work, business activity, issues and important notes in one simple diary.*
+Independent business diary product (not coupled to Vyaamikk Samadhaan backends). Auth v2 journey: Phone → OTP → Email OTP / linking → Complete Profile → Profile Review → UEID → Onboarding → Location → You dashboard.
 
----
-
-## Table of Contents
-
-- [Stack](#stack)
-- [Project structure](#project-structure)
-- [Getting started](#getting-started)
-- [App modes](#app-modes-development-vs-production)
-- [Vyaamikk ID (UEID) — Identity model](#vyaamikk-id-ueid--identity-model)
-- [Golden flow](#golden-flow)
-- [Security & privacy](#security--privacy)
-- [Going to production](#going-to-production)
-- [Roadmap (deferred features)](#roadmap-deferred-features)
+Canonical readiness status for this stabilization pass: [`STABILIZATION_AND_RELEASE_READINESS.md`](./STABILIZATION_AND_RELEASE_READINESS.md).
 
 ---
 
-## Stack
+## Stack (current)
 
 | Concern | Choice |
 |---|---|
-| Framework | Expo SDK 56 + React Native 0.85 (New Architecture) |
+| Framework | Expo SDK **54** + React Native **0.81.5** (managed EAS; no checked-in `ios/` / `android/`) |
+| Navigation | Expo Router 6 (file-based under `app/`) |
 | Language | TypeScript (strict) |
-| Navigation | Expo Router (file-based) |
-| Forms | React Hook Form + Zod |
-| Auth | Pluggable: mock (dev) or Firebase Auth (prod) |
-| Data | Pluggable: AsyncStorage (dev) or Firestore (prod) |
-| Session | `expo-secure-store` (native) / AsyncStorage (web) |
-| Network status | `@react-native-community/netinfo` |
+| Auth (production) | `@react-native-firebase/auth` phone OTP + Cloud Functions email OTP (Resend server-side) |
+| Auth (Expo Go) | Local-mock OTP `000000` only (never in preview/store) |
+| Data | Owner-scoped Firestore `users/{uid}/…` (production) · AsyncStorage/SQLite (local-mock) |
+| Session | `expo-secure-store` + Auth SDK |
 
-## Project structure
+---
 
-```
-Vyaamikk Diary/                # workspace root (run `npm` commands here)
-├── app/                       # Expo Router routes (file-based)
-│   ├── _layout.tsx            # Root layout (providers, gesture root, splash)
-│   ├── index.tsx              # Splash / Boot — resolves auth, picks route
-│   ├── (auth)/                # Logged-out flow
-│   │   ├── login.tsx          #   Mobile number + consent
-│   │   ├── otp.tsx            #   OTP verification
-│   │   └── ueid.tsx           #   Welcome + UEID created/fetched
-│   └── (app)/                 # Logged-in flow
-│       ├── dashboard.tsx
-│       ├── profile.tsx
-│       ├── diary/
-│       │   ├── index.tsx      #   History (search + filter)
-│       │   ├── new.tsx        #   Add entry (Save / Save & Share)
-│       │   ├── [id].tsx       #   Entry detail (Edit / Share / Delete)
-│       │   └── edit/[id].tsx  #   Edit entry
-│       └── settings/
-│           ├── index.tsx
-│           ├── about.tsx
-│           └── delete.tsx     #   Delete account request flow
-│
-├── src/
-│   ├── components/
-│   │   ├── ui/                # Buttons, Cards, TextField, Loader, …
-│   │   └── diary/             # EntryRow, EntryForm, CategoryPicker
-│   ├── config/
-│   │   ├── env.ts             # Reads EXPO_PUBLIC_* env, derives mode
-│   │   └── firebase.ts        # Lazy Firebase init + FirebaseNotConfiguredError
-│   ├── domain/
-│   │   ├── types.ts           # UserProfile, DiaryEntry, etc.
-│   │   ├── categories.ts
-│   │   └── errors.ts          # AppError + userFacingMessage
-│   ├── services/
-│   │   ├── auth/              # AuthService abstraction (+ mock + firebase)
-│   │   ├── diary/             # DiaryRepository abstraction (+ mock + firebase)
-│   │   └── session.ts         # SecureStore-backed session persistence
-│   ├── state/
-│   │   ├── auth.tsx           # AuthProvider + useAuth()
-│   │   ├── network.ts         # useIsOnline()
-│   │   └── useDiaryList.ts    # List + refresh hook
-│   ├── theme/                 # colors, spacing, typography
-│   └── utils/                 # phone, ueid, date, share, validation, logger
-│
-├── firestore.rules            # Production Firestore security rules
-├── app.json                   # Expo config (scheme, plugins, bundle IDs)
-├── .env.example               # Copy to .env and fill in for production
-└── README.md
-```
+## Canonical environments & builds
 
-## Getting started
+| Goal | How | Backend | OTP |
+|---|---|---|---|
+| Mock UI / Expo Go | `npm run start:expo-go` | `local-mock` | `000000` (not shown in UI) |
+| Native Firebase phone OTP (dev client + Metro) | Install EAS `development` or `development-production-otp` APK, then `npm run start:prod-dev-client` | `firebase-production` | Real SMS |
+| Standalone internal APK (no Metro) | `eas build --profile preview` | `firebase-production` or fail-closed | Real SMS / Functions — **never** mock |
+| Play-oriented AAB | `eas build --profile production` | `firebase-production` or fail-closed | Real SMS / Functions |
+
+**Important distinctions**
+
+- A **development-client** APK shows the Expo Dev Client launcher and needs Metro. EAS profiles `development` and `development-production-otp` both bake `EXPO_PUBLIC_APP_MODE=production` so runtime isolation accepts them.
+- A **preview** APK is a release-style standalone binary (`distribution: "internal"` → APK). It opens the app directly. It must never use local-mock OTP. Explicit `android.buildType: "apk"` is **not** required for internal distribution to produce an APK.
+- Starting a development client with `EXPO_PUBLIC_APP_MODE=development` is **rejected** by runtime isolation — use `npm run start:prod-dev-client`.
+- Local `.env` must set `EXPO_PUBLIC_APP_MODE=production` for development-client Metro. Expo’s client `expo/virtual/env` merges `.env*` **over** shell `process.env`, so a shell-only override is not enough.
+- There is **no** staging Firebase profile in this repo until the owner supplies a real staging project and approves a clearly named EAS profile.
 
 ```bash
-cd "Vyaamikk Diary"            # workspace root — where package.json lives
-npm install --legacy-peer-deps # only needed once
-cp .env.example .env           # (optional) leave EXPO_PUBLIC_APP_MODE=development
-npm run start                  # press i / a / w for iOS / Android / Web
+cp .env.example .env   # fill EXPO_PUBLIC_FIREBASE_* for production-auth paths
+npm install
+npm run start:expo-go              # mock UI
+npm run start:prod-dev-client      # after installing a development-client APK
+npm run android:live               # emulator + Metro + open existing dev client
+npm run check:firebase-client      # native google-services vs JS EXPO_PUBLIC_* (no secret dump)
+# Standalone beta APK (after Firebase Phone Auth + Functions/rules are live):
+# npx eas-cli@latest build --profile preview --platform android
 ```
 
-Out of the box the app runs in **development mode** — no Firebase project
-needed. You can log in with any valid 10-digit Indian mobile number and the OTP
-is **`123456`** (also surfaced in a small banner on the OTP screen for clarity).
+Acceptance checklist for the standalone APK: [`docs/BETA_PREVIEW_ANDROID_ACCEPTANCE_SHEET.md`](./docs/BETA_PREVIEW_ANDROID_ACCEPTANCE_SHEET.md).
 
-## App modes: development vs production
+---
 
-Selected by `EXPO_PUBLIC_APP_MODE` in your `.env`:
+## Validation (local)
 
-| Mode | Auth | Storage | Behavior |
-|---|---|---|---|
-| `development` (default) | Mock OTP service (`123456`) | AsyncStorage | Stable UEID registry persists across reloads. Great for UI work & demos. |
-| `production` | Firebase Auth (phone OTP) | Firestore | Requires all `EXPO_PUBLIC_FIREBASE_*` values + the native phone verifier (see below). |
-
-Both modes go through the same `AuthService` / `DiaryRepository` interfaces.
-Screens never touch the concrete adapter — switching modes is a config flag.
-
-## Vyaamikk ID (UEID) — Identity model
-
-The UEID is the **first identity registry of the SPECIAL SOFTWARES ecosystem**,
-issued by Vyaamikk Diary. It is intentionally future-compatible so the same
-mobile → UEID mapping can be migrated into Vyaamikk Samadhaan later **without
-changing the user's ID**.
-
-```
-Format:   VYD-YYYY-XXXXXX
-Example:  VYD-2026-8K4P9X
-Alphabet: 23456789ABCDEFGHJKMNPQRSTUVWXYZ  (no 0/O, 1/I/L — ambiguity-free)
+```bash
+npm run typecheck
+npm run lint                 # typecheck + correctness ESLint gate (scoped)
+npm run test:env-resolution
+npm run test:production-mock-otp-isolation
+npm run test:wizard-nav-race
+npm run test:save-idempotency
+npm run test:save-hardening
+npm run test:auth-policy-matrix
+npm run test:local-mock-mobile-otp
+npm run test:local-mock-email-otp
+npm run test:native-phone-auth
+npm run test:customer-credit-save
+npm run test:letterhead-pdf
+npm run test:cooling-off
+npm run test:storage-paths
+npm run test:local-business-date
+npm run functions:build
+npx expo-doctor              # expect 18/18
 ```
 
-Rules enforced by the auth service:
+`npm run audit:records` remains **dry-run** and refuses production. It never auto-repairs.
 
-- One verified mobile number ⇒ exactly one UEID, forever.
-- UEIDs never change and are never re-issued.
-- Returning users (same mobile) always get the **same** UEID back.
-- UEIDs do not encode or reveal the mobile number.
-- UEIDs are indexed server-side; the index is **not** publicly enumerable
-  (`firestore.rules` denies all client reads on `phoneIndex` / `ueidIndex`).
+Firestore rules emulator (when Java + Firebase tooling available):
 
-The production implementation uses a Firestore transaction to:
-1. Look up `phoneIndex/{phone}` — return existing user if present.
-2. Otherwise: generate a candidate UEID, check `ueidIndex/{ueid}` for
-   collision, retry up to 8 times, then atomically write:
-   - `users/{uid}` (full profile),
-   - `phoneIndex/{phone} → uid`,
-   - `ueidIndex/{ueid} → uid`.
-
-## Golden flow
-
-```
-Splash → Login → OTP → UEID screen → Dashboard
-              ↘ (returning user goes straight to Dashboard)
-
-Dashboard → Add Entry → Save / Save & Share → Entry Detail
-         ↘ View Diary  → Search / Filter → Entry Detail → Edit / Share / Delete
-         ↘ My Vyaamikk ID (Profile)
-         ↘ Settings → About / Privacy / Terms / Delete Account / Logout
+```bash
+npm run test:firestore-rules
 ```
 
-## Security & privacy
+---
 
-Implemented today:
+## Product journey (Auth v2)
 
-- OTP codes are never logged in production (`utils/logger.ts` redacts `otp`,
-  `code`, `verificationCode`).
-- Mobile numbers are masked in logs (`+91 98••••3210`).
-- Sessions live in `expo-secure-store` (Keychain / EncryptedSharedPreferences).
-- No secrets are bundled — Firebase keys come from environment variables.
-- Soft-delete is the default for both entries and accounts.
-- Firestore rules restrict diary entries to their owner and lock down
-  the identity indexes entirely (see `firestore.rules`).
+Phone → OTP → Email OTP / email linking → Complete Profile → Profile Review → UEID (Vyaamikk ID) → Onboarding Introduction → Location Onboarding → You dashboard.
 
-Avoided (per V1 scope):
+Primary tabs: You, Calendar, Saved Records (when retained), Settings. Wizard navigation is owned synchronously by `wizardNavigationController` (no awaited AsyncStorage before Back).
 
-- No surveillance language, geo-tracking, attendance/payroll, KYC, or
-  regulated-finance functionality.
-- No marketing of legal compliance.
-- No third-party SDKs beyond Firebase.
+---
 
-## Going to production
+## Security boundaries (do not weaken)
 
-This V1 is intentionally a clean foundation. Before shipping to the stores:
+- Standalone / preview / store / development-client: never silent local-mock fallback.
+- Identity indexes (`phoneIndex`, `ueidIndex`, `emailIndex`, …) are **server-owned**.
+- Letterhead Matter PDFs contain **no** Vyaamikk branding, UEID, or operator footer; diary link is ``${clientRecordId}_matter``.
+- Purchase-order serial allocation occurs only after the idempotent existence check.
+- Customer-credit payments dedupe on `clientPaymentId`.
+- Device integrity probe is **dormant** and not wired into login until an approved SDK is configured.
+- Android background location remains disabled.
 
-1. **Wire native phone OTP.** The Firebase JS SDK doesn't ship a native phone
-   verifier; install [`@react-native-firebase/auth`](https://rnfirebase.io/auth/phone-auth)
-   (or your SMS provider) and fill in the two integration seams in
-   `src/services/auth/firebase.ts`:
-   - `startOtp` — call `verifyPhoneNumber`, return `{ verificationId, phoneE164, devCodeHint: null }`.
-   - `confirmOtp` — build `PhoneAuthCredential`, `signInWithCredential`, then
-     `resolveOrCreateUser(authUid, phoneE164)` (already implemented).
-2. **Deploy `firestore.rules`** to your Firestore project.
-3. **Move profile / phoneIndex / ueidIndex writes behind a Cloud Function**
-   in strict-prod mode so clients can never tamper with the registry.
-4. **Configure `.env`** with real Firebase keys and set
-   `EXPO_PUBLIC_APP_MODE=production`.
-5. **Replace branding placeholders**: app icon, splash image, adaptive icon
-   layers in `app.json`, and the placeholder Privacy/Terms URLs.
-6. **Privacy / Data deletion**: the app exposes a Delete Account request that
-   marks the user + entries as deleted. Add a backend job that completes hard
-   deletion after a grace period (App Store / Play Store both require a
-   user-initiated deletion path).
-7. **Build with EAS**: `eas build -p ios` / `eas build -p android` and submit.
+External operations (SMS fingerprints, Resend DNS, Functions/rules deploy, App Check console enforcement, store credentials) are **not** completed merely because source exists — see the readiness report.
 
-## Roadmap (deferred features)
+---
 
-Out of scope for V1 (and explicitly **not** in this codebase, per product spec):
-roles & connections, DMs, approvals, payroll, attendance, punch / geo-tracking,
-CCTV, lending, marketplace, KYC, admin panel, AI features, multi-product
-ecosystem screens. The architecture deliberately keeps the identity layer
-extensible so these can be layered on later without rewriting screens.
+## Docs map
+
+| Document | Role |
+|---|---|
+| [`STABILIZATION_AND_RELEASE_READINESS.md`](./STABILIZATION_AND_RELEASE_READINESS.md) | Authoritative stabilization / channel readiness report |
+| [`MASTER_AUTH_ONBOARDING_EXECUTION_TRACKER.md`](./MASTER_AUTH_ONBOARDING_EXECUTION_TRACKER.md) | Auth/onboarding execution tracker |
+| [`PRODUCTION_READINESS.md`](./PRODUCTION_READINESS.md) | Historical auth-track notes — superseded for channel readiness by the report above |
+| [`.env.example`](./.env.example) | Environment semantics |
+
+---
+
+## Roadmap (explicitly out of product scope)
+
+Roles/connections, DMs, org graph, payroll, attendance, continuous geo-tracking, KYC, marketplace, Samadhaan coupling. Architecture may stay migration-friendly without importing those contracts.
