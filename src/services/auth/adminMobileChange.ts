@@ -1,11 +1,12 @@
 /**
- * @internal Admin / support-only mobile change APIs.
+ * Admin / support-facing mobile change entry (also used by Review contact_change).
  *
- * Self-service mobile change is NOT exposed in the consumer app UI.
- * These helpers remain for manual support tooling, migration scripts, and tests.
+ * Production path (firebase-production + native linked):
+ *   preflight callable → verifyPhoneNumber → updatePhoneNumber → confirm callable
+ * Local-mock / shared-dev: AuthService.startMobileChange / confirmMobileChange
+ * preserve UID + UEID via applyMockMobileChange / shared-dev transaction.
  *
- * NOTE: Local/admin mock paths do not enforce mobile quarantine.
- * Server (functions/src/identity/mobileQuarantine.ts) must assert before bind.
+ * Self-service is available from Review verified contacts (and later Settings).
  */
 
 import { getAuthService } from "./index";

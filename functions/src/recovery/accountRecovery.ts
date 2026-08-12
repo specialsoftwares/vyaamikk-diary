@@ -16,8 +16,10 @@ import {
 import { verifyEmailOtpDigest } from "../email/otpCrypto";
 import { EMAIL_OTP_USER_MESSAGES } from "../email/otpPolicy";
 import { resolveEmailProvider } from "../email/provider";
+import { EMAIL_OTP_RUNTIME_SECRETS } from "../email/secrets";
 import {
   assertMobileNotQuarantined,
+  applyDeferredMobileQuarantineRelease,
   sha256MobileHash,
 } from "../identity/mobileQuarantine";
 import { normalizePhoneE164 } from "../identity/shared";
@@ -26,6 +28,11 @@ const RECOVERY_SESSIONS = "accountRecoverySessions";
 const SUPPORT_CASES = "manualRecoveryCases";
 const COOLING_OFF_MS = 24 * 60 * 60 * 1000;
 const RECOVERY_LOCK_MS = 60 * 60 * 1000;
+
+const emailOtpCallOpts = {
+  region: "asia-south1" as const,
+  secrets: EMAIL_OTP_RUNTIME_SECRETS,
+};
 
 function requireUid(request: { auth?: { uid?: string } | null }): string {
   const uid = request.auth?.uid;
@@ -111,7 +118,7 @@ function buildRecoveryQuestions(
   return qs.slice(0, 3);
 }
 
-export const startAccountRecovery = onCall({ region: "asia-south1" }, async (request) => {
+export const startAccountRecovery = onCall(emailOtpCallOpts, async (request) => {
   const uid = requireUid(request);
   const db = getAdminDb();
   const userRef = db.collection(USERS).doc(uid);
@@ -178,7 +185,7 @@ export const startAccountRecovery = onCall({ region: "asia-south1" }, async (req
   };
 });
 
-export const completeAccountRecovery = onCall({ region: "asia-south1" }, async (request) => {
+export const completeAccountRecovery = onCall(emailOtpCallOpts, async (request) => {
   const uid = requireUid(request);
   const sessionId = String(request.data?.sessionId ?? "");
   const emailCode = String(request.data?.emailCode ?? "");
@@ -264,10 +271,11 @@ export const completeAccountRecovery = onCall({ region: "asia-south1" }, async (
     }
 
     // Phone uniqueness + quarantine (server must enforce; hash never raw E.164)
+    // All remaining reads must finish before any write (Firestore transaction ordering).
     const newPhoneNorm = normalizePhoneE164(newPhoneE164);
     const newMobileHash = sha256MobileHash(newPhoneNorm);
     const now = Date.now();
-    await assertMobileNotQuarantined(tx, newMobileHash, now);
+    const quarantine = await assertMobileNotQuarantined(tx, newMobileHash, now);
 
     const phoneIndexRef = db.collection("phoneIndex").doc(newPhoneNorm);
     const phoneSnap = await tx.get(phoneIndexRef);
@@ -283,6 +291,7 @@ export const completeAccountRecovery = onCall({ region: "asia-south1" }, async (
         ? request.data.recoveryDeviceId
         : randomBytes(8).toString("hex");
 
+    applyDeferredMobileQuarantineRelease(tx, newMobileHash, now, quarantine.releaseDue);
     if (oldPhone && normalizePhoneE164(oldPhone) !== newPhoneNorm) {
       tx.delete(db.collection("phoneIndex").doc(normalizePhoneE164(oldPhone)));
     }
@@ -389,7 +398,7 @@ export const openManualRecoveryCase = onCall({ region: "asia-south1" }, async (r
 });
 
 /** Admin/support-only — requires callable auth + support claim (documented; enforce via IAM). */
-export const resolveManualRecoveryCase = onCall({ region: "asia-south1" }, async (request) => {
+export const resolveManualRecoveryCase = onCall(emailOtpCallOpts, async (request) => {
   const reviewerUid = requireUid(request);
   const supportClaim = request.auth?.token?.support === true;
   if (!supportClaim && process.env.FUNCTIONS_EMULATOR !== "true") {

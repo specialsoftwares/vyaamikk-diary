@@ -208,6 +208,12 @@ export async function createOrRotateEmailChallenge(input: {
   const secret = otpSecret();
   const purpose = input.purpose ?? "bind";
 
+  // Fail closed before mutating profile / burning rate limits when mail is misconfigured.
+  const { provider, mode } = resolveEmailProvider();
+  if (mode === "unavailable" && process.env.FUNCTIONS_EMULATOR !== "true") {
+    throwEmailOtpError("EMAIL_PROVIDER_UNAVAILABLE");
+  }
+
   const userRef = db.collection(USERS).doc(authUid);
   const userSnap = await userRef.get();
   if (!userSnap.exists) throwEmailOtpError("FORBIDDEN", "permission-denied");
@@ -328,11 +334,6 @@ export async function createOrRotateEmailChallenge(input: {
     updatedAt: now,
   });
   await batch.commit();
-
-  const { provider, mode } = resolveEmailProvider();
-  if (mode === "unavailable" && process.env.FUNCTIONS_EMULATOR !== "true") {
-    throwEmailOtpError("EMAIL_PROVIDER_UNAVAILABLE");
-  }
 
   const sendResult = await provider.send({
     to: normalized,

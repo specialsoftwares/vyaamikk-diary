@@ -18,6 +18,11 @@ export {
 } from "./identity/mobileQuarantine";
 
 export {
+  confirmVerifiedMobileContactChange,
+  preflightVerifiedMobileContactChange,
+} from "./identity/confirmVerifiedMobileChange";
+
+export {
   startEmailVerification,
   resendEmailVerification,
   verifyAndBindEmail,

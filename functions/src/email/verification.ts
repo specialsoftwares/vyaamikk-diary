@@ -7,6 +7,7 @@ import {
   verifyEmailChallengeAndBind,
 } from "./challengeService";
 import { EMAIL_OTP_USER_MESSAGES } from "./otpPolicy";
+import { EMAIL_OTP_RUNTIME_SECRETS } from "./secrets";
 import {
   completeEmailChangeTransaction,
   startEmailChangeNewEmailChallenge,
@@ -23,12 +24,17 @@ function requireAuthUid(request: { auth?: { uid?: string } | null }): string {
   return uid;
 }
 
+const emailOtpCallOpts = {
+  region: "asia-south1" as const,
+  secrets: EMAIL_OTP_RUNTIME_SECRETS,
+};
+
 /**
  * Start / rotate email OTP challenge and send code.
  * App Check: enable via Firebase Console rollout; not enforced here yet so
  * local emulator / Expo Go development remain usable (documented).
  */
-export const startEmailVerification = onCall({ region: "asia-south1" }, async (request) => {
+export const startEmailVerification = onCall(emailOtpCallOpts, async (request) => {
   const uid = requireAuthUid(request);
   const rawEmail = request.data?.email;
   const idempotencyKey =
@@ -44,7 +50,7 @@ export const startEmailVerification = onCall({ region: "asia-south1" }, async (r
   });
 });
 
-export const resendEmailVerification = onCall({ region: "asia-south1" }, async (request) => {
+export const resendEmailVerification = onCall(emailOtpCallOpts, async (request) => {
   const uid = requireAuthUid(request);
   const challengeId = request.data?.challengeId ?? request.data?.verificationId;
   if (typeof challengeId !== "string") {
@@ -53,7 +59,7 @@ export const resendEmailVerification = onCall({ region: "asia-south1" }, async (
   return resendEmailChallenge({ uid, challengeId });
 });
 
-export const verifyAndBindEmail = onCall({ region: "asia-south1" }, async (request) => {
+export const verifyAndBindEmail = onCall(emailOtpCallOpts, async (request) => {
   const uid = requireAuthUid(request);
   const challengeId = request.data?.challengeId ?? request.data?.verificationId;
   const code = request.data?.code;
@@ -71,8 +77,12 @@ export const verifyAndBindEmail = onCall({ region: "asia-south1" }, async (reque
   return { profile };
 });
 
-/** Staged verified-email change (new email OTP after current-mobile factor). */
-export const changeVerifiedEmail = onCall({ region: "asia-south1" }, async (request) => {
+/**
+ * Staged verified-email change (new email OTP after current-mobile factor).
+ * Bound to the same secrets; deploy may still hit Cloud Run CPU quota separately —
+ * that must not block deploying the three core beta email callables above.
+ */
+export const changeVerifiedEmail = onCall(emailOtpCallOpts, async (request) => {
   const uid = requireAuthUid(request);
   const stage = request.data?.stage;
   if (stage === "require_mobile_otp") {

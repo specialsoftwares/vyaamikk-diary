@@ -10,8 +10,19 @@ export function fnv1a(input: string, seed = 0x811c9dc5): number {
 }
 
 export function normalizePhoneE164(phone: string): string {
+  if (typeof phone !== "string") {
+    throw new TypeError("phone must be a string");
+  }
   const trimmed = phone.trim();
-  if (trimmed.startsWith("+")) return trimmed;
+  if (!trimmed) {
+    throw new TypeError("phone must be non-empty");
+  }
+  // Strip formatting while preserving E.164 ("+91 64208 35745" → "+916420835745").
+  if (trimmed.startsWith("+")) {
+    const digits = trimmed.replace(/\D/g, "");
+    if (digits.length >= 8) return `+${digits}`;
+    return trimmed;
+  }
   const digits = trimmed.replace(/\D/g, "");
   if (digits.length === 10) return `+91${digits}`;
   if (digits.length === 12 && digits.startsWith("91")) return `+${digits}`;

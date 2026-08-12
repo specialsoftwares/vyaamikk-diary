@@ -6,6 +6,9 @@
  *
  * Uses @react-native-firebase/functions when native auth is active so the
  * callable carries the same ID token as @react-native-firebase/auth.
+ *
+ * CRITICAL: native `functions()` defaults to us-central1. All Vyaamikk Diary
+ * callables are deployed in asia-south1 — always pass the configured region.
  */
 
 import { getFunctions, httpsCallable, connectFunctionsEmulator } from "firebase/functions";
@@ -16,6 +19,8 @@ import { getFirebaseApp } from "@/config/firebase";
 import type { PhoneE164, UserProfile } from "@/domain/types";
 import { normaliseUserProfile } from "./normalizeProfile";
 import { createLogger } from "@/utils/logger";
+import { canonicalFunctionsRegion } from "./authFlowErrorPresentation";
+import { ensureNativeAuthReadyForCallables } from "./nativeCallableAuthGate";
 
 import type { AuthResult } from "./types";
 import {
@@ -40,9 +45,22 @@ function isNativePhoneAuthLinked(): boolean {
   }
 }
 
-function tryNativeFunctions():
-  | (() => import("@react-native-firebase/functions").FunctionsInstance)
-  | null {
+type NativeFunctionsInstance = import("@react-native-firebase/functions").FunctionsInstance;
+type NativeFirebaseApp = {
+  name: string;
+  options?: { projectId?: string };
+};
+
+/**
+ * Bind Functions to the SAME RNFirebase [DEFAULT] app as Auth, with asia-south1.
+ * Prefer modular getFunctions(getApp(), region) when available; fall back to
+ * namespaced functions(app, region) / functions(region).
+ */
+function tryNativeFunctionsForRegion(region: string): {
+  fns: NativeFunctionsInstance;
+  functionsAppName: string;
+  functionsProjectId: string;
+} | null {
   let isWeb = false;
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -54,18 +72,52 @@ function tryNativeFunctions():
   if (isWeb || !isNativePhoneAuthLinked()) return null;
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const mod = require("@react-native-firebase/functions") as {
-      default: () => import("@react-native-firebase/functions").FunctionsInstance;
+    const appMod = require("@react-native-firebase/app") as {
+      getApp?: () => NativeFirebaseApp;
+      default?: { app: (name?: string) => NativeFirebaseApp };
     };
-    return mod.default;
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const fnsMod = require("@react-native-firebase/functions") as {
+      getFunctions?: (app?: NativeFirebaseApp, region?: string) => NativeFunctionsInstance;
+      default: (
+        appOrRegion?: unknown,
+        maybeRegion?: string
+      ) => NativeFunctionsInstance & { app?: NativeFirebaseApp };
+    };
+
+    const app: NativeFirebaseApp =
+      (typeof appMod.getApp === "function" ? appMod.getApp() : null) ||
+      (typeof appMod.default?.app === "function" ? appMod.default.app() : null) ||
+      ({ name: "[DEFAULT]", options: { projectId: env.firebase.projectId } } as NativeFirebaseApp);
+
+    let fns: NativeFunctionsInstance & { app?: NativeFirebaseApp };
+    if (typeof fnsMod.getFunctions === "function") {
+      fns = fnsMod.getFunctions(app, region) as NativeFunctionsInstance & {
+        app?: NativeFirebaseApp;
+      };
+    } else if (typeof fnsMod.default === "function") {
+      fns = fnsMod.default(app, region);
+    } else {
+      return null;
+    }
+
+    const functionsAppName = String(fns.app?.name ?? app.name ?? "[DEFAULT]");
+    const functionsProjectId = String(
+      fns.app?.options?.projectId ?? app.options?.projectId ?? env.firebase.projectId ?? ""
+    );
+    return { fns, functionsAppName, functionsProjectId };
   } catch {
     return null;
   }
 }
 
+function functionsRegion(): string {
+  return canonicalFunctionsRegion(env.firebase.functionsRegion);
+}
+
 function getJsCallableFunctions() {
   const app = getFirebaseApp();
-  const region = env.firebase.functionsRegion;
+  const region = functionsRegion();
   const fns = getFunctions(app, region || undefined);
   if (__DEV__ && process.env.EXPO_PUBLIC_FUNCTIONS_EMULATOR_HOST && !emulatorConnected) {
     const [host, portStr] = process.env.EXPO_PUBLIC_FUNCTIONS_EMULATOR_HOST.split(":");
@@ -85,32 +137,131 @@ async function callFunction<TRequest, TResponse>(
   name: string,
   data: TRequest
 ): Promise<TResponse> {
+  const region = functionsRegion();
+  const attemptId = `fn_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+  let authSnap: Awaited<ReturnType<typeof ensureNativeAuthReadyForCallables>> | null = null;
+  let functionsAppName = "";
+  let functionsProjectId = "";
+  let sameFirebaseApp: boolean | null = null;
+
   try {
-    const nativeFns = tryNativeFunctions();
-    if (nativeFns) {
-      const callable = nativeFns().httpsCallable<TRequest, TResponse>(name);
+    const nativeBundle = tryNativeFunctionsForRegion(region);
+    const transport = nativeBundle ? "native" : "js";
+
+    if (nativeBundle) {
+      authSnap = await ensureNativeAuthReadyForCallables();
+      functionsAppName = nativeBundle.functionsAppName;
+      functionsProjectId = nativeBundle.functionsProjectId;
+      sameFirebaseApp =
+        authSnap.authAppName === functionsAppName &&
+        (!authSnap.authProjectId ||
+          !functionsProjectId ||
+          authSnap.authProjectId === functionsProjectId);
+
+      if (!sameFirebaseApp) {
+        throw new AppError(
+          "auth_failed",
+          "Couldn't finish account setup due to a Firebase session mismatch. Please try again.",
+          undefined,
+          {
+            authPhase: "post_auth",
+            failureDomain: "functions",
+            diagnosticCode: "AUTH_FUNCTIONS_APP_MISMATCH",
+            callableName: name,
+            functionsRegion: region,
+            authAppName: authSnap.authAppName,
+            functionsAppName,
+            sameFirebaseApp: false,
+            firebaseUserPresent: true,
+            idTokenReady: authSnap.idTokenReady,
+          }
+        );
+      }
+
+      log.info("callable start", {
+        attemptId,
+        phase: "RESOLVE_OR_CREATE_START",
+        callableName: name,
+        functionsRegion: region,
+        transport,
+        authAppName: authSnap.authAppName,
+        functionsAppName,
+        sameFirebaseApp: true,
+        firebaseUserPresent: true,
+        idTokenReady: true,
+        uidSuffix: authSnap.uidSuffix,
+      });
+
+      const callable = nativeBundle.fns.httpsCallable<TRequest, TResponse>(name);
       const result = await callable(data);
+      log.info("callable ok", {
+        attemptId,
+        phase: "RESOLVE_OR_CREATE_RESPONSE",
+        callableName: name,
+        functionsRegion: region,
+        transport,
+      });
       return result.data;
     }
+
+    log.info("callable start", {
+      attemptId,
+      phase: "RESOLVE_OR_CREATE_START",
+      callableName: name,
+      functionsRegion: region,
+      transport,
+    });
     const callable = httpsCallable<TRequest, TResponse>(getJsCallableFunctions(), name);
     const result = await callable(data);
+    log.info("callable ok", {
+      attemptId,
+      phase: "RESOLVE_OR_CREATE_RESPONSE",
+      callableName: name,
+      functionsRegion: region,
+      transport,
+    });
     return result.data;
   } catch (e: unknown) {
-    log.error(`callable ${name} failed`, e);
+    if (e instanceof AppError) throw e;
+
     const code =
       e && typeof e === "object" && "code" in e
         ? String((e as { code: string }).code)
         : "unknown";
+    log.error(`callable ${name} failed`, {
+      attemptId,
+      callableName: name,
+      functionsRegion: region,
+      code,
+      firebaseUserPresent: authSnap?.uidPresent ?? null,
+      idTokenReady: authSnap?.idTokenReady ?? null,
+      sameFirebaseApp,
+    });
     const message =
       e && typeof e === "object" && "message" in e
         ? String((e as { message: string }).message)
         : "Identity service unavailable.";
     const details = extractCallableDetails(e);
     const serverCode = typeof details?.code === "string" ? details.code : null;
+    const baseDetails = {
+      authPhase: "post_auth" as const,
+      failureDomain: "functions" as const,
+      callableName: name,
+      functionsRegion: region,
+      functionsErrorCode: code,
+      diagnosticCode: `${code}:${region}:${name}`,
+      firebaseUserPresent: authSnap?.uidPresent ?? null,
+      idTokenReady: authSnap?.idTokenReady ?? null,
+      authAppName: authSnap?.authAppName ?? null,
+      functionsAppName: functionsAppName || null,
+      sameFirebaseApp,
+      uidSuffix: authSnap?.uidSuffix ?? null,
+    };
 
     if (serverCode === "EMAIL_OTP_COOLDOWN" || code === "functions/resource-exhausted") {
       if (serverCode === "EMAIL_OTP_COOLDOWN" || details?.resendAvailableAt != null) {
         throw new AppError("email_otp_cooldown", message || "Resend is not available yet.", e, {
+          ...baseDetails,
           resendAvailableAt:
             typeof details?.resendAvailableAt === "number" ? details.resendAvailableAt : null,
           retryAfterSeconds:
@@ -119,18 +270,59 @@ async function callFunction<TRequest, TResponse>(
       }
     }
     if (code === "functions/unauthenticated") {
-      throw new AppError("permission_denied", "Sign in again to continue.");
+      throw new AppError(
+        "auth_failed",
+        "Your sign-in was verified, but we couldn't finish setting up your account. Please try again.",
+        e,
+        {
+          ...baseDetails,
+          diagnosticCode: `FN_UNAUTHENTICATED:${region}:${name}`,
+          retryAccountSetup: true,
+        }
+      );
     }
     if (code === "functions/permission-denied") {
-      throw new AppError("permission_denied", message);
+      throw new AppError("permission_denied", message, e, baseDetails);
     }
     if (code === "functions/not-found") {
-      throw new AppError("not_found", message);
+      throw new AppError(
+        "not_found",
+        "Couldn't finish account setup. The identity service was not reached. Please try again.",
+        e,
+        {
+          ...baseDetails,
+          diagnosticCode: `FN_NOT_FOUND:${region}:${name}`,
+        }
+      );
     }
     if (code === "functions/failed-precondition") {
-      throw new AppError("permission_denied", message);
+      const providerUnavailable =
+        serverCode === "EMAIL_PROVIDER_UNAVAILABLE" ||
+        /email delivery is temporarily unavailable/i.test(message);
+      if (providerUnavailable) {
+        throw new AppError(
+          "otp_send_failed",
+          message || "Email delivery is temporarily unavailable. Try again later.",
+          e,
+          {
+            ...baseDetails,
+            failureDomain: "email_delivery",
+            diagnosticCode: "EMAIL_PROVIDER_UNAVAILABLE",
+            phase: "email_send",
+          }
+        );
+      }
+      throw new AppError("permission_denied", message, e, baseDetails);
     }
-    throw new AppError("unknown", message);
+    throw new AppError(
+      "unknown",
+      message || "Couldn't finish account setup. Please try again.",
+      e,
+      {
+        ...baseDetails,
+        retryAccountSetup: true,
+      }
+    );
   }
 }
 
@@ -170,7 +362,11 @@ export async function callResolveOrCreateUserByPhone(
   const data = routeResolveByPhoneResponse(raw);
   const uid = String(data.profile.uid ?? "");
   if (!uid) {
-    throw new AppError("unknown", "Identity service returned an invalid profile.");
+    throw new AppError("unknown", "Identity service returned an invalid profile.", undefined, {
+      authPhase: "post_auth",
+      callableName: "resolveOrCreateUserByPhone",
+      diagnosticCode: "IDENTITY_INVALID_PROFILE",
+    });
   }
   return {
     profile: normaliseUserProfile(uid, data.profile),
@@ -193,7 +389,11 @@ export async function callMintClientAuthToken(): Promise<MintClientAuthTokenResp
     {}
   );
   if (!data?.token) {
-    throw new AppError("unknown", "Auth bridge returned an empty token.");
+    throw new AppError("unknown", "Auth bridge returned an empty token.", undefined, {
+      authPhase: "post_auth",
+      callableName: "mintClientAuthToken",
+      diagnosticCode: "MINT_TOKEN_EMPTY",
+    });
   }
   return data;
 }
@@ -311,10 +511,70 @@ export async function callCompleteAccountReactivation(): Promise<AuthResult> {
   >("completeAccountReactivation", {});
   const uid = String(data.profile.uid ?? "");
   if (!uid) {
-    throw new AppError("unknown", "Reactivation returned an invalid profile.");
+    throw new AppError("unknown", "Reactivation returned an invalid profile.", undefined, {
+      authPhase: "post_auth",
+      callableName: "completeAccountReactivation",
+      diagnosticCode: "REACTIVATION_INVALID_PROFILE",
+    });
   }
   return {
     profile: normaliseUserProfile(uid, data.profile),
     isNewUser: false,
   };
+}
+
+export interface PreflightVerifiedMobileChangeResponse {
+  ok: true;
+  operationId: string;
+  noop?: boolean;
+  ueid?: string;
+}
+
+export async function callPreflightVerifiedMobileContactChange(
+  newerPhoneE164: PhoneE164,
+  operationId?: string
+): Promise<PreflightVerifiedMobileChangeResponse> {
+  return callFunction<
+    { newerPhoneE164: string; operationId?: string },
+    PreflightVerifiedMobileChangeResponse
+  >("preflightVerifiedMobileContactChange", {
+    newerPhoneE164,
+    ...(operationId ? { operationId } : {}),
+  });
+}
+
+export interface ConfirmVerifiedMobileChangeResponse {
+  ok: true;
+  uid: string;
+  ueid: string;
+  phoneE164: string;
+  alreadyComplete?: boolean;
+  profile: Record<string, unknown>;
+}
+
+export async function callConfirmVerifiedMobileContactChange(args: {
+  newerPhoneE164: PhoneE164;
+  operationId?: string;
+}): Promise<UserProfile> {
+  const data = await callFunction<
+    { newerPhoneE164: string; operationId?: string },
+    ConfirmVerifiedMobileChangeResponse
+  >("confirmVerifiedMobileContactChange", {
+    newerPhoneE164: args.newerPhoneE164,
+    ...(args.operationId ? { operationId: args.operationId } : {}),
+  });
+  const uid = String(data.profile?.uid ?? data.uid ?? "");
+  if (!uid) {
+    throw new AppError("unknown", "Mobile bind returned an invalid profile.", undefined, {
+      authPhase: "post_auth",
+      callableName: "confirmVerifiedMobileContactChange",
+      diagnosticCode: "MOBILE_CHANGE_INVALID_PROFILE",
+    });
+  }
+  return normaliseUserProfile(uid, {
+    ...data.profile,
+    uid,
+    ueid: data.ueid ?? data.profile.ueid,
+    phoneE164: data.phoneE164 ?? data.profile.phoneE164,
+  });
 }

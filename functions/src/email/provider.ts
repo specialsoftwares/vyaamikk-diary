@@ -1,7 +1,11 @@
 /**
  * Transactional email provider abstraction.
  *
- * Production requires EMAIL_PROVIDER_API_KEY (Resend) + EMAIL_FROM_ADDRESS secrets.
+ * Production requires EMAIL_PROVIDER_API_KEY (Resend) + EMAIL_FROM_ADDRESS secrets
+ * (bound via defineSecret on callables that send or HMAC email OTPs).
+ * EMAIL_FROM_ADDRESS may be a bare address (`no-reply@domain`) or Resend display form
+ * (`Vyaamikk Diary <no-reply@domain>`).
+ * RESEND_API_KEY remains an optional process.env fallback only (not a Secret Manager param).
  * Emulator / missing secrets: development adapter logs only — never claims production delivery.
  */
 
@@ -22,6 +26,38 @@ export interface SendEmailResult {
 
 export interface EmailProvider {
   send(input: SendEmailInput): Promise<SendEmailResult>;
+}
+
+/** Resend live keys are `re_…` with no whitespace. */
+export function isPlausibleResendApiKey(apiKey: string): boolean {
+  const key = apiKey.trim();
+  if (!key.startsWith("re_")) return false;
+  if (key.length < 20 || key.length > 256) return false;
+  if (/\s/.test(key)) return false;
+  return true;
+}
+
+/**
+ * Accept bare email or a single `Display Name <email>` form.
+ * Reject duplicated / concatenated secret paste mistakes.
+ */
+export function canonicalizeEmailFromAddress(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed.length > 200) return null;
+
+  const angle = trimmed.match(/^([^<>]+)<\s*([^<>@\s]+@[^<>@\s]+)\s*>$/);
+  if (angle) {
+    const display = angle[1]!.trim().replace(/\s+/g, " ");
+    const email = angle[2]!.trim().toLowerCase();
+    if (!display || display.length > 80) return null;
+    if (trimmed.indexOf("<") !== trimmed.lastIndexOf("<")) return null;
+    return `${display} <${email}>`;
+  }
+
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed) && !/\s/.test(trimmed)) {
+    return trimmed.toLowerCase();
+  }
+  return null;
 }
 
 export function createDevLogEmailProvider(): EmailProvider {
@@ -83,6 +119,18 @@ export function createResendEmailProvider(apiKey: string, fromAddress: string): 
   };
 }
 
+function unavailableProvider(): EmailProvider {
+  return {
+    async send() {
+      return {
+        delivered: false,
+        provider: "none",
+        errorCode: "EMAIL_PROVIDER_UNAVAILABLE",
+      };
+    },
+  };
+}
+
 /**
  * Resolve provider from environment.
  * - FUNCTIONS_EMULATOR / missing API key → dev-log (explicit non-production)
@@ -92,26 +140,31 @@ export function resolveEmailProvider(env: NodeJS.ProcessEnv = process.env): {
   provider: EmailProvider;
   mode: "development" | "production" | "unavailable";
 } {
-  const apiKey = env.EMAIL_PROVIDER_API_KEY?.trim() || env.RESEND_API_KEY?.trim();
-  const from = env.EMAIL_FROM_ADDRESS?.trim();
+  const apiKeyRaw = env.EMAIL_PROVIDER_API_KEY?.trim() || env.RESEND_API_KEY?.trim() || "";
+  const fromRaw = env.EMAIL_FROM_ADDRESS?.trim() || "";
   const emulator = env.FUNCTIONS_EMULATOR === "true";
 
   if (emulator || env.EMAIL_PROVIDER_FORCE_DEV === "1") {
     return { provider: createDevLogEmailProvider(), mode: "development" };
   }
-  if (apiKey && from) {
-    return { provider: createResendEmailProvider(apiKey, from), mode: "production" };
+
+  const from = canonicalizeEmailFromAddress(fromRaw);
+  const apiKeyOk = isPlausibleResendApiKey(apiKeyRaw);
+  if (apiKeyOk && from) {
+    return {
+      provider: createResendEmailProvider(apiKeyRaw.trim(), from),
+      mode: "production",
+    };
   }
-  return {
-    provider: {
-      async send() {
-        return {
-          delivered: false,
-          provider: "none",
-          errorCode: "EMAIL_PROVIDER_UNAVAILABLE",
-        };
-      },
-    },
-    mode: "unavailable",
-  };
+
+  if (apiKeyRaw || fromRaw) {
+    console.error("[email-provider] production config rejected", {
+      apiKeyPlausible: apiKeyOk,
+      fromCanonical: Boolean(from),
+      fromRawLen: fromRaw.length,
+      apiKeyRawLen: apiKeyRaw.length,
+    });
+  }
+
+  return { provider: unavailableProvider(), mode: "unavailable" };
 }

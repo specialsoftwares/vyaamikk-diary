@@ -11,6 +11,7 @@ declare module "@react-native-firebase/auth" {
     uid: string;
     phoneNumber?: string | null;
     getIdToken(forceRefresh?: boolean): Promise<string>;
+    updatePhoneNumber(credential: AuthCredential): Promise<void>;
   }
   export interface UserCredential {
     user: FirebaseUser;
@@ -23,6 +24,31 @@ declare module "@react-native-firebase/auth" {
   export class PhoneAuthProvider {
     static credential(verificationId: string, code: string): AuthCredential;
   }
+  export interface PhoneAuthSnapshot {
+    state: "sent" | "timeout" | "verified" | "error";
+    verificationId: string;
+    code: string | null;
+    error: unknown | null;
+  }
+  export interface PhoneAuthListener {
+    on(
+      event: "state_changed",
+      observer: (snapshot: PhoneAuthSnapshot) => void,
+      errorCb?: (error: unknown) => void,
+      successCb?: (snapshot: PhoneAuthSnapshot) => void
+    ): PhoneAuthListener;
+    then(
+      onFulfilled?: ((a: PhoneAuthSnapshot) => unknown) | null,
+      onRejected?: ((a: unknown) => unknown) | null
+    ): Promise<unknown>;
+    catch(onRejected: (a: unknown) => unknown): Promise<unknown>;
+  }
+  export const PhoneAuthState: {
+    CODE_SENT: "sent";
+    AUTO_VERIFY_TIMEOUT: "timeout";
+    AUTO_VERIFIED: "verified";
+    ERROR: "error";
+  };
   export interface FirebaseAuthSettings {
     appVerificationDisabledForTesting?: boolean;
     forceRecaptchaFlowForTesting?: boolean;
@@ -32,6 +58,11 @@ declare module "@react-native-firebase/auth" {
     settings: FirebaseAuthSettings;
     signInWithPhoneNumber(phoneNumber: string): Promise<ConfirmationResult>;
     signInWithCredential(credential: AuthCredential): Promise<UserCredential>;
+    verifyPhoneNumber(
+      phoneNumber: string,
+      autoVerifyTimeoutOrForceResend?: number | boolean,
+      forceResend?: boolean
+    ): PhoneAuthListener;
     signOut(): Promise<void>;
     currentUser: FirebaseUser | null;
     onAuthStateChanged(listener: (user: FirebaseUser | null) => void): () => void;

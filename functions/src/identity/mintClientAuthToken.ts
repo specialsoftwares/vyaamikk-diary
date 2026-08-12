@@ -1,4 +1,5 @@
 import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { logger } from "firebase-functions";
 import { getAuth } from "firebase-admin/auth";
 import { getApps, initializeApp } from "firebase-admin/app";
 
@@ -32,6 +33,20 @@ export const mintClientAuthToken = onCall({ region: "asia-south1" }, async (requ
     return { token };
   } catch (e) {
     const message = e instanceof Error ? e.message : "token mint failed";
-    throw new HttpsError("internal", `Could not mint client auth token: ${message}`);
+    const name = e instanceof Error ? e.name : "Error";
+    // Safe diagnostics only — never log the token or full uid.
+    logger.error("mintClientAuthToken createCustomToken failed", {
+      errorName: name,
+      errorMessage: message.replace(/\b[A-Za-z0-9_-]{20,}\b/g, "[redacted]").slice(0, 300),
+      uidSuffix: uid.length >= 6 ? uid.slice(-6) : "??????",
+      diagnosticCode: /iam|permission|token creator/i.test(message)
+        ? "MINT_IAM_TOKEN_CREATOR"
+        : "MINT_CUSTOM_TOKEN_FAILED",
+    });
+    throw new HttpsError(
+      "internal",
+      "Could not mint client auth token. Secure session bridge is unavailable.",
+      { diagnosticCode: "MINT_CUSTOM_TOKEN_FAILED" }
+    );
   }
 });

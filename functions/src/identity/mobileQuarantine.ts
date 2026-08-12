@@ -144,25 +144,46 @@ export function throwMobileQuarantined(): never {
   throw new HttpsError("failed-precondition", MOBILE_QUARANTINE_USER_MESSAGE);
 }
 
+export type MobileQuarantineCheck = {
+  /** True when an expired-but-still-active quarantine row should be marked released. */
+  releaseDue: boolean;
+};
+
+/**
+ * READ-ONLY quarantine gate for use inside Firestore transactions.
+ * Must not write: callers apply deferred release after the full read phase.
+ */
 export async function assertMobileNotQuarantined(
   tx: Transaction,
   mobileHash: string,
   now = Date.now()
-): Promise<void> {
+): Promise<MobileQuarantineCheck> {
   const db = getAdminDb();
   const snap = await tx.get(db.collection(MOBILE_QUARANTINES).doc(mobileHash));
-  if (!snap.exists) return;
+  if (!snap.exists) return { releaseDue: false };
   const doc = snap.data() as MobileQuarantineDoc;
   if (isQuarantineBlocking(doc, now)) {
     throwMobileQuarantined();
   }
-  // Due but not yet marked released — release opportunistically in same tx.
-  if (doc.status === "active" && doc.releaseAt <= now) {
-    tx.update(db.collection(MOBILE_QUARANTINES).doc(mobileHash), {
-      status: "released",
-      releasedAt: now,
-    });
+  if (doc.status === "active" && typeof doc.releaseAt === "number" && doc.releaseAt <= now) {
+    return { releaseDue: true };
   }
+  return { releaseDue: false };
+}
+
+/** Write-phase companion for {@link assertMobileNotQuarantined}. */
+export function applyDeferredMobileQuarantineRelease(
+  tx: Transaction,
+  mobileHash: string,
+  now: number,
+  releaseDue: boolean
+): void {
+  if (!releaseDue) return;
+  const db = getAdminDb();
+  tx.update(db.collection(MOBILE_QUARANTINES).doc(mobileHash), {
+    status: "released",
+    releasedAt: now,
+  });
 }
 
 export function startMobileQuarantine(

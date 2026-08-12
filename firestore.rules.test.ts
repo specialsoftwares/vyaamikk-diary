@@ -176,6 +176,22 @@ async function main() {
     );
     check("client emailVerifiedAt change denied", true);
 
+    await assertFails(
+      updateDoc(doc(authedDb("email-guard"), "users", "email-guard"), {
+        emailStatus: "verified",
+        updatedAt: Date.now(),
+      })
+    );
+    check("client emailStatus verified self-assert denied", true);
+
+    await assertFails(
+      updateDoc(doc(authedDb("email-guard"), "users", "email-guard"), {
+        emailLinkedAt: Date.now(),
+        updatedAt: Date.now(),
+      })
+    );
+    check("client emailLinkedAt change denied", true);
+
     // --- Legacy W4/W8 enrichment payload denied ---
     await assertFails(
       setDoc(

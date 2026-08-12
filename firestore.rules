@@ -77,8 +77,8 @@ service cloud.firestore {
         'lastProfileEditedAt',
         'legalConsents',
         'updatedAt',
-        'emailStatus',
-        'emailLinkedAt',
+        // emailStatus / emailLinkedAt / emailVerifiedAt are server-authoritative
+        // (startEmailVerification / verifyAndBindEmail). Clients must not self-assert.
         'accountKind',
         'pinCode',
         'pinLocality',
