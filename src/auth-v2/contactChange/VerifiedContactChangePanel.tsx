@@ -22,6 +22,10 @@ import {
   validateReplacementEmail,
   validateReplacementMobile,
 } from "@/auth-v2/contactChange/contactChangeModel";
+import {
+  assertReviewContactEditAllowed,
+  reviewContactEditLimitMessage,
+} from "@/auth-v2/reviewContactEditPolicy";
 import { REVIEW_CONTACTS_SECURITY_NOTE } from "@/auth-v2/reviewEditCopy";
 import { OtpVerificationScreen } from "@/auth-v2/screens/OtpVerificationScreen";
 import { EmailOtpScreen } from "@/auth-v2/screens/EmailOtpScreen";
@@ -69,6 +73,9 @@ interface VerifiedContactChangePanelProps {
   emailVerified: boolean;
   phoneChangeAvailable: boolean;
   emailChangeAvailable: boolean;
+  mobileReviewChangeCount?: number;
+  emailReviewChangeCount?: number;
+  profileCompletedAt?: number | null;
   adapters: ContactChangeAdapters;
   /** When true, hide shell Done (parent should hide primary while nested). */
   onPhaseChange?: (phase: ContactChangePhase) => void;
@@ -84,6 +91,9 @@ export function VerifiedContactChangePanel({
   emailVerified,
   phoneChangeAvailable,
   emailChangeAvailable,
+  mobileReviewChangeCount = 0,
+  emailReviewChangeCount = 0,
+  profileCompletedAt = null,
   adapters,
   onPhaseChange,
 }: VerifiedContactChangePanelProps) {
@@ -148,8 +158,21 @@ export function VerifiedContactChangePanel({
     goPhase("overview");
   }, [goPhase]);
 
+  const phoneEditGate = assertReviewContactEditAllowed({
+    channel: "mobile",
+    count: mobileReviewChangeCount,
+    profileCompletedAt,
+  });
+  const emailEditGate = assertReviewContactEditAllowed({
+    channel: "email",
+    count: emailReviewChangeCount,
+    profileCompletedAt,
+  });
+  const phoneEditable = phoneChangeAvailable && phoneEditGate.ok;
+  const emailEditable = emailChangeAvailable && emailEditGate.ok;
+
   const beginPhone = () => {
-    if (!phoneChangeAvailable || activeChannel === "email") return;
+    if (!phoneEditable || activeChannel === "email") return;
     setError(null);
     setActiveChannel("phone");
     setLocalMobile("");
@@ -157,7 +180,7 @@ export function VerifiedContactChangePanel({
   };
 
   const beginEmail = () => {
-    if (!emailChangeAvailable || activeChannel === "phone") return;
+    if (!emailEditable || activeChannel === "phone") return;
     setError(null);
     setActiveChannel("email");
     setEmailInput("");
@@ -348,7 +371,7 @@ export function VerifiedContactChangePanel({
         actionLabel="Change"
         accessibilityLabel="Change mobile number"
         onAction={beginPhone}
-        editable={phoneChangeAvailable}
+        editable={phoneEditable}
         purpose="security"
         chipTestID="contact-change-phone"
         testID="contact-change-phone-card"
@@ -371,7 +394,7 @@ export function VerifiedContactChangePanel({
         actionLabel="Change"
         accessibilityLabel="Change email"
         onAction={beginEmail}
-        editable={emailChangeAvailable}
+        editable={emailEditable}
         purpose="security"
         chipTestID="contact-change-email"
         testID="contact-change-email-card"
@@ -391,6 +414,17 @@ export function VerifiedContactChangePanel({
           { backgroundColor: tokens.cardBg, borderColor: tokens.cardBorder },
         ]}
       />
+
+      {!phoneEditGate.ok ? (
+        <Text style={[styles.helper, { color: tokens.muted }]}>
+          {reviewContactEditLimitMessage("mobile")}
+        </Text>
+      ) : null}
+      {!emailEditGate.ok ? (
+        <Text style={[styles.helper, { color: tokens.muted }]}>
+          {reviewContactEditLimitMessage("email")}
+        </Text>
+      ) : null}
 
       <ReviewInfoCard>
         <Text style={[styles.infoTitle, { color: tokens.heading }]}>Identity protection</Text>

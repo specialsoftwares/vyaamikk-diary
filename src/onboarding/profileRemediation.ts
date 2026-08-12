@@ -22,13 +22,12 @@ export function resolveProfileRemediation(
   if (!user) return "accountDataInconsistent";
   if (!hasAuthoritativeVerifiedEmail(user)) return "emailRemediationRequired";
 
-  // Legacy weak completion: profileCompletedAt without new mandatory fields.
+  // Completed v2 profiles do not require a logo — image is optional.
   const hasV2 =
     user.onboardingProfileVersion === 2 ||
     (Boolean(user.pinCode) &&
       Boolean(user.pinDistrict) &&
       Boolean(user.pinState) &&
-      Boolean(user.profileLogo?.localUri) &&
       Boolean(user.issuerIdentitySnapshotId) &&
       Boolean(user.accountKind));
 
@@ -38,7 +37,6 @@ export function resolveProfileRemediation(
   }
 
   if (!hasV2) {
-    if (!user.profileLogo?.localUri) return "imageLogoRemediationRequired";
     if (!user.pinCode || !user.pinDistrict || !user.pinState) {
       return "pinConfirmationRequired";
     }
@@ -51,7 +49,6 @@ export function resolveProfileRemediation(
   }
 
   if (!user.issuerIdentitySnapshotId) return "identitySnapshotRepairRequired";
-  if (!user.profileLogo?.localUri) return "imageLogoRemediationRequired";
   if (!user.pinCode || !user.pinDistrict || !user.pinState) {
     return "pinConfirmationRequired";
   }

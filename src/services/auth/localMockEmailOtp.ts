@@ -3,6 +3,12 @@
  * Deterministic OTP is `000000` and only when every explicit safety condition passes.
  */
 
+import { CONTACT_CHANGE_EMAIL_COLLISION_MESSAGE } from "@/auth-v2/contactChange/contactChangeModel";
+import {
+  assertReviewContactEditAllowed,
+  nextReviewContactEditCount,
+  shouldCountSuccessfulReviewContactReplacement,
+} from "@/auth-v2/reviewContactEditPolicy";
 import { AppError } from "@/domain/errors";
 import type { UserProfile } from "@/domain/types";
 import { getActiveBackend, getResolvedEnvironment } from "@/config/env";
@@ -14,6 +20,7 @@ import {
   EMAIL_OTP_TTL_MS,
   LOCAL_MOCK_DETERMINISTIC_EMAIL_OTP,
 } from "@/services/auth/emailOtpConstants";
+import { loadMockRegistry } from "@/services/auth/mockRegistry";
 import { createLogger } from "@/utils/logger";
 
 const log = createLogger("auth/localMockEmailOtp");
@@ -114,7 +121,28 @@ export async function localMockStartEmailOtp(
   const hash = hashEmail(normalized);
   const owner = emailIndex.get(hash);
   if (owner && owner !== uid) {
-    throw new AppError("email_already_linked", "This email cannot be used. Try a different address.");
+    throw new AppError("email_already_linked", CONTACT_CHANGE_EMAIL_COLLISION_MESSAGE);
+  }
+
+  let existing: UserProfile | undefined;
+  try {
+    existing = (await loadMockRegistry()).users[uid];
+  } catch {
+    existing = undefined;
+  }
+  const currentVerified =
+    existing?.emailStatus === "verified"
+      ? normalizeEmail(existing.normalizedEmail ?? existing.businessEmail ?? "")
+      : "";
+  if (currentVerified && currentVerified !== normalized) {
+    const reviewGate = assertReviewContactEditAllowed({
+      channel: "email",
+      count: existing?.emailReviewChangeCount,
+      profileCompletedAt: existing?.profileCompletedAt ?? null,
+    });
+    if (!reviewGate.ok) {
+      throw new AppError("permission_denied", reviewGate.message);
+    }
   }
 
   const prevId = byUidActive.get(uid);
@@ -224,12 +252,32 @@ export async function localMockVerifyEmailOtp(
   const hash = hashEmail(challenge.normalizedEmail);
   const owner = emailIndex.get(hash);
   if (owner && owner !== uid) {
-    throw new AppError("email_already_linked", "This email cannot be used. Try a different address.");
+    throw new AppError("email_already_linked", CONTACT_CHANGE_EMAIL_COLLISION_MESSAGE);
+  }
+  for (const [existingHash, existingUid] of [...emailIndex.entries()]) {
+    if (existingUid === uid && existingHash !== hash) {
+      emailIndex.delete(existingHash);
+    }
   }
   emailIndex.set(hash, uid);
   challenge.status = "consumed";
   challenge.code = "";
   const now = Date.now();
+  let existing: UserProfile | undefined;
+  try {
+    existing = (await loadMockRegistry()).users[uid];
+  } catch {
+    existing = undefined;
+  }
+  const previousEmail = normalizeEmail(
+    existing?.normalizedEmail ?? existing?.businessEmail ?? ""
+  );
+  const countReview = shouldCountSuccessfulReviewContactReplacement({
+    profileCompletedAt: existing?.profileCompletedAt ?? null,
+    previousNormalized: previousEmail,
+    nextNormalized: challenge.normalizedEmail,
+    bindSucceeded: true,
+  });
   return applyProfile({
     businessEmail: challenge.normalizedEmail,
     normalizedEmail: challenge.normalizedEmail,
@@ -240,6 +288,9 @@ export async function localMockVerifyEmailOtp(
     emailBindingVersion: 1,
     identityUpdatedAt: now,
     emailVerificationLockUntil: null,
+    emailReviewChangeCount: countReview
+      ? nextReviewContactEditCount(existing?.emailReviewChangeCount)
+      : existing?.emailReviewChangeCount ?? 0,
   });
 }
 

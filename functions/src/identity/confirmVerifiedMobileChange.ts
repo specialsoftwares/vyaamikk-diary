@@ -16,11 +16,22 @@ import { HttpsError, onCall } from "firebase-functions/v2/https";
 
 import { getAdminDb } from "../admin";
 import {
-  assertMobileNotQuarantined,
   applyDeferredMobileQuarantineRelease,
+  isQuarantineBlocking,
+  MOBILE_QUARANTINES,
   sha256MobileHash,
   startMobileQuarantine,
+  throwMobileQuarantined,
+  type MobileQuarantineDoc,
 } from "./mobileQuarantine";
+import {
+  assertReviewContactEditAllowed,
+  classifyContactAssignment,
+  nextReviewContactEditCount,
+  REVIEW_MOBILE_EDIT_LIMIT_MESSAGE,
+  shouldCountSuccessfulReviewContactReplacement,
+  shouldQuarantineReleasedMobile,
+} from "./reviewContactEditPolicy";
 import { normalizePhoneE164 } from "./shared";
 
 const USERS = "users";
@@ -28,6 +39,30 @@ const PHONE_INDEX = "phoneIndex";
 
 function phonesMatch(a: string, b: string): boolean {
   return normalizePhoneE164(a) === normalizePhoneE164(b);
+}
+
+async function assertMobileAvailableForUid(
+  tx: Transaction,
+  args: { uid: string; mobileHash: string; now: number }
+): Promise<{ releaseDue: boolean; reclaimQuarantine: boolean }> {
+  const db = getAdminDb();
+  const snap = await tx.get(db.collection(MOBILE_QUARANTINES).doc(args.mobileHash));
+  if (!snap.exists) return { releaseDue: false, reclaimQuarantine: false };
+  const doc = snap.data() as MobileQuarantineDoc;
+  if (isQuarantineBlocking(doc, args.now)) {
+    if (doc.formerUid === args.uid) {
+      return { releaseDue: false, reclaimQuarantine: true };
+    }
+    throwMobileQuarantined();
+  }
+  if (doc.status === "active" && typeof doc.releaseAt === "number" && doc.releaseAt <= args.now) {
+    return { releaseDue: true, reclaimQuarantine: false };
+  }
+  return { releaseDue: false, reclaimQuarantine: false };
+}
+
+function throwReviewMobileEditLimit(): never {
+  throw new HttpsError("failed-precondition", REVIEW_MOBILE_EDIT_LIMIT_MESSAGE);
 }
 
 function newOperationId(): string {
@@ -76,19 +111,31 @@ export async function preflightVerifiedMobileContactChangeTx(
     };
   }
 
+  const reviewGate = assertReviewContactEditAllowed({
+    channel: "mobile",
+    count: user.mobileReviewChangeCount,
+    profileCompletedAt:
+      typeof user.profileCompletedAt === "number" ? user.profileCompletedAt : null,
+  });
+  if (!reviewGate.ok) throwReviewMobileEditLimit();
+
   const newerHash = sha256MobileHash(newer);
-  await assertMobileNotQuarantined(tx, newerHash, args.now);
+  await assertMobileAvailableForUid(tx, {
+    uid: args.uid,
+    mobileHash: newerHash,
+    now: args.now,
+  });
 
   const phoneIndexRef = db.collection(PHONE_INDEX).doc(newer);
   const phoneSnap = await tx.get(phoneIndexRef);
-  if (phoneSnap.exists) {
-    const owner = (phoneSnap.data() as { uid?: string }).uid;
-    if (owner && owner !== args.uid) {
-      throw new HttpsError(
-        "already-exists",
-        "This mobile number cannot be used for this account. Please use another number or contact support."
-      );
-    }
+  const owner = phoneSnap.exists
+    ? (phoneSnap.data() as { uid?: string }).uid
+    : undefined;
+  if (classifyContactAssignment({ ownerUid: owner, currentUid: args.uid }) === "assigned_to_other") {
+    throw new HttpsError(
+      "already-exists",
+      "This mobile number cannot be used for this account. Please use another number or contact support."
+    );
   }
 
   // Soft reservation marker on the user doc (not an authoritative phone).
@@ -174,33 +221,67 @@ export async function confirmVerifiedMobileContactChangeTx(
     }
   }
 
+  const reviewGate = assertReviewContactEditAllowed({
+    channel: "mobile",
+    count: user.mobileReviewChangeCount,
+    profileCompletedAt:
+      typeof user.profileCompletedAt === "number" ? user.profileCompletedAt : null,
+  });
+  if (!reviewGate.ok) throwReviewMobileEditLimit();
+
   const newerHash = sha256MobileHash(newer);
-  const quarantine = await assertMobileNotQuarantined(tx, newerHash, args.now);
+  const quarantine = await assertMobileAvailableForUid(tx, {
+    uid: args.uid,
+    mobileHash: newerHash,
+    now: args.now,
+  });
 
   const phoneIndexRef = db.collection(PHONE_INDEX).doc(newer);
   const phoneSnap = await tx.get(phoneIndexRef);
-  if (phoneSnap.exists) {
-    const owner = (phoneSnap.data() as { uid?: string }).uid;
-    if (owner && owner !== args.uid) {
-      throw new HttpsError(
-        "already-exists",
-        "This mobile number cannot be used for this account. Please use another number or contact support."
-      );
-    }
+  const owner = phoneSnap.exists
+    ? (phoneSnap.data() as { uid?: string }).uid
+    : undefined;
+  if (classifyContactAssignment({ ownerUid: owner, currentUid: args.uid }) === "assigned_to_other") {
+    throw new HttpsError(
+      "already-exists",
+      "This mobile number cannot be used for this account. Please use another number or contact support."
+    );
   }
 
   applyDeferredMobileQuarantineRelease(tx, newerHash, args.now, quarantine.releaseDue);
-
-  if (oldPhone && !phonesMatch(oldPhone, newer)) {
-    tx.delete(db.collection(PHONE_INDEX).doc(oldPhone));
-    const oldHash = sha256MobileHash(oldPhone);
-    startMobileQuarantine(tx, {
-      mobileHash: oldHash,
-      formerUid: args.uid,
-      reason: "mobile_change",
-      now: args.now,
+  if (quarantine.reclaimQuarantine) {
+    tx.update(db.collection(MOBILE_QUARANTINES).doc(newerHash), {
+      status: "cancelled",
+      cancelledAt: args.now,
+      reboundAt: args.now,
+      reboundToUid: args.uid,
     });
   }
+
+  const completedAt =
+    typeof user.profileCompletedAt === "number" ? user.profileCompletedAt : null;
+  if (oldPhone && !phonesMatch(oldPhone, newer)) {
+    tx.delete(db.collection(PHONE_INDEX).doc(oldPhone));
+    if (shouldQuarantineReleasedMobile({ profileCompletedAt: completedAt })) {
+      const oldHash = sha256MobileHash(oldPhone);
+      startMobileQuarantine(tx, {
+        mobileHash: oldHash,
+        formerUid: args.uid,
+        reason: "mobile_change",
+        now: args.now,
+      });
+    }
+  }
+
+  const countReview = shouldCountSuccessfulReviewContactReplacement({
+    profileCompletedAt: completedAt,
+    previousNormalized: oldPhone,
+    nextNormalized: newer,
+    bindSucceeded: true,
+  });
+  const mobileReviewChangeCount = countReview
+    ? nextReviewContactEditCount(user.mobileReviewChangeCount)
+    : Number(user.mobileReviewChangeCount ?? 0);
 
   tx.set(phoneIndexRef, { uid: args.uid, phoneE164: newer, updatedAt: args.now });
   const nextProfile = {
@@ -211,6 +292,7 @@ export async function confirmVerifiedMobileContactChangeTx(
     mobileHash: newerHash,
     mobileChangedAt: args.now,
     mobileChangeCount: Number(user.mobileChangeCount ?? 0) + 1,
+    mobileReviewChangeCount,
     pendingMobileChange: null,
     updatedAt: args.now,
   };
@@ -219,6 +301,7 @@ export async function confirmVerifiedMobileContactChangeTx(
     mobileHash: newerHash,
     mobileChangedAt: args.now,
     mobileChangeCount: Number(user.mobileChangeCount ?? 0) + 1,
+    mobileReviewChangeCount,
     pendingMobileChange: null,
     updatedAt: args.now,
   });

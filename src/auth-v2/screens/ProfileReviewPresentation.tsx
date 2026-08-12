@@ -111,8 +111,6 @@ export function ProfileReviewPresentation({
     setSubmitting(true);
     setError(null);
     setPersistStatus("pending");
-    // Show workspace surface immediately — Ack must paint preparing before ready/You.
-    setPhase("workspace");
     if (__DEV__) {
       console.log("[workspace-ready] Confirm press → committing", { t: Date.now() });
     }
@@ -125,6 +123,8 @@ export function ProfileReviewPresentation({
         console.log("[workspace-ready] onConfirmPersist resolved", { t: Date.now() });
       }
       setPersistStatus("succeeded");
+      // Preparing paints only after prerequisites + persist succeeded.
+      setPhase("workspace");
     } catch (e) {
       setPersistStatus("failed");
       setPhase("review");

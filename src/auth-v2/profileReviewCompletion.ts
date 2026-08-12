@@ -76,7 +76,8 @@ export function assertReviewCompletionUsesWorkspaceReady(source: string): boolea
     source.includes("WorkspaceReadyAck") &&
     source.includes('setPhase("workspace")') &&
     source.includes("persistStatus") &&
-    source.includes("onSuccessNavigate")
+    source.includes("onSuccessNavigate") &&
+    source.includes("await onConfirmPersist()")
   );
 }
 

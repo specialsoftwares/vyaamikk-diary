@@ -19,6 +19,9 @@ export const CONTACT_CHANGE_PURPOSE = "contact_change" as const;
 export const CONTACT_CHANGE_MOBILE_COLLISION_MESSAGE =
   "This mobile number cannot be used for this account. Please use another number or contact support.";
 
+export const CONTACT_CHANGE_EMAIL_COLLISION_MESSAGE =
+  "This email cannot be used for this account. Please use another email or contact support.";
+
 /** Same-number no-op — no SMS, no mutation. */
 export const CONTACT_CHANGE_SAME_MOBILE_MESSAGE =
   "This is already your verified mobile number.";

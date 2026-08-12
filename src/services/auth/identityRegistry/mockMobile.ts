@@ -2,6 +2,10 @@
  * Mock-registry mobile index operations (local-mock backend).
  */
 
+import {
+  nextReviewContactEditCount,
+  shouldCountSuccessfulReviewContactReplacement,
+} from "@/auth-v2/reviewContactEditPolicy";
 import type { PhoneE164, UEID, UserProfile } from "@/domain/types";
 import { isActiveAccount } from "@/services/accountDeletion/accountStatus";
 import { recordRetiredPhoneLocal } from "@/services/accountDeletion/retiredIdentity";
@@ -62,6 +66,16 @@ export async function applyMockMobileChange(
 
   delete registry.phoneIndex[oldPhone];
   registry.phoneIndex[nextPhone] = uid;
+  if (registry.releasedPhones) {
+    delete registry.releasedPhones[nextPhone];
+  }
+
+  const countReview = shouldCountSuccessfulReviewContactReplacement({
+    profileCompletedAt: existing.profileCompletedAt,
+    previousNormalized: oldPhone,
+    nextNormalized: nextPhone,
+    bindSucceeded: true,
+  });
 
   const next: UserProfile = {
     ...existing,
@@ -70,6 +84,9 @@ export async function applyMockMobileChange(
     mobileLinkedAt: existing.mobileLinkedAt ?? existing.createdAt,
     mobileChangedAt: now,
     mobileChangeCount: (existing.mobileChangeCount ?? 0) + 1,
+    mobileReviewChangeCount: countReview
+      ? nextReviewContactEditCount(existing.mobileReviewChangeCount)
+      : existing.mobileReviewChangeCount ?? 0,
     identityChangeHistory: appendIdentityChangeHistory(
       existing.identityChangeHistory,
       buildMobileChangedHistory(oldPhone, nextPhone, now)

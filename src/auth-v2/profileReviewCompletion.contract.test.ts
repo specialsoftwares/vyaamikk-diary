@@ -172,6 +172,16 @@ const presentation = readFileSync(
 assert.equal(assertReviewCompletionUsesWorkspaceReady(presentation), true);
 assert.match(presentation, /setPhase\("workspace"\)/);
 assert.match(presentation, /persistStatus/);
+assert.ok(
+  presentation.indexOf("await onConfirmPersist()") <
+    presentation.indexOf('setPhase("workspace")'),
+  "Workspace Ready must not paint before persist succeeds"
+);
+assert.doesNotMatch(
+  presentation,
+  /setPhase\("workspace"\);[\s\S]*await onConfirmPersist\(\)/,
+  "must not enter Preparing before persist"
+);
 assert.doesNotMatch(
   presentation,
   /await onConfirmPersist\(\);\s*onSuccessNavigate/,

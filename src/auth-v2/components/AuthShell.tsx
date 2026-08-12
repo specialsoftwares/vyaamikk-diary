@@ -1,5 +1,6 @@
-import React from "react";
+import React, { useEffect } from "react";
 import {
+  BackHandler,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -61,7 +62,19 @@ export function AuthShell({
   const isDark = resolvedMode === "dark";
   const tokens = authV2Tokens(colors, isDark);
   const gradient = authV2GradientStops(isDark);
+  const onBackRef = React.useRef(onBack);
+  onBackRef.current = onBack;
+  const consumeSystemBack = Boolean(showBack && onBack);
   const useActionZone = footerPlacement === "actionZone" && Boolean(footer);
+
+  useEffect(() => {
+    if (!consumeSystemBack) return;
+    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      onBackRef.current?.();
+      return true;
+    });
+    return () => sub.remove();
+  }, [consumeSystemBack]);
 
   return (
     <LinearGradient colors={gradient} style={styles.root}>

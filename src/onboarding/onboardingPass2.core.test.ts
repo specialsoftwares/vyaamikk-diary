@@ -397,7 +397,23 @@ function baseUser(over: Partial<UserProfile> = {}): UserProfile {
         profileLogo: null,
       })
     ),
-    "imageLogoRemediationRequired"
+    "pinConfirmationRequired"
+  );
+  assert.equal(
+    resolveProfileRemediation(
+      baseUser({
+        profileCompletedAt: 1,
+        onboardingProfileVersion: 2,
+        accountKind: "individual",
+        pinCode: "110001",
+        pinDistrict: "New Delhi",
+        pinState: "Delhi",
+        profileLogo: null,
+        issuerIdentitySnapshotId: "iss_1",
+      })
+    ),
+    "fullyCompliant",
+    "optional logo must not force image remediation"
   );
 }
 

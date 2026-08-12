@@ -62,6 +62,8 @@ export const SERVER_OWNED_PROFILE_PATCH_KEYS = [
   "deletedAt",
   "mobileChangedAt",
   "mobileChangeCount",
+  "mobileReviewChangeCount",
+  "emailReviewChangeCount",
 ] as const;
 
 /**

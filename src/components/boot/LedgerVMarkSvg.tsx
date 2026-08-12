@@ -1,4 +1,5 @@
 import React from "react";
+import { View } from "react-native";
 import Svg, { Circle, Line, Path, Rect } from "react-native-svg";
 
 import { BRAND_GOLD } from "@/config/brandMotion";
@@ -21,6 +22,11 @@ interface LedgerVMarkSvgProps {
   leftArmLen: number;
   strokeColor?: string;
   cutFill?: string;
+  /**
+   * When false, skip the opaque punch-out rect so the gold rule can cross the V
+   * on gradient surfaces (Phone Entry). Boot keeps punch-out on BRAND_SURFACE.
+   */
+  punchCut?: boolean;
 }
 
 /** Static SVG mark — no Reanimated props (Expo Go safe). */
@@ -35,56 +41,61 @@ export function LedgerVMarkSvg({
   leftArmLen,
   strokeColor = V_STROKE.color,
   cutFill = LEDGER_CUT.fill,
+  punchCut = true,
 }: LedgerVMarkSvgProps) {
   return (
-    <Svg width={size} height={size} viewBox={`0 0 ${LEDGER_V_VIEWBOX} ${LEDGER_V_VIEWBOX}`}>
-      <Path
-        d={V_PATH_D}
-        stroke={strokeColor}
-        strokeWidth={V_STROKE.width}
-        strokeLinejoin={V_STROKE.linejoin}
-        strokeMiterlimit={V_STROKE.miterlimit}
-        strokeLinecap={V_STROKE.linecap}
-        fill="none"
-      />
-      <Rect
-        x={LEDGER_CUT.x}
-        y={LEDGER_CUT.y}
-        width={LEDGER_CUT.width}
-        height={LEDGER_CUT.height}
-        fill={cutFill}
-      />
-      <Line
-        x1={GOLD_RULE.x1}
-        y1={GOLD_RULE.y1}
-        x2={GOLD_RULE.x2}
-        y2={GOLD_RULE.y2}
-        stroke={BRAND_GOLD}
-        strokeWidth={GOLD_RULE.strokeWidth}
-        opacity={goldOpacity}
-      />
-      <Path
-        d="M 12 11 L 40 68"
-        stroke="rgba(255,255,255,0.22)"
-        strokeWidth={1.5}
-        fill="none"
-        strokeDasharray={`${leftTrailLen} ${leftArmLen}`}
-        opacity={tracerVisible ? 1 : 0}
-      />
-      <Path
-        d="M 40 68 L 68 11"
-        stroke="rgba(255,255,255,0.22)"
-        strokeWidth={1.5}
-        fill="none"
-        strokeDasharray={`${rightTrailLen} ${leftArmLen}`}
-        opacity={tracerVisible ? 1 : 0}
-      />
-      {tracerVisible ? (
-        <>
-          <Circle cx={tracerX} cy={tracerY} r={4.5} fill="rgba(255,255,255,0.25)" />
-          <Circle cx={tracerX} cy={tracerY} r={3} fill="#FFFFFF" />
-        </>
-      ) : null}
-    </Svg>
+    <View style={{ width: size, height: size }}>
+      <Svg width={size} height={size} viewBox={`0 0 ${LEDGER_V_VIEWBOX} ${LEDGER_V_VIEWBOX}`}>
+        <Path
+          d={V_PATH_D}
+          stroke={strokeColor}
+          strokeWidth={V_STROKE.width}
+          strokeLinejoin={V_STROKE.linejoin}
+          strokeMiterlimit={V_STROKE.miterlimit}
+          strokeLinecap={V_STROKE.linecap}
+          fill="none"
+        />
+        {punchCut ? (
+          <Rect
+            x={LEDGER_CUT.x}
+            y={LEDGER_CUT.y}
+            width={LEDGER_CUT.width}
+            height={LEDGER_CUT.height}
+            fill={cutFill}
+          />
+        ) : null}
+        <Line
+          x1={GOLD_RULE.x1}
+          y1={GOLD_RULE.y1}
+          x2={GOLD_RULE.x2}
+          y2={GOLD_RULE.y2}
+          stroke={BRAND_GOLD}
+          strokeWidth={GOLD_RULE.strokeWidth}
+          opacity={goldOpacity}
+        />
+        <Path
+          d="M 12 11 L 40 68"
+          stroke="rgba(255,255,255,0.22)"
+          strokeWidth={1.5}
+          fill="none"
+          strokeDasharray={`${leftTrailLen} ${leftArmLen}`}
+          opacity={tracerVisible ? 1 : 0}
+        />
+        <Path
+          d="M 40 68 L 68 11"
+          stroke="rgba(255,255,255,0.22)"
+          strokeWidth={1.5}
+          fill="none"
+          strokeDasharray={`${rightTrailLen} ${leftArmLen}`}
+          opacity={tracerVisible ? 1 : 0}
+        />
+        {tracerVisible ? (
+          <>
+            <Circle cx={tracerX} cy={tracerY} r={4.5} fill="rgba(255,255,255,0.25)" />
+            <Circle cx={tracerX} cy={tracerY} r={3} fill="#FFFFFF" />
+          </>
+        ) : null}
+      </Svg>
+    </View>
   );
 }

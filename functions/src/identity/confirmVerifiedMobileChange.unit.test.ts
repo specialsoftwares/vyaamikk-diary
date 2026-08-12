@@ -19,6 +19,8 @@ assert.equal(
   "collision copy must remain privacy-safe (no account-existence leak)"
 );
 assert.equal(src.includes("startMobileQuarantine"), true);
+assert.equal(src.includes("shouldQuarantineReleasedMobile"), true);
+assert.equal(src.includes("mobileReviewChangeCount"), true);
 assert.equal(src.includes("phoneIndex"), true);
 // Must not create users / allocate UEID
 assert.equal(src.includes("generateUEID"), false);

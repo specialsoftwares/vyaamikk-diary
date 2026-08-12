@@ -42,6 +42,17 @@ export function reviewEditReturnsToHref(): "/(auth)/profile-review" {
   return "/(auth)/profile-review";
 }
 
+/** Review → editor must push so system Back has a previous route. */
+export function reviewEditEnterHref(section: ReviewEditTarget): {
+  pathname: "/(auth)/complete-profile";
+  params: { section: ReviewEditTarget; intent: "review" };
+} {
+  return {
+    pathname: "/(auth)/complete-profile",
+    params: { section, intent: "review" },
+  };
+}
+
 export type ReviewDraftSlice = {
   displayName: string;
   businessName: string;

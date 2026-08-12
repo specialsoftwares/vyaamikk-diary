@@ -10,7 +10,7 @@ import {
   shouldShowPhoneEntryProvenance,
 } from "@/auth-v2/components/phoneEntryBrandModel";
 import { LedgerVMarkSvg } from "@/components/boot/LedgerVMarkSvg";
-import { leftArmLength } from "@/components/boot/ledgerVMarkGeometry";
+import { GOLD_RULE, V_STROKE, leftArmLength } from "@/components/boot/ledgerVMarkGeometry";
 
 const ARM_LEN = leftArmLength();
 const MARK_SIZE = 26;
@@ -47,12 +47,12 @@ export function PhoneEntryBrandSignature() {
         tracerX={0}
         tracerY={0}
         tracerVisible={false}
-        goldOpacity={0.38}
+        goldOpacity={GOLD_RULE.maxOpacity}
         leftTrailLen={0}
         rightTrailLen={0}
         leftArmLen={ARM_LEN}
-        strokeColor={PHONE_ENTRY_BRAND_COLORS.markStroke}
-        cutFill={PHONE_ENTRY_BRAND_COLORS.markCut}
+        strokeColor={V_STROKE.color}
+        punchCut={false}
       />
       <Text style={styles.vyaamikk}>VYAAMIKK</Text>
       <Text style={styles.diary}>DIARY</Text>

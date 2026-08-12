@@ -11,6 +11,10 @@ import type { OnboardingProfileDraftV2 } from "@/onboarding/profileIdentityModel
 import { persistIssuerIdentitySnapshot } from "@/onboarding/issuerIdentitySnapshot";
 import { clearOnboardingProfileDraftV2 } from "@/onboarding/onboardingProfileDraftV2";
 import {
+  classifyIdentityMediaForCompletion,
+  optionalIdentityMediaCompletionError,
+} from "@/onboarding/optionalIdentityMedia";
+import {
   completeOnboardingProfileWithDeps,
   __resetCompleteOnboardingFlightForTests,
   type CompleteOnboardingResult,
@@ -27,10 +31,16 @@ export interface CompleteOnboardingInput {
 }
 
 async function assertDurableLogo(draft: OnboardingProfileDraftV2): Promise<void> {
-  const uri = draft.profileLogo?.localUri;
-  if (!uri || !draft.logoPersisted) {
-    throw new AppError("unknown", "Profile image must be saved before completion.");
+  const classification = classifyIdentityMediaForCompletion(draft);
+  const policyError = optionalIdentityMediaCompletionError(classification);
+  if (policyError) {
+    throw new AppError("unknown", policyError);
   }
+  if (classification === "absent") {
+    return;
+  }
+  const uri = draft.profileLogo?.localUri;
+  if (!uri) return;
   const info = await FileSystem.getInfoAsync(uri);
   if (!info.exists) {
     throw new AppError(

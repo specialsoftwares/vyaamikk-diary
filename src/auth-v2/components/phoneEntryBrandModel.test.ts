@@ -67,6 +67,12 @@ assert.equal(model.includes("CREATE RECORDS, GROW BUSINESS"), false);
 assert.ok(signature.includes("PHONE_ENTRY_BRAND_TAGLINE"));
 assert.ok(signature.includes("PHONE_ENTRY_PROVENANCE_LINE_1"));
 assert.ok(signature.includes("PHONE_ENTRY_PROVENANCE_LINE_2"));
+assert.ok(signature.includes("punchCut={false}"));
+assert.ok(signature.includes("V_STROKE.color"));
+assert.ok(signature.includes("GOLD_RULE.maxOpacity"));
+assert.equal(signature.includes("markStroke"), false);
+assert.equal(signature.includes("goldOpacity={0.38}"), false);
+assert.ok(phone.includes("PhoneEntryBrandSignature"));
 assert.equal(signature.includes("Made in India"), false);
 assert.equal(model.includes("Made in India"), false);
 

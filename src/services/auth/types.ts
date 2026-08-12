@@ -72,7 +72,9 @@ export interface ProfilePatch {
   deletionCompletedAt?: number | null;
   retiredUeid?: boolean | null;
   businessNameChangeCount?: number;
-  emailChangeCount?: number;
+    emailChangeCount?: number;
+    mobileReviewChangeCount?: number;
+    emailReviewChangeCount?: number;
   profileChangeHistory?: ProfileChangeHistoryEntry[];
   lastProfileEditedAt?: number | null;
   legalConsents?: LegalConsentRecord[];

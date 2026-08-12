@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import {
   applyReviewEditPatch,
   parseReviewEditTarget,
   reviewEditAllowsPinLookup,
+  reviewEditEnterHref,
+  reviewEditReturnsToHref,
   resolveContactVerificationState,
   shouldAdvanceToLocationAfterDetailsSave,
   type ReviewDraftSlice,
@@ -126,5 +130,27 @@ const unchanged = resolveContactVerificationState({
 });
 assert.equal(unchanged.pending, null);
 assert.equal(unchanged.verified, true);
+
+assert.deepEqual(reviewEditEnterHref("media"), {
+  pathname: "/(auth)/complete-profile",
+  params: { section: "media", intent: "review" },
+});
+assert.equal(reviewEditReturnsToHref(), "/(auth)/profile-review");
+
+const reviewScreen = readFileSync(
+  join(__dirname, "screens/ProfileReviewScreen.tsx"),
+  "utf8"
+);
+assert.match(reviewScreen, /router\.push\(\{/);
+assert.match(reviewScreen, /params: \{ section, intent: "review" \}/);
+const editor = readFileSync(
+  join(__dirname, "screens/ReviewSectionEditorScreen.tsx"),
+  "utf8"
+);
+assert.match(editor, /router\.canGoBack\(\)/);
+assert.match(editor, /router\.back\(\)/);
+
+const shell = readFileSync(join(__dirname, "components/AuthShell.tsx"), "utf8");
+assert.match(shell, /hardwareBackPress/);
 
 console.log("reviewEditIntent.test.ts: ok");

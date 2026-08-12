@@ -18,6 +18,11 @@ import {
 } from "./otpPolicy";
 import { digestEmailOtp, generateEmailOtpCode, verifyEmailOtpDigest } from "./otpCrypto";
 import { resolveEmailProvider } from "./provider";
+import {
+  assertReviewContactEditAllowed,
+  nextReviewContactEditCount,
+  shouldCountSuccessfulReviewContactReplacement,
+} from "../identity/reviewContactEditPolicy";
 
 export const PENDING_COLLECTION = "pendingEmailVerifications";
 export const EMAIL_BINDINGS = "emailBindings";
@@ -226,6 +231,36 @@ export async function createOrRotateEmailChallenge(input: {
     }
   }
 
+  const currentVerified =
+    user.emailStatus === "verified"
+      ? normalizeEmailStrict(String(user.normalizedEmail ?? user.businessEmail ?? ""))
+      : "";
+  const replacingVerified = Boolean(currentVerified && currentVerified !== normalized);
+  if (replacingVerified) {
+    const reviewGate = assertReviewContactEditAllowed({
+      channel: "email",
+      count: user.emailReviewChangeCount,
+      profileCompletedAt:
+        typeof user.profileCompletedAt === "number" ? user.profileCompletedAt : null,
+    });
+    if (!reviewGate.ok) throwEmailOtpError("EMAIL_REVIEW_EDIT_LIMIT");
+  }
+
+  const bindingSnap = await db.collection(EMAIL_BINDINGS).doc(emailHash).get();
+  const legacySnap = await db.collection(EMAIL_INDEX).doc(emailHash).get();
+  for (const snap of [bindingSnap, legacySnap]) {
+    if (!snap.exists) continue;
+    const data = snap.data() as { uid?: string; userId?: string; status?: string; emailStatus?: string };
+    const owner = data.uid ?? data.userId;
+    const verified =
+      data.status === "verified" ||
+      data.status === "active" ||
+      data.emailStatus === "verified";
+    if (owner && owner !== authUid && verified) {
+      throwEmailOtpError("EMAIL_ALREADY_BOUND");
+    }
+  }
+
   const lockUntil = Number(user.emailVerificationLockUntil ?? 0);
   if (
     lockUntil > now &&
@@ -324,15 +359,18 @@ export async function createOrRotateEmailChallenge(input: {
     purpose,
   };
   batch.set(db.collection(PENDING_COLLECTION).doc(challengeId), challenge);
-  batch.update(userRef, {
-    emailStatus: "verification_pending",
-    // Display form preserved separately when client sends it; store normalized for binding.
-    normalizedEmail: normalized,
-    businessEmail: normalized,
-    emailHash,
-    emailVerifiedAt: null,
-    updatedAt: now,
-  });
+  if (!replacingVerified) {
+    batch.update(userRef, {
+      emailStatus: "verification_pending",
+      normalizedEmail: normalized,
+      businessEmail: normalized,
+      emailHash,
+      emailVerifiedAt: null,
+      updatedAt: now,
+    });
+  } else {
+    batch.update(userRef, { updatedAt: now });
+  }
   await batch.commit();
 
   const sendResult = await provider.send({
@@ -449,9 +487,33 @@ export async function verifyEmailChallengeAndBind(input: {
     const now = Date.now();
     const bindingVersion = Number(user.emailBindingVersion ?? 0) + 1;
     const ueid = String(user.ueid ?? "");
+    const previousEmail =
+      user.emailStatus === "verified"
+        ? normalizeEmailStrict(String(user.normalizedEmail ?? user.businessEmail ?? ""))
+        : "";
+    const replacingVerified = Boolean(
+      previousEmail && previousEmail !== pending.normalizedEmail
+    );
+    if (replacingVerified) {
+      const reviewGate = assertReviewContactEditAllowed({
+        channel: "email",
+        count: user.emailReviewChangeCount,
+        profileCompletedAt:
+          typeof user.profileCompletedAt === "number" ? user.profileCompletedAt : null,
+      });
+      if (!reviewGate.ok) throwEmailOtpError("EMAIL_REVIEW_EDIT_LIMIT");
+    }
 
     const bindingRef = db.collection(EMAIL_BINDINGS).doc(pending.emailHash);
     const legacyRef = db.collection(EMAIL_INDEX).doc(pending.emailHash);
+
+    if (replacingVerified) {
+      const oldHash = emailBindingKey(previousEmail);
+      if (oldHash !== pending.emailHash) {
+        tx.delete(db.collection(EMAIL_BINDINGS).doc(oldHash));
+        tx.delete(db.collection(EMAIL_INDEX).doc(oldHash));
+      }
+    }
 
     tx.set(bindingRef, {
       uid: input.uid,
@@ -471,6 +533,17 @@ export async function verifyEmailChallengeAndBind(input: {
       verifiedAt: now,
     });
 
+    const countReview = shouldCountSuccessfulReviewContactReplacement({
+      profileCompletedAt:
+        typeof user.profileCompletedAt === "number" ? user.profileCompletedAt : null,
+      previousNormalized: previousEmail,
+      nextNormalized: pending.normalizedEmail,
+      bindSucceeded: true,
+    });
+    const emailReviewChangeCount = countReview
+      ? nextReviewContactEditCount(user.emailReviewChangeCount)
+      : Number(user.emailReviewChangeCount ?? 0);
+
     const updated = {
       ...user,
       businessEmail: pending.normalizedEmail,
@@ -483,6 +556,7 @@ export async function verifyEmailChallengeAndBind(input: {
       identityUpdatedAt: now,
       emailVerificationLockUntil: null,
       emailVerificationLockedEmail: null,
+      emailReviewChangeCount,
       updatedAt: now,
     };
 
@@ -497,6 +571,7 @@ export async function verifyEmailChallengeAndBind(input: {
       identityUpdatedAt: now,
       emailVerificationLockUntil: null,
       emailVerificationLockedEmail: null,
+      emailReviewChangeCount,
       updatedAt: now,
     });
 

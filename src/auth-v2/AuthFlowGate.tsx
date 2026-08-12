@@ -103,9 +103,11 @@ import {
 } from "@/auth/emailOtpSendMachine";
 import {
   isPreDashboardOnboardingIncomplete,
-  sameEmailAddress,
   type OnboardingWizardStep,
 } from "@/auth/onboardingWizard";
+import {
+  resolveVerifiedEmailContinueAction,
+} from "@/auth-v2/verifiedEmailContinue";
 import {
   useAuthoritativeCountdown,
   useAuthoritativeResendCountdown,
@@ -330,23 +332,22 @@ export function AuthFlowGate() {
     step === "email_verify" ? emailExpiresAt : null
   );
 
-  const goToBusinessIdentity = useCallback(() => {
-    // Only user-directed Back/review may suppress this intentional continue.
-    // Do NOT consult shouldSuppressForwardGuard here: that mount/boot helper
-    // returns true for continueForward when memory still says emailOtp/emailEntry,
-    // which would permanently no-op after a successful email verify (vc10 stuck
-    // "Email verified" chip on email_verify with Verify disabled).
-    if (isReviewIntentActive()) {
-      return;
-    }
-    if (user) {
-      markContinuingWizardStep("businessIdentity", user.uid, {
-        phoneE164: user.phoneE164,
-        verifiedEmail: user.normalizedEmail ?? user.businessEmail,
-      });
-    }
-    router.replace("/(auth)/complete-profile");
-  }, [router, user]);
+  const goToBusinessIdentity = useCallback(
+    (opts?: { userInitiated?: boolean }) => {
+      // Hydration/boot must not steal a review session. User Continue must proceed.
+      if (!opts?.userInitiated && isReviewIntentActive()) {
+        return;
+      }
+      if (user) {
+        markContinuingWizardStep("businessIdentity", user.uid, {
+          phoneE164: user.phoneE164,
+          verifiedEmail: user.normalizedEmail ?? user.businessEmail,
+        });
+      }
+      router.replace("/(auth)/complete-profile");
+    },
+    [router, user]
+  );
 
   const handoffToApp = useCallback(() => {
     router.replace("/");
@@ -788,7 +789,7 @@ export function AuthFlowGate() {
         await markAuthWrapperEmailComplete(nextProfile.uid);
         resolveVerificationSuccess("mobile", () => {
           void (async () => {
-            goToBusinessIdentity();
+            goToBusinessIdentity({ userInitiated: true });
             await clearAuthWrapperChallenge();
             setChallenge(null);
           })();
@@ -1005,12 +1006,14 @@ export function AuthFlowGate() {
     clearFlowError();
     setEmailHint(null);
 
-    // Same already-verified email — continue to profile without a new OTP.
-    if (
-      hasAuthoritativeVerifiedEmail(user) &&
-      sameEmailAddress(trimmed, user.normalizedEmail ?? user.businessEmail ?? "")
-    ) {
-      goToBusinessIdentity();
+    const action = resolveVerifiedEmailContinueAction({
+      draftEmail: trimmed,
+      verifiedEmail: user.normalizedEmail ?? user.businessEmail ?? "",
+      emailAuthoritativelyVerified: hasAuthoritativeVerifiedEmail(user),
+    });
+    if (action === "invalid") return;
+    if (action === "proceed_without_otp") {
+      goToBusinessIdentity({ userInitiated: true });
       return;
     }
 
@@ -1198,7 +1201,7 @@ export function AuthFlowGate() {
       // Route after success settle — never before authoritative bind.
       // Mount/boot suppress guard must still not wrap this continue (vc10).
       resolveVerificationSuccess("email", () => {
-        goToBusinessIdentity();
+        goToBusinessIdentity({ userInitiated: true });
         setEmailCode("");
         setEmailVerificationId(null);
         setEmailSendMachine(createEmailOtpSendMachine());

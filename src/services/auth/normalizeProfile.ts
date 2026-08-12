@@ -125,6 +125,18 @@ export function normaliseUserProfile(
       typeof raw.emailChangeCount === "number"
         ? Math.max(0, Math.floor(raw.emailChangeCount))
         : 0,
+    mobileChangeCount:
+      typeof raw.mobileChangeCount === "number"
+        ? Math.max(0, Math.floor(raw.mobileChangeCount))
+        : 0,
+    mobileReviewChangeCount:
+      typeof raw.mobileReviewChangeCount === "number"
+        ? Math.max(0, Math.floor(raw.mobileReviewChangeCount))
+        : 0,
+    emailReviewChangeCount:
+      typeof raw.emailReviewChangeCount === "number"
+        ? Math.max(0, Math.floor(raw.emailReviewChangeCount))
+        : 0,
     profileChangeHistory: Array.isArray(raw.profileChangeHistory)
       ? (raw.profileChangeHistory as UserProfile["profileChangeHistory"])
       : [],
@@ -308,6 +320,20 @@ export function applyProfilePatch(user: UserProfile, patch: ProfilePatch): UserP
   }
   if (patch.emailChangeCount !== undefined && patch.emailChangeCount !== user.emailChangeCount) {
     next.emailChangeCount = patch.emailChangeCount;
+    changed = true;
+  }
+  if (
+    patch.mobileReviewChangeCount !== undefined &&
+    patch.mobileReviewChangeCount !== user.mobileReviewChangeCount
+  ) {
+    next.mobileReviewChangeCount = patch.mobileReviewChangeCount;
+    changed = true;
+  }
+  if (
+    patch.emailReviewChangeCount !== undefined &&
+    patch.emailReviewChangeCount !== user.emailReviewChangeCount
+  ) {
+    next.emailReviewChangeCount = patch.emailReviewChangeCount;
     changed = true;
   }
   if (patch.profileChangeHistory !== undefined) {

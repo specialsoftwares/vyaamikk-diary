@@ -74,7 +74,7 @@ export function ProfileReviewScreen() {
       phoneE164: user.phoneE164,
       verifiedEmail: user.normalizedEmail ?? user.businessEmail,
     });
-    router.replace({
+    router.push({
       pathname: "/(auth)/complete-profile",
       params: { section, intent: "review" },
     });

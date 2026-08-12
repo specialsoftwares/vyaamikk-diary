@@ -121,7 +121,9 @@ export interface UserProfile {
   mobileLinkedAt?: number | null;
   /** When mobile was last changed via OTP-verified flow. */
   mobileChangedAt?: number | null;
-  mobileChangeCount?: number;
+    mobileChangeCount?: number;
+    /** Signup Review successful mobile replacements (max 2). Independent of email. */
+    mobileReviewChangeCount?: number;
   identityChangeHistory?: IdentityChangeHistoryEntry[];
   deletionRequestedAt?: number | null;
   /** Epoch ms when pending deletion becomes final (request + grace period). */
@@ -131,8 +133,10 @@ export interface UserProfile {
   retiredUeid?: boolean;
   /** Settings edits to business / profession name after onboarding (max 2). */
   businessNameChangeCount?: number;
-  /** Settings edits to business email after onboarding (max 2). */
-  emailChangeCount?: number;
+    /** Settings edits to business email after onboarding (max 2). */
+    emailChangeCount?: number;
+    /** Signup Review successful email replacements (max 2). Independent of mobile. */
+    emailReviewChangeCount?: number;
   /** Internal audit trail for support — not shown in UI. */
   profileChangeHistory?: ProfileChangeHistoryEntry[];
   lastProfileEditedAt?: number | null;

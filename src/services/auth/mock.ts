@@ -13,6 +13,8 @@
  *   shared-dev use Firestore indexes + retiredPhones tombstones.
  */
 
+import { CONTACT_CHANGE_MOBILE_COLLISION_MESSAGE } from "@/auth-v2/contactChange/contactChangeModel";
+import { assertReviewContactEditAllowed } from "@/auth-v2/reviewContactEditPolicy";
 import { AppError } from "@/domain/errors";
 import {
   DEFAULT_PDF_BRANDING,
@@ -45,7 +47,6 @@ import {
   assertNoStaleActiveAccountAtDerivedUid,
   findActiveProfileForLoginPhone,
   resolveNewMockAccountUeid,
-  throwDuplicateActiveMobile,
 } from "@/services/auth/mobileIdentity";
 import { throwPendingDeletionLoginBlocked } from "@/services/auth/identityErrors";
 import { hashMobileE164, normalizePhoneE164 } from "@/utils/mobileHash";
@@ -196,6 +197,12 @@ export const mockAuthService: AuthService = {
 
   async startMobileChange(newPhoneE164: PhoneE164): Promise<OtpChallenge> {
     log.info("startMobileChange", { phone: newPhoneE164 });
+    const registry = await loadMockRegistry();
+    const normalized = normalizePhoneE164(newPhoneE164);
+    const owner = registry.phoneIndex[normalized];
+    if (owner) {
+      throw new AppError("permission_denied", CONTACT_CHANGE_MOBILE_COLLISION_MESSAGE);
+    }
     const result = await localMockStartMobileOtp(newPhoneE164, "mobile_change_new");
     return {
       verificationId: result.verificationId,
@@ -223,8 +230,17 @@ export const mockAuthService: AuthService = {
       return existing;
     }
 
+    const reviewGate = assertReviewContactEditAllowed({
+      channel: "mobile",
+      count: existing.mobileReviewChangeCount,
+      profileCompletedAt: existing.profileCompletedAt,
+    });
+    if (!reviewGate.ok) {
+      throw new AppError("permission_denied", reviewGate.message);
+    }
+
     if (isActivePhoneOwnedByOther(registry, newPhone, currentUid)) {
-      throwDuplicateActiveMobile();
+      throw new AppError("permission_denied", CONTACT_CHANGE_MOBILE_COLLISION_MESSAGE);
     }
 
     const next = await applyMockMobileChange(registry, existing, newPhone);

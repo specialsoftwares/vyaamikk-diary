@@ -20,6 +20,7 @@ import {
   REVIEW_PHONE_CHANGE_AVAILABLE,
   reviewEditCopy,
 } from "@/auth-v2/reviewEditCopy";
+import { assertReviewContactEditAllowed } from "@/auth-v2/reviewContactEditPolicy";
 import {
   reviewEditAllowsPinLookup,
   reviewEditReturnsToHref,
@@ -104,6 +105,10 @@ export function ReviewSectionEditorScreen({ target }: ReviewSectionEditorScreenP
   }, []);
 
   const returnToReview = useCallback(() => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
     router.replace(reviewEditReturnsToHref());
   }, [router]);
 
@@ -334,7 +339,17 @@ export function ReviewSectionEditorScreen({ target }: ReviewSectionEditorScreenP
 
   const contactAdapters: ContactChangeAdapters | null = user
     ? {
-        startPhone: (phoneE164) => startVerifiedPhoneChange(phoneE164),
+        startPhone: (phoneE164) => {
+          const gate = assertReviewContactEditAllowed({
+            channel: "mobile",
+            count: user.mobileReviewChangeCount,
+            profileCompletedAt: user.profileCompletedAt,
+          });
+          if (!gate.ok) {
+            throw new Error(gate.message);
+          }
+          return startVerifiedPhoneChange(phoneE164);
+        },
         confirmPhone: (challenge, code) =>
           confirmVerifiedPhoneChange(user.uid, challenge, code).then(async (profile) => {
             await applyServerProfile(profile);
@@ -348,7 +363,17 @@ export function ReviewSectionEditorScreen({ target }: ReviewSectionEditorScreenP
           await applyServerProfile(profile);
           return profile;
         },
-        startEmail: (nextEmail) => startVerifiedEmailChange(user.uid, nextEmail),
+        startEmail: (nextEmail) => {
+          const gate = assertReviewContactEditAllowed({
+            channel: "email",
+            count: user.emailReviewChangeCount,
+            profileCompletedAt: user.profileCompletedAt,
+          });
+          if (!gate.ok) {
+            throw new Error(gate.message);
+          }
+          return startVerifiedEmailChange(user.uid, nextEmail);
+        },
         resendEmail: (verificationId, nextEmail) =>
           resendVerifiedEmailChange(user.uid, verificationId, nextEmail),
         confirmEmail: (verificationId, code, nextEmail) =>
@@ -487,6 +512,9 @@ export function ReviewSectionEditorScreen({ target }: ReviewSectionEditorScreenP
           emailVerified={emailVerified}
           phoneChangeAvailable={REVIEW_PHONE_CHANGE_AVAILABLE}
           emailChangeAvailable={REVIEW_EMAIL_CHANGE_AVAILABLE}
+          mobileReviewChangeCount={user.mobileReviewChangeCount ?? 0}
+          emailReviewChangeCount={user.emailReviewChangeCount ?? 0}
+          profileCompletedAt={user.profileCompletedAt}
           adapters={contactAdapters}
           onPhaseChange={setContactPhase}
         />

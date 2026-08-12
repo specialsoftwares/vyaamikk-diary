@@ -16,6 +16,7 @@ export const EMAIL_OTP_MAX_SENDS_PER_EMAIL_HOUR = 8;
 export type EmailOtpServerErrorCode =
   | "EMAIL_INVALID"
   | "EMAIL_ALREADY_BOUND"
+  | "EMAIL_REVIEW_EDIT_LIMIT"
   | "EMAIL_OTP_COOLDOWN"
   | "EMAIL_OTP_EXPIRED"
   | "EMAIL_OTP_INVALID"
@@ -30,7 +31,9 @@ export type EmailOtpServerErrorCode =
 
 export const EMAIL_OTP_USER_MESSAGES: Record<EmailOtpServerErrorCode, string> = {
   EMAIL_INVALID: "Enter a valid email address.",
-  EMAIL_ALREADY_BOUND: "This email cannot be used. Try a different address.",
+  EMAIL_ALREADY_BOUND:
+    "This email cannot be used for this account. Please use another email or contact support.",
+  EMAIL_REVIEW_EDIT_LIMIT: "You can change your email twice during signup review.",
   EMAIL_OTP_COOLDOWN: "Resend is not available yet.",
   EMAIL_OTP_EXPIRED: "That code has expired. Request a new one.",
   EMAIL_OTP_INVALID: "Incorrect code. Please try again.",

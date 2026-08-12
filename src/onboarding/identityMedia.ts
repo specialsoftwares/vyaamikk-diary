@@ -2,7 +2,7 @@
  * Profile image / business logo selection + validation for onboarding.
  */
 
-import { Platform } from "react-native";
+import { AppState, InteractionManager, Platform } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system/legacy";
 
@@ -19,6 +19,11 @@ import {
   type IdentityMediaRejectReason,
   validateIdentityMediaCandidate,
 } from "@/onboarding/identityMediaValidation";
+import {
+  canStartPickerInvocation,
+  pickerHostIsReady,
+  shouldRequestMediaLibraryPermissionBeforeLaunch,
+} from "@/onboarding/identityMediaPickerGate";
 
 export {
   MAX_PROFILE_LOGO_BYTES,
@@ -134,6 +139,36 @@ async function finalizePickedAsset(
   };
 }
 
+let pickerInFlight = false;
+
+function waitNextFrame(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => resolve());
+  });
+}
+
+/**
+ * ActivityResultLauncher is registered when the host Activity is resumed.
+ * After a permission dialog or navigation replace, launch must wait until
+ * AppState is active and interactions have flushed — not an arbitrary timeout.
+ */
+async function waitForPickerHostReady(): Promise<void> {
+  await new Promise<void>((resolve) => {
+    InteractionManager.runAfterInteractions(() => resolve());
+  });
+  if (!pickerHostIsReady(AppState.currentState)) {
+    await new Promise<void>((resolve) => {
+      const sub = AppState.addEventListener("change", (next) => {
+        if (pickerHostIsReady(next)) {
+          sub.remove();
+          resolve();
+        }
+      });
+    });
+  }
+  await waitNextFrame();
+}
+
 /**
  * Recover a picker/camera result if Android destroyed the Activity while the
  * system UI owned the foreground (same pattern as letterhead / customer photo).
@@ -153,49 +188,61 @@ async function recoverPendingPickerAsset(): Promise<ImagePicker.ImagePickerAsset
 export async function pickIdentityMedia(
   source: IdentityMediaSource
 ): Promise<PickedLogoAsset & { width: number; height: number }> {
-  const pendingAsset = await recoverPendingPickerAsset();
-  if (pendingAsset) {
-    return finalizePickedAsset(pendingAsset);
+  if (!canStartPickerInvocation(pickerInFlight)) {
+    throw new IdentityMediaError("cancelled", "Image selection already in progress.");
   }
-
-  let result: ImagePicker.ImagePickerResult;
-  if (source === "camera") {
-    const current = await ImagePicker.getCameraPermissionsAsync();
-    const perm = current.granted
-      ? current
-      : await ImagePicker.requestCameraPermissionsAsync();
-    if (!perm.granted) {
-      throw new IdentityMediaError(
-        "permission_denied",
-        "Camera permission is required to take a profile photo."
-      );
+  pickerInFlight = true;
+  try {
+    const pendingAsset = await recoverPendingPickerAsset();
+    if (pendingAsset) {
+      return finalizePickedAsset(pendingAsset);
     }
-    result = await ImagePicker.launchCameraAsync({
-      ...PICKER_OPTS,
-      cameraType: ImagePicker.CameraType.front,
-    });
-  } else {
-    // iOS needs Photos permission. Android Photo Picker typically does not —
-    // still request when not granted, but do not hard-fail Android when the
-    // legacy storage permission is denied.
-    const current = await ImagePicker.getMediaLibraryPermissionsAsync();
-    if (!current.granted) {
-      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perm.granted && Platform.OS !== "android") {
+
+    let result: ImagePicker.ImagePickerResult;
+    if (source === "camera") {
+      const current = await ImagePicker.getCameraPermissionsAsync();
+      const perm = current.granted
+        ? current
+        : await ImagePicker.requestCameraPermissionsAsync();
+      if (!perm.granted) {
         throw new IdentityMediaError(
           "permission_denied",
-          "Photo library permission is required to choose an image."
+          "Camera permission is required to take a profile photo."
         );
       }
+      await waitForPickerHostReady();
+      result = await ImagePicker.launchCameraAsync({
+        ...PICKER_OPTS,
+        cameraType: ImagePicker.CameraType.front,
+      });
+    } else {
+      // iOS Photos permission is required. Android system Photo Picker is not
+      // gated on READ_MEDIA — requesting it recreates the Activity and is the
+      // Play vc14 unregistered-launcher failure class.
+      if (shouldRequestMediaLibraryPermissionBeforeLaunch(Platform.OS)) {
+        const current = await ImagePicker.getMediaLibraryPermissionsAsync();
+        if (!current.granted) {
+          const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+          if (!perm.granted) {
+            throw new IdentityMediaError(
+              "permission_denied",
+              "Photo library permission is required to choose an image."
+            );
+          }
+        }
+      }
+      await waitForPickerHostReady();
+      result = await ImagePicker.launchImageLibraryAsync(PICKER_OPTS);
     }
-    result = await ImagePicker.launchImageLibraryAsync(PICKER_OPTS);
-  }
 
-  if (result.canceled || !result.assets?.[0]) {
-    throw new IdentityMediaError("cancelled", "Image selection cancelled.");
-  }
+    if (result.canceled || !result.assets?.[0]) {
+      throw new IdentityMediaError("cancelled", "Image selection cancelled.");
+    }
 
-  return finalizePickedAsset(result.assets[0]);
+    return finalizePickedAsset(result.assets[0]);
+  } finally {
+    pickerInFlight = false;
+  }
 }
 
 export async function confirmAndPersistIdentityMedia(
