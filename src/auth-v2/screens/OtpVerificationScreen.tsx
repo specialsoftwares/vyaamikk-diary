@@ -5,13 +5,18 @@ import { AuthShell } from "@/auth-v2/components/AuthShell";
 import { AuthV2PrimaryButton } from "@/auth-v2/components/AuthV2PrimaryButton";
 import { OnboardingInlineMessage } from "@/auth-v2/components/OnboardingInlineMessage";
 import { OnboardingOtpCells } from "@/auth-v2/components/OnboardingOtpCells";
-import { shouldAutoVerifyOtp } from "@/auth-v2/otp/onboardingOtpModel";
+import {
+  OTP_OFFLINE_VERIFY_MESSAGE,
+  classifyOtpVerifyFailure,
+  resolveOtpVerifyUi,
+  shouldAutoVerifyOtp,
+} from "@/auth-v2/otp/onboardingOtpModel";
 import { onboardingMark } from "@/auth-v2/onboardingPerfProbe";
 import { authV2Tokens } from "@/auth-v2/theme/authV2Theme";
 import { useT } from "@/i18n";
 import { spacing, typography, useTheme } from "@/theme";
 import { useIsOnline } from "@/state/network";
-import { Banner, LocaleUiText } from "@/components/ui";
+import { LocaleUiText } from "@/components/ui";
 import { PhoneAuthErrorPanel } from "@/auth-v2/components/PhoneAuthErrorPanel";
 import { formatDisplayPhone } from "@/utils/phone";
 import {
@@ -36,6 +41,8 @@ interface OtpVerificationScreenProps {
   error?: string | null;
   errorTitle?: string | null;
   errorDiagnostic?: string | null;
+  /** AppError.code from last verify/send failure — recovery chrome only. */
+  errorCode?: string | null;
   onCopyErrorDiagnostics?: () => void;
   /** Post-auth identity retry without requesting a new SMS. */
   onRetryAccountSetup?: () => void;
@@ -56,6 +63,7 @@ export function OtpVerificationScreen({
   error = null,
   errorTitle = null,
   errorDiagnostic = null,
+  errorCode = null,
   onCopyErrorDiagnostics,
   onRetryAccountSetup,
   lockUntil = null,
@@ -71,11 +79,35 @@ export function OtpVerificationScreen({
   const verifyInFlightRef = useRef(false);
 
   const displayPhone = formatDisplayPhone(phoneE164);
-  const complete = code.length === MOBILE_OTP_LENGTH;
 
   const { remainingSeconds: resendRemaining, canResend } =
     useAuthoritativeResendCountdown(resendAvailableAt);
   const lockRemaining = useAuthoritativeCountdown(lockUntil);
+  const failureKind = classifyOtpVerifyFailure(errorCode);
+  const ui = resolveOtpVerifyUi({
+    digits: code,
+    length: MOBILE_OTP_LENGTH,
+    online,
+    loading,
+    lockRemaining,
+    lastSubmitted: lastAutoRef.current,
+    failureKind,
+  });
+
+  const invokeVerify = (nextCode: string) => {
+    if (verifyInFlightRef.current || loading) return;
+    lastAutoRef.current = nextCode;
+    verifyInFlightRef.current = true;
+    onboardingMark("otpComplete");
+    onboardingMark("verifyStarted");
+    try {
+      onVerify(nextCode);
+    } finally {
+      setTimeout(() => {
+        verifyInFlightRef.current = false;
+      }, 0);
+    }
+  };
 
   useEffect(() => {
     if (lockRemaining > 0) return;
@@ -85,23 +117,15 @@ export function OtpVerificationScreen({
         length: MOBILE_OTP_LENGTH,
         lastSubmitted: lastAutoRef.current,
         inFlight: loading || verifyInFlightRef.current,
-        disabled: false,
+        disabled: ui.autoVerifyDisabled,
       })
     ) {
       return;
     }
-    lastAutoRef.current = code;
-    verifyInFlightRef.current = true;
-    onboardingMark("otpComplete");
-    onboardingMark("verifyStarted");
-    try {
-      onVerify(code);
-    } finally {
-      setTimeout(() => {
-        verifyInFlightRef.current = false;
-      }, 0);
-    }
-  }, [code, loading, lockRemaining, onVerify]);
+    invokeVerify(code);
+    // invokeVerify is stable enough for this screen; lastAutoRef guards duplicates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- lastAutoRef + shouldAutoVerifyOtp are the guards
+  }, [code, loading, lockRemaining, onVerify, online, ui.autoVerifyDisabled]);
 
   const setDigits = (text: string) => {
     const next = text.replace(/\D/g, "").slice(0, MOBILE_OTP_LENGTH);
@@ -109,6 +133,14 @@ export function OtpVerificationScreen({
     onDigitsChange?.(next);
     if (next.length < MOBILE_OTP_LENGTH) lastAutoRef.current = null;
   };
+
+  const resendBlocked = resending || loading || (resendAvailableAt != null && !canResend);
+  const showFooter =
+    !online ||
+    Boolean(error || errorDiagnostic) ||
+    Boolean(onRetryAccountSetup) ||
+    lockRemaining > 0 ||
+    ui.showManualVerifyCta;
 
   return (
     <AuthShell
@@ -118,58 +150,59 @@ export function OtpVerificationScreen({
       headerTop={null}
       footerPlacement="actionZone"
       footer={
-        <>
-          {!online ? <Banner tone="warning" message={t("common.offlineHint")} /> : null}
-          <PhoneAuthErrorPanel
-            title={errorTitle}
-            message={error}
-            diagnostic={errorDiagnostic}
-            onCopyDiagnostics={onCopyErrorDiagnostics}
-          />
-          {onRetryAccountSetup ? (
-            <Pressable
-              onPress={onRetryAccountSetup}
-              disabled={loading}
-              accessibilityRole="button"
-              accessibilityLabel="Try account setup again"
-              style={styles.retryWrap}
-            >
-              <Text style={[styles.retryLink, { color: tokens.link }, loading && { opacity: 0.5 }]}>
-                Try again (no new SMS)
-              </Text>
-            </Pressable>
-          ) : null}
-          {lockRemaining > 0 ? (
-            <OnboardingInlineMessage
-              tone="danger"
-              message={`Try again in ${formatOtpCountdownMmSs(lockRemaining)}`}
+        showFooter ? (
+          <>
+            {!online ? (
+              <OnboardingInlineMessage
+                tone="info"
+                message={OTP_OFFLINE_VERIFY_MESSAGE}
+                testID="auth-v2-otp-offline"
+              />
+            ) : null}
+            <PhoneAuthErrorPanel
+              title={errorTitle}
+              message={error}
+              diagnostic={errorDiagnostic}
+              onCopyDiagnostics={onCopyErrorDiagnostics}
             />
-          ) : null}
-          <AuthV2PrimaryButton
-            label={t("authV2.otp.verify")}
-            loading={loading}
-            loadingLabel={t("authV2.otp.verifying")}
-            disabled={!complete || !online || loading || lockRemaining > 0}
-            onPress={() => {
-              if (verifyInFlightRef.current || loading) return;
-              verifyInFlightRef.current = true;
-              onboardingMark("verifyStarted");
-              try {
-                onVerify(code);
-              } finally {
-                setTimeout(() => {
-                  verifyInFlightRef.current = false;
-                }, 0);
-              }
-            }}
-            testID="auth-v2-otp-verify"
-            activeBg={tokens.ctaActiveBg}
-            activeText={tokens.ctaActiveText}
-            mutedBg={tokens.ctaMutedBg}
-            mutedText={tokens.ctaMutedText}
-            mutedBorder={tokens.ctaMutedBorder}
-          />
-        </>
+            {onRetryAccountSetup ? (
+              <Pressable
+                onPress={onRetryAccountSetup}
+                disabled={loading}
+                accessibilityRole="button"
+                accessibilityLabel="Try account setup again"
+                style={styles.retryWrap}
+              >
+                <Text
+                  style={[styles.retryLink, { color: tokens.secondaryAction }, loading && { opacity: 0.5 }]}
+                >
+                  Try again (no new SMS)
+                </Text>
+              </Pressable>
+            ) : null}
+            {lockRemaining > 0 ? (
+              <OnboardingInlineMessage
+                tone="danger"
+                message={`Try again in ${formatOtpCountdownMmSs(lockRemaining)}`}
+              />
+            ) : null}
+            {ui.showManualVerifyCta ? (
+              <AuthV2PrimaryButton
+                label={t("common.retry")}
+                loading={loading}
+                loadingLabel={t("authV2.otp.verifying")}
+                disabled={!online || loading || lockRemaining > 0}
+                onPress={() => invokeVerify(code)}
+                testID="auth-v2-otp-verify"
+                activeBg={tokens.ctaActiveBg}
+                activeText={tokens.ctaActiveText}
+                mutedBg={tokens.ctaMutedBg}
+                mutedText={tokens.ctaMutedText}
+                mutedBorder={tokens.ctaMutedBorder}
+              />
+            ) : null}
+          </>
+        ) : undefined
       }
     >
       <OnboardingOtpCells
@@ -179,12 +212,17 @@ export function OtpVerificationScreen({
         disabled={loading || lockRemaining > 0}
         error={Boolean(error)}
         testID="auth-v2-otp-input"
-        accessibilityLabel="One-time password"
+        accessibilityLabel={
+          loading ? "One-time password. Verifying your code." : "One-time password"
+        }
       />
 
       <View style={styles.resendRow}>
         {resendRemaining > 0 ? (
-          <LocaleUiText style={[styles.resendHint, { color: tokens.muted }]}>
+          <LocaleUiText
+            style={[styles.resendHint, { color: tokens.secondaryActionMuted }]}
+            accessibilityLabel={`Resend OTP in ${formatOtpCountdownMmSs(resendRemaining)}`}
+          >
             {`Resend OTP in ${formatOtpCountdownMmSs(resendRemaining)}`}
           </LocaleUiText>
         ) : (
@@ -195,19 +233,33 @@ export function OtpVerificationScreen({
               setDigits("");
               onResend();
             }}
-            disabled={resending || loading || (resendAvailableAt != null && !canResend)}
+            disabled={resendBlocked}
             accessibilityRole="button"
             accessibilityLabel="Resend OTP"
+            accessibilityState={{ disabled: resendBlocked }}
+            hitSlop={8}
+            style={styles.secondaryHit}
           >
-            <Text style={[styles.resendLink, { color: tokens.link }, resending && { opacity: 0.5 }]}>
+            <Text
+              style={[
+                styles.resendLink,
+                { color: resendBlocked ? tokens.secondaryActionMuted : tokens.secondaryAction },
+              ]}
+            >
               {resending ? t("otp.resending") : "Resend OTP"}
             </Text>
           </Pressable>
         )}
       </View>
 
-      <Pressable onPress={onChangeNumber} style={styles.changeNumber} accessibilityRole="button">
-        <LocaleUiText style={[styles.changeNumberText, { color: tokens.link }]}>
+      <Pressable
+        onPress={onChangeNumber}
+        style={styles.changeNumber}
+        accessibilityRole="button"
+        accessibilityLabel={t("authV2.otp.changeNumber")}
+        hitSlop={8}
+      >
+        <LocaleUiText style={[styles.changeNumberText, { color: tokens.tertiaryAction }]}>
           {t("authV2.otp.changeNumber")}
         </LocaleUiText>
       </Pressable>
@@ -223,12 +275,24 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     marginTop: spacing.lg,
     marginBottom: spacing.md,
-    minHeight: 28,
+    minHeight: 44,
   },
-  resendHint: { ...typography.caption },
+  secondaryHit: {
+    minHeight: 44,
+    minWidth: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: spacing.sm,
+  },
+  resendHint: { ...typography.captionStrong },
   resendLink: { ...typography.captionStrong },
-  retryWrap: { alignItems: "center", paddingVertical: spacing.xs },
+  retryWrap: { alignItems: "center", paddingVertical: spacing.xs, minHeight: 44, justifyContent: "center" },
   retryLink: { ...typography.captionStrong },
-  changeNumber: { alignItems: "center", paddingVertical: spacing.sm },
-  changeNumberText: { ...typography.captionStrong },
+  changeNumber: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: spacing.sm,
+    minHeight: 44,
+  },
+  changeNumberText: { ...typography.caption },
 });

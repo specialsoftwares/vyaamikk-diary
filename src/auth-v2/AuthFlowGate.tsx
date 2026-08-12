@@ -1349,6 +1349,7 @@ export function AuthFlowGate() {
         error={error}
         errorTitle={errorTitle}
         errorDiagnostic={errorDiagnostic}
+        errorCode={phoneAuthError?.code ?? null}
         onCopyErrorDiagnostics={() => void copyPhoneAuthDiagnostics()}
         onRetryAccountSetup={
           canRetryAccountSetupWithoutSms(phoneAuthError)

@@ -13,6 +13,10 @@ export function authV2Tokens(colors: ColorScheme, isDark: boolean) {
     heading: "#FFFFFF",
     body: isDark ? "rgba(255,255,255,0.82)" : "rgba(255,255,255,0.9)",
     muted: "rgba(255,255,255,0.62)",
+    /** Readable secondary text-action on the dark auth gradient (not primaryLight). */
+    secondaryAction: "rgba(199,210,254,0.92)",
+    tertiaryAction: "rgba(199,210,254,0.72)",
+    secondaryActionMuted: "rgba(199,210,254,0.42)",
     inputBg: isDark ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.16)",
     inputBorder: isDark ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.22)",
     inputText: "#FFFFFF",
