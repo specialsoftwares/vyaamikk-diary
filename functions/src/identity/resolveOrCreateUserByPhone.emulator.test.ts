@@ -12,10 +12,12 @@ import { HttpsError } from "firebase-functions/v2/https";
 
 import {
   applyDeferredMobileQuarantineRelease,
-  assertMobileNotQuarantined,
+  cancelStaleMobileQuarantine,
   MOBILE_QUARANTINES,
+  readMobileQuarantineState,
   sha256MobileHash,
 } from "./mobileQuarantine";
+import { decideResolverMobileEligibility } from "./mobileAssignmentEligibility";
 import { resolveAuthoritativePhoneAuthIdentity } from "./phoneAuthClaimBinding";
 
 const PHONE = "+919800011122";
@@ -90,7 +92,8 @@ async function main() {
   await db.runTransaction(async (tx) => {
     const phoneSnap = await tx.get(phoneRef);
     assert.equal(phoneSnap.exists, false);
-    const quarantine = await assertMobileNotQuarantined(tx, mobileHash, NOW);
+    const quarantine = await readMobileQuarantineState(tx, mobileHash, NOW);
+    assert.equal(quarantine.blocking, false);
     assert.equal(quarantine.releaseDue, true);
     const retiredSnap = await tx.get(retiredRef);
     const existingUser = await tx.get(userRef);
@@ -128,7 +131,8 @@ async function main() {
   await db.runTransaction(async (tx) => {
     const phoneSnap = await tx.get(phoneRef);
     assert.equal(phoneSnap.exists, true);
-    const quarantine = await assertMobileNotQuarantined(tx, mobileHash, NOW);
+    const quarantine = await readMobileQuarantineState(tx, mobileHash, NOW);
+    assert.equal(quarantine.blocking, false);
     assert.equal(quarantine.releaseDue, true);
     const existingSnap = await tx.get(userRef);
     assert.equal(existingSnap.exists, true);
@@ -138,6 +142,60 @@ async function main() {
 
   const qReturning = await qRef.get();
   assert.equal((qReturning.data() as { status: string }).status, "released");
+
+  // ——— Active leftover quarantine + unassigned phone → signup, cancel stale row ———
+  const STALE_PHONE = "+919800011144";
+  const STALE_UID = "emulator-uid-stale-signup";
+  const staleHash = sha256MobileHash(STALE_PHONE);
+  const staleQRef = db.collection(MOBILE_QUARANTINES).doc(staleHash);
+  const stalePhoneRef = db.collection("phoneIndex").doc(STALE_PHONE);
+  const staleUserRef = db.collection("users").doc(STALE_UID);
+  await stalePhoneRef.delete().catch(() => undefined);
+  await staleUserRef.delete().catch(() => undefined);
+  await staleQRef.set({
+    mobileHash: staleHash,
+    formerUid: "old-uid",
+    status: "active",
+    reason: "mobile_change",
+    createdAt: NOW,
+    startedAt: NOW,
+    releaseAt: NOW + 21 * 24 * 60 * 60 * 1000,
+  });
+
+  await db.runTransaction(async (tx) => {
+    const phoneSnap = await tx.get(stalePhoneRef);
+    const qState = await readMobileQuarantineState(tx, staleHash, NOW);
+    const decision = decideResolverMobileEligibility({
+      phoneIndexUid: phoneSnap.exists
+        ? String((phoneSnap.data() as { uid?: string }).uid ?? "")
+        : null,
+      authUid: STALE_UID,
+      quarantineBlocking: qState.blocking,
+    });
+    assert.equal(decision.kind, "signup");
+    if (decision.kind === "signup") assert.equal(decision.releaseStaleQuarantine, true);
+    await tx.get(staleUserRef);
+    if (decision.kind === "signup" && decision.releaseStaleQuarantine) {
+      cancelStaleMobileQuarantine(tx, {
+        mobileHash: staleHash,
+        reboundToUid: STALE_UID,
+        now: NOW,
+      });
+    }
+    tx.set(staleUserRef, {
+      uid: STALE_UID,
+      phoneE164: STALE_PHONE,
+      status: "active",
+      createdAt: NOW,
+      updatedAt: NOW,
+    });
+    tx.set(stalePhoneRef, { uid: STALE_UID, createdAt: NOW });
+  });
+
+  const staleQAfter = await staleQRef.get();
+  const stalePhoneAfter = await stalePhoneRef.get();
+  assert.equal((staleQAfter.data() as { status: string }).status, "cancelled");
+  assert.equal((stalePhoneAfter.data() as { uid: string }).uid, STALE_UID);
 
   // ——— Phone-claim mismatch must not open / mutate identity docs ———
   const attackPhoneRef = db.collection("phoneIndex").doc(PHONE_B);
@@ -186,10 +244,11 @@ async function main() {
         oldReadAfterWriteFails: true,
         firstTimeDeferredReleaseSucceeds: true,
         returningDeferredReleaseSucceeds: true,
+        unassignedActiveQuarantineSignupCancelsStale: true,
         phoneClaimMismatchBlocksMutation: true,
       },
       rootCause:
-        "assertMobileNotQuarantined wrote quarantine release before later tx.get → Firestore read-after-write → functions/internal",
+        "unassigned leftover mobile quarantine must not throw failed-precondition; cancel in write phase after full read",
     })
   );
 

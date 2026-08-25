@@ -4,9 +4,11 @@ import type { Transaction } from "firebase-admin/firestore";
 import { createHash } from "node:crypto";
 
 import { getAdminDb } from "../admin";
+import { decideResolverMobileEligibility } from "./mobileAssignmentEligibility";
 import {
-  assertMobileNotQuarantined,
   applyDeferredMobileQuarantineRelease,
+  cancelStaleMobileQuarantine,
+  readMobileQuarantineState,
   sha256MobileHash,
 } from "./mobileQuarantine";
 import {
@@ -103,6 +105,23 @@ function claimUeid(tx: Transaction, ueid: string, authUid: string, now: number):
   });
 }
 
+function applyResolverQuarantineWrites(
+  tx: Transaction,
+  mobileHash: string,
+  now: number,
+  args: { releaseDue: boolean; cancelStale: boolean; reboundToUid: string }
+): void {
+  if (args.cancelStale) {
+    cancelStaleMobileQuarantine(tx, {
+      mobileHash,
+      reboundToUid: args.reboundToUid,
+      now,
+    });
+    return;
+  }
+  applyDeferredMobileQuarantineRelease(tx, mobileHash, now, args.releaseDue);
+}
+
 function rethrowAsHttps(err: unknown, attemptId: string, authUid: string): never {
   if (err instanceof HttpsError) throw err;
   const message = err instanceof Error ? err.message : String(err);
@@ -162,20 +181,36 @@ export const resolveOrCreateUserByPhone = onCall(
 
         // ——— READ PHASE (no writes) ———
         const phoneSnap = await tx.get(phoneRef);
-        const quarantine = await assertMobileNotQuarantined(tx, mobileHash, now);
+        const quarantine = await readMobileQuarantineState(tx, mobileHash, now);
 
+        let phoneIndexUid: string | null = null;
         if (phoneSnap.exists) {
           const phoneData = phoneSnap.data() as { uid?: string } | undefined;
-          const indexedUid = typeof phoneData?.uid === "string" ? phoneData.uid : "";
+          const indexedUid = typeof phoneData?.uid === "string" ? phoneData.uid.trim() : "";
           if (!indexedUid) {
             throw new HttpsError("failed-precondition", "Identity registry is inconsistent.");
           }
-          if (indexedUid !== authUid) {
-            throw new HttpsError(
-              "failed-precondition",
-              "This mobile number is linked to another account."
-            );
-          }
+          phoneIndexUid = indexedUid;
+        }
+
+        const decision = decideResolverMobileEligibility({
+          phoneIndexUid,
+          authUid,
+          quarantineBlocking: quarantine.blocking,
+        });
+        if (decision.kind === "conflict") {
+          throw new HttpsError(
+            "failed-precondition",
+            "This mobile number is linked to another account."
+          );
+        }
+
+        const cancelStale =
+          decision.kind === "login"
+            ? quarantine.blocking
+            : decision.releaseStaleQuarantine;
+
+        if (decision.kind === "login") {
           const existingSnap = await tx.get(userRef);
           if (!existingSnap.exists) {
             throw new HttpsError("failed-precondition", "Identity registry is inconsistent.");
@@ -183,7 +218,11 @@ export const resolveOrCreateUserByPhone = onCall(
           const profile = existingSnap.data() as UserProfileDoc;
 
           // ——— WRITE PHASE ———
-          applyDeferredMobileQuarantineRelease(tx, mobileHash, now, quarantine.releaseDue);
+          applyResolverQuarantineWrites(tx, mobileHash, now, {
+            releaseDue: quarantine.releaseDue,
+            cancelStale,
+            reboundToUid: authUid,
+          });
 
           if (deletionBlocked(profile)) {
             const scheduled =
@@ -205,7 +244,10 @@ export const resolveOrCreateUserByPhone = onCall(
               policyTextVersion: "2026-06" as const,
               profile: minimalSafeProfile(profile),
               isNewUser: false as const,
-              _meta: { branch: "returning_deletion_pending" as const },
+              _meta: {
+                branch: "returning_deletion_pending" as const,
+                staleQuarantineCancelled: cancelStale,
+              },
             };
           }
           if (!isActive(profile) && !isPendingDeletion(profile)) {
@@ -224,7 +266,10 @@ export const resolveOrCreateUserByPhone = onCall(
           return {
             profile: loggedIn,
             isNewUser: false as const,
-            _meta: { branch: "returning_active" as const },
+            _meta: {
+              branch: "returning_active" as const,
+              staleQuarantineCancelled: cancelStale,
+            },
           };
         }
 
@@ -250,7 +295,11 @@ export const resolveOrCreateUserByPhone = onCall(
               );
             }
             // Active user missing phoneIndex — repair index (reads done).
-            applyDeferredMobileQuarantineRelease(tx, mobileHash, now, quarantine.releaseDue);
+            applyResolverQuarantineWrites(tx, mobileHash, now, {
+              releaseDue: quarantine.releaseDue,
+              cancelStale,
+              reboundToUid: authUid,
+            });
             const loggedIn = applyLoginTimestamps(prior, now);
             tx.update(userRef, {
               lastLoginAt: loggedIn.lastLoginAt,
@@ -262,12 +311,19 @@ export const resolveOrCreateUserByPhone = onCall(
             return {
               profile: loggedIn,
               isNewUser: false as const,
-              _meta: { branch: "repair_phone_index" as const },
+              _meta: {
+                branch: "repair_phone_index" as const,
+                staleQuarantineCancelled: cancelStale,
+              },
             };
           }
           // Inactive / deleted user doc for this authUid — recreate under same uid.
           const freshUeid = await findAvailableUeid(tx);
-          applyDeferredMobileQuarantineRelease(tx, mobileHash, now, quarantine.releaseDue);
+          applyResolverQuarantineWrites(tx, mobileHash, now, {
+            releaseDue: quarantine.releaseDue,
+            cancelStale,
+            reboundToUid: authUid,
+          });
           claimUeid(tx, freshUeid, authUid, now);
           const fresh = freshProfileShell(authUid, phone, freshUeid, now);
           tx.set(userRef, fresh);
@@ -275,12 +331,20 @@ export const resolveOrCreateUserByPhone = onCall(
           return {
             profile: fresh,
             isNewUser: true as const,
-            _meta: { branch: "recreate_inactive_user" as const, retired },
+            _meta: {
+              branch: "recreate_inactive_user" as const,
+              retired,
+              staleQuarantineCancelled: cancelStale,
+            },
           };
         }
 
         const ueid = await findAvailableUeid(tx);
-        applyDeferredMobileQuarantineRelease(tx, mobileHash, now, quarantine.releaseDue);
+        applyResolverQuarantineWrites(tx, mobileHash, now, {
+          releaseDue: quarantine.releaseDue,
+          cancelStale,
+          reboundToUid: authUid,
+        });
         claimUeid(tx, ueid, authUid, now);
         const profile = freshProfileShell(authUid, phone, ueid, now);
         tx.set(userRef, profile);
@@ -288,17 +352,26 @@ export const resolveOrCreateUserByPhone = onCall(
         return {
           profile,
           isNewUser: true as const,
-          _meta: { branch: "first_time_create" as const, retired },
+          _meta: {
+            branch: "first_time_create" as const,
+            retired,
+            staleQuarantineCancelled: cancelStale,
+          },
         };
       });
 
-      const meta = (result as { _meta?: { branch?: string; retired?: boolean } })._meta;
+      const meta = (
+        result as {
+          _meta?: { branch?: string; retired?: boolean; staleQuarantineCancelled?: boolean };
+        }
+      )._meta;
       logger.info("resolveOrCreateUserByPhone ok", {
         attemptId,
         uidSuffix: uidSuffix(authUid),
         branch: meta?.branch ?? "unknown",
         isNewUser: Boolean((result as { isNewUser?: boolean }).isNewUser),
         retiredPhone: Boolean(meta?.retired),
+        staleQuarantineCancelled: Boolean(meta?.staleQuarantineCancelled),
       });
 
       // Strip internal meta before returning to clients.
@@ -308,6 +381,14 @@ export const resolveOrCreateUserByPhone = onCall(
       }
       return result;
     } catch (err) {
+      if (err instanceof HttpsError) {
+        logger.warn("resolveOrCreateUserByPhone rejected", {
+          attemptId,
+          uidSuffix: uidSuffix(authUid),
+          mobileHashPrefix: mobileHash.slice(0, 8),
+          httpsCode: err.code,
+        });
+      }
       rethrowAsHttps(err, attemptId, authUid);
     }
   }

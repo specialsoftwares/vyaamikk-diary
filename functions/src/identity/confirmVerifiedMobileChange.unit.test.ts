@@ -22,6 +22,12 @@ assert.equal(src.includes("startMobileQuarantine"), true);
 assert.equal(src.includes("shouldQuarantineReleasedMobile"), true);
 assert.equal(src.includes("mobileReviewChangeCount"), true);
 assert.equal(src.includes("phoneIndex"), true);
+assert.equal(src.includes("shouldCancelQuarantineOnUnassignedBind"), true);
+assert.equal(
+  src.includes("throwMobileQuarantined"),
+  false,
+  "unassigned leftover quarantine must not fail contact-change bind"
+);
 // Must not create users / allocate UEID
 assert.equal(src.includes("generateUEID"), false);
 assert.equal(src.includes("resolveOrCreateUserByPhone"), false);

@@ -14,6 +14,7 @@ import {
   normalizePhoneE164,
   type UserProfileDoc,
 } from "./shared";
+import { decideResolverMobileEligibility } from "./mobileAssignmentEligibility";
 import {
   assertMobileNotQuarantinedPure,
   createEmptyQuarantineState,
@@ -69,6 +70,12 @@ function testNormalizePhoneRejectsNonString() {
   assert.equal(normalizePhoneE164("9876543210"), "+919876543210");
   assert.equal(normalizePhoneE164("+919876543210"), "+919876543210");
   assert.equal(normalizePhoneE164("+91 98765 43210"), "+919876543210");
+  assert.equal(normalizePhoneE164("919876543210"), "+919876543210");
+  assert.equal(
+    normalizePhoneE164("9876543210"),
+    normalizePhoneE164("+91 98765 43210"),
+    "equivalent Indian representations must collapse to one identity key"
+  );
 }
 
 function testExpiredQuarantineReleaseIsSeparateWriteStep() {
@@ -212,6 +219,47 @@ function testUidSuffixLoggingContract() {
   assert.equal(mobileHashPrefix.includes("9876"), false);
 }
 
+function testUnassignedActiveQuarantineIsSignupNotFailedPrecondition() {
+  const eligibility = decideResolverMobileEligibility({
+    phoneIndexUid: null,
+    authUid: UID,
+    quarantineBlocking: true,
+  });
+  assert.equal(eligibility.kind, "signup");
+  if (eligibility.kind === "signup") {
+    assert.equal(eligibility.releaseStaleQuarantine, true);
+  }
+  assert.equal(
+    classifyIdentityBranch({
+      phoneIndexUid: null,
+      authUid: UID,
+      user: null,
+    }),
+    "first_time_create"
+  );
+}
+
+function testConcurrentSignupSerializesOnPhoneIndexOwner() {
+  const first = decideResolverMobileEligibility({
+    phoneIndexUid: null,
+    authUid: "uid-first",
+    quarantineBlocking: true,
+  });
+  assert.equal(first.kind, "signup");
+  const loser = decideResolverMobileEligibility({
+    phoneIndexUid: "uid-first",
+    authUid: "uid-second",
+    quarantineBlocking: true,
+  });
+  assert.equal(loser.kind, "conflict");
+  const retry = decideResolverMobileEligibility({
+    phoneIndexUid: "uid-first",
+    authUid: "uid-first",
+    quarantineBlocking: false,
+  });
+  assert.equal(retry.kind, "login");
+}
+
 testNormalizePhoneRejectsNonString();
 testExpiredQuarantineReleaseIsSeparateWriteStep();
 testReadAfterWriteOrderingIsIllegal();
@@ -220,5 +268,7 @@ testFirstTimeCreateBranch();
 testReturningConflictAndDeletion();
 testRecreateInactiveIsNewUserPath();
 testUidSuffixLoggingContract();
+testUnassignedActiveQuarantineIsSignupNotFailedPrecondition();
+testConcurrentSignupSerializesOnPhoneIndexOwner();
 
 console.log("resolveOrCreateUserByPhone.unit.test.ts: ok");

@@ -149,26 +149,50 @@ export type MobileQuarantineCheck = {
   releaseDue: boolean;
 };
 
+export type MobileQuarantineRead = {
+  blocking: boolean;
+  releaseDue: boolean;
+};
+
 /**
- * READ-ONLY quarantine gate for use inside Firestore transactions.
+ * READ-ONLY quarantine snapshot for identity transactions.
+ * Does not throw: callers classify eligibility from phoneIndex, then write.
+ */
+export async function readMobileQuarantineState(
+  tx: Transaction,
+  mobileHash: string,
+  now = Date.now()
+): Promise<MobileQuarantineRead> {
+  const db = getAdminDb();
+  const snap = await tx.get(db.collection(MOBILE_QUARANTINES).doc(mobileHash));
+  if (!snap.exists) return { blocking: false, releaseDue: false };
+  const doc = snap.data() as MobileQuarantineDoc;
+  if (isQuarantineBlocking(doc, now)) {
+    return { blocking: true, releaseDue: false };
+  }
+  if (doc.status === "active" && typeof doc.releaseAt === "number" && doc.releaseAt <= now) {
+    return { blocking: false, releaseDue: true };
+  }
+  return { blocking: false, releaseDue: false };
+}
+
+/**
+ * READ-ONLY quarantine gate for recovery / explicit reservation callers.
  * Must not write: callers apply deferred release after the full read phase.
+ *
+ * Do not use this as a signup uniqueness gate. Unassigned numbers are eligible
+ * even when a leftover quarantine row exists — see mobileAssignmentEligibility.
  */
 export async function assertMobileNotQuarantined(
   tx: Transaction,
   mobileHash: string,
   now = Date.now()
 ): Promise<MobileQuarantineCheck> {
-  const db = getAdminDb();
-  const snap = await tx.get(db.collection(MOBILE_QUARANTINES).doc(mobileHash));
-  if (!snap.exists) return { releaseDue: false };
-  const doc = snap.data() as MobileQuarantineDoc;
-  if (isQuarantineBlocking(doc, now)) {
+  const state = await readMobileQuarantineState(tx, mobileHash, now);
+  if (state.blocking) {
     throwMobileQuarantined();
   }
-  if (doc.status === "active" && typeof doc.releaseAt === "number" && doc.releaseAt <= now) {
-    return { releaseDue: true };
-  }
-  return { releaseDue: false };
+  return { releaseDue: state.releaseDue };
 }
 
 /** Write-phase companion for {@link assertMobileNotQuarantined}. */
@@ -183,6 +207,22 @@ export function applyDeferredMobileQuarantineRelease(
   tx.update(db.collection(MOBILE_QUARANTINES).doc(mobileHash), {
     status: "released",
     releasedAt: now,
+  });
+}
+
+/**
+ * Cancel leftover quarantine when an unassigned number is bound to a UEID.
+ * Read-phase must have observed the doc; write-phase only.
+ */
+export function cancelStaleMobileQuarantine(
+  tx: Transaction,
+  input: { mobileHash: string; reboundToUid: string; now: number }
+): void {
+  tx.update(getAdminDb().collection(MOBILE_QUARANTINES).doc(input.mobileHash), {
+    status: "cancelled",
+    cancelledAt: input.now,
+    reboundAt: input.now,
+    reboundToUid: input.reboundToUid,
   });
 }
 

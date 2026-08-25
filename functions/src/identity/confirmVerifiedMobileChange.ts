@@ -15,13 +15,13 @@ import type { Transaction } from "firebase-admin/firestore";
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 
 import { getAdminDb } from "../admin";
+import { shouldCancelQuarantineOnUnassignedBind } from "./mobileAssignmentEligibility";
 import {
   applyDeferredMobileQuarantineRelease,
   isQuarantineBlocking,
   MOBILE_QUARANTINES,
   sha256MobileHash,
   startMobileQuarantine,
-  throwMobileQuarantined,
   type MobileQuarantineDoc,
 } from "./mobileQuarantine";
 import {
@@ -41,19 +41,31 @@ function phonesMatch(a: string, b: string): boolean {
   return normalizePhoneE164(a) === normalizePhoneE164(b);
 }
 
-async function assertMobileAvailableForUid(
+/**
+ * Quarantine is not UEID ownership. Call after phoneIndex uniqueness:
+ * assigned-to-other is already refused. Remaining blocking rows are cancelled
+ * on bind (former-owner reclaim or unassigned leftover).
+ */
+async function readMobileQuarantineForUnassignedBind(
   tx: Transaction,
-  args: { uid: string; mobileHash: string; now: number }
+  args: {
+    uid: string;
+    mobileHash: string;
+    now: number;
+    phoneIndexOwnerUid: string | null | undefined;
+  }
 ): Promise<{ releaseDue: boolean; reclaimQuarantine: boolean }> {
   const db = getAdminDb();
   const snap = await tx.get(db.collection(MOBILE_QUARANTINES).doc(args.mobileHash));
   if (!snap.exists) return { releaseDue: false, reclaimQuarantine: false };
   const doc = snap.data() as MobileQuarantineDoc;
   if (isQuarantineBlocking(doc, args.now)) {
-    if (doc.formerUid === args.uid) {
-      return { releaseDue: false, reclaimQuarantine: true };
-    }
-    throwMobileQuarantined();
+    const reclaim = shouldCancelQuarantineOnUnassignedBind({
+      phoneIndexOwnerUid: args.phoneIndexOwnerUid,
+      currentUid: args.uid,
+      quarantineBlocking: true,
+    });
+    return { releaseDue: false, reclaimQuarantine: reclaim };
   }
   if (doc.status === "active" && typeof doc.releaseAt === "number" && doc.releaseAt <= args.now) {
     return { releaseDue: true, reclaimQuarantine: false };
@@ -120,12 +132,6 @@ export async function preflightVerifiedMobileContactChangeTx(
   if (!reviewGate.ok) throwReviewMobileEditLimit();
 
   const newerHash = sha256MobileHash(newer);
-  await assertMobileAvailableForUid(tx, {
-    uid: args.uid,
-    mobileHash: newerHash,
-    now: args.now,
-  });
-
   const phoneIndexRef = db.collection(PHONE_INDEX).doc(newer);
   const phoneSnap = await tx.get(phoneIndexRef);
   const owner = phoneSnap.exists
@@ -137,6 +143,12 @@ export async function preflightVerifiedMobileContactChangeTx(
       "This mobile number cannot be used for this account. Please use another number or contact support."
     );
   }
+  await readMobileQuarantineForUnassignedBind(tx, {
+    uid: args.uid,
+    mobileHash: newerHash,
+    now: args.now,
+    phoneIndexOwnerUid: owner,
+  });
 
   // Soft reservation marker on the user doc (not an authoritative phone).
   tx.update(userRef, {
@@ -230,12 +242,6 @@ export async function confirmVerifiedMobileContactChangeTx(
   if (!reviewGate.ok) throwReviewMobileEditLimit();
 
   const newerHash = sha256MobileHash(newer);
-  const quarantine = await assertMobileAvailableForUid(tx, {
-    uid: args.uid,
-    mobileHash: newerHash,
-    now: args.now,
-  });
-
   const phoneIndexRef = db.collection(PHONE_INDEX).doc(newer);
   const phoneSnap = await tx.get(phoneIndexRef);
   const owner = phoneSnap.exists
@@ -247,6 +253,12 @@ export async function confirmVerifiedMobileContactChangeTx(
       "This mobile number cannot be used for this account. Please use another number or contact support."
     );
   }
+  const quarantine = await readMobileQuarantineForUnassignedBind(tx, {
+    uid: args.uid,
+    mobileHash: newerHash,
+    now: args.now,
+    phoneIndexOwnerUid: owner,
+  });
 
   applyDeferredMobileQuarantineRelease(tx, newerHash, args.now, quarantine.releaseDue);
   if (quarantine.reclaimQuarantine) {

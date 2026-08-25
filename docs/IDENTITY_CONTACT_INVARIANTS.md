@@ -41,3 +41,13 @@ Precheck available → OTP verify → final server transactional check → bind 
 Review contact edit must never create another Vyaamikk identity.
 
 During incomplete onboarding, releasing a replaced mobile does not start the 21-day recovery quarantine. After profile completion, that recovery reservation may apply; it must not masquerade as permanent UEID ownership. The former owner may reclaim a quarantined number.
+
+## Resolver vs leftover quarantine
+
+`resolveOrCreateUserByPhone` classifies by `phoneIndex` (UEID assignment), not by `mobileQuarantines`.
+
+- Assigned to the authenticated caller → login. Do not reject because a quarantine marker exists.
+- Assigned to another identity → privacy-safe conflict. Do not create a second UEID.
+- Unassigned → eligible signup. Cancel leftover quarantine in the same transaction.
+
+Entered, OTP-verified, replaced during Review, or left in an onboarding/contact-change quarantine row is not assignment. Quarantine remains a recovery marker; it must not block first signup of an unassigned number.
