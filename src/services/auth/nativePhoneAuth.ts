@@ -609,7 +609,6 @@ export async function confirmNativePhoneOtp(
     });
     if (e instanceof AppError) throw e;
     throw phoneAuthFailureToAppError(e, "confirm", {
-      phoneE164Sent: row.phoneE164,
       androidActivity: probeAndroidAuthActivityState(),
       attemptId: row.attemptId,
     });

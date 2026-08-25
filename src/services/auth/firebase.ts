@@ -362,10 +362,19 @@ export const firebaseAuthService: AuthService = {
       phase: "FIREBASE_SIGN_IN_SUCCESS",
       firebaseUserPresent: true,
     });
+    try {
+      const { authPerfMark } = await import("./authFlowPerf");
+      authPerfMark("V3_firebase_auth_ok");
+    } catch {
+      // ignore
+    }
     const phone = normalizePhoneE164(challenge.phoneE164);
     if (useIdentityCallables()) {
       try {
+        const { authPerfMark } = await import("./authFlowPerf");
+        authPerfMark("V5_resolver_begin");
         const result = await callResolveOrCreateUserByPhone(phone);
+        authPerfMark("V6_resolver_ok");
         // Bridge MUST succeed before AuthProvider marks signed_in / Email mounts.
         // Otherwise users/{uid} reads are denied (request.auth null) and surface
         // as "Missing or insufficient permissions."

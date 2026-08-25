@@ -6,6 +6,10 @@ import { legal } from "@/config/legal";
 import type { LegalConsentRecord, PendingLegalConsent } from "@/domain/legalConsent";
 import type { PhoneE164, UEID, UserProfile } from "@/domain/types";
 import type { ProfilePatch } from "@/services/auth/types";
+import {
+  CONSENT_RECONCILE_SOURCE,
+  resolvePendingConsentForVerifiedProfile,
+} from "@/services/consent/pendingConsentReconcile";
 
 const PENDING_KEY = "vyd_pending_legal_consent_v1";
 
@@ -61,9 +65,20 @@ export async function clearPendingConsent(): Promise<void> {
 export async function consentPatchForProfile(
   profile: UserProfile
 ): Promise<ProfilePatch | null> {
-  const pending = await loadPendingConsent();
+  const stored = await loadPendingConsent();
+  const hasCurrentConsentVersion = (profile.legalConsents ?? []).some(
+    (c) => c.consentVersion === legal.consentVersion
+  );
+  const pending = resolvePendingConsentForVerifiedProfile({
+    pending: stored,
+    verifiedPhoneE164: profile.phoneE164,
+    hasCurrentConsentVersion,
+    rebuildRecord: buildConsentRecord({
+      sourceScreen: CONSENT_RECONCILE_SOURCE,
+      phoneE164: profile.phoneE164,
+    }),
+  });
   if (!pending) return null;
-  if (pending.phoneE164 !== profile.phoneE164) return null;
 
   const record: LegalConsentRecord = {
     ...pending.record,

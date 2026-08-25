@@ -89,11 +89,10 @@ function run() {
       { phoneE164Sent: "+918076861531", androidActivity: "unknown" }
     )
   );
-  assert.match(display, /Diagnostic: auth\/missing-client-identifier/);
-  assert.match(display, /Detail:/);
-  assert.match(display, /Phone sent: \+918076861531/);
-  assert.match(display, /Exception:/);
-  assert.ok(!/AIza|Bearer|eyJ/.test(display));
+  assert.equal(display.includes("auth/missing-client-identifier"), false);
+  assert.equal(display.includes("+918076861531"), false);
+  assert.equal(/Exception:|Diagnostic:|Android activity/i.test(display), false);
+  assert.match(display, /Could not verify this app for phone sign-in/i);
 
   const copy = formatPhoneAuthCopyDiagnostics(
     phoneAuthFailureToAppError(
@@ -108,7 +107,8 @@ function run() {
   assert.match(copy, /firebaseAuthCode=auth\/missing-client-identifier/);
   assert.match(copy, /exceptionName=FirebaseAuthError/);
   assert.match(copy, /redactedMessage=/);
-  assert.match(copy, /phoneE164Sent=\+918076861531/);
+  assert.match(copy, /phoneSuffix=1531/);
+  assert.equal(copy.includes("+918076861531"), false);
   assert.ok(!/AIza|Bearer|eyJ/.test(copy));
 
   // Unknown codes preserve original string, not invalid_phone.

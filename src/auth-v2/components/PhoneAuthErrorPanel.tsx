@@ -1,22 +1,23 @@
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
+import { shouldShowAuthDiagnosticsInUi } from "@/services/auth/authDiagnosticsGate";
 import { Banner } from "@/components/ui";
 import { spacing, typography } from "@/theme";
 
 interface PhoneAuthErrorPanelProps {
   /** Phase-specific title (send / verify / post-auth). */
   title?: string | null;
-  /** Full failure text (friendly + optional detail). */
+  /** Human-readable failure text only. */
   message?: string | null;
-  /** Compact diagnostic code shown during physical acceptance testing. */
+  /** Compact diagnostic — shown only when internal diagnostics are enabled. */
   diagnostic?: string | null;
   onCopyDiagnostics?: () => void;
 }
 
 /**
- * Sticky auth failure panel. Parent must not clear this until a successful
- * recovery action or a newer failure replaces it.
+ * Transient Phone Auth failure panel. Parent must scope this to the Phone /
+ * Phone OTP surfaces — never reuse the same payload on Email.
  */
 export function PhoneAuthErrorPanel({
   title,
@@ -24,15 +25,20 @@ export function PhoneAuthErrorPanel({
   diagnostic,
   onCopyDiagnostics,
 }: PhoneAuthErrorPanelProps) {
-  if (!message && !diagnostic) return null;
+  const showDiag = shouldShowAuthDiagnosticsInUi();
+  const publicMessage = message?.trim() || null;
+  if (!publicMessage && !(showDiag && diagnostic)) return null;
   const bannerTitle = title?.trim() || "Something went wrong";
-  const bannerMessage = [message?.trim(), diagnostic ? `Diagnostic: ${diagnostic}` : null]
+  const bannerMessage = [
+    publicMessage,
+    showDiag && diagnostic ? `Diagnostic: ${diagnostic}` : null,
+  ]
     .filter(Boolean)
     .join("\n");
   return (
     <View style={styles.wrap} accessibilityLiveRegion="polite">
       <Banner tone="danger" title={bannerTitle} message={bannerMessage || bannerTitle} />
-      {diagnostic && onCopyDiagnostics ? (
+      {showDiag && diagnostic && onCopyDiagnostics ? (
         <Pressable
           onPress={onCopyDiagnostics}
           accessibilityRole="button"

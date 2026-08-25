@@ -4,6 +4,7 @@
  */
 
 import { AppError, type AppErrorCode } from "@/domain/errors";
+import { AUTH_USER_FACING_COPY } from "./authUserFacingCopy";
 
 /** Firebase Auth codes we explicitly surface in the beta UI. */
 export const KNOWN_PHONE_AUTH_CODES = [
@@ -124,10 +125,8 @@ export function mapPhoneAuthFailure(
   const redactedMessage = redactPhoneAuthMessage(extractRawMessage(error));
 
   let appErrorCode: AppErrorCode = phase === "send" ? "otp_send_failed" : "invalid_otp";
-  let userMessage =
-    phase === "send"
-      ? "Could not send the verification code. Check the number and try again."
-      : "Incorrect or expired verification code.";
+  let userMessage: string =
+    phase === "send" ? AUTH_USER_FACING_COPY.sendFailed : AUTH_USER_FACING_COPY.invalidOtp;
 
   switch (knownCode === "auth/unknown" ? firebaseAuthCode : knownCode) {
     case "auth/invalid-phone-number":
@@ -139,22 +138,22 @@ export function mapPhoneAuthFailure(
       appErrorCode = "invalid_otp";
       userMessage =
         phase === "confirm"
-          ? "Incorrect verification code. Please try again."
+          ? AUTH_USER_FACING_COPY.invalidOtp
           : "Could not start verification. Please request a new code.";
       break;
     case "auth/code-expired":
     case "auth/session-expired":
       appErrorCode = "otp_expired";
-      userMessage = "OTP expired. Please request a new code.";
+      userMessage = AUTH_USER_FACING_COPY.expiredOtp;
       break;
     case "auth/too-many-requests":
     case "auth/quota-exceeded":
       appErrorCode = "too_many_attempts";
-      userMessage = "Too many attempts. Please wait a few minutes and try again.";
+      userMessage = AUTH_USER_FACING_COPY.tooManyRequests;
       break;
     case "auth/network-request-failed":
       appErrorCode = "network";
-      userMessage = "No internet connection. Please check your network and try again.";
+      userMessage = AUTH_USER_FACING_COPY.network;
       break;
     case "auth/operation-not-allowed":
       appErrorCode = "auth_not_configured";
@@ -212,42 +211,14 @@ export function phoneAuthDiagnosticId(error: unknown): string | null {
 }
 
 /**
- * Full on-screen failure text for OTP send/confirm (no tokens).
- * Kept sticky in the UI until the next successful send or a new failure replaces it.
+ * Production on-screen failure text for OTP send/confirm.
+ * Never includes Firebase codes, exception class, activity, or raw phone.
  */
 export function formatPhoneAuthDisplayMessage(error: unknown): string {
   if (!(error instanceof AppError)) {
-    const mapped = mapPhoneAuthFailure(error, "send");
-    return [
-      mapped.userMessage,
-      `Diagnostic: ${mapped.firebaseAuthCode}`,
-      `Exception: ${mapped.exceptionName}`,
-      `Detail: ${mapped.redactedMessage}`,
-    ].join("\n");
+    return mapPhoneAuthFailure(error, "send").userMessage;
   }
-  const d = error.details ?? {};
-  const code =
-    typeof d.firebaseAuthCode === "string" && d.firebaseAuthCode.startsWith("auth/")
-      ? d.firebaseAuthCode
-      : null;
-  const exceptionName =
-    typeof d.exceptionName === "string" && d.exceptionName ? d.exceptionName : null;
-  const detail =
-    typeof d.redactedNativeMessage === "string" && d.redactedNativeMessage
-      ? d.redactedNativeMessage
-      : null;
-  const phone =
-    typeof d.phoneE164Sent === "string" && d.phoneE164Sent ? d.phoneE164Sent : null;
-  const activity =
-    typeof d.androidActivity === "string" && d.androidActivity ? d.androidActivity : null;
-
-  const lines = [userFacingMessageFromAppError(error)];
-  if (code) lines.push(`Diagnostic: ${code}`);
-  if (exceptionName) lines.push(`Exception: ${exceptionName}`);
-  if (detail) lines.push(`Detail: ${detail}`);
-  if (phone) lines.push(`Phone sent: ${phone}`);
-  if (activity) lines.push(`Android activity: ${activity}`);
-  return lines.join("\n");
+  return userFacingMessageFromAppError(error);
 }
 
 function userFacingMessageFromAppError(error: AppError): string {
@@ -299,7 +270,8 @@ export function formatPhoneAuthCopyDiagnostics(error: unknown): string {
       lines.push(`exceptionName=${d.exceptionName}`);
     }
     if (typeof d.phoneE164Sent === "string" && d.phoneE164Sent) {
-      lines.push(`phoneE164Sent=${d.phoneE164Sent}`);
+      const digits = d.phoneE164Sent.replace(/\D/g, "");
+      lines.push(`phoneSuffix=${digits.slice(-4) || "????"}`);
     }
     if (typeof d.androidActivity === "string" && d.androidActivity) {
       lines.push(`androidActivity=${d.androidActivity}`);

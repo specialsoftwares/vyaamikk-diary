@@ -168,6 +168,14 @@ export const env = {
   /** Optional override for PIN resolver (defaults to public postalpincode.in-style API). */
   expoPublicPincodeApiUrl: readPublicEnv(process.env.EXPO_PUBLIC_PINCODE_API_URL),
 
+  /**
+   * Explicit Internal/dev diagnostic panels. Production Play stays off unless
+   * this is bundled as "1" — Internal Testing must not leak debug UI by default.
+   */
+  get internalAuthDiagnostics() {
+    return readPublicEnv(process.env.EXPO_PUBLIC_INTERNAL_AUTH_DIAGNOSTICS, "") === "1";
+  },
+
   brand: {
     appName: readPublicEnv(process.env.EXPO_PUBLIC_APP_NAME, APP_BRAND_NAME),
     owner: readPublicEnv(process.env.EXPO_PUBLIC_BRAND_OWNER, PUBLIC_BRAND),

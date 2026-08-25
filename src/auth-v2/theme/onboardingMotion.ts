@@ -5,7 +5,7 @@
 
 export const ONBOARDING_SCREEN_MS = 250;
 /** Success settle AFTER authoritative verify — not a substitute for waiting. */
-export const ONBOARDING_SUCCESS_ACK_MS = 680;
+export const ONBOARDING_SUCCESS_ACK_MS = 420;
 export const ONBOARDING_SUCCESS_ACK_REDUCED_MS = 220;
 /** Minimum verifying overlay visibility so a fast backend does not flash. */
 export const ONBOARDING_MIN_VERIFYING_VISIBLE_MS = 300;

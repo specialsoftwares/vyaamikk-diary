@@ -1,6 +1,6 @@
 /**
- * Phase-aware auth error presentation for Phone OTP send / verify / post-auth.
- * Diagnostic codes remain visible through physical-device acceptance testing.
+ * Phase-aware auth error titles. Diagnostic codes are not shown in production UI
+ * unless EXPO_PUBLIC_INTERNAL_AUTH_DIAGNOSTICS=1.
  */
 
 import { AppError } from "@/domain/errors";

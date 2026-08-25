@@ -19,7 +19,7 @@ assert.ok(
 );
 assert.equal(screen.includes("disabled={!complete"), false, "must not leave a visible disabled Verify");
 assert.ok(screen.includes("tokens.secondaryAction"));
-assert.ok(screen.includes("tokens.tertiaryAction"));
+assert.ok(screen.includes("AuthTertiaryTextAction"));
 assert.ok(screen.includes("Resend OTP"));
 assert.ok(screen.includes("authV2.otp.changeNumber"));
 assert.ok(screen.includes("OTP_OFFLINE_VERIFY_MESSAGE"));

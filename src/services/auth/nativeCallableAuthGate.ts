@@ -197,6 +197,12 @@ export async function ensureNativeAuthReadyForCallables(): Promise<NativeCallabl
     authProjectIdPresent: Boolean(authProjectId),
     phoneNumberPresent: snap.phoneNumberPresent,
   });
+  try {
+    const { authPerfMark } = await import("./authFlowPerf");
+    authPerfMark("V4_id_token_ready");
+  } catch {
+    // Perf probe must never block identity.
+  }
 
   return snap;
 }
