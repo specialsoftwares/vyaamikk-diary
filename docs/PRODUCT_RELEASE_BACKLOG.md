@@ -164,13 +164,67 @@ Authoritative first deferred product surface after Public V1. Do not implement d
 
 # LATER RELEASES
 
-_None yet._
+### [VYD-RL-002] Android R8 minification, resource shrinking, and mapping archival
+
+**Status:** deferred  
+
+**Target release:** after Public V1 stabilization (dedicated Internal Testing RC; do not mix into the next product-fix AAB)  
+
+**Priority:** P2  
+
+**Area:** Android / EAS / Play / Crash reporting  
+
+**Decision:**
+
+Public V1 production AABs currently ship with Expo SDK 54 default `minifyEnabled=false` and `shrinkResources=false`. R8 shrinking/obfuscation is **not** active. Google Play’s “no deobfuscation file associated with this App Bundle” warning is expected in that state and is **not** proof that the binary is obfuscated.
+
+Do **not** enable R8 during Public V1 defect-batch builds. If later enabled, use `expo-build-properties` (`enableMinifyInReleaseBuilds`, optionally `enableShrinkResourcesInReleaseBuilds`, `extraProguardRules`) — never a committed generated `android/` tree.
+
+**Why deferred:**
+
+Most of the ~81 MB AAB is native `.so` (four ABIs), Hermes JS, fonts, and native debug-symbol metadata. R8 can only act on DEX/Java/Kotlin and unused resources. Phone Auth, ImagePicker Activity Result, RNFirebase, Reanimated, and Expo module discovery are reflection/JNI-sensitive. Mixing R8 with an unrelated product-fix RC would make regressions undiagnosable.
+
+**Acceptance before implementation:**
+
+- dedicated Internal Testing versionCode with R8 on, compared to the current unminified AAB;
+- physical matrix: Phone Auth / Play Integrity / OTP, Email OTP, ImagePicker, PDF/share, records CRUD, process restart;
+- archive per versionCode: AAB + source commit + `mapping.txt` (never reuse across versionCodes);
+- Play mapping/native-symbol association process (EAS does not currently auto-upload mapping; `eas submit` has no Play service account);
+- no blanket `-keep class com.google.firebase.** { *; }` unless a specific failure proves it.
+
+**Notes:**
+
+Audit completed 2026-08-26 against production AAB vc16 (`b35f9ff4-b6d4-4b9e-a3e7-a6b272371dbe`). Strategy C (enable incrementally on a dedicated RC). Related later work: Baseline/Startup Profiles, R8 Configuration Analyzer, Play deobfuscation automation.
+
+**Added:** 2026-08-26  
+
+**Last reviewed:** 2026-08-26  
 
 ---
 
 # PARKED / RESEARCH
 
-_None yet._
+### [VYD-RL-003] Android Baseline / Startup Profiles and R8 Configuration Analyzer
+
+**Status:** parked  
+
+**Target release:** unassigned  
+
+**Priority:** P3  
+
+**Area:** Android / startup  
+
+**Decision:**
+
+Current AAB already embeds a small dependency-provided `baseline.prof` / `baseline.profm` via AndroidX ProfileInstaller. An **app-specific** Baseline/Startup Profile and Google’s R8 Configuration Analyzer are research items after R8 is actually enabled. Do not install experimental Android Studio/AGP tooling into the Expo project to run the analyzer.
+
+**Why deferred:**
+
+Requires a minified release pipeline, extra Gradle/EAS work, and physical startup measurement. Not appropriate before Public V1 and not a substitute for enabling R8.
+
+**Added:** 2026-08-26  
+
+**Last reviewed:** 2026-08-26_
 
 ---
 
