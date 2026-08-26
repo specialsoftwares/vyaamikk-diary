@@ -1,10 +1,9 @@
-import React from "react";
+import React, { type ComponentProps } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
-import type { ComponentProps } from "react";
 
 import { LocaleUiText } from "@/components/ui/LocaleUiText";
-import { LuxuryPressable } from "@/components/ui/LuxuryPressable";
+import { SettingsPressable } from "./SettingsPressable";
 import { spacing, typography, useTheme, useThemedStyles } from "@/theme";
 
 type IconName = ComponentProps<typeof MaterialCommunityIcons>["name"];
@@ -113,15 +112,14 @@ export function SettingsPreferenceRow({
 
   if (onPress) {
     return (
-      <LuxuryPressable
+      <SettingsPressable
         onPress={onPress}
-        tactile
         style={styles.row}
         accessibilityRole="button"
         accessibilityLabel={accessibilityLabel ?? label}
       >
         {content}
-      </LuxuryPressable>
+      </SettingsPressable>
     );
   }
 

@@ -5,6 +5,7 @@ const statutoryEn = {
   tabSubtitle: "Standard due dates — informational only",
   disclaimer:
     "Vyaamikk Diary provides general statutory date information for convenience. Applicability depends on your registration, turnover, filing frequency and facts. Due dates may change by government notification. Please verify on the official portal or with your CA/CS/tax professional.",
+  loadError: "Couldn't load statutory information.",
   filters: {
     all: "All",
     GST: "GST",

@@ -46,6 +46,8 @@ const en = {
     remove: "Remove",
     loading: "Loading…",
     retry: "Try again",
+    ok: "OK",
+    optional: "Optional",
     error: "Something went wrong",
     success: "Done",
     offline: "You're offline",
@@ -463,6 +465,7 @@ const en = {
       "Select a date for categorized records, or open Map for GPS footprints and approximate PIN areas from freight/dispatch — not live tracking.",
     modeCalendar: "Calendar",
     modeMap: "Map",
+    loadError: "Couldn't load calendar records.",
     dayEmptyTitle: "No records on this date",
     dayEmptyMessage:
       "Create a new business record, reminder, payment request, freight detail or work note when required.",
@@ -622,6 +625,8 @@ const en = {
     fromPin: "From PIN code",
     fromPinOptional: "From PIN code (optional)",
     toPin: "To PIN code",
+    goodsMovedFromPin: "Goods moved from PIN",
+    receivedAtPin: "Received at PIN",
     receivedAtPinOptional: "Received at PIN (optional)",
     supplierPinOptional: "Supplier PIN (optional)",
     partyPinOptional: "Party PIN (optional)",
@@ -735,6 +740,7 @@ const en = {
     settlementStatus: "Settlement status",
     remarks: "Remarks",
     partyName: "Party / customer",
+    contactPerson: "Contact person",
     materialName: "Material",
     quantity: "Quantity",
     unit: "Unit",
@@ -1055,6 +1061,8 @@ const en = {
     pdfPrivacy: "PDF Privacy",
     terms: "Terms of Use",
     deleteAccount: "Delete Account",
+    deleteAccountAndData: "Delete Account & Data",
+    deleteAccountSubtitle: "Permanently remove your account and app-controlled data",
     logout: "Logout",
     signingOut: "Signing out…",
     signOutPrompt: "Sign out?",
@@ -1471,6 +1479,9 @@ const en = {
       "Vyaamikk Diary helps you maintain structured business records—work updates, cash given, materials, staff matters, letterheads, and follow-up reminders—and export them as PDFs for your own documentation and sharing.",
     aboutUtility:
       "The app is a documentation utility only. You control what is recorded; the platform does not verify or become a party to your underlying business matters.",
+    viewerMeta: "Effective {{effectiveDate}} · {{entity}} · Version {{version}}",
+    viewerHostedLink: "Open the hosted document on the web",
+    viewerHostedHub: "Open legal documents on the website",
     contactPlaceholder: "For support, contact: {{email}}",
     privacyDeletion:
       "You can delete your account from Settings → Delete Account. Deletion removes your account and associated personal data we are not legally required to retain. PDFs you exported outside the app cannot be withdrawn.",
@@ -1502,6 +1513,8 @@ const en = {
     errSaveInProgress: "Save already in progress. Wait a moment, then try again.",
     openHistory: "View saved professional packs",
     historyTitle: "Professional packs",
+    detailTitle: "Professional pack",
+    fetchError: "Couldn't load this professional pack.",
     historySubtitle: "Saved briefs for sharing with your professionals",
     historyEmptyTitle: "No professional packs yet",
     historyEmptyMessage: "Create a pack from + New business entry.",
@@ -2227,6 +2240,7 @@ const en = {
   businessInsights: {
     title: "Business Data & Insights",
     intro: "Private summaries from your own records — never shared with other users.",
+    loadError: "Couldn't load business insights.",
     cardRecords: "Records created",
     cardDeletedRecords: "Records deleted (FY)",
     cardPdfs: "PDFs generated",
@@ -2474,6 +2488,8 @@ const en = {
         "Vyaamikk Diary uses your device location only when you save a record, to place an optional footprint on Calendar & Maps. It is not used for ads, profiling, or sharing with third parties.",
       allow: "Continue",
     },
+    loading: "Loading location access…",
+    loadError: "Couldn't load location preferences.",
     settings: {
       title: "Location Access",
       lead:
@@ -2620,6 +2636,8 @@ const en = {
         "Event date can be within the last 15 days through today. Future plans belong in notes.",
       materialEvent:
         "Dispatch/receipt date can be within the last 15 days through today only.",
+      materialReceipt7d:
+        "Receipt date can be within the last 7 days through today.",
       paymentRequestToday:
         "Request date is today only and cannot be backdated. Invoice/due dates may be in the past.",
       freightWindow: "Freight date can be within 15 days before or after today.",
@@ -2661,6 +2679,7 @@ const en = {
     en: "English",
     hi: "हिंदी",
     toggleAriaLabel: "Switch language",
+    selectorAriaLabel: "Select language",
   },
 };
 

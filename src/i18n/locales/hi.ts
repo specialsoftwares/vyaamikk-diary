@@ -44,6 +44,7 @@ const hi: Translations = {
     remove: "हटाएं",
     loading: "लोड हो रहा है…",
     retry: "फिर कोशिश करें",
+    ok: "ठीक है",
     error: "कुछ गड़बड़ हुई",
     success: "हो गया",
     offline: "आप ऑफलाइन हैं",
@@ -1012,6 +1013,8 @@ const hi: Translations = {
     pdfPrivacy: "PDF गोपनीयता",
     terms: "उपयोग की शर्तें",
     deleteAccount: "अकाउंट हटाएं",
+    deleteAccountAndData: "अकाउंट और डेटा हटाएं",
+    deleteAccountSubtitle: "आपका अकाउंट और ऐप द्वारा नियंत्रित डेटा स्थायी रूप से हटा दें",
     logout: "लॉगआउट",
     signingOut: "साइन आउट हो रहा है…",
     signOutPrompt: "साइन आउट करें?",
@@ -2530,6 +2533,7 @@ const hi: Translations = {
     en: "English",
     hi: "हिंदी",
     toggleAriaLabel: "भाषा बदलें",
+    selectorAriaLabel: "भाषा चुनें",
   },
 };
 

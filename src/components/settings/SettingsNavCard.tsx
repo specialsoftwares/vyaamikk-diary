@@ -1,10 +1,9 @@
-import React from "react";
+import React, { type ComponentProps } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
-import type { ComponentProps } from "react";
 
 import { LocaleUiText } from "@/components/ui/LocaleUiText";
-import { LuxuryPressable } from "@/components/ui/LuxuryPressable";
+import { SettingsPressable } from "./SettingsPressable";
 import { executiveCardDepth } from "@/theme/cardDepth";
 import { radius, spacing, typography, useTheme, useThemedStyles } from "@/theme";
 
@@ -74,10 +73,9 @@ export function SettingsNavCard({
   );
 
   return (
-    <LuxuryPressable
+    <SettingsPressable
       onPress={onPress}
       disabled={!onPress}
-      tactile={Boolean(onPress)}
       style={styles.card}
       accessibilityRole="button"
       accessibilityLabel={title}
@@ -93,7 +91,7 @@ export function SettingsNavCard({
         {subtitle ? <LocaleUiText style={styles.subtitle}>{subtitle}</LocaleUiText> : null}
       </View>
       <Text style={styles.chevron}>{external ? "↗" : "›"}</Text>
-    </LuxuryPressable>
+    </SettingsPressable>
   );
 }
 

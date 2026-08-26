@@ -57,6 +57,26 @@ async function run() {
     assert.ok(label && label.length > 0, `settings.language for ${lang}`);
   }
 
+  await changeAppLanguage("en");
+  assert.equal(
+    translateSync("en", "settings.deleteAccountAndData"),
+    "Delete Account & Data"
+  );
+  assert.equal(
+    translateSync("en", "settings.deleteAccountSubtitle"),
+    "Permanently remove your account and app-controlled data"
+  );
+  assert.notEqual(
+    translateSync("en", "settings.deleteAccountAndData"),
+    "settings.deleteAccountAndData"
+  );
+
+  await ensureLocaleBundle("hi");
+  const hiDelete = translateSync("hi", "settings.deleteAccountAndData");
+  assert.notEqual(hiDelete, "settings.deleteAccountAndData");
+  assert.notEqual(hiDelete, "Delete Account & Data");
+  assert.ok(hiDelete.includes("अकाउंट"));
+
   // After the loop every supported language has been loaded on demand.
   assert.deepEqual(getRegisteredLanguages(), [...SUPPORTED_LANGS]);
 
