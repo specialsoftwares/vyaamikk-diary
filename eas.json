@@ -12,7 +12,7 @@
       }
     },
     "production": {
-      "autoIncrement": true,
+      "autoIncrement": false,
       "environment": "production",
       "env": {
         "EXPO_PUBLIC_APP_MODE": "production"
