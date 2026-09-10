@@ -1,0 +1,82 @@
+# Vyaamikk Diary — Phase-1 CI (VYD-20)
+#
+# Executes the provider-independent repository CI contract:
+#   npm ci && npm --prefix functions ci && npm run ci:verify
+#
+# Deliberately contains NO deployment stages: no Firebase deploy, no
+# Firestore Rules deploy, no EAS build, no Play upload, no production
+# credentials. Emulator suites inside ci:verify use fake project IDs.
+#
+# The two provisioned files (.env / google-services.json) are gitignored
+# client-visible configuration (EXPO_PUBLIC_* keys / Android client config),
+# transported via repository Actions secrets; contents are never echoed.
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Java 21 (Firestore emulator)
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Setup Node 20 (npm download cache)
+        uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            functions/package-lock.json
+
+      - name: Install pinned firebase-tools
+        run: npm install -g firebase-tools@14.20.0
+
+      - name: Tool versions (non-sensitive)
+        run: |
+          node --version
+          npm --version
+          java -version
+          firebase --version
+          git --version
+
+      - name: Provision CI config files (contents never printed)
+        env:
+          VYD_CI_ENV_FILE: ${{ secrets.VYD_CI_ENV_FILE }}
+          VYD_CI_GOOGLE_SERVICES_JSON: ${{ secrets.VYD_CI_GOOGLE_SERVICES_JSON }}
+        run: |
+          printf '%s\n' "$VYD_CI_ENV_FILE" > .env
+          printf '%s\n' "$VYD_CI_GOOGLE_SERVICES_JSON" > google-services.json
+          test -s .env
+          test -s google-services.json
+          echo "Provisioned .env ($(wc -c < .env) bytes) and google-services.json ($(wc -c < google-services.json) bytes)"
+
+      - name: Install dependencies (root, locked)
+        run: npm ci
+
+      - name: Install dependencies (functions, locked)
+        run: npm --prefix functions ci
+
+      - name: CI verify (canonical repository gate)
+        run: npm run ci:verify
