@@ -269,6 +269,28 @@ async function callFunction<TRequest, TResponse>(
         });
       }
     }
+    if (serverCode === "RATE_LIMITED") {
+      throw new AppError(
+        "too_many_attempts",
+        message || "Too many verification attempts. Please wait a moment and try again.",
+        e,
+        baseDetails
+      );
+    }
+    if (serverCode === "EMAIL_ALREADY_BOUND") {
+      throw new AppError("email_already_linked", message, e, baseDetails);
+    }
+    if (serverCode === "EMAIL_INVALID") {
+      throw new AppError("save_failed", "Please enter a valid email address.", e, baseDetails);
+    }
+    if (serverCode === "CONFLICT") {
+      throw new AppError(
+        "unknown",
+        "Please use your previous email or start over.",
+        e,
+        { ...baseDetails, diagnosticCode: "EMAIL_OTP_CONFLICT" }
+      );
+    }
     if (code === "functions/unauthenticated") {
       throw new AppError(
         "auth_failed",
@@ -302,7 +324,7 @@ async function callFunction<TRequest, TResponse>(
       if (providerUnavailable) {
         throw new AppError(
           "otp_send_failed",
-          message || "Email delivery is temporarily unavailable. Try again later.",
+          message || "Could not send verification code. Please check the email address and try again.",
           e,
           {
             ...baseDetails,

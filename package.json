@@ -113,6 +113,7 @@
     "test:auth-policy-matrix": "npx --yes tsx src/auth/authPolicyMatrix.test.ts",
     "test:email-otp-crypto": "npx --yes tsx src/services/auth/emailOtpPolicy.crypto.test.ts",
     "test:local-mock-email-otp": "npx --yes tsx src/services/auth/localMockEmailOtp.test.ts",
+    "test:pending-email": "npx --yes tsx src/services/auth/pendingEmailVerification.lifecycle.test.ts && npx --yes tsx functions/src/email/pendingEmailPolicy.unit.test.ts",
     "test:otp-countdown": "npx --yes tsx src/utils/otpCountdownFormat.test.ts",
     "test:cooling-off": "npx --yes tsx src/auth/coolingOffPolicy.test.ts",
     "test:onboarding-pass2": "npx --yes tsx src/onboarding/onboardingPass2.core.test.ts",

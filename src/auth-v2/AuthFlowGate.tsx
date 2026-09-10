@@ -131,6 +131,7 @@ import {
 import {
   resolveVerifiedEmailContinueAction,
 } from "@/auth-v2/verifiedEmailContinue";
+import { presentEmailOtpSendError } from "@/services/auth/presentEmailOtpSendError";
 import {
   useAuthoritativeCountdown,
   useAuthoritativeResendCountdown,
@@ -543,6 +544,9 @@ export function AuthFlowGate() {
         // Continue / boot into wrapper: land on email until verified; then profile.
         if (!hasAuthoritativeVerifiedEmail(user)) {
           setEmailDraft(user.businessEmail ?? "");
+          setEmailVerificationId(null);
+          setEmailCode("");
+          setEmailSendMachine(createEmailOtpSendMachine());
           if (user.phoneE164) {
             setPhoneE164(user.phoneE164);
             setPhoneDraft({
@@ -1139,8 +1143,6 @@ export function AuthFlowGate() {
     const trimmed = emailDraft.trim().toLowerCase();
     if (!user) return;
     if (emailSendInFlightRef.current) return;
-    clearFlowError();
-    setEmailHint(null);
 
     const action = resolveVerifiedEmailContinueAction({
       draftEmail: trimmed,
@@ -1153,9 +1155,13 @@ export function AuthFlowGate() {
       return;
     }
 
+    // In-flight guard before any navigation/state so rapid taps cannot issue two challenges.
+    emailSendInFlightRef.current = true;
+    clearFlowError();
+    setEmailHint(null);
+
     // Navigate-first: dismiss keyboard, show OTP screen, send in background.
     Keyboard.dismiss();
-    emailSendInFlightRef.current = true;
     const started = beginEmailOtpSend(emailSendMachine);
     const generation = started.generation;
     setEmailSendMachine(started);
@@ -1202,7 +1208,7 @@ export function AuthFlowGate() {
           const failed = failEmailOtpSend(
             started,
             generation,
-            "OTP could not be sent"
+            presentEmailOtpSendError(e)
           );
           if (failed) setEmailSendMachine(failed);
         } else if (completed) {
@@ -1212,21 +1218,18 @@ export function AuthFlowGate() {
         return;
       }
       if (e instanceof AppError && e.code === "email_already_linked") {
-        const failed = failEmailOtpSend(started, generation, e.message);
+        const failed = failEmailOtpSend(started, generation, presentEmailOtpSendError(e));
         if (failed) setEmailSendMachine(failed);
         applyFlowError(e, "email_otp");
         return;
       }
       if (e instanceof AppError && e.code === "email_pending_deletion") {
-        const failed = failEmailOtpSend(started, generation, e.message);
+        const failed = failEmailOtpSend(started, generation, presentEmailOtpSendError(e));
         if (failed) setEmailSendMachine(failed);
         applyFlowError(e, "email_otp");
         return;
       }
-      const sendFailure =
-        e instanceof AppError
-          ? e.message
-          : "OTP could not be sent";
+      const sendFailure = presentEmailOtpSendError(e);
       const failed = failEmailOtpSend(started, generation, sendFailure);
       if (failed) setEmailSendMachine(failed);
       if (e instanceof AppError) {
@@ -1270,7 +1273,7 @@ export function AuthFlowGate() {
       const failed = failEmailOtpSend(
         started,
         generation,
-        "OTP could not be sent"
+        presentEmailOtpSendError(e)
       );
       if (failed) setEmailSendMachine(failed);
       applyFlowError(e, "email_otp");
@@ -1547,7 +1550,7 @@ export function AuthFlowGate() {
         canResend={emailCanResend}
         validityRemaining={emailValidityRemaining}
         expired={emailValidityRemaining <= 0 && Boolean(emailExpiresAt)}
-        error={emailOtpScreenError}
+        error={sendFailed ? emailSendMachine.errorMessage ?? emailOtpScreenError : emailOtpScreenError}
       />
     );
   }
@@ -1563,7 +1566,7 @@ export function AuthFlowGate() {
             ? () => goToBusinessIdentity({ userInitiated: true })
             : undefined
         }
-        loading={loading}
+        loading={loading || emailSendMachine.state === "sending"}
         error={emailScreenError}
         hint={
           emailVerifiedChip

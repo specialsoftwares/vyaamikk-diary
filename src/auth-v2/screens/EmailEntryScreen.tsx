@@ -65,7 +65,7 @@ export function EmailEntryScreen({
             label={t("authV2.email.continue")}
             loading={loading}
             loadingLabel={t("authV2.email.saving")}
-            disabled={!valid || !online}
+            disabled={!valid || !online || loading}
             onPress={onContinue}
             testID="auth-v2-email-continue"
             purpose="advance"

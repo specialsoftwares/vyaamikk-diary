@@ -77,7 +77,7 @@ export function failEmailOtpSend(
     ...machine,
     state: "failed",
     challengeId: null,
-    errorMessage: message || "OTP could not be sent",
+    errorMessage: message || "Could not send verification code. Please check the email address and try again.",
   };
 }
 

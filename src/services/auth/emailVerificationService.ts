@@ -17,6 +17,11 @@ import {
   localMockStartEmailOtp,
   localMockVerifyEmailOtp,
 } from "./localMockEmailOtp";
+import {
+  clearPendingEmailVerification,
+  preparePendingEmailVerification,
+  rememberIssuedPendingEmailVerification,
+} from "./pendingEmailVerification";
 
 export interface EmailVerificationStartResult {
   sent: boolean;
@@ -52,6 +57,7 @@ export async function startEmailOtpVerification(
     throw new AppError("save_failed", "Enter a valid email address.");
   }
   const normalized = normalizeEmail(rawEmail);
+  preparePendingEmailVerification(uid, normalized);
 
   if (useIdentityCallables()) {
     const result = await callStartEmailVerification(normalized, opts?.idempotencyKey);
@@ -59,6 +65,10 @@ export async function startEmailOtpVerification(
     if (!id) {
       throw new AppError("unknown", result.message ?? "Could not start email verification.");
     }
+    rememberIssuedPendingEmailVerification(uid, normalized, {
+      challengeId: id,
+      expiresAt: result.expiresAt,
+    });
     return {
       sent: result.sent,
       challengeId: id,
@@ -74,6 +84,10 @@ export async function startEmailOtpVerification(
 
   if (getActiveBackend() === "local-mock") {
     const result = await localMockStartEmailOtp(uid, normalized);
+    rememberIssuedPendingEmailVerification(uid, normalized, {
+      challengeId: result.challengeId,
+      expiresAt: result.expiresAt,
+    });
     return {
       ...result,
       verificationId: result.challengeId,
@@ -115,10 +129,14 @@ export async function completeEmailOtpVerification(
   applyLocalProfile: (patch: Partial<UserProfile>) => Promise<UserProfile>
 ): Promise<UserProfile> {
   if (useIdentityCallables()) {
-    return callVerifyAndBindEmail(challengeId, code);
+    const profile = await callVerifyAndBindEmail(challengeId, code);
+    clearPendingEmailVerification(uid);
+    return profile;
   }
   if (getActiveBackend() === "local-mock") {
-    return localMockVerifyEmailOtp(uid, challengeId, code, applyLocalProfile);
+    const profile = await localMockVerifyEmailOtp(uid, challengeId, code, applyLocalProfile);
+    clearPendingEmailVerification(uid);
+    return profile;
   }
   throw new AppError("permission_denied", "Email verification backend unavailable.");
 }

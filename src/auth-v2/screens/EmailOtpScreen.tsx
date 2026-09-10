@@ -114,7 +114,12 @@ export function EmailOtpScreen({
       }
     >
       {sending ? <OnboardingInlineMessage tone="info" message="Sending OTP…" /> : null}
-      {sendFailed ? <OnboardingInlineMessage tone="danger" message="OTP could not be sent" /> : null}
+      {sendFailed ? (
+        <OnboardingInlineMessage
+          tone="danger"
+          message={error || "Could not send verification code. Please check the email address and try again."}
+        />
+      ) : null}
       {!sending && !sendFailed && validityRemaining > 0 ? (
         <OnboardingInlineMessage
           tone="muted"

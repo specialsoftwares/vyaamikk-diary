@@ -22,6 +22,10 @@ import {
 } from "@/services/auth/emailOtpConstants";
 import { loadMockRegistry } from "@/services/auth/mockRegistry";
 import { createLogger } from "@/utils/logger";
+import {
+  decideUnverifiedPendingEmailAction,
+  shouldEnforceResendCooldown,
+} from "./pendingEmailPolicy";
 
 const log = createLogger("auth/localMockEmailOtp");
 
@@ -43,6 +47,7 @@ export interface LocalMockEmailChallenge {
 const challenges = new Map<string, LocalMockEmailChallenge>();
 const emailIndex = new Map<string, string>(); // hash -> uid
 const byUidActive = new Map<string, string>(); // uid -> challengeId
+let sendShouldFailForTests = false;
 
 /**
  * Local-mock email OTP is allowed when active backend is local-mock in
@@ -155,7 +160,13 @@ export async function localMockStartEmailOtp(
           "Too many incorrect attempts. Wait 1 hour or use a different email."
         );
       }
-      if (Date.now() < prev.resendAvailableAt && prev.normalizedEmail === normalized) {
+      const nowForPolicy = Date.now();
+      const action = decideUnverifiedPendingEmailAction({
+        submittedEmail: normalized,
+        pending: { email: prev.normalizedEmail, expiresAt: prev.expiresAt },
+        now: nowForPolicy,
+      }).type;
+      if (shouldEnforceResendCooldown(action, prev, nowForPolicy)) {
         throw new AppError(
           "email_otp_cooldown",
           "Resend is not available yet.",
@@ -193,6 +204,14 @@ export async function localMockStartEmailOtp(
   };
   challenges.set(challengeId, challenge);
   byUidActive.set(uid, challengeId);
+  if (sendShouldFailForTests) {
+    supersedeChallenge(challenge);
+    byUidActive.delete(uid);
+    throw new AppError(
+      "otp_send_failed",
+      "Could not send verification code. Please check the email address and try again."
+    );
+  }
   log.info("local-mock email OTP issued (development-only)", { version, challengeId });
 
   return {
@@ -298,6 +317,24 @@ export function resetLocalMockEmailOtpForTests(): void {
   challenges.clear();
   emailIndex.clear();
   byUidActive.clear();
+  sendShouldFailForTests = false;
+}
+
+export function clearLocalMockPendingEmailForUid(uid: string): void {
+  const id = byUidActive.get(uid);
+  if (id) {
+    const prev = challenges.get(id);
+    if (prev && prev.status === "active") supersedeChallenge(prev);
+    byUidActive.delete(uid);
+  }
+}
+
+export function __setLocalMockEmailSendFailureForTests(fail: boolean): void {
+  sendShouldFailForTests = fail;
+}
+
+export function __activeLocalMockChallengeIdForUid(uid: string): string | undefined {
+  return byUidActive.get(uid);
 }
 
 /** Test helper — inspect active challenge plaintext (tests only). */
