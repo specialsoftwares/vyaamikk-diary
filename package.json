@@ -22,6 +22,8 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
+    "test:all": "node scripts/ci/run-all-tests.mjs",
+    "ci:verify": "npm run typecheck && npm run lint:eslint && npm run test:all && npm --prefix functions run build && npm run test:firestore-rules && npm run test:resolve-or-create-phone-emulator && npm run check:firebase-client && npx expo config --type public > /dev/null && echo 'ci:verify PASS'",
     "test:inr": "npx --yes tsx src/utils/money/inr.test.ts",
     "test:cash-date": "npx --yes tsx src/utils/businessEntry/cashPaidDate.test.ts",
     "test:week-range": "npx --yes tsx src/utils/date/rollingWeekRange.test.ts",
