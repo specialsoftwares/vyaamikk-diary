@@ -380,6 +380,22 @@ export const firebaseAuthService: AuthService = {
         // as "Missing or insufficient permissions."
         const { requireJsAuthSessionForFirestore } = await import("./jsAuthBridge");
         await requireJsAuthSessionForFirestore("post_phone_identity");
+        // Boundary: after identity is known. Clear only transient pending-email
+        // cache when this UID is still in unverified email onboarding.
+        // Server pendingEmailVerifications are replaced on the next
+        // startEmailVerification (not deleted here — no extra callable).
+        // Verified returning users are left untouched.
+        const { hasAuthoritativeVerifiedEmail } = await import("@/auth/identityRouteState");
+        const { shouldClearTransientPendingEmailAfterPhoneAuth } = await import(
+          "./pendingEmailPolicy"
+        );
+        const { clearTransientPendingEmailState } = await import("./pendingEmailVerification");
+        if (
+          shouldClearTransientPendingEmailAfterPhoneAuth(result.profile) &&
+          !hasAuthoritativeVerifiedEmail(result.profile)
+        ) {
+          clearTransientPendingEmailState(result.profile.uid);
+        }
         return result;
       } catch (e) {
         // Firebase phone auth already succeeded — preserve that boundary in diagnostics.
@@ -403,11 +419,16 @@ export const firebaseAuthService: AuthService = {
   },
 
   async signOut(): Promise<void> {
+    const uid = getFirebaseAuth().currentUser?.uid ?? null;
     try {
       await getFirebaseAuth().signOut();
       await signOutNativePhoneAuth();
     } catch (e) {
       log.warn("signOut failed", e);
+    }
+    if (uid) {
+      const { clearTransientPendingEmailState } = await import("./pendingEmailVerification");
+      clearTransientPendingEmailState(uid);
     }
   },
 

@@ -23,6 +23,13 @@ import {
   nextReviewContactEditCount,
   shouldCountSuccessfulReviewContactReplacement,
 } from "../identity/reviewContactEditPolicy";
+import {
+  isAuthoritativeVerifiedEmailOwnership,
+  pickActivePendingForPolicy,
+  rotationActionForStart,
+  shouldEnforceResendCooldown,
+  shouldWriteUnverifiedPendingUserFields,
+} from "./pendingEmailPolicy";
 
 export const PENDING_COLLECTION = "pendingEmailVerifications";
 export const EMAIL_BINDINGS = "emailBindings";
@@ -177,10 +184,7 @@ export async function assertEmailNotBoundElsewhere(
     if (!snap.exists) continue;
     const data = snap.data() as { uid?: string; userId?: string; status?: string; emailStatus?: string };
     const owner = data.uid ?? data.userId;
-    const verified =
-      data.status === "verified" ||
-      data.status === "active" ||
-      data.emailStatus === "verified";
+    const verified = isAuthoritativeVerifiedEmailOwnership(data);
     if (owner && owner !== uid && verified) {
       throwEmailOtpError("EMAIL_ALREADY_BOUND");
     }
@@ -252,10 +256,7 @@ export async function createOrRotateEmailChallenge(input: {
     if (!snap.exists) continue;
     const data = snap.data() as { uid?: string; userId?: string; status?: string; emailStatus?: string };
     const owner = data.uid ?? data.userId;
-    const verified =
-      data.status === "verified" ||
-      data.status === "active" ||
-      data.emailStatus === "verified";
+    const verified = isAuthoritativeVerifiedEmailOwnership(data);
     if (owner && owner !== authUid && verified) {
       throwEmailOtpError("EMAIL_ALREADY_BOUND");
     }
@@ -269,20 +270,26 @@ export async function createOrRotateEmailChallenge(input: {
     throwEmailOtpError("EMAIL_OTP_LOCKED");
   }
 
-  // Enforce resend cooldown before burning rate-limit budget.
+  // Cooldown applies only to same-email resend of an unexpired challenge.
+  // A different unverified address is a replace, never a conflict.
   {
     const priorAll = await db.collection(PENDING_COLLECTION).where("userId", "==", authUid).get();
-    for (const d of priorAll.docs) {
-      const data = d.data() as ChallengeDoc;
-      if (data.purpose !== purpose || data.status !== "active") continue;
-      if (data.normalizedEmail !== normalized) continue;
-      if (now < data.resendAvailableAt) {
-        throwEmailOtpError(
-          "EMAIL_OTP_COOLDOWN",
-          "resource-exhausted",
-          cooldownDetails(data.resendAvailableAt, now)
-        );
-      }
+    const active = priorAll.docs
+      .map((d) => d.data() as ChallengeDoc)
+      .filter((data) => data.purpose === purpose && data.status === "active");
+    const picked = pickActivePendingForPolicy(active, normalized, now);
+    const action = rotationActionForStart({
+      currentVerifiedNormalized: currentVerified,
+      submittedNormalized: normalized,
+      pending: picked,
+      now,
+    });
+    if (shouldEnforceResendCooldown(action, picked, now) && picked) {
+      throwEmailOtpError(
+        "EMAIL_OTP_COOLDOWN",
+        "resource-exhausted",
+        cooldownDetails(picked.resendAvailableAt, now)
+      );
     }
   }
 
@@ -311,67 +318,95 @@ export async function createOrRotateEmailChallenge(input: {
     }
   }
 
-  // Supersede prior active challenges for this uid+purpose.
-  const priorAll = await db.collection(PENDING_COLLECTION).where("userId", "==", authUid).get();
-  const prior = priorAll.docs.filter((d) => {
-    const data = d.data() as ChallengeDoc;
-    return data.purpose === purpose && data.status === "active";
-  });
+  const issued = await db.runTransaction(async (tx) => {
+    const userSnapTx = await tx.get(userRef);
+    if (!userSnapTx.exists) throwEmailOtpError("FORBIDDEN", "permission-denied");
+    const userTx = userSnapTx.data() as Record<string, unknown>;
+    const currentVerifiedTx =
+      userTx.emailStatus === "verified"
+        ? normalizeEmailStrict(String(userTx.normalizedEmail ?? userTx.businessEmail ?? ""))
+        : "";
 
-  let nextVersion = 1;
-  for (const d of prior) {
-    const data = d.data() as ChallengeDoc;
-    nextVersion = Math.max(nextVersion, (data.version ?? 0) + 1);
-  }
-
-  const challengeId = db.collection(PENDING_COLLECTION).doc().id;
-  const code = generateEmailOtpCode();
-  const otpDigest = digestEmailOtp(secret, code, {
-    challengeId,
-    uid: authUid,
-    normalizedEmail: normalized,
-    version: nextVersion,
-  });
-
-  const expiresAt = now + EMAIL_OTP_TTL_MS;
-  const resendAvailableAt = now + EMAIL_OTP_RESEND_COOLDOWN_MS;
-
-  const batch = db.batch();
-  for (const d of prior) {
-    batch.update(d.ref, { status: "superseded", otpDigest: null });
-  }
-
-  const challenge: ChallengeDoc = {
-    challengeId,
-    userId: authUid,
-    normalizedEmail: normalized,
-    emailHash,
-    otpDigest,
-    version: nextVersion,
-    issuedAt: now,
-    expiresAt,
-    resendAvailableAt,
-    incorrectAttempts: 0,
-    lockUntil: null,
-    consumedAt: null,
-    status: "active",
-    idempotencyKey: input.idempotencyKey ?? null,
-    purpose,
-  };
-  batch.set(db.collection(PENDING_COLLECTION).doc(challengeId), challenge);
-  if (!replacingVerified) {
-    batch.update(userRef, {
-      emailStatus: "verification_pending",
-      normalizedEmail: normalized,
-      businessEmail: normalized,
-      emailHash,
-      emailVerifiedAt: null,
-      updatedAt: now,
+    const pendingQuery = db.collection(PENDING_COLLECTION).where("userId", "==", authUid);
+    const priorAll = await tx.get(pendingQuery);
+    const prior = priorAll.docs.filter((d) => {
+      const data = d.data() as ChallengeDoc;
+      return data.purpose === purpose && data.status === "active";
     });
-  } else {
-    batch.update(userRef, { updatedAt: now });
-  }
-  await batch.commit();
+    const active = prior.map((d) => d.data() as ChallengeDoc);
+    const picked = pickActivePendingForPolicy(active, normalized, now);
+    const action = rotationActionForStart({
+      currentVerifiedNormalized: currentVerifiedTx,
+      submittedNormalized: normalized,
+      pending: picked,
+      now,
+    });
+    if (shouldEnforceResendCooldown(action, picked, now) && picked) {
+      throwEmailOtpError(
+        "EMAIL_OTP_COOLDOWN",
+        "resource-exhausted",
+        cooldownDetails(picked.resendAvailableAt, now)
+      );
+    }
+
+    let nextVersion = 1;
+    for (const d of prior) {
+      const data = d.data() as ChallengeDoc;
+      nextVersion = Math.max(nextVersion, (data.version ?? 0) + 1);
+    }
+
+    const challengeId = db.collection(PENDING_COLLECTION).doc().id;
+    const code = generateEmailOtpCode();
+    const otpDigest = digestEmailOtp(secret, code, {
+      challengeId,
+      uid: authUid,
+      normalizedEmail: normalized,
+      version: nextVersion,
+    });
+    const expiresAt = now + EMAIL_OTP_TTL_MS;
+    const resendAvailableAt = now + EMAIL_OTP_RESEND_COOLDOWN_MS;
+
+    for (const d of prior) {
+      tx.update(d.ref, { status: "superseded", otpDigest: null });
+    }
+
+    const challenge: ChallengeDoc = {
+      challengeId,
+      userId: authUid,
+      normalizedEmail: normalized,
+      emailHash,
+      otpDigest,
+      version: nextVersion,
+      issuedAt: now,
+      expiresAt,
+      resendAvailableAt,
+      incorrectAttempts: 0,
+      lockUntil: null,
+      consumedAt: null,
+      status: "active",
+      idempotencyKey: input.idempotencyKey ?? null,
+      purpose,
+    };
+    tx.set(db.collection(PENDING_COLLECTION).doc(challengeId), challenge);
+
+    // Pending fields are disposable onboarding state. Never strip a verified email.
+    if (shouldWriteUnverifiedPendingUserFields(currentVerifiedTx)) {
+      tx.update(userRef, {
+        emailStatus: "verification_pending",
+        normalizedEmail: normalized,
+        businessEmail: normalized,
+        emailHash,
+        emailVerifiedAt: null,
+        updatedAt: now,
+      });
+    } else {
+      tx.update(userRef, { updatedAt: now });
+    }
+
+    return { challengeId, code, nextVersion, expiresAt, resendAvailableAt };
+  });
+
+  const { challengeId, code, nextVersion, expiresAt, resendAvailableAt } = issued;
 
   const sendResult = await provider.send({
     to: normalized,
@@ -381,6 +416,14 @@ export async function createOrRotateEmailChallenge(input: {
   });
 
   if (!sendResult.delivered && mode === "production") {
+    try {
+      await db.collection(PENDING_COLLECTION).doc(challengeId).update({
+        status: "superseded",
+        otpDigest: null,
+      });
+    } catch {
+      // Delivery failed; still report provider error. Challenge must not stay active.
+    }
     throwEmailOtpError("EMAIL_PROVIDER_UNAVAILABLE");
   }
 

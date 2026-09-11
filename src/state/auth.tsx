@@ -41,6 +41,8 @@ import { formatRuntimeDiagnostics } from "@/config/runtimeEnvironment";
 import { isLoginBlockedAccount } from "@/services/accountDeletion/accountStatus";
 import { useLocalDb } from "@/state/localDb";
 import { clearAuthWrapperProgress } from "@/auth-v2/authWrapperProgress";
+import { clearTransientPendingEmailState } from "@/services/auth/pendingEmailVerification";
+import { clearLocalMockPendingEmailForUid } from "@/services/auth/localMockEmailOtp";
 import {
   beginFirstActionFreezeSession,
   endFirstActionFreezeSession,
@@ -333,7 +335,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (e) {
       log.warn("auth signOut error", e);
     }
-    if (uid) await clearAuthWrapperProgress(uid);
+    if (uid) {
+      await clearAuthWrapperProgress(uid);
+      clearTransientPendingEmailState(uid);
+      clearLocalMockPendingEmailForUid(uid);
+    }
     clearSessionLastActiveTouch(uid);
     endFirstActionFreezeSession();
     await forceClearAllSessions();
@@ -349,7 +355,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const hardDevSignOut = useCallback(async () => {
     if (!__DEV__) return;
     const uid = state.session?.user.uid;
-    if (uid) await clearAuthWrapperProgress(uid);
+    if (uid) {
+      await clearAuthWrapperProgress(uid);
+      clearTransientPendingEmailState(uid);
+      clearLocalMockPendingEmailForUid(uid);
+    }
     clearSessionLastActiveTouch(uid);
     endFirstActionFreezeSession();
     await forceClearAllSessions();

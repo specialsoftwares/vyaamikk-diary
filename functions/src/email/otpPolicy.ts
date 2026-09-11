@@ -30,7 +30,7 @@ export type EmailOtpServerErrorCode =
   | "CONFLICT";
 
 export const EMAIL_OTP_USER_MESSAGES: Record<EmailOtpServerErrorCode, string> = {
-  EMAIL_INVALID: "Enter a valid email address.",
+  EMAIL_INVALID: "Please enter a valid email address.",
   EMAIL_ALREADY_BOUND:
     "This email cannot be used for this account. Please use another email or contact support.",
   EMAIL_REVIEW_EDIT_LIMIT: "You can change your email twice during signup review.",
@@ -40,12 +40,13 @@ export const EMAIL_OTP_USER_MESSAGES: Record<EmailOtpServerErrorCode, string> = 
   EMAIL_OTP_LOCKED:
     "Too many incorrect attempts. This email is locked for 1 hour — or enter a different email.",
   EMAIL_VERIFICATION_REQUIRED: "Verify your email to continue.",
-  EMAIL_PROVIDER_UNAVAILABLE: "Email delivery is temporarily unavailable. Try again later.",
-  RATE_LIMITED: "Too many requests. Please wait and try again.",
-  UNAUTHENTICATED: "Sign in again to continue.",
+  EMAIL_PROVIDER_UNAVAILABLE:
+    "Could not send verification code. Please check the email address and try again.",
+  RATE_LIMITED: "Too many verification attempts. Please wait a moment and try again.",
+  UNAUTHENTICATED: "Your session has expired. Please verify your phone number again.",
   FORBIDDEN: "You cannot perform this action.",
   NETWORK_ERROR: "Network error. Check your connection and try again.",
-  CONFLICT: "Something changed. Refresh and try again.",
+  CONFLICT: "Please use your previous email or start over.",
 };
 
 export function normalizeEmailStrict(raw: string): string {
