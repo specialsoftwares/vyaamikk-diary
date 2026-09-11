@@ -18,7 +18,7 @@ import { KeyboardFormScrollProvider } from "@/components/forms/KeyboardFormScrol
 import { FormFocusProvider } from "@/components/inputSafety/FormFocusManager";
 import { ValidationFocusProvider } from "@/components/inputSafety/ValidationFocusManager";
 import { useKeyboardInset } from "@/hooks/useKeyboardInset";
-import { useTabBarMetrics } from "@/layout/tabBar";
+import { tabBarFooterClearance, useTabBarMetrics } from "@/layout/tabBar";
 import { spacing, useThemeColors, useThemedStyles } from "@/theme";
 
 /** Extra space below last field so Save / suggestions stay above keyboard. */
@@ -195,8 +195,11 @@ export function Screen({
               <View
                 style={[
                   styles.footerBar,
+                  // Native tab bar clips content at its top edge on Android and
+                  // overlays it on iOS — clearance must derive from the shared
+                  // metrics model, never a per-screen constant (VYD-23).
                   tabBarInset
-                    ? { paddingBottom: tabBar.height + spacing.md }
+                    ? { paddingBottom: tabBarFooterClearance(tabBar) }
                     : { paddingBottom: insets.bottom + spacing.sm },
                 ]}
               >
