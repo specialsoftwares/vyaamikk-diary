@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, StyleSheet, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import * as SplashScreen from "expo-splash-screen";
 
 import { runStartupCoordinator } from "./coordinator";
@@ -7,6 +7,7 @@ import { installGlobalStartupHandlers, setStartupFailureListener } from "./globa
 import { StartupFailureScreen } from "./StartupFailureScreen";
 import { RootErrorBoundary } from "./RootErrorBoundary";
 import type { StartupDiagnostics } from "./types";
+import { BRAND_SURFACE } from "@/config/brandMotion";
 
 installGlobalStartupHandlers();
 
@@ -25,7 +26,8 @@ async function hideSplash(): Promise<void> {
 
 /**
  * Runs the startup coordinator before mounting the real provider tree.
- * Always hides splash on success or controlled failure.
+ * Keep the native splash up on success so BootScreen can hide it at route time.
+ * Hide on controlled failure so StartupFailureScreen is visible.
  */
 export function BootstrapRoot({ children }: { children: React.ReactNode }) {
   const [phase, setPhase] = useState<Phase>({ kind: "loading" });
@@ -36,8 +38,8 @@ export function BootstrapRoot({ children }: { children: React.ReactNode }) {
     void (async () => {
       const outcome = await runStartupCoordinator();
       if (cancelled) return;
-      await hideSplash();
       if (!outcome.ok) {
+        await hideSplash();
         setPhase({ kind: "failed", diagnostics: outcome.diagnostics });
         return;
       }
@@ -61,11 +63,7 @@ export function BootstrapRoot({ children }: { children: React.ReactNode }) {
   }, [run]);
 
   if (phase.kind === "loading") {
-    return (
-      <View style={styles.boot}>
-        <ActivityIndicator color="#3B41C5" />
-      </View>
-    );
+    return <View style={styles.boot} />;
   }
 
   if (phase.kind === "failed") {
@@ -87,8 +85,6 @@ export function BootstrapRoot({ children }: { children: React.ReactNode }) {
 const styles = StyleSheet.create({
   boot: {
     flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#0F172A",
+    backgroundColor: BRAND_SURFACE,
   },
 });
