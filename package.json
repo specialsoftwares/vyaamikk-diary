@@ -137,6 +137,7 @@
     "test:harness-review-restart": "npx --yes tsx src/auth-v2/preview/harnessReviewRestart.test.ts",
     "test:harness-post-location-handoff": "npx --yes tsx src/auth-v2/preview/harnessPostLocationHandoff.test.ts",
     "test:boot-release-gate": "npx --yes tsx src/boot/bootReleaseGate.contract.test.ts",
+    "test:boot-production-startup": "npx --yes tsx src/boot/bootProductionStartup.contract.test.ts",
     "functions:build": "npm --prefix functions run build",
     "functions:lint": "npm --prefix functions run lint",
     "lint:eslint": "eslint \"src/config/**/*.{ts,tsx}\" \"src/startup/**/*.{ts,tsx}\" \"src/auth/**/*.{ts,tsx}\" \"src/services/device/**/*.{ts,tsx}\" \"src/services/auth/productionMockOtpIsolation.test.ts\" \"src/utils/date.ts\" \"src/utils/localBusinessDate.test.ts\" \"src/services/search/buildSearchableText.ts\" \"src/services/statutory/statutoryPromptSession.ts\" --max-warnings 40",

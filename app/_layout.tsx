@@ -19,7 +19,8 @@ import { I18nextProvider } from "react-i18next";
 import { i18n } from "@/i18n/i18n";
 
 /**
- * Keep splash visible until BootstrapRoot hides it on success or controlled failure.
+ * Keep splash visible until BootScreen hides it after route resolution,
+ * or BootstrapRoot hides it on a controlled startup failure.
  * Never call assertProductionConfig() at module scope — that terminated Android.
  */
 SplashScreen.preventAutoHideAsync().catch(() => {
