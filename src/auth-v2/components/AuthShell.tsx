@@ -1,6 +1,7 @@
 import React, { useEffect } from "react";
 import {
   BackHandler,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -20,8 +21,14 @@ import {
   AUTH_ACTION_ZONE_ABOVE,
   AUTH_ACTION_ZONE_BELOW,
 } from "@/auth-v2/components/authActionZoneLayout";
+import {
+  androidAuthShellFooterKeyboardPad,
+  authShellKeyboardShouldPersistTaps,
+  resolveAuthShellHardwareBack,
+} from "@/auth-v2/authShellKeyboardPolicy";
 import { authV2GradientStops, authV2Tokens } from "@/auth-v2/theme/authV2Theme";
 import { FormFocusProvider } from "@/components/inputSafety/FormFocusManager";
+import { useKeyboardInset } from "@/hooks/useKeyboardInset";
 import { spacing, typography, useTheme } from "@/theme";
 
 interface AuthShellProps {
@@ -45,6 +52,7 @@ interface AuthShellProps {
  * Auth/onboarding shell — one keyboard strategy on iOS (KAV padding only).
  * Do not stack automaticallyAdjustKeyboardInsets here; it pushes content off-screen.
  * Action-zone placement keeps auth CTAs in the verifying/verified focal band.
+ * Android: lift the sticky footer by keyboard inset and persist taps on CTAs.
  */
 export function AuthShell({
   title,
@@ -66,15 +74,34 @@ export function AuthShell({
   onBackRef.current = onBack;
   const consumeSystemBack = Boolean(showBack && onBack);
   const useActionZone = footerPlacement === "actionZone" && Boolean(footer);
+  const keyboardHeight = useKeyboardInset(true);
+  const footerKeyboardPad = androidAuthShellFooterKeyboardPad({
+    platform: Platform.OS,
+    keyboardHeight,
+  });
 
   useEffect(() => {
     if (!consumeSystemBack) return;
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      const action = resolveAuthShellHardwareBack({
+        keyboardVisible:
+          keyboardHeight > 0 ||
+          (typeof Keyboard.isVisible === "function" && Keyboard.isVisible()),
+      });
+      if (action === "dismiss-keyboard") {
+        Keyboard.dismiss();
+        return true;
+      }
       onBackRef.current?.();
       return true;
     });
     return () => sub.remove();
-  }, [consumeSystemBack]);
+  }, [consumeSystemBack, keyboardHeight]);
+
+  const onBackPress = () => {
+    Keyboard.dismiss();
+    onBack?.();
+  };
 
   return (
     <LinearGradient colors={gradient} style={styles.root}>
@@ -87,7 +114,7 @@ export function AuthShell({
         <View style={[styles.safe, { paddingTop: insets.top + spacing.sm }]}>
           {showBack && onBack ? (
             <Pressable
-              onPress={onBack}
+              onPress={onBackPress}
               style={[styles.backBtn, { backgroundColor: tokens.backBtnBg, borderColor: tokens.backBtnBorder }]}
               accessibilityRole="button"
               accessibilityLabel="Back"
@@ -99,7 +126,7 @@ export function AuthShell({
           )}
 
           <ScrollView
-            keyboardShouldPersistTaps="handled"
+            keyboardShouldPersistTaps={authShellKeyboardShouldPersistTaps()}
             keyboardDismissMode="on-drag"
             contentContainerStyle={[
               styles.scroll,
@@ -116,13 +143,20 @@ export function AuthShell({
             showsVerticalScrollIndicator={false}
           >
             {headerTop}
-            <Text style={[styles.title, { color: tokens.heading }]} accessibilityRole="header">
-              {title}
-            </Text>
-            {subtitle ? (
-              <Text style={[styles.subtitle, { color: tokens.body }]}>{subtitle}</Text>
-            ) : null}
+            <Pressable onPress={Keyboard.dismiss} accessible={false}>
+              <Text style={[styles.title, { color: tokens.heading }]} accessibilityRole="header">
+                {title}
+              </Text>
+              {subtitle ? (
+                <Text style={[styles.subtitle, { color: tokens.body }]}>{subtitle}</Text>
+              ) : null}
+            </Pressable>
             {children}
+            <Pressable
+              onPress={Keyboard.dismiss}
+              accessible={false}
+              style={styles.keyboardDismissPad}
+            />
             {useActionZone ? (
               <>
                 <View style={styles.zoneAbove} />
@@ -138,7 +172,15 @@ export function AuthShell({
           </ScrollView>
 
           {!useActionZone && footer ? (
-            <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, spacing.lg) }]}>
+            <View
+              style={[
+                styles.footer,
+                {
+                  paddingBottom:
+                    Math.max(insets.bottom, spacing.lg) + footerKeyboardPad,
+                },
+              ]}
+            >
               {footer}
             </View>
           ) : null}
@@ -171,6 +213,10 @@ const styles = StyleSheet.create({
   },
   scrollZone: {
     paddingBottom: spacing.sm,
+  },
+  keyboardDismissPad: {
+    flexGrow: 1,
+    minHeight: 24,
   },
   zoneAbove: {
     flexGrow: AUTH_ACTION_ZONE_ABOVE,

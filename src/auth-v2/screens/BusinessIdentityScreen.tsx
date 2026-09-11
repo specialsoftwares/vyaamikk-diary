@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Keyboard,
   Pressable,
   StyleSheet,
   Text,
@@ -42,6 +43,13 @@ import {
   loadOnboardingProfileDraftV2,
   saveOnboardingProfileDraftV2,
 } from "@/onboarding/onboardingProfileDraftV2";
+import {
+  createGenerationGuard,
+  decideLocationContinueAction,
+  decideLocationContinueAfterPersist,
+  LOCATION_CONTINUE_REVIEW_HREF,
+  locationContinueChrome,
+} from "@/onboarding/locationOnboardingContinue";
 import {
   isIdentityContinueEnabled,
   isIdentityDetailsContinueEnabled,
@@ -96,6 +104,7 @@ export function BusinessIdentityScreen({
   const draftRef = useRef<OnboardingProfileDraftV2 | null>(null);
   const latestPinRequestIdRef = useRef(0);
   const pinLookupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const continueGuardRef = useRef(createGenerationGuard());
 
   const readOnly = user ? isOnboardingIdentityLocked(user) : false;
 
@@ -173,7 +182,10 @@ export function BusinessIdentityScreen({
   }, [user, readOnly, draft?.accountKind]);
 
   useEffect(() => {
+    const continueGuard = continueGuardRef.current;
     return () => {
+      continueGuard.invalidate();
+      latestPinRequestIdRef.current = nextPinLookupRequestId();
       if (pinLookupTimerRef.current) clearTimeout(pinLookupTimerRef.current);
     };
   }, []);
@@ -337,6 +349,7 @@ export function BusinessIdentityScreen({
   };
 
   const onContinue = async () => {
+    Keyboard.dismiss();
     setServerError(null);
     const current = draftRef.current;
     if (!current) return;
@@ -349,26 +362,63 @@ export function BusinessIdentityScreen({
       email,
       draft: current,
     });
-    if (!validation.ok) {
-      setServerError(validation.message);
+    const continueEnabledNow = isIdentityContinueEnabled({
+      submitting: false,
+      mediaBusy,
+      pinStatus: pinUi.status,
+      confirmedLocation: current.confirmedLocation,
+      pinCode: current.pinCode,
+    });
+    const decision = decideLocationContinueAction({
+      continueEnabled: continueEnabledNow,
+      validationOk: validation.ok,
+      validationMessage: validation.ok ? undefined : validation.message,
+    });
+    if (decision.kind === "blocked") {
+      setServerError(decision.message);
       return;
     }
+    const gen = continueGuardRef.current.begin();
     setSubmitting(true);
     try {
       await saveOnboardingProfileDraftV2(current);
+      const after = decideLocationContinueAfterPersist({
+        generationCurrent: continueGuardRef.current.isCurrent(gen),
+        persistOk: true,
+      });
+      if (after === "ignore") return;
       markContinuingWizardStep("profileReview", user.uid, {
         phoneE164: user.phoneE164,
         verifiedEmail: user.normalizedEmail ?? user.businessEmail,
       });
-      router.replace("/(auth)/profile-review");
+      router.replace(LOCATION_CONTINUE_REVIEW_HREF);
     } catch (e) {
+      const after = decideLocationContinueAfterPersist({
+        generationCurrent: continueGuardRef.current.isCurrent(gen),
+        persistOk: false,
+        persistMessage: userFacingMessage(e),
+      });
+      if (after === "ignore") return;
       setServerError(userFacingMessage(e));
     } finally {
-      setSubmitting(false);
+      if (continueGuardRef.current.isCurrent(gen)) {
+        setSubmitting(false);
+      }
+    }
+  };
+
+  const cancelPendingLocationWork = () => {
+    Keyboard.dismiss();
+    continueGuardRef.current.invalidate();
+    latestPinRequestIdRef.current = nextPinLookupRequestId();
+    if (pinLookupTimerRef.current) {
+      clearTimeout(pinLookupTimerRef.current);
+      pinLookupTimerRef.current = null;
     }
   };
 
   const goBack = () => {
+    cancelPendingLocationWork();
     if (identityPhase === "location" && !readOnly) {
       setIdentityPhase("details");
       return;
@@ -457,9 +507,14 @@ export function BusinessIdentityScreen({
     confirmedLocation: draft.confirmedLocation,
     pinCode: draft.pinCode,
   });
+  const locationChrome = locationContinueChrome({
+    submitting,
+    continueEnabled,
+  });
 
   const onDetailsContinue = () => {
     if (!detailsEnabled) return;
+    Keyboard.dismiss();
     onboardingMark("identityContinueTap");
     void persistDraftNow();
     setIdentityPhase("location");
@@ -507,9 +562,11 @@ export function BusinessIdentityScreen({
             ) : null}
             <AuthV2PrimaryButton
               label={t("onboarding.profile.continue")}
-              loading={submitting}
+              loading={identityPhase === "location" ? locationChrome.loading : submitting}
               loadingLabel={t("authV2.email.saving")}
-              disabled={identityPhase === "details" ? !detailsEnabled : !continueEnabled}
+              disabled={
+                identityPhase === "details" ? !detailsEnabled : locationChrome.disabled
+              }
               onPress={() =>
                 identityPhase === "details" ? onDetailsContinue() : void onContinue()
               }
@@ -665,21 +722,25 @@ export function BusinessIdentityScreen({
             ) : null}
 
             {pinUi.status === "ready_to_confirm" ? (
-              <LocationConfirmationCard
-                locality={pinUi.locality}
-                district={pinUi.district}
-                state={pinUi.state}
-                confirmed={false}
-              />
+              <Pressable onPress={Keyboard.dismiss} accessible={false}>
+                <LocationConfirmationCard
+                  locality={pinUi.locality}
+                  district={pinUi.district}
+                  state={pinUi.state}
+                  confirmed={false}
+                />
+              </Pressable>
             ) : null}
 
             {pinUi.status === "confirmed" ? (
-              <LocationConfirmationCard
-                locality={pinUi.location.locality}
-                district={pinUi.location.district}
-                state={pinUi.location.state}
-                confirmed
-              />
+              <Pressable onPress={Keyboard.dismiss} accessible={false}>
+                <LocationConfirmationCard
+                  locality={pinUi.location.locality}
+                  district={pinUi.location.district}
+                  state={pinUi.location.state}
+                  confirmed
+                />
+              </Pressable>
             ) : null}
           </>
         )}

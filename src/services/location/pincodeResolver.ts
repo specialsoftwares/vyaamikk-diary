@@ -2,15 +2,10 @@ import type { PincodeResolution } from "@/domain/indianPostal";
 import {
   getSharedIndiaPincodeOfflineLookup,
   isIndiaPincodeOfflineLookupReady,
-  scheduleDeferredIndiaPincodeWarm,
 } from "@/services/location/pincodeOfflineLookup";
 import { shouldQueryOfflinePincodeOnInteractivePath } from "@/services/location/pincodeWarmPolicy";
 import { env } from "@/config/env";
 import { pincodeCacheRepository } from "@/services/location/pincodeCacheRepository";
-export {
-  scheduleDeferredIndiaPincodeWarm,
-  warmIndiaPincodeOfflineLookup,
-} from "@/services/location/pincodeOfflineLookup";
 import { lookupPostalPincodeApi } from "@/services/location/postalPincodeApi";
 import { createLogger } from "@/utils/logger";
 
@@ -176,8 +171,8 @@ async function resolveUncached(pinCode: string): Promise<PincodeResolution> {
   if (api.success) {
     await pincodeCacheRepository.set(api);
     sessionCache.set(pinCode, api);
-    // Warm offline DB after a successful interactive API hit — never before.
-    scheduleDeferredIndiaPincodeWarm(2_000);
+    // Do not scheduleDeferredIndiaPincodeWarm here. That decompresses ~165k
+    // post offices on the JS thread and freezes Continue/Back after Confirmed.
     logLookupDiagnostic({
       pin: pinCode,
       cacheHit: false,
@@ -187,10 +182,6 @@ async function resolveUncached(pinCode: string): Promise<PincodeResolution> {
     });
     return api;
   }
-
-  // Still schedule a deferred warm so later lookups can go offline without
-  // blocking this failed interactive attempt.
-  scheduleDeferredIndiaPincodeWarm(2_000);
 
   // Cache durable not-found; never cache transport/timeout (retry next tap).
   if (api.errorClass === "not_found") {
