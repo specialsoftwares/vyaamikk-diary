@@ -95,6 +95,7 @@
     "test:sync-lock-identity": "npx --yes tsx src/sync/syncLockIdentityPolicy.test.ts",
     "test:safe-mailto": "npx --yes tsx src/utils/safeMailto.test.ts",
     "test:pincode-warm-policy": "npx --yes tsx src/services/location/pincodeWarmPolicy.test.ts",
+    "test:location-onboarding-stall": "npx --yes tsx src/onboarding/locationOnboardingContinue.contract.test.ts && npx --yes tsx src/auth-v2/authShellKeyboardPolicy.test.ts",
     "test:session-last-active": "npx --yes tsx src/services/auth/sessionLastActiveTouch.test.ts",
     "test:letterhead-migration-policy": "npx --yes tsx src/services/letterhead/letterheadMigrationPolicy.test.ts",
     "test:first-action-freeze": "npx --yes tsx src/diagnostics/firstActionFreeze.regression.test.ts",

@@ -20,3 +20,14 @@ export function shouldWarmIndiaPincodeOnCalendarTabMount(): boolean {
 export function shouldQueryOfflinePincodeOnInteractivePath(offlineReady: boolean): boolean {
   return offlineReady === true;
 }
+
+/**
+ * Interactive PIN lookup (Identity / review-edit) must not start the offline DB
+ * after a successful API hit. Decompressing ~165k post offices on the JS thread
+ * freezes Pressables for seconds to minutes — Continue, Back, and keyboard
+ * dismissal all look dead while the Confirmed card is already on screen.
+ * Map mode still warms via `scheduleDeferredIndiaPincodeWarm` directly.
+ */
+export function shouldScheduleOfflinePincodeWarmAfterInteractiveLookup(): boolean {
+  return false;
+}
