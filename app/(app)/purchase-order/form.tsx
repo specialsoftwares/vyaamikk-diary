@@ -54,7 +54,14 @@ import {
   normalizeIndianPinInput,
   resolveIndianPincode,
 } from "@/services/location/pincodeResolver";
-import { createStaleSafePincodeLookup } from "@/services/location/staleSafePincodeLookup";
+import {
+  applyLatestPinAutofill,
+  createStaleSafePincodeLookup,
+  EMPTY_PIN_AUTOFILL,
+  pinAutofillStateAfterUserEdit,
+  pinAutofillStateFromLoaded,
+  type PinAutofillFieldState,
+} from "@/services/location/staleSafePincodeLookup";
 import { formatINRInWords } from "@/utils/money/inrWords";
 import { useFormFieldNavigation } from "@/components/inputSafety/FormFocusManager";
 import { buildPurchaseOrderNavOrder } from "@/utils/formFieldNavigation/fieldNavOrders";
@@ -233,6 +240,8 @@ export default function PurchaseOrderFormScreen() {
   const hasLogo = Boolean(user?.profileLogo?.localUri);
   const vendorPinLookupRef = useRef(createStaleSafePincodeLookup(resolveIndianPincode));
   const buyerPinLookupRef = useRef(createStaleSafePincodeLookup(resolveIndianPincode));
+  const vendorStateFillRef = useRef<PinAutofillFieldState>({ ...EMPTY_PIN_AUTOFILL });
+  const buyerStateFillRef = useRef<PinAutofillFieldState>({ ...EMPTY_PIN_AUTOFILL });
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -249,6 +258,10 @@ export default function PurchaseOrderFormScreen() {
           setVendorAddress(po.vendorAddress ?? "");
           setVendorPin(po.vendorPin ?? "");
           setVendorState(po.vendorState ?? "");
+          vendorStateFillRef.current = pinAutofillStateFromLoaded(
+            po.vendorState ?? "",
+            po.vendorPin ?? ""
+          );
           setVendorContactName(po.vendorContactName ?? "");
           setVendorContactPhone(po.vendorContactPhone ?? "");
           setVendorContactEmail(po.vendorContactEmail ?? "");
@@ -257,6 +270,10 @@ export default function PurchaseOrderFormScreen() {
           setBuyerGstin(po.buyerGstin ?? "");
           setBuyerPin(po.buyerPin ?? "");
           setBuyerState(po.buyerState ?? "");
+          buyerStateFillRef.current = pinAutofillStateFromLoaded(
+            po.buyerState ?? "",
+            po.buyerPin ?? ""
+          );
           setAuthorizedBy(po.authorizedBy ?? "");
           setAuthorizedDesignation(po.authorizedDesignation ?? "");
           setShipSameAsBuyer(po.shipSameAsBuyer ?? true);
@@ -326,14 +343,24 @@ export default function PurchaseOrderFormScreen() {
     });
   }, [user, isEditing]);
 
-  // Best-effort: resolve vendor/buyer state from PIN. Latest PIN wins.
+  // Best-effort: resolve vendor/buyer state from PIN. Latest PIN wins for
+  // empty/auto-filled values; a manual edit for the current PIN is kept.
   useEffect(() => {
     const pin = normalizeIndianPinInput(vendorPin);
     if (!isValidIndianPincode(pin)) return;
     let cancelled = false;
     void vendorPinLookupRef.current.lookup(pin).then((r) => {
       if (cancelled || !r?.success || !r.state) return;
-      setVendorState(r.state);
+      setVendorState((prev) => {
+        const next = applyLatestPinAutofill({
+          current: prev,
+          resolved: r.state,
+          pin,
+          field: vendorStateFillRef.current,
+        });
+        vendorStateFillRef.current = next.field;
+        return next.value;
+      });
     });
     return () => {
       cancelled = true;
@@ -346,7 +373,16 @@ export default function PurchaseOrderFormScreen() {
     let cancelled = false;
     void buyerPinLookupRef.current.lookup(pin).then((r) => {
       if (cancelled || !r?.success || !r.state) return;
-      setBuyerState(r.state);
+      setBuyerState((prev) => {
+        const next = applyLatestPinAutofill({
+          current: prev,
+          resolved: r.state,
+          pin,
+          field: buyerStateFillRef.current,
+        });
+        buyerStateFillRef.current = next.field;
+        return next.value;
+      });
     });
     return () => {
       cancelled = true;
@@ -750,7 +786,10 @@ export default function PurchaseOrderFormScreen() {
               navFieldKey="buyerState"
               label={t("purchaseOrder.fieldState")}
               value={buyerState}
-              onChangeText={setBuyerState}
+              onChangeText={(v) => {
+                buyerStateFillRef.current = pinAutofillStateAfterUserEdit(v, buyerPin);
+                setBuyerState(v);
+              }}
               maxLength={40}
             />
           </View>
@@ -836,7 +875,10 @@ export default function PurchaseOrderFormScreen() {
               navFieldKey="vendorState"
               label={t("purchaseOrder.fieldState")}
               value={vendorState}
-              onChangeText={setVendorState}
+              onChangeText={(v) => {
+                vendorStateFillRef.current = pinAutofillStateAfterUserEdit(v, vendorPin);
+                setVendorState(v);
+              }}
               maxLength={40}
             />
           </View>

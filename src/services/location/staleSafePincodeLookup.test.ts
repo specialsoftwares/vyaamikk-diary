@@ -10,7 +10,13 @@ import { fileURLToPath } from "node:url";
 
 import { applyPinLookupResult, nextPinLookupRequestId } from "@/onboarding/pinConfirmation";
 import { lookupPostalPincodeApi } from "@/services/location/postalPincodeApi";
-import { createStaleSafePincodeLookup } from "@/services/location/staleSafePincodeLookup";
+import {
+  applyLatestPinAutofill,
+  createStaleSafePincodeLookup,
+  EMPTY_PIN_AUTOFILL,
+  pinAutofillStateAfterUserEdit,
+  pinAutofillStateFromLoaded,
+} from "@/services/location/staleSafePincodeLookup";
 import {
   isValidIndianPincode,
   normalizeIndianPinInput,
@@ -145,6 +151,71 @@ async function testRapidPinAThenB(): Promise<void> {
   assert.equal(b.district, "New Delhi");
 }
 
+function testPinAutofillProvenance(): void {
+  const empty = applyLatestPinAutofill({
+    current: "",
+    resolved: "Uttar Pradesh",
+    pin: "201016",
+    field: { ...EMPTY_PIN_AUTOFILL },
+  });
+  assert.equal(empty.value, "Uttar Pradesh");
+  assert.equal(empty.field.provenance, "auto");
+  assert.equal(empty.field.pinWhenSet, "201016");
+
+  const replaceAuto = applyLatestPinAutofill({
+    current: "Uttar Pradesh",
+    resolved: "Delhi",
+    pin: "110001",
+    field: { provenance: "auto", pinWhenSet: "201016" },
+  });
+  assert.equal(replaceAuto.value, "Delhi", "new PIN must replace a previous auto-fill");
+  assert.equal(replaceAuto.field.pinWhenSet, "110001");
+
+  const keepManualSamePin = applyLatestPinAutofill({
+    current: "Maharashtra",
+    resolved: "Uttar Pradesh",
+    pin: "201016",
+    field: pinAutofillStateAfterUserEdit("Maharashtra", "201016"),
+  });
+  assert.equal(keepManualSamePin.value, "Maharashtra");
+  assert.equal(keepManualSamePin.field.provenance, "manual");
+
+  const loaded = pinAutofillStateFromLoaded("Uttar Pradesh", "201016");
+  const keepLoadedSamePin = applyLatestPinAutofill({
+    current: "Uttar Pradesh",
+    resolved: "Ghaziabad-wrong",
+    pin: "201016",
+    field: loaded,
+  });
+  assert.equal(
+    keepLoadedSamePin.value,
+    "Uttar Pradesh",
+    "opening an existing record must not clobber saved state for the same PIN"
+  );
+
+  const loadedThenNewPin = applyLatestPinAutofill({
+    current: "Uttar Pradesh",
+    resolved: "Delhi",
+    pin: "110001",
+    field: loaded,
+  });
+  assert.equal(
+    loadedThenNewPin.value,
+    "Delhi",
+    "changing PIN must still let the latest lookup replace a leftover saved state"
+  );
+
+  const cleared = pinAutofillStateAfterUserEdit("", "201016");
+  const refillAfterClear = applyLatestPinAutofill({
+    current: "",
+    resolved: "Uttar Pradesh",
+    pin: "201016",
+    field: cleared,
+  });
+  assert.equal(refillAfterClear.value, "Uttar Pradesh");
+  assert.equal(refillAfterClear.field.provenance, "auto");
+}
+
 function testInteractiveCallersUseGuards(): void {
   assert.equal(shouldQueryOfflinePincodeOnInteractivePath(false), false);
 
@@ -170,12 +241,34 @@ function testInteractiveCallersUseGuards(): void {
   const credit = readFileSync(join(root, "app/(app)/customer-credit/form.tsx"), "utf8");
   assert.match(po, /createStaleSafePincodeLookup/);
   assert.match(credit, /createStaleSafePincodeLookup/);
+  assert.match(po, /applyLatestPinAutofill/);
+  assert.match(credit, /applyLatestPinAutofill/);
+  assert.doesNotMatch(
+    po,
+    /setVendorState\(r\.state\)/,
+    "PO must not unconditionally overwrite an editable vendor state"
+  );
+  assert.doesNotMatch(po, /setBuyerState\(r\.state\)/);
+  assert.doesNotMatch(credit, /setCustomerState\(r\.state\)/);
+  assert.doesNotMatch(credit, /setCity\(r\.district\)/);
   assert.doesNotMatch(
     po,
     /vendorPinResolved\.current = pin;\s*void resolveIndianPincode/,
     "PO must not mark PIN resolved before the lookup finishes"
   );
   assert.doesNotMatch(credit, /customerPinResolved\.current = pin;/);
+  assert.doesNotMatch(
+    po,
+    /prev\.trim\(\) \|\| r\.state/,
+    "must not restore first-fill-wins (stale PIN A would beat PIN B)"
+  );
+  assert.doesNotMatch(credit, /prev\.trim\(\) \|\| r\.state/);
+  assert.doesNotMatch(
+    po,
+    /shipPinLookup|shipPinResolved/,
+    "shipping PIN is manual entry only — not an auto-resolve path"
+  );
+  assert.match(po, /navFieldKey="shipPin"/);
 
   const resolver = readFileSync(
     join(root, "src/services/location/pincodeResolver.ts"),
@@ -194,6 +287,7 @@ async function main(): Promise<void> {
   await testOtherValidPinViaMockedFetch();
   await testNotFoundAndPartial();
   await testRapidPinAThenB();
+  testPinAutofillProvenance();
   testInteractiveCallersUseGuards();
   console.log("staleSafePincodeLookup.test.ts: ok");
 }
