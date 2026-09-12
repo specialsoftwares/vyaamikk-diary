@@ -223,6 +223,19 @@ async function main() {
           currentPeriodEnd: NOW - 30 * DAY,
         },
       ],
+      [
+        "existing trial",
+        {
+          plan: "professional",
+          billingStatus: "trial",
+          entitlementActive: true,
+          entitlementReason: "trialActive",
+          trialStartedAt: NOW - DAY,
+          trialEndsAt: NOW + 13 * DAY,
+          currentPeriodStart: NOW - DAY,
+          currentPeriodEnd: NOW + 13 * DAY,
+        },
+      ],
     ];
     let phoneSuffix = 700_000;
     for (const [label, prior] of ineligible) {
