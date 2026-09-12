@@ -263,12 +263,6 @@ function testInteractiveCallersUseGuards(): void {
     "must not restore first-fill-wins (stale PIN A would beat PIN B)"
   );
   assert.doesNotMatch(credit, /prev\.trim\(\) \|\| r\.state/);
-  assert.doesNotMatch(
-    po,
-    /shipPinLookup|shipPinResolved/,
-    "shipping PIN is manual entry only — not an auto-resolve path"
-  );
-  assert.match(po, /navFieldKey="shipPin"/);
 
   const resolver = readFileSync(
     join(root, "src/services/location/pincodeResolver.ts"),
@@ -282,6 +276,45 @@ function testInteractiveCallersUseGuards(): void {
   assert.doesNotMatch(coordinator, /getSharedIndiaPincodeOfflineLookup/);
 }
 
+function testShipPinLookupAndValidation(): void {
+  const po = readFileSync(join(root, "app/(app)/purchase-order/form.tsx"), "utf8");
+
+  assert.match(po, /shipPinLookupRef/, "A: shipPin uses a dedicated stale-safe lookup");
+  assert.equal(
+    [...po.matchAll(/createStaleSafePincodeLookup\(resolveIndianPincode\)/g)].length,
+    3,
+    "vendor, buyer, and ship each own a stale-safe lookup instance"
+  );
+  assert.match(po, /shipPinLookupRef\.current\.lookup\(pin\)/);
+  assert.match(po, /if \(shipSameAsBuyer\) return;/);
+  assert.match(po, /shipStateFillRef/);
+  assert.match(po, /pinAutofillStateFromLoaded\(\s*po\.shipState/);
+  assert.match(po, /pinAutofillStateAfterUserEdit\(v, shipPin\)/);
+  assert.match(
+    po,
+    /applyLatestPinAutofill\(\{[\s\S]*field: shipStateFillRef\.current/,
+    "C–F: shipping uses the shared provenance autofill helper, not an ad-hoc fill"
+  );
+  assert.doesNotMatch(po, /setShipState\(r\.state\)/);
+  assert.doesNotMatch(po, /shipPinResolved\.current = pin;/);
+  assert.match(
+    po,
+    /shipPin\.trim\(\) && !isValidIndianPincode\(shipPin\)/,
+    "G: non-empty malformed ship PIN is flagged on the field"
+  );
+  assert.match(
+    po,
+    /!shipSameAsBuyer && shipPin\.trim\(\) && !isValidIndianPincode\(shipPin\)/,
+    "G: submit rejects malformed optional ship PIN; empty remains allowed"
+  );
+  assert.match(po, /t\("postal\.invalidPin"\)/);
+  assert.doesNotMatch(
+    po,
+    /scheduleDeferredIndiaPincodeWarm/,
+    "H: PO form must not warm india-pincode"
+  );
+}
+
 async function main(): Promise<void> {
   await test201016Fixture();
   await testOtherValidPinViaMockedFetch();
@@ -289,6 +322,7 @@ async function main(): Promise<void> {
   await testRapidPinAThenB();
   testPinAutofillProvenance();
   testInteractiveCallersUseGuards();
+  testShipPinLookupAndValidation();
   console.log("staleSafePincodeLookup.test.ts: ok");
 }
 

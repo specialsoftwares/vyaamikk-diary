@@ -240,8 +240,10 @@ export default function PurchaseOrderFormScreen() {
   const hasLogo = Boolean(user?.profileLogo?.localUri);
   const vendorPinLookupRef = useRef(createStaleSafePincodeLookup(resolveIndianPincode));
   const buyerPinLookupRef = useRef(createStaleSafePincodeLookup(resolveIndianPincode));
+  const shipPinLookupRef = useRef(createStaleSafePincodeLookup(resolveIndianPincode));
   const vendorStateFillRef = useRef<PinAutofillFieldState>({ ...EMPTY_PIN_AUTOFILL });
   const buyerStateFillRef = useRef<PinAutofillFieldState>({ ...EMPTY_PIN_AUTOFILL });
+  const shipStateFillRef = useRef<PinAutofillFieldState>({ ...EMPTY_PIN_AUTOFILL });
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -281,6 +283,10 @@ export default function PurchaseOrderFormScreen() {
           setShipAddress(po.shipAddress ?? "");
           setShipPin(po.shipPin ?? "");
           setShipState(po.shipState ?? "");
+          shipStateFillRef.current = pinAutofillStateFromLoaded(
+            po.shipState ?? "",
+            po.shipPin ?? ""
+          );
           setShipContact(po.shipContact ?? "");
           setTaxApplicable(po.taxApplicable ?? "none");
           if (po.gstRate != null) {
@@ -389,6 +395,29 @@ export default function PurchaseOrderFormScreen() {
     };
   }, [buyerPin]);
 
+  useEffect(() => {
+    if (shipSameAsBuyer) return;
+    const pin = normalizeIndianPinInput(shipPin);
+    if (!isValidIndianPincode(pin)) return;
+    let cancelled = false;
+    void shipPinLookupRef.current.lookup(pin).then((r) => {
+      if (cancelled || !r?.success || !r.state) return;
+      setShipState((prev) => {
+        const next = applyLatestPinAutofill({
+          current: prev,
+          resolved: r.state,
+          pin,
+          field: shipStateFillRef.current,
+        });
+        shipStateFillRef.current = next.field;
+        return next.value;
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [shipPin, shipSameAsBuyer]);
+
   const effectiveGstRate = useMemo(() => {
     if (taxApplicable !== "applicable") return null;
     return gstRateSel === "custom" ? toNumber(gstRateCustom) : Number(gstRateSel);
@@ -485,6 +514,8 @@ export default function PurchaseOrderFormScreen() {
     if (!isValidGstin(buyerGstin)) return setSubmitError(t("purchaseOrder.errBuyerGstin"));
     if (!isValidIndianPincode(vendorPin)) return setSubmitError(t("purchaseOrder.errVendorPin"));
     if (!isValidIndianPincode(buyerPin)) return setSubmitError(t("purchaseOrder.errBuyerPin"));
+    if (!shipSameAsBuyer && shipPin.trim() && !isValidIndianPincode(shipPin))
+      return setSubmitError(t("postal.invalidPin"));
     if (vendorContactPhone.trim() && !PHONE_RE.test(vendorContactPhone.trim()))
       return setSubmitError(t("purchaseOrder.errContactPhone"));
     if (vendorContactEmail.trim() && !EMAIL_RE.test(vendorContactEmail.trim()))
@@ -970,6 +1001,11 @@ export default function PurchaseOrderFormScreen() {
                   onChangeText={(v) => setShipPin(normalizeIndianPinInput(v))}
                   keyboardType="number-pad"
                   maxLength={6}
+                  error={
+                    shipPin.trim() && !isValidIndianPincode(shipPin)
+                      ? t("postal.invalidPin")
+                      : null
+                  }
                 />
               </View>
               <View style={styles.qtyCol}>
@@ -977,7 +1013,10 @@ export default function PurchaseOrderFormScreen() {
                   navFieldKey="shipState"
                   label={t("purchaseOrder.fieldState")}
                   value={shipState}
-                  onChangeText={setShipState}
+                  onChangeText={(v) => {
+                    shipStateFillRef.current = pinAutofillStateAfterUserEdit(v, shipPin);
+                    setShipState(v);
+                  }}
                   maxLength={40}
                 />
               </View>
