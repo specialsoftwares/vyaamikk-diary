@@ -30,6 +30,14 @@ service firebase.storage {
                    && request.resource.contentType == 'application/pdf';
     }
 
+    // Company GST artefacts — Admin SDK / signed URLs only. Never client SDK.
+    match /company/invoices/{allPaths=**} {
+      allow read, write: if false;
+    }
+    match /company/gstr1-reports/{allPaths=**} {
+      allow read, write: if false;
+    }
+
     match /{allPaths=**} {
       allow read, write: if false;
     }

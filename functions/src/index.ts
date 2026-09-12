@@ -57,3 +57,10 @@ export {
   handleWasNotMeToken,
   handleWasNotMeTokenHttp,
 } from "./security/newDeviceSecurity";
+
+/** VYD-40 GST callables: exported for build, production-disabled (fail-closed). */
+export { updateBillingDetails } from "./billing/callables/updateBillingDetails";
+export { verifyGstinManual } from "./billing/callables/verifyGstinManual";
+export { getInvoiceDownloadUrl } from "./billing/callables/getInvoiceDownloadUrl";
+export { generateGstr1WorkingPapers } from "./billing/callables/generateGstr1WorkingPapers";
+export { markGstr1Filed } from "./billing/callables/markGstr1Filed";

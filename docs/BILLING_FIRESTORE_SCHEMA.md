@@ -12,8 +12,15 @@ schema-by-use: **no documents are pre-created to "initialize" collections.**
 | `users/{uid}/subscription/status` | Admin SDK only | owner | denied (all ops) |
 | `users/{uid}/subscription/usageCurrent` | Admin SDK + the single Option-C atomic transition | owner | ONLY the gated atomic quota transition; delete denied |
 | `users/{uid}/subscriptionBillingHistory/{eventId}` | Admin SDK only (sanitized events) | owner | denied |
+| `users/{uid}/subscription/billingDetails` | Admin SDK only (`updateBillingDetails` / `verifyGstinManual`) | owner | denied |
 | `users/{uid}/preferences/billingUx` | client (owner) | owner | `hasOnly(benefitScreenShownAt, updatedAt)`, ints; delete denied |
 | `_companyBilling/{uid}` | Admin SDK only | denied (even own uid) | denied |
+| `_subscriptionInvoices/{invoiceId}` | Admin SDK only | denied | denied |
+| `_subscriptionCreditNotes/{creditNoteId}` | Admin SDK only | denied | denied |
+| `_invoiceCounters/{financialYear}` | Admin SDK only | denied | denied |
+| `_creditNoteCounters/{financialYear}` | Admin SDK only | denied | denied |
+| `_invoiceRetryQueue/{invoiceId}` | Admin SDK only | denied | denied |
+| `_gstr1FilingBatches/{filingBatchId}` | Admin SDK only | denied | denied |
 | `_subscriptionAuditLog/{eventId}` | Admin SDK only (append-only discipline) | denied | denied |
 | `_processedBillingEvents/{idempotencyKey}` | Admin SDK only | denied | denied |
 | `_billingEventLedger/{financialEventId}` | Admin SDK only (immutable ledger) | denied | denied |
@@ -290,3 +297,16 @@ anticipated client query — sanitized billing history, latest 12
 single-field order-by served by Firestore's automatic single-field indexes.
 A composite index becomes necessary only if a filtered+ordered variant
 appears in a later phase; it will be added with the query that requires it.
+
+## VYD-40 GST / tax documents (fail-closed foundation)
+
+- Invoice source of truth is `_subscriptionInvoices/{invoiceId}` with
+  `invoiceId` derived from `financialEventId`. `_companyBilling.latestTaxDocumentId`
+  is a pointer only.
+- Billing history remains `users/{uid}/subscriptionBillingHistory/{eventId}`
+  with optional additive tax fields. Absent fields on older events are valid.
+- Production TAX INVOICE issuance stays fail-closed until seller certificate
+  fields, SAC/rate, and (for Apple) platform tax policy are owner/CA confirmed.
+- Cloud Run HTML→PDF renderer is selected but **not deployed** in VYD-40.
+  See `docs/BILLING_VYD38_BILLING_DETAILS_UX.md` for the deferred Billing
+  Details UI.

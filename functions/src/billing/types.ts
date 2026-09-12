@@ -175,6 +175,15 @@ export interface BillingHistoryEventDoc {
   /** Integer paise actually charged by the store for this event, when known. */
   amountInPaise: number | null;
   currency: "INR" | null;
+  /** Optional GST/tax-document pointers (VYD-40). Absent on pre-GST events. */
+  taxDocumentId?: string | null;
+  taxDocumentNumber?: string | null;
+  taxDocumentType?: string | null;
+  taxableAmountInPaise?: number | null;
+  taxAmountInPaise?: number | null;
+  totalInPaise?: number | null;
+  invoiceAvailableForDownload?: boolean | null;
+  gstinVerificationStatus?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -237,6 +246,11 @@ export interface CompanyBillingDoc {
    * defense in depth; adapters own reconciliation — see transition.ts).
    */
   lastReconciledAt: number | null;
+  /**
+   * Pointer only (VYD-40). The invoice source of truth is
+   * `_subscriptionInvoices/{invoiceId}` — never copy the full invoice here.
+   */
+  latestTaxDocumentId?: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -422,3 +436,258 @@ export type PlanFeatureKey =
 
 /** Business plan anticipates at most 3 business profiles (W-11; not built yet). */
 export const BUSINESS_PLAN_MAX_BUSINESS_PROFILES = 3;
+
+// ---------------------------------------------------------------------------
+// GST / tax documents (VYD-40) — see functions/src/billing/tax/
+// ---------------------------------------------------------------------------
+
+export type TaxResponsibilityMode = "developer" | "platform" | "unconfirmed";
+
+export type PlatformTaxChannel =
+  | "google_play_india"
+  | "apple_app_store_india"
+  | "direct_web_india";
+
+export type TaxDocumentType =
+  | "tax_invoice_b2b"
+  | "tax_invoice_b2c"
+  | "platform_subscription_receipt"
+  | "compliance_review_required";
+
+export type GstinVerificationStatus =
+  | "not_provided"
+  | "pending_manual_verification"
+  | "verified"
+  | "rejected";
+
+export type BuyerClassification = "b2b" | "b2c";
+
+export type GstTaxType = "cgst_sgst" | "igst" | null;
+
+export type InvoicePdfStatus =
+  | "pending"
+  | "awaiting_financial_evidence"
+  | "awaiting_renderer"
+  | "ready"
+  | "failed";
+
+export type InvoiceEmailStatus =
+  | "pending"
+  | "accepted"
+  | "delivered"
+  | "bounced"
+  | "failed"
+  | "skipped_no_verified_email";
+
+export type GstrFilingFrequency = "monthly" | "quarterly";
+
+export type EcoClassificationStatus = "requires_tax_review" | "not_applicable" | "classified";
+
+export interface SellerTaxSnapshot {
+  legalName: string;
+  tradeName: string | null;
+  gstin: string;
+  registeredAddress: string;
+  stateCode: string;
+  stateName: string;
+}
+
+export interface BuyerTaxSnapshot {
+  classification: BuyerClassification;
+  legalName: string | null;
+  gstin: string | null;
+  gstinVerificationStatus: GstinVerificationStatus;
+  billingAddress: string | null;
+  stateCode: string | null;
+  stateName: string | null;
+}
+
+export interface EcoReportingSnapshot {
+  platform: BillingPlatform | "web";
+  operatorIdentifier: string | null;
+  operatorGstin: string | null;
+  taxResponsibilityMode: TaxResponsibilityMode;
+  section52TcsStatus: EcoClassificationStatus;
+  table14ClassificationStatus: EcoClassificationStatus;
+}
+
+/**
+ * Immutable-per-document tax invoice / receipt.
+ * Path: `_subscriptionInvoices/{invoiceId}` (zero client access).
+ */
+export interface SubscriptionInvoiceDoc {
+  invoiceId: string;
+  uid: string;
+  diagnosticUid: string;
+  financialEventId: string;
+  platform: BillingPlatform | "web" | null;
+  canonicalSku: string | null;
+  plan: VyaamikkPlan | null;
+  billingPeriod: string | null;
+  taxResponsibilityMode: TaxResponsibilityMode;
+  documentType: TaxDocumentType;
+  documentNumber: string | null;
+  financialYear: string | null;
+  taxPeriodMonth: string | null;
+  invoiceIssuedAt: number | null;
+  supplyOccurredAt: number | null;
+  seller: SellerTaxSnapshot | null;
+  buyer: BuyerTaxSnapshot;
+  placeOfSupplyStateCode: string | null;
+  placeOfSupplyStateName: string | null;
+  sacCode: string | null;
+  serviceDescription: string | null;
+  currency: "INR" | null;
+  grossCustomerAmountInPaise: number | null;
+  taxableAmountInPaise: number | null;
+  gstRateBps: number | null;
+  taxType: GstTaxType;
+  cgstInPaise: number | null;
+  sgstInPaise: number | null;
+  igstInPaise: number | null;
+  totalTaxInPaise: number | null;
+  totalInPaise: number | null;
+  platformCommissionInPaise: number | null;
+  ecoReporting: EcoReportingSnapshot;
+  pdfStatus: InvoicePdfStatus;
+  invoicePdfStoragePath: string | null;
+  emailStatus: InvoiceEmailStatus;
+  emailProviderMessageId: string | null;
+  invoiceEmailAcceptedAt: number | null;
+  invoiceEmailDeliveredAt: number | null;
+  gstrReportable: boolean;
+  gstrReportedMonth: string | null;
+  gstrFilingBatchId: string | null;
+  historyEventId: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export const INVOICE_IMMUTABLE_KEYS: ReadonlyArray<keyof SubscriptionInvoiceDoc> = [
+  "invoiceId",
+  "uid",
+  "diagnosticUid",
+  "financialEventId",
+  "platform",
+  "canonicalSku",
+  "plan",
+  "billingPeriod",
+  "taxResponsibilityMode",
+  "documentType",
+  "documentNumber",
+  "financialYear",
+  "taxPeriodMonth",
+  "invoiceIssuedAt",
+  "supplyOccurredAt",
+  "seller",
+  "buyer",
+  "placeOfSupplyStateCode",
+  "placeOfSupplyStateName",
+  "sacCode",
+  "serviceDescription",
+  "currency",
+  "grossCustomerAmountInPaise",
+  "taxableAmountInPaise",
+  "gstRateBps",
+  "taxType",
+  "cgstInPaise",
+  "sgstInPaise",
+  "igstInPaise",
+  "totalTaxInPaise",
+  "totalInPaise",
+  "platformCommissionInPaise",
+  "ecoReporting",
+];
+
+export const INVOICE_OPERATIONAL_KEYS: ReadonlyArray<keyof SubscriptionInvoiceDoc> = [
+  "pdfStatus",
+  "invoicePdfStoragePath",
+  "emailStatus",
+  "emailProviderMessageId",
+  "invoiceEmailAcceptedAt",
+  "invoiceEmailDeliveredAt",
+  "gstrReportedMonth",
+  "gstrFilingBatchId",
+  "updatedAt",
+];
+
+export interface SubscriptionBillingDetailsDoc {
+  gstin: string | null;
+  billingBusinessName: string | null;
+  billingAddressLine1: string | null;
+  billingAddressLine2: string | null;
+  billingCity: string | null;
+  billingPostalCode: string | null;
+  billingStateCode: string | null;
+  billingStateName: string | null;
+  gstinVerificationStatus: GstinVerificationStatus;
+  verifiedLegalName: string | null;
+  verifiedStateCode: string | null;
+  verifiedAt: number | null;
+  verifiedByDiagnosticUid: string | null;
+  updatedAt: number;
+}
+
+export interface InvoiceCounterDoc {
+  currentTaxInvoiceCount: number;
+  currentReceiptCount: number;
+  financialYear: string;
+  updatedAt: number;
+}
+
+export interface CreditNoteCounterDoc {
+  currentCount: number;
+  financialYear: string;
+  updatedAt: number;
+}
+
+export interface SubscriptionCreditNoteDoc {
+  creditNoteId: string;
+  originalInvoiceId: string;
+  originalDocumentNumber: string | null;
+  refundFinancialEventId: string;
+  uid: string;
+  diagnosticUid: string;
+  documentNumber: string | null;
+  financialYear: string | null;
+  taxPeriodMonth: string | null;
+  issuedAt: number | null;
+  taxResponsibilityMode: TaxResponsibilityMode;
+  taxableAmountReversedInPaise: number | null;
+  cgstReversedInPaise: number | null;
+  sgstReversedInPaise: number | null;
+  igstReversedInPaise: number | null;
+  totalTaxReversedInPaise: number | null;
+  totalReversedInPaise: number | null;
+  gstrReportable: boolean;
+  gstrReportedMonth: string | null;
+  gstrFilingBatchId: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type InvoiceRetryStage = "pdf" | "email";
+
+export interface InvoiceRetryQueueDoc {
+  invoiceId: string;
+  financialEventId: string;
+  stage: InvoiceRetryStage;
+  attempts: number;
+  maxAttempts: number;
+  nextAttemptAt: number;
+  lastErrorCode: string | null;
+  deadLettered: boolean;
+  updatedAt: number;
+}
+
+export interface Gstr1FilingBatchDoc {
+  month: string;
+  reportId: string;
+  invoiceIds: string[];
+  creditNoteIds: string[];
+  reportHash: string;
+  filedAt: number;
+  filedByDiagnosticUid: string;
+  filingAcknowledgementReference: string;
+  createdAt: number;
+}

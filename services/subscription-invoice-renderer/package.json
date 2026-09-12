@@ -1,0 +1,20 @@
+{
+  "name": "subscription-invoice-renderer",
+  "private": true,
+  "version": "1.0.0",
+  "engines": {
+    "node": "20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/main.js",
+    "test": "npx --yes tsx src/protocol.test.ts && npx --yes tsx src/server.test.ts"
+  },
+  "dependencies": {
+    "puppeteer": "24.22.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.0",
+    "typescript": "^5.8.3"
+  }
+}
