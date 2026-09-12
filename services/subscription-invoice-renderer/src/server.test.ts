@@ -56,6 +56,16 @@ async function main() {
   if (!dockerPath) throw new Error("Dockerfile not found");
   const docker = readFileSync(dockerPath, "utf8");
   assert.match(docker, /npm run build/);
+  assert.match(docker, /FROM node:22-bookworm-slim AS builder/);
+  assert.match(docker, /ghcr.io\/puppeteer\/puppeteer:24.22.3/);
+  assert.doesNotMatch(docker, /FROM node:20/);
+  const pkgPath = [
+    resolve(process.cwd(), "package.json"),
+    resolve(process.cwd(), "services/subscription-invoice-renderer/package.json"),
+  ].find((p) => existsSync(p));
+  if (!pkgPath) throw new Error("renderer package.json not found");
+  const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { engines?: { node?: string } };
+  assert.equal(pkg.engines?.node, "22");
   assert.match(docker, /COPY --from=builder \/app\/dist \.\/dist/);
   assert.doesNotMatch(docker, /^COPY dist \.\/dist$/m);
 

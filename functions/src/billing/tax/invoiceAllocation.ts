@@ -206,6 +206,7 @@ export async function persistTaxDocument(
       taxPeriodMonth: taxPeriod.taxPeriodMonth,
       taxPeriodStatus: taxPeriod.taxPeriodStatus,
       issueStatus: issued ? "issued" : "unissued_draft",
+      issueHoldReason: issued ? null : (input.stub.issueHoldReason ?? null),
       gstrReportable:
         issued &&
         taxPeriod.taxPeriodStatus === "resolved" &&
@@ -227,15 +228,13 @@ export async function persistTaxDocument(
   });
 }
 
-/** @deprecated Prefer persistTaxDocument; wrapper retains prior call shape. */
+/** Low-level stub helper for counter tests. Production issuance uses taxDocumentFinalization. */
 export async function allocateInvoiceStub(
   store: BillingStore,
   input: AllocateInvoiceInput
 ): Promise<AllocateInvoiceResult> {
   return persistTaxDocument(store, input);
 }
-
-export const finalizeUnissuedInvoice = persistTaxDocument;
 
 export function assertDocumentTypeAllowsNumber(documentType: TaxDocumentType): void {
   if (!mayAllocateStatutoryNumber(documentType)) {

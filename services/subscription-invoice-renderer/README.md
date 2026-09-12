@@ -29,7 +29,7 @@ No API keys. No shared bearer secrets. No unauthenticated invocation.
 
 ## Pin
 
-- Node 20
+- Node 22 (matches `ghcr.io/puppeteer/puppeteer:24.22.3` runtime; do not declare engines Node 20)
 - `puppeteer@24.22.3`
 - Image tag must match: `ghcr.io/puppeteer/puppeteer:24.22.3`
 

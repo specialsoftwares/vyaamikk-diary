@@ -40,6 +40,8 @@ import { resolve } from "node:path";
 
 import type { EmailProvider } from "../../email/provider";
 import { createInvoiceDownloadUrl } from "../callables/getInvoiceDownloadUrl";
+import { applyUpdateBillingDetails } from "../callables/updateBillingDetails";
+import { applyVerifyGstinManual } from "../callables/verifyGstinManual";
 import { BillingError } from "../errors";
 import {
   billingDetailsPath,
@@ -50,6 +52,7 @@ import {
   subscriptionHistoryPath,
 } from "../paths";
 import { MemoryBillingStore } from "../store";
+import type { BillingStore, BillingTransaction } from "../store";
 import type {
   BillingEventLedgerDoc,
   CompanyBillingDoc,
@@ -77,6 +80,8 @@ import {
 } from "./pdfRenderer";
 import { enqueueInvoiceRetry, resolveInvoiceRetryStage, INVOICE_RETRY_MAX_ATTEMPTS } from "./retryQueue";
 import type { SellerIdentityConfig } from "./sellerIdentity";
+import { notApplicableChannelEco, unreviewedChannelEco } from "./sellerIdentity";
+import { finalizeUnissuedInvoice } from "./taxDocumentFinalization";
 import {
   MemoryInvoiceObjectStorage,
   orchestrateTaxDocument,
@@ -105,6 +110,9 @@ function sellerConfig(overrides: Partial<SellerIdentityConfig> = {}): SellerIden
     appleTaxResponsibilityMode: "unconfirmed" as const,
     googleTaxResponsibilityMode: "developer" as const,
     directWebTaxResponsibilityMode: "developer" as const,
+    googleEco: unreviewedChannelEco("google_play"),
+    appleEco: unreviewedChannelEco("apple_app_store"),
+    directWebEco: notApplicableChannelEco(null),
     billingEmailFromAddress: "billing@example.test",
     invoiceRendererUrl: "https://renderer.example.test",
     adminIdentityProvisioned: false,
@@ -183,6 +191,7 @@ function skeleton(partial: Partial<SubscriptionInvoiceDoc> & Pick<SubscriptionIn
     invoiceIssuedOnIst: null,
     supplyOccurredAt: NOW,
     issueStatus: "unissued_draft",
+    issueHoldReason: null,
     reverseChargeMode: "no",
     subscriptionDescription: "Vyaamikk Diary Professional Subscription (Yearly)",
     seller: null,
@@ -849,6 +858,293 @@ async function testEmailAndRetrySeparation(): Promise<void> {
   assert.equal(recovered.billingPeriod, "yearly");
 }
 
+const BUYER_MH_GSTIN = "27AAAAA0000A1Z5";
+const ADMIN = {
+  uid: "admin-1",
+  tokenAdmin: true,
+  adminIdentityProvisioned: true,
+};
+
+class FlipBillingDetailsStore implements BillingStore {
+  constructor(
+    readonly inner: MemoryBillingStore,
+    readonly flipPath: string,
+    readonly flipped: Record<string, unknown>
+  ) {}
+  async runTransaction<T>(fn: (tx: BillingTransaction) => Promise<T>): Promise<T> {
+    return this.inner.runTransaction(async (tx) => {
+      return fn({
+        get: async (path: string) => {
+          if (path === this.flipPath) {
+            this.inner.docs.set(path, this.flipped);
+            return { exists: true, data: () => this.flipped };
+          }
+          return tx.get(path);
+        },
+        create: (path: string, data: Record<string, unknown>) => tx.create(path, data),
+        set: (path: string, data: Record<string, unknown>) => tx.set(path, data),
+      });
+    });
+  }
+}
+
+async function testPendingGstinAndTransactionalFinalization(): Promise<void> {
+  const finalSrc = readFileSync(
+    resolve(process.cwd(), "functions/src/billing/tax/taxDocumentFinalization.ts"),
+    "utf8"
+  );
+  assert.match(finalSrc, /tx\.get\(ledgerPath\)/);
+  assert.match(finalSrc, /tx\.get\(billingDetailsPath/);
+  assert.match(finalSrc, /tx\.get\(counterPath\)/);
+  assert.match(finalSrc, /tx\.get\(invoicePath\)/);
+  const orchSrc = readFileSync(
+    resolve(process.cwd(), "functions/src/billing/tax/taxDocumentOrchestrator.ts"),
+    "utf8"
+  );
+  assert.match(orchSrc, /finalizeUnissuedInvoice/);
+  assert.doesNotMatch(orchSrc, /persistTaxDocument/);
+  assert.doesNotMatch(orchSrc, /buyerFromDetails/);
+
+  const noGstinStore = new MemoryBillingStore();
+  const noGstinEvt = ledger({ financialEventId: "evt-no-gstin" });
+  seedLedger(noGstinStore, noGstinEvt);
+  const b2c = await orchestrate({ store: noGstinStore, event: noGstinEvt });
+  assert.equal(b2c.documentType, "tax_invoice_b2c");
+  assert.equal(b2c.documentNumber, "SS/2026-27/0001");
+  assert.equal(b2c.buyer.gstin, null);
+  assert.equal(b2c.ecoReporting.table14ClassificationStatus, "requires_tax_review");
+
+  const pendingStore = new MemoryBillingStore();
+  const pendingEvt = ledger({ financialEventId: "evt-pending-gstin" });
+  seedLedger(pendingStore, pendingEvt);
+  pendingStore.docs.set(billingDetailsPath("user-1"), {
+    ...emptyBuyer(),
+    gstin: BUYER_MH_GSTIN,
+    gstinVerificationStatus: "pending_manual_verification",
+    billingStateCode: "27",
+    billingStateName: "Maharashtra",
+  });
+  const pendingInv = await orchestrate({ store: pendingStore, event: pendingEvt });
+  assert.equal(pendingInv.documentType, "compliance_review_required");
+  assert.equal(pendingInv.documentNumber, null);
+  assert.equal(pendingInv.issueHoldReason, "recipient_tax_classification_pending");
+  assert.equal(pendingInv.buyer.gstin, null);
+  assert.equal(pendingInv.buyer.gstinVerificationStatus, "pending_manual_verification");
+  const pendingId = pendingInv.invoiceId;
+
+  await applyVerifyGstinManual(pendingStore, {
+    targetUid: "user-1",
+    decision: "verified",
+    verifiedLegalName: "Buyer LLP",
+    nowMs: NOW + 1,
+    admin: ADMIN,
+    adminDiagnosticUid: "admindiag01",
+  });
+  const verifiedInv = await orchestrate({ store: pendingStore, event: pendingEvt });
+  assert.equal(verifiedInv.invoiceId, pendingId);
+  assert.equal(verifiedInv.documentType, "tax_invoice_b2b");
+  assert.equal(verifiedInv.documentNumber, "SS/2026-27/0001");
+  assert.equal(verifiedInv.buyer.gstin, BUYER_MH_GSTIN);
+
+  const rejectStore = new MemoryBillingStore();
+  const rejectEvt = ledger({ financialEventId: "evt-reject-gstin" });
+  seedLedger(rejectStore, rejectEvt);
+  rejectStore.docs.set(billingDetailsPath("user-1"), {
+    ...emptyBuyer(),
+    gstin: BUYER_MH_GSTIN,
+    gstinVerificationStatus: "pending_manual_verification",
+    billingStateCode: "27",
+  });
+  const rejectDraft = await orchestrate({ store: rejectStore, event: rejectEvt });
+  assert.equal(rejectDraft.documentNumber, null);
+  await applyVerifyGstinManual(rejectStore, {
+    targetUid: "user-1",
+    decision: "rejected",
+    nowMs: NOW + 2,
+    admin: ADMIN,
+    adminDiagnosticUid: "admindiag01",
+  });
+  const rejectedInv = await orchestrate({ store: rejectStore, event: rejectEvt });
+  assert.equal(rejectedInv.invoiceId, rejectDraft.invoiceId);
+  assert.equal(rejectedInv.documentType, "tax_invoice_b2c");
+  assert.equal(rejectedInv.documentNumber, "SS/2026-27/0001");
+  assert.equal(rejectedInv.buyer.gstin, null);
+  assert.doesNotMatch(buildSubscriptionTaxDocumentHtml(rejectedInv), /27AAAAA0000A1Z5/);
+  assert.doesNotMatch(buildSubscriptionTaxDocumentHtml(rejectedInv), /GSTIN: 27/);
+
+  const clearStore = new MemoryBillingStore();
+  const clearEvt = ledger({ financialEventId: "evt-clear-gstin" });
+  seedLedger(clearStore, clearEvt);
+  clearStore.docs.set(billingDetailsPath("user-1"), {
+    ...emptyBuyer(),
+    gstin: BUYER_MH_GSTIN,
+    gstinVerificationStatus: "pending_manual_verification",
+  });
+  const clearDraft = await orchestrate({ store: clearStore, event: clearEvt });
+  await applyUpdateBillingDetails(clearStore, "user-1", { gstin: null }, NOW + 3);
+  const clearedInv = await orchestrate({ store: clearStore, event: clearEvt });
+  assert.equal(clearedInv.invoiceId, clearDraft.invoiceId);
+  assert.equal(clearedInv.documentType, "tax_invoice_b2c");
+  assert.ok(clearedInv.documentNumber);
+
+  const raceInner = new MemoryBillingStore();
+  const raceEvt = ledger({ financialEventId: "evt-race-gstin" });
+  seedLedger(raceInner, raceEvt);
+  raceInner.docs.set(billingDetailsPath("user-1"), {
+    ...emptyBuyer(),
+    gstin: BUYER_MH_GSTIN,
+    gstinVerificationStatus: "pending_manual_verification",
+    billingStateCode: "27",
+    billingStateName: "Maharashtra",
+  });
+  const flipStore = new FlipBillingDetailsStore(raceInner, billingDetailsPath("user-1"), {
+    ...emptyBuyer(),
+    gstin: BUYER_MH_GSTIN,
+    gstinVerificationStatus: "verified",
+    verifiedLegalName: "Buyer LLP",
+    verifiedStateCode: "27",
+    billingStateCode: "27",
+    billingStateName: "Maharashtra",
+    verifiedAt: NOW,
+    verifiedByDiagnosticUid: "admindiag01",
+    updatedAt: NOW,
+  });
+  const raced = await finalizeUnissuedInvoice(flipStore, {
+    financialEventId: raceEvt.financialEventId,
+    config: sellerConfig(),
+    diagnosticUidFor: () => "diag01",
+    nowMs: NOW,
+  });
+  assert.equal(raced.invoice.documentType, "tax_invoice_b2b");
+  assert.equal(raced.invoice.buyer.gstin, BUYER_MH_GSTIN);
+  assert.ok(raced.invoice.documentNumber);
+
+  const ecoStore = new MemoryBillingStore();
+  const ecoEvt = ledger({ financialEventId: "evt-eco-classified" });
+  seedLedger(ecoStore, ecoEvt);
+  const ecoInv = await orchestrate({
+    store: ecoStore,
+    event: ecoEvt,
+    config: sellerConfig({
+      googleEco: {
+        section52TcsStatus: "classified",
+        table14ClassificationStatus: "classified",
+        operatorIdentifier: "google_play",
+        operatorGstin: null,
+      },
+    }),
+  });
+  assert.equal(ecoInv.ecoReporting.table14ClassificationStatus, "classified");
+  assert.equal(ecoInv.ecoReporting.section52TcsStatus, "classified");
+
+  const appleEcoStore = new MemoryBillingStore();
+  const appleEcoEvt = ledger({ financialEventId: "evt-apple-eco", platform: "ios" });
+  seedLedger(appleEcoStore, appleEcoEvt);
+  const appleIssued = await orchestrate({
+    store: appleEcoStore,
+    event: appleEcoEvt,
+    config: sellerConfig({ appleTaxResponsibilityMode: "developer" }),
+  });
+  assert.equal(appleIssued.documentType, "tax_invoice_b2c");
+  assert.equal(appleIssued.ecoReporting.table14ClassificationStatus, "requires_tax_review");
+  assert.equal(appleIssued.ecoReporting.section52TcsStatus, "requires_tax_review");
+}
+
+function creditNoteInput(
+  original: SubscriptionInvoiceDoc,
+  refundId: string,
+  nowMs: number
+) {
+  return {
+    stub: {
+      creditNoteId: creditNoteIdForRefundEvent(refundId),
+      originalInvoiceId: original.invoiceId,
+      originalDocumentNumber: original.documentNumber,
+      refundFinancialEventId: refundId,
+      uid: original.uid,
+      diagnosticUid: original.diagnosticUid,
+      documentNumber: null,
+      financialYear: null,
+      taxPeriodMonth: null,
+      taxPeriodStatus: "pending_issue" as const,
+      issuedAt: null,
+      issuedOnIst: null,
+      buyerGstin: null,
+      buyerClassification: null,
+      originalInvoiceIssuedOnIst: null,
+      placeOfSupplyStateCode: null,
+      gstRateBps: null,
+      taxType: null,
+      taxResponsibilityMode: original.taxResponsibilityMode,
+      taxableAmountReversedInPaise: original.taxableAmountInPaise,
+      cgstReversedInPaise: original.cgstInPaise,
+      sgstReversedInPaise: original.sgstInPaise,
+      igstReversedInPaise: original.igstInPaise,
+      totalTaxReversedInPaise: original.totalTaxInPaise,
+      totalReversedInPaise: original.totalInPaise,
+      gstrReportable: false,
+      gstrReportedMonth: null,
+      gstrFilingBatchId: null,
+      createdAt: nowMs,
+      updatedAt: nowMs,
+    },
+    original,
+    nowMs,
+  };
+}
+
+async function testCreditNoteIssueMonthTaxPeriod(): Promise<void> {
+  const store = new MemoryBillingStore();
+  const sepIssue = istWallClockToEpochMs("2026-09-12T12:00:00");
+  const octIssue = istWallClockToEpochMs("2026-10-05T10:00:00");
+  const original = (
+    await allocateInvoiceStub(store, {
+      stub: skeleton({
+        invoiceId: invoiceIdForFinancialEvent("inv-cn-sep"),
+        financialEventId: "inv-cn-sep",
+        documentType: "tax_invoice_b2b",
+        supplyOccurredAt: sepIssue,
+      }),
+      nowMs: sepIssue,
+      allocateNumber: true,
+    })
+  ).invoice;
+  const octCn = await allocateCreditNoteStub(store, {
+    ...creditNoteInput(original, "refund-oct", octIssue),
+    financialYear: "2026-27",
+  });
+  assert.equal(octCn.creditNote.taxPeriodMonth, "2026-10");
+  assert.equal(octCn.creditNote.taxPeriodStatus, "resolved");
+  assert.notEqual(octCn.creditNote.taxPeriodStatus, "unresolved_cross_period");
+  assert.equal(octCn.creditNote.financialYear, "2026-27");
+  assert.equal(octCn.creditNote.issuedOnIst, "05-10-2026");
+
+  const fyStore = new MemoryBillingStore();
+  const marIssue = istWallClockToEpochMs("2027-03-15T12:00:00");
+  const aprIssue = istWallClockToEpochMs("2027-04-02T09:00:00");
+  const marOriginal = (
+    await allocateInvoiceStub(fyStore, {
+      stub: skeleton({
+        invoiceId: invoiceIdForFinancialEvent("inv-cn-mar"),
+        financialEventId: "inv-cn-mar",
+        documentType: "tax_invoice_b2c",
+        supplyOccurredAt: marIssue,
+      }),
+      nowMs: marIssue,
+      allocateNumber: true,
+    })
+  ).invoice;
+  assert.equal(marOriginal.financialYear, "2026-27");
+  const aprCn = await allocateCreditNoteStub(fyStore, {
+    ...creditNoteInput(marOriginal, "refund-apr", aprIssue),
+    financialYear: "2027-28",
+  });
+  assert.equal(aprCn.creditNote.financialYear, "2027-28");
+  assert.equal(aprCn.creditNote.taxPeriodMonth, "2027-04");
+  assert.equal(aprCn.creditNote.taxPeriodStatus, "resolved");
+  assert.match(aprCn.creditNote.documentNumber ?? "", /^CN\/2027-28\/0001$/);
+}
+
 async function main(): Promise<void> {
   await testAllocationConcurrency();
   await testOrchestratorAuthorityAndRetries();
@@ -857,6 +1153,8 @@ async function main(): Promise<void> {
   await testUnissuedDraftLifecycle();
   await testIssueTimestampAndIstDate();
   await testEmailAndRetrySeparation();
+  await testPendingGstinAndTransactionalFinalization();
+  await testCreditNoteIssueMonthTaxPeriod();
   console.log("gst.documents.unit.test.ts: ok");
 }
 

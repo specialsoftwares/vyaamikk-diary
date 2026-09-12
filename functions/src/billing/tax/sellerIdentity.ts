@@ -34,13 +34,42 @@
 
 import { BillingError } from "../errors";
 import type {
+  EcoClassificationStatus,
   GstrFilingFrequency,
   ReverseChargeMode,
   SellerTaxSnapshot,
   TaxResponsibilityMode,
 } from "../types";
 
+import type { PlatformTaxPolicyOverrides } from "./platformTaxPolicy";
+import { parseEcoClassificationStatus } from "./platformTaxPolicy";
+
 import { gstStateCodeFromGstin, gstStateName, isValidGstinFormat, normalizeGstin } from "./gstin";
+
+export interface ChannelEcoConfig {
+  section52TcsStatus: EcoClassificationStatus;
+  table14ClassificationStatus: EcoClassificationStatus;
+  operatorIdentifier: string | null;
+  operatorGstin: string | null;
+}
+
+export function unreviewedChannelEco(operatorIdentifier: string | null): ChannelEcoConfig {
+  return {
+    section52TcsStatus: "requires_tax_review",
+    table14ClassificationStatus: "requires_tax_review",
+    operatorIdentifier,
+    operatorGstin: null,
+  };
+}
+
+export function notApplicableChannelEco(operatorIdentifier: string | null = null): ChannelEcoConfig {
+  return {
+    section52TcsStatus: "not_applicable",
+    table14ClassificationStatus: "not_applicable",
+    operatorIdentifier,
+    operatorGstin: null,
+  };
+}
 
 export interface SellerIdentityConfig {
   companyGstin: string | null;
@@ -58,6 +87,9 @@ export interface SellerIdentityConfig {
   appleTaxResponsibilityMode: TaxResponsibilityMode;
   googleTaxResponsibilityMode: TaxResponsibilityMode;
   directWebTaxResponsibilityMode: TaxResponsibilityMode;
+  googleEco: ChannelEcoConfig;
+  appleEco: ChannelEcoConfig;
+  directWebEco: ChannelEcoConfig;
   billingEmailFromAddress: string | null;
   invoiceRendererUrl: string | null;
   adminIdentityProvisioned: boolean;
@@ -95,6 +127,9 @@ export function loadTaxRuntimeConfig(
       env.DIRECT_WEB_TAX_RESPONSIBILITY_MODE,
       "developer"
     ),
+    googleEco: loadChannelEco(env, "GOOGLE", "google_play"),
+    appleEco: loadChannelEco(env, "APPLE", "apple_app_store"),
+    directWebEco: loadChannelEco(env, "DIRECT_WEB", null, "not_applicable"),
     billingEmailFromAddress: emptyToNull(env.BILLING_EMAIL_FROM_ADDRESS),
     invoiceRendererUrl: emptyToNull(env.INVOICE_RENDERER_URL),
     adminIdentityProvisioned: env.ADMIN_IDENTITY_PROVISIONED === "true",
@@ -105,6 +140,56 @@ export function loadTaxRuntimeConfig(
 function emptyToNull(raw: string | undefined): string | null {
   const t = raw?.trim() ?? "";
   return t.length === 0 ? null : t;
+}
+
+function loadChannelEco(
+  env: NodeJS.ProcessEnv,
+  prefix: "GOOGLE" | "APPLE" | "DIRECT_WEB",
+  defaultOperator: string | null,
+  defaultStatus: EcoClassificationStatus = "requires_tax_review"
+): ChannelEcoConfig {
+  const sectionRaw = env[`${prefix}_SECTION52_TCS_STATUS`];
+  const tableRaw = env[`${prefix}_TABLE14_CLASSIFICATION_STATUS`];
+  return {
+    section52TcsStatus:
+      sectionRaw === undefined || sectionRaw.trim() === ""
+        ? defaultStatus
+        : parseEcoClassificationStatus(sectionRaw),
+    table14ClassificationStatus:
+      tableRaw === undefined || tableRaw.trim() === ""
+        ? defaultStatus
+        : parseEcoClassificationStatus(tableRaw),
+    operatorIdentifier: emptyToNull(env[`${prefix}_OPERATOR_IDENTIFIER`]) ?? defaultOperator,
+    operatorGstin: emptyToNull(env[`${prefix}_OPERATOR_GSTIN`]),
+  };
+}
+
+export function policyOverridesFromConfig(
+  config: SellerIdentityConfig
+): Partial<Record<"google_play_india" | "apple_app_store_india" | "direct_web_india", PlatformTaxPolicyOverrides>> {
+  return {
+    google_play_india: {
+      mode: config.googleTaxResponsibilityMode,
+      section52TcsStatus: config.googleEco.section52TcsStatus,
+      table14ClassificationStatus: config.googleEco.table14ClassificationStatus,
+      operatorIdentifier: config.googleEco.operatorIdentifier,
+      operatorGstin: config.googleEco.operatorGstin,
+    },
+    apple_app_store_india: {
+      mode: config.appleTaxResponsibilityMode,
+      section52TcsStatus: config.appleEco.section52TcsStatus,
+      table14ClassificationStatus: config.appleEco.table14ClassificationStatus,
+      operatorIdentifier: config.appleEco.operatorIdentifier,
+      operatorGstin: config.appleEco.operatorGstin,
+    },
+    direct_web_india: {
+      mode: config.directWebTaxResponsibilityMode,
+      section52TcsStatus: config.directWebEco.section52TcsStatus,
+      table14ClassificationStatus: config.directWebEco.table14ClassificationStatus,
+      operatorIdentifier: config.directWebEco.operatorIdentifier,
+      operatorGstin: config.directWebEco.operatorGstin,
+    },
+  };
 }
 
 export function parsePriceIncludesGst(raw: string | undefined): boolean | null {

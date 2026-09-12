@@ -39,9 +39,8 @@ import { creditNoteCounterPath, subscriptionCreditNotePath } from "../paths";
 import type { BillingStore } from "../store";
 import type { CreditNoteCounterDoc, SubscriptionCreditNoteDoc, SubscriptionInvoiceDoc } from "../types";
 
-import { getFinancialYearForDate, formatIstCalendarDate } from "./financialYearUtils";
+import { getFinancialYearForDate, formatIstCalendarDate, getMonthKey } from "./financialYearUtils";
 import { assertStatutoryDocumentNumber } from "./invoiceAllocation";
-import { resolveTaxPeriod } from "./taxPeriod";
 
 export function creditNoteIdForRefundEvent(refundFinancialEventId: string): string {
   if (!refundFinancialEventId) {
@@ -111,16 +110,12 @@ export async function allocateCreditNoteStub(
       updatedAt: input.nowMs,
     };
     const serial = prior.currentCount + 1;
-    const taxPeriod = resolveTaxPeriod({
-      supplyOccurredAt: input.original.supplyOccurredAt,
-      invoiceIssuedAt: input.nowMs,
-    });
     const created: SubscriptionCreditNoteDoc = {
       ...input.stub,
       documentNumber: formatCreditNoteNumber(fyForIssue, serial),
       financialYear: fyForIssue,
-      taxPeriodMonth: taxPeriod.taxPeriodMonth,
-      taxPeriodStatus: taxPeriod.taxPeriodStatus,
+      taxPeriodMonth: getMonthKey(input.nowMs),
+      taxPeriodStatus: "resolved",
       issuedAt: input.nowMs,
       issuedOnIst: formatIstCalendarDate(input.nowMs),
       buyerGstin: input.original.buyer.gstin,
@@ -129,7 +124,7 @@ export async function allocateCreditNoteStub(
       placeOfSupplyStateCode: input.original.placeOfSupplyStateCode,
       gstRateBps: input.original.gstRateBps,
       taxType: input.original.taxType,
-      gstrReportable: taxPeriod.taxPeriodStatus === "resolved",
+      gstrReportable: true,
       createdAt: input.nowMs,
       updatedAt: input.nowMs,
     };

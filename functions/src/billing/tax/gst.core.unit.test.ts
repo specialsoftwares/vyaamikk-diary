@@ -58,14 +58,16 @@ import {
   normalizeGstin,
 } from "./gstin";
 import { GST_TAX_DOCUMENT_LEGAL_MODEL } from "./legalContext";
+import { isRecipientTaxClassificationPending, statutoryBuyerFromDetails } from "./buyerSnapshot";
 import {
   classifyTaxDocument,
   mayAllocateStatutoryNumber,
+  parseEcoClassificationStatus,
   platformTaxPolicy,
   resolvePlatformTaxPolicy,
 } from "./platformTaxPolicy";
 import { resolvePlaceOfSupply } from "./placeOfSupply";
-import { loadSellerTaxIdentity, parsePriceIncludesGst, parseReverseChargeMode, type SellerIdentityConfig } from "./sellerIdentity";
+import { loadSellerTaxIdentity, parsePriceIncludesGst, parseReverseChargeMode, loadTaxRuntimeConfig, unreviewedChannelEco, notApplicableChannelEco, type SellerIdentityConfig } from "./sellerIdentity";
 import { calculateGst, isPaiseCalculationValid } from "./taxMath";
 import { parseGstrMonth, resolveTaxPeriod } from "./taxPeriod";
 import {
@@ -97,6 +99,9 @@ function completeSeller(overrides: Partial<SellerIdentityConfig> = {}): SellerId
     appleTaxResponsibilityMode: "unconfirmed",
     googleTaxResponsibilityMode: "developer",
     directWebTaxResponsibilityMode: "developer",
+    googleEco: unreviewedChannelEco("google_play"),
+    appleEco: unreviewedChannelEco("apple_app_store"),
+    directWebEco: notApplicableChannelEco(null),
     billingEmailFromAddress: "billing@specialsoftwares.com",
     invoiceRendererUrl: "https://renderer.example.test",
     adminIdentityProvisioned: false,
@@ -126,6 +131,76 @@ function testGstin(): void {
   assert.equal(isValidGstinFormat("09aaaaa0000a1z5"), true);
   assert.equal(isValidGstinFormat("not-a-gstin"), false);
   assert.equal(isValidGstinFormat("99AAAAA0000A1Z5"), false);
+  const pendingSnap = statutoryBuyerFromDetails({
+    gstin: BUYER_MH_GSTIN,
+    billingBusinessName: "Buyer LLP",
+    billingAddressLine1: null,
+    billingAddressLine2: null,
+    billingCity: null,
+    billingPostalCode: null,
+    billingStateCode: "27",
+    billingStateName: "Maharashtra",
+    gstinVerificationStatus: "pending_manual_verification",
+    verifiedLegalName: null,
+    verifiedStateCode: null,
+    verifiedAt: null,
+    verifiedByDiagnosticUid: null,
+    updatedAt: 1,
+  });
+  assert.equal(isRecipientTaxClassificationPending({
+    gstin: BUYER_MH_GSTIN,
+    billingBusinessName: null,
+    billingAddressLine1: null,
+    billingAddressLine2: null,
+    billingCity: null,
+    billingPostalCode: null,
+    billingStateCode: null,
+    billingStateName: null,
+    gstinVerificationStatus: "pending_manual_verification",
+    verifiedLegalName: null,
+    verifiedStateCode: null,
+    verifiedAt: null,
+    verifiedByDiagnosticUid: null,
+    updatedAt: 1,
+  }), true);
+  assert.equal(pendingSnap.classification, "b2c");
+  assert.equal(pendingSnap.gstin, null);
+  const rejectedSnap = statutoryBuyerFromDetails({
+    gstin: BUYER_MH_GSTIN,
+    billingBusinessName: "Buyer LLP",
+    billingAddressLine1: null,
+    billingAddressLine2: null,
+    billingCity: null,
+    billingPostalCode: null,
+    billingStateCode: "27",
+    billingStateName: "Maharashtra",
+    gstinVerificationStatus: "rejected",
+    verifiedLegalName: null,
+    verifiedStateCode: null,
+    verifiedAt: null,
+    verifiedByDiagnosticUid: null,
+    updatedAt: 1,
+  });
+  assert.equal(rejectedSnap.gstin, null);
+  assert.equal(rejectedSnap.gstinVerificationStatus, "rejected");
+  const verifiedSnap = statutoryBuyerFromDetails({
+    gstin: BUYER_MH_GSTIN,
+    billingBusinessName: "Buyer LLP",
+    billingAddressLine1: null,
+    billingAddressLine2: null,
+    billingCity: null,
+    billingPostalCode: null,
+    billingStateCode: "27",
+    billingStateName: "Maharashtra",
+    gstinVerificationStatus: "verified",
+    verifiedLegalName: "Buyer LLP",
+    verifiedStateCode: "27",
+    verifiedAt: 1,
+    verifiedByDiagnosticUid: "diag",
+    updatedAt: 1,
+  });
+  assert.equal(verifiedSnap.classification, "b2b");
+  assert.equal(verifiedSnap.gstin, BUYER_MH_GSTIN);
   assert.equal(gstStateCodeFromGstin(SELLER_GSTIN), "09");
   assert.equal(gstStateName("09"), "Uttar Pradesh");
   assert.notEqual(gstStateName("09"), "UP");
@@ -255,6 +330,16 @@ function testPolicy(): void {
     "tax_invoice_b2c"
   );
 
+  assert.equal(
+    classifyTaxDocument({
+      policy: google,
+      buyerIsVerifiedB2b: false,
+      recipientClassificationPending: true,
+    }),
+    "compliance_review_required"
+  );
+  assert.equal(mayAllocateStatutoryNumber("compliance_review_required"), false);
+
   const apple = resolvePlatformTaxPolicy("ios");
   assert.equal(apple.mode, "unconfirmed");
   assert.equal(
@@ -269,6 +354,48 @@ function testPolicy(): void {
     classifyTaxDocument({ policy: web, buyerIsVerifiedB2b: false }),
     "tax_invoice_b2c"
   );
+
+  assert.equal(google.section52TcsStatus, "requires_tax_review");
+  assert.equal(google.table14ClassificationStatus, "requires_tax_review");
+  const approvedGoogle = resolvePlatformTaxPolicy("android", {
+    google_play_india: {
+      mode: "developer",
+      section52TcsStatus: "classified",
+      table14ClassificationStatus: "classified",
+    },
+  });
+  assert.equal(approvedGoogle.section52TcsStatus, "classified");
+  assert.equal(approvedGoogle.table14ClassificationStatus, "classified");
+  assert.equal(parseEcoClassificationStatus("bogus"), "requires_tax_review");
+  assert.equal(parseEcoClassificationStatus(undefined), "requires_tax_review");
+  const invalidGoogle = resolvePlatformTaxPolicy("android", {
+    google_play_india: {
+      section52TcsStatus: "classified",
+      table14ClassificationStatus: "not-a-status" as "classified",
+    },
+  });
+  assert.equal(invalidGoogle.table14ClassificationStatus, "requires_tax_review");
+  const appleModeOnly = resolvePlatformTaxPolicy("ios", {
+    apple_app_store_india: { mode: "developer" },
+  });
+  assert.equal(appleModeOnly.mode, "developer");
+  assert.equal(appleModeOnly.section52TcsStatus, "requires_tax_review");
+  assert.equal(appleModeOnly.table14ClassificationStatus, "requires_tax_review");
+  const applePlatformMode = resolvePlatformTaxPolicy("ios", {
+    apple_app_store_india: { mode: "platform" },
+  });
+  assert.equal(applePlatformMode.mode, "platform");
+  assert.equal(applePlatformMode.table14ClassificationStatus, "requires_tax_review");
+
+  const fromEnv = loadTaxRuntimeConfig({});
+  assert.equal(fromEnv.googleEco.section52TcsStatus, "requires_tax_review");
+  assert.equal(fromEnv.googleEco.table14ClassificationStatus, "requires_tax_review");
+  const invalidEnv = loadTaxRuntimeConfig({
+    GOOGLE_TABLE14_CLASSIFICATION_STATUS: "maybe",
+    GOOGLE_SECTION52_TCS_STATUS: "nope",
+  });
+  assert.equal(invalidEnv.googleEco.table14ClassificationStatus, "requires_tax_review");
+  assert.equal(invalidEnv.googleEco.section52TcsStatus, "requires_tax_review");
 }
 
 function testPlaceOfSupply(): void {

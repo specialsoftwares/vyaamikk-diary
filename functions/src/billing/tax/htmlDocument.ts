@@ -109,7 +109,11 @@ export function buildSubscriptionTaxDocumentHtml(invoice: SubscriptionInvoiceDoc
 
   const recipientBlock = `<p>${
     buyer.legalName ? esc(buyer.legalName) : "Unregistered recipient"
-  }<br/>${buyer.gstin ? `GSTIN: ${esc(buyer.gstin)}<br/>` : ""}${
+  }<br/>${
+    buyer.gstin && buyer.gstinVerificationStatus === "verified"
+      ? `GSTIN: ${esc(buyer.gstin)}<br/>`
+      : ""
+  }${
     buyer.billingAddress ? `${esc(buyer.billingAddress)}<br/>` : ""
   }${
     buyer.stateName && buyer.stateCode

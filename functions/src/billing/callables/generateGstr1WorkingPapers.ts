@@ -34,6 +34,7 @@
 
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 
+import { BillingError } from "../errors";
 import { MemoryBillingStore, type BillingStore } from "../store";
 import type { Gstr1ReportManifestDoc, SubscriptionCreditNoteDoc, SubscriptionInvoiceDoc } from "../types";
 import { assertAdminAuthorized, type AdminAuthContext } from "../tax/adminAuth";
@@ -67,11 +68,22 @@ export function listTaxDocumentsFromMemory(
   };
 }
 
+export function listAuthoritativeTaxDocuments(
+  store: BillingStore,
+  month: string
+): { invoices: SubscriptionInvoiceDoc[]; creditNotes: SubscriptionCreditNoteDoc[] } {
+  if (!(store instanceof MemoryBillingStore)) {
+    throw new BillingError({
+      clientCode: "internal_error",
+      causeCode: "gstr_store_scan_unsupported",
+    });
+  }
+  return listTaxDocumentsFromMemory(store, month);
+}
+
 export async function generateGstr1WorkingPapersCore(input: {
   month: string;
   admin: AdminAuthContext;
-  invoices: SubscriptionInvoiceDoc[];
-  creditNotes: SubscriptionCreditNoteDoc[];
   storage: InvoiceObjectStorage;
   store: BillingStore;
   generatedByDiagnosticUid: string;
@@ -85,10 +97,11 @@ export async function generateGstr1WorkingPapersCore(input: {
 }> {
   assertAdminAuthorized(input.admin);
   assertGstrMonth(input.month);
+  const listed = listAuthoritativeTaxDocuments(input.store, input.month);
   const papers = buildGstr1WorkingPapers({
     month: input.month,
-    invoices: input.invoices,
-    creditNotes: input.creditNotes,
+    invoices: listed.invoices,
+    creditNotes: listed.creditNotes,
   });
   const jsonPath = gstr1ReportStoragePath(input.month, papers.reportId, "json");
   const csvPath = gstr1ReportStoragePath(input.month, papers.reportId, "csv");

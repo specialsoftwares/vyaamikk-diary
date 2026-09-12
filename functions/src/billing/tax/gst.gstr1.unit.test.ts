@@ -85,6 +85,7 @@ function invoice(
     invoiceIssuedOnIst: "12-09-2026",
     supplyOccurredAt: 1,
     issueStatus: "issued",
+    issueHoldReason: null,
     reverseChargeMode: "no",
     seller: null,
     buyer: {
@@ -223,9 +224,18 @@ async function main(): Promise<void> {
     updatedAt: 1,
   };
 
-  const papers = buildGstr1WorkingPapers({
+  const papersWithApple = buildGstr1WorkingPapers({
     month: "2026-09",
     invoices: [b2b, b2c, filed, apple],
+    creditNotes: [cn],
+  });
+  assert.ok(papersWithApple.ecoTable14.some((r) => r.table14ClassificationStatus === "requires_tax_review"));
+  assert.equal(papersWithApple.reviewStatus, "requires_tax_review");
+  assert.ok(papersWithApple.unresolvedReviewReasons.includes("gstr_tax_review_unresolved"));
+
+  const papers = buildGstr1WorkingPapers({
+    month: "2026-09",
+    invoices: [b2b, b2c, filed],
     creditNotes: [cn],
   });
   assert.equal(papers.b2b.length, 1);
@@ -244,8 +254,6 @@ async function main(): Promise<void> {
   assert.equal(papers.creditNotes[0]?.taxableReversalInPaise, 10000);
   assert.equal(papers.excludedAlreadyFiled.includes("inv-filed"), true);
   assert.equal(papers.reportableInvoiceIds.includes("inv-filed"), false);
-  assert.ok(papers.ecoTable14.some((r) => r.table14ClassificationStatus === "requires_tax_review"));
-  assert.ok(papers.ecoTable14.some((r) => r.note.includes("not fabricated")));
   assert.equal(papers.reviewStatus, "ready_to_file");
   assert.deepEqual(papers.unresolvedReviewReasons, []);
 
@@ -289,11 +297,13 @@ async function main(): Promise<void> {
   const admin = { uid: "admin-1", tokenAdmin: true, adminIdentityProvisioned: true };
   const storage = new MemoryInvoiceObjectStorage();
   const store = new MemoryBillingStore();
+  store.docs.set(`_subscriptionInvoices/${b2b.invoiceId}`, { ...b2b });
+  store.docs.set(`_subscriptionInvoices/${b2c.invoiceId}`, { ...b2c });
+  store.docs.set(`_subscriptionInvoices/${filed.invoiceId}`, { ...filed });
+  store.docs.set(`_subscriptionCreditNotes/${cn.creditNoteId}`, { ...cn });
   const generated = await generateGstr1WorkingPapersCore({
     month: "2026-09",
     admin,
-    invoices: [b2b, b2c, filed, apple],
-    creditNotes: [cn],
     storage,
     store,
     generatedByDiagnosticUid: "admindiag01",
@@ -310,8 +320,6 @@ async function main(): Promise<void> {
     generateGstr1WorkingPapersCore({
       month: "2026-09",
       admin: { ...admin, adminIdentityProvisioned: false },
-      invoices: [b2b],
-      creditNotes: [],
       storage,
       store,
       generatedByDiagnosticUid: "admindiag01",
@@ -319,11 +327,6 @@ async function main(): Promise<void> {
     }),
     isCause("admin_identity_unprovisioned")
   );
-
-  store.docs.set(`_subscriptionInvoices/${b2b.invoiceId}`, { ...b2b });
-  store.docs.set(`_subscriptionInvoices/${b2c.invoiceId}`, { ...b2c });
-  store.docs.set(`_subscriptionInvoices/${filed.invoiceId}`, { ...filed });
-  store.docs.set(`_subscriptionCreditNotes/${cn.creditNoteId}`, { ...cn });
 
   await assert.rejects(
     applyMarkGstr1Filed(store, {
@@ -353,8 +356,6 @@ async function main(): Promise<void> {
   const reviewGenerated = await generateGstr1WorkingPapersCore({
     month: "2026-09",
     admin,
-    invoices: [reviewB2b],
-    creditNotes: [],
     storage,
     store: reviewStore,
     generatedByDiagnosticUid: "admindiag01",
@@ -369,6 +370,60 @@ async function main(): Promise<void> {
       nowMs: 12,
     }),
     isCause("gstr_tax_review_unresolved")
+  );
+
+  const appleBlockStore = new MemoryBillingStore();
+  appleBlockStore.docs.set(`_subscriptionInvoices/${b2b.invoiceId}`, { ...b2b });
+  appleBlockStore.docs.set(`_subscriptionInvoices/${apple.invoiceId}`, { ...apple });
+  const appleBlocked = await generateGstr1WorkingPapersCore({
+    month: "2026-09",
+    admin,
+    storage,
+    store: appleBlockStore,
+    generatedByDiagnosticUid: "admindiag01",
+    nowMs: 13,
+  });
+  assert.equal(appleBlocked.papers.reviewStatus, "requires_tax_review");
+  assert.ok(appleBlocked.papers.unresolvedReviewReasons.includes("gstr_tax_review_unresolved"));
+  await assert.rejects(
+    applyMarkGstr1Filed(appleBlockStore, {
+      admin,
+      adminDiagnosticUid: "admindiag01",
+      reportId: appleBlocked.papers.reportId,
+      acknowledgement: "ACK-APPLE",
+      nowMs: 14,
+    }),
+    isCause("gstr_tax_review_unresolved")
+  );
+
+  const driftStore = new MemoryBillingStore();
+  driftStore.docs.set(`_subscriptionInvoices/${b2b.invoiceId}`, { ...b2b });
+  driftStore.docs.set(`_subscriptionInvoices/${b2c.invoiceId}`, { ...b2c });
+  driftStore.docs.set(`_subscriptionInvoices/${filed.invoiceId}`, { ...filed });
+  driftStore.docs.set(`_subscriptionCreditNotes/${cn.creditNoteId}`, { ...cn });
+  const driftGenerated = await generateGstr1WorkingPapersCore({
+    month: "2026-09",
+    admin,
+    storage,
+    store: driftStore,
+    generatedByDiagnosticUid: "admindiag01",
+    nowMs: 15,
+  });
+  assert.ok(driftGenerated.papers.sourceInvoiceIds.includes("inv-b2b"));
+  driftStore.docs.set(`_subscriptionInvoices/${b2b.invoiceId}`, {
+    ...b2b,
+    taxableAmountInPaise: 1,
+    buyer: { ...b2b.buyer, gstin: "24AAAAA0000A1Z5" },
+  });
+  await assert.rejects(
+    applyMarkGstr1Filed(driftStore, {
+      admin,
+      adminDiagnosticUid: "admindiag01",
+      reportId: driftGenerated.papers.reportId,
+      acknowledgement: "ACK-DRIFT",
+      nowMs: 16,
+    }),
+    isCause("gstr_report_source_drift")
   );
 
   const batch = await applyMarkGstr1Filed(store, {

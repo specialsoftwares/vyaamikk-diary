@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # Self-contained: compiles TypeScript in the builder. Do not COPY a host dist/.
 
-FROM node:20-bookworm-slim AS builder
+FROM node:22-bookworm-slim AS builder
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci

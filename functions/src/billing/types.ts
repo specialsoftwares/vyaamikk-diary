@@ -468,6 +468,8 @@ export type ReverseChargeMode = "yes" | "no" | "unconfirmed";
 
 export type TaxDocumentIssueStatus = "unissued_draft" | "issued";
 
+export type InvoiceIssueHoldReason = "recipient_tax_classification_pending";
+
 export type TaxPeriodStatus = "pending_issue" | "resolved" | "unresolved_cross_period";
 
 export type InvoicePdfStatus =
@@ -540,6 +542,7 @@ export interface SubscriptionInvoiceDoc {
   invoiceIssuedOnIst: string | null;
   supplyOccurredAt: number | null;
   issueStatus: TaxDocumentIssueStatus;
+  issueHoldReason: InvoiceIssueHoldReason | null;
   reverseChargeMode: ReverseChargeMode | null;
   subscriptionDescription: string | null;
   seller: SellerTaxSnapshot | null;
@@ -605,6 +608,7 @@ export const INVOICE_STATUTORY_KEYS: ReadonlyArray<keyof SubscriptionInvoiceDoc>
   "invoiceIssuedOnIst",
   "supplyOccurredAt",
   "issueStatus",
+  "issueHoldReason",
   "reverseChargeMode",
   "seller",
   "buyer",
@@ -730,6 +734,8 @@ export interface Gstr1ReportManifestDoc {
   month: string;
   invoiceIds: string[];
   creditNoteIds: string[];
+  sourceInvoiceIds: string[];
+  sourceCreditNoteIds: string[];
   contentHash: string;
   jsonStoragePath: string;
   csvStoragePath: string;

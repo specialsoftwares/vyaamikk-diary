@@ -87,14 +87,59 @@ export function channelForStorePlatform(platform: BillingPlatform | "web"): Plat
   return "direct_web_india";
 }
 
+export interface PlatformTaxPolicyOverrides {
+  mode?: TaxResponsibilityMode;
+  section52TcsStatus?: EcoClassificationStatus;
+  table14ClassificationStatus?: EcoClassificationStatus;
+  operatorIdentifier?: string | null;
+  operatorGstin?: string | null;
+}
+
+export function parseEcoClassificationStatus(raw: string | undefined): EcoClassificationStatus {
+  const t = raw?.trim() ?? "";
+  if (t === "classified" || t === "not_applicable" || t === "requires_tax_review") return t;
+  return "requires_tax_review";
+}
+
 export function resolvePlatformTaxPolicy(
   platform: BillingPlatform | "web",
-  modeOverrides?: Partial<Record<PlatformTaxChannel, TaxResponsibilityMode>>
+  overrides?: Partial<Record<PlatformTaxChannel, PlatformTaxPolicyOverrides>>
 ): PlatformTaxPolicy {
   const channel = channelForStorePlatform(platform);
   const base = platformTaxPolicy(channel);
-  const override = modeOverrides?.[channel];
-  return override ? { ...base, mode: override } : base;
+  const override = overrides?.[channel];
+  if (!override) return base;
+  return {
+    ...base,
+    mode: override.mode ?? base.mode,
+    section52TcsStatus:
+      override.section52TcsStatus !== undefined
+        ? parseEcoClassificationStatus(override.section52TcsStatus)
+        : base.section52TcsStatus,
+    table14ClassificationStatus:
+      override.table14ClassificationStatus !== undefined
+        ? parseEcoClassificationStatus(override.table14ClassificationStatus)
+        : base.table14ClassificationStatus,
+  };
+}
+
+export function ecoSnapshotFromPolicy(
+  platform: BillingPlatform | "web",
+  policy: PlatformTaxPolicy,
+  override?: PlatformTaxPolicyOverrides
+): {
+  operatorIdentifier: string | null;
+  operatorGstin: string | null;
+} {
+  const fallbackId = platform === "android" ? "google_play" : platform === "ios" ? "apple_app_store" : null;
+  return {
+    operatorIdentifier:
+      override && "operatorIdentifier" in override
+        ? override.operatorIdentifier ?? null
+        : fallbackId,
+    operatorGstin:
+      override && "operatorGstin" in override ? override.operatorGstin ?? null : null,
+  };
 }
 
 /**
@@ -104,7 +149,9 @@ export function resolvePlatformTaxPolicy(
 export function classifyTaxDocument(opts: {
   policy: PlatformTaxPolicy;
   buyerIsVerifiedB2b: boolean;
+  recipientClassificationPending?: boolean;
 }): TaxDocumentType {
+  if (opts.recipientClassificationPending) return "compliance_review_required";
   if (opts.policy.mode === "unconfirmed") return "compliance_review_required";
   if (opts.policy.mode === "platform") return "platform_subscription_receipt";
   if (opts.policy.mode !== "developer") {
