@@ -76,5 +76,34 @@ assert.ok(pressable.includes("Platform.OS === \"android\""));
 
 assert.ok(navCard.includes("StyleSheet.hairlineWidth"));
 assert.ok(prefRow.includes("StyleSheet.hairlineWidth"));
+assert.doesNotMatch(
+  navCard,
+  /backgroundColor: embedded \? "transparent" : undefined/,
+  "standalone SettingsNavCard must keep opaque surface; undefined wipes fill and leaves Android elevation as a grey slab"
+);
+assert.match(
+  navCard,
+  /\.\.\.depth, overflow: "hidden"/,
+  "standalone settings cards clip to radius so Android does not paint a rectangular halo"
+);
+
+const cardDepth = readFileSync(join(root, "../../theme/cardDepth.ts"), "utf8");
+assert.doesNotMatch(
+  cardDepth,
+  /android:\s*\{\s*elevation:\s*[1-9]/,
+  "executiveCardDepth must not apply Android Material elevation (grey rectangular plane)"
+);
+assert.doesNotMatch(
+  luxuryTokens,
+  /android:\s*\{\s*elevation:\s*2\s*\}/,
+  "luxuryCardShadow must not use Android elevation in light mode"
+);
+
+assert.ok(settingsTab.includes("tabBarInset"));
+assert.doesNotMatch(
+  settingsTab,
+  /paddingBottom:\s*0/,
+  "settings scroll must keep tab-bar clearance via Screen tabBarInset"
+);
 
 console.log("settingsPresentation.contract.test.ts: ok");

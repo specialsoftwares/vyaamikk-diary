@@ -35,7 +35,6 @@ export function executiveCardDepth(
             shadowOpacity: isDark ? 0.28 : 0.08,
             shadowRadius: 16,
           },
-          android: { elevation: 4 },
           default: {},
         }),
       };
@@ -54,10 +53,6 @@ export function executiveCardDepth(
         borderWidth: 1,
         borderColor: luxuryCardBorder(isDark),
         ...luxuryCardShadow(isDark),
-        ...Platform.select({
-          android: { elevation: 1 },
-          default: {},
-        }),
       };
     case 4:
     default:
