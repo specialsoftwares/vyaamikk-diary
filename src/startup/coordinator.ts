@@ -10,8 +10,15 @@ function checkpoint(list: StartupStage[], stage: StartupStage): void {
 }
 
 /**
- * Sequential, try/catch startup. Failures become StartupOutcome.ok=false —
- * they must never escape as unhandled throws that kill the Android process.
+ * Fail-closed startup. Failures become StartupOutcome.ok=false — they must
+ * never escape as unhandled throws that kill the Android process.
+ *
+ * Critical path (must finish before routing): production config, native
+ * Firebase probe, JS Firebase init, local DB open/migrate. Auth restore
+ * continues under the native splash after this returns and providers mount.
+ *
+ * Independent JS Firebase init and SQLite open run concurrently. PIN database
+ * warm, PDF generation, dashboard statistics, and analytics must not run here.
  *
  * Heavy native modules (Firebase JS, SQLite) are loaded via dynamic import so
  * Node unit tests can exercise config guards without loading react-native.
@@ -64,49 +71,56 @@ export async function runStartupCoordinator(options?: {
     }
     checkpoint(checkpoints, "NATIVE_FIREBASE_READY");
 
-    let jsReady = false;
-    if (isFirebaseConfigured()) {
+    // JS Firebase and local SQLite are independent. Start both during the
+    // native splash instead of waiting for one before the other. Do not
+    // block this path on PIN warm, PDFs, dashboard stats, or analytics.
+    const jsFirebaseTask = (async (): Promise<boolean> => {
+      if (isFirebaseConfigured()) {
+        if (!skipNative) {
+          try {
+            const { getFirebaseApp } = await import("@/config/firebase");
+            const { getApps } = await import("firebase/app");
+            const app = getFirebaseApp();
+            const ready = Boolean(app) || getApps().length > 0;
+            if (ready && env.firebase.projectId.length === 0) {
+              throw new StartupError(
+                "FIREBASE_PROJECT_MISMATCH",
+                "JS_FIREBASE_READY",
+                "JS Firebase project id is empty after configuration check."
+              );
+            }
+            return ready;
+          } catch (e) {
+            throw toStartupError(e, "FIREBASE_JS_INIT_FAILED", "JS_FIREBASE_READY");
+          }
+        }
+        return true;
+      }
+      if (env.isProduction) {
+        throw new StartupError(
+          "FIREBASE_JS_MISSING",
+          "JS_FIREBASE_READY",
+          "JS Firebase public config markers are missing from the release bundle."
+        );
+      }
+      return false;
+    })();
+
+    const localDbTask = (async (): Promise<void> => {
       if (!skipNative) {
         try {
-          const { getFirebaseApp } = await import("@/config/firebase");
-          const { getApps } = await import("firebase/app");
-          const app = getFirebaseApp();
-          jsReady = Boolean(app) || getApps().length > 0;
-          if (jsReady && env.firebase.projectId.length === 0) {
-            throw new StartupError(
-              "FIREBASE_PROJECT_MISMATCH",
-              "JS_FIREBASE_READY",
-              "JS Firebase project id is empty after configuration check."
-            );
-          }
+          const { initializeLocalDatabase } = await import("@/localDb/init");
+          await initializeLocalDatabase();
         } catch (e) {
-          throw toStartupError(e, "FIREBASE_JS_INIT_FAILED", "JS_FIREBASE_READY");
+          throw toStartupError(e, "LOCAL_DB_MIGRATE_FAILED", "LOCAL_DB_OPENED");
         }
-      } else {
-        jsReady = true;
       }
-    } else if (env.isProduction) {
-      throw new StartupError(
-        "FIREBASE_JS_MISSING",
-        "JS_FIREBASE_READY",
-        "JS Firebase public config markers are missing from the release bundle."
-      );
-    }
-    checkpoint(checkpoints, "JS_FIREBASE_READY");
+    })();
 
-    if (!skipNative) {
-      try {
-        const { initializeLocalDatabase } = await import("@/localDb/init");
-        await initializeLocalDatabase();
-        checkpoint(checkpoints, "LOCAL_DB_OPENED");
-        checkpoint(checkpoints, "LOCAL_DB_MIGRATED");
-      } catch (e) {
-        throw toStartupError(e, "LOCAL_DB_MIGRATE_FAILED", "LOCAL_DB_OPENED");
-      }
-    } else {
-      checkpoint(checkpoints, "LOCAL_DB_OPENED");
-      checkpoint(checkpoints, "LOCAL_DB_MIGRATED");
-    }
+    const [jsReady] = await Promise.all([jsFirebaseTask, localDbTask]);
+    checkpoint(checkpoints, "JS_FIREBASE_READY");
+    checkpoint(checkpoints, "LOCAL_DB_OPENED");
+    checkpoint(checkpoints, "LOCAL_DB_MIGRATED");
 
     checkpoint(checkpoints, "AUTH_HYDRATED");
     checkpoint(checkpoints, "SYNC_READY");
