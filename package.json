@@ -61,6 +61,7 @@
     "test:save-lifecycle": "npx --yes tsx src/services/records/saveLifecycle.test.ts",
     "test:save-locks": "npx --yes tsx src/services/records/saveLock.test.ts",
     "test:pro-pack-dedupe": "npx --yes tsx src/services/professionalPack/dedupe.test.ts",
+    "test:professional-brief-routing": "npx --yes tsx src/navigation/professionalBriefRouting.contract.test.ts",
     "test:payment-period": "npx --yes tsx src/utils/businessEntry/paymentPeriod.test.ts",
     "test:share-text": "npx --yes tsx src/services/share/shareText.test.ts",
     "test:display-alias": "npx --yes tsx src/utils/displayAlias.test.ts",

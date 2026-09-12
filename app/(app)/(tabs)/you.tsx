@@ -2,8 +2,6 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useFocusEffect, useNavigation, useRouter } from "expo-router";
 
-import { creatableMattersForCategory } from "@/domain/professionalPackCreatable";
-
 import { Banner, LastRefreshedHint, Screen, SmartHeadline } from "@/components/ui";
 import { SyncStatusBanner } from "@/components/sync/SyncStatusBanner";
 import { ComposerPickerSheet } from "@/components/composer/ComposerPickerSheet";
@@ -217,11 +215,13 @@ export default function YouTab() {
         return;
       }
       if (routesToProfessionalPack) {
-        const matters = creatableMattersForCategory("ca_tax");
-        const matter = matters[0]?.type ?? "gst_return_support";
+        // VYD-24: Professional brief must open the category selector
+        // (CA / Tax, CS / Compliance, Legal Professional) -> matter list ->
+        // form. A previous change hard-routed to the ca_tax GST form and
+        // bypassed the whole taxonomy; do not route to /form from here.
         router.push({
-          pathname: "/(app)/professional-pack/form",
-          params: { category: "ca_tax", matter, fromPicker: "1" },
+          pathname: "/(app)/professional-pack",
+          params: { fromPicker: "1" },
         });
         return;
       }
