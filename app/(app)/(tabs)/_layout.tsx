@@ -18,9 +18,6 @@ import { resolveYouTabIconConcept } from "@/components/you/YouTabIcon";
 import { useT } from "@/i18n";
 import { useTheme } from "@/theme";
 
-/** Brand indigo active tab tint — matches executive layer / native tab spec. */
-const TAB_ACTIVE_TINT = "#4338CA";
-
 const YOU_TAB_ICON_NAME = {
   notebook: "book-open-page-variant-outline",
   ledger: "file-document-multiple-outline",
@@ -33,6 +30,23 @@ const YOU_TAB_ICON_NAME = {
 /**
  * Four-tab shell: Calendar / You / Saved Records / Settings & Info.
  * Native system tab bar (Liquid Glass on iOS 26+, UITabBar / Material 3 on Android).
+ *
+ * Navigation chrome contract (VYD-23):
+ * - Every color on the bar comes from the resolved app theme, per mode. No
+ *   hardcoded tints: the old fixed indigo-700 selected tint measured ~2.1:1
+ *   against Material 3 dark surfaces (the dark palette brightens primary
+ *   for exactly this reason).
+ * - `backgroundColor` is set explicitly so the bar matches app surfaces in
+ *   both modes instead of the default Material tone.
+ * - `labelVisibilityMode="labeled"` (Android): all four destinations keep
+ *   concise labels at all times. The Material default ("auto") collapses to
+ *   selected-only labels with 4+ destinations, which hid inactive labels and
+ *   shifted bar geometry on every selection.
+ * - Label sizing intentionally left to the system: a hard-coded fontSize
+ *   fought iOS 26 Liquid Glass / Dynamic Type label metrics
+ *   (docs/NATIVE_TAB_LAYOUT_AUDIT.md). Colors only.
+ * - Contrast pairs are locked by src/layout/tabBarMetrics.contract.test.ts
+ *   (labels >= 4.5:1, icons >= 3:1 in both themes).
  */
 export default function TabsLayout() {
   const t = useT();
@@ -65,14 +79,15 @@ export default function TabsLayout() {
     <>
       <NavigationThemeProvider value={navigationTheme}>
         <NativeTabs
-          tintColor={TAB_ACTIVE_TINT}
-          iconColor={colors.textMuted}
-          // Label sizing intentionally left to the system: a hard-coded
-          // fontSize fought iOS 26 Liquid Glass / Dynamic Type label metrics
-          // (docs/NATIVE_TAB_LAYOUT_AUDIT.md). Colors only.
+          tintColor={colors.primary}
+          backgroundColor={colors.surface}
+          iconColor={{ default: colors.textMuted, selected: colors.primary }}
+          labelVisibilityMode="labeled"
+          indicatorColor={colors.primaryLight}
+          rippleColor={colors.primaryLight}
           labelStyle={{
             default: { color: colors.textMuted },
-            selected: { color: TAB_ACTIVE_TINT },
+            selected: { color: colors.primary },
           }}
         >
           <NativeTabs.Trigger name="calendar">
