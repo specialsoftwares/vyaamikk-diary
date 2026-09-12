@@ -84,6 +84,17 @@ Baseline architecture facts this model is tied to:
   cross-user tests. Two-records-one-increment is impossible because the
   final counter state can only point at one record and every billable create
   independently requires the pointer+transition.
+- **Fail-closed cap:** `monthlyRecordCap` recognizes only the exact strings
+  `starter`/`professional`/`business`; malformed or unknown plan values in a
+  corrupted/mis-migrated status doc fall to the free cap of 25 instead of
+  defaulting upward to unlimited (emulator-proven with `proffesional` and
+  `enterprise` active plans).
+- **Phase-G gate:** enforcement may only be enabled per family after the
+  REAL production write set (record + usage + serial counters + save locks)
+  passes the six acceptance proofs in
+  `docs/BILLING_FIRESTORE_SCHEMA.md` ("Phase-G acceptance criteria") —
+  access limits, serial invariants, quota binding, replay, final-slot race,
+  and save-idempotency non-regression.
 - **Residual risk:** delete-and-recreate of the *same* record id cannot mint
   extra live records beyond the cap (each recreation still requires a fresh
   valid consumption; a replay with consumption is denied because the id

@@ -65,10 +65,17 @@ atomic Firestore batch**, validated bidirectionally by Rules:
    stored month differs (lazy rollover), or `== 1` when no counter existed.
 2. Counter side (`usageLinkedRecordCreatedInBatch` + shape/cap checks): the
    counter write must use `hasOnly` shape, the rules-derived `monthKey`, an
-   exact `+1`/reset transition, stay within `monthlyRecordCap` (free 25,
-   starter 100, professional/business unlimited; lapsed entitlement ⇒ free
-   cap), and point at a record in an allowlisted billable collection that
-   does **not** exist before the batch and **does** exist after it.
+   exact `+1`/reset transition, stay within `monthlyRecordCap`, and point at
+   a record in an allowlisted billable collection that does **not** exist
+   before the batch and **does** exist after it.
+
+`monthlyRecordCap` is **fail-closed**: only the exact strings `starter`
+(→ 100), `professional` and `business` (→ unlimited) are recognized;
+everything else — `free`, a missing field, a lapsed entitlement, a malformed
+value (`proffesional`) or an unknown future enum (`enterprise`) — gets the
+free cap of 25. A backend typo, migration error or corrupted status document
+can therefore never silently grant unlimited quota (emulator-proven with
+malformed and unknown active plans at 25/25).
 
 Consequences (all emulator-proven in `firestore.rules.billing.test.ts`):
 
@@ -116,6 +123,65 @@ integration — the pattern itself is collection-agnostic (the emulator suite
 demonstrates the allowlist boundary with a `letterheadDocs` attempt).
 `_saveLocks`, `completedSteps[]`, `clientRecordId`, `idempotencyKey` and
 serial counters are untouched by design (W-6).
+
+### Phase-G acceptance criteria — REAL production write sets (mandatory)
+
+Phase A proves the atomic Rules primitive with a minimal batch (record +
+`usageCurrent`). That is deliberately NOT the production write shape: real
+creates also involve serial counters and save-coordination writes. **Before
+`quotaEnforcementEnabled` may be turned on for ANY record family, Phase G
+must emulator-test the ACTUAL production write set of that family — every
+write that participates in creation — not the minimal Phase-A pair.**
+
+Minimum required write-set proofs:
+
+- **Purchase Order:** record create + `usageCurrent` transition + the
+  existing `counters/purchaseOrder` serial increment
+  (`next == resource.data.next + 1`).
+- **Cash Paid:** entry create + `usageCurrent` transition + the existing
+  `counters/cashPaidVouchers` financial-year counter (same-year `count + 1`
+  AND year-rollover `count == 1` variants).
+- Equivalent real write sets for every remaining billable family (diary
+  entries incl. the offline sync-flush path, Customer Credit + its
+  `counters/customerCredit` serial, Professional Packs, Letterhead docs +
+  `config/*` template writes), plus the `_saveLocks` writes wherever the
+  production flow issues them.
+
+Each family's proof must demonstrate, in the rules emulator, that:
+
+1. the full atomic operation succeeds within Firestore Rules
+   document-access limits (max 20 access calls per batch/transaction —
+   measure the worst-case family, not the average);
+2. existing serial-counter invariants remain intact (monotonic +1, cash-paid
+   FY rollover semantics) alongside the quota transition;
+3. the quota binding remains intact in the enlarged batch (all eleven
+   Phase-A security cases re-hold against the production write shape);
+4. a replayed save does not increment EITHER the quota counter OR the serial
+   counter unexpectedly;
+5. the final-slot race stays correct under the actual production
+   batch/transaction shape (exactly one winner; serial counters not burned
+   by the loser);
+6. save idempotency does not regress (`_saveLocks`, `completedSteps[]`,
+   `clientRecordId`, `idempotencyKey` behavior byte-identical for users with
+   enforcement off, and semantically unchanged with enforcement on).
+
+Phase G may not enable enforcement for a family whose real write set has not
+passed all six proofs. (Documentation/acceptance-criteria only — nothing of
+Phase G is implemented in Phase A.)
+
+## Timestamp authority (decision)
+
+`usageCurrent.updatedAt` and `preferences/billingUx.updatedAt` (and
+`billingUx.benefitScreenShownAt`) are **client-supplied epoch millis and are
+NON-AUTHORITATIVE metadata**: no Rules authorization or ordering decision
+reads them (they are only type-checked). Authorization/ordering derive from
+`request.time` (the rules-computed IST month key), counter monotonicity and
+batch linkage — never from these fields. This matches the shipped repo
+convention (serial counters, `_saveLocks`, `trustedDevices` all carry client
+int timestamps as metadata). Server-written billing docs (`status`, history,
+ledgers) get server-side timestamps from the Admin SDK in Phase B+. No
+`request.time`-equality enforcement is added — it would be a style refactor
+with no authorization gain.
 
 ## Month rollover (owner spec §15)
 

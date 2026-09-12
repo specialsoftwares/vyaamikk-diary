@@ -247,10 +247,19 @@ service cloud.firestore {
     // entitlement (entitlementActive == false) falls back to the free cap.
     // -1 = unlimited. Mirrors PLAN_MONTHLY_RECORD_LIMITS in
     // functions/src/billing/types.ts — keep in sync.
+    //
+    // FAIL CLOSED: only the exact strings 'professional' and 'business' are
+    // unlimited, and only 'starter' gets 100. Everything else — free, a
+    // missing field, a malformed value ('proffesional'), or an unknown
+    // future enum ('enterprise') — gets the free cap of 25. A backend typo,
+    // migration error or corrupted status doc must never silently grant
+    // unlimited quota.
     function monthlyRecordCap(uid) {
       let s = get(subscriptionStatusPath(uid)).data;
       let plan = s.get('entitlementActive', false) == true ? s.get('plan', 'free') : 'free';
-      return plan == 'free' ? 25 : (plan == 'starter' ? 100 : -1);
+      return plan == 'starter'
+        ? 100
+        : ((plan == 'professional' || plan == 'business') ? -1 : 25);
     }
 
     function usageWithinCap(uid) {
@@ -490,15 +499,29 @@ service cloud.firestore {
       // ---- Billing UX preferences (NOT entitlement state) ----------------
       // The only billing-adjacent doc a client may write: narrow UX fields
       // with enforced types. No plan/status/trial field may ever appear here.
+      // benefitScreenShownAt is a ONE-TIME marker: established on create,
+      // immutable afterwards (UX integrity — the education screen was shown
+      // once for this account). Only updatedAt metadata may change.
+      // Timestamps here are client-supplied epoch millis and are
+      // NON-AUTHORITATIVE metadata (no authorization/ordering significance).
       match /preferences/billingUx {
         allow read: if isOwner(uid);
-        allow create, update: if isActiveUser(uid)
+        allow create: if isActiveUser(uid)
                       && request.resource.data.keys().hasOnly([
                         'benefitScreenShownAt',
                         'updatedAt',
                       ])
                       && request.resource.data.benefitScreenShownAt is int
                       && request.resource.data.updatedAt is int;
+        allow update: if isActiveUser(uid)
+                      && request.resource.data.keys().hasOnly([
+                        'benefitScreenShownAt',
+                        'updatedAt',
+                      ])
+                      && request.resource.data.benefitScreenShownAt is int
+                      && request.resource.data.updatedAt is int
+                      && request.resource.data.benefitScreenShownAt
+                        == resource.data.benefitScreenShownAt;
         allow delete: if false;
       }
     }

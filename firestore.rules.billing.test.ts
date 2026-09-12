@@ -287,21 +287,40 @@ async function main() {
     }
 
     // ================= preferences/billingUx (narrow client write) ========
+    // benefitScreenShownAt is a one-time marker: create establishes it, any
+    // later change is denied; only updatedAt metadata stays mutable.
+    const benefitMarker = Date.now();
     await assertSucceeds(
       setDoc(doc(authedDb("alice"), "users", "alice", "preferences", "billingUx"), {
-        benefitScreenShownAt: Date.now(),
-        updatedAt: Date.now(),
+        benefitScreenShownAt: benefitMarker,
+        updatedAt: benefitMarker,
       })
     );
-    check("billingUx narrow client write allowed", true);
+    check("billingUx first marker create allowed", true);
 
     await assertSucceeds(
       updateDoc(doc(authedDb("alice"), "users", "alice", "preferences", "billingUx"), {
-        benefitScreenShownAt: Date.now() + 1,
-        updatedAt: Date.now() + 1,
+        benefitScreenShownAt: benefitMarker,
+        updatedAt: benefitMarker + 1,
       })
     );
-    check("billingUx narrow client update allowed", true);
+    check("billingUx updatedAt metadata refresh allowed (marker unchanged)", true);
+
+    await assertFails(
+      updateDoc(doc(authedDb("alice"), "users", "alice", "preferences", "billingUx"), {
+        benefitScreenShownAt: benefitMarker + 999,
+        updatedAt: Date.now(),
+      })
+    );
+    check("billingUx changing benefitScreenShownAt denied (one-time marker)", true);
+
+    await assertFails(
+      setDoc(doc(authedDb("alice"), "users", "alice", "preferences", "billingUx"), {
+        benefitScreenShownAt: benefitMarker - 12_345,
+        updatedAt: Date.now(),
+      })
+    );
+    check("billingUx full-overwrite marker rewrite denied", true);
 
     await assertFails(
       setDoc(doc(authedDb("alice"), "users", "alice", "preferences", "billingUx"), {
@@ -556,6 +575,61 @@ async function main() {
       ).commit()
     );
     check("lapsed starter entitlement enforces free cap (26/25 denied)", true);
+
+    // Fail-closed on unknown/malformed plans: a corrupted or future status
+    // value must NEVER be defaulted upward to unlimited — it gets the free
+    // cap of 25 even with entitlementActive == true.
+    await seedUser("quota-typo");
+    await seedSubscriptionStatus("quota-typo", {
+      plan: "proffesional", // deliberate malformed value
+      entitlementActive: true,
+      quotaEnforcementEnabled: true,
+    });
+    await seedUsage("quota-typo", usageDoc(monthNow, 25, "seed-po"));
+    await assertFails(
+      poWithUsageBatch(
+        authedDb("quota-typo"),
+        "quota-typo",
+        "po-typo-26",
+        usageDoc(monthNow, 26, "po-typo-26")
+      ).commit()
+    );
+    check("fail-closed: malformed plan 'proffesional' capped at 25 (26 denied)", true);
+
+    await seedUser("quota-unknown");
+    await seedSubscriptionStatus("quota-unknown", {
+      plan: "enterprise", // unknown future enum value
+      entitlementActive: true,
+      quotaEnforcementEnabled: true,
+    });
+    await seedUsage("quota-unknown", usageDoc(monthNow, 25, "seed-po"));
+    await assertFails(
+      poWithUsageBatch(
+        authedDb("quota-unknown"),
+        "quota-unknown",
+        "po-unk-26",
+        usageDoc(monthNow, 26, "po-unk-26")
+      ).commit()
+    );
+    check("fail-closed: unknown plan 'enterprise' capped at 25 (26 denied)", true);
+
+    // Exact 'professional' is unlimited (counterpart of the business case 9).
+    await seedUser("quota-pro");
+    await seedSubscriptionStatus("quota-pro", {
+      plan: "professional",
+      entitlementActive: true,
+      quotaEnforcementEnabled: true,
+    });
+    await seedUsage("quota-pro", usageDoc(monthNow, 500, "seed-po"));
+    await assertSucceeds(
+      poWithUsageBatch(
+        authedDb("quota-pro"),
+        "quota-pro",
+        "po-pro-501",
+        usageDoc(monthNow, 501, "po-pro-501")
+      ).commit()
+    );
+    check("exact professional plan unlimited (500→501 allowed)", true);
 
     // Case 11 — altered monthKey cannot reset or pre-consume quota.
     await seedUser("quota-month");
