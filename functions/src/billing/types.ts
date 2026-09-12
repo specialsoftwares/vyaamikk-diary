@@ -239,9 +239,13 @@ export interface CompanyBillingDoc {
 // ---------------------------------------------------------------------------
 
 export interface SubscriptionAuditLogEventDoc {
-  /** Truncated privacy-safe uid digest (Phase B: HMAC of uid, first 16 hex). */
+  /**
+   * Privacy-minimized account identifier: HMAC-SHA256(BILLING_DIAG_UID_SECRET, uid)
+   * truncated to 16 hex chars (see diagnosticUid.ts). Raw Firebase uid is NOT
+   * stored on audit records — company billing remains keyed by uid because it
+   * is the authoritative server-only account record.
+   */
   diagnosticUid: string;
-  uid: string;
   source: BillingMutationSource;
   idempotencyKey: string;
   occurredAt: number;
@@ -264,6 +268,13 @@ export interface ProcessedBillingEventDoc {
   processedAt: number;
   /** Short machine summary, e.g. "activated:vyd_professional_yearly". */
   resultSummary: string;
+  /**
+   * SHA-256 of the canonical transition (no credentials). A replay with the
+   * same idempotency key MUST match; a mismatch fails closed rather than
+   * silently accepting a conflicting mutation.
+   */
+  requestFingerprint: string;
+  diagnosticUid: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -281,6 +292,12 @@ export type FinancialEventType = "purchase" | "renewal" | "refund" | "chargeback
 export interface BillingEventLedgerDoc {
   financialEventId: string;
   platform: BillingPlatform;
+  /**
+   * Account ownership linkage. Retained because refund/revocation mapping and
+   * revenue attribution must resolve to the Firebase account that owns the
+   * store transaction. This collection is server-only (Rules deny all client
+   * access). Audit logs do NOT copy this field — they use diagnosticUid.
+   */
   uid: string;
   canonicalSku: string;
   eventType: FinancialEventType;

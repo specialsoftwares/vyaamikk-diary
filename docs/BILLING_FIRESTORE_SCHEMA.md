@@ -29,7 +29,12 @@ Notes:
   record creates behave exactly as before billing existed (emulator-proven).
 - `_subscriptionAuditLog` append-only is a backend write-discipline invariant
   (Admin SDK bypasses Rules; Phase B enforces create-only in the engine plus
-  contract tests). Client-side it is simply inaccessible.
+  contract tests). Client-side it is simply inaccessible. **Phase B privacy
+  correction:** audit documents store `diagnosticUid` only (HMAC-SHA256 of
+  uid with `BILLING_DIAG_UID_SECRET`, truncated to 16 hex). Raw Firebase
+  `uid` is not stored on audit records. `_companyBilling` remains keyed by
+  uid (authoritative server-only account record). `_billingEventLedger`
+  retains uid for refund/revenue attribution and is server-only.
 - `_trialLedger` ids come from
   `HMAC-SHA256(TRIAL_IDENTITY_SECRET, normalizeE164(phone))`
   (`functions/src/billing/trialIdentity.ts`); no raw phone or uid is stored
