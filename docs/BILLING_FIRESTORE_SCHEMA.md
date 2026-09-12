@@ -21,6 +21,7 @@ schema-by-use: **no documents are pre-created to "initialize" collections.**
 | `_creditNoteCounters/{financialYear}` | Admin SDK only | denied | denied |
 | `_invoiceRetryQueue/{invoiceId}` | Admin SDK only | denied | denied |
 | `_gstr1FilingBatches/{filingBatchId}` | Admin SDK only | denied | denied |
+| `_gstr1ReportManifests/{reportId}` | Admin SDK only | denied | denied |
 | `_subscriptionAuditLog/{eventId}` | Admin SDK only (append-only discipline) | denied | denied |
 | `_processedBillingEvents/{idempotencyKey}` | Admin SDK only | denied | denied |
 | `_billingEventLedger/{financialEventId}` | Admin SDK only (immutable ledger) | denied | denied |

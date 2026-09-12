@@ -49,6 +49,7 @@ import {
   getMonthKey,
   istWallClockToEpochMs,
   parseFinancialYear,
+  formatIstCalendarDate,
 } from "./financialYearUtils";
 import {
   gstStateCodeFromGstin,
@@ -64,10 +65,16 @@ import {
   resolvePlatformTaxPolicy,
 } from "./platformTaxPolicy";
 import { resolvePlaceOfSupply } from "./placeOfSupply";
-import { loadSellerTaxIdentity, type SellerIdentityConfig } from "./sellerIdentity";
+import { loadSellerTaxIdentity, parsePriceIncludesGst, parseReverseChargeMode, type SellerIdentityConfig } from "./sellerIdentity";
 import { calculateGst, isPaiseCalculationValid } from "./taxMath";
+import { parseGstrMonth, resolveTaxPeriod } from "./taxPeriod";
+import {
+  formatTaxInvoiceNumber,
+  STATUTORY_DOCUMENT_NUMBER_MAX_LEN,
+} from "./invoiceAllocation";
+import { formatCreditNoteNumber } from "./creditNote";
 
-const SELLER_GSTIN = "09ACLFA6299A1Z6";
+const SELLER_GSTIN = "09AAAAA0000A1Z5";
 const BUYER_MH_GSTIN = "27AAAAA0000A1Z5";
 
 function isCause(code: string) {
@@ -86,6 +93,10 @@ function completeSeller(overrides: Partial<SellerIdentityConfig> = {}): SellerId
     serviceSacDescription: "Test software subscription service (CA approval required)",
     gstRateBps: 1800,
     priceIncludesGst: true,
+    reverseChargeMode: "no",
+    appleTaxResponsibilityMode: "unconfirmed",
+    googleTaxResponsibilityMode: "developer",
+    directWebTaxResponsibilityMode: "developer",
     billingEmailFromAddress: "billing@specialsoftwares.com",
     invoiceRendererUrl: "https://renderer.example.test",
     adminIdentityProvisioned: false,
@@ -111,8 +122,8 @@ function testLegalHeaders(): void {
 }
 
 function testGstin(): void {
-  assert.equal(normalizeGstin("  09aclfa6299a1z6  "), SELLER_GSTIN);
-  assert.equal(isValidGstinFormat("09aclfa6299a1z6"), true);
+  assert.equal(normalizeGstin("  09aaaaa0000a1z5  "), SELLER_GSTIN);
+  assert.equal(isValidGstinFormat("09aaaaa0000a1z5"), true);
   assert.equal(isValidGstinFormat("not-a-gstin"), false);
   assert.equal(isValidGstinFormat("99AAAAA0000A1Z5"), false);
   assert.equal(gstStateCodeFromGstin(SELLER_GSTIN), "09");
@@ -120,7 +131,7 @@ function testGstin(): void {
   assert.notEqual(gstStateName("09"), "UP");
   assert.notEqual(gstStateCodeFromGstin(SELLER_GSTIN), "MH");
   assert.equal(gstStateCodeFromGstin(BUYER_MH_GSTIN), "27");
-  assert.throws(() => gstStateCodeFromGstin("UPACLFA6299A1Z6"), isCause("gstin_format_invalid"));
+  assert.throws(() => gstStateCodeFromGstin("UPAAAAA0000A1Z5"), isCause("gstin_format_invalid"));
 }
 
 async function testBillingDetailsAndVerification(): Promise<void> {
@@ -129,7 +140,7 @@ async function testBillingDetailsAndVerification(): Promise<void> {
   const saved = await applyUpdateBillingDetails(
     store,
     uid,
-    { gstin: "  09aclfa6299a1z6  ", billingBusinessName: "Buyer LLP" },
+    { gstin: "  09aaaaa0000a1z5  ", billingBusinessName: "Buyer LLP" },
     1000
   );
   assert.equal(saved.gstin, SELLER_GSTIN);
@@ -409,6 +420,49 @@ function testFinancialYear(): void {
   const start = getFinancialYearStartDate("2026-27");
   assert.equal(getFinancialYearForDate(start), "2026-27");
   assert.equal(getMonthKey(start.getTime()), "2026-04");
+
+  const istBoundary = Date.parse("2026-09-13T00:15:00+05:30");
+  assert.equal(formatIstCalendarDate(istBoundary), "13-09-2026");
+  assert.notEqual(new Date(istBoundary).toISOString().slice(0, 10), "2026-09-13");
+  assert.equal(formatIstCalendarDate(istWallClockToEpochMs("2026-09-12T23:59:59")), "12-09-2026");
+  assert.equal(formatIstCalendarDate(istWallClockToEpochMs("2026-09-13T00:00:00")), "13-09-2026");
+}
+
+function testTaxPeriodAndMonth(): void {
+  assert.deepEqual(parseGstrMonth("2026-09"), { year: 2026, month: 9 });
+  assert.throws(() => parseGstrMonth("2026-00"), isCause("invalid_gstr_month"));
+  assert.throws(() => parseGstrMonth("2026-13"), isCause("invalid_gstr_month"));
+  const same = resolveTaxPeriod({
+    supplyOccurredAt: istWallClockToEpochMs("2026-09-12T12:00:00"),
+    invoiceIssuedAt: istWallClockToEpochMs("2026-09-30T23:59:59"),
+  });
+  assert.equal(same.taxPeriodStatus, "resolved");
+  assert.equal(same.taxPeriodMonth, "2026-09");
+  const cross = resolveTaxPeriod({
+    supplyOccurredAt: istWallClockToEpochMs("2027-03-31T23:59:59"),
+    invoiceIssuedAt: istWallClockToEpochMs("2027-04-01T00:01:00"),
+  });
+  assert.equal(cross.taxPeriodStatus, "unresolved_cross_period");
+  assert.equal(cross.taxPeriodMonth, null);
+}
+
+function testFailClosedConfigAndNumbers(): void {
+  assert.equal(parsePriceIncludesGst("true"), true);
+  assert.equal(parsePriceIncludesGst("false"), false);
+  assert.equal(parsePriceIncludesGst(undefined), null);
+  assert.equal(parsePriceIncludesGst("TRUE"), null);
+  assert.equal(parsePriceIncludesGst("yes"), null);
+  assert.equal(parseReverseChargeMode("yes"), "yes");
+  assert.equal(parseReverseChargeMode("no"), "no");
+  assert.equal(parseReverseChargeMode(undefined), "unconfirmed");
+  assert.equal(parseReverseChargeMode("maybe"), "unconfirmed");
+  const ss = formatTaxInvoiceNumber("2026-27", 1);
+  const cn = formatCreditNoteNumber("2026-27", 1);
+  assert.equal(ss, "SS/2026-27/0001");
+  assert.equal(cn, "CN/2026-27/0001");
+  assert.ok(ss.length <= STATUTORY_DOCUMENT_NUMBER_MAX_LEN);
+  assert.ok(cn.length <= STATUTORY_DOCUMENT_NUMBER_MAX_LEN);
+  assert.throws(() => formatTaxInvoiceNumber("2026-27", 100000), isCause("statutory_number_too_long"));
 }
 
 async function main(): Promise<void> {
@@ -420,6 +474,8 @@ async function main(): Promise<void> {
   testPlaceOfSupply();
   testTaxMath();
   testFinancialYear();
+  testTaxPeriodAndMonth();
+  testFailClosedConfigAndNumbers();
   console.log("gst.core.unit.test.ts: ok");
 }
 

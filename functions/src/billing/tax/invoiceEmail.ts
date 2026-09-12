@@ -33,7 +33,10 @@
  */
 
 import type { EmailProvider } from "../../email/provider";
+import { canonicalizeEmailFromAddress } from "../../email/provider";
 import type { InvoiceEmailStatus, SubscriptionInvoiceDoc } from "../types";
+
+export const EMAIL_INVOICE_DOWNLOAD_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 export interface VerifiedEmailLookup {
   emailStatus: string | null | undefined;
@@ -45,6 +48,20 @@ export function authoritativeVerifiedEmail(user: VerifiedEmailLookup): string | 
   if (user.emailStatus !== "verified") return null;
   const email = (user.normalizedEmail ?? user.businessEmail ?? "").trim().toLowerCase();
   return email.includes("@") ? email : null;
+}
+
+/**
+ * Local invoice state is the primary duplicate-send guard.
+ * Provider idempotency keys are defense-in-depth only.
+ */
+export function shouldAttemptInvoiceEmail(
+  emailStatus: InvoiceEmailStatus,
+  hasVerifiedEmail: boolean
+): boolean {
+  if (emailStatus === "accepted" || emailStatus === "delivered") return false;
+  if (emailStatus === "bounced") return false;
+  if (emailStatus === "skipped_no_verified_email") return hasVerifiedEmail;
+  return emailStatus === "pending" || emailStatus === "failed";
 }
 
 export interface SendInvoiceEmailResult {
@@ -63,8 +80,8 @@ export async function sendInvoiceEmail(opts: {
   recipient: VerifiedEmailLookup;
   nowMs: number;
   fromAddress?: string | null;
+  downloadUrl?: string | null;
 }): Promise<SendInvoiceEmailResult> {
-  void opts.fromAddress;
   const to = authoritativeVerifiedEmail(opts.recipient);
   if (!to) {
     return {
@@ -74,12 +91,26 @@ export async function sendInvoiceEmail(opts: {
     };
   }
   const number = opts.invoice.documentNumber ?? opts.invoice.invoiceId;
+  const downloadLine = opts.downloadUrl
+    ? `Download your document (link expires in 7 days):\n${opts.downloadUrl}\n\n`
+    : "";
+  const textBody =
+    `Your Vyaamikk Diary billing document ${number} is ready.\n\n` +
+    downloadLine +
+    "The PDF is also available in the app under Subscription & Billing after you sign in. " +
+    "This message does not attach the PDF.";
+  const htmlBody = opts.downloadUrl
+    ? `<p>Your Vyaamikk Diary billing document ${escapeHtml(number)} is ready.</p>` +
+      `<p><a href="${escapeHtml(opts.downloadUrl)}">Download invoice PDF</a> (link expires in 7 days).</p>` +
+      `<p>The PDF is also available in the app under Subscription &amp; Billing after you sign in. This message does not attach the PDF.</p>`
+    : undefined;
+  const from = opts.fromAddress ? canonicalizeEmailFromAddress(opts.fromAddress) : null;
   const result = await opts.provider.send({
     to,
     subject: `Vyaamikk Diary billing document ${number}`,
-    textBody:
-      "Your Vyaamikk Diary billing document is available in the app under Subscription & Billing. " +
-      "Download is available after you sign in. This message does not attach the PDF.",
+    textBody,
+    htmlBody,
+    fromAddress: from ?? undefined,
     idempotencyKey: `invoice-email:${opts.invoice.invoiceId}`,
   });
   if (result.errorCode || result.provider === "none") {
@@ -89,10 +120,17 @@ export async function sendInvoiceEmail(opts: {
       invoiceEmailAcceptedAt: null,
     };
   }
-  // Provider `delivered: true` on 2xx is acceptance, not inbox delivery.
   return {
     emailStatus: "accepted",
     emailProviderMessageId: result.providerMessageId ?? null,
     invoiceEmailAcceptedAt: opts.nowMs,
   };
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }

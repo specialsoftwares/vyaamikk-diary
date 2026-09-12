@@ -15,6 +15,11 @@ export interface SendEmailInput {
   textBody: string;
   /** Idempotency key for provider / retry safety. */
   idempotencyKey: string;
+  /** Optional HTML body. OTP callers omit this; billing may include a download link. */
+  htmlBody?: string;
+  /** Optional sender override. OTP callers omit this and keep EMAIL_FROM_ADDRESS. */
+  fromAddress?: string;
+  replyTo?: string;
 }
 
 export interface SendEmailResult {
@@ -87,10 +92,12 @@ export function createResendEmailProvider(apiKey: string, fromAddress: string): 
             "Idempotency-Key": input.idempotencyKey.slice(0, 256),
           },
           body: JSON.stringify({
-            from: fromAddress,
+            from: input.fromAddress?.trim() || fromAddress,
             to: [input.to],
             subject: input.subject,
             text: input.textBody,
+            ...(input.htmlBody ? { html: input.htmlBody } : {}),
+            ...(input.replyTo ? { reply_to: input.replyTo } : {}),
           }),
         });
         if (!res.ok) {

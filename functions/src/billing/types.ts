@@ -464,6 +464,12 @@ export type BuyerClassification = "b2b" | "b2c";
 
 export type GstTaxType = "cgst_sgst" | "igst" | null;
 
+export type ReverseChargeMode = "yes" | "no" | "unconfirmed";
+
+export type TaxDocumentIssueStatus = "unissued_draft" | "issued";
+
+export type TaxPeriodStatus = "pending_issue" | "resolved" | "unresolved_cross_period";
+
 export type InvoicePdfStatus =
   | "pending"
   | "awaiting_financial_evidence"
@@ -529,8 +535,13 @@ export interface SubscriptionInvoiceDoc {
   documentNumber: string | null;
   financialYear: string | null;
   taxPeriodMonth: string | null;
+  taxPeriodStatus: TaxPeriodStatus;
   invoiceIssuedAt: number | null;
+  invoiceIssuedOnIst: string | null;
   supplyOccurredAt: number | null;
+  issueStatus: TaxDocumentIssueStatus;
+  reverseChargeMode: ReverseChargeMode | null;
+  subscriptionDescription: string | null;
   seller: SellerTaxSnapshot | null;
   buyer: BuyerTaxSnapshot;
   placeOfSupplyStateCode: string | null;
@@ -563,7 +574,18 @@ export interface SubscriptionInvoiceDoc {
   updatedAt: number;
 }
 
-export const INVOICE_IMMUTABLE_KEYS: ReadonlyArray<keyof SubscriptionInvoiceDoc> = [
+/** Always immutable, including on unissued drafts. */
+export const INVOICE_IDENTITY_KEYS: ReadonlyArray<keyof SubscriptionInvoiceDoc> = [
+  "invoiceId",
+  "uid",
+  "financialEventId",
+];
+
+/**
+ * Frozen only after statutory issuance (documentNumber + invoiceIssuedAt).
+ * Unissued drafts may refresh these when compliance configuration arrives.
+ */
+export const INVOICE_STATUTORY_KEYS: ReadonlyArray<keyof SubscriptionInvoiceDoc> = [
   "invoiceId",
   "uid",
   "diagnosticUid",
@@ -572,13 +594,18 @@ export const INVOICE_IMMUTABLE_KEYS: ReadonlyArray<keyof SubscriptionInvoiceDoc>
   "canonicalSku",
   "plan",
   "billingPeriod",
+  "subscriptionDescription",
   "taxResponsibilityMode",
   "documentType",
   "documentNumber",
   "financialYear",
   "taxPeriodMonth",
+  "taxPeriodStatus",
   "invoiceIssuedAt",
+  "invoiceIssuedOnIst",
   "supplyOccurredAt",
+  "issueStatus",
+  "reverseChargeMode",
   "seller",
   "buyer",
   "placeOfSupplyStateCode",
@@ -598,6 +625,9 @@ export const INVOICE_IMMUTABLE_KEYS: ReadonlyArray<keyof SubscriptionInvoiceDoc>
   "platformCommissionInPaise",
   "ecoReporting",
 ];
+
+/** @deprecated Use INVOICE_STATUTORY_KEYS; kept as alias for existing imports. */
+export const INVOICE_IMMUTABLE_KEYS = INVOICE_STATUTORY_KEYS;
 
 export const INVOICE_OPERATIONAL_KEYS: ReadonlyArray<keyof SubscriptionInvoiceDoc> = [
   "pdfStatus",
@@ -651,7 +681,15 @@ export interface SubscriptionCreditNoteDoc {
   documentNumber: string | null;
   financialYear: string | null;
   taxPeriodMonth: string | null;
+  taxPeriodStatus: TaxPeriodStatus;
   issuedAt: number | null;
+  issuedOnIst: string | null;
+  buyerGstin: string | null;
+  buyerClassification: BuyerClassification | null;
+  originalInvoiceIssuedOnIst: string | null;
+  placeOfSupplyStateCode: string | null;
+  gstRateBps: number | null;
+  taxType: GstTaxType;
   taxResponsibilityMode: TaxResponsibilityMode;
   taxableAmountReversedInPaise: number | null;
   cgstReversedInPaise: number | null;
@@ -668,16 +706,37 @@ export interface SubscriptionCreditNoteDoc {
 
 export type InvoiceRetryStage = "pdf" | "email";
 
+export interface InvoiceRetryStageState {
+  attempts: number;
+  maxAttempts: number;
+  nextAttemptAt: number | null;
+  lastErrorCode: string | null;
+  deadLettered: boolean;
+  resolved: boolean;
+}
+
 export interface InvoiceRetryQueueDoc {
   invoiceId: string;
   financialEventId: string;
-  stage: InvoiceRetryStage;
-  attempts: number;
-  maxAttempts: number;
-  nextAttemptAt: number;
-  lastErrorCode: string | null;
-  deadLettered: boolean;
+  pdf: InvoiceRetryStageState;
+  email: InvoiceRetryStageState;
   updatedAt: number;
+}
+
+export type Gstr1ReviewStatus = "ready_to_file" | "requires_tax_review";
+
+export interface Gstr1ReportManifestDoc {
+  reportId: string;
+  month: string;
+  invoiceIds: string[];
+  creditNoteIds: string[];
+  contentHash: string;
+  jsonStoragePath: string;
+  csvStoragePath: string;
+  generatedAt: number;
+  generatedByDiagnosticUid: string;
+  reviewStatus: Gstr1ReviewStatus;
+  unresolvedReviewReasons: string[];
 }
 
 export interface Gstr1FilingBatchDoc {

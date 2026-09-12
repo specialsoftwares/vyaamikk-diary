@@ -8,13 +8,14 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/main.js",
-    "test": "npx --yes tsx src/protocol.test.ts && npx --yes tsx src/server.test.ts"
+    "test": "tsx src/protocol.test.ts && tsx src/server.test.ts"
   },
   "dependencies": {
     "puppeteer": "24.22.3"
   },
   "devDependencies": {
     "@types/node": "^20.17.0",
+    "tsx": "4.20.5",
     "typescript": "^5.8.3"
   }
 }

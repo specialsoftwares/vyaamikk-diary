@@ -34,7 +34,7 @@
 
 import { invoiceRetryQueuePath } from "../paths";
 import type { BillingStore } from "../store";
-import type { InvoiceRetryQueueDoc, InvoiceRetryStage } from "../types";
+import type { InvoiceRetryQueueDoc, InvoiceRetryStage, InvoiceRetryStageState } from "../types";
 
 export const INVOICE_RETRY_MAX_ATTEMPTS = 3;
 export const INVOICE_RETRY_BACKOFF_MS = 60_000;
@@ -57,6 +57,31 @@ export class NoopInvoiceRetryAlerter implements InvoiceRetryAlerter {
   }
 }
 
+function emptyStage(): InvoiceRetryStageState {
+  return {
+    attempts: 0,
+    maxAttempts: INVOICE_RETRY_MAX_ATTEMPTS,
+    nextAttemptAt: null,
+    lastErrorCode: null,
+    deadLettered: false,
+    resolved: false,
+  };
+}
+
+function emptyRetryDoc(
+  invoiceId: string,
+  financialEventId: string,
+  nowMs: number
+): InvoiceRetryQueueDoc {
+  return {
+    invoiceId,
+    financialEventId,
+    pdf: emptyStage(),
+    email: emptyStage(),
+    updatedAt: nowMs,
+  };
+}
+
 export async function persistInvoiceRetry(
   store: BillingStore,
   input: {
@@ -70,18 +95,58 @@ export async function persistInvoiceRetry(
   const path = invoiceRetryQueuePath(input.invoiceId);
   return store.runTransaction(async (tx) => {
     const snap = await tx.get(path);
-    const prior = snap.exists ? (snap.data() as unknown as InvoiceRetryQueueDoc) : null;
-    const attempts = (prior?.attempts ?? 0) + 1;
+    const prior = snap.exists
+      ? (snap.data() as unknown as InvoiceRetryQueueDoc)
+      : emptyRetryDoc(input.invoiceId, input.financialEventId, input.nowMs);
+    const current = prior[input.stage] ?? emptyStage();
+    const attempts = current.attempts + 1;
     const dead = attempts >= INVOICE_RETRY_MAX_ATTEMPTS;
-    const next: InvoiceRetryQueueDoc = {
-      invoiceId: input.invoiceId,
-      financialEventId: input.financialEventId,
-      stage: input.stage,
+    const nextStage: InvoiceRetryStageState = {
       attempts,
       maxAttempts: INVOICE_RETRY_MAX_ATTEMPTS,
       nextAttemptAt: dead ? input.nowMs : input.nowMs + INVOICE_RETRY_BACKOFF_MS,
       lastErrorCode: input.errorCode,
       deadLettered: dead,
+      resolved: false,
+    };
+    const next: InvoiceRetryQueueDoc = {
+      invoiceId: input.invoiceId,
+      financialEventId: input.financialEventId,
+      pdf: input.stage === "pdf" ? nextStage : prior.pdf ?? emptyStage(),
+      email: input.stage === "email" ? nextStage : prior.email ?? emptyStage(),
+      updatedAt: input.nowMs,
+    };
+    tx.set(path, next as unknown as Record<string, unknown>);
+    return next;
+  });
+}
+
+export async function resolveInvoiceRetryStage(
+  store: BillingStore,
+  input: {
+    invoiceId: string;
+    financialEventId: string;
+    stage: InvoiceRetryStage;
+    nowMs: number;
+  }
+): Promise<InvoiceRetryQueueDoc | null> {
+  const path = invoiceRetryQueuePath(input.invoiceId);
+  return store.runTransaction(async (tx) => {
+    const snap = await tx.get(path);
+    if (!snap.exists) return null;
+    const prior = snap.data() as unknown as InvoiceRetryQueueDoc;
+    const resolved: InvoiceRetryStageState = {
+      ...(prior[input.stage] ?? emptyStage()),
+      nextAttemptAt: null,
+      lastErrorCode: null,
+      deadLettered: false,
+      resolved: true,
+    };
+    const next: InvoiceRetryQueueDoc = {
+      ...prior,
+      financialEventId: input.financialEventId,
+      pdf: input.stage === "pdf" ? resolved : prior.pdf ?? emptyStage(),
+      email: input.stage === "email" ? resolved : prior.email ?? emptyStage(),
       updatedAt: input.nowMs,
     };
     tx.set(path, next as unknown as Record<string, unknown>);
@@ -101,7 +166,7 @@ export async function enqueueInvoiceRetry(
   }
 ): Promise<InvoiceRetryQueueDoc> {
   const doc = await persistInvoiceRetry(store, input);
-  if (doc.deadLettered && input.alerter) {
+  if (doc[input.stage].deadLettered && input.alerter) {
     await input.alerter.notifyDeadLetter({
       invoiceId: input.invoiceId,
       stage: input.stage,

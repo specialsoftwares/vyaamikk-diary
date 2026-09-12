@@ -622,6 +622,9 @@ service cloud.firestore {
     match /_gstr1FilingBatches/{filingBatchId} {
       allow read, write: if false;
     }
+    match /_gstr1ReportManifests/{reportId} {
+      allow read, write: if false;
+    }
 
     // ---- Global paper-savings estimate (public product stat) -------------
     // Server-written; figures are labelled estimates (owner decision W-9).

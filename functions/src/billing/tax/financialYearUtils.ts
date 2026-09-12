@@ -156,3 +156,26 @@ export function istWallClockToEpochMs(isoLocal: string): number {
     Number(m[6])
   );
 }
+
+/**
+ * Canonical India-local calendar date for tax documents: dd-MM-yyyy in
+ * Asia/Kolkata. Never use UTC ISO date slices for invoice/GSTR dates.
+ */
+export function formatIstCalendarDate(epochMs: number): string {
+  if (!Number.isFinite(epochMs)) {
+    throw new BillingError({
+      clientCode: "internal_error",
+      causeCode: "invalid_ist_calendar_date",
+    });
+  }
+  const fmt = new Intl.DateTimeFormat("en-GB", {
+    timeZone: IST_TIME_ZONE,
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+  const bag = Object.fromEntries(
+    fmt.formatToParts(new Date(epochMs)).map((p) => [p.type, p.value])
+  );
+  return `${bag.day}-${bag.month}-${bag.year}`;
+}

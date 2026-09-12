@@ -30,7 +30,7 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -49,6 +49,7 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             functions/package-lock.json
+            services/subscription-invoice-renderer/package-lock.json
 
       - name: Install pinned firebase-tools
         run: npm install -g firebase-tools@14.20.0

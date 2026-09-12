@@ -22,6 +22,9 @@ const EXCLUDE = new Set([
   "test:storage-rules", // storage emulator suite — separate ci:verify stage
   "test:resolve-or-create-phone-emulator", // emulator suite — separate ci:verify stage
   "test:billing-transaction-emulator", // emulator suite — separate ci:verify stage
+  "test:invoice-renderer", // requires services/subscription-invoice-renderer node_modules
+  "test:invoice-renderer-build", // npm ci + tsc; run by ci:verify
+  "test:invoice-renderer-docker", // docker build; run by ci:verify
 ]);
 
 const suites = Object.keys(pkg.scripts)

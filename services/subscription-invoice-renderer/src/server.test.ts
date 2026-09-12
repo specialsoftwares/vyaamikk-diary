@@ -49,6 +49,16 @@ async function main() {
   assert.ok(!src.includes("GSTIN"));
   assert.ok(!src.includes("purchaseToken"));
 
+  const dockerPath = [
+    resolve(process.cwd(), "Dockerfile"),
+    resolve(process.cwd(), "services/subscription-invoice-renderer/Dockerfile"),
+  ].find((p) => existsSync(p));
+  if (!dockerPath) throw new Error("Dockerfile not found");
+  const docker = readFileSync(dockerPath, "utf8");
+  assert.match(docker, /npm run build/);
+  assert.match(docker, /COPY --from=builder \/app\/dist \.\/dist/);
+  assert.doesNotMatch(docker, /^COPY dist \.\/dist$/m);
+
   const server = createRendererServer(async () => Buffer.from("%PDF-FAKE"));
   await new Promise<void>((r) => server.listen(0, r));
   const addr = server.address();

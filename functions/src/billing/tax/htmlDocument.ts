@@ -32,7 +32,9 @@
  * policy.
  */
 
-import type { SubscriptionInvoiceDoc } from "../types";
+import type { SubscriptionCreditNoteDoc, SubscriptionInvoiceDoc } from "../types";
+
+import { formatIstCalendarDate } from "./financialYearUtils";
 
 const BRAND = "SPECIAL SOFTWARES";
 const PRODUCT = "Vyaamikk Diary";
@@ -68,6 +70,24 @@ function titleFor(doc: SubscriptionInvoiceDoc): string {
   return "COMPLIANCE REVIEW — NOT A TAX INVOICE";
 }
 
+function issueDateLabel(issuedAt: number | null, issuedOnIst: string | null): string {
+  if (issuedOnIst) return issuedOnIst;
+  if (issuedAt != null) return formatIstCalendarDate(issuedAt);
+  return "—";
+}
+
+function reverseChargeLabel(mode: SubscriptionInvoiceDoc["reverseChargeMode"]): string {
+  if (mode === "yes") return "Yes";
+  if (mode === "no") return "No";
+  return "—";
+}
+
+function descriptionCell(invoice: SubscriptionInvoiceDoc): string {
+  const planLine = invoice.subscriptionDescription ?? "Vyaamikk Diary subscription";
+  const sacLine = invoice.serviceDescription;
+  return sacLine && sacLine !== planLine ? `${esc(planLine)}<br/>${esc(sacLine)}` : esc(planLine);
+}
+
 /**
  * Pure HTML builder. No Expo, no React Native, no logging of document contents.
  */
@@ -77,9 +97,7 @@ export function buildSubscriptionTaxDocumentHtml(invoice: SubscriptionInvoiceDoc
   const isTaxInvoice =
     invoice.documentType === "tax_invoice_b2b" || invoice.documentType === "tax_invoice_b2c";
   const interState = invoice.taxType === "igst";
-  const issued = invoice.invoiceIssuedAt
-    ? new Date(invoice.invoiceIssuedAt).toISOString().slice(0, 10)
-    : "—";
+  const issued = issueDateLabel(invoice.invoiceIssuedAt, invoice.invoiceIssuedOnIst);
 
   const supplierBlock = seller
     ? `<p><strong>${esc(seller.legalName)}</strong>${
@@ -153,7 +171,7 @@ export function buildSubscriptionTaxDocumentHtml(invoice: SubscriptionInvoiceDoc
     </thead>
     <tbody>
       <tr>
-        <td>${esc(invoice.serviceDescription ?? "Vyaamikk Diary subscription")}</td>
+        <td>${descriptionCell(invoice)}</td>
         <td>${esc(invoice.sacCode ?? "—")}</td>
         <td>${paise(invoice.taxableAmountInPaise)}</td>
         <td>${invoice.gstRateBps != null ? `${(invoice.gstRateBps / 100).toFixed(2)}%` : "—"}</td>
@@ -167,7 +185,7 @@ export function buildSubscriptionTaxDocumentHtml(invoice: SubscriptionInvoiceDoc
       ? `<p>CGST: ${paise(invoice.cgstInPaise)} &nbsp; SGST: ${paise(
           invoice.sgstInPaise
         )} &nbsp; IGST: ${paise(invoice.igstInPaise)}</p>
-         <p>Reverse charge: No</p>`
+         <p>Reverse charge: ${esc(reverseChargeLabel(invoice.reverseChargeMode))}</p>`
       : ""
   }
   ${interState && isTaxInvoice ? `<p>Inter-State supply. Place of supply as stated above.</p>` : ""}
@@ -175,6 +193,36 @@ export function buildSubscriptionTaxDocumentHtml(invoice: SubscriptionInvoiceDoc
   <p class="note">Computer-generated document. Brand mark ${esc(
     BRAND
   )} is a trade presentation; the GST supplier is the legal person on the GST registration.</p>
+</div>
+</body>
+</html>`;
+}
+
+export function buildSubscriptionCreditNoteHtml(note: SubscriptionCreditNoteDoc): string {
+  const issued = issueDateLabel(note.issuedAt, note.issuedOnIst);
+  const originalDate = note.originalInvoiceIssuedOnIst ?? "—";
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>CREDIT NOTE</title>
+<style>
+  body { font-family: Helvetica, Arial, sans-serif; font-size: 12px; color: #111; margin: 0; }
+  .page { width: 190mm; margin: 10mm auto; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>CREDIT NOTE</h1>
+  <div>Document number: ${esc(note.documentNumber ?? "—")}</div>
+  <div>Issue date: ${esc(issued)}</div>
+  <div>Original invoice: ${esc(note.originalDocumentNumber ?? note.originalInvoiceId)}</div>
+  <div>Original invoice date: ${esc(originalDate)}</div>
+  <div>Recipient GSTIN: ${esc(note.buyerGstin ?? "—")}</div>
+  <div>Place of supply: ${esc(note.placeOfSupplyStateCode ?? "—")}</div>
+  <div>Taxable reversal: ${paise(note.taxableAmountReversedInPaise)}</div>
+  <div>Tax reversal: ${paise(note.totalTaxReversedInPaise)}</div>
+  <div>Total reversal: ${paise(note.totalReversedInPaise)}</div>
 </div>
 </body>
 </html>`;

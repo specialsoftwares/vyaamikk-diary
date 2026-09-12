@@ -95,6 +95,17 @@ export function getCatalogEntry(sku: CanonicalSku): CatalogEntry {
   return SUBSCRIPTION_CATALOG[sku];
 }
 
+export function isCanonicalSku(sku: string): sku is CanonicalSku {
+  return Object.prototype.hasOwnProperty.call(SUBSCRIPTION_CATALOG, sku);
+}
+
+export function subscriptionDescriptionForSku(sku: CanonicalSku): string {
+  const entry = getCatalogEntry(sku);
+  const plan = `${entry.plan.charAt(0).toUpperCase()}${entry.plan.slice(1)}`;
+  const period = `${entry.period.charAt(0).toUpperCase()}${entry.period.slice(1)}`;
+  return `Vyaamikk Diary ${plan} Subscription (${period})`;
+}
+
 /**
  * Reverse lookup for Android purchase verification: resolve the canonical SKU
  * from the store-reported productId + basePlanId. Returns null for unknown

@@ -279,6 +279,7 @@ async function main() {
       ["_creditNoteCounters", "2026-27"],
       ["_invoiceRetryQueue", "inv_v1_test"],
       ["_gstr1FilingBatches", "gstr1batch_test"],
+      ["_gstr1ReportManifests", "gstr1_2026-09_test"],
     ];
     for (const [coll, id] of serverOnlyDocs) {
       await testEnv.withSecurityRulesDisabled(async (ctx) => {

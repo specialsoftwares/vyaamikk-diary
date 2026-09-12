@@ -39,16 +39,34 @@ import assert from "node:assert/strict";
 import { applyMarkGstr1Filed } from "../callables/markGstr1Filed";
 import { generateGstr1WorkingPapersCore } from "../callables/generateGstr1WorkingPapers";
 import { BillingError } from "../errors";
+import { gstr1ReportManifestPath } from "../paths";
 import { MemoryBillingStore } from "../store";
 import type { SubscriptionCreditNoteDoc, SubscriptionInvoiceDoc } from "../types";
-import { buildGstr1WorkingPapers } from "./gstr1WorkingPapers";
+import { buildGstr1WorkingPapers, workingPapersToCsv } from "./gstr1WorkingPapers";
 import { MemoryInvoiceObjectStorage } from "./taxDocumentOrchestrator";
+import { parseGstrMonth } from "./taxPeriod";
 
 function isCause(code: string) {
   return (e: unknown) => e instanceof BillingError && e.causeCode === code;
 }
 
-function invoice(partial: Partial<SubscriptionInvoiceDoc> & { invoiceId: string; documentType: SubscriptionInvoiceDoc["documentType"] }): SubscriptionInvoiceDoc {
+function classifiedEco(platform: "android" | "ios" = "android"): SubscriptionInvoiceDoc["ecoReporting"] {
+  return {
+    platform,
+    operatorIdentifier: platform === "android" ? "google_play" : "apple_app_store",
+    operatorGstin: null,
+    taxResponsibilityMode: "developer",
+    section52TcsStatus: "classified",
+    table14ClassificationStatus: "classified",
+  };
+}
+
+function invoice(
+  partial: Partial<SubscriptionInvoiceDoc> & {
+    invoiceId: string;
+    documentType: SubscriptionInvoiceDoc["documentType"];
+  }
+): SubscriptionInvoiceDoc {
   return {
     uid: "user-1",
     diagnosticUid: "diag01",
@@ -57,12 +75,17 @@ function invoice(partial: Partial<SubscriptionInvoiceDoc> & { invoiceId: string;
     canonicalSku: "vyd_professional_yearly",
     plan: "professional",
     billingPeriod: "yearly",
+    subscriptionDescription: "Vyaamikk Diary Professional Subscription (Yearly)",
     taxResponsibilityMode: "developer",
     documentNumber: "SS/2026-27/0001",
     financialYear: "2026-27",
     taxPeriodMonth: "2026-09",
+    taxPeriodStatus: "resolved",
     invoiceIssuedAt: 1,
+    invoiceIssuedOnIst: "12-09-2026",
     supplyOccurredAt: 1,
+    issueStatus: "issued",
+    reverseChargeMode: "no",
     seller: null,
     buyer: {
       classification: partial.documentType === "tax_invoice_b2b" ? "b2b" : "b2c",
@@ -88,14 +111,7 @@ function invoice(partial: Partial<SubscriptionInvoiceDoc> & { invoiceId: string;
     totalTaxInPaise: 1800,
     totalInPaise: 11800,
     platformCommissionInPaise: 1770,
-    ecoReporting: {
-      platform: "android",
-      operatorIdentifier: "google_play",
-      operatorGstin: null,
-      taxResponsibilityMode: "developer",
-      section52TcsStatus: "requires_tax_review",
-      table14ClassificationStatus: "requires_tax_review",
-    },
+    ecoReporting: classifiedEco(),
     pdfStatus: "ready",
     invoicePdfStoragePath: "company/invoices/2026-27/x.pdf",
     emailStatus: "accepted",
@@ -113,6 +129,14 @@ function invoice(partial: Partial<SubscriptionInvoiceDoc> & { invoiceId: string;
 }
 
 async function main(): Promise<void> {
+  assert.deepEqual(parseGstrMonth("2026-09"), { year: 2026, month: 9 });
+  assert.throws(() => parseGstrMonth("2026-00"), isCause("invalid_gstr_month"));
+  assert.throws(() => parseGstrMonth("2026-13"), isCause("invalid_gstr_month"));
+  assert.throws(
+    () => buildGstr1WorkingPapers({ month: "2026-13", invoices: [], creditNotes: [] }),
+    isCause("invalid_gstr_month")
+  );
+
   const b2b = invoice({ invoiceId: "inv-b2b", documentType: "tax_invoice_b2b", documentNumber: "SS/2026-27/0001" });
   const b2c = invoice({
     invoiceId: "inv-b2c",
@@ -141,11 +165,27 @@ async function main(): Promise<void> {
     platform: "ios",
     gstrReportable: false,
     taxResponsibilityMode: "unconfirmed",
+    documentNumber: null,
+    invoiceIssuedAt: null,
+    issueStatus: "unissued_draft",
     ecoReporting: {
       platform: "ios",
       operatorIdentifier: "apple_app_store",
       operatorGstin: null,
       taxResponsibilityMode: "unconfirmed",
+      section52TcsStatus: "requires_tax_review",
+      table14ClassificationStatus: "requires_tax_review",
+    },
+  });
+  const reviewB2b = invoice({
+    invoiceId: "inv-review",
+    documentType: "tax_invoice_b2b",
+    documentNumber: "SS/2026-27/0009",
+    ecoReporting: {
+      platform: "android",
+      operatorIdentifier: "google_play",
+      operatorGstin: null,
+      taxResponsibilityMode: "developer",
       section52TcsStatus: "requires_tax_review",
       table14ClassificationStatus: "requires_tax_review",
     },
@@ -160,7 +200,15 @@ async function main(): Promise<void> {
     documentNumber: "CN/2026-27/0001",
     financialYear: "2026-27",
     taxPeriodMonth: "2026-09",
+    taxPeriodStatus: "resolved",
     issuedAt: 1,
+    issuedOnIst: "12-09-2026",
+    buyerGstin: "27AAAAA0000A1Z5",
+    buyerClassification: "b2b",
+    originalInvoiceIssuedOnIst: "12-09-2026",
+    placeOfSupplyStateCode: "27",
+    gstRateBps: 1800,
+    taxType: "igst",
     taxResponsibilityMode: "developer",
     taxableAmountReversedInPaise: 10000,
     cgstReversedInPaise: 0,
@@ -182,28 +230,80 @@ async function main(): Promise<void> {
   });
   assert.equal(papers.b2b.length, 1);
   assert.equal(papers.b2b[0]?.invoiceId, "inv-b2b");
+  assert.equal(papers.b2b[0]?.recipientGstin, "27AAAAA0000A1Z5");
+  assert.equal(papers.b2b[0]?.invoiceDateIst, "12-09-2026");
+  assert.equal(papers.b2b[0]?.invoiceValueInclusiveInPaise, 11800);
   assert.equal(papers.b2cSummary.length, 1);
   assert.equal(papers.b2cSummary[0]?.invoiceCount, 1);
-  assert.ok(papers.hsnSacSummary.some((r) => r.sacCode === "TESTSAC"));
+  assert.equal(papers.b2cSummary[0]?.taxableValueInPaise, 10000);
+  assert.ok(papers.hsnSacSummary.some((r) => r.sacCode === "TESTSAC" && r.totalTaxInPaise === 3600));
   assert.ok(papers.documentSeries.some((s) => s.documentType === "tax_invoice_b2b"));
   assert.equal(papers.creditNotes.length, 1);
   assert.equal(papers.creditNotes[0]?.originalInvoiceId, "inv-b2b");
+  assert.equal(papers.creditNotes[0]?.recipientGstin, "27AAAAA0000A1Z5");
+  assert.equal(papers.creditNotes[0]?.taxableReversalInPaise, 10000);
   assert.equal(papers.excludedAlreadyFiled.includes("inv-filed"), true);
   assert.equal(papers.reportableInvoiceIds.includes("inv-filed"), false);
   assert.ok(papers.ecoTable14.some((r) => r.table14ClassificationStatus === "requires_tax_review"));
   assert.ok(papers.ecoTable14.some((r) => r.note.includes("not fabricated")));
+  assert.equal(papers.reviewStatus, "ready_to_file");
+  assert.deepEqual(papers.unresolvedReviewReasons, []);
+
+  const csv = workingPapersToCsv(papers);
+  assert.match(csv, /GSTR-1 working papers for manual filing/);
+  assert.doesNotMatch(csv, /^section,id,amountInPaise$/m);
+  assert.match(csv, /recipientGstin/);
+  assert.match(csv, /27AAAAA0000A1Z5/);
+  assert.match(csv, /b2c_summary/);
+  assert.match(csv, /credit_note/);
+  const injectionPapers = buildGstr1WorkingPapers({
+    month: "2026-09",
+    invoices: [
+      invoice({
+        invoiceId: "inv-inject",
+        documentType: "tax_invoice_b2b",
+        documentNumber: "=1+1",
+        buyer: {
+          classification: "b2b",
+          legalName: "=HYPERLINK(1)",
+          gstin: "27AAAAA0000A1Z5",
+          gstinVerificationStatus: "verified",
+          billingAddress: null,
+          stateCode: "27",
+          stateName: "Maharashtra",
+        },
+      }),
+    ],
+    creditNotes: [],
+  });
+  assert.match(workingPapersToCsv(injectionPapers), /"'=1\+1/);
+
+  const reviewPapers = buildGstr1WorkingPapers({
+    month: "2026-09",
+    invoices: [reviewB2b],
+    creditNotes: [],
+  });
+  assert.equal(reviewPapers.reviewStatus, "requires_tax_review");
+  assert.ok(reviewPapers.unresolvedReviewReasons.includes("gstr_tax_review_unresolved"));
 
   const admin = { uid: "admin-1", tokenAdmin: true, adminIdentityProvisioned: true };
   const storage = new MemoryInvoiceObjectStorage();
+  const store = new MemoryBillingStore();
   const generated = await generateGstr1WorkingPapersCore({
     month: "2026-09",
     admin,
     invoices: [b2b, b2c, filed, apple],
     creditNotes: [cn],
     storage,
+    store,
+    generatedByDiagnosticUid: "admindiag01",
+    nowMs: 5,
   });
   assert.match(generated.jsonPath, /^company\/gstr1-reports\/2026-09\//);
   assert.match(generated.csvPath, /\.csv$/);
+  assert.equal(storage.contentTypes.get(generated.jsonPath), "application/json; charset=utf-8");
+  assert.equal(storage.contentTypes.get(generated.csvPath), "text/csv; charset=utf-8");
+  assert.ok(store.docs.has(gstr1ReportManifestPath(generated.papers.reportId)));
   assert.match(generated.csv, /b2b/);
 
   await assert.rejects(
@@ -213,11 +313,13 @@ async function main(): Promise<void> {
       invoices: [b2b],
       creditNotes: [],
       storage,
+      store,
+      generatedByDiagnosticUid: "admindiag01",
+      nowMs: 6,
     }),
     isCause("admin_identity_unprovisioned")
   );
 
-  const store = new MemoryBillingStore();
   store.docs.set(`_subscriptionInvoices/${b2b.invoiceId}`, { ...b2b });
   store.docs.set(`_subscriptionInvoices/${b2c.invoiceId}`, { ...b2c });
   store.docs.set(`_subscriptionInvoices/${filed.invoiceId}`, { ...filed });
@@ -227,31 +329,87 @@ async function main(): Promise<void> {
     applyMarkGstr1Filed(store, {
       admin,
       adminDiagnosticUid: "admindiag01",
-      month: "2026-09",
-      papers,
+      reportId: generated.papers.reportId,
       acknowledgement: "   ",
       nowMs: 9,
     }),
     isCause("gstr_acknowledgement_required")
   );
 
+  await assert.rejects(
+    applyMarkGstr1Filed(store, {
+      admin,
+      adminDiagnosticUid: "admindiag01",
+      reportId: generated.papers.reportId,
+      month: "2026-10",
+      acknowledgement: "ACK-1",
+      nowMs: 10,
+    }),
+    isCause("gstr_month_report_mismatch")
+  );
+
+  const reviewStore = new MemoryBillingStore();
+  reviewStore.docs.set(`_subscriptionInvoices/${reviewB2b.invoiceId}`, { ...reviewB2b });
+  const reviewGenerated = await generateGstr1WorkingPapersCore({
+    month: "2026-09",
+    admin,
+    invoices: [reviewB2b],
+    creditNotes: [],
+    storage,
+    store: reviewStore,
+    generatedByDiagnosticUid: "admindiag01",
+    nowMs: 11,
+  });
+  await assert.rejects(
+    applyMarkGstr1Filed(reviewStore, {
+      admin,
+      adminDiagnosticUid: "admindiag01",
+      reportId: reviewGenerated.papers.reportId,
+      acknowledgement: "ACK-REVIEW",
+      nowMs: 12,
+    }),
+    isCause("gstr_tax_review_unresolved")
+  );
+
   const batch = await applyMarkGstr1Filed(store, {
     admin,
     adminDiagnosticUid: "admindiag01",
-    month: "2026-09",
-    papers,
+    reportId: generated.papers.reportId,
     acknowledgement: "ACK-1",
     nowMs: 10,
   });
   assert.deepEqual(batch.invoiceIds.sort(), ["inv-b2b", "inv-b2c"].sort());
   assert.equal(batch.creditNoteIds[0], "cn-1");
+  assert.equal(batch.month, "2026-09");
+  assert.equal(batch.reportHash, generated.papers.contentHash);
   const markedB2b = store.docs.get(`_subscriptionInvoices/${b2b.invoiceId}`) as SubscriptionInvoiceDoc;
   const markedFiled = store.docs.get(`_subscriptionInvoices/${filed.invoiceId}`) as SubscriptionInvoiceDoc;
   assert.equal(markedB2b.gstrReportedMonth, "2026-09");
-  assert.equal(markedB2b.gstrFilingBatchId, `gstr1batch_${papers.reportId}`);
+  assert.equal(markedB2b.gstrFilingBatchId, `gstr1batch_${generated.papers.reportId}`);
   assert.equal(markedFiled.gstrFilingBatchId, null);
   const markedCn = store.docs.get(`_subscriptionCreditNotes/${cn.creditNoteId}`) as SubscriptionCreditNoteDoc;
   assert.equal(markedCn.gstrReportedMonth, "2026-09");
+
+  const replay = await applyMarkGstr1Filed(store, {
+    admin,
+    adminDiagnosticUid: "admindiag01",
+    reportId: generated.papers.reportId,
+    acknowledgement: "ACK-1",
+    nowMs: 99,
+  });
+  assert.equal(replay.filedAt, 10);
+  assert.equal(replay.filingAcknowledgementReference, "ACK-1");
+
+  await assert.rejects(
+    applyMarkGstr1Filed(store, {
+      admin,
+      adminDiagnosticUid: "admindiag01",
+      reportId: generated.papers.reportId,
+      acknowledgement: "ACK-OTHER",
+      nowMs: 100,
+    }),
+    isCause("gstr_filing_batch_conflict")
+  );
 
   console.log("gst.gstr1.unit.test.ts: ok");
 }

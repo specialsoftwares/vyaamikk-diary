@@ -46,6 +46,7 @@ import {
   companyBillingPath,
   financialLedgerPath,
   invoiceCounterPath,
+  invoiceRetryQueuePath,
   subscriptionHistoryPath,
 } from "../paths";
 import { MemoryBillingStore } from "../store";
@@ -60,21 +61,21 @@ import {
   creditNoteIdForRefundEvent,
   developerCreditNoteRequired,
 } from "./creditNote";
-import { istWallClockToEpochMs } from "./financialYearUtils";
+import { istWallClockToEpochMs, formatIstCalendarDate } from "./financialYearUtils";
 import { APPROVED_RENDERING_PROFILE, buildSubscriptionTaxDocumentHtml } from "./htmlDocument";
 import {
   allocateInvoiceStub,
   applyOperationalInvoicePatch,
   invoiceIdForFinancialEvent,
 } from "./invoiceAllocation";
-import { authoritativeVerifiedEmail, sendInvoiceEmail } from "./invoiceEmail";
+import { authoritativeVerifiedEmail, sendInvoiceEmail, shouldAttemptInvoiceEmail } from "./invoiceEmail";
 import {
   CloudRunInvoicePdfRenderer,
   FakeInvoicePdfRenderer,
   MissingRenderer,
   createInvoicePdfRenderer,
 } from "./pdfRenderer";
-import { enqueueInvoiceRetry, INVOICE_RETRY_MAX_ATTEMPTS } from "./retryQueue";
+import { enqueueInvoiceRetry, resolveInvoiceRetryStage, INVOICE_RETRY_MAX_ATTEMPTS } from "./retryQueue";
 import type { SellerIdentityConfig } from "./sellerIdentity";
 import {
   MemoryInvoiceObjectStorage,
@@ -82,7 +83,7 @@ import {
 } from "./taxDocumentOrchestrator";
 
 const NOW = 1_800_000_000_000;
-const SELLER_GSTIN = "09ACLFA6299A1Z6";
+const SELLER_GSTIN = "09AAAAA0000A1Z5";
 
 function isCause(code: string) {
   return (e: unknown) => e instanceof BillingError && e.causeCode === code;
@@ -100,7 +101,11 @@ function sellerConfig(overrides: Partial<SellerIdentityConfig> = {}): SellerIden
     serviceSacDescription: "Test software subscription service (CA approval required)",
     gstRateBps: 1800,
     priceIncludesGst: true,
-    billingEmailFromAddress: "billing@specialsoftwares.com",
+    reverseChargeMode: "no" as const,
+    appleTaxResponsibilityMode: "unconfirmed" as const,
+    googleTaxResponsibilityMode: "developer" as const,
+    directWebTaxResponsibilityMode: "developer" as const,
+    billingEmailFromAddress: "billing@example.test",
     invoiceRendererUrl: "https://renderer.example.test",
     adminIdentityProvisioned: false,
     gstrFilingFrequency: "monthly",
@@ -173,8 +178,13 @@ function skeleton(partial: Partial<SubscriptionInvoiceDoc> & Pick<SubscriptionIn
     documentNumber: null,
     financialYear: "2026-27",
     taxPeriodMonth: "2026-09",
+    taxPeriodStatus: "pending_issue",
     invoiceIssuedAt: null,
+    invoiceIssuedOnIst: null,
     supplyOccurredAt: NOW,
+    issueStatus: "unissued_draft",
+    reverseChargeMode: "no",
+    subscriptionDescription: "Vyaamikk Diary Professional Subscription (Yearly)",
     seller: null,
     buyer: {
       classification: "b2c",
@@ -232,17 +242,19 @@ async function orchestrate(opts: {
   user?: { emailStatus: string; normalizedEmail?: string | null };
   historyEventId?: string;
   config?: SellerIdentityConfig;
+  nowMs?: number;
+  storage?: MemoryInvoiceObjectStorage;
 }) {
   return orchestrateTaxDocument(
     {
       store: opts.store,
       config: opts.config ?? sellerConfig(),
       renderer: opts.renderer ?? new FakeInvoicePdfRenderer(),
-      storage: new MemoryInvoiceObjectStorage(),
+      storage: opts.storage ?? new MemoryInvoiceObjectStorage(),
       email: opts.email ?? fakeEmail(),
       loadUser: async () => opts.user ?? { emailStatus: "verified", normalizedEmail: "owner@example.com" },
       diagnosticUidFor: () => "diag01",
-      nowMs: NOW,
+      nowMs: opts.nowMs ?? NOW,
       historyEventId: opts.historyEventId,
     },
     opts.event.financialEventId
@@ -471,7 +483,15 @@ async function testCreditNotes(): Promise<void> {
       documentNumber: null,
       financialYear: null,
       taxPeriodMonth: "2026-09",
+      taxPeriodStatus: "pending_issue",
       issuedAt: null,
+      issuedOnIst: null,
+      buyerGstin: null,
+      buyerClassification: null,
+      originalInvoiceIssuedOnIst: null,
+      placeOfSupplyStateCode: null,
+      gstRateBps: null,
+      taxType: null,
       taxResponsibilityMode: original.taxResponsibilityMode,
       taxableAmountReversedInPaise: original.taxableAmountInPaise,
       cgstReversedInPaise: original.cgstInPaise,
@@ -523,6 +543,7 @@ async function testHtmlEmailDownloadRenderer(): Promise<void> {
   assert.match(html, /TESTSAC/);
   assert.match(html, /Place of supply/);
   assert.match(html, /Reverse charge: No/);
+  assert.match(html, /Vyaamikk Diary Professional Subscription \(Yearly\)/);
   assert.match(html, /Computer-generated document/);
   assert.match(
     html,
@@ -549,10 +570,15 @@ async function testHtmlEmailDownloadRenderer(): Promise<void> {
   assert.notEqual(accepted.emailStatus, "delivered");
 
   const storage = new MemoryInvoiceObjectStorage();
-  await storage.uploadPdf(inv.invoicePdfStoragePath ?? "company/invoices/2026-27/x.pdf", Buffer.from("%PDF"), {
-    invoiceNumber: inv.documentNumber ?? "n",
-    plan: "professional",
-    financialEventId: inv.financialEventId,
+  await storage.putObject({
+    path: inv.invoicePdfStoragePath ?? "company/invoices/2026-27/x.pdf",
+    bytes: Buffer.from("%PDF"),
+    contentType: "application/pdf",
+    customMetadata: {
+      invoiceNumber: inv.documentNumber ?? "n",
+      plan: "professional",
+      financialEventId: inv.financialEventId,
+    },
   });
   const readyStore = new MemoryBillingStore();
   readyStore.docs.set(`_subscriptionInvoices/${inv.invoiceId}`, { ...inv, pdfStatus: "ready" });
@@ -636,8 +662,9 @@ async function testHtmlEmailDownloadRenderer(): Promise<void> {
     errorCode: "invoice_pdf_failed",
     nowMs: NOW + 2,
   });
-  assert.equal(last.attempts, INVOICE_RETRY_MAX_ATTEMPTS);
-  assert.equal(last.deadLettered, true);
+  assert.equal(last.pdf.attempts, INVOICE_RETRY_MAX_ATTEMPTS);
+  assert.equal(last.pdf.deadLettered, true);
+  assert.equal(last.email.attempts, 0);
 
   const persistSrc = readFileSync(resolve(process.cwd(), "functions/src/billing/applyTransition.ts"), "utf8");
   assert.doesNotMatch(persistSrc, /orchestrateTaxDocument/);
@@ -645,11 +672,191 @@ async function testHtmlEmailDownloadRenderer(): Promise<void> {
   assert.doesNotMatch(fnPkg, /puppeteer/);
 }
 
+async function testUnissuedDraftLifecycle(): Promise<void> {
+  const sellerStore = new MemoryBillingStore();
+  const sellerEvt = ledger({ financialEventId: "evt-seller-draft" });
+  seedLedger(sellerStore, sellerEvt);
+  const incompleteSeller = await orchestrate({
+    store: sellerStore,
+    event: sellerEvt,
+    config: sellerConfig({ companyGstin: null }),
+  });
+  assert.equal(incompleteSeller.documentNumber, null);
+  assert.equal(incompleteSeller.invoiceIssuedAt, null);
+  assert.equal(incompleteSeller.issueStatus, "unissued_draft");
+  const sellerId = incompleteSeller.invoiceId;
+  const completeSeller = await orchestrate({ store: sellerStore, event: sellerEvt });
+  assert.equal(completeSeller.invoiceId, sellerId);
+  assert.equal(completeSeller.documentNumber, "SS/2026-27/0001");
+  assert.ok(completeSeller.invoiceIssuedAt);
+  assert.equal(completeSeller.issueStatus, "issued");
+  assert.equal(completeSeller.seller?.gstin, SELLER_GSTIN);
+
+  const sacStore = new MemoryBillingStore();
+  const sacEvt = ledger({ financialEventId: "evt-sac-draft" });
+  seedLedger(sacStore, sacEvt);
+  const missingSac = await orchestrate({
+    store: sacStore,
+    event: sacEvt,
+    config: sellerConfig({ serviceSacCode: null }),
+  });
+  assert.equal(missingSac.documentNumber, null);
+  const sacReady = await orchestrate({ store: sacStore, event: sacEvt });
+  assert.equal(sacReady.invoiceId, missingSac.invoiceId);
+  assert.equal(sacReady.documentNumber, "SS/2026-27/0001");
+  assert.equal(sacReady.sacCode, "TESTSAC");
+
+  const appleStore = new MemoryBillingStore();
+  const appleEvt = ledger({ financialEventId: "evt-apple-draft", platform: "ios" });
+  seedLedger(appleStore, appleEvt);
+  const appleDraft = await orchestrate({ store: appleStore, event: appleEvt });
+  assert.equal(appleDraft.documentType, "compliance_review_required");
+  assert.equal(appleDraft.documentNumber, null);
+  const appleConfirmed = await orchestrate({
+    store: appleStore,
+    event: appleEvt,
+    config: sellerConfig({ appleTaxResponsibilityMode: "developer" }),
+  });
+  assert.equal(appleConfirmed.invoiceId, appleDraft.invoiceId);
+  assert.equal(appleConfirmed.documentType, "tax_invoice_b2c");
+  assert.equal(appleConfirmed.documentNumber, "SS/2026-27/0001");
+
+  const rcStore = new MemoryBillingStore();
+  const rcEvt = ledger({ financialEventId: "evt-rc" });
+  seedLedger(rcStore, rcEvt);
+  const rcDraft = await orchestrate({
+    store: rcStore,
+    event: rcEvt,
+    config: sellerConfig({ reverseChargeMode: "unconfirmed" }),
+  });
+  assert.equal(rcDraft.documentNumber, null);
+  const pricedStore = new MemoryBillingStore();
+  const pricedEvt = ledger({ financialEventId: "evt-price" });
+  seedLedger(pricedStore, pricedEvt);
+  const priceDraft = await orchestrate({
+    store: pricedStore,
+    event: pricedEvt,
+    config: sellerConfig({ priceIncludesGst: null }),
+  });
+  assert.equal(priceDraft.documentNumber, null);
+
+  assert.throws(
+    () => applyOperationalInvoicePatch(completeSeller, { buyer: { ...completeSeller.buyer, gstin: "27AAAAA0000A1Z5" } }),
+    isCause("invoice_immutable_field_mutation")
+  );
+}
+
+async function testIssueTimestampAndIstDate(): Promise<void> {
+  const store = new MemoryBillingStore();
+  const supply = istWallClockToEpochMs("2027-03-31T23:59:59");
+  const issue = istWallClockToEpochMs("2027-04-01T00:01:00");
+  const evt = ledger({
+    financialEventId: "evt-cross-fy",
+    occurredAt: supply,
+    monthKey: "2027-03",
+  });
+  seedLedger(store, evt);
+  const inv = await orchestrate({ store, event: evt, nowMs: issue });
+  assert.equal(inv.documentNumber, "SS/2027-28/0001");
+  assert.equal(inv.financialYear, "2027-28");
+  assert.equal(inv.supplyOccurredAt, supply);
+  assert.equal(inv.invoiceIssuedAt, issue);
+  assert.equal(inv.taxPeriodStatus, "unresolved_cross_period");
+  assert.equal(inv.gstrReportable, false);
+
+  const dateStore = new MemoryBillingStore();
+  const istIssue = Date.parse("2026-09-13T00:15:00+05:30");
+  const dateEvt = ledger({
+    financialEventId: "evt-ist-date",
+    occurredAt: istIssue,
+    monthKey: "2026-09",
+  });
+  seedLedger(dateStore, dateEvt);
+  const dated = await orchestrate({ store: dateStore, event: dateEvt, nowMs: istIssue });
+  assert.equal(formatIstCalendarDate(istIssue), "13-09-2026");
+  assert.equal(dated.invoiceIssuedOnIst, "13-09-2026");
+  assert.match(buildSubscriptionTaxDocumentHtml(dated), /Issue date: 13-09-2026/);
+  assert.doesNotMatch(buildSubscriptionTaxDocumentHtml(dated), /Issue date: 12-09-2026/);
+}
+
+async function testEmailAndRetrySeparation(): Promise<void> {
+  assert.equal(shouldAttemptInvoiceEmail("accepted", true), false);
+  assert.equal(shouldAttemptInvoiceEmail("delivered", true), false);
+  assert.equal(shouldAttemptInvoiceEmail("bounced", true), false);
+  assert.equal(shouldAttemptInvoiceEmail("skipped_no_verified_email", false), false);
+  assert.equal(shouldAttemptInvoiceEmail("skipped_no_verified_email", true), true);
+  assert.equal(shouldAttemptInvoiceEmail("pending", true), true);
+  assert.equal(shouldAttemptInvoiceEmail("failed", true), true);
+
+  const store = new MemoryBillingStore();
+  const evt = ledger({ financialEventId: "evt-email-once" });
+  seedLedger(store, evt);
+  const email = fakeEmail();
+  const first = await orchestrate({ store, event: evt, email });
+  assert.equal(first.emailStatus, "accepted");
+  assert.equal(email.sends.length, 1);
+  const send = email.sends[0] as { htmlBody?: string; fromAddress?: string; textBody: string };
+  assert.match(send.textBody, /expires in 7 days/);
+  assert.match(send.htmlBody ?? "", /Download invoice PDF/);
+  assert.equal(send.fromAddress, "billing@example.test");
+  const second = await orchestrate({ store, event: evt, email });
+  assert.equal(second.emailStatus, "accepted");
+  assert.equal(email.sends.length, 1);
+
+  const pdfStore = new MemoryBillingStore();
+  const pdfEvt = ledger({ financialEventId: "evt-pdf-budget" });
+  seedLedger(pdfStore, pdfEvt);
+  const failing = {
+    async renderHtmlToPdf() {
+      throw new BillingError({
+        clientCode: "temporary_unavailable",
+        causeCode: "invoice_pdf_failed",
+        retryable: true,
+      });
+    },
+  };
+  await orchestrate({
+    store: pdfStore,
+    event: pdfEvt,
+    renderer: failing as unknown as FakeInvoicePdfRenderer,
+  });
+  await orchestrate({
+    store: pdfStore,
+    event: pdfEvt,
+    renderer: failing as unknown as FakeInvoicePdfRenderer,
+  });
+  const retry = pdfStore.docs.get(invoiceRetryQueuePath(invoiceIdForFinancialEvent("evt-pdf-budget"))) as {
+    pdf: { attempts: number };
+    email: { attempts: number };
+  };
+  assert.equal(retry.pdf.attempts, 2);
+  assert.equal(retry.email.attempts, 0);
+
+  const recovered = await orchestrate({
+    store: pdfStore,
+    event: pdfEvt,
+    renderer: new FakeInvoicePdfRenderer(),
+  });
+  assert.equal(recovered.pdfStatus, "ready");
+  const resolved = await resolveInvoiceRetryStage(pdfStore, {
+    invoiceId: recovered.invoiceId,
+    financialEventId: pdfEvt.financialEventId,
+    stage: "pdf",
+    nowMs: NOW + 9,
+  });
+  assert.equal(resolved?.pdf.resolved, true);
+  assert.equal(recovered.plan, "professional");
+  assert.equal(recovered.billingPeriod, "yearly");
+}
+
 async function main(): Promise<void> {
   await testAllocationConcurrency();
   await testOrchestratorAuthorityAndRetries();
   await testCreditNotes();
   await testHtmlEmailDownloadRenderer();
+  await testUnissuedDraftLifecycle();
+  await testIssueTimestampAndIstDate();
+  await testEmailAndRetrySeparation();
   console.log("gst.documents.unit.test.ts: ok");
 }
 

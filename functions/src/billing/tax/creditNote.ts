@@ -39,6 +39,10 @@ import { creditNoteCounterPath, subscriptionCreditNotePath } from "../paths";
 import type { BillingStore } from "../store";
 import type { CreditNoteCounterDoc, SubscriptionCreditNoteDoc, SubscriptionInvoiceDoc } from "../types";
 
+import { getFinancialYearForDate, formatIstCalendarDate } from "./financialYearUtils";
+import { assertStatutoryDocumentNumber } from "./invoiceAllocation";
+import { resolveTaxPeriod } from "./taxPeriod";
+
 export function creditNoteIdForRefundEvent(refundFinancialEventId: string): string {
   if (!refundFinancialEventId) {
     throw new BillingError({
@@ -54,7 +58,7 @@ export function creditNoteIdForRefundEvent(refundFinancialEventId: string): stri
 }
 
 export function formatCreditNoteNumber(financialYear: string, serial: number): string {
-  return `CN/${financialYear}/${String(serial).padStart(4, "0")}`;
+  return assertStatutoryDocumentNumber(`CN/${financialYear}/${String(serial).padStart(4, "0")}`);
 }
 
 /**
@@ -72,11 +76,12 @@ export async function allocateCreditNoteStub(
   store: BillingStore,
   input: {
     stub: SubscriptionCreditNoteDoc;
-    financialYear: string;
+    financialYear?: string;
     nowMs: number;
     original: SubscriptionInvoiceDoc;
   }
 ): Promise<{ creditNote: SubscriptionCreditNoteDoc; reused: boolean }> {
+  void input.financialYear;
   if (!developerCreditNoteRequired(input.original)) {
     throw new BillingError({
       clientCode: "internal_error",
@@ -84,7 +89,8 @@ export async function allocateCreditNoteStub(
     });
   }
   const path = subscriptionCreditNotePath(input.stub.creditNoteId);
-  const counterPath = creditNoteCounterPath(input.financialYear);
+  const fyForIssue = getFinancialYearForDate(input.nowMs);
+  const counterPath = creditNoteCounterPath(fyForIssue);
 
   return store.runTransaction(async (tx) => {
     const existingSnap = await tx.get(path);
@@ -101,22 +107,36 @@ export async function allocateCreditNoteStub(
     }
     const prior = (counterSnap.data() as CreditNoteCounterDoc | undefined) ?? {
       currentCount: 0,
-      financialYear: input.financialYear,
+      financialYear: fyForIssue,
       updatedAt: input.nowMs,
     };
     const serial = prior.currentCount + 1;
+    const taxPeriod = resolveTaxPeriod({
+      supplyOccurredAt: input.original.supplyOccurredAt,
+      invoiceIssuedAt: input.nowMs,
+    });
     const created: SubscriptionCreditNoteDoc = {
       ...input.stub,
-      documentNumber: formatCreditNoteNumber(input.financialYear, serial),
-      financialYear: input.financialYear,
+      documentNumber: formatCreditNoteNumber(fyForIssue, serial),
+      financialYear: fyForIssue,
+      taxPeriodMonth: taxPeriod.taxPeriodMonth,
+      taxPeriodStatus: taxPeriod.taxPeriodStatus,
       issuedAt: input.nowMs,
+      issuedOnIst: formatIstCalendarDate(input.nowMs),
+      buyerGstin: input.original.buyer.gstin,
+      buyerClassification: input.original.buyer.classification,
+      originalInvoiceIssuedOnIst: input.original.invoiceIssuedOnIst,
+      placeOfSupplyStateCode: input.original.placeOfSupplyStateCode,
+      gstRateBps: input.original.gstRateBps,
+      taxType: input.original.taxType,
+      gstrReportable: taxPeriod.taxPeriodStatus === "resolved",
       createdAt: input.nowMs,
       updatedAt: input.nowMs,
     };
     tx.create(path, created as unknown as Record<string, unknown>);
     tx.set(counterPath, {
       currentCount: serial,
-      financialYear: input.financialYear,
+      financialYear: fyForIssue,
       updatedAt: input.nowMs,
     } satisfies CreditNoteCounterDoc);
     return { creditNote: created, reused: false };

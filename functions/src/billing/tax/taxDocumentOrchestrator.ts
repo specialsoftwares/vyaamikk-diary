@@ -35,6 +35,11 @@
 import type { EmailProvider } from "../../email/provider";
 import { BillingError } from "../errors";
 import {
+  isCanonicalSku,
+  subscriptionDescriptionForSku,
+  getCatalogEntry,
+} from "../products";
+import {
   billingDetailsPath,
   companyBillingPath,
   financialLedgerPath,
@@ -48,13 +53,21 @@ import type {
   BuyerTaxSnapshot,
   CompanyBillingDoc,
   InvoicePdfStatus,
+  PlatformTaxChannel,
   SubscriptionBillingDetailsDoc,
   SubscriptionInvoiceDoc,
+  TaxResponsibilityMode,
 } from "../types";
 import { INVOICE_OPERATIONAL_KEYS } from "../types";
 
-import { allocateInvoiceStub, applyOperationalInvoicePatch, invoiceIdForFinancialEvent } from "./invoiceAllocation";
-import { sendInvoiceEmail, type VerifiedEmailLookup } from "./invoiceEmail";
+import { persistTaxDocument, applyOperationalInvoicePatch, invoiceIdForFinancialEvent, isIssuedInvoice } from "./invoiceAllocation";
+import {
+  EMAIL_INVOICE_DOWNLOAD_TTL_MS,
+  authoritativeVerifiedEmail,
+  sendInvoiceEmail,
+  shouldAttemptInvoiceEmail,
+  type VerifiedEmailLookup,
+} from "./invoiceEmail";
 import { APPROVED_RENDERING_PROFILE, buildSubscriptionTaxDocumentHtml } from "./htmlDocument";
 import {
   classifyTaxDocument,
@@ -63,36 +76,39 @@ import {
 } from "./platformTaxPolicy";
 import { resolvePlaceOfSupply } from "./placeOfSupply";
 import type { InvoicePdfRenderer } from "./pdfRenderer";
-import { enqueueInvoiceRetry, type InvoiceRetryAlerter } from "./retryQueue";
+import { enqueueInvoiceRetry, resolveInvoiceRetryStage, type InvoiceRetryAlerter } from "./retryQueue";
 import {
+  isReverseChargeApproved,
   isSacAndRateApproved,
   isSellerIdentityComplete,
   loadSellerTaxIdentity,
   type SellerIdentityConfig,
 } from "./sellerIdentity";
 import { calculateGst } from "./taxMath";
-import { getFinancialYearForDate, getMonthKey } from "./financialYearUtils";
 import { gstStateName, isKnownGstStateCode } from "./gstin";
 
+export const IN_APP_INVOICE_DOWNLOAD_TTL_MS = 15 * 60 * 1000;
+
+export interface PutObjectInput {
+  path: string;
+  bytes: Buffer;
+  contentType: string;
+  customMetadata?: Record<string, string>;
+}
+
 export interface InvoiceObjectStorage {
-  uploadPdf(
-    path: string,
-    bytes: Buffer,
-    metadata: { invoiceNumber: string; plan: string; financialEventId: string }
-  ): Promise<void>;
+  putObject(input: PutObjectInput): Promise<void>;
   getSignedDownloadUrl(path: string, expiresMs: number): Promise<string>;
 }
 
 export class MemoryInvoiceObjectStorage implements InvoiceObjectStorage {
   readonly objects = new Map<string, Buffer>();
+  readonly contentTypes = new Map<string, string>();
   readonly metadata = new Map<string, Record<string, string>>();
-  async uploadPdf(
-    path: string,
-    bytes: Buffer,
-    metadata: { invoiceNumber: string; plan: string; financialEventId: string }
-  ): Promise<void> {
-    this.objects.set(path, bytes);
-    this.metadata.set(path, metadata);
+  async putObject(input: PutObjectInput): Promise<void> {
+    this.objects.set(input.path, input.bytes);
+    this.contentTypes.set(input.path, input.contentType);
+    this.metadata.set(input.path, input.customMetadata ?? {});
   }
   async getSignedDownloadUrl(path: string, expiresMs: number): Promise<string> {
     if (!this.objects.has(path)) {
@@ -140,6 +156,16 @@ function buyerFromDetails(
   };
 }
 
+function policyModeOverrides(
+  config: SellerIdentityConfig
+): Partial<Record<PlatformTaxChannel, TaxResponsibilityMode>> {
+  return {
+    apple_app_store_india: config.appleTaxResponsibilityMode,
+    google_play_india: config.googleTaxResponsibilityMode,
+    direct_web_india: config.directWebTaxResponsibilityMode,
+  };
+}
+
 function emptyInvoiceSkeleton(
   ledger: BillingEventLedgerDoc,
   invoiceId: string,
@@ -156,13 +182,18 @@ function emptyInvoiceSkeleton(
     canonicalSku: ledger.canonicalSku,
     plan: null,
     billingPeriod: null,
+    subscriptionDescription: null,
     taxResponsibilityMode: "unconfirmed",
     documentType: "compliance_review_required",
     documentNumber: null,
     financialYear: null,
     taxPeriodMonth: null,
+    taxPeriodStatus: "pending_issue",
     invoiceIssuedAt: null,
+    invoiceIssuedOnIst: null,
     supplyOccurredAt: ledger.occurredAt,
+    issueStatus: "unissued_draft",
+    reverseChargeMode: null,
     seller: null,
     buyer: buyerFromDetails(null),
     placeOfSupplyStateCode: null,
@@ -241,6 +272,14 @@ export async function orchestrateTaxDocument(
     });
   }
   const ledger = ledgerSnap.data() as unknown as BillingEventLedgerDoc;
+  if (!isCanonicalSku(ledger.canonicalSku)) {
+    throw new BillingError({
+      clientCode: "internal_error",
+      causeCode: "unknown_canonical_sku",
+    });
+  }
+  const catalog = getCatalogEntry(ledger.canonicalSku);
+  const subscriptionDescription = subscriptionDescriptionForSku(ledger.canonicalSku);
   const invoiceId = invoiceIdForFinancialEvent(ledger.financialEventId);
   const diagnosticUid = deps.diagnosticUidFor(ledger.uid);
   const detailsSnap = await deps.store.runTransaction(async (tx) =>
@@ -250,7 +289,7 @@ export async function orchestrateTaxDocument(
     ? (detailsSnap.data() as unknown as SubscriptionBillingDetailsDoc)
     : null;
   const buyer = buyerFromDetails(details);
-  const policy = resolvePlatformTaxPolicy(ledger.platform);
+  const policy = resolvePlatformTaxPolicy(ledger.platform, policyModeOverrides(deps.config));
   const documentType = classifyTaxDocument({
     policy,
     buyerIsVerifiedB2b: buyer.classification === "b2b",
@@ -263,6 +302,8 @@ export async function orchestrateTaxDocument(
 
   const sellerReady = isSellerIdentityComplete(deps.config);
   const sacReady = isSacAndRateApproved(deps.config);
+  const reverseChargeReady = isReverseChargeApproved(deps.config.reverseChargeMode);
+  const priceBasisReady = typeof deps.config.priceIncludesGst === "boolean";
   const seller = sellerReady ? loadSellerTaxIdentity(deps.config) : null;
 
   let pdfStatus: InvoicePdfStatus = "pending";
@@ -273,14 +314,21 @@ export async function orchestrateTaxDocument(
     amountOk &&
     sellerReady &&
     sacReady &&
+    reverseChargeReady &&
+    priceBasisReady &&
     seller != null;
 
   const allocateNumber =
     pdfStatus !== "awaiting_financial_evidence" &&
     (documentType === "platform_subscription_receipt" || canFinalizeDeveloperInvoice);
 
-  let taxFields: Partial<SubscriptionInvoiceDoc> = {};
-  if (canFinalizeDeveloperInvoice && seller) {
+  let taxFields: Partial<SubscriptionInvoiceDoc> = {
+    plan: catalog.plan,
+    billingPeriod: catalog.period,
+    subscriptionDescription,
+    reverseChargeMode: deps.config.reverseChargeMode,
+  };
+  if (canFinalizeDeveloperInvoice && seller && typeof deps.config.priceIncludesGst === "boolean") {
     const pos = resolvePlaceOfSupply({
       classification: buyer.classification,
       verifiedRecipientStateCode:
@@ -297,6 +345,7 @@ export async function orchestrateTaxDocument(
       currency: "INR",
     });
     taxFields = {
+      ...taxFields,
       seller,
       placeOfSupplyStateCode: pos.placeOfSupplyStateCode,
       placeOfSupplyStateName: pos.placeOfSupplyStateName,
@@ -310,18 +359,18 @@ export async function orchestrateTaxDocument(
       igstInPaise: math.igstInPaise,
       totalTaxInPaise: math.totalTaxInPaise,
       totalInPaise: math.totalInPaise,
-      gstrReportable: true,
     };
   } else if (documentType === "platform_subscription_receipt" && amountOk) {
     taxFields = {
+      ...taxFields,
       seller,
       totalInPaise: ledger.grossAmountInPaise,
-      gstrReportable: false,
       serviceDescription: "Platform-processed subscription payment",
     };
+  } else if (seller) {
+    taxFields = { ...taxFields, seller };
   }
 
-  const fy = getFinancialYearForDate(ledger.occurredAt);
   const stub: SubscriptionInvoiceDoc = {
     ...emptyInvoiceSkeleton(
       ledger,
@@ -342,20 +391,22 @@ export async function orchestrateTaxDocument(
       section52TcsStatus: policy.section52TcsStatus,
       table14ClassificationStatus: policy.table14ClassificationStatus,
     },
-    taxPeriodMonth: getMonthKey(ledger.occurredAt),
-    financialYear: fy,
+    supplyOccurredAt: ledger.occurredAt,
     ...taxFields,
   };
 
-  const allocated = await allocateInvoiceStub(deps.store, {
+  const allocated = await persistTaxDocument(deps.store, {
     stub,
-    financialYear: fy,
     nowMs: deps.nowMs,
     allocateNumber,
   });
   let invoice = allocated.invoice;
 
-  if (invoice.documentNumber && invoice.pdfStatus !== "ready" && invoice.pdfStatus !== "awaiting_financial_evidence") {
+  if (
+    isIssuedInvoice(invoice) &&
+    invoice.pdfStatus !== "ready" &&
+    invoice.pdfStatus !== "awaiting_financial_evidence"
+  ) {
     try {
       const html = buildSubscriptionTaxDocumentHtml(invoice);
       const pdf = await deps.renderer.renderHtmlToPdf({
@@ -363,11 +414,24 @@ export async function orchestrateTaxDocument(
         html,
         renderingProfile: APPROVED_RENDERING_PROFILE,
       });
+      const fy = invoice.financialYear;
+      if (!fy) {
+        throw new BillingError({
+          clientCode: "internal_error",
+          causeCode: "issued_invoice_missing_financial_year",
+        });
+      }
       const storagePath = invoicePdfStoragePath(fy, invoice.invoiceId);
-      await deps.storage.uploadPdf(storagePath, pdf, {
-        invoiceNumber: invoice.documentNumber,
-        plan: invoice.plan ?? "unknown",
-        financialEventId: invoice.financialEventId,
+      await deps.storage.putObject({
+        path: storagePath,
+        bytes: pdf,
+        contentType: "application/pdf",
+        customMetadata: {
+          invoiceNumber: invoice.documentNumber ?? "",
+          plan: invoice.plan ?? "unknown",
+          billingPeriod: invoice.billingPeriod ?? "",
+          financialEventId: invoice.financialEventId,
+        },
       });
       invoice = applyOperationalInvoicePatch(invoice, {
         pdfStatus: "ready",
@@ -375,6 +439,12 @@ export async function orchestrateTaxDocument(
         updatedAt: deps.nowMs,
       });
       await persistInvoice(deps.store, invoice);
+      await resolveInvoiceRetryStage(deps.store, {
+        invoiceId: invoice.invoiceId,
+        financialEventId,
+        stage: "pdf",
+        nowMs: deps.nowMs,
+      });
     } catch (err) {
       const cause = err instanceof BillingError ? err.causeCode : "invoice_pdf_failed";
       const awaiting = cause === "invoice_renderer_unconfigured";
@@ -395,47 +465,64 @@ export async function orchestrateTaxDocument(
   }
 
   if (invoice.pdfStatus === "ready") {
-    try {
-      const user = await deps.loadUser(ledger.uid);
-      const mailed = await sendInvoiceEmail({
-        provider: deps.email,
-        invoice,
-        recipient: user,
-        nowMs: deps.nowMs,
-        fromAddress: deps.config.billingEmailFromAddress,
-      });
-      invoice = applyOperationalInvoicePatch(invoice, {
-        emailStatus: mailed.emailStatus,
-        emailProviderMessageId: mailed.emailProviderMessageId,
-        invoiceEmailAcceptedAt: mailed.invoiceEmailAcceptedAt,
-        updatedAt: deps.nowMs,
-      });
-      await persistInvoice(deps.store, invoice);
-      if (mailed.emailStatus === "failed") {
+    const user = await deps.loadUser(ledger.uid);
+    const hasVerified = Boolean(authoritativeVerifiedEmail(user));
+    if (shouldAttemptInvoiceEmail(invoice.emailStatus, hasVerified)) {
+      try {
+        const downloadUrl = invoice.invoicePdfStoragePath
+          ? await deps.storage.getSignedDownloadUrl(
+              invoice.invoicePdfStoragePath,
+              EMAIL_INVOICE_DOWNLOAD_TTL_MS
+            )
+          : null;
+        const mailed = await sendInvoiceEmail({
+          provider: deps.email,
+          invoice,
+          recipient: user,
+          nowMs: deps.nowMs,
+          fromAddress: deps.config.billingEmailFromAddress,
+          downloadUrl,
+        });
+        invoice = applyOperationalInvoicePatch(invoice, {
+          emailStatus: mailed.emailStatus,
+          emailProviderMessageId: mailed.emailProviderMessageId,
+          invoiceEmailAcceptedAt: mailed.invoiceEmailAcceptedAt,
+          updatedAt: deps.nowMs,
+        });
+        await persistInvoice(deps.store, invoice);
+        if (mailed.emailStatus === "failed") {
+          await enqueueInvoiceRetry(deps.store, {
+            invoiceId: invoice.invoiceId,
+            financialEventId,
+            stage: "email",
+            errorCode: "invoice_email_failed",
+            nowMs: deps.nowMs,
+            alerter: deps.alerter,
+          });
+        } else if (mailed.emailStatus === "accepted") {
+          await resolveInvoiceRetryStage(deps.store, {
+            invoiceId: invoice.invoiceId,
+            financialEventId,
+            stage: "email",
+            nowMs: deps.nowMs,
+          });
+        }
+      } catch (err) {
+        const cause = err instanceof BillingError ? err.causeCode : "invoice_email_failed";
+        invoice = applyOperationalInvoicePatch(invoice, {
+          emailStatus: "failed",
+          updatedAt: deps.nowMs,
+        });
+        await persistInvoice(deps.store, invoice);
         await enqueueInvoiceRetry(deps.store, {
           invoiceId: invoice.invoiceId,
           financialEventId,
           stage: "email",
-          errorCode: "invoice_email_failed",
+          errorCode: cause,
           nowMs: deps.nowMs,
           alerter: deps.alerter,
         });
       }
-    } catch (err) {
-      const cause = err instanceof BillingError ? err.causeCode : "invoice_email_failed";
-      invoice = applyOperationalInvoicePatch(invoice, {
-        emailStatus: "failed",
-        updatedAt: deps.nowMs,
-      });
-      await persistInvoice(deps.store, invoice);
-      await enqueueInvoiceRetry(deps.store, {
-        invoiceId: invoice.invoiceId,
-        financialEventId,
-        stage: "email",
-        errorCode: cause,
-        nowMs: deps.nowMs,
-        alerter: deps.alerter,
-      });
     }
   }
 
@@ -450,6 +537,8 @@ export async function orchestrateTaxDocument(
         taxDocumentId: invoice.invoiceId,
         taxDocumentNumber: invoice.documentNumber,
         taxDocumentType: invoice.documentType,
+        plan: invoice.plan,
+        billingPeriod: invoice.billingPeriod,
         taxableAmountInPaise: invoice.taxableAmountInPaise,
         taxAmountInPaise: invoice.totalTaxInPaise,
         totalInPaise: invoice.totalInPaise,

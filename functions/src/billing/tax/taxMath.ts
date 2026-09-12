@@ -82,6 +82,12 @@ export function calculateGst(input: TaxMathInput): TaxMathResult {
       causeCode: "invalid_gst_rate_bps",
     });
   }
+  if (typeof input.priceIncludesGst !== "boolean") {
+    throw new BillingError({
+      clientCode: "internal_error",
+      causeCode: "price_includes_gst_unconfirmed",
+    });
+  }
 
   let taxable: number;
   let totalTax: number;

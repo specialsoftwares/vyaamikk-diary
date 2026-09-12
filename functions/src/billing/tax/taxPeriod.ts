@@ -32,39 +32,42 @@
  * policy.
  */
 
-import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { BillingError } from "../errors";
+import type { TaxPeriodStatus } from "../types";
 
-import type { BillingStore } from "../store";
-import { assertAdminAuthorized, type AdminAuthContext } from "../tax/adminAuth";
-import { markGstr1FiledExact } from "../tax/gstr1WorkingPapers";
+import { getMonthKey } from "./financialYearUtils";
 
-export async function applyMarkGstr1Filed(
-  store: BillingStore,
-  input: {
-    admin: AdminAuthContext;
-    adminDiagnosticUid: string;
-    reportId: string;
-    acknowledgement: string;
-    nowMs: number;
-    month?: string;
+export function parseGstrMonth(month: string): { year: number; month: number } {
+  const m = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(month);
+  if (!m) {
+    throw new BillingError({
+      clientCode: "internal_error",
+      causeCode: "invalid_gstr_month",
+    });
   }
-) {
-  assertAdminAuthorized(input.admin);
-  return markGstr1FiledExact(store, {
-    reportId: input.reportId,
-    acknowledgement: input.acknowledgement,
-    filedByDiagnosticUid: input.adminDiagnosticUid,
-    nowMs: input.nowMs,
-    month: input.month,
-  });
+  return { year: Number(m[1]), month: Number(m[2]) };
 }
 
-export const markGstr1Filed = onCall({ region: "asia-south1" }, async (request) => {
-  if (!request.auth?.uid) {
-    throw new HttpsError("unauthenticated", "Sign in required.");
+export function assertGstrMonth(month: string): string {
+  parseGstrMonth(month);
+  return month;
+}
+
+/**
+ * GSTR tax period is claimed only when supply and invoice-issue months match.
+ * Cross-month/year delay is unresolved until CA policy exists — never guessed.
+ */
+export function resolveTaxPeriod(input: {
+  supplyOccurredAt: number | null;
+  invoiceIssuedAt: number | null;
+}): { taxPeriodMonth: string | null; taxPeriodStatus: TaxPeriodStatus } {
+  if (input.invoiceIssuedAt == null || input.supplyOccurredAt == null) {
+    return { taxPeriodMonth: null, taxPeriodStatus: "pending_issue" };
   }
-  throw new HttpsError(
-    "failed-precondition",
-    "GSTR-1 filing-batch callable is not production-enabled in VYD-40."
-  );
-});
+  const supplyMonth = getMonthKey(input.supplyOccurredAt);
+  const issueMonth = getMonthKey(input.invoiceIssuedAt);
+  if (supplyMonth === issueMonth) {
+    return { taxPeriodMonth: issueMonth, taxPeriodStatus: "resolved" };
+  }
+  return { taxPeriodMonth: null, taxPeriodStatus: "unresolved_cross_period" };
+}

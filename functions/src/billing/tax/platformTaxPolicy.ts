@@ -88,9 +88,13 @@ export function channelForStorePlatform(platform: BillingPlatform | "web"): Plat
 }
 
 export function resolvePlatformTaxPolicy(
-  platform: BillingPlatform | "web"
+  platform: BillingPlatform | "web",
+  modeOverrides?: Partial<Record<PlatformTaxChannel, TaxResponsibilityMode>>
 ): PlatformTaxPolicy {
-  return platformTaxPolicy(channelForStorePlatform(platform));
+  const channel = channelForStorePlatform(platform);
+  const base = platformTaxPolicy(channel);
+  const override = modeOverrides?.[channel];
+  return override ? { ...base, mode: override } : base;
 }
 
 /**

@@ -35,53 +35,88 @@
 import { createHash } from "node:crypto";
 
 import { BillingError } from "../errors";
-import { gstr1FilingBatchPath, subscriptionCreditNotePath, subscriptionInvoicePath } from "../paths";
+import {
+  gstr1FilingBatchPath,
+  gstr1ReportManifestPath,
+  subscriptionCreditNotePath,
+  subscriptionInvoicePath,
+} from "../paths";
 import type { BillingStore } from "../store";
 import type {
   Gstr1FilingBatchDoc,
+  Gstr1ReportManifestDoc,
+  Gstr1ReviewStatus,
   SubscriptionCreditNoteDoc,
   SubscriptionInvoiceDoc,
 } from "../types";
 
+import { formatIstCalendarDate } from "./financialYearUtils";
+import { assertGstrMonth } from "./taxPeriod";
+
+export interface Gstr1B2bWorkingRow {
+  invoiceId: string;
+  recipientGstin: string | null;
+  documentNumber: string | null;
+  invoiceDateIst: string | null;
+  invoiceValueInclusiveInPaise: number | null;
+  placeOfSupplyStateCode: string | null;
+  gstRateBps: number | null;
+  taxableValueInPaise: number | null;
+  igstInPaise: number | null;
+  cgstInPaise: number | null;
+  sgstInPaise: number | null;
+  documentType: string;
+  ecoReviewStatus: string;
+}
+
+export interface Gstr1B2cWorkingRow {
+  placeOfSupplyStateCode: string;
+  gstRateBps: number;
+  taxableValueInPaise: number;
+  igstInPaise: number;
+  cgstInPaise: number;
+  sgstInPaise: number;
+  totalTaxInPaise: number;
+  invoiceCount: number;
+}
+
+export interface Gstr1HsnWorkingRow {
+  sacCode: string;
+  taxableValueInPaise: number;
+  igstInPaise: number;
+  cgstInPaise: number;
+  sgstInPaise: number;
+  totalTaxInPaise: number;
+  invoiceCount: number;
+}
+
+export interface Gstr1CreditNoteWorkingRow {
+  creditNoteId: string;
+  documentNumber: string | null;
+  creditNoteDateIst: string | null;
+  originalInvoiceId: string;
+  originalDocumentNumber: string | null;
+  recipientGstin: string | null;
+  recipientClassification: string | null;
+  taxableReversalInPaise: number | null;
+  taxReversalInPaise: number | null;
+  totalReversalInPaise: number | null;
+}
+
 export interface Gstr1WorkingPapers {
   month: string;
   reportId: string;
-  b2b: Array<{
-    invoiceId: string;
-    documentNumber: string | null;
-    gstin: string | null;
-    placeOfSupplyStateCode: string | null;
-    taxableAmountInPaise: number | null;
-    igstInPaise: number | null;
-    cgstInPaise: number | null;
-    sgstInPaise: number | null;
-    totalInPaise: number | null;
-  }>;
-  b2cSummary: Array<{
-    placeOfSupplyStateCode: string;
-    gstRateBps: number;
-    taxableAmountInPaise: number;
-    taxInPaise: number;
-    invoiceCount: number;
-  }>;
-  hsnSacSummary: Array<{
-    sacCode: string;
-    taxableAmountInPaise: number;
-    taxInPaise: number;
-    invoiceCount: number;
-  }>;
+  contentHash: string;
+  b2b: Gstr1B2bWorkingRow[];
+  b2cSummary: Gstr1B2cWorkingRow[];
+  hsnSacSummary: Gstr1HsnWorkingRow[];
   documentSeries: Array<{
     documentType: string;
     fromNumber: string | null;
     toNumber: string | null;
     count: number;
   }>;
-  creditNotes: Array<{
-    creditNoteId: string;
-    documentNumber: string | null;
-    originalInvoiceId: string;
-    totalReversedInPaise: number | null;
-  }>;
+  creditNotes: Gstr1CreditNoteWorkingRow[];
   ecoTable14: Array<{
     invoiceId: string;
     platform: string;
@@ -92,6 +127,44 @@ export interface Gstr1WorkingPapers {
   }>;
   excludedAlreadyFiled: string[];
   reportableInvoiceIds: string[];
+  reportableCreditNoteIds: string[];
+  unresolvedReviewReasons: string[];
+  reviewStatus: Gstr1ReviewStatus;
+}
+
+function invoiceDateIst(inv: SubscriptionInvoiceDoc): string | null {
+  if (inv.invoiceIssuedOnIst) return inv.invoiceIssuedOnIst;
+  if (inv.invoiceIssuedAt != null) return formatIstCalendarDate(inv.invoiceIssuedAt);
+  return null;
+}
+
+function creditNoteDateIst(note: SubscriptionCreditNoteDoc): string | null {
+  if (note.issuedOnIst) return note.issuedOnIst;
+  if (note.issuedAt != null) return formatIstCalendarDate(note.issuedAt);
+  return null;
+}
+
+function uniqueSorted(ids: string[]): string[] {
+  return [...new Set(ids)].sort();
+}
+
+function sameIdSet(a: string[], b: string[]): boolean {
+  return JSON.stringify(uniqueSorted(a)) === JSON.stringify(uniqueSorted(b));
+}
+
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
+  const rec = value as Record<string, unknown>;
+  const keys = Object.keys(rec).sort();
+  return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalJson(rec[k])}`).join(",")}}`;
+}
+
+function ecoUnresolved(inv: SubscriptionInvoiceDoc): boolean {
+  return (
+    inv.ecoReporting.table14ClassificationStatus === "requires_tax_review" ||
+    inv.ecoReporting.section52TcsStatus === "requires_tax_review"
+  );
 }
 
 export function buildGstr1WorkingPapers(input: {
@@ -99,12 +172,7 @@ export function buildGstr1WorkingPapers(input: {
   invoices: SubscriptionInvoiceDoc[];
   creditNotes: SubscriptionCreditNoteDoc[];
 }): Gstr1WorkingPapers {
-  if (!/^\d{4}-\d{2}$/.test(input.month)) {
-    throw new BillingError({
-      clientCode: "internal_error",
-      causeCode: "invalid_gstr_month",
-    });
-  }
+  assertGstrMonth(input.month);
   const excludedAlreadyFiled: string[] = [];
   const eligible = input.invoices.filter((inv) => {
     if (inv.taxPeriodMonth !== input.month) return false;
@@ -119,43 +187,59 @@ export function buildGstr1WorkingPapers(input: {
     .filter((i) => i.documentType === "tax_invoice_b2b")
     .map((i) => ({
       invoiceId: i.invoiceId,
+      recipientGstin: i.buyer.gstin,
       documentNumber: i.documentNumber,
-      gstin: i.buyer.gstin,
+      invoiceDateIst: invoiceDateIst(i),
+      invoiceValueInclusiveInPaise: i.totalInPaise,
       placeOfSupplyStateCode: i.placeOfSupplyStateCode,
-      taxableAmountInPaise: i.taxableAmountInPaise,
+      gstRateBps: i.gstRateBps,
+      taxableValueInPaise: i.taxableAmountInPaise,
       igstInPaise: i.igstInPaise,
       cgstInPaise: i.cgstInPaise,
       sgstInPaise: i.sgstInPaise,
-      totalInPaise: i.totalInPaise,
+      documentType: i.documentType,
+      ecoReviewStatus: i.ecoReporting.table14ClassificationStatus,
     }));
 
-  const b2cMap = new Map<string, Gstr1WorkingPapers["b2cSummary"][number]>();
+  const b2cMap = new Map<string, Gstr1B2cWorkingRow>();
   for (const i of eligible.filter((x) => x.documentType === "tax_invoice_b2c")) {
     const key = `${i.placeOfSupplyStateCode ?? "unknown"}:${i.gstRateBps ?? 0}`;
     const row = b2cMap.get(key) ?? {
       placeOfSupplyStateCode: i.placeOfSupplyStateCode ?? "unknown",
       gstRateBps: i.gstRateBps ?? 0,
-      taxableAmountInPaise: 0,
-      taxInPaise: 0,
+      taxableValueInPaise: 0,
+      igstInPaise: 0,
+      cgstInPaise: 0,
+      sgstInPaise: 0,
+      totalTaxInPaise: 0,
       invoiceCount: 0,
     };
-    row.taxableAmountInPaise += i.taxableAmountInPaise ?? 0;
-    row.taxInPaise += i.totalTaxInPaise ?? 0;
+    row.taxableValueInPaise += i.taxableAmountInPaise ?? 0;
+    row.igstInPaise += i.igstInPaise ?? 0;
+    row.cgstInPaise += i.cgstInPaise ?? 0;
+    row.sgstInPaise += i.sgstInPaise ?? 0;
+    row.totalTaxInPaise += i.totalTaxInPaise ?? 0;
     row.invoiceCount += 1;
     b2cMap.set(key, row);
   }
 
-  const hsnMap = new Map<string, Gstr1WorkingPapers["hsnSacSummary"][number]>();
+  const hsnMap = new Map<string, Gstr1HsnWorkingRow>();
   for (const i of eligible) {
     const sac = i.sacCode ?? "unspecified";
     const row = hsnMap.get(sac) ?? {
       sacCode: sac,
-      taxableAmountInPaise: 0,
-      taxInPaise: 0,
+      taxableValueInPaise: 0,
+      igstInPaise: 0,
+      cgstInPaise: 0,
+      sgstInPaise: 0,
+      totalTaxInPaise: 0,
       invoiceCount: 0,
     };
-    row.taxableAmountInPaise += i.taxableAmountInPaise ?? 0;
-    row.taxInPaise += i.totalTaxInPaise ?? 0;
+    row.taxableValueInPaise += i.taxableAmountInPaise ?? 0;
+    row.igstInPaise += i.igstInPaise ?? 0;
+    row.cgstInPaise += i.cgstInPaise ?? 0;
+    row.sgstInPaise += i.sgstInPaise ?? 0;
+    row.totalTaxInPaise += i.totalTaxInPaise ?? 0;
     row.invoiceCount += 1;
     hsnMap.set(sac, row);
   }
@@ -181,8 +265,14 @@ export function buildGstr1WorkingPapers(input: {
     .map((c) => ({
       creditNoteId: c.creditNoteId,
       documentNumber: c.documentNumber,
+      creditNoteDateIst: creditNoteDateIst(c),
       originalInvoiceId: c.originalInvoiceId,
-      totalReversedInPaise: c.totalReversedInPaise,
+      originalDocumentNumber: c.originalDocumentNumber,
+      recipientGstin: c.buyerGstin,
+      recipientClassification: c.buyerClassification,
+      taxableReversalInPaise: c.taxableAmountReversedInPaise,
+      taxReversalInPaise: c.totalTaxReversedInPaise,
+      totalReversalInPaise: c.totalReversedInPaise,
     }));
 
   const ecoTable14 = input.invoices
@@ -200,56 +290,219 @@ export function buildGstr1WorkingPapers(input: {
           : "classified",
     }));
 
-  const reportId = createHash("sha256")
-    .update(
-      JSON.stringify({
-        month: input.month,
-        invoices: eligible.map((i) => i.invoiceId).sort(),
-        creditNotes: creditNotes.map((c) => c.creditNoteId).sort(),
-      }),
-      "utf8"
-    )
-    .digest("hex")
-    .slice(0, 24);
+  const unresolved = new Set<string>();
+  for (const inv of eligible) {
+    if (ecoUnresolved(inv)) unresolved.add("gstr_tax_review_unresolved");
+    if (inv.taxPeriodStatus !== "resolved") unresolved.add("gstr_tax_period_unresolved");
+    if (!inv.documentNumber || inv.invoiceIssuedAt == null) unresolved.add("gstr_document_unissued");
+  }
+  for (const note of creditNotes) {
+    if (!note.documentNumber) unresolved.add("gstr_document_unissued");
+  }
 
-  return {
+  const contentBody = {
     month: input.month,
-    reportId: `gstr1_${input.month}_${reportId}`,
     b2b,
     b2cSummary: [...b2cMap.values()],
     hsnSacSummary: [...hsnMap.values()],
     documentSeries,
     creditNotes,
     ecoTable14,
-    excludedAlreadyFiled,
-    reportableInvoiceIds: eligible.map((i) => i.invoiceId),
+    excludedAlreadyFiled: uniqueSorted(excludedAlreadyFiled),
+    reportableInvoiceIds: uniqueSorted(eligible.map((i) => i.invoiceId)),
+    reportableCreditNoteIds: uniqueSorted(creditNotes.map((c) => c.creditNoteId)),
+    unresolvedReviewReasons: [...unresolved].sort(),
+  };
+  const contentHash = createHash("sha256").update(canonicalJson(contentBody), "utf8").digest("hex");
+  const reviewStatus: Gstr1ReviewStatus =
+    unresolved.size === 0 ? "ready_to_file" : "requires_tax_review";
+
+  return {
+    ...contentBody,
+    reportId: `gstr1_${input.month}_${contentHash.slice(0, 24)}`,
+    contentHash,
+    reviewStatus,
   };
 }
 
+function csvCell(value: string | number | null | undefined): string {
+  const raw = value == null ? "" : String(value);
+  const guarded = /^[=+\-@]/.test(raw) ? `'${raw}` : raw;
+  return `"${guarded.replace(/"/g, '""')}"`;
+}
+
 export function workingPapersToCsv(papers: Gstr1WorkingPapers): string {
-  const lines = ["section,id,amountInPaise"];
+  const lines = [
+    "# GSTR-1 working papers for manual filing. Not a GSTN upload file.",
+    [
+      "section",
+      "id",
+      "documentNumber",
+      "documentDateIst",
+      "recipientGstin",
+      "recipientClassification",
+      "placeOfSupplyStateCode",
+      "gstRateBps",
+      "taxableValueInPaise",
+      "igstInPaise",
+      "cgstInPaise",
+      "sgstInPaise",
+      "totalTaxInPaise",
+      "invoiceValueInclusiveInPaise",
+      "documentType",
+      "ecoReviewStatus",
+      "originalInvoice",
+      "invoiceCount",
+    ].join(","),
+  ];
   for (const row of papers.b2b) {
-    lines.push(`b2b,${row.invoiceId},${row.totalInPaise ?? 0}`);
+    lines.push(
+      [
+        csvCell("b2b"),
+        csvCell(row.invoiceId),
+        csvCell(row.documentNumber),
+        csvCell(row.invoiceDateIst),
+        csvCell(row.recipientGstin),
+        csvCell("b2b"),
+        csvCell(row.placeOfSupplyStateCode),
+        csvCell(row.gstRateBps),
+        csvCell(row.taxableValueInPaise),
+        csvCell(row.igstInPaise),
+        csvCell(row.cgstInPaise),
+        csvCell(row.sgstInPaise),
+        csvCell((row.igstInPaise ?? 0) + (row.cgstInPaise ?? 0) + (row.sgstInPaise ?? 0)),
+        csvCell(row.invoiceValueInclusiveInPaise),
+        csvCell(row.documentType),
+        csvCell(row.ecoReviewStatus),
+        csvCell(""),
+        csvCell(1),
+      ].join(",")
+    );
   }
   for (const row of papers.b2cSummary) {
     lines.push(
-      `b2c,${row.placeOfSupplyStateCode}:${row.gstRateBps},${row.taxableAmountInPaise}`
+      [
+        csvCell("b2c_summary"),
+        csvCell(`${row.placeOfSupplyStateCode}:${row.gstRateBps}`),
+        csvCell(""),
+        csvCell(""),
+        csvCell(""),
+        csvCell("b2c"),
+        csvCell(row.placeOfSupplyStateCode),
+        csvCell(row.gstRateBps),
+        csvCell(row.taxableValueInPaise),
+        csvCell(row.igstInPaise),
+        csvCell(row.cgstInPaise),
+        csvCell(row.sgstInPaise),
+        csvCell(row.totalTaxInPaise),
+        csvCell(row.taxableValueInPaise + row.totalTaxInPaise),
+        csvCell("tax_invoice_b2c"),
+        csvCell(""),
+        csvCell(""),
+        csvCell(row.invoiceCount),
+      ].join(",")
+    );
+  }
+  for (const row of papers.hsnSacSummary) {
+    lines.push(
+      [
+        csvCell("hsn_sac_summary"),
+        csvCell(row.sacCode),
+        csvCell(""),
+        csvCell(""),
+        csvCell(""),
+        csvCell(""),
+        csvCell(""),
+        csvCell(""),
+        csvCell(row.taxableValueInPaise),
+        csvCell(row.igstInPaise),
+        csvCell(row.cgstInPaise),
+        csvCell(row.sgstInPaise),
+        csvCell(row.totalTaxInPaise),
+        csvCell(""),
+        csvCell(""),
+        csvCell(""),
+        csvCell(""),
+        csvCell(row.invoiceCount),
+      ].join(",")
     );
   }
   for (const row of papers.creditNotes) {
-    lines.push(`credit_note,${row.creditNoteId},${row.totalReversedInPaise ?? 0}`);
+    lines.push(
+      [
+        csvCell("credit_note"),
+        csvCell(row.creditNoteId),
+        csvCell(row.documentNumber),
+        csvCell(row.creditNoteDateIst),
+        csvCell(row.recipientGstin),
+        csvCell(row.recipientClassification),
+        csvCell(""),
+        csvCell(""),
+        csvCell(row.taxableReversalInPaise),
+        csvCell(""),
+        csvCell(""),
+        csvCell(""),
+        csvCell(row.taxReversalInPaise),
+        csvCell(row.totalReversalInPaise),
+        csvCell("credit_note"),
+        csvCell(""),
+        csvCell(row.originalDocumentNumber ?? row.originalInvoiceId),
+        csvCell(1),
+      ].join(",")
+    );
   }
   return lines.join("\n");
+}
+
+export async function persistGstr1ReportManifest(
+  store: BillingStore,
+  papers: Gstr1WorkingPapers,
+  input: {
+    jsonStoragePath: string;
+    csvStoragePath: string;
+    generatedAt: number;
+    generatedByDiagnosticUid: string;
+  }
+): Promise<Gstr1ReportManifestDoc> {
+  const path = gstr1ReportManifestPath(papers.reportId);
+  const doc: Gstr1ReportManifestDoc = {
+    reportId: papers.reportId,
+    month: papers.month,
+    invoiceIds: papers.reportableInvoiceIds,
+    creditNoteIds: papers.reportableCreditNoteIds,
+    contentHash: papers.contentHash,
+    jsonStoragePath: input.jsonStoragePath,
+    csvStoragePath: input.csvStoragePath,
+    generatedAt: input.generatedAt,
+    generatedByDiagnosticUid: input.generatedByDiagnosticUid,
+    reviewStatus: papers.reviewStatus,
+    unresolvedReviewReasons: papers.unresolvedReviewReasons,
+  };
+  return store.runTransaction(async (tx) => {
+    const snap = await tx.get(path);
+    if (snap.exists) {
+      const existing = snap.data() as unknown as Gstr1ReportManifestDoc;
+      if (existing.contentHash !== doc.contentHash) {
+        throw new BillingError({
+          clientCode: "internal_error",
+          causeCode: "gstr_report_manifest_conflict",
+        });
+      }
+      return existing;
+    }
+    tx.create(path, doc as unknown as Record<string, unknown>);
+    return doc;
+  });
 }
 
 export async function markGstr1FiledExact(
   store: BillingStore,
   input: {
-    month: string;
-    papers: Gstr1WorkingPapers;
+    reportId: string;
     acknowledgement: string;
     filedByDiagnosticUid: string;
     nowMs: number;
+    month?: string;
   }
 ): Promise<Gstr1FilingBatchDoc> {
   const ack = input.acknowledgement.trim();
@@ -259,26 +512,45 @@ export async function markGstr1FiledExact(
       causeCode: "gstr_acknowledgement_required",
     });
   }
-  const exactInvoiceIds = uniqueIds(input.papers.reportableInvoiceIds);
-  const creditNoteIds = input.papers.creditNotes.map((c) => c.creditNoteId);
-  const reportHash = createHash("sha256")
-    .update(JSON.stringify({ invoiceIds: exactInvoiceIds, creditNoteIds }), "utf8")
-    .digest("hex");
-  const filingBatchId = `gstr1batch_${input.papers.reportId}`;
-  const batch: Gstr1FilingBatchDoc = {
-    month: input.month,
-    reportId: input.papers.reportId,
-    invoiceIds: exactInvoiceIds,
-    creditNoteIds,
-    reportHash,
-    filedAt: input.nowMs,
-    filedByDiagnosticUid: input.filedByDiagnosticUid,
-    filingAcknowledgementReference: ack,
-    createdAt: input.nowMs,
-  };
+  if (!input.reportId) {
+    throw new BillingError({
+      clientCode: "invalid_purchase",
+      causeCode: "gstr_report_id_required",
+    });
+  }
+  if (input.month) assertGstrMonth(input.month);
 
-  await store.runTransaction(async (tx) => {
+  return store.runTransaction(async (tx) => {
+    const manifestSnap = await tx.get(gstr1ReportManifestPath(input.reportId));
+    if (!manifestSnap.exists) {
+      throw new BillingError({
+        clientCode: "not_entitled",
+        causeCode: "gstr_report_manifest_missing",
+      });
+    }
+    const manifest = manifestSnap.data() as unknown as Gstr1ReportManifestDoc;
+    if (input.month && input.month !== manifest.month) {
+      throw new BillingError({
+        clientCode: "invalid_purchase",
+        causeCode: "gstr_month_report_mismatch",
+      });
+    }
+    assertGstrMonth(manifest.month);
+    if (manifest.unresolvedReviewReasons.length > 0) {
+      const reason = manifest.unresolvedReviewReasons.includes("gstr_tax_review_unresolved")
+        ? "gstr_tax_review_unresolved"
+        : manifest.unresolvedReviewReasons[0] ?? "gstr_tax_review_unresolved";
+      throw new BillingError({
+        clientCode: "invalid_purchase",
+        causeCode: reason,
+      });
+    }
+
+    const exactInvoiceIds = uniqueSorted(manifest.invoiceIds);
+    const creditNoteIds = uniqueSorted(manifest.creditNoteIds);
+    const filingBatchId = `gstr1batch_${manifest.reportId}`;
     const batchSnap = await tx.get(gstr1FilingBatchPath(filingBatchId));
+
     const invoiceSnaps = [];
     for (const id of exactInvoiceIds) {
       invoiceSnaps.push({ id, snap: await tx.get(subscriptionInvoicePath(id)) });
@@ -287,34 +559,129 @@ export async function markGstr1FiledExact(
     for (const id of creditNoteIds) {
       cnSnaps.push({ id, snap: await tx.get(subscriptionCreditNotePath(id)) });
     }
-    if (batchSnap.exists) {
-      return;
+
+    for (const { id, snap } of invoiceSnaps) {
+      if (!snap.exists) {
+        throw new BillingError({
+          clientCode: "internal_error",
+          causeCode: "gstr_invoice_missing",
+        });
+      }
+      const doc = snap.data() as unknown as SubscriptionInvoiceDoc;
+      if (doc.invoiceId !== id) {
+        throw new BillingError({
+          clientCode: "internal_error",
+          causeCode: "gstr_invoice_missing",
+        });
+      }
+      if (!doc.gstrReportable) {
+        throw new BillingError({
+          clientCode: "invalid_purchase",
+          causeCode: "gstr_document_not_reportable",
+        });
+      }
+      if (!doc.documentNumber || doc.invoiceIssuedAt == null) {
+        throw new BillingError({
+          clientCode: "invalid_purchase",
+          causeCode: "gstr_document_unissued",
+        });
+      }
+      if (doc.taxPeriodStatus !== "resolved" || doc.taxPeriodMonth !== manifest.month) {
+        throw new BillingError({
+          clientCode: "invalid_purchase",
+          causeCode: "gstr_tax_period_unresolved",
+        });
+      }
+      if (ecoUnresolved(doc)) {
+        throw new BillingError({
+          clientCode: "invalid_purchase",
+          causeCode: "gstr_tax_review_unresolved",
+        });
+      }
+      if (doc.gstrFilingBatchId && doc.gstrFilingBatchId !== filingBatchId) {
+        throw new BillingError({
+          clientCode: "invalid_purchase",
+          causeCode: "gstr_filing_batch_conflict",
+        });
+      }
     }
+    for (const { id, snap } of cnSnaps) {
+      if (!snap.exists) {
+        throw new BillingError({
+          clientCode: "internal_error",
+          causeCode: "gstr_credit_note_missing",
+        });
+      }
+      const doc = snap.data() as unknown as SubscriptionCreditNoteDoc;
+      if (!doc.gstrReportable || !doc.documentNumber) {
+        throw new BillingError({
+          clientCode: "invalid_purchase",
+          causeCode: "gstr_document_not_reportable",
+        });
+      }
+      if (doc.taxPeriodStatus !== "resolved" || doc.taxPeriodMonth !== manifest.month) {
+        throw new BillingError({
+          clientCode: "invalid_purchase",
+          causeCode: "gstr_tax_period_unresolved",
+        });
+      }
+      if (doc.gstrFilingBatchId && doc.gstrFilingBatchId !== filingBatchId) {
+        throw new BillingError({
+          clientCode: "invalid_purchase",
+          causeCode: "gstr_filing_batch_conflict",
+        });
+      }
+      void id;
+    }
+
+    const batch: Gstr1FilingBatchDoc = {
+      month: manifest.month,
+      reportId: manifest.reportId,
+      invoiceIds: exactInvoiceIds,
+      creditNoteIds,
+      reportHash: manifest.contentHash,
+      filedAt: input.nowMs,
+      filedByDiagnosticUid: input.filedByDiagnosticUid,
+      filingAcknowledgementReference: ack,
+      createdAt: input.nowMs,
+    };
+
+    if (batchSnap.exists) {
+      const stored = batchSnap.data() as unknown as Gstr1FilingBatchDoc;
+      if (
+        stored.reportHash === batch.reportHash &&
+        stored.month === batch.month &&
+        stored.filingAcknowledgementReference === ack &&
+        sameIdSet(stored.invoiceIds, exactInvoiceIds) &&
+        sameIdSet(stored.creditNoteIds, creditNoteIds)
+      ) {
+        return stored;
+      }
+      throw new BillingError({
+        clientCode: "invalid_purchase",
+        causeCode: "gstr_filing_batch_conflict",
+      });
+    }
+
     tx.create(gstr1FilingBatchPath(filingBatchId), batch as unknown as Record<string, unknown>);
     for (const { snap } of invoiceSnaps) {
-      if (!snap.exists) continue;
       const doc = snap.data() as unknown as SubscriptionInvoiceDoc;
       tx.set(subscriptionInvoicePath(doc.invoiceId), {
         ...doc,
-        gstrReportedMonth: input.month,
+        gstrReportedMonth: manifest.month,
         gstrFilingBatchId: filingBatchId,
         updatedAt: input.nowMs,
       } as unknown as Record<string, unknown>);
     }
     for (const { snap } of cnSnaps) {
-      if (!snap.exists) continue;
       const doc = snap.data() as unknown as SubscriptionCreditNoteDoc;
       tx.set(subscriptionCreditNotePath(doc.creditNoteId), {
         ...doc,
-        gstrReportedMonth: input.month,
+        gstrReportedMonth: manifest.month,
         gstrFilingBatchId: filingBatchId,
         updatedAt: input.nowMs,
       } as unknown as Record<string, unknown>);
     }
+    return batch;
   });
-  return batch;
-}
-
-function uniqueIds(ids: string[]): string[] {
-  return [...new Set(ids)];
 }

@@ -60,6 +60,10 @@ export function gstr1FilingBatchPath(filingBatchId: string): string {
   return `_gstr1FilingBatches/${filingBatchId}`;
 }
 
+export function gstr1ReportManifestPath(reportId: string): string {
+  return `_gstr1ReportManifests/${reportId}`;
+}
+
 export function invoicePdfStoragePath(financialYear: string, invoiceId: string): string {
   return `company/invoices/${financialYear}/${invoiceId}.pdf`;
 }

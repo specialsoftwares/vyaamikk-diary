@@ -33,7 +33,12 @@
  */
 
 import { BillingError } from "../errors";
-import type { GstrFilingFrequency, SellerTaxSnapshot } from "../types";
+import type {
+  GstrFilingFrequency,
+  ReverseChargeMode,
+  SellerTaxSnapshot,
+  TaxResponsibilityMode,
+} from "../types";
 
 import { gstStateCodeFromGstin, gstStateName, isValidGstinFormat, normalizeGstin } from "./gstin";
 
@@ -47,7 +52,12 @@ export interface SellerIdentityConfig {
   serviceSacCode: string | null;
   serviceSacDescription: string | null;
   gstRateBps: number | null;
-  priceIncludesGst: boolean;
+  /** Exact config only. Missing/invalid → null; GST is not calculated until known. */
+  priceIncludesGst: boolean | null;
+  reverseChargeMode: ReverseChargeMode;
+  appleTaxResponsibilityMode: TaxResponsibilityMode;
+  googleTaxResponsibilityMode: TaxResponsibilityMode;
+  directWebTaxResponsibilityMode: TaxResponsibilityMode;
   billingEmailFromAddress: string | null;
   invoiceRendererUrl: string | null;
   adminIdentityProvisioned: boolean;
@@ -71,7 +81,20 @@ export function loadTaxRuntimeConfig(
     serviceSacDescription: emptyToNull(env.SERVICE_SAC_DESCRIPTION),
     gstRateBps:
       gstRateBps != null && Number.isInteger(gstRateBps) && gstRateBps > 0 ? gstRateBps : null,
-    priceIncludesGst: env.PRICE_INCLUDES_GST !== "false",
+    priceIncludesGst: parsePriceIncludesGst(env.PRICE_INCLUDES_GST),
+    reverseChargeMode: parseReverseChargeMode(env.REVERSE_CHARGE_MODE),
+    appleTaxResponsibilityMode: parseTaxResponsibilityMode(
+      env.APPLE_TAX_RESPONSIBILITY_MODE,
+      "unconfirmed"
+    ),
+    googleTaxResponsibilityMode: parseTaxResponsibilityMode(
+      env.GOOGLE_TAX_RESPONSIBILITY_MODE,
+      "developer"
+    ),
+    directWebTaxResponsibilityMode: parseTaxResponsibilityMode(
+      env.DIRECT_WEB_TAX_RESPONSIBILITY_MODE,
+      "developer"
+    ),
     billingEmailFromAddress: emptyToNull(env.BILLING_EMAIL_FROM_ADDRESS),
     invoiceRendererUrl: emptyToNull(env.INVOICE_RENDERER_URL),
     adminIdentityProvisioned: env.ADMIN_IDENTITY_PROVISIONED === "true",
@@ -82,6 +105,32 @@ export function loadTaxRuntimeConfig(
 function emptyToNull(raw: string | undefined): string | null {
   const t = raw?.trim() ?? "";
   return t.length === 0 ? null : t;
+}
+
+export function parsePriceIncludesGst(raw: string | undefined): boolean | null {
+  if (raw === "true") return true;
+  if (raw === "false") return false;
+  return null;
+}
+
+export function parseReverseChargeMode(raw: string | undefined): ReverseChargeMode {
+  const t = raw?.trim() ?? "";
+  if (t === "yes" || t === "no" || t === "unconfirmed") return t;
+  return "unconfirmed";
+}
+
+export function parseTaxResponsibilityMode(
+  raw: string | undefined,
+  fallback: TaxResponsibilityMode
+): TaxResponsibilityMode {
+  const t = raw?.trim() ?? "";
+  if (t === "developer" || t === "platform" || t === "unconfirmed") return t;
+  if (t === "") return fallback;
+  return "unconfirmed";
+}
+
+export function isReverseChargeApproved(mode: ReverseChargeMode): boolean {
+  return mode === "yes" || mode === "no";
 }
 
 export function isSellerIdentityComplete(config: SellerIdentityConfig): boolean {
