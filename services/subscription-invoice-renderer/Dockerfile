@@ -12,6 +12,7 @@ RUN npm run build
 FROM ghcr.io/puppeteer/puppeteer:24.22.3
 ENV NODE_ENV=production
 ENV PORT=8080
+ENV npm_config_engine_strict=true
 WORKDIR /app
 COPY package.json package-lock.json ./
 ENV PUPPETEER_SKIP_DOWNLOAD=true

@@ -29,7 +29,8 @@ No API keys. No shared bearer secrets. No unauthenticated invocation.
 
 ## Pin
 
-- Node 22 (matches `ghcr.io/puppeteer/puppeteer:24.22.3` runtime; do not declare engines Node 20)
+- Isolated Cloud Run service: Node 22 (`ghcr.io/puppeteer/puppeteer:24.22.3`). `package.json` `engines.node` is `"22"`.
+- GitHub Actions installs renderer deps inside `node:22-bookworm-slim` so the Node 20 job runner cannot emit EBADENGINE.
 - `puppeteer@24.22.3`
 - Image tag must match: `ghcr.io/puppeteer/puppeteer:24.22.3`
 

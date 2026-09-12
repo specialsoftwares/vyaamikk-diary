@@ -57,6 +57,7 @@ async function main() {
   const docker = readFileSync(dockerPath, "utf8");
   assert.match(docker, /npm run build/);
   assert.match(docker, /FROM node:22-bookworm-slim AS builder/);
+  assert.match(docker, /npm_config_engine_strict=true/);
   assert.match(docker, /ghcr.io\/puppeteer\/puppeteer:24.22.3/);
   assert.doesNotMatch(docker, /FROM node:20/);
   const pkgPath = [
