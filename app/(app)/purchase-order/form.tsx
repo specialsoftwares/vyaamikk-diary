@@ -54,6 +54,7 @@ import {
   normalizeIndianPinInput,
   resolveIndianPincode,
 } from "@/services/location/pincodeResolver";
+import { createStaleSafePincodeLookup } from "@/services/location/staleSafePincodeLookup";
 import { formatINRInWords } from "@/utils/money/inrWords";
 import { useFormFieldNavigation } from "@/components/inputSafety/FormFocusManager";
 import { buildPurchaseOrderNavOrder } from "@/utils/formFieldNavigation/fieldNavOrders";
@@ -230,8 +231,8 @@ export default function PurchaseOrderFormScreen() {
   useFormFieldNavigation(poNavOrder);
 
   const hasLogo = Boolean(user?.profileLogo?.localUri);
-  const vendorPinResolved = useRef<string | null>(null);
-  const buyerPinResolved = useRef<string | null>(null);
+  const vendorPinLookupRef = useRef(createStaleSafePincodeLookup(resolveIndianPincode));
+  const buyerPinLookupRef = useRef(createStaleSafePincodeLookup(resolveIndianPincode));
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -325,23 +326,31 @@ export default function PurchaseOrderFormScreen() {
     });
   }, [user, isEditing]);
 
-  // Best-effort: resolve vendor/buyer state from PIN.
+  // Best-effort: resolve vendor/buyer state from PIN. Latest PIN wins.
   useEffect(() => {
     const pin = normalizeIndianPinInput(vendorPin);
-    if (!isValidIndianPincode(pin) || vendorPinResolved.current === pin) return;
-    vendorPinResolved.current = pin;
-    void resolveIndianPincode(pin).then((r) => {
-      if (r.success && r.state) setVendorState((prev) => prev.trim() || r.state || prev);
+    if (!isValidIndianPincode(pin)) return;
+    let cancelled = false;
+    void vendorPinLookupRef.current.lookup(pin).then((r) => {
+      if (cancelled || !r?.success || !r.state) return;
+      setVendorState(r.state);
     });
+    return () => {
+      cancelled = true;
+    };
   }, [vendorPin]);
 
   useEffect(() => {
     const pin = normalizeIndianPinInput(buyerPin);
-    if (!isValidIndianPincode(pin) || buyerPinResolved.current === pin) return;
-    buyerPinResolved.current = pin;
-    void resolveIndianPincode(pin).then((r) => {
-      if (r.success && r.state) setBuyerState((prev) => prev.trim() || r.state || prev);
+    if (!isValidIndianPincode(pin)) return;
+    let cancelled = false;
+    void buyerPinLookupRef.current.lookup(pin).then((r) => {
+      if (cancelled || !r?.success || !r.state) return;
+      setBuyerState(r.state);
     });
+    return () => {
+      cancelled = true;
+    };
   }, [buyerPin]);
 
   const effectiveGstRate = useMemo(() => {

@@ -69,6 +69,7 @@ import {
   normalizeIndianPinInput,
   resolveIndianPincode,
 } from "@/services/location/pincodeResolver";
+import { createStaleSafePincodeLookup } from "@/services/location/staleSafePincodeLookup";
 import { normalizeIndianMobile } from "@/utils/phone";
 import { isValidPan, normalizePan } from "@/utils/pan/pan";
 import { formatINRInWords } from "@/utils/money/inrWords";
@@ -249,7 +250,7 @@ export default function CustomerCreditFormScreen() {
   const [guarantorName, setGuarantorName] = useState("");
   const [remarks, setRemarks] = useState("");
 
-  const customerPinResolved = useRef<string | null>(null);
+  const customerPinLookupRef = useRef(createStaleSafePincodeLookup(resolveIndianPincode));
 
   const load = useCallback(async () => {
     if (!user) return;
@@ -336,21 +337,25 @@ export default function CustomerCreditFormScreen() {
     });
   }, [user, isEditing]);
 
-  // Best-effort: resolve city/state from PIN (don't re-ask once resolved).
+  // Best-effort: resolve city/state from PIN. Latest PIN wins.
   useEffect(() => {
     const pin = normalizeIndianPinInput(customerPin);
-    if (!isValidIndianPincode(pin) || customerPinResolved.current === pin) return;
-    customerPinResolved.current = pin;
-    void resolveIndianPincode(pin).then((r) => {
+    if (!isValidIndianPincode(pin)) return;
+    let cancelled = false;
+    void customerPinLookupRef.current.lookup(pin).then((r) => {
+      if (cancelled || !r) return;
       if (r.success) {
-        if (r.state) setCustomerState((prev) => prev.trim() || r.state || prev);
-        if (r.district) setCity((prev) => prev.trim() || r.district || prev);
+        if (r.state) setCustomerState(r.state);
+        if (r.district) setCity(r.district);
         const place = [r.district, r.state].filter(Boolean).join(", ");
         setPinResolved(place ? `${place} - ${pin}` : null);
       } else {
         setPinResolved(null);
       }
     });
+    return () => {
+      cancelled = true;
+    };
   }, [customerPin]);
 
   const cleanProducts: CustomerCreditProduct[] = useMemo(
