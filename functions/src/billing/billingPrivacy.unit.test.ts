@@ -66,4 +66,16 @@ const auditSrc = readFileSync(resolve(__dirname, "types.ts"), "utf8");
 assert.match(auditSrc, /export interface SubscriptionAuditLogEventDoc/);
 assert.ok(!/export interface SubscriptionAuditLogEventDoc \{[^}]*\buid: string/.test(auditSrc));
 
+// substring plan inference must never return (exact catalog only)
+const transitionSrc = readFileSync(resolve(__dirname, "transition.ts"), "utf8");
+assert.ok(!transitionSrc.includes('includes("business")'));
+assert.ok(!transitionSrc.includes('includes("professional")'));
+assert.ok(!transitionSrc.includes('includes("starter")'));
+assert.match(transitionSrc, /SUBSCRIPTION_CATALOG/);
+
+// trial idempotency key must be the opaque digest, never raw identity/uid
+const trialSrc = readFileSync(resolve(__dirname, "trialGrant.ts"), "utf8");
+assert.ok(!trialSrc.includes("`trial:${identity}"));
+assert.match(trialSrc, /opaqueTrialIdempotencyKey/);
+
 console.log("billingPrivacy.unit.test.ts: ok");

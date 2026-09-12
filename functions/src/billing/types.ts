@@ -230,6 +230,13 @@ export interface CompanyBillingDoc {
   encryptedPurchaseCredential: EncryptedPurchaseCredential | null;
   /** Google linkedPurchaseToken invalidation chain fingerprints (never raw). */
   invalidatedCredentialFingerprints: string[];
+  /**
+   * Monotonic watermark of the newest authoritative store state applied
+   * (VerifiedPlatformEvent.reconciledAt). The transition engine rejects
+   * platform-sourced transitions older than this watermark (stale-event
+   * defense in depth; adapters own reconciliation — see transition.ts).
+   */
+  lastReconciledAt: number | null;
   createdAt: number;
   updatedAt: number;
 }

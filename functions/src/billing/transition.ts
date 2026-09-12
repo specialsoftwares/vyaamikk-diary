@@ -3,6 +3,17 @@
  *
  * Google/Apple parsing stays OUT of this module. Callers pass a verified
  * platform event (or a trial/admin request). Persistence is a separate step.
+ *
+ * OUT-OF-ORDER EVENT SAFETY (owner-reviewed contract):
+ * Platform adapters (Phase C Android / Phase D iOS) MUST reconcile to the
+ * CURRENT authoritative store state (e.g. purchases.subscriptionsv2.get /
+ * App Store signed transaction info) before invoking this engine, and MUST
+ * stamp `VerifiedPlatformEvent.reconciledAt` with the moment that state was
+ * fetched. Adapters never feed raw historical webhook payloads directly into
+ * the engine. As defense in depth, the persistence layer additionally
+ * rejects platform-sourced transitions whose `reconciledAt` is OLDER than
+ * the `lastReconciledAt` watermark already stored in `_companyBilling`
+ * (see applyTransition.ts). Both layers fail closed.
  */
 
 import { createHash } from "node:crypto";
@@ -10,6 +21,7 @@ import { createHash } from "node:crypto";
 import { deriveEntitlement, neverSubscribedEntitlement } from "./deriveEntitlement";
 import { BillingError } from "./errors";
 import { istMonthKeyForMillis } from "./istMonthKey";
+import { SUBSCRIPTION_CATALOG, type CatalogEntry } from "./products";
 import { TRIAL_DURATION_DAYS, TRIAL_PLAN, type BillingHistoryEventDoc } from "./types";
 import type {
   BillingEventLedgerDoc,
@@ -45,6 +57,15 @@ export interface VerifiedPlatformEvent {
   credentialFingerprint: string | null;
   /** Must already be encrypted — never pass a raw purchase token here. */
   encryptedPurchaseCredential: EncryptedPurchaseCredential | null;
+  /**
+   * REQUIRED CONTRACT (stale-event safety): epoch ms at which the adapter
+   * fetched the CURRENT authoritative subscription state from the platform.
+   * Adapters must reconcile webhook/callable triggers against live store
+   * state before building this event; the engine fails closed when this is
+   * missing and the persistence layer rejects values older than the stored
+   * `_companyBilling.lastReconciledAt` watermark.
+   */
+  reconciledAt: number;
 }
 
 export interface VerifiedFinancialEvent {
@@ -89,15 +110,88 @@ export interface DerivedTransition {
 
 const PAID: ReadonlySet<VyaamikkPlan> = new Set(["starter", "professional", "business"]);
 
-function paidPlan(value: VyaamikkPlan | undefined, sku: string | undefined): VyaamikkPlan {
-  if (value && PAID.has(value)) return value;
-  if (sku?.includes("business")) return "business";
-  if (sku?.includes("professional")) return "professional";
-  if (sku?.includes("starter")) return "starter";
-  throw new BillingError({
-    clientCode: "invalid_purchase",
-    causeCode: "unknown_plan_fail_closed",
-  });
+function catalogEntryOrNull(sku: string): CatalogEntry | null {
+  return (SUBSCRIPTION_CATALOG as Record<string, CatalogEntry | undefined>)[sku] ?? null;
+}
+
+/**
+ * Resolve a platform event's SKU against the EXACT Phase-A catalog.
+ * No substring inference: unknown SKUs are rejected, and a known SKU whose
+ * plan conflicts with the requested plan is rejected (never silently prefer
+ * either side). Product/basePlan identifiers must match the catalog mapping.
+ */
+function resolveCatalogEntry(
+  ev: VerifiedPlatformEvent,
+  requestedPlan: VyaamikkPlan | undefined
+): CatalogEntry {
+  const entry = catalogEntryOrNull(ev.canonicalSku);
+  if (!entry) {
+    throw new BillingError({
+      clientCode: "invalid_purchase",
+      causeCode: "unknown_canonical_sku",
+    });
+  }
+  const productMatches =
+    ev.platform === "android"
+      ? ev.productId === entry.android.productId &&
+        (ev.basePlanId === null || ev.basePlanId === entry.android.basePlanId)
+      : ev.productId === entry.ios.productId;
+  if (!productMatches) {
+    throw new BillingError({
+      clientCode: "invalid_purchase",
+      causeCode: "sku_product_mismatch",
+    });
+  }
+  if (requestedPlan !== undefined && requestedPlan !== entry.plan) {
+    throw new BillingError({
+      clientCode: "invalid_purchase",
+      causeCode: "sku_plan_mismatch",
+    });
+  }
+  return entry;
+}
+
+function assertKnownFinancialSku(sku: string): void {
+  if (!catalogEntryOrNull(sku)) {
+    throw new BillingError({
+      clientCode: "invalid_purchase",
+      causeCode: "unknown_canonical_sku",
+    });
+  }
+}
+
+function assertReconciled(ev: VerifiedPlatformEvent): void {
+  if (typeof ev.reconciledAt !== "number" || !Number.isFinite(ev.reconciledAt)) {
+    throw new BillingError({
+      clientCode: "invalid_purchase",
+      causeCode: "platform_event_not_reconciled",
+    });
+  }
+}
+
+/**
+ * Trial eligibility (owner rule: "first account trial", trial must NEVER
+ * replace paid access). Eligible prior states are ONLY:
+ * - no prior subscription status document, or
+ * - an explicit server-created never-subscribed/unentitled state with no
+ *   current or historic paid platform ownership.
+ * Anything else — active/grace/cancelled-but-period-active paid states,
+ * an existing or expired trial, or an expired historical paid subscription —
+ * is rejected fail-closed.
+ */
+export function isTrialEligiblePriorState(prior: SubscriptionStatusDoc | null): boolean {
+  if (prior === null) return true;
+  return (
+    prior.plan === "free" &&
+    prior.entitlementActive === false &&
+    prior.entitlementReason === "neverSubscribed" &&
+    prior.billingStatus === "expired" &&
+    prior.platform === null &&
+    prior.productId === null &&
+    prior.trialStartedAt === null &&
+    prior.trialEndsAt === null &&
+    prior.currentPeriodEnd === null
+  );
 }
 
 function baseStatus(
@@ -163,18 +257,66 @@ function platformFields(ev: VerifiedPlatformEvent | undefined): Partial<Subscrip
   };
 }
 
+/**
+ * Canonical idempotency fingerprint.
+ *
+ * Covers the COMPLETE semantic payload of the transition so a replayed
+ * idempotency key carrying different semantics (different amount, uid, base
+ * plan, period end, grace end, …) is detected as a conflict and fails
+ * closed.
+ *
+ * Deliberately EXCLUDED:
+ * - `nowMs` and `reconciledAt`: processing/retry timestamps — a legitimate
+ *   retry of the same semantic event arrives later and must stay idempotent.
+ * - `encryptedPurchaseCredential`: AES-GCM ciphertext is randomized per
+ *   encryption; the deterministic `credentialFingerprint` covers the
+ *   credential identity instead.
+ *
+ * Key order in the literals below is fixed → JSON.stringify is a
+ * deterministic canonical serialization.
+ */
 function fingerprint(req: TransitionRequest): string {
   const r = req.requested;
+  const p = r.platformEvent;
+  const f = r.financialEvent;
   const payload = JSON.stringify({
-    kind: r.kind,
-    plan: r.plan ?? null,
-    sku: r.platformEvent?.canonicalSku ?? r.financialEvent?.canonicalSku ?? null,
-    periodEnd: r.platformEvent?.currentPeriodEnd ?? null,
-    financialEventId: r.financialEvent?.financialEventId ?? null,
-    financialType: r.financialEvent?.eventType ?? null,
-    accessRevoked: r.accessRevoked === true,
+    v: 2,
+    uid: req.uid,
     source: req.source,
     eventSource: req.eventSource,
+    occurredAt: req.occurredAt,
+    kind: r.kind,
+    plan: r.plan ?? null,
+    cancelledAt: r.cancelledAt ?? null,
+    gracePeriodEndsAt: r.gracePeriodEndsAt ?? null,
+    accessRevoked: r.accessRevoked === true,
+    historyType: r.historyType ?? null,
+    platformEvent: p
+      ? {
+          platform: p.platform,
+          canonicalSku: p.canonicalSku,
+          productId: p.productId,
+          basePlanId: p.basePlanId,
+          currentPeriodStart: p.currentPeriodStart,
+          currentPeriodEnd: p.currentPeriodEnd,
+          autoRenewing: p.autoRenewing,
+          latestOrderId: p.latestOrderId,
+          originalTransactionId: p.originalTransactionId,
+          credentialFingerprint: p.credentialFingerprint,
+        }
+      : null,
+    financialEvent: f
+      ? {
+          financialEventId: f.financialEventId,
+          eventType: f.eventType,
+          platform: f.platform,
+          canonicalSku: f.canonicalSku,
+          grossAmountInPaise: f.grossAmountInPaise,
+          actualPlatformCommissionInPaise: f.actualPlatformCommissionInPaise,
+          estimatedPlatformCommissionInPaise: f.estimatedPlatformCommissionInPaise,
+          occurredAt: f.occurredAt,
+        }
+      : null,
   });
   return createHash("sha256").update(payload, "utf8").digest("hex");
 }
@@ -210,6 +352,7 @@ function ledgerFrom(
       causeCode: "non_integer_paise",
     });
   }
+  assertKnownFinancialSku(fin.canonicalSku);
   return {
     financialEventId: fin.financialEventId,
     platform: fin.platform,
@@ -241,12 +384,22 @@ export function deriveSubscriptionTransition(
     };
   }
 
+  if (requested.platformEvent) {
+    assertReconciled(requested.platformEvent);
+  }
+
   let historyType: BillingHistoryEventDoc["type"] | null = requested.historyType ?? null;
   const sku = requested.platformEvent?.canonicalSku ?? requested.financialEvent?.canonicalSku ?? null;
   const amount = requested.financialEvent?.grossAmountInPaise ?? null;
 
   switch (requested.kind) {
     case "grantTrial": {
+      if (!isTrialEligiblePriorState(prior)) {
+        throw new BillingError({
+          clientCode: "not_entitled",
+          causeCode: "trial_prior_state_ineligible",
+        });
+      }
       next.plan = TRIAL_PLAN;
       next.billingStatus = "trial";
       next.trialStartedAt = occurredAt;
@@ -265,8 +418,14 @@ export function deriveSubscriptionTransition(
     }
     case "activatePaid":
     case "renew": {
-      const plan = paidPlan(requested.plan, requested.platformEvent?.canonicalSku);
-      next.plan = plan;
+      if (!requested.platformEvent) {
+        throw new BillingError({
+          clientCode: "invalid_purchase",
+          causeCode: "missing_platform_event",
+        });
+      }
+      const entry = resolveCatalogEntry(requested.platformEvent, requested.plan);
+      next.plan = entry.plan;
       next.billingStatus = "active";
       next.cancelledAt = null;
       next.gracePeriodEndsAt = null;
@@ -275,14 +434,19 @@ export function deriveSubscriptionTransition(
       break;
     }
     case "enterGrace": {
+      const entry = requested.platformEvent
+        ? resolveCatalogEntry(requested.platformEvent, requested.plan)
+        : null;
       next.billingStatus = "grace";
       next.gracePeriodEndsAt = requested.gracePeriodEndsAt ?? next.gracePeriodEndsAt;
       Object.assign(next, platformFields(requested.platformEvent));
-      if (requested.plan && PAID.has(requested.plan)) next.plan = requested.plan;
+      if (entry) next.plan = entry.plan;
+      else if (requested.plan && PAID.has(requested.plan)) next.plan = requested.plan;
       historyType = "graceEntered";
       break;
     }
     case "enterOnHold": {
+      if (requested.platformEvent) resolveCatalogEntry(requested.platformEvent, requested.plan);
       next.billingStatus = "onHold";
       next.autoRenewing = false;
       Object.assign(next, platformFields(requested.platformEvent));
@@ -290,6 +454,7 @@ export function deriveSubscriptionTransition(
       break;
     }
     case "cancel": {
+      if (requested.platformEvent) resolveCatalogEntry(requested.platformEvent, requested.plan);
       next.billingStatus = "cancelled";
       next.cancelledAt = requested.cancelledAt ?? occurredAt;
       next.autoRenewing = false;
@@ -317,6 +482,7 @@ export function deriveSubscriptionTransition(
           causeCode: "admin_grant_unknown_plan",
         });
       }
+      if (requested.platformEvent) resolveCatalogEntry(requested.platformEvent, requested.plan);
       next.plan = requested.plan;
       next.billingStatus = "active";
       next.entitlementReason = "adminGrant";
@@ -388,11 +554,34 @@ export function deriveSubscriptionTransition(
   };
 }
 
+const FINANCIAL_EVENT_CLASSES: ReadonlySet<FinancialEventType> = new Set([
+  "purchase",
+  "renewal",
+  "refund",
+  "chargeback",
+]);
+
+/**
+ * Deterministic Firestore-safe financial ledger document id.
+ *
+ * The EVENT CLASS is part of the identity: a purchase and a later refund of
+ * the SAME store transaction are distinct financial events and must coexist
+ * as separate ledger rows (`android:purchase:{id}` vs `android:refund:{id}`),
+ * while a duplicate delivery of the same class stays deduplicated. Refunds
+ * do NOT need a fresh store transaction id.
+ */
 export function financialEventIdForStore(opts: {
   platform: BillingPlatform;
+  eventType: FinancialEventType;
   orderId?: string | null;
   transactionId?: string | null;
 }): string {
+  if (!FINANCIAL_EVENT_CLASSES.has(opts.eventType)) {
+    throw new BillingError({
+      clientCode: "invalid_purchase",
+      causeCode: "unknown_financial_event_type",
+    });
+  }
   if (opts.platform === "android") {
     if (!opts.orderId) {
       throw new BillingError({
@@ -400,7 +589,7 @@ export function financialEventIdForStore(opts: {
         causeCode: "missing_android_order_id",
       });
     }
-    return `android:${opts.orderId}`;
+    return `android:${opts.eventType}:${opts.orderId.replace(/\//g, "_")}`;
   }
   if (!opts.transactionId) {
     throw new BillingError({
@@ -408,5 +597,5 @@ export function financialEventIdForStore(opts: {
       causeCode: "missing_ios_transaction_id",
     });
   }
-  return `ios:${opts.transactionId}`;
+  return `ios:${opts.eventType}:${opts.transactionId.replace(/\//g, "_")}`;
 }
