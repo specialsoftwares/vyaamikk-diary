@@ -39,7 +39,11 @@ export function luxuryCardBorder(isDark: boolean): string {
   return isDark ? LUXURY_COLORS.dark.cardBorder : LUXURY_COLORS.light.cardBorder;
 }
 
-/** Spec shadow: 0 2px 12px rgba(49, 46, 129, 0.07) — light mode only. */
+/** Spec shadow: 0 2px 12px rgba(49, 46, 129, 0.07) — iOS light mode only.
+ * Android Material elevation paints a large rectangular grey plane around
+ * rounded cards (visible as slabs in light mode). Android depth is the
+ * hairline luxury border on the same surface, not elevation.
+ */
 export function luxuryCardShadow(isDark: boolean): ViewStyle {
   if (isDark) return {};
   return Platform.select({
@@ -49,7 +53,7 @@ export function luxuryCardShadow(isDark: boolean): ViewStyle {
       shadowOpacity: 0.07,
       shadowRadius: 12,
     },
-    android: { elevation: 2 },
+    android: {},
     default: {},
   }) as ViewStyle;
 }

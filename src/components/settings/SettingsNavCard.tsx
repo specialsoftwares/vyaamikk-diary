@@ -48,13 +48,14 @@ export function SettingsNavCard({
   const styles = useThemedStyles((c) =>
     StyleSheet.create({
       card: {
-        ...(embedded ? {} : depth),
+        ...(embedded
+          ? { backgroundColor: "transparent" }
+          : { ...depth, overflow: "hidden" }),
         flexDirection: "row",
         alignItems: "center",
         gap: spacing.md,
         paddingVertical: spacing.md,
         paddingHorizontal: spacing.md,
-        backgroundColor: embedded ? "transparent" : undefined,
       },
       ring: {
         width: 44,
