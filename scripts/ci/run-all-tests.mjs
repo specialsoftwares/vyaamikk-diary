@@ -20,6 +20,7 @@ const EXCLUDE = new Set([
   "test:all", // self
   "test:firestore-rules", // emulator suite — separate ci:verify stage
   "test:resolve-or-create-phone-emulator", // emulator suite — separate ci:verify stage
+  "test:billing-transaction-emulator", // emulator suite — separate ci:verify stage
 ]);
 
 const suites = Object.keys(pkg.scripts)

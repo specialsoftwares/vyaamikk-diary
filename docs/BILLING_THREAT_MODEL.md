@@ -148,8 +148,14 @@ Baseline architecture facts this model is tied to:
   `notificationUUID`) and the rule that webhooks only trigger re-verification
   against the store APIs (`purchases.subscriptionsv2.get` / App Store Server
   API) — the notification payload is never the entitlement source.
+- **Phase B contract (VYD-31):** adapters own reconciliation and must stamp
+  `VerifiedPlatformEvent.reconciledAt` (state-fetch time). The engine
+  additionally rejects platform-sourced transitions whose `reconciledAt` is
+  older than the persisted `_companyBilling.lastReconciledAt` watermark
+  (`stale_platform_state`) — an old-but-validly-signed event replayed after a
+  newer state can never regress entitlement.
 - **Residual risk:** a replay can cause a redundant store lookup (rate-limited,
-  logged), never a duplicate transition.
+  logged), never a duplicate or stale transition.
 
 ### 8. Forged webhook (attacker posts to endpoints)
 
@@ -213,17 +219,26 @@ Baseline architecture facts this model is tied to:
 - **Recycled numbers (W-5):** same durable identity ⇒ no automatic second
   trial. A legitimate new owner of a recycled number is handled by a future
   admin override (`overrideAllowed` metadata reserved; no UI in Phase A).
+- **Phase B hardening (VYD-31):** the grant additionally requires an eligible
+  prior state (no status doc, or an explicit server-created never-subscribed
+  state) — a trial can never overwrite current or historic paid access, and a
+  retried grant never extends an existing trial. The trial idempotency key is
+  an opaque digest (`trial:<sha256(identityHmac:diagnosticUid:mode)>`), so no
+  raw uid/phone/identity material reaches audit or processed-event records.
 - **Residual risk:** a person with multiple phone numbers can obtain one
   trial per number. Accepted (documented owner decision).
 
 ### 12. Billing-event double count (validation + webhook for one purchase)
 
 - **Asset:** `_billingEventLedger` / `_revenueReports` accuracy.
-- **Security boundary:** `financialEventId` = store order/transaction id
-  (`latestOrderId` / `originalTransactionId`), so the validation path and the
-  webhook path collide into ONE ledger doc; revenue derives only from this
-  ledger, never by summing processing events. Commission fields are split
-  into `actualPlatformCommissionInPaise` vs
+- **Security boundary:** `financialEventId` =
+  `{platform}:{eventClass}:{storeTransactionId}` (VYD-31), so the validation
+  path and the webhook path collide into ONE ledger doc per event class,
+  while a purchase and a refund of the same store transaction coexist as
+  distinct immutable rows; a conflicting duplicate (same id, different
+  amount/type) fails closed. Revenue derives only from this ledger, never by
+  summing processing events. Commission fields are split into
+  `actualPlatformCommissionInPaise` vs
   `estimatedPlatformCommissionInPaise` (never conflated).
 - **Residual risk:** store-side order-id semantics changes; covered by Phase
   B contract tests against recorded API fixtures.

@@ -29,13 +29,71 @@ Notes:
   record creates behave exactly as before billing existed (emulator-proven).
 - `_subscriptionAuditLog` append-only is a backend write-discipline invariant
   (Admin SDK bypasses Rules; Phase B enforces create-only in the engine plus
-  contract tests). Client-side it is simply inaccessible.
+  contract tests). Client-side it is simply inaccessible. **Phase B privacy
+  correction:** audit documents store `diagnosticUid` only (HMAC-SHA256 of
+  uid with `BILLING_DIAG_UID_SECRET`, truncated to 16 hex). Raw Firebase
+  `uid` is not stored on audit records. `_companyBilling` remains keyed by
+  uid (authoritative server-only account record). `_billingEventLedger`
+  retains uid for refund/revenue attribution and is server-only.
 - `_trialLedger` ids come from
   `HMAC-SHA256(TRIAL_IDENTITY_SECRET, normalizeE164(phone))`
   (`functions/src/billing/trialIdentity.ts`); no raw phone or uid is stored
   (`lastAccountUidDiagnostic` is a truncated digest).
 - `globalStats/paperSaved` figures are labelled estimates with a methodology
   string (owner decision W-9); other `globalStats/*` docs are default-denied.
+
+## Phase-B financial-core invariants (VYD-31 correction round)
+
+- **Transaction shape.** Every billing mutation runs as ONE transaction with
+  an explicit read phase (processed event, subscription status, company
+  billing, financial ledger row when the request carries a financial event,
+  plus hook reads) followed by an explicit write phase. Prepare hooks receive
+  a read-only transaction view and return planned writes; no read ever
+  follows a write (`applyTransition.ts`; proven against real Firestore by
+  `test:billing-transaction-emulator` and enforced in unit tests by the
+  Firestore-strict `MemoryBillingStore`).
+- **Financial ledger identity.** `_billingEventLedger` doc ids are
+  `{platform}:{eventClass}:{storeTransactionId}` (e.g.
+  `android:purchase:GPA.x`, `android:refund:GPA.x`). The event class is part
+  of the identity: a purchase and a refund of the SAME store transaction
+  coexist as separate immutable rows, duplicate deliveries of the same class
+  deduplicate, and a conflicting duplicate (same id, different amount/type/
+  uid/sku) fails closed. Refunds are not assumed to carry new store ids.
+- **Idempotency fingerprint.** `_processedBillingEvents.requestFingerprint`
+  is a SHA-256 over the COMPLETE semantic payload (uid, source, eventSource,
+  occurredAt, kind, plan, cancelledAt, gracePeriodEndsAt, accessRevoked,
+  historyType, full platform event incl. `credentialFingerprint`, full
+  financial event). Processing time (`nowMs`, `reconciledAt`) and randomized
+  ciphertext are deliberately excluded so a retried event stays idempotent
+  while any semantic drift under a reused key fails closed.
+- **Trial idempotency key.** Trial grants use
+  `trial:<sha256(identityHmac:diagnosticUid:mode)>` — opaque, deterministic,
+  containing no raw uid, no phone, and not exposing the trial identity HMAC.
+  The grant result returned toward callables carries no identity material.
+- **Trial eligibility.** A trial may only follow "no prior status doc" or an
+  explicit server-created never-subscribed state (free/inactive/
+  `neverSubscribed`, no platform, no product, no trial timestamps). Current
+  or historic paid ownership — active, grace, cancelled-period-active,
+  on-hold, or expired-paid — rejects fail-closed
+  (`trial_prior_state_ineligible`), and a repeated grant never extends an
+  existing trial.
+- **Out-of-order event safety (ownership contract).** Platform adapters
+  (Phase C/D) OWN reconciliation: they MUST fetch the current authoritative
+  subscription state from Google/Apple and stamp
+  `VerifiedPlatformEvent.reconciledAt` before invoking the engine — raw
+  historical webhook payloads are never fed in directly. The engine adds
+  defense in depth: `_companyBilling.lastReconciledAt` is a monotonic
+  watermark and platform-sourced transitions with an older `reconciledAt`
+  are rejected (`stale_platform_state`); equal timestamps (one reconciliation
+  feeding callable + webhook paths) remain allowed.
+- **Credential envelope.** `encryptedPurchaseCredential.ciphertext` is a
+  true KMS envelope: per-credential random 256-bit DEK, local AES-256-GCM
+  (random 96-bit IV, 128-bit tag, algorithm bound as AAD), DEK wrapped by
+  Cloud KMS; layout `[version][wrapped-DEK length][wrapped DEK][IV][tag]
+  [ciphertext]` base64-encoded, with `keyVersion` = KMS key resource name and
+  `algorithm = GOOGLE_KMS_ENVELOPE_AES256GCM_V1`. The plaintext DEK is never
+  persisted and is zeroized after use; without KMS config every call fails
+  closed (`kms_unavailable`). KMS itself is NOT enabled in Phase B.
 
 ## Canonical SKU catalog (owner decision W-1)
 
