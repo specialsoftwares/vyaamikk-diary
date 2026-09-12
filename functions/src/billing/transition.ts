@@ -77,6 +77,11 @@ export interface VerifiedFinancialEvent {
   actualPlatformCommissionInPaise: number | null;
   estimatedPlatformCommissionInPaise: number | null;
   occurredAt: number;
+  /**
+   * Refund/chargeback → original purchase/renewal financialEventId.
+   * Purchase/renewal must be null.
+   */
+  relatedFinancialEventId: string | null;
 }
 
 export interface CanonicalTransition {
@@ -315,6 +320,7 @@ function fingerprint(req: TransitionRequest): string {
           actualPlatformCommissionInPaise: f.actualPlatformCommissionInPaise,
           estimatedPlatformCommissionInPaise: f.estimatedPlatformCommissionInPaise,
           occurredAt: f.occurredAt,
+          relatedFinancialEventId: f.relatedFinancialEventId ?? null,
         }
       : null,
   });
@@ -353,6 +359,27 @@ function ledgerFrom(
     });
   }
   assertKnownFinancialSku(fin.canonicalSku);
+  const related = fin.relatedFinancialEventId ?? null;
+  if (fin.eventType === "purchase" || fin.eventType === "renewal") {
+    if (related != null) {
+      throw new BillingError({
+        clientCode: "invalid_purchase",
+        causeCode: "related_financial_event_not_allowed",
+      });
+    }
+  } else if (fin.eventType === "refund" || fin.eventType === "chargeback") {
+    if (!related) {
+      throw new BillingError({
+        clientCode: "invalid_purchase",
+        causeCode: "missing_related_financial_event",
+      });
+    }
+  } else {
+    throw new BillingError({
+      clientCode: "invalid_purchase",
+      causeCode: "unknown_financial_event_type",
+    });
+  }
   return {
     financialEventId: fin.financialEventId,
     platform: fin.platform,
@@ -365,6 +392,7 @@ function ledgerFrom(
     estimatedPlatformCommissionInPaise: fin.estimatedPlatformCommissionInPaise,
     occurredAt: fin.occurredAt,
     monthKey: istMonthKeyForMillis(fin.occurredAt),
+    relatedFinancialEventId: related,
     recordedAt: nowMs,
     recordedBy: source,
   };

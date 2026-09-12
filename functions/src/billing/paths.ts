@@ -44,6 +44,10 @@ export function subscriptionCreditNotePath(creditNoteId: string): string {
   return `_subscriptionCreditNotes/${creditNoteId}`;
 }
 
+export function subscriptionTaxCompliancePath(invoiceId: string): string {
+  return `_subscriptionTaxCompliance/${invoiceId}`;
+}
+
 export function invoiceCounterPath(financialYear: string): string {
   return `_invoiceCounters/${financialYear}`;
 }

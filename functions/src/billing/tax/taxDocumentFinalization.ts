@@ -38,6 +38,7 @@ import {
   financialLedgerPath,
   invoiceCounterPath,
   subscriptionInvoicePath,
+  subscriptionTaxCompliancePath,
 } from "../paths";
 import {
   getCatalogEntry,
@@ -51,10 +52,12 @@ import type {
   InvoicePdfStatus,
   SubscriptionBillingDetailsDoc,
   SubscriptionInvoiceDoc,
+  SubscriptionTaxComplianceDoc,
 } from "../types";
 
 import {
   isRecipientTaxClassificationPending,
+  recipientInvoiceDetailsIncomplete,
   statutoryBuyerFromDetails,
 } from "./buyerSnapshot";
 import { formatIstCalendarDate, getFinancialYearForDate } from "./financialYearUtils";
@@ -85,6 +88,7 @@ import {
 } from "./sellerIdentity";
 import { calculateGst } from "./taxMath";
 import { resolveTaxPeriod } from "./taxPeriod";
+import { buildInvoiceComplianceDoc } from "./taxCompliance";
 
 export interface FinalizeUnissuedInvoiceInput {
   financialEventId: string;
@@ -149,6 +153,18 @@ export async function finalizeUnissuedInvoice(
         causeCode: "financial_event_missing",
       });
     }
+    if (ledger.eventType === "refund" || ledger.eventType === "chargeback") {
+      throw new BillingError({
+        clientCode: "invalid_purchase",
+        causeCode: "financial_event_not_invoiceable",
+      });
+    }
+    if (ledger.eventType !== "purchase" && ledger.eventType !== "renewal") {
+      throw new BillingError({
+        clientCode: "invalid_purchase",
+        causeCode: "unknown_financial_event_type",
+      });
+    }
     if (!isCanonicalSku(ledger.canonicalSku)) {
       throw new BillingError({
         clientCode: "internal_error",
@@ -169,6 +185,8 @@ export async function finalizeUnissuedInvoice(
     }
     const detailsSnap = await tx.get(billingDetailsPath(ledger.uid));
     const counterSnap = await tx.get(counterPath);
+    const compliancePath = subscriptionTaxCompliancePath(invoiceId);
+    const complianceSnap = await tx.get(compliancePath);
     if (existing && isIssuedInvoice(existing)) {
       return { invoice: existing, reused: true, newlyIssued: false };
     }
@@ -187,6 +205,15 @@ export async function finalizeUnissuedInvoice(
     const subscriptionDescription = subscriptionDescriptionForSku(ledger.canonicalSku);
     const buyer = statutoryBuyerFromDetails(details);
     const pendingRecipient = isRecipientTaxClassificationPending(details);
+    const recipientDetailsIncomplete = recipientInvoiceDetailsIncomplete(
+      details,
+      buyer.classification
+    );
+    const issueHoldReason = pendingRecipient
+      ? "recipient_tax_classification_pending"
+      : recipientDetailsIncomplete
+        ? "recipient_invoice_details_incomplete"
+        : null;
     const channel = channelForStorePlatform(ledger.platform);
     const policy = resolvePlatformTaxPolicy(ledger.platform, overrides);
     const ecoIds = ecoSnapshotFromPolicy(ledger.platform, policy, overrides[channel]);
@@ -213,10 +240,12 @@ export async function finalizeUnissuedInvoice(
       reverseChargeReady &&
       priceBasisReady &&
       seller != null &&
-      !pendingRecipient;
+      !pendingRecipient &&
+      !recipientDetailsIncomplete;
     const allocateNumber =
       pdfStatus !== "awaiting_financial_evidence" &&
       !pendingRecipient &&
+      !recipientDetailsIncomplete &&
       (documentType === "platform_subscription_receipt" || canFinalizeDeveloperInvoice);
 
     const diagnosticUid = input.diagnosticUidFor(ledger.uid);
@@ -240,7 +269,7 @@ export async function finalizeUnissuedInvoice(
       invoiceIssuedOnIst: null,
       supplyOccurredAt: ledger.occurredAt,
       issueStatus: "unissued_draft",
-      issueHoldReason: pendingRecipient ? "recipient_tax_classification_pending" : null,
+      issueHoldReason,
       reverseChargeMode: input.config.reverseChargeMode,
       seller,
       buyer,
@@ -265,8 +294,7 @@ export async function finalizeUnissuedInvoice(
         operatorIdentifier: ecoIds.operatorIdentifier,
         operatorGstin: ecoIds.operatorGstin,
         taxResponsibilityMode: policy.mode,
-        section52TcsStatus: policy.section52TcsStatus,
-        table14ClassificationStatus: policy.table14ClassificationStatus,
+        ecoReportingCategory: policy.ecoReportingCategory,
       },
       gstrReportable: false,
       ...operationalFrom(existing, pdfStatus),
@@ -306,7 +334,12 @@ export async function finalizeUnissuedInvoice(
         totalTaxInPaise: math.totalTaxInPaise,
         totalInPaise: math.totalInPaise,
       };
-    } else if (documentType === "platform_subscription_receipt" && amountOk && !pendingRecipient) {
+    } else if (
+      documentType === "platform_subscription_receipt" &&
+      amountOk &&
+      !pendingRecipient &&
+      !recipientDetailsIncomplete
+    ) {
       stub = {
         ...stub,
         totalInPaise: ledger.grossAmountInPaise,
@@ -359,10 +392,23 @@ export async function finalizeUnissuedInvoice(
       createdAt: existing?.createdAt ?? issueAt,
       updatedAt: issueAt,
     };
+    const priorCompliance = complianceSnap.exists
+      ? (complianceSnap.data() as unknown as SubscriptionTaxComplianceDoc)
+      : null;
+    const compliance = buildInvoiceComplianceDoc({
+      invoice: created,
+      existing: priorCompliance,
+      nowMs: issueAt,
+    });
     if (existingSnap.exists) {
       tx.set(invoicePath, created as unknown as Record<string, unknown>);
     } else {
       tx.create(invoicePath, created as unknown as Record<string, unknown>);
+    }
+    if (complianceSnap.exists) {
+      tx.set(compliancePath, compliance as unknown as Record<string, unknown>);
+    } else {
+      tx.create(compliancePath, compliance as unknown as Record<string, unknown>);
     }
     if (nextCounter) {
       tx.set(counterPath, nextCounter as unknown as Record<string, unknown>);

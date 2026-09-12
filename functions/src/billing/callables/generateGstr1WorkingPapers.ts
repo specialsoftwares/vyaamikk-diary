@@ -34,9 +34,8 @@
 
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 
-import { BillingError } from "../errors";
-import { MemoryBillingStore, type BillingStore } from "../store";
-import type { Gstr1ReportManifestDoc, SubscriptionCreditNoteDoc, SubscriptionInvoiceDoc } from "../types";
+import type { BillingStore } from "../store";
+import type { Gstr1ReportManifestDoc } from "../types";
 import { assertAdminAuthorized, type AdminAuthContext } from "../tax/adminAuth";
 import {
   buildGstr1WorkingPapers,
@@ -45,41 +44,12 @@ import {
   type Gstr1WorkingPapers,
 } from "../tax/gstr1WorkingPapers";
 import type { InvoiceObjectStorage } from "../tax/taxDocumentOrchestrator";
+import {
+  reportSourceFromBillingStore,
+  type TaxComplianceReportSource,
+} from "../tax/taxComplianceReportSource";
 import { gstr1ReportStoragePath } from "../paths";
 import { assertGstrMonth } from "../tax/taxPeriod";
-
-export function listTaxDocumentsFromMemory(
-  store: MemoryBillingStore,
-  month: string
-): { invoices: SubscriptionInvoiceDoc[]; creditNotes: SubscriptionCreditNoteDoc[] } {
-  const invoices: SubscriptionInvoiceDoc[] = [];
-  const creditNotes: SubscriptionCreditNoteDoc[] = [];
-  for (const [path, data] of store.docs) {
-    if (path.startsWith("_subscriptionInvoices/")) {
-      invoices.push(data as unknown as SubscriptionInvoiceDoc);
-    }
-    if (path.startsWith("_subscriptionCreditNotes/")) {
-      creditNotes.push(data as unknown as SubscriptionCreditNoteDoc);
-    }
-  }
-  return {
-    invoices: invoices.filter((i) => i.taxPeriodMonth === month),
-    creditNotes: creditNotes.filter((c) => c.taxPeriodMonth === month),
-  };
-}
-
-export function listAuthoritativeTaxDocuments(
-  store: BillingStore,
-  month: string
-): { invoices: SubscriptionInvoiceDoc[]; creditNotes: SubscriptionCreditNoteDoc[] } {
-  if (!(store instanceof MemoryBillingStore)) {
-    throw new BillingError({
-      clientCode: "internal_error",
-      causeCode: "gstr_store_scan_unsupported",
-    });
-  }
-  return listTaxDocumentsFromMemory(store, month);
-}
 
 export async function generateGstr1WorkingPapersCore(input: {
   month: string;
@@ -88,6 +58,7 @@ export async function generateGstr1WorkingPapersCore(input: {
   store: BillingStore;
   generatedByDiagnosticUid: string;
   nowMs: number;
+  reportSource?: TaxComplianceReportSource;
 }): Promise<{
   papers: Gstr1WorkingPapers;
   manifest: Gstr1ReportManifestDoc;
@@ -97,11 +68,13 @@ export async function generateGstr1WorkingPapersCore(input: {
 }> {
   assertAdminAuthorized(input.admin);
   assertGstrMonth(input.month);
-  const listed = listAuthoritativeTaxDocuments(input.store, input.month);
+  const source = input.reportSource ?? reportSourceFromBillingStore(input.store);
+  const listed = await source.loadMonthlyScope(input.month);
   const papers = buildGstr1WorkingPapers({
     month: input.month,
     invoices: listed.invoices,
     creditNotes: listed.creditNotes,
+    complianceRecords: listed.complianceRecords,
   });
   const jsonPath = gstr1ReportStoragePath(input.month, papers.reportId, "json");
   const csvPath = gstr1ReportStoragePath(input.month, papers.reportId, "csv");

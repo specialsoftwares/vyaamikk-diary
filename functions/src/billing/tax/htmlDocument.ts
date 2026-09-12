@@ -108,7 +108,11 @@ export function buildSubscriptionTaxDocumentHtml(invoice: SubscriptionInvoiceDoc
     : `<p>Supplier identity incomplete — this document is not a final tax invoice.</p>`;
 
   const recipientBlock = `<p>${
-    buyer.legalName ? esc(buyer.legalName) : "Unregistered recipient"
+    buyer.legalName
+      ? esc(buyer.legalName)
+      : isTaxInvoice && invoice.issueStatus === "issued"
+        ? "Recipient particulars incomplete — this document is not a final tax invoice."
+        : "Unregistered recipient"
   }<br/>${
     buyer.gstin && buyer.gstinVerificationStatus === "verified"
       ? `GSTIN: ${esc(buyer.gstin)}<br/>`

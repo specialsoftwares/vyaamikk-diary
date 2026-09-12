@@ -32,7 +32,7 @@
  * policy.
  */
 
-import type { BuyerTaxSnapshot, SubscriptionBillingDetailsDoc } from "../types";
+import type { BuyerClassification, BuyerTaxSnapshot, SubscriptionBillingDetailsDoc } from "../types";
 
 import { gstStateName, isKnownGstStateCode } from "./gstin";
 
@@ -42,9 +42,49 @@ export function isRecipientTaxClassificationPending(
   return details?.gstinVerificationStatus === "pending_manual_verification";
 }
 
+export function isIndianPin(raw: string | null | undefined): boolean {
+  return /^\d{6}$/.test(raw?.trim() ?? "");
+}
+
+function nonEmpty(raw: string | null | undefined): raw is string {
+  return Boolean(raw && raw.trim());
+}
+
+/**
+ * B2B tax invoices require verified GSTIN, legal name, GST State, address, and PIN.
+ * B2C developer tax invoices (including ECO/app-store supplies) require recipient
+ * name, address, PIN, State and State code — Rule 46 particulars, not optional.
+ */
+export function recipientInvoiceDetailsIncomplete(
+  details: SubscriptionBillingDetailsDoc | null,
+  classification: BuyerClassification
+): boolean {
+  if (!details) return true;
+  if (classification === "b2b") {
+    return !(
+      details.gstinVerificationStatus === "verified" &&
+      nonEmpty(details.gstin) &&
+      nonEmpty(details.verifiedLegalName) &&
+      nonEmpty(details.verifiedStateCode) &&
+      isKnownGstStateCode(details.verifiedStateCode) &&
+      nonEmpty(details.billingAddressLine1) &&
+      isIndianPin(details.billingPostalCode)
+    );
+  }
+  return !(
+    nonEmpty(details.billingRecipientName) &&
+    nonEmpty(details.billingAddressLine1) &&
+    isIndianPin(details.billingPostalCode) &&
+    nonEmpty(details.billingStateCode) &&
+    isKnownGstStateCode(details.billingStateCode) &&
+    nonEmpty(details.billingStateName)
+  );
+}
+
 /**
  * Statutory buyer snapshot. Unverified GSTIN is never the recipient GSTIN.
  * Raw entered GSTIN remains on billingDetails for manual review.
+ * B2C legalName is billingRecipientName — never optional business-name alone.
  */
 export function statutoryBuyerFromDetails(
   details: SubscriptionBillingDetailsDoc | null
@@ -63,11 +103,12 @@ export function statutoryBuyerFromDetails(
   return {
     classification: verified ? "b2b" : "b2c",
     legalName: verified
-      ? details?.verifiedLegalName ?? details?.billingBusinessName ?? null
-      : details?.billingBusinessName ?? null,
+      ? details?.verifiedLegalName ?? null
+      : details?.billingRecipientName ?? null,
     gstin: verified ? details?.gstin ?? null : null,
     gstinVerificationStatus: status,
     billingAddress: addressParts.length ? addressParts.join(", ") : null,
+    postalCode: details?.billingPostalCode?.trim() || null,
     stateCode,
     stateName:
       stateCode && isKnownGstStateCode(stateCode)

@@ -35,12 +35,25 @@
 import { createHash } from "node:crypto";
 
 import { BillingError } from "../errors";
-import { creditNoteCounterPath, subscriptionCreditNotePath } from "../paths";
+import {
+  creditNoteCounterPath,
+  financialLedgerPath,
+  subscriptionCreditNotePath,
+  subscriptionInvoicePath,
+  subscriptionTaxCompliancePath,
+} from "../paths";
 import type { BillingStore } from "../store";
-import type { CreditNoteCounterDoc, SubscriptionCreditNoteDoc, SubscriptionInvoiceDoc } from "../types";
+import type {
+  BillingEventLedgerDoc,
+  CreditNoteCounterDoc,
+  SubscriptionCreditNoteDoc,
+  SubscriptionInvoiceDoc,
+  SubscriptionTaxComplianceDoc,
+} from "../types";
 
-import { getFinancialYearForDate, formatIstCalendarDate, getMonthKey } from "./financialYearUtils";
-import { assertStatutoryDocumentNumber } from "./invoiceAllocation";
+import { formatIstCalendarDate, getFinancialYearForDate, getMonthKey } from "./financialYearUtils";
+import { assertStatutoryDocumentNumber, invoiceIdForFinancialEvent, isIssuedInvoice } from "./invoiceAllocation";
+import { buildCreditNoteComplianceDoc } from "./taxCompliance";
 
 export function creditNoteIdForRefundEvent(refundFinancialEventId: string): string {
   if (!refundFinancialEventId) {
@@ -71,32 +84,158 @@ export function developerCreditNoteRequired(invoice: SubscriptionInvoiceDoc): bo
   );
 }
 
-export async function allocateCreditNoteStub(
-  store: BillingStore,
-  input: {
-    stub: SubscriptionCreditNoteDoc;
-    financialYear?: string;
-    nowMs: number;
-    original: SubscriptionInvoiceDoc;
-  }
-): Promise<{ creditNote: SubscriptionCreditNoteDoc; reused: boolean }> {
-  void input.financialYear;
-  if (!developerCreditNoteRequired(input.original)) {
+function assertOriginalTaxIntegrity(original: SubscriptionInvoiceDoc): void {
+  if (
+    original.totalInPaise == null ||
+    original.taxableAmountInPaise == null ||
+    original.totalTaxInPaise == null ||
+    original.gstRateBps == null ||
+    original.taxType == null
+  ) {
     throw new BillingError({
       clientCode: "internal_error",
-      causeCode: "credit_note_not_applicable",
+      causeCode: "credit_note_tax_inconsistent",
     });
   }
-  const path = subscriptionCreditNotePath(input.stub.creditNoteId);
+  const split =
+    (original.cgstInPaise ?? 0) + (original.sgstInPaise ?? 0) + (original.igstInPaise ?? 0);
+  if (split !== original.totalTaxInPaise) {
+    throw new BillingError({
+      clientCode: "internal_error",
+      causeCode: "credit_note_tax_inconsistent",
+    });
+  }
+  if (original.taxableAmountInPaise + original.totalTaxInPaise !== original.totalInPaise) {
+    throw new BillingError({
+      clientCode: "internal_error",
+      causeCode: "credit_note_tax_inconsistent",
+    });
+  }
+  if (original.taxType === "cgst_sgst" && (original.igstInPaise ?? 0) !== 0) {
+    throw new BillingError({
+      clientCode: "internal_error",
+      causeCode: "credit_note_tax_inconsistent",
+    });
+  }
+  if (original.taxType === "igst" && ((original.cgstInPaise ?? 0) !== 0 || (original.sgstInPaise ?? 0) !== 0)) {
+    throw new BillingError({
+      clientCode: "internal_error",
+      causeCode: "credit_note_tax_inconsistent",
+    });
+  }
+}
+
+/**
+ * Partial refunds are not yet a supported statutory feature. Fail closed
+ * unless the verified refund amount exactly equals the original invoice total.
+ */
+export async function finalizeSubscriptionCreditNote(
+  store: BillingStore,
+  input: {
+    refundFinancialEventId: string;
+    diagnosticUidFor: (uid: string) => string;
+    nowMs: number;
+  }
+): Promise<{ creditNote: SubscriptionCreditNoteDoc; reused: boolean }> {
+  const refundPath = financialLedgerPath(input.refundFinancialEventId);
+  const creditNoteId = creditNoteIdForRefundEvent(input.refundFinancialEventId);
+  const cnPath = subscriptionCreditNotePath(creditNoteId);
   const fyForIssue = getFinancialYearForDate(input.nowMs);
   const counterPath = creditNoteCounterPath(fyForIssue);
+  const cnCompliancePath = subscriptionTaxCompliancePath(creditNoteId);
 
   return store.runTransaction(async (tx) => {
-    const existingSnap = await tx.get(path);
+    const refundSnap = await tx.get(refundPath);
+    if (!refundSnap.exists) {
+      throw new BillingError({
+        clientCode: "internal_error",
+        causeCode: "financial_event_missing",
+      });
+    }
+    const refund = refundSnap.data() as unknown as BillingEventLedgerDoc;
+    if (refund.financialEventId !== input.refundFinancialEventId) {
+      throw new BillingError({
+        clientCode: "internal_error",
+        causeCode: "financial_event_missing",
+      });
+    }
+    if (refund.eventType !== "refund" && refund.eventType !== "chargeback") {
+      throw new BillingError({
+        clientCode: "invalid_purchase",
+        causeCode: "financial_event_not_refundable",
+      });
+    }
+    const relatedId = refund.relatedFinancialEventId;
+    if (!relatedId) {
+      throw new BillingError({
+        clientCode: "invalid_purchase",
+        causeCode: "missing_related_financial_event",
+      });
+    }
+
+    const originalLedgerSnap = await tx.get(financialLedgerPath(relatedId));
+    if (!originalLedgerSnap.exists) {
+      throw new BillingError({
+        clientCode: "internal_error",
+        causeCode: "related_financial_event_missing",
+      });
+    }
+    const originalLedger = originalLedgerSnap.data() as unknown as BillingEventLedgerDoc;
+    if (
+      originalLedger.eventType !== "purchase" &&
+      originalLedger.eventType !== "renewal"
+    ) {
+      throw new BillingError({
+        clientCode: "invalid_purchase",
+        causeCode: "related_financial_event_not_invoiceable",
+      });
+    }
+    if (originalLedger.uid !== refund.uid || originalLedger.platform !== refund.platform) {
+      throw new BillingError({
+        clientCode: "invalid_purchase",
+        causeCode: "related_financial_event_mismatch",
+      });
+    }
+
+    const originalInvoiceId = invoiceIdForFinancialEvent(originalLedger.financialEventId);
+    const originalInvoicePath = subscriptionInvoicePath(originalInvoiceId);
+    const originalInvoiceSnap = await tx.get(originalInvoicePath);
+    const existingCnSnap = await tx.get(cnPath);
     const counterSnap = await tx.get(counterPath);
-    if (existingSnap.exists) {
-      const existing = existingSnap.data() as unknown as SubscriptionCreditNoteDoc;
-      if (existing.refundFinancialEventId !== input.stub.refundFinancialEventId) {
+    const originalCompliancePath = subscriptionTaxCompliancePath(originalInvoiceId);
+    const originalComplianceSnap = await tx.get(originalCompliancePath);
+    const cnComplianceSnap = await tx.get(cnCompliancePath);
+
+    if (!originalInvoiceSnap.exists) {
+      throw new BillingError({
+        clientCode: "internal_error",
+        causeCode: "credit_note_original_missing",
+      });
+    }
+    const original = originalInvoiceSnap.data() as unknown as SubscriptionInvoiceDoc;
+    if (original.invoiceId !== originalInvoiceId || original.financialEventId !== originalLedger.financialEventId) {
+      throw new BillingError({
+        clientCode: "internal_error",
+        causeCode: "credit_note_original_mismatch",
+      });
+    }
+    if (original.uid !== refund.uid || original.platform !== refund.platform) {
+      throw new BillingError({
+        clientCode: "invalid_purchase",
+        causeCode: "related_financial_event_mismatch",
+      });
+    }
+    if (!isIssuedInvoice(original) || !developerCreditNoteRequired(original)) {
+      throw new BillingError({
+        clientCode: "internal_error",
+        causeCode: "credit_note_not_applicable",
+      });
+    }
+    assertOriginalTaxIntegrity(original);
+
+    if (existingCnSnap.exists) {
+      const existing = existingCnSnap.data() as unknown as SubscriptionCreditNoteDoc;
+      if (existing.refundFinancialEventId !== input.refundFinancialEventId) {
         throw new BillingError({
           clientCode: "internal_error",
           causeCode: "credit_note_id_collision",
@@ -104,6 +243,32 @@ export async function allocateCreditNoteStub(
       }
       return { creditNote: existing, reused: true };
     }
+
+    const originalTotal = original.totalInPaise as number;
+    if (refund.grossAmountInPaise > originalTotal) {
+      throw new BillingError({
+        clientCode: "invalid_purchase",
+        causeCode: "credit_exceeds_original",
+      });
+    }
+    if (refund.grossAmountInPaise !== originalTotal) {
+      throw new BillingError({
+        clientCode: "invalid_purchase",
+        causeCode: "partial_refund_not_supported",
+      });
+    }
+
+    const originalCompliance = originalComplianceSnap.exists
+      ? (originalComplianceSnap.data() as unknown as SubscriptionTaxComplianceDoc)
+      : null;
+    const priorCumulative = originalCompliance?.cumulativeCreditReversedInPaise ?? 0;
+    if (priorCumulative + originalTotal > originalTotal) {
+      throw new BillingError({
+        clientCode: "invalid_purchase",
+        causeCode: "credit_exceeds_original",
+      });
+    }
+
     const prior = (counterSnap.data() as CreditNoteCounterDoc | undefined) ?? {
       currentCount: 0,
       financialYear: fyForIssue,
@@ -111,29 +276,94 @@ export async function allocateCreditNoteStub(
     };
     const serial = prior.currentCount + 1;
     const created: SubscriptionCreditNoteDoc = {
-      ...input.stub,
+      creditNoteId,
+      originalInvoiceId: original.invoiceId,
+      originalDocumentNumber: original.documentNumber,
+      refundFinancialEventId: input.refundFinancialEventId,
+      uid: original.uid,
+      diagnosticUid: input.diagnosticUidFor(original.uid),
       documentNumber: formatCreditNoteNumber(fyForIssue, serial),
       financialYear: fyForIssue,
       taxPeriodMonth: getMonthKey(input.nowMs),
       taxPeriodStatus: "resolved",
       issuedAt: input.nowMs,
       issuedOnIst: formatIstCalendarDate(input.nowMs),
-      buyerGstin: input.original.buyer.gstin,
-      buyerClassification: input.original.buyer.classification,
-      originalInvoiceIssuedOnIst: input.original.invoiceIssuedOnIst,
-      placeOfSupplyStateCode: input.original.placeOfSupplyStateCode,
-      gstRateBps: input.original.gstRateBps,
-      taxType: input.original.taxType,
+      buyerGstin: original.buyer.gstin,
+      buyerClassification: original.buyer.classification,
+      originalInvoiceIssuedOnIst: original.invoiceIssuedOnIst,
+      placeOfSupplyStateCode: original.placeOfSupplyStateCode,
+      gstRateBps: original.gstRateBps,
+      taxType: original.taxType,
+      taxResponsibilityMode: original.taxResponsibilityMode,
+      taxableAmountReversedInPaise: original.taxableAmountInPaise,
+      cgstReversedInPaise: original.cgstInPaise,
+      sgstReversedInPaise: original.sgstInPaise,
+      igstReversedInPaise: original.igstInPaise,
+      totalTaxReversedInPaise: original.totalTaxInPaise,
+      totalReversedInPaise: original.totalInPaise,
       gstrReportable: true,
+      gstrReportedMonth: null,
+      gstrFilingBatchId: null,
       createdAt: input.nowMs,
       updatedAt: input.nowMs,
     };
-    tx.create(path, created as unknown as Record<string, unknown>);
+    const nextOriginalCompliance: SubscriptionTaxComplianceDoc = originalCompliance
+      ? {
+          ...originalCompliance,
+          cumulativeCreditReversedInPaise: priorCumulative + originalTotal,
+          updatedAt: input.nowMs,
+        }
+      : {
+          invoiceId: original.invoiceId,
+          documentKind: "invoice",
+          financialEventId: original.financialEventId,
+          originalInvoiceId: null,
+          uid: original.uid,
+          supplyMonthKey: getMonthKey(original.supplyOccurredAt ?? original.createdAt),
+          issueMonthKey: original.invoiceIssuedAt ? getMonthKey(original.invoiceIssuedAt) : null,
+          reportingTaxPeriodMonth: original.taxPeriodMonth,
+          taxPeriodDecisionStatus: "requires_tax_review",
+          ecoReportingCategory: original.ecoReporting.ecoReportingCategory,
+          operatorIdentifier: original.ecoReporting.operatorIdentifier,
+          operatorGstin: original.ecoReporting.operatorGstin,
+          reviewStatus: "requires_tax_review",
+          unresolvedReasons: ["compliance_record_missing"],
+          cumulativeCreditReversedInPaise: originalTotal,
+          reviewedAt: null,
+          reviewedByDiagnosticUid: null,
+          reviewBasis: null,
+          reviewVersion: 0,
+          previousEcoReportingCategory: null,
+          previousReportingTaxPeriodMonth: null,
+          createdAt: input.nowMs,
+          updatedAt: input.nowMs,
+        };
+    const cnCompliance = buildCreditNoteComplianceDoc({
+      creditNote: created,
+      original,
+      originalCompliance: nextOriginalCompliance,
+      existing: cnComplianceSnap.exists
+        ? (cnComplianceSnap.data() as unknown as SubscriptionTaxComplianceDoc)
+        : null,
+      nowMs: input.nowMs,
+    });
+
+    tx.create(cnPath, created as unknown as Record<string, unknown>);
     tx.set(counterPath, {
       currentCount: serial,
       financialYear: fyForIssue,
       updatedAt: input.nowMs,
     } satisfies CreditNoteCounterDoc);
+    if (originalComplianceSnap.exists) {
+      tx.set(originalCompliancePath, nextOriginalCompliance as unknown as Record<string, unknown>);
+    } else {
+      tx.create(originalCompliancePath, nextOriginalCompliance as unknown as Record<string, unknown>);
+    }
+    if (cnComplianceSnap.exists) {
+      tx.set(cnCompliancePath, cnCompliance as unknown as Record<string, unknown>);
+    } else {
+      tx.create(cnCompliancePath, cnCompliance as unknown as Record<string, unknown>);
+    }
     return { creditNote: created, reused: false };
   });
 }

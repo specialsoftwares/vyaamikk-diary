@@ -41,23 +41,37 @@ import { generateGstr1WorkingPapersCore } from "../callables/generateGstr1Workin
 import { BillingError } from "../errors";
 import { gstr1ReportManifestPath } from "../paths";
 import { MemoryBillingStore } from "../store";
-import type { SubscriptionCreditNoteDoc, SubscriptionInvoiceDoc } from "../types";
+import type { SubscriptionCreditNoteDoc, SubscriptionInvoiceDoc, SubscriptionTaxComplianceDoc } from "../types";
 import { buildGstr1WorkingPapers, workingPapersToCsv } from "./gstr1WorkingPapers";
 import { MemoryInvoiceObjectStorage } from "./taxDocumentOrchestrator";
 import { parseGstrMonth } from "./taxPeriod";
+import { istWallClockToEpochMs } from "./financialYearUtils";
+import { applyReviewTaxCompliance } from "./taxCompliance";
 
 function isCause(code: string) {
   return (e: unknown) => e instanceof BillingError && e.causeCode === code;
 }
 
-function classifiedEco(platform: "android" | "ios" = "android"): SubscriptionInvoiceDoc["ecoReporting"] {
+const SYNTHETIC_OPERATOR_GSTIN = "29AAAAA0000A1Z5";
+const SEP_SUPPLY = istWallClockToEpochMs("2026-09-12T12:00:00");
+
+function filingEco(platform: "android" | "ios" = "android"): SubscriptionInvoiceDoc["ecoReporting"] {
+  return {
+    platform,
+    operatorIdentifier: platform === "android" ? "google_play" : "apple_app_store",
+    operatorGstin: SYNTHETIC_OPERATOR_GSTIN,
+    taxResponsibilityMode: "developer",
+    ecoReportingCategory: "section52_table14a",
+  };
+}
+
+function unresolvedEco(platform: "android" | "ios" = "android"): SubscriptionInvoiceDoc["ecoReporting"] {
   return {
     platform,
     operatorIdentifier: platform === "android" ? "google_play" : "apple_app_store",
     operatorGstin: null,
-    taxResponsibilityMode: "developer",
-    section52TcsStatus: "classified",
-    table14ClassificationStatus: "classified",
+    taxResponsibilityMode: platform === "ios" ? "unconfirmed" : "developer",
+    ecoReportingCategory: "requires_tax_review",
   };
 }
 
@@ -81,19 +95,27 @@ function invoice(
     financialYear: "2026-27",
     taxPeriodMonth: "2026-09",
     taxPeriodStatus: "resolved",
-    invoiceIssuedAt: 1,
+    invoiceIssuedAt: SEP_SUPPLY,
     invoiceIssuedOnIst: "12-09-2026",
-    supplyOccurredAt: 1,
+    supplyOccurredAt: SEP_SUPPLY,
     issueStatus: "issued",
     issueHoldReason: null,
     reverseChargeMode: "no",
-    seller: null,
+    seller: {
+      legalName: "SPECIAL SOFTWARES LLP (TEST — CERTIFICATE UNCONFIRMED)",
+      tradeName: "Vyaamikk Diary",
+      gstin: "09AAAAA0000A1Z5",
+      registeredAddress: "TEST REGISTERED ADDRESS PLACEHOLDER",
+      stateCode: "09",
+      stateName: "Uttar Pradesh",
+    },
     buyer: {
       classification: partial.documentType === "tax_invoice_b2b" ? "b2b" : "b2c",
       legalName: "Buyer",
       gstin: partial.documentType === "tax_invoice_b2b" ? "27AAAAA0000A1Z5" : null,
       gstinVerificationStatus: partial.documentType === "tax_invoice_b2b" ? "verified" : "not_provided",
-      billingAddress: null,
+      billingAddress: "12 MG Road, Mumbai, 400001",
+      postalCode: "400001",
       stateCode: "27",
       stateName: "Maharashtra",
     },
@@ -112,7 +134,7 @@ function invoice(
     totalTaxInPaise: 1800,
     totalInPaise: 11800,
     platformCommissionInPaise: 1770,
-    ecoReporting: classifiedEco(),
+    ecoReporting: filingEco(),
     pdfStatus: "ready",
     invoicePdfStoragePath: "company/invoices/2026-27/x.pdf",
     emailStatus: "accepted",
@@ -129,12 +151,108 @@ function invoice(
   };
 }
 
+function complianceFor(
+  inv: SubscriptionInvoiceDoc,
+  patch: Partial<SubscriptionTaxComplianceDoc> = {}
+): SubscriptionTaxComplianceDoc {
+  const open =
+    inv.issueStatus !== "issued" ||
+    inv.ecoReporting.ecoReportingCategory === "requires_tax_review" ||
+    inv.taxPeriodStatus !== "resolved";
+  const reasons: string[] = [];
+  if (inv.issueStatus !== "issued") reasons.push("document_unissued");
+  if (inv.taxResponsibilityMode === "unconfirmed") reasons.push("tax_responsibility_unconfirmed");
+  if (inv.ecoReporting.ecoReportingCategory === "requires_tax_review") {
+    reasons.push("eco_reporting_requires_tax_review");
+  }
+  if (inv.taxPeriodStatus === "unresolved_cross_period") reasons.push("tax_period_unresolved_cross_period");
+  return {
+    invoiceId: inv.invoiceId,
+    documentKind: "invoice",
+    financialEventId: inv.financialEventId,
+    originalInvoiceId: null,
+    uid: inv.uid,
+    supplyMonthKey: "2026-09",
+    issueMonthKey: inv.invoiceIssuedAt ? "2026-09" : null,
+    reportingTaxPeriodMonth: inv.taxPeriodMonth,
+    taxPeriodDecisionStatus: inv.taxPeriodStatus === "resolved" ? "resolved" : inv.issueStatus === "issued" ? "unresolved_cross_period" : "pending_issue",
+    ecoReportingCategory: inv.ecoReporting.ecoReportingCategory,
+    operatorIdentifier: inv.ecoReporting.operatorIdentifier,
+    operatorGstin: inv.ecoReporting.operatorGstin,
+    reviewStatus: open ? "requires_tax_review" : "ready_to_file",
+    unresolvedReasons: reasons.sort(),
+    cumulativeCreditReversedInPaise: 0,
+    reviewedAt: open ? null : 1,
+    reviewedByDiagnosticUid: open ? null : "admindiag01",
+    reviewBasis: open ? null : "fixture",
+    reviewVersion: open ? 0 : 1,
+    previousEcoReportingCategory: null,
+    previousReportingTaxPeriodMonth: null,
+    createdAt: 1,
+    updatedAt: 1,
+    ...patch,
+  };
+}
+
+function complianceForCn(
+  cn: SubscriptionCreditNoteDoc,
+  original: SubscriptionInvoiceDoc
+): SubscriptionTaxComplianceDoc {
+  return {
+    invoiceId: cn.creditNoteId,
+    documentKind: "credit_note",
+    financialEventId: cn.refundFinancialEventId,
+    originalInvoiceId: original.invoiceId,
+    uid: cn.uid,
+    supplyMonthKey: "2026-09",
+    issueMonthKey: cn.taxPeriodMonth,
+    reportingTaxPeriodMonth: cn.taxPeriodMonth,
+    taxPeriodDecisionStatus: "resolved",
+    ecoReportingCategory: original.ecoReporting.ecoReportingCategory,
+    operatorIdentifier: original.ecoReporting.operatorIdentifier,
+    operatorGstin: original.ecoReporting.operatorGstin,
+    reviewStatus: "ready_to_file",
+    unresolvedReasons: [],
+    cumulativeCreditReversedInPaise: 0,
+    reviewedAt: 1,
+    reviewedByDiagnosticUid: "admindiag01",
+    reviewBasis: "fixture",
+    reviewVersion: 1,
+    previousEcoReportingCategory: null,
+    previousReportingTaxPeriodMonth: null,
+    createdAt: 1,
+    updatedAt: 1,
+  };
+}
+
+function seedDocs(
+  store: InstanceType<typeof MemoryBillingStore>,
+  invoices: SubscriptionInvoiceDoc[],
+  creditNotes: SubscriptionCreditNoteDoc[] = [],
+  extras: SubscriptionTaxComplianceDoc[] = []
+): void {
+  for (const inv of invoices) {
+    store.docs.set(`_subscriptionInvoices/${inv.invoiceId}`, { ...inv });
+    store.docs.set(`_subscriptionTaxCompliance/${inv.invoiceId}`, { ...complianceFor(inv) });
+  }
+  for (const cn of creditNotes) {
+    store.docs.set(`_subscriptionCreditNotes/${cn.creditNoteId}`, { ...cn });
+    const original = invoices.find((i) => i.invoiceId === cn.originalInvoiceId);
+    if (original) {
+      store.docs.set(`_subscriptionTaxCompliance/${cn.creditNoteId}`, { ...complianceForCn(cn, original) });
+    }
+  }
+  for (const rec of extras) {
+    store.docs.set(`_subscriptionTaxCompliance/${rec.invoiceId}`, { ...rec });
+  }
+}
+
 async function main(): Promise<void> {
   assert.deepEqual(parseGstrMonth("2026-09"), { year: 2026, month: 9 });
   assert.throws(() => parseGstrMonth("2026-00"), isCause("invalid_gstr_month"));
   assert.throws(() => parseGstrMonth("2026-13"), isCause("invalid_gstr_month"));
   assert.throws(
-    () => buildGstr1WorkingPapers({ month: "2026-13", invoices: [], creditNotes: [] }),
+    () => buildGstr1WorkingPapers({ month: "2026-13", invoices: [], creditNotes: [], complianceRecords: [] }),
     isCause("invalid_gstr_month")
   );
 
@@ -146,10 +264,11 @@ async function main(): Promise<void> {
     placeOfSupplyStateCode: "09",
     buyer: {
       classification: "b2c",
-      legalName: null,
+      legalName: "Test Recipient",
       gstin: null,
       gstinVerificationStatus: "not_provided",
-      billingAddress: null,
+      billingAddress: "1 Test Street, Lucknow, 226001",
+      postalCode: "226001",
       stateCode: "09",
       stateName: "Uttar Pradesh",
     },
@@ -168,28 +287,16 @@ async function main(): Promise<void> {
     taxResponsibilityMode: "unconfirmed",
     documentNumber: null,
     invoiceIssuedAt: null,
+    taxPeriodMonth: null,
+    taxPeriodStatus: "pending_issue",
     issueStatus: "unissued_draft",
-    ecoReporting: {
-      platform: "ios",
-      operatorIdentifier: "apple_app_store",
-      operatorGstin: null,
-      taxResponsibilityMode: "unconfirmed",
-      section52TcsStatus: "requires_tax_review",
-      table14ClassificationStatus: "requires_tax_review",
-    },
+    ecoReporting: unresolvedEco("ios"),
   });
   const reviewB2b = invoice({
     invoiceId: "inv-review",
     documentType: "tax_invoice_b2b",
     documentNumber: "SS/2026-27/0009",
-    ecoReporting: {
-      platform: "android",
-      operatorIdentifier: "google_play",
-      operatorGstin: null,
-      taxResponsibilityMode: "developer",
-      section52TcsStatus: "requires_tax_review",
-      table14ClassificationStatus: "requires_tax_review",
-    },
+    ecoReporting: unresolvedEco(),
   });
   const cn: SubscriptionCreditNoteDoc = {
     creditNoteId: "cn-1",
@@ -224,12 +331,21 @@ async function main(): Promise<void> {
     updatedAt: 1,
   };
 
+  const appleComp = complianceFor(apple);
   const papersWithApple = buildGstr1WorkingPapers({
     month: "2026-09",
     invoices: [b2b, b2c, filed, apple],
     creditNotes: [cn],
+    complianceRecords: [
+      complianceFor(b2b),
+      complianceFor(b2c),
+      complianceFor(filed),
+      appleComp,
+      complianceForCn(cn, b2b),
+    ],
   });
-  assert.ok(papersWithApple.ecoTable14.some((r) => r.table14ClassificationStatus === "requires_tax_review"));
+  assert.ok(papersWithApple.complianceOpenItems.some((i) => i.invoiceId === "inv-apple"));
+  assert.equal(apple.taxPeriodMonth, null);
   assert.equal(papersWithApple.reviewStatus, "requires_tax_review");
   assert.ok(papersWithApple.unresolvedReviewReasons.includes("gstr_tax_review_unresolved"));
 
@@ -237,6 +353,12 @@ async function main(): Promise<void> {
     month: "2026-09",
     invoices: [b2b, b2c, filed],
     creditNotes: [cn],
+    complianceRecords: [
+      complianceFor(b2b),
+      complianceFor(b2c),
+      complianceFor(filed),
+      complianceForCn(cn, b2b),
+    ],
   });
   assert.equal(papers.b2b.length, 1);
   assert.equal(papers.b2b[0]?.invoiceId, "inv-b2b");
@@ -254,6 +376,11 @@ async function main(): Promise<void> {
   assert.equal(papers.creditNotes[0]?.taxableReversalInPaise, 10000);
   assert.equal(papers.excludedAlreadyFiled.includes("inv-filed"), true);
   assert.equal(papers.reportableInvoiceIds.includes("inv-filed"), false);
+  assert.equal(papers.table14a.length, 1);
+  assert.equal(papers.table14a[0]?.operatorGstin, SYNTHETIC_OPERATOR_GSTIN);
+  assert.equal(papers.table14a[0]?.fileReady, true);
+  assert.ok(papers.table14a[0]?.sourceInvoiceIds.includes("inv-b2b"));
+  assert.ok(papers.table14a[0]?.creditNoteIds.includes("cn-1"));
   assert.equal(papers.reviewStatus, "ready_to_file");
   assert.deepEqual(papers.unresolvedReviewReasons, []);
 
@@ -264,25 +391,27 @@ async function main(): Promise<void> {
   assert.match(csv, /27AAAAA0000A1Z5/);
   assert.match(csv, /b2c_summary/);
   assert.match(csv, /credit_note/);
+  assert.match(csv, /section52_table14a/);
+  const injectInv = invoice({
+    invoiceId: "inv-inject",
+    documentType: "tax_invoice_b2b",
+    documentNumber: "=1+1",
+    buyer: {
+      classification: "b2b",
+      legalName: "=HYPERLINK(1)",
+      gstin: "27AAAAA0000A1Z5",
+      gstinVerificationStatus: "verified",
+      billingAddress: "x",
+      postalCode: "400001",
+      stateCode: "27",
+      stateName: "Maharashtra",
+    },
+  });
   const injectionPapers = buildGstr1WorkingPapers({
     month: "2026-09",
-    invoices: [
-      invoice({
-        invoiceId: "inv-inject",
-        documentType: "tax_invoice_b2b",
-        documentNumber: "=1+1",
-        buyer: {
-          classification: "b2b",
-          legalName: "=HYPERLINK(1)",
-          gstin: "27AAAAA0000A1Z5",
-          gstinVerificationStatus: "verified",
-          billingAddress: null,
-          stateCode: "27",
-          stateName: "Maharashtra",
-        },
-      }),
-    ],
+    invoices: [injectInv],
     creditNotes: [],
+    complianceRecords: [complianceFor(injectInv)],
   });
   assert.match(workingPapersToCsv(injectionPapers), /"'=1\+1/);
 
@@ -290,17 +419,53 @@ async function main(): Promise<void> {
     month: "2026-09",
     invoices: [reviewB2b],
     creditNotes: [],
+    complianceRecords: [complianceFor(reviewB2b)],
   });
   assert.equal(reviewPapers.reviewStatus, "requires_tax_review");
   assert.ok(reviewPapers.unresolvedReviewReasons.includes("gstr_tax_review_unresolved"));
 
+  const table14bInv = invoice({
+    invoiceId: "inv-14b",
+    documentType: "tax_invoice_b2c",
+    documentNumber: "SS/2026-27/0014",
+    ecoReporting: {
+      ...filingEco(),
+      ecoReportingCategory: "section9_5_table14b",
+    },
+  });
+  const table14bPapers = buildGstr1WorkingPapers({
+    month: "2026-09",
+    invoices: [table14bInv],
+    creditNotes: [],
+    complianceRecords: [complianceFor(table14bInv)],
+  });
+  assert.equal(table14bPapers.table14b.length, 1);
+  assert.equal(table14bPapers.table14b[0]?.category, "section9_5_table14b");
+  assert.equal(table14bPapers.table14b[0]?.operatorGstin, SYNTHETIC_OPERATOR_GSTIN);
+  assert.equal(table14bPapers.table14b[0]?.fileReady, true);
+
+  const missingGstinInv = invoice({
+    invoiceId: "inv-missing-op",
+    documentType: "tax_invoice_b2c",
+    documentNumber: "SS/2026-27/0015",
+    ecoReporting: {
+      ...filingEco(),
+      operatorGstin: null,
+    },
+  });
+  const missingGstinPapers = buildGstr1WorkingPapers({
+    month: "2026-09",
+    invoices: [missingGstinInv],
+    creditNotes: [],
+    complianceRecords: [complianceFor(missingGstinInv)],
+  });
+  assert.equal(missingGstinPapers.table14a[0]?.fileReady, false);
+  assert.equal(missingGstinPapers.reviewStatus, "requires_tax_review");
+
   const admin = { uid: "admin-1", tokenAdmin: true, adminIdentityProvisioned: true };
   const storage = new MemoryInvoiceObjectStorage();
   const store = new MemoryBillingStore();
-  store.docs.set(`_subscriptionInvoices/${b2b.invoiceId}`, { ...b2b });
-  store.docs.set(`_subscriptionInvoices/${b2c.invoiceId}`, { ...b2c });
-  store.docs.set(`_subscriptionInvoices/${filed.invoiceId}`, { ...filed });
-  store.docs.set(`_subscriptionCreditNotes/${cn.creditNoteId}`, { ...cn });
+  seedDocs(store, [b2b, b2c, filed], [cn]);
   const generated = await generateGstr1WorkingPapersCore({
     month: "2026-09",
     admin,
@@ -352,7 +517,7 @@ async function main(): Promise<void> {
   );
 
   const reviewStore = new MemoryBillingStore();
-  reviewStore.docs.set(`_subscriptionInvoices/${reviewB2b.invoiceId}`, { ...reviewB2b });
+  seedDocs(reviewStore, [reviewB2b]);
   const reviewGenerated = await generateGstr1WorkingPapersCore({
     month: "2026-09",
     admin,
@@ -373,8 +538,7 @@ async function main(): Promise<void> {
   );
 
   const appleBlockStore = new MemoryBillingStore();
-  appleBlockStore.docs.set(`_subscriptionInvoices/${b2b.invoiceId}`, { ...b2b });
-  appleBlockStore.docs.set(`_subscriptionInvoices/${apple.invoiceId}`, { ...apple });
+  seedDocs(appleBlockStore, [b2b, apple]);
   const appleBlocked = await generateGstr1WorkingPapersCore({
     month: "2026-09",
     admin,
@@ -397,10 +561,7 @@ async function main(): Promise<void> {
   );
 
   const driftStore = new MemoryBillingStore();
-  driftStore.docs.set(`_subscriptionInvoices/${b2b.invoiceId}`, { ...b2b });
-  driftStore.docs.set(`_subscriptionInvoices/${b2c.invoiceId}`, { ...b2c });
-  driftStore.docs.set(`_subscriptionInvoices/${filed.invoiceId}`, { ...filed });
-  driftStore.docs.set(`_subscriptionCreditNotes/${cn.creditNoteId}`, { ...cn });
+  seedDocs(driftStore, [b2b, b2c, filed], [cn]);
   const driftGenerated = await generateGstr1WorkingPapersCore({
     month: "2026-09",
     admin,
@@ -422,6 +583,36 @@ async function main(): Promise<void> {
       reportId: driftGenerated.papers.reportId,
       acknowledgement: "ACK-DRIFT",
       nowMs: 16,
+    }),
+    isCause("gstr_report_source_drift")
+  );
+
+  const complianceDriftStore = new MemoryBillingStore();
+  seedDocs(complianceDriftStore, [b2b, b2c], [cn]);
+  const complianceDriftGenerated = await generateGstr1WorkingPapersCore({
+    month: "2026-09",
+    admin,
+    storage,
+    store: complianceDriftStore,
+    generatedByDiagnosticUid: "admindiag01",
+    nowMs: 17,
+  });
+  await applyReviewTaxCompliance(complianceDriftStore, {
+    invoiceId: b2b.invoiceId,
+    admin,
+    reviewedByDiagnosticUid: "admindiag01",
+    reviewBasis: "reclassify after report generation",
+    nowMs: 18,
+    ecoReportingCategory: "section9_5_table14b",
+    operatorGstin: SYNTHETIC_OPERATOR_GSTIN,
+  });
+  await assert.rejects(
+    applyMarkGstr1Filed(complianceDriftStore, {
+      admin,
+      adminDiagnosticUid: "admindiag01",
+      reportId: complianceDriftGenerated.papers.reportId,
+      acknowledgement: "ACK-COMP-DRIFT",
+      nowMs: 19,
     }),
     isCause("gstr_report_source_drift")
   );

@@ -63,6 +63,7 @@ import {
   classifyTaxDocument,
   mayAllocateStatutoryNumber,
   parseEcoClassificationStatus,
+  parseEcoReportingCategory,
   platformTaxPolicy,
   resolvePlatformTaxPolicy,
 } from "./platformTaxPolicy";
@@ -133,6 +134,7 @@ function testGstin(): void {
   assert.equal(isValidGstinFormat("99AAAAA0000A1Z5"), false);
   const pendingSnap = statutoryBuyerFromDetails({
     gstin: BUYER_MH_GSTIN,
+    billingRecipientName: null,
     billingBusinessName: "Buyer LLP",
     billingAddressLine1: null,
     billingAddressLine2: null,
@@ -149,6 +151,7 @@ function testGstin(): void {
   });
   assert.equal(isRecipientTaxClassificationPending({
     gstin: BUYER_MH_GSTIN,
+    billingRecipientName: null,
     billingBusinessName: null,
     billingAddressLine1: null,
     billingAddressLine2: null,
@@ -167,6 +170,7 @@ function testGstin(): void {
   assert.equal(pendingSnap.gstin, null);
   const rejectedSnap = statutoryBuyerFromDetails({
     gstin: BUYER_MH_GSTIN,
+    billingRecipientName: null,
     billingBusinessName: "Buyer LLP",
     billingAddressLine1: null,
     billingAddressLine2: null,
@@ -185,6 +189,7 @@ function testGstin(): void {
   assert.equal(rejectedSnap.gstinVerificationStatus, "rejected");
   const verifiedSnap = statutoryBuyerFromDetails({
     gstin: BUYER_MH_GSTIN,
+    billingRecipientName: null,
     billingBusinessName: "Buyer LLP",
     billingAddressLine1: null,
     billingAddressLine2: null,
@@ -355,47 +360,48 @@ function testPolicy(): void {
     "tax_invoice_b2c"
   );
 
-  assert.equal(google.section52TcsStatus, "requires_tax_review");
-  assert.equal(google.table14ClassificationStatus, "requires_tax_review");
+  assert.equal(google.ecoReportingCategory, "requires_tax_review");
   const approvedGoogle = resolvePlatformTaxPolicy("android", {
     google_play_india: {
       mode: "developer",
-      section52TcsStatus: "classified",
-      table14ClassificationStatus: "classified",
+      ecoReportingCategory: "section52_table14a",
     },
   });
-  assert.equal(approvedGoogle.section52TcsStatus, "classified");
-  assert.equal(approvedGoogle.table14ClassificationStatus, "classified");
-  assert.equal(parseEcoClassificationStatus("bogus"), "requires_tax_review");
-  assert.equal(parseEcoClassificationStatus(undefined), "requires_tax_review");
+  assert.equal(approvedGoogle.ecoReportingCategory, "section52_table14a");
+  assert.equal(parseEcoReportingCategory("classified"), "requires_tax_review");
+  assert.equal(parseEcoClassificationStatus("classified"), "requires_tax_review");
+  assert.equal(parseEcoReportingCategory("bogus"), "requires_tax_review");
+  assert.equal(parseEcoReportingCategory(undefined), "requires_tax_review");
   const invalidGoogle = resolvePlatformTaxPolicy("android", {
     google_play_india: {
-      section52TcsStatus: "classified",
-      table14ClassificationStatus: "not-a-status" as "classified",
+      ecoReportingCategory: "not-a-status" as "section52_table14a",
     },
   });
-  assert.equal(invalidGoogle.table14ClassificationStatus, "requires_tax_review");
+  assert.equal(invalidGoogle.ecoReportingCategory, "requires_tax_review");
   const appleModeOnly = resolvePlatformTaxPolicy("ios", {
     apple_app_store_india: { mode: "developer" },
   });
   assert.equal(appleModeOnly.mode, "developer");
-  assert.equal(appleModeOnly.section52TcsStatus, "requires_tax_review");
-  assert.equal(appleModeOnly.table14ClassificationStatus, "requires_tax_review");
+  assert.equal(appleModeOnly.ecoReportingCategory, "requires_tax_review");
   const applePlatformMode = resolvePlatformTaxPolicy("ios", {
     apple_app_store_india: { mode: "platform" },
   });
   assert.equal(applePlatformMode.mode, "platform");
-  assert.equal(applePlatformMode.table14ClassificationStatus, "requires_tax_review");
+  assert.equal(applePlatformMode.ecoReportingCategory, "requires_tax_review");
 
   const fromEnv = loadTaxRuntimeConfig({});
-  assert.equal(fromEnv.googleEco.section52TcsStatus, "requires_tax_review");
-  assert.equal(fromEnv.googleEco.table14ClassificationStatus, "requires_tax_review");
+  assert.equal(fromEnv.googleEco.ecoReportingCategory, "requires_tax_review");
   const invalidEnv = loadTaxRuntimeConfig({
+    GOOGLE_ECO_REPORTING_CATEGORY: "classified",
     GOOGLE_TABLE14_CLASSIFICATION_STATUS: "maybe",
-    GOOGLE_SECTION52_TCS_STATUS: "nope",
   });
-  assert.equal(invalidEnv.googleEco.table14ClassificationStatus, "requires_tax_review");
-  assert.equal(invalidEnv.googleEco.section52TcsStatus, "requires_tax_review");
+  assert.equal(invalidEnv.googleEco.ecoReportingCategory, "requires_tax_review");
+  const table14aEnv = loadTaxRuntimeConfig({
+    GOOGLE_ECO_REPORTING_CATEGORY: "section52_table14a",
+    GOOGLE_OPERATOR_GSTIN: "29AAAAA0000A1Z5",
+  });
+  assert.equal(table14aEnv.googleEco.ecoReportingCategory, "section52_table14a");
+  assert.equal(table14aEnv.googleEco.operatorGstin, "29AAAAA0000A1Z5");
 }
 
 function testPlaceOfSupply(): void {

@@ -34,4 +34,14 @@ No API keys. No shared bearer secrets. No unauthenticated invocation.
 - `puppeteer@24.22.3`
 - Image tag must match: `ghcr.io/puppeteer/puppeteer:24.22.3`
 
+## Production-enablement gate (Cloud Run)
+
+Before Cloud Run is enabled, review reachable runtime vulnerabilities with:
+
+`npm audit --omit=dev --json`
+
+against this exact pinned Puppeteer image. Do **not** run `npm audit fix --force`.
+This is a Cloud Run production-enablement gate, not a VYD-40 merge blocker while
+the renderer is undeployed.
+
 Do not deploy this service until the owner authorizes Cloud Run + IAM.

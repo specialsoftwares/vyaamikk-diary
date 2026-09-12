@@ -275,6 +275,7 @@ async function main() {
       ["_billingRateLimits", "purchase_alice_202609121600"],
       ["_subscriptionInvoices", "inv_v1_test"],
       ["_subscriptionCreditNotes", "cn_v1_test"],
+      ["_subscriptionTaxCompliance", "inv_v1_test"],
       ["_invoiceCounters", "2026-27"],
       ["_creditNoteCounters", "2026-27"],
       ["_invoiceRetryQueue", "inv_v1_test"],

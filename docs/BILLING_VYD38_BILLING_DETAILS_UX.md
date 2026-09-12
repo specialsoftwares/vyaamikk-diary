@@ -16,11 +16,17 @@ Inside Subscription & Billing management — not a temporary Settings page.
 
 | Field | Notes |
 | --- | --- |
+| Recipient / Billing Name | Maps to `billingRecipientName`. Required for B2C tax invoices (including Google Play / Apple developer-issued supplies). Do not reuse optional business-name as the only individual name. |
 | GST Number (optional) | Label suffix: **For GST Tax Invoice**. Placeholder example `22AAAAA0000A1Z5`. |
-| Business Name | Maps to `billingBusinessName`. |
-| Billing address | Line 1, optional line 2, city. |
+| Business Name | Maps to `billingBusinessName`. Optional; used where the recipient is a business. Not a substitute for Recipient / Billing Name. |
+| Address line(s) | Line 1 required before a tax invoice may issue; optional line 2. |
+| City | `billingCity`. |
+| PIN | `billingPostalCode`. Required 6-digit PIN before a tax invoice may issue. |
 | State | Numeric GST State code + name. Never postal abbreviations (MH/UP) as the stored code. |
-| PIN | `billingPostalCode`. |
+
+The client may prefill these from an existing profile, but the backend tax
+snapshot uses server-owned `users/{uid}/subscription/billingDetails` as the
+authoritative source.
 
 Save **only** through the `updateBillingDetails` callable. Clients must not
 write `users/{uid}/subscription/billingDetails`.

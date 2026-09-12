@@ -331,6 +331,11 @@ export interface BillingEventLedgerDoc {
   occurredAt: number;
   /** IST month bucket for revenue reports. */
   monthKey: string;
+  /**
+   * Refund/chargeback → original purchase/renewal financialEventId.
+   * Purchase/renewal must be null. Required for refund/chargeback.
+   */
+  relatedFinancialEventId: string | null;
   recordedAt: number;
   recordedBy: BillingMutationSource;
 }
@@ -468,9 +473,17 @@ export type ReverseChargeMode = "yes" | "no" | "unconfirmed";
 
 export type TaxDocumentIssueStatus = "unissued_draft" | "issued";
 
-export type InvoiceIssueHoldReason = "recipient_tax_classification_pending";
+export type InvoiceIssueHoldReason =
+  | "recipient_tax_classification_pending"
+  | "recipient_invoice_details_incomplete";
 
 export type TaxPeriodStatus = "pending_issue" | "resolved" | "unresolved_cross_period";
+
+export type TaxPeriodDecisionStatus =
+  | "pending_issue"
+  | "resolved"
+  | "unresolved_cross_period"
+  | "requires_tax_review";
 
 export type InvoicePdfStatus =
   | "pending"
@@ -489,7 +502,16 @@ export type InvoiceEmailStatus =
 
 export type GstrFilingFrequency = "monthly" | "quarterly";
 
-export type EcoClassificationStatus = "requires_tax_review" | "not_applicable" | "classified";
+/**
+ * GSTR-1 ECO/Table-14 category. Generic "classified" is not a legal category.
+ * Table 14(a) = ECO collects TCS under section 52.
+ * Table 14(b) = ECO pays tax under section 9(5).
+ */
+export type EcoReportingCategory =
+  | "requires_tax_review"
+  | "not_applicable"
+  | "section52_table14a"
+  | "section9_5_table14b";
 
 export interface SellerTaxSnapshot {
   legalName: string;
@@ -506,6 +528,7 @@ export interface BuyerTaxSnapshot {
   gstin: string | null;
   gstinVerificationStatus: GstinVerificationStatus;
   billingAddress: string | null;
+  postalCode: string | null;
   stateCode: string | null;
   stateName: string | null;
 }
@@ -515,8 +538,8 @@ export interface EcoReportingSnapshot {
   operatorIdentifier: string | null;
   operatorGstin: string | null;
   taxResponsibilityMode: TaxResponsibilityMode;
-  section52TcsStatus: EcoClassificationStatus;
-  table14ClassificationStatus: EcoClassificationStatus;
+  /** Issue-time policy copy only. Filing authority is the compliance record. */
+  ecoReportingCategory: EcoReportingCategory;
 }
 
 /**
@@ -573,6 +596,42 @@ export interface SubscriptionInvoiceDoc {
   gstrReportedMonth: string | null;
   gstrFilingBatchId: string | null;
   historyEventId: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type Gstr1ReviewStatus = "ready_to_file" | "requires_tax_review";
+
+export type TaxComplianceDocumentKind = "invoice" | "credit_note";
+
+/**
+ * Server-only GST-return / monthly-compliance record.
+ * Path: `_subscriptionTaxCompliance/{invoiceId}` (invoiceId or creditNoteId).
+ * Filing authority for reporting period, ECO/Table-14 category, and month close.
+ * The invoice legal snapshot stays immutable after issuance.
+ */
+export interface SubscriptionTaxComplianceDoc {
+  invoiceId: string;
+  documentKind: TaxComplianceDocumentKind;
+  financialEventId: string;
+  originalInvoiceId: string | null;
+  uid: string;
+  supplyMonthKey: string;
+  issueMonthKey: string | null;
+  reportingTaxPeriodMonth: string | null;
+  taxPeriodDecisionStatus: TaxPeriodDecisionStatus;
+  ecoReportingCategory: EcoReportingCategory;
+  operatorIdentifier: string | null;
+  operatorGstin: string | null;
+  reviewStatus: Gstr1ReviewStatus;
+  unresolvedReasons: string[];
+  cumulativeCreditReversedInPaise: number;
+  reviewedAt: number | null;
+  reviewedByDiagnosticUid: string | null;
+  reviewBasis: string | null;
+  reviewVersion: number;
+  previousEcoReportingCategory: EcoReportingCategory | null;
+  previousReportingTaxPeriodMonth: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -647,6 +706,8 @@ export const INVOICE_OPERATIONAL_KEYS: ReadonlyArray<keyof SubscriptionInvoiceDo
 
 export interface SubscriptionBillingDetailsDoc {
   gstin: string | null;
+  /** Individual recipient / billing name. Not the same as optional business name. */
+  billingRecipientName: string | null;
   billingBusinessName: string | null;
   billingAddressLine1: string | null;
   billingAddressLine2: string | null;
@@ -727,8 +788,6 @@ export interface InvoiceRetryQueueDoc {
   updatedAt: number;
 }
 
-export type Gstr1ReviewStatus = "ready_to_file" | "requires_tax_review";
-
 export interface Gstr1ReportManifestDoc {
   reportId: string;
   month: string;
@@ -736,6 +795,7 @@ export interface Gstr1ReportManifestDoc {
   creditNoteIds: string[];
   sourceInvoiceIds: string[];
   sourceCreditNoteIds: string[];
+  sourceComplianceIds: string[];
   contentHash: string;
   jsonStoragePath: string;
   csvStoragePath: string;

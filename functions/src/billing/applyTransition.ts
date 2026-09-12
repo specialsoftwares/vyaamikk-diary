@@ -171,7 +171,8 @@ function ledgerConflict(existing: Record<string, unknown>, next: BillingEventLed
     existing.grossAmountInPaise !== next.grossAmountInPaise ||
     existing.platform !== next.platform ||
     existing.canonicalSku !== next.canonicalSku ||
-    existing.uid !== next.uid
+    existing.uid !== next.uid ||
+    (existing.relatedFinancialEventId ?? null) !== (next.relatedFinancialEventId ?? null)
   );
 }
 

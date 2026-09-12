@@ -35,7 +35,7 @@
 import { BillingError } from "../errors";
 import type {
   BillingPlatform,
-  EcoClassificationStatus,
+  EcoReportingCategory,
   PlatformTaxChannel,
   TaxDocumentType,
   TaxResponsibilityMode,
@@ -46,8 +46,7 @@ export interface PlatformTaxPolicy {
   mode: TaxResponsibilityMode;
   /** Working-policy notes; never a substitute for mode. */
   rationale: string;
-  section52TcsStatus: EcoClassificationStatus;
-  table14ClassificationStatus: EcoClassificationStatus;
+  ecoReportingCategory: EcoReportingCategory;
 }
 
 const POLICIES: Record<PlatformTaxChannel, PlatformTaxPolicy> = {
@@ -56,24 +55,21 @@ const POLICIES: Record<PlatformTaxChannel, PlatformTaxPolicy> = {
     mode: "developer",
     rationale:
       "Google India developer guidance currently treats the developer as responsible for determining applicable GST on app / in-app sales; marketplace TDS/GST-TCS is separate. ECO/Table-14 classification still requires tax review.",
-    section52TcsStatus: "requires_tax_review",
-    table14ClassificationStatus: "requires_tax_review",
+    ecoReportingCategory: "requires_tax_review",
   },
   apple_app_store_india: {
     channel: "apple_app_store_india",
     mode: "unconfirmed",
     rationale:
       "Apple India tax responsibility is unconfirmed until the Paid Apps Agreement / Schedule 2 and tax settings are reviewed. No Special Softwares TAX INVOICE while unconfirmed.",
-    section52TcsStatus: "requires_tax_review",
-    table14ClassificationStatus: "requires_tax_review",
+    ecoReportingCategory: "requires_tax_review",
   },
   direct_web_india: {
     channel: "direct_web_india",
     mode: "developer",
     rationale:
       "Direct-web/Razorpay sales, when introduced, are developer-direct supplies with explicitly configured GST treatment.",
-    section52TcsStatus: "not_applicable",
-    table14ClassificationStatus: "not_applicable",
+    ecoReportingCategory: "not_applicable",
   },
 };
 
@@ -89,16 +85,31 @@ export function channelForStorePlatform(platform: BillingPlatform | "web"): Plat
 
 export interface PlatformTaxPolicyOverrides {
   mode?: TaxResponsibilityMode;
-  section52TcsStatus?: EcoClassificationStatus;
-  table14ClassificationStatus?: EcoClassificationStatus;
+  ecoReportingCategory?: EcoReportingCategory;
   operatorIdentifier?: string | null;
   operatorGstin?: string | null;
 }
 
-export function parseEcoClassificationStatus(raw: string | undefined): EcoClassificationStatus {
+/**
+ * Generic "classified" is not a legal GSTR-1 Table-14 category.
+ * Missing/invalid values fail closed to requires_tax_review.
+ */
+export function parseEcoReportingCategory(raw: string | undefined): EcoReportingCategory {
   const t = raw?.trim() ?? "";
-  if (t === "classified" || t === "not_applicable" || t === "requires_tax_review") return t;
+  if (
+    t === "not_applicable" ||
+    t === "section52_table14a" ||
+    t === "section9_5_table14b" ||
+    t === "requires_tax_review"
+  ) {
+    return t;
+  }
   return "requires_tax_review";
+}
+
+/** @deprecated Use parseEcoReportingCategory. Never returns a generic classified category. */
+export function parseEcoClassificationStatus(raw: string | undefined): EcoReportingCategory {
+  return parseEcoReportingCategory(raw);
 }
 
 export function resolvePlatformTaxPolicy(
@@ -112,14 +123,10 @@ export function resolvePlatformTaxPolicy(
   return {
     ...base,
     mode: override.mode ?? base.mode,
-    section52TcsStatus:
-      override.section52TcsStatus !== undefined
-        ? parseEcoClassificationStatus(override.section52TcsStatus)
-        : base.section52TcsStatus,
-    table14ClassificationStatus:
-      override.table14ClassificationStatus !== undefined
-        ? parseEcoClassificationStatus(override.table14ClassificationStatus)
-        : base.table14ClassificationStatus,
+    ecoReportingCategory:
+      override.ecoReportingCategory !== undefined
+        ? parseEcoReportingCategory(override.ecoReportingCategory)
+        : base.ecoReportingCategory,
   };
 }
 

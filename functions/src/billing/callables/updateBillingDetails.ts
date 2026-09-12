@@ -42,6 +42,7 @@ import { isKnownGstStateCode, isValidGstinFormat, normalizeGstin } from "../tax/
 
 export interface UpdateBillingDetailsInput {
   gstin?: string | null;
+  billingRecipientName?: string | null;
   billingBusinessName?: string | null;
   billingAddressLine1?: string | null;
   billingAddressLine2?: string | null;
@@ -128,6 +129,10 @@ export async function applyUpdateBillingDetails(
 
     const next: SubscriptionBillingDetailsDoc = {
       gstin,
+      billingRecipientName:
+        "billingRecipientName" in input
+          ? cleanText(input.billingRecipientName, 120)
+          : prior?.billingRecipientName ?? null,
       billingBusinessName:
         "billingBusinessName" in input
           ? cleanText(input.billingBusinessName, 120)

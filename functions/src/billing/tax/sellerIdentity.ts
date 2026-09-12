@@ -34,7 +34,7 @@
 
 import { BillingError } from "../errors";
 import type {
-  EcoClassificationStatus,
+  EcoReportingCategory,
   GstrFilingFrequency,
   ReverseChargeMode,
   SellerTaxSnapshot,
@@ -42,21 +42,19 @@ import type {
 } from "../types";
 
 import type { PlatformTaxPolicyOverrides } from "./platformTaxPolicy";
-import { parseEcoClassificationStatus } from "./platformTaxPolicy";
+import { parseEcoReportingCategory } from "./platformTaxPolicy";
 
 import { gstStateCodeFromGstin, gstStateName, isValidGstinFormat, normalizeGstin } from "./gstin";
 
 export interface ChannelEcoConfig {
-  section52TcsStatus: EcoClassificationStatus;
-  table14ClassificationStatus: EcoClassificationStatus;
+  ecoReportingCategory: EcoReportingCategory;
   operatorIdentifier: string | null;
   operatorGstin: string | null;
 }
 
 export function unreviewedChannelEco(operatorIdentifier: string | null): ChannelEcoConfig {
   return {
-    section52TcsStatus: "requires_tax_review",
-    table14ClassificationStatus: "requires_tax_review",
+    ecoReportingCategory: "requires_tax_review",
     operatorIdentifier,
     operatorGstin: null,
   };
@@ -64,8 +62,7 @@ export function unreviewedChannelEco(operatorIdentifier: string | null): Channel
 
 export function notApplicableChannelEco(operatorIdentifier: string | null = null): ChannelEcoConfig {
   return {
-    section52TcsStatus: "not_applicable",
-    table14ClassificationStatus: "not_applicable",
+    ecoReportingCategory: "not_applicable",
     operatorIdentifier,
     operatorGstin: null,
   };
@@ -146,19 +143,22 @@ function loadChannelEco(
   env: NodeJS.ProcessEnv,
   prefix: "GOOGLE" | "APPLE" | "DIRECT_WEB",
   defaultOperator: string | null,
-  defaultStatus: EcoClassificationStatus = "requires_tax_review"
+  defaultCategory: EcoReportingCategory = "requires_tax_review"
 ): ChannelEcoConfig {
-  const sectionRaw = env[`${prefix}_SECTION52_TCS_STATUS`];
-  const tableRaw = env[`${prefix}_TABLE14_CLASSIFICATION_STATUS`];
+  const categoryRaw = env[`${prefix}_ECO_REPORTING_CATEGORY`];
+  const legacyTable = env[`${prefix}_TABLE14_CLASSIFICATION_STATUS`];
+  const legacySection = env[`${prefix}_SECTION52_TCS_STATUS`];
+  const chosen =
+    categoryRaw !== undefined && categoryRaw.trim() !== ""
+      ? categoryRaw
+      : legacyTable !== undefined && legacyTable.trim() !== ""
+        ? legacyTable
+        : legacySection;
   return {
-    section52TcsStatus:
-      sectionRaw === undefined || sectionRaw.trim() === ""
-        ? defaultStatus
-        : parseEcoClassificationStatus(sectionRaw),
-    table14ClassificationStatus:
-      tableRaw === undefined || tableRaw.trim() === ""
-        ? defaultStatus
-        : parseEcoClassificationStatus(tableRaw),
+    ecoReportingCategory:
+      chosen === undefined || String(chosen).trim() === ""
+        ? defaultCategory
+        : parseEcoReportingCategory(String(chosen)),
     operatorIdentifier: emptyToNull(env[`${prefix}_OPERATOR_IDENTIFIER`]) ?? defaultOperator,
     operatorGstin: emptyToNull(env[`${prefix}_OPERATOR_GSTIN`]),
   };
@@ -170,22 +170,19 @@ export function policyOverridesFromConfig(
   return {
     google_play_india: {
       mode: config.googleTaxResponsibilityMode,
-      section52TcsStatus: config.googleEco.section52TcsStatus,
-      table14ClassificationStatus: config.googleEco.table14ClassificationStatus,
+      ecoReportingCategory: config.googleEco.ecoReportingCategory,
       operatorIdentifier: config.googleEco.operatorIdentifier,
       operatorGstin: config.googleEco.operatorGstin,
     },
     apple_app_store_india: {
       mode: config.appleTaxResponsibilityMode,
-      section52TcsStatus: config.appleEco.section52TcsStatus,
-      table14ClassificationStatus: config.appleEco.table14ClassificationStatus,
+      ecoReportingCategory: config.appleEco.ecoReportingCategory,
       operatorIdentifier: config.appleEco.operatorIdentifier,
       operatorGstin: config.appleEco.operatorGstin,
     },
     direct_web_india: {
       mode: config.directWebTaxResponsibilityMode,
-      section52TcsStatus: config.directWebEco.section52TcsStatus,
-      table14ClassificationStatus: config.directWebEco.table14ClassificationStatus,
+      ecoReportingCategory: config.directWebEco.ecoReportingCategory,
       operatorIdentifier: config.directWebEco.operatorIdentifier,
       operatorGstin: config.directWebEco.operatorGstin,
     },

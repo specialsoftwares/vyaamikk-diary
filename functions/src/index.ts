@@ -64,3 +64,4 @@ export { verifyGstinManual } from "./billing/callables/verifyGstinManual";
 export { getInvoiceDownloadUrl } from "./billing/callables/getInvoiceDownloadUrl";
 export { generateGstr1WorkingPapers } from "./billing/callables/generateGstr1WorkingPapers";
 export { markGstr1Filed } from "./billing/callables/markGstr1Filed";
+export { reviewSubscriptionTaxCompliance } from "./billing/callables/reviewTaxCompliance";

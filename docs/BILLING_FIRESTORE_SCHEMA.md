@@ -17,6 +17,7 @@ schema-by-use: **no documents are pre-created to "initialize" collections.**
 | `_companyBilling/{uid}` | Admin SDK only | denied (even own uid) | denied |
 | `_subscriptionInvoices/{invoiceId}` | Admin SDK only | denied | denied |
 | `_subscriptionCreditNotes/{creditNoteId}` | Admin SDK only | denied | denied |
+| `_subscriptionTaxCompliance/{invoiceId}` | Admin SDK only | denied | denied |
 | `_invoiceCounters/{financialYear}` | Admin SDK only | denied | denied |
 | `_creditNoteCounters/{financialYear}` | Admin SDK only | denied | denied |
 | `_invoiceRetryQueue/{invoiceId}` | Admin SDK only | denied | denied |
@@ -303,7 +304,10 @@ appears in a later phase; it will be added with the query that requires it.
 
 - Invoice source of truth is `_subscriptionInvoices/{invoiceId}` with
   `invoiceId` derived from `financialEventId`. `_companyBilling.latestTaxDocumentId`
-  is a pointer only.
+  is a pointer only. GST-return classification (reporting period, ECO/Table-14
+  category, operator GSTIN, month-close open items) lives in
+  `_subscriptionTaxCompliance/{invoiceId}` and is filing authority.
+- Billing history remains `users/{uid}/subscriptionBillingHistory/{eventId}`
 - Billing history remains `users/{uid}/subscriptionBillingHistory/{eventId}`
   with optional additive tax fields. Absent fields on older events are valid.
 - Production TAX INVOICE issuance stays fail-closed until seller certificate
