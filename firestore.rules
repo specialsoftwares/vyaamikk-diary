@@ -206,6 +206,127 @@ service cloud.firestore {
         && request.resource.data.title.size() <= 120;
     }
 
+    // ---- Subscription & billing helpers ---------------------------------
+    //
+    // Server-authoritative billing (Phase A foundation):
+    //   users/{uid}/subscription/status       server-written entitlement doc
+    //   users/{uid}/subscription/usageCurrent Option-C atomic quota counter
+    // Quota enforcement is activation-gated: it applies only when the
+    // server-written status doc sets quotaEnforcementEnabled == true. No such
+    // doc exists until the billing backend ships (Phase B) and Phase G turns
+    // enforcement on, so current production save behavior is unchanged.
+
+    function subscriptionStatusPath(uid) {
+      return /databases/$(database)/documents/users/$(uid)/subscription/status;
+    }
+
+    function usageCurrentPath(uid) {
+      return /databases/$(database)/documents/users/$(uid)/subscription/usageCurrent;
+    }
+
+    function quotaEnforcementOn(uid) {
+      return exists(subscriptionStatusPath(uid))
+        && get(subscriptionStatusPath(uid)).data.get('quotaEnforcementEnabled', false) == true;
+    }
+
+    // IST (Asia/Kolkata, fixed UTC+05:30, no DST) calendar month of the
+    // server request time, as "YYYY-MM". Mirrors
+    // functions/src/billing/istMonthKey.ts — keep both in sync. Boundary
+    // behavior is proven deterministically in istMonthKey.unit.test.ts and
+    // rules/TS agreement is proven in firestore.rules.billing.test.ts.
+    function istNow() {
+      return request.time + duration.value(19800, 's');
+    }
+
+    function istMonthKey() {
+      let m = istNow().month();
+      return string(istNow().year()) + '-' + (m < 10 ? '0' + string(m) : string(m));
+    }
+
+    // Monthly record-creation cap for the user's EFFECTIVE plan. A lapsed
+    // entitlement (entitlementActive == false) falls back to the free cap.
+    // -1 = unlimited. Mirrors PLAN_MONTHLY_RECORD_LIMITS in
+    // functions/src/billing/types.ts — keep in sync.
+    //
+    // FAIL CLOSED: only the exact strings 'professional' and 'business' are
+    // unlimited, and only 'starter' gets 100. Everything else — free, a
+    // missing field, a malformed value ('proffesional'), or an unknown
+    // future enum ('enterprise') — gets the free cap of 25. A backend typo,
+    // migration error or corrupted status doc must never silently grant
+    // unlimited quota.
+    function monthlyRecordCap(uid) {
+      let s = get(subscriptionStatusPath(uid)).data;
+      let plan = s.get('entitlementActive', false) == true ? s.get('plan', 'free') : 'free';
+      return plan == 'starter'
+        ? 100
+        : ((plan == 'professional' || plan == 'business') ? -1 : 25);
+    }
+
+    function usageWithinCap(uid) {
+      let cap = monthlyRecordCap(uid);
+      return cap == -1 || request.resource.data.recordsThisMonth <= cap;
+    }
+
+    // Billable record collections whose CREATE consumes quota. Phase A
+    // proves the pattern on purchaseOrders; Phase G extends this list to all
+    // billable families together with the client batch integration.
+    function quotaLinkedCollection(coll) {
+      return coll == 'purchaseOrders';
+    }
+
+    function usageDocShapeValid() {
+      return request.resource.data.keys().hasOnly([
+          'monthKey',
+          'recordsThisMonth',
+          'lastRecordCollection',
+          'lastRecordId',
+          'updatedAt',
+        ])
+        && request.resource.data.monthKey is string
+        && request.resource.data.recordsThisMonth is int
+        && request.resource.data.recordsThisMonth >= 1
+        && request.resource.data.lastRecordCollection is string
+        && request.resource.data.lastRecordId is string
+        && request.resource.data.lastRecordId.size() > 0
+        && request.resource.data.lastRecordId.size() <= 200
+        && request.resource.data.updatedAt is int;
+    }
+
+    // Linkage: the usage transition must point at a billable record that is
+    // CREATED in this same atomic batch — it must not exist before the batch
+    // and must exist after it. This makes a standalone usage mutation, or a
+    // usage mutation pointing at a pre-existing record, impossible.
+    function usageLinkedRecordCreatedInBatch(uid) {
+      let coll = request.resource.data.lastRecordCollection;
+      let rid = request.resource.data.lastRecordId;
+      return quotaLinkedCollection(coll)
+        && !exists(/databases/$(database)/documents/users/$(uid)/$(coll)/$(rid))
+        && existsAfter(/databases/$(database)/documents/users/$(uid)/$(coll)/$(rid));
+    }
+
+    // Record-side binding: a billable record CREATE under enforcement is
+    // valid only if, after this atomic batch, usageCurrent points at exactly
+    // this record AND performed a genuine +1 (or first/rollover reset to 1)
+    // transition relative to the pre-batch counter. Requiring the actual
+    // transition here (not just the pointer) closes the stale-pointer replay:
+    // an unchanged usage doc can never satisfy the +1 requirement.
+    function usageConsumedForRecord(uid, coll, recordId) {
+      let afterData = getAfter(usageCurrentPath(uid)).data;
+      return afterData.lastRecordCollection == coll
+        && afterData.lastRecordId == recordId
+        && afterData.monthKey == istMonthKey()
+        && (
+          !exists(usageCurrentPath(uid))
+            ? afterData.recordsThisMonth == 1
+            : (
+              (get(usageCurrentPath(uid)).data.monthKey == afterData.monthKey
+                && afterData.recordsThisMonth == get(usageCurrentPath(uid)).data.recordsThisMonth + 1)
+              || (get(usageCurrentPath(uid)).data.monthKey != afterData.monthKey
+                && afterData.recordsThisMonth == 1)
+            )
+        );
+    }
+
     // ---- User profile ---------------------------------------------------
     match /users/{uid} {
       allow read: if isOwner(uid);
@@ -270,10 +391,18 @@ service cloud.firestore {
       }
 
       // ---- Purchase orders ----------------------------------------------
+      // Billable create: while quota enforcement is enabled for this user
+      // (server-controlled rollout switch; off for everyone today), the
+      // create must be accompanied by a valid usageCurrent transition in the
+      // same atomic batch. Updates/deletes never consume quota.
       match /purchaseOrders/{orderId} {
         allow read: if isOwner(uid);
         allow create: if isActiveUser(uid)
-                      && request.resource.data.userId == uid;
+                      && request.resource.data.userId == uid
+                      && (
+                        !quotaEnforcementOn(uid)
+                        || usageConsumedForRecord(uid, 'purchaseOrders', orderId)
+                      );
         allow update: if isActiveUser(uid)
                       && request.resource.data.userId == uid;
         allow delete: if isActiveUser(uid);
@@ -320,6 +449,80 @@ service cloud.firestore {
       match /securityEvents/{eventId} {
         allow read: if isOwner(uid);
         allow write: if false;
+      }
+
+      // ---- Subscription entitlement (server-authoritative) --------------
+      // Only the Admin SDK backend mutates this document. The client is
+      // NEVER authoritative for entitlements — read-only for the owner.
+      match /subscription/status {
+        allow read: if isOwner(uid);
+        allow create, update, delete: if false;
+      }
+
+      // ---- Monthly usage counter (Option-C atomic quota) -----------------
+      // Client mutation is denied EXCEPT the single narrowly scoped
+      // transition: while quota enforcement is enabled for this user, a
+      // batch may apply exactly one +1 (or first/rollover reset to 1)
+      // transition bound to a billable record created in the same atomic
+      // batch, within the effective plan's monthly cap, using the
+      // server-derived IST month key.
+      match /subscription/usageCurrent {
+        allow read: if isOwner(uid);
+        allow create: if isActiveUser(uid)
+                      && quotaEnforcementOn(uid)
+                      && usageDocShapeValid()
+                      && request.resource.data.monthKey == istMonthKey()
+                      && request.resource.data.recordsThisMonth == 1
+                      && usageWithinCap(uid)
+                      && usageLinkedRecordCreatedInBatch(uid);
+        allow update: if isActiveUser(uid)
+                      && quotaEnforcementOn(uid)
+                      && usageDocShapeValid()
+                      && request.resource.data.monthKey == istMonthKey()
+                      && (
+                        (resource.data.monthKey == request.resource.data.monthKey
+                          && request.resource.data.recordsThisMonth == resource.data.recordsThisMonth + 1)
+                        || (resource.data.monthKey != request.resource.data.monthKey
+                          && request.resource.data.recordsThisMonth == 1)
+                      )
+                      && usageWithinCap(uid)
+                      && usageLinkedRecordCreatedInBatch(uid);
+        allow delete: if false;
+      }
+
+      // ---- Sanitized billing history (server-written; owner read-only) ---
+      match /subscriptionBillingHistory/{eventId} {
+        allow read: if isOwner(uid);
+        allow write: if false;
+      }
+
+      // ---- Billing UX preferences (NOT entitlement state) ----------------
+      // The only billing-adjacent doc a client may write: narrow UX fields
+      // with enforced types. No plan/status/trial field may ever appear here.
+      // benefitScreenShownAt is a ONE-TIME marker: established on create,
+      // immutable afterwards (UX integrity — the education screen was shown
+      // once for this account). Only updatedAt metadata may change.
+      // Timestamps here are client-supplied epoch millis and are
+      // NON-AUTHORITATIVE metadata (no authorization/ordering significance).
+      match /preferences/billingUx {
+        allow read: if isOwner(uid);
+        allow create: if isActiveUser(uid)
+                      && request.resource.data.keys().hasOnly([
+                        'benefitScreenShownAt',
+                        'updatedAt',
+                      ])
+                      && request.resource.data.benefitScreenShownAt is int
+                      && request.resource.data.updatedAt is int;
+        allow update: if isActiveUser(uid)
+                      && request.resource.data.keys().hasOnly([
+                        'benefitScreenShownAt',
+                        'updatedAt',
+                      ])
+                      && request.resource.data.benefitScreenShownAt is int
+                      && request.resource.data.updatedAt is int
+                      && request.resource.data.benefitScreenShownAt
+                        == resource.data.benefitScreenShownAt;
+        allow delete: if false;
       }
     }
 
@@ -368,6 +571,39 @@ service cloud.firestore {
     // ---- Account deletion ledger (Admin / Functions only) ---------------
     match /deletionJobs/{uid} {
       allow read, write: if false;
+    }
+
+    // ---- Billing backend collections (Admin / Functions only) -----------
+    // Zero client access. No "admin user" client exceptions exist on
+    // purpose: the Admin SDK bypasses Rules, so nothing legitimate is ever
+    // blocked by these denies.
+    match /_companyBilling/{uid} {
+      allow read, write: if false;
+    }
+    match /_subscriptionAuditLog/{eventId} {
+      allow read, write: if false;
+    }
+    match /_processedBillingEvents/{idempotencyKey} {
+      allow read, write: if false;
+    }
+    match /_billingEventLedger/{financialEventId} {
+      allow read, write: if false;
+    }
+    match /_revenueReports/{monthKey} {
+      allow read, write: if false;
+    }
+    match /_trialLedger/{trialIdentityHmac} {
+      allow read, write: if false;
+    }
+    match /_billingRateLimits/{bucketId} {
+      allow read, write: if false;
+    }
+
+    // ---- Global paper-savings estimate (public product stat) -------------
+    // Server-written; figures are labelled estimates (owner decision W-9).
+    match /globalStats/paperSaved {
+      allow read: if true;
+      allow write: if false;
     }
   }
 }
