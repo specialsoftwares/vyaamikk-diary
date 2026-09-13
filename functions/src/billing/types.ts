@@ -674,6 +674,7 @@ export interface SubscriptionTaxComplianceDoc {
   annualReturnFurnishedAt: number | null;
   annualReturnCutoffReviewedAt: number | null;
   annualReturnCutoffReviewBasis: string | null;
+  annualReturnCutoffConfirmedThrough: number | null;
   taxAdjustmentDisposition: TaxAdjustmentDisposition;
   reviewedAt: number | null;
   reviewedByDiagnosticUid: string | null;
@@ -826,6 +827,7 @@ export interface SubscriptionCreditNoteDoc {
   annualReturnFurnishedAt: number | null;
   annualReturnCutoffReviewedAt: number | null;
   annualReturnCutoffReviewBasis: string | null;
+  annualReturnCutoffConfirmedThrough: number | null;
   taxAdjustmentDisposition: TaxAdjustmentDisposition;
   gstrReportable: boolean;
   gstrReportedMonth: string | null;

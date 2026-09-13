@@ -228,6 +228,7 @@ function syntheticMissingTaxAdjustmentFromLedger(
     annualReturnFurnishedAt: null,
     annualReturnCutoffReviewedAt: null,
     annualReturnCutoffReviewBasis: null,
+    annualReturnCutoffConfirmedThrough: null,
     taxAdjustmentDisposition: event.eventType === "chargeback" ? "requires_review" : "pending",
     reviewedAt: null,
     reviewedByDiagnosticUid: null,
@@ -611,7 +612,7 @@ function applyLedgerReconciliation(input: {
   complianceById: Map<string, SubscriptionTaxComplianceDoc>;
   inScope: SubscriptionTaxComplianceDoc[];
   financialEvents: BillingEventLedgerDoc[];
-}): BillingEventLedgerDoc[] {
+}): void {
   const gaps = detectLedgerReconciliationGaps({
     month: input.month,
     invoices: input.invoices,
@@ -629,8 +630,45 @@ function applyLedgerReconciliation(input: {
       unresolvedReasons: mergeReasons(base.unresolvedReasons, gap.reasons),
     });
   }
-  return input.financialEvents
-    .filter((event) => event.monthKey === input.month)
+}
+
+/**
+ * Monthly population (A) plus document-authority dependency closure (B–D).
+ * Deduplicated by financialEventId. Unrelated prior-month ledger rows are
+ * not pulled in merely because they share a calendar month with a dependency.
+ */
+export function collectSourceDependencyFinancialEvents(input: {
+  month: string;
+  invoices: SubscriptionInvoiceDoc[];
+  creditNotes: SubscriptionCreditNoteDoc[];
+  complianceRecords: SubscriptionTaxComplianceDoc[];
+  financialEvents: BillingEventLedgerDoc[];
+}): BillingEventLedgerDoc[] {
+  const byId = new Map(input.financialEvents.map((e) => [e.financialEventId, e]));
+  const ids = new Set<string>();
+
+  for (const event of input.financialEvents) {
+    if (event.monthKey === input.month) ids.add(event.financialEventId);
+  }
+  for (const invoice of input.invoices) {
+    ids.add(invoice.financialEventId);
+  }
+  for (const note of input.creditNotes) {
+    ids.add(note.refundFinancialEventId);
+    const refund = byId.get(note.refundFinancialEventId);
+    if (refund?.relatedFinancialEventId) ids.add(refund.relatedFinancialEventId);
+  }
+  for (const rec of input.complianceRecords) {
+    ids.add(rec.financialEventId);
+    if (rec.documentKind === "credit_note" && rec.originalInvoiceId) {
+      const originalInvoice = input.invoices.find((i) => i.invoiceId === rec.originalInvoiceId);
+      if (originalInvoice) ids.add(originalInvoice.financialEventId);
+    }
+  }
+
+  return [...ids]
+    .map((id) => byId.get(id))
+    .filter((event): event is BillingEventLedgerDoc => Boolean(event))
     .sort((a, b) => a.financialEventId.localeCompare(b.financialEventId));
 }
 
@@ -665,7 +703,7 @@ function assembleScope(input: {
     }
   }
 
-  const scopedFinancialEvents = applyLedgerReconciliation({
+  applyLedgerReconciliation({
     month: input.month,
     invoices: input.invoices,
     creditNotes: input.creditNotes,
@@ -699,20 +737,28 @@ function assembleScope(input: {
     }
   }
 
+  const invoices = uniqueById(scopedInvoices, (i) => i.invoiceId).sort((a, b) =>
+    a.invoiceId.localeCompare(b.invoiceId)
+  );
+  const creditNotes = uniqueById(scopedCreditNotes, (c) => c.creditNoteId).sort((a, b) =>
+    a.creditNoteId.localeCompare(b.creditNoteId)
+  );
+  const complianceRecords = uniqueById(inScope, (c) => c.invoiceId).sort((a, b) =>
+    a.invoiceId.localeCompare(b.invoiceId)
+  );
+  const financialEvents = collectSourceDependencyFinancialEvents({
+    month: input.month,
+    invoices,
+    creditNotes,
+    complianceRecords,
+    financialEvents: input.financialEvents,
+  });
+
   return {
-    invoices: uniqueById(scopedInvoices, (i) => i.invoiceId).sort((a, b) =>
-      a.invoiceId.localeCompare(b.invoiceId)
-    ),
-    creditNotes: uniqueById(scopedCreditNotes, (c) => c.creditNoteId).sort((a, b) =>
-      a.creditNoteId.localeCompare(b.creditNoteId)
-    ),
-    complianceRecords: uniqueById(inScope, (c) => c.invoiceId).sort((a, b) =>
-      a.invoiceId.localeCompare(b.invoiceId)
-    ),
-    financialEvents: uniqueById(
-      scopedFinancialEvents as Array<BillingEventLedgerDoc & { invoiceId?: string }>,
-      (e) => e.financialEventId
-    ).sort((a, b) => a.financialEventId.localeCompare(b.financialEventId)),
+    invoices,
+    creditNotes,
+    complianceRecords,
+    financialEvents,
   };
 }
 

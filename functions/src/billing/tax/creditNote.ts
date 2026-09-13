@@ -339,6 +339,7 @@ export async function finalizeSubscriptionCreditNote(
       annualReturnFurnishedAt: null,
       annualReturnCutoffReviewedAt: null,
       annualReturnCutoffReviewBasis: null,
+      annualReturnCutoffConfirmedThrough: null,
       taxAdjustmentDisposition: "credit_note_issued",
       gstrReportable: true,
       gstrReportedMonth: null,

@@ -217,6 +217,7 @@ function complianceFor(
     annualReturnFurnishedAt: null,
     annualReturnCutoffReviewedAt: null,
     annualReturnCutoffReviewBasis: null,
+    annualReturnCutoffConfirmedThrough: null,
     taxAdjustmentDisposition: "not_applicable",
     reviewedAt: open ? null : 1,
     reviewedByDiagnosticUid: open ? null : "admindiag01",
@@ -258,6 +259,7 @@ function complianceForCn(
     annualReturnFurnishedAt: null,
     annualReturnCutoffReviewedAt: 1,
     annualReturnCutoffReviewBasis: "fixture",
+    annualReturnCutoffConfirmedThrough: istWallClockToEpochMs("2027-11-30T23:59:59"),
     taxAdjustmentDisposition: "credit_note_issued",
     reviewedAt: 1,
     reviewedByDiagnosticUid: "admindiag01",
@@ -702,6 +704,7 @@ async function testRound5BidirectionalTaxMathAndCutoff(
     annualReturnCutoffStatus: "not_furnished_as_of_review",
     annualReturnCutoffReviewedAt: 1,
     annualReturnCutoffReviewBasis: "fixture",
+    annualReturnCutoffConfirmedThrough: istWallClockToEpochMs("2027-11-30T23:59:59"),
   };
   caseH.docs.set(financialLedgerPath(hPurchase), { ...ledgerEvent({ financialEventId: hPurchase }) });
   caseH.docs.set(`_subscriptionInvoices/${hInv.invoiceId}`, { ...hInv });
@@ -734,6 +737,7 @@ async function testRound5BidirectionalTaxMathAndCutoff(
     annualReturnCutoffStatus: "not_furnished_as_of_review",
     annualReturnCutoffReviewedAt: 1,
     annualReturnCutoffReviewBasis: "fixture",
+    annualReturnCutoffConfirmedThrough: istWallClockToEpochMs("2027-11-30T23:59:59"),
   };
   caseI.docs.set(financialLedgerPath(iPurchase), { ...ledgerEvent({ financialEventId: iPurchase }) });
   caseI.docs.set(
@@ -792,6 +796,7 @@ async function testRound5BidirectionalTaxMathAndCutoff(
     annualReturnCutoffStatus: "not_furnished_as_of_review",
     annualReturnCutoffReviewedAt: 1,
     annualReturnCutoffReviewBasis: "fixture",
+    annualReturnCutoffConfirmedThrough: istWallClockToEpochMs("2027-11-30T23:59:59"),
   };
   const igstStore = new MemoryBillingStore();
   seedDocs(igstStore, [igstInv], [igstCn]);
@@ -845,6 +850,7 @@ async function testRound5BidirectionalTaxMathAndCutoff(
     annualReturnCutoffStatus: "not_furnished_as_of_review",
     annualReturnCutoffReviewedAt: 1,
     annualReturnCutoffReviewBasis: "fixture",
+    annualReturnCutoffConfirmedThrough: istWallClockToEpochMs("2027-11-30T23:59:59"),
   };
   const cgstStore = new MemoryBillingStore();
   seedDocs(cgstStore, [cgstInv], [cgstCn]);
@@ -882,6 +888,7 @@ async function testRound5BidirectionalTaxMathAndCutoff(
     annualReturnCutoffStatus: "unconfirmed",
     annualReturnCutoffReviewedAt: null,
     annualReturnCutoffReviewBasis: null,
+    annualReturnCutoffConfirmedThrough: null,
     reviewVersion: liveCnComp.reviewVersion + 1,
   });
   await assert.rejects(
@@ -995,6 +1002,7 @@ function cnFixtureEligible(original: SubscriptionInvoiceDoc): SubscriptionCredit
     annualReturnFurnishedAt: null,
     annualReturnCutoffReviewedAt: null,
     annualReturnCutoffReviewBasis: null,
+    annualReturnCutoffConfirmedThrough: null,
     taxAdjustmentDisposition: "credit_note_issued",
     gstrReportable: true,
     gstrReportedMonth: null,
@@ -1002,6 +1010,399 @@ function cnFixtureEligible(original: SubscriptionInvoiceDoc): SubscriptionCredit
     createdAt: 1,
     updatedAt: 1,
   };
+}
+
+
+async function testRound6SourceClosureAndDeclarationDeadline(
+  admin: { uid: string; tokenAdmin: boolean; adminIdentityProvisioned: boolean },
+  storage: MemoryInvoiceObjectStorage
+): Promise<void> {
+  const sourceOf = (store: MemoryBillingStore) => new MemoryTaxComplianceReportSource(store);
+  const sepPurchase = "evt-r6-sep-purchase";
+  const octRefund = "evt-r6-oct-refund";
+  const unrelatedSep = "evt-r6-unrelated-sep";
+  const sepInv = invoice({
+    invoiceId: invoiceIdForFinancialEvent(sepPurchase),
+    financialEventId: sepPurchase,
+    documentType: "tax_invoice_b2b",
+    documentNumber: "SS/2026-27/0601",
+    taxPeriodMonth: "2026-09",
+  });
+  const octIssuedAt = istWallClockToEpochMs("2026-10-20T12:00:00");
+  const octCnId = creditNoteIdForRefundEvent(octRefund);
+  const octCn: SubscriptionCreditNoteDoc = {
+    ...cnFixtureEligible(sepInv),
+    creditNoteId: octCnId,
+    refundFinancialEventId: octRefund,
+    taxPeriodMonth: "2026-10",
+    issuedAt: octIssuedAt,
+    issuedOnIst: "20-10-2026",
+    gstAdjustmentEligibility: "eligible",
+    recipientItcReversalEvidenceStatus: "confirmed",
+    annualReturnCutoffStatus: "not_furnished_as_of_review",
+    annualReturnFurnishedAt: null,
+    annualReturnCutoffReviewedAt: octIssuedAt,
+    annualReturnCutoffReviewBasis: "fixture",
+    annualReturnCutoffConfirmedThrough: istWallClockToEpochMs("2027-11-30T23:59:59"),
+  };
+  const crossStore = new MemoryBillingStore();
+  crossStore.docs.set(`_subscriptionInvoices/${sepInv.invoiceId}`, { ...sepInv });
+  crossStore.docs.set(`_subscriptionTaxCompliance/${sepInv.invoiceId}`, {
+    ...complianceFor(sepInv),
+  });
+  crossStore.docs.set(financialLedgerPath(sepPurchase), {
+    ...ledgerEvent({ financialEventId: sepPurchase, monthKey: "2026-09" }),
+  });
+  crossStore.docs.set(`_subscriptionCreditNotes/${octCnId}`, { ...octCn });
+  crossStore.docs.set(`_subscriptionTaxCompliance/${octCnId}`, {
+    ...complianceForCn(octCn, sepInv),
+    supplyMonthKey: "2026-09",
+    issueMonthKey: "2026-10",
+    reportingTaxPeriodMonth: "2026-10",
+    annualReturnCutoffConfirmedThrough: istWallClockToEpochMs("2027-11-30T23:59:59"),
+  });
+  crossStore.docs.set(financialLedgerPath(octRefund), {
+    ...ledgerEvent({
+      financialEventId: octRefund,
+      eventType: "refund",
+      relatedFinancialEventId: sepPurchase,
+      occurredAt: octIssuedAt,
+      monthKey: "2026-10",
+    }),
+  });
+  crossStore.docs.set(financialLedgerPath(unrelatedSep), {
+    ...ledgerEvent({ financialEventId: unrelatedSep, monthKey: "2026-09", uid: "other-user" }),
+  });
+
+  const octScope = await sourceOf(crossStore).loadMonthlyScope("2026-10");
+  const octPapers = buildGstr1WorkingPapers({ month: "2026-10", ...octScope });
+  assert.equal(octPapers.reviewStatus, "ready_to_file");
+  assert.ok(octPapers.sourceFinancialEventIds.includes(sepPurchase));
+  assert.ok(octPapers.sourceFinancialEventIds.includes(octRefund));
+  assert.equal(octPapers.sourceFinancialEventIds.includes(unrelatedSep), false);
+  assert.ok(octPapers.taxAdjustments.some((row) => row.financialEventId === octRefund));
+  assert.equal(
+    octPapers.unresolvedReviewReasons.includes("tax_document_related_financial_event_missing"),
+    false
+  );
+
+  const generatedOct = await generateGstr1WorkingPapersCore({
+    month: "2026-10",
+    admin,
+    storage,
+    store: crossStore,
+    generatedByDiagnosticUid: "admindiag01",
+    nowMs: 200,
+  });
+  assert.equal(generatedOct.papers.reviewStatus, "ready_to_file");
+  assert.ok(generatedOct.papers.sourceFinancialEventIds.includes(sepPurchase));
+
+  crossStore.docs.delete(financialLedgerPath(sepPurchase));
+  await assert.rejects(
+    applyMarkGstr1Filed(crossStore, {
+      admin,
+      adminDiagnosticUid: "admindiag01",
+      reportId: generatedOct.papers.reportId,
+      acknowledgement: "ACK-R6-DEL",
+      nowMs: istWallClockToEpochMs("2026-10-25T12:00:00"),
+    }),
+    isCause("gstr_report_source_drift")
+  );
+
+  // Restore and mutate original purchase amount → source drift
+  crossStore.docs.set(financialLedgerPath(sepPurchase), {
+    ...ledgerEvent({ financialEventId: sepPurchase, monthKey: "2026-09" }),
+  });
+  const generatedOct2 = await generateGstr1WorkingPapersCore({
+    month: "2026-10",
+    admin,
+    storage,
+    store: crossStore,
+    generatedByDiagnosticUid: "admindiag01",
+    nowMs: 201,
+  });
+  crossStore.docs.set(financialLedgerPath(sepPurchase), {
+    ...ledgerEvent({
+      financialEventId: sepPurchase,
+      monthKey: "2026-09",
+      grossAmountInPaise: 1,
+    }),
+  });
+  await assert.rejects(
+    applyMarkGstr1Filed(crossStore, {
+      admin,
+      adminDiagnosticUid: "admindiag01",
+      reportId: generatedOct2.papers.reportId,
+      acknowledgement: "ACK-R6-MUT",
+      nowMs: istWallClockToEpochMs("2026-10-26T12:00:00"),
+    }),
+    isCause("gstr_report_source_drift")
+  );
+
+  // September supply / October reviewed reporting tax period
+  const deferredPurchase = "evt-r6-deferred-purchase";
+  const deferredInv = invoice({
+    invoiceId: invoiceIdForFinancialEvent(deferredPurchase),
+    financialEventId: deferredPurchase,
+    documentType: "tax_invoice_b2b",
+    documentNumber: "SS/2026-27/0602",
+    taxPeriodMonth: "2026-10",
+  });
+  const deferredStore = new MemoryBillingStore();
+  deferredStore.docs.set(`_subscriptionInvoices/${deferredInv.invoiceId}`, { ...deferredInv });
+  deferredStore.docs.set(`_subscriptionTaxCompliance/${deferredInv.invoiceId}`, {
+    ...complianceFor(deferredInv),
+    supplyMonthKey: "2026-09",
+    issueMonthKey: "2026-09",
+    reportingTaxPeriodMonth: "2026-10",
+  });
+  deferredStore.docs.set(financialLedgerPath(deferredPurchase), {
+    ...ledgerEvent({ financialEventId: deferredPurchase, monthKey: "2026-09" }),
+  });
+  deferredStore.docs.set(financialLedgerPath(unrelatedSep), {
+    ...ledgerEvent({ financialEventId: unrelatedSep, monthKey: "2026-09", uid: "other-user" }),
+  });
+  const deferredPapers = buildGstr1WorkingPapers({
+    month: "2026-10",
+    ...(await sourceOf(deferredStore).loadMonthlyScope("2026-10")),
+  });
+  assert.equal(deferredPapers.reviewStatus, "ready_to_file");
+  assert.ok(deferredPapers.sourceFinancialEventIds.includes(deferredPurchase));
+  assert.equal(deferredPapers.sourceFinancialEventIds.includes(unrelatedSep), false);
+  assert.ok(deferredPapers.reportableInvoiceIds.includes(deferredInv.invoiceId));
+
+  // Section 34 declaration deadline tests
+  const declPurchase = "evt-r6-decl-purchase";
+  const declRefund = "evt-r6-decl-refund";
+  const declInv = invoice({
+    invoiceId: invoiceIdForFinancialEvent(declPurchase),
+    financialEventId: declPurchase,
+    documentType: "tax_invoice_b2b",
+    documentNumber: "SS/2026-27/0603",
+  });
+  const declCnId = creditNoteIdForRefundEvent(declRefund);
+  const cnIssued = istWallClockToEpochMs("2026-10-20T12:00:00");
+  const furnishedAt = istWallClockToEpochMs("2026-11-01T00:00:00");
+  const declCn: SubscriptionCreditNoteDoc = {
+    ...cnFixtureEligible(declInv),
+    creditNoteId: declCnId,
+    refundFinancialEventId: declRefund,
+    taxPeriodMonth: "2026-10",
+    issuedAt: cnIssued,
+    issuedOnIst: "20-10-2026",
+    gstAdjustmentEligibility: "eligible",
+    recipientItcReversalEvidenceStatus: "confirmed",
+    annualReturnCutoffStatus: "furnished",
+    annualReturnFurnishedAt: furnishedAt,
+    annualReturnCutoffReviewedAt: cnIssued,
+    annualReturnCutoffReviewBasis: "fixture",
+    annualReturnCutoffConfirmedThrough: null,
+    section34OuterLimitAt: furnishedAt,
+  };
+
+  function seedDeclStore(patch: Partial<SubscriptionTaxComplianceDoc> = {}): MemoryBillingStore {
+    const store = new MemoryBillingStore();
+    store.docs.set(`_subscriptionInvoices/${declInv.invoiceId}`, { ...declInv, taxPeriodMonth: "2026-10" });
+    store.docs.set(`_subscriptionTaxCompliance/${declInv.invoiceId}`, {
+      ...complianceFor({ ...declInv, taxPeriodMonth: "2026-10" }),
+      supplyMonthKey: "2026-09",
+      reportingTaxPeriodMonth: "2026-10",
+    });
+    store.docs.set(financialLedgerPath(declPurchase), {
+      ...ledgerEvent({ financialEventId: declPurchase, monthKey: "2026-09" }),
+    });
+    store.docs.set(`_subscriptionCreditNotes/${declCnId}`, { ...declCn });
+    store.docs.set(`_subscriptionTaxCompliance/${declCnId}`, {
+      ...complianceForCn(declCn, declInv),
+      supplyMonthKey: "2026-09",
+      issueMonthKey: "2026-10",
+      reportingTaxPeriodMonth: "2026-10",
+      gstAdjustmentEligibility: "eligible",
+      annualReturnCutoffStatus: "furnished",
+      annualReturnFurnishedAt: furnishedAt,
+      annualReturnCutoffConfirmedThrough: null,
+      section34OuterLimitAt: furnishedAt,
+      ...patch,
+    });
+    store.docs.set(financialLedgerPath(declRefund), {
+      ...ledgerEvent({
+        financialEventId: declRefund,
+        eventType: "refund",
+        relatedFinancialEventId: declPurchase,
+        occurredAt: cnIssued,
+        monthKey: "2026-10",
+      }),
+    });
+    return store;
+  }
+
+  const permitStore = seedDeclStore();
+  const permitGen = await generateGstr1WorkingPapersCore({
+    month: "2026-10",
+    admin,
+    storage,
+    store: permitStore,
+    generatedByDiagnosticUid: "admindiag01",
+    nowMs: 210,
+  });
+  assert.equal(permitGen.papers.reviewStatus, "ready_to_file");
+  await applyMarkGstr1Filed(permitStore, {
+    admin,
+    adminDiagnosticUid: "admindiag01",
+    reportId: permitGen.papers.reportId,
+    acknowledgement: "ACK-R6-31OCT",
+    nowMs: istWallClockToEpochMs("2026-10-31T12:00:00"),
+  });
+
+  const rejectStore = seedDeclStore();
+  const rejectGen = await generateGstr1WorkingPapersCore({
+    month: "2026-10",
+    admin,
+    storage,
+    store: rejectStore,
+    generatedByDiagnosticUid: "admindiag01",
+    nowMs: 211,
+  });
+  await assert.rejects(
+    applyMarkGstr1Filed(rejectStore, {
+      admin,
+      adminDiagnosticUid: "admindiag01",
+      reportId: rejectGen.papers.reportId,
+      acknowledgement: "ACK-R6-02NOV",
+      nowMs: istWallClockToEpochMs("2026-11-02T00:00:00"),
+    }),
+    isCause("gst_adjustment_section34_deadline_passed")
+  );
+
+  const nov30 = istWallClockToEpochMs("2027-11-30T23:59:59");
+  const notFurnishedStore = seedDeclStore({
+    annualReturnCutoffStatus: "not_furnished_as_of_review",
+    annualReturnFurnishedAt: null,
+    annualReturnCutoffConfirmedThrough: nov30,
+    section34OuterLimitAt: nov30,
+  });
+  // also patch CN doc cutoff fields for consistency in rebuilds from txn source ids
+  const nfCn = notFurnishedStore.docs.get(`_subscriptionCreditNotes/${declCnId}`) as SubscriptionCreditNoteDoc;
+  notFurnishedStore.docs.set(`_subscriptionCreditNotes/${declCnId}`, {
+    ...nfCn,
+    annualReturnCutoffStatus: "not_furnished_as_of_review",
+    annualReturnFurnishedAt: null,
+    annualReturnCutoffConfirmedThrough: nov30,
+    section34OuterLimitAt: nov30,
+  });
+  const nfGen = await generateGstr1WorkingPapersCore({
+    month: "2026-10",
+    admin,
+    storage,
+    store: notFurnishedStore,
+    generatedByDiagnosticUid: "admindiag01",
+    nowMs: 212,
+  });
+  await applyMarkGstr1Filed(notFurnishedStore, {
+    admin,
+    adminDiagnosticUid: "admindiag01",
+    reportId: nfGen.papers.reportId,
+    acknowledgement: "ACK-R6-30NOV",
+    nowMs: nov30,
+  });
+
+  const afterCutoffStore = seedDeclStore({
+    annualReturnCutoffStatus: "not_furnished_as_of_review",
+    annualReturnFurnishedAt: null,
+    annualReturnCutoffConfirmedThrough: istWallClockToEpochMs("2027-12-01T00:00:00"),
+    section34OuterLimitAt: nov30,
+  });
+  const afterCn = afterCutoffStore.docs.get(`_subscriptionCreditNotes/${declCnId}`) as SubscriptionCreditNoteDoc;
+  afterCutoffStore.docs.set(`_subscriptionCreditNotes/${declCnId}`, {
+    ...afterCn,
+    annualReturnCutoffStatus: "not_furnished_as_of_review",
+    annualReturnFurnishedAt: null,
+    annualReturnCutoffConfirmedThrough: istWallClockToEpochMs("2027-12-01T00:00:00"),
+    section34OuterLimitAt: nov30,
+  });
+  const afterGen = await generateGstr1WorkingPapersCore({
+    month: "2026-10",
+    admin,
+    storage,
+    store: afterCutoffStore,
+    generatedByDiagnosticUid: "admindiag01",
+    nowMs: 213,
+  });
+  await assert.rejects(
+    applyMarkGstr1Filed(afterCutoffStore, {
+      admin,
+      adminDiagnosticUid: "admindiag01",
+      reportId: afterGen.papers.reportId,
+      acknowledgement: "ACK-R6-01DEC",
+      nowMs: istWallClockToEpochMs("2027-12-01T00:00:00"),
+    }),
+    isCause("gst_adjustment_section34_deadline_passed")
+  );
+
+  const staleThrough = istWallClockToEpochMs("2026-10-20T12:00:00");
+  const fileAt = istWallClockToEpochMs("2026-11-10T12:00:00");
+  const staleStore = seedDeclStore({
+    annualReturnCutoffStatus: "not_furnished_as_of_review",
+    annualReturnFurnishedAt: null,
+    annualReturnCutoffConfirmedThrough: staleThrough,
+    section34OuterLimitAt: nov30,
+  });
+  const staleCn = staleStore.docs.get(`_subscriptionCreditNotes/${declCnId}`) as SubscriptionCreditNoteDoc;
+  staleStore.docs.set(`_subscriptionCreditNotes/${declCnId}`, {
+    ...staleCn,
+    annualReturnCutoffStatus: "not_furnished_as_of_review",
+    annualReturnFurnishedAt: null,
+    annualReturnCutoffConfirmedThrough: staleThrough,
+    section34OuterLimitAt: nov30,
+  });
+  const staleGen = await generateGstr1WorkingPapersCore({
+    month: "2026-10",
+    admin,
+    storage,
+    store: staleStore,
+    generatedByDiagnosticUid: "admindiag01",
+    nowMs: 214,
+  });
+  await assert.rejects(
+    applyMarkGstr1Filed(staleStore, {
+      admin,
+      adminDiagnosticUid: "admindiag01",
+      reportId: staleGen.papers.reportId,
+      acknowledgement: "ACK-R6-STALE",
+      nowMs: fileAt,
+    }),
+    isCause("gst_adjustment_annual_return_cutoff_stale")
+  );
+
+  // Fresh reconfirmation through filing timestamp may proceed (after regenerating report)
+  await applyReviewTaxCompliance(staleStore, {
+    invoiceId: declCnId,
+    admin,
+    reviewedByDiagnosticUid: "admindiag01",
+    reviewBasis: "reconfirm annual return still not furnished through filing time",
+    nowMs: fileAt,
+    gstAdjustmentEligibility: "eligible",
+    recipientItcReversalEvidenceStatus: "confirmed",
+    annualReturnCutoffStatus: "not_furnished_as_of_review",
+    annualReturnFurnishedAt: null,
+    annualReturnCutoffConfirmedThrough: fileAt,
+  });
+  const freshGen = await generateGstr1WorkingPapersCore({
+    month: "2026-10",
+    admin,
+    storage,
+    store: staleStore,
+    generatedByDiagnosticUid: "admindiag01",
+    nowMs: 215,
+  });
+  assert.equal(freshGen.papers.reviewStatus, "ready_to_file");
+  await applyMarkGstr1Filed(staleStore, {
+    admin,
+    adminDiagnosticUid: "admindiag01",
+    reportId: freshGen.papers.reportId,
+    acknowledgement: "ACK-R6-FRESH",
+    nowMs: fileAt,
+  });
 }
 
 async function main(): Promise<void> {
@@ -1119,6 +1520,7 @@ async function main(): Promise<void> {
     annualReturnFurnishedAt: null,
     annualReturnCutoffReviewedAt: 1,
     annualReturnCutoffReviewBasis: "fixture",
+    annualReturnCutoffConfirmedThrough: istWallClockToEpochMs("2027-11-30T23:59:59"),
     taxAdjustmentDisposition: "credit_note_issued",
     gstrReportable: true,
     gstrReportedMonth: null,
@@ -1466,6 +1868,7 @@ async function main(): Promise<void> {
 
   await testRound4LedgerCompletenessAndDrift(admin, storage);
   await testRound5BidirectionalTaxMathAndCutoff(admin, storage);
+  await testRound6SourceClosureAndDeclarationDeadline(admin, storage);
 
   console.log("gst.gstr1.unit.test.ts: ok");
 }

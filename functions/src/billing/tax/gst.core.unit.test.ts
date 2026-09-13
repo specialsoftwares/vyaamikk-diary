@@ -80,6 +80,7 @@ import {
 import { formatCreditNoteNumber } from "./creditNote";
 import {
   annualReturnCutoffIsResolvedForEligibility,
+  assertAnnualReturnCutoffState,
   assertGstAdjustmentMayBeEligible,
   effectiveSection34OutputTaxReductionLimitMs,
   parseSection34CreditNotePolicy,
@@ -646,7 +647,66 @@ function testFinancialYear(): void {
     originalSupplyOccurredAt: sepSupply,
     annualReturnCutoffStatus: "not_furnished_as_of_review",
     annualReturnFurnishedAt: null,
+    annualReturnCutoffConfirmedThrough: sepSupply,
   });
+  assert.throws(
+    () =>
+      assertAnnualReturnCutoffState({
+        annualReturnCutoffStatus: "furnished",
+        annualReturnFurnishedAt: null,
+      }),
+    isCause("gst_adjustment_annual_return_furnished_at_required")
+  );
+  assert.throws(
+    () =>
+      assertAnnualReturnCutoffState({
+        annualReturnCutoffStatus: "not_furnished_as_of_review",
+        annualReturnFurnishedAt: furnishedAt,
+      }),
+    isCause("gst_adjustment_annual_return_cutoff_inconsistent")
+  );
+  assert.throws(
+    () =>
+      assertGstAdjustmentMayBeEligible({
+        eligibility: "eligible",
+        buyer: b2bBuyer,
+        recipientItcReversalEvidenceStatus: "confirmed",
+        taxIncidenceConditionStatus: "not_applicable",
+        issuedAt: sepSupply,
+        originalSupplyOccurredAt: sepSupply,
+        annualReturnCutoffStatus: "not_furnished_as_of_review",
+        annualReturnFurnishedAt: null,
+        annualReturnCutoffConfirmedThrough: sepSupply,
+        declarationAt: sepSupply + 1,
+      }),
+    isCause("gst_adjustment_annual_return_cutoff_stale")
+  );
+  assertGstAdjustmentMayBeEligible({
+    eligibility: "eligible",
+    buyer: b2bBuyer,
+    recipientItcReversalEvidenceStatus: "confirmed",
+    taxIncidenceConditionStatus: "not_applicable",
+    issuedAt: sepSupply,
+    originalSupplyOccurredAt: sepSupply,
+    annualReturnCutoffStatus: "furnished",
+    annualReturnFurnishedAt: furnishedAt,
+    declarationAt: furnishedAt,
+  });
+  assert.throws(
+    () =>
+      assertGstAdjustmentMayBeEligible({
+        eligibility: "eligible",
+        buyer: b2bBuyer,
+        recipientItcReversalEvidenceStatus: "confirmed",
+        taxIncidenceConditionStatus: "not_applicable",
+        issuedAt: sepSupply,
+        originalSupplyOccurredAt: sepSupply,
+        annualReturnCutoffStatus: "furnished",
+        annualReturnFurnishedAt: furnishedAt,
+        declarationAt: furnishedAt + 1,
+      }),
+    isCause("gst_adjustment_section34_deadline_passed")
+  );
 
   assert.equal(
     formatIstCalendarDate(ordinaryTaxableServiceInvoiceIssueDueAt(sepSupply)),

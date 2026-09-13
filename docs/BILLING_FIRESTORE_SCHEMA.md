@@ -338,4 +338,9 @@ appears in a later phase; it will be added with the query that requires it.
   annual return is furnished. The annual-return date is never guessed;
   `gstAdjustmentEligibility == eligible` requires
   `annualReturnCutoffStatus` to be `furnished` or
-  `not_furnished_as_of_review`.
+  `not_furnished_as_of_review`. Filing declares at `nowMs` and must not
+  exceed that effective outer limit. `not_furnished_as_of_review` also
+  requires `annualReturnCutoffConfirmedThrough >= declarationAt`. Monthly
+  GSTR source closure binds dependency financial events (including a prior-
+  month original purchase referenced by an in-month credit note), not only
+  `event.monthKey === report month`.

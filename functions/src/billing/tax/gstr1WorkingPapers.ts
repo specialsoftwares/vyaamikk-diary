@@ -564,15 +564,18 @@ export function buildGstr1WorkingPapers(input: {
     if (!note.documentNumber) unresolved.add("gstr_document_unissued");
   }
 
-  const financialEvents = [...(input.financialEvents ?? [])]
-    .filter((event) => event.monthKey === input.month)
-    .sort((a, b) => a.financialEventId.localeCompare(b.financialEventId));
+  const sourceFinancialEvents = [...(input.financialEvents ?? [])].sort((a, b) =>
+    a.financialEventId.localeCompare(b.financialEventId)
+  );
+  const monthlyFinancialEvents = sourceFinancialEvents.filter(
+    (event) => event.monthKey === input.month
+  );
   for (const gap of detectLedgerReconciliationGaps({
     month: input.month,
     invoices,
     creditNotes: creditNoteDocs,
     complianceRecords: input.complianceRecords,
-    financialEvents: input.financialEvents ?? [],
+    financialEvents: sourceFinancialEvents,
   })) {
     unresolved.add("gstr_tax_review_unresolved");
     for (const reason of gap.reasons) unresolved.add(reason);
@@ -599,7 +602,7 @@ export function buildGstr1WorkingPapers(input: {
   const creditNoteByRefundId = new Map(
     creditNoteDocs.map((c) => [c.refundFinancialEventId, c] as const)
   );
-  const taxAdjustments: Gstr1TaxAdjustmentWorkingRow[] = financialEvents
+  const taxAdjustments: Gstr1TaxAdjustmentWorkingRow[] = monthlyFinancialEvents
     .filter((event) => event.eventType === "refund" || event.eventType === "chargeback")
     .map((event) => {
       const note = creditNoteByRefundId.get(event.financialEventId);
@@ -646,7 +649,9 @@ export function buildGstr1WorkingPapers(input: {
   const sourceInvoiceIds = uniqueSorted(invoices.map((i) => i.invoiceId));
   const sourceCreditNoteIds = uniqueSorted(creditNoteDocs.map((c) => c.creditNoteId));
   const sourceComplianceIds = uniqueSorted(input.complianceRecords.map((c) => c.invoiceId));
-  const sourceFinancialEventIds = uniqueSorted(financialEvents.map((e) => e.financialEventId));
+  const sourceFinancialEventIds = uniqueSorted(
+    sourceFinancialEvents.map((e) => e.financialEventId)
+  );
   const contentBody = {
     month: input.month,
     b2b,
@@ -670,7 +675,7 @@ export function buildGstr1WorkingPapers(input: {
     sourceComplianceBinds: [...input.complianceRecords]
       .sort((a, b) => a.invoiceId.localeCompare(b.invoiceId))
       .map(complianceStatutoryBind),
-    sourceFinancialEventBinds: financialEvents.map(financialEventTaxBind),
+    sourceFinancialEventBinds: sourceFinancialEvents.map(financialEventTaxBind),
     unresolvedReviewReasons: [...unresolved].sort(),
   };
   const contentHash = createHash("sha256").update(canonicalJson(contentBody), "utf8").digest("hex");
@@ -1241,6 +1246,8 @@ export async function markGstr1FiledExact(
         originalSupplyOccurredAt: original.supplyOccurredAt ?? original.createdAt,
         annualReturnCutoffStatus: compliance.annualReturnCutoffStatus,
         annualReturnFurnishedAt: compliance.annualReturnFurnishedAt,
+        annualReturnCutoffConfirmedThrough: compliance.annualReturnCutoffConfirmedThrough,
+        declarationAt: input.nowMs,
       });
     }
 

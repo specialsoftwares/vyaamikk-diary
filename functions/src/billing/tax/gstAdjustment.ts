@@ -61,6 +61,7 @@ export function invoiceGstAdjustmentDefaults(): {
   annualReturnFurnishedAt: number | null;
   annualReturnCutoffReviewedAt: number | null;
   annualReturnCutoffReviewBasis: string | null;
+  annualReturnCutoffConfirmedThrough: number | null;
 } {
   return {
     gstAdjustmentEligibility: "not_applicable",
@@ -72,6 +73,7 @@ export function invoiceGstAdjustmentDefaults(): {
     annualReturnFurnishedAt: null,
     annualReturnCutoffReviewedAt: null,
     annualReturnCutoffReviewBasis: null,
+    annualReturnCutoffConfirmedThrough: null,
   };
 }
 
@@ -85,6 +87,7 @@ export function creditNoteGstAdjustmentUnconfirmedDefaults(): {
   annualReturnFurnishedAt: number | null;
   annualReturnCutoffReviewedAt: number | null;
   annualReturnCutoffReviewBasis: string | null;
+  annualReturnCutoffConfirmedThrough: number | null;
 } {
   return {
     gstAdjustmentEligibility: "requires_review",
@@ -96,6 +99,7 @@ export function creditNoteGstAdjustmentUnconfirmedDefaults(): {
     annualReturnFurnishedAt: null,
     annualReturnCutoffReviewedAt: null,
     annualReturnCutoffReviewBasis: null,
+    annualReturnCutoffConfirmedThrough: null,
   };
 }
 
@@ -103,6 +107,50 @@ export function annualReturnCutoffIsResolvedForEligibility(
   status: AnnualReturnCutoffStatus | null | undefined
 ): boolean {
   return status === "furnished" || status === "not_furnished_as_of_review";
+}
+
+export function assertAnnualReturnCutoffState(input: {
+  annualReturnCutoffStatus: AnnualReturnCutoffStatus;
+  annualReturnFurnishedAt: number | null;
+  annualReturnCutoffConfirmedThrough?: number | null;
+  eligibility?: GstAdjustmentEligibility;
+}): void {
+  const status = input.annualReturnCutoffStatus;
+  const furnishedAt = input.annualReturnFurnishedAt;
+  const confirmedThrough = input.annualReturnCutoffConfirmedThrough ?? null;
+  if (status === "furnished") {
+    if (furnishedAt == null || !Number.isFinite(furnishedAt)) {
+      throw new BillingError({
+        clientCode: "invalid_purchase",
+        causeCode: "gst_adjustment_annual_return_furnished_at_required",
+      });
+    }
+    return;
+  }
+  if (status === "not_furnished_as_of_review") {
+    if (furnishedAt != null) {
+      throw new BillingError({
+        clientCode: "invalid_purchase",
+        causeCode: "gst_adjustment_annual_return_cutoff_inconsistent",
+      });
+    }
+    if (
+      input.eligibility === "eligible" &&
+      (confirmedThrough == null || !Number.isFinite(confirmedThrough))
+    ) {
+      throw new BillingError({
+        clientCode: "invalid_purchase",
+        causeCode: "gst_adjustment_annual_return_cutoff_stale",
+      });
+    }
+    return;
+  }
+  if (furnishedAt != null || confirmedThrough != null) {
+    throw new BillingError({
+      clientCode: "invalid_purchase",
+      causeCode: "gst_adjustment_annual_return_cutoff_inconsistent",
+    });
+  }
 }
 
 /**
@@ -207,8 +255,16 @@ export function assertGstAdjustmentMayBeEligible(input: {
   originalSupplyOccurredAt: number;
   annualReturnCutoffStatus: AnnualReturnCutoffStatus;
   annualReturnFurnishedAt: number | null;
+  annualReturnCutoffConfirmedThrough?: number | null;
+  declarationAt?: number | null;
 }): void {
   if (input.eligibility !== "eligible") return;
+  assertAnnualReturnCutoffState({
+    annualReturnCutoffStatus: input.annualReturnCutoffStatus,
+    annualReturnFurnishedAt: input.annualReturnFurnishedAt,
+    annualReturnCutoffConfirmedThrough: input.annualReturnCutoffConfirmedThrough,
+    eligibility: input.eligibility,
+  });
   const limit = effectiveSection34OutputTaxReductionLimitMs({
     originalSupplyOccurredAt: input.originalSupplyOccurredAt,
     annualReturnCutoffStatus: input.annualReturnCutoffStatus,
@@ -219,6 +275,21 @@ export function assertGstAdjustmentMayBeEligible(input: {
       clientCode: "invalid_purchase",
       causeCode: "gst_adjustment_section34_deadline_passed",
     });
+  }
+  if (input.declarationAt != null && input.declarationAt > limit) {
+    throw new BillingError({
+      clientCode: "invalid_purchase",
+      causeCode: "gst_adjustment_section34_deadline_passed",
+    });
+  }
+  if (input.annualReturnCutoffStatus === "not_furnished_as_of_review" && input.declarationAt != null) {
+    const confirmedThrough = input.annualReturnCutoffConfirmedThrough ?? null;
+    if (confirmedThrough == null || confirmedThrough < input.declarationAt) {
+      throw new BillingError({
+        clientCode: "invalid_purchase",
+        causeCode: "gst_adjustment_annual_return_cutoff_stale",
+      });
+    }
   }
   if (input.buyer.classification === "b2b") {
     if (input.recipientItcReversalEvidenceStatus !== "confirmed") {
