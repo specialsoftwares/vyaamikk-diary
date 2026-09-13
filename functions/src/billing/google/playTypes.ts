@@ -65,6 +65,16 @@ export interface GoogleOutOfAppPurchaseContext {
   expiredExternalAccountIdentifiers?: GoogleExternalAccountIdentifiers;
 }
 
+export interface GoogleUserInitiatedCancellation {
+  cancelTime?: string;
+}
+
+export interface GoogleCanceledStateContext {
+  userInitiatedCancellation?: GoogleUserInitiatedCancellation;
+  systemInitiatedCancellation?: unknown;
+  replacementCancellation?: unknown;
+}
+
 export interface GoogleSubscriptionPurchaseV2 {
   regionCode?: string;
   startTime?: string;
@@ -75,7 +85,7 @@ export interface GoogleSubscriptionPurchaseV2 {
   lineItems?: GoogleSubscriptionPurchaseLineItem[];
   externalAccountIdentifiers?: GoogleExternalAccountIdentifiers;
   outOfAppPurchaseContext?: GoogleOutOfAppPurchaseContext;
-  canceledStateContext?: unknown;
+  canceledStateContext?: GoogleCanceledStateContext;
   pausedStateContext?: unknown;
   testPurchase?: unknown;
 }
@@ -87,12 +97,6 @@ export type GoogleOrderState =
   | "CANCELED"
   | string;
 
-export interface GoogleOrderLineItem {
-  productId?: string;
-  productTitle?: string;
-  total?: GoogleMoney;
-}
-
 export interface GoogleOrderSubscriptionDetails {
   basePlanId?: string;
   offerId?: string;
@@ -100,9 +104,17 @@ export interface GoogleOrderSubscriptionDetails {
   servicePeriodEndTime?: string;
 }
 
+export interface GoogleOrderLineItem {
+  productId?: string;
+  total?: GoogleMoney;
+  subscriptionDetails?: GoogleOrderSubscriptionDetails;
+}
+
 /**
- * Sanitized Order — `purchaseToken` is deliberately omitted from this type
- * so it cannot be persisted or logged through this object.
+ * Sanitized Order matching the current Android Publisher Orders resource.
+ * `subscriptionDetails` lives on each line item, not the order root.
+ * `packageName` is not an Order field — package authority is the
+ * package-scoped GET URL. `purchaseToken` is deliberately omitted.
  */
 export interface GoogleOrder {
   orderId?: string;
@@ -111,8 +123,6 @@ export interface GoogleOrder {
   tax?: GoogleMoney;
   developerRevenueInBuyerCurrency?: GoogleMoney;
   lineItems?: GoogleOrderLineItem[];
-  subscriptionDetails?: GoogleOrderSubscriptionDetails;
-  packageName?: string;
   createTime?: string;
 }
 

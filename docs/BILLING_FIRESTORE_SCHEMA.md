@@ -351,3 +351,16 @@ appears in a later phase; it will be added with the query that requires it.
   GSTR source closure binds dependency financial events (including a prior-
   month original purchase referenced by an in-month credit note), not only
   `event.monthKey === report month`.
+
+## Google Play production-enablement gates (VYD-32)
+
+- `PLAY_BILLING_ENABLED` defaults **false**. Do not enable production Play
+  billing until owner-authorized Play Console, Pub/Sub OIDC, IAM, KMS, and
+  the pending-refund-review product are in place.
+- `pendingRefundReviewNotification` is an explicit go-live blocker. Google
+  requires evaluating the request and calling `ReviewRefund` within 24 hours.
+  VYD-32 does **not** implement that product. When billing is enabled, these
+  RTDN events fail closed as `pending_refund_review_unimplemented` (retryable
+  HTTP 503). They are never acknowledged as success, never persisted as
+  plaintext `pendingRefundToken`, and never auto-suggested as a refund.
+- Chargeback/pending-review tax treatment remains a VYD-40 legal review gate.

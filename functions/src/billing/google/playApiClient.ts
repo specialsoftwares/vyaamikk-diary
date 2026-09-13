@@ -73,43 +73,43 @@ function asObject(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-/** Drop secret-bearing Order fields before the object leaves this module. */
-function sanitizeOrder(raw: unknown): GoogleOrder {
+function asMoney(value: unknown): GoogleOrder["total"] | undefined {
+  return value && typeof value === "object" ? (value as GoogleOrder["total"]) : undefined;
+}
+
+function sanitizeLineSubscriptionDetails(raw: unknown): NonNullable<GoogleOrder["lineItems"]>[number]["subscriptionDetails"] {
+  if (raw == null || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const d = raw as Record<string, unknown>;
+  return {
+    basePlanId: typeof d.basePlanId === "string" ? d.basePlanId : undefined,
+    offerId: typeof d.offerId === "string" ? d.offerId : undefined,
+    servicePeriodStartTime:
+      typeof d.servicePeriodStartTime === "string" ? d.servicePeriodStartTime : undefined,
+    servicePeriodEndTime:
+      typeof d.servicePeriodEndTime === "string" ? d.servicePeriodEndTime : undefined,
+  };
+}
+
+/**
+ * Drop secret-bearing Order fields. Ignore synthetic root subscriptionDetails
+ * and packageName — they are not current Orders-resource fields.
+ */
+export function sanitizePlayOrder(raw: unknown): GoogleOrder {
   const o = asObject(raw);
   const lineItemsRaw = Array.isArray(o.lineItems) ? o.lineItems : [];
-  const details =
-    o.subscriptionDetails && typeof o.subscriptionDetails === "object"
-      ? (o.subscriptionDetails as Record<string, unknown>)
-      : null;
   return {
     orderId: typeof o.orderId === "string" ? o.orderId : undefined,
     state: typeof o.state === "string" ? o.state : undefined,
-    total: o.total && typeof o.total === "object" ? (o.total as GoogleOrder["total"]) : undefined,
-    tax: o.tax && typeof o.tax === "object" ? (o.tax as GoogleOrder["tax"]) : undefined,
-    developerRevenueInBuyerCurrency:
-      o.developerRevenueInBuyerCurrency && typeof o.developerRevenueInBuyerCurrency === "object"
-        ? (o.developerRevenueInBuyerCurrency as GoogleOrder["developerRevenueInBuyerCurrency"])
-        : undefined,
+    total: asMoney(o.total),
+    tax: asMoney(o.tax),
+    developerRevenueInBuyerCurrency: asMoney(o.developerRevenueInBuyerCurrency),
     lineItems: lineItemsRaw
       .filter((item): item is Record<string, unknown> => !!item && typeof item === "object")
       .map((item) => ({
         productId: typeof item.productId === "string" ? item.productId : undefined,
-        productTitle: typeof item.productTitle === "string" ? item.productTitle : undefined,
-        total: item.total && typeof item.total === "object" ? (item.total as GoogleOrder["total"]) : undefined,
+        total: asMoney(item.total),
+        subscriptionDetails: sanitizeLineSubscriptionDetails(item.subscriptionDetails),
       })),
-    subscriptionDetails: details
-      ? {
-          basePlanId: typeof details.basePlanId === "string" ? details.basePlanId : undefined,
-          offerId: typeof details.offerId === "string" ? details.offerId : undefined,
-          servicePeriodStartTime:
-            typeof details.servicePeriodStartTime === "string"
-              ? details.servicePeriodStartTime
-              : undefined,
-          servicePeriodEndTime:
-            typeof details.servicePeriodEndTime === "string" ? details.servicePeriodEndTime : undefined,
-        }
-      : undefined,
-    packageName: typeof o.packageName === "string" ? o.packageName : undefined,
     createTime: typeof o.createTime === "string" ? o.createTime : undefined,
   };
 }
@@ -195,7 +195,7 @@ export class PlayApiClient implements PlayApi {
       `${PLAY_API_BASE}/${encodeURIComponent(this.packageName)}` +
       `/orders/${encodeURIComponent(orderId)}`;
     const { json } = await this.requestJson(url);
-    return sanitizeOrder(json);
+    return sanitizePlayOrder(json);
   }
 
   /**

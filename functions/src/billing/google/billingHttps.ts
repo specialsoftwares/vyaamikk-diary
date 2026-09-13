@@ -34,7 +34,9 @@ export function rtdnHttpStatusForError(err: unknown): number {
     if (
       err.causeCode === "rtdn_malformed" ||
       err.causeCode === "rtdn_invalid_base64" ||
-      err.causeCode === "rtdn_wrong_package"
+      err.causeCode === "rtdn_wrong_package" ||
+      err.causeCode === "missing_rtdn_event_time" ||
+      err.causeCode === "invalid_event_time_millis"
     ) {
       return 400;
     }

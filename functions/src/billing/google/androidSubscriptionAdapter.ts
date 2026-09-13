@@ -17,12 +17,16 @@ import type { CredentialCipher } from "../crypto";
 import { credentialFingerprint } from "../crypto";
 import { BillingError } from "../errors";
 import { billingLog } from "../log";
-import { companyBillingPath, financialLedgerPath, sanitizeDocId } from "../paths";
+import {
+  companyBillingPath,
+  financialLedgerPath,
+  sanitizeDocId,
+  subscriptionStatusPath,
+} from "../paths";
 import { canonicalSkuForAndroid, getCatalogEntry, isCanonicalSku, type CanonicalSku } from "../products";
 import type { BillingStore } from "../store";
 import {
   financialEventIdForStore,
-  type CanonicalTransition,
   type CanonicalTransitionKind,
   type TransitionRequest,
   type VerifiedFinancialEvent,
@@ -33,16 +37,18 @@ import type {
   BillingMutationSource,
   CompanyBillingDoc,
   SubscriptionStatusDoc,
+  VyaamikkPlan,
 } from "../types";
 import { CANONICAL_PLAY_PACKAGE_NAME } from "./playConstants";
 import { googlePaidOrderTotalToPaise } from "./playMoney";
+import { assertPaidSubscriptionOrder } from "./playOrder";
 import {
   assertOwnerMatchesCaller,
   playOwnershipIdentifiersPresent,
   resolvePlayPurchaseOwner,
 } from "./playOwnership";
-import { parseRfc3339Millis, parseRfc3339MillisOrNull } from "./playTime";
-import { assertOrderId, assertPurchaseToken } from "./playToken";
+import { parseGoogleEventTimeMillis, parseRfc3339Millis, parseRfc3339MillisOrNull } from "./playTime";
+import { assertPurchaseToken, assertOrderId } from "./playToken";
 import type { PlayApi } from "./playApiClient";
 import type {
   GoogleOrder,
@@ -82,9 +88,8 @@ export interface AndroidBillingResult {
   to: SubscriptionStatusDoc | null;
   canonicalSku: CanonicalSku | null;
   googleSubscriptionState: string | null;
+  reconciliationRequired: boolean;
 }
-
-const PAID_ORDER_STATES = new Set(["PROCESSED", "ORDER_STATE_PROCESSED"]);
 
 export function resolveAndroidCatalogFromLineItem(
   lineItem: GoogleSubscriptionPurchaseLineItem
@@ -150,6 +155,17 @@ async function readCompany(
   });
 }
 
+async function readStatus(
+  store: BillingStore,
+  uid: string
+): Promise<SubscriptionStatusDoc | null> {
+  return store.runTransaction(async (tx) => {
+    const snap = await tx.get(subscriptionStatusPath(uid));
+    if (!snap.exists) return null;
+    return snap.data() as unknown as SubscriptionStatusDoc;
+  });
+}
+
 async function readLedger(
   store: BillingStore,
   financialEventId: string
@@ -161,53 +177,15 @@ async function readLedger(
   });
 }
 
-function assertPackageName(actual: string | undefined, expected: string): void {
-  if (actual != null && actual !== expected) {
-    throw new BillingError({
-      clientCode: "verification_failed",
-      causeCode: "rtdn_wrong_package",
-    });
-  }
+function isPlayApiNotFound(err: unknown): boolean {
+  return err instanceof BillingError && err.causeCode === "play_api_not_found";
 }
 
-function validatePaidOrder(opts: {
-  order: GoogleOrder;
-  expectedOrderId: string;
-  productId: string;
-  basePlanId: string;
-  packageName: string;
-}): void {
-  if (opts.order.orderId && opts.order.orderId !== opts.expectedOrderId) {
-    throw new BillingError({
-      clientCode: "verification_failed",
-      causeCode: "order_id_mismatch",
-    });
-  }
-  assertPackageName(opts.order.packageName, opts.packageName);
-  const state = opts.order.state ?? "";
-  if (!PAID_ORDER_STATES.has(state)) {
-    throw new BillingError({
-      clientCode: "verification_failed",
-      causeCode: "order_not_processable",
-    });
-  }
-  const productOk =
-    !opts.order.lineItems ||
-    opts.order.lineItems.length === 0 ||
-    opts.order.lineItems.some((item) => item.productId === opts.productId);
-  if (!productOk) {
-    throw new BillingError({
-      clientCode: "verification_failed",
-      causeCode: "order_product_mismatch",
-    });
-  }
-  const orderBase = opts.order.subscriptionDetails?.basePlanId;
-  if (typeof orderBase === "string" && orderBase.length > 0 && orderBase !== opts.basePlanId) {
-    throw new BillingError({
-      clientCode: "verification_failed",
-      causeCode: "order_base_plan_mismatch",
-    });
-  }
+function isIdempotentApplyCollision(err: unknown): boolean {
+  return (
+    err instanceof BillingError &&
+    (err.causeCode === "idempotency_conflict" || err.causeCode === "append_only_collision")
+  );
 }
 
 function mapLifecycleKind(state: string): CanonicalTransitionKind | "skip" {
@@ -252,6 +230,7 @@ function emptyResult(
     to: null,
     canonicalSku: null,
     googleSubscriptionState: extras?.googleSubscriptionState ?? null,
+    reconciliationRequired: false,
     ...extras,
   };
 }
@@ -281,20 +260,130 @@ async function invokeTaxHandoff(
   });
 }
 
+function classifyPurchaseOrRenewal(opts: {
+  company: CompanyBillingDoc | null;
+  tokenFingerprint: string;
+  orderId: string;
+  existingPurchase: BillingEventLedgerDoc | null;
+  existingRenewal: BillingEventLedgerDoc | null;
+}): "purchase" | "renewal" {
+  const { company, tokenFingerprint, orderId, existingPurchase, existingRenewal } = opts;
+  if (existingPurchase && existingRenewal) {
+    throw new BillingError({
+      clientCode: "internal_error",
+      causeCode: "purchase_renewal_classification_conflict",
+    });
+  }
+  const impliedRenewal =
+    company?.credentialFingerprint === tokenFingerprint &&
+    typeof company.latestOrderId === "string" &&
+    company.latestOrderId.length > 0 &&
+    company.latestOrderId !== orderId;
+  if (existingPurchase) {
+    if (impliedRenewal) {
+      throw new BillingError({
+        clientCode: "internal_error",
+        causeCode: "purchase_renewal_classification_conflict",
+      });
+    }
+    return "purchase";
+  }
+  if (existingRenewal) return "renewal";
+  return impliedRenewal ? "renewal" : "purchase";
+}
+
+function lifecycleAlreadyMatches(
+  status: SubscriptionStatusDoc | null,
+  kind: CanonicalTransitionKind,
+  plan: VyaamikkPlan,
+  currentPeriodEnd: number
+): boolean {
+  if (!status) return false;
+  if (kind === "expire") return status.billingStatus === "expired";
+  if (kind === "activatePaid" || kind === "renew") {
+    return (
+      status.billingStatus === "active" &&
+      status.plan === plan &&
+      status.currentPeriodEnd === currentPeriodEnd
+    );
+  }
+  if (kind === "enterGrace") {
+    return (
+      status.billingStatus === "grace" &&
+      status.plan === plan &&
+      status.currentPeriodEnd === currentPeriodEnd
+    );
+  }
+  if (kind === "enterOnHold") {
+    return status.billingStatus === "onHold" && status.plan === plan;
+  }
+  if (kind === "cancel") {
+    return (
+      status.billingStatus === "cancelled" &&
+      status.plan === plan &&
+      status.currentPeriodEnd === currentPeriodEnd
+    );
+  }
+  return false;
+}
+
+async function applyTransitionIdempotent(
+  deps: AndroidBillingDeps,
+  diagnosticUid: string,
+  req: TransitionRequest,
+  expectedFinancial?: VerifiedFinancialEvent
+): Promise<ApplyTransitionResult> {
+  try {
+    return await applySubscriptionTransition({ store: deps.store, diagnosticUid }, req);
+  } catch (err) {
+    if (!isIdempotentApplyCollision(err)) throw err;
+    if (expectedFinancial) {
+      const existing = await readLedger(deps.store, expectedFinancial.financialEventId);
+      if (
+        !existing ||
+        existing.eventType !== expectedFinancial.eventType ||
+        existing.grossAmountInPaise !== expectedFinancial.grossAmountInPaise ||
+        existing.uid !== req.uid
+      ) {
+        throw err;
+      }
+    }
+    const prior = await readStatus(deps.store, req.uid);
+    if (!prior) throw err;
+    return {
+      alreadyProcessed: true,
+      diagnosticUid,
+      from: prior,
+      to: prior,
+      financialEventWritten: false,
+      historyWritten: false,
+      resultSummary: `${prior.billingStatus}:${prior.plan}:${prior.entitlementActive ? "1" : "0"}`,
+    };
+  }
+}
+
+function cancelTimeMillis(sub: GoogleSubscriptionPurchaseV2): number | null {
+  return parseRfc3339MillisOrNull(
+    sub.canceledStateContext?.userInitiatedCancellation?.cancelTime,
+    "invalid_cancel_time"
+  );
+}
+
 async function acknowledgeIfRequired(opts: {
   play: PlayApi;
   purchaseToken: string;
   productId: string;
   acknowledgementState: string | undefined;
   subscriptionState: string;
-  isRenewal: boolean;
-  isNewPurchase: boolean;
+  isSameTokenRenewal: boolean;
 }): Promise<boolean> {
   if (opts.subscriptionState === "SUBSCRIPTION_STATE_PENDING") return false;
-  if (opts.subscriptionState === "SUBSCRIPTION_STATE_PENDING_PURCHASE_CANCELED") return false;
+  if (opts.subscriptionState === "SUBSCRIPTION_STATE_PENDING_PURCHASE_CANCELED") {
+    return false;
+  }
   if (opts.acknowledgementState === "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED") return false;
   if (opts.acknowledgementState === "ACKNOWLEDGEMENT_STATE_PENDING") {
-    if (opts.isRenewal) return false;
+    if (opts.isSameTokenRenewal) return false;
     try {
       await opts.play.acknowledgeSubscription(opts.purchaseToken, opts.productId);
       return true;
@@ -306,13 +395,115 @@ async function acknowledgeIfRequired(opts: {
       });
     }
   }
-  if (opts.isNewPurchase) {
+  if (!opts.isSameTokenRenewal) {
     throw new BillingError({
       clientCode: "verification_failed",
       causeCode: "unknown_acknowledgement_state",
     });
   }
   return false;
+}
+
+interface ReconciledSuccessfulOrder {
+  financial: VerifiedFinancialEvent;
+  isRenewal: boolean;
+  orderId: string;
+  currentPeriodStart: number | null;
+  alreadyInLedger: boolean;
+}
+
+async function reconcileLatestSuccessfulOrder(opts: {
+  deps: AndroidBillingDeps;
+  company: CompanyBillingDoc | null;
+  tokenFingerprint: string;
+  canonicalSku: CanonicalSku;
+  productId: string;
+  basePlanId: string;
+  latestSuccessfulOrderId: string;
+}): Promise<ReconciledSuccessfulOrder> {
+  const orderId = opts.latestSuccessfulOrderId;
+  const order = await opts.deps.play.getOrder(orderId);
+  const lineItem = assertPaidSubscriptionOrder({
+    order,
+    expectedOrderId: orderId,
+    productId: opts.productId,
+    basePlanId: opts.basePlanId,
+  });
+  const grossAmountInPaise = googlePaidOrderTotalToPaise(order.total);
+  const orderOccurredAt = parseRfc3339Millis(order.createTime, "invalid_order_create_time");
+  const currentPeriodStart = parseRfc3339MillisOrNull(
+    lineItem.subscriptionDetails?.servicePeriodStartTime,
+    "invalid_service_period_start"
+  );
+  const purchaseLedgerId = financialEventIdForStore({
+    platform: "android",
+    eventType: "purchase",
+    orderId,
+  });
+  const renewalLedgerId = financialEventIdForStore({
+    platform: "android",
+    eventType: "renewal",
+    orderId,
+  });
+  const existingPurchase = await readLedger(opts.deps.store, purchaseLedgerId);
+  const existingRenewal = await readLedger(opts.deps.store, renewalLedgerId);
+  const eventType = classifyPurchaseOrRenewal({
+    company: opts.company,
+    tokenFingerprint: opts.tokenFingerprint,
+    orderId,
+    existingPurchase,
+    existingRenewal,
+  });
+  const alreadyInLedger = eventType === "purchase" ? existingPurchase != null : existingRenewal != null;
+  return {
+    isRenewal: eventType === "renewal",
+    orderId,
+    currentPeriodStart,
+    alreadyInLedger,
+    financial: {
+      financialEventId: financialEventIdForStore({
+        platform: "android",
+        eventType,
+        orderId,
+      }),
+      eventType,
+      platform: "android",
+      canonicalSku: opts.canonicalSku,
+      grossAmountInPaise,
+      actualPlatformCommissionInPaise: null,
+      estimatedPlatformCommissionInPaise: null,
+      occurredAt: orderOccurredAt,
+      relatedFinancialEventId: null,
+    },
+  };
+}
+
+function buildPlatformEvent(opts: {
+  catalog: { productId: string; basePlanId: string; canonicalSku: CanonicalSku };
+  lineItem: GoogleSubscriptionPurchaseLineItem;
+  fp: string;
+  encrypted: VerifiedPlatformEvent["encryptedPurchaseCredential"];
+  linkedCredentialFingerprint: string | null;
+  reconciledAt: number;
+  currentPeriodStart: number | null;
+  currentPeriodEnd: number;
+  latestOrderId: string | null;
+}): VerifiedPlatformEvent {
+  return {
+    platform: "android",
+    canonicalSku: opts.catalog.canonicalSku,
+    productId: opts.catalog.productId,
+    basePlanId: opts.catalog.basePlanId,
+    currentPeriodStart: opts.currentPeriodStart,
+    currentPeriodEnd: opts.currentPeriodEnd,
+    autoRenewing: opts.lineItem.autoRenewingPlan?.autoRenewEnabled === true,
+    latestOrderId: opts.latestOrderId,
+    originalTransactionId: null,
+    credentialFingerprint: opts.fp,
+    encryptedPurchaseCredential: opts.encrypted,
+    linkedCredentialFingerprint: opts.linkedCredentialFingerprint,
+    reconciledAt: opts.reconciledAt,
+  };
 }
 
 export async function processAndroidPurchaseToken(
@@ -323,6 +514,8 @@ export async function processAndroidPurchaseToken(
     source: BillingMutationSource;
     eventSource: TransitionRequest["eventSource"];
     expectedCanonicalSku?: unknown;
+    eventTimeMillis?: number | null;
+    linkedFollowDepth?: number;
   }
 ): Promise<AndroidBillingResult> {
   const purchaseToken = assertPurchaseToken(input.purchaseToken);
@@ -343,8 +536,93 @@ export async function processAndroidPurchaseToken(
   }
 
   const sub = await deps.play.getSubscriptionV2(purchaseToken);
+  return reconcileFetchedSubscription(deps, {
+    purchaseToken,
+    sub,
+    callerUid: input.callerUid,
+    source: input.source,
+    eventSource: input.eventSource,
+    expectedCanonicalSku: input.expectedCanonicalSku,
+    eventTimeMillis: input.eventTimeMillis,
+    linkedFollowDepth: input.linkedFollowDepth ?? 0,
+  });
+}
+
+async function skipPending(
+  deps: AndroidBillingDeps,
+  sub: GoogleSubscriptionPurchaseV2,
+  skipped: string
+): Promise<AndroidBillingResult> {
+  let uid = "";
+  let diagnosticUid = "unresolved";
+  if (playOwnershipIdentifiersPresent(sub)) {
+    try {
+      const owner = await resolvePlayPurchaseOwner(deps.store, sub);
+      uid = owner.uid;
+      diagnosticUid = deps.diagnosticUidFor(uid);
+    } catch {
+      /* PENDING must not fail closed on unresolved owner / missing owned fields */
+    }
+  }
+  billingLog("info", {
+    diagnosticUid,
+    platform: "android",
+    googleSubscriptionState: sub.subscriptionState ?? undefined,
+    result: "skipped_pending",
+  });
+  return emptyResult(uid, diagnosticUid, skipped, {
+    googleSubscriptionState: sub.subscriptionState ?? null,
+  });
+}
+
+async function reconcileFetchedSubscription(
+  deps: AndroidBillingDeps,
+  input: {
+    purchaseToken: string;
+    sub: GoogleSubscriptionPurchaseV2;
+    callerUid?: string;
+    source: BillingMutationSource;
+    eventSource: TransitionRequest["eventSource"];
+    expectedCanonicalSku?: unknown;
+    eventTimeMillis?: number | null;
+    linkedFollowDepth: number;
+  }
+): Promise<AndroidBillingResult> {
+  const state = input.sub.subscriptionState ?? "";
   const reconciledAt = deps.nowMs();
-  const lineItem = assertSingleAndroidLineItem(sub);
+
+  if (state === "SUBSCRIPTION_STATE_PENDING") {
+    return skipPending(deps, input.sub, "pending");
+  }
+
+  if (state === "SUBSCRIPTION_STATE_PENDING_PURCHASE_CANCELED") {
+    const linkedRaw = input.sub.linkedPurchaseToken;
+    if (typeof linkedRaw !== "string" || linkedRaw.length === 0) {
+      return skipPending(deps, input.sub, "pending_purchase_canceled");
+    }
+    if (input.linkedFollowDepth >= 1) {
+      return skipPending(deps, input.sub, "pending_purchase_canceled");
+    }
+    const linkedToken = assertPurchaseToken(linkedRaw);
+    const linkedSub = await deps.play.getSubscriptionV2(linkedToken);
+    return reconcileFetchedSubscription(deps, {
+      purchaseToken: linkedToken,
+      sub: linkedSub,
+      callerUid: input.callerUid,
+      source: input.source,
+      eventSource: input.eventSource,
+      expectedCanonicalSku: input.expectedCanonicalSku,
+      eventTimeMillis: input.eventTimeMillis,
+      linkedFollowDepth: input.linkedFollowDepth + 1,
+    });
+  }
+
+  const lifecycleKind = mapLifecycleKind(state);
+  if (lifecycleKind === "skip") {
+    return skipPending(deps, input.sub, "pending");
+  }
+
+  const lineItem = assertSingleAndroidLineItem(input.sub);
   const catalog = resolveAndroidCatalogFromLineItem(lineItem);
   if (
     typeof input.expectedCanonicalSku === "string" &&
@@ -356,28 +634,27 @@ export async function processAndroidPurchaseToken(
     });
   }
 
-  if (!playOwnershipIdentifiersPresent(sub)) {
+  if (!playOwnershipIdentifiersPresent(input.sub)) {
     throw new BillingError({
       clientCode: input.callerUid ? "verification_failed" : "temporary_unavailable",
       causeCode: input.callerUid ? "missing_obfuscated_account_id" : "unresolved_play_account_owner",
       retryable: !input.callerUid,
     });
   }
-  const owner = await resolvePlayPurchaseOwner(deps.store, sub);
+  const owner = await resolvePlayPurchaseOwner(deps.store, input.sub);
   if (input.callerUid) {
     assertOwnerMatchesCaller(owner.uid, input.callerUid);
   }
   const uid = owner.uid;
   const diagnosticUid = deps.diagnosticUidFor(uid);
 
-  const state = sub.subscriptionState ?? "";
-  const linkedRaw = sub.linkedPurchaseToken;
+  const linkedRaw = input.sub.linkedPurchaseToken;
   const linkedCredentialFingerprint =
     typeof linkedRaw === "string" && linkedRaw.length > 0
       ? credentialFingerprint(linkedRaw)
       : null;
 
-  const fp = credentialFingerprint(purchaseToken);
+  const fp = credentialFingerprint(input.purchaseToken);
   const company = await readCompany(deps.store, uid);
   if (company?.invalidatedCredentialFingerprints?.includes(fp)) {
     throw new BillingError({
@@ -386,182 +663,150 @@ export async function processAndroidPurchaseToken(
     });
   }
 
-  const encrypted = await deps.cipher.encryptCredential(purchaseToken);
+  const encrypted = await deps.cipher.encryptCredential(input.purchaseToken);
   const currentPeriodEnd = parseRfc3339Millis(lineItem.expiryTime, "invalid_expiry_time");
+  const plan = getCatalogEntry(catalog.canonicalSku).plan;
+  const userCancelTime = cancelTimeMillis(input.sub);
+  const observationTime =
+    userCancelTime ??
+    (typeof input.eventTimeMillis === "number" ? input.eventTimeMillis : null) ??
+    reconciledAt;
 
-  const lifecycleKind = mapLifecycleKind(state);
-  if (lifecycleKind === "skip") {
-    billingLog("info", {
-      diagnosticUid,
-      platform: "android",
-      googleSubscriptionState: state,
-      result: "skipped_pending",
-    });
-    return emptyResult(uid, diagnosticUid, state === "SUBSCRIPTION_STATE_PENDING" ? "pending" : "pending_purchase_canceled", {
-      googleSubscriptionState: state,
-      canonicalSku: catalog.canonicalSku,
+  const latestSuccessfulOrderId =
+    typeof lineItem.latestSuccessfulOrderId === "string" &&
+    lineItem.latestSuccessfulOrderId.length > 0
+      ? lineItem.latestSuccessfulOrderId
+      : null;
+
+  if (state === "SUBSCRIPTION_STATE_ACTIVE" && !latestSuccessfulOrderId) {
+    throw new BillingError({
+      clientCode: "verification_failed",
+      causeCode: "missing_latest_successful_order_id",
     });
   }
 
-  let financial: VerifiedFinancialEvent | undefined;
-  let kind: CanonicalTransitionKind = lifecycleKind;
-  let isRenewal = false;
-  let orderId: string | null = null;
-  let currentPeriodStart: number | null = null;
-
-  if (state === "SUBSCRIPTION_STATE_ACTIVE") {
-    const latestSuccessfulOrderId = lineItem.latestSuccessfulOrderId;
-    if (typeof latestSuccessfulOrderId !== "string" || latestSuccessfulOrderId.length === 0) {
-      throw new BillingError({
-        clientCode: "verification_failed",
-        causeCode: "missing_latest_successful_order_id",
-      });
-    }
-    orderId = latestSuccessfulOrderId;
-    const order = await deps.play.getOrder(orderId);
-    validatePaidOrder({
-      order,
-      expectedOrderId: orderId,
+  let economic: ReconciledSuccessfulOrder | null = null;
+  if (latestSuccessfulOrderId) {
+    economic = await reconcileLatestSuccessfulOrder({
+      deps,
+      company,
+      tokenFingerprint: fp,
+      canonicalSku: catalog.canonicalSku,
       productId: catalog.productId,
       basePlanId: catalog.basePlanId,
-      packageName,
+      latestSuccessfulOrderId,
     });
-    const grossAmountInPaise = googlePaidOrderTotalToPaise(order.total);
-    const orderOccurredAt =
-      parseRfc3339MillisOrNull(order.createTime, "invalid_order_create_time") ?? currentPeriodEnd;
-    currentPeriodStart = parseRfc3339MillisOrNull(
-      order.subscriptionDetails?.servicePeriodStartTime,
-      "invalid_service_period_start"
-    );
-    const sameToken = company?.credentialFingerprint === fp;
-    const purchaseLedgerId = financialEventIdForStore({
-      platform: "android",
-      eventType: "purchase",
-      orderId,
-    });
-    const renewalLedgerId = financialEventIdForStore({
-      platform: "android",
-      eventType: "renewal",
-      orderId,
-    });
-    const existingPurchase = await readLedger(deps.store, purchaseLedgerId);
-    const existingRenewal = await readLedger(deps.store, renewalLedgerId);
-    if (existingPurchase) {
-      isRenewal = false;
-    } else if (existingRenewal) {
-      isRenewal = true;
-    } else {
-      isRenewal = Boolean(
-        sameToken && company?.latestOrderId && company.latestOrderId !== orderId
-      );
-    }
-    const eventType = isRenewal ? "renewal" : "purchase";
-    kind = isRenewal ? "renew" : "activatePaid";
-    financial = {
-      financialEventId: financialEventIdForStore({
-        platform: "android",
-        eventType,
-        orderId,
-      }),
-      eventType,
-      platform: "android",
-      canonicalSku: catalog.canonicalSku,
-      grossAmountInPaise,
-      actualPlatformCommissionInPaise: null,
-      estimatedPlatformCommissionInPaise: null,
-      occurredAt: orderOccurredAt,
-      relatedFinancialEventId: null,
-    };
-  } else if (state === "SUBSCRIPTION_STATE_IN_GRACE_PERIOD") {
-    kind = "enterGrace";
-  } else if (state === "SUBSCRIPTION_STATE_ON_HOLD" || state === "SUBSCRIPTION_STATE_PAUSED") {
-    kind = "enterOnHold";
-  } else if (state === "SUBSCRIPTION_STATE_CANCELED") {
-    kind = "cancel";
-  } else if (state === "SUBSCRIPTION_STATE_EXPIRED") {
-    kind = "expire";
   }
 
-  const platformEvent: VerifiedPlatformEvent = {
-    platform: "android",
-    canonicalSku: catalog.canonicalSku,
-    productId: catalog.productId,
-    basePlanId: catalog.basePlanId,
-    currentPeriodStart,
-    currentPeriodEnd,
-    autoRenewing: lineItem.autoRenewingPlan?.autoRenewEnabled === true,
-    latestOrderId: orderId ?? lineItem.latestSuccessfulOrderId ?? null,
-    originalTransactionId: null,
-    credentialFingerprint: fp,
-    encryptedPurchaseCredential: encrypted,
+  const platformEvent = buildPlatformEvent({
+    catalog,
+    lineItem,
+    fp,
+    encrypted,
     linkedCredentialFingerprint,
     reconciledAt,
-  };
+    currentPeriodStart: economic?.currentPeriodStart ?? null,
+    currentPeriodEnd,
+    latestOrderId: economic?.orderId ?? latestSuccessfulOrderId,
+  });
 
-  const requested: CanonicalTransition = {
-    kind,
-    plan: getCatalogEntry(catalog.canonicalSku).plan,
-    platformEvent,
-    financialEvent: financial,
-    gracePeriodEndsAt: kind === "enterGrace" ? currentPeriodEnd : undefined,
-    googleSubscriptionState: state,
-  };
+  let financialEventWritten = false;
+  let historyWritten = false;
+  let alreadyProcessed = true;
+  let to: SubscriptionStatusDoc | null = await readStatus(deps.store, uid);
+  let lastSummary = to
+    ? `${to.billingStatus}:${to.plan}:${to.entitlementActive ? "1" : "0"}`
+    : "noop";
 
-  const idempotencyKey = financial
-    ? `android:${financial.eventType}:${orderId}:${input.eventSource}`
-    : `android:life:${fp}:${state}:${currentPeriodEnd}:${input.eventSource}`;
+  if (economic && !economic.alreadyInLedger) {
+    const economicKind: CanonicalTransitionKind = economic.isRenewal ? "renew" : "activatePaid";
+    const economicReq: TransitionRequest = {
+      uid,
+      source: input.source,
+      eventSource: input.eventSource,
+      idempotencyKey: economic.financial.financialEventId,
+      occurredAt: economic.financial.occurredAt,
+      nowMs: reconciledAt,
+      requested: {
+        kind: economicKind,
+        plan,
+        platformEvent,
+        financialEvent: economic.financial,
+        googleSubscriptionState: state,
+      },
+    };
+    const applied = await applyTransitionIdempotent(
+      deps,
+      diagnosticUid,
+      economicReq,
+      economic.financial
+    );
+    financialEventWritten = applied.financialEventWritten || financialEventWritten;
+    historyWritten = applied.historyWritten || historyWritten;
+    alreadyProcessed = alreadyProcessed && applied.alreadyProcessed;
+    to = applied.to;
+    lastSummary = applied.resultSummary;
+    await invokeTaxHandoff(deps, uid, economic.financial, applied);
+  }
 
-  const req: TransitionRequest = {
-    uid,
-    source: input.source,
-    eventSource: input.eventSource,
-    idempotencyKey,
-    occurredAt: financial?.occurredAt ?? currentPeriodEnd,
-    nowMs: reconciledAt,
-    requested,
-  };
-
-  const applyResult = await applySubscriptionTransition(
-    { store: deps.store, diagnosticUid },
-    req
-  );
+  const liveKind = lifecycleKind;
+  if (!lifecycleAlreadyMatches(to, liveKind, plan, currentPeriodEnd)) {
+    const lifecycleKey = `android:life:${fp}:${state}:${currentPeriodEnd}`;
+    const lifecycleReq: TransitionRequest = {
+      uid,
+      source: input.source,
+      eventSource: input.eventSource,
+      idempotencyKey: lifecycleKey,
+      occurredAt: observationTime,
+      nowMs: reconciledAt,
+      requested: {
+        kind: liveKind,
+        plan,
+        platformEvent,
+        cancelledAt: liveKind === "cancel" ? observationTime : undefined,
+        gracePeriodEndsAt: liveKind === "enterGrace" ? currentPeriodEnd : undefined,
+        googleSubscriptionState: state,
+      },
+    };
+    const applied = await applyTransitionIdempotent(deps, diagnosticUid, lifecycleReq);
+    historyWritten = applied.historyWritten || historyWritten;
+    alreadyProcessed = alreadyProcessed && applied.alreadyProcessed;
+    to = applied.to;
+    lastSummary = applied.resultSummary;
+  }
 
   const acknowledged = await acknowledgeIfRequired({
     play: deps.play,
-    purchaseToken,
+    purchaseToken: input.purchaseToken,
     productId: catalog.productId,
-    acknowledgementState: sub.acknowledgementState,
+    acknowledgementState: input.sub.acknowledgementState,
     subscriptionState: state,
-    isRenewal,
-    isNewPurchase: kind === "activatePaid" && !isRenewal,
+    isSameTokenRenewal: economic?.isRenewal === true,
   });
-
-  if (financial) {
-    await invokeTaxHandoff(deps, uid, financial, applyResult);
-  }
 
   billingLog("info", {
     diagnosticUid,
     platform: "android",
     canonicalSku: catalog.canonicalSku,
     googleSubscriptionState: state,
-    orderId: orderId ?? undefined,
+    orderId: economic?.orderId,
     reconciledAt,
-    result: applyResult.alreadyProcessed ? "already_processed" : "ok",
+    result: alreadyProcessed ? "already_processed" : "ok",
   });
 
   return {
-    alreadyProcessed: applyResult.alreadyProcessed,
-    financialEventWritten: applyResult.financialEventWritten,
-    historyWritten: applyResult.historyWritten,
+    alreadyProcessed,
+    financialEventWritten,
+    historyWritten,
     acknowledged,
     skipped: null,
     uid,
     diagnosticUid,
-    resultSummary: applyResult.resultSummary,
-    to: applyResult.to,
+    resultSummary: lastSummary,
+    to,
     canonicalSku: catalog.canonicalSku,
     googleSubscriptionState: state,
+    reconciliationRequired: false,
   };
 }
 
@@ -573,6 +818,7 @@ export async function processAndroidVoidedPurchase(
     productType: unknown;
     refundType: unknown;
     source: BillingMutationSource;
+    eventTimeMillis: unknown;
   }
 ): Promise<AndroidBillingResult> {
   if (input.productType !== 1 && input.productType !== "SUBSCRIPTION") {
@@ -596,36 +842,17 @@ export async function processAndroidVoidedPurchase(
 
   const purchaseToken = assertPurchaseToken(input.purchaseToken);
   const orderId = assertOrderId(input.orderId);
+  const refundOccurredAt = parseGoogleEventTimeMillis(
+    input.eventTimeMillis,
+    "missing_rtdn_event_time"
+  );
   const packageName = deps.packageName ?? CANONICAL_PLAY_PACKAGE_NAME;
-
-  const sub = await deps.play.getSubscriptionV2(purchaseToken);
-  const reconciledAt = deps.nowMs();
-  const lineItem = assertSingleAndroidLineItem(sub);
-  const catalog = resolveAndroidCatalogFromLineItem(lineItem);
-  if (!playOwnershipIdentifiersPresent(sub)) {
+  if (packageName !== CANONICAL_PLAY_PACKAGE_NAME) {
     throw new BillingError({
-      clientCode: "temporary_unavailable",
-      causeCode: "unresolved_play_account_owner",
-      retryable: true,
+      clientCode: "internal_error",
+      causeCode: "play_package_name_mismatch",
     });
   }
-  const owner = await resolvePlayPurchaseOwner(deps.store, sub);
-  const uid = owner.uid;
-  const diagnosticUid = deps.diagnosticUidFor(uid);
-
-  const order = await deps.play.getOrder(orderId);
-  assertPackageName(order.packageName, packageName);
-  const productOk =
-    !order.lineItems ||
-    order.lineItems.length === 0 ||
-    order.lineItems.some((item) => item.productId === catalog.productId);
-  if (!productOk) {
-    throw new BillingError({
-      clientCode: "verification_failed",
-      causeCode: "order_product_mismatch",
-    });
-  }
-  const grossAmountInPaise = googlePaidOrderTotalToPaise(order.total);
 
   const purchaseLedgerId = financialEventIdForStore({
     platform: "android",
@@ -648,29 +875,26 @@ export async function processAndroidVoidedPurchase(
     });
   }
 
-  const fp = credentialFingerprint(purchaseToken);
-  const encrypted = await deps.cipher.encryptCredential(purchaseToken);
-  const currentPeriodEnd = parseRfc3339Millis(lineItem.expiryTime, "invalid_expiry_time");
-  const state = sub.subscriptionState ?? "";
-  const retainAccess = state === "SUBSCRIPTION_STATE_ACTIVE";
+  if (!isCanonicalSku(original.canonicalSku)) {
+    throw new BillingError({
+      clientCode: "verification_failed",
+      causeCode: "unknown_android_sku",
+    });
+  }
+  const originalSku = original.canonicalSku;
+  const catalogEntry = getCatalogEntry(originalSku);
+  const order = await deps.play.getOrder(orderId);
+  assertPaidSubscriptionOrder({
+    order,
+    expectedOrderId: orderId,
+    productId: catalogEntry.android.productId,
+    basePlanId: catalogEntry.android.basePlanId,
+  });
+  const grossAmountInPaise = googlePaidOrderTotalToPaise(order.total);
 
-  const platformEvent: VerifiedPlatformEvent = {
-    platform: "android",
-    canonicalSku: catalog.canonicalSku,
-    productId: catalog.productId,
-    basePlanId: catalog.basePlanId,
-    currentPeriodStart: null,
-    currentPeriodEnd,
-    autoRenewing: false,
-    latestOrderId: orderId,
-    originalTransactionId: null,
-    credentialFingerprint: fp,
-    encryptedPurchaseCredential: encrypted,
-    reconciledAt,
-  };
-
-  const refundOccurredAt =
-    parseRfc3339MillisOrNull(order.createTime, "invalid_order_create_time") ?? original.occurredAt;
+  const uid = original.uid;
+  const diagnosticUid = deps.diagnosticUidFor(uid);
+  const reconciledAt = deps.nowMs();
 
   const financial: VerifiedFinancialEvent = {
     financialEventId: financialEventIdForStore({
@@ -680,7 +904,7 @@ export async function processAndroidVoidedPurchase(
     }),
     eventType: "refund",
     platform: "android",
-    canonicalSku: catalog.canonicalSku,
+    canonicalSku: originalSku,
     grossAmountInPaise,
     actualPlatformCommissionInPaise: null,
     estimatedPlatformCommissionInPaise: null,
@@ -688,59 +912,88 @@ export async function processAndroidVoidedPurchase(
     relatedFinancialEventId: original.financialEventId,
   };
 
-  let kind: CanonicalTransitionKind;
-  if (retainAccess) {
-    kind = "recordFinancial";
-  } else if (state === "SUBSCRIPTION_STATE_CANCELED") {
-    kind = "cancel";
-  } else if (state === "SUBSCRIPTION_STATE_ON_HOLD" || state === "SUBSCRIPTION_STATE_PAUSED") {
-    kind = "enterOnHold";
-  } else {
-    kind = "expire";
+  const refundReq: TransitionRequest = {
+    uid,
+    source: input.source,
+    eventSource: "webhook",
+    idempotencyKey: financial.financialEventId,
+    occurredAt: refundOccurredAt,
+    nowMs: reconciledAt,
+    requested: {
+      kind: "recordFinancial",
+      plan: catalogEntry.plan,
+      financialEvent: financial,
+    },
+  };
+  const refundApply = await applyTransitionIdempotent(deps, diagnosticUid, refundReq, financial);
+  await invokeTaxHandoff(deps, uid, financial, refundApply);
+
+  let liveSub: GoogleSubscriptionPurchaseV2 | null = null;
+  try {
+    liveSub = await deps.play.getSubscriptionV2(purchaseToken);
+  } catch (err) {
+    if (!isPlayApiNotFound(err)) throw err;
   }
 
-  const applyResult = await applySubscriptionTransition(
-    { store: deps.store, diagnosticUid },
-    {
+  if (!liveSub) {
+    const to = await readStatus(deps.store, uid);
+    billingLog("warn", {
+      diagnosticUid,
+      platform: "android",
+      orderId,
+      result: "refund_recorded_subscription_unqueryable",
+      causeCode: "play_subscription_unqueryable",
+    });
+    return {
+      alreadyProcessed: refundApply.alreadyProcessed,
+      financialEventWritten: refundApply.financialEventWritten,
+      historyWritten: refundApply.historyWritten,
+      acknowledged: false,
+      skipped: null,
       uid,
-      source: input.source,
-      eventSource: "webhook",
-      idempotencyKey: `android:refund:${orderId}:webhook`,
-      occurredAt: refundOccurredAt,
-      nowMs: reconciledAt,
-      requested: {
-        kind,
-        plan: getCatalogEntry(catalog.canonicalSku).plan,
-        platformEvent,
-        financialEvent: financial,
-        googleSubscriptionState: state,
-      },
-    }
-  );
+      diagnosticUid,
+      resultSummary: "refund_recorded_subscription_unqueryable",
+      to,
+      canonicalSku: originalSku,
+      googleSubscriptionState: null,
+      reconciliationRequired: true,
+    };
+  }
 
-  await invokeTaxHandoff(deps, uid, financial, applyResult);
+  const live = await reconcileFetchedSubscription(deps, {
+    purchaseToken,
+    sub: liveSub,
+    source: input.source,
+    eventSource: "webhook",
+    eventTimeMillis: refundOccurredAt,
+    linkedFollowDepth: 0,
+  });
 
   billingLog("info", {
     diagnosticUid,
     platform: "android",
-    canonicalSku: catalog.canonicalSku,
-    googleSubscriptionState: state,
+    canonicalSku: live.canonicalSku ?? undefined,
+    googleSubscriptionState: live.googleSubscriptionState ?? undefined,
     orderId,
-    result: applyResult.alreadyProcessed ? "already_processed" : "ok",
+    result: refundApply.alreadyProcessed && live.alreadyProcessed ? "already_processed" : "ok",
     eventType: "refund",
   });
 
   return {
-    alreadyProcessed: applyResult.alreadyProcessed,
-    financialEventWritten: applyResult.financialEventWritten,
-    historyWritten: applyResult.historyWritten,
-    acknowledged: false,
+    alreadyProcessed: refundApply.alreadyProcessed && live.alreadyProcessed,
+    financialEventWritten: refundApply.financialEventWritten || live.financialEventWritten,
+    historyWritten: refundApply.historyWritten || live.historyWritten,
+    acknowledged: live.acknowledged,
     skipped: null,
     uid,
     diagnosticUid,
-    resultSummary: applyResult.resultSummary,
-    to: applyResult.to,
-    canonicalSku: catalog.canonicalSku,
-    googleSubscriptionState: state,
+    resultSummary: live.resultSummary,
+    to: live.to,
+    canonicalSku: live.canonicalSku ?? originalSku,
+    googleSubscriptionState: live.googleSubscriptionState,
+    reconciliationRequired: false,
   };
 }
+
+export { assertPaidSubscriptionOrder };
+export type { GoogleOrder };

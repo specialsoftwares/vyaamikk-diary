@@ -95,11 +95,15 @@ async function main() {
     {
       orderId: ORDER,
       state: "PROCESSED",
-      packageName: "com.specialsoftwares.vyaamikkdiary",
       createTime: rfc(NOW),
       total: { currencyCode: "INR", units: "249", nanos: 0 },
-      lineItems: [{ productId: "vyd_professional" }],
-      subscriptionDetails: { basePlanId: "monthly", servicePeriodStartTime: rfc(NOW) },
+      lineItems: [
+        {
+          productId: "vyd_professional",
+          total: { currencyCode: "INR", units: "249", nanos: 0 },
+          subscriptionDetails: { basePlanId: "monthly", servicePeriodStartTime: rfc(NOW) },
+        },
+      ],
     }
   );
 

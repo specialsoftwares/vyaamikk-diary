@@ -16,6 +16,7 @@ import {
   type AndroidBillingDeps,
   type AndroidBillingResult,
 } from "./androidSubscriptionAdapter";
+import { parseGoogleEventTimeMillis } from "./playTime";
 import {
   RTDN_SUBSCRIPTION_NOTIFICATION_TYPES,
   VOID_PRODUCT_TYPE_SUBSCRIPTION,
@@ -113,12 +114,17 @@ export async function handleAndroidRtdn(
   }
 
   if (notification.pendingRefundReviewNotification) {
-    billingLog("info", {
+    billingLog("error", {
       platform: "android",
       messageId,
-      result: "pending_refund_review_ignored",
+      result: "pending_refund_review_unimplemented",
+      causeCode: "pending_refund_review_unimplemented",
     });
-    return { httpStatus: 200, action: "pending_refund_review_ignored" };
+    throw new BillingError({
+      clientCode: "temporary_unavailable",
+      causeCode: "pending_refund_review_unimplemented",
+      retryable: true,
+    });
   }
 
   if (notification.oneTimeProductNotification) {
@@ -140,12 +146,17 @@ export async function handleAndroidRtdn(
       });
       return { httpStatus: 200, action: "voided_non_subscription_ignored" };
     }
+    const eventTimeMillis = parseGoogleEventTimeMillis(
+      notification.eventTimeMillis,
+      "missing_rtdn_event_time"
+    );
     const billing = await processAndroidVoidedPurchase(deps, {
       purchaseToken: voided.purchaseToken,
       orderId: voided.orderId,
       productType: voided.productType,
       refundType: voided.refundType,
       source: "rtdn",
+      eventTimeMillis,
     });
     return { httpStatus: 200, action: "voided_subscription", billing };
   }
@@ -156,10 +167,15 @@ export async function handleAndroidRtdn(
       typeof subN.notificationType === "number"
         ? RTDN_SUBSCRIPTION_NOTIFICATION_TYPES[subN.notificationType] ?? "UNKNOWN"
         : "UNKNOWN";
+    const eventTimeMillis = parseGoogleEventTimeMillis(
+      notification.eventTimeMillis,
+      "missing_rtdn_event_time"
+    );
     const billing = await processAndroidPurchaseToken(deps, {
       purchaseToken: subN.purchaseToken,
       source: "rtdn",
       eventSource: "webhook",
+      eventTimeMillis,
     });
     billingLog("info", {
       diagnosticUid: billing.diagnosticUid,
