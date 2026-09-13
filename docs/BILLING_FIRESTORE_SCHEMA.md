@@ -29,6 +29,7 @@ schema-by-use: **no documents are pre-created to "initialize" collections.**
 | `_revenueReports/{monthKey}` | Admin SDK only | denied | denied |
 | `_trialLedger/{trialIdentityHmac}` | Admin SDK only; survives account deletion | denied | denied |
 | `_billingRateLimits/{bucketId}` | Admin SDK only (transactional buckets) | denied | denied |
+| `_playAccountIndex/{obfuscatedAccountId}` | Admin SDK only (Play obfuscated-account ownership) | denied | denied |
 | `globalStats/paperSaved` | Admin SDK only | public (`read: if true`) | denied |
 
 Notes:
@@ -48,6 +49,12 @@ Notes:
   `HMAC-SHA256(TRIAL_IDENTITY_SECRET, normalizeE164(phone))`
   (`functions/src/billing/trialIdentity.ts`); no raw phone or uid is stored
   (`lastAccountUidDiagnostic` is a truncated digest).
+- `_playAccountIndex/{obfuscatedAccountId}` maps
+  `SHA-256("vyd-play-account-v1:" + uid)` to `{ uid, createdAt, updatedAt }`.
+  Clients have zero access. VYD-35 will pass the returned id to
+  `BillingFlowParams.setObfuscatedAccountId`. Collision onto a different uid
+  fails closed.
+
 - `globalStats/paperSaved` figures are labelled estimates with a methodology
   string (owner decision W-9); other `globalStats/*` docs are default-denied.
 

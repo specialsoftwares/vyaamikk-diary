@@ -42,6 +42,7 @@ export type CanonicalTransitionKind =
   | "cancel"
   | "expire"
   | "refund"
+  | "recordFinancial"
   | "adminGrant";
 
 export interface VerifiedPlatformEvent {
@@ -57,6 +58,12 @@ export interface VerifiedPlatformEvent {
   credentialFingerprint: string | null;
   /** Must already be encrypted — never pass a raw purchase token here. */
   encryptedPurchaseCredential: EncryptedPurchaseCredential | null;
+  /**
+   * SHA-256 of Google `linkedPurchaseToken` when a replacement token is
+   * verified. Never the raw linked token. Persistence appends this to
+   * `_companyBilling.invalidatedCredentialFingerprints`.
+   */
+  linkedCredentialFingerprint?: string | null;
   /**
    * REQUIRED CONTRACT (stale-event safety): epoch ms at which the adapter
    * fetched the CURRENT authoritative subscription state from the platform.
@@ -93,6 +100,13 @@ export interface CanonicalTransition {
   gracePeriodEndsAt?: number;
   accessRevoked?: boolean;
   historyType?: BillingHistoryEventDoc["type"];
+  /**
+   * Sanitized Google subscriptionState (e.g. SUBSCRIPTION_STATE_PAUSED).
+   * Diagnostic/audit only — never a credential. Lets a future Subscription
+   * screen distinguish paused vs account hold while Phase C maps PAUSED to
+   * existing enterOnHold / no-access semantics.
+   */
+  googleSubscriptionState?: string | null;
 }
 
 export interface TransitionRequest {
@@ -308,8 +322,10 @@ function fingerprint(req: TransitionRequest): string {
           latestOrderId: p.latestOrderId,
           originalTransactionId: p.originalTransactionId,
           credentialFingerprint: p.credentialFingerprint,
+          linkedCredentialFingerprint: p.linkedCredentialFingerprint ?? null,
         }
       : null,
+    googleSubscriptionState: r.googleSubscriptionState ?? null,
     financialEvent: f
       ? {
           financialEventId: f.financialEventId,
@@ -474,19 +490,27 @@ export function deriveSubscriptionTransition(
       break;
     }
     case "enterOnHold": {
-      if (requested.platformEvent) resolveCatalogEntry(requested.platformEvent, requested.plan);
+      const entry = requested.platformEvent
+        ? resolveCatalogEntry(requested.platformEvent, requested.plan)
+        : null;
       next.billingStatus = "onHold";
       next.autoRenewing = false;
       Object.assign(next, platformFields(requested.platformEvent));
+      if (entry) next.plan = entry.plan;
+      else if (requested.plan && PAID.has(requested.plan)) next.plan = requested.plan;
       historyType = "onHoldEntered";
       break;
     }
     case "cancel": {
-      if (requested.platformEvent) resolveCatalogEntry(requested.platformEvent, requested.plan);
+      const entry = requested.platformEvent
+        ? resolveCatalogEntry(requested.platformEvent, requested.plan)
+        : null;
       next.billingStatus = "cancelled";
       next.cancelledAt = requested.cancelledAt ?? occurredAt;
       next.autoRenewing = false;
       Object.assign(next, platformFields(requested.platformEvent));
+      if (entry) next.plan = entry.plan;
+      else if (requested.plan && PAID.has(requested.plan)) next.plan = requested.plan;
       historyType = "cancelled";
       break;
     }
@@ -501,6 +525,31 @@ export function deriveSubscriptionTransition(
       next.autoRenewing = false;
       next.currentPeriodEnd = occurredAt;
       historyType = "refunded";
+      break;
+    }
+    case "recordFinancial": {
+      // Financial-event-only / reconciliation path (VYD-32): a Google refund
+      // is NOT automatically a revocation. Live subscription state decides
+      // access; this kind writes the ledger (and optional watermark) without
+      // forcing expiry. Do not use `kind: refund` for refund-without-revoke.
+      //
+      // `prior === null` is allowed in the fingerprint preview (applyTransition
+      // always derives once with prior=null). Persistence rejects a real
+      // apply with no status document.
+      if (!requested.financialEvent) {
+        throw new BillingError({
+          clientCode: "invalid_purchase",
+          causeCode: "missing_financial_event",
+        });
+      }
+      if (requested.platformEvent) {
+        resolveCatalogEntry(requested.platformEvent, requested.plan);
+        if (prior) Object.assign(next, platformFields(requested.platformEvent));
+      }
+      if (!historyType) {
+        historyType =
+          requested.financialEvent.eventType === "refund" ? "refunded" : null;
+      }
       break;
     }
     case "adminGrant": {

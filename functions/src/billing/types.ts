@@ -218,6 +218,17 @@ export interface EncryptedPurchaseCredential {
   algorithm: string;
 }
 
+/**
+ * Server-only Google Play obfuscated-account ownership index (VYD-32).
+ * Path: `_playAccountIndex/{obfuscatedAccountId}` — zero client access.
+ * `obfuscatedAccountId` is SHA-256("vyd-play-account-v1:" + uid) hex.
+ */
+export interface PlayAccountIndexDoc {
+  uid: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface CompanyBillingDoc {
   uid: string;
   platform: BillingPlatform;

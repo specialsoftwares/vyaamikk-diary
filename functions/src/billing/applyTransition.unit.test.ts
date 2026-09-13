@@ -533,6 +533,51 @@ async function main() {
     );
   }
 
+  // recordFinancial writes a refund ledger row without expiring access
+  {
+    const store = new MemoryBillingStore();
+    await applySubscriptionTransition(
+      { store, diagnosticUid: DIAG },
+      paidActivate({ idempotencyKey: "rf-paid" })
+    );
+    const purchaseId = "android:purchase:GPA.1111-2222";
+    const refundId = financialEventIdForStore({
+      platform: "android",
+      eventType: "refund",
+      orderId: "GPA.1111-2222",
+    });
+    const recorded = await applySubscriptionTransition(
+      { store, diagnosticUid: DIAG },
+      {
+        uid: UID,
+        source: "rtdn",
+        eventSource: "webhook",
+        idempotencyKey: "rf-keep-access",
+        occurredAt: NOW + 10_000,
+        nowMs: NOW + 10_000,
+        requested: {
+          kind: "recordFinancial",
+          financialEvent: {
+            financialEventId: refundId,
+            eventType: "refund",
+            platform: "android",
+            canonicalSku: "vyd_professional_monthly",
+            grossAmountInPaise: 24_900,
+            actualPlatformCommissionInPaise: null,
+            estimatedPlatformCommissionInPaise: null,
+            occurredAt: NOW + 10_000,
+            relatedFinancialEventId: purchaseId,
+          },
+          googleSubscriptionState: "SUBSCRIPTION_STATE_ACTIVE",
+        },
+      }
+    );
+    assert.equal(recorded.financialEventWritten, true);
+    assert.equal(recorded.to.entitlementActive, true);
+    assert.equal(recorded.to.billingStatus, "active");
+    assert.equal(recorded.to.plan, "professional");
+  }
+
   console.log("applyTransition.unit.test.ts: ok");
 }
 

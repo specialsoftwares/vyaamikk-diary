@@ -15,6 +15,13 @@ export const BILLING_LOG_ALLOWED_KEYS = [
   "result",
   "latencyMs",
   "retryable",
+  "canonicalSku",
+  "causeCode",
+  "googleSubscriptionState",
+  "notificationType",
+  "messageId",
+  "orderId",
+  "reconciledAt",
 ] as const;
 
 export type BillingLogField = (typeof BILLING_LOG_ALLOWED_KEYS)[number];
@@ -36,6 +43,12 @@ export const BILLING_LOG_FORBIDDEN_KEYS = [
   "signedPayload",
   "rawWebhookBody",
   "ciphertext",
+  "encryptedPurchaseCredential",
+  "linkedPurchaseToken",
+  "pendingRefundToken",
+  "Authorization",
+  "authorization",
+  "bearer",
   "gstin",
   "billingAddress",
   "legalName",

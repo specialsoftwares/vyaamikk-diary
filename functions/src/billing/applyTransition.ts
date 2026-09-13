@@ -135,6 +135,29 @@ function assertNoSecretsInHistory(history: Record<string, unknown>): void {
   }
 }
 
+function mergeInvalidatedFingerprints(
+  prior: CompanyBillingDoc | null,
+  ev: TransitionRequest["requested"]["platformEvent"] | undefined
+): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (value: string | null | undefined) => {
+    if (typeof value !== "string" || value.length === 0 || seen.has(value)) return;
+    seen.add(value);
+    out.push(value);
+  };
+  for (const fp of prior?.invalidatedCredentialFingerprints ?? []) push(fp);
+  push(ev?.linkedCredentialFingerprint);
+  if (
+    prior?.credentialFingerprint &&
+    ev?.credentialFingerprint &&
+    prior.credentialFingerprint !== ev.credentialFingerprint
+  ) {
+    push(prior.credentialFingerprint);
+  }
+  return out;
+}
+
 function companyFrom(
   uid: string,
   prior: CompanyBillingDoc | null,
@@ -156,7 +179,7 @@ function companyFrom(
     credentialFingerprint: ev?.credentialFingerprint ?? prior?.credentialFingerprint ?? null,
     encryptedPurchaseCredential:
       ev?.encryptedPurchaseCredential ?? prior?.encryptedPurchaseCredential ?? null,
-    invalidatedCredentialFingerprints: prior?.invalidatedCredentialFingerprints ?? [],
+    invalidatedCredentialFingerprints: mergeInvalidatedFingerprints(prior, ev),
     lastReconciledAt: ev
       ? Math.max(ev.reconciledAt, priorWatermark ?? ev.reconciledAt)
       : priorWatermark,
@@ -242,6 +265,13 @@ export async function applySubscriptionTransition(
         throw plan.error;
       }
 
+      if (req.requested.kind === "recordFinancial" && !prior) {
+        throw new BillingError({
+          clientCode: "invalid_purchase",
+          causeCode: "no_prior_subscription_for_financial_record",
+        });
+      }
+
       // Stale-event defense in depth (see transition.ts contract): reject
       // platform-sourced transitions older than the persisted watermark.
       const ev = req.requested.platformEvent;
@@ -304,6 +334,7 @@ export async function applySubscriptionTransition(
           eventSource: req.eventSource,
           kind: req.requested.kind,
           canonicalSku: req.requested.platformEvent?.canonicalSku ?? null,
+          googleSubscriptionState: req.requested.googleSubscriptionState ?? null,
         },
       };
       appendSubscriptionAuditEvent(tx, auditEventIdFor(req.idempotencyKey), audit);

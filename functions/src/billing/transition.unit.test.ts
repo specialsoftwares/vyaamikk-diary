@@ -244,4 +244,51 @@ const trialReq: TransitionRequest = {
   assert.equal(d.next.plan, "free");
 }
 
+{
+  const priorPaid = deriveSubscriptionTransition(null, {
+    uid: "u1",
+    source: "androidValidation",
+    eventSource: "callable",
+    idempotencyKey: "rf-a",
+    occurredAt: NOW,
+    nowMs: NOW,
+    requested: {
+      kind: "activatePaid",
+      plan: "professional",
+      platformEvent: androidEvent({
+        canonicalSku: "vyd_professional_monthly",
+        productId: "vyd_professional",
+      }),
+    },
+  }).next;
+  const recorded = deriveSubscriptionTransition(priorPaid, {
+    uid: "u1",
+    source: "rtdn",
+    eventSource: "webhook",
+    idempotencyKey: "rf-1",
+    occurredAt: NOW + 1_000,
+    nowMs: NOW + 1_000,
+    requested: {
+      kind: "recordFinancial",
+      financialEvent: {
+        financialEventId: "android:refund:GPA.RF",
+        eventType: "refund",
+        platform: "android",
+        canonicalSku: "vyd_professional_monthly",
+        grossAmountInPaise: 24_900,
+        actualPlatformCommissionInPaise: null,
+        estimatedPlatformCommissionInPaise: null,
+        occurredAt: NOW + 1_000,
+        relatedFinancialEventId: "android:purchase:GPA.RF",
+      },
+      googleSubscriptionState: "SUBSCRIPTION_STATE_ACTIVE",
+    },
+  });
+  assert.equal(recorded.next.entitlementActive, true);
+  assert.equal(recorded.next.billingStatus, "active");
+  assert.equal(recorded.next.plan, "professional");
+  assert.equal(recorded.ledger?.eventType, "refund");
+  assert.equal(recorded.history?.type, "refunded");
+}
+
 console.log("transition.unit.test.ts: ok");
