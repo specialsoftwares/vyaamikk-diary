@@ -30,6 +30,7 @@ schema-by-use: **no documents are pre-created to "initialize" collections.**
 | `_trialLedger/{trialIdentityHmac}` | Admin SDK only; survives account deletion | denied | denied |
 | `_billingRateLimits/{bucketId}` | Admin SDK only (transactional buckets) | denied | denied |
 | `_playAccountIndex/{obfuscatedAccountId}` | Admin SDK only (Play obfuscated-account ownership) | denied | denied |
+| `_playCredentialIndex/{credentialFingerprint}` | Admin SDK only (Play purchase-token fingerprint ownership) | denied | denied |
 | `_billingReconciliationQueue/{queueId}` | Admin SDK only (durable Play/refund reconciliation work) | denied | denied |
 | `globalStats/paperSaved` | Admin SDK only | public (`read: if true`) | denied |
 
@@ -55,6 +56,12 @@ Notes:
   Clients have zero access. VYD-35 will pass the returned id to
   `BillingFlowParams.setObfuscatedAccountId`. Collision onto a different uid
   fails closed.
+- `_playCredentialIndex/{credentialFingerprint}` maps the SHA-256 fingerprint
+  of a verified Google purchase token to `{ uid, createdAt, updatedAt }`.
+  Used to resolve `outOfAppPurchaseContext.expiredPurchaseToken` without
+  storing the raw token or calling the Play API with it. Collision onto a
+  different uid fails closed (`play_credential_index_collision`). Clients
+  have zero access.
 - `_billingReconciliationQueue/{stableId}` is a server-only work record used
   when a verified financial event (for example a Play refund) is recorded but
   live entitlement cannot be authoritatively reconciled (expired token,
@@ -62,10 +69,12 @@ Notes:
   owner mismatch). Document ids are source-independent
   (`android:refund-reconcile:{orderId}`). Documents store `reason`,
   `platform`, `financialEventId`, optional `credentialFingerprint`,
-  timestamps, `status: "pending"`, and `attemptCount`. They never store raw
-  purchase tokens, plaintext credentials, or uid. Duplicate RTDN deliveries
-  preserve a single work item. VYD-32 writes the queue; a later phase may
-  consume it. Clients have zero access.
+  timestamps, `status: "pending" | "resolved"`, `resolvedAt`, and
+  `attemptCount`. They never store raw purchase tokens, plaintext
+  credentials, or uid. Duplicate RTDN deliveries preserve a single work
+  item. A later successful live reconcile marks the same document
+  `resolved` without deleting forensic history. VYD-32 writes the queue; a
+  later phase may consume it. Clients have zero access.
 
 - `globalStats/paperSaved` figures are labelled estimates with a methodology
   string (owner decision W-9); other `globalStats/*` docs are default-denied.

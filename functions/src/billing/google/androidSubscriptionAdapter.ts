@@ -27,6 +27,7 @@ import { canonicalSkuForAndroid, getCatalogEntry, isCanonicalSku, type Canonical
 import {
   ensureReconciliationWorkItem,
   refundReconciliationQueueId,
+  resolveReconciliationWorkItem,
 } from "../reconciliationQueue";
 import type { BillingStore } from "../store";
 import {
@@ -46,15 +47,22 @@ import type {
 import { CANONICAL_PLAY_PACKAGE_NAME } from "./playConstants";
 import { googlePaidOrderTotalToPaise } from "./playMoney";
 import {
+  playLifecycleIdempotencyKey,
+  playLifecycleSnapshotHash,
+} from "./playLifecycle";
+import {
   assertFullyRefundedSubscriptionOrder,
   assertProcessedSubscriptionOrder,
   assertRefundSignalAgreesWithOrder,
   assertSubscriptionOrderLineItem,
+  assertVoidedPurchaseFullRefundType,
+  classifyVerifiedFullRefundReason,
   requireProcessedEventMillis,
   requireRefundEventAuthority,
 } from "./playOrder";
 import {
   assertOwnerMatchesCaller,
+  ensurePlayCredentialIndex,
   playOwnershipIdentifiersPresent,
   resolvePlayPurchaseOwner,
 } from "./playOwnership";
@@ -153,6 +161,48 @@ export function assertSingleAndroidLineItem(
     });
   }
   return items[0];
+}
+
+const OWNED_NON_PENDING_STATES = new Set([
+  "SUBSCRIPTION_STATE_ACTIVE",
+  "SUBSCRIPTION_STATE_IN_GRACE_PERIOD",
+  "SUBSCRIPTION_STATE_ON_HOLD",
+  "SUBSCRIPTION_STATE_CANCELED",
+  "SUBSCRIPTION_STATE_PAUSED",
+  "SUBSCRIPTION_STATE_EXPIRED",
+]);
+
+export function assertNoDeferredItemChange(lineItem: GoogleSubscriptionPurchaseLineItem): void {
+  if (lineItem.deferredItemReplacement != null || lineItem.deferredItemRemoval != null) {
+    throw new BillingError({
+      clientCode: "invalid_purchase",
+      causeCode: "unsupported_deferred_subscription_change",
+    });
+  }
+}
+
+function requireSubscriptionEtag(sub: GoogleSubscriptionPurchaseV2): string {
+  const etag = sub.etag;
+  if (typeof etag !== "string" || etag.length === 0) {
+    throw new BillingError({
+      clientCode: "verification_failed",
+      causeCode: "missing_subscription_etag",
+    });
+  }
+  return etag;
+}
+
+function requireLatestSuccessfulOrderId(
+  lineItem: GoogleSubscriptionPurchaseLineItem
+): string {
+  const orderId = lineItem.latestSuccessfulOrderId;
+  if (typeof orderId !== "string" || orderId.length === 0) {
+    throw new BillingError({
+      clientCode: "verification_failed",
+      causeCode: "missing_latest_successful_order_id",
+    });
+  }
+  return orderId;
 }
 
 async function readCompany(
@@ -716,6 +766,7 @@ async function reconcileFetchedSubscription(
   }
 
   const lineItem = assertSingleAndroidLineItem(input.sub);
+  assertNoDeferredItemChange(lineItem);
   const catalog = resolveAndroidCatalogFromLineItem(lineItem);
   if (
     typeof input.expectedCanonicalSku === "string" &&
@@ -762,6 +813,16 @@ async function reconcileFetchedSubscription(
     });
   }
 
+  const etag = requireSubscriptionEtag(input.sub);
+  if (!OWNED_NON_PENDING_STATES.has(state)) {
+    throw new BillingError({
+      clientCode: "verification_failed",
+      causeCode: "unknown_google_subscription_state",
+    });
+  }
+  const latestSuccessfulOrderId = requireLatestSuccessfulOrderId(lineItem);
+  await ensurePlayCredentialIndex(deps.store, fp, uid, reconciledAt);
+
   const encrypted = await deps.cipher.encryptCredential(input.purchaseToken);
   const currentPeriodEnd = parseRfc3339Millis(lineItem.expiryTime, "invalid_expiry_time");
   const plan = getCatalogEntry(catalog.canonicalSku).plan;
@@ -771,32 +832,16 @@ async function reconcileFetchedSubscription(
     (typeof input.eventTimeMillis === "number" ? input.eventTimeMillis : null) ??
     reconciledAt;
 
-  const latestSuccessfulOrderId =
-    typeof lineItem.latestSuccessfulOrderId === "string" &&
-    lineItem.latestSuccessfulOrderId.length > 0
-      ? lineItem.latestSuccessfulOrderId
-      : null;
-
-  if (state === "SUBSCRIPTION_STATE_ACTIVE" && !latestSuccessfulOrderId) {
-    throw new BillingError({
-      clientCode: "verification_failed",
-      causeCode: "missing_latest_successful_order_id",
-    });
-  }
-
-  let economic: ReconciledSuccessfulOrder | null = null;
-  if (latestSuccessfulOrderId) {
-    economic = await reconcileLatestSuccessfulOrder({
-      deps,
-      company,
-      uid,
-      tokenFingerprint: fp,
-      canonicalSku: catalog.canonicalSku,
-      productId: catalog.productId,
-      basePlanId: catalog.basePlanId,
-      latestSuccessfulOrderId,
-    });
-  }
+  const economic = await reconcileLatestSuccessfulOrder({
+    deps,
+    company,
+    uid,
+    tokenFingerprint: fp,
+    canonicalSku: catalog.canonicalSku,
+    productId: catalog.productId,
+    basePlanId: catalog.basePlanId,
+    latestSuccessfulOrderId,
+  });
 
   const platformEvent = buildPlatformEvent({
     catalog,
@@ -805,9 +850,9 @@ async function reconcileFetchedSubscription(
     encrypted,
     linkedCredentialFingerprint,
     reconciledAt,
-    currentPeriodStart: economic?.currentPeriodStart ?? null,
+    currentPeriodStart: economic.currentPeriodStart,
     currentPeriodEnd,
-    latestOrderId: economic?.orderId ?? latestSuccessfulOrderId,
+    latestOrderId: economic.orderId,
   });
 
   let financialEventWritten = false;
@@ -818,7 +863,7 @@ async function reconcileFetchedSubscription(
     ? `${to.billingStatus}:${to.plan}:${to.entitlementActive ? "1" : "0"}`
     : "noop";
 
-  if (economic && !economic.alreadyInLedger) {
+  if (!economic.alreadyInLedger) {
     const economicKind: CanonicalTransitionKind = economic.isRenewal ? "renew" : "activatePaid";
     const economicReq: TransitionRequest = {
       uid,
@@ -851,7 +896,10 @@ async function reconcileFetchedSubscription(
 
   const liveKind = lifecycleKind;
   if (!lifecycleAlreadyMatches(to, liveKind, plan, currentPeriodEnd)) {
-    const lifecycleKey = `android:life:${fp}:${state}:${currentPeriodEnd}`;
+    const lifecycleKey = playLifecycleIdempotencyKey(
+      state,
+      playLifecycleSnapshotHash(fp, etag)
+    );
     const lifecycleReq: TransitionRequest = {
       uid,
       source: input.source,
@@ -881,7 +929,7 @@ async function reconcileFetchedSubscription(
     productId: catalog.productId,
     acknowledgementState: input.sub.acknowledgementState,
     subscriptionState: state,
-    isSameTokenRenewal: economic?.isRenewal === true,
+    isSameTokenRenewal: economic.isRenewal === true,
   });
 
   billingLog("info", {
@@ -889,7 +937,7 @@ async function reconcileFetchedSubscription(
     platform: "android",
     canonicalSku: catalog.canonicalSku,
     googleSubscriptionState: state,
-    orderId: economic?.orderId,
+    orderId: economic.orderId,
     reconciledAt,
     result: alreadyProcessed ? "already_processed" : "ok",
   });
@@ -942,6 +990,20 @@ async function enqueueRefundReconciliation(opts: {
   });
 }
 
+async function markRefundReconciliationResolved(opts: {
+  deps: AndroidBillingDeps;
+  orderId: string;
+  financialEventId: string;
+  nowMs: number;
+}): Promise<void> {
+  await resolveReconciliationWorkItem(opts.deps.store, {
+    id: refundReconciliationQueueId(opts.orderId),
+    platform: "android",
+    financialEventId: opts.financialEventId,
+    nowMs: opts.nowMs,
+  });
+}
+
 export async function processAndroidVoidedPurchase(
   deps: AndroidBillingDeps,
   input: {
@@ -959,18 +1021,7 @@ export async function processAndroidVoidedPurchase(
       causeCode: "unsupported_void_product_type",
     });
   }
-  if (input.refundType === 2 || input.refundType === "QUANTITY_BASED_PARTIAL_REFUND") {
-    throw new BillingError({
-      clientCode: "invalid_purchase",
-      causeCode: "unsupported_partial_refund",
-    });
-  }
-  if (input.refundType !== 1 && input.refundType !== "FULL_REFUND" && input.refundType != null) {
-    throw new BillingError({
-      clientCode: "invalid_purchase",
-      causeCode: "unsupported_partial_refund",
-    });
-  }
+  assertVoidedPurchaseFullRefundType(input.refundType);
 
   const rtdnPurchaseToken = assertPurchaseToken(input.purchaseToken);
   const orderId = assertOrderId(input.orderId);
@@ -1030,7 +1081,43 @@ export async function processAndroidVoidedPurchase(
   });
   const processedEventTimeMillis = requireProcessedEventMillis(order);
   const refundAuthority = requireRefundEventAuthority(order);
-  if (refundAuthority.grossAmountInPaise !== original.grossAmountInPaise) {
+  const financialEventType = classifyVerifiedFullRefundReason(order);
+  if (original.financialEventId !== (existingPurchase ? purchaseLedgerId : renewalLedgerId)) {
+    throw new BillingError({
+      clientCode: "internal_error",
+      causeCode: "financial_event_conflict",
+    });
+  }
+  if (original.eventType !== (existingPurchase ? "purchase" : "renewal")) {
+    throw new BillingError({
+      clientCode: "internal_error",
+      causeCode: "financial_event_conflict",
+    });
+  }
+  if (
+    original.platform !== "android" ||
+    original.canonicalSku !== originalSku ||
+    original.currency !== "INR"
+  ) {
+    throw new BillingError({
+      clientCode: "internal_error",
+      causeCode: "financial_event_conflict",
+    });
+  }
+  if (original.occurredAt !== processedEventTimeMillis) {
+    throw new BillingError({
+      clientCode: "internal_error",
+      causeCode: "financial_event_conflict",
+    });
+  }
+  const orderTotalPaise = googlePaidOrderTotalToPaise(order.total);
+  if (original.grossAmountInPaise !== orderTotalPaise) {
+    throw new BillingError({
+      clientCode: "internal_error",
+      causeCode: "refund_gross_mismatch",
+    });
+  }
+  if (original.grossAmountInPaise !== refundAuthority.grossAmountInPaise) {
     throw new BillingError({
       clientCode: "internal_error",
       causeCode: "refund_gross_mismatch",
@@ -1051,10 +1138,10 @@ export async function processAndroidVoidedPurchase(
   const financial: VerifiedFinancialEvent = {
     financialEventId: financialEventIdForStore({
       platform: "android",
-      eventType: "refund",
+      eventType: financialEventType,
       orderId,
     }),
-    eventType: "refund",
+    eventType: financialEventType,
     platform: "android",
     canonicalSku: originalSku,
     grossAmountInPaise,
@@ -1159,6 +1246,12 @@ export async function processAndroidVoidedPurchase(
       linkedFollowDepth: 0,
       expectedUid: uid,
     });
+    await markRefundReconciliationResolved({
+      deps,
+      orderId,
+      financialEventId: financial.financialEventId,
+      nowMs: reconciledAt,
+    });
     billingLog("info", {
       diagnosticUid,
       platform: "android",
@@ -1166,7 +1259,7 @@ export async function processAndroidVoidedPurchase(
       googleSubscriptionState: live.googleSubscriptionState ?? undefined,
       orderId,
       result: refundApply.alreadyProcessed && live.alreadyProcessed ? "already_processed" : "ok",
-      eventType: "refund",
+      eventType: financialEventType,
     });
     return {
       alreadyProcessed: refundApply.alreadyProcessed && live.alreadyProcessed,

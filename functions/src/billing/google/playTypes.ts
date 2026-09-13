@@ -53,6 +53,7 @@ export interface GoogleSubscriptionPurchaseLineItem {
   prepaidPlan?: GooglePrepaidPlan;
   offerDetails?: GoogleOfferDetails;
   deferredItemReplacement?: unknown;
+  deferredItemRemoval?: unknown;
   signupPromotion?: unknown;
 }
 
@@ -63,6 +64,11 @@ export interface GoogleExternalAccountIdentifiers {
 
 export interface GoogleOutOfAppPurchaseContext {
   expiredExternalAccountIdentifiers?: GoogleExternalAccountIdentifiers;
+  /**
+   * Last expired subscription token. Identification-only via fingerprint
+   * lookup; never used to call the Play API; never persisted or logged.
+   */
+  expiredPurchaseToken?: string;
 }
 
 export interface GoogleUserInitiatedCancellation {
@@ -88,6 +94,11 @@ export interface GoogleSubscriptionPurchaseV2 {
   canceledStateContext?: GoogleCanceledStateContext;
   pausedStateContext?: unknown;
   testPurchase?: unknown;
+  /**
+   * Entity tag for the current subscription snapshot. Always present for
+   * auto-renewing subscriptions. Used as NON-SECRET lifecycle identity.
+   */
+  etag?: string;
 }
 
 export type GoogleOrderState =
@@ -129,6 +140,9 @@ export interface GoogleRefundDetails {
   total?: GoogleMoney;
   tax?: GoogleMoney;
 }
+
+/** Google `RefundEvent.refundReason`. Unknown / unspecified fail closed. */
+export type GoogleRefundReason = "REFUND_REASON_UNSPECIFIED" | "OTHER" | "CHARGEBACK";
 
 /** Narrow `OrderHistory.refundEvent` for a completed full refund. */
 export interface GoogleRefundEvent {

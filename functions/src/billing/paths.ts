@@ -36,6 +36,10 @@ export function playAccountIndexPath(obfuscatedAccountId: string): string {
   return `_playAccountIndex/${obfuscatedAccountId}`;
 }
 
+export function playCredentialIndexPath(credentialFingerprint: string): string {
+  return `_playCredentialIndex/${credentialFingerprint}`;
+}
+
 export function billingReconciliationQueuePath(queueId: string): string {
   return `_billingReconciliationQueue/${sanitizeDocId(queueId)}`;
 }

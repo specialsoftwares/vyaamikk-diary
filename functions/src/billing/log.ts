@@ -46,6 +46,7 @@ export const BILLING_LOG_FORBIDDEN_KEYS = [
   "encryptedPurchaseCredential",
   "linkedPurchaseToken",
   "pendingRefundToken",
+  "expiredPurchaseToken",
   "Authorization",
   "authorization",
   "bearer",

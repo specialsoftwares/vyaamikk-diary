@@ -19,9 +19,6 @@ const REFUNDED_ORDER_STATES = new Set(["REFUNDED", "ORDER_STATE_REFUNDED"]);
 const PENDING_REFUND_STATES = new Set(["PENDING_REFUND", "ORDER_STATE_PENDING_REFUND"]);
 const PARTIAL_REFUND_STATES = new Set(["PARTIALLY_REFUNDED", "ORDER_STATE_PARTIALLY_REFUNDED"]);
 
-/** Pub/Sub delivery may lag the Order refund event; GST month still follows the Order. */
-const MAX_RTDN_REFUND_SIGNAL_SKEW_MS = 7 * 24 * 60 * 60 * 1000;
-
 function fail(causeCode: string, clientCode: BillingError["clientCode"] = "verification_failed"): never {
   throw new BillingError({
     clientCode,
@@ -112,21 +109,39 @@ export function requireRefundEventAuthority(order: GoogleOrder): {
 }
 
 /**
- * RTDN `eventTimeMillis` is signal timing. The Order refund event is the
- * financial timestamp. Reject impossible / material contradictions; do not
- * require byte-for-byte equality.
+ * Map a verified full-refund Order's refundReason onto the financial event class.
+ * Entitlement is never derived from this. Unknown / unspecified fail closed.
+ */
+export function classifyVerifiedFullRefundReason(order: GoogleOrder): "refund" | "chargeback" {
+  const reason = order.orderHistory?.refundEvent?.refundReason;
+  if (reason === "OTHER") return "refund";
+  if (reason === "CHARGEBACK") return "chargeback";
+  throw new BillingError({
+    clientCode: "verification_failed",
+    causeCode: "unknown_order_refund_reason",
+  });
+}
+
+/**
+ * RTDN `eventTimeMillis` is signal/diagnostic timing. The Order refund event
+ * is the financial timestamp. Grounded checks only: both timestamps must
+ * already have parsed strictly; refund must not precede processedEvent.
+ * There is no documented Google validity window between the two clocks.
  */
 export function assertRefundSignalAgreesWithOrder(opts: {
   rtdnEventTimeMillis: number;
   refundEventTimeMillis: number;
   processedEventTimeMillis: number;
 }): void {
+  if (
+    !Number.isFinite(opts.rtdnEventTimeMillis) ||
+    !Number.isFinite(opts.refundEventTimeMillis) ||
+    !Number.isFinite(opts.processedEventTimeMillis)
+  ) {
+    fail("invalid_refund_event_time");
+  }
   if (opts.refundEventTimeMillis < opts.processedEventTimeMillis) {
     fail("refund_before_processed");
-  }
-  const skew = Math.abs(opts.rtdnEventTimeMillis - opts.refundEventTimeMillis);
-  if (skew > MAX_RTDN_REFUND_SIGNAL_SKEW_MS) {
-    fail("refund_event_time_contradiction");
   }
 }
 
@@ -173,7 +188,29 @@ export function assertFullyRefundedSubscriptionOrder(opts: {
   }
   requireProcessedEventMillis(opts.order);
   requireRefundEventAuthority(opts.order);
+  classifyVerifiedFullRefundReason(opts.order);
   return lineItem;
+}
+
+/** VoidedPurchaseNotification.refundType: VYD-32 requires FULL_REFUND only. */
+export function assertVoidedPurchaseFullRefundType(refundType: unknown): void {
+  if (refundType === 2 || refundType === "QUANTITY_BASED_PARTIAL_REFUND") {
+    throw new BillingError({
+      clientCode: "invalid_purchase",
+      causeCode: "unsupported_partial_refund",
+    });
+  }
+  if (refundType === 1 || refundType === "FULL_REFUND") return;
+  if (refundType == null) {
+    throw new BillingError({
+      clientCode: "verification_failed",
+      causeCode: "missing_void_refund_type",
+    });
+  }
+  throw new BillingError({
+    clientCode: "verification_failed",
+    causeCode: "unknown_void_refund_type",
+  });
 }
 
 /** @deprecated Use assertProcessedSubscriptionOrder — PROCESSED paid orders only. */

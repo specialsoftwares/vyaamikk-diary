@@ -15,7 +15,7 @@ import { InMemoryCredentialCipher } from "../crypto";
 import { diagnosticUidHmac } from "../diagnosticUid";
 import { BillingError } from "../errors";
 import { FirestoreBillingStore } from "../firestoreBillingStore";
-import { financialLedgerPath, playAccountIndexPath, sanitizeDocId } from "../paths";
+import { financialLedgerPath, playAccountIndexPath, playCredentialIndexPath, sanitizeDocId } from "../paths";
 import type { PlayApi } from "./playApiClient";
 import { obfuscatedAccountIdForUid } from "./playOwnership";
 import type { GoogleOrder, GoogleSubscriptionPurchaseV2 } from "./playTypes";
@@ -81,6 +81,7 @@ async function main() {
     {
       subscriptionState: "SUBSCRIPTION_STATE_ACTIVE",
       acknowledgementState: "ACKNOWLEDGEMENT_STATE_PENDING",
+      etag: "etag-emu-active-1",
       lineItems: [
         {
           productId: "vyd_professional",
@@ -133,6 +134,10 @@ async function main() {
   assert.ok(company);
   assert.equal(JSON.stringify(company).includes(TOKEN), false);
   assert.equal(company?.credentialFingerprint?.length, 64);
+  const credSnap = await db.doc(playCredentialIndexPath(company.credentialFingerprint as string)).get();
+  assert.equal(credSnap.exists, true);
+  assert.equal(credSnap.data()?.uid, UID);
+  assert.equal(JSON.stringify(credSnap.data()).includes(TOKEN), false);
 
   const serialized = JSON.stringify((await db.collection("_subscriptionAuditLog").get()).docs.map((d) => d.data()));
   assert.equal(serialized.includes(TOKEN), false);

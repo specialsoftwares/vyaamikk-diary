@@ -230,12 +230,24 @@ export interface PlayAccountIndexDoc {
 }
 
 /**
+ * Server-only purchase-token fingerprint → uid index (VYD-32).
+ * Path: `_playCredentialIndex/{credentialFingerprint}` — zero client access.
+ * Document id is SHA-256(purchase token) hex. Never stores the raw token,
+ * ciphertext, email, or phone.
+ */
+export interface PlayCredentialIndexDoc {
+  uid: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/**
  * Server-only durable reconciliation work item (VYD-32).
  * Path: `_billingReconciliationQueue/{stableId}` — zero client access.
  * Never stores raw purchase tokens, plaintext credentials, or uid.
  * `financialEventId` is the resolver for the ledger owner.
  */
-export type BillingReconciliationQueueStatus = "pending";
+export type BillingReconciliationQueueStatus = "pending" | "resolved";
 
 export interface BillingReconciliationQueueDoc {
   reason: string;
@@ -244,6 +256,7 @@ export interface BillingReconciliationQueueDoc {
   credentialFingerprint: string | null;
   createdAt: number;
   updatedAt: number;
+  resolvedAt: number | null;
   status: BillingReconciliationQueueStatus;
   attemptCount: number;
 }

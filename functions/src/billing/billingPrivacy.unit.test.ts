@@ -20,6 +20,7 @@ assert.throws(
 );
 assert.throws(() => assertBillingLogContext({ purchaseToken: "tok" }), BillingLogPrivacyError);
 assert.throws(() => assertBillingLogContext({ phoneE164: "+91" }), BillingLogPrivacyError);
+assert.throws(() => assertBillingLogContext({ expiredPurchaseToken: "tok" }), BillingLogPrivacyError);
 assert.throws(() => assertBillingLogContext({ receipt: "r" }), BillingLogPrivacyError);
 assert.throws(() => assertBillingLogContext({ signedTransaction: "jws" }), BillingLogPrivacyError);
 assert.throws(() => assertBillingLogContext({ email: "a@b.c" }), BillingLogPrivacyError);

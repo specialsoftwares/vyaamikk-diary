@@ -14,11 +14,13 @@ import { handleAndroidRtdnHttp } from "../callables/androidRtdn";
 import { InMemoryCredentialCipher, credentialFingerprint } from "../crypto";
 import { diagnosticUidHmac } from "../diagnosticUid";
 import { BillingError } from "../errors";
-import { companyBillingPath, financialLedgerPath, playAccountIndexPath, sanitizeDocId, billingReconciliationQueuePath } from "../paths";
+import { companyBillingPath, financialLedgerPath, playAccountIndexPath, playCredentialIndexPath, sanitizeDocId, billingReconciliationQueuePath, subscriptionStatusPath } from "../paths";
 import { ALL_CANONICAL_SKUS, SUBSCRIPTION_CATALOG, canonicalSkuForAndroid } from "../products";
 import { istMonthKeyForMillis } from "../istMonthKey";
 import { MemoryBillingStore } from "../store";
 import type { BillingEventLedgerDoc, CompanyBillingDoc, SubscriptionStatusDoc } from "../types";
+import { buildGstr1WorkingPapers } from "../tax/gstr1WorkingPapers";
+import { MemoryTaxComplianceReportSource } from "../tax/taxComplianceReportSource";
 import {
   processAndroidPurchaseToken,
   processAndroidVoidedPurchase,
@@ -32,6 +34,8 @@ import {
   assertFullyRefundedSubscriptionOrder,
   assertPaidSubscriptionOrder,
   assertProcessedSubscriptionOrder,
+  assertVoidedPurchaseFullRefundType,
+  classifyVerifiedFullRefundReason,
 } from "./playOrder";
 import { obfuscatedAccountIdForUid } from "./playOwnership";
 import { verifyPubSubPushOidc, type OidcTokenVerifier } from "./pubsubOidc";
@@ -47,6 +51,7 @@ const OTHER = "uid-play-bob";
 const TOKEN = "RAW_PURCHASE_TOKEN_SECRET_VALUE_DO_NOT_PERSIST";
 const TOKEN2 = "RAW_PURCHASE_TOKEN_SECRET_VALUE_REPLACEMENT";
 const LINKED = "RAW_LINKED_TOKEN_SECRET_VALUE_DO_NOT_PERSIST";
+const EXPIRED_TOKEN = "RAW_EXPIRED_PURCHASE_TOKEN_SECRET_DO_NOT_PERSIST";
 const ORDER1 = "GPA.3311-PLAY-1";
 const ORDER2 = "GPA.3311-PLAY-2";
 
@@ -67,6 +72,7 @@ function activeSub(overrides: Partial<GoogleSubscriptionPurchaseV2> = {}): Googl
     subscriptionState: "SUBSCRIPTION_STATE_ACTIVE",
     acknowledgementState: "ACKNOWLEDGEMENT_STATE_PENDING",
     startTime: rfc(NOW),
+    etag: "etag-active-1",
     lineItems: [
       {
         productId: "vyd_professional",
@@ -124,7 +130,8 @@ function paidOrder(
 function refundedOrder(
   order: GoogleOrder,
   refundEventTime: string,
-  refundTotal: GoogleOrder["total"] = order.total
+  refundTotal: GoogleOrder["total"] = order.total,
+  refundReason: string | null = "OTHER"
 ): GoogleOrder {
   return {
     ...order,
@@ -139,7 +146,7 @@ function refundedOrder(
           total: refundTotal,
           tax: order.tax,
         },
-        refundReason: "OTHER",
+        ...(refundReason != null ? { refundReason } : {}),
       },
     },
   };
@@ -241,7 +248,12 @@ class FakePlay implements PlayApi {
 
 function secretsIn(value: unknown): boolean {
   const blob = JSON.stringify(value);
-  return blob.includes(TOKEN) || blob.includes(TOKEN2) || blob.includes(LINKED);
+  return (
+    blob.includes(TOKEN) ||
+    blob.includes(TOKEN2) ||
+    blob.includes(LINKED) ||
+    blob.includes(EXPIRED_TOKEN)
+  );
 }
 
 function assertNoSecrets(store: MemoryBillingStore, extra?: unknown): void {
@@ -418,6 +430,10 @@ async function main() {
     const company = store.docs.get(companyBillingPath(UID)) as CompanyBillingDoc;
     assert.equal(company.credentialFingerprint, credentialFingerprint(TOKEN));
     assert.ok(company.encryptedPurchaseCredential);
+    const credIndex = store.docs.get(playCredentialIndexPath(credentialFingerprint(TOKEN))) as {
+      uid: string;
+    };
+    assert.equal(credIndex.uid, UID);
     assertNoSecrets(store, result);
   }
 
@@ -1888,6 +1904,638 @@ async function main() {
     assert.ok(http instanceof BillingError);
     assert.equal((http as InstanceType<typeof BillingError>).causeCode, "pending_refund_review_unimplemented");
     assert.equal((http as InstanceType<typeof BillingError>).retryable, true);
+  }
+
+  // Round-3: chargeback, ownership completeness, owned-state order, etag lifecycle
+  {
+    const sep = Date.parse("2026-09-15T00:00:00+05:30");
+    const oct = Date.parse("2026-10-15T00:00:00+05:30");
+
+    function canceledHistory(store: MemoryBillingStore) {
+      return historyDocs(store).filter(([, v]) => (v as { type?: string }).type === "cancelled");
+    }
+
+    async function purchaseThenVoid(opts: {
+      refundReason: string | null;
+      refundType?: unknown;
+      eventTimeMillis?: number;
+    }) {
+      const play = new FakePlay(activeSub(), paidOrder(ORDER1, "249"));
+      const primed = await primedDeps(play);
+      await processAndroidPurchaseToken(primed.deps, {
+        purchaseToken: TOKEN,
+        callerUid: UID,
+        source: "androidValidation",
+        eventSource: "callable",
+      });
+      play.sub.acknowledgementState = "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED";
+      play.orders.set(
+        ORDER1,
+        refundedOrder(play.orders.get(ORDER1)!, rfc(NOW + 1000), undefined, opts.refundReason)
+      );
+      const voided = await processAndroidVoidedPurchase(primed.deps, {
+        purchaseToken: TOKEN,
+        orderId: ORDER1,
+        productType: 1,
+        refundType: opts.refundType ?? 1,
+        source: "rtdn",
+        eventTimeMillis: opts.eventTimeMillis ?? NOW + 1000,
+      });
+      return { ...primed, play, voided };
+    }
+
+    // A/B/C. OTHER refund vs CHARGEBACK vs unspecified
+    {
+      assert.equal(
+        classifyVerifiedFullRefundReason(refundedOrder(paidOrder(ORDER1, "249"), rfc(NOW), undefined, "OTHER")),
+        "refund"
+      );
+      assert.equal(
+        classifyVerifiedFullRefundReason(
+          refundedOrder(paidOrder(ORDER1, "249"), rfc(NOW), undefined, "CHARGEBACK")
+        ),
+        "chargeback"
+      );
+      assert.throws(
+        () =>
+          classifyVerifiedFullRefundReason(
+            refundedOrder(paidOrder(ORDER1, "249"), rfc(NOW), undefined, null)
+          ),
+        isCause("unknown_order_refund_reason")
+      );
+      assert.throws(
+        () =>
+          classifyVerifiedFullRefundReason(
+            refundedOrder(paidOrder(ORDER1, "249"), rfc(NOW), undefined, "REFUND_REASON_UNSPECIFIED")
+          ),
+        isCause("unknown_order_refund_reason")
+      );
+      assert.throws(
+        () =>
+          classifyVerifiedFullRefundReason(
+            refundedOrder(paidOrder(ORDER1, "249"), rfc(NOW), undefined, "FUTURE_REASON")
+          ),
+        isCause("unknown_order_refund_reason")
+      );
+
+      const other = await purchaseThenVoid({ refundReason: "OTHER" });
+      assert.equal(other.store.docs.has(financialLedgerPath(sanitizeDocId(`android:refund:${ORDER1}`))), true);
+      assert.equal(
+        other.store.docs.has(financialLedgerPath(sanitizeDocId(`android:chargeback:${ORDER1}`))),
+        false
+      );
+      assert.equal(
+        other.taxCalls.filter((c) => c.eventType === "refund" && c.financialEventWritten).length,
+        1
+      );
+
+      const cb = await purchaseThenVoid({ refundReason: "CHARGEBACK" });
+      const cbLedger = cb.store.docs.get(
+        financialLedgerPath(sanitizeDocId(`android:chargeback:${ORDER1}`))
+      ) as BillingEventLedgerDoc;
+      assert.equal(cbLedger.eventType, "chargeback");
+      assert.equal(cbLedger.relatedFinancialEventId, `android:purchase:${ORDER1}`);
+      assert.equal(cbLedger.grossAmountInPaise, 24_900);
+      assert.equal(cbLedger.actualPlatformCommissionInPaise, null);
+      assert.equal(cb.store.docs.has(financialLedgerPath(sanitizeDocId(`android:refund:${ORDER1}`))), false);
+      assert.equal(cb.taxCalls.filter((c) => c.eventType === "purchase").length, 1);
+      assert.equal(cb.taxCalls.filter((c) => c.eventType === "refund").length, 0);
+      assert.equal(cb.taxCalls.some((c) => (c.eventType as string) === "chargeback"), false);
+
+      const month = istMonthKeyForMillis(cbLedger.occurredAt);
+      const papers = buildGstr1WorkingPapers({
+        month,
+        ...(await new MemoryTaxComplianceReportSource(cb.store).loadMonthlyScope(month)),
+      });
+      assert.equal(papers.reviewStatus, "requires_tax_review");
+      assert.ok(papers.taxAdjustments.some((row) => row.eventType === "chargeback"));
+      assert.equal(papers.taxAdjustments.some((row) => row.eventType === "refund"), false);
+      assert.ok(papers.taxAdjustments.every((row) => row.creditNoteId == null));
+      assert.ok(
+        papers.complianceOpenItems.some((i) => i.unresolvedReasons.includes("gst_adjustment_requires_review"))
+      );
+      assert.equal(
+        [...cb.store.docs.keys()].filter((k) => k.startsWith("_subscriptionCreditNotes/")).length,
+        0
+      );
+
+      const unspecifiedPlay = new FakePlay(activeSub(), paidOrder(ORDER1, "249"));
+      const unspecified = await primedDeps(unspecifiedPlay);
+      await processAndroidPurchaseToken(unspecified.deps, {
+        purchaseToken: TOKEN,
+        callerUid: UID,
+        source: "androidValidation",
+        eventSource: "callable",
+      });
+      unspecifiedPlay.orders.set(
+        ORDER1,
+        refundedOrder(unspecifiedPlay.orders.get(ORDER1)!, rfc(NOW + 1000), undefined, null)
+      );
+      await assert.rejects(
+        processAndroidVoidedPurchase(unspecified.deps, {
+          purchaseToken: TOKEN,
+          orderId: ORDER1,
+          productType: 1,
+          refundType: 1,
+          source: "rtdn",
+          eventTimeMillis: NOW + 1000,
+        }),
+        isCause("unknown_order_refund_reason")
+      );
+      assert.equal(
+        unspecified.store.docs.has(financialLedgerPath(sanitizeDocId(`android:refund:${ORDER1}`))),
+        false
+      );
+      assert.equal(
+        unspecified.store.docs.has(financialLedgerPath(sanitizeDocId(`android:chargeback:${ORDER1}`))),
+        false
+      );
+    }
+
+    // F–I. out-of-app expiredPurchaseToken ownership
+    {
+      const expiredOnlyPlay = new FakePlay(
+        activeSub({
+          externalAccountIdentifiers: {},
+          outOfAppPurchaseContext: { expiredPurchaseToken: EXPIRED_TOKEN },
+        }),
+        paidOrder(ORDER1, "249")
+      );
+      const expiredOnly = await primedDeps(expiredOnlyPlay);
+      expiredOnly.store.docs.set(playCredentialIndexPath(credentialFingerprint(EXPIRED_TOKEN)), {
+        uid: UID,
+        createdAt: NOW,
+        updatedAt: NOW,
+      });
+      const recovered = await processAndroidPurchaseToken(expiredOnly.deps, {
+        purchaseToken: TOKEN,
+        callerUid: UID,
+        source: "androidValidation",
+        eventSource: "callable",
+      });
+      assert.equal(recovered.uid, UID);
+      assert.equal(recovered.to?.entitlementActive, true);
+      assert.equal(expiredOnlyPlay.capturedTokens.includes(EXPIRED_TOKEN), false);
+      assert.equal(
+        expiredOnly.store.docs.get(playCredentialIndexPath(credentialFingerprint(TOKEN)))?.uid,
+        UID
+      );
+      assertNoSecrets(expiredOnly.store, recovered);
+      assert.equal(JSON.stringify([...expiredOnly.store.docs.entries()]).includes(EXPIRED_TOKEN), false);
+
+      const bothSame = new FakePlay(
+        activeSub({
+          outOfAppPurchaseContext: {
+            expiredExternalAccountIdentifiers: {
+              obfuscatedExternalAccountId: obfuscatedAccountIdForUid(UID),
+            },
+            expiredPurchaseToken: EXPIRED_TOKEN,
+          },
+        }),
+        paidOrder(ORDER1, "249")
+      );
+      const same = await primedDeps(bothSame);
+      same.store.docs.set(playCredentialIndexPath(credentialFingerprint(EXPIRED_TOKEN)), {
+        uid: UID,
+        createdAt: NOW,
+        updatedAt: NOW,
+      });
+      const sameOwned = await processAndroidPurchaseToken(same.deps, {
+        purchaseToken: TOKEN,
+        callerUid: UID,
+        source: "androidValidation",
+        eventSource: "callable",
+      });
+      assert.equal(sameOwned.uid, UID);
+
+      const conflictAb = new FakePlay(
+        activeSub({
+          outOfAppPurchaseContext: {
+            expiredExternalAccountIdentifiers: {
+              obfuscatedExternalAccountId: obfuscatedAccountIdForUid(OTHER),
+            },
+          },
+        }),
+        paidOrder(ORDER1, "249")
+      );
+      const ab = await primedDeps(conflictAb);
+      await handlePrepareAndroidBillingAccount(ab.store, OTHER, NOW);
+      await assert.rejects(
+        processAndroidPurchaseToken(ab.deps, {
+          purchaseToken: TOKEN,
+          callerUid: UID,
+          source: "androidValidation",
+          eventSource: "callable",
+        }),
+        isCause("play_ownership_signal_conflict")
+      );
+
+      const conflictToken = new FakePlay(
+        activeSub({
+          outOfAppPurchaseContext: { expiredPurchaseToken: EXPIRED_TOKEN },
+        }),
+        paidOrder(ORDER1, "249")
+      );
+      const vsToken = await primedDeps(conflictToken);
+      vsToken.store.docs.set(playCredentialIndexPath(credentialFingerprint(EXPIRED_TOKEN)), {
+        uid: OTHER,
+        createdAt: NOW,
+        updatedAt: NOW,
+      });
+      await assert.rejects(
+        processAndroidPurchaseToken(vsToken.deps, {
+          purchaseToken: TOKEN,
+          callerUid: UID,
+          source: "androidValidation",
+          eventSource: "callable",
+        }),
+        isCause("play_ownership_signal_conflict")
+      );
+
+      const unknownExpired = new FakePlay(
+        activeSub({
+          externalAccountIdentifiers: {},
+          outOfAppPurchaseContext: { expiredPurchaseToken: EXPIRED_TOKEN },
+        }),
+        paidOrder(ORDER1, "249")
+      );
+      const unknown = await primedDeps(unknownExpired);
+      await assert.rejects(
+        processAndroidPurchaseToken(unknown.deps, {
+          purchaseToken: TOKEN,
+          source: "rtdn",
+          eventSource: "webhook",
+        }),
+        (e: unknown) =>
+          e instanceof BillingError &&
+          e.causeCode === "unresolved_play_account_owner" &&
+          e.retryable === true
+      );
+      assert.equal(unknownExpired.capturedTokens.includes(EXPIRED_TOKEN), false);
+      assert.equal(JSON.stringify(unknown.store.docs.get(subscriptionStatusPath(UID)) ?? {}).includes(EXPIRED_TOKEN), false);
+
+      const collisionPlay = new FakePlay(activeSub(), paidOrder(ORDER1, "249"));
+      const collision = await primedDeps(collisionPlay);
+      collision.store.docs.set(playCredentialIndexPath(credentialFingerprint(TOKEN)), {
+        uid: OTHER,
+        createdAt: NOW,
+        updatedAt: NOW,
+      });
+      await assert.rejects(
+        processAndroidPurchaseToken(collision.deps, {
+          purchaseToken: TOKEN,
+          callerUid: UID,
+          source: "androidValidation",
+          eventSource: "callable",
+        }),
+        isCause("play_credential_index_collision")
+      );
+      assert.equal(collision.store.docs.has(subscriptionStatusPath(UID)), false);
+    }
+
+    // J–O. every owned non-pending state requires latestSuccessfulOrderId
+    {
+      for (const state of [
+        "SUBSCRIPTION_STATE_IN_GRACE_PERIOD",
+        "SUBSCRIPTION_STATE_ON_HOLD",
+        "SUBSCRIPTION_STATE_CANCELED",
+        "SUBSCRIPTION_STATE_PAUSED",
+        "SUBSCRIPTION_STATE_EXPIRED",
+      ]) {
+        const sub = activeSub({
+          subscriptionState: state,
+          acknowledgementState: "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED",
+        });
+        delete sub.lineItems![0].latestSuccessfulOrderId;
+        const play = new FakePlay(sub, paidOrder(ORDER1, "249"));
+        const { deps, store } = await primedDeps(play);
+        await assert.rejects(
+          processAndroidPurchaseToken(deps, {
+            purchaseToken: TOKEN,
+            callerUid: UID,
+            source: "rtdn",
+            eventSource: "webhook",
+          }),
+          isCause("missing_latest_successful_order_id")
+        );
+        assert.equal(play.ackCalls, 0);
+        assert.equal(historyDocs(store).length, 0);
+        assert.equal(
+          [...store.docs.keys()].filter((k) => k.startsWith("_billingEventLedger/")).length,
+          0
+        );
+        assert.equal(store.docs.has(subscriptionStatusPath(UID)), false);
+      }
+    }
+
+    // P/Q. deferred replacement / removal rejected
+    {
+      for (const deferred of [
+        { deferredItemReplacement: { productId: "vyd_starter" } },
+        { deferredItemRemoval: {} },
+      ]) {
+        const play = new FakePlay(
+          activeSub({
+            lineItems: [
+              {
+                productId: "vyd_professional",
+                expiryTime: rfc(FUTURE),
+                latestSuccessfulOrderId: ORDER1,
+                autoRenewingPlan: { autoRenewEnabled: true },
+                offerDetails: { basePlanId: "monthly" },
+                ...deferred,
+              },
+            ],
+          }),
+          paidOrder(ORDER1, "249")
+        );
+        const { deps, store } = await primedDeps(play);
+        await assert.rejects(
+          processAndroidPurchaseToken(deps, {
+            purchaseToken: TOKEN,
+            callerUid: UID,
+            source: "androidValidation",
+            eventSource: "callable",
+          }),
+          isCause("unsupported_deferred_subscription_change")
+        );
+        assert.equal(play.ackCalls, 0);
+        assert.equal(store.docs.has(subscriptionStatusPath(UID)), false);
+      }
+    }
+
+    // R/S/T. etag lifecycle identity
+    {
+      const play = new FakePlay(
+        activeSub({
+          subscriptionState: "SUBSCRIPTION_STATE_CANCELED",
+          acknowledgementState: "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED",
+          etag: "etag-cancel-t1",
+          canceledStateContext: {
+            userInitiatedCancellation: { cancelTime: rfc(NOW) },
+          },
+        }),
+        paidOrder(ORDER1, "249")
+      );
+      const { deps, store } = await primedDeps(play);
+      const firstCancel = await processAndroidPurchaseToken(deps, {
+        purchaseToken: TOKEN,
+        callerUid: UID,
+        source: "rtdn",
+        eventSource: "webhook",
+        eventTimeMillis: NOW,
+      });
+      assert.equal(firstCancel.to?.billingStatus, "cancelled");
+      assert.equal(firstCancel.to?.cancelledAt, NOW);
+
+      play.sub = activeSub({
+        acknowledgementState: "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED",
+        etag: "etag-active-restart",
+      });
+      const restarted = await processAndroidPurchaseToken(deps, {
+        purchaseToken: TOKEN,
+        source: "rtdn",
+        eventSource: "webhook",
+        eventTimeMillis: NOW + DAY,
+      });
+      assert.equal(restarted.to?.billingStatus, "active");
+
+      play.sub = activeSub({
+        subscriptionState: "SUBSCRIPTION_STATE_CANCELED",
+        acknowledgementState: "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED",
+        etag: "etag-cancel-t2",
+        canceledStateContext: {
+          userInitiatedCancellation: { cancelTime: rfc(NOW + 2 * DAY) },
+        },
+      });
+      const secondCancel = await processAndroidPurchaseToken(deps, {
+        purchaseToken: TOKEN,
+        source: "rtdn",
+        eventSource: "webhook",
+        eventTimeMillis: NOW + 2 * DAY,
+      });
+      assert.equal(secondCancel.to?.billingStatus, "cancelled");
+      assert.equal(secondCancel.to?.cancelledAt, NOW + 2 * DAY);
+      assert.equal(canceledHistory(store).length, 2);
+
+      const dupCancel = await processAndroidPurchaseToken(deps, {
+        purchaseToken: TOKEN,
+        source: "rtdn",
+        eventSource: "webhook",
+        eventTimeMillis: NOW + 2 * DAY,
+      });
+      assert.equal(dupCancel.alreadyProcessed, true);
+      assert.equal(canceledHistory(store).length, 2);
+
+      const racedPlay = new FakePlay(activeSub(), paidOrder(ORDER1, "249"));
+      const raced = await primedDeps(racedPlay);
+      await processAndroidPurchaseToken(raced.deps, {
+        purchaseToken: TOKEN,
+        callerUid: UID,
+        source: "androidValidation",
+        eventSource: "callable",
+      });
+      racedPlay.sub.subscriptionState = "SUBSCRIPTION_STATE_CANCELED";
+      racedPlay.sub.acknowledgementState = "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED";
+      racedPlay.sub.etag = "etag-cancel-race";
+      racedPlay.sub.canceledStateContext = {
+        userInitiatedCancellation: { cancelTime: rfc(NOW + 5_000) },
+      };
+      const [c1, c2] = await Promise.all([
+        processAndroidPurchaseToken(raced.deps, {
+          purchaseToken: TOKEN,
+          callerUid: UID,
+          source: "androidValidation",
+          eventSource: "callable",
+          eventTimeMillis: NOW + 5_000,
+        }),
+        processAndroidPurchaseToken(raced.deps, {
+          purchaseToken: TOKEN,
+          source: "rtdn",
+          eventSource: "webhook",
+          eventTimeMillis: NOW + 5_000,
+        }),
+      ]);
+      assert.ok(c1.to?.billingStatus === "cancelled" && c2.to?.billingStatus === "cancelled");
+      assert.equal(canceledHistory(raced.store).length, 1);
+    }
+
+    // U/V. original ledger must match Order history at refund time
+    {
+      const play = new FakePlay(
+        activeSub(),
+        paidOrder(ORDER1, "249", 0, rfc(sep), { processedEventTime: rfc(sep) })
+      );
+      const timed = await primedDeps(play);
+      const sepDeps = { ...timed.deps, nowMs: () => sep };
+      await processAndroidPurchaseToken(sepDeps, {
+        purchaseToken: TOKEN,
+        callerUid: UID,
+        source: "androidValidation",
+        eventSource: "callable",
+      });
+      const purchasePath = financialLedgerPath(sanitizeDocId(`android:purchase:${ORDER1}`));
+      const ledger = timed.store.docs.get(purchasePath) as BillingEventLedgerDoc;
+      timed.store.docs.set(purchasePath, { ...ledger, occurredAt: oct });
+      play.sub.acknowledgementState = "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED";
+      play.orders.set(ORDER1, refundedOrder(play.orders.get(ORDER1)!, rfc(oct)));
+      await assert.rejects(
+        processAndroidVoidedPurchase(timed.deps, {
+          purchaseToken: TOKEN,
+          orderId: ORDER1,
+          productType: 1,
+          refundType: 1,
+          source: "rtdn",
+          eventTimeMillis: oct,
+        }),
+        isCause("financial_event_conflict")
+      );
+
+      const grossPlay = new FakePlay(activeSub(), paidOrder(ORDER1, "249"));
+      const gross = await primedDeps(grossPlay);
+      await processAndroidPurchaseToken(gross.deps, {
+        purchaseToken: TOKEN,
+        callerUid: UID,
+        source: "androidValidation",
+        eventSource: "callable",
+      });
+      grossPlay.sub.acknowledgementState = "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED";
+      const originalOrder = grossPlay.orders.get(ORDER1)!;
+      grossPlay.orders.set(
+        ORDER1,
+        refundedOrder(originalOrder, rfc(NOW + 1000), { currencyCode: "INR", units: "99", nanos: 0 })
+      );
+      await assert.rejects(
+        processAndroidVoidedPurchase(gross.deps, {
+          purchaseToken: TOKEN,
+          orderId: ORDER1,
+          productType: 1,
+          refundType: 1,
+          source: "rtdn",
+          eventTimeMillis: NOW + 1000,
+        }),
+        isCause("refund_gross_mismatch")
+      );
+    }
+
+    // W/X. queue pending → later success → resolved; duplicate stays resolved
+    {
+      const play = new FakePlay(activeSub(), paidOrder(ORDER1, "249"));
+      const { deps, store } = await primedDeps(play);
+      await processAndroidPurchaseToken(deps, {
+        purchaseToken: TOKEN,
+        callerUid: UID,
+        source: "androidValidation",
+        eventSource: "callable",
+      });
+      play.orders.set(ORDER1, refundedOrder(play.orders.get(ORDER1)!, rfc(NOW + 8000)));
+      play.unqueryableTokens.add(TOKEN);
+      await processAndroidVoidedPurchase(deps, {
+        purchaseToken: TOKEN,
+        orderId: ORDER1,
+        productType: 1,
+        refundType: 1,
+        source: "rtdn",
+        eventTimeMillis: NOW + 8000,
+      });
+      const queuePath = billingReconciliationQueuePath(
+        sanitizeDocId(`android:refund-reconcile:${ORDER1}`)
+      );
+      const pending = store.docs.get(queuePath) as {
+        status: string;
+        resolvedAt: number | null;
+        financialEventId: string;
+      };
+      assert.equal(pending.status, "pending");
+      assert.equal(pending.resolvedAt, null);
+      play.unqueryableTokens.delete(TOKEN);
+      const later = await processAndroidVoidedPurchase(deps, {
+        purchaseToken: TOKEN,
+        orderId: ORDER1,
+        productType: 1,
+        refundType: 1,
+        source: "rtdn",
+        eventTimeMillis: NOW + 8000,
+      });
+      assert.equal(later.reconciliationRequired, false);
+      const resolved = store.docs.get(queuePath) as {
+        status: string;
+        resolvedAt: number | null;
+        financialEventId: string;
+      };
+      assert.equal(queueDocs(store).length, 1);
+      assert.equal(resolved.status, "resolved");
+      assert.equal(resolved.resolvedAt, NOW);
+      assert.equal(resolved.financialEventId, `android:refund:${ORDER1}`);
+      const again = await processAndroidVoidedPurchase(deps, {
+        purchaseToken: TOKEN,
+        orderId: ORDER1,
+        productType: 1,
+        refundType: 1,
+        source: "rtdn",
+        eventTimeMillis: NOW + 8000,
+      });
+      assert.equal(again.reconciliationRequired, false);
+      const still = store.docs.get(queuePath) as { status: string; resolvedAt: number | null };
+      assert.equal(still.status, "resolved");
+      assert.equal(still.resolvedAt, NOW);
+    }
+
+    // Y. missing refundType fails before treating Order as refunded
+    {
+      assert.throws(() => assertVoidedPurchaseFullRefundType(undefined), isCause("missing_void_refund_type"));
+      assert.throws(() => assertVoidedPurchaseFullRefundType(null), isCause("missing_void_refund_type"));
+      assert.throws(() => assertVoidedPurchaseFullRefundType(99), isCause("unknown_void_refund_type"));
+      const play = new FakePlay(activeSub(), paidOrder(ORDER1, "249"));
+      const { deps, store } = await primedDeps(play);
+      await processAndroidPurchaseToken(deps, {
+        purchaseToken: TOKEN,
+        callerUid: UID,
+        source: "androidValidation",
+        eventSource: "callable",
+      });
+      play.orders.set(ORDER1, refundedOrder(play.orders.get(ORDER1)!, rfc(NOW + 1000)));
+      await assert.rejects(
+        processAndroidVoidedPurchase(deps, {
+          purchaseToken: TOKEN,
+          orderId: ORDER1,
+          productType: 1,
+          refundType: undefined,
+          source: "rtdn",
+          eventTimeMillis: NOW + 1000,
+        }),
+        isCause("missing_void_refund_type")
+      );
+      assert.equal(store.docs.has(financialLedgerPath(sanitizeDocId(`android:refund:${ORDER1}`))), false);
+    }
+
+    // Z. no undocumented 7-day RTDN vs refundEvent rejection
+    {
+      const play = new FakePlay(activeSub(), paidOrder(ORDER1, "249"));
+      const { deps, store } = await primedDeps(play);
+      await processAndroidPurchaseToken(deps, {
+        purchaseToken: TOKEN,
+        callerUid: UID,
+        source: "androidValidation",
+        eventSource: "callable",
+      });
+      play.sub.acknowledgementState = "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED";
+      const refundAt = NOW + 8 * DAY;
+      play.orders.set(ORDER1, refundedOrder(play.orders.get(ORDER1)!, rfc(refundAt)));
+      const late = await processAndroidVoidedPurchase(deps, {
+        purchaseToken: TOKEN,
+        orderId: ORDER1,
+        productType: 1,
+        refundType: 1,
+        source: "rtdn",
+        eventTimeMillis: NOW,
+      });
+      const refundLedger = store.docs.get(
+        financialLedgerPath(sanitizeDocId(`android:refund:${ORDER1}`))
+      ) as BillingEventLedgerDoc;
+      assert.equal(late.financialEventWritten, true);
+      assert.equal(refundLedger.occurredAt, refundAt);
+    }
   }
 
   // Source-level: adapter never logs tokens

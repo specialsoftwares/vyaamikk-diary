@@ -57,6 +57,7 @@ const FORBIDDEN_ERROR_SUBSTRINGS = [
   "signedPayload",
   "receiptData",
   "latestReceipt",
+  "expiredPurchaseToken",
   "BEGIN PRIVATE",
 ];
 
