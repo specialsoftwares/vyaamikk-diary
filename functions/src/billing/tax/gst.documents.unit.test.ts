@@ -546,6 +546,37 @@ async function testCreditNotes(): Promise<void> {
   assert.equal(first.creditNote.gstRateBps, original.gstRateBps);
   assert.equal(first.creditNote.igstReversedInPaise, original.igstInPaise);
   assert.equal(first.creditNote.gstAdjustmentEligibility, "requires_review");
+  assert.equal(first.creditNote.annualReturnCutoffStatus, "unconfirmed");
+  const admin = { uid: "admin-1", tokenAdmin: true, adminIdentityProvisioned: true };
+  await assert.rejects(
+    applyReviewTaxCompliance(store, {
+      invoiceId: first.creditNote.creditNoteId,
+      admin,
+      reviewedByDiagnosticUid: "admindiag01",
+      reviewBasis: "cannot mark eligible while annual-return cutoff is unconfirmed",
+      nowMs: NOW + 10,
+      gstAdjustmentEligibility: "eligible",
+      recipientItcReversalEvidenceStatus: "confirmed",
+      annualReturnCutoffStatus: "unconfirmed",
+    }),
+    isCause("gst_adjustment_annual_return_cutoff_unconfirmed")
+  );
+  const madeEligible = await applyReviewTaxCompliance(store, {
+    invoiceId: first.creditNote.creditNoteId,
+    admin,
+    reviewedByDiagnosticUid: "admindiag01",
+    reviewBasis: "ITC reversal confirmed; annual return not furnished as of review",
+    nowMs: NOW + 11,
+    gstAdjustmentEligibility: "eligible",
+    recipientItcReversalEvidenceStatus: "confirmed",
+    annualReturnCutoffStatus: "not_furnished_as_of_review",
+    annualReturnFurnishedAt: null,
+    ecoReportingCategory: "section52_table14a",
+    operatorGstin: "29AAAAA0000A1Z5",
+    operatorIdentifier: "google_play",
+  });
+  assert.equal(madeEligible.gstAdjustmentEligibility, "eligible");
+  assert.equal(madeEligible.annualReturnCutoffStatus, "not_furnished_as_of_review");
   const cnHtml = buildSubscriptionCreditNoteHtml(first.creditNote);
   assert.match(cnHtml, /CREDIT NOTE/);
   assert.match(cnHtml, /Nature of document: CREDIT NOTE/);

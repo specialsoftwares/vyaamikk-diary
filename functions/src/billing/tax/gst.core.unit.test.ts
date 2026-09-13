@@ -78,7 +78,12 @@ import {
   STATUTORY_DOCUMENT_NUMBER_MAX_LEN,
 } from "./invoiceAllocation";
 import { formatCreditNoteNumber } from "./creditNote";
-import { parseSection34CreditNotePolicy } from "./gstAdjustment";
+import {
+  annualReturnCutoffIsResolvedForEligibility,
+  assertGstAdjustmentMayBeEligible,
+  effectiveSection34OutputTaxReductionLimitMs,
+  parseSection34CreditNotePolicy,
+} from "./gstAdjustment";
 
 const SELLER_GSTIN = "09AAAAA0000A1Z5";
 const BUYER_MH_GSTIN = "27AAAAA0000A1Z5";
@@ -562,6 +567,87 @@ function testFinancialYear(): void {
     formatIstCalendarDate(section34OutputTaxReductionOuterLimitMs(sepSupply)),
     "30-11-2027"
   );
+  assert.equal(
+    annualReturnCutoffIsResolvedForEligibility("unconfirmed"),
+    false
+  );
+  assert.equal(annualReturnCutoffIsResolvedForEligibility("not_furnished_as_of_review"), true);
+  assert.equal(annualReturnCutoffIsResolvedForEligibility("furnished"), true);
+  assert.throws(
+    () =>
+      effectiveSection34OutputTaxReductionLimitMs({
+        originalSupplyOccurredAt: sepSupply,
+        annualReturnCutoffStatus: "unconfirmed",
+        annualReturnFurnishedAt: null,
+      }),
+    isCause("gst_adjustment_annual_return_cutoff_unconfirmed")
+  );
+  assert.equal(
+    effectiveSection34OutputTaxReductionLimitMs({
+      originalSupplyOccurredAt: sepSupply,
+      annualReturnCutoffStatus: "not_furnished_as_of_review",
+      annualReturnFurnishedAt: null,
+    }),
+    section34OutputTaxReductionOuterLimitMs(sepSupply)
+  );
+  const furnishedAt = istWallClockToEpochMs("2026-12-01T00:00:00");
+  assert.equal(
+    effectiveSection34OutputTaxReductionLimitMs({
+      originalSupplyOccurredAt: sepSupply,
+      annualReturnCutoffStatus: "furnished",
+      annualReturnFurnishedAt: furnishedAt,
+    }),
+    furnishedAt
+  );
+  const b2bBuyer = {
+    classification: "b2b" as const,
+    legalName: "Buyer LLP",
+    gstin: BUYER_MH_GSTIN,
+    gstinVerificationStatus: "verified" as const,
+    billingAddress: "12 MG Road",
+    postalCode: "400001",
+    stateCode: "27",
+    stateName: "Maharashtra",
+  };
+  assert.throws(
+    () =>
+      assertGstAdjustmentMayBeEligible({
+        eligibility: "eligible",
+        buyer: b2bBuyer,
+        recipientItcReversalEvidenceStatus: "confirmed",
+        taxIncidenceConditionStatus: "not_applicable",
+        issuedAt: sepSupply,
+        originalSupplyOccurredAt: sepSupply,
+        annualReturnCutoffStatus: "unconfirmed",
+        annualReturnFurnishedAt: null,
+      }),
+    isCause("gst_adjustment_annual_return_cutoff_unconfirmed")
+  );
+  assert.throws(
+    () =>
+      assertGstAdjustmentMayBeEligible({
+        eligibility: "eligible",
+        buyer: b2bBuyer,
+        recipientItcReversalEvidenceStatus: "confirmed",
+        taxIncidenceConditionStatus: "not_applicable",
+        issuedAt: sepSupply,
+        originalSupplyOccurredAt: sepSupply,
+        annualReturnCutoffStatus: "furnished",
+        annualReturnFurnishedAt: istWallClockToEpochMs("2026-09-01T00:00:00"),
+      }),
+    isCause("gst_adjustment_section34_deadline_passed")
+  );
+  assertGstAdjustmentMayBeEligible({
+    eligibility: "eligible",
+    buyer: b2bBuyer,
+    recipientItcReversalEvidenceStatus: "confirmed",
+    taxIncidenceConditionStatus: "not_applicable",
+    issuedAt: sepSupply,
+    originalSupplyOccurredAt: sepSupply,
+    annualReturnCutoffStatus: "not_furnished_as_of_review",
+    annualReturnFurnishedAt: null,
+  });
+
   assert.equal(
     formatIstCalendarDate(ordinaryTaxableServiceInvoiceIssueDueAt(sepSupply)),
     "12-10-2026"

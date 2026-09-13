@@ -56,7 +56,11 @@ import type {
 
 import { formatIstCalendarDate } from "./financialYearUtils";
 import { isValidGstinFormat } from "./gstin";
-import { outputTaxReductionIncluded } from "./gstAdjustment";
+import {
+  assertGstAdjustmentMayBeEligible,
+  outputTaxReductionIncluded,
+  outputTaxReductionMayBeApplied,
+} from "./gstAdjustment";
 import { mayIssueDeveloperTaxInvoice } from "./platformTaxPolicy";
 import {
   complianceStatutoryBind,
@@ -65,7 +69,9 @@ import {
   unresolvedReasonsForInvoice,
 } from "./taxCompliance";
 import {
+  detectLedgerReconciliationGaps,
   financialEventTaxBind,
+  isLedgerReconciliationReason,
   reportSourceFromBillingStore,
   type TaxComplianceReportSource,
 } from "./taxComplianceReportSource";
@@ -129,7 +135,12 @@ export interface Gstr1TaxAdjustmentWorkingRow {
   creditNoteId: string | null;
   gstAdjustmentEligibility: string;
   taxAdjustmentDisposition: string;
+  taxableValueReductionInPaise: number | null;
   outputTaxReductionInPaise: number | null;
+  grossReversalInPaise: number | null;
+  igstReductionInPaise: number | null;
+  cgstReductionInPaise: number | null;
+  sgstReductionInPaise: number | null;
 }
 
 export interface Gstr1Table14WorkingRow {
@@ -377,8 +388,9 @@ export function buildGstr1WorkingPapers(input: {
       return reporting === input.month && c.gstrReportable && !c.gstrReportedMonth;
     })
     .map((c) => {
-      const eligibility =
-        complianceById.get(c.creditNoteId)?.gstAdjustmentEligibility ?? c.gstAdjustmentEligibility;
+      const rec = complianceById.get(c.creditNoteId);
+      const eligibility = rec?.gstAdjustmentEligibility ?? c.gstAdjustmentEligibility;
+      const cutoff = rec?.annualReturnCutoffStatus ?? c.annualReturnCutoffStatus ?? "unconfirmed";
       return {
         creditNoteId: c.creditNoteId,
         documentNumber: c.documentNumber,
@@ -391,7 +403,10 @@ export function buildGstr1WorkingPapers(input: {
         taxReversalInPaise: c.totalTaxReversedInPaise,
         totalReversalInPaise: c.totalReversedInPaise,
         gstAdjustmentEligibility: eligibility,
-        outputTaxReductionIncluded: outputTaxReductionIncluded(eligibility),
+        outputTaxReductionIncluded: outputTaxReductionMayBeApplied({
+          eligibility,
+          annualReturnCutoffStatus: cutoff,
+        }),
       };
     });
 
@@ -443,7 +458,7 @@ export function buildGstr1WorkingPapers(input: {
     row.sourceInvoiceIds.push(inv.invoiceId);
   }
   for (const note of creditNotes) {
-    if (!outputTaxReductionIncluded(note.gstAdjustmentEligibility)) continue;
+    if (!note.outputTaxReductionIncluded) continue;
     const originalCompliance = complianceById.get(note.originalInvoiceId);
     const original = invoiceById.get(note.originalInvoiceId);
     const category =
@@ -480,7 +495,8 @@ export function buildGstr1WorkingPapers(input: {
   const complianceOpenItems: Gstr1ComplianceOpenItem[] = [];
   const unresolved = new Set<string>();
   for (const rec of input.complianceRecords) {
-    if (!isInMonthlyComplianceScope(rec, input.month)) continue;
+    const reconBlocked = rec.unresolvedReasons.some(isLedgerReconciliationReason);
+    if (!isInMonthlyComplianceScope(rec, input.month) && !reconBlocked) continue;
     const original =
       rec.documentKind === "credit_note" && rec.originalInvoiceId
         ? complianceById.get(rec.originalInvoiceId)
@@ -489,7 +505,7 @@ export function buildGstr1WorkingPapers(input: {
     const liveGstin = original?.operatorGstin ?? rec.operatorGstin;
     const invoice = invoiceById.get(rec.invoiceId);
     const note = creditNoteDocs.find((c) => c.creditNoteId === rec.invoiceId);
-    const liveReasons = invoice
+    const computed = invoice
       ? unresolvedReasonsForInvoice({
           invoice,
           ecoReportingCategory: liveCategory,
@@ -503,8 +519,11 @@ export function buildGstr1WorkingPapers(input: {
             operatorGstin: liveGstin,
             gstAdjustmentEligibility:
               rec.gstAdjustmentEligibility ?? note.gstAdjustmentEligibility,
+            annualReturnCutoffStatus:
+              rec.annualReturnCutoffStatus ?? note.annualReturnCutoffStatus,
           })
-        : rec.unresolvedReasons;
+        : [];
+    const liveReasons = mergeReasons(rec.unresolvedReasons, computed);
     const liveStatus: Gstr1ReviewStatus =
       liveReasons.length === 0 ? "ready_to_file" : "requires_tax_review";
     if (liveStatus === "requires_tax_review") {
@@ -548,6 +567,35 @@ export function buildGstr1WorkingPapers(input: {
   const financialEvents = [...(input.financialEvents ?? [])]
     .filter((event) => event.monthKey === input.month)
     .sort((a, b) => a.financialEventId.localeCompare(b.financialEventId));
+  for (const gap of detectLedgerReconciliationGaps({
+    month: input.month,
+    invoices,
+    creditNotes: creditNoteDocs,
+    complianceRecords: input.complianceRecords,
+    financialEvents: input.financialEvents ?? [],
+  })) {
+    unresolved.add("gstr_tax_review_unresolved");
+    for (const reason of gap.reasons) unresolved.add(reason);
+    const existing = complianceOpenItems.find((item) => item.invoiceId === gap.invoiceId);
+    if (existing) {
+      existing.unresolvedReasons = mergeReasons(existing.unresolvedReasons, gap.reasons);
+      existing.reviewStatus = "requires_tax_review";
+      continue;
+    }
+    const rec = complianceById.get(gap.invoiceId);
+    complianceOpenItems.push({
+      invoiceId: gap.invoiceId,
+      documentKind: rec?.documentKind ?? gap.documentKind,
+      financialEventId: rec?.financialEventId ?? gap.financialEventId,
+      supplyMonthKey: rec?.supplyMonthKey ?? input.month,
+      issueMonthKey: rec?.issueMonthKey ?? null,
+      reportingTaxPeriodMonth: rec?.reportingTaxPeriodMonth ?? null,
+      taxPeriodMonth: rec?.reportingTaxPeriodMonth ?? null,
+      ecoReportingCategory: rec?.ecoReportingCategory ?? "requires_tax_review",
+      unresolvedReasons: gap.reasons,
+      reviewStatus: "requires_tax_review",
+    });
+  }
   const creditNoteByRefundId = new Map(
     creditNoteDocs.map((c) => [c.refundFinancialEventId, c] as const)
   );
@@ -562,7 +610,16 @@ export function buildGstr1WorkingPapers(input: {
         compliance?.gstAdjustmentEligibility ??
         note?.gstAdjustmentEligibility ??
         "requires_review";
-      const included = outputTaxReductionIncluded(eligibility);
+      const cutoff =
+        compliance?.annualReturnCutoffStatus ?? note?.annualReturnCutoffStatus ?? "unconfirmed";
+      const included = outputTaxReductionMayBeApplied({
+        eligibility,
+        annualReturnCutoffStatus: cutoff,
+      });
+      if (outputTaxReductionIncluded(eligibility) && !included) {
+        unresolved.add("gstr_tax_review_unresolved");
+        unresolved.add("gst_adjustment_annual_return_cutoff_unconfirmed");
+      }
       return {
         financialEventId: event.financialEventId,
         eventType: event.eventType,
@@ -571,7 +628,12 @@ export function buildGstr1WorkingPapers(input: {
         taxAdjustmentDisposition:
           compliance?.taxAdjustmentDisposition ??
           (note ? "credit_note_issued" : event.eventType === "chargeback" ? "requires_review" : "pending"),
-        outputTaxReductionInPaise: included ? (note?.taxableAmountReversedInPaise ?? null) : null,
+        taxableValueReductionInPaise: included ? (note?.taxableAmountReversedInPaise ?? null) : null,
+        outputTaxReductionInPaise: included ? (note?.totalTaxReversedInPaise ?? null) : null,
+        grossReversalInPaise: included ? (note?.totalReversedInPaise ?? null) : null,
+        igstReductionInPaise: included ? (note?.igstReversedInPaise ?? null) : null,
+        cgstReductionInPaise: included ? (note?.cgstReversedInPaise ?? null) : null,
+        sgstReductionInPaise: included ? (note?.sgstReversedInPaise ?? null) : null,
       };
     });
   for (const row of taxAdjustments) {
@@ -630,6 +692,10 @@ function originalResolvedEco(
   if (rec.documentKind !== "credit_note" || !rec.originalInvoiceId) return false;
   const original = complianceById.get(rec.originalInvoiceId);
   return Boolean(original && original.ecoReportingCategory !== "requires_tax_review");
+}
+
+function mergeReasons(existing: string[], extra: string[]): string[] {
+  return [...new Set([...existing, ...extra])].sort();
 }
 
 function csvCell(value: string | number | null | undefined): string {
@@ -769,12 +835,12 @@ export function workingPapersToCsv(papers: Gstr1WorkingPapers): string {
         csvCell(row.eventType),
         csvCell(""),
         csvCell(""),
+        csvCell(row.taxableValueReductionInPaise),
+        csvCell(row.igstReductionInPaise),
+        csvCell(row.cgstReductionInPaise),
+        csvCell(row.sgstReductionInPaise),
         csvCell(row.outputTaxReductionInPaise),
-        csvCell(""),
-        csvCell(""),
-        csvCell(""),
-        csvCell(""),
-        csvCell(""),
+        csvCell(row.grossReversalInPaise),
         csvCell(row.gstAdjustmentEligibility),
         csvCell(row.taxAdjustmentDisposition),
         csvCell(""),
@@ -1126,6 +1192,56 @@ export async function markGstr1FiledExact(
           causeCode: "gstr_filing_batch_conflict",
         });
       }
+    }
+
+    const taxReducingCreditNoteIds = uniqueSorted([
+      ...rebuilt.creditNotes.filter((row) => row.outputTaxReductionIncluded).map((row) => row.creditNoteId),
+      ...rebuilt.taxAdjustments
+        .filter((row) => row.outputTaxReductionInPaise != null)
+        .map((row) => row.creditNoteId)
+        .filter((id): id is string => Boolean(id)),
+    ]);
+    for (const id of taxReducingCreditNoteIds) {
+      const note = creditNoteById.get(id);
+      const compliance = complianceById.get(id);
+      if (!note || !compliance) {
+        throw new BillingError({
+          clientCode: "invalid_purchase",
+          causeCode: "gstr_tax_review_unresolved",
+        });
+      }
+      if (compliance.gstAdjustmentEligibility !== "eligible") {
+        throw new BillingError({
+          clientCode: "invalid_purchase",
+          causeCode: "gst_adjustment_not_eligible_at_filing",
+        });
+      }
+      if (
+        compliance.annualReturnCutoffStatus !== "furnished" &&
+        compliance.annualReturnCutoffStatus !== "not_furnished_as_of_review"
+      ) {
+        throw new BillingError({
+          clientCode: "invalid_purchase",
+          causeCode: "gst_adjustment_annual_return_cutoff_unconfirmed",
+        });
+      }
+      const original = invoiceById.get(note.originalInvoiceId);
+      if (!note.buyer || !original) {
+        throw new BillingError({
+          clientCode: "internal_error",
+          causeCode: "credit_note_statutory_particulars_incomplete",
+        });
+      }
+      assertGstAdjustmentMayBeEligible({
+        eligibility: compliance.gstAdjustmentEligibility,
+        buyer: note.buyer,
+        recipientItcReversalEvidenceStatus: compliance.recipientItcReversalEvidenceStatus,
+        taxIncidenceConditionStatus: compliance.taxIncidenceConditionStatus,
+        issuedAt: note.issuedAt ?? input.nowMs,
+        originalSupplyOccurredAt: original.supplyOccurredAt ?? original.createdAt,
+        annualReturnCutoffStatus: compliance.annualReturnCutoffStatus,
+        annualReturnFurnishedAt: compliance.annualReturnFurnishedAt,
+      });
     }
 
     const batch: Gstr1FilingBatchDoc = {

@@ -46,7 +46,8 @@ import { billingDetailsPath, financialLedgerPath, subscriptionTaxCompliancePath 
 import type { BillingEventLedgerDoc, SubscriptionInvoiceDoc, SubscriptionTaxComplianceDoc } from "../types";
 import { istWallClockToEpochMs } from "./financialYearUtils";
 import { notApplicableChannelEco, unreviewedChannelEco, type SellerIdentityConfig } from "./sellerIdentity";
-import { finalizeSubscriptionCreditNote } from "./creditNote";
+import { creditNoteIdForRefundEvent, finalizeSubscriptionCreditNote } from "./creditNote";
+import { invoiceIdForFinancialEvent } from "./invoiceAllocation";
 import { finalizeUnissuedInvoice } from "./taxDocumentFinalization";
 import { applyReviewTaxCompliance } from "./taxCompliance";
 import { AdminFirestoreTaxComplianceReportSource } from "./taxComplianceReportSource";
@@ -242,6 +243,170 @@ async function main(): Promise<void> {
   assert.equal(apple.invoice.taxPeriodMonth, null);
   const appleScope = await source.loadMonthlyScope("2026-09");
   assert.ok(appleScope.complianceRecords.some((c) => c.invoiceId === apple.invoice.invoiceId && c.supplyMonthKey === "2026-09"));
+
+  const bEvent = "emu-r5-missing-invoice";
+  const bInvoiceId = invoiceIdForFinancialEvent(bEvent);
+  await db.doc(financialLedgerPath(bEvent)).set({ ...ledger(bEvent), uid: "emu-r5-b" });
+  await db.doc(subscriptionTaxCompliancePath(bInvoiceId)).set({
+    invoiceId: bInvoiceId,
+    documentKind: "invoice",
+    financialEventId: bEvent,
+    originalInvoiceId: null,
+    uid: "emu-r5-b",
+    supplyMonthKey: "2026-09",
+    issueMonthKey: "2026-09",
+    reportingTaxPeriodMonth: "2026-09",
+    taxPeriodDecisionStatus: "resolved",
+    ecoReportingCategory: "section52_table14a",
+    operatorIdentifier: "google_play",
+    operatorGstin: SYNTHETIC_OPERATOR_GSTIN,
+    reviewStatus: "ready_to_file",
+    unresolvedReasons: [],
+    cumulativeCreditReversedInPaise: 0,
+    gstAdjustmentEligibility: "not_applicable",
+    recipientItcReversalEvidenceStatus: "not_applicable",
+    taxIncidenceConditionStatus: "not_applicable",
+    section34OuterLimitAt: null,
+    annualReturnCutoffStatus: "not_applicable",
+    annualReturnFurnishedAt: null,
+    annualReturnCutoffReviewedAt: null,
+    annualReturnCutoffReviewBasis: null,
+    taxAdjustmentDisposition: "not_applicable",
+    reviewedAt: NOW,
+    reviewedByDiagnosticUid: "emu-admin-diag",
+    reviewBasis: "fixture",
+    reviewVersion: 1,
+    previousEcoReportingCategory: null,
+    previousReportingTaxPeriodMonth: null,
+    createdAt: NOW,
+    updatedAt: NOW,
+  });
+  const bScope = await source.loadMonthlyScope("2026-09");
+  const bPapers = buildGstr1WorkingPapers({ month: "2026-09", ...bScope });
+  assert.equal(bPapers.reviewStatus, "requires_tax_review");
+  assert.ok(
+    bPapers.complianceOpenItems.some(
+      (item) =>
+        item.invoiceId === bInvoiceId &&
+        item.unresolvedReasons.includes("financial_event_invoice_mismatch")
+    )
+  );
+
+  const eEvent = "emu-r5-missing-ledger";
+  const eInvoiceId = invoiceIdForFinancialEvent(eEvent);
+  await db.doc(`_subscriptionInvoices/${eInvoiceId}`).set({
+    ...issued.invoice,
+    invoiceId: eInvoiceId,
+    financialEventId: eEvent,
+    uid: "emu-r5-e",
+    documentNumber: "SS/2026-27/0099",
+  });
+  await db.doc(subscriptionTaxCompliancePath(eInvoiceId)).set({
+    invoiceId: eInvoiceId,
+    documentKind: "invoice",
+    financialEventId: eEvent,
+    originalInvoiceId: null,
+    uid: "emu-r5-e",
+    supplyMonthKey: "2026-09",
+    issueMonthKey: "2026-09",
+    reportingTaxPeriodMonth: "2026-09",
+    taxPeriodDecisionStatus: "resolved",
+    ecoReportingCategory: "section52_table14a",
+    operatorIdentifier: "google_play",
+    operatorGstin: SYNTHETIC_OPERATOR_GSTIN,
+    reviewStatus: "ready_to_file",
+    unresolvedReasons: [],
+    cumulativeCreditReversedInPaise: 0,
+    gstAdjustmentEligibility: "not_applicable",
+    recipientItcReversalEvidenceStatus: "not_applicable",
+    taxIncidenceConditionStatus: "not_applicable",
+    section34OuterLimitAt: null,
+    annualReturnCutoffStatus: "not_applicable",
+    annualReturnFurnishedAt: null,
+    annualReturnCutoffReviewedAt: null,
+    annualReturnCutoffReviewBasis: null,
+    taxAdjustmentDisposition: "not_applicable",
+    reviewedAt: NOW,
+    reviewedByDiagnosticUid: "emu-admin-diag",
+    reviewBasis: "fixture",
+    reviewVersion: 1,
+    previousEcoReportingCategory: null,
+    previousReportingTaxPeriodMonth: null,
+    createdAt: NOW,
+    updatedAt: NOW,
+  });
+  const ePapers = buildGstr1WorkingPapers({
+    month: "2026-09",
+    ...(await source.loadMonthlyScope("2026-09")),
+  });
+  assert.ok(
+    ePapers.complianceOpenItems.some(
+      (item) =>
+        item.invoiceId === eInvoiceId &&
+        item.unresolvedReasons.includes("tax_document_financial_event_missing")
+    )
+  );
+
+  const hRefund = "emu-r5-cn-no-refund-ledger";
+  const hCnId = creditNoteIdForRefundEvent(hRefund);
+  await db.doc(`_subscriptionCreditNotes/${hCnId}`).set({
+    creditNoteId: hCnId,
+    originalInvoiceId: issued.invoice.invoiceId,
+    originalDocumentNumber: issued.invoice.documentNumber,
+    refundFinancialEventId: hRefund,
+    uid: issued.invoice.uid,
+    diagnosticUid: "emu-diag",
+    documentNumber: "CN/2026-27/0099",
+    financialYear: "2026-27",
+    taxPeriodMonth: "2026-09",
+    taxPeriodStatus: "resolved",
+    issuedAt: NOW,
+    issuedOnIst: "12-09-2026",
+    nature: "CREDIT NOTE",
+    seller: issued.invoice.seller,
+    buyer: issued.invoice.buyer,
+    buyerGstin: issued.invoice.buyer.gstin,
+    buyerClassification: issued.invoice.buyer.classification,
+    originalInvoiceIssuedAt: issued.invoice.invoiceIssuedAt,
+    originalInvoiceIssuedOnIst: issued.invoice.invoiceIssuedOnIst,
+    placeOfSupplyStateCode: issued.invoice.placeOfSupplyStateCode,
+    placeOfSupplyStateName: issued.invoice.placeOfSupplyStateName,
+    gstRateBps: issued.invoice.gstRateBps,
+    taxType: issued.invoice.taxType,
+    taxResponsibilityMode: issued.invoice.taxResponsibilityMode,
+    taxableAmountReversedInPaise: issued.invoice.taxableAmountInPaise,
+    cgstReversedInPaise: issued.invoice.cgstInPaise,
+    sgstReversedInPaise: issued.invoice.sgstInPaise,
+    igstReversedInPaise: issued.invoice.igstInPaise,
+    totalTaxReversedInPaise: issued.invoice.totalTaxInPaise,
+    totalReversedInPaise: issued.invoice.totalInPaise,
+    gstAdjustmentEligibility: "eligible",
+    recipientItcReversalEvidenceStatus: "not_applicable",
+    taxIncidenceConditionStatus: "confirmed",
+    section34OuterLimitAt: istWallClockToEpochMs("2027-11-30T23:59:59"),
+    annualReturnCutoffStatus: "not_furnished_as_of_review",
+    annualReturnFurnishedAt: null,
+    annualReturnCutoffReviewedAt: NOW,
+    annualReturnCutoffReviewBasis: "fixture",
+    taxAdjustmentDisposition: "credit_note_issued",
+    gstrReportable: true,
+    gstrReportedMonth: null,
+    gstrFilingBatchId: null,
+    createdAt: NOW,
+    updatedAt: NOW,
+  });
+  const hPapers = buildGstr1WorkingPapers({
+    month: "2026-09",
+    ...(await source.loadMonthlyScope("2026-09")),
+  });
+  assert.ok(
+    hPapers.complianceOpenItems.some(
+      (item) =>
+        item.invoiceId === hCnId &&
+        item.unresolvedReasons.includes("tax_document_financial_event_missing")
+    )
+  );
+
 
   await assert.rejects(
     applyReviewTaxCompliance(store, {

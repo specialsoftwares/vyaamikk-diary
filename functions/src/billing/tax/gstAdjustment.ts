@@ -34,6 +34,7 @@
 
 import { BillingError } from "../errors";
 import type {
+  AnnualReturnCutoffStatus,
   BuyerTaxSnapshot,
   FinancialEventType,
   GstAdjustmentEligibility,
@@ -56,6 +57,10 @@ export function invoiceGstAdjustmentDefaults(): {
   taxIncidenceConditionStatus: GstEvidenceStatus;
   section34OuterLimitAt: number | null;
   taxAdjustmentDisposition: TaxAdjustmentDisposition;
+  annualReturnCutoffStatus: AnnualReturnCutoffStatus;
+  annualReturnFurnishedAt: number | null;
+  annualReturnCutoffReviewedAt: number | null;
+  annualReturnCutoffReviewBasis: string | null;
 } {
   return {
     gstAdjustmentEligibility: "not_applicable",
@@ -63,7 +68,72 @@ export function invoiceGstAdjustmentDefaults(): {
     taxIncidenceConditionStatus: "not_applicable",
     section34OuterLimitAt: null,
     taxAdjustmentDisposition: "not_applicable",
+    annualReturnCutoffStatus: "not_applicable",
+    annualReturnFurnishedAt: null,
+    annualReturnCutoffReviewedAt: null,
+    annualReturnCutoffReviewBasis: null,
   };
+}
+
+export function creditNoteGstAdjustmentUnconfirmedDefaults(): {
+  gstAdjustmentEligibility: GstAdjustmentEligibility;
+  recipientItcReversalEvidenceStatus: GstEvidenceStatus;
+  taxIncidenceConditionStatus: GstEvidenceStatus;
+  section34OuterLimitAt: number | null;
+  taxAdjustmentDisposition: TaxAdjustmentDisposition;
+  annualReturnCutoffStatus: AnnualReturnCutoffStatus;
+  annualReturnFurnishedAt: number | null;
+  annualReturnCutoffReviewedAt: number | null;
+  annualReturnCutoffReviewBasis: string | null;
+} {
+  return {
+    gstAdjustmentEligibility: "requires_review",
+    recipientItcReversalEvidenceStatus: "unconfirmed",
+    taxIncidenceConditionStatus: "unconfirmed",
+    section34OuterLimitAt: null,
+    taxAdjustmentDisposition: "pending",
+    annualReturnCutoffStatus: "unconfirmed",
+    annualReturnFurnishedAt: null,
+    annualReturnCutoffReviewedAt: null,
+    annualReturnCutoffReviewBasis: null,
+  };
+}
+
+export function annualReturnCutoffIsResolvedForEligibility(
+  status: AnnualReturnCutoffStatus | null | undefined
+): boolean {
+  return status === "furnished" || status === "not_furnished_as_of_review";
+}
+
+/**
+ * Earlier of 30 November following the original-supply FY and the furnished
+ * annual-return timestamp. Never guesses an annual-return date.
+ */
+export function effectiveSection34OutputTaxReductionLimitMs(input: {
+  originalSupplyOccurredAt: number;
+  annualReturnCutoffStatus: AnnualReturnCutoffStatus;
+  annualReturnFurnishedAt: number | null;
+}): number {
+  const statutory = section34OutputTaxReductionOuterLimitMs(input.originalSupplyOccurredAt);
+  if (
+    input.annualReturnCutoffStatus === "unconfirmed" ||
+    input.annualReturnCutoffStatus === "not_applicable"
+  ) {
+    throw new BillingError({
+      clientCode: "invalid_purchase",
+      causeCode: "gst_adjustment_annual_return_cutoff_unconfirmed",
+    });
+  }
+  if (input.annualReturnCutoffStatus === "not_furnished_as_of_review") {
+    return statutory;
+  }
+  if (input.annualReturnFurnishedAt == null || !Number.isFinite(input.annualReturnFurnishedAt)) {
+    throw new BillingError({
+      clientCode: "invalid_purchase",
+      causeCode: "gst_adjustment_annual_return_furnished_at_required",
+    });
+  }
+  return Math.min(statutory, input.annualReturnFurnishedAt);
 }
 
 export function parseSection34CreditNotePolicy(
@@ -135,9 +205,15 @@ export function assertGstAdjustmentMayBeEligible(input: {
   taxIncidenceConditionStatus: GstEvidenceStatus;
   issuedAt: number;
   originalSupplyOccurredAt: number;
+  annualReturnCutoffStatus: AnnualReturnCutoffStatus;
+  annualReturnFurnishedAt: number | null;
 }): void {
   if (input.eligibility !== "eligible") return;
-  const limit = section34OutputTaxReductionOuterLimitMs(input.originalSupplyOccurredAt);
+  const limit = effectiveSection34OutputTaxReductionLimitMs({
+    originalSupplyOccurredAt: input.originalSupplyOccurredAt,
+    annualReturnCutoffStatus: input.annualReturnCutoffStatus,
+    annualReturnFurnishedAt: input.annualReturnFurnishedAt,
+  });
   if (input.issuedAt > limit) {
     throw new BillingError({
       clientCode: "invalid_purchase",
@@ -161,6 +237,16 @@ export function assertGstAdjustmentMayBeEligible(input: {
 
 export function outputTaxReductionIncluded(eligibility: string | null | undefined): boolean {
   return eligibility === "eligible";
+}
+
+export function outputTaxReductionMayBeApplied(input: {
+  eligibility: string | null | undefined;
+  annualReturnCutoffStatus: AnnualReturnCutoffStatus | null | undefined;
+}): boolean {
+  return (
+    outputTaxReductionIncluded(input.eligibility) &&
+    annualReturnCutoffIsResolvedForEligibility(input.annualReturnCutoffStatus)
+  );
 }
 
 export function assertCreditNoteStatutoryParticulars(input: {

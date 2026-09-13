@@ -315,17 +315,27 @@ appears in a later phase; it will be added with the query that requires it.
 - Cloud Run HTML→PDF renderer is selected but **not deployed** in VYD-40.
   See `docs/BILLING_VYD38_BILLING_DETAILS_UX.md` for the deferred Billing
   Details UI.
-- Monthly GSTR close uses `_billingEventLedger` as the population baseline.
-  A purchase/renewal without a corresponding invoice+compliance record, or a
-  refund/chargeback without an explicit tax-adjustment disposition, is an
-  open item (`financial_event_tax_document_missing` /
+- Monthly GSTR close uses `_billingEventLedger` as the population baseline
+  in **both** directions. A purchase/renewal without a corresponding
+  invoice+compliance record, or a refund/chargeback without an explicit
+  tax-adjustment disposition, is an open item
+  (`financial_event_tax_document_missing` /
   `tax_adjustment_disposition_missing`) and cannot `ready_to_file`.
+  Invoice/credit-note/compliance rows that cannot resolve an authoritative
+  ledger event (`tax_document_financial_event_missing`) likewise cannot
+  `ready_to_file`. Ledger vs document disagreements (uid, platform, SKU,
+  financialEventId, relatedFinancialEventId, month scope) are open blockers.
 - `invoiceIssueDueAt` is an operational aging hint (ordinary taxable
   services: 30 days from supply). Auto-expiring pending-GSTIN /
   incomplete-recipient holds against that deadline is a
   **production-enablement gate**, not a VYD-40 merge blocker.
 - Store refund/chargeback is financial evidence only. GST output-tax
   reduction requires explicit `gstAdjustmentEligibility` on the compliance
-  record. Chargebacks default to `requires_review` and do not auto-issue
-  credit notes. Section 34's 30 November outer limit is modelled;
-  annual-return date is unknown and is not guessed.
+  record and is the GST **tax** amount (`totalTaxReversedInPaise`), not
+  taxable value. Chargebacks default to `requires_review` and do not
+  auto-issue credit notes. Section 34 uses whichever is earlier of
+  30 November following the original-supply FY and the date the relevant
+  annual return is furnished. The annual-return date is never guessed;
+  `gstAdjustmentEligibility == eligible` requires
+  `annualReturnCutoffStatus` to be `furnished` or
+  `not_furnished_as_of_review`.

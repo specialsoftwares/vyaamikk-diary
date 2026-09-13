@@ -623,6 +623,17 @@ export type GstAdjustmentEligibility =
 
 export type GstEvidenceStatus = "not_applicable" | "unconfirmed" | "confirmed";
 
+/**
+ * Section 34 uses the earlier of 30 November following the original-supply FY
+ * and the date the relevant annual return is furnished. The date is never
+ * guessed: `unconfirmed` cannot become `eligible`.
+ */
+export type AnnualReturnCutoffStatus =
+  | "not_applicable"
+  | "unconfirmed"
+  | "not_furnished_as_of_review"
+  | "furnished";
+
 export type TaxAdjustmentDisposition =
   | "not_applicable"
   | "pending"
@@ -659,6 +670,10 @@ export interface SubscriptionTaxComplianceDoc {
   recipientItcReversalEvidenceStatus: GstEvidenceStatus;
   taxIncidenceConditionStatus: GstEvidenceStatus;
   section34OuterLimitAt: number | null;
+  annualReturnCutoffStatus: AnnualReturnCutoffStatus;
+  annualReturnFurnishedAt: number | null;
+  annualReturnCutoffReviewedAt: number | null;
+  annualReturnCutoffReviewBasis: string | null;
   taxAdjustmentDisposition: TaxAdjustmentDisposition;
   reviewedAt: number | null;
   reviewedByDiagnosticUid: string | null;
@@ -807,6 +822,10 @@ export interface SubscriptionCreditNoteDoc {
   recipientItcReversalEvidenceStatus: GstEvidenceStatus;
   taxIncidenceConditionStatus: GstEvidenceStatus;
   section34OuterLimitAt: number | null;
+  annualReturnCutoffStatus: AnnualReturnCutoffStatus;
+  annualReturnFurnishedAt: number | null;
+  annualReturnCutoffReviewedAt: number | null;
+  annualReturnCutoffReviewBasis: string | null;
   taxAdjustmentDisposition: TaxAdjustmentDisposition;
   gstrReportable: boolean;
   gstrReportedMonth: string | null;

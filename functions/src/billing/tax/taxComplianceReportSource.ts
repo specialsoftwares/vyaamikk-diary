@@ -45,7 +45,7 @@ import type {
 
 import { creditNoteIdForRefundEvent } from "./creditNote";
 import { getMonthKey } from "./financialYearUtils";
-import { invoiceGstAdjustmentDefaults } from "./gstAdjustment";
+import { creditNoteGstAdjustmentUnconfirmedDefaults, invoiceGstAdjustmentDefaults } from "./gstAdjustment";
 import { invoiceIdForFinancialEvent } from "./invoiceAllocation";
 import { isInMonthlyComplianceScope } from "./taxCompliance";
 
@@ -148,7 +148,7 @@ function syntheticCreditNoteCompliance(
     reviewStatus: "requires_tax_review",
     unresolvedReasons: ["compliance_record_missing"],
     cumulativeCreditReversedInPaise: 0,
-    ...invoiceGstAdjustmentDefaults(),
+    ...creditNoteGstAdjustmentUnconfirmedDefaults(),
     reviewedAt: null,
     reviewedByDiagnosticUid: null,
     reviewBasis: null,
@@ -224,6 +224,10 @@ function syntheticMissingTaxAdjustmentFromLedger(
     recipientItcReversalEvidenceStatus: "unconfirmed",
     taxIncidenceConditionStatus: "unconfirmed",
     section34OuterLimitAt: null,
+    annualReturnCutoffStatus: "unconfirmed",
+    annualReturnFurnishedAt: null,
+    annualReturnCutoffReviewedAt: null,
+    annualReturnCutoffReviewBasis: null,
     taxAdjustmentDisposition: event.eventType === "chargeback" ? "requires_review" : "pending",
     reviewedAt: null,
     reviewedByDiagnosticUid: null,
@@ -236,45 +240,398 @@ function syntheticMissingTaxAdjustmentFromLedger(
   };
 }
 
-function reconcileLedgerEvents(input: {
+export const LEDGER_RECONCILIATION_REASONS = [
+  "financial_event_tax_document_missing",
+  "financial_event_invoice_mismatch",
+  "financial_event_compliance_mismatch",
+  "financial_event_month_scope_mismatch",
+  "tax_document_financial_event_missing",
+  "tax_document_related_financial_event_missing",
+  "tax_document_related_financial_event_mismatch",
+  "tax_adjustment_disposition_missing",
+  "gst_credit_note_missing",
+] as const;
+
+export function isLedgerReconciliationReason(reason: string): boolean {
+  return (LEDGER_RECONCILIATION_REASONS as readonly string[]).includes(reason);
+}
+
+function mergeReasons(existing: string[], extra: string[]): string[] {
+  return [...new Set([...existing, ...extra])].sort();
+}
+
+function originalSupplyEventType(eventType: BillingEventLedgerDoc["eventType"]): boolean {
+  return eventType === "purchase" || eventType === "renewal";
+}
+
+function refundLikeEventType(eventType: BillingEventLedgerDoc["eventType"]): boolean {
+  return eventType === "refund" || eventType === "chargeback";
+}
+
+function invoiceMatchesLedger(
+  invoice: SubscriptionInvoiceDoc,
+  event: BillingEventLedgerDoc
+): boolean {
+  return (
+    invoice.financialEventId === event.financialEventId &&
+    invoice.uid === event.uid &&
+    invoice.platform === event.platform &&
+    invoice.canonicalSku === event.canonicalSku &&
+    invoice.invoiceId === invoiceIdForFinancialEvent(event.financialEventId)
+  );
+}
+
+function complianceMatchesLedger(
+  rec: SubscriptionTaxComplianceDoc,
+  event: BillingEventLedgerDoc
+): boolean {
+  return rec.financialEventId === event.financialEventId && rec.uid === event.uid;
+}
+
+interface ReconciliationGap {
+  invoiceId: string;
+  documentKind: "invoice" | "credit_note";
+  financialEventId: string;
+  uid: string;
+  reasons: string[];
+  event: BillingEventLedgerDoc | null;
+}
+
+function addGap(
+  gaps: Map<string, ReconciliationGap>,
+  partial: Omit<ReconciliationGap, "reasons"> & { reasons: string[] }
+): void {
+  const existing = gaps.get(partial.invoiceId);
+  if (!existing) {
+    gaps.set(partial.invoiceId, {
+      ...partial,
+      reasons: mergeReasons([], partial.reasons),
+    });
+    return;
+  }
+  existing.reasons = mergeReasons(existing.reasons, partial.reasons);
+  if (!existing.event && partial.event) existing.event = partial.event;
+}
+
+export function detectLedgerReconciliationGaps(input: {
   month: string;
+  invoices: SubscriptionInvoiceDoc[];
+  creditNotes: SubscriptionCreditNoteDoc[];
+  complianceRecords: SubscriptionTaxComplianceDoc[];
+  financialEvents: BillingEventLedgerDoc[];
+}): ReconciliationGap[] {
+  const invoiceById = new Map(input.invoices.map((i) => [i.invoiceId, i]));
+  const creditNoteById = new Map(input.creditNotes.map((c) => [c.creditNoteId, c]));
+  const complianceById = new Map(input.complianceRecords.map((c) => [c.invoiceId, c]));
+  const ledgerById = new Map(input.financialEvents.map((e) => [e.financialEventId, e]));
+  const inMonth = input.financialEvents.filter((event) => event.monthKey === input.month);
+  const gaps = new Map<string, ReconciliationGap>();
+
+  for (const event of inMonth) {
+    if (originalSupplyEventType(event.eventType)) {
+      const invoiceId = invoiceIdForFinancialEvent(event.financialEventId);
+      const invoice = invoiceById.get(invoiceId);
+      const compliance = complianceById.get(invoiceId);
+      const reasons: string[] = [];
+      if (!invoice && !compliance) {
+        reasons.push("financial_event_tax_document_missing");
+      } else {
+        if (!invoice) {
+          reasons.push("financial_event_tax_document_missing", "financial_event_invoice_mismatch");
+        } else if (!invoiceMatchesLedger(invoice, event)) {
+          reasons.push("financial_event_invoice_mismatch");
+        }
+        if (!compliance) {
+          reasons.push("financial_event_compliance_mismatch");
+        } else {
+          if (!complianceMatchesLedger(compliance, event)) {
+            reasons.push("financial_event_compliance_mismatch");
+          }
+          if (!isInMonthlyComplianceScope(compliance, input.month)) {
+            reasons.push("financial_event_month_scope_mismatch");
+          }
+        }
+      }
+      if (reasons.length > 0) {
+        addGap(gaps, {
+          invoiceId,
+          documentKind: "invoice",
+          financialEventId: event.financialEventId,
+          uid: event.uid,
+          reasons,
+          event,
+        });
+      }
+    } else if (refundLikeEventType(event.eventType)) {
+      const creditNoteId = creditNoteIdForRefundEvent(event.financialEventId);
+      const note = creditNoteById.get(creditNoteId);
+      const compliance = complianceById.get(creditNoteId);
+      const reasons: string[] = [];
+      if (event.eventType === "refund") {
+        if (!note && !compliance) {
+          reasons.push(
+            "tax_adjustment_disposition_missing",
+            "gst_credit_note_missing",
+            "gst_adjustment_requires_review"
+          );
+        } else {
+          if (!note) {
+            reasons.push("gst_credit_note_missing", "financial_event_tax_document_missing");
+          }
+          if (!compliance) reasons.push("financial_event_compliance_mismatch");
+        }
+      } else if (!compliance) {
+        reasons.push("gst_adjustment_requires_review", "tax_adjustment_disposition_missing");
+      }
+      if (note) {
+        if (note.refundFinancialEventId !== event.financialEventId || note.uid !== event.uid) {
+          reasons.push("financial_event_invoice_mismatch");
+        }
+      }
+      if (compliance) {
+        if (!complianceMatchesLedger(compliance, event)) {
+          reasons.push("financial_event_compliance_mismatch");
+        }
+        if (!isInMonthlyComplianceScope(compliance, input.month)) {
+          reasons.push("financial_event_month_scope_mismatch");
+        }
+        if (
+          compliance.taxAdjustmentDisposition === "pending" ||
+          (event.eventType === "chargeback" && compliance.taxAdjustmentDisposition === "not_applicable")
+        ) {
+          reasons.push("tax_adjustment_disposition_missing");
+        }
+      }
+      const relatedId = event.relatedFinancialEventId;
+      const original = relatedId ? ledgerById.get(relatedId) : undefined;
+      if (!relatedId || !original) {
+        reasons.push("tax_document_related_financial_event_missing");
+      } else if (!originalSupplyEventType(original.eventType)) {
+        reasons.push("tax_document_related_financial_event_mismatch");
+      } else if (note && note.originalInvoiceId !== invoiceIdForFinancialEvent(original.financialEventId)) {
+        reasons.push("tax_document_related_financial_event_mismatch");
+      }
+      if (reasons.length > 0) {
+        addGap(gaps, {
+          invoiceId: creditNoteId,
+          documentKind: "credit_note",
+          financialEventId: event.financialEventId,
+          uid: event.uid,
+          reasons,
+          event,
+        });
+      }
+    }
+  }
+
+  for (const invoice of input.invoices) {
+    const supplyMonthKey = invoice.supplyOccurredAt ? getMonthKey(invoice.supplyOccurredAt) : null;
+    const issueMonthKey = invoice.invoiceIssuedAt ? getMonthKey(invoice.invoiceIssuedAt) : null;
+    const compliance = complianceById.get(invoice.invoiceId);
+    const inDocMonth =
+      supplyMonthKey === input.month ||
+      issueMonthKey === input.month ||
+      invoice.taxPeriodMonth === input.month ||
+      Boolean(compliance && isInMonthlyComplianceScope(compliance, input.month));
+    if (!inDocMonth) continue;
+    const event = ledgerById.get(invoice.financialEventId);
+    const reasons: string[] = [];
+    if (!event) {
+      reasons.push("tax_document_financial_event_missing");
+    } else {
+      if (!invoiceMatchesLedger(invoice, event)) reasons.push("financial_event_invoice_mismatch");
+      if (compliance && !complianceMatchesLedger(compliance, event)) {
+        reasons.push("financial_event_compliance_mismatch");
+      }
+    }
+    if (reasons.length > 0) {
+      addGap(gaps, {
+        invoiceId: invoice.invoiceId,
+        documentKind: "invoice",
+        financialEventId: invoice.financialEventId,
+        uid: invoice.uid,
+        reasons,
+        event: event ?? null,
+      });
+    }
+  }
+
+  for (const note of input.creditNotes) {
+    const issueMonthKey = note.issuedAt ? getMonthKey(note.issuedAt) : null;
+    const compliance = complianceById.get(note.creditNoteId);
+    const inDocMonth =
+      issueMonthKey === input.month ||
+      note.taxPeriodMonth === input.month ||
+      Boolean(compliance && isInMonthlyComplianceScope(compliance, input.month));
+    if (!inDocMonth) continue;
+    const refund = ledgerById.get(note.refundFinancialEventId);
+    const reasons: string[] = [];
+    if (!refund) {
+      reasons.push("tax_document_financial_event_missing");
+    } else {
+      if (!refundLikeEventType(refund.eventType) || refund.uid !== note.uid) {
+        reasons.push("financial_event_invoice_mismatch");
+      }
+      const original = refund.relatedFinancialEventId
+        ? ledgerById.get(refund.relatedFinancialEventId)
+        : undefined;
+      if (!original) {
+        reasons.push("tax_document_related_financial_event_missing");
+      } else if (!originalSupplyEventType(original.eventType)) {
+        reasons.push("tax_document_related_financial_event_mismatch");
+      } else if (note.originalInvoiceId !== invoiceIdForFinancialEvent(original.financialEventId)) {
+        reasons.push("tax_document_related_financial_event_mismatch");
+      }
+    }
+    if (reasons.length > 0) {
+      addGap(gaps, {
+        invoiceId: note.creditNoteId,
+        documentKind: "credit_note",
+        financialEventId: note.refundFinancialEventId,
+        uid: note.uid,
+        reasons,
+        event: refund ?? null,
+      });
+    }
+  }
+
+  for (const rec of input.complianceRecords) {
+    if (!isInMonthlyComplianceScope(rec, input.month) && !gaps.has(rec.invoiceId)) continue;
+    const event = ledgerById.get(rec.financialEventId);
+    const reasons: string[] = [];
+    if (!event) {
+      reasons.push("tax_document_financial_event_missing");
+    } else {
+      if (!complianceMatchesLedger(rec, event)) reasons.push("financial_event_compliance_mismatch");
+      if (rec.documentKind === "invoice" && !originalSupplyEventType(event.eventType)) {
+        reasons.push("financial_event_compliance_mismatch");
+      }
+      if (rec.documentKind === "credit_note" && !refundLikeEventType(event.eventType)) {
+        reasons.push("financial_event_compliance_mismatch");
+      }
+    }
+    if (reasons.length > 0) {
+      addGap(gaps, {
+        invoiceId: rec.invoiceId,
+        documentKind: rec.documentKind,
+        financialEventId: rec.financialEventId,
+        uid: rec.uid,
+        reasons,
+        event: event ?? null,
+      });
+    }
+  }
+
+  return [...gaps.values()];
+}
+
+function upsertComplianceBlocker(
+  input: {
+    inScope: SubscriptionTaxComplianceDoc[];
+    complianceById: Map<string, SubscriptionTaxComplianceDoc>;
+  },
+  next: SubscriptionTaxComplianceDoc
+): void {
+  const unresolvedReasons = [...next.unresolvedReasons].sort();
+  const stamped: SubscriptionTaxComplianceDoc = {
+    ...next,
+    unresolvedReasons,
+    reviewStatus: unresolvedReasons.length > 0 ? "requires_tax_review" : next.reviewStatus,
+  };
+  input.complianceById.set(stamped.invoiceId, stamped);
+  const idx = input.inScope.findIndex((row) => row.invoiceId === stamped.invoiceId);
+  if (idx >= 0) input.inScope[idx] = stamped;
+  else input.inScope.push(stamped);
+}
+
+function syntheticForGap(
+  gap: ReconciliationGap,
+  month: string,
+  invoiceById: Map<string, SubscriptionInvoiceDoc>,
+  creditNoteById: Map<string, SubscriptionCreditNoteDoc>
+): SubscriptionTaxComplianceDoc {
+  if (gap.event && gap.documentKind === "invoice") {
+    return { ...syntheticMissingInvoiceFromLedger(gap.event, month), unresolvedReasons: gap.reasons };
+  }
+  if (gap.event && gap.documentKind === "credit_note") {
+    const synthetic = syntheticMissingTaxAdjustmentFromLedger(gap.event, month);
+    return { ...synthetic, unresolvedReasons: mergeReasons(synthetic.unresolvedReasons, gap.reasons) };
+  }
+  const invoice = invoiceById.get(gap.invoiceId);
+  if (invoice) {
+    const synthetic = syntheticInvoiceCompliance(invoice, month);
+    if (synthetic) {
+      return { ...synthetic, unresolvedReasons: mergeReasons(synthetic.unresolvedReasons, gap.reasons) };
+    }
+  }
+  const note = creditNoteById.get(gap.invoiceId);
+  if (note) {
+    const synthetic = syntheticCreditNoteCompliance(note, month);
+    if (synthetic) {
+      return { ...synthetic, unresolvedReasons: mergeReasons(synthetic.unresolvedReasons, gap.reasons) };
+    }
+  }
+  return {
+    invoiceId: gap.invoiceId,
+    documentKind: gap.documentKind,
+    financialEventId: gap.financialEventId,
+    originalInvoiceId: null,
+    uid: gap.uid,
+    supplyMonthKey: month,
+    issueMonthKey: null,
+    reportingTaxPeriodMonth: null,
+    taxPeriodDecisionStatus: "requires_tax_review",
+    ecoReportingCategory: "requires_tax_review",
+    operatorIdentifier: null,
+    operatorGstin: null,
+    reviewStatus: "requires_tax_review",
+    unresolvedReasons: gap.reasons,
+    cumulativeCreditReversedInPaise: 0,
+    ...(gap.documentKind === "credit_note"
+      ? creditNoteGstAdjustmentUnconfirmedDefaults()
+      : invoiceGstAdjustmentDefaults()),
+    reviewedAt: null,
+    reviewedByDiagnosticUid: null,
+    reviewBasis: null,
+    reviewVersion: 0,
+    previousEcoReportingCategory: null,
+    previousReportingTaxPeriodMonth: null,
+    createdAt: 0,
+    updatedAt: 0,
+  };
+}
+
+function applyLedgerReconciliation(input: {
+  month: string;
+  invoices: SubscriptionInvoiceDoc[];
+  creditNotes: SubscriptionCreditNoteDoc[];
+  originalComplianceRecords: SubscriptionTaxComplianceDoc[];
   invoiceById: Map<string, SubscriptionInvoiceDoc>;
   creditNoteById: Map<string, SubscriptionCreditNoteDoc>;
   complianceById: Map<string, SubscriptionTaxComplianceDoc>;
   inScope: SubscriptionTaxComplianceDoc[];
   financialEvents: BillingEventLedgerDoc[];
 }): BillingEventLedgerDoc[] {
-  const inMonth = input.financialEvents
+  const gaps = detectLedgerReconciliationGaps({
+    month: input.month,
+    invoices: input.invoices,
+    creditNotes: input.creditNotes,
+    complianceRecords: input.originalComplianceRecords,
+    financialEvents: input.financialEvents,
+  });
+  for (const gap of gaps) {
+    const existing = input.complianceById.get(gap.invoiceId);
+    const base =
+      existing ??
+      syntheticForGap(gap, input.month, input.invoiceById, input.creditNoteById);
+    upsertComplianceBlocker(input, {
+      ...base,
+      unresolvedReasons: mergeReasons(base.unresolvedReasons, gap.reasons),
+    });
+  }
+  return input.financialEvents
     .filter((event) => event.monthKey === input.month)
     .sort((a, b) => a.financialEventId.localeCompare(b.financialEventId));
-  for (const event of inMonth) {
-    if (event.eventType === "purchase" || event.eventType === "renewal") {
-      const invoiceId = invoiceIdForFinancialEvent(event.financialEventId);
-      const invoice = input.invoiceById.get(invoiceId);
-      const compliance = input.complianceById.get(invoiceId);
-      if (!invoice || !compliance) {
-        if (input.complianceById.has(invoiceId)) continue;
-        const synthetic = syntheticMissingInvoiceFromLedger(event, input.month);
-        input.inScope.push(synthetic);
-        input.complianceById.set(synthetic.invoiceId, synthetic);
-      }
-    } else if (event.eventType === "refund" || event.eventType === "chargeback") {
-      const creditNoteId = creditNoteIdForRefundEvent(event.financialEventId);
-      const note = input.creditNoteById.get(creditNoteId);
-      const compliance = input.complianceById.get(creditNoteId);
-      if (note && compliance) continue;
-      if (input.complianceById.has(creditNoteId) && note) continue;
-      if (compliance && !compliance.unresolvedReasons.includes("tax_adjustment_disposition_missing")) {
-        continue;
-      }
-      if (!input.complianceById.has(creditNoteId)) {
-        const synthetic = syntheticMissingTaxAdjustmentFromLedger(event, input.month);
-        input.inScope.push(synthetic);
-        input.complianceById.set(synthetic.invoiceId, synthetic);
-      }
-    }
-  }
-  return inMonth;
 }
 
 function assembleScope(input: {
@@ -308,6 +665,18 @@ function assembleScope(input: {
     }
   }
 
+  const scopedFinancialEvents = applyLedgerReconciliation({
+    month: input.month,
+    invoices: input.invoices,
+    creditNotes: input.creditNotes,
+    originalComplianceRecords: input.complianceRecords,
+    invoiceById,
+    creditNoteById,
+    complianceById,
+    inScope,
+    financialEvents: input.financialEvents,
+  });
+
   const scopedInvoices: SubscriptionInvoiceDoc[] = [];
   const scopedCreditNotes: SubscriptionCreditNoteDoc[] = [];
   for (const rec of inScope) {
@@ -319,7 +688,6 @@ function assembleScope(input: {
       if (inv) scopedInvoices.push(inv);
     }
   }
-
   for (const note of scopedCreditNotes) {
     const original = invoiceById.get(note.originalInvoiceId);
     if (original && !scopedInvoices.some((i) => i.invoiceId === original.invoiceId)) {
@@ -330,15 +698,6 @@ function assembleScope(input: {
       inScope.push(originalCompliance);
     }
   }
-
-  const scopedFinancialEvents = reconcileLedgerEvents({
-    month: input.month,
-    invoiceById,
-    creditNoteById,
-    complianceById,
-    inScope,
-    financialEvents: input.financialEvents,
-  });
 
   return {
     invoices: uniqueById(scopedInvoices, (i) => i.invoiceId).sort((a, b) =>

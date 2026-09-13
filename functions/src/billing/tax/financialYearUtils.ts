@@ -191,8 +191,10 @@ export function ordinaryTaxableServiceInvoiceIssueDueAt(supplyOccurredAt: number
 }
 
 /**
- * Section 34 reporting outer limit: 30 November following the end of the FY
- * of the original supply. Annual-return date is unknown and is not guessed.
+ * Section 34 statutory 30 November ceiling following the original-supply FY.
+ * The Act uses whichever is earlier of this date and the date of furnishing
+ * the relevant annual return. That annual-return date is never guessed; the
+ * earlier-cutoff evidence model lives on the compliance record.
  */
 export function section34OutputTaxReductionOuterLimitMs(originalSupplyOccurredAt: number): number {
   const { endYear } = parseFinancialYear(getFinancialYearForDate(originalSupplyOccurredAt));

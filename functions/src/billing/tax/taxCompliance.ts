@@ -40,6 +40,7 @@ import {
 } from "../paths";
 import type { BillingStore } from "../store";
 import type {
+  AnnualReturnCutoffStatus,
   EcoReportingCategory,
   GstAdjustmentEligibility,
   GstEvidenceStatus,
@@ -53,7 +54,9 @@ import type {
 import { assertAdminAuthorized, type AdminAuthContext } from "./adminAuth";
 import { getMonthKey } from "./financialYearUtils";
 import {
+  annualReturnCutoffIsResolvedForEligibility,
   assertGstAdjustmentMayBeEligible,
+  effectiveSection34OutputTaxReductionLimitMs,
   invoiceGstAdjustmentDefaults,
 } from "./gstAdjustment";
 import { isValidGstinFormat } from "./gstin";
@@ -134,6 +137,7 @@ export function unresolvedReasonsForCreditNote(input: {
   ecoReportingCategory: EcoReportingCategory;
   operatorGstin: string | null;
   gstAdjustmentEligibility?: GstAdjustmentEligibility;
+  annualReturnCutoffStatus?: AnnualReturnCutoffStatus;
 }): string[] {
   const reasons = new Set<string>();
   const note = input.creditNote;
@@ -154,6 +158,11 @@ export function unresolvedReasonsForCreditNote(input: {
     input.gstAdjustmentEligibility ?? note.gstAdjustmentEligibility ?? "requires_review";
   if (eligibility === "requires_review") {
     reasons.add("gst_adjustment_requires_review");
+  }
+  const cutoff =
+    input.annualReturnCutoffStatus ?? note.annualReturnCutoffStatus ?? "unconfirmed";
+  if (eligibility === "eligible" && !annualReturnCutoffIsResolvedForEligibility(cutoff)) {
+    reasons.add("gst_adjustment_annual_return_cutoff_unconfirmed");
   }
   return [...reasons].sort();
 }
@@ -228,6 +237,14 @@ export function buildInvoiceComplianceDoc(input: {
     taxIncidenceConditionStatus:
       input.existing?.taxIncidenceConditionStatus ?? adjustment.taxIncidenceConditionStatus,
     section34OuterLimitAt: input.existing?.section34OuterLimitAt ?? adjustment.section34OuterLimitAt,
+    annualReturnCutoffStatus:
+      input.existing?.annualReturnCutoffStatus ?? adjustment.annualReturnCutoffStatus,
+    annualReturnFurnishedAt:
+      input.existing?.annualReturnFurnishedAt ?? adjustment.annualReturnFurnishedAt,
+    annualReturnCutoffReviewedAt:
+      input.existing?.annualReturnCutoffReviewedAt ?? adjustment.annualReturnCutoffReviewedAt,
+    annualReturnCutoffReviewBasis:
+      input.existing?.annualReturnCutoffReviewBasis ?? adjustment.annualReturnCutoffReviewBasis,
     taxAdjustmentDisposition:
       input.existing?.taxAdjustmentDisposition ?? adjustment.taxAdjustmentDisposition,
     reviewedAt: input.existing?.reviewedAt ?? null,
@@ -257,11 +274,16 @@ export function buildCreditNoteComplianceDoc(input: {
     input.existing?.reviewedAt && input.existing.gstAdjustmentEligibility
       ? input.existing.gstAdjustmentEligibility
       : input.creditNote.gstAdjustmentEligibility;
+  const annualReturnCutoffStatus =
+    input.existing?.annualReturnCutoffStatus ??
+    input.creditNote.annualReturnCutoffStatus ??
+    "unconfirmed";
   const reasons = unresolvedReasonsForCreditNote({
     creditNote: input.creditNote,
     ecoReportingCategory,
     operatorGstin,
     gstAdjustmentEligibility,
+    annualReturnCutoffStatus,
   });
   return {
     invoiceId: input.creditNote.creditNoteId,
@@ -289,6 +311,15 @@ export function buildCreditNoteComplianceDoc(input: {
       input.existing?.taxIncidenceConditionStatus ?? input.creditNote.taxIncidenceConditionStatus,
     section34OuterLimitAt:
       input.existing?.section34OuterLimitAt ?? input.creditNote.section34OuterLimitAt,
+    annualReturnCutoffStatus,
+    annualReturnFurnishedAt:
+      input.existing?.annualReturnFurnishedAt ?? input.creditNote.annualReturnFurnishedAt,
+    annualReturnCutoffReviewedAt:
+      input.existing?.annualReturnCutoffReviewedAt ??
+      input.creditNote.annualReturnCutoffReviewedAt,
+    annualReturnCutoffReviewBasis:
+      input.existing?.annualReturnCutoffReviewBasis ??
+      input.creditNote.annualReturnCutoffReviewBasis,
     taxAdjustmentDisposition:
       input.existing?.taxAdjustmentDisposition ?? input.creditNote.taxAdjustmentDisposition,
     reviewedAt: input.existing?.reviewedAt ?? null,
@@ -315,6 +346,8 @@ export interface ReviewTaxComplianceInput {
   gstAdjustmentEligibility?: GstAdjustmentEligibility;
   recipientItcReversalEvidenceStatus?: GstEvidenceStatus;
   taxIncidenceConditionStatus?: GstEvidenceStatus;
+  annualReturnCutoffStatus?: AnnualReturnCutoffStatus;
+  annualReturnFurnishedAt?: number | null;
 }
 
 /**
@@ -370,6 +403,12 @@ export async function applyReviewTaxCompliance(
         input.recipientItcReversalEvidenceStatus ?? prior.recipientItcReversalEvidenceStatus;
       const taxIncidenceConditionStatus =
         input.taxIncidenceConditionStatus ?? prior.taxIncidenceConditionStatus;
+      const annualReturnCutoffStatus =
+        input.annualReturnCutoffStatus ?? prior.annualReturnCutoffStatus ?? "unconfirmed";
+      const annualReturnFurnishedAt =
+        input.annualReturnFurnishedAt !== undefined
+          ? input.annualReturnFurnishedAt
+          : (prior.annualReturnFurnishedAt ?? null);
       if (!creditNote.buyer) {
         throw new BillingError({
           clientCode: "internal_error",
@@ -383,7 +422,23 @@ export async function applyReviewTaxCompliance(
         taxIncidenceConditionStatus,
         issuedAt: creditNote.issuedAt ?? input.nowMs,
         originalSupplyOccurredAt: original.supplyOccurredAt ?? original.createdAt,
+        annualReturnCutoffStatus,
+        annualReturnFurnishedAt,
       });
+      const section34OuterLimitAt =
+        gstAdjustmentEligibility === "eligible"
+          ? effectiveSection34OutputTaxReductionLimitMs({
+              originalSupplyOccurredAt: original.supplyOccurredAt ?? original.createdAt,
+              annualReturnCutoffStatus,
+              annualReturnFurnishedAt,
+            })
+          : (prior.section34OuterLimitAt ?? creditNote.section34OuterLimitAt);
+      const annualReturnCutoffReviewedAt = input.annualReturnCutoffStatus
+        ? input.nowMs
+        : (prior.annualReturnCutoffReviewedAt ?? null);
+      const annualReturnCutoffReviewBasis = input.annualReturnCutoffStatus
+        ? basis
+        : (prior.annualReturnCutoffReviewBasis ?? null);
       const ecoReportingCategory =
         input.ecoReportingCategory !== undefined
           ? parseEcoReportingCategory(input.ecoReportingCategory)
@@ -399,6 +454,7 @@ export async function applyReviewTaxCompliance(
         ecoReportingCategory,
         operatorGstin,
         gstAdjustmentEligibility,
+        annualReturnCutoffStatus,
       });
       const next: SubscriptionTaxComplianceDoc = {
         ...prior,
@@ -408,6 +464,11 @@ export async function applyReviewTaxCompliance(
         gstAdjustmentEligibility,
         recipientItcReversalEvidenceStatus,
         taxIncidenceConditionStatus,
+        section34OuterLimitAt,
+        annualReturnCutoffStatus,
+        annualReturnFurnishedAt,
+        annualReturnCutoffReviewedAt,
+        annualReturnCutoffReviewBasis,
         taxAdjustmentDisposition: "credit_note_issued",
         unresolvedReasons: reasons,
         reviewStatus: reviewStatusFor(reasons),
@@ -493,5 +554,9 @@ export function complianceStatutoryBind(doc: SubscriptionTaxComplianceDoc) {
     taxIncidenceConditionStatus: doc.taxIncidenceConditionStatus,
     taxAdjustmentDisposition: doc.taxAdjustmentDisposition,
     section34OuterLimitAt: doc.section34OuterLimitAt,
+    annualReturnCutoffStatus: doc.annualReturnCutoffStatus,
+    annualReturnFurnishedAt: doc.annualReturnFurnishedAt,
+    annualReturnCutoffReviewedAt: doc.annualReturnCutoffReviewedAt,
+    annualReturnCutoffReviewBasis: doc.annualReturnCutoffReviewBasis,
   };
 }
