@@ -24,6 +24,8 @@ assert.throws(() => assertBillingLogContext({ receipt: "r" }), BillingLogPrivacy
 assert.throws(() => assertBillingLogContext({ signedTransaction: "jws" }), BillingLogPrivacyError);
 assert.throws(() => assertBillingLogContext({ email: "a@b.c" }), BillingLogPrivacyError);
 assert.throws(() => assertBillingLogContext({ businessName: "X" }), BillingLogPrivacyError);
+assert.throws(() => assertBillingLogContext({ gstin: "09AAAAA0000A1Z5" }), BillingLogPrivacyError);
+assert.throws(() => assertBillingLogContext({ legalName: "X" }), BillingLogPrivacyError);
 
 const ok = assertBillingLogContext({
   correlationId: "c1",

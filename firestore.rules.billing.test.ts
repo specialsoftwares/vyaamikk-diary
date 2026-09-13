@@ -273,6 +273,14 @@ async function main() {
       ["_revenueReports", monthNow],
       ["_trialLedger", "a".repeat(64)],
       ["_billingRateLimits", "purchase_alice_202609121600"],
+      ["_subscriptionInvoices", "inv_v1_test"],
+      ["_subscriptionCreditNotes", "cn_v1_test"],
+      ["_subscriptionTaxCompliance", "inv_v1_test"],
+      ["_invoiceCounters", "2026-27"],
+      ["_creditNoteCounters", "2026-27"],
+      ["_invoiceRetryQueue", "inv_v1_test"],
+      ["_gstr1FilingBatches", "gstr1batch_test"],
+      ["_gstr1ReportManifests", "gstr1_2026-09_test"],
     ];
     for (const [coll, id] of serverOnlyDocs) {
       await testEnv.withSecurityRulesDisabled(async (ctx) => {
@@ -285,6 +293,41 @@ async function main() {
       await assertFails(getDoc(doc(unauthedDb(), coll, id)));
       check(`${coll} client read+write denied`, true);
     }
+
+    // ================= billingDetails (owner read, client write denied) ===
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", "alice", "subscription", "billingDetails"), {
+        gstin: null,
+        gstinVerificationStatus: "not_provided",
+        updatedAt: Date.now(),
+      });
+    });
+    await assertSucceeds(
+      getDoc(doc(authedDb("alice"), "users", "alice", "subscription", "billingDetails"))
+    );
+    check("owner reads own billingDetails", true);
+
+    await assertFails(
+      getDoc(doc(authedDb("mallory"), "users", "alice", "subscription", "billingDetails"))
+    );
+    check("cross-user billingDetails read denied", true);
+
+    await assertFails(
+      setDoc(doc(authedDb("alice"), "users", "alice", "subscription", "billingDetails"), {
+        gstin: "27AAAAA0000A1Z5",
+        gstinVerificationStatus: "verified",
+        updatedAt: Date.now(),
+      })
+    );
+    check("owner billingDetails write denied", true);
+
+    await assertFails(
+      setDoc(doc(unauthedDb(), "users", "alice", "subscription", "billingDetails"), {
+        gstin: null,
+        updatedAt: Date.now(),
+      })
+    );
+    check("unauthenticated billingDetails write denied", true);
 
     // ================= preferences/billingUx (narrow client write) ========
     // benefitScreenShownAt is a one-time marker: create establishes it, any

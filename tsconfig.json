@@ -18,6 +18,7 @@
   "exclude": [
     "node_modules",
     "functions",
-    "tools/onboarding-ux-harness"
+    "tools/onboarding-ux-harness",
+    "services"
   ]
 }

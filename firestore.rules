@@ -490,6 +490,12 @@ service cloud.firestore {
         allow delete: if false;
       }
 
+      // ---- Billing details (VYD-40; owner read; all client writes denied) --
+      match /subscription/billingDetails {
+        allow read: if isOwner(uid);
+        allow create, update, delete: if false;
+      }
+
       // ---- Sanitized billing history (server-written; owner read-only) ---
       match /subscriptionBillingHistory/{eventId} {
         allow read: if isOwner(uid);
@@ -596,6 +602,30 @@ service cloud.firestore {
       allow read, write: if false;
     }
     match /_billingRateLimits/{bucketId} {
+      allow read, write: if false;
+    }
+    match /_subscriptionInvoices/{invoiceId} {
+      allow read, write: if false;
+    }
+    match /_subscriptionCreditNotes/{creditNoteId} {
+      allow read, write: if false;
+    }
+    match /_subscriptionTaxCompliance/{invoiceId} {
+      allow read, write: if false;
+    }
+    match /_invoiceCounters/{financialYear} {
+      allow read, write: if false;
+    }
+    match /_creditNoteCounters/{financialYear} {
+      allow read, write: if false;
+    }
+    match /_invoiceRetryQueue/{invoiceId} {
+      allow read, write: if false;
+    }
+    match /_gstr1FilingBatches/{filingBatchId} {
+      allow read, write: if false;
+    }
+    match /_gstr1ReportManifests/{reportId} {
       allow read, write: if false;
     }
 

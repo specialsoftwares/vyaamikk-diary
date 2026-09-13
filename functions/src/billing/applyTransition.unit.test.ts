@@ -78,6 +78,7 @@ function paidActivate(
         actualPlatformCommissionInPaise: null,
         estimatedPlatformCommissionInPaise: 3_735,
         occurredAt: NOW,
+        relatedFinancialEventId: null,
       },
       historyType: "purchaseActivated",
     },
@@ -246,6 +247,7 @@ async function main() {
       actualPlatformCommissionInPaise: null,
       estimatedPlatformCommissionInPaise: 3_735,
       occurredAt: NOW,
+      relatedFinancialEventId: null,
     };
     const webhook: TransitionRequest = {
       uid: UID,
@@ -325,6 +327,7 @@ async function main() {
           actualPlatformCommissionInPaise: null,
           estimatedPlatformCommissionInPaise: null,
           occurredAt: NOW + 60_000,
+          relatedFinancialEventId: purchaseId,
         },
       },
     });
@@ -357,6 +360,28 @@ async function main() {
     assert.equal(ledgers.length, 2); // purchase + refund coexist
     assert.ok(store.docs.has(financialLedgerPath(sanitizeDocId(purchaseId))));
     assert.ok(store.docs.has(financialLedgerPath(sanitizeDocId(refundId))));
+    const refundLedger = store.docs.get(financialLedgerPath(sanitizeDocId(refundId))) as {
+      relatedFinancialEventId: string | null;
+    };
+    assert.equal(refundLedger.relatedFinancialEventId, purchaseId);
+
+    await assert.rejects(
+      applySubscriptionTransition(
+        { store: new MemoryBillingStore(), diagnosticUid: DIAG },
+        {
+          ...mkRefund("missing-related", 24_900),
+          requested: {
+            kind: "refund",
+            accessRevoked: true,
+            financialEvent: {
+              ...mkRefund("missing-related", 24_900).requested.financialEvent!,
+              relatedFinancialEventId: null,
+            },
+          },
+        }
+      ),
+      isCause("missing_related_financial_event")
+    );
 
     // conflicting second refund (different amount, same refund id) → fail closed
     await assert.rejects(
@@ -407,6 +432,7 @@ async function main() {
         financialEvent: {
           ...first.requested.financialEvent!,
           eventType: "refund",
+          relatedFinancialEventId: first.requested.financialEvent!.financialEventId,
         },
       },
     });

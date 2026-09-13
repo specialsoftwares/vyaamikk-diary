@@ -36,6 +36,10 @@ export const BILLING_LOG_FORBIDDEN_KEYS = [
   "signedPayload",
   "rawWebhookBody",
   "ciphertext",
+  "gstin",
+  "billingAddress",
+  "legalName",
+  "registeredAddress",
 ] as const;
 
 const ALLOWED = new Set<string>(BILLING_LOG_ALLOWED_KEYS);

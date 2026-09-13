@@ -15,6 +15,8 @@ Every object path starts with `users/{userId}/…` where `userId` must equal `re
 | `users/{userId}/letterhead/{filename}` | Letterhead template image |
 | `users/{userId}/attachments/{recordId}/{filename}` | Cash Paid receipt / record attachments |
 | `users/{userId}/pdfs/{recordId}/{filename}` | Optional cloud PDF backup (rules ready; V1 app upload not enabled) |
+| `company/invoices/{financialYear}/{invoiceId}.pdf` | GST/subscription tax PDFs (Admin SDK / signed URL only; client denied) |
+| `company/gstr1-reports/{month}/{reportId}.{json,csv}` | Internal GSTR-1 working papers (Admin SDK / signed URL only; client denied) |
 
 ## 4. Rule principle
 

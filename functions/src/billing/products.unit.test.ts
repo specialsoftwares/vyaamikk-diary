@@ -10,6 +10,7 @@ import {
   canonicalSkuForAndroid,
   canonicalSkuForIos,
   getCatalogEntry,
+  subscriptionDescriptionForSku,
   SUBSCRIPTION_CATALOG,
 } from "./products";
 import { PLAN_MONTHLY_RECORD_LIMITS, UNLIMITED_RECORDS } from "./types";
@@ -82,5 +83,10 @@ assert.equal(PLAN_MONTHLY_RECORD_LIMITS.free, 25);
 assert.equal(PLAN_MONTHLY_RECORD_LIMITS.starter, 100);
 assert.equal(PLAN_MONTHLY_RECORD_LIMITS.professional, UNLIMITED_RECORDS);
 assert.equal(PLAN_MONTHLY_RECORD_LIMITS.business, UNLIMITED_RECORDS);
+
+assert.equal(
+  subscriptionDescriptionForSku("vyd_professional_yearly"),
+  "Vyaamikk Diary Professional Subscription (Yearly)"
+);
 
 console.log("products.unit.test.ts: ok");

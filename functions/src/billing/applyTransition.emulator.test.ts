@@ -149,6 +149,7 @@ async function main() {
         actualPlatformCommissionInPaise: null,
         estimatedPlatformCommissionInPaise: 3_735,
         occurredAt: NOW + 2 * 60_000,
+        relatedFinancialEventId: null,
       },
     },
   };
@@ -196,6 +197,7 @@ async function main() {
         actualPlatformCommissionInPaise: null,
         estimatedPlatformCommissionInPaise: null,
         occurredAt: NOW + 5 * 60_000,
+        relatedFinancialEventId: purchaseId,
       },
     },
   };

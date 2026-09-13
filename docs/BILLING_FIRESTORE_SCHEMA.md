@@ -12,8 +12,17 @@ schema-by-use: **no documents are pre-created to "initialize" collections.**
 | `users/{uid}/subscription/status` | Admin SDK only | owner | denied (all ops) |
 | `users/{uid}/subscription/usageCurrent` | Admin SDK + the single Option-C atomic transition | owner | ONLY the gated atomic quota transition; delete denied |
 | `users/{uid}/subscriptionBillingHistory/{eventId}` | Admin SDK only (sanitized events) | owner | denied |
+| `users/{uid}/subscription/billingDetails` | Admin SDK only (`updateBillingDetails` / `verifyGstinManual`) | owner | denied |
 | `users/{uid}/preferences/billingUx` | client (owner) | owner | `hasOnly(benefitScreenShownAt, updatedAt)`, ints; delete denied |
 | `_companyBilling/{uid}` | Admin SDK only | denied (even own uid) | denied |
+| `_subscriptionInvoices/{invoiceId}` | Admin SDK only | denied | denied |
+| `_subscriptionCreditNotes/{creditNoteId}` | Admin SDK only | denied | denied |
+| `_subscriptionTaxCompliance/{invoiceId}` | Admin SDK only | denied | denied |
+| `_invoiceCounters/{financialYear}` | Admin SDK only | denied | denied |
+| `_creditNoteCounters/{financialYear}` | Admin SDK only | denied | denied |
+| `_invoiceRetryQueue/{invoiceId}` | Admin SDK only | denied | denied |
+| `_gstr1FilingBatches/{filingBatchId}` | Admin SDK only | denied | denied |
+| `_gstr1ReportManifests/{reportId}` | Admin SDK only | denied | denied |
 | `_subscriptionAuditLog/{eventId}` | Admin SDK only (append-only discipline) | denied | denied |
 | `_processedBillingEvents/{idempotencyKey}` | Admin SDK only | denied | denied |
 | `_billingEventLedger/{financialEventId}` | Admin SDK only (immutable ledger) | denied | denied |
@@ -290,3 +299,48 @@ anticipated client query — sanitized billing history, latest 12
 single-field order-by served by Firestore's automatic single-field indexes.
 A composite index becomes necessary only if a filtered+ordered variant
 appears in a later phase; it will be added with the query that requires it.
+
+## VYD-40 GST / tax documents (fail-closed foundation)
+
+- Invoice source of truth is `_subscriptionInvoices/{invoiceId}` with
+  `invoiceId` derived from `financialEventId`. `_companyBilling.latestTaxDocumentId`
+  is a pointer only. GST-return classification (reporting period, ECO/Table-14
+  category, operator GSTIN, month-close open items) lives in
+  `_subscriptionTaxCompliance/{invoiceId}` and is filing authority.
+- Billing history remains `users/{uid}/subscriptionBillingHistory/{eventId}`
+- Billing history remains `users/{uid}/subscriptionBillingHistory/{eventId}`
+  with optional additive tax fields. Absent fields on older events are valid.
+- Production TAX INVOICE issuance stays fail-closed until seller certificate
+  fields, SAC/rate, and (for Apple) platform tax policy are owner/CA confirmed.
+- Cloud Run HTML→PDF renderer is selected but **not deployed** in VYD-40.
+  See `docs/BILLING_VYD38_BILLING_DETAILS_UX.md` for the deferred Billing
+  Details UI.
+- Monthly GSTR close uses `_billingEventLedger` as the population baseline
+  in **both** directions. A purchase/renewal without a corresponding
+  invoice+compliance record, or a refund/chargeback without an explicit
+  tax-adjustment disposition, is an open item
+  (`financial_event_tax_document_missing` /
+  `tax_adjustment_disposition_missing`) and cannot `ready_to_file`.
+  Invoice/credit-note/compliance rows that cannot resolve an authoritative
+  ledger event (`tax_document_financial_event_missing`) likewise cannot
+  `ready_to_file`. Ledger vs document disagreements (uid, platform, SKU,
+  financialEventId, relatedFinancialEventId, month scope) are open blockers.
+- `invoiceIssueDueAt` is an operational aging hint (ordinary taxable
+  services: 30 days from supply). Auto-expiring pending-GSTIN /
+  incomplete-recipient holds against that deadline is a
+  **production-enablement gate**, not a VYD-40 merge blocker.
+- Store refund/chargeback is financial evidence only. GST output-tax
+  reduction requires explicit `gstAdjustmentEligibility` on the compliance
+  record and is the GST **tax** amount (`totalTaxReversedInPaise`), not
+  taxable value. Chargebacks default to `requires_review` and do not
+  auto-issue credit notes. Section 34 uses whichever is earlier of
+  30 November following the original-supply FY and the date the relevant
+  annual return is furnished. The annual-return date is never guessed;
+  `gstAdjustmentEligibility == eligible` requires
+  `annualReturnCutoffStatus` to be `furnished` or
+  `not_furnished_as_of_review`. Filing declares at `nowMs` and must not
+  exceed that effective outer limit. `not_furnished_as_of_review` also
+  requires `annualReturnCutoffConfirmedThrough >= declarationAt`. Monthly
+  GSTR source closure binds dependency financial events (including a prior-
+  month original purchase referenced by an in-month credit note), not only
+  `event.monthKey === report month`.

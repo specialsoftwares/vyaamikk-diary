@@ -270,6 +270,18 @@ Baseline architecture facts this model is tied to:
 - **Residual risk:** internal test builds intentionally accepting sandbox —
   isolated by explicit build-flagged configuration in later phases.
 
+### 15. GST tax documents and GSTR working papers (VYD-40)
+
+- **Asset:** tax invoices, GSTIN, registered addresses, GSTR working papers.
+- **Security boundary:** server-only collections; Storage `company/invoices/**`
+  and `company/gstr1-reports/**` are client-denied; download URLs are
+  owner-only signed URLs resolved from `taxDocumentId` (never a client-supplied
+  Storage path). Admin GSTIN verification and GSTR marking stay fail-closed
+  until admin identity is provisioned (`token.admin === true`).
+- **Residual risk:** production invoice issuance is intentionally blocked
+  until seller certificate / SAC / Apple policy gates are resolved. Cloud Run
+  renderer is unimplemented in production (not deployed).
+
 ---
 
 ## Configuration vs secret classification (owner spec §1)
@@ -289,6 +301,9 @@ CONFIGURATION / IDENTIFIERS (parameters/env, NOT Secret Manager):
 - `APPSTORE_ISSUER_ID`, `APPSTORE_KEY_ID`, `APPSTORE_APP_APPLE_ID`
 - `BILLING_KMS_KEY_NAME`
 - Android package / iOS bundle id (already in `app.json`)
+- `INVOICE_RENDERER_URL`, `COMPANY_GSTIN`, `SERVICE_SAC_CODE`,
+  `SERVICE_SAC_DESCRIPTION`, `GST_RATE_BPS`, `BILLING_EMAIL_FROM_ADDRESS`
+  (VYD-40 placeholders; missing values fail closed)
 
 ---
 

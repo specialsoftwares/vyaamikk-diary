@@ -175,6 +175,15 @@ export interface BillingHistoryEventDoc {
   /** Integer paise actually charged by the store for this event, when known. */
   amountInPaise: number | null;
   currency: "INR" | null;
+  /** Optional GST/tax-document pointers (VYD-40). Absent on pre-GST events. */
+  taxDocumentId?: string | null;
+  taxDocumentNumber?: string | null;
+  taxDocumentType?: string | null;
+  taxableAmountInPaise?: number | null;
+  taxAmountInPaise?: number | null;
+  totalInPaise?: number | null;
+  invoiceAvailableForDownload?: boolean | null;
+  gstinVerificationStatus?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -237,6 +246,11 @@ export interface CompanyBillingDoc {
    * defense in depth; adapters own reconciliation — see transition.ts).
    */
   lastReconciledAt: number | null;
+  /**
+   * Pointer only (VYD-40). The invoice source of truth is
+   * `_subscriptionInvoices/{invoiceId}` — never copy the full invoice here.
+   */
+  latestTaxDocumentId?: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -317,6 +331,11 @@ export interface BillingEventLedgerDoc {
   occurredAt: number;
   /** IST month bucket for revenue reports. */
   monthKey: string;
+  /**
+   * Refund/chargeback → original purchase/renewal financialEventId.
+   * Purchase/renewal must be null. Required for refund/chargeback.
+   */
+  relatedFinancialEventId: string | null;
   recordedAt: number;
   recordedBy: BillingMutationSource;
 }
@@ -422,3 +441,475 @@ export type PlanFeatureKey =
 
 /** Business plan anticipates at most 3 business profiles (W-11; not built yet). */
 export const BUSINESS_PLAN_MAX_BUSINESS_PROFILES = 3;
+
+// ---------------------------------------------------------------------------
+// GST / tax documents (VYD-40) — see functions/src/billing/tax/
+// ---------------------------------------------------------------------------
+
+export type TaxResponsibilityMode = "developer" | "platform" | "unconfirmed";
+
+export type PlatformTaxChannel =
+  | "google_play_india"
+  | "apple_app_store_india"
+  | "direct_web_india";
+
+export type TaxDocumentType =
+  | "tax_invoice_b2b"
+  | "tax_invoice_b2c"
+  | "platform_subscription_receipt"
+  | "compliance_review_required";
+
+export type GstinVerificationStatus =
+  | "not_provided"
+  | "pending_manual_verification"
+  | "verified"
+  | "rejected";
+
+export type BuyerClassification = "b2b" | "b2c";
+
+export type GstTaxType = "cgst_sgst" | "igst" | null;
+
+export type ReverseChargeMode = "yes" | "no" | "unconfirmed";
+
+export type TaxDocumentIssueStatus = "unissued_draft" | "issued";
+
+export type InvoiceIssueHoldReason =
+  | "recipient_tax_classification_pending"
+  | "recipient_invoice_details_incomplete";
+
+export type TaxPeriodStatus = "pending_issue" | "resolved" | "unresolved_cross_period";
+
+export type TaxPeriodDecisionStatus =
+  | "pending_issue"
+  | "resolved"
+  | "unresolved_cross_period"
+  | "requires_tax_review";
+
+export type InvoicePdfStatus =
+  | "pending"
+  | "awaiting_financial_evidence"
+  | "awaiting_renderer"
+  | "ready"
+  | "failed";
+
+export type InvoiceEmailStatus =
+  | "pending"
+  | "accepted"
+  | "delivered"
+  | "bounced"
+  | "failed"
+  | "skipped_no_verified_email";
+
+export type GstrFilingFrequency = "monthly" | "quarterly";
+
+/**
+ * GSTR-1 ECO/Table-14 category. Generic "classified" is not a legal category.
+ * Table 14(a) = ECO collects TCS under section 52.
+ * Table 14(b) = ECO pays tax under section 9(5).
+ */
+export type EcoReportingCategory =
+  | "requires_tax_review"
+  | "not_applicable"
+  | "section52_table14a"
+  | "section9_5_table14b";
+
+export interface SellerTaxSnapshot {
+  legalName: string;
+  tradeName: string | null;
+  gstin: string;
+  registeredAddress: string;
+  stateCode: string;
+  stateName: string;
+}
+
+export interface BuyerTaxSnapshot {
+  classification: BuyerClassification;
+  legalName: string | null;
+  gstin: string | null;
+  gstinVerificationStatus: GstinVerificationStatus;
+  billingAddress: string | null;
+  postalCode: string | null;
+  stateCode: string | null;
+  stateName: string | null;
+}
+
+export interface EcoReportingSnapshot {
+  platform: BillingPlatform | "web";
+  operatorIdentifier: string | null;
+  operatorGstin: string | null;
+  taxResponsibilityMode: TaxResponsibilityMode;
+  /** Issue-time policy copy only. Filing authority is the compliance record. */
+  ecoReportingCategory: EcoReportingCategory;
+}
+
+/**
+ * Immutable-per-document tax invoice / receipt.
+ * Path: `_subscriptionInvoices/{invoiceId}` (zero client access).
+ */
+export interface SubscriptionInvoiceDoc {
+  invoiceId: string;
+  uid: string;
+  diagnosticUid: string;
+  financialEventId: string;
+  platform: BillingPlatform | "web" | null;
+  canonicalSku: string | null;
+  plan: VyaamikkPlan | null;
+  billingPeriod: string | null;
+  taxResponsibilityMode: TaxResponsibilityMode;
+  documentType: TaxDocumentType;
+  documentNumber: string | null;
+  financialYear: string | null;
+  taxPeriodMonth: string | null;
+  taxPeriodStatus: TaxPeriodStatus;
+  invoiceIssuedAt: number | null;
+  invoiceIssuedOnIst: string | null;
+  supplyOccurredAt: number | null;
+  issueStatus: TaxDocumentIssueStatus;
+  issueHoldReason: InvoiceIssueHoldReason | null;
+  reverseChargeMode: ReverseChargeMode | null;
+  subscriptionDescription: string | null;
+  seller: SellerTaxSnapshot | null;
+  buyer: BuyerTaxSnapshot;
+  placeOfSupplyStateCode: string | null;
+  placeOfSupplyStateName: string | null;
+  sacCode: string | null;
+  serviceDescription: string | null;
+  currency: "INR" | null;
+  grossCustomerAmountInPaise: number | null;
+  taxableAmountInPaise: number | null;
+  gstRateBps: number | null;
+  taxType: GstTaxType;
+  cgstInPaise: number | null;
+  sgstInPaise: number | null;
+  igstInPaise: number | null;
+  totalTaxInPaise: number | null;
+  totalInPaise: number | null;
+  platformCommissionInPaise: number | null;
+  ecoReporting: EcoReportingSnapshot;
+  pdfStatus: InvoicePdfStatus;
+  invoicePdfStoragePath: string | null;
+  emailStatus: InvoiceEmailStatus;
+  emailProviderMessageId: string | null;
+  invoiceEmailAcceptedAt: number | null;
+  invoiceEmailDeliveredAt: number | null;
+  gstrReportable: boolean;
+  gstrReportedMonth: string | null;
+  gstrFilingBatchId: string | null;
+  historyEventId: string | null;
+  /**
+   * Operational aging hint (ordinary taxable services: 30 days from supply).
+   * Pending-GSTIN / incomplete-recipient holds are NOT auto-expired against
+   * this timestamp in VYD-40 — enforcement is a production-enablement gate.
+   */
+  invoiceIssueDueAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type Gstr1ReviewStatus = "ready_to_file" | "requires_tax_review";
+
+export type TaxComplianceDocumentKind = "invoice" | "credit_note";
+
+/**
+ * Output-tax reduction eligibility is distinct from a store refund/chargeback
+ * and from whether a statutory credit note document exists.
+ */
+export type GstAdjustmentEligibility =
+  | "not_applicable"
+  | "requires_review"
+  | "eligible"
+  | "ineligible"
+  | "ineligible_for_output_tax_reduction";
+
+export type GstEvidenceStatus = "not_applicable" | "unconfirmed" | "confirmed";
+
+/**
+ * Section 34 uses the earlier of 30 November following the original-supply FY
+ * and the date the relevant annual return is furnished. The date is never
+ * guessed: `unconfirmed` cannot become `eligible`.
+ */
+export type AnnualReturnCutoffStatus =
+  | "not_applicable"
+  | "unconfirmed"
+  | "not_furnished_as_of_review"
+  | "furnished";
+
+export type TaxAdjustmentDisposition =
+  | "not_applicable"
+  | "pending"
+  | "credit_note_issued"
+  | "requires_review"
+  | "ineligible";
+
+/** Explicit Section-34 CN issuance policy. Blank/unconfirmed fails closed. */
+export type Section34CreditNotePolicy = "unconfirmed" | "full_refund_developer_tax_invoice";
+
+/**
+ * Server-only GST-return / monthly-compliance record.
+ * Path: `_subscriptionTaxCompliance/{invoiceId}` (invoiceId or creditNoteId).
+ * Filing authority for reporting period, ECO/Table-14 category, and month close.
+ * The invoice legal snapshot stays immutable after issuance.
+ */
+export interface SubscriptionTaxComplianceDoc {
+  invoiceId: string;
+  documentKind: TaxComplianceDocumentKind;
+  financialEventId: string;
+  originalInvoiceId: string | null;
+  uid: string;
+  supplyMonthKey: string;
+  issueMonthKey: string | null;
+  reportingTaxPeriodMonth: string | null;
+  taxPeriodDecisionStatus: TaxPeriodDecisionStatus;
+  ecoReportingCategory: EcoReportingCategory;
+  operatorIdentifier: string | null;
+  operatorGstin: string | null;
+  reviewStatus: Gstr1ReviewStatus;
+  unresolvedReasons: string[];
+  cumulativeCreditReversedInPaise: number;
+  gstAdjustmentEligibility: GstAdjustmentEligibility;
+  recipientItcReversalEvidenceStatus: GstEvidenceStatus;
+  taxIncidenceConditionStatus: GstEvidenceStatus;
+  section34OuterLimitAt: number | null;
+  annualReturnCutoffStatus: AnnualReturnCutoffStatus;
+  annualReturnFurnishedAt: number | null;
+  annualReturnCutoffReviewedAt: number | null;
+  annualReturnCutoffReviewBasis: string | null;
+  annualReturnCutoffConfirmedThrough: number | null;
+  taxAdjustmentDisposition: TaxAdjustmentDisposition;
+  reviewedAt: number | null;
+  reviewedByDiagnosticUid: string | null;
+  reviewBasis: string | null;
+  reviewVersion: number;
+  previousEcoReportingCategory: EcoReportingCategory | null;
+  previousReportingTaxPeriodMonth: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** Always immutable, including on unissued drafts. */
+export const INVOICE_IDENTITY_KEYS: ReadonlyArray<keyof SubscriptionInvoiceDoc> = [
+  "invoiceId",
+  "uid",
+  "financialEventId",
+];
+
+/**
+ * Frozen only after statutory issuance (documentNumber + invoiceIssuedAt).
+ * Unissued drafts may refresh these when compliance configuration arrives.
+ */
+export const INVOICE_STATUTORY_KEYS: ReadonlyArray<keyof SubscriptionInvoiceDoc> = [
+  "invoiceId",
+  "uid",
+  "diagnosticUid",
+  "financialEventId",
+  "platform",
+  "canonicalSku",
+  "plan",
+  "billingPeriod",
+  "subscriptionDescription",
+  "taxResponsibilityMode",
+  "documentType",
+  "documentNumber",
+  "financialYear",
+  "taxPeriodMonth",
+  "taxPeriodStatus",
+  "invoiceIssuedAt",
+  "invoiceIssuedOnIst",
+  "supplyOccurredAt",
+  "issueStatus",
+  "issueHoldReason",
+  "reverseChargeMode",
+  "seller",
+  "buyer",
+  "placeOfSupplyStateCode",
+  "placeOfSupplyStateName",
+  "sacCode",
+  "serviceDescription",
+  "currency",
+  "grossCustomerAmountInPaise",
+  "taxableAmountInPaise",
+  "gstRateBps",
+  "taxType",
+  "cgstInPaise",
+  "sgstInPaise",
+  "igstInPaise",
+  "totalTaxInPaise",
+  "totalInPaise",
+  "platformCommissionInPaise",
+  "ecoReporting",
+];
+
+/** @deprecated Use INVOICE_STATUTORY_KEYS; kept as alias for existing imports. */
+export const INVOICE_IMMUTABLE_KEYS = INVOICE_STATUTORY_KEYS;
+
+export const INVOICE_OPERATIONAL_KEYS: ReadonlyArray<keyof SubscriptionInvoiceDoc> = [
+  "pdfStatus",
+  "invoicePdfStoragePath",
+  "emailStatus",
+  "emailProviderMessageId",
+  "invoiceEmailAcceptedAt",
+  "invoiceEmailDeliveredAt",
+  "gstrReportedMonth",
+  "gstrFilingBatchId",
+  "invoiceIssueDueAt",
+  "updatedAt",
+];
+
+export interface SubscriptionBillingDetailsDoc {
+  gstin: string | null;
+  /** Individual recipient / billing name. Not the same as optional business name. */
+  billingRecipientName: string | null;
+  billingBusinessName: string | null;
+  billingAddressLine1: string | null;
+  billingAddressLine2: string | null;
+  billingCity: string | null;
+  billingPostalCode: string | null;
+  billingStateCode: string | null;
+  billingStateName: string | null;
+  gstinVerificationStatus: GstinVerificationStatus;
+  verifiedLegalName: string | null;
+  verifiedStateCode: string | null;
+  verifiedAt: number | null;
+  verifiedByDiagnosticUid: string | null;
+  updatedAt: number;
+}
+
+export interface InvoiceCounterDoc {
+  currentTaxInvoiceCount: number;
+  currentReceiptCount: number;
+  financialYear: string;
+  updatedAt: number;
+}
+
+export interface CreditNoteCounterDoc {
+  currentCount: number;
+  financialYear: string;
+  updatedAt: number;
+}
+
+export interface SubscriptionCreditNoteDoc {
+  creditNoteId: string;
+  originalInvoiceId: string;
+  originalDocumentNumber: string | null;
+  refundFinancialEventId: string;
+  uid: string;
+  diagnosticUid: string;
+  documentNumber: string | null;
+  financialYear: string | null;
+  taxPeriodMonth: string | null;
+  taxPeriodStatus: TaxPeriodStatus;
+  issuedAt: number | null;
+  issuedOnIst: string | null;
+  nature: "CREDIT NOTE";
+  seller: SellerTaxSnapshot | null;
+  buyer: BuyerTaxSnapshot | null;
+  /** Convenience copy of buyer.gstin. Name/address live on `buyer`. */
+  buyerGstin: string | null;
+  buyerClassification: BuyerClassification | null;
+  originalInvoiceIssuedAt: number | null;
+  originalInvoiceIssuedOnIst: string | null;
+  placeOfSupplyStateCode: string | null;
+  placeOfSupplyStateName: string | null;
+  gstRateBps: number | null;
+  taxType: GstTaxType;
+  taxResponsibilityMode: TaxResponsibilityMode;
+  taxableAmountReversedInPaise: number | null;
+  cgstReversedInPaise: number | null;
+  sgstReversedInPaise: number | null;
+  igstReversedInPaise: number | null;
+  totalTaxReversedInPaise: number | null;
+  totalReversedInPaise: number | null;
+  gstAdjustmentEligibility: GstAdjustmentEligibility;
+  recipientItcReversalEvidenceStatus: GstEvidenceStatus;
+  taxIncidenceConditionStatus: GstEvidenceStatus;
+  section34OuterLimitAt: number | null;
+  annualReturnCutoffStatus: AnnualReturnCutoffStatus;
+  annualReturnFurnishedAt: number | null;
+  annualReturnCutoffReviewedAt: number | null;
+  annualReturnCutoffReviewBasis: string | null;
+  annualReturnCutoffConfirmedThrough: number | null;
+  taxAdjustmentDisposition: TaxAdjustmentDisposition;
+  gstrReportable: boolean;
+  gstrReportedMonth: string | null;
+  gstrFilingBatchId: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export const CREDIT_NOTE_STATUTORY_KEYS: ReadonlyArray<keyof SubscriptionCreditNoteDoc> = [
+  "creditNoteId",
+  "originalInvoiceId",
+  "originalDocumentNumber",
+  "refundFinancialEventId",
+  "uid",
+  "documentNumber",
+  "financialYear",
+  "taxPeriodMonth",
+  "issuedAt",
+  "issuedOnIst",
+  "nature",
+  "seller",
+  "buyer",
+  "originalInvoiceIssuedAt",
+  "originalInvoiceIssuedOnIst",
+  "placeOfSupplyStateCode",
+  "placeOfSupplyStateName",
+  "gstRateBps",
+  "taxType",
+  "taxResponsibilityMode",
+  "taxableAmountReversedInPaise",
+  "cgstReversedInPaise",
+  "sgstReversedInPaise",
+  "igstReversedInPaise",
+  "totalTaxReversedInPaise",
+  "totalReversedInPaise",
+];
+
+export type InvoiceRetryStage = "pdf" | "email";
+
+export interface InvoiceRetryStageState {
+  attempts: number;
+  maxAttempts: number;
+  nextAttemptAt: number | null;
+  lastErrorCode: string | null;
+  deadLettered: boolean;
+  resolved: boolean;
+}
+
+export interface InvoiceRetryQueueDoc {
+  invoiceId: string;
+  financialEventId: string;
+  pdf: InvoiceRetryStageState;
+  email: InvoiceRetryStageState;
+  updatedAt: number;
+}
+
+export interface Gstr1ReportManifestDoc {
+  reportId: string;
+  month: string;
+  invoiceIds: string[];
+  creditNoteIds: string[];
+  sourceInvoiceIds: string[];
+  sourceCreditNoteIds: string[];
+  sourceComplianceIds: string[];
+  sourceFinancialEventIds: string[];
+  contentHash: string;
+  jsonStoragePath: string;
+  csvStoragePath: string;
+  generatedAt: number;
+  generatedByDiagnosticUid: string;
+  reviewStatus: Gstr1ReviewStatus;
+  unresolvedReviewReasons: string[];
+}
+
+export interface Gstr1FilingBatchDoc {
+  month: string;
+  reportId: string;
+  invoiceIds: string[];
+  creditNoteIds: string[];
+  reportHash: string;
+  filedAt: number;
+  filedByDiagnosticUid: string;
+  filingAcknowledgementReference: string;
+  createdAt: number;
+}

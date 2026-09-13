@@ -19,8 +19,13 @@ const pkg = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
 const EXCLUDE = new Set([
   "test:all", // self
   "test:firestore-rules", // emulator suite — separate ci:verify stage
+  "test:storage-rules", // storage emulator suite — separate ci:verify stage
   "test:resolve-or-create-phone-emulator", // emulator suite — separate ci:verify stage
   "test:billing-transaction-emulator", // emulator suite — separate ci:verify stage
+  "test:billing-gst-compliance-emulator", // emulator suite — separate ci:verify stage
+  "test:invoice-renderer", // requires services/subscription-invoice-renderer node_modules
+  "test:invoice-renderer-build", // npm ci + tsc; run by ci:verify
+  "test:invoice-renderer-docker", // docker build; run by ci:verify
 ]);
 
 const suites = Object.keys(pkg.scripts)

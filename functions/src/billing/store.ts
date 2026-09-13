@@ -48,11 +48,50 @@ export class ReadAfterWriteError extends Error {
   }
 }
 
+class ConcurrentModificationError extends Error {
+  constructor() {
+    super("transaction retry: a read document changed before commit");
+    this.name = "ConcurrentModificationError";
+  }
+}
+
+function snapshotEqual(
+  a: Record<string, unknown> | undefined,
+  b: Record<string, unknown> | undefined
+): boolean {
+  if (a === undefined && b === undefined) return true;
+  if (a === undefined || b === undefined) return false;
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
 export class MemoryBillingStore implements BillingStore {
   readonly docs = new Map<string, Record<string, unknown>>();
 
+  /**
+   * Firestore-like optimistic concurrency: if a document that was read
+   * changed before commit, the callback is retried. Concurrent counter
+   * allocations therefore cannot both persist the same serial.
+   */
   async runTransaction<T>(fn: (tx: BillingTransaction) => Promise<T>): Promise<T> {
+    const maxAttempts = 8;
+    let lastConflict: ConcurrentModificationError | null = null;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        return await this.runOnce(fn);
+      } catch (err) {
+        if (err instanceof ConcurrentModificationError) {
+          lastConflict = err;
+          continue;
+        }
+        throw err;
+      }
+    }
+    throw lastConflict ?? new ConcurrentModificationError();
+  }
+
+  private async runOnce<T>(fn: (tx: BillingTransaction) => Promise<T>): Promise<T> {
     const snapshot = new Map(this.docs);
+    const readValues = new Map<string, Record<string, unknown> | undefined>();
     const writes: Array<{ op: "create" | "set"; path: string; data: Record<string, unknown> }> =
       [];
     let writesStaged = false;
@@ -63,6 +102,7 @@ export class MemoryBillingStore implements BillingStore {
           throw new ReadAfterWriteError(path);
         }
         const data = snapshot.get(path);
+        readValues.set(path, data);
         return {
           exists: data !== undefined,
           data: () => data,
@@ -80,6 +120,12 @@ export class MemoryBillingStore implements BillingStore {
 
     // If fn throws, nothing below runs — zero writes are applied.
     const result = await fn(tx);
+
+    for (const [path, expected] of readValues) {
+      if (!snapshotEqual(this.docs.get(path), expected)) {
+        throw new ConcurrentModificationError();
+      }
+    }
 
     // Validate every create BEFORE applying any mutation (atomic commit).
     const pendingCreates = new Set<string>();
