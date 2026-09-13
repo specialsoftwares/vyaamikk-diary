@@ -12,7 +12,16 @@ import {
   CANONICAL_PLAY_PACKAGE_NAME,
   PLAY_API_BASE,
 } from "./playConstants";
-import type { GoogleOrder, GoogleSubscriptionPurchaseV2 } from "./playTypes";
+import type {
+  GoogleCancellationEvent,
+  GoogleOrder,
+  GoogleOrderHistory,
+  GooglePartialRefundEvent,
+  GoogleProcessedEvent,
+  GoogleRefundDetails,
+  GoogleRefundEvent,
+  GoogleSubscriptionPurchaseV2,
+} from "./playTypes";
 
 export const PLAY_API_TIMEOUT_MS = 15_000;
 
@@ -90,9 +99,68 @@ function sanitizeLineSubscriptionDetails(raw: unknown): NonNullable<GoogleOrder[
   };
 }
 
+function sanitizeRefundDetails(raw: unknown): GoogleRefundDetails | undefined {
+  if (raw == null || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const d = raw as Record<string, unknown>;
+  return {
+    total: asMoney(d.total),
+    tax: asMoney(d.tax),
+  };
+}
+
+function sanitizeProcessedEvent(raw: unknown): GoogleProcessedEvent | undefined {
+  if (raw == null || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const d = raw as Record<string, unknown>;
+  return {
+    eventTime: typeof d.eventTime === "string" ? d.eventTime : undefined,
+  };
+}
+
+function sanitizeCancellationEvent(raw: unknown): GoogleCancellationEvent | undefined {
+  if (raw == null || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const d = raw as Record<string, unknown>;
+  return {
+    eventTime: typeof d.eventTime === "string" ? d.eventTime : undefined,
+  };
+}
+
+function sanitizeRefundEvent(raw: unknown): GoogleRefundEvent | undefined {
+  if (raw == null || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const d = raw as Record<string, unknown>;
+  return {
+    eventTime: typeof d.eventTime === "string" ? d.eventTime : undefined,
+    refundDetails: sanitizeRefundDetails(d.refundDetails),
+    refundReason: typeof d.refundReason === "string" ? d.refundReason : undefined,
+  };
+}
+
+function sanitizePartialRefundEvent(raw: unknown): GooglePartialRefundEvent | undefined {
+  if (raw == null || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const d = raw as Record<string, unknown>;
+  return {
+    state: typeof d.state === "string" ? d.state : undefined,
+    refundDetails: sanitizeRefundDetails(d.refundDetails),
+  };
+}
+
+function sanitizeOrderHistory(raw: unknown): GoogleOrderHistory | undefined {
+  if (raw == null || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const h = raw as Record<string, unknown>;
+  const partialRaw = Array.isArray(h.partialRefundEvents) ? h.partialRefundEvents : [];
+  return {
+    processedEvent: sanitizeProcessedEvent(h.processedEvent),
+    cancellationEvent: sanitizeCancellationEvent(h.cancellationEvent),
+    refundEvent: sanitizeRefundEvent(h.refundEvent),
+    partialRefundEvents: partialRaw
+      .map(sanitizePartialRefundEvent)
+      .filter((e): e is GooglePartialRefundEvent => e != null),
+  };
+}
+
 /**
  * Drop secret-bearing Order fields. Ignore synthetic root subscriptionDetails
- * and packageName — they are not current Orders-resource fields.
+ * and packageName — they are not current Orders-resource fields. Never copy
+ * purchaseToken, buyerAddress, or raw response extras.
  */
 export function sanitizePlayOrder(raw: unknown): GoogleOrder {
   const o = asObject(raw);
@@ -111,6 +179,7 @@ export function sanitizePlayOrder(raw: unknown): GoogleOrder {
         subscriptionDetails: sanitizeLineSubscriptionDetails(item.subscriptionDetails),
       })),
     createTime: typeof o.createTime === "string" ? o.createTime : undefined,
+    orderHistory: sanitizeOrderHistory(o.orderHistory),
   };
 }
 

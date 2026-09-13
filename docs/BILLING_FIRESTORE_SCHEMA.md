@@ -30,6 +30,7 @@ schema-by-use: **no documents are pre-created to "initialize" collections.**
 | `_trialLedger/{trialIdentityHmac}` | Admin SDK only; survives account deletion | denied | denied |
 | `_billingRateLimits/{bucketId}` | Admin SDK only (transactional buckets) | denied | denied |
 | `_playAccountIndex/{obfuscatedAccountId}` | Admin SDK only (Play obfuscated-account ownership) | denied | denied |
+| `_billingReconciliationQueue/{queueId}` | Admin SDK only (durable Play/refund reconciliation work) | denied | denied |
 | `globalStats/paperSaved` | Admin SDK only | public (`read: if true`) | denied |
 
 Notes:
@@ -54,6 +55,17 @@ Notes:
   Clients have zero access. VYD-35 will pass the returned id to
   `BillingFlowParams.setObfuscatedAccountId`. Collision onto a different uid
   fails closed.
+- `_billingReconciliationQueue/{stableId}` is a server-only work record used
+  when a verified financial event (for example a Play refund) is recorded but
+  live entitlement cannot be authoritatively reconciled (expired token,
+  historical replaced token whose current credential cannot be decrypted,
+  owner mismatch). Document ids are source-independent
+  (`android:refund-reconcile:{orderId}`). Documents store `reason`,
+  `platform`, `financialEventId`, optional `credentialFingerprint`,
+  timestamps, `status: "pending"`, and `attemptCount`. They never store raw
+  purchase tokens, plaintext credentials, or uid. Duplicate RTDN deliveries
+  preserve a single work item. VYD-32 writes the queue; a later phase may
+  consume it. Clients have zero access.
 
 - `globalStats/paperSaved` figures are labelled estimates with a methodology
   string (owner decision W-9); other `globalStats/*` docs are default-denied.
@@ -363,4 +375,7 @@ appears in a later phase; it will be added with the query that requires it.
   RTDN events fail closed as `pending_refund_review_unimplemented` (retryable
   HTTP 503). They are never acknowledged as success, never persisted as
   plaintext `pendingRefundToken`, and never auto-suggested as a refund.
+- Verified Play refunds that cannot reconcile live entitlement write
+  `_billingReconciliationQueue` before the RTDN is acknowledged. The queue
+  is not a substitute for `ReviewRefund`.
 - Chargeback/pending-review tax treatment remains a VYD-40 legal review gate.

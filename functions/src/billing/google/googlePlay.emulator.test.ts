@@ -104,6 +104,7 @@ async function main() {
           subscriptionDetails: { basePlanId: "monthly", servicePeriodStartTime: rfc(NOW) },
         },
       ],
+      orderHistory: { processedEvent: { eventTime: rfc(NOW) } },
     }
   );
 

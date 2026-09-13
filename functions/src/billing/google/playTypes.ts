@@ -91,10 +91,14 @@ export interface GoogleSubscriptionPurchaseV2 {
 }
 
 export type GoogleOrderState =
+  | "STATE_UNSPECIFIED"
   | "ORDER_STATE_UNSPECIFIED"
   | "PENDING"
   | "PROCESSED"
   | "CANCELED"
+  | "PENDING_REFUND"
+  | "PARTIALLY_REFUNDED"
+  | "REFUNDED"
   | string;
 
 export interface GoogleOrderSubscriptionDetails {
@@ -110,11 +114,55 @@ export interface GoogleOrderLineItem {
   subscriptionDetails?: GoogleOrderSubscriptionDetails;
 }
 
+/** Narrow `OrderHistory.processedEvent` — `eventTime` only. */
+export interface GoogleProcessedEvent {
+  eventTime?: string;
+}
+
+/** Narrow `OrderHistory.cancellationEvent` — `eventTime` only. */
+export interface GoogleCancellationEvent {
+  eventTime?: string;
+}
+
+/** Narrow `RefundDetails` — refunded gross + tax. No buyer PII. */
+export interface GoogleRefundDetails {
+  total?: GoogleMoney;
+  tax?: GoogleMoney;
+}
+
+/** Narrow `OrderHistory.refundEvent` for a completed full refund. */
+export interface GoogleRefundEvent {
+  eventTime?: string;
+  refundDetails?: GoogleRefundDetails;
+  refundReason?: string;
+}
+
+/**
+ * Narrow `OrderHistory.partialRefundEvents[]`. Presence is diagnostic;
+ * VYD-32 never treats a partial as a completed full refund.
+ */
+export interface GooglePartialRefundEvent {
+  state?: string;
+  refundDetails?: GoogleRefundDetails;
+}
+
+/**
+ * Sanitized `Order.orderHistory`. Omits purchaseToken, buyer address, and
+ * any other PII / raw credential material.
+ */
+export interface GoogleOrderHistory {
+  processedEvent?: GoogleProcessedEvent;
+  cancellationEvent?: GoogleCancellationEvent;
+  refundEvent?: GoogleRefundEvent;
+  partialRefundEvents?: GooglePartialRefundEvent[];
+}
+
 /**
  * Sanitized Order matching the current Android Publisher Orders resource.
  * `subscriptionDetails` lives on each line item, not the order root.
  * `packageName` is not an Order field — package authority is the
- * package-scoped GET URL. `purchaseToken` is deliberately omitted.
+ * package-scoped GET URL. `purchaseToken` and `buyerAddress` are omitted.
+ * `createTime` is diagnostic metadata only — not the financial timestamp.
  */
 export interface GoogleOrder {
   orderId?: string;
@@ -124,6 +172,7 @@ export interface GoogleOrder {
   developerRevenueInBuyerCurrency?: GoogleMoney;
   lineItems?: GoogleOrderLineItem[];
   createTime?: string;
+  orderHistory?: GoogleOrderHistory;
 }
 
 export interface GoogleDeveloperNotification {

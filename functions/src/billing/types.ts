@@ -229,6 +229,25 @@ export interface PlayAccountIndexDoc {
   updatedAt: number;
 }
 
+/**
+ * Server-only durable reconciliation work item (VYD-32).
+ * Path: `_billingReconciliationQueue/{stableId}` — zero client access.
+ * Never stores raw purchase tokens, plaintext credentials, or uid.
+ * `financialEventId` is the resolver for the ledger owner.
+ */
+export type BillingReconciliationQueueStatus = "pending";
+
+export interface BillingReconciliationQueueDoc {
+  reason: string;
+  platform: BillingPlatform;
+  financialEventId: string;
+  credentialFingerprint: string | null;
+  createdAt: number;
+  updatedAt: number;
+  status: BillingReconciliationQueueStatus;
+  attemptCount: number;
+}
+
 export interface CompanyBillingDoc {
   uid: string;
   platform: BillingPlatform;

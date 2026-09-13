@@ -1,30 +1,40 @@
 /**
- * Strict Google Order validation for VYD-32 paid financial events.
+ * Strict Google Order validation for VYD-32 financial events.
  *
  * Matches the current Android Publisher Orders resource: subscriptionDetails
  * is a line-item field. Package authority is the package-scoped endpoint,
  * not a synthetic Order.packageName.
+ *
+ * Purchase/renewal and full-refund are distinct Order states and MUST NOT
+ * share a PROCESSED-only validator.
  */
 
 import { BillingError } from "../errors";
 import { googlePaidOrderTotalToPaise } from "./playMoney";
+import { parseRfc3339Millis } from "./playTime";
 import type { GoogleOrder, GoogleOrderLineItem } from "./playTypes";
 
-const PAID_ORDER_STATES = new Set(["PROCESSED", "ORDER_STATE_PROCESSED"]);
+const PROCESSED_ORDER_STATES = new Set(["PROCESSED", "ORDER_STATE_PROCESSED"]);
+const REFUNDED_ORDER_STATES = new Set(["REFUNDED", "ORDER_STATE_REFUNDED"]);
+const PENDING_REFUND_STATES = new Set(["PENDING_REFUND", "ORDER_STATE_PENDING_REFUND"]);
+const PARTIAL_REFUND_STATES = new Set(["PARTIALLY_REFUNDED", "ORDER_STATE_PARTIALLY_REFUNDED"]);
 
-function fail(causeCode: string): never {
+/** Pub/Sub delivery may lag the Order refund event; GST month still follows the Order. */
+const MAX_RTDN_REFUND_SIGNAL_SKEW_MS = 7 * 24 * 60 * 60 * 1000;
+
+function fail(causeCode: string, clientCode: BillingError["clientCode"] = "verification_failed"): never {
   throw new BillingError({
-    clientCode: "verification_failed",
+    clientCode,
     causeCode,
   });
 }
 
 /**
- * Require exactly one supported subscription line item that matches the
- * verified product + base plan. Missing orderId / lineItems /
- * subscriptionDetails / basePlanId all fail closed.
+ * Exact orderId + single supported subscription line item. No Order-state check.
+ * Used when the purchase/renewal is already in the ledger (the Order may now
+ * be REFUNDED) and when building the PROCESSED / full-refund validators.
  */
-export function assertPaidSubscriptionOrder(opts: {
+export function assertSubscriptionOrderLineItem(opts: {
   order: GoogleOrder;
   expectedOrderId: string;
   productId: string;
@@ -36,10 +46,6 @@ export function assertPaidSubscriptionOrder(opts: {
   }
   if (order.orderId !== expectedOrderId) {
     fail("order_id_mismatch");
-  }
-  const state = order.state ?? "";
-  if (!PAID_ORDER_STATES.has(state)) {
-    fail("order_not_processable");
   }
   const items = order.lineItems;
   if (!Array.isArray(items) || items.length === 0) {
@@ -80,4 +86,102 @@ export function assertPaidSubscriptionOrder(opts: {
     }
   }
   return lineItem;
+}
+
+/**
+ * Authoritative purchase/renewal financial timestamp.
+ * `Order.createTime` is not used — pending payment can complete in a later month.
+ */
+export function requireProcessedEventMillis(order: GoogleOrder): number {
+  const eventTime = order.orderHistory?.processedEvent?.eventTime;
+  return parseRfc3339Millis(eventTime, "missing_order_processed_event");
+}
+
+export function requireRefundEventAuthority(order: GoogleOrder): {
+  occurredAt: number;
+  grossAmountInPaise: number;
+} {
+  const refundEvent = order.orderHistory?.refundEvent;
+  if (refundEvent == null || typeof refundEvent !== "object") {
+    fail("missing_order_refund_event");
+  }
+  const occurredAt = parseRfc3339Millis(refundEvent.eventTime, "missing_order_refund_event_time");
+  const total = refundEvent.refundDetails?.total;
+  const grossAmountInPaise = googlePaidOrderTotalToPaise(total);
+  return { occurredAt, grossAmountInPaise };
+}
+
+/**
+ * RTDN `eventTimeMillis` is signal timing. The Order refund event is the
+ * financial timestamp. Reject impossible / material contradictions; do not
+ * require byte-for-byte equality.
+ */
+export function assertRefundSignalAgreesWithOrder(opts: {
+  rtdnEventTimeMillis: number;
+  refundEventTimeMillis: number;
+  processedEventTimeMillis: number;
+}): void {
+  if (opts.refundEventTimeMillis < opts.processedEventTimeMillis) {
+    fail("refund_before_processed");
+  }
+  const skew = Math.abs(opts.rtdnEventTimeMillis - opts.refundEventTimeMillis);
+  if (skew > MAX_RTDN_REFUND_SIGNAL_SKEW_MS) {
+    fail("refund_event_time_contradiction");
+  }
+}
+
+/**
+ * PROCESSED paid subscription Order used for purchase/renewal ledger writes.
+ */
+export function assertProcessedSubscriptionOrder(opts: {
+  order: GoogleOrder;
+  expectedOrderId: string;
+  productId: string;
+  basePlanId: string;
+}): GoogleOrderLineItem {
+  const lineItem = assertSubscriptionOrderLineItem(opts);
+  const state = opts.order.state ?? "";
+  if (!PROCESSED_ORDER_STATES.has(state)) {
+    fail("order_not_processable");
+  }
+  requireProcessedEventMillis(opts.order);
+  return lineItem;
+}
+
+/**
+ * Completed FULL refund Order. PENDING_REFUND and PARTIALLY_REFUNDED fail closed.
+ */
+export function assertFullyRefundedSubscriptionOrder(opts: {
+  order: GoogleOrder;
+  expectedOrderId: string;
+  productId: string;
+  basePlanId: string;
+}): GoogleOrderLineItem {
+  const lineItem = assertSubscriptionOrderLineItem(opts);
+  const state = opts.order.state ?? "";
+  if (PENDING_REFUND_STATES.has(state)) {
+    fail("order_refund_pending");
+  }
+  if (PARTIAL_REFUND_STATES.has(state)) {
+    throw new BillingError({
+      clientCode: "invalid_purchase",
+      causeCode: "unsupported_partial_refund",
+    });
+  }
+  if (!REFUNDED_ORDER_STATES.has(state)) {
+    fail("order_not_fully_refunded");
+  }
+  requireProcessedEventMillis(opts.order);
+  requireRefundEventAuthority(opts.order);
+  return lineItem;
+}
+
+/** @deprecated Use assertProcessedSubscriptionOrder — PROCESSED paid orders only. */
+export function assertPaidSubscriptionOrder(opts: {
+  order: GoogleOrder;
+  expectedOrderId: string;
+  productId: string;
+  basePlanId: string;
+}): GoogleOrderLineItem {
+  return assertProcessedSubscriptionOrder(opts);
 }

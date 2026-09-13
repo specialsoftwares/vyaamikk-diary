@@ -392,6 +392,23 @@ async function main() {
       [...store.docs.keys()].filter((k) => k.startsWith("_billingEventLedger/")).length,
       2
     );
+
+    await assert.rejects(
+      applySubscriptionTransition(
+        { store, diagnosticUid: DIAG },
+        {
+          ...mkRefund("coexist-r4", 24_900),
+          requested: {
+            ...mkRefund("coexist-r4", 24_900).requested,
+            financialEvent: {
+              ...mkRefund("coexist-r4", 24_900).requested.financialEvent!,
+              occurredAt: NOW + 86_400_000,
+            },
+          },
+        }
+      ),
+      isCause("financial_event_conflict")
+    );
   }
 
   // STALE PLATFORM STATE: reconciledAt older than the stored watermark → reject

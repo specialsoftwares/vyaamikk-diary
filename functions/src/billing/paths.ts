@@ -36,6 +36,10 @@ export function playAccountIndexPath(obfuscatedAccountId: string): string {
   return `_playAccountIndex/${obfuscatedAccountId}`;
 }
 
+export function billingReconciliationQueuePath(queueId: string): string {
+  return `_billingReconciliationQueue/${sanitizeDocId(queueId)}`;
+}
+
 export function billingDetailsPath(uid: string): string {
   return `users/${uid}/subscription/billingDetails`;
 }

@@ -14,11 +14,11 @@ import { handleAndroidRtdnHttp } from "../callables/androidRtdn";
 import { InMemoryCredentialCipher, credentialFingerprint } from "../crypto";
 import { diagnosticUidHmac } from "../diagnosticUid";
 import { BillingError } from "../errors";
-import { companyBillingPath, financialLedgerPath, playAccountIndexPath, sanitizeDocId } from "../paths";
+import { companyBillingPath, financialLedgerPath, playAccountIndexPath, sanitizeDocId, billingReconciliationQueuePath } from "../paths";
 import { ALL_CANONICAL_SKUS, SUBSCRIPTION_CATALOG, canonicalSkuForAndroid } from "../products";
 import { istMonthKeyForMillis } from "../istMonthKey";
 import { MemoryBillingStore } from "../store";
-import type { CompanyBillingDoc, SubscriptionStatusDoc } from "../types";
+import type { BillingEventLedgerDoc, CompanyBillingDoc, SubscriptionStatusDoc } from "../types";
 import {
   processAndroidPurchaseToken,
   processAndroidVoidedPurchase,
@@ -28,7 +28,11 @@ import {
 } from "./androidSubscriptionAdapter";
 import type { PlayApi } from "./playApiClient";
 import { PlayApiClient, sanitizePlayOrder } from "./playApiClient";
-import { assertPaidSubscriptionOrder } from "./playOrder";
+import {
+  assertFullyRefundedSubscriptionOrder,
+  assertPaidSubscriptionOrder,
+  assertProcessedSubscriptionOrder,
+} from "./playOrder";
 import { obfuscatedAccountIdForUid } from "./playOwnership";
 import { verifyPubSubPushOidc, type OidcTokenVerifier } from "./pubsubOidc";
 import { handleAndroidRtdn } from "./rtdn";
@@ -79,25 +83,85 @@ function activeSub(overrides: Partial<GoogleSubscriptionPurchaseV2> = {}): Googl
   };
 }
 
-function paidOrder(orderId: string, totalUnits: string, nanos = 0, createTime = rfc(NOW)): GoogleOrder {
+function paidOrder(
+  orderId: string,
+  totalUnits: string,
+  nanos = 0,
+  createTime = rfc(NOW),
+  opts: {
+    productId?: string;
+    basePlanId?: string;
+    processedEventTime?: string;
+    state?: GoogleOrder["state"];
+  } = {}
+): GoogleOrder {
   const total = { currencyCode: "INR" as const, units: totalUnits, nanos };
+  const productId = opts.productId ?? "vyd_professional";
+  const basePlanId = opts.basePlanId ?? "monthly";
+  const processedEventTime = opts.processedEventTime ?? createTime;
   return {
     orderId,
-    state: "PROCESSED",
+    state: opts.state ?? "PROCESSED",
     createTime,
     total,
     developerRevenueInBuyerCurrency: { currencyCode: "INR", units: "1", nanos: 0 },
     lineItems: [
       {
-        productId: "vyd_professional",
+        productId,
         total,
         subscriptionDetails: {
-          basePlanId: "monthly",
-          servicePeriodStartTime: createTime,
+          basePlanId,
+          servicePeriodStartTime: processedEventTime,
         },
       },
     ],
+    orderHistory: {
+      processedEvent: { eventTime: processedEventTime },
+    },
   };
+}
+
+function refundedOrder(
+  order: GoogleOrder,
+  refundEventTime: string,
+  refundTotal: GoogleOrder["total"] = order.total
+): GoogleOrder {
+  return {
+    ...order,
+    state: "REFUNDED",
+    orderHistory: {
+      processedEvent: order.orderHistory?.processedEvent ?? {
+        eventTime: order.createTime,
+      },
+      refundEvent: {
+        eventTime: refundEventTime,
+        refundDetails: {
+          total: refundTotal,
+          tax: order.tax,
+        },
+        refundReason: "OTHER",
+      },
+    },
+  };
+}
+
+function starterSub(overrides: Partial<GoogleSubscriptionPurchaseV2> = {}): GoogleSubscriptionPurchaseV2 {
+  return activeSub({
+    lineItems: [
+      {
+        productId: "vyd_starter",
+        expiryTime: rfc(FUTURE),
+        latestSuccessfulOrderId: ORDER1,
+        autoRenewingPlan: { autoRenewEnabled: true },
+        offerDetails: { basePlanId: "monthly" },
+      },
+    ],
+    ...overrides,
+  });
+}
+
+function queueDocs(store: MemoryBillingStore) {
+  return [...store.docs.entries()].filter(([k]) => k.startsWith("_billingReconciliationQueue/"));
 }
 
 function rtdnBody(
@@ -800,6 +864,7 @@ async function main() {
       eventSource: "callable",
     });
     play.sub.acknowledgementState = "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED";
+    play.orders.set(ORDER1, refundedOrder(play.orders.get(ORDER1)!, rfc(NOW)));
     const refunded = await processAndroidVoidedPurchase(deps, {
       purchaseToken: TOKEN,
       orderId: ORDER1,
@@ -865,7 +930,7 @@ async function main() {
       subscriptionState: "SUBSCRIPTION_STATE_EXPIRED",
       acknowledgementState: "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED",
     });
-    expPlay.orders.set(ORDER1, paidOrder(ORDER1, "249"));
+    expPlay.orders.set(ORDER1, refundedOrder(paidOrder(ORDER1, "249"), rfc(NOW)));
     const revoked = await processAndroidVoidedPurchase(expired.deps, {
       purchaseToken: TOKEN,
       orderId: ORDER1,
@@ -947,6 +1012,7 @@ async function main() {
       total: { currencyCode: "INR", units: "249", nanos: 0 },
       purchaseToken: TOKEN,
       packageName: "com.specialsoftwares.vyaamikkdiary",
+      buyerAddress: { buyerCountry: "IN", buyerState: "KA", buyerPostcode: "560001" },
       subscriptionDetails: { basePlanId: "SHOULD_BE_IGNORED" },
       lineItems: [
         {
@@ -960,12 +1026,18 @@ async function main() {
           },
         },
       ],
+      orderHistory: {
+        processedEvent: { eventTime: rfc(NOW) },
+        purchaseToken: TOKEN,
+      },
     };
     const sanitized = sanitizePlayOrder(raw);
     assert.equal("packageName" in sanitized, false);
     assert.equal("subscriptionDetails" in sanitized, false);
     assert.equal(JSON.stringify(sanitized).includes(TOKEN), false);
     assert.equal(sanitized.lineItems?.[0]?.subscriptionDetails?.basePlanId, "monthly");
+    assert.equal(sanitized.orderHistory?.processedEvent?.eventTime, rfc(NOW));
+    assert.equal("buyerAddress" in sanitized, false);
     assertPaidSubscriptionOrder({
       order: sanitized,
       expectedOrderId: ORDER1,
@@ -998,6 +1070,7 @@ async function main() {
           ],
         },
       ],
+      ["missing_order_processed_event", { ...paidOrder(ORDER1, "249"), orderHistory: {} }],
     ] as const;
     for (const [cause, order] of missing) {
       play.orders.set(ORDER1, order);
@@ -1189,6 +1262,7 @@ async function main() {
       eventSource: "callable",
     });
     play.sub.acknowledgementState = "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED";
+    play.orders.set(ORDER1, refundedOrder(play.orders.get(ORDER1)!, rfc(oct)));
     const refunded = await processAndroidVoidedPurchase(
       { ...timed, nowMs: () => oct },
       {
@@ -1236,6 +1310,7 @@ async function main() {
     const before = store.docs.get(companyBillingPath(UID)) as CompanyBillingDoc;
     const statusBefore = store.docs.get(`users/${UID}/subscription/status`) as SubscriptionStatusDoc;
     assert.equal(before.latestOrderId, ORDER2);
+    play.orders.set(ORDER1, refundedOrder(play.orders.get(ORDER1)!, rfc(NOW + 5000)));
     const refunded = await processAndroidVoidedPurchase(deps, {
       purchaseToken: TOKEN,
       orderId: ORDER1,
@@ -1269,6 +1344,7 @@ async function main() {
       source: "androidValidation",
       eventSource: "callable",
     });
+    play.orders.set(ORDER1, refundedOrder(play.orders.get(ORDER1)!, rfc(NOW + 8000)));
     play.unqueryableTokens.add(TOKEN);
     const refunded = await processAndroidVoidedPurchase(deps, {
       purchaseToken: TOKEN,
@@ -1282,6 +1358,10 @@ async function main() {
     assert.equal(refunded.reconciliationRequired, true);
     assert.equal(refunded.to?.billingStatus, "active");
     assert.ok(store.docs.has(financialLedgerPath(sanitizeDocId(`android:refund:${ORDER1}`))));
+    assert.equal(queueDocs(store).length, 1);
+    assert.ok(
+      store.docs.has(billingReconciliationQueuePath(sanitizeDocId(`android:refund-reconcile:${ORDER1}`)))
+    );
     assertNoSecrets(store, refunded);
   }
 
@@ -1361,6 +1441,412 @@ async function main() {
     });
     assert.equal(skippedPpc.skipped, "pending_purchase_canceled");
     assert.equal(skippedPpc.to, null);
+  }
+
+  // Round-2: Order history, refund authority, current-token reconcile, queue
+  {
+    const sep = Date.parse("2026-09-15T00:00:00+05:30");
+    const oct = Date.parse("2026-10-15T00:00:00+05:30");
+
+    // A. Sep create / Oct processed → purchase month Oct
+    {
+      const play = new FakePlay(
+        activeSub(),
+        paidOrder(ORDER1, "249", 0, rfc(sep), { processedEventTime: rfc(oct) })
+      );
+      const { deps, store } = await primedDeps(play);
+      const timed = { ...deps, nowMs: () => oct };
+      await processAndroidPurchaseToken(timed, {
+        purchaseToken: TOKEN,
+        callerUid: UID,
+        source: "androidValidation",
+        eventSource: "callable",
+      });
+      const purchaseLedger = store.docs.get(
+        financialLedgerPath(sanitizeDocId(`android:purchase:${ORDER1}`))
+      ) as { monthKey: string; occurredAt: number };
+      assert.equal(purchaseLedger.monthKey, "2026-10");
+      assert.equal(purchaseLedger.occurredAt, oct);
+      assert.equal(istMonthKeyForMillis(purchaseLedger.occurredAt), "2026-10");
+    }
+
+    // B/C. REFUNDED accepted; PROCESSED rejected as completed full refund
+    {
+      const processed = paidOrder(ORDER1, "249");
+      assert.throws(
+        () =>
+          assertFullyRefundedSubscriptionOrder({
+            order: processed,
+            expectedOrderId: ORDER1,
+            productId: "vyd_professional",
+            basePlanId: "monthly",
+          }),
+        isCause("order_not_fully_refunded")
+      );
+      const refunded = refundedOrder(processed, rfc(NOW + 1000));
+      assertProcessedSubscriptionOrder({
+        order: processed,
+        expectedOrderId: ORDER1,
+        productId: "vyd_professional",
+        basePlanId: "monthly",
+      });
+      assertFullyRefundedSubscriptionOrder({
+        order: refunded,
+        expectedOrderId: ORDER1,
+        productId: "vyd_professional",
+        basePlanId: "monthly",
+      });
+      assert.throws(
+        () =>
+          assertFullyRefundedSubscriptionOrder({
+            order: { ...refunded, state: "PENDING_REFUND" },
+            expectedOrderId: ORDER1,
+            productId: "vyd_professional",
+            basePlanId: "monthly",
+          }),
+        isCause("order_refund_pending")
+      );
+      assert.throws(
+        () =>
+          assertFullyRefundedSubscriptionOrder({
+            order: { ...refunded, state: "PARTIALLY_REFUNDED" },
+            expectedOrderId: ORDER1,
+            productId: "vyd_professional",
+            basePlanId: "monthly",
+          }),
+        isCause("unsupported_partial_refund")
+      );
+    }
+
+    // D/E. refundEvent total is refund gross; mismatch vs original fails closed
+    {
+      const play = new FakePlay(activeSub(), paidOrder(ORDER1, "249"));
+      const { deps, store } = await primedDeps(play);
+      await processAndroidPurchaseToken(deps, {
+        purchaseToken: TOKEN,
+        callerUid: UID,
+        source: "androidValidation",
+        eventSource: "callable",
+      });
+      play.sub.acknowledgementState = "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED";
+      play.orders.set(
+        ORDER1,
+        refundedOrder(play.orders.get(ORDER1)!, rfc(NOW + 1000), {
+          currencyCode: "INR",
+          units: "100",
+          nanos: 0,
+        })
+      );
+      await assert.rejects(
+        processAndroidVoidedPurchase(deps, {
+          purchaseToken: TOKEN,
+          orderId: ORDER1,
+          productType: 1,
+          refundType: 1,
+          source: "rtdn",
+          eventTimeMillis: NOW + 1000,
+        }),
+        isCause("refund_gross_mismatch")
+      );
+      assert.equal(store.docs.has(financialLedgerPath(sanitizeDocId(`android:refund:${ORDER1}`))), false);
+
+      play.orders.set(ORDER1, refundedOrder(paidOrder(ORDER1, "249"), rfc(NOW + 1000)));
+      const ok = await processAndroidVoidedPurchase(deps, {
+        purchaseToken: TOKEN,
+        orderId: ORDER1,
+        productType: 1,
+        refundType: 1,
+        source: "rtdn",
+        eventTimeMillis: NOW + 1000,
+      });
+      assert.equal(ok.financialEventWritten, true);
+      const refundLedger = store.docs.get(
+        financialLedgerPath(sanitizeDocId(`android:refund:${ORDER1}`))
+      ) as { grossAmountInPaise: number };
+      assert.equal(refundLedger.grossAmountInPaise, 24_900);
+    }
+
+    // F already covered by Sep purchase / Oct refundEvent month keys above.
+
+    // G/H. historical Token A refund cannot mutate current Token B
+    {
+      const play = new FakePlay(
+        starterSub({ acknowledgementState: "ACKNOWLEDGEMENT_STATE_PENDING" }),
+        paidOrder(ORDER1, "99", 0, rfc(NOW), { productId: "vyd_starter" })
+      );
+      const { deps, store } = await primedDeps(play);
+      await processAndroidPurchaseToken(deps, {
+        purchaseToken: TOKEN,
+        callerUid: UID,
+        source: "androidValidation",
+        eventSource: "callable",
+      });
+      play.sub = activeSub({
+        acknowledgementState: "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED",
+        linkedPurchaseToken: TOKEN,
+        lineItems: [
+          {
+            productId: "vyd_professional",
+            expiryTime: rfc(FUTURE),
+            latestSuccessfulOrderId: ORDER2,
+            autoRenewingPlan: { autoRenewEnabled: true },
+            offerDetails: { basePlanId: "monthly" },
+          },
+        ],
+      });
+      play.subsByToken.set(TOKEN2, play.sub);
+      play.orders.set(ORDER2, paidOrder(ORDER2, "249"));
+      await processAndroidPurchaseToken(deps, {
+        purchaseToken: TOKEN2,
+        callerUid: UID,
+        source: "androidValidation",
+        eventSource: "callable",
+      });
+      play.subsByToken.set(
+        TOKEN,
+        starterSub({
+          subscriptionState: "SUBSCRIPTION_STATE_EXPIRED",
+          acknowledgementState: "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED",
+          lineItems: [
+            {
+              productId: "vyd_starter",
+              expiryTime: rfc(NOW - DAY),
+              latestSuccessfulOrderId: ORDER1,
+              autoRenewingPlan: { autoRenewEnabled: false },
+              offerDetails: { basePlanId: "monthly" },
+            },
+          ],
+        })
+      );
+      play.orders.set(
+        ORDER1,
+        refundedOrder(play.orders.get(ORDER1)!, rfc(NOW + 9000))
+      );
+      const companyBefore = store.docs.get(companyBillingPath(UID)) as CompanyBillingDoc;
+      assert.equal(companyBefore.credentialFingerprint, credentialFingerprint(TOKEN2));
+      const capturesBefore = play.capturedTokens.length;
+      const refunded = await processAndroidVoidedPurchase(deps, {
+        purchaseToken: TOKEN,
+        orderId: ORDER1,
+        productType: 1,
+        refundType: 1,
+        source: "rtdn",
+        eventTimeMillis: NOW + 9000,
+      });
+      const captures = play.capturedTokens.slice(capturesBefore);
+      assert.equal(captures.includes(TOKEN), false);
+      assert.equal(captures.includes(TOKEN2), true);
+      assert.equal(refunded.financialEventWritten, true);
+      assert.equal(refunded.to?.plan, "professional");
+      assert.equal(refunded.to?.billingStatus, "active");
+      assert.equal(refunded.to?.entitlementActive, true);
+      const company = store.docs.get(companyBillingPath(UID)) as CompanyBillingDoc;
+      assert.equal(company.latestOrderId, ORDER2);
+      assert.equal(company.credentialFingerprint, credentialFingerprint(TOKEN2));
+      assert.equal(queueDocs(store).length, 0);
+      assertNoSecrets(store, refunded);
+    }
+
+    // I. refund live owner mismatch A/B blocked
+    {
+      const play = new FakePlay(activeSub(), paidOrder(ORDER1, "249"));
+      const { deps, store } = await primedDeps(play);
+      await handlePrepareAndroidBillingAccount(store, OTHER, NOW);
+      await processAndroidPurchaseToken(deps, {
+        purchaseToken: TOKEN,
+        callerUid: UID,
+        source: "androidValidation",
+        eventSource: "callable",
+      });
+      play.sub.acknowledgementState = "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED";
+      play.sub.externalAccountIdentifiers = {
+        obfuscatedExternalAccountId: obfuscatedAccountIdForUid(OTHER),
+      };
+      play.orders.set(ORDER1, refundedOrder(play.orders.get(ORDER1)!, rfc(NOW + 1000)));
+      const refunded = await processAndroidVoidedPurchase(deps, {
+        purchaseToken: TOKEN,
+        orderId: ORDER1,
+        productType: 1,
+        refundType: 1,
+        source: "rtdn",
+        eventTimeMillis: NOW + 1000,
+      });
+      assert.equal(refunded.financialEventWritten, true);
+      assert.equal(refunded.reconciliationRequired, true);
+      assert.equal(refunded.resultSummary, "refund_subscription_owner_mismatch");
+      assert.equal(store.docs.has(`users/${OTHER}/subscription/status`), false);
+      const alice = store.docs.get(`users/${UID}/subscription/status`) as SubscriptionStatusDoc;
+      assert.equal(alice.billingStatus, "active");
+      assert.equal(queueDocs(store).length, 1);
+      assertNoSecrets(store, refunded);
+    }
+
+    // J/K. unqueryable current token → durable queue; duplicate RTDN → one item
+    {
+      const play = new FakePlay(activeSub(), paidOrder(ORDER1, "249"));
+      const { deps, store } = await primedDeps(play);
+      await processAndroidPurchaseToken(deps, {
+        purchaseToken: TOKEN,
+        callerUid: UID,
+        source: "androidValidation",
+        eventSource: "callable",
+      });
+      play.orders.set(ORDER1, refundedOrder(play.orders.get(ORDER1)!, rfc(NOW + 8000)));
+      play.unqueryableTokens.add(TOKEN);
+      await processAndroidVoidedPurchase(deps, {
+        purchaseToken: TOKEN,
+        orderId: ORDER1,
+        productType: 1,
+        refundType: 1,
+        source: "rtdn",
+        eventTimeMillis: NOW + 8000,
+      });
+      await processAndroidVoidedPurchase(deps, {
+        purchaseToken: TOKEN,
+        orderId: ORDER1,
+        productType: 1,
+        refundType: 1,
+        source: "rtdn",
+        eventTimeMillis: NOW + 8000,
+      });
+      assert.equal(queueDocs(store).length, 1);
+      assert.equal(
+        [...store.docs.keys()].filter((k) => k.startsWith("_billingEventLedger/")).length,
+        2
+      );
+      const item = store.docs.get(
+        billingReconciliationQueuePath(sanitizeDocId(`android:refund-reconcile:${ORDER1}`))
+      ) as { reason: string; financialEventId: string; status: string };
+      assert.equal(item.reason, "play_subscription_unqueryable");
+      assert.equal(item.financialEventId, `android:refund:${ORDER1}`);
+      assert.equal(item.status, "pending");
+      assert.equal(JSON.stringify(item).includes(TOKEN), false);
+    }
+
+    // L. PPC Professional attempt canceled / linked Starter preserved
+    {
+      const ppc = new FakePlay(
+        {
+          subscriptionState: "SUBSCRIPTION_STATE_PENDING_PURCHASE_CANCELED",
+          acknowledgementState: "ACKNOWLEDGEMENT_STATE_PENDING",
+          linkedPurchaseToken: LINKED,
+          lineItems: [{ productId: "vyd_professional", offerDetails: { basePlanId: "monthly" } }],
+        },
+        paidOrder(ORDER1, "99", 0, rfc(NOW), { productId: "vyd_starter" })
+      );
+      ppc.subsByToken.set(TOKEN, {
+        subscriptionState: "SUBSCRIPTION_STATE_PENDING_PURCHASE_CANCELED",
+        acknowledgementState: "ACKNOWLEDGEMENT_STATE_PENDING",
+        linkedPurchaseToken: LINKED,
+        lineItems: [{ productId: "vyd_professional", offerDetails: { basePlanId: "monthly" } }],
+      });
+      ppc.subsByToken.set(
+        LINKED,
+        starterSub({ acknowledgementState: "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED" })
+      );
+      const linked = await primedDeps(ppc);
+      const preserved = await processAndroidPurchaseToken(linked.deps, {
+        purchaseToken: TOKEN,
+        callerUid: UID,
+        source: "rtdn",
+        eventSource: "webhook",
+        eventTimeMillis: NOW,
+        expectedCanonicalSku: "vyd_professional_monthly",
+      });
+      assert.equal(preserved.to?.plan, "starter");
+      assert.equal(preserved.to?.entitlementActive, true);
+      assert.notEqual(preserved.canonicalSku, "vyd_professional_monthly");
+      assert.equal(preserved.canonicalSku, "vyd_starter_monthly");
+      assert.equal(ppc.ackCalls, 0);
+      assertNoSecrets(linked.store, preserved);
+    }
+
+    // M. purchase+renewal ledger both existing for same order → fail closed
+    {
+      const play = new FakePlay(activeSub(), paidOrder(ORDER1, "249"));
+      const { deps, store } = await primedDeps(play);
+      await processAndroidPurchaseToken(deps, {
+        purchaseToken: TOKEN,
+        callerUid: UID,
+        source: "androidValidation",
+        eventSource: "callable",
+      });
+      const purchasePath = financialLedgerPath(sanitizeDocId(`android:purchase:${ORDER1}`));
+      const renewalPath = financialLedgerPath(sanitizeDocId(`android:renewal:${ORDER1}`));
+      const purchase = store.docs.get(purchasePath) as BillingEventLedgerDoc;
+      store.docs.set(renewalPath, {
+        ...purchase,
+        financialEventId: `android:renewal:${ORDER1}`,
+        eventType: "renewal",
+      });
+      play.sub.acknowledgementState = "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED";
+      await assert.rejects(
+        processAndroidPurchaseToken(deps, {
+          purchaseToken: TOKEN,
+          source: "rtdn",
+          eventSource: "webhook",
+          eventTimeMillis: NOW,
+        }),
+        isCause("purchase_renewal_classification_conflict")
+      );
+      play.orders.set(ORDER1, refundedOrder(play.orders.get(ORDER1)!, rfc(NOW + 1000)));
+      await assert.rejects(
+        processAndroidVoidedPurchase(deps, {
+          purchaseToken: TOKEN,
+          orderId: ORDER1,
+          productType: 1,
+          refundType: 1,
+          source: "rtdn",
+          eventTimeMillis: NOW + 1000,
+        }),
+        isCause("purchase_renewal_classification_conflict")
+      );
+    }
+
+    // N. financial collision with wrong SKU/amount/time → fail closed
+    {
+      const play = new FakePlay(activeSub(), paidOrder(ORDER1, "249"));
+      const { deps, store } = await primedDeps(play);
+      await processAndroidPurchaseToken(deps, {
+        purchaseToken: TOKEN,
+        callerUid: UID,
+        source: "androidValidation",
+        eventSource: "callable",
+      });
+      const purchasePath = financialLedgerPath(sanitizeDocId(`android:purchase:${ORDER1}`));
+      const ledger = store.docs.get(purchasePath) as BillingEventLedgerDoc;
+      store.docs.set(purchasePath, { ...ledger, canonicalSku: "vyd_starter_monthly" });
+      play.sub.acknowledgementState = "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED";
+      await assert.rejects(
+        processAndroidPurchaseToken(deps, {
+          purchaseToken: TOKEN,
+          source: "rtdn",
+          eventSource: "webhook",
+          eventTimeMillis: NOW,
+        }),
+        isCause("financial_event_conflict")
+      );
+      store.docs.set(purchasePath, { ...ledger, grossAmountInPaise: 1 });
+      await assert.rejects(
+        processAndroidPurchaseToken(deps, {
+          purchaseToken: TOKEN,
+          source: "rtdn",
+          eventSource: "webhook",
+          eventTimeMillis: NOW,
+        }),
+        isCause("financial_event_conflict")
+      );
+      store.docs.set(purchasePath, { ...ledger, occurredAt: NOW + 86_400_000 });
+      await assert.rejects(
+        processAndroidPurchaseToken(deps, {
+          purchaseToken: TOKEN,
+          source: "rtdn",
+          eventSource: "webhook",
+          eventTimeMillis: NOW,
+        }),
+        isCause("financial_event_conflict")
+      );
+    }
   }
 
   // Round-1: pending refund review HTTP 503 gate
