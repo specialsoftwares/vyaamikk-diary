@@ -37,22 +37,43 @@ import type { Firestore } from "firebase-admin/firestore";
 import { BillingError } from "../errors";
 import { MemoryBillingStore, type BillingStore } from "../store";
 import type {
+  BillingEventLedgerDoc,
   SubscriptionCreditNoteDoc,
   SubscriptionInvoiceDoc,
   SubscriptionTaxComplianceDoc,
 } from "../types";
 
+import { creditNoteIdForRefundEvent } from "./creditNote";
 import { getMonthKey } from "./financialYearUtils";
+import { invoiceGstAdjustmentDefaults } from "./gstAdjustment";
+import { invoiceIdForFinancialEvent } from "./invoiceAllocation";
 import { isInMonthlyComplianceScope } from "./taxCompliance";
 
 export interface TaxComplianceMonthlyScope {
   invoices: SubscriptionInvoiceDoc[];
   creditNotes: SubscriptionCreditNoteDoc[];
   complianceRecords: SubscriptionTaxComplianceDoc[];
+  financialEvents: BillingEventLedgerDoc[];
 }
 
 export interface TaxComplianceReportSource {
   loadMonthlyScope(month: string): Promise<TaxComplianceMonthlyScope>;
+}
+
+export function financialEventTaxBind(event: BillingEventLedgerDoc) {
+  return {
+    financialEventId: event.financialEventId,
+    eventType: event.eventType,
+    uid: event.uid,
+    platform: event.platform,
+    canonicalSku: event.canonicalSku,
+    grossAmountInPaise: event.grossAmountInPaise,
+    currency: event.currency,
+    occurredAt: event.occurredAt,
+    relatedFinancialEventId: event.relatedFinancialEventId,
+    recordedBy: event.recordedBy,
+    monthKey: event.monthKey,
+  };
 }
 
 function uniqueById<T extends { invoiceId?: string; creditNoteId?: string }>(
@@ -93,6 +114,7 @@ function syntheticInvoiceCompliance(
     reviewStatus: "requires_tax_review",
     unresolvedReasons: ["compliance_record_missing"],
     cumulativeCreditReversedInPaise: 0,
+    ...invoiceGstAdjustmentDefaults(),
     reviewedAt: null,
     reviewedByDiagnosticUid: null,
     reviewBasis: null,
@@ -126,6 +148,7 @@ function syntheticCreditNoteCompliance(
     reviewStatus: "requires_tax_review",
     unresolvedReasons: ["compliance_record_missing"],
     cumulativeCreditReversedInPaise: 0,
+    ...invoiceGstAdjustmentDefaults(),
     reviewedAt: null,
     reviewedByDiagnosticUid: null,
     reviewBasis: null,
@@ -137,11 +160,129 @@ function syntheticCreditNoteCompliance(
   };
 }
 
+function syntheticMissingInvoiceFromLedger(
+  event: BillingEventLedgerDoc,
+  month: string
+): SubscriptionTaxComplianceDoc {
+  const invoiceId = invoiceIdForFinancialEvent(event.financialEventId);
+  return {
+    invoiceId,
+    documentKind: "invoice",
+    financialEventId: event.financialEventId,
+    originalInvoiceId: null,
+    uid: event.uid,
+    supplyMonthKey: event.monthKey || month,
+    issueMonthKey: null,
+    reportingTaxPeriodMonth: null,
+    taxPeriodDecisionStatus: "requires_tax_review",
+    ecoReportingCategory: "requires_tax_review",
+    operatorIdentifier: null,
+    operatorGstin: null,
+    reviewStatus: "requires_tax_review",
+    unresolvedReasons: ["financial_event_tax_document_missing"],
+    cumulativeCreditReversedInPaise: 0,
+    ...invoiceGstAdjustmentDefaults(),
+    reviewedAt: null,
+    reviewedByDiagnosticUid: null,
+    reviewBasis: null,
+    reviewVersion: 0,
+    previousEcoReportingCategory: null,
+    previousReportingTaxPeriodMonth: null,
+    createdAt: event.recordedAt,
+    updatedAt: event.recordedAt,
+  };
+}
+
+function syntheticMissingTaxAdjustmentFromLedger(
+  event: BillingEventLedgerDoc,
+  month: string
+): SubscriptionTaxComplianceDoc {
+  const creditNoteId = creditNoteIdForRefundEvent(event.financialEventId);
+  const reasons =
+    event.eventType === "chargeback"
+      ? ["gst_adjustment_requires_review", "tax_adjustment_disposition_missing"]
+      : ["tax_adjustment_disposition_missing", "gst_credit_note_missing", "gst_adjustment_requires_review"];
+  return {
+    invoiceId: creditNoteId,
+    documentKind: "credit_note",
+    financialEventId: event.financialEventId,
+    originalInvoiceId: event.relatedFinancialEventId
+      ? invoiceIdForFinancialEvent(event.relatedFinancialEventId)
+      : null,
+    uid: event.uid,
+    supplyMonthKey: event.monthKey || month,
+    issueMonthKey: null,
+    reportingTaxPeriodMonth: null,
+    taxPeriodDecisionStatus: "requires_tax_review",
+    ecoReportingCategory: "requires_tax_review",
+    operatorIdentifier: null,
+    operatorGstin: null,
+    reviewStatus: "requires_tax_review",
+    unresolvedReasons: reasons.sort(),
+    cumulativeCreditReversedInPaise: 0,
+    gstAdjustmentEligibility: "requires_review",
+    recipientItcReversalEvidenceStatus: "unconfirmed",
+    taxIncidenceConditionStatus: "unconfirmed",
+    section34OuterLimitAt: null,
+    taxAdjustmentDisposition: event.eventType === "chargeback" ? "requires_review" : "pending",
+    reviewedAt: null,
+    reviewedByDiagnosticUid: null,
+    reviewBasis: null,
+    reviewVersion: 0,
+    previousEcoReportingCategory: null,
+    previousReportingTaxPeriodMonth: null,
+    createdAt: event.recordedAt,
+    updatedAt: event.recordedAt,
+  };
+}
+
+function reconcileLedgerEvents(input: {
+  month: string;
+  invoiceById: Map<string, SubscriptionInvoiceDoc>;
+  creditNoteById: Map<string, SubscriptionCreditNoteDoc>;
+  complianceById: Map<string, SubscriptionTaxComplianceDoc>;
+  inScope: SubscriptionTaxComplianceDoc[];
+  financialEvents: BillingEventLedgerDoc[];
+}): BillingEventLedgerDoc[] {
+  const inMonth = input.financialEvents
+    .filter((event) => event.monthKey === input.month)
+    .sort((a, b) => a.financialEventId.localeCompare(b.financialEventId));
+  for (const event of inMonth) {
+    if (event.eventType === "purchase" || event.eventType === "renewal") {
+      const invoiceId = invoiceIdForFinancialEvent(event.financialEventId);
+      const invoice = input.invoiceById.get(invoiceId);
+      const compliance = input.complianceById.get(invoiceId);
+      if (!invoice || !compliance) {
+        if (input.complianceById.has(invoiceId)) continue;
+        const synthetic = syntheticMissingInvoiceFromLedger(event, input.month);
+        input.inScope.push(synthetic);
+        input.complianceById.set(synthetic.invoiceId, synthetic);
+      }
+    } else if (event.eventType === "refund" || event.eventType === "chargeback") {
+      const creditNoteId = creditNoteIdForRefundEvent(event.financialEventId);
+      const note = input.creditNoteById.get(creditNoteId);
+      const compliance = input.complianceById.get(creditNoteId);
+      if (note && compliance) continue;
+      if (input.complianceById.has(creditNoteId) && note) continue;
+      if (compliance && !compliance.unresolvedReasons.includes("tax_adjustment_disposition_missing")) {
+        continue;
+      }
+      if (!input.complianceById.has(creditNoteId)) {
+        const synthetic = syntheticMissingTaxAdjustmentFromLedger(event, input.month);
+        input.inScope.push(synthetic);
+        input.complianceById.set(synthetic.invoiceId, synthetic);
+      }
+    }
+  }
+  return inMonth;
+}
+
 function assembleScope(input: {
   month: string;
   invoices: SubscriptionInvoiceDoc[];
   creditNotes: SubscriptionCreditNoteDoc[];
   complianceRecords: SubscriptionTaxComplianceDoc[];
+  financialEvents: BillingEventLedgerDoc[];
 }): TaxComplianceMonthlyScope {
   const invoiceById = new Map(input.invoices.map((i) => [i.invoiceId, i]));
   const creditNoteById = new Map(input.creditNotes.map((c) => [c.creditNoteId, c]));
@@ -190,6 +331,15 @@ function assembleScope(input: {
     }
   }
 
+  const scopedFinancialEvents = reconcileLedgerEvents({
+    month: input.month,
+    invoiceById,
+    creditNoteById,
+    complianceById,
+    inScope,
+    financialEvents: input.financialEvents,
+  });
+
   return {
     invoices: uniqueById(scopedInvoices, (i) => i.invoiceId).sort((a, b) =>
       a.invoiceId.localeCompare(b.invoiceId)
@@ -200,6 +350,10 @@ function assembleScope(input: {
     complianceRecords: uniqueById(inScope, (c) => c.invoiceId).sort((a, b) =>
       a.invoiceId.localeCompare(b.invoiceId)
     ),
+    financialEvents: uniqueById(
+      scopedFinancialEvents as Array<BillingEventLedgerDoc & { invoiceId?: string }>,
+      (e) => e.financialEventId
+    ).sort((a, b) => a.financialEventId.localeCompare(b.financialEventId)),
   };
 }
 
@@ -210,6 +364,7 @@ export class MemoryTaxComplianceReportSource implements TaxComplianceReportSourc
     const invoices: SubscriptionInvoiceDoc[] = [];
     const creditNotes: SubscriptionCreditNoteDoc[] = [];
     const complianceRecords: SubscriptionTaxComplianceDoc[] = [];
+    const financialEvents: BillingEventLedgerDoc[] = [];
     for (const [path, data] of this.store.docs) {
       if (path.startsWith("_subscriptionInvoices/")) {
         invoices.push(data as unknown as SubscriptionInvoiceDoc);
@@ -217,9 +372,11 @@ export class MemoryTaxComplianceReportSource implements TaxComplianceReportSourc
         creditNotes.push(data as unknown as SubscriptionCreditNoteDoc);
       } else if (path.startsWith("_subscriptionTaxCompliance/")) {
         complianceRecords.push(data as unknown as SubscriptionTaxComplianceDoc);
+      } else if (path.startsWith("_billingEventLedger/")) {
+        financialEvents.push(data as unknown as BillingEventLedgerDoc);
       }
     }
-    return assembleScope({ month, invoices, creditNotes, complianceRecords });
+    return assembleScope({ month, invoices, creditNotes, complianceRecords, financialEvents });
   }
 }
 
@@ -232,15 +389,17 @@ export class AdminFirestoreTaxComplianceReportSource implements TaxComplianceRep
   constructor(private readonly db: Firestore) {}
 
   async loadMonthlyScope(month: string): Promise<TaxComplianceMonthlyScope> {
-    const [invSnap, cnSnap, compSnap] = await Promise.all([
+    const [invSnap, cnSnap, compSnap, ledgerSnap] = await Promise.all([
       this.db.collection("_subscriptionInvoices").get(),
       this.db.collection("_subscriptionCreditNotes").get(),
       this.db.collection("_subscriptionTaxCompliance").get(),
+      this.db.collection("_billingEventLedger").get(),
     ]);
     const invoices = invSnap.docs.map((d) => d.data() as SubscriptionInvoiceDoc);
     const creditNotes = cnSnap.docs.map((d) => d.data() as SubscriptionCreditNoteDoc);
     const complianceRecords = compSnap.docs.map((d) => d.data() as SubscriptionTaxComplianceDoc);
-    return assembleScope({ month, invoices, creditNotes, complianceRecords });
+    const financialEvents = ledgerSnap.docs.map((d) => d.data() as BillingEventLedgerDoc);
+    return assembleScope({ month, invoices, creditNotes, complianceRecords, financialEvents });
   }
 }
 

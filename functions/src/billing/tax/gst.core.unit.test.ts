@@ -50,6 +50,8 @@ import {
   istWallClockToEpochMs,
   parseFinancialYear,
   formatIstCalendarDate,
+  ordinaryTaxableServiceInvoiceIssueDueAt,
+  section34OutputTaxReductionOuterLimitMs,
 } from "./financialYearUtils";
 import {
   gstStateCodeFromGstin,
@@ -76,6 +78,7 @@ import {
   STATUTORY_DOCUMENT_NUMBER_MAX_LEN,
 } from "./invoiceAllocation";
 import { formatCreditNoteNumber } from "./creditNote";
+import { parseSection34CreditNotePolicy } from "./gstAdjustment";
 
 const SELLER_GSTIN = "09AAAAA0000A1Z5";
 const BUYER_MH_GSTIN = "27AAAAA0000A1Z5";
@@ -554,6 +557,16 @@ function testFinancialYear(): void {
   assert.equal(getFinancialYearForDate(start), "2026-27");
   assert.equal(getMonthKey(start.getTime()), "2026-04");
 
+  const sepSupply = istWallClockToEpochMs("2026-09-12T12:00:00");
+  assert.equal(
+    formatIstCalendarDate(section34OutputTaxReductionOuterLimitMs(sepSupply)),
+    "30-11-2027"
+  );
+  assert.equal(
+    formatIstCalendarDate(ordinaryTaxableServiceInvoiceIssueDueAt(sepSupply)),
+    "12-10-2026"
+  );
+
   const istBoundary = Date.parse("2026-09-13T00:15:00+05:30");
   assert.equal(formatIstCalendarDate(istBoundary), "13-09-2026");
   assert.notEqual(new Date(istBoundary).toISOString().slice(0, 10), "2026-09-13");
@@ -589,6 +602,8 @@ function testFailClosedConfigAndNumbers(): void {
   assert.equal(parseReverseChargeMode("no"), "no");
   assert.equal(parseReverseChargeMode(undefined), "unconfirmed");
   assert.equal(parseReverseChargeMode("maybe"), "unconfirmed");
+  assert.equal(parseSection34CreditNotePolicy("full_refund_developer_tax_invoice"), "full_refund_developer_tax_invoice");
+  assert.equal(parseSection34CreditNotePolicy(undefined), "unconfirmed");
   const ss = formatTaxInvoiceNumber("2026-27", 1);
   const cn = formatCreditNoteNumber("2026-27", 1);
   assert.equal(ss, "SS/2026-27/0001");

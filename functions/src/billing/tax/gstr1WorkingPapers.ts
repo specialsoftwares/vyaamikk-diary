@@ -38,12 +38,14 @@ import { BillingError } from "../errors";
 import {
   gstr1FilingBatchPath,
   gstr1ReportManifestPath,
+  financialLedgerPath,
   subscriptionCreditNotePath,
   subscriptionInvoicePath,
   subscriptionTaxCompliancePath,
 } from "../paths";
 import type { BillingStore } from "../store";
 import type {
+  BillingEventLedgerDoc,
   Gstr1FilingBatchDoc,
   Gstr1ReportManifestDoc,
   Gstr1ReviewStatus,
@@ -54,6 +56,7 @@ import type {
 
 import { formatIstCalendarDate } from "./financialYearUtils";
 import { isValidGstinFormat } from "./gstin";
+import { outputTaxReductionIncluded } from "./gstAdjustment";
 import { mayIssueDeveloperTaxInvoice } from "./platformTaxPolicy";
 import {
   complianceStatutoryBind,
@@ -61,6 +64,11 @@ import {
   unresolvedReasonsForCreditNote,
   unresolvedReasonsForInvoice,
 } from "./taxCompliance";
+import {
+  financialEventTaxBind,
+  reportSourceFromBillingStore,
+  type TaxComplianceReportSource,
+} from "./taxComplianceReportSource";
 import { assertGstrMonth } from "./taxPeriod";
 
 export interface Gstr1B2bWorkingRow {
@@ -111,6 +119,17 @@ export interface Gstr1CreditNoteWorkingRow {
   taxableReversalInPaise: number | null;
   taxReversalInPaise: number | null;
   totalReversalInPaise: number | null;
+  gstAdjustmentEligibility: string;
+  outputTaxReductionIncluded: boolean;
+}
+
+export interface Gstr1TaxAdjustmentWorkingRow {
+  financialEventId: string;
+  eventType: string;
+  creditNoteId: string | null;
+  gstAdjustmentEligibility: string;
+  taxAdjustmentDisposition: string;
+  outputTaxReductionInPaise: number | null;
 }
 
 export interface Gstr1Table14WorkingRow {
@@ -153,6 +172,7 @@ export interface Gstr1WorkingPapers {
     count: number;
   }>;
   creditNotes: Gstr1CreditNoteWorkingRow[];
+  taxAdjustments: Gstr1TaxAdjustmentWorkingRow[];
   table14a: Gstr1Table14WorkingRow[];
   table14b: Gstr1Table14WorkingRow[];
   complianceOpenItems: Gstr1ComplianceOpenItem[];
@@ -162,6 +182,7 @@ export interface Gstr1WorkingPapers {
   sourceInvoiceIds: string[];
   sourceCreditNoteIds: string[];
   sourceComplianceIds: string[];
+  sourceFinancialEventIds: string[];
   unresolvedReviewReasons: string[];
   reviewStatus: Gstr1ReviewStatus;
 }
@@ -233,6 +254,10 @@ function creditNoteStatutoryBind(note: SubscriptionCreditNoteDoc) {
     taxReversalInPaise: note.totalTaxReversedInPaise,
     totalReversalInPaise: note.totalReversedInPaise,
     originalInvoiceId: note.originalInvoiceId,
+    gstAdjustmentEligibility: note.gstAdjustmentEligibility,
+    sellerGstin: note.seller?.gstin ?? null,
+    recipientName: note.buyer?.legalName ?? null,
+    recipientAddress: note.buyer?.billingAddress ?? null,
   };
 }
 
@@ -241,6 +266,7 @@ export function buildGstr1WorkingPapers(input: {
   invoices: SubscriptionInvoiceDoc[];
   creditNotes: SubscriptionCreditNoteDoc[];
   complianceRecords: SubscriptionTaxComplianceDoc[];
+  financialEvents?: BillingEventLedgerDoc[];
 }): Gstr1WorkingPapers {
   assertGstrMonth(input.month);
   const invoices = [...input.invoices].sort((a, b) => a.invoiceId.localeCompare(b.invoiceId));
@@ -350,18 +376,24 @@ export function buildGstr1WorkingPapers(input: {
       const reporting = compliance?.reportingTaxPeriodMonth ?? c.taxPeriodMonth;
       return reporting === input.month && c.gstrReportable && !c.gstrReportedMonth;
     })
-    .map((c) => ({
-      creditNoteId: c.creditNoteId,
-      documentNumber: c.documentNumber,
-      creditNoteDateIst: creditNoteDateIst(c),
-      originalInvoiceId: c.originalInvoiceId,
-      originalDocumentNumber: c.originalDocumentNumber,
-      recipientGstin: c.buyerGstin,
-      recipientClassification: c.buyerClassification,
-      taxableReversalInPaise: c.taxableAmountReversedInPaise,
-      taxReversalInPaise: c.totalTaxReversedInPaise,
-      totalReversalInPaise: c.totalReversedInPaise,
-    }));
+    .map((c) => {
+      const eligibility =
+        complianceById.get(c.creditNoteId)?.gstAdjustmentEligibility ?? c.gstAdjustmentEligibility;
+      return {
+        creditNoteId: c.creditNoteId,
+        documentNumber: c.documentNumber,
+        creditNoteDateIst: creditNoteDateIst(c),
+        originalInvoiceId: c.originalInvoiceId,
+        originalDocumentNumber: c.originalDocumentNumber,
+        recipientGstin: c.buyerGstin,
+        recipientClassification: c.buyerClassification,
+        taxableReversalInPaise: c.taxableAmountReversedInPaise,
+        taxReversalInPaise: c.totalTaxReversedInPaise,
+        totalReversalInPaise: c.totalReversedInPaise,
+        gstAdjustmentEligibility: eligibility,
+        outputTaxReductionIncluded: outputTaxReductionIncluded(eligibility),
+      };
+    });
 
   type Table14Bucket = Gstr1Table14WorkingRow;
   const table14aMap = new Map<string, Table14Bucket>();
@@ -411,6 +443,7 @@ export function buildGstr1WorkingPapers(input: {
     row.sourceInvoiceIds.push(inv.invoiceId);
   }
   for (const note of creditNotes) {
+    if (!outputTaxReductionIncluded(note.gstAdjustmentEligibility)) continue;
     const originalCompliance = complianceById.get(note.originalInvoiceId);
     const original = invoiceById.get(note.originalInvoiceId);
     const category =
@@ -468,6 +501,8 @@ export function buildGstr1WorkingPapers(input: {
             creditNote: note,
             ecoReportingCategory: liveCategory,
             operatorGstin: liveGstin,
+            gstAdjustmentEligibility:
+              rec.gstAdjustmentEligibility ?? note.gstAdjustmentEligibility,
           })
         : rec.unresolvedReasons;
     const liveStatus: Gstr1ReviewStatus =
@@ -510,9 +545,46 @@ export function buildGstr1WorkingPapers(input: {
     if (!note.documentNumber) unresolved.add("gstr_document_unissued");
   }
 
+  const financialEvents = [...(input.financialEvents ?? [])]
+    .filter((event) => event.monthKey === input.month)
+    .sort((a, b) => a.financialEventId.localeCompare(b.financialEventId));
+  const creditNoteByRefundId = new Map(
+    creditNoteDocs.map((c) => [c.refundFinancialEventId, c] as const)
+  );
+  const taxAdjustments: Gstr1TaxAdjustmentWorkingRow[] = financialEvents
+    .filter((event) => event.eventType === "refund" || event.eventType === "chargeback")
+    .map((event) => {
+      const note = creditNoteByRefundId.get(event.financialEventId);
+      const compliance = note
+        ? complianceById.get(note.creditNoteId)
+        : [...input.complianceRecords].find((c) => c.financialEventId === event.financialEventId);
+      const eligibility =
+        compliance?.gstAdjustmentEligibility ??
+        note?.gstAdjustmentEligibility ??
+        "requires_review";
+      const included = outputTaxReductionIncluded(eligibility);
+      return {
+        financialEventId: event.financialEventId,
+        eventType: event.eventType,
+        creditNoteId: note?.creditNoteId ?? null,
+        gstAdjustmentEligibility: eligibility,
+        taxAdjustmentDisposition:
+          compliance?.taxAdjustmentDisposition ??
+          (note ? "credit_note_issued" : event.eventType === "chargeback" ? "requires_review" : "pending"),
+        outputTaxReductionInPaise: included ? (note?.taxableAmountReversedInPaise ?? null) : null,
+      };
+    });
+  for (const row of taxAdjustments) {
+    if (row.gstAdjustmentEligibility === "requires_review" || row.taxAdjustmentDisposition === "pending") {
+      unresolved.add("gstr_tax_review_unresolved");
+      unresolved.add("gst_adjustment_requires_review");
+    }
+  }
+
   const sourceInvoiceIds = uniqueSorted(invoices.map((i) => i.invoiceId));
   const sourceCreditNoteIds = uniqueSorted(creditNoteDocs.map((c) => c.creditNoteId));
   const sourceComplianceIds = uniqueSorted(input.complianceRecords.map((c) => c.invoiceId));
+  const sourceFinancialEventIds = uniqueSorted(financialEvents.map((e) => e.financialEventId));
   const contentBody = {
     month: input.month,
     b2b,
@@ -520,6 +592,7 @@ export function buildGstr1WorkingPapers(input: {
     hsnSacSummary: [...hsnMap.values()],
     documentSeries,
     creditNotes,
+    taxAdjustments,
     table14a,
     table14b,
     complianceOpenItems: complianceOpenItems.sort((a, b) => a.invoiceId.localeCompare(b.invoiceId)),
@@ -529,11 +602,13 @@ export function buildGstr1WorkingPapers(input: {
     sourceInvoiceIds,
     sourceCreditNoteIds,
     sourceComplianceIds,
+    sourceFinancialEventIds,
     sourceInvoiceBinds: invoices.map(invoiceStatutoryBind),
     sourceCreditNoteBinds: creditNoteDocs.map(creditNoteStatutoryBind),
     sourceComplianceBinds: [...input.complianceRecords]
       .sort((a, b) => a.invoiceId.localeCompare(b.invoiceId))
       .map(complianceStatutoryBind),
+    sourceFinancialEventBinds: financialEvents.map(financialEventTaxBind),
     unresolvedReviewReasons: [...unresolved].sort(),
   };
   const contentHash = createHash("sha256").update(canonicalJson(contentBody), "utf8").digest("hex");
@@ -683,6 +758,30 @@ export function workingPapersToCsv(papers: Gstr1WorkingPapers): string {
       ].join(",")
     );
   }
+  for (const row of papers.taxAdjustments) {
+    lines.push(
+      [
+        csvCell("tax_adjustment"),
+        csvCell(row.financialEventId),
+        csvCell(row.creditNoteId),
+        csvCell(""),
+        csvCell(""),
+        csvCell(row.eventType),
+        csvCell(""),
+        csvCell(""),
+        csvCell(row.outputTaxReductionInPaise),
+        csvCell(""),
+        csvCell(""),
+        csvCell(""),
+        csvCell(""),
+        csvCell(""),
+        csvCell(row.gstAdjustmentEligibility),
+        csvCell(row.taxAdjustmentDisposition),
+        csvCell(""),
+        csvCell(1),
+      ].join(",")
+    );
+  }
   for (const row of [...papers.table14a, ...papers.table14b]) {
     lines.push(
       [
@@ -729,6 +828,7 @@ export async function persistGstr1ReportManifest(
     sourceInvoiceIds: papers.sourceInvoiceIds,
     sourceCreditNoteIds: papers.sourceCreditNoteIds,
     sourceComplianceIds: papers.sourceComplianceIds,
+    sourceFinancialEventIds: papers.sourceFinancialEventIds,
     contentHash: papers.contentHash,
     jsonStoragePath: input.jsonStoragePath,
     csvStoragePath: input.csvStoragePath,
@@ -762,6 +862,7 @@ export async function markGstr1FiledExact(
     filedByDiagnosticUid: string;
     nowMs: number;
     month?: string;
+    reportSource?: TaxComplianceReportSource;
   }
 ): Promise<Gstr1FilingBatchDoc> {
   const ack = input.acknowledgement.trim();
@@ -810,11 +911,13 @@ export async function markGstr1FiledExact(
     const sourceInvoiceIds = uniqueSorted(manifest.sourceInvoiceIds ?? []);
     const sourceCreditNoteIds = uniqueSorted(manifest.sourceCreditNoteIds ?? []);
     const sourceComplianceIds = uniqueSorted(manifest.sourceComplianceIds ?? []);
+    const sourceFinancialEventIds = uniqueSorted(manifest.sourceFinancialEventIds ?? []);
     if (
       (exactInvoiceIds.length > 0 || creditNoteIds.length > 0) &&
       sourceInvoiceIds.length === 0 &&
       sourceCreditNoteIds.length === 0 &&
-      sourceComplianceIds.length === 0
+      sourceComplianceIds.length === 0 &&
+      sourceFinancialEventIds.length === 0
     ) {
       throw new BillingError({
         clientCode: "invalid_purchase",
@@ -841,12 +944,33 @@ export async function markGstr1FiledExact(
       });
     }
 
-    const allInvoiceIds = uniqueSorted([...sourceInvoiceIds, ...exactInvoiceIds]);
-    const allCreditNoteIds = uniqueSorted([...sourceCreditNoteIds, ...creditNoteIds]);
+    const reportSource = input.reportSource ?? reportSourceFromBillingStore(store);
+    const live = await reportSource.loadMonthlyScope(manifest.month);
+    const liveFinancialEventIds = uniqueSorted(
+      live.financialEvents.map((event) => event.financialEventId)
+    );
+    if (!sameIdSet(liveFinancialEventIds, sourceFinancialEventIds)) {
+      throw new BillingError({
+        clientCode: "invalid_purchase",
+        causeCode: "gstr_report_source_drift",
+      });
+    }
+
+    const allInvoiceIds = uniqueSorted([
+      ...sourceInvoiceIds,
+      ...exactInvoiceIds,
+      ...live.invoices.map((i) => i.invoiceId),
+    ]);
+    const allCreditNoteIds = uniqueSorted([
+      ...sourceCreditNoteIds,
+      ...creditNoteIds,
+      ...live.creditNotes.map((c) => c.creditNoteId),
+    ]);
     const allComplianceIds = uniqueSorted([
       ...sourceComplianceIds,
       ...allInvoiceIds,
       ...allCreditNoteIds,
+      ...live.complianceRecords.map((c) => c.invoiceId),
     ]);
     const invoiceById = new Map<string, SubscriptionInvoiceDoc>();
     for (const id of allInvoiceIds) {
@@ -893,23 +1017,48 @@ export async function markGstr1FiledExact(
       }
       complianceById.set(id, snap.data() as unknown as SubscriptionTaxComplianceDoc);
     }
+    const financialEventById = new Map<string, BillingEventLedgerDoc>();
+    for (const id of uniqueSorted([...sourceFinancialEventIds, ...liveFinancialEventIds])) {
+      const snap = await tx.get(financialLedgerPath(id));
+      if (!snap.exists) {
+        throw new BillingError({
+          clientCode: "invalid_purchase",
+          causeCode: "gstr_report_source_drift",
+        });
+      }
+      financialEventById.set(id, snap.data() as unknown as BillingEventLedgerDoc);
+    }
 
-    const rebuilt = buildGstr1WorkingPapers({
+    const rebuiltFromLive = buildGstr1WorkingPapers({
       month: manifest.month,
-      invoices: sourceInvoiceIds.map((id) => invoiceById.get(id) as SubscriptionInvoiceDoc),
+      invoices: live.invoices,
+      creditNotes: live.creditNotes,
+      complianceRecords: live.complianceRecords,
+      financialEvents: live.financialEvents,
+    });
+    const rebuiltFromTxn = buildGstr1WorkingPapers({
+      month: manifest.month,
+      invoices: sourceInvoiceIds.map((id) => invoiceById.get(id) as SubscriptionInvoiceDoc).filter(Boolean),
       creditNotes: sourceCreditNoteIds.map(
         (id) => creditNoteById.get(id) as SubscriptionCreditNoteDoc
-      ),
-      complianceRecords: sourceComplianceIds.map(
-        (id) => complianceById.get(id) as SubscriptionTaxComplianceDoc
+      ).filter(Boolean),
+      complianceRecords: sourceComplianceIds
+        .map((id) => complianceById.get(id) as SubscriptionTaxComplianceDoc)
+        .filter(Boolean),
+      financialEvents: sourceFinancialEventIds.map(
+        (id) => financialEventById.get(id) as BillingEventLedgerDoc
       ),
     });
-    if (rebuilt.contentHash !== manifest.contentHash) {
+    if (
+      rebuiltFromLive.contentHash !== manifest.contentHash ||
+      rebuiltFromTxn.contentHash !== manifest.contentHash
+    ) {
       throw new BillingError({
         clientCode: "invalid_purchase",
         causeCode: "gstr_report_source_drift",
       });
     }
+    const rebuilt = rebuiltFromTxn;
     if (rebuilt.reviewStatus !== "ready_to_file" || rebuilt.complianceOpenItems.length > 0) {
       throw new BillingError({
         clientCode: "invalid_purchase",

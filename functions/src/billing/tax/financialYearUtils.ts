@@ -158,6 +158,48 @@ export function istWallClockToEpochMs(isoLocal: string): number {
 }
 
 /**
+ * Add calendar days to an Asia/Kolkata civil date, returning 23:59:59.000 IST
+ * of the resulting day. Used for operational invoice-issue aging only.
+ */
+export function addIstCalendarDays(epochMs: number, days: number): number {
+  if (!Number.isFinite(epochMs) || !Number.isInteger(days)) {
+    throw new BillingError({
+      clientCode: "internal_error",
+      causeCode: "invalid_ist_calendar_date",
+    });
+  }
+  const { year, month, day } = istParts(epochMs);
+  const shifted = new Date(Date.UTC(year, month - 1, day + days));
+  return istWallTimeToUtcMs(
+    shifted.getUTCFullYear(),
+    shifted.getUTCMonth() + 1,
+    shifted.getUTCDate(),
+    23,
+    59,
+    59
+  );
+}
+
+/**
+ * Rule 47 ordinary taxable-service outer issue hint: 30 days from supply.
+ * Not enforced against pending-GSTIN holds in VYD-40 (production-enablement gate).
+ */
+export const ORDINARY_TAXABLE_SERVICE_INVOICE_ISSUE_DAYS = 30;
+
+export function ordinaryTaxableServiceInvoiceIssueDueAt(supplyOccurredAt: number): number {
+  return addIstCalendarDays(supplyOccurredAt, ORDINARY_TAXABLE_SERVICE_INVOICE_ISSUE_DAYS);
+}
+
+/**
+ * Section 34 reporting outer limit: 30 November following the end of the FY
+ * of the original supply. Annual-return date is unknown and is not guessed.
+ */
+export function section34OutputTaxReductionOuterLimitMs(originalSupplyOccurredAt: number): number {
+  const { endYear } = parseFinancialYear(getFinancialYearForDate(originalSupplyOccurredAt));
+  return istWallTimeToUtcMs(endYear, 11, 30, 23, 59, 59);
+}
+
+/**
  * Canonical India-local calendar date for tax documents: dd-MM-yyyy in
  * Asia/Kolkata. Never use UTC ISO date slices for invoice/GSTR dates.
  */

@@ -596,6 +596,12 @@ export interface SubscriptionInvoiceDoc {
   gstrReportedMonth: string | null;
   gstrFilingBatchId: string | null;
   historyEventId: string | null;
+  /**
+   * Operational aging hint (ordinary taxable services: 30 days from supply).
+   * Pending-GSTIN / incomplete-recipient holds are NOT auto-expired against
+   * this timestamp in VYD-40 — enforcement is a production-enablement gate.
+   */
+  invoiceIssueDueAt: number | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -603,6 +609,29 @@ export interface SubscriptionInvoiceDoc {
 export type Gstr1ReviewStatus = "ready_to_file" | "requires_tax_review";
 
 export type TaxComplianceDocumentKind = "invoice" | "credit_note";
+
+/**
+ * Output-tax reduction eligibility is distinct from a store refund/chargeback
+ * and from whether a statutory credit note document exists.
+ */
+export type GstAdjustmentEligibility =
+  | "not_applicable"
+  | "requires_review"
+  | "eligible"
+  | "ineligible"
+  | "ineligible_for_output_tax_reduction";
+
+export type GstEvidenceStatus = "not_applicable" | "unconfirmed" | "confirmed";
+
+export type TaxAdjustmentDisposition =
+  | "not_applicable"
+  | "pending"
+  | "credit_note_issued"
+  | "requires_review"
+  | "ineligible";
+
+/** Explicit Section-34 CN issuance policy. Blank/unconfirmed fails closed. */
+export type Section34CreditNotePolicy = "unconfirmed" | "full_refund_developer_tax_invoice";
 
 /**
  * Server-only GST-return / monthly-compliance record.
@@ -626,6 +655,11 @@ export interface SubscriptionTaxComplianceDoc {
   reviewStatus: Gstr1ReviewStatus;
   unresolvedReasons: string[];
   cumulativeCreditReversedInPaise: number;
+  gstAdjustmentEligibility: GstAdjustmentEligibility;
+  recipientItcReversalEvidenceStatus: GstEvidenceStatus;
+  taxIncidenceConditionStatus: GstEvidenceStatus;
+  section34OuterLimitAt: number | null;
+  taxAdjustmentDisposition: TaxAdjustmentDisposition;
   reviewedAt: number | null;
   reviewedByDiagnosticUid: string | null;
   reviewBasis: string | null;
@@ -701,6 +735,7 @@ export const INVOICE_OPERATIONAL_KEYS: ReadonlyArray<keyof SubscriptionInvoiceDo
   "invoiceEmailDeliveredAt",
   "gstrReportedMonth",
   "gstrFilingBatchId",
+  "invoiceIssueDueAt",
   "updatedAt",
 ];
 
@@ -749,10 +784,16 @@ export interface SubscriptionCreditNoteDoc {
   taxPeriodStatus: TaxPeriodStatus;
   issuedAt: number | null;
   issuedOnIst: string | null;
+  nature: "CREDIT NOTE";
+  seller: SellerTaxSnapshot | null;
+  buyer: BuyerTaxSnapshot | null;
+  /** Convenience copy of buyer.gstin. Name/address live on `buyer`. */
   buyerGstin: string | null;
   buyerClassification: BuyerClassification | null;
+  originalInvoiceIssuedAt: number | null;
   originalInvoiceIssuedOnIst: string | null;
   placeOfSupplyStateCode: string | null;
+  placeOfSupplyStateName: string | null;
   gstRateBps: number | null;
   taxType: GstTaxType;
   taxResponsibilityMode: TaxResponsibilityMode;
@@ -762,12 +803,46 @@ export interface SubscriptionCreditNoteDoc {
   igstReversedInPaise: number | null;
   totalTaxReversedInPaise: number | null;
   totalReversedInPaise: number | null;
+  gstAdjustmentEligibility: GstAdjustmentEligibility;
+  recipientItcReversalEvidenceStatus: GstEvidenceStatus;
+  taxIncidenceConditionStatus: GstEvidenceStatus;
+  section34OuterLimitAt: number | null;
+  taxAdjustmentDisposition: TaxAdjustmentDisposition;
   gstrReportable: boolean;
   gstrReportedMonth: string | null;
   gstrFilingBatchId: string | null;
   createdAt: number;
   updatedAt: number;
 }
+
+export const CREDIT_NOTE_STATUTORY_KEYS: ReadonlyArray<keyof SubscriptionCreditNoteDoc> = [
+  "creditNoteId",
+  "originalInvoiceId",
+  "originalDocumentNumber",
+  "refundFinancialEventId",
+  "uid",
+  "documentNumber",
+  "financialYear",
+  "taxPeriodMonth",
+  "issuedAt",
+  "issuedOnIst",
+  "nature",
+  "seller",
+  "buyer",
+  "originalInvoiceIssuedAt",
+  "originalInvoiceIssuedOnIst",
+  "placeOfSupplyStateCode",
+  "placeOfSupplyStateName",
+  "gstRateBps",
+  "taxType",
+  "taxResponsibilityMode",
+  "taxableAmountReversedInPaise",
+  "cgstReversedInPaise",
+  "sgstReversedInPaise",
+  "igstReversedInPaise",
+  "totalTaxReversedInPaise",
+  "totalReversedInPaise",
+];
 
 export type InvoiceRetryStage = "pdf" | "email";
 
@@ -796,6 +871,7 @@ export interface Gstr1ReportManifestDoc {
   sourceInvoiceIds: string[];
   sourceCreditNoteIds: string[];
   sourceComplianceIds: string[];
+  sourceFinancialEventIds: string[];
   contentHash: string;
   jsonStoragePath: string;
   csvStoragePath: string;

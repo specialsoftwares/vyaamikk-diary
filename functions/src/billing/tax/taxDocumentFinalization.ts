@@ -60,7 +60,7 @@ import {
   recipientInvoiceDetailsIncomplete,
   statutoryBuyerFromDetails,
 } from "./buyerSnapshot";
-import { formatIstCalendarDate, getFinancialYearForDate } from "./financialYearUtils";
+import { formatIstCalendarDate, getFinancialYearForDate, ordinaryTaxableServiceInvoiceIssueDueAt } from "./financialYearUtils";
 import {
   formatPlatformReceiptNumber,
   formatTaxInvoiceNumber,
@@ -300,6 +300,9 @@ export async function finalizeUnissuedInvoice(
       ...operationalFrom(existing, pdfStatus),
       pdfStatus: existing?.pdfStatus === "ready" ? existing.pdfStatus : pdfStatus,
       historyEventId: existing?.historyEventId ?? input.historyEventId ?? null,
+      invoiceIssueDueAt:
+        existing?.invoiceIssueDueAt ??
+        ordinaryTaxableServiceInvoiceIssueDueAt(ledger.occurredAt),
       createdAt: existing?.createdAt ?? issueAt,
       updatedAt: issueAt,
     };

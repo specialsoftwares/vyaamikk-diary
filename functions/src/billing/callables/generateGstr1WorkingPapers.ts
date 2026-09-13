@@ -75,6 +75,7 @@ export async function generateGstr1WorkingPapersCore(input: {
     invoices: listed.invoices,
     creditNotes: listed.creditNotes,
     complianceRecords: listed.complianceRecords,
+    financialEvents: listed.financialEvents,
   });
   const jsonPath = gstr1ReportStoragePath(input.month, papers.reportId, "json");
   const csvPath = gstr1ReportStoragePath(input.month, papers.reportId, "csv");

@@ -209,6 +209,25 @@ export function buildSubscriptionTaxDocumentHtml(invoice: SubscriptionInvoiceDoc
 export function buildSubscriptionCreditNoteHtml(note: SubscriptionCreditNoteDoc): string {
   const issued = issueDateLabel(note.issuedAt, note.issuedOnIst);
   const originalDate = note.originalInvoiceIssuedOnIst ?? "—";
+  const seller = note.seller;
+  const buyer = note.buyer;
+  const supplierBlock = seller
+    ? `<p><strong>${esc(seller.legalName)}</strong>${
+        seller.tradeName ? `<br/>Trade name: ${esc(seller.tradeName)}` : ""
+      }<br/>GSTIN: ${esc(seller.gstin)}<br/>${esc(seller.registeredAddress)}<br/>State: ${esc(
+        seller.stateName
+      )} (${esc(seller.stateCode)})</p>`
+    : `<p>Supplier identity incomplete — this document is not a final credit note.</p>`;
+  const recipientBlock = `<p>${
+    buyer?.legalName ? esc(buyer.legalName) : "Recipient particulars incomplete"
+  }<br/>${
+    buyer?.gstin ? `GSTIN: ${esc(buyer.gstin)}<br/>` : ""
+  }${buyer?.billingAddress ? `${esc(buyer.billingAddress)}<br/>` : ""}${
+    buyer?.stateName && buyer.stateCode
+      ? `State: ${esc(buyer.stateName)} (${esc(buyer.stateCode)})`
+      : ""
+  }</p>`;
+  const interState = note.taxType === "igst";
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -217,20 +236,55 @@ export function buildSubscriptionCreditNoteHtml(note: SubscriptionCreditNoteDoc)
 <style>
   body { font-family: Helvetica, Arial, sans-serif; font-size: 12px; color: #111; margin: 0; }
   .page { width: 190mm; margin: 10mm auto; }
+  .brand { font-size: 18px; letter-spacing: 0.08em; font-weight: 700; }
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+  th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; }
 </style>
 </head>
 <body>
 <div class="page">
+  <div class="brand">${esc(BRAND)}</div>
   <h1>CREDIT NOTE</h1>
+  <div>Nature of document: CREDIT NOTE</div>
   <div>Document number: ${esc(note.documentNumber ?? "—")}</div>
   <div>Issue date: ${esc(issued)}</div>
-  <div>Original invoice: ${esc(note.originalDocumentNumber ?? note.originalInvoiceId)}</div>
+  <div>Original tax invoice number: ${esc(note.originalDocumentNumber ?? note.originalInvoiceId)}</div>
   <div>Original invoice date: ${esc(originalDate)}</div>
-  <div>Recipient GSTIN: ${esc(note.buyerGstin ?? "—")}</div>
-  <div>Place of supply: ${esc(note.placeOfSupplyStateCode ?? "—")}</div>
-  <div>Taxable reversal: ${paise(note.taxableAmountReversedInPaise)}</div>
-  <div>Tax reversal: ${paise(note.totalTaxReversedInPaise)}</div>
-  <div>Total reversal: ${paise(note.totalReversedInPaise)}</div>
+  <div>Place of supply: ${esc(
+    note.placeOfSupplyStateName
+      ? `${note.placeOfSupplyStateName} (${note.placeOfSupplyStateCode ?? ""})`
+      : (note.placeOfSupplyStateCode ?? "—")
+  )}</div>
+  <h2>Supplier</h2>
+  ${supplierBlock}
+  <h2>Recipient</h2>
+  ${recipientBlock}
+  <table>
+    <thead>
+      <tr>
+        <th>Taxable value credited</th>
+        <th>Rate</th>
+        <th>CGST</th>
+        <th>SGST</th>
+        <th>IGST</th>
+        <th>Total credited</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>${paise(note.taxableAmountReversedInPaise)}</td>
+        <td>${note.gstRateBps != null ? `${(note.gstRateBps / 100).toFixed(2)}%` : "—"}</td>
+        <td>${paise(note.cgstReversedInPaise)}</td>
+        <td>${paise(note.sgstReversedInPaise)}</td>
+        <td>${paise(note.igstReversedInPaise)}</td>
+        <td>${paise(note.totalReversedInPaise)}</td>
+      </tr>
+    </tbody>
+  </table>
+  ${interState ? `<p>Inter-State supply. Place of supply as stated above.</p>` : ""}
+  <p class="note">Computer-generated document. Brand mark ${esc(
+    BRAND
+  )} is a trade presentation; the GST supplier is the legal person on the GST registration.</p>
 </div>
 </body>
 </html>`;

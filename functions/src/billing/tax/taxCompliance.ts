@@ -33,10 +33,16 @@
  */
 
 import { BillingError } from "../errors";
-import { subscriptionInvoicePath, subscriptionTaxCompliancePath } from "../paths";
+import {
+  subscriptionCreditNotePath,
+  subscriptionInvoicePath,
+  subscriptionTaxCompliancePath,
+} from "../paths";
 import type { BillingStore } from "../store";
 import type {
   EcoReportingCategory,
+  GstAdjustmentEligibility,
+  GstEvidenceStatus,
   Gstr1ReviewStatus,
   SubscriptionCreditNoteDoc,
   SubscriptionInvoiceDoc,
@@ -46,6 +52,10 @@ import type {
 
 import { assertAdminAuthorized, type AdminAuthContext } from "./adminAuth";
 import { getMonthKey } from "./financialYearUtils";
+import {
+  assertGstAdjustmentMayBeEligible,
+  invoiceGstAdjustmentDefaults,
+} from "./gstAdjustment";
 import { isValidGstinFormat } from "./gstin";
 import { parseEcoReportingCategory } from "./platformTaxPolicy";
 import { assertGstrMonth } from "./taxPeriod";
@@ -123,6 +133,7 @@ export function unresolvedReasonsForCreditNote(input: {
   creditNote: SubscriptionCreditNoteDoc;
   ecoReportingCategory: EcoReportingCategory;
   operatorGstin: string | null;
+  gstAdjustmentEligibility?: GstAdjustmentEligibility;
 }): string[] {
   const reasons = new Set<string>();
   const note = input.creditNote;
@@ -138,6 +149,11 @@ export function unresolvedReasonsForCreditNote(input: {
     (!input.operatorGstin || !isValidGstinFormat(input.operatorGstin))
   ) {
     reasons.add("eco_operator_gstin_required");
+  }
+  const eligibility =
+    input.gstAdjustmentEligibility ?? note.gstAdjustmentEligibility ?? "requires_review";
+  if (eligibility === "requires_review") {
+    reasons.add("gst_adjustment_requires_review");
   }
   return [...reasons].sort();
 }
@@ -187,6 +203,7 @@ export function buildInvoiceComplianceDoc(input: {
     operatorGstin: liveOperatorGstin,
     taxPeriodDecisionStatus,
   });
+  const adjustment = invoiceGstAdjustmentDefaults();
   return {
     invoiceId: input.invoice.invoiceId,
     documentKind: "invoice",
@@ -203,6 +220,16 @@ export function buildInvoiceComplianceDoc(input: {
     reviewStatus: reviewStatusFor(reasons),
     unresolvedReasons: reasons,
     cumulativeCreditReversedInPaise: input.existing?.cumulativeCreditReversedInPaise ?? 0,
+    gstAdjustmentEligibility:
+      input.existing?.gstAdjustmentEligibility ?? adjustment.gstAdjustmentEligibility,
+    recipientItcReversalEvidenceStatus:
+      input.existing?.recipientItcReversalEvidenceStatus ??
+      adjustment.recipientItcReversalEvidenceStatus,
+    taxIncidenceConditionStatus:
+      input.existing?.taxIncidenceConditionStatus ?? adjustment.taxIncidenceConditionStatus,
+    section34OuterLimitAt: input.existing?.section34OuterLimitAt ?? adjustment.section34OuterLimitAt,
+    taxAdjustmentDisposition:
+      input.existing?.taxAdjustmentDisposition ?? adjustment.taxAdjustmentDisposition,
     reviewedAt: input.existing?.reviewedAt ?? null,
     reviewedByDiagnosticUid: input.existing?.reviewedByDiagnosticUid ?? null,
     reviewBasis: input.existing?.reviewBasis ?? null,
@@ -226,10 +253,15 @@ export function buildCreditNoteComplianceDoc(input: {
     input.original.ecoReporting.ecoReportingCategory;
   const operatorGstin =
     input.originalCompliance?.operatorGstin ?? input.original.ecoReporting.operatorGstin;
+  const gstAdjustmentEligibility =
+    input.existing?.reviewedAt && input.existing.gstAdjustmentEligibility
+      ? input.existing.gstAdjustmentEligibility
+      : input.creditNote.gstAdjustmentEligibility;
   const reasons = unresolvedReasonsForCreditNote({
     creditNote: input.creditNote,
     ecoReportingCategory,
     operatorGstin,
+    gstAdjustmentEligibility,
   });
   return {
     invoiceId: input.creditNote.creditNoteId,
@@ -249,6 +281,16 @@ export function buildCreditNoteComplianceDoc(input: {
     reviewStatus: reviewStatusFor(reasons),
     unresolvedReasons: reasons,
     cumulativeCreditReversedInPaise: 0,
+    gstAdjustmentEligibility,
+    recipientItcReversalEvidenceStatus:
+      input.existing?.recipientItcReversalEvidenceStatus ??
+      input.creditNote.recipientItcReversalEvidenceStatus,
+    taxIncidenceConditionStatus:
+      input.existing?.taxIncidenceConditionStatus ?? input.creditNote.taxIncidenceConditionStatus,
+    section34OuterLimitAt:
+      input.existing?.section34OuterLimitAt ?? input.creditNote.section34OuterLimitAt,
+    taxAdjustmentDisposition:
+      input.existing?.taxAdjustmentDisposition ?? input.creditNote.taxAdjustmentDisposition,
     reviewedAt: input.existing?.reviewedAt ?? null,
     reviewedByDiagnosticUid: input.existing?.reviewedByDiagnosticUid ?? null,
     reviewBasis: input.existing?.reviewBasis ?? null,
@@ -270,6 +312,9 @@ export interface ReviewTaxComplianceInput {
   operatorGstin?: string | null;
   operatorIdentifier?: string | null;
   reportingTaxPeriodMonth?: string | null;
+  gstAdjustmentEligibility?: GstAdjustmentEligibility;
+  recipientItcReversalEvidenceStatus?: GstEvidenceStatus;
+  taxIncidenceConditionStatus?: GstEvidenceStatus;
 }
 
 /**
@@ -290,24 +335,100 @@ export async function applyReviewTaxCompliance(
   }
   if (input.reportingTaxPeriodMonth) assertGstrMonth(input.reportingTaxPeriodMonth);
   const invoicePath = subscriptionInvoicePath(input.invoiceId);
+  const creditNotePath = subscriptionCreditNotePath(input.invoiceId);
   const compliancePath = subscriptionTaxCompliancePath(input.invoiceId);
   return store.runTransaction(async (tx) => {
     const invoiceSnap = await tx.get(invoicePath);
+    const creditNoteSnap = await tx.get(creditNotePath);
     const complianceSnap = await tx.get(compliancePath);
-    if (!invoiceSnap.exists) {
-      throw new BillingError({
-        clientCode: "not_entitled",
-        causeCode: "invoice_missing",
-      });
-    }
     if (!complianceSnap.exists) {
       throw new BillingError({
         clientCode: "internal_error",
         causeCode: "compliance_record_missing",
       });
     }
-    const invoice = invoiceSnap.data() as unknown as SubscriptionInvoiceDoc;
     const prior = complianceSnap.data() as unknown as SubscriptionTaxComplianceDoc;
+    if (prior.documentKind === "credit_note") {
+      if (!creditNoteSnap.exists) {
+        throw new BillingError({
+          clientCode: "not_entitled",
+          causeCode: "credit_note_missing",
+        });
+      }
+      const creditNote = creditNoteSnap.data() as unknown as SubscriptionCreditNoteDoc;
+      const originalSnap = await tx.get(subscriptionInvoicePath(creditNote.originalInvoiceId));
+      if (!originalSnap.exists) {
+        throw new BillingError({
+          clientCode: "internal_error",
+          causeCode: "credit_note_original_missing",
+        });
+      }
+      const original = originalSnap.data() as unknown as SubscriptionInvoiceDoc;
+      const gstAdjustmentEligibility =
+        input.gstAdjustmentEligibility ?? prior.gstAdjustmentEligibility;
+      const recipientItcReversalEvidenceStatus =
+        input.recipientItcReversalEvidenceStatus ?? prior.recipientItcReversalEvidenceStatus;
+      const taxIncidenceConditionStatus =
+        input.taxIncidenceConditionStatus ?? prior.taxIncidenceConditionStatus;
+      if (!creditNote.buyer) {
+        throw new BillingError({
+          clientCode: "internal_error",
+          causeCode: "credit_note_statutory_particulars_incomplete",
+        });
+      }
+      assertGstAdjustmentMayBeEligible({
+        eligibility: gstAdjustmentEligibility,
+        buyer: creditNote.buyer,
+        recipientItcReversalEvidenceStatus,
+        taxIncidenceConditionStatus,
+        issuedAt: creditNote.issuedAt ?? input.nowMs,
+        originalSupplyOccurredAt: original.supplyOccurredAt ?? original.createdAt,
+      });
+      const ecoReportingCategory =
+        input.ecoReportingCategory !== undefined
+          ? parseEcoReportingCategory(input.ecoReportingCategory)
+          : prior.ecoReportingCategory;
+      const operatorGstin =
+        input.operatorGstin !== undefined ? input.operatorGstin : prior.operatorGstin;
+      const operatorIdentifier =
+        input.operatorIdentifier !== undefined
+          ? input.operatorIdentifier
+          : prior.operatorIdentifier;
+      const reasons = unresolvedReasonsForCreditNote({
+        creditNote,
+        ecoReportingCategory,
+        operatorGstin,
+        gstAdjustmentEligibility,
+      });
+      const next: SubscriptionTaxComplianceDoc = {
+        ...prior,
+        ecoReportingCategory,
+        operatorGstin,
+        operatorIdentifier,
+        gstAdjustmentEligibility,
+        recipientItcReversalEvidenceStatus,
+        taxIncidenceConditionStatus,
+        taxAdjustmentDisposition: "credit_note_issued",
+        unresolvedReasons: reasons,
+        reviewStatus: reviewStatusFor(reasons),
+        previousEcoReportingCategory: prior.ecoReportingCategory,
+        previousReportingTaxPeriodMonth: prior.reportingTaxPeriodMonth,
+        reviewedAt: input.nowMs,
+        reviewedByDiagnosticUid: input.reviewedByDiagnosticUid,
+        reviewBasis: basis,
+        reviewVersion: prior.reviewVersion + 1,
+        updatedAt: input.nowMs,
+      };
+      tx.set(compliancePath, next as unknown as Record<string, unknown>);
+      return next;
+    }
+    if (!invoiceSnap.exists) {
+      throw new BillingError({
+        clientCode: "not_entitled",
+        causeCode: "invoice_missing",
+      });
+    }
+    const invoice = invoiceSnap.data() as unknown as SubscriptionInvoiceDoc;
     const ecoReportingCategory =
       input.ecoReportingCategory !== undefined
         ? parseEcoReportingCategory(input.ecoReportingCategory)
@@ -367,5 +488,10 @@ export function complianceStatutoryBind(doc: SubscriptionTaxComplianceDoc) {
     reviewVersion: doc.reviewVersion,
     reviewBasis: doc.reviewBasis,
     unresolvedReasons: doc.unresolvedReasons,
+    gstAdjustmentEligibility: doc.gstAdjustmentEligibility,
+    recipientItcReversalEvidenceStatus: doc.recipientItcReversalEvidenceStatus,
+    taxIncidenceConditionStatus: doc.taxIncidenceConditionStatus,
+    taxAdjustmentDisposition: doc.taxAdjustmentDisposition,
+    section34OuterLimitAt: doc.section34OuterLimitAt,
   };
 }

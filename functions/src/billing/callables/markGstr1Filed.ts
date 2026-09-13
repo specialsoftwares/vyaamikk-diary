@@ -37,6 +37,7 @@ import { HttpsError, onCall } from "firebase-functions/v2/https";
 import type { BillingStore } from "../store";
 import { assertAdminAuthorized, type AdminAuthContext } from "../tax/adminAuth";
 import { markGstr1FiledExact } from "../tax/gstr1WorkingPapers";
+import { reportSourceFromBillingStore, type TaxComplianceReportSource } from "../tax/taxComplianceReportSource";
 
 export async function applyMarkGstr1Filed(
   store: BillingStore,
@@ -47,6 +48,7 @@ export async function applyMarkGstr1Filed(
     acknowledgement: string;
     nowMs: number;
     month?: string;
+    reportSource?: TaxComplianceReportSource;
   }
 ) {
   assertAdminAuthorized(input.admin);
@@ -56,6 +58,7 @@ export async function applyMarkGstr1Filed(
     filedByDiagnosticUid: input.adminDiagnosticUid,
     nowMs: input.nowMs,
     month: input.month,
+    reportSource: input.reportSource ?? reportSourceFromBillingStore(store),
   });
 }
 

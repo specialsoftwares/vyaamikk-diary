@@ -50,6 +50,7 @@ import {
   invoiceRetryQueuePath,
   subscriptionHistoryPath,
   subscriptionTaxCompliancePath,
+  creditNoteCounterPath,
 } from "../paths";
 import { MemoryBillingStore } from "../store";
 import type { BillingStore, BillingTransaction } from "../store";
@@ -65,7 +66,7 @@ import {
   finalizeSubscriptionCreditNote,
 } from "./creditNote";
 import { istWallClockToEpochMs, formatIstCalendarDate } from "./financialYearUtils";
-import { APPROVED_RENDERING_PROFILE, buildSubscriptionTaxDocumentHtml } from "./htmlDocument";
+import { APPROVED_RENDERING_PROFILE, buildSubscriptionCreditNoteHtml, buildSubscriptionTaxDocumentHtml } from "./htmlDocument";
 import {
   allocateInvoiceStub,
   applyOperationalInvoicePatch,
@@ -273,6 +274,7 @@ function skeleton(partial: Partial<SubscriptionInvoiceDoc> & Pick<SubscriptionIn
     gstrReportedMonth: null,
     gstrFilingBatchId: null,
     historyEventId: null,
+    invoiceIssueDueAt: null,
     createdAt: NOW,
     updatedAt: NOW,
     ...partial,
@@ -526,15 +528,37 @@ async function testCreditNotes(): Promise<void> {
     refundFinancialEventId: refundId,
     diagnosticUidFor: () => "diag01",
     nowMs: NOW,
+    section34CreditNotePolicy: "full_refund_developer_tax_invoice",
   });
   assert.match(first.creditNote.documentNumber ?? "", /^CN\/2026-27\/0001$/);
   assert.equal(first.creditNote.originalInvoiceId, original.invoiceId);
   assert.equal(first.creditNote.totalReversedInPaise, original.totalInPaise);
   assert.equal(first.creditNote.taxableAmountReversedInPaise, original.taxableAmountInPaise);
+  assert.equal(first.creditNote.nature, "CREDIT NOTE");
+  assert.equal(first.creditNote.seller?.legalName, original.seller?.legalName);
+  assert.equal(first.creditNote.seller?.gstin, original.seller?.gstin);
+  assert.equal(first.creditNote.seller?.registeredAddress, original.seller?.registeredAddress);
+  assert.equal(first.creditNote.buyer?.legalName, original.buyer.legalName);
+  assert.equal(first.creditNote.buyer?.billingAddress, original.buyer.billingAddress);
+  assert.equal(first.creditNote.buyer?.gstin, original.buyer.gstin);
+  assert.equal(first.creditNote.originalDocumentNumber, original.documentNumber);
+  assert.equal(first.creditNote.originalInvoiceIssuedOnIst, original.invoiceIssuedOnIst);
+  assert.equal(first.creditNote.gstRateBps, original.gstRateBps);
+  assert.equal(first.creditNote.igstReversedInPaise, original.igstInPaise);
+  assert.equal(first.creditNote.gstAdjustmentEligibility, "requires_review");
+  const cnHtml = buildSubscriptionCreditNoteHtml(first.creditNote);
+  assert.match(cnHtml, /CREDIT NOTE/);
+  assert.match(cnHtml, /Nature of document: CREDIT NOTE/);
+  assert.match(cnHtml, /SPECIAL SOFTWARES LLP/);
+  assert.match(cnHtml, /Buyer LLP/);
+  assert.match(cnHtml, new RegExp(original.documentNumber?.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") ?? "missing"));
+  assert.match(cnHtml, /Taxable value credited/);
+  assert.ok((first.creditNote.documentNumber ?? "").length <= 16);
   const retry = await finalizeSubscriptionCreditNote(store, {
     refundFinancialEventId: refundId,
     diagnosticUidFor: () => "diag01",
     nowMs: NOW + 5,
+    section34CreditNotePolicy: "full_refund_developer_tax_invoice",
   });
   assert.equal(retry.reused, true);
   assert.equal(retry.creditNote.documentNumber, first.creditNote.documentNumber);
@@ -557,6 +581,7 @@ async function testCreditNotes(): Promise<void> {
       refundFinancialEventId: "refund-over",
       diagnosticUidFor: () => "diag01",
       nowMs: NOW,
+      section34CreditNotePolicy: "full_refund_developer_tax_invoice",
     }),
     isCause("credit_exceeds_original")
   );
@@ -579,6 +604,7 @@ async function testCreditNotes(): Promise<void> {
       refundFinancialEventId: "refund-partial",
       diagnosticUidFor: () => "diag01",
       nowMs: NOW,
+      section34CreditNotePolicy: "full_refund_developer_tax_invoice",
     }),
     isCause("partial_refund_not_supported")
   );
@@ -599,6 +625,7 @@ async function testCreditNotes(): Promise<void> {
     refundFinancialEventId: refundId,
     diagnosticUidFor: () => "diag01",
     nowMs: NOW,
+    section34CreditNotePolicy: "full_refund_developer_tax_invoice",
   });
   seedLedger(
     secondCnStore,
@@ -613,9 +640,123 @@ async function testCreditNotes(): Promise<void> {
       refundFinancialEventId: "refund-2",
       diagnosticUidFor: () => "diag01",
       nowMs: NOW + 1,
+      section34CreditNotePolicy: "full_refund_developer_tax_invoice",
     }),
     isCause("credit_exceeds_original")
   );
+
+  await assert.rejects(
+    finalizeSubscriptionCreditNote(secondCnStore, {
+      refundFinancialEventId: "refund-2",
+      diagnosticUidFor: () => "diag01",
+      nowMs: NOW + 2,
+      section34CreditNotePolicy: "unconfirmed",
+    }),
+    isCause("gst_credit_note_policy_unconfirmed")
+  );
+
+  const chargebackStore = new MemoryBillingStore();
+  seedLedger(chargebackStore, ledger({ financialEventId: purchaseId }));
+  chargebackStore.docs.set(billingDetailsPath("user-1"), { ...completeB2bDetails() });
+  await orchestrate({ store: chargebackStore, event: ledger({ financialEventId: purchaseId }) });
+  seedLedger(
+    chargebackStore,
+    ledger({
+      financialEventId: "cb-1",
+      eventType: "chargeback",
+      relatedFinancialEventId: purchaseId,
+    })
+  );
+  await assert.rejects(
+    finalizeSubscriptionCreditNote(chargebackStore, {
+      refundFinancialEventId: "cb-1",
+      diagnosticUidFor: () => "diag01",
+      nowMs: NOW,
+      section34CreditNotePolicy: "full_refund_developer_tax_invoice",
+    }),
+    isCause("chargeback_credit_note_not_automatic")
+  );
+  const cbPapers = buildGstr1WorkingPapers({
+    month: "2026-09",
+    ...(await new MemoryTaxComplianceReportSource(chargebackStore).loadMonthlyScope("2026-09")),
+  });
+  assert.equal(cbPapers.reviewStatus, "requires_tax_review");
+  assert.ok(cbPapers.taxAdjustments.some((row) => row.eventType === "chargeback"));
+  assert.ok(
+    cbPapers.complianceOpenItems.some((i) => i.unresolvedReasons.includes("gst_adjustment_requires_review"))
+  );
+
+  const lateStore = new MemoryBillingStore();
+  seedLedger(lateStore, ledger({ financialEventId: purchaseId }));
+  lateStore.docs.set(billingDetailsPath("user-1"), { ...completeB2bDetails() });
+  await orchestrate({ store: lateStore, event: ledger({ financialEventId: purchaseId }) });
+  seedLedger(
+    lateStore,
+    ledger({
+      financialEventId: "refund-late",
+      eventType: "refund",
+      relatedFinancialEventId: purchaseId,
+    })
+  );
+  const lateCn = await finalizeSubscriptionCreditNote(lateStore, {
+    refundFinancialEventId: "refund-late",
+    diagnosticUidFor: () => "diag01",
+    nowMs: istWallClockToEpochMs("2027-12-01T00:00:00"),
+    section34CreditNotePolicy: "full_refund_developer_tax_invoice",
+  });
+  assert.equal(lateCn.creditNote.gstAdjustmentEligibility, "ineligible_for_output_tax_reduction");
+
+  const raceStore = new MemoryBillingStore();
+  seedLedger(raceStore, ledger({ financialEventId: purchaseId }));
+  raceStore.docs.set(billingDetailsPath("user-1"), { ...completeB2bDetails() });
+  const racedOriginal = await orchestrate({
+    store: raceStore,
+    event: ledger({ financialEventId: purchaseId }),
+  });
+  seedLedger(
+    raceStore,
+    ledger({
+      financialEventId: "refund-race-a",
+      eventType: "refund",
+      relatedFinancialEventId: purchaseId,
+    })
+  );
+  seedLedger(
+    raceStore,
+    ledger({
+      financialEventId: "refund-race-b",
+      eventType: "refund",
+      relatedFinancialEventId: purchaseId,
+    })
+  );
+  const raced = await Promise.allSettled([
+    finalizeSubscriptionCreditNote(raceStore, {
+      refundFinancialEventId: "refund-race-a",
+      diagnosticUidFor: () => "diag01",
+      nowMs: NOW,
+      section34CreditNotePolicy: "full_refund_developer_tax_invoice",
+    }),
+    finalizeSubscriptionCreditNote(raceStore, {
+      refundFinancialEventId: "refund-race-b",
+      diagnosticUidFor: () => "diag01",
+      nowMs: NOW,
+      section34CreditNotePolicy: "full_refund_developer_tax_invoice",
+    }),
+  ]);
+  const racedOk = raced.filter((r) => r.status === "fulfilled");
+  const racedFail = raced.filter((r) => r.status === "rejected");
+  assert.equal(racedOk.length, 1);
+  assert.equal(racedFail.length, 1);
+  const racedFailErr = (racedFail[0] as PromiseRejectedResult).reason as BillingError;
+  assert.equal(racedFailErr.causeCode, "credit_exceeds_original");
+  const cnDocs = [...raceStore.docs.keys()].filter((k) => k.startsWith("_subscriptionCreditNotes/"));
+  assert.equal(cnDocs.length, 1);
+  const counter = raceStore.docs.get(creditNoteCounterPath("2026-27")) as { currentCount: number };
+  assert.equal(counter.currentCount, 1);
+  const origComp = raceStore.docs.get(
+    subscriptionTaxCompliancePath(racedOriginal.invoiceId)
+  ) as SubscriptionTaxComplianceDoc;
+  assert.equal(origComp.cumulativeCreditReversedInPaise, racedOriginal.totalInPaise);
 }
 
 async function testHtmlEmailDownloadRenderer(): Promise<void> {
@@ -1087,6 +1228,7 @@ async function testPendingGstinAndTransactionalFinalization(): Promise<void> {
     config: sellerConfig(),
     diagnosticUidFor: () => "diag01",
     nowMs: NOW,
+    section34CreditNotePolicy: "full_refund_developer_tax_invoice",
   });
   assert.equal(raced.invoice.documentType, "tax_invoice_b2b");
   assert.equal(raced.invoice.buyer.gstin, BUYER_MH_GSTIN);
@@ -1146,6 +1288,7 @@ async function testCreditNoteIssueMonthTaxPeriod(): Promise<void> {
     refundFinancialEventId: "refund-oct",
     diagnosticUidFor: () => "diag01",
     nowMs: octIssue,
+    section34CreditNotePolicy: "full_refund_developer_tax_invoice",
   });
   assert.equal(octCn.creditNote.taxPeriodMonth, "2026-10");
   assert.equal(octCn.creditNote.taxPeriodStatus, "resolved");
@@ -1179,6 +1322,7 @@ async function testCreditNoteIssueMonthTaxPeriod(): Promise<void> {
     refundFinancialEventId: "refund-apr",
     diagnosticUidFor: () => "diag01",
     nowMs: aprIssue,
+    section34CreditNotePolicy: "full_refund_developer_tax_invoice",
   });
   assert.equal(aprCn.creditNote.financialYear, "2027-28");
   assert.equal(aprCn.creditNote.taxPeriodMonth, "2027-04");
@@ -1366,6 +1510,7 @@ async function testRound3ComplianceRecipientAndEco(): Promise<void> {
   const completeB2c = await orchestrate({ store: completeB2cStore, event: completeEvt });
   assert.match(completeB2c.documentNumber ?? "", /^SS\//);
   assert.equal(completeB2c.buyer.legalName, "Test Recipient");
+  assert.ok(completeB2c.invoiceIssueDueAt != null);
 
   const refundStore = new MemoryBillingStore();
   seedLedger(

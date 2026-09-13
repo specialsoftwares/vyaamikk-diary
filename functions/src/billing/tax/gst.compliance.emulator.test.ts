@@ -46,6 +46,7 @@ import { billingDetailsPath, financialLedgerPath, subscriptionTaxCompliancePath 
 import type { BillingEventLedgerDoc, SubscriptionInvoiceDoc, SubscriptionTaxComplianceDoc } from "../types";
 import { istWallClockToEpochMs } from "./financialYearUtils";
 import { notApplicableChannelEco, unreviewedChannelEco, type SellerIdentityConfig } from "./sellerIdentity";
+import { finalizeSubscriptionCreditNote } from "./creditNote";
 import { finalizeUnissuedInvoice } from "./taxDocumentFinalization";
 import { applyReviewTaxCompliance } from "./taxCompliance";
 import { AdminFirestoreTaxComplianceReportSource } from "./taxComplianceReportSource";
@@ -134,6 +135,7 @@ async function main(): Promise<void> {
     nowMs: NOW,
   });
   assert.match(issued.invoice.documentNumber ?? "", /^SS\/2026-27\//);
+  assert.ok(issued.invoice.invoiceIssueDueAt != null);
   const complianceSnap = await db.doc(subscriptionTaxCompliancePath(issued.invoice.invoiceId)).get();
   assert.equal(complianceSnap.exists, true);
   const compliance = complianceSnap.data() as SubscriptionTaxComplianceDoc;
@@ -146,9 +148,7 @@ async function main(): Promise<void> {
   assert.ok(scoped.complianceRecords.some((c) => c.invoiceId === issued.invoice.invoiceId));
   const papers = buildGstr1WorkingPapers({
     month: "2026-09",
-    invoices: scoped.invoices,
-    creditNotes: scoped.creditNotes,
-    complianceRecords: scoped.complianceRecords,
+    ...scoped,
   });
   assert.equal(papers.reviewStatus, "requires_tax_review");
 
@@ -170,12 +170,66 @@ async function main(): Promise<void> {
   const scopedAfter = await source.loadMonthlyScope("2026-09");
   const papersAfter = buildGstr1WorkingPapers({
     month: "2026-09",
-    invoices: scopedAfter.invoices,
-    creditNotes: scopedAfter.creditNotes,
-    complianceRecords: scopedAfter.complianceRecords,
+    ...scopedAfter,
   });
   assert.equal(papersAfter.reviewStatus, "ready_to_file");
   assert.equal(papersAfter.table14a[0]?.operatorGstin, SYNTHETIC_OPERATOR_GSTIN);
+
+  await db.doc(financialLedgerPath("emu-gst-orphan-purchase")).set({
+    ...ledger("emu-gst-orphan-purchase"),
+    uid: "emu-gst-orphan",
+  });
+  const orphanScope = await source.loadMonthlyScope("2026-09");
+  assert.ok(
+    orphanScope.complianceRecords.some((c) =>
+      c.unresolvedReasons.includes("financial_event_tax_document_missing")
+    )
+  );
+  const orphanPapers = buildGstr1WorkingPapers({
+    month: "2026-09",
+    ...orphanScope,
+  });
+  assert.ok(orphanPapers.sourceFinancialEventIds.includes("emu-gst-orphan-purchase"));
+  assert.equal(orphanPapers.reviewStatus, "requires_tax_review");
+
+  await db.doc(financialLedgerPath("emu-refund-a")).set({
+    ...ledger("emu-refund-a"),
+    eventType: "refund",
+    relatedFinancialEventId: "emu-gst-google",
+  });
+  await db.doc(financialLedgerPath("emu-refund-b")).set({
+    ...ledger("emu-refund-b"),
+    eventType: "refund",
+    relatedFinancialEventId: "emu-gst-google",
+  });
+  const raced = await Promise.allSettled([
+    finalizeSubscriptionCreditNote(store, {
+      refundFinancialEventId: "emu-refund-a",
+      diagnosticUidFor: () => "emu-diag",
+      nowMs: NOW,
+      section34CreditNotePolicy: "full_refund_developer_tax_invoice",
+    }),
+    finalizeSubscriptionCreditNote(store, {
+      refundFinancialEventId: "emu-refund-b",
+      diagnosticUidFor: () => "emu-diag",
+      nowMs: NOW,
+      section34CreditNotePolicy: "full_refund_developer_tax_invoice",
+    }),
+  ]);
+  const racedOk = raced.filter((r) => r.status === "fulfilled");
+  const racedFail = raced.filter((r) => r.status === "rejected");
+  assert.equal(racedOk.length, 1);
+  assert.equal(racedFail.length, 1);
+  const failErr = (racedFail[0] as PromiseRejectedResult).reason as BillingError;
+  assert.equal(failErr.causeCode, "credit_exceeds_original");
+  const cnSnap = await db.collection("_subscriptionCreditNotes").get();
+  assert.equal(cnSnap.size, 1);
+  const counterSnap = await db.doc("_creditNoteCounters/2026-27").get();
+  assert.equal((counterSnap.data() as { currentCount: number }).currentCount, 1);
+  const origCompAfterRace = (
+    await db.doc(subscriptionTaxCompliancePath(issued.invoice.invoiceId)).get()
+  ).data() as SubscriptionTaxComplianceDoc;
+  assert.equal(origCompAfterRace.cumulativeCreditReversedInPaise, issued.invoice.totalInPaise);
 
   await db.doc(financialLedgerPath("emu-gst-apple")).set(ledger("emu-gst-apple", "ios"));
   const apple = await finalizeUnissuedInvoice(store, {

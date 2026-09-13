@@ -46,12 +46,22 @@ import type { BillingStore } from "../store";
 import type {
   BillingEventLedgerDoc,
   CreditNoteCounterDoc,
+  Section34CreditNotePolicy,
   SubscriptionCreditNoteDoc,
   SubscriptionInvoiceDoc,
   SubscriptionTaxComplianceDoc,
 } from "../types";
 
-import { formatIstCalendarDate, getFinancialYearForDate, getMonthKey } from "./financialYearUtils";
+import { formatIstCalendarDate, getFinancialYearForDate, getMonthKey, section34OutputTaxReductionOuterLimitMs } from "./financialYearUtils";
+import {
+  assertCreditNoteStatutoryParticulars,
+  assertRefundMayIssueStatutoryCreditNote,
+  CREDIT_NOTE_NATURE,
+  evidenceStatusForRecipient,
+  gstAdjustmentEligibilityAtIssuance,
+  invoiceGstAdjustmentDefaults,
+  snapshotCreditNoteParties,
+} from "./gstAdjustment";
 import { assertStatutoryDocumentNumber, invoiceIdForFinancialEvent, isIssuedInvoice } from "./invoiceAllocation";
 import { buildCreditNoteComplianceDoc } from "./taxCompliance";
 
@@ -135,6 +145,7 @@ export async function finalizeSubscriptionCreditNote(
     refundFinancialEventId: string;
     diagnosticUidFor: (uid: string) => string;
     nowMs: number;
+    section34CreditNotePolicy: Section34CreditNotePolicy;
   }
 ): Promise<{ creditNote: SubscriptionCreditNoteDoc; reused: boolean }> {
   const refundPath = financialLedgerPath(input.refundFinancialEventId);
@@ -165,6 +176,10 @@ export async function finalizeSubscriptionCreditNote(
         causeCode: "financial_event_not_refundable",
       });
     }
+    assertRefundMayIssueStatutoryCreditNote({
+      eventType: refund.eventType,
+      section34CreditNotePolicy: input.section34CreditNotePolicy,
+    });
     const relatedId = refund.relatedFinancialEventId;
     if (!relatedId) {
       throw new BillingError({
@@ -275,6 +290,16 @@ export async function finalizeSubscriptionCreditNote(
       updatedAt: input.nowMs,
     };
     const serial = prior.currentCount + 1;
+    const parties = snapshotCreditNoteParties(original);
+    const evidence = evidenceStatusForRecipient(parties.buyer);
+    const section34OuterLimitAt = section34OutputTaxReductionOuterLimitMs(
+      original.supplyOccurredAt ?? original.createdAt
+    );
+    const gstAdjustmentEligibility = gstAdjustmentEligibilityAtIssuance({
+      eventType: refund.eventType,
+      issuedAt: input.nowMs,
+      originalSupplyOccurredAt: original.supplyOccurredAt ?? original.createdAt,
+    });
     const created: SubscriptionCreditNoteDoc = {
       creditNoteId,
       originalInvoiceId: original.invoiceId,
@@ -288,10 +313,15 @@ export async function finalizeSubscriptionCreditNote(
       taxPeriodStatus: "resolved",
       issuedAt: input.nowMs,
       issuedOnIst: formatIstCalendarDate(input.nowMs),
-      buyerGstin: original.buyer.gstin,
-      buyerClassification: original.buyer.classification,
+      nature: CREDIT_NOTE_NATURE,
+      seller: parties.seller,
+      buyer: parties.buyer,
+      buyerGstin: parties.buyer.gstin,
+      buyerClassification: parties.buyer.classification,
+      originalInvoiceIssuedAt: original.invoiceIssuedAt,
       originalInvoiceIssuedOnIst: original.invoiceIssuedOnIst,
       placeOfSupplyStateCode: original.placeOfSupplyStateCode,
+      placeOfSupplyStateName: original.placeOfSupplyStateName,
       gstRateBps: original.gstRateBps,
       taxType: original.taxType,
       taxResponsibilityMode: original.taxResponsibilityMode,
@@ -301,12 +331,19 @@ export async function finalizeSubscriptionCreditNote(
       igstReversedInPaise: original.igstInPaise,
       totalTaxReversedInPaise: original.totalTaxInPaise,
       totalReversedInPaise: original.totalInPaise,
+      gstAdjustmentEligibility,
+      recipientItcReversalEvidenceStatus: evidence.recipientItcReversalEvidenceStatus,
+      taxIncidenceConditionStatus: evidence.taxIncidenceConditionStatus,
+      section34OuterLimitAt,
+      taxAdjustmentDisposition: "credit_note_issued",
       gstrReportable: true,
       gstrReportedMonth: null,
       gstrFilingBatchId: null,
       createdAt: input.nowMs,
       updatedAt: input.nowMs,
     };
+    assertCreditNoteStatutoryParticulars({ creditNote: created, original });
+    const invoiceDefaults = invoiceGstAdjustmentDefaults();
     const nextOriginalCompliance: SubscriptionTaxComplianceDoc = originalCompliance
       ? {
           ...originalCompliance,
@@ -329,6 +366,7 @@ export async function finalizeSubscriptionCreditNote(
           reviewStatus: "requires_tax_review",
           unresolvedReasons: ["compliance_record_missing"],
           cumulativeCreditReversedInPaise: originalTotal,
+          ...invoiceDefaults,
           reviewedAt: null,
           reviewedByDiagnosticUid: null,
           reviewBasis: null,

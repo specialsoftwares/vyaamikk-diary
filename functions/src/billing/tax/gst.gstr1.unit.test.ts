@@ -39,14 +39,21 @@ import assert from "node:assert/strict";
 import { applyMarkGstr1Filed } from "../callables/markGstr1Filed";
 import { generateGstr1WorkingPapersCore } from "../callables/generateGstr1WorkingPapers";
 import { BillingError } from "../errors";
-import { gstr1ReportManifestPath } from "../paths";
+import { gstr1ReportManifestPath, financialLedgerPath } from "../paths";
 import { MemoryBillingStore } from "../store";
-import type { SubscriptionCreditNoteDoc, SubscriptionInvoiceDoc, SubscriptionTaxComplianceDoc } from "../types";
+import type {
+  BillingEventLedgerDoc,
+  SubscriptionCreditNoteDoc,
+  SubscriptionInvoiceDoc,
+  SubscriptionTaxComplianceDoc,
+} from "../types";
 import { buildGstr1WorkingPapers, workingPapersToCsv } from "./gstr1WorkingPapers";
 import { MemoryInvoiceObjectStorage } from "./taxDocumentOrchestrator";
 import { parseGstrMonth } from "./taxPeriod";
 import { istWallClockToEpochMs } from "./financialYearUtils";
 import { applyReviewTaxCompliance } from "./taxCompliance";
+import { MemoryTaxComplianceReportSource } from "./taxComplianceReportSource";
+import { invoiceIdForFinancialEvent } from "./invoiceAllocation";
 
 function isCause(code: string) {
   return (e: unknown) => e instanceof BillingError && e.causeCode === code;
@@ -145,6 +152,7 @@ function invoice(
     gstrReportedMonth: null,
     gstrFilingBatchId: null,
     historyEventId: null,
+    invoiceIssueDueAt: null,
     createdAt: 1,
     updatedAt: 1,
     ...partial,
@@ -182,6 +190,11 @@ function complianceFor(
     reviewStatus: open ? "requires_tax_review" : "ready_to_file",
     unresolvedReasons: reasons.sort(),
     cumulativeCreditReversedInPaise: 0,
+    gstAdjustmentEligibility: "not_applicable",
+    recipientItcReversalEvidenceStatus: "not_applicable",
+    taxIncidenceConditionStatus: "not_applicable",
+    section34OuterLimitAt: null,
+    taxAdjustmentDisposition: "not_applicable",
     reviewedAt: open ? null : 1,
     reviewedByDiagnosticUid: open ? null : "admindiag01",
     reviewBasis: open ? null : "fixture",
@@ -214,6 +227,11 @@ function complianceForCn(
     reviewStatus: "ready_to_file",
     unresolvedReasons: [],
     cumulativeCreditReversedInPaise: 0,
+    gstAdjustmentEligibility: "eligible",
+    recipientItcReversalEvidenceStatus: "confirmed",
+    taxIncidenceConditionStatus: "not_applicable",
+    section34OuterLimitAt: istWallClockToEpochMs("2027-11-30T23:59:59"),
+    taxAdjustmentDisposition: "credit_note_issued",
     reviewedAt: 1,
     reviewedByDiagnosticUid: "admindiag01",
     reviewBasis: "fixture",
@@ -245,6 +263,231 @@ function seedDocs(
   for (const rec of extras) {
     store.docs.set(`_subscriptionTaxCompliance/${rec.invoiceId}`, { ...rec });
   }
+}
+
+function ledgerEvent(
+  patch: Partial<BillingEventLedgerDoc> & { financialEventId: string }
+): BillingEventLedgerDoc {
+  return {
+    platform: "android",
+    uid: "user-1",
+    canonicalSku: "vyd_professional_yearly",
+    eventType: "purchase",
+    grossAmountInPaise: 11800,
+    currency: "INR",
+    actualPlatformCommissionInPaise: 1770,
+    estimatedPlatformCommissionInPaise: null,
+    occurredAt: SEP_SUPPLY,
+    monthKey: "2026-09",
+    relatedFinancialEventId: null,
+    recordedAt: 1,
+    recordedBy: "androidValidation",
+    ...patch,
+  };
+}
+
+async function testRound4LedgerCompletenessAndDrift(
+  admin: { uid: string; tokenAdmin: boolean; adminIdentityProvisioned: boolean },
+  storage: MemoryInvoiceObjectStorage
+): Promise<void> {
+  const orphanPurchase = new MemoryBillingStore();
+  orphanPurchase.docs.set(
+    financialLedgerPath("evt-orphan-purchase"),
+    { ...ledgerEvent({ financialEventId: "evt-orphan-purchase" }) }
+  );
+  const purchaseScope = await new MemoryTaxComplianceReportSource(orphanPurchase).loadMonthlyScope("2026-09");
+  assert.ok(
+    purchaseScope.complianceRecords.some((c) =>
+      c.unresolvedReasons.includes("financial_event_tax_document_missing")
+    )
+  );
+  const purchasePapers = buildGstr1WorkingPapers({ month: "2026-09", ...purchaseScope });
+  assert.equal(purchasePapers.reviewStatus, "requires_tax_review");
+  assert.ok(purchasePapers.sourceFinancialEventIds.includes("evt-orphan-purchase"));
+
+  const orphanRenewal = new MemoryBillingStore();
+  orphanRenewal.docs.set(
+    financialLedgerPath("evt-orphan-renewal"),
+    { ...ledgerEvent({ financialEventId: "evt-orphan-renewal", eventType: "renewal" }) }
+  );
+  const renewalPapers = buildGstr1WorkingPapers({
+    month: "2026-09",
+    ...(await new MemoryTaxComplianceReportSource(orphanRenewal).loadMonthlyScope("2026-09")),
+  });
+  assert.equal(renewalPapers.reviewStatus, "requires_tax_review");
+  assert.ok(
+    renewalPapers.complianceOpenItems.some((i) =>
+      i.unresolvedReasons.includes("financial_event_tax_document_missing")
+    )
+  );
+
+  const original = invoice({ invoiceId: "inv-b2b-oct", documentType: "tax_invoice_b2b" });
+  const orphanRefund = new MemoryBillingStore();
+  orphanRefund.docs.set(`_subscriptionInvoices/${original.invoiceId}`, { ...original });
+  orphanRefund.docs.set(`_subscriptionTaxCompliance/${original.invoiceId}`, { ...complianceFor(original) });
+  orphanRefund.docs.set(
+    financialLedgerPath("evt-orphan-refund"),
+    {
+      ...ledgerEvent({
+        financialEventId: "evt-orphan-refund",
+        eventType: "refund",
+        relatedFinancialEventId: original.financialEventId,
+        occurredAt: istWallClockToEpochMs("2026-10-05T12:00:00"),
+        monthKey: "2026-10",
+      }),
+    }
+  );
+  const octPapers = buildGstr1WorkingPapers({
+    month: "2026-10",
+    ...(await new MemoryTaxComplianceReportSource(orphanRefund).loadMonthlyScope("2026-10")),
+  });
+  assert.equal(octPapers.reviewStatus, "requires_tax_review");
+  assert.ok(octPapers.taxAdjustments.some((row) => row.financialEventId === "evt-orphan-refund"));
+  assert.ok(
+    octPapers.complianceOpenItems.some((i) => i.unresolvedReasons.includes("tax_adjustment_disposition_missing"))
+  );
+  assert.equal(octPapers.table14a.every((row) => row.creditNoteIds.length === 0), true);
+
+  const unresolvedCn = {
+    ...cnFixtureEligible(original),
+    gstAdjustmentEligibility: "requires_review" as const,
+    recipientItcReversalEvidenceStatus: "unconfirmed" as const,
+  };
+  const unresolvedPapers = buildGstr1WorkingPapers({
+    month: "2026-09",
+    invoices: [original],
+    creditNotes: [unresolvedCn],
+    complianceRecords: [
+      complianceFor(original),
+      { ...complianceForCn(unresolvedCn, original), gstAdjustmentEligibility: "requires_review", unresolvedReasons: ["gst_adjustment_requires_review"], reviewStatus: "requires_tax_review" },
+    ],
+  });
+  assert.equal(unresolvedPapers.reviewStatus, "requires_tax_review");
+  assert.equal(unresolvedPapers.creditNotes[0]?.outputTaxReductionIncluded, false);
+  assert.equal(
+    unresolvedPapers.table14a[0]?.creditNoteIds.includes(unresolvedCn.creditNoteId) ?? false,
+    false
+  );
+
+  const appearStore = new MemoryBillingStore();
+  seedDocs(appearStore, [original]);
+  const appeared = await generateGstr1WorkingPapersCore({
+    month: "2026-09",
+    admin,
+    storage,
+    store: appearStore,
+    generatedByDiagnosticUid: "admindiag01",
+    nowMs: 40,
+  });
+  assert.deepEqual(appeared.papers.sourceFinancialEventIds, []);
+  appearStore.docs.set(
+    financialLedgerPath("evt-late-purchase"),
+    { ...ledgerEvent({ financialEventId: "evt-late-purchase" }) }
+  );
+  await assert.rejects(
+    applyMarkGstr1Filed(appearStore, {
+      admin,
+      adminDiagnosticUid: "admindiag01",
+      reportId: appeared.papers.reportId,
+      acknowledgement: "ACK-LATE",
+      nowMs: 41,
+    }),
+    isCause("gstr_report_source_drift")
+  );
+
+  const matchedEventId = "evt-matched-purchase";
+  const matchedInvoiceId = invoiceIdForFinancialEvent(matchedEventId);
+  const matched = invoice({
+    invoiceId: matchedInvoiceId,
+    financialEventId: matchedEventId,
+    documentType: "tax_invoice_b2b",
+    documentNumber: "SS/2026-27/0008",
+  });
+  const mutateStore = new MemoryBillingStore();
+  seedDocs(mutateStore, [matched]);
+  mutateStore.docs.set(
+    financialLedgerPath(matchedEventId),
+    { ...ledgerEvent({ financialEventId: matchedEventId }) }
+  );
+  const mutatedGenerated = await generateGstr1WorkingPapersCore({
+    month: "2026-09",
+    admin,
+    storage,
+    store: mutateStore,
+    generatedByDiagnosticUid: "admindiag01",
+    nowMs: 42,
+  });
+  assert.equal(mutatedGenerated.papers.reviewStatus, "ready_to_file");
+  assert.ok(mutatedGenerated.papers.sourceFinancialEventIds.includes(matchedEventId));
+  mutateStore.docs.set(financialLedgerPath(matchedEventId), {
+    ...ledgerEvent({ financialEventId: matchedEventId, grossAmountInPaise: 1 }),
+  });
+  await assert.rejects(
+    applyMarkGstr1Filed(mutateStore, {
+      admin,
+      adminDiagnosticUid: "admindiag01",
+      reportId: mutatedGenerated.papers.reportId,
+      acknowledgement: "ACK-MUTATE",
+      nowMs: 43,
+    }),
+    isCause("gstr_report_source_drift")
+  );
+  mutateStore.docs.delete(financialLedgerPath(matchedEventId));
+  await assert.rejects(
+    applyMarkGstr1Filed(mutateStore, {
+      admin,
+      adminDiagnosticUid: "admindiag01",
+      reportId: mutatedGenerated.papers.reportId,
+      acknowledgement: "ACK-GONE",
+      nowMs: 44,
+    }),
+    isCause("gstr_report_source_drift")
+  );
+}
+
+function cnFixtureEligible(original: SubscriptionInvoiceDoc): SubscriptionCreditNoteDoc {
+  return {
+    creditNoteId: "cn-unresolved",
+    originalInvoiceId: original.invoiceId,
+    originalDocumentNumber: original.documentNumber,
+    refundFinancialEventId: "refund-unresolved",
+    uid: original.uid,
+    diagnosticUid: "diag01",
+    documentNumber: "CN/2026-27/0009",
+    financialYear: "2026-27",
+    taxPeriodMonth: "2026-09",
+    taxPeriodStatus: "resolved",
+    issuedAt: 1,
+    issuedOnIst: "12-09-2026",
+    nature: "CREDIT NOTE",
+    seller: original.seller,
+    buyer: original.buyer,
+    buyerGstin: original.buyer.gstin,
+    buyerClassification: original.buyer.classification,
+    originalInvoiceIssuedAt: original.invoiceIssuedAt,
+    originalInvoiceIssuedOnIst: original.invoiceIssuedOnIst,
+    placeOfSupplyStateCode: original.placeOfSupplyStateCode,
+    placeOfSupplyStateName: original.placeOfSupplyStateName,
+    gstRateBps: original.gstRateBps,
+    taxType: original.taxType,
+    taxResponsibilityMode: original.taxResponsibilityMode,
+    taxableAmountReversedInPaise: original.taxableAmountInPaise,
+    cgstReversedInPaise: original.cgstInPaise,
+    sgstReversedInPaise: original.sgstInPaise,
+    igstReversedInPaise: original.igstInPaise,
+    totalTaxReversedInPaise: original.totalTaxInPaise,
+    totalReversedInPaise: original.totalInPaise,
+    gstAdjustmentEligibility: "requires_review",
+    recipientItcReversalEvidenceStatus: "unconfirmed",
+    taxIncidenceConditionStatus: "not_applicable",
+    section34OuterLimitAt: istWallClockToEpochMs("2027-11-30T23:59:59"),
+    taxAdjustmentDisposition: "credit_note_issued",
+    gstrReportable: true,
+    gstrReportedMonth: null,
+    gstrFilingBatchId: null,
+    createdAt: 1,
+    updatedAt: 1,
+  };
 }
 
 async function main(): Promise<void> {
@@ -311,10 +554,31 @@ async function main(): Promise<void> {
     taxPeriodStatus: "resolved",
     issuedAt: 1,
     issuedOnIst: "12-09-2026",
+    nature: "CREDIT NOTE",
+    seller: {
+      legalName: "SPECIAL SOFTWARES LLP (TEST — CERTIFICATE UNCONFIRMED)",
+      tradeName: "Vyaamikk Diary",
+      gstin: "09AAAAA0000A1Z5",
+      registeredAddress: "TEST REGISTERED ADDRESS PLACEHOLDER",
+      stateCode: "09",
+      stateName: "Uttar Pradesh",
+    },
+    buyer: {
+      classification: "b2b",
+      legalName: "Buyer",
+      gstin: "27AAAAA0000A1Z5",
+      gstinVerificationStatus: "verified",
+      billingAddress: "12 MG Road, Mumbai, 400001",
+      postalCode: "400001",
+      stateCode: "27",
+      stateName: "Maharashtra",
+    },
     buyerGstin: "27AAAAA0000A1Z5",
     buyerClassification: "b2b",
+    originalInvoiceIssuedAt: SEP_SUPPLY,
     originalInvoiceIssuedOnIst: "12-09-2026",
     placeOfSupplyStateCode: "27",
+    placeOfSupplyStateName: "Maharashtra",
     gstRateBps: 1800,
     taxType: "igst",
     taxResponsibilityMode: "developer",
@@ -324,6 +588,11 @@ async function main(): Promise<void> {
     igstReversedInPaise: 1800,
     totalTaxReversedInPaise: 1800,
     totalReversedInPaise: 11800,
+    gstAdjustmentEligibility: "eligible",
+    recipientItcReversalEvidenceStatus: "confirmed",
+    taxIncidenceConditionStatus: "not_applicable",
+    section34OuterLimitAt: istWallClockToEpochMs("2027-11-30T23:59:59"),
+    taxAdjustmentDisposition: "credit_note_issued",
     gstrReportable: true,
     gstrReportedMonth: null,
     gstrFilingBatchId: null,
@@ -380,9 +649,10 @@ async function main(): Promise<void> {
   assert.equal(papers.table14a[0]?.operatorGstin, SYNTHETIC_OPERATOR_GSTIN);
   assert.equal(papers.table14a[0]?.fileReady, true);
   assert.ok(papers.table14a[0]?.sourceInvoiceIds.includes("inv-b2b"));
-  assert.ok(papers.table14a[0]?.creditNoteIds.includes("cn-1"));
+  assert.equal(papers.table14a[0]?.creditNoteIds.includes("cn-1"), true);
   assert.equal(papers.reviewStatus, "ready_to_file");
   assert.deepEqual(papers.unresolvedReviewReasons, []);
+  assert.deepEqual(papers.sourceFinancialEventIds, []);
 
   const csv = workingPapersToCsv(papers);
   assert.match(csv, /GSTR-1 working papers for manual filing/);
@@ -656,6 +926,8 @@ async function main(): Promise<void> {
     }),
     isCause("gstr_filing_batch_conflict")
   );
+
+  await testRound4LedgerCompletenessAndDrift(admin, storage);
 
   console.log("gst.gstr1.unit.test.ts: ok");
 }
