@@ -121,7 +121,7 @@ const PERIOD = 1_800_000_000_000;
 }
 
 {
-  // E. onHold → free capability (server entitlementActive false)
+  // E. onHold → free even if entitlementActive is true
   const onHold = status({
     plan: "professional",
     billingStatus: "onHold",
@@ -130,10 +130,19 @@ const PERIOD = 1_800_000_000_000;
   });
   assert.equal(effectivePlanForSubscription(onHold), "free");
   assert.equal(featuresForSubscription(onHold).canUseProfessionalFeatures, false);
+
+  const onHoldContradiction = status({
+    plan: "business",
+    billingStatus: "onHold",
+    entitlementActive: true,
+    entitlementReason: "storeSubscriptionActive",
+  });
+  assert.equal(effectivePlanForSubscription(onHoldContradiction), "free");
+  assert.equal(featuresForSubscription(onHoldContradiction).canUseBusinessFeatures, false);
 }
 
 {
-  // F. expired → free
+  // F. expired → free even if entitlementActive is true
   const expired = status({
     plan: "business",
     billingStatus: "expired",
@@ -142,6 +151,26 @@ const PERIOD = 1_800_000_000_000;
   });
   assert.equal(effectivePlanForSubscription(expired), "free");
   assert.equal(featuresForSubscription(expired).canUseBusinessInsights, false);
+
+  const expiredContradiction = status({
+    plan: "professional",
+    billingStatus: "expired",
+    entitlementActive: true,
+    entitlementReason: "storeSubscriptionActive",
+  });
+  assert.equal(effectivePlanForSubscription(expiredContradiction), "free");
+  assert.equal(featuresForSubscription(expiredContradiction).canUseProfessionalBrief, false);
+}
+
+{
+  // R. trial + entitlementActive false → free
+  const trialOff = status({
+    plan: "professional",
+    billingStatus: "trial",
+    entitlementActive: false,
+    trialEndsAt: PERIOD,
+  });
+  assert.equal(effectivePlanForSubscription(trialOff), "free");
 }
 
 {

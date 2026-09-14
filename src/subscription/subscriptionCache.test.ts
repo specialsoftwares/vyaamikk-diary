@@ -11,6 +11,7 @@ import {
   SUBSCRIPTION_CACHE_KEY,
   SUBSCRIPTION_CACHE_VERSION,
   clearSubscriptionCache,
+  clearSubscriptionCacheIfUid,
   parseSubscriptionCacheEnvelope,
   readSubscriptionCache,
   writeSubscriptionCache,
@@ -203,6 +204,42 @@ async function main() {
     NOW
   );
   assert.equal(cannotGrant.status.entitlementActive, false);
+}
+
+{
+  // O. clock rollback relative to savedAt cannot hydrate paid cache
+  const store = memoryStore();
+  await writeSubscriptionCache({
+    store,
+    uid: "uid-a",
+    status: entitledProfessional(FUTURE),
+    nowMs: NOW,
+  });
+  const rolledBack = await readSubscriptionCache({
+    store,
+    uid: "uid-a",
+    nowMs: NOW - 1,
+  });
+  assert.equal(rolledBack, null);
+  const stillOnDisk = JSON.parse(store.data[SUBSCRIPTION_CACHE_KEY]!) as { savedAt: number };
+  assert.equal(stillOnDisk.savedAt, NOW, "must not rewrite stored timestamps");
+  const forward = await readSubscriptionCache({ store, uid: "uid-a", nowMs: NOW });
+  assert.ok(forward);
+  assert.equal(forward.status.plan, "professional");
+}
+
+{
+  // V helper. late A clear must not delete B cache
+  const store = memoryStore();
+  await writeSubscriptionCache({
+    store,
+    uid: "uid-b",
+    status: entitledProfessional(FUTURE),
+    nowMs: NOW,
+  });
+  await clearSubscriptionCacheIfUid(store, "uid-a");
+  const env = JSON.parse(store.data[SUBSCRIPTION_CACHE_KEY]!) as { uid: string };
+  assert.equal(env.uid, "uid-b");
 }
 
 {

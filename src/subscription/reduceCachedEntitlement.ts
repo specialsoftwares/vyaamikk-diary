@@ -14,6 +14,33 @@ function inFuture(ts: number | null, nowMs: number): ts is number {
   return typeof ts === "number" && Number.isFinite(ts) && ts > nowMs;
 }
 
+/**
+ * Applicable offline/cache expiry boundary. `null` means already non-access
+ * (onHold / expired) or no timestamp to watch. Does not invent a later expiry.
+ */
+export function entitlementExpiryBoundaryMs(status: ClientSubscriptionStatus): number | null {
+  if (!status.entitlementActive) return null;
+  switch (status.billingStatus) {
+    case "trial":
+      return typeof status.trialEndsAt === "number" && Number.isFinite(status.trialEndsAt)
+        ? status.trialEndsAt
+        : null;
+    case "active":
+    case "cancelled":
+      return typeof status.currentPeriodEnd === "number" && Number.isFinite(status.currentPeriodEnd)
+        ? status.currentPeriodEnd
+        : null;
+    case "grace":
+      return typeof status.gracePeriodEndsAt === "number" && Number.isFinite(status.gracePeriodEndsAt)
+        ? status.gracePeriodEndsAt
+        : null;
+    case "onHold":
+    case "expired":
+    default:
+      return null;
+  }
+}
+
 function revokeToFree(
   status: ClientSubscriptionStatus,
   reason: ClientSubscriptionStatus["entitlementReason"]

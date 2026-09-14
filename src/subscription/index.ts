@@ -33,5 +33,10 @@ export {
   clearSubscriptionCache,
 } from "./subscriptionCache";
 
+export {
+  bindSubscriptionViewToAuth,
+  activeAuthUid,
+} from "./subscriptionViewBinding";
+
 export { SubscriptionProvider, useSubscription } from "./SubscriptionProvider";
 export type { UseSubscriptionResult } from "./SubscriptionProvider";

@@ -87,12 +87,55 @@ export async function readSubscriptionCache(args: {
     return null;
   }
 
+  // Clock rollback relative to savedAt must not extend paid hydration.
+  if (nowMs < envelope.savedAt) {
+    return null;
+  }
+
   const reduced = reduceCachedEntitlement(envelope.status, nowMs);
   return {
     envelope,
     status: reduced.status,
     reduced: reduced.reduced,
   };
+}
+
+/** Remove the global cache only when the envelope still belongs to `uid`. */
+export async function clearSubscriptionCacheIfUid(
+  store: SubscriptionKeyValueStore,
+  uid: string
+): Promise<void> {
+  let raw: string | null;
+  try {
+    raw = await store.getItem(SUBSCRIPTION_CACHE_KEY);
+  } catch {
+    return;
+  }
+  if (!raw) return;
+  let parsedJson: unknown;
+  try {
+    parsedJson = JSON.parse(raw);
+  } catch {
+    await safeRemove(store);
+    return;
+  }
+  const envelope = parseSubscriptionCacheEnvelope(parsedJson);
+  if (envelope && envelope.uid !== uid) return;
+  try {
+    raw = await store.getItem(SUBSCRIPTION_CACHE_KEY);
+  } catch {
+    return;
+  }
+  if (!raw) return;
+  try {
+    parsedJson = JSON.parse(raw);
+  } catch {
+    await safeRemove(store);
+    return;
+  }
+  const again = parseSubscriptionCacheEnvelope(parsedJson);
+  if (again && again.uid !== uid) return;
+  await safeRemove(store);
 }
 
 export async function writeSubscriptionCache(args: {

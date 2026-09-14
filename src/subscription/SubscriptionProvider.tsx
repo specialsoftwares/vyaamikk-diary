@@ -6,6 +6,9 @@
  *
  * Consumes server `users/{uid}/subscription/status` only. Does not talk to
  * Play Billing or App Store purchase APIs and does not render paywalls.
+ *
+ * Render-time owner binding is the zero-frame uid isolation gate. Effects
+ * only drive the session; they must not be the visibility authority.
  */
 
 import React, {
@@ -17,43 +20,36 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { AppState } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { useAuth } from "@/state/auth";
 import { useIsOnline } from "@/state/network";
-import { DEFAULT_CLIENT_SUBSCRIPTION } from "./types";
-import { featuresForSubscription } from "./subscriptionFeatures";
 import {
   createSubscriptionSession,
   type SubscriptionView,
 } from "./subscriptionSession";
 import {
+  bindSubscriptionViewToAuth,
+  defaultSafeSubscriptionView,
+} from "./subscriptionViewBinding";
+import {
   listenFirestoreSubscriptionStatus,
   readFirestoreSubscriptionStatus,
 } from "./subscriptionFirestore";
 
-export interface UseSubscriptionResult extends SubscriptionView {
+export type UseSubscriptionResult = Omit<SubscriptionView, "ownerUid"> & {
   refresh: () => Promise<void>;
-}
+};
 
 const SubscriptionContext = createContext<UseSubscriptionResult | null>(null);
-
-const INITIAL: SubscriptionView = {
-  status: DEFAULT_CLIENT_SUBSCRIPTION,
-  plan: "free",
-  features: featuresForSubscription(DEFAULT_CLIENT_SUBSCRIPTION),
-  source: "default",
-  isLoading: true,
-  isRefreshing: false,
-  isOffline: false,
-  isStale: false,
-  error: null,
-};
 
 export function SubscriptionProvider({ children }: { children: React.ReactNode }) {
   const { status: authStatus, user } = useAuth();
   const online = useIsOnline();
-  const [view, setView] = useState<SubscriptionView>(INITIAL);
+  const [view, setView] = useState<SubscriptionView>(() =>
+    defaultSafeSubscriptionView({ isLoading: true, ownerUid: null })
+  );
   const sessionRef = useRef<ReturnType<typeof createSubscriptionSession> | null>(null);
 
   useEffect(() => {
@@ -65,7 +61,11 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
       onChange: setView,
     });
     sessionRef.current = session;
+    const sub = AppState.addEventListener("change", (next) => {
+      if (next === "active") session.notifyForeground();
+    });
     return () => {
+      sub.remove();
       session.dispose();
       sessionRef.current = null;
     };
@@ -86,12 +86,19 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
     await sessionRef.current?.refresh();
   }, []);
 
+  const bound = bindSubscriptionViewToAuth({
+    view,
+    authStatus,
+    authUid: user?.uid ?? null,
+  });
+  const { ownerUid: _ownerUid, ...publicView } = bound;
+
   const api = useMemo<UseSubscriptionResult>(
     () => ({
-      ...view,
+      ...publicView,
       refresh,
     }),
-    [view, refresh]
+    [publicView, refresh]
   );
 
   return (

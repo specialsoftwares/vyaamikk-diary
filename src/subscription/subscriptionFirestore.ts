@@ -3,6 +3,9 @@
  *
  * Read / listen only. Client writes to this document are forbidden —
  * Rules deny them and the client is not entitlement authority.
+ *
+ * Snapshot provenance comes from Firestore `metadata.fromCache`, never from
+ * NetInfo. Default `onSnapshot` can deliver SDK cache *and* server data.
  */
 
 import { doc, getDocFromServer, onSnapshot } from "firebase/firestore";
@@ -14,8 +17,13 @@ export interface SubscriptionDocError {
   code: string;
 }
 
+export interface SubscriptionDocSnapshot {
+  data: unknown | null;
+  fromCache: boolean;
+}
+
 export interface SubscriptionDocObserver {
-  next: (data: unknown | null) => void;
+  next: (snapshot: SubscriptionDocSnapshot) => void;
   error: (err: SubscriptionDocError) => void;
 }
 
@@ -32,15 +40,19 @@ export function subscriptionStatusDoc(uid: string) {
 
 export const listenFirestoreSubscriptionStatus: SubscriptionDocListener = (uid, observer) => {
   if (!isFirebaseConfigured()) {
-    observer.next(null);
+    observer.next({ data: null, fromCache: true });
     return () => {};
   }
   try {
     const ref = subscriptionStatusDoc(uid);
     return onSnapshot(
       ref,
+      { includeMetadataChanges: true },
       (snap) => {
-        observer.next(snap.exists() ? snap.data() : null);
+        observer.next({
+          data: snap.exists() ? snap.data() : null,
+          fromCache: snap.metadata.fromCache,
+        });
       },
       (err) => {
         observer.error({ code: typeof err.code === "string" ? err.code : "unknown" });

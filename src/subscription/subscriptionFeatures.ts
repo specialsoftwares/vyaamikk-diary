@@ -74,17 +74,25 @@ export function featuresForPlan(plan: VyaamikkPlan): SubscriptionFeatures {
 }
 
 /**
- * Effective plan for feature access. Lifecycle is consumed from the
- * authoritative `entitlementActive` flag — UI must not re-implement billing
- * state machines.
+ * Effective plan for feature access.
  *
- * Trial (while entitled) → Professional capabilities.
- * !entitlementActive (expired trial, onHold, expired, lapsed cancel) → free.
+ * Known non-access statuses (onHold, expired) are ALWAYS free, even if a
+ * malformed document sets entitlementActive=true. Timestamp expiry is applied
+ * separately by `reduceCachedEntitlement` — this matrix does not invent clocks.
  */
 export function effectivePlanForSubscription(status: ClientSubscriptionStatus): VyaamikkPlan {
-  if (!status.entitlementActive) return "free";
-  if (status.billingStatus === "trial") return TRIAL_PLAN;
-  return status.plan;
+  switch (status.billingStatus) {
+    case "trial":
+      return status.entitlementActive ? TRIAL_PLAN : "free";
+    case "active":
+    case "grace":
+    case "cancelled":
+      return status.entitlementActive ? status.plan : "free";
+    case "onHold":
+    case "expired":
+    default:
+      return "free";
+  }
 }
 
 export function featuresForSubscription(status: ClientSubscriptionStatus): SubscriptionFeatures {

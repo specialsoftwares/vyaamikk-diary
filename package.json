@@ -117,7 +117,7 @@
     "test:external-https": "npx --yes tsx src/utils/externalHttpsUrl.test.ts",
     "test:root-providers": "npx --yes tsx src/config/rootDataProviders.test.ts",
     "test:subscription-features": "npx --yes tsx src/subscription/subscriptionFeatures.test.ts && npx --yes tsx src/subscription/parseSubscriptionStatus.test.ts",
-    "test:subscription-provider": "npx --yes tsx src/subscription/subscriptionSession.test.ts",
+    "test:subscription-provider": "npx --yes tsx src/subscription/subscriptionSession.test.ts && npx --yes tsx src/subscription/subscriptionViewBinding.test.ts",
     "test:subscription-cache": "npx --yes tsx src/subscription/subscriptionCache.test.ts",
     "test:subscription-plan-static": "npx --yes tsx src/subscription/subscriptionPlan.static.test.ts",
     "test:curtain-phases": "npx --yes tsx src/components/ui/curtainSheetPhases.test.ts",

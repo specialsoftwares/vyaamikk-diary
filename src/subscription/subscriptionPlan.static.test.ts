@@ -39,9 +39,11 @@ function isAllowlisted(rel: string): boolean {
   return ALLOW_PLAN_COMPARE.some((re) => re.test(p));
 }
 
-const PLAN_COMPARE = [
+  const PLAN_COMPARE = [
   /\bplan\s*[=!]==?\s*['"](?:free|starter|professional|business)['"]/,
+  /['"](?:free|starter|professional|business)['"]\s*[=!]==?\s*\bplan\b/,
   /\b(?:status|subscription)\.plan\s*[=!]==?\s*['"](?:free|starter|professional|business)['"]/,
+  /\bswitch\s*\(\s*plan\s*\)/,
 ];
 
 const scanRoots = [join(repoRoot, "src"), join(repoRoot, "app")];
@@ -103,6 +105,8 @@ assert.deepEqual(violations, [], `raw plan comparisons outside allowlist:\n${vio
     readFileSync(join(repoRoot, "src/subscription/subscriptionFirestore.ts"), "utf8")
   );
   assert.match(firestore, /onSnapshot/);
+  assert.match(firestore, /includeMetadataChanges:\s*true/);
+  assert.match(firestore, /fromCache/);
   assert.match(firestore, /getDocFromServer/);
   assert.doesNotMatch(firestore, /\bsetDoc\b/);
 }
