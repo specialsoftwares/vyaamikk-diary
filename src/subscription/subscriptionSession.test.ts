@@ -48,6 +48,33 @@ function professionalDoc(): Record<string, unknown> {
   };
 }
 
+function starterStatus(): ClientSubscriptionStatus {
+  return {
+    ...DEFAULT_CLIENT_SUBSCRIPTION,
+    plan: "starter",
+    billingStatus: "active",
+    entitlementActive: true,
+    entitlementReason: "storeSubscriptionActive",
+    currentPeriodStart: NOW,
+    currentPeriodEnd: FUTURE,
+    platform: "android",
+    autoRenewing: true,
+  };
+}
+
+function businessDoc(): Record<string, unknown> {
+  return {
+    plan: "business",
+    billingStatus: "active",
+    entitlementActive: true,
+    entitlementReason: "storeSubscriptionActive",
+    currentPeriodStart: NOW,
+    currentPeriodEnd: FUTURE,
+    platform: "ios",
+    autoRenewing: true,
+  };
+}
+
 function professionalStatus(): ClientSubscriptionStatus {
   return {
     ...DEFAULT_CLIENT_SUBSCRIPTION,
@@ -68,7 +95,7 @@ interface FakeListener {
   error(uid: string, code: string): void;
   unsubCount: number;
   liveCount(): number;
-  observers: Array<{ uid: string; observer: SubscriptionDocObserver; live: boolean }>;
+  observers: { uid: string; observer: SubscriptionDocObserver; live: boolean }[];
 }
 
 function createFakeListener(): FakeListener {
@@ -377,7 +404,6 @@ async function main() {
   );
   await session.flushWrites();
   assert.notEqual(session.getView().source, "server");
-  assert.equal(session.getView().source, "cache");
   assert.equal(session.getView().plan, "free");
   assert.equal(session.getView().features.canUseProfessionalFeatures, false);
   assert.equal(store.data[SUBSCRIPTION_CACHE_KEY], undefined);
@@ -385,7 +411,7 @@ async function main() {
 }
 
 {
-  // C. fromCache=true valid professional is cache provenance
+  // C. fromCache=true valid professional from default/free must NOT widen
   const store = memoryStore();
   const fake = createFakeListener();
   const session = createSubscriptionSession({
@@ -399,8 +425,9 @@ async function main() {
   await wait();
   fake.emit("uid-a", professionalDoc(), true);
   await session.flushWrites();
-  assert.equal(session.getView().source, "cache");
-  assert.equal(session.getView().plan, "professional");
+  assert.equal(session.getView().plan, "free");
+  assert.equal(session.getView().features.canUseProfessionalFeatures, false);
+  assert.notEqual(session.getView().source, "server");
   assert.equal(store.data[SUBSCRIPTION_CACHE_KEY], undefined, "must not persist Firestore cache as server evidence");
   session.dispose();
 }
@@ -419,7 +446,8 @@ async function main() {
   session.setAuth({ status: "signed_in", uid: "uid-a" });
   await wait();
   fake.emit("uid-a", professionalDoc(), true);
-  assert.equal(session.getView().source, "cache");
+  assert.notEqual(session.getView().source, "server");
+  assert.equal(session.getView().plan, "free");
   fake.emit("uid-a", professionalDoc(), false);
   await session.flushWrites();
   assert.equal(session.getView().source, "server");
@@ -477,7 +505,7 @@ async function main() {
 {
   // J/K/L/M/N. offline expiry while app remains open + timer cleanup + foreground
   const clock = { now: NOW };
-  const timers: Array<{ id: number; when: number; fn: () => void }> = [];
+  const timers: { id: number; when: number; fn: () => void }[] = [];
   let timerId = 0;
   const fake = createFakeListener();
   const store = memoryStore();
@@ -748,6 +776,295 @@ async function main() {
   const env = JSON.parse(store.data[SUBSCRIPTION_CACHE_KEY]!) as { uid: string; status: { plan: string } };
   assert.equal(env.uid, "uid-b");
   assert.equal(env.status.plan, "professional");
+  session.dispose();
+}
+
+{
+  // Round 2 A. Firestore fromCache Professional from default/free stays free
+  const store = memoryStore();
+  const fake = createFakeListener();
+  const session = createSubscriptionSession({
+    listen: fake.listen,
+    read: async () => null,
+    store,
+    now: () => NOW,
+    onChange: () => {},
+  });
+  session.setAuth({ status: "signed_in", uid: "uid-a" });
+  await wait();
+  assert.equal(session.getView().plan, "free");
+  fake.emit("uid-a", professionalDoc(), true);
+  await session.flushWrites();
+  assert.equal(session.getView().plan, "free");
+  assert.equal(session.getView().features.canUseProfessionalFeatures, false);
+  session.dispose();
+}
+
+{
+  // Round 2 B. Firestore cache Business from no accepted entitlement stays free
+  const store = memoryStore();
+  const fake = createFakeListener();
+  const session = createSubscriptionSession({
+    listen: fake.listen,
+    read: async () => null,
+    store,
+    now: () => NOW,
+    onChange: () => {},
+  });
+  session.setAuth({ status: "signed_in", uid: "uid-a" });
+  await wait();
+  fake.emit("uid-a", businessDoc(), true);
+  assert.equal(session.getView().plan, "free");
+  assert.equal(session.getView().features.canUseBusinessFeatures, false);
+  session.dispose();
+}
+
+{
+  // Round 2 C. AsyncStorage Starter + Firestore cache Professional must not widen
+  const store = memoryStore();
+  await writeSubscriptionCache({
+    store,
+    uid: "uid-a",
+    status: starterStatus(),
+    nowMs: NOW,
+  });
+  const fake = createFakeListener();
+  const session = createSubscriptionSession({
+    listen: fake.listen,
+    read: async () => null,
+    store,
+    now: () => NOW,
+    onChange: () => {},
+  });
+  session.setAuth({ status: "signed_in", uid: "uid-a" });
+  await wait();
+  assert.equal(session.getView().plan, "starter");
+  fake.emit("uid-a", professionalDoc(), true);
+  assert.equal(session.getView().plan, "starter");
+  assert.equal(session.getView().features.canUseProfessionalFeatures, false);
+  session.dispose();
+}
+
+{
+  // Round 2 D. Accepted AsyncStorage Professional + same Firestore cache may remain
+  const store = memoryStore();
+  await writeSubscriptionCache({
+    store,
+    uid: "uid-a",
+    status: professionalStatus(),
+    nowMs: NOW,
+  });
+  const fake = createFakeListener();
+  const session = createSubscriptionSession({
+    listen: fake.listen,
+    read: async () => null,
+    store,
+    now: () => NOW,
+    onChange: () => {},
+  });
+  session.setAuth({ status: "signed_in", uid: "uid-a" });
+  await wait();
+  fake.emit("uid-a", professionalDoc(), true);
+  assert.equal(session.getView().plan, "professional");
+  assert.equal(session.getView().source, "cache");
+  session.dispose();
+}
+
+{
+  // Round 2 E. Accepted paid continuity may be narrowed by cached expired/onHold
+  const store = memoryStore();
+  await writeSubscriptionCache({
+    store,
+    uid: "uid-a",
+    status: professionalStatus(),
+    nowMs: NOW,
+  });
+  const fake = createFakeListener();
+  const session = createSubscriptionSession({
+    listen: fake.listen,
+    read: async () => null,
+    store,
+    now: () => NOW,
+    onChange: () => {},
+  });
+  session.setAuth({ status: "signed_in", uid: "uid-a" });
+  await wait();
+  assert.equal(session.getView().plan, "professional");
+  fake.emit(
+    "uid-a",
+    {
+      plan: "professional",
+      billingStatus: "onHold",
+      entitlementActive: true,
+    },
+    true
+  );
+  assert.equal(session.getView().plan, "free");
+  assert.equal(session.getView().features.canUseProfessionalFeatures, false);
+  session.dispose();
+}
+
+{
+  // Round 2 F. fromCache=false Professional after local-safe free is accepted
+  const store = memoryStore();
+  const fake = createFakeListener();
+  const session = createSubscriptionSession({
+    listen: fake.listen,
+    read: async () => null,
+    store,
+    now: () => NOW,
+    onChange: () => {},
+  });
+  session.setAuth({ status: "signed_in", uid: "uid-a" });
+  await wait();
+  fake.emit("uid-a", professionalDoc(), true);
+  assert.equal(session.getView().plan, "free");
+  fake.emit("uid-a", professionalDoc(), false);
+  await session.flushWrites();
+  assert.equal(session.getView().source, "server");
+  assert.equal(session.getView().plan, "professional");
+  session.dispose();
+}
+
+{
+  // Round 2 G. getDocFromServer Professional is accepted
+  const store = memoryStore();
+  const fake = createFakeListener();
+  const session = createSubscriptionSession({
+    listen: fake.listen,
+    read: async () => professionalDoc(),
+    store,
+    now: () => NOW,
+    onChange: () => {},
+  });
+  session.setAuth({ status: "signed_in", uid: "uid-a" });
+  await wait();
+  fake.emit("uid-a", professionalDoc(), true);
+  assert.equal(session.getView().plan, "free");
+  await session.refresh();
+  assert.equal(session.getView().source, "server");
+  assert.equal(session.getView().plan, "professional");
+  session.dispose();
+}
+
+{
+  // Round 2 auth-failure latch: fromCache paid must stay free
+  const store = memoryStore();
+  const fake = createFakeListener();
+  const session = createSubscriptionSession({
+    listen: fake.listen,
+    read: async () => null,
+    store,
+    now: () => NOW,
+    onChange: () => {},
+  });
+  session.setAuth({ status: "signed_in", uid: "uid-a" });
+  await wait();
+  fake.emit("uid-a", professionalDoc(), false);
+  await session.flushWrites();
+  assert.equal(session.getView().plan, "professional");
+  fake.error("uid-a", "permission-denied");
+  await session.flushWrites();
+  assert.equal(session.getView().plan, "free");
+  fake.emit("uid-a", professionalDoc(), true);
+  assert.equal(session.getView().plan, "free");
+  assert.equal(session.getView().features.canUseProfessionalFeatures, false);
+  fake.emit("uid-a", professionalDoc(), false);
+  await session.flushWrites();
+  assert.equal(session.getView().plan, "professional");
+  session.dispose();
+}
+
+{
+  // Round 2 clock-rollback hydration + Firestore cache cannot restore paid
+  const store = memoryStore();
+  await writeSubscriptionCache({
+    store,
+    uid: "uid-a",
+    status: professionalStatus(),
+    nowMs: NOW,
+  });
+  const fake = createFakeListener();
+  const session = createSubscriptionSession({
+    listen: fake.listen,
+    read: async () => null,
+    store,
+    now: () => NOW - 1,
+    onChange: () => {},
+  });
+  session.setAuth({ status: "signed_in", uid: "uid-a" });
+  await wait();
+  assert.equal(session.getView().plan, "free");
+  fake.emit("uid-a", professionalDoc(), true);
+  assert.equal(session.getView().plan, "free");
+  assert.equal(session.getView().features.canUseProfessionalFeatures, false);
+  session.dispose();
+}
+
+{
+  // Round 2 runtime clock rollback A/C/D
+  const clock = { now: NOW };
+  const fake = createFakeListener();
+  const session = createSubscriptionSession({
+    listen: fake.listen,
+    read: async () => professionalDoc(),
+    store: memoryStore(),
+    now: () => clock.now,
+    onChange: () => {},
+  });
+  session.setAuth({ status: "signed_in", uid: "uid-a" });
+  await wait();
+  fake.emit("uid-a", professionalDoc(), false);
+  session.setOffline(true);
+  assert.equal(session.getView().plan, "professional");
+  clock.now = NOW - 1;
+  session.notifyForeground();
+  assert.equal(session.getView().plan, "free", "A. post-hydration rollback → free");
+  fake.emit("uid-a", professionalDoc(), true);
+  assert.equal(session.getView().plan, "free", "C. rollback + Firestore cache stays free");
+  clock.now = NOW - 1;
+  fake.emit("uid-a", professionalDoc(), false);
+  await session.flushWrites();
+  assert.equal(session.getView().plan, "professional", "D. fresh server restores after rollback");
+  session.dispose();
+}
+
+{
+  // Round 2 runtime clock B. timer callback after rollback fail-closes, no extend
+  const clock = { now: NOW };
+  const timers: { id: number; when: number; fn: () => void }[] = [];
+  let timerId = 0;
+  const fake = createFakeListener();
+  const session = createSubscriptionSession({
+    listen: fake.listen,
+    read: async () => null,
+    store: memoryStore(),
+    now: () => clock.now,
+    onChange: () => {},
+    setTimeoutFn: (fn, ms) => {
+      const id = ++timerId;
+      timers.push({ id, when: clock.now + Number(ms), fn });
+      return id as unknown as ReturnType<typeof setTimeout>;
+    },
+    clearTimeoutFn: (handle) => {
+      const id = Number(handle);
+      const idx = timers.findIndex((t) => t.id === id);
+      if (idx >= 0) timers.splice(idx, 1);
+    },
+  });
+  session.setAuth({ status: "signed_in", uid: "uid-a" });
+  await wait();
+  fake.emit("uid-a", { ...professionalDoc(), currentPeriodEnd: NOW + 8_000 }, false);
+  session.setOffline(true);
+  assert.equal(session.getView().plan, "professional");
+  assert.ok(timers.length >= 1);
+  const created = timerId;
+  const pending = timers[0];
+  clock.now = NOW - 1;
+  pending.fn();
+  assert.equal(session.getView().plan, "free");
+  assert.equal(session.getView().features.canUseProfessionalFeatures, false);
+  assert.equal(timerId, created, "must not reschedule an extending timer");
   session.dispose();
 }
 

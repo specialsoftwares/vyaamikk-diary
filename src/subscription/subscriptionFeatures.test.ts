@@ -15,6 +15,7 @@ import {
   featuresForPlan,
   featuresForSubscription,
   hasSubscriptionFeature,
+  preferNonAuthoritativeStatus,
   subscriptionPlanRank,
   SUBSCRIPTION_PLAN_RANK,
 } from "./subscriptionFeatures";
@@ -210,6 +211,39 @@ const PERIOD = 1_800_000_000_000;
     entitlementActive: false,
   });
   assert.equal(featuresForSubscription(spoof).canUseBusinessFeatures, false);
+}
+
+{
+  // Non-authoritative evidence must not widen effective plan rank
+  const free = status({});
+  const starter = status({
+    plan: "starter",
+    billingStatus: "active",
+    entitlementActive: true,
+    currentPeriodEnd: PERIOD,
+  });
+  const professional = status({
+    plan: "professional",
+    billingStatus: "active",
+    entitlementActive: true,
+    currentPeriodEnd: PERIOD,
+  });
+  const business = status({
+    plan: "business",
+    billingStatus: "active",
+    entitlementActive: true,
+    currentPeriodEnd: PERIOD,
+  });
+  const expired = status({
+    plan: "professional",
+    billingStatus: "expired",
+    entitlementActive: false,
+  });
+  assert.equal(effectivePlanForSubscription(preferNonAuthoritativeStatus(free, professional)), "free");
+  assert.equal(effectivePlanForSubscription(preferNonAuthoritativeStatus(free, business)), "free");
+  assert.equal(effectivePlanForSubscription(preferNonAuthoritativeStatus(starter, professional)), "starter");
+  assert.equal(effectivePlanForSubscription(preferNonAuthoritativeStatus(professional, professional)), "professional");
+  assert.equal(effectivePlanForSubscription(preferNonAuthoritativeStatus(professional, expired)), "free");
 }
 
 console.log("subscriptionFeatures.test.ts: ok");

@@ -7,12 +7,17 @@
  *
  * Firestore `metadata.fromCache` is the snapshot provenance. NetInfo is only
  * reachability. Offline AsyncStorage is UX continuity for the same uid only.
+ *
+ * Non-authoritative local state (AsyncStorage continuity + Firestore SDK
+ * cache) may only preserve or reduce access. Widening requires
+ * fromCache === false or getDocFromServer().
  */
 
 import { parseSubscriptionStatus } from "./parseSubscriptionStatus";
 import {
   effectivePlanForSubscription,
   featuresForSubscription,
+  preferNonAuthoritativeStatus,
   type SubscriptionFeatures,
 } from "./subscriptionFeatures";
 import {
@@ -117,15 +122,17 @@ export function createSubscriptionSession(deps: SubscriptionSessionDeps) {
   let offline = false;
   let writeQueue: Promise<void> = Promise.resolve();
   let expiryTimer: SubscriptionTimeoutHandle | null = null;
+  let lastObservedNowMs: number | null = null;
+  let localContinuityBlocked = false;
   let current: SubscriptionView = viewFrom(DEFAULT_CLIENT_SUBSCRIPTION, "default", {
     isLoading: true,
     ownerUid: null,
   });
 
-  function publish(next: SubscriptionView) {
+  function publish(next: SubscriptionView, opts?: { skipExpirySync?: boolean }) {
     current = next;
     deps.onChange(next);
-    syncExpiryTimer();
+    if (!opts?.skipExpirySync) syncExpiryTimer();
   }
 
   function enqueue(task: () => Promise<void>) {
@@ -139,8 +146,63 @@ export function createSubscriptionSession(deps: SubscriptionSessionDeps) {
     }
   }
 
+  function resetSessionLatches() {
+    localContinuityBlocked = false;
+    lastObservedNowMs = null;
+    clearExpiryTimer();
+  }
+
+  function freeDefaultView(extra: Partial<SubscriptionView>): SubscriptionView {
+    return viewFrom(DEFAULT_CLIENT_SUBSCRIPTION, "default", {
+      ownerUid: uid,
+      isOffline: offline,
+      isLoading: false,
+      isRefreshing: false,
+      ...extra,
+    });
+  }
+
+  function blockLocalContinuity(extra: Partial<SubscriptionView>) {
+    localContinuityBlocked = true;
+    clearExpiryTimer();
+    publish(freeDefaultView(extra), { skipExpirySync: true });
+  }
+
+  function failClosedClock() {
+    blockLocalContinuity({ error: current.error });
+  }
+
+  /**
+   * Wall-clock sample for local/offline evaluation. Backward movement
+   * fail-closes local continuity until fresh server authority.
+   */
+  function observeNowForLocal(): number | null {
+    const now = deps.now();
+    if (typeof now !== "number" || !Number.isFinite(now)) {
+      failClosedClock();
+      return null;
+    }
+    if (lastObservedNowMs != null && now < lastObservedNowMs) {
+      failClosedClock();
+      return null;
+    }
+    lastObservedNowMs = now;
+    return now;
+  }
+
+  function applyAuthoritativeClockBaseline() {
+    localContinuityBlocked = false;
+    const now = deps.now();
+    lastObservedNowMs = typeof now === "number" && Number.isFinite(now) ? now : lastObservedNowMs;
+  }
+
   function applyReducedIfNeeded(view: SubscriptionView): SubscriptionView {
-    const reduced = reduceCachedEntitlement(view.status, deps.now());
+    if (localContinuityBlocked) return freeDefaultView({ error: view.error, ownerUid: view.ownerUid });
+    const nowMs = observeNowForLocal();
+    if (nowMs == null || localContinuityBlocked) {
+      return current;
+    }
+    const reduced = reduceCachedEntitlement(view.status, nowMs);
     if (!reduced.reduced) return view;
     return viewFrom(reduced.status, view.source === "server" ? view.source : "cache", {
       ownerUid: view.ownerUid,
@@ -154,9 +216,11 @@ export function createSubscriptionSession(deps: SubscriptionSessionDeps) {
 
   function syncExpiryTimer() {
     clearExpiryTimer();
+    if (localContinuityBlocked) return;
     if (!shouldWatchExpiry(current, offline)) return;
+    const nowMs = observeNowForLocal();
+    if (nowMs == null || localContinuityBlocked) return;
     const boundary = entitlementExpiryBoundaryMs(current.status);
-    const nowMs = deps.now();
     if (boundary == null) {
       const reduced = applyReducedIfNeeded(current);
       if (reduced !== current) publish(reduced);
@@ -169,11 +233,14 @@ export function createSubscriptionSession(deps: SubscriptionSessionDeps) {
     expiryTimer = scheduleTimeout(() => {
       expiryTimer = null;
       if (generation !== forGen || uid !== forUid) return;
+      const nowAtFire = observeNowForLocal();
+      if (nowAtFire == null || localContinuityBlocked) return;
       const reduced = applyReducedIfNeeded(current);
       if (reduced !== current) {
         publish(reduced);
         return;
       }
+      if (localContinuityBlocked) return;
       syncExpiryTimer();
     }, wait);
   }
@@ -211,20 +278,16 @@ export function createSubscriptionSession(deps: SubscriptionSessionDeps) {
   }
 
   function failClosedAuth(forUid: string, forGen: number, code: string) {
-    publish(
-      viewFrom(DEFAULT_CLIENT_SUBSCRIPTION, "default", {
-        ownerUid: forUid,
-        isOffline: offline,
-        error: code,
-        isLoading: false,
-        isRefreshing: false,
-      })
-    );
+    blockLocalContinuity({
+      ownerUid: forUid,
+      error: code,
+    });
     invalidateCache(forUid, forGen);
   }
 
   function applyServerDoc(raw: unknown | null, forUid: string, forGen: number) {
     if (generation !== forGen || uid !== forUid) return;
+    applyAuthoritativeClockBaseline();
     const status =
       raw == null ? { ...DEFAULT_CLIENT_SUBSCRIPTION } : parseSubscriptionStatus(raw);
     publish(
@@ -240,34 +303,57 @@ export function createSubscriptionSession(deps: SubscriptionSessionDeps) {
     persist(forUid, forGen, status);
   }
 
+  function acceptedSameUidView(forUid: string, nowMs: number): SubscriptionView {
+    if (current.ownerUid !== forUid) {
+      return viewFrom(DEFAULT_CLIENT_SUBSCRIPTION, "default", {
+        ownerUid: forUid,
+        isOffline: offline,
+        isLoading: false,
+      });
+    }
+    const reduced = reduceCachedEntitlement(current.status, nowMs);
+    if (!reduced.reduced) {
+      return { ...current, isLoading: false, isRefreshing: false };
+    }
+    return viewFrom(reduced.status, current.source === "server" ? current.source : "cache", {
+      ownerUid: forUid,
+      isOffline: offline || current.isOffline,
+      isStale: true,
+      isLoading: false,
+      isRefreshing: false,
+      error: current.error,
+    });
+  }
+
   function applyCachedFirestoreDoc(raw: unknown | null, forUid: string, forGen: number) {
     if (generation !== forGen || uid !== forUid) return;
+    if (localContinuityBlocked) {
+      publish(freeDefaultView({ ownerUid: forUid, error: current.error }), { skipExpirySync: true });
+      return;
+    }
+    const nowMs = observeNowForLocal();
+    if (nowMs == null || localContinuityBlocked) return;
+
+    const accepted = acceptedSameUidView(forUid, nowMs);
     if (raw == null) {
-      // Cached miss is not proof the server doc is absent.
-      if (current.ownerUid === forUid) {
-        publish({
-          ...current,
-          isLoading: false,
-          isRefreshing: false,
-        });
-        return;
-      }
-      publish(
-        viewFrom(DEFAULT_CLIENT_SUBSCRIPTION, "default", {
-          ownerUid: forUid,
-          isLoading: false,
-          isOffline: offline,
-        })
-      );
+      // Cached miss is not proof the server doc is absent. Do not widen.
+      publish({
+        ...accepted,
+        isLoading: false,
+        isRefreshing: false,
+      });
       return;
     }
     const parsed = parseSubscriptionStatus(raw);
-    const reduced = reduceCachedEntitlement(parsed, deps.now());
+    const reducedCandidate = reduceCachedEntitlement(parsed, nowMs).status;
+    const merged = preferNonAuthoritativeStatus(accepted.status, reducedCandidate);
+    const narrowed =
+      effectivePlanForSubscription(merged) !== effectivePlanForSubscription(accepted.status);
     publish(
-      viewFrom(reduced.status, "cache", {
+      viewFrom(merged, accepted.source === "default" && !narrowed ? accepted.source : "cache", {
         ownerUid: forUid,
         isOffline: offline,
-        isStale: reduced.reduced,
+        isStale: true,
         error: null,
         isLoading: false,
         isRefreshing: false,
@@ -310,6 +396,17 @@ export function createSubscriptionSession(deps: SubscriptionSessionDeps) {
     });
   }
 
+  async function detectClockRollbackEnvelope(forUid: string, nowMs: number): Promise<boolean> {
+    try {
+      const raw = await deps.store.getItem(SUBSCRIPTION_CACHE_KEY);
+      if (!raw) return false;
+      const env = parseSubscriptionCacheEnvelope(JSON.parse(raw) as unknown);
+      return Boolean(env && env.uid === forUid && nowMs < env.savedAt);
+    } catch {
+      return false;
+    }
+  }
+
   async function hydrateAndListen(forUid: string, forGen: number) {
     publish(
       viewFrom(DEFAULT_CLIENT_SUBSCRIPTION, "default", {
@@ -321,14 +418,33 @@ export function createSubscriptionSession(deps: SubscriptionSessionDeps) {
     await writeQueue;
     if (generation !== forGen || uid !== forUid) return;
 
-    const cached = await readSubscriptionCache({
-      store: deps.store,
-      uid: forUid,
-      nowMs: deps.now(),
-    });
+    const nowMs = observeNowForLocal();
+    if (nowMs == null || localContinuityBlocked || generation !== forGen || uid !== forUid) {
+      if (generation === forGen && uid === forUid) attachListener(forUid, forGen);
+      return;
+    }
+
+    const rolledBackEnvelope = await detectClockRollbackEnvelope(forUid, nowMs);
+    if (generation !== forGen || uid !== forUid) return;
+    if (rolledBackEnvelope) {
+      localContinuityBlocked = true;
+      publish(freeDefaultView({ ownerUid: forUid }), { skipExpirySync: true });
+      attachListener(forUid, forGen);
+      return;
+    }
+
+    const cached = localContinuityBlocked
+      ? null
+      : await readSubscriptionCache({
+          store: deps.store,
+          uid: forUid,
+          nowMs,
+        });
     if (generation !== forGen || uid !== forUid) return;
 
-    if (cached) {
+    if (localContinuityBlocked) {
+      publish(freeDefaultView({ ownerUid: forUid }), { skipExpirySync: true });
+    } else if (cached) {
       publish(
         viewFrom(cached.status, "cache", {
           ownerUid: forUid,
@@ -365,7 +481,7 @@ export function createSubscriptionSession(deps: SubscriptionSessionDeps) {
     uid = nextUid;
     unsubscribe?.();
     unsubscribe = null;
-    clearExpiryTimer();
+    resetSessionLatches();
 
     if (next.status === "loading" || !nextUid) {
       publish(
@@ -416,6 +532,10 @@ export function createSubscriptionSession(deps: SubscriptionSessionDeps) {
   function setOffline(next: boolean) {
     const was = offline;
     offline = next;
+    if (localContinuityBlocked) {
+      publish(freeDefaultView({ error: current.error }), { skipExpirySync: true });
+      return;
+    }
     if (was === next && current.isOffline === next) {
       if (next) syncExpiryTimer();
       return;
@@ -429,6 +549,10 @@ export function createSubscriptionSession(deps: SubscriptionSessionDeps) {
 
   function notifyForeground() {
     if (!uid) return;
+    if (localContinuityBlocked) {
+      publish(freeDefaultView({ error: current.error, ownerUid: uid }), { skipExpirySync: true });
+      return;
+    }
     const reduced = applyReducedIfNeeded(current);
     if (reduced !== current) {
       publish({ ...reduced, isOffline: offline });
@@ -443,7 +567,7 @@ export function createSubscriptionSession(deps: SubscriptionSessionDeps) {
     unsubscribe = null;
     uid = null;
     authStatus = "signed_out";
-    clearExpiryTimer();
+    resetSessionLatches();
   }
 
   function getView(): SubscriptionView {

@@ -79,10 +79,13 @@ assert.deepEqual(violations, [], `raw plan comparisons outside allowlist:\n${vio
   const pkg = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")) as {
     dependencies?: Record<string, string>;
     devDependencies?: Record<string, string>;
+    scripts?: Record<string, string>;
   };
   const deps = { ...pkg.dependencies, ...pkg.devDependencies };
   assert.equal(deps["expo-iap"], undefined);
   assert.equal(deps["react-native-iap"], undefined);
+  assert.match(pkg.scripts?.["lint:eslint"] ?? "", /src\/subscription\/\*\*\/\*\.\{ts,tsx\}/);
+  assert.match(pkg.scripts?.["lint:eslint"] ?? "", /app\/_layout\.tsx/);
 }
 
 {
