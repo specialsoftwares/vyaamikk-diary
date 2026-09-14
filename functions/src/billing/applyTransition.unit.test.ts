@@ -22,7 +22,14 @@ import {
   subscriptionStatusPath,
 } from "./paths";
 import { AlreadyExistsError, MemoryBillingStore } from "./store";
-import { financialEventIdForStore, type TransitionRequest } from "./transition";
+import { istMonthKeyForMillis } from "./istMonthKey";
+import { buildGstr1WorkingPapers } from "./tax/gstr1WorkingPapers";
+import { MemoryTaxComplianceReportSource } from "./tax/taxComplianceReportSource";
+import {
+  financialEventIdForStore,
+  oppositeAndroidFullReversalFinancialEventId,
+  type TransitionRequest,
+} from "./transition";
 import type { SubscriptionAuditLogEventDoc } from "./types";
 
 const NOW = 1_800_000_000_000;
@@ -84,6 +91,63 @@ function paidActivate(
     },
     ...overrides,
   };
+}
+
+function recordFullReversal(opts: {
+  eventType: "refund" | "chargeback";
+  orderId: string;
+  relatedFinancialEventId: string;
+  occurredAt: number;
+  idempotencyKey?: string;
+  grossAmountInPaise?: number;
+}): TransitionRequest {
+  const financialEventId = financialEventIdForStore({
+    platform: "android",
+    eventType: opts.eventType,
+    orderId: opts.orderId,
+  });
+  return {
+    uid: UID,
+    source: "rtdn",
+    eventSource: "webhook",
+    idempotencyKey: opts.idempotencyKey ?? financialEventId,
+    occurredAt: opts.occurredAt,
+    nowMs: opts.occurredAt,
+    requested: {
+      kind: "recordFinancial",
+      financialEvent: {
+        financialEventId,
+        eventType: opts.eventType,
+        platform: "android",
+        canonicalSku: "vyd_professional_monthly",
+        grossAmountInPaise: opts.grossAmountInPaise ?? 24_900,
+        actualPlatformCommissionInPaise: null,
+        estimatedPlatformCommissionInPaise: null,
+        occurredAt: opts.occurredAt,
+        relatedFinancialEventId: opts.relatedFinancialEventId,
+      },
+    },
+  };
+}
+
+function reversalLedgerFlags(store: MemoryBillingStore, orderId: string): {
+  refund: boolean;
+  chargeback: boolean;
+  total: number;
+} {
+  const refund = store.docs.has(
+    financialLedgerPath(
+      sanitizeDocId(financialEventIdForStore({ platform: "android", eventType: "refund", orderId }))
+    )
+  );
+  const chargeback = store.docs.has(
+    financialLedgerPath(
+      sanitizeDocId(
+        financialEventIdForStore({ platform: "android", eventType: "chargeback", orderId })
+      )
+    )
+  );
+  return { refund, chargeback, total: Number(refund) + Number(chargeback) };
 }
 
 async function main() {
@@ -392,6 +456,23 @@ async function main() {
       [...store.docs.keys()].filter((k) => k.startsWith("_billingEventLedger/")).length,
       2
     );
+
+    await assert.rejects(
+      applySubscriptionTransition(
+        { store, diagnosticUid: DIAG },
+        {
+          ...mkRefund("coexist-r4", 24_900),
+          requested: {
+            ...mkRefund("coexist-r4", 24_900).requested,
+            financialEvent: {
+              ...mkRefund("coexist-r4", 24_900).requested.financialEvent!,
+              occurredAt: NOW + 86_400_000,
+            },
+          },
+        }
+      ),
+      isCause("financial_event_conflict")
+    );
   }
 
   // STALE PLATFORM STATE: reconciledAt older than the stored watermark → reject
@@ -531,6 +612,330 @@ async function main() {
         financialLedgerPath(sanitizeDocId("android:purchase:GPA.1111-2222"))
       )
     );
+  }
+
+  // recordFinancial writes a refund ledger row without expiring access
+  {
+    const store = new MemoryBillingStore();
+    await applySubscriptionTransition(
+      { store, diagnosticUid: DIAG },
+      paidActivate({ idempotencyKey: "rf-paid" })
+    );
+    const purchaseId = "android:purchase:GPA.1111-2222";
+    const refundId = financialEventIdForStore({
+      platform: "android",
+      eventType: "refund",
+      orderId: "GPA.1111-2222",
+    });
+    const recorded = await applySubscriptionTransition(
+      { store, diagnosticUid: DIAG },
+      {
+        uid: UID,
+        source: "rtdn",
+        eventSource: "webhook",
+        idempotencyKey: "rf-keep-access",
+        occurredAt: NOW + 10_000,
+        nowMs: NOW + 10_000,
+        requested: {
+          kind: "recordFinancial",
+          financialEvent: {
+            financialEventId: refundId,
+            eventType: "refund",
+            platform: "android",
+            canonicalSku: "vyd_professional_monthly",
+            grossAmountInPaise: 24_900,
+            actualPlatformCommissionInPaise: null,
+            estimatedPlatformCommissionInPaise: null,
+            occurredAt: NOW + 10_000,
+            relatedFinancialEventId: purchaseId,
+          },
+          googleSubscriptionState: "SUBSCRIPTION_STATE_ACTIVE",
+        },
+      }
+    );
+    assert.equal(recorded.financialEventWritten, true);
+    assert.equal(recorded.to.entitlementActive, true);
+    assert.equal(recorded.to.billingStatus, "active");
+    assert.equal(recorded.to.plan, "professional");
+  }
+
+  // FULL-REVERSAL MUTUAL EXCLUSION: one Google Order is refund XOR chargeback.
+  {
+    const orderId = "GPA.1111-2222";
+    const purchaseId = financialEventIdForStore({
+      platform: "android",
+      eventType: "purchase",
+      orderId,
+    });
+    const at = NOW + 20_000;
+
+    assert.equal(
+      oppositeAndroidFullReversalFinancialEventId(
+        "android:refund:GPA.1111-2222",
+        "refund",
+        "android"
+      ),
+      "android:chargeback:GPA.1111-2222"
+    );
+    assert.equal(
+      oppositeAndroidFullReversalFinancialEventId(
+        "android:chargeback:GPA.1111-2222",
+        "chargeback",
+        "android"
+      ),
+      "android:refund:GPA.1111-2222"
+    );
+    assert.equal(
+      oppositeAndroidFullReversalFinancialEventId("android:purchase:GPA.1111-2222", "purchase", "android"),
+      null
+    );
+    assert.equal(
+      oppositeAndroidFullReversalFinancialEventId("ios:refund:77", "refund", "ios"),
+      null
+    );
+
+    // A. existing refund → incoming chargeback fails; no chargeback row
+    {
+      const store = new MemoryBillingStore();
+      await applySubscriptionTransition(
+        { store, diagnosticUid: DIAG },
+        paidActivate({ idempotencyKey: "mutex-a-purchase" })
+      );
+      const purchaseBefore = {
+        ...(store.docs.get(financialLedgerPath(sanitizeDocId(purchaseId))) as Record<string, unknown>),
+      };
+      const keysBeforeRefund = [...store.docs.keys()].sort();
+      const refunded = await applySubscriptionTransition(
+        { store, diagnosticUid: DIAG },
+        recordFullReversal({ eventType: "refund", orderId, relatedFinancialEventId: purchaseId, occurredAt: at })
+      );
+      assert.equal(refunded.financialEventWritten, true);
+      const keysAfterRefund = [...store.docs.keys()].sort();
+      await assert.rejects(
+        applySubscriptionTransition(
+          { store, diagnosticUid: DIAG },
+          recordFullReversal({
+            eventType: "chargeback",
+            orderId,
+            relatedFinancialEventId: purchaseId,
+            occurredAt: at,
+          })
+        ),
+        isCause("full_reversal_classification_conflict")
+      );
+      const flags = reversalLedgerFlags(store, orderId);
+      assert.equal(flags.refund, true);
+      assert.equal(flags.chargeback, false);
+      assert.equal(flags.total, 1);
+      assert.deepEqual(
+        store.docs.get(financialLedgerPath(sanitizeDocId(purchaseId))),
+        purchaseBefore
+      );
+      const keysAfterConflict = [...store.docs.keys()].sort();
+      assert.deepEqual(keysAfterConflict, keysAfterRefund);
+      assert.notEqual(keysAfterRefund.length, keysBeforeRefund.length);
+    }
+
+    // B. existing chargeback → incoming refund fails; no refund row
+    {
+      const store = new MemoryBillingStore();
+      await applySubscriptionTransition(
+        { store, diagnosticUid: DIAG },
+        paidActivate({ idempotencyKey: "mutex-b-purchase" })
+      );
+      const purchaseBefore = {
+        ...(store.docs.get(financialLedgerPath(sanitizeDocId(purchaseId))) as Record<string, unknown>),
+      };
+      const charged = await applySubscriptionTransition(
+        { store, diagnosticUid: DIAG },
+        recordFullReversal({
+          eventType: "chargeback",
+          orderId,
+          relatedFinancialEventId: purchaseId,
+          occurredAt: at,
+        })
+      );
+      assert.equal(charged.financialEventWritten, true);
+      const keysAfterCb = [...store.docs.keys()].sort();
+      await assert.rejects(
+        applySubscriptionTransition(
+          { store, diagnosticUid: DIAG },
+          recordFullReversal({ eventType: "refund", orderId, relatedFinancialEventId: purchaseId, occurredAt: at })
+        ),
+        isCause("full_reversal_classification_conflict")
+      );
+      const flags = reversalLedgerFlags(store, orderId);
+      assert.equal(flags.refund, false);
+      assert.equal(flags.chargeback, true);
+      assert.equal(flags.total, 1);
+      assert.deepEqual(
+        store.docs.get(financialLedgerPath(sanitizeDocId(purchaseId))),
+        purchaseBefore
+      );
+      assert.deepEqual([...store.docs.keys()].sort(), keysAfterCb);
+    }
+
+    // L/M. same-class redelivery is idempotent; immutable mismatch still fails
+    {
+      const store = new MemoryBillingStore();
+      await applySubscriptionTransition(
+        { store, diagnosticUid: DIAG },
+        paidActivate({ idempotencyKey: "mutex-replay-p" })
+      );
+      const first = await applySubscriptionTransition(
+        { store, diagnosticUid: DIAG },
+        recordFullReversal({ eventType: "refund", orderId, relatedFinancialEventId: purchaseId, occurredAt: at })
+      );
+      const replay = await applySubscriptionTransition(
+        { store, diagnosticUid: DIAG },
+        recordFullReversal({ eventType: "refund", orderId, relatedFinancialEventId: purchaseId, occurredAt: at })
+      );
+      assert.equal(first.financialEventWritten, true);
+      assert.equal(replay.alreadyProcessed, true);
+      assert.equal(replay.financialEventWritten, false);
+      assert.equal(reversalLedgerFlags(store, orderId).total, 1);
+
+      await assert.rejects(
+        applySubscriptionTransition(
+          { store, diagnosticUid: DIAG },
+          recordFullReversal({
+            eventType: "refund",
+            orderId,
+            relatedFinancialEventId: purchaseId,
+            occurredAt: at,
+            idempotencyKey: "mutex-replay-mismatch",
+            grossAmountInPaise: 9_900,
+          })
+        ),
+        isCause("financial_event_conflict")
+      );
+      assert.equal(reversalLedgerFlags(store, orderId).total, 1);
+
+      const cbStore = new MemoryBillingStore();
+      await applySubscriptionTransition(
+        { store: cbStore, diagnosticUid: DIAG },
+        paidActivate({ idempotencyKey: "mutex-cb-replay-p" })
+      );
+      const cbFirst = await applySubscriptionTransition(
+        { store: cbStore, diagnosticUid: DIAG },
+        recordFullReversal({
+          eventType: "chargeback",
+          orderId,
+          relatedFinancialEventId: purchaseId,
+          occurredAt: at,
+        })
+      );
+      const cbReplay = await applySubscriptionTransition(
+        { store: cbStore, diagnosticUid: DIAG },
+        recordFullReversal({
+          eventType: "chargeback",
+          orderId,
+          relatedFinancialEventId: purchaseId,
+          occurredAt: at,
+        })
+      );
+      assert.equal(cbFirst.financialEventWritten, true);
+      assert.equal(cbReplay.alreadyProcessed, true);
+      assert.equal(reversalLedgerFlags(cbStore, orderId).chargeback, true);
+      assert.equal(reversalLedgerFlags(cbStore, orderId).refund, false);
+    }
+
+    // Memory-store concurrent refund vs chargeback: exactly one class
+    {
+      const store = new MemoryBillingStore();
+      await applySubscriptionTransition(
+        { store, diagnosticUid: DIAG },
+        paidActivate({ idempotencyKey: "mutex-race-p" })
+      );
+      const purchaseBefore = JSON.stringify(
+        store.docs.get(financialLedgerPath(sanitizeDocId(purchaseId)))
+      );
+      const historyBefore = [...store.docs.keys()].filter((k) =>
+        k.startsWith(`users/${UID}/subscriptionBillingHistory/`)
+      ).length;
+      const auditBefore = [...store.docs.keys()].filter((k) =>
+        k.startsWith("_subscriptionAuditLog/")
+      ).length;
+      const processedBefore = [...store.docs.keys()].filter((k) =>
+        k.startsWith("_processedBillingEvents/")
+      ).length;
+
+      const delay = async () => {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        return { outcome: "proceed" as const };
+      };
+      const settled = await Promise.allSettled([
+        applySubscriptionTransition(
+          { store, diagnosticUid: DIAG, prepareTransition: delay },
+          recordFullReversal({
+            eventType: "refund",
+            orderId,
+            relatedFinancialEventId: purchaseId,
+            occurredAt: at,
+          })
+        ),
+        applySubscriptionTransition(
+          { store, diagnosticUid: DIAG, prepareTransition: delay },
+          recordFullReversal({
+            eventType: "chargeback",
+            orderId,
+            relatedFinancialEventId: purchaseId,
+            occurredAt: at,
+          })
+        ),
+      ]);
+      const fulfilled = settled.filter((r) => r.status === "fulfilled");
+      const rejected = settled.filter((r) => r.status === "rejected");
+      assert.equal(fulfilled.length, 1, `expected one winner, got ${JSON.stringify(settled)}`);
+      assert.equal(rejected.length, 1);
+      const lost = (rejected[0] as PromiseRejectedResult).reason;
+      assert.ok(lost instanceof BillingError);
+      assert.equal(lost.causeCode, "full_reversal_classification_conflict");
+      const flags = reversalLedgerFlags(store, orderId);
+      assert.equal(flags.total, 1, "never both reversal classes");
+      assert.equal(
+        JSON.stringify(store.docs.get(financialLedgerPath(sanitizeDocId(purchaseId)))),
+        purchaseBefore
+      );
+      const historyAfter = [...store.docs.keys()].filter((k) =>
+        k.startsWith(`users/${UID}/subscriptionBillingHistory/`)
+      ).length;
+      const auditAfter = [...store.docs.keys()].filter((k) =>
+        k.startsWith("_subscriptionAuditLog/")
+      ).length;
+      const processedAfter = [...store.docs.keys()].filter((k) =>
+        k.startsWith("_processedBillingEvents/")
+      ).length;
+      assert.equal(processedAfter, processedBefore + 1);
+      assert.equal(auditAfter, auditBefore + 1);
+      assert.ok(historyAfter === historyBefore || historyAfter === historyBefore + 1);
+
+      const winnerType = flags.refund ? "refund" : "chargeback";
+      const month = istMonthKeyForMillis(at);
+      const papers = buildGstr1WorkingPapers({
+        month,
+        ...(await new MemoryTaxComplianceReportSource(store).loadMonthlyScope(month)),
+      });
+      assert.equal(
+        papers.taxAdjustments.filter((row) => row.eventType === "refund" || row.eventType === "chargeback")
+          .length,
+        1
+      );
+      if (winnerType === "chargeback") {
+        assert.equal(papers.reviewStatus, "requires_tax_review");
+        assert.ok(papers.taxAdjustments.some((row) => row.eventType === "chargeback"));
+        assert.equal(papers.taxAdjustments.some((row) => row.eventType === "refund"), false);
+        assert.ok(papers.taxAdjustments.every((row) => row.creditNoteId == null));
+        assert.ok(
+          papers.complianceOpenItems.some((i) =>
+            i.unresolvedReasons.includes("gst_adjustment_requires_review")
+          )
+        );
+      } else {
+        assert.ok(papers.taxAdjustments.some((row) => row.eventType === "refund"));
+        assert.equal(papers.taxAdjustments.some((row) => row.eventType === "chargeback"), false);
+      }
+    }
   }
 
   console.log("applyTransition.unit.test.ts: ok");

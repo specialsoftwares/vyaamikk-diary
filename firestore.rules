@@ -604,6 +604,15 @@ service cloud.firestore {
     match /_billingRateLimits/{bucketId} {
       allow read, write: if false;
     }
+    match /_playAccountIndex/{obfuscatedAccountId} {
+      allow read, write: if false;
+    }
+    match /_playCredentialIndex/{credentialFingerprint} {
+      allow read, write: if false;
+    }
+    match /_billingReconciliationQueue/{queueId} {
+      allow read, write: if false;
+    }
     match /_subscriptionInvoices/{invoiceId} {
       allow read, write: if false;
     }

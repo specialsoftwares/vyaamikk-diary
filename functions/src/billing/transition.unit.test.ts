@@ -9,7 +9,9 @@ import assert from "node:assert/strict";
 import { BillingError } from "./errors";
 import {
   deriveSubscriptionTransition,
+  financialEventIdForStore,
   isTrialEligiblePriorState,
+  oppositeAndroidFullReversalFinancialEventId,
   type TransitionRequest,
   type VerifiedPlatformEvent,
 } from "./transition";
@@ -244,4 +246,68 @@ const trialReq: TransitionRequest = {
   assert.equal(d.next.plan, "free");
 }
 
-console.log("transition.unit.test.ts: ok");
+{
+  const priorPaid = deriveSubscriptionTransition(null, {
+    uid: "u1",
+    source: "androidValidation",
+    eventSource: "callable",
+    idempotencyKey: "rf-a",
+    occurredAt: NOW,
+    nowMs: NOW,
+    requested: {
+      kind: "activatePaid",
+      plan: "professional",
+      platformEvent: androidEvent({
+        canonicalSku: "vyd_professional_monthly",
+        productId: "vyd_professional",
+      }),
+    },
+  }).next;
+  const recorded = deriveSubscriptionTransition(priorPaid, {
+    uid: "u1",
+    source: "rtdn",
+    eventSource: "webhook",
+    idempotencyKey: "rf-1",
+    occurredAt: NOW + 1_000,
+    nowMs: NOW + 1_000,
+    requested: {
+      kind: "recordFinancial",
+      financialEvent: {
+        financialEventId: "android:refund:GPA.RF",
+        eventType: "refund",
+        platform: "android",
+        canonicalSku: "vyd_professional_monthly",
+        grossAmountInPaise: 24_900,
+        actualPlatformCommissionInPaise: null,
+        estimatedPlatformCommissionInPaise: null,
+        occurredAt: NOW + 1_000,
+        relatedFinancialEventId: "android:purchase:GPA.RF",
+      },
+      googleSubscriptionState: "SUBSCRIPTION_STATE_ACTIVE",
+    },
+  });
+  assert.equal(recorded.next.entitlementActive, true);
+  assert.equal(recorded.next.billingStatus, "active");
+  assert.equal(recorded.next.plan, "professional");
+  assert.equal(recorded.ledger?.eventType, "refund");
+  assert.equal(recorded.history?.type, "refunded");
+}
+
+  assert.equal(
+    financialEventIdForStore({ platform: "android", eventType: "refund", orderId: "GPA.9" }),
+    "android:refund:GPA.9"
+  );
+  assert.equal(
+    oppositeAndroidFullReversalFinancialEventId("android:refund:GPA.9", "refund", "android"),
+    "android:chargeback:GPA.9"
+  );
+  assert.equal(
+    oppositeAndroidFullReversalFinancialEventId("android:chargeback:GPA.9", "chargeback", "android"),
+    "android:refund:GPA.9"
+  );
+  assert.equal(
+    oppositeAndroidFullReversalFinancialEventId("android:purchase:GPA.9", "purchase", "android"),
+    null
+  );
+
+  console.log("transition.unit.test.ts: ok");

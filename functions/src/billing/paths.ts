@@ -32,6 +32,18 @@ export function rateLimitBucketPath(bucketId: string): string {
   return `_billingRateLimits/${bucketId}`;
 }
 
+export function playAccountIndexPath(obfuscatedAccountId: string): string {
+  return `_playAccountIndex/${obfuscatedAccountId}`;
+}
+
+export function playCredentialIndexPath(credentialFingerprint: string): string {
+  return `_playCredentialIndex/${credentialFingerprint}`;
+}
+
+export function billingReconciliationQueuePath(queueId: string): string {
+  return `_billingReconciliationQueue/${sanitizeDocId(queueId)}`;
+}
+
 export function billingDetailsPath(uid: string): string {
   return `users/${uid}/subscription/billingDetails`;
 }

@@ -65,3 +65,8 @@ export { getInvoiceDownloadUrl } from "./billing/callables/getInvoiceDownloadUrl
 export { generateGstr1WorkingPapers } from "./billing/callables/generateGstr1WorkingPapers";
 export { markGstr1Filed } from "./billing/callables/markGstr1Filed";
 export { reviewSubscriptionTaxCompliance } from "./billing/callables/reviewTaxCompliance";
+
+/** VYD-32 Google Play billing: exported for build, production-disabled (fail-closed). */
+export { prepareAndroidBillingAccount } from "./billing/callables/prepareAndroidBillingAccount";
+export { validateAndActivateAndroid } from "./billing/callables/validateAndActivateAndroid";
+export { androidRtdn } from "./billing/callables/androidRtdn";

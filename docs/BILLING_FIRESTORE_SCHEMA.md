@@ -29,6 +29,9 @@ schema-by-use: **no documents are pre-created to "initialize" collections.**
 | `_revenueReports/{monthKey}` | Admin SDK only | denied | denied |
 | `_trialLedger/{trialIdentityHmac}` | Admin SDK only; survives account deletion | denied | denied |
 | `_billingRateLimits/{bucketId}` | Admin SDK only (transactional buckets) | denied | denied |
+| `_playAccountIndex/{obfuscatedAccountId}` | Admin SDK only (Play obfuscated-account ownership) | denied | denied |
+| `_playCredentialIndex/{credentialFingerprint}` | Admin SDK only (Play purchase-token fingerprint ownership) | denied | denied |
+| `_billingReconciliationQueue/{queueId}` | Admin SDK only (durable Play/refund reconciliation work) | denied | denied |
 | `globalStats/paperSaved` | Admin SDK only | public (`read: if true`) | denied |
 
 Notes:
@@ -48,6 +51,31 @@ Notes:
   `HMAC-SHA256(TRIAL_IDENTITY_SECRET, normalizeE164(phone))`
   (`functions/src/billing/trialIdentity.ts`); no raw phone or uid is stored
   (`lastAccountUidDiagnostic` is a truncated digest).
+- `_playAccountIndex/{obfuscatedAccountId}` maps
+  `SHA-256("vyd-play-account-v1:" + uid)` to `{ uid, createdAt, updatedAt }`.
+  Clients have zero access. VYD-35 will pass the returned id to
+  `BillingFlowParams.setObfuscatedAccountId`. Collision onto a different uid
+  fails closed.
+- `_playCredentialIndex/{credentialFingerprint}` maps the SHA-256 fingerprint
+  of a verified Google purchase token to `{ uid, createdAt, updatedAt }`.
+  Used to resolve `outOfAppPurchaseContext.expiredPurchaseToken` without
+  storing the raw token or calling the Play API with it. Collision onto a
+  different uid fails closed (`play_credential_index_collision`). Clients
+  have zero access.
+- `_billingReconciliationQueue/{stableId}` is a server-only work record used
+  when a verified financial event (for example a Play refund) is recorded but
+  live entitlement cannot be authoritatively reconciled (expired token,
+  historical replaced token whose current credential cannot be decrypted,
+  owner mismatch). Document ids are source-independent
+  (`android:refund-reconcile:{orderId}`). Documents store `reason`,
+  `platform`, `financialEventId`, optional `credentialFingerprint`,
+  timestamps, `status: "pending" | "resolved"`, `resolvedAt`, and
+  `attemptCount`. They never store raw purchase tokens, plaintext
+  credentials, or uid. Duplicate RTDN deliveries preserve a single work
+  item. A later successful live reconcile marks the same document
+  `resolved` without deleting forensic history. VYD-32 writes the queue; a
+  later phase may consume it. Clients have zero access.
+
 - `globalStats/paperSaved` figures are labelled estimates with a methodology
   string (owner decision W-9); other `globalStats/*` docs are default-denied.
 
@@ -344,3 +372,19 @@ appears in a later phase; it will be added with the query that requires it.
   GSTR source closure binds dependency financial events (including a prior-
   month original purchase referenced by an in-month credit note), not only
   `event.monthKey === report month`.
+
+## Google Play production-enablement gates (VYD-32)
+
+- `PLAY_BILLING_ENABLED` defaults **false**. Do not enable production Play
+  billing until owner-authorized Play Console, Pub/Sub OIDC, IAM, KMS, and
+  the pending-refund-review product are in place.
+- `pendingRefundReviewNotification` is an explicit go-live blocker. Google
+  requires evaluating the request and calling `ReviewRefund` within 24 hours.
+  VYD-32 does **not** implement that product. When billing is enabled, these
+  RTDN events fail closed as `pending_refund_review_unimplemented` (retryable
+  HTTP 503). They are never acknowledged as success, never persisted as
+  plaintext `pendingRefundToken`, and never auto-suggested as a refund.
+- Verified Play refunds that cannot reconcile live entitlement write
+  `_billingReconciliationQueue` before the RTDN is acknowledged. The queue
+  is not a substitute for `ReviewRefund`.
+- Chargeback/pending-review tax treatment remains a VYD-40 legal review gate.

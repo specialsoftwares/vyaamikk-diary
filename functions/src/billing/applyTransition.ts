@@ -7,9 +7,12 @@
  * TRANSACTION SHAPE (Firestore-compatible, structurally enforced):
  *   1. READ PHASE   — processed-event doc, subscription status, company
  *                     billing, the financial ledger row (when the request
- *                     carries a financial event), and any auxiliary decision
- *                     state read by the prepare hook. The hook receives a
- *                     READ-ONLY transaction view, so it cannot write.
+ *                     carries a financial event), the opposite Android
+ *                     full-reversal ledger row (refund ↔ chargeback) so two
+ *                     concurrent opposite-class writes cannot both commit,
+ *                     and any auxiliary decision state read by the prepare
+ *                     hook. The hook receives a READ-ONLY transaction view,
+ *                     so it cannot write.
  *   2. VALIDATE     — idempotent-replay check, stale-platform-state guard,
  *                     pure derivation, financial ledger conflict check.
  *   3. WRITE PHASE  — every set/create happens here, after ALL reads.
@@ -32,7 +35,11 @@ import {
   type BillingReadTransaction,
   type BillingStore,
 } from "./store";
-import { deriveSubscriptionTransition, type TransitionRequest } from "./transition";
+import {
+  deriveSubscriptionTransition,
+  oppositeAndroidFullReversalFinancialEventId,
+  type TransitionRequest,
+} from "./transition";
 import type {
   BillingEventLedgerDoc,
   CompanyBillingDoc,
@@ -135,6 +142,29 @@ function assertNoSecretsInHistory(history: Record<string, unknown>): void {
   }
 }
 
+function mergeInvalidatedFingerprints(
+  prior: CompanyBillingDoc | null,
+  ev: TransitionRequest["requested"]["platformEvent"] | undefined
+): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (value: string | null | undefined) => {
+    if (typeof value !== "string" || value.length === 0 || seen.has(value)) return;
+    seen.add(value);
+    out.push(value);
+  };
+  for (const fp of prior?.invalidatedCredentialFingerprints ?? []) push(fp);
+  push(ev?.linkedCredentialFingerprint);
+  if (
+    prior?.credentialFingerprint &&
+    ev?.credentialFingerprint &&
+    prior.credentialFingerprint !== ev.credentialFingerprint
+  ) {
+    push(prior.credentialFingerprint);
+  }
+  return out;
+}
+
 function companyFrom(
   uid: string,
   prior: CompanyBillingDoc | null,
@@ -156,7 +186,7 @@ function companyFrom(
     credentialFingerprint: ev?.credentialFingerprint ?? prior?.credentialFingerprint ?? null,
     encryptedPurchaseCredential:
       ev?.encryptedPurchaseCredential ?? prior?.encryptedPurchaseCredential ?? null,
-    invalidatedCredentialFingerprints: prior?.invalidatedCredentialFingerprints ?? [],
+    invalidatedCredentialFingerprints: mergeInvalidatedFingerprints(prior, ev),
     lastReconciledAt: ev
       ? Math.max(ev.reconciledAt, priorWatermark ?? ev.reconciledAt)
       : priorWatermark,
@@ -172,7 +202,8 @@ function ledgerConflict(existing: Record<string, unknown>, next: BillingEventLed
     existing.platform !== next.platform ||
     existing.canonicalSku !== next.canonicalSku ||
     existing.uid !== next.uid ||
-    (existing.relatedFinancialEventId ?? null) !== (next.relatedFinancialEventId ?? null)
+    (existing.relatedFinancialEventId ?? null) !== (next.relatedFinancialEventId ?? null) ||
+    existing.occurredAt !== next.occurredAt
   );
 }
 
@@ -201,6 +232,20 @@ export async function applySubscriptionTransition(
         ? (companySnap.data() as unknown as CompanyBillingDoc)
         : null;
       const ledgerSnap = ledgerPath ? await tx.get(ledgerPath) : null;
+      // Refund vs chargeback of one Google Order are different ledger ids.
+      // Reading the opposite row in THIS transaction makes a concurrent
+      // opposite-class create invalidate the loser (retry → fail closed).
+      const oppositeReversalId =
+        requestedFinancial != null
+          ? oppositeAndroidFullReversalFinancialEventId(
+              requestedFinancial.financialEventId,
+              requestedFinancial.eventType,
+              requestedFinancial.platform
+            )
+          : null;
+      const oppositeReversalSnap = oppositeReversalId
+        ? await tx.get(financialLedgerPath(sanitizeDocId(oppositeReversalId)))
+        : null;
       const readOnlyTx: BillingReadTransaction = { get: (p) => tx.get(p) };
       const plan: TransitionPlan = deps.prepareTransition
         ? await deps.prepareTransition(readOnlyTx, prior)
@@ -240,6 +285,20 @@ export async function applySubscriptionTransition(
 
       if (plan.outcome === "reject") {
         throw plan.error;
+      }
+
+      if (oppositeReversalSnap?.exists) {
+        throw new BillingError({
+          clientCode: "internal_error",
+          causeCode: "full_reversal_classification_conflict",
+        });
+      }
+
+      if (req.requested.kind === "recordFinancial" && !prior) {
+        throw new BillingError({
+          clientCode: "invalid_purchase",
+          causeCode: "no_prior_subscription_for_financial_record",
+        });
       }
 
       // Stale-event defense in depth (see transition.ts contract): reject
@@ -304,6 +363,7 @@ export async function applySubscriptionTransition(
           eventSource: req.eventSource,
           kind: req.requested.kind,
           canonicalSku: req.requested.platformEvent?.canonicalSku ?? null,
+          googleSubscriptionState: req.requested.googleSubscriptionState ?? null,
         },
       };
       appendSubscriptionAuditEvent(tx, auditEventIdFor(req.idempotencyKey), audit);

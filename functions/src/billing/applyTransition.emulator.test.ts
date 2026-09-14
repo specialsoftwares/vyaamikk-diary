@@ -18,12 +18,16 @@ import { applySubscriptionTransition } from "./applyTransition";
 import { diagnosticUidHmac } from "./diagnosticUid";
 import { BillingError } from "./errors";
 import { FirestoreBillingStore } from "./firestoreBillingStore";
-import { subscriptionStatusPath, trialLedgerPath } from "./paths";
+import { istMonthKeyForMillis } from "./istMonthKey";
+import { financialLedgerPath, sanitizeDocId, subscriptionStatusPath, trialLedgerPath, billingReconciliationQueuePath } from "./paths";
+import { ensureReconciliationWorkItem } from "./reconciliationQueue";
 import {
   financialEventIdForStore,
   type TransitionRequest,
   type VerifiedPlatformEvent,
 } from "./transition";
+import { AdminFirestoreTaxComplianceReportSource } from "./tax/taxComplianceReportSource";
+import { buildGstr1WorkingPapers } from "./tax/gstr1WorkingPapers";
 import { trialIdentityHmac } from "./trialIdentity";
 import { grantProfessionalTrial } from "./trialGrant";
 import { TRIAL_DURATION_DAYS } from "./types";
@@ -67,6 +71,37 @@ async function expectBillingError(p: Promise<unknown>, causeCode: string): Promi
     return;
   }
   assert.fail(`expected BillingError ${causeCode}, but call succeeded`);
+}
+
+function describeErr(err: unknown): string {
+  if (err instanceof BillingError) return `BillingError:${err.causeCode}`;
+  if (err instanceof Error) return `${err.name}:${err.message}`;
+  return String(err);
+}
+
+function isFirestoreRaceLoser(err: unknown, allowedCauses: string[]): boolean {
+  if (err instanceof BillingError) return allowedCauses.includes(err.causeCode);
+  const msg = err instanceof Error ? `${err.name} ${err.message}` : String(err);
+  return /ABORTED|contention|already exists|FAILED_PRECONDITION/i.test(msg);
+}
+
+function makeReadBarrier(n: number) {
+  let count = 0;
+  let release: (() => void) | undefined;
+  const gate = new Promise<void>((r) => {
+    release = r;
+  });
+  return async () => {
+    count += 1;
+    if (count >= n) release?.();
+    await Promise.race([
+      gate,
+      new Promise<void>((r) => {
+        setTimeout(r, 100);
+      }),
+    ]);
+    return { outcome: "proceed" as const };
+  };
 }
 
 async function main() {
@@ -251,18 +286,222 @@ async function main() {
     "trial_prior_state_ineligible"
   );
   const identityB = trialIdentityHmac(TRIAL_SECRET, PHONE_B);
-  assert.equal(
-    (await db.doc(trialLedgerPath(identityB)).get()).exists,
-    false,
-    "rejected trial must not leave a ledger row (atomic failure)"
-  );
+  assert.equal((await db.doc(trialLedgerPath(identityB)).get()).exists, false, "rejected trial must not leave a ledger row (atomic failure)");
+
+  // ——— Round 4: concurrent refund vs chargeback of one Order, real Firestore ———
+  {
+    const UID_REV = "emu-uid-billing-rev-4";
+    const ORDER_REV = "GPA.EMU-REV-4";
+    const diagnosticUidRev = diagnosticUidHmac(DIAG_SECRET, UID_REV);
+    const purchaseId = financialEventIdForStore({
+      platform: "android",
+      eventType: "purchase",
+      orderId: ORDER_REV,
+    });
+    const refundId = financialEventIdForStore({
+      platform: "android",
+      eventType: "refund",
+      orderId: ORDER_REV,
+    });
+    const chargebackId = financialEventIdForStore({
+      platform: "android",
+      eventType: "chargeback",
+      orderId: ORDER_REV,
+    });
+    const occurredAt = NOW + 12 * 60_000;
+    const purchaseReq: TransitionRequest = {
+      uid: UID_REV,
+      source: "androidValidation",
+      eventSource: "callable",
+      idempotencyKey: "emu-rev-purchase",
+      occurredAt: NOW + 10 * 60_000,
+      nowMs: NOW + 10 * 60_000,
+      requested: {
+        kind: "activatePaid",
+        plan: "professional",
+        platformEvent: platformEvent({
+          latestOrderId: ORDER_REV,
+          credentialFingerprint: "fp-emulator-rev-4",
+          reconciledAt: NOW + 10 * 60_000,
+          currentPeriodStart: NOW + 10 * 60_000,
+        }),
+        financialEvent: {
+          financialEventId: purchaseId,
+          eventType: "purchase",
+          platform: "android",
+          canonicalSku: "vyd_professional_monthly",
+          grossAmountInPaise: 24_900,
+          actualPlatformCommissionInPaise: null,
+          estimatedPlatformCommissionInPaise: 3_735,
+          occurredAt: NOW + 10 * 60_000,
+          relatedFinancialEventId: null,
+        },
+      },
+    };
+    await applySubscriptionTransition({ store, diagnosticUid: diagnosticUidRev }, purchaseReq);
+    const purchasePath = financialLedgerPath(sanitizeDocId(purchaseId));
+    const purchaseBefore = (await db.doc(purchasePath).get()).data();
+    assert.ok(purchaseBefore);
+    const statusBefore = (await db.doc(subscriptionStatusPath(UID_REV)).get()).data();
+    const mkReversal = (eventType: "refund" | "chargeback"): TransitionRequest => {
+      const financialEventId = eventType === "refund" ? refundId : chargebackId;
+      return {
+        uid: UID_REV,
+        source: "rtdn",
+        eventSource: "webhook",
+        idempotencyKey: financialEventId,
+        occurredAt,
+        nowMs: occurredAt,
+        requested: {
+          kind: "recordFinancial",
+          financialEvent: {
+            financialEventId,
+            eventType,
+            platform: "android",
+            canonicalSku: "vyd_professional_monthly",
+            grossAmountInPaise: 24_900,
+            actualPlatformCommissionInPaise: null,
+            estimatedPlatformCommissionInPaise: null,
+            occurredAt,
+            relatedFinancialEventId: purchaseId,
+          },
+        },
+      };
+    };
+    let settled: PromiseSettledResult<unknown>[] = [];
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const delay = makeReadBarrier(2);
+      settled = await Promise.allSettled([
+        applySubscriptionTransition(
+          { store, diagnosticUid: diagnosticUidRev, prepareTransition: delay },
+          mkReversal("refund")
+        ),
+        applySubscriptionTransition(
+          { store, diagnosticUid: diagnosticUidRev, prepareTransition: delay },
+          mkReversal("chargeback")
+        ),
+      ]);
+      if (settled.filter((r) => r.status === "fulfilled").length > 0) break;
+    }
+    const fulfilled = settled.filter((r) => r.status === "fulfilled");
+    const rejected = settled.filter((r) => r.status === "rejected");
+    assert.equal(
+      fulfilled.length,
+      1,
+      `expected one reversal winner, got ${settled.map((r) => (r.status === "rejected" ? describeErr(r.reason) : "ok")).join(",")}`
+    );
+    assert.equal(rejected.length, 1);
+    const lost = (rejected[0] as PromiseRejectedResult).reason;
+    assert.ok(
+      isFirestoreRaceLoser(lost, ["full_reversal_classification_conflict", "append_only_collision"]),
+      `loser was ${describeErr(lost)}`
+    );
+    const refundSnap = await db.doc(financialLedgerPath(sanitizeDocId(refundId))).get();
+    const chargebackSnap = await db.doc(financialLedgerPath(sanitizeDocId(chargebackId))).get();
+    assert.equal(
+      Number(refundSnap.exists) + Number(chargebackSnap.exists),
+      1,
+      "exactly one full-reversal class"
+    );
+    assert.deepEqual((await db.doc(purchasePath).get()).data(), purchaseBefore);
+    const statusAfter = (await db.doc(subscriptionStatusPath(UID_REV)).get()).data();
+    assert.equal(statusAfter?.plan, statusBefore?.plan);
+    assert.equal(statusAfter?.entitlementActive, statusBefore?.entitlementActive);
+    const winnerType = refundSnap.exists ? "refund" : "chargeback";
+    const month = istMonthKeyForMillis(occurredAt);
+    const papers = buildGstr1WorkingPapers({
+      month,
+      ...(await new AdminFirestoreTaxComplianceReportSource(db).loadMonthlyScope(month)),
+    });
+    const reversalRows = papers.taxAdjustments.filter(
+      (row) =>
+        row.financialEventId === refundId || row.financialEventId === chargebackId
+    );
+    assert.equal(reversalRows.length, 1);
+    if (winnerType === "chargeback") {
+      assert.equal(papers.reviewStatus, "requires_tax_review");
+      assert.equal(reversalRows[0].eventType, "chargeback");
+      assert.equal(reversalRows[0].creditNoteId, null);
+      assert.ok(
+        papers.complianceOpenItems.some((i) =>
+          i.unresolvedReasons.includes("gst_adjustment_requires_review")
+        )
+      );
+    } else {
+      assert.equal(reversalRows[0].eventType, "refund");
+    }
+  }
+
+  // ——— Round 4: queue create race identity (real Firestore) ———
+  {
+    const qid = "android:refund-reconcile:GPA.EMU-Q-4";
+    const mismatch = await Promise.allSettled([
+      ensureReconciliationWorkItem(store, {
+        id: qid,
+        reason: "live_subscription_unavailable",
+        platform: "android",
+        financialEventId: "android:refund:GPA.EMU-Q-4",
+        nowMs: NOW + 13 * 60_000,
+      }),
+      ensureReconciliationWorkItem(store, {
+        id: qid,
+        reason: "live_subscription_unavailable",
+        platform: "android",
+        financialEventId: "android:chargeback:GPA.EMU-Q-4",
+        nowMs: NOW + 13 * 60_000,
+      }),
+    ]);
+    const mismatchFulfilled = mismatch.filter((r) => r.status === "fulfilled");
+    const mismatchRejected = mismatch.filter((r) => r.status === "rejected");
+    assert.equal(
+      mismatchFulfilled.length,
+      1,
+      `queue mismatch race: ${mismatch.map((r) => (r.status === "rejected" ? describeErr(r.reason) : "ok")).join(",")}`
+    );
+    assert.equal(mismatchRejected.length, 1);
+    const mismatchLost = (mismatchRejected[0] as PromiseRejectedResult).reason;
+    assert.ok(
+      isFirestoreRaceLoser(mismatchLost, ["reconciliation_queue_identity_mismatch"]),
+      `queue loser was ${describeErr(mismatchLost)}`
+    );
+    const qDoc = await db.doc(billingReconciliationQueuePath(sanitizeDocId(qid))).get();
+    assert.equal(qDoc.exists, true);
+    const qData = qDoc.data() as { financialEventId: string; platform: string };
+    assert.equal(qData.platform, "android");
+    assert.ok(
+      qData.financialEventId === "android:refund:GPA.EMU-Q-4" ||
+        qData.financialEventId === "android:chargeback:GPA.EMU-Q-4"
+    );
+
+    const qidSame = "android:refund-reconcile:GPA.EMU-Q-4-SAME";
+    const same = await Promise.allSettled([
+      ensureReconciliationWorkItem(store, {
+        id: qidSame,
+        reason: "live_subscription_unavailable",
+        platform: "android",
+        financialEventId: "android:refund:GPA.EMU-Q-4-SAME",
+        nowMs: NOW + 14 * 60_000,
+      }),
+      ensureReconciliationWorkItem(store, {
+        id: qidSame,
+        reason: "live_subscription_unavailable",
+        platform: "android",
+        financialEventId: "android:refund:GPA.EMU-Q-4-SAME",
+        nowMs: NOW + 14 * 60_000,
+      }),
+    ]);
+    assert.equal(same.every((r) => r.status === "fulfilled"), true);
+    const createdFlags = same.map((r) => (r.status === "fulfilled" ? r.value.created : false));
+    assert.equal(createdFlags.filter(Boolean).length, 1);
+    assert.equal(createdFlags.filter((v) => !v).length, 1);
+  }
 
   // ——— Value-level privacy: no raw uid/phone anywhere in audit values ———
   const audits = await db.collection("_subscriptionAuditLog").get();
-  assert.equal(audits.size, 5);
+  assert.ok(audits.size >= 5);
   for (const doc of audits.docs) {
     const serialized = JSON.stringify(doc.data());
-    for (const secret of [UID, PHONE, PHONE_B, PHONE.slice(1), PHONE_B.slice(1)]) {
+    for (const secret of [UID, "emu-uid-billing-rev-4", PHONE, PHONE_B, PHONE.slice(1), PHONE_B.slice(1)]) {
       assert.ok(
         !serialized.includes(secret),
         `audit doc ${doc.id} leaks ${secret.slice(0, 4)}…`
@@ -283,6 +522,8 @@ async function main() {
         stalePlatformStateRejectedAtomically: true,
         trialCannotReplacePaidAccess: true,
         auditValuesContainNoRawUidOrPhone: true,
+        androidFullReversalMutexUnderRealFirestore: true,
+        reconciliationQueueCreateRaceIdentityUnderRealFirestore: true,
       },
     })
   );

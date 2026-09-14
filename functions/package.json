@@ -2,7 +2,9 @@
   "name": "vyaamikk-diary-functions",
   "private": true,
   "main": "lib/index.js",
-  "engines": { "node": "20" },
+  "engines": {
+    "node": "20"
+  },
   "scripts": {
     "build": "tsc",
     "build:watch": "tsc --watch",
@@ -12,7 +14,8 @@
   },
   "dependencies": {
     "firebase-admin": "^13.4.0",
-    "firebase-functions": "^6.3.2"
+    "firebase-functions": "^6.3.2",
+    "google-auth-library": "10.9.0"
   },
   "devDependencies": {
     "typescript": "^5.8.3"
