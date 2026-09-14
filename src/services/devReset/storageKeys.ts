@@ -12,6 +12,7 @@ export const DEV_ASYNC_EXACT_KEYS = [
   "vyd_auth_v2_challenge",
   "vyd_lang_v1",
   "vyd_theme_mode_v1",
+  "vyd_sub_cache_v1",
   "vyaamikk:hasSeenIntroSplash",
 ] as const;
 

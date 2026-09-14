@@ -36,13 +36,14 @@ export async function runStartupCoordinator(options?: {
     if (
       !providers.mountLocalDb ||
       !providers.mountAuth ||
+      !providers.mountSubscription ||
       !providers.mountSync ||
       !providers.mountAppFeedback
     ) {
       throw new StartupError(
         "PROVIDER_TREE_INVALID",
         "BOOT",
-        "Root LocalDb/Auth/Sync/AppFeedback providers must always mount."
+        "Root LocalDb/Auth/Subscription/Sync/AppFeedback providers must always mount."
       );
     }
 

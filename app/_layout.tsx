@@ -11,6 +11,7 @@ import { decideRootDataProviders } from "@/config/rootDataProviders";
 import { AppFeedbackProvider } from "@/feedback/AppFeedback";
 import { LocalDbProvider } from "@/state/localDb";
 import { AuthProvider } from "@/state/auth";
+import { SubscriptionProvider } from "@/subscription";
 import { SyncProvider } from "@/state/sync";
 import { I18nProvider } from "@/i18n";
 import { LocaleFontProvider } from "@/i18n/LocaleFontProvider";
@@ -33,14 +34,16 @@ const rootDataProviders = decideRootDataProviders();
 /**
  * Single stable provider tree for the entire app.
  *
- * LocalDb → Auth → Sync → AppFeedback must remain mounted across public
- * routes, authenticated routes, redirects, and language transitions.
+ * LocalDb → Auth → Subscription → Sync → AppFeedback must remain mounted
+ * across public routes, authenticated routes, redirects, and language
+ * transitions. Subscription is uid-bound and must not remount per screen.
  */
 function RootProviders({ children }: { children: React.ReactNode }) {
   // Soft-check only — BootstrapRoot already enforced this fail-closed in-UI.
   if (
     !rootDataProviders.mountLocalDb ||
     !rootDataProviders.mountAuth ||
+    !rootDataProviders.mountSubscription ||
     !rootDataProviders.mountSync ||
     !rootDataProviders.mountAppFeedback
   ) {
@@ -56,9 +59,11 @@ function RootProviders({ children }: { children: React.ReactNode }) {
               <LocaleFontProvider>
                 <LocalDbProvider>
                   <AuthProvider>
-                    <SyncProvider>
-                      <AppFeedbackProvider>{children}</AppFeedbackProvider>
-                    </SyncProvider>
+                    <SubscriptionProvider>
+                      <SyncProvider>
+                        <AppFeedbackProvider>{children}</AppFeedbackProvider>
+                      </SyncProvider>
+                    </SubscriptionProvider>
                   </AuthProvider>
                 </LocalDbProvider>
               </LocaleFontProvider>

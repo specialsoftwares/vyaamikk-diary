@@ -12,6 +12,7 @@ function testAlwaysMountsFullTree() {
   assert.equal(d.mountAuth, true);
   assert.equal(d.mountSync, true);
   assert.equal(d.mountAppFeedback, true);
+  assert.equal(d.mountSubscription, true);
 }
 
 function testPathnameCannotSkipAuth() {
@@ -30,6 +31,11 @@ function testPathnameCannotSkipAuth() {
     assert.equal(d.mountAuth, true, `auth must mount for ${String(path)}`);
     assert.equal(d.mountLocalDb, true, `localDb must mount for ${String(path)}`);
     assert.equal(d.mountSync, true, `sync must mount for ${String(path)}`);
+    assert.equal(
+      d.mountSubscription,
+      true,
+      `subscription must mount for ${String(path)}`
+    );
   }
 }
 
