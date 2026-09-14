@@ -9,8 +9,11 @@
  * reachability. Offline AsyncStorage is UX continuity for the same uid only.
  *
  * Non-authoritative local state (AsyncStorage continuity + Firestore SDK
- * cache) may only preserve or reduce access. Widening requires
- * fromCache === false or getDocFromServer().
+ * cache) may only preserve accepted paid continuity, shorten it via the
+ * accepted timestamp reducer, or revoke it to free. It must not substitute
+ * another paid lifecycle. Widening/replacement requires fromCache === false
+ * or getDocFromServer(). Authoritative cache writes use the acceptance-time
+ * clock sample as savedAt.
  */
 
 import { parseSubscriptionStatus } from "./parseSubscriptionStatus";
@@ -190,10 +193,15 @@ export function createSubscriptionSession(deps: SubscriptionSessionDeps) {
     return now;
   }
 
-  function applyAuthoritativeClockBaseline() {
+  /** Sample the acceptance-time clock. Returns null when no finite timestamp exists. */
+  function applyAuthoritativeClockBaseline(): number | null {
     localContinuityBlocked = false;
     const now = deps.now();
-    lastObservedNowMs = typeof now === "number" && Number.isFinite(now) ? now : lastObservedNowMs;
+    if (typeof now === "number" && Number.isFinite(now)) {
+      lastObservedNowMs = now;
+      return now;
+    }
+    return null;
   }
 
   function applyReducedIfNeeded(view: SubscriptionView): SubscriptionView {
@@ -245,14 +253,20 @@ export function createSubscriptionSession(deps: SubscriptionSessionDeps) {
     }, wait);
   }
 
-  function persist(forUid: string, forGen: number, status: ClientSubscriptionStatus) {
+  function persist(
+    forUid: string,
+    forGen: number,
+    status: ClientSubscriptionStatus,
+    acceptedAtMs: number
+  ) {
+    if (typeof acceptedAtMs !== "number" || !Number.isFinite(acceptedAtMs)) return;
     enqueue(async () => {
       if (generation !== forGen || uid !== forUid) return;
       await writeSubscriptionCache({
         store: deps.store,
         uid: forUid,
         status,
-        nowMs: deps.now(),
+        nowMs: acceptedAtMs,
       });
       if (generation !== forGen || uid !== forUid) {
         try {
@@ -287,7 +301,7 @@ export function createSubscriptionSession(deps: SubscriptionSessionDeps) {
 
   function applyServerDoc(raw: unknown | null, forUid: string, forGen: number) {
     if (generation !== forGen || uid !== forUid) return;
-    applyAuthoritativeClockBaseline();
+    const acceptedAtMs = applyAuthoritativeClockBaseline();
     const status =
       raw == null ? { ...DEFAULT_CLIENT_SUBSCRIPTION } : parseSubscriptionStatus(raw);
     publish(
@@ -300,7 +314,9 @@ export function createSubscriptionSession(deps: SubscriptionSessionDeps) {
         isRefreshing: false,
       })
     );
-    persist(forUid, forGen, status);
+    if (acceptedAtMs != null) {
+      persist(forUid, forGen, status, acceptedAtMs);
+    }
   }
 
   function acceptedSameUidView(forUid: string, nowMs: number): SubscriptionView {

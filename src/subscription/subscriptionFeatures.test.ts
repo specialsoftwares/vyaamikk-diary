@@ -214,9 +214,9 @@ const PERIOD = 1_800_000_000_000;
 }
 
 {
-  // Non-authoritative evidence must not widen effective plan rank
+  // Non-authoritative evidence: revoke to free is allowed; paid cannot replace paid
   const free = status({});
-  const starter = status({
+  const starterShort = status({
     plan: "starter",
     billingStatus: "active",
     entitlementActive: true,
@@ -239,11 +239,22 @@ const PERIOD = 1_800_000_000_000;
     billingStatus: "expired",
     entitlementActive: false,
   });
+  const starterLonger = status({
+    plan: "starter",
+    billingStatus: "active",
+    entitlementActive: true,
+    currentPeriodEnd: PERIOD + 30 * 86_400_000,
+  });
   assert.equal(effectivePlanForSubscription(preferNonAuthoritativeStatus(free, professional)), "free");
   assert.equal(effectivePlanForSubscription(preferNonAuthoritativeStatus(free, business)), "free");
-  assert.equal(effectivePlanForSubscription(preferNonAuthoritativeStatus(starter, professional)), "starter");
+  assert.equal(effectivePlanForSubscription(preferNonAuthoritativeStatus(starterShort, professional)), "starter");
   assert.equal(effectivePlanForSubscription(preferNonAuthoritativeStatus(professional, professional)), "professional");
   assert.equal(effectivePlanForSubscription(preferNonAuthoritativeStatus(professional, expired)), "free");
+  const kept = preferNonAuthoritativeStatus(professional, starterLonger);
+  assert.equal(effectivePlanForSubscription(kept), "professional");
+  assert.equal(kept.currentPeriodEnd, PERIOD, "must not adopt a longer lower-plan timestamp");
+  assert.equal(kept.billingStatus, "active");
+  assert.equal(kept.plan, "professional");
 }
 
 console.log("subscriptionFeatures.test.ts: ok");

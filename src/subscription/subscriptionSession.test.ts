@@ -7,6 +7,7 @@ import { DEFAULT_CLIENT_SUBSCRIPTION, type ClientSubscriptionStatus } from "./ty
 import { createSubscriptionSession } from "./subscriptionSession";
 import {
   SUBSCRIPTION_CACHE_KEY,
+  readSubscriptionCache,
   writeSubscriptionCache,
   type SubscriptionKeyValueStore,
 } from "./subscriptionCache";
@@ -1065,6 +1066,242 @@ async function main() {
   assert.equal(session.getView().plan, "free");
   assert.equal(session.getView().features.canUseProfessionalFeatures, false);
   assert.equal(timerId, created, "must not reschedule an extending timer");
+  session.dispose();
+}
+
+{
+  // Round 3 A. Professional T1 + cached Starter T2 must not survive to T2
+  const T1 = NOW + 5 * 60_000;
+  const T2 = NOW + 30 * 86_400_000;
+  const clock = { now: NOW };
+  const store = memoryStore();
+  await writeSubscriptionCache({
+    store,
+    uid: "uid-a",
+    status: { ...professionalStatus(), currentPeriodEnd: T1 },
+    nowMs: NOW,
+  });
+  const fake = createFakeListener();
+  const session = createSubscriptionSession({
+    listen: fake.listen,
+    read: async () => null,
+    store,
+    now: () => clock.now,
+    onChange: () => {},
+  });
+  session.setAuth({ status: "signed_in", uid: "uid-a" });
+  await wait();
+  fake.emit(
+    "uid-a",
+    {
+      plan: "starter",
+      billingStatus: "active",
+      entitlementActive: true,
+      currentPeriodEnd: T2,
+    },
+    true
+  );
+  assert.equal(session.getView().plan, "professional");
+  assert.equal(session.getView().status.currentPeriodEnd, T1);
+  clock.now = T1;
+  session.notifyForeground();
+  assert.equal(session.getView().plan, "free");
+  assert.equal(session.getView().features.canUseStarterFeatures, false);
+  session.dispose();
+}
+
+{
+  // Round 3 B. Business T1 + cached Professional T2 → free at T1
+  const T1 = NOW + 5 * 60_000;
+  const T2 = NOW + 30 * 86_400_000;
+  const clock = { now: NOW };
+  const store = memoryStore();
+  await writeSubscriptionCache({
+    store,
+    uid: "uid-a",
+    status: {
+      ...professionalStatus(),
+      plan: "business",
+      currentPeriodEnd: T1,
+    },
+    nowMs: NOW,
+  });
+  const fake = createFakeListener();
+  const session = createSubscriptionSession({
+    listen: fake.listen,
+    read: async () => null,
+    store,
+    now: () => clock.now,
+    onChange: () => {},
+  });
+  session.setAuth({ status: "signed_in", uid: "uid-a" });
+  await wait();
+  fake.emit("uid-a", { ...professionalDoc(), currentPeriodEnd: T2 }, true);
+  assert.equal(session.getView().plan, "business");
+  clock.now = T1;
+  session.notifyForeground();
+  assert.equal(session.getView().plan, "free");
+  session.dispose();
+}
+
+{
+  // Round 3 C. trial T1 + cached Starter T2 cannot outlive the trial ceiling
+  const T1 = NOW + 5 * 60_000;
+  const T2 = NOW + 30 * 86_400_000;
+  const clock = { now: NOW };
+  const store = memoryStore();
+  await writeSubscriptionCache({
+    store,
+    uid: "uid-a",
+    status: {
+      ...DEFAULT_CLIENT_SUBSCRIPTION,
+      plan: "professional",
+      billingStatus: "trial",
+      entitlementActive: true,
+      entitlementReason: "trialActive",
+      trialEndsAt: T1,
+    },
+    nowMs: NOW,
+  });
+  const fake = createFakeListener();
+  const session = createSubscriptionSession({
+    listen: fake.listen,
+    read: async () => null,
+    store,
+    now: () => clock.now,
+    onChange: () => {},
+  });
+  session.setAuth({ status: "signed_in", uid: "uid-a" });
+  await wait();
+  fake.emit(
+    "uid-a",
+    {
+      plan: "starter",
+      billingStatus: "active",
+      entitlementActive: true,
+      currentPeriodEnd: T2,
+    },
+    true
+  );
+  assert.equal(session.getView().plan, "professional");
+  assert.equal(session.getView().status.billingStatus, "trial");
+  clock.now = T1;
+  session.notifyForeground();
+  assert.equal(session.getView().plan, "free");
+  session.dispose();
+}
+
+{
+  // Round 3 D. cached effective-Free still revokes accepted paid
+  const store = memoryStore();
+  await writeSubscriptionCache({
+    store,
+    uid: "uid-a",
+    status: professionalStatus(),
+    nowMs: NOW,
+  });
+  const fake = createFakeListener();
+  const session = createSubscriptionSession({
+    listen: fake.listen,
+    read: async () => null,
+    store,
+    now: () => NOW,
+    onChange: () => {},
+  });
+  session.setAuth({ status: "signed_in", uid: "uid-a" });
+  await wait();
+  fake.emit(
+    "uid-a",
+    { plan: "professional", billingStatus: "expired", entitlementActive: false },
+    true
+  );
+  assert.equal(session.getView().plan, "free");
+  session.dispose();
+}
+
+{
+  // Round 3 queued persist: savedAt is acceptance-time, not a later rolled-back now()
+  const T1 = NOW + 5_000;
+  const T0 = NOW - 1_000;
+  const clock = { now: NOW };
+  const data: Record<string, string> = {};
+  let gate: Promise<void> | null = null;
+  let releaseGate: () => void = () => {};
+  const store: SubscriptionKeyValueStore & { data: Record<string, string> } = {
+    data,
+    async getItem(key) {
+      return Object.prototype.hasOwnProperty.call(data, key) ? data[key] : null;
+    },
+    async setItem(key, value) {
+      if (gate) await gate;
+      data[key] = value;
+    },
+    async removeItem(key) {
+      delete data[key];
+    },
+  };
+  const fake = createFakeListener();
+  const session = createSubscriptionSession({
+    listen: fake.listen,
+    read: async () => null,
+    store,
+    now: () => clock.now,
+    onChange: () => {},
+  });
+  gate = new Promise<void>((resolve) => {
+    releaseGate = resolve;
+  });
+  session.setAuth({ status: "signed_in", uid: "uid-a" });
+  await wait();
+  fake.emit("uid-a", professionalDoc(), false);
+  await wait();
+  clock.now = T1;
+  fake.emit(
+    "uid-a",
+    {
+      plan: "starter",
+      billingStatus: "active",
+      entitlementActive: true,
+      currentPeriodEnd: FUTURE,
+    },
+    false
+  );
+  clock.now = T0;
+  releaseGate();
+  gate = null;
+  await session.flushWrites();
+  const env = JSON.parse(store.data[SUBSCRIPTION_CACHE_KEY]!) as {
+    uid: string;
+    savedAt: number;
+    status: { plan: string };
+  };
+  assert.equal(env.uid, "uid-a");
+  assert.equal(env.status.plan, "starter");
+  assert.equal(env.savedAt, T1);
+  assert.notEqual(env.savedAt, T0);
+  const restarted = await readSubscriptionCache({ store, uid: "uid-a", nowMs: T0 });
+  assert.equal(restarted, null);
+  session.dispose();
+}
+
+{
+  // Ordinary no-rollback authoritative persist still records acceptance-time savedAt
+  const store = memoryStore();
+  const fake = createFakeListener();
+  const session = createSubscriptionSession({
+    listen: fake.listen,
+    read: async () => null,
+    store,
+    now: () => NOW,
+    onChange: () => {},
+  });
+  session.setAuth({ status: "signed_in", uid: "uid-a" });
+  await wait();
+  fake.emit("uid-a", professionalDoc(), false);
+  await session.flushWrites();
+  const env = JSON.parse(store.data[SUBSCRIPTION_CACHE_KEY]!) as { savedAt: number; status: { plan: string } };
+  assert.equal(env.savedAt, NOW);
+  assert.equal(env.status.plan, "professional");
   session.dispose();
 }
 

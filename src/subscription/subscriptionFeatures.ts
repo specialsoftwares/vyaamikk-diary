@@ -100,22 +100,25 @@ export function featuresForSubscription(status: ClientSubscriptionStatus): Subsc
 }
 
 /**
- * Firestore SDK cache / other non-authoritative evidence may only preserve
- * or reduce the already-accepted same-uid plan. It must never widen:
- * free→paid or a lower plan→a higher plan.
+ * Firestore SDK cache is not a second paid-lifecycle authority.
  *
- * `accepted` and `candidate` should already be time-reduced. Equal rank
- * keeps `accepted` so SDK-cache timestamps cannot extend access.
+ * After time reduction of both sides:
+ * - candidate effective free → free (revoke / fail closed is allowed)
+ * - accepted free + candidate paid → keep free
+ * - accepted paid + candidate paid → keep the already-accepted status
+ *
+ * Never install a different paid lifecycle (plan, timestamps, billingStatus,
+ * platform, renewal, scheduledPlan) from non-authoritative evidence.
  */
 export function preferNonAuthoritativeStatus(
   accepted: ClientSubscriptionStatus,
   candidate: ClientSubscriptionStatus | null
 ): ClientSubscriptionStatus {
   if (candidate == null) return accepted;
-  const acceptedRank = subscriptionPlanRank(effectivePlanForSubscription(accepted));
-  const candidateRank = subscriptionPlanRank(effectivePlanForSubscription(candidate));
-  if (candidateRank > acceptedRank) return accepted;
-  if (candidateRank < acceptedRank) return candidate;
+  const acceptedPlan = effectivePlanForSubscription(accepted);
+  const candidatePlan = effectivePlanForSubscription(candidate);
+  if (candidatePlan === "free") return candidate;
+  if (acceptedPlan === "free") return accepted;
   return accepted;
 }
 
