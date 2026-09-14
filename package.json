@@ -120,6 +120,11 @@
     "test:subscription-provider": "npx --yes tsx src/subscription/subscriptionSession.test.ts && npx --yes tsx src/subscription/subscriptionViewBinding.test.ts",
     "test:subscription-cache": "npx --yes tsx src/subscription/subscriptionCache.test.ts",
     "test:subscription-plan-static": "npx --yes tsx src/subscription/subscriptionPlan.static.test.ts",
+    "test:iap-catalog": "npx --yes tsx src/billing/iap/iapCatalog.test.ts",
+    "test:iap-offers": "npx --yes tsx src/billing/iap/iapOffers.test.ts",
+    "test:iap-pending": "npx --yes tsx src/billing/iap/iapPendingPurchase.test.ts",
+    "test:iap-processor": "npx --yes tsx src/billing/iap/iapPurchaseProcessor.test.ts && npx --yes tsx src/billing/iap/iapSession.test.ts",
+    "test:iap-static": "npx --yes tsx src/billing/iap/iap.static.test.ts",
     "test:curtain-phases": "npx --yes tsx src/components/ui/curtainSheetPhases.test.ts",
     "test:flip-lock": "npx --yes tsx src/components/you/identityCardFlipController.test.ts",
     "test:language-transition": "npx --yes tsx src/i18n/languageTransitionController.test.ts",
@@ -175,7 +180,7 @@
     "test:boot-production-startup": "npx --yes tsx src/boot/bootProductionStartup.contract.test.ts",
     "functions:build": "npm --prefix functions run build",
     "functions:lint": "npm --prefix functions run lint",
-    "lint:eslint": "eslint \"src/config/**/*.{ts,tsx}\" \"src/startup/**/*.{ts,tsx}\" \"src/auth/**/*.{ts,tsx}\" \"src/services/device/**/*.{ts,tsx}\" \"src/services/auth/productionMockOtpIsolation.test.ts\" \"src/utils/date.ts\" \"src/utils/localBusinessDate.test.ts\" \"src/services/search/buildSearchableText.ts\" \"src/services/statutory/statutoryPromptSession.ts\" \"src/subscription/**/*.{ts,tsx}\" \"app/_layout.tsx\" --max-warnings 40",
+    "lint:eslint": "eslint \"src/config/**/*.{ts,tsx}\" \"src/startup/**/*.{ts,tsx}\" \"src/auth/**/*.{ts,tsx}\" \"src/services/device/**/*.{ts,tsx}\" \"src/services/auth/productionMockOtpIsolation.test.ts\" \"src/utils/date.ts\" \"src/utils/localBusinessDate.test.ts\" \"src/services/search/buildSearchableText.ts\" \"src/services/statutory/statutoryPromptSession.ts\" \"src/subscription/**/*.{ts,tsx}\" \"src/billing/iap/**/*.{ts,tsx}\" \"app/_layout.tsx\" --max-warnings 40",
     "lint": "npm run typecheck && npm run lint:eslint"
   },
   "dependencies": {
@@ -205,6 +210,7 @@
     "expo-font": "~14.0.12",
     "expo-glass-effect": "~0.1.10",
     "expo-haptics": "~15.0.8",
+    "expo-iap": "5.6.0",
     "expo-image-picker": "~17.0.11",
     "expo-linear-gradient": "~15.0.8",
     "expo-linking": "~8.0.12",

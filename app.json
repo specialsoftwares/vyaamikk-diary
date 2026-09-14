@@ -52,6 +52,7 @@
           }
         }
       ],
+      "expo-iap",
       [
         "expo-router",
         {
