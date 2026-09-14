@@ -72,6 +72,7 @@ const iapSrc = iapFiles.map((f) => ({
   assert.match(processor, /validateAndActivateAndroid/);
   assert.match(processor, /validateAndActivateIOS/);
   assert.match(processor, /finishedIosTokens/);
+  assert.match(processor, /stillCurrent/);
   assert.doesNotMatch(processor, /acknowledgePurchaseAndroid/);
 }
 
@@ -85,6 +86,16 @@ const iapSrc = iapFiles.map((f) => ({
   assert.match(session, /reconnectBudget/);
   assert.match(session, /finishedIosTokens/);
   assert.match(session, /canLaunchNativeSheet/);
+  assert.match(session, /isCurrentOperation/);
+  assert.match(session, /releasePurchaseIfCurrent/);
+  assert.match(session, /publishResultIfCurrent/);
+  assert.match(session, /emitIfCurrent/);
+  assert.match(session, /purchaseOwnerGen/);
+  assert.match(session, /processedTokens = new Set/);
+  assert.match(session, /finishedIosTokens = new Set/);
+  assert.doesNotMatch(session, /processedTokens\.clear\(/);
+  assert.doesNotMatch(session, /finishedIosTokens\.clear\(/);
+  assert.match(session, /compensateStaleStorage/);
   const pendingIdx = session.indexOf("writePendingPurchase");
   const reqIdx = session.lastIndexOf("requestPurchase");
   assert.ok(pendingIdx >= 0 && reqIdx > pendingIdx);

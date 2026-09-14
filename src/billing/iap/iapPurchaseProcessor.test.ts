@@ -156,6 +156,7 @@ function deps(args: {
     currentUid: () => uid,
     currentGeneration: () => gen.n,
     generation: 1,
+    operationUid: uid,
   };
 }
 
@@ -636,6 +637,56 @@ async function testSuccessfulFinishDuplicateCannotCreatePhantomUnfinished() {
   assert.equal(store.data[PENDING_PURCHASE_CACHE_KEY], undefined);
 }
 
+async function testIosFinishedTokenDoesNotClearUnrelatedPending() {
+  const store = memoryStore();
+  const spy = {
+    android: [],
+    ios: [] as { signedTransactionInfo: string; expectedCanonicalSku?: string }[],
+    finish: [] as StorePurchase[],
+    purchases: [],
+  };
+  const finished = new Set<string>(["header.payload.signature"]);
+  const bPending: PendingPurchaseEnvelope = {
+    version: 1,
+    uid: "uid-b",
+    platform: "ios",
+    canonicalSku: "vyd_starter_monthly",
+    productId: "com.specialsoftwares.vyaamikkdiary.starter.monthly",
+    stage: "intent_created",
+    initiatedAt: 10,
+    updatedAt: 10,
+  };
+  await seedPending(store, bPending);
+  const live = { uid: "uid-b", gen: 2 };
+  const d = deps({
+    platform: "ios",
+    store,
+    native: fakeNative(spy),
+    backend: fakeBackend(spy),
+    uid: "uid-b",
+  });
+  const out = await processStorePurchase({
+    deps: {
+      ...d,
+      currentUid: () => live.uid,
+      currentGeneration: () => live.gen,
+      generation: 2,
+      operationUid: "uid-b",
+    },
+    purchase: iosPurchase(),
+    pending: bPending,
+    source: "purchase",
+    processedTokens: new Set(),
+    finishedIosTokens: finished,
+  });
+  assert.equal(out.result.kind, "failed");
+  assert.equal(out.pending?.uid, "uid-b");
+  assert.equal(out.pending?.canonicalSku, "vyd_starter_monthly");
+  assert.ok(store.data[PENDING_PURCHASE_CACHE_KEY]);
+  assert.equal(spy.finish.length, 0);
+  assert.equal(spy.ios.length, 0);
+}
+
 async function main() {
   await testAndroidPendingDoesNotValidate();
   await testAndroidPurchasedSendsTokenNotCurrentPlan();
@@ -651,6 +702,7 @@ async function main() {
   await testDuplicateIosSuccessfulCallbackFinishesOnce();
   await testVerifiedUnfinishedIosRetriesFinish();
   await testSuccessfulFinishDuplicateCannotCreatePhantomUnfinished();
+  await testIosFinishedTokenDoesNotClearUnrelatedPending();
   console.log("iapPurchaseProcessor.test.ts: ok");
 }
 

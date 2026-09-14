@@ -77,6 +77,12 @@ function createHarness(args: {
   fetchProducts?: () => Promise<StoreProductLike[]>;
   getAvailablePurchases?: () => Promise<StorePurchase[]>;
   finishTransactionIOS?: () => Promise<void>;
+  prepareAndroidBillingAccount?: () => Promise<{ obfuscatedAccountId: string }>;
+  prepareIOSBillingAccount?: () => Promise<{ appAccountToken: string }>;
+  validateAndActivateIOS?: (input: {
+    signedTransactionInfo: string;
+    expectedCanonicalSku?: string;
+  }) => Promise<{ alreadyProcessed: boolean }>;
 }) {
   const store = args.store ?? memoryStore();
   const calls = {
@@ -128,14 +134,14 @@ function createHarness(args: {
       calls.purchaseListeners += 1;
       onPurchase = listener;
       return () => {
-        onPurchase = null;
+        if (onPurchase === listener) onPurchase = null;
       };
     },
     addPurchaseErrorListener(listener) {
       calls.errorListeners += 1;
       onError = listener;
       return () => {
-        onError = null;
+        if (onError === listener) onError = null;
       };
     },
   };
@@ -143,6 +149,7 @@ function createHarness(args: {
   const backend: IapBackend = {
     async prepareAndroidBillingAccount() {
       calls.prepareAndroid += 1;
+      if (args.prepareAndroidBillingAccount) return args.prepareAndroidBillingAccount();
       return { obfuscatedAccountId: "obf-server-aaa" };
     },
     async validateAndActivateAndroid(input) {
@@ -151,10 +158,12 @@ function createHarness(args: {
     },
     async prepareIOSBillingAccount() {
       calls.prepareIos += 1;
+      if (args.prepareIOSBillingAccount) return args.prepareIOSBillingAccount();
       return { appAccountToken: "22222222-2222-4222-8222-222222222222" };
     },
     async validateAndActivateIOS(input) {
       calls.validateIos.push(input);
+      if (args.validateAndActivateIOS) return args.validateAndActivateIOS(input);
       return { alreadyProcessed: false };
     },
   };
@@ -730,6 +739,373 @@ async function testVerifiedUnfinishedIosSurvivesUntilFinish() {
   assert.equal(blocked.kind, "already_in_flight");
 }
 
+function gate() {
+  let release = () => {};
+  const wait = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { wait, release: () => release() };
+}
+
+async function flushAsync() {
+  for (let i = 0; i < 20; i += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
+async function testStaleARequestResolveDoesNotReleaseBLock() {
+  let first = true;
+  const g = gate();
+  let started = () => {};
+  const startedP = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const h = createHarness({
+    platform: "android",
+    requestPurchase: async () => {
+      if (first) {
+        first = false;
+        started();
+        await g.wait;
+      }
+    },
+  });
+  await h.session.setAuth({ status: "signed_in", uid: "uid-a" });
+  const purchaseA = h.session.purchase("vyd_professional_yearly");
+  await startedP;
+  await h.session.setAuth({ status: "signed_in", uid: "uid-b" });
+  const purchaseB = await h.session.purchase("vyd_professional_yearly");
+  assert.equal(purchaseB.kind, "sheet_launched");
+  assert.equal(h.session.getView().purchaseInFlight, true);
+  assert.equal(h.session.getView().pending?.uid, "uid-b");
+  const bLast = h.session.getView().lastResult;
+  g.release();
+  const aResult = await purchaseA;
+  assert.equal(aResult.kind, "failed");
+  assert.equal(h.session.getView().purchaseInFlight, true);
+  assert.equal(h.session.getView().pending?.uid, "uid-b");
+  assert.equal(h.session.getView().lastResult, bLast);
+  const secondB = await h.session.purchase("vyd_professional_monthly");
+  assert.equal(secondB.kind, "already_in_flight");
+  assert.equal(h.calls.requestPurchase.length, 2);
+}
+
+async function testStaleARequestRejectDoesNotReleaseBLock() {
+  let first = true;
+  const g = gate();
+  let started = () => {};
+  const startedP = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const h = createHarness({
+    platform: "android",
+    requestPurchase: async () => {
+      if (first) {
+        first = false;
+        started();
+        await g.wait;
+        throw new Error("stale A request failed");
+      }
+    },
+  });
+  await h.session.setAuth({ status: "signed_in", uid: "uid-a" });
+  const purchaseA = h.session.purchase("vyd_professional_yearly");
+  await startedP;
+  await h.session.setAuth({ status: "signed_in", uid: "uid-b" });
+  const purchaseB = await h.session.purchase("vyd_professional_yearly");
+  assert.equal(purchaseB.kind, "sheet_launched");
+  const bLast = h.session.getView().lastResult;
+  g.release();
+  const aResult = await purchaseA;
+  assert.equal(aResult.kind, "failed");
+  assert.equal(h.session.getView().purchaseInFlight, true);
+  assert.equal(h.session.getView().pending?.uid, "uid-b");
+  assert.equal(h.session.getView().lastResult, bLast);
+  const secondB = await h.session.purchase("vyd_professional_monthly");
+  assert.equal(secondB.kind, "already_in_flight");
+  assert.equal(h.calls.requestPurchase.length, 2);
+}
+
+async function testStalePrepareDoesNotClearBPurchase() {
+  let first = true;
+  const g = gate();
+  let started = () => {};
+  const startedP = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const h = createHarness({
+    platform: "android",
+    prepareAndroidBillingAccount: async () => {
+      if (first) {
+        first = false;
+        started();
+        await g.wait;
+      }
+      return { obfuscatedAccountId: "obf-server-aaa" };
+    },
+  });
+  await h.session.setAuth({ status: "signed_in", uid: "uid-a" });
+  const purchaseA = h.session.purchase("vyd_professional_yearly");
+  await startedP;
+  await h.session.setAuth({ status: "signed_in", uid: "uid-b" });
+  const purchaseB = await h.session.purchase("vyd_professional_yearly");
+  assert.equal(purchaseB.kind, "sheet_launched");
+  assert.equal(h.session.getView().purchaseInFlight, true);
+  g.release();
+  await purchaseA;
+  assert.equal(h.session.getView().purchaseInFlight, true);
+  assert.equal(h.session.getView().pending?.uid, "uid-b");
+  const secondB = await h.session.purchase("vyd_professional_monthly");
+  assert.equal(secondB.kind, "already_in_flight");
+}
+
+async function testStaleCatalogDoesNotClearBCatalog() {
+  let first = true;
+  const g = gate();
+  let started = () => {};
+  const startedP = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const h = createHarness({
+    platform: "android",
+    fetchProducts: async () => {
+      if (first) {
+        first = false;
+        started();
+        await g.wait;
+      }
+      return [standardAndroidProduct()];
+    },
+  });
+  await h.session.setAuth({ status: "signed_in", uid: "uid-a" });
+  const loadA = h.session.loadCatalog();
+  await startedP;
+  await h.session.setAuth({ status: "signed_in", uid: "uid-b" });
+  const catalogB = await h.session.loadCatalog();
+  assert.ok(catalogB.some((item) => item.canonicalSku === "vyd_professional_yearly" && item.available));
+  g.release();
+  await loadA;
+  const after = h.session.getView().catalog;
+  assert.ok(after.some((item) => item.canonicalSku === "vyd_professional_yearly" && item.available));
+  assert.equal(after.length, catalogB.length);
+}
+
+async function testStaleRestoreDoesNotOverwriteBLastResult() {
+  let first = true;
+  const g = gate();
+  let started = () => {};
+  const startedP = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const h = createHarness({
+    platform: "android",
+    getAvailablePurchases: async () => {
+      if (first) {
+        first = false;
+        started();
+        await g.wait;
+        throw new Error("store down");
+      }
+      return [];
+    },
+  });
+  await h.session.setAuth({ status: "signed_in", uid: "uid-a" });
+  const restoreA = h.session.restorePurchases();
+  await startedP;
+  await h.session.setAuth({ status: "signed_in", uid: "uid-b" });
+  const restoreB = await h.session.restorePurchases();
+  assert.equal(restoreB.kind, "verified");
+  const bLast = h.session.getView().lastResult;
+  g.release();
+  await restoreA;
+  assert.equal(h.session.getView().lastResult, bLast);
+  assert.equal(h.session.getView().lastResult?.kind, "verified");
+}
+
+function createDeferredRemoveStore(): IapKeyValueStore & {
+  data: Record<string, string>;
+  waitForRemoveItem: () => Promise<void>;
+  releaseRemoveItem: () => void;
+} {
+  const data: Record<string, string> = {};
+  let started = () => {};
+  const startedP = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const g = gate();
+  let firstRemove = true;
+  return {
+    data,
+    waitForRemoveItem: () => startedP,
+    releaseRemoveItem: () => g.release(),
+    async getItem(key) {
+      return Object.prototype.hasOwnProperty.call(data, key) ? data[key] : null;
+    },
+    async setItem(key, value) {
+      data[key] = value;
+    },
+    async removeItem(key) {
+      if (firstRemove) {
+        firstRemove = false;
+        started();
+        await g.wait;
+      }
+      delete data[key];
+    },
+  };
+}
+
+async function testOldAuthCleanupDoesNotCloseNewAuth() {
+  const store = createDeferredRemoveStore();
+  const h = createHarness({ platform: "android", store });
+  await h.session.setAuth({ status: "signed_in", uid: "uid-a" });
+  await h.session.purchase("vyd_professional_yearly");
+  assert.equal(h.session.getView().connected, true);
+  const authB = h.session.setAuth({ status: "signed_in", uid: "uid-b" });
+  await store.waitForRemoveItem();
+  await h.session.setAuth({ status: "signed_in", uid: "uid-c" });
+  const endsAfterC = h.calls.end;
+  const listenersAfterC = h.calls.purchaseListeners;
+  store.releaseRemoveItem();
+  await authB;
+  assert.equal(h.session.getView().ownerUid, "uid-c");
+  assert.equal(h.session.getView().connected, true);
+  assert.equal(h.calls.end, endsAfterC);
+  h.emitPurchase({
+    store: "google",
+    productId: "vyd_professional",
+    purchaseState: "purchased",
+    purchaseToken: "c-token",
+    nativePurchase: {},
+  });
+  assert.ok(h.calls.purchaseListeners >= listenersAfterC);
+}
+
+async function testAuthChangeDuringEndConnection() {
+  let firstEnd = true;
+  const g = gate();
+  let started = () => {};
+  const startedP = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const h = createHarness({
+    platform: "android",
+    endConnection: async () => {
+      if (firstEnd) {
+        firstEnd = false;
+        started();
+        await g.wait;
+      }
+    },
+  });
+  await h.session.setAuth({ status: "signed_in", uid: "uid-a" });
+  const authB = h.session.setAuth({ status: "signed_in", uid: "uid-b" });
+  await startedP;
+  const authC = h.session.setAuth({ status: "signed_in", uid: "uid-c" });
+  g.release();
+  await authB;
+  await authC;
+  assert.equal(h.session.getView().ownerUid, "uid-c");
+  assert.equal(h.session.getView().connected, true);
+}
+
+async function testStaleInitAfterNewInitFalseCleansUp() {
+  let resolveA = (_value: boolean) => {};
+  let firstInit = true;
+  let started = () => {};
+  const startedP = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const h = createHarness({
+    platform: "android",
+    initConnection: async () => {
+      if (firstInit) {
+        firstInit = false;
+        started();
+        return new Promise<boolean>((resolve) => {
+          resolveA = resolve;
+        });
+      }
+      return false;
+    },
+  });
+  const authA = h.session.setAuth({ status: "signed_in", uid: "uid-a" });
+  await startedP;
+  await h.session.setAuth({ status: "signed_in", uid: "uid-b" });
+  assert.equal(h.session.getView().connected, false);
+  const endsBefore = h.calls.end;
+  resolveA(true);
+  await authA;
+  assert.ok(h.calls.end > endsBefore);
+  assert.equal(h.session.getView().connected, false);
+  assert.equal(h.session.getView().ownerUid, "uid-b");
+}
+
+async function testIosATokenDoesNotContaminateBSession() {
+  const iosProduct: StoreProductLike = {
+    id: "com.specialsoftwares.vyaamikkdiary.professional.yearly",
+    type: "subs",
+    platform: "ios",
+    displayPrice: "$19.99",
+    currency: "USD",
+    introductoryPricePaymentModeIOS: "empty",
+  };
+  const starterProduct: StoreProductLike = {
+    id: "com.specialsoftwares.vyaamikkdiary.starter.monthly",
+    type: "subs",
+    platform: "ios",
+    displayPrice: "$2.99",
+    currency: "USD",
+    introductoryPricePaymentModeIOS: "empty",
+  };
+  const g = gate();
+  let started = () => {};
+  const startedP = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  let firstValidate = true;
+  const h = createHarness({
+    platform: "ios",
+    products: [iosProduct, starterProduct],
+    validateAndActivateIOS: async () => {
+      if (firstValidate) {
+        firstValidate = false;
+        started();
+        await g.wait;
+      }
+      return { alreadyProcessed: false };
+    },
+  });
+  await h.session.setAuth({ status: "signed_in", uid: "uid-a" });
+  await h.session.purchase("vyd_professional_yearly");
+  const aPurchase = {
+    store: "apple" as const,
+    productId: "com.specialsoftwares.vyaamikkdiary.professional.yearly",
+    purchaseState: "purchased" as const,
+    purchaseToken: "header.payload.signature",
+    nativePurchase: {},
+  };
+  h.emitPurchase(aPurchase);
+  await startedP;
+  await h.session.setAuth({ status: "signed_in", uid: "uid-b" });
+  const bBuy = await h.session.purchase("vyd_starter_monthly");
+  assert.equal(bBuy.kind, "sheet_launched");
+  assert.equal(h.session.getView().pending?.uid, "uid-b");
+  const validatesAfterB = h.calls.validateIos.length;
+  g.release();
+  await flushAsync();
+  assert.equal(h.session.getView().pending?.uid, "uid-b");
+  assert.equal(h.session.getView().pending?.canonicalSku, "vyd_starter_monthly");
+  assert.equal(h.session.getView().purchaseInFlight, true);
+  assert.notEqual(h.session.getView().lastResult?.kind, "verified");
+  h.emitPurchase(aPurchase);
+  await flushAsync();
+  assert.equal(h.session.getView().pending?.uid, "uid-b");
+  assert.equal(h.session.getView().pending?.canonicalSku, "vyd_starter_monthly");
+  assert.ok(h.calls.validateIos.length >= validatesAfterB);
+  assert.notEqual(h.session.getView().lastResult?.kind, "verified");
+}
+
 async function main() {
   await testNoPurchaseSheetOnStartup();
   await testExpoGoAndWebUnsupported();
@@ -754,6 +1130,15 @@ async function main() {
   await testFailedRecoveryQueryKeepsRecoverableState();
   await testStorePendingSurvivesEmptyAndFailedRecovery();
   await testVerifiedUnfinishedIosSurvivesUntilFinish();
+  await testStaleARequestResolveDoesNotReleaseBLock();
+  await testStaleARequestRejectDoesNotReleaseBLock();
+  await testStalePrepareDoesNotClearBPurchase();
+  await testStaleCatalogDoesNotClearBCatalog();
+  await testStaleRestoreDoesNotOverwriteBLastResult();
+  await testOldAuthCleanupDoesNotCloseNewAuth();
+  await testAuthChangeDuringEndConnection();
+  await testStaleInitAfterNewInitFalseCleansUp();
+  await testIosATokenDoesNotContaminateBSession();
   console.log("iapSession.test.ts: ok");
 }
 

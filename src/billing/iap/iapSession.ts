@@ -3,6 +3,9 @@
  *
  * Do not attach listeners from screens. Do not launch a purchase sheet on
  * startup. Store events never mutate feature entitlement.
+ *
+ * After any await, shared session state may be mutated only when
+ * generation + uid still match the operation that started the work.
  */
 
 import {
@@ -67,20 +70,29 @@ export function createIapSession(deps: IapSessionDeps) {
   let uid: string | null = null;
   let connected = false;
   let connectionOwnerGen: number | null = null;
+  let listenerOwnerGen: number | null = null;
   let initEpoch = 0;
+  const inFlightInits = new Set<number>();
+  let connectionEnds = Promise.resolve();
   let reconnectBudget = 0;
   let purchaseInFlight = false;
+  let purchaseOwnerGen: number | null = null;
+  let purchaseOwnerUid: string | null = null;
   let catalog: CanonicalSkuAvailability[] = [];
   let pending: PendingPurchaseEnvelope | null = null;
   let lastResult: PurchaseFlowResult | null = null;
   let removeUpdated: (() => void) | null = null;
   let removeError: (() => void) | null = null;
-  const processedTokens = new Set<string>();
-  const finishedIosTokens = new Set<string>();
+  let processedTokens = new Set<string>();
+  let finishedIosTokens = new Set<string>();
   let processQueue: Promise<void> = Promise.resolve();
 
   const storePlatform: IapPlatform | null =
     deps.platform === "android" || deps.platform === "ios" ? deps.platform : null;
+
+  function isCurrentOperation(forGen: number, forUid: string | null): boolean {
+    return generation === forGen && uid === forUid;
+  }
 
   function mutationAuthFor(forUid: string, forGen: number) {
     return {
@@ -95,9 +107,7 @@ export function createIapSession(deps: IapSessionDeps) {
     deps.onChange({
       ownerUid: uid,
       available: deps.capability.available && storePlatform != null && uid != null,
-      unavailableReason: !uid
-        ? "not_signed_in"
-        : deps.capability.reason,
+      unavailableReason: !uid ? "not_signed_in" : deps.capability.reason,
       connected,
       catalog,
       pending,
@@ -106,7 +116,45 @@ export function createIapSession(deps: IapSessionDeps) {
     });
   }
 
-  function processorDeps(forGen: number): PurchaseProcessorDeps | null {
+  function emitIfCurrent(forGen: number, forUid: string | null) {
+    if (!isCurrentOperation(forGen, forUid)) return;
+    emit();
+  }
+
+  function publishResultIfCurrent(
+    forGen: number,
+    forUid: string | null,
+    result: PurchaseFlowResult
+  ): PurchaseFlowResult {
+    if (!isCurrentOperation(forGen, forUid)) return result;
+    lastResult = result;
+    emit();
+    return result;
+  }
+
+  function beginPurchaseLock(forGen: number, forUid: string) {
+    purchaseInFlight = true;
+    purchaseOwnerGen = forGen;
+    purchaseOwnerUid = forUid;
+  }
+
+  function releasePurchaseIfCurrent(forGen: number, forUid: string | null) {
+    if (!isCurrentOperation(forGen, forUid)) return;
+    if (purchaseOwnerGen !== forGen || purchaseOwnerUid !== forUid) return;
+    purchaseInFlight = false;
+    purchaseOwnerGen = null;
+    purchaseOwnerUid = null;
+  }
+
+  function authChurnResult(forUid: string | null): PurchaseFlowResult {
+    return {
+      kind: "failed",
+      recoverable: true,
+      message: forUid ? "Account changed." : "Signed out.",
+    };
+  }
+
+  function processorDeps(forGen: number, forUid: string | null): PurchaseProcessorDeps | null {
     if (!storePlatform) return null;
     return {
       native: deps.native,
@@ -117,29 +165,65 @@ export function createIapSession(deps: IapSessionDeps) {
       currentUid: () => uid,
       currentGeneration: () => generation,
       generation: forGen,
+      operationUid: forUid,
     };
   }
 
-  function detachListeners() {
+  function detachListenersOwnedBy(forGen: number) {
+    if (listenerOwnerGen !== forGen) return;
     removeUpdated?.();
     removeError?.();
     removeUpdated = null;
     removeError = null;
+    listenerOwnerGen = null;
   }
 
-  function markDisconnected(forGen: number) {
-    if (generation !== forGen) return;
+  function enqueueConnectionEnd(work: () => Promise<void>): Promise<void> {
+    const run = connectionEnds.then(work, work);
+    connectionEnds = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
+  }
+
+  function markDisconnected(forGen: number, forUid: string | null) {
+    if (!isCurrentOperation(forGen, forUid)) return;
     connected = false;
     if (connectionOwnerGen === forGen) connectionOwnerGen = null;
-    detachListeners();
+    detachListenersOwnedBy(forGen);
+  }
+
+  async function compensateStaleStorage(
+    envelope: PendingPurchaseEnvelope,
+    forGen: number
+  ): Promise<void> {
+    await clearPendingPurchaseIfUid(
+      deps.store,
+      envelope.uid,
+      mutationAuthFor(envelope.uid, forGen)
+    );
+  }
+
+  async function compensateStalePurchase(
+    envelope: PendingPurchaseEnvelope,
+    forGen: number,
+    forUid: string
+  ): Promise<PurchaseFlowResult> {
+    await compensateStaleStorage(envelope, forGen);
+    const result = authChurnResult(forUid);
+    if (!isCurrentOperation(forGen, forUid)) return result;
+    releasePurchaseIfCurrent(forGen, forUid);
+    if (pending?.uid === envelope.uid) pending = null;
+    lastResult = result;
+    emit();
+    return result;
   }
 
   async function abandonNonDurablePending(forUid: string, forGen: number) {
-    if (!pending || pending.uid !== forUid) return;
-    if (isDurablePendingStage(pending.stage)) return;
     await clearPendingPurchaseIfUid(deps.store, forUid, mutationAuthFor(forUid, forGen));
-    if (generation !== forGen) return;
-    if (pending?.uid === forUid && !isDurablePendingStage(pending.stage)) {
+    if (!isCurrentOperation(forGen, forUid)) return;
+    if (pending?.uid === forUid && pending && !isDurablePendingStage(pending.stage)) {
       pending = null;
     }
   }
@@ -149,26 +233,29 @@ export function createIapSession(deps: IapSessionDeps) {
     source: "purchase" | "recovery" | "restore"
   ): Promise<void> {
     const forGen = generation;
+    const forUid = uid;
+    const tokens = processedTokens;
+    const finished = finishedIosTokens;
     const run = async () => {
-      if (generation !== forGen) return;
-      const pdeps = processorDeps(forGen);
+      if (!isCurrentOperation(forGen, forUid)) return;
+      const pdeps = processorDeps(forGen, forUid);
       if (!pdeps) return;
-      const latest = uid ? await readPendingPurchase({ store: deps.store, uid }) : null;
-      if (generation !== forGen) return;
+      const latest = forUid ? await readPendingPurchase({ store: deps.store, uid: forUid }) : null;
+      if (!isCurrentOperation(forGen, forUid)) return;
       pending = latest;
       const out = await processStorePurchase({
         deps: pdeps,
         purchase,
         pending,
         source,
-        processedTokens,
-        finishedIosTokens,
+        processedTokens: tokens,
+        finishedIosTokens: finished,
       });
-      if (generation !== forGen) return;
+      if (!isCurrentOperation(forGen, forUid)) return;
       pending = out.pending;
       lastResult = out.result;
       if (out.result.kind !== "store_pending") {
-        purchaseInFlight = false;
+        releasePurchaseIfCurrent(forGen, forUid);
       }
       emit();
     };
@@ -181,62 +268,80 @@ export function createIapSession(deps: IapSessionDeps) {
   }
 
   function attachListeners(forGen: number) {
-    detachListeners();
+    if (generation !== forGen) return;
+    if (listenerOwnerGen != null && listenerOwnerGen > forGen) return;
+    if (listenerOwnerGen != null && listenerOwnerGen !== forGen) {
+      detachListenersOwnedBy(listenerOwnerGen);
+    }
     removeUpdated = deps.native.addPurchaseUpdatedListener((purchase) => {
-      if (generation !== forGen) return;
+      if (generation !== forGen || listenerOwnerGen !== forGen) return;
       void handlePurchase(purchase, "purchase");
     });
     removeError = deps.native.addPurchaseErrorListener((error) => {
-      if (generation !== forGen) return;
-      const pdeps = processorDeps(forGen);
+      if (generation !== forGen || listenerOwnerGen !== forGen) return;
+      const forUid = uid;
+      const pdeps = processorDeps(forGen, forUid);
       if (!pdeps) return;
       void (async () => {
-        const latest = uid ? await readPendingPurchase({ store: deps.store, uid }) : null;
-        if (generation !== forGen) return;
+        const latest = forUid ? await readPendingPurchase({ store: deps.store, uid: forUid }) : null;
+        if (!isCurrentOperation(forGen, forUid)) return;
         pending = latest;
         const out = await processPurchaseError({ deps: pdeps, error, pending });
-        if (generation !== forGen) return;
+        if (!isCurrentOperation(forGen, forUid)) return;
         pending = out.pending;
         lastResult = out.result;
-        purchaseInFlight = false;
+        releasePurchaseIfCurrent(forGen, forUid);
         emit();
       })();
     });
+    listenerOwnerGen = forGen;
+  }
+
+  async function endNativeConnection(): Promise<void> {
+    try {
+      await deps.native.endConnection();
+    } catch {
+      // ignore
+    }
   }
 
   async function openConnection(forGen: number): Promise<boolean> {
+    await connectionEnds;
     if (generation !== forGen || !uid || !storePlatform || !deps.capability.available) {
       return false;
     }
+    const forUid = uid;
     const myEpoch = ++initEpoch;
+    inFlightInits.add(forGen);
     let didConnect = false;
     try {
       didConnect = (await deps.native.initConnection()) === true;
     } catch {
       didConnect = false;
+    } finally {
+      inFlightInits.delete(forGen);
     }
 
-    if (generation !== forGen || uid == null) {
-      const newerOwns = connectionOwnerGen != null && connectionOwnerGen !== forGen;
-      const newerInitInFlight = initEpoch !== myEpoch;
-      if (didConnect && !newerOwns && !newerInitInFlight) {
-        try {
-          await deps.native.endConnection();
-        } catch {
-          // ignore
-        }
+    if (!isCurrentOperation(forGen, forUid) || uid == null) {
+      const newerOwns = connectionOwnerGen != null && connectionOwnerGen > forGen;
+      const newerInFlight = [...inFlightInits].some((g) => g > forGen);
+      if (didConnect && !newerOwns && !newerInFlight) {
+        await enqueueConnectionEnd(endNativeConnection);
       }
       return false;
     }
 
-    if (initEpoch !== myEpoch) {
+    if (connectionOwnerGen != null && connectionOwnerGen > forGen) {
+      return false;
+    }
+    if (initEpoch !== myEpoch && connectionOwnerGen != null && connectionOwnerGen > forGen) {
       return false;
     }
 
     if (!didConnect) {
       connected = false;
       if (connectionOwnerGen === forGen) connectionOwnerGen = null;
-      detachListeners();
+      detachListenersOwnedBy(forGen);
       return false;
     }
 
@@ -246,8 +351,28 @@ export function createIapSession(deps: IapSessionDeps) {
     return true;
   }
 
-  async function ensureConnected(forGen: number): Promise<boolean> {
-    if (generation !== forGen || !uid || !storePlatform || !deps.capability.available) {
+  async function closeConnectionIfOwned(forGen: number): Promise<void> {
+    if (generation !== forGen) return;
+    if (connectionOwnerGen != null && connectionOwnerGen > forGen) return;
+    if (!connected && connectionOwnerGen == null) return;
+
+    await enqueueConnectionEnd(async () => {
+      if (generation !== forGen) return;
+      if (connectionOwnerGen != null && connectionOwnerGen > forGen) return;
+      if (!connected && connectionOwnerGen == null) return;
+      await endNativeConnection();
+      if (generation !== forGen) return;
+      if (connectionOwnerGen != null && connectionOwnerGen > forGen) return;
+      connected = false;
+      if (connectionOwnerGen != null && connectionOwnerGen <= forGen) {
+        connectionOwnerGen = null;
+      }
+      detachListenersOwnedBy(forGen);
+    });
+  }
+
+  async function ensureConnected(forGen: number, forUid: string | null): Promise<boolean> {
+    if (!isCurrentOperation(forGen, forUid) || !storePlatform || !deps.capability.available) {
       return false;
     }
     if (connected && connectionOwnerGen === forGen) return true;
@@ -256,13 +381,13 @@ export function createIapSession(deps: IapSessionDeps) {
     return openConnection(forGen);
   }
 
-  async function recover(forGen: number) {
-    if (!uid || !storePlatform) return;
-    const existing = await readPendingPurchase({ store: deps.store, uid });
-    if (generation !== forGen) return;
+  async function recover(forGen: number, forUid: string) {
+    if (!isCurrentOperation(forGen, forUid) || !storePlatform) return;
+    const existing = await readPendingPurchase({ store: deps.store, uid: forUid });
+    if (!isCurrentOperation(forGen, forUid)) return;
     pending = existing;
     if (!existing) {
-      emit();
+      emitIfCurrent(forGen, forUid);
       return;
     }
 
@@ -276,9 +401,9 @@ export function createIapSession(deps: IapSessionDeps) {
       await writePendingPurchase({
         store: deps.store,
         envelope: pending,
-        ...mutationAuthFor(uid, forGen),
+        ...mutationAuthFor(forUid, forGen),
       });
-      if (generation !== forGen) return;
+      if (!isCurrentOperation(forGen, forUid)) return;
     }
 
     let purchases: StorePurchase[] = [];
@@ -288,24 +413,25 @@ export function createIapSession(deps: IapSessionDeps) {
         includeSuspendedAndroid: false,
       });
     } catch (error) {
+      if (!isCurrentOperation(forGen, forUid)) return;
       if (isNativeDisconnectError(thrownPurchaseError(error))) {
-        markDisconnected(forGen);
+        markDisconnected(forGen, forUid);
       }
       emit();
       return;
     }
-    if (generation !== forGen) return;
+    if (!isCurrentOperation(forGen, forUid)) return;
     const matching = purchases.filter((p) => p.productId === existing.productId);
     if (matching.length === 0) {
       if (!durable) {
-        await clearPendingPurchaseIfUid(deps.store, uid, mutationAuthFor(uid, forGen));
-        if (generation === forGen) pending = null;
+        await clearPendingPurchaseIfUid(deps.store, forUid, mutationAuthFor(forUid, forGen));
+        if (isCurrentOperation(forGen, forUid)) pending = null;
       }
-      emit();
+      if (isCurrentOperation(forGen, forUid)) emit();
       return;
     }
     for (const purchase of matching) {
-      if (generation !== forGen) return;
+      if (!isCurrentOperation(forGen, forUid)) return;
       await handlePurchase(purchase, "recovery");
     }
   }
@@ -314,16 +440,22 @@ export function createIapSession(deps: IapSessionDeps) {
     const previousUid = uid;
     generation += 1;
     const forGen = generation;
-    processedTokens.clear();
-    finishedIosTokens.clear();
+    processedTokens = new Set();
+    finishedIosTokens = new Set();
     purchaseInFlight = false;
+    purchaseOwnerGen = null;
+    purchaseOwnerUid = null;
     catalog = [];
     lastResult = null;
+    pending = null;
     reconnectBudget = 1;
-    detachListeners();
 
     const nextUid = input.status === "signed_in" ? input.uid : null;
     uid = nextUid;
+
+    if (listenerOwnerGen != null && listenerOwnerGen < forGen) {
+      detachListenersOwnedBy(listenerOwnerGen);
+    }
 
     if (previousUid && previousUid !== nextUid) {
       await clearPendingPurchaseIfUid(
@@ -332,55 +464,56 @@ export function createIapSession(deps: IapSessionDeps) {
         mutationAuthFor(previousUid, forGen)
       );
     }
+    if (generation !== forGen) return;
 
-    if (connected) {
-      try {
-        await deps.native.endConnection();
-      } catch {
-        // ignore
-      }
-      connected = false;
-      connectionOwnerGen = null;
-    }
+    await closeConnectionIfOwned(forGen);
+    if (generation !== forGen) return;
 
     if (!nextUid) {
-      pending = null;
-      emit();
+      emitIfCurrent(forGen, nextUid);
       return;
     }
 
-    pending = await reconcilePendingPurchaseForUid({
+    const reconciled = await reconcilePendingPurchaseForUid({
       store: deps.store,
       ...mutationAuthFor(nextUid, forGen),
     });
     if (generation !== forGen) return;
+    pending = reconciled;
 
     if (!deps.capability.available || !storePlatform) {
-      emit();
+      emitIfCurrent(forGen, nextUid);
       return;
     }
 
     const didConnect = await openConnection(forGen);
     if (generation !== forGen) return;
     if (!didConnect) {
-      connected = false;
-      emit();
+      if (isCurrentOperation(forGen, nextUid)) {
+        connected = false;
+        emit();
+      }
       return;
     }
-    await recover(forGen);
-    emit();
+    await recover(forGen, nextUid);
+    emitIfCurrent(forGen, nextUid);
   }
 
   async function loadCatalog(): Promise<CanonicalSkuAvailability[]> {
     const forGen = generation;
-    if (!uid || !deps.capability.available || !storePlatform) {
-      catalog = [];
-      emit();
-      return catalog;
+    const forUid = uid;
+    if (!forUid || !deps.capability.available || !storePlatform) {
+      if (isCurrentOperation(forGen, forUid)) {
+        catalog = [];
+        emit();
+        return catalog;
+      }
+      return [];
     }
     if (!connected || connectionOwnerGen !== forGen) {
-      const ok = await ensureConnected(forGen);
-      if (!ok || generation !== forGen) {
+      const ok = await ensureConnected(forGen, forUid);
+      if (!isCurrentOperation(forGen, forUid)) return [];
+      if (!ok) {
         catalog = [];
         emit();
         return catalog;
@@ -394,10 +527,12 @@ export function createIapSession(deps: IapSessionDeps) {
     try {
       products = await deps.native.fetchProducts({ skus, type: "subs" });
     } catch (error) {
+      if (!isCurrentOperation(forGen, forUid)) return [];
       if (isNativeDisconnectError(thrownPurchaseError(error))) {
-        markDisconnected(forGen);
-        const ok = await ensureConnected(forGen);
-        if (ok && generation === forGen) {
+        markDisconnected(forGen, forUid);
+        const ok = await ensureConnected(forGen, forUid);
+        if (!isCurrentOperation(forGen, forUid)) return [];
+        if (ok) {
           try {
             products = await deps.native.fetchProducts({ skus, type: "subs" });
           } catch {
@@ -410,7 +545,7 @@ export function createIapSession(deps: IapSessionDeps) {
         products = [];
       }
     }
-    if (generation !== forGen) return catalog;
+    if (!isCurrentOperation(forGen, forUid)) return [];
     catalog = mapStoreProductsToCatalog({
       platform: storePlatform,
       products,
@@ -419,36 +554,15 @@ export function createIapSession(deps: IapSessionDeps) {
     return catalog;
   }
 
-  async function compensateStalePurchase(
-    envelope: PendingPurchaseEnvelope,
-    forGen: number
-  ): Promise<PurchaseFlowResult> {
-    purchaseInFlight = false;
-    await clearPendingPurchaseIfUid(
-      deps.store,
-      envelope.uid,
-      mutationAuthFor(envelope.uid, forGen)
-    );
-    if (pending?.uid === envelope.uid) pending = null;
-    const result: PurchaseFlowResult = {
-      kind: "failed",
-      recoverable: true,
-      message: uid ? "Account changed." : "Signed out.",
-    };
-    lastResult = result;
-    emit();
-    return result;
-  }
-
   async function canLaunchNativeSheet(
     forGen: number,
+    forUid: string,
     envelope: PendingPurchaseEnvelope
   ): Promise<boolean> {
-    if (generation !== forGen) return false;
-    if (!uid || uid !== envelope.uid) return false;
-    const stored = await readPendingPurchase({ store: deps.store, uid });
-    if (generation !== forGen) return false;
-    return stored != null && stored.uid === uid && stored.uid === envelope.uid;
+    if (!isCurrentOperation(forGen, forUid) || forUid !== envelope.uid) return false;
+    const stored = await readPendingPurchase({ store: deps.store, uid: forUid });
+    if (!isCurrentOperation(forGen, forUid)) return false;
+    return stored != null && stored.uid === forUid && stored.uid === envelope.uid;
   }
 
   function purchaseBlocked(): boolean {
@@ -462,55 +576,43 @@ export function createIapSession(deps: IapSessionDeps) {
         kind: "unavailable",
         reason: "products_unavailable",
       };
-      lastResult = result;
-      emit();
-      return result;
+      return publishResultIfCurrent(generation, uid, result);
     }
-    if (!uid) {
+    const forGen = generation;
+    const buyerUid = uid;
+    if (!buyerUid) {
       const result: PurchaseFlowResult = { kind: "unavailable", reason: "not_signed_in" };
-      lastResult = result;
-      emit();
-      return result;
+      return publishResultIfCurrent(forGen, buyerUid, result);
     }
     if (!deps.capability.available || !storePlatform) {
       const result: PurchaseFlowResult = {
         kind: "unavailable",
         reason: deps.capability.reason ?? "native_build_required",
       };
-      lastResult = result;
-      emit();
-      return result;
+      return publishResultIfCurrent(forGen, buyerUid, result);
     }
     if (purchaseBlocked()) {
       const result: PurchaseFlowResult = { kind: "already_in_flight" };
-      lastResult = result;
-      emit();
-      return result;
+      return publishResultIfCurrent(forGen, buyerUid, result);
     }
 
-    const forGen = generation;
-    const buyerUid = uid;
-
     if (!connected || connectionOwnerGen !== forGen) {
-      const ok = await ensureConnected(forGen);
-      if (!ok || generation !== forGen || uid !== buyerUid) {
+      const ok = await ensureConnected(forGen, buyerUid);
+      if (!isCurrentOperation(forGen, buyerUid)) return authChurnResult(buyerUid);
+      if (!ok) {
         const result: PurchaseFlowResult = {
           kind: "failed",
           recoverable: true,
           message: "Store is not connected.",
         };
-        lastResult = result;
-        emit();
-        return result;
+        return publishResultIfCurrent(forGen, buyerUid, result);
       }
     }
 
     const entry = getClientCatalogEntry(canonicalSku);
     if (catalog.length === 0) {
       await loadCatalog();
-      if (generation !== forGen || uid !== buyerUid) {
-        return { kind: "failed", recoverable: true, message: "Signed out." };
-      }
+      if (!isCurrentOperation(forGen, buyerUid)) return authChurnResult(buyerUid);
     }
     const skuState = catalog.find((item) => item.canonicalSku === canonicalSku);
     if (!skuState?.available) {
@@ -518,20 +620,19 @@ export function createIapSession(deps: IapSessionDeps) {
         kind: "unavailable",
         reason: skuState?.unavailableReason ?? "products_unavailable",
       };
-      lastResult = result;
-      emit();
-      return result;
+      return publishResultIfCurrent(forGen, buyerUid, result);
     }
 
-    purchaseInFlight = true;
+    beginPurchaseLock(forGen, buyerUid);
     emit();
+    let envelope: PendingPurchaseEnvelope | null = null;
     try {
       const ids = pendingProductIdForSku(storePlatform, canonicalSku);
       if (storePlatform === "android") {
         const prepared = await deps.backend.prepareAndroidBillingAccount();
-        if (generation !== forGen || uid !== buyerUid) {
-          purchaseInFlight = false;
-          return { kind: "failed", recoverable: true, message: "Signed out." };
+        if (!isCurrentOperation(forGen, buyerUid)) {
+          if (envelope) await compensateStaleStorage(envelope, forGen);
+          return authChurnResult(buyerUid);
         }
         const obfuscatedAccountId = assertServerObfuscatedAccountId({
           obfuscatedAccountId: prepared.obfuscatedAccountId,
@@ -539,16 +640,14 @@ export function createIapSession(deps: IapSessionDeps) {
         });
         const offerToken = skuState.androidOfferToken;
         if (!offerToken) {
-          purchaseInFlight = false;
+          releasePurchaseIfCurrent(forGen, buyerUid);
           const result: PurchaseFlowResult = {
             kind: "unavailable",
             reason: "unsupported_offer",
           };
-          lastResult = result;
-          emit();
-          return result;
+          return publishResultIfCurrent(forGen, buyerUid, result);
         }
-        const envelope: PendingPurchaseEnvelope = {
+        envelope = {
           version: 1,
           uid: buyerUid,
           platform: "android",
@@ -565,21 +664,19 @@ export function createIapSession(deps: IapSessionDeps) {
           ...mutationAuthFor(buyerUid, forGen),
         });
         if (!wrote) {
-          if (generation !== forGen || uid !== buyerUid) {
-            return compensateStalePurchase(envelope, forGen);
+          if (!isCurrentOperation(forGen, buyerUid)) {
+            return compensateStalePurchase(envelope, forGen, buyerUid);
           }
-          purchaseInFlight = false;
+          releasePurchaseIfCurrent(forGen, buyerUid);
           const result: PurchaseFlowResult = {
             kind: "failed",
             recoverable: true,
             message: "Couldn't start purchase.",
           };
-          lastResult = result;
-          emit();
-          return result;
+          return publishResultIfCurrent(forGen, buyerUid, result);
         }
-        if (!(await canLaunchNativeSheet(forGen, envelope))) {
-          return compensateStalePurchase(envelope, forGen);
+        if (!(await canLaunchNativeSheet(forGen, buyerUid, envelope))) {
+          return compensateStalePurchase(envelope, forGen, buyerUid);
         }
         pending = envelope;
         emit();
@@ -588,31 +685,27 @@ export function createIapSession(deps: IapSessionDeps) {
           request: {
             google: {
               skus: [entry.android.productId],
-              subscriptionOffers: [
-                { sku: entry.android.productId, offerToken },
-              ],
+              subscriptionOffers: [{ sku: entry.android.productId, offerToken }],
               obfuscatedAccountId,
             },
           },
         });
       } else {
         const prepared = await deps.backend.prepareIOSBillingAccount();
-        if (generation !== forGen || uid !== buyerUid) {
-          purchaseInFlight = false;
-          return { kind: "failed", recoverable: true, message: "Signed out." };
+        if (!isCurrentOperation(forGen, buyerUid)) {
+          if (envelope) await compensateStaleStorage(envelope, forGen);
+          return authChurnResult(buyerUid);
         }
         if (!isUuidAppAccountToken(prepared.appAccountToken)) {
-          purchaseInFlight = false;
+          releasePurchaseIfCurrent(forGen, buyerUid);
           const result: PurchaseFlowResult = {
             kind: "failed",
             recoverable: true,
             message: "Couldn't start purchase.",
           };
-          lastResult = result;
-          emit();
-          return result;
+          return publishResultIfCurrent(forGen, buyerUid, result);
         }
-        const envelope: PendingPurchaseEnvelope = {
+        envelope = {
           version: 1,
           uid: buyerUid,
           platform: "ios",
@@ -628,21 +721,19 @@ export function createIapSession(deps: IapSessionDeps) {
           ...mutationAuthFor(buyerUid, forGen),
         });
         if (!wrote) {
-          if (generation !== forGen || uid !== buyerUid) {
-            return compensateStalePurchase(envelope, forGen);
+          if (!isCurrentOperation(forGen, buyerUid)) {
+            return compensateStalePurchase(envelope, forGen, buyerUid);
           }
-          purchaseInFlight = false;
+          releasePurchaseIfCurrent(forGen, buyerUid);
           const result: PurchaseFlowResult = {
             kind: "failed",
             recoverable: true,
             message: "Couldn't start purchase.",
           };
-          lastResult = result;
-          emit();
-          return result;
+          return publishResultIfCurrent(forGen, buyerUid, result);
         }
-        if (!(await canLaunchNativeSheet(forGen, envelope))) {
-          return compensateStalePurchase(envelope, forGen);
+        if (!(await canLaunchNativeSheet(forGen, buyerUid, envelope))) {
+          return compensateStalePurchase(envelope, forGen, buyerUid);
         }
         pending = envelope;
         emit();
@@ -656,74 +747,77 @@ export function createIapSession(deps: IapSessionDeps) {
           },
         });
       }
-      if (generation !== forGen || uid !== buyerUid) {
-        return compensateStalePurchase(
-          {
-            version: 1,
-            uid: buyerUid,
-            platform: storePlatform,
-            canonicalSku,
-            productId: pendingProductIdForSku(storePlatform, canonicalSku).productId,
-            stage: "intent_created",
-            initiatedAt: deps.now(),
-            updatedAt: deps.now(),
-          },
-          forGen
-        );
+      if (!isCurrentOperation(forGen, buyerUid)) {
+        if (envelope) await compensateStaleStorage(envelope, forGen);
+        return authChurnResult(buyerUid);
       }
       const result: PurchaseFlowResult = { kind: "sheet_launched" };
       lastResult = result;
       emit();
       return result;
     } catch (error) {
-      purchaseInFlight = false;
       const normalized = thrownPurchaseError(error);
+      if (!isCurrentOperation(forGen, buyerUid)) {
+        if (envelope) await compensateStaleStorage(envelope, forGen);
+        return {
+          kind: "failed",
+          recoverable: true,
+          message: "Purchase didn't complete.",
+        };
+      }
       if (isNativeDisconnectError(normalized)) {
-        markDisconnected(forGen);
+        markDisconnected(forGen, buyerUid);
       }
-      if (uid === buyerUid && generation === forGen) {
-        if (isUserCancelledError(normalized)) {
-          await abandonNonDurablePending(buyerUid, forGen);
-          lastResult = { kind: "cancelled" };
-          emit();
-          return lastResult;
-        }
+      releasePurchaseIfCurrent(forGen, buyerUid);
+      if (isUserCancelledError(normalized)) {
         await abandonNonDurablePending(buyerUid, forGen);
+        if (!isCurrentOperation(forGen, buyerUid)) {
+          return { kind: "cancelled" };
+        }
+        const result: PurchaseFlowResult = { kind: "cancelled" };
+        lastResult = result;
+        emit();
+        return result;
       }
-      lastResult = {
+      await abandonNonDurablePending(buyerUid, forGen);
+      if (!isCurrentOperation(forGen, buyerUid)) {
+        return {
+          kind: "failed",
+          recoverable: true,
+          message: "Purchase didn't complete.",
+        };
+      }
+      const result: PurchaseFlowResult = {
         kind: "failed",
         recoverable: true,
         message: "Purchase didn't complete.",
-      };
-      emit();
-      return lastResult;
-    }
-  }
-
-  async function restorePurchases(): Promise<PurchaseFlowResult> {
-    const forGen = generation;
-    if (!uid || !deps.capability.available || !storePlatform) {
-      const result: PurchaseFlowResult = {
-        kind: "unavailable",
-        reason: !uid
-          ? "not_signed_in"
-          : deps.capability.reason ?? "native_build_required",
       };
       lastResult = result;
       emit();
       return result;
     }
+  }
+
+  async function restorePurchases(): Promise<PurchaseFlowResult> {
+    const forGen = generation;
+    const forUid = uid;
+    if (!forUid || !deps.capability.available || !storePlatform) {
+      const result: PurchaseFlowResult = {
+        kind: "unavailable",
+        reason: !forUid ? "not_signed_in" : deps.capability.reason ?? "native_build_required",
+      };
+      return publishResultIfCurrent(forGen, forUid, result);
+    }
     if (!connected || connectionOwnerGen !== forGen) {
-      const ok = await ensureConnected(forGen);
-      if (!ok || generation !== forGen) {
+      const ok = await ensureConnected(forGen, forUid);
+      if (!isCurrentOperation(forGen, forUid)) return authChurnResult(forUid);
+      if (!ok) {
         const result: PurchaseFlowResult = {
           kind: "failed",
           recoverable: true,
           message: "Store is not connected.",
         };
-        lastResult = result;
-        emit();
-        return result;
+        return publishResultIfCurrent(forGen, forUid, result);
       }
     }
     let purchases: StorePurchase[] = [];
@@ -733,37 +827,36 @@ export function createIapSession(deps: IapSessionDeps) {
         includeSuspendedAndroid: false,
       });
     } catch (error) {
+      if (!isCurrentOperation(forGen, forUid)) return authChurnResult(forUid);
       if (isNativeDisconnectError(thrownPurchaseError(error))) {
-        markDisconnected(forGen);
+        markDisconnected(forGen, forUid);
       }
-      lastResult = {
+      const result: PurchaseFlowResult = {
         kind: "failed",
         recoverable: true,
         message: "Couldn't refresh store purchases.",
       };
-      emit();
-      return lastResult;
+      return publishResultIfCurrent(forGen, forUid, result);
     }
-    if (generation !== forGen) {
-      return { kind: "failed", recoverable: true, message: "Signed out." };
-    }
+    if (!isCurrentOperation(forGen, forUid)) return authChurnResult(forUid);
     if (purchases.length === 0) {
-      lastResult = { kind: "verified" };
-      emit();
-      return lastResult;
+      const result: PurchaseFlowResult = { kind: "verified" };
+      return publishResultIfCurrent(forGen, forUid, result);
     }
     let last: PurchaseFlowResult = { kind: "verified" };
     for (const purchase of purchases) {
-      if (generation !== forGen) break;
+      if (!isCurrentOperation(forGen, forUid)) return authChurnResult(forUid);
       await handlePurchase(purchase, "restore");
+      if (!isCurrentOperation(forGen, forUid)) return authChurnResult(forUid);
       last = lastResult ?? last;
     }
     return last;
   }
 
   async function dispose() {
+    const ownedListeners = listenerOwnerGen;
     generation += 1;
-    detachListeners();
+    if (ownedListeners != null) detachListenersOwnedBy(ownedListeners);
     if (connected) {
       try {
         await deps.native.endConnection();
@@ -776,6 +869,8 @@ export function createIapSession(deps: IapSessionDeps) {
     uid = null;
     pending = null;
     purchaseInFlight = false;
+    purchaseOwnerGen = null;
+    purchaseOwnerUid = null;
   }
 
   return {
