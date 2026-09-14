@@ -17,6 +17,40 @@ export function refundReconciliationQueueId(orderId: string): string {
   return `android:refund-reconcile:${orderId.replace(/\//g, "_")}`;
 }
 
+function assertReconciliationQueueIdentity(
+  existing: BillingReconciliationQueueDoc | undefined,
+  input: { platform: BillingPlatform; financialEventId: string }
+): void {
+  if (
+    !existing ||
+    existing.financialEventId !== input.financialEventId ||
+    existing.platform !== input.platform
+  ) {
+    throw new BillingError({
+      clientCode: "internal_error",
+      causeCode: "reconciliation_queue_identity_mismatch",
+    });
+  }
+}
+
+async function readAndAssertQueueIdentity(
+  store: BillingStore,
+  path: string,
+  input: { platform: BillingPlatform; financialEventId: string }
+): Promise<{ created: false }> {
+  return store.runTransaction(async (tx) => {
+    const snap = await tx.get(path);
+    if (!snap.exists) {
+      throw new BillingError({
+        clientCode: "internal_error",
+        causeCode: "reconciliation_queue_identity_mismatch",
+      });
+    }
+    assertReconciliationQueueIdentity(snap.data() as BillingReconciliationQueueDoc | undefined, input);
+    return { created: false as const };
+  });
+}
+
 export async function ensureReconciliationWorkItem(
   store: BillingStore,
   input: {
@@ -33,16 +67,10 @@ export async function ensureReconciliationWorkItem(
     return await store.runTransaction(async (tx) => {
       const snap = await tx.get(path);
       if (snap.exists) {
-        const existing = snap.data() as BillingReconciliationQueueDoc | undefined;
-        if (
-          existing &&
-          (existing.financialEventId !== input.financialEventId || existing.platform !== input.platform)
-        ) {
-          throw new BillingError({
-            clientCode: "internal_error",
-            causeCode: "reconciliation_queue_identity_mismatch",
-          });
-        }
+        assertReconciliationQueueIdentity(
+          snap.data() as BillingReconciliationQueueDoc | undefined,
+          input
+        );
         return { created: false };
       }
       const doc: BillingReconciliationQueueDoc = {
@@ -61,7 +89,9 @@ export async function ensureReconciliationWorkItem(
     });
   } catch (err) {
     if (err instanceof AlreadyExistsError) {
-      return { created: false };
+      // Create lost a race: re-read the winner. Do not return success on
+      // a mismatched identity merely because another writer committed first.
+      return readAndAssertQueueIdentity(store, path, input);
     }
     throw err;
   }
@@ -91,12 +121,7 @@ export async function resolveReconciliationWorkItem(
     if (!existing) {
       return { existed: false, changed: false };
     }
-    if (existing.financialEventId !== input.financialEventId || existing.platform !== input.platform) {
-      throw new BillingError({
-        clientCode: "internal_error",
-        causeCode: "reconciliation_queue_identity_mismatch",
-      });
-    }
+    assertReconciliationQueueIdentity(existing, input);
     if (existing.status === "resolved") {
       return { existed: true, changed: false };
     }

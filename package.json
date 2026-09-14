@@ -48,6 +48,7 @@
     "test:billing-diagnostic-uid": "npx --yes tsx functions/src/billing/diagnosticUid.unit.test.ts",
     "test:billing-transition": "npx --yes tsx functions/src/billing/transition.unit.test.ts",
     "test:billing-persist": "npx --yes tsx functions/src/billing/applyTransition.unit.test.ts",
+    "test:billing-reconciliation-queue": "npx --yes tsx functions/src/billing/reconciliationQueue.unit.test.ts",
     "test:billing-trial-grant": "npx --yes tsx functions/src/billing/trialGrant.unit.test.ts",
     "test:billing-rate-limit": "npx --yes tsx functions/src/billing/rateLimit.unit.test.ts",
     "test:billing-crypto": "npx --yes tsx functions/src/billing/crypto.unit.test.ts",

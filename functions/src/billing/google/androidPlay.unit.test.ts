@@ -2538,6 +2538,146 @@ async function main() {
     }
   }
 
+  // Round-4: full-reversal mutual exclusion (adapter)
+  {
+    async function seedPaid(refundReason: string) {
+      const play = new FakePlay(activeSub(), paidOrder(ORDER1, "249"));
+      const primed = await primedDeps(play);
+      await processAndroidPurchaseToken(primed.deps, {
+        purchaseToken: TOKEN,
+        callerUid: UID,
+        source: "androidValidation",
+        eventSource: "callable",
+      });
+      play.sub.acknowledgementState = "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED";
+      play.orders.set(
+        ORDER1,
+        refundedOrder(play.orders.get(ORDER1)!, rfc(NOW + 1000), undefined, refundReason)
+      );
+      return { ...primed, play };
+    }
+
+    // A. existing refund → incoming CHARGEBACK fails closed; no chargeback row
+    {
+      const primed = await seedPaid("OTHER");
+      await processAndroidVoidedPurchase(primed.deps, {
+        purchaseToken: TOKEN,
+        orderId: ORDER1,
+        productType: 1,
+        refundType: 1,
+        source: "rtdn",
+        eventTimeMillis: NOW + 1000,
+      });
+      primed.play.orders.set(
+        ORDER1,
+        refundedOrder(primed.play.orders.get(ORDER1)!, rfc(NOW + 1000), undefined, "CHARGEBACK")
+      );
+      const keysBefore = [...primed.store.docs.keys()].sort();
+      await assert.rejects(
+        processAndroidVoidedPurchase(primed.deps, {
+          purchaseToken: TOKEN,
+          orderId: ORDER1,
+          productType: 1,
+          refundType: 1,
+          source: "rtdn",
+          eventTimeMillis: NOW + 1000,
+        }),
+        isCause("full_reversal_classification_conflict")
+      );
+      assert.equal(primed.store.docs.has(financialLedgerPath(sanitizeDocId(`android:refund:${ORDER1}`))), true);
+      assert.equal(
+        primed.store.docs.has(financialLedgerPath(sanitizeDocId(`android:chargeback:${ORDER1}`))),
+        false
+      );
+      assert.deepEqual([...primed.store.docs.keys()].sort(), keysBefore);
+      assert.equal(primed.taxCalls.filter((c) => (c.eventType as string) === "chargeback").length, 0);
+    }
+
+    // B. existing chargeback → incoming OTHER/refund fails closed; no refund row
+    {
+      const primed = await seedPaid("CHARGEBACK");
+      await processAndroidVoidedPurchase(primed.deps, {
+        purchaseToken: TOKEN,
+        orderId: ORDER1,
+        productType: 1,
+        refundType: 1,
+        source: "rtdn",
+        eventTimeMillis: NOW + 1000,
+      });
+      primed.play.orders.set(
+        ORDER1,
+        refundedOrder(primed.play.orders.get(ORDER1)!, rfc(NOW + 1000), undefined, "OTHER")
+      );
+      const keysBefore = [...primed.store.docs.keys()].sort();
+      await assert.rejects(
+        processAndroidVoidedPurchase(primed.deps, {
+          purchaseToken: TOKEN,
+          orderId: ORDER1,
+          productType: 1,
+          refundType: 1,
+          source: "rtdn",
+          eventTimeMillis: NOW + 1000,
+        }),
+        isCause("full_reversal_classification_conflict")
+      );
+      assert.equal(
+        primed.store.docs.has(financialLedgerPath(sanitizeDocId(`android:chargeback:${ORDER1}`))),
+        true
+      );
+      assert.equal(primed.store.docs.has(financialLedgerPath(sanitizeDocId(`android:refund:${ORDER1}`))), false);
+      assert.deepEqual([...primed.store.docs.keys()].sort(), keysBefore);
+      assert.equal(primed.taxCalls.filter((c) => c.eventType === "refund").length, 0);
+    }
+
+    // same-class OTHER / CHARGEBACK replay
+    {
+      const other = await seedPaid("OTHER");
+      const first = await processAndroidVoidedPurchase(other.deps, {
+        purchaseToken: TOKEN,
+        orderId: ORDER1,
+        productType: 1,
+        refundType: 1,
+        source: "rtdn",
+        eventTimeMillis: NOW + 1000,
+      });
+      const replay = await processAndroidVoidedPurchase(other.deps, {
+        purchaseToken: TOKEN,
+        orderId: ORDER1,
+        productType: 1,
+        refundType: 1,
+        source: "rtdn",
+        eventTimeMillis: NOW + 1000,
+      });
+      assert.equal(first.financialEventWritten, true);
+      assert.equal(replay.alreadyProcessed, true);
+      assert.equal(other.store.docs.has(financialLedgerPath(sanitizeDocId(`android:refund:${ORDER1}`))), true);
+      assert.equal(other.store.docs.has(financialLedgerPath(sanitizeDocId(`android:chargeback:${ORDER1}`))), false);
+
+      const cb = await seedPaid("CHARGEBACK");
+      const cbFirst = await processAndroidVoidedPurchase(cb.deps, {
+        purchaseToken: TOKEN,
+        orderId: ORDER1,
+        productType: 1,
+        refundType: 1,
+        source: "rtdn",
+        eventTimeMillis: NOW + 1000,
+      });
+      const cbReplay = await processAndroidVoidedPurchase(cb.deps, {
+        purchaseToken: TOKEN,
+        orderId: ORDER1,
+        productType: 1,
+        refundType: 1,
+        source: "rtdn",
+        eventTimeMillis: NOW + 1000,
+      });
+      assert.equal(cbFirst.financialEventWritten, true);
+      assert.equal(cbReplay.alreadyProcessed, true);
+      assert.equal(cb.store.docs.has(financialLedgerPath(sanitizeDocId(`android:chargeback:${ORDER1}`))), true);
+      assert.equal(cb.store.docs.has(financialLedgerPath(sanitizeDocId(`android:refund:${ORDER1}`))), false);
+      assert.equal(cb.taxCalls.filter((c) => c.eventType === "refund").length, 0);
+    }
+  }
+
   // Source-level: adapter never logs tokens
   {
     const src = [

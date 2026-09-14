@@ -9,7 +9,9 @@ import assert from "node:assert/strict";
 import { BillingError } from "./errors";
 import {
   deriveSubscriptionTransition,
+  financialEventIdForStore,
   isTrialEligiblePriorState,
+  oppositeAndroidFullReversalFinancialEventId,
   type TransitionRequest,
   type VerifiedPlatformEvent,
 } from "./transition";
@@ -291,4 +293,21 @@ const trialReq: TransitionRequest = {
   assert.equal(recorded.history?.type, "refunded");
 }
 
-console.log("transition.unit.test.ts: ok");
+  assert.equal(
+    financialEventIdForStore({ platform: "android", eventType: "refund", orderId: "GPA.9" }),
+    "android:refund:GPA.9"
+  );
+  assert.equal(
+    oppositeAndroidFullReversalFinancialEventId("android:refund:GPA.9", "refund", "android"),
+    "android:chargeback:GPA.9"
+  );
+  assert.equal(
+    oppositeAndroidFullReversalFinancialEventId("android:chargeback:GPA.9", "chargeback", "android"),
+    "android:refund:GPA.9"
+  );
+  assert.equal(
+    oppositeAndroidFullReversalFinancialEventId("android:purchase:GPA.9", "purchase", "android"),
+    null
+  );
+
+  console.log("transition.unit.test.ts: ok");

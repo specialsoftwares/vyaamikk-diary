@@ -646,6 +646,10 @@ const FINANCIAL_EVENT_CLASSES: ReadonlySet<FinancialEventType> = new Set([
  * as separate ledger rows (`android:purchase:{id}` vs `android:refund:{id}`),
  * while a duplicate delivery of the same class stays deduplicated. Refunds
  * do NOT need a fresh store transaction id.
+ *
+ * Refund vs chargeback of the SAME Google Order are mutually exclusive
+ * (see oppositeAndroidFullReversalFinancialEventId). Their ids differ by
+ * eventType, so ordinary same-row idempotency cannot collide them.
  */
 export function financialEventIdForStore(opts: {
   platform: BillingPlatform;
@@ -675,4 +679,25 @@ export function financialEventIdForStore(opts: {
     });
   }
   return `ios:${opts.eventType}:${opts.transactionId.replace(/\//g, "_")}`;
+}
+
+/**
+ * Opposite full-reversal ledger id for one Google Order.
+ *
+ * `android:refund:{order}` ↔ `android:chargeback:{order}`.
+ * Purchase/renewal and non-Android events return null (no extra read).
+ */
+export function oppositeAndroidFullReversalFinancialEventId(
+  financialEventId: string,
+  eventType: FinancialEventType,
+  platform: BillingPlatform
+): string | null {
+  if (platform !== "android") return null;
+  if (eventType !== "refund" && eventType !== "chargeback") return null;
+  const prefix = `android:${eventType}:`;
+  if (!financialEventId.startsWith(prefix)) return null;
+  const orderPart = financialEventId.slice(prefix.length);
+  if (orderPart.length === 0) return null;
+  const opposite = eventType === "refund" ? "chargeback" : "refund";
+  return `android:${opposite}:${orderPart}`;
 }
