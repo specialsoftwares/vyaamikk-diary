@@ -388,3 +388,27 @@ appears in a later phase; it will be added with the query that requires it.
   `_billingReconciliationQueue` before the RTDN is acknowledged. The queue
   is not a substitute for `ReviewRefund`.
 - Chargeback/pending-review tax treatment remains a VYD-40 legal review gate.
+
+## App Store production-enablement gates (VYD-33)
+
+- `APPSTORE_BILLING_ENABLED` defaults **false**. Do not enable production App
+  Store billing in this phase.
+- **APP STORE PRODUCT IDS MUST BE CONFIRMED BEFORE PRODUCTION ENABLEMENT.**
+  The nine Phase-A iOS identifiers remain provisional. Production environment
+  fails closed (`appstore_product_ids_unconfirmed`) until that confirmation
+  is encoded in a later owner-authorized change.
+- `APPSTORE_PRIVATE_KEY` is secret material and must never be committed.
+  Valid issuer id, key id, numeric `appAppleId`, and Apple root CA DERs are
+  required before production enablement. No App Store Connect product
+  creation, ASSN URL configuration, or Functions/Rules deploy ships in VYD-33.
+- Apple `REFUND_REVERSED` (and other unsupported financial corrections) cannot
+  be represented in the current immutable ledger (`purchase|renewal|refund|
+  chargeback` only). They fail closed into `_billingReconciliationQueue` as
+  `unsupported_ios_refund_reversal` and must be reviewed before go-live.
+- Scheduled iOS product changes (`autoRenewProductId` ≠ current `productId`)
+  fail closed as `unsupported_ios_scheduled_plan_change`. Phase B does not
+  map `scheduledPlan`.
+- Apple India tax responsibility remains unconfirmed (VYD-40). Ledger events
+  may feed the existing tax-document post-commit boundary; no real invoice or
+  credit note issues while seller/platform tax configuration is fail-closed.
+

@@ -17,6 +17,10 @@ export function refundReconciliationQueueId(orderId: string): string {
   return `android:refund-reconcile:${orderId.replace(/\//g, "_")}`;
 }
 
+export function iosStatusReconciliationQueueId(originalTransactionId: string): string {
+  return `ios:status-reconcile:${originalTransactionId.replace(/\//g, "_")}`;
+}
+
 function assertReconciliationQueueIdentity(
   existing: BillingReconciliationQueueDoc | undefined,
   input: { platform: BillingPlatform; financialEventId: string }

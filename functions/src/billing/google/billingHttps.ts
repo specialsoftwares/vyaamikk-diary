@@ -45,3 +45,16 @@ export function rtdnHttpStatusForError(err: unknown): number {
   }
   return 503;
 }
+
+/**
+ * Apple retries ASSN until HTTP 200. Retryable Apple API/network failures
+ * return 503 so Apple redelivers. Verification/poison payloads return 200
+ * after no mutation so they do not retry forever.
+ */
+export function assnHttpStatusForError(err: unknown): number {
+  if (err instanceof BillingError) {
+    if (err.retryable) return 503;
+    return 200;
+  }
+  return 503;
+}

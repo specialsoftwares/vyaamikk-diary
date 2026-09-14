@@ -40,6 +40,8 @@ DerivedData/
 *.cer
 *.pem
 *.key
+# VYD-33 test-only ECDSA key for SignedDataVerifier (not App Store Connect).
+!functions/src/billing/apple/official-fixtures/vyaamikk-test-pki/leaf.p8
 
 # Logs
 *.log

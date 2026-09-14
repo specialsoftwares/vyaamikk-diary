@@ -610,6 +610,12 @@ service cloud.firestore {
     match /_playCredentialIndex/{credentialFingerprint} {
       allow read, write: if false;
     }
+    match /_appStoreAccountByUid/{uid} {
+      allow read, write: if false;
+    }
+    match /_appStoreAccountIndex/{appAccountToken} {
+      allow read, write: if false;
+    }
     match /_billingReconciliationQueue/{queueId} {
       allow read, write: if false;
     }

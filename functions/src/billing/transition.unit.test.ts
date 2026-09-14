@@ -12,6 +12,7 @@ import {
   financialEventIdForStore,
   isTrialEligiblePriorState,
   oppositeAndroidFullReversalFinancialEventId,
+  oppositeIosPurchaseRenewalFinancialEventId,
   type TransitionRequest,
   type VerifiedPlatformEvent,
 } from "./transition";
@@ -307,6 +308,19 @@ const trialReq: TransitionRequest = {
   );
   assert.equal(
     oppositeAndroidFullReversalFinancialEventId("android:purchase:GPA.9", "purchase", "android"),
+    null
+  );
+
+  assert.equal(
+    oppositeIosPurchaseRenewalFinancialEventId("ios:purchase:77", "purchase", "ios"),
+    "ios:renewal:77"
+  );
+  assert.equal(
+    oppositeIosPurchaseRenewalFinancialEventId("ios:renewal:77", "renewal", "ios"),
+    "ios:purchase:77"
+  );
+  assert.equal(
+    oppositeIosPurchaseRenewalFinancialEventId("ios:refund:77", "refund", "ios"),
     null
   );
 

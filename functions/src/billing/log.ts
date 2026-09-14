@@ -21,6 +21,9 @@ export const BILLING_LOG_ALLOWED_KEYS = [
   "notificationType",
   "messageId",
   "orderId",
+  "transactionId",
+  "originalTransactionId",
+  "notificationUUID",
   "reconciledAt",
 ] as const;
 
@@ -40,7 +43,11 @@ export const BILLING_LOG_FORBIDDEN_KEYS = [
   "receipt",
   "receiptData",
   "signedTransaction",
+  "signedTransactionInfo",
+  "signedRenewalInfo",
   "signedPayload",
+  "APPSTORE_PRIVATE_KEY",
+  "privateKey",
   "rawWebhookBody",
   "ciphertext",
   "encryptedPurchaseCredential",

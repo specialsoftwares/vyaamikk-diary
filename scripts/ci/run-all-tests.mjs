@@ -24,6 +24,7 @@ const EXCLUDE = new Set([
   "test:billing-transaction-emulator", // emulator suite — separate ci:verify stage
   "test:billing-gst-compliance-emulator", // emulator suite — separate ci:verify stage
   "test:billing-google-play-emulator", // emulator suite — separate ci:verify stage
+  "test:billing-apple-emulator", // emulator suite — separate ci:verify stage
   "test:invoice-renderer", // requires services/subscription-invoice-renderer node_modules
   "test:invoice-renderer-build", // npm ci + tsc; run by ci:verify
   "test:invoice-renderer-docker", // docker build; run by ci:verify

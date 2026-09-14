@@ -275,6 +275,8 @@ async function main() {
       ["_billingRateLimits", "purchase_alice_202609121600"],
       ["_playAccountIndex", "obfuscated-account-id-hex"],
       ["_playCredentialIndex", "a".repeat(64)],
+      ["_appStoreAccountByUid", "alice"],
+      ["_appStoreAccountIndex", "11111111-1111-4111-8111-111111111111"],
       ["_billingReconciliationQueue", "android:refund-reconcile:GPA.1234"],
       ["_subscriptionInvoices", "inv_v1_test"],
       ["_subscriptionCreditNotes", "cn_v1_test"],
