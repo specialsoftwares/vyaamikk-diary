@@ -55,6 +55,9 @@ const iapSrc = iapFiles.map((f) => ({
   assert.match(pending, /obfuscatedAccountId/);
   const pendingCode = stripComments(pending);
   assert.match(pendingCode, /pendingEnvelopeContainsSecrets/);
+  assert.match(pendingCode, /isCanonicalSku/);
+  assert.match(pendingCode, /enqueuePendingMutation/);
+  assert.doesNotMatch(pendingCode, /canonicalSku\)\.startsWith\("vyd_"\)/);
 }
 
 {
@@ -68,6 +71,8 @@ const iapSrc = iapFiles.map((f) => ({
   assert.match(processor, /finishTransactionIOS/);
   assert.match(processor, /validateAndActivateAndroid/);
   assert.match(processor, /validateAndActivateIOS/);
+  assert.match(processor, /finishedIosTokens/);
+  assert.doesNotMatch(processor, /acknowledgePurchaseAndroid/);
 }
 
 {
@@ -76,6 +81,10 @@ const iapSrc = iapFiles.map((f) => ({
   assert.match(session, /prepareIOSBillingAccount/);
   assert.match(session, /writePendingPurchase/);
   assert.match(session, /requestPurchase/);
+  assert.match(session, /didConnect/);
+  assert.match(session, /reconnectBudget/);
+  assert.match(session, /finishedIosTokens/);
+  assert.match(session, /canLaunchNativeSheet/);
   const pendingIdx = session.indexOf("writePendingPurchase");
   const reqIdx = session.lastIndexOf("requestPurchase");
   assert.ok(pendingIdx >= 0 && reqIdx > pendingIdx);
@@ -83,6 +92,7 @@ const iapSrc = iapFiles.map((f) => ({
   assert.doesNotMatch(session, /billingPlanType:\s*["']MONTHLY["']/);
   assert.doesNotMatch(session, /offers\s*\[\s*0\s*\]/);
   assert.doesNotMatch(session, /expectedPriceInPaise|₹99|₹249/);
+  assert.doesNotMatch(session, /acknowledgePurchaseAndroid/);
 }
 
 {
@@ -99,6 +109,9 @@ const iapSrc = iapFiles.map((f) => ({
   assert.match(provider, /createIapSession/);
   assert.doesNotMatch(provider, /\buseIAP\b/);
   assert.match(provider, /expo_go|native_build_required/);
+  assert.match(provider, /bindIapViewToAuth/);
+  assert.match(provider, /runGuardedIapAction/);
+  assert.match(provider, /Omit<IapView, "ownerUid">/);
 }
 
 {

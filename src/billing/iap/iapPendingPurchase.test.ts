@@ -1,5 +1,6 @@
 /**
- * Pending cache uid isolation, secret rejection, generation races.
+ * Pending cache uid isolation, secret rejection, generation races,
+ * serialized mutations, and exact canonical SKU schema.
  */
 import assert from "node:assert/strict";
 
@@ -8,6 +9,7 @@ import {
   clearPendingPurchaseIfUid,
   parsePendingPurchaseEnvelope,
   readPendingPurchase,
+  reconcilePendingPurchaseForUid,
   writePendingPurchase,
 } from "./iapPendingPurchase";
 import type { IapKeyValueStore, PendingPurchaseEnvelope } from "./iapTypes";
@@ -45,6 +47,84 @@ function envelope(uid: string, extra: Partial<PendingPurchaseEnvelope> = {}): Pe
   };
 }
 
+function authFor(
+  uid: string,
+  generation: number,
+  live: { uid: string | null; gen: number }
+) {
+  return {
+    expectedUid: uid,
+    generation,
+    currentGeneration: () => live.gen,
+    currentUid: () => live.uid,
+  };
+}
+
+function createDeferredStore(opts: {
+  blockSet?: boolean;
+  blockRemove?: boolean;
+} = {}): IapKeyValueStore & {
+  data: Record<string, string>;
+  setItemStarts: number;
+  removeItemStarts: number;
+  waitForSetItem: () => Promise<void>;
+  waitForRemoveItem: () => Promise<void>;
+  releaseSetItem: () => void;
+  releaseRemoveItem: () => void;
+} {
+  const blockSet = opts.blockSet === true;
+  const blockRemove = opts.blockRemove === true;
+  const data: Record<string, string> = {};
+  let setStarted: () => void = () => {};
+  let removeStarted: () => void = () => {};
+  const setStartedP = new Promise<void>((resolve) => {
+    setStarted = resolve;
+  });
+  const removeStartedP = new Promise<void>((resolve) => {
+    removeStarted = resolve;
+  });
+  let releaseSet: () => void = () => {};
+  let releaseRemove: () => void = () => {};
+  const setGate = new Promise<void>((resolve) => {
+    releaseSet = resolve;
+  });
+  const removeGate = new Promise<void>((resolve) => {
+    releaseRemove = resolve;
+  });
+  let firstSet = true;
+  let firstRemove = true;
+  return {
+    data,
+    setItemStarts: 0,
+    removeItemStarts: 0,
+    waitForSetItem: () => setStartedP,
+    waitForRemoveItem: () => removeStartedP,
+    releaseSetItem: () => releaseSet(),
+    releaseRemoveItem: () => releaseRemove(),
+    async getItem(key) {
+      return Object.prototype.hasOwnProperty.call(data, key) ? data[key] : null;
+    },
+    async setItem(key, value) {
+      this.setItemStarts += 1;
+      if (blockSet && firstSet) {
+        firstSet = false;
+        setStarted();
+        await setGate;
+      }
+      data[key] = value;
+    },
+    async removeItem(key) {
+      this.removeItemStarts += 1;
+      if (blockRemove && firstRemove) {
+        firstRemove = false;
+        removeStarted();
+        await removeGate;
+      }
+      delete data[key];
+    },
+  };
+}
+
 function testExactKey() {
   assert.equal(PENDING_PURCHASE_CACHE_KEY, "vyd_pending_purchase_v1");
 }
@@ -69,16 +149,69 @@ function testRejectsSecrets() {
   );
 }
 
+function testRejectsMalformedCanonicalSku() {
+  assert.equal(
+    parsePendingPurchaseEnvelope({
+      ...envelope("uid-a"),
+      canonicalSku: "vyd_fake_monthly",
+    }),
+    null
+  );
+  assert.equal(
+    parsePendingPurchaseEnvelope({
+      ...envelope("uid-a"),
+      canonicalSku: "vyd_professional_yearly",
+      productId: "vyd_starter",
+    }),
+    null
+  );
+  assert.equal(
+    parsePendingPurchaseEnvelope({
+      ...envelope("uid-a"),
+      canonicalSku: "vyd_professional_yearly",
+      productId: "vyd_professional",
+      androidBasePlanId: "monthly",
+    }),
+    null
+  );
+  assert.equal(
+    parsePendingPurchaseEnvelope({
+      version: 1,
+      uid: "uid-a",
+      platform: "ios",
+      canonicalSku: "vyd_professional_yearly",
+      productId: "com.specialsoftwares.vyaamikkdiary.professional.yearly",
+      androidBasePlanId: "yearly",
+      stage: "intent_created",
+      initiatedAt: 1,
+      updatedAt: 1,
+    }),
+    null
+  );
+  assert.equal(
+    parsePendingPurchaseEnvelope({
+      version: 1,
+      uid: "uid-a",
+      platform: "android",
+      canonicalSku: "vyd_professional_yearly",
+      productId: "com.specialsoftwares.vyaamikkdiary.professional.yearly",
+      androidBasePlanId: "yearly",
+      stage: "intent_created",
+      initiatedAt: 1,
+      updatedAt: 1,
+    }),
+    null
+  );
+}
+
 function testUidADoesNotSurfaceToB() {
   return (async () => {
     const store = memoryStore();
-    let gen = 1;
+    const live = { uid: "uid-a" as string | null, gen: 1 };
     const ok = await writePendingPurchase({
       store,
       envelope: envelope("uid-a"),
-      expectedUid: "uid-a",
-      generation: 1,
-      currentGeneration: () => gen,
+      ...authFor("uid-a", 1, live),
     });
     assert.equal(ok, true);
     const forB = await readPendingPurchase({ store, uid: "uid-b" });
@@ -91,13 +224,11 @@ function testUidADoesNotSurfaceToB() {
 function testLogoutClearsOwnUidOnly() {
   return (async () => {
     const store = memoryStore();
-    let gen = 1;
+    const live = { uid: "uid-a" as string | null, gen: 1 };
     await writePendingPurchase({
       store,
       envelope: envelope("uid-a"),
-      expectedUid: "uid-a",
-      generation: 1,
-      currentGeneration: () => gen,
+      ...authFor("uid-a", 1, live),
     });
     await clearPendingPurchaseIfUid(store, "uid-b");
     assert.ok(await readPendingPurchase({ store, uid: "uid-a" }));
@@ -109,21 +240,24 @@ function testLogoutClearsOwnUidOnly() {
 function testLateAWriteCannotOverwriteB() {
   return (async () => {
     const store = memoryStore();
-    let gen = 1;
+    const live = { uid: "uid-b" as string | null, gen: 1 };
     await writePendingPurchase({
       store,
-      envelope: envelope("uid-b", { canonicalSku: "vyd_starter_monthly", productId: "vyd_starter" }),
-      expectedUid: "uid-b",
-      generation: 1,
-      currentGeneration: () => gen,
+      envelope: envelope("uid-b", {
+        canonicalSku: "vyd_starter_monthly",
+        productId: "vyd_starter",
+        androidBasePlanId: "monthly",
+      }),
+      ...authFor("uid-b", 1, live),
     });
-    gen = 2;
+    live.gen = 2;
     const late = await writePendingPurchase({
       store,
       envelope: envelope("uid-a"),
       expectedUid: "uid-a",
       generation: 1,
-      currentGeneration: () => gen,
+      currentGeneration: () => live.gen,
+      currentUid: () => live.uid,
     });
     assert.equal(late, false);
     const current = await readPendingPurchase({ store, uid: "uid-b" });
@@ -132,12 +266,92 @@ function testLateAWriteCannotOverwriteB() {
   })();
 }
 
+async function testDeferredAWriteCannotOverwriteB() {
+  const store = createDeferredStore({ blockSet: true });
+  const live = { uid: "uid-a" as string | null, gen: 1 };
+  const writeA = writePendingPurchase({
+    store,
+    envelope: envelope("uid-a"),
+    ...authFor("uid-a", 1, live),
+  });
+  await store.waitForSetItem();
+  live.uid = "uid-b";
+  live.gen = 2;
+  const wroteB = await writePendingPurchase({
+    store,
+    envelope: envelope("uid-b", {
+      canonicalSku: "vyd_starter_monthly",
+      productId: "vyd_starter",
+      androidBasePlanId: "monthly",
+    }),
+    ...authFor("uid-b", 2, live),
+  });
+  assert.equal(wroteB, true);
+  store.releaseSetItem();
+  const lateA = await writeA;
+  assert.equal(lateA, false);
+  const forB = await readPendingPurchase({ store, uid: "uid-b" });
+  assert.equal(forB?.uid, "uid-b");
+  assert.equal(forB?.canonicalSku, "vyd_starter_monthly");
+  assert.equal(await readPendingPurchase({ store, uid: "uid-a" }), null);
+}
+
+async function testLateAClearCannotDeleteB() {
+  const store = createDeferredStore({ blockRemove: true });
+  const live = { uid: "uid-a" as string | null, gen: 1 };
+  store.data[PENDING_PURCHASE_CACHE_KEY] = JSON.stringify(envelope("uid-a"));
+  const clearA = clearPendingPurchaseIfUid(store, "uid-a", authFor("uid-a", 1, live));
+  await store.waitForRemoveItem();
+  live.uid = "uid-b";
+  live.gen = 2;
+  const wroteB = await writePendingPurchase({
+    store,
+    envelope: envelope("uid-b", {
+      canonicalSku: "vyd_starter_monthly",
+      productId: "vyd_starter",
+      androidBasePlanId: "monthly",
+    }),
+    ...authFor("uid-b", 2, live),
+  });
+  assert.equal(wroteB, true);
+  store.releaseRemoveItem();
+  await clearA;
+  const forB = await readPendingPurchase({ store, uid: "uid-b" });
+  assert.equal(forB?.uid, "uid-b");
+}
+
+async function testReconcileClearsOrphanedDifferentUid() {
+  const store = memoryStore();
+  store.data[PENDING_PURCHASE_CACHE_KEY] = JSON.stringify(envelope("uid-a"));
+  const live = { uid: "uid-b" as string | null, gen: 1 };
+  const forB = await reconcilePendingPurchaseForUid({
+    store,
+    ...authFor("uid-b", 1, live),
+  });
+  assert.equal(forB, null);
+  assert.equal(await readPendingPurchase({ store, uid: "uid-a" }), null);
+  const wrote = await writePendingPurchase({
+    store,
+    envelope: envelope("uid-b", {
+      canonicalSku: "vyd_starter_monthly",
+      productId: "vyd_starter",
+      androidBasePlanId: "monthly",
+    }),
+    ...authFor("uid-b", 1, live),
+  });
+  assert.equal(wrote, true);
+}
+
 async function main() {
   testExactKey();
   testRejectsSecrets();
+  testRejectsMalformedCanonicalSku();
   await testUidADoesNotSurfaceToB();
   await testLogoutClearsOwnUidOnly();
   await testLateAWriteCannotOverwriteB();
+  await testDeferredAWriteCannotOverwriteB();
+  await testLateAClearCannotDeleteB();
+  await testReconcileClearsOrphanedDifferentUid();
   console.log("iapPendingPurchase.test.ts: ok");
 }
 

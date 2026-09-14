@@ -9,14 +9,16 @@
  * Android: server owns Play acknowledgment (VYD-32). Do not call
  * expo-iap finishTransaction on Android — 5.6.0 acknowledges again.
  * iOS: finishTransaction only after successful backend verification.
+ * Successfully finished iOS tokens are remembered in memory only.
  */
 
 import { getClientCatalogEntry } from "./iapCatalog";
 import {
   clearPendingPurchaseIfUid,
+  isDurablePendingStage,
   writePendingPurchase,
 } from "./iapPendingPurchase";
-import { EXPO_IAP_USER_CANCELLED } from "./iapNativeCodes";
+import { isUserCancelledError } from "./iapNativeErrors";
 import type {
   CanonicalSku,
   IapBackend,
@@ -46,6 +48,15 @@ function nonempty(value: string | null | undefined): value is string {
   return typeof value === "string" && value.length > 0;
 }
 
+function mutationAuth(deps: PurchaseProcessorDeps, uid: string) {
+  return {
+    expectedUid: uid,
+    generation: deps.generation,
+    currentGeneration: deps.currentGeneration,
+    currentUid: deps.currentUid,
+  };
+}
+
 async function patchPending(
   deps: PurchaseProcessorDeps,
   pending: PendingPurchaseEnvelope | null,
@@ -61,9 +72,7 @@ async function patchPending(
   const ok = await writePendingPurchase({
     store: deps.store,
     envelope: next,
-    expectedUid: uid,
-    generation: deps.generation,
-    currentGeneration: deps.currentGeneration,
+    ...mutationAuth(deps, uid),
   });
   return ok ? next : pending;
 }
@@ -87,8 +96,10 @@ export async function processStorePurchase(args: {
   pending: PendingPurchaseEnvelope | null;
   source: ProcessSource;
   processedTokens: Set<string>;
+  finishedIosTokens?: Set<string>;
 }): Promise<{ result: PurchaseFlowResult; pending: PendingPurchaseEnvelope | null }> {
   const { deps, purchase, source } = args;
+  const finishedIosTokens = args.finishedIosTokens ?? new Set<string>();
   let pending = args.pending;
   const uid = deps.currentUid();
   if (!uid) {
@@ -142,9 +153,12 @@ export async function processStorePurchase(args: {
     };
   }
 
-  const alreadyValidatedIos =
-    pending?.stage === "verified_unfinished_ios" &&
-    args.processedTokens.has(purchase.purchaseToken);
+  if (deps.platform === "ios" && finishedIosTokens.has(purchase.purchaseToken)) {
+    await clearPendingPurchaseIfUid(deps.store, uid, mutationAuth(deps, uid));
+    return { result: { kind: "verified" }, pending: null };
+  }
+
+  const alreadyValidatedIos = args.processedTokens.has(purchase.purchaseToken);
 
   if (deps.platform === "android") {
     if (purchase.store !== "google") {
@@ -181,7 +195,7 @@ export async function processStorePurchase(args: {
     void validation.acknowledged;
     void validation.entitlementActive;
     args.processedTokens.add(purchase.purchaseToken);
-    await clearPendingPurchaseIfUid(deps.store, uid);
+    await clearPendingPurchaseIfUid(deps.store, uid, mutationAuth(deps, uid));
     return { result: { kind: "verified" }, pending: null };
   }
 
@@ -222,20 +236,30 @@ export async function processStorePurchase(args: {
         pending,
       };
     }
+    args.processedTokens.add(purchase.purchaseToken);
   }
-
-  args.processedTokens.add(purchase.purchaseToken);
 
   if (shouldFinish) {
     try {
       await deps.native.finishTransactionIOS(purchase);
     } catch {
+      if (!pending || pending.uid !== uid) {
+        return {
+          result: {
+            kind: "failed",
+            recoverable: true,
+            message: "Couldn't finish this purchase.",
+          },
+          pending: null,
+        };
+      }
       pending = await patchPending(deps, pending, "verified_unfinished_ios");
       return { result: { kind: "verified_unfinished_ios" }, pending };
     }
+    finishedIosTokens.add(purchase.purchaseToken);
   }
 
-  await clearPendingPurchaseIfUid(deps.store, uid);
+  await clearPendingPurchaseIfUid(deps.store, uid, mutationAuth(deps, uid));
   return { result: { kind: "verified" }, pending: null };
 }
 
@@ -245,18 +269,37 @@ export async function processPurchaseError(args: {
   pending: PendingPurchaseEnvelope | null;
 }): Promise<{ result: PurchaseFlowResult; pending: PendingPurchaseEnvelope | null }> {
   const uid = args.deps.currentUid();
-  const cancelled =
-    args.error.code === EXPO_IAP_USER_CANCELLED || args.error.code === "user-cancelled";
-  if (
-    cancelled &&
-    args.pending &&
-    args.pending.stage !== "store_pending" &&
-    args.pending.stage !== "verifying" &&
-    args.pending.stage !== "verified_unfinished_ios"
-  ) {
-    if (uid) await clearPendingPurchaseIfUid(args.deps.store, uid);
+  const cancelled = isUserCancelledError(args.error);
+  const durable = args.pending ? isDurablePendingStage(args.pending.stage) : false;
+
+  if (cancelled && args.pending && !durable && args.pending.stage !== "verifying") {
+    if (uid) await clearPendingPurchaseIfUid(args.deps.store, uid, mutationAuth(args.deps, uid));
     return { result: { kind: "cancelled" }, pending: null };
   }
+
+  if (cancelled && durable) {
+    return {
+      result: {
+        kind: "failed",
+        recoverable: true,
+        message: "Purchase didn't complete.",
+      },
+      pending: args.pending,
+    };
+  }
+
+  if (!cancelled && args.pending && !durable && uid) {
+    await clearPendingPurchaseIfUid(args.deps.store, uid, mutationAuth(args.deps, uid));
+    return {
+      result: {
+        kind: "failed",
+        recoverable: true,
+        message: "Purchase didn't complete.",
+      },
+      pending: null,
+    };
+  }
+
   return {
     result: {
       kind: "failed",

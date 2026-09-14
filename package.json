@@ -122,7 +122,7 @@
     "test:subscription-plan-static": "npx --yes tsx src/subscription/subscriptionPlan.static.test.ts",
     "test:iap-catalog": "npx --yes tsx src/billing/iap/iapCatalog.test.ts",
     "test:iap-offers": "npx --yes tsx src/billing/iap/iapOffers.test.ts",
-    "test:iap-pending": "npx --yes tsx src/billing/iap/iapPendingPurchase.test.ts",
+    "test:iap-pending": "npx --yes tsx src/billing/iap/iapPendingPurchase.test.ts && npx --yes tsx src/billing/iap/iapViewBinding.test.ts",
     "test:iap-processor": "npx --yes tsx src/billing/iap/iapPurchaseProcessor.test.ts && npx --yes tsx src/billing/iap/iapSession.test.ts",
     "test:iap-static": "npx --yes tsx src/billing/iap/iap.static.test.ts",
     "test:curtain-phases": "npx --yes tsx src/components/ui/curtainSheetPhases.test.ts",

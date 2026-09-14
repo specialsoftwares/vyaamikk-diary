@@ -160,13 +160,28 @@ function deps(args: {
 }
 
 async function seedPending(store: IapKeyValueStore, env: PendingPurchaseEnvelope) {
-  await writePendingPurchase({
+  const ok = await writePendingPurchase({
     store,
     envelope: env,
     expectedUid: env.uid,
     generation: 1,
     currentGeneration: () => 1,
+    currentUid: () => env.uid,
   });
+  assert.equal(ok, true);
+}
+
+function iosPending(uid = "uid-a"): PendingPurchaseEnvelope {
+  return {
+    version: 1,
+    uid,
+    platform: "ios",
+    canonicalSku: "vyd_professional_yearly",
+    productId: "com.specialsoftwares.vyaamikkdiary.professional.yearly",
+    stage: "intent_created",
+    initiatedAt: 10,
+    updatedAt: 10,
+  };
 }
 
 async function testAndroidPendingDoesNotValidate() {
@@ -281,11 +296,7 @@ async function testIosValidateBeforeFinish() {
       return native.finishTransactionIOS(purchase);
     },
   };
-  const env: PendingPurchaseEnvelope = {
-    ...pending(),
-    platform: "ios",
-    productId: "com.specialsoftwares.vyaamikkdiary.professional.yearly",
-  };
+  const env = iosPending();
   await seedPending(store, env);
   const out = await processStorePurchase({
     deps: deps({ platform: "ios", store, native: wrappedNative, backend: wrapped }),
@@ -309,11 +320,7 @@ async function testIosValidationFailureDoesNotFinish() {
     purchases: [],
     iosShouldFail: true,
   };
-  const env: PendingPurchaseEnvelope = {
-    ...pending(),
-    platform: "ios",
-    productId: "com.specialsoftwares.vyaamikkdiary.professional.yearly",
-  };
+  const env = iosPending();
   await seedPending(store, env);
   const out = await processStorePurchase({
     deps: deps({
@@ -346,11 +353,7 @@ async function testIosFinishFailureVerifiedUnfinished() {
       throw new Error("finish failed");
     },
   };
-  const env: PendingPurchaseEnvelope = {
-    ...pending(),
-    platform: "ios",
-    productId: "com.specialsoftwares.vyaamikkdiary.professional.yearly",
-  };
+  const env = iosPending();
   await seedPending(store, env);
   const out = await processStorePurchase({
     deps: deps({
@@ -505,6 +508,134 @@ async function testRestoreIosValidatesJwsWithoutGrantApi() {
   assert.equal(spy.finish.length, 0);
 }
 
+async function testDuplicateIosSuccessfulCallbackFinishesOnce() {
+  const store = memoryStore();
+  const spy = {
+    android: [],
+    ios: [] as { signedTransactionInfo: string; expectedCanonicalSku?: string }[],
+    finish: [] as StorePurchase[],
+    purchases: [],
+  };
+  const tokens = new Set<string>();
+  const finished = new Set<string>();
+  const env = iosPending();
+  await seedPending(store, env);
+  const d = deps({ platform: "ios", store, native: fakeNative(spy), backend: fakeBackend(spy) });
+  const first = await processStorePurchase({
+    deps: d,
+    purchase: iosPurchase(),
+    pending: env,
+    source: "purchase",
+    processedTokens: tokens,
+    finishedIosTokens: finished,
+  });
+  const second = await processStorePurchase({
+    deps: d,
+    purchase: iosPurchase(),
+    pending: null,
+    source: "purchase",
+    processedTokens: tokens,
+    finishedIosTokens: finished,
+  });
+  assert.equal(first.result.kind, "verified");
+  assert.equal(second.result.kind, "verified");
+  assert.equal(spy.finish.length, 1);
+  assert.equal(store.data[PENDING_PURCHASE_CACHE_KEY], undefined);
+}
+
+async function testVerifiedUnfinishedIosRetriesFinish() {
+  const store = memoryStore();
+  const spy = {
+    android: [],
+    ios: [] as { signedTransactionInfo: string; expectedCanonicalSku?: string }[],
+    finish: [] as StorePurchase[],
+    purchases: [],
+  };
+  let shouldFailFinish = true;
+  const native = fakeNative(spy);
+  const wrapping: IapNativeAdapter = {
+    ...native,
+    async finishTransactionIOS(purchase) {
+      if (shouldFailFinish) throw new Error("finish failed");
+      return native.finishTransactionIOS(purchase);
+    },
+  };
+  const env = iosPending();
+  await seedPending(store, env);
+  const tokens = new Set<string>();
+  const finished = new Set<string>();
+  const d = deps({ platform: "ios", store, native: wrapping, backend: fakeBackend(spy) });
+  const first = await processStorePurchase({
+    deps: d,
+    purchase: iosPurchase(),
+    pending: env,
+    source: "purchase",
+    processedTokens: tokens,
+    finishedIosTokens: finished,
+  });
+  assert.equal(first.result.kind, "verified_unfinished_ios");
+  assert.equal(first.pending?.stage, "verified_unfinished_ios");
+  assert.equal(spy.ios.length, 1);
+  shouldFailFinish = false;
+  const second = await processStorePurchase({
+    deps: d,
+    purchase: iosPurchase(),
+    pending: first.pending,
+    source: "purchase",
+    processedTokens: tokens,
+    finishedIosTokens: finished,
+  });
+  assert.equal(second.result.kind, "verified");
+  assert.equal(second.pending, null);
+  assert.equal(spy.ios.length, 1);
+  assert.equal(spy.finish.length, 1);
+}
+
+async function testSuccessfulFinishDuplicateCannotCreatePhantomUnfinished() {
+  const store = memoryStore();
+  const spy = {
+    android: [],
+    ios: [] as { signedTransactionInfo: string; expectedCanonicalSku?: string }[],
+    finish: [] as StorePurchase[],
+    purchases: [],
+  };
+  const native = fakeNative(spy);
+  const wrapping: IapNativeAdapter = {
+    ...native,
+    async finishTransactionIOS(purchase) {
+      if (spy.finish.length >= 1) throw new Error("second finish must not run");
+      return native.finishTransactionIOS(purchase);
+    },
+  };
+  const env = iosPending();
+  await seedPending(store, env);
+  const tokens = new Set<string>();
+  const finished = new Set<string>();
+  const d = deps({ platform: "ios", store, native: wrapping, backend: fakeBackend(spy) });
+  const first = await processStorePurchase({
+    deps: d,
+    purchase: iosPurchase(),
+    pending: env,
+    source: "purchase",
+    processedTokens: tokens,
+    finishedIosTokens: finished,
+  });
+  assert.equal(first.result.kind, "verified");
+  const second = await processStorePurchase({
+    deps: d,
+    purchase: iosPurchase(),
+    pending: null,
+    source: "purchase",
+    processedTokens: tokens,
+    finishedIosTokens: finished,
+  });
+  assert.equal(second.result.kind, "verified");
+  assert.equal(second.pending, null);
+  assert.equal(spy.finish.length, 1);
+  assert.notEqual(second.result.kind, "verified_unfinished_ios");
+  assert.equal(store.data[PENDING_PURCHASE_CACHE_KEY], undefined);
+}
+
 async function main() {
   await testAndroidPendingDoesNotValidate();
   await testAndroidPurchasedSendsTokenNotCurrentPlan();
@@ -517,6 +648,9 @@ async function main() {
   await testUserCancelledDoesNotClearStorePending();
   await testRestoreAndroidValidatesWithoutBasePlan();
   await testRestoreIosValidatesJwsWithoutGrantApi();
+  await testDuplicateIosSuccessfulCallbackFinishesOnce();
+  await testVerifiedUnfinishedIosRetriesFinish();
+  await testSuccessfulFinishDuplicateCannotCreatePhantomUnfinished();
   console.log("iapPurchaseProcessor.test.ts: ok");
 }
 

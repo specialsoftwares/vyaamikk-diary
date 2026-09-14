@@ -3,6 +3,9 @@
  *
  * Mounts once after AuthProvider / SubscriptionProvider. Never grants
  * entitlement; SubscriptionProvider remains the capability authority.
+ *
+ * Render-time owner binding is the zero-frame uid isolation gate. Effects
+ * only drive the session; they must not be the visibility or action authority.
  */
 
 import React, {
@@ -24,6 +27,11 @@ import { resolveIapCapability } from "./iapCapability";
 import { createFirebaseIapBackend } from "./iapBackend";
 import { createExpoIapNativeAdapter } from "./iapNative";
 import { createIapSession, type IapSession } from "./iapSession";
+import {
+  activeIapAuthUid,
+  bindIapViewToAuth,
+  runGuardedIapAction,
+} from "./iapViewBinding";
 import type {
   CanonicalSku,
   IapNativeAdapter,
@@ -31,7 +39,7 @@ import type {
   PurchaseFlowResult,
 } from "./iapTypes";
 
-export type UseIapResult = IapView & {
+export type UseIapResult = Omit<IapView, "ownerUid"> & {
   loadCatalog: () => Promise<void>;
   purchase: (sku: CanonicalSku) => Promise<PurchaseFlowResult>;
   restorePurchases: () => Promise<PurchaseFlowResult>;
@@ -104,7 +112,11 @@ export function IapProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const platform =
-      Platform.OS === "ios" || Platform.OS === "android" ? Platform.OS : Platform.OS === "web" ? "web" : "other";
+      Platform.OS === "ios" || Platform.OS === "android"
+        ? Platform.OS
+        : Platform.OS === "web"
+          ? "web"
+          : "other";
     const session = createIapSession({
       native: capability.available ? createExpoIapNativeAdapter() : noopNativeAdapter(),
       backend: createFirebaseIapBackend(),
@@ -128,38 +140,68 @@ export function IapProvider({ children }: { children: React.ReactNode }) {
     });
   }, [authStatus, user?.uid]);
 
+  const activeUid = activeIapAuthUid(authStatus, user?.uid ?? null);
+  const activeUidRef = useRef(activeUid);
+  activeUidRef.current = activeUid;
+
+  const bound = bindIapViewToAuth({
+    view,
+    authStatus,
+    authUid: user?.uid ?? null,
+  });
+  const { ownerUid: _ownerUid, ...publicView } = bound;
+
   const loadCatalog = useCallback(async () => {
-    await sessionRef.current?.loadCatalog();
+    const session = sessionRef.current;
+    if (!session) return;
+    await runGuardedIapAction({
+      activeUid: activeUidRef.current,
+      sessionOwnerUid: session.getView().ownerUid,
+      blockedResult: undefined,
+      action: () => session.loadCatalog().then(() => undefined),
+    });
   }, []);
 
   const purchase = useCallback(async (sku: CanonicalSku) => {
-    if (!sessionRef.current) {
+    const session = sessionRef.current;
+    if (!session) {
       return {
         kind: "unavailable" as const,
         reason: "native_build_required" as const,
       };
     }
-    return sessionRef.current.purchase(sku);
+    return runGuardedIapAction({
+      activeUid: activeUidRef.current,
+      sessionOwnerUid: session.getView().ownerUid,
+      blockedResult: { kind: "unavailable" as const, reason: "not_signed_in" as const },
+      action: () => session.purchase(sku),
+    });
   }, []);
 
-  const restorePurchases = useCallback(async () => {
-    if (!sessionRef.current) {
+  const restorePurchases = useCallback(async (): Promise<PurchaseFlowResult> => {
+    const session = sessionRef.current;
+    if (!session) {
       return {
-        kind: "unavailable" as const,
-        reason: "native_build_required" as const,
+        kind: "unavailable",
+        reason: "native_build_required",
       };
     }
-    return sessionRef.current.restorePurchases();
+    return runGuardedIapAction({
+      activeUid: activeUidRef.current,
+      sessionOwnerUid: session.getView().ownerUid,
+      blockedResult: { kind: "unavailable", reason: "not_signed_in" },
+      action: () => session.restorePurchases(),
+    });
   }, []);
 
   const value = useMemo<UseIapResult>(
     () => ({
-      ...view,
+      ...publicView,
       loadCatalog,
       purchase,
       restorePurchases,
     }),
-    [view, loadCatalog, purchase, restorePurchases]
+    [publicView, loadCatalog, purchase, restorePurchases]
   );
 
   return <IapContext.Provider value={value}>{children}</IapContext.Provider>;
