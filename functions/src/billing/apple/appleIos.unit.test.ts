@@ -6,8 +6,10 @@ import assert from "node:assert/strict";
 
 import {
   AutoRenewStatus,
+  BillingPlanType,
   InAppOwnershipType,
   NotificationTypeV2,
+  RenewalBillingPlanType,
   RevocationType,
   Status,
   TransactionReason,
@@ -32,6 +34,7 @@ import {
 } from "../paths";
 import { ALL_CANONICAL_SKUS, SUBSCRIPTION_CATALOG, canonicalSkuForIos } from "../products";
 import { MemoryBillingStore } from "../store";
+import { iosStatusReconciliationQueueId } from "../reconciliationQueue";
 import type {
   BillingEventLedgerDoc,
   BillingReconciliationQueueDoc,
@@ -45,10 +48,17 @@ import { loadAppStoreRuntimeConfig } from "./appleConfig";
 import {
   APP_STORE_ENABLE_ONLINE_CERTIFICATE_CHECKS,
   APP_STORE_FINANCIAL_REPORTING_AUTHORITY_IMPLEMENTED,
+  APP_STORE_PRODUCT_IDENTIFIERS_CONFIRMED,
   assertAppStoreLiveBillingAllowed,
   CANONICAL_IOS_BUNDLE_ID,
 } from "./appleConstants";
-import { iosProratedRefundReviewId, iosRefundReversedReviewId } from "./appleFinancialReview";
+import {
+  ensureAppStoreFinancialReview,
+  iosFullRefundMissingSaleReviewId,
+  iosProratedRefundReviewId,
+  iosRefundReversedReviewId,
+  iosUnsupportedRevocationReviewId,
+} from "./appleFinancialReview";
 import {
   processIosNotification,
   processIosSignedTransaction,
@@ -131,6 +141,10 @@ function currentPair(opts: {
   renewalOriginalTransactionId?: string;
   renewalAppAccountToken?: string;
   renewalProductId?: string;
+  billingPlanType?: string;
+  renewalBillingPlanType?: string;
+  commitmentInfo?: Record<string, unknown>;
+  renewalCommitmentInfo?: Record<string, unknown>;
 }) {
   const originalTransactionId = opts.originalTransactionId ?? ORIG;
   const transactionId = opts.transactionId ?? ORIG;
@@ -153,6 +167,8 @@ function currentPair(opts: {
       ...(opts.revocationPercentage != null
         ? { revocationPercentage: opts.revocationPercentage }
         : {}),
+      ...(opts.billingPlanType != null ? { billingPlanType: opts.billingPlanType } : {}),
+      ...(opts.commitmentInfo != null ? { commitmentInfo: opts.commitmentInfo } : {}),
     })
   );
   const renewal = signAppleJws(
@@ -165,6 +181,12 @@ function currentPair(opts: {
       appAccountToken: opts.renewalAppAccountToken ?? opts.token,
       ...(opts.gracePeriodExpiresDate != null
         ? { gracePeriodExpiresDate: opts.gracePeriodExpiresDate }
+        : {}),
+      ...(opts.renewalBillingPlanType != null
+        ? { renewalBillingPlanType: opts.renewalBillingPlanType }
+        : {}),
+      ...(opts.renewalCommitmentInfo != null
+        ? { commitmentInfo: opts.renewalCommitmentInfo }
         : {}),
     })
   );
@@ -197,7 +219,7 @@ function assertNoSyntheticQueueFinancialIds(store: MemoryBillingStore) {
   for (const [path, doc] of store.docs.entries()) {
     if (!path.includes("_billingReconciliationQueue/")) continue;
     const id = String((doc as BillingReconciliationQueueDoc).financialEventId ?? "");
-    assert.match(id, /^ios:(purchase|renewal|refund):.+/);
+    assert.match(id, /^ios:(purchase|renewal|refund):.+$/);
     assert.equal(id.includes(":review:"), false);
     assert.equal(id.includes("unknown"), false);
   }
@@ -215,11 +237,18 @@ function reviewDoc(store: MemoryBillingStore, id: string): AppStoreFinancialRevi
 
 function queueDoc(
   store: MemoryBillingStore,
+  financialEventId: string,
   originalTransactionId = ORIG
 ): BillingReconciliationQueueDoc | undefined {
   return store.docs.get(
-    billingReconciliationQueuePath(`ios:status-reconcile:${originalTransactionId}`)
+    billingReconciliationQueuePath(
+      sanitizeDocId(iosStatusReconciliationQueueId(originalTransactionId, financialEventId))
+    )
   ) as BillingReconciliationQueueDoc | undefined;
+}
+
+function queueCount(store: MemoryBillingStore): number {
+  return [...store.docs.keys()].filter((k) => k.includes("_billingReconciliationQueue/")).length;
 }
 
 function historyCount(store: MemoryBillingStore, uid = UID): number {
@@ -806,7 +835,9 @@ assert.equal(canonicalSkuForIos("com.specialsoftwares.vyaamikkdiary.unknown.mont
     handleValidateAndActivateIOS(deps, { uid: UID, signedTransactionInfo: pair.tx }),
     isCause("apple_api_temporary_unavailable")
   );
-  const qid = billingReconciliationQueuePath(`ios:status-reconcile:${ORIG}`);
+  const qid = billingReconciliationQueuePath(
+    sanitizeDocId(iosStatusReconciliationQueueId(ORIG, "ios:purchase:2001"))
+  );
   const queued = store.docs.get(qid) as BillingReconciliationQueueDoc | undefined;
   assert.equal(queued?.status, "pending");
   assert.equal(queued?.platform, "ios");
@@ -854,6 +885,7 @@ assert.equal(canonicalSkuForIos("com.specialsoftwares.vyaamikkdiary.unknown.mont
 
 {
   assert.equal(APP_STORE_FINANCIAL_REPORTING_AUTHORITY_IMPLEMENTED, false);
+  assert.equal(APP_STORE_PRODUCT_IDENTIFIERS_CONFIRMED, false);
   assert.equal(APP_STORE_ENABLE_ONLINE_CERTIFICATE_CHECKS, false);
   assert.throws(
     () => assertAppStoreLiveBillingAllowed(),
@@ -922,7 +954,7 @@ assert.equal(canonicalSkuForIos("com.specialsoftwares.vyaamikkdiary.unknown.mont
     handleValidateAndActivateIOS(deps, { uid: UID, signedTransactionInfo: pair.tx }),
     isCause("apple_api_temporary_unavailable")
   );
-  const queued = queueDoc(store);
+  const queued = queueDoc(store, "ios:renewal:3001");
   assert.equal(queued?.financialEventId, "ios:renewal:3001");
   assert.equal(queued?.status, "pending");
   assert.equal(ledger(store, "ios:purchase:3001"), undefined);
@@ -931,7 +963,7 @@ assert.equal(canonicalSkuForIos("com.specialsoftwares.vyaamikkdiary.unknown.mont
     { ...deps, nowMs: () => TEST_NOW_MS + 50 },
     { uid: UID, signedTransactionInfo: pair.tx }
   );
-  const resolved = queueDoc(store);
+  const resolved = queueDoc(store, "ios:renewal:3001");
   assert.equal(resolved?.status, "resolved");
   assert.equal(resolved?.financialEventId, "ios:renewal:3001");
   assert.equal(ledger(store, "ios:renewal:3001")?.eventType, "renewal");
@@ -954,8 +986,7 @@ assert.equal(canonicalSkuForIos("com.specialsoftwares.vyaamikkdiary.unknown.mont
     isCause("unknown_ios_transaction_reason")
   );
   assert.equal(ledger(store, "ios:purchase:2001"), undefined);
-  const qid = billingReconciliationQueuePath(`ios:status-reconcile:${ORIG}`);
-  assert.equal(store.docs.get(qid), undefined);
+  assert.equal(queueCount(store), 0);
 }
 
 {
@@ -994,7 +1025,7 @@ assert.equal(canonicalSkuForIos("com.specialsoftwares.vyaamikkdiary.unknown.mont
   );
   assert.ok(ledger(store, "ios:refund:3001"));
   assert.equal(ledger(store, "ios:purchase:3001"), undefined);
-  const queued = queueDoc(store);
+  const queued = queueDoc(store, "ios:refund:3001");
   assert.equal(queued?.financialEventId, "ios:refund:3001");
   await assert.rejects(
     processIosNotification({ ...deps, nowMs: () => TEST_NOW_MS + 6000 }, notif),
@@ -1016,7 +1047,7 @@ assert.equal(canonicalSkuForIos("com.specialsoftwares.vyaamikkdiary.unknown.mont
   (deps.api as FakeAppleApi).statuses = expired.statuses;
   const recovered = await processIosNotification({ ...deps, nowMs: () => TEST_NOW_MS + 7000 }, notif);
   assert.equal(recovered.to?.billingStatus, "expired");
-  const resolved = queueDoc(store);
+  const resolved = queueDoc(store, "ios:refund:3001");
   assert.equal(resolved?.status, "resolved");
   assert.equal(resolved?.financialEventId, "ios:refund:3001");
   assert.equal(ledger(store, "ios:refund:3001")?.relatedFinancialEventId, "ios:renewal:3001");
@@ -1247,7 +1278,11 @@ assert.equal(canonicalSkuForIos("com.specialsoftwares.vyaamikkdiary.unknown.mont
     uid: OTHER,
     relatedFinancialEventId: "ios:purchase:2001",
   } as BillingEventLedgerDoc);
-  store.docs.set(billingReconciliationQueuePath(`ios:status-reconcile:${ORIG}`), {
+  store.docs.set(
+    billingReconciliationQueuePath(
+      sanitizeDocId(iosStatusReconciliationQueueId(ORIG, "ios:purchase:2001"))
+    ),
+    {
     reason: "ios_live_status_unavailable",
     platform: "ios",
     financialEventId: evilId,
@@ -1263,10 +1298,10 @@ assert.equal(canonicalSkuForIos("com.specialsoftwares.vyaamikkdiary.unknown.mont
       { ...deps, nowMs: () => TEST_NOW_MS + 50 },
       { uid: UID, signedTransactionInfo: pair.tx }
     ),
-    isCause("ios_reconciliation_queue_owner_mismatch")
+    isCause("reconciliation_queue_identity_mismatch")
   );
-  assert.equal(queueDoc(store)?.status, "pending");
-  assert.equal(queueDoc(store)?.financialEventId, evilId);
+  assert.equal(queueDoc(store, "ios:purchase:2001")?.status, "pending");
+  assert.equal(queueDoc(store, "ios:purchase:2001")?.financialEventId, evilId);
 }
 
 {
@@ -1323,7 +1358,8 @@ assert.equal(canonicalSkuForIos("com.specialsoftwares.vyaamikkdiary.unknown.mont
   assert.equal(review?.reason, "unsupported_ios_refund_reversal");
   assert.equal(review?.entitlementReconciledAt, null);
   assert.equal(review?.financialEventId, null);
-  assert.equal(queueDoc(store), undefined);
+  assert.equal(queueDoc(store, "ios:purchase:2001"), undefined);
+  assert.equal(queueCount(store), 0);
   assertNoSecrets(store);
 }
 
@@ -1505,10 +1541,599 @@ assert.equal(canonicalSkuForIos("com.specialsoftwares.vyaamikkdiary.unknown.mont
   assert.equal(review?.entitlementReconciledAt, null);
   assert.equal(ledger(store, "ios:refund:2001"), undefined);
   assert.equal(taxEvents.includes("refund"), false);
-  const queued = queueDoc(store);
+  const queued = queueDoc(store, "ios:purchase:2001");
   assert.equal(queued?.financialEventId, "ios:purchase:2001");
   assertNoSyntheticQueueFinancialIds(store);
   assertNoSecrets(store);
+}
+
+{
+  const retryable = () =>
+    new BillingError({
+      clientCode: "temporary_unavailable",
+      causeCode: "apple_api_temporary_unavailable",
+      retryable: true,
+    });
+  const { store, deps, api, pair, token } = await primed();
+  await handleValidateAndActivateIOS(deps, { uid: UID, signedTransactionInfo: pair.tx });
+  api.fail = retryable();
+  await assert.rejects(
+    handleValidateAndActivateIOS(deps, { uid: UID, signedTransactionInfo: pair.tx }),
+    isCause("apple_api_temporary_unavailable")
+  );
+  assert.equal(queueDoc(store, "ios:purchase:2001")?.status, "pending");
+  api.fail = null;
+  await handleValidateAndActivateIOS(
+    { ...deps, nowMs: () => TEST_NOW_MS + 2 },
+    { uid: UID, signedTransactionInfo: pair.tx }
+  );
+  assert.equal(queueDoc(store, "ios:purchase:2001")?.status, "resolved");
+
+  const renewal = currentPair({
+    token,
+    reason: TransactionReason.RENEWAL,
+    transactionId: "3001",
+    purchaseDate: TEST_NOW_MS + 20,
+    signedDate: TEST_NOW_MS + 20,
+  });
+  api.statuses = renewal.statuses;
+  await handleValidateAndActivateIOS(
+    { ...deps, nowMs: () => TEST_NOW_MS + 60_000 },
+    { uid: UID, signedTransactionInfo: renewal.tx }
+  );
+  assert.ok(ledger(store, "ios:renewal:3001"));
+  api.fail = retryable();
+  await assert.rejects(
+    handleValidateAndActivateIOS(
+      { ...deps, nowMs: () => TEST_NOW_MS + 60_001 },
+      { uid: UID, signedTransactionInfo: renewal.tx }
+    ),
+    isCause("apple_api_temporary_unavailable")
+  );
+  assert.equal(queueDoc(store, "ios:renewal:3001")?.status, "pending");
+  assert.equal(queueDoc(store, "ios:renewal:3001")?.financialEventId, "ios:renewal:3001");
+  assert.equal(queueDoc(store, "ios:purchase:2001")?.status, "resolved");
+  assert.equal(queueCount(store), 2);
+
+  api.fail = null;
+  await handleValidateAndActivateIOS(
+    { ...deps, nowMs: () => TEST_NOW_MS + 60_002 },
+    { uid: UID, signedTransactionInfo: pair.tx }
+  );
+  assert.equal(queueDoc(store, "ios:purchase:2001")?.status, "resolved");
+  assert.equal(queueDoc(store, "ios:renewal:3001")?.status, "pending");
+
+  await handleValidateAndActivateIOS(
+    { ...deps, nowMs: () => TEST_NOW_MS + 120_000 },
+    { uid: UID, signedTransactionInfo: renewal.tx }
+  );
+  assert.equal(queueDoc(store, "ios:renewal:3001")?.status, "resolved");
+
+  const refundTx = signAppleJws(
+    transactionPayload({
+      appAccountToken: token,
+      transactionId: "3001",
+      originalTransactionId: ORIG,
+      transactionReason: TransactionReason.RENEWAL,
+      revocationType: RevocationType.REFUND_FULL,
+      revocationDate: TEST_NOW_MS + 120_010,
+      revocationPercentage: 100_000,
+      purchaseDate: TEST_NOW_MS + 20,
+    })
+  );
+  api.fail = retryable();
+  const refundNotif = signAppleJws(
+    notificationPayload({
+      notificationType: NotificationTypeV2.REFUND,
+      signedTransactionInfo: refundTx,
+      signedDate: TEST_NOW_MS + 120_010,
+    })
+  );
+  await assert.rejects(
+    processIosNotification({ ...deps, nowMs: () => TEST_NOW_MS + 120_010 }, refundNotif),
+    isCause("apple_api_temporary_unavailable")
+  );
+  assert.equal(queueDoc(store, "ios:refund:3001")?.status, "pending");
+  assert.equal(queueDoc(store, "ios:refund:3001")?.financialEventId, "ios:refund:3001");
+  assert.equal(queueDoc(store, "ios:purchase:2001")?.status, "resolved");
+  assert.equal(queueDoc(store, "ios:renewal:3001")?.status, "resolved");
+  assert.equal(queueCount(store), 3);
+  assert.ok(ledger(store, "ios:refund:3001"));
+
+  api.fail = null;
+  const revoked = currentPair({
+    token,
+    status: Status.REVOKED,
+    autoRenew: AutoRenewStatus.OFF,
+    reason: TransactionReason.RENEWAL,
+    transactionId: "3001",
+    purchaseDate: TEST_NOW_MS + 20,
+    signedDate: TEST_NOW_MS + 120_020,
+  });
+  api.statuses = revoked.statuses;
+  await processIosNotification({ ...deps, nowMs: () => TEST_NOW_MS + 120_020 }, refundNotif);
+  assert.equal(queueDoc(store, "ios:refund:3001")?.status, "resolved");
+  assert.equal(queueDoc(store, "ios:purchase:2001")?.status, "resolved");
+  assert.equal(queueDoc(store, "ios:renewal:3001")?.status, "resolved");
+  assert.equal(queueCount(store), 3);
+  assertNoSyntheticQueueFinancialIds(store);
+}
+
+{
+  const t1 = TEST_NOW_MS + 86_400_000;
+  const t2 = TEST_NOW_MS + 2 * 86_400_000;
+  for (const [from, to] of [
+    [t1, t2],
+    [t2, t1],
+  ] as const) {
+    const { store, deps, api, pair, token } = await primed({
+      status: Status.BILLING_GRACE_PERIOD,
+      gracePeriodExpiresDate: from,
+    });
+    await handleValidateAndActivateIOS(deps, { uid: UID, signedTransactionInfo: pair.tx });
+    assert.equal(store.docs.get(subscriptionStatusPath(UID))?.gracePeriodEndsAt, from);
+    const histories = historyCount(store);
+    const later = currentPair({
+      token,
+      status: Status.BILLING_GRACE_PERIOD,
+      gracePeriodExpiresDate: to,
+      signedDate: TEST_NOW_MS + 1,
+    });
+    api.statuses = later.statuses;
+    await handleValidateAndActivateIOS(
+      { ...deps, nowMs: () => TEST_NOW_MS + 50 },
+      { uid: UID, signedTransactionInfo: later.tx }
+    );
+    assert.equal(store.docs.get(subscriptionStatusPath(UID))?.gracePeriodEndsAt, to);
+    assert.equal(historyCount(store), histories + 1);
+    const resign = currentPair({
+      token,
+      status: Status.BILLING_GRACE_PERIOD,
+      gracePeriodExpiresDate: to,
+      signedDate: TEST_NOW_MS + 2,
+    });
+    api.statuses = resign.statuses;
+    await handleValidateAndActivateIOS(
+      { ...deps, nowMs: () => TEST_NOW_MS + 100 },
+      { uid: UID, signedTransactionInfo: resign.tx }
+    );
+    assert.equal(store.docs.get(subscriptionStatusPath(UID))?.gracePeriodEndsAt, to);
+    assert.equal(historyCount(store), histories + 1);
+  }
+}
+
+{
+  const t1 = TEST_NOW_MS + 86_400_000;
+  const { store, deps, api, pair, token } = await primed({
+    status: Status.BILLING_GRACE_PERIOD,
+    autoRenew: AutoRenewStatus.ON,
+    gracePeriodExpiresDate: t1,
+  });
+  await handleValidateAndActivateIOS(deps, { uid: UID, signedTransactionInfo: pair.tx });
+  assert.equal(store.docs.get(subscriptionStatusPath(UID))?.autoRenewing, true);
+  const histories = historyCount(store);
+  const off = currentPair({
+    token,
+    status: Status.BILLING_GRACE_PERIOD,
+    autoRenew: AutoRenewStatus.OFF,
+    gracePeriodExpiresDate: t1,
+    signedDate: TEST_NOW_MS + 1,
+  });
+  api.statuses = off.statuses;
+  await handleValidateAndActivateIOS(
+    { ...deps, nowMs: () => TEST_NOW_MS + 50 },
+    { uid: UID, signedTransactionInfo: off.tx }
+  );
+  assert.equal(store.docs.get(subscriptionStatusPath(UID))?.autoRenewing, false);
+  assert.equal(historyCount(store), histories + 1);
+  const on = currentPair({
+    token,
+    status: Status.BILLING_GRACE_PERIOD,
+    autoRenew: AutoRenewStatus.ON,
+    gracePeriodExpiresDate: t1,
+    signedDate: TEST_NOW_MS + 2,
+  });
+  api.statuses = on.statuses;
+  await handleValidateAndActivateIOS(
+    { ...deps, nowMs: () => TEST_NOW_MS + 100 },
+    { uid: UID, signedTransactionInfo: on.tx }
+  );
+  assert.equal(store.docs.get(subscriptionStatusPath(UID))?.autoRenewing, true);
+  assert.equal(historyCount(store), histories + 2);
+}
+
+{
+  const { store, deps, api, pair, token } = await primed({
+    status: Status.BILLING_RETRY,
+    autoRenew: AutoRenewStatus.ON,
+  });
+  await handleValidateAndActivateIOS(deps, { uid: UID, signedTransactionInfo: pair.tx });
+  assert.equal(store.docs.get(subscriptionStatusPath(UID))?.billingStatus, "onHold");
+  assert.equal(store.docs.get(subscriptionStatusPath(UID))?.autoRenewing, true);
+  assert.equal(store.docs.get(subscriptionStatusPath(UID))?.platform, "ios");
+  const histories = historyCount(store);
+  const off = currentPair({
+    token,
+    status: Status.BILLING_RETRY,
+    autoRenew: AutoRenewStatus.OFF,
+    signedDate: TEST_NOW_MS + 1,
+  });
+  api.statuses = off.statuses;
+  await handleValidateAndActivateIOS(
+    { ...deps, nowMs: () => TEST_NOW_MS + 50 },
+    { uid: UID, signedTransactionInfo: off.tx }
+  );
+  assert.equal(store.docs.get(subscriptionStatusPath(UID))?.autoRenewing, false);
+  assert.equal(store.docs.get(subscriptionStatusPath(UID))?.billingStatus, "onHold");
+  assert.equal(historyCount(store), histories + 1);
+  const same = currentPair({
+    token,
+    status: Status.BILLING_RETRY,
+    autoRenew: AutoRenewStatus.OFF,
+    signedDate: TEST_NOW_MS + 2,
+  });
+  api.statuses = same.statuses;
+  await handleValidateAndActivateIOS(
+    { ...deps, nowMs: () => TEST_NOW_MS + 100 },
+    { uid: UID, signedTransactionInfo: same.tx }
+  );
+  assert.equal(historyCount(store), histories + 1);
+}
+
+{
+  const { store, deps, api, pair, token } = await primed({ autoRenew: AutoRenewStatus.OFF });
+  await handleValidateAndActivateIOS(deps, { uid: UID, signedTransactionInfo: pair.tx });
+  assert.equal(store.docs.get(subscriptionStatusPath(UID))?.billingStatus, "cancelled");
+  const histories = historyCount(store);
+  const resign = currentPair({
+    token,
+    autoRenew: AutoRenewStatus.OFF,
+    signedDate: TEST_NOW_MS + 9,
+  });
+  api.statuses = resign.statuses;
+  await handleValidateAndActivateIOS(
+    { ...deps, nowMs: () => TEST_NOW_MS + 90 },
+    { uid: UID, signedTransactionInfo: resign.tx }
+  );
+  assert.equal(store.docs.get(subscriptionStatusPath(UID))?.billingStatus, "cancelled");
+  assert.equal(historyCount(store), histories);
+}
+
+{
+  const { store, deps, token, taxEvents } = await primed({
+    status: Status.REVOKED,
+    autoRenew: AutoRenewStatus.OFF,
+  });
+  const refundTx = signAppleJws(
+    transactionPayload({
+      appAccountToken: token,
+      revocationType: RevocationType.REFUND_FULL,
+      revocationDate: TEST_NOW_MS + 1,
+      revocationPercentage: 100_000,
+      purchaseDate: TEST_NOW_MS,
+    })
+  );
+  const result = await processIosNotification(
+    { ...deps, nowMs: () => TEST_NOW_MS + 2 },
+    signAppleJws(
+      notificationPayload({
+        notificationType: NotificationTypeV2.REFUND,
+        signedTransactionInfo: refundTx,
+      })
+    )
+  );
+  assert.equal(result.to?.entitlementActive, false);
+  const review = reviewDoc(store, iosFullRefundMissingSaleReviewId(ORIG));
+  assert.equal(review?.reason, "ios_full_refund_original_sale_missing");
+  assert.equal(review?.status, "pending");
+  const sale = ledger(store, "ios:purchase:2001") ?? ledger(store, "ios:renewal:2001");
+  const refund = ledger(store, "ios:refund:2001");
+  if (!sale) {
+    assert.equal(refund, undefined);
+    assert.equal(taxEvents.includes("refund"), false);
+  } else if (refund) {
+    assert.equal(refund.relatedFinancialEventId, sale.financialEventId);
+  }
+}
+
+{
+  const { store, deps, token, taxEvents } = await primed({
+    status: Status.EXPIRED,
+    autoRenew: AutoRenewStatus.OFF,
+  });
+  const refundTx = signAppleJws(
+    transactionPayload({
+      appAccountToken: token,
+      revocationType: RevocationType.REFUND_FULL,
+      revocationDate: TEST_NOW_MS + 1,
+      revocationPercentage: 100_000,
+      purchaseDate: TEST_NOW_MS,
+    })
+  );
+  const notif = signAppleJws(
+    notificationPayload({
+      notificationType: NotificationTypeV2.REFUND,
+      signedTransactionInfo: refundTx,
+    })
+  );
+  await processIosNotification({ ...deps, nowMs: () => TEST_NOW_MS + 2 }, notif);
+  assert.ok(ledger(store, "ios:purchase:2001"));
+  assert.equal(ledger(store, "ios:refund:2001")?.relatedFinancialEventId, "ios:purchase:2001");
+  assert.equal(
+    reviewDoc(store, iosFullRefundMissingSaleReviewId(ORIG))?.financialEventId,
+    "ios:refund:2001"
+  );
+  const histories = historyCount(store);
+  await processIosNotification({ ...deps, nowMs: () => TEST_NOW_MS + 3 }, notif);
+  assert.equal(ledger(store, "ios:refund:2001")?.relatedFinancialEventId, "ios:purchase:2001");
+  assert.equal(historyCount(store), histories);
+  assert.ok(taxEvents.includes("refund"));
+}
+
+{
+  const { store, deps, api, token, taxEvents } = await primed();
+  const liveLater = currentPair({
+    token,
+    reason: TransactionReason.RENEWAL,
+    transactionId: "3001",
+    purchaseDate: TEST_NOW_MS + 1000,
+    signedDate: TEST_NOW_MS + 1000,
+  });
+  api.statuses = liveLater.statuses;
+  const refundTx = signAppleJws(
+    transactionPayload({
+      appAccountToken: token,
+      transactionId: "2001",
+      originalTransactionId: ORIG,
+      transactionReason: TransactionReason.PURCHASE,
+      revocationType: RevocationType.REFUND_FULL,
+      revocationDate: TEST_NOW_MS + 500,
+      revocationPercentage: 100_000,
+      purchaseDate: TEST_NOW_MS,
+    })
+  );
+  const result = await processIosNotification(
+    { ...deps, nowMs: () => TEST_NOW_MS + 2000 },
+    signAppleJws(
+      notificationPayload({
+        notificationType: NotificationTypeV2.REFUND,
+        signedTransactionInfo: refundTx,
+      })
+    )
+  );
+  assert.equal(result.to?.billingStatus, "active");
+  assert.equal(result.to?.entitlementActive, true);
+  assert.equal(ledger(store, "ios:purchase:2001"), undefined);
+  assert.equal(ledger(store, "ios:refund:2001"), undefined);
+  assert.ok(ledger(store, "ios:renewal:3001"));
+  const review = reviewDoc(store, iosFullRefundMissingSaleReviewId("2001"));
+  assert.equal(review?.reason, "ios_full_refund_original_sale_missing");
+  assert.equal(review?.financialEventId, null);
+  assert.equal(review?.status, "pending");
+  assert.ok(review?.entitlementReconciledAt);
+  assert.equal(taxEvents.includes("refund"), false);
+}
+
+{
+  const { store, deps, api, pair, token, taxEvents } = await primed();
+  await handleValidateAndActivateIOS(deps, { uid: UID, signedTransactionInfo: pair.tx });
+  const nested = signAppleJws(
+    transactionPayload({
+      appAccountToken: token,
+      revocationType: "FUTURE_REVOKE_KIND",
+      revocationDate: TEST_NOW_MS + 1,
+    })
+  );
+  api.statuses = currentPair({ token, signedDate: TEST_NOW_MS + 2 }).statuses;
+  const result = await processIosNotification(
+    { ...deps, nowMs: () => TEST_NOW_MS + 2 },
+    signAppleJws(
+      notificationPayload({
+        notificationType: NotificationTypeV2.REFUND,
+        signedTransactionInfo: nested,
+      })
+    )
+  );
+  assert.equal(result.action, "unsupported_revocation_review_reconciled");
+  assert.equal(result.to?.billingStatus, "active");
+  assert.equal(ledger(store, "ios:refund:2001"), undefined);
+  assert.equal(taxEvents.includes("refund"), false);
+  const review = reviewDoc(store, iosUnsupportedRevocationReviewId(ORIG));
+  assert.equal(review?.reason, "unsupported_ios_revocation_type");
+  assert.ok(review?.entitlementReconciledAt);
+}
+
+{
+  const { store, deps, api, token } = await primed();
+  const prorated = signAppleJws(
+    transactionPayload({
+      appAccountToken: token,
+      revocationType: RevocationType.REFUND_PRORATED,
+      revocationDate: TEST_NOW_MS + 1,
+    })
+  );
+  const notif = signAppleJws(
+    notificationPayload({
+      notificationType: NotificationTypeV2.REFUND,
+      signedTransactionInfo: prorated,
+    })
+  );
+  api.statuses = currentPair({ token, signedDate: TEST_NOW_MS + 5 }).statuses;
+  await processIosNotification({ ...deps, nowMs: () => TEST_NOW_MS + 5 }, notif);
+  const id = iosProratedRefundReviewId(ORIG);
+  assert.equal(reviewDoc(store, id)?.financialEventId, null);
+  assert.ok(ledger(store, "ios:purchase:2001"));
+  assert.equal(ledger(store, "ios:refund:2001"), undefined);
+  await processIosNotification({ ...deps, nowMs: () => TEST_NOW_MS + 6 }, notif);
+  const review = reviewDoc(store, id);
+  assert.equal(review?.financialEventId, "ios:purchase:2001");
+  assert.ok(review?.financialEventLinkedAt);
+  const linkedAt = review?.financialEventLinkedAt;
+  await processIosNotification({ ...deps, nowMs: () => TEST_NOW_MS + 7 }, notif);
+  assert.equal(reviewDoc(store, id)?.financialEventId, "ios:purchase:2001");
+  assert.equal(reviewDoc(store, id)?.financialEventLinkedAt, linkedAt);
+}
+
+{
+  const store = new MemoryBillingStore();
+  const id = iosProratedRefundReviewId("enrich-1");
+  const base = {
+    id,
+    reason: "unsupported_ios_prorated_refund",
+    transactionId: "enrich-1",
+    originalTransactionId: ORIG,
+    canonicalSku: "vyd_professional_monthly",
+    uid: UID,
+    diagnosticUid: "diag-original",
+  };
+  await ensureAppStoreFinancialReview(store, {
+    ...base,
+    financialEventId: null,
+    nowMs: TEST_NOW_MS,
+  });
+  assert.equal(reviewDoc(store, id)?.financialEventId, null);
+  assert.equal(reviewDoc(store, id)?.financialEventLinkedAt, null);
+  await ensureAppStoreFinancialReview(store, {
+    ...base,
+    financialEventId: "ios:purchase:enrich-1",
+    diagnosticUid: "diag-rotated",
+    nowMs: TEST_NOW_MS + 1,
+  });
+  const enriched = reviewDoc(store, id);
+  assert.equal(enriched?.financialEventId, "ios:purchase:enrich-1");
+  assert.equal(enriched?.diagnosticUid, "diag-original");
+  assert.equal(enriched?.financialEventLinkedAt, TEST_NOW_MS + 1);
+  await ensureAppStoreFinancialReview(store, {
+    ...base,
+    financialEventId: "ios:purchase:enrich-1",
+    nowMs: TEST_NOW_MS + 2,
+  });
+  assert.equal(reviewDoc(store, id)?.financialEventLinkedAt, TEST_NOW_MS + 1);
+  await ensureAppStoreFinancialReview(store, {
+    ...base,
+    financialEventId: null,
+    nowMs: TEST_NOW_MS + 3,
+  });
+  assert.equal(reviewDoc(store, id)?.financialEventId, "ios:purchase:enrich-1");
+  await assert.rejects(
+    ensureAppStoreFinancialReview(store, {
+      ...base,
+      financialEventId: "ios:refund:enrich-1",
+      nowMs: TEST_NOW_MS + 4,
+    }),
+    isCause("ios_financial_review_identity_mismatch")
+  );
+  await assert.rejects(
+    ensureAppStoreFinancialReview(store, {
+      ...base,
+      uid: OTHER,
+      financialEventId: "ios:purchase:enrich-1",
+      nowMs: TEST_NOW_MS + 5,
+    }),
+    isCause("ios_financial_review_identity_mismatch")
+  );
+  await assert.rejects(
+    ensureAppStoreFinancialReview(store, {
+      ...base,
+      canonicalSku: "vyd_starter_monthly",
+      financialEventId: "ios:purchase:enrich-1",
+      nowMs: TEST_NOW_MS + 6,
+    }),
+    isCause("ios_financial_review_identity_mismatch")
+  );
+}
+
+{
+  const { deps, pair } = await primed({
+    billingPlanType: BillingPlanType.BILLED_UPFRONT,
+    renewalBillingPlanType: RenewalBillingPlanType.BILLED_UPFRONT,
+  });
+  const result = await handleValidateAndActivateIOS(deps, {
+    uid: UID,
+    signedTransactionInfo: pair.tx,
+  });
+  assert.equal(result.to?.billingStatus, "active");
+}
+
+{
+  const { deps, pair } = await primed({ billingPlanType: BillingPlanType.MONTHLY });
+  await assert.rejects(
+    handleValidateAndActivateIOS(deps, { uid: UID, signedTransactionInfo: pair.tx }),
+    isCause("unsupported_ios_commitment_billing_plan")
+  );
+}
+
+{
+  const { deps, pair } = await primed({
+    renewalBillingPlanType: RenewalBillingPlanType.MONTHLY,
+  });
+  await assert.rejects(
+    handleValidateAndActivateIOS(deps, { uid: UID, signedTransactionInfo: pair.tx }),
+    isCause("unsupported_ios_commitment_billing_plan")
+  );
+}
+
+{
+  const { deps, pair } = await primed({
+    commitmentInfo: { totalBillingPeriods: 12 },
+  });
+  await assert.rejects(
+    handleValidateAndActivateIOS(deps, { uid: UID, signedTransactionInfo: pair.tx }),
+    isCause("unsupported_ios_commitment_billing_plan")
+  );
+}
+
+{
+  const { deps, pair } = await primed({
+    renewalCommitmentInfo: { commitmentRenewalDate: TEST_NOW_MS + 1 },
+  });
+  await assert.rejects(
+    handleValidateAndActivateIOS(deps, { uid: UID, signedTransactionInfo: pair.tx }),
+    isCause("unsupported_ios_commitment_billing_plan")
+  );
+}
+
+{
+  const { deps, pair } = await primed({ billingPlanType: "YEARLY" });
+  await assert.rejects(
+    handleValidateAndActivateIOS(deps, { uid: UID, signedTransactionInfo: pair.tx }),
+    isCause("unsupported_ios_commitment_billing_plan")
+  );
+}
+
+{
+  const { deps, pair } = await primed({
+    billingPlanType: BillingPlanType.BILLED_UPFRONT,
+    renewalBillingPlanType: RenewalBillingPlanType.MONTHLY,
+  });
+  await assert.rejects(
+    handleValidateAndActivateIOS(deps, { uid: UID, signedTransactionInfo: pair.tx }),
+    isCause("unsupported_ios_commitment_billing_plan")
+  );
+}
+
+{
+  const { deps, token } = await primed();
+  const a = currentPair({ token, billingPlanType: BillingPlanType.BILLED_UPFRONT });
+  const b = currentPair({ token });
+  (deps.api as FakeAppleApi).statuses = statusResponseForItems(ORIG, [
+    { status: Status.ACTIVE, signedTransactionInfo: a.tx, signedRenewalInfo: a.renewal },
+    { status: Status.ACTIVE, signedTransactionInfo: b.tx, signedRenewalInfo: b.renewal },
+  ]);
+  await assert.rejects(
+    handleValidateAndActivateIOS(deps, { uid: UID, signedTransactionInfo: a.tx }),
+    isCause("ambiguous_ios_subscription_state")
+  );
+}
+
+{
+  const durable = /^ios:(purchase|renewal|refund):.+$/;
+  assert.equal(durable.test("ios:purchase:2001"), true);
+  assert.equal(durable.test("ios:renewal:3001"), true);
+  assert.equal(durable.test("ios:refund:3001"), true);
+  assert.equal(durable.test("xios:purchase:2001"), false);
+  assert.equal(durable.test("ios:review:2001"), false);
+  assert.equal(durable.test("ios:purchase:"), false);
 }
 
 assert.equal(CANONICAL_IOS_BUNDLE_ID, "com.specialsoftwares.vyaamikkdiary");

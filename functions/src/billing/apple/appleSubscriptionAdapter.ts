@@ -37,10 +37,14 @@ import {
 import { canonicalSkuForIos, getCatalogEntry, isCanonicalSku, type CanonicalSku } from "../products";
 import {
   ensureAppStoreFinancialReview,
+  iosFullRefundMissingSaleReviewId,
   iosProratedRefundReviewId,
   iosRefundReversedReviewId,
+  iosUnsupportedRevocationReviewId,
   markAppStoreFinancialReviewEntitlementReconciled,
+  readAppStoreFinancialReview,
 } from "./appleFinancialReview";
+import { assertIosBillingPlanSupported, iosBillingPlanSemanticKey } from "./appleBillingPlan";
 import {
   ensureReconciliationWorkItem,
   iosStatusReconciliationQueueId,
@@ -128,7 +132,7 @@ interface VerifiedIosCurrent {
 }
 
 const FULL_REFUND_PERCENTAGE_MILLIUNITS = 100_000;
-const DURABLE_IOS_FINANCIAL_EVENT_ID = /^ios:(purchase|renewal|refund):.+/;
+const DURABLE_IOS_FINANCIAL_EVENT_ID = /^ios:(purchase|renewal|refund):.+$/;
 
 function requireText(value: unknown, causeCode: string): string {
   if (typeof value !== "string" || value.length === 0) {
@@ -206,35 +210,36 @@ function financialReplayMatches(
 
 function lifecycleAlreadyMatches(
   status: SubscriptionStatusDoc | null,
-  kind: CanonicalTransitionKind,
-  plan: VyaamikkPlan,
-  currentPeriodEnd: number
+  opts: {
+    kind: CanonicalTransitionKind;
+    plan: VyaamikkPlan;
+    platformEvent: VerifiedPlatformEvent;
+    gracePeriodEndsAt?: number;
+  }
 ): boolean {
   if (!status) return false;
-  if (kind === "expire") return status.billingStatus === "expired";
-  if (kind === "activatePaid" || kind === "renew") {
-    return (
-      status.billingStatus === "active" &&
-      status.plan === plan &&
-      status.currentPeriodEnd === currentPeriodEnd
-    );
+  const ev = opts.platformEvent;
+  const samePlatform = (nextStatus: SubscriptionStatusDoc["billingStatus"]): boolean =>
+    status.billingStatus === nextStatus &&
+    status.plan === opts.plan &&
+    status.platform === ev.platform &&
+    status.productId === ev.productId &&
+    (status.basePlanId ?? null) === (ev.basePlanId ?? null) &&
+    status.currentPeriodStart === ev.currentPeriodStart &&
+    status.currentPeriodEnd === ev.currentPeriodEnd &&
+    status.autoRenewing === ev.autoRenewing;
+  if (opts.kind === "expire") return status.billingStatus === "expired";
+  if (opts.kind === "activatePaid" || opts.kind === "renew") {
+    return samePlatform("active") && status.cancelledAt == null && status.gracePeriodEndsAt == null;
   }
-  if (kind === "enterGrace") {
-    return (
-      status.billingStatus === "grace" &&
-      status.plan === plan &&
-      status.currentPeriodEnd === currentPeriodEnd
-    );
+  if (opts.kind === "enterGrace") {
+    return samePlatform("grace") && status.gracePeriodEndsAt === opts.gracePeriodEndsAt;
   }
-  if (kind === "enterOnHold") {
-    return status.billingStatus === "onHold" && status.plan === plan;
+  if (opts.kind === "enterOnHold") {
+    return samePlatform("onHold");
   }
-  if (kind === "cancel") {
-    return (
-      status.billingStatus === "cancelled" &&
-      status.plan === plan &&
-      status.currentPeriodEnd === currentPeriodEnd
-    );
+  if (opts.kind === "cancel") {
+    return samePlatform("cancelled");
   }
   return false;
 }
@@ -350,6 +355,7 @@ export async function assertVerifiedIosTransactionPointer(
       causeCode: "missing_ios_app_account_token",
     });
   }
+  assertIosBillingPlanSupported(tx);
   return tx;
 }
 
@@ -381,6 +387,7 @@ function iosCurrentSemanticKey(c: VerifiedIosCurrent): string {
       price: nullish(c.transaction.price),
       currency: nullish(c.transaction.currency),
     },
+    billingPlan: iosBillingPlanSemanticKey(c.transaction, c.renewal),
     renewal: {
       originalTransactionId: nullish(c.renewal.originalTransactionId),
       appAccountToken: nullish(c.renewal.appAccountToken),
@@ -525,6 +532,7 @@ export async function selectCurrentIosSubscription(opts: {
         originalTransactionId: opts.originalTransactionId,
         expectedUid: opts.expectedUid,
       });
+      assertIosBillingPlanSupported(transaction, renewal);
       if (item.status == null) {
         throw new BillingError({
           clientCode: "verification_failed",
@@ -638,11 +646,12 @@ async function enqueueStatusReconciliation(
   financialEventId: string,
   reason: string
 ): Promise<void> {
+  const durableId = assertDurableIosFinancialEventId(financialEventId);
   await ensureReconciliationWorkItem(deps.store, {
-    id: iosStatusReconciliationQueueId(originalTransactionId),
+    id: iosStatusReconciliationQueueId(originalTransactionId, durableId),
     reason,
     platform: "ios",
-    financialEventId: assertDurableIosFinancialEventId(financialEventId),
+    financialEventId: durableId,
     credentialFingerprint: null,
     nowMs: deps.nowMs(),
   });
@@ -650,9 +659,10 @@ async function enqueueStatusReconciliation(
 
 async function readIosStatusReconciliationQueue(
   store: BillingStore,
-  originalTransactionId: string
+  originalTransactionId: string,
+  financialEventId: string
 ): Promise<BillingReconciliationQueueDoc | null> {
-  const id = iosStatusReconciliationQueueId(originalTransactionId);
+  const id = iosStatusReconciliationQueueId(originalTransactionId, financialEventId);
   return store.runTransaction(async (tx) => {
     const snap = await tx.get(billingReconciliationQueuePath(sanitizeDocId(id)));
     if (!snap.exists) return null;
@@ -673,25 +683,28 @@ function isIosSaleEventType(
 }
 
 /**
- * Resolve the iOS status-reconciliation queue by ITS OWN persisted
- * financialEventId. Never substitute the current sale event id.
+ * Resolve the iOS status-reconciliation work item for ONE durable financial
+ * event. Missing item is a no-op. Never infers a different event from the
+ * current live sale.
  */
 async function resolveIosStatusReconciliationIfPresent(
   store: BillingStore,
   originalTransactionId: string,
+  financialEventId: string | null | undefined,
   expectedUid: string,
   nowMs: number
 ): Promise<void> {
-  const queue = await readIosStatusReconciliationQueue(store, originalTransactionId);
+  if (financialEventId == null || financialEventId === "") return;
+  const durableId = assertDurableIosFinancialEventId(financialEventId);
+  const queue = await readIosStatusReconciliationQueue(store, originalTransactionId, durableId);
   if (!queue) return;
-  if (queue.platform !== "ios") {
+  if (queue.platform !== "ios" || queue.financialEventId !== durableId) {
     throw new BillingError({
       clientCode: "internal_error",
       causeCode: "reconciliation_queue_identity_mismatch",
     });
   }
-  const financialEventId = assertDurableIosFinancialEventId(queue.financialEventId);
-  const ledger = await readLedger(store, financialEventId);
+  const ledger = await readLedger(store, durableId);
   if (!ledger || ledger.platform !== "ios" || !isDurableIosLedgerEventType(ledger.eventType)) {
     throw new BillingError({
       clientCode: "internal_error",
@@ -705,9 +718,9 @@ async function resolveIosStatusReconciliationIfPresent(
     });
   }
   await resolveReconciliationWorkItem(store, {
-    id: iosStatusReconciliationQueueId(originalTransactionId),
+    id: iosStatusReconciliationQueueId(originalTransactionId, durableId),
     platform: "ios",
-    financialEventId,
+    financialEventId: durableId,
     nowMs,
   });
 }
@@ -820,7 +833,17 @@ export async function reconcileIosOriginalTransaction(
     });
   }
 
-  if (!lifecycleAlreadyMatches(to, mapped.kind, plan, currentPeriodEnd)) {
+  if (
+    !lifecycleAlreadyMatches(to, {
+      kind: mapped.kind,
+      plan,
+      platformEvent,
+      gracePeriodEndsAt:
+        mapped.kind === "enterGrace"
+          ? (optionalFiniteMillis(current.renewal.gracePeriodExpiresDate) ?? currentPeriodEnd)
+          : undefined,
+    })
+  ) {
     const snapshotHash = iosLifecycleSnapshotHash({
       transactionId: requireText(current.transaction.transactionId, "missing_ios_transaction_id"),
       originalTransactionId: input.originalTransactionId,
@@ -861,13 +884,6 @@ export async function reconcileIosOriginalTransaction(
     to = applied.to;
     lastSummary = applied.resultSummary;
   }
-
-  await resolveIosStatusReconciliationIfPresent(
-    deps.store,
-    input.originalTransactionId,
-    current.uid,
-    reconciledAt
-  );
 
   billingLog("info", {
     diagnosticUid,
@@ -915,7 +931,7 @@ export async function processIosSignedTransaction(
     "missing_ios_original_transaction_id"
   );
   try {
-    return await reconcileIosOriginalTransaction(deps, {
+    const result = await reconcileIosOriginalTransaction(deps, {
       originalTransactionId,
       expectedUid: ownerUid,
       source: input.source,
@@ -923,6 +939,31 @@ export async function processIosSignedTransaction(
       observationTime: deps.nowMs(),
       expectedCanonicalSku: input.expectedCanonicalSku,
     });
+    const txId = requireText(pointer.transactionId, "missing_ios_transaction_id");
+    let pointerFinancialEventId: string | null = null;
+    try {
+      const eventType = economicEventType(pointer.transactionReason);
+      pointerFinancialEventId = financialEventIdForStore({
+        platform: "ios",
+        eventType,
+        transactionId: txId,
+      });
+    } catch (err) {
+      if (!(err instanceof BillingError && err.causeCode === "unknown_ios_transaction_reason")) {
+        throw err;
+      }
+    }
+    if (pointerFinancialEventId) {
+      const existing = await readLedger(deps.store, pointerFinancialEventId);
+      await resolveIosStatusReconciliationIfPresent(
+        deps.store,
+        originalTransactionId,
+        existing?.financialEventId ?? null,
+        ownerUid,
+        deps.nowMs()
+      );
+    }
+    return result;
   } catch (err) {
     if (isRetryableBillingError(err)) {
       const txId = requireText(pointer.transactionId, "missing_ios_transaction_id");
@@ -1080,9 +1121,13 @@ async function verifiedRefundFinancialEventIdIfPresent(
 async function persistUnsupportedIosRefundReview(opts: {
   deps: IosBillingDeps;
   reviewId: string;
-  reason: "unsupported_ios_prorated_refund";
+  reason:
+    | "unsupported_ios_prorated_refund"
+    | "ios_full_refund_original_sale_missing"
+    | "unsupported_ios_revocation_type";
   transaction: JWSTransactionDecodedPayload;
   resolvedUid: string;
+  financialEventId?: string | null;
 }): Promise<{ reviewId: string; queueFinancialEventId: string | null }> {
   const transactionId = requireText(opts.transaction.transactionId, "missing_ios_transaction_id");
   const originalTransactionId = requireText(
@@ -1091,12 +1136,15 @@ async function persistUnsupportedIosRefundReview(opts: {
   );
   const productId = requireText(opts.transaction.productId, "unknown_ios_product");
   const canonicalSku = canonicalSkuForIos(productId);
-  const queueFinancialEventId = await verifiedOriginalSaleFinancialEventIdIfPresent(
-    opts.deps.store,
-    transactionId,
-    opts.resolvedUid,
-    canonicalSku
-  );
+  const queueFinancialEventId =
+    opts.financialEventId !== undefined
+      ? opts.financialEventId
+      : await verifiedOriginalSaleFinancialEventIdIfPresent(
+          opts.deps.store,
+          transactionId,
+          opts.resolvedUid,
+          canonicalSku
+        );
   await ensureAppStoreFinancialReview(opts.deps.store, {
     id: opts.reviewId,
     reason: opts.reason,
@@ -1172,12 +1220,43 @@ export async function recordIosRefundAdjustment(
     };
   }
   if (input.transaction.revocationType !== RevocationType.REFUND_FULL) {
-    throw new BillingError({
-      clientCode: "verification_failed",
-      causeCode: "unknown_ios_revocation_type",
+    const review = await persistUnsupportedIosRefundReview({
+      deps,
+      reviewId: iosUnsupportedRevocationReviewId(transactionId),
+      reason: "unsupported_ios_revocation_type",
+      transaction: input.transaction,
+      resolvedUid,
     });
+    return {
+      written: false,
+      financial: null,
+      uid: resolvedUid,
+      reviewRequired: true,
+      reviewReason: "unsupported_ios_revocation_type",
+      reviewId: review.reviewId,
+      queueFinancialEventId: review.queueFinancialEventId,
+    };
   }
-  const original = await locateOriginalIosSale(deps.store, transactionId);
+  const original = await locateOriginalIosSaleIfPresent(deps.store, transactionId);
+  if (!original) {
+    const review = await persistUnsupportedIosRefundReview({
+      deps,
+      reviewId: iosFullRefundMissingSaleReviewId(transactionId),
+      reason: "ios_full_refund_original_sale_missing",
+      transaction: input.transaction,
+      resolvedUid,
+      financialEventId: null,
+    });
+    return {
+      written: false,
+      financial: null,
+      uid: resolvedUid,
+      reviewRequired: true,
+      reviewReason: "ios_full_refund_original_sale_missing",
+      reviewId: review.reviewId,
+      queueFinancialEventId: null,
+    };
+  }
   if (resolvedUid !== original.uid) {
     throw new BillingError({
       clientCode: "verification_failed",
@@ -1279,6 +1358,34 @@ async function reconcileAssnCurrentStatus(opts: {
       eventSource: "webhook",
       observationTime: opts.observationTime,
     });
+    let resolveId = opts.durableQueueFinancialEventId;
+    if (!resolveId && opts.fallbackTransaction) {
+      try {
+        const eventType = economicEventType(opts.fallbackTransaction.transactionReason);
+        const txId = requireText(
+          opts.fallbackTransaction.transactionId,
+          "missing_ios_transaction_id"
+        );
+        const financialEventId = financialEventIdForStore({
+          platform: "ios",
+          eventType,
+          transactionId: txId,
+        });
+        const existing = await readLedger(opts.deps.store, financialEventId);
+        resolveId = existing?.financialEventId ?? null;
+      } catch (err) {
+        if (!(err instanceof BillingError && err.causeCode === "unknown_ios_transaction_reason")) {
+          throw err;
+        }
+      }
+    }
+    await resolveIosStatusReconciliationIfPresent(
+      opts.deps.store,
+      opts.originalTransactionId,
+      resolveId,
+      opts.expectedUid,
+      opts.deps.nowMs()
+    );
     if (opts.reviewId) {
       await markAppStoreFinancialReviewEntitlementReconciled(opts.deps.store, {
         id: opts.reviewId,
@@ -1320,6 +1427,37 @@ async function reconcileAssnCurrentStatus(opts: {
     }
     throw err;
   }
+}
+
+function reviewActionForReason(reason: string | null): string {
+  if (reason === "unsupported_ios_prorated_refund") return "prorated_refund_review_reconciled";
+  if (reason === "ios_full_refund_original_sale_missing") {
+    return "full_refund_missing_sale_review_reconciled";
+  }
+  if (reason === "unsupported_ios_revocation_type") return "unsupported_revocation_review_reconciled";
+  return "reconciled";
+}
+
+async function enrichMissingSaleReviewWithRefund(
+  deps: IosBillingDeps,
+  transaction: JWSTransactionDecodedPayload,
+  refundFinancialEventId: string
+): Promise<void> {
+  const transactionId = requireText(transaction.transactionId, "missing_ios_transaction_id");
+  const reviewId = iosFullRefundMissingSaleReviewId(transactionId);
+  const existing = await readAppStoreFinancialReview(deps.store, reviewId);
+  if (!existing) return;
+  await ensureAppStoreFinancialReview(deps.store, {
+    id: reviewId,
+    reason: existing.reason,
+    transactionId: existing.transactionId,
+    originalTransactionId: existing.originalTransactionId,
+    canonicalSku: existing.canonicalSku,
+    financialEventId: refundFinancialEventId,
+    uid: existing.uid,
+    diagnosticUid: existing.diagnosticUid,
+    nowMs: deps.nowMs(),
+  });
 }
 
 export async function processIosNotification(
@@ -1421,8 +1559,12 @@ export async function processIosNotification(
   let refundWritten = false;
   let queueFinancialEventId: string | null = null;
   let reviewId: string | null = null;
-  let successAction = "reconciled";
-  if (notification.notificationType === NotificationTypeV2.REFUND) {
+  let reviewReason: string | null = null;
+  if (
+    notification.notificationType === NotificationTypeV2.REFUND ||
+    (nestedTx.revocationType !== RevocationType.FAMILY_REVOKE &&
+      (nestedTx.revocationDate != null || nestedTx.revocationType != null))
+  ) {
     const refund = await recordIosRefundAdjustment(deps, {
       transaction: nestedTx,
       source: "assnV2",
@@ -1432,23 +1574,13 @@ export async function processIosNotification(
     refundWritten = refund.written;
     queueFinancialEventId = refund.queueFinancialEventId;
     reviewId = refund.reviewId;
-    if (refund.reviewRequired) successAction = "prorated_refund_review_reconciled";
-  } else if (nestedTx.revocationType === RevocationType.FAMILY_REVOKE) {
-    // Not a monetary refund. Current status still decides access.
-  } else if (nestedTx.revocationDate != null || nestedTx.revocationType != null) {
-    const refund = await recordIosRefundAdjustment(deps, {
-      transaction: nestedTx,
-      source: "assnV2",
-      eventSource: "webhook",
-      expectedUid: ownerUid,
-    });
-    refundWritten = refund.written;
-    queueFinancialEventId = refund.queueFinancialEventId;
-    reviewId = refund.reviewId;
-    if (refund.reviewRequired) successAction = "prorated_refund_review_reconciled";
+    reviewReason = refund.reviewReason;
+    if (refund.financial) {
+      await enrichMissingSaleReviewWithRefund(deps, nestedTx, refund.financial.financialEventId);
+    }
   }
 
-  return reconcileAssnCurrentStatus({
+  const result = await reconcileAssnCurrentStatus({
     deps,
     originalTransactionId,
     expectedUid: ownerUid,
@@ -1456,10 +1588,28 @@ export async function processIosNotification(
     durableQueueFinancialEventId: queueFinancialEventId,
     fallbackTransaction: nestedTx,
     reviewId,
-    action: successAction,
+    action: reviewActionForReason(reviewReason),
     notificationUUID,
     financialEventWritten: refundWritten,
   });
+
+  if (reviewReason === "ios_full_refund_original_sale_missing") {
+    const retry = await recordIosRefundAdjustment(deps, {
+      transaction: nestedTx,
+      source: "assnV2",
+      eventSource: "webhook",
+      expectedUid: ownerUid,
+    });
+    if (retry.financial) {
+      await enrichMissingSaleReviewWithRefund(deps, nestedTx, retry.financial.financialEventId);
+      return {
+        ...result,
+        financialEventWritten: result.financialEventWritten || retry.written,
+      };
+    }
+  }
+
+  return result;
 }
 
 export function companyHasNoAppleJws(company: CompanyBillingDoc | null): boolean {

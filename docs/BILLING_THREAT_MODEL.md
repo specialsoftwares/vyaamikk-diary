@@ -171,9 +171,17 @@ Baseline architecture facts this model is tied to:
     production `appAppleId`), never Sign-in-with-Apple JWKS. Online certificate
     checks (`enableOnlineChecks` / OCSP) are **off** in VYD-33 so CI stays
     deterministic; enabling them is an explicit go-live security/availability
-    decision. ASSN `notificationType` (including `REFUND_REVERSED` and
-    prorated refund) is a signal only. Current entitlement still comes from
-    Get All Subscription Statuses after SignedDataVerifier checks.
+    decision. ASSN `notificationType` (including `REFUND_REVERSED`,
+    prorated refund, missing original sale, and unknown revocation types)
+    is a signal only. Current entitlement still comes from Get All
+    Subscription Statuses after SignedDataVerifier checks, even when the
+    financial correction is held in `_appStoreFinancialReview`.
+    Authenticity/ownership/integrity failures still block entirely.
+    Apple 2026 `billingPlanType` `MONTHLY` / non-empty `commitmentInfo`
+    fail closed (`unsupported_ios_commitment_billing_plan`); commitment
+    products are not implemented. iOS live-status queue ids are
+    event-scoped (`originalTransactionId` + durable financial event).
+    Financial-review `diagnosticUid` is forensic only and is not identity.
 - **Residual risk:** compromise of Google/Apple signing infrastructure —
   out of scope.
 

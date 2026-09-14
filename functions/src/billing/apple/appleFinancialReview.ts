@@ -2,15 +2,17 @@
  * Server-only Apple financial-review records (VYD-33).
  *
  * Used when Apple reports an unsupported financial correction
- * (REFUND_REVERSED, prorated refund) that must not invent a
+ * (REFUND_REVERSED, prorated refund, missing original sale, unknown
+ * revocation) that must not invent a
  * `_billingReconciliationQueue.financialEventId`.
  *
- * `financialEventId` is set only when a real `_billingEventLedger` row exists
- * and has been integrity-checked. Never stores raw JWS or private keys.
+ * Core identity is reason/platform/transaction ids/uid/canonicalSku.
+ * `diagnosticUid` is forensic only and is not identity — so a future
+ * BILLING_DIAG_UID_SECRET rotation cannot redefine the economic review.
  *
- * Review `status` stays `pending`. Current entitlement is still applied from
- * Get All Subscription Statuses; `entitlementReconciledAt` is a one-time
- * forensic marker, not an access grant.
+ * `financialEventId` may be null until a real ledger row exists. A later
+ * verified id may enrich null → that id once. A non-null id is immutable.
+ * Never stores raw JWS or private keys.
  */
 
 import { BillingError } from "../errors";
@@ -26,38 +28,61 @@ export function iosProratedRefundReviewId(transactionId: string): string {
   return `ios:prorated-refund:${transactionId.replace(/\//g, "_")}`;
 }
 
+export function iosFullRefundMissingSaleReviewId(transactionId: string): string {
+  return `ios:full-refund-missing-sale:${transactionId.replace(/\//g, "_")}`;
+}
+
+export function iosUnsupportedRevocationReviewId(transactionId: string): string {
+  return `ios:unsupported-revocation:${transactionId.replace(/\//g, "_")}`;
+}
+
 function nullishSku(value: string | null | undefined): string | null {
   return value == null ? null : value;
 }
 
-function assertReviewIdentity(
+function assertReviewCoreIdentity(
   existing: AppStoreFinancialReviewDoc | undefined,
   input: {
     reason: string;
     transactionId: string;
     originalTransactionId: string;
-    financialEventId: string | null;
     uid: string;
     canonicalSku: string | null;
-    diagnosticUid: string;
   }
-): void {
+): asserts existing is AppStoreFinancialReviewDoc {
   if (
     !existing ||
     existing.reason !== input.reason ||
     existing.platform !== "ios" ||
     existing.transactionId !== input.transactionId ||
     existing.originalTransactionId !== input.originalTransactionId ||
-    (existing.financialEventId ?? null) !== (input.financialEventId ?? null) ||
     existing.uid !== input.uid ||
-    nullishSku(existing.canonicalSku) !== nullishSku(input.canonicalSku) ||
-    existing.diagnosticUid !== input.diagnosticUid
+    nullishSku(existing.canonicalSku) !== nullishSku(input.canonicalSku)
   ) {
     throw new BillingError({
       clientCode: "internal_error",
       causeCode: "ios_financial_review_identity_mismatch",
     });
   }
+}
+
+function resolvedFinancialEventId(
+  existingId: string | null,
+  candidateId: string | null
+): { next: string | null; enrich: boolean } {
+  if (existingId == null || existingId === "") {
+    if (candidateId == null || candidateId === "") {
+      return { next: null, enrich: false };
+    }
+    return { next: candidateId, enrich: true };
+  }
+  if (candidateId == null || candidateId === "" || candidateId === existingId) {
+    return { next: existingId, enrich: false };
+  }
+  throw new BillingError({
+    clientCode: "internal_error",
+    causeCode: "ios_financial_review_identity_mismatch",
+  });
 }
 
 export async function ensureAppStoreFinancialReview(
@@ -73,7 +98,7 @@ export async function ensureAppStoreFinancialReview(
     diagnosticUid: string;
     nowMs: number;
   }
-): Promise<{ created: boolean }> {
+): Promise<{ created: boolean; enriched: boolean }> {
   if (input.transactionId.length === 0 || input.transactionId === "unknown") {
     throw new BillingError({
       clientCode: "verification_failed",
@@ -87,21 +112,41 @@ export async function ensureAppStoreFinancialReview(
     });
   }
   const path = appStoreFinancialReviewPath(sanitizeDocId(input.id));
-  const identity = {
+  const core = {
     reason: input.reason,
     transactionId: input.transactionId,
     originalTransactionId: input.originalTransactionId,
-    financialEventId: input.financialEventId,
     uid: input.uid,
     canonicalSku: input.canonicalSku,
-    diagnosticUid: input.diagnosticUid,
   };
+
+  const applyExisting = async (
+    existing: AppStoreFinancialReviewDoc,
+    tx: { set: (path: string, data: Record<string, unknown>) => void }
+  ): Promise<{ created: false; enriched: boolean }> => {
+    assertReviewCoreIdentity(existing, core);
+    const { next, enrich } = resolvedFinancialEventId(
+      existing.financialEventId ?? null,
+      input.financialEventId
+    );
+    if (!enrich) {
+      return { created: false, enriched: false };
+    }
+    const updated: AppStoreFinancialReviewDoc = {
+      ...existing,
+      financialEventId: next,
+      financialEventLinkedAt: existing.financialEventLinkedAt ?? input.nowMs,
+      updatedAt: input.nowMs,
+    };
+    tx.set(path, updated as unknown as Record<string, unknown>);
+    return { created: false, enriched: true };
+  };
+
   try {
     return await store.runTransaction(async (tx) => {
       const snap = await tx.get(path);
       if (snap.exists) {
-        assertReviewIdentity(snap.data() as AppStoreFinancialReviewDoc | undefined, identity);
-        return { created: false };
+        return applyExisting(snap.data() as unknown as AppStoreFinancialReviewDoc, tx);
       }
       const doc: AppStoreFinancialReviewDoc = {
         reason: input.reason,
@@ -116,9 +161,10 @@ export async function ensureAppStoreFinancialReview(
         updatedAt: input.nowMs,
         status: "pending",
         entitlementReconciledAt: null,
+        financialEventLinkedAt: null,
       };
       tx.create(path, doc as unknown as Record<string, unknown>);
-      return { created: true };
+      return { created: true, enriched: false };
     });
   } catch (err) {
     if (err instanceof AlreadyExistsError) {
@@ -130,12 +176,23 @@ export async function ensureAppStoreFinancialReview(
             causeCode: "ios_financial_review_identity_mismatch",
           });
         }
-        assertReviewIdentity(snap.data() as AppStoreFinancialReviewDoc | undefined, identity);
-        return { created: false as const };
+        return applyExisting(snap.data() as unknown as AppStoreFinancialReviewDoc, tx);
       });
     }
     throw err;
   }
+}
+
+export async function readAppStoreFinancialReview(
+  store: BillingStore,
+  id: string
+): Promise<AppStoreFinancialReviewDoc | null> {
+  const path = appStoreFinancialReviewPath(sanitizeDocId(id));
+  return store.runTransaction(async (tx) => {
+    const snap = await tx.get(path);
+    if (!snap.exists) return null;
+    return snap.data() as unknown as AppStoreFinancialReviewDoc;
+  });
 }
 
 export async function markAppStoreFinancialReviewEntitlementReconciled(

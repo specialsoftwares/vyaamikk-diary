@@ -71,7 +71,9 @@ Notes:
   historical replaced token whose current credential cannot be decrypted,
   owner mismatch). Document ids are source-independent
   (`android:refund-reconcile:{orderId}`,
-  `ios:status-reconcile:{originalTransactionId}`). Documents store `reason`,
+  `ios:status-reconcile:{originalTransactionId}:{financialEventId}`).
+  iOS work items are **event-scoped**: purchase, later renewal, and later
+  refund on the same chain are separate immutable documents. Documents store `reason`,
   `platform`, `financialEventId`, optional `credentialFingerprint`,
   timestamps, `status: "pending" | "resolved"`, `resolvedAt`, and
   `attemptCount`. They never store raw purchase tokens, plaintext
@@ -82,15 +84,22 @@ Notes:
   `financialEventId` (never a guessed current-sale id). VYD-32/VYD-33 write
   the queue; a later phase may consume it. Clients have zero access.
 - `_appStoreFinancialReview/{stableId}` is a server-only Apple review record
-  for unsupported financial corrections (`REFUND_REVERSED`, prorated refund).
+  for unsupported Apple financial corrections (`REFUND_REVERSED`, prorated
+  refund, full refund with a missing local original sale, unknown
+  revocation type). `diagnosticUid` is forensic only: `BILLING_DIAG_UID_SECRET`
+  may rotate, and rotation must not redefine review identity (`uid` is the
+  owner).
   It stores `reason`, `platform: ios`, `transactionId`,
   `originalTransactionId`, optional `canonicalSku`, optional real
   `financialEventId` (never invented; bound only after verifying the ledger
-  row's platform, eventType, uid, SKU, and related original sale), `uid`,
-  `diagnosticUid`, timestamps, `status: pending`, and optional
+  row's platform, eventType, uid, SKU, and related original sale; `null` may
+  later enrich one-way to a verified id), `uid`, forensic `diagnosticUid`
+  (not identity), timestamps, `status: pending`, optional
   `entitlementReconciledAt` (set once after Get All Subscription Statuses
-  succeeds). Financial correction stays pending; current entitlement is
-  still applied from live Apple status. No raw JWS. Clients have zero access.
+  succeeds), and optional `financialEventLinkedAt`. Core identity is
+  reason/platform/transaction ids/uid/canonicalSku. Financial correction
+  stays pending; current entitlement is still applied from live Apple status.
+  No raw JWS. Clients have zero access.
 
 - `globalStats/paperSaved` figures are labelled estimates with a methodology
   string (owner decision W-9); other `globalStats/*` docs are default-denied.
@@ -441,6 +450,19 @@ appears in a later phase; it will be added with the query that requires it.
   ledger row, durable `_appStoreFinancialReview`, no tax/CN handoff.
   Unsupported financial treatment does not skip live entitlement
   reconciliation.
+- Full refund with a missing local original sale is a reconciliation
+  condition, not a freeze: durable review
+  `ios_full_refund_original_sale_missing`, then Get All Subscription Statuses.
+  If live reconcile backfills the exact purchase/renewal, the refund is linked
+  once. Historical missing sales on a later ACTIVE chain stay pending; no
+  fabricated sale/refund/tax.
+- Unknown/unsupported verified revocation types persist a financial review
+  and still apply current Apple status. Ownership/integrity failures still
+  fail closed entirely.
+- Apple 2026 `billingPlanType` / `renewalBillingPlanType` `MONTHLY` and
+  non-empty `commitmentInfo` fail closed
+  (`unsupported_ios_commitment_billing_plan`). Omitted fields and
+  `BILLED_UPFRONT` are allowed. Commitment products are not implemented.
 - Scheduled iOS product changes (`autoRenewProductId` ≠ current `productId`)
   fail closed as `unsupported_ios_scheduled_plan_change`. Phase B does not
   map `scheduledPlan`.

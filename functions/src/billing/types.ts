@@ -270,9 +270,11 @@ export interface AppStoreAccountIndexDoc {
  * `_billingReconciliationQueue.financialEventId`. No raw JWS.
  * `financialEventId` is set only when a real ledger row exists and has been
  * integrity-checked (platform, eventType, uid, SKU, related original sale).
- * Financial-review `status` stays `pending`; current entitlement is still
- * applied from Get All Subscription Statuses. `entitlementReconciledAt` is
- * an optional immutable marker set once after that live reconcile.
+ * A later verified id may enrich `null` → that id once; a non-null id is
+ * immutable. `diagnosticUid` is forensic only and is not review identity
+ * (uid is the owner). `entitlementReconciledAt` / `financialEventLinkedAt`
+ * are one-time markers. Financial-review `status` stays `pending`; current
+ * entitlement is still applied from Get All Subscription Statuses.
  */
 export type AppStoreFinancialReviewStatus = "pending";
 
@@ -284,11 +286,21 @@ export interface AppStoreFinancialReviewDoc {
   canonicalSku: string | null;
   financialEventId: string | null;
   uid: string;
+  /**
+   * Forensic HMAC only. Not review identity. A future
+   * `BILLING_DIAG_UID_SECRET` rotation must not redefine the economic
+   * review; `uid` is the owner.
+   */
   diagnosticUid: string;
   createdAt: number;
   updatedAt: number;
   status: AppStoreFinancialReviewStatus;
   entitlementReconciledAt: number | null;
+  /**
+   * One-time marker set when `financialEventId` is enriched from null to a
+   * verified ledger id. Never cleared. Not part of core review identity.
+   */
+  financialEventLinkedAt: number | null;
 }
 
 /**
