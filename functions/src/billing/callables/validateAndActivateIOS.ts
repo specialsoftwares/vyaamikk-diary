@@ -12,7 +12,7 @@ import { getFirestore } from "firebase-admin/firestore";
 
 import { createAppStoreServerApiClient } from "../apple/appleApiClient";
 import { loadAppStoreRuntimeConfig } from "../apple/appleConfig";
-import { isAppStoreBillingEnabled } from "../apple/appleConstants";
+import { isAppStoreBillingEnabled, assertAppStoreLiveBillingAllowed } from "../apple/appleConstants";
 import {
   processIosSignedTransaction,
   type IosBillingDeps,
@@ -50,6 +50,7 @@ export async function handleValidateAndActivateIOS(
 }
 
 function productionDeps(): IosBillingDeps {
+  assertAppStoreLiveBillingAllowed();
   const cfg = loadAppStoreRuntimeConfig();
   const store = new FirestoreBillingStore(getFirestore());
   const secret = process.env.BILLING_DIAG_UID_SECRET ?? "";
@@ -60,7 +61,7 @@ function productionDeps(): IosBillingDeps {
       environment: cfg.environment,
       bundleId: cfg.bundleId,
       appAppleId: cfg.appAppleId,
-      enableOnlineChecks: false,
+      enableOnlineChecks: cfg.enableOnlineChecks === true,
     }),
     api: createAppStoreServerApiClient(cfg),
     diagnosticUidFor: (uid) => diagnosticUidHmac(secret, uid),

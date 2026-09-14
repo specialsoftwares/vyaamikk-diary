@@ -1,15 +1,23 @@
 /**
- * Apple transaction price (milliunits) → integer INR paise.
+ * Apple JWS store-transaction price (milliunits) → integer INR paise.
  *
- * Apple documents `JWSTransactionDecodedPayload.price` as milliunits of
- * `currency` (1000 milliunits = 1 currency unit). Vyaamikk's ledger is INR
- * paise (100 paise = 1 INR), so:
+ * This converts verified `JWSTransactionDecodedPayload.price` + `currency`
+ * into ledger-shaped paise for **pre-production consistency checks** and
+ * injected tests. It is verified store-transaction evidence only.
  *
+ * Apple documents that JWS price/currency MUST NOT be used for revenue
+ * reconciliation or recognition. App Store Connect financial reporting is
+ * the accounting source of record. That path is unimplemented
+ * (`APP_STORE_FINANCIAL_REPORTING_AUTHORITY_IMPLEMENTED = false`).
+ *
+ * Production exports cannot reach this write path while that gate is false.
+ * Do not treat the result as GST / revenue / accounting authority.
+ *
+ * Conversion (when used as evidence):
  *   paise = milliunits / 10
- *
- * Conversion is BigInt-safe: no floating point. Currency MUST be INR.
- * Never use catalog expected price, renewalPrice, or client-supplied price.
- * Do not infer App Store commission by subtraction.
+ * BigInt-safe, no floating point. Currency MUST be INR. Never use catalog
+ * expected price, renewalPrice, or client-supplied price. Do not infer
+ * App Store commission by subtraction.
  */
 
 import { BillingError } from "../errors";
@@ -41,7 +49,8 @@ function milliunitsToBigInt(raw: unknown): bigint {
 }
 
 /**
- * Convert Apple milliunit price to integer paise. Currency MUST be INR.
+ * Convert verified Apple JWS milliunit store price to integer paise.
+ * Currency MUST be INR. Not an accounting source of record.
  */
 export function appleMilliunitsToPaise(opts: {
   price: unknown;
@@ -71,5 +80,5 @@ export function appleMilliunitsToPaise(opts: {
   return Number(paise);
 }
 
-/** Apple does not expose an authoritative App Store commission amount. */
+/** Apple JWS does not expose an authoritative App Store commission amount. */
 export const APPLE_PLATFORM_COMMISSION_IN_PAISE: null = null;

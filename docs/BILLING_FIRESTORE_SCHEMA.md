@@ -31,6 +31,9 @@ schema-by-use: **no documents are pre-created to "initialize" collections.**
 | `_billingRateLimits/{bucketId}` | Admin SDK only (transactional buckets) | denied | denied |
 | `_playAccountIndex/{obfuscatedAccountId}` | Admin SDK only (Play obfuscated-account ownership) | denied | denied |
 | `_playCredentialIndex/{credentialFingerprint}` | Admin SDK only (Play purchase-token fingerprint ownership) | denied | denied |
+| `_appStoreAccountByUid/{uid}` | Admin SDK only (App Store appAccountToken ownership) | denied | denied |
+| `_appStoreAccountIndex/{appAccountToken}` | Admin SDK only (App Store token → uid) | denied | denied |
+| `_appStoreFinancialReview/{reviewId}` | Admin SDK only (unsupported Apple financial corrections) | denied | denied |
 | `_billingReconciliationQueue/{queueId}` | Admin SDK only (durable Play/refund reconciliation work) | denied | denied |
 | `globalStats/paperSaved` | Admin SDK only | public (`read: if true`) | denied |
 
@@ -72,6 +75,13 @@ Notes:
   timestamps, `status: "pending" | "resolved"`, `resolvedAt`, and
   `attemptCount`. They never store raw purchase tokens, plaintext
   credentials, or uid. Duplicate RTDN deliveries preserve a single work
+  item. `financialEventId` must resolve a real `_billingEventLedger` row.
+- `_appStoreFinancialReview/{stableId}` is a server-only Apple review record
+  for unsupported financial corrections (`REFUND_REVERSED`, prorated refund).
+  It stores `reason`, `platform: ios`, `transactionId`,
+  `originalTransactionId`, optional `canonicalSku`, optional real
+  `financialEventId` (never invented), `uid`, `diagnosticUid`, timestamps,
+  and `status: pending`. No raw JWS. Clients have zero access.
   item. A later successful live reconcile marks the same document
   `resolved` without deleting forensic history. VYD-32 writes the queue; a
   later phase may consume it. Clients have zero access.
@@ -397,18 +407,51 @@ appears in a later phase; it will be added with the query that requires it.
   The nine Phase-A iOS identifiers remain provisional. Production environment
   fails closed (`appstore_product_ids_unconfirmed`) until that confirmation
   is encoded in a later owner-authorized change.
+- **APP STORE CONNECT FINANCIAL / ACCOUNTING REPORTING AUTHORITY** is
+  unimplemented (`APP_STORE_FINANCIAL_REPORTING_AUTHORITY_IMPLEMENTED = false`).
+  Apple documents that JWS `price` / `currency` must not be used for revenue
+  reconciliation or recognition. App Store Connect financial reporting is the
+  source of record. `APPSTORE_BILLING_ENABLED=true` fails closed with
+  `appstore_financial_authority_unimplemented` until that path exists.
+  Confirming product identifiers alone cannot make Apple billing live.
+  Verified JWS store-transaction price may be used as pre-production evidence
+  in injected tests only; it is not GST / revenue / accounting authority.
+  VYD-40 Apple tax-document posting must not be production-enabled until this
+  gate is true.
 - `APPSTORE_PRIVATE_KEY` is secret material and must never be committed.
   Valid issuer id, key id, numeric `appAppleId`, and Apple root CA DERs are
   required before production enablement. No App Store Connect product
   creation, ASSN URL configuration, or Functions/Rules deploy ships in VYD-33.
 - Apple `REFUND_REVERSED` (and other unsupported financial corrections) cannot
   be represented in the current immutable ledger (`purchase|renewal|refund|
-  chargeback` only). They fail closed into `_billingReconciliationQueue` as
-  `unsupported_ios_refund_reversal` and must be reviewed before go-live.
+  chargeback` only). They fail closed into server-only
+  `_appStoreFinancialReview` (`unsupported_ios_refund_reversal`) and must be
+  reviewed before go-live. That collection never invents a
+  `_billingReconciliationQueue.financialEventId`.
+- Prorated refunds (`REFUND_PRORATED`) are unsupported: no refund ledger row,
+  durable `_appStoreFinancialReview`, no tax/CN handoff.
 - Scheduled iOS product changes (`autoRenewProductId` ≠ current `productId`)
   fail closed as `unsupported_ios_scheduled_plan_change`. Phase B does not
   map `scheduledPlan`.
 - Apple India tax responsibility remains unconfirmed (VYD-40). Ledger events
   may feed the existing tax-document post-commit boundary; no real invoice or
   credit note issues while seller/platform tax configuration is fail-closed.
+- `SignedDataVerifier` `enableOnlineChecks` is **false** in VYD-33 (CI must
+  not perform OCSP/network certificate checks). Turning this on is an explicit
+  production security/availability decision at go-live.
+
+### Before live Apple subscription billing
+
+Owner-authorized later phases must complete all of:
+
+- App Store product ids confirmed
+- App Store financial/accounting reporting authority implemented and reconciled
+- Apple India tax responsibility resolved
+- VYD-40 Apple tax-document policy approved
+- issuer / key / private key / root CAs / `appAppleId` configured
+- ASSN URL configured
+- unsupported refund-reversal / prorated-review operational path established
+- decision made on online certificate checks
+
+VYD-33 does **not** implement those external configurations.
 

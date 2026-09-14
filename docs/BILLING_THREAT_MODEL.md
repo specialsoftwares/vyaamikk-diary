@@ -167,8 +167,11 @@ Baseline architecture facts this model is tied to:
     `email` == configured push service account, `email_verified`), never a
     static bearer/URL token.
   - Apple ASSN v2: **`@apple/app-store-server-library` SignedDataVerifier**
-    (ES256 + x5c chain to pinned Apple Root CAs + OCSP + bundleId +
-    environment + production `appAppleId`), never Sign-in-with-Apple JWKS.
+    (ES256 + x5c chain to pinned Apple Root CAs + bundleId + environment +
+    production `appAppleId`), never Sign-in-with-Apple JWKS. Online certificate
+    checks (`enableOnlineChecks` / OCSP) are **off** in VYD-33 so CI stays
+    deterministic; enabling them is an explicit go-live security/availability
+    decision.
 - **Residual risk:** compromise of Google/Apple signing infrastructure —
   out of scope.
 
@@ -301,6 +304,9 @@ CONFIGURATION / IDENTIFIERS (parameters/env, NOT Secret Manager):
 - `APPSTORE_ISSUER_ID`, `APPSTORE_KEY_ID`, `APPSTORE_APP_APPLE_ID`
 - `APPSTORE_BILLING_ENABLED` (default false), `APPSTORE_ENVIRONMENT`
 - `APPSTORE_ROOT_CA_CERTS_BASE64` (Apple root CA DER material; not the .p8)
+- Compile-time gates: `APP_STORE_PRODUCT_IDENTIFIERS_CONFIRMED`,
+  `APP_STORE_FINANCIAL_REPORTING_AUTHORITY_IMPLEMENTED` (both false).
+  Apple JWS price is not accounting authority.
 - `BILLING_KMS_KEY_NAME`
 - Android package / iOS bundle id (already in `app.json`)
 - `INVOICE_RENDERER_URL`, `COMPANY_GSTIN`, `SERVICE_SAC_CODE`,

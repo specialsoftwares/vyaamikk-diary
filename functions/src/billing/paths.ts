@@ -48,6 +48,10 @@ export function appStoreAccountIndexPath(appAccountToken: string): string {
   return `_appStoreAccountIndex/${appAccountToken}`;
 }
 
+export function appStoreFinancialReviewPath(reviewId: string): string {
+  return `_appStoreFinancialReview/${sanitizeDocId(reviewId)}`;
+}
+
 export function billingReconciliationQueuePath(queueId: string): string {
   return `_billingReconciliationQueue/${sanitizeDocId(queueId)}`;
 }

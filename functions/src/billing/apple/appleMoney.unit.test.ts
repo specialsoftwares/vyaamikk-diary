@@ -1,5 +1,6 @@
 /**
- * Apple milliunit → INR paise (VYD-33).
+ * Apple milliunit → INR paise store-transaction evidence (VYD-33).
+ * Not an accounting / revenue / GST source of record.
  * Run: npm run test:billing-apple-money
  */
 import assert from "node:assert/strict";

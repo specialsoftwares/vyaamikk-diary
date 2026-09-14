@@ -33,7 +33,12 @@ import {
   sanitizeDocId,
   subscriptionStatusPath,
 } from "../paths";
-import { canonicalSkuForIos, getCatalogEntry, type CanonicalSku } from "../products";
+import { canonicalSkuForIos, getCatalogEntry, isCanonicalSku, type CanonicalSku } from "../products";
+import {
+  ensureAppStoreFinancialReview,
+  iosProratedRefundReviewId,
+  iosRefundReversedReviewId,
+} from "./appleFinancialReview";
 import {
   ensureReconciliationWorkItem,
   iosStatusReconciliationQueueId,
@@ -110,10 +115,7 @@ interface VerifiedIosCurrent {
 }
 
 const FULL_REFUND_PERCENTAGE_MILLIUNITS = 100_000;
-
-function iosReviewQueueId(kind: string, transactionId: string): string {
-  return `ios:review:${kind}:${transactionId.replace(/\//g, "_")}`;
-}
+const DURABLE_IOS_FINANCIAL_EVENT_ID = /^ios:(purchase|renewal|refund):.+/;
 
 function requireText(value: unknown, causeCode: string): string {
   if (typeof value !== "string" || value.length === 0) {
@@ -274,6 +276,9 @@ async function invokeTaxHandoff(
   financial: VerifiedFinancialEvent,
   applyResult: ApplyTransitionResult
 ): Promise<void> {
+  // Production exports omit postCommitTaxHandoff until
+  // APP_STORE_FINANCIAL_REPORTING_AUTHORITY_IMPLEMENTED. Injected tests may
+  // pass a callback to prove adapter wiring; that path is not a live tax issue.
   if (!deps.postCommitTaxHandoff) return;
   if (
     financial.eventType !== "purchase" &&
@@ -335,16 +340,121 @@ export async function assertVerifiedIosTransactionPointer(
   return tx;
 }
 
+function nullish(value: unknown): unknown {
+  return value == null ? null : value;
+}
+
+/**
+ * Semantic identity of a verified current-subscription candidate.
+ * Any field that can change ownership, economics, period, grace, revocation,
+ * lifecycle identity, or store-price evidence must match.
+ */
+function iosCurrentSemanticKey(c: VerifiedIosCurrent): string {
+  return JSON.stringify({
+    uid: c.uid,
+    status: c.status,
+    transaction: {
+      transactionId: nullish(c.transaction.transactionId),
+      originalTransactionId: nullish(c.transaction.originalTransactionId),
+      productId: nullish(c.transaction.productId),
+      appAccountToken: nullish(c.transaction.appAccountToken),
+      transactionReason: nullish(c.transaction.transactionReason),
+      purchaseDate: nullish(c.transaction.purchaseDate),
+      expiresDate: nullish(c.transaction.expiresDate),
+      revocationDate: nullish(c.transaction.revocationDate),
+      revocationType: nullish(c.transaction.revocationType),
+      revocationPercentage: nullish(c.transaction.revocationPercentage),
+      inAppOwnershipType: nullish(c.transaction.inAppOwnershipType),
+      price: nullish(c.transaction.price),
+      currency: nullish(c.transaction.currency),
+    },
+    renewal: {
+      originalTransactionId: nullish(c.renewal.originalTransactionId),
+      appAccountToken: nullish(c.renewal.appAccountToken),
+      productId: nullish(c.renewal.productId),
+      autoRenewProductId: nullish(c.renewal.autoRenewProductId),
+      autoRenewStatus: nullish(c.renewal.autoRenewStatus),
+      gracePeriodExpiresDate: nullish(c.renewal.gracePeriodExpiresDate),
+      signedDate: nullish(c.renewal.signedDate),
+    },
+  });
+}
+
 function currentStatesEquivalent(a: VerifiedIosCurrent, b: VerifiedIosCurrent): boolean {
-  return (
-    a.uid === b.uid &&
-    a.status === b.status &&
-    a.transaction.transactionId === b.transaction.transactionId &&
-    a.transaction.originalTransactionId === b.transaction.originalTransactionId &&
-    a.transaction.productId === b.transaction.productId &&
-    a.renewal.autoRenewStatus === b.renewal.autoRenewStatus &&
-    a.transaction.expiresDate === b.transaction.expiresDate
+  return iosCurrentSemanticKey(a) === iosCurrentSemanticKey(b);
+}
+
+function assertExpectedCanonicalSkuHint(
+  expectedCanonicalSku: unknown,
+  verified: CanonicalSku
+): void {
+  if (expectedCanonicalSku == null) return;
+  if (typeof expectedCanonicalSku !== "string" || !isCanonicalSku(expectedCanonicalSku)) {
+    throw new BillingError({
+      clientCode: "invalid_purchase",
+      causeCode: "invalid_sku_hint",
+    });
+  }
+  if (expectedCanonicalSku !== verified) {
+    throw new BillingError({
+      clientCode: "verification_failed",
+      causeCode: "sku_hint_mismatch",
+    });
+  }
+}
+
+function assertDurableIosFinancialEventId(financialEventId: string): string {
+  if (!DURABLE_IOS_FINANCIAL_EVENT_ID.test(financialEventId) || financialEventId.includes(":review:")) {
+    throw new BillingError({
+      clientCode: "internal_error",
+      causeCode: "invalid_reconciliation_financial_event_id",
+    });
+  }
+  return financialEventId;
+}
+
+async function assertIosRenewalBoundToTransaction(opts: {
+  store: BillingStore;
+  transaction: JWSTransactionDecodedPayload;
+  renewal: JWSRenewalInfoDecodedPayload;
+  originalTransactionId: string;
+  expectedUid: string;
+}): Promise<void> {
+  const txOrig = requireText(
+    opts.transaction.originalTransactionId,
+    "missing_ios_original_transaction_id"
   );
+  const renewalOrig = requireText(
+    opts.renewal.originalTransactionId,
+    "ios_renewal_original_transaction_mismatch"
+  );
+  if (txOrig !== opts.originalTransactionId || renewalOrig !== opts.originalTransactionId) {
+    throw new BillingError({
+      clientCode: "verification_failed",
+      causeCode: "ios_renewal_original_transaction_mismatch",
+    });
+  }
+  const txToken = requireText(opts.transaction.appAccountToken, "missing_ios_app_account_token");
+  if (opts.renewal.appAccountToken != null && opts.renewal.appAccountToken !== "") {
+    if (opts.renewal.appAccountToken !== txToken) {
+      throw new BillingError({
+        clientCode: "verification_failed",
+        causeCode: "ios_renewal_account_token_mismatch",
+      });
+    }
+    const renewalUid = await resolveUidFromAppAccountToken(opts.store, opts.renewal.appAccountToken);
+    assertIosOwnerMatchesCaller(renewalUid, opts.expectedUid);
+  }
+  if (
+    typeof opts.renewal.productId === "string" &&
+    opts.renewal.productId.length > 0 &&
+    opts.renewal.productId !== opts.transaction.productId
+  ) {
+    throw new BillingError({
+      clientCode: "verification_failed",
+      causeCode: "ios_renewal_transaction_mismatch",
+    });
+  }
 }
 
 export async function selectCurrentIosSubscription(opts: {
@@ -395,6 +505,13 @@ export async function selectCurrentIosSubscription(opts: {
       }
       const uid = await resolveUidFromAppAccountToken(opts.store, transaction.appAccountToken);
       assertIosOwnerMatchesCaller(uid, opts.expectedUid);
+      await assertIosRenewalBoundToTransaction({
+        store: opts.store,
+        transaction,
+        renewal,
+        originalTransactionId: opts.originalTransactionId,
+        expectedUid: opts.expectedUid,
+      });
       if (item.status == null) {
         throw new BillingError({
           clientCode: "verification_failed",
@@ -480,6 +597,7 @@ function buildPurchaseOrRenewalFinancial(
   const eventType = economicEventType(transaction.transactionReason);
   const transactionId = requireText(transaction.transactionId, "missing_ios_transaction_id");
   const occurredAt = requireFiniteMillis(transaction.purchaseDate, "missing_ios_purchase_date");
+  // Verified JWS store-transaction price evidence only — not accounting SoR.
   const grossAmountInPaise = appleMilliunitsToPaise({
     price: transaction.price,
     currency: transaction.currency,
@@ -511,7 +629,7 @@ async function enqueueStatusReconciliation(
     id: iosStatusReconciliationQueueId(originalTransactionId),
     reason,
     platform: "ios",
-    financialEventId,
+    financialEventId: assertDurableIosFinancialEventId(financialEventId),
     credentialFingerprint: null,
     nowMs: deps.nowMs(),
   });
@@ -525,6 +643,7 @@ export async function reconcileIosOriginalTransaction(
     source: BillingMutationSource;
     eventSource: TransitionRequest["eventSource"];
     observationTime: number;
+    expectedCanonicalSku?: unknown;
   }
 ): Promise<IosBillingResult> {
   const diagnosticUid = deps.diagnosticUidFor(input.expectedUid);
@@ -554,6 +673,7 @@ export async function reconcileIosOriginalTransaction(
       causeCode: "unknown_ios_product",
     });
   }
+  assertExpectedCanonicalSkuHint(input.expectedCanonicalSku, canonicalSku);
   const catalog = getCatalogEntry(canonicalSku);
   const plan = catalog.plan;
   const mapped = mapAppleSubscriptionStatus({
@@ -706,7 +826,6 @@ export async function processIosSignedTransaction(
     expectedCanonicalSku?: unknown;
   }
 ): Promise<IosBillingResult> {
-  void input.expectedCanonicalSku;
   const pointer = await assertVerifiedIosTransactionPointer(
     deps.verifier,
     input.signedTransactionInfo
@@ -725,13 +844,12 @@ export async function processIosSignedTransaction(
       source: input.source,
       eventSource: input.eventSource,
       observationTime: deps.nowMs(),
+      expectedCanonicalSku: input.expectedCanonicalSku,
     });
   } catch (err) {
     if (isRetryableBillingError(err)) {
       const txId = requireText(pointer.transactionId, "missing_ios_transaction_id");
-      const eventType = pointer.transactionReason
-        ? economicEventType(pointer.transactionReason)
-        : "purchase";
+      const eventType = economicEventType(pointer.transactionReason);
       const financialEventId = financialEventIdForStore({
         platform: "ios",
         eventType,
@@ -742,7 +860,7 @@ export async function processIosSignedTransaction(
         await enqueueStatusReconciliation(
           deps,
           originalTransactionId,
-          financialEventId,
+          existing.financialEventId,
           "ios_live_status_unavailable"
         );
       }
@@ -783,29 +901,75 @@ async function locateOriginalIosSale(
   return original;
 }
 
+async function locateOriginalIosSaleIfPresent(
+  store: BillingStore,
+  transactionId: string
+): Promise<BillingEventLedgerDoc | null> {
+  try {
+    return await locateOriginalIosSale(store, transactionId);
+  } catch (err) {
+    if (err instanceof BillingError && err.causeCode === "missing_ios_original_sale") {
+      return null;
+    }
+    throw err;
+  }
+}
+
+async function resolveVerifiedRefundOwner(
+  store: BillingStore,
+  transaction: JWSTransactionDecodedPayload,
+  expectedUid: string
+): Promise<string> {
+  const token = requireText(transaction.appAccountToken, "missing_ios_app_account_token");
+  const resolvedUid = await resolveUidFromAppAccountToken(store, token);
+  assertIosOwnerMatchesCaller(resolvedUid, expectedUid);
+  return resolvedUid;
+}
+
 export async function recordIosFullRefundIfPresent(
   deps: IosBillingDeps,
   input: {
     transaction: JWSTransactionDecodedPayload;
     source: BillingMutationSource;
     eventSource: TransitionRequest["eventSource"];
+    expectedUid: string;
   }
 ): Promise<{ written: boolean; financial: VerifiedFinancialEvent | null; uid: string | null }> {
   if (input.transaction.revocationDate == null && input.transaction.revocationType == null) {
     return { written: false, financial: null, uid: null };
   }
   const transactionId = requireText(input.transaction.transactionId, "missing_ios_transaction_id");
+  const originalTransactionId = requireText(
+    input.transaction.originalTransactionId,
+    "missing_ios_original_transaction_id"
+  );
   if (input.transaction.revocationType === RevocationType.FAMILY_REVOKE) {
     return { written: false, financial: null, uid: null };
   }
+  const resolvedUid = await resolveVerifiedRefundOwner(
+    deps.store,
+    input.transaction,
+    input.expectedUid
+  );
   if (input.transaction.revocationType === RevocationType.REFUND_PRORATED) {
-    const original = await locateOriginalIosSale(deps.store, transactionId).catch(() => null);
-    await ensureReconciliationWorkItem(deps.store, {
-      id: iosReviewQueueId("prorated-refund", transactionId),
+    const original = await locateOriginalIosSaleIfPresent(deps.store, transactionId);
+    if (original && original.uid !== resolvedUid) {
+      throw new BillingError({
+        clientCode: "verification_failed",
+        causeCode: "ios_refund_owner_mismatch",
+      });
+    }
+    const productId =
+      typeof input.transaction.productId === "string" ? input.transaction.productId : "";
+    await ensureAppStoreFinancialReview(deps.store, {
+      id: iosProratedRefundReviewId(transactionId),
       reason: "unsupported_ios_prorated_refund",
-      platform: "ios",
-      financialEventId: original?.financialEventId ?? `ios:review:prorated:${transactionId}`,
-      credentialFingerprint: null,
+      transactionId,
+      originalTransactionId,
+      canonicalSku: productId ? canonicalSkuForIos(productId) : null,
+      financialEventId: original?.financialEventId ?? null,
+      uid: resolvedUid,
+      diagnosticUid: deps.diagnosticUidFor(resolvedUid),
       nowMs: deps.nowMs(),
     });
     throw new BillingError({
@@ -829,6 +993,12 @@ export async function recordIosFullRefundIfPresent(
     });
   }
   const original = await locateOriginalIosSale(deps.store, transactionId);
+  if (resolvedUid !== original.uid) {
+    throw new BillingError({
+      clientCode: "verification_failed",
+      causeCode: "ios_refund_owner_mismatch",
+    });
+  }
   const productId = requireText(input.transaction.productId, "unknown_ios_product");
   const canonicalSku = canonicalSkuForIos(productId);
   if (canonicalSku == null || original.canonicalSku !== canonicalSku) {
@@ -929,17 +1099,40 @@ export async function processIosNotification(
   }
 
   if (notification.notificationType === NotificationTypeV2.REFUND_REVERSED) {
-    const nested = notification.data?.signedTransactionInfo;
-    const tx = nested
-      ? await deps.verifier.verifyAndDecodeTransaction(assertSignedJws(nested, "invalid_signed_transaction_info"))
-      : null;
-    const transactionId = tx?.transactionId ?? "unknown";
-    await ensureReconciliationWorkItem(deps.store, {
-      id: iosReviewQueueId("refund-reversed", transactionId),
-      reason: "unsupported_ios_refund_reversal",
+    const nestedTxJws = notification.data?.signedTransactionInfo;
+    if (!nestedTxJws) {
+      throw new BillingError({
+        clientCode: "verification_failed",
+        causeCode: "assn_missing_signed_transaction",
+      });
+    }
+    const nestedTx = await assertVerifiedIosTransactionPointer(deps.verifier, nestedTxJws);
+    const token = requireText(nestedTx.appAccountToken, "missing_ios_app_account_token");
+    const ownerUid = await resolveUidFromAppAccountToken(deps.store, token);
+    const transactionId = requireText(nestedTx.transactionId, "missing_ios_transaction_id");
+    const originalTransactionId = requireText(
+      nestedTx.originalTransactionId,
+      "missing_ios_original_transaction_id"
+    );
+    const productId =
+      typeof nestedTx.productId === "string" && nestedTx.productId.length > 0
+        ? nestedTx.productId
+        : "";
+    const refundId = financialEventIdForStore({
       platform: "ios",
-      financialEventId: `ios:review:refund-reversed:${transactionId}`,
-      credentialFingerprint: null,
+      eventType: "refund",
+      transactionId,
+    });
+    const refundLedger = await readLedger(deps.store, refundId);
+    await ensureAppStoreFinancialReview(deps.store, {
+      id: iosRefundReversedReviewId(transactionId),
+      reason: "unsupported_ios_refund_reversal",
+      transactionId,
+      originalTransactionId,
+      canonicalSku: productId ? canonicalSkuForIos(productId) : null,
+      financialEventId: refundLedger?.financialEventId ?? null,
+      uid: ownerUid,
+      diagnosticUid: deps.diagnosticUidFor(ownerUid),
       nowMs: deps.nowMs(),
     });
     return {
@@ -947,8 +1140,8 @@ export async function processIosNotification(
       financialEventWritten: false,
       historyWritten: false,
       skipped: "unsupported_ios_refund_reversal",
-      uid: "",
-      diagnosticUid: "",
+      uid: ownerUid,
+      diagnosticUid: deps.diagnosticUidFor(ownerUid),
       resultSummary: "unsupported_ios_refund_reversal",
       to: null,
       canonicalSku: null,
@@ -975,21 +1168,27 @@ export async function processIosNotification(
   );
 
   let refundWritten = false;
+  let refundFinancial: VerifiedFinancialEvent | null = null;
   if (notification.notificationType === NotificationTypeV2.REFUND) {
     const refund = await recordIosFullRefundIfPresent(deps, {
       transaction: nestedTx,
       source: "assnV2",
       eventSource: "webhook",
+      expectedUid: ownerUid,
     });
     refundWritten = refund.written;
+    refundFinancial = refund.financial;
   } else if (nestedTx.revocationType === RevocationType.FAMILY_REVOKE) {
     // Not a monetary refund. Current status still decides access.
   } else if (nestedTx.revocationDate != null || nestedTx.revocationType != null) {
-    await recordIosFullRefundIfPresent(deps, {
+    const refund = await recordIosFullRefundIfPresent(deps, {
       transaction: nestedTx,
       source: "assnV2",
       eventSource: "webhook",
+      expectedUid: ownerUid,
     });
+    refundWritten = refund.written;
+    refundFinancial = refund.financial;
   }
 
   try {
@@ -1008,18 +1207,23 @@ export async function processIosNotification(
     };
   } catch (err) {
     if (isRetryableBillingError(err)) {
-      const txId = requireText(nestedTx.transactionId, "missing_ios_transaction_id");
-      const financialEventId = financialEventIdForStore({
-        platform: "ios",
-        eventType: "purchase",
-        transactionId: txId,
-      });
-      const existing = await readLedger(deps.store, financialEventId);
-      if (existing || refundWritten) {
+      let durableId = refundFinancial?.financialEventId ?? null;
+      if (!durableId) {
+        const eventType = economicEventType(nestedTx.transactionReason);
+        const txId = requireText(nestedTx.transactionId, "missing_ios_transaction_id");
+        const financialEventId = financialEventIdForStore({
+          platform: "ios",
+          eventType,
+          transactionId: txId,
+        });
+        const existing = await readLedger(deps.store, financialEventId);
+        durableId = existing?.financialEventId ?? null;
+      }
+      if (durableId) {
         await enqueueStatusReconciliation(
           deps,
           originalTransactionId,
-          existing?.financialEventId ?? financialEventId,
+          durableId,
           "ios_live_status_unavailable"
         );
       }

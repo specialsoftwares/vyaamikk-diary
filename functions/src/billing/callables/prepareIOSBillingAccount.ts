@@ -9,7 +9,7 @@ import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { getFirestore } from "firebase-admin/firestore";
 
 import { ensureIosBillingAccount } from "../apple/appleOwnership";
-import { isAppStoreBillingEnabled } from "../apple/appleConstants";
+import { isAppStoreBillingEnabled, assertAppStoreLiveBillingAllowed } from "../apple/appleConstants";
 import { BillingError } from "../errors";
 import { throwHttpsFromBilling } from "../google/billingHttps";
 import { FirestoreBillingStore } from "../firestoreBillingStore";
@@ -39,6 +39,7 @@ export const prepareIOSBillingAccount = onCall(
       );
     }
     try {
+      assertAppStoreLiveBillingAllowed();
       const store = new FirestoreBillingStore(getFirestore());
       return await handlePrepareIOSBillingAccount(store, request.auth.uid, Date.now());
     } catch (err) {

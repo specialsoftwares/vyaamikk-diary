@@ -277,6 +277,7 @@ async function main() {
       ["_playCredentialIndex", "a".repeat(64)],
       ["_appStoreAccountByUid", "alice"],
       ["_appStoreAccountIndex", "11111111-1111-4111-8111-111111111111"],
+      ["_appStoreFinancialReview", "ios:refund-reversed:2001"],
       ["_billingReconciliationQueue", "android:refund-reconcile:GPA.1234"],
       ["_subscriptionInvoices", "inv_v1_test"],
       ["_subscriptionCreditNotes", "cn_v1_test"],

@@ -151,6 +151,31 @@ export function statusResponseFor(
   };
 }
 
+export function statusResponseForItems(
+  originalTransactionId: string,
+  items: Array<{
+    status: Status;
+    signedTransactionInfo: string;
+    signedRenewalInfo: string;
+  }>
+): StatusResponse {
+  return {
+    environment: Environment.SANDBOX,
+    bundleId: CANONICAL_IOS_BUNDLE_ID,
+    data: [
+      {
+        subscriptionGroupIdentifier: "vyd-group",
+        lastTransactions: items.map((item) => ({
+          originalTransactionId,
+          status: item.status,
+          signedTransactionInfo: item.signedTransactionInfo,
+          signedRenewalInfo: item.signedRenewalInfo,
+        })),
+      },
+    ],
+  };
+}
+
 export function readOfficialAppleFixture(name: string): string {
   return readFileSync(join(FIXTURES, "mock_signed_data", name), "utf8").trim();
 }

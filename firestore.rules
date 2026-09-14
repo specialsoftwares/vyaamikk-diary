@@ -616,6 +616,9 @@ service cloud.firestore {
     match /_appStoreAccountIndex/{appAccountToken} {
       allow read, write: if false;
     }
+    match /_appStoreFinancialReview/{reviewId} {
+      allow read, write: if false;
+    }
     match /_billingReconciliationQueue/{queueId} {
       allow read, write: if false;
     }

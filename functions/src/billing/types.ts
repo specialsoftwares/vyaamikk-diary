@@ -264,6 +264,29 @@ export interface AppStoreAccountIndexDoc {
 }
 
 /**
+ * Server-only Apple financial-review record (VYD-33).
+ * Path: `_appStoreFinancialReview/{stableId}` — zero client access.
+ * Used for unsupported Apple financial corrections that must not invent a
+ * `_billingReconciliationQueue.financialEventId`. No raw JWS.
+ * `financialEventId` is set only when a real ledger row exists.
+ */
+export type AppStoreFinancialReviewStatus = "pending";
+
+export interface AppStoreFinancialReviewDoc {
+  reason: string;
+  platform: "ios";
+  transactionId: string;
+  originalTransactionId: string;
+  canonicalSku: string | null;
+  financialEventId: string | null;
+  uid: string;
+  diagnosticUid: string;
+  createdAt: number;
+  updatedAt: number;
+  status: AppStoreFinancialReviewStatus;
+}
+
+/**
  * Server-only durable reconciliation work item (VYD-32).
  * Path: `_billingReconciliationQueue/{stableId}` — zero client access.
  * Never stores raw purchase tokens, plaintext credentials, or uid.

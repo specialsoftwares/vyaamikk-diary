@@ -139,6 +139,18 @@ assert.throws(
   () =>
     loadAppStoreRuntimeConfig({
       APPSTORE_BILLING_ENABLED: "true",
+      APPSTORE_ENVIRONMENT: "sandbox",
+      APPSTORE_ISSUER_ID: "iss",
+      APPSTORE_KEY_ID: "key",
+      APPSTORE_PRIVATE_KEY: "-----BEGIN PRIVATE KEY-----\nM\n-----END PRIVATE KEY-----",
+      APPSTORE_ROOT_CA_CERTS_BASE64: Buffer.alloc(80).toString("base64"),
+    }),
+  (e: unknown) => e instanceof BillingError && e.causeCode === "appstore_financial_authority_unimplemented"
+);
+
+assert.throws(
+  () =>
+    loadAppStoreRuntimeConfig({
       APPSTORE_ENVIRONMENT: "production",
       APPSTORE_ISSUER_ID: "iss",
       APPSTORE_KEY_ID: "key",

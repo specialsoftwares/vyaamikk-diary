@@ -10,10 +10,13 @@ import { Environment } from "@apple/app-store-server-library";
 
 import { BillingError } from "../errors";
 import {
+  APP_STORE_ENABLE_ONLINE_CERTIFICATE_CHECKS,
   APP_STORE_PRODUCT_IDENTIFIERS_CONFIRMED,
   appAppleIdFromEnv,
   appStoreEnvironmentFromEnv,
+  assertAppStoreLiveBillingAllowed,
   CANONICAL_IOS_BUNDLE_ID,
+  isAppStoreBillingEnabled,
 } from "./appleConstants";
 
 export interface AppStoreRuntimeConfig {
@@ -24,7 +27,12 @@ export interface AppStoreRuntimeConfig {
   privateKeyPem: string;
   rootCaDerCerts: Buffer[];
   appAppleId?: number;
-  enableOnlineChecks: false;
+  /**
+   * Official SignedDataVerifier online certificate checks (OCSP).
+   * Compile-time default is false. CI must stay false. Production go-live
+   * must decide explicitly; this field is not flipped by env in VYD-33.
+   */
+  enableOnlineChecks: boolean;
 }
 
 function failClosed(causeCode: string): never {
@@ -93,10 +101,16 @@ function normalizePrivateKeyPem(raw: string): string {
  * Full runtime config required to talk to Apple (sandbox or production).
  * Production additionally requires a numeric appAppleId and confirmed
  * product identifiers.
+ *
+ * APPSTORE_BILLING_ENABLED=true cannot load live deps while financial-report
+ * authority is unimplemented — even if product identifiers were confirmed.
  */
 export function loadAppStoreRuntimeConfig(
   env: NodeJS.ProcessEnv = process.env
 ): AppStoreRuntimeConfig {
+  if (isAppStoreBillingEnabled(env)) {
+    assertAppStoreLiveBillingAllowed();
+  }
   const environment = appStoreEnvironmentFromEnv(env);
   if (environment === Environment.PRODUCTION && !APP_STORE_PRODUCT_IDENTIFIERS_CONFIRMED) {
     failClosed("appstore_product_ids_unconfirmed");
@@ -117,6 +131,6 @@ export function loadAppStoreRuntimeConfig(
     privateKeyPem,
     rootCaDerCerts,
     appAppleId,
-    enableOnlineChecks: false,
+    enableOnlineChecks: APP_STORE_ENABLE_ONLINE_CERTIFICATE_CHECKS,
   };
 }
