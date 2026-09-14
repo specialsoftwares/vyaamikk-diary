@@ -9,7 +9,8 @@
  *   { productId, basePlanId }.
  * - iOS may map a canonical SKU to a distinct App Store product identifier.
  *   The identifiers below are provisional until App Store Connect products
- *   are created (owner decision W-7 defers live Apple work).
+ *   are confirmed. APP STORE PRODUCT IDS MUST BE CONFIRMED BEFORE
+ *   PRODUCTION ENABLEMENT (VYD-33 go-live gate).
  *
  * Prices are EXPECTED COMMERCIAL CONFIG in integer paise for tests/marketing
  * copy only. The purchase UI must always display store-localized pricing;

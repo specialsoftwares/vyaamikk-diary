@@ -167,8 +167,35 @@ Baseline architecture facts this model is tied to:
     `email` == configured push service account, `email_verified`), never a
     static bearer/URL token.
   - Apple ASSN v2: **`@apple/app-store-server-library` SignedDataVerifier**
-    (ES256 + x5c chain to pinned Apple Root CAs + OCSP + bundleId +
-    environment + production `appAppleId`), never Sign-in-with-Apple JWKS.
+    (ES256 + x5c chain to pinned Apple Root CAs + bundleId + environment +
+    production `appAppleId`), never Sign-in-with-Apple JWKS. Online certificate
+    checks (`enableOnlineChecks` / OCSP) are **off** in VYD-33 so CI stays
+    deterministic; enabling them is an explicit go-live security/availability
+    decision. ASSN `notificationType` (including `REFUND_REVERSED`,
+    prorated refund, missing original sale, and unknown revocation types)
+    is a signal only. Current entitlement still comes from Get All
+    Subscription Statuses after SignedDataVerifier checks, even when the
+    financial correction is held in `_appStoreFinancialReview`.
+    Authenticity/ownership/integrity failures still block entirely.
+    Applied App Store offer fields (`offerType`, `offerIdentifier`,
+    `offerDiscountType`, `offerPeriod` on transaction or renewal) fail closed
+    (`unsupported_ios_store_offer`) before mutation; eligibility fields such
+    as `eligibleWinBackOfferIds` are not applied-offer state.
+    Contradictory signed status items that claim the requested
+    `originalTransactionId` fail closed rather than skipping to another
+    candidate. Known out-of-scope ASSN shapes (`RENEWAL_EXTENSION` SUMMARY,
+    `EXTERNAL_PURCHASE_TOKEN`, `RESCIND_CONSENT`) are acknowledged without
+    billing mutation after SignedDataVerifier. Durable ASSN work is incident-
+    scoped by verified `notificationUUID`.
+    Apple 2026 `billingPlanType` `MONTHLY` / non-empty `commitmentInfo`
+    fail closed (`unsupported_ios_commitment_billing_plan`); commitment
+    products are not implemented. iOS live-status queue ids are
+    event-scoped and incident-scoped (`originalTransactionId` + durable
+    financial event + callable vs ASSN UUID).
+    Financial-review `diagnosticUid` is forensic only and is not identity.
+    Transitive `jsrsasign@11.1.5` (via the official Apple library 3.1.0)
+    is a production-enablement dependency watch, not a VYD-33 merge
+    blocker; do not override Apple's cryptography package.
 - **Residual risk:** compromise of Google/Apple signing infrastructure —
   out of scope.
 
@@ -299,6 +326,11 @@ CONFIGURATION / IDENTIFIERS (parameters/env, NOT Secret Manager):
 
 - `PLAY_RTDN_PUSH_SERVICE_ACCOUNT`, `PLAY_RTDN_PUSH_AUDIENCE`
 - `APPSTORE_ISSUER_ID`, `APPSTORE_KEY_ID`, `APPSTORE_APP_APPLE_ID`
+- `APPSTORE_BILLING_ENABLED` (default false), `APPSTORE_ENVIRONMENT`
+- `APPSTORE_ROOT_CA_CERTS_BASE64` (Apple root CA DER material; not the .p8)
+- Compile-time gates: `APP_STORE_PRODUCT_IDENTIFIERS_CONFIRMED`,
+  `APP_STORE_FINANCIAL_REPORTING_AUTHORITY_IMPLEMENTED` (both false).
+  Apple JWS price is not accounting authority.
 - `BILLING_KMS_KEY_NAME`
 - Android package / iOS bundle id (already in `app.json`)
 - `INVOICE_RENDERER_URL`, `COMPANY_GSTIN`, `SERVICE_SAC_CODE`,

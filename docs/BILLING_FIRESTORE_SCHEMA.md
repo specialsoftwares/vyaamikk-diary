@@ -31,6 +31,9 @@ schema-by-use: **no documents are pre-created to "initialize" collections.**
 | `_billingRateLimits/{bucketId}` | Admin SDK only (transactional buckets) | denied | denied |
 | `_playAccountIndex/{obfuscatedAccountId}` | Admin SDK only (Play obfuscated-account ownership) | denied | denied |
 | `_playCredentialIndex/{credentialFingerprint}` | Admin SDK only (Play purchase-token fingerprint ownership) | denied | denied |
+| `_appStoreAccountByUid/{uid}` | Admin SDK only (App Store appAccountToken ownership) | denied | denied |
+| `_appStoreAccountIndex/{appAccountToken}` | Admin SDK only (App Store token → uid) | denied | denied |
+| `_appStoreFinancialReview/{reviewId}` | Admin SDK only (unsupported Apple financial corrections) | denied | denied |
 | `_billingReconciliationQueue/{queueId}` | Admin SDK only (durable Play/refund reconciliation work) | denied | denied |
 | `globalStats/paperSaved` | Admin SDK only | public (`read: if true`) | denied |
 
@@ -67,14 +70,44 @@ Notes:
   live entitlement cannot be authoritatively reconciled (expired token,
   historical replaced token whose current credential cannot be decrypted,
   owner mismatch). Document ids are source-independent
-  (`android:refund-reconcile:{orderId}`). Documents store `reason`,
+  (`android:refund-reconcile:{orderId}`,
+  `ios:status-reconcile:{originalTransactionId}:{financialEventId}:callable`
+  for purchase-validation retries, or
+  `ios:status-reconcile:{originalTransactionId}:{financialEventId}:assn:{notificationUUID}`
+  for ASSN-originated status work).
+  iOS work items are **event-scoped and incident-scoped**: purchase, later renewal,
+  and later refund on the same chain are separate immutable documents, and a later
+  ASSN notification for the same financial event (different verified
+  `notificationUUID`) is a new document. Same Apple redelivery UUID reuses the
+  same item. Resolved incidents are never reopened, deleted, or reused for a
+  different notification. Documents store `reason`,
   `platform`, `financialEventId`, optional `credentialFingerprint`,
   timestamps, `status: "pending" | "resolved"`, `resolvedAt`, and
   `attemptCount`. They never store raw purchase tokens, plaintext
-  credentials, or uid. Duplicate RTDN deliveries preserve a single work
-  item. A later successful live reconcile marks the same document
-  `resolved` without deleting forensic history. VYD-32 writes the queue; a
-  later phase may consume it. Clients have zero access.
+  credentials, or uid. Duplicate deliveries preserve a single work item.
+  `financialEventId` must resolve a real `_billingEventLedger` row. A later
+  successful live reconcile marks the same document `resolved` without
+  deleting forensic history, using the queue's own persisted
+  `financialEventId` (never a guessed current-sale id). VYD-32/VYD-33 write
+  the queue; a later phase may consume it. Clients have zero access.
+- `_appStoreFinancialReview/{stableId}` is a server-only Apple review record
+  for unsupported Apple financial corrections (`REFUND_REVERSED`, prorated
+  refund, full refund with a missing local original sale, unknown
+  revocation type, or a monetary refund whose `revocationPercentage` is
+  missing/contradictory). `diagnosticUid` is forensic only: `BILLING_DIAG_UID_SECRET`
+  may rotate, and rotation must not redefine review identity (`uid` is the
+  owner).
+  It stores `reason`, `platform: ios`, `transactionId`,
+  `originalTransactionId`, optional `canonicalSku`, optional real
+  `financialEventId` (never invented; bound only after verifying the ledger
+  row's platform, eventType, uid, SKU, and related original sale; `null` may
+  later enrich one-way to a verified id), `uid`, forensic `diagnosticUid`
+  (not identity), timestamps, `status: pending`, optional
+  `entitlementReconciledAt` (set once after Get All Subscription Statuses
+  succeeds), and optional `financialEventLinkedAt`. Core identity is
+  reason/platform/transaction ids/uid/canonicalSku. Financial correction
+  stays pending; current entitlement is still applied from live Apple status.
+  No raw JWS. Clients have zero access.
 
 - `globalStats/paperSaved` figures are labelled estimates with a methodology
   string (owner decision W-9); other `globalStats/*` docs are default-denied.
@@ -388,3 +421,120 @@ appears in a later phase; it will be added with the query that requires it.
   `_billingReconciliationQueue` before the RTDN is acknowledged. The queue
   is not a substitute for `ReviewRefund`.
 - Chargeback/pending-review tax treatment remains a VYD-40 legal review gate.
+
+## App Store production-enablement gates (VYD-33)
+
+- `APPSTORE_BILLING_ENABLED` defaults **false**. Do not enable production App
+  Store billing in this phase.
+- **APP STORE PRODUCT IDS MUST BE CONFIRMED BEFORE PRODUCTION ENABLEMENT.**
+  The nine Phase-A iOS identifiers remain provisional. Production environment
+  fails closed (`appstore_product_ids_unconfirmed`) until that confirmation
+  is encoded in a later owner-authorized change.
+- **APP STORE CONNECT FINANCIAL / ACCOUNTING REPORTING AUTHORITY** is
+  unimplemented (`APP_STORE_FINANCIAL_REPORTING_AUTHORITY_IMPLEMENTED = false`).
+  Apple documents that JWS `price` / `currency` must not be used for revenue
+  reconciliation or recognition. App Store Connect financial reporting is the
+  source of record. `APPSTORE_BILLING_ENABLED=true` fails closed with
+  `appstore_financial_authority_unimplemented` until that path exists.
+  Confirming product identifiers alone cannot make Apple billing live.
+  Verified JWS store-transaction price may be used as pre-production evidence
+  in injected tests only; it is not GST / revenue / accounting authority.
+  VYD-40 Apple tax-document posting must not be production-enabled until this
+  gate is true.
+- `APPSTORE_PRIVATE_KEY` is secret material and must never be committed.
+  Valid issuer id, key id, numeric `appAppleId`, and Apple root CA DERs are
+  required before production enablement. No App Store Connect product
+  creation, ASSN URL configuration, or Functions/Rules deploy ships in VYD-33.
+- Apple `REFUND_REVERSED` (and other unsupported financial corrections) cannot
+  be represented in the current immutable ledger (`purchase|renewal|refund|
+  chargeback` only). They persist a server-only `_appStoreFinancialReview`
+  (`unsupported_ios_refund_reversal`) and must be reviewed before go-live.
+  That collection never invents a `_billingReconciliationQueue.financialEventId`.
+  ASSN remains a signal only: after the review record is written, current
+  entitlement is still fetched from Get All Subscription Statuses. A retryable
+  live-status failure returns HTTP 503 so Apple redelivers; a real refund
+  ledger row may be queued, but no synthetic financial id is invented.
+- Prorated refunds (`REFUND_PRORATED`) are unsupported accounting: no refund
+  ledger row, durable `_appStoreFinancialReview`, no tax/CN handoff.
+  Unsupported financial treatment does not skip live entitlement
+  reconciliation.
+- Full refund with a missing local original sale is a reconciliation
+  condition, not a freeze: durable review
+  `ios_full_refund_original_sale_missing`, then Get All Subscription Statuses.
+  If live reconcile backfills the exact purchase/renewal, the refund is linked
+  once. Historical missing sales on a later ACTIVE chain stay pending; no
+  fabricated sale/refund/tax.
+- Unknown/unsupported verified revocation types persist a financial review
+  and still apply current Apple status. Ownership/integrity failures still
+  fail closed entirely.
+- Apple 2026 `billingPlanType` / `renewalBillingPlanType` `MONTHLY` and
+  non-empty `commitmentInfo` fail closed
+  (`unsupported_ios_commitment_billing_plan`). Omitted fields and
+  `BILLED_UPFRONT` are allowed. Commitment products are not implemented.
+- App Store-managed applied offers fail closed (`unsupported_ios_store_offer`)
+  before any ledger, history, entitlement, or financial-review mutation.
+  Inspected `@apple/app-store-server-library@3.1.0` fields:
+  `offerType` (`INTRODUCTORY_OFFER=1`, `PROMOTIONAL_OFFER=2`, `OFFER_CODE=3`,
+  `WIN_BACK_OFFER=4`), `offerIdentifier`, `offerDiscountType`, `offerPeriod`.
+  Any non-null `offerType` / `offerDiscountType` / `offerPeriod`, or any
+  non-empty `offerIdentifier`, on a verified transaction or renewal is
+  rejected. Duration is not parsed. Informational `eligibleWinBackOfferIds`
+  is not applied-offer state.
+  A zero-price Apple introductory/free-trial transaction is not the
+  Vyaamikk 14-day Professional trial.
+- Monetary refunds require a consistent integer `revocationPercentage`
+  (Apple milli-percent 0..100000). `REFUND_FULL` must be exactly 100000.
+  `REFUND_PRORATED` must be `> 0` and `< 100000`. Missing, non-integer,
+  out-of-range, or type/percentage contradictions persist
+  `invalid_ios_revocation_percentage` (no refund row, no tax/CN) and still
+  reconcile live entitlement from Get All Subscription Statuses.
+  Do not guess 100%. `REFUND_REVERSED` does not require the field.
+  `FAMILY_REVOKE` remains non-monetary.
+- Get All Subscription Statuses may return sibling `originalTransactionId`
+  items; those are skipped. Once an outer item claims the requested chain,
+  a signed transaction whose `originalTransactionId` or `type` contradicts
+  that claim fails closed (`ios_status_transaction_chain_mismatch` /
+  `ios_status_product_type_mismatch`) instead of selecting another candidate.
+- After SignedDataVerifier, known out-of-scope ASSN shapes return HTTP 200
+  without mutation: `RENEWAL_EXTENSION` + `SUMMARY`
+  (`renewal_extension_summary_ignored`), `EXTERNAL_PURCHASE_TOKEN`
+  (`external_purchase_token_ignored`), `RESCIND_CONSENT`
+  (`non_billing_rescind_consent_ignored`). Unknown future shapes stay
+  fail-closed. Durable billing ASSN processing requires a verified
+  non-empty `notificationUUID`.
+- Scheduled iOS product changes (`autoRenewProductId` ≠ current `productId`)
+  fail closed as `unsupported_ios_scheduled_plan_change`. Phase B does not
+  map `scheduledPlan`.
+- Apple India tax responsibility remains unconfirmed (VYD-40). Ledger events
+  may feed the existing tax-document post-commit boundary; no real invoice or
+  credit note issues while seller/platform tax configuration is fail-closed.
+- `SignedDataVerifier` `enableOnlineChecks` is **false** in VYD-33 (CI must
+  not perform OCSP/network certificate checks). Turning this on is an explicit
+  production security/availability decision at go-live.
+- **Dependency watch (not a VYD-33 merge blocker):**
+  `@apple/app-store-server-library@3.1.0` transitively installs
+  `jsrsasign@11.1.5`. That package is deprecated / end-of-support.
+  Advisories affecting `jsrsasign` `<11.1.1` are already patched by 11.1.5.
+  Before production launch: re-check the latest official Apple App Store
+  Server Library, re-run `npm audit` / security review, and do **not**
+  override Apple's transitive cryptography package unless Apple supports the
+  replacement. Production cannot enable App Store billing if a known
+  unpatched signature / X.509 validation advisory affects the pinned
+  dependency set. Do not fork or replace the official library in VYD-33.
+
+### Before live Apple subscription billing
+
+Owner-authorized later phases must complete all of:
+
+- App Store product ids confirmed
+- App Store financial/accounting reporting authority implemented and reconciled
+- Apple India tax responsibility resolved
+- VYD-40 Apple tax-document policy approved
+- issuer / key / private key / root CAs / `appAppleId` configured
+- ASSN URL configured
+- unsupported refund-reversal / prorated-review operational path established
+- decision made on online certificate checks
+- re-check latest official App Store Server Library and `jsrsasign` advisories
+
+VYD-33 does **not** implement those external configurations.
+

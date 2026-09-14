@@ -701,3 +701,24 @@ export function oppositeAndroidFullReversalFinancialEventId(
   const opposite = eventType === "refund" ? "chargeback" : "refund";
   return `android:${opposite}:${orderPart}`;
 }
+
+/**
+ * Opposite purchase/renewal ledger id for one Apple transactionId.
+ *
+ * `ios:purchase:{tx}` ↔ `ios:renewal:{tx}`. The same transactionId must
+ * never become both economic classes.
+ */
+export function oppositeIosPurchaseRenewalFinancialEventId(
+  financialEventId: string,
+  eventType: FinancialEventType,
+  platform: BillingPlatform
+): string | null {
+  if (platform !== "ios") return null;
+  if (eventType !== "purchase" && eventType !== "renewal") return null;
+  const prefix = `ios:${eventType}:`;
+  if (!financialEventId.startsWith(prefix)) return null;
+  const txPart = financialEventId.slice(prefix.length);
+  if (txPart.length === 0) return null;
+  const opposite = eventType === "purchase" ? "renewal" : "purchase";
+  return `ios:${opposite}:${txPart}`;
+}

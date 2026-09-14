@@ -54,11 +54,14 @@ const FORBIDDEN_ERROR_SUBSTRINGS = [
   "purchaseToken",
   "purchase_token",
   "signedTransaction",
+  "signedTransactionInfo",
+  "signedRenewalInfo",
   "signedPayload",
   "receiptData",
   "latestReceipt",
   "expiredPurchaseToken",
   "BEGIN PRIVATE",
+  "APPSTORE_PRIVATE_KEY",
 ];
 
 export function toClientSafeBillingError(err: unknown): ClientSafeBillingError {

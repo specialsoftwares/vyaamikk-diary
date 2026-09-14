@@ -10,6 +10,8 @@
  *                     carries a financial event), the opposite Android
  *                     full-reversal ledger row (refund ↔ chargeback) so two
  *                     concurrent opposite-class writes cannot both commit,
+ *                     the opposite iOS purchase/renewal ledger row so the
+ *                     same Apple transactionId cannot be both classes,
  *                     and any auxiliary decision state read by the prepare
  *                     hook. The hook receives a READ-ONLY transaction view,
  *                     so it cannot write.
@@ -38,6 +40,7 @@ import {
 import {
   deriveSubscriptionTransition,
   oppositeAndroidFullReversalFinancialEventId,
+  oppositeIosPurchaseRenewalFinancialEventId,
   type TransitionRequest,
 } from "./transition";
 import type {
@@ -128,6 +131,8 @@ function assertNoSecretsInHistory(history: Record<string, unknown>): void {
     "receipt",
     "receiptData",
     "signedTransaction",
+    "signedTransactionInfo",
+    "signedRenewalInfo",
     "signedPayload",
     "encryptedPurchaseCredential",
     "ciphertext",
@@ -246,6 +251,17 @@ export async function applySubscriptionTransition(
       const oppositeReversalSnap = oppositeReversalId
         ? await tx.get(financialLedgerPath(sanitizeDocId(oppositeReversalId)))
         : null;
+      const oppositeIosClassId =
+        requestedFinancial != null
+          ? oppositeIosPurchaseRenewalFinancialEventId(
+              requestedFinancial.financialEventId,
+              requestedFinancial.eventType,
+              requestedFinancial.platform
+            )
+          : null;
+      const oppositeIosClassSnap = oppositeIosClassId
+        ? await tx.get(financialLedgerPath(sanitizeDocId(oppositeIosClassId)))
+        : null;
       const readOnlyTx: BillingReadTransaction = { get: (p) => tx.get(p) };
       const plan: TransitionPlan = deps.prepareTransition
         ? await deps.prepareTransition(readOnlyTx, prior)
@@ -291,6 +307,13 @@ export async function applySubscriptionTransition(
         throw new BillingError({
           clientCode: "internal_error",
           causeCode: "full_reversal_classification_conflict",
+        });
+      }
+
+      if (oppositeIosClassSnap?.exists) {
+        throw new BillingError({
+          clientCode: "internal_error",
+          causeCode: "purchase_renewal_classification_conflict",
         });
       }
 

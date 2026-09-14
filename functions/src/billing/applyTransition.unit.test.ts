@@ -28,6 +28,7 @@ import { MemoryTaxComplianceReportSource } from "./tax/taxComplianceReportSource
 import {
   financialEventIdForStore,
   oppositeAndroidFullReversalFinancialEventId,
+  oppositeIosPurchaseRenewalFinancialEventId,
   type TransitionRequest,
 } from "./transition";
 import type { SubscriptionAuditLogEventDoc } from "./types";
@@ -692,6 +693,14 @@ async function main() {
     assert.equal(
       oppositeAndroidFullReversalFinancialEventId("ios:refund:77", "refund", "ios"),
       null
+    );
+    assert.equal(
+      oppositeIosPurchaseRenewalFinancialEventId("ios:purchase:77", "purchase", "ios"),
+      "ios:renewal:77"
+    );
+    assert.equal(
+      oppositeIosPurchaseRenewalFinancialEventId("ios:renewal:77", "renewal", "ios"),
+      "ios:purchase:77"
     );
 
     // A. existing refund → incoming chargeback fails; no chargeback row

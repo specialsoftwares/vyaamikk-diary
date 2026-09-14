@@ -40,6 +40,18 @@ export function playCredentialIndexPath(credentialFingerprint: string): string {
   return `_playCredentialIndex/${credentialFingerprint}`;
 }
 
+export function appStoreAccountByUidPath(uid: string): string {
+  return `_appStoreAccountByUid/${uid}`;
+}
+
+export function appStoreAccountIndexPath(appAccountToken: string): string {
+  return `_appStoreAccountIndex/${appAccountToken}`;
+}
+
+export function appStoreFinancialReviewPath(reviewId: string): string {
+  return `_appStoreFinancialReview/${sanitizeDocId(reviewId)}`;
+}
+
 export function billingReconciliationQueuePath(queueId: string): string {
   return `_billingReconciliationQueue/${sanitizeDocId(queueId)}`;
 }
