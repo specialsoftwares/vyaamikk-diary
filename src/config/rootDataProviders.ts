@@ -11,6 +11,9 @@
  * public routes, authenticated routes, redirects, language changes,
  * loading/error states, and navigation transitions. Route *content* may
  * change; the provider instance must not.
+ *
+ * `SubscriptionProvider` follows the same rule: it mounts once after
+ * `AuthProvider` (uid binding) and must not be pathname-gated.
  */
 
 export interface RootDataProvidersDecision {
@@ -18,6 +21,7 @@ export interface RootDataProvidersDecision {
   mountAuth: boolean;
   mountSync: boolean;
   mountAppFeedback: boolean;
+  mountSubscription: boolean;
 }
 
 const ALWAYS: RootDataProvidersDecision = {
@@ -25,6 +29,7 @@ const ALWAYS: RootDataProvidersDecision = {
   mountAuth: true,
   mountSync: true,
   mountAppFeedback: true,
+  mountSubscription: true,
 };
 
 /**

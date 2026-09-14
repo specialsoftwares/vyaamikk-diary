@@ -116,6 +116,10 @@
     "test:public-links": "npx --yes tsx src/config/publicLinks.test.ts",
     "test:external-https": "npx --yes tsx src/utils/externalHttpsUrl.test.ts",
     "test:root-providers": "npx --yes tsx src/config/rootDataProviders.test.ts",
+    "test:subscription-features": "npx --yes tsx src/subscription/subscriptionFeatures.test.ts && npx --yes tsx src/subscription/parseSubscriptionStatus.test.ts",
+    "test:subscription-provider": "npx --yes tsx src/subscription/subscriptionSession.test.ts && npx --yes tsx src/subscription/subscriptionViewBinding.test.ts",
+    "test:subscription-cache": "npx --yes tsx src/subscription/subscriptionCache.test.ts",
+    "test:subscription-plan-static": "npx --yes tsx src/subscription/subscriptionPlan.static.test.ts",
     "test:curtain-phases": "npx --yes tsx src/components/ui/curtainSheetPhases.test.ts",
     "test:flip-lock": "npx --yes tsx src/components/you/identityCardFlipController.test.ts",
     "test:language-transition": "npx --yes tsx src/i18n/languageTransitionController.test.ts",
@@ -171,7 +175,7 @@
     "test:boot-production-startup": "npx --yes tsx src/boot/bootProductionStartup.contract.test.ts",
     "functions:build": "npm --prefix functions run build",
     "functions:lint": "npm --prefix functions run lint",
-    "lint:eslint": "eslint \"src/config/**/*.{ts,tsx}\" \"src/startup/**/*.{ts,tsx}\" \"src/auth/**/*.{ts,tsx}\" \"src/services/device/**/*.{ts,tsx}\" \"src/services/auth/productionMockOtpIsolation.test.ts\" \"src/utils/date.ts\" \"src/utils/localBusinessDate.test.ts\" \"src/services/search/buildSearchableText.ts\" \"src/services/statutory/statutoryPromptSession.ts\" --max-warnings 40",
+    "lint:eslint": "eslint \"src/config/**/*.{ts,tsx}\" \"src/startup/**/*.{ts,tsx}\" \"src/auth/**/*.{ts,tsx}\" \"src/services/device/**/*.{ts,tsx}\" \"src/services/auth/productionMockOtpIsolation.test.ts\" \"src/utils/date.ts\" \"src/utils/localBusinessDate.test.ts\" \"src/services/search/buildSearchableText.ts\" \"src/services/statutory/statutoryPromptSession.ts\" \"src/subscription/**/*.{ts,tsx}\" \"app/_layout.tsx\" --max-warnings 40",
     "lint": "npm run typecheck && npm run lint:eslint"
   },
   "dependencies": {

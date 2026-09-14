@@ -175,9 +175,10 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
       settle: async () => {
         // Intentionally NO full-tree remount key. Remounting children of
         // I18nProvider would recreate LocalDbProvider / AuthProvider /
-        // SyncProvider (design forbids this) and can leave navigation and
-        // touches wedged after a language switch. LocaleFontProvider + the
-        // revision bump above already refresh script fonts and `t()`.
+        // SubscriptionProvider / SyncProvider (design forbids this) and can
+        // leave navigation and touches wedged after a language switch.
+        // LocaleFontProvider + the revision bump above already refresh
+        // script fonts and `t()`.
         await new Promise<void>((resolve) => {
           InteractionManager.runAfterInteractions(() => resolve());
         });
