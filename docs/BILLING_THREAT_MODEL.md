@@ -178,7 +178,7 @@ Baseline architecture facts this model is tied to:
     financial correction is held in `_appStoreFinancialReview`.
     Authenticity/ownership/integrity failures still block entirely.
     Applied App Store offer fields (`offerType`, `offerIdentifier`,
-    `offerDiscountType` on transaction or renewal) fail closed
+    `offerDiscountType`, `offerPeriod` on transaction or renewal) fail closed
     (`unsupported_ios_store_offer`) before mutation; eligibility fields such
     as `eligibleWinBackOfferIds` are not applied-offer state.
     Contradictory signed status items that claim the requested

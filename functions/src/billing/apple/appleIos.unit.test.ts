@@ -158,9 +158,11 @@ function currentPair(opts: {
   offerType?: number;
   offerIdentifier?: string;
   offerDiscountType?: string;
+  offerPeriod?: string;
   renewalOfferType?: number;
   renewalOfferIdentifier?: string;
   renewalOfferDiscountType?: string;
+  renewalOfferPeriod?: string;
   eligibleWinBackOfferIds?: string[];
 }) {
   const originalTransactionId = opts.originalTransactionId ?? ORIG;
@@ -189,6 +191,7 @@ function currentPair(opts: {
       ...(opts.offerType != null ? { offerType: opts.offerType } : {}),
       ...(opts.offerIdentifier != null ? { offerIdentifier: opts.offerIdentifier } : {}),
       ...(opts.offerDiscountType != null ? { offerDiscountType: opts.offerDiscountType } : {}),
+      ...(opts.offerPeriod != null ? { offerPeriod: opts.offerPeriod } : {}),
     })
   );
   const renewal = signAppleJws(
@@ -215,6 +218,7 @@ function currentPair(opts: {
       ...(opts.renewalOfferDiscountType != null
         ? { offerDiscountType: opts.renewalOfferDiscountType }
         : {}),
+      ...(opts.renewalOfferPeriod != null ? { offerPeriod: opts.renewalOfferPeriod } : {}),
       ...(opts.eligibleWinBackOfferIds != null
         ? { eligibleWinBackOfferIds: opts.eligibleWinBackOfferIds }
         : {}),
@@ -2288,6 +2292,56 @@ assert.equal(canonicalSkuForIos("com.specialsoftwares.vyaamikkdiary.unknown.mont
   });
   assert.equal(result.to?.billingStatus, "active");
   assert.ok(ledger(store, "ios:purchase:2001"));
+}
+
+{
+  const { store, deps, pair } = await primed({ offerPeriod: "P1W" });
+  await assert.rejects(
+    handleValidateAndActivateIOS(deps, { uid: UID, signedTransactionInfo: pair.tx }),
+    isCause("unsupported_ios_store_offer")
+  );
+  assert.equal(store.docs.get(subscriptionStatusPath(UID)), undefined);
+  assert.equal(historyCount(store), 0);
+  assert.equal(ledger(store, "ios:purchase:2001"), undefined);
+  assert.equal(financialReviewCount(store), 0);
+  assert.equal(queueCount(store), 0);
+}
+
+{
+  const { store, deps, pair } = await primed({ renewalOfferPeriod: "P1M" });
+  await assert.rejects(
+    handleValidateAndActivateIOS(deps, { uid: UID, signedTransactionInfo: pair.tx }),
+    isCause("unsupported_ios_store_offer")
+  );
+  assert.equal(store.docs.get(subscriptionStatusPath(UID)), undefined);
+  assert.equal(historyCount(store), 0);
+  assert.equal(ledger(store, "ios:purchase:2001"), undefined);
+  assert.equal(financialReviewCount(store), 0);
+}
+
+{
+  const { store, deps, pair } = await primed({
+    eligibleWinBackOfferIds: ["winback.eligible.only"],
+  });
+  const result = await handleValidateAndActivateIOS(deps, {
+    uid: UID,
+    signedTransactionInfo: pair.tx,
+  });
+  assert.equal(result.to?.billingStatus, "active");
+  assert.equal(result.to?.entitlementActive, true);
+  assert.ok(ledger(store, "ios:purchase:2001"));
+  assert.equal(financialReviewCount(store), 0);
+}
+
+{
+  const { store, deps, pair } = await primed();
+  const result = await handleValidateAndActivateIOS(deps, {
+    uid: UID,
+    signedTransactionInfo: pair.tx,
+  });
+  assert.equal(result.to?.billingStatus, "active");
+  assert.ok(ledger(store, "ios:purchase:2001"));
+  assert.equal(historyCount(store), 1);
 }
 
 {

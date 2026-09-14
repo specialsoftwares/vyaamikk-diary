@@ -475,9 +475,11 @@ appears in a later phase; it will be added with the query that requires it.
   before any ledger, history, entitlement, or financial-review mutation.
   Inspected `@apple/app-store-server-library@3.1.0` fields:
   `offerType` (`INTRODUCTORY_OFFER=1`, `PROMOTIONAL_OFFER=2`, `OFFER_CODE=3`,
-  `WIN_BACK_OFFER=4`), `offerIdentifier`, `offerDiscountType`. Any non-null
-  applied-offer field on a verified transaction or renewal is rejected.
-  Informational `eligibleWinBackOfferIds` is not applied-offer state.
+  `WIN_BACK_OFFER=4`), `offerIdentifier`, `offerDiscountType`, `offerPeriod`.
+  Any non-null `offerType` / `offerDiscountType` / `offerPeriod`, or any
+  non-empty `offerIdentifier`, on a verified transaction or renewal is
+  rejected. Duration is not parsed. Informational `eligibleWinBackOfferIds`
+  is not applied-offer state.
   A zero-price Apple introductory/free-trial transaction is not the
   Vyaamikk 14-day Professional trial.
 - Monetary refunds require a consistent integer `revocationPercentage`
