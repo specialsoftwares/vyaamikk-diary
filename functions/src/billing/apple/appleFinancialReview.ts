@@ -3,7 +3,7 @@
  *
  * Used when Apple reports an unsupported financial correction
  * (REFUND_REVERSED, prorated refund, missing original sale, unknown
- * revocation) that must not invent a
+ * revocation, invalid revocationPercentage) that must not invent a
  * `_billingReconciliationQueue.financialEventId`.
  *
  * Core identity is reason/platform/transaction ids/uid/canonicalSku.
@@ -34,6 +34,10 @@ export function iosFullRefundMissingSaleReviewId(transactionId: string): string 
 
 export function iosUnsupportedRevocationReviewId(transactionId: string): string {
   return `ios:unsupported-revocation:${transactionId.replace(/\//g, "_")}`;
+}
+
+export function iosInvalidRevocationPercentageReviewId(transactionId: string): string {
+  return `ios:invalid-revocation-percentage:${transactionId.replace(/\//g, "_")}`;
 }
 
 function nullishSku(value: string | null | undefined): string | null {

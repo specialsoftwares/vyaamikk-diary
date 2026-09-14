@@ -35,20 +35,26 @@ import {
   subscriptionStatusPath,
 } from "../paths";
 import { canonicalSkuForIos, getCatalogEntry, isCanonicalSku, type CanonicalSku } from "../products";
+import { ignoredIosAssnAction } from "./appleAssnScope";
+import { assertIosBillingPlanSupported, iosBillingPlanSemanticKey } from "./appleBillingPlan";
 import {
   ensureAppStoreFinancialReview,
   iosFullRefundMissingSaleReviewId,
+  iosInvalidRevocationPercentageReviewId,
   iosProratedRefundReviewId,
   iosRefundReversedReviewId,
   iosUnsupportedRevocationReviewId,
   markAppStoreFinancialReviewEntitlementReconciled,
   readAppStoreFinancialReview,
 } from "./appleFinancialReview";
-import { assertIosBillingPlanSupported, iosBillingPlanSemanticKey } from "./appleBillingPlan";
+import { iosMonetaryRefundPercentageDisposition } from "./appleRefundPercentage";
+import { assertIosStoreOfferUnsupported } from "./appleStoreOffer";
 import {
   ensureReconciliationWorkItem,
+  IOS_CALLABLE_RECONCILIATION_INCIDENT,
   iosStatusReconciliationQueueId,
   resolveReconciliationWorkItem,
+  type IosStatusReconciliationIncident,
 } from "../reconciliationQueue";
 import type { BillingStore } from "../store";
 import {
@@ -131,7 +137,6 @@ interface VerifiedIosCurrent {
   renewal: JWSRenewalInfoDecodedPayload;
 }
 
-const FULL_REFUND_PERCENTAGE_MILLIUNITS = 100_000;
 const DURABLE_IOS_FINANCIAL_EVENT_ID = /^ios:(purchase|renewal|refund):.+$/;
 
 function requireText(value: unknown, causeCode: string): string {
@@ -356,6 +361,7 @@ export async function assertVerifiedIosTransactionPointer(
     });
   }
   assertIosBillingPlanSupported(tx);
+  assertIosStoreOfferUnsupported(tx);
   return tx;
 }
 
@@ -496,14 +502,24 @@ export async function selectCurrentIosSubscription(opts: {
       }
       const transaction = await opts.verifier.verifyAndDecodeTransaction(item.signedTransactionInfo);
       const renewal = await opts.verifier.verifyAndDecodeRenewalInfo(item.signedRenewalInfo);
-      if (transaction.originalTransactionId !== opts.originalTransactionId) continue;
+      if (transaction.originalTransactionId !== opts.originalTransactionId) {
+        throw new BillingError({
+          clientCode: "verification_failed",
+          causeCode: "ios_status_transaction_chain_mismatch",
+        });
+      }
       if (transaction.bundleId !== CANONICAL_IOS_BUNDLE_ID) {
         throw new BillingError({
           clientCode: "verification_failed",
           causeCode: "apple_app_identifier_mismatch",
         });
       }
-      if (transaction.type !== Type.AUTO_RENEWABLE_SUBSCRIPTION) continue;
+      if (transaction.type !== Type.AUTO_RENEWABLE_SUBSCRIPTION) {
+        throw new BillingError({
+          clientCode: "verification_failed",
+          causeCode: "ios_status_product_type_mismatch",
+        });
+      }
       if (transaction.inAppOwnershipType !== InAppOwnershipType.PURCHASED) {
         throw new BillingError({
           clientCode: "verification_failed",
@@ -533,6 +549,7 @@ export async function selectCurrentIosSubscription(opts: {
         expectedUid: opts.expectedUid,
       });
       assertIosBillingPlanSupported(transaction, renewal);
+      assertIosStoreOfferUnsupported(transaction, renewal);
       if (item.status == null) {
         throw new BillingError({
           clientCode: "verification_failed",
@@ -644,11 +661,12 @@ async function enqueueStatusReconciliation(
   deps: IosBillingDeps,
   originalTransactionId: string,
   financialEventId: string,
-  reason: string
+  reason: string,
+  incident: IosStatusReconciliationIncident
 ): Promise<void> {
   const durableId = assertDurableIosFinancialEventId(financialEventId);
   await ensureReconciliationWorkItem(deps.store, {
-    id: iosStatusReconciliationQueueId(originalTransactionId, durableId),
+    id: iosStatusReconciliationQueueId(originalTransactionId, durableId, incident),
     reason,
     platform: "ios",
     financialEventId: durableId,
@@ -660,9 +678,10 @@ async function enqueueStatusReconciliation(
 async function readIosStatusReconciliationQueue(
   store: BillingStore,
   originalTransactionId: string,
-  financialEventId: string
+  financialEventId: string,
+  incident: IosStatusReconciliationIncident
 ): Promise<BillingReconciliationQueueDoc | null> {
-  const id = iosStatusReconciliationQueueId(originalTransactionId, financialEventId);
+  const id = iosStatusReconciliationQueueId(originalTransactionId, financialEventId, incident);
   return store.runTransaction(async (tx) => {
     const snap = await tx.get(billingReconciliationQueuePath(sanitizeDocId(id)));
     if (!snap.exists) return null;
@@ -692,11 +711,17 @@ async function resolveIosStatusReconciliationIfPresent(
   originalTransactionId: string,
   financialEventId: string | null | undefined,
   expectedUid: string,
-  nowMs: number
+  nowMs: number,
+  incident: IosStatusReconciliationIncident
 ): Promise<void> {
   if (financialEventId == null || financialEventId === "") return;
   const durableId = assertDurableIosFinancialEventId(financialEventId);
-  const queue = await readIosStatusReconciliationQueue(store, originalTransactionId, durableId);
+  const queue = await readIosStatusReconciliationQueue(
+    store,
+    originalTransactionId,
+    durableId,
+    incident
+  );
   if (!queue) return;
   if (queue.platform !== "ios" || queue.financialEventId !== durableId) {
     throw new BillingError({
@@ -718,7 +743,7 @@ async function resolveIosStatusReconciliationIfPresent(
     });
   }
   await resolveReconciliationWorkItem(store, {
-    id: iosStatusReconciliationQueueId(originalTransactionId, durableId),
+    id: iosStatusReconciliationQueueId(originalTransactionId, durableId, incident),
     platform: "ios",
     financialEventId: durableId,
     nowMs,
@@ -960,7 +985,8 @@ export async function processIosSignedTransaction(
         originalTransactionId,
         existing?.financialEventId ?? null,
         ownerUid,
-        deps.nowMs()
+        deps.nowMs(),
+        IOS_CALLABLE_RECONCILIATION_INCIDENT
       );
     }
     return result;
@@ -979,7 +1005,8 @@ export async function processIosSignedTransaction(
           deps,
           originalTransactionId,
           existing.financialEventId,
-          "ios_live_status_unavailable"
+          "ios_live_status_unavailable",
+          IOS_CALLABLE_RECONCILIATION_INCIDENT
         );
       }
     }
@@ -1124,7 +1151,8 @@ async function persistUnsupportedIosRefundReview(opts: {
   reason:
     | "unsupported_ios_prorated_refund"
     | "ios_full_refund_original_sale_missing"
-    | "unsupported_ios_revocation_type";
+    | "unsupported_ios_revocation_type"
+    | "invalid_ios_revocation_percentage";
   transaction: JWSTransactionDecodedPayload;
   resolvedUid: string;
   financialEventId?: string | null;
@@ -1196,12 +1224,26 @@ export async function recordIosRefundAdjustment(
     input.transaction,
     input.expectedUid
   );
-  const prorated =
-    input.transaction.revocationType === RevocationType.REFUND_PRORATED ||
-    (input.transaction.revocationType === RevocationType.REFUND_FULL &&
-      input.transaction.revocationPercentage != null &&
-      input.transaction.revocationPercentage !== FULL_REFUND_PERCENTAGE_MILLIUNITS);
-  if (prorated) {
+  const percentageDisposition = iosMonetaryRefundPercentageDisposition(input.transaction);
+  if (percentageDisposition === "invalid") {
+    const review = await persistUnsupportedIosRefundReview({
+      deps,
+      reviewId: iosInvalidRevocationPercentageReviewId(transactionId),
+      reason: "invalid_ios_revocation_percentage",
+      transaction: input.transaction,
+      resolvedUid,
+    });
+    return {
+      written: false,
+      financial: null,
+      uid: resolvedUid,
+      reviewRequired: true,
+      reviewReason: "invalid_ios_revocation_percentage",
+      reviewId: review.reviewId,
+      queueFinancialEventId: review.queueFinancialEventId,
+    };
+  }
+  if (percentageDisposition === "prorated") {
     const review = await persistUnsupportedIosRefundReview({
       deps,
       reviewId: iosProratedRefundReviewId(transactionId),
@@ -1219,7 +1261,7 @@ export async function recordIosRefundAdjustment(
       queueFinancialEventId: review.queueFinancialEventId,
     };
   }
-  if (input.transaction.revocationType !== RevocationType.REFUND_FULL) {
+  if (percentageDisposition !== "full") {
     const review = await persistUnsupportedIosRefundReview({
       deps,
       reviewId: iosUnsupportedRevocationReviewId(transactionId),
@@ -1347,9 +1389,13 @@ async function reconcileAssnCurrentStatus(opts: {
   fallbackTransaction?: JWSTransactionDecodedPayload;
   reviewId: string | null;
   action: string;
-  notificationUUID: string | null;
+  notificationUUID: string;
   financialEventWritten: boolean;
 }): Promise<IosBillingResult & { action: string; notificationUUID: string | null }> {
+  const incident: IosStatusReconciliationIncident = {
+    kind: "assn",
+    notificationUUID: opts.notificationUUID,
+  };
   try {
     const result = await reconcileIosOriginalTransaction(opts.deps, {
       originalTransactionId: opts.originalTransactionId,
@@ -1384,7 +1430,8 @@ async function reconcileAssnCurrentStatus(opts: {
       opts.originalTransactionId,
       resolveId,
       opts.expectedUid,
-      opts.deps.nowMs()
+      opts.deps.nowMs(),
+      incident
     );
     if (opts.reviewId) {
       await markAppStoreFinancialReviewEntitlementReconciled(opts.deps.store, {
@@ -1421,7 +1468,8 @@ async function reconcileAssnCurrentStatus(opts: {
           opts.deps,
           opts.originalTransactionId,
           durableId,
-          "ios_live_status_unavailable"
+          "ios_live_status_unavailable",
+          incident
         );
       }
     }
@@ -1435,6 +1483,9 @@ function reviewActionForReason(reason: string | null): string {
     return "full_refund_missing_sale_review_reconciled";
   }
   if (reason === "unsupported_ios_revocation_type") return "unsupported_revocation_review_reconciled";
+  if (reason === "invalid_ios_revocation_percentage") {
+    return "invalid_revocation_percentage_review_reconciled";
+  }
   return "reconciled";
 }
 
@@ -1458,6 +1509,38 @@ async function enrichMissingSaleReviewWithRefund(
     diagnosticUid: existing.diagnosticUid,
     nowMs: deps.nowMs(),
   });
+}
+
+function requireAssnNotificationUuid(notification: ResponseBodyV2DecodedPayload): string {
+  const uuid = notification.notificationUUID;
+  if (typeof uuid !== "string" || uuid.length === 0) {
+    throw new BillingError({
+      clientCode: "verification_failed",
+      causeCode: "missing_ios_notification_uuid",
+    });
+  }
+  return uuid;
+}
+
+function ignoredAssnResult(
+  action: string,
+  notificationUUID: string | null
+): IosBillingResult & { action: string; notificationUUID: string | null } {
+  return {
+    alreadyProcessed: true,
+    financialEventWritten: false,
+    historyWritten: false,
+    skipped: action,
+    uid: "",
+    diagnosticUid: "",
+    resultSummary: action,
+    to: null,
+    canonicalSku: null,
+    appleStatus: null,
+    reconciliationRequired: false,
+    action,
+    notificationUUID,
+  };
 }
 
 export async function processIosNotification(
@@ -1491,6 +1574,13 @@ export async function processIosNotification(
       notificationUUID,
     };
   }
+
+  const ignoredAction = ignoredIosAssnAction(notification);
+  if (ignoredAction) {
+    return ignoredAssnResult(ignoredAction, notificationUUID);
+  }
+
+  const verifiedNotificationUUID = requireAssnNotificationUuid(notification);
 
   if (notification.notificationType === NotificationTypeV2.REFUND_REVERSED) {
     const nestedTxJws = notification.data?.signedTransactionInfo;
@@ -1536,7 +1626,7 @@ export async function processIosNotification(
       durableQueueFinancialEventId: refundFinancialEventId,
       reviewId,
       action: "refund_reversal_review_reconciled",
-      notificationUUID,
+      notificationUUID: verifiedNotificationUUID,
       financialEventWritten: false,
     });
   }
@@ -1589,7 +1679,7 @@ export async function processIosNotification(
     fallbackTransaction: nestedTx,
     reviewId,
     action: reviewActionForReason(reviewReason),
-    notificationUUID,
+    notificationUUID: verifiedNotificationUUID,
     financialEventWritten: refundWritten,
   });
 

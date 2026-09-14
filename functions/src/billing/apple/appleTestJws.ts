@@ -103,27 +103,44 @@ export function renewalPayload(
   };
 }
 
+export const TEST_NOTIFICATION_UUID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+
 export function notificationPayload(opts: {
   notificationType: NotificationTypeV2 | string;
+  subtype?: string;
   signedTransactionInfo?: string;
   notificationUUID?: string;
   signedDate?: number;
   bundleId?: string;
   environment?: string;
+  summary?: Record<string, unknown>;
+  externalPurchaseToken?: Record<string, unknown>;
+  appData?: Record<string, unknown>;
+  omitData?: boolean;
 }): Record<string, unknown> {
-  return {
+  const payload: Record<string, unknown> = {
     notificationType: opts.notificationType,
-    notificationUUID: opts.notificationUUID ?? "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    notificationUUID: opts.notificationUUID ?? TEST_NOTIFICATION_UUID,
     signedDate: opts.signedDate ?? TEST_NOW_MS,
-    data: {
+  };
+  if (opts.subtype != null) payload.subtype = opts.subtype;
+  const useAlternateRoot = Boolean(
+    opts.summary || opts.externalPurchaseToken || opts.appData || opts.omitData
+  );
+  if (!useAlternateRoot) {
+    payload.data = {
       bundleId: opts.bundleId ?? CANONICAL_IOS_BUNDLE_ID,
       environment: opts.environment ?? Environment.SANDBOX,
       appAppleId: 1234,
       ...(opts.signedTransactionInfo
         ? { signedTransactionInfo: opts.signedTransactionInfo }
         : {}),
-    },
-  };
+    };
+  }
+  if (opts.summary) payload.summary = opts.summary;
+  if (opts.externalPurchaseToken) payload.externalPurchaseToken = opts.externalPurchaseToken;
+  if (opts.appData) payload.appData = opts.appData;
+  return payload;
 }
 
 export function statusResponseFor(
@@ -157,6 +174,7 @@ export function statusResponseForItems(
     status: Status;
     signedTransactionInfo: string;
     signedRenewalInfo: string;
+    originalTransactionId?: string;
   }>
 ): StatusResponse {
   return {
@@ -166,7 +184,7 @@ export function statusResponseForItems(
       {
         subscriptionGroupIdentifier: "vyd-group",
         lastTransactions: items.map((item) => ({
-          originalTransactionId,
+          originalTransactionId: item.originalTransactionId ?? originalTransactionId,
           status: item.status,
           signedTransactionInfo: item.signedTransactionInfo,
           signedRenewalInfo: item.signedRenewalInfo,

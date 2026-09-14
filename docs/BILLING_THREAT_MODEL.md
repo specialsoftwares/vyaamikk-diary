@@ -177,11 +177,25 @@ Baseline architecture facts this model is tied to:
     Subscription Statuses after SignedDataVerifier checks, even when the
     financial correction is held in `_appStoreFinancialReview`.
     Authenticity/ownership/integrity failures still block entirely.
+    Applied App Store offer fields (`offerType`, `offerIdentifier`,
+    `offerDiscountType` on transaction or renewal) fail closed
+    (`unsupported_ios_store_offer`) before mutation; eligibility fields such
+    as `eligibleWinBackOfferIds` are not applied-offer state.
+    Contradictory signed status items that claim the requested
+    `originalTransactionId` fail closed rather than skipping to another
+    candidate. Known out-of-scope ASSN shapes (`RENEWAL_EXTENSION` SUMMARY,
+    `EXTERNAL_PURCHASE_TOKEN`, `RESCIND_CONSENT`) are acknowledged without
+    billing mutation after SignedDataVerifier. Durable ASSN work is incident-
+    scoped by verified `notificationUUID`.
     Apple 2026 `billingPlanType` `MONTHLY` / non-empty `commitmentInfo`
     fail closed (`unsupported_ios_commitment_billing_plan`); commitment
     products are not implemented. iOS live-status queue ids are
-    event-scoped (`originalTransactionId` + durable financial event).
+    event-scoped and incident-scoped (`originalTransactionId` + durable
+    financial event + callable vs ASSN UUID).
     Financial-review `diagnosticUid` is forensic only and is not identity.
+    Transitive `jsrsasign@11.1.5` (via the official Apple library 3.1.0)
+    is a production-enablement dependency watch, not a VYD-33 merge
+    blocker; do not override Apple's cryptography package.
 - **Residual risk:** compromise of Google/Apple signing infrastructure —
   out of scope.
 

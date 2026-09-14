@@ -17,11 +17,34 @@ export function refundReconciliationQueueId(orderId: string): string {
   return `android:refund-reconcile:${orderId.replace(/\//g, "_")}`;
 }
 
+/**
+ * Incident discriminator for iOS status-reconciliation work.
+ * Callable retries share one deterministic item. Each ASSN
+ * `notificationUUID` is a separate immutable incident.
+ */
+export type IosStatusReconciliationIncident =
+  | { readonly kind: "callable" }
+  | { readonly kind: "assn"; readonly notificationUUID: string };
+
+export const IOS_CALLABLE_RECONCILIATION_INCIDENT = {
+  kind: "callable",
+} as const satisfies IosStatusReconciliationIncident;
+
+function sanitizeQueueSegment(value: string): string {
+  return value.replace(/\//g, "_");
+}
+
 export function iosStatusReconciliationQueueId(
   originalTransactionId: string,
-  financialEventId: string
+  financialEventId: string,
+  incident: IosStatusReconciliationIncident
 ): string {
-  return `ios:status-reconcile:${originalTransactionId.replace(/\//g, "_")}:${financialEventId.replace(/\//g, "_")}`;
+  const orig = sanitizeQueueSegment(originalTransactionId);
+  const event = sanitizeQueueSegment(financialEventId);
+  if (incident.kind === "callable") {
+    return `ios:status-reconcile:${orig}:${event}:callable`;
+  }
+  return `ios:status-reconcile:${orig}:${event}:assn:${sanitizeQueueSegment(incident.notificationUUID)}`;
 }
 
 function assertReconciliationQueueIdentity(
