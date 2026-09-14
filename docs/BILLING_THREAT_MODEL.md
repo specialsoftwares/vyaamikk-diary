@@ -171,7 +171,9 @@ Baseline architecture facts this model is tied to:
     production `appAppleId`), never Sign-in-with-Apple JWKS. Online certificate
     checks (`enableOnlineChecks` / OCSP) are **off** in VYD-33 so CI stays
     deterministic; enabling them is an explicit go-live security/availability
-    decision.
+    decision. ASSN `notificationType` (including `REFUND_REVERSED` and
+    prorated refund) is a signal only. Current entitlement still comes from
+    Get All Subscription Statuses after SignedDataVerifier checks.
 - **Residual risk:** compromise of Google/Apple signing infrastructure —
   out of scope.
 

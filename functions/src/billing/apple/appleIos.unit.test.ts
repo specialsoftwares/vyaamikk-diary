@@ -19,6 +19,7 @@ import { handlePrepareIOSBillingAccount } from "../callables/prepareIOSBillingAc
 import { handleValidateAndActivateIOS } from "../callables/validateAndActivateIOS";
 import { diagnosticUidHmac } from "../diagnosticUid";
 import { BillingError } from "../errors";
+import { assnHttpStatusForError } from "../google/billingHttps";
 import {
   appStoreAccountByUidPath,
   appStoreAccountIndexPath,
@@ -204,6 +205,21 @@ function assertNoSyntheticQueueFinancialIds(store: MemoryBillingStore) {
 
 function ledger(store: MemoryBillingStore, id: string): BillingEventLedgerDoc | undefined {
   return store.docs.get(financialLedgerPath(sanitizeDocId(id))) as BillingEventLedgerDoc | undefined;
+}
+
+function reviewDoc(store: MemoryBillingStore, id: string): AppStoreFinancialReviewDoc | undefined {
+  return store.docs.get(appStoreFinancialReviewPath(sanitizeDocId(id))) as
+    | AppStoreFinancialReviewDoc
+    | undefined;
+}
+
+function queueDoc(
+  store: MemoryBillingStore,
+  originalTransactionId = ORIG
+): BillingReconciliationQueueDoc | undefined {
+  return store.docs.get(
+    billingReconciliationQueuePath(`ios:status-reconcile:${originalTransactionId}`)
+  ) as BillingReconciliationQueueDoc | undefined;
 }
 
 function historyCount(store: MemoryBillingStore, uid = UID): number {
@@ -699,7 +715,7 @@ assert.equal(canonicalSkuForIos("com.specialsoftwares.vyaamikkdiary.unknown.mont
 }
 
 {
-  const { store, deps, pair, token } = await primed();
+  const { store, deps, api, pair, token, taxEvents } = await primed();
   await handleValidateAndActivateIOS(deps, { uid: UID, signedTransactionInfo: pair.tx });
   const prorated = signAppleJws(
     transactionPayload({
@@ -714,13 +730,18 @@ assert.equal(canonicalSkuForIos("com.specialsoftwares.vyaamikkdiary.unknown.mont
       signedTransactionInfo: prorated,
     })
   );
-  await assert.rejects(processIosNotification(deps, notif), isCause("unsupported_ios_prorated_refund"));
+  const callsBefore = api.calls;
+  const result = await processIosNotification(deps, notif);
+  assert.equal(result.action, "prorated_refund_review_reconciled");
+  assert.ok(api.calls > callsBefore);
   assert.equal(ledger(store, "ios:refund:2001"), undefined);
-  const review = store.docs.get(
-    appStoreFinancialReviewPath(sanitizeDocId(iosProratedRefundReviewId(ORIG)))
-  ) as AppStoreFinancialReviewDoc | undefined;
+  assert.equal(taxEvents.includes("refund"), false);
+  const review = reviewDoc(store, iosProratedRefundReviewId(ORIG));
   assert.equal(review?.reason, "unsupported_ios_prorated_refund");
   assert.equal(review?.financialEventId, "ios:purchase:2001");
+  assert.equal(review?.status, "pending");
+  assert.ok(review?.entitlementReconciledAt);
+  assert.equal(result.to?.entitlementActive, true);
   const queueHits = [...store.docs.keys()].filter((k) => k.includes("_billingReconciliationQueue/"));
   assert.equal(queueHits.length, 0);
 }
@@ -747,7 +768,7 @@ assert.equal(canonicalSkuForIos("com.specialsoftwares.vyaamikkdiary.unknown.mont
 }
 
 {
-  const { store, deps, pair, token } = await primed();
+  const { store, deps, api, pair, token } = await primed();
   await handleValidateAndActivateIOS(deps, { uid: UID, signedTransactionInfo: pair.tx });
   const nested = signAppleJws(transactionPayload({ appAccountToken: token }));
   const notif = signAppleJws(
@@ -756,16 +777,19 @@ assert.equal(canonicalSkuForIos("com.specialsoftwares.vyaamikkdiary.unknown.mont
       signedTransactionInfo: nested,
     })
   );
+  const callsBefore = api.calls;
   const result = await processIosNotification(deps, notif);
-  assert.equal(result.action, "refund_reversal_review");
+  assert.equal(result.action, "refund_reversal_review_reconciled");
+  assert.ok(api.calls > callsBefore);
+  assert.equal(result.to?.billingStatus, "active");
   assert.ok(ledger(store, "ios:purchase:2001"));
   assert.equal(ledger(store, "ios:refund:2001"), undefined);
-  const review = store.docs.get(
-    appStoreFinancialReviewPath(sanitizeDocId(iosRefundReversedReviewId(ORIG)))
-  ) as AppStoreFinancialReviewDoc | undefined;
+  const review = reviewDoc(store, iosRefundReversedReviewId(ORIG));
   assert.equal(review?.reason, "unsupported_ios_refund_reversal");
   assert.equal(review?.transactionId, ORIG);
   assert.equal(review?.financialEventId, null);
+  assert.equal(review?.status, "pending");
+  assert.ok(review?.entitlementReconciledAt);
   const queueHits = [...store.docs.keys()].filter((k) => k.includes("_billingReconciliationQueue/"));
   assert.equal(queueHits.length, 0);
 }
@@ -898,9 +922,19 @@ assert.equal(canonicalSkuForIos("com.specialsoftwares.vyaamikkdiary.unknown.mont
     handleValidateAndActivateIOS(deps, { uid: UID, signedTransactionInfo: pair.tx }),
     isCause("apple_api_temporary_unavailable")
   );
-  const qid = billingReconciliationQueuePath(`ios:status-reconcile:${ORIG}`);
-  const queued = store.docs.get(qid) as BillingReconciliationQueueDoc | undefined;
+  const queued = queueDoc(store);
   assert.equal(queued?.financialEventId, "ios:renewal:3001");
+  assert.equal(queued?.status, "pending");
+  assert.equal(ledger(store, "ios:purchase:3001"), undefined);
+  (deps.api as FakeAppleApi).fail = null;
+  await handleValidateAndActivateIOS(
+    { ...deps, nowMs: () => TEST_NOW_MS + 50 },
+    { uid: UID, signedTransactionInfo: pair.tx }
+  );
+  const resolved = queueDoc(store);
+  assert.equal(resolved?.status, "resolved");
+  assert.equal(resolved?.financialEventId, "ios:renewal:3001");
+  assert.equal(ledger(store, "ios:renewal:3001")?.eventType, "renewal");
   assert.equal(ledger(store, "ios:purchase:3001"), undefined);
   assertNoSyntheticQueueFinancialIds(store);
 }
@@ -960,8 +994,7 @@ assert.equal(canonicalSkuForIos("com.specialsoftwares.vyaamikkdiary.unknown.mont
   );
   assert.ok(ledger(store, "ios:refund:3001"));
   assert.equal(ledger(store, "ios:purchase:3001"), undefined);
-  const qid = billingReconciliationQueuePath(`ios:status-reconcile:${ORIG}`);
-  const queued = store.docs.get(qid) as BillingReconciliationQueueDoc | undefined;
+  const queued = queueDoc(store);
   assert.equal(queued?.financialEventId, "ios:refund:3001");
   await assert.rejects(
     processIosNotification({ ...deps, nowMs: () => TEST_NOW_MS + 6000 }, notif),
@@ -969,6 +1002,29 @@ assert.equal(canonicalSkuForIos("com.specialsoftwares.vyaamikkdiary.unknown.mont
   );
   const again = [...store.docs.keys()].filter((k) => k.includes("_billingReconciliationQueue/"));
   assert.equal(again.length, 1);
+  assertNoSyntheticQueueFinancialIds(store);
+
+  (deps.api as FakeAppleApi).fail = null;
+  const expired = currentPair({
+    token,
+    status: Status.EXPIRED,
+    reason: TransactionReason.RENEWAL,
+    transactionId: "3001",
+    purchaseDate: TEST_NOW_MS,
+    signedDate: TEST_NOW_MS + 7000,
+  });
+  (deps.api as FakeAppleApi).statuses = expired.statuses;
+  const recovered = await processIosNotification({ ...deps, nowMs: () => TEST_NOW_MS + 7000 }, notif);
+  assert.equal(recovered.to?.billingStatus, "expired");
+  const resolved = queueDoc(store);
+  assert.equal(resolved?.status, "resolved");
+  assert.equal(resolved?.financialEventId, "ios:refund:3001");
+  assert.equal(ledger(store, "ios:refund:3001")?.relatedFinancialEventId, "ios:renewal:3001");
+  assert.equal(ledger(store, "ios:purchase:3001"), undefined);
+  assert.equal(
+    [...store.docs.keys()].filter((k) => k.includes("_billingReconciliationQueue/")).length,
+    1
+  );
   assertNoSyntheticQueueFinancialIds(store);
 }
 
@@ -1051,10 +1107,15 @@ assert.equal(canonicalSkuForIos("com.specialsoftwares.vyaamikkdiary.unknown.mont
     })
   );
   await processIosNotification(deps, reversed);
-  const review = store.docs.get(
-    appStoreFinancialReviewPath(sanitizeDocId(iosRefundReversedReviewId(ORIG)))
-  ) as AppStoreFinancialReviewDoc | undefined;
+  const review = reviewDoc(store, iosRefundReversedReviewId(ORIG));
   assert.equal(review?.financialEventId, "ios:refund:2001");
+  assert.equal(review?.uid, UID);
+  assert.equal(review?.canonicalSku, "vyd_professional_monthly");
+  assert.equal(review?.platform, "ios");
+  assert.equal(ledger(store, "ios:refund:2001")?.relatedFinancialEventId, "ios:purchase:2001");
+  assert.equal(ledger(store, "ios:refund:2001")?.uid, UID);
+  assert.equal(review?.status, "pending");
+  assert.ok(review?.entitlementReconciledAt);
   assertNoSyntheticQueueFinancialIds(store);
 }
 
@@ -1172,6 +1233,282 @@ assert.equal(canonicalSkuForIos("com.specialsoftwares.vyaamikkdiary.unknown.mont
     handleValidateAndActivateIOS(deps, { uid: UID, signedTransactionInfo: pair.tx }),
     isCause("ios_renewal_transaction_mismatch")
   );
+}
+
+{
+  const { store, deps, pair } = await primed();
+  await handleValidateAndActivateIOS(deps, { uid: UID, signedTransactionInfo: pair.tx });
+  await seedAccount(store, OTHER);
+  const evilId = "ios:refund:evil";
+  store.docs.set(financialLedgerPath(sanitizeDocId(evilId)), {
+    ...(ledger(store, "ios:purchase:2001") as BillingEventLedgerDoc),
+    financialEventId: evilId,
+    eventType: "refund",
+    uid: OTHER,
+    relatedFinancialEventId: "ios:purchase:2001",
+  } as BillingEventLedgerDoc);
+  store.docs.set(billingReconciliationQueuePath(`ios:status-reconcile:${ORIG}`), {
+    reason: "ios_live_status_unavailable",
+    platform: "ios",
+    financialEventId: evilId,
+    credentialFingerprint: null,
+    createdAt: TEST_NOW_MS,
+    updatedAt: TEST_NOW_MS,
+    resolvedAt: null,
+    status: "pending",
+    attemptCount: 0,
+  } as BillingReconciliationQueueDoc);
+  await assert.rejects(
+    handleValidateAndActivateIOS(
+      { ...deps, nowMs: () => TEST_NOW_MS + 50 },
+      { uid: UID, signedTransactionInfo: pair.tx }
+    ),
+    isCause("ios_reconciliation_queue_owner_mismatch")
+  );
+  assert.equal(queueDoc(store)?.status, "pending");
+  assert.equal(queueDoc(store)?.financialEventId, evilId);
+}
+
+{
+  const { store, deps, api, pair, token } = await primed({ status: Status.EXPIRED });
+  await handleValidateAndActivateIOS(deps, { uid: UID, signedTransactionInfo: pair.tx });
+  assert.equal(store.docs.get(subscriptionStatusPath(UID))?.billingStatus, "expired");
+  assert.equal(store.docs.get(subscriptionStatusPath(UID))?.entitlementActive, false);
+  const active = currentPair({ token, signedDate: TEST_NOW_MS + 1000 });
+  api.statuses = active.statuses;
+  const reversed = signAppleJws(
+    notificationPayload({
+      notificationType: NotificationTypeV2.REFUND_REVERSED,
+      signedTransactionInfo: pair.tx,
+    })
+  );
+  const result = await processIosNotification(
+    { ...deps, nowMs: () => TEST_NOW_MS + 1000 },
+    reversed
+  );
+  assert.equal(result.action, "refund_reversal_review_reconciled");
+  assert.equal(result.to?.billingStatus, "active");
+  assert.equal(result.to?.entitlementActive, true);
+  const review = reviewDoc(store, iosRefundReversedReviewId(ORIG));
+  assert.equal(review?.status, "pending");
+  assert.ok(review?.entitlementReconciledAt);
+  assert.equal(ledger(store, "ios:refund:2001"), undefined);
+}
+
+{
+  const { store, deps, api, pair, token } = await primed();
+  await handleValidateAndActivateIOS(deps, { uid: UID, signedTransactionInfo: pair.tx });
+  api.fail = new BillingError({
+    clientCode: "temporary_unavailable",
+    causeCode: "apple_api_temporary_unavailable",
+    retryable: true,
+  });
+  const nested = signAppleJws(transactionPayload({ appAccountToken: token }));
+  const notif = signAppleJws(
+    notificationPayload({
+      notificationType: NotificationTypeV2.REFUND_REVERSED,
+      signedTransactionInfo: nested,
+    })
+  );
+  await assert.rejects(
+    handleAppStoreServerNotificationsV2Http({
+      body: { signedPayload: notif },
+      deps: { ...deps, nowMs: () => TEST_NOW_MS + 1 },
+      appStoreBillingEnabled: true,
+    }),
+    (e: unknown) =>
+      isCause("apple_api_temporary_unavailable")(e) && assnHttpStatusForError(e) === 503
+  );
+  const review = reviewDoc(store, iosRefundReversedReviewId(ORIG));
+  assert.equal(review?.reason, "unsupported_ios_refund_reversal");
+  assert.equal(review?.entitlementReconciledAt, null);
+  assert.equal(review?.financialEventId, null);
+  assert.equal(queueDoc(store), undefined);
+  assertNoSecrets(store);
+}
+
+{
+  const { store, deps, pair, token } = await primed();
+  await handleValidateAndActivateIOS(deps, { uid: UID, signedTransactionInfo: pair.tx });
+  await seedAccount(store, OTHER);
+  store.docs.set(financialLedgerPath(sanitizeDocId("ios:refund:2001")), {
+    ...(ledger(store, "ios:purchase:2001") as BillingEventLedgerDoc),
+    financialEventId: "ios:refund:2001",
+    eventType: "refund",
+    uid: OTHER,
+    relatedFinancialEventId: "ios:purchase:2001",
+  } as BillingEventLedgerDoc);
+  const aliceBefore = store.docs.get(subscriptionStatusPath(UID));
+  const nested = signAppleJws(transactionPayload({ appAccountToken: token }));
+  await assert.rejects(
+    processIosNotification(
+      deps,
+      signAppleJws(
+        notificationPayload({
+          notificationType: NotificationTypeV2.REFUND_REVERSED,
+          signedTransactionInfo: nested,
+        })
+      )
+    ),
+    isCause("ios_refund_ledger_integrity_mismatch")
+  );
+  assert.equal(reviewDoc(store, iosRefundReversedReviewId(ORIG)), undefined);
+  assert.equal(store.docs.get(subscriptionStatusPath(UID)), aliceBefore);
+  assert.equal(store.docs.get(subscriptionStatusPath(OTHER)), undefined);
+}
+
+{
+  const { store, deps, pair, token } = await primed();
+  await handleValidateAndActivateIOS(deps, { uid: UID, signedTransactionInfo: pair.tx });
+  const nested = signAppleJws(transactionPayload({ appAccountToken: token }));
+  const notif = signAppleJws(
+    notificationPayload({
+      notificationType: NotificationTypeV2.REFUND_REVERSED,
+      signedTransactionInfo: nested,
+    })
+  );
+  await processIosNotification(deps, notif);
+  const dup = await processIosNotification({ ...deps, nowMs: () => TEST_NOW_MS + 9 }, notif);
+  assert.equal(dup.action, "refund_reversal_review_reconciled");
+  const reviews = [...store.docs.keys()].filter((k) => k.includes("_appStoreFinancialReview/"));
+  assert.equal(reviews.length, 1);
+  assert.equal(reviewDoc(store, iosRefundReversedReviewId(ORIG))?.uid, UID);
+}
+
+{
+  const { store, deps, pair, token } = await primed();
+  await handleValidateAndActivateIOS(deps, { uid: UID, signedTransactionInfo: pair.tx });
+  const nested = signAppleJws(transactionPayload({ appAccountToken: token }));
+  await processIosNotification(
+    deps,
+    signAppleJws(
+      notificationPayload({
+        notificationType: NotificationTypeV2.REFUND_REVERSED,
+        signedTransactionInfo: nested,
+      })
+    )
+  );
+  const { appAccountToken: bob } = await seedAccount(store, OTHER);
+  const bobNested = signAppleJws(transactionPayload({ appAccountToken: bob }));
+  await assert.rejects(
+    processIosNotification(
+      deps,
+      signAppleJws(
+        notificationPayload({
+          notificationType: NotificationTypeV2.REFUND_REVERSED,
+          signedTransactionInfo: bobNested,
+        })
+      )
+    ),
+    isCause("ios_financial_review_identity_mismatch")
+  );
+  assert.equal(reviewDoc(store, iosRefundReversedReviewId(ORIG))?.uid, UID);
+}
+
+{
+  const { store, deps, pair, token } = await primed();
+  await handleValidateAndActivateIOS(deps, { uid: UID, signedTransactionInfo: pair.tx });
+  const nested = signAppleJws(transactionPayload({ appAccountToken: token }));
+  await processIosNotification(
+    deps,
+    signAppleJws(
+      notificationPayload({
+        notificationType: NotificationTypeV2.REFUND_REVERSED,
+        signedTransactionInfo: nested,
+      })
+    )
+  );
+  const otherSku = signAppleJws(
+    transactionPayload({
+      appAccountToken: token,
+      productId: "com.specialsoftwares.vyaamikkdiary.starter.monthly",
+    })
+  );
+  await assert.rejects(
+    processIosNotification(
+      deps,
+      signAppleJws(
+        notificationPayload({
+          notificationType: NotificationTypeV2.REFUND_REVERSED,
+          signedTransactionInfo: otherSku,
+        })
+      )
+    ),
+    isCause("ios_financial_review_identity_mismatch")
+  );
+  assert.equal(
+    reviewDoc(store, iosRefundReversedReviewId(ORIG))?.canonicalSku,
+    "vyd_professional_monthly"
+  );
+}
+
+{
+  const { store, deps, api, pair, token } = await primed({ status: Status.EXPIRED });
+  await handleValidateAndActivateIOS(deps, { uid: UID, signedTransactionInfo: pair.tx });
+  assert.equal(store.docs.get(subscriptionStatusPath(UID))?.entitlementActive, false);
+  const active = currentPair({ token, signedDate: TEST_NOW_MS + 2000 });
+  api.statuses = active.statuses;
+  const prorated = signAppleJws(
+    transactionPayload({
+      appAccountToken: token,
+      revocationType: RevocationType.REFUND_PRORATED,
+      revocationDate: TEST_NOW_MS + 1,
+    })
+  );
+  const result = await processIosNotification(
+    { ...deps, nowMs: () => TEST_NOW_MS + 2000 },
+    signAppleJws(
+      notificationPayload({
+        notificationType: NotificationTypeV2.REFUND,
+        signedTransactionInfo: prorated,
+      })
+    )
+  );
+  assert.equal(result.action, "prorated_refund_review_reconciled");
+  assert.equal(result.to?.billingStatus, "active");
+  assert.equal(result.to?.entitlementActive, true);
+  assert.equal(ledger(store, "ios:refund:2001"), undefined);
+  assert.equal(reviewDoc(store, iosProratedRefundReviewId(ORIG))?.status, "pending");
+}
+
+{
+  const { store, deps, api, pair, token, taxEvents } = await primed();
+  await handleValidateAndActivateIOS(deps, { uid: UID, signedTransactionInfo: pair.tx });
+  api.fail = new BillingError({
+    clientCode: "temporary_unavailable",
+    causeCode: "apple_api_temporary_unavailable",
+    retryable: true,
+  });
+  const prorated = signAppleJws(
+    transactionPayload({
+      appAccountToken: token,
+      revocationType: RevocationType.REFUND_PRORATED,
+      revocationDate: TEST_NOW_MS + 1,
+    })
+  );
+  const err = await processIosNotification(
+    deps,
+    signAppleJws(
+      notificationPayload({
+        notificationType: NotificationTypeV2.REFUND,
+        signedTransactionInfo: prorated,
+      })
+    )
+  ).then(
+    () => null,
+    (e: unknown) => e
+  );
+  assert.ok(isCause("apple_api_temporary_unavailable")(err));
+  assert.equal(assnHttpStatusForError(err), 503);
+  const review = reviewDoc(store, iosProratedRefundReviewId(ORIG));
+  assert.equal(review?.reason, "unsupported_ios_prorated_refund");
+  assert.equal(review?.entitlementReconciledAt, null);
+  assert.equal(ledger(store, "ios:refund:2001"), undefined);
+  assert.equal(taxEvents.includes("refund"), false);
+  const queued = queueDoc(store);
+  assert.equal(queued?.financialEventId, "ios:purchase:2001");
+  assertNoSyntheticQueueFinancialIds(store);
+  assertNoSecrets(store);
 }
 
 assert.equal(CANONICAL_IOS_BUNDLE_ID, "com.specialsoftwares.vyaamikkdiary");

@@ -70,21 +70,27 @@ Notes:
   live entitlement cannot be authoritatively reconciled (expired token,
   historical replaced token whose current credential cannot be decrypted,
   owner mismatch). Document ids are source-independent
-  (`android:refund-reconcile:{orderId}`). Documents store `reason`,
+  (`android:refund-reconcile:{orderId}`,
+  `ios:status-reconcile:{originalTransactionId}`). Documents store `reason`,
   `platform`, `financialEventId`, optional `credentialFingerprint`,
   timestamps, `status: "pending" | "resolved"`, `resolvedAt`, and
   `attemptCount`. They never store raw purchase tokens, plaintext
-  credentials, or uid. Duplicate RTDN deliveries preserve a single work
-  item. `financialEventId` must resolve a real `_billingEventLedger` row.
+  credentials, or uid. Duplicate deliveries preserve a single work item.
+  `financialEventId` must resolve a real `_billingEventLedger` row. A later
+  successful live reconcile marks the same document `resolved` without
+  deleting forensic history, using the queue's own persisted
+  `financialEventId` (never a guessed current-sale id). VYD-32/VYD-33 write
+  the queue; a later phase may consume it. Clients have zero access.
 - `_appStoreFinancialReview/{stableId}` is a server-only Apple review record
   for unsupported financial corrections (`REFUND_REVERSED`, prorated refund).
   It stores `reason`, `platform: ios`, `transactionId`,
   `originalTransactionId`, optional `canonicalSku`, optional real
-  `financialEventId` (never invented), `uid`, `diagnosticUid`, timestamps,
-  and `status: pending`. No raw JWS. Clients have zero access.
-  item. A later successful live reconcile marks the same document
-  `resolved` without deleting forensic history. VYD-32 writes the queue; a
-  later phase may consume it. Clients have zero access.
+  `financialEventId` (never invented; bound only after verifying the ledger
+  row's platform, eventType, uid, SKU, and related original sale), `uid`,
+  `diagnosticUid`, timestamps, `status: pending`, and optional
+  `entitlementReconciledAt` (set once after Get All Subscription Statuses
+  succeeds). Financial correction stays pending; current entitlement is
+  still applied from live Apple status. No raw JWS. Clients have zero access.
 
 - `globalStats/paperSaved` figures are labelled estimates with a methodology
   string (owner decision W-9); other `globalStats/*` docs are default-denied.
@@ -424,12 +430,17 @@ appears in a later phase; it will be added with the query that requires it.
   creation, ASSN URL configuration, or Functions/Rules deploy ships in VYD-33.
 - Apple `REFUND_REVERSED` (and other unsupported financial corrections) cannot
   be represented in the current immutable ledger (`purchase|renewal|refund|
-  chargeback` only). They fail closed into server-only
-  `_appStoreFinancialReview` (`unsupported_ios_refund_reversal`) and must be
-  reviewed before go-live. That collection never invents a
-  `_billingReconciliationQueue.financialEventId`.
-- Prorated refunds (`REFUND_PRORATED`) are unsupported: no refund ledger row,
-  durable `_appStoreFinancialReview`, no tax/CN handoff.
+  chargeback` only). They persist a server-only `_appStoreFinancialReview`
+  (`unsupported_ios_refund_reversal`) and must be reviewed before go-live.
+  That collection never invents a `_billingReconciliationQueue.financialEventId`.
+  ASSN remains a signal only: after the review record is written, current
+  entitlement is still fetched from Get All Subscription Statuses. A retryable
+  live-status failure returns HTTP 503 so Apple redelivers; a real refund
+  ledger row may be queued, but no synthetic financial id is invented.
+- Prorated refunds (`REFUND_PRORATED`) are unsupported accounting: no refund
+  ledger row, durable `_appStoreFinancialReview`, no tax/CN handoff.
+  Unsupported financial treatment does not skip live entitlement
+  reconciliation.
 - Scheduled iOS product changes (`autoRenewProductId` ≠ current `productId`)
   fail closed as `unsupported_ios_scheduled_plan_change`. Phase B does not
   map `scheduledPlan`.

@@ -268,7 +268,11 @@ export interface AppStoreAccountIndexDoc {
  * Path: `_appStoreFinancialReview/{stableId}` — zero client access.
  * Used for unsupported Apple financial corrections that must not invent a
  * `_billingReconciliationQueue.financialEventId`. No raw JWS.
- * `financialEventId` is set only when a real ledger row exists.
+ * `financialEventId` is set only when a real ledger row exists and has been
+ * integrity-checked (platform, eventType, uid, SKU, related original sale).
+ * Financial-review `status` stays `pending`; current entitlement is still
+ * applied from Get All Subscription Statuses. `entitlementReconciledAt` is
+ * an optional immutable marker set once after that live reconcile.
  */
 export type AppStoreFinancialReviewStatus = "pending";
 
@@ -284,6 +288,7 @@ export interface AppStoreFinancialReviewDoc {
   createdAt: number;
   updatedAt: number;
   status: AppStoreFinancialReviewStatus;
+  entitlementReconciledAt: number | null;
 }
 
 /**
