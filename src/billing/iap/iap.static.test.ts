@@ -62,6 +62,9 @@ const iapSrc = iapFiles.map((f) => ({
   assert.match(pendingCode, /authStillOwnsAttempt/);
   assert.match(pendingCode, /clearPendingPurchaseIfEnvelope/);
   assert.match(pendingCode, /samePurchaseIntent/);
+  assert.match(pendingCode, /admitIntent/);
+  assert.match(pendingCode, /accepted:/);
+  assert.match(pendingCode, /shouldAcceptIntent/);
   assert.doesNotMatch(pendingCode, /canonicalSku\)\.startsWith\("vyd_"\)/);
 }
 
@@ -79,6 +82,8 @@ const iapSrc = iapFiles.map((f) => ({
   assert.match(processor, /finishedIosTokens/);
   assert.match(processor, /stillCurrent/);
   assert.match(processor, /operationAttempt/);
+  assert.match(processor, /operationRevision/);
+  assert.match(processor, /currentRevision/);
   assert.match(processor, /clearPendingPurchaseIfEnvelope/);
   assert.doesNotMatch(processor, /acknowledgePurchaseAndroid/);
 }
@@ -124,6 +129,8 @@ const iapSrc = iapFiles.map((f) => ({
   assert.match(session, /launchNativeSheet/);
   assert.match(session, /flowKind/);
   assert.match(session, /flowAttempt/);
+  assert.match(session, /operationRevision/);
+  assert.match(session, /revisionAtStart/);
   const restoreFn = session.slice(session.indexOf("async function restorePurchases"));
   const restoreLockIdx = restoreFn.indexOf("beginPurchaseLock");
   const restoreEnsureIdx = restoreFn.indexOf("await ensureConnected");

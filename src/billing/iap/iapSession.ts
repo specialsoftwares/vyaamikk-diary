@@ -83,6 +83,7 @@ export function createIapSession(deps: IapSessionDeps) {
   let flowKind: "purchase" | "restore" | null = null;
   let flowAttempt: number | null = null;
   let nextFlowAttempt = 0;
+  let operationRevision = 0;
   let catalog: CanonicalSkuAvailability[] = [];
   let pending: PendingPurchaseEnvelope | null = null;
   let lastResult: PurchaseFlowResult | null = null;
@@ -99,7 +100,12 @@ export function createIapSession(deps: IapSessionDeps) {
     return generation === forGen && uid === forUid;
   }
 
-  function mutationAuthFor(forUid: string, forGen: number, attempt?: number | null) {
+  function mutationAuthFor(
+    forUid: string,
+    forGen: number,
+    attempt?: number | null,
+    revision?: number | null
+  ) {
     return {
       expectedUid: forUid,
       generation: forGen,
@@ -107,6 +113,8 @@ export function createIapSession(deps: IapSessionDeps) {
       currentUid: () => uid,
       expectedAttempt: attempt ?? undefined,
       currentAttempt: () => flowAttempt,
+      expectedRevision: revision ?? operationRevision,
+      currentRevision: () => operationRevision,
     };
   }
 
@@ -144,6 +152,7 @@ export function createIapSession(deps: IapSessionDeps) {
     forUid: string,
     kind: "purchase" | "restore" = "purchase"
   ): number {
+    operationRevision += 1;
     nextFlowAttempt += 1;
     purchaseInFlight = true;
     purchaseOwnerGen = forGen;
@@ -200,7 +209,8 @@ export function createIapSession(deps: IapSessionDeps) {
   function processorDeps(
     forGen: number,
     forUid: string | null,
-    attempt: number | null
+    attempt: number | null,
+    revision: number | null
   ): PurchaseProcessorDeps | null {
     if (!storePlatform) return null;
     return {
@@ -215,6 +225,8 @@ export function createIapSession(deps: IapSessionDeps) {
       operationUid: forUid,
       operationAttempt: attempt,
       currentAttempt: () => flowAttempt,
+      operationRevision: revision,
+      currentRevision: () => operationRevision,
     };
   }
 
@@ -246,13 +258,14 @@ export function createIapSession(deps: IapSessionDeps) {
   async function compensateStaleStorage(
     envelope: PendingPurchaseEnvelope,
     forGen: number,
-    attempt?: number | null
+    attempt?: number | null,
+    revision?: number | null
   ): Promise<void> {
     await clearPendingPurchaseIfEnvelope({
       store: deps.store,
       envelope,
       onlyNonDurable: true,
-      ...mutationAuthFor(envelope.uid, forGen, attempt),
+      ...mutationAuthFor(envelope.uid, forGen, attempt, revision),
     });
   }
 
@@ -260,9 +273,10 @@ export function createIapSession(deps: IapSessionDeps) {
     envelope: PendingPurchaseEnvelope,
     forGen: number,
     forUid: string,
-    attempt?: number
+    attempt?: number,
+    revision?: number | null
   ): Promise<PurchaseFlowResult> {
-    await compensateStaleStorage(envelope, forGen, attempt);
+    await compensateStaleStorage(envelope, forGen, attempt, revision);
     const result = authChurnResult(forUid);
     if (attempt != null) {
       if (!ownsPurchaseAttempt(forGen, forUid, attempt)) return result;
@@ -286,7 +300,8 @@ export function createIapSession(deps: IapSessionDeps) {
     envelope: PendingPurchaseEnvelope | null,
     forUid: string,
     forGen: number,
-    attempt: number
+    attempt: number,
+    revision?: number | null
   ) {
     const target = envelope ?? pending;
     if (!target || target.uid !== forUid) return;
@@ -295,7 +310,7 @@ export function createIapSession(deps: IapSessionDeps) {
       store: deps.store,
       envelope: target,
       onlyNonDurable: true,
-      ...mutationAuthFor(forUid, forGen, attempt),
+      ...mutationAuthFor(forUid, forGen, attempt, revision),
     });
     if (!ownsPurchaseAttempt(forGen, forUid, attempt)) return;
     if (
@@ -317,34 +332,34 @@ export function createIapSession(deps: IapSessionDeps) {
     const forUid = uid;
     const kindAtStart = flowKind;
     const attemptAtStart = flowAttempt;
+    const revisionAtStart = operationRevision;
     const pendingAtStart = pending;
     const tokens = processedTokens;
     const finished = finishedIosTokens;
-    const run = async () => {
-      if (!isCurrentOperation(forGen, forUid)) return;
+    const capturedOperationStillOwns = () => {
+      if (!isCurrentOperation(forGen, forUid)) return false;
+      if (operationRevision !== revisionAtStart) return false;
       if (kindAtStart === "purchase" && attemptAtStart != null && !ownsPurchaseAttempt(forGen, forUid, attemptAtStart)) {
-        return;
+        return false;
       }
       if (kindAtStart === "restore" && attemptAtStart != null && !ownsRestoreAttempt(forGen, forUid, attemptAtStart)) {
-        return;
+        return false;
       }
-      if (kindAtStart == null && (flowKind != null || flowAttempt != null)) return;
+      if (kindAtStart == null && (flowKind != null || flowAttempt != null)) return false;
+      return true;
+    };
+    const run = async () => {
+      if (!capturedOperationStillOwns()) return;
       // Applicability before any pending mutation: a mismatched store event
       // must not patch, clear, or release the active purchase attempt.
       if (pendingAtStart && pendingAtStart.productId !== purchase.productId) {
         if (source !== "restore") return;
       }
       if (kindAtStart === "purchase" && !pendingAtStart) return;
-      const pdeps = processorDeps(forGen, forUid, attemptAtStart);
+      const pdeps = processorDeps(forGen, forUid, attemptAtStart, revisionAtStart);
       if (!pdeps) return;
       const latest = forUid ? await readPendingPurchase({ store: deps.store, uid: forUid }) : null;
-      if (!isCurrentOperation(forGen, forUid)) return;
-      if (kindAtStart === "purchase" && attemptAtStart != null && !ownsPurchaseAttempt(forGen, forUid, attemptAtStart)) {
-        return;
-      }
-      if (kindAtStart === "restore" && attemptAtStart != null && !ownsRestoreAttempt(forGen, forUid, attemptAtStart)) {
-        return;
-      }
+      if (!capturedOperationStillOwns()) return;
       const pendingForProcess =
         pendingAtStart && latest && latest.productId !== pendingAtStart.productId
           ? pendingAtStart
@@ -364,14 +379,7 @@ export function createIapSession(deps: IapSessionDeps) {
         processedTokens: tokens,
         finishedIosTokens: finished,
       });
-      if (!isCurrentOperation(forGen, forUid)) return;
-      if (kindAtStart === "purchase" && attemptAtStart != null && !ownsPurchaseAttempt(forGen, forUid, attemptAtStart)) {
-        return;
-      }
-      if (kindAtStart === "restore" && attemptAtStart != null && !ownsRestoreAttempt(forGen, forUid, attemptAtStart)) {
-        return;
-      }
-      if (flowKind !== kindAtStart || flowAttempt !== attemptAtStart) return;
+      if (!capturedOperationStillOwns()) return;
       if (
         source !== "restore" &&
         pendingAtStart &&
@@ -410,8 +418,9 @@ export function createIapSession(deps: IapSessionDeps) {
       const forUid = uid;
       const kindAtStart = flowKind;
       const attemptAtStart = flowAttempt;
+      const revisionAtStart = operationRevision;
       const pendingAtStart = pending;
-      const pdeps = processorDeps(forGen, forUid, attemptAtStart);
+      const pdeps = processorDeps(forGen, forUid, attemptAtStart, revisionAtStart);
       if (!pdeps) return;
       void (async () => {
         // Unidentified errors (no productId) apply only to the current
@@ -426,6 +435,7 @@ export function createIapSession(deps: IapSessionDeps) {
         }
         const latest = forUid ? await readPendingPurchase({ store: deps.store, uid: forUid }) : null;
         if (!ownsPurchaseAttempt(forGen, forUid, attemptAtStart)) return;
+        if (operationRevision !== revisionAtStart) return;
         const pendingForProcess =
           pendingAtStart && latest && latest.productId !== pendingAtStart.productId
             ? pendingAtStart
@@ -443,6 +453,7 @@ export function createIapSession(deps: IapSessionDeps) {
           pending: pendingForProcess,
         });
         if (!ownsPurchaseAttempt(forGen, forUid, attemptAtStart)) return;
+        if (operationRevision !== revisionAtStart) return;
         pending = out.pending;
         lastResult = out.result;
         releasePurchaseIfCurrent(forGen, forUid, attemptAtStart);
@@ -800,11 +811,12 @@ export function createIapSession(deps: IapSessionDeps) {
     }
 
     const myAttempt = beginPurchaseLock(forGen, buyerUid, "purchase");
+    const myRevision = operationRevision;
     emit();
     let envelope: PendingPurchaseEnvelope | null = null;
 
     const retiredWithoutPublish = async (): Promise<PurchaseFlowResult> => {
-      if (envelope) await compensateStaleStorage(envelope, forGen, myAttempt);
+      if (envelope) await compensateStaleStorage(envelope, forGen, myAttempt, myRevision);
       if (!isCurrentOperation(forGen, buyerUid)) return authChurnResult(buyerUid);
       return {
         kind: "failed",
@@ -819,7 +831,7 @@ export function createIapSession(deps: IapSessionDeps) {
       if (!envelope || !stillOwnsThisPurchase()) return retiredWithoutPublish();
       if (!(await canLaunchNativeSheet(forGen, buyerUid, envelope, myAttempt))) {
         if (!stillOwnsThisPurchase()) return retiredWithoutPublish();
-        return compensateStalePurchase(envelope, forGen, buyerUid, myAttempt);
+        return compensateStalePurchase(envelope, forGen, buyerUid, myAttempt, myRevision);
       }
       if (!stillOwnsThisPurchase()) return retiredWithoutPublish();
       pending = envelope;
@@ -892,7 +904,7 @@ export function createIapSession(deps: IapSessionDeps) {
         const wrote = await writePendingPurchase({
           store: deps.store,
           envelope,
-          ...mutationAuthFor(buyerUid, forGen, myAttempt),
+          ...mutationAuthFor(buyerUid, forGen, myAttempt, myRevision),
         });
         if (!stillOwnsThisPurchase()) return retiredWithoutPublish();
         if (!wrote) {
@@ -942,7 +954,7 @@ export function createIapSession(deps: IapSessionDeps) {
         const wrote = await writePendingPurchase({
           store: deps.store,
           envelope,
-          ...mutationAuthFor(buyerUid, forGen, myAttempt),
+          ...mutationAuthFor(buyerUid, forGen, myAttempt, myRevision),
         });
         if (!stillOwnsThisPurchase()) return retiredWithoutPublish();
         if (!wrote) {
@@ -979,7 +991,7 @@ export function createIapSession(deps: IapSessionDeps) {
         markDisconnected(forGen, buyerUid);
       }
       if (isUserCancelledError(normalized)) {
-        await abandonNonDurablePending(envelope, buyerUid, forGen, myAttempt);
+        await abandonNonDurablePending(envelope, buyerUid, forGen, myAttempt, myRevision);
         if (!stillOwnsThisPurchase()) return { kind: "cancelled" };
         releasePurchaseIfCurrent(forGen, buyerUid, myAttempt);
         const result: PurchaseFlowResult = { kind: "cancelled" };
@@ -987,7 +999,7 @@ export function createIapSession(deps: IapSessionDeps) {
         emit();
         return result;
       }
-      await abandonNonDurablePending(envelope, buyerUid, forGen, myAttempt);
+      await abandonNonDurablePending(envelope, buyerUid, forGen, myAttempt, myRevision);
       if (!stillOwnsThisPurchase()) return retiredWithoutPublish();
       releasePurchaseIfCurrent(forGen, buyerUid, myAttempt);
       const result: PurchaseFlowResult = {

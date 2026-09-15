@@ -146,6 +146,8 @@ function deps(args: {
   gen?: { n: number };
   attempt?: { n: number | null };
   operationAttempt?: number | null;
+  revision?: { n: number | null };
+  operationRevision?: number | null;
 }): PurchaseProcessorDeps {
   const gen = args.gen ?? { n: 1 };
   const uid = args.uid ?? "uid-a";
@@ -161,6 +163,8 @@ function deps(args: {
     operationUid: uid,
     operationAttempt: args.operationAttempt,
     currentAttempt: args.attempt ? () => args.attempt!.n : undefined,
+    operationRevision: args.operationRevision,
+    currentRevision: args.revision ? () => args.revision!.n : undefined,
   };
 }
 
@@ -938,6 +942,165 @@ async function testRetiredAttemptValidationFailureDoesNotPatchNewerEnvelope() {
   assert.equal(disk.stage, "intent_created");
 }
 
+async function testIdleOperationStaysStaleAfterLaterAttemptCompletes() {
+  // Reproduced: an idle/background validation captured with no active attempt
+  // must stay stale after a later purchase completes and the session is idle
+  // again. Revision mismatch, not “currentAttempt() == null”, is the owner.
+  const store = memoryStore();
+  const envA = pending();
+  await seedPending(store, envA);
+  const revision = { n: 1 as number | null };
+  const attempt = { n: null as number | null };
+  let resolveWait = () => {};
+  const wait = new Promise<void>((resolve) => {
+    resolveWait = resolve;
+  });
+  let started = () => {};
+  const startedP = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const spy = {
+    android: [] as { purchaseToken: string; expectedCanonicalSku?: string }[],
+    ios: [] as { signedTransactionInfo: string; expectedCanonicalSku?: string }[],
+  };
+  const backend = fakeBackend(spy);
+  backend.validateAndActivateAndroid = async () => {
+    started();
+    await wait;
+    throw new Error("backend down");
+  };
+  const nativeSpy = { finish: [] as StorePurchase[], purchases: [] as NativePurchaseRequest[] };
+  const run = processStorePurchase({
+    deps: deps({
+      platform: "android",
+      store,
+      native: fakeNative(nativeSpy),
+      backend,
+      attempt,
+      operationAttempt: null,
+      revision,
+      operationRevision: 1,
+    }),
+    purchase: androidPurchase(),
+    pending: envA,
+    source: "recovery",
+    processedTokens: new Set(),
+  });
+  await startedP;
+  revision.n = 2;
+  attempt.n = 2;
+  const envB: PendingPurchaseEnvelope = {
+    ...pending(),
+    canonicalSku: "vyd_professional_monthly",
+    androidBasePlanId: "monthly",
+    initiatedAt: 104,
+    updatedAt: 104,
+  };
+  await seedPending(store, envB);
+  attempt.n = null;
+  resolveWait();
+  const out = await run;
+  const disk = JSON.parse(store.data[PENDING_PURCHASE_CACHE_KEY]!);
+  assert.equal(disk.canonicalSku, "vyd_professional_monthly");
+  assert.equal(disk.stage, "intent_created");
+  assert.equal(disk.initiatedAt, 104);
+  assert.notEqual(out.pending?.stage, "awaiting_recovery");
+}
+
+async function testIdleOperationSuccessDoesNotMutateAfterLaterAttempt() {
+  const store = memoryStore();
+  const envA = pending();
+  await seedPending(store, envA);
+  const revision = { n: 1 as number | null };
+  const attempt = { n: null as number | null };
+  let resolveWait = () => {};
+  const wait = new Promise<void>((resolve) => {
+    resolveWait = resolve;
+  });
+  let started = () => {};
+  const startedP = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const spy = {
+    android: [] as { purchaseToken: string; expectedCanonicalSku?: string }[],
+    ios: [] as { signedTransactionInfo: string; expectedCanonicalSku?: string }[],
+  };
+  const backend = fakeBackend(spy);
+  const orig = backend.validateAndActivateAndroid;
+  backend.validateAndActivateAndroid = async (input) => {
+    started();
+    await wait;
+    return orig.call(backend, input);
+  };
+  const nativeSpy = { finish: [] as StorePurchase[], purchases: [] as NativePurchaseRequest[] };
+  const run = processStorePurchase({
+    deps: deps({
+      platform: "android",
+      store,
+      native: fakeNative(nativeSpy),
+      backend,
+      attempt,
+      operationAttempt: null,
+      revision,
+      operationRevision: 1,
+    }),
+    purchase: androidPurchase(),
+    pending: envA,
+    source: "recovery",
+    processedTokens: new Set(),
+  });
+  await startedP;
+  revision.n = 2;
+  attempt.n = 2;
+  const envB: PendingPurchaseEnvelope = {
+    ...pending(),
+    canonicalSku: "vyd_professional_monthly",
+    androidBasePlanId: "monthly",
+    initiatedAt: 104,
+    updatedAt: 104,
+  };
+  await seedPending(store, envB);
+  attempt.n = null;
+  resolveWait();
+  await run;
+  const disk = JSON.parse(store.data[PENDING_PURCHASE_CACHE_KEY]!);
+  assert.equal(disk.canonicalSku, "vyd_professional_monthly");
+  assert.equal(disk.initiatedAt, 104);
+}
+
+async function testIdleOperationStillProcessesWhenRevisionMatches() {
+  const store = memoryStore();
+  const envA = pending();
+  await seedPending(store, envA);
+  const revision = { n: 1 as number | null };
+  const attempt = { n: null as number | null };
+  const spy = {
+    android: [] as { purchaseToken: string; expectedCanonicalSku?: string }[],
+    ios: [] as { signedTransactionInfo: string; expectedCanonicalSku?: string }[],
+    androidShouldFail: true,
+  };
+  const nativeSpy = { finish: [] as StorePurchase[], purchases: [] as NativePurchaseRequest[] };
+  const out = await processStorePurchase({
+    deps: deps({
+      platform: "android",
+      store,
+      native: fakeNative(nativeSpy),
+      backend: fakeBackend(spy),
+      attempt,
+      operationAttempt: null,
+      revision,
+      operationRevision: 1,
+    }),
+    purchase: androidPurchase(),
+    pending: envA,
+    source: "recovery",
+    processedTokens: new Set(),
+  });
+  assert.equal(out.result.kind, "failed");
+  assert.equal(out.pending?.stage, "awaiting_recovery");
+  assert.equal(JSON.parse(store.data[PENDING_PURCHASE_CACHE_KEY]!).stage, "awaiting_recovery");
+}
+
 async function main() {
   await testAndroidPendingDoesNotValidate();
   await testAndroidPurchasedSendsTokenNotCurrentPlan();
@@ -960,6 +1123,9 @@ async function main() {
   await testMismatchedProductErrorDoesNotClearPending();
   await testRetiredAttemptValidationDoesNotClearNewerEnvelope();
   await testRetiredAttemptValidationFailureDoesNotPatchNewerEnvelope();
+  await testIdleOperationStaysStaleAfterLaterAttemptCompletes();
+  await testIdleOperationSuccessDoesNotMutateAfterLaterAttempt();
+  await testIdleOperationStillProcessesWhenRevisionMatches();
   console.log("iapPurchaseProcessor.test.ts: ok");
 }
 

@@ -45,6 +45,8 @@ export interface PurchaseProcessorDeps {
   operationUid: string | null;
   operationAttempt?: number | null;
   currentAttempt?: () => number | null;
+  operationRevision?: number | null;
+  currentRevision?: () => number | null;
 }
 
 function nonempty(value: string | null | undefined): value is string {
@@ -54,6 +56,9 @@ function nonempty(value: string | null | undefined): value is string {
 function stillCurrent(deps: PurchaseProcessorDeps): boolean {
   if (deps.currentGeneration() !== deps.generation) return false;
   if (deps.currentUid() !== deps.operationUid) return false;
+  if (deps.operationRevision != null && deps.currentRevision) {
+    if (deps.currentRevision() !== deps.operationRevision) return false;
+  }
   if (deps.operationAttempt != null) {
     return deps.currentAttempt?.() === deps.operationAttempt;
   }
@@ -69,6 +74,8 @@ function mutationAuth(deps: PurchaseProcessorDeps, uid: string) {
     currentUid: deps.currentUid,
     expectedAttempt: deps.operationAttempt,
     currentAttempt: deps.currentAttempt,
+    expectedRevision: deps.operationRevision,
+    currentRevision: deps.currentRevision,
   };
 }
 

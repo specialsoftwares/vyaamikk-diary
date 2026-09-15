@@ -6,9 +6,13 @@
  * email, phone, GST, prices, or Purchase.id.
  *
  * All mutating operations share one per-store serialization gate for the
- * decide/commit step. Storage I/O itself runs outside that lock so a delayed
+ * decide/commit step. Admission of a call is distinct from the accepted
+ * cache state that delayed I/O must converge to. A retired/rejected/no-op
+ * request must not replace a newer accepted write or clear. Releasing an
+ * attempt lock does not revoke a successfully accepted stored state.
+ * Storage I/O itself runs outside that lock so a delayed
  * getItem/setItem/removeItem cannot deadlock a newer attempt. After every
- * awaited mutation the latest intent is re-applied:
+ * awaited mutation the accepted state is re-applied:
  *   - a stale A write must not remain as B-session state
  *   - a stale A clear must not delete B
  */
@@ -52,6 +56,8 @@ export interface PendingMutationAuth {
   currentUid: () => string | null;
   expectedAttempt?: number | null;
   currentAttempt?: () => number | null;
+  expectedRevision?: number | null;
+  currentRevision?: () => number | null;
 }
 
 type LatestIntent =
@@ -83,9 +89,37 @@ type MutationPlan =
   | { action: "set"; value: string }
   | { action: "remove" };
 
+type AcceptedCacheState =
+  | {
+      kind: "set";
+      seq: number;
+      envelope: PendingPurchaseEnvelope;
+      uid: string;
+      generation: number;
+      currentGeneration: () => number;
+      currentUid: () => string | null;
+    }
+  | {
+      kind: "clear";
+      seq: number;
+      uid: string | null;
+      generation: number;
+      onlyNonDurable: boolean;
+      allUids: boolean;
+    }
+  | {
+      kind: "reconcile";
+      seq: number;
+      uid: string;
+      generation: number;
+      currentGeneration: () => number;
+      currentUid: () => string | null;
+    };
+
 interface MutationGate {
   queue: Promise<unknown>;
   latest: LatestIntent | null;
+  accepted: AcceptedCacheState | null;
   seq: number;
 }
 
@@ -94,7 +128,7 @@ const mutationGates = new WeakMap<object, MutationGate>();
 function gateFor(store: IapKeyValueStore): MutationGate {
   const existing = mutationGates.get(store);
   if (existing) return existing;
-  const created: MutationGate = { queue: Promise.resolve(), latest: null, seq: 0 };
+  const created: MutationGate = { queue: Promise.resolve(), latest: null, accepted: null, seq: 0 };
   mutationGates.set(store, created);
   return created;
 }
@@ -194,9 +228,108 @@ export function authStillOwns(auth: PendingMutationAuth, envelopeUid: string): b
 }
 
 export function authStillOwnsAttempt(auth: PendingMutationAuth): boolean {
+  if (auth.expectedRevision != null && auth.currentRevision) {
+    if (auth.currentRevision() !== auth.expectedRevision) return false;
+  }
   if (auth.expectedAttempt == null) return true;
   if (!auth.currentAttempt) return true;
   return auth.currentAttempt() === auth.expectedAttempt;
+}
+
+function operationStillLive(auth: PendingMutationAuth): boolean {
+  return authStillOwnsAttempt(auth);
+}
+
+function isUidSwitchCleanup(auth: PendingMutationAuth, targetUid: string): boolean {
+  return (
+    auth.currentGeneration() === auth.generation &&
+    auth.expectedUid === targetUid &&
+    auth.currentUid() !== targetUid
+  );
+}
+
+function shouldAcceptIntent(intent: LatestIntent): boolean {
+  if (intent.op === "clear-all" || intent.op === "scrub-malformed") return true;
+  if (intent.op === "write") {
+    return authStillOwns(intent.auth, intent.envelope.uid) && operationStillLive(intent.auth);
+  }
+  if (intent.op === "clear-envelope") {
+    if (authStillOwns(intent.auth, intent.envelope.uid) && operationStillLive(intent.auth)) {
+      return true;
+    }
+    return isUidSwitchCleanup(intent.auth, intent.envelope.uid);
+  }
+  if (intent.op === "clear-uid") {
+    if (!intent.auth) return true;
+    if (authStillOwns(intent.auth, intent.uid) && operationStillLive(intent.auth)) return true;
+    return isUidSwitchCleanup(intent.auth, intent.uid);
+  }
+  if (intent.op === "reconcile") {
+    return authStillOwns(intent.auth, intent.auth.expectedUid) && operationStillLive(intent.auth);
+  }
+  return false;
+}
+
+function toAcceptedState(intent: LatestIntent): AcceptedCacheState {
+  if (intent.op === "write") {
+    return {
+      kind: "set",
+      seq: intent.seq,
+      envelope: intent.envelope,
+      uid: intent.envelope.uid,
+      generation: intent.auth.generation,
+      currentGeneration: intent.auth.currentGeneration,
+      currentUid: intent.auth.currentUid,
+    };
+  }
+  if (intent.op === "clear-envelope") {
+    return {
+      kind: "clear",
+      seq: intent.seq,
+      uid: intent.envelope.uid,
+      generation: intent.auth.generation,
+      onlyNonDurable: intent.onlyNonDurable,
+      allUids: false,
+    };
+  }
+  if (intent.op === "clear-uid") {
+    return {
+      kind: "clear",
+      seq: intent.seq,
+      uid: intent.uid,
+      generation: intent.auth?.generation ?? 0,
+      onlyNonDurable: false,
+      allUids: false,
+    };
+  }
+  if (intent.op === "reconcile") {
+    return {
+      kind: "reconcile",
+      seq: intent.seq,
+      uid: intent.auth.expectedUid,
+      generation: intent.auth.generation,
+      currentGeneration: intent.auth.currentGeneration,
+      currentUid: intent.auth.currentUid,
+    };
+  }
+  return {
+    kind: "clear",
+    seq: intent.seq,
+    uid: null,
+    generation: 0,
+    onlyNonDurable: false,
+    allUids: true,
+  };
+}
+
+function admitIntent(store: IapKeyValueStore, intent: LatestIntent) {
+  const gate = gateFor(store);
+  gate.seq += 1;
+  intent.seq = gate.seq;
+  gate.latest = intent;
+  if (shouldAcceptIntent(intent)) {
+    gate.accepted = toAcceptedState(intent);
+  }
 }
 
 export function samePurchaseIntent(
@@ -222,6 +355,8 @@ function captureAuth(auth: PendingMutationAuth): PendingMutationAuth {
     currentUid: auth.currentUid,
     expectedAttempt: auth.expectedAttempt,
     currentAttempt: auth.currentAttempt,
+    expectedRevision: auth.expectedRevision,
+    currentRevision: auth.currentRevision,
   };
 }
 
@@ -274,63 +409,47 @@ function decidePendingMutation(
     malformed: boolean;
   }
 ): MutationPlan {
-  const latest = gateFor(store).latest;
-  if (!latest) return { action: "noop" };
+  const accepted = gateFor(store).accepted;
+  if (!accepted) return { action: "noop" };
 
-  if (latest.op === "write") {
-    if (!authStillOwns(latest.auth, latest.envelope.uid)) {
-      if (disk.envelope?.uid === latest.envelope.uid) return { action: "remove" };
+  if (accepted.kind === "set") {
+    if (
+      accepted.currentGeneration() !== accepted.generation ||
+      accepted.currentUid() !== accepted.uid
+    ) {
+      if (disk.envelope?.uid === accepted.uid) return { action: "remove" };
       return { action: "noop" };
     }
-    if (!authStillOwnsAttempt(latest.auth)) return { action: "noop" };
-    if (sameEnvelope(disk.envelope, latest.envelope)) return { action: "noop" };
-    return { action: "set", value: JSON.stringify(latest.envelope) };
+    if (sameEnvelope(disk.envelope, accepted.envelope)) return { action: "noop" };
+    return { action: "set", value: JSON.stringify(accepted.envelope) };
   }
 
-  if (latest.op === "clear-uid") {
-    if (latest.auth && !authStillOwns(latest.auth, latest.uid)) {
-      if (disk.envelope?.uid === latest.uid) return { action: "remove" };
-      return { action: "noop" };
-    }
-    if (latest.auth && !authStillOwnsAttempt(latest.auth)) return { action: "noop" };
+  if (accepted.kind === "clear") {
     if (!disk.raw) return { action: "noop" };
-    if (disk.envelope && disk.envelope.uid !== latest.uid) return { action: "noop" };
-    return { action: "remove" };
-  }
-
-  if (latest.op === "clear-envelope") {
-    if (!authStillOwns(latest.auth, latest.envelope.uid)) {
-      if (
-        disk.envelope?.uid === latest.envelope.uid &&
-        latest.auth.currentUid() !== latest.envelope.uid
-      ) {
-        return { action: "remove" };
-      }
+    if (accepted.allUids) return { action: "remove" };
+    if (disk.envelope && accepted.uid && disk.envelope.uid !== accepted.uid) {
       return { action: "noop" };
     }
-    if (!disk.envelope) return { action: "noop" };
-    if (!samePurchaseIntent(disk.envelope, latest.envelope)) return { action: "noop" };
-    if (latest.onlyNonDurable && isDurablePendingStage(disk.envelope.stage)) {
+    if (
+      accepted.onlyNonDurable &&
+      disk.envelope &&
+      isDurablePendingStage(disk.envelope.stage)
+    ) {
       return { action: "noop" };
     }
-    if (!authStillOwnsAttempt(latest.auth)) return { action: "noop" };
     return { action: "remove" };
   }
 
-  if (latest.op === "reconcile") {
-    if (!authStillOwns(latest.auth, latest.auth.expectedUid)) return { action: "noop" };
-    if (!disk.raw) return { action: "noop" };
-    if (disk.malformed || !disk.envelope) return { action: "remove" };
-    if (disk.envelope.uid === latest.auth.expectedUid) return { action: "noop" };
-    if (latest.auth.currentUid() === disk.envelope.uid) return { action: "noop" };
-    return { action: "remove" };
-  }
-
-  if (latest.op === "scrub-malformed") {
-    if (disk.malformed || (disk.raw && !disk.envelope)) return { action: "remove" };
+  if (!disk.raw) return { action: "noop" };
+  if (
+    accepted.currentGeneration() !== accepted.generation ||
+    accepted.currentUid() !== accepted.uid
+  ) {
     return { action: "noop" };
   }
-
+  if (disk.malformed || !disk.envelope) return { action: "remove" };
+  if (disk.envelope.uid === accepted.uid) return { action: "noop" };
+  if (accepted.currentUid() === disk.envelope.uid) return { action: "noop" };
   return { action: "remove" };
 }
 
@@ -367,8 +486,7 @@ export async function readPendingPurchase(args: {
   if (seen.malformed) {
     const gate = gateFor(args.store);
     if (!gate.latest || gate.latest.op === "scrub-malformed") {
-      gate.seq += 1;
-      gate.latest = { op: "scrub-malformed", seq: gate.seq };
+      admitIntent(args.store, { op: "scrub-malformed", seq: 0 });
       await materializePendingCache(args.store);
     }
     return null;
@@ -382,9 +500,7 @@ export async function readPendingPurchase(args: {
 export async function reconcilePendingPurchaseForUid(
   args: { store: IapKeyValueStore } & PendingMutationAuth
 ): Promise<PendingPurchaseEnvelope | null> {
-  const gate = gateFor(args.store);
-  gate.seq += 1;
-  gate.latest = { op: "reconcile", seq: gate.seq, auth: captureAuth(args) };
+  admitIntent(args.store, { op: "reconcile", seq: 0, auth: captureAuth(args) });
   await materializePendingCache(args.store);
   return readPendingPurchase({ store: args.store, uid: args.expectedUid });
 }
@@ -397,14 +513,12 @@ export async function writePendingPurchase(
   if (!parsePendingPurchaseEnvelope(args.envelope)) return false;
   if (!authStillOwns(args, args.envelope.uid) || !authStillOwnsAttempt(args)) return false;
 
-  const gate = gateFor(args.store);
-  gate.seq += 1;
-  gate.latest = {
+  admitIntent(args.store, {
     op: "write",
-    seq: gate.seq,
+    seq: 0,
     envelope: args.envelope,
     auth: captureAuth(args),
-  };
+  });
   await materializePendingCache(args.store);
   if (!authStillOwns(args, args.envelope.uid) || !authStillOwnsAttempt(args)) return false;
   const disk = await parseStored(args.store);
@@ -416,14 +530,12 @@ export async function clearPendingPurchaseIfUid(
   uid: string,
   auth?: PendingMutationAuth
 ): Promise<void> {
-  const gate = gateFor(store);
-  gate.seq += 1;
-  gate.latest = {
+  admitIntent(store, {
     op: "clear-uid",
-    seq: gate.seq,
+    seq: 0,
     uid,
     auth: auth ? captureAuth(auth) : undefined,
-  };
+  });
   await materializePendingCache(store);
 }
 
@@ -434,21 +546,17 @@ export async function clearPendingPurchaseIfEnvelope(
     onlyNonDurable?: boolean;
   } & PendingMutationAuth
 ): Promise<void> {
-  const gate = gateFor(args.store);
-  gate.seq += 1;
-  gate.latest = {
+  admitIntent(args.store, {
     op: "clear-envelope",
-    seq: gate.seq,
+    seq: 0,
     envelope: args.envelope,
     auth: captureAuth(args),
     onlyNonDurable: args.onlyNonDurable === true,
-  };
+  });
   await materializePendingCache(args.store);
 }
 
 export async function clearPendingPurchase(store: IapKeyValueStore): Promise<void> {
-  const gate = gateFor(store);
-  gate.seq += 1;
-  gate.latest = { op: "clear-all", seq: gate.seq };
+  admitIntent(store, { op: "clear-all", seq: 0 });
   await materializePendingCache(store);
 }

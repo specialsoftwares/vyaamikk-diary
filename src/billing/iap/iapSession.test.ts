@@ -2192,6 +2192,251 @@ async function testIosRestoreFinalEmittedViewReleasesLock() {
   assert.equal(h.session.getView().purchaseInFlight, false);
 }
 
+function createDeferredVerifyingStore(): IapKeyValueStore & {
+  data: Record<string, string>;
+  waitForSetItem: () => Promise<void>;
+  releaseSetItem: () => void;
+} {
+  const data: Record<string, string> = {};
+  let setStarted: () => void = () => {};
+  const setStartedP = new Promise<void>((resolve) => {
+    setStarted = resolve;
+  });
+  const g = gate();
+  let blocked = false;
+  return {
+    data,
+    waitForSetItem: () => setStartedP,
+    releaseSetItem: () => g.release(),
+    async getItem(key) {
+      return Object.prototype.hasOwnProperty.call(data, key) ? data[key] : null;
+    },
+    async setItem(key, value) {
+      let stage: string | undefined;
+      try {
+        stage = JSON.parse(value).stage;
+      } catch {
+        stage = undefined;
+      }
+      if (stage === "verifying" && !blocked) {
+        blocked = true;
+        setStarted();
+        await g.wait;
+      }
+      data[key] = value;
+    },
+    async removeItem(key) {
+      delete data[key];
+    },
+  };
+}
+
+async function testThreeOpDelayedVerifyingWriteRetiredCompensationKeepsB() {
+  // Reproduced at a3b0186: delay A's verifying write, cancel A, persist B,
+  // reject A's request (retired compensation), then resume A's write.
+  const clock = { now: 101 };
+  const store = createDeferredVerifyingStore();
+  const requestG = gate();
+  let firstRequest = true;
+  let requestStarted = () => {};
+  const requestStartedP = new Promise<void>((resolve) => {
+    requestStarted = resolve;
+  });
+  const h = createHarness({
+    platform: "android",
+    store,
+    now: () => clock.now,
+    requestPurchase: async () => {
+      if (!firstRequest) return;
+      firstRequest = false;
+      requestStarted();
+      await requestG.wait;
+      throw new Error("stale A request");
+    },
+  });
+  await h.session.setAuth({ status: "signed_in", uid: "uid-a" });
+  const purchaseA = h.session.purchase("vyd_professional_yearly");
+  void purchaseA.catch(() => {});
+  await requestStartedP;
+  h.emitPurchase(yearlyAndroidPurchase());
+  await store.waitForSetItem();
+  h.emitError({ code: "user-cancelled", message: "cancelled", productId: "vyd_professional" });
+  await flushAsync();
+  assert.equal(h.session.getView().purchaseInFlight, false);
+  clock.now = 104;
+  const purchaseB = await h.session.purchase("vyd_professional_monthly");
+  assert.equal(purchaseB.kind, "sheet_launched");
+  assert.equal(h.session.getView().pending?.canonicalSku, "vyd_professional_monthly");
+  assert.equal(h.session.getView().pending?.initiatedAt, 104);
+  requestG.release();
+  await purchaseA;
+  store.releaseSetItem();
+  await flushAsync();
+  const persisted = readPersistedPending(store);
+  assert.equal(persisted?.canonicalSku, "vyd_professional_monthly");
+  assert.equal(persisted?.stage, "intent_created");
+  assert.equal(persisted?.initiatedAt, 104);
+  assert.equal(h.session.getView().pending?.canonicalSku, "vyd_professional_monthly");
+  assert.equal(h.session.getView().pending?.initiatedAt, 104);
+  assert.equal(h.session.getView().purchaseInFlight, true);
+  const last = h.views[h.views.length - 1];
+  assert.equal(last?.pending?.initiatedAt, 104);
+  assert.equal(last?.purchaseInFlight, true);
+}
+
+async function testCompletedCancellationRemainsClearedAfterOldVerifyingWrite() {
+  // Preventive: B’s completed cancellation stays cleared after old I/O.
+  const clock = { now: 101 };
+  const store = createDeferredVerifyingStore();
+  const requestG = gate();
+  let firstRequest = true;
+  let requestStarted = () => {};
+  const requestStartedP = new Promise<void>((resolve) => {
+    requestStarted = resolve;
+  });
+  const h = createHarness({
+    platform: "android",
+    store,
+    now: () => clock.now,
+    requestPurchase: async () => {
+      if (!firstRequest) return;
+      firstRequest = false;
+      requestStarted();
+      await requestG.wait;
+      throw new Error("stale A request");
+    },
+  });
+  await h.session.setAuth({ status: "signed_in", uid: "uid-a" });
+  const purchaseA = h.session.purchase("vyd_professional_yearly");
+  void purchaseA.catch(() => {});
+  await requestStartedP;
+  h.emitPurchase(yearlyAndroidPurchase());
+  await store.waitForSetItem();
+  h.emitError({ code: "user-cancelled", message: "cancelled", productId: "vyd_professional" });
+  await flushAsync();
+  clock.now = 104;
+  const purchaseB = await h.session.purchase("vyd_professional_monthly");
+  assert.equal(purchaseB.kind, "sheet_launched");
+  h.emitError({ code: "user-cancelled", message: "cancelled", productId: "vyd_professional" });
+  await flushAsync();
+  assert.equal(h.session.getView().purchaseInFlight, false);
+  assert.equal(h.session.getView().lastResult?.kind, "cancelled");
+  assert.equal(readPersistedPending(store), undefined);
+  requestG.release();
+  await purchaseA;
+  store.releaseSetItem();
+  await flushAsync();
+  assert.equal(readPersistedPending(store), undefined);
+  assert.equal(h.session.getView().pending, null);
+  assert.equal(h.session.getView().purchaseInFlight, false);
+  assert.equal(h.session.getView().lastResult?.kind, "cancelled");
+  const last = h.views[h.views.length - 1];
+  assert.equal(last?.lastResult?.kind, "cancelled");
+  assert.equal(last?.pending, null);
+}
+
+async function testBackgroundIdleValidationFailureCannotReviveAfterLaterCancel() {
+  // Reproduced at a3b0186: idle background retry, then B purchase+cancel,
+  // then old validation fails. Must not recreate Yearly awaiting_recovery
+  // or replace cancelled lastResult.
+  const validateG = gate();
+  let secondStarted = () => {};
+  const secondStartedP = new Promise<void>((resolve) => {
+    secondStarted = resolve;
+  });
+  let validates = 0;
+  const clock = { now: 101 };
+  const h = createHarness({
+    platform: "android",
+    now: () => clock.now,
+    validateAndActivateAndroid: async () => {
+      validates += 1;
+      if (validates === 1) throw new Error("first backend fail");
+      if (validates === 2) {
+        secondStarted();
+        await validateG.wait;
+        throw new Error("stale background fail");
+      }
+      return { alreadyProcessed: false, acknowledged: true };
+    },
+  });
+  await h.session.setAuth({ status: "signed_in", uid: "uid-a" });
+  await h.session.purchase("vyd_professional_yearly");
+  h.emitPurchase(yearlyAndroidPurchase());
+  await flushAsync();
+  assert.equal(h.session.getView().pending?.stage, "awaiting_recovery");
+  assert.equal(h.session.getView().pending?.initiatedAt, 101);
+  assert.equal(h.session.getView().purchaseInFlight, false);
+  h.emitPurchase(yearlyAndroidPurchase());
+  await secondStartedP;
+  clock.now = 104;
+  const purchaseB = await h.session.purchase("vyd_professional_monthly");
+  assert.equal(purchaseB.kind, "sheet_launched");
+  assert.equal(h.session.getView().pending?.initiatedAt, 104);
+  h.emitError({ code: "user-cancelled", message: "cancelled", productId: "vyd_professional" });
+  await flushAsync();
+  assert.equal(readPersistedPending(h.store), undefined);
+  assert.equal(h.session.getView().pending, null);
+  assert.equal(h.session.getView().lastResult?.kind, "cancelled");
+  assert.equal(h.session.getView().purchaseInFlight, false);
+  const cancelled = h.session.getView().lastResult;
+  validateG.release();
+  await flushAsync();
+  assert.equal(readPersistedPending(h.store), undefined);
+  assert.equal(h.session.getView().pending, null);
+  assert.equal(h.session.getView().lastResult, cancelled);
+  assert.equal(h.session.getView().lastResult?.kind, "cancelled");
+  const last = h.views[h.views.length - 1];
+  assert.equal(last?.lastResult?.kind, "cancelled");
+  assert.equal(last?.pending, null);
+}
+
+async function testBackgroundIdleValidationSuccessCannotOverwriteLaterCancel() {
+  const validateG = gate();
+  let secondStarted = () => {};
+  const secondStartedP = new Promise<void>((resolve) => {
+    secondStarted = resolve;
+  });
+  let validates = 0;
+  const clock = { now: 101 };
+  const h = createHarness({
+    platform: "android",
+    now: () => clock.now,
+    validateAndActivateAndroid: async () => {
+      validates += 1;
+      if (validates === 1) throw new Error("first backend fail");
+      if (validates === 2) {
+        secondStarted();
+        await validateG.wait;
+        return { alreadyProcessed: false, acknowledged: true };
+      }
+      return { alreadyProcessed: false, acknowledged: true };
+    },
+  });
+  await h.session.setAuth({ status: "signed_in", uid: "uid-a" });
+  await h.session.purchase("vyd_professional_yearly");
+  h.emitPurchase(yearlyAndroidPurchase());
+  await flushAsync();
+  h.emitPurchase(yearlyAndroidPurchase());
+  await secondStartedP;
+  clock.now = 104;
+  const purchaseB = await h.session.purchase("vyd_professional_monthly");
+  assert.equal(purchaseB.kind, "sheet_launched");
+  h.emitError({ code: "user-cancelled", message: "cancelled", productId: "vyd_professional" });
+  await flushAsync();
+  const cancelled = h.session.getView().lastResult;
+  assert.equal(cancelled?.kind, "cancelled");
+  validateG.release();
+  await flushAsync();
+  assert.equal(readPersistedPending(h.store), undefined);
+  assert.equal(h.session.getView().pending, null);
+  assert.equal(h.session.getView().lastResult, cancelled);
+  assert.equal(h.session.getView().lastResult?.kind, "cancelled");
+  assert.equal(h.session.getView().purchaseInFlight, false);
+  const last = h.views[h.views.length - 1];
+  assert.equal(last?.lastResult?.kind, "cancelled");
+}
+
 async function main() {
   const tests: [string, () => Promise<void>][] = [
     ["testNoPurchaseSheetOnStartup", testNoPurchaseSheetOnStartup],
@@ -2256,6 +2501,10 @@ async function main() {
     ["testRetiredPendingWriteDoesNotLaunchOrOverwrite", testRetiredPendingWriteDoesNotLaunchOrOverwrite],
     ["testStrayPurchasedEventDoesNotOverwriteLaterPurchase", testStrayPurchasedEventDoesNotOverwriteLaterPurchase],
     ["testIosRestoreFinalEmittedViewReleasesLock", testIosRestoreFinalEmittedViewReleasesLock],
+    ["testThreeOpDelayedVerifyingWriteRetiredCompensationKeepsB", testThreeOpDelayedVerifyingWriteRetiredCompensationKeepsB],
+    ["testCompletedCancellationRemainsClearedAfterOldVerifyingWrite", testCompletedCancellationRemainsClearedAfterOldVerifyingWrite],
+    ["testBackgroundIdleValidationFailureCannotReviveAfterLaterCancel", testBackgroundIdleValidationFailureCannotReviveAfterLaterCancel],
+    ["testBackgroundIdleValidationSuccessCannotOverwriteLaterCancel", testBackgroundIdleValidationSuccessCannotOverwriteLaterCancel],
   ];
   for (const [name, fn] of tests) {
     try {
