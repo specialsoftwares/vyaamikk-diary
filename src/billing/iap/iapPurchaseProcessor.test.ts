@@ -687,6 +687,138 @@ async function testIosFinishedTokenDoesNotClearUnrelatedPending() {
   assert.equal(spy.ios.length, 0);
 }
 
+async function testUnrelatedPurchasedDoesNotMutatePending() {
+  const store = memoryStore();
+  const env = pending();
+  await seedPending(store, env);
+  const spy = {
+    android: [] as { purchaseToken: string; expectedCanonicalSku?: string }[],
+    ios: [] as { signedTransactionInfo: string; expectedCanonicalSku?: string }[],
+  };
+  const nativeSpy = { finish: [] as StorePurchase[], purchases: [] as NativePurchaseRequest[] };
+  const out = await processStorePurchase({
+    deps: deps({
+      platform: "android",
+      store,
+      native: fakeNative(nativeSpy),
+      backend: fakeBackend(spy),
+    }),
+    purchase: androidPurchase({ productId: "vyd_starter", purchaseToken: "starter-token" }),
+    pending: env,
+    source: "purchase",
+    processedTokens: new Set(),
+  });
+  assert.equal(out.result.kind, "failed");
+  if (out.result.kind === "failed") assert.equal(out.result.message, "Product mismatch.");
+  assert.equal(out.pending?.stage, "intent_created");
+  assert.equal(out.pending?.productId, "vyd_professional");
+  assert.equal(spy.android.length, 0);
+  assert.ok(store.data[PENDING_PURCHASE_CACHE_KEY]);
+}
+
+async function testUnrelatedPendingAndUnknownDoNotPatchProcessor() {
+  const store = memoryStore();
+  const env = pending();
+  await seedPending(store, env);
+  const spy = {
+    android: [] as { purchaseToken: string; expectedCanonicalSku?: string }[],
+    ios: [] as { signedTransactionInfo: string; expectedCanonicalSku?: string }[],
+  };
+  const nativeSpy = { finish: [] as StorePurchase[], purchases: [] as NativePurchaseRequest[] };
+  const pendingOut = await processStorePurchase({
+    deps: deps({
+      platform: "android",
+      store,
+      native: fakeNative(nativeSpy),
+      backend: fakeBackend(spy),
+    }),
+    purchase: androidPurchase({
+      productId: "vyd_starter",
+      purchaseState: "pending",
+      purchaseToken: "starter-pending",
+    }),
+    pending: env,
+    source: "purchase",
+    processedTokens: new Set(),
+  });
+  assert.equal(pendingOut.pending?.stage, "intent_created");
+  const unknownOut = await processStorePurchase({
+    deps: deps({
+      platform: "android",
+      store,
+      native: fakeNative(nativeSpy),
+      backend: fakeBackend(spy),
+    }),
+    purchase: androidPurchase({
+      productId: "vyd_starter",
+      purchaseState: "unknown",
+      purchaseToken: "starter-unknown",
+    }),
+    pending: env,
+    source: "purchase",
+    processedTokens: new Set(),
+  });
+  assert.equal(unknownOut.pending?.stage, "intent_created");
+  assert.equal(JSON.parse(store.data[PENDING_PURCHASE_CACHE_KEY]!).stage, "intent_created");
+}
+
+async function testRestoreUnrelatedPurchasedDoesNotClearPending() {
+  const store = memoryStore();
+  const env = pending();
+  await seedPending(store, env);
+  const spy = {
+    android: [] as { purchaseToken: string; expectedCanonicalSku?: string }[],
+    ios: [] as { signedTransactionInfo: string; expectedCanonicalSku?: string }[],
+  };
+  const nativeSpy = { finish: [] as StorePurchase[], purchases: [] as NativePurchaseRequest[] };
+  const out = await processStorePurchase({
+    deps: deps({
+      platform: "android",
+      store,
+      native: fakeNative(nativeSpy),
+      backend: fakeBackend(spy),
+    }),
+    purchase: androidPurchase({ productId: "vyd_starter", purchaseToken: "starter-token" }),
+    pending: env,
+    source: "restore",
+    processedTokens: new Set(),
+  });
+  assert.equal(out.result.kind, "verified");
+  assert.equal(out.pending?.canonicalSku, "vyd_professional_yearly");
+  assert.equal(out.pending?.stage, "intent_created");
+  assert.equal(spy.android.length, 1);
+  assert.equal(spy.android[0]?.purchaseToken, "starter-token");
+  assert.ok(store.data[PENDING_PURCHASE_CACHE_KEY]);
+}
+
+async function testMismatchedProductErrorDoesNotClearPending() {
+  const store = memoryStore();
+  const env = pending();
+  await seedPending(store, env);
+  const spy = {
+    android: [] as { purchaseToken: string; expectedCanonicalSku?: string }[],
+    ios: [] as { signedTransactionInfo: string; expectedCanonicalSku?: string }[],
+  };
+  const nativeSpy = { finish: [] as StorePurchase[], purchases: [] as NativePurchaseRequest[] };
+  const out = await processPurchaseError({
+    deps: deps({
+      platform: "android",
+      store,
+      native: fakeNative(nativeSpy),
+      backend: fakeBackend(spy),
+    }),
+    error: {
+      code: "billing-unavailable",
+      message: "other sku failed",
+      productId: "vyd_starter",
+    },
+    pending: env,
+  });
+  assert.equal(out.result.kind, "failed");
+  assert.equal(out.pending?.stage, "intent_created");
+  assert.ok(store.data[PENDING_PURCHASE_CACHE_KEY]);
+}
+
 async function main() {
   await testAndroidPendingDoesNotValidate();
   await testAndroidPurchasedSendsTokenNotCurrentPlan();
@@ -703,6 +835,10 @@ async function main() {
   await testVerifiedUnfinishedIosRetriesFinish();
   await testSuccessfulFinishDuplicateCannotCreatePhantomUnfinished();
   await testIosFinishedTokenDoesNotClearUnrelatedPending();
+  await testUnrelatedPurchasedDoesNotMutatePending();
+  await testUnrelatedPendingAndUnknownDoNotPatchProcessor();
+  await testRestoreUnrelatedPurchasedDoesNotClearPending();
+  await testMismatchedProductErrorDoesNotClearPending();
   console.log("iapPurchaseProcessor.test.ts: ok");
 }
 

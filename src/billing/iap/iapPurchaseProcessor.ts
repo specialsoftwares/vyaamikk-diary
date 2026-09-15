@@ -119,6 +119,21 @@ export async function processStorePurchase(args: {
 
   void purchase.currentPlanId;
 
+  if (pending && pending.productId !== purchase.productId) {
+    if (source !== "restore") {
+      return {
+        result: { kind: "failed", recoverable: true, message: "Product mismatch." },
+        pending,
+      };
+    }
+    if (purchase.purchaseState !== "purchased" || !nonempty(purchase.purchaseToken)) {
+      return {
+        result: { kind: "failed", recoverable: true, message: "Product mismatch." },
+        pending,
+      };
+    }
+  }
+
   if (purchase.purchaseState === "unknown") {
     pending = await patchPending(deps, pending, "awaiting_recovery");
     return {
@@ -205,7 +220,9 @@ export async function processStorePurchase(args: {
         pending,
       };
     }
-    pending = await patchPending(deps, pending, "verifying");
+    if (!pending || pending.productId === purchase.productId) {
+      pending = await patchPending(deps, pending, "verifying");
+    }
     const hint = expectedCanonicalSkuHint(pending, purchase);
     let validation;
     try {
@@ -224,6 +241,16 @@ export async function processStorePurchase(args: {
           pending: args.pending,
         };
       }
+      if (pending && pending.productId !== purchase.productId) {
+        return {
+          result: {
+            kind: "failed",
+            recoverable: true,
+            message: "Couldn't verify this purchase.",
+          },
+          pending,
+        };
+      }
       pending = await patchPending(deps, pending, "awaiting_recovery");
       return {
         result: {
@@ -237,6 +264,9 @@ export async function processStorePurchase(args: {
     void validation.acknowledged;
     void validation.entitlementActive;
     args.processedTokens.add(purchase.purchaseToken);
+    if (pending && pending.productId !== purchase.productId) {
+      return { result: { kind: "verified" }, pending };
+    }
     if (!stillCurrent(deps)) {
       return { result: { kind: "verified" }, pending: args.pending };
     }
@@ -266,7 +296,9 @@ export async function processStorePurchase(args: {
     pending?.stage === "verified_unfinished_ios";
 
   if (!alreadyValidatedIos) {
-    pending = await patchPending(deps, pending, "verifying");
+    if (!pending || pending.productId === purchase.productId) {
+      pending = await patchPending(deps, pending, "verifying");
+    }
     const hint = expectedCanonicalSkuHint(pending, purchase);
     try {
       await deps.backend.validateAndActivateIOS({
@@ -282,6 +314,16 @@ export async function processStorePurchase(args: {
             message: "Couldn't verify this purchase.",
           },
           pending: args.pending,
+        };
+      }
+      if (pending && pending.productId !== purchase.productId) {
+        return {
+          result: {
+            kind: "failed",
+            recoverable: true,
+            message: "Couldn't verify this purchase.",
+          },
+          pending,
         };
       }
       pending = await patchPending(deps, pending, "awaiting_recovery");
@@ -327,6 +369,9 @@ export async function processStorePurchase(args: {
   if (!stillCurrent(deps)) {
     return { result: { kind: "verified" }, pending: args.pending };
   }
+  if (pending && pending.productId !== purchase.productId) {
+    return { result: { kind: "verified" }, pending };
+  }
   await clearPendingPurchaseIfUid(deps.store, uid, mutationAuth(deps, uid));
   if (!stillCurrent(deps)) {
     return { result: { kind: "verified" }, pending: args.pending };
@@ -342,6 +387,16 @@ export async function processPurchaseError(args: {
   const uid = args.deps.operationUid ?? args.deps.currentUid();
   const cancelled = isUserCancelledError(args.error);
   const durable = args.pending ? isDurablePendingStage(args.pending.stage) : false;
+  if (
+    args.error.productId &&
+    args.pending &&
+    args.pending.productId !== args.error.productId
+  ) {
+    return {
+      result: { kind: "failed", recoverable: true, message: "Product mismatch." },
+      pending: args.pending,
+    };
+  }
 
   if (cancelled && args.pending && !durable && args.pending.stage !== "verifying") {
     if (!stillCurrent(args.deps) || !uid) {

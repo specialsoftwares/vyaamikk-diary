@@ -99,6 +99,7 @@ const iapSrc = iapFiles.map((f) => ({
   assert.match(session, /openFlight/);
   assert.match(session, /readyGen/);
   assert.match(session, /purchaseLockOwnedBy/);
+  assert.match(session, /ownsRestoreAttempt/);
   const purchaseFn = session.slice(session.indexOf("async function purchase"));
   const lockIdx = purchaseFn.indexOf("beginPurchaseLock");
   const loadIdx = purchaseFn.indexOf("await loadCatalog");
@@ -108,6 +109,14 @@ const iapSrc = iapFiles.map((f) => ({
   const pendingIdx = session.indexOf("writePendingPurchase");
   const reqIdx = session.lastIndexOf("requestPurchase");
   assert.ok(pendingIdx >= 0 && reqIdx > pendingIdx);
+  assert.match(session, /flowKind/);
+  assert.match(session, /flowAttempt/);
+  const restoreFn = session.slice(session.indexOf("async function restorePurchases"));
+  const restoreLockIdx = restoreFn.indexOf("beginPurchaseLock");
+  const restoreEnsureIdx = restoreFn.indexOf("await ensureConnected");
+  const restoreGetIdx = restoreFn.indexOf("getAvailablePurchases");
+  assert.ok(restoreLockIdx >= 0 && restoreEnsureIdx > restoreLockIdx);
+  assert.ok(restoreGetIdx > restoreLockIdx);
   assert.doesNotMatch(session, /withOffer|winBackOffer|promotionalOfferJWS|compactJWS/);
   assert.doesNotMatch(session, /billingPlanType:\s*["']MONTHLY["']/);
   assert.doesNotMatch(session, /offers\s*\[\s*0\s*\]/);
@@ -122,6 +131,8 @@ const iapSrc = iapFiles.map((f) => ({
   assert.match(native, /finishTransactionIOS/);
   assert.doesNotMatch(native, /acknowledgePurchaseAndroid/);
   assert.match(nativeRaw, /Do not add an Android finish/);
+  assert.match(nativeRaw, /PurchaseError.productId is optional/);
+  assert.match(nativeRaw, /Unidentified native error policy/);
 }
 
 {

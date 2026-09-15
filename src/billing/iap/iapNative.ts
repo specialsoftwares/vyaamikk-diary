@@ -9,6 +9,22 @@
  *
  * VYD-32 already acknowledges on the backend. This adapter therefore
  * exposes finishTransactionIOS only. Do not add an Android finish/ack path.
+ *
+ * PurchaseError.productId is optional in expo-iap 5.6.0. mapError forwards
+ * the native productId when present and null when absent. It does not invent
+ * product, attempt, or purchase identifiers.
+ *
+ * Unidentified native error policy (consumed by iapSession):
+ * - If productId is present and does not match the active purchase pending
+ *   product, ignore the error: do not release the lock, patch/clear pending,
+ *   or overwrite lastResult.
+ * - If productId is absent, apply the error only to the currently owned
+ *   purchase attempt. expo-iap omits productId for some user-cancelled and
+ *   billing-unavailable failures; discarding those would leave the owning
+ *   flow stuck. Do not apply unidentified errors to a restore-owned flow.
+ * - A matching productId is not proof of the same purchase attempt. Session
+ *   flowAttempt still gates mutation after any await.
+ * - Restore failures are reported by getAvailablePurchases, not this listener.
  */
 
 import {
