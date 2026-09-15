@@ -21,6 +21,8 @@ export type AppErrorCode =
   | "save_failed"
   | "delete_failed"
   | "offline_read_only"
+  | "quota_exhausted"
+  | "quota_state_invalid"
   | "unknown";
 
 export class AppError extends Error {
@@ -89,6 +91,12 @@ export function userFacingMessage(e: unknown): string {
           e.message ||
           "You can view existing records, but creating, editing, deleting, PDF generation, sharing, and sync are unavailable until you reconnect and this device is re-validated."
         );
+      case "quota_exhausted":
+        return (
+          e.message || "Monthly record limit reached. This save was not completed."
+        );
+      case "quota_state_invalid":
+        return e.message || "Couldn't save right now. Please try again.";
       default:
         return e.message || "Something went wrong.";
     }

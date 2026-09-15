@@ -252,6 +252,86 @@ async function run(): Promise<void> {
   assert.equal(edited.id, lh.id);
   assert.equal((await mockLetterheadDocumentRepository.list(lhUser)).length, 1);
 
+  // --- M: lock / resume / completedSteps survive post-create side-effect failure ---
+  const { __resetCapabilityGuardForTests } = await import("@/auth/offlineCapabilityGuard");
+  __resetCapabilityGuardForTests({ isOnline: true, lastValidationAt: Date.now() });
+  await clearStorage();
+  const { beginCoordinatedSave, failCoordinatedSave, runRecordStepIfNeeded } = await import(
+    "@/services/records/saveCoordinator"
+  );
+  const { attachRecordIdToPersistentLock, readPersistentSaveLock } = await import(
+    "@/services/records/persistentSaveLock"
+  );
+  const mUser = "quota_lifecycle_user";
+  const mClient = "cr_quota_lifecycle";
+  const mCtx = createSaveIdempotencyContext({
+    userId: mUser,
+    recordKind: "customer_credit",
+    clientRecordId: mClient,
+  });
+  const begun = await beginCoordinatedSave(mCtx, {
+    ueid: "VYD-0000-000001",
+    processLockKey: mCtx.idempotencyKey,
+  });
+  assert.equal(begun.decision.action, "proceed");
+  const createdM = await mockCustomerCreditRepository.create(mUser, {
+    clientRecordId: begun.clientRecordId,
+    ueid: "VYD-0000-000001",
+    saleDate,
+    mode: "credit",
+    customerName: "Quota Lifecycle",
+    customerMobile: "+919876543210",
+    products: [
+      {
+        productName: "Item",
+        brandModel: null,
+        serialImei: null,
+        saleAmount: 1000,
+        invoiceNumber: null,
+      },
+    ],
+    saleAmount: 1000,
+    schedule: [],
+  });
+  await attachRecordIdToPersistentLock(mUser, begun.clientRecordId, createdM.id);
+  const baseStep = await runRecordStepIfNeeded(
+    {
+      userId: mUser,
+      recordKind: "customer_credit",
+      recordId: createdM.id,
+      step: SAVE_STEP.BASE_RECORD_CREATED,
+      completedSteps: [],
+      clientRecordId: begun.clientRecordId,
+      alwaysRun: true,
+    },
+    async () => createdM
+  );
+  assert.ok(baseStep.completedSteps.includes(SAVE_STEP.BASE_RECORD_CREATED));
+  await failCoordinatedSave(begun.idempotency, "pdf_side_effect_failed", {
+    processLockKey: mCtx.idempotencyKey,
+    clearRegistry: false,
+  });
+  const failedLock = await readPersistentSaveLock(mUser, begun.clientRecordId);
+  assert.equal(failedLock?.status, "failed");
+  assert.equal(failedLock?.recordId, createdM.id);
+  const resumed = await beginCoordinatedSave(mCtx, {
+    ueid: "VYD-0000-000001",
+    processLockKey: mCtx.idempotencyKey,
+  });
+  assert.equal(resumed.decision.action, "resume");
+  if (resumed.decision.action === "resume") {
+    assert.equal(resumed.decision.recordId, createdM.id);
+    assert.ok(resumed.decision.completedSteps.includes(SAVE_STEP.BASE_RECORD_CREATED));
+    assert.equal(
+      shouldRunStep(resumed.decision.completedSteps, SAVE_STEP.BASE_RECORD_CREATED),
+      false
+    );
+    assert.equal(
+      shouldRunStep(resumed.decision.completedSteps, SAVE_STEP.PDF_GENERATED, { pdfUri: null }),
+      true
+    );
+  }
+
   console.log("saveLifecycle.test.ts: all cases passed");
 }
 
