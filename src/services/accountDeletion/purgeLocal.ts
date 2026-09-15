@@ -14,6 +14,7 @@ import { removeProfileLogoFile } from "@/services/profileLogo/storage";
 import { clearMasterDataSessionCache, masterDataRepository } from "@/services/masterData";
 import { clearLocationFootprintPreferences } from "@/services/location/locationFootprintPreferences";
 import { clearRecentSearches } from "@/services/search/recentSearches";
+import { clearPendingPurchaseIfUid } from "@/billing/iap/iapPendingPurchase";
 import { createLogger } from "@/utils/logger";
 
 const log = createLogger("accountDeletion/purgeLocal");
@@ -115,6 +116,7 @@ export async function purgeLocalAccountData(input: {
   clearMasterDataSessionCache();
   await clearLocationFootprintPreferences(userId);
   await removeAsyncStorageKeysForUser(userId);
+  await clearPendingPurchaseIfUid(AsyncStorage, userId);
   await clearRecentSearches();
 
   log.info("purge local done", { userId });

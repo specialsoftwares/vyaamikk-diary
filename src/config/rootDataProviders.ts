@@ -14,6 +14,8 @@
  *
  * `SubscriptionProvider` follows the same rule: it mounts once after
  * `AuthProvider` (uid binding) and must not be pathname-gated.
+ * `IapProvider` mounts once after `SubscriptionProvider` and owns the
+ * single native IAP connection/listener. It never grants entitlement.
  */
 
 export interface RootDataProvidersDecision {
@@ -22,6 +24,7 @@ export interface RootDataProvidersDecision {
   mountSync: boolean;
   mountAppFeedback: boolean;
   mountSubscription: boolean;
+  mountIap: boolean;
 }
 
 const ALWAYS: RootDataProvidersDecision = {
@@ -30,6 +33,7 @@ const ALWAYS: RootDataProvidersDecision = {
   mountSync: true,
   mountAppFeedback: true,
   mountSubscription: true,
+  mountIap: true,
 };
 
 /**

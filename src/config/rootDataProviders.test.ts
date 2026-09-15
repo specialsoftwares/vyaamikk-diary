@@ -13,6 +13,7 @@ function testAlwaysMountsFullTree() {
   assert.equal(d.mountSync, true);
   assert.equal(d.mountAppFeedback, true);
   assert.equal(d.mountSubscription, true);
+  assert.equal(d.mountIap, true);
 }
 
 function testPathnameCannotSkipAuth() {
@@ -36,6 +37,7 @@ function testPathnameCannotSkipAuth() {
       true,
       `subscription must mount for ${String(path)}`
     );
+    assert.equal(d.mountIap, true, `iap must mount for ${String(path)}`);
   }
 }
 

@@ -69,10 +69,12 @@ assert.deepEqual(violations, [], `raw plan comparisons outside allowlist:\n${vio
 {
   const layout = readFileSync(join(repoRoot, "app/_layout.tsx"), "utf8");
   assert.match(layout, /SubscriptionProvider/);
+  assert.match(layout, /IapProvider/);
   const authIdx = layout.indexOf("<AuthProvider>");
   const subIdx = layout.indexOf("<SubscriptionProvider>");
+  const iapIdx = layout.indexOf("<IapProvider>");
   const syncIdx = layout.indexOf("<SyncProvider>");
-  assert.ok(authIdx >= 0 && subIdx > authIdx && syncIdx > subIdx);
+  assert.ok(authIdx >= 0 && subIdx > authIdx && iapIdx > subIdx && syncIdx > iapIdx);
 }
 
 {
@@ -82,9 +84,10 @@ assert.deepEqual(violations, [], `raw plan comparisons outside allowlist:\n${vio
     scripts?: Record<string, string>;
   };
   const deps = { ...pkg.dependencies, ...pkg.devDependencies };
-  assert.equal(deps["expo-iap"], undefined);
+  assert.equal(deps["expo-iap"], "5.6.0");
   assert.equal(deps["react-native-iap"], undefined);
   assert.match(pkg.scripts?.["lint:eslint"] ?? "", /src\/subscription\/\*\*\/\*\.\{ts,tsx\}/);
+  assert.match(pkg.scripts?.["lint:eslint"] ?? "", /src\/billing\/iap\/\*\*\/\*\.\{ts,tsx\}/);
   assert.match(pkg.scripts?.["lint:eslint"] ?? "", /app\/_layout\.tsx/);
 }
 

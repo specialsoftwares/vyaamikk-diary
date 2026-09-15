@@ -11,6 +11,7 @@ import { AppFeedbackProvider } from "@/feedback/AppFeedback";
 import { LocalDbProvider } from "@/state/localDb";
 import { AuthProvider } from "@/state/auth";
 import { SubscriptionProvider } from "@/subscription";
+import { IapProvider } from "@/billing/iap";
 import { SyncProvider } from "@/state/sync";
 import { I18nProvider } from "@/i18n";
 import { LocaleFontProvider } from "@/i18n/LocaleFontProvider";
@@ -33,9 +34,9 @@ const rootDataProviders = decideRootDataProviders();
 /**
  * Single stable provider tree for the entire app.
  *
- * LocalDb → Auth → Subscription → Sync → AppFeedback must remain mounted
+ * LocalDb → Auth → Subscription → IAP → Sync → AppFeedback must remain mounted
  * across public routes, authenticated routes, redirects, and language
- * transitions. Subscription is uid-bound and must not remount per screen.
+ * transitions. Subscription and IAP are uid-bound and must not remount per screen.
  */
 function RootProviders({ children }: { children: React.ReactNode }) {
   // Soft-check only — BootstrapRoot already enforced this fail-closed in-UI.
@@ -43,6 +44,7 @@ function RootProviders({ children }: { children: React.ReactNode }) {
     !rootDataProviders.mountLocalDb ||
     !rootDataProviders.mountAuth ||
     !rootDataProviders.mountSubscription ||
+    !rootDataProviders.mountIap ||
     !rootDataProviders.mountSync ||
     !rootDataProviders.mountAppFeedback
   ) {
@@ -59,9 +61,11 @@ function RootProviders({ children }: { children: React.ReactNode }) {
                 <LocalDbProvider>
                   <AuthProvider>
                     <SubscriptionProvider>
-                      <SyncProvider>
-                        <AppFeedbackProvider>{children}</AppFeedbackProvider>
-                      </SyncProvider>
+                      <IapProvider>
+                        <SyncProvider>
+                          <AppFeedbackProvider>{children}</AppFeedbackProvider>
+                        </SyncProvider>
+                      </IapProvider>
                     </SubscriptionProvider>
                   </AuthProvider>
                 </LocalDbProvider>
