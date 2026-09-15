@@ -1,4 +1,4 @@
-import { doc, runTransaction, type Firestore } from "firebase/firestore";
+import { doc, getDoc, runTransaction, type Firestore } from "firebase/firestore";
 
 import { AppError } from "@/domain/errors";
 import {
@@ -10,6 +10,7 @@ import { wrapAtomicCreateFailure } from "@/billing/optionC/classifyCreateError";
 import {
   monthlyRecordCapFromStatusData,
   quotaEnforcementEnabledFromStatusData,
+  UNLIMITED_MONTHLY_RECORD_CAP,
 } from "@/subscription/monthlyRecordCap";
 
 export type SerialCounterId = "purchaseOrder" | "customerCredit";
@@ -22,6 +23,8 @@ export interface AtomicCreateReadSnapshot {
   usageRecordsThisMonth: number | null;
   usageMonthKey: string | null;
   counterNext: number | null;
+  /** Captured outside the transaction; retries must reuse this exact id. */
+  recordId: string;
 }
 
 export interface AtomicCreateHooks {
@@ -171,6 +174,7 @@ export async function runAtomicBillableCreate<T>(
         usageRecordsThisMonth,
         usageMonthKey,
         counterNext,
+        recordId,
       });
 
       let serial: number | null = null;
@@ -206,8 +210,75 @@ export async function runAtomicBillableCreate<T>(
       };
     });
   } catch (error) {
-    throw wrapAtomicCreateFailure(error);
+    const wrapped = wrapAtomicCreateFailure(error);
+    if (wrapped.code !== "permission_denied") throw wrapped;
+    return recoverAfterPermissionDenied({
+      db,
+      userId,
+      collection,
+      recordId,
+      monthKey,
+      parseExisting,
+      cause: error,
+      wrapped,
+    });
   }
+}
+
+/**
+ * Firestore does not retry a transaction that Rules rejected. A losing
+ * concurrent create therefore surfaces as permission_denied even when the
+ * authoritative outcome is "the record already exists" (same-id) or
+ * "the month is full" (final-slot). Re-read record + status + usage and
+ * only then return existing or throw quota_exhausted. Never map
+ * permission-denied by error-message substring.
+ */
+async function recoverAfterPermissionDenied<T>(params: {
+  db: Firestore;
+  userId: string;
+  collection: BillableRecordCollection;
+  recordId: string;
+  monthKey: string;
+  parseExisting: (id: string, data: Record<string, unknown>) => T;
+  cause: unknown;
+  wrapped: AppError;
+}): Promise<AtomicBillableCreateResult<T>> {
+  const { db, userId, collection, recordId, monthKey, parseExisting, cause, wrapped } = params;
+  try {
+    const recSnap = await getDoc(recordRef(db, userId, collection, recordId));
+    if (recSnap.exists()) {
+      return {
+        outcome: "existing",
+        record: parseExisting(recSnap.id, recSnap.data() as Record<string, unknown>),
+        serial: null,
+      };
+    }
+    const stSnap = await getDoc(statusRef(db, userId));
+    if (!stSnap.exists()) throw wrapped;
+    const statusData = stSnap.data() as Record<string, unknown>;
+    if (!quotaEnforcementEnabledFromStatusData(statusData)) throw wrapped;
+    const cap = monthlyRecordCapFromStatusData(statusData);
+    if (cap === UNLIMITED_MONTHLY_RECORD_CAP) throw wrapped;
+    const uSnap = await getDoc(usageRef(db, userId));
+    if (!uSnap.exists()) throw wrapped;
+    const usage = readUsageSnapshot(uSnap.data() as Record<string, unknown>);
+    if (usage && usage.monthKey === monthKey && usage.recordsThisMonth >= cap) {
+      throw new AppError(
+        "quota_exhausted",
+        "Monthly record limit reached. This save was not completed.",
+        cause,
+        {
+          reason: "quota_exhausted",
+          recordsThisMonth: usage.recordsThisMonth,
+          cap,
+          monthKey,
+        }
+      );
+    }
+  } catch (inner) {
+    if (inner instanceof AppError) throw inner;
+  }
+  throw wrapped;
 }
 
 /** Standalone serial allocation — public API compatibility. Does not create a record. */

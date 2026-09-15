@@ -1,5 +1,5 @@
 /**
- * VYD-36 Round 1 — Option-C production write-set proofs for
+ * VYD-36 Round 2 — Option-C production write-set proofs for
  * purchaseOrders, customerCreditRecords, professionalPacks.
  *
  * Runs in the same emulator session as firestore.rules.billing.test.ts.
@@ -32,9 +32,13 @@ import {
 import { createCustomerCreditAtomic } from "@/services/customerCredit/atomicCreate";
 import { createProfessionalPackAtomic } from "@/services/professionalPack/atomicCreate";
 import { classifyAtomicCreateError } from "@/billing/optionC/classifyCreateError";
-import { runAtomicBillableCreate } from "@/billing/optionC/atomicBillableCreate";
+import {
+  runAtomicBillableCreate,
+  type AtomicCreateHooks,
+} from "@/billing/optionC/atomicBillableCreate";
 import type { PurchaseOrder } from "@/domain/purchaseOrder";
 import type { CustomerCreditRecord } from "@/domain/customerCredit";
+import type { ProfessionalServicePack } from "@/domain/professionalPack";
 
 const PROJECT_ID = "vyaamikk-diary-phaseg-quota-test";
 const RULES_PATH = resolve(process.cwd(), "firestore.rules");
@@ -132,9 +136,9 @@ function poInput(clientRecordId: string) {
   };
 }
 
-function creditInput(clientRecordId: string) {
+function creditInput(clientRecordId?: string) {
   return {
-    clientRecordId,
+    ...(clientRecordId !== undefined ? { clientRecordId } : {}),
     ueid: "VYD-2026-BILL01",
     saleDate: Date.now(),
     mode: "credit" as const,
@@ -172,6 +176,79 @@ function parsePo(id: string, raw: Record<string, unknown>): PurchaseOrder {
 }
 function parseCredit(id: string, raw: Record<string, unknown>): CustomerCreditRecord {
   return { ...(raw as object), id } as CustomerCreditRecord;
+}
+
+function inspectSettled(
+  name: string,
+  results: PromiseSettledResult<unknown>[]
+): { fulfilled: number; rejectedKinds: string[] } {
+  const rejectedKinds: string[] = [];
+  let fulfilled = 0;
+  results.forEach((r, i) => {
+    if (r.status === "fulfilled") {
+      fulfilled += 1;
+      console.log(`  inspect ${name} fulfilled[${i}]`);
+      return;
+    }
+    const kind = classifyAtomicCreateError(r.reason);
+    const msg = r.reason instanceof Error ? r.reason.message : String(r.reason);
+    console.log(`  inspect ${name} rejection[${i}] kind=${kind} message=${msg}`);
+    rejectedKinds.push(kind);
+  });
+  return { fulfilled, rejectedKinds };
+}
+
+/**
+ * First-pass-only latch so two production creates finish their reads
+ * before either writes. Retries skip the wait. Timeout releases waiters
+ * so a serialized emulator cannot deadlock; overlap is then false.
+ */
+class FirstPassBarrier {
+  arrived = 0;
+  overlap = false;
+  timedOut = false;
+  private released = false;
+  private waiters: (() => void)[] = [];
+  private timer: ReturnType<typeof setTimeout> | null = null;
+
+  constructor(
+    private readonly n: number,
+    private readonly timeoutMs = 5000
+  ) {}
+
+  private releaseAll() {
+    if (this.released) return;
+    this.released = true;
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+    this.waiters.splice(0).forEach((fn) => fn());
+  }
+
+  hook(seenIds?: string[]): AtomicCreateHooks {
+    let pass = 0;
+    return {
+      afterReads: async (snapshot) => {
+        seenIds?.push(snapshot.recordId);
+        pass += 1;
+        if (pass !== 1) return;
+        this.arrived += 1;
+        if (this.arrived >= this.n) {
+          if (!this.timedOut) this.overlap = true;
+          this.releaseAll();
+          return;
+        }
+        await new Promise<void>((resolve) => {
+          this.waiters.push(resolve);
+          this.timer = setTimeout(() => {
+            this.timedOut = true;
+            this.releaseAll();
+          }, this.timeoutMs);
+        });
+      },
+    };
+  }
 }
 
 async function counterNext(uid: string, counterId: string): Promise<number | null> {
@@ -347,23 +424,126 @@ async function main() {
     check("G/H retry does not increment usage", (await usageCount("g-po")) === 1);
     check("G/H retry does not increment serial", (await counterNext("g-po", "purchaseOrder")) === 1);
 
-    // E same-id concurrency
+    // E same-id concurrency via production create functions (every rejection inspected)
     await seedUser("g-same");
     await seedStatus("g-same", { quotaEnforcementEnabled: true, plan: "free", entitlementActive: true });
+    const poSameBarrier = new FirstPassBarrier(2);
+    const poSameSeenA: string[] = [];
+    const poSameSeenB: string[] = [];
     const sameResults = await Promise.allSettled([
-      createPurchaseOrderAtomic(authedDb("g-same"), "g-same", poInput("po_same"), parsePo),
-      createPurchaseOrderAtomic(authedDb("g-same"), "g-same", poInput("po_same"), parsePo),
+      createPurchaseOrderAtomic(
+        authedDb("g-same"),
+        "g-same",
+        poInput("po_same"),
+        parsePo,
+        poSameBarrier.hook(poSameSeenA)
+      ),
+      createPurchaseOrderAtomic(
+        authedDb("g-same"),
+        "g-same",
+        poInput("po_same"),
+        parsePo,
+        poSameBarrier.hook(poSameSeenB)
+      ),
     ]);
+    const sameInspect = inspectSettled("E PO same-id", sameResults);
+    check("E PO same-id first-pass overlap", poSameBarrier.overlap);
+    check(
+      "E PO same-id both fulfilled",
+      sameInspect.fulfilled === 2,
+      `fulfilled=${sameInspect.fulfilled} rejected=${sameInspect.rejectedKinds.join(",") || "none"}`
+    );
+    sameInspect.rejectedKinds.forEach((kind, i) => {
+      check(`E PO same-id rejection[${i}] is not quota_exhausted`, kind !== "quota_exhausted", kind);
+    });
     const sameOk = sameResults.filter((r) => r.status === "fulfilled") as PromiseFulfilledResult<PurchaseOrder>[];
     check(
-      "E same-id concurrency at least one returns the record",
-      sameOk.length >= 1 && sameOk.every((r) => r.value.id === "po_same" && r.value.serial === 1),
-      `fulfilled=${sameOk.length}`
+      "E PO same-id every success is po_same serial 1",
+      sameOk.length >= 1 && sameOk.every((r) => r.value.id === "po_same" && r.value.serial === 1)
     );
-    check("E same-id one quota increment", (await usageCount("g-same")) === 1);
-    check("E same-id one serial", (await counterNext("g-same", "purchaseOrder")) === 1);
+    check("E PO same-id one quota increment", (await usageCount("g-same")) === 1);
+    check("E PO same-id one serial", (await counterNext("g-same", "purchaseOrder")) === 1);
+    check(
+      "E PO same-id captured id reused on retries",
+      [...poSameSeenA, ...poSameSeenB].every((id) => id === "po_same")
+    );
 
-    // F final-slot concurrency
+    await seedUser("g-same-cc");
+    await seedStatus("g-same-cc", { quotaEnforcementEnabled: true, plan: "free", entitlementActive: true });
+    const ccSameBarrier = new FirstPassBarrier(2);
+    const ccSameResults = await Promise.allSettled([
+      createCustomerCreditAtomic(
+        authedDb("g-same-cc"),
+        "g-same-cc",
+        creditInput("cr_same"),
+        parseCredit,
+        ccSameBarrier.hook()
+      ),
+      createCustomerCreditAtomic(
+        authedDb("g-same-cc"),
+        "g-same-cc",
+        creditInput("cr_same"),
+        parseCredit,
+        ccSameBarrier.hook()
+      ),
+    ]);
+    const ccSameInspect = inspectSettled("E CC same-id", ccSameResults);
+    check("E CC same-id first-pass overlap", ccSameBarrier.overlap);
+    check(
+      "E CC same-id both fulfilled",
+      ccSameInspect.fulfilled === 2,
+      `fulfilled=${ccSameInspect.fulfilled} rejected=${ccSameInspect.rejectedKinds.join(",") || "none"}`
+    );
+    ccSameInspect.rejectedKinds.forEach((kind, i) => {
+      check(`E CC same-id rejection[${i}] is not quota_exhausted`, kind !== "quota_exhausted", kind);
+    });
+    const ccSameOk = ccSameResults.filter(
+      (r) => r.status === "fulfilled"
+    ) as PromiseFulfilledResult<CustomerCreditRecord>[];
+    check(
+      "E CC same-id every success is cr_same serial 1",
+      ccSameOk.length >= 1 && ccSameOk.every((r) => r.value.id === "cr_same" && r.value.serial === 1)
+    );
+    check("E CC same-id one quota increment", (await usageCount("g-same-cc")) === 1);
+    check("E CC same-id one serial", (await counterNext("g-same-cc", "customerCredit")) === 1);
+
+    await seedUser("g-same-pk");
+    await seedStatus("g-same-pk", { quotaEnforcementEnabled: true, plan: "free", entitlementActive: true });
+    const pkSameBarrier = new FirstPassBarrier(2);
+    const pkSameResults = await Promise.allSettled([
+      createProfessionalPackAtomic(
+        authedDb("g-same-pk"),
+        "g-same-pk",
+        packInput("pk_same"),
+        pkSameBarrier.hook()
+      ),
+      createProfessionalPackAtomic(
+        authedDb("g-same-pk"),
+        "g-same-pk",
+        packInput("pk_same"),
+        pkSameBarrier.hook()
+      ),
+    ]);
+    const pkSameInspect = inspectSettled("E pack same-id", pkSameResults);
+    check("E pack same-id first-pass overlap", pkSameBarrier.overlap);
+    check(
+      "E pack same-id both fulfilled",
+      pkSameInspect.fulfilled === 2,
+      `fulfilled=${pkSameInspect.fulfilled} rejected=${pkSameInspect.rejectedKinds.join(",") || "none"}`
+    );
+    pkSameInspect.rejectedKinds.forEach((kind, i) => {
+      check(`E pack same-id rejection[${i}] is not quota_exhausted`, kind !== "quota_exhausted", kind);
+    });
+    const pkSameOk = pkSameResults.filter(
+      (r) => r.status === "fulfilled"
+    ) as PromiseFulfilledResult<ProfessionalServicePack>[];
+    check(
+      "E pack same-id every success is pk_same",
+      pkSameOk.length >= 1 && pkSameOk.every((r) => r.value.id === "pk_same")
+    );
+    check("E pack same-id one quota increment", (await usageCount("g-same-pk")) === 1);
+
+    // F sequential PO final-slot (still covered) plus concurrent production creates
     await seedUser("g-race");
     await seedStatus("g-race", { quotaEnforcementEnabled: true, plan: "free", entitlementActive: true });
     await seedUsage("g-race", usageDoc(monthNow, 24, "seed"));
@@ -409,6 +589,163 @@ async function main() {
       (await counterNext("g-race", "purchaseOrder")) === 11
     );
 
+    await seedUser("g-race-fn");
+    await seedStatus("g-race-fn", { quotaEnforcementEnabled: true, plan: "free", entitlementActive: true });
+    await seedUsage("g-race-fn", usageDoc(monthNow, 24, "seed"));
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", "g-race-fn", "counters", "purchaseOrder"), {
+        next: 10,
+        updatedAt: Date.now(),
+      });
+    });
+    const poFnBarrier = new FirstPassBarrier(2);
+    const poFnSeenA: string[] = [];
+    const poFnSeenB: string[] = [];
+    const poFnRace = await Promise.allSettled([
+      createPurchaseOrderAtomic(
+        authedDb("g-race-fn"),
+        "g-race-fn",
+        poInput("po_fn_a"),
+        parsePo,
+        poFnBarrier.hook(poFnSeenA)
+      ),
+      createPurchaseOrderAtomic(
+        authedDb("g-race-fn"),
+        "g-race-fn",
+        poInput("po_fn_b"),
+        parsePo,
+        poFnBarrier.hook(poFnSeenB)
+      ),
+    ]);
+    const poFnInspect = inspectSettled("F PO production create", poFnRace);
+    check("F PO production create first-pass overlap", poFnBarrier.overlap);
+    check(
+      "F PO production create exactly one fulfilled",
+      poFnInspect.fulfilled === 1,
+      `fulfilled=${poFnInspect.fulfilled} rejected=${poFnInspect.rejectedKinds.join(",") || "none"}`
+    );
+    check(
+      "F PO production create loser is quota_exhausted",
+      poFnInspect.rejectedKinds.length === 1 && poFnInspect.rejectedKinds[0] === "quota_exhausted",
+      poFnInspect.rejectedKinds.join(",") || "none"
+    );
+    check("F PO production create usage=25", (await usageCount("g-race-fn")) === 25);
+    check("F PO production create serial=11", (await counterNext("g-race-fn", "purchaseOrder")) === 11);
+    const poFnA = (await getDoc(doc(authedDb("g-race-fn"), "users", "g-race-fn", "purchaseOrders", "po_fn_a"))).exists();
+    const poFnB = (await getDoc(doc(authedDb("g-race-fn"), "users", "g-race-fn", "purchaseOrders", "po_fn_b"))).exists();
+    check("F PO production create exactly one record", poFnA !== poFnB);
+    check(
+      "F PO production create retry reused captured ids",
+      poFnSeenA.every((id) => id === "po_fn_a") && poFnSeenB.every((id) => id === "po_fn_b")
+    );
+
+    await seedUser("g-race-cc");
+    await seedStatus("g-race-cc", { quotaEnforcementEnabled: true, plan: "free", entitlementActive: true });
+    await seedUsage("g-race-cc", usageDoc(monthNow, 24, "seed", "customerCreditRecords"));
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", "g-race-cc", "counters", "customerCredit"), {
+        next: 10,
+        updatedAt: Date.now(),
+      });
+    });
+    const ccFnBarrier = new FirstPassBarrier(2);
+    const ccFnSeenA: string[] = [];
+    const ccFnSeenB: string[] = [];
+    const ccFnRace = await Promise.allSettled([
+      createCustomerCreditAtomic(
+        authedDb("g-race-cc"),
+        "g-race-cc",
+        creditInput(),
+        parseCredit,
+        ccFnBarrier.hook(ccFnSeenA)
+      ),
+      createCustomerCreditAtomic(
+        authedDb("g-race-cc"),
+        "g-race-cc",
+        creditInput("  "),
+        parseCredit,
+        ccFnBarrier.hook(ccFnSeenB)
+      ),
+    ]);
+    const ccFnInspect = inspectSettled("F CC production create", ccFnRace);
+    check("F CC production create first-pass overlap", ccFnBarrier.overlap);
+    check(
+      "F CC production create exactly one fulfilled",
+      ccFnInspect.fulfilled === 1,
+      `fulfilled=${ccFnInspect.fulfilled} rejected=${ccFnInspect.rejectedKinds.join(",") || "none"}`
+    );
+    check(
+      "F CC production create loser is quota_exhausted",
+      ccFnInspect.rejectedKinds.length === 1 && ccFnInspect.rejectedKinds[0] === "quota_exhausted",
+      ccFnInspect.rejectedKinds.join(",") || "none"
+    );
+    const ccFnWinner = (
+      ccFnRace.find((r) => r.status === "fulfilled") as PromiseFulfilledResult<CustomerCreditRecord> | undefined
+    )?.value;
+    check("F CC production create usage=25", (await usageCount("g-race-cc")) === 25);
+    check("F CC production create serial=11", (await counterNext("g-race-cc", "customerCredit")) === 11);
+    check("F CC absent/blank winner has non-blank id", Boolean(ccFnWinner && ccFnWinner.id.trim().length > 0));
+    if (ccFnWinner) {
+      const winnerSnap = await getDoc(
+        doc(authedDb("g-race-cc"), "users", "g-race-cc", "customerCreditRecords", ccFnWinner.id)
+      );
+      check(
+        "F CC path id matches payload id",
+        winnerSnap.exists() && (winnerSnap.data() as { id?: string }).id === ccFnWinner.id
+      );
+      const winnerSeen = ccFnWinner.id === ccFnSeenA[0] ? ccFnSeenA : ccFnSeenB;
+      const loserSeen = ccFnWinner.id === ccFnSeenA[0] ? ccFnSeenB : ccFnSeenA;
+      check("F CC winner retries reused captured id", winnerSeen.every((id) => id === ccFnWinner.id));
+      check(
+        "F CC loser retries reused captured id",
+        loserSeen.length >= 1 && loserSeen.every((id) => id === loserSeen[0])
+      );
+      check(
+        "F CC loser record absent",
+        loserSeen[0] != null &&
+          !(
+            await getDoc(
+              doc(authedDb("g-race-cc"), "users", "g-race-cc", "customerCreditRecords", loserSeen[0])
+            )
+          ).exists()
+      );
+    }
+
+    await seedUser("g-race-pk");
+    await seedStatus("g-race-pk", { quotaEnforcementEnabled: true, plan: "free", entitlementActive: true });
+    await seedUsage("g-race-pk", usageDoc(monthNow, 24, "seed", "professionalPacks"));
+    const pkFnBarrier = new FirstPassBarrier(2);
+    const pkFnRace = await Promise.allSettled([
+      createProfessionalPackAtomic(
+        authedDb("g-race-pk"),
+        "g-race-pk",
+        packInput("pk_fn_a"),
+        pkFnBarrier.hook()
+      ),
+      createProfessionalPackAtomic(
+        authedDb("g-race-pk"),
+        "g-race-pk",
+        packInput("pk_fn_b"),
+        pkFnBarrier.hook()
+      ),
+    ]);
+    const pkFnInspect = inspectSettled("F pack production create", pkFnRace);
+    check("F pack production create first-pass overlap", pkFnBarrier.overlap);
+    check(
+      "F pack production create exactly one fulfilled",
+      pkFnInspect.fulfilled === 1,
+      `fulfilled=${pkFnInspect.fulfilled} rejected=${pkFnInspect.rejectedKinds.join(",") || "none"}`
+    );
+    check(
+      "F pack production create loser is quota_exhausted",
+      pkFnInspect.rejectedKinds.length === 1 && pkFnInspect.rejectedKinds[0] === "quota_exhausted",
+      pkFnInspect.rejectedKinds.join(",") || "none"
+    );
+    check("F pack production create usage=25", (await usageCount("g-race-pk")) === 25);
+    const pkFnA = (await getDoc(doc(authedDb("g-race-pk"), "users", "g-race-pk", "professionalPacks", "pk_fn_a"))).exists();
+    const pkFnB = (await getDoc(doc(authedDb("g-race-pk"), "users", "g-race-pk", "professionalPacks", "pk_fn_b"))).exists();
+    check("F pack production create exactly one record", pkFnA !== pkFnB);
+
     await seedUser("g-race-batch");
     await seedStatus("g-race-batch", {
       quotaEnforcementEnabled: true,
@@ -446,11 +783,11 @@ async function main() {
       productionPoBatch("g-race-batch", "po_batch_a", 11),
       productionPoBatch("g-race-batch", "po_batch_b", 11),
     ]);
-    const batchWins = batchRace.filter((r) => r.status === "fulfilled").length;
+    const batchInspect = inspectSettled("F production-shaped batches", batchRace);
     check(
       "F production-shaped concurrent batches: exactly one commit",
-      batchWins === 1,
-      `fulfilled=${batchWins}`
+      batchInspect.fulfilled === 1,
+      `fulfilled=${batchInspect.fulfilled}`
     );
 
     // J plan / malformed / missing status
@@ -631,6 +968,118 @@ async function main() {
       })
     );
     check("I CC update/payment-shaped write does not consume", (await usageCount("g-cc")) === 1);
+
+    const closedAt = Date.now();
+    await assertSucceeds(
+      updateDoc(doc(authedDb("g-cc"), "users", "g-cc", "customerCreditRecords", "cr_on_1"), {
+        userId: "g-cc",
+        status: "fully_paid",
+        closedAt,
+        closure: {
+          finalPaymentDate: closedAt,
+          finalPaymentAmount: 10000,
+          paymentMode: "cash",
+          paidBy: "customer",
+          recordedBy: "g-cc",
+          balanceAtClosure: 0,
+          adjustment: "none",
+          closedAt,
+        },
+        updatedAt: closedAt,
+      })
+    );
+    check("I CC full-closure-shaped update does not consume", (await usageCount("g-cc")) === 1);
+
+    await seedUser("g-id");
+    await seedStatus("g-id", { quotaEnforcementEnabled: true, plan: "starter", entitlementActive: true });
+    const absentCredit = await createCustomerCreditAtomic(
+      authedDb("g-id"),
+      "g-id",
+      creditInput(),
+      parseCredit
+    );
+    const absentSnap = await getDoc(
+      doc(authedDb("g-id"), "users", "g-id", "customerCreditRecords", absentCredit.id)
+    );
+    check("CC absent clientRecordId produces a stored id", absentCredit.id.trim().length > 0);
+    check(
+      "CC absent clientRecordId path matches payload",
+      absentSnap.exists() && (absentSnap.data() as { id?: string }).id === absentCredit.id
+    );
+    const blankCredit = await createCustomerCreditAtomic(
+      authedDb("g-id"),
+      "g-id",
+      creditInput(""),
+      parseCredit
+    );
+    const blankSnap = await getDoc(
+      doc(authedDb("g-id"), "users", "g-id", "customerCreditRecords", blankCredit.id)
+    );
+    check("CC blank clientRecordId produces a distinct stored id", blankCredit.id !== absentCredit.id);
+    check(
+      "CC blank clientRecordId path matches payload",
+      blankSnap.exists() && (blankSnap.data() as { id?: string }).id === blankCredit.id
+    );
+    const wsCredit = await createCustomerCreditAtomic(
+      authedDb("g-id"),
+      "g-id",
+      creditInput("   "),
+      parseCredit
+    );
+    check("CC whitespace clientRecordId is distinct from blank/absent", wsCredit.id !== blankCredit.id);
+    check("CC identity creates consumed three quota slots", (await usageCount("g-id")) === 3);
+    check("CC identity creates allocated three serials", (await counterNext("g-id", "customerCredit")) === 3);
+
+    await seedUser("g-cc-slot");
+    await seedStatus("g-cc-slot", { quotaEnforcementEnabled: true, plan: "free", entitlementActive: true });
+    await seedUsage("g-cc-slot", usageDoc(monthNow, 24, "seed", "customerCreditRecords"));
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", "g-cc-slot", "counters", "customerCredit"), {
+        next: 4,
+        updatedAt: Date.now(),
+      });
+    });
+    const ccSlotWin = await createCustomerCreditAtomic(
+      authedDb("g-cc-slot"),
+      "g-cc-slot",
+      creditInput("cr_slot_a"),
+      parseCredit
+    );
+    check("F CC sequential winner at final slot", ccSlotWin.serial === 5 && (await usageCount("g-cc-slot")) === 25);
+    let ccSlotLoser: string | null = null;
+    try {
+      await createCustomerCreditAtomic(
+        authedDb("g-cc-slot"),
+        "g-cc-slot",
+        creditInput("cr_slot_b"),
+        parseCredit
+      );
+    } catch (e) {
+      ccSlotLoser = classifyAtomicCreateError(e);
+    }
+    check("F CC sequential loser quota_exhausted", ccSlotLoser === "quota_exhausted");
+    check("F CC sequential loser did not increment serial", (await counterNext("g-cc-slot", "customerCredit")) === 5);
+
+    await seedUser("g-pk-slot");
+    await seedStatus("g-pk-slot", { quotaEnforcementEnabled: true, plan: "free", entitlementActive: true });
+    await seedUsage("g-pk-slot", usageDoc(monthNow, 24, "seed", "professionalPacks"));
+    const pkSlotWin = await createProfessionalPackAtomic(
+      authedDb("g-pk-slot"),
+      "g-pk-slot",
+      packInput("pk_slot_a")
+    );
+    check("F pack sequential winner at final slot", pkSlotWin.id === "pk_slot_a" && (await usageCount("g-pk-slot")) === 25);
+    let pkSlotLoser: string | null = null;
+    try {
+      await createProfessionalPackAtomic(authedDb("g-pk-slot"), "g-pk-slot", packInput("pk_slot_b"));
+    } catch (e) {
+      pkSlotLoser = classifyAtomicCreateError(e);
+    }
+    check("F pack sequential loser quota_exhausted", pkSlotLoser === "quota_exhausted");
+    check(
+      "F pack sequential loser record absent",
+      !(await getDoc(doc(authedDb("g-pk-slot"), "users", "g-pk-slot", "professionalPacks", "pk_slot_b"))).exists()
+    );
 
     // Inactive entitlement uses free cap
     await seedUser("g-lapsed");

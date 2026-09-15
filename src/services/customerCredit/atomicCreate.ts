@@ -26,10 +26,10 @@ export async function createCustomerCreditAtomic(
   input: CreateCustomerCreditInput,
   parseExisting: (id: string, data: Record<string, unknown>) => CustomerCreditRecord,
   hooks?: AtomicCreateHooks,
-  nowMs = Date.now()
+  nowMs = Date.now(),
+  recordId = stableRecordId(input.clientRecordId, "cr")
 ): Promise<CustomerCreditRecord> {
   if (!userId) throw new AppError("permission_denied", "Not signed in.");
-  const recordId = stableRecordId(input.clientRecordId, "cr");
   const monthKey = istMonthKeyForMillis(nowMs);
   const result = await runAtomicBillableCreate({
     db,
@@ -44,7 +44,7 @@ export async function createCustomerCreditAtomic(
       if (serial == null || serial < 1) {
         throw new AppError("save_failed", "Customer credit serial was not allocated.");
       }
-      const record = buildNewRecord(userId, serial, input, nowMs);
+      const record = buildNewRecord(userId, serial, input, nowMs, recordId);
       return { record, payload: toCloud(record) };
     },
     hooks,

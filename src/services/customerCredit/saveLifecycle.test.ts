@@ -184,6 +184,36 @@ async function run(): Promise<void> {
   const summary = (await import("@/domain/customerCredit")).computeCreditSummary(detail!);
   assert.ok(summary.totalPaid >= 2500, "balance reflects appended payment");
 
+  // --- absent/blank clientRecordId: identity captured once per create ---
+  const absent = await mockCustomerCreditRepository.create(userId, {
+    ...minimalCreditInput("unused"),
+    clientRecordId: undefined,
+  });
+  assert.ok(absent.id.trim().length > 0, "absent clientRecordId still yields an id");
+  const absentHit = await mockCustomerCreditRepository.getById(userId, absent.id);
+  assert.equal(absentHit?.id, absent.id, "mock payload id matches stored id");
+  const absentOther = await mockCustomerCreditRepository.create(userId, {
+    ...minimalCreditInput("unused"),
+    clientRecordId: undefined,
+  });
+  assert.notEqual(
+    absentOther.id,
+    absent.id,
+    "a new create with absent clientRecordId is a distinct record"
+  );
+
+  const blank = await mockCustomerCreditRepository.create(userId, {
+    ...minimalCreditInput("unused"),
+    clientRecordId: "   ",
+  });
+  assert.ok(blank.id.trim().length > 0, "blank clientRecordId still yields an id");
+  const blankRetry = await mockCustomerCreditRepository.create(userId, {
+    ...minimalCreditInput("unused"),
+    clientRecordId: blank.id,
+  });
+  assert.equal(blankRetry.id, blank.id, "retry with captured id is idempotent");
+  assert.equal(blankRetry.serial, blank.serial, "idempotent retry does not allocate another serial");
+
   console.log("saveLifecycle.test.ts: all cases passed");
 }
 
