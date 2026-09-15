@@ -8,13 +8,20 @@
  * All mutating operations share one per-store serialization gate for the
  * decide/commit step. Admission of a call is distinct from the accepted
  * cache state that delayed I/O must converge to. A retired/rejected/no-op
- * request must not replace a newer accepted write or clear. Releasing an
- * attempt lock does not revoke a successfully accepted stored state.
- * Storage I/O itself runs outside that lock so a delayed
+ * request must not replace a newer accepted write or clear. Caller
+ * authorization is distinct from envelope-conditional applicability:
+ * a live-authorized clear of a different envelope, or an onlyNonDurable
+ * clear of store_pending / verified_unfinished_ios, must not replace
+ * the accepted durable write or delete a different same-UID envelope.
+ * Releasing an attempt lock does not revoke a successfully accepted
+ * stored state. Storage I/O itself runs outside that lock so a delayed
  * getItem/setItem/removeItem cannot deadlock a newer attempt. After every
  * awaited mutation the accepted state is re-applied:
  *   - a stale A write must not remain as B-session state
  *   - a stale A clear must not delete B
+ * Cold-start envelope clears stay unresolved until they are compared to
+ * accepted state (or disk when none exists). A delayed read is rechecked
+ * against the current accepted mutation before it can commit.
  */
 
 import { getClientCatalogEntry, isCanonicalSku } from "./iapCatalog";
@@ -106,6 +113,17 @@ type AcceptedCacheState =
       generation: number;
       onlyNonDurable: boolean;
       allUids: boolean;
+      matchIntent?: PendingPurchaseEnvelope;
+    }
+  | {
+      kind: "unresolved-clear";
+      seq: number;
+      envelope: PendingPurchaseEnvelope;
+      uid: string;
+      generation: number;
+      onlyNonDurable: boolean;
+      currentGeneration: () => number;
+      currentUid: () => string | null;
     }
   | {
       kind: "reconcile";
@@ -254,10 +272,7 @@ function shouldAcceptIntent(intent: LatestIntent): boolean {
     return authStillOwns(intent.auth, intent.envelope.uid) && operationStillLive(intent.auth);
   }
   if (intent.op === "clear-envelope") {
-    if (authStillOwns(intent.auth, intent.envelope.uid) && operationStillLive(intent.auth)) {
-      return true;
-    }
-    return isUidSwitchCleanup(intent.auth, intent.envelope.uid);
+    return false;
   }
   if (intent.op === "clear-uid") {
     if (!intent.auth) return true;
@@ -268,6 +283,64 @@ function shouldAcceptIntent(intent: LatestIntent): boolean {
     return authStillOwns(intent.auth, intent.auth.expectedUid) && operationStillLive(intent.auth);
   }
   return false;
+}
+
+function envelopeClearAuthorized(
+  intent: Extract<LatestIntent, { op: "clear-envelope" }>
+): boolean {
+  if (authStillOwns(intent.auth, intent.envelope.uid) && operationStillLive(intent.auth)) {
+    return true;
+  }
+  return isUidSwitchCleanup(intent.auth, intent.envelope.uid);
+}
+
+function envelopeClearAppliesToAcceptedSet(
+  intent: Extract<LatestIntent, { op: "clear-envelope" }>,
+  envelope: PendingPurchaseEnvelope
+): boolean {
+  if (!samePurchaseIntent(envelope, intent.envelope)) return false;
+  if (intent.onlyNonDurable && isDurablePendingStage(envelope.stage)) return false;
+  return true;
+}
+
+function acceptedClearFromEnvelope(
+  intent: Extract<LatestIntent, { op: "clear-envelope" }>
+): Extract<AcceptedCacheState, { kind: "clear" }> {
+  return {
+    kind: "clear",
+    seq: intent.seq,
+    uid: intent.envelope.uid,
+    generation: intent.auth.generation,
+    onlyNonDurable: intent.onlyNonDurable,
+    allUids: false,
+    matchIntent: intent.envelope,
+  };
+}
+
+function admitEnvelopeClear(
+  gate: MutationGate,
+  intent: Extract<LatestIntent, { op: "clear-envelope" }>
+): void {
+  if (!envelopeClearAuthorized(intent)) return;
+  const accepted = gate.accepted;
+  if (accepted?.kind === "set") {
+    if (!envelopeClearAppliesToAcceptedSet(intent, accepted.envelope)) return;
+    gate.accepted = acceptedClearFromEnvelope(intent);
+    return;
+  }
+  if (accepted?.kind === "clear") {
+    return;
+  }
+  gate.accepted = {
+    kind: "unresolved-clear",
+    seq: intent.seq,
+    envelope: intent.envelope,
+    uid: intent.envelope.uid,
+    generation: intent.auth.generation,
+    onlyNonDurable: intent.onlyNonDurable,
+    currentGeneration: intent.auth.currentGeneration,
+    currentUid: intent.auth.currentUid,
+  };
 }
 
 function toAcceptedState(intent: LatestIntent): AcceptedCacheState {
@@ -283,14 +356,7 @@ function toAcceptedState(intent: LatestIntent): AcceptedCacheState {
     };
   }
   if (intent.op === "clear-envelope") {
-    return {
-      kind: "clear",
-      seq: intent.seq,
-      uid: intent.envelope.uid,
-      generation: intent.auth.generation,
-      onlyNonDurable: intent.onlyNonDurable,
-      allUids: false,
-    };
+    return acceptedClearFromEnvelope(intent);
   }
   if (intent.op === "clear-uid") {
     return {
@@ -327,6 +393,10 @@ function admitIntent(store: IapKeyValueStore, intent: LatestIntent) {
   gate.seq += 1;
   intent.seq = gate.seq;
   gate.latest = intent;
+  if (intent.op === "clear-envelope") {
+    admitEnvelopeClear(gate, intent);
+    return;
+  }
   if (shouldAcceptIntent(intent)) {
     gate.accepted = toAcceptedState(intent);
   }
@@ -401,6 +471,70 @@ function sameEnvelope(
   );
 }
 
+function promoteUnresolvedClear(
+  store: IapKeyValueStore,
+  accepted: Extract<AcceptedCacheState, { kind: "unresolved-clear" }>,
+  next: AcceptedCacheState
+): void {
+  const gate = gateFor(store);
+  if (gate.accepted !== accepted) return;
+  gate.accepted = next;
+}
+
+function decideUnresolvedClear(
+  store: IapKeyValueStore,
+  accepted: Extract<AcceptedCacheState, { kind: "unresolved-clear" }>,
+  disk: {
+    raw: string | null;
+    envelope: PendingPurchaseEnvelope | null;
+    malformed: boolean;
+  }
+): MutationPlan {
+  if (!disk.raw) {
+    promoteUnresolvedClear(store, accepted, {
+      kind: "clear",
+      seq: accepted.seq,
+      uid: accepted.uid,
+      generation: accepted.generation,
+      onlyNonDurable: accepted.onlyNonDurable,
+      allUids: false,
+      matchIntent: accepted.envelope,
+    });
+    return { action: "noop" };
+  }
+  if (disk.malformed || !disk.envelope) {
+    return { action: "noop" };
+  }
+  if (disk.envelope.uid !== accepted.uid) {
+    return { action: "noop" };
+  }
+  if (!samePurchaseIntent(disk.envelope, accepted.envelope)) {
+    return { action: "noop" };
+  }
+  if (accepted.onlyNonDurable && isDurablePendingStage(disk.envelope.stage)) {
+    promoteUnresolvedClear(store, accepted, {
+      kind: "set",
+      seq: accepted.seq,
+      envelope: disk.envelope,
+      uid: disk.envelope.uid,
+      generation: accepted.generation,
+      currentGeneration: accepted.currentGeneration,
+      currentUid: accepted.currentUid,
+    });
+    return { action: "noop" };
+  }
+  promoteUnresolvedClear(store, accepted, {
+    kind: "clear",
+    seq: accepted.seq,
+    uid: accepted.uid,
+    generation: accepted.generation,
+    onlyNonDurable: accepted.onlyNonDurable,
+    allUids: false,
+    matchIntent: accepted.envelope,
+  });
+  return { action: "remove" };
+}
+
 function decidePendingMutation(
   store: IapKeyValueStore,
   disk: {
@@ -422,6 +556,10 @@ function decidePendingMutation(
     }
     if (sameEnvelope(disk.envelope, accepted.envelope)) return { action: "noop" };
     return { action: "set", value: JSON.stringify(accepted.envelope) };
+  }
+
+  if (accepted.kind === "unresolved-clear") {
+    return decideUnresolvedClear(store, accepted, disk);
   }
 
   if (accepted.kind === "clear") {

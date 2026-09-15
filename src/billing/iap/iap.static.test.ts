@@ -65,6 +65,10 @@ const iapSrc = iapFiles.map((f) => ({
   assert.match(pendingCode, /admitIntent/);
   assert.match(pendingCode, /accepted:/);
   assert.match(pendingCode, /shouldAcceptIntent/);
+  assert.match(pendingCode, /admitEnvelopeClear/);
+  assert.match(pendingCode, /envelopeClearAppliesToAcceptedSet/);
+  assert.match(pendingCode, /unresolved-clear/);
+  assert.match(pendingCode, /matchIntent/);
   assert.doesNotMatch(pendingCode, /canonicalSku\)\.startsWith\("vyd_"\)/);
 }
 

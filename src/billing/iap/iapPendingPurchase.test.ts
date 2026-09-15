@@ -699,11 +699,221 @@ async function testCompletedClearSurvivesOldWriteAfterOwnerFinished() {
     expectedAttempt: 2,
     currentAttempt: () => live.attempt,
   });
+  assert.equal(store.data[PENDING_PURCHASE_CACHE_KEY], undefined);
   live.attempt = null;
   store.releaseSetItem();
   await writeA;
   assert.equal(store.data[PENDING_PURCHASE_CACHE_KEY], undefined);
+  assert.equal(persistedEnvelope(store), undefined);
   assert.equal(await readPendingPurchase({ store, uid: "uid-a" }), null);
+}
+
+function persistedEnvelope(store: { data: Record<string, string> }): unknown {
+  const raw = store.data[PENDING_PURCHASE_CACHE_KEY];
+  return raw ? JSON.parse(raw) : undefined;
+}
+
+function attemptAuth(
+  uid: string,
+  generation: number,
+  live: { uid: string | null; gen: number; attempt: number | null }
+) {
+  return {
+    ...authFor(uid, generation, live),
+    expectedAttempt: live.attempt,
+    currentAttempt: () => live.attempt,
+  };
+}
+
+function iosMonthlyUnfinished(initiatedAt: number): PendingPurchaseEnvelope {
+  return {
+    version: 1,
+    uid: "uid-a",
+    platform: "ios",
+    canonicalSku: "vyd_professional_monthly",
+    productId: "com.specialsoftwares.vyaamikkdiary.professional.monthly",
+    stage: "verified_unfinished_ios",
+    initiatedAt,
+    updatedAt: initiatedAt,
+  };
+}
+
+async function testMismatchedEnvelopeClearDoesNotDeleteMonthly() {
+  // Reproduced at cache level: live-authorized clear of Yearly/101 must not
+  // delete accepted Monthly/104. Product/UID similarity is not identity.
+  const store = memoryStore();
+  const live = { uid: "uid-a" as string | null, gen: 1, attempt: 2 as number | null };
+  const monthly = monthlyEnvelope(104);
+  const yearly = envelope("uid-a", { initiatedAt: 101, updatedAt: 101 });
+  const wrote = await writePendingPurchase({
+    store,
+    envelope: monthly,
+    ...attemptAuth("uid-a", 1, live),
+  });
+  assert.equal(wrote, true);
+  await clearPendingPurchaseIfEnvelope({
+    store,
+    envelope: yearly,
+    onlyNonDurable: true,
+    ...attemptAuth("uid-a", 1, live),
+  });
+  assert.deepEqual(persistedEnvelope(store), monthly);
+  assert.deepEqual(await readPendingPurchase({ store, uid: "uid-a" }), monthly);
+  // Plant Yearly on disk. If the clear replaced accepted state with empty,
+  // another Yearly clear would delete it. Monthly's accepted set must restore.
+  store.data[PENDING_PURCHASE_CACHE_KEY] = JSON.stringify(yearly);
+  await clearPendingPurchaseIfEnvelope({
+    store,
+    envelope: yearly,
+    onlyNonDurable: true,
+    ...attemptAuth("uid-a", 1, live),
+  });
+  assert.deepEqual(persistedEnvelope(store), monthly);
+}
+
+async function testColdStartMismatchedEnvelopeClearDoesNotDeleteDiskMonthly() {
+  // Preventive/cold-start: no in-memory accepted set exists yet.
+  const store = memoryStore();
+  const live = { uid: "uid-a" as string | null, gen: 1, attempt: 2 as number | null };
+  const monthly = monthlyEnvelope(104);
+  const yearly = envelope("uid-a", { initiatedAt: 101, updatedAt: 101 });
+  store.data[PENDING_PURCHASE_CACHE_KEY] = JSON.stringify(monthly);
+  await clearPendingPurchaseIfEnvelope({
+    store,
+    envelope: yearly,
+    onlyNonDurable: true,
+    ...attemptAuth("uid-a", 1, live),
+  });
+  assert.deepEqual(persistedEnvelope(store), monthly);
+}
+
+async function testDurableAndroidNoOpClearThenDelayedOldWriteKeepsB() {
+  // Reproduced at cache level: onlyNonDurable clear of live B store_pending
+  // must not replace accepted B. After A's delayed write, B remains.
+  const store = createDeferredStore({ blockSet: true });
+  const live = { uid: "uid-a" as string | null, gen: 1, attempt: 1 as number | null };
+  const envA = envelope("uid-a", { initiatedAt: 101, updatedAt: 101 });
+  const envB = monthlyEnvelope(104, { stage: "store_pending" });
+  const writeA = writePendingPurchase({
+    store,
+    envelope: envA,
+    ...attemptAuth("uid-a", 1, live),
+  });
+  await store.waitForSetItem();
+  live.attempt = 2;
+  const wroteB = await writePendingPurchase({
+    store,
+    envelope: envB,
+    ...attemptAuth("uid-a", 1, live),
+  });
+  assert.equal(wroteB, true);
+  assert.deepEqual(persistedEnvelope(store), envB);
+  await clearPendingPurchaseIfEnvelope({
+    store,
+    envelope: envB,
+    onlyNonDurable: true,
+    ...attemptAuth("uid-a", 1, live),
+  });
+  assert.deepEqual(persistedEnvelope(store), envB);
+  store.releaseSetItem();
+  const lateA = await writeA;
+  assert.equal(lateA, false);
+  assert.deepEqual(persistedEnvelope(store), envB);
+  assert.equal((persistedEnvelope(store) as PendingPurchaseEnvelope).stage, "store_pending");
+  assert.equal((persistedEnvelope(store) as PendingPurchaseEnvelope).initiatedAt, 104);
+  assert.equal((persistedEnvelope(store) as PendingPurchaseEnvelope).updatedAt, 104);
+}
+
+async function testDurableIosNoOpClearThenDelayedOldWriteKeepsB() {
+  const store = createDeferredStore({ blockSet: true });
+  const live = { uid: "uid-a" as string | null, gen: 1, attempt: 1 as number | null };
+  const envA = envelope("uid-a", { initiatedAt: 101, updatedAt: 101 });
+  const envB = iosMonthlyUnfinished(104);
+  const writeA = writePendingPurchase({
+    store,
+    envelope: envA,
+    ...attemptAuth("uid-a", 1, live),
+  });
+  await store.waitForSetItem();
+  live.attempt = 2;
+  const wroteB = await writePendingPurchase({
+    store,
+    envelope: envB,
+    ...attemptAuth("uid-a", 1, live),
+  });
+  assert.equal(wroteB, true);
+  await clearPendingPurchaseIfEnvelope({
+    store,
+    envelope: envB,
+    onlyNonDurable: true,
+    ...attemptAuth("uid-a", 1, live),
+  });
+  store.releaseSetItem();
+  await writeA;
+  assert.deepEqual(persistedEnvelope(store), envB);
+  assert.equal((persistedEnvelope(store) as PendingPurchaseEnvelope).stage, "verified_unfinished_ios");
+}
+
+async function testDelayedRemoveCannotEraseDurableNoOpPreservedB() {
+  const store = createDeferredStore({ blockRemove: true });
+  const live = { uid: "uid-a" as string | null, gen: 1, attempt: 1 as number | null };
+  const envA = envelope("uid-a", { initiatedAt: 101, updatedAt: 101 });
+  store.data[PENDING_PURCHASE_CACHE_KEY] = JSON.stringify(envA);
+  const clearA = clearPendingPurchaseIfEnvelope({
+    store,
+    envelope: envA,
+    onlyNonDurable: true,
+    ...attemptAuth("uid-a", 1, live),
+  });
+  await store.waitForRemoveItem();
+  live.attempt = 2;
+  const envB = monthlyEnvelope(104, { stage: "store_pending" });
+  const wroteB = await writePendingPurchase({
+    store,
+    envelope: envB,
+    ...attemptAuth("uid-a", 1, live),
+  });
+  assert.equal(wroteB, true);
+  await clearPendingPurchaseIfEnvelope({
+    store,
+    envelope: envB,
+    onlyNonDurable: true,
+    ...attemptAuth("uid-a", 1, live),
+  });
+  store.releaseRemoveItem();
+  await clearA;
+  assert.deepEqual(persistedEnvelope(store), envB);
+}
+
+async function testDelayedRemoveCannotEraseMismatchedClearPreservedB() {
+  const store = createDeferredStore({ blockRemove: true });
+  const live = { uid: "uid-a" as string | null, gen: 1, attempt: 1 as number | null };
+  const envA = envelope("uid-a", { initiatedAt: 101, updatedAt: 101 });
+  store.data[PENDING_PURCHASE_CACHE_KEY] = JSON.stringify(envA);
+  const clearA = clearPendingPurchaseIfEnvelope({
+    store,
+    envelope: envA,
+    onlyNonDurable: true,
+    ...attemptAuth("uid-a", 1, live),
+  });
+  await store.waitForRemoveItem();
+  live.attempt = 2;
+  const envB = monthlyEnvelope(104);
+  const wroteB = await writePendingPurchase({
+    store,
+    envelope: envB,
+    ...attemptAuth("uid-a", 1, live),
+  });
+  assert.equal(wroteB, true);
+  await clearPendingPurchaseIfEnvelope({
+    store,
+    envelope: envA,
+    onlyNonDurable: true,
+    ...attemptAuth("uid-a", 1, live),
+  });
+  store.releaseRemoveItem();
+  await clearA;
+  assert.deepEqual(persistedEnvelope(store), envB);
 }
 
 async function testIdleRevisionAndAttemptGuardsAgree() {
@@ -757,6 +967,12 @@ async function main() {
   await testDeferredOldRemoveWithInterveningRetiredCleanupDoesNotDeleteB();
   await testAcceptedDurableWriteSurvivesAfterOwnerReleasesAttempt();
   await testCompletedClearSurvivesOldWriteAfterOwnerFinished();
+  await testMismatchedEnvelopeClearDoesNotDeleteMonthly();
+  await testColdStartMismatchedEnvelopeClearDoesNotDeleteDiskMonthly();
+  await testDurableAndroidNoOpClearThenDelayedOldWriteKeepsB();
+  await testDurableIosNoOpClearThenDelayedOldWriteKeepsB();
+  await testDelayedRemoveCannotEraseDurableNoOpPreservedB();
+  await testDelayedRemoveCannotEraseMismatchedClearPreservedB();
   await testIdleRevisionAndAttemptGuardsAgree();
   console.log("iapPendingPurchase.test.ts: ok");
 }
