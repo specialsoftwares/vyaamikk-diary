@@ -48,14 +48,12 @@ import {
   createCustomerCreditAtomic,
   allocateCustomerCreditSerialOnDb,
 } from "./atomicCreate";
-
 import {
-  appendPayment,
-  applyFullClosure,
-  applyStatus,
-  applyUpdate,
-  removePaymentFrom,
-} from "./shared";
+  addCustomerCreditPaymentOnDb,
+  closeCustomerCreditFullyPaidOnDb,
+} from "./recordMutations";
+
+import { applyStatus, applyUpdate, removePaymentFrom } from "./shared";
 import type { CloseFullyPaidInput } from "./types";
 import type {
   CreateCustomerCreditInput,
@@ -329,13 +327,13 @@ export const firebaseCustomerCreditRepository: CustomerCreditRepository = {
   },
 
   async addPayment(userId, recordId, payment) {
-    const ref = recordDocRef(userId, recordId);
-    const snap = await getDoc(ref);
-    if (!snap.exists()) throw new AppError("not_found", "Record not found.");
-    const existing = fromDoc(snap.id, snap.data() as Record<string, unknown>, userId);
-    const next = appendPayment(existing, payment, Date.now());
-    await setDoc(ref, toCloud(next), { merge: true });
-    return next;
+    return addCustomerCreditPaymentOnDb(
+      getFirebaseDb(),
+      userId,
+      recordId,
+      payment,
+      (id, data) => fromDoc(id, data, userId)
+    );
   },
 
   async removePayment(userId, recordId, paymentId) {
@@ -359,21 +357,12 @@ export const firebaseCustomerCreditRepository: CustomerCreditRepository = {
   },
 
   async closeFullyPaid(userId, input: CloseFullyPaidInput) {
-    const ref = recordDocRef(userId, input.recordId);
-    const snap = await getDoc(ref);
-    if (!snap.exists()) throw new AppError("not_found", "Record not found.");
-    const existing = fromDoc(snap.id, snap.data() as Record<string, unknown>, userId);
-    const next = applyFullClosure(
-      existing,
-      input.closure,
-      {
-        appendPayment: input.appendFinalPayment !== false,
-        clientPaymentId: input.clientMutationId,
-      },
-      Date.now()
+    return closeCustomerCreditFullyPaidOnDb(
+      getFirebaseDb(),
+      userId,
+      input,
+      (id, data) => fromDoc(id, data, userId)
     );
-    await setDoc(ref, toCloud(next), { merge: true });
-    return next;
   },
 
   async setReminder(userId, recordId, reminder) {

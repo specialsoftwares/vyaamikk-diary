@@ -184,6 +184,33 @@ async function run(): Promise<void> {
   const summary = (await import("@/domain/customerCredit")).computeCreditSummary(detail!);
   assert.ok(summary.totalPaid >= 2500, "balance reflects appended payment");
 
+  const closedAt = Date.now();
+  const closed = await mockCustomerCreditRepository.closeFullyPaid(userId, {
+    recordId: created.id,
+    appendFinalPayment: true,
+    clientMutationId: "close_lifecycle_1",
+    closure: {
+      finalPaymentDate: closedAt,
+      finalPaymentAmount: 7500,
+      paymentMode: "cash",
+      paidBy: "customer",
+      recordedBy: userId,
+      balanceAtClosure: 0,
+      adjustment: "exact",
+      closedAt,
+    },
+  });
+  assert.equal(closed.status, "fully_paid");
+  assert.ok(closed.closure, "closure metadata persisted");
+  const closedAgain = await mockCustomerCreditRepository.closeFullyPaid(userId, {
+    recordId: created.id,
+    appendFinalPayment: true,
+    clientMutationId: "close_lifecycle_1",
+    closure: closed.closure!,
+  });
+  assert.equal(closedAgain.status, "fully_paid");
+  assert.equal(closedAgain.version, closed.version, "repeat closeFullyPaid is idempotent");
+
   // --- absent/blank clientRecordId: identity captured once per create ---
   const absent = await mockCustomerCreditRepository.create(userId, {
     ...minimalCreditInput("unused"),

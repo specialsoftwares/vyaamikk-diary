@@ -1,5 +1,5 @@
 /**
- * VYD-36 Round 2 — Option-C production write-set proofs for
+ * VYD-36 Round 3 — Option-C production write-set proofs for
  * purchaseOrders, customerCreditRecords, professionalPacks.
  *
  * Runs in the same emulator session as firestore.rules.billing.test.ts.
@@ -30,6 +30,10 @@ import {
   createPurchaseOrderAtomic,
 } from "@/services/purchaseOrder/atomicCreate";
 import { createCustomerCreditAtomic } from "@/services/customerCredit/atomicCreate";
+import {
+  addCustomerCreditPaymentOnDb,
+  closeCustomerCreditFullyPaidOnDb,
+} from "@/services/customerCredit/recordMutations";
 import { createProfessionalPackAtomic } from "@/services/professionalPack/atomicCreate";
 import { classifyAtomicCreateError } from "@/billing/optionC/classifyCreateError";
 import {
@@ -464,7 +468,11 @@ async function main() {
     check("E PO same-id one quota increment", (await usageCount("g-same")) === 1);
     check("E PO same-id one serial", (await counterNext("g-same", "purchaseOrder")) === 1);
     check(
-      "E PO same-id captured id reused on retries",
+      "D server-confirmed same-id recovery did not consume extra quota/serial",
+      (await usageCount("g-same")) === 1 && (await counterNext("g-same", "purchaseOrder")) === 1
+    );
+    check(
+      "E PO same-id captured id stable across afterReads invocations",
       [...poSameSeenA, ...poSameSeenB].every((id) => id === "po_same")
     );
 
@@ -635,7 +643,12 @@ async function main() {
     const poFnB = (await getDoc(doc(authedDb("g-race-fn"), "users", "g-race-fn", "purchaseOrders", "po_fn_b"))).exists();
     check("F PO production create exactly one record", poFnA !== poFnB);
     check(
-      "F PO production create retry reused captured ids",
+      "E server-confirmed PO final-slot loser absent with usage at cap",
+      poFnA !== poFnB && (await usageCount("g-race-fn")) === 25
+    );
+    console.log(`  PO afterReads A=${poFnSeenA.length} B=${poFnSeenB.length}; SDK txn callback retry observed=${poFnSeenA.length >= 2 || poFnSeenB.length >= 2}`);
+    check(
+      "PO captured id stable across afterReads invocations",
       poFnSeenA.every((id) => id === "po_fn_a") && poFnSeenB.every((id) => id === "po_fn_b")
     );
 
@@ -695,10 +708,16 @@ async function main() {
       );
       const winnerSeen = ccFnWinner.id === ccFnSeenA[0] ? ccFnSeenA : ccFnSeenB;
       const loserSeen = ccFnWinner.id === ccFnSeenA[0] ? ccFnSeenB : ccFnSeenA;
-      check("F CC winner retries reused captured id", winnerSeen.every((id) => id === ccFnWinner.id));
+      console.log(
+        `  identity afterReads A=${ccFnSeenA.length} B=${ccFnSeenB.length}; SDK txn callback retry observed=${
+          ccFnSeenA.length >= 2 || ccFnSeenB.length >= 2
+        }`
+      );
       check(
-        "F CC loser retries reused captured id",
-        loserSeen.length >= 1 && loserSeen.every((id) => id === loserSeen[0])
+        "CC captured id stable across afterReads invocations (not proof of SDK retry unless count>=2)",
+        winnerSeen.every((id) => id === ccFnWinner.id) &&
+          loserSeen.length >= 1 &&
+          loserSeen.every((id) => id === loserSeen[0])
       );
       check(
         "F CC loser record absent",
@@ -745,6 +764,64 @@ async function main() {
     const pkFnA = (await getDoc(doc(authedDb("g-race-pk"), "users", "g-race-pk", "professionalPacks", "pk_fn_a"))).exists();
     const pkFnB = (await getDoc(doc(authedDb("g-race-pk"), "users", "g-race-pk", "professionalPacks", "pk_fn_b"))).exists();
     check("F pack production create exactly one record", pkFnA !== pkFnB);
+
+    await seedUser("g-xfamily");
+    await seedStatus("g-xfamily", { quotaEnforcementEnabled: true, plan: "free", entitlementActive: true });
+    await seedUsage("g-xfamily", usageDoc(monthNow, 24, "seed"));
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", "g-xfamily", "counters", "purchaseOrder"), {
+        next: 3,
+        updatedAt: Date.now(),
+      });
+      await setDoc(doc(ctx.firestore(), "users", "g-xfamily", "counters", "customerCredit"), {
+        next: 8,
+        updatedAt: Date.now(),
+      });
+    });
+    const xfBarrier = new FirstPassBarrier(2);
+    const xfRace = await Promise.allSettled([
+      createPurchaseOrderAtomic(
+        authedDb("g-xfamily"),
+        "g-xfamily",
+        poInput("po_xf"),
+        parsePo,
+        xfBarrier.hook()
+      ),
+      createCustomerCreditAtomic(
+        authedDb("g-xfamily"),
+        "g-xfamily",
+        creditInput("cr_xf"),
+        parseCredit,
+        xfBarrier.hook()
+      ),
+    ]);
+    const xfInspect = inspectSettled("F PO vs CC production create", xfRace);
+    check("F cross-family first-pass overlap", xfBarrier.overlap);
+    check(
+      "F cross-family exactly one fulfilled",
+      xfInspect.fulfilled === 1,
+      `fulfilled=${xfInspect.fulfilled} rejected=${xfInspect.rejectedKinds.join(",") || "none"}`
+    );
+    xfInspect.rejectedKinds.forEach((kind, i) => {
+      check(`F cross-family rejection[${i}] is quota_exhausted`, kind === "quota_exhausted", kind);
+    });
+    check("F cross-family usage=25", (await usageCount("g-xfamily")) === 25);
+    const xfPo = (
+      await getDoc(doc(authedDb("g-xfamily"), "users", "g-xfamily", "purchaseOrders", "po_xf"))
+    ).exists();
+    const xfCr = (
+      await getDoc(doc(authedDb("g-xfamily"), "users", "g-xfamily", "customerCreditRecords", "cr_xf"))
+    ).exists();
+    check("F cross-family exactly one committed record", xfPo !== xfCr);
+    const xfPoSerial = await counterNext("g-xfamily", "purchaseOrder");
+    const xfCrSerial = await counterNext("g-xfamily", "customerCredit");
+    if (xfPo && !xfCr) {
+      check("F cross-family PO win advances only PO serial", xfPoSerial === 4 && xfCrSerial === 8);
+    } else if (xfCr && !xfPo) {
+      check("F cross-family CC win advances only CC serial", xfPoSerial === 3 && xfCrSerial === 9);
+    } else {
+      check("F cross-family winner family identified", false);
+    }
 
     await seedUser("g-race-batch");
     await seedStatus("g-race-batch", {
@@ -967,7 +1044,10 @@ async function main() {
         updatedAt: Date.now(),
       })
     );
-    check("I CC update/payment-shaped write does not consume", (await usageCount("g-cc")) === 1);
+    check(
+      "I CC update/payment-shaped write is a Rules property, not repository addPayment",
+      (await usageCount("g-cc")) === 1
+    );
 
     const closedAt = Date.now();
     await assertSucceeds(
@@ -989,6 +1069,53 @@ async function main() {
       })
     );
     check("I CC full-closure-shaped update does not consume", (await usageCount("g-cc")) === 1);
+
+    const payRec = await createCustomerCreditAtomic(
+      authedDb("g-cc"),
+      "g-cc",
+      creditInput("cr_pay_ops"),
+      parseCredit
+    );
+    const payBefore = await usageCount("g-cc");
+    check("I CC payment fixture consumed one create slot", payBefore === 2 && payRec.id === "cr_pay_ops");
+    const paid = await addCustomerCreditPaymentOnDb(
+      authedDb("g-cc"),
+      "g-cc",
+      "cr_pay_ops",
+      {
+        amount: 2500,
+        paidDate: Date.now(),
+        mode: "cash",
+        reference: null,
+        note: "emulator payment",
+        clientPaymentId: "pay_em_1",
+      },
+      parseCredit
+    );
+    check("I CC repository payment appends ledger", (paid.payments?.length ?? 0) >= 1);
+    check("I CC repository payment does not consume quota", (await usageCount("g-cc")) === payBefore);
+    const closed = await closeCustomerCreditFullyPaidOnDb(
+      authedDb("g-cc"),
+      "g-cc",
+      {
+        recordId: "cr_pay_ops",
+        appendFinalPayment: true,
+        clientMutationId: "close_em_1",
+        closure: {
+          finalPaymentDate: Date.now(),
+          finalPaymentAmount: 7500,
+          paymentMode: "cash",
+          paidBy: "customer",
+          recordedBy: "g-cc",
+          balanceAtClosure: 0,
+          adjustment: "exact",
+          closedAt: Date.now(),
+        },
+      },
+      parseCredit
+    );
+    check("I CC repository closure marks fully_paid", closed.status === "fully_paid");
+    check("I CC repository closure does not consume quota", (await usageCount("g-cc")) === payBefore);
 
     await seedUser("g-id");
     await seedStatus("g-id", { quotaEnforcementEnabled: true, plan: "starter", entitlementActive: true });
@@ -1132,22 +1259,19 @@ async function main() {
     );
     check("J starter cap 100 allows create at 26", starterPo.serial === 1 && (await usageCount("g-starter")) === 26);
 
-    // Access budget (N): each document in a transaction is evaluated separately.
-    // Per-evaluation get/exists/getAfter (cached same-path reads count once):
-    //   PO create: isActiveUser get(users/uid)=1
-    //              quotaEnforcementOn exists+get(status)=1
-    //              usageConsumedForRecord getAfter(usage)=1 + exists+get(usage)=1
-    //              ≈ 4 of the 10 per-request access limit.
-    //   usageCurrent update: isActiveUser=1, quotaEnforcementOn=1,
-    //              usageLinkedRecordCreatedInBatch exists+existsAfter(record)=2
-    //              ≈ 4 of 10.
-    //   counter create/update: isActiveUser=1, serial validators use request/resource only
-    //              ≈ 1 of 10.
+    // Access budget (N)
+    // Manual estimate (not a measured get/exists/getAfter trace):
+    //   Create txn per evaluation: isActiveUser get(users/uid);
+    //   quotaEnforcementOn exists+get(status); usageConsumedForRecord
+    //   getAfter(usage)+exists+get(usage); serial counter isActiveUser.
+    //   ≈ 4 (record) + 4 (usage) + 1 (counter) of the 10 per-request limit.
+    // Recovery after a Rules-denied commit is a later read-only transaction
+    // (account, record, status, usage) and is not part of the create budget.
+    // Measured evidence: production-shaped PO/CC/pack creates succeeded, and
+    // same-id / final-slot / cross-family recovery did not hit the access cap.
     // _saveLocks is a separate pre-create write, not part of this transaction.
-    // These production-shaped PO/CC/pack transactions succeeding is the budget proof;
-    // a tiny fixture is not treated as evidence.
     check(
-      "N production-shaped PO atomic create succeeded (Rules access budget held)",
+      "N production-shaped PO atomic create succeeded (Rules access budget held; measured: create committed)",
       po1.serial === 1
     );
     check(
