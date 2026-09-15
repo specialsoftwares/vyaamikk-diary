@@ -98,6 +98,10 @@ function createHarness(args: {
     fetch: 0,
     purchaseListeners: 0,
     errorListeners: 0,
+    initInFlight: 0,
+    maxConcurrentInit: 0,
+    activePurchaseListeners: 0,
+    activeErrorListeners: 0,
   };
   let onPurchase: ((p: StorePurchase) => void) | null = null;
   let onError: ((e: StorePurchaseError) => void) | null = null;
@@ -105,8 +109,14 @@ function createHarness(args: {
   const native: IapNativeAdapter = {
     async initConnection() {
       calls.init += 1;
-      if (args.initConnection) return args.initConnection();
-      return true;
+      calls.initInFlight += 1;
+      calls.maxConcurrentInit = Math.max(calls.maxConcurrentInit, calls.initInFlight);
+      try {
+        if (args.initConnection) return args.initConnection();
+        return true;
+      } finally {
+        calls.initInFlight -= 1;
+      }
     },
     async endConnection() {
       calls.end += 1;
@@ -132,15 +142,19 @@ function createHarness(args: {
     },
     addPurchaseUpdatedListener(listener) {
       calls.purchaseListeners += 1;
+      calls.activePurchaseListeners += 1;
       onPurchase = listener;
       return () => {
+        calls.activePurchaseListeners -= 1;
         if (onPurchase === listener) onPurchase = null;
       };
     },
     addPurchaseErrorListener(listener) {
       calls.errorListeners += 1;
+      calls.activeErrorListeners += 1;
       onError = listener;
       return () => {
+        calls.activeErrorListeners -= 1;
         if (onError === listener) onError = null;
       };
     },
@@ -184,6 +198,12 @@ function createHarness(args: {
   });
 
   return { session, store, calls, native, emitPurchase: (p: StorePurchase) => onPurchase?.(p), emitError: (e: StorePurchaseError) => onError?.(e) };
+}
+
+async function flushAsync() {
+  for (let i = 0; i < 20; i += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
 }
 
 async function testNoPurchaseSheetOnStartup() {
@@ -533,13 +553,17 @@ async function testStaleAInitDoesNotTearDownB() {
   });
   const authA = h.session.setAuth({ status: "signed_in", uid: "uid-a" });
   await initStartedP;
-  await h.session.setAuth({ status: "signed_in", uid: "uid-b" });
-  const endsAfterB = h.calls.end;
+  const authB = h.session.setAuth({ status: "signed_in", uid: "uid-b" });
+  await flushAsync();
+  assert.equal(h.calls.maxConcurrentInit, 1);
   resolveA(true);
   await authA;
+  await authB;
   assert.equal(h.session.getView().ownerUid, "uid-b");
   assert.equal(h.session.getView().connected, true);
-  assert.equal(h.calls.end, endsAfterB);
+  assert.equal(h.calls.maxConcurrentInit, 1);
+  assert.equal(h.calls.activePurchaseListeners, 1);
+  assert.equal(h.calls.activeErrorListeners, 1);
 }
 
 async function testBoundedReconnectDoesNotAutoLaunchPurchase() {
@@ -745,12 +769,6 @@ function gate() {
     release = resolve;
   });
   return { wait, release: () => release() };
-}
-
-async function flushAsync() {
-  for (let i = 0; i < 20; i += 1) {
-    await new Promise((resolve) => setImmediate(resolve));
-  }
 }
 
 async function testStaleARequestResolveDoesNotReleaseBLock() {
@@ -1031,14 +1049,18 @@ async function testStaleInitAfterNewInitFalseCleansUp() {
   });
   const authA = h.session.setAuth({ status: "signed_in", uid: "uid-a" });
   await startedP;
-  await h.session.setAuth({ status: "signed_in", uid: "uid-b" });
-  assert.equal(h.session.getView().connected, false);
-  const endsBefore = h.calls.end;
+  const authB = h.session.setAuth({ status: "signed_in", uid: "uid-b" });
+  await flushAsync();
+  assert.equal(h.calls.maxConcurrentInit, 1);
   resolveA(true);
   await authA;
-  assert.ok(h.calls.end > endsBefore);
+  await authB;
+  assert.equal(h.calls.maxConcurrentInit, 1);
   assert.equal(h.session.getView().connected, false);
   assert.equal(h.session.getView().ownerUid, "uid-b");
+  assert.equal(h.calls.activePurchaseListeners, 0);
+  assert.equal(h.calls.activeErrorListeners, 0);
+  assert.ok(h.calls.end >= 1);
 }
 
 async function testIosATokenDoesNotContaminateBSession() {
@@ -1106,6 +1128,245 @@ async function testIosATokenDoesNotContaminateBSession() {
   assert.notEqual(h.session.getView().lastResult?.kind, "verified");
 }
 
+async function testConcurrentDoublePurchaseDuringCatalog() {
+  let first = true;
+  const g = gate();
+  let started = () => {};
+  const startedP = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const h = createHarness({
+    platform: "android",
+    fetchProducts: async () => {
+      if (first) {
+        first = false;
+        started();
+        await g.wait;
+      }
+      return [standardAndroidProduct()];
+    },
+  });
+  await h.session.setAuth({ status: "signed_in", uid: "uid-a" });
+  assert.equal(h.session.getView().catalog.length, 0);
+  const firstPromise = h.session.purchase("vyd_professional_yearly");
+  await startedP;
+  const secondResult = await h.session.purchase("vyd_professional_monthly");
+  assert.equal(secondResult.kind, "already_in_flight");
+  g.release();
+  const firstResult = await firstPromise;
+  assert.equal(firstResult.kind, "sheet_launched");
+  assert.equal(h.calls.prepareAndroid, 1);
+  assert.equal(h.session.getView().pending?.canonicalSku, "vyd_professional_yearly");
+  assert.equal(h.session.getView().pending?.uid, "uid-a");
+  assert.equal(h.calls.requestPurchase.length, 1);
+}
+
+async function testIdenticalSkuDoubleTap() {
+  let first = true;
+  const g = gate();
+  let started = () => {};
+  const startedP = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const h = createHarness({
+    platform: "android",
+    fetchProducts: async () => {
+      if (first) {
+        first = false;
+        started();
+        await g.wait;
+      }
+      return [standardAndroidProduct()];
+    },
+  });
+  await h.session.setAuth({ status: "signed_in", uid: "uid-a" });
+  const firstPromise = h.session.purchase("vyd_professional_yearly");
+  await startedP;
+  const secondResult = await h.session.purchase("vyd_professional_yearly");
+  assert.equal(secondResult.kind, "already_in_flight");
+  g.release();
+  const firstResult = await firstPromise;
+  assert.equal(firstResult.kind, "sheet_launched");
+  assert.equal(h.calls.prepareAndroid, 1);
+  assert.equal(h.calls.requestPurchase.length, 1);
+}
+
+async function testRestoreBlockedWhilePurchaseInFlight() {
+  const g = gate();
+  let started = () => {};
+  const startedP = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const h = createHarness({
+    platform: "android",
+    requestPurchase: async () => {
+      started();
+      await g.wait;
+    },
+  });
+  await h.session.setAuth({ status: "signed_in", uid: "uid-a" });
+  const getAvailableBefore = h.calls.getAvailable;
+  const purchaseP = h.session.purchase("vyd_professional_yearly");
+  await startedP;
+  const lastBefore = h.session.getView().lastResult;
+  const restore = await h.session.restorePurchases();
+  assert.equal(restore.kind, "already_in_flight");
+  assert.equal(h.calls.getAvailable, getAvailableBefore);
+  assert.equal(h.session.getView().pending?.uid, "uid-a");
+  assert.equal(h.session.getView().pending?.stage, "intent_created");
+  assert.equal(h.session.getView().purchaseInFlight, true);
+  assert.equal(h.session.getView().lastResult, lastBefore);
+  assert.equal(h.calls.validateAndroid.length, 0);
+  g.release();
+  const launched = await purchaseP;
+  assert.equal(launched.kind, "sheet_launched");
+  h.emitError({ code: "user-cancelled", message: "cancelled" });
+  await flushAsync();
+  assert.equal(h.session.getView().purchaseInFlight, false);
+  const restoreAfter = await h.session.restorePurchases();
+  assert.equal(restoreAfter.kind, "verified");
+  assert.ok(h.calls.getAvailable > getAvailableBefore);
+  assert.equal(h.calls.validateAndroid.length, 0);
+}
+
+async function testPurchaseBlockedDuringDurableRecovery() {
+  const pendingEnv = {
+    version: 1,
+    uid: "uid-a",
+    platform: "android" as const,
+    canonicalSku: "vyd_professional_yearly" as const,
+    productId: "vyd_professional",
+    androidBasePlanId: "yearly" as const,
+    stage: "store_pending" as const,
+    initiatedAt: 1,
+    updatedAt: 1,
+  };
+  const g = gate();
+  let started = () => {};
+  const startedP = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const h = createHarness({
+    platform: "android",
+    getAvailablePurchases: async () => {
+      started();
+      await g.wait;
+      return [];
+    },
+  });
+  h.store.data[PENDING_PURCHASE_CACHE_KEY] = JSON.stringify(pendingEnv);
+  const authP = h.session.setAuth({ status: "signed_in", uid: "uid-a" });
+  await startedP;
+  const buy = await h.session.purchase("vyd_professional_monthly");
+  assert.equal(buy.kind, "already_in_flight");
+  assert.equal(h.calls.requestPurchase.length, 0);
+  assert.equal(h.calls.prepareAndroid, 0);
+  assert.equal(h.session.getView().pending?.stage, "store_pending");
+  g.release();
+  await authP;
+  assert.equal(h.session.getView().pending?.stage, "store_pending");
+  const after = await h.session.purchase("vyd_professional_yearly");
+  assert.equal(after.kind, "already_in_flight");
+  assert.equal(h.calls.requestPurchase.length, 0);
+}
+
+async function testPurchaseWorksAfterEmptyRecovery() {
+  const h = createHarness({ platform: "android" });
+  await h.session.setAuth({ status: "signed_in", uid: "uid-a" });
+  const result = await h.session.purchase("vyd_professional_yearly");
+  assert.equal(result.kind, "sheet_launched");
+  assert.equal(h.calls.requestPurchase.length, 1);
+}
+
+async function testInitAFalseThenBTrue() {
+  let resolveA = (_value: boolean) => {};
+  let firstInit = true;
+  let started = () => {};
+  const startedP = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const h = createHarness({
+    platform: "android",
+    initConnection: async () => {
+      if (firstInit) {
+        firstInit = false;
+        started();
+        return new Promise<boolean>((resolve) => {
+          resolveA = resolve;
+        });
+      }
+      return true;
+    },
+  });
+  const authA = h.session.setAuth({ status: "signed_in", uid: "uid-a" });
+  await startedP;
+  const authB = h.session.setAuth({ status: "signed_in", uid: "uid-b" });
+  await flushAsync();
+  assert.equal(h.calls.maxConcurrentInit, 1);
+  resolveA(false);
+  await authA;
+  await authB;
+  assert.equal(h.calls.maxConcurrentInit, 1);
+  assert.equal(h.session.getView().ownerUid, "uid-b");
+  assert.equal(h.session.getView().connected, true);
+  assert.equal(h.calls.activePurchaseListeners, 1);
+  assert.equal(h.calls.activeErrorListeners, 1);
+  assert.equal(h.calls.purchaseListeners, 1);
+  assert.equal(h.calls.errorListeners, 1);
+}
+
+async function testSameGenerationInitCoalesces() {
+  const g = gate();
+  let started = () => {};
+  const startedP = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  let bothFetching = () => {};
+  const bothFetchingP = new Promise<void>((resolve) => {
+    bothFetching = resolve;
+  });
+  let initN = 0;
+  let fetchN = 0;
+  let inFetch = 0;
+  const h = createHarness({
+    platform: "android",
+    initConnection: async () => {
+      initN += 1;
+      if (initN >= 2) {
+        started();
+        await g.wait;
+      }
+      return true;
+    },
+    fetchProducts: async () => {
+      fetchN += 1;
+      if (fetchN <= 2) {
+        inFetch += 1;
+        if (inFetch === 2) bothFetching();
+        await bothFetchingP;
+        const err = new Error("disconnected");
+        (err as { code?: string }).code = "service-disconnected";
+        throw err;
+      }
+      return [standardAndroidProduct()];
+    },
+  });
+  await h.session.setAuth({ status: "signed_in", uid: "uid-a" });
+  const c1 = h.session.loadCatalog();
+  const c2 = h.session.loadCatalog();
+  await bothFetchingP;
+  await startedP;
+  assert.equal(h.calls.maxConcurrentInit, 1);
+  assert.equal(h.calls.init, 2);
+  g.release();
+  await c1;
+  await c2;
+  assert.equal(h.calls.maxConcurrentInit, 1);
+  assert.equal(h.calls.init, 2);
+  assert.equal(h.calls.activePurchaseListeners, 1);
+  assert.equal(h.calls.activeErrorListeners, 1);
+}
+
 async function main() {
   await testNoPurchaseSheetOnStartup();
   await testExpoGoAndWebUnsupported();
@@ -1139,6 +1400,13 @@ async function main() {
   await testAuthChangeDuringEndConnection();
   await testStaleInitAfterNewInitFalseCleansUp();
   await testIosATokenDoesNotContaminateBSession();
+  await testConcurrentDoublePurchaseDuringCatalog();
+  await testIdenticalSkuDoubleTap();
+  await testRestoreBlockedWhilePurchaseInFlight();
+  await testPurchaseBlockedDuringDurableRecovery();
+  await testPurchaseWorksAfterEmptyRecovery();
+  await testInitAFalseThenBTrue();
+  await testSameGenerationInitCoalesces();
   console.log("iapSession.test.ts: ok");
 }
 

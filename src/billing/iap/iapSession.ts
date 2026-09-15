@@ -71,10 +71,11 @@ export function createIapSession(deps: IapSessionDeps) {
   let connected = false;
   let connectionOwnerGen: number | null = null;
   let listenerOwnerGen: number | null = null;
-  let initEpoch = 0;
-  const inFlightInits = new Set<number>();
   let connectionEnds = Promise.resolve();
+  let openFlight: Promise<boolean> | null = null;
+  let openFlightGen: number | null = null;
   let reconnectBudget = 0;
+  let readyGen: number | null = null;
   let purchaseInFlight = false;
   let purchaseOwnerGen: number | null = null;
   let purchaseOwnerUid: string | null = null;
@@ -144,6 +145,19 @@ export function createIapSession(deps: IapSessionDeps) {
     purchaseInFlight = false;
     purchaseOwnerGen = null;
     purchaseOwnerUid = null;
+  }
+
+  function purchaseLockOwnedBy(forGen: number, forUid: string | null): boolean {
+    return (
+      purchaseInFlight &&
+      purchaseOwnerGen === forGen &&
+      purchaseOwnerUid === forUid &&
+      isCurrentOperation(forGen, forUid)
+    );
+  }
+
+  function isAuthReady(forGen: number): boolean {
+    return readyGen === forGen;
   }
 
   function authChurnResult(forUid: string | null): PurchaseFlowResult {
@@ -270,6 +284,7 @@ export function createIapSession(deps: IapSessionDeps) {
   function attachListeners(forGen: number) {
     if (generation !== forGen) return;
     if (listenerOwnerGen != null && listenerOwnerGen > forGen) return;
+    if (listenerOwnerGen === forGen && removeUpdated != null && removeError != null) return;
     if (listenerOwnerGen != null && listenerOwnerGen !== forGen) {
       detachListenersOwnedBy(listenerOwnerGen);
     }
@@ -305,36 +320,36 @@ export function createIapSession(deps: IapSessionDeps) {
     }
   }
 
-  async function openConnection(forGen: number): Promise<boolean> {
+  async function openConnectionExclusive(
+    forGen: number,
+    asReconnect: boolean
+  ): Promise<boolean> {
     await connectionEnds;
     if (generation !== forGen || !uid || !storePlatform || !deps.capability.available) {
       return false;
     }
+    if (connected && connectionOwnerGen === forGen) return true;
+    if (asReconnect) {
+      if (reconnectBudget <= 0) return false;
+      reconnectBudget -= 1;
+    }
     const forUid = uid;
-    const myEpoch = ++initEpoch;
-    inFlightInits.add(forGen);
     let didConnect = false;
     try {
       didConnect = (await deps.native.initConnection()) === true;
     } catch {
       didConnect = false;
-    } finally {
-      inFlightInits.delete(forGen);
     }
 
     if (!isCurrentOperation(forGen, forUid) || uid == null) {
       const newerOwns = connectionOwnerGen != null && connectionOwnerGen > forGen;
-      const newerInFlight = [...inFlightInits].some((g) => g > forGen);
-      if (didConnect && !newerOwns && !newerInFlight) {
+      if (didConnect && !newerOwns) {
         await enqueueConnectionEnd(endNativeConnection);
       }
       return false;
     }
 
     if (connectionOwnerGen != null && connectionOwnerGen > forGen) {
-      return false;
-    }
-    if (initEpoch !== myEpoch && connectionOwnerGen != null && connectionOwnerGen > forGen) {
       return false;
     }
 
@@ -349,6 +364,39 @@ export function createIapSession(deps: IapSessionDeps) {
     connectionOwnerGen = forGen;
     attachListeners(forGen);
     return true;
+  }
+
+  async function openConnection(
+    forGen: number,
+    asReconnect = false
+  ): Promise<boolean> {
+    while (openFlight != null && openFlightGen !== forGen) {
+      try {
+        await openFlight;
+      } catch {
+        // ignore
+      }
+      if (generation !== forGen) return false;
+    }
+    if (openFlight != null && openFlightGen === forGen) {
+      return openFlight;
+    }
+    if (generation !== forGen || !uid || !storePlatform || !deps.capability.available) {
+      return false;
+    }
+    if (connected && connectionOwnerGen === forGen) return true;
+
+    const run = openConnectionExclusive(forGen, asReconnect);
+    openFlight = run;
+    openFlightGen = forGen;
+    try {
+      return await run;
+    } finally {
+      if (openFlight === run) {
+        openFlight = null;
+        openFlightGen = null;
+      }
+    }
   }
 
   async function closeConnectionIfOwned(forGen: number): Promise<void> {
@@ -376,9 +424,7 @@ export function createIapSession(deps: IapSessionDeps) {
       return false;
     }
     if (connected && connectionOwnerGen === forGen) return true;
-    if (reconnectBudget <= 0) return false;
-    reconnectBudget -= 1;
-    return openConnection(forGen);
+    return openConnection(forGen, true);
   }
 
   async function recover(forGen: number, forUid: string) {
@@ -440,6 +486,7 @@ export function createIapSession(deps: IapSessionDeps) {
     const previousUid = uid;
     generation += 1;
     const forGen = generation;
+    readyGen = null;
     processedTokens = new Set();
     finishedIosTokens = new Set();
     purchaseInFlight = false;
@@ -457,6 +504,7 @@ export function createIapSession(deps: IapSessionDeps) {
       detachListenersOwnedBy(listenerOwnerGen);
     }
 
+    try {
     if (previousUid && previousUid !== nextUid) {
       await clearPendingPurchaseIfUid(
         deps.store,
@@ -497,6 +545,9 @@ export function createIapSession(deps: IapSessionDeps) {
     }
     await recover(forGen, nextUid);
     emitIfCurrent(forGen, nextUid);
+    } finally {
+      if (generation === forGen) readyGen = forGen;
+    }
   }
 
   async function loadCatalog(): Promise<CanonicalSkuAvailability[]> {
@@ -566,6 +617,7 @@ export function createIapSession(deps: IapSessionDeps) {
   }
 
   function purchaseBlocked(): boolean {
+    if (readyGen !== generation) return true;
     if (purchaseInFlight) return true;
     return pending != null && isDurablePendingStage(pending.stage);
   }
@@ -596,10 +648,14 @@ export function createIapSession(deps: IapSessionDeps) {
       return publishResultIfCurrent(forGen, buyerUid, result);
     }
 
+    beginPurchaseLock(forGen, buyerUid);
+    emit();
+
     if (!connected || connectionOwnerGen !== forGen) {
       const ok = await ensureConnected(forGen, buyerUid);
       if (!isCurrentOperation(forGen, buyerUid)) return authChurnResult(buyerUid);
       if (!ok) {
+        releasePurchaseIfCurrent(forGen, buyerUid);
         const result: PurchaseFlowResult = {
           kind: "failed",
           recoverable: true,
@@ -616,6 +672,7 @@ export function createIapSession(deps: IapSessionDeps) {
     }
     const skuState = catalog.find((item) => item.canonicalSku === canonicalSku);
     if (!skuState?.available) {
+      releasePurchaseIfCurrent(forGen, buyerUid);
       const result: PurchaseFlowResult = {
         kind: "unavailable",
         reason: skuState?.unavailableReason ?? "products_unavailable",
@@ -623,8 +680,6 @@ export function createIapSession(deps: IapSessionDeps) {
       return publishResultIfCurrent(forGen, buyerUid, result);
     }
 
-    beginPurchaseLock(forGen, buyerUid);
-    emit();
     let envelope: PendingPurchaseEnvelope | null = null;
     try {
       const ids = pendingProductIdForSku(storePlatform, canonicalSku);
@@ -808,9 +863,13 @@ export function createIapSession(deps: IapSessionDeps) {
       };
       return publishResultIfCurrent(forGen, forUid, result);
     }
+    if (!isAuthReady(forGen) || purchaseLockOwnedBy(forGen, forUid)) {
+      return { kind: "already_in_flight" };
+    }
     if (!connected || connectionOwnerGen !== forGen) {
       const ok = await ensureConnected(forGen, forUid);
       if (!isCurrentOperation(forGen, forUid)) return authChurnResult(forUid);
+      if (purchaseLockOwnedBy(forGen, forUid)) return { kind: "already_in_flight" };
       if (!ok) {
         const result: PurchaseFlowResult = {
           kind: "failed",
@@ -839,6 +898,7 @@ export function createIapSession(deps: IapSessionDeps) {
       return publishResultIfCurrent(forGen, forUid, result);
     }
     if (!isCurrentOperation(forGen, forUid)) return authChurnResult(forUid);
+    if (purchaseLockOwnedBy(forGen, forUid)) return { kind: "already_in_flight" };
     if (purchases.length === 0) {
       const result: PurchaseFlowResult = { kind: "verified" };
       return publishResultIfCurrent(forGen, forUid, result);

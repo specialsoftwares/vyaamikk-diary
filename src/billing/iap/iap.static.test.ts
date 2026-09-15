@@ -96,6 +96,15 @@ const iapSrc = iapFiles.map((f) => ({
   assert.doesNotMatch(session, /processedTokens\.clear\(/);
   assert.doesNotMatch(session, /finishedIosTokens\.clear\(/);
   assert.match(session, /compensateStaleStorage/);
+  assert.match(session, /openFlight/);
+  assert.match(session, /readyGen/);
+  assert.match(session, /purchaseLockOwnedBy/);
+  const purchaseFn = session.slice(session.indexOf("async function purchase"));
+  const lockIdx = purchaseFn.indexOf("beginPurchaseLock");
+  const loadIdx = purchaseFn.indexOf("await loadCatalog");
+  const ensureIdx = purchaseFn.indexOf("await ensureConnected");
+  assert.ok(lockIdx >= 0 && loadIdx > lockIdx);
+  assert.ok(ensureIdx > lockIdx);
   const pendingIdx = session.indexOf("writePendingPurchase");
   const reqIdx = session.lastIndexOf("requestPurchase");
   assert.ok(pendingIdx >= 0 && reqIdx > pendingIdx);
