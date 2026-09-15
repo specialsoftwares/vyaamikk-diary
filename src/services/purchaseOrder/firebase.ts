@@ -5,9 +5,8 @@
  *   users/{uid}/purchaseOrders/{poId}
  *   users/{uid}/counters/purchaseOrder  → { next: number }
  *
- * Serial allocation uses a Firestore transaction on the counter doc so two
- * concurrent creates can never receive the same number. PDF file URIs are
- * never written remotely.
+ * First CREATE commits counter + record (and usageCurrent while enforcement
+ * is on) in one transaction. PDF file URIs are never written remotely.
  */
 
 import {
@@ -18,7 +17,6 @@ import {
   getDocs,
   orderBy,
   query,
-  runTransaction,
   setDoc,
 } from "firebase/firestore";
 
@@ -30,11 +28,10 @@ import {
   type PurchaseOrder,
   type PurchaseOrderItem,
 } from "@/domain/purchaseOrder";
-import { stableRecordId } from "@/services/records/stableRecordId";
 import { createLogger } from "@/utils/logger";
+import { createPurchaseOrderAtomic, allocatePurchaseOrderSerialOnDb } from "./atomicCreate";
 
 import type {
-  CreatePurchaseOrderInput,
   ListPurchaseOrdersOptions,
   PurchaseOrderRepository,
   UpdatePurchaseOrderInput,
@@ -48,9 +45,6 @@ function userCollection(userId: string) {
 }
 function poDocRef(userId: string, id: string) {
   return doc(getFirebaseDb(), "users", userId, COLLECTION, id);
-}
-function counterDocRef(userId: string) {
-  return doc(getFirebaseDb(), "users", userId, "counters", "purchaseOrder");
 }
 
 function num(v: unknown, fallback = 0): number {
@@ -143,84 +137,13 @@ function toCloud(po: PurchaseOrder): Record<string, unknown> {
 
 export const firebasePurchaseOrderRepository: PurchaseOrderRepository = {
   async allocateSerial(userId) {
-    if (!userId) throw new AppError("permission_denied", "Not signed in.");
-    const ref = counterDocRef(userId);
-    return runTransaction(getFirebaseDb(), async (tx) => {
-      const snap = await tx.get(ref);
-      const current = snap.exists() ? num((snap.data() as { next?: number }).next) : 0;
-      const next = current + 1;
-      tx.set(ref, { next, updatedAt: Date.now() }, { merge: true });
-      return next;
-    });
+    return allocatePurchaseOrderSerialOnDb(getFirebaseDb(), userId);
   },
 
   async create(userId, input) {
-    if (!userId) throw new AppError("permission_denied", "Not signed in.");
-    const id = stableRecordId(input.clientRecordId, "po");
-    const ref = poDocRef(userId, id);
-    const existingSnap = await getDoc(ref);
-    if (existingSnap.exists()) {
-      return fromDoc(existingSnap.id, existingSnap.data() as Record<string, unknown>, userId);
-    }
-
-    const serial = await this.allocateSerial(userId);
-    const now = Date.now();
-    const po: PurchaseOrder = {
-      id,
-      userId,
-      ueid: input.ueid,
-      serial,
-      poNumber: formatPoNumber(serial),
-      status: "active",
-      poDate: input.poDate,
-      vendorName: input.vendorName.trim(),
-      vendorGstin: input.vendorGstin ?? null,
-      vendorAddress: input.vendorAddress ?? null,
-      vendorPin: input.vendorPin ?? null,
-      vendorState: input.vendorState ?? null,
-      vendorContactName: input.vendorContactName ?? null,
-      vendorContactPhone: input.vendorContactPhone ?? null,
-      vendorContactEmail: input.vendorContactEmail ?? null,
-      buyerName: input.buyerName.trim(),
-      buyerAddress: input.buyerAddress ?? null,
-      buyerGstin: input.buyerGstin ?? null,
-      buyerPin: input.buyerPin ?? null,
-      buyerState: input.buyerState ?? null,
-      authorizedBy: input.authorizedBy ?? null,
-      authorizedDesignation: input.authorizedDesignation ?? null,
-      shipSameAsBuyer: input.shipSameAsBuyer ?? false,
-      shipName: input.shipName ?? null,
-      shipAddress: input.shipAddress ?? null,
-      shipPin: input.shipPin ?? null,
-      shipState: input.shipState ?? null,
-      shipContact: input.shipContact ?? null,
-      deliveryLocation: input.deliveryLocation ?? null,
-      billingLocation: input.billingLocation ?? null,
-      expectedDeliveryDate: input.expectedDeliveryDate ?? null,
-      taxApplicable: input.taxApplicable ?? "none",
-      gstRate: input.gstRate ?? null,
-      useLogo: input.useLogo ?? false,
-      items: input.items,
-      total: input.total ?? computePurchaseOrderTotal(input.items),
-      deliveryTerms: input.deliveryTerms ?? null,
-      paymentTerms: input.paymentTerms ?? null,
-      freightTerms: input.freightTerms ?? null,
-      referenceNumber: input.referenceNumber ?? null,
-      notes: input.notes ?? null,
-      terms: input.terms ?? null,
-      pdfUri: input.pdfUri ?? null,
-      firstGeneratedAt: now,
-      lastEditedAt: null,
-      version: 1,
-      editHistory: [{ version: 1, at: now, action: "created" }],
-      cancelledAt: null,
-      createdAt: now,
-      updatedAt: now,
-      deletedAt: null,
-    };
-    await setDoc(poDocRef(userId, id), toCloud(po));
-    log.info("po created (firebase)");
-    return po;
+    return createPurchaseOrderAtomic(getFirebaseDb(), userId, input, (id, data) =>
+      fromDoc(id, data, userId)
+    );
   },
 
   async update(userId, input) {

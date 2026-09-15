@@ -30,16 +30,22 @@ function n(v?: number | null): number | null {
   return v != null && Number.isFinite(v) ? v : null;
 }
 
-/** Build a brand-new record from create input + an allocated serial. */
+/**
+ * Build a brand-new record from create input + an allocated serial.
+ * `recordId` must be captured once by the caller (including for absent/blank
+ * clientRecordId) and reused on transaction retries. Do not call
+ * stableRecordId again inside this builder.
+ */
 export function buildNewRecord(
   userId: string,
   serial: number,
   input: CreateCustomerCreditInput,
-  now: number
+  now: number,
+  recordId: string
 ): CustomerCreditRecord {
   const products = input.products ?? [];
   return {
-    id: stableRecordId(input.clientRecordId, "cr"),
+    id: recordId,
     userId,
     ueid: input.ueid,
     serial,

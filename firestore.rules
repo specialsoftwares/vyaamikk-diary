@@ -268,10 +268,19 @@ service cloud.firestore {
     }
 
     // Billable record collections whose CREATE consumes quota. Phase A
-    // proves the pattern on purchaseOrders; Phase G extends this list to all
-    // billable families together with the client batch integration.
+    // proved the pattern on purchaseOrders; this increment adds
+    // customerCreditRecords and professionalPacks. entries and
+    // letterheadDocs stay ungated until a later VYD-36 round.
     function quotaLinkedCollection(coll) {
-      return coll == 'purchaseOrders';
+      return coll == 'purchaseOrders'
+             || coll == 'customerCreditRecords'
+             || coll == 'professionalPacks';
+    }
+
+    function istMonthKeyShape(key) {
+      return key is string
+             && key.size() == 7
+             && key[4] == '-';
     }
 
     function usageDocShapeValid() {
@@ -322,6 +331,7 @@ service cloud.firestore {
               (get(usageCurrentPath(uid)).data.monthKey == afterData.monthKey
                 && afterData.recordsThisMonth == get(usageCurrentPath(uid)).data.recordsThisMonth + 1)
               || (get(usageCurrentPath(uid)).data.monthKey != afterData.monthKey
+                && istMonthKeyShape(get(usageCurrentPath(uid)).data.monthKey)
                 && afterData.recordsThisMonth == 1)
             )
         );
@@ -359,7 +369,11 @@ service cloud.firestore {
                       && request.resource.data.userId == uid
                       && request.resource.data.title is string
                       && request.resource.data.title.size() > 0
-                      && request.resource.data.title.size() <= 200;
+                      && request.resource.data.title.size() <= 200
+                      && (
+                        !quotaEnforcementOn(uid)
+                        || usageConsumedForRecord(uid, 'professionalPacks', packId)
+                      );
         allow update: if isActiveUser(uid)
                       && request.resource.data.userId == uid
                       && request.resource.data.title is string
@@ -384,7 +398,11 @@ service cloud.firestore {
       match /customerCreditRecords/{recordId} {
         allow read: if isOwner(uid);
         allow create: if isActiveUser(uid)
-                      && request.resource.data.userId == uid;
+                      && request.resource.data.userId == uid
+                      && (
+                        !quotaEnforcementOn(uid)
+                        || usageConsumedForRecord(uid, 'customerCreditRecords', recordId)
+                      );
         allow update: if isActiveUser(uid)
                       && request.resource.data.userId == uid;
         allow delete: if isActiveUser(uid);
@@ -483,6 +501,7 @@ service cloud.firestore {
                         (resource.data.monthKey == request.resource.data.monthKey
                           && request.resource.data.recordsThisMonth == resource.data.recordsThisMonth + 1)
                         || (resource.data.monthKey != request.resource.data.monthKey
+                          && istMonthKeyShape(resource.data.monthKey)
                           && request.resource.data.recordsThisMonth == 1)
                       )
                       && usageWithinCap(uid)
