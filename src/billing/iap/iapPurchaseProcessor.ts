@@ -14,7 +14,7 @@
 
 import { getClientCatalogEntry } from "./iapCatalog";
 import {
-  clearPendingPurchaseIfUid,
+  clearPendingPurchaseIfEnvelope,
   isDurablePendingStage,
   writePendingPurchase,
 } from "./iapPendingPurchase";
@@ -43,6 +43,8 @@ export interface PurchaseProcessorDeps {
   currentGeneration: () => number;
   generation: number;
   operationUid: string | null;
+  operationAttempt?: number | null;
+  currentAttempt?: () => number | null;
 }
 
 function nonempty(value: string | null | undefined): value is string {
@@ -50,10 +52,13 @@ function nonempty(value: string | null | undefined): value is string {
 }
 
 function stillCurrent(deps: PurchaseProcessorDeps): boolean {
-  return (
-    deps.currentGeneration() === deps.generation &&
-    deps.currentUid() === deps.operationUid
-  );
+  if (deps.currentGeneration() !== deps.generation) return false;
+  if (deps.currentUid() !== deps.operationUid) return false;
+  if (deps.operationAttempt != null) {
+    return deps.currentAttempt?.() === deps.operationAttempt;
+  }
+  if (deps.currentAttempt) return deps.currentAttempt() == null;
+  return true;
 }
 
 function mutationAuth(deps: PurchaseProcessorDeps, uid: string) {
@@ -62,6 +67,8 @@ function mutationAuth(deps: PurchaseProcessorDeps, uid: string) {
     generation: deps.generation,
     currentGeneration: deps.currentGeneration,
     currentUid: deps.currentUid,
+    expectedAttempt: deps.operationAttempt,
+    currentAttempt: deps.currentAttempt,
   };
 }
 
@@ -70,6 +77,7 @@ async function patchPending(
   pending: PendingPurchaseEnvelope | null,
   stage: PendingPurchaseEnvelope["stage"]
 ): Promise<PendingPurchaseEnvelope | null> {
+  if (!stillCurrent(deps)) return pending;
   const uid = deps.currentUid();
   if (!pending || !uid || pending.uid !== uid) return pending;
   const next: PendingPurchaseEnvelope = {
@@ -83,6 +91,22 @@ async function patchPending(
     ...mutationAuth(deps, uid),
   });
   return ok ? next : pending;
+}
+
+async function clearOwnedPending(
+  deps: PurchaseProcessorDeps,
+  pending: PendingPurchaseEnvelope | null,
+  uid: string,
+  onlyNonDurable: boolean
+): Promise<void> {
+  if (!pending || pending.uid !== uid) return;
+  if (!stillCurrent(deps)) return;
+  await clearPendingPurchaseIfEnvelope({
+    store: deps.store,
+    envelope: pending,
+    onlyNonDurable,
+    ...mutationAuth(deps, uid),
+  });
 }
 
 /**
@@ -135,6 +159,16 @@ export async function processStorePurchase(args: {
   }
 
   if (purchase.purchaseState === "unknown") {
+    if (!stillCurrent(deps)) {
+      return {
+        result: {
+          kind: "failed",
+          recoverable: true,
+          message: "Purchase state is unknown.",
+        },
+        pending: args.pending,
+      };
+    }
     pending = await patchPending(deps, pending, "awaiting_recovery");
     return {
       result: {
@@ -147,6 +181,9 @@ export async function processStorePurchase(args: {
   }
 
   if (purchase.purchaseState === "pending") {
+    if (!stillCurrent(deps)) {
+      return { result: { kind: "store_pending" }, pending: args.pending };
+    }
     if (deps.platform === "android") {
       pending = await patchPending(deps, pending, "store_pending");
       return { result: { kind: "store_pending" }, pending };
@@ -193,7 +230,7 @@ export async function processStorePurchase(args: {
       pending.uid === uid &&
       pending.productId === purchase.productId
     ) {
-      await clearPendingPurchaseIfUid(deps.store, uid, mutationAuth(deps, uid));
+      await clearOwnedPending(deps, pending, uid, false);
       if (!stillCurrent(deps)) {
         return { result: { kind: "verified" }, pending: args.pending };
       }
@@ -270,7 +307,7 @@ export async function processStorePurchase(args: {
     if (!stillCurrent(deps)) {
       return { result: { kind: "verified" }, pending: args.pending };
     }
-    await clearPendingPurchaseIfUid(deps.store, uid, mutationAuth(deps, uid));
+    await clearOwnedPending(deps, pending, uid, false);
     if (!stillCurrent(deps)) {
       return { result: { kind: "verified" }, pending: args.pending };
     }
@@ -372,7 +409,7 @@ export async function processStorePurchase(args: {
   if (pending && pending.productId !== purchase.productId) {
     return { result: { kind: "verified" }, pending };
   }
-  await clearPendingPurchaseIfUid(deps.store, uid, mutationAuth(deps, uid));
+  await clearOwnedPending(deps, pending, uid, false);
   if (!stillCurrent(deps)) {
     return { result: { kind: "verified" }, pending: args.pending };
   }
@@ -402,7 +439,10 @@ export async function processPurchaseError(args: {
     if (!stillCurrent(args.deps) || !uid) {
       return { result: { kind: "cancelled" }, pending: args.pending };
     }
-    await clearPendingPurchaseIfUid(args.deps.store, uid, mutationAuth(args.deps, uid));
+    await clearOwnedPending(args.deps, args.pending, uid, true);
+    if (!stillCurrent(args.deps)) {
+      return { result: { kind: "cancelled" }, pending: args.pending };
+    }
     return { result: { kind: "cancelled" }, pending: null };
   }
 
@@ -418,7 +458,27 @@ export async function processPurchaseError(args: {
   }
 
   if (!cancelled && args.pending && !durable && uid) {
-    await clearPendingPurchaseIfUid(args.deps.store, uid, mutationAuth(args.deps, uid));
+    if (!stillCurrent(args.deps)) {
+      return {
+        result: {
+          kind: "failed",
+          recoverable: true,
+          message: "Purchase didn't complete.",
+        },
+        pending: args.pending,
+      };
+    }
+    await clearOwnedPending(args.deps, args.pending, uid, true);
+    if (!stillCurrent(args.deps)) {
+      return {
+        result: {
+          kind: "failed",
+          recoverable: true,
+          message: "Purchase didn't complete.",
+        },
+        pending: args.pending,
+      };
+    }
     return {
       result: {
         kind: "failed",

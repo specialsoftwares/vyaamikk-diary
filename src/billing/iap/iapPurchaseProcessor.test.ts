@@ -144,6 +144,8 @@ function deps(args: {
   backend: IapBackend;
   uid?: string;
   gen?: { n: number };
+  attempt?: { n: number | null };
+  operationAttempt?: number | null;
 }): PurchaseProcessorDeps {
   const gen = args.gen ?? { n: 1 };
   const uid = args.uid ?? "uid-a";
@@ -157,6 +159,8 @@ function deps(args: {
     currentGeneration: () => gen.n,
     generation: 1,
     operationUid: uid,
+    operationAttempt: args.operationAttempt,
+    currentAttempt: args.attempt ? () => args.attempt!.n : undefined,
   };
 }
 
@@ -819,6 +823,121 @@ async function testMismatchedProductErrorDoesNotClearPending() {
   assert.ok(store.data[PENDING_PURCHASE_CACHE_KEY]);
 }
 
+async function testRetiredAttemptValidationDoesNotClearNewerEnvelope() {
+  const store = memoryStore();
+  const envA = pending();
+  await seedPending(store, envA);
+  const attempt = { n: 1 as number | null };
+  const g = {
+    release: () => {},
+    wait: Promise.resolve(),
+  };
+  let started = () => {};
+  const startedP = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  let resolveWait = () => {};
+  g.wait = new Promise<void>((resolve) => {
+    resolveWait = resolve;
+  });
+  const spy = {
+    android: [] as { purchaseToken: string; expectedCanonicalSku?: string }[],
+    ios: [] as { signedTransactionInfo: string; expectedCanonicalSku?: string }[],
+  };
+  const backend = fakeBackend(spy);
+  const orig = backend.validateAndActivateAndroid;
+  backend.validateAndActivateAndroid = async (input) => {
+    started();
+    await g.wait;
+    return orig.call(backend, input);
+  };
+  const nativeSpy = { finish: [] as StorePurchase[], purchases: [] as NativePurchaseRequest[] };
+  const run = processStorePurchase({
+    deps: deps({
+      platform: "android",
+      store,
+      native: fakeNative(nativeSpy),
+      backend,
+      attempt,
+      operationAttempt: 1,
+    }),
+    purchase: androidPurchase(),
+    pending: envA,
+    source: "purchase",
+    processedTokens: new Set(),
+  });
+  await startedP;
+  attempt.n = 2;
+  const envB: PendingPurchaseEnvelope = {
+    ...pending(),
+    canonicalSku: "vyd_professional_monthly",
+    androidBasePlanId: "monthly",
+    initiatedAt: 40,
+    updatedAt: 40,
+  };
+  await seedPending(store, envB);
+  resolveWait();
+  const out = await run;
+  assert.equal(out.pending?.canonicalSku, "vyd_professional_yearly");
+  const disk = JSON.parse(store.data[PENDING_PURCHASE_CACHE_KEY]!);
+  assert.equal(disk.canonicalSku, "vyd_professional_monthly");
+}
+
+async function testRetiredAttemptValidationFailureDoesNotPatchNewerEnvelope() {
+  const store = memoryStore();
+  const envA = pending();
+  await seedPending(store, envA);
+  const attempt = { n: 1 as number | null };
+  let resolveWait = () => {};
+  const wait = new Promise<void>((resolve) => {
+    resolveWait = resolve;
+  });
+  let started = () => {};
+  const startedP = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const spy = {
+    android: [] as { purchaseToken: string; expectedCanonicalSku?: string }[],
+    ios: [] as { signedTransactionInfo: string; expectedCanonicalSku?: string }[],
+  };
+  const backend = fakeBackend(spy);
+  backend.validateAndActivateAndroid = async () => {
+    started();
+    await wait;
+    throw new Error("backend down");
+  };
+  const nativeSpy = { finish: [] as StorePurchase[], purchases: [] as NativePurchaseRequest[] };
+  const run = processStorePurchase({
+    deps: deps({
+      platform: "android",
+      store,
+      native: fakeNative(nativeSpy),
+      backend,
+      attempt,
+      operationAttempt: 1,
+    }),
+    purchase: androidPurchase(),
+    pending: envA,
+    source: "purchase",
+    processedTokens: new Set(),
+  });
+  await startedP;
+  attempt.n = 2;
+  const envB: PendingPurchaseEnvelope = {
+    ...pending(),
+    canonicalSku: "vyd_professional_monthly",
+    androidBasePlanId: "monthly",
+    initiatedAt: 40,
+    updatedAt: 40,
+  };
+  await seedPending(store, envB);
+  resolveWait();
+  await run;
+  const disk = JSON.parse(store.data[PENDING_PURCHASE_CACHE_KEY]!);
+  assert.equal(disk.canonicalSku, "vyd_professional_monthly");
+  assert.equal(disk.stage, "intent_created");
+}
+
 async function main() {
   await testAndroidPendingDoesNotValidate();
   await testAndroidPurchasedSendsTokenNotCurrentPlan();
@@ -839,6 +958,8 @@ async function main() {
   await testUnrelatedPendingAndUnknownDoNotPatchProcessor();
   await testRestoreUnrelatedPurchasedDoesNotClearPending();
   await testMismatchedProductErrorDoesNotClearPending();
+  await testRetiredAttemptValidationDoesNotClearNewerEnvelope();
+  await testRetiredAttemptValidationFailureDoesNotPatchNewerEnvelope();
   console.log("iapPurchaseProcessor.test.ts: ok");
 }
 

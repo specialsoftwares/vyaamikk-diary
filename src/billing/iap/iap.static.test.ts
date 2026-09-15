@@ -57,6 +57,11 @@ const iapSrc = iapFiles.map((f) => ({
   assert.match(pendingCode, /pendingEnvelopeContainsSecrets/);
   assert.match(pendingCode, /isCanonicalSku/);
   assert.match(pendingCode, /enqueuePendingMutation/);
+  assert.match(pendingCode, /parseStored\(store\)/);
+  assert.match(pendingCode, /enqueuePendingMutation\(store, \(\) =>/);
+  assert.match(pendingCode, /authStillOwnsAttempt/);
+  assert.match(pendingCode, /clearPendingPurchaseIfEnvelope/);
+  assert.match(pendingCode, /samePurchaseIntent/);
   assert.doesNotMatch(pendingCode, /canonicalSku\)\.startsWith\("vyd_"\)/);
 }
 
@@ -73,6 +78,8 @@ const iapSrc = iapFiles.map((f) => ({
   assert.match(processor, /validateAndActivateIOS/);
   assert.match(processor, /finishedIosTokens/);
   assert.match(processor, /stillCurrent/);
+  assert.match(processor, /operationAttempt/);
+  assert.match(processor, /clearPendingPurchaseIfEnvelope/);
   assert.doesNotMatch(processor, /acknowledgePurchaseAndroid/);
 }
 
@@ -109,6 +116,12 @@ const iapSrc = iapFiles.map((f) => ({
   const pendingIdx = session.indexOf("writePendingPurchase");
   const reqIdx = session.lastIndexOf("requestPurchase");
   assert.ok(pendingIdx >= 0 && reqIdx > pendingIdx);
+  const beforeNative = session.slice(0, reqIdx);
+  assert.match(beforeNative, /ownsPurchaseAttempt/);
+  assert.match(session, /clearPendingPurchaseIfEnvelope/);
+  assert.match(session, /retiredWithoutPublish/);
+  assert.match(session, /stillOwnsThisPurchase/);
+  assert.match(session, /launchNativeSheet/);
   assert.match(session, /flowKind/);
   assert.match(session, /flowAttempt/);
   const restoreFn = session.slice(session.indexOf("async function restorePurchases"));

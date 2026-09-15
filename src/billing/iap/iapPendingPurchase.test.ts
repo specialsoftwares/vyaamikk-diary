@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 
 import {
   PENDING_PURCHASE_CACHE_KEY,
+  clearPendingPurchaseIfEnvelope,
   clearPendingPurchaseIfUid,
   parsePendingPurchaseEnvelope,
   readPendingPurchase,
@@ -342,6 +343,185 @@ async function testReconcileClearsOrphanedDifferentUid() {
   assert.equal(wrote, true);
 }
 
+async function testSameSessionRetiredWriteDoesNotOverwriteNewerEnvelope() {
+  const store = memoryStore();
+  const live = { uid: "uid-a" as string | null, gen: 1, attempt: 1 as number | null };
+  const wroteA = await writePendingPurchase({
+    store,
+    envelope: envelope("uid-a", { initiatedAt: 101, updatedAt: 101 }),
+    ...authFor("uid-a", 1, live),
+    expectedAttempt: 1,
+    currentAttempt: () => live.attempt,
+  });
+  assert.equal(wroteA, true);
+  live.attempt = 2;
+  const wroteB = await writePendingPurchase({
+    store,
+    envelope: envelope("uid-a", {
+      canonicalSku: "vyd_professional_monthly",
+      androidBasePlanId: "monthly",
+      initiatedAt: 101,
+      updatedAt: 101,
+    }),
+    ...authFor("uid-a", 1, live),
+    expectedAttempt: 2,
+    currentAttempt: () => live.attempt,
+  });
+  assert.equal(wroteB, true);
+  const lateA = await writePendingPurchase({
+    store,
+    envelope: envelope("uid-a", {
+      stage: "verifying",
+      initiatedAt: 101,
+      updatedAt: 199,
+    }),
+    ...authFor("uid-a", 1, live),
+    expectedAttempt: 1,
+    currentAttempt: () => live.attempt,
+  });
+  assert.equal(lateA, false);
+  const current = await readPendingPurchase({ store, uid: "uid-a" });
+  assert.equal(current?.canonicalSku, "vyd_professional_monthly");
+  assert.equal(current?.stage, "intent_created");
+}
+
+async function testRetiredEnvelopeClearDoesNotDeleteNewerIntent() {
+  const store = memoryStore();
+  const live = { uid: "uid-a" as string | null, gen: 1, attempt: 1 as number | null };
+  const envA = envelope("uid-a", { initiatedAt: 101, updatedAt: 101 });
+  await writePendingPurchase({
+    store,
+    envelope: envA,
+    ...authFor("uid-a", 1, live),
+    expectedAttempt: 1,
+    currentAttempt: () => live.attempt,
+  });
+  live.attempt = 2;
+  const envB = envelope("uid-a", {
+    canonicalSku: "vyd_professional_monthly",
+    androidBasePlanId: "monthly",
+    initiatedAt: 104,
+    updatedAt: 104,
+  });
+  await writePendingPurchase({
+    store,
+    envelope: envB,
+    ...authFor("uid-a", 1, live),
+    expectedAttempt: 2,
+    currentAttempt: () => live.attempt,
+  });
+  await clearPendingPurchaseIfEnvelope({
+    store,
+    envelope: envA,
+    onlyNonDurable: true,
+    ...authFor("uid-a", 1, live),
+    expectedAttempt: 1,
+    currentAttempt: () => live.attempt,
+  });
+  const current = await readPendingPurchase({ store, uid: "uid-a" });
+  assert.equal(current?.canonicalSku, "vyd_professional_monthly");
+  assert.equal(current?.initiatedAt, 104);
+}
+
+async function testDurableEnvelopeSurvivesRetiredClear() {
+  const store = memoryStore();
+  const live = { uid: "uid-a" as string | null, gen: 1, attempt: null as number | null };
+  const unfinished: PendingPurchaseEnvelope = {
+    version: 1,
+    uid: "uid-a",
+    platform: "ios",
+    canonicalSku: "vyd_professional_yearly",
+    productId: "com.specialsoftwares.vyaamikkdiary.professional.yearly",
+    stage: "verified_unfinished_ios",
+    initiatedAt: 10,
+    updatedAt: 20,
+  };
+  await writePendingPurchase({
+    store,
+    envelope: unfinished,
+    ...authFor("uid-a", 1, live),
+  });
+  live.attempt = 2;
+  await clearPendingPurchaseIfEnvelope({
+    store,
+    envelope: unfinished,
+    onlyNonDurable: true,
+    ...authFor("uid-a", 1, live),
+    expectedAttempt: 1,
+    currentAttempt: () => live.attempt,
+  });
+  const current = await readPendingPurchase({ store, uid: "uid-a" });
+  assert.equal(current?.stage, "verified_unfinished_ios");
+}
+
+async function testDeferredSameSessionWriteDoesNotOverwriteNewerIntent() {
+  const store = createDeferredStore({ blockSet: true });
+  const live = { uid: "uid-a" as string | null, gen: 1, attempt: 1 as number | null };
+  const writeA = writePendingPurchase({
+    store,
+    envelope: envelope("uid-a", { initiatedAt: 101, updatedAt: 101 }),
+    ...authFor("uid-a", 1, live),
+    expectedAttempt: 1,
+    currentAttempt: () => live.attempt,
+  });
+  await store.waitForSetItem();
+  live.attempt = 2;
+  const wroteB = await writePendingPurchase({
+    store,
+    envelope: envelope("uid-a", {
+      canonicalSku: "vyd_professional_monthly",
+      androidBasePlanId: "monthly",
+      initiatedAt: 104,
+      updatedAt: 104,
+    }),
+    ...authFor("uid-a", 1, live),
+    expectedAttempt: 2,
+    currentAttempt: () => live.attempt,
+  });
+  assert.equal(wroteB, true);
+  store.releaseSetItem();
+  const lateA = await writeA;
+  assert.equal(lateA, false);
+  const current = await readPendingPurchase({ store, uid: "uid-a" });
+  assert.equal(current?.canonicalSku, "vyd_professional_monthly");
+  assert.equal(current?.initiatedAt, 104);
+}
+
+async function testDeferredSameSessionClearDoesNotDeleteNewerIntent() {
+  const store = createDeferredStore({ blockRemove: true });
+  const live = { uid: "uid-a" as string | null, gen: 1, attempt: 1 as number | null };
+  const envA = envelope("uid-a", { initiatedAt: 101, updatedAt: 101 });
+  store.data[PENDING_PURCHASE_CACHE_KEY] = JSON.stringify(envA);
+  const clearA = clearPendingPurchaseIfEnvelope({
+    store,
+    envelope: envA,
+    onlyNonDurable: true,
+    ...authFor("uid-a", 1, live),
+    expectedAttempt: 1,
+    currentAttempt: () => live.attempt,
+  });
+  await store.waitForRemoveItem();
+  live.attempt = 2;
+  const wroteB = await writePendingPurchase({
+    store,
+    envelope: envelope("uid-a", {
+      canonicalSku: "vyd_professional_monthly",
+      androidBasePlanId: "monthly",
+      initiatedAt: 104,
+      updatedAt: 104,
+    }),
+    ...authFor("uid-a", 1, live),
+    expectedAttempt: 2,
+    currentAttempt: () => live.attempt,
+  });
+  assert.equal(wroteB, true);
+  store.releaseRemoveItem();
+  await clearA;
+  const current = await readPendingPurchase({ store, uid: "uid-a" });
+  assert.equal(current?.canonicalSku, "vyd_professional_monthly");
+  assert.equal(current?.initiatedAt, 104);
+}
+
 async function main() {
   testExactKey();
   testRejectsSecrets();
@@ -352,6 +532,11 @@ async function main() {
   await testDeferredAWriteCannotOverwriteB();
   await testLateAClearCannotDeleteB();
   await testReconcileClearsOrphanedDifferentUid();
+  await testSameSessionRetiredWriteDoesNotOverwriteNewerEnvelope();
+  await testRetiredEnvelopeClearDoesNotDeleteNewerIntent();
+  await testDurableEnvelopeSurvivesRetiredClear();
+  await testDeferredSameSessionWriteDoesNotOverwriteNewerIntent();
+  await testDeferredSameSessionClearDoesNotDeleteNewerIntent();
   console.log("iapPendingPurchase.test.ts: ok");
 }
 
