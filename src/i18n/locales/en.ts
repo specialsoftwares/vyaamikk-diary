@@ -2567,9 +2567,26 @@ const en = {
     sessionExpiredBanner:
       "Session expired. Tap to re-authenticate. Your local data is safe.",
     tapToReauth: "Tap here to sign in again",
+    tapToRetry: "Tap to retry sync",
     offlineSaved: "{{count}} change(s) saved on device — will sync when online",
     pendingSync: "{{count}} item(s) waiting to sync — tap to retry",
     syncing: "Syncing your changes…",
+    quotaReachedBanner:
+      "Monthly record limit reached. {{count}} item(s) saved on this device — tap to retry.",
+    permissionBanner:
+      "Could not sync {{count}} item(s). Your local copy is kept — tap to retry.",
+    entryPending: "Saved on device — waiting to sync",
+    entryQuota: "Monthly limit reached — saved on device",
+    entryPermission: "Could not sync — saved on device",
+    entryError: "Needs attention — saved on device",
+    savedLocallyTitle: "Saved on this device",
+    savedLocallyQuota:
+      "Monthly record limit reached. This record is kept on your device and is not on the server yet.",
+    savedLocallyPending:
+      "Saved on this device. It will sync when the connection is available.",
+    savedLocallyPermission:
+      "This record is kept on your device. It is not on the server yet.",
+    retrySync: "Retry sync",
     dbFailedTitle: "Storage could not start",
     dbFailedBody:
       "Vyaamikk Diary needs local storage to save your records. Please restart the app. If this continues, reinstall or free device space.",

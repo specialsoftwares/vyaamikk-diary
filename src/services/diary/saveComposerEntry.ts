@@ -68,6 +68,8 @@ export interface SaveComposerEntryResult {
   entry: BusinessEntry;
   pdfFailed: boolean;
   failedSecondarySteps?: string[];
+  cloudAccepted: boolean;
+  syncFailureKind?: string;
 }
 
 export async function saveComposerEntry(
@@ -124,7 +126,8 @@ export async function saveComposerEntry(
           processLockKey,
           completedSteps,
           pdfFailed,
-          failedSecondarySteps
+          failedSecondarySteps,
+          true
         );
       }
 
@@ -140,7 +143,8 @@ export async function saveComposerEntry(
             processLockKey,
             completedSteps,
             pdfFailed,
-            failedSecondarySteps
+            failedSecondarySteps,
+            true
           );
         }
       }
@@ -181,13 +185,15 @@ export async function saveComposerEntry(
       },
     };
 
-    let entry = await createEntryWithReminder(userId, input, {
+    let created = await createEntryWithReminder(userId, input, {
       title: options.labels.reminderNotificationTitle.replace("{{title}}", input.title),
       body: entryListSummary(draftForNotify, options.t),
     });
+    let entry = created.entry;
+    const cloudAccepted = created.remoteAccepted;
 
     logLifecyclePhase("repository_create_done", {
-      phase: "remote_write",
+      phase: cloudAccepted ? "remote_write" : "local_write",
       recordKind: "business_entry",
       userId,
       remoteId: entry.id,
@@ -198,7 +204,7 @@ export async function saveComposerEntry(
       await attachRecordIdToPersistentLock(userId, input.clientRecordId, entry.id);
     }
 
-    if (!hasCompletedStep(completedSteps, SAVE_STEP.BASE_RECORD_CREATED)) {
+    if (cloudAccepted && !hasCompletedStep(completedSteps, SAVE_STEP.BASE_RECORD_CREATED)) {
       const base = await runRecordStepIfNeeded(
         {
           userId,
@@ -214,17 +220,30 @@ export async function saveComposerEntry(
       completedSteps = base.completedSteps;
     }
 
-    return await finishComposerSavePipeline(
+    if (!cloudAccepted && idempotency) {
+      await failCoordinatedSave(idempotency, created.failureKind ?? "save_failed", {
+        processLockKey: processLockKey ?? undefined,
+        clearRegistry: false,
+      });
+    }
+
+    const finished = await finishComposerSavePipeline(
       userId,
       input,
       options,
       entry,
-      idempotency,
-      processLockKey,
+      cloudAccepted ? idempotency : undefined,
+      cloudAccepted ? processLockKey : null,
       completedSteps,
       pdfFailed,
-      failedSecondarySteps
+      failedSecondarySteps,
+      cloudAccepted
     );
+    return {
+      ...finished,
+      cloudAccepted,
+      syncFailureKind: created.failureKind,
+    };
   } catch (e) {
     if (e instanceof SaveStillInProgressError) throw e;
     logLifecyclePhase(e instanceof Error ? e.message : "composer_save_failed", {
@@ -254,7 +273,8 @@ async function finishComposerSavePipeline(
   processLockKey: string | null,
   completedSteps: string[],
   pdfFailed: boolean,
-  failedSecondarySteps: string[]
+  failedSecondarySteps: string[],
+  cloudAccepted = true
 ): Promise<SaveComposerEntryResult> {
   let withPdf = entry;
   const needsPdf =
@@ -401,21 +421,21 @@ async function finishComposerSavePipeline(
   );
   if (!searchResult.ok) failedSecondarySteps.push("search_index");
 
-  if (idempotency) {
+  if (cloudAccepted && idempotency) {
     await completeCoordinatedSave(idempotency, withPdf.id, {
       processLockKey: processLockKey ?? undefined,
     });
-  } else if (processLockKey) {
+  } else if (cloudAccepted && processLockKey) {
     releaseProcessSaveLock(processLockKey);
   }
 
-  logLifecyclePhase("record_save_complete", {
-    phase: "complete",
+  logLifecyclePhase(cloudAccepted ? "record_save_complete" : "record_save_local_only", {
+    phase: cloudAccepted ? "complete" : "local_write",
     recordKind: "business_entry",
     userId,
     remoteId: withPdf.id,
     clientRecordId: input.clientRecordId,
   });
 
-  return { entry: withPdf, pdfFailed, failedSecondarySteps };
+  return { entry: withPdf, pdfFailed, failedSecondarySteps, cloudAccepted };
 }

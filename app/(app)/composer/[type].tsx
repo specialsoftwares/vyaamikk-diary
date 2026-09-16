@@ -38,6 +38,7 @@ import {
   formDraftsRepository,
   type FormDraftRecord,
 } from "@/repositories/formDraftsRepository";
+import { localEntriesRepository } from "@/repositories/localEntriesRepository";
 import { getDiaryRepository } from "@/services/diary";
 import { updateEntryLocalFirst } from "@/services/diary/localFirst";
 import { saveComposerEntry } from "@/services/diary/saveComposerEntry";
@@ -104,6 +105,8 @@ export default function ComposerScreen() {
     entry: BusinessEntry;
     pdfFailed: boolean;
     mode: "created" | "updated";
+    cloudAccepted?: boolean;
+    syncFailureKind?: string;
   } | null>(null);
   const [draftSaveResult, setDraftSaveResult] = useState<FormDraftRecord | null>(null);
   const [unsavedSheetVisible, setUnsavedSheetVisible] = useState(false);
@@ -564,7 +567,11 @@ export default function ComposerScreen() {
           notifySearchIndexChanged();
           dirtyRef.current = false;
           setFormDirty(false);
-          setSaveResult({ entry: updated, pdfFailed: false, mode: "updated" });
+          const localAfter = await localEntriesRepository.getRecord(user.uid, updated.id);
+          const cloudAccepted = !(
+            localAfter?.meta.pendingOp === "create" && !localAfter.meta.remoteConfirmed
+          );
+          setSaveResult({ entry: updated, pdfFailed: false, mode: "updated", cloudAccepted });
           void ingestComposerForm(
             { userId: user.uid, ueid: user.ueid },
             entryType,
@@ -573,7 +580,11 @@ export default function ComposerScreen() {
           if (footprintFailed) {
             feedback.showWarning(t("locationFootprints.saveAttachFailed"));
           }
-          feedback.showSuccess(t("composer.saveSuccess.updatedTitle"));
+          if (!cloudAccepted) {
+            feedback.showWarning(t("sync.savedLocallyPending"), t("sync.savedLocallyTitle"));
+          } else {
+            feedback.showSuccess(t("composer.saveSuccess.updatedTitle"));
+          }
           succeeded = true;
           return;
         }
@@ -581,7 +592,7 @@ export default function ComposerScreen() {
         if (!clientRecordIdRef.current) {
           clientRecordIdRef.current = generateClientRecordId("entry");
         }
-        let { entry, pdfFailed, failedSecondarySteps } = await saveComposerEntry(
+        let { entry, pdfFailed, failedSecondarySteps, cloudAccepted, syncFailureKind } = await saveComposerEntry(
           user.uid,
           {
             clientRecordId: clientRecordIdRef.current,
@@ -651,7 +662,7 @@ export default function ComposerScreen() {
         notifySearchIndexChanged();
         dirtyRef.current = false;
         setFormDirty(false);
-        setSaveResult({ entry, pdfFailed, mode: "created" });
+        setSaveResult({ entry, pdfFailed, mode: "created", cloudAccepted, syncFailureKind });
         succeeded = true;
         void ingestComposerForm(
           { userId: user.uid, ueid: user.ueid },
@@ -661,7 +672,15 @@ export default function ComposerScreen() {
         if (footprintFailed) {
           feedback.showWarning(t("locationFootprints.saveAttachFailed"));
         }
-        if (pdfFailed) {
+        if (!cloudAccepted) {
+          const localMsg =
+            syncFailureKind === "quota_exhausted"
+              ? t("sync.savedLocallyQuota")
+              : syncFailureKind === "permission_denied" || syncFailureKind === "quota_state_invalid"
+                ? t("sync.savedLocallyPermission")
+                : t("sync.savedLocallyPending");
+          feedback.showWarning(localMsg, t("sync.savedLocallyTitle"));
+        } else if (pdfFailed) {
           feedback.showWarning(t("pdf.entrySavedPdfFailed"), t("pdf.entrySavedTitle"));
         } else if (failedSecondarySteps && failedSecondarySteps.length > 0) {
           feedback.showWarning(
@@ -809,6 +828,8 @@ export default function ComposerScreen() {
         <ComposerSaveSuccess
           entry={saveResult.entry}
           pdfFailed={saveResult.pdfFailed}
+          cloudAccepted={saveResult.cloudAccepted}
+          syncFailureKind={saveResult.syncFailureKind}
           onAddAnother={onAddAnother}
         />
       </Screen>

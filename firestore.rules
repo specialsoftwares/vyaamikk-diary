@@ -267,14 +267,15 @@ service cloud.firestore {
       return cap == -1 || request.resource.data.recordsThisMonth <= cap;
     }
 
-    // Billable record collections whose CREATE consumes quota. Phase A
-    // proved the pattern on purchaseOrders; this increment adds
-    // customerCreditRecords and professionalPacks. entries and
-    // letterheadDocs stay ungated until a later VYD-36 round.
+    // Billable record collections whose CREATE consumes quota.
+    // letterheadDocs stay ungated until their separate increment.
+    // Ordinary entries (including the automatic letterhead diary mirror)
+    // follow this collection-level model — no client-controlled exemption.
     function quotaLinkedCollection(coll) {
       return coll == 'purchaseOrders'
              || coll == 'customerCreditRecords'
-             || coll == 'professionalPacks';
+             || coll == 'professionalPacks'
+             || coll == 'entries';
     }
 
     function istMonthKeyShape(key) {
@@ -355,7 +356,11 @@ service cloud.firestore {
         allow read: if isOwner(uid);
         allow create: if isActiveUser(uid)
                       && request.resource.data.userId == uid
-                      && entryTitleValid();
+                      && entryTitleValid()
+                      && (
+                        !quotaEnforcementOn(uid)
+                        || usageConsumedForRecord(uid, 'entries', entryId)
+                      );
         allow update: if isActiveUser(uid)
                       && request.resource.data.userId == uid
                       && entryTitleValid();

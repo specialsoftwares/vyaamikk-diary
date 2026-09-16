@@ -86,8 +86,11 @@ function applyFilters(
 export const mockDiaryRepository: DiaryRepository = {
   async create(userId, input) {
     const now = Date.now();
+    const id = input.clientRecordId?.trim() || shortId("diary");
+    const existing = (await loadAll(userId)).find((e) => e.id === id);
+    if (existing) return existing;
     const entry: BusinessEntry = {
-      id: shortId("diary"),
+      id,
       userId,
       ueid: input.ueid,
       entryType: input.entryType,

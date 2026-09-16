@@ -16,9 +16,10 @@ interface EntryRowProps {
   onPress?: () => void;
   /** Stronger border + shadow for dashboard previews (default flat for long lists). */
   raised?: boolean;
+  syncBadge?: "pending" | "quota" | "permission" | "error" | "synced";
 }
 
-function EntryRowComponent({ entry, onPress, raised = false }: EntryRowProps) {
+function EntryRowComponent({ entry, onPress, raised = false, syncBadge }: EntryRowProps) {
   const t = useT();
   const accentKey = accentKeyForEntryType(entry.entryType);
   const styles = useThemedStyles((c) =>
@@ -62,6 +63,17 @@ function EntryRowComponent({ entry, onPress, raised = false }: EntryRowProps) {
         />
         {entry.reminder ? (
           <LocaleUiText style={styles.metaBell}>{t("diary.reminder.badge")}</LocaleUiText>
+        ) : null}
+        {syncBadge && syncBadge !== "synced" ? (
+          <LocaleUiText style={styles.metaBell}>
+            {syncBadge === "quota"
+              ? t("sync.entryQuota")
+              : syncBadge === "permission"
+                ? t("sync.entryPermission")
+                : syncBadge === "error"
+                  ? t("sync.entryError")
+                  : t("sync.entryPending")}
+          </LocaleUiText>
         ) : null}
       </View>
       {summary ? (

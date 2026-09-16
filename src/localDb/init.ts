@@ -7,6 +7,7 @@ import {
   migrateToV4,
   migrateToV5,
   migrateToV6,
+  migrateToV7,
   tableExists,
   tableHasColumn,
 } from "./migrate";
@@ -81,6 +82,10 @@ export function initializeLocalDatabase(): Promise<void> {
         migrateToV6(database);
         version = 6;
       }
+      if (version < 7) {
+        migrateToV7(database);
+        version = 7;
+      }
 
       if (version >= 3 && !tableHasColumn(database, "form_drafts", "source")) {
         migrateToV3(database);
@@ -93,6 +98,9 @@ export function initializeLocalDatabase(): Promise<void> {
       }
       if (version >= 6 && !tableExists(database, "business_insights")) {
         migrateToV6(database);
+      }
+      if (version >= 7 && tableExists(database, "entries_local") && !tableHasColumn(database, "entries_local", "remote_confirmed")) {
+        migrateToV7(database);
       }
 
       database.runSync(

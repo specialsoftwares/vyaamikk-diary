@@ -16,31 +16,49 @@ export interface SyncQueueItem {
   lastError: string | null;
 }
 
-export const syncQueueRepository = {
-  async enqueue(item: Omit<SyncQueueItem, "id" | "createdAt" | "attempts" | "lastError">): Promise<string> {
-    const db = getLocalDatabase();
-    const dup = db.getFirstSync<{ id: string }>(
-      `SELECT id FROM sync_queue
-       WHERE user_id = ? AND entity = ? AND entity_id = ? AND op = ? LIMIT 1`,
-      [item.userId, item.entity, item.entityId, item.op]
-    );
-    if (dup?.id) return dup.id;
+export function enqueueSync(
+  item: Omit<SyncQueueItem, "id" | "createdAt" | "attempts" | "lastError">,
+  options?: { replacePayload?: boolean }
+): string {
+  const db = getLocalDatabase();
+  const dup = db.getFirstSync<{ id: string }>(
+    `SELECT id FROM sync_queue
+     WHERE user_id = ? AND entity = ? AND entity_id = ? AND op = ? LIMIT 1`,
+    [item.userId, item.entity, item.entityId, item.op]
+  );
+  if (dup?.id) {
+    if (options?.replacePayload) {
+      db.runSync(
+        `UPDATE sync_queue SET payload_json = ?, last_error = NULL WHERE id = ?`,
+        [item.payload == null ? null : JSON.stringify(item.payload), dup.id]
+      );
+    }
+    return dup.id;
+  }
 
-    const id = shortId("sync");
-    db.runSync(
-      `INSERT INTO sync_queue (id, user_id, op, entity, entity_id, payload_json, created_at, attempts, last_error)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL)`,
-      [
-        id,
-        item.userId,
-        item.op,
-        item.entity,
-        item.entityId,
-        item.payload == null ? null : JSON.stringify(item.payload),
-        Date.now(),
-      ]
-    );
-    return id;
+  const id = shortId("sync");
+  db.runSync(
+    `INSERT INTO sync_queue (id, user_id, op, entity, entity_id, payload_json, created_at, attempts, last_error)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL)`,
+    [
+      id,
+      item.userId,
+      item.op,
+      item.entity,
+      item.entityId,
+      item.payload == null ? null : JSON.stringify(item.payload),
+      Date.now(),
+    ]
+  );
+  return id;
+}
+
+export const syncQueueRepository = {
+  async enqueue(
+    item: Omit<SyncQueueItem, "id" | "createdAt" | "attempts" | "lastError">,
+    options?: { replacePayload?: boolean }
+  ): Promise<string> {
+    return enqueueSync(item, options);
   },
 
   async listForUser(userId: string, limit = 50): Promise<SyncQueueItem[]> {
@@ -75,6 +93,26 @@ export const syncQueueRepository = {
   async remove(id: string): Promise<void> {
     const db = getLocalDatabase();
     db.runSync("DELETE FROM sync_queue WHERE id = ?", [id]);
+  },
+
+  async removeForEntity(
+    userId: string,
+    entity: SyncEntity,
+    entityId: string,
+    op?: SyncOp
+  ): Promise<void> {
+    const db = getLocalDatabase();
+    if (op) {
+      db.runSync(
+        `DELETE FROM sync_queue WHERE user_id = ? AND entity = ? AND entity_id = ? AND op = ?`,
+        [userId, entity, entityId, op]
+      );
+      return;
+    }
+    db.runSync(
+      `DELETE FROM sync_queue WHERE user_id = ? AND entity = ? AND entity_id = ?`,
+      [userId, entity, entityId]
+    );
   },
 
   async markAttempt(id: string, error: string | null): Promise<void> {

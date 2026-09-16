@@ -101,7 +101,10 @@ export interface RecoverAfterPermissionDeniedParams<T> {
   recordId: string;
   /** Month key the failed create attempted to write. */
   monthKey: string;
-  /** Clock captured with that month key; disagreement means wrong-month. */
+  /**
+   * Client clock captured with `monthKey`. Comparing them is a client-value
+   * consistency check, not proof of server time. Rules use `request.time`.
+   */
   nowMs: number;
   parseExisting: (id: string, data: Record<string, unknown>) => T;
   cause: unknown;

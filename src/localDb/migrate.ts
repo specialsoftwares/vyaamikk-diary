@@ -143,6 +143,39 @@ export function migrateToV6(db: Db): void {
   `);
 }
 
+export function migrateToV7(db: Db): void {
+  if (!tableHasColumn(db, "entries_local", "pending_op")) {
+    db.execSync(`ALTER TABLE entries_local ADD COLUMN pending_op TEXT`);
+  }
+  if (!tableHasColumn(db, "entries_local", "remote_confirmed")) {
+    db.execSync(`ALTER TABLE entries_local ADD COLUMN remote_confirmed INTEGER NOT NULL DEFAULT 0`);
+  }
+  if (!tableHasColumn(db, "entries_local", "sync_error_code")) {
+    db.execSync(`ALTER TABLE entries_local ADD COLUMN sync_error_code TEXT`);
+  }
+  if (!tableHasColumn(db, "entries_local", "auto_retry")) {
+    db.execSync(`ALTER TABLE entries_local ADD COLUMN auto_retry INTEGER NOT NULL DEFAULT 1`);
+  }
+  db.execSync(`
+    CREATE INDEX IF NOT EXISTS idx_entries_local_sync
+      ON entries_local (user_id, remote_confirmed, auto_retry)
+  `);
+  // Legacy: synced rows are already server-accepted. Do not infer that from timestamps.
+  db.execSync(`
+    UPDATE entries_local
+       SET remote_confirmed = 1
+     WHERE sync_status = 'synced'
+  `);
+  // Legacy local_* pending rows are unsynced CREATEs; keep that identity.
+  db.execSync(`
+    UPDATE entries_local
+       SET pending_op = 'create'
+     WHERE pending_op IS NULL
+       AND sync_status = 'pending'
+       AND id LIKE 'local_%'
+  `);
+}
+
 export function migrateToV4(db: Db): void {
   db.execSync(`
     CREATE TABLE IF NOT EXISTS statutory_occurrences (

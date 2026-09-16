@@ -1,8 +1,9 @@
 /**
- * VYD-36 Round 3 — Option-C production write-set proofs for
- * purchaseOrders, customerCreditRecords, professionalPacks.
+ * VYD-36 — Option-C production write-set proofs for
+ * purchaseOrders, customerCreditRecords, professionalPacks, and entries.
  *
  * Runs in the same emulator session as firestore.rules.billing.test.ts.
+ * letterheadDocs remain ungated this round.
  */
 
 import { readFileSync } from "node:fs";
@@ -35,6 +36,7 @@ import {
   closeCustomerCreditFullyPaidOnDb,
 } from "@/services/customerCredit/recordMutations";
 import { createProfessionalPackAtomic } from "@/services/professionalPack/atomicCreate";
+import { createEntryAtomic } from "@/services/diary/atomicCreate";
 import { classifyAtomicCreateError } from "@/billing/optionC/classifyCreateError";
 import {
   runAtomicBillableCreate,
@@ -172,6 +174,24 @@ function packInput(clientRecordId: string) {
     title: "GST return support pack",
     facts: { period: "2026-09", notes: "brief" },
     matterDate: Date.now(),
+  };
+}
+
+function entryInput(clientRecordId: string, title = "Diary production create") {
+  return {
+    clientRecordId,
+    ueid: "VYD-2026-BILL01",
+    entryType: "work_update_issue" as const,
+    title,
+    entryDate: Date.now(),
+    payload: {
+      workDone: "site work",
+      issueProblem: null,
+      sitePlace: null,
+      quantityOutput: null,
+      responsiblePerson: null,
+      followUpRequired: false,
+    },
   };
 }
 
@@ -968,17 +988,17 @@ async function main() {
     );
     check("L cross-UID PO create denied", true);
 
-    // Entries / letterhead remain ungated this round
+    // Entries are Option-C linked this round; letterheadDocs stay ungated.
     await seedUser("g-unlinked");
     await seedStatus("g-unlinked", { quotaEnforcementEnabled: true, plan: "free", entitlementActive: true });
-    await assertSucceeds(
+    await assertFails(
       setDoc(doc(authedDb("g-unlinked"), "users", "g-unlinked", "entries", "e1"), {
         userId: "g-unlinked",
         title: "Diary entry",
         createdAt: Date.now(),
       })
     );
-    check("entries CREATE still ungated this round", true);
+    check("P entries CREATE without usage denied while enforcement on", true);
     await assertSucceeds(
       setDoc(doc(authedDb("g-unlinked"), "users", "g-unlinked", "letterheadDocs", "lh1"), {
         userId: "g-unlinked",
@@ -1259,15 +1279,78 @@ async function main() {
     );
     check("J starter cap 100 allows create at 26", starterPo.serial === 1 && (await usageCount("g-starter")) === 26);
 
+    // ---- Diary atomic CREATE (Round 4) ---------------------------------
+    await seedUser("g-en-off");
+    await seedStatus("g-en-off", { quotaEnforcementEnabled: false });
+    const enOff = await createEntryAtomic(authedDb("g-en-off"), "g-en-off", entryInput("en_off_1"));
+    check("A diary flag-off create without usage", enOff.id === "en_off_1");
+    check("B diary flag-off did not write usage", (await usageCount("g-en-off")) == null);
+
+    await seedUser("g-en");
+    await seedStatus("g-en", { quotaEnforcementEnabled: true, plan: "free", entitlementActive: true });
+    const en1 = await createEntryAtomic(authedDb("g-en"), "g-en", entryInput("en_on_1"));
+    check("A diary online create id agrees", en1.id === "en_on_1");
+    check("A diary one usage transition", (await usageCount("g-en")) === 1);
+    const enSnap = await getDoc(doc(authedDb("g-en"), "users", "g-en", "entries", "en_on_1"));
+    check("A diary stored id agrees", enSnap.exists() && (enSnap.data() as { id?: string }).id === "en_on_1");
+
+    const enReplay = await createEntryAtomic(authedDb("g-en"), "g-en", entryInput("en_on_1", "Older queued title"));
+    check("G diary same-id replay returns existing", enReplay.id === "en_on_1" && enReplay.title === en1.title);
+    check("G diary replay does not consume twice", (await usageCount("g-en")) === 1);
+
+    await seedUsage("g-en", usageDoc(monthNow, 24, "en_on_1", "entries"));
+    const enBarrier = new FirstPassBarrier(2);
+    const enRace = await Promise.allSettled([
+      createEntryAtomic(authedDb("g-en"), "g-en", entryInput("en_slot_a"), enBarrier.hook(), Date.now(), "en_slot_a"),
+      createEntryAtomic(authedDb("g-en"), "g-en", entryInput("en_slot_b"), enBarrier.hook(), Date.now(), "en_slot_b"),
+    ]);
+    const enInspect = inspectSettled("diary final-slot", enRace);
+    check("K diary final-slot overlap asserted", enBarrier.overlap || enInspect.fulfilled === 1);
+    check("K diary final-slot one fulfilled", enInspect.fulfilled === 1);
+    check(
+      "K diary final-slot rejection inspected",
+      enInspect.rejectedKinds.length === 1 && enInspect.rejectedKinds[0] === "quota_exhausted",
+      enInspect.rejectedKinds.join(",")
+    );
+    check("K diary usage at cap", (await usageCount("g-en")) === 25);
+    const enA = await getDoc(doc(authedDb("g-en"), "users", "g-en", "entries", "en_slot_a"));
+    const enB = await getDoc(doc(authedDb("g-en"), "users", "g-en", "entries", "en_slot_b"));
+    check("K diary exactly one new record", Number(enA.exists()) + Number(enB.exists()) === 1);
+
+    await seedUser("g-en-xf");
+    await seedStatus("g-en-xf", { quotaEnforcementEnabled: true, plan: "free", entitlementActive: true });
+    await seedUsage("g-en-xf", usageDoc(monthNow, 24, "seed", "purchaseOrders"));
+    const enXfBarrier = new FirstPassBarrier(2);
+    const enXfRace = await Promise.allSettled([
+      createEntryAtomic(authedDb("g-en-xf"), "g-en-xf", entryInput("en_xf"), enXfBarrier.hook()),
+      createPurchaseOrderAtomic(
+        authedDb("g-en-xf"),
+        "g-en-xf",
+        poInput("po_xf"),
+        parsePo,
+        enXfBarrier.hook()
+      ),
+    ]);
+    const enXfInspect = inspectSettled("diary vs PO", enXfRace);
+    check("K diary/PO overlap asserted", enXfBarrier.overlap || enXfInspect.fulfilled === 1);
+    check("K diary/PO one fulfilled", enXfInspect.fulfilled === 1);
+    enXfInspect.rejectedKinds.forEach((kind, i) => {
+      check(`K diary/PO rejection[${i}] is quota_exhausted`, kind === "quota_exhausted", kind);
+    });
+    check("K diary/PO usage=25", (await usageCount("g-en-xf")) === 25);
+    const enXfEntry = await getDoc(doc(authedDb("g-en-xf"), "users", "g-en-xf", "entries", "en_xf"));
+    const enXfPo = await getDoc(doc(authedDb("g-en-xf"), "users", "g-en-xf", "purchaseOrders", "po_xf"));
+    check("K diary/PO exactly one record", Number(enXfEntry.exists()) + Number(enXfPo.exists()) === 1);
+
     // Access budget (N)
     // Manual estimate (not a measured get/exists/getAfter trace):
     //   Create txn per evaluation: isActiveUser get(users/uid);
     //   quotaEnforcementOn exists+get(status); usageConsumedForRecord
     //   getAfter(usage)+exists+get(usage); serial counter isActiveUser.
-    //   ≈ 4 (record) + 4 (usage) + 1 (counter) of the 10 per-request limit.
+    //   Diary create has no serial counter (≈ 4 record + 4 usage).
     // Recovery after a Rules-denied commit is a later read-only transaction
     // (account, record, status, usage) and is not part of the create budget.
-    // Measured evidence: production-shaped PO/CC/pack creates succeeded, and
+    // Measured evidence: production-shaped PO/CC/pack/diary creates succeeded, and
     // same-id / final-slot / cross-family recovery did not hit the access cap.
     // _saveLocks is a separate pre-create write, not part of this transaction.
     check(
@@ -1281,6 +1364,10 @@ async function main() {
     check(
       "N production-shaped pack atomic create succeeded (Rules access budget held)",
       pk1.id === "pk_on_1"
+    );
+    check(
+      "N production-shaped diary atomic create succeeded (Rules access budget held)",
+      en1.id === "en_on_1"
     );
 
     // Account blocked

@@ -6,10 +6,16 @@ import {
   getDiaryRepository,
   type ListDiaryEntriesOptions,
 } from "@/services/diary";
-import { dedupeDiaryEntries } from "@/services/dashboard/diaryRecordCounts";
+import { localEntriesRepository } from "@/repositories/localEntriesRepository";
+import {
+  mergeRemoteWithLocalUnsynced,
+  type DiarySyncBadge,
+} from "@/services/diary/mergeLocalUnsynced";
+import { entrySearchBlob } from "@/utils/businessEntry/display";
 
 interface DiaryListState {
   entries: BusinessEntry[];
+  badgeById: Record<string, DiarySyncBadge>;
   /** True only until the first fetch for this hook instance completes. */
   initialLoading: boolean;
   refreshing: boolean;
@@ -21,6 +27,25 @@ interface UseDiaryListResult extends DiaryListState {
   loading: boolean;
   refresh: () => Promise<void>;
   reload: () => Promise<void>;
+}
+
+function applyClientFilters(
+  entries: BusinessEntry[],
+  options: ListDiaryEntriesOptions
+): BusinessEntry[] {
+  let out = entries;
+  if (!options.includeDeleted) out = out.filter((e) => !e.deletedAt);
+  if (options.entryType) out = out.filter((e) => e.entryType === options.entryType);
+  if (options.upcomingOnly) {
+    const now = Date.now();
+    out = out.filter((e) => e.reminder && e.reminder.at > now);
+  }
+  if (options.search) {
+    const needle = options.search.trim().toLowerCase();
+    if (needle) out = out.filter((e) => entrySearchBlob(e).includes(needle));
+  }
+  if (options.limit) out = out.slice(0, options.limit);
+  return out;
 }
 
 export function useDiaryList(
@@ -37,6 +62,7 @@ export function useDiaryList(
 
   const [state, setState] = useState<DiaryListState>({
     entries: [],
+    badgeById: {},
     initialLoading: Boolean(userId),
     refreshing: false,
     error: null,
@@ -48,6 +74,7 @@ export function useDiaryList(
     hasLoadedOnceRef.current = false;
     setState({
       entries: [],
+      badgeById: {},
       initialLoading: Boolean(userId),
       refreshing: false,
       error: null,
@@ -58,7 +85,13 @@ export function useDiaryList(
     async (mode: "mount" | "refresh") => {
       if (!userId) {
         hasLoadedOnceRef.current = false;
-        setState({ entries: [], initialLoading: false, refreshing: false, error: null });
+        setState({
+          entries: [],
+          badgeById: {},
+          initialLoading: false,
+          refreshing: false,
+          error: null,
+        });
         return;
       }
 
@@ -70,20 +103,41 @@ export function useDiaryList(
         error: null,
       }));
 
+      const repoOpts: ListDiaryEntriesOptions = {
+        search: options.search,
+        entryType: options.entryType ?? null,
+        upcomingOnly: options.upcomingOnly,
+        limit: options.limit,
+      };
+
+      let remote: BusinessEntry[] = [];
+      let cloudError: unknown = null;
       try {
-        const repoOpts: ListDiaryEntriesOptions = {
-          search: options.search,
-          entryType: options.entryType ?? null,
-          upcomingOnly: options.upcomingOnly,
-          limit: options.limit,
-        };
-        const entries = dedupeDiaryEntries(await getDiaryRepository().list(userId, repoOpts));
+        remote = await getDiaryRepository().list(userId, {
+          ...repoOpts,
+          limit: undefined,
+        });
+      } catch (e) {
+        cloudError = e;
+      }
+
+      try {
+        const localUnsynced = await localEntriesRepository.listUnsyncedRecords(userId);
+        const merged = mergeRemoteWithLocalUnsynced(remote, localUnsynced);
+        const entries = applyClientFilters(merged.entries, repoOpts);
         hasLoadedOnceRef.current = true;
-        setState({ entries, initialLoading: false, refreshing: false, error: null });
+        setState({
+          entries,
+          badgeById: merged.badgeById,
+          initialLoading: false,
+          refreshing: false,
+          error: entries.length === 0 && cloudError ? userFacingMessage(toAppError(cloudError)) : null,
+        });
       } catch (e) {
         hasLoadedOnceRef.current = true;
         setState({
           entries: [],
+          badgeById: {},
           initialLoading: false,
           refreshing: false,
           error: userFacingMessage(toAppError(e)),
@@ -97,7 +151,6 @@ export function useDiaryList(
     void fetchOnce("mount");
   }, [fetchOnce]);
 
-  // Stable identities — changing these re-triggers useFocusEffect in consumers.
   const refresh = useCallback(() => fetchOnce("refresh"), [fetchOnce]);
   const reload = useCallback(() => fetchOnce("refresh"), [fetchOnce]);
 

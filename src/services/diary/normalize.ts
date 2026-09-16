@@ -15,10 +15,23 @@ import type {
 } from "@/domain/businessEntry";
 import type { RecordGpsLocation } from "@/domain/recordLocation";
 import type { EntryReminder, GeoPoint, UEID } from "@/domain/types";
-import { geoPointToRecordGps } from "@/utils/location/entryLocation";
-import { normalizeDocumentHistory } from "@/services/documentHistory";
+import { normalizeDocumentHistory } from "@/services/documentHistory/core";
 import { paymentBankDetailsHasContent } from "@/utils/businessEntry/paymentBankDetails";
 import { parseINRInput } from "@/utils/money/inr";
+
+function geoPointToRecordGps(
+  geo: GeoPoint,
+  opts?: { addressLabel?: string | null; source?: RecordGpsLocation["source"] }
+): RecordGpsLocation {
+  return {
+    latitude: geo.latitude,
+    longitude: geo.longitude,
+    accuracy: geo.accuracy ?? null,
+    addressLabel: opts?.addressLabel ?? null,
+    capturedAt: new Date(geo.capturedAt).toISOString(),
+    source: opts?.source ?? "device",
+  };
+}
 
 function emptyPayload(type: BusinessEntryType): BusinessEntry["payload"] {
   switch (type) {

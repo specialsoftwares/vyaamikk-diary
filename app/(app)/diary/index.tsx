@@ -83,7 +83,7 @@ export default function DiaryHistoryScreen() {
     }),
     [search, entryType, upcomingOnly, listLimit]
   );
-  const { entries, loading, refreshing, error, refresh, reload } = useDiaryList(
+  const { entries, badgeById, loading, refreshing, error, refresh, reload } = useDiaryList(
     user?.uid ?? null,
     options
   );
@@ -165,12 +165,16 @@ export default function DiaryHistoryScreen() {
             onDeletePress={() => requestDelete(req, reload)}
             deleteInProgress={isDeleting(req)}
           >
-            <EntryRow entry={item} onPress={() => openEntry(item.id)} />
+            <EntryRow
+              entry={item}
+              syncBadge={badgeById[item.id]}
+              onPress={() => openEntry(item.id)}
+            />
           </SwipeToDeleteRow>
         </View>
       );
     },
-    [openEntry, styles.rowWrap, requestDelete, reload, isDeleting]
+    [openEntry, styles.rowWrap, requestDelete, reload, isDeleting, badgeById]
   );
 
   const listPadding = useMemo(

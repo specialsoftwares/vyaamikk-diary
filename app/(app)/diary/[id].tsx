@@ -19,6 +19,9 @@ import { userFacingMessage } from "@/domain/errors";
 import { useStuckBusyRecovery } from "@/hooks/useStuckBusyRecovery";
 import { getDiaryRepository } from "@/services/diary";
 import { updateEntryLocalFirst } from "@/services/diary/localFirst";
+import { localEntriesRepository } from "@/repositories/localEntriesRepository";
+import { syncEngine } from "@/sync/syncEngine";
+import { badgeForLocalRecord } from "@/services/diary/mergeLocalUnsynced";
 import { stripGpsFromLocation } from "@/services/location/locationRecordService";
 import { deleteUserContent } from "@/services/records/userContentDelete";
 import { notifySearchIndexChanged } from "@/services/search";
@@ -50,6 +53,10 @@ export default function EntryDetailScreen() {
   const [linkedDispatchStale, setLinkedDispatchStale] = useState(false);
   const [refreshingLink, setRefreshingLink] = useState(false);
   const [removingGps, setRemovingGps] = useState(false);
+  const [syncBadge, setSyncBadge] = useState<"pending" | "quota" | "permission" | "error" | "synced">(
+    "synced"
+  );
+  const [retryingSync, setRetryingSync] = useState(false);
   // iOS share-sheet promise can hang after dismissal, stranding `exporting`
   // past its `finally` — recover on refocus / app-active (see hook docs).
   const shareRecovery = useStuckBusyRecovery(
@@ -106,7 +113,11 @@ export default function EntryDetailScreen() {
     setLoading(true);
     setError(null);
     try {
-      const found = await getDiaryRepository().getById(user.uid, entryId);
+      const found =
+        (await getDiaryRepository().getById(user.uid, entryId)) ??
+        (await localEntriesRepository.getById(user.uid, entryId));
+      const localMeta = await localEntriesRepository.getRecord(user.uid, entryId);
+      setSyncBadge(localMeta ? badgeForLocalRecord(localMeta) : found ? "synced" : "synced");
       if (!found) {
         setError(t("errors.notFound"));
       } else {
@@ -357,6 +368,34 @@ export default function EntryDetailScreen() {
       {actionError ? (
         <View style={styles.bannerWrap}>
           <Banner tone="danger" message={actionError} />
+        </View>
+      ) : null}
+
+      {syncBadge && syncBadge !== "synced" ? (
+        <View style={styles.bannerWrap}>
+          <Banner
+            tone={syncBadge === "quota" ? "warning" : "info"}
+            message={
+              syncBadge === "quota"
+                ? t("sync.savedLocallyQuota")
+                : syncBadge === "permission" || syncBadge === "error"
+                  ? t("sync.savedLocallyPermission")
+                  : t("sync.savedLocallyPending")
+            }
+          />
+          <Button
+            label={t("sync.retrySync")}
+            onPress={() => {
+              if (!user) return;
+              setRetryingSync(true);
+              void syncEngine
+                .retryUnsyncedEntry(user.uid, entry.id)
+                .then(() => load())
+                .finally(() => setRetryingSync(false));
+            }}
+            loading={retryingSync}
+            fullWidth
+          />
         </View>
       ) : null}
 

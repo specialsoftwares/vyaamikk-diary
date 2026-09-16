@@ -106,6 +106,22 @@ function poWithUsageBatch(
   return batch;
 }
 
+function entryWithUsageBatch(
+  db: Firestore,
+  uid: string,
+  entryId: string,
+  usage: Record<string, unknown>
+) {
+  const batch = writeBatch(db);
+  batch.set(doc(db, "users", uid, "entries", entryId), {
+    userId: uid,
+    title: "Diary entry",
+    createdAt: Date.now(),
+  });
+  batch.set(doc(db, "users", uid, "subscription", "usageCurrent"), usage);
+  return batch;
+}
+
 function usageDoc(
   monthKey: string,
   recordsThisMonth: number,
@@ -549,6 +565,54 @@ async function main() {
     );
     check("linkage allowlist: non-linked collection cannot consume quota", true);
 
+    // Entries are Option-C linked this round; letterheadDocs stay ungated.
+    await assertFails(
+      setDoc(doc(qf(), "users", "quota-free", "entries", "en-bare"), {
+        userId: "quota-free",
+        title: "Bare entry",
+      })
+    );
+    check("P entry create without usage denied while enforcement on", true);
+
+    await assertSucceeds(
+      entryWithUsageBatch(
+        qf(),
+        "quota-free",
+        "en-1",
+        usageDoc(monthNow, 3, "en-1", "entries")
+      ).commit()
+    );
+    check("P entry create + genuine usage transition allowed", true);
+
+    await assertFails(
+      entryWithUsageBatch(
+        qf(),
+        "quota-free",
+        "en-2",
+        usageDoc(monthNow, 4, "en-1", "entries")
+      ).commit()
+    );
+    check("P two entries cannot share one increment", true);
+
+    await assertSucceeds(
+      updateDoc(doc(qf(), "users", "quota-free", "entries", "en-1"), {
+        userId: "quota-free",
+        title: "Edited diary entry",
+        updatedAt: Date.now(),
+      })
+    );
+    check("P entry edit does not consume quota", true);
+
+    await assertFails(
+      entryWithUsageBatch(
+        qf(),
+        "quota-free",
+        "en-1",
+        usageDoc(monthNow, 4, "en-1", "entries")
+      ).commit()
+    );
+    check("P entry replay cannot consume again", true);
+
     // Case 7 — concurrent creates racing for the final slot (24/25).
     await seedUser("quota-race");
     await seedSubscriptionStatus("quota-race", {
@@ -729,6 +793,60 @@ async function main() {
       ).commit()
     );
     check("rollover: continuing a stale month (+1 on old monthKey) denied", true);
+
+    await assertFails(
+      entryWithUsageBatch(
+        qf(),
+        "quota-free",
+        "en-wrong-ptr",
+        usageDoc(monthNow, 4, "en-1", "entries")
+      ).commit()
+    );
+    check("P entry wrong usage pointer denied", true);
+
+    await seedUser("quota-en-cap");
+    await seedSubscriptionStatus("quota-en-cap", {
+      plan: "free",
+      entitlementActive: true,
+      quotaEnforcementEnabled: true,
+    });
+    await seedUsage("quota-en-cap", usageDoc(monthNow, 25, "seed-en", "entries"));
+    await assertFails(
+      entryWithUsageBatch(
+        authedDb("quota-en-cap"),
+        "quota-en-cap",
+        "en-26",
+        usageDoc(monthNow, 26, "en-26", "entries")
+      ).commit()
+    );
+    check("P entry over free cap denied", true);
+
+    await seedUser("quota-en-roll");
+    await seedSubscriptionStatus("quota-en-roll", {
+      plan: "free",
+      entitlementActive: true,
+      quotaEnforcementEnabled: true,
+    });
+    await seedUsage("quota-en-roll", usageDoc(monthPrev, 17, "old-en", "entries"));
+    await assertSucceeds(
+      entryWithUsageBatch(
+        authedDb("quota-en-roll"),
+        "quota-en-roll",
+        "en-roll",
+        usageDoc(monthNow, 1, "en-roll", "entries")
+      ).commit()
+    );
+    check("P entry rollover to current IST month allowed", true);
+
+    await assertFails(
+      entryWithUsageBatch(
+        authedDb("mallory"),
+        "quota-free",
+        "en-x",
+        usageDoc(monthNow, 4, "en-x", "entries")
+      ).commit()
+    );
+    check("P entry cross-UID create+usage denied", true);
 
     // Cross-user quota writes are impossible regardless of batch shape.
     await assertFails(

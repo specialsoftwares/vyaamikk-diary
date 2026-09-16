@@ -34,6 +34,8 @@ export type SyncUiStatus =
   | "syncing"
   | "offline"
   | "pending"
+  | "quota_blocked"
+  | "sync_blocked"
   | "session_expired"
   | "pulling";
 
@@ -41,7 +43,10 @@ interface SyncContextValue {
   status: SyncUiStatus;
   lockReason: SyncLockReason;
   pendingCount: number;
+  quotaBlockedCount: number;
+  syncBlockedCount: number;
   flush: () => Promise<void>;
+  retryBlocked: () => Promise<void>;
   clearSessionLock: () => void;
   pullFromCloud: () => Promise<void>;
   /** Pull-to-refresh: flush queue + pull cloud when online; local-only when offline/expired. */
@@ -58,6 +63,8 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   const [pulling, setPulling] = useState(false);
   const [offline, setOffline] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
+  const [quotaBlockedCount, setQuotaBlockedCount] = useState(0);
+  const [syncBlockedCount, setSyncBlockedCount] = useState(0);
   const identityRef = useRef<{
     status: typeof authStatus;
     uid: string | null;
@@ -92,23 +99,53 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   const refreshPending = useCallback(async () => {
     if (!user) {
       setPendingCount(0);
+      setQuotaBlockedCount(0);
+      setSyncBlockedCount(0);
       return;
     }
-    const pending = await localEntriesRepository.listPending(user.uid);
+    const unsynced = await localEntriesRepository.listUnsyncedRecords(user.uid);
     const queue = await syncQueueRepository.listForUser(user.uid);
     const ids = new Set<string>();
-    for (const entry of pending) ids.add(entry.id);
+    let quota = 0;
+    let blocked = 0;
+    for (const record of unsynced) {
+      ids.add(record.entry.id);
+      if (record.meta.syncErrorCode === "quota_exhausted") quota += 1;
+      else if (!record.meta.autoRetry) blocked += 1;
+    }
     for (const item of queue) {
       if (item.entity === "entry") ids.add(item.entityId);
     }
     setPendingCount(ids.size);
+    setQuotaBlockedCount(quota);
+    setSyncBlockedCount(blocked);
   }, [user]);
 
   const flush = useCallback(async () => {
-    if (!user || sessionSyncGate.isLocked()) return;
+    const uid = user?.uid;
+    if (!uid || sessionSyncGate.isLocked()) return;
     setSyncing(true);
     try {
-      await syncEngine.flush(user.uid);
+      await syncEngine.flush(uid);
+      if (identityRef.current.uid !== uid) return;
+      await refreshPending();
+    } finally {
+      setSyncing(false);
+    }
+  }, [user, refreshPending]);
+
+  const retryBlocked = useCallback(async () => {
+    const uid = user?.uid;
+    if (!uid || sessionSyncGate.isLocked()) return;
+    setSyncing(true);
+    try {
+      const unsynced = await localEntriesRepository.listUnsyncedRecords(uid);
+      for (const record of unsynced) {
+        if (!record.meta.autoRetry) {
+          await syncEngine.retryUnsyncedEntry(uid, record.entry.id);
+        }
+      }
+      if (identityRef.current.uid !== uid) return;
       await refreshPending();
     } finally {
       setSyncing(false);
@@ -116,13 +153,15 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   }, [user, refreshPending]);
 
   const pullFromCloud = useCallback(async () => {
-    if (!user || sessionSyncGate.isLocked()) return;
+    const uid = user?.uid;
+    if (!uid || sessionSyncGate.isLocked()) return;
     setPulling(true);
     try {
-      const count = await localEntriesRepository.countForUser(user.uid);
+      const count = await localEntriesRepository.countForUser(uid);
       if (count === 0) {
-        await syncEngine.pullEntriesToLocalCache(user.uid);
+        await syncEngine.pullEntriesToLocalCache(uid);
       }
+      if (identityRef.current.uid !== uid) return;
       await refreshPending();
     } catch (e) {
       log.warn("pullFromCloud", e);
@@ -149,10 +188,13 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       return { offline, sessionLocked };
     }
 
+    const uid = user.uid;
     setSyncing(true);
     try {
-      await syncEngine.flush(user.uid);
-      await syncEngine.pullEntriesToLocalCache(user.uid);
+      await syncEngine.flush(uid);
+      if (identityRef.current.uid !== uid) return { offline: false, sessionLocked: false };
+      await syncEngine.pullEntriesToLocalCache(uid);
+      if (identityRef.current.uid !== uid) return { offline: false, sessionLocked: false };
       await refreshPending();
     } catch (e) {
       log.warn("runRefreshSync", e);
@@ -201,22 +243,27 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     if (lockReason === "session_expired") return "session_expired";
     if (pulling) return "pulling";
     if (syncing) return "syncing";
+    if (quotaBlockedCount > 0) return "quota_blocked";
+    if (syncBlockedCount > 0) return "sync_blocked";
     if (offline && pendingCount > 0) return "offline";
     if (pendingCount > 0) return "pending";
     return "idle";
-  }, [lockReason, pulling, syncing, offline, pendingCount]);
+  }, [lockReason, pulling, syncing, offline, pendingCount, quotaBlockedCount, syncBlockedCount]);
 
   const value = useMemo(
     () => ({
       status,
       lockReason,
       pendingCount,
+      quotaBlockedCount,
+      syncBlockedCount,
       flush,
+      retryBlocked,
       clearSessionLock: () => sessionSyncGate.unlock(),
       pullFromCloud,
       runRefreshSync,
     }),
-    [status, lockReason, pendingCount, flush, pullFromCloud, runRefreshSync]
+    [status, lockReason, pendingCount, quotaBlockedCount, syncBlockedCount, flush, retryBlocked, pullFromCloud, runRefreshSync]
   );
 
   return <SyncContext.Provider value={value}>{children}</SyncContext.Provider>;

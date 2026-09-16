@@ -20,16 +20,16 @@ import { getFirebaseDb } from "@/config/firebase";
 import { entrySearchBlob } from "@/utils/businessEntry/display";
 import { notificationsService } from "@/services/notifications";
 
-import { createInitialDocumentHistory } from "@/services/documentHistory";
 import { mergeBusinessEntryUpdate, mergeEntryPdfGeneration } from "./mergeEntryUpdate";
 import { entryToCloudStorage } from "@/services/pdf/pdfCloudSync";
 import { dedupeDiaryEntries } from "@/services/dashboard/diaryRecordCounts";
-import { normaliseBusinessEntry } from "./normalize";
+import {
+  createEntryAtomic,
+  entryFromFirestoreDoc,
+} from "./atomicCreate";
 import type {
-  CreateBusinessEntryInput,
   DiaryRepository,
   ListDiaryEntriesOptions,
-  UpdateBusinessEntryInput,
 } from "./types";
 
 function entriesCollection(userId: string) {
@@ -39,14 +39,6 @@ function entriesCollection(userId: string) {
 function reminderToJson(r: EntryReminder | null) {
   if (!r) return null;
   return { at: r.at, note: r.note, notificationId: r.notificationId };
-}
-
-/** Firestore doc id wins — stored `id` field may be empty from legacy creates. */
-function entryFromFirestoreDoc(
-  docId: string,
-  data: Record<string, unknown>
-): BusinessEntry | null {
-  return normaliseBusinessEntry({ ...data, id: docId }, "");
 }
 
 function applyFilters(
@@ -72,45 +64,7 @@ function applyFilters(
 
 export const firebaseDiaryRepository: DiaryRepository = {
   async create(userId, input) {
-    const now = Date.now();
-    const ref = input.clientRecordId
-      ? doc(getFirebaseDb(), "users", userId, "entries", input.clientRecordId)
-      : doc(entriesCollection(userId));
-
-    const existingSnap = await getDoc(ref);
-    if (existingSnap.exists()) {
-      const existing = entryFromFirestoreDoc(
-        existingSnap.id,
-        existingSnap.data() as Record<string, unknown>
-      );
-      if (existing) return existing;
-    }
-
-    const entry: BusinessEntry = {
-      id: ref.id,
-      userId,
-      ueid: input.ueid,
-      entryType: input.entryType,
-      title: input.title.trim(),
-      entryDate: input.entryDate,
-      notes: input.notes?.trim() || null,
-      reminder: input.reminder ?? null,
-      location: input.location ?? null,
-      attachments: input.attachments ?? [],
-      payload: input.payload,
-      pdfUri: null,
-      documentHistory: createInitialDocumentHistory(),
-      source: input.source ?? "composer",
-      status: input.status ?? "active",
-      createdAt: now,
-      updatedAt: now,
-      deletedAt: null,
-    };
-    const stored = entryToCloudStorage(entry);
-    stored.reminder = reminderToJson(entry.reminder);
-    stored.id = ref.id;
-    await setDoc(ref, stored);
-    return entry;
+    return createEntryAtomic(getFirebaseDb(), userId, input);
   },
 
   async update(userId, input) {

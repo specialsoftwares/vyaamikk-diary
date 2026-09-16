@@ -5,7 +5,8 @@ import { UNLIMITED_MONTHLY_RECORD_CAP } from "@/subscription/monthlyRecordCap";
 export type BillableRecordCollection =
   | "purchaseOrders"
   | "customerCreditRecords"
-  | "professionalPacks";
+  | "professionalPacks"
+  | "entries";
 
 export interface UsageCurrentSnapshot {
   monthKey: string;

@@ -99,4 +99,16 @@ const unlimited = nextUsageWrite({
 });
 assert.equal(unlimited.recordsThisMonth, 501);
 
+const diaryInc = nextUsageWrite({
+  existing: valid,
+  monthKey: "2026-09",
+  cap: 25,
+  collection: "entries",
+  recordId: "en-1",
+  updatedAt: 1,
+});
+assert.equal(diaryInc.lastRecordCollection, "entries");
+assert.equal(diaryInc.lastRecordId, "en-1");
+assert.equal(diaryInc.recordsThisMonth, 5);
+
 console.log("usageTransition.test.ts: ok");
