@@ -8,7 +8,10 @@ import {
   type LocalFirstCreateResult,
 } from "./localFirst";
 import { readLocalEntryRecordSync } from "@/repositories/localEntriesRepository";
-import { captureAdmissionToken } from "@/sync/syncSessionOwnership";
+import {
+  captureAdmissionToken,
+  type SyncSessionToken,
+} from "@/sync/syncSessionOwnership";
 
 export type { LocalFirstCreateResult };
 
@@ -50,10 +53,12 @@ export function reminderStillAppliesForScheduledNotification(
 export async function createEntryWithReminder(
   userId: string,
   input: CreateBusinessEntryInput,
-  reminderLabels: { title: string; body: string }
+  reminderLabels: { title: string; body: string },
+  options?: { session?: SyncSessionToken | null }
 ): Promise<LocalFirstCreateResult> {
-  const session = captureAdmissionToken();
-  const created = await createEntryLocalFirst(userId, input);
+  const session =
+    options && "session" in options ? options.session ?? null : captureAdmissionToken();
+  const created = await createEntryLocalFirst(userId, input, { session });
   const entry = created.entry;
   if (!entry.reminder || entry.reminder.notificationId) return created;
 

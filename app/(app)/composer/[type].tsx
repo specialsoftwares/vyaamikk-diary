@@ -38,9 +38,9 @@ import {
   formDraftsRepository,
   type FormDraftRecord,
 } from "@/repositories/formDraftsRepository";
-import { localEntriesRepository } from "@/repositories/localEntriesRepository";
 import { getDiaryRepository } from "@/services/diary";
 import { updateEntryLocalFirst } from "@/services/diary/localFirst";
+import { presentComposerWriteAcceptance } from "@/services/diary/composerSaveSteps";
 import { saveComposerEntry } from "@/services/diary/saveComposerEntry";
 import { logSaveDiagnostic } from "@/services/records/saveDiagnostics";
 import { lifecycleUiResetDiagnostics } from "@/services/records/saveLifecycleRunner";
@@ -546,7 +546,7 @@ export default function ComposerScreen() {
             cashPayload = resolved.payload;
             photoUploadFailed = resolved.photoUploadFailed;
           }
-          const { entry: updated } = await updateEntryLocalFirst(user.uid, {
+          const write = await updateEntryLocalFirst(user.uid, {
             id: editingId,
             title,
             entryDate: parts.entryDate,
@@ -556,6 +556,8 @@ export default function ComposerScreen() {
             payload: saveEntryType === "business_cash_given" ? cashPayload : parts.payload,
             attachments,
           });
+          const updated = write.entry;
+          const presented = presentComposerWriteAcceptance(write);
           editingAttachmentsRef.current = updated.attachments ?? [];
           if (photoUploadFailed) {
             feedback.showWarning(t("composer.cashPaidPhotoUploadFailed"));
@@ -567,11 +569,13 @@ export default function ComposerScreen() {
           notifySearchIndexChanged();
           dirtyRef.current = false;
           setFormDirty(false);
-          const localAfter = await localEntriesRepository.getRecord(user.uid, updated.id);
-          const cloudAccepted = !(
-            localAfter?.meta.pendingOp === "create" && !localAfter.meta.remoteConfirmed
-          );
-          setSaveResult({ entry: updated, pdfFailed: false, mode: "updated", cloudAccepted });
+          setSaveResult({
+            entry: updated,
+            pdfFailed: false,
+            mode: "updated",
+            cloudAccepted: presented.cloudAccepted,
+            syncFailureKind: presented.syncFailureKind,
+          });
           void ingestComposerForm(
             { userId: user.uid, ueid: user.ueid },
             entryType,
@@ -580,8 +584,15 @@ export default function ComposerScreen() {
           if (footprintFailed) {
             feedback.showWarning(t("locationFootprints.saveAttachFailed"));
           }
-          if (!cloudAccepted) {
-            feedback.showWarning(t("sync.savedLocallyPending"), t("sync.savedLocallyTitle"));
+          if (!presented.cloudAccepted) {
+            const localMsg =
+              presented.syncFailureKind === "quota_exhausted"
+                ? t("sync.savedLocallyQuota")
+                : presented.syncFailureKind === "permission_denied" ||
+                    presented.syncFailureKind === "quota_state_invalid"
+                  ? t("sync.savedLocallyPermission")
+                  : t("sync.savedLocallyPending");
+            feedback.showWarning(localMsg, t("sync.savedLocallyTitle"));
           } else {
             feedback.showSuccess(t("composer.saveSuccess.updatedTitle"));
           }
@@ -646,13 +657,15 @@ export default function ComposerScreen() {
             cashPaidPhotoState,
             cashPayload
           );
-          entry = (
-            await updateEntryLocalFirst(user.uid, {
-              id: entry.id,
-              attachments: resolved.attachments,
-              payload: resolved.payload,
-            })
-          ).entry;
+          const attachWrite = await updateEntryLocalFirst(user.uid, {
+            id: entry.id,
+            attachments: resolved.attachments,
+            payload: resolved.payload,
+          });
+          entry = attachWrite.entry;
+          if (!attachWrite.remoteAccepted) {
+            failedSecondarySteps = [...(failedSecondarySteps ?? []), "attachments"];
+          }
           if (resolved.photoUploadFailed) {
             feedback.showWarning(t("composer.cashPaidPhotoUploadFailed"));
           }

@@ -301,12 +301,15 @@ export default function EntryDetailScreen() {
     setRemovingGps(true);
     setActionError(null);
     try {
-      const { entry: updated } = await updateEntryLocalFirst(user.uid, {
+      const write = await updateEntryLocalFirst(user.uid, {
         id: entry.id,
         location: stripGpsFromLocation(entry.location),
       });
-      setEntry(updated);
+      setEntry(write.entry);
       notifySearchIndexChanged();
+      if (!write.remoteAccepted) {
+        setActionError(t("sync.savedLocallyPending"));
+      }
     } catch (e) {
       setActionError(userFacingMessage(e));
     } finally {

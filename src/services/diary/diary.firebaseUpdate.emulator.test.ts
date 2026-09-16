@@ -115,6 +115,68 @@ async function main() {
     if (cleared.reminder !== null) throw new Error("reminder not cleared");
     if (cancels.join() !== "notif-1") throw new Error(`expected one cancel, got ${cancels.join()}`);
 
+    const { appendRecordCompletedStep, setCompletedStepsFirestoreForTests, COMPLETED_STEPS_AT_FIELD } =
+      await import("@/services/records/recordCompletedSteps");
+    const { SAVE_STEP } = await import("@/services/records/saveLockTypes");
+    setCompletedStepsFirestoreForTests(db);
+    try {
+      const stepped = await createEntryAtomic(db, uid, entryInput("en_steps_cas"));
+      const contentAt = stepped.updatedAt;
+      const afterBase = await appendRecordCompletedStep(
+        uid,
+        "business_entry",
+        stepped.id,
+        SAVE_STEP.BASE_RECORD_CREATED
+      );
+      const afterPdfGen = await appendRecordCompletedStep(
+        uid,
+        "business_entry",
+        stepped.id,
+        SAVE_STEP.PDF_GENERATED
+      );
+      if (!afterBase.includes(SAVE_STEP.BASE_RECORD_CREATED)) {
+        throw new Error("BASE_RECORD_CREATED missing");
+      }
+      if (!afterPdfGen.includes(SAVE_STEP.PDF_GENERATED)) {
+        throw new Error("PDF_GENERATED missing");
+      }
+      const stepSnap = await getDoc(doc(db, "users", uid, "entries", stepped.id));
+      const stepData = stepSnap.data() as Record<string, unknown>;
+      if (stepData.updatedAt !== contentAt) {
+        throw new Error(
+          `completedSteps must not bump content updatedAt (was ${String(stepData.updatedAt)}, want ${contentAt})`
+        );
+      }
+      if (typeof stepData[COMPLETED_STEPS_AT_FIELD] !== "number") {
+        throw new Error("completedStepsUpdatedAt audit field missing");
+      }
+      const afterMeta = await updateDiaryEntryOnDb(
+        db,
+        uid,
+        { id: stepped.id, title: "After coordination metadata", expectedUpdatedAt: contentAt },
+        { cancelNotification: async () => undefined }
+      );
+      if (afterMeta.title !== "After coordination metadata") {
+        throw new Error("CAS update after completedSteps should succeed");
+      }
+
+      try {
+        await updateDiaryEntryOnDb(
+          db,
+          uid,
+          { id: stepped.id, title: "stale after genuine edit", expectedUpdatedAt: contentAt },
+          { cancelNotification: async () => undefined }
+        );
+        throw new Error("genuine remote content edit must still CAS-fail");
+      } catch (e) {
+        if (!(e instanceof AppError) || e.details?.remoteChanged !== true) {
+          throw e;
+        }
+      }
+    } finally {
+      setCompletedStepsFirestoreForTests(null);
+    }
+
     console.log("diary.firebaseUpdate.emulator.test.ts: ok (Firestore emulator)");
   } finally {
     await testEnv.cleanup();

@@ -1,9 +1,20 @@
 /**
  * Persist completedSteps on base record documents (Firestore arrayUnion / mock dedup).
+ *
+ * Coordination metadata must not bump content `updatedAt`. Diary CAS compares
+ * that field; a steps-only write would otherwise make a later PDF UPDATE
+ * look like a remote content edit.
  */
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { arrayUnion, doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
+import {
+  arrayUnion,
+  doc,
+  getDoc,
+  setDoc,
+  updateDoc,
+  type Firestore,
+} from "firebase/firestore";
 
 import { getActiveBackend } from "@/config/env";
 import { getFirebaseDb } from "@/config/firebase";
@@ -14,12 +25,22 @@ import type { RecordSaveKind } from "./saveIdempotency";
 
 const log = createLogger("save/completedSteps");
 
+/** Audit clock for step coordination — not the diary content version. */
+export const COMPLETED_STEPS_AT_FIELD = "completedStepsUpdatedAt" as const;
+
 type RecordCollection =
   | "entries"
   | "professionalPacks"
   | "purchaseOrders"
   | "customerCreditRecords"
   | "letterheadDocs";
+
+let firestoreForTests: Firestore | null = null;
+
+/** Node/CI seam. Production still uses getFirebaseDb(). */
+export function setCompletedStepsFirestoreForTests(db: Firestore | null): void {
+  firestoreForTests = db;
+}
 
 function collectionForKind(kind: RecordSaveKind): RecordCollection | null {
   switch (kind) {
@@ -42,12 +63,30 @@ function collectionForKind(kind: RecordSaveKind): RecordCollection | null {
 }
 
 function usesFirestore(): boolean {
+  if (firestoreForTests) return true;
   const backend = getActiveBackend();
   return backend === "firebase-shared-dev" || backend === "firebase-production";
 }
 
+function firestoreDb(): Firestore {
+  return firestoreForTests ?? getFirebaseDb();
+}
+
 function mockStorageKey(userId: string, collection: RecordCollection, recordId: string): string {
   return `vyd_steps_v1_${userId}_${collection}_${recordId}`;
+}
+
+/**
+ * Primary and fallback Firestore payloads. Never includes content `updatedAt`.
+ */
+export function completedStepsCoordinationPatch(
+  completedStepsValue: unknown,
+  now = Date.now()
+): Record<string, unknown> {
+  return {
+    completedSteps: completedStepsValue,
+    [COMPLETED_STEPS_AT_FIELD]: now,
+  };
 }
 
 export async function fetchRecordCompletedSteps(
@@ -59,7 +98,7 @@ export async function fetchRecordCompletedSteps(
   if (!userId || !recordId || !collection) return [];
   try {
     if (usesFirestore()) {
-      const ref = doc(getFirebaseDb(), "users", userId, collection, recordId);
+      const ref = doc(firestoreDb(), "users", userId, collection, recordId);
       const snap = await getDoc(ref);
       if (!snap.exists()) return [];
       const steps = (snap.data() as { completedSteps?: unknown }).completedSteps;
@@ -84,11 +123,8 @@ export async function appendRecordCompletedStep(
   if (!userId || !recordId || !collection) return [];
   try {
     if (usesFirestore()) {
-      const ref = doc(getFirebaseDb(), "users", userId, collection, recordId);
-      await updateDoc(ref, {
-        completedSteps: arrayUnion(step),
-        updatedAt: Date.now(),
-      });
+      const ref = doc(firestoreDb(), "users", userId, collection, recordId);
+      await updateDoc(ref, completedStepsCoordinationPatch(arrayUnion(step)));
       return fetchRecordCompletedSteps(userId, recordKind, recordId);
     }
     const key = mockStorageKey(userId, collection, recordId);
@@ -100,7 +136,7 @@ export async function appendRecordCompletedStep(
     log.warn("append step failed", { step, recordKind });
     try {
       if (usesFirestore()) {
-        const ref = doc(getFirebaseDb(), "users", userId, collection, recordId);
+        const ref = doc(firestoreDb(), "users", userId, collection, recordId);
         const snap = await getDoc(ref);
         if (snap.exists()) {
           const data = snap.data() as Record<string, unknown>;
@@ -108,7 +144,7 @@ export async function appendRecordCompletedStep(
             Array.isArray(data.completedSteps) ? (data.completedSteps as string[]) : [],
             step
           );
-          await setDoc(ref, { completedSteps: merged, updatedAt: Date.now() }, { merge: true });
+          await setDoc(ref, completedStepsCoordinationPatch(merged), { merge: true });
           return merged;
         }
       }

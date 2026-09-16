@@ -65,9 +65,11 @@ async function notifySearch(): Promise<void> {
  */
 export async function createEntryLocalFirst(
   userId: string,
-  input: CreateBusinessEntryInput
+  input: CreateBusinessEntryInput,
+  options?: { session?: SyncSessionToken | null }
 ): Promise<LocalFirstCreateResult> {
-  const session = captureAdmissionToken();
+  const session =
+    options && "session" in options ? options.session ?? null : captureAdmissionToken();
   const now = Date.now();
   const recordId = stableRecordId(input.clientRecordId, "en");
   const createInput: CreateBusinessEntryInput = { ...input, clientRecordId: recordId };
