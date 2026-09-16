@@ -9,6 +9,7 @@ import {
   migrateToV6,
   migrateToV7,
   migrateToV8,
+  migrateToV9,
   tableExists,
   tableHasColumn,
 } from "./migrate";
@@ -91,6 +92,10 @@ export function initializeLocalDatabase(): Promise<void> {
         migrateToV8(database);
         version = 8;
       }
+      if (version < 9) {
+        migrateToV9(database);
+        version = 9;
+      }
 
       if (version >= 3 && !tableHasColumn(database, "form_drafts", "source")) {
         migrateToV3(database);
@@ -113,6 +118,13 @@ export function initializeLocalDatabase(): Promise<void> {
         !tableHasColumn(database, "entries_local", "local_revision")
       ) {
         migrateToV8(database);
+      }
+      if (
+        version >= 9 &&
+        tableExists(database, "entries_local") &&
+        !tableHasColumn(database, "entries_local", "origin_revision")
+      ) {
+        migrateToV9(database);
       }
 
       database.runSync(

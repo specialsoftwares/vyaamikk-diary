@@ -15,7 +15,14 @@ import {
   acknowledgeDiaryFailure,
   acknowledgeDiaryUpdateSuccess,
   captureSentDiaryOp,
+  expectedUpdatedAtForRecord,
 } from "@/sync/diaryAck";
+import {
+  enqueueDiaryRecordWrite,
+  rememberRemoteUpdatedAt,
+} from "@/sync/diaryRecordWrites";
+import { captureAdmissionToken, mayIssueRemoteWork } from "@/sync/syncSessionOwnership";
+import { entryToUpdateInput } from "@/sync/diarySyncIntent";
 import { mergeBusinessEntryUpdate } from "@/services/diary/mergeEntryUpdate";
 import { stableRecordId } from "@/services/records/stableRecordId";
 import { createLogger } from "@/utils/logger";
@@ -52,6 +59,7 @@ export async function createEntryLocalFirst(
   userId: string,
   input: CreateBusinessEntryInput
 ): Promise<LocalFirstCreateResult> {
+  const session = captureAdmissionToken();
   const now = Date.now();
   const recordId = stableRecordId(input.clientRecordId, "en");
   const createInput: CreateBusinessEntryInput = { ...input, clientRecordId: recordId };
@@ -92,10 +100,37 @@ export async function createEntryLocalFirst(
     op: "create",
     queueId,
     entry: localEntry,
+    session,
   });
 
+  if (!mayIssueRemoteWork(session, userId)) {
+    return {
+      entry: currentLocal(userId, recordId, localEntry),
+      remoteAccepted: false,
+    };
+  }
+
   try {
-    const result = await getDiaryRepository().createWithOutcome(userId, createInput);
+    const dispatched = await enqueueDiaryRecordWrite({
+      userId,
+      recordId,
+      revision: sent.revision,
+      op: "create",
+      session,
+      run: async () => {
+        if (!mayIssueRemoteWork(session, userId)) {
+          throw new AppError("session_expired", "Session is no longer active.");
+        }
+        return getDiaryRepository().createWithOutcome(userId, createInput);
+      },
+    });
+    if (dispatched.skipped) {
+      return {
+        entry: currentLocal(userId, recordId, localEntry),
+        remoteAccepted: false,
+      };
+    }
+    const result = dispatched.value;
     logSaveDiagnostic({
       phase: "remote_write",
       recordKind: "business_entry",
@@ -104,6 +139,7 @@ export async function createEntryLocalFirst(
       remoteId: result.record.id,
       source: "create",
     });
+    rememberRemoteUpdatedAt(userId, recordId, result.record.updatedAt);
     const ack = acknowledgeDiaryCreateSuccess(sent, result.record, result.outcome);
     await notifySearch();
     return {
@@ -122,7 +158,9 @@ export async function createEntryLocalFirst(
       };
     }
     if (kind === "network") {
-      void syncEngine.flush(userId).catch(() => undefined);
+      if (mayIssueRemoteWork(session, userId)) {
+        void syncEngine.flush(userId).catch(() => undefined);
+      }
       return {
         entry: currentLocal(userId, recordId, localEntry),
         remoteAccepted: false,
@@ -141,6 +179,7 @@ export async function updateEntryLocalFirst(
   userId: string,
   input: UpdateBusinessEntryInput
 ): Promise<BusinessEntry> {
+  const session = captureAdmissionToken();
   const existingRecord =
     (await localEntriesRepository.getRecord(userId, input.id)) ??
     (await getDiaryRepository().getById(userId, input.id).then((entry) =>
@@ -164,17 +203,43 @@ export async function updateEntryLocalFirst(
     op: "update",
     queueId,
     entry: merged,
+    session,
   });
 
+  if (!mayIssueRemoteWork(session, userId)) {
+    return currentLocal(userId, input.id, merged);
+  }
+
+  const expectedUpdatedAt = input.expectedUpdatedAt ?? expectedUpdatedAtForRecord(userId, input.id);
+  const payload = entryToUpdateInput(merged, expectedUpdatedAt);
+
   try {
-    const remote = await getDiaryRepository().update(userId, input);
+    const dispatched = await enqueueDiaryRecordWrite({
+      userId,
+      recordId: input.id,
+      revision: sent.revision,
+      op: "update",
+      session,
+      run: async () => {
+        if (!mayIssueRemoteWork(session, userId)) {
+          throw new AppError("session_expired", "Session is no longer active.");
+        }
+        const latestExpected = expectedUpdatedAtForRecord(userId, input.id) ?? expectedUpdatedAt;
+        return getDiaryRepository().update(userId, { ...payload, expectedUpdatedAt: latestExpected });
+      },
+    });
+    if (dispatched.skipped) {
+      return currentLocal(userId, input.id, merged);
+    }
+    const remote = dispatched.value;
+    rememberRemoteUpdatedAt(userId, input.id, remote.updatedAt);
     acknowledgeDiaryUpdateSuccess(sent, remote);
     await notifySearch();
     return currentLocal(userId, input.id, remote);
   } catch (e) {
     acknowledgeDiaryFailure(sent, e);
     const kind = classifyAtomicCreateError(e);
-    if (kind === "network") {
+    if (kind === "network" && mayIssueRemoteWork(session, userId)) {
       void syncEngine.flush(userId).catch(() => undefined);
     }
     return currentLocal(userId, input.id, merged);

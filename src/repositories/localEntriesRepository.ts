@@ -12,8 +12,13 @@ export interface LocalEntrySyncMeta {
   syncErrorCode: string | null;
   autoRetry: boolean;
   localUpdatedAt: number;
+  remoteUpdatedAt: number | null;
   localRevision: number;
   ackedRevision: number;
+  originRevision: number;
+  originOp: PendingOp | null;
+  originEntry: BusinessEntry | null;
+  dispatchGeneration: number;
 }
 
 export interface LocalEntryRecord {
@@ -29,6 +34,11 @@ export interface UpsertLocalEntryOptions {
   autoRetry?: boolean;
   localRevision?: number;
   ackedRevision?: number;
+  originRevision?: number;
+  originOp?: PendingOp | null;
+  originEntry?: BusinessEntry | null;
+  dispatchGeneration?: number;
+  remoteUpdatedAt?: number | null;
   bumpRevision?: boolean;
   /** When true, unspecified meta fields keep the existing row's values. */
   preserveUnspecifiedMeta?: boolean;
@@ -48,6 +58,15 @@ function parseSyncStatus(raw: unknown): LocalSyncStatus {
   return "pending";
 }
 
+function parseOriginEntry(raw: string | null | undefined): BusinessEntry | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as BusinessEntry;
+  } catch {
+    return null;
+  }
+}
+
 function parseRow(row: {
   payload_json: string;
   sync_status?: string;
@@ -56,8 +75,13 @@ function parseRow(row: {
   sync_error_code?: string | null;
   auto_retry?: number | null;
   local_updated_at?: number;
+  remote_updated_at?: number | null;
   local_revision?: number | null;
   acked_revision?: number | null;
+  origin_revision?: number | null;
+  origin_payload_json?: string | null;
+  origin_op?: string | null;
+  dispatch_generation?: number | null;
 }): LocalEntryRecord | null {
   try {
     const entry = JSON.parse(row.payload_json) as BusinessEntry;
@@ -70,8 +94,16 @@ function parseRow(row: {
         syncErrorCode: row.sync_error_code ?? null,
         autoRetry: row.auto_retry == null ? true : Number(row.auto_retry) === 1,
         localUpdatedAt: Number(row.local_updated_at ?? entry.updatedAt ?? 0),
+        remoteUpdatedAt:
+          row.remote_updated_at == null || row.remote_updated_at === undefined
+            ? null
+            : Number(row.remote_updated_at),
         localRevision: Number(row.local_revision ?? 0),
         ackedRevision: Number(row.acked_revision ?? 0),
+        originRevision: Number(row.origin_revision ?? 0),
+        originOp: parsePendingOp(row.origin_op),
+        originEntry: parseOriginEntry(row.origin_payload_json),
+        dispatchGeneration: Number(row.dispatch_generation ?? 0),
       },
     };
   } catch {
@@ -79,7 +111,7 @@ function parseRow(row: {
   }
 }
 
-const ENTRY_SELECT = `payload_json, sync_status, pending_op, remote_confirmed, sync_error_code, auto_retry, local_updated_at, local_revision, acked_revision`;
+const ENTRY_SELECT = `payload_json, sync_status, pending_op, remote_confirmed, sync_error_code, auto_retry, local_updated_at, remote_updated_at, local_revision, acked_revision, origin_revision, origin_payload_json, origin_op, dispatch_generation`;
 
 export function readLocalEntryRecordSync(userId: string, id: string): LocalEntryRecord | null {
   const db = getLocalDatabase();
@@ -91,8 +123,13 @@ export function readLocalEntryRecordSync(userId: string, id: string): LocalEntry
     sync_error_code: string | null;
     auto_retry: number | null;
     local_updated_at: number;
+    remote_updated_at: number | null;
     local_revision: number | null;
     acked_revision: number | null;
+    origin_revision: number | null;
+    origin_payload_json: string | null;
+    origin_op: string | null;
+    dispatch_generation: number | null;
   }>(
     `SELECT ${ENTRY_SELECT}
        FROM entries_local WHERE user_id = ? AND id = ?`,
@@ -147,18 +184,51 @@ export function writeLocalEntryRowSync(
       : options.preserveUnspecifiedMeta
         ? (meta?.ackedRevision ?? 0)
         : (meta?.ackedRevision ?? 0);
+  const originRevision =
+    options.originRevision !== undefined
+      ? options.originRevision
+      : options.preserveUnspecifiedMeta
+        ? (meta?.originRevision ?? 0)
+        : (meta?.originRevision ?? 0);
+  const originOp =
+    options.originOp !== undefined
+      ? options.originOp
+      : options.preserveUnspecifiedMeta
+        ? (meta?.originOp ?? null)
+        : (meta?.originOp ?? null);
+  const originEntry =
+    options.originEntry !== undefined
+      ? options.originEntry
+      : options.preserveUnspecifiedMeta
+        ? (meta?.originEntry ?? null)
+        : (meta?.originEntry ?? null);
+  const dispatchGeneration =
+    options.dispatchGeneration !== undefined
+      ? options.dispatchGeneration
+      : options.preserveUnspecifiedMeta
+        ? (meta?.dispatchGeneration ?? 0)
+        : (meta?.dispatchGeneration ?? 0);
+  const remoteUpdatedAt =
+    options.remoteUpdatedAt !== undefined
+      ? options.remoteUpdatedAt
+      : options.preserveUnspecifiedMeta
+        ? (meta?.remoteUpdatedAt ?? null)
+        : remoteConfirmed
+          ? (meta?.remoteUpdatedAt ?? null)
+          : null;
   db.runSync(
     `INSERT OR REPLACE INTO entries_local
      (id, user_id, payload_json, sync_status, local_updated_at, remote_updated_at, version_number,
-      pending_op, remote_confirmed, sync_error_code, auto_retry, local_revision, acked_revision)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      pending_op, remote_confirmed, sync_error_code, auto_retry, local_revision, acked_revision,
+      origin_revision, origin_payload_json, origin_op, dispatch_generation)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       entry.id,
       entry.userId,
       JSON.stringify(entry),
       options.syncStatus,
       entry.updatedAt ?? Date.now(),
-      remoteConfirmed ? (entry.updatedAt ?? Date.now()) : null,
+      remoteUpdatedAt,
       entry.documentHistory?.versionNumber ?? 1,
       pendingOp,
       boolInt(remoteConfirmed, 0),
@@ -166,6 +236,10 @@ export function writeLocalEntryRowSync(
       boolInt(autoRetry, 1),
       localRevision,
       ackedRevision,
+      originRevision,
+      originEntry ? JSON.stringify(originEntry) : null,
+      originOp,
+      dispatchGeneration,
     ]
   );
 }
@@ -219,6 +293,11 @@ export const localEntriesRepository = {
         autoRetry: true,
         localRevision: 1,
         ackedRevision: 0,
+        originRevision: 1,
+        originOp: "create",
+        originEntry: entry,
+        dispatchGeneration: 1,
+        remoteUpdatedAt: null,
       },
       null
     );
@@ -244,8 +323,13 @@ export const localEntriesRepository = {
       sync_error_code: string | null;
       auto_retry: number | null;
       local_updated_at: number;
+      remote_updated_at: number | null;
       local_revision: number | null;
       acked_revision: number | null;
+      origin_revision: number | null;
+      origin_payload_json: string | null;
+      origin_op: string | null;
+      dispatch_generation: number | null;
     }>(
       `SELECT ${ENTRY_SELECT}
          FROM entries_local
@@ -274,6 +358,11 @@ export const localEntriesRepository = {
         autoRetry: true,
         localRevision: revision,
         ackedRevision: revision,
+        originRevision: revision,
+        originOp: null,
+        originEntry: entry,
+        remoteUpdatedAt: entry.updatedAt ?? existing?.meta.remoteUpdatedAt ?? null,
+        preserveUnspecifiedMeta: true,
       },
       existing
     );
@@ -294,6 +383,7 @@ export const localEntriesRepository = {
         remoteConfirmed: true,
         syncErrorCode: null,
         autoRetry: true,
+        preserveUnspecifiedMeta: true,
       },
       record
     );
@@ -327,6 +417,8 @@ export const localEntriesRepository = {
         remoteConfirmed: record.meta.remoteConfirmed,
         syncErrorCode: null,
         autoRetry: true,
+        dispatchGeneration: (record.meta.dispatchGeneration ?? 0) + 1,
+        preserveUnspecifiedMeta: true,
       },
       record
     );

@@ -99,6 +99,7 @@ function testRotatesGenerationOnLifecycle() {
   assert.notEqual(second?.generation, first?.generation);
   assert.equal(syncSessionOwnership.isCurrent(first), false);
   syncSessionOwnership.resetForTests();
+  assert.equal(syncSessionOwnership.isActiveOwner(first), false);
 }
 
 function main() {

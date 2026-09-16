@@ -8,11 +8,17 @@ import { createEntryLocalFirst, updateEntryLocalFirst } from "@/services/diary/l
 import { localEntriesRepository } from "@/repositories/localEntriesRepository";
 import { syncQueueRepository } from "@/repositories/syncQueueRepository";
 import { persistDiaryCreateIntent, persistDiaryUpdateIntent } from "@/repositories/diaryLocalIntent";
-import { installMemoryLocalDatabase, uninstallMemoryLocalDatabase } from "@/localDb/testHarness";
+import { installMemoryLocalDatabase, reopenMemoryLocalDatabaseFrom, uninstallMemoryLocalDatabase } from "@/localDb/testHarness";
 import { __diarySyncTest, syncEngine } from "@/sync/syncEngine";
 import { sessionSyncGate } from "@/sync/sessionSyncGate";
 import { syncSessionOwnership } from "@/sync/syncSessionOwnership";
 import { mergeBusinessEntryUpdate } from "@/services/diary/mergeEntryUpdate";
+import {
+  acknowledgeDiaryCreateSuccess,
+  acknowledgeDiaryFailure,
+  captureSentDiaryOp,
+} from "@/sync/diaryAck";
+import { resetDiaryRecordWritesForTests } from "@/sync/diaryRecordWrites";
 
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -125,7 +131,9 @@ async function main() {
   installMemoryLocalDatabase();
   sessionSyncGate.unlock();
   syncSessionOwnership.resetForTests();
+  syncSessionOwnership.beginSession("u1");
   __diarySyncTest.resetFlushChain();
+  resetDiaryRecordWritesForTests();
 
   try {
     // A. Direct CREATE delayed; local edit arrives; old success preserves edit and queues UPDATE.
@@ -259,15 +267,20 @@ async function main() {
     const cP1 = updateEntryLocalFirst("u1", { id: "en_ack_c", title: "A" });
     await cEntered[0]!.promise;
     const cP2 = updateEntryLocalFirst("u1", { id: "en_ack_c", title: "B" });
+    cGates[0]!.resolve();
+    await cP1;
     await cEntered[1]!.promise;
     cGates[1]!.resolve();
     await cP2;
-    assert.equal((await localEntriesRepository.getRecord("u1", "en_ack_c"))?.entry.title, "B");
-    cGates[0]!.resolve();
-    await cP1;
     const cFinal = await localEntriesRepository.getRecord("u1", "en_ack_c");
     assert.equal(cFinal?.entry.title, "B");
     assert.notEqual(cFinal?.entry.title, "A");
+    assert.equal(cStore.get("en_ack_c")?.title, "B");
+    assert.equal(cFinal?.meta.syncStatus, "synced");
+    assert.equal(
+      (await syncQueueRepository.listForUser("u1")).filter((q) => q.entityId === "en_ack_c").length,
+      0
+    );
 
     // D. Old failure after a newer accepted/rearmed operation cannot suspend or remove that newer operation.
     const dStore = new Map<string, BusinessEntry>();
@@ -294,15 +307,16 @@ async function main() {
     const dP1 = updateEntryLocalFirst("u1", { id: "en_ack_d", title: "old" });
     await dEntered[0]!.promise;
     const dP2 = updateEntryLocalFirst("u1", { id: "en_ack_d", title: "newer" });
+    dGates[0]!.resolve();
+    await dP1;
     await dEntered[1]!.promise;
     dGates[1]!.resolve();
     await dP2;
-    dGates[0]!.resolve();
-    await dP1;
     const dFinal = await localEntriesRepository.getRecord("u1", "en_ack_d");
     assert.equal(dFinal?.entry.title, "newer");
     assert.notEqual(dFinal?.meta.syncErrorCode, "permission_denied");
     assert.equal(dFinal?.meta.autoRetry, true);
+    assert.equal(dStore.get("en_ack_d")?.title, "newer");
 
     // E. Same-ID CREATE replay against newer server content does not overwrite it on a subsequent flush.
     const eRemote = { ...asEntry("en_ack_e", "server newer"), updatedAt: 99, documentHistory: {
@@ -424,6 +438,139 @@ async function main() {
     const hRow = await localEntriesRepository.getRecord("u1", "en_ack_h");
     assert.equal(hRow?.entry.title, "local pending");
     assert.notEqual(hRow?.meta.syncStatus, "synced");
+
+    // Round 6 — lost CREATE ack, later edit, restart, existing-record replay.
+    // Boundary: production persist/processQueue/ack; mocked DiaryRepository (not Firebase quota).
+    const lostStore = new Map<string, BusinessEntry>();
+    let lostCreates = 0;
+    let lostUpdates = 0;
+    setDiaryRepositoryForTests(
+      mockRepo(lostStore, {
+        create: async (input) => {
+          lostCreates += 1;
+          const entry = { ...asEntry(input.clientRecordId!, input.title), userId: "u1", updatedAt: 50 };
+          lostStore.set(entry.id, entry);
+          throw new AppError("network", "ack lost");
+        },
+        update: async (input) => {
+          lostUpdates += 1;
+          const cur = lostStore.get(input.id)!;
+          const next = { ...cur, ...input, updatedAt: Date.now() } as BusinessEntry;
+          lostStore.set(input.id, next);
+          return next;
+        },
+      })
+    );
+    const lostMemory = installMemoryLocalDatabase();
+    syncSessionOwnership.resetForTests();
+    syncSessionOwnership.beginSession("u1");
+    const lostCreate = await createEntryLocalFirst("u1", noteInput("en_lost_1", "original"));
+    assert.equal(lostCreate.remoteAccepted, false);
+    assert.equal(lostStore.get("en_lost_1")?.title, "original");
+    await updateEntryLocalFirst("u1", { id: "en_lost_1", title: "later offline edit" });
+    const lostMid = await localEntriesRepository.getRecord("u1", "en_lost_1");
+    assert.equal(lostMid?.entry.title, "later offline edit");
+    assert.ok((lostMid?.meta.originRevision ?? 0) > 0);
+    assert.equal(lostMid?.meta.originEntry?.title, "original");
+    reopenMemoryLocalDatabaseFrom(lostMemory);
+    setDiaryRepositoryForTests(
+      mockRepo(lostStore, {
+        create: async (input) => {
+          lostCreates += 1;
+          return lostStore.get(input.clientRecordId!)!;
+        },
+        update: async (input) => {
+          lostUpdates += 1;
+          const cur = lostStore.get(input.id)!;
+          if (input.expectedUpdatedAt != null && cur.updatedAt !== input.expectedUpdatedAt) {
+            throw new AppError("save_failed", "Entry changed remotely.", undefined, { remoteChanged: true });
+          }
+          const next = { ...cur, ...input, updatedAt: Date.now() } as BusinessEntry;
+          lostStore.set(input.id, next);
+          return next;
+        },
+      })
+    );
+    await __diarySyncTest.processQueue("u1");
+    const lostAfterReplay = await localEntriesRepository.getRecord("u1", "en_lost_1");
+    assert.equal(lostAfterReplay?.entry.title, "later offline edit");
+    assert.notEqual(lostAfterReplay?.meta.syncStatus, "synced");
+    assert.equal(lostStore.get("en_lost_1")?.title, "original");
+    await __diarySyncTest.processQueue("u1");
+    assert.equal(lostStore.get("en_lost_1")?.title, "later offline edit");
+    assert.equal((await localEntriesRepository.getRecord("u1", "en_lost_1"))?.meta.syncStatus, "synced");
+    assert.equal(lostCreates, 2);
+    assert.equal(lostUpdates, 1);
+
+    // Settled revision: success then late failure cannot reopen.
+    persistDiaryCreateIntent(asEntry("en_settled", "ok"), noteInput("en_settled", "ok"));
+    const settledRow = await localEntriesRepository.getRecord("u1", "en_settled");
+    const settledSent = captureSentDiaryOp({
+      userId: "u1",
+      recordId: "en_settled",
+      op: "create",
+      queueId: (await syncQueueRepository.listForUser("u1")).find((q) => q.entityId === "en_settled")?.id ?? null,
+      entry: settledRow!.entry,
+      session: syncSessionOwnership.capture(),
+    });
+    setDiaryRepositoryForTests(mockRepo(new Map()));
+    await __diarySyncTest.processQueue("u1");
+    assert.equal((await localEntriesRepository.getRecord("u1", "en_settled"))?.meta.syncStatus, "synced");
+    const lateFail = acknowledgeDiaryFailure(settledSent, new AppError("permission_denied", "late"));
+    assert.equal(lateFail.applied, false);
+    const settledAfter = await localEntriesRepository.getRecord("u1", "en_settled");
+    assert.equal(settledAfter?.meta.syncStatus, "synced");
+    assert.equal(settledAfter?.meta.autoRetry, true);
+    assert.notEqual(settledAfter?.meta.syncErrorCode, "permission_denied");
+    const dup = acknowledgeDiaryCreateSuccess(settledSent, { ...asEntry("en_settled", "ok"), userId: "u1" }, "created");
+    assert.equal(dup.applied, false);
+    assert.equal((await localEntriesRepository.getRecord("u1", "en_settled"))?.meta.syncStatus, "synced");
+
+    persistDiaryCreateIntent(asEntry("en_create_then_update", "c"), noteInput("en_create_then_update", "c"));
+    setDiaryRepositoryForTests(mockRepo(new Map()));
+    await __diarySyncTest.processQueue("u1");
+    const afterCreate = await localEntriesRepository.getRecord("u1", "en_create_then_update");
+    const createSent = captureSentDiaryOp({
+      userId: "u1",
+      recordId: "en_create_then_update",
+      op: "create",
+      queueId: null,
+      entry: afterCreate!.entry,
+      session: syncSessionOwnership.capture(),
+    });
+    await updateEntryLocalFirst("u1", { id: "en_create_then_update", title: "updated" });
+    await __diarySyncTest.processQueue("u1");
+    const afterUpdate = await localEntriesRepository.getRecord("u1", "en_create_then_update");
+    assert.equal(afterUpdate?.meta.syncStatus, "synced");
+    acknowledgeDiaryCreateSuccess(createSent, { ...asEntry("en_create_then_update", "c"), userId: "u1" }, "created");
+    const afterStaleCreate = await localEntriesRepository.getRecord("u1", "en_create_then_update");
+    assert.equal(afterStaleCreate?.entry.title, "updated");
+    assert.equal(afterStaleCreate?.meta.syncStatus, "synced");
+
+    persistDiaryCreateIntent(asEntry("en_rearm", "r"), noteInput("en_rearm", "r"));
+    const rearmRecord = await localEntriesRepository.getRecord("u1", "en_rearm");
+    const rearmSent = captureSentDiaryOp({
+      userId: "u1",
+      recordId: "en_rearm",
+      op: "create",
+      queueId: (await syncQueueRepository.listForUser("u1")).find((q) => q.entityId === "en_rearm")?.id ?? null,
+      entry: rearmRecord!.entry,
+      session: syncSessionOwnership.capture(),
+    });
+    setDiaryRepositoryForTests(
+      mockRepo(new Map(), {
+        create: async () => {
+          throw new AppError("permission_denied", "denied");
+        },
+      })
+    );
+    await __diarySyncTest.processQueue("u1");
+    await localEntriesRepository.enableAutoRetry("u1", "en_rearm");
+    const afterRearm = await localEntriesRepository.getRecord("u1", "en_rearm");
+    assert.equal(afterRearm?.meta.autoRetry, true);
+    const oldFail = acknowledgeDiaryFailure(rearmSent, new AppError("permission_denied", "old"));
+    assert.equal(oldFail.applied, false);
+    assert.equal((await localEntriesRepository.getRecord("u1", "en_rearm"))?.meta.autoRetry, true);
   } finally {
     setDiaryRepositoryForTests(null);
     sessionSyncGate.unlock();

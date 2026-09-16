@@ -44,12 +44,11 @@ export const syncSessionOwnership = {
   },
 
   /**
-   * When no session has been begun (legacy tests / early boot), treat the
-   * caller as the owner so existing auth-lock behaviour is unchanged.
-   * Once a session exists, only that generation may mutate the gate / UI.
+   * Production ownership: only the live UID+generation may lock, publish, or
+   * dispatch further remote work. A missing live session does not authorize
+   * a retired operation.
    */
   isActiveOwner(token: SyncSessionToken | null | undefined): boolean {
-    if (!current) return true;
     return this.isCurrent(token);
   },
 
@@ -58,6 +57,24 @@ export const syncSessionOwnership = {
     current = null;
   },
 };
+
+/** Capture at operation entry, before the first await. */
+export function captureAdmissionToken(): SyncSessionToken | null {
+  return syncSessionOwnership.capture();
+}
+
+/**
+ * Whether this admission token may issue (further) remote work for `userId`.
+ * Token UID must match the operation UID and the live generation.
+ */
+export function mayIssueRemoteWork(
+  token: SyncSessionToken | null | undefined,
+  userId: string
+): boolean {
+  if (!token) return false;
+  if (token.uid !== userId) return false;
+  return syncSessionOwnership.isCurrent(token);
+}
 
 export function sessionFlushKey(userId: string, token: SyncSessionToken | null): string {
   if (!token) return `${userId}#0`;

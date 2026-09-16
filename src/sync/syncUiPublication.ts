@@ -72,3 +72,56 @@ export function resetSyncActivityLeasesForTests(): void {
   activeFlushLease = null;
   activePullLease = null;
 }
+
+export type SyncUiSnapshot = {
+  owner: SyncSessionToken | null;
+  pendingCount: number;
+  quotaBlockedCount: number;
+  syncBlockedCount: number;
+  syncing: boolean;
+  pulling: boolean;
+};
+
+export const EMPTY_SYNC_UI_VIEW = {
+  pendingCount: 0,
+  quotaBlockedCount: 0,
+  syncBlockedCount: 0,
+  syncing: false,
+  pulling: false,
+};
+
+export function retiredSyncUiSnapshot(): SyncUiSnapshot {
+  return {
+    owner: null,
+    ...EMPTY_SYNC_UI_VIEW,
+  };
+}
+
+export function emptySyncUiSnapshotFor(token: SyncSessionToken | null): SyncUiSnapshot {
+  if (!token) return retiredSyncUiSnapshot();
+  return {
+    owner: { uid: token.uid, generation: token.generation },
+    ...EMPTY_SYNC_UI_VIEW,
+  };
+}
+
+/**
+ * Immediate presentation mask. A's stored counts/activity cannot appear as B's
+ * current state, including while B's refresh is still pending.
+ */
+export function presentSyncUi(
+  liveUid: string | null,
+  liveGeneration: number,
+  stored: SyncUiSnapshot
+): typeof EMPTY_SYNC_UI_VIEW {
+  if (!liveUid || !stored.owner) return { ...EMPTY_SYNC_UI_VIEW };
+  if (stored.owner.uid !== liveUid) return { ...EMPTY_SYNC_UI_VIEW };
+  if (stored.owner.generation !== liveGeneration) return { ...EMPTY_SYNC_UI_VIEW };
+  return {
+    pendingCount: stored.pendingCount,
+    quotaBlockedCount: stored.quotaBlockedCount,
+    syncBlockedCount: stored.syncBlockedCount,
+    syncing: stored.syncing,
+    pulling: stored.pulling,
+  };
+}

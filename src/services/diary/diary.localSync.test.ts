@@ -10,7 +10,7 @@ import { syncQueueRepository } from "@/repositories/syncQueueRepository";
 import { persistDiaryCreateIntent, setDiaryIntentCrashHook } from "@/repositories/diaryLocalIntent";
 import { installMemoryLocalDatabase, reopenMemoryLocalDatabaseFrom, uninstallMemoryLocalDatabase } from "@/localDb/testHarness";
 import { openMemorySqlite } from "@/localDb/memorySqlite";
-import { execStatements, migrateToV7, migrateToV8 } from "@/localDb/migrate";
+import { execStatements, migrateToV7, migrateToV8, migrateToV9 } from "@/localDb/migrate";
 import { MIGRATIONS_V1 } from "@/localDb/schema";
 import { __diarySyncTest, syncEngine } from "@/sync/syncEngine";
 import { sessionSyncGate } from "@/sync/sessionSyncGate";
@@ -118,6 +118,7 @@ async function main() {
   const memory = installMemoryLocalDatabase();
   sessionSyncGate.unlock();
   syncSessionOwnership.resetForTests();
+  syncSessionOwnership.beginSession("u1");
   __diarySyncTest.resetFlushChain();
 
   try {
@@ -328,6 +329,7 @@ async function main() {
     );
     persistDiaryCreateIntent({ ...asEntry("en_a"), userId: "user-a" }, noteInput("en_a"));
     persistDiaryCreateIntent({ ...asEntry("en_b"), userId: "user-b" }, noteInput("en_b"));
+    syncSessionOwnership.beginSession("user-a");
     const flushA = __diarySyncTest.processQueue("user-a");
     releaseCreate();
     await flushA;
@@ -335,6 +337,7 @@ async function main() {
     assert.equal(bRow?.meta.remoteConfirmed, false);
     assert.equal(aStore.has("en_b"), false);
     assert.ok(aStore.has("en_a"));
+    syncSessionOwnership.beginSession("u1");
 
     // N. Identical-looking separate entries both survive heuristic purge.
     persistDiaryCreateIntent(asEntry("local_twin_1", "Same title"), noteInput("local_twin_1", "Same title"));
@@ -404,6 +407,7 @@ async function main() {
     );
     migrateToV7(migrated as unknown as Parameters<typeof migrateToV7>[0]);
     migrateToV8(migrated as unknown as Parameters<typeof migrateToV8>[0]);
+    migrateToV9(migrated as unknown as Parameters<typeof migrateToV9>[0]);
     const kept = migrated.getFirstSync<{ id: string; payload_json: string; local_revision: number }>(
       "SELECT id, payload_json, local_revision FROM entries_local WHERE id = ?",
       ["keep_1"]
@@ -411,6 +415,12 @@ async function main() {
     assert.equal(kept?.id, "keep_1");
     assert.ok(kept?.payload_json.includes("keep_1"));
     assert.equal(Number(kept?.local_revision ?? 0), 0);
+    const keptOrigin = migrated.getFirstSync<{ origin_revision: number; dispatch_generation: number }>(
+      "SELECT origin_revision, dispatch_generation FROM entries_local WHERE id = ?",
+      ["keep_1"]
+    );
+    assert.equal(Number(keptOrigin?.origin_revision ?? -1), 0);
+    assert.equal(Number(keptOrigin?.dispatch_generation ?? -1), 0);
     const keptQueue = migrated.getFirstSync<{ entity_id: string; revision: number }>(
       "SELECT entity_id, revision FROM sync_queue WHERE id = ?",
       ["sync_keep"]

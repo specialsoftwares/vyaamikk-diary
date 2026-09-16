@@ -18,6 +18,10 @@ import {
   localContentDiffers,
 } from "@/sync/diarySyncIntent";
 import {
+  rememberRemoteUpdatedAt,
+  peekRemoteUpdatedAt,
+} from "@/sync/diaryRecordWrites";
+import {
   syncSessionOwnership,
   type SyncSessionToken,
 } from "@/sync/syncSessionOwnership";
@@ -30,6 +34,10 @@ export type SentDiaryOp = {
   revision: number;
   queueId: string | null;
   sentEntry: BusinessEntry;
+  originRevision: number;
+  originEntry: BusinessEntry | null;
+  originOp: PendingOp | null;
+  dispatchGeneration: number;
   session: SyncSessionToken | null;
 };
 
@@ -39,6 +47,7 @@ export function captureSentDiaryOp(args: {
   op: PendingOp;
   queueId: string | null;
   entry: BusinessEntry;
+  session: SyncSessionToken | null;
 }): SentDiaryOp {
   const record = readLocalEntryRecordSync(args.userId, args.recordId);
   let revision = record?.meta.localRevision ?? 0;
@@ -53,12 +62,20 @@ export function captureSentDiaryOp(args: {
     revision,
     queueId: args.queueId,
     sentEntry: record?.entry ?? args.entry,
-    session: syncSessionOwnership.capture(),
+    originRevision: record?.meta.originRevision ?? 0,
+    originEntry: record?.meta.originEntry ?? null,
+    originOp: record?.meta.originOp ?? null,
+    dispatchGeneration: record?.meta.dispatchGeneration ?? 0,
+    session: args.session,
   };
 }
 
 function withLocalTx(fn: () => void): void {
   getLocalDatabase().withTransactionSync(fn);
+}
+
+function maxAcked(current: number, sent: number): number {
+  return Math.max(current, sent);
 }
 
 function removeAckedQueue(sent: SentDiaryOp): void {
@@ -100,6 +117,31 @@ function convertCreateQueueToUpdate(
   );
 }
 
+function hasDurableOrigin(sent: SentDiaryOp): boolean {
+  return sent.originRevision > 0 && sent.originEntry != null;
+}
+
+function followUpAfterOrigin(currentEntry: BusinessEntry, currentRevision: number, sent: SentDiaryOp): boolean {
+  const originRevision = hasDurableOrigin(sent) ? sent.originRevision : sent.revision;
+  if (currentRevision > originRevision) return true;
+  const origin = sent.originEntry;
+  if (origin && localContentDiffers(currentEntry, origin)) return true;
+  return false;
+}
+
+function editsAfterThisSend(currentEntry: BusinessEntry, currentRevision: number, sent: SentDiaryOp): boolean {
+  if (currentRevision > sent.revision) return true;
+  return currentRevision === sent.revision && localContentDiffers(currentEntry, sent.sentEntry);
+}
+
+function revisionSettled(currentAcked: number, currentPending: PendingOp | null, sent: SentDiaryOp): boolean {
+  if (currentAcked < sent.revision) return false;
+  if (sent.op === "create" && currentPending === "update") return true;
+  if (sent.op === "create" && currentPending == null) return true;
+  if (currentPending && currentPending !== sent.op && currentAcked >= sent.revision) return true;
+  return currentPending == null;
+}
+
 export type DiaryAckResult = {
   applied: boolean;
   latestSynced: boolean;
@@ -118,45 +160,145 @@ export function acknowledgeDiaryCreateSuccess(
       result = { applied: true, latestSynced: true };
       return;
     }
-    const laterLocalEdits = current.meta.localRevision !== sent.revision;
-    const sentVsRemote = localContentDiffers(sent.sentEntry, remote);
-    const legacyAmbiguous = sent.revision === 0 && current.meta.pendingOp == null;
+    rememberRemoteUpdatedAt(sent.userId, sent.recordId, remote.updatedAt);
+    const acked = maxAcked(current.meta.ackedRevision, sent.revision);
 
-    if (!laterLocalEdits) {
-      if (outcome === "existing" && sentVsRemote) {
-        if (legacyAmbiguous) {
-          writeLocalEntryRowSync(
-            current.entry,
-            {
-              syncStatus: "conflict",
-              pendingOp: current.meta.pendingOp,
-              remoteConfirmed: true,
-              syncErrorCode: null,
-              autoRetry: false,
-              localRevision: current.meta.localRevision,
-              ackedRevision: sent.revision,
-            },
-            current
-          );
-          removeAckedQueue(sent);
-          result = { applied: true, latestSynced: false };
-          return;
-        }
+    if (revisionSettled(current.meta.ackedRevision, current.meta.pendingOp, sent)) {
+      removeAckedQueue(sent);
+      writeLocalEntryRowSync(
+        current.entry,
+        {
+          syncStatus: current.meta.pendingOp ? current.meta.syncStatus : current.meta.syncStatus,
+          pendingOp: current.meta.pendingOp,
+          remoteConfirmed: true,
+          syncErrorCode: current.meta.syncErrorCode,
+          autoRetry: current.meta.autoRetry,
+          localRevision: current.meta.localRevision,
+          ackedRevision: acked,
+          remoteUpdatedAt: remote.updatedAt,
+          preserveUnspecifiedMeta: true,
+        },
+        current
+      );
+      result = {
+        applied: false,
+        latestSynced: current.meta.syncStatus === "synced" && current.meta.pendingOp == null,
+      };
+      return;
+    }
+
+    if (outcome === "created" && editsAfterThisSend(current.entry, current.meta.localRevision, sent)) {
+      const nextOp: PendingOp = current.meta.pendingOp === "delete" ? "delete" : "update";
+      writeLocalEntryRowSync(
+        current.entry,
+        {
+          syncStatus: "pending",
+          pendingOp: nextOp,
+          remoteConfirmed: true,
+          syncErrorCode: null,
+          autoRetry: true,
+          localRevision: current.meta.localRevision,
+          ackedRevision: acked,
+          originRevision: current.meta.localRevision,
+          originOp: nextOp,
+          originEntry: current.entry,
+          remoteUpdatedAt: remote.updatedAt,
+          preserveUnspecifiedMeta: true,
+        },
+        current
+      );
+      removeAckedQueue(sent);
+      if (nextOp === "update") {
+        convertCreateQueueToUpdate(
+          sent.userId,
+          sent.recordId,
+          current.entry,
+          current.meta.localRevision,
+          remote.updatedAt
+        );
+      }
+      result = { applied: true, latestSynced: false };
+      return;
+    }
+
+    const laterThanOrigin = followUpAfterOrigin(current.entry, current.meta.localRevision, sent);
+    const originEntry = sent.originEntry ?? sent.sentEntry;
+    const originVsRemote = localContentDiffers(originEntry, remote);
+    const legacyAmbiguous = !hasDurableOrigin(sent);
+
+    if (outcome === "existing" && laterThanOrigin) {
+      if (legacyAmbiguous || originVsRemote) {
         writeLocalEntryRowSync(
-          remote,
+          current.entry,
           {
-            syncStatus: "synced",
-            pendingOp: null,
+            syncStatus: "conflict",
+            pendingOp: current.meta.pendingOp === "delete" ? "delete" : current.meta.pendingOp,
             remoteConfirmed: true,
             syncErrorCode: null,
-            autoRetry: true,
+            autoRetry: false,
             localRevision: current.meta.localRevision,
-            ackedRevision: current.meta.localRevision,
+            ackedRevision: acked,
+            remoteUpdatedAt: remote.updatedAt,
+            preserveUnspecifiedMeta: true,
           },
           current
         );
         removeAckedQueue(sent);
-        result = { applied: true, latestSynced: true };
+        result = { applied: true, latestSynced: false };
+        return;
+      }
+      const nextOp: PendingOp = current.meta.pendingOp === "delete" ? "delete" : "update";
+      writeLocalEntryRowSync(
+        current.entry,
+        {
+          syncStatus: "pending",
+          pendingOp: nextOp,
+          remoteConfirmed: true,
+          syncErrorCode: null,
+          autoRetry: true,
+          localRevision: current.meta.localRevision,
+          ackedRevision: acked,
+          originRevision: current.meta.localRevision,
+          originOp: nextOp,
+          originEntry: current.entry,
+          remoteUpdatedAt: remote.updatedAt,
+          preserveUnspecifiedMeta: true,
+        },
+        current
+      );
+      removeAckedQueue(sent);
+      if (nextOp === "update") {
+        convertCreateQueueToUpdate(
+          sent.userId,
+          sent.recordId,
+          current.entry,
+          current.meta.localRevision,
+          remote.updatedAt
+        );
+      }
+      result = { applied: true, latestSynced: false };
+      return;
+    }
+
+    if (outcome === "existing" && originVsRemote) {
+      if (legacyAmbiguous) {
+        writeLocalEntryRowSync(
+          current.entry,
+          {
+            syncStatus: "conflict",
+            pendingOp: current.meta.pendingOp,
+            remoteConfirmed: true,
+            syncErrorCode: null,
+            autoRetry: false,
+            localRevision: current.meta.localRevision,
+            ackedRevision: acked,
+            remoteUpdatedAt: remote.updatedAt,
+            preserveUnspecifiedMeta: true,
+          },
+          current
+        );
+        removeAckedQueue(sent);
+        result = { applied: true, latestSynced: false };
         return;
       }
       writeLocalEntryRowSync(
@@ -169,6 +311,10 @@ export function acknowledgeDiaryCreateSuccess(
           autoRetry: true,
           localRevision: current.meta.localRevision,
           ackedRevision: current.meta.localRevision,
+          originRevision: current.meta.localRevision,
+          originOp: null,
+          originEntry: remote,
+          remoteUpdatedAt: remote.updatedAt,
         },
         current
       );
@@ -177,50 +323,25 @@ export function acknowledgeDiaryCreateSuccess(
       return;
     }
 
-    if (outcome === "existing" && sentVsRemote) {
-      writeLocalEntryRowSync(
-        current.entry,
-        {
-          syncStatus: "conflict",
-          pendingOp: current.meta.pendingOp === "delete" ? "delete" : current.meta.pendingOp,
-          remoteConfirmed: true,
-          syncErrorCode: null,
-          autoRetry: false,
-          localRevision: current.meta.localRevision,
-          ackedRevision: sent.revision,
-        },
-        current
-      );
-      removeAckedQueue(sent);
-      result = { applied: true, latestSynced: false };
-      return;
-    }
-
-    const nextOp: PendingOp = current.meta.pendingOp === "delete" ? "delete" : "update";
     writeLocalEntryRowSync(
-      current.entry,
+      remote,
       {
-        syncStatus: "pending",
-        pendingOp: nextOp,
+        syncStatus: "synced",
+        pendingOp: null,
         remoteConfirmed: true,
         syncErrorCode: null,
         autoRetry: true,
         localRevision: current.meta.localRevision,
-        ackedRevision: sent.revision,
+        ackedRevision: current.meta.localRevision,
+        originRevision: current.meta.localRevision,
+        originOp: null,
+        originEntry: remote,
+        remoteUpdatedAt: remote.updatedAt,
       },
       current
     );
     removeAckedQueue(sent);
-    if (nextOp === "update") {
-      convertCreateQueueToUpdate(
-        sent.userId,
-        sent.recordId,
-        current.entry,
-        current.meta.localRevision,
-        remote.updatedAt
-      );
-    }
-    result = { applied: true, latestSynced: false };
+    result = { applied: true, latestSynced: true };
   });
   return result;
 }
@@ -234,6 +355,33 @@ export function acknowledgeDiaryUpdateSuccess(sent: SentDiaryOp, remote: Busines
       result = { applied: true, latestSynced: true };
       return;
     }
+    rememberRemoteUpdatedAt(sent.userId, sent.recordId, remote.updatedAt);
+    const acked = maxAcked(current.meta.ackedRevision, sent.revision);
+
+    if (current.meta.ackedRevision >= sent.revision && current.meta.pendingOp !== "update") {
+      removeAckedQueue(sent);
+      writeLocalEntryRowSync(
+        current.entry,
+        {
+          syncStatus: current.meta.syncStatus,
+          pendingOp: current.meta.pendingOp,
+          remoteConfirmed: true,
+          syncErrorCode: current.meta.syncErrorCode,
+          autoRetry: current.meta.autoRetry,
+          localRevision: current.meta.localRevision,
+          ackedRevision: acked,
+          remoteUpdatedAt: remote.updatedAt,
+          preserveUnspecifiedMeta: true,
+        },
+        current
+      );
+      result = {
+        applied: false,
+        latestSynced: current.meta.syncStatus === "synced" && current.meta.pendingOp == null,
+      };
+      return;
+    }
+
     if (current.meta.localRevision !== sent.revision) {
       writeLocalEntryRowSync(
         current.entry,
@@ -244,7 +392,9 @@ export function acknowledgeDiaryUpdateSuccess(sent: SentDiaryOp, remote: Busines
           syncErrorCode: current.meta.syncErrorCode,
           autoRetry: current.meta.autoRetry,
           localRevision: current.meta.localRevision,
-          ackedRevision: Math.max(current.meta.ackedRevision, sent.revision),
+          ackedRevision: acked,
+          remoteUpdatedAt: remote.updatedAt,
+          preserveUnspecifiedMeta: true,
         },
         current
       );
@@ -252,6 +402,7 @@ export function acknowledgeDiaryUpdateSuccess(sent: SentDiaryOp, remote: Busines
       result = { applied: true, latestSynced: false };
       return;
     }
+
     writeLocalEntryRowSync(
       remote,
       {
@@ -262,6 +413,10 @@ export function acknowledgeDiaryUpdateSuccess(sent: SentDiaryOp, remote: Busines
         autoRetry: true,
         localRevision: current.meta.localRevision,
         ackedRevision: current.meta.localRevision,
+        originRevision: current.meta.localRevision,
+        originOp: null,
+        originEntry: remote,
+        remoteUpdatedAt: remote.updatedAt,
       },
       current
     );
@@ -274,7 +429,7 @@ export function acknowledgeDiaryUpdateSuccess(sent: SentDiaryOp, remote: Busines
 export function acknowledgeDiaryDeleteSuccess(sent: SentDiaryOp): void {
   withLocalTx(() => {
     const current = readLocalEntryRecordSync(sent.userId, sent.recordId);
-    if (current && current.meta.localRevision !== sent.revision) {
+    if (current && (current.meta.localRevision !== sent.revision || current.meta.ackedRevision >= sent.revision)) {
       removeAckedQueue(sent);
       return;
     }
@@ -282,6 +437,19 @@ export function acknowledgeDiaryDeleteSuccess(sent: SentDiaryOp): void {
     db.runSync("DELETE FROM entries_local WHERE user_id = ? AND id = ?", [sent.userId, sent.recordId]);
     removeAckedQueue(sent);
   });
+}
+
+function staleFailureApplies(sent: SentDiaryOp): boolean {
+  const current = readLocalEntryRecordSync(sent.userId, sent.recordId);
+  const queue = sent.queueId ? readSyncQueueItemSync(sent.queueId) : null;
+  if (!current) return false;
+  if (current.meta.ackedRevision >= sent.revision) return false;
+  if (current.meta.dispatchGeneration !== sent.dispatchGeneration) return false;
+  if (current.meta.localRevision !== sent.revision) return false;
+  if (sent.op === "create" && current.meta.pendingOp && current.meta.pendingOp !== "create") return false;
+  if (sent.op === "create" && current.meta.remoteConfirmed) return false;
+  if (queue && queue.revision !== sent.revision) return false;
+  return true;
 }
 
 export function acknowledgeDiaryFailure(
@@ -295,14 +463,13 @@ export function acknowledgeDiaryFailure(
 
   let applied = false;
   withLocalTx(() => {
-    const current = readLocalEntryRecordSync(sent.userId, sent.recordId);
-    const queue = sent.queueId ? readSyncQueueItemSync(sent.queueId) : null;
-    const revisionMatches = current != null && current.meta.localRevision === sent.revision;
-    const queueMatches = queue != null && queue.revision === sent.revision;
-
-    if (!revisionMatches) {
+    if (!staleFailureApplies(sent)) {
       return;
     }
+    const current = readLocalEntryRecordSync(sent.userId, sent.recordId);
+    if (!current) return;
+    const queue = sent.queueId ? readSyncQueueItemSync(sent.queueId) : null;
+    const queueMatches = queue != null && queue.revision === sent.revision;
 
     applied = true;
     if (
@@ -319,6 +486,7 @@ export function acknowledgeDiaryFailure(
           autoRetry: false,
           localRevision: current.meta.localRevision,
           ackedRevision: current.meta.ackedRevision,
+          preserveUnspecifiedMeta: true,
         },
         current
       );
@@ -339,6 +507,7 @@ export function acknowledgeDiaryFailure(
         autoRetry: false,
         localRevision: current.meta.localRevision,
         ackedRevision: current.meta.ackedRevision,
+        preserveUnspecifiedMeta: true,
       },
       current
     );
@@ -356,4 +525,8 @@ export function acknowledgeDiaryFailure(
   });
 
   return { kind, applied };
+}
+
+export function expectedUpdatedAtForRecord(userId: string, recordId: string): number | undefined {
+  return peekRemoteUpdatedAt(userId, recordId);
 }

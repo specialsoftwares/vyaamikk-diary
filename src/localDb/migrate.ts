@@ -188,6 +188,21 @@ export function migrateToV8(db: Db): void {
   }
 }
 
+export function migrateToV9(db: Db): void {
+  if (!tableHasColumn(db, "entries_local", "origin_revision")) {
+    db.execSync(`ALTER TABLE entries_local ADD COLUMN origin_revision INTEGER NOT NULL DEFAULT 0`);
+  }
+  if (!tableHasColumn(db, "entries_local", "origin_payload_json")) {
+    db.execSync(`ALTER TABLE entries_local ADD COLUMN origin_payload_json TEXT`);
+  }
+  if (!tableHasColumn(db, "entries_local", "origin_op")) {
+    db.execSync(`ALTER TABLE entries_local ADD COLUMN origin_op TEXT`);
+  }
+  if (!tableHasColumn(db, "entries_local", "dispatch_generation")) {
+    db.execSync(`ALTER TABLE entries_local ADD COLUMN dispatch_generation INTEGER NOT NULL DEFAULT 0`);
+  }
+}
+
 export function migrateToV4(db: Db): void {
   db.execSync(`
     CREATE TABLE IF NOT EXISTS statutory_occurrences (

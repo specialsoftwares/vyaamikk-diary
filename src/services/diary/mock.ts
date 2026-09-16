@@ -11,7 +11,6 @@ import { entrySearchBlob } from "@/utils/businessEntry/display";
 import { notificationsService } from "@/services/notifications";
 
 import { createInitialDocumentHistory } from "@/services/documentHistory";
-import { mergeBusinessEntryUpdate, mergeEntryPdfGeneration } from "./mergeEntryUpdate";
 import { entryToStorage, normaliseBusinessEntry } from "./normalize";
 import type {
   CreateBusinessEntryInput,
@@ -129,22 +128,14 @@ export const mockDiaryRepository: DiaryRepository = {
       throw new AppError("save_failed", "Entry changed remotely.", undefined, { remoteChanged: true });
     }
 
-    if (input.reminder !== undefined) {
-      const wasScheduled = existing.reminder?.notificationId ?? null;
-      const willBeDifferent =
-        input.reminder === null ||
-        input.reminder.notificationId !== existing.reminder?.notificationId;
-      if (wasScheduled && willBeDifferent) {
-        await notificationsService.cancel(wasScheduled);
-      }
-    }
-
-    let next = mergeBusinessEntryUpdate(existing, input);
-    if (input.pdfUri !== undefined && input.pdfUri !== existing.pdfUri && input.pdfUri) {
-      next = mergeEntryPdfGeneration(next, input.pdfUri);
-    }
+    const { reminderCancelIdAfterUpdate, buildDiaryUpdateRecord, runAfterDiaryUpdateCommit } = await import(
+      "./firebaseUpdatePlan"
+    );
+    const cancelId = reminderCancelIdAfterUpdate(existing, input);
+    const next = buildDiaryUpdateRecord(existing, input);
     all[idx] = next;
     await saveAll(userId, all);
+    await runAfterDiaryUpdateCommit(cancelId, (id) => notificationsService.cancel(id));
     return next;
   },
 

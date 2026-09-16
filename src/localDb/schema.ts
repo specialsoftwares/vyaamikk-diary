@@ -1,7 +1,7 @@
 /** SQLite schema — single on-device source of truth for drafts, cache, and sync queue. */
 
 export const DB_NAME = "vyaamikk_diary.db";
-export const DB_VERSION = 8;
+export const DB_VERSION = 9;
 
 export const MIGRATIONS_V1 = `
 PRAGMA journal_mode = WAL;
@@ -189,4 +189,15 @@ export const MIGRATIONS_V8 = `
 ALTER TABLE entries_local ADD COLUMN local_revision INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE entries_local ADD COLUMN acked_revision INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE sync_queue ADD COLUMN revision INTEGER NOT NULL DEFAULT 0;
+`;
+
+/**
+ * Durable original-attempt identity for CREATE/UPDATE replay.
+ * Retry dispatch must not replace this baseline. Timestamps are not the key.
+ */
+export const MIGRATIONS_V9 = `
+ALTER TABLE entries_local ADD COLUMN origin_revision INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE entries_local ADD COLUMN origin_payload_json TEXT;
+ALTER TABLE entries_local ADD COLUMN origin_op TEXT;
+ALTER TABLE entries_local ADD COLUMN dispatch_generation INTEGER NOT NULL DEFAULT 0;
 `;

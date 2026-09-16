@@ -4,11 +4,11 @@ import { AppError } from "@/domain/errors";
 import type { BusinessEntry } from "@/domain/businessEntry";
 import type { CreateBusinessEntryInput, DiaryRepository, UpdateBusinessEntryInput } from "@/services/diary/types";
 import { setDiaryRepositoryForTests } from "@/services/diary";
-import { createEntryLocalFirst } from "@/services/diary/localFirst";
+import { createEntryLocalFirst, updateEntryLocalFirst } from "@/services/diary/localFirst";
 import { persistDiaryCreateIntent } from "@/repositories/diaryLocalIntent";
 import { localEntriesRepository } from "@/repositories/localEntriesRepository";
 import { installMemoryLocalDatabase, uninstallMemoryLocalDatabase } from "@/localDb/testHarness";
-import { __diarySyncTest } from "@/sync/syncEngine";
+import { __diarySyncTest, setDiaryQueueAdmissionHookForTests } from "@/sync/syncEngine";
 import { sessionSyncGate } from "@/sync/sessionSyncGate";
 import { syncSessionOwnership } from "@/sync/syncSessionOwnership";
 import { applyAuthSyncIdentityTransition } from "@/sync/syncLockIdentityPolicy";
@@ -81,6 +81,7 @@ function mockRepo(
   hooks?: {
     create?: (input: CreateBusinessEntryInput) => Promise<BusinessEntry>;
     update?: (input: UpdateBusinessEntryInput) => Promise<BusinessEntry>;
+    getById?: (id: string) => Promise<BusinessEntry | null>;
   }
 ): DiaryRepository {
   return {
@@ -115,6 +116,7 @@ function mockRepo(
       store.delete(id);
     },
     async getById(_userId, id) {
+      if (hooks?.getById) return hooks.getById(id);
       return store.get(id) ?? null;
     },
     async list() {
@@ -311,6 +313,156 @@ async function main() {
     const liveResult = await liveCreate;
     assert.equal(liveResult.remoteAccepted, false);
     assert.equal(sessionSyncGate.isLocked(), false);
+
+    // Round 6 — admission-time token. A. UPDATE getById delayed across A -> B.
+    signOut();
+    const admitA = applyAuthSyncIdentityTransition({
+      prevStatus: "signed_out",
+      nextStatus: "signed_in",
+      prevUid: null,
+      nextUid: "user-a",
+    })!;
+    const admitEntered = deferred();
+    const admitGate = deferred();
+    let admitUpdates = 0;
+    let admitGets = 0;
+    setDiaryRepositoryForTests(
+      mockRepo(new Map(), {
+        getById: async (id) => {
+          admitGets += 1;
+          admitEntered.resolve();
+          await admitGate.promise;
+          return asEntry(id, "from-cloud", "user-a");
+        },
+        update: async (input) => {
+          admitUpdates += 1;
+          throw new AppError("session_expired", "expired");
+        },
+        create: async () => {
+          throw new AppError("session_expired", "expired");
+        },
+      })
+    );
+    const admitUpdate = updateEntryLocalFirst("user-a", { id: "en_admit_a", title: "edited" });
+    await admitEntered.promise;
+    const admitB = applyAuthSyncIdentityTransition({
+      prevStatus: "signed_in",
+      nextStatus: "signed_in",
+      prevUid: "user-a",
+      nextUid: "user-b",
+    })!;
+    assert.notEqual(admitB.generation, admitA.generation);
+    admitGate.resolve();
+    await admitUpdate;
+    assert.equal(sessionSyncGate.isLocked(), false);
+    assert.equal(admitUpdates, 0);
+    assert.equal(admitGets, 1);
+    persistDiaryCreateIntent(asEntry("en_admit_b", "bee", "user-b"), noteInput("en_admit_b"));
+    const bStore = new Map<string, BusinessEntry>();
+    setDiaryRepositoryForTests(mockRepo(bStore));
+    await __diarySyncTest.processQueue("user-b", admitB);
+    assert.ok(bStore.has("en_admit_b"));
+
+    // B. A -> logout -> A new generation, delayed getById.
+    signOut();
+    const admitA2 = applyAuthSyncIdentityTransition({
+      prevStatus: "signed_out",
+      nextStatus: "signed_in",
+      prevUid: null,
+      nextUid: "user-a",
+    })!;
+    const admit2Entered = deferred();
+    const admit2Gate = deferred();
+    let admit2Updates = 0;
+    setDiaryRepositoryForTests(
+      mockRepo(new Map(), {
+        getById: async (id) => {
+          admit2Entered.resolve();
+          await admit2Gate.promise;
+          return asEntry(id, "cloud", "user-a");
+        },
+        update: async () => {
+          admit2Updates += 1;
+          throw new AppError("session_expired", "expired");
+        },
+      })
+    );
+    const admit2Update = updateEntryLocalFirst("user-a", { id: "en_admit_a2", title: "edit" });
+    await admit2Entered.promise;
+    signOut();
+    const admitA3 = applyAuthSyncIdentityTransition({
+      prevStatus: "signed_out",
+      nextStatus: "signed_in",
+      prevUid: null,
+      nextUid: "user-a",
+    })!;
+    assert.notEqual(admitA3.generation, admitA2.generation);
+    admit2Gate.resolve();
+    await admit2Update;
+    assert.equal(sessionSyncGate.isLocked(), false);
+    assert.equal(admit2Updates, 0);
+
+    // C. Late failure while signed out does not lock.
+    signOut();
+    assert.equal(syncSessionOwnership.isActiveOwner(admitA3), false);
+    assert.equal(sessionSyncGate.isLocked(), false);
+
+    // D. Old-UID invocation while B is already active.
+    const liveB = applyAuthSyncIdentityTransition({
+      prevStatus: "signed_out",
+      nextStatus: "signed_in",
+      prevUid: null,
+      nextUid: "user-b",
+    })!;
+    let dUpdates = 0;
+    setDiaryRepositoryForTests(
+      mockRepo(new Map([["en_old_uid", asEntry("en_old_uid", "row", "user-a")]]), {
+        update: async () => {
+          dUpdates += 1;
+          throw new AppError("session_expired", "expired");
+        },
+        getById: async (id) => asEntry(id, "row", "user-a"),
+      })
+    );
+    persistDiaryCreateIntent(asEntry("en_old_uid", "row", "user-a"), noteInput("en_old_uid"));
+    await localEntriesRepository.markSynced(asEntry("en_old_uid", "row", "user-a"));
+    await updateEntryLocalFirst("user-a", { id: "en_old_uid", title: "from-a" });
+    assert.equal(dUpdates, 0);
+    assert.equal(sessionSyncGate.isLocked(), false);
+    assert.equal(syncSessionOwnership.current()?.generation, liveB.generation);
+
+    // E. Queue admission interrupted before remote dispatch.
+    signOut();
+    const qA = applyAuthSyncIdentityTransition({
+      prevStatus: "signed_out",
+      nextStatus: "signed_in",
+      prevUid: null,
+      nextUid: "user-a",
+    })!;
+    let qCreates = 0;
+    setDiaryRepositoryForTests(
+      mockRepo(new Map(), {
+        create: async (input) => {
+          qCreates += 1;
+          const entry = asEntry(input.clientRecordId!, input.title, "user-a");
+          return entry;
+        },
+      })
+    );
+    persistDiaryCreateIntent(asEntry("en_q_a1", "one", "user-a"), noteInput("en_q_a1"));
+    persistDiaryCreateIntent(asEntry("en_q_a2", "two", "user-a"), noteInput("en_q_a2"));
+    setDiaryQueueAdmissionHookForTests(async () => {
+      applyAuthSyncIdentityTransition({
+        prevStatus: "signed_in",
+        nextStatus: "signed_in",
+        prevUid: "user-a",
+        nextUid: "user-b",
+      });
+    });
+    await __diarySyncTest.processQueue("user-a", qA);
+    assert.equal(qCreates, 0);
+    assert.equal(sessionSyncGate.isLocked(), false);
+    assert.ok(await localEntriesRepository.getRecord("user-a", "en_q_a1"));
   } finally {
     setDiaryRepositoryForTests(null);
     sessionSyncGate.unlock();

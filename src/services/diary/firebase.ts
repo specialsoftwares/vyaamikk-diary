@@ -10,24 +10,19 @@ import {
   getDocs,
   orderBy,
   query,
-  runTransaction,
-  setDoc,
 } from "firebase/firestore";
 
-import { AppError } from "@/domain/errors";
 import type { BusinessEntry } from "@/domain/businessEntry";
-import type { EntryReminder } from "@/domain/types";
 import { getFirebaseDb } from "@/config/firebase";
 import { entrySearchBlob } from "@/utils/businessEntry/display";
 import { notificationsService } from "@/services/notifications";
 
-import { mergeBusinessEntryUpdate, mergeEntryPdfGeneration } from "./mergeEntryUpdate";
-import { entryToCloudStorage } from "@/services/pdf/pdfCloudSync";
 import { dedupeDiaryEntries } from "@/services/dashboard/diaryRecordCounts";
 import {
   createEntryAtomicDetailed,
   entryFromFirestoreDoc,
 } from "./atomicCreate";
+import { updateDiaryEntryOnDb } from "./firebaseUpdate";
 import type {
   DiaryCreateResult,
   DiaryRepository,
@@ -36,11 +31,6 @@ import type {
 
 function entriesCollection(userId: string) {
   return collection(getFirebaseDb(), "users", userId, "entries");
-}
-
-function reminderToJson(r: EntryReminder | null) {
-  if (!r) return null;
-  return { at: r.at, note: r.note, notificationId: r.notificationId };
 }
 
 function applyFilters(
@@ -75,51 +65,9 @@ export const firebaseDiaryRepository: DiaryRepository = {
   },
 
   async update(userId, input) {
-    const { expectedUpdatedAt, ...edit } = input;
-    const db = getFirebaseDb();
-    const ref = doc(db, "users", userId, "entries", input.id);
-
-    const applyUpdate = async (existing: BusinessEntry): Promise<BusinessEntry> => {
-      if (edit.reminder !== undefined) {
-        const wasScheduled = existing.reminder?.notificationId ?? null;
-        const willBeDifferent =
-          edit.reminder === null ||
-          edit.reminder.notificationId !== existing.reminder?.notificationId;
-        if (wasScheduled && willBeDifferent) {
-          await notificationsService.cancel(wasScheduled);
-        }
-      }
-      let next = mergeBusinessEntryUpdate(existing, edit);
-      if (edit.pdfUri !== undefined && edit.pdfUri) {
-        next = mergeEntryPdfGeneration(next, edit.pdfUri);
-      }
-      return next;
-    };
-
-    if (expectedUpdatedAt != null) {
-      return runTransaction(db, async (tx) => {
-        const snap = await tx.get(ref);
-        if (!snap.exists()) throw new AppError("not_found", "Entry not found.");
-        const existing = entryFromFirestoreDoc(snap.id, snap.data() as Record<string, unknown>)!;
-        if (existing.updatedAt !== expectedUpdatedAt) {
-          throw new AppError("save_failed", "Entry changed remotely.", undefined, { remoteChanged: true });
-        }
-        const next = await applyUpdate(existing);
-        const patch = entryToCloudStorage(next);
-        patch.reminder = reminderToJson(next.reminder);
-        tx.set(ref, patch, { merge: true });
-        return next;
-      });
-    }
-
-    const snap = await getDoc(ref);
-    if (!snap.exists()) throw new AppError("not_found", "Entry not found.");
-    const existing = entryFromFirestoreDoc(snap.id, snap.data() as Record<string, unknown>)!;
-    const next = await applyUpdate(existing);
-    const patch = entryToCloudStorage(next);
-    patch.reminder = reminderToJson(next.reminder);
-    await setDoc(ref, patch, { merge: true });
-    return next;
+    return updateDiaryEntryOnDb(getFirebaseDb(), userId, input, {
+      cancelNotification: (id) => notificationsService.cancel(id),
+    });
   },
 
   async hardDelete(userId, id) {

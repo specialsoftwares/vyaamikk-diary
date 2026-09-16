@@ -20,6 +20,11 @@ function meta(partial: Partial<LocalEntryRecord["meta"]>): LocalEntryRecord["met
     localUpdatedAt: 1,
     localRevision: 0,
     ackedRevision: 0,
+    originRevision: 0,
+    originOp: null,
+    originEntry: null,
+    dispatchGeneration: 0,
+    remoteUpdatedAt: null,
     ...partial,
   };
 }

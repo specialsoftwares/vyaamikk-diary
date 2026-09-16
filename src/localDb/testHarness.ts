@@ -1,5 +1,5 @@
 import { MIGRATIONS_V1 } from "./schema";
-import { execStatements, migrateToV7, migrateToV8 } from "./migrate";
+import { execStatements, migrateToV7, migrateToV8, migrateToV9 } from "./migrate";
 import { cloneMemorySqlite, MemorySqlite, openMemorySqlite } from "./memorySqlite";
 import { setLocalDatabaseForTests, closeLocalDatabaseForTests } from "./database";
 
@@ -7,6 +7,7 @@ function applyDiaryTestMigrations(memory: MemorySqlite): void {
   execStatements(memory as unknown as ReturnType<typeof import("./database").openLocalDatabase>, MIGRATIONS_V1, "v1");
   migrateToV7(memory as unknown as ReturnType<typeof import("./database").openLocalDatabase>);
   migrateToV8(memory as unknown as ReturnType<typeof import("./database").openLocalDatabase>);
+  migrateToV9(memory as unknown as ReturnType<typeof import("./database").openLocalDatabase>);
 }
 
 export function installMemoryLocalDatabase(): MemorySqlite {
