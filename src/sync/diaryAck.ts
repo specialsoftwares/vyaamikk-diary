@@ -41,6 +41,10 @@ export type SentDiaryOp = {
   session: SyncSessionToken | null;
 };
 
+/**
+ * Immutable dispatch envelope. Callers must pass the payload identity that
+ * is about to be sent — never recapture after a remote response.
+ */
 export function captureSentDiaryOp(args: {
   userId: string;
   recordId: string;
@@ -48,10 +52,15 @@ export function captureSentDiaryOp(args: {
   queueId: string | null;
   entry: BusinessEntry;
   session: SyncSessionToken | null;
+  revision?: number;
+  dispatchGeneration?: number;
+  originRevision?: number;
+  originEntry?: BusinessEntry | null;
+  originOp?: PendingOp | null;
 }): SentDiaryOp {
   const record = readLocalEntryRecordSync(args.userId, args.recordId);
-  let revision = record?.meta.localRevision ?? 0;
-  if (args.queueId) {
+  let revision = args.revision ?? record?.meta.localRevision ?? 0;
+  if (args.revision == null && args.queueId) {
     const queued = readSyncQueueItemSync(args.queueId);
     if (queued) revision = queued.revision;
   }
@@ -61,13 +70,17 @@ export function captureSentDiaryOp(args: {
     op: args.op,
     revision,
     queueId: args.queueId,
-    sentEntry: record?.entry ?? args.entry,
-    originRevision: record?.meta.originRevision ?? 0,
-    originEntry: record?.meta.originEntry ?? null,
-    originOp: record?.meta.originOp ?? null,
-    dispatchGeneration: record?.meta.dispatchGeneration ?? 0,
+    sentEntry: args.entry,
+    originRevision: args.originRevision ?? record?.meta.originRevision ?? 0,
+    originEntry: args.originEntry !== undefined ? args.originEntry : record?.meta.originEntry ?? null,
+    originOp: args.originOp !== undefined ? args.originOp : record?.meta.originOp ?? null,
+    dispatchGeneration: args.dispatchGeneration ?? record?.meta.dispatchGeneration ?? 0,
     session: args.session,
   };
+}
+
+export function isRemoteNotIssued(error: unknown): boolean {
+  return error instanceof AppError && error.details?.remoteNotIssued === true;
 }
 
 function withLocalTx(fn: () => void): void {
@@ -161,7 +174,9 @@ export function acknowledgeDiaryCreateSuccess(
       return;
     }
     rememberRemoteUpdatedAt(sent.userId, sent.recordId, remote.updatedAt);
-    const acked = maxAcked(current.meta.ackedRevision, sent.revision);
+    const originContentAck = hasDurableOrigin(sent) ? sent.originRevision : 0;
+    const createdContentAck = maxAcked(current.meta.ackedRevision, sent.revision);
+    const existingContentAck = maxAcked(current.meta.ackedRevision, originContentAck);
 
     if (revisionSettled(current.meta.ackedRevision, current.meta.pendingOp, sent)) {
       removeAckedQueue(sent);
@@ -174,7 +189,7 @@ export function acknowledgeDiaryCreateSuccess(
           syncErrorCode: current.meta.syncErrorCode,
           autoRetry: current.meta.autoRetry,
           localRevision: current.meta.localRevision,
-          ackedRevision: acked,
+          ackedRevision: current.meta.ackedRevision,
           remoteUpdatedAt: remote.updatedAt,
           preserveUnspecifiedMeta: true,
         },
@@ -198,7 +213,7 @@ export function acknowledgeDiaryCreateSuccess(
           syncErrorCode: null,
           autoRetry: true,
           localRevision: current.meta.localRevision,
-          ackedRevision: acked,
+          ackedRevision: createdContentAck,
           originRevision: current.meta.localRevision,
           originOp: nextOp,
           originEntry: current.entry,
@@ -237,7 +252,7 @@ export function acknowledgeDiaryCreateSuccess(
             syncErrorCode: null,
             autoRetry: false,
             localRevision: current.meta.localRevision,
-            ackedRevision: acked,
+            ackedRevision: existingContentAck,
             remoteUpdatedAt: remote.updatedAt,
             preserveUnspecifiedMeta: true,
           },
@@ -257,7 +272,7 @@ export function acknowledgeDiaryCreateSuccess(
           syncErrorCode: null,
           autoRetry: true,
           localRevision: current.meta.localRevision,
-          ackedRevision: acked,
+          ackedRevision: existingContentAck,
           originRevision: current.meta.localRevision,
           originOp: nextOp,
           originEntry: current.entry,
@@ -291,7 +306,7 @@ export function acknowledgeDiaryCreateSuccess(
             syncErrorCode: null,
             autoRetry: false,
             localRevision: current.meta.localRevision,
-            ackedRevision: acked,
+            ackedRevision: existingContentAck,
             remoteUpdatedAt: remote.updatedAt,
             preserveUnspecifiedMeta: true,
           },
@@ -439,11 +454,20 @@ export function acknowledgeDiaryDeleteSuccess(sent: SentDiaryOp): void {
   });
 }
 
+function sentContentAlreadyAcked(current: { meta: { ackedRevision: number; pendingOp: PendingOp | null } }, sent: SentDiaryOp): boolean {
+  if (current.meta.ackedRevision > sent.revision) return true;
+  if (current.meta.ackedRevision === sent.revision) {
+    if (current.meta.pendingOp == null) return true;
+    if (current.meta.pendingOp !== sent.op) return true;
+  }
+  return false;
+}
+
 function staleFailureApplies(sent: SentDiaryOp): boolean {
   const current = readLocalEntryRecordSync(sent.userId, sent.recordId);
   const queue = sent.queueId ? readSyncQueueItemSync(sent.queueId) : null;
   if (!current) return false;
-  if (current.meta.ackedRevision >= sent.revision) return false;
+  if (sentContentAlreadyAcked(current, sent)) return false;
   if (current.meta.dispatchGeneration !== sent.dispatchGeneration) return false;
   if (current.meta.localRevision !== sent.revision) return false;
   if (sent.op === "create" && current.meta.pendingOp && current.meta.pendingOp !== "create") return false;
@@ -457,6 +481,9 @@ export function acknowledgeDiaryFailure(
   error: unknown
 ): { kind: ReturnType<typeof classifyAtomicCreateError>; applied: boolean } {
   const kind = classifyAtomicCreateError(error);
+  if (isRemoteNotIssued(error)) {
+    return { kind, applied: false };
+  }
   if ((kind === "unauthenticated" || isSyncAuthError(error)) && syncSessionOwnership.isActiveOwner(sent.session)) {
     sessionSyncGate.lock("session_expired");
   }

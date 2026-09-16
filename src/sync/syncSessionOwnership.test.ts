@@ -8,7 +8,7 @@ import { createEntryLocalFirst, updateEntryLocalFirst } from "@/services/diary/l
 import { persistDiaryCreateIntent } from "@/repositories/diaryLocalIntent";
 import { localEntriesRepository } from "@/repositories/localEntriesRepository";
 import { installMemoryLocalDatabase, uninstallMemoryLocalDatabase } from "@/localDb/testHarness";
-import { __diarySyncTest, setDiaryQueueAdmissionHookForTests } from "@/sync/syncEngine";
+import { __diarySyncTest, setDiaryQueueAdmissionHookForTests, setDiaryDispatchPrepHookForTests } from "@/sync/syncEngine";
 import { sessionSyncGate } from "@/sync/sessionSyncGate";
 import { syncSessionOwnership } from "@/sync/syncSessionOwnership";
 import { applyAuthSyncIdentityTransition } from "@/sync/syncLockIdentityPolicy";
@@ -463,6 +463,196 @@ async function main() {
     assert.equal(qCreates, 0);
     assert.equal(sessionSyncGate.isLocked(), false);
     assert.ok(await localEntriesRepository.getRecord("user-a", "en_q_a1"));
+
+    // Round 7 — inner per-record job reads. A. Switch during inner queue-item read.
+    signOut();
+    const innerQa = applyAuthSyncIdentityTransition({
+      prevStatus: "signed_out",
+      nextStatus: "signed_in",
+      prevUid: null,
+      nextUid: "user-a",
+    })!;
+    persistDiaryCreateIntent(asEntry("en_inner_q", "queued", "user-a"), noteInput("en_inner_q"));
+    const innerQEntered = deferred();
+    const innerQGate = deferred();
+    let innerQCreates = 0;
+    setDiaryRepositoryForTests(
+      mockRepo(new Map(), {
+        create: async (input) => {
+          innerQCreates += 1;
+          return asEntry(input.clientRecordId!, input.title, "user-a");
+        },
+      })
+    );
+    setDiaryDispatchPrepHookForTests({
+      afterQueueItemRead: async () => {
+        innerQEntered.resolve();
+        await innerQGate.promise;
+      },
+    });
+    const innerQFlush = __diarySyncTest.processQueue("user-a", innerQa);
+    await innerQEntered.promise;
+    const innerQb = applyAuthSyncIdentityTransition({
+      prevStatus: "signed_in",
+      nextStatus: "signed_in",
+      prevUid: "user-a",
+      nextUid: "user-b",
+    })!;
+    innerQGate.resolve();
+    await innerQFlush;
+    assert.equal(innerQCreates, 0);
+    assert.equal(sessionSyncGate.isLocked(), false);
+    assert.ok(await localEntriesRepository.getRecord("user-a", "en_inner_q"));
+    persistDiaryCreateIntent(asEntry("en_inner_qb", "bee", "user-b"), noteInput("en_inner_qb"));
+    const innerQStore = new Map<string, BusinessEntry>();
+    setDiaryRepositoryForTests(mockRepo(innerQStore));
+    await __diarySyncTest.processQueue("user-b", innerQb);
+    assert.ok(innerQStore.has("en_inner_qb"));
+
+    // B. Switch during inner local-record read.
+    signOut();
+    const innerLa = applyAuthSyncIdentityTransition({
+      prevStatus: "signed_out",
+      nextStatus: "signed_in",
+      prevUid: null,
+      nextUid: "user-a",
+    })!;
+    persistDiaryCreateIntent(asEntry("en_inner_l", "local", "user-a"), noteInput("en_inner_l"));
+    const innerLEntered = deferred();
+    const innerLGate = deferred();
+    let innerLCreates = 0;
+    setDiaryRepositoryForTests(
+      mockRepo(new Map(), {
+        create: async (input) => {
+          innerLCreates += 1;
+          return asEntry(input.clientRecordId!, input.title, "user-a");
+        },
+      })
+    );
+    setDiaryDispatchPrepHookForTests({
+      afterLocalRecordRead: async () => {
+        innerLEntered.resolve();
+        await innerLGate.promise;
+      },
+    });
+    const innerLFlush = __diarySyncTest.processQueue("user-a", innerLa);
+    await innerLEntered.promise;
+    applyAuthSyncIdentityTransition({
+      prevStatus: "signed_in",
+      nextStatus: "signed_in",
+      prevUid: "user-a",
+      nextUid: "user-b",
+    });
+    innerLGate.resolve();
+    await innerLFlush;
+    assert.equal(innerLCreates, 0);
+    assert.equal(sessionSyncGate.isLocked(), false);
+    assert.ok(await localEntriesRepository.getRecord("user-a", "en_inner_l"));
+
+    // C. Logout during preparation.
+    signOut();
+    const innerOutA = applyAuthSyncIdentityTransition({
+      prevStatus: "signed_out",
+      nextStatus: "signed_in",
+      prevUid: null,
+      nextUid: "user-a",
+    })!;
+    persistDiaryCreateIntent(asEntry("en_inner_out", "out", "user-a"), noteInput("en_inner_out"));
+    const innerOutEntered = deferred();
+    const innerOutGate = deferred();
+    let innerOutCreates = 0;
+    setDiaryRepositoryForTests(
+      mockRepo(new Map(), {
+        create: async (input) => {
+          innerOutCreates += 1;
+          return asEntry(input.clientRecordId!, input.title, "user-a");
+        },
+      })
+    );
+    setDiaryDispatchPrepHookForTests({
+      afterLocalRecordRead: async () => {
+        innerOutEntered.resolve();
+        await innerOutGate.promise;
+      },
+    });
+    const innerOutFlush = __diarySyncTest.processQueue("user-a", innerOutA);
+    await innerOutEntered.promise;
+    signOut();
+    innerOutGate.resolve();
+    await innerOutFlush;
+    assert.equal(innerOutCreates, 0);
+    assert.equal(sessionSyncGate.isLocked(), false);
+    assert.ok(await localEntriesRepository.getRecord("user-a", "en_inner_out"));
+
+    // D. A -> logout -> A new generation during inner read.
+    const innerA2 = applyAuthSyncIdentityTransition({
+      prevStatus: "signed_out",
+      nextStatus: "signed_in",
+      prevUid: null,
+      nextUid: "user-a",
+    })!;
+    persistDiaryCreateIntent(asEntry("en_inner_gen", "gen", "user-a"), noteInput("en_inner_gen"));
+    const innerGenEntered = deferred();
+    const innerGenGate = deferred();
+    let innerGenCreates = 0;
+    setDiaryRepositoryForTests(
+      mockRepo(new Map(), {
+        create: async (input) => {
+          innerGenCreates += 1;
+          return asEntry(input.clientRecordId!, input.title, "user-a");
+        },
+      })
+    );
+    setDiaryDispatchPrepHookForTests({
+      afterQueueItemRead: async () => {
+        innerGenEntered.resolve();
+        await innerGenGate.promise;
+      },
+    });
+    const innerGenFlush = __diarySyncTest.processQueue("user-a", innerA2);
+    await innerGenEntered.promise;
+    signOut();
+    const innerA3 = applyAuthSyncIdentityTransition({
+      prevStatus: "signed_out",
+      nextStatus: "signed_in",
+      prevUid: null,
+      nextUid: "user-a",
+    })!;
+    assert.notEqual(innerA3.generation, innerA2.generation);
+    innerGenGate.resolve();
+    await innerGenFlush;
+    assert.equal(innerGenCreates, 0);
+    assert.equal(sessionSyncGate.isLocked(), false);
+
+    // E. Old-UID direct operation with no local row while B is active.
+    const liveB2 = applyAuthSyncIdentityTransition({
+      prevStatus: "signed_out",
+      nextStatus: "signed_in",
+      prevUid: null,
+      nextUid: "user-b",
+    })!;
+    let missingGets = 0;
+    let missingUpdates = 0;
+    setDiaryRepositoryForTests(
+      mockRepo(new Map(), {
+        getById: async () => {
+          missingGets += 1;
+          return asEntry("en_missing_a", "cloud", "user-a");
+        },
+        update: async () => {
+          missingUpdates += 1;
+          throw new AppError("session_expired", "expired");
+        },
+      })
+    );
+    await assert.rejects(
+      () => updateEntryLocalFirst("user-a", { id: "en_missing_a", title: "from-a" }),
+      (err: unknown) => err instanceof AppError && err.code === "session_expired"
+    );
+    assert.equal(missingGets, 0);
+    assert.equal(missingUpdates, 0);
+    assert.equal(sessionSyncGate.isLocked(), false);
+    assert.equal(syncSessionOwnership.current()?.generation, liveB2.generation);
   } finally {
     setDiaryRepositoryForTests(null);
     sessionSyncGate.unlock();

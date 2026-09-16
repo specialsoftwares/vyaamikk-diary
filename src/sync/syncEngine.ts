@@ -30,6 +30,8 @@ import {
   acknowledgeDiaryUpdateSuccess,
   captureSentDiaryOp,
   expectedUpdatedAtForRecord,
+  isRemoteNotIssued,
+  type SentDiaryOp,
 } from "@/sync/diaryAck";
 import {
   enqueueDiaryRecordWrite,
@@ -47,10 +49,55 @@ import { createLogger } from "@/utils/logger";
 const log = createLogger("sync");
 
 let queueAdmissionHook: (() => Promise<void>) | null = null;
+let dispatchPrepHooks: {
+  afterQueueItemRead?: () => Promise<void>;
+  afterLocalRecordRead?: () => Promise<void>;
+} | null = null;
 
 /** Test-only: await between queue listing and remote dispatch. */
 export function setDiaryQueueAdmissionHookForTests(hook: (() => Promise<void>) | null): void {
   queueAdmissionHook = hook;
+}
+
+/** Test-only: await inside the per-record job after preparation reads. */
+export function setDiaryDispatchPrepHookForTests(
+  hooks: {
+    afterQueueItemRead?: () => Promise<void>;
+    afterLocalRecordRead?: () => Promise<void>;
+  } | null
+): void {
+  dispatchPrepHooks = hooks;
+}
+
+function abortUnownedDispatch(owner: SyncSessionToken | null, userId: string): void {
+  if (!mayIssueRemoteWork(owner, userId)) {
+    throw new AppError("session_expired", "Session is no longer active.", undefined, {
+      remoteNotIssued: true,
+    });
+  }
+}
+
+function envelopeFromLive(
+  owner: SyncSessionToken | null,
+  userId: string,
+  liveItem: { id: string; entityId: string; revision: number; payload: unknown },
+  liveLocal: LocalEntryRecord | null,
+  op: "create" | "update" | "delete"
+): SentDiaryOp {
+  const fallbackEntry = (liveLocal?.entry ?? (liveItem.payload as BusinessEntry)) as BusinessEntry;
+  return captureSentDiaryOp({
+    userId,
+    recordId: liveItem.entityId,
+    op,
+    queueId: liveItem.id,
+    entry: fallbackEntry,
+    session: owner,
+    revision: liveLocal?.meta.localRevision ?? liveItem.revision,
+    dispatchGeneration: liveLocal?.meta.dispatchGeneration ?? 0,
+    originRevision: liveLocal?.meta.originRevision ?? 0,
+    originEntry: liveLocal?.meta.originEntry ?? null,
+    originOp: liveLocal?.meta.originOp ?? null,
+  });
 }
 
 export type SyncPhase = "idle" | "syncing" | "offline" | "error";
@@ -165,11 +212,12 @@ async function processQueue(
     const localRecord = item.entity === "entry"
       ? await localEntriesRepository.getRecord(userId, item.entityId)
       : null;
+    if (!stillOwnsFlush(owner, userId)) break;
     if (localRecord && !localRecord.meta.autoRetry) {
       continue;
     }
     const fallbackEntry = (localRecord?.entry ?? (item.payload as BusinessEntry)) as BusinessEntry;
-    const sent = captureSentDiaryOp({
+    const listedSent = captureSentDiaryOp({
       userId,
       recordId: item.entityId,
       op: item.op as "create" | "update" | "delete",
@@ -177,21 +225,24 @@ async function processQueue(
       entry: fallbackEntry,
       session: owner,
     });
+    let dispatchedOp: SentDiaryOp = listedSent;
     try {
       const dispatched = await enqueueDiaryRecordWrite({
         userId,
         recordId: item.entityId,
-        revision: sent.revision,
-        op: sent.op,
+        revision: listedSent.revision,
+        op: listedSent.op,
         session: owner,
         run: async () => {
-          if (!stillOwnsFlush(owner, userId)) {
-            throw new AppError("session_expired", "Session is no longer active.");
-          }
+          abortUnownedDispatch(owner, userId);
           const liveItem = (await syncQueueRepository.getById(item.id)) ?? item;
+          if (dispatchPrepHooks?.afterQueueItemRead) await dispatchPrepHooks.afterQueueItemRead();
+          abortUnownedDispatch(owner, userId);
           const liveLocal = liveItem.entity === "entry"
             ? await localEntriesRepository.getRecord(userId, liveItem.entityId)
             : null;
+          if (dispatchPrepHooks?.afterLocalRecordRead) await dispatchPrepHooks.afterLocalRecordRead();
+          abortUnownedDispatch(owner, userId);
           if (liveLocal && !liveLocal.meta.autoRetry) {
             return { kind: "noop" as const };
           }
@@ -201,16 +252,11 @@ async function processQueue(
                 (liveItem.payload as UpdateBusinessEntryInput | null)?.expectedUpdatedAt ??
                 expectedUpdatedAtForRecord(userId, liveItem.entityId);
               const payload = entryToUpdateInput(liveLocal.entry, expected);
+              const updateSent = envelopeFromLive(owner, userId, liveItem, liveLocal, "update");
+              dispatchedOp = updateSent;
+              abortUnownedDispatch(owner, userId);
               const remote = await repo.update(userId, payload);
               rememberRemoteUpdatedAt(userId, liveItem.entityId, remote.updatedAt);
-              const updateSent = captureSentDiaryOp({
-                userId,
-                recordId: liveItem.entityId,
-                op: "update",
-                queueId: liveItem.id,
-                entry: liveLocal.entry,
-                session: owner,
-              });
               const ack = acknowledgeDiaryUpdateSuccess(updateSent, remote);
               return { kind: "update" as const, ack };
             }
@@ -225,9 +271,12 @@ async function processQueue(
                     (liveItem.payload as CreateBusinessEntryInput).clientRecordId || liveItem.entityId,
                 };
             input.clientRecordId = liveLocal?.entry.id ?? liveItem.entityId;
+            const createSent = envelopeFromLive(owner, userId, liveItem, liveLocal, "create");
+            dispatchedOp = createSent;
+            abortUnownedDispatch(owner, userId);
             const result = await repo.createWithOutcome(userId, input);
             rememberRemoteUpdatedAt(userId, liveItem.entityId, result.record.updatedAt);
-            const ack = acknowledgeDiaryCreateSuccess(sent, result.record, result.outcome);
+            const ack = acknowledgeDiaryCreateSuccess(createSent, result.record, result.outcome);
             return { kind: "create" as const, ack };
           }
           if (liveItem.entity === "entry" && liveItem.op === "update") {
@@ -237,15 +286,21 @@ async function processQueue(
             const payload: UpdateBusinessEntryInput = liveLocal?.entry
               ? entryToUpdateInput(liveLocal.entry, expected)
               : { ...(liveItem.payload as UpdateBusinessEntryInput), expectedUpdatedAt: expected };
+            const updateSent = envelopeFromLive(owner, userId, liveItem, liveLocal, "update");
+            dispatchedOp = updateSent;
+            abortUnownedDispatch(owner, userId);
             const remote = await repo.update(userId, payload);
             rememberRemoteUpdatedAt(userId, liveItem.entityId, remote.updatedAt);
-            const ack = acknowledgeDiaryUpdateSuccess(sent, remote);
+            const ack = acknowledgeDiaryUpdateSuccess(updateSent, remote);
             return { kind: "update" as const, ack };
           }
           if (liveItem.entity === "entry" && liveItem.op === "delete") {
             const payload = liveItem.payload as { id: string };
+            const deleteSent = envelopeFromLive(owner, userId, liveItem, liveLocal, "delete");
+            dispatchedOp = deleteSent;
+            abortUnownedDispatch(owner, userId);
             await repo.hardDelete(userId, payload.id);
-            acknowledgeDiaryDeleteSuccess(sent);
+            acknowledgeDiaryDeleteSuccess(deleteSent);
             return { kind: "delete" as const };
           }
           return { kind: "noop" as const };
@@ -261,17 +316,21 @@ async function processQueue(
         synced += 1;
       }
     } catch (e) {
-      failed += 1;
-      const msg = e instanceof Error ? e.message : String(e);
-      const currentQueue = await syncQueueRepository.getById(item.id);
-      if (currentQueue && currentQueue.revision === sent.revision) {
-        await syncQueueRepository.markAttempt(item.id, msg);
+      if (!isRemoteNotIssued(e)) {
+        failed += 1;
+        const msg = e instanceof Error ? e.message : String(e);
+        const currentQueue = await syncQueueRepository.getById(item.id);
+        if (currentQueue && currentQueue.revision === dispatchedOp.revision) {
+          await syncQueueRepository.markAttempt(item.id, msg);
+        }
       }
-      const action = acknowledgeDiaryFailure(sent, e);
-      if (action.kind === "unauthenticated" || isSyncAuthError(e)) {
+      const action = acknowledgeDiaryFailure(dispatchedOp, e);
+      if (!isRemoteNotIssued(e) && (action.kind === "unauthenticated" || isSyncAuthError(e))) {
         break;
       }
-      log.warn("queue item failed", { id: item.id, msg, kind: action.kind });
+      if (!isRemoteNotIssued(e)) {
+        log.warn("queue item failed", { id: item.id, msg: e instanceof Error ? e.message : String(e), kind: action.kind });
+      }
     }
   }
 
@@ -418,5 +477,6 @@ export const __diarySyncTest = {
     flushChainByKey.clear();
     resetDiaryRecordWritesForTests();
     queueAdmissionHook = null;
+    dispatchPrepHooks = null;
   },
 };

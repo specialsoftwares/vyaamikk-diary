@@ -1,12 +1,9 @@
-import type { BusinessEntry } from "@/domain/businessEntry";
 import { AppError, toAppError } from "@/domain/errors";
 import type { CreateBusinessEntryInput } from "./types";
 import { createEntryLocalFirst, type LocalFirstCreateResult } from "./localFirst";
 import { getDiaryRepository } from "./index";
 import { notificationsService } from "@/services/notifications";
 import { persistDiaryUpdateIntent } from "@/repositories/diaryLocalIntent";
-import { readLocalEntryRecordSync } from "@/repositories/localEntriesRepository";
-import { mergeBusinessEntryUpdate } from "./mergeEntryUpdate";
 
 export type { LocalFirstCreateResult };
 
@@ -27,9 +24,8 @@ export async function createEntryWithReminder(
     });
     const reminder = { ...entry.reminder, notificationId };
     if (!created.remoteAccepted) {
-      const merged = mergeBusinessEntryUpdate(entry, { id: entry.id, reminder });
-      persistDiaryUpdateIntent(merged, { id: entry.id, reminder }, readLocalEntryRecordSync(userId, entry.id));
-      return { ...created, entry: merged };
+      const persisted = persistDiaryUpdateIntent(userId, { id: entry.id, reminder });
+      return { ...created, entry: persisted.entry };
     }
     const updated = await getDiaryRepository().update(userId, {
       id: entry.id,

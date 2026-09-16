@@ -1,3 +1,4 @@
+import { AppError } from "@/domain/errors";
 import { getLocalDatabase } from "@/localDb/database";
 import {
   readLocalEntryRecordSync,
@@ -8,7 +9,17 @@ import {
 import { enqueueSync } from "@/repositories/syncQueueRepository";
 import type { BusinessEntry } from "@/domain/businessEntry";
 import type { CreateBusinessEntryInput, UpdateBusinessEntryInput } from "@/services/diary/types";
-import { entryToCreateInput } from "@/sync/diarySyncIntent";
+import { mergeBusinessEntryUpdate } from "@/services/diary/mergeEntryUpdate";
+import { entryToCreateInput, entryToUpdateInput } from "@/sync/diarySyncIntent";
+
+export type DiaryLocalPersistResult = {
+  queueId: string;
+  entry: BusinessEntry;
+  revision: number;
+  dispatchGeneration: number;
+  pendingOp: PendingOp;
+  remoteConfirmed: boolean;
+};
 
 function withLocalTx(fn: () => void): void {
   getLocalDatabase().withTransactionSync(fn);
@@ -75,14 +86,21 @@ export function persistDiaryCreateIntent(
   return queueId;
 }
 
+/**
+ * Apply `patch` to the latest local row inside the same transaction that
+ * advances revision and writes row+queue. Callers must not pre-merge.
+ */
 export function persistDiaryUpdateIntent(
-  entry: BusinessEntry,
-  updateInput: UpdateBusinessEntryInput,
-  _existing: LocalEntryRecord | null
-): string {
-  let queueId = "";
+  userId: string,
+  patch: UpdateBusinessEntryInput,
+  fallbackEntry?: BusinessEntry | null
+): DiaryLocalPersistResult {
+  let result: DiaryLocalPersistResult | null = null;
   withLocalTx(() => {
-    const existing = readLocalEntryRecordSync(entry.userId, entry.id) ?? _existing;
+    const existing = readLocalEntryRecordSync(userId, patch.id);
+    const base = existing?.entry ?? fallbackEntry ?? null;
+    if (!base) throw new AppError("not_found", "Entry not found");
+    const entry = mergeBusinessEntryUpdate(base, patch);
     const nextRevision = (existing?.meta.localRevision ?? 0) + 1;
     const nextDispatch = (existing?.meta.dispatchGeneration ?? 0) + 1;
     const pendingCreate =
@@ -99,6 +117,12 @@ export function persistDiaryUpdateIntent(
         ? existing.entry
         : entry;
     const originOp: PendingOp = pendingCreate ? "create" : "update";
+    const pendingOp: PendingOp = pendingCreate
+      ? "create"
+      : existing?.meta.remoteConfirmed
+        ? "update"
+        : (existing?.meta.pendingOp ?? "update");
+    const remoteConfirmed = pendingCreate ? false : existing?.meta.remoteConfirmed ?? false;
     writeLocalEntryRowSync(
       entry,
       pendingCreate
@@ -118,8 +142,8 @@ export function persistDiaryUpdateIntent(
           }
         : {
             syncStatus: "pending",
-            pendingOp: existing?.meta.remoteConfirmed ? "update" : (existing?.meta.pendingOp ?? "update"),
-            remoteConfirmed: existing?.meta.remoteConfirmed ?? false,
+            pendingOp,
+            remoteConfirmed,
             syncErrorCode: null,
             autoRetry: true,
             localRevision: nextRevision,
@@ -134,26 +158,35 @@ export function persistDiaryUpdateIntent(
       existing
     );
     crashHook?.("after_row");
-    queueId = enqueueSync(
+    const queueId = enqueueSync(
       pendingCreate
         ? {
-            userId: entry.userId,
+            userId,
             op: "create",
             entity: "entry",
-            entityId: entry.id,
+            entityId: patch.id,
             payload: entryToCreateInput(entry),
             revision: nextRevision,
           }
         : {
-            userId: entry.userId,
+            userId,
             op: "update",
             entity: "entry",
-            entityId: entry.id,
-            payload: updateInput,
+            entityId: patch.id,
+            payload: entryToUpdateInput(entry),
             revision: nextRevision,
           },
       { replacePayload: true }
     );
+    result = {
+      queueId,
+      entry,
+      revision: nextRevision,
+      dispatchGeneration: nextDispatch,
+      pendingOp,
+      remoteConfirmed,
+    };
   });
-  return queueId;
+  if (!result) throw new AppError("unknown", "Failed to persist diary update");
+  return result;
 }

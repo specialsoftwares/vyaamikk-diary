@@ -13,7 +13,6 @@ import { __diarySyncTest } from "@/sync/syncEngine";
 import { sessionSyncGate } from "@/sync/sessionSyncGate";
 import { syncSessionOwnership } from "@/sync/syncSessionOwnership";
 import { resetDiaryRecordWritesForTests } from "@/sync/diaryRecordWrites";
-import { mergeBusinessEntryUpdate } from "@/services/diary/mergeEntryUpdate";
 
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -183,9 +182,7 @@ async function main() {
     const bStore = new Map<string, BusinessEntry>();
     setDiaryRepositoryForTests(mockRepo(bStore));
     await __diarySyncTest.processQueue("u1");
-    const bSynced = await localEntriesRepository.getRecord("u1", "en_ord_b");
-    const bN = mergeBusinessEntryUpdate(bSynced!.entry, { id: "en_ord_b", title: "N" });
-    persistDiaryUpdateIntent(bN, { id: "en_ord_b", title: "N" }, bSynced);
+    persistDiaryUpdateIntent("u1", { id: "en_ord_b", title: "N" });
     const bEntered = deferred();
     const bGate = deferred();
     let bCreates = 0;

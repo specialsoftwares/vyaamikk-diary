@@ -2,11 +2,11 @@ import type { BusinessEntry } from "@/domain/businessEntry";
 import { AppError } from "@/domain/errors";
 import type { CreateBusinessEntryInput, UpdateBusinessEntryInput } from "./types";
 import { getDiaryRepository } from "./index";
+import { readLocalEntryRecordSync } from "@/repositories/localEntriesRepository";
 import {
-  localEntriesRepository,
-  readLocalEntryRecordSync,
-} from "@/repositories/localEntriesRepository";
-import { persistDiaryCreateIntent, persistDiaryUpdateIntent } from "@/repositories/diaryLocalIntent";
+  persistDiaryCreateIntent,
+  persistDiaryUpdateIntent,
+} from "@/repositories/diaryLocalIntent";
 import { syncEngine } from "@/sync/syncEngine";
 import { classifyAtomicCreateError } from "@/billing/optionC/classifyCreateError";
 import { isSyncAuthError } from "@/sync/sessionSyncGate";
@@ -23,7 +23,6 @@ import {
 } from "@/sync/diaryRecordWrites";
 import { captureAdmissionToken, mayIssueRemoteWork } from "@/sync/syncSessionOwnership";
 import { entryToUpdateInput } from "@/sync/diarySyncIntent";
-import { mergeBusinessEntryUpdate } from "@/services/diary/mergeEntryUpdate";
 import { stableRecordId } from "@/services/records/stableRecordId";
 import { createLogger } from "@/utils/logger";
 import { logSaveDiagnostic } from "@/services/records/saveDiagnostics";
@@ -119,7 +118,9 @@ export async function createEntryLocalFirst(
       session,
       run: async () => {
         if (!mayIssueRemoteWork(session, userId)) {
-          throw new AppError("session_expired", "Session is no longer active.");
+          throw new AppError("session_expired", "Session is no longer active.", undefined, {
+            remoteNotIssued: true,
+          });
         }
         return getDiaryRepository().createWithOutcome(userId, createInput);
       },
@@ -180,38 +181,40 @@ export async function updateEntryLocalFirst(
   input: UpdateBusinessEntryInput
 ): Promise<BusinessEntry> {
   const session = captureAdmissionToken();
-  const existingRecord =
-    (await localEntriesRepository.getRecord(userId, input.id)) ??
-    (await getDiaryRepository().getById(userId, input.id).then((entry) =>
-      entry ? { entry, meta: null } : null
-    ));
-  const existing = existingRecord && "entry" in existingRecord ? existingRecord.entry : null;
-  if (!existing) throw new AppError("not_found", "Entry not found");
+  const localNow = readLocalEntryRecordSync(userId, input.id);
+  let fallback: BusinessEntry | null = null;
+  if (!localNow) {
+    if (!mayIssueRemoteWork(session, userId)) {
+      throw new AppError("session_expired", "Session is no longer active.", undefined, {
+        remoteNotIssued: true,
+      });
+    }
+    fallback = await getDiaryRepository().getById(userId, input.id);
+  }
 
-  const merged = mergeBusinessEntryUpdate(existing, input);
-  const localRecord = readLocalEntryRecordSync(userId, input.id);
-  const queueId = persistDiaryUpdateIntent(merged, input, localRecord);
-
-  const pendingCreate = localRecord?.meta.pendingOp === "create" && !localRecord.meta.remoteConfirmed;
+  const persisted = persistDiaryUpdateIntent(userId, input, fallback);
+  const pendingCreate = persisted.pendingOp === "create" && !persisted.remoteConfirmed;
   if (pendingCreate) {
-    return merged;
+    return persisted.entry;
   }
 
   const sent = captureSentDiaryOp({
     userId,
     recordId: input.id,
     op: "update",
-    queueId,
-    entry: merged,
+    queueId: persisted.queueId,
+    entry: persisted.entry,
     session,
+    revision: persisted.revision,
+    dispatchGeneration: persisted.dispatchGeneration,
   });
 
   if (!mayIssueRemoteWork(session, userId)) {
-    return currentLocal(userId, input.id, merged);
+    return persisted.entry;
   }
 
   const expectedUpdatedAt = input.expectedUpdatedAt ?? expectedUpdatedAtForRecord(userId, input.id);
-  const payload = entryToUpdateInput(merged, expectedUpdatedAt);
+  const payload = entryToUpdateInput(persisted.entry, expectedUpdatedAt);
 
   try {
     const dispatched = await enqueueDiaryRecordWrite({
@@ -222,14 +225,16 @@ export async function updateEntryLocalFirst(
       session,
       run: async () => {
         if (!mayIssueRemoteWork(session, userId)) {
-          throw new AppError("session_expired", "Session is no longer active.");
+          throw new AppError("session_expired", "Session is no longer active.", undefined, {
+            remoteNotIssued: true,
+          });
         }
         const latestExpected = expectedUpdatedAtForRecord(userId, input.id) ?? expectedUpdatedAt;
         return getDiaryRepository().update(userId, { ...payload, expectedUpdatedAt: latestExpected });
       },
     });
     if (dispatched.skipped) {
-      return currentLocal(userId, input.id, merged);
+      return currentLocal(userId, input.id, persisted.entry);
     }
     const remote = dispatched.value;
     rememberRemoteUpdatedAt(userId, input.id, remote.updatedAt);
@@ -242,6 +247,6 @@ export async function updateEntryLocalFirst(
     if (kind === "network" && mayIssueRemoteWork(session, userId)) {
       void syncEngine.flush(userId).catch(() => undefined);
     }
-    return currentLocal(userId, input.id, merged);
+    return currentLocal(userId, input.id, persisted.entry);
   }
 }
