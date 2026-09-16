@@ -132,7 +132,7 @@
     "test:consent-dismiss": "npx --yes tsx src/components/location/consentSheetDismissPolicy.test.ts",
     "test:sync-lock-identity": "npx --yes tsx src/sync/syncLockIdentityPolicy.test.ts",
     "test:sync-auth-classifier": "npx --yes tsx src/sync/sessionSyncGate.test.ts && npx --yes tsx src/sync/diarySyncIntent.test.ts && npx --yes tsx src/sync/syncSessionOwnership.test.ts && npx --yes tsx src/sync/syncUiPublication.test.ts",
-    "test:diary-local-sync": "npx --yes tsx src/services/diary/diary.localSync.test.ts && npx --yes tsx src/services/diary/diary.ackOwnership.test.ts && npx --yes tsx src/services/diary/diary.recordWrites.test.ts && npx --yes tsx src/services/diary/diary.atomicPatch.test.ts && npx --yes tsx src/services/diary/diary.firebaseUpdate.test.ts",
+    "test:diary-local-sync": "npx --yes tsx src/services/diary/diary.localSync.test.ts && npx --yes tsx src/services/diary/diary.ackOwnership.test.ts && npx --yes tsx src/services/diary/diary.recordWrites.test.ts && npx --yes tsx src/services/diary/diary.atomicPatch.test.ts && npx --yes tsx src/services/diary/diary.reminderIntegration.test.ts && npx --yes tsx src/services/diary/diary.firebaseUpdate.test.ts",
     "test:tab-bar-metrics": "npx --yes tsx src/layout/tabBarMetrics.contract.test.ts",
     "test:safe-mailto": "npx --yes tsx src/utils/safeMailto.test.ts",
     "test:pincode-warm-policy": "npx --yes tsx src/services/location/pincodeWarmPolicy.test.ts",

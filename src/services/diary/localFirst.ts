@@ -21,7 +21,11 @@ import {
   enqueueDiaryRecordWrite,
   rememberRemoteUpdatedAt,
 } from "@/sync/diaryRecordWrites";
-import { captureAdmissionToken, mayIssueRemoteWork } from "@/sync/syncSessionOwnership";
+import {
+  captureAdmissionToken,
+  mayIssueRemoteWork,
+  type SyncSessionToken,
+} from "@/sync/syncSessionOwnership";
 import { entryToUpdateInput } from "@/sync/diarySyncIntent";
 import { stableRecordId } from "@/services/records/stableRecordId";
 import { createLogger } from "@/utils/logger";
@@ -30,10 +34,15 @@ import { createInitialDocumentHistory } from "@/services/documentHistory";
 
 const log = createLogger("diary/localFirst");
 
-export interface LocalFirstCreateResult {
+export interface LocalFirstWriteResult {
   entry: BusinessEntry;
   remoteAccepted: boolean;
   failureKind?: ReturnType<typeof classifyAtomicCreateError>;
+}
+
+export interface LocalFirstCreateResult extends LocalFirstWriteResult {
+  reminderRemoteAccepted?: boolean;
+  reminderFailureKind?: ReturnType<typeof classifyAtomicCreateError>;
 }
 
 function currentLocal(userId: string, id: string, fallback: BusinessEntry): BusinessEntry {
@@ -178,9 +187,11 @@ export async function createEntryLocalFirst(
 
 export async function updateEntryLocalFirst(
   userId: string,
-  input: UpdateBusinessEntryInput
-): Promise<BusinessEntry> {
-  const session = captureAdmissionToken();
+  input: UpdateBusinessEntryInput,
+  options?: { session?: SyncSessionToken | null }
+): Promise<LocalFirstWriteResult> {
+  const session =
+    options && "session" in options ? options.session ?? null : captureAdmissionToken();
   const localNow = readLocalEntryRecordSync(userId, input.id);
   let fallback: BusinessEntry | null = null;
   if (!localNow) {
@@ -195,7 +206,7 @@ export async function updateEntryLocalFirst(
   const persisted = persistDiaryUpdateIntent(userId, input, fallback);
   const pendingCreate = persisted.pendingOp === "create" && !persisted.remoteConfirmed;
   if (pendingCreate) {
-    return persisted.entry;
+    return { entry: persisted.entry, remoteAccepted: false };
   }
 
   const sent = captureSentDiaryOp({
@@ -210,7 +221,7 @@ export async function updateEntryLocalFirst(
   });
 
   if (!mayIssueRemoteWork(session, userId)) {
-    return persisted.entry;
+    return { entry: persisted.entry, remoteAccepted: false };
   }
 
   const expectedUpdatedAt = input.expectedUpdatedAt ?? expectedUpdatedAtForRecord(userId, input.id);
@@ -234,19 +245,25 @@ export async function updateEntryLocalFirst(
       },
     });
     if (dispatched.skipped) {
-      return currentLocal(userId, input.id, persisted.entry);
+      return { entry: currentLocal(userId, input.id, persisted.entry), remoteAccepted: false };
     }
     const remote = dispatched.value;
     rememberRemoteUpdatedAt(userId, input.id, remote.updatedAt);
-    acknowledgeDiaryUpdateSuccess(sent, remote);
+    const ack = acknowledgeDiaryUpdateSuccess(sent, remote);
     await notifySearch();
-    return currentLocal(userId, input.id, remote);
+    return {
+      entry: currentLocal(userId, input.id, remote),
+      remoteAccepted: ack.applied || ack.latestSynced,
+    };
   } catch (e) {
-    acknowledgeDiaryFailure(sent, e);
-    const kind = classifyAtomicCreateError(e);
-    if (kind === "network" && mayIssueRemoteWork(session, userId)) {
+    const fail = acknowledgeDiaryFailure(sent, e);
+    if (fail.kind === "network" && mayIssueRemoteWork(session, userId)) {
       void syncEngine.flush(userId).catch(() => undefined);
     }
-    return currentLocal(userId, input.id, persisted.entry);
+    return {
+      entry: currentLocal(userId, input.id, persisted.entry),
+      remoteAccepted: false,
+      failureKind: fail.kind,
+    };
   }
 }

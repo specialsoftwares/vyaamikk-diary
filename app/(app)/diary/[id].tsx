@@ -301,7 +301,7 @@ export default function EntryDetailScreen() {
     setRemovingGps(true);
     setActionError(null);
     try {
-      const updated = await updateEntryLocalFirst(user.uid, {
+      const { entry: updated } = await updateEntryLocalFirst(user.uid, {
         id: entry.id,
         location: stripGpsFromLocation(entry.location),
       });

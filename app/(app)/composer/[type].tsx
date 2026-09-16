@@ -546,7 +546,7 @@ export default function ComposerScreen() {
             cashPayload = resolved.payload;
             photoUploadFailed = resolved.photoUploadFailed;
           }
-          const updated = await updateEntryLocalFirst(user.uid, {
+          const { entry: updated } = await updateEntryLocalFirst(user.uid, {
             id: editingId,
             title,
             entryDate: parts.entryDate,
@@ -646,11 +646,13 @@ export default function ComposerScreen() {
             cashPaidPhotoState,
             cashPayload
           );
-          entry = await updateEntryLocalFirst(user.uid, {
-            id: entry.id,
-            attachments: resolved.attachments,
-            payload: resolved.payload,
-          });
+          entry = (
+            await updateEntryLocalFirst(user.uid, {
+              id: entry.id,
+              attachments: resolved.attachments,
+              payload: resolved.payload,
+            })
+          ).entry;
           if (resolved.photoUploadFailed) {
             feedback.showWarning(t("composer.cashPaidPhotoUploadFailed"));
           }

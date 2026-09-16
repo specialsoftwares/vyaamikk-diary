@@ -5,22 +5,17 @@ import {
   buildBusinessEntryPdfHtml,
   businessEntryPdfLabels,
 } from "@/services/pdf/businessEntryPdfTemplate";
-import { getUserPdfBranding } from "@/services/pdf/userPdfBranding";
-import { pdfService } from "@/services/pdf/pdfService";
 import { buildPdfFileNameForBusinessEntry } from "@/services/pdf/pdfFileNames";
 import { dayKey } from "@/utils/date";
 import { entryListSummary } from "@/utils/businessEntry/display";
 
-import { updateEntryLocalFirst } from "./localFirst";
 import { getDiaryRepository } from "./index";
 import { syncEngine } from "@/sync/syncEngine";
 import type { Lang } from "@/i18n/types";
-import { gujaratiPdfBodyFontCss, gujaratiPdfFontFaceCss } from "@/services/pdf/pdfGujaratiFont";
+import { pdfBrandingHook, pdfGenerateHook } from "@/services/pdf/pdfGenerateHook";
 import type { CreateBusinessEntryInput } from "./types";
 import { createEntryWithReminder } from "./saveWithReminder";
-import { syncInsightsFromBusinessEntry } from "@/services/insights/insightSync";
-import { invalidateGlobalSearchIndex } from "@/services/search/globalSearchRepository";
-import { invalidateMasterInsightsCache } from "@/services/insights/masterInsightsSummary";
+import { attachComposerPdfUri } from "./composerSaveSteps";
 import {
   beginCoordinatedSave,
   completeCoordinatedSave,
@@ -71,6 +66,8 @@ export interface SaveComposerEntryResult {
   cloudAccepted: boolean;
   syncFailureKind?: string;
 }
+
+export { composerSecondaryWriteReachedCloud } from "./composerSaveSteps";
 
 export async function saveComposerEntry(
   userId: string,
@@ -191,6 +188,9 @@ export async function saveComposerEntry(
     });
     let entry = created.entry;
     const cloudAccepted = created.remoteAccepted;
+    if (cloudAccepted && created.reminderRemoteAccepted === false) {
+      failedSecondarySteps.push("reminder_attached");
+    }
 
     logLifecyclePhase("repository_create_done", {
       phase: cloudAccepted ? "remote_write" : "local_write",
@@ -289,10 +289,18 @@ async function finishComposerSavePipeline(
       remoteId: entry.id,
     });
     try {
-      const branding = await getUserPdfBranding(options.user, { t: options.t });
+      const hookedBranding = pdfBrandingHook();
+      const branding = hookedBranding
+        ? await hookedBranding(options.user)
+        : await (await import("@/services/pdf/userPdfBranding")).getUserPdfBranding(options.user, {
+            t: options.t,
+          });
       const uiLang = options.uiLang ?? "en";
       let extraCss = "";
       if (uiLang === "gu") {
+        const { gujaratiPdfFontFaceCss, gujaratiPdfBodyFontCss } = await import(
+          "@/services/pdf/pdfGujaratiFont"
+        );
         const fontFace = await gujaratiPdfFontFaceCss();
         extraCss = `${fontFace}${gujaratiPdfBodyFontCss()}`;
       }
@@ -331,33 +339,44 @@ async function finishComposerSavePipeline(
           completedSteps,
           clientRecordId: input.clientRecordId,
         },
-        () =>
-          pdfService.generate({
+        async () => {
+          const inputPdf = {
             html,
             fileNameHint,
             fileName: buildPdfFileNameForBusinessEntry(entry, {
               businessName: options.user.businessName,
               date: dayKey(entry.entryDate),
             }),
-          })
+          };
+          const hooked = pdfGenerateHook();
+          if (hooked) return hooked(inputPdf);
+          const { pdfService } = await import("@/services/pdf/pdfService");
+          return pdfService.generate(inputPdf);
+        }
       );
       completedSteps = pdfStep.completedSteps;
-      if (pdfStep.ran && pdfStep.result) {
-        const uriStep = await runRecordStepIfNeeded(
-          {
-            userId,
-            recordKind: "business_entry",
-            recordId: entry.id,
-            step: SAVE_STEP.PDF_URI_SAVED,
-            completedSteps,
-            clientRecordId: input.clientRecordId,
-          },
-          async () =>
-            updateEntryLocalFirst(userId, { id: entry.id, pdfUri: pdfStep.result!.uri })
-        );
-        withPdf = uriStep.result ?? entry;
-        completedSteps = uriStep.completedSteps;
-        void syncEngine.cacheEntry(withPdf);
+      const generatedUri =
+        (pdfStep.ran && pdfStep.result?.uri) ||
+        (typeof entry.pdfUri === "string" && entry.pdfUri) ||
+        null;
+      if (
+        generatedUri &&
+        shouldRunStep(completedSteps, SAVE_STEP.PDF_URI_SAVED, { pdfUri: generatedUri })
+      ) {
+        const attached = await attachComposerPdfUri({
+          userId,
+          entryId: entry.id,
+          pdfUri: generatedUri,
+          completedSteps,
+          clientRecordId: input.clientRecordId,
+        });
+        withPdf = attached.entry;
+        completedSteps = attached.completedSteps;
+        if (attached.remoteAccepted) {
+          void syncEngine.cacheEntry(withPdf);
+        } else {
+          failedSecondarySteps.push("pdf_uri_saved");
+        }
       }
       logLifecyclePhase("pdf_done", {
         phase: "pdf_done",
@@ -396,7 +415,12 @@ async function finishComposerSavePipeline(
           completedSteps,
           clientRecordId: input.clientRecordId,
         },
-        async () => syncInsightsFromBusinessEntry(userId, input.ueid, withPdf)
+        async () => {
+          const { syncInsightsFromBusinessEntry } = await import(
+            "@/services/insights/insightSync"
+          );
+          return syncInsightsFromBusinessEntry(userId, input.ueid, withPdf);
+        }
       );
       completedSteps = step.completedSteps;
     }
@@ -407,6 +431,9 @@ async function finishComposerSavePipeline(
     "calendar_map_index",
     insightCtx,
     async () => {
+      const { invalidateMasterInsightsCache } = await import(
+        "@/services/insights/masterInsightsSummary"
+      );
       invalidateMasterInsightsCache();
     }
   );
@@ -416,6 +443,9 @@ async function finishComposerSavePipeline(
     "search_index",
     insightCtx,
     async () => {
+      const { invalidateGlobalSearchIndex } = await import(
+        "@/services/search/globalSearchRepository"
+      );
       invalidateGlobalSearchIndex();
     }
   );
