@@ -1,7 +1,7 @@
 /** SQLite schema — single on-device source of truth for drafts, cache, and sync queue. */
 
 export const DB_NAME = "vyaamikk_diary.db";
-export const DB_VERSION = 7;
+export const DB_VERSION = 8;
 
 export const MIGRATIONS_V1 = `
 PRAGMA journal_mode = WAL;
@@ -179,4 +179,14 @@ ALTER TABLE entries_local ADD COLUMN sync_error_code TEXT;
 ALTER TABLE entries_local ADD COLUMN auto_retry INTEGER NOT NULL DEFAULT 1;
 CREATE INDEX IF NOT EXISTS idx_entries_local_sync
   ON entries_local (user_id, remote_confirmed, auto_retry);
+`;
+
+/**
+ * Durable local revision / queue revision for acknowledgement ownership.
+ * Timestamps are not used as the ownership mechanism.
+ */
+export const MIGRATIONS_V8 = `
+ALTER TABLE entries_local ADD COLUMN local_revision INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE entries_local ADD COLUMN acked_revision INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE sync_queue ADD COLUMN revision INTEGER NOT NULL DEFAULT 0;
 `;

@@ -12,6 +12,8 @@ export interface LocalEntrySyncMeta {
   syncErrorCode: string | null;
   autoRetry: boolean;
   localUpdatedAt: number;
+  localRevision: number;
+  ackedRevision: number;
 }
 
 export interface LocalEntryRecord {
@@ -25,6 +27,9 @@ export interface UpsertLocalEntryOptions {
   remoteConfirmed?: boolean;
   syncErrorCode?: string | null;
   autoRetry?: boolean;
+  localRevision?: number;
+  ackedRevision?: number;
+  bumpRevision?: boolean;
   /** When true, unspecified meta fields keep the existing row's values. */
   preserveUnspecifiedMeta?: boolean;
 }
@@ -51,6 +56,8 @@ function parseRow(row: {
   sync_error_code?: string | null;
   auto_retry?: number | null;
   local_updated_at?: number;
+  local_revision?: number | null;
+  acked_revision?: number | null;
 }): LocalEntryRecord | null {
   try {
     const entry = JSON.parse(row.payload_json) as BusinessEntry;
@@ -63,12 +70,16 @@ function parseRow(row: {
         syncErrorCode: row.sync_error_code ?? null,
         autoRetry: row.auto_retry == null ? true : Number(row.auto_retry) === 1,
         localUpdatedAt: Number(row.local_updated_at ?? entry.updatedAt ?? 0),
+        localRevision: Number(row.local_revision ?? 0),
+        ackedRevision: Number(row.acked_revision ?? 0),
       },
     };
   } catch {
     return null;
   }
 }
+
+const ENTRY_SELECT = `payload_json, sync_status, pending_op, remote_confirmed, sync_error_code, auto_retry, local_updated_at, local_revision, acked_revision`;
 
 export function readLocalEntryRecordSync(userId: string, id: string): LocalEntryRecord | null {
   const db = getLocalDatabase();
@@ -80,8 +91,10 @@ export function readLocalEntryRecordSync(userId: string, id: string): LocalEntry
     sync_error_code: string | null;
     auto_retry: number | null;
     local_updated_at: number;
+    local_revision: number | null;
+    acked_revision: number | null;
   }>(
-    `SELECT payload_json, sync_status, pending_op, remote_confirmed, sync_error_code, auto_retry, local_updated_at
+    `SELECT ${ENTRY_SELECT}
        FROM entries_local WHERE user_id = ? AND id = ?`,
     [userId, id]
   );
@@ -120,11 +133,25 @@ export function writeLocalEntryRowSync(
       : options.preserveUnspecifiedMeta
         ? (meta?.autoRetry ?? true)
         : true;
+  const localRevision =
+    options.localRevision !== undefined
+      ? options.localRevision
+      : options.bumpRevision
+        ? (meta?.localRevision ?? 0) + 1
+        : options.preserveUnspecifiedMeta
+          ? (meta?.localRevision ?? 0)
+          : (meta?.localRevision ?? 0);
+  const ackedRevision =
+    options.ackedRevision !== undefined
+      ? options.ackedRevision
+      : options.preserveUnspecifiedMeta
+        ? (meta?.ackedRevision ?? 0)
+        : (meta?.ackedRevision ?? 0);
   db.runSync(
     `INSERT OR REPLACE INTO entries_local
      (id, user_id, payload_json, sync_status, local_updated_at, remote_updated_at, version_number,
-      pending_op, remote_confirmed, sync_error_code, auto_retry)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      pending_op, remote_confirmed, sync_error_code, auto_retry, local_revision, acked_revision)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       entry.id,
       entry.userId,
@@ -137,6 +164,8 @@ export function writeLocalEntryRowSync(
       boolInt(remoteConfirmed, 0),
       syncErrorCode,
       boolInt(autoRetry, 1),
+      localRevision,
+      ackedRevision,
     ]
   );
 }
@@ -153,13 +182,24 @@ export const localEntriesRepository = {
       remoteConfirmed: syncStatus === "synced" ? true : undefined,
       syncErrorCode: syncStatus === "synced" ? null : undefined,
       autoRetry: syncStatus === "synced" ? true : undefined,
+      ackedRevision: syncStatus === "synced" ? undefined : undefined,
       preserveUnspecifiedMeta: true,
     });
   },
 
   async upsertWithMeta(entry: BusinessEntry, options: UpsertLocalEntryOptions): Promise<void> {
     const existing = readLocalEntryRecordSync(entry.userId, entry.id);
-    writeLocalEntryRowSync(entry, options, existing);
+    const syncedAck =
+      options.syncStatus === "synced" && options.ackedRevision === undefined
+        ? (options.localRevision ?? existing?.meta.localRevision ?? 0)
+        : options.ackedRevision;
+    writeLocalEntryRowSync(
+      entry,
+      syncedAck !== undefined && options.syncStatus === "synced"
+        ? { ...options, ackedRevision: syncedAck }
+        : options,
+      existing
+    );
   },
 
   async createPending(
@@ -177,6 +217,8 @@ export const localEntriesRepository = {
         remoteConfirmed: false,
         syncErrorCode: null,
         autoRetry: true,
+        localRevision: 1,
+        ackedRevision: 0,
       },
       null
     );
@@ -202,8 +244,10 @@ export const localEntriesRepository = {
       sync_error_code: string | null;
       auto_retry: number | null;
       local_updated_at: number;
+      local_revision: number | null;
+      acked_revision: number | null;
     }>(
-      `SELECT payload_json, sync_status, pending_op, remote_confirmed, sync_error_code, auto_retry, local_updated_at
+      `SELECT ${ENTRY_SELECT}
          FROM entries_local
         WHERE user_id = ? AND (remote_confirmed = 0 OR sync_status != 'synced')
         ORDER BY local_updated_at ASC`,
@@ -218,13 +262,21 @@ export const localEntriesRepository = {
   },
 
   async markSynced(entry: BusinessEntry): Promise<void> {
-    await this.upsertWithMeta(entry, {
-      syncStatus: "synced",
-      pendingOp: null,
-      remoteConfirmed: true,
-      syncErrorCode: null,
-      autoRetry: true,
-    });
+    const existing = readLocalEntryRecordSync(entry.userId, entry.id);
+    const revision = existing?.meta.localRevision ?? 0;
+    writeLocalEntryRowSync(
+      entry,
+      {
+        syncStatus: "synced",
+        pendingOp: null,
+        remoteConfirmed: true,
+        syncErrorCode: null,
+        autoRetry: true,
+        localRevision: revision,
+        ackedRevision: revision,
+      },
+      existing
+    );
   },
 
   async markRemoteConfirmedKeepLocal(
@@ -255,9 +307,10 @@ export const localEntriesRepository = {
       {
         syncStatus: "error",
         pendingOp: record.meta.pendingOp,
-        remoteConfirmed: false,
+        remoteConfirmed: record.meta.remoteConfirmed,
         syncErrorCode: errorCode,
         autoRetry: false,
+        preserveUnspecifiedMeta: true,
       },
       record
     );

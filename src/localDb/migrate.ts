@@ -176,6 +176,18 @@ export function migrateToV7(db: Db): void {
   `);
 }
 
+export function migrateToV8(db: Db): void {
+  if (!tableHasColumn(db, "entries_local", "local_revision")) {
+    db.execSync(`ALTER TABLE entries_local ADD COLUMN local_revision INTEGER NOT NULL DEFAULT 0`);
+  }
+  if (!tableHasColumn(db, "entries_local", "acked_revision")) {
+    db.execSync(`ALTER TABLE entries_local ADD COLUMN acked_revision INTEGER NOT NULL DEFAULT 0`);
+  }
+  if (tableHasColumn(db, "sync_queue", "id") && !tableHasColumn(db, "sync_queue", "revision")) {
+    db.execSync(`ALTER TABLE sync_queue ADD COLUMN revision INTEGER NOT NULL DEFAULT 0`);
+  }
+}
+
 export function migrateToV4(db: Db): void {
   db.execSync(`
     CREATE TABLE IF NOT EXISTS statutory_occurrences (

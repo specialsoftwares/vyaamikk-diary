@@ -432,8 +432,26 @@ export class MemorySqlite {
       return out;
     });
   }
+
+  /** Deep-copy tables so a second instance can load persisted MemorySqlite state. */
+  exportTables(): Map<string, Table> {
+    return cloneTables(this.tables);
+  }
+
+  importTables(tables: Map<string, Table>): void {
+    this.tables = cloneTables(tables);
+    this.txDepth = 0;
+    this.txSnapshot = null;
+  }
 }
 
 export function openMemorySqlite(): MemorySqlite {
   return new MemorySqlite();
+}
+
+/** Fresh MemorySqlite instance loaded from another instance's persisted rows. */
+export function cloneMemorySqlite(source: MemorySqlite): MemorySqlite {
+  const next = new MemorySqlite();
+  next.importTables(source.exportTables());
+  return next;
 }

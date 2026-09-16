@@ -6,19 +6,34 @@ import type {
 import { getDiaryRepository } from "@/services/diary";
 import {
   localEntriesRepository,
+  readLocalEntryRecordSync,
+  writeLocalEntryRowSync,
   type LocalEntryRecord,
 } from "@/repositories/localEntriesRepository";
 import { syncQueueRepository } from "@/repositories/syncQueueRepository";
-import { persistRemoteAccepted } from "@/repositories/diaryLocalIntent";
 import { detectEntryConflict } from "@/sync/conflict";
 import { isSyncAuthError, sessionSyncGate } from "@/sync/sessionSyncGate";
-import { classifyAtomicCreateError } from "@/billing/optionC/classifyCreateError";
 import {
+  entryToCreateInput,
+  entryToUpdateInput,
+  hasOutstandingLocalIntent,
   localContentDiffers,
   resolveDiaryPendingOp,
   shouldAutoEnqueue,
   shouldSkipHeuristicPurge,
 } from "@/sync/diarySyncIntent";
+import {
+  acknowledgeDiaryCreateSuccess,
+  acknowledgeDiaryDeleteSuccess,
+  acknowledgeDiaryFailure,
+  acknowledgeDiaryUpdateSuccess,
+  captureSentDiaryOp,
+} from "@/sync/diaryAck";
+import {
+  sessionFlushKey,
+  syncSessionOwnership,
+  type SyncSessionToken,
+} from "@/sync/syncSessionOwnership";
 import { createLogger } from "@/utils/logger";
 
 const log = createLogger("sync");
@@ -26,42 +41,11 @@ const log = createLogger("sync");
 export type SyncPhase = "idle" | "syncing" | "offline" | "error";
 
 type FlushJob = {
-  userId: string;
+  key: string;
   promise: Promise<{ synced: number; failed: number }>;
 };
 
-let flushChain: FlushJob | null = null;
-
-function entryToCreateInput(entry: BusinessEntry): CreateBusinessEntryInput {
-  return {
-    clientRecordId: entry.id,
-    ueid: entry.ueid,
-    entryType: entry.entryType,
-    title: entry.title,
-    entryDate: entry.entryDate,
-    notes: entry.notes,
-    reminder: entry.reminder,
-    location: entry.location,
-    attachments: entry.attachments,
-    payload: entry.payload,
-    source: entry.source,
-    status: entry.status,
-  };
-}
-
-function entryToUpdateInput(entry: BusinessEntry): UpdateBusinessEntryInput {
-  return {
-    id: entry.id,
-    title: entry.title,
-    entryDate: entry.entryDate,
-    notes: entry.notes,
-    reminder: entry.reminder,
-    location: entry.location,
-    attachments: entry.attachments,
-    payload: entry.payload,
-    status: entry.status,
-  };
-}
+const flushChainByKey = new Map<string, FlushJob>();
 
 /**
  * Legacy leftover cleanup. Newly managed provisionals, quota-blocked rows,
@@ -99,6 +83,7 @@ async function purgeSupersededLocalPlaceholders(userId: string): Promise<void> {
 
 function enqueueOpForRecord(record: LocalEntryRecord): Promise<string> | void {
   const op = resolveDiaryPendingOp(record.entry.id, record.meta);
+  const revision = record.meta.localRevision;
   if (op === "update") {
     return syncQueueRepository.enqueue({
       userId: record.entry.userId,
@@ -106,16 +91,17 @@ function enqueueOpForRecord(record: LocalEntryRecord): Promise<string> | void {
       entity: "entry",
       entityId: record.entry.id,
       payload: entryToUpdateInput(record.entry),
+      revision,
     }, { replacePayload: true });
   }
   if (op === "delete") return;
-  // create, ambiguous legacy, or local_ — replay the same identity as CREATE.
   return syncQueueRepository.enqueue({
     userId: record.entry.userId,
     op: "create",
     entity: "entry",
     entityId: record.entry.id,
     payload: entryToCreateInput(record.entry),
+    revision,
   }, { replacePayload: true });
 }
 
@@ -138,141 +124,155 @@ async function ensurePendingQueued(userId: string): Promise<void> {
   }
 }
 
-async function applyCreateFailureToLocal(
-  userId: string,
-  entityId: string,
-  error: unknown
-): Promise<"auth" | "suspend" | "retry"> {
-  if (isSyncAuthError(error)) {
-    sessionSyncGate.lock("session_expired");
-    return "auth";
-  }
-  const kind = classifyAtomicCreateError(error);
-  if (kind === "network") return "retry";
-  await localEntriesRepository.suspendAutoRetry(userId, entityId, kind);
-  await syncQueueRepository.removeForEntity(userId, "entry", entityId, "create");
-  return "suspend";
+function stillOwnsFlush(token: SyncSessionToken | null): boolean {
+  if (!token) return !syncSessionOwnership.current();
+  return syncSessionOwnership.isCurrent(token);
 }
 
-async function processQueue(userId: string): Promise<{ synced: number; failed: number }> {
+async function processQueue(
+  userId: string,
+  token?: SyncSessionToken | null
+): Promise<{ synced: number; failed: number }> {
+  const owner = token === undefined ? syncSessionOwnership.capture() : token;
+  if (owner && owner.uid !== userId) return { synced: 0, failed: 0 };
   let synced = 0;
   let failed = 0;
   const queue = await syncQueueRepository.listForUser(userId);
   const repo = getDiaryRepository();
 
-  for (const item of queue) {
+  for (const listed of queue) {
+    if (!stillOwnsFlush(owner)) break;
+    if (sessionSyncGate.isLocked() && stillOwnsFlush(owner)) break;
+    const item = (await syncQueueRepository.getById(listed.id)) ?? listed;
     if (item.userId !== userId) continue;
-    if (sessionSyncGate.isLocked()) break;
     const localRecord = item.entity === "entry"
       ? await localEntriesRepository.getRecord(userId, item.entityId)
       : null;
     if (localRecord && !localRecord.meta.autoRetry) {
-      await syncQueueRepository.remove(item.id);
       continue;
     }
+    const fallbackEntry = (localRecord?.entry ?? (item.payload as BusinessEntry)) as BusinessEntry;
+    const sent = captureSentDiaryOp({
+      userId,
+      recordId: item.entityId,
+      op: item.op as "create" | "update" | "delete",
+      queueId: item.id,
+      entry: fallbackEntry,
+    });
     try {
       if (item.entity === "entry" && item.op === "create") {
-        const local = localRecord?.entry ?? null;
-        const input = local
-          ? entryToCreateInput(local)
+        const input: CreateBusinessEntryInput = localRecord?.entry
+          ? entryToCreateInput(localRecord.entry)
           : {
               ...(item.payload as CreateBusinessEntryInput),
               clientRecordId:
-                (item.payload as CreateBusinessEntryInput).clientRecordId ||
-                (item.entityId.startsWith("local_") ? item.entityId : item.entityId),
+                (item.payload as CreateBusinessEntryInput).clientRecordId || item.entityId,
             };
-        input.clientRecordId = local?.id ?? item.entityId;
-        const remote = await repo.create(userId, input);
-        if (sessionSyncGate.isLocked() || item.userId !== userId) {
-          failed += 1;
-          break;
-        }
-        const latest = await localEntriesRepository.getById(userId, item.entityId);
-        if (latest && detectEntryConflict(latest, remote) && localContentDiffers(latest, remote)) {
-          persistRemoteAccepted(userId, remote, latest, entryToUpdateInput(latest));
-        } else if (latest && localContentDiffers(latest, remote)) {
-          persistRemoteAccepted(userId, remote, latest, entryToUpdateInput(latest));
-        } else {
-          persistRemoteAccepted(userId, remote, latest, null);
-          if (item.entityId !== remote.id) {
-            await localEntriesRepository.removeById(userId, item.entityId);
-          }
-        }
+        input.clientRecordId = localRecord?.entry.id ?? item.entityId;
+        const result = await repo.createWithOutcome(userId, input);
+        const ack = acknowledgeDiaryCreateSuccess(sent, result.record, result.outcome);
+        if (ack.latestSynced) synced += 1;
       } else if (item.entity === "entry" && item.op === "update") {
-        const local = localRecord?.entry ?? null;
-        const payload = local
-          ? entryToUpdateInput(local)
+        const payload: UpdateBusinessEntryInput = localRecord?.entry
+          ? {
+              ...entryToUpdateInput(localRecord.entry),
+              expectedUpdatedAt: (item.payload as UpdateBusinessEntryInput | null)?.expectedUpdatedAt,
+            }
           : (item.payload as UpdateBusinessEntryInput);
         const remote = await repo.update(userId, payload);
-        if (sessionSyncGate.isLocked() || item.userId !== userId) {
-          failed += 1;
-          break;
-        }
-        await localEntriesRepository.markSynced(remote);
+        const ack = acknowledgeDiaryUpdateSuccess(sent, remote);
+        if (ack.latestSynced) synced += 1;
       } else if (item.entity === "entry" && item.op === "delete") {
         const payload = item.payload as { id: string };
         await repo.hardDelete(userId, payload.id);
-        if (sessionSyncGate.isLocked() || item.userId !== userId) {
-          failed += 1;
-          break;
-        }
-        await localEntriesRepository.removeById(userId, payload.id);
+        acknowledgeDiaryDeleteSuccess(sent);
+        synced += 1;
       }
-      await syncQueueRepository.remove(item.id);
-      synced += 1;
     } catch (e) {
       failed += 1;
       const msg = e instanceof Error ? e.message : String(e);
-      await syncQueueRepository.markAttempt(item.id, msg);
-      const action = await applyCreateFailureToLocal(userId, item.entityId, e);
-      if (action === "auth") break;
-      log.warn("queue item failed", { id: item.id, msg });
+      const currentQueue = await syncQueueRepository.getById(item.id);
+      if (currentQueue && currentQueue.revision === sent.revision) {
+        await syncQueueRepository.markAttempt(item.id, msg);
+      }
+      const action = acknowledgeDiaryFailure(sent, e);
+      if (action.kind === "unauthenticated" || isSyncAuthError(e)) {
+        break;
+      }
+      log.warn("queue item failed", { id: item.id, msg, kind: action.kind });
     }
   }
 
   return { synced, failed };
 }
 
+function cacheRemoteWithoutClobberingIntent(userId: string, remote: BusinessEntry): void {
+  const existing = readLocalEntryRecordSync(userId, remote.id);
+  if (existing && hasOutstandingLocalIntent(existing.meta)) {
+    if (localContentDiffers(existing.entry, remote)) {
+      writeLocalEntryRowSync(
+        existing.entry,
+        {
+          syncStatus: "conflict",
+          pendingOp: existing.meta.pendingOp,
+          remoteConfirmed: existing.meta.remoteConfirmed,
+          syncErrorCode: existing.meta.syncErrorCode,
+          autoRetry: false,
+          localRevision: existing.meta.localRevision,
+          ackedRevision: existing.meta.ackedRevision,
+        },
+        existing
+      );
+    }
+    return;
+  }
+  void localEntriesRepository.markSynced(remote);
+}
+
 export const syncEngine = {
   async flush(userId: string): Promise<{ synced: number; failed: number }> {
+    const token = syncSessionOwnership.capture();
+    if (token && token.uid !== userId) return { synced: 0, failed: 0 };
     if (sessionSyncGate.isLocked()) return { synced: 0, failed: 0 };
 
     const { assertLiveMutationAllowed, recordConnectivity, recordSuccessfulOnlineValidation } =
       await import("@/auth/offlineCapabilityGuard");
+    if (token && !syncSessionOwnership.isCurrent(token)) return { synced: 0, failed: 0 };
+    if (sessionSyncGate.isLocked()) return { synced: 0, failed: 0 };
+
     const NetInfo = (await import("@react-native-community/netinfo")).default;
     const net = await NetInfo.fetch();
     recordConnectivity(Boolean(net.isConnected));
+    if (token && !syncSessionOwnership.isCurrent(token)) return { synced: 0, failed: 0 };
     if (!net.isConnected) {
       assertLiveMutationAllowed("sync");
       return { synced: 0, failed: 0 };
     }
     assertLiveMutationAllowed("sync");
     recordSuccessfulOnlineValidation();
+    if (token && !syncSessionOwnership.isCurrent(token)) return { synced: 0, failed: 0 };
+    if (sessionSyncGate.isLocked()) return { synced: 0, failed: 0 };
 
-    if (flushChain) {
-      if (flushChain.userId === userId) return flushChain.promise;
-      try {
-        await flushChain.promise;
-      } catch {
-        // Old user's flush must not become this user's result.
-      }
-      if (sessionSyncGate.isLocked()) return { synced: 0, failed: 0 };
-    }
+    const key = sessionFlushKey(userId, token);
+    const prev = flushChainByKey.get(key);
+    if (prev) return prev.promise;
 
     const job: FlushJob = {
-      userId,
+      key,
       promise: Promise.resolve({ synced: 0, failed: 0 }),
     };
     job.promise = (async () => {
       try {
+        if (token && !syncSessionOwnership.isCurrent(token)) return { synced: 0, failed: 0 };
         if (sessionSyncGate.isLocked()) return { synced: 0, failed: 0 };
         await ensurePendingQueued(userId);
-        return await processQueue(userId);
+        if (token && !syncSessionOwnership.isCurrent(token)) return { synced: 0, failed: 0 };
+        return await processQueue(userId, token);
       } finally {
-        if (flushChain === job) flushChain = null;
+        if (flushChainByKey.get(key) === job) flushChainByKey.delete(key);
       }
     })();
-    flushChain = job;
+    flushChainByKey.set(key, job);
     return job.promise;
   },
 
@@ -292,16 +292,24 @@ export const syncEngine = {
    * Non-blocking — failures are logged, not thrown to UI.
    */
   async pullEntriesToLocalCache(userId: string): Promise<number> {
+    const token = syncSessionOwnership.capture();
+    if (token && token.uid !== userId) return 0;
     if (sessionSyncGate.isLocked()) return 0;
     const NetInfo = (await import("@react-native-community/netinfo")).default;
     const net = await NetInfo.fetch();
+    if (token && !syncSessionOwnership.isCurrent(token)) return 0;
     if (!net.isConnected) return 0;
 
     try {
       const remote = await getDiaryRepository().list(userId, { limit: 500 });
+      if (token && !syncSessionOwnership.isCurrent(token)) return 0;
       for (const entry of remote) {
+        if (token && !syncSessionOwnership.isCurrent(token)) return 0;
         const existing = await localEntriesRepository.getRecord(userId, entry.id);
-        if (existing && !existing.meta.remoteConfirmed) continue;
+        if (existing && hasOutstandingLocalIntent(existing.meta)) {
+          cacheRemoteWithoutClobberingIntent(userId, entry);
+          continue;
+        }
         if (existing && detectEntryConflict(existing.entry, entry)) {
           await localEntriesRepository.upsert(existing.entry, "conflict");
         } else {
@@ -310,25 +318,18 @@ export const syncEngine = {
       }
       return remote.length;
     } catch (e) {
-      if (isSyncAuthError(e)) sessionSyncGate.lock("session_expired");
+      if (isSyncAuthError(e) && (!token || syncSessionOwnership.isCurrent(token))) {
+        sessionSyncGate.lock("session_expired");
+      }
       log.warn("pull failed", e);
       return 0;
     }
   },
 
   async cacheEntry(entry: BusinessEntry): Promise<void> {
-    const existing = await localEntriesRepository.getRecord(entry.userId, entry.id);
-    if (existing && !existing.meta.remoteConfirmed) {
-      await localEntriesRepository.upsertWithMeta(entry, {
-        syncStatus: existing.meta.syncStatus,
-        pendingOp: existing.meta.pendingOp,
-        remoteConfirmed: false,
-        syncErrorCode: existing.meta.syncErrorCode,
-        autoRetry: existing.meta.autoRetry,
-      });
-      return;
-    }
-    await localEntriesRepository.markSynced(entry);
+    const token = syncSessionOwnership.capture();
+    if (token && token.uid !== entry.userId) return;
+    cacheRemoteWithoutClobberingIntent(entry.userId, entry);
   },
 };
 
@@ -337,6 +338,6 @@ export const __diarySyncTest = {
   purgeSupersededLocalPlaceholders,
   processQueue,
   resetFlushChain() {
-    flushChain = null;
+    flushChainByKey.clear();
   },
 };

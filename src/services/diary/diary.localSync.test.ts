@@ -7,14 +7,14 @@ import { setDiaryRepositoryForTests } from "@/services/diary";
 import { createEntryLocalFirst, updateEntryLocalFirst } from "@/services/diary/localFirst";
 import { localEntriesRepository, writeLocalEntryRowSync } from "@/repositories/localEntriesRepository";
 import { syncQueueRepository } from "@/repositories/syncQueueRepository";
-import { persistDiaryCreateIntent } from "@/repositories/diaryLocalIntent";
-import { installMemoryLocalDatabase, uninstallMemoryLocalDatabase } from "@/localDb/testHarness";
-import { getLocalDatabase } from "@/localDb/database";
+import { persistDiaryCreateIntent, setDiaryIntentCrashHook } from "@/repositories/diaryLocalIntent";
+import { installMemoryLocalDatabase, reopenMemoryLocalDatabaseFrom, uninstallMemoryLocalDatabase } from "@/localDb/testHarness";
 import { openMemorySqlite } from "@/localDb/memorySqlite";
-import { execStatements, migrateToV7 } from "@/localDb/migrate";
+import { execStatements, migrateToV7, migrateToV8 } from "@/localDb/migrate";
 import { MIGRATIONS_V1 } from "@/localDb/schema";
 import { __diarySyncTest, syncEngine } from "@/sync/syncEngine";
 import { sessionSyncGate } from "@/sync/sessionSyncGate";
+import { syncSessionOwnership } from "@/sync/syncSessionOwnership";
 import { stableRecordId } from "@/services/records/stableRecordId";
 import { classifyAtomicCreateError } from "@/billing/optionC/classifyCreateError";
 
@@ -73,18 +73,28 @@ function mockRepo(store: Map<string, BusinessEntry>, hooks?: {
 }): DiaryRepository {
   return {
     async create(userId, input) {
-      if (hooks?.create) return hooks.create(input);
+      return (await this.createWithOutcome(userId, input)).record;
+    },
+    async createWithOutcome(userId, input) {
       const id = input.clientRecordId!;
+      const had = store.has(id);
+      if (hooks?.create) {
+        const record = await hooks.create(input);
+        return { record, outcome: had ? "existing" : "created" };
+      }
       const existing = store.get(id);
-      if (existing) return existing;
-      const entry = { ...asEntry(id, input.title), userId };
+      if (existing) return { record: existing, outcome: "existing" };
+      const entry = { ...asEntry(id, input.title), userId, title: input.title };
       store.set(id, entry);
-      return entry;
+      return { record: entry, outcome: "created" };
     },
     async update(userId, input) {
       if (hooks?.update) return hooks.update(input);
       const cur = store.get(input.id);
       if (!cur) throw new AppError("not_found", "missing");
+      if (input.expectedUpdatedAt != null && cur.updatedAt !== input.expectedUpdatedAt) {
+        throw new AppError("save_failed", "Entry changed remotely.", undefined, { remoteChanged: true });
+      }
       const next = { ...cur, ...input, userId, updatedAt: Date.now() } as BusinessEntry;
       store.set(input.id, next);
       return next;
@@ -105,8 +115,9 @@ function mockRepo(store: Map<string, BusinessEntry>, hooks?: {
 }
 
 async function main() {
-  installMemoryLocalDatabase();
+  const memory = installMemoryLocalDatabase();
   sessionSyncGate.unlock();
+  syncSessionOwnership.resetForTests();
   __diarySyncTest.resetFlushChain();
 
   try {
@@ -168,7 +179,8 @@ async function main() {
     assert.equal((await localEntriesRepository.getRecord("u1", "en_quota_1"))?.meta.autoRetry, false);
     assert.equal((await localEntriesRepository.getRecord("u1", "en_quota_1"))?.meta.remoteConfirmed, false);
 
-    // E. Restart: durable state survives re-read.
+    // E. Restart: durable state survives a fresh database instance loaded from persisted rows.
+    reopenMemoryLocalDatabaseFrom(memory);
     const restarted = await localEntriesRepository.getRecord("u1", "en_quota_1");
     assert.equal(restarted?.meta.pendingOp, "create");
     assert.equal(restarted?.entry.id, "en_quota_1");
@@ -337,20 +349,27 @@ async function main() {
     assert.ok(await localEntriesRepository.getById("u1", "en_ident_1"));
     assert.ok(await localEntriesRepository.getById("u1", "en_ident_2"));
 
-    // Crash between local row + queue write rolls both back.
-    const db = getLocalDatabase();
+    persistDiaryCreateIntent(asEntry("en_keep_crash"), noteInput("en_keep_crash"));
+    setDiaryIntentCrashHook(() => {
+      throw new Error("injected crash");
+    });
     try {
-      db.withTransactionSync(() => {
-        persistDiaryCreateIntent(asEntry("en_crash"), noteInput("en_crash"));
-        throw new Error("simulated crash");
-      });
+      persistDiaryCreateIntent(asEntry("en_crash"), noteInput("en_crash"));
+      assert.fail("expected injected crash");
     } catch (e) {
-      assert.equal((e as Error).message, "simulated crash");
+      assert.equal((e as Error).message, "injected crash");
+    } finally {
+      setDiaryIntentCrashHook(null);
     }
     assert.equal(await localEntriesRepository.getById("u1", "en_crash"), null);
     assert.equal(
       (await syncQueueRepository.listForUser("u1")).some((q) => q.entityId === "en_crash"),
       false
+    );
+    assert.ok(await localEntriesRepository.getById("u1", "en_keep_crash"));
+    assert.equal(
+      (await syncQueueRepository.listForUser("u1")).some((q) => q.entityId === "en_keep_crash"),
+      true
     );
 
     // Ambiguous legacy pending non-local_ id reconstructs CREATE with the same id.
@@ -384,17 +403,20 @@ async function main() {
       ["sync_keep", "u1", "create", "entry", "keep_1", JSON.stringify(noteInput("keep_1")), 1]
     );
     migrateToV7(migrated as unknown as Parameters<typeof migrateToV7>[0]);
-    const kept = migrated.getFirstSync<{ id: string; payload_json: string }>(
-      "SELECT id, payload_json FROM entries_local WHERE id = ?",
+    migrateToV8(migrated as unknown as Parameters<typeof migrateToV8>[0]);
+    const kept = migrated.getFirstSync<{ id: string; payload_json: string; local_revision: number }>(
+      "SELECT id, payload_json, local_revision FROM entries_local WHERE id = ?",
       ["keep_1"]
     );
     assert.equal(kept?.id, "keep_1");
     assert.ok(kept?.payload_json.includes("keep_1"));
-    const keptQueue = migrated.getFirstSync<{ entity_id: string }>(
-      "SELECT entity_id FROM sync_queue WHERE id = ?",
+    assert.equal(Number(kept?.local_revision ?? 0), 0);
+    const keptQueue = migrated.getFirstSync<{ entity_id: string; revision: number }>(
+      "SELECT entity_id, revision FROM sync_queue WHERE id = ?",
       ["sync_keep"]
     );
     assert.equal(keptQueue?.entity_id, "keep_1");
+    assert.equal(Number(keptQueue?.revision ?? 0), 0);
 
     // O. Local persistence is not remote confirmation.
     assert.equal((await localEntriesRepository.getRecord("u1", "en_off_1"))?.meta.remoteConfirmed, true);
@@ -407,6 +429,7 @@ async function main() {
   } finally {
     setDiaryRepositoryForTests(null);
     sessionSyncGate.unlock();
+    syncSessionOwnership.resetForTests();
     __diarySyncTest.resetFlushChain();
     uninstallMemoryLocalDatabase();
   }

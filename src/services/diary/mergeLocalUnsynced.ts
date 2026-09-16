@@ -20,6 +20,7 @@ export function badgeForLocalRecord(record: LocalEntryRecord): DiarySyncBadge {
   if (code === "quota_exhausted") return "quota";
   if (code === "permission_denied") return "permission";
   if (record.meta.syncStatus === "error" || code) return "error";
+  if (record.meta.syncStatus === "conflict") return "error";
   if (!record.meta.remoteConfirmed || record.meta.syncStatus === "pending") return "pending";
   return "synced";
 }

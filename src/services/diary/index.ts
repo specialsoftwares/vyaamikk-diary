@@ -7,6 +7,8 @@ let testOverride: DiaryRepository | null = null;
 
 export type {
   DiaryRepository,
+  DiaryCreateResult,
+  DiaryCreateOutcome,
   CreateDiaryEntryInput,
   UpdateDiaryEntryInput,
   ListDiaryEntriesOptions,

@@ -15,6 +15,7 @@ import { mergeBusinessEntryUpdate, mergeEntryPdfGeneration } from "./mergeEntryU
 import { entryToStorage, normaliseBusinessEntry } from "./normalize";
 import type {
   CreateBusinessEntryInput,
+  DiaryCreateResult,
   DiaryRepository,
   ListDiaryEntriesOptions,
   UpdateBusinessEntryInput,
@@ -85,10 +86,14 @@ function applyFilters(
 
 export const mockDiaryRepository: DiaryRepository = {
   async create(userId, input) {
+    return (await this.createWithOutcome(userId, input)).record;
+  },
+
+  async createWithOutcome(userId, input): Promise<DiaryCreateResult> {
     const now = Date.now();
     const id = input.clientRecordId?.trim() || shortId("diary");
     const existing = (await loadAll(userId)).find((e) => e.id === id);
-    if (existing) return existing;
+    if (existing) return { record: existing, outcome: "existing" };
     const entry: BusinessEntry = {
       id,
       userId,
@@ -112,7 +117,7 @@ export const mockDiaryRepository: DiaryRepository = {
     const all = await loadAll(userId);
     all.unshift(entry);
     await saveAll(userId, all);
-    return entry;
+    return { record: entry, outcome: "created" };
   },
 
   async update(userId, input) {
@@ -120,6 +125,9 @@ export const mockDiaryRepository: DiaryRepository = {
     const idx = all.findIndex((e) => e.id === input.id);
     if (idx === -1) throw new AppError("not_found", "Entry not found.");
     const existing = all[idx];
+    if (input.expectedUpdatedAt != null && existing.updatedAt !== input.expectedUpdatedAt) {
+      throw new AppError("save_failed", "Entry changed remotely.", undefined, { remoteChanged: true });
+    }
 
     if (input.reminder !== undefined) {
       const wasScheduled = existing.reminder?.notificationId ?? null;

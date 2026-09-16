@@ -18,6 +18,8 @@ function meta(partial: Partial<LocalEntryRecord["meta"]>): LocalEntryRecord["met
     syncErrorCode: null,
     autoRetry: true,
     localUpdatedAt: 1,
+    localRevision: 0,
+    ackedRevision: 0,
     ...partial,
   };
 }
@@ -56,6 +58,14 @@ assert.equal(
   localContentDiffers(
     { title: "A", notes: "new", payload: { x: 1 }, entryDate: 1 },
     { title: "A", notes: null, payload: { x: 1 }, entryDate: 1 }
+  ),
+  true
+);
+
+assert.equal(
+  localContentDiffers(
+    { title: "A", notes: null, payload: { x: 1 }, entryDate: 1, reminder: { at: 9, note: "x", notificationId: null } },
+    { title: "A", notes: null, payload: { x: 1 }, entryDate: 1, reminder: null }
   ),
   true
 );
