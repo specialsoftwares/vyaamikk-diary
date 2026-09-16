@@ -48,6 +48,7 @@
     "test:billing-diagnostic-uid": "npx --yes tsx functions/src/billing/diagnosticUid.unit.test.ts",
     "test:billing-transition": "npx --yes tsx functions/src/billing/transition.unit.test.ts",
     "test:billing-persist": "npx --yes tsx functions/src/billing/applyTransition.unit.test.ts",
+    "test:billing-presentation": "npx --yes tsx src/components/billing/upgradePresentation.test.ts && npx --yes tsx src/components/billing/upgradePresentation.contract.test.ts && npx --yes tsx src/components/billing/billingUxPreviewGate.test.ts",
     "test:billing-reconciliation-queue": "npx --yes tsx functions/src/billing/reconciliationQueue.unit.test.ts",
     "test:billing-trial-grant": "npx --yes tsx functions/src/billing/trialGrant.unit.test.ts",
     "test:billing-rate-limit": "npx --yes tsx functions/src/billing/rateLimit.unit.test.ts",
@@ -180,7 +181,7 @@
     "test:boot-production-startup": "npx --yes tsx src/boot/bootProductionStartup.contract.test.ts",
     "functions:build": "npm --prefix functions run build",
     "functions:lint": "npm --prefix functions run lint",
-    "lint:eslint": "eslint \"src/config/**/*.{ts,tsx}\" \"src/startup/**/*.{ts,tsx}\" \"src/auth/**/*.{ts,tsx}\" \"src/services/device/**/*.{ts,tsx}\" \"src/services/auth/productionMockOtpIsolation.test.ts\" \"src/utils/date.ts\" \"src/utils/localBusinessDate.test.ts\" \"src/services/search/buildSearchableText.ts\" \"src/services/statutory/statutoryPromptSession.ts\" \"src/subscription/**/*.{ts,tsx}\" \"src/billing/iap/**/*.{ts,tsx}\" \"app/_layout.tsx\" --max-warnings 40",
+    "lint:eslint": "eslint \"src/config/**/*.{ts,tsx}\" \"src/startup/**/*.{ts,tsx}\" \"src/auth/**/*.{ts,tsx}\" \"src/services/device/**/*.{ts,tsx}\" \"src/services/auth/productionMockOtpIsolation.test.ts\" \"src/utils/date.ts\" \"src/utils/localBusinessDate.test.ts\" \"src/services/search/buildSearchableText.ts\" \"src/services/statutory/statutoryPromptSession.ts\" \"src/subscription/**/*.{ts,tsx}\" \"src/billing/iap/**/*.{ts,tsx}\" \"src/components/billing/**/*.{ts,tsx}\" \"app/_layout.tsx\" --max-warnings 40",
     "lint": "npm run typecheck && npm run lint:eslint"
   },
   "dependencies": {

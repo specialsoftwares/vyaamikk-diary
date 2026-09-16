@@ -16,6 +16,7 @@ import { LOCAL_MOCK_DETERMINISTIC_MOBILE_OTP } from "@/services/auth/mobileOtpCo
 import { LOCAL_MOCK_DETERMINISTIC_EMAIL_OTP } from "@/services/auth/emailOtpConstants";
 import { AppError } from "@/domain/errors";
 import { isOnboardingUxPreviewEnabled } from "@/auth-v2/preview/onboardingPreviewGate";
+import { isBillingUxPreviewEnabled } from "@/components/billing/billingUxPreviewGate";
 
 function withStoreSignals(fn: () => void): void {
   // Force production-like standalone signals for this process.
@@ -39,6 +40,11 @@ withStoreSignals(() => {
     isOnboardingUxPreviewEnabled(),
     false,
     "onboarding UX preview must stay production-inaccessible"
+  );
+  assert.equal(
+    isBillingUxPreviewEnabled(),
+    false,
+    "billing UX preview must stay production-inaccessible"
   );
 
   let mobileBlocked = false;

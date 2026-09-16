@@ -1,0 +1,219 @@
+/**
+ * Copy and CTA helpers for billing presentation.
+ *
+ * No store calls, no entitlement writes, no invented live prices.
+ * Trial CTA is shown only when the caller passes backend-confirmed eligibility.
+ */
+
+import {
+  UPGRADE_PERIODS,
+  type TranslateFn,
+  type UpgradeCatalogPeriod,
+  type UpgradeCatalogState,
+  type UpgradeOperationState,
+  type UpgradePlanCardModel,
+  type UpgradePlanId,
+  type UpgradePlanOffer,
+  type UpgradeTriggerContext,
+} from "./upgradeTypes";
+
+/**
+ * W-9: unsubstantiated social-proof. Must stay false until owner/legal approval.
+ * UpgradeSheet must not render this claim while the flag is false.
+ */
+export const SHOW_TRUSTED_BY_INDIAN_BUSINESS_OWNERS_CLAIM = false;
+
+/** Forbidden until SHOW_TRUSTED_BY_INDIAN_BUSINESS_OWNERS_CLAIM is approved. */
+export const UNAPPROVED_TRUSTED_BY_CLAIM = "TRUSTED BY INDIAN BUSINESS OWNERS";
+
+export const FORBIDDEN_W9_CLAIM_FRAGMENTS = [
+  "cannot be backdated",
+  "cannot be duplicated",
+  "holds in any dispute",
+  UNAPPROVED_TRUSTED_BY_CLAIM,
+] as const;
+
+export type UpgradeCtaKind = "trial" | "subscribe" | "unavailable" | "pending" | "loading";
+
+export interface UpgradeTriggerCopy {
+  title: string;
+  subtitle: string;
+}
+
+export function upgradeTriggerCopy(t: TranslateFn, triggerContext: UpgradeTriggerContext): UpgradeTriggerCopy {
+  switch (triggerContext) {
+    case "recordLimitReached":
+      return {
+        title: t("billing.upgrade.trigger.recordLimitReached.title"),
+        subtitle: t("billing.upgrade.trigger.recordLimitReached.subtitle"),
+      };
+    case "featureLocked":
+      return {
+        title: t("billing.upgrade.trigger.featureLocked.title"),
+        subtitle: t("billing.upgrade.trigger.featureLocked.subtitle"),
+      };
+    case "trialExpiring":
+      return {
+        title: t("billing.upgrade.trigger.trialExpiring.title"),
+        subtitle: t("billing.upgrade.trigger.trialExpiring.subtitle"),
+      };
+    case "manualUpgrade":
+      return {
+        title: t("billing.upgrade.trigger.manualUpgrade.title"),
+        subtitle: t("billing.upgrade.trigger.manualUpgrade.subtitle"),
+      };
+  }
+}
+
+export function upgradePeriodLabel(t: TranslateFn, period: UpgradeCatalogPeriod): string {
+  switch (period) {
+    case "monthly":
+      return t("billing.upgrade.periodMonthly");
+    case "quarterly":
+      return t("billing.upgrade.periodQuarterly");
+    case "yearly":
+      return t("billing.upgrade.periodYearly");
+  }
+}
+
+function planCardCopy(
+  t: TranslateFn,
+  planId: UpgradePlanId
+): { name: string; benefits: string[] } {
+  switch (planId) {
+    case "starter":
+      return {
+        name: t("billing.upgrade.plans.starter.name"),
+        benefits: [
+          t("billing.upgrade.plans.starter.b1"),
+          t("billing.upgrade.plans.starter.b2"),
+        ],
+      };
+    case "professional":
+      return {
+        name: t("billing.upgrade.plans.professional.name"),
+        benefits: [
+          t("billing.upgrade.plans.professional.b1"),
+          t("billing.upgrade.plans.professional.b2"),
+          t("billing.upgrade.plans.professional.b3"),
+        ],
+      };
+    case "business":
+      return {
+        name: t("billing.upgrade.plans.business.name"),
+        benefits: [
+          t("billing.upgrade.plans.business.b1"),
+          t("billing.upgrade.plans.business.b2"),
+          t("billing.upgrade.plans.business.b3"),
+          t("billing.upgrade.plans.business.b4"),
+        ],
+      };
+  }
+}
+
+export function buildUpgradePlanCards(
+  t: TranslateFn,
+  offers: readonly UpgradePlanOffer[],
+  period: UpgradeCatalogPeriod
+): UpgradePlanCardModel[] {
+  const cards: UpgradePlanCardModel[] = [];
+  for (const offer of offers) {
+    if (offer.period !== period) continue;
+    const copy = planCardCopy(t, offer.planId);
+    const offerState = offer.offer;
+    cards.push({
+      sku: offer.sku,
+      planId: offer.planId,
+      period: offer.period,
+      name: copy.name,
+      benefits: copy.benefits,
+      priceLabel: offerState.status === "ready" ? offerState.displayPrice : null,
+      priceState: offerState.status,
+    });
+  }
+  return cards;
+}
+
+export function resolveUpgradeCta(input: {
+  trialEligible: boolean;
+  purchaseAvailable: boolean;
+  purchaseState: UpgradeOperationState;
+  catalogState: UpgradeCatalogState;
+}): { kind: UpgradeCtaKind; enabled: boolean; labelKey: string } {
+  if (input.catalogState === "loading" || input.purchaseState === "loading") {
+    return { kind: "loading", enabled: false, labelKey: "billing.upgrade.purchaseLoading" };
+  }
+  if (input.purchaseState === "pending") {
+    return { kind: "pending", enabled: false, labelKey: "billing.upgrade.purchasePending" };
+  }
+  if (
+    !input.purchaseAvailable ||
+    input.purchaseState === "unavailable" ||
+    input.catalogState === "unavailable"
+  ) {
+    return { kind: "unavailable", enabled: false, labelKey: "billing.upgrade.purchaseUnavailable" };
+  }
+  if (input.trialEligible) {
+    return { kind: "trial", enabled: true, labelKey: "billing.upgrade.ctaTrial" };
+  }
+  return { kind: "subscribe", enabled: true, labelKey: "billing.upgrade.ctaSubscribe" };
+}
+
+export function canDispatchPurchase(input: {
+  ctaEnabled: boolean;
+  selectedSku: string | null;
+  selectedOfferReady: boolean;
+}): boolean {
+  return input.ctaEnabled && Boolean(input.selectedSku) && input.selectedOfferReady;
+}
+
+export function canDispatchRestore(input: {
+  restoreAvailable: boolean;
+  restoreState: UpgradeOperationState;
+}): boolean {
+  if (!input.restoreAvailable) return false;
+  if (input.restoreState === "loading" || input.restoreState === "pending") return false;
+  if (input.restoreState === "unavailable") return false;
+  return true;
+}
+
+export function selectedOfferIsReady(
+  offers: readonly UpgradePlanOffer[],
+  sku: string | null
+): boolean {
+  if (!sku) return false;
+  for (const offer of offers) {
+    if (offer.sku === sku) return offer.offer.status === "ready";
+  }
+  return false;
+}
+
+export function defaultSelectedSku(
+  cards: readonly UpgradePlanCardModel[],
+  currentSku: string | null
+): string | null {
+  if (currentSku) {
+    for (const card of cards) {
+      if (card.sku === currentSku) return currentSku;
+    }
+  }
+  for (const card of cards) {
+    if (card.priceState === "ready") return card.sku;
+  }
+  return cards[0]?.sku ?? null;
+}
+
+export const UPGRADE_PERIOD_ORDER: readonly UpgradeCatalogPeriod[] = UPGRADE_PERIODS;
+
+/** Illustrative paper estimate only — not measured product savings. */
+export const ESTIMATE_SHEETS_PER_RECORD = 1;
+
+export function estimateSheetsSaved(records: number, sheetsPerRecord = ESTIMATE_SHEETS_PER_RECORD): number {
+  if (!Number.isFinite(records) || records < 0) return 0;
+  if (!Number.isFinite(sheetsPerRecord) || sheetsPerRecord < 0) return 0;
+  return Math.floor(records * sheetsPerRecord);
+}
+
+export function shouldShowTrustedByClaim(): boolean {
+  return SHOW_TRUSTED_BY_INDIAN_BUSINESS_OWNERS_CLAIM;
+}

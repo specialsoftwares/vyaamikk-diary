@@ -2603,6 +2603,106 @@
       }
     }
   },
+  "billing": {
+    "upgrade": {
+      "close": "Close upgrade options",
+      "currentPlan": "Current plan",
+      "entitlement": "Access",
+      "periodMonthly": "Monthly",
+      "periodQuarterly": "Quarterly",
+      "periodYearly": "Yearly",
+      "priceUnavailable": "Price unavailable from the store",
+      "catalogLoading": "Loading plans from the store…",
+      "catalogUnavailable": "Plans are unavailable right now. Try again later.",
+      "purchaseUnavailable": "Purchases are not available in this build.",
+      "restoreUnavailable": "Restore is not available in this build.",
+      "purchasePending": "Waiting for the store…",
+      "purchaseLoading": "Starting purchase…",
+      "ctaSubscribe": "Continue",
+      "ctaTrial": "Start 14-day trial",
+      "ctaRestore": "Restore purchases",
+      "learnBenefits": "Why upgrade?",
+      "selectPlan": "Select a plan",
+      "trustedByClaim": "TRUSTED BY INDIAN BUSINESS OWNERS",
+      "trigger": {
+        "recordLimitReached": {
+          "title": "You've reached this month's record limit",
+          "subtitle": "Upgrade to keep creating records this month."
+        },
+        "featureLocked": {
+          "title": "This feature needs a paid plan",
+          "subtitle": "Choose a plan that includes this capability."
+        },
+        "trialExpiring": {
+          "title": "Your trial is ending soon",
+          "subtitle": "Subscribe to keep Professional access after the trial."
+        },
+        "manualUpgrade": {
+          "title": "Upgrade Vyaamikk Diary",
+          "subtitle": "Choose a plan. Prices come from the store on your device."
+        }
+      },
+      "plans": {
+        "starter": {
+          "name": "Starter",
+          "b1": "Up to 100 records each month",
+          "b2": "Core diary, cash and credit records"
+        },
+        "professional": {
+          "name": "Professional",
+          "b1": "Unlimited records each month",
+          "b2": "Professional Brief",
+          "b3": "Everything in Starter"
+        },
+        "business": {
+          "name": "Business",
+          "b1": "Unlimited records each month",
+          "b2": "Professional Brief",
+          "b3": "Business Insights",
+          "b4": "Everything in Professional"
+        }
+      },
+      "trialNote": "14-day Professional trial — shown only when your account is eligible.",
+      "storePriceNote": "Prices shown are from Google Play or the App Store on this device."
+    },
+    "education": {
+      "title": "Why keep records in Vyaamikk Diary",
+      "continue": "See plans",
+      "paperTitle": "Paper stays in one place",
+      "paperBody": "Create diary, cash and credit records on your phone instead of loose notebooks.",
+      "timeTitle": "Less searching later",
+      "timeBody": "Find a party, amount or date without flipping through pages.",
+      "savingsTitle": "Paper use (illustrative only)",
+      "savingsBody": "This calculator is an estimate you control. It is not measured savings from Vyaamikk Diary.",
+      "savingsRecords": "Records you type",
+      "savingsSheets": "About {{sheets}} sheets",
+      "savingsDisclaimer": "Uses 1 sheet per record as a simple stand-in. Change the number to explore. Not a guarantee.",
+      "gstTitle": "Organised records, not GST filing",
+      "gstBody": "Keep cash, credit and diary entries organised so you can review them later. This is not a GST filing or tax-advice service.",
+      "indiaTitle": "Built in India. Built for India",
+      "indiaBody": "Designed for Indian business record-keeping. We do not claim to be trusted by all Indian business owners.",
+      "yoursTitle": "Your records stay yours",
+      "yoursBody": "Your business records belong to you. Keep a copy when you need one."
+    },
+    "preview": {
+      "title": "Billing UX preview",
+      "subtitle": "Development only. Purchases, restore and quota triggers stay closed.",
+      "openEducation": "Open benefit education",
+      "sheetRecordLimit": "Upgrade sheet — record limit",
+      "sheetFeature": "Upgrade sheet — feature locked",
+      "sheetTrial": "Upgrade sheet — trial ending",
+      "sheetManual": "Upgrade sheet — manual",
+      "catalogLoading": "Catalog loading fixture",
+      "catalogUnavailable": "Catalog unavailable fixture",
+      "purchasePending": "Purchase pending fixture",
+      "purchaseError": "Controlled error fixture",
+      "trialOn": "Use trial-eligible fixture",
+      "trialOff": "Use trial-not-eligible fixture",
+      "motionOn": "Use motion fixture",
+      "motionOff": "Use reduced-motion fixture",
+      "note": "Fixture prices are for layout review only. They are not live store prices."
+    }
+  },
   "language": {
     "en": "English",
     "hi": "हिंदी",
