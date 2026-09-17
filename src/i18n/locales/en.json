@@ -28,6 +28,7 @@
     "enable": "Enable",
     "disable": "Disable",
     "back": "Back",
+    "goBack": "Go back",
     "next": "Next",
     "done": "Done",
     "add": "Add",
@@ -2616,6 +2617,8 @@
       "catalogUnavailable": "Plans are unavailable right now. Try again later.",
       "purchaseUnavailable": "Purchases are not available in this build.",
       "restoreUnavailable": "Restore is not available in this build.",
+      "restorePending": "Waiting to restore purchases…",
+      "restoreLoading": "Restoring purchases…",
       "purchasePending": "Waiting for the store…",
       "purchaseLoading": "Starting purchase…",
       "ctaSubscribe": "Continue",
@@ -2704,7 +2707,9 @@
       "lastAction": "Last preview action: {{action}}",
       "motionOn": "Use motion fixture",
       "motionOff": "Use reduced-motion fixture",
-      "note": "Fixture prices are for layout review only. They are not live store prices."
+      "note": "Fixture prices are for layout review only. They are not live store prices.",
+      "entitlement": "25 records / month (preview)",
+      "restorePending": "Restore in-progress fixture"
     }
   },
   "language": {

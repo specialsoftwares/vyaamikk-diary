@@ -133,6 +133,18 @@ export function BillingUxPreviewLab({ onLeave }: { onLeave: () => void }) {
         onPress={() => {
           setCatalogState("ready");
           setPurchaseState("pending");
+          setRestoreState("idle");
+          setErrorMessage(null);
+          openSheet("manualUpgrade");
+        }}
+      />
+      <LabButton
+        styles={styles}
+        label={t("billing.preview.restorePending")}
+        onPress={() => {
+          setCatalogState("ready");
+          setPurchaseState("idle");
+          setRestoreState("pending");
           setErrorMessage(null);
           openSheet("manualUpgrade");
         }}
@@ -177,7 +189,7 @@ export function BillingUxPreviewLab({ onLeave }: { onLeave: () => void }) {
         visible={sheetVisible}
         triggerContext={triggerContext}
         currentPlanLabel="Free"
-        entitlementLabel="25 records / month (preview)"
+        entitlementLabel={t("billing.preview.entitlement")}
         trialEligible={trialEligible}
         trialActionAvailable={trialActionAvailable}
         offers={offers}

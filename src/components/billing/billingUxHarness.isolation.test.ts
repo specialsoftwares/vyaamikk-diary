@@ -33,6 +33,7 @@ assert.equal(
 );
 assert.equal(metro.includes("BootstrapRoot"), true);
 assert.equal(metro.includes("expo-sqlite"), true);
+assert.equal(metro.includes("realpathSync"), true);
 assert.equal(pkg.includes("node_modules/.bin/expo"), true);
 assert.equal(pkg.includes("--web --port 8092"), true);
 

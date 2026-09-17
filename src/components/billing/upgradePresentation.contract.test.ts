@@ -21,6 +21,7 @@ function stripComments(src: string): string {
 const sheet = stripComments(read("UpgradeSheet.tsx"));
 const education = stripComments(read("BenefitEducationScreen.tsx"));
 const lab = stripComments(read("BillingUxPreviewLab.tsx"));
+const hi = readFileSync(join(root, "../../i18n/locales/hi.ts"), "utf8");
 const route = readFileSync(
   join(root, "../../../app/(app)/settings/billing-ux-preview.tsx"),
   "utf8"
@@ -68,6 +69,12 @@ assert.match(lab, /CLIENT_MANUAL_TRIAL_START_SUPPORTED/);
 assert.match(lab, /onStartTrial/);
 assert.match(lab, /purchase:\$\{sku\}/);
 assert.match(lab, /setLastPreviewAction\("trial"\)/);
+assert.match(lab, /billing\.preview\.entitlement/);
+assert.match(lab, /billing\.preview\.restorePending/);
+assert.match(sheet, /restoreCtaLabel/);
+assert.doesNotMatch(sheet, /restoreEnabled \? t\("billing\.upgrade\.ctaRestore"\)/);
+assert.match(hi, /ट्रायल-अपात्र फिक्स्चर/);
+assert.doesNotMatch(hi, /ट्रायल-अपत्र फिक्स्चर/);
 assert.doesNotMatch(lab, /useIap\b/);
 assert.doesNotMatch(lab, /grantProfessionalTrial/);
 assert.match(route, /isBillingUxPreviewEnabled/);
@@ -81,6 +88,10 @@ assert.doesNotMatch(publicPreview, /onPurchase/);
 assert.match(settings, /isBillingUxPreviewEnabled\(\)/);
 assert.match(settings, /billing-ux-preview/);
 assert.doesNotMatch(settings, /Subscription & Billing/);
+
+const header = stripComments(read("../ui/Header.tsx"));
+assert.match(header, /backAccessibilityLabel\?: string/);
+assert.match(header, /common\.goBack/);
 
 const curtain = readFileSync(join(root, "../ui/CurtainSheet.tsx"), "utf8");
 assert.match(curtain, /closeOnBackdropPress\?: boolean/);

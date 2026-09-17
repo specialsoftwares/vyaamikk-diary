@@ -26,6 +26,7 @@ import {
   defaultSelectedSku,
   planIdForSku,
   resolveUpgradeCta,
+  restoreCtaLabel,
   selectedOfferIsReady,
   shouldShowTrustedByClaim,
   upgradePeriodLabel,
@@ -154,11 +155,9 @@ export function UpgradeSheet({
   });
   const primaryEnabled = purchaseEnabled || trialEnabled;
   const restoreEnabled = canDispatchRestore({ restoreAvailable, restoreState });
-  const busy =
-    purchaseState === "loading" ||
-    purchaseState === "pending" ||
-    restoreState === "loading" ||
-    restoreState === "pending";
+  const restoreLabel = restoreCtaLabel(t, { restoreAvailable, restoreState });
+  const purchaseBusy = purchaseState === "loading" || purchaseState === "pending";
+  const restoreBusy = restoreState === "loading" || restoreState === "pending";
 
   const close = () => {
     if (curtainRef.current) {
@@ -317,7 +316,7 @@ export function UpgradeSheet({
           onPress={() => {
             const press = chooseUpgradePrimaryPress({
               dispatch: cta.dispatch,
-              enabled: primaryEnabled && !busy,
+              enabled: primaryEnabled && !purchaseBusy,
               selectedSku: resolvedSku,
             });
             if (press.type === "purchase") {
@@ -328,17 +327,17 @@ export function UpgradeSheet({
               onStartTrial();
             }
           }}
-          disabled={!primaryEnabled || busy}
+          disabled={!primaryEnabled || purchaseBusy}
           accessibilityRole="button"
-          accessibilityState={{ disabled: !primaryEnabled || busy, busy }}
+          accessibilityState={{ disabled: !primaryEnabled || purchaseBusy, busy: purchaseBusy }}
           accessibilityLabel={purchaseCtaLabel(t, cta.kind)}
           style={({ pressed }) => [
             styles.primaryCta,
-            (!primaryEnabled || busy) && styles.ctaDisabled,
-            pressed && primaryEnabled && !busy && styles.pressed,
+            (!primaryEnabled || purchaseBusy) && styles.ctaDisabled,
+            pressed && primaryEnabled && !purchaseBusy && styles.pressed,
           ]}
         >
-          {busy && (purchaseState === "loading" || purchaseState === "pending") ? (
+          {purchaseBusy ? (
             <ActivityIndicator color={CURTAIN_TEXT} />
           ) : null}
           <LocaleUiText style={styles.primaryCtaLabel}>{purchaseCtaLabel(t, cta.kind)}</LocaleUiText>
@@ -348,21 +347,18 @@ export function UpgradeSheet({
           onPress={() => {
             if (restoreEnabled) onRestore();
           }}
-          disabled={!restoreEnabled || busy}
+          disabled={!restoreEnabled || restoreBusy}
           accessibilityRole="button"
-          accessibilityState={{ disabled: !restoreEnabled || busy, busy }}
-          accessibilityLabel={
-            restoreEnabled ? t("billing.upgrade.ctaRestore") : t("billing.upgrade.restoreUnavailable")
-          }
+          accessibilityState={{ disabled: !restoreEnabled || restoreBusy, busy: restoreBusy }}
+          accessibilityLabel={restoreLabel}
           style={({ pressed }) => [
             styles.secondaryCta,
-            (!restoreEnabled || busy) && styles.ctaDisabled,
-            pressed && restoreEnabled && !busy && styles.pressed,
+            (!restoreEnabled || restoreBusy) && styles.ctaDisabled,
+            pressed && restoreEnabled && !restoreBusy && styles.pressed,
           ]}
         >
-          <LocaleUiText style={styles.secondaryCtaLabel}>
-            {restoreEnabled ? t("billing.upgrade.ctaRestore") : t("billing.upgrade.restoreUnavailable")}
-          </LocaleUiText>
+          {restoreBusy ? <ActivityIndicator color={CURTAIN_TEXT} /> : null}
+          <LocaleUiText style={styles.secondaryCtaLabel}>{restoreLabel}</LocaleUiText>
         </Pressable>
       </View>
       </View>
@@ -554,6 +550,8 @@ const styles = StyleSheet.create({
     minHeight: 44,
     alignItems: "center",
     justifyContent: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
   },
   secondaryCtaLabel: {
     ...typography.bodyStrong,

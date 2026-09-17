@@ -280,6 +280,18 @@ export function canDispatchRestore(input: {
   return true;
 }
 
+export function restoreCtaLabel(
+  t: TranslateFn,
+  input: { restoreAvailable: boolean; restoreState: UpgradeOperationState }
+): string {
+  if (input.restoreState === "loading") return t("billing.upgrade.restoreLoading");
+  if (input.restoreState === "pending") return t("billing.upgrade.restorePending");
+  if (!input.restoreAvailable || input.restoreState === "unavailable") {
+    return t("billing.upgrade.restoreUnavailable");
+  }
+  return t("billing.upgrade.ctaRestore");
+}
+
 export function selectedOfferIsReady(
   offers: readonly UpgradePlanOffer[],
   sku: string | null

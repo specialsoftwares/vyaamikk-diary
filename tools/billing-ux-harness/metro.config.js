@@ -1,18 +1,29 @@
 const path = require("path");
+const fs = require("fs");
 const { getDefaultConfig } = require("expo/metro-config");
 
 const projectRoot = __dirname;
 const workspaceRoot = path.resolve(__dirname, "../..");
-const workspaceNodeModules = path.join(workspaceRoot, "node_modules");
+const workspaceNodeModules = fs.realpathSync(path.join(workspaceRoot, "node_modules"));
 
 /** @type {import('expo/metro-config').MetroConfig} */
 const config = getDefaultConfig(projectRoot);
 
-config.watchFolders = [workspaceRoot];
+config.watchFolders = [workspaceRoot, workspaceNodeModules];
 config.resolver.nodeModulesPaths = [
   path.join(projectRoot, "node_modules"),
   workspaceNodeModules,
 ];
+config.resolver.disableHierarchicalLookup = true;
+config.resolver.extraNodeModules = new Proxy(
+  {},
+  {
+    get(_target, name) {
+      if (typeof name !== "string" || name.length === 0) return undefined;
+      return path.join(workspaceNodeModules, name);
+    },
+  }
+);
 
 config.resolver.resolveRequest = (context, moduleName, platform) => {
   if (moduleName === "expo-router") {

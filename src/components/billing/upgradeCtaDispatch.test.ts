@@ -10,6 +10,7 @@ import {
   defaultSelectedSku,
   planIdForSku,
   resolveUpgradeCta,
+  restoreCtaLabel,
   selectedOfferIsReady,
 } from "./upgradePresentation";
 import type {
@@ -246,10 +247,33 @@ assert.equal(CLIENT_MANUAL_TRIAL_START_SUPPORTED, false);
     trialActionAvailable: false,
     selectedSku: "vyd_starter_monthly",
     restoreState: "pending",
-    busy: true,
   });
-  assert.deepEqual(restoreBusy.press, { type: "none" });
+  assert.deepEqual(restoreBusy.press, { type: "purchase", sku: "vyd_starter_monthly" });
   assert.equal(restoreBusy.restoreEnabled, false);
+}
+
+{
+  const t = (key: string) => key;
+  assert.equal(
+    restoreCtaLabel(t, { restoreAvailable: true, restoreState: "loading" }),
+    "billing.upgrade.restoreLoading"
+  );
+  assert.equal(
+    restoreCtaLabel(t, { restoreAvailable: true, restoreState: "pending" }),
+    "billing.upgrade.restorePending"
+  );
+  assert.equal(
+    restoreCtaLabel(t, { restoreAvailable: true, restoreState: "unavailable" }),
+    "billing.upgrade.restoreUnavailable"
+  );
+  assert.equal(
+    restoreCtaLabel(t, { restoreAvailable: false, restoreState: "idle" }),
+    "billing.upgrade.restoreUnavailable"
+  );
+  assert.equal(
+    restoreCtaLabel(t, { restoreAvailable: true, restoreState: "idle" }),
+    "billing.upgrade.ctaRestore"
+  );
 }
 
 {
