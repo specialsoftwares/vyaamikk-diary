@@ -169,14 +169,32 @@ export async function failSaveAttempt(ctx: SaveIdempotencyContext): Promise<void
 }
 
 /** In-process mutex — survives re-renders, not hot reload. */
-const processLocks = new Set<string>();
+export type ProcessSaveLockOwner = symbol;
 
-export function acquireProcessSaveLock(lockKey: string): boolean {
-  if (processLocks.has(lockKey)) return false;
-  processLocks.add(lockKey);
-  return true;
+const processLocks = new Map<string, ProcessSaveLockOwner>();
+
+export function acquireOwnedProcessSaveLock(lockKey: string): ProcessSaveLockOwner | null {
+  if (!lockKey || processLocks.has(lockKey)) return null;
+  const owner = Symbol(lockKey);
+  processLocks.set(lockKey, owner);
+  return owner;
 }
 
-export function releaseProcessSaveLock(lockKey: string): void {
+export function acquireProcessSaveLock(lockKey: string): boolean {
+  return acquireOwnedProcessSaveLock(lockKey) != null;
+}
+
+/**
+ * Release a process reservation.
+ * When `owner` is provided, only that owner may clear the key — a stale
+ * cleanup must not drop a newer operation's reservation.
+ */
+export function releaseProcessSaveLock(lockKey: string, owner?: ProcessSaveLockOwner): void {
+  if (!lockKey) return;
+  if (owner !== undefined && processLocks.get(lockKey) !== owner) return;
   processLocks.delete(lockKey);
+}
+
+export function isProcessSaveLockHeld(lockKey: string): boolean {
+  return processLocks.has(lockKey);
 }

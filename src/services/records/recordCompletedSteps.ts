@@ -28,6 +28,27 @@ const log = createLogger("save/completedSteps");
 /** Audit clock for step coordination — not the diary content version. */
 export const COMPLETED_STEPS_AT_FIELD = "completedStepsUpdatedAt" as const;
 
+export interface CompletedStepWriteObservation {
+  userId: string;
+  recordKind: RecordSaveKind;
+  recordId: string;
+  step: SaveStepName;
+  backend: "firestore" | "local";
+}
+
+let completedStepWriteObserver: ((observation: CompletedStepWriteObservation) => void) | null =
+  null;
+
+export function setCompletedStepWriteObserverForTests(
+  observer: ((observation: CompletedStepWriteObservation) => void) | null
+): void {
+  completedStepWriteObserver = observer;
+}
+
+function noteCompletedStepWrite(observation: CompletedStepWriteObservation): void {
+  completedStepWriteObserver?.(observation);
+}
+
 type RecordCollection =
   | "entries"
   | "professionalPacks"
@@ -124,12 +145,26 @@ export async function appendRecordCompletedStep(
   try {
     if (usesFirestore()) {
       const ref = doc(firestoreDb(), "users", userId, collection, recordId);
+      noteCompletedStepWrite({
+        userId,
+        recordKind,
+        recordId,
+        step,
+        backend: "firestore",
+      });
       await updateDoc(ref, completedStepsCoordinationPatch(arrayUnion(step)));
       return fetchRecordCompletedSteps(userId, recordKind, recordId);
     }
     const key = mockStorageKey(userId, collection, recordId);
     const existing = await fetchRecordCompletedSteps(userId, recordKind, recordId);
     const next = mergeCompletedSteps(existing, step);
+    noteCompletedStepWrite({
+      userId,
+      recordKind,
+      recordId,
+      step,
+      backend: "local",
+    });
     await AsyncStorage.setItem(key, JSON.stringify(next));
     return next;
   } catch (e) {
@@ -144,6 +179,13 @@ export async function appendRecordCompletedStep(
             Array.isArray(data.completedSteps) ? (data.completedSteps as string[]) : [],
             step
           );
+          noteCompletedStepWrite({
+            userId,
+            recordKind,
+            recordId,
+            step,
+            backend: "firestore",
+          });
           await setDoc(ref, completedStepsCoordinationPatch(merged), { merge: true });
           return merged;
         }

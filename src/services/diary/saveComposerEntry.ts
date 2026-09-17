@@ -17,8 +17,10 @@ import {
   beginCoordinatedSave,
   completeCoordinatedSave,
   failCoordinatedSave,
+  retireOwnedReservation,
   runRecordStepIfNeeded,
   shouldRunStep,
+  type ProcessSaveLockOwner,
 } from "@/services/records/saveCoordinator";
 import { attachRecordIdToPersistentLock } from "@/services/records/persistentSaveLock";
 import {
@@ -112,6 +114,8 @@ export async function saveComposerEntry(
 ): Promise<SaveComposerEntryResult> {
   const session = captureAdmissionToken();
   const processLockKey = options.idempotency?.idempotencyKey ?? input.clientRecordId ?? null;
+  let processLockOwner: ProcessSaveLockOwner | null = null;
+  let lockLeaseStartedAt: number | null = null;
   let idempotency = options.idempotency;
   let completedSteps: string[] = [];
   let pdfFailed = false;
@@ -136,6 +140,8 @@ export async function saveComposerEntry(
       idempotency = begun.idempotency;
       input.clientRecordId = begun.clientRecordId;
       completedSteps = begun.decision.completedSteps;
+      processLockOwner = begun.processLockOwner;
+      lockLeaseStartedAt = begun.lockLeaseStartedAt;
 
       if (begun.decision.action === "return_done") {
         const existing = await loadComposerRecord(userId, begun.decision.recordId, session);
@@ -155,7 +161,9 @@ export async function saveComposerEntry(
           options,
           existing,
           idempotency,
-          processLockKey,
+          null,
+          null,
+          null,
           completedSteps,
           pdfFailed,
           failedSecondarySteps,
@@ -174,6 +182,8 @@ export async function saveComposerEntry(
             resumed,
             idempotency,
             processLockKey,
+            processLockOwner,
+            lockLeaseStartedAt,
             completedSteps,
             pdfFailed,
             failedSecondarySteps,
@@ -243,12 +253,16 @@ export async function saveComposerEntry(
     });
 
     if (input.clientRecordId && mayIssueRemoteWork(session, userId)) {
-      await attachRecordIdToPersistentLock(userId, input.clientRecordId, entry.id);
+      await attachRecordIdToPersistentLock(
+        userId,
+        input.clientRecordId,
+        entry.id,
+        lockLeaseStartedAt ?? undefined
+      );
     }
 
     if (
       cloudAccepted &&
-      mayIssueRemoteWork(session, userId) &&
       !hasCompletedStep(completedSteps, SAVE_STEP.BASE_RECORD_CREATED)
     ) {
       const base = await runRecordStepIfNeeded(
@@ -259,6 +273,8 @@ export async function saveComposerEntry(
           step: SAVE_STEP.BASE_RECORD_CREATED,
           completedSteps,
           clientRecordId: input.clientRecordId,
+          lockLeaseStartedAt: lockLeaseStartedAt ?? undefined,
+          session,
           alwaysRun: true,
         },
         async () => entry
@@ -269,6 +285,9 @@ export async function saveComposerEntry(
     if (!cloudAccepted && idempotency) {
       await failCoordinatedSave(idempotency, created.failureKind ?? "save_failed", {
         processLockKey: processLockKey ?? undefined,
+        processLockOwner: processLockOwner ?? undefined,
+        lockLeaseStartedAt: lockLeaseStartedAt ?? undefined,
+        session,
         clearRegistry: false,
       });
     }
@@ -280,6 +299,8 @@ export async function saveComposerEntry(
       entry,
       cloudAccepted ? idempotency : undefined,
       cloudAccepted ? processLockKey : null,
+      cloudAccepted ? processLockOwner : null,
+      cloudAccepted ? lockLeaseStartedAt : null,
       completedSteps,
       pdfFailed,
       failedSecondarySteps,
@@ -302,10 +323,13 @@ export async function saveComposerEntry(
     if (idempotency) {
       await failCoordinatedSave(idempotency, "composer_save_failed", {
         processLockKey: processLockKey ?? undefined,
+        processLockOwner: processLockOwner ?? undefined,
+        lockLeaseStartedAt: lockLeaseStartedAt ?? undefined,
+        session,
         clearRegistry: false,
       });
     } else if (processLockKey) {
-      releaseProcessSaveLock(processLockKey);
+      releaseProcessSaveLock(processLockKey, processLockOwner ?? undefined);
     }
     throw e;
   }
@@ -376,6 +400,8 @@ async function finishComposerSavePipeline(
   entry: BusinessEntry,
   idempotency: SaveIdempotencyContext | undefined,
   processLockKey: string | null,
+  processLockOwner: ProcessSaveLockOwner | null,
+  lockLeaseStartedAt: number | null,
   completedSteps: string[],
   pdfFailed: boolean,
   failedSecondarySteps: string[],
@@ -410,6 +436,8 @@ async function finishComposerSavePipeline(
             step: SAVE_STEP.PDF_GENERATED,
             completedSteps,
             clientRecordId: input.clientRecordId,
+            lockLeaseStartedAt: lockLeaseStartedAt ?? undefined,
+            session,
             alwaysRun: alreadyGenerated,
           },
           () => generateComposerPdfFile(withPdf, options)
@@ -458,7 +486,6 @@ async function finishComposerSavePipeline(
     }
   }
 
-  const canIssueRemote = mayIssueRemoteWork(session, userId);
   const insightCtx = {
     recordKind: "business_entry" as const,
     userId,
@@ -468,7 +495,7 @@ async function finishComposerSavePipeline(
 
   if (secondaryIndexHook) {
     await secondaryIndexHook();
-  } else if (canIssueRemote) {
+  } else if (mayIssueRemoteWork(session, userId)) {
     const insightsResult = await runBestEffortSecondary("insight_index", insightCtx, async () => {
       const step = await runRecordStepIfNeeded(
         {
@@ -478,6 +505,8 @@ async function finishComposerSavePipeline(
           step: SAVE_STEP.INSIGHTS_INDEXED,
           completedSteps,
           clientRecordId: input.clientRecordId,
+          lockLeaseStartedAt: lockLeaseStartedAt ?? undefined,
+          session,
         },
         async () => {
           const { syncInsightsFromBusinessEntry } = await import("@/services/insights/insightSync");
@@ -503,12 +532,25 @@ async function finishComposerSavePipeline(
     if (!searchResult.ok) failedSecondarySteps.push("search_index");
   }
 
-  if (cloudAccepted && canIssueRemote && idempotency) {
-    await completeCoordinatedSave(idempotency, withPdf.id, {
-      processLockKey: processLockKey ?? undefined,
+  if (cloudAccepted && mayIssueRemoteWork(session, userId)) {
+    if (idempotency) {
+      await completeCoordinatedSave(idempotency, withPdf.id, {
+        processLockKey: processLockKey ?? undefined,
+        processLockOwner: processLockOwner ?? undefined,
+        lockLeaseStartedAt: lockLeaseStartedAt ?? undefined,
+        session,
+      });
+    } else if (processLockKey) {
+      releaseProcessSaveLock(processLockKey, processLockOwner ?? undefined);
+    }
+  } else if (cloudAccepted && processLockKey) {
+    await retireOwnedReservation({
+      userId,
+      clientRecordId: input.clientRecordId,
+      processLockKey,
+      processLockOwner: processLockOwner ?? undefined,
+      lockLeaseStartedAt: lockLeaseStartedAt ?? undefined,
     });
-  } else if (cloudAccepted && canIssueRemote && processLockKey) {
-    releaseProcessSaveLock(processLockKey);
   }
 
   logLifecyclePhase(cloudAccepted ? "record_save_complete" : "record_save_local_only", {

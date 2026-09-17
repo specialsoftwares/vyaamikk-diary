@@ -6,7 +6,8 @@ export type BillableRecordCollection =
   | "purchaseOrders"
   | "customerCreditRecords"
   | "professionalPacks"
-  | "entries";
+  | "entries"
+  | "letterheadDocs";
 
 export interface UsageCurrentSnapshot {
   monthKey: string;

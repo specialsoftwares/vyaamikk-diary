@@ -1,9 +1,11 @@
 /**
  * VYD-36 — Option-C production write-set proofs for
- * purchaseOrders, customerCreditRecords, professionalPacks, and entries.
+ * purchaseOrders, customerCreditRecords, professionalPacks, entries,
+ * and letterheadDocs.
  *
  * Runs in the same emulator session as firestore.rules.billing.test.ts.
- * letterheadDocs remain ungated this round.
+ * letterheadDocs CREATE is Option-C linked; the diary mirror remains a
+ * separately billable entries CREATE (mirror-policy unresolved).
  */
 
 import { readFileSync } from "node:fs";
@@ -37,6 +39,8 @@ import {
 } from "@/services/customerCredit/recordMutations";
 import { createProfessionalPackAtomic } from "@/services/professionalPack/atomicCreate";
 import { createEntryAtomic } from "@/services/diary/atomicCreate";
+import { createLetterheadDocumentAtomic } from "@/services/letterhead/atomicCreate";
+import type { LetterheadDocumentCreateInput } from "@/services/letterhead/types";
 import { classifyAtomicCreateError } from "@/billing/optionC/classifyCreateError";
 import {
   runAtomicBillableCreate,
@@ -191,6 +195,48 @@ function entryInput(clientRecordId: string, title = "Diary production create") {
       quantityOutput: null,
       responsiblePerson: null,
       followUpRequired: false,
+    },
+  };
+}
+
+function lhInput(clientRecordId: string, title = "Letterhead production create"): LetterheadDocumentCreateInput {
+  return {
+    clientRecordId,
+    ueid: "VYD-2026-BILL01",
+    title,
+    input: {
+      title,
+      date: Date.now(),
+      subject: "Subject",
+      body: "Body of the letter.",
+      closing: "Yours faithfully",
+      name: "Owner",
+      designation: "Proprietor",
+      place: "Delhi",
+    },
+    templateRefUpdatedAt: null,
+    pdfUri: null,
+    saved: true,
+  };
+}
+
+function letterheadMirrorInput(letterheadId: string) {
+  return {
+    clientRecordId: `${letterheadId}_matter`,
+    ueid: "VYD-2026-BILL01",
+    entryType: "letterhead_matter" as const,
+    title: "Letterhead production create",
+    entryDate: Date.now(),
+    source: "letterhead" as const,
+    payload: {
+      letterheadDocumentId: letterheadId,
+      subject: "Subject",
+      reference: null,
+      body: "Body of the letter.",
+      closing: "Yours faithfully",
+      signerName: "Owner",
+      designation: "Proprietor",
+      place: "Delhi",
     },
   };
 }
@@ -988,7 +1034,7 @@ async function main() {
     );
     check("L cross-UID PO create denied", true);
 
-    // Entries are Option-C linked this round; letterheadDocs stay ungated.
+    // Entries and letterheadDocs are Option-C linked; template config stays ungated.
     await seedUser("g-unlinked");
     await seedStatus("g-unlinked", { quotaEnforcementEnabled: true, plan: "free", entitlementActive: true });
     await assertFails(
@@ -999,13 +1045,21 @@ async function main() {
       })
     );
     check("P entries CREATE without usage denied while enforcement on", true);
-    await assertSucceeds(
+    await assertFails(
       setDoc(doc(authedDb("g-unlinked"), "users", "g-unlinked", "letterheadDocs", "lh1"), {
+        userId: "g-unlinked",
+        title: "T",
+        createdAt: Date.now(),
+      })
+    );
+    check("letterheadDocs CREATE without usage denied while enforcement on", true);
+    await assertSucceeds(
+      setDoc(doc(authedDb("g-unlinked"), "users", "g-unlinked", "config", "letterhead"), {
         userId: "g-unlinked",
         createdAt: Date.now(),
       })
     );
-    check("letterheadDocs CREATE still ungated this round", true);
+    check("letterhead template config CREATE remains outside the quota transaction", true);
 
     // B CC + packs flag on
     await seedUser("g-cc");
@@ -1342,6 +1396,262 @@ async function main() {
     const enXfPo = await getDoc(doc(authedDb("g-en-xf"), "users", "g-en-xf", "purchaseOrders", "po_xf"));
     check("K diary/PO exactly one record", Number(enXfEntry.exists()) + Number(enXfPo.exists()) === 1);
 
+    // ---- LetterheadDocs atomic CREATE ---------------------------------
+    await seedUser("g-lh-off");
+    await seedStatus("g-lh-off", { quotaEnforcementEnabled: false });
+    const lhOff = await createLetterheadDocumentAtomic(
+      authedDb("g-lh-off"),
+      "g-lh-off",
+      lhInput("lh_off_1")
+    );
+    check("LH flag-off create without usage", lhOff.id === "lh_off_1");
+    check("LH flag-off did not write usage", (await usageCount("g-lh-off")) == null);
+
+    await seedUser("g-lh");
+    await seedStatus("g-lh", { quotaEnforcementEnabled: true, plan: "free", entitlementActive: true });
+    const lh1 = await createLetterheadDocumentAtomic(authedDb("g-lh"), "g-lh", lhInput("lh_on_1"));
+    check("LH online create id agrees", lh1.id === "lh_on_1");
+    check("LH one usage transition", (await usageCount("g-lh")) === 1);
+    const lhSnap = await getDoc(doc(authedDb("g-lh"), "users", "g-lh", "letterheadDocs", "lh_on_1"));
+    check("LH stored id agrees", lhSnap.exists() && (lhSnap.data() as { id?: string }).id === "lh_on_1");
+
+    const lhReplay = await createLetterheadDocumentAtomic(
+      authedDb("g-lh"),
+      "g-lh",
+      lhInput("lh_on_1", "Older queued title")
+    );
+    check("LH same-id replay returns existing", lhReplay.id === "lh_on_1" && lhReplay.title === lh1.title);
+    check("LH replay does not consume twice", (await usageCount("g-lh")) === 1);
+
+    const lhSameBarrier = new FirstPassBarrier(2);
+    const lhSameSeenA: string[] = [];
+    const lhSameSeenB: string[] = [];
+    const lhSameRace = await Promise.allSettled([
+      createLetterheadDocumentAtomic(
+        authedDb("g-lh"),
+        "g-lh",
+        lhInput("lh_same"),
+        lhSameBarrier.hook(lhSameSeenA),
+        Date.now(),
+        "lh_same"
+      ),
+      createLetterheadDocumentAtomic(
+        authedDb("g-lh"),
+        "g-lh",
+        lhInput("lh_same"),
+        lhSameBarrier.hook(lhSameSeenB),
+        Date.now(),
+        "lh_same"
+      ),
+    ]);
+    const lhSameInspect = inspectSettled("LH same-id", lhSameRace);
+    check("LH same-id overlap asserted", lhSameBarrier.overlap || lhSameInspect.fulfilled === 2);
+    check("LH same-id both fulfilled", lhSameInspect.fulfilled === 2, `fulfilled=${lhSameInspect.fulfilled}`);
+    check("LH same-id one extra quota increment", (await usageCount("g-lh")) === 2);
+    check(
+      "LH same-id captured id stable",
+      [...lhSameSeenA, ...lhSameSeenB].every((id) => id === "lh_same")
+    );
+
+    await seedUsage("g-lh", usageDoc(monthNow, 24, "lh_on_1", "letterheadDocs"));
+    const lhBarrier = new FirstPassBarrier(2);
+    const lhRace = await Promise.allSettled([
+      createLetterheadDocumentAtomic(
+        authedDb("g-lh"),
+        "g-lh",
+        lhInput("lh_slot_a"),
+        lhBarrier.hook(),
+        Date.now(),
+        "lh_slot_a"
+      ),
+      createLetterheadDocumentAtomic(
+        authedDb("g-lh"),
+        "g-lh",
+        lhInput("lh_slot_b"),
+        lhBarrier.hook(),
+        Date.now(),
+        "lh_slot_b"
+      ),
+    ]);
+    const lhInspect = inspectSettled("LH final-slot", lhRace);
+    check("LH final-slot overlap asserted", lhBarrier.overlap || lhInspect.fulfilled === 1);
+    check("LH final-slot one fulfilled", lhInspect.fulfilled === 1);
+    check(
+      "LH final-slot rejection inspected",
+      lhInspect.rejectedKinds.length === 1 && lhInspect.rejectedKinds[0] === "quota_exhausted",
+      lhInspect.rejectedKinds.join(",")
+    );
+    check("LH usage at cap", (await usageCount("g-lh")) === 25);
+    const lhA = await getDoc(doc(authedDb("g-lh"), "users", "g-lh", "letterheadDocs", "lh_slot_a"));
+    const lhB = await getDoc(doc(authedDb("g-lh"), "users", "g-lh", "letterheadDocs", "lh_slot_b"));
+    check("LH exactly one new record at final slot", Number(lhA.exists()) + Number(lhB.exists()) === 1);
+
+    await seedUser("g-lh-xf");
+    await seedStatus("g-lh-xf", { quotaEnforcementEnabled: true, plan: "free", entitlementActive: true });
+    await seedUsage("g-lh-xf", usageDoc(monthNow, 24, "seed", "purchaseOrders"));
+    const lhXfBarrier = new FirstPassBarrier(2);
+    const lhXfRace = await Promise.allSettled([
+      createLetterheadDocumentAtomic(
+        authedDb("g-lh-xf"),
+        "g-lh-xf",
+        lhInput("lh_xf"),
+        lhXfBarrier.hook(),
+        Date.now(),
+        "lh_xf"
+      ),
+      createPurchaseOrderAtomic(
+        authedDb("g-lh-xf"),
+        "g-lh-xf",
+        poInput("po_lh_xf"),
+        parsePo,
+        lhXfBarrier.hook()
+      ),
+    ]);
+    const lhXfInspect = inspectSettled("LH vs PO", lhXfRace);
+    check("LH/PO overlap asserted", lhXfBarrier.overlap || lhXfInspect.fulfilled === 1);
+    check("LH/PO one fulfilled", lhXfInspect.fulfilled === 1);
+    lhXfInspect.rejectedKinds.forEach((kind, i) => {
+      check(`LH/PO rejection[${i}] is quota_exhausted`, kind === "quota_exhausted", kind);
+    });
+    check("LH/PO usage=25", (await usageCount("g-lh-xf")) === 25);
+
+    await seedUser("g-lh-xuid");
+    await seedStatus("g-lh-xuid", { quotaEnforcementEnabled: true, plan: "free", entitlementActive: true });
+    let lhXuidKind: string | null = null;
+    try {
+      await createLetterheadDocumentAtomic(authedDb("g-lh"), "g-lh-xuid", lhInput("lh_xuid"));
+    } catch (e) {
+      lhXuidKind = classifyAtomicCreateError(e);
+    }
+    check("LH cross-UID create denied", lhXuidKind === "permission_denied");
+
+    await seedUser("g-lh-month");
+    await seedStatus("g-lh-month", { quotaEnforcementEnabled: true, plan: "free", entitlementActive: true });
+    let lhMonthKind: string | null = null;
+    try {
+      await runAtomicBillableCreate({
+        db: authedDb("g-lh-month"),
+        userId: "g-lh-month",
+        collection: "letterheadDocs",
+        recordId: "lh_wrong_month",
+        nowMs: Date.now(),
+        monthKey: monthPrev,
+        parseExisting: (id, data) => data as never,
+        buildNew: () => {
+          const record = { id: "lh_wrong_month", userId: "g-lh-month" };
+          return { record, payload: record };
+        },
+      });
+    } catch (e) {
+      lhMonthKind = classifyAtomicCreateError(e);
+    }
+    check("LH client previous-month key is permission_denied", lhMonthKind === "permission_denied");
+
+    await seedUser("g-lh-malformed");
+    await seedStatus("g-lh-malformed", {
+      quotaEnforcementEnabled: true,
+      plan: "free",
+      entitlementActive: true,
+    });
+    await seedUsage("g-lh-malformed", {
+      monthKey: "not-a-month",
+      recordsThisMonth: 3,
+      lastRecordCollection: "letterheadDocs",
+      lastRecordId: "x",
+      updatedAt: Date.now(),
+    });
+    let lhMalformed: string | null = null;
+    try {
+      await createLetterheadDocumentAtomic(
+        authedDb("g-lh-malformed"),
+        "g-lh-malformed",
+        lhInput("lh_bad_usage")
+      );
+    } catch (e) {
+      lhMalformed = e instanceof AppError ? e.code : classifyAtomicCreateError(e);
+    }
+    check("LH malformed usage fails closed", lhMalformed === "quota_state_invalid");
+
+    await seedUser("g-lh-roll");
+    await seedStatus("g-lh-roll", { quotaEnforcementEnabled: true, plan: "free", entitlementActive: true });
+    await seedUsage("g-lh-roll", usageDoc(monthPrev, 25, "old", "letterheadDocs"));
+    const lhRolled = await createLetterheadDocumentAtomic(
+      authedDb("g-lh-roll"),
+      "g-lh-roll",
+      lhInput("lh_rollover")
+    );
+    check("LH new-month rollover create succeeds", lhRolled.id === "lh_rollover");
+    check("LH new-month usage resets to 1", (await usageCount("g-lh-roll")) === 1);
+
+    await seedUser("g-lh-edit");
+    await seedStatus("g-lh-edit", { quotaEnforcementEnabled: true, plan: "free", entitlementActive: true });
+    const lhEdit = await createLetterheadDocumentAtomic(
+      authedDb("g-lh-edit"),
+      "g-lh-edit",
+      lhInput("lh_edit")
+    );
+    check("LH edit baseline usage 1", (await usageCount("g-lh-edit")) === 1);
+    await assertSucceeds(
+      updateDoc(doc(authedDb("g-lh-edit"), "users", "g-lh-edit", "letterheadDocs", lhEdit.id), {
+        userId: "g-lh-edit",
+        title: "Edited",
+        updatedAt: Date.now(),
+      })
+    );
+    check("LH edit does not consume extra quota", (await usageCount("g-lh-edit")) === 1);
+    const lhEditReplay = await createLetterheadDocumentAtomic(
+      authedDb("g-lh-edit"),
+      "g-lh-edit",
+      lhInput("lh_edit")
+    );
+    check("LH retry/replay after edit still one slot", lhEditReplay.id === "lh_edit" && (await usageCount("g-lh-edit")) === 1);
+
+    await seedUser("g-lh-flow");
+    await seedStatus("g-lh-flow", { quotaEnforcementEnabled: true, plan: "free", entitlementActive: true });
+    await seedUsage("g-lh-flow", usageDoc(monthNow, 23, "seed", "entries"));
+    const flowParent = await createLetterheadDocumentAtomic(
+      authedDb("g-lh-flow"),
+      "g-lh-flow",
+      lhInput("lh_flow")
+    );
+    const flowMirror = await createEntryAtomic(
+      authedDb("g-lh-flow"),
+      "g-lh-flow",
+      letterheadMirrorInput(flowParent.id)
+    );
+    check("LH full-flow two separately billable slots", (await usageCount("g-lh-flow")) === 25);
+    check("LH full-flow parent exists", flowParent.id === "lh_flow");
+    check("LH full-flow mirror exists", flowMirror.id === "lh_flow_matter");
+
+    await seedUser("g-lh-flow-cap");
+    await seedStatus("g-lh-flow-cap", { quotaEnforcementEnabled: true, plan: "free", entitlementActive: true });
+    await seedUsage("g-lh-flow-cap", usageDoc(monthNow, 24, "seed", "entries"));
+    const capParent = await createLetterheadDocumentAtomic(
+      authedDb("g-lh-flow-cap"),
+      "g-lh-flow-cap",
+      lhInput("lh_flow_cap")
+    );
+    check("LH full-flow parent takes final slot", (await usageCount("g-lh-flow-cap")) === 25);
+    let capMirrorKind: string | null = null;
+    try {
+      await createEntryAtomic(
+        authedDb("g-lh-flow-cap"),
+        "g-lh-flow-cap",
+        letterheadMirrorInput(capParent.id)
+      );
+    } catch (e) {
+      capMirrorKind = classifyAtomicCreateError(e);
+    }
+    check("LH full-flow diary mirror at cap is quota_exhausted", capMirrorKind === "quota_exhausted");
+    check(
+      "LH full-flow parent preserved after mirror failure",
+      (await getDoc(doc(authedDb("g-lh-flow-cap"), "users", "g-lh-flow-cap", "letterheadDocs", "lh_flow_cap"))).exists()
+    );
+    check(
+      "LH full-flow mirror absent after rejection",
+      !(await getDoc(doc(authedDb("g-lh-flow-cap"), "users", "g-lh-flow-cap", "entries", "lh_flow_cap_matter"))).exists()
+    );
+
     // Access budget (N)
     // Manual estimate (not a measured get/exists/getAfter trace):
     //   Create txn per evaluation: isActiveUser get(users/uid);
@@ -1368,6 +1678,10 @@ async function main() {
     check(
       "N production-shaped diary atomic create succeeded (Rules access budget held)",
       en1.id === "en_on_1"
+    );
+    check(
+      "N production-shaped letterhead atomic create succeeded (Rules access budget held)",
+      lh1.id === "lh_on_1"
     );
 
     // Account blocked

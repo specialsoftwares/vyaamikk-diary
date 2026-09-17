@@ -71,6 +71,7 @@
     "test:deletion": "npx --yes tsx src/services/records/permanentDeletion.test.ts",
     "test:smoke-refinement": "npx --yes tsx scripts/smoke-refinement-pass.ts",
     "test:letterhead-pdf": "npx --yes tsx src/services/pdf/letterheadPdfService.test.ts",
+    "test:letterhead-quota-lifecycle": "npx --yes tsx src/services/letterhead/letterheadMirrorPolicy.test.ts && npx --yes tsx src/services/letterhead/saveWithPdf.lifecycle.test.ts",
     "test:pdf-redesign": "npx --yes tsx src/services/pdf/pdfRedesign.test.ts",
     "test:identity-email": "npx --yes tsx src/services/auth/emailLink.test.ts",
     "test:identity-mobile": "npx --yes tsx src/services/auth/identity.mobile.test.ts",

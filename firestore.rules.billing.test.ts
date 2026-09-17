@@ -122,6 +122,22 @@ function entryWithUsageBatch(
   return batch;
 }
 
+function letterheadWithUsageBatch(
+  db: Firestore,
+  uid: string,
+  docId: string,
+  usage: Record<string, unknown>
+) {
+  const batch = writeBatch(db);
+  batch.set(doc(db, "users", uid, "letterheadDocs", docId), {
+    userId: uid,
+    title: "Letter",
+    createdAt: Date.now(),
+  });
+  batch.set(doc(db, "users", uid, "subscription", "usageCurrent"), usage);
+  return batch;
+}
+
 function usageDoc(
   monthKey: string,
   recordsThisMonth: number,
@@ -547,25 +563,25 @@ async function main() {
     );
     check("case 6: replayed create cannot consume again", true);
 
-    // Linkage scope: only Phase-A-linked collections may consume quota.
+    // Linkage scope: template config is not a billable collection.
     await assertFails(
       (() => {
         const db = qf();
         const b = writeBatch(db);
-        b.set(doc(db, "users", "quota-free", "letterheadDocs", "lh-1"), {
+        b.set(doc(db, "users", "quota-free", "config", "letterhead"), {
           userId: "quota-free",
           createdAt: Date.now(),
         });
         b.set(
           doc(db, "users", "quota-free", "subscription", "usageCurrent"),
-          usageDoc(monthNow, 3, "lh-1", "letterheadDocs")
+          usageDoc(monthNow, 3, "letterhead", "config")
         );
         return b.commit();
       })()
     );
     check("linkage allowlist: non-linked collection cannot consume quota", true);
 
-    // Entries are Option-C linked this round; letterheadDocs stay ungated.
+    // Entries and letterheadDocs are Option-C linked; template config stays ungated.
     await assertFails(
       setDoc(doc(qf(), "users", "quota-free", "entries", "en-bare"), {
         userId: "quota-free",
@@ -612,6 +628,82 @@ async function main() {
       ).commit()
     );
     check("P entry replay cannot consume again", true);
+
+    await seedUser("quota-lh");
+    await seedSubscriptionStatus("quota-lh", {
+      plan: "free",
+      entitlementActive: true,
+      quotaEnforcementEnabled: true,
+    });
+    const qlh = () => authedDb("quota-lh");
+    await assertFails(
+      setDoc(doc(qlh(), "users", "quota-lh", "letterheadDocs", "lh-bare"), {
+        userId: "quota-lh",
+        title: "Bare letter",
+        createdAt: Date.now(),
+      })
+    );
+    check("LH letterhead create without usage denied while enforcement on", true);
+
+    await assertSucceeds(
+      letterheadWithUsageBatch(
+        qlh(),
+        "quota-lh",
+        "lh-1",
+        usageDoc(monthNow, 1, "lh-1", "letterheadDocs")
+      ).commit()
+    );
+    check("LH letterhead create + genuine usage transition allowed", true);
+
+    await assertFails(
+      letterheadWithUsageBatch(
+        qlh(),
+        "quota-lh",
+        "lh-2",
+        usageDoc(monthNow, 2, "lh-1", "letterheadDocs")
+      ).commit()
+    );
+    check("LH two letterheads cannot share one increment", true);
+
+    await assertFails(
+      letterheadWithUsageBatch(
+        qlh(),
+        "quota-lh",
+        "lh-ptr",
+        usageDoc(monthNow, 2, "lh-ptr", "entries")
+      ).commit()
+    );
+    check("LH usage pointer collection must match letterheadDocs", true);
+
+    await assertSucceeds(
+      updateDoc(doc(qlh(), "users", "quota-lh", "letterheadDocs", "lh-1"), {
+        userId: "quota-lh",
+        title: "Edited letter",
+        updatedAt: Date.now(),
+      })
+    );
+    check("LH letterhead edit does not consume quota", true);
+
+    await assertFails(
+      letterheadWithUsageBatch(
+        qlh(),
+        "quota-lh",
+        "lh-1",
+        usageDoc(monthNow, 2, "lh-1", "letterheadDocs")
+      ).commit()
+    );
+    check("LH letterhead replay cannot consume again", true);
+
+    await seedUser("quota-lh-off");
+    await seedSubscriptionStatus("quota-lh-off", { quotaEnforcementEnabled: false });
+    await assertSucceeds(
+      setDoc(doc(authedDb("quota-lh-off"), "users", "quota-lh-off", "letterheadDocs", "lh-off"), {
+        userId: "quota-lh-off",
+        title: "Off",
+        createdAt: Date.now(),
+      })
+    );
+    check("LH quotaEnforcementEnabled=false → plain letterhead create allowed", true);
 
     // Case 7 — concurrent creates racing for the final slot (24/25).
     await seedUser("quota-race");

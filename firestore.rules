@@ -268,14 +268,15 @@ service cloud.firestore {
     }
 
     // Billable record collections whose CREATE consumes quota.
-    // letterheadDocs stay ungated until their separate increment.
-    // Ordinary entries (including the automatic letterhead diary mirror)
-    // follow this collection-level model — no client-controlled exemption.
+    // letterheadDocs and entries are separately billable. Ordinary entries
+    // (including the automatic letterhead diary mirror) follow this
+    // collection-level model — no client-controlled exemption.
     function quotaLinkedCollection(coll) {
       return coll == 'purchaseOrders'
              || coll == 'customerCreditRecords'
              || coll == 'professionalPacks'
-             || coll == 'entries';
+             || coll == 'entries'
+             || coll == 'letterheadDocs';
     }
 
     function istMonthKeyShape(key) {
@@ -388,9 +389,18 @@ service cloud.firestore {
       }
 
       // ---- Letterhead documents -----------------------------------------
+      // Template config / Storage uploads are not part of this create.
       match /letterheadDocs/{docId} {
         allow read: if isOwner(uid);
-        allow create, update, delete: if isActiveUser(uid);
+        allow create: if isActiveUser(uid)
+                      && request.resource.data.userId == uid
+                      && (
+                        !quotaEnforcementOn(uid)
+                        || usageConsumedForRecord(uid, 'letterheadDocs', docId)
+                      );
+        allow update: if isActiveUser(uid)
+                      && request.resource.data.userId == uid;
+        allow delete: if isActiveUser(uid);
       }
 
       // ---- Letterhead template config -----------------------------------

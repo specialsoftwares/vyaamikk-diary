@@ -1,6 +1,6 @@
 /**
- * Round 9 — composer orchestration: completed-step CAS, PDF resume, session
- * ownership, and truthful write presentation.
+ * Round 10 — composer orchestration: retirement must not append completed
+ * steps or hold the process reservation; same-ID recovery remains possible.
  * Boundary: mocked DiaryRepository + MemorySqlite + injected PDF/index hooks.
  * Not device, expo-sqlite, native PDF, or Firestore emulator quota.
  */
@@ -31,9 +31,24 @@ import { sessionSyncGate } from "@/sync/sessionSyncGate";
 import { syncSessionOwnership } from "@/sync/syncSessionOwnership";
 import { resetDiaryRecordWritesForTests } from "@/sync/diaryRecordWrites";
 import { applyAuthSyncIdentityTransition } from "@/sync/syncLockIdentityPolicy";
-import { SAVE_STEP, hasCompletedStep } from "@/services/records/saveLockTypes";
-import { fetchRecordCompletedSteps } from "@/services/records/recordCompletedSteps";
-import { createSaveIdempotencyContext } from "@/services/records/saveIdempotency";
+import { SAVE_STEP, SaveStillInProgressError, hasCompletedStep } from "@/services/records/saveLockTypes";
+import {
+  fetchRecordCompletedSteps,
+  setCompletedStepWriteObserverForTests,
+  type CompletedStepWriteObservation,
+} from "@/services/records/recordCompletedSteps";
+import {
+  acquireOwnedProcessSaveLock,
+  createSaveIdempotencyContext,
+  isProcessSaveLockHeld,
+  releaseProcessSaveLock,
+} from "@/services/records/saveIdempotency";
+import {
+  markPersistentLockDone,
+  markPersistentLockFailed,
+  markPersistentLockInFlight,
+  readPersistentSaveLock,
+} from "@/services/records/persistentSaveLock";
 
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -196,6 +211,21 @@ const composerUser = {
   status: "active" as const,
 } satisfies UserProfile;
 
+function processLockKeyFor(clientRecordId: string): string {
+  return createSaveIdempotencyContext({
+    userId: "u1",
+    recordKind: "business_entry",
+    clientRecordId,
+  }).idempotencyKey;
+}
+
+function pdfGeneratedWrites(
+  writes: CompletedStepWriteObservation[],
+  recordId: string
+): CompletedStepWriteObservation[] {
+  return writes.filter((w) => w.recordId === recordId && w.step === SAVE_STEP.PDF_GENERATED);
+}
+
 function composerOptions(clientRecordId: string) {
   return {
     user: composerUser,
@@ -263,7 +293,11 @@ async function main() {
     prevUid: null,
     nextUid: "u1",
   });
-  setComposerSecondaryIndexHookForTests(async () => undefined);
+    setComposerSecondaryIndexHookForTests(async () => undefined);
+  const stepWrites: CompletedStepWriteObservation[] = [];
+  setCompletedStepWriteObserverForTests((observation) => {
+    stepWrites.push(observation);
+  });
   setReminderNotificationsForTests({
     scheduleOneShot: async () => "nid-r9",
     cancel: async () => undefined,
@@ -324,6 +358,7 @@ async function main() {
     assert.equal(hasCompletedStep(stepsA, SAVE_STEP.PDF_URI_SAVED), true);
     assert.equal(aStore.get("en_r9_a")?.pdfUri, "file:///tmp/r9-a.pdf");
     assert.equal(readLocalEntryRecordSync("u1", "en_r9_a")?.entry.pdfUri, "file:///tmp/r9-a.pdf");
+    assert.equal(isProcessSaveLockHeld(processLockKeyFor("en_r9_a")), false);
 
     // 2. Genuine intervening remote content edit — CAS must still conflict.
     const bStore = new Map<string, BusinessEntry>();
@@ -471,6 +506,7 @@ async function main() {
     const eStore = new Map<string, BusinessEntry>();
     const eClock = { n: 5000 };
     let ePdfUpdates = 0;
+    const eWritesBeforePdf: CompletedStepWriteObservation[] = [];
     setDiaryRepositoryForTests(
       mockRepo(eStore, eClock, {
         create: async (input) => {
@@ -497,6 +533,7 @@ async function main() {
     });
     const saveE = saveComposerEntry("u1", noteInput("en_r9_e"), composerOptions("en_r9_e"));
     await eStarted.promise;
+    eWritesBeforePdf.push(...stepWrites.filter((w) => w.recordId === "en_r9_e"));
     applyAuthSyncIdentityTransition({
       prevStatus: "signed_in",
       nextStatus: "signed_in",
@@ -510,6 +547,21 @@ async function main() {
     assert.equal((resultE.failedSecondarySteps ?? []).includes("pdf_uri_saved"), true);
     assert.equal(eStore.get("en_r9_e")?.pdfUri ?? null, null);
     assert.equal(readLocalEntryRecordSync("u1", "en_r9_e")?.entry.pdfUri, "file:///tmp/r9-e.pdf");
+    assert.equal(
+      pdfGeneratedWrites(stepWrites, "en_r9_e").length,
+      0,
+      "retired A→B must not append PDF_GENERATED"
+    );
+    assert.equal(
+      hasCompletedStep(await fetchRecordCompletedSteps("u1", "business_entry", "en_r9_e"), SAVE_STEP.PDF_GENERATED),
+      false
+    );
+    assert.equal(isProcessSaveLockHeld(processLockKeyFor("en_r9_e")), false, "A's reservation must be released");
+    assert.equal(
+      eWritesBeforePdf.some((w) => w.step === SAVE_STEP.BASE_RECORD_CREATED),
+      true,
+      "base step may be acknowledged before retirement"
+    );
 
     applyAuthSyncIdentityTransition({
       prevStatus: "signed_in",
@@ -568,6 +620,13 @@ async function main() {
       nextUid: "u1",
     });
     assert.notEqual(syncSessionOwnership.current()?.generation, admittedGen);
+    let inFlightBlocked = false;
+    try {
+      await saveComposerEntry("u1", noteInput("en_r9_f"), composerOptions("en_r9_f"));
+    } catch (e) {
+      inFlightBlocked = e instanceof SaveStillInProgressError;
+    }
+    assert.equal(inFlightBlocked, true, "same-ID retry must wait until the retired reservation is released");
     fHold.resolve({ uri: "file:///tmp/r9-f.pdf", fileName: "f.pdf" });
     const resultF = await saveF;
     assert.equal(resultF.cloudAccepted, true, "accepted CREATE is preserved");
@@ -575,6 +634,72 @@ async function main() {
     assert.equal((resultF.failedSecondarySteps ?? []).includes("pdf_uri_saved"), true);
     assert.equal(fStore.get("en_r9_f")?.pdfUri ?? null, null);
     assert.equal(readLocalEntryRecordSync("u1", "en_r9_f")?.entry.pdfUri, "file:///tmp/r9-f.pdf");
+    assert.equal(
+      pdfGeneratedWrites(stepWrites, "en_r9_f").length,
+      0,
+      "retired A→logout→A must not append PDF_GENERATED"
+    );
+    assert.equal(
+      hasCompletedStep(await fetchRecordCompletedSteps("u1", "business_entry", "en_r9_f"), SAVE_STEP.PDF_GENERATED),
+      false
+    );
+    assert.equal(isProcessSaveLockHeld(processLockKeyFor("en_r9_f")), false);
+
+    setPdfGenerateHookForTests(async () => {
+      return { uri: "file:///tmp/r9-f-retry.pdf", fileName: "f.pdf" };
+    });
+    const retryF = await saveComposerEntry("u1", noteInput("en_r9_f"), composerOptions("en_r9_f"));
+    assert.equal(retryF.cloudAccepted, true);
+    assert.equal((retryF.failedSecondarySteps ?? []).includes("pdf_uri_saved"), false);
+    assert.equal(fPdfUpdates, 1, "explicit same-ID recovery attaches PDF under the new session");
+    assert.equal(fStore.get("en_r9_f")?.pdfUri, "file:///tmp/r9-f-retry.pdf");
+    assert.equal(
+      hasCompletedStep(await fetchRecordCompletedSteps("u1", "business_entry", "en_r9_f"), SAVE_STEP.PDF_URI_SAVED),
+      true
+    );
+    assert.equal(isProcessSaveLockHeld(processLockKeyFor("en_r9_f")), false);
+
+    // 5c. Stale cleanup cannot release or complete a newer owner's reservation.
+    const staleKey = "stale-owner-lock";
+    const ownerOld = acquireOwnedProcessSaveLock(staleKey);
+    assert.ok(ownerOld);
+    assert.equal(acquireOwnedProcessSaveLock(staleKey), null);
+    releaseProcessSaveLock(staleKey, Symbol("other-owner"));
+    assert.equal(isProcessSaveLockHeld(staleKey), true, "wrong owner must not clear the reservation");
+    const ownerNewer = acquireOwnedProcessSaveLock(staleKey);
+    assert.equal(ownerNewer, null, "newer acquire must fail while old owner still holds");
+    releaseProcessSaveLock(staleKey, ownerOld);
+    const ownerNew = acquireOwnedProcessSaveLock(staleKey);
+    assert.ok(ownerNew);
+    releaseProcessSaveLock(staleKey, ownerOld);
+    assert.equal(isProcessSaveLockHeld(staleKey), true, "retired owner must not release newer reservation");
+    releaseProcessSaveLock(staleKey, ownerNew);
+    assert.equal(isProcessSaveLockHeld(staleKey), false);
+
+    const lease = await markPersistentLockInFlight({
+      userId: "u1",
+      clientRecordId: "en_r9_lease",
+      idempotencyKey: "lease-old",
+      recordKind: "business_entry",
+      recordId: "en_r9_lease",
+    });
+    const newerLease = await markPersistentLockInFlight({
+      userId: "u1",
+      clientRecordId: "en_r9_lease",
+      idempotencyKey: "lease-new",
+      recordKind: "business_entry",
+      recordId: "en_r9_lease",
+    });
+    assert.notEqual(newerLease.startedAt, lease.startedAt);
+    await markPersistentLockFailed("u1", "en_r9_lease", "session_retired", lease.startedAt);
+    const afterStaleFail = await readPersistentSaveLock("u1", "en_r9_lease");
+    assert.equal(afterStaleFail?.status, "in_flight");
+    assert.equal(afterStaleFail?.startedAt, newerLease.startedAt);
+    await markPersistentLockDone("u1", "en_r9_lease", "en_r9_lease", lease.startedAt);
+    const afterStaleDone = await readPersistentSaveLock("u1", "en_r9_lease");
+    assert.equal(afterStaleDone?.status, "in_flight", "stale complete must not finish newer work");
+    await markPersistentLockFailed("u1", "en_r9_lease", "newer_failed", newerLease.startedAt);
+    assert.equal((await readPersistentSaveLock("u1", "en_r9_lease"))?.status, "failed");
 
     // 6. Rejected UPDATE — presentation follows LocalFirstWriteResult, not existence.
     const gStore = new Map<string, BusinessEntry>();
@@ -615,6 +740,7 @@ async function main() {
     assert.notEqual(presented.cloudAccepted, inferredFromExistence);
     assert.equal(expectedUpdatedAtForRecord("u1", "en_r9_g") != null, true);
   } finally {
+    setCompletedStepWriteObserverForTests(null);
     setPdfGenerateHookForTests(null);
     setComposerSecondaryIndexHookForTests(null);
     setReminderNotificationsForTests(null);

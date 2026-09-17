@@ -25,11 +25,9 @@ import { letterheadDocToCloudStorage } from "@/services/pdf/pdfCloudSync";
 import { stableRecordId } from "@/services/records/stableRecordId";
 import { createLogger } from "@/utils/logger";
 
-import type {
-  LetterheadDocument,
-  LetterheadDocumentInput,
-  LetterheadDocumentRepository,
-} from "./types";
+import { createLetterheadDocumentAtomic } from "./atomicCreate";
+import { parseLetterheadDocument } from "./documentParse";
+import type { LetterheadDocument, LetterheadDocumentRepository } from "./types";
 
 const log = createLogger("letterhead/docs-firebase");
 const COLLECTION = "letterheadDocs";
@@ -38,50 +36,8 @@ function userDocsCollection(userId: string) {
   return collection(getFirebaseDb(), "users", userId, COLLECTION);
 }
 
-function optStr(v: unknown): string | undefined {
-  return typeof v === "string" ? v : undefined;
-}
-
 function fromDoc(id: string, raw: Record<string, unknown>, userId: string): LetterheadDocument {
-  const input = (raw.input ?? {}) as Partial<LetterheadDocumentInput>;
-  const editHistory = Array.isArray(raw.editHistory)
-    ? (raw.editHistory as LetterheadDocument["editHistory"])
-    : undefined;
-  return {
-    id,
-    userId,
-    ueid: String(raw.ueid ?? ""),
-    title: String(raw.title ?? ""),
-    input: {
-      title: String(input.title ?? ""),
-      date: Number(input.date ?? Date.now()),
-      reference: optStr(input.reference),
-      recipientName: optStr(input.recipientName),
-      recipientDesignation: optStr(input.recipientDesignation),
-      recipientCompany: optStr(input.recipientCompany),
-      recipientAddress: optStr(input.recipientAddress),
-      subject: String(input.subject ?? ""),
-      salutation: optStr(input.salutation),
-      body: String(input.body ?? ""),
-      closing: String(input.closing ?? ""),
-      name: String(input.name ?? ""),
-      designation: String(input.designation ?? ""),
-      place: String(input.place ?? ""),
-      useSignature: input.useSignature === true,
-      useStamp: input.useStamp === true,
-    },
-    templateRefUpdatedAt:
-      raw.templateRefUpdatedAt == null ? null : Number(raw.templateRefUpdatedAt),
-    pdfUri: typeof raw.pdfUri === "string" ? raw.pdfUri : null,
-    saved: Boolean(raw.saved ?? true),
-    firstGeneratedAt:
-      raw.firstGeneratedAt == null ? undefined : Number(raw.firstGeneratedAt),
-    lastEditedAt: raw.lastEditedAt == null ? null : Number(raw.lastEditedAt),
-    version: raw.version == null ? undefined : Number(raw.version),
-    editHistory,
-    createdAt: Number(raw.createdAt ?? Date.now()),
-    updatedAt: Number(raw.updatedAt ?? Date.now()),
-  };
+  return parseLetterheadDocument(id, raw, userId);
 }
 
 export const firebaseLetterheadDocumentRepository: LetterheadDocumentRepository = {
@@ -102,29 +58,18 @@ export const firebaseLetterheadDocumentRepository: LetterheadDocumentRepository 
 
   async create(userId, record) {
     if (!userId) throw new AppError("permission_denied", "Not signed in.");
-    const { clientRecordId, ...rest } = record;
-    const id = stableRecordId(clientRecordId, "lhd");
-    const ref = doc(getFirebaseDb(), "users", userId, COLLECTION, id);
-    const existingSnap = await getDoc(ref);
-    if (existingSnap.exists()) {
-      return fromDoc(
-        existingSnap.id,
-        existingSnap.data() as Record<string, unknown>,
-        userId
-      );
-    }
-
-    const now = Date.now();
-    const payload = letterheadDocToCloudStorage({
-      ...rest,
+    const nowMs = Date.now();
+    const id = stableRecordId(record.clientRecordId, "lhd");
+    const created = await createLetterheadDocumentAtomic(
+      getFirebaseDb(),
       userId,
-      createdAt: now,
-      updatedAt: now,
-    });
-    (payload as Record<string, unknown>).id = id;
-    await setDoc(ref, payload);
+      record,
+      undefined,
+      nowMs,
+      id
+    );
     log.info("doc created (firebase)");
-    return fromDoc(id, payload as Record<string, unknown>, userId);
+    return created;
   },
 
   async update(userId, id, patch) {

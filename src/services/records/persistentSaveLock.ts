@@ -110,7 +110,11 @@ export async function markPersistentLockInFlight(params: {
   preserveStartedAt?: number;
 }): Promise<SaveLockDoc> {
   const now = Date.now();
-  const startedAt = params.preserveStartedAt ?? now;
+  const existing = await readPersistentSaveLock(params.userId, params.clientRecordId);
+  let startedAt = params.preserveStartedAt ?? now;
+  if (params.preserveStartedAt == null && existing && existing.startedAt >= startedAt) {
+    startedAt = existing.startedAt + 1;
+  }
   const lock: SaveLockDoc = {
     clientRecordId: params.clientRecordId,
     idempotencyKey: params.idempotencyKey,
@@ -130,14 +134,20 @@ export async function markPersistentLockInFlight(params: {
   return lock;
 }
 
+function lockLeaseMatches(existing: SaveLockDoc | null, leaseStartedAt?: number): boolean {
+  if (leaseStartedAt == null) return existing != null;
+  return existing != null && existing.startedAt === leaseStartedAt;
+}
+
 export async function touchPersistentLock(
   userId: string,
-  clientRecordId: string
+  clientRecordId: string,
+  leaseStartedAt?: number
 ): Promise<void> {
   const existing = await readPersistentSaveLock(userId, clientRecordId);
-  if (!existing) return;
+  if (!lockLeaseMatches(existing, leaseStartedAt)) return;
   await writePersistentSaveLock({
-    ...existing,
+    ...existing!,
     updatedAt: Date.now(),
   });
 }
@@ -146,12 +156,14 @@ export async function touchPersistentLock(
 export async function attachRecordIdToPersistentLock(
   userId: string,
   clientRecordId: string,
-  recordId: string
+  recordId: string,
+  leaseStartedAt?: number
 ): Promise<void> {
   const existing = await readPersistentSaveLock(userId, clientRecordId);
-  if (!existing || existing.recordId === recordId) return;
+  if (!lockLeaseMatches(existing, leaseStartedAt)) return;
+  if (existing!.recordId === recordId) return;
   await writePersistentSaveLock({
-    ...existing,
+    ...existing!,
     recordId,
     updatedAt: Date.now(),
   });
@@ -160,9 +172,11 @@ export async function attachRecordIdToPersistentLock(
 export async function markPersistentLockDone(
   userId: string,
   clientRecordId: string,
-  recordId: string
+  recordId: string,
+  leaseStartedAt?: number
 ): Promise<void> {
   const existing = await readPersistentSaveLock(userId, clientRecordId);
+  if (leaseStartedAt != null && !lockLeaseMatches(existing, leaseStartedAt)) return;
   const now = Date.now();
   const lock: SaveLockDoc = existing ?? {
     clientRecordId,
@@ -188,13 +202,14 @@ export async function markPersistentLockDone(
 export async function markPersistentLockFailed(
   userId: string,
   clientRecordId: string,
-  failureCode: string
+  failureCode: string,
+  leaseStartedAt?: number
 ): Promise<void> {
   const existing = await readPersistentSaveLock(userId, clientRecordId);
-  if (!existing) return;
+  if (!lockLeaseMatches(existing, leaseStartedAt)) return;
   const now = Date.now();
   await writePersistentSaveLock({
-    ...existing,
+    ...existing!,
     status: "failed",
     failedAt: now,
     failureCode,

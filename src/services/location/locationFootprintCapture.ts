@@ -1,6 +1,5 @@
 import type { BusinessEntry } from "@/domain/businessEntry";
 import { geoPointToRecordGps } from "@/utils/location/entryLocation";
-import { locationService } from "@/services/location";
 
 import {
   loadLocationFootprintPreferences,
@@ -34,6 +33,7 @@ export async function resolveEntryLocationWithFootprint(
   }
 
   try {
+    const { locationService } = await import("@/services/location");
     const point = await locationService.getCurrent();
     const label = manualLocation?.name?.trim() || null;
     const gps = geoPointToRecordGps(point, {

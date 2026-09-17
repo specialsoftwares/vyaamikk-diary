@@ -1,12 +1,10 @@
+import { AppError } from "@/domain/errors";
 import type { UserProfile } from "@/domain/types";
-import { pdfService } from "@/services/pdf/pdfService";
-import { englishPdfT } from "@/i18n/englishPdfT";
-import { buildLetterheadHtml } from "@/services/pdf/letterheadPdfService";
+import type { EntryLocation } from "@/domain/businessEntry";
 import { dayKey } from "@/utils/date";
 import { autoEntryTitle } from "@/utils/businessEntry/display";
 import { getDiaryRepository } from "@/services/diary";
-import { resolveEntryLocationWithFootprint } from "@/services/location/locationFootprintCapture";
-import { getLetterheadDocumentRepository } from "@/services/letterhead";
+import { getLetterheadDocumentRepository } from "@/services/letterhead/documentRepository";
 import type {
   LetterheadConfig,
   LetterheadDocument,
@@ -19,10 +17,11 @@ import {
   failCoordinatedSave,
   runRecordStepIfNeeded,
   shouldRunStep,
+  type ProcessSaveLockOwner,
 } from "@/services/records/saveCoordinator";
 import { SAVE_STEP, SaveStillInProgressError, hasCompletedStep } from "@/services/records/saveLockTypes";
 import type { SaveIdempotencyContext } from "@/services/records/saveIdempotency";
-import { releaseProcessSaveLock } from "@/services/records/saveIdempotency";
+import { pdfGenerateHook } from "@/services/pdf/pdfGenerateHook";
 
 export interface SaveLetterheadCreateResult {
   doc: LetterheadDocument;
@@ -45,6 +44,8 @@ export async function saveLetterheadCreateWithPdf(
   }
 ): Promise<SaveLetterheadCreateResult> {
   const processLockKey = params.idempotency.idempotencyKey;
+  let processLockOwner: ProcessSaveLockOwner | null = null;
+  let lockLeaseStartedAt: number | null = null;
   let idempotency = params.idempotency;
   let completedSteps: string[] = [];
 
@@ -55,6 +56,8 @@ export async function saveLetterheadCreateWithPdf(
       route: params.route,
     });
     idempotency = begun.idempotency;
+    processLockOwner = begun.processLockOwner;
+    lockLeaseStartedAt = begun.lockLeaseStartedAt;
     const clientRecordId = begun.clientRecordId;
 
     if (begun.decision.action === "return_done") {
@@ -99,6 +102,7 @@ export async function saveLetterheadCreateWithPdf(
             step: SAVE_STEP.BASE_RECORD_CREATED,
             completedSteps,
             clientRecordId,
+            lockLeaseStartedAt: lockLeaseStartedAt ?? undefined,
             alwaysRun: true,
           },
           async () => doc
@@ -113,17 +117,24 @@ export async function saveLetterheadCreateWithPdf(
       shouldRunStep(completedSteps, SAVE_STEP.PDF_URI_SAVED, { pdfUri: doc.pdfUri });
 
     if (needsPdf) {
-      const { html } = await buildLetterheadHtml({
-        config: params.config,
-        doc: params.docInput,
-        locale: params.locale,
-        labels: {
-          subject: englishPdfT()("letterhead.labels.subject"),
-          date: englishPdfT()("letterhead.labels.date"),
-          reference: englishPdfT()("letterhead.labels.reference"),
-          to: englishPdfT()("letterhead.labels.to"),
-        },
-      });
+      const hooked = pdfGenerateHook();
+      let html = "";
+      if (!hooked) {
+        const { englishPdfT } = await import("@/i18n/englishPdfT");
+        const { buildLetterheadHtml } = await import("@/services/pdf/letterheadPdfService");
+        const built = await buildLetterheadHtml({
+          config: params.config,
+          doc: params.docInput,
+          locale: params.locale,
+          labels: {
+            subject: englishPdfT()("letterhead.labels.subject"),
+            date: englishPdfT()("letterhead.labels.date"),
+            reference: englishPdfT()("letterhead.labels.reference"),
+            to: englishPdfT()("letterhead.labels.to"),
+          },
+        });
+        html = built.html;
+      }
       const pdfStep = await runRecordStepIfNeeded(
         {
           userId,
@@ -132,19 +143,24 @@ export async function saveLetterheadCreateWithPdf(
           step: SAVE_STEP.PDF_GENERATED,
           completedSteps,
           clientRecordId,
+          lockLeaseStartedAt: lockLeaseStartedAt ?? undefined,
         },
-        () =>
-          pdfService.generate({
+        async () => {
+          const generateInput = {
             html,
             fileNameHint: params.t("letterhead.fileNameHint", {
               date: dayKey(params.docInput.date),
             }),
             fileName: {
-              documentType: "letterhead",
+              documentType: "letterhead" as const,
               businessName: params.user.businessName ?? params.user.displayName ?? undefined,
               date: dayKey(params.docInput.date),
             },
-          })
+          };
+          if (hooked) return hooked(generateInput);
+          const { pdfService } = await import("@/services/pdf/pdfService");
+          return pdfService.generate(generateInput);
+        }
       );
       completedSteps = pdfStep.completedSteps;
       if (pdfStep.ran && pdfStep.result) {
@@ -157,6 +173,7 @@ export async function saveLetterheadCreateWithPdf(
             step: SAVE_STEP.PDF_URI_SAVED,
             completedSteps,
             clientRecordId,
+            lockLeaseStartedAt: lockLeaseStartedAt ?? undefined,
           },
           async () => {
             doc = await repo.update(userId, doc.id, { pdfUri, saved: true });
@@ -169,7 +186,7 @@ export async function saveLetterheadCreateWithPdf(
     }
 
     const senderName = params.docInput.name?.trim() || "";
-    await runRecordStepIfNeeded(
+    const diaryStep = await runRecordStepIfNeeded(
       {
         userId,
         recordKind: "letterhead_doc",
@@ -177,11 +194,22 @@ export async function saveLetterheadCreateWithPdf(
         step: SAVE_STEP.DIARY_LINK_CREATED,
         completedSteps,
         clientRecordId,
+        lockLeaseStartedAt: lockLeaseStartedAt ?? undefined,
       },
       async () => {
         const placeLabel = params.docInput.place?.trim() || null;
-        const manualLoc = placeLabel ? { name: placeLabel, geo: null, gps: null } : null;
-        const { location } = await resolveEntryLocationWithFootprint(userId, manualLoc);
+        const manualLoc: EntryLocation | null = placeLabel
+          ? { name: placeLabel, geo: null, gps: null }
+          : null;
+        let location: EntryLocation | null = manualLoc;
+        try {
+          const { resolveEntryLocationWithFootprint } = await import(
+            "@/services/location/locationFootprintCapture"
+          );
+          location = (await resolveEntryLocationWithFootprint(userId, manualLoc)).location;
+        } catch {
+          location = manualLoc;
+        }
         const reference = params.docInput.reference?.trim() || null;
         await getDiaryRepository().create(userId, {
           clientRecordId: params.diaryClientId,
@@ -223,13 +251,40 @@ export async function saveLetterheadCreateWithPdf(
         });
       }
     );
+    completedSteps = diaryStep.completedSteps;
 
-    await completeCoordinatedSave(idempotency, doc.id, { processLockKey });
+    const pdfReady = Boolean(pdfUri || doc.pdfUri);
+    if (needsPdf && !pdfReady) {
+      await failCoordinatedSave(idempotency, "pdf_incomplete", {
+        processLockKey,
+        processLockOwner: processLockOwner ?? undefined,
+        lockLeaseStartedAt: lockLeaseStartedAt ?? undefined,
+        clearRegistry: false,
+      });
+      throw new AppError("save_failed", "Letterhead PDF was not saved.");
+    }
+    if (!hasCompletedStep(completedSteps, SAVE_STEP.DIARY_LINK_CREATED)) {
+      await failCoordinatedSave(idempotency, "diary_link_incomplete", {
+        processLockKey,
+        processLockOwner: processLockOwner ?? undefined,
+        lockLeaseStartedAt: lockLeaseStartedAt ?? undefined,
+        clearRegistry: false,
+      });
+      throw new AppError("save_failed", "Letterhead diary link was not created.");
+    }
+
+    await completeCoordinatedSave(idempotency, doc.id, {
+      processLockKey,
+      processLockOwner: processLockOwner ?? undefined,
+      lockLeaseStartedAt: lockLeaseStartedAt ?? undefined,
+    });
     return { doc, pdfUri: pdfUri || doc.pdfUri || "" };
   } catch (e) {
     if (e instanceof SaveStillInProgressError) throw e;
     await failCoordinatedSave(idempotency, "letterhead_save_failed", {
       processLockKey,
+      processLockOwner: processLockOwner ?? undefined,
+      lockLeaseStartedAt: lockLeaseStartedAt ?? undefined,
       clearRegistry: false,
     });
     throw e;
