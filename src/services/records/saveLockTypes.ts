@@ -57,6 +57,22 @@ export function mergeCompletedSteps(
   return base;
 }
 
+/** First-seen order. Used when recovering across current, sibling, and Round 10 keys. */
+export function unionCompletedSteps(
+  ...lists: Array<string[] | undefined | null>
+): string[] {
+  const out: string[] = [];
+  for (const list of lists) {
+    if (!Array.isArray(list)) continue;
+    for (const step of list) {
+      if (typeof step === "string" && step.length > 0 && !out.includes(step)) {
+        out.push(step);
+      }
+    }
+  }
+  return out;
+}
+
 /** Another save is in progress — UI should show "Still saving…". */
 export class SaveStillInProgressError extends Error {
   readonly uiState: SaveUiState = "still_saving";

@@ -258,7 +258,8 @@ export async function saveComposerEntry(
         userId,
         input.clientRecordId,
         entry.id,
-        lockLeaseStartedAt ?? undefined
+        lockLeaseStartedAt ?? undefined,
+        session
       );
     }
 
@@ -555,6 +556,7 @@ async function finishComposerSavePipeline(
       processLockKey,
       processLockOwner: processLockOwner ?? undefined,
       lockLeaseStartedAt: lockLeaseStartedAt ?? undefined,
+      session,
     });
   }
 

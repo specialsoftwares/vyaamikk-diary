@@ -14,6 +14,8 @@ import {
   markPersistentLockFailed,
   markPersistentLockInFlight,
   readPersistentSaveLock,
+  recordRetiredLeaseIntent,
+  hasRetiredLeaseIntent,
   touchPersistentLock,
 } from "./persistentSaveLock";
 import {
@@ -78,8 +80,8 @@ export interface CoordinatedSaveLockOptions {
 
 /**
  * Release only the reservation this operation still owns.
- * Must not clear a newer process lock or complete/fail a newer persistent lease.
- * Retired cleanup does not adopt a new login: callers pass the original lease.
+ * In-process release does not wait for remote cleanup. Retired remote
+ * cleanup is not started under a later session.
  */
 export async function retireOwnedReservation(options: {
   userId: string;
@@ -87,17 +89,31 @@ export async function retireOwnedReservation(options: {
   processLockKey?: string;
   processLockOwner?: ProcessSaveLockOwner;
   lockLeaseStartedAt?: number;
+  session?: SyncSessionToken | null;
 }): Promise<void> {
-  if (options.clientRecordId && options.lockLeaseStartedAt != null) {
-    await markPersistentLockFailed(
-      options.userId,
-      options.clientRecordId,
-      "session_retired",
-      options.lockLeaseStartedAt
-    );
-  }
   if (options.processLockKey && options.processLockOwner) {
     releaseProcessSaveLock(options.processLockKey, options.processLockOwner);
+  }
+  if (options.clientRecordId && options.lockLeaseStartedAt != null) {
+    await recordRetiredLeaseIntent(
+      options.userId,
+      options.clientRecordId,
+      options.lockLeaseStartedAt
+    );
+    if (!stillOwnsRemoteCoordination(options.session, options.userId)) {
+      return;
+    }
+    try {
+      await markPersistentLockFailed(
+        options.userId,
+        options.clientRecordId,
+        "session_retired",
+        options.lockLeaseStartedAt,
+        options.session
+      );
+    } catch {
+      // Process reservation is already released. Local intent remains.
+    }
   }
 }
 
@@ -161,6 +177,7 @@ export async function beginCoordinatedSave(
       processLockKey,
       processLockOwner: processLockOwner ?? undefined,
       lockLeaseStartedAt: lockLeaseStartedAt ?? undefined,
+      session: options.session,
     });
     throw new SaveRetryableError("Save session is no longer current.", "session_retired");
   };
@@ -200,6 +217,46 @@ export async function beginCoordinatedSave(
 
     if (persistent) {
       if (persistent.status === "in_flight" && !isLockExpired(persistent)) {
+        const retiredIntent = await hasRetiredLeaseIntent(
+          ctx.userId,
+          clientRecordId,
+          persistent.startedAt
+        );
+        await abandonIfRetired();
+        if (
+          retiredIntent &&
+          stillOwnsRemoteCoordination(options.session, ctx.userId)
+        ) {
+          const recordId = persistent.recordId ?? null;
+          const steps = recordId
+            ? await fetchRecordCompletedSteps(ctx.userId, ctx.recordKind, recordId)
+            : [];
+          await abandonIfRetired();
+          const lock = await markPersistentLockInFlight({
+            userId: ctx.userId,
+            ueid: options.ueid,
+            clientRecordId,
+            idempotencyKey: idempotency.idempotencyKey,
+            recordKind: ctx.recordKind,
+            recordId,
+            session: options.session,
+          });
+          lockLeaseStartedAt = lock.startedAt;
+          await abandonIfRetired();
+          return {
+            decision: {
+              action: "resume",
+              recordId,
+              clientRecordId,
+              completedSteps: steps,
+              fromExpiredLock: false,
+            },
+            clientRecordId,
+            idempotency,
+            processLockOwner,
+            lockLeaseStartedAt: lock.startedAt,
+          };
+        }
         logSaveDiagnostic({
           phase: "blocked_lock",
           recordKind: ctx.recordKind,
@@ -248,6 +305,7 @@ export async function beginCoordinatedSave(
           idempotencyKey: idempotency.idempotencyKey,
           recordKind: ctx.recordKind,
           recordId,
+          session: options.session,
         });
         lockLeaseStartedAt = lock.startedAt;
         await abandonIfRetired();
@@ -279,6 +337,7 @@ export async function beginCoordinatedSave(
           idempotencyKey: idempotency.idempotencyKey,
           recordKind: ctx.recordKind,
           recordId,
+          session: options.session,
         });
         lockLeaseStartedAt = lock.startedAt;
         await abandonIfRetired();
@@ -306,6 +365,7 @@ export async function beginCoordinatedSave(
         idempotencyKey: idempotency.idempotencyKey,
         recordKind: ctx.recordKind,
         recordId: null,
+        session: options.session,
       });
       lockLeaseStartedAt = lock.startedAt;
       await abandonIfRetired();
@@ -347,6 +407,7 @@ export async function completeCoordinatedSave(
         processLockKey: options?.processLockKey,
         processLockOwner: options?.processLockOwner,
         lockLeaseStartedAt: options?.lockLeaseStartedAt,
+        session: options?.session,
       });
       return;
     }
@@ -359,6 +420,7 @@ export async function completeCoordinatedSave(
           processLockKey: options?.processLockKey,
           processLockOwner: options?.processLockOwner,
           lockLeaseStartedAt: options?.lockLeaseStartedAt,
+          session: options?.session,
         });
         return;
       }
@@ -366,7 +428,8 @@ export async function completeCoordinatedSave(
         idempotency.userId,
         idempotency.clientRecordId,
         recordId,
-        options?.lockLeaseStartedAt
+        options?.lockLeaseStartedAt,
+        options?.session
       );
     }
     logSaveDiagnostic({
@@ -395,6 +458,7 @@ export async function failCoordinatedSave(
         processLockKey: options?.processLockKey,
         processLockOwner: options?.processLockOwner,
         lockLeaseStartedAt: options?.lockLeaseStartedAt,
+        session: options?.session,
       });
       return;
     }
@@ -402,7 +466,8 @@ export async function failCoordinatedSave(
       idempotency.userId,
       idempotency.clientRecordId,
       failureCode,
-      options?.lockLeaseStartedAt
+      options?.lockLeaseStartedAt,
+      options?.session
     );
     if (options?.clearRegistry !== false && !options?.isUpdate) {
       await failSaveAttempt(idempotency);
@@ -462,7 +527,12 @@ export async function runRecordStepIfNeeded<T>(
 
   const lockId = params.clientRecordId ?? params.recordId;
   if (stillOwnsRemoteCoordination(params.session, params.userId)) {
-    await touchPersistentLock(params.userId, lockId, params.lockLeaseStartedAt);
+    await touchPersistentLock(
+      params.userId,
+      lockId,
+      params.lockLeaseStartedAt,
+      params.session
+    );
   }
   const issuesRemoteWork = params.issuesRemoteWork !== false;
   if (issuesRemoteWork && !stillOwnsRemoteCoordination(params.session, params.userId)) {
@@ -480,7 +550,12 @@ export async function runRecordStepIfNeeded<T>(
     params.session
   );
   if (stillOwnsRemoteCoordination(params.session, params.userId)) {
-    await touchPersistentLock(params.userId, lockId, params.lockLeaseStartedAt);
+    await touchPersistentLock(
+      params.userId,
+      lockId,
+      params.lockLeaseStartedAt,
+      params.session
+    );
   }
   return { ran: true, result, completedSteps };
 }

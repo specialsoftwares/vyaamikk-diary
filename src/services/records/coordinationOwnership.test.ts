@@ -22,11 +22,14 @@ import {
 } from "@/services/records/saveIdempotency";
 import {
   attachRecordIdToPersistentLock,
+  hasRetiredLeaseIntent,
   markPersistentLockDone,
   markPersistentLockFailed,
   markPersistentLockInFlight,
   readPersistentSaveLock,
   setPersistentLockAfterReadGateForTests,
+  setPersistentLockInsideTransactionGateForTests,
+  setPersistentLockMutationObserverForTests,
   setPersistentLockNowMsForTests,
   setPersistentLockTouchGateForTests,
   touchPersistentLock,
@@ -34,6 +37,8 @@ import {
 import {
   beginCoordinatedSave,
   completeCoordinatedSave,
+  failCoordinatedSave,
+  retireOwnedReservation,
   runRecordStepIfNeeded,
 } from "@/services/records/saveCoordinator";
 import {
@@ -57,7 +62,20 @@ function barrier() {
   const entered = deferred();
   const hold = deferred();
   return {
-    waitUntilEntered: () => entered.promise,
+    waitUntilEntered: () =>
+      new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("test barrier: gate was not entered")), 5000);
+        entered.promise.then(
+          () => {
+            clearTimeout(timer);
+            resolve();
+          },
+          (err) => {
+            clearTimeout(timer);
+            reject(err);
+          }
+        );
+      }),
     release: () => hold.resolve(),
     gate: async () => {
       entered.resolve();
@@ -410,6 +428,245 @@ async function main() {
     "owner must release the process lock when completeSaveAttempt throws"
   );
   setCompleteSaveAttemptGateForTests(null);
+
+  // Round 13 — session authority inside lock transitions (local serialized analog).
+  syncSessionOwnership.resetForTests();
+  const sessionLockA = syncSessionOwnership.beginSession("u1");
+  const lockAuth = await markPersistentLockInFlight({
+    userId: "u1",
+    clientRecordId: "en_r13_lock_auth",
+    idempotencyKey: "lock-a",
+    recordKind: "business_entry",
+    session: sessionLockA,
+  });
+  const lockMutations: { startedAt: number; status: string }[] = [];
+  setPersistentLockMutationObserverForTests((info) => {
+    lockMutations.push({ startedAt: info.startedAt, status: info.status });
+  });
+  const lockHold = barrier();
+  setPersistentLockInsideTransactionGateForTests(lockHold.gate);
+  const staleAuthTouch = touchPersistentLock(
+    "u1",
+    "en_r13_lock_auth",
+    lockAuth.startedAt,
+    sessionLockA
+  );
+  await lockHold.waitUntilEntered();
+  const sessionLockB = syncSessionOwnership.beginSession("u1");
+  assert.notEqual(sessionLockB.generation, sessionLockA.generation);
+  const mutationsAtSwitch = lockMutations.length;
+  lockHold.release();
+  await staleAuthTouch;
+  assert.equal(lockMutations.length, mutationsAtSwitch, "A->B must not queue a lock mutation");
+  const afterAB = await readPersistentSaveLock("u1", "en_r13_lock_auth");
+  assert.equal(afterAB?.startedAt, lockAuth.startedAt);
+  assert.equal(afterAB?.updatedAt, lockAuth.updatedAt);
+  assert.equal(afterAB?.idempotencyKey, "lock-a");
+  setPersistentLockInsideTransactionGateForTests(null);
+
+  syncSessionOwnership.resetForTests();
+  const sessionReloginA = syncSessionOwnership.beginSession("u1");
+  const lockRelogin = await markPersistentLockInFlight({
+    userId: "u1",
+    clientRecordId: "en_r13_lock_relogin",
+    idempotencyKey: "lock-relogin",
+    recordKind: "business_entry",
+    session: sessionReloginA,
+  });
+  const reloginMutations: number[] = [];
+  setPersistentLockMutationObserverForTests((info) => {
+    reloginMutations.push(info.startedAt);
+  });
+  const reloginHold = barrier();
+  setPersistentLockInsideTransactionGateForTests(reloginHold.gate);
+  const staleDone = markPersistentLockDone(
+    "u1",
+    "en_r13_lock_relogin",
+    "stolen",
+    lockRelogin.startedAt,
+    sessionReloginA
+  );
+  await reloginHold.waitUntilEntered();
+  syncSessionOwnership.endSession();
+  const sessionReloginA2 = syncSessionOwnership.beginSession("u1");
+  assert.notEqual(sessionReloginA2.generation, sessionReloginA.generation);
+  const mutationsAtRelogin = reloginMutations.length;
+  reloginHold.release();
+  await staleDone;
+  assert.equal(reloginMutations.length, mutationsAtRelogin, "A->logout->A must not adopt the new login");
+  const afterRelogin = await readPersistentSaveLock("u1", "en_r13_lock_relogin");
+  assert.equal(afterRelogin?.status, "in_flight");
+  assert.notEqual(afterRelogin?.recordId, "stolen");
+  setPersistentLockInsideTransactionGateForTests(null);
+
+  await touchPersistentLock("u1", "en_r13_lock_relogin", lockRelogin.startedAt);
+  const compatible = await readPersistentSaveLock("u1", "en_r13_lock_relogin");
+  assert.ok((compatible?.updatedAt ?? 0) >= (lockRelogin.updatedAt ?? 0));
+  assert.equal(compatible?.startedAt, lockRelogin.startedAt, "callers without session remain compatible");
+  setPersistentLockMutationObserverForTests(null);
+
+  // Round 13 — retire releases process lock without waiting for remote cleanup.
+  syncSessionOwnership.resetForTests();
+  const sessionRetire = syncSessionOwnership.beginSession("u1");
+  const ctxRetire = createSaveIdempotencyContext({
+    userId: "u1",
+    recordKind: "business_entry",
+    clientRecordId: "en_r13_retire",
+  });
+  const begunRetire = await beginCoordinatedSave(ctxRetire, {
+    processLockKey: ctxRetire.idempotencyKey,
+    session: sessionRetire,
+  });
+  assert.equal(begunRetire.decision.action, "proceed");
+  await attachRecordIdToPersistentLock(
+    "u1",
+    "en_r13_retire",
+    "en_r13_retire",
+    begunRetire.lockLeaseStartedAt ?? undefined,
+    sessionRetire
+  );
+  const pendingHold = barrier();
+  setPersistentLockInsideTransactionGateForTests(pendingHold.gate);
+  const retirePending = retireOwnedReservation({
+    userId: "u1",
+    clientRecordId: "en_r13_retire",
+    processLockKey: ctxRetire.idempotencyKey,
+    processLockOwner: begunRetire.processLockOwner ?? undefined,
+    lockLeaseStartedAt: begunRetire.lockLeaseStartedAt ?? undefined,
+    session: sessionRetire,
+  });
+  await pendingHold.waitUntilEntered();
+  assert.equal(
+    isProcessSaveLockHeld(ctxRetire.idempotencyKey),
+    false,
+    "process reservation must drop while remote cleanup is still pending"
+  );
+  pendingHold.release();
+  await retirePending;
+  setPersistentLockInsideTransactionGateForTests(null);
+
+  syncSessionOwnership.resetForTests();
+  const sessionReject = syncSessionOwnership.beginSession("u1");
+  const ctxReject = createSaveIdempotencyContext({
+    userId: "u1",
+    recordKind: "business_entry",
+    clientRecordId: "en_r13_reject",
+  });
+  const begunReject = await beginCoordinatedSave(ctxReject, {
+    processLockKey: ctxReject.idempotencyKey,
+    session: sessionReject,
+  });
+  setPersistentLockInsideTransactionGateForTests(async () => {
+    throw new Error("remote_cleanup_rejected");
+  });
+  await retireOwnedReservation({
+    userId: "u1",
+    clientRecordId: "en_r13_reject",
+    processLockKey: ctxReject.idempotencyKey,
+    processLockOwner: begunReject.processLockOwner ?? undefined,
+    lockLeaseStartedAt: begunReject.lockLeaseStartedAt ?? undefined,
+    session: sessionReject,
+  });
+  assert.equal(isProcessSaveLockHeld(ctxReject.idempotencyKey), false);
+  setPersistentLockInsideTransactionGateForTests(null);
+
+  syncSessionOwnership.resetForTests();
+  const sessionFail = syncSessionOwnership.beginSession("u1");
+  const ctxFail = createSaveIdempotencyContext({
+    userId: "u1",
+    recordKind: "business_entry",
+    clientRecordId: "en_r13_fail_caller",
+  });
+  const begunFail = await beginCoordinatedSave(ctxFail, {
+    processLockKey: ctxFail.idempotencyKey,
+    session: sessionFail,
+  });
+  syncSessionOwnership.endSession();
+  await failCoordinatedSave(ctxFail, "session_retired", {
+    processLockKey: ctxFail.idempotencyKey,
+    processLockOwner: begunFail.processLockOwner ?? undefined,
+    lockLeaseStartedAt: begunFail.lockLeaseStartedAt ?? undefined,
+    session: sessionFail,
+  });
+  assert.equal(isProcessSaveLockHeld(ctxFail.idempotencyKey), false);
+  assert.equal(
+    await hasRetiredLeaseIntent("u1", "en_r13_fail_caller", begunFail.lockLeaseStartedAt ?? 0),
+    true
+  );
+
+  syncSessionOwnership.resetForTests();
+  const sessionRecover = syncSessionOwnership.beginSession("u1");
+  const ctxRecover = createSaveIdempotencyContext({
+    userId: "u1",
+    recordKind: "business_entry",
+    clientRecordId: "en_r13_recover",
+  });
+  const begunRecover = await beginCoordinatedSave(ctxRecover, {
+    processLockKey: ctxRecover.idempotencyKey,
+    session: sessionRecover,
+  });
+  await attachRecordIdToPersistentLock(
+    "u1",
+    "en_r13_recover",
+    "en_r13_recover",
+    begunRecover.lockLeaseStartedAt ?? undefined,
+    sessionRecover
+  );
+  syncSessionOwnership.endSession();
+  await retireOwnedReservation({
+    userId: "u1",
+    clientRecordId: "en_r13_recover",
+    processLockKey: ctxRecover.idempotencyKey,
+    processLockOwner: begunRecover.processLockOwner ?? undefined,
+    lockLeaseStartedAt: begunRecover.lockLeaseStartedAt ?? undefined,
+    session: sessionRecover,
+  });
+  const lockAfterRetire = await readPersistentSaveLock("u1", "en_r13_recover");
+  assert.equal(lockAfterRetire?.status, "in_flight", "retired remote cleanup must not run under a later session");
+  assert.equal(lockAfterRetire?.recordId, "en_r13_recover");
+  const sessionFresh = syncSessionOwnership.beginSession("u1");
+  const recovered = await beginCoordinatedSave(ctxRecover, {
+    processLockKey: ctxRecover.idempotencyKey,
+    session: sessionFresh,
+  });
+  assert.equal(recovered.decision.action, "resume");
+  if (recovered.decision.action === "resume") {
+    assert.equal(recovered.decision.recordId, "en_r13_recover");
+  }
+  assert.equal(isProcessSaveLockHeld(ctxRecover.idempotencyKey), true);
+  releaseProcessSaveLock(ctxRecover.idempotencyKey, recovered.processLockOwner ?? undefined);
+
+  const newerOwner = acquireOwnedProcessSaveLock(ctxRecover.idempotencyKey);
+  assert.ok(newerOwner);
+  await retireOwnedReservation({
+    userId: "u1",
+    clientRecordId: "en_r13_recover",
+    processLockKey: ctxRecover.idempotencyKey,
+    processLockOwner: begunRecover.processLockOwner ?? undefined,
+    lockLeaseStartedAt: begunRecover.lockLeaseStartedAt ?? undefined,
+    session: sessionRecover,
+  });
+  assert.equal(
+    isProcessSaveLockHeld(ctxRecover.idempotencyKey),
+    true,
+    "retired owner must not clear a newer process reservation"
+  );
+  const replacementLease = await markPersistentLockInFlight({
+    userId: "u1",
+    clientRecordId: "en_r13_recover",
+    idempotencyKey: "newer-owner",
+    recordKind: "business_entry",
+  });
+  await retireOwnedReservation({
+    userId: "u1",
+    clientRecordId: "en_r13_recover",
+    lockLeaseStartedAt: begunRecover.lockLeaseStartedAt ?? undefined,
+    session: sessionRecover,
+  });
+  const stillNewerLease = await readPersistentSaveLock("u1", "en_r13_recover");
+  assert.equal(stillNewerLease?.startedAt, replacementLease.startedAt);
+  assert.equal(stillNewerLease?.idempotencyKey, "newer-owner");
+  releaseProcessSaveLock(ctxRecover.idempotencyKey, newerOwner);
 
   const composerSrc = fs.readFileSync(
     path.join(import.meta.dirname, "../diary/saveComposerEntry.ts"),

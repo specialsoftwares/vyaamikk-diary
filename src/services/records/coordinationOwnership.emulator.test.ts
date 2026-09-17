@@ -24,6 +24,8 @@ import {
   readPersistentSaveLock,
   setPersistentLockAfterReadGateForTests,
   setPersistentLockFirestoreForTests,
+  setPersistentLockInsideTransactionGateForTests,
+  setPersistentLockMutationObserverForTests,
   touchPersistentLock,
 } from "@/services/records/persistentSaveLock";
 import { SAVE_STEP } from "@/services/records/saveLockTypes";
@@ -44,7 +46,20 @@ function barrier() {
   const entered = deferred();
   const hold = deferred();
   return {
-    waitUntilEntered: () => entered.promise,
+    waitUntilEntered: () =>
+      new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("test barrier: gate was not entered")), 15000);
+        entered.promise.then(
+          () => {
+            clearTimeout(timer);
+            resolve();
+          },
+          (err) => {
+            clearTimeout(timer);
+            reject(err);
+          }
+        );
+      }),
     release: () => hold.resolve(),
     gate: async () => {
       entered.resolve();
@@ -318,6 +333,91 @@ async function main() {
     setCompletedStepBoundaryHooksForTests(null);
     setCompletedStepWriteObserverForTests(null);
 
+    const lockSession = syncSessionOwnership.beginSession(uid);
+    const lockDoc = await markPersistentLockInFlight({
+      userId: uid,
+      clientRecordId: "en_r13_em_session",
+      idempotencyKey: "em-session-a",
+      recordKind: "business_entry",
+      session: lockSession,
+    });
+    const emMutations: string[] = [];
+    setPersistentLockMutationObserverForTests((info) => {
+      emMutations.push(`${info.status}:${info.startedAt}`);
+    });
+    const emHold = barrier();
+    let emAttempts = 0;
+    setPersistentLockInsideTransactionGateForTests(async () => {
+      emAttempts += 1;
+      if (emAttempts === 1) await emHold.gate();
+    });
+    const emTouch = touchPersistentLock(
+      uid,
+      "en_r13_em_session",
+      lockDoc.startedAt,
+      lockSession
+    );
+    await emHold.waitUntilEntered();
+    const beforeSwitch = await readPersistentSaveLock(uid, "en_r13_em_session");
+    syncSessionOwnership.beginSession(uid);
+    const mutAtSwitch = emMutations.length;
+    emHold.release();
+    await emTouch;
+    const afterSwitch = await readPersistentSaveLock(uid, "en_r13_em_session");
+    if (afterSwitch?.startedAt !== lockDoc.startedAt || afterSwitch.status !== "in_flight") {
+      throw new Error("A->B must not mutate the original lease");
+    }
+    if ((afterSwitch.updatedAt ?? 0) !== (beforeSwitch?.updatedAt ?? 0)) {
+      throw new Error(`A->B queued a lock write: ${JSON.stringify(afterSwitch)}`);
+    }
+    if (emMutations.length !== mutAtSwitch) {
+      throw new Error("A->B must not observe a transaction mutation");
+    }
+
+    setPersistentLockInsideTransactionGateForTests(null);
+    setPersistentLockMutationObserverForTests(null);
+
+    const reloginSession = syncSessionOwnership.beginSession(uid);
+    const reloginLock = await markPersistentLockInFlight({
+      userId: uid,
+      clientRecordId: "en_r13_em_relogin",
+      idempotencyKey: "em-relogin-a",
+      recordKind: "business_entry",
+      session: reloginSession,
+    });
+    const emMutations2: string[] = [];
+    setPersistentLockMutationObserverForTests((info) => {
+      emMutations2.push(`${info.status}:${info.startedAt}`);
+    });
+    const emHold2 = barrier();
+    let emAttempts2 = 0;
+    setPersistentLockInsideTransactionGateForTests(async () => {
+      emAttempts2 += 1;
+      if (emAttempts2 === 1) await emHold2.gate();
+    });
+    const emFail = markPersistentLockFailed(
+      uid,
+      "en_r13_em_relogin",
+      "session_retired",
+      reloginLock.startedAt,
+      reloginSession
+    );
+    await emHold2.waitUntilEntered();
+    syncSessionOwnership.endSession();
+    syncSessionOwnership.beginSession(uid);
+    const mutAtRelogin = emMutations2.length;
+    emHold2.release();
+    await emFail;
+    const afterRelogin = await readPersistentSaveLock(uid, "en_r13_em_relogin");
+    if (afterRelogin?.status !== "in_flight") {
+      throw new Error("A->logout->A must not fail the lease under the new login");
+    }
+    if (emMutations2.length !== mutAtRelogin) {
+      throw new Error("A->logout->A must not observe a transaction mutation");
+    }
+    setPersistentLockInsideTransactionGateForTests(null);
+    setPersistentLockMutationObserverForTests(null);
+
     console.log("coordinationOwnership.emulator.test.ts: ok (Firestore emulator)");
   } finally {
     setCompletedStepsFirestoreForTests(null);
@@ -325,6 +425,8 @@ async function main() {
     setCompletedStepBoundaryHooksForTests(null);
     setCompletedStepWriteObserverForTests(null);
     setPersistentLockAfterReadGateForTests(null);
+    setPersistentLockInsideTransactionGateForTests(null);
+    setPersistentLockMutationObserverForTests(null);
     await testEnv.cleanup();
   }
 }

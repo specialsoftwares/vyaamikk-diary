@@ -19,12 +19,27 @@ import { mayIssueRemoteWork, type SyncSessionToken } from "@/sync/syncSessionOwn
 
 import {
   mergeCompletedSteps,
+  unionCompletedSteps,
   type SaveStepName,
 } from "./saveLockTypes";
 import type { RecordSaveKind } from "./saveIdempotency";
 
-const LOCAL_PREFIX = "vyd_completed_steps_v1_";
+/** Round 12 local key: vyd_completed_steps_v1_{uid}_{recordKind}_{recordId} */
+export const LOCAL_COMPLETED_STEPS_PREFIX = "vyd_completed_steps_v1_";
+/** Round 10 local key: vyd_steps_v1_{uid}_{collection}_{recordId} */
+export const LEGACY_COMPLETED_STEPS_PREFIX = "vyd_steps_v1_";
 export const COMPLETED_STEPS_AT_FIELD = "completedStepsUpdatedAt";
+
+const RECORD_SAVE_KINDS: readonly RecordSaveKind[] = [
+  "business_entry",
+  "professional_pack",
+  "purchase_order",
+  "customer_credit",
+  "customer_credit_closure",
+  "customer_credit_payment",
+  "letterhead_doc",
+  "draft_convert",
+];
 
 const localQueues = new Map<string, Promise<unknown>>();
 
@@ -49,8 +64,42 @@ async function withSerializedLocal<T>(key: string, fn: () => Promise<T>): Promis
   }
 }
 
-function localKey(userId: string, recordKind: RecordSaveKind, recordId: string): string {
-  return `${LOCAL_PREFIX}${userId}_${recordKind}_${recordId}`;
+export function localCompletedStepsKey(
+  userId: string,
+  recordKind: RecordSaveKind,
+  recordId: string
+): string {
+  return `${LOCAL_COMPLETED_STEPS_PREFIX}${userId}_${recordKind}_${recordId}`;
+}
+
+/** Exact Round 10 AsyncStorage key. Collection, not recordKind. */
+export function legacyCompletedStepsKey(
+  userId: string,
+  recordKind: RecordSaveKind,
+  recordId: string
+): string {
+  return `${LEGACY_COMPLETED_STEPS_PREFIX}${userId}_${completedStepsCollectionForKind(recordKind)}_${recordId}`;
+}
+
+export function kindsSharingCompletedStepsCollection(
+  recordKind: RecordSaveKind
+): RecordSaveKind[] {
+  const collection = completedStepsCollectionForKind(recordKind);
+  return RECORD_SAVE_KINDS.filter((kind) => completedStepsCollectionForKind(kind) === collection);
+}
+
+function localQueueId(userId: string, recordKind: RecordSaveKind, recordId: string): string {
+  return `${userId}:${completedStepsCollectionForKind(recordKind)}:${recordId}`;
+}
+
+async function readLocalPayload(key: string): Promise<string[]> {
+  try {
+    const raw = await AsyncStorage.getItem(key);
+    if (!raw) return [];
+    return parseLocalCompletedStepsPayload(raw);
+  } catch {
+    return [];
+  }
 }
 
 /** Canonical Firestore subcollection for coordination metadata. */
@@ -180,18 +229,29 @@ function mayWriteCompletedSteps(
   return mayIssueRemoteWork(session, userId);
 }
 
+function localLookupKeys(
+  userId: string,
+  recordKind: RecordSaveKind,
+  recordId: string
+): string[] {
+  const keys = [
+    localCompletedStepsKey(userId, recordKind, recordId),
+    legacyCompletedStepsKey(userId, recordKind, recordId),
+  ];
+  for (const kind of kindsSharingCompletedStepsCollection(recordKind)) {
+    if (kind === recordKind) continue;
+    keys.push(localCompletedStepsKey(userId, kind, recordId));
+  }
+  return [...new Set(keys)];
+}
+
 async function fetchLocalCompletedSteps(
   userId: string,
   recordKind: RecordSaveKind,
   recordId: string
 ): Promise<string[]> {
-  try {
-    const raw = await AsyncStorage.getItem(localKey(userId, recordKind, recordId));
-    if (!raw) return [];
-    return parseLocalCompletedStepsPayload(raw);
-  } catch {
-    return [];
-  }
+  const lists = await Promise.all(localLookupKeys(userId, recordKind, recordId).map(readLocalPayload));
+  return unionCompletedSteps(...lists);
 }
 
 export async function fetchRecordCompletedSteps(
@@ -273,8 +333,8 @@ export async function appendRecordCompletedStep(
     }
   }
 
-  const key = localKey(userId, recordKind, recordId);
-  return withSerializedLocal(key, async () => {
+  const currentKey = localCompletedStepsKey(userId, recordKind, recordId);
+  return withSerializedLocal(localQueueId(userId, recordKind, recordId), async () => {
     const existing = await fetchLocalCompletedSteps(userId, recordKind, recordId);
     await boundaryHooks?.beforeFallbackGet?.();
     if (!mayWriteCompletedSteps(session, userId)) {
@@ -287,9 +347,10 @@ export async function appendRecordCompletedStep(
     const next = mergeCompletedSteps(existing, step);
     noteCompletedStepWrite({ ...observationBase, phase: "primary_update" });
     try {
-      await AsyncStorage.setItem(key, JSON.stringify({ completedSteps: next }));
+      await AsyncStorage.setItem(currentKey, JSON.stringify({ completedSteps: next }));
     } catch {
-      // memory-only fallback is the in-memory merge returned below
+      // Keep Round 10 (and any sibling) payloads. Unpersisted merge is not durable.
+      return fetchLocalCompletedSteps(userId, recordKind, recordId);
     }
     return next;
   });

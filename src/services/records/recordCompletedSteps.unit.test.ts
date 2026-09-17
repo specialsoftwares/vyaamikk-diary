@@ -133,6 +133,106 @@ async function main() {
   );
   assert.deepEqual(nextLegacy, [SAVE_STEP.BASE_RECORD_CREATED, SAVE_STEP.PDF_GENERATED]);
 
+  const round10Key = "vyd_steps_v1_u_r10_entries_en_r10";
+  const round10Payload = JSON.stringify([SAVE_STEP.BASE_RECORD_CREATED]);
+  await AsyncStorage.setItem(round10Key, round10Payload);
+  const r10Fetched = await fetchRecordCompletedSteps("u_r10", "business_entry", "en_r10");
+  assert.deepEqual(r10Fetched, [SAVE_STEP.BASE_RECORD_CREATED], "fetch must read the Round 10 key");
+  assert.deepEqual(
+    await fetchRecordCompletedSteps("u_r10", "draft_convert", "en_r10"),
+    [SAVE_STEP.BASE_RECORD_CREATED],
+    "diary/draft conversion historically shared the entries collection key"
+  );
+  const r10Again = await fetchRecordCompletedSteps("u_r10", "business_entry", "en_r10");
+  assert.deepEqual(r10Again, r10Fetched, "repeated reads keep acknowledged steps");
+  const r10Appended = await appendRecordCompletedStep(
+    "u_r10",
+    "business_entry",
+    "en_r10",
+    SAVE_STEP.PDF_GENERATED
+  );
+  assert.deepEqual(r10Appended, [SAVE_STEP.BASE_RECORD_CREATED, SAVE_STEP.PDF_GENERATED]);
+  assert.equal(await AsyncStorage.getItem(round10Key), round10Payload, "legacy key retained after persist");
+  const currentR10 = "vyd_completed_steps_v1_u_r10_business_entry_en_r10";
+  assert.equal(
+    (await AsyncStorage.getItem(currentR10)) != null,
+    true,
+    "successful append writes the Round 12 key"
+  );
+  const r10Retry = await appendRecordCompletedStep(
+    "u_r10",
+    "business_entry",
+    "en_r10",
+    SAVE_STEP.PDF_GENERATED
+  );
+  assert.deepEqual(r10Retry, [SAVE_STEP.BASE_RECORD_CREATED, SAVE_STEP.PDF_GENERATED]);
+
+  const bothLegacy = "vyd_steps_v1_u_both_entries_en_both";
+  const bothCurrent = "vyd_completed_steps_v1_u_both_business_entry_en_both";
+  await AsyncStorage.setItem(bothLegacy, JSON.stringify([SAVE_STEP.BASE_RECORD_CREATED]));
+  await AsyncStorage.setItem(
+    bothCurrent,
+    JSON.stringify({ completedSteps: [SAVE_STEP.PDF_GENERATED] })
+  );
+  const bothFetched = await fetchRecordCompletedSteps("u_both", "business_entry", "en_both");
+  assert.deepEqual(bothFetched, [SAVE_STEP.PDF_GENERATED, SAVE_STEP.BASE_RECORD_CREATED]);
+  const bothAppended = await appendRecordCompletedStep(
+    "u_both",
+    "business_entry",
+    "en_both",
+    SAVE_STEP.PDF_URI_SAVED
+  );
+  assert.ok(bothAppended.includes(SAVE_STEP.BASE_RECORD_CREATED));
+  assert.ok(bothAppended.includes(SAVE_STEP.PDF_GENERATED));
+  assert.ok(bothAppended.includes(SAVE_STEP.PDF_URI_SAVED));
+  assert.equal(await AsyncStorage.getItem(bothLegacy), JSON.stringify([SAVE_STEP.BASE_RECORD_CREATED]));
+
+  const ccLegacy = "vyd_steps_v1_u_cc_customerCreditRecords_cr_shared";
+  await AsyncStorage.setItem(ccLegacy, JSON.stringify([SAVE_STEP.BASE_RECORD_CREATED]));
+  assert.deepEqual(
+    await fetchRecordCompletedSteps("u_cc", "customer_credit_payment", "cr_shared"),
+    [SAVE_STEP.BASE_RECORD_CREATED]
+  );
+  assert.deepEqual(
+    await fetchRecordCompletedSteps("u_cc", "customer_credit_closure", "cr_shared"),
+    [SAVE_STEP.BASE_RECORD_CREATED]
+  );
+  const ccPay = await appendRecordCompletedStep(
+    "u_cc",
+    "customer_credit_payment",
+    "cr_shared",
+    SAVE_STEP.LEDGER_EVENT_APPENDED
+  );
+  assert.deepEqual(ccPay, [SAVE_STEP.BASE_RECORD_CREATED, SAVE_STEP.LEDGER_EVENT_APPENDED]);
+  assert.equal(await AsyncStorage.getItem(ccLegacy), JSON.stringify([SAVE_STEP.BASE_RECORD_CREATED]));
+
+  const failLegacy = "vyd_steps_v1_u_fail_entries_en_fail";
+  const failLegacyPayload = JSON.stringify([SAVE_STEP.BASE_RECORD_CREATED]);
+  await AsyncStorage.setItem(failLegacy, failLegacyPayload);
+  const originalSetItem = AsyncStorage.setItem.bind(AsyncStorage);
+  AsyncStorage.setItem = async (key: string, value: string) => {
+    if (String(key).includes("vyd_completed_steps_v1_u_fail_")) {
+      throw new Error("persist_fail");
+    }
+    return originalSetItem(key, value);
+  };
+  try {
+    const failedAppend = await appendRecordCompletedStep(
+      "u_fail",
+      "business_entry",
+      "en_fail",
+      SAVE_STEP.PDF_GENERATED
+    );
+    assert.deepEqual(failedAppend, [SAVE_STEP.BASE_RECORD_CREATED], "persist failure must not drop old progress");
+    assert.deepEqual(await fetchRecordCompletedSteps("u_fail", "business_entry", "en_fail"), [
+      SAVE_STEP.BASE_RECORD_CREATED,
+    ]);
+    assert.equal(await AsyncStorage.getItem(failLegacy), failLegacyPayload);
+    assert.equal(await AsyncStorage.getItem("vyd_completed_steps_v1_u_fail_business_entry_en_fail"), null);
+  } finally {
+    AsyncStorage.setItem = originalSetItem;
+  }
+
   console.log("recordCompletedSteps.unit.test.ts: ok");
 }
 
