@@ -3,7 +3,7 @@ import { Pressable, StyleSheet } from "react-native";
 
 import { Header, LocaleUiText, Screen } from "@/components/ui";
 import { useI18n, useT } from "@/i18n";
-import { spacing, typography } from "@/theme";
+import { spacing, typography, useThemedStyles } from "@/theme";
 
 import { BenefitEducationScreen } from "./BenefitEducationScreen";
 import { isBillingUxPreviewEnabled } from "./billingUxPreviewGate";
@@ -32,6 +32,7 @@ type LabSurface = "hub" | "education";
 export function BillingUxPreviewLab({ onLeave }: { onLeave: () => void }) {
   const t = useT();
   const { lang, setLang } = useI18n();
+  const styles = usePreviewLabStyles();
   const [surface, setSurface] = useState<LabSurface>("hub");
   const [sheetVisible, setSheetVisible] = useState(false);
   const [triggerContext, setTriggerContext] = useState<UpgradeTriggerContext>("manualUpgrade");
@@ -85,29 +86,49 @@ export function BillingUxPreviewLab({ onLeave }: { onLeave: () => void }) {
       <LocaleUiText style={styles.lead}>{t("billing.preview.subtitle")}</LocaleUiText>
       <LocaleUiText style={styles.note}>{t("billing.preview.note")}</LocaleUiText>
 
-      <LabButton label={t("billing.preview.openEducation")} onPress={() => setSurface("education")} />
+      <LabButton
+        styles={styles}
+        label={t("billing.preview.openEducation")}
+        onPress={() => setSurface("education")}
+      />
       {BILLING_UX_PREVIEW_TRIGGERS.map((trigger) => (
         <LabButton
           key={trigger}
+          styles={styles}
           label={previewTriggerLabel(t, trigger)}
-          onPress={() => openSheet(trigger)}
+          onPress={() => {
+            setCatalogState("ready");
+            setPurchaseState("idle");
+            setRestoreState("idle");
+            setErrorMessage(null);
+            openSheet(trigger);
+          }}
         />
       ))}
       <LabButton
+        styles={styles}
         label={t("billing.preview.catalogLoading")}
         onPress={() => {
           setCatalogState("loading");
+          setPurchaseState("idle");
+          setRestoreState("idle");
+          setErrorMessage(null);
           openSheet("manualUpgrade");
         }}
       />
       <LabButton
+        styles={styles}
         label={t("billing.preview.catalogUnavailable")}
         onPress={() => {
           setCatalogState("unavailable");
+          setPurchaseState("idle");
+          setRestoreState("idle");
+          setErrorMessage(null);
           openSheet("manualUpgrade");
         }}
       />
       <LabButton
+        styles={styles}
         label={t("billing.preview.purchasePending")}
         onPress={() => {
           setCatalogState("ready");
@@ -117,6 +138,7 @@ export function BillingUxPreviewLab({ onLeave }: { onLeave: () => void }) {
         }}
       />
       <LabButton
+        styles={styles}
         label={t("billing.preview.purchaseError")}
         onPress={() => {
           setCatalogState("ready");
@@ -126,10 +148,12 @@ export function BillingUxPreviewLab({ onLeave }: { onLeave: () => void }) {
         }}
       />
       <LabButton
+        styles={styles}
         label={trialEligible ? t("billing.preview.trialOff") : t("billing.preview.trialOn")}
         onPress={() => setTrialEligible((value) => !value)}
       />
       <LabButton
+        styles={styles}
         label={
           trialActionAvailable ? t("billing.preview.trialActionOff") : t("billing.preview.trialActionOn")
         }
@@ -139,10 +163,12 @@ export function BillingUxPreviewLab({ onLeave }: { onLeave: () => void }) {
         {t("billing.preview.lastAction", { action: lastPreviewAction })}
       </LocaleUiText>
       <LabButton
+        styles={styles}
         label={lang === "hi" ? t("language.en") : t("language.hi")}
         onPress={() => setLang(lang === "hi" ? "en" : "hi")}
       />
       <LabButton
+        styles={styles}
         label={reducedMotion ? t("billing.preview.motionOn") : t("billing.preview.motionOff")}
         onPress={() => setReducedMotion((value) => !value)}
       />
@@ -182,6 +208,7 @@ export function BillingUxPreviewLab({ onLeave }: { onLeave: () => void }) {
           setSheetVisible(false);
           setPurchaseState("idle");
           setRestoreState("idle");
+          setErrorMessage(null);
         }}
         onOpenBenefitEducation={() => {
           setSheetVisible(false);
@@ -205,7 +232,49 @@ function previewTriggerLabel(t: TranslateFn, trigger: UpgradeTriggerContext): st
   }
 }
 
-function LabButton({ label, onPress }: { label: string; onPress: () => void }) {
+function usePreviewLabStyles() {
+  return useThemedStyles((c) =>
+    StyleSheet.create({
+      lead: {
+        ...typography.body,
+        color: c.text,
+        marginBottom: spacing.sm,
+      },
+      note: {
+        ...typography.caption,
+        color: c.textMuted,
+        marginBottom: spacing.lg,
+      },
+      btn: {
+        minHeight: 48,
+        borderRadius: 12,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: c.divider,
+        backgroundColor: c.surface,
+        justifyContent: "center",
+        paddingHorizontal: spacing.md,
+        marginBottom: spacing.sm,
+      },
+      btnLabel: {
+        ...typography.bodyStrong,
+        color: c.text,
+      },
+      pressed: {
+        opacity: 0.7,
+      },
+    })
+  );
+}
+
+function LabButton({
+  label,
+  onPress,
+  styles,
+}: {
+  label: string;
+  onPress: () => void;
+  styles: ReturnType<typeof usePreviewLabStyles>;
+}) {
   return (
     <Pressable
       onPress={onPress}
@@ -217,28 +286,3 @@ function LabButton({ label, onPress }: { label: string; onPress: () => void }) {
     </Pressable>
   );
 }
-
-const styles = StyleSheet.create({
-  lead: {
-    ...typography.body,
-    marginBottom: spacing.sm,
-  },
-  note: {
-    ...typography.caption,
-    marginBottom: spacing.lg,
-  },
-  btn: {
-    minHeight: 48,
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    justifyContent: "center",
-    paddingHorizontal: spacing.md,
-    marginBottom: spacing.sm,
-  },
-  btnLabel: {
-    ...typography.bodyStrong,
-  },
-  pressed: {
-    opacity: 0.7,
-  },
-});

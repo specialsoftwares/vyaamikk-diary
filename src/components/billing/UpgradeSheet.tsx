@@ -10,6 +10,7 @@ import {
 import { LocaleUiText } from "@/components/ui/LocaleUiText";
 import {
   CurtainSheet,
+  CURTAIN_SURFACE,
   type CurtainSheetHandle,
 } from "@/components/ui/CurtainSheet";
 import { BRAND_GOLD } from "@/config/brandMotion";
@@ -194,6 +195,7 @@ export function UpgradeSheet({
         </View>
       }
     >
+      <View style={styles.sheetBody}>
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
@@ -309,7 +311,8 @@ export function UpgradeSheet({
             <LocaleUiText style={styles.errorText}>{errorMessage}</LocaleUiText>
           </View>
         ) : null}
-
+      </ScrollView>
+      <View style={styles.ctaDock}>
         <Pressable
           onPress={() => {
             const press = chooseUpgradePrimaryPress({
@@ -361,7 +364,8 @@ export function UpgradeSheet({
             {restoreEnabled ? t("billing.upgrade.ctaRestore") : t("billing.upgrade.restoreUnavailable")}
           </LocaleUiText>
         </Pressable>
-      </ScrollView>
+      </View>
+      </View>
     </CurtainSheet>
   );
 }
@@ -403,11 +407,15 @@ const styles = StyleSheet.create({
     color: CURTAIN_TEXT,
     marginTop: -2,
   },
-  scroll: { flex: 1 },
+  scroll: { flex: 1, minHeight: 0 },
+  sheetBody: {
+    flex: 1,
+    minHeight: 0,
+  },
   scrollContent: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
-    paddingBottom: spacing.xl,
+    paddingBottom: spacing.md,
     gap: spacing.md,
   },
   metaBlock: {
@@ -518,6 +526,15 @@ const styles = StyleSheet.create({
   errorText: {
     ...typography.caption,
     color: "#FECACA",
+  },
+  ctaDock: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.lg,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: CURTAIN_DIVIDER,
+    backgroundColor: CURTAIN_SURFACE,
+    gap: spacing.sm,
   },
   primaryCta: {
     minHeight: 52,
