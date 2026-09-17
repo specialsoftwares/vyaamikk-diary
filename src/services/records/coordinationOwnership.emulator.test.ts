@@ -262,6 +262,62 @@ async function main() {
       throw new Error("loser mutations must leave the winner unchanged");
     }
 
+    // Canonical Customer Credit collection + session recheck inside transaction retries.
+    const ccId = "cr_r12_canonical";
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", uid, "customerCreditRecords", ccId), {
+        userId: uid,
+        clientRecordId: ccId,
+        saleDate: 1_700_000_000_000,
+        mode: "credit",
+        customerName: "Coord CC",
+        saleAmount: 100,
+        createdAt: 1_700_000_000_000,
+        updatedAt: 1_700_000_000_000,
+      });
+    });
+    syncSessionOwnership.resetForTests();
+    const ccSession = syncSessionOwnership.beginSession(uid);
+    await appendRecordCompletedStep(uid, "customer_credit", ccId, SAVE_STEP.BASE_RECORD_CREATED, ccSession);
+    const ccSnap = await getDoc(doc(db, "users", uid, "customerCreditRecords", ccId));
+    const ccSteps = (ccSnap.data()?.completedSteps as string[]) ?? [];
+    if (!ccSteps.includes(SAVE_STEP.BASE_RECORD_CREATED)) {
+      throw new Error("customer credit completedSteps must land on customerCreditRecords");
+    }
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const wrongSnap = await getDoc(doc(ctx.firestore(), "users", uid, "customerCredits", ccId));
+      if (wrongSnap.exists()) {
+        throw new Error("completedSteps must not write the non-canonical customerCredits collection");
+      }
+    });
+
+    const txHold = barrier();
+    setCompletedStepBoundaryHooksForTests({
+      failPrimaryUpdate: true,
+      insideTransactionCallback: txHold.gate,
+    });
+    const txAppend = appendRecordCompletedStep(
+      uid,
+      "customer_credit",
+      ccId,
+      SAVE_STEP.PDF_GENERATED,
+      ccSession
+    );
+    await txHold.waitUntilEntered();
+    syncSessionOwnership.endSession();
+    txHold.release();
+    const afterTx = await txAppend;
+    if (afterTx.includes(SAVE_STEP.PDF_GENERATED)) {
+      throw new Error("retired transaction callback must not append PDF_GENERATED");
+    }
+    const ccAfter = await getDoc(doc(db, "users", uid, "customerCreditRecords", ccId));
+    const ccAfterSteps = (ccAfter.data()?.completedSteps as string[]) ?? [];
+    if (ccAfterSteps.includes(SAVE_STEP.PDF_GENERATED)) {
+      throw new Error("session check inside transaction retry must skip the write");
+    }
+    setCompletedStepBoundaryHooksForTests(null);
+    setCompletedStepWriteObserverForTests(null);
+
     console.log("coordinationOwnership.emulator.test.ts: ok (Firestore emulator)");
   } finally {
     setCompletedStepsFirestoreForTests(null);

@@ -514,6 +514,7 @@ async function finishComposerSavePipeline(
         },
         async () => {
           const { syncInsightsFromBusinessEntry } = await import("@/services/insights/insightSync");
+          if (!mayIssueRemoteWork(session, userId)) return;
           return syncInsightsFromBusinessEntry(userId, input.ueid, withPdf);
         }
       );

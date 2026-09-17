@@ -8,7 +8,7 @@ import {
 } from "@/services/records/saveCoordinator";
 import { attachRecordIdToPersistentLock } from "@/services/records/persistentSaveLock";
 import { SAVE_STEP, SaveStillInProgressError } from "@/services/records/saveLockTypes";
-import type { SaveIdempotencyContext } from "@/services/records/saveIdempotency";
+import type { SaveIdempotencyContext, ProcessSaveLockOwner } from "@/services/records/saveIdempotency";
 import { stableRecordId } from "@/services/records/stableRecordId";
 
 import { getCustomerCreditRepository } from "./index";
@@ -21,6 +21,7 @@ export async function saveCustomerCreditPayment(
   idempotency: SaveIdempotencyContext
 ): Promise<CustomerCreditRecord> {
   const processLockKey = idempotency.idempotencyKey;
+  let processLockOwner: ProcessSaveLockOwner | null = null;
   const payId = stableRecordId(payment.clientPaymentId ?? idempotency.clientRecordId, "pay");
   const repo = getCustomerCreditRepository();
 
@@ -52,6 +53,7 @@ export async function saveCustomerCreditPayment(
     const begun = await beginCoordinatedSave(idempotency, {
       processLockKey,
     });
+    processLockOwner = begun.processLockOwner;
 
     if (begun.decision.action === "return_done") {
       const donePaymentId = begun.decision.recordId;
@@ -156,7 +158,10 @@ export async function saveCustomerCreditPayment(
       idempotency.clientRecordId,
       payId
     );
-    await completeCoordinatedSave(idempotency, payId, { processLockKey });
+    await completeCoordinatedSave(idempotency, payId, {
+      processLockKey,
+      processLockOwner: processLockOwner ?? undefined,
+    });
     return updated;
   } catch (e) {
     if (e instanceof SaveStillInProgressError) throw e;
@@ -170,6 +175,7 @@ export async function saveCustomerCreditPayment(
     });
     await failCoordinatedSave(idempotency, "credit_payment_failed", {
       processLockKey,
+      processLockOwner: processLockOwner ?? undefined,
       clearRegistry: false,
     });
     throw e;

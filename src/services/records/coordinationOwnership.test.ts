@@ -378,6 +378,39 @@ async function main() {
   );
   setBeginSaveAttemptGateForTests(null);
 
+  // Operation-owned process lock is released when completeSaveAttempt throws.
+  syncSessionOwnership.resetForTests();
+  const sessionThrow = syncSessionOwnership.beginSession("u1");
+  const ctxThrow = createSaveIdempotencyContext({
+    userId: "u1",
+    recordKind: "business_entry",
+    clientRecordId: "en_r12_lock_throw",
+  });
+  const begunThrow = await beginCoordinatedSave(ctxThrow, {
+    processLockKey: ctxThrow.idempotencyKey,
+    session: sessionThrow,
+  });
+  assert.equal(begunThrow.decision.action, "proceed");
+  setCompleteSaveAttemptGateForTests(async () => {
+    throw new Error("complete_attempt_boom");
+  });
+  await assert.rejects(
+    () =>
+      completeCoordinatedSave(begunThrow.idempotency, "en_r12_lock_throw", {
+        processLockKey: ctxThrow.idempotencyKey,
+        processLockOwner: begunThrow.processLockOwner ?? undefined,
+        lockLeaseStartedAt: begunThrow.lockLeaseStartedAt ?? undefined,
+        session: sessionThrow,
+      }),
+    /complete_attempt_boom/
+  );
+  assert.equal(
+    isProcessSaveLockHeld(ctxThrow.idempotencyKey),
+    false,
+    "owner must release the process lock when completeSaveAttempt throws"
+  );
+  setCompleteSaveAttemptGateForTests(null);
+
   const composerSrc = fs.readFileSync(
     path.join(import.meta.dirname, "../diary/saveComposerEntry.ts"),
     "utf8"
@@ -386,6 +419,15 @@ async function main() {
   assert.equal(composerSrc.includes("issuesRemoteWork: false"), true);
   assert.equal(composerSrc.includes("SAVE_STEP.INSIGHTS_INDEXED"), true);
   assert.equal(composerSrc.includes('await import("@/services/insights/insightSync")'), true);
+  const insightStart = composerSrc.indexOf("SAVE_STEP.INSIGHTS_INDEXED");
+  const insightSlice = composerSrc.slice(insightStart, insightStart + 900);
+  const importAt = insightSlice.indexOf('await import("@/services/insights/insightSync")');
+  const recheckAt = insightSlice.lastIndexOf("mayIssueRemoteWork(session, userId)");
+  assert.ok(importAt >= 0, "composer insight callback must await insightSync import");
+  assert.ok(
+    recheckAt > importAt,
+    "original session must be rechecked after the awaited insight import"
+  );
   assert.equal(composerSrc.includes("completeCoordinatedSave"), true);
 
   console.log("coordinationOwnership.test.ts: ok");

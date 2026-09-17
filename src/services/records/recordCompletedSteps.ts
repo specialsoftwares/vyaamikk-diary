@@ -12,6 +12,8 @@ import {
   type Firestore,
 } from "firebase/firestore";
 
+import { getActiveBackend } from "@/config/env";
+import type { ActiveBackend } from "@/config/runtimeEnvironment";
 import { getFirebaseDb } from "@/config/firebase";
 import { mayIssueRemoteWork, type SyncSessionToken } from "@/sync/syncSessionOwnership";
 
@@ -51,7 +53,8 @@ function localKey(userId: string, recordKind: RecordSaveKind, recordId: string):
   return `${LOCAL_PREFIX}${userId}_${recordKind}_${recordId}`;
 }
 
-function collectionForKind(recordKind: RecordSaveKind): string {
+/** Canonical Firestore subcollection for coordination metadata. */
+export function completedStepsCollectionForKind(recordKind: RecordSaveKind): string {
   switch (recordKind) {
     case "professional_pack":
       return "professionalPacks";
@@ -60,12 +63,20 @@ function collectionForKind(recordKind: RecordSaveKind): string {
     case "customer_credit":
     case "customer_credit_closure":
     case "customer_credit_payment":
-      return "customerCredits";
+      return "customerCreditRecords";
     case "letterhead_doc":
       return "letterheadDocs";
     default:
       return "entries";
   }
+}
+
+/**
+ * Remote completed-step writes follow the explicit backend, not "Firebase is
+ * importable". local-mock stays on AsyncStorage even when a web SDK exists.
+ */
+export function completedStepsUsesRemoteStore(backend: ActiveBackend): boolean {
+  return backend === "firebase-shared-dev" || backend === "firebase-production";
 }
 
 let firestoreForTests: Firestore | null = null;
@@ -100,6 +111,8 @@ export type CompletedStepBoundaryHooks = {
   beforeFallbackGet?: () => Promise<void>;
   /** Pause immediately before a fallback write is dispatched. */
   beforeFallbackWrite?: () => Promise<void>;
+  /** Pause inside the Firestore transaction callback (including retries). */
+  insideTransactionCallback?: () => Promise<void>;
 };
 
 let boundaryHooks: CompletedStepBoundaryHooks | null = null;
@@ -120,20 +133,32 @@ function db(): Firestore {
 
 function useFirestore(): boolean {
   if (firestoreForTests) return true;
-  try {
-    return Boolean(getFirebaseDb());
-  } catch {
-    return false;
-  }
+  return completedStepsUsesRemoteStore(getActiveBackend());
 }
 
 function recordRef(userId: string, recordKind: RecordSaveKind, recordId: string) {
-  return doc(db(), "users", userId, collectionForKind(recordKind), recordId);
+  return doc(db(), "users", userId, completedStepsCollectionForKind(recordKind), recordId);
 }
 
 function parseCompletedSteps(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   return raw.filter((s): s is string => typeof s === "string" && s.length > 0);
+}
+
+/** Accept current `{ completedSteps }` objects and older array / `{ steps }` payloads. */
+export function parseLocalCompletedStepsPayload(raw: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parseCompletedSteps(parsed);
+    if (parsed && typeof parsed === "object") {
+      const rec = parsed as { completedSteps?: unknown; steps?: unknown };
+      if (Array.isArray(rec.completedSteps)) return parseCompletedSteps(rec.completedSteps);
+      if (Array.isArray(rec.steps)) return parseCompletedSteps(rec.steps);
+    }
+  } catch {
+    return [];
+  }
+  return [];
 }
 
 /** Patch shape for coordination-only writes — never includes content `updatedAt`. */
@@ -163,8 +188,7 @@ async function fetchLocalCompletedSteps(
   try {
     const raw = await AsyncStorage.getItem(localKey(userId, recordKind, recordId));
     if (!raw) return [];
-    const parsed = JSON.parse(raw) as { completedSteps?: unknown };
-    return parseCompletedSteps(parsed.completedSteps);
+    return parseLocalCompletedStepsPayload(raw);
   } catch {
     return [];
   }
@@ -192,12 +216,16 @@ async function appendCompletedStepFallbackAtomic(
   userId: string,
   recordKind: RecordSaveKind,
   recordId: string,
-  step: SaveStepName
+  step: SaveStepName,
+  session?: SyncSessionToken | null
 ): Promise<string[]> {
   const ref = recordRef(userId, recordKind, recordId);
   const nowMs = Date.now();
   await runTransaction(db(), async (tx) => {
+    if (!mayWriteCompletedSteps(session, userId)) return;
     const snap = await tx.get(ref);
+    await boundaryHooks?.insideTransactionCallback?.();
+    if (!mayWriteCompletedSteps(session, userId)) return;
     if (!snap.exists()) return;
     tx.update(ref, completedStepsCoordinationPatch(arrayUnion(step), nowMs));
   });
@@ -241,7 +269,7 @@ export async function appendRecordCompletedStep(
       }
       if (!snap.exists()) return current;
       noteCompletedStepWrite({ ...observationBase, phase: "fallback_write" });
-      return appendCompletedStepFallbackAtomic(userId, recordKind, recordId, step);
+      return appendCompletedStepFallbackAtomic(userId, recordKind, recordId, step, session);
     }
   }
 

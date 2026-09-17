@@ -328,23 +328,18 @@ export async function beginCoordinatedSave(
   }
 }
 
+function releaseOwnedProcessLock(options?: CoordinatedSaveLockOptions): void {
+  if (options?.processLockKey && options.processLockOwner) {
+    releaseProcessSaveLock(options.processLockKey, options.processLockOwner);
+  }
+}
+
 export async function completeCoordinatedSave(
   idempotency: SaveIdempotencyContext,
   recordId: string,
   options?: CoordinatedSaveLockOptions
 ): Promise<void> {
-  if (!stillOwnsRemoteCoordination(options?.session, idempotency.userId)) {
-    await retireOwnedReservation({
-      userId: idempotency.userId,
-      clientRecordId: idempotency.clientRecordId,
-      processLockKey: options?.processLockKey,
-      processLockOwner: options?.processLockOwner,
-      lockLeaseStartedAt: options?.lockLeaseStartedAt,
-    });
-    return;
-  }
-  if (!options?.isUpdate) {
-    await completeSaveAttempt(idempotency, recordId);
+  try {
     if (!stillOwnsRemoteCoordination(options?.session, idempotency.userId)) {
       await retireOwnedReservation({
         userId: idempotency.userId,
@@ -355,24 +350,36 @@ export async function completeCoordinatedSave(
       });
       return;
     }
-    await markPersistentLockDone(
-      idempotency.userId,
-      idempotency.clientRecordId,
-      recordId,
-      options?.lockLeaseStartedAt
-    );
+    if (!options?.isUpdate) {
+      await completeSaveAttempt(idempotency, recordId);
+      if (!stillOwnsRemoteCoordination(options?.session, idempotency.userId)) {
+        await retireOwnedReservation({
+          userId: idempotency.userId,
+          clientRecordId: idempotency.clientRecordId,
+          processLockKey: options?.processLockKey,
+          processLockOwner: options?.processLockOwner,
+          lockLeaseStartedAt: options?.lockLeaseStartedAt,
+        });
+        return;
+      }
+      await markPersistentLockDone(
+        idempotency.userId,
+        idempotency.clientRecordId,
+        recordId,
+        options?.lockLeaseStartedAt
+      );
+    }
+    logSaveDiagnostic({
+      phase: "complete",
+      recordKind: idempotency.recordKind,
+      userId: idempotency.userId,
+      clientRecordId: idempotency.clientRecordId,
+      remoteId: recordId,
+      idempotencyKey: idempotency.idempotencyKey,
+    });
+  } finally {
+    releaseOwnedProcessLock(options);
   }
-  if (options?.processLockKey) {
-    releaseProcessSaveLock(options.processLockKey, options.processLockOwner);
-  }
-  logSaveDiagnostic({
-    phase: "complete",
-    recordKind: idempotency.recordKind,
-    userId: idempotency.userId,
-    clientRecordId: idempotency.clientRecordId,
-    remoteId: recordId,
-    idempotencyKey: idempotency.idempotencyKey,
-  });
 }
 
 export async function failCoordinatedSave(
@@ -380,36 +387,37 @@ export async function failCoordinatedSave(
   failureCode: string,
   options?: CoordinatedSaveLockOptions
 ): Promise<void> {
-  if (!stillOwnsRemoteCoordination(options?.session, idempotency.userId)) {
-    await retireOwnedReservation({
+  try {
+    if (!stillOwnsRemoteCoordination(options?.session, idempotency.userId)) {
+      await retireOwnedReservation({
+        userId: idempotency.userId,
+        clientRecordId: idempotency.clientRecordId,
+        processLockKey: options?.processLockKey,
+        processLockOwner: options?.processLockOwner,
+        lockLeaseStartedAt: options?.lockLeaseStartedAt,
+      });
+      return;
+    }
+    await markPersistentLockFailed(
+      idempotency.userId,
+      idempotency.clientRecordId,
+      failureCode,
+      options?.lockLeaseStartedAt
+    );
+    if (options?.clearRegistry !== false && !options?.isUpdate) {
+      await failSaveAttempt(idempotency);
+    }
+    logSaveDiagnostic({
+      phase: "error",
+      recordKind: idempotency.recordKind,
       userId: idempotency.userId,
       clientRecordId: idempotency.clientRecordId,
-      processLockKey: options?.processLockKey,
-      processLockOwner: options?.processLockOwner,
-      lockLeaseStartedAt: options?.lockLeaseStartedAt,
+      idempotencyKey: idempotency.idempotencyKey,
+      message: failureCode,
     });
-    return;
+  } finally {
+    releaseOwnedProcessLock(options);
   }
-  await markPersistentLockFailed(
-    idempotency.userId,
-    idempotency.clientRecordId,
-    failureCode,
-    options?.lockLeaseStartedAt
-  );
-  if (options?.clearRegistry !== false && !options?.isUpdate) {
-    await failSaveAttempt(idempotency);
-  }
-  if (options?.processLockKey) {
-    releaseProcessSaveLock(options.processLockKey, options.processLockOwner);
-  }
-  logSaveDiagnostic({
-    phase: "error",
-    recordKind: idempotency.recordKind,
-    userId: idempotency.userId,
-    clientRecordId: idempotency.clientRecordId,
-    idempotencyKey: idempotency.idempotencyKey,
-    message: failureCode,
-  });
 }
 
 export function shouldRunStep(

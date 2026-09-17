@@ -309,6 +309,7 @@ async function run(): Promise<void> {
   assert.ok(baseStep.completedSteps.includes(SAVE_STEP.BASE_RECORD_CREATED));
   await failCoordinatedSave(begun.idempotency, "pdf_side_effect_failed", {
     processLockKey: mCtx.idempotencyKey,
+    processLockOwner: begun.processLockOwner ?? undefined,
     clearRegistry: false,
   });
   const failedLock = await readPersistentSaveLock(mUser, begun.clientRecordId);
