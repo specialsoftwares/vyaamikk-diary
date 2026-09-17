@@ -26,6 +26,7 @@ export async function attachComposerPdfUri(params: {
   pdfUri: string;
   completedSteps: string[];
   clientRecordId?: string;
+  lockLeaseStartedAt?: number;
   session?: SyncSessionToken | null;
 }): Promise<{
   entry: BusinessEntry;
@@ -57,6 +58,8 @@ export async function attachComposerPdfUri(params: {
       step: SAVE_STEP.PDF_URI_SAVED,
       completedSteps: params.completedSteps,
       clientRecordId: params.clientRecordId,
+      lockLeaseStartedAt: params.lockLeaseStartedAt,
+      session: params.session,
     },
     async () => write.entry
   );

@@ -27,7 +27,7 @@ import {
   logLifecyclePhase,
   runBestEffortSecondary,
 } from "@/services/records/saveLifecycleRunner";
-import { SAVE_STEP, SaveStillInProgressError, hasCompletedStep } from "@/services/records/saveLockTypes";
+import { SAVE_STEP, SaveRetryableError, SaveStillInProgressError, hasCompletedStep } from "@/services/records/saveLockTypes";
 import type { SaveIdempotencyContext } from "@/services/records/saveIdempotency";
 import { releaseProcessSaveLock } from "@/services/records/saveIdempotency";
 import {
@@ -136,6 +136,7 @@ export async function saveComposerEntry(
         ueid: input.ueid,
         processLockKey: processLockKey ?? undefined,
         route: options.route,
+        session,
       });
       idempotency = begun.idempotency;
       input.clientRecordId = begun.clientRecordId;
@@ -314,6 +315,7 @@ export async function saveComposerEntry(
     };
   } catch (e) {
     if (e instanceof SaveStillInProgressError) throw e;
+    if (e instanceof SaveRetryableError && e.failureCode === "session_retired") throw e;
     logLifecyclePhase(e instanceof Error ? e.message : "composer_save_failed", {
       phase: "error",
       recordKind: "business_entry",
@@ -439,6 +441,7 @@ async function finishComposerSavePipeline(
             lockLeaseStartedAt: lockLeaseStartedAt ?? undefined,
             session,
             alwaysRun: alreadyGenerated,
+            issuesRemoteWork: false,
           },
           () => generateComposerPdfFile(withPdf, options)
         );
@@ -456,6 +459,7 @@ async function finishComposerSavePipeline(
           pdfUri: generatedUri,
           completedSteps,
           clientRecordId: input.clientRecordId,
+          lockLeaseStartedAt: lockLeaseStartedAt ?? undefined,
           session,
         });
         withPdf = attached.entry;

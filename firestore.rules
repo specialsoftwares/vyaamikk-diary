@@ -460,7 +460,10 @@ service cloud.firestore {
       // ---- Save coordination locks --------------------------------------
       match /_saveLocks/{clientRecordId} {
         allow read: if isOwner(uid)
-                    && resource.data.userId == uid;
+                    && (
+                      resource == null
+                      || resource.data.userId == uid
+                    );
         allow create: if isActiveUser(uid)
                       && saveLockCreateValid(uid, clientRecordId);
         allow update: if isActiveUser(uid)

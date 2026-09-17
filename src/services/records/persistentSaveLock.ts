@@ -3,10 +3,13 @@
  *
  * Collection: users/{uid}/_saveLocks/{clientRecordId}
  * Lightweight coordination metadata only.
+ *
+ * Lease mutations are conditional: Firestore uses a transaction; local storage
+ * serializes per key. A stale owner must not overwrite a newer lease.
  */
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc, runTransaction, type Firestore } from "firebase/firestore";
 
 import { getActiveBackend } from "@/config/env";
 import { getFirebaseDb } from "@/config/firebase";
@@ -22,9 +25,72 @@ import type { RecordSaveKind } from "./saveIdempotency";
 const log = createLogger("save/persistentLock");
 const LOCAL_PREFIX = "vyd_persistent_save_lock_v1_";
 
+const localQueues = new Map<string, Promise<unknown>>();
+
+let firestoreForTests: Firestore | null = null;
+let afterReadGate: ((existing: SaveLockDoc | null) => Promise<void>) | null = null;
+let touchGate: (() => Promise<void>) | null = null;
+let nowMsForTests: number | null = null;
+
+/** Node/CI seam. Production still uses getFirebaseDb() / active backend. */
+export function setPersistentLockFirestoreForTests(db: Firestore | null): void {
+  firestoreForTests = db;
+}
+
+export function setPersistentLockNowMsForTests(nowMs: number | null): void {
+  nowMsForTests = nowMs;
+}
+
+function nowMs(): number {
+  return nowMsForTests ?? Date.now();
+}
+
+/**
+ * Test-only: runs after a preview read and before the atomic transition.
+ * Lets another operation install a newer lease between read and write.
+ */
+export function setPersistentLockAfterReadGateForTests(
+  gate: ((existing: SaveLockDoc | null) => Promise<void>) | null
+): void {
+  afterReadGate = gate;
+}
+
+/** Test-only: pause at the start of touchPersistentLock. */
+export function setPersistentLockTouchGateForTests(
+  gate: (() => Promise<void>) | null
+): void {
+  touchGate = gate;
+}
+
+async function withSerializedLocal<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const prev = localQueues.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const done = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  localQueues.set(
+    key,
+    prev.then(
+      () => done,
+      () => done
+    )
+  );
+  try {
+    await prev.catch(() => undefined);
+    return await fn();
+  } finally {
+    release();
+  }
+}
+
 function usesFirestoreLock(): boolean {
+  if (firestoreForTests) return true;
   const backend = getActiveBackend();
   return backend === "firebase-shared-dev" || backend === "firebase-production";
+}
+
+function lockDb(): Firestore {
+  return firestoreForTests ?? getFirebaseDb();
 }
 
 function localKey(userId: string, clientRecordId: string): string {
@@ -32,7 +98,7 @@ function localKey(userId: string, clientRecordId: string): string {
 }
 
 function firestoreLockRef(userId: string, clientRecordId: string) {
-  return doc(getFirebaseDb(), "users", userId, "_saveLocks", clientRecordId);
+  return doc(lockDb(), "users", userId, "_saveLocks", clientRecordId);
 }
 
 function num(v: unknown, fallback = 0): number {
@@ -54,89 +120,160 @@ function parseLock(raw: Record<string, unknown>): SaveLockDoc {
     expiresAt: num(raw.expiresAt),
     completedAt: raw.completedAt == null ? null : num(raw.completedAt),
     failedAt: raw.failedAt == null ? null : num(raw.failedAt),
-    failureCode: raw.failureCode == null ? null : String(raw.failureCode),
+    failureCode: typeof raw.failureCode === "string" ? raw.failureCode : null,
   };
+}
+
+function lockToPayload(lock: SaveLockDoc): Record<string, unknown> {
+  return {
+    clientRecordId: lock.clientRecordId,
+    idempotencyKey: lock.idempotencyKey,
+    userId: lock.userId,
+    ...(lock.ueid ? { ueid: lock.ueid } : {}),
+    recordKind: lock.recordKind,
+    recordId: lock.recordId ?? null,
+    status: lock.status,
+    startedAt: lock.startedAt,
+    updatedAt: lock.updatedAt,
+    expiresAt: lock.expiresAt,
+    completedAt: lock.completedAt ?? null,
+    failedAt: lock.failedAt ?? null,
+    failureCode: lock.failureCode ?? null,
+  };
+}
+
+export function isLockExpired(lock: SaveLockDoc, now = nowMs()): boolean {
+  return now >= lock.expiresAt;
+}
+
+/**
+ * Lease identity is `startedAt`. `expectedStartedAt == null` means acquire /
+ * replace (not a stale owner write). Session authority is separate.
+ */
+export function lockLeaseMatches(
+  existing: SaveLockDoc | null,
+  expectedStartedAt: number | undefined
+): boolean {
+  if (expectedStartedAt == null) return true;
+  if (!existing) return false;
+  return existing.startedAt === expectedStartedAt;
+}
+
+/** Distinct even when two replacements observe the same millisecond. */
+export function mintLeaseStartedAt(
+  existing: SaveLockDoc | null,
+  now: number,
+  preserveStartedAt?: number
+): number {
+  if (preserveStartedAt != null && Number.isFinite(preserveStartedAt)) {
+    return preserveStartedAt;
+  }
+  if (existing && existing.startedAt >= now) return existing.startedAt + 1;
+  return now;
+}
+
+async function readLocalLock(userId: string, clientRecordId: string): Promise<SaveLockDoc | null> {
+  try {
+    const raw = await AsyncStorage.getItem(localKey(userId, clientRecordId));
+    if (!raw) return null;
+    return parseLock(JSON.parse(raw) as Record<string, unknown>);
+  } catch {
+    return null;
+  }
+}
+
+async function readFirestoreLock(
+  userId: string,
+  clientRecordId: string
+): Promise<SaveLockDoc | null> {
+  const snap = await getDoc(firestoreLockRef(userId, clientRecordId));
+  if (!snap.exists()) return null;
+  return parseLock(snap.data() as Record<string, unknown>);
 }
 
 export async function readPersistentSaveLock(
   userId: string,
   clientRecordId: string
 ): Promise<SaveLockDoc | null> {
-  if (!userId || !clientRecordId) return null;
-  try {
-    if (usesFirestoreLock()) {
-      const snap = await getDoc(firestoreLockRef(userId, clientRecordId));
-      if (!snap.exists()) return null;
-      return parseLock(snap.data() as Record<string, unknown>);
+  if (usesFirestoreLock()) {
+    try {
+      return await readFirestoreLock(userId, clientRecordId);
+    } catch (e) {
+      log.warn("read_lock_failed", { userId, clientRecordId, err: String(e) });
+      return null;
     }
-    const raw = await AsyncStorage.getItem(localKey(userId, clientRecordId));
-    if (!raw) return null;
-    return parseLock(JSON.parse(raw) as Record<string, unknown>);
-  } catch (e) {
-    log.warn("read lock failed", e);
-    return null;
   }
+  return readLocalLock(userId, clientRecordId);
 }
 
-export async function writePersistentSaveLock(lock: SaveLockDoc): Promise<void> {
-  if (!lock.userId || !lock.clientRecordId) return;
-  try {
-    if (usesFirestoreLock()) {
-      await setDoc(firestoreLockRef(lock.userId, lock.clientRecordId), lock, {
-        merge: true,
-      });
-      return;
-    }
-    await AsyncStorage.setItem(
-      localKey(lock.userId, lock.clientRecordId),
-      JSON.stringify(lock)
-    );
-  } catch (e) {
-    log.warn("write lock failed", e);
+async function applyLockTransition(
+  userId: string,
+  clientRecordId: string,
+  expectedLeaseStartedAt: number | undefined,
+  mutator: (existing: SaveLockDoc | null) => SaveLockDoc | null
+): Promise<SaveLockDoc | null> {
+  if (afterReadGate) {
+    const preview = usesFirestoreLock()
+      ? await readFirestoreLock(userId, clientRecordId)
+      : await readLocalLock(userId, clientRecordId);
+    await afterReadGate(preview);
   }
-}
 
-export function isLockExpired(lock: SaveLockDoc, now = Date.now()): boolean {
-  return lock.expiresAt > 0 && now > lock.expiresAt;
+  if (usesFirestoreLock()) {
+    const ref = firestoreLockRef(userId, clientRecordId);
+    return runTransaction(lockDb(), async (tx) => {
+      const snap = await tx.get(ref);
+      const existing = snap.exists() ? parseLock(snap.data() as Record<string, unknown>) : null;
+      if (!lockLeaseMatches(existing, expectedLeaseStartedAt)) return existing;
+      const next = mutator(existing);
+      if (!next) return existing;
+      tx.set(ref, lockToPayload(next));
+      return next;
+    });
+  }
+
+  return withSerializedLocal(localKey(userId, clientRecordId), async () => {
+    const existing = await readLocalLock(userId, clientRecordId);
+    if (!lockLeaseMatches(existing, expectedLeaseStartedAt)) return existing;
+    const next = mutator(existing);
+    if (!next) return existing;
+    await AsyncStorage.setItem(localKey(userId, clientRecordId), JSON.stringify(next));
+    return next;
+  });
 }
 
 export async function markPersistentLockInFlight(params: {
   userId: string;
-  ueid?: string;
   clientRecordId: string;
   idempotencyKey: string;
   recordKind: RecordSaveKind;
   recordId?: string | null;
+  ueid?: string;
   preserveStartedAt?: number;
 }): Promise<SaveLockDoc> {
-  const now = Date.now();
-  const existing = await readPersistentSaveLock(params.userId, params.clientRecordId);
-  let startedAt = params.preserveStartedAt ?? now;
-  if (params.preserveStartedAt == null && existing && existing.startedAt >= startedAt) {
-    startedAt = existing.startedAt + 1;
+  const now = nowMs();
+  const next = await applyLockTransition(params.userId, params.clientRecordId, undefined, (existing) => {
+    const startedAt = mintLeaseStartedAt(existing, now, params.preserveStartedAt);
+    return {
+      clientRecordId: params.clientRecordId,
+      idempotencyKey: params.idempotencyKey,
+      userId: params.userId,
+      ueid: params.ueid,
+      recordKind: params.recordKind,
+      recordId: params.recordId ?? existing?.recordId ?? null,
+      status: "in_flight",
+      startedAt,
+      updatedAt: now,
+      expiresAt: startedAt + SAVE_LOCK_TTL_MS,
+      completedAt: null,
+      failedAt: null,
+      failureCode: null,
+    };
+  });
+  if (!next) {
+    throw new Error("persistent_lock_acquire_failed");
   }
-  const lock: SaveLockDoc = {
-    clientRecordId: params.clientRecordId,
-    idempotencyKey: params.idempotencyKey,
-    userId: params.userId,
-    ueid: params.ueid,
-    recordKind: params.recordKind,
-    recordId: params.recordId ?? null,
-    status: "in_flight",
-    startedAt,
-    updatedAt: now,
-    expiresAt: startedAt + SAVE_LOCK_TTL_MS,
-    completedAt: null,
-    failedAt: null,
-    failureCode: null,
-  };
-  await writePersistentSaveLock(lock);
-  return lock;
-}
-
-function lockLeaseMatches(existing: SaveLockDoc | null, leaseStartedAt?: number): boolean {
-  if (leaseStartedAt == null) return existing != null;
-  return existing != null && existing.startedAt === leaseStartedAt;
+  return next;
 }
 
 export async function touchPersistentLock(
@@ -144,28 +281,28 @@ export async function touchPersistentLock(
   clientRecordId: string,
   leaseStartedAt?: number
 ): Promise<void> {
-  const existing = await readPersistentSaveLock(userId, clientRecordId);
-  if (!lockLeaseMatches(existing, leaseStartedAt)) return;
-  await writePersistentSaveLock({
-    ...existing!,
-    updatedAt: Date.now(),
+  await touchGate?.();
+  const now = nowMs();
+  await applyLockTransition(userId, clientRecordId, leaseStartedAt, (existing) => {
+    if (!existing) return null;
+    return {
+      ...existing,
+      updatedAt: now,
+      expiresAt: existing.startedAt + SAVE_LOCK_TTL_MS,
+    };
   });
 }
 
-/** Link a persisted base record id onto an in-flight lock (after create, before PDF). */
 export async function attachRecordIdToPersistentLock(
   userId: string,
   clientRecordId: string,
   recordId: string,
   leaseStartedAt?: number
 ): Promise<void> {
-  const existing = await readPersistentSaveLock(userId, clientRecordId);
-  if (!lockLeaseMatches(existing, leaseStartedAt)) return;
-  if (existing!.recordId === recordId) return;
-  await writePersistentSaveLock({
-    ...existing!,
-    recordId,
-    updatedAt: Date.now(),
+  const now = nowMs();
+  await applyLockTransition(userId, clientRecordId, leaseStartedAt, (existing) => {
+    if (!existing) return null;
+    return { ...existing, recordId, updatedAt: now };
   });
 }
 
@@ -175,27 +312,18 @@ export async function markPersistentLockDone(
   recordId: string,
   leaseStartedAt?: number
 ): Promise<void> {
-  const existing = await readPersistentSaveLock(userId, clientRecordId);
-  if (leaseStartedAt != null && !lockLeaseMatches(existing, leaseStartedAt)) return;
-  const now = Date.now();
-  const lock: SaveLockDoc = existing ?? {
-    clientRecordId,
-    idempotencyKey: "",
-    userId,
-    recordKind: "business_entry",
-    status: "in_flight",
-    startedAt: now,
-    updatedAt: now,
-    expiresAt: now + SAVE_LOCK_TTL_MS,
-  };
-  await writePersistentSaveLock({
-    ...lock,
-    recordId,
-    status: "done",
-    completedAt: now,
-    updatedAt: now,
-    failedAt: null,
-    failureCode: null,
+  const now = nowMs();
+  await applyLockTransition(userId, clientRecordId, leaseStartedAt, (existing) => {
+    if (!existing) return null;
+    return {
+      ...existing,
+      recordId,
+      status: "done",
+      updatedAt: now,
+      completedAt: now,
+      failedAt: null,
+      failureCode: null,
+    };
   });
 }
 
@@ -205,14 +333,15 @@ export async function markPersistentLockFailed(
   failureCode: string,
   leaseStartedAt?: number
 ): Promise<void> {
-  const existing = await readPersistentSaveLock(userId, clientRecordId);
-  if (!lockLeaseMatches(existing, leaseStartedAt)) return;
-  const now = Date.now();
-  await writePersistentSaveLock({
-    ...existing!,
-    status: "failed",
-    failedAt: now,
-    failureCode,
-    updatedAt: now,
+  const now = nowMs();
+  await applyLockTransition(userId, clientRecordId, leaseStartedAt, (existing) => {
+    if (!existing) return null;
+    return {
+      ...existing,
+      status: "failed",
+      updatedAt: now,
+      failedAt: now,
+      failureCode,
+    };
   });
 }

@@ -55,6 +55,8 @@ export interface BeginCoordinatedSaveOptions {
   /** Skip persistent lock for edit-only flows. */
   isUpdate?: boolean;
   route?: string;
+  /** Original admission token. Rechecked after every await before returning ownership. */
+  session?: SyncSessionToken | null;
 }
 
 export interface BeginCoordinatedSaveResult {
@@ -77,6 +79,7 @@ export interface CoordinatedSaveLockOptions {
 /**
  * Release only the reservation this operation still owns.
  * Must not clear a newer process lock or complete/fail a newer persistent lease.
+ * Retired cleanup does not adopt a new login: callers pass the original lease.
  */
 export async function retireOwnedReservation(options: {
   userId: string;
@@ -85,7 +88,7 @@ export async function retireOwnedReservation(options: {
   processLockOwner?: ProcessSaveLockOwner;
   lockLeaseStartedAt?: number;
 }): Promise<void> {
-  if (options.clientRecordId) {
+  if (options.clientRecordId && options.lockLeaseStartedAt != null) {
     await markPersistentLockFailed(
       options.userId,
       options.clientRecordId,
@@ -93,7 +96,7 @@ export async function retireOwnedReservation(options: {
       options.lockLeaseStartedAt
     );
   }
-  if (options.processLockKey) {
+  if (options.processLockKey && options.processLockOwner) {
     releaseProcessSaveLock(options.processLockKey, options.processLockOwner);
   }
 }
@@ -118,6 +121,10 @@ export async function beginCoordinatedSave(
   const { assertLiveMutationAllowed } = await import("@/auth/offlineCapabilityGuard");
   assertLiveMutationAllowed(options.isUpdate ? "edit" : "create");
 
+  if (!stillOwnsRemoteCoordination(options.session, ctx.userId)) {
+    throw new SaveRetryableError("Save session is no longer current.", "session_retired");
+  }
+
   const processLockKey =
     options.processLockKey ?? ctx.idempotencyKey ?? ctx.clientRecordId;
 
@@ -137,155 +144,188 @@ export async function beginCoordinatedSave(
   }
 
   const releaseAcquiredProcessLock = () => {
-    if (processLockKey) releaseProcessSaveLock(processLockKey, processLockOwner ?? undefined);
+    if (processLockKey && processLockOwner) {
+      releaseProcessSaveLock(processLockKey, processLockOwner);
+    }
   };
 
   let idempotency = ctx;
   let clientRecordId = ctx.clientRecordId;
-
-  if (!options.isUpdate) {
-    const attempt = await beginSaveAttempt(ctx);
-    clientRecordId = attempt.clientRecordId;
-    idempotency = { ...ctx, clientRecordId };
-
-    if (attempt.action === "return_existing" && attempt.recordId) {
-      const steps = await fetchRecordCompletedSteps(
-        ctx.userId,
-        ctx.recordKind,
-        attempt.recordId
-      );
-      releaseAcquiredProcessLock();
-      return {
-        decision: {
-          action: "return_done",
-          recordId: attempt.recordId,
-          clientRecordId: attempt.clientRecordId,
-          completedSteps: steps,
-        },
-        clientRecordId: attempt.clientRecordId,
-        idempotency,
-        processLockOwner: null,
-        lockLeaseStartedAt: null,
-      };
-    }
-  }
-
-  const persistent = await readPersistentSaveLock(ctx.userId, clientRecordId);
-
-  if (persistent) {
-    if (persistent.status === "in_flight" && !isLockExpired(persistent)) {
-      logSaveDiagnostic({
-        phase: "blocked_lock",
-        recordKind: ctx.recordKind,
-        userId: ctx.userId,
-        route: options.route,
-        blocked: true,
-        clientRecordId,
-        message: "persistent_in_flight",
-      });
-      releaseAcquiredProcessLock();
-      throw new SaveStillInProgressError();
-    }
-
-    if (persistent.status === "done" && persistent.recordId) {
-      const steps = await fetchRecordCompletedSteps(
-        ctx.userId,
-        ctx.recordKind,
-        persistent.recordId
-      );
-      releaseAcquiredProcessLock();
-      return {
-        decision: {
-          action: "return_done",
-          recordId: persistent.recordId,
-          clientRecordId,
-          completedSteps: steps,
-        },
-        clientRecordId,
-        idempotency,
-        processLockOwner: null,
-        lockLeaseStartedAt: null,
-      };
-    }
-
-    if (persistent.status === "failed") {
-      const recordId = persistent.recordId ?? null;
-      const steps = recordId
-        ? await fetchRecordCompletedSteps(ctx.userId, ctx.recordKind, recordId)
-        : [];
-      const lock = await markPersistentLockInFlight({
-        userId: ctx.userId,
-        ueid: options.ueid,
-        clientRecordId,
-        idempotencyKey: idempotency.idempotencyKey,
-        recordKind: ctx.recordKind,
-        recordId,
-      });
-      return {
-        decision: {
-          action: "resume",
-          recordId,
-          clientRecordId,
-          completedSteps: steps,
-          fromExpiredLock: false,
-        },
-        clientRecordId,
-        idempotency,
-        processLockOwner,
-        lockLeaseStartedAt: lock.startedAt,
-      };
-    }
-
-    if (isLockExpired(persistent)) {
-      const recordId = persistent.recordId ?? null;
-      const steps = recordId
-        ? await fetchRecordCompletedSteps(ctx.userId, ctx.recordKind, recordId)
-        : [];
-      const lock = await markPersistentLockInFlight({
-        userId: ctx.userId,
-        ueid: options.ueid,
-        clientRecordId,
-        idempotencyKey: idempotency.idempotencyKey,
-        recordKind: ctx.recordKind,
-        recordId,
-        preserveStartedAt: Date.now(),
-      });
-      return {
-        decision: {
-          action: "resume",
-          recordId,
-          clientRecordId,
-          completedSteps: steps,
-          fromExpiredLock: true,
-        },
-        clientRecordId,
-        idempotency,
-        processLockOwner,
-        lockLeaseStartedAt: lock.startedAt,
-      };
-    }
-  }
-
   let lockLeaseStartedAt: number | null = null;
-  if (!options.isUpdate) {
-    const lock = await markPersistentLockInFlight({
-      userId: ctx.userId,
-      ueid: options.ueid,
-      clientRecordId,
-      idempotencyKey: idempotency.idempotencyKey,
-      recordKind: ctx.recordKind,
-      recordId: null,
-    });
-    lockLeaseStartedAt = lock.startedAt;
-  }
 
-  return {
-    decision: { action: "proceed", clientRecordId, completedSteps: [] },
-    clientRecordId,
-    idempotency,
-    processLockOwner,
-    lockLeaseStartedAt,
+  const abandonIfRetired = async () => {
+    if (stillOwnsRemoteCoordination(options.session, ctx.userId)) return;
+    await retireOwnedReservation({
+      userId: ctx.userId,
+      clientRecordId: lockLeaseStartedAt != null ? clientRecordId : undefined,
+      processLockKey,
+      processLockOwner: processLockOwner ?? undefined,
+      lockLeaseStartedAt: lockLeaseStartedAt ?? undefined,
+    });
+    throw new SaveRetryableError("Save session is no longer current.", "session_retired");
   };
+
+  try {
+    if (!options.isUpdate) {
+      const attempt = await beginSaveAttempt(ctx);
+      await abandonIfRetired();
+      clientRecordId = attempt.clientRecordId;
+      idempotency = { ...ctx, clientRecordId };
+
+      if (attempt.action === "return_existing" && attempt.recordId) {
+        const steps = await fetchRecordCompletedSteps(
+          ctx.userId,
+          ctx.recordKind,
+          attempt.recordId
+        );
+        await abandonIfRetired();
+        releaseAcquiredProcessLock();
+        return {
+          decision: {
+            action: "return_done",
+            recordId: attempt.recordId,
+            clientRecordId: attempt.clientRecordId,
+            completedSteps: steps,
+          },
+          clientRecordId: attempt.clientRecordId,
+          idempotency,
+          processLockOwner: null,
+          lockLeaseStartedAt: null,
+        };
+      }
+    }
+
+    const persistent = await readPersistentSaveLock(ctx.userId, clientRecordId);
+    await abandonIfRetired();
+
+    if (persistent) {
+      if (persistent.status === "in_flight" && !isLockExpired(persistent)) {
+        logSaveDiagnostic({
+          phase: "blocked_lock",
+          recordKind: ctx.recordKind,
+          userId: ctx.userId,
+          route: options.route,
+          blocked: true,
+          clientRecordId,
+          message: "persistent_in_flight",
+        });
+        releaseAcquiredProcessLock();
+        throw new SaveStillInProgressError();
+      }
+
+      if (persistent.status === "done" && persistent.recordId) {
+        const steps = await fetchRecordCompletedSteps(
+          ctx.userId,
+          ctx.recordKind,
+          persistent.recordId
+        );
+        await abandonIfRetired();
+        releaseAcquiredProcessLock();
+        return {
+          decision: {
+            action: "return_done",
+            recordId: persistent.recordId,
+            clientRecordId,
+            completedSteps: steps,
+          },
+          clientRecordId,
+          idempotency,
+          processLockOwner: null,
+          lockLeaseStartedAt: null,
+        };
+      }
+
+      if (persistent.status === "failed") {
+        const recordId = persistent.recordId ?? null;
+        const steps = recordId
+          ? await fetchRecordCompletedSteps(ctx.userId, ctx.recordKind, recordId)
+          : [];
+        await abandonIfRetired();
+        const lock = await markPersistentLockInFlight({
+          userId: ctx.userId,
+          ueid: options.ueid,
+          clientRecordId,
+          idempotencyKey: idempotency.idempotencyKey,
+          recordKind: ctx.recordKind,
+          recordId,
+        });
+        lockLeaseStartedAt = lock.startedAt;
+        await abandonIfRetired();
+        return {
+          decision: {
+            action: "resume",
+            recordId,
+            clientRecordId,
+            completedSteps: steps,
+            fromExpiredLock: false,
+          },
+          clientRecordId,
+          idempotency,
+          processLockOwner,
+          lockLeaseStartedAt: lock.startedAt,
+        };
+      }
+
+      if (isLockExpired(persistent)) {
+        const recordId = persistent.recordId ?? null;
+        const steps = recordId
+          ? await fetchRecordCompletedSteps(ctx.userId, ctx.recordKind, recordId)
+          : [];
+        await abandonIfRetired();
+        const lock = await markPersistentLockInFlight({
+          userId: ctx.userId,
+          ueid: options.ueid,
+          clientRecordId,
+          idempotencyKey: idempotency.idempotencyKey,
+          recordKind: ctx.recordKind,
+          recordId,
+        });
+        lockLeaseStartedAt = lock.startedAt;
+        await abandonIfRetired();
+        return {
+          decision: {
+            action: "resume",
+            recordId,
+            clientRecordId,
+            completedSteps: steps,
+            fromExpiredLock: true,
+          },
+          clientRecordId,
+          idempotency,
+          processLockOwner,
+          lockLeaseStartedAt: lock.startedAt,
+        };
+      }
+    }
+
+    if (!options.isUpdate) {
+      const lock = await markPersistentLockInFlight({
+        userId: ctx.userId,
+        ueid: options.ueid,
+        clientRecordId,
+        idempotencyKey: idempotency.idempotencyKey,
+        recordKind: ctx.recordKind,
+        recordId: null,
+      });
+      lockLeaseStartedAt = lock.startedAt;
+      await abandonIfRetired();
+    }
+
+    return {
+      decision: { action: "proceed", clientRecordId, completedSteps: [] },
+      clientRecordId,
+      idempotency,
+      processLockOwner,
+      lockLeaseStartedAt,
+    };
+  } catch (error) {
+    if (error instanceof SaveStillInProgressError) throw error;
+    if (error instanceof SaveRetryableError && error.failureCode === "session_retired") {
+      throw error;
+    }
+    releaseAcquiredProcessLock();
+    throw error;
+  }
 }
 
 export async function completeCoordinatedSave(
@@ -306,6 +346,13 @@ export async function completeCoordinatedSave(
   if (!options?.isUpdate) {
     await completeSaveAttempt(idempotency, recordId);
     if (!stillOwnsRemoteCoordination(options?.session, idempotency.userId)) {
+      await retireOwnedReservation({
+        userId: idempotency.userId,
+        clientRecordId: idempotency.clientRecordId,
+        processLockKey: options?.processLockKey,
+        processLockOwner: options?.processLockOwner,
+        lockLeaseStartedAt: options?.lockLeaseStartedAt,
+      });
       return;
     }
     await markPersistentLockDone(
@@ -392,6 +439,11 @@ export async function runRecordStepIfNeeded<T>(
     session?: SyncSessionToken | null;
     /** When true, still run fn even if step marked done (e.g. fetch existing record). */
     alwaysRun?: boolean;
+    /**
+     * Remote work (insights, URI save, completed-step append) must not start after
+     * retirement. Local PDF recovery may set this false so generate can finish.
+     */
+    issuesRemoteWork?: boolean;
   },
   fn: () => Promise<T>
 ): Promise<{ ran: boolean; result?: T; completedSteps: string[] }> {
@@ -404,6 +456,10 @@ export async function runRecordStepIfNeeded<T>(
   if (stillOwnsRemoteCoordination(params.session, params.userId)) {
     await touchPersistentLock(params.userId, lockId, params.lockLeaseStartedAt);
   }
+  const issuesRemoteWork = params.issuesRemoteWork !== false;
+  if (issuesRemoteWork && !stillOwnsRemoteCoordination(params.session, params.userId)) {
+    return { ran: false, completedSteps: steps };
+  }
   const result = await fn();
   if (!stillOwnsRemoteCoordination(params.session, params.userId)) {
     return { ran: true, result, completedSteps: steps };
@@ -412,9 +468,12 @@ export async function runRecordStepIfNeeded<T>(
     params.userId,
     params.recordKind,
     params.recordId,
-    params.step
+    params.step,
+    params.session
   );
-  await touchPersistentLock(params.userId, lockId, params.lockLeaseStartedAt);
+  if (stillOwnsRemoteCoordination(params.session, params.userId)) {
+    await touchPersistentLock(params.userId, lockId, params.lockLeaseStartedAt);
+  }
   return { ran: true, result, completedSteps };
 }
 

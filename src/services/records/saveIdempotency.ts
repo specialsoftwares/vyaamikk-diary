@@ -119,6 +119,19 @@ export type BeginSaveAttemptResult =
   | { action: "proceed"; clientRecordId: string; replay: false }
   | { action: "return_existing"; clientRecordId: string; recordId: string; replay: true };
 
+let beginSaveAttemptGate: (() => Promise<void>) | null = null;
+let completeSaveAttemptGate: (() => Promise<void>) | null = null;
+
+/** Test-only barrier at the start of beginSaveAttempt. */
+export function setBeginSaveAttemptGateForTests(gate: (() => Promise<void>) | null): void {
+  beginSaveAttemptGate = gate;
+}
+
+/** Test-only barrier at the start of completeSaveAttempt. */
+export function setCompleteSaveAttemptGateForTests(gate: (() => Promise<void>) | null): void {
+  completeSaveAttemptGate = gate;
+}
+
 /**
  * Repository-layer guard. Call before create/write.
  * Returns existing record id when the same idempotency key already completed.
@@ -126,6 +139,7 @@ export type BeginSaveAttemptResult =
 export async function beginSaveAttempt(
   ctx: SaveIdempotencyContext
 ): Promise<BeginSaveAttemptResult> {
+  await beginSaveAttemptGate?.();
   const existing = await readAttempt(ctx.userId, ctx.idempotencyKey);
   if (existing?.status === "completed" && existing.recordId) {
     return {
@@ -150,6 +164,7 @@ export async function completeSaveAttempt(
   ctx: SaveIdempotencyContext,
   recordId: string
 ): Promise<void> {
+  await completeSaveAttemptGate?.();
   await writeAttempt(ctx.userId, ctx.idempotencyKey, {
     clientRecordId: ctx.clientRecordId,
     recordId,
