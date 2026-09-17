@@ -2,7 +2,7 @@ import React, { useMemo, useState } from "react";
 import { Pressable, StyleSheet } from "react-native";
 
 import { Header, LocaleUiText, Screen } from "@/components/ui";
-import { useT } from "@/i18n";
+import { useI18n, useT } from "@/i18n";
 import { spacing, typography } from "@/theme";
 
 import { BenefitEducationScreen } from "./BenefitEducationScreen";
@@ -14,6 +14,7 @@ import {
   fixtureReadyOffers,
   fixtureUnavailableOffers,
 } from "./billingUxPreviewFixtures";
+import { CLIENT_MANUAL_TRIAL_START_SUPPORTED } from "./upgradePresentation";
 import { UpgradeSheet } from "./UpgradeSheet";
 import type {
   TranslateFn,
@@ -30,15 +31,20 @@ type LabSurface = "hub" | "education";
  */
 export function BillingUxPreviewLab({ onLeave }: { onLeave: () => void }) {
   const t = useT();
+  const { lang, setLang } = useI18n();
   const [surface, setSurface] = useState<LabSurface>("hub");
   const [sheetVisible, setSheetVisible] = useState(false);
   const [triggerContext, setTriggerContext] = useState<UpgradeTriggerContext>("manualUpgrade");
   const [catalogState, setCatalogState] = useState<UpgradeCatalogState>("ready");
   const [trialEligible, setTrialEligible] = useState(false);
+  const [trialActionAvailable, setTrialActionAvailable] = useState(
+    CLIENT_MANUAL_TRIAL_START_SUPPORTED
+  );
+  const [lastPreviewAction, setLastPreviewAction] = useState("none");
   const [purchaseState, setPurchaseState] = useState<UpgradeOperationState>("idle");
   const [restoreState, setRestoreState] = useState<UpgradeOperationState>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [selectedSku, setSelectedSku] = useState<string | null>("vyd_professional_monthly");
+  const [selectedSku, setSelectedSku] = useState<string | null>("vyd_starter_monthly");
   const [selectedPeriod, setSelectedPeriod] = useState<UpgradePlanOffer["period"]>("monthly");
   const [reducedMotion, setReducedMotion] = useState(false);
 
@@ -124,6 +130,19 @@ export function BillingUxPreviewLab({ onLeave }: { onLeave: () => void }) {
         onPress={() => setTrialEligible((value) => !value)}
       />
       <LabButton
+        label={
+          trialActionAvailable ? t("billing.preview.trialActionOff") : t("billing.preview.trialActionOn")
+        }
+        onPress={() => setTrialActionAvailable((value) => !value)}
+      />
+      <LocaleUiText style={styles.note}>
+        {t("billing.preview.lastAction", { action: lastPreviewAction })}
+      </LocaleUiText>
+      <LabButton
+        label={lang === "hi" ? t("language.en") : t("language.hi")}
+        onPress={() => setLang(lang === "hi" ? "en" : "hi")}
+      />
+      <LabButton
         label={reducedMotion ? t("billing.preview.motionOn") : t("billing.preview.motionOff")}
         onPress={() => setReducedMotion((value) => !value)}
       />
@@ -134,6 +153,7 @@ export function BillingUxPreviewLab({ onLeave }: { onLeave: () => void }) {
         currentPlanLabel="Free"
         entitlementLabel="25 records / month (preview)"
         trialEligible={trialEligible}
+        trialActionAvailable={trialActionAvailable}
         offers={offers}
         catalogState={catalogState}
         purchaseAvailable={catalogState === "ready"}
@@ -145,11 +165,16 @@ export function BillingUxPreviewLab({ onLeave }: { onLeave: () => void }) {
         selectedPeriod={selectedPeriod}
         onSelectSku={setSelectedSku}
         onSelectPeriod={setSelectedPeriod}
-        onPurchase={() => {
+        onPurchase={(sku) => {
+          setLastPreviewAction(`purchase:${sku}`);
           setPurchaseState("pending");
           setErrorMessage(BILLING_UX_PREVIEW_ERROR);
         }}
+        onStartTrial={() => {
+          setLastPreviewAction("trial");
+        }}
         onRestore={() => {
+          setLastPreviewAction("restore");
           setRestoreState("pending");
           setErrorMessage(BILLING_UX_PREVIEW_ERROR);
         }}

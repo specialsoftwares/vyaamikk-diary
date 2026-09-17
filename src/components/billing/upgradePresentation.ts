@@ -2,7 +2,9 @@
  * Copy and CTA helpers for billing presentation.
  *
  * No store calls, no entitlement writes, no invented live prices.
- * Trial CTA is shown only when the caller passes backend-confirmed eligibility.
+ * Trial CTA is shown only when the caller passes backend-confirmed eligibility
+ * AND a supported client trial-start. The accepted grant is server-only
+ * (`grantProfessionalTrial`); there is no client callable.
  */
 
 import {
@@ -23,6 +25,12 @@ import {
  */
 export const SHOW_TRUSTED_BY_INDIAN_BUSINESS_OWNERS_CLAIM = false;
 
+/**
+ * Manual client trial start is not supported. Do not invent a callable.
+ * Preview fixtures may pass true only to exercise the trial dispatch path.
+ */
+export const CLIENT_MANUAL_TRIAL_START_SUPPORTED = false;
+
 /** Forbidden until SHOW_TRUSTED_BY_INDIAN_BUSINESS_OWNERS_CLAIM is approved. */
 export const UNAPPROVED_TRUSTED_BY_CLAIM = "TRUSTED BY INDIAN BUSINESS OWNERS";
 
@@ -33,7 +41,15 @@ export const FORBIDDEN_W9_CLAIM_FRAGMENTS = [
   UNAPPROVED_TRUSTED_BY_CLAIM,
 ] as const;
 
-export type UpgradeCtaKind = "trial" | "subscribe" | "unavailable" | "pending" | "loading";
+export type UpgradeCtaKind =
+  | "trial"
+  | "subscribe"
+  | "unavailable"
+  | "pending"
+  | "loading"
+  | "trialUnavailable";
+
+export type UpgradePrimaryDispatch = "purchase" | "trial" | "none";
 
 export interface UpgradeTriggerCopy {
   title: string;
@@ -134,37 +150,124 @@ export function buildUpgradePlanCards(
   return cards;
 }
 
+export function planIdForSku(
+  offers: readonly UpgradePlanOffer[],
+  sku: string | null
+): UpgradePlanId | null {
+  if (!sku) return null;
+  for (const offer of offers) {
+    if (offer.sku === sku) return offer.planId;
+  }
+  return null;
+}
+
 export function resolveUpgradeCta(input: {
   trialEligible: boolean;
+  trialActionAvailable: boolean;
+  selectedPlanId: UpgradePlanId | null;
   purchaseAvailable: boolean;
   purchaseState: UpgradeOperationState;
   catalogState: UpgradeCatalogState;
-}): { kind: UpgradeCtaKind; enabled: boolean; labelKey: string } {
+  hasError?: boolean;
+}): { kind: UpgradeCtaKind; enabled: boolean; labelKey: string; dispatch: UpgradePrimaryDispatch } {
   if (input.catalogState === "loading" || input.purchaseState === "loading") {
-    return { kind: "loading", enabled: false, labelKey: "billing.upgrade.purchaseLoading" };
+    return {
+      kind: "loading",
+      enabled: false,
+      labelKey: "billing.upgrade.purchaseLoading",
+      dispatch: "none",
+    };
   }
   if (input.purchaseState === "pending") {
-    return { kind: "pending", enabled: false, labelKey: "billing.upgrade.purchasePending" };
+    return {
+      kind: "pending",
+      enabled: false,
+      labelKey: "billing.upgrade.purchasePending",
+      dispatch: "none",
+    };
   }
   if (
     !input.purchaseAvailable ||
     input.purchaseState === "unavailable" ||
     input.catalogState === "unavailable"
   ) {
-    return { kind: "unavailable", enabled: false, labelKey: "billing.upgrade.purchaseUnavailable" };
+    return {
+      kind: "unavailable",
+      enabled: false,
+      labelKey: "billing.upgrade.purchaseUnavailable",
+      dispatch: "none",
+    };
   }
-  if (input.trialEligible) {
-    return { kind: "trial", enabled: true, labelKey: "billing.upgrade.ctaTrial" };
+
+  const professionalTrialSelected =
+    input.trialEligible === true && input.selectedPlanId === "professional";
+
+  if (professionalTrialSelected) {
+    if (input.trialActionAvailable !== true) {
+      return {
+        kind: "trialUnavailable",
+        enabled: false,
+        labelKey: "billing.upgrade.ctaTrialUnavailable",
+        dispatch: "none",
+      };
+    }
+    if (input.hasError) {
+      return {
+        kind: "trial",
+        enabled: false,
+        labelKey: "billing.upgrade.ctaTrial",
+        dispatch: "none",
+      };
+    }
+    return {
+      kind: "trial",
+      enabled: true,
+      labelKey: "billing.upgrade.ctaTrial",
+      dispatch: "trial",
+    };
   }
-  return { kind: "subscribe", enabled: true, labelKey: "billing.upgrade.ctaSubscribe" };
+
+  return {
+    kind: "subscribe",
+    enabled: !input.hasError,
+    labelKey: "billing.upgrade.ctaSubscribe",
+    dispatch: input.hasError ? "none" : "purchase",
+  };
+}
+
+export function chooseUpgradePrimaryPress(input: {
+  dispatch: UpgradePrimaryDispatch;
+  enabled: boolean;
+  selectedSku: string | null;
+}): { type: "purchase"; sku: string } | { type: "trial" } | { type: "none" } {
+  if (!input.enabled || input.dispatch === "none") return { type: "none" };
+  if (input.dispatch === "trial") return { type: "trial" };
+  if (input.dispatch === "purchase" && input.selectedSku) {
+    return { type: "purchase", sku: input.selectedSku };
+  }
+  return { type: "none" };
 }
 
 export function canDispatchPurchase(input: {
   ctaEnabled: boolean;
+  dispatch: UpgradePrimaryDispatch;
   selectedSku: string | null;
   selectedOfferReady: boolean;
 }): boolean {
-  return input.ctaEnabled && Boolean(input.selectedSku) && input.selectedOfferReady;
+  return (
+    input.ctaEnabled &&
+    input.dispatch === "purchase" &&
+    Boolean(input.selectedSku) &&
+    input.selectedOfferReady
+  );
+}
+
+export function canDispatchTrial(input: {
+  ctaEnabled: boolean;
+  dispatch: UpgradePrimaryDispatch;
+  trialActionAvailable: boolean;
+}): boolean {
+  return input.ctaEnabled && input.dispatch === "trial" && input.trialActionAvailable;
 }
 
 export function canDispatchRestore(input: {

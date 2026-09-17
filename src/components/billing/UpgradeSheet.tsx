@@ -20,7 +20,10 @@ import {
   buildUpgradePlanCards,
   canDispatchPurchase,
   canDispatchRestore,
+  canDispatchTrial,
+  chooseUpgradePrimaryPress,
   defaultSelectedSku,
+  planIdForSku,
   resolveUpgradeCta,
   selectedOfferIsReady,
   shouldShowTrustedByClaim,
@@ -41,6 +44,8 @@ function purchaseCtaLabel(t: TranslateFn, kind: UpgradeCtaKind): string {
   switch (kind) {
     case "trial":
       return t("billing.upgrade.ctaTrial");
+    case "trialUnavailable":
+      return t("billing.upgrade.ctaTrialUnavailable");
     case "subscribe":
       return t("billing.upgrade.ctaSubscribe");
     case "unavailable":
@@ -64,6 +69,11 @@ export interface UpgradeSheetProps {
   currentPlanLabel: string;
   entitlementLabel: string;
   trialEligible: boolean;
+  /**
+   * True only when a supported client trial-start exists.
+   * The accepted backend grant is server-only; production callers must pass false.
+   */
+  trialActionAvailable: boolean;
   offers: readonly UpgradePlanOffer[];
   catalogState: UpgradeCatalogState;
   purchaseAvailable: boolean;
@@ -76,6 +86,8 @@ export interface UpgradeSheetProps {
   onSelectSku: (sku: string) => void;
   onSelectPeriod: (period: UpgradePlanOffer["period"]) => void;
   onPurchase: (sku: string) => void;
+  /** Invoked only for a trial-labelled CTA. Must not purchase a store SKU. */
+  onStartTrial: () => void;
   onRestore: () => void;
   onDismiss: () => void;
   onOpenBenefitEducation: () => void;
@@ -91,6 +103,7 @@ export function UpgradeSheet({
   currentPlanLabel,
   entitlementLabel,
   trialEligible,
+  trialActionAvailable,
   offers,
   catalogState,
   purchaseAvailable,
@@ -103,6 +116,7 @@ export function UpgradeSheet({
   onSelectSku,
   onSelectPeriod,
   onPurchase,
+  onStartTrial,
   onRestore,
   onDismiss,
   onOpenBenefitEducation,
@@ -114,19 +128,30 @@ export function UpgradeSheet({
     () => buildUpgradePlanCards(t, offers, selectedPeriod),
     [t, offers, selectedPeriod]
   );
+  const resolvedSku = defaultSelectedSku(cards, selectedSku);
+  const selectedPlanId = planIdForSku(offers, resolvedSku);
   const cta = resolveUpgradeCta({
     trialEligible,
+    trialActionAvailable,
+    selectedPlanId,
     purchaseAvailable,
     purchaseState,
     catalogState,
+    hasError: Boolean(errorMessage),
   });
-  const resolvedSku = defaultSelectedSku(cards, selectedSku);
   const offerReady = selectedOfferIsReady(offers, resolvedSku);
   const purchaseEnabled = canDispatchPurchase({
     ctaEnabled: cta.enabled,
+    dispatch: cta.dispatch,
     selectedSku: resolvedSku,
     selectedOfferReady: offerReady,
   });
+  const trialEnabled = canDispatchTrial({
+    ctaEnabled: cta.enabled,
+    dispatch: cta.dispatch,
+    trialActionAvailable,
+  });
+  const primaryEnabled = purchaseEnabled || trialEnabled;
   const restoreEnabled = canDispatchRestore({ restoreAvailable, restoreState });
   const busy =
     purchaseState === "loading" ||
@@ -287,16 +312,27 @@ export function UpgradeSheet({
 
         <Pressable
           onPress={() => {
-            if (resolvedSku && purchaseEnabled) onPurchase(resolvedSku);
+            const press = chooseUpgradePrimaryPress({
+              dispatch: cta.dispatch,
+              enabled: primaryEnabled && !busy,
+              selectedSku: resolvedSku,
+            });
+            if (press.type === "purchase") {
+              onPurchase(press.sku);
+              return;
+            }
+            if (press.type === "trial") {
+              onStartTrial();
+            }
           }}
-          disabled={!purchaseEnabled || busy}
+          disabled={!primaryEnabled || busy}
           accessibilityRole="button"
-          accessibilityState={{ disabled: !purchaseEnabled || busy, busy }}
+          accessibilityState={{ disabled: !primaryEnabled || busy, busy }}
           accessibilityLabel={purchaseCtaLabel(t, cta.kind)}
           style={({ pressed }) => [
             styles.primaryCta,
-            (!purchaseEnabled || busy) && styles.ctaDisabled,
-            pressed && purchaseEnabled && !busy && styles.pressed,
+            (!primaryEnabled || busy) && styles.ctaDisabled,
+            pressed && primaryEnabled && !busy && styles.pressed,
           ]}
         >
           {busy && (purchaseState === "loading" || purchaseState === "pending") ? (

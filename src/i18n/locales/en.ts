@@ -2692,6 +2692,7 @@ const en = {
       purchaseLoading: "Starting purchase…",
       ctaSubscribe: "Continue",
       ctaTrial: "Start 14-day trial",
+      ctaTrialUnavailable: "Trial cannot be started here",
       ctaRestore: "Restore purchases",
       learnBenefits: "Why upgrade?",
       selectPlan: "Select a plan",
@@ -2734,7 +2735,8 @@ const en = {
           b4: "Everything in Professional",
         },
       },
-      trialNote: "14-day Professional trial — shown only when your account is eligible.",
+      trialNote:
+        "14-day Professional trial is granted by account policy, not by buying a store plan. This screen cannot start a trial.",
       storePriceNote: "Prices shown are from Google Play or the App Store on this device.",
     },
     education: {
@@ -2773,6 +2775,9 @@ const en = {
       purchaseError: "Controlled error fixture",
       trialOn: "Use trial-eligible fixture",
       trialOff: "Use trial-not-eligible fixture",
+      trialActionOn: "Use trial-action-available fixture",
+      trialActionOff: "Use trial-action-unavailable fixture",
+      lastAction: "Last preview action: {{action}}",
       motionOn: "Use motion fixture",
       motionOff: "Use reduced-motion fixture",
       note: "Fixture prices are for layout review only. They are not live store prices.",

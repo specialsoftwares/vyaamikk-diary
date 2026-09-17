@@ -29,6 +29,10 @@ const settings = readFileSync(
   join(root, "../../../app/(app)/(tabs)/settings.tsx"),
   "utf8"
 );
+const publicPreview = readFileSync(
+  join(root, "../../../app/(public)/billing-ux-preview.tsx"),
+  "utf8"
+);
 
 assert.match(sheet, /<CurtainSheet/);
 assert.match(sheet, /closeOnBackdropPress=\{false\}/);
@@ -40,6 +44,12 @@ assert.doesNotMatch(sheet, /useAuth\b/);
 assert.doesNotMatch(sheet, /restorePurchases/);
 assert.doesNotMatch(sheet, /billingUxPreviewFixtures/);
 assert.doesNotMatch(sheet, /\bswitch\s*\(\s*plan\s*\)/);
+assert.match(sheet, /chooseUpgradePrimaryPress/);
+assert.match(sheet, /trialActionAvailable/);
+assert.match(sheet, /onStartTrial/);
+assert.doesNotMatch(sheet, /if \(resolvedSku && purchaseEnabled\) onPurchase\(resolvedSku\)/);
+assert.doesNotMatch(sheet, /grantProfessionalTrial/);
+assert.doesNotMatch(sheet, /https\.onCall/);
 assert.doesNotMatch(education, /useIap\b/);
 assert.doesNotMatch(education, /AsyncStorage/);
 assert.doesNotMatch(education, /benefitScreenShown/);
@@ -54,9 +64,20 @@ assert.match(sheet, /shouldShowTrustedByClaim\(\)/);
 
 assert.match(lab, /BILLING_UX_PREVIEW_ERROR/);
 assert.match(lab, /fixtureReadyOffers/);
+assert.match(lab, /CLIENT_MANUAL_TRIAL_START_SUPPORTED/);
+assert.match(lab, /onStartTrial/);
+assert.match(lab, /purchase:\$\{sku\}/);
+assert.match(lab, /setLastPreviewAction\("trial"\)/);
 assert.doesNotMatch(lab, /useIap\b/);
+assert.doesNotMatch(lab, /grantProfessionalTrial/);
 assert.match(route, /isBillingUxPreviewEnabled/);
 assert.match(route, /Redirect/);
+assert.match(publicPreview, /isBillingUxPreviewEnabled/);
+assert.match(publicPreview, /BillingUxPreviewLab/);
+assert.match(publicPreview, /Redirect/);
+assert.match(publicPreview, /\/\(public\)\/landing/);
+assert.doesNotMatch(publicPreview, /useIap\b/);
+assert.doesNotMatch(publicPreview, /onPurchase/);
 assert.match(settings, /isBillingUxPreviewEnabled\(\)/);
 assert.match(settings, /billing-ux-preview/);
 assert.doesNotMatch(settings, /Subscription & Billing/);

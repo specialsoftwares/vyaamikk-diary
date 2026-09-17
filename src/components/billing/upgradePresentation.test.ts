@@ -5,6 +5,7 @@ import {
   buildUpgradePlanCards,
   canDispatchPurchase,
   canDispatchRestore,
+  CLIENT_MANUAL_TRIAL_START_SUPPORTED,
   defaultSelectedSku,
   estimateSheetsSaved,
   FORBIDDEN_W9_CLAIM_FRAGMENTS,
@@ -78,19 +79,30 @@ for (const trigger of UPGRADE_TRIGGER_CONTEXTS) {
   assert.equal(cards.every((card) => card.priceState === "loading"), true);
 }
 
+assert.equal(CLIENT_MANUAL_TRIAL_START_SUPPORTED, false);
+
 assert.deepEqual(
   resolveUpgradeCta({
     trialEligible: true,
+    trialActionAvailable: true,
+    selectedPlanId: "professional",
     purchaseAvailable: true,
     purchaseState: "idle",
     catalogState: "ready",
   }),
-  { kind: "trial", enabled: true, labelKey: "billing.upgrade.ctaTrial" }
+  {
+    kind: "trial",
+    enabled: true,
+    labelKey: "billing.upgrade.ctaTrial",
+    dispatch: "trial",
+  }
 );
 
 assert.equal(
   resolveUpgradeCta({
-    trialEligible: false,
+    trialEligible: true,
+    trialActionAvailable: false,
+    selectedPlanId: "starter",
     purchaseAvailable: true,
     purchaseState: "idle",
     catalogState: "ready",
@@ -101,6 +113,32 @@ assert.equal(
 assert.equal(
   resolveUpgradeCta({
     trialEligible: true,
+    trialActionAvailable: false,
+    selectedPlanId: "professional",
+    purchaseAvailable: true,
+    purchaseState: "idle",
+    catalogState: "ready",
+  }).kind,
+  "trialUnavailable"
+);
+
+assert.equal(
+  resolveUpgradeCta({
+    trialEligible: false,
+    trialActionAvailable: false,
+    selectedPlanId: "starter",
+    purchaseAvailable: true,
+    purchaseState: "idle",
+    catalogState: "ready",
+  }).kind,
+  "subscribe"
+);
+
+assert.equal(
+  resolveUpgradeCta({
+    trialEligible: true,
+    trialActionAvailable: true,
+    selectedPlanId: "professional",
     purchaseAvailable: false,
     purchaseState: "idle",
     catalogState: "ready",
@@ -111,6 +149,8 @@ assert.equal(
 assert.equal(
   resolveUpgradeCta({
     trialEligible: false,
+    trialActionAvailable: false,
+    selectedPlanId: "starter",
     purchaseAvailable: true,
     purchaseState: "pending",
     catalogState: "ready",
@@ -121,6 +161,8 @@ assert.equal(
 assert.equal(
   resolveUpgradeCta({
     trialEligible: false,
+    trialActionAvailable: false,
+    selectedPlanId: "starter",
     purchaseAvailable: true,
     purchaseState: "idle",
     catalogState: "loading",
@@ -131,6 +173,7 @@ assert.equal(
 assert.equal(
   canDispatchPurchase({
     ctaEnabled: true,
+    dispatch: "purchase",
     selectedSku: "vyd_starter_monthly",
     selectedOfferReady: true,
   }),
@@ -139,6 +182,16 @@ assert.equal(
 assert.equal(
   canDispatchPurchase({
     ctaEnabled: true,
+    dispatch: "trial",
+    selectedSku: "vyd_starter_monthly",
+    selectedOfferReady: true,
+  }),
+  false
+);
+assert.equal(
+  canDispatchPurchase({
+    ctaEnabled: true,
+    dispatch: "purchase",
     selectedSku: "vyd_starter_monthly",
     selectedOfferReady: false,
   }),
