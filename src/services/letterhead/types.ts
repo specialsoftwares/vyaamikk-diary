@@ -10,6 +10,8 @@
  *     stays correct regardless of the image's intrinsic dimensions.
  */
 
+import type { SyncSessionToken } from "@/sync/syncSessionOwnership";
+
 export interface LetterheadMargins {
   /** % of page height from the top of A4 where content starts. */
   topPct: number;
@@ -173,7 +175,11 @@ export type LetterheadDocumentCreateInput = Omit<
 export interface LetterheadDocumentRepository {
   list(userId: string): Promise<LetterheadDocument[]>;
   get(userId: string, id: string): Promise<LetterheadDocument | null>;
-  create(userId: string, record: LetterheadDocumentCreateInput): Promise<LetterheadDocument>;
+  create(
+    userId: string,
+    record: LetterheadDocumentCreateInput,
+    session?: SyncSessionToken | null
+  ): Promise<LetterheadDocument>;
   update(
     userId: string,
     id: string,
@@ -189,7 +195,8 @@ export interface LetterheadDocumentRepository {
         | "editHistory"
         | "templateRefUpdatedAt"
       >
-    >
+    >,
+    session?: SyncSessionToken | null
   ): Promise<LetterheadDocument>;
   remove(userId: string, id: string): Promise<void>;
 }

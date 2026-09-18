@@ -20,7 +20,7 @@ import {
   shouldRunStep,
 } from "@/services/records/saveCoordinator";
 import { SAVE_STEP, SaveStillInProgressError, hasCompletedStep } from "@/services/records/saveLockTypes";
-import type { SaveIdempotencyContext } from "@/services/records/saveIdempotency";
+import type { SaveIdempotencyContext, ProcessSaveLockOwner } from "@/services/records/saveIdempotency";
 import { releaseProcessSaveLock } from "@/services/records/saveIdempotency";
 import { invalidateGlobalSearchIndex } from "@/services/search/globalSearchRepository";
 
@@ -46,6 +46,7 @@ export async function saveProfessionalPackWithPdf(
     options.packId ?? options.idempotency?.idempotencyKey ?? null;
   let idempotency = options.idempotency;
   let completedSteps: string[] = [];
+  let processLockOwner: ProcessSaveLockOwner | null = null;
 
   try {
     if (!options.isUpdate && idempotency) {
@@ -56,6 +57,7 @@ export async function saveProfessionalPackWithPdf(
       });
       idempotency = begun.idempotency;
       input = { ...input, clientRecordId: begun.clientRecordId };
+      processLockOwner = begun.processLockOwner;
 
       if (begun.decision.action === "return_done") {
         const existing = await getProfessionalPackRepository().getById(
@@ -223,9 +225,10 @@ export async function saveProfessionalPackWithPdf(
     if (idempotency && !options.isUpdate) {
       await completeCoordinatedSave(idempotency, pack.id, {
         processLockKey: processLockKey ?? undefined,
+        processLockOwner: processLockOwner ?? undefined,
       });
     } else if (processLockKey) {
-      releaseProcessSaveLock(processLockKey);
+      releaseProcessSaveLock(processLockKey, processLockOwner ?? undefined);
     }
 
     return pack;
@@ -234,10 +237,11 @@ export async function saveProfessionalPackWithPdf(
     if (idempotency && !options.isUpdate) {
       await failCoordinatedSave(idempotency, "pro_pack_save_failed", {
         processLockKey: processLockKey ?? undefined,
+        processLockOwner: processLockOwner ?? undefined,
         clearRegistry: false,
       });
     } else if (processLockKey) {
-      releaseProcessSaveLock(processLockKey);
+      releaseProcessSaveLock(processLockKey, processLockOwner ?? undefined);
     }
     throw e;
   }

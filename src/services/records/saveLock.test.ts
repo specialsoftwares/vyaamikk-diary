@@ -8,6 +8,7 @@ import {
   SAVE_STEP,
   hasCompletedStep,
   mergeCompletedSteps,
+  unionCompletedSteps,
 } from "./saveLockTypes";
 import { isLockExpired } from "./persistentSaveLock";
 import {
@@ -114,6 +115,13 @@ async function run(): Promise<void> {
   assert.deepEqual(
     mergeCompletedSteps([SAVE_STEP.BASE_RECORD_CREATED], SAVE_STEP.BASE_RECORD_CREATED),
     [SAVE_STEP.BASE_RECORD_CREATED]
+  );
+  assert.deepEqual(
+    unionCompletedSteps(
+      [SAVE_STEP.PDF_GENERATED],
+      [SAVE_STEP.BASE_RECORD_CREATED, SAVE_STEP.PDF_GENERATED]
+    ),
+    [SAVE_STEP.PDF_GENERATED, SAVE_STEP.BASE_RECORD_CREATED]
   );
 
   const inFlight = {

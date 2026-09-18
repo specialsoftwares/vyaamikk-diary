@@ -7,6 +7,9 @@
  * must always clear it.
  */
 
+import { sessionSyncGate } from "@/sync/sessionSyncGate";
+import { syncSessionOwnership, type SyncSessionToken } from "@/sync/syncSessionOwnership";
+
 export type AuthSyncTransition = {
   prevStatus: "loading" | "signed_out" | "signed_in";
   nextStatus: "loading" | "signed_out" | "signed_in";
@@ -36,4 +39,22 @@ export function shouldClearSyncLockOnAuthTransition(
     return true;
   }
   return false;
+}
+
+/**
+ * Production auth→sync lifecycle. Call this on every identity transition
+ * (including tests). Rotates the session-generation token and clears the
+ * process-wide lock so delayed work from the previous session cannot relock
+ * or publish into the new one.
+ */
+export function applyAuthSyncIdentityTransition(t: AuthSyncTransition): SyncSessionToken | null {
+  if (!shouldClearSyncLockOnAuthTransition(t)) {
+    return syncSessionOwnership.current();
+  }
+  sessionSyncGate.unlock();
+  if (t.nextStatus === "signed_in" && t.nextUid) {
+    return syncSessionOwnership.beginSession(t.nextUid);
+  }
+  syncSessionOwnership.endSession();
+  return null;
 }

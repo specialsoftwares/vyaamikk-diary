@@ -1,7 +1,7 @@
 /** SQLite schema — single on-device source of truth for drafts, cache, and sync queue. */
 
 export const DB_NAME = "vyaamikk_diary.db";
-export const DB_VERSION = 6;
+export const DB_VERSION = 9;
 
 export const MIGRATIONS_V1 = `
 PRAGMA journal_mode = WAL;
@@ -166,4 +166,38 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_bi_link_source
 
 CREATE INDEX IF NOT EXISTS idx_bi_link_user_fy
   ON business_insight_links (user_id, financial_year, insight_kind);
+`;
+
+/**
+ * Durable CREATE/UPDATE intent and remote-confirmation flags.
+ * `remote_updated_at` is not proof of server acceptance.
+ */
+export const MIGRATIONS_V7 = `
+ALTER TABLE entries_local ADD COLUMN pending_op TEXT;
+ALTER TABLE entries_local ADD COLUMN remote_confirmed INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE entries_local ADD COLUMN sync_error_code TEXT;
+ALTER TABLE entries_local ADD COLUMN auto_retry INTEGER NOT NULL DEFAULT 1;
+CREATE INDEX IF NOT EXISTS idx_entries_local_sync
+  ON entries_local (user_id, remote_confirmed, auto_retry);
+`;
+
+/**
+ * Durable local revision / queue revision for acknowledgement ownership.
+ * Timestamps are not used as the ownership mechanism.
+ */
+export const MIGRATIONS_V8 = `
+ALTER TABLE entries_local ADD COLUMN local_revision INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE entries_local ADD COLUMN acked_revision INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE sync_queue ADD COLUMN revision INTEGER NOT NULL DEFAULT 0;
+`;
+
+/**
+ * Durable original-attempt identity for CREATE/UPDATE replay.
+ * Retry dispatch must not replace this baseline. Timestamps are not the key.
+ */
+export const MIGRATIONS_V9 = `
+ALTER TABLE entries_local ADD COLUMN origin_revision INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE entries_local ADD COLUMN origin_payload_json TEXT;
+ALTER TABLE entries_local ADD COLUMN origin_op TEXT;
+ALTER TABLE entries_local ADD COLUMN dispatch_generation INTEGER NOT NULL DEFAULT 0;
 `;

@@ -5,8 +5,9 @@
  *   users/{uid}/customerCreditRecords/{id}
  *   users/{uid}/counters/customerCredit  → { next: number }
  *
- * Serial allocation uses a Firestore transaction on the counter doc. PDF file
- * URIs are never written remotely. All reads/writes are user-scoped.
+ * First CREATE commits counter + record (and usageCurrent while enforcement
+ * is on) in one transaction. PDF file URIs are never written remotely. All
+ * reads/writes are user-scoped.
  */
 
 import {
@@ -17,7 +18,6 @@ import {
   getDocs,
   orderBy,
   query,
-  runTransaction,
   setDoc,
 } from "firebase/firestore";
 
@@ -44,15 +44,16 @@ import {
   type EmiInstallment,
 } from "@/domain/customerCredit";
 import { createLogger } from "@/utils/logger";
-
 import {
-  appendPayment,
-  applyFullClosure,
-  applyStatus,
-  applyUpdate,
-  buildNewRecord,
-  removePaymentFrom,
-} from "./shared";
+  createCustomerCreditAtomic,
+  allocateCustomerCreditSerialOnDb,
+} from "./atomicCreate";
+import {
+  addCustomerCreditPaymentOnDb,
+  closeCustomerCreditFullyPaidOnDb,
+} from "./recordMutations";
+
+import { applyStatus, applyUpdate, removePaymentFrom } from "./shared";
 import type { CloseFullyPaidInput } from "./types";
 import type {
   CreateCustomerCreditInput,
@@ -69,9 +70,6 @@ function userCollection(userId: string) {
 }
 function recordDocRef(userId: string, id: string) {
   return doc(getFirebaseDb(), "users", userId, COLLECTION, id);
-}
-function counterDocRef(userId: string) {
-  return doc(getFirebaseDb(), "users", userId, "counters", "customerCredit");
 }
 
 function num(v: unknown, fallback = 0): number {
@@ -309,36 +307,13 @@ function toCloud(record: CustomerCreditRecord): Record<string, unknown> {
 
 export const firebaseCustomerCreditRepository: CustomerCreditRepository = {
   async allocateSerial(userId) {
-    if (!userId) throw new AppError("permission_denied", "Not signed in.");
-    const ref = counterDocRef(userId);
-    return runTransaction(getFirebaseDb(), async (tx) => {
-      const snap = await tx.get(ref);
-      const current = snap.exists() ? num((snap.data() as { next?: number }).next) : 0;
-      const next = current + 1;
-      tx.set(ref, { next, updatedAt: Date.now() }, { merge: true });
-      return next;
-    });
+    return allocateCustomerCreditSerialOnDb(getFirebaseDb(), userId);
   },
 
   async create(userId, input: CreateCustomerCreditInput) {
-    if (!userId) throw new AppError("permission_denied", "Not signed in.");
-    const recordId = buildNewRecord(userId, 0, input, Date.now()).id;
-    const ref = recordDocRef(userId, recordId);
-    const existingSnap = await getDoc(ref);
-    if (existingSnap.exists()) {
-      return fromDoc(existingSnap.id, existingSnap.data() as Record<string, unknown>, userId);
-    }
-
-    const serial = await this.allocateSerial(userId);
-    const record = buildNewRecord(userId, serial, input, Date.now());
-    await setDoc(ref, toCloud(record));
-    log.info("credit record created (firebase)", {
-      id: record.id,
-      recordNumber: record.recordNumber,
-      mode: record.mode,
-      firestorePath: `users/${userId}/${COLLECTION}/${record.id}`,
-    });
-    return record;
+    return createCustomerCreditAtomic(getFirebaseDb(), userId, input, (id, data) =>
+      fromDoc(id, data, userId)
+    );
   },
 
   async update(userId, input: UpdateCustomerCreditInput) {
@@ -352,13 +327,13 @@ export const firebaseCustomerCreditRepository: CustomerCreditRepository = {
   },
 
   async addPayment(userId, recordId, payment) {
-    const ref = recordDocRef(userId, recordId);
-    const snap = await getDoc(ref);
-    if (!snap.exists()) throw new AppError("not_found", "Record not found.");
-    const existing = fromDoc(snap.id, snap.data() as Record<string, unknown>, userId);
-    const next = appendPayment(existing, payment, Date.now());
-    await setDoc(ref, toCloud(next), { merge: true });
-    return next;
+    return addCustomerCreditPaymentOnDb(
+      getFirebaseDb(),
+      userId,
+      recordId,
+      payment,
+      (id, data) => fromDoc(id, data, userId)
+    );
   },
 
   async removePayment(userId, recordId, paymentId) {
@@ -382,21 +357,12 @@ export const firebaseCustomerCreditRepository: CustomerCreditRepository = {
   },
 
   async closeFullyPaid(userId, input: CloseFullyPaidInput) {
-    const ref = recordDocRef(userId, input.recordId);
-    const snap = await getDoc(ref);
-    if (!snap.exists()) throw new AppError("not_found", "Record not found.");
-    const existing = fromDoc(snap.id, snap.data() as Record<string, unknown>, userId);
-    const next = applyFullClosure(
-      existing,
-      input.closure,
-      {
-        appendPayment: input.appendFinalPayment !== false,
-        clientPaymentId: input.clientMutationId,
-      },
-      Date.now()
+    return closeCustomerCreditFullyPaidOnDb(
+      getFirebaseDb(),
+      userId,
+      input,
+      (id, data) => fromDoc(id, data, userId)
     );
-    await setDoc(ref, toCloud(next), { merge: true });
-    return next;
   },
 
   async setReminder(userId, recordId, reminder) {

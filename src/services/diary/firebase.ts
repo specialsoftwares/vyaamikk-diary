@@ -10,43 +10,28 @@ import {
   getDocs,
   orderBy,
   query,
-  setDoc,
 } from "firebase/firestore";
 
-import { AppError } from "@/domain/errors";
 import type { BusinessEntry } from "@/domain/businessEntry";
-import type { EntryReminder } from "@/domain/types";
 import { getFirebaseDb } from "@/config/firebase";
 import { entrySearchBlob } from "@/utils/businessEntry/display";
 import { notificationsService } from "@/services/notifications";
+import type { SyncSessionToken } from "@/sync/syncSessionOwnership";
 
-import { createInitialDocumentHistory } from "@/services/documentHistory";
-import { mergeBusinessEntryUpdate, mergeEntryPdfGeneration } from "./mergeEntryUpdate";
-import { entryToCloudStorage } from "@/services/pdf/pdfCloudSync";
 import { dedupeDiaryEntries } from "@/services/dashboard/diaryRecordCounts";
-import { normaliseBusinessEntry } from "./normalize";
+import {
+  createEntryAtomicDetailed,
+  entryFromFirestoreDoc,
+} from "./atomicCreate";
+import { updateDiaryEntryOnDb } from "./firebaseUpdate";
 import type {
-  CreateBusinessEntryInput,
+  DiaryCreateResult,
   DiaryRepository,
   ListDiaryEntriesOptions,
-  UpdateBusinessEntryInput,
 } from "./types";
 
 function entriesCollection(userId: string) {
   return collection(getFirebaseDb(), "users", userId, "entries");
-}
-
-function reminderToJson(r: EntryReminder | null) {
-  if (!r) return null;
-  return { at: r.at, note: r.note, notificationId: r.notificationId };
-}
-
-/** Firestore doc id wins — stored `id` field may be empty from legacy creates. */
-function entryFromFirestoreDoc(
-  docId: string,
-  data: Record<string, unknown>
-): BusinessEntry | null {
-  return normaliseBusinessEntry({ ...data, id: docId }, "");
 }
 
 function applyFilters(
@@ -71,72 +56,24 @@ function applyFilters(
 }
 
 export const firebaseDiaryRepository: DiaryRepository = {
-  async create(userId, input) {
-    const now = Date.now();
-    const ref = input.clientRecordId
-      ? doc(getFirebaseDb(), "users", userId, "entries", input.clientRecordId)
-      : doc(entriesCollection(userId));
+  async create(userId, input, session) {
+    return (await this.createWithOutcome(userId, input, session)).record;
+  },
 
-    const existingSnap = await getDoc(ref);
-    if (existingSnap.exists()) {
-      const existing = entryFromFirestoreDoc(
-        existingSnap.id,
-        existingSnap.data() as Record<string, unknown>
-      );
-      if (existing) return existing;
-    }
-
-    const entry: BusinessEntry = {
-      id: ref.id,
+  async createWithOutcome(userId, input, session?: SyncSessionToken | null): Promise<DiaryCreateResult> {
+    const result = await createEntryAtomicDetailed(
+      getFirebaseDb(),
       userId,
-      ueid: input.ueid,
-      entryType: input.entryType,
-      title: input.title.trim(),
-      entryDate: input.entryDate,
-      notes: input.notes?.trim() || null,
-      reminder: input.reminder ?? null,
-      location: input.location ?? null,
-      attachments: input.attachments ?? [],
-      payload: input.payload,
-      pdfUri: null,
-      documentHistory: createInitialDocumentHistory(),
-      source: input.source ?? "composer",
-      status: input.status ?? "active",
-      createdAt: now,
-      updatedAt: now,
-      deletedAt: null,
-    };
-    const stored = entryToCloudStorage(entry);
-    stored.reminder = reminderToJson(entry.reminder);
-    stored.id = ref.id;
-    await setDoc(ref, stored);
-    return entry;
+      input,
+      session === undefined ? undefined : { session }
+    );
+    return { record: result.record, outcome: result.outcome };
   },
 
   async update(userId, input) {
-    const ref = doc(getFirebaseDb(), "users", userId, "entries", input.id);
-    const snap = await getDoc(ref);
-    if (!snap.exists()) throw new AppError("not_found", "Entry not found.");
-    const existing = entryFromFirestoreDoc(snap.id, snap.data() as Record<string, unknown>)!;
-
-    if (input.reminder !== undefined) {
-      const wasScheduled = existing.reminder?.notificationId ?? null;
-      const willBeDifferent =
-        input.reminder === null ||
-        input.reminder.notificationId !== existing.reminder?.notificationId;
-      if (wasScheduled && willBeDifferent) {
-        await notificationsService.cancel(wasScheduled);
-      }
-    }
-
-    let next = mergeBusinessEntryUpdate(existing, input);
-    if (input.pdfUri !== undefined && input.pdfUri) {
-      next = mergeEntryPdfGeneration(next, input.pdfUri);
-    }
-    const patch = entryToCloudStorage(next);
-    patch.reminder = reminderToJson(next.reminder);
-    await setDoc(ref, patch, { merge: true });
-    return next;
+    return updateDiaryEntryOnDb(getFirebaseDb(), userId, input, {
+      cancelNotification: (id) => notificationsService.cancel(id),
+    });
   },
 
   async hardDelete(userId, id) {

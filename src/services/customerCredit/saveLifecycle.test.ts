@@ -184,6 +184,63 @@ async function run(): Promise<void> {
   const summary = (await import("@/domain/customerCredit")).computeCreditSummary(detail!);
   assert.ok(summary.totalPaid >= 2500, "balance reflects appended payment");
 
+  const closedAt = Date.now();
+  const closed = await mockCustomerCreditRepository.closeFullyPaid(userId, {
+    recordId: created.id,
+    appendFinalPayment: true,
+    clientMutationId: "close_lifecycle_1",
+    closure: {
+      finalPaymentDate: closedAt,
+      finalPaymentAmount: 7500,
+      paymentMode: "cash",
+      paidBy: "customer",
+      recordedBy: userId,
+      balanceAtClosure: 0,
+      adjustment: "exact",
+      closedAt,
+    },
+  });
+  assert.equal(closed.status, "fully_paid");
+  assert.ok(closed.closure, "closure metadata persisted");
+  const closedAgain = await mockCustomerCreditRepository.closeFullyPaid(userId, {
+    recordId: created.id,
+    appendFinalPayment: true,
+    clientMutationId: "close_lifecycle_1",
+    closure: closed.closure!,
+  });
+  assert.equal(closedAgain.status, "fully_paid");
+  assert.equal(closedAgain.version, closed.version, "repeat closeFullyPaid is idempotent");
+
+  // --- absent/blank clientRecordId: identity captured once per create ---
+  const absent = await mockCustomerCreditRepository.create(userId, {
+    ...minimalCreditInput("unused"),
+    clientRecordId: undefined,
+  });
+  assert.ok(absent.id.trim().length > 0, "absent clientRecordId still yields an id");
+  const absentHit = await mockCustomerCreditRepository.getById(userId, absent.id);
+  assert.equal(absentHit?.id, absent.id, "mock payload id matches stored id");
+  const absentOther = await mockCustomerCreditRepository.create(userId, {
+    ...minimalCreditInput("unused"),
+    clientRecordId: undefined,
+  });
+  assert.notEqual(
+    absentOther.id,
+    absent.id,
+    "a new create with absent clientRecordId is a distinct record"
+  );
+
+  const blank = await mockCustomerCreditRepository.create(userId, {
+    ...minimalCreditInput("unused"),
+    clientRecordId: "   ",
+  });
+  assert.ok(blank.id.trim().length > 0, "blank clientRecordId still yields an id");
+  const blankRetry = await mockCustomerCreditRepository.create(userId, {
+    ...minimalCreditInput("unused"),
+    clientRecordId: blank.id,
+  });
+  assert.equal(blankRetry.id, blank.id, "retry with captured id is idempotent");
+  assert.equal(blankRetry.serial, blank.serial, "idempotent retry does not allocate another serial");
+
   console.log("saveLifecycle.test.ts: all cases passed");
 }
 

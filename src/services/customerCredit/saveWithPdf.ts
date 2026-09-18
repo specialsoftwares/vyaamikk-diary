@@ -14,7 +14,7 @@ import {
 } from "@/services/records/saveCoordinator";
 import { attachRecordIdToPersistentLock } from "@/services/records/persistentSaveLock";
 import { SAVE_STEP, SaveStillInProgressError, hasCompletedStep } from "@/services/records/saveLockTypes";
-import type { SaveIdempotencyContext } from "@/services/records/saveIdempotency";
+import type { SaveIdempotencyContext, ProcessSaveLockOwner } from "@/services/records/saveIdempotency";
 import { releaseProcessSaveLock } from "@/services/records/saveIdempotency";
 import { syncInsightsFromCustomerCredit } from "@/services/insights/insightSync";
 import { syncCreditReminder } from "@/services/customerCredit/reminders";
@@ -44,6 +44,7 @@ export async function saveCustomerCreditWithPdf(
     params.update?.id ?? params.idempotency?.idempotencyKey ?? null;
   let idempotency = params.idempotency;
   let completedSteps: string[] = [];
+  let processLockOwner: ProcessSaveLockOwner | null = null;
   const repo = getCustomerCreditRepository();
 
   logSaveDiagnostic({
@@ -69,6 +70,7 @@ export async function saveCustomerCreditWithPdf(
       idempotency = begun.idempotency;
       params.create.clientRecordId = begun.clientRecordId;
       completedSteps = begun.decision.completedSteps;
+      processLockOwner = begun.processLockOwner;
 
       if (begun.decision.action === "return_done") {
         saved =
@@ -319,9 +321,10 @@ export async function saveCustomerCreditWithPdf(
     if (idempotency && !isUpdate) {
       await completeCoordinatedSave(idempotency, saved.id, {
         processLockKey: processLockKey ?? undefined,
+        processLockOwner: processLockOwner ?? undefined,
       });
     } else if (processLockKey) {
-      releaseProcessSaveLock(processLockKey);
+      releaseProcessSaveLock(processLockKey, processLockOwner ?? undefined);
     }
 
     logSaveDiagnostic({
@@ -346,10 +349,11 @@ export async function saveCustomerCreditWithPdf(
     if (idempotency && !isUpdate) {
       await failCoordinatedSave(idempotency, "credit_save_failed", {
         processLockKey: processLockKey ?? undefined,
+        processLockOwner: processLockOwner ?? undefined,
         clearRegistry: false,
       });
     } else if (processLockKey) {
-      releaseProcessSaveLock(processLockKey);
+      releaseProcessSaveLock(processLockKey, processLockOwner ?? undefined);
     }
     throw e;
   }

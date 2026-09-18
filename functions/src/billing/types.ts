@@ -106,12 +106,18 @@ export interface SubscriptionStatusDoc {
 // ---------------------------------------------------------------------------
 
 /** Cloud record collections that consume monthly quota when CREATED. */
-export type BillableRecordCollection =
+export type QuotaLinkedRecordCollection =
   | "entries"
   | "purchaseOrders"
   | "customerCreditRecords"
-  | "professionalPacks"
-  | "letterheadDocs";
+  | "professionalPacks";
+
+/**
+ * `letterheadDocs` remains on this union only because historical
+ * `usageCurrent.lastRecordCollection` values may still name it. New letterhead
+ * creates must not write usage.
+ */
+export type BillableRecordCollection = QuotaLinkedRecordCollection | "letterheadDocs";
 
 /**
  * The only client-writable billing document, and only via the atomic
