@@ -2741,6 +2741,8 @@ const en = {
       trialNote:
         "14-day Professional trial is granted by account policy, not by buying a store plan. This screen cannot start a trial.",
       storePriceNote: "Prices shown are from Google Play or the App Store on this device.",
+      letterheadIncluded:
+        "Letterhead documents are included for every account for 12 months from signup. They do not require buying a pack during this period. After that, access continues until a later owner decision.",
     },
     education: {
       title: "Why keep records in Vyaamikk Diary",

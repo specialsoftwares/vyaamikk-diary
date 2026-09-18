@@ -237,4 +237,13 @@ assert.equal(estimateSheetsSaved(-3), 0);
 assert.equal(estimateSheetsSaved(Number.NaN), 0);
 assert.equal(UPGRADE_PERIOD_ORDER.length, 3);
 
+{
+  const monthly = buildUpgradePlanCards(t, fixtureReadyOffers(), "monthly");
+  for (const card of monthly) {
+    for (const line of card.benefits) {
+      assert.equal(/letterhead/i.test(line), false, `${card.planId} must not sell letterhead as a pack benefit`);
+    }
+  }
+}
+
 console.log("upgradePresentation.test.ts: ok");

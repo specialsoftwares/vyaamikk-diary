@@ -22,6 +22,7 @@ const sheet = stripComments(read("UpgradeSheet.tsx"));
 const education = stripComments(read("BenefitEducationScreen.tsx"));
 const lab = stripComments(read("BillingUxPreviewLab.tsx"));
 const hi = readFileSync(join(root, "../../i18n/locales/hi.ts"), "utf8");
+const en = readFileSync(join(root, "../../i18n/locales/en.ts"), "utf8");
 const route = readFileSync(
   join(root, "../../../app/(app)/settings/billing-ux-preview.tsx"),
   "utf8"
@@ -45,6 +46,12 @@ assert.doesNotMatch(sheet, /useAuth\b/);
 assert.doesNotMatch(sheet, /restorePurchases/);
 assert.doesNotMatch(sheet, /billingUxPreviewFixtures/);
 assert.doesNotMatch(sheet, /\bswitch\s*\(\s*plan\s*\)/);
+assert.match(sheet, /billing\.upgrade\.letterheadIncluded/);
+assert.match(en, /letterheadIncluded:/);
+assert.match(hi, /letterheadIncluded:/);
+assert.match(en, /do not require buying a pack during this period/);
+assert.doesNotMatch(en.slice(en.indexOf("plans:"), en.indexOf("trialNote:")), /[Ll]etterhead/);
+assert.doesNotMatch(hi.slice(hi.indexOf("plans:"), hi.indexOf("trialNote:")), /लेटरहेड/);
 assert.match(sheet, /decideUpgradeSheetDispatch/);
 assert.match(sheet, /sheetDispatch\.primaryPress/);
 assert.match(sheet, /sheetDispatch\.restoreEnabled/);
