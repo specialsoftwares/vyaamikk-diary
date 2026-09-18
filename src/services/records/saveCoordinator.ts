@@ -10,9 +10,11 @@ import {
 import { logSaveDiagnostic } from "./saveDiagnostics";
 import {
   isLockExpired,
+  isPersistentLockAcquireFailed,
   markPersistentLockDone,
   markPersistentLockFailed,
   markPersistentLockInFlight,
+  persistentLockCallerMayReplace,
   readPersistentSaveLock,
   recordRetiredLeaseIntent,
   hasRetiredLeaseIntent,
@@ -22,6 +24,7 @@ import {
   SaveRetryableError,
   SaveStillInProgressError,
   hasCompletedStep,
+  type SaveLockDoc,
   type SaveStepName,
 } from "./saveLockTypes";
 import {
@@ -215,6 +218,78 @@ export async function beginCoordinatedSave(
     const persistent = await readPersistentSaveLock(ctx.userId, clientRecordId);
     await abandonIfRetired();
 
+    const callerMayReplaceObserved = (observed: SaveLockDoc) =>
+      persistentLockCallerMayReplace(observed, {
+        userId: ctx.userId,
+        clientRecordId,
+        recordKind: ctx.recordKind,
+        idempotencyKey: idempotency.idempotencyKey,
+        recordId: observed.recordId,
+      });
+
+    const reacquireObservedLease = async (
+      observed: SaveLockDoc,
+      fromExpiredLock: boolean
+    ): Promise<BeginCoordinatedSaveResult> => {
+      if (!callerMayReplaceObserved(observed)) {
+        releaseAcquiredProcessLock();
+        throw new SaveStillInProgressError();
+      }
+      const recordId = observed.recordId ?? null;
+      const steps = recordId
+        ? await fetchRecordCompletedSteps(ctx.userId, ctx.recordKind, recordId)
+        : [];
+      await abandonIfRetired();
+      let lock: SaveLockDoc;
+      try {
+        lock = await markPersistentLockInFlight({
+          userId: ctx.userId,
+          ueid: options.ueid,
+          clientRecordId,
+          idempotencyKey: idempotency.idempotencyKey,
+          recordKind: ctx.recordKind,
+          recordId,
+          expectedLeaseStartedAt: observed.startedAt,
+          session: options.session,
+        });
+      } catch (error) {
+        if (isPersistentLockAcquireFailed(error)) {
+          releaseAcquiredProcessLock();
+          throw new SaveStillInProgressError();
+        }
+        throw error;
+      }
+      lockLeaseStartedAt = lock.startedAt;
+      await abandonIfRetired();
+      return {
+        decision: {
+          action: "resume",
+          recordId,
+          clientRecordId,
+          completedSteps: steps,
+          fromExpiredLock,
+        },
+        clientRecordId,
+        idempotency,
+        processLockOwner,
+        lockLeaseStartedAt: lock.startedAt,
+      };
+    };
+
+    const declineInFlight = () => {
+      logSaveDiagnostic({
+        phase: "blocked_lock",
+        recordKind: ctx.recordKind,
+        userId: ctx.userId,
+        route: options.route,
+        blocked: true,
+        clientRecordId,
+        message: "persistent_in_flight",
+      });
+      releaseAcquiredProcessLock();
+      throw new SaveStillInProgressError();
+    };
+
     if (persistent) {
       if (persistent.status === "in_flight" && !isLockExpired(persistent)) {
         const retiredIntent = await hasRetiredLeaseIntent(
@@ -225,49 +300,12 @@ export async function beginCoordinatedSave(
         await abandonIfRetired();
         if (
           retiredIntent &&
-          stillOwnsRemoteCoordination(options.session, ctx.userId)
+          stillOwnsRemoteCoordination(options.session, ctx.userId) &&
+          callerMayReplaceObserved(persistent)
         ) {
-          const recordId = persistent.recordId ?? null;
-          const steps = recordId
-            ? await fetchRecordCompletedSteps(ctx.userId, ctx.recordKind, recordId)
-            : [];
-          await abandonIfRetired();
-          const lock = await markPersistentLockInFlight({
-            userId: ctx.userId,
-            ueid: options.ueid,
-            clientRecordId,
-            idempotencyKey: idempotency.idempotencyKey,
-            recordKind: ctx.recordKind,
-            recordId,
-            session: options.session,
-          });
-          lockLeaseStartedAt = lock.startedAt;
-          await abandonIfRetired();
-          return {
-            decision: {
-              action: "resume",
-              recordId,
-              clientRecordId,
-              completedSteps: steps,
-              fromExpiredLock: false,
-            },
-            clientRecordId,
-            idempotency,
-            processLockOwner,
-            lockLeaseStartedAt: lock.startedAt,
-          };
+          return await reacquireObservedLease(persistent, false);
         }
-        logSaveDiagnostic({
-          phase: "blocked_lock",
-          recordKind: ctx.recordKind,
-          userId: ctx.userId,
-          route: options.route,
-          blocked: true,
-          clientRecordId,
-          message: "persistent_in_flight",
-        });
-        releaseAcquiredProcessLock();
-        throw new SaveStillInProgressError();
+        declineInFlight();
       }
 
       if (persistent.status === "done" && persistent.recordId) {
@@ -293,67 +331,11 @@ export async function beginCoordinatedSave(
       }
 
       if (persistent.status === "failed") {
-        const recordId = persistent.recordId ?? null;
-        const steps = recordId
-          ? await fetchRecordCompletedSteps(ctx.userId, ctx.recordKind, recordId)
-          : [];
-        await abandonIfRetired();
-        const lock = await markPersistentLockInFlight({
-          userId: ctx.userId,
-          ueid: options.ueid,
-          clientRecordId,
-          idempotencyKey: idempotency.idempotencyKey,
-          recordKind: ctx.recordKind,
-          recordId,
-          session: options.session,
-        });
-        lockLeaseStartedAt = lock.startedAt;
-        await abandonIfRetired();
-        return {
-          decision: {
-            action: "resume",
-            recordId,
-            clientRecordId,
-            completedSteps: steps,
-            fromExpiredLock: false,
-          },
-          clientRecordId,
-          idempotency,
-          processLockOwner,
-          lockLeaseStartedAt: lock.startedAt,
-        };
+        return await reacquireObservedLease(persistent, false);
       }
 
       if (isLockExpired(persistent)) {
-        const recordId = persistent.recordId ?? null;
-        const steps = recordId
-          ? await fetchRecordCompletedSteps(ctx.userId, ctx.recordKind, recordId)
-          : [];
-        await abandonIfRetired();
-        const lock = await markPersistentLockInFlight({
-          userId: ctx.userId,
-          ueid: options.ueid,
-          clientRecordId,
-          idempotencyKey: idempotency.idempotencyKey,
-          recordKind: ctx.recordKind,
-          recordId,
-          session: options.session,
-        });
-        lockLeaseStartedAt = lock.startedAt;
-        await abandonIfRetired();
-        return {
-          decision: {
-            action: "resume",
-            recordId,
-            clientRecordId,
-            completedSteps: steps,
-            fromExpiredLock: true,
-          },
-          clientRecordId,
-          idempotency,
-          processLockOwner,
-          lockLeaseStartedAt: lock.startedAt,
-        };
+        return await reacquireObservedLease(persistent, true);
       }
     }
 
@@ -365,6 +347,7 @@ export async function beginCoordinatedSave(
         idempotencyKey: idempotency.idempotencyKey,
         recordKind: ctx.recordKind,
         recordId: null,
+        expectedLeaseStartedAt: null,
         session: options.session,
       });
       lockLeaseStartedAt = lock.startedAt;
@@ -384,6 +367,9 @@ export async function beginCoordinatedSave(
       throw error;
     }
     releaseAcquiredProcessLock();
+    if (isPersistentLockAcquireFailed(error)) {
+      throw new SaveStillInProgressError();
+    }
     throw error;
   }
 }

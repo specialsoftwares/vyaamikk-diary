@@ -8,6 +8,7 @@ import { resolve } from "node:path";
 import { initializeTestEnvironment, type RulesTestEnvironment } from "@firebase/rules-unit-testing";
 import { doc, getDoc, setDoc, type Firestore } from "firebase/firestore";
 
+import { __resetCapabilityGuardForTests } from "@/auth/offlineCapabilityGuard";
 import { createEntryAtomic } from "@/services/diary/atomicCreate";
 import {
   appendRecordCompletedStep,
@@ -28,7 +29,15 @@ import {
   setPersistentLockMutationObserverForTests,
   touchPersistentLock,
 } from "@/services/records/persistentSaveLock";
-import { SAVE_STEP } from "@/services/records/saveLockTypes";
+import {
+  createSaveIdempotencyContext,
+  isProcessSaveLockHeld,
+} from "@/services/records/saveIdempotency";
+import {
+  beginCoordinatedSave,
+  retireOwnedReservation,
+} from "@/services/records/saveCoordinator";
+import { SAVE_STEP, SaveStillInProgressError } from "@/services/records/saveLockTypes";
 import { captureAdmissionToken, syncSessionOwnership } from "@/sync/syncSessionOwnership";
 
 const PROJECT_ID = "vyaamikk-diary-coord-own-test";
@@ -86,7 +95,34 @@ function entryInput(clientRecordId: string) {
   };
 }
 
+function installAsyncStoragePolyfill(): void {
+  (globalThis as unknown as { __DEV__: boolean }).__DEV__ = true;
+  const mem = new Map<string, string>();
+  (globalThis as unknown as { window: { localStorage: Storage } }).window = {
+    localStorage: {
+      getItem: (k: string) => mem.get(k) ?? null,
+      setItem: (k: string, v: string) => {
+        mem.set(k, v);
+      },
+      removeItem: (k: string) => {
+        mem.delete(k);
+      },
+      clear: () => {
+        mem.clear();
+      },
+      get length() {
+        return mem.size;
+      },
+      key: (i: number) => [...mem.keys()][i] ?? null,
+    } as Storage,
+  };
+}
+
 async function main() {
+  installAsyncStoragePolyfill();
+  const { default: AsyncStorage } = await import("@react-native-async-storage/async-storage");
+  await AsyncStorage.clear();
+  __resetCapabilityGuardForTests({ isOnline: true, lastValidationAt: Date.now() });
   const rules = readFileSync(RULES_PATH, "utf8");
   const testEnv: RulesTestEnvironment = await initializeTestEnvironment({
     projectId: PROJECT_ID,
@@ -417,6 +453,138 @@ async function main() {
     }
     setPersistentLockInsideTransactionGateForTests(null);
     setPersistentLockMutationObserverForTests(null);
+
+    // Round 14 — coordinator recovery vs a newer Firestore lease. Not a mock lock store.
+    syncSessionOwnership.resetForTests();
+    const raceSession = syncSessionOwnership.beginSession(uid);
+    const raceCtx = createSaveIdempotencyContext({
+      userId: uid,
+      recordKind: "business_entry",
+      clientRecordId: "en_r14_em_race",
+    });
+    const begunRace = await beginCoordinatedSave(raceCtx, {
+      processLockKey: raceCtx.idempotencyKey,
+      session: raceSession,
+    });
+    await attachRecordIdToPersistentLock(
+      uid,
+      "en_r14_em_race",
+      "en_r14_em_race",
+      begunRace.lockLeaseStartedAt ?? undefined,
+      raceSession
+    );
+    const l1Race = await readPersistentSaveLock(uid, "en_r14_em_race");
+    if (!l1Race) throw new Error("expected L1 before recovery race");
+    syncSessionOwnership.endSession();
+    await retireOwnedReservation({
+      userId: uid,
+      clientRecordId: "en_r14_em_race",
+      processLockKey: raceCtx.idempotencyKey,
+      processLockOwner: begunRace.processLockOwner ?? undefined,
+      lockLeaseStartedAt: begunRace.lockLeaseStartedAt ?? undefined,
+      session: raceSession,
+    });
+
+    const fetchHold = barrier();
+    setCompletedStepBoundaryHooksForTests({ beforeFetch: fetchHold.gate });
+    const raceFresh = syncSessionOwnership.beginSession(uid);
+    const recoverRaceP = beginCoordinatedSave(raceCtx, {
+      processLockKey: raceCtx.idempotencyKey,
+      session: raceFresh,
+    });
+    await fetchHold.waitUntilEntered();
+    const l2Race = await markPersistentLockInFlight({
+      userId: uid,
+      clientRecordId: "en_r14_em_race",
+      idempotencyKey: raceCtx.idempotencyKey,
+      recordKind: "business_entry",
+      recordId: "en_r14_em_race",
+    });
+    fetchHold.release();
+    try {
+      await recoverRaceP;
+      throw new Error("paused recovery must not resume after a newer same-key lease");
+    } catch (error) {
+      if (!(error instanceof SaveStillInProgressError)) throw error;
+    }
+    const afterRace = await readPersistentSaveLock(uid, "en_r14_em_race");
+    if (afterRace?.startedAt !== l2Race.startedAt) {
+      throw new Error("newer same-key Firestore lease must win while recovery is paused");
+    }
+    if (isProcessSaveLockHeld(raceCtx.idempotencyKey)) {
+      throw new Error("rejected recovery must release its process reservation");
+    }
+    setCompletedStepBoundaryHooksForTests(null);
+
+    syncSessionOwnership.resetForTests();
+    const retrySession = syncSessionOwnership.beginSession(uid);
+    const retryCtx = createSaveIdempotencyContext({
+      userId: uid,
+      recordKind: "business_entry",
+      clientRecordId: "en_r14_em_retry",
+    });
+    const begunRetry = await beginCoordinatedSave(retryCtx, {
+      processLockKey: retryCtx.idempotencyKey,
+      session: retrySession,
+    });
+    await attachRecordIdToPersistentLock(
+      uid,
+      "en_r14_em_retry",
+      "en_r14_em_retry",
+      begunRetry.lockLeaseStartedAt ?? undefined,
+      retrySession
+    );
+    const l1Retry = await readPersistentSaveLock(uid, "en_r14_em_retry");
+    if (!l1Retry) throw new Error("expected L1 before transaction retry");
+    syncSessionOwnership.endSession();
+    await retireOwnedReservation({
+      userId: uid,
+      clientRecordId: "en_r14_em_retry",
+      processLockKey: retryCtx.idempotencyKey,
+      processLockOwner: begunRetry.processLockOwner ?? undefined,
+      lockLeaseStartedAt: begunRetry.lockLeaseStartedAt ?? undefined,
+      session: retrySession,
+    });
+
+    const retryHold = barrier();
+    let retryAttempts = 0;
+    setPersistentLockInsideTransactionGateForTests(async () => {
+      retryAttempts += 1;
+      if (retryAttempts === 1) await retryHold.gate();
+    });
+    const retryFresh = syncSessionOwnership.beginSession(uid);
+    const recoverRetryP = beginCoordinatedSave(retryCtx, {
+      processLockKey: retryCtx.idempotencyKey,
+      session: retryFresh,
+    });
+    await retryHold.waitUntilEntered();
+    const l2Retry = await markPersistentLockInFlight({
+      userId: uid,
+      clientRecordId: "en_r14_em_retry",
+      idempotencyKey: "em-l2-retry",
+      recordKind: "business_entry",
+      recordId: "en_r14_em_retry",
+    });
+    retryHold.release();
+    try {
+      await recoverRetryP;
+      throw new Error("transaction retry must not overwrite the newer lease");
+    } catch (error) {
+      if (!(error instanceof SaveStillInProgressError)) throw error;
+    }
+    const afterRetry = await readPersistentSaveLock(uid, "en_r14_em_retry");
+    if (afterRetry?.startedAt !== l2Retry.startedAt || afterRetry.idempotencyKey !== "em-l2-retry") {
+      throw new Error(
+        `retry overwrote newer lease: ${JSON.stringify({
+          startedAt: afterRetry?.startedAt,
+          key: afterRetry?.idempotencyKey,
+        })}`
+      );
+    }
+    if (isProcessSaveLockHeld(retryCtx.idempotencyKey)) {
+      throw new Error("declined retry acquisition must release its process reservation");
+    }
+    setPersistentLockInsideTransactionGateForTests(null);
 
     console.log("coordinationOwnership.emulator.test.ts: ok (Firestore emulator)");
   } finally {

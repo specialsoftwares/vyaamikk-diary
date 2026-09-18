@@ -156,6 +156,8 @@ export function setCompletedStepWriteObserverForTests(
 export type CompletedStepBoundaryHooks = {
   /** After the primary update is noted as started, fail it so fallback can run. */
   failPrimaryUpdate?: boolean;
+  /** Pause before the completed-step fetch used by recovery/re-acquire. */
+  beforeFetch?: () => Promise<void>;
   /** Pause the fallback read (getDoc / local get). */
   beforeFallbackGet?: () => Promise<void>;
   /** Pause immediately before a fallback write is dispatched. */
@@ -260,6 +262,7 @@ export async function fetchRecordCompletedSteps(
   recordId: string
 ): Promise<string[]> {
   if (!recordId) return [];
+  await boundaryHooks?.beforeFetch?.();
   if (useFirestore()) {
     try {
       const snap = await getDoc(recordRef(userId, recordKind, recordId));

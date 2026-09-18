@@ -222,16 +222,50 @@ export function isLockExpired(lock: SaveLockDoc, now = nowMs()): boolean {
 }
 
 /**
- * Lease identity is `startedAt`. `expectedStartedAt == null` means acquire /
- * replace (not a stale owner write). Session authority is separate.
+ * Lease identity is `startedAt`.
+ * `undefined` = unconditional (compatibility / first-writer tests).
+ * `null` = mutate only when no lease exists.
+ * `number` = mutate only that exact observed lease.
+ * Session authority is separate.
  */
 export function lockLeaseMatches(
   existing: SaveLockDoc | null,
-  expectedStartedAt: number | undefined
+  expectedStartedAt: number | null | undefined
 ): boolean {
-  if (expectedStartedAt == null) return true;
+  if (expectedStartedAt === undefined) return true;
+  if (expectedStartedAt === null) return existing == null;
   if (!existing) return false;
   return existing.startedAt === expectedStartedAt;
+}
+
+export const PERSISTENT_LOCK_ACQUIRE_FAILED = "persistent_lock_acquire_failed";
+
+export function isPersistentLockAcquireFailed(error: unknown): boolean {
+  return error instanceof Error && error.message === PERSISTENT_LOCK_ACQUIRE_FAILED;
+}
+
+/**
+ * Recovery/re-acquire may replace only a lease whose identity matches the caller.
+ * clientRecordId and authoritative recordId may differ after attach.
+ */
+export function persistentLockCallerMayReplace(
+  existing: SaveLockDoc,
+  caller: {
+    userId: string;
+    clientRecordId: string;
+    recordKind: RecordSaveKind;
+    idempotencyKey: string;
+    recordId?: string | null;
+  }
+): boolean {
+  if (existing.userId !== caller.userId) return false;
+  if (existing.clientRecordId !== caller.clientRecordId) return false;
+  if (existing.recordKind !== caller.recordKind) return false;
+  if (existing.idempotencyKey !== caller.idempotencyKey) return false;
+  const have = existing.recordId ?? null;
+  const want = caller.recordId ?? null;
+  if (want && have && want !== have) return false;
+  return true;
 }
 
 /** Distinct even when two replacements observe the same millisecond. */
@@ -284,10 +318,10 @@ export async function readPersistentSaveLock(
 async function applyLockTransition(
   userId: string,
   clientRecordId: string,
-  expectedLeaseStartedAt: number | undefined,
+  expectedLeaseStartedAt: number | null | undefined,
   mutator: (existing: SaveLockDoc | null) => SaveLockDoc | null,
   session?: SyncSessionToken | null
-): Promise<SaveLockDoc | null> {
+): Promise<{ lock: SaveLockDoc | null; mutated: boolean }> {
   if (afterReadGate) {
     const preview = usesFirestoreLock()
       ? await readFirestoreLock(userId, clientRecordId)
@@ -295,9 +329,12 @@ async function applyLockTransition(
     await afterReadGate(preview);
   }
 
+  let mutated = false;
+
   if (usesFirestoreLock()) {
     const ref = firestoreLockRef(userId, clientRecordId);
-    return runTransaction(lockDb(), async (tx) => {
+    const lock = await runTransaction(lockDb(), async (tx) => {
+      mutated = false;
       if (!mayMutatePersistentLock(session, userId)) {
         const snap = await tx.get(ref);
         return snap.exists() ? parseLock(snap.data() as Record<string, unknown>) : null;
@@ -311,6 +348,7 @@ async function applyLockTransition(
       if (!next) return existing;
       if (!mayMutatePersistentLock(session, userId)) return existing;
       tx.set(ref, lockToPayload(next));
+      mutated = true;
       lockMutationObserver?.({
         userId,
         clientRecordId,
@@ -320,20 +358,25 @@ async function applyLockTransition(
       });
       return next;
     });
+    return { lock, mutated };
   }
 
-  return withSerializedLocal(localKey(userId, clientRecordId), async () => {
+  const lock = await withSerializedLocal(localKey(userId, clientRecordId), async () => {
+    mutated = false;
+    if (!mayMutatePersistentLock(session, userId)) {
+      return readLocalLock(userId, clientRecordId);
+    }
+    await insideTransactionGate?.();
     if (!mayMutatePersistentLock(session, userId)) {
       return readLocalLock(userId, clientRecordId);
     }
     const existing = await readLocalLock(userId, clientRecordId);
-    await insideTransactionGate?.();
-    if (!mayMutatePersistentLock(session, userId)) return existing;
     if (!lockLeaseMatches(existing, expectedLeaseStartedAt)) return existing;
     const next = mutator(existing);
     if (!next) return existing;
     if (!mayMutatePersistentLock(session, userId)) return existing;
     await AsyncStorage.setItem(localKey(userId, clientRecordId), JSON.stringify(next));
+    mutated = true;
     lockMutationObserver?.({
       userId,
       clientRecordId,
@@ -343,6 +386,7 @@ async function applyLockTransition(
     });
     return next;
   });
+  return { lock, mutated };
 }
 
 export async function markPersistentLockInFlight(params: {
@@ -353,15 +397,34 @@ export async function markPersistentLockInFlight(params: {
   recordId?: string | null;
   ueid?: string;
   preserveStartedAt?: number;
+  /**
+   * `number` = that exact observed lease; `null` = document must still be empty;
+   * omit for an unconditional acquire (compatibility).
+   */
+  expectedLeaseStartedAt?: number | null;
   /** Original admission token. Omit for callers that predate session threading. */
   session?: SyncSessionToken | null;
 }): Promise<SaveLockDoc> {
   const now = nowMs();
-  const next = await applyLockTransition(
+  const { lock, mutated } = await applyLockTransition(
     params.userId,
     params.clientRecordId,
-    undefined,
+    params.expectedLeaseStartedAt,
     (existing) => {
+      if (typeof params.expectedLeaseStartedAt === "number") {
+        if (!existing) return null;
+        if (
+          !persistentLockCallerMayReplace(existing, {
+            userId: params.userId,
+            clientRecordId: params.clientRecordId,
+            recordKind: params.recordKind,
+            idempotencyKey: params.idempotencyKey,
+            recordId: params.recordId,
+          })
+        ) {
+          return null;
+        }
+      }
       const startedAt = mintLeaseStartedAt(existing, now, params.preserveStartedAt);
       return {
         clientRecordId: params.clientRecordId,
@@ -370,7 +433,7 @@ export async function markPersistentLockInFlight(params: {
         ueid: params.ueid,
         recordKind: params.recordKind,
         recordId: params.recordId ?? existing?.recordId ?? null,
-        status: "in_flight",
+        status: "in_flight" as const,
         startedAt,
         updatedAt: now,
         expiresAt: startedAt + SAVE_LOCK_TTL_MS,
@@ -381,10 +444,10 @@ export async function markPersistentLockInFlight(params: {
     },
     params.session
   );
-  if (!next || next.idempotencyKey !== params.idempotencyKey || next.status !== "in_flight") {
-    throw new Error("persistent_lock_acquire_failed");
+  if (!mutated || !lock || lock.status !== "in_flight" || lock.userId !== params.userId) {
+    throw new Error(PERSISTENT_LOCK_ACQUIRE_FAILED);
   }
-  return next;
+  return lock;
 }
 
 export async function touchPersistentLock(

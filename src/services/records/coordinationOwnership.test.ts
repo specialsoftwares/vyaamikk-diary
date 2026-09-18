@@ -26,7 +26,9 @@ import {
   markPersistentLockDone,
   markPersistentLockFailed,
   markPersistentLockInFlight,
+  persistentLockCallerMayReplace,
   readPersistentSaveLock,
+  recordRetiredLeaseIntent,
   setPersistentLockAfterReadGateForTests,
   setPersistentLockInsideTransactionGateForTests,
   setPersistentLockMutationObserverForTests,
@@ -48,7 +50,7 @@ import {
   setCompletedStepWriteObserverForTests,
   type CompletedStepWriteObservation,
 } from "@/services/records/recordCompletedSteps";
-import { SAVE_STEP, SaveRetryableError } from "@/services/records/saveLockTypes";
+import { SAVE_STEP, SaveRetryableError, SaveStillInProgressError } from "@/services/records/saveLockTypes";
 
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -667,6 +669,272 @@ async function main() {
   assert.equal(stillNewerLease?.startedAt, replacementLease.startedAt);
   assert.equal(stillNewerLease?.idempotencyKey, "newer-owner");
   releaseProcessSaveLock(ctxRecover.idempotencyKey, newerOwner);
+
+  const linkedCtx = createSaveIdempotencyContext({
+    userId: "u1",
+    recordKind: "business_entry",
+    clientRecordId: "en_r14_linked_client",
+  });
+  const sessionLinked = syncSessionOwnership.beginSession("u1");
+  const begunLinked = await beginCoordinatedSave(linkedCtx, {
+    processLockKey: linkedCtx.idempotencyKey,
+    session: sessionLinked,
+  });
+  await attachRecordIdToPersistentLock(
+    "u1",
+    "en_r14_linked_client",
+    "en_r14_authoritative",
+    begunLinked.lockLeaseStartedAt ?? undefined,
+    sessionLinked
+  );
+  const linkedDoc = await readPersistentSaveLock("u1", "en_r14_linked_client");
+  assert.ok(linkedDoc);
+  assert.equal(linkedDoc.clientRecordId, "en_r14_linked_client");
+  assert.equal(linkedDoc.recordId, "en_r14_authoritative");
+  assert.equal(
+    persistentLockCallerMayReplace(linkedDoc, {
+      userId: "u1",
+      clientRecordId: "en_r14_linked_client",
+      recordKind: "business_entry",
+      idempotencyKey: linkedCtx.idempotencyKey,
+      recordId: "en_r14_authoritative",
+    }),
+    true,
+    "clientRecordId and authoritative recordId may differ"
+  );
+  syncSessionOwnership.endSession();
+  await retireOwnedReservation({
+    userId: "u1",
+    clientRecordId: "en_r14_linked_client",
+    processLockKey: linkedCtx.idempotencyKey,
+    processLockOwner: begunLinked.processLockOwner ?? undefined,
+    lockLeaseStartedAt: begunLinked.lockLeaseStartedAt ?? undefined,
+    session: sessionLinked,
+  });
+  const sessionLinkedFresh = syncSessionOwnership.beginSession("u1");
+  const recoveredLinked = await beginCoordinatedSave(linkedCtx, {
+    processLockKey: linkedCtx.idempotencyKey,
+    session: sessionLinkedFresh,
+  });
+  assert.equal(recoveredLinked.decision.action, "resume");
+  if (recoveredLinked.decision.action === "resume") {
+    assert.equal(recoveredLinked.decision.recordId, "en_r14_authoritative");
+  }
+  releaseProcessSaveLock(linkedCtx.idempotencyKey, recoveredLinked.processLockOwner ?? undefined);
+
+  const alien = await markPersistentLockInFlight({
+    userId: "u1",
+    clientRecordId: "en_r14_mismatch",
+    idempotencyKey: "alien-key",
+    recordKind: "professional_pack",
+  });
+  await recordRetiredLeaseIntent("u1", "en_r14_mismatch", alien.startedAt);
+  const mismatchMutations: string[] = [];
+  setPersistentLockMutationObserverForTests((info) => {
+    mismatchMutations.push(`${info.status}:${info.startedAt}`);
+  });
+  const ctxMismatch = createSaveIdempotencyContext({
+    userId: "u1",
+    recordKind: "business_entry",
+    clientRecordId: "en_r14_mismatch",
+  });
+  const sessionMismatch = syncSessionOwnership.beginSession("u1");
+  await assert.rejects(
+    () =>
+      beginCoordinatedSave(ctxMismatch, {
+        processLockKey: ctxMismatch.idempotencyKey,
+        session: sessionMismatch,
+      }),
+    (err: unknown) => err instanceof SaveStillInProgressError
+  );
+  const stillAlien = await readPersistentSaveLock("u1", "en_r14_mismatch");
+  assert.equal(stillAlien?.startedAt, alien.startedAt);
+  assert.equal(stillAlien?.idempotencyKey, "alien-key");
+  assert.equal(stillAlien?.recordKind, "professional_pack");
+  assert.equal(mismatchMutations.length, 0, "mismatched identity must not mutate");
+  assert.equal(isProcessSaveLockHeld(ctxMismatch.idempotencyKey), false);
+  setPersistentLockMutationObserverForTests(null);
+
+  async function setupRetiredInFlight(clientRecordId: string, recordId: string) {
+    syncSessionOwnership.resetForTests();
+    const session = syncSessionOwnership.beginSession("u1");
+    const ctx = createSaveIdempotencyContext({
+      userId: "u1",
+      recordKind: "business_entry",
+      clientRecordId,
+    });
+    const begun = await beginCoordinatedSave(ctx, {
+      processLockKey: ctx.idempotencyKey,
+      session,
+    });
+    await attachRecordIdToPersistentLock(
+      "u1",
+      clientRecordId,
+      recordId,
+      begun.lockLeaseStartedAt ?? undefined,
+      session
+    );
+    const observed = await readPersistentSaveLock("u1", clientRecordId);
+    syncSessionOwnership.endSession();
+    await retireOwnedReservation({
+      userId: "u1",
+      clientRecordId,
+      processLockKey: ctx.idempotencyKey,
+      processLockOwner: begun.processLockOwner ?? undefined,
+      lockLeaseStartedAt: begun.lockLeaseStartedAt ?? undefined,
+      session,
+    });
+    return { ctx, observed };
+  }
+
+  {
+    const { ctx, observed } = await setupRetiredInFlight("en_r14_same_key", "en_r14_same_key");
+    assert.ok(observed);
+    const fetchHold = barrier();
+    setCompletedStepBoundaryHooksForTests({ beforeFetch: fetchHold.gate });
+    const sessionRace = syncSessionOwnership.beginSession("u1");
+    const recoverP = beginCoordinatedSave(ctx, {
+      processLockKey: ctx.idempotencyKey,
+      session: sessionRace,
+    });
+    await fetchHold.waitUntilEntered();
+    const l2Same = await markPersistentLockInFlight({
+      userId: "u1",
+      clientRecordId: "en_r14_same_key",
+      idempotencyKey: ctx.idempotencyKey,
+      recordKind: "business_entry",
+      recordId: "en_r14_same_key",
+    });
+    fetchHold.release();
+    await assert.rejects(
+      recoverP,
+      (err: unknown) => err instanceof SaveStillInProgressError
+    );
+    const afterSame = await readPersistentSaveLock("u1", "en_r14_same_key");
+    assert.equal(afterSame?.startedAt, l2Same.startedAt);
+    assert.notEqual(afterSame?.startedAt, observed.startedAt);
+    assert.equal(afterSame?.idempotencyKey, ctx.idempotencyKey);
+    assert.equal(isProcessSaveLockHeld(ctx.idempotencyKey), false);
+    setCompletedStepBoundaryHooksForTests(null);
+  }
+
+  {
+    const { ctx, observed } = await setupRetiredInFlight("en_r14_diff_key", "en_r14_diff_key");
+    assert.ok(observed);
+    const fetchHold = barrier();
+    setCompletedStepBoundaryHooksForTests({ beforeFetch: fetchHold.gate });
+    const sessionRace = syncSessionOwnership.beginSession("u1");
+    const recoverP = beginCoordinatedSave(ctx, {
+      processLockKey: ctx.idempotencyKey,
+      session: sessionRace,
+    });
+    await fetchHold.waitUntilEntered();
+    const l2Diff = await markPersistentLockInFlight({
+      userId: "u1",
+      clientRecordId: "en_r14_diff_key",
+      idempotencyKey: "l2-other-key",
+      recordKind: "business_entry",
+      recordId: "en_r14_diff_key",
+    });
+    fetchHold.release();
+    await assert.rejects(
+      recoverP,
+      (err: unknown) => err instanceof SaveStillInProgressError
+    );
+    const afterDiff = await readPersistentSaveLock("u1", "en_r14_diff_key");
+    assert.equal(afterDiff?.startedAt, l2Diff.startedAt);
+    assert.equal(afterDiff?.idempotencyKey, "l2-other-key");
+    assert.equal(isProcessSaveLockHeld(ctx.idempotencyKey), false);
+    setCompletedStepBoundaryHooksForTests(null);
+  }
+
+  {
+    const sessionFail = syncSessionOwnership.beginSession("u1");
+    const ctxFail = createSaveIdempotencyContext({
+      userId: "u1",
+      recordKind: "business_entry",
+      clientRecordId: "en_r14_failed_race",
+    });
+    const begunFail = await beginCoordinatedSave(ctxFail, {
+      processLockKey: ctxFail.idempotencyKey,
+      session: sessionFail,
+    });
+    await attachRecordIdToPersistentLock(
+      "u1",
+      "en_r14_failed_race",
+      "en_r14_failed_race",
+      begunFail.lockLeaseStartedAt ?? undefined,
+      sessionFail
+    );
+    await failCoordinatedSave(ctxFail, "unit_failed", {
+      processLockKey: ctxFail.idempotencyKey,
+      processLockOwner: begunFail.processLockOwner ?? undefined,
+      lockLeaseStartedAt: begunFail.lockLeaseStartedAt ?? undefined,
+      session: sessionFail,
+    });
+    const failedDoc = await readPersistentSaveLock("u1", "en_r14_failed_race");
+    assert.equal(failedDoc?.status, "failed");
+    const fetchHold = barrier();
+    setCompletedStepBoundaryHooksForTests({ beforeFetch: fetchHold.gate });
+    const recoverP = beginCoordinatedSave(ctxFail, {
+      processLockKey: ctxFail.idempotencyKey,
+      session: sessionFail,
+    });
+    await fetchHold.waitUntilEntered();
+    const l2Fail = await markPersistentLockInFlight({
+      userId: "u1",
+      clientRecordId: "en_r14_failed_race",
+      idempotencyKey: ctxFail.idempotencyKey,
+      recordKind: "business_entry",
+      recordId: "en_r14_failed_race",
+    });
+    fetchHold.release();
+    await assert.rejects(
+      recoverP,
+      (err: unknown) => err instanceof SaveStillInProgressError
+    );
+    const afterFail = await readPersistentSaveLock("u1", "en_r14_failed_race");
+    assert.equal(afterFail?.startedAt, l2Fail.startedAt);
+    assert.equal(isProcessSaveLockHeld(ctxFail.idempotencyKey), false);
+    setCompletedStepBoundaryHooksForTests(null);
+  }
+
+  {
+    const emptyHold = barrier();
+    let pausedOnce = false;
+    setPersistentLockAfterReadGateForTests(async () => {
+      if (pausedOnce) return;
+      pausedOnce = true;
+      await emptyHold.gate();
+    });
+    const ctxEmpty = createSaveIdempotencyContext({
+      userId: "u1",
+      recordKind: "business_entry",
+      clientRecordId: "en_r14_empty_race",
+    });
+    const sessionEmpty = syncSessionOwnership.beginSession("u1");
+    const firstP = beginCoordinatedSave(ctxEmpty, {
+      processLockKey: ctxEmpty.idempotencyKey,
+      session: sessionEmpty,
+    });
+    await emptyHold.waitUntilEntered();
+    const l2Empty = await markPersistentLockInFlight({
+      userId: "u1",
+      clientRecordId: "en_r14_empty_race",
+      idempotencyKey: "l2-empty",
+      recordKind: "business_entry",
+    });
+    emptyHold.release();
+    await assert.rejects(
+      firstP,
+      (err: unknown) => err instanceof SaveStillInProgressError
+    );
+    const afterEmpty = await readPersistentSaveLock("u1", "en_r14_empty_race");
+    assert.equal(afterEmpty?.startedAt, l2Empty.startedAt);
+    assert.equal(afterEmpty?.idempotencyKey, "l2-empty");
+    assert.equal(isProcessSaveLockHeld(ctxEmpty.idempotencyKey), false);
+    setPersistentLockAfterReadGateForTests(null);
+  }
 
   const composerSrc = fs.readFileSync(
     path.join(import.meta.dirname, "../diary/saveComposerEntry.ts"),
