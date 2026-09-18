@@ -20,9 +20,8 @@ import { spacing, typography } from "@/theme";
 import {
   buildUpgradePlanCards,
   canDispatchPurchase,
-  canDispatchRestore,
   canDispatchTrial,
-  chooseUpgradePrimaryPress,
+  decideUpgradeSheetDispatch,
   defaultSelectedSku,
   planIdForSku,
   resolveUpgradeCta,
@@ -153,11 +152,16 @@ export function UpgradeSheet({
     dispatch: cta.dispatch,
     trialActionAvailable,
   });
-  const primaryEnabled = purchaseEnabled || trialEnabled;
-  const restoreEnabled = canDispatchRestore({ restoreAvailable, restoreState });
+  const sheetDispatch = decideUpgradeSheetDispatch({
+    purchaseEnabled,
+    trialEnabled,
+    restoreAvailable,
+    purchaseState,
+    restoreState,
+    dispatch: cta.dispatch,
+    selectedSku: resolvedSku,
+  });
   const restoreLabel = restoreCtaLabel(t, { restoreAvailable, restoreState });
-  const purchaseBusy = purchaseState === "loading" || purchaseState === "pending";
-  const restoreBusy = restoreState === "loading" || restoreState === "pending";
 
   const close = () => {
     if (curtainRef.current) {
@@ -314,11 +318,7 @@ export function UpgradeSheet({
       <View style={styles.ctaDock}>
         <Pressable
           onPress={() => {
-            const press = chooseUpgradePrimaryPress({
-              dispatch: cta.dispatch,
-              enabled: primaryEnabled && !purchaseBusy,
-              selectedSku: resolvedSku,
-            });
+            const press = sheetDispatch.primaryPress;
             if (press.type === "purchase") {
               onPurchase(press.sku);
               return;
@@ -327,17 +327,20 @@ export function UpgradeSheet({
               onStartTrial();
             }
           }}
-          disabled={!primaryEnabled || purchaseBusy}
+          disabled={!sheetDispatch.primaryEnabled}
           accessibilityRole="button"
-          accessibilityState={{ disabled: !primaryEnabled || purchaseBusy, busy: purchaseBusy }}
+          accessibilityState={{
+            disabled: !sheetDispatch.primaryEnabled,
+            busy: sheetDispatch.purchaseSpinner,
+          }}
           accessibilityLabel={purchaseCtaLabel(t, cta.kind)}
           style={({ pressed }) => [
             styles.primaryCta,
-            (!primaryEnabled || purchaseBusy) && styles.ctaDisabled,
-            pressed && primaryEnabled && !purchaseBusy && styles.pressed,
+            !sheetDispatch.primaryEnabled && styles.ctaDisabled,
+            pressed && sheetDispatch.primaryEnabled && styles.pressed,
           ]}
         >
-          {purchaseBusy ? (
+          {sheetDispatch.purchaseSpinner ? (
             <ActivityIndicator color={CURTAIN_TEXT} />
           ) : null}
           <LocaleUiText style={styles.primaryCtaLabel}>{purchaseCtaLabel(t, cta.kind)}</LocaleUiText>
@@ -345,19 +348,22 @@ export function UpgradeSheet({
 
         <Pressable
           onPress={() => {
-            if (restoreEnabled) onRestore();
+            if (sheetDispatch.restoreEnabled) onRestore();
           }}
-          disabled={!restoreEnabled || restoreBusy}
+          disabled={!sheetDispatch.restoreEnabled}
           accessibilityRole="button"
-          accessibilityState={{ disabled: !restoreEnabled || restoreBusy, busy: restoreBusy }}
+          accessibilityState={{
+            disabled: !sheetDispatch.restoreEnabled,
+            busy: sheetDispatch.restoreSpinner,
+          }}
           accessibilityLabel={restoreLabel}
           style={({ pressed }) => [
             styles.secondaryCta,
-            (!restoreEnabled || restoreBusy) && styles.ctaDisabled,
-            pressed && restoreEnabled && !restoreBusy && styles.pressed,
+            !sheetDispatch.restoreEnabled && styles.ctaDisabled,
+            pressed && sheetDispatch.restoreEnabled && styles.pressed,
           ]}
         >
-          {restoreBusy ? <ActivityIndicator color={CURTAIN_TEXT} /> : null}
+          {sheetDispatch.restoreSpinner ? <ActivityIndicator color={CURTAIN_TEXT} /> : null}
           <LocaleUiText style={styles.secondaryCtaLabel}>{restoreLabel}</LocaleUiText>
         </Pressable>
       </View>

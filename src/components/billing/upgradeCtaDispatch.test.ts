@@ -3,9 +3,8 @@ import assert from "node:assert/strict";
 import { fixtureReadyOffers } from "./billingUxPreviewFixtures";
 import {
   canDispatchPurchase,
-  canDispatchRestore,
   canDispatchTrial,
-  chooseUpgradePrimaryPress,
+  decideUpgradeSheetDispatch,
   CLIENT_MANUAL_TRIAL_START_SUPPORTED,
   defaultSelectedSku,
   planIdForSku,
@@ -44,10 +43,15 @@ function decidePrimary(input: {
   enabled: boolean;
   press: PrimaryPress;
   restoreEnabled: boolean;
+  primaryEnabled: boolean;
+  purchaseSpinner: boolean;
+  restoreSpinner: boolean;
 } {
   const offers = input.offers ?? fixtureReadyOffers();
   const catalogState = input.catalogState ?? "ready";
   const purchaseState = input.purchaseState ?? "idle";
+  const restoreState = input.restoreState ?? "idle";
+  const restoreAvailable = input.restoreAvailable ?? true;
   const cardsPeriod = offers.find((row) => row.sku === input.selectedSku)?.period ?? "monthly";
   const selectedSku =
     input.selectedSku ??
@@ -85,9 +89,13 @@ function decidePrimary(input: {
     dispatch: cta.dispatch,
     trialActionAvailable: input.trialActionAvailable,
   });
-  const press = chooseUpgradePrimaryPress({
+  const sheet = decideUpgradeSheetDispatch({
+    purchaseEnabled,
+    trialEnabled,
+    restoreAvailable,
+    purchaseState,
+    restoreState,
     dispatch: cta.dispatch,
-    enabled: (purchaseEnabled || trialEnabled) && input.busy !== true,
     selectedSku,
   });
   return {
@@ -95,11 +103,11 @@ function decidePrimary(input: {
     labelKey: cta.labelKey,
     dispatch: cta.dispatch,
     enabled: cta.enabled,
-    press,
-    restoreEnabled: canDispatchRestore({
-      restoreAvailable: input.restoreAvailable ?? true,
-      restoreState: input.restoreState ?? "idle",
-    }),
+    press: sheet.primaryPress,
+    restoreEnabled: sheet.restoreEnabled,
+    primaryEnabled: sheet.primaryEnabled,
+    purchaseSpinner: sheet.purchaseSpinner,
+    restoreSpinner: sheet.restoreSpinner,
   };
 }
 
@@ -202,7 +210,10 @@ assert.equal(CLIENT_MANUAL_TRIAL_START_SUPPORTED, false);
   });
   assert.equal(pending.kind, "pending");
   assert.deepEqual(pending.press, { type: "none" });
-  assert.equal(pending.restoreEnabled, true);
+  assert.equal(pending.restoreEnabled, false);
+  assert.equal(pending.primaryEnabled, false);
+  assert.equal(pending.purchaseSpinner, true);
+  assert.equal(pending.restoreSpinner, false);
 }
 
 {
@@ -242,14 +253,73 @@ assert.equal(CLIENT_MANUAL_TRIAL_START_SUPPORTED, false);
 }
 
 {
-  const restoreBusy = decidePrimary({
+  const restorePending = decidePrimary({
     trialEligible: false,
     trialActionAvailable: false,
     selectedSku: "vyd_starter_monthly",
     restoreState: "pending",
   });
-  assert.deepEqual(restoreBusy.press, { type: "purchase", sku: "vyd_starter_monthly" });
-  assert.equal(restoreBusy.restoreEnabled, false);
+  assert.deepEqual(restorePending.press, { type: "none" });
+  assert.equal(restorePending.restoreEnabled, false);
+  assert.equal(restorePending.primaryEnabled, false);
+  assert.equal(restorePending.purchaseSpinner, false);
+  assert.equal(restorePending.restoreSpinner, true);
+}
+
+{
+  const restoreLoading = decidePrimary({
+    trialEligible: false,
+    trialActionAvailable: false,
+    selectedSku: "vyd_starter_monthly",
+    restoreState: "loading",
+  });
+  assert.deepEqual(restoreLoading.press, { type: "none" });
+  assert.equal(restoreLoading.restoreEnabled, false);
+  assert.equal(restoreLoading.primaryEnabled, false);
+  assert.equal(restoreLoading.purchaseSpinner, false);
+  assert.equal(restoreLoading.restoreSpinner, true);
+}
+
+{
+  const purchaseLoading = decidePrimary({
+    trialEligible: false,
+    trialActionAvailable: false,
+    selectedSku: "vyd_starter_monthly",
+    purchaseState: "loading",
+  });
+  assert.deepEqual(purchaseLoading.press, { type: "none" });
+  assert.equal(purchaseLoading.restoreEnabled, false);
+  assert.equal(purchaseLoading.primaryEnabled, false);
+  assert.equal(purchaseLoading.purchaseSpinner, true);
+  assert.equal(purchaseLoading.restoreSpinner, false);
+}
+
+{
+  const trialLockedByRestore = decidePrimary({
+    trialEligible: true,
+    trialActionAvailable: true,
+    selectedSku: "vyd_professional_monthly",
+    restoreState: "pending",
+  });
+  assert.equal(trialLockedByRestore.kind, "trial");
+  assert.deepEqual(trialLockedByRestore.press, { type: "none" });
+  assert.equal(trialLockedByRestore.restoreEnabled, false);
+  assert.equal(trialLockedByRestore.primaryEnabled, false);
+}
+
+{
+  const settled = decidePrimary({
+    trialEligible: false,
+    trialActionAvailable: false,
+    selectedSku: "vyd_starter_monthly",
+    purchaseState: "idle",
+    restoreState: "idle",
+  });
+  assert.deepEqual(settled.press, { type: "purchase", sku: "vyd_starter_monthly" });
+  assert.equal(settled.restoreEnabled, true);
+  assert.equal(settled.primaryEnabled, true);
+  assert.equal(settled.purchaseSpinner, false);
+  assert.equal(settled.restoreSpinner, false);
 }
 
 {
@@ -286,6 +356,22 @@ assert.equal(CLIENT_MANUAL_TRIAL_START_SUPPORTED, false);
   });
   assert.deepEqual(restoreSeparate.press, { type: "trial" });
   assert.equal(restoreSeparate.restoreEnabled, true);
+}
+
+{
+  const restoreUnavailable = decidePrimary({
+    trialEligible: false,
+    trialActionAvailable: false,
+    selectedSku: "vyd_starter_monthly",
+    restoreAvailable: false,
+    restoreState: "unavailable",
+  });
+  assert.deepEqual(restoreUnavailable.press, {
+    type: "purchase",
+    sku: "vyd_starter_monthly",
+  });
+  assert.equal(restoreUnavailable.restoreEnabled, false);
+  assert.equal(restoreUnavailable.restoreSpinner, false);
 }
 
 {

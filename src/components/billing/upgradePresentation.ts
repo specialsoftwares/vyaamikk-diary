@@ -280,6 +280,69 @@ export function canDispatchRestore(input: {
   return true;
 }
 
+export function isBillingOperationBusy(state: UpgradeOperationState): boolean {
+  return state === "loading" || state === "pending";
+}
+
+/** Either in-flight billing action locks purchase/trial and restore. */
+export function billingActionsLocked(input: {
+  purchaseState: UpgradeOperationState;
+  restoreState: UpgradeOperationState;
+}): boolean {
+  return (
+    isBillingOperationBusy(input.purchaseState) ||
+    isBillingOperationBusy(input.restoreState)
+  );
+}
+
+export type UpgradeSheetPrimaryPress =
+  | { type: "purchase"; sku: string }
+  | { type: "trial" }
+  | { type: "none" };
+
+export type UpgradeSheetDispatchDecision = {
+  primaryEnabled: boolean;
+  restoreEnabled: boolean;
+  purchaseSpinner: boolean;
+  restoreSpinner: boolean;
+  primaryPress: UpgradeSheetPrimaryPress;
+};
+
+/**
+ * Production decision boundary used by UpgradeSheet handlers.
+ * Operation-specific labels/spinners stay with the in-flight action.
+ */
+export function decideUpgradeSheetDispatch(input: {
+  purchaseEnabled: boolean;
+  trialEnabled: boolean;
+  restoreAvailable: boolean;
+  purchaseState: UpgradeOperationState;
+  restoreState: UpgradeOperationState;
+  dispatch: UpgradePrimaryDispatch;
+  selectedSku: string | null;
+}): UpgradeSheetDispatchDecision {
+  const locked = billingActionsLocked({
+    purchaseState: input.purchaseState,
+    restoreState: input.restoreState,
+  });
+  const restoreBase = canDispatchRestore({
+    restoreAvailable: input.restoreAvailable,
+    restoreState: input.restoreState,
+  });
+  const primaryEnabled = (input.purchaseEnabled || input.trialEnabled) && !locked;
+  return {
+    primaryEnabled,
+    restoreEnabled: restoreBase && !locked,
+    purchaseSpinner: isBillingOperationBusy(input.purchaseState),
+    restoreSpinner: isBillingOperationBusy(input.restoreState),
+    primaryPress: chooseUpgradePrimaryPress({
+      dispatch: input.dispatch,
+      enabled: primaryEnabled,
+      selectedSku: input.selectedSku,
+    }),
+  };
+}
+
 export function restoreCtaLabel(
   t: TranslateFn,
   input: { restoreAvailable: boolean; restoreState: UpgradeOperationState }

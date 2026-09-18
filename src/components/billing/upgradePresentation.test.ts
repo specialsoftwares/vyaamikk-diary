@@ -6,6 +6,7 @@ import {
   canDispatchPurchase,
   canDispatchRestore,
   CLIENT_MANUAL_TRIAL_START_SUPPORTED,
+  decideUpgradeSheetDispatch,
   defaultSelectedSku,
   estimateSheetsSaved,
   FORBIDDEN_W9_CLAIM_FRAGMENTS,
@@ -200,6 +201,36 @@ assert.equal(
 assert.equal(canDispatchRestore({ restoreAvailable: true, restoreState: "idle" }), true);
 assert.equal(canDispatchRestore({ restoreAvailable: true, restoreState: "pending" }), false);
 assert.equal(canDispatchRestore({ restoreAvailable: false, restoreState: "idle" }), false);
+
+{
+  const restoreLocksPurchase = decideUpgradeSheetDispatch({
+    purchaseEnabled: true,
+    trialEnabled: false,
+    restoreAvailable: true,
+    purchaseState: "idle",
+    restoreState: "pending",
+    dispatch: "purchase",
+    selectedSku: "vyd_starter_monthly",
+  });
+  assert.equal(restoreLocksPurchase.primaryEnabled, false);
+  assert.equal(restoreLocksPurchase.restoreEnabled, false);
+  assert.deepEqual(restoreLocksPurchase.primaryPress, { type: "none" });
+}
+{
+  const purchaseLocksRestore = decideUpgradeSheetDispatch({
+    purchaseEnabled: true,
+    trialEnabled: false,
+    restoreAvailable: true,
+    purchaseState: "loading",
+    restoreState: "idle",
+    dispatch: "purchase",
+    selectedSku: "vyd_starter_monthly",
+  });
+  assert.equal(purchaseLocksRestore.primaryEnabled, false);
+  assert.equal(purchaseLocksRestore.restoreEnabled, false);
+  assert.equal(purchaseLocksRestore.purchaseSpinner, true);
+  assert.equal(purchaseLocksRestore.restoreSpinner, false);
+}
 
 assert.equal(estimateSheetsSaved(25), 25);
 assert.equal(estimateSheetsSaved(-3), 0);
