@@ -82,6 +82,12 @@ export interface UpgradeSheetProps {
   purchaseState: UpgradeOperationState;
   restoreState: UpgradeOperationState;
   errorMessage: string | null;
+  /**
+   * Recoverable purchase/restore failure may keep Continue enabled so the
+   * user can retry without using Restore. Default false preserves the
+   * presentation-lab blocking error.
+   */
+  errorRetryEnabled?: boolean;
   selectedSku: string | null;
   selectedPeriod: UpgradePlanOffer["period"];
   onSelectSku: (sku: string) => void;
@@ -112,6 +118,7 @@ export function UpgradeSheet({
   purchaseState,
   restoreState,
   errorMessage,
+  errorRetryEnabled = false,
   selectedSku,
   selectedPeriod,
   onSelectSku,
@@ -138,7 +145,7 @@ export function UpgradeSheet({
     purchaseAvailable,
     purchaseState,
     catalogState,
-    hasError: Boolean(errorMessage),
+    hasError: Boolean(errorMessage) && !errorRetryEnabled,
   });
   const offerReady = selectedOfferIsReady(offers, resolvedSku);
   const purchaseEnabled = canDispatchPurchase({

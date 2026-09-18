@@ -3,53 +3,66 @@
  *
  * Uses the existing IapProvider / SubscriptionProvider. Does not start a
  * second purchase listener, write entitlements, or auto-retry the save.
+ * Presentation visibility is owned by the session-bound host runtime.
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useIap } from "@/billing/iap";
 import { UpgradeSheet } from "@/components/billing/UpgradeSheet";
 import { BenefitEducationScreen } from "@/components/billing/BenefitEducationScreen";
 import { useT } from "@/i18n";
+import { useAuth } from "@/state/auth";
 import { useSubscription } from "@/subscription";
 import type { UpgradeCatalogPeriod } from "@/components/billing/upgradeTypes";
 
-import { createQuotaUpsellController, type QuotaUpsellController } from "./quotaUpsellController";
 import { mapUpgradeSheetModel } from "./mapUpgradeSheetModel";
-import { registerQuotaUpsellPresenter } from "./notifyOrdinaryQuotaUpsell";
-import type { QuotaUpsellRequest } from "./quotaUpsellTypes";
+import { createQuotaUpsellHostRuntime } from "./quotaUpsellHostRuntime";
 
 export function QuotaUpsellHost({ children }: { children: React.ReactNode }) {
   const t = useT();
+  const { status: authStatus, user } = useAuth();
   const iap = useIap();
   const { purchase, restorePurchases, loadCatalog, available } = iap;
   const subscription = useSubscription();
   const [tick, setTick] = useState(0);
-  const [educationOpen, setEducationOpen] = useState(false);
   const [selectedSku, setSelectedSku] = useState<string | null>(null);
   const [selectedPeriod, setSelectedPeriod] = useState<UpgradeCatalogPeriod>("monthly");
+  const iapRef = useRef(iap);
+  iapRef.current = iap;
 
-  const controller = useMemo<QuotaUpsellController>(
+  const runtime = useMemo(
     () =>
-      createQuotaUpsellController({
+      createQuotaUpsellHostRuntime({
         purchase,
         restorePurchases,
+        getIap: () => iapRef.current,
       }),
     [purchase, restorePurchases]
   );
 
   useEffect(() => {
-    registerQuotaUpsellPresenter((request: QuotaUpsellRequest) => {
-      const result = controller.present(request);
-      setTick((n) => n + 1);
-      return result;
-    });
+    const stop = runtime.subscribe(() => setTick((n) => n + 1));
+    runtime.attach();
     return () => {
-      registerQuotaUpsellPresenter(null);
+      stop();
+      runtime.dispose();
     };
-  }, [controller]);
+  }, [runtime]);
 
-  const snapshot = controller.snapshot();
+  useEffect(() => {
+    runtime.reconcile();
+  }, [
+    runtime,
+    authStatus,
+    user?.uid,
+    iap.available,
+    iap.purchaseInFlight,
+    iap.pending,
+    iap.lastResult,
+  ]);
+
+  const snapshot = runtime.snapshot();
   const model = mapUpgradeSheetModel({
     t,
     iap,
@@ -57,10 +70,14 @@ export function QuotaUpsellHost({ children }: { children: React.ReactNode }) {
     hostPurchaseState: snapshot.hostPurchaseState,
     hostRestoreState: snapshot.hostRestoreState,
     hostErrorMessage: snapshot.hostErrorMessage,
+    errorRecoverable: snapshot.errorRecoverable,
   });
 
   useEffect(() => {
-    if (!snapshot.visible) return;
+    if (!snapshot.visible) {
+      setSelectedSku(null);
+      return;
+    }
     if (selectedSku == null && model.defaultSku) {
       setSelectedSku(model.defaultSku);
       setSelectedPeriod(model.defaultPeriod);
@@ -75,30 +92,29 @@ export function QuotaUpsellHost({ children }: { children: React.ReactNode }) {
 
   const onPurchase = useCallback(
     (sku: string) => {
-      void controller.purchase(sku).then(() => setTick((n) => n + 1));
+      void runtime.purchase(sku).catch(() => undefined);
     },
-    [controller]
+    [runtime]
   );
   const onRestore = useCallback(() => {
-    void controller.restore().then(() => setTick((n) => n + 1));
-  }, [controller]);
+    void runtime.restore().catch(() => undefined);
+  }, [runtime]);
   const onDismiss = useCallback(() => {
-    controller.dismiss();
-    setEducationOpen(false);
-    setSelectedSku(null);
-    setTick((n) => n + 1);
-  }, [controller]);
+    runtime.dismiss();
+  }, [runtime]);
   const onStartTrial = useCallback(() => {
-    controller.startTrial();
-  }, [controller]);
+    runtime.startTrial();
+  }, [runtime]);
 
   void tick;
+
+  const sheetVisible = snapshot.visible && !snapshot.educationOpen;
 
   return (
     <>
       {children}
       <UpgradeSheet
-        visible={snapshot.visible && !educationOpen}
+        visible={sheetVisible}
         triggerContext={model.triggerContext}
         currentPlanLabel={model.currentPlanLabel}
         entitlementLabel={model.entitlementLabel}
@@ -111,6 +127,7 @@ export function QuotaUpsellHost({ children }: { children: React.ReactNode }) {
         purchaseState={model.purchaseState}
         restoreState={model.restoreState}
         errorMessage={model.errorMessage}
+        errorRetryEnabled={model.errorRetryEnabled}
         selectedSku={selectedSku}
         selectedPeriod={selectedPeriod}
         onSelectSku={setSelectedSku}
@@ -119,13 +136,13 @@ export function QuotaUpsellHost({ children }: { children: React.ReactNode }) {
         onStartTrial={onStartTrial}
         onRestore={onRestore}
         onDismiss={onDismiss}
-        onOpenBenefitEducation={() => setEducationOpen(true)}
+        onOpenBenefitEducation={() => runtime.openEducation()}
       />
-      {educationOpen ? (
+      {snapshot.educationOpen ? (
         <BenefitEducationScreen
           reducedMotion={false}
-          onContinue={() => setEducationOpen(false)}
-          onClose={() => setEducationOpen(false)}
+          onContinue={() => runtime.closeEducation()}
+          onClose={() => runtime.closeEducation()}
         />
       ) : null}
     </>

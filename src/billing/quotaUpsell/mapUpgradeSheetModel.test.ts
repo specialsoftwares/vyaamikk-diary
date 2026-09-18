@@ -59,6 +59,7 @@ const readyCatalog: CanonicalSkuAvailability[] = ALL_CANONICAL_SKUS.map((sku) =>
   );
   assert.equal(model.currentPlanLabel, "billing.upgrade.freePlanName");
   assert.equal(model.entitlementLabel, "billing.upgrade.entitlementInactive");
+  assert.equal(model.errorRetryEnabled, false);
 }
 
 {
@@ -149,7 +150,29 @@ const readyCatalog: CanonicalSkuAvailability[] = ALL_CANONICAL_SKUS.map((sku) =>
     hostRestoreState: "idle",
     hostErrorMessage: null,
   });
-  assert.equal(failed.errorMessage, "store error");
+  assert.equal(failed.errorMessage, null);
+  assert.equal(failed.errorRetryEnabled, false);
+}
+
+{
+  const hostFailed = mapUpgradeSheetModel({
+    t,
+    iap: iapView({
+      catalog: readyCatalog,
+      lastResult: { kind: "failed", recoverable: true, message: "store error" },
+    }),
+    subscription: {
+      status: DEFAULT_CLIENT_SUBSCRIPTION,
+      plan: "free",
+      features: featuresForPlan("free"),
+    },
+    hostPurchaseState: "idle",
+    hostRestoreState: "idle",
+    hostErrorMessage: "pay fail",
+    errorRecoverable: true,
+  });
+  assert.equal(hostFailed.errorMessage, "pay fail");
+  assert.equal(hostFailed.errorRetryEnabled, true);
 }
 
 {

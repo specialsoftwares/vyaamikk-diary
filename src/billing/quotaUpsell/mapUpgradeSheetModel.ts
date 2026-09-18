@@ -4,7 +4,7 @@
  */
 
 import { ALL_CANONICAL_SKUS, getClientCatalogEntry, isCanonicalSku } from "@/billing/iap/iapCatalog";
-import type { CanonicalSku, IapView, PurchaseFlowResult } from "@/billing/iap/iapTypes";
+import type { CanonicalSku, IapView } from "@/billing/iap/iapTypes";
 import type {
   UpgradeCatalogPeriod,
   UpgradeCatalogState,
@@ -46,6 +46,7 @@ export type MappedUpgradeSheetModel = {
   purchaseState: UpgradeOperationState;
   restoreState: UpgradeOperationState;
   errorMessage: string | null;
+  errorRetryEnabled: boolean;
   defaultSku: string | null;
   defaultPeriod: UpgradeCatalogPeriod;
 };
@@ -112,12 +113,6 @@ function operationStateFromIap(
   return "idle";
 }
 
-export function errorMessageFromPurchaseResult(result: PurchaseFlowResult | null): string | null {
-  if (!result) return null;
-  if (result.kind === "failed") return result.message;
-  return null;
-}
-
 export function mapUpgradeSheetModel(input: {
   t: TranslateFn;
   iap: QuotaUpsellCatalogSource;
@@ -125,6 +120,7 @@ export function mapUpgradeSheetModel(input: {
   hostPurchaseState: UpgradeOperationState;
   hostRestoreState: UpgradeOperationState;
   hostErrorMessage: string | null;
+  errorRecoverable?: boolean;
 }): MappedUpgradeSheetModel {
   const catalogState = catalogStateFromIap(input.iap);
   const offers = ALL_CANONICAL_SKUS.map((sku) => offerForSku(sku, input.iap.catalog, catalogState));
@@ -133,7 +129,6 @@ export function mapUpgradeSheetModel(input: {
   const restoreAvailable = input.iap.available;
   const purchaseState = operationStateFromIap(input.iap, input.hostPurchaseState, true);
   const restoreState = operationStateFromIap(input.iap, input.hostRestoreState, false);
-  const iapError = errorMessageFromPurchaseResult(input.iap.lastResult);
   const defaultReady = offers.find((offer) => offer.offer.status === "ready");
   return {
     triggerContext: "recordLimitReached",
@@ -147,7 +142,8 @@ export function mapUpgradeSheetModel(input: {
     restoreAvailable,
     purchaseState,
     restoreState,
-    errorMessage: input.hostErrorMessage ?? iapError,
+    errorMessage: input.hostErrorMessage,
+    errorRetryEnabled: Boolean(input.hostErrorMessage) && input.errorRecoverable === true,
     defaultSku: defaultReady?.sku ?? null,
     defaultPeriod: defaultReady?.period ?? "monthly",
   };

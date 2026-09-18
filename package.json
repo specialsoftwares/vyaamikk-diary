@@ -50,7 +50,7 @@
     "test:billing-transition": "npx --yes tsx functions/src/billing/transition.unit.test.ts",
     "test:billing-persist": "npx --yes tsx functions/src/billing/applyTransition.unit.test.ts",
     "test:billing-presentation": "npx --yes tsx src/components/billing/upgradePresentation.test.ts && npx --yes tsx src/components/billing/upgradeCtaDispatch.test.ts && npx --yes tsx src/components/billing/upgradePresentation.contract.test.ts && npx --yes tsx src/components/billing/billingUxPreviewGate.test.ts && npx --yes tsx src/components/billing/billingUxHarness.isolation.test.ts",
-    "test:quota-upsell": "npx --yes tsx src/billing/quotaUpsell/quotaUpsellGate.test.ts && npx --yes tsx src/billing/quotaUpsell/quotaUpsellDecision.test.ts && npx --yes tsx src/billing/quotaUpsell/mapUpgradeSheetModel.test.ts && npx --yes tsx src/billing/quotaUpsell/quotaUpsellController.test.ts && npx --yes tsx src/billing/quotaUpsell/quotaUpsell.contract.test.ts",
+    "test:quota-upsell": "npx --yes tsx src/billing/quotaUpsell/quotaUpsellGate.test.ts && npx --yes tsx src/billing/quotaUpsell/quotaUpsellDecision.test.ts && npx --yes tsx src/billing/quotaUpsell/mapUpgradeSheetModel.test.ts && npx --yes tsx src/billing/quotaUpsell/quotaUpsellController.test.ts && npx --yes tsx src/billing/quotaUpsell/quotaUpsellHost.lifecycle.test.ts && npx --yes tsx src/billing/quotaUpsell/quotaUpsell.contract.test.ts",
     "test:billing-reconciliation-queue": "npx --yes tsx functions/src/billing/reconciliationQueue.unit.test.ts",
     "test:billing-trial-grant": "npx --yes tsx functions/src/billing/trialGrant.unit.test.ts",
     "test:billing-rate-limit": "npx --yes tsx functions/src/billing/rateLimit.unit.test.ts",

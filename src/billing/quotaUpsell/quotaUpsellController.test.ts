@@ -191,6 +191,58 @@ assert.equal(controller.snapshot().clientRecordId, "diary_1", "dismissal keeps t
 }
 
 {
+  controller.dismiss();
+  syncSessionOwnership.resetForTests();
+  const sessionOwnerA = syncSessionOwnership.beginSession("uid-a");
+  const openedA = controller.present(quotaReq({ session: sessionOwnerA, clientRecordId: "diary_a" }));
+  assert.equal(openedA.ok, true);
+  controller.openEducation();
+  assert.equal(controller.snapshot().visible, true);
+  assert.equal(controller.snapshot().educationOpen, true);
+
+  const sessionOwnerB = syncSessionOwnership.beginSession("uid-b");
+  assert.equal(controller.snapshot().visible, false, "A→B hides retired presentation");
+  assert.equal(controller.snapshot().educationOpen, false);
+  const staleOther = controller.present(
+    quotaReq({ session: sessionOwnerA, clientRecordId: "from_a_after_b" })
+  );
+  assert.equal(staleOther.ok, false);
+  const admittedB = controller.present(
+    quotaReq({ session: sessionOwnerB, family: "purchase_order", clientRecordId: "po_b" })
+  );
+  assert.equal(admittedB.ok, true);
+  assert.equal(controller.snapshot().visible, true);
+  assert.equal(controller.snapshot().clientRecordId, "po_b");
+  assert.equal(controller.snapshot().educationOpen, false);
+}
+
+{
+  controller.dismiss();
+  syncSessionOwnership.endSession();
+  const sessionBeforeLogout = syncSessionOwnership.beginSession("uid-a");
+  const first = controller.present(
+    quotaReq({ session: sessionBeforeLogout, clientRecordId: "logout_a" })
+  );
+  assert.equal(first.ok, true);
+  controller.openEducation();
+  syncSessionOwnership.endSession();
+  assert.equal(controller.snapshot().visible, false, "logout hides retired presentation");
+  assert.equal(controller.snapshot().educationOpen, false);
+  const sessionAfterLogin = syncSessionOwnership.beginSession("uid-a");
+  assert.equal(controller.snapshot().visible, false);
+  const staleA1 = controller.present(
+    quotaReq({ session: sessionBeforeLogout, clientRecordId: "logout_a" })
+  );
+  assert.equal(staleA1.ok, false);
+  const liveA2 = controller.present(
+    quotaReq({ session: sessionAfterLogin, clientRecordId: "logout_a2" })
+  );
+  assert.equal(liveA2.ok, true);
+  assert.equal(controller.snapshot().visible, true);
+  assert.equal(controller.snapshot().educationOpen, false);
+}
+
+{
   let hostOpens = 0;
   registerQuotaUpsellPresenter((request) => {
     hostOpens += 1;

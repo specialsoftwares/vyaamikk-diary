@@ -28,13 +28,22 @@ function read(rel: string): string {
   return readFileSync(join(repoRoot, rel), "utf8");
 }
 
+const runtime = stripComments(read("src/billing/quotaUpsell/quotaUpsellHostRuntime.ts"));
+assert.match(runtime, /createQuotaUpsellController/);
+assert.match(runtime, /registerQuotaUpsellPresenter/);
+assert.doesNotMatch(runtime, /grantProfessionalTrial/);
+assert.doesNotMatch(runtime, /\bsetDoc\b/);
+
 const host = stripComments(read("src/billing/quotaUpsell/QuotaUpsellHost.tsx"));
 assert.match(host, /useIap\(\)/);
 assert.match(host, /useSubscription\(\)/);
 assert.match(host, /iap\.purchase|purchase,/);
 assert.match(host, /restorePurchases/);
 assert.match(host, /trialActionAvailable=\{model\.trialActionAvailable\}/);
-assert.match(host, /createQuotaUpsellController/);
+assert.match(host, /createQuotaUpsellHostRuntime/);
+assert.match(host, /runtime\.reconcile/);
+assert.match(host, /errorRetryEnabled=\{model\.errorRetryEnabled\}/);
+assert.match(host, /\.catch\(/);
 assert.doesNotMatch(host, /grantProfessionalTrial/);
 assert.doesNotMatch(host, /\bsetDoc\b/);
 assert.doesNotMatch(host, /subscription\/status/);
@@ -48,6 +57,7 @@ assert.doesNotMatch(gate, /process\.env\s*\[/);
 const sheet = stripComments(read("src/components/billing/UpgradeSheet.tsx"));
 assert.doesNotMatch(sheet, /useIap\b/);
 assert.doesNotMatch(sheet, /notifyOrdinaryQuotaUpsell/);
+assert.match(sheet, /errorRetryEnabled/);
 
 const layout = read("app/_layout.tsx");
 assert.match(layout, /QuotaUpsellHost/);

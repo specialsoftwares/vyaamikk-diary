@@ -3,9 +3,10 @@
  *
  * Presentation-only: purchase/restore go to the existing IAP callbacks.
  * A purchase result never writes entitlement. Trial start is unsupported.
+ * Stale callbacks never recapture the live session or mutate a newer attempt.
  */
 
-import type { CanonicalSku, PurchaseFlowResult } from "@/billing/iap/iapTypes";
+import type { CanonicalSku, IapView, PurchaseFlowResult } from "@/billing/iap/iapTypes";
 import type { UpgradeOperationState } from "@/components/billing/upgradeTypes";
 import { syncSessionOwnership, type SyncSessionToken } from "@/sync/syncSessionOwnership";
 
@@ -30,128 +31,263 @@ export interface QuotaUpsellControllerDeps {
   restorePurchases: () => Promise<PurchaseFlowResult>;
 }
 
+type AttemptKind = "purchase" | "restore";
+
+type Attempt = {
+  id: number;
+  kind: AttemptKind;
+  presentationId: number;
+  session: SyncSessionToken | null;
+  callbackReturned: boolean;
+};
+
+export type QuotaUpsellIapSlice = Pick<
+  IapView,
+  "available" | "pending" | "purchaseInFlight" | "lastResult"
+>;
+
+export type QuotaUpsellSnapshot = {
+  visible: boolean;
+  educationOpen: boolean;
+  presentationId: number;
+  clientRecordId: string | null;
+  session: SyncSessionToken | null;
+  hostPurchaseState: UpgradeOperationState;
+  hostRestoreState: UpgradeOperationState;
+  inFlightKind: AttemptKind | null;
+  hostErrorMessage: string | null;
+  errorRecoverable: boolean;
+  attemptId: number | null;
+  purchaseCalls: CanonicalSku[];
+  restoreCalls: number;
+  trialCalls: number;
+  saveCalls: number;
+};
+
 export interface QuotaUpsellController {
   present(request: QuotaUpsellRequest): QuotaUpsellPresentResult;
   dismiss(): void;
+  sync(iap: QuotaUpsellIapSlice): void;
   purchase(sku: string): Promise<QuotaUpsellActionResult>;
   restore(): Promise<QuotaUpsellActionResult>;
   startTrial(): QuotaUpsellActionResult;
-  snapshot(): {
-    visible: boolean;
-    clientRecordId: string | null;
-    session: SyncSessionToken | null;
-    hostPurchaseState: UpgradeOperationState;
-    hostRestoreState: UpgradeOperationState;
-    inFlightKind: "purchase" | "restore" | null;
-    hostErrorMessage: string | null;
-    purchaseCalls: CanonicalSku[];
-    restoreCalls: number;
-    trialCalls: number;
-  };
+  openEducation(): void;
+  closeEducation(): void;
+  snapshot(): QuotaUpsellSnapshot;
 }
 
 function isBusy(state: UpgradeOperationState): boolean {
   return state === "loading" || state === "pending";
 }
 
-function hostStateFromResult(result: PurchaseFlowResult): UpgradeOperationState {
-  if (result.kind === "store_pending" || result.kind === "verified_unfinished_ios") return "pending";
-  if (result.kind === "unavailable") return "unavailable";
-  if (result.kind === "already_in_flight") return "loading";
-  return "idle";
+function durablePending(iap: QuotaUpsellIapSlice): boolean {
+  const stage = iap.pending?.stage;
+  return stage === "store_pending" || stage === "verifying";
+}
+
+function iapSettled(iap: QuotaUpsellIapSlice): boolean {
+  return !iap.purchaseInFlight && !durablePending(iap);
+}
+
+function failureMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  return "Purchase could not be completed.";
+}
+
+function applyResultState(result: PurchaseFlowResult): {
+  state: UpgradeOperationState;
+  error: string | null;
+  recoverable: boolean;
+} {
+  if (result.kind === "store_pending" || result.kind === "verified_unfinished_ios") {
+    return { state: "pending", error: null, recoverable: false };
+  }
+  if (result.kind === "unavailable") {
+    return { state: "unavailable", error: null, recoverable: false };
+  }
+  if (result.kind === "already_in_flight") {
+    return { state: "loading", error: null, recoverable: false };
+  }
+  if (result.kind === "failed") {
+    return { state: "idle", error: result.message, recoverable: result.recoverable };
+  }
+  return { state: "idle", error: null, recoverable: false };
 }
 
 export function createQuotaUpsellController(
   deps: QuotaUpsellControllerDeps
 ): QuotaUpsellController {
-  let visible = false;
+  let held = false;
+  let educationHeld = false;
+  let presentationId = 0;
   let clientRecordId: string | null = null;
-  let session: SyncSessionToken | null = null;
+  let originSession: SyncSessionToken | null = null;
   let hostPurchaseState: UpgradeOperationState = "idle";
   let hostRestoreState: UpgradeOperationState = "idle";
-  let inFlightKind: "purchase" | "restore" | null = null;
   let hostErrorMessage: string | null = null;
+  let errorRecoverable = false;
+  let currentAttempt: Attempt | null = null;
+  let attemptSeq = 0;
   const purchaseCalls: CanonicalSku[] = [];
   let restoreCalls = 0;
   let trialCalls = 0;
 
-  function stillOwnsSheet(): boolean {
-    return visible && syncSessionOwnership.isCurrent(session);
+  function presented(): boolean {
+    return held && syncSessionOwnership.isCurrent(originSession);
+  }
+
+  function educationOpen(): boolean {
+    return educationHeld && presented();
+  }
+
+  function awaitingCallback(): boolean {
+    return currentAttempt != null && !currentAttempt.callbackReturned;
+  }
+
+  function keepIssuedStoreBusy(): boolean {
+    return awaitingCallback() && syncSessionOwnership.isCurrent(currentAttempt?.session ?? null);
+  }
+
+  function storeBusyForDispatch(): boolean {
+    if (keepIssuedStoreBusy() && presented()) return true;
+    if (!presented()) return false;
+    return isBusy(hostPurchaseState) || isBusy(hostRestoreState);
+  }
+
+  function idleHostOperations(): void {
+    if (isBusy(hostPurchaseState)) hostPurchaseState = "idle";
+    if (isBusy(hostRestoreState)) hostRestoreState = "idle";
+  }
+
+  function retirePresentation(): void {
+    held = false;
+    educationHeld = false;
+    hostErrorMessage = null;
+    errorRecoverable = false;
+    presentationId += 1;
+    if (!keepIssuedStoreBusy()) {
+      idleHostOperations();
+    }
+  }
+
+  function finishAttempt(attempt: Attempt, result: PurchaseFlowResult): QuotaUpsellActionResult {
+    if (currentAttempt?.id !== attempt.id) {
+      return { kind: "ignored_stale" };
+    }
+    currentAttempt = { ...attempt, callbackReturned: true };
+    if (
+      attempt.presentationId !== presentationId ||
+      !syncSessionOwnership.isCurrent(attempt.session) ||
+      !presented()
+    ) {
+      idleHostOperations();
+      return { kind: "ignored_stale" };
+    }
+    const applied = applyResultState(result);
+    if (attempt.kind === "purchase") {
+      hostPurchaseState = applied.state;
+    } else {
+      hostRestoreState = applied.state;
+    }
+    hostErrorMessage = applied.error;
+    errorRecoverable = applied.recoverable;
+    return result;
+  }
+
+  async function runAttempt(
+    kind: AttemptKind,
+    action: () => Promise<PurchaseFlowResult>
+  ): Promise<QuotaUpsellActionResult> {
+    if (!presented()) return { kind: "ignored_stale" };
+    if (storeBusyForDispatch()) return { kind: "blocked_busy" };
+    const attempt: Attempt = {
+      id: (attemptSeq += 1),
+      kind,
+      presentationId,
+      session: originSession,
+      callbackReturned: false,
+    };
+    currentAttempt = attempt;
+    hostErrorMessage = null;
+    errorRecoverable = false;
+    if (kind === "purchase") hostPurchaseState = "loading";
+    else hostRestoreState = "loading";
+    let result: PurchaseFlowResult;
+    try {
+      result = await action();
+    } catch (error) {
+      result = { kind: "failed", recoverable: true, message: failureMessage(error) };
+    }
+    return finishAttempt(attempt, result);
   }
 
   return {
     present(request) {
+      if (held && !presented()) {
+        retirePresentation();
+      }
       const eligibility = decideQuotaUpsellEligibility(request);
       if (!eligibility.ok) {
-        return { ...eligibility, visible, clientRecordId };
+        return { ...eligibility, visible: presented(), clientRecordId };
       }
       const id = request.clientRecordId as string;
-      if (visible && clientRecordId === id) {
-        return { ok: false, reason: "sheet_already_visible", visible, clientRecordId };
+      if (presented() && clientRecordId === id) {
+        return { ok: false, reason: "sheet_already_visible", visible: true, clientRecordId };
       }
-      if (visible && clientRecordId !== id) {
-        return { ok: false, reason: "other_sheet_visible", visible, clientRecordId };
+      if (presented() && clientRecordId !== id) {
+        return { ok: false, reason: "other_sheet_visible", visible: true, clientRecordId };
       }
-      visible = true;
+      held = true;
+      educationHeld = false;
+      presentationId += 1;
       clientRecordId = id;
-      session = request.session;
+      originSession = request.session;
       hostErrorMessage = null;
-      return { ok: true, visible, clientRecordId };
+      errorRecoverable = false;
+      if (!keepIssuedStoreBusy()) {
+        idleHostOperations();
+      }
+      return { ok: true, visible: true, clientRecordId };
     },
 
     dismiss() {
-      visible = false;
-      hostPurchaseState = "idle";
-      hostRestoreState = "idle";
-      inFlightKind = null;
-      hostErrorMessage = null;
-      // Keep clientRecordId for diagnostics; do not recreate a record.
+      retirePresentation();
+    },
+
+    sync(iap) {
+      if (held && !syncSessionOwnership.isCurrent(originSession)) {
+        retirePresentation();
+      }
+      if (hostPurchaseState === "unavailable" && iap.available) {
+        hostPurchaseState = "idle";
+      }
+      if (hostRestoreState === "unavailable" && iap.available) {
+        hostRestoreState = "idle";
+      }
+      if (iapSettled(iap) && !awaitingCallback()) {
+        if (hostPurchaseState === "loading" || hostPurchaseState === "pending") {
+          hostPurchaseState = "idle";
+        }
+        if (hostRestoreState === "loading" || hostRestoreState === "pending") {
+          hostRestoreState = "idle";
+        }
+      }
     },
 
     async purchase(sku) {
-      if (!stillOwnsSheet()) return { kind: "ignored_stale" };
-      if (isBusy(hostPurchaseState) || isBusy(hostRestoreState) || inFlightKind) {
-        return { kind: "blocked_busy" };
-      }
       const canonical = asCanonicalPurchaseSku(sku);
+      if (!presented()) return { kind: "ignored_stale" };
+      if (storeBusyForDispatch()) return { kind: "blocked_busy" };
       if (!canonical) return { kind: "invalid_sku" };
-      const owner = session;
-      inFlightKind = "purchase";
-      hostPurchaseState = "loading";
-      hostErrorMessage = null;
       purchaseCalls.push(canonical);
-      const result = await deps.purchase(canonical);
-      if (!syncSessionOwnership.isCurrent(owner)) {
-        inFlightKind = null;
-        hostPurchaseState = "idle";
-        return { kind: "ignored_stale" };
-      }
-      inFlightKind = result.kind === "already_in_flight" ? "purchase" : null;
-      hostPurchaseState = hostStateFromResult(result);
-      hostErrorMessage = result.kind === "failed" ? result.message : null;
-      return result;
+      return runAttempt("purchase", () => deps.purchase(canonical));
     },
 
     async restore() {
-      if (!stillOwnsSheet()) return { kind: "ignored_stale" };
-      if (isBusy(hostPurchaseState) || isBusy(hostRestoreState) || inFlightKind) {
-        return { kind: "blocked_busy" };
-      }
-      const owner = session;
-      inFlightKind = "restore";
-      hostRestoreState = "loading";
-      hostErrorMessage = null;
+      if (!presented()) return { kind: "ignored_stale" };
+      if (storeBusyForDispatch()) return { kind: "blocked_busy" };
       restoreCalls += 1;
-      const result = await deps.restorePurchases();
-      if (!syncSessionOwnership.isCurrent(owner)) {
-        inFlightKind = null;
-        hostRestoreState = "idle";
-        return { kind: "ignored_stale" };
-      }
-      inFlightKind = result.kind === "already_in_flight" ? "restore" : null;
-      hostRestoreState = hostStateFromResult(result);
-      hostErrorMessage = result.kind === "failed" ? result.message : null;
-      return result;
+      return runAttempt("restore", () => deps.restorePurchases());
     },
 
     startTrial() {
@@ -159,18 +295,44 @@ export function createQuotaUpsellController(
       return { kind: "unsupported" };
     },
 
+    openEducation() {
+      if (!presented()) return;
+      educationHeld = true;
+    },
+
+    closeEducation() {
+      educationHeld = false;
+    },
+
     snapshot() {
+      const visible = presented();
+      const attempt = currentAttempt;
+      const liveInFlight =
+        attempt != null &&
+        !attempt.callbackReturned &&
+        syncSessionOwnership.isCurrent(attempt.session);
       return {
         visible,
+        educationOpen: educationOpen(),
+        presentationId,
         clientRecordId,
-        session,
+        session: originSession,
         hostPurchaseState,
         hostRestoreState,
-        inFlightKind,
-        hostErrorMessage,
+        inFlightKind: liveInFlight
+          ? attempt.kind
+          : visible && isBusy(hostPurchaseState)
+            ? "purchase"
+            : visible && isBusy(hostRestoreState)
+              ? "restore"
+              : null,
+        hostErrorMessage: visible ? hostErrorMessage : null,
+        errorRecoverable: visible && errorRecoverable,
+        attemptId: attempt?.id ?? null,
         purchaseCalls: [...purchaseCalls],
         restoreCalls,
         trialCalls,
+        saveCalls: 0,
       };
     },
   };
