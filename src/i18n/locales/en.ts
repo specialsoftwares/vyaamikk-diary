@@ -2758,6 +2758,10 @@ const en = {
       trialNote:
         "14-day Professional trial is granted by account policy, not by buying a store plan. This screen cannot start a trial.",
       storePriceNote: "Prices shown are from Google Play or the App Store on this device.",
+      freePlanName: "Free",
+      entitlementInactive: "No paid entitlement",
+      entitlementUnlimited: "Unlimited records this month",
+      entitlementLimit: "Up to {{limit}} records this month",
       letterheadIncluded:
         "Letterhead is free for every account for 12 months from signup. No paid plan is required, and it does not use your ordinary monthly record allowance. Access stays free under the current policy, with no automatic charge at the anniversary.",
     },

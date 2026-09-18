@@ -42,6 +42,8 @@ import { getDiaryRepository } from "@/services/diary";
 import { updateEntryLocalFirst } from "@/services/diary/localFirst";
 import { presentComposerWriteAcceptance } from "@/services/diary/composerSaveSteps";
 import { saveComposerEntry } from "@/services/diary/saveComposerEntry";
+import { notifyOrdinaryQuotaUpsell } from "@/billing/quotaUpsell";
+import { captureAdmissionToken } from "@/sync/syncSessionOwnership";
 import { logSaveDiagnostic } from "@/services/records/saveDiagnostics";
 import { lifecycleUiResetDiagnostics } from "@/services/records/saveLifecycleRunner";
 import {
@@ -505,6 +507,7 @@ export default function ComposerScreen() {
       setSaving(true);
       setError(null);
       let succeeded = false;
+      const saveSession = captureAdmissionToken();
       try {
         logSaveDiagnostic({
           phase: "start",
@@ -593,6 +596,15 @@ export default function ComposerScreen() {
                   ? t("sync.savedLocallyPermission")
                   : t("sync.savedLocallyPending");
             feedback.showWarning(localMsg, t("sync.savedLocallyTitle"));
+            if (presented.syncFailureKind === "quota_exhausted") {
+              notifyOrdinaryQuotaUpsell({
+                family: "diary",
+                origin: "user_save",
+                clientRecordId: editingId,
+                session: saveSession,
+                failureKind: presented.syncFailureKind,
+              });
+            }
           } else {
             feedback.showSuccess(t("composer.saveSuccess.updatedTitle"));
           }
@@ -695,6 +707,15 @@ export default function ComposerScreen() {
                 ? t("sync.savedLocallyPermission")
                 : t("sync.savedLocallyPending");
           feedback.showWarning(localMsg, t("sync.savedLocallyTitle"));
+          if (syncFailureKind === "quota_exhausted") {
+            notifyOrdinaryQuotaUpsell({
+              family: "diary",
+              origin: "user_save",
+              clientRecordId: clientRecordIdRef.current,
+              session: saveSession,
+              failureKind: syncFailureKind,
+            });
+          }
         } else if (pdfFailed) {
           feedback.showWarning(t("pdf.entrySavedPdfFailed"), t("pdf.entrySavedTitle"));
         } else if (failedSecondarySteps && failedSecondarySteps.length > 0) {

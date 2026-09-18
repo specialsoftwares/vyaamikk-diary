@@ -1,0 +1,215 @@
+import assert from "node:assert/strict";
+
+import type { CanonicalSku, PurchaseFlowResult } from "@/billing/iap/iapTypes";
+import { AppError } from "@/domain/errors";
+import { syncSessionOwnership } from "@/sync/syncSessionOwnership";
+
+import { createQuotaUpsellController } from "./quotaUpsellController";
+import { __setQuotaUpsellEnabledForTests } from "./quotaUpsellGate";
+import {
+  notifyOrdinaryQuotaUpsell,
+  registerQuotaUpsellPresenter,
+} from "./notifyOrdinaryQuotaUpsell";
+import type { QuotaUpsellRequest } from "./quotaUpsellTypes";
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
+async function run(): Promise<void> {
+__setQuotaUpsellEnabledForTests(true);
+syncSessionOwnership.resetForTests();
+const sessionA1 = syncSessionOwnership.beginSession("uid-a");
+
+const purchaseCalls: CanonicalSku[] = [];
+const restoreCalls: number[] = [];
+let purchaseImpl: () => Promise<PurchaseFlowResult> = async () => ({ kind: "sheet_launched" });
+let restoreImpl: () => Promise<PurchaseFlowResult> = async () => ({ kind: "sheet_launched" });
+
+const controller = createQuotaUpsellController({
+  purchase: async (sku) => {
+    purchaseCalls.push(sku);
+    return purchaseImpl();
+  },
+  restorePurchases: async () => {
+    restoreCalls.push(1);
+    return restoreImpl();
+  },
+});
+
+function quotaReq(over: Partial<QuotaUpsellRequest> = {}): QuotaUpsellRequest {
+  return {
+    family: "diary",
+    origin: "user_save",
+    clientRecordId: "diary_1",
+    session: syncSessionOwnership.capture(),
+    failureKind: "quota_exhausted",
+    ...over,
+  };
+}
+
+{
+  const opened = controller.present(quotaReq({ session: sessionA1 }));
+  assert.equal(opened.ok, true);
+  assert.equal(opened.visible, true);
+  assert.equal(controller.snapshot().clientRecordId, "diary_1");
+}
+
+{
+  const dup = controller.present(quotaReq({ session: sessionA1, clientRecordId: "diary_1" }));
+  assert.equal(dup.ok, false);
+  assert.equal(dup.ok === false && dup.reason, "sheet_already_visible");
+}
+
+{
+  const other = controller.present(
+    quotaReq({ family: "purchase_order", clientRecordId: "po_1", session: sessionA1 })
+  );
+  assert.equal(other.ok, false);
+  assert.equal(other.ok === false && other.reason, "other_sheet_visible");
+}
+
+{
+  const denied = controller.present(
+    quotaReq({
+      failureKind: "permission_denied",
+      error: new AppError("permission_denied", "rules"),
+      clientRecordId: "diary_2",
+    })
+  );
+  assert.equal(denied.visible, true);
+  assert.equal(denied.ok, false);
+}
+
+{
+  const net = controller.present(
+    quotaReq({ failureKind: "network", clientRecordId: "diary_2" })
+  );
+  assert.equal(net.ok, false);
+}
+
+{
+  const lh = controller.present(
+    quotaReq({ family: "letterhead", clientRecordId: "lh_1" })
+  );
+  assert.equal(lh.ok, false);
+  assert.equal(controller.snapshot().visible, true);
+  assert.equal(controller.snapshot().clientRecordId, "diary_1");
+}
+
+{
+  const result = await controller.purchase("vyd_starter_monthly");
+  assert.equal(result.kind, "sheet_launched");
+  assert.deepEqual(purchaseCalls, ["vyd_starter_monthly"]);
+  assert.equal(restoreCalls.length, 0);
+}
+
+{
+  purchaseImpl = async () => ({ kind: "failed", recoverable: true, message: "pay fail" });
+  const failed = await controller.purchase("vyd_professional_yearly");
+  assert.equal(failed.kind, "failed");
+  assert.equal(controller.snapshot().hostErrorMessage, "pay fail");
+  assert.equal(controller.snapshot().hostPurchaseState, "idle");
+}
+
+{
+  const pendingGate = deferred<PurchaseFlowResult>();
+  purchaseImpl = () => pendingGate.promise;
+  restoreImpl = async () => ({ kind: "sheet_launched" });
+  const first = controller.purchase("vyd_business_monthly");
+  const dup = await controller.purchase("vyd_starter_yearly");
+  const restoreBlocked = await controller.restore();
+  assert.equal(dup.kind, "blocked_busy");
+  assert.equal(restoreBlocked.kind, "blocked_busy");
+  pendingGate.resolve({ kind: "store_pending" });
+  const launched = await first;
+  assert.equal(launched.kind, "store_pending");
+  assert.equal(controller.snapshot().hostPurchaseState, "pending");
+  assert.equal(purchaseCalls.filter((s) => s === "vyd_starter_yearly").length, 0);
+  assert.equal(restoreCalls.length, 0);
+}
+
+controller.dismiss();
+assert.equal(controller.snapshot().visible, false);
+assert.equal(controller.snapshot().clientRecordId, "diary_1", "dismissal keeps the retry id");
+
+{
+  purchaseCalls.length = 0;
+  restoreCalls.length = 0;
+  const reopened = controller.present(quotaReq({ session: sessionA1, clientRecordId: "diary_1" }));
+  assert.equal(reopened.ok, true);
+  restoreImpl = async () => ({ kind: "verified" });
+  const restored = await controller.restore();
+  assert.equal(restored.kind, "verified");
+  assert.equal(restoreCalls.length, 1);
+  assert.equal(purchaseCalls.length, 0);
+}
+
+{
+  const trial = controller.startTrial();
+  assert.equal(trial.kind, "unsupported");
+  assert.equal(controller.snapshot().trialCalls, 1);
+}
+
+{
+  const sessionB = syncSessionOwnership.beginSession("uid-b");
+  const staleDispatch = await controller.purchase("vyd_starter_monthly");
+  assert.equal(staleDispatch.kind, "ignored_stale");
+  const staleRestore = await controller.restore();
+  assert.equal(staleRestore.kind, "ignored_stale");
+  const fromB = controller.present(quotaReq({ session: sessionA1, clientRecordId: "from_a" }));
+  assert.equal(fromB.ok, false);
+  assert.equal(fromB.ok === false && fromB.reason, "session_stale");
+  void sessionB;
+}
+
+{
+  controller.dismiss();
+  syncSessionOwnership.endSession();
+  const sessionA2 = syncSessionOwnership.beginSession("uid-a");
+  const afterRelogin = controller.present(
+    quotaReq({ session: sessionA1, clientRecordId: "after_relogin" })
+  );
+  assert.equal(afterRelogin.ok, false);
+  assert.equal(afterRelogin.ok === false && afterRelogin.reason, "session_stale");
+  const live = controller.present(quotaReq({ session: sessionA2, clientRecordId: "live_a2" }));
+  assert.equal(live.ok, true);
+
+  const slow = deferred<PurchaseFlowResult>();
+  purchaseImpl = () => slow.promise;
+  const inflight = controller.purchase("vyd_starter_monthly");
+  syncSessionOwnership.endSession();
+  syncSessionOwnership.beginSession("uid-a");
+  slow.resolve({ kind: "verified" });
+  const ignored = await inflight;
+  assert.equal(ignored.kind, "ignored_stale");
+  assert.equal(controller.snapshot().hostPurchaseState, "idle");
+}
+
+{
+  let hostOpens = 0;
+  registerQuotaUpsellPresenter((request) => {
+    hostOpens += 1;
+    return controller.present(request);
+  });
+  const bg = notifyOrdinaryQuotaUpsell(
+    quotaReq({ origin: "background_sync", clientRecordId: "bg_1" })
+  );
+  assert.equal(bg.ok, false);
+  assert.equal(hostOpens, 0);
+  registerQuotaUpsellPresenter(null);
+}
+
+__setQuotaUpsellEnabledForTests(null);
+syncSessionOwnership.resetForTests();
+console.log("quotaUpsellController.test.ts: ok");
+}
+
+void run().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

@@ -81,6 +81,8 @@ import { normalizeIndianMobile } from "@/utils/phone";
 import { isValidPan, normalizePan } from "@/utils/pan/pan";
 import { formatINRInWords } from "@/utils/money/inrWords";
 import { saveCustomerCreditWithPdf } from "@/services/customerCredit/saveWithPdf";
+import { notifyOrdinaryQuotaUpsell } from "@/billing/quotaUpsell";
+import { captureAdmissionToken } from "@/sync/syncSessionOwnership";
 import { logSaveDiagnostic } from "@/services/records/saveDiagnostics";
 import { useFormFieldNavigation } from "@/components/inputSafety/FormFocusManager";
 import { buildCustomerCreditNavOrder } from "@/utils/formFieldNavigation/fieldNavOrders";
@@ -623,6 +625,7 @@ export default function CustomerCreditFormScreen() {
     saveLockRef.current = true;
     setSubmitting(true);
     let succeeded = false;
+    const saveSession = captureAdmissionToken();
     try {
       logSaveDiagnostic({
         phase: "start",
@@ -769,6 +772,15 @@ export default function CustomerCreditFormScreen() {
         return;
       }
       setSubmitError(userFacingMessage(e) || t("customerCredit.errGenerate"));
+      if (!isEditing) {
+        notifyOrdinaryQuotaUpsell({
+          family: "customer_credit",
+          origin: "user_save",
+          clientRecordId: clientRecordIdRef.current,
+          session: saveSession,
+          error: e,
+        });
+      }
     } finally {
       setSubmitting(false);
       saveLockRef.current = false;
