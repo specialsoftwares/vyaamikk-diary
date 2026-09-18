@@ -10,6 +10,7 @@ import { letterheadDocToCloudStorage } from "@/services/pdf/pdfCloudSync";
 import { stableRecordId } from "@/services/records/stableRecordId";
 
 import { parseLetterheadDocument } from "./documentParse";
+import { isSupportedLetterheadParentData } from "./letterheadMirrorPolicy";
 import type { LetterheadDocument, LetterheadDocumentCreateInput } from "./types";
 
 export function buildNewLetterheadDocument(
@@ -74,6 +75,20 @@ export async function createLetterheadDocumentAtomicDetailed(
     parseExisting: (id, data) => parseLetterheadDocument(id, data, userId),
     buildNew: () => {
       const record = buildNewLetterheadDocument(userId, recordId, input, nowMs);
+      if (
+        !isSupportedLetterheadParentData({
+          userId: record.userId,
+          title: record.title,
+          input: record.input as unknown as Record<string, unknown>,
+        })
+      ) {
+        throw new AppError(
+          "permission_denied",
+          "Letterhead document is not valid.",
+          undefined,
+          { reason: "letterhead_parent_shape_invalid" }
+        );
+      }
       return { record, payload: letterheadDocToCloudStorage(record) };
     },
     hooks,

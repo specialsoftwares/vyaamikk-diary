@@ -6,6 +6,8 @@
  * session cannot lock the gate, dispatch further writes, or publish UI.
  */
 
+import { SaveRetryableError } from "@/services/records/saveLockTypes";
+
 export type SyncSessionToken = {
   uid: string;
   generation: number;
@@ -79,4 +81,19 @@ export function mayIssueRemoteWork(
 export function sessionFlushKey(userId: string, token: SyncSessionToken | null): string {
   if (!token) return `${userId}#0`;
   return `${token.uid}#${token.generation}`;
+}
+
+/**
+ * Dispatch-boundary recheck. `undefined` skips the check so callers that
+ * never captured a token stay unchanged. Explicit `null` is fail-closed.
+ * Does not recapture the live session into an old continuation.
+ */
+export function assertDispatchedSession(
+  session: SyncSessionToken | null | undefined,
+  userId: string
+): void {
+  if (session === undefined) return;
+  if (!mayIssueRemoteWork(session, userId)) {
+    throw new SaveRetryableError("Save session is no longer current.", "session_retired");
+  }
 }

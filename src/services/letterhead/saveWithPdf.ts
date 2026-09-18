@@ -168,16 +168,20 @@ export async function saveLetterheadCreateWithPdf(
     } else {
       await abandonIfRetired(ownership());
       const createdAt = Date.now();
-      doc = await repo.create(userId, {
-        clientRecordId,
-        title: params.title,
-        input: params.docInput,
-        ...params.createPayload,
-        firstGeneratedAt: createdAt,
-        lastEditedAt: null,
-        version: 1,
-        editHistory: [{ version: 1, at: createdAt, action: "created" }],
-      });
+      doc = await repo.create(
+        userId,
+        {
+          clientRecordId,
+          title: params.title,
+          input: params.docInput,
+          ...params.createPayload,
+          firstGeneratedAt: createdAt,
+          lastEditedAt: null,
+          version: 1,
+          editHistory: [{ version: 1, at: createdAt, action: "created" }],
+        },
+        session
+      );
       await abandonIfRetired(ownership());
       if (lockLeaseStartedAt != null) {
         await attachRecordIdToPersistentLock(
@@ -297,7 +301,7 @@ export async function saveLetterheadCreateWithPdf(
             if (!mayIssueRemoteWork(session, userId)) {
               throw new SaveRetryableError("Save session is no longer current.", "session_retired");
             }
-            doc = await repo.update(userId, doc.id, { pdfUri, saved: true });
+            doc = await repo.update(userId, doc.id, { pdfUri, saved: true }, session);
             return doc;
           }
         );
@@ -365,7 +369,9 @@ export async function saveLetterheadCreateWithPdf(
           }
         }
         if (!mayIssueRemoteWork(session, userId)) return;
-        await diaryRepo.create(userId, {
+        await diaryRepo.create(
+          userId,
+          {
           clientRecordId: mirrorId,
           ueid: params.user.ueid,
           entryType: "letterhead_matter",
@@ -402,7 +408,9 @@ export async function saveLetterheadCreateWithPdf(
             designation: params.docInput.designation?.trim() || null,
             place: params.docInput.place?.trim() || null,
           },
-        });
+          },
+          session
+        );
       }
     );
     completedSteps = diaryStep.completedSteps;
@@ -429,7 +437,17 @@ export async function saveLetterheadCreateWithPdf(
     return { doc, pdfUri: pdfUri || retainedLetterheadPdfUri(userId, doc) || "" };
   } catch (e) {
     if (e instanceof SaveStillInProgressError) throw e;
-    if (e instanceof SaveRetryableError && e.failureCode === "session_retired") throw e;
+    if (e instanceof SaveRetryableError && e.failureCode === "session_retired") {
+      await retireOwnedReservation({
+        userId,
+        clientRecordId: lockLeaseStartedAt != null ? idempotency.clientRecordId : undefined,
+        processLockKey,
+        processLockOwner: processLockOwner ?? undefined,
+        lockLeaseStartedAt: lockLeaseStartedAt ?? undefined,
+        session,
+      });
+      throw e;
+    }
     await failCoordinatedSave(idempotency, "letterhead_save_failed", {
       processLockKey,
       processLockOwner: processLockOwner ?? undefined,

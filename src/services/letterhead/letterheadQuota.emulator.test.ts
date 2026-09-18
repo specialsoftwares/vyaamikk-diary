@@ -449,6 +449,129 @@ async function main() {
     }
     check("unrelated payload fields denied on mirror CREATE", extraPayloadKind === "permission_denied");
 
+    let emptyParentKind: string | null = null;
+    try {
+      await createLetterheadDocumentAtomic(authedDb("alice"), "alice", {
+        ...lhInput("lh_empty_input"),
+        input: {} as never,
+      });
+    } catch (e) {
+      emptyParentKind = classifyAtomicCreateError(e);
+    }
+    check("empty parent input denied on atomic CREATE", emptyParentKind === "permission_denied");
+    await assertFails(
+      setDoc(doc(authedDb("alice"), "users", "alice", "letterheadDocs", "lh_empty_rules"), {
+        userId: "alice",
+        title: "Parent",
+        input: {},
+        createdAt: Date.now(),
+      })
+    );
+    check("empty parent input denied at Rules", true);
+
+    await assertFails(
+      setDoc(doc(authedDb("alice"), "users", "alice", "letterheadDocs", "lh_object_body_parent"), {
+        userId: "alice",
+        title: "Parent",
+        input: {
+          title: "Parent",
+          date: Date.now(),
+          subject: "Subject",
+          body: { amount: 5000 },
+          closing: "Yours",
+          name: "Owner",
+          designation: "Proprietor",
+          place: "Delhi",
+        },
+        createdAt: Date.now(),
+      })
+    );
+    check("object parent body denied at Rules", true);
+
+    let objectBodyKind: string | null = null;
+    try {
+      await createEntryAtomic(authedDb("alice"), "alice", {
+        ...mirrorInput(shapeParent.id),
+        payload: {
+          letterheadDocumentId: shapeParent.id,
+          body: { amount: 5000, workDone: "not letter text" },
+        } as never,
+      });
+    } catch (e) {
+      objectBodyKind = classifyAtomicCreateError(e);
+    }
+    check("object mirror body denied on atomic CREATE", objectBodyKind === "permission_denied");
+    await assertFails(
+      setDoc(doc(authedDb("alice"), "users", "alice", "entries", letterheadMirrorRecordId(shapeParent.id)), {
+        userId: "alice",
+        title: "Notice",
+        entryType: "letterhead_matter",
+        source: "letterhead",
+        payload: {
+          letterheadDocumentId: shapeParent.id,
+          body: { amount: 5000, workDone: "not letter text" },
+        },
+      })
+    );
+    check("object mirror body denied at Rules", true);
+
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", "alice", "entries", "lh_alice_legacy_extra"), {
+        userId: "alice",
+        title: "Legacy extra",
+        entryType: "letterhead_matter",
+        source: "letterhead",
+        payload: {
+          letterheadDocumentId: "lh_alice",
+          body: "kept letter text",
+          workDone: "old unrelated",
+        },
+        attachments: [{ id: "att_a", uri: "file://a.jpg", mimeType: "image/jpeg", name: "a.jpg" }],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+    });
+    await assertFails(
+      updateDoc(doc(authedDb("alice"), "users", "alice", "entries", "lh_alice_legacy_extra"), {
+        userId: "alice",
+        payload: {
+          letterheadDocumentId: "lh_alice",
+          body: "kept letter text",
+          workDone: "new unrelated",
+        },
+      })
+    );
+    check("legacy unsupported payload value cannot change", true);
+    await assertFails(
+      updateDoc(doc(authedDb("alice"), "users", "alice", "entries", "lh_alice_legacy_extra"), {
+        userId: "alice",
+        attachments: [{ id: "att_b", uri: "file://b.jpg", mimeType: "image/jpeg", name: "b.jpg" }],
+      })
+    );
+    check("attachment replacement without count increase denied", true);
+    await assertSucceeds(
+      updateDoc(doc(authedDb("alice"), "users", "alice", "entries", "lh_alice_legacy_extra"), {
+        userId: "alice",
+        title: "Legacy extra preserved",
+      })
+    );
+    check("legitimate legacy title edit remains allowed", true);
+    await assertSucceeds(
+      updateDoc(doc(authedDb("alice"), "users", "alice", "letterheadDocs", shapeParent.id), {
+        userId: "alice",
+        title: "Shape parent metadata",
+        updatedAt: Date.now(),
+      })
+    );
+    check("parent title/metadata write remains allowed", true);
+    await assertFails(
+      updateDoc(doc(authedDb("alice"), "users", "alice", "letterheadDocs", shapeParent.id), {
+        userId: "alice",
+        pdfUri: "file:///tmp/device-local.pdf",
+      })
+    );
+    check("device-local pdfUri cannot be newly written", true);
+
     let reminderCreateKind: string | null = null;
     try {
       await createEntryAtomic(authedDb("alice"), "alice", {
@@ -541,6 +664,16 @@ async function main() {
     steal.set(doc(db, "users", "alice", "letterheadDocs", "lh_steal"), {
       userId: "alice",
       title: "Steal",
+      input: {
+        title: "Steal",
+        date: Date.now(),
+        subject: "Subject",
+        body: "Body of the letter.",
+        closing: "Yours",
+        name: "Owner",
+        designation: "Proprietor",
+        place: "Delhi",
+      },
       createdAt: Date.now(),
     });
     steal.set(doc(db, "users", "alice", "subscription", "usageCurrent"), {

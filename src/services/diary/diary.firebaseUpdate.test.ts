@@ -177,6 +177,43 @@ async function main() {
     (e: unknown) => e instanceof AppError && e.details?.reason === "letterhead_mirror_conversion_denied"
   );
 
+  const legacyExtra: BusinessEntry = {
+    ...mirror,
+    payload: { ...mirror.payload, workDone: "old unrelated" } as never,
+    attachments: [{ id: "att_a", uri: "file://a.jpg", mimeType: "image/jpeg", name: "a.jpg" }],
+  };
+  assert.throws(
+    () =>
+      buildDiaryUpdateRecord(legacyExtra, {
+        id: legacyExtra.id,
+        payload: { ...legacyExtra.payload, workDone: "new unrelated" } as never,
+      }),
+    (e: unknown) => e instanceof AppError && e.details?.reason === "letterhead_mirror_conversion_denied"
+  );
+  const legacyKept = buildDiaryUpdateRecord(legacyExtra, {
+    id: legacyExtra.id,
+    title: "Legacy title edit",
+    payload: { ...legacyExtra.payload } as never,
+  });
+  assert.equal(legacyKept.title, "Legacy title edit");
+  assert.equal((legacyKept.payload as { workDone?: string }).workDone, "old unrelated");
+  assert.throws(
+    () =>
+      buildDiaryUpdateRecord(legacyExtra, {
+        id: legacyExtra.id,
+        attachments: [{ id: "att_b", uri: "file://b.jpg", mimeType: "image/jpeg", name: "b.jpg" }],
+      }),
+    (e: unknown) => e instanceof AppError && e.details?.reason === "letterhead_mirror_conversion_denied"
+  );
+  assert.throws(
+    () =>
+      buildDiaryUpdateRecord(mirror, {
+        id: mirror.id,
+        payload: { ...mirror.payload, body: { amount: 5000, workDone: "not letter text" } } as never,
+      }),
+    (e: unknown) => e instanceof AppError && e.details?.reason === "letterhead_mirror_conversion_denied"
+  );
+
   console.log("diary.firebaseUpdate.test.ts: ok (fake transaction boundary)");
 }
 

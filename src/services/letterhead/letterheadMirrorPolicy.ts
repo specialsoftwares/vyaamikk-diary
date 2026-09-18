@@ -73,27 +73,134 @@ export type LetterheadMirrorPayloadKey = (typeof LETTERHEAD_MIRROR_PAYLOAD_KEYS)
 
 const LETTERHEAD_MIRROR_PAYLOAD_KEY_SET = new Set<string>(LETTERHEAD_MIRROR_PAYLOAD_KEYS);
 
+export const LETTERHEAD_PARENT_INPUT_REQUIRED_KEYS = [
+  "title",
+  "date",
+  "subject",
+  "body",
+  "closing",
+  "name",
+  "designation",
+  "place",
+] as const;
+
+export const LETTERHEAD_PARENT_INPUT_OPTIONAL_KEYS = [
+  "reference",
+  "recipientName",
+  "recipientDesignation",
+  "recipientCompany",
+  "recipientAddress",
+  "salutation",
+  "useSignature",
+  "useStamp",
+] as const;
+
+const LETTERHEAD_PARENT_INPUT_KEY_SET = new Set<string>([
+  ...LETTERHEAD_PARENT_INPUT_REQUIRED_KEYS,
+  ...LETTERHEAD_PARENT_INPUT_OPTIONAL_KEYS,
+]);
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function isOptionalLetterString(value: unknown): boolean {
+  return value == null || typeof value === "string";
+}
+
+function isOptionalLetterBool(value: unknown): boolean {
+  return value == null || typeof value === "boolean";
+}
+
+function isLetterDate(value: unknown): boolean {
+  return typeof value === "number" && Number.isFinite(value) && Number.isInteger(value);
+}
+
 export function letterheadParentIdFromPayload(payload: unknown): string | null {
-  if (payload == null || typeof payload !== "object") return null;
-  const parentId = (payload as { letterheadDocumentId?: unknown }).letterheadDocumentId;
+  if (!isPlainObject(payload)) return null;
+  const parentId = payload.letterheadDocumentId;
   if (typeof parentId !== "string") return null;
   const trimmed = parentId.trim();
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function isSupportedMirrorPayloadValue(key: string, value: unknown): boolean {
+  if (key === "letterheadDocumentId") return isNonEmptyString(value);
+  if (key === "body") return typeof value === "string" && value.length > 0 && !Array.isArray(value);
+  return isOptionalLetterString(value);
+}
+
 export function isSupportedLetterheadMirrorPayload(payload: unknown): boolean {
-  if (payload == null || typeof payload !== "object" || Array.isArray(payload)) return false;
-  const keys = Object.keys(payload as Record<string, unknown>);
+  if (!isPlainObject(payload)) return false;
+  const keys = Object.keys(payload);
   if (keys.some((key) => !LETTERHEAD_MIRROR_PAYLOAD_KEY_SET.has(key))) return false;
-  return letterheadParentIdFromPayload(payload) != null;
+  if (!keys.includes("letterheadDocumentId") || !keys.includes("body")) return false;
+  return keys.every((key) => isSupportedMirrorPayloadValue(key, payload[key]));
+}
+
+export function isSupportedLetterheadMirrorPayloadPatch(
+  before: unknown,
+  after: unknown
+): boolean {
+  if (!isPlainObject(before) || !isPlainObject(after)) return false;
+  if (letterheadParentIdFromPayload(after) !== letterheadParentIdFromPayload(before)) return false;
+  for (const key of Object.keys(after)) {
+    if (stableJson(before[key]) === stableJson(after[key])) continue;
+    if (!LETTERHEAD_MIRROR_PAYLOAD_KEY_SET.has(key)) return false;
+    if (!isSupportedMirrorPayloadValue(key, after[key])) return false;
+  }
+  for (const key of Object.keys(before)) {
+    if (LETTERHEAD_MIRROR_PAYLOAD_KEY_SET.has(key)) continue;
+    if (!(key in after) || stableJson(before[key]) !== stableJson(after[key])) return false;
+  }
+  return true;
+}
+
+export function letterheadAttachmentsIdentityEqual(a: unknown, b: unknown): boolean {
+  return stableJson(a ?? []) === stableJson(b ?? []);
+}
+
+function stableJson(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "\u0000";
+  }
+}
+
+export function isSupportedLetterheadParentInput(input: unknown): boolean {
+  if (!isPlainObject(input)) return false;
+  const keys = Object.keys(input);
+  if (LETTERHEAD_PARENT_INPUT_REQUIRED_KEYS.some((key) => !keys.includes(key))) return false;
+  if (keys.some((key) => !LETTERHEAD_PARENT_INPUT_KEY_SET.has(key))) return false;
+  if (!isNonEmptyString(input.title)) return false;
+  if (!isLetterDate(input.date)) return false;
+  if (!isNonEmptyString(input.subject)) return false;
+  if (typeof input.body !== "string" || input.body.length === 0) return false;
+  if (typeof input.closing !== "string") return false;
+  if (typeof input.name !== "string") return false;
+  if (typeof input.designation !== "string") return false;
+  if (typeof input.place !== "string") return false;
+  if (!isOptionalLetterString(input.reference)) return false;
+  if (!isOptionalLetterString(input.recipientName)) return false;
+  if (!isOptionalLetterString(input.recipientDesignation)) return false;
+  if (!isOptionalLetterString(input.recipientCompany)) return false;
+  if (!isOptionalLetterString(input.recipientAddress)) return false;
+  if (!isOptionalLetterString(input.salutation)) return false;
+  if (!isOptionalLetterBool(input.useSignature)) return false;
+  if (!isOptionalLetterBool(input.useStamp)) return false;
+  return true;
 }
 
 export function isSupportedLetterheadParentData(data: Record<string, unknown> | undefined | null): boolean {
   if (!data) return false;
   if (typeof data.userId !== "string" || data.userId.trim().length === 0) return false;
   if (typeof data.title !== "string" || data.title.trim().length === 0) return false;
-  const input = data.input;
-  return input != null && typeof input === "object" && !Array.isArray(input);
+  return isSupportedLetterheadParentInput(data.input);
 }
 
 function isAbsentOrNull(value: unknown): boolean {

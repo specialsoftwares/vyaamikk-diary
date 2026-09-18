@@ -12,7 +12,12 @@ import {
   LETTERHEAD_SINGLE_SLOT_PROPOSAL,
   LETTERHEAD_ZERO_QUOTA_ADOPTED,
   isLegacyLetterheadMirrorForParent,
+  isSupportedLetterheadMirrorPayload,
+  isSupportedLetterheadMirrorPayloadPatch,
+  isSupportedLetterheadParentData,
+  isSupportedLetterheadParentInput,
   isValidatedLetterheadMirrorInput,
+  letterheadAttachmentsIdentityEqual,
   letterheadMirrorRecordId,
   letterheadParentIdFromMirrorRecordId,
 } from "./letterheadMirrorPolicy";
@@ -20,9 +25,13 @@ import {
 const savePath = path.join(import.meta.dirname, "saveWithPdf.ts");
 const diaryAtomicPath = path.join(import.meta.dirname, "../diary/atomicCreate.ts");
 const lhAtomicPath = path.join(import.meta.dirname, "atomicCreate.ts");
+const docsFirebasePath = path.join(import.meta.dirname, "documents-firebase.ts");
+const atomicBillablePath = path.join(import.meta.dirname, "../../billing/optionC/atomicBillableCreate.ts");
 const saveSrc = fs.readFileSync(savePath, "utf8");
 const diarySrc = fs.readFileSync(diaryAtomicPath, "utf8");
 const lhSrc = fs.readFileSync(lhAtomicPath, "utf8");
+const docsFirebaseSrc = fs.readFileSync(docsFirebasePath, "utf8");
+const atomicBillableSrc = fs.readFileSync(atomicBillablePath, "utf8");
 
 assert.equal(LETTERHEAD_MIRROR_POLICY_STATUS, "adopted");
 assert.equal(LETTERHEAD_ZERO_QUOTA_ADOPTED, true);
@@ -49,11 +58,23 @@ assert.equal(
     {
       entryType: "letterhead_matter",
       source: "letterhead",
-      payload: { letterheadDocumentId: "lh_flow" },
+      payload: { letterheadDocumentId: "lh_flow", body: "Letter text" },
     },
     "lh_flow:matter"
   ),
   true
+);
+assert.equal(
+  isValidatedLetterheadMirrorInput(
+    {
+      entryType: "letterhead_matter",
+      source: "letterhead",
+      payload: { letterheadDocumentId: "lh_flow" },
+    },
+    "lh_flow:matter"
+  ),
+  false,
+  "mirror CREATE requires letter body text"
 );
 assert.equal(
   isValidatedLetterheadMirrorInput(
@@ -144,5 +165,76 @@ assert.doesNotMatch(
 assert.equal(saveSrc.includes("captureAdmissionToken"), true);
 assert.equal(saveSrc.includes("issuesRemoteWork: false"), true);
 assert.equal(saveSrc.includes("SAVE_STEP.PDF_URI_SAVED"), true);
+assert.match(saveSrc, /repo\.create\(\s*userId,[\s\S]*?\},\s*session\s*\)/);
+assert.match(saveSrc, /repo\.update\(\s*userId,\s*doc\.id,\s*\{\s*pdfUri,\s*saved:\s*true\s*\},\s*session\s*\)/);
+assert.match(saveSrc, /diaryRepo\.create\(\s*userId,[\s\S]*?\},\s*session\s*\)/);
+assert.match(docsFirebaseSrc, /assertDispatchedSession\(session, userId\)/);
+assert.match(docsFirebaseSrc, /letterheadDocToCloudStorage\(next\)/);
+assert.match(atomicBillableSrc, /assertDispatchedSession\(hooks\.session, userId\)/);
+assert.match(atomicBillableSrc, /SaveRetryableError/);
+assert.equal(docsFirebaseSrc.includes("pdfUri: null") || docsFirebaseSrc.includes("letterheadDocToCloudStorage"), true);
+
+const validParentInput = {
+  title: "Notice",
+  date: 1_700_000_000_000,
+  subject: "Subject",
+  body: "Body of the letter.",
+  closing: "Yours faithfully",
+  name: "Owner",
+  designation: "Proprietor",
+  place: "Delhi",
+  reference: null,
+  salutation: null,
+  useSignature: false,
+};
+assert.equal(isSupportedLetterheadParentInput(validParentInput), true);
+assert.equal(isSupportedLetterheadParentInput({}), false, "empty parent input is not supported");
+assert.equal(
+  isSupportedLetterheadParentInput({ ...validParentInput, body: { amount: 5000 } }),
+  false,
+  "object body is not letter text"
+);
+assert.equal(isSupportedLetterheadParentInput({ ...validParentInput, date: "today" }), false);
+assert.equal(
+  isSupportedLetterheadParentData({ userId: "uid", title: "Parent", input: {} }),
+  false
+);
+assert.equal(
+  isSupportedLetterheadParentData({ userId: "uid", title: "Parent", input: validParentInput }),
+  true
+);
+assert.equal(
+  isSupportedLetterheadMirrorPayload({
+    letterheadDocumentId: "lh_flow",
+    body: { amount: 5000, workDone: "not letter text" },
+  }),
+  false
+);
+assert.equal(
+  isSupportedLetterheadMirrorPayload({ letterheadDocumentId: "lh_flow", body: "Letter text" }),
+  true
+);
+assert.equal(
+  isSupportedLetterheadMirrorPayloadPatch(
+    { letterheadDocumentId: "lh_flow", body: "kept", workDone: "old" },
+    { letterheadDocumentId: "lh_flow", body: "kept", workDone: "new" }
+  ),
+  false,
+  "existing unsupported payload values cannot change"
+);
+assert.equal(
+  isSupportedLetterheadMirrorPayloadPatch(
+    { letterheadDocumentId: "lh_flow", body: "kept", workDone: "old" },
+    { letterheadDocumentId: "lh_flow", body: "revised letter", workDone: "old" }
+  ),
+  true
+);
+assert.equal(
+  letterheadAttachmentsIdentityEqual(
+    [{ id: "a", uri: "file://a", mimeType: "image/jpeg", name: "a.jpg" }],
+    [{ id: "b", uri: "file://b", mimeType: "image/jpeg", name: "b.jpg" }]
+  ),
+  false
+);
 
 console.log("letterheadMirrorPolicy.test.ts: ok (zero-quota adopted; one-slot remains historical)");

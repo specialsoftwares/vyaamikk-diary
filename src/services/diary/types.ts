@@ -7,6 +7,7 @@ import type {
   EntrySource,
 } from "@/domain/businessEntry";
 import type { EntryReminder } from "@/domain/types";
+import type { SyncSessionToken } from "@/sync/syncSessionOwnership";
 
 export type { BusinessEntry, BusinessEntryType };
 
@@ -68,10 +69,15 @@ export interface ListDiaryEntriesOptions {
 }
 
 export interface DiaryRepository {
-  create(userId: string, input: CreateBusinessEntryInput): Promise<BusinessEntry>;
+  create(
+    userId: string,
+    input: CreateBusinessEntryInput,
+    session?: SyncSessionToken | null
+  ): Promise<BusinessEntry>;
   createWithOutcome(
     userId: string,
-    input: CreateBusinessEntryInput
+    input: CreateBusinessEntryInput,
+    session?: SyncSessionToken | null
   ): Promise<DiaryCreateResult>;
   update(userId: string, input: UpdateBusinessEntryInput): Promise<BusinessEntry>;
   /** Permanently removes the entry document — no soft-delete tombstone. */

@@ -16,6 +16,7 @@ import type { BusinessEntry } from "@/domain/businessEntry";
 import { getFirebaseDb } from "@/config/firebase";
 import { entrySearchBlob } from "@/utils/businessEntry/display";
 import { notificationsService } from "@/services/notifications";
+import type { SyncSessionToken } from "@/sync/syncSessionOwnership";
 
 import { dedupeDiaryEntries } from "@/services/dashboard/diaryRecordCounts";
 import {
@@ -55,12 +56,17 @@ function applyFilters(
 }
 
 export const firebaseDiaryRepository: DiaryRepository = {
-  async create(userId, input) {
-    return (await this.createWithOutcome(userId, input)).record;
+  async create(userId, input, session) {
+    return (await this.createWithOutcome(userId, input, session)).record;
   },
 
-  async createWithOutcome(userId, input): Promise<DiaryCreateResult> {
-    const result = await createEntryAtomicDetailed(getFirebaseDb(), userId, input);
+  async createWithOutcome(userId, input, session?: SyncSessionToken | null): Promise<DiaryCreateResult> {
+    const result = await createEntryAtomicDetailed(
+      getFirebaseDb(),
+      userId,
+      input,
+      session === undefined ? undefined : { session }
+    );
     return { record: result.record, outcome: result.outcome };
   },
 

@@ -15,6 +15,8 @@ import {
   monthlyRecordCapFromStatusData,
   quotaEnforcementEnabledFromStatusData,
 } from "@/subscription/monthlyRecordCap";
+import { SaveRetryableError } from "@/services/records/saveLockTypes";
+import { assertDispatchedSession } from "@/sync/syncSessionOwnership";
 
 export type SerialCounterId = "purchaseOrder" | "customerCredit";
 
@@ -44,6 +46,12 @@ export interface AtomicCreateHooks {
    * after the record existence read and before writes.
    */
   extraReads?: (tx: Transaction) => Promise<void>;
+  /**
+   * Originating admission token. Rechecked after transaction reads and
+   * `afterReads`, before any mutation. Omitted (`undefined`) skips the
+   * check. Explicit `null` is fail-closed. Never recaptures the live session.
+   */
+  session?: import("@/sync/syncSessionOwnership").SyncSessionToken | null;
 }
 
 export interface AtomicBillableCreateParams<T> {
@@ -199,6 +207,10 @@ export async function runAtomicBillableCreate<T>(
         recordId,
       });
 
+      if (hooks && Object.prototype.hasOwnProperty.call(hooks, "session")) {
+        assertDispatchedSession(hooks.session, userId);
+      }
+
       let serial: number | null = null;
       if (serialCounter) {
         serial = (counterNext ?? 0) + 1;
@@ -240,6 +252,11 @@ export async function runAtomicBillableCreate<T>(
       };
     });
   } catch (error) {
+    if (error instanceof SaveRetryableError) throw error;
+    if (error && typeof error === "object" && "cause" in error) {
+      const cause = (error as { cause: unknown }).cause;
+      if (cause instanceof SaveRetryableError) throw cause;
+    }
     const wrapped = wrapAtomicCreateFailure(error);
     if (wrapped.code !== "permission_denied") throw wrapped;
     return recoverAfterPermissionDenied({

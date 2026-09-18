@@ -2,7 +2,10 @@ import { AppError } from "@/domain/errors";
 import type { BusinessEntry, LetterheadMatterPayload } from "@/domain/businessEntry";
 import type { UpdateBusinessEntryInput } from "./types";
 import { mergeBusinessEntryUpdate, mergeEntryPdfGeneration } from "./mergeEntryUpdate";
-import { LETTERHEAD_MIRROR_PAYLOAD_KEYS } from "@/services/letterhead/letterheadMirrorPolicy";
+import {
+  isSupportedLetterheadMirrorPayloadPatch,
+  letterheadAttachmentsIdentityEqual,
+} from "@/services/letterhead/letterheadMirrorPolicy";
 
 export function reminderCancelIdAfterUpdate(
   existing: BusinessEntry,
@@ -49,20 +52,14 @@ function freezeLetterheadMirrorLinkage(
   }
   if (
     Array.isArray(edit.attachments) &&
-    edit.attachments.length > (existing.attachments?.length ?? 0)
+    !letterheadAttachmentsIdentityEqual(edit.attachments, existing.attachments ?? [])
   ) {
     denyMirrorConversion();
   }
   if (edit.payload === undefined) return edit;
   const current = existing.payload as LetterheadMatterPayload;
   const next = edit.payload as LetterheadMatterPayload & Record<string, unknown>;
-  if (next.letterheadDocumentId !== current.letterheadDocumentId) denyMirrorConversion();
-  const extraKeys = Object.keys(next).filter(
-    (key) =>
-      !(key in (current as object)) &&
-      !(LETTERHEAD_MIRROR_PAYLOAD_KEYS as readonly string[]).includes(key)
-  );
-  if (extraKeys.length > 0) denyMirrorConversion();
+  if (!isSupportedLetterheadMirrorPayloadPatch(current, next)) denyMirrorConversion();
   return edit;
 }
 

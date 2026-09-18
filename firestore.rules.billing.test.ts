@@ -132,6 +132,16 @@ function letterheadWithUsageBatch(
   batch.set(doc(db, "users", uid, "letterheadDocs", docId), {
     userId: uid,
     title: "Letter",
+    input: {
+      title: "Letter",
+      date: Date.now(),
+      subject: "Subject",
+      body: "Body of the letter.",
+      closing: "Yours",
+      name: "Owner",
+      designation: "Proprietor",
+      place: "Delhi",
+    },
     createdAt: Date.now(),
   });
   batch.set(doc(db, "users", uid, "subscription", "usageCurrent"), usage);

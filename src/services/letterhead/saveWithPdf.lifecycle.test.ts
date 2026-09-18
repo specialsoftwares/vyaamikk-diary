@@ -4,6 +4,7 @@
  */
 import assert from "node:assert/strict";
 
+import type { Firestore } from "firebase/firestore";
 import { AppError } from "@/domain/errors";
 import { DEFAULT_PDF_BRANDING, type UserProfile } from "@/domain/types";
 import type { BusinessEntry } from "@/domain/businessEntry";
@@ -17,6 +18,8 @@ import {
   type LetterheadDocumentRepository,
 } from "@/services/letterhead/types";
 import { setLetterheadDocumentRepositoryForTests } from "@/services/letterhead/documentRepository";
+import { updateLetterheadDocumentOnDb } from "@/services/letterhead/documents-firebase";
+import { letterheadDocToCloudStorage } from "@/services/pdf/pdfCloudSync";
 import {
   resetLetterheadPdfRetentionForTests,
   saveLetterheadCreateWithPdf,
@@ -162,6 +165,51 @@ function mockLetterheadRepo(
     },
     async remove(_userId, id) {
       store.delete(id);
+    },
+  };
+}
+
+function repoWithProductionUpdate(
+  store: Map<string, LetterheadDocument>,
+  opts: {
+    throwOnPdfUri?: () => boolean;
+    createGate?: () => Promise<void>;
+    getGate?: () => Promise<void>;
+    afterGetDoc?: () => Promise<void>;
+    onSetDoc?: (payload: Record<string, unknown>) => void;
+  } = {}
+): LetterheadDocumentRepository {
+  const base = mockLetterheadRepo(store, opts);
+  return {
+    ...base,
+    async update(userId, id, patch, session) {
+      if (patch.pdfUri && opts.throwOnPdfUri?.()) {
+        throw new AppError("save_failed", "uri attach boom");
+      }
+      return updateLetterheadDocumentOnDb({} as Firestore, userId, id, patch, session, {
+        docRef: { path: `users/${userId}/letterheadDocs/${id}` } as never,
+        getDoc: async () => {
+          const cur = store.get(id);
+          const snap = {
+            exists: () => Boolean(cur),
+            id,
+            data: () => (cur ? letterheadDocToCloudStorage(cur) : undefined),
+          };
+          if (opts.afterGetDoc) await opts.afterGetDoc();
+          return snap;
+        },
+        setDoc: async (_ref, payload) => {
+          opts.onSetDoc?.(payload as Record<string, unknown>);
+          const cur = store.get(id);
+          if (!cur) throw new AppError("not_found", "missing");
+          store.set(id, {
+            ...cur,
+            ...(payload as object),
+            pdfUri: typeof patch.pdfUri === "string" ? patch.pdfUri : cur.pdfUri,
+            updatedAt: Date.now(),
+          } as LetterheadDocument);
+        },
+      });
     },
   };
 }
@@ -581,6 +629,142 @@ async function main() {
     const afterStale = await readPersistentSaveLock("u-lh", "lh_retire_create");
     assert.equal(afterStale?.startedAt, replacement.startedAt, "stale cleanup cannot release a newer owner");
     assert.notEqual(stepWrites.length, 0);
+
+    resetLetterheadPdfRetentionForTests();
+    const prodStore = new Map<string, LetterheadDocument>();
+    const prodDiary = { n: 0 };
+    const prodHold = deferred();
+    const prodStarted = deferred();
+    const prodSetDocs: Record<string, unknown>[] = [];
+    let pauseProdGet = true;
+    beginOwner();
+    setLetterheadDocumentRepositoryForTests(
+      repoWithProductionUpdate(prodStore, {
+        afterGetDoc: async () => {
+          if (!pauseProdGet) return;
+          prodStarted.resolve();
+          await prodHold.promise;
+        },
+        onSetDoc: (payload) => {
+          prodSetDocs.push(payload);
+        },
+      })
+    );
+    setDiaryRepositoryForTests(mockDiaryRepo({ creates: prodDiary }));
+    setPdfGenerateHookForTests(async () => ({ uri: "file:///tmp/lh-prod-ab.pdf", fileName: "lh.pdf" }));
+    const saveProdAb = saveLetterheadCreateWithPdf("u-lh", saveParams("lh_prod_update_ab"));
+    await prodStarted.promise;
+    applyAuthSyncIdentityTransition({
+      prevStatus: "signed_in",
+      nextStatus: "signed_in",
+      prevUid: "u-lh",
+      nextUid: "u2",
+    });
+    prodHold.resolve();
+    await assert.rejects(
+      saveProdAb,
+      (err: unknown) => err instanceof SaveRetryableError && err.failureCode === "session_retired"
+    );
+    assert.equal(prodSetDocs.length, 0, "retired A→B must not newly issue setDoc");
+    assert.equal(prodDiary.n, 0, "retired A→B must not create a mirror");
+    assert.equal(
+      hasCompletedStep(
+        await fetchRecordCompletedSteps("u-lh", "letterhead_doc", "lh_prod_update_ab"),
+        SAVE_STEP.PDF_URI_SAVED
+      ),
+      false,
+      "retired A→B must not complete PDF_URI_SAVED"
+    );
+    assert.equal(
+      hasCompletedStep(
+        await fetchRecordCompletedSteps("u-lh", "letterhead_doc", "lh_prod_update_ab"),
+        SAVE_STEP.DIARY_LINK_CREATED
+      ),
+      false
+    );
+    assert.equal(isProcessSaveLockHeld(saveParams("lh_prod_update_ab").idempotency.idempotencyKey), false);
+    assert.notEqual((await readPersistentSaveLock("u-lh", "lh_prod_update_ab"))?.status, "done");
+
+    applyAuthSyncIdentityTransition({
+      prevStatus: "signed_in",
+      nextStatus: "signed_out",
+      prevUid: "u2",
+      nextUid: null,
+    });
+    beginOwner();
+    pauseProdGet = false;
+    const recoverProdAb = await saveLetterheadCreateWithPdf("u-lh", saveParams("lh_prod_update_ab"));
+    assert.equal(recoverProdAb.doc.id, "lh_prod_update_ab");
+    assert.equal(prodDiary.n, 1);
+    assert.equal(prodSetDocs.length >= 1, true);
+    assert.equal(prodSetDocs.every((payload) => payload.pdfUri === null), true);
+
+    resetLetterheadPdfRetentionForTests();
+    const reloginStore = new Map<string, LetterheadDocument>();
+    const reloginDiary = { n: 0 };
+    const reloginHold = deferred();
+    const reloginStarted = deferred();
+    const reloginSetDocs: Record<string, unknown>[] = [];
+    let pauseReloginGet = true;
+    beginOwner();
+    setLetterheadDocumentRepositoryForTests(
+      repoWithProductionUpdate(reloginStore, {
+        afterGetDoc: async () => {
+          if (!pauseReloginGet) return;
+          reloginStarted.resolve();
+          await reloginHold.promise;
+        },
+        onSetDoc: (payload) => {
+          reloginSetDocs.push(payload);
+        },
+      })
+    );
+    setDiaryRepositoryForTests(mockDiaryRepo({ creates: reloginDiary }));
+    setPdfGenerateHookForTests(async () => ({ uri: "file:///tmp/lh-prod-relogin.pdf", fileName: "lh.pdf" }));
+    const saveProdRelogin = saveLetterheadCreateWithPdf("u-lh", saveParams("lh_prod_update_relogin"));
+    await reloginStarted.promise;
+    applyAuthSyncIdentityTransition({
+      prevStatus: "signed_in",
+      nextStatus: "signed_out",
+      prevUid: "u-lh",
+      nextUid: null,
+    });
+    applyAuthSyncIdentityTransition({
+      prevStatus: "signed_out",
+      nextStatus: "signed_in",
+      prevUid: null,
+      nextUid: "u-lh",
+    });
+    reloginHold.resolve();
+    await assert.rejects(
+      saveProdRelogin,
+      (err: unknown) => err instanceof SaveRetryableError && err.failureCode === "session_retired"
+    );
+    assert.equal(reloginSetDocs.length, 0, "retired A→logout→A must not newly issue setDoc");
+    assert.equal(reloginDiary.n, 0);
+    assert.equal(
+      hasCompletedStep(
+        await fetchRecordCompletedSteps("u-lh", "letterhead_doc", "lh_prod_update_relogin"),
+        SAVE_STEP.PDF_URI_SAVED
+      ),
+      false
+    );
+    assert.equal(isProcessSaveLockHeld(saveParams("lh_prod_update_relogin").idempotency.idempotencyKey), false);
+
+    pauseReloginGet = false;
+    const recoverProdRelogin = await saveLetterheadCreateWithPdf("u-lh", saveParams("lh_prod_update_relogin"));
+    assert.equal(recoverProdRelogin.doc.id, "lh_prod_update_relogin");
+    assert.equal(reloginDiary.n, 1);
+    const oldProdLease = (await readPersistentSaveLock("u-lh", "lh_prod_update_relogin"))?.startedAt ?? 0;
+    const newerOwner = await markPersistentLockInFlight({
+      userId: "u-lh",
+      clientRecordId: "lh_prod_update_relogin",
+      idempotencyKey: "replacement-prod-owner",
+      recordKind: "letterhead_doc",
+    });
+    await markPersistentLockFailed("u-lh", "lh_prod_update_relogin", "session_retired", oldProdLease);
+    const afterNewer = await readPersistentSaveLock("u-lh", "lh_prod_update_relogin");
+    assert.equal(afterNewer?.startedAt, newerOwner.startedAt, "stale cleanup cannot release a newer owner");
   } finally {
     setPdfGenerateHookForTests(null);
     setLetterheadDocumentRepositoryForTests(null);

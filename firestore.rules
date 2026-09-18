@@ -290,20 +290,148 @@ service cloud.firestore {
       ];
     }
 
+    function letterheadParentInputRequiredKeys() {
+      return ['title', 'date', 'subject', 'body', 'closing', 'name', 'designation', 'place'];
+    }
+
+    function letterheadParentInputAllowedKeys() {
+      return [
+        'title',
+        'date',
+        'subject',
+        'body',
+        'closing',
+        'name',
+        'designation',
+        'place',
+        'reference',
+        'recipientName',
+        'recipientDesignation',
+        'recipientCompany',
+        'recipientAddress',
+        'salutation',
+        'useSignature',
+        'useStamp'
+      ];
+    }
+
+    function optionalLetterString(data, key) {
+      return !data.keys().hasAny([key])
+             || data[key] == null
+             || data[key] is string;
+    }
+
+    function optionalLetterBool(data, key) {
+      return !data.keys().hasAny([key])
+             || data[key] == null
+             || data[key] is bool;
+    }
+
+    function letterheadParentInputSupported(input) {
+      return input is map
+             && input.keys().hasAll(letterheadParentInputRequiredKeys())
+             && input.keys().hasOnly(letterheadParentInputAllowedKeys())
+             && input.title is string
+             && input.title.size() > 0
+             && input.title.size() <= 200
+             && input.date is int
+             && input.subject is string
+             && input.subject.size() > 0
+             && input.body is string
+             && input.body.size() > 0
+             && input.closing is string
+             && input.name is string
+             && input.designation is string
+             && input.place is string
+             && optionalLetterString(input, 'reference')
+             && optionalLetterString(input, 'recipientName')
+             && optionalLetterString(input, 'recipientDesignation')
+             && optionalLetterString(input, 'recipientCompany')
+             && optionalLetterString(input, 'recipientAddress')
+             && optionalLetterString(input, 'salutation')
+             && optionalLetterBool(input, 'useSignature')
+             && optionalLetterBool(input, 'useStamp');
+    }
+
     function isSupportedLetterheadParentShape(parent) {
       return parent.keys().hasAll(['userId', 'title', 'input'])
              && parent.userId is string
              && parent.title is string
              && parent.title.size() > 0
              && parent.title.size() <= 200
-             && parent.input is map;
+             && letterheadParentInputSupported(parent.input);
+    }
+
+    function letterheadPdfUriAbsentOrNull(data) {
+      return data.get('pdfUri', null) == null;
+    }
+
+    function letterheadParentInputUpdateAllowed() {
+      return !resource.data.keys().hasAny(['input'])
+             ? (
+                 !request.resource.data.keys().hasAny(['input'])
+                 || letterheadParentInputSupported(request.resource.data.input)
+               )
+             : (
+                 request.resource.data.input == resource.data.input
+                 || letterheadParentInputSupported(request.resource.data.input)
+               );
+    }
+
+    function letterheadParentUpdateAllowed() {
+      return request.resource.data.userId == resource.data.userId
+             && request.resource.data.title is string
+             && request.resource.data.title.size() > 0
+             && request.resource.data.title.size() <= 200
+             && (
+               request.resource.data.get('pdfUri', null) == null
+               || request.resource.data.get('pdfUri', null) == resource.data.get('pdfUri', null)
+             )
+             && letterheadParentInputUpdateAllowed();
     }
 
     function letterheadMirrorPayloadSupported(payload) {
-      return payload.keys().hasOnly(letterheadSupportedPayloadKeyList())
+      return payload is map
+             && payload.keys().hasOnly(letterheadSupportedPayloadKeyList())
+             && payload.keys().hasAll(['letterheadDocumentId', 'body'])
              && payload.letterheadDocumentId is string
              && payload.letterheadDocumentId.size() > 0
-             && payload.letterheadDocumentId.size() <= 200;
+             && payload.letterheadDocumentId.size() <= 200
+             && payload.body is string
+             && payload.body.size() > 0
+             && optionalLetterString(payload, 'subject')
+             && optionalLetterString(payload, 'reference')
+             && optionalLetterString(payload, 'closing')
+             && optionalLetterString(payload, 'signerName')
+             && optionalLetterString(payload, 'designation')
+             && optionalLetterString(payload, 'place');
+    }
+
+    function letterheadMirrorChangedStringField(after, affected, key) {
+      return !affected.hasAny([key])
+             || after[key] == null
+             || after[key] is string;
+    }
+
+    function letterheadMirrorPayloadUpdateAllowed() {
+      let before = resource.data.get('payload', {});
+      let after = request.resource.data.get('payload', {});
+      let affected = after.diff(before).affectedKeys();
+      return before is map
+             && after is map
+             && affected.hasOnly(letterheadSupportedPayloadKeyList())
+             && after.get('letterheadDocumentId', '')
+                  == before.get('letterheadDocumentId', '')
+             && (
+               !affected.hasAny(['body'])
+               || (after.body is string && after.body.size() > 0)
+             )
+             && letterheadMirrorChangedStringField(after, affected, 'subject')
+             && letterheadMirrorChangedStringField(after, affected, 'reference')
+             && letterheadMirrorChangedStringField(after, affected, 'closing')
+             && letterheadMirrorChangedStringField(after, affected, 'signerName')
+             && letterheadMirrorChangedStringField(after, affected, 'designation')
+             && letterheadMirrorChangedStringField(after, affected, 'place');
     }
 
     function letterheadMirrorCreateShape() {
@@ -353,12 +481,7 @@ service cloud.firestore {
              || (
                request.resource.data.entryType == 'letterhead_matter'
                && request.resource.data.get('source', '') == resource.data.get('source', '')
-               && request.resource.data.get('payload', {}).get('letterheadDocumentId', '')
-                    == resource.data.get('payload', {}).get('letterheadDocumentId', '')
-               && request.resource.data.get('payload', {})
-                    .diff(resource.data.get('payload', {}))
-                    .addedKeys()
-                    .hasOnly(letterheadSupportedPayloadKeyList())
+               && letterheadMirrorPayloadUpdateAllowed()
                && (
                  request.resource.data.get('reminder', null) == resource.data.get('reminder', null)
                  || request.resource.data.get('reminder', null) == null
@@ -367,8 +490,8 @@ service cloud.firestore {
                  request.resource.data.get('notes', null) == resource.data.get('notes', null)
                  || request.resource.data.get('notes', null) == null
                )
-               && request.resource.data.get('attachments', []).size()
-                    <= resource.data.get('attachments', []).size()
+               && request.resource.data.get('attachments', [])
+                    == resource.data.get('attachments', [])
              );
     }
 
@@ -496,9 +619,11 @@ service cloud.firestore {
         allow read: if isOwner(uid);
         allow create: if isActiveUser(uid)
                       && request.resource.data.userId == uid
-                      && isSupportedLetterheadParentShape(request.resource.data);
+                      && isSupportedLetterheadParentShape(request.resource.data)
+                      && letterheadPdfUriAbsentOrNull(request.resource.data);
         allow update: if isActiveUser(uid)
-                      && request.resource.data.userId == uid;
+                      && request.resource.data.userId == uid
+                      && letterheadParentUpdateAllowed();
         allow delete: if isActiveUser(uid);
       }
 
