@@ -73,6 +73,11 @@ export type LetterheadMirrorPayloadKey = (typeof LETTERHEAD_MIRROR_PAYLOAD_KEYS)
 
 const LETTERHEAD_MIRROR_PAYLOAD_KEY_SET = new Set<string>(LETTERHEAD_MIRROR_PAYLOAD_KEYS);
 
+/**
+ * `title` is a required key on the form payload and may be the blank string
+ * the create screen defaults to. Document title is resolved separately
+ * (`input.title || input.subject`) and must be nonempty.
+ */
 export const LETTERHEAD_PARENT_INPUT_REQUIRED_KEYS = [
   "title",
   "date",
@@ -106,6 +111,11 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+/** Form title: present string, including the supported blank default. */
+function isSupportedLetterheadFormTitle(value: unknown): value is string {
+  return typeof value === "string" && value.length <= 200;
 }
 
 function isOptionalLetterString(value: unknown): boolean {
@@ -177,7 +187,7 @@ export function isSupportedLetterheadParentInput(input: unknown): boolean {
   const keys = Object.keys(input);
   if (LETTERHEAD_PARENT_INPUT_REQUIRED_KEYS.some((key) => !keys.includes(key))) return false;
   if (keys.some((key) => !LETTERHEAD_PARENT_INPUT_KEY_SET.has(key))) return false;
-  if (!isNonEmptyString(input.title)) return false;
+  if (!isSupportedLetterheadFormTitle(input.title)) return false;
   if (!isLetterDate(input.date)) return false;
   if (!isNonEmptyString(input.subject)) return false;
   if (typeof input.body !== "string" || input.body.length === 0) return false;

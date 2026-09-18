@@ -27,11 +27,18 @@ const diaryAtomicPath = path.join(import.meta.dirname, "../diary/atomicCreate.ts
 const lhAtomicPath = path.join(import.meta.dirname, "atomicCreate.ts");
 const docsFirebasePath = path.join(import.meta.dirname, "documents-firebase.ts");
 const atomicBillablePath = path.join(import.meta.dirname, "../../billing/optionC/atomicBillableCreate.ts");
+const createPath = path.join(import.meta.dirname, "../../../app/(app)/letterhead/create.tsx");
 const saveSrc = fs.readFileSync(savePath, "utf8");
 const diarySrc = fs.readFileSync(diaryAtomicPath, "utf8");
 const lhSrc = fs.readFileSync(lhAtomicPath, "utf8");
 const docsFirebaseSrc = fs.readFileSync(docsFirebasePath, "utf8");
 const atomicBillableSrc = fs.readFileSync(atomicBillablePath, "utf8");
+const createSrc = fs.readFileSync(createPath, "utf8");
+
+assert.match(createSrc, /title:\s*""/);
+assert.match(createSrc, /if \(!values\.subject\?\.trim\(\)\)/);
+assert.match(createSrc, /const title = docInput\.title \|\| docInput\.subject/);
+assert.doesNotMatch(createSrc, /if \(!values\.title\?\.trim\(\)\)/);
 
 assert.equal(LETTERHEAD_MIRROR_POLICY_STATUS, "adopted");
 assert.equal(LETTERHEAD_ZERO_QUOTA_ADOPTED, true);
@@ -189,6 +196,68 @@ const validParentInput = {
 };
 assert.equal(isSupportedLetterheadParentInput(validParentInput), true);
 assert.equal(isSupportedLetterheadParentInput({}), false, "empty parent input is not supported");
+
+const formBlankTitleInput = {
+  title: "",
+  date: 1_700_000_000_000,
+  reference: "",
+  recipientName: "",
+  recipientDesignation: "",
+  recipientCompany: "",
+  recipientAddress: "",
+  subject: "Subject of the letter",
+  salutation: "Dear Sir/Madam,",
+  body: "Body of the letter.",
+  closing: "Yours faithfully,",
+  name: "Owner",
+  designation: "",
+  place: "",
+  useSignature: false,
+  useStamp: false,
+};
+assert.equal(
+  isSupportedLetterheadParentInput(formBlankTitleInput),
+  true,
+  "blank form title is supported when subject/body/sender are present"
+);
+assert.equal(
+  isSupportedLetterheadParentData({
+    userId: "uid",
+    title: formBlankTitleInput.subject,
+    input: formBlankTitleInput,
+  }),
+  true,
+  "resolved document title may come from subject"
+);
+assert.equal(
+  isSupportedLetterheadParentData({
+    userId: "uid",
+    title: "",
+    input: formBlankTitleInput,
+  }),
+  false,
+  "resolved document title remains required"
+);
+assert.equal(
+  isSupportedLetterheadParentInput({ ...formBlankTitleInput, subject: "" }),
+  false,
+  "blank subject is not a valid letter"
+);
+assert.equal(
+  isSupportedLetterheadParentInput({ ...formBlankTitleInput, body: "" }),
+  false,
+  "blank body is not a valid letter"
+);
+assert.equal(
+  isSupportedLetterheadParentInput({ ...formBlankTitleInput, title: { text: "obj" } }),
+  false,
+  "object title is not a form string"
+);
+assert.equal(
+  isSupportedLetterheadParentInput({ ...validParentInput, title: "Notice" }),
+  true,
+  "explicit title remains supported"
+);
 assert.equal(
   isSupportedLetterheadParentInput({ ...validParentInput, body: { amount: 5000 } }),
   false,

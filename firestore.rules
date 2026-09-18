@@ -328,11 +328,13 @@ service cloud.firestore {
     }
 
     function letterheadParentInputSupported(input) {
+      // input.title is a required key and may be the blank form default.
+      // Document title (parent.title) remains nonempty and is resolved from
+      // input.title or input.subject.
       return input is map
              && input.keys().hasAll(letterheadParentInputRequiredKeys())
              && input.keys().hasOnly(letterheadParentInputAllowedKeys())
              && input.title is string
-             && input.title.size() > 0
              && input.title.size() <= 200
              && input.date is int
              && input.subject is string

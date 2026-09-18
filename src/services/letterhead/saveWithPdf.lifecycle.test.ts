@@ -15,16 +15,17 @@ import {
   type LetterheadConfig,
   type LetterheadDocument,
   type LetterheadDocumentCreateInput,
+  type LetterheadDocumentInput,
   type LetterheadDocumentRepository,
 } from "@/services/letterhead/types";
-import { setLetterheadDocumentRepositoryForTests } from "@/services/letterhead/documentRepository";
+import { setLetterheadDocumentRepositoryForTests, getLetterheadDocumentRepository } from "@/services/letterhead/documentRepository";
 import { updateLetterheadDocumentOnDb } from "@/services/letterhead/documents-firebase";
 import { letterheadDocToCloudStorage } from "@/services/pdf/pdfCloudSync";
 import {
   resetLetterheadPdfRetentionForTests,
   saveLetterheadCreateWithPdf,
 } from "@/services/letterhead/saveWithPdf";
-import { letterheadMirrorRecordId } from "@/services/letterhead/letterheadMirrorPolicy";
+import { letterheadMirrorRecordId, isSupportedLetterheadParentData } from "@/services/letterhead/letterheadMirrorPolicy";
 import { setPdfGenerateHookForTests } from "@/services/pdf/pdfGenerateHook";
 import { createSaveIdempotencyContext, isProcessSaveLockHeld } from "@/services/records/saveIdempotency";
 import {
@@ -118,6 +119,35 @@ const docInput = {
   place: "Delhi",
 };
 
+/** Actual create.tsx defaultValues, with only the form-required letter fields filled. */
+function formLetterheadInput(
+  overrides: Partial<LetterheadDocumentInput> = {}
+): LetterheadDocumentInput {
+  return {
+    title: "",
+    date: 1_700_000_000_000,
+    reference: "",
+    recipientName: "",
+    recipientDesignation: "",
+    recipientCompany: "",
+    recipientAddress: "",
+    subject: "",
+    salutation: "Dear Sir/Madam,",
+    body: "",
+    closing: "Yours faithfully,",
+    name: "",
+    designation: "",
+    place: "",
+    useSignature: false,
+    useStamp: false,
+    ...overrides,
+  };
+}
+
+function resolvedDocumentTitle(input: LetterheadDocumentInput): string {
+  return input.title || input.subject || "letterhead.createTitle";
+}
+
 function mockLetterheadRepo(
   store: Map<string, LetterheadDocument>,
   opts: {
@@ -137,6 +167,17 @@ function mockLetterheadRepo(
     },
     async create(userId, record: LetterheadDocumentCreateInput) {
       if (opts.createGate) await opts.createGate();
+      if (
+        !isSupportedLetterheadParentData({
+          userId,
+          title: record.title,
+          input: record.input as unknown as Record<string, unknown>,
+        })
+      ) {
+        throw new AppError("permission_denied", "Letterhead document is not valid.", undefined, {
+          reason: "letterhead_parent_shape_invalid",
+        });
+      }
       const id = record.clientRecordId ?? `lh_${Date.now()}`;
       const existing = store.get(id);
       if (existing) return existing;
@@ -269,12 +310,16 @@ function mockDiaryRepo(opts: { throwOnCreate?: boolean; creates?: { n: number } 
   };
 }
 
-function saveParams(clientRecordId: string) {
+function saveParams(
+  clientRecordId: string,
+  extras: { docInput?: LetterheadDocumentInput; title?: string } = {}
+) {
+  const input = extras.docInput ?? docInput;
   return {
     user,
     config,
-    docInput,
-    title: "Notice",
+    docInput: input,
+    title: extras.title ?? (extras.docInput ? resolvedDocumentTitle(input) : "Notice"),
     createPayload: {
       ueid: user.ueid,
       templateRefUpdatedAt: config.updatedAt,
@@ -765,6 +810,77 @@ async function main() {
     await markPersistentLockFailed("u-lh", "lh_prod_update_relogin", "session_retired", oldProdLease);
     const afterNewer = await readPersistentSaveLock("u-lh", "lh_prod_update_relogin");
     assert.equal(afterNewer?.startedAt, newerOwner.startedAt, "stale cleanup cannot release a newer owner");
+
+    resetLetterheadPdfRetentionForTests();
+    const blankForm = formLetterheadInput({
+      subject: "Subject of the letter",
+      body: "Body of the letter.",
+      name: "Owner",
+    });
+    assert.equal(blankForm.title, "", "fixture must keep the form's blank title");
+    const blankStore = new Map<string, LetterheadDocument>();
+    const blankDiary = { n: 0 };
+    setLetterheadDocumentRepositoryForTests(repoWithProductionUpdate(blankStore));
+    setDiaryRepositoryForTests(mockDiaryRepo({ creates: blankDiary }));
+    setPdfGenerateHookForTests(async () => ({ uri: "file:///tmp/lh-blank-title.pdf", fileName: "lh.pdf" }));
+    const blankSaved = await saveLetterheadCreateWithPdf(
+      "u-lh",
+      saveParams("lh_blank_title", { docInput: blankForm })
+    );
+    assert.equal(blankSaved.doc.id, "lh_blank_title");
+    assert.equal(blankSaved.doc.input.title, "");
+    assert.equal(blankSaved.doc.title, "Subject of the letter");
+    assert.equal(blankDiary.n, 1, "blank form title still creates the genuine mirror");
+    assert.equal(blankSaved.pdfUri, "file:///tmp/lh-blank-title.pdf");
+
+    let missingSubjectDenied = false;
+    try {
+      await saveLetterheadCreateWithPdf(
+        "u-lh",
+        saveParams("lh_missing_subject", {
+          docInput: formLetterheadInput({ body: "Body of the letter.", name: "Owner" }),
+        })
+      );
+    } catch (e) {
+      missingSubjectDenied = e instanceof AppError && e.code === "permission_denied";
+    }
+    assert.equal(missingSubjectDenied, true, "blank subject remains denied");
+    assert.equal(blankStore.has("lh_missing_subject"), false);
+
+    const explicitForm = formLetterheadInput({
+      title: "Office notice",
+      subject: "Subject of the letter",
+      body: "Body of the letter.",
+      name: "Owner",
+    });
+    const explicitSaved = await saveLetterheadCreateWithPdf(
+      "u-lh",
+      saveParams("lh_explicit_title", { docInput: explicitForm })
+    );
+    assert.equal(explicitSaved.doc.input.title, "Office notice");
+    assert.equal(explicitSaved.doc.title, "Office notice");
+
+    const diaryBeforeReplay = blankDiary.n;
+    const recoveredBlank = await saveLetterheadCreateWithPdf(
+      "u-lh",
+      saveParams("lh_blank_title", { docInput: blankForm })
+    );
+    assert.equal(recoveredBlank.doc.id, "lh_blank_title");
+    assert.equal(recoveredBlank.doc.input.title, "");
+    assert.equal(blankDiary.n, diaryBeforeReplay, "same-ID replay of blank-title letter does not mint another mirror");
+
+    const editedBlank = formLetterheadInput({
+      subject: "Revised subject",
+      body: "Revised body of the letter.",
+      name: "Owner",
+    });
+    const afterEdit = await getLetterheadDocumentRepository().update("u-lh", "lh_blank_title", {
+      title: resolvedDocumentTitle(editedBlank),
+      input: editedBlank,
+    });
+    assert.equal(afterEdit.input.title, "");
+    assert.equal(afterEdit.title, "Revised subject");
+    assert.equal(afterEdit.input.body, "Revised body of the letter.");
   } finally {
     setPdfGenerateHookForTests(null);
     setLetterheadDocumentRepositoryForTests(null);

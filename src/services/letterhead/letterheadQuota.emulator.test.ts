@@ -105,6 +105,36 @@ function lhInput(clientRecordId: string) {
   };
 }
 
+/** create.tsx defaultValues with only subject/body/sender filled. */
+function formLhInput(clientRecordId: string) {
+  return {
+    clientRecordId,
+    ueid: "VYD-2026-BILL01",
+    title: "Subject of the letter",
+    input: {
+      title: "",
+      date: Date.now(),
+      reference: "",
+      recipientName: "",
+      recipientDesignation: "",
+      recipientCompany: "",
+      recipientAddress: "",
+      subject: "Subject of the letter",
+      salutation: "Dear Sir/Madam,",
+      body: "Body of the letter.",
+      closing: "Yours faithfully,",
+      name: "Owner",
+      designation: "",
+      place: "",
+      useSignature: false,
+      useStamp: false,
+    },
+    templateRefUpdatedAt: null,
+    pdfUri: null,
+    saved: true,
+  };
+}
+
 function mirrorInput(letterheadId: string) {
   return {
     clientRecordId: letterheadMirrorRecordId(letterheadId),
@@ -468,6 +498,94 @@ async function main() {
       })
     );
     check("empty parent input denied at Rules", true);
+
+    const usageBeforeBlankTitle = await usageCount("alice");
+    const blankTitleParent = await createLetterheadDocumentAtomic(
+      authedDb("alice"),
+      "alice",
+      formLhInput("lh_form_blank_title")
+    );
+    check("blank form title + valid subject/body/sender CREATE", blankTitleParent.input.title === "");
+    check("blank form title resolves document title from subject", blankTitleParent.title === "Subject of the letter");
+    const blankMirror = await createEntryAtomic(authedDb("alice"), "alice", mirrorInput(blankTitleParent.id));
+    check("blank-title parent still mints a genuine mirror", blankMirror.id === letterheadMirrorRecordId(blankTitleParent.id));
+    check("blank-title CREATE remains zero quota", (await usageCount("alice")) === usageBeforeBlankTitle);
+
+    await assertSucceeds(
+      setDoc(doc(authedDb("alice"), "users", "alice", "letterheadDocs", "lh_form_blank_rules"), {
+        userId: "alice",
+        title: "Subject of the letter",
+        input: formLhInput("lh_form_blank_rules").input,
+        createdAt: Date.now(),
+      })
+    );
+    check("blank form title allowed at Rules when document title is resolved", true);
+
+    await assertFails(
+      setDoc(doc(authedDb("alice"), "users", "alice", "letterheadDocs", "lh_blank_doc_title"), {
+        userId: "alice",
+        title: "",
+        input: formLhInput("lh_blank_doc_title").input,
+        createdAt: Date.now(),
+      })
+    );
+    check("empty resolved document title denied at Rules", true);
+
+    let missingSubjectKind: string | null = null;
+    try {
+      await createLetterheadDocumentAtomic(authedDb("alice"), "alice", {
+        ...formLhInput("lh_missing_subject"),
+        input: { ...formLhInput("lh_missing_subject").input, subject: "" },
+      });
+    } catch (e) {
+      missingSubjectKind = classifyAtomicCreateError(e);
+    }
+    check("missing subject denied on atomic CREATE", missingSubjectKind === "permission_denied");
+
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", "alice", "letterheadDocs", "lh_saved_blank"), {
+        userId: "alice",
+        title: "Old subject",
+        input: {
+          ...formLhInput("lh_saved_blank").input,
+          subject: "Old subject",
+          body: "Old body of the letter.",
+        },
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+    });
+    await assertSucceeds(
+      updateDoc(doc(authedDb("alice"), "users", "alice", "letterheadDocs", "lh_saved_blank"), {
+        userId: "alice",
+        title: "Old subject",
+        input: {
+          ...formLhInput("lh_saved_blank").input,
+          subject: "Old subject",
+          body: "Recovered body of the letter.",
+        },
+        updatedAt: Date.now(),
+      })
+    );
+    check("editing a previously saved blank-title letter remains allowed", true);
+
+    const replayBlank = await createLetterheadDocumentAtomic(
+      authedDb("alice"),
+      "alice",
+      formLhInput("lh_form_blank_title")
+    );
+    check("same-ID replay of blank-title letter returns existing", replayBlank.id === blankTitleParent.id);
+    check("same-ID replay keeps blank form title", replayBlank.input.title === "");
+
+    await assertFails(
+      setDoc(doc(authedDb("alice"), "users", "alice", "letterheadDocs", "lh_object_title"), {
+        userId: "alice",
+        title: "Subject of the letter",
+        input: { ...formLhInput("lh_object_title").input, title: { text: "obj" } },
+        createdAt: Date.now(),
+      })
+    );
+    check("object form title denied at Rules", true);
 
     await assertFails(
       setDoc(doc(authedDb("alice"), "users", "alice", "letterheadDocs", "lh_object_body_parent"), {
