@@ -328,10 +328,20 @@ async function main() {
   await backToHub(page);
 
   await clickName(page, "अपग्रेड शीट — रिकॉर्ड सीमा");
+  await scrollCtaIntoView(page);
   records.push(
     await capture(page, "isolated-sheet-record-limit-hi.png", note("trigger-recordLimitReached-hi", "hi"))
   );
+  await setViewport(page, NARROW);
+  records.push(
+    await capture(
+      page,
+      "isolated-sheet-record-limit-hi-narrow.png",
+      note("trigger-recordLimitReached-hi-narrow-cta-dock", "hi")
+    )
+  );
   await closeSheet(page);
+  await setViewport(page, PHONE);
 
   const hubEn = records.find((r) => r.file === "isolated-hub-en.png");
   const hubNarrow = records.find((r) => r.file === "isolated-hub-en-narrow.png");
