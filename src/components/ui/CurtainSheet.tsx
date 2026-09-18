@@ -78,6 +78,12 @@ export interface CurtainSheetProps {
   onHardwareBack?: () => boolean;
   sheetStyle?: StyleProp<ViewStyle>;
   accessibilityLabel?: string;
+  /**
+   * When false, tapping the dimmed overlay does not dismiss.
+   * Hardware back, drag-to-dismiss, and an in-sheet close control still work.
+   * Default true (existing picker / consent curtains).
+   */
+  closeOnBackdropPress?: boolean;
 }
 
 /**
@@ -100,6 +106,7 @@ export const CurtainSheet = forwardRef<CurtainSheetHandle, CurtainSheetProps>(
       onHardwareBack,
       sheetStyle,
       accessibilityLabel = "Sheet",
+      closeOnBackdropPress = true,
     },
     ref
   ) {
@@ -300,12 +307,14 @@ export const CurtainSheet = forwardRef<CurtainSheetHandle, CurtainSheetProps>(
           <Pressable
             style={StyleSheet.absoluteFill}
             pointerEvents={closing ? "none" : "auto"}
-            disabled={closing}
-            onPress={() => springClose()}
-            accessibilityRole="button"
-            accessibilityLabel="Close"
-            accessibilityElementsHidden={closing}
-            importantForAccessibility={closing ? "no-hide-descendants" : "auto"}
+            disabled={closing || !closeOnBackdropPress}
+            onPress={closeOnBackdropPress ? () => springClose() : undefined}
+            accessibilityRole={closeOnBackdropPress ? "button" : undefined}
+            accessibilityLabel={closeOnBackdropPress ? "Close" : undefined}
+            accessibilityElementsHidden={closing || !closeOnBackdropPress}
+            importantForAccessibility={
+              closing || !closeOnBackdropPress ? "no-hide-descendants" : "auto"
+            }
           />
           <Animated.View
             style={[

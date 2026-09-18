@@ -1,0 +1,10 @@
+{
+  "name": "vyaamikk-billing-ux-harness",
+  "version": "0.0.0-dev",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "start": "EXPO_NO_TELEMETRY=1 EXPO_PUBLIC_APP_MODE=development EXPO_PUBLIC_DEV_BACKEND=local-mock CI=1 ../../node_modules/.bin/expo start --web --port 8092 --clear",
+    "start:go": "EXPO_NO_TELEMETRY=1 EXPO_PUBLIC_APP_MODE=development EXPO_PUBLIC_DEV_BACKEND=local-mock ../../node_modules/.bin/expo start --go --lan --port 8092 --clear"
+  }
+}
