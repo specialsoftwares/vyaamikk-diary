@@ -1,8 +1,8 @@
 {
   "label": "Isolated component preview — not full-app or native validation.",
-  "capturedAt": "2026-09-18T09:58:00.105Z",
-  "capturedCodeSha": "f81a7d252ad2b8d6c6738a35798523786ae48006",
-  "candidateSha": "f81a7d252ad2b8d6c6738a35798523786ae48006",
+  "capturedAt": "2026-09-18T14:36:48.880Z",
+  "capturedCodeSha": "c66f7727365aa80f2fe14f4339e1f9de42929f7a",
+  "candidateSha": "c66f7727365aa80f2fe14f4339e1f9de42929f7a",
   "harnessUrl": "http://127.0.0.1:8092",
   "captureMethod": "playwright-core Chrome page.screenshot viewport (not editor-panel crop)",
   "cssZoomNote": "CSS zoom is browser evidence, not native Dynamic Type or Android/iOS accessibility validation. A full-viewport curtain scaled with document zoom can clip the CTA dock; unzoomed narrow captures show the dock, and enlarged education (scrollable) keeps See plans reachable.",
@@ -131,8 +131,8 @@
     {
       "file": "isolated-sheet-record-limit-en.png",
       "path": "tools/billing-ux-harness/captures/isolated-sheet-record-limit-en.png",
-      "sha256": "ab4e9d75cbaba95a088103ded4525fc22bd61b0297d58ba656eb354c7902d36e",
-      "bytes": 149991,
+      "sha256": "fcf87321684761ae4db8cc1ccff736e7ef9bb748a2f51eb93c076e7203621610",
+      "bytes": 154657,
       "viewport": {
         "width": 390,
         "height": 844
@@ -151,8 +151,8 @@
     {
       "file": "isolated-sheet-feature-locked-en.png",
       "path": "tools/billing-ux-harness/captures/isolated-sheet-feature-locked-en.png",
-      "sha256": "8778b0e58ea3b62da3b514248b1d2d63f282a3d2d8ad29639a5a4eff94b5e626",
-      "bytes": 146770,
+      "sha256": "f8db214df1becd28da6f62120f4060e3b3962a4f803e0f2d63c2dcfcf9d417e5",
+      "bytes": 152923,
       "viewport": {
         "width": 390,
         "height": 844
@@ -171,8 +171,8 @@
     {
       "file": "isolated-sheet-trial-ending-en.png",
       "path": "tools/billing-ux-harness/captures/isolated-sheet-trial-ending-en.png",
-      "sha256": "77534f5739d1db7565a4c30a849364d03c76a322d99b3986857e76d1a9950272",
-      "bytes": 148670,
+      "sha256": "ef5460de41508f11fe7da9655f00e3f01018ffd32144a642b870f6a1ed115486",
+      "bytes": 154801,
       "viewport": {
         "width": 390,
         "height": 844
@@ -191,8 +191,8 @@
     {
       "file": "isolated-sheet-manual-en.png",
       "path": "tools/billing-ux-harness/captures/isolated-sheet-manual-en.png",
-      "sha256": "92b41b91d2acb7c9d60d2bead77d04fed0a62ea7f70eae828dd5415911bd593a",
-      "bytes": 149369,
+      "sha256": "c11f48425719f2851896686fc68c93cfcdb8a14c9f344a436d02a82bbb9f5358",
+      "bytes": 155508,
       "viewport": {
         "width": 390,
         "height": 844
@@ -211,8 +211,8 @@
     {
       "file": "isolated-sheet-period-quarterly-en.png",
       "path": "tools/billing-ux-harness/captures/isolated-sheet-period-quarterly-en.png",
-      "sha256": "e5002b872040fea4d02aaf0ec3784dfd6420f338403cc83cce0de7ce18d5a0c5",
-      "bytes": 150333,
+      "sha256": "cfc4046818ce13683dff3795cea350489b39cfe01662c8c8e0fb0d597e002581",
+      "bytes": 156504,
       "viewport": {
         "width": 390,
         "height": 844
@@ -231,8 +231,8 @@
     {
       "file": "isolated-sheet-period-yearly-en.png",
       "path": "tools/billing-ux-harness/captures/isolated-sheet-period-yearly-en.png",
-      "sha256": "5a61726256a8d2e6ccc74808a994af115f8f7fd73154bda42b93bb698fb8706c",
-      "bytes": 150889,
+      "sha256": "3d03c8319c42a423f127ef7d776623406b096a14332b264d43cee20f90ec1e74",
+      "bytes": 157068,
       "viewport": {
         "width": 390,
         "height": 844
@@ -251,8 +251,8 @@
     {
       "file": "isolated-sheet-trial-eligible-unavailable-en.png",
       "path": "tools/billing-ux-harness/captures/isolated-sheet-trial-eligible-unavailable-en.png",
-      "sha256": "8ef15cd4ef63e9c6b401ecc5a9ae4763a9b4750cac7c64c8f902e366e4903d63",
-      "bytes": 151894,
+      "sha256": "229a246219706b609e070b7c6d6f3176b3deb08ef74edc1afe7d3cdd9ccc7312",
+      "bytes": 158583,
       "viewport": {
         "width": 390,
         "height": 844
@@ -271,8 +271,8 @@
     {
       "file": "isolated-sheet-trial-eligible-en.png",
       "path": "tools/billing-ux-harness/captures/isolated-sheet-trial-eligible-en.png",
-      "sha256": "584633ca98b45b043a517d7ec040909b1dbf455eb075caff4f6d9edb533ae57c",
-      "bytes": 150276,
+      "sha256": "d8f437e75aec1c9fc6915c7d635f3f534e9dd343b73a9bbab4db8b14acf9be0b",
+      "bytes": 156970,
       "viewport": {
         "width": 390,
         "height": 844
@@ -291,8 +291,8 @@
     {
       "file": "isolated-sheet-trial-ineligible-en.png",
       "path": "tools/billing-ux-harness/captures/isolated-sheet-trial-ineligible-en.png",
-      "sha256": "fa78a3574b18bb818f1f20db25f09880d5d057bade9badd6326396ffc4d219cf",
-      "bytes": 149369,
+      "sha256": "a72e247323380d249e4d03bbb42ce496543598b568a66e02912cc5d86dfcf6ec",
+      "bytes": 156044,
       "viewport": {
         "width": 390,
         "height": 844
@@ -311,8 +311,8 @@
     {
       "file": "isolated-sheet-loading-en.png",
       "path": "tools/billing-ux-harness/captures/isolated-sheet-loading-en.png",
-      "sha256": "81a7fd5e3658bc4df5ad1f2329a485aadfa004d06acb2de922c45a2cedde3b03",
-      "bytes": 128046,
+      "sha256": "ff56b24122f51cdf5b5df540cbb6aae5baa633c9310a083ca890fd2994504cfd",
+      "bytes": 134773,
       "viewport": {
         "width": 390,
         "height": 844
@@ -331,8 +331,8 @@
     {
       "file": "isolated-sheet-unavailable-en.png",
       "path": "tools/billing-ux-harness/captures/isolated-sheet-unavailable-en.png",
-      "sha256": "36cfacf11eec91f94823c6b63f786a85f50c550c78fec1b1726d7127d59b652a",
-      "bytes": 130645,
+      "sha256": "50bbcbfca6215cc9716eda04c713ff8a4bed6689a556aa4c6c2859bd40e4e856",
+      "bytes": 137446,
       "viewport": {
         "width": 390,
         "height": 844
@@ -351,8 +351,8 @@
     {
       "file": "isolated-sheet-purchase-pending-en.png",
       "path": "tools/billing-ux-harness/captures/isolated-sheet-purchase-pending-en.png",
-      "sha256": "ae0104c0b92e918a405af10c666d11d1618d3889803931626c769341a4119716",
-      "bytes": 152772,
+      "sha256": "a1e27fd21b95fafe3321ede810454a99b2a44d34df80fe6ec79a62fa7bf8db52",
+      "bytes": 158799,
       "viewport": {
         "width": 390,
         "height": 844
@@ -391,8 +391,8 @@
     {
       "file": "isolated-sheet-restore-pending-en.png",
       "path": "tools/billing-ux-harness/captures/isolated-sheet-restore-pending-en.png",
-      "sha256": "5332a051e4ff3e6667a456bc7b6693d8f6af0c6ef88e42f2131352285008dd17",
-      "bytes": 152330,
+      "sha256": "924d8c05987e19411d42f03cbafdda74bc23875d4c095bb774af91fa7c621bf0",
+      "bytes": 158358,
       "viewport": {
         "width": 390,
         "height": 844
@@ -411,8 +411,8 @@
     {
       "file": "isolated-sheet-record-limit-en-narrow.png",
       "path": "tools/billing-ux-harness/captures/isolated-sheet-record-limit-en-narrow.png",
-      "sha256": "e9bf24e340231aaf7c94c0a17657200c7bd3bddead4cb73f105c069678c13475",
-      "bytes": 125224,
+      "sha256": "caa596f33f2a63c39cd3cdc0d464cddf79006c07d679989c815a3640787b6797",
+      "bytes": 127301,
       "viewport": {
         "width": 320,
         "height": 720
@@ -531,8 +531,8 @@
     {
       "file": "isolated-sheet-record-limit-hi.png",
       "path": "tools/billing-ux-harness/captures/isolated-sheet-record-limit-hi.png",
-      "sha256": "dbe68a65b0e96e46fac4395127f98ffd2f9c116844cf2c0a203c1fd5aaee2d38",
-      "bytes": 145512,
+      "sha256": "17bef9ca9d13b207aea4da036daf1004c1c1eb4ee7e3e04b7f34c001b6e37951",
+      "bytes": 148051,
       "viewport": {
         "width": 390,
         "height": 844
@@ -549,13 +549,33 @@
       "label": "Isolated component preview — not full-app or native validation."
     },
     {
+      "file": "isolated-sheet-record-limit-hi-narrow.png",
+      "path": "tools/billing-ux-harness/captures/isolated-sheet-record-limit-hi-narrow.png",
+      "sha256": "8ef253fb3c9b083b24277cc298f29ea19439e0ecede7f5818111b3f557131d41",
+      "bytes": 121448,
+      "viewport": {
+        "width": 320,
+        "height": 720
+      },
+      "devicePixelRatio": 2,
+      "language": "hi",
+      "selectedState": "trigger-recordLimitReached-hi-narrow-cta-dock",
+      "cssZoom": "1",
+      "scroll": {
+        "scrollHeight": 720,
+        "clientHeight": 720,
+        "scrollY": 0
+      },
+      "label": "Isolated component preview — not full-app or native validation."
+    },
+    {
       "file": "isolated-contact-sheet.png",
       "path": "tools/billing-ux-harness/captures/isolated-contact-sheet.png",
-      "sha256": "0fdef5d3e2f9a662f86aecd9585fdcbaf249fae5f9bf451292384d27f7532d2c",
-      "bytes": 3496191,
+      "sha256": "afb0d2403c50e873e9287a88107ce82e6a88c1ebe870cacf9feef86450e3d980",
+      "bytes": 3923304,
       "viewport": {
         "width": 1600,
-        "height": 2365
+        "height": 2205
       },
       "devicePixelRatio": 1,
       "language": "n/a",
