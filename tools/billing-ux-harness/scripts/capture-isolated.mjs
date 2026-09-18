@@ -162,7 +162,8 @@ function chromePath() {
 
 async function main() {
   fs.mkdirSync(outDir, { recursive: true });
-  const candidateSha = process.env.CANDIDATE_SHA || gitHead();
+  const capturedCodeSha = process.env.CAPTURED_CODE_SHA || gitHead();
+  const candidateSha = capturedCodeSha;
   const browser = await chromium.launch({
     executablePath: chromePath(),
     headless: true,
@@ -339,6 +340,7 @@ async function main() {
   const manifest = {
     label: LABEL,
     capturedAt: new Date().toISOString(),
+    capturedCodeSha,
     candidateSha,
     harnessUrl: url,
     captureMethod: "playwright-core Chrome page.screenshot viewport (not editor-panel crop)",
@@ -406,7 +408,7 @@ figcaption{margin-top:6px;word-break:break-word}
   if (duplicateHub) {
     throw new Error("hub-en and hub-en-narrow are byte-identical; narrow viewport did not change the capture");
   }
-  console.log(`captured ${records.length} viewports; candidateSha=${candidateSha}`);
+  console.log(`captured ${records.length} viewports; capturedCodeSha=${capturedCodeSha}`);
   console.log(`manifest ${path.join(outDir, "capture-manifest.json")}`);
 }
 

@@ -1,7 +1,8 @@
 {
   "label": "Isolated component preview — not full-app or native validation.",
-  "capturedAt": "2026-09-17T20:23:57.904Z",
-  "candidateSha": "8dba0e29050a6bcd130dab70f5ab70819ea328b2",
+  "capturedAt": "2026-09-18T07:20:40.808Z",
+  "capturedCodeSha": "f0842e2cd7038d4675762296f7a16ee5bd5b80db",
+  "candidateSha": "f0842e2cd7038d4675762296f7a16ee5bd5b80db",
   "harnessUrl": "http://127.0.0.1:8092",
   "captureMethod": "playwright-core Chrome page.screenshot viewport (not editor-panel crop)",
   "cssZoomNote": "CSS zoom is browser evidence, not native Dynamic Type or Android/iOS accessibility validation. A full-viewport curtain scaled with document zoom can clip the CTA dock; unzoomed narrow captures show the dock, and enlarged education (scrollable) keeps See plans reachable.",
@@ -350,8 +351,8 @@
     {
       "file": "isolated-sheet-purchase-pending-en.png",
       "path": "tools/billing-ux-harness/captures/isolated-sheet-purchase-pending-en.png",
-      "sha256": "c4558fdfbe9be9ec08a9e3361cc7b24246649623b3ea19c1ef9d8ba31cf64246",
-      "bytes": 141104,
+      "sha256": "44af5287fbfd477fb5ed63da31ef2f990e293abcaa00fc52b5dad0b819b44cb3",
+      "bytes": 140930,
       "viewport": {
         "width": 390,
         "height": 844
@@ -390,8 +391,8 @@
     {
       "file": "isolated-sheet-restore-pending-en.png",
       "path": "tools/billing-ux-harness/captures/isolated-sheet-restore-pending-en.png",
-      "sha256": "1add7cfa3e58458f82d10ae0af7d0e42db5c83daaaac54c90cbfdb85a0f7d461",
-      "bytes": 140820,
+      "sha256": "a4abdcc42ca684c5a62269d983d3c22f60d3997f196c2889153422305e018bd6",
+      "bytes": 140510,
       "viewport": {
         "width": 390,
         "height": 844
@@ -550,8 +551,8 @@
     {
       "file": "isolated-contact-sheet.png",
       "path": "tools/billing-ux-harness/captures/isolated-contact-sheet.png",
-      "sha256": "a16b054b95dbb85ab3452b5507a1f46e7b2b3a702e1f9f20e4adbe4ed44d9ca8",
-      "bytes": 3339718,
+      "sha256": "6b2bac4627ba27fdaf942eda1fb76b08964f76edc1e200b53b07b488398307e8",
+      "bytes": 3337510,
       "viewport": {
         "width": 1600,
         "height": 2365
