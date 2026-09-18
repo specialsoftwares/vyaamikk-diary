@@ -10,6 +10,7 @@ import {
   SettingsNavGroup,
 } from "@/components/settings";
 import { Screen, SkeletonLoadingPanel, SkeletonSettingsSection, LocaleUiText } from "@/components/ui";
+import { isBillingUxPreviewEnabled } from "@/components/billing/billingUxPreviewGate";
 import { getAuthEntryHref } from "@/config/authWrapper";
 import { useAuth } from "@/state/auth";
 import { useT } from "@/i18n";
@@ -107,6 +108,10 @@ export default function SettingsTab() {
     [router]
   );
   const onDevReset = useCallback(() => router.push("/(app)/settings/dev-reset"), [router]);
+  const onBillingPreview = useCallback(
+    () => router.push("/(app)/settings/billing-ux-preview"),
+    [router]
+  );
 
   if (status === "loading") {
     return (
@@ -195,6 +200,14 @@ export default function SettingsTab() {
             onPress={onDevReset}
             accent="danger"
           />
+          {isBillingUxPreviewEnabled() ? (
+            <SettingsNavCard
+              icon="credit-card-outline"
+              title={t("billing.preview.title")}
+              subtitle={t("billing.preview.subtitle")}
+              onPress={onBillingPreview}
+            />
+          ) : null}
         </>
       ) : null}
 
