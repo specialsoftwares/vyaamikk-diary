@@ -1,4 +1,4 @@
-import { doc, runTransaction, type Firestore } from "firebase/firestore";
+import { doc, runTransaction, type Firestore, type Transaction } from "firebase/firestore";
 
 import { AppError } from "@/domain/errors";
 import {
@@ -18,6 +18,9 @@ import {
 
 export type SerialCounterId = "purchaseOrder" | "customerCredit";
 
+/** Ordinary families consume quota. Letterhead parent/mirror use `"none"`. */
+export type AtomicQuotaConsumption = "required" | "none";
+
 export interface AtomicCreateReadSnapshot {
   recordExists: boolean;
   statusExists: boolean;
@@ -36,6 +39,11 @@ export interface AtomicCreateHooks {
    * Must not perform Firestore writes, network I/O, or mutate save locks.
    */
   afterReads?: (snapshot: AtomicCreateReadSnapshot) => Promise<void>;
+  /**
+   * Extra transactional reads (for example the letterhead parent). Must run
+   * after the record existence read and before writes.
+   */
+  extraReads?: (tx: Transaction) => Promise<void>;
 }
 
 export interface AtomicBillableCreateParams<T> {
@@ -54,6 +62,11 @@ export interface AtomicBillableCreateParams<T> {
     payload: Record<string, unknown>;
   };
   hooks?: AtomicCreateHooks;
+  /**
+   * `"none"` skips status/usage reads and does not write `usageCurrent`.
+   * Default `"required"` is the ordinary billable create path.
+   */
+  quotaConsumption?: AtomicQuotaConsumption;
 }
 
 export interface AtomicBillableCreateResult<T> {
@@ -112,6 +125,7 @@ export async function runAtomicBillableCreate<T>(
     parseExisting,
     buildNew,
     hooks,
+    quotaConsumption = "required",
   } = params;
 
   try {
@@ -126,26 +140,31 @@ export async function runAtomicBillableCreate<T>(
         };
       }
 
-      const stSnap = await tx.get(statusRef(db, userId));
-      const statusExists = stSnap.exists();
-      const statusData = statusExists
-        ? (stSnap.data() as Record<string, unknown>)
-        : undefined;
-      const enforcementOn =
-        statusExists && quotaEnforcementEnabledFromStatusData(statusData);
+      await hooks?.extraReads?.(tx);
 
+      const consumesQuota = quotaConsumption === "required";
+      let statusExists = false;
+      let statusData: Record<string, unknown> | undefined;
+      let enforcementOn = false;
       let cap: number | null = null;
       let usageRecordsThisMonth: number | null = null;
       let usageMonthKey: string | null = null;
       let usageRaw: Record<string, unknown> | undefined;
 
-      if (enforcementOn) {
-        cap = monthlyRecordCapFromStatusData(statusData ?? {});
-        const uSnap = await tx.get(usageRef(db, userId));
-        usageRaw = uSnap.exists() ? (uSnap.data() as Record<string, unknown>) : undefined;
-        const usage = readUsageSnapshot(usageRaw);
-        usageRecordsThisMonth = usage?.recordsThisMonth ?? null;
-        usageMonthKey = usage?.monthKey ?? null;
+      if (consumesQuota) {
+        const stSnap = await tx.get(statusRef(db, userId));
+        statusExists = stSnap.exists();
+        statusData = statusExists ? (stSnap.data() as Record<string, unknown>) : undefined;
+        enforcementOn = statusExists && quotaEnforcementEnabledFromStatusData(statusData);
+
+        if (enforcementOn) {
+          cap = monthlyRecordCapFromStatusData(statusData ?? {});
+          const uSnap = await tx.get(usageRef(db, userId));
+          usageRaw = uSnap.exists() ? (uSnap.data() as Record<string, unknown>) : undefined;
+          const usage = readUsageSnapshot(usageRaw);
+          usageRecordsThisMonth = usage?.recordsThisMonth ?? null;
+          usageMonthKey = usage?.monthKey ?? null;
+        }
       }
 
       let counterNext: number | null = null;
@@ -193,7 +212,15 @@ export async function runAtomicBillableCreate<T>(
       const built = buildNew(serial);
       tx.set(recRef, built.payload);
 
-      if (enforcementOn) {
+      if (consumesQuota && enforcementOn) {
+        if (collection === "letterheadDocs") {
+          throw new AppError(
+            "save_failed",
+            "Letterhead must not consume ordinary quota.",
+            undefined,
+            { reason: "letterhead_quota_write_denied" }
+          );
+        }
         const usage = readUsageSnapshot(usageRaw);
         const write = nextUsageWrite({
           existing: usage,
@@ -222,6 +249,7 @@ export async function runAtomicBillableCreate<T>(
       parseExisting,
       cause: error,
       wrapped,
+      quotaConsumption,
       readAuthoritative: () =>
         readRecoveryStateInTransaction(db, userId, collection, recordId),
     });

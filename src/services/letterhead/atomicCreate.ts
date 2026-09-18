@@ -29,9 +29,10 @@ export function buildNewLetterheadDocument(
 }
 
 /**
- * Production letterheadDocs CREATE. ID and attempt timestamp are resolved
- * by the caller (or once here) and reused on transaction retries.
- * Template config and Storage uploads stay outside this transaction.
+ * Production letterheadDocs CREATE. Zero ordinary quota. ID and attempt
+ * timestamp are resolved by the caller (or once here) and reused on
+ * transaction retries. Template config and Storage uploads stay outside
+ * this transaction.
  */
 export async function createLetterheadDocumentAtomic(
   db: Firestore,
@@ -69,6 +70,7 @@ export async function createLetterheadDocumentAtomicDetailed(
     recordId,
     nowMs,
     monthKey,
+    quotaConsumption: "none",
     parseExisting: (id, data) => parseLetterheadDocument(id, data, userId),
     buildNew: () => {
       const record = buildNewLetterheadDocument(userId, recordId, input, nowMs);

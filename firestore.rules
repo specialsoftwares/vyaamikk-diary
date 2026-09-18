@@ -268,15 +268,52 @@ service cloud.firestore {
     }
 
     // Billable record collections whose CREATE consumes quota.
-    // letterheadDocs and entries are separately billable. Ordinary entries
-    // (including the automatic letterhead diary mirror) follow this
-    // collection-level model — no client-controlled exemption.
+    // Letterhead documents and their validated automatic diary mirrors
+    // are not quota-linked under the adopted Round 15 policy.
     function quotaLinkedCollection(coll) {
       return coll == 'purchaseOrders'
              || coll == 'customerCreditRecords'
              || coll == 'professionalPacks'
-             || coll == 'entries'
-             || coll == 'letterheadDocs';
+             || coll == 'entries';
+    }
+
+    function letterheadMirrorParentId() {
+      return request.resource.data.get('payload', {}).get('letterheadDocumentId', '');
+    }
+
+    // Genuine same-UID parent must already exist. A client entryType, parent
+    // id, exemption flag, or deterministic id alone is not sufficient.
+    function isValidatedLetterheadMirrorCreate(uid, entryId) {
+      let parentId = letterheadMirrorParentId();
+      return request.resource.data.entryType == 'letterhead_matter'
+             && request.resource.data.get('source', '') == 'letterhead'
+             && request.resource.data.userId == uid
+             && parentId is string
+             && parentId.size() > 0
+             && parentId.size() <= 200
+             && entryId == parentId + ':matter'
+             && get(/databases/$(database)/documents/users/$(uid)/letterheadDocs/$(parentId)).data.get('userId', '') == uid;
+    }
+
+    function afterEntryIsValidatedLetterheadMirror(uid, entryId) {
+      let after = getAfter(/databases/$(database)/documents/users/$(uid)/entries/$(entryId)).data;
+      let parentId = after.get('payload', {}).get('letterheadDocumentId', '');
+      return after.get('entryType', '') == 'letterhead_matter'
+             && after.get('source', '') == 'letterhead'
+             && parentId is string
+             && parentId.size() > 0
+             && entryId == parentId + ':matter'
+             && get(/databases/$(database)/documents/users/$(uid)/letterheadDocs/$(parentId)).data.get('userId', '') == uid;
+    }
+
+    function letterheadMirrorLinkagePreserved() {
+      return resource.data.get('entryType', '') != 'letterhead_matter'
+             || (
+               request.resource.data.entryType == 'letterhead_matter'
+               && request.resource.data.get('source', '') == resource.data.get('source', '')
+               && request.resource.data.get('payload', {}).get('letterheadDocumentId', '')
+                    == resource.data.get('payload', {}).get('letterheadDocumentId', '')
+             );
     }
 
     function istMonthKeyShape(key) {
@@ -312,7 +349,8 @@ service cloud.firestore {
       let rid = request.resource.data.lastRecordId;
       return quotaLinkedCollection(coll)
         && !exists(/databases/$(database)/documents/users/$(uid)/$(coll)/$(rid))
-        && existsAfter(/databases/$(database)/documents/users/$(uid)/$(coll)/$(rid));
+        && existsAfter(/databases/$(database)/documents/users/$(uid)/$(coll)/$(rid))
+        && !(coll == 'entries' && afterEntryIsValidatedLetterheadMirror(uid, rid));
     }
 
     // Record-side binding: a billable record CREATE under enforcement is
@@ -359,12 +397,19 @@ service cloud.firestore {
                       && request.resource.data.userId == uid
                       && entryTitleValid()
                       && (
-                        !quotaEnforcementOn(uid)
-                        || usageConsumedForRecord(uid, 'entries', entryId)
+                        isValidatedLetterheadMirrorCreate(uid, entryId)
+                        || (
+                          request.resource.data.get('entryType', '') != 'letterhead_matter'
+                          && (
+                            !quotaEnforcementOn(uid)
+                            || usageConsumedForRecord(uid, 'entries', entryId)
+                          )
+                        )
                       );
         allow update: if isActiveUser(uid)
                       && request.resource.data.userId == uid
-                      && entryTitleValid();
+                      && entryTitleValid()
+                      && letterheadMirrorLinkagePreserved();
         allow delete: if isActiveUser(uid);
       }
 
@@ -390,14 +435,11 @@ service cloud.firestore {
 
       // ---- Letterhead documents -----------------------------------------
       // Template config / Storage uploads are not part of this create.
+      // Adopted policy: letterheadDocs CREATE does not consume ordinary quota.
       match /letterheadDocs/{docId} {
         allow read: if isOwner(uid);
         allow create: if isActiveUser(uid)
-                      && request.resource.data.userId == uid
-                      && (
-                        !quotaEnforcementOn(uid)
-                        || usageConsumedForRecord(uid, 'letterheadDocs', docId)
-                      );
+                      && request.resource.data.userId == uid;
         allow update: if isActiveUser(uid)
                       && request.resource.data.userId == uid;
         allow delete: if isActiveUser(uid);

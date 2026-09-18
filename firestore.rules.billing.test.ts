@@ -581,7 +581,8 @@ async function main() {
     );
     check("linkage allowlist: non-linked collection cannot consume quota", true);
 
-    // Entries and letterheadDocs are Option-C linked; template config stays ungated.
+    // Entries remain Option-C linked; letterheadDocs are zero-quota.
+    // Template config stays ungated.
     await assertFails(
       setDoc(doc(qf(), "users", "quota-free", "entries", "en-bare"), {
         userId: "quota-free",
@@ -636,16 +637,16 @@ async function main() {
       quotaEnforcementEnabled: true,
     });
     const qlh = () => authedDb("quota-lh");
-    await assertFails(
+    await assertSucceeds(
       setDoc(doc(qlh(), "users", "quota-lh", "letterheadDocs", "lh-bare"), {
         userId: "quota-lh",
         title: "Bare letter",
         createdAt: Date.now(),
       })
     );
-    check("LH letterhead create without usage denied while enforcement on", true);
+    check("LH letterhead create without usage allowed while enforcement on", true);
 
-    await assertSucceeds(
+    await assertFails(
       letterheadWithUsageBatch(
         qlh(),
         "quota-lh",
@@ -653,46 +654,16 @@ async function main() {
         usageDoc(monthNow, 1, "lh-1", "letterheadDocs")
       ).commit()
     );
-    check("LH letterhead create + genuine usage transition allowed", true);
-
-    await assertFails(
-      letterheadWithUsageBatch(
-        qlh(),
-        "quota-lh",
-        "lh-2",
-        usageDoc(monthNow, 2, "lh-1", "letterheadDocs")
-      ).commit()
-    );
-    check("LH two letterheads cannot share one increment", true);
-
-    await assertFails(
-      letterheadWithUsageBatch(
-        qlh(),
-        "quota-lh",
-        "lh-ptr",
-        usageDoc(monthNow, 2, "lh-ptr", "entries")
-      ).commit()
-    );
-    check("LH usage pointer collection must match letterheadDocs", true);
+    check("LH letterhead create cannot mutate ordinary usage", true);
 
     await assertSucceeds(
-      updateDoc(doc(qlh(), "users", "quota-lh", "letterheadDocs", "lh-1"), {
+      updateDoc(doc(qlh(), "users", "quota-lh", "letterheadDocs", "lh-bare"), {
         userId: "quota-lh",
         title: "Edited letter",
         updatedAt: Date.now(),
       })
     );
     check("LH letterhead edit does not consume quota", true);
-
-    await assertFails(
-      letterheadWithUsageBatch(
-        qlh(),
-        "quota-lh",
-        "lh-1",
-        usageDoc(monthNow, 2, "lh-1", "letterheadDocs")
-      ).commit()
-    );
-    check("LH letterhead replay cannot consume again", true);
 
     await seedUser("quota-lh-off");
     await seedSubscriptionStatus("quota-lh-off", { quotaEnforcementEnabled: false });

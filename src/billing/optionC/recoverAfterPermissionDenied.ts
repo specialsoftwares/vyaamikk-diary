@@ -110,6 +110,11 @@ export interface RecoverAfterPermissionDeniedParams<T> {
   cause: unknown;
   wrapped: AppError;
   readAuthoritative: RecoveryStateReader;
+  /**
+   * Quota-exempt creates must never be reinterpreted as quota_exhausted.
+   * Existing-record replay still applies.
+   */
+  quotaConsumption?: "required" | "none";
 }
 
 /**
@@ -123,7 +128,7 @@ export interface RecoverAfterPermissionDeniedParams<T> {
 export async function recoverAfterPermissionDenied<T>(
   params: RecoverAfterPermissionDeniedParams<T>
 ): Promise<RecoveredExistingRecord<T>> {
-  const { recordId, monthKey, nowMs, parseExisting, cause, wrapped, readAuthoritative } = params;
+  const { recordId, monthKey, nowMs, parseExisting, cause, wrapped, readAuthoritative, quotaConsumption = "required" } = params;
 
   let state: AuthoritativeRecoveryState;
   try {
@@ -158,6 +163,10 @@ export async function recoverAfterPermissionDenied<T>(
     } catch (parseErr) {
       throw wrapAtomicCreateFailure(parseErr);
     }
+  }
+
+  if (quotaConsumption === "none") {
+    throw wrapped;
   }
 
   if (monthKey !== istMonthKeyForMillis(nowMs)) {

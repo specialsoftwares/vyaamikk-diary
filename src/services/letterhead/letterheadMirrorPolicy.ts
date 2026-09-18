@@ -1,30 +1,41 @@
 /**
- * Letterhead diary-mirror billing policy — UNRESOLVED / NOT ADOPTED.
+ * Letterhead diary-mirror billing policy — ADOPTED (Round 15).
  *
- * Documented Option-C contract in production: `letterheadDocs` and `entries`
- * are separately billable. The create flow writes both (parent letterheadDocs
- * CREATE plus an `entries` CREATE with entryType `letterhead_matter`).
+ * Parent `letterheadDocs` CREATE and its automatic `letterhead_matter`
+ * diary mirror consume ZERO ordinary monthly quota. Ordinary diary,
+ * purchase orders, Customer Credit and Professional Packs are unchanged.
  *
- * This module is a reviewable proposal only. It must not be wired as a
- * production quota exemption based on entryType, source, a client-provided
- * parent id, or a deterministic document id. A deterministic id alone does
- * not establish a trusted parent/mirror relationship.
+ * Mirror security is independent of quota: a client `entryType`, exemption
+ * flag, supplied parent id, or deterministic id alone is not proof. Rules
+ * require a pre-existing same-UID letterhead parent and the deterministic
+ * mirror path.
+ *
+ * Historical two-slot production contract and the unadopted one-slot
+ * proposal are retained below as historical evidence only.
  */
 
-export const LETTERHEAD_MIRROR_POLICY_STATUS = "unresolved" as const;
+import { stableRecordId } from "@/services/records/stableRecordId";
 
-/** Production must keep both creates billable until a single-slot policy is accepted. */
-export const LETTERHEAD_MIRROR_QUOTA_EXEMPTION_ADOPTED = false;
+import {
+  LETTERHEAD_COMMERCIAL_POLICY_ID,
+  LETTERHEAD_COMMERCIAL_POLICY_STATUS,
+  letterheadCreatesConsumeOrdinaryQuota,
+} from "./letterheadAccessPolicy";
 
-export const LETTERHEAD_FULL_FLOW_BILLABLE_SLOTS = 2;
+export const LETTERHEAD_MIRROR_POLICY_STATUS = LETTERHEAD_COMMERCIAL_POLICY_STATUS;
+export const LETTERHEAD_ZERO_QUOTA_ADOPTED = true;
+export const LETTERHEAD_FULL_FLOW_BILLABLE_SLOTS = 0;
+export const LETTERHEAD_HISTORICAL_REFUND_AUTHORIZED = false;
+export const LETTERHEAD_PRODUCTION_BACKFILL_AUTHORIZED = false;
 
-/**
- * Exact mirror path the proposal would require. Not implemented.
- * Parent id is `stableRecordId(letterheadClientRecordId, "lhd")` today;
- * the diary create currently uses a caller-supplied `diaryClientId`, which
- * is not the same as a trusted same-UID deterministic mirror path.
- */
-export const LETTERHEAD_SINGLE_SLOT_MIRROR_PATH = {
+/** @deprecated Name kept so callers see the one-slot proposal was not adopted. Zero-quota is the adopted rule. */
+export const LETTERHEAD_MIRROR_QUOTA_EXEMPTION_ADOPTED = true;
+
+export const LETTERHEAD_MIRROR_ENTRY_TYPE = "letterhead_matter" as const;
+export const LETTERHEAD_MIRROR_SOURCE = "letterhead" as const;
+export const LETTERHEAD_MIRROR_ID_SUFFIX = ":matter" as const;
+
+export const LETTERHEAD_MIRROR_PATH = {
   parentCollection: "letterheadDocs",
   parentIdRule: 'stableRecordId(letterheadClientRecordId, "lhd")',
   mirrorCollection: "entries",
@@ -32,64 +43,135 @@ export const LETTERHEAD_SINGLE_SLOT_MIRROR_PATH = {
   firestorePath: "users/{uid}/entries/{deterministicMirrorId}",
 } as const;
 
+export function letterheadMirrorRecordId(parentId: string): string {
+  const trimmed = parentId.trim();
+  if (!trimmed) {
+    throw new TypeError("letterhead parent id is required");
+  }
+  return stableRecordId(`${trimmed}${LETTERHEAD_MIRROR_ID_SUFFIX}`, "en");
+}
+
+export function letterheadParentIdFromMirrorRecordId(recordId: string): string | null {
+  const suffix = LETTERHEAD_MIRROR_ID_SUFFIX;
+  if (!recordId.endsWith(suffix)) return null;
+  const parentId = recordId.slice(0, -suffix.length);
+  return parentId.length > 0 ? parentId : null;
+}
+
+export function letterheadParentIdFromPayload(payload: unknown): string | null {
+  if (payload == null || typeof payload !== "object") return null;
+  const parentId = (payload as { letterheadDocumentId?: unknown }).letterheadDocumentId;
+  if (typeof parentId !== "string") return null;
+  const trimmed = parentId.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+export function isValidatedLetterheadMirrorInput(
+  input: {
+    entryType: string;
+    source?: string | null;
+    payload: unknown;
+  },
+  recordId: string
+): boolean {
+  if (input.entryType !== LETTERHEAD_MIRROR_ENTRY_TYPE) return false;
+  if ((input.source ?? "composer") !== LETTERHEAD_MIRROR_SOURCE) return false;
+  const parentId = letterheadParentIdFromPayload(input.payload);
+  if (!parentId) return false;
+  return recordId === letterheadMirrorRecordId(parentId) && parentId !== recordId;
+}
+
+export function isLegacyLetterheadMirrorForParent(
+  entry: {
+    entryType?: string;
+    source?: string | null;
+    payload?: unknown;
+  },
+  parentId: string
+): boolean {
+  if (entry.entryType !== LETTERHEAD_MIRROR_ENTRY_TYPE) return false;
+  if (entry.source !== LETTERHEAD_MIRROR_SOURCE) return false;
+  return letterheadParentIdFromPayload(entry.payload) === parentId;
+}
+
+export const LETTERHEAD_ADOPTED_MIRROR_POLICY = {
+  status: LETTERHEAD_MIRROR_POLICY_STATUS,
+  policyId: LETTERHEAD_COMMERCIAL_POLICY_ID,
+  adopted: true,
+  billableSlots: LETTERHEAD_FULL_FLOW_BILLABLE_SLOTS,
+  consumesOrdinaryQuota: letterheadCreatesConsumeOrdinaryQuota(),
+  parentCollection: "letterheadDocs",
+  mirrorCollection: "entries",
+  mirrorEntryType: LETTERHEAD_MIRROR_ENTRY_TYPE,
+  mirrorPath: LETTERHEAD_MIRROR_PATH,
+  parentRelationship: {
+    sameUidRequired: true,
+    deterministicIdInsufficient: true,
+    parentMustExistBeforeMirrorBatch: true,
+    parentMustExistInSameUid: true,
+    authoritativeLinkage:
+      "server-validated parent document exists before the mirror CREATE, parent.userId == request.auth.uid, mirror id == parentId + ':matter', and mirror.payload.letterheadDocumentId == parent id",
+    clientProvidedParentId: "insufficient",
+    clientEntryType: "insufficient",
+    clientExemptionFlag: "denied",
+  },
+  restrictions: {
+    arbitraryDiaryContent: "denied_on_quota_free_path",
+    secondMirrorForSameParent: "denied_at_deterministic_path; legacy arbitrary-id mirrors are left in place and not converted",
+    conversionToArbitraryDiary: "denied",
+    quotaExemptFlagOnClient: "denied",
+  },
+  deletion: {
+    parentDeletedMirrorRemains: "orphan remains; no auto-delete; no quota refund",
+    mirrorDeletedParentRemains: "parent remains; recreate mirror only at the deterministic path if the parent still exists",
+    recreateParentAfterDelete: "new parent is a new letterhead CREATE; must not reuse a prior mirror as exemption proof",
+  },
+  existingArbitraryIdMirrors: {
+    treatment: "preserved; no silent conversion; no production backfill; not a second quota-free create path",
+    interruptedMigration: "leave existing documents; do not half-apply a new id",
+  },
+  rulesAccessBudget: {
+    letterheadCreateGets: "isActiveUser get(users/uid)",
+    mirrorCreateGets: "isActiveUser get(users/uid) + get(letterheadDocs/parentId)",
+    measured: true,
+  },
+  historicalQuotaRefund: LETTERHEAD_HISTORICAL_REFUND_AUTHORIZED,
+  productionBackfill: LETTERHEAD_PRODUCTION_BACKFILL_AUTHORIZED,
+} as const;
+
+/** Historical Option-C contract: both documents consumed quota. Superseded. */
+export const LETTERHEAD_HISTORICAL_TWO_SLOT_CONTRACT = {
+  status: "superseded",
+  billableSlots: 2,
+  note: "letterheadDocs CREATE and the automatic diary mirror were separately billable",
+} as const;
+
+/**
+ * Unadopted one-slot proposal. Retained as historical evidence. Round 15
+ * did not adopt parent-consumes-one / mirror-exempt.
+ */
+export const LETTERHEAD_SINGLE_SLOT_MIRROR_PATH = LETTERHEAD_MIRROR_PATH;
+
 export type LetterheadSingleSlotProposal = {
-  status: "proposal_only";
+  status: "unadopted_superseded";
   adopted: false;
   consumingDocument: "letterheadDocs";
   parentConsumesOneSlot: true;
   mirrorCollection: "entries";
   mirrorEntryType: "letterhead_matter";
-  mirrorPath: typeof LETTERHEAD_SINGLE_SLOT_MIRROR_PATH;
+  mirrorPath: typeof LETTERHEAD_MIRROR_PATH;
   parentRelationship: {
     sameUidRequired: true;
-    /** Deterministic id is necessary but not sufficient. */
     deterministicIdInsufficient: true;
     parentMustExistInSameUid: true;
-    authoritativeLinkage:
-      "server-validated parent document exists, parent.userId == request.auth.uid, and mirror.payload.letterheadDocumentId == parent.id";
+    authoritativeLinkage: string;
     clientProvidedParentId: "denied";
-  };
-  allowedMirrorFields: readonly [
-    "entryType",
-    "title",
-    "entryDate",
-    "source",
-    "payload.letterheadDocumentId",
-    "payload.subject",
-    "payload.reference",
-    "payload.body",
-    "payload.closing",
-    "payload.signerName",
-    "payload.designation",
-    "payload.place",
-    "location",
-  ];
-  restrictions: {
-    arbitraryDiaryContent: "denied";
-    secondMirrorForSameParent: "denied";
-    conversionToArbitraryDiary: "denied";
-    quotaExemptFlagOnClient: "denied";
-  };
-  deletion: {
-    parentDeletedMirrorRemains: "orphan remains billable; no auto-delete; no quota refund";
-    mirrorDeletedParentRemains: "parent remains the consuming document; recreate mirror only if parent still exists and no other mirror exists";
-    recreateParentAfterDelete: "new parent is a new billable CREATE; must not reuse a prior mirror as exemption proof";
-  };
-  existingArbitraryIdMirrors: {
-    treatment: "remain two-slot billable; no silent conversion; no production backfill";
-    interruptedMigration: "leave both documents billable; do not half-apply exemption";
-  };
-  rulesAccessBudget: {
-    currentOptionCCreateReads: "status + usageCurrent + record + optional serial counter";
-    proposedExtraReads:
-      "parent GET + same-UID parent.userId check + mirror uniqueness GET at deterministic path (must be measured before adoption; not assumed free)";
-    measured: false;
   };
   historicalQuotaRefund: false;
 };
 
 export const LETTERHEAD_SINGLE_SLOT_PROPOSAL: LetterheadSingleSlotProposal = {
-  status: "proposal_only",
+  status: "unadopted_superseded",
   adopted: false,
   consumingDocument: "letterheadDocs",
   parentConsumesOneSlot: true,
@@ -103,44 +185,6 @@ export const LETTERHEAD_SINGLE_SLOT_PROPOSAL: LetterheadSingleSlotProposal = {
     authoritativeLinkage:
       "server-validated parent document exists, parent.userId == request.auth.uid, and mirror.payload.letterheadDocumentId == parent.id",
     clientProvidedParentId: "denied",
-  },
-  allowedMirrorFields: [
-    "entryType",
-    "title",
-    "entryDate",
-    "source",
-    "payload.letterheadDocumentId",
-    "payload.subject",
-    "payload.reference",
-    "payload.body",
-    "payload.closing",
-    "payload.signerName",
-    "payload.designation",
-    "payload.place",
-    "location",
-  ],
-  restrictions: {
-    arbitraryDiaryContent: "denied",
-    secondMirrorForSameParent: "denied",
-    conversionToArbitraryDiary: "denied",
-    quotaExemptFlagOnClient: "denied",
-  },
-  deletion: {
-    parentDeletedMirrorRemains: "orphan remains billable; no auto-delete; no quota refund",
-    mirrorDeletedParentRemains:
-      "parent remains the consuming document; recreate mirror only if parent still exists and no other mirror exists",
-    recreateParentAfterDelete:
-      "new parent is a new billable CREATE; must not reuse a prior mirror as exemption proof",
-  },
-  existingArbitraryIdMirrors: {
-    treatment: "remain two-slot billable; no silent conversion; no production backfill",
-    interruptedMigration: "leave both documents billable; do not half-apply exemption",
-  },
-  rulesAccessBudget: {
-    currentOptionCCreateReads: "status + usageCurrent + record + optional serial counter",
-    proposedExtraReads:
-      "parent GET + same-UID parent.userId check + mirror uniqueness GET at deterministic path (must be measured before adoption; not assumed free)",
-    measured: false,
   },
   historicalQuotaRefund: false,
 };

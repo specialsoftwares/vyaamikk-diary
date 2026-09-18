@@ -111,16 +111,4 @@ assert.equal(diaryInc.lastRecordCollection, "entries");
 assert.equal(diaryInc.lastRecordId, "en-1");
 assert.equal(diaryInc.recordsThisMonth, 5);
 
-const letterheadInc = nextUsageWrite({
-  existing: valid,
-  monthKey: "2026-09",
-  cap: 25,
-  collection: "letterheadDocs",
-  recordId: "lh-1",
-  updatedAt: 1,
-});
-assert.equal(letterheadInc.lastRecordCollection, "letterheadDocs");
-assert.equal(letterheadInc.lastRecordId, "lh-1");
-assert.equal(letterheadInc.recordsThisMonth, 5);
-
 console.log("usageTransition.test.ts: ok");

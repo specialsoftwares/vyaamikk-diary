@@ -1,4 +1,5 @@
-import type { BusinessEntry } from "@/domain/businessEntry";
+import { AppError } from "@/domain/errors";
+import type { BusinessEntry, LetterheadMatterPayload } from "@/domain/businessEntry";
 import type { UpdateBusinessEntryInput } from "./types";
 import { mergeBusinessEntryUpdate, mergeEntryPdfGeneration } from "./mergeEntryUpdate";
 
@@ -18,11 +19,29 @@ export function buildDiaryUpdateRecord(
   existing: BusinessEntry,
   edit: UpdateBusinessEntryInput
 ): BusinessEntry {
-  let next = mergeBusinessEntryUpdate(existing, edit);
+  const frozen = freezeLetterheadMirrorLinkage(existing, edit);
+  let next = mergeBusinessEntryUpdate(existing, frozen);
   if (edit.pdfUri !== undefined && edit.pdfUri) {
     next = mergeEntryPdfGeneration(next, edit.pdfUri);
   }
   return next;
+}
+
+function freezeLetterheadMirrorLinkage(
+  existing: BusinessEntry,
+  edit: UpdateBusinessEntryInput
+): UpdateBusinessEntryInput {
+  if (existing.entryType !== "letterhead_matter") return edit;
+  if (edit.payload === undefined) return edit;
+  const current = existing.payload as LetterheadMatterPayload;
+  const next = edit.payload as LetterheadMatterPayload;
+  if (next.letterheadDocumentId === current.letterheadDocumentId) return edit;
+  throw new AppError(
+    "permission_denied",
+    "Letterhead diary link cannot be changed.",
+    undefined,
+    { reason: "letterhead_mirror_conversion_denied" }
+  );
 }
 
 /**

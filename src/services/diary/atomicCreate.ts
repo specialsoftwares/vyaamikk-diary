@@ -1,4 +1,4 @@
-import type { Firestore } from "firebase/firestore";
+import { doc, type Firestore, type Transaction } from "firebase/firestore";
 
 import { AppError } from "@/domain/errors";
 import type { BusinessEntry } from "@/domain/businessEntry";
@@ -10,6 +10,10 @@ import {
 } from "@/billing/optionC/atomicBillableCreate";
 import { stableRecordId } from "@/services/records/stableRecordId";
 import { createInitialDocumentHistory } from "@/services/documentHistory/core";
+import {
+  isValidatedLetterheadMirrorInput,
+  letterheadParentIdFromPayload,
+} from "@/services/letterhead/letterheadMirrorPolicy";
 import { normaliseBusinessEntry } from "./normalize";
 import type { CreateBusinessEntryInput } from "./types";
 
@@ -106,6 +110,17 @@ export async function createEntryAtomicDetailed(
 ) {
   if (!userId) throw new AppError("permission_denied", "Not signed in.");
   const monthKey = istMonthKeyForMillis(nowMs);
+  const mirrorShaped = input.entryType === "letterhead_matter";
+  const validatedMirror = isValidatedLetterheadMirrorInput(input, recordId);
+  if (mirrorShaped && !validatedMirror) {
+    throw new AppError(
+      "permission_denied",
+      "Letterhead diary link is not valid.",
+      undefined,
+      { reason: "letterhead_mirror_unvalidated" }
+    );
+  }
+  const parentId = validatedMirror ? letterheadParentIdFromPayload(input.payload) : null;
   return runAtomicBillableCreate({
     db,
     userId,
@@ -113,6 +128,7 @@ export async function createEntryAtomicDetailed(
     recordId,
     nowMs,
     monthKey,
+    quotaConsumption: validatedMirror ? "none" : "required",
     parseExisting: (id, data) => {
       const existing = entryFromFirestoreDoc(id, data);
       if (!existing) {
@@ -124,6 +140,34 @@ export async function createEntryAtomicDetailed(
       const record = buildNewDiaryEntry(userId, recordId, input, nowMs);
       return { record, payload: diaryEntryToCloudPayload(record) };
     },
-    hooks,
+    hooks: {
+      ...hooks,
+      extraReads: async (tx: Transaction) => {
+        if (validatedMirror && parentId) {
+          await assertSameUserLetterheadParent(tx, db, userId, parentId);
+        }
+        await hooks?.extraReads?.(tx);
+      },
+    },
   });
+}
+
+async function assertSameUserLetterheadParent(
+  tx: Transaction,
+  db: Firestore,
+  userId: string,
+  parentId: string
+): Promise<void> {
+  const parentSnap = await tx.get(doc(db, "users", userId, "letterheadDocs", parentId));
+  if (!parentSnap.exists()) {
+    throw new AppError("permission_denied", "Letterhead diary link is not valid.", undefined, {
+      reason: "letterhead_parent_missing",
+    });
+  }
+  const parentUid = (parentSnap.data() as { userId?: unknown }).userId;
+  if (parentUid !== userId) {
+    throw new AppError("permission_denied", "Letterhead diary link is not valid.", undefined, {
+      reason: "letterhead_parent_user_mismatch",
+    });
+  }
 }

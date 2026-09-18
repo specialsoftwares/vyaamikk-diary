@@ -2,12 +2,14 @@ import { AppError } from "@/domain/errors";
 import { isIstMonthKeyShape } from "@/billing/istMonthKey";
 import { UNLIMITED_MONTHLY_RECORD_CAP } from "@/subscription/monthlyRecordCap";
 
-export type BillableRecordCollection =
+export type QuotaLinkedRecordCollection =
   | "purchaseOrders"
   | "customerCreditRecords"
   | "professionalPacks"
-  | "entries"
-  | "letterheadDocs";
+  | "entries";
+
+/** Historical usage docs may still name letterheadDocs. New writes must not. */
+export type BillableRecordCollection = QuotaLinkedRecordCollection | "letterheadDocs";
 
 export interface UsageCurrentSnapshot {
   monthKey: string;
@@ -19,7 +21,7 @@ export interface UsageCurrentSnapshot {
 export interface UsageCurrentWrite {
   monthKey: string;
   recordsThisMonth: number;
-  lastRecordCollection: BillableRecordCollection;
+  lastRecordCollection: QuotaLinkedRecordCollection;
   lastRecordId: string;
   updatedAt: number;
 }
@@ -65,7 +67,7 @@ export function nextUsageWrite(params: {
   existing: UsageCurrentSnapshot | null;
   monthKey: string;
   cap: number;
-  collection: BillableRecordCollection;
+  collection: QuotaLinkedRecordCollection;
   recordId: string;
   updatedAt: number;
 }): UsageCurrentWrite {

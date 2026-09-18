@@ -5,6 +5,10 @@ import { dayKey } from "@/utils/date";
 import { autoEntryTitle } from "@/utils/businessEntry/display";
 import { getDiaryRepository } from "@/services/diary";
 import { getLetterheadDocumentRepository } from "@/services/letterhead/documentRepository";
+import {
+  isLegacyLetterheadMirrorForParent,
+  letterheadMirrorRecordId,
+} from "@/services/letterhead/letterheadMirrorPolicy";
 import type {
   LetterheadConfig,
   LetterheadDocument,
@@ -211,8 +215,20 @@ export async function saveLetterheadCreateWithPdf(
           location = manualLoc;
         }
         const reference = params.docInput.reference?.trim() || null;
-        await getDiaryRepository().create(userId, {
-          clientRecordId: params.diaryClientId,
+        const diaryRepo = getDiaryRepository();
+        const mirrorId = letterheadMirrorRecordId(doc.id);
+        const existingMirror = await diaryRepo.getById(userId, mirrorId);
+        if (existingMirror && isLegacyLetterheadMirrorForParent(existingMirror, doc.id)) {
+          return existingMirror;
+        }
+        if (params.diaryClientId && params.diaryClientId !== mirrorId) {
+          const legacy = await diaryRepo.getById(userId, params.diaryClientId);
+          if (legacy && isLegacyLetterheadMirrorForParent(legacy, doc.id)) {
+            return legacy;
+          }
+        }
+        await diaryRepo.create(userId, {
+          clientRecordId: mirrorId,
           ueid: params.user.ueid,
           entryType: "letterhead_matter",
           title:
