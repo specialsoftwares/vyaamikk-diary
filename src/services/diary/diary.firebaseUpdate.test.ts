@@ -127,6 +127,56 @@ async function main() {
   assert.equal(cancels, 0);
   assert.equal(txRuns, 1);
 
+  const mirror: BusinessEntry = {
+    ...entry(),
+    id: "lh_flow:matter",
+    entryType: "letterhead_matter",
+    source: "letterhead",
+    notes: null,
+    reminder: null,
+    payload: {
+      letterheadDocumentId: "lh_flow",
+      subject: "Subject",
+      reference: null,
+      body: "Body of the letter.",
+      closing: "Yours",
+      signerName: "Owner",
+      designation: "Proprietor",
+      place: "Delhi",
+    },
+  };
+  const titled = buildDiaryUpdateRecord(mirror, { id: mirror.id, title: "Edited letter" });
+  assert.equal(titled.title, "Edited letter");
+  const bodyEdit = buildDiaryUpdateRecord(mirror, {
+    id: mirror.id,
+    payload: { ...mirror.payload, body: "Revised letter text" },
+  });
+  assert.equal((bodyEdit.payload as { body: string }).body, "Revised letter text");
+  assert.throws(
+    () =>
+      buildDiaryUpdateRecord(mirror, {
+        id: mirror.id,
+        reminder: { at: 1_800_000_000_000, note: "follow", notificationId: "n2" },
+      }),
+    (e: unknown) => e instanceof AppError && e.details?.reason === "letterhead_mirror_conversion_denied"
+  );
+  assert.throws(
+    () =>
+      buildDiaryUpdateRecord(mirror, {
+        id: mirror.id,
+        payload: { ...mirror.payload, letterheadDocumentId: "other" },
+      }),
+    (e: unknown) => e instanceof AppError && e.details?.reason === "letterhead_mirror_conversion_denied"
+  );
+  assert.throws(
+    () =>
+      buildDiaryUpdateRecord(mirror, {
+        id: mirror.id,
+        payload: { ...mirror.payload, workDone: "nope" } as never,
+      }),
+    (e: unknown) => e instanceof AppError && e.details?.reason === "letterhead_mirror_conversion_denied"
+  );
+
   console.log("diary.firebaseUpdate.test.ts: ok (fake transaction boundary)");
 }
 

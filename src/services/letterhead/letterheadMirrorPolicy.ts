@@ -58,6 +58,21 @@ export function letterheadParentIdFromMirrorRecordId(recordId: string): string |
   return parentId.length > 0 ? parentId : null;
 }
 
+export const LETTERHEAD_MIRROR_PAYLOAD_KEYS = [
+  "letterheadDocumentId",
+  "subject",
+  "reference",
+  "body",
+  "closing",
+  "signerName",
+  "designation",
+  "place",
+] as const;
+
+export type LetterheadMirrorPayloadKey = (typeof LETTERHEAD_MIRROR_PAYLOAD_KEYS)[number];
+
+const LETTERHEAD_MIRROR_PAYLOAD_KEY_SET = new Set<string>(LETTERHEAD_MIRROR_PAYLOAD_KEYS);
+
 export function letterheadParentIdFromPayload(payload: unknown): string | null {
   if (payload == null || typeof payload !== "object") return null;
   const parentId = (payload as { letterheadDocumentId?: unknown }).letterheadDocumentId;
@@ -66,19 +81,71 @@ export function letterheadParentIdFromPayload(payload: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+export function isSupportedLetterheadMirrorPayload(payload: unknown): boolean {
+  if (payload == null || typeof payload !== "object" || Array.isArray(payload)) return false;
+  const keys = Object.keys(payload as Record<string, unknown>);
+  if (keys.some((key) => !LETTERHEAD_MIRROR_PAYLOAD_KEY_SET.has(key))) return false;
+  return letterheadParentIdFromPayload(payload) != null;
+}
+
+export function isSupportedLetterheadParentData(data: Record<string, unknown> | undefined | null): boolean {
+  if (!data) return false;
+  if (typeof data.userId !== "string" || data.userId.trim().length === 0) return false;
+  if (typeof data.title !== "string" || data.title.trim().length === 0) return false;
+  const input = data.input;
+  return input != null && typeof input === "object" && !Array.isArray(input);
+}
+
+function isAbsentOrNull(value: unknown): boolean {
+  return value == null;
+}
+
+export function isSupportedLetterheadMirrorCreateShape(input: {
+  notes?: unknown;
+  reminder?: unknown;
+  attachments?: unknown;
+  payload: unknown;
+}): boolean {
+  if (!isAbsentOrNull(input.notes)) return false;
+  if (!isAbsentOrNull(input.reminder)) return false;
+  if (Array.isArray(input.attachments) && input.attachments.length > 0) return false;
+  return isSupportedLetterheadMirrorPayload(input.payload);
+}
+
+/** Deterministic new-create exemption. Legacy arbitrary IDs are not proof. */
 export function isValidatedLetterheadMirrorInput(
   input: {
     entryType: string;
     source?: string | null;
+    notes?: unknown;
+    reminder?: unknown;
+    attachments?: unknown;
     payload: unknown;
   },
   recordId: string
 ): boolean {
   if (input.entryType !== LETTERHEAD_MIRROR_ENTRY_TYPE) return false;
   if ((input.source ?? "composer") !== LETTERHEAD_MIRROR_SOURCE) return false;
+  if (!isSupportedLetterheadMirrorCreateShape(input)) return false;
   const parentId = letterheadParentIdFromPayload(input.payload);
   if (!parentId) return false;
   return recordId === letterheadMirrorRecordId(parentId) && parentId !== recordId;
+}
+
+/** Existing-record recovery: UID, type, source, and parent linkage. ID may be legacy. */
+export function isLegitimateExistingLetterheadMirror(
+  entry: {
+    userId?: string;
+    entryType?: string;
+    source?: string | null;
+    payload?: unknown;
+  },
+  userId: string
+): boolean {
+  if (entry.userId !== userId) return false;
+  if (entry.entryType !== LETTERHEAD_MIRROR_ENTRY_TYPE) return false;
+  if (entry.source !== LETTERHEAD_MIRROR_SOURCE) return false;
+  return letterheadParentIdFromPayload(entry.payload) != null;
 }
 
 export function isLegacyLetterheadMirrorForParent(
@@ -109,11 +176,14 @@ export const LETTERHEAD_ADOPTED_MIRROR_POLICY = {
     deterministicIdInsufficient: true,
     parentMustExistBeforeMirrorBatch: true,
     parentMustExistInSameUid: true,
+    parentShapeRequired: true,
+    skeletalParentInsufficient: true,
     authoritativeLinkage:
-      "server-validated parent document exists before the mirror CREATE, parent.userId == request.auth.uid, mirror id == parentId + ':matter', and mirror.payload.letterheadDocumentId == parent id",
+      "server-validated parent document exists before the mirror CREATE, parent.userId == request.auth.uid, parent has title+input, mirror id == parentId + ':matter', and mirror.payload.letterheadDocumentId == parent id",
     clientProvidedParentId: "insufficient",
     clientEntryType: "insufficient",
     clientExemptionFlag: "denied",
+    supportedPayloadKeys: LETTERHEAD_MIRROR_PAYLOAD_KEYS,
   },
   restrictions: {
     arbitraryDiaryContent: "denied_on_quota_free_path",
@@ -131,9 +201,10 @@ export const LETTERHEAD_ADOPTED_MIRROR_POLICY = {
     interruptedMigration: "leave existing documents; do not half-apply a new id",
   },
   rulesAccessBudget: {
-    letterheadCreateGets: "isActiveUser get(users/uid)",
-    mirrorCreateGets: "isActiveUser get(users/uid) + get(letterheadDocs/parentId)",
-    measured: true,
+    letterheadCreateGets: "static source estimate: isActiveUser get(users/uid)",
+    mirrorCreateGets: "static source estimate: isActiveUser get(users/uid) + get(letterheadDocs/parentId)",
+    estimateMethod: "static_source_count",
+    measuredAtRuntime: false,
   },
   historicalQuotaRefund: LETTERHEAD_HISTORICAL_REFUND_AUTHORIZED,
   productionBackfill: LETTERHEAD_PRODUCTION_BACKFILL_AUTHORIZED,

@@ -2,6 +2,7 @@ import { AppError } from "@/domain/errors";
 import type { BusinessEntry, LetterheadMatterPayload } from "@/domain/businessEntry";
 import type { UpdateBusinessEntryInput } from "./types";
 import { mergeBusinessEntryUpdate, mergeEntryPdfGeneration } from "./mergeEntryUpdate";
+import { LETTERHEAD_MIRROR_PAYLOAD_KEYS } from "@/services/letterhead/letterheadMirrorPolicy";
 
 export function reminderCancelIdAfterUpdate(
   existing: BusinessEntry,
@@ -27,21 +28,42 @@ export function buildDiaryUpdateRecord(
   return next;
 }
 
-function freezeLetterheadMirrorLinkage(
-  existing: BusinessEntry,
-  edit: UpdateBusinessEntryInput
-): UpdateBusinessEntryInput {
-  if (existing.entryType !== "letterhead_matter") return edit;
-  if (edit.payload === undefined) return edit;
-  const current = existing.payload as LetterheadMatterPayload;
-  const next = edit.payload as LetterheadMatterPayload;
-  if (next.letterheadDocumentId === current.letterheadDocumentId) return edit;
+function denyMirrorConversion(): never {
   throw new AppError(
     "permission_denied",
     "Letterhead diary link cannot be changed.",
     undefined,
     { reason: "letterhead_mirror_conversion_denied" }
   );
+}
+
+function freezeLetterheadMirrorLinkage(
+  existing: BusinessEntry,
+  edit: UpdateBusinessEntryInput
+): UpdateBusinessEntryInput {
+  if (existing.entryType !== "letterhead_matter") return edit;
+  if (existing.source !== "letterhead") return edit;
+  if (edit.reminder && existing.reminder == null) denyMirrorConversion();
+  if (typeof edit.notes === "string" && edit.notes.trim() && existing.notes == null) {
+    denyMirrorConversion();
+  }
+  if (
+    Array.isArray(edit.attachments) &&
+    edit.attachments.length > (existing.attachments?.length ?? 0)
+  ) {
+    denyMirrorConversion();
+  }
+  if (edit.payload === undefined) return edit;
+  const current = existing.payload as LetterheadMatterPayload;
+  const next = edit.payload as LetterheadMatterPayload & Record<string, unknown>;
+  if (next.letterheadDocumentId !== current.letterheadDocumentId) denyMirrorConversion();
+  const extraKeys = Object.keys(next).filter(
+    (key) =>
+      !(key in (current as object)) &&
+      !(LETTERHEAD_MIRROR_PAYLOAD_KEYS as readonly string[]).includes(key)
+  );
+  if (extraKeys.length > 0) denyMirrorConversion();
+  return edit;
 }
 
 /**

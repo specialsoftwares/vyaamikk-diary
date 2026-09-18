@@ -940,6 +940,10 @@ async function main() {
     path.join(import.meta.dirname, "../diary/saveComposerEntry.ts"),
     "utf8"
   );
+  const letterheadSaveSrc = fs.readFileSync(
+    path.join(import.meta.dirname, "../letterhead/saveWithPdf.ts"),
+    "utf8"
+  );
   assert.equal(composerSrc.includes("session,"), true);
   assert.equal(composerSrc.includes("issuesRemoteWork: false"), true);
   assert.equal(composerSrc.includes("SAVE_STEP.INSIGHTS_INDEXED"), true);
@@ -954,6 +958,19 @@ async function main() {
     "original session must be rechecked after the awaited insight import"
   );
   assert.equal(composerSrc.includes("completeCoordinatedSave"), true);
+  assert.equal(letterheadSaveSrc.includes("captureAdmissionToken"), true);
+  assert.equal(letterheadSaveSrc.includes("session,"), true);
+  assert.equal(letterheadSaveSrc.includes("issuesRemoteWork: false"), true);
+  const locStart = letterheadSaveSrc.indexOf("locationFootprintCapture");
+  assert.ok(locStart >= 0, "letterhead diary callback awaits location import");
+  const locSlice = letterheadSaveSrc.slice(locStart, locStart + 500);
+  assert.ok(
+    locSlice.includes("mayIssueRemoteWork(session, userId)"),
+    "original session must be rechecked after the awaited location import"
+  );
+  const pdfImportAt = letterheadSaveSrc.indexOf('await import("@/services/pdf/pdfService")');
+  assert.ok(pdfImportAt >= 0, "letterhead generate awaits pdfService import");
+  assert.equal(letterheadSaveSrc.includes("completeCoordinatedSave"), true);
 
   console.log("coordinationOwnership.test.ts: ok");
 }

@@ -1050,6 +1050,7 @@ async function main() {
       setDoc(doc(authedDb("g-unlinked"), "users", "g-unlinked", "letterheadDocs", "lh1"), {
         userId: "g-unlinked",
         title: "T",
+        input: { title: "T", date: Date.now(), subject: "S", body: "B", closing: "C", name: "N", designation: "D", place: "P" },
         createdAt: Date.now(),
       })
     );
@@ -1536,7 +1537,21 @@ async function main() {
       quotaConsumption: "none",
       parseExisting: (id, data) => data as never,
       buildNew: () => {
-        const record = { id: "lh_wrong_month", userId: "g-lh-month" };
+        const record = {
+          id: "lh_wrong_month",
+          userId: "g-lh-month",
+          title: "Month-key unused",
+          input: {
+            title: "Month-key unused",
+            date: Date.now(),
+            subject: "S",
+            body: "B",
+            closing: "C",
+            name: "N",
+            designation: "D",
+            place: "P",
+          },
+        };
         return { record, payload: record };
       },
     });

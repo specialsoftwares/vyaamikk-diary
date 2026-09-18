@@ -641,6 +641,16 @@ async function main() {
       setDoc(doc(qlh(), "users", "quota-lh", "letterheadDocs", "lh-bare"), {
         userId: "quota-lh",
         title: "Bare letter",
+        input: {
+          title: "Bare letter",
+          date: Date.now(),
+          subject: "Subject",
+          body: "Body",
+          closing: "Yours",
+          name: "Owner",
+          designation: "Proprietor",
+          place: "Delhi",
+        },
         createdAt: Date.now(),
       })
     );
@@ -671,6 +681,7 @@ async function main() {
       setDoc(doc(authedDb("quota-lh-off"), "users", "quota-lh-off", "letterheadDocs", "lh-off"), {
         userId: "quota-lh-off",
         title: "Off",
+        input: { title: "Off", date: Date.now(), subject: "S", body: "B", closing: "C", name: "N", designation: "D", place: "P" },
         createdAt: Date.now(),
       })
     );

@@ -277,33 +277,75 @@ service cloud.firestore {
              || coll == 'entries';
     }
 
+    function letterheadSupportedPayloadKeyList() {
+      return [
+        'letterheadDocumentId',
+        'subject',
+        'reference',
+        'body',
+        'closing',
+        'signerName',
+        'designation',
+        'place'
+      ];
+    }
+
+    function isSupportedLetterheadParentShape(parent) {
+      return parent.keys().hasAll(['userId', 'title', 'input'])
+             && parent.userId is string
+             && parent.title is string
+             && parent.title.size() > 0
+             && parent.title.size() <= 200
+             && parent.input is map;
+    }
+
+    function letterheadMirrorPayloadSupported(payload) {
+      return payload.keys().hasOnly(letterheadSupportedPayloadKeyList())
+             && payload.letterheadDocumentId is string
+             && payload.letterheadDocumentId.size() > 0
+             && payload.letterheadDocumentId.size() <= 200;
+    }
+
+    function letterheadMirrorCreateShape() {
+      return request.resource.data.get('notes', null) == null
+             && request.resource.data.get('reminder', null) == null
+             && request.resource.data.get('attachments', []).size() == 0
+             && letterheadMirrorPayloadSupported(request.resource.data.get('payload', {}));
+    }
+
     function letterheadMirrorParentId() {
       return request.resource.data.get('payload', {}).get('letterheadDocumentId', '');
     }
 
-    // Genuine same-UID parent must already exist. A client entryType, parent
-    // id, exemption flag, or deterministic id alone is not sufficient.
+    // Genuine same-UID parent must already exist with the supported parent
+    // shape. A client entryType, parent id, exemption flag, deterministic
+    // id, or skeletal {userId} parent is not sufficient.
     function isValidatedLetterheadMirrorCreate(uid, entryId) {
       let parentId = letterheadMirrorParentId();
+      let parent = get(/databases/$(database)/documents/users/$(uid)/letterheadDocs/$(parentId)).data;
       return request.resource.data.entryType == 'letterhead_matter'
              && request.resource.data.get('source', '') == 'letterhead'
              && request.resource.data.userId == uid
+             && letterheadMirrorCreateShape()
              && parentId is string
              && parentId.size() > 0
              && parentId.size() <= 200
              && entryId == parentId + ':matter'
-             && get(/databases/$(database)/documents/users/$(uid)/letterheadDocs/$(parentId)).data.get('userId', '') == uid;
+             && isSupportedLetterheadParentShape(parent)
+             && parent.userId == uid;
     }
 
     function afterEntryIsValidatedLetterheadMirror(uid, entryId) {
       let after = getAfter(/databases/$(database)/documents/users/$(uid)/entries/$(entryId)).data;
       let parentId = after.get('payload', {}).get('letterheadDocumentId', '');
+      let parent = get(/databases/$(database)/documents/users/$(uid)/letterheadDocs/$(parentId)).data;
       return after.get('entryType', '') == 'letterhead_matter'
              && after.get('source', '') == 'letterhead'
              && parentId is string
              && parentId.size() > 0
              && entryId == parentId + ':matter'
-             && get(/databases/$(database)/documents/users/$(uid)/letterheadDocs/$(parentId)).data.get('userId', '') == uid;
+             && isSupportedLetterheadParentShape(parent)
+             && parent.userId == uid;
     }
 
     function letterheadMirrorLinkagePreserved() {
@@ -313,6 +355,20 @@ service cloud.firestore {
                && request.resource.data.get('source', '') == resource.data.get('source', '')
                && request.resource.data.get('payload', {}).get('letterheadDocumentId', '')
                     == resource.data.get('payload', {}).get('letterheadDocumentId', '')
+               && request.resource.data.get('payload', {})
+                    .diff(resource.data.get('payload', {}))
+                    .addedKeys()
+                    .hasOnly(letterheadSupportedPayloadKeyList())
+               && (
+                 request.resource.data.get('reminder', null) == resource.data.get('reminder', null)
+                 || request.resource.data.get('reminder', null) == null
+               )
+               && (
+                 request.resource.data.get('notes', null) == resource.data.get('notes', null)
+                 || request.resource.data.get('notes', null) == null
+               )
+               && request.resource.data.get('attachments', []).size()
+                    <= resource.data.get('attachments', []).size()
              );
     }
 
@@ -439,7 +495,8 @@ service cloud.firestore {
       match /letterheadDocs/{docId} {
         allow read: if isOwner(uid);
         allow create: if isActiveUser(uid)
-                      && request.resource.data.userId == uid;
+                      && request.resource.data.userId == uid
+                      && isSupportedLetterheadParentShape(request.resource.data);
         allow update: if isActiveUser(uid)
                       && request.resource.data.userId == uid;
         allow delete: if isActiveUser(uid);

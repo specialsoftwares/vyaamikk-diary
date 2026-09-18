@@ -11,6 +11,8 @@ import {
 import { stableRecordId } from "@/services/records/stableRecordId";
 import { createInitialDocumentHistory } from "@/services/documentHistory/core";
 import {
+  isLegitimateExistingLetterheadMirror,
+  isSupportedLetterheadParentData,
   isValidatedLetterheadMirrorInput,
   letterheadParentIdFromPayload,
 } from "@/services/letterhead/letterheadMirrorPolicy";
@@ -112,14 +114,6 @@ export async function createEntryAtomicDetailed(
   const monthKey = istMonthKeyForMillis(nowMs);
   const mirrorShaped = input.entryType === "letterhead_matter";
   const validatedMirror = isValidatedLetterheadMirrorInput(input, recordId);
-  if (mirrorShaped && !validatedMirror) {
-    throw new AppError(
-      "permission_denied",
-      "Letterhead diary link is not valid.",
-      undefined,
-      { reason: "letterhead_mirror_unvalidated" }
-    );
-  }
   const parentId = validatedMirror ? letterheadParentIdFromPayload(input.payload) : null;
   return runAtomicBillableCreate({
     db,
@@ -134,9 +128,25 @@ export async function createEntryAtomicDetailed(
       if (!existing) {
         throw new AppError("save_failed", "Saved diary entry could not be read.");
       }
+      if (mirrorShaped && !isLegitimateExistingLetterheadMirror(existing, userId)) {
+        throw new AppError(
+          "permission_denied",
+          "Letterhead diary link is not valid.",
+          undefined,
+          { reason: "letterhead_mirror_existing_unvalidated" }
+        );
+      }
       return existing;
     },
     buildNew: () => {
+      if (mirrorShaped && !validatedMirror) {
+        throw new AppError(
+          "permission_denied",
+          "Letterhead diary link is not valid.",
+          undefined,
+          { reason: "letterhead_mirror_unvalidated" }
+        );
+      }
       const record = buildNewDiaryEntry(userId, recordId, input, nowMs);
       return { record, payload: diaryEntryToCloudPayload(record) };
     },
@@ -168,6 +178,11 @@ async function assertSameUserLetterheadParent(
   if (parentUid !== userId) {
     throw new AppError("permission_denied", "Letterhead diary link is not valid.", undefined, {
       reason: "letterhead_parent_user_mismatch",
+    });
+  }
+  if (!isSupportedLetterheadParentData(parentSnap.data() as Record<string, unknown>)) {
+    throw new AppError("permission_denied", "Letterhead diary link is not valid.", undefined, {
+      reason: "letterhead_parent_shape_invalid",
     });
   }
 }

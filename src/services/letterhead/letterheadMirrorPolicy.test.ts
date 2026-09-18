@@ -90,6 +90,33 @@ assert.equal(
   false
 );
 assert.equal(
+  isValidatedLetterheadMirrorInput(
+    {
+      entryType: "letterhead_matter",
+      source: "letterhead",
+      payload: { letterheadDocumentId: "lh_flow", workDone: "nope" },
+    },
+    "lh_flow:matter"
+  ),
+  false,
+  "unrelated payload keys are not a supported mirror create"
+);
+assert.equal(
+  isValidatedLetterheadMirrorInput(
+    {
+      entryType: "letterhead_matter",
+      source: "letterhead",
+      notes: "diary note",
+      payload: { letterheadDocumentId: "lh_flow" },
+    },
+    "lh_flow:matter"
+  ),
+  false
+);
+assert.equal(LETTERHEAD_ADOPTED_MIRROR_POLICY.rulesAccessBudget.measuredAtRuntime, false);
+assert.equal(LETTERHEAD_ADOPTED_MIRROR_POLICY.rulesAccessBudget.estimateMethod, "static_source_count");
+assert.equal(LETTERHEAD_ADOPTED_MIRROR_POLICY.parentRelationship.skeletalParentInsufficient, true);
+assert.equal(
   isLegacyLetterheadMirrorForParent(
     {
       entryType: "letterhead_matter",
@@ -107,5 +134,15 @@ assert.equal(saveSrc.includes("letterheadMirrorRecordId"), true);
 assert.equal(saveSrc.includes('entryType: "letterhead_matter"'), true);
 assert.equal(lhSrc.includes('quotaConsumption: "none"'), true);
 assert.equal(diarySrc.includes("isValidatedLetterheadMirrorInput"), true);
+assert.equal(diarySrc.includes("parseExisting"), true);
+assert.equal(diarySrc.includes("letterhead_mirror_unvalidated"), true);
+assert.match(diarySrc, /buildNew:[\s\S]*letterhead_mirror_unvalidated/);
+assert.doesNotMatch(
+  diarySrc.slice(0, diarySrc.indexOf("parseExisting")),
+  /letterhead_mirror_unvalidated/
+);
+assert.equal(saveSrc.includes("captureAdmissionToken"), true);
+assert.equal(saveSrc.includes("issuesRemoteWork: false"), true);
+assert.equal(saveSrc.includes("SAVE_STEP.PDF_URI_SAVED"), true);
 
 console.log("letterheadMirrorPolicy.test.ts: ok (zero-quota adopted; one-slot remains historical)");
