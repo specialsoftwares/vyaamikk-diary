@@ -222,6 +222,7 @@ export function UpgradeSheet({
         >
           <LocaleUiText style={styles.linkText}>{t("billing.upgrade.learnBenefits")}</LocaleUiText>
         </Pressable>
+        <LocaleUiText style={styles.storeNote}>{t("billing.upgrade.letterheadIncluded")}</LocaleUiText>
 
         {shouldShowTrustedByClaim() ? (
           <LocaleUiText style={styles.trustClaim}>{t("billing.upgrade.trustedByClaim")}</LocaleUiText>
@@ -301,7 +302,6 @@ export function UpgradeSheet({
           : null}
 
         <LocaleUiText style={styles.storeNote}>{t("billing.upgrade.storePriceNote")}</LocaleUiText>
-        <LocaleUiText style={styles.storeNote}>{t("billing.upgrade.letterheadIncluded")}</LocaleUiText>
         {trialEligible ? (
           <LocaleUiText style={styles.storeNote}>{t("billing.upgrade.trialNote")}</LocaleUiText>
         ) : null}
