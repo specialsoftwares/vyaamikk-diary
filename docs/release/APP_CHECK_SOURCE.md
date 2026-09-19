@@ -6,12 +6,14 @@ Implemented on the isolated combined candidate. **No Console enforcement, no cal
 
 | SDK | Init | Token coverage |
 | --- | --- | --- |
-| `@react-native-firebase/app-check@^24.1.0` | Attempted after native default app is present (Android Play Integrity, iOS App Attest + DeviceCheck fallback). Optional `getToken` is probed and **not** copied into JS. | Native Phone Auth / native Functions only, once a store binary exists |
+| `@react-native-firebase/app-check@^24.1.0` | Bounded `initializeAppCheck` after native default app is present (Android Play Integrity, iOS App Attest + DeviceCheck fallback). Optional `getToken` is a detached diagnostic and is **not** copied into JS. | Native Phone Auth / native Functions only, once a store binary exists |
 | `firebase/app-check` (JS `firebase@^12`) | Module + CustomProvider/`initializeAppCheck` **API probe only** | **Not initialized** — JS appId is the web app, not the native Android/iOS app |
 
-## App-identity constraint (not a mock failed-proof)
+## App-identity constraint (implementation boundary, not a universal impossibility proof)
 
-`evaluateNativeToJsCustomProvider` records that a native token string is present or absent, then returns `acceptedAsDualSdkCoverage: false`. Production bootstrap **does not** pass `mocked-native-app-check-token`.
+`evaluateNativeToJsCustomProvider` records whether a native token string is present, whether the JS and native app IDs are both non-empty and equal (`appIdentityCompatible`), and always returns `acceptedAsDualSdkCoverage: false`.
+
+That boolean is the **current candidate's decision**: JS `initializeAppCheck` is not called, so a native token is not dual-SDK coverage. A helper hardcoded to `false` is not proof that every native-to-JS bridge is impossible in every product. Production bootstrap **does not** pass `mocked-native-app-check-token`.
 
 Evidence used in source tests (injected SDK/port, not a live Play binary):
 
@@ -19,13 +21,15 @@ Evidence used in source tests (injected SDK/port, not a live Play binary):
 - `initializeAppCheck` is **not** called on the JS app
 - Native iOS reports `appAttest`, never `playIntegrity`
 - Native Android reports `playIntegrity`
-- JS `app.options.appId` (web) is distinct from the native app id; copying `getToken` does not bind JS Firestore/Functions to the native app
+- Injected tests use distinct JS (web) and native app IDs; copying `getToken` would not bind JS Firestore/Functions to the native app when those IDs differ
 
-Viable later path: independently attested JS provider (reCAPTCHA / Enterprise) on the web appId, plus native Play Integrity on the Android app — still two tokens. Do not use production debug tokens. Do not weaken live Play Integrity `NO_INTEGRITY` merely to obtain tokens.
+A later independently attested JS provider (for example reCAPTCHA / Enterprise on a **web** appId) is not an implemented, supported React Native JS runtime path in this candidate. Do not treat browser reCAPTCHA as proven for RN JS without that path and evidence. Do not use production debug tokens. Do not weaken live Play Integrity `NO_INTEGRITY` merely to obtain tokens.
 
 ## Ordering and observability
 
-Startup: native Firebase probe → JS `getFirebaseApp()` → `initializeAppCheckLayer`. Native init probes `getToken(false)` then `getToken(true)` (force-refresh) and does not copy either string into JS. The report is stored (`getLastAppCheckInitReport`) and retained by the coordinator. Failures do not crash startup while enforcement is off.
+Startup: native Firebase probe → JS `getFirebaseApp()` → `initializeAppCheckLayer`, which awaits **bounded native provider initialize only**. Optional `getToken(false)` runs detached after routing is unblocked. Boot does **not** call `getToken(true)`. An explicit `probeNativeAppCheckTokens({ forceRefresh: true })` / `runAppCheckForceRefreshProbe` path exists for diagnostics.
+
+The init report is stored (`getLastAppCheckInitReport`). Late diagnostics cannot replace a newer attempt. Init budget timeout marks native `failed` without waiting forever; hanging initialize is detached. Failures do not crash startup while enforcement is off. Production config/DB failures remain fail-closed.
 
 Production `evaluateProductionConfig` refuses `EXPO_PUBLIC_FIREBASE_APP_CHECK_DEBUG_TOKEN` and `FIREBASE_APP_CHECK_DEBUG_TOKEN`. `eas.json` production/preview must not gain those keys.
 

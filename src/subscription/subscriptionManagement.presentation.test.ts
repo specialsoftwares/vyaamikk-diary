@@ -168,6 +168,8 @@ assert.equal(isKnownGstStateCode("MH"), false);
   );
   assert.match(screen, /notifyManualUpgrade/);
   assert.match(screen, /createSubscriptionManagementRuntime/);
+  assert.match(screen, /maskManagementSnapshot/);
+  assert.match(screen, /liveSession/);
   assert.match(screen, /restorePurchases/);
   assert.match(screen, /saveBillingDetailsClient/);
   assert.match(screen, /isSubscriptionPurchaseEntryEnabled/);

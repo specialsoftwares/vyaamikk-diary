@@ -1,6 +1,7 @@
 /**
- * Session-owned subscription management operations. The screen must use this
- * runtime so delayed reads/saves cannot publish a retired account.
+ * Session-owned subscription management operations. Loading, save, restore
+ * and manage use separate operation identities so one cannot strand another.
+ * Publication checks live auth UID + session generation, not only setOwner.
  */
 
 import type { BillingDetailsSaveResult, UpdateBillingDetailsPayload } from "@/billing/iap/billingDetailsClient";
@@ -34,6 +35,12 @@ export type ManagementPublished = {
   manageError: string | null;
   upgradeError: string | null;
   invoiceReady: boolean;
+  draftDirty: boolean;
+};
+
+export type LiveManagementSession = {
+  authUid: string | null;
+  session: SyncSessionToken | null;
 };
 
 export type ManagementRuntimeDeps = {
@@ -46,11 +53,13 @@ export type ManagementRuntimeDeps = {
   presentUpgrade: (session: SyncSessionToken | null) => QuotaUpsellPresentResult;
   nowMs?: () => number;
   isPurchaseEntryEnabled?: () => boolean;
+  /** Authoritative live session; defaults to the last setOwner token. */
+  liveSession?: () => LiveManagementSession;
 };
 
 const emptyDraft = draftFromDetails(null);
 
-function emptyPublished(ownerKey: string): ManagementPublished {
+export function emptyPublished(ownerKey: string): ManagementPublished {
   return {
     ownerKey,
     usage: null,
@@ -65,12 +74,39 @@ function emptyPublished(ownerKey: string): ManagementPublished {
     manageError: null,
     upgradeError: null,
     invoiceReady: false,
+    draftDirty: false,
   };
+}
+
+export function liveOwnerKey(live: LiveManagementSession): string {
+  if (!live.authUid || !live.session) return "signed_out#0";
+  if (live.authUid !== live.session.uid) return "signed_out#0";
+  return sessionFlushKey(live.session.uid, live.session);
+}
+
+export function maskManagementSnapshot(
+  published: ManagementPublished,
+  live: LiveManagementSession
+): ManagementPublished {
+  const key = liveOwnerKey(live);
+  if (published.ownerKey === key) return published;
+  if (key === "signed_out#0") {
+    return {
+      ...emptyPublished(key),
+      usage: { kind: "unavailable", code: "signed_out" },
+      history: { kind: "unavailable", code: "signed_out" },
+      detailsKind: "unavailable",
+    };
+  }
+  return emptyPublished(key);
 }
 
 export function createSubscriptionManagementRuntime(deps: ManagementRuntimeDeps) {
   let owner: SyncSessionToken | null = null;
-  let opSeq = 0;
+  let loadSeq = 0;
+  let saveSeq = 0;
+  let restoreSeq = 0;
+  let manageSeq = 0;
   let published = emptyPublished("signed_out#0");
   const listeners = new Set<() => void>();
 
@@ -82,14 +118,29 @@ export function createSubscriptionManagementRuntime(deps: ManagementRuntimeDeps)
     return token ? sessionFlushKey(token.uid, token) : "signed_out#0";
   }
 
-  function isLive(token: SyncSessionToken | null, op: number): boolean {
-    if (op !== opSeq) return false;
-    if (!token || !owner) return false;
-    return token.uid === owner.uid && token.generation === owner.generation;
+  function readLive(): LiveManagementSession {
+    if (deps.liveSession) return deps.liveSession();
+    return { authUid: owner?.uid ?? null, session: owner };
+  }
+
+  function isLiveAuthority(admitted: SyncSessionToken): boolean {
+    const live = readLive();
+    if (!live.authUid || !live.session) return false;
+    if (live.authUid !== live.session.uid) return false;
+    if (admitted.uid !== live.session.uid || admitted.generation !== live.session.generation) {
+      return false;
+    }
+    if (!owner || owner.uid !== admitted.uid || owner.generation !== admitted.generation) {
+      return false;
+    }
+    return true;
   }
 
   function retireAndReset(next: SyncSessionToken | null): void {
-    opSeq += 1;
+    loadSeq += 1;
+    saveSeq += 1;
+    restoreSeq += 1;
+    manageSeq += 1;
     owner = next;
     published = emptyPublished(ownerKeyOf(next));
     if (!next) {
@@ -108,14 +159,17 @@ export function createSubscriptionManagementRuntime(deps: ManagementRuntimeDeps)
       retireAndReset(null);
       return;
     }
+    if (!isLiveAuthority(owner)) return;
+    loadSeq += 1;
+    const op = loadSeq;
     const admitted = { uid: owner.uid, generation: owner.generation };
-    opSeq += 1;
-    const op = opSeq;
-    published = {
-      ...published,
-      detailsKind: published.detailsKind === "ready" ? "ready" : "loading",
-    };
-    emit();
+    if (!published.draftDirty) {
+      published = {
+        ...published,
+        detailsKind: published.detailsKind === "ready" ? "ready" : "loading",
+      };
+      emit();
+    }
     void load(admitted, op);
   }
 
@@ -125,7 +179,8 @@ export function createSubscriptionManagementRuntime(deps: ManagementRuntimeDeps)
       deps.readHistory(admitted.uid),
       deps.readDetails(admitted.uid),
     ]);
-    if (!isLive(admitted, op)) return;
+    if (op !== loadSeq) return;
+    if (!isLiveAuthority(admitted)) return;
     let draft = emptyDraft;
     let detailsKind: ManagementPublished["detailsKind"] = "unavailable";
     if (detailsRead.kind === "ok") {
@@ -135,16 +190,19 @@ export function createSubscriptionManagementRuntime(deps: ManagementRuntimeDeps)
       draft = draftFromDetails(null);
       detailsKind = "ready";
     }
+    const keepDraft = published.draftDirty || published.saving;
     published = {
       ...published,
       ownerKey: ownerKeyOf(admitted),
       usage: usageRead,
       history: historyRead,
-      detailsKind,
-      draft,
-      invoiceReady: billingDetailsInvoiceReady(draft),
-      gstinError: null,
-      saveError: null,
+      detailsKind: keepDraft && published.detailsKind === "ready" ? "ready" : detailsKind,
+      draft: keepDraft ? published.draft : draft,
+      invoiceReady: keepDraft
+        ? billingDetailsInvoiceReady(published.draft)
+        : billingDetailsInvoiceReady(draft),
+      gstinError: keepDraft ? published.gstinError : null,
+      saveError: keepDraft ? published.saveError : null,
     };
     emit();
   }
@@ -165,16 +223,17 @@ export function createSubscriptionManagementRuntime(deps: ManagementRuntimeDeps)
       if (prevKey === nextKey) return;
       retireAndReset(next);
       if (next) {
-        const op = opSeq;
+        const op = loadSeq;
         void load(next, op);
       }
     },
     reload,
     setDraft(draft: BillingDetailsDraft): void {
-      if (!owner) return;
+      if (!owner || !isLiveAuthority(owner)) return;
       published = {
         ...published,
         draft,
+        draftDirty: true,
         invoiceReady: billingDetailsInvoiceReady(draft),
         gstinError: null,
       };
@@ -182,9 +241,9 @@ export function createSubscriptionManagementRuntime(deps: ManagementRuntimeDeps)
     },
     async saveDetails(): Promise<void> {
       const admitted = owner ? { uid: owner.uid, generation: owner.generation } : null;
-      if (!admitted) return;
-      opSeq += 1;
-      const op = opSeq;
+      if (!admitted || !isLiveAuthority(admitted)) return;
+      saveSeq += 1;
+      const op = saveSeq;
       const payload = payloadFromDraft(published.draft);
       published = { ...published, saving: true, saveError: null, gstinError: null };
       emit();
@@ -192,7 +251,7 @@ export function createSubscriptionManagementRuntime(deps: ManagementRuntimeDeps)
       try {
         result = await deps.saveDetails(payload);
       } catch {
-        if (!isLive(admitted, op)) return;
+        if (op !== saveSeq || !isLiveAuthority(admitted)) return;
         published = {
           ...published,
           saving: false,
@@ -201,9 +260,10 @@ export function createSubscriptionManagementRuntime(deps: ManagementRuntimeDeps)
         emit();
         return;
       }
-      if (!isLive(admitted, op)) return;
+      if (op !== saveSeq || !isLiveAuthority(admitted)) return;
       published = { ...published, saving: false };
       if (result.kind === "saved") {
+        published = { ...published, draftDirty: false };
         emit();
         reload();
         return;
@@ -222,7 +282,16 @@ export function createSubscriptionManagementRuntime(deps: ManagementRuntimeDeps)
         emit();
         return { ok: false, reason: "purchase_entry_closed", visible: false, clientRecordId: null };
       }
-      if (!owner || !session || session.uid !== owner.uid || session.generation !== owner.generation) {
+      const live = readLive();
+      if (
+        !owner ||
+        !session ||
+        !live.session ||
+        !live.authUid ||
+        live.authUid !== live.session.uid ||
+        session.uid !== live.session.uid ||
+        session.generation !== live.session.generation
+      ) {
         published = { ...published, upgradeError: "session_stale" };
         emit();
         return { ok: false, reason: "session_stale", visible: false, clientRecordId: null };
@@ -233,14 +302,14 @@ export function createSubscriptionManagementRuntime(deps: ManagementRuntimeDeps)
     },
     async restore(): Promise<void> {
       const admitted = owner ? { uid: owner.uid, generation: owner.generation } : null;
-      if (!admitted) return;
-      opSeq += 1;
-      const op = opSeq;
+      if (!admitted || !isLiveAuthority(admitted)) return;
+      restoreSeq += 1;
+      const op = restoreSeq;
       published = { ...published, restoring: true, restoreError: null };
       emit();
       try {
         const result = await deps.restore();
-        if (!isLive(admitted, op)) return;
+        if (op !== restoreSeq || !isLiveAuthority(admitted)) return;
         published = { ...published, restoring: false };
         if (result.kind === "failed") {
           published = { ...published, restoreError: result.message ?? "failed" };
@@ -249,27 +318,27 @@ export function createSubscriptionManagementRuntime(deps: ManagementRuntimeDeps)
         }
         emit();
       } catch {
-        if (!isLive(admitted, op)) return;
+        if (op !== restoreSeq || !isLiveAuthority(admitted)) return;
         published = { ...published, restoring: false, restoreError: "failed" };
         emit();
       }
     },
     async manage(url: string): Promise<void> {
       const admitted = owner ? { uid: owner.uid, generation: owner.generation } : null;
-      if (!admitted) return;
-      opSeq += 1;
-      const op = opSeq;
+      if (!admitted || !isLiveAuthority(admitted)) return;
+      manageSeq += 1;
+      const op = manageSeq;
       published = { ...published, manageError: null };
       emit();
       try {
         const opened = await deps.openUrl(url);
-        if (!isLive(admitted, op)) return;
+        if (op !== manageSeq || !isLiveAuthority(admitted)) return;
         if (opened === false) {
           published = { ...published, manageError: "manage_unavailable" };
           emit();
         }
       } catch {
-        if (!isLive(admitted, op)) return;
+        if (op !== manageSeq || !isLiveAuthority(admitted)) return;
         published = { ...published, manageError: "manage_unavailable" };
         emit();
       }

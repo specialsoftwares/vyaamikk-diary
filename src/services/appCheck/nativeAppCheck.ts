@@ -2,6 +2,9 @@
  * RNFirebase App Check. Must be initialized on the native [DEFAULT] app.
  * Expo Go cannot load this module. Debug provider is forbidden in production.
  * iOS is reported as appAttest, never as Play Integrity.
+ *
+ * Provider initialize is the startup-relevant step. Optional getToken /
+ * force-refresh probes are diagnostics and must not gate routing.
  */
 
 import type { AppCheckInitStatus, AppCheckProviderKind } from "./appCheckTypes";
@@ -11,6 +14,7 @@ export type NativeAppCheckInitResult = {
   provider: AppCheckProviderKind;
   tokenObtained: boolean;
   appId: string | null;
+  probe?: (forceRefresh?: boolean) => Promise<{ tokenObtained: boolean; refreshAttempted: boolean }>;
 };
 
 export type NativeAppCheckPort = {
@@ -20,6 +24,48 @@ export type NativeAppCheckPort = {
   getToken?: (forceRefresh: boolean) => Promise<{ token: string; expireTimeMillis?: number }>;
 };
 
+export type AppCheckClock = {
+  nowMs: () => number;
+  wait: (ms: number) => Promise<void>;
+};
+
+export const DEFAULT_APP_CHECK_INIT_BUDGET_MS = 2000;
+
+export function defaultAppCheckClock(): AppCheckClock {
+  return {
+    nowMs: () => Date.now(),
+    wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  };
+}
+
+export async function raceWithBudget<T>(
+  work: Promise<T>,
+  budgetMs: number,
+  clock: AppCheckClock
+): Promise<{ kind: "done"; value: T } | { kind: "timeout" }> {
+  let settled = false;
+  const guarded = work.then(
+    (value) => {
+      settled = true;
+      return { kind: "done" as const, value };
+    },
+    (err) => {
+      settled = true;
+      throw err;
+    }
+  );
+  const timeout = clock.wait(budgetMs).then(() => {
+    if (settled) return guarded;
+    return { kind: "timeout" as const };
+  });
+  try {
+    return await Promise.race([guarded, timeout]);
+  } catch (err) {
+    if (!settled) void work.catch(() => undefined);
+    throw err;
+  }
+}
+
 function productionProvider(platform: "ios" | "android"): AppCheckProviderKind {
   return platform === "ios" ? "appAttest" : "playIntegrity";
 }
@@ -28,6 +74,8 @@ export async function initializeNativeAppCheck(input: {
   isProduction: boolean;
   debugTokenPresent: boolean;
   port?: NativeAppCheckPort;
+  clock?: AppCheckClock;
+  initBudgetMs?: number;
 }): Promise<NativeAppCheckInitResult> {
   if (input.isProduction && input.debugTokenPresent) {
     return { status: "failed", provider: "debug", tokenObtained: false, appId: null };
@@ -39,28 +87,28 @@ export async function initializeNativeAppCheck(input: {
   }
 
   const provider = input.isProduction ? productionProvider(port.platform) : "debug";
+  const clock = input.clock ?? defaultAppCheckClock();
+  const budget = input.initBudgetMs ?? DEFAULT_APP_CHECK_INIT_BUDGET_MS;
   try {
-    await port.initialize(provider);
-    let tokenObtained = false;
-    if (port.getToken) {
-      try {
-        const token = await port.getToken(false);
-        tokenObtained = typeof token?.token === "string" && token.token.length > 0;
-      } catch {
-        tokenObtained = false;
-      }
-      try {
-        // Force-refresh probe only. The string is never copied into JS App Check.
-        await port.getToken(true);
-      } catch {
-        // Refresh failure does not undo initialize while enforcement is off.
-      }
+    const initWork = port.initialize(provider);
+    const raced = await raceWithBudget(initWork, budget, clock);
+    if (raced.kind === "timeout") {
+      void initWork.catch(() => undefined);
+      return {
+        status: "failed",
+        provider,
+        tokenObtained: false,
+        appId: port.nativeAppId ?? null,
+      };
     }
     return {
       status: "initialized",
       provider,
-      tokenObtained,
+      tokenObtained: false,
       appId: port.nativeAppId ?? null,
+      probe: port.getToken
+        ? (forceRefresh) => probeNativeAppCheckTokens({ port, forceRefresh: forceRefresh === true })
+        : undefined,
     };
   } catch {
     return {
@@ -70,6 +118,32 @@ export async function initializeNativeAppCheck(input: {
       appId: port.nativeAppId ?? null,
     };
   }
+}
+
+/** Explicit diagnostic path. Not a startup prerequisite. Force-refresh is opt-in. */
+export async function probeNativeAppCheckTokens(input: {
+  port: NativeAppCheckPort;
+  forceRefresh?: boolean;
+}): Promise<{ tokenObtained: boolean; refreshAttempted: boolean }> {
+  if (!input.port.getToken) {
+    return { tokenObtained: false, refreshAttempted: false };
+  }
+  let tokenObtained = false;
+  try {
+    const token = await input.port.getToken(false);
+    tokenObtained = typeof token?.token === "string" && token.token.length > 0;
+  } catch {
+    tokenObtained = false;
+  }
+  if (!input.forceRefresh) {
+    return { tokenObtained, refreshAttempted: false };
+  }
+  try {
+    await input.port.getToken(true);
+  } catch {
+    // Refresh failure does not undo initialize while enforcement is off.
+  }
+  return { tokenObtained, refreshAttempted: true };
 }
 
 async function loadProductionPort(): Promise<NativeAppCheckPort | null> {

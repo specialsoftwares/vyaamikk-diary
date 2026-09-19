@@ -38,7 +38,7 @@ import {
   managementPlanNameKey,
   managementQuotaView,
 } from "@/subscription/subscriptionManagementPresentation";
-import { createSubscriptionManagementRuntime } from "@/subscription/subscriptionManagementRuntime";
+import { createSubscriptionManagementRuntime, maskManagementSnapshot } from "@/subscription/subscriptionManagementRuntime";
 import { syncSessionOwnership } from "@/sync/syncSessionOwnership";
 import { spacing, typography, useThemedStyles } from "@/theme";
 
@@ -57,9 +57,16 @@ export function SubscriptionManagementScreen() {
   const iap = useIap();
   const uid = user?.uid ?? null;
   const session = syncSessionOwnership.capture();
+  const liveSession =
+    uid && session && uid === session.uid
+      ? { uid: session.uid, generation: session.generation }
+      : null;
+  const live = { authUid: uid, session: liveSession };
 
   const iapRef = React.useRef(iap);
   iapRef.current = iap;
+  const liveRef = React.useRef(live);
+  liveRef.current = live;
 
   const [runtime] = useState(() =>
     createSubscriptionManagementRuntime({
@@ -70,19 +77,20 @@ export function SubscriptionManagementScreen() {
       restore: () => iapRef.current.restorePurchases(),
       openUrl: (url) => Linking.openURL(url),
       presentUpgrade: notifyManualUpgrade,
+      liveSession: () => liveRef.current,
     })
   );
   const [, setTick] = useState(0);
-  const published = runtime.snapshot();
+  const published = maskManagementSnapshot(runtime.snapshot(), live);
 
   useEffect(() => {
     return runtime.subscribe(() => setTick((n) => n + 1));
   }, [runtime]);
 
   useEffect(() => {
-    runtime.setOwner(uid && session ? { uid: session.uid, generation: session.generation } : null);
+    runtime.setOwner(liveSession);
     // Ownership is UID + generation, not the capture() object identity.
-  }, [runtime, uid, session?.uid, session?.generation]); // eslint-disable-line react-hooks/exhaustive-deps -- session object identity is not the key
+  }, [runtime, liveSession?.uid, liveSession?.generation]); // eslint-disable-line react-hooks/exhaustive-deps -- session object identity is not the key
 
   useEffect(() => {
     const sub = AppState.addEventListener("change", (state) => {

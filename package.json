@@ -112,7 +112,7 @@
     "test:js-auth-bridge": "npx --yes tsx src/services/auth/jsAuthBridge.test.ts",
     "test:env-resolution": "npx --yes tsx src/config/runtimeEnvironment.test.ts",
     "test:env-static-inline": "npx --yes tsx src/config/env.staticInline.test.ts",
-    "test:startup": "npx --yes tsx src/startup/startup.coordinator.test.ts && npx --yes tsx src/startup/startup.envAccess.static.test.ts && npx --yes tsx src/startup/startup.smoke.test.ts",
+    "test:startup": "npx --yes tsx src/startup/startup.coordinator.test.ts && npx --yes tsx src/startup/startup.envAccess.static.test.ts && npx --yes tsx src/startup/startup.smoke.test.ts && npx --yes tsx src/startup/startup.appCheck.barrier.test.ts",
     "test:local-business-date": "npx --yes tsx src/utils/localBusinessDate.test.ts",
     "test:production-mock-otp-isolation": "npx --yes tsx src/services/auth/productionMockOtpIsolation.test.ts",
     "test:js-auth-bridge-readiness": "npx --yes tsx src/services/auth/jsAuthBridgeReadiness.test.ts && npx --yes tsx src/services/auth/jsAuthBridge.test.ts",

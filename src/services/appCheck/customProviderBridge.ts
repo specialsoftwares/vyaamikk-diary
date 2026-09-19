@@ -13,7 +13,7 @@ export type CustomProviderBridgeAttempt = {
   failure: string;
   jsAppId: string | null;
   nativeAppId: string | null;
-  appIdentityCompatible: false;
+  appIdentityCompatible: boolean;
 };
 
 export function evaluateNativeToJsCustomProvider(input: {
@@ -23,13 +23,22 @@ export function evaluateNativeToJsCustomProvider(input: {
 }): CustomProviderBridgeAttempt {
   const jsAppId = input.jsAppId ?? null;
   const nativeAppId = input.nativeAppId ?? null;
+  const sameNonEmptyIds =
+    typeof jsAppId === "string" &&
+    jsAppId.length > 0 &&
+    typeof nativeAppId === "string" &&
+    nativeAppId.length > 0 &&
+    jsAppId === nativeAppId;
+  const failure = sameNonEmptyIds
+    ? "JS firebase/app-check initializeAppCheck is not called in this candidate, so a native token is not dual-SDK coverage even when app IDs match."
+    : APP_CHECK_CUSTOM_PROVIDER_BRIDGE_FAILURE;
   return {
     nativeTokenPresent: input.nativeTokenPresent,
     acceptedAsDualSdkCoverage: false,
-    failure: APP_CHECK_CUSTOM_PROVIDER_BRIDGE_FAILURE,
+    failure,
     jsAppId,
     nativeAppId,
-    appIdentityCompatible: false,
+    appIdentityCompatible: sameNonEmptyIds,
   };
 }
 

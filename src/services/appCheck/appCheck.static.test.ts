@@ -4,9 +4,12 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { attemptNativeToJsCustomProviderBridge } from "./customProviderBridge";
-import { initializeAppCheckLayer } from "./bootstrap";
+import {
+  getAppCheckDiagnosticPromise,
+  initializeAppCheckLayer,
+} from "./bootstrap";
 import { initializeJsAppCheck } from "./jsAppCheck";
-import { initializeNativeAppCheck } from "./nativeAppCheck";
+import { initializeNativeAppCheck, probeNativeAppCheckTokens } from "./nativeAppCheck";
 import {
   APP_CHECK_CUSTOM_PROVIDER_BRIDGE_FAILURE,
   getLastAppCheckInitReport,
@@ -64,8 +67,17 @@ async function main() {
       },
     });
     assert.equal(ios.provider, "appAttest");
-    assert.equal(ios.tokenObtained, true);
+    assert.equal(ios.tokenObtained, false);
     assert.notEqual(ios.provider, "playIntegrity");
+    const probedIos = await probeNativeAppCheckTokens({
+      port: {
+        platform: "ios",
+        nativeAppId: "1:proj:ios:xyz",
+        initialize: async () => undefined,
+        getToken: async () => ({ token: "attest-token", expireTimeMillis: Date.now() + 3600_000 }),
+      },
+    });
+    assert.equal(probedIos.tokenObtained, true);
   }
 
   {
@@ -88,7 +100,7 @@ async function main() {
 
   {
     const refreshCalls: boolean[] = [];
-    const native = await initializeNativeAppCheck({
+    await initializeNativeAppCheck({
       isProduction: true,
       debugTokenPresent: false,
       port: {
@@ -101,9 +113,21 @@ async function main() {
         },
       },
     });
+    assert.deepEqual(refreshCalls, []);
+    const probed = await probeNativeAppCheckTokens({
+      port: {
+        platform: "android",
+        nativeAppId: "1:proj:android:xyz",
+        initialize: async () => undefined,
+        getToken: async (forceRefresh) => {
+          refreshCalls.push(forceRefresh);
+          return { token: "native-token", expireTimeMillis: Date.now() - 1 };
+        },
+      },
+      forceRefresh: true,
+    });
     assert.deepEqual(refreshCalls, [false, true]);
-    assert.equal(native.tokenObtained, true);
-    assert.equal(native.appId, "1:proj:android:xyz");
+    assert.equal(probed.tokenObtained, true);
   }
 
   {
@@ -150,13 +174,14 @@ async function main() {
     assert.equal(report.customProviderBridgeAccepted, false);
     assert.equal(report.nativeProvider, "playIntegrity");
     assert.equal(report.jsProvider, "none");
-    assert.equal(report.nativeTokenObtained, true);
+    assert.equal(report.nativeTokenObtained, false);
     assert.equal(report.jsAppId, "1:proj:web:abc");
     assert.equal(report.nativeAppId, "1:proj:android:xyz");
     assert.equal(report.bridgeFailure, APP_CHECK_CUSTOM_PROVIDER_BRIDGE_FAILURE);
     const stored = getLastAppCheckInitReport();
-    assert.equal(stored?.nativeTokenObtained, true);
-    assert.equal(stored?.initializeAppCheckCalledOnJs, false);
+    assert.equal(stored?.nativeTokenObtained, false);
+    const diagnostic = await getAppCheckDiagnosticPromise();
+    assert.equal(diagnostic?.nativeTokenObtained, true);
   }
 
   {
@@ -165,7 +190,7 @@ async function main() {
     assert.match(bootstrap, /setLastAppCheckInitReport/);
     const coordinator = read("src/startup/coordinator.ts");
     assert.match(coordinator, /initializeAppCheckLayer/);
-    assert.match(coordinator, /const report = await initializeAppCheckLayer/);
+    assert.doesNotMatch(coordinator, /getToken\(true\)/);
   }
 
   {
