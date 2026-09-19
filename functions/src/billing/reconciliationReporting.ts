@@ -25,6 +25,8 @@ export type LedgerCommissionReport = {
   monthKey: string | null;
   complete: boolean;
   sampleTruncated: boolean;
+  scanStartedAt: number | null;
+  ledgerHighWatermark: number;
 };
 
 function addKnown(sum: number, value: number | null | undefined): { sum: number; unknown: boolean } {
@@ -34,10 +36,18 @@ function addKnown(sum: number, value: number | null | undefined): { sum: number;
   return { sum: sum + value, unknown: false };
 }
 
+function isInflow(eventType: BillingEventLedgerDoc["eventType"]): boolean {
+  return eventType === "purchase" || eventType === "renewal";
+}
+
+function isOutflow(eventType: BillingEventLedgerDoc["eventType"]): boolean {
+  return eventType === "refund" || eventType === "chargeback";
+}
+
 export function summarizeLedgerCommissions(
   rows: BillingEventLedgerDoc[],
   monthKey?: string | null,
-  flags?: { complete?: boolean; sampleTruncated?: boolean }
+  flags?: { complete?: boolean; sampleTruncated?: boolean; scanStartedAt?: number | null }
 ): LedgerCommissionReport {
   const report: LedgerCommissionReport = {
     eventCount: rows.length,
@@ -52,23 +62,32 @@ export function summarizeLedgerCommissions(
     monthKey: monthKey ?? null,
     complete: flags?.complete === true,
     sampleTruncated: flags?.sampleTruncated === true,
+    scanStartedAt: typeof flags?.scanStartedAt === "number" ? flags.scanStartedAt : null,
+    ledgerHighWatermark: 0,
   };
   for (const row of rows) {
-    const gross = addKnown(report.grossKnownPaise, row.grossAmountInPaise);
-    report.grossKnownPaise = gross.sum;
-    if (gross.unknown) report.grossUnknownCount += 1;
-    const actual = addKnown(report.actualCommissionKnownPaise, row.actualPlatformCommissionInPaise);
-    report.actualCommissionKnownPaise = actual.sum;
-    if (actual.unknown) report.actualCommissionUnknownCount += 1;
-    const estimated = addKnown(
-      report.estimatedCommissionKnownPaise,
-      row.estimatedPlatformCommissionInPaise
-    );
-    report.estimatedCommissionKnownPaise = estimated.sum;
-    if (estimated.unknown) report.estimatedCommissionUnknownCount += 1;
-    if (row.eventType === "refund" || row.eventType === "chargeback") {
-      if (gross.unknown) report.refundsUnknownCount += 1;
-      else report.refundsKnownPaise += row.grossAmountInPaise;
+    if (typeof row.recordedAt === "number" && row.recordedAt > report.ledgerHighWatermark) {
+      report.ledgerHighWatermark = row.recordedAt;
+    }
+    if (isInflow(row.eventType)) {
+      const gross = addKnown(report.grossKnownPaise, row.grossAmountInPaise);
+      report.grossKnownPaise = gross.sum;
+      if (gross.unknown) report.grossUnknownCount += 1;
+      const actual = addKnown(report.actualCommissionKnownPaise, row.actualPlatformCommissionInPaise);
+      report.actualCommissionKnownPaise = actual.sum;
+      if (actual.unknown) report.actualCommissionUnknownCount += 1;
+      const estimated = addKnown(
+        report.estimatedCommissionKnownPaise,
+        row.estimatedPlatformCommissionInPaise
+      );
+      report.estimatedCommissionKnownPaise = estimated.sum;
+      if (estimated.unknown) report.estimatedCommissionUnknownCount += 1;
+      continue;
+    }
+    if (isOutflow(row.eventType)) {
+      const refund = addKnown(report.refundsKnownPaise, row.grossAmountInPaise);
+      report.refundsKnownPaise = refund.sum;
+      if (refund.unknown) report.refundsUnknownCount += 1;
     }
   }
   return report;
@@ -144,6 +163,7 @@ export function revenueReportFromCommission(
   generatedAt: number
 ): RevenueReportDoc | null {
   if (!report.monthKey) return null;
+  if (typeof report.scanStartedAt !== "number") return null;
   return {
     monthKey: report.monthKey,
     grossRevenueInPaise: report.grossKnownPaise,
@@ -153,6 +173,8 @@ export function revenueReportFromCommission(
     netRevenueEstimateInPaise: null,
     financialEventCount: report.eventCount,
     generatedAt,
+    scanStartedAt: report.scanStartedAt,
+    ledgerHighWatermark: report.ledgerHighWatermark,
     complete: report.complete,
     sampleTruncated: report.sampleTruncated,
     grossUnknownCount: report.grossUnknownCount,
@@ -169,11 +191,24 @@ export async function persistRevenueReport(input: {
 }): Promise<boolean> {
   const doc = revenueReportFromCommission(input.report, input.nowMs);
   if (!doc || !doc.complete || doc.sampleTruncated) return false;
-  await input.store.runTransaction(async (tx) => {
-    await tx.get(revenueReportPath(doc.monthKey));
+  return input.store.runTransaction(async (tx) => {
+    const snap = await tx.get(revenueReportPath(doc.monthKey));
+    const existing = snap.data() as RevenueReportDoc | undefined;
+    if (existing?.complete === true) {
+      const existingStart =
+        typeof existing.scanStartedAt === "number" ? existing.scanStartedAt : Number.NEGATIVE_INFINITY;
+      if (existingStart > doc.scanStartedAt) return false;
+      if (existingStart === doc.scanStartedAt) {
+        const existingWatermark =
+          typeof existing.ledgerHighWatermark === "number"
+            ? existing.ledgerHighWatermark
+            : Number.NEGATIVE_INFINITY;
+        if (existingWatermark > doc.ledgerHighWatermark) return false;
+      }
+    }
     tx.set(revenueReportPath(doc.monthKey), { ...doc });
+    return true;
   });
-  return true;
 }
 
 export async function reportLedgerCommissionsForMonth(input: {
@@ -188,9 +223,15 @@ export async function reportLedgerCommissionsForMonth(input: {
 }): Promise<LedgerCommissionReport & { persisted: boolean }> {
   const pageSize = input.pageSize ?? 100;
   const maxPages = input.maxPages ?? 50;
+  const clock = input.nowMs ?? Date.now;
+  const scanStartedAt = clock();
   let rows: BillingEventLedgerDoc[] = [];
   let complete = false;
   let sampleTruncated = false;
+
+  // Pagination walks live document-id order. Concurrent ledger inserts between
+  // pages can appear in a later page; this is not a frozen snapshot. Ordering
+  // for persistence uses scanStartedAt, then ledgerHighWatermark (max recordedAt).
 
   if (typeof input.scanner.listForMonthPage === "function") {
     let after: string | null = null;
@@ -216,13 +257,17 @@ export async function reportLedgerCommissionsForMonth(input: {
     complete = !sampleTruncated;
   }
 
-  const report = summarizeLedgerCommissions(rows, input.monthKey, { complete, sampleTruncated });
+  const report = summarizeLedgerCommissions(rows, input.monthKey, {
+    complete,
+    sampleTruncated,
+    scanStartedAt,
+  });
   let persisted = false;
   if (input.persistTo) {
     persisted = await persistRevenueReport({
       store: input.persistTo,
       report,
-      nowMs: (input.nowMs ?? Date.now)(),
+      nowMs: clock(),
     });
   }
   return { ...report, persisted };

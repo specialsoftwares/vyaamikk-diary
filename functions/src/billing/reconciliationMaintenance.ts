@@ -232,17 +232,30 @@ export async function recordMaintenanceBackoff(input: {
   nowMs: number;
   outcome: string;
   backoffMs?: number;
-}): Promise<void> {
+  leaseOwner?: string;
+  leaseNowMs?: () => number;
+}): Promise<boolean> {
   const path = billingMaintenanceSchedulePath(input.uid);
   const delay = input.backoffMs ?? MAINTENANCE_BACKOFF_MS;
-  await input.store.runTransaction(async (tx) => {
-    await tx.get(path);
+  const leasePath = staleMaintenanceLeasePath();
+  return input.store.runTransaction(async (tx) => {
+    if (input.leaseOwner) {
+      const leaseSnap = await tx.get(leasePath);
+      const lease = leaseSnap.data();
+      const current = input.leaseNowMs ? input.leaseNowMs() : input.nowMs;
+      if (lease?.owner !== input.leaseOwner) return false;
+      if (typeof lease?.expiresAt !== "number" || lease.expiresAt <= current) return false;
+    }
+    const snap = await tx.get(path);
+    const lastAttemptAt = snap.data()?.lastAttemptAt;
+    if (typeof lastAttemptAt === "number" && lastAttemptAt > input.nowMs) return false;
     tx.set(path, {
       uid: input.uid,
       nextEligibleAt: input.nowMs + delay,
       lastAttemptAt: input.nowMs,
       lastOutcome: input.outcome,
     });
+    return true;
   });
 }
 
@@ -304,7 +317,7 @@ export async function runStaleCompanyMaintenance(input: {
       const rows = await input.scanner.listStale(now, staleAfterMs, maxItems);
       tallies.scanned = rows.length;
       for (const row of rows) {
-        await processStaleRow({ input, row, tallies, now });
+        await processStaleRow({ input, row, tallies });
       }
       return tallies;
     }
@@ -334,7 +347,7 @@ export async function runStaleCompanyMaintenance(input: {
           continue;
         }
         tallies.scanned += 1;
-        const slot = await processStaleRow({ input, row, tallies, now });
+        const slot = await processStaleRow({ input, row, tallies });
         if (slot) workSlots += 1;
         if (workSlots >= maxItems) break;
       }
@@ -360,17 +373,19 @@ async function processStaleRow(input: {
   input: {
     store: BillingStore;
     revalidate: StoreRevalidator;
+    nowMs: () => number;
+    leaseOwner?: string;
   };
   row: StaleCompanyRow;
   tallies: MaintenanceTallies;
-  now: number;
 }): Promise<boolean> {
   const { row, tallies } = input;
+  const currentNow = () => input.input.nowMs();
   try {
     const eligible = await isMaintenanceAccountEligible({
       store: input.input.store,
       uid: row.uid,
-      nowMs: input.now,
+      nowMs: currentNow(),
     });
     if (!eligible) {
       tallies.skipped += 1;
@@ -381,8 +396,10 @@ async function processStaleRow(input: {
       await recordMaintenanceBackoff({
         store: input.input.store,
         uid: row.uid,
-        nowMs: input.now,
+        nowMs: currentNow(),
         outcome: "missing_credential",
+        leaseOwner: input.input.leaseOwner,
+        leaseNowMs: currentNow,
       });
       return true;
     }
@@ -413,8 +430,10 @@ async function processStaleRow(input: {
     await recordMaintenanceBackoff({
       store: input.input.store,
       uid: row.uid,
-      nowMs: input.now,
+      nowMs: currentNow(),
       outcome: outcomeKind(outcome),
+      leaseOwner: input.input.leaseOwner,
+      leaseNowMs: currentNow,
     });
     return true;
   } catch {
@@ -423,8 +442,10 @@ async function processStaleRow(input: {
       await recordMaintenanceBackoff({
         store: input.input.store,
         uid: row.uid,
-        nowMs: input.now,
+        nowMs: currentNow(),
         outcome: "isolated_failure",
+        leaseOwner: input.input.leaseOwner,
+        leaseNowMs: currentNow,
       });
     } catch {
       // Sidecar failure must not abort the remaining accounts.

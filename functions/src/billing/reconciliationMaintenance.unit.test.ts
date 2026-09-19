@@ -8,11 +8,14 @@ import {
   collectStaleCompanyRows,
   isStaleCompanyWatermark,
   memoryStaleCompanyScanner,
+  recordMaintenanceBackoff,
   runStaleCompanyMaintenance,
+  MAINTENANCE_BACKOFF_MS,
 } from "./reconciliationMaintenance";
 import {
   summarizeLedgerCommissions,
   reportLedgerCommissionsForMonth,
+  persistRevenueReport,
   memoryLedgerMonthScanner,
 } from "./reconciliationReporting";
 import { MemoryBillingStore } from "./store";
@@ -383,9 +386,20 @@ async function main() {
     assert.equal(month.persisted, true);
     assert.equal(month.actualCommissionUnknownCount, 1);
     assert.equal(month.refundsKnownPaise, 100);
-    const persisted = store.docs.get("_revenueReports/2026-09") as { financialEventCount?: number; netRevenueEstimateInPaise?: number | null };
+    assert.equal(month.grossKnownPaise, 201 * 100);
+    const persisted = store.docs.get("_revenueReports/2026-09") as {
+      financialEventCount?: number;
+      netRevenueEstimateInPaise?: number | null;
+      grossRevenueInPaise?: number;
+      refundsInPaise?: number;
+      scanStartedAt?: number;
+      ledgerHighWatermark?: number;
+    };
     assert.equal(persisted.financialEventCount, 202);
     assert.equal(persisted.netRevenueEstimateInPaise, null);
+    assert.equal(persisted.grossRevenueInPaise, 201 * 100);
+    assert.equal(persisted.refundsInPaise, 100);
+    assert.equal(persisted.scanStartedAt, NOW);
     const again = await reportLedgerCommissionsForMonth({
       scanner: memoryLedgerMonthScanner(store),
       monthKey: "2026-09",
@@ -398,6 +412,331 @@ async function main() {
       monthKey: "2026-08",
     });
     assert.equal(other.eventCount, 1);
+  }
+
+  {
+    const report = summarizeLedgerCommissions(
+      [
+        ledger({
+          financialEventId: "android:purchase:GPA.GROSS-1",
+          eventType: "purchase",
+          grossAmountInPaise: 20000,
+          actualPlatformCommissionInPaise: 3000,
+          estimatedPlatformCommissionInPaise: 3000,
+        }),
+        ledger({
+          financialEventId: "android:refund:GPA.GROSS-1",
+          eventType: "refund",
+          relatedFinancialEventId: "android:purchase:GPA.GROSS-1",
+          grossAmountInPaise: 20000,
+          actualPlatformCommissionInPaise: 3000,
+          estimatedPlatformCommissionInPaise: 3000,
+        }),
+      ],
+      "2026-09",
+      { complete: true, scanStartedAt: NOW }
+    );
+    assert.equal(report.grossKnownPaise, 20000);
+    assert.equal(report.refundsKnownPaise, 20000);
+    assert.equal(report.actualCommissionKnownPaise, 3000);
+    const store = new MemoryBillingStore();
+    const persisted = await persistRevenueReport({ store, report, nowMs: NOW });
+    assert.equal(persisted, true);
+    const doc = store.docs.get("_revenueReports/2026-09") as {
+      grossRevenueInPaise?: number;
+      refundsInPaise?: number;
+    };
+    assert.equal(doc.grossRevenueInPaise, 20000);
+    assert.equal(doc.refundsInPaise, 20000);
+  }
+
+  {
+    const report = summarizeLedgerCommissions(
+      [
+        ledger({
+          financialEventId: "android:renewal:GPA.REN-1",
+          eventType: "renewal",
+          grossAmountInPaise: 24900,
+          actualPlatformCommissionInPaise: 3700,
+          estimatedPlatformCommissionInPaise: 3700,
+        }),
+        ledger({
+          financialEventId: "android:chargeback:GPA.REN-1",
+          eventType: "chargeback",
+          relatedFinancialEventId: "android:renewal:GPA.REN-1",
+          grossAmountInPaise: 24900,
+          actualPlatformCommissionInPaise: null,
+          estimatedPlatformCommissionInPaise: null,
+        }),
+        ledger({
+          financialEventId: "android:purchase:GPA.UNK-1",
+          eventType: "purchase",
+          grossAmountInPaise: null as unknown as number,
+          actualPlatformCommissionInPaise: null,
+          estimatedPlatformCommissionInPaise: null,
+        }),
+      ],
+      "2026-09",
+      { complete: true, scanStartedAt: NOW }
+    );
+    assert.equal(report.grossKnownPaise, 24900);
+    assert.equal(report.grossUnknownCount, 1);
+    assert.equal(report.refundsKnownPaise, 24900);
+    assert.equal(report.actualCommissionUnknownCount, 1);
+    assert.equal(report.estimatedCommissionUnknownCount, 1);
+    assert.equal(report.estimatedCommissionKnownPaise, 3700);
+    const store = new MemoryBillingStore();
+    assert.equal(await persistRevenueReport({ store, report, nowMs: NOW }), true);
+    const doc = store.docs.get("_revenueReports/2026-09") as {
+      grossRevenueInPaise?: number;
+      refundsInPaise?: number;
+      grossUnknownCount?: number;
+      actualCommissionUnknownCount?: number;
+      estimatedPlatformCommissionInPaise?: number;
+      netRevenueEstimateInPaise?: number | null;
+    };
+    assert.equal(doc.grossRevenueInPaise, 24900);
+    assert.equal(doc.refundsInPaise, 24900);
+    assert.equal(doc.grossUnknownCount, 1);
+    assert.equal(doc.actualCommissionUnknownCount, 1);
+    assert.equal(doc.estimatedPlatformCommissionInPaise, 3700);
+    assert.equal(doc.netRevenueEstimateInPaise, null);
+    const again = await persistRevenueReport({ store, report, nowMs: NOW + 5 });
+    assert.equal(again, true);
+    assert.equal(
+      (store.docs.get("_revenueReports/2026-09") as { generatedAt?: number }).generatedAt,
+      NOW + 5
+    );
+  }
+
+  {
+    const store = new MemoryBillingStore();
+    const newer = summarizeLedgerCommissions(
+      [ledger({ recordedAt: 2000, grossAmountInPaise: 500 })],
+      "2026-09",
+      { complete: true, scanStartedAt: 2000 }
+    );
+    assert.equal(await persistRevenueReport({ store, report: newer, nowMs: 2000 }), true);
+    const delayed = summarizeLedgerCommissions(
+      [ledger({ recordedAt: 1000, grossAmountInPaise: 1 })],
+      "2026-09",
+      { complete: true, scanStartedAt: 1000 }
+    );
+    assert.equal(await persistRevenueReport({ store, report: delayed, nowMs: 1000 }), false);
+    const kept = store.docs.get("_revenueReports/2026-09") as {
+      scanStartedAt?: number;
+      grossRevenueInPaise?: number;
+      ledgerHighWatermark?: number;
+    };
+    assert.equal(kept.scanStartedAt, 2000);
+    assert.equal(kept.grossRevenueInPaise, 500);
+    assert.equal(kept.ledgerHighWatermark, 2000);
+    const incomplete = summarizeLedgerCommissions([ledger()], "2026-09", {
+      complete: false,
+      scanStartedAt: 3000,
+    });
+    assert.equal(await persistRevenueReport({ store, report: incomplete, nowMs: 3000 }), false);
+  }
+
+  {
+    const store = new MemoryBillingStore();
+    store.docs.set(
+      financialLedgerPath(sanitizeDocId("android:purchase:GPA.P1")),
+      ledger({
+        financialEventId: "android:purchase:GPA.P1",
+        recordedAt: 10,
+      }) as unknown as Record<string, unknown>
+    );
+    let pages = 0;
+    const scanner = {
+      async listForMonth() {
+        return [];
+      },
+      async listForMonthPage(_monthKey: string, _pageSize: number, afterId: string | null) {
+        pages += 1;
+        if (pages === 1) {
+          return {
+            rows: [ledger({ financialEventId: "android:purchase:GPA.P1", recordedAt: 10 })],
+            lastId: "android:purchase:GPA.P1",
+            exhausted: false,
+          };
+        }
+        store.docs.set(
+          financialLedgerPath(sanitizeDocId("android:purchase:GPA.P2")),
+          ledger({
+            financialEventId: "android:purchase:GPA.P2",
+            recordedAt: 99,
+            grossAmountInPaise: 50,
+          }) as unknown as Record<string, unknown>
+        );
+        return {
+          rows: [
+            ledger({
+              financialEventId: "android:purchase:GPA.P2",
+              recordedAt: 99,
+              grossAmountInPaise: 50,
+            }),
+          ],
+          lastId: afterId === "android:purchase:GPA.P1" ? "android:purchase:GPA.P2" : "android:purchase:GPA.P2",
+          exhausted: true,
+        };
+      },
+    };
+    const month = await reportLedgerCommissionsForMonth({
+      scanner,
+      monthKey: "2026-09",
+      pageSize: 1,
+      persistTo: store,
+      nowMs: () => NOW,
+    });
+    assert.equal(month.complete, true);
+    assert.equal(month.eventCount, 2);
+    assert.equal(month.ledgerHighWatermark, 99);
+    assert.equal(month.persisted, true);
+  }
+
+  {
+    const store = new MemoryBillingStore();
+    store.docs.set(
+      companyBillingPath(UID),
+      company() as unknown as Record<string, unknown>
+    );
+    let now = NOW;
+    await runStaleCompanyMaintenance({
+      enabled: true,
+      store,
+      scanner: memoryStaleCompanyScanner(store),
+      revalidate: async () => {
+        now = NOW + 22_000;
+        return { kind: "pending", resultSummary: "held" };
+      },
+      nowMs: () => now,
+      leaseOwner: "tick-new",
+      useDocumentIdScan: true,
+    });
+    const newer = store.docs.get(`_billingMaintenanceSchedule/${UID}`) as {
+      lastAttemptAt?: number;
+      lastOutcome?: string;
+      nextEligibleAt?: number;
+    };
+    assert.equal(newer.lastAttemptAt, NOW + 22_000);
+    assert.equal(newer.lastOutcome, "pending");
+    assert.equal(newer.nextEligibleAt, NOW + 22_000 + MAINTENANCE_BACKOFF_MS);
+    const retired = await recordMaintenanceBackoff({
+      store,
+      uid: UID,
+      nowMs: NOW,
+      outcome: "pending",
+      leaseOwner: "tick-old",
+      leaseNowMs: () => NOW + 22_000,
+    });
+    assert.equal(retired, false);
+    const still = store.docs.get(`_billingMaintenanceSchedule/${UID}`) as {
+      lastAttemptAt?: number;
+      lastOutcome?: string;
+    };
+    assert.equal(still.lastAttemptAt, NOW + 22_000);
+    assert.equal(still.lastOutcome, "pending");
+    const staleClock = await recordMaintenanceBackoff({
+      store,
+      uid: UID,
+      nowMs: NOW,
+      outcome: "isolated_failure",
+      leaseOwner: "tick-new",
+      leaseNowMs: () => NOW + 22_000,
+    });
+    assert.equal(staleClock, false);
+    store.docs.set("_billingOps/staleMaintenanceLease", {
+      owner: "tick-held",
+      expiresAt: NOW + 120_000,
+      scanCursor: null,
+    });
+    const monotonic = await recordMaintenanceBackoff({
+      store,
+      uid: UID,
+      nowMs: NOW,
+      outcome: "pending",
+      leaseOwner: "tick-held",
+      leaseNowMs: () => NOW + 22_000,
+    });
+    assert.equal(monotonic, false);
+    store.docs.set("_billingOps/staleMaintenanceLease", {
+      owner: "tick-old",
+      expiresAt: NOW - 1,
+      scanCursor: null,
+    });
+    const expired = await recordMaintenanceBackoff({
+      store,
+      uid: UID,
+      nowMs: NOW,
+      outcome: "pending",
+      leaseOwner: "tick-old",
+      leaseNowMs: () => NOW + 22_000,
+    });
+    assert.equal(expired, false);
+    const keptSchedule = store.docs.get(`_billingMaintenanceSchedule/${UID}`) as {
+      lastAttemptAt?: number;
+      lastOutcome?: string;
+    };
+    assert.equal(keptSchedule.lastAttemptAt, NOW + 22_000);
+    assert.equal(keptSchedule.lastOutcome, "pending");
+  }
+
+  {
+    const store = new MemoryBillingStore();
+    store.docs.set(
+      companyBillingPath(UID),
+      company() as unknown as Record<string, unknown>
+    );
+    let oldNow = NOW;
+    let releaseOld!: (value: StoreRevalidateOutcome) => void;
+    const oldHold = new Promise<StoreRevalidateOutcome>((resolve) => {
+      releaseOld = resolve;
+    });
+    const oldRun = runStaleCompanyMaintenance({
+      enabled: true,
+      store,
+      scanner: memoryStaleCompanyScanner(store),
+      revalidate: async () => oldHold,
+      nowMs: () => oldNow,
+      leaseOwner: "tick-old",
+      useDocumentIdScan: true,
+    });
+    for (let i = 0; i < 40; i++) {
+      const lease = store.docs.get("_billingOps/staleMaintenanceLease");
+      if (lease && lease.owner === "tick-old") break;
+      await new Promise((r) => setImmediate(r));
+    }
+    assert.equal(store.docs.get("_billingOps/staleMaintenanceLease")?.owner, "tick-old");
+    const newNow = NOW + 122_000;
+    const takeover = await runStaleCompanyMaintenance({
+      enabled: true,
+      store,
+      scanner: memoryStaleCompanyScanner(store),
+      revalidate: async () => ({ kind: "terminal", resultSummary: "dead", causeCode: "gone" }),
+      nowMs: () => newNow,
+      leaseOwner: "tick-new",
+      useDocumentIdScan: true,
+    });
+    assert.equal(takeover.attempted, 1);
+    const afterNew = store.docs.get(`_billingMaintenanceSchedule/${UID}`) as {
+      lastAttemptAt?: number;
+      lastOutcome?: string;
+      nextEligibleAt?: number;
+    };
+    assert.equal(afterNew.lastAttemptAt, NOW + 122_000);
+    assert.equal(afterNew.lastOutcome, "terminal");
+    const cursorAfterNew = store.docs.get("_billingOps/staleMaintenanceLease")?.scanCursor ?? null;
+    releaseOld({ kind: "pending", resultSummary: "held" });
+    const oldFinished = await oldRun;
+    assert.equal(oldFinished.pending, 1);
+    const afterOld = store.docs.get(`_billingMaintenanceSchedule/${UID}`) as {
+      lastAttemptAt?: number;
+      lastOutcome?: string;
+    };
+    assert.equal(afterOld.lastAttemptAt, NOW + 122_000);
+    assert.equal(afterOld.lastOutcome, "terminal");
+    assert.equal(store.docs.get("_billingOps/staleMaintenanceLease")?.scanCursor ?? null, cursorAfterNew);
   }
 
   console.log("reconciliationMaintenance.unit.test.ts: ok");

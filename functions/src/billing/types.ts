@@ -485,6 +485,10 @@ export interface RevenueReportDoc {
   netRevenueEstimateInPaise: number | null;
   financialEventCount: number;
   generatedAt: number;
+  /** Instant the month scan started. Persist ordering uses this, not generatedAt. */
+  scanStartedAt: number;
+  /** Max ledger recordedAt observed in this scan. */
+  ledgerHighWatermark: number;
   complete: boolean;
   sampleTruncated: boolean;
   grossUnknownCount: number;
