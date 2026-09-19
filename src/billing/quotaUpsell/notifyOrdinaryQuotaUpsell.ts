@@ -1,3 +1,4 @@
+import { isSubscriptionPurchaseEntryEnabled } from "@/billing/iap/purchaseEntryGate";
 import type { SyncSessionToken } from "@/sync/syncSessionOwnership";
 
 import { decideQuotaUpsellEligibility } from "./quotaUpsellDecision";
@@ -43,6 +44,9 @@ export function notifyOrdinaryQuotaUpsell(request: QuotaUpsellRequest): QuotaUps
  * does not invent a record id. Reuses the same UpgradeSheet host.
  */
 export function notifyManualUpgrade(session: SyncSessionToken | null): QuotaUpsellPresentResult {
+  if (!isSubscriptionPurchaseEntryEnabled()) {
+    return { ok: false, reason: "purchase_entry_closed", visible: false, clientRecordId: null };
+  }
   if (!manualPresenter) {
     return { ok: false, reason: "no_host", visible: false, clientRecordId: null };
   }

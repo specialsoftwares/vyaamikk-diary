@@ -331,7 +331,14 @@ export interface BillingReconciliationQueueDoc {
   updatedAt: number;
   resolvedAt: number | null;
   status: BillingReconciliationQueueStatus;
+  /** Forensic total claims, never reset by operator recovery. */
   attemptCount: number;
+  /**
+   * Remaining claim budget. Operator requeue restores this to 12 without
+   * wiping attemptCount. Missing on legacy docs is treated as
+   * max(0, 12 - attemptCount).
+   */
+  attemptBudgetRemaining?: number;
   leaseOwner?: string | null;
   leaseExpiresAt?: number | null;
   nextAttemptAt?: number | null;

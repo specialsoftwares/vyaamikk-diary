@@ -63,6 +63,12 @@ const gate = stripComments(read("src/billing/quotaUpsell/quotaUpsellGate.ts"));
 assert.match(gate, /process\.env\.EXPO_PUBLIC_QUOTA_UPSELL_ENABLED === ["']1["']/);
 assert.doesNotMatch(gate, /process\.env\s*\[/);
 
+const purchaseEntry = stripComments(read("src/billing/iap/purchaseEntryGate.ts"));
+assert.match(purchaseEntry, /process\.env\.EXPO_PUBLIC_SUBSCRIPTION_PURCHASE_ENTRY_ENABLED === ["']1["']/);
+assert.doesNotMatch(purchaseEntry, /process\.env\s*\[/);
+assert.match(stripComments(read("src/billing/quotaUpsell/notifyOrdinaryQuotaUpsell.ts")), /purchase_entry_closed/);
+assert.match(stripComments(read("src/billing/quotaUpsell/quotaUpsellHostRuntime.ts")), /purchase_entry_closed/);
+
 const sheet = stripComments(read("src/components/billing/UpgradeSheet.tsx"));
 assert.doesNotMatch(sheet, /useIap\b/);
 assert.doesNotMatch(sheet, /notifyOrdinaryQuotaUpsell/);

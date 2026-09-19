@@ -51,6 +51,25 @@ Independent execution of production `beginCoordinatedSave` with an existing **do
 
 `npm run test:live-rules-compat` (Firestore emulator). Label: `LIVE_RULES_COMPAT`.
 
-Result (2026-09-19, isolated combined candidate): **PASS**. Before: missing status/usage/lock reads denied; ordinary CREATE denied on status; letterhead CREATE compatible; `beginCoordinatedSave` blocked on missing lock. After patch: missing status/usage reads allowed empty; lock helper returns null; ordinary CREATE allowed with enforcement off; production `beginCoordinatedSave` proceeds; completion + same-ID replay returns `return_done` with no new lease; pending-secondary status/usage reads allowed; client status/usage writes still denied; enforcement-true ordinary CREATE still denied (no client usage writes). Identity uid mutation denied before and after.
+Result (2026-09-19, isolated combined candidate): **PASS** for the hashed CREATE + begin/complete helper suite.
+
+Before the patch: missing status/usage/lock reads denied; ordinary CREATE denied on status; letterhead CREATE compatible; `beginCoordinatedSave` blocked on missing lock.
+
+After the patch: missing status/usage reads allowed empty; lock helper returns null; ordinary CREATE allowed with enforcement off; production `beginCoordinatedSave` proceeds; completion + same-ID replay returns `return_done` with no new lease; pending-secondary status/usage reads allowed; client status/usage writes still denied; enforcement-true ordinary CREATE still denied (no client usage writes). Identity uid mutation denied before and after.
+
+This continuation adds production-caller coverage on the proposed patch phase: `saveComposerEntry` (first Save, completed steps, same-ID return_done, PDF failure + recovery without extra CREATE), `saveLetterheadCreateWithPdf` (PDF metadata + genuine mirror), and other ordinary families' `save*WithPdf` admission/completion paths. Native PDF and insights are injected; Firestore repositories, coordinator, and completed steps remain real.
+
+Independent emulator re-run this continuation (2026-09-19, isolated combined candidate), including those production callers: **LIVE_RULES_COMPAT PASS**. After-patch production-caller checks recorded:
+
+- `saveComposerEntry` first Save completes with PDF metadata
+- `saveComposerEntry` same-ID return_done does not extra-CREATE
+- `saveComposerEntry` PDF failure keeps base record
+- `saveComposerEntry` PDF recovery does not extra-CREATE
+- `saveLetterheadCreateWithPdf` PDF + genuine mirror
+- `savePurchaseOrderWithPdf` / `saveCustomerCreditWithPdf` / `saveProfessionalPackWithPdf` complete
+
+Scoped production-caller corrections (not Rules widening): skip `completeCoordinatedSave` on `return_done` when there is no lease/owner/processLockKey; `touchPersistentLock` no-ops unless `status === "in_flight"`; skip HTML builders when a PDF hook is installed so Node tests do not load i18next/react-native. Done-lock `done→in_flight` remains denied.
+
+Boundary: emulator + MemorySqlite, not a device or live project. Do not treat emulator PASS as a Play-installed device result.
 
 Canonical `test:firestore-rules` still uses repo `firestore.rules`.

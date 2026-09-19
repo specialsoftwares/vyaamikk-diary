@@ -4,7 +4,7 @@
  */
 
 import { onSchedule } from "firebase-functions/v2/scheduler";
-import { getFirestore } from "firebase-admin/firestore";
+import { getFirestore, type Firestore, type QueryDocumentSnapshot } from "firebase-admin/firestore";
 
 import { createAppleSignedDataVerifier } from "../apple/appleVerifier";
 import { createAppStoreServerApiClient } from "../apple/appleApiClient";
@@ -24,23 +24,79 @@ import {
   PlayApiClient,
 } from "../google/playApiClient";
 import { billingLog } from "../log";
-import { BillingError } from "../errors";
-import { runBillingReconciliationTick } from "../reconciliationConsumer";
+import { istMonthKeyForMillis } from "../istMonthKey";
+import {
+  collectDueReconciliationIds,
+  newReconciliationInvocationId,
+  runBillingReconciliationTick,
+  type StoreRevalidator,
+} from "../reconciliationConsumer";
 import { isBillingReconciliationEnabled } from "../reconciliationFlags";
 import {
   createAndroidStoreRevalidator,
   createIosStoreRevalidator,
   createPlatformStoreRevalidator,
 } from "../reconciliationStoreRevalidate";
-import type { StoreRevalidator } from "../reconciliationConsumer";
+import {
+  formatCommissionReportLine,
+  reportLedgerCommissionsForMonth,
+} from "../reconciliationReporting";
+import {
+  collectStaleCompanyRows,
+  runStaleCompanyMaintenance,
+  STALE_COMPANY_REVALIDATION_MS,
+  type StaleCompanyRow,
+} from "../reconciliationMaintenance";
+import type { BillingEventLedgerDoc, CompanyBillingDoc } from "../types";
 
-function unavailable(code: string): StoreRevalidator {
-  return async () => {
-    throw new BillingError({
-      clientCode: "temporary_unavailable",
-      causeCode: code,
-      retryable: true,
-    });
+function configurationDisabled(code: string): StoreRevalidator {
+  return async () => ({ kind: "configuration_disabled", resultSummary: code });
+}
+
+function firestoreDueScanner(db: Firestore) {
+  return {
+    async listCandidateIds(tickNow: number, limit: number) {
+      return collectDueReconciliationIds({
+        nowMs: tickNow,
+        limit,
+        pageSize: 40,
+        maxPages: 8,
+        async readPage(page, pageSize) {
+          const col = db.collection("_billingReconciliationQueue");
+          const pendingQ = col
+            .where("status", "in", ["pending", "failed_retryable"])
+            .orderBy("nextAttemptAt")
+            .limit(pageSize)
+            .offset(page * pageSize);
+          const leasedQ = col
+            .where("status", "==", "leased")
+            .orderBy("leaseExpiresAt")
+            .limit(pageSize)
+            .offset(page * pageSize);
+          const [pending, leased] = await Promise.all([pendingQ.get(), leasedQ.get()]);
+          const rows: Array<{
+            id: string;
+            status: string;
+            nextAttemptAt?: number;
+            leaseExpiresAt?: number;
+          }> = [];
+          for (const doc of [...pending.docs, ...leased.docs] as QueryDocumentSnapshot[]) {
+            const data = doc.data() as {
+              status?: string;
+              nextAttemptAt?: number;
+              leaseExpiresAt?: number;
+            };
+            rows.push({
+              id: doc.id,
+              status: data.status ?? "",
+              nextAttemptAt: data.nextAttemptAt,
+              leaseExpiresAt: data.leaseExpiresAt,
+            });
+          }
+          return rows;
+        },
+      });
+    },
   };
 }
 
@@ -59,8 +115,9 @@ export const scheduledBillingReconciliation = onSchedule(
     const secret = process.env.BILLING_DIAG_UID_SECRET ?? "";
     const diagnosticUidFor = (uid: string) => diagnosticUidHmac(secret, uid);
     const nowMs = () => Date.now();
+    const invocationId = newReconciliationInvocationId(process.env.K_REVISION);
 
-    let android: StoreRevalidator = unavailable("play_billing_disabled");
+    let android: StoreRevalidator = configurationDisabled("play_billing_disabled");
     if (isPlayBillingEnabled()) {
       const androidDeps = {
         store,
@@ -78,7 +135,7 @@ export const scheduledBillingReconciliation = onSchedule(
       android = createAndroidStoreRevalidator(androidDeps, androidDeps.cipher);
     }
 
-    let ios: StoreRevalidator = unavailable("appstore_billing_disabled");
+    let ios: StoreRevalidator = configurationDisabled("appstore_billing_disabled");
     if (isAppStoreBillingEnabled()) {
       try {
         const cfg = loadAppStoreRuntimeConfig();
@@ -96,45 +153,89 @@ export const scheduledBillingReconciliation = onSchedule(
           nowMs,
         });
       } catch {
-        ios = unavailable("ios_revalidator_unavailable");
+        ios = configurationDisabled("ios_revalidator_unavailable");
       }
     }
 
-    const scanner = {
-      async listCandidateIds(tickNow: number) {
-        const col = db.collection("_billingReconciliationQueue");
-        const pending = await col
-          .where("status", "in", ["pending", "failed_retryable", "leased"])
-          .limit(40)
-          .get();
-        const ids: string[] = [];
-        for (const doc of pending.docs) {
-          const data = doc.data() as {
-            nextAttemptAt?: number;
-            status?: string;
-            leaseExpiresAt?: number;
-          };
-          if ((data.nextAttemptAt ?? 0) > tickNow) continue;
-          if (data.status === "leased" && (data.leaseExpiresAt ?? 0) > tickNow) continue;
-          ids.push(doc.id);
-        }
-        return ids;
-      },
-    };
-
+    const revalidate = createPlatformStoreRevalidator({ android, ios });
     const tallies = await runBillingReconciliationTick({
       enabled: true,
       store,
-      scanner,
-      revalidate: createPlatformStoreRevalidator({ android, ios }),
+      scanner: firestoreDueScanner(db),
+      revalidate,
       nowMs,
-      workerId: `scheduler:${process.env.K_REVISION ?? "local"}`,
+      workerId: invocationId,
       maxItems: 10,
+    });
+
+    const staleCutoff = nowMs() - STALE_COMPANY_REVALIDATION_MS;
+    const mapSnap = (doc: QueryDocumentSnapshot): StaleCompanyRow => {
+      const data = doc.data() as CompanyBillingDoc;
+      return {
+        uid: doc.id,
+        platform: data.platform,
+        lastReconciledAt: data.lastReconciledAt ?? null,
+        credentialFingerprint: data.credentialFingerprint ?? null,
+        latestOrderId: data.latestOrderId ?? null,
+        originalTransactionId: data.originalTransactionId ?? null,
+      };
+    };
+    const [agedSnap, neverSnap] = await Promise.all([
+      db
+        .collection("_companyBilling")
+        .where("lastReconciledAt", "<", staleCutoff)
+        .orderBy("lastReconciledAt")
+        .limit(10)
+        .get(),
+      db.collection("_companyBilling").where("lastReconciledAt", "==", null).limit(10).get(),
+    ]);
+    const staleRows: StaleCompanyRow[] = collectStaleCompanyRows({
+      neverReconciled: neverSnap.docs.map(mapSnap),
+      aged: agedSnap.docs.map(mapSnap),
+      maxItems: 10,
+    });
+    const maintenance = await runStaleCompanyMaintenance({
+      enabled: true,
+      store,
+      scanner: {
+        listStale: async () => staleRows,
+      },
+      revalidate,
+      nowMs,
+      maxItems: 10,
+    });
+
+    const monthKey = istMonthKeyForMillis(nowMs());
+    const ledgerSnap = await db
+      .collection("_billingEventLedger")
+      .where("monthKey", "==", monthKey)
+      .limit(200)
+      .get();
+    const ledgerRows = ledgerSnap.docs.map((d) => d.data() as BillingEventLedgerDoc);
+    const report = await reportLedgerCommissionsForMonth({
+      scanner: {
+        listForMonth: async () => ledgerRows,
+      },
+      monthKey,
+    });
+
+    billingLog("info", {
+      diagnosticUid: "scheduler",
+      platform: "android",
+      correlationId: invocationId,
+      result: `reconciliation_tick:${tallies.claimed}:${tallies.resolved}:${tallies.retryable}:${tallies.terminal}:${tallies.pending}:${tallies.stale}:${tallies.configuration_disabled}`,
     });
     billingLog("info", {
       diagnosticUid: "scheduler",
       platform: "android",
-      result: `reconciliation_tick:${tallies.claimed}:${tallies.resolved}:${tallies.retryable}:${tallies.terminal}`,
+      correlationId: invocationId,
+      result: `stale_company:${maintenance.scanned}:${maintenance.attempted}:${maintenance.verified}:${maintenance.pending}:${maintenance.skipped}`,
+    });
+    billingLog("info", {
+      diagnosticUid: "scheduler",
+      platform: "android",
+      correlationId: invocationId,
+      result: `commission_report:${monthKey}:${formatCommissionReportLine(report)}`,
     });
   }
 );

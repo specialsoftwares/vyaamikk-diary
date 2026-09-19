@@ -14,13 +14,18 @@ import {
 } from "./paths";
 import {
   claimReconciliationWorkItem,
+  completeClaimedReconciliationWorkItem,
   ensureReconciliationWorkItem,
   markReconciliationRetryable,
   operatorRequeueReconciliationWorkItem,
+  remainingAttemptBudget,
+  RECONCILIATION_MAX_ATTEMPTS,
   reconciliationBackoffMs,
 } from "./reconciliationQueue";
 import {
+  collectDueReconciliationIds,
   memoryReconciliationScanner,
+  newReconciliationInvocationId,
   processClaimedReconciliationItem,
   runBillingReconciliationTick,
   type StoreRevalidateInput,
@@ -128,7 +133,7 @@ async function main() {
       claimed: claimed.doc!,
       revalidate: async (input) => {
         calls.push(input);
-        return { resultSummary: "ok" };
+        return { kind: "verified", resultSummary: "ok" };
       },
     });
     assert.equal(result.outcome, "resolved");
@@ -162,7 +167,7 @@ async function main() {
       claimed: claimed.doc!,
       revalidate: async () => {
         calls += 1;
-        return { resultSummary: "should-not-run" };
+        return { kind: "verified", resultSummary: "should-not-run" };
       },
     });
     assert.equal(result.outcome, "terminal");
@@ -184,7 +189,7 @@ async function main() {
       workerId: "w1",
       nowMs: NOW,
       claimed: claimed.doc!,
-      revalidate: async () => ({ resultSummary: "no" }),
+      revalidate: async () => ({ kind: "verified", resultSummary: "no" }),
     });
     assert.equal(result.outcome, "terminal");
     assert.equal(result.reason, "missing_ledger");
@@ -241,6 +246,7 @@ async function main() {
     const doc = store.docs.get(queue()) as BillingReconciliationQueueDoc;
     assert.equal(doc.status, "pending");
     assert.equal(doc.nextAttemptAt, NOW + 5);
+    assert.equal(remainingAttemptBudget(doc), RECONCILIATION_MAX_ATTEMPTS);
   }
 
   {
@@ -250,7 +256,7 @@ async function main() {
       enabled: false,
       store,
       scanner: memoryReconciliationScanner(store),
-      revalidate: async () => ({ resultSummary: "no" }),
+      revalidate: async () => ({ kind: "verified", resultSummary: "no" }),
       nowMs: () => NOW,
       workerId: "sched",
     });
@@ -259,7 +265,7 @@ async function main() {
       enabled: true,
       store,
       scanner: memoryReconciliationScanner(store),
-      revalidate: async () => ({ resultSummary: "ok" }),
+      revalidate: async () => ({ kind: "verified", resultSummary: "ok" }),
       nowMs: () => NOW,
       workerId: "sched",
     });
@@ -274,7 +280,7 @@ async function main() {
       enabled: true,
       store,
       scanner: memoryReconciliationScanner(store),
-      revalidate: async () => ({ resultSummary: "ok" }),
+      revalidate: async () => ({ kind: "verified", resultSummary: "ok" }),
       nowMs: () => NOW,
       workerId: "a",
     });
@@ -292,7 +298,198 @@ async function main() {
     assert.equal(second.claimed, 0);
   }
 
+  {
+    const store = new MemoryBillingStore();
+    await seedPending(store);
+    const first = await claimReconciliationWorkItem(store, {
+      id: QUEUE_ID,
+      workerId: "scheduler:rev1:inv-a",
+      nowMs: NOW,
+    });
+    const sameRevision = await claimReconciliationWorkItem(store, {
+      id: QUEUE_ID,
+      workerId: "scheduler:rev1:inv-b",
+      nowMs: NOW + 1,
+    });
+    const sameWorker = await claimReconciliationWorkItem(store, {
+      id: QUEUE_ID,
+      workerId: "scheduler:rev1:inv-a",
+      nowMs: NOW + 1,
+    });
+    assert.equal(first.claimed, true);
+    assert.equal(sameRevision.claimed, false);
+    assert.equal(sameWorker.claimed, false);
+  }
+
+  {
+    const store = new MemoryBillingStore();
+    await seedPending(store);
+    const oldHold = deferred<{ kind: "verified"; resultSummary: string }>();
+    const oldClaim = await claimReconciliationWorkItem(store, {
+      id: QUEUE_ID,
+      workerId: "old",
+      nowMs: NOW,
+    });
+    const oldWork = processClaimedReconciliationItem(store, {
+      id: QUEUE_ID,
+      workerId: "old",
+      nowMs: () => NOW + 90_000,
+      claimed: oldClaim.doc!,
+      revalidate: async () => oldHold.promise,
+    });
+    const fresh = await claimReconciliationWorkItem(store, {
+      id: QUEUE_ID,
+      workerId: "new",
+      nowMs: NOW + 61_000,
+    });
+    assert.equal(fresh.claimed, true);
+    oldHold.resolve({ kind: "verified", resultSummary: "late" });
+    const oldResult = await oldWork;
+    assert.equal(oldResult.outcome, "stale");
+    const doc = store.docs.get(queue()) as BillingReconciliationQueueDoc;
+    assert.equal(doc.status, "leased");
+    assert.equal(doc.leaseOwner, "new");
+    const completeOld = await completeClaimedReconciliationWorkItem(store, {
+      id: QUEUE_ID,
+      workerId: "old",
+      platform: "android",
+      financialEventId: EVENT_ID,
+      nowMs: NOW + 90_000,
+    });
+    assert.equal(completeOld.completed, false);
+    assert.equal(completeOld.reason, "stale_lease");
+  }
+
+  {
+    const store = new MemoryBillingStore();
+    await seedPending(store);
+    const claimed = await claimReconciliationWorkItem(store, {
+      id: QUEUE_ID,
+      workerId: "w1",
+      nowMs: NOW,
+    });
+    const refused = await operatorRequeueReconciliationWorkItem(store, {
+      id: QUEUE_ID,
+      nowMs: NOW + 1,
+    });
+    assert.equal(refused.refused, "active_lease");
+    assert.equal(claimed.doc?.status, "leased");
+  }
+
+  {
+    const store = new MemoryBillingStore();
+    await seedPending(store);
+    for (let i = 0; i < RECONCILIATION_MAX_ATTEMPTS; i++) {
+      const claimed = await claimReconciliationWorkItem(store, {
+        id: QUEUE_ID,
+        workerId: `w${i}`,
+        nowMs: NOW + i * 20 * 60_000,
+      });
+      if (claimed.claimed) {
+        await markReconciliationRetryable(store, {
+          id: QUEUE_ID,
+          workerId: `w${i}`,
+          nowMs: NOW + i * 20 * 60_000,
+          errorCode: "play_unavailable",
+        });
+      }
+    }
+    const exhausted = await claimReconciliationWorkItem(store, {
+      id: QUEUE_ID,
+      workerId: "after",
+      nowMs: NOW + RECONCILIATION_MAX_ATTEMPTS * 20 * 60_000,
+    });
+    assert.equal(exhausted.claimed, false);
+    assert.equal(exhausted.doc?.status, "terminal");
+    const recovered = await operatorRequeueReconciliationWorkItem(store, {
+      id: QUEUE_ID,
+      nowMs: NOW + RECONCILIATION_MAX_ATTEMPTS * 20 * 60_000 + 1,
+    });
+    assert.equal(recovered.changed, true);
+    const after = store.docs.get(queue()) as BillingReconciliationQueueDoc;
+    assert.equal(after.status, "pending");
+    assert.equal(after.attemptCount, RECONCILIATION_MAX_ATTEMPTS);
+    assert.equal(remainingAttemptBudget(after), RECONCILIATION_MAX_ATTEMPTS);
+    const reclaim = await claimReconciliationWorkItem(store, {
+      id: QUEUE_ID,
+      workerId: "operator-retry",
+      nowMs: NOW + RECONCILIATION_MAX_ATTEMPTS * 20 * 60_000 + 1,
+    });
+    assert.equal(reclaim.claimed, true);
+  }
+
+  {
+    const store = new MemoryBillingStore();
+    await seedPending(store);
+    const tick = await runBillingReconciliationTick({
+      enabled: true,
+      store,
+      scanner: memoryReconciliationScanner(store),
+      revalidate: async () => ({
+        kind: "configuration_disabled",
+        resultSummary: "play_billing_disabled",
+      }),
+      nowMs: () => NOW,
+      workerId: "cfg",
+    });
+    assert.equal(tick.claimed, 1);
+    assert.equal(tick.configuration_disabled, 1);
+    const doc = store.docs.get(queue()) as BillingReconciliationQueueDoc;
+    assert.equal(doc.status, "pending");
+    assert.equal(doc.terminalReason, null);
+    assert.equal(remainingAttemptBudget(doc), RECONCILIATION_MAX_ATTEMPTS);
+  }
+
+  {
+    const store = new MemoryBillingStore();
+    await seedPending(store);
+    const tick = await runBillingReconciliationTick({
+      enabled: true,
+      store,
+      scanner: memoryReconciliationScanner(store),
+      revalidate: async () => ({ kind: "pending", resultSummary: "pending" }),
+      nowMs: () => NOW,
+      workerId: "pend",
+    });
+    assert.equal(tick.pending, 1);
+    assert.equal((store.docs.get(queue()) as BillingReconciliationQueueDoc).status, "failed_retryable");
+  }
+
+  {
+    const pages: Array<Array<{ id: string; status: string; nextAttemptAt?: number }>> = [
+      Array.from({ length: 40 }, (_, i) => ({
+        id: `early-${i}`,
+        status: "pending",
+        nextAttemptAt: NOW + 60_000,
+      })),
+      [{ id: QUEUE_ID, status: "pending", nextAttemptAt: NOW }],
+    ];
+    const ids = await collectDueReconciliationIds({
+      nowMs: NOW,
+      limit: 10,
+      pageSize: 40,
+      maxPages: 8,
+      readPage: async (page) => pages[page] ?? [],
+    });
+    assert.equal(ids.includes(QUEUE_ID), true);
+  }
+
+  {
+    const a = newReconciliationInvocationId("rev");
+    const b = newReconciliationInvocationId("rev");
+    assert.notEqual(a, b);
+    assert.match(a, /^scheduler:rev:/);
+  }
+
   console.log("reconciliationConsumer.unit.test.ts: ok");
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
 }
 
 void main().catch((err) => {

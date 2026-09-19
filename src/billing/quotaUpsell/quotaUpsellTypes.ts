@@ -30,7 +30,8 @@ export type QuotaUpsellDenyReason =
   | "session_stale"
   | "no_host"
   | "sheet_already_visible"
-  | "other_sheet_visible";
+  | "other_sheet_visible"
+  | "purchase_entry_closed";
 
 export interface QuotaUpsellRequest {
   family: QuotaUpsellFamily;

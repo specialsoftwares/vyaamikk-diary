@@ -539,7 +539,7 @@ async function finishComposerSavePipeline(
   }
 
   if (cloudAccepted && mayIssueRemoteWork(session, userId)) {
-    if (idempotency) {
+    if (idempotency && (processLockKey || processLockOwner || lockLeaseStartedAt)) {
       await completeCoordinatedSave(idempotency, withPdf.id, {
         processLockKey: processLockKey ?? undefined,
         processLockOwner: processLockOwner ?? undefined,

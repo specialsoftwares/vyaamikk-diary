@@ -7,49 +7,15 @@ import React, { useMemo, useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 
 import { LocaleUiText, PremiumActionButton, TextField } from "@/components/ui";
-import { gstStateLabel, GST_STATE_CODES, gstStateName } from "@/subscription/gstStates";
-import type { ClientBillingDetails } from "@/subscription/billingDetailsReader";
+import { gstStateLabel, GST_STATE_CODES } from "@/subscription/gstStates";
 import type { TranslateFn } from "@/components/billing/upgradeTypes";
 import { radius, spacing, typography, useThemedStyles } from "@/theme";
+import {
+  type BillingDetailsDraft,
+} from "@/components/billing/billingDetailsDraft";
 
-export type BillingDetailsDraft = {
-  billingRecipientName: string;
-  gstin: string;
-  billingBusinessName: string;
-  billingAddressLine1: string;
-  billingAddressLine2: string;
-  billingCity: string;
-  billingPostalCode: string;
-  billingStateCode: string;
-};
-
-export function draftFromDetails(details: ClientBillingDetails | null): BillingDetailsDraft {
-  return {
-    billingRecipientName: details?.billingRecipientName ?? "",
-    gstin: details?.gstin ?? "",
-    billingBusinessName: details?.billingBusinessName ?? "",
-    billingAddressLine1: details?.billingAddressLine1 ?? "",
-    billingAddressLine2: details?.billingAddressLine2 ?? "",
-    billingCity: details?.billingCity ?? "",
-    billingPostalCode: details?.billingPostalCode ?? "",
-    billingStateCode: details?.billingStateCode ?? "",
-  };
-}
-
-export function payloadFromDraft(draft: BillingDetailsDraft) {
-  const stateCode = draft.billingStateCode.trim();
-  return {
-    billingRecipientName: draft.billingRecipientName.trim() || null,
-    gstin: draft.gstin.trim() || null,
-    billingBusinessName: draft.billingBusinessName.trim() || null,
-    billingAddressLine1: draft.billingAddressLine1.trim() || null,
-    billingAddressLine2: draft.billingAddressLine2.trim() || null,
-    billingCity: draft.billingCity.trim() || null,
-    billingPostalCode: draft.billingPostalCode.trim() || null,
-    billingStateCode: stateCode || null,
-    billingStateName: stateCode ? gstStateName(stateCode) : null,
-  };
-}
+export type { BillingDetailsDraft } from "@/components/billing/billingDetailsDraft";
+export { draftFromDetails, payloadFromDraft } from "@/components/billing/billingDetailsDraft";
 
 export function BillingDetailsForm(props: {
   t: TranslateFn;

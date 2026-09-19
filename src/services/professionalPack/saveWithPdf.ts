@@ -5,9 +5,6 @@ import {
   buildProfessionalPackPdfHtml,
   professionalPackPdfLabels,
 } from "@/services/pdf/professionalPackPdfTemplate";
-import { resolveGujaratiPdfExtraCss } from "@/services/pdf/resolveGujaratiPdfExtraCss";
-import { getUserPdfBranding } from "@/services/pdf/userPdfBranding";
-import { pdfService } from "@/services/pdf/pdfService";
 import { dayKey } from "@/utils/date";
 import { matterLabelKey } from "@/utils/professionalPack/display";
 import { getMatterDef } from "@/domain/professionalPackMatters";
@@ -22,11 +19,17 @@ import {
 import { SAVE_STEP, SaveStillInProgressError, hasCompletedStep } from "@/services/records/saveLockTypes";
 import type { SaveIdempotencyContext, ProcessSaveLockOwner } from "@/services/records/saveIdempotency";
 import { releaseProcessSaveLock } from "@/services/records/saveIdempotency";
-import { invalidateGlobalSearchIndex } from "@/services/search/globalSearchRepository";
 
 import { getProfessionalPackRepository } from "./index";
 import type { CreateProfessionalPackInput } from "./types";
-import { notificationsService } from "@/services/notifications";
+import { pdfGenerateHook } from "@/services/pdf/pdfGenerateHook";
+
+let saveEffectsForTests: (() => Promise<void>) | null = null;
+
+/** Node/CI seam. Production still indexes search after PDF. */
+export function setProfessionalPackSaveEffectsForTests(hook: (() => Promise<void>) | null): void {
+  saveEffectsForTests = hook;
+}
 
 export async function saveProfessionalPackWithPdf(
   userId: string,
@@ -120,6 +123,7 @@ export async function saveProfessionalPackWithPdf(
 
     if (pack.reminder && !pack.reminder.notificationId) {
       try {
+        const { notificationsService } = await import("@/services/notifications");
         const nid = await notificationsService.scheduleOneShot({
           title: options.t("proPack.reminderTitle", { title: pack.title }),
           body: options.t("proPack.reminderBody"),
@@ -140,28 +144,34 @@ export async function saveProfessionalPackWithPdf(
       shouldRunStep(completedSteps, SAVE_STEP.PDF_URI_SAVED, { pdfUri: pack.pdfUri });
 
     if (needsPdf) {
-      const def = getMatterDef(pack.professionalCategory, pack.matterType);
-      const matterLabel = matterLabelKey(pack.professionalCategory, pack.matterType);
-      const branding = await getUserPdfBranding(options.user, { t: options.t });
-      const extraCss = await resolveGujaratiPdfExtraCss(options.uiLang);
-      const html = buildProfessionalPackPdfHtml({
-        pack,
-        user: options.user,
-        branding,
-        locale: options.locale,
-        extraCss,
-        labels: professionalPackPdfLabels({
-          t: options.t,
-          uiLang: options.uiLang,
-          reportTitle: def
-            ? options.t(`proPack.pdfTitles.${def.pdfTitleKey}`)
-            : options.t("proPack.pdfTitles.generic"),
-          matterType: options.t(matterLabel),
-          category: options.t(`proPack.categories.${pack.professionalCategory}`),
-          profileTitle: options.t("pdf.userProfileTitle"),
-          legal: branding.legal,
-        }),
-      });
+      const hooked = pdfGenerateHook();
+      let html = "";
+      if (!hooked) {
+        const def = getMatterDef(pack.professionalCategory, pack.matterType);
+        const matterLabel = matterLabelKey(pack.professionalCategory, pack.matterType);
+        const { getUserPdfBranding } = await import("@/services/pdf/userPdfBranding");
+        const { resolveGujaratiPdfExtraCss } = await import("@/services/pdf/resolveGujaratiPdfExtraCss");
+        const branding = await getUserPdfBranding(options.user, { t: options.t });
+        const extraCss = await resolveGujaratiPdfExtraCss(options.uiLang);
+        html = buildProfessionalPackPdfHtml({
+          pack,
+          user: options.user,
+          branding,
+          locale: options.locale,
+          extraCss,
+          labels: professionalPackPdfLabels({
+            t: options.t,
+            uiLang: options.uiLang,
+            reportTitle: def
+              ? options.t(`proPack.pdfTitles.${def.pdfTitleKey}`)
+              : options.t("proPack.pdfTitles.generic"),
+            matterType: options.t(matterLabel),
+            category: options.t(`proPack.categories.${pack.professionalCategory}`),
+            profileTitle: options.t("pdf.userProfileTitle"),
+            legal: branding.legal,
+          }),
+        });
+      }
 
       try {
         const pdfStep = await runRecordStepIfNeeded(
@@ -173,18 +183,22 @@ export async function saveProfessionalPackWithPdf(
             completedSteps,
             clientRecordId: input.clientRecordId,
           },
-          () =>
-            pdfService.generate({
+          async () => {
+            const generateInput = {
               html,
               fileNameHint: options.t("proPack.fileNameHint", {
                 date: dayKey(pack.matterDate),
               }),
               fileName: {
-                documentType: "professionalBrief",
+                documentType: "professionalBrief" as const,
                 titleOrParty: pack.title,
                 date: dayKey(pack.matterDate),
               },
-            })
+            };
+            if (hooked) return hooked(generateInput);
+            const { pdfService } = await import("@/services/pdf/pdfService");
+            return pdfService.generate(generateInput);
+          }
         );
         completedSteps = pdfStep.completedSteps;
         if (pdfStep.ran && pdfStep.result) {
@@ -217,6 +231,11 @@ export async function saveProfessionalPackWithPdf(
         clientRecordId: input.clientRecordId,
       },
       async () => {
+        if (saveEffectsForTests) {
+          await saveEffectsForTests();
+          return;
+        }
+        const { invalidateGlobalSearchIndex } = await import("@/services/search/globalSearchRepository");
         invalidateGlobalSearchIndex();
       }
     );

@@ -41,6 +41,8 @@ assert.equal(settingsTab.includes("useSharedValue"), false);
 assert.ok(settingsTab.includes('t("settings.deleteAccountAndData")'));
 assert.ok(settingsTab.includes('t("settings.deleteAccountSubtitle")'));
 assert.ok(settingsTab.includes('router.push("/(app)/settings/identity")'));
+assert.ok(settingsTab.includes('router.push("/(app)/settings/subscription")'));
+assert.ok(settingsTab.includes('t("settings.subscriptionItem")'));
 assert.ok(settingsTab.includes('router.push("/(app)/settings/legal")'));
 assert.ok(settingsTab.includes('router.push("/(app)/settings/about")'));
 assert.ok(settingsTab.includes('router.push("/(app)/settings/disclaimer")'));

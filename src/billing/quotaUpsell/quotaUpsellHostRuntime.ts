@@ -7,6 +7,7 @@
  */
 
 import type { CanonicalSku, IapView, PurchaseFlowResult } from "@/billing/iap/iapTypes";
+import { isSubscriptionPurchaseEntryEnabled } from "@/billing/iap/purchaseEntryGate";
 
 import {
   createQuotaUpsellController,
@@ -82,6 +83,15 @@ export function createQuotaUpsellHostRuntime(
 
   function presentManual(session: SyncSessionToken | null): QuotaUpsellPresentResult {
     controller.sync(deps.getIap());
+    if (!isSubscriptionPurchaseEntryEnabled()) {
+      emit();
+      return {
+        ok: false,
+        reason: "purchase_entry_closed",
+        visible: false,
+        clientRecordId: null,
+      };
+    }
     const result = controller.presentManual(session);
     emit();
     return result;

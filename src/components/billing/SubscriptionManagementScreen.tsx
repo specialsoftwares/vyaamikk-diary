@@ -1,15 +1,16 @@
 /**
  * Production subscription management. Presentation-only for entitlements:
  * status comes from SubscriptionProvider; purchases/restore from IapProvider.
- * No second native purchase controller. No client entitlement writes.
+ * Reads/saves publish only for the originating UID+generation.
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Linking, Platform, StyleSheet, View } from "react-native";
+import React, { useEffect, useMemo, useState } from "react";
+import { AppState, Linking, Platform, StyleSheet, View } from "react-native";
 
 import { useIap } from "@/billing/iap";
 import { saveBillingDetailsClient } from "@/billing/iap/billingDetailsClient";
 import { storeSubscriptionsManageUrl } from "@/billing/iap/playSubscriptionsUrl";
+import { isSubscriptionPurchaseEntryEnabled } from "@/billing/iap/purchaseEntryGate";
 import { notifyManualUpgrade } from "@/billing/quotaUpsell";
 import {
   Card,
@@ -21,12 +22,7 @@ import {
 import { useT } from "@/i18n";
 import { useAuth } from "@/state/auth";
 import { useSubscription } from "@/subscription";
-import {
-  draftFromDetails,
-  payloadFromDraft,
-  BillingDetailsForm,
-  type BillingDetailsDraft,
-} from "@/components/billing/BillingDetailsForm";
+import { BillingDetailsForm } from "@/components/billing/BillingDetailsForm";
 import {
   billingHistoryTypeCopyKey,
   formatHistoryAmountInr,
@@ -42,6 +38,7 @@ import {
   managementPlanNameKey,
   managementQuotaView,
 } from "@/subscription/subscriptionManagementPresentation";
+import { createSubscriptionManagementRuntime } from "@/subscription/subscriptionManagementRuntime";
 import { syncSessionOwnership } from "@/sync/syncSessionOwnership";
 import { spacing, typography, useThemedStyles } from "@/theme";
 
@@ -59,19 +56,42 @@ export function SubscriptionManagementScreen() {
   const subscription = useSubscription();
   const iap = useIap();
   const uid = user?.uid ?? null;
+  const session = syncSessionOwnership.capture();
 
-  const [usage, setUsage] = useState<Awaited<ReturnType<typeof readOwnerQuotaUsage>> | null>(null);
-  const [history, setHistory] = useState<
-    Awaited<ReturnType<typeof readOwnerBillingHistory>> | null
-  >(null);
-  const [detailsKind, setDetailsKind] = useState<"loading" | "ready" | "unavailable">("loading");
-  const [draft, setDraft] = useState<BillingDetailsDraft>(draftFromDetails(null));
-  const [gstinError, setGstinError] = useState<string | null>(null);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [restoreError, setRestoreError] = useState<string | null>(null);
-  const [manageError, setManageError] = useState<string | null>(null);
-  const [upgradeError, setUpgradeError] = useState<string | null>(null);
+  const iapRef = React.useRef(iap);
+  iapRef.current = iap;
+
+  const [runtime] = useState(() =>
+    createSubscriptionManagementRuntime({
+      readUsage: readOwnerQuotaUsage,
+      readHistory: readOwnerBillingHistory,
+      readDetails: readOwnerBillingDetails,
+      saveDetails: saveBillingDetailsClient,
+      restore: () => iapRef.current.restorePurchases(),
+      openUrl: (url) => Linking.openURL(url),
+      presentUpgrade: notifyManualUpgrade,
+    })
+  );
+  const [, setTick] = useState(0);
+  const published = runtime.snapshot();
+
+  useEffect(() => {
+    return runtime.subscribe(() => setTick((n) => n + 1));
+  }, [runtime]);
+
+  useEffect(() => {
+    runtime.setOwner(uid && session ? { uid: session.uid, generation: session.generation } : null);
+    // Ownership is UID + generation, not the capture() object identity.
+  }, [runtime, uid, session?.uid, session?.generation]); // eslint-disable-line react-hooks/exhaustive-deps -- session object identity is not the key
+
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") runtime.reload();
+    });
+    return () => sub.remove();
+  }, [runtime]);
+
+  useEffect(() => () => runtime.dispose(), [runtime]);
 
   const styles = useThemedStyles((colors) =>
     StyleSheet.create({
@@ -86,117 +106,71 @@ export function SubscriptionManagementScreen() {
       body: { ...typography.body, color: colors.text, lineHeight: 22 },
       muted: { ...typography.caption, color: colors.textMuted, lineHeight: 18 },
       error: { ...typography.caption, color: colors.danger, lineHeight: 18 },
+      barTrack: {
+        height: 6,
+        borderRadius: 3,
+        backgroundColor: colors.divider,
+        overflow: "hidden",
+      },
+      barFill: { height: 6, backgroundColor: colors.primary },
       historyRow: { gap: 2, paddingVertical: spacing.sm },
       divider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.divider },
     })
   );
 
-  const reload = useCallback(async () => {
-    if (!uid) {
-      setUsage({ kind: "unavailable", code: "signed_out" });
-      setHistory({ kind: "unavailable", code: "signed_out" });
-      setDetailsKind("unavailable");
-      return;
-    }
-    const [usageRead, historyRead, detailsRead] = await Promise.all([
-      readOwnerQuotaUsage(uid),
-      readOwnerBillingHistory(uid),
-      readOwnerBillingDetails(uid),
-    ]);
-    setUsage(usageRead);
-    setHistory(historyRead);
-    if (detailsRead.kind === "ok") {
-      setDraft(draftFromDetails(detailsRead.details));
-      setDetailsKind("ready");
-    } else if (detailsRead.kind === "missing") {
-      setDraft(draftFromDetails(null));
-      setDetailsKind("ready");
-    } else {
-      setDetailsKind("unavailable");
-    }
-  }, [uid]);
-
-  useEffect(() => {
-    void reload();
-  }, [reload]);
-
   const pendingKey = managementPendingCopyKey(managementPendingKind(subscription.status));
   const periodEnd = managementPeriodEndMs(subscription.status);
   const quota = managementQuotaView({
     features: subscription.features,
-    recordsThisMonth: usage?.kind === "ok" ? usage.recordsThisMonth : null,
-    usageReadable: usage?.kind === "ok" || usage?.kind === "missing",
+    usage: published.usage,
+    nowMs: Date.now(),
   });
 
   const quotaCopy = useMemo(() => {
     if (quota.kind === "unlimited") return t("billing.management.quotaUnlimited");
-    if (quota.kind === "unavailable") return t("billing.management.quotaUnavailable");
+    if (quota.kind === "unavailable") {
+      if (quota.currency.kind === "malformed") return t("billing.management.quotaMalformed");
+      return t("billing.management.quotaUnavailable");
+    }
+    if (quota.currency.kind === "prior_month") {
+      return t("billing.management.quotaPriorMonth", { month: quota.currency.storedMonthKey, limit: quota.limit });
+    }
+    if (quota.currency.kind === "future_month") {
+      return t("billing.management.quotaFutureMonth", { month: quota.currency.storedMonthKey });
+    }
     if (quota.used == null) return t("billing.management.quotaUnknown", { limit: quota.limit });
     return t("billing.management.quotaUsed", { used: quota.used, limit: quota.limit });
   }, [quota, t]);
 
-  const storeBusy = iap.purchaseInFlight || iap.pending != null;
+  const storeBusy = iap.purchaseInFlight || iap.pending != null || published.restoring;
   const platform = subscription.status.platform ?? (Platform.OS === "ios" ? "ios" : "android");
-
-  const onUpgrade = () => {
-    setUpgradeError(null);
-    const result = notifyManualUpgrade(syncSessionOwnership.capture());
-    if (!result.ok) {
-      setUpgradeError(t("billing.management.upgradeUnavailable"));
-    }
-  };
-
-  const onRestore = async () => {
-    setRestoreError(null);
-    if (storeBusy) {
-      setRestoreError(t("billing.management.restoreBusy"));
-      return;
-    }
-    const result = await iap.restorePurchases();
-    if (result.kind === "failed") {
-      setRestoreError(result.message);
-    } else if (result.kind === "unavailable") {
-      setRestoreError(t("billing.upgrade.restoreUnavailable"));
-    }
-  };
-
-  const onManage = async () => {
-    setManageError(null);
-    const url = storeSubscriptionsManageUrl({ platform, plan: subscription.plan });
-    try {
-      const opened = await Linking.openURL(url);
-      if (opened === false) {
-        setManageError(t("billing.management.manageUnavailable"));
-      }
-    } catch {
-      setManageError(t("billing.management.manageUnavailable"));
-    }
-  };
-
-  const onSaveDetails = async () => {
-    setGstinError(null);
-    setSaveError(null);
-    setSaving(true);
-    try {
-      const result = await saveBillingDetailsClient(payloadFromDraft(draft));
-      if (result.kind === "saved") {
-        await reload();
-        return;
-      }
-      if (result.kind === "gstin_format_invalid") {
-        setGstinError(t("billing.management.gstInvalid"));
-        return;
-      }
-      setSaveError(result.message);
-    } catch {
-      setSaveError(t("billing.management.saveFailed"));
-    } finally {
-      setSaving(false);
-    }
-  };
+  const purchaseEntryOn = isSubscriptionPurchaseEntryEnabled();
+  const barRatio =
+    quota.kind === "capped" && quota.used != null && quota.limit > 0
+      ? Math.min(1, quota.used / quota.limit)
+      : 0;
 
   const historyRows: SanitizedBillingHistoryRow[] =
-    history?.kind === "ok" ? history.rows : [];
+    published.history?.kind === "ok" ? published.history.rows : [];
+
+  const upgradeErrorCopy =
+    published.upgradeError === "purchase_entry_closed"
+      ? t("billing.management.purchaseEntryClosed")
+      : published.upgradeError
+        ? t("billing.management.upgradeUnavailable")
+        : null;
+  const restoreErrorCopy =
+    published.restoreError === "unavailable"
+      ? t("billing.upgrade.restoreUnavailable")
+      : published.restoreError === "failed"
+        ? t("billing.management.restoreBusy")
+        : published.restoreError;
+  const saveErrorCopy =
+    published.saveError === "save_failed"
+      ? t("billing.management.saveFailed")
+      : published.saveError
+        ? t("billing.management.saveFailed")
+        : null;
 
   return (
     <Screen scroll>
@@ -224,46 +198,64 @@ export function SubscriptionManagementScreen() {
                 : t("billing.management.periodUnknown")}
             </LocaleUiText>
             <LocaleUiText style={styles.muted}>{quotaCopy}</LocaleUiText>
+            {quota.kind === "capped" && quota.used != null ? (
+              <View style={styles.barTrack} accessibilityRole="progressbar">
+                <View style={[styles.barFill, { width: `${Math.round(barRatio * 100)}%` }]} />
+              </View>
+            ) : null}
+            {quota.kind === "capped" && quota.warnAt80 ? (
+              <LocaleUiText style={styles.muted}>{t("billing.management.quotaWarn80")}</LocaleUiText>
+            ) : null}
             <LocaleUiText style={styles.muted}>{t("billing.upgrade.letterheadIncluded")}</LocaleUiText>
           </>
         )}
         {subscription.error ? <LocaleUiText style={styles.error}>{subscription.error}</LocaleUiText> : null}
         <PremiumActionButton
           label={t("billing.management.upgradeCta")}
-          onPress={onUpgrade}
-          disabled={storeBusy}
+          onPress={() => {
+            const result = runtime.presentUpgrade(syncSessionOwnership.capture());
+            if (!result.ok && result.reason !== "purchase_entry_closed") {
+              /* runtime already recorded upgradeError */
+            }
+          }}
+          disabled={storeBusy || !purchaseEntryOn}
           accessibilityLabel={t("billing.management.upgradeCta")}
         />
-        {upgradeError ? <LocaleUiText style={styles.error}>{upgradeError}</LocaleUiText> : null}
+        {upgradeErrorCopy ? <LocaleUiText style={styles.error}>{upgradeErrorCopy}</LocaleUiText> : null}
+        {!purchaseEntryOn ? (
+          <LocaleUiText style={styles.muted}>{t("billing.management.purchaseEntryClosed")}</LocaleUiText>
+        ) : null}
         <PremiumActionButton
           variant="secondary"
           label={t("billing.upgrade.ctaRestore")}
           onPress={() => {
-            void onRestore();
+            void runtime.restore();
           }}
           loading={storeBusy}
           disabled={!iap.available || storeBusy}
           accessibilityLabel={t("billing.upgrade.ctaRestore")}
         />
         <LocaleUiText style={styles.muted}>{t("billing.management.restoreNotCancel")}</LocaleUiText>
-        {restoreError ? <LocaleUiText style={styles.error}>{restoreError}</LocaleUiText> : null}
+        {restoreErrorCopy ? <LocaleUiText style={styles.error}>{restoreErrorCopy}</LocaleUiText> : null}
         <PremiumActionButton
           variant="ghost"
           label={t("billing.management.managePlay")}
           onPress={() => {
-            void onManage();
+            void runtime.manage(storeSubscriptionsManageUrl({ platform, plan: subscription.plan }));
           }}
           accessibilityLabel={t("billing.management.managePlay")}
         />
         <LocaleUiText style={styles.muted}>{t("billing.management.managePlayHint")}</LocaleUiText>
-        {manageError ? <LocaleUiText style={styles.error}>{manageError}</LocaleUiText> : null}
+        {published.manageError ? (
+          <LocaleUiText style={styles.error}>{t("billing.management.manageUnavailable")}</LocaleUiText>
+        ) : null}
       </Card>
 
       <LocaleUiText style={styles.sectionTitle}>{t("billing.management.historyTitle")}</LocaleUiText>
       <Card style={styles.card}>
-        {history == null ? (
+        {published.history == null ? (
           <LocaleUiText style={styles.muted}>{t("billing.management.loading")}</LocaleUiText>
-        ) : history.kind === "unavailable" ? (
+        ) : published.history.kind === "unavailable" ? (
           <LocaleUiText style={styles.muted}>{t("billing.management.historyUnavailable")}</LocaleUiText>
         ) : historyRows.length === 0 ? (
           <LocaleUiText style={styles.muted}>{t("billing.management.historyEmpty")}</LocaleUiText>
@@ -288,23 +280,32 @@ export function SubscriptionManagementScreen() {
 
       <LocaleUiText style={styles.sectionTitle}>{t("billing.management.detailsTitle")}</LocaleUiText>
       <Card style={styles.card}>
-        {detailsKind === "loading" ? (
+        {published.detailsKind === "loading" ? (
           <LocaleUiText style={styles.muted}>{t("billing.management.loading")}</LocaleUiText>
-        ) : detailsKind === "unavailable" ? (
+        ) : published.detailsKind === "unavailable" ? (
           <LocaleUiText style={styles.muted}>{t("billing.management.detailsUnavailable")}</LocaleUiText>
         ) : (
-          <BillingDetailsForm
-            t={t}
-            draft={draft}
-            onChange={setDraft}
-            gstinError={gstinError}
-            saveError={saveError}
-            saving={saving}
-            saveDisabled={!uid}
-            onSave={() => {
-              void onSaveDetails();
-            }}
-          />
+          <>
+            <LocaleUiText style={styles.muted}>
+              {published.invoiceReady
+                ? t("billing.management.invoiceReadyHint")
+                : t("billing.management.invoiceIncompleteHint")}
+            </LocaleUiText>
+            <BillingDetailsForm
+              t={t}
+              draft={published.draft}
+              onChange={(draft) => runtime.setDraft(draft)}
+              gstinError={
+                published.gstinError ? t("billing.management.gstInvalid") : null
+              }
+              saveError={saveErrorCopy}
+              saving={published.saving}
+              saveDisabled={!uid}
+              onSave={() => {
+                void runtime.saveDetails();
+              }}
+            />
+          </>
         )}
       </Card>
     </Screen>

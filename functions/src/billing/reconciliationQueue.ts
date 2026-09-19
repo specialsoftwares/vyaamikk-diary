@@ -12,6 +12,9 @@ import { AlreadyExistsError, type BillingStore } from "./store";
 import { billingReconciliationQueuePath, sanitizeDocId } from "./paths";
 import type { BillingPlatform, BillingReconciliationQueueDoc } from "./types";
 
+export const RECONCILIATION_LEASE_MS = 60_000;
+export const RECONCILIATION_MAX_ATTEMPTS = 12;
+
 export function refundReconciliationQueueId(orderId: string): string {
   return `android:refund-reconcile:${orderId.replace(/\//g, "_")}`;
 }
@@ -112,6 +115,7 @@ export async function ensureReconciliationWorkItem(
         resolvedAt: null,
         status: "pending",
         attemptCount: 0,
+        attemptBudgetRemaining: RECONCILIATION_MAX_ATTEMPTS,
         leaseOwner: null,
         leaseExpiresAt: null,
         nextAttemptAt: input.nowMs,
@@ -170,9 +174,6 @@ export async function resolveReconciliationWorkItem(
   });
 }
 
-export const RECONCILIATION_LEASE_MS = 60_000;
-export const RECONCILIATION_MAX_ATTEMPTS = 12;
-
 export function reconciliationBackoffMs(attemptCount: number): number {
   const exp = Math.min(Math.max(attemptCount, 0), 8);
   return Math.min(30_000 * 2 ** exp, 15 * 60_000);
@@ -183,15 +184,23 @@ function isDue(doc: BillingReconciliationQueueDoc, nowMs: number): boolean {
   return next <= nowMs;
 }
 
-function leaseHeldByOther(
-  doc: BillingReconciliationQueueDoc,
-  nowMs: number,
-  workerId: string
-): boolean {
+function liveLeaseHeld(doc: BillingReconciliationQueueDoc, nowMs: number): boolean {
   if (doc.status !== "leased") return false;
-  const expires = doc.leaseExpiresAt ?? 0;
-  if (expires <= nowMs) return false;
-  return (doc.leaseOwner ?? "") !== workerId;
+  return (doc.leaseExpiresAt ?? 0) > nowMs;
+}
+
+export function remainingAttemptBudget(
+  doc: Pick<BillingReconciliationQueueDoc, "attemptCount" | "attemptBudgetRemaining">,
+  maxAttempts = RECONCILIATION_MAX_ATTEMPTS
+): number {
+  if (typeof doc.attemptBudgetRemaining === "number" && Number.isInteger(doc.attemptBudgetRemaining)) {
+    return Math.max(0, doc.attemptBudgetRemaining);
+  }
+  return Math.max(0, maxAttempts - doc.attemptCount);
+}
+
+function claimedBy(doc: BillingReconciliationQueueDoc, workerId: string, nowMs: number): boolean {
+  return liveLeaseHeld(doc, nowMs) && (doc.leaseOwner ?? "") === workerId;
 }
 
 export async function claimReconciliationWorkItem(
@@ -215,17 +224,19 @@ export async function claimReconciliationWorkItem(
     if (existing.status === "resolved" || existing.status === "terminal") {
       return { claimed: false, doc: existing };
     }
-    if (leaseHeldByOther(existing, input.nowMs, input.workerId)) {
+    if (liveLeaseHeld(existing, input.nowMs)) {
       return { claimed: false, doc: existing };
     }
     if (!isDue(existing, input.nowMs)) {
       return { claimed: false, doc: existing };
     }
-    if (existing.attemptCount >= maxAttempts) {
+    const budget = remainingAttemptBudget(existing, maxAttempts);
+    if (budget <= 0) {
       const terminal: BillingReconciliationQueueDoc = {
         ...existing,
         status: "terminal",
         terminalReason: "retry_exhausted",
+        attemptBudgetRemaining: 0,
         leaseOwner: null,
         leaseExpiresAt: null,
         updatedAt: input.nowMs,
@@ -239,10 +250,85 @@ export async function claimReconciliationWorkItem(
       leaseOwner: input.workerId,
       leaseExpiresAt: input.nowMs + leaseMs,
       attemptCount: existing.attemptCount + 1,
+      attemptBudgetRemaining: budget - 1,
       updatedAt: input.nowMs,
     };
     tx.set(path, next as unknown as Record<string, unknown>);
     return { claimed: true, doc: next };
+  });
+}
+
+/**
+ * Worker completion. Distinct from webhook `resolveReconciliationWorkItem`,
+ * which remains the authoritative RTDN/ASSN path and does not require a lease.
+ */
+export async function completeClaimedReconciliationWorkItem(
+  store: BillingStore,
+  input: {
+    id: string;
+    workerId: string;
+    platform: BillingPlatform;
+    financialEventId: string;
+    nowMs: number;
+  }
+): Promise<{ completed: boolean; reason: string; doc: BillingReconciliationQueueDoc | null }> {
+  const path = billingReconciliationQueuePath(sanitizeDocId(input.id));
+  return store.runTransaction(async (tx) => {
+    const snap = await tx.get(path);
+    if (!snap.exists) return { completed: false, reason: "missing", doc: null };
+    const existing = snap.data() as BillingReconciliationQueueDoc | undefined;
+    if (!existing) return { completed: false, reason: "missing", doc: null };
+    assertReconciliationQueueIdentity(existing, {
+      platform: input.platform,
+      financialEventId: input.financialEventId,
+    });
+    if (existing.status === "resolved") {
+      return { completed: false, reason: "already_resolved", doc: existing };
+    }
+    if (!claimedBy(existing, input.workerId, input.nowMs)) {
+      return { completed: false, reason: "stale_lease", doc: existing };
+    }
+    const next: BillingReconciliationQueueDoc = {
+      ...existing,
+      status: "resolved",
+      resolvedAt: existing.resolvedAt ?? input.nowMs,
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      updatedAt: input.nowMs,
+    };
+    tx.set(path, next as unknown as Record<string, unknown>);
+    return { completed: true, reason: "ok", doc: next };
+  });
+}
+
+export async function restoreClaimedReconciliationBudget(
+  store: BillingStore,
+  input: {
+    id: string;
+    workerId: string;
+    nowMs: number;
+    errorCode: string;
+    nextAttemptAt: number;
+  }
+): Promise<boolean> {
+  const path = billingReconciliationQueuePath(sanitizeDocId(input.id));
+  return store.runTransaction(async (tx) => {
+    const snap = await tx.get(path);
+    if (!snap.exists) return false;
+    const existing = snap.data() as BillingReconciliationQueueDoc | undefined;
+    if (!existing || !claimedBy(existing, input.workerId, input.nowMs)) return false;
+    const next: BillingReconciliationQueueDoc = {
+      ...existing,
+      status: "pending",
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      attemptBudgetRemaining: remainingAttemptBudget(existing) + 1,
+      lastErrorCode: input.errorCode,
+      nextAttemptAt: input.nextAttemptAt,
+      updatedAt: input.nowMs,
+    };
+    tx.set(path, next as unknown as Record<string, unknown>);
+    return true;
   });
 }
 
@@ -306,9 +392,10 @@ export async function markReconciliationTerminal(
 
 export async function operatorRequeueReconciliationWorkItem(
   store: BillingStore,
-  input: { id: string; nowMs: number }
-): Promise<{ existed: boolean; changed: boolean }> {
+  input: { id: string; nowMs: number; maxAttempts?: number }
+): Promise<{ existed: boolean; changed: boolean; refused?: "active_lease" }> {
   const path = billingReconciliationQueuePath(sanitizeDocId(input.id));
+  const maxAttempts = input.maxAttempts ?? RECONCILIATION_MAX_ATTEMPTS;
   return store.runTransaction(async (tx) => {
     const snap = await tx.get(path);
     if (!snap.exists) return { existed: false, changed: false };
@@ -317,6 +404,9 @@ export async function operatorRequeueReconciliationWorkItem(
     if (existing.status === "resolved") {
       return { existed: true, changed: false };
     }
+    if (liveLeaseHeld(existing, input.nowMs)) {
+      return { existed: true, changed: false, refused: "active_lease" };
+    }
     const next: BillingReconciliationQueueDoc = {
       ...existing,
       status: "pending",
@@ -324,6 +414,8 @@ export async function operatorRequeueReconciliationWorkItem(
       leaseExpiresAt: null,
       nextAttemptAt: input.nowMs,
       terminalReason: null,
+      lastErrorCode: existing.lastErrorCode ?? null,
+      attemptBudgetRemaining: maxAttempts,
       updatedAt: input.nowMs,
     };
     tx.set(path, next as unknown as Record<string, unknown>);

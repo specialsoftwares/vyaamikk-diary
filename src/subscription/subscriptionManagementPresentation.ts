@@ -3,8 +3,10 @@
  * lifecycle rules; this module maps already-authoritative status fields.
  */
 
+import { isIstMonthKeyShape, istMonthKeyForMillis } from "@/billing/istMonthKey";
 import { UNLIMITED_RECORDS, type ClientSubscriptionStatus, type VyaamikkPlan } from "./types";
 import type { SubscriptionFeatures } from "./subscriptionFeatures";
+import type { QuotaUsageRead } from "./quotaUsageReader";
 
 export type ManagementPendingKind =
   | "none"
@@ -14,10 +16,25 @@ export type ManagementPendingKind =
   | "expired"
   | "trial";
 
+export type QuotaUsageCurrency =
+  | { kind: "current"; used: number; monthKey: string }
+  | { kind: "prior_month"; storedMonthKey: string }
+  | { kind: "future_month"; storedMonthKey: string }
+  | { kind: "malformed" }
+  | { kind: "missing" }
+  | { kind: "unavailable"; code?: string };
+
 export type ManagementQuotaKind =
   | { kind: "unlimited" }
-  | { kind: "capped"; limit: number; used: number | null }
-  | { kind: "unavailable" };
+  | {
+      kind: "capped";
+      limit: number;
+      used: number | null;
+      monthKey: string | null;
+      currency: QuotaUsageCurrency;
+      warnAt80: boolean;
+    }
+  | { kind: "unavailable"; currency: QuotaUsageCurrency };
 
 const PLAN_NAME_KEYS: Record<VyaamikkPlan, string> = {
   free: "billing.upgrade.freePlanName",
@@ -72,25 +89,74 @@ export function managementPeriodEndMs(status: ClientSubscriptionStatus): number 
   return null;
 }
 
+export function interpretQuotaUsage(input: {
+  read: QuotaUsageRead | null;
+  nowMs: number;
+}): QuotaUsageCurrency {
+  if (!input.read) return { kind: "unavailable" };
+  if (input.read.kind === "missing") return { kind: "missing" };
+  if (input.read.kind === "unavailable") {
+    return { kind: "unavailable", code: input.read.code };
+  }
+  if (input.read.kind === "malformed") return { kind: "malformed" };
+  const monthKey = input.read.monthKey;
+  const used = input.read.recordsThisMonth;
+  if (
+    !isIstMonthKeyShape(monthKey) ||
+    typeof used !== "number" ||
+    !Number.isInteger(used) ||
+    used < 0
+  ) {
+    return { kind: "malformed" };
+  }
+  const current = istMonthKeyForMillis(input.nowMs);
+  if (monthKey < current) return { kind: "prior_month", storedMonthKey: monthKey };
+  if (monthKey > current) return { kind: "future_month", storedMonthKey: monthKey };
+  return { kind: "current", used, monthKey };
+}
+
 export function managementQuotaView(input: {
   features: SubscriptionFeatures;
-  recordsThisMonth: number | null;
-  usageReadable: boolean;
+  usage: QuotaUsageRead | null;
+  nowMs: number;
 }): ManagementQuotaKind {
-  if (!input.usageReadable && input.recordsThisMonth == null) {
-    return { kind: "unavailable" };
-  }
+  const currency = interpretQuotaUsage({ read: input.usage, nowMs: input.nowMs });
   if (input.features.monthlyRecordLimit === UNLIMITED_RECORDS) {
     return { kind: "unlimited" };
   }
+  if (currency.kind === "unavailable" || currency.kind === "malformed") {
+    return { kind: "unavailable", currency };
+  }
+  const used = currency.kind === "current" ? currency.used : null;
+  const monthKey = currency.kind === "current" ? currency.monthKey : null;
+  const limit = input.features.monthlyRecordLimit;
+  const warnAt80 = used != null && limit > 0 && used / limit >= 0.8;
   return {
     kind: "capped",
-    limit: input.features.monthlyRecordLimit,
-    used: input.recordsThisMonth,
+    limit,
+    used,
+    monthKey,
+    currency,
+    warnAt80,
   };
 }
 
 export function androidProductIdForPlan(plan: VyaamikkPlan): string | null {
   if (plan === "free") return null;
   return `vyd_${plan}`;
+}
+
+export function billingDetailsInvoiceReady(draft: {
+  billingRecipientName: string;
+  billingAddressLine1: string;
+  billingPostalCode: string;
+  billingStateCode: string;
+}): boolean {
+  const pin = draft.billingPostalCode.trim();
+  return (
+    draft.billingRecipientName.trim().length > 0 &&
+    draft.billingAddressLine1.trim().length > 0 &&
+    /^\d{6}$/.test(pin) &&
+    /^\d{2}$/.test(draft.billingStateCode.trim())
+  );
 }

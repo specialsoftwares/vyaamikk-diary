@@ -86,10 +86,11 @@ export async function runStartupCoordinator(options?: {
             if (ready) {
               try {
                 const { initializeAppCheckLayer } = await import("@/services/appCheck/bootstrap");
-                await initializeAppCheckLayer({
+                const report = await initializeAppCheckLayer({
                   isProduction: env.isProduction,
                   getJsApp: () => app,
                 });
+                void report;
               } catch {
                 // Unenforced. Do not fail JS Firebase init on App Check.
               }

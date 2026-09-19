@@ -38,6 +38,11 @@ import { setCompletedStepsFirestoreForTests } from "@/services/records/recordCom
 import { captureAdmissionToken, syncSessionOwnership } from "@/sync/syncSessionOwnership";
 import type { CustomerCreditRecord } from "@/domain/customerCredit";
 import type { PurchaseOrder } from "@/domain/purchaseOrder";
+import {
+  installCompatSaveSeams,
+  runCompatProductionSaves,
+  uninstallCompatSaveSeams,
+} from "./liveRulesCompat.fullSave";
 
 const BASELINE = resolve(process.cwd(), "docs/release/rules-compat/baseline/firestore.rules");
 const PROPOSED = resolve(process.cwd(), "docs/release/rules-compat/proposed/firestore.rules");
@@ -421,6 +426,15 @@ async function runPhase(label: string, rulesPath: string, patched: boolean): Pro
 
     if (patched) {
       await env.withSecurityRulesDisabled(async (ctx) => {
+        await setDoc(doc(ctx.firestore(), "users", uid, "subscription", "status"), {
+          plan: "free",
+          billingStatus: "expired",
+          entitlementActive: false,
+          entitlementReason: "neverSubscribed",
+          quotaEnforcementEnabled: false,
+          updatedAt: Date.now(),
+          updatedBy: "admin",
+        });
         const startedAt = Date.now() - 60_000;
         await setDoc(doc(ctx.firestore(), "users", uid, "_saveLocks", "done_lock"), {
           userId: uid,
@@ -445,6 +459,21 @@ async function runPhase(label: string, rulesPath: string, patched: boolean): Pro
         "after: existing done lock returns return_done with zero new lease",
         doneBegin.decision.action === "return_done" && doneBegin.lockLeaseStartedAt == null
       );
+
+      try {
+        await installCompatSaveSeams({ db, parsePo, parseCredit });
+        await runCompatProductionSaves({
+          uid,
+          db,
+          check,
+          entryInput,
+          poInput,
+          creditInput,
+          packInput,
+        });
+      } finally {
+        uninstallCompatSaveSeams();
+      }
     }
 
     await assertFails(updateDoc(doc(db, "users", uid), { uid: "hijack" }));

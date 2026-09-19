@@ -464,6 +464,7 @@ export async function touchPersistentLock(
     leaseStartedAt,
     (existing) => {
       if (!existing) return null;
+      if (existing.status !== "in_flight") return null;
       return {
         ...existing,
         updatedAt: now,
