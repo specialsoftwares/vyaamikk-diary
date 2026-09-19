@@ -90,15 +90,19 @@ export function createQuotaUpsellHostRuntime(
       emit();
     },
     async purchase(sku) {
+      const op = controller.purchase(sku);
+      emit();
       try {
-        return await controller.purchase(sku);
+        return await op;
       } finally {
         emit();
       }
     },
     async restore() {
+      const op = controller.restore();
+      emit();
       try {
-        return await controller.restore();
+        return await op;
       } finally {
         emit();
       }
