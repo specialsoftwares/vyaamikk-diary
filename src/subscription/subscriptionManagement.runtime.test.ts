@@ -23,6 +23,19 @@ function token(uid: string, generation: number): SyncSessionToken {
   return { uid, generation };
 }
 
+function sampleDraft(billingRecipientName: string) {
+  return {
+    billingRecipientName,
+    gstin: "",
+    billingBusinessName: "",
+    billingAddressLine1: "",
+    billingAddressLine2: "",
+    billingCity: "",
+    billingPostalCode: "",
+    billingStateCode: "",
+  };
+}
+
 async function flush(): Promise<void> {
   for (let i = 0; i < 20; i++) await Promise.resolve();
 }
@@ -80,16 +93,7 @@ async function main() {
       presentUpgrade: () => ({ ok: true, visible: true, clientRecordId: null }),
     });
     runtime.setOwner(token("same", 1));
-    runtime.setDraft({
-      billingRecipientName: "Retired draft",
-      gstin: "",
-      billingBusinessName: "",
-      billingAddressLine1: "",
-      billingAddressLine2: "",
-      billingCity: "",
-      billingPostalCode: "",
-      billingStateCode: "",
-    });
+    runtime.setDraft(sampleDraft("Retired draft"), token("same", 1));
     runtime.setOwner(token("same", 2));
     assert.equal(runtime.snapshot().draft.billingRecipientName, "");
     assert.equal(runtime.snapshot().ownerKey, "same#2");
@@ -114,7 +118,7 @@ async function main() {
     });
     runtime.setOwner(token("acct", 1));
     await flush();
-    const saveP = runtime.saveDetails();
+    const saveP = runtime.saveDetails(token("acct", 1));
     runtime.setOwner(token("acct", 2));
     assert.equal(runtime.snapshot().saving, false);
     saveHold.resolve({ kind: "saved" });
@@ -135,7 +139,7 @@ async function main() {
       presentUpgrade: () => ({ ok: true, visible: true, clientRecordId: null }),
     });
     runtime.setOwner(token("acct", 3));
-    const restoreP = runtime.restore();
+    const restoreP = runtime.restore(token("acct", 3));
     runtime.dispose();
     restoreHold.resolve({ kind: "failed", message: "stale" });
     await restoreP;
@@ -179,11 +183,11 @@ async function main() {
     });
     runtime.setOwner(token("acct", 1));
     await flush();
-    await runtime.saveDetails();
+    await runtime.saveDetails(token("acct", 1));
     assert.equal(runtime.snapshot().saveError, "save_failed");
-    await runtime.restore();
+    await runtime.restore(token("acct", 1));
     assert.equal(runtime.snapshot().restoreError, "failed");
-    await runtime.manage("https://play.google.com/store/account/subscriptions");
+    await runtime.manage("https://play.google.com/store/account/subscriptions", token("acct", 1));
     assert.equal(runtime.snapshot().manageError, "manage_unavailable");
     runtime.dispose();
   }
@@ -206,7 +210,7 @@ async function main() {
     });
     runtime.setOwner(token("acct", 1));
     await flush();
-    const restoreP = runtime.restore();
+    const restoreP = runtime.restore(token("acct", 1));
     assert.equal(runtime.snapshot().restoring, true);
     runtime.reload();
     restoreHold.resolve({ kind: "restored" });
@@ -230,9 +234,9 @@ async function main() {
     });
     runtime.setOwner(token("acct", 1));
     await flush();
-    const saveP = runtime.saveDetails();
+    const saveP = runtime.saveDetails(token("acct", 1));
     assert.equal(runtime.snapshot().saving, true);
-    await runtime.manage("https://play.google.com/store/account/subscriptions");
+    await runtime.manage("https://play.google.com/store/account/subscriptions", token("acct", 1));
     saveHold.resolve({ kind: "saved" });
     await saveP;
     await flush();
@@ -253,7 +257,7 @@ async function main() {
       presentUpgrade: () => ({ ok: true, visible: true, clientRecordId: null }),
     });
     runtime.setOwner(token("acct", 1));
-    await runtime.manage("https://play.google.com/store/account/subscriptions");
+    await runtime.manage("https://play.google.com/store/account/subscriptions", token("acct", 1));
     detailsHold.resolve({ kind: "missing" });
     historyHold.resolve({ kind: "ok", rows: [] });
     await flush();
@@ -303,16 +307,7 @@ async function main() {
     });
     runtime.setOwner(token("acct", 1));
     await flush();
-    runtime.setDraft({
-      billingRecipientName: "Local edit",
-      gstin: "",
-      billingBusinessName: "",
-      billingAddressLine1: "",
-      billingAddressLine2: "",
-      billingCity: "",
-      billingPostalCode: "",
-      billingStateCode: "",
-    });
+    runtime.setDraft(sampleDraft("Local edit"), token("acct", 1));
     runtime.reload();
     await flush();
     assert.equal(runtime.snapshot().draft.billingRecipientName, "Local edit");
@@ -353,6 +348,225 @@ async function main() {
     assert.equal(relogged.draft.billingRecipientName, "");
     runtime.setOwner(token("user-a", 2));
     await flush();
+    runtime.dispose();
+  }
+
+  {
+    const origin = token("acct", 1);
+    let saves = 0;
+    const runtime = createSubscriptionManagementRuntime({
+      readUsage: async () => ({ kind: "missing" }),
+      readHistory: async () => ({ kind: "ok", rows: [] }),
+      readDetails: async () => ({ kind: "missing" }),
+      saveDetails: async () => {
+        saves += 1;
+        return { kind: "saved" };
+      },
+      restore: async () => ({ kind: "restored" }),
+      openUrl: async () => true,
+      presentUpgrade: () => ({ ok: true, visible: true, clientRecordId: null }),
+    });
+    runtime.setOwner(origin);
+    await flush();
+    runtime.setDraft(sampleDraft("Unchanged"), origin);
+    await runtime.saveDetails(origin);
+    await flush();
+    assert.equal(runtime.snapshot().draftDirty, false);
+    assert.equal(saves, 1);
+    runtime.dispose();
+  }
+
+  {
+    const origin = token("acct", 1);
+    const saveHold = deferred<{ kind: "saved" }>();
+    let saves = 0;
+    const runtime = createSubscriptionManagementRuntime({
+      readUsage: async () => ({ kind: "missing" }),
+      readHistory: async () => ({ kind: "ok", rows: [] }),
+      readDetails: async () => ({ kind: "missing" }),
+      saveDetails: async () => {
+        saves += 1;
+        return saveHold.promise;
+      },
+      restore: async () => ({ kind: "restored" }),
+      openUrl: async () => true,
+      presentUpgrade: () => ({ ok: true, visible: true, clientRecordId: null }),
+    });
+    runtime.setOwner(origin);
+    await flush();
+    runtime.setDraft(sampleDraft("First"), origin);
+    const first = runtime.saveDetails(origin);
+    const concurrent = runtime.saveDetails(origin);
+    runtime.setDraft(sampleDraft("During save"), origin);
+    runtime.reload();
+    await flush();
+    assert.equal(runtime.snapshot().draft.billingRecipientName, "During save");
+    saveHold.resolve({ kind: "saved" });
+    await first;
+    await concurrent;
+    await flush();
+    assert.equal(saves, 1);
+    assert.equal(runtime.snapshot().saving, false);
+    assert.equal(runtime.snapshot().draftDirty, true);
+    assert.equal(runtime.snapshot().draft.billingRecipientName, "During save");
+    await runtime.saveDetails(origin);
+    await flush();
+    assert.equal(saves, 2);
+    assert.equal(runtime.snapshot().draftDirty, false);
+    runtime.dispose();
+  }
+
+  {
+    const origin = token("acct", 1);
+    let released = false;
+    const runtime = createSubscriptionManagementRuntime({
+      readUsage: async () => ({ kind: "missing" }),
+      readHistory: async () => ({ kind: "ok", rows: [] }),
+      readDetails: async () => ({ kind: "missing" }),
+      saveDetails: async () => {
+        await new Promise<void>((resolve) => {
+          const wait = () => {
+            if (released) resolve();
+            else setTimeout(wait, 0);
+          };
+          wait();
+        });
+        throw new Error("network");
+      },
+      restore: async () => ({ kind: "restored" }),
+      openUrl: async () => true,
+      presentUpgrade: () => ({ ok: true, visible: true, clientRecordId: null }),
+    });
+    runtime.setOwner(origin);
+    await flush();
+    runtime.setDraft(sampleDraft("Will fail"), origin);
+    const saveP = runtime.saveDetails(origin);
+    runtime.setDraft(sampleDraft("Kept after fail"), origin);
+    released = true;
+    await saveP;
+    assert.equal(runtime.snapshot().saving, false);
+    assert.equal(runtime.snapshot().draftDirty, true);
+    assert.equal(runtime.snapshot().draft.billingRecipientName, "Kept after fail");
+    runtime.dispose();
+  }
+
+  {
+    const writes: string[] = [];
+    let upgrades = 0;
+    let live: { authUid: string | null; session: SyncSessionToken | null } = {
+      authUid: "user-a",
+      session: token("user-a", 1),
+    };
+    const runtime = createSubscriptionManagementRuntime({
+      readUsage: async () => ({ kind: "missing" }),
+      readHistory: async () => ({ kind: "ok", rows: [] }),
+      readDetails: async () => ({ kind: "missing" }),
+      saveDetails: async () => {
+        writes.push("save");
+        return { kind: "saved" };
+      },
+      restore: async () => {
+        writes.push("restore");
+        return { kind: "restored" };
+      },
+      openUrl: async () => {
+        writes.push("manage");
+        return true;
+      },
+      presentUpgrade: () => {
+        upgrades += 1;
+        return { ok: true, visible: true, clientRecordId: null };
+      },
+      liveSession: () => live,
+      isPurchaseEntryEnabled: () => true,
+    });
+    const originA = token("user-a", 1);
+    runtime.setOwner(originA);
+    await flush();
+    const capturedA = {
+      onChange: runtime.bindSetDraft(originA),
+      onSave: runtime.bindSaveDetails(originA),
+      onRestore: runtime.bindRestore(originA),
+      onManage: runtime.bindManage(originA),
+      onUpgrade: runtime.bindPresentUpgrade(originA),
+    };
+    live = { authUid: "user-b", session: token("user-b", 2) };
+    runtime.setOwner(token("user-b", 2));
+    await flush();
+    capturedA.onChange(sampleDraft("from A"));
+    await capturedA.onSave();
+    await capturedA.onRestore();
+    await capturedA.onManage("https://play.google.com/store/account/subscriptions");
+    const retiredUpgrade = capturedA.onUpgrade();
+    assert.equal(runtime.snapshot().draft.billingRecipientName, "");
+    assert.equal(writes.length, 0);
+    assert.equal(upgrades, 0);
+    assert.equal(retiredUpgrade.ok, false);
+    const originB = token("user-b", 2);
+    const currentB = {
+      onChange: runtime.bindSetDraft(originB),
+      onSave: runtime.bindSaveDetails(originB),
+      onUpgrade: runtime.bindPresentUpgrade(originB),
+    };
+    currentB.onChange(sampleDraft("from B"));
+    assert.equal(runtime.snapshot().draft.billingRecipientName, "from B");
+    await currentB.onSave();
+    const liveUpgrade = currentB.onUpgrade();
+    assert.equal(writes.includes("save"), true);
+    assert.equal(upgrades, 1);
+    assert.equal(liveUpgrade.ok, true);
+    runtime.dispose();
+  }
+
+  {
+    let live: { authUid: string | null; session: SyncSessionToken | null } = {
+      authUid: "user-a",
+      session: token("user-a", 1),
+    };
+    const runtime = createSubscriptionManagementRuntime({
+      readUsage: async () => ({ kind: "missing" }),
+      readHistory: async () => ({ kind: "ok", rows: [] }),
+      readDetails: async () => ({ kind: "missing" }),
+      saveDetails: async () => ({ kind: "saved" }),
+      restore: async () => ({ kind: "restored" }),
+      openUrl: async () => true,
+      presentUpgrade: () => ({ ok: true, visible: true, clientRecordId: null }),
+      liveSession: () => live,
+    });
+    runtime.setOwner(token("user-a", 1));
+    await flush();
+    const firstA = runtime.bindSetDraft(token("user-a", 1));
+    live = { authUid: null, session: null };
+    runtime.setOwner(null);
+    live = { authUid: "user-a", session: token("user-a", 2) };
+    runtime.setOwner(token("user-a", 2));
+    await flush();
+    firstA(sampleDraft("old generation"));
+    assert.equal(runtime.snapshot().draft.billingRecipientName, "");
+    runtime.bindSetDraft(token("user-a", 2))(sampleDraft("new generation"));
+    assert.equal(runtime.snapshot().draft.billingRecipientName, "new generation");
+    runtime.dispose();
+  }
+
+  {
+    const holder = token("user-a", 1);
+    const runtime = createSubscriptionManagementRuntime({
+      readUsage: async () => ({ kind: "missing" }),
+      readHistory: async () => ({ kind: "ok", rows: [] }),
+      readDetails: async () => ({ kind: "missing" }),
+      saveDetails: async () => ({ kind: "saved" }),
+      restore: async () => ({ kind: "restored" }),
+      openUrl: async () => true,
+      presentUpgrade: () => ({ ok: true, visible: true, clientRecordId: null }),
+    });
+    runtime.setOwner(token("user-a", 1));
+    await flush();
+    const staleChange = runtime.bindSetDraft(holder);
+    runtime.setOwner(token("user-a", 2));
+    await flush();
+    holder.generation = 2;
+    staleChange(sampleDraft("recaptured"));
+    assert.equal(runtime.snapshot().draft.billingRecipientName, "");
     runtime.dispose();
   }
 

@@ -107,6 +107,7 @@ export function createSubscriptionManagementRuntime(deps: ManagementRuntimeDeps)
   let saveSeq = 0;
   let restoreSeq = 0;
   let manageSeq = 0;
+  let draftRev = 0;
   let published = emptyPublished("signed_out#0");
   const listeners = new Set<() => void>();
 
@@ -141,6 +142,7 @@ export function createSubscriptionManagementRuntime(deps: ManagementRuntimeDeps)
     saveSeq += 1;
     restoreSeq += 1;
     manageSeq += 1;
+    draftRev = 0;
     owner = next;
     published = emptyPublished(ownerKeyOf(next));
     if (!next) {
@@ -207,6 +209,126 @@ export function createSubscriptionManagementRuntime(deps: ManagementRuntimeDeps)
     emit();
   }
 
+  function copyOrigin(origin: SyncSessionToken | null): SyncSessionToken | null {
+    return origin ? { uid: origin.uid, generation: origin.generation } : null;
+  }
+
+  function setDraft(draft: BillingDetailsDraft, origin: SyncSessionToken | null): void {
+    if (!origin || !isLiveAuthority(origin)) return;
+    draftRev += 1;
+    published = {
+      ...published,
+      draft,
+      draftDirty: true,
+      invoiceReady: billingDetailsInvoiceReady(draft),
+      gstinError: null,
+    };
+    emit();
+  }
+
+  async function saveDetails(origin: SyncSessionToken | null): Promise<void> {
+    if (!origin || !isLiveAuthority(origin)) return;
+    if (published.saving) return;
+    saveSeq += 1;
+    const op = saveSeq;
+    const admitted = { uid: origin.uid, generation: origin.generation };
+    const submittedRev = draftRev;
+    const payload = payloadFromDraft(published.draft);
+    published = { ...published, saving: true, saveError: null, gstinError: null };
+    emit();
+    let result: BillingDetailsSaveResult;
+    try {
+      result = await deps.saveDetails(payload);
+    } catch {
+      if (op !== saveSeq || !isLiveAuthority(admitted)) return;
+      published = {
+        ...published,
+        saving: false,
+        saveError: "save_failed",
+      };
+      emit();
+      return;
+    }
+    if (op !== saveSeq || !isLiveAuthority(admitted)) return;
+    published = { ...published, saving: false };
+    if (result.kind === "saved") {
+      if (draftRev === submittedRev) {
+        published = { ...published, draftDirty: false };
+        emit();
+        reload();
+        return;
+      }
+      emit();
+      return;
+    }
+    if (result.kind === "gstin_format_invalid") {
+      published = { ...published, gstinError: "gstin_format_invalid" };
+    } else {
+      published = { ...published, saveError: result.kind };
+    }
+    emit();
+  }
+
+  function presentUpgrade(origin: SyncSessionToken | null): QuotaUpsellPresentResult {
+    if (!origin || !isLiveAuthority(origin)) {
+      return { ok: false, reason: "session_stale", visible: false, clientRecordId: null };
+    }
+    const enabled = (deps.isPurchaseEntryEnabled ?? isSubscriptionPurchaseEntryEnabled)();
+    if (!enabled) {
+      published = { ...published, upgradeError: "purchase_entry_closed" };
+      emit();
+      return { ok: false, reason: "purchase_entry_closed", visible: false, clientRecordId: null };
+    }
+    published = { ...published, upgradeError: null };
+    emit();
+    return deps.presentUpgrade(origin);
+  }
+
+  async function restore(origin: SyncSessionToken | null): Promise<void> {
+    if (!origin || !isLiveAuthority(origin)) return;
+    const admitted = { uid: origin.uid, generation: origin.generation };
+    restoreSeq += 1;
+    const op = restoreSeq;
+    published = { ...published, restoring: true, restoreError: null };
+    emit();
+    try {
+      const result = await deps.restore();
+      if (op !== restoreSeq || !isLiveAuthority(admitted)) return;
+      published = { ...published, restoring: false };
+      if (result.kind === "failed") {
+        published = { ...published, restoreError: result.message ?? "failed" };
+      } else if (result.kind === "unavailable") {
+        published = { ...published, restoreError: "unavailable" };
+      }
+      emit();
+    } catch {
+      if (op !== restoreSeq || !isLiveAuthority(admitted)) return;
+      published = { ...published, restoring: false, restoreError: "failed" };
+      emit();
+    }
+  }
+
+  async function manage(url: string, origin: SyncSessionToken | null): Promise<void> {
+    if (!origin || !isLiveAuthority(origin)) return;
+    const admitted = { uid: origin.uid, generation: origin.generation };
+    manageSeq += 1;
+    const op = manageSeq;
+    published = { ...published, manageError: null };
+    emit();
+    try {
+      const opened = await deps.openUrl(url);
+      if (op !== manageSeq || !isLiveAuthority(admitted)) return;
+      if (opened === false) {
+        published = { ...published, manageError: "manage_unavailable" };
+        emit();
+      }
+    } catch {
+      if (op !== manageSeq || !isLiveAuthority(admitted)) return;
+      published = { ...published, manageError: "manage_unavailable" };
+      emit();
+    }
+  }
+
   return {
     snapshot(): ManagementPublished {
       return published;
@@ -228,120 +350,30 @@ export function createSubscriptionManagementRuntime(deps: ManagementRuntimeDeps)
       }
     },
     reload,
-    setDraft(draft: BillingDetailsDraft): void {
-      if (!owner || !isLiveAuthority(owner)) return;
-      published = {
-        ...published,
-        draft,
-        draftDirty: true,
-        invoiceReady: billingDetailsInvoiceReady(draft),
-        gstinError: null,
-      };
-      emit();
+    setDraft,
+    saveDetails,
+    presentUpgrade,
+    restore,
+    manage,
+    bindSetDraft(origin: SyncSessionToken | null) {
+      const captured = copyOrigin(origin);
+      return (draft: BillingDetailsDraft) => setDraft(draft, captured);
     },
-    async saveDetails(): Promise<void> {
-      const admitted = owner ? { uid: owner.uid, generation: owner.generation } : null;
-      if (!admitted || !isLiveAuthority(admitted)) return;
-      saveSeq += 1;
-      const op = saveSeq;
-      const payload = payloadFromDraft(published.draft);
-      published = { ...published, saving: true, saveError: null, gstinError: null };
-      emit();
-      let result: BillingDetailsSaveResult;
-      try {
-        result = await deps.saveDetails(payload);
-      } catch {
-        if (op !== saveSeq || !isLiveAuthority(admitted)) return;
-        published = {
-          ...published,
-          saving: false,
-          saveError: "save_failed",
-        };
-        emit();
-        return;
-      }
-      if (op !== saveSeq || !isLiveAuthority(admitted)) return;
-      published = { ...published, saving: false };
-      if (result.kind === "saved") {
-        published = { ...published, draftDirty: false };
-        emit();
-        reload();
-        return;
-      }
-      if (result.kind === "gstin_format_invalid") {
-        published = { ...published, gstinError: "gstin_format_invalid" };
-      } else {
-        published = { ...published, saveError: result.kind };
-      }
-      emit();
+    bindSaveDetails(origin: SyncSessionToken | null) {
+      const captured = copyOrigin(origin);
+      return () => saveDetails(captured);
     },
-    presentUpgrade(session: SyncSessionToken | null): QuotaUpsellPresentResult {
-      const enabled = (deps.isPurchaseEntryEnabled ?? isSubscriptionPurchaseEntryEnabled)();
-      if (!enabled) {
-        published = { ...published, upgradeError: "purchase_entry_closed" };
-        emit();
-        return { ok: false, reason: "purchase_entry_closed", visible: false, clientRecordId: null };
-      }
-      const live = readLive();
-      if (
-        !owner ||
-        !session ||
-        !live.session ||
-        !live.authUid ||
-        live.authUid !== live.session.uid ||
-        session.uid !== live.session.uid ||
-        session.generation !== live.session.generation
-      ) {
-        published = { ...published, upgradeError: "session_stale" };
-        emit();
-        return { ok: false, reason: "session_stale", visible: false, clientRecordId: null };
-      }
-      published = { ...published, upgradeError: null };
-      emit();
-      return deps.presentUpgrade(session);
+    bindRestore(origin: SyncSessionToken | null) {
+      const captured = copyOrigin(origin);
+      return () => restore(captured);
     },
-    async restore(): Promise<void> {
-      const admitted = owner ? { uid: owner.uid, generation: owner.generation } : null;
-      if (!admitted || !isLiveAuthority(admitted)) return;
-      restoreSeq += 1;
-      const op = restoreSeq;
-      published = { ...published, restoring: true, restoreError: null };
-      emit();
-      try {
-        const result = await deps.restore();
-        if (op !== restoreSeq || !isLiveAuthority(admitted)) return;
-        published = { ...published, restoring: false };
-        if (result.kind === "failed") {
-          published = { ...published, restoreError: result.message ?? "failed" };
-        } else if (result.kind === "unavailable") {
-          published = { ...published, restoreError: "unavailable" };
-        }
-        emit();
-      } catch {
-        if (op !== restoreSeq || !isLiveAuthority(admitted)) return;
-        published = { ...published, restoring: false, restoreError: "failed" };
-        emit();
-      }
+    bindManage(origin: SyncSessionToken | null) {
+      const captured = copyOrigin(origin);
+      return (url: string) => manage(url, captured);
     },
-    async manage(url: string): Promise<void> {
-      const admitted = owner ? { uid: owner.uid, generation: owner.generation } : null;
-      if (!admitted || !isLiveAuthority(admitted)) return;
-      manageSeq += 1;
-      const op = manageSeq;
-      published = { ...published, manageError: null };
-      emit();
-      try {
-        const opened = await deps.openUrl(url);
-        if (op !== manageSeq || !isLiveAuthority(admitted)) return;
-        if (opened === false) {
-          published = { ...published, manageError: "manage_unavailable" };
-          emit();
-        }
-      } catch {
-        if (op !== manageSeq || !isLiveAuthority(admitted)) return;
-        published = { ...published, manageError: "manage_unavailable" };
-        emit();
-      }
+    bindPresentUpgrade(origin: SyncSessionToken | null) {
+      const captured = copyOrigin(origin);
+      return () => presentUpgrade(captured);
     },
     dispose(): void {
       retireAndReset(null);

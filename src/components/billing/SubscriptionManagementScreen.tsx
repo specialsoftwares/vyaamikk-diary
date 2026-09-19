@@ -221,7 +221,7 @@ export function SubscriptionManagementScreen() {
         <PremiumActionButton
           label={t("billing.management.upgradeCta")}
           onPress={() => {
-            const result = runtime.presentUpgrade(syncSessionOwnership.capture());
+            const result = runtime.bindPresentUpgrade(liveSession)();
             if (!result.ok && result.reason !== "purchase_entry_closed") {
               /* runtime already recorded upgradeError */
             }
@@ -237,7 +237,7 @@ export function SubscriptionManagementScreen() {
           variant="secondary"
           label={t("billing.upgrade.ctaRestore")}
           onPress={() => {
-            void runtime.restore();
+            void runtime.bindRestore(liveSession)();
           }}
           loading={storeBusy}
           disabled={!iap.available || storeBusy}
@@ -249,7 +249,9 @@ export function SubscriptionManagementScreen() {
           variant="ghost"
           label={t("billing.management.managePlay")}
           onPress={() => {
-            void runtime.manage(storeSubscriptionsManageUrl({ platform, plan: subscription.plan }));
+            void runtime.bindManage(liveSession)(
+              storeSubscriptionsManageUrl({ platform, plan: subscription.plan })
+            );
           }}
           accessibilityLabel={t("billing.management.managePlay")}
         />
@@ -302,7 +304,7 @@ export function SubscriptionManagementScreen() {
             <BillingDetailsForm
               t={t}
               draft={published.draft}
-              onChange={(draft) => runtime.setDraft(draft)}
+              onChange={runtime.bindSetDraft(liveSession)}
               gstinError={
                 published.gstinError ? t("billing.management.gstInvalid") : null
               }
@@ -310,7 +312,7 @@ export function SubscriptionManagementScreen() {
               saving={published.saving}
               saveDisabled={!uid}
               onSave={() => {
-                void runtime.saveDetails();
+                void runtime.bindSaveDetails(liveSession)();
               }}
             />
           </>
