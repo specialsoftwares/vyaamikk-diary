@@ -16,7 +16,7 @@ Worktree: isolated `release/public-android-combined` (PR #26). Historical worksp
 | Previous reviewed head | `f875356efb4030d24fd60c5b80f1470b13d782a5` |
 | Core-app application (startup App Check + subscription ops + typecheck) | `b5cfbf7050e1e75d30acf274e82ca90259f02950` |
 | Paid-backend follow-up (maintenance/reporting/Play audit) | `24595dbd4ff6fe3c9c0031926e93ddeafae83954` |
-| Branch HEAD (this register) | *this commit — recheck `git rev-parse HEAD`* |
+| Branch HEAD (register/packets) | `38346ae09952947dc51e50eeeee9098b802bd8c7` |
 
 Local canonical `test:all` on the paid follow-up working tree: **139/139 passed in 250.4s**. Suite count stays 139 because the new emulator suite is invoked from `ci:verify`, not `test:all`. `typecheck`, `lint:eslint`, and `functions` build PASS. `test:billing-maintenance-emulator` PASS under `firebase emulators:exec`.
 
