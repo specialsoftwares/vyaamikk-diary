@@ -131,7 +131,7 @@ HTTP RTDN/ASSN paths stay on their existing authenticators. App Check does not m
 
 | Case | Prerequisite | Expect |
 | --- | --- | --- |
-| Monitor-mode Play-installed Android | REL-09 SHA-256 vs Play App Signing; Play Integrity Cloud project link still unread in Play Console | Tokens may be accepted according to live Play Integrity App Check settings; Phone Auth still completes |
+| Monitor-mode Play-installed Android | Play App Signing SHA-256 `b9c521…6ce92` and SHA-1 `d223f0…82e59` confirmed from Play copy controls 2026-09-19T10:01:25Z; Play Console says Play Integrity **API is not integrated** (keep separate from Firebase App Check Play Integrity provider registration) | Tokens / Phone Auth still unmeasured on a Play-installed binary |
 | Sideload preview APK | Unenforced | Token fetch is configuration-dependent; app must remain usable while enforcement is off |
 | JS billing callable with only native App Check | Callables unenforced | Call succeeds today; would fail after a deployed `enforceAppCheck: true` — proves dual-init requirement |
 | Firestore save after JS bridge, no JS App Check | Firestore service unenforced | Succeeds today; would fail after Console Firestore enforcement, not because of a Rules `request.appCheck` field |
@@ -171,11 +171,11 @@ Deployed Functions (asia-south1, nodejs20, ACTIVE): identity / email / recovery 
 
 Deployed Rules ≠ current repo files (hashes differ). Neither live nor repo Rules mention `appCheck` / `request.appCheck`.
 
-- Firestore release `cloud.firestore`, ruleset `9c02e187-bd1c-4a5f-bdcc-d8f070e0a5b2`, last release update 2026-08-12. Live file sha256 `d8ee0abcd5a8f217f1fbe60af9651e5b4253b07cac72d0746c4e781a48052aa2`. Repo `firestore.rules` sha256 `ac19cea6c4ae4618686f90e7017d27aacd5bfef7cba717866349439e052bc14b`. Repo adds subscription/quota/billing match paths (`quotaEnforcementOn`, `usageCurrent`, billing ledgers) that are **not** in the live ruleset. Live ordinary CREATE for diary/PO/CC/pack does not apply that monthly quota gate.
-- Storage release for bucket `vyaamikk-diary.firebasestorage.app`, ruleset `a2a0ddf7-9746-4dd2-bd48-29c9abc0e41f`, last update 2026-07-23. Live sha256 `1a912051ba923a0e4ae29fd36b1741bcf0f5879cd53e6d4bd386c9d5a3b717d5`. Repo adds explicit deny matches for `company/invoices` and `company/gstr1-reports`; live already has a catch-all deny.
+- Firestore release `cloud.firestore`, ruleset `9c02e187-bd1c-4a5f-bdcc-d8f070e0a5b2`, last release update 2026-08-12. Live file sha256 `d8ee0abcd5a8f217f1fbe60af9651e5b4253b07cac72d0746c4e781a48052aa2`. Repo `firestore.rules` sha256 `ac19cea6c4ae4618686f90e7017d27aacd5bfef7cba717866349439e052bc14b`. Repo adds subscription/quota/billing match paths (`quotaEnforcementOn`, `usageCurrent`, billing ledgers) that are **not** in the live ruleset. Live ordinary CREATE does not apply that monthly quota gate. Continuation 3 emulator of `#22` against the exported live snapshot: ordinary CREATE is still `permission-denied` because `subscription/status` is unreadable; letterhead CREATE is compatible.
+- Storage release for bucket `vyaamikk-diary.firebasestorage.app`, ruleset `a2a0ddf7-9746-4dd2-bd48-29c9abc0e41f`, last update 2026-07-23. Live sha256 `1a912051ba923a0e4ae29fd36b1741bcf0f5879cd53e6d4bd386c9d5a3b717d5`. Repo adds explicit deny matches for `company/invoices` and `company/gstr1-reports`; live already has a catch-all deny. Client letterhead/attachments/pdfs paths match; no Storage emulator run was required.
 
 Phone Auth (Identity Toolkit config, secrets withheld): phone sign-in enabled; SMS region allowlist `IN` only; MFA `DISABLED`; authorized domains `localhost`, `vyaamikk-diary.firebaseapp.com`, `vyaamikk-diary.web.app`. Test phone numbers exist (count 5); values are not recorded here. Firebase Auth SMS Play Integrity vs reCAPTCHA fallback is **not** a field in this Identity Toolkit config payload.
 
-Still unread (Play Console / user documents): Play Integrity API Cloud-project link, tracks, uploaded versionCodes, which SHA is Play App Signing, per-user `quotaEnforcementEnabled` documents, EAS secret values.
+Still unread: per-user `quotaEnforcementEnabled` documents, EAS secret values. Play tracks, uploaded versionCodes, and upload vs Play App Signing public fingerprints were read on 2026-09-19 (see `INTERNAL_CANDIDATE_RUNBOOK.md`). Play Console Play Integrity API remains “not integrated”; that is not the Firebase App Check provider record.
 
 This plan is not production protection. Current backends are not App Check–enforced.

@@ -58,7 +58,7 @@
       "hold": true,
       "ci_run": 35430627279,
       "ci_status": "SUCCESS",
-      "note": "Documentation-only control PR. Independent review Actions 35430627279 SUCCESS 132/132 on merge-ref d2ef07d (parents 79d405d + 4be1bf1). A later GitHub-generated merge ref may differ; d2ef07d is the checkout actually tested. The commit that records Continuation 2 will differ from 4be1bf1.",
+      "note": "Documentation-only control PR. Independent review Actions 35434307374 SUCCESS 132/132 on tested merge e83e01d (Continuation 2 head 886a6b2). The commit that records Continuation 3 will differ from 886a6b2.",
       "head_prior": "4cb8edec2f6882beefce45fb05df26a6f6ffea44",
       "ci_run_prior": 35428924956,
       "merge_ref_prior": "96785a4cd2c8dc3bbfd36963b75aec66b54cb85e",
@@ -111,7 +111,7 @@
     "selection": "Lowest priority number among actionable ready tasks. Blocked work does not block independent tasks.",
     "review_rule": "Sensitive implementation remains ready_for_review until reviewer and exact SHA are recorded; passing self-tests is not release acceptance.",
     "dependency_rule": "depends_on names completed acceptance prerequisites for the listed execution. Preparatory read-only work may proceed where explicitly allowed. Release operations always need separate approval.",
-    "resume": "Continuation 2 recorded: docs corrected on PR #23; REL-03 focused test:env-shell-precedence PASS after copying approved gitignored .env; Firebase REL-10 read-only audit completed as support.vyd@specialsoftwares.com; Play still blocked in Cursor Chromium (aeadmin@specialsoftwares.com password challenge, Too many failed attempts; Safari session not shared). Independent review acceptances recorded for REL-01 source/injected-IAP, REL-03 EN/HI source, REL-02 mounted-host preserved, REL-04 source preserved. No merge/build/deploy/store/flag write."
+    "resume": "Continuation 3 recorded: Cursor Play access restored (aeadmin@specialsoftwares.com session; no password this continuation) and is separate from completed preflight. All-bundles 1–6 of 6 = versionCodes 17,16,15,14,13,10 (sixth item is vc10). Searches 18/19/12/11 no results. Play App Signing SHA-1 d223f0…82e59 read from hyphenated copy control at 2026-09-19T10:01:25Z; maps to Firebase. LIVE_RULES_EXPORT emulator vs exported Firestore sha256 d8ee0abc…: ordinary CREATE and first save-lock acquire denied; letterhead/mirror compatible; subscription listener controlled free default. Source-combination/#22+#24+#25 not created; versionCode 19 proposed unused, not bumped. Dashboard 6/11 recorded unchanged. All PRs remain draft HOLD. No merge/build/deploy/store/flag write."
   },
   "tasks": [
     {
@@ -489,7 +489,7 @@
         "head": "79d405d0b626d5067a33541887ac3c70689b8724",
         "pr": null,
         "last_result": "Source wiring mapped (startOtp→startNativePhoneOtp). Not deployed-auth acceptance. Dirty historical email-OTP inventoried read-only, not imported. REL-03 OTP copy is a separate PR.",
-        "next_action": "Keep AUTH_MANUAL_ACCEPTANCE_CHECKLIST for an installed candidate. Do not rewrite OTP callers from stale docs. REL-10 needed for live Phone Auth SHA inspection."
+        "next_action": "Keep AUTH_MANUAL_ACCEPTANCE_CHECKLIST for an installed candidate. Do not rewrite OTP callers from stale docs. Play signing SHA-1/SHA-256 now mapped; native Phone Auth on a Play-installed binary still unverified."
       },
       "blocker": null
     },
@@ -595,6 +595,19 @@
           "checked_at": "2026-09-19",
           "cli_user": "support.vyd@specialsoftwares.com",
           "result": "App Check providers registered; Firestore/Auth UNENFORCED; Storage not toggled; callable enforceAppCheck absent on deployed identity functions. Play Integrity App Check config present (tokenTtl 3600s; API minDeviceRecognitionLevel NO_INTEGRITY; PLAY_RECOGNIZED/LICENSED not in this payload). Live Firestore ruleset 9c02e187… updated 2026-08-12 does not match repo (repo adds quota/billing paths; live ordinary CREATE has no quotaEnforcementOn). Live Storage ruleset a2a0ddf7… updated 2026-07-23; catch-all deny present. Neither live nor repo Rules mention appCheck. Billing/GST functions exported in source are not deployed. No Rules/Functions deploy performed."
+        },
+        {
+          "kind": "live_rules_emulator",
+          "label": "LIVE_RULES_EXPORT",
+          "checked_at": "2026-09-19",
+          "client_sha": "8adcd7b604257d00b43635e70d90e4e97e5bcd57",
+          "firestore_ruleset": "9c02e187-bd1c-4a5f-bdcc-d8f070e0a5b2",
+          "firestore_sha256": "d8ee0abcd5a8f217f1fbe60af9651e5b4253b07cac72d0746c4e781a48052aa2",
+          "storage_ruleset": "a2a0ddf7-9746-4dd2-bd48-29c9abc0e41f",
+          "storage_sha256": "1a912051ba923a0e4ae29fd36b1741bcf0f5879cd53e6d4bd386c9d5a3b717d5",
+          "exported_at": "2026-09-19T09:51:02.759Z",
+          "cli_user": "support.vyd@specialsoftwares.com",
+          "result": "Unchanged #22 helpers vs exported live Firestore. Ordinary diary/PO/CC/pack CREATE denied on tx.get users/{uid}/subscription/status (missing and seeded enforcement-false both unreadable; not treated as off). Recovery status/usage reads denied. Letterhead parent+genuine mirror CREATE, saved metadata UPDATE, same-ID recovery compatible; no usageCurrent write. Missing _saveLocks acquire denied (Null value on resource.data.userId). Existing in_flight lock complete compatible; same-ID retry after done denied by live transition table. Subscription listener permission-denied → free default view (controlled degradation, not boot crash). Storage client paths match live; no Storage emulator run. Canonical candidate-Rules suites not re-run as live. No Rules deploy."
         }
       ],
       "jira": [
@@ -603,7 +616,7 @@
       "validation": {
         "implementation": "investigating",
         "review": "pending",
-        "source_phase": "design_corrected_live_compared",
+        "source_phase": "design_corrected_live_compared_emulator",
         "deployment": "compared_not_enforced",
         "device": "not_run"
       },
@@ -611,8 +624,8 @@
         "branch": "release/bounded-autonomy-register",
         "head": null,
         "pr": 23,
-        "last_result": "APP_CHECK_DESIGN.md corrected. Live comparison recorded. Source still has no App Check client. Enforcement not enabled.",
-        "next_action": "Do not enable enforcement, deploy Rules, install App Check SDKs, or add a debug-token bypass. REL-09 still needed before Play-signing vs SHA mapping."
+        "last_result": "Live Rules exported and emulator-compared to #22. Ordinary CREATE and first save-lock acquire incompatible with live Rules. Letterhead compatible. No App Check implementation or Rules deploy.",
+        "next_action": "Do not enable enforcement, deploy Rules, install App Check SDKs, or add a debug-token bypass. Smallest later-reviewed compatibility patch is owner-read/server-write-denied subscription/status and usageCurrent plus missing-doc _saveLocks read. Play Integrity Console 'not integrated' remains separate from Firebase App Check provider registration."
       },
       "blocker": null
     },
@@ -620,7 +633,7 @@
       "id": "REL-09",
       "priority": 1,
       "title": "Owner restores existing Play account access",
-      "state": "blocked_human",
+      "state": "verified",
       "risk": "external",
       "allowed_scope": [
         "Owner completes password/2FA in the existing developer account; agent may then perform read-only inspection."
@@ -640,11 +653,30 @@
           "kind": "cursor_browser_blocker",
           "checked_at": "2026-09-19",
           "result": "Owner completed Play sign-in in Safari on the existing developer account; that session is not shared with Cursor Chromium. Agent Play tab remained https://accounts.google.com/v3/signin/challenge/pwd continue=https://play.google.com/console for aeadmin@specialsoftwares.com with heading Too many failed attempts. Password was not entered or retried. No second developer account created. Package/tracks/versionCodes/certificates still uninspected."
+        },
+        {
+          "kind": "access_restored",
+          "checked_at": "2026-09-19",
+          "result": "Cursor Chromium reached the existing Play Console using the established aeadmin@specialsoftwares.com session. No password was entered this continuation. Access restoration is recorded separately from completed preflight."
+        },
+        {
+          "kind": "readonly_play_inspect",
+          "checked_at": "2026-09-19",
+          "account": "aeadmin@specialsoftwares.com",
+          "developer": "SPECIAL Softwares (5171346189091805855)",
+          "app": "Vyaamikk Diary (4972339006118168782)",
+          "package": "com.specialsoftwares.vyaamikkdiary",
+          "signing_copied_at": "2026-09-19T10:01:25.878Z",
+          "bundles_recorded_at": "2026-09-19T10:05:33.381Z",
+          "internal_testing_recorded_at": "2026-09-19T10:08:14.288Z",
+          "dashboard_recorded_at": "2026-09-19T10:09:16.895Z",
+          "production_recorded_at": "2026-09-19T10:11:55.238Z",
+          "result": "Package matches Firebase. Draft/unreviewed; production Inactive; internal testing Active RC4 vc17 (released 26 Aug 23:01, not reviewed). Dashboard setup 6/11 recorded and not changed (incomplete: sign-in details, target audience, data safety, category+contact, Store Listing). Developer verification previously registered. Installed audience previously 0. All app bundles 1–6 of 6 / 6 app versions: 17 Active, 16/15/14/13/10 Inactive. Sixth item is versionCode 10. Searches 18,19,12,11: No results. FILTER-BAR present; no extra hidden versions revealed. Upload SHA-1 20f8150e…42ad SHA-256 e688fa0b…8752a. Play App Signing SHA-256 b9c521e3…ce92 and SHA-1 d223f0a5…82e59 read from hyphenated copy controls (not leftover-hash inference). All four match Firebase. Play Console Play Integrity API not integrated — keep separate from Firebase App Check Play Integrity provider registration. No upload, track change, key reset, or listing create."
         }
       ],
       "jira": [],
       "validation": {
-        "implementation": "not_started",
+        "implementation": "investigating",
         "review": "pending",
         "deployment": "not_applicable",
         "device": "not_run"
@@ -653,13 +685,10 @@
         "branch": null,
         "head": null,
         "pr": null,
-        "last_result": "Play Console unread in the agent browser. Safari session not transferable. Google lockout shown for aeadmin@specialsoftwares.com.",
-        "next_action": "After the Cursor Chromium lockout clears, complete password/2FA for the existing Play developer account inside Cursor’s browser (currently offering aeadmin@specialsoftwares.com), then open the existing app page. Do not create another developer account or retry while lockout is shown."
+        "last_result": "Play read-only inspect complete. Access restored earlier in Continuation 3; preflight evidence recorded after SHA-1 copy and complete 6-item bundle inventory including vc10.",
+        "next_action": "Do not mutate Play (no upload, track change, key reset, listing create). Dashboard 6/11 remains outstanding and unchanged."
       },
-      "blocker": {
-        "type": "owner_sign_in",
-        "next_action": "Sign in to the existing Play developer account in Cursor’s Chromium after the current Too many failed attempts lockout clears; Safari sign-in does not grant the agent access. Then allow read-only inspect of package, tracks, versionCodes, and signing certificates."
-      }
+      "blocker": null
     },
     {
       "id": "REL-10",
@@ -705,7 +734,7 @@
         "head": null,
         "pr": null,
         "last_result": "Read-only Firebase audit complete for project/apps/SHA/Phone Auth/App Check/Functions list/Rules hashes. Remaining unknowns are Play Console and per-user documents.",
-        "next_action": "Do not rotate keys, deploy, or write flags. Use REL-09 for Play signing vs these SHA hashes."
+        "next_action": "Do not rotate keys, deploy, or write flags. Play signing SHA-1/SHA-256 now mapped in REL-09. Per-user documents remain unread."
       },
       "blocker": null
     },
@@ -713,7 +742,7 @@
       "id": "REL-11",
       "priority": 9,
       "title": "Complete read-only internal-AAB preflight",
-      "state": "blocked_dependency",
+      "state": "ready_for_review",
       "risk": "external",
       "allowed_scope": [
         "After REL-09/10, inspect account, package, signing, deployed backend and EAS profile/environment metadata.",
@@ -739,25 +768,30 @@
           "kind": "partial_preflight",
           "checked_at": "2026-09-19",
           "result": "Package com.specialsoftwares.vyaamikkdiary matches the Firebase Android app. eas.json production builds an AAB and preview an APK; both set EXPO_PUBLIC_APP_MODE=production; neither sets EXPO_PUBLIC_QUOTA_UPSELL_ENABLED. Source versionCode 19 remains unused-on-Play unknown. Firebase SHA hashes recorded; which cert is Play App Signing is unread. Billing functions not deployed; live Rules lack quota paths — billing-off internal testing does not require those deploys. REL-09 still blocks versionCode/track/certificate mapping."
+        },
+        {
+          "kind": "internal_aab_preflight",
+          "checked_at": "2026-09-19",
+          "result": "Play package/tracks/versionCodes/signing mapped. Proposed versionCode 19 (unused on complete inventory; also 18 unused); not bumped. eas.json production AAB, preview APK, APP_MODE=production, upsell unset. Combination #22+#24+#25 not created; merge-tree preview conflicts on package.json and #22/#24 locale files. Live Rules deny ordinary CREATE and first save-lock acquire; letterhead compatible. Billing functions not deployed. Dashboard 6/11 outstanding, not changed. No build/upload."
         }
       ],
       "jira": [],
       "validation": {
-        "implementation": "not_started",
+        "implementation": "investigating",
         "review": "pending",
         "deployment": "not_applicable",
         "device": "not_run"
       },
       "work": {
-        "branch": null,
+        "branch": "release/bounded-autonomy-register",
         "head": null,
-        "pr": null,
-        "last_result": "Firebase half of internal-AAB preflight recorded. Play tracks/versionCodes/signing still blocked on REL-09.",
-        "next_action": "After REL-09, map unused versionCode and upload vs Play App Signing certificates to the recorded Firebase SHA-256 hashes; then prepare a reviewable build proposal. Do not build."
+        "pr": 23,
+        "last_result": "Read-only internal-AAB preflight recorded. Proposal in INTERNAL_CANDIDATE_RUNBOOK.md. Combined SHA does not exist. versionCode not bumped. No build.",
+        "next_action": "Keep HOLD. A later authorization must create the combined candidate, review merge-tree conflicts, consider the smallest live-Rules compatibility patch, then approve an exact build/track action. Do not infer that approval here."
       },
       "blocker": {
         "type": "dependencies_and_approval",
-        "next_action": "Complete REL-09 Play inspect. REL-10 Firebase read is done. Do not infer release approval or bump versionCode yet."
+        "next_action": "Combination, live-Rules compatibility review, dashboard/legal items, and explicit build/track approval remain. Do not bump versionCode or build."
       }
     },
     {
@@ -848,6 +882,11 @@
           "kind": "runbook_correction",
           "path": "docs/release/INTERNAL_CANDIDATE_RUNBOOK.md",
           "result": "Continuation 2: explicit quota matrix; three gates; live vs source backend; dev-client native binary identity vs separately served JS commit."
+        },
+        {
+          "kind": "runbook_continuation_3",
+          "path": "docs/release/INTERNAL_CANDIDATE_RUNBOOK.md",
+          "result": "Play inventory, certificate mapping, LIVE_RULES_EXPORT matrix, merge-tree combination preview, and versionCode 19 proposal recorded. Combined tree not created. Tests still not executed on a binary."
         }
       ],
       "jira": [
@@ -869,8 +908,8 @@
         "branch": "release/bounded-autonomy-register",
         "head": null,
         "pr": 23,
-        "last_result": "INTERNAL_CANDIDATE_RUNBOOK.md corrected. No merge or build. Tests not executed.",
-        "next_action": "Use the runbook plus AUTH_MANUAL_ACCEPTANCE_CHECKLIST when an authorized binary exists. Do not assume versionCode 19 is free on Play. Record binary id and JS commit separately for any existing dev client."
+        "last_result": "INTERNAL_CANDIDATE_RUNBOOK.md updated for Continuation 3. No merge or build. Device tests not executed.",
+        "next_action": "Use the runbook plus AUTH_MANUAL_ACCEPTANCE_CHECKLIST when an authorized binary exists. Proposed versionCode 19 is unused on the complete Play listing; do not bump here. Record binary id and JS commit separately for any existing dev client."
       },
       "blocker": null
     },
@@ -1073,7 +1112,7 @@
       "docs/release/RELEASE_REGISTER.json": "2726eb7c54e2fa3ee588f5f4d7cf54281fe5416ba526cc3096de80ede0d1d18c",
       "docs/release/CURSOR_START.md": "7f27ce3dee950232814eb4d28df708501dc59adce45b2a7f98d7e10a9c2930c5"
     },
-    "next_action": "REL-01/02 await remaining native/store validation; source/injected-IAP review accepted at 8adcd7b (001a532 SUCCESS 138/138). REL-03 source EN/HI accepted at 9db22fa (f3f99e8 SUCCESS 132/132). REL-04 source preserved at 5076f77. REL-10 Firebase read-only done; REL-09 Play still blocked in Cursor browser. Keep all PRs draft. No merge, native/EAS build, deploy, store mutation, or production flag write.",
+    "next_action": "Continuation 3 preflight recorded on this control PR. Keep all PRs draft. Do not merge, native/EAS build, deploy, store mutation, or production flag write. REL-09 Play inspect is done; REL-11 proposal is recorded; combination/Rules/build remain separately authorized. REL-01/02 source/injected-IAP accepted at 8adcd7b. REL-03 source EN/HI accepted at 9db22fa. REL-04 source preserved at 5076f77.",
     "remote_branch_created": true
   }
 }

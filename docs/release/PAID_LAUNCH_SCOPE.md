@@ -26,7 +26,7 @@ Missing public-launch features must remain visible here without being silently c
 - Backend billing **source** stays fail-closed: `PLAY_BILLING_ENABLED === "true"` / `APPSTORE_BILLING_ENABLED === "true"` (`functions/src/billing/google/playConstants.ts`, `functions/src/billing/apple/appleConstants.ts`).
 - **Live (REL-10):** those billing/GST functions are exported in `functions/src/index.ts` and are **not** in `firebase functions:list`. Identity/email/deletion/security **are** deployed. Live Play/App Store billing flags cannot be observed on a deployed billing handler. Deployed identity environment variables do not include `PLAY_BILLING_*` / `APPSTORE_BILLING_*`. Do not treat source fail-closed comments as proof of a live env var value.
 
-Quota matrix (intended behaviour, not permission to change flags): see `INTERNAL_CANDIDATE_RUNBOOK.md`. Live Firestore Rules do not include `quotaEnforcementOn`; current live ordinary CREATE is not rejected by that monthly quota Rules gate. Per-user `quotaEnforcementEnabled` documents were not read.
+Quota matrix (intended behaviour, not permission to change flags): see `INTERNAL_CANDIDATE_RUNBOOK.md`. Live Firestore Rules do not include `quotaEnforcementOn`. Continuation 3 emulator against the exported live ruleset shows ordinary CREATE is still **denied**: the `#22` client `tx.get`s `users/{uid}/subscription/status`, a path with no live match (missing and seeded enforcement-false are both unreadable). That is not a monthly-quota rejection. Letterhead parent/mirror CREATE is compatible. Per-user `quotaEnforcementEnabled` documents were not read.
 
 ## Requirement map
 
@@ -47,7 +47,7 @@ Do not defer manage/cancel by labelling all of VYD-38 optional. Owner must accep
 
 | Piece | Where | Evidence class |
 | --- | --- | --- |
-| Server document | `users/{uid}/subscription/status` | Code. Live user documents not read (REL-10). Live Rules also lack the repo’s `match /subscription/status` path. |
+| Server document | `users/{uid}/subscription/status` | Code. Live user documents not read (REL-10). Live Rules lack `match /subscription/status`; Continuation 3 emulator: owner `getDoc` / listener are `permission-denied`. |
 | Client parse | `parseSubscriptionStatus` fail-closed to free / non-entitled | Unit tests. |
 | Session + cache | `subscriptionSession.ts`, `subscriptionCache.ts`, `subscriptionFirestore.ts` (`onSnapshot`, `getDocFromServer`) | Unit tests. Not device. |
 | UX gating | `subscriptionFeatures.ts` — **not security**. Rules / quota architecture remain authority. `onHold` / `expired` → free even if a malformed doc sets `entitlementActive`. | Unit tests. |
