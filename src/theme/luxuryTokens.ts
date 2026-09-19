@@ -28,7 +28,7 @@ export const LUXURY_COLORS = {
   },
 } as const;
 
-/** Tactile press — scale 0.97, ~120ms ease-out via LuxuryPressable. */
+/** Tactile press — scale 0.97 / opacity 0.94 while RN `pressed` is true. */
 export const LUXURY_PRESS = {
   scale: 0.97,
   opacity: 0.94,
