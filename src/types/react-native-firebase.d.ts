@@ -106,3 +106,17 @@ declare module "@react-native-firebase/functions" {
     region?: string
   ): FunctionsInstance;
 }
+
+declare module "@react-native-firebase/app-check" {
+  export class ReactNativeFirebaseAppCheckProvider {
+    configure(options: unknown): void;
+  }
+  export interface AppCheckInstance {
+    initializeAppCheck(options: {
+      provider: ReactNativeFirebaseAppCheckProvider;
+      isTokenAutoRefreshEnabled: boolean;
+    }): Promise<void>;
+    getToken(forceRefresh?: boolean): Promise<{ token: string }>;
+  }
+  export default function appCheck(): AppCheckInstance;
+}

@@ -16,8 +16,12 @@ import {
   type QuotaUpsellPresentResult,
   type QuotaUpsellSnapshot,
 } from "./quotaUpsellController";
-import { registerQuotaUpsellPresenter } from "./notifyOrdinaryQuotaUpsell";
+import {
+  registerManualUpgradePresenter,
+  registerQuotaUpsellPresenter,
+} from "./notifyOrdinaryQuotaUpsell";
 import type { QuotaUpsellRequest } from "./quotaUpsellTypes";
+import type { SyncSessionToken } from "@/sync/syncSessionOwnership";
 
 export type QuotaUpsellHostRuntimeDeps = {
   purchase: (sku: CanonicalSku) => Promise<PurchaseFlowResult>;
@@ -31,6 +35,7 @@ export type QuotaUpsellHostRuntime = {
   reconcile(): void;
   snapshot(): QuotaUpsellSnapshot;
   present(request: QuotaUpsellRequest): QuotaUpsellPresentResult;
+  presentManual(session: SyncSessionToken | null): QuotaUpsellPresentResult;
   dismiss(): void;
   purchase(sku: string): Promise<QuotaUpsellActionResult>;
   restore(): Promise<QuotaUpsellActionResult>;
@@ -75,16 +80,25 @@ export function createQuotaUpsellHostRuntime(
     return result;
   }
 
+  function presentManual(session: SyncSessionToken | null): QuotaUpsellPresentResult {
+    controller.sync(deps.getIap());
+    const result = controller.presentManual(session);
+    emit();
+    return result;
+  }
+
   return {
     controller,
     attach() {
       registerQuotaUpsellPresenter(present);
+      registerManualUpgradePresenter(presentManual);
     },
     reconcile,
     snapshot() {
       return controller.snapshot();
     },
     present,
+    presentManual,
     dismiss() {
       controller.dismiss();
       emit();
@@ -128,6 +142,7 @@ export function createQuotaUpsellHostRuntime(
     },
     dispose() {
       registerQuotaUpsellPresenter(null);
+      registerManualUpgradePresenter(null);
       listeners.clear();
     },
   };

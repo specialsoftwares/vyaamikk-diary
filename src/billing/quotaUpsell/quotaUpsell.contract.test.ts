@@ -30,7 +30,8 @@ function read(rel: string): string {
 
 const runtime = stripComments(read("src/billing/quotaUpsell/quotaUpsellHostRuntime.ts"));
 assert.match(runtime, /createQuotaUpsellController/);
-assert.match(runtime, /registerQuotaUpsellPresenter/);
+  assert.match(runtime, /registerManualUpgradePresenter/);
+  assert.match(runtime, /presentManual/);
 assert.doesNotMatch(runtime, /grantProfessionalTrial/);
 assert.doesNotMatch(runtime, /\bsetDoc\b/);
 
@@ -108,5 +109,14 @@ for (const file of syncFiles) {
 const preview = stripComments(read("src/components/billing/BillingUxPreviewLab.tsx"));
 assert.doesNotMatch(preview, /notifyOrdinaryQuotaUpsell/);
 assert.doesNotMatch(preview, /useIap\b/);
+
+const notify = stripComments(read("src/billing/quotaUpsell/notifyOrdinaryQuotaUpsell.ts"));
+assert.match(notify, /notifyManualUpgrade/);
+assert.match(notify, /registerManualUpgradePresenter/);
+assert.doesNotMatch(notify, /\bsetDoc\b/);
+
+const settingsSrc = read("app/(app)/(tabs)/settings.tsx");
+assert.match(settingsSrc, /settings.subscriptionItem/);
+assert.match(settingsSrc, /settings\/subscription/);
 
 console.log("quotaUpsell.contract.test.ts: ok");

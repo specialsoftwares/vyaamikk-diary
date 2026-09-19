@@ -1,5 +1,5 @@
 export { isQuotaUpsellEnabled, __setQuotaUpsellEnabledForTests } from "./quotaUpsellGate";
-export { notifyOrdinaryQuotaUpsell } from "./notifyOrdinaryQuotaUpsell";
+export { notifyOrdinaryQuotaUpsell, notifyManualUpgrade } from "./notifyOrdinaryQuotaUpsell";
 export { QuotaUpsellHost } from "./QuotaUpsellHost";
 export { createQuotaUpsellController } from "./quotaUpsellController";
 export { decideQuotaUpsellEligibility } from "./quotaUpsellDecision";

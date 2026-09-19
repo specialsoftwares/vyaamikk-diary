@@ -83,6 +83,17 @@ export async function runStartupCoordinator(options?: {
             const { getApps } = await import("firebase/app");
             const app = getFirebaseApp();
             const ready = Boolean(app) || getApps().length > 0;
+            if (ready) {
+              try {
+                const { initializeAppCheckLayer } = await import("@/services/appCheck/bootstrap");
+                await initializeAppCheckLayer({
+                  isProduction: env.isProduction,
+                  getJsApp: () => app,
+                });
+              } catch {
+                // Unenforced. Do not fail JS Firebase init on App Check.
+              }
+            }
             if (ready && env.firebase.projectId.length === 0) {
               throw new StartupError(
                 "FIREBASE_PROJECT_MISMATCH",

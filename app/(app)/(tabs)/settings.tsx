@@ -112,6 +112,10 @@ export default function SettingsTab() {
     () => router.push("/(app)/settings/billing-ux-preview"),
     [router]
   );
+  const onSubscription = useCallback(
+    () => router.push("/(app)/settings/subscription"),
+    [router]
+  );
 
   if (status === "loading") {
     return (
@@ -134,6 +138,12 @@ export default function SettingsTab() {
         title={t("settings.profileIdentityItem")}
         subtitle={t("settings.profileIdentitySubtitle")}
         onPress={onProfileIdentity}
+      />
+      <SettingsNavCard
+        icon="credit-card-outline"
+        title={t("settings.subscriptionItem")}
+        subtitle={t("settings.subscriptionSubtitle")}
+        onPress={onSubscription}
       />
 
       <LocaleUiText style={styles.sectionLabel}>{t("settings.sectionAccountApp")}</LocaleUiText>

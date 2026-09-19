@@ -19,6 +19,7 @@ const pkg = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
 const EXCLUDE = new Set([
   "test:all", // self
   "test:firestore-rules", // emulator suite — separate ci:verify stage
+  "test:live-rules-compat", // live-export compatibility emulator — separate ci:verify stage
   "test:storage-rules", // storage emulator suite — separate ci:verify stage
   "test:resolve-or-create-phone-emulator", // emulator suite — separate ci:verify stage
   "test:billing-transaction-emulator", // emulator suite — separate ci:verify stage

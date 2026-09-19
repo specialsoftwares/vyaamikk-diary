@@ -103,6 +103,8 @@ assert.doesNotMatch(publicPreview, /useIap\b/);
 assert.doesNotMatch(publicPreview, /onPurchase/);
 assert.match(settings, /isBillingUxPreviewEnabled\(\)/);
 assert.match(settings, /billing-ux-preview/);
+assert.match(settings, /settings.subscriptionItem/);
+assert.match(settings, /settings\/subscription/);
 assert.doesNotMatch(settings, /Subscription & Billing/);
 
 const header = stripComments(read("../ui/Header.tsx"));

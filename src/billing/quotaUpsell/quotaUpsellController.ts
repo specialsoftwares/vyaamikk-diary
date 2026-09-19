@@ -7,7 +7,7 @@
  */
 
 import type { CanonicalSku, IapView, PurchaseFlowResult } from "@/billing/iap/iapTypes";
-import type { UpgradeOperationState } from "@/components/billing/upgradeTypes";
+import type { UpgradeOperationState, UpgradeTriggerContext } from "@/components/billing/upgradeTypes";
 import { syncSessionOwnership, type SyncSessionToken } from "@/sync/syncSessionOwnership";
 
 import { decideQuotaUpsellEligibility } from "./quotaUpsellDecision";
@@ -51,6 +51,7 @@ export type QuotaUpsellSnapshot = {
   educationOpen: boolean;
   presentationId: number;
   clientRecordId: string | null;
+  triggerContext: UpgradeTriggerContext;
   session: SyncSessionToken | null;
   hostPurchaseState: UpgradeOperationState;
   hostRestoreState: UpgradeOperationState;
@@ -66,6 +67,7 @@ export type QuotaUpsellSnapshot = {
 
 export interface QuotaUpsellController {
   present(request: QuotaUpsellRequest): QuotaUpsellPresentResult;
+  presentManual(session: SyncSessionToken | null): QuotaUpsellPresentResult;
   dismiss(): void;
   sync(iap: QuotaUpsellIapSlice): void;
   purchase(sku: string): Promise<QuotaUpsellActionResult>;
@@ -121,6 +123,7 @@ export function createQuotaUpsellController(
   let educationHeld = false;
   let presentationId = 0;
   let clientRecordId: string | null = null;
+  let triggerContext: UpgradeTriggerContext = "recordLimitReached";
   let originSession: SyncSessionToken | null = null;
   let hostPurchaseState: UpgradeOperationState = "idle";
   let hostRestoreState: UpgradeOperationState = "idle";
@@ -295,6 +298,7 @@ export function createQuotaUpsellController(
       educationHeld = false;
       presentationId += 1;
       clientRecordId = id;
+      triggerContext = "recordLimitReached";
       originSession = request.session;
       hostErrorMessage = null;
       errorRecoverable = false;
@@ -303,6 +307,34 @@ export function createQuotaUpsellController(
         idleHostOperations();
       }
       return { ok: true, visible: true, clientRecordId };
+    },
+
+    presentManual(session) {
+      if (held && !presented()) {
+        retirePresentation();
+      }
+      if (!syncSessionOwnership.isCurrent(session)) {
+        return { ok: false, reason: "session_stale", visible: presented(), clientRecordId };
+      }
+      if (presented() && triggerContext === "manualUpgrade" && clientRecordId == null) {
+        return { ok: false, reason: "sheet_already_visible", visible: true, clientRecordId };
+      }
+      if (presented()) {
+        return { ok: false, reason: "other_sheet_visible", visible: true, clientRecordId };
+      }
+      held = true;
+      educationHeld = false;
+      presentationId += 1;
+      clientRecordId = null;
+      triggerContext = "manualUpgrade";
+      originSession = session;
+      hostErrorMessage = null;
+      errorRecoverable = false;
+      ackLatestIapResult();
+      if (!keepIssuedStoreBusy()) {
+        idleHostOperations();
+      }
+      return { ok: true, visible: true, clientRecordId: null };
     },
 
     dismiss() {
@@ -373,6 +405,7 @@ export function createQuotaUpsellController(
         educationOpen: educationOpen(),
         presentationId,
         clientRecordId,
+        triggerContext,
         session: originSession,
         hostPurchaseState,
         hostRestoreState,

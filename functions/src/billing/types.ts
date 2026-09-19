@@ -315,7 +315,12 @@ export interface AppStoreFinancialReviewDoc {
  * Never stores raw purchase tokens, plaintext credentials, or uid.
  * `financialEventId` is the resolver for the ledger owner.
  */
-export type BillingReconciliationQueueStatus = "pending" | "resolved";
+export type BillingReconciliationQueueStatus =
+  | "pending"
+  | "leased"
+  | "failed_retryable"
+  | "resolved"
+  | "terminal";
 
 export interface BillingReconciliationQueueDoc {
   reason: string;
@@ -327,6 +332,11 @@ export interface BillingReconciliationQueueDoc {
   resolvedAt: number | null;
   status: BillingReconciliationQueueStatus;
   attemptCount: number;
+  leaseOwner?: string | null;
+  leaseExpiresAt?: number | null;
+  nextAttemptAt?: number | null;
+  lastErrorCode?: string | null;
+  terminalReason?: string | null;
 }
 
 export interface CompanyBillingDoc {

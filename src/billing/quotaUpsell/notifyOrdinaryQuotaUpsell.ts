@@ -1,13 +1,21 @@
+import type { SyncSessionToken } from "@/sync/syncSessionOwnership";
+
 import { decideQuotaUpsellEligibility } from "./quotaUpsellDecision";
 import type { QuotaUpsellPresentResult } from "./quotaUpsellController";
 import type { QuotaUpsellRequest } from "./quotaUpsellTypes";
 
 type Presenter = (request: QuotaUpsellRequest) => QuotaUpsellPresentResult;
+type ManualPresenter = (session: SyncSessionToken | null) => QuotaUpsellPresentResult;
 
 let presenter: Presenter | null = null;
+let manualPresenter: ManualPresenter | null = null;
 
 export function registerQuotaUpsellPresenter(next: Presenter | null): void {
   presenter = next;
+}
+
+export function registerManualUpgradePresenter(next: ManualPresenter | null): void {
+  manualPresenter = next;
 }
 
 /**
@@ -28,4 +36,15 @@ export function notifyOrdinaryQuotaUpsell(request: QuotaUpsellRequest): QuotaUps
     };
   }
   return presenter(request);
+}
+
+/**
+ * Settings / management entry. Independent of the quota upsell gate and
+ * does not invent a record id. Reuses the same UpgradeSheet host.
+ */
+export function notifyManualUpgrade(session: SyncSessionToken | null): QuotaUpsellPresentResult {
+  if (!manualPresenter) {
+    return { ok: false, reason: "no_host", visible: false, clientRecordId: null };
+  }
+  return manualPresenter(session);
 }

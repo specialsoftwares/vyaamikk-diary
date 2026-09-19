@@ -121,6 +121,7 @@ export function QuotaUpsellHostView({
     hostRestoreState: snapshot.hostRestoreState,
     hostErrorMessage: snapshot.hostErrorMessage,
     errorRecoverable: snapshot.errorRecoverable,
+    triggerContext: snapshot.triggerContext,
   });
 
   useEffect(() => {

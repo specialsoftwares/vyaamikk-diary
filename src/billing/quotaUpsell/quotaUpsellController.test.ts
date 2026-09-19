@@ -425,6 +425,36 @@ assert.equal(controller.snapshot().clientRecordId, "diary_1", "dismissal keeps t
   registerQuotaUpsellPresenter(null);
 }
 
+{
+  controller.dismiss();
+  syncSessionOwnership.resetForTests();
+  __setQuotaUpsellEnabledForTests(false);
+  const sessionManual = syncSessionOwnership.beginSession("uid-manual");
+  const opened = controller.presentManual(sessionManual);
+  assert.equal(opened.ok, true);
+  assert.equal(opened.clientRecordId, null);
+  assert.equal(controller.snapshot().triggerContext, "manualUpgrade");
+  assert.equal(controller.snapshot().visible, true);
+  const dup = controller.presentManual(sessionManual);
+  assert.equal(dup.ok, false);
+  assert.equal(dup.ok === false && dup.reason, "sheet_already_visible");
+  __setQuotaUpsellEnabledForTests(true);
+  const quotaBlocked = controller.present(quotaReq({ session: sessionManual, clientRecordId: "diary_manual" }));
+  assert.equal(quotaBlocked.ok, false);
+  assert.equal(quotaBlocked.ok === false && quotaBlocked.reason, "other_sheet_visible");
+  purchaseImpl = async () => ({ kind: "sheet_launched" });
+  const bought = await controller.purchase("vyd_starter_monthly");
+  assert.equal(bought.kind, "sheet_launched");
+  controller.dismiss();
+  __setQuotaUpsellEnabledForTests(true);
+  const quotaAfter = controller.present(quotaReq({ session: sessionManual, clientRecordId: "diary_after_manual" }));
+  assert.equal(quotaAfter.ok, true);
+  assert.equal(controller.snapshot().triggerContext, "recordLimitReached");
+  const manualBlocked = controller.presentManual(sessionManual);
+  assert.equal(manualBlocked.ok, false);
+  assert.equal(manualBlocked.ok === false && manualBlocked.reason, "other_sheet_visible");
+}
+
 __setQuotaUpsellEnabledForTests(null);
 syncSessionOwnership.resetForTests();
 console.log("quotaUpsellController.test.ts: ok");

@@ -34,8 +34,13 @@
 
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 
+import { getFirestore } from "firebase-admin/firestore";
+
 import { BillingError } from "../errors";
 import { billingDetailsPath } from "../paths";
+import { FirestoreBillingStore } from "../firestoreBillingStore";
+import { throwHttpsFromBilling } from "../google/billingHttps";
+import { isUpdateBillingDetailsEnabled } from "../reconciliationFlags";
 import type { BillingStore } from "../store";
 import type { GstinVerificationStatus, SubscriptionBillingDetailsDoc } from "../types";
 import { isKnownGstStateCode, isValidGstinFormat, normalizeGstin } from "../tax/gstin";
@@ -168,12 +173,33 @@ export async function applyUpdateBillingDetails(
   });
 }
 
+export async function handleUpdateBillingDetails(
+  store: BillingStore,
+  uid: string,
+  input: UpdateBillingDetailsInput,
+  nowMs: number
+): Promise<SubscriptionBillingDetailsDoc> {
+  return applyUpdateBillingDetails(store, uid, input, nowMs);
+}
+
 export const updateBillingDetails = onCall({ region: "asia-south1" }, async (request) => {
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "Sign in required.");
   }
-  throw new HttpsError(
-    "failed-precondition",
-    "Billing details callable is not production-enabled in VYD-40."
-  );
+  if (!isUpdateBillingDetailsEnabled()) {
+    throw new HttpsError(
+      "failed-precondition",
+      "Billing details callable is not production-enabled."
+    );
+  }
+  try {
+    const data = (request.data ?? {}) as UpdateBillingDetailsInput;
+    const store = new FirestoreBillingStore(getFirestore());
+    return await handleUpdateBillingDetails(store, request.auth.uid, data, Date.now());
+  } catch (err) {
+    if (err instanceof BillingError && err.causeCode === "gstin_format_invalid") {
+      throw new HttpsError("invalid-argument", "Invalid GST number format");
+    }
+    throwHttpsFromBilling(err);
+  }
 });

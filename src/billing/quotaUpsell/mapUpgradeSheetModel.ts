@@ -11,6 +11,7 @@ import type {
   UpgradeOperationState,
   UpgradePlanOffer,
   TranslateFn,
+  UpgradeTriggerContext,
 } from "@/components/billing/upgradeTypes";
 import { UNLIMITED_RECORDS, type ClientSubscriptionStatus, type VyaamikkPlan } from "@/subscription/types";
 import type { SubscriptionFeatures } from "@/subscription/subscriptionFeatures";
@@ -34,7 +35,7 @@ export type QuotaUpsellSubscriptionSource = {
 };
 
 export type MappedUpgradeSheetModel = {
-  triggerContext: "recordLimitReached";
+  triggerContext: UpgradeTriggerContext;
   currentPlanLabel: string;
   entitlementLabel: string;
   trialEligible: boolean;
@@ -121,6 +122,7 @@ export function mapUpgradeSheetModel(input: {
   hostRestoreState: UpgradeOperationState;
   hostErrorMessage: string | null;
   errorRecoverable?: boolean;
+  triggerContext?: UpgradeTriggerContext;
 }): MappedUpgradeSheetModel {
   const catalogState = catalogStateFromIap(input.iap);
   const offers = ALL_CANONICAL_SKUS.map((sku) => offerForSku(sku, input.iap.catalog, catalogState));
@@ -131,7 +133,7 @@ export function mapUpgradeSheetModel(input: {
   const restoreState = operationStateFromIap(input.iap, input.hostRestoreState, false);
   const defaultReady = offers.find((offer) => offer.offer.status === "ready");
   return {
-    triggerContext: "recordLimitReached",
+    triggerContext: input.triggerContext ?? "recordLimitReached",
     currentPlanLabel: currentPlanLabel(input.t, input.subscription.plan),
     entitlementLabel: entitlementLabel(input.t, input.subscription),
     trialEligible: false,

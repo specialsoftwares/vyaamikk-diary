@@ -1,0 +1,389 @@
+rules_version = '2';
+
+// Vyaamikk Diary — Firestore security rules (production)
+//
+// Identity model:
+//   users/{uid}              -> signed-in user's profile (1:1 with auth uid).
+//   users/{uid}/entries/{id} -> diary entries owned by {uid}.
+//   phoneIndex/{phoneE164}   -> server-owned reverse index.
+//   ueidIndex/{ueid}         -> server-owned UEID claim ledger.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function userData(uid) {
+      return get(/databases/$(database)/documents/users/$(uid)).data;
+    }
+
+    function userStatus(uid) {
+      return userData(uid).get('status', 'active');
+    }
+
+    function isActiveUser(uid) {
+      return isOwner(uid) && userStatus(uid) == 'active';
+    }
+
+    function identityLockedFieldsUnchanged() {
+      return request.resource.data.get('status', 'active') == resource.data.get('status', 'active')
+        && request.resource.data.get('deletionRequestedAt', null) == resource.data.get('deletionRequestedAt', null)
+        && request.resource.data.get('deletionScheduledFor', null) == resource.data.get('deletionScheduledFor', null)
+        && request.resource.data.get('deletionCompletedAt', null) == resource.data.get('deletionCompletedAt', null)
+        && request.resource.data.get('reactivationRequestedAt', null) == resource.data.get('reactivationRequestedAt', null)
+        && request.resource.data.get('reactivationPhoneVerifiedAt', null) == resource.data.get('reactivationPhoneVerifiedAt', null)
+        && request.resource.data.get('reactivationEmailVerifiedAt', null) == resource.data.get('reactivationEmailVerifiedAt', null);
+    }
+
+    function protectedIdentityFieldsUnchanged() {
+      return request.resource.data.get('uid', request.auth.uid) == resource.data.get('uid', request.auth.uid)
+        && request.resource.data.get('ueid', '') == resource.data.get('ueid', '')
+        && request.resource.data.get('phoneE164', '') == resource.data.get('phoneE164', '')
+        && request.resource.data.get('mobileHash', null) == resource.data.get('mobileHash', null)
+        && request.resource.data.get('emailHash', null) == resource.data.get('emailHash', null)
+        && request.resource.data.get('createdAt', 0) == resource.data.get('createdAt', 0)
+        && request.resource.data.get('retiredUeid', false) == resource.data.get('retiredUeid', false)
+        && request.resource.data.get('deletedAt', null) == resource.data.get('deletedAt', null)
+        && identityLockedFieldsUnchanged();
+    }
+
+    function clientProfilePatchAllowed() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        'displayName',
+        'salutation',
+        'businessName',
+        'workType',
+        'designation',
+        'businessEmail',
+        'normalizedEmail',
+        'language',
+        'profileCompletedAt',
+        'ueidReleasedAt',
+        'onboardingIntroSeenAt',
+        'profileLogo',
+        'pdfBranding',
+        'lastLoginAt',
+        'previousLoginAt',
+        'lastActiveAt',
+        'businessNameChangeCount',
+        'emailChangeCount',
+        'profileChangeHistory',
+        'lastProfileEditedAt',
+        'legalConsents',
+        'updatedAt',
+        // emailStatus / emailLinkedAt / emailVerifiedAt are server-authoritative
+        // (startEmailVerification / verifyAndBindEmail). Clients must not self-assert.
+        'accountKind',
+        'pinCode',
+        'pinLocality',
+        'pinDistrict',
+        'pinState',
+        'gstin',
+        'gstinVerificationState',
+        'issuerIdentitySnapshotId',
+        'onboardingProfileVersion',
+      ]);
+    }
+
+    function clientDeletionRequestAllowed() {
+      return resource.data.get('status', 'active') == 'active'
+        && request.resource.data.get('status', 'active') == 'pending_deletion'
+        && request.resource.data.get('deletionRequestedAt', 0) is int
+        && request.resource.data.get('deletionScheduledFor', 0) is int
+        && request.resource.data.get('deletionCompletedAt', null) == null
+        && request.resource.data.get('retiredUeid', false) == false
+        && request.resource.data.get('ueid', '') == resource.data.get('ueid', '')
+        && request.resource.data.get('phoneE164', '') == resource.data.get('phoneE164', '')
+        && request.resource.data.get('emailHash', null) == resource.data.get('emailHash', null)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status',
+          'deletionRequestedAt',
+          'deletionScheduledFor',
+          'deletionCompletedAt',
+          'retiredUeid',
+          'mobileHash',
+          'updatedAt',
+        ]);
+    }
+
+    function serialCounterId(counterId) {
+      return counterId in ['customerCredit', 'purchaseOrder'];
+    }
+
+    function cashPaidCounterId(counterId) {
+      return counterId == 'cashPaidVouchers';
+    }
+
+    function serialCounterCreateValid() {
+      return request.resource.data.keys().hasOnly(['next', 'updatedAt'])
+        && request.resource.data.next is int
+        && request.resource.data.next == 1
+        && request.resource.data.updatedAt is int;
+    }
+
+    function serialCounterUpdateValid() {
+      return request.resource.data.keys().hasOnly(['next', 'updatedAt'])
+        && request.resource.data.next is int
+        && request.resource.data.updatedAt is int
+        && request.resource.data.next == resource.data.next + 1;
+    }
+
+    function cashPaidCounterCreateValid() {
+      return request.resource.data.keys().hasOnly(['currentYear', 'count', 'updatedAt'])
+        && request.resource.data.currentYear is string
+        && request.resource.data.count is int
+        && request.resource.data.count == 1
+        && request.resource.data.updatedAt is int;
+    }
+
+    function cashPaidCounterUpdateValid() {
+      return request.resource.data.keys().hasOnly(['currentYear', 'count', 'updatedAt'])
+        && request.resource.data.currentYear is string
+        && request.resource.data.count is int
+        && request.resource.data.updatedAt is int
+        && (
+          (request.resource.data.currentYear == resource.data.currentYear
+            && request.resource.data.count == resource.data.count + 1)
+          || (request.resource.data.currentYear != resource.data.currentYear
+            && request.resource.data.count == 1)
+        );
+    }
+
+    function saveLockCreateValid(uid, clientRecordId) {
+      return request.resource.data.userId == uid
+        && request.resource.data.clientRecordId == clientRecordId
+        && request.resource.data.status == 'in_flight'
+        && request.resource.data.startedAt is int
+        && request.resource.data.updatedAt is int
+        && request.resource.data.expiresAt is int;
+    }
+
+    function saveLockUpdateValid() {
+      return request.resource.data.userId == resource.data.userId
+        && request.resource.data.clientRecordId == resource.data.clientRecordId
+        && request.resource.data.status in ['in_flight', 'done', 'failed']
+        && (
+          (resource.data.status == 'in_flight'
+            && request.resource.data.status in ['in_flight', 'done', 'failed'])
+          || (resource.data.status == 'failed' && request.resource.data.status == 'in_flight')
+        );
+    }
+
+    function trustedDeviceCreateValid(uid, deviceId) {
+      return request.resource.data.userId == uid
+        && request.resource.data.deviceInstallationId == deviceId
+        && request.resource.data.status == 'active'
+        && request.resource.data.firstSeenAt is int
+        && request.resource.data.lastSeenAt is int;
+    }
+
+    function trustedDeviceUpdateValid(deviceId) {
+      return request.resource.data.userId == resource.data.userId
+        && request.resource.data.ueid == resource.data.ueid
+        && request.resource.data.deviceInstallationId == deviceId
+        && request.resource.data.firstSeenAt == resource.data.firstSeenAt
+        && request.resource.data.status == 'active'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'lastSeenAt',
+          'lastLoginAt',
+          'status',
+          'pushToken',
+          'appVersion',
+          'buildNumber',
+          'platform',
+        ]);
+    }
+
+    function entryTitleValid() {
+      return request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.title.size() <= 120;
+    }
+
+    // ---- User profile ---------------------------------------------------
+    match /users/{uid} {
+      allow read: if isOwner(uid);
+      // Profile creation is server-only (resolveOrCreateUserByPhone Cloud Function).
+      allow create: if false;
+      allow update: if isOwner(uid)
+                    && request.resource.data.get('uid', uid) == uid
+                    && (
+                      clientDeletionRequestAllowed()
+                      || (protectedIdentityFieldsUnchanged() && clientProfilePatchAllowed())
+                    );
+      allow delete: if false;
+
+      // ---- Diary entries ------------------------------------------------
+      match /entries/{entryId} {
+        allow read: if isOwner(uid);
+        allow create: if isActiveUser(uid)
+                      && request.resource.data.userId == uid
+                      && entryTitleValid();
+        allow update: if isActiveUser(uid)
+                      && request.resource.data.userId == uid
+                      && entryTitleValid();
+        allow delete: if isActiveUser(uid);
+      }
+
+      // ---- Professional service packs -----------------------------------
+      match /professionalPacks/{packId} {
+        allow read: if isOwner(uid);
+        allow create: if isActiveUser(uid)
+                      && request.resource.data.userId == uid
+                      && request.resource.data.title is string
+                      && request.resource.data.title.size() > 0
+                      && request.resource.data.title.size() <= 200;
+        allow update: if isActiveUser(uid)
+                      && request.resource.data.userId == uid
+                      && request.resource.data.title is string
+                      && request.resource.data.title.size() > 0
+                      && request.resource.data.title.size() <= 200;
+        allow delete: if isActiveUser(uid);
+      }
+
+      // ---- Letterhead documents -----------------------------------------
+      match /letterheadDocs/{docId} {
+        allow read: if isOwner(uid);
+        allow create, update, delete: if isActiveUser(uid);
+      }
+
+      // ---- Letterhead template config -----------------------------------
+      match /config/{configId} {
+        allow read: if isOwner(uid);
+        allow create, update, delete: if isActiveUser(uid);
+      }
+
+      // ---- Customer Credit / EMI ----------------------------------------
+      match /customerCreditRecords/{recordId} {
+        allow read: if isOwner(uid);
+        allow create: if isActiveUser(uid)
+                      && request.resource.data.userId == uid;
+        allow update: if isActiveUser(uid)
+                      && request.resource.data.userId == uid;
+        allow delete: if isActiveUser(uid);
+      }
+
+      // ---- Purchase orders ----------------------------------------------
+      match /purchaseOrders/{orderId} {
+        allow read: if isOwner(uid);
+        allow create: if isActiveUser(uid)
+                      && request.resource.data.userId == uid;
+        allow update: if isActiveUser(uid)
+                      && request.resource.data.userId == uid;
+        allow delete: if isActiveUser(uid);
+      }
+
+      // ---- Per-user serial counters -------------------------------------
+      match /counters/{counterId} {
+        allow read: if isOwner(uid);
+        allow create: if isActiveUser(uid)
+                      && (
+                        (serialCounterId(counterId) && serialCounterCreateValid())
+                        || (cashPaidCounterId(counterId) && cashPaidCounterCreateValid())
+                      );
+        allow update: if isActiveUser(uid)
+                      && (
+                        (serialCounterId(counterId) && serialCounterUpdateValid())
+                        || (cashPaidCounterId(counterId) && cashPaidCounterUpdateValid())
+                      );
+        allow delete: if false;
+      }
+
+      // ---- Save coordination locks --------------------------------------
+      match /_saveLocks/{clientRecordId} {
+        allow read: if isOwner(uid)
+                    && (
+                      resource == null
+                      || resource.data.userId == uid
+                    );
+        allow create: if isActiveUser(uid)
+                      && saveLockCreateValid(uid, clientRecordId);
+        allow update: if isActiveUser(uid)
+                      && saveLockUpdateValid();
+        allow delete: if false;
+      }
+
+
+      // ---- Compatibility (billing-off internal): owner reads of subscription
+      // status/usageCurrent, including missing documents. Client writes denied.
+      // Admin SDK writers are unaffected. Not the canonical quota Ruleset.
+      match /subscription/status {
+        allow read: if isOwner(uid);
+        allow create, update, delete: if false;
+      }
+      match /subscription/usageCurrent {
+        allow read: if isOwner(uid);
+        allow create, update, delete: if false;
+      }
+
+      // ---- Trusted devices (non-authoritative client registry) ----------
+      match /trustedDevices/{deviceId} {
+        allow read: if isOwner(uid);
+        allow create: if isActiveUser(uid)
+                      && trustedDeviceCreateValid(uid, deviceId);
+        allow update: if isActiveUser(uid)
+                      && trustedDeviceUpdateValid(deviceId);
+        allow delete: if false;
+      }
+
+      // ---- Security history (server-written; owner may read status) -----
+      match /securityEvents/{eventId} {
+        allow read: if isOwner(uid);
+        allow write: if false;
+      }
+    }
+
+    // ---- Server-owned reverse indexes -----------------------------------
+    match /phoneIndex/{phone} {
+      allow read, write: if false;
+    }
+    match /ueidIndex/{ueid} {
+      allow read, write: if false;
+    }
+    match /emailIndex/{emailHash} {
+      allow read, write: if false;
+    }
+
+    match /emailBindings/{emailHash} {
+      allow read, write: if false;
+    }
+
+    match /emailOtpRateLimits/{id} {
+      allow read, write: if false;
+    }
+
+    match /emailChangeSessions/{id} {
+      allow read, write: if false;
+    }
+
+    match /accountRecoverySessions/{id} {
+      allow read, write: if false;
+    }
+
+    match /manualRecoveryCases/{id} {
+      allow read: if isSignedIn() && resource.data.uid == request.auth.uid;
+      allow write: if false;
+    }
+
+    // ---- Retired mobiles ------------------------------------------------
+    match /retiredPhones/{phone} {
+      allow read, write: if false;
+    }
+
+    // ---- Pending email verifications ------------------------------------
+    match /pendingEmailVerifications/{verificationId} {
+      allow read, write: if false;
+    }
+
+    // ---- Account deletion ledger (Admin / Functions only) ---------------
+    match /deletionJobs/{uid} {
+      allow read, write: if false;
+    }
+  }
+}
