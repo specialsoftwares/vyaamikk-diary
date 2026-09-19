@@ -7,7 +7,7 @@
 - Keep original #20–#25 HOLD until independently accepted
 - Combined candidate `release/public-android-combined` contains their union plus VYD-38/39 and App Check source
 - Independently retrieved Actions on reviewed head `6c46a70`: run `35446043899` job `105905020493` SUCCESS; checkout `40ba879` merge into main `79d405d`; `test:all` **139/139** in 370.3s; `ci:verify` PASS including Expo config and invoice-renderer Docker
-- This continuation adds source after that head. Local `test:all` **139/139 in 429.5s**; `LIVE_RULES_COMPAT` PASS including production save callers. **Require fresh Actions on the final changed SHA and its tested merge-ref**. Do not reuse 139/139 from `6c46a70` as the count for the new head.
+- This continuation adds source after that head. Application commit `fe55c226c07a1263d88663036e5f86d985cbb494`. Local `test:all` **139/139 in 429.5s**; `LIVE_RULES_COMPAT` PASS including production save callers. **Require fresh Actions on `fe55c22` (and any later docs-only SHA) and its tested merge-ref**. Do not reuse 139/139 from `6c46a70` as the count for the new head.
 
 ## Gates (keep separate)
 

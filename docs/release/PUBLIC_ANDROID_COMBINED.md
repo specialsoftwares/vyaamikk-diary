@@ -17,7 +17,7 @@ Worktree: `/Users/shivamsaurav/vyd-worktrees/public-android-combined`
 Branch: `release/public-android-combined`  
 Base: reviewed #22, then merged #24 and #25.
 
-This continuation (PR #26 review corrections + remaining source) sits on top of `6c46a70`. Local `test:all` **139/139 PASS in 429.5s** (2026-09-19). `test:live-rules-compat` **LIVE_RULES_COMPAT PASS** including production save callers. Not merged to main. Fresh Actions required on the final SHA.
+This continuation (PR #26 review corrections + remaining source) is application commit `fe55c226c07a1263d88663036e5f86d985cbb494` on top of `6c46a70`. Local `test:all` **139/139 PASS in 429.5s** (2026-09-19). `test:live-rules-compat` **LIVE_RULES_COMPAT PASS** including production save callers. Not merged to main. Fresh Actions required on `fe55c22` and any later docs-only SHA.
 
 ## Conflict union
 
