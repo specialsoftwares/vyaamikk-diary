@@ -2,8 +2,6 @@ import type { CustomerCreditRecord } from "@/domain/customerCredit";
 import { AppError } from "@/domain/errors";
 import type { UserProfile } from "@/domain/types";
 import type { Lang } from "@/i18n/types";
-import { pdfService } from "@/services/pdf/pdfService";
-import { buildCreditPdfHtml } from "@/services/customerCredit/pdfContext";
 import { logSaveDiagnostic } from "@/services/records/saveDiagnostics";
 import {
   beginCoordinatedSave,
@@ -14,16 +12,20 @@ import {
 } from "@/services/records/saveCoordinator";
 import { attachRecordIdToPersistentLock } from "@/services/records/persistentSaveLock";
 import { SAVE_STEP, SaveStillInProgressError, hasCompletedStep } from "@/services/records/saveLockTypes";
-import type { SaveIdempotencyContext } from "@/services/records/saveIdempotency";
+import type { SaveIdempotencyContext, ProcessSaveLockOwner } from "@/services/records/saveIdempotency";
 import { releaseProcessSaveLock } from "@/services/records/saveIdempotency";
-import { syncInsightsFromCustomerCredit } from "@/services/insights/insightSync";
-import { syncCreditReminder } from "@/services/customerCredit/reminders";
-import { invalidateGlobalSearchIndex } from "@/services/search/globalSearchRepository";
 import { dayKey } from "@/utils/date";
 
 import { getCustomerCreditRepository } from "./index";
-import type { CreateCustomerCreditInput, UpdateCustomerCreditInput } from "./types";
-import type { AddCreditPaymentInput } from "./types";
+import type { AddCreditPaymentInput, CreateCustomerCreditInput, UpdateCustomerCreditInput } from "./types";
+import { pdfGenerateHook } from "@/services/pdf/pdfGenerateHook";
+
+let saveEffectsForTests: (() => Promise<void>) | null = null;
+
+/** Node/CI seam. Production still runs insights after PDF. */
+export function setCustomerCreditSaveEffectsForTests(hook: (() => Promise<void>) | null): void {
+  saveEffectsForTests = hook;
+}
 
 export async function saveCustomerCreditWithPdf(
   userId: string,
@@ -44,6 +46,7 @@ export async function saveCustomerCreditWithPdf(
     params.update?.id ?? params.idempotency?.idempotencyKey ?? null;
   let idempotency = params.idempotency;
   let completedSteps: string[] = [];
+  let processLockOwner: ProcessSaveLockOwner | null = null;
   const repo = getCustomerCreditRepository();
 
   logSaveDiagnostic({
@@ -69,6 +72,7 @@ export async function saveCustomerCreditWithPdf(
       idempotency = begun.idempotency;
       params.create.clientRecordId = begun.clientRecordId;
       completedSteps = begun.decision.completedSteps;
+      processLockOwner = begun.processLockOwner;
 
       if (begun.decision.action === "return_done") {
         saved =
@@ -210,14 +214,17 @@ export async function saveCustomerCreditWithPdf(
         message: "pdf_start",
       });
       try {
-        const html = await buildCreditPdfHtml({
-          record: saved,
-          variant,
-          user: params.user,
-          t: params.t,
-          locale: params.locale,
-          uiLang: params.uiLang,
-        });
+        const hooked = pdfGenerateHook();
+        const html = hooked
+          ? ""
+          : await (await import("@/services/customerCredit/pdfContext")).buildCreditPdfHtml({
+              record: saved,
+              variant,
+              user: params.user,
+              t: params.t,
+              locale: params.locale,
+              uiLang: params.uiLang,
+            });
         const pdfStep = await runRecordStepIfNeeded(
           {
             userId,
@@ -227,16 +234,20 @@ export async function saveCustomerCreditWithPdf(
             completedSteps,
             clientRecordId: params.create?.clientRecordId,
           },
-          () =>
-            pdfService.generate({
+          async () => {
+            const generateInput = {
               html,
               fileNameHint: saved!.recordNumber,
               fileName: {
-                documentType: "dukaan",
+                documentType: "dukaan" as const,
                 customerName: saved!.customerName,
                 date: dayKey(saved!.saleDate ?? saved!.createdAt),
               },
-            })
+            };
+            if (hooked) return hooked(generateInput);
+            const { pdfService } = await import("@/services/pdf/pdfService");
+            return pdfService.generate(generateInput);
+          }
         );
         completedSteps = pdfStep.completedSteps;
         if (pdfStep.ran && pdfStep.result) {
@@ -288,7 +299,10 @@ export async function saveCustomerCreditWithPdf(
       }
     }
 
-    void syncCreditReminder(userId, saved, params.t);
+    if (!saveEffectsForTests) {
+      const { syncCreditReminder } = await import("@/services/customerCredit/reminders");
+      void syncCreditReminder(userId, saved, params.t);
+    }
 
     const insightsStep = await runRecordStepIfNeeded(
       {
@@ -299,8 +313,14 @@ export async function saveCustomerCreditWithPdf(
         completedSteps,
         clientRecordId: params.create?.clientRecordId,
       },
-      async () =>
-        syncInsightsFromCustomerCredit(userId, params.create?.ueid ?? saved.ueid, saved)
+      async () => {
+        if (saveEffectsForTests) {
+          await saveEffectsForTests();
+          return;
+        }
+        const { syncInsightsFromCustomerCredit } = await import("@/services/insights/insightSync");
+        await syncInsightsFromCustomerCredit(userId, params.create?.ueid ?? saved.ueid, saved);
+      }
     );
     completedSteps = insightsStep.completedSteps;
 
@@ -313,15 +333,20 @@ export async function saveCustomerCreditWithPdf(
         completedSteps,
         clientRecordId: params.create?.clientRecordId,
       },
-      async () => invalidateGlobalSearchIndex()
+      async () => {
+        if (saveEffectsForTests) return;
+        const { invalidateGlobalSearchIndex } = await import("@/services/search/globalSearchRepository");
+        invalidateGlobalSearchIndex();
+      }
     );
 
     if (idempotency && !isUpdate) {
       await completeCoordinatedSave(idempotency, saved.id, {
         processLockKey: processLockKey ?? undefined,
+        processLockOwner: processLockOwner ?? undefined,
       });
     } else if (processLockKey) {
-      releaseProcessSaveLock(processLockKey);
+      releaseProcessSaveLock(processLockKey, processLockOwner ?? undefined);
     }
 
     logSaveDiagnostic({
@@ -346,10 +371,11 @@ export async function saveCustomerCreditWithPdf(
     if (idempotency && !isUpdate) {
       await failCoordinatedSave(idempotency, "credit_save_failed", {
         processLockKey: processLockKey ?? undefined,
+        processLockOwner: processLockOwner ?? undefined,
         clearRegistry: false,
       });
     } else if (processLockKey) {
-      releaseProcessSaveLock(processLockKey);
+      releaseProcessSaveLock(processLockKey, processLockOwner ?? undefined);
     }
     throw e;
   }

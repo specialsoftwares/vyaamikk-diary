@@ -11,10 +11,10 @@ import { entrySearchBlob } from "@/utils/businessEntry/display";
 import { notificationsService } from "@/services/notifications";
 
 import { createInitialDocumentHistory } from "@/services/documentHistory";
-import { mergeBusinessEntryUpdate, mergeEntryPdfGeneration } from "./mergeEntryUpdate";
 import { entryToStorage, normaliseBusinessEntry } from "./normalize";
 import type {
   CreateBusinessEntryInput,
+  DiaryCreateResult,
   DiaryRepository,
   ListDiaryEntriesOptions,
   UpdateBusinessEntryInput,
@@ -85,9 +85,16 @@ function applyFilters(
 
 export const mockDiaryRepository: DiaryRepository = {
   async create(userId, input) {
+    return (await this.createWithOutcome(userId, input)).record;
+  },
+
+  async createWithOutcome(userId, input): Promise<DiaryCreateResult> {
     const now = Date.now();
+    const id = input.clientRecordId?.trim() || shortId("diary");
+    const existing = (await loadAll(userId)).find((e) => e.id === id);
+    if (existing) return { record: existing, outcome: "existing" };
     const entry: BusinessEntry = {
-      id: shortId("diary"),
+      id,
       userId,
       ueid: input.ueid,
       entryType: input.entryType,
@@ -109,7 +116,7 @@ export const mockDiaryRepository: DiaryRepository = {
     const all = await loadAll(userId);
     all.unshift(entry);
     await saveAll(userId, all);
-    return entry;
+    return { record: entry, outcome: "created" };
   },
 
   async update(userId, input) {
@@ -117,23 +124,18 @@ export const mockDiaryRepository: DiaryRepository = {
     const idx = all.findIndex((e) => e.id === input.id);
     if (idx === -1) throw new AppError("not_found", "Entry not found.");
     const existing = all[idx];
-
-    if (input.reminder !== undefined) {
-      const wasScheduled = existing.reminder?.notificationId ?? null;
-      const willBeDifferent =
-        input.reminder === null ||
-        input.reminder.notificationId !== existing.reminder?.notificationId;
-      if (wasScheduled && willBeDifferent) {
-        await notificationsService.cancel(wasScheduled);
-      }
+    if (input.expectedUpdatedAt != null && existing.updatedAt !== input.expectedUpdatedAt) {
+      throw new AppError("save_failed", "Entry changed remotely.", undefined, { remoteChanged: true });
     }
 
-    let next = mergeBusinessEntryUpdate(existing, input);
-    if (input.pdfUri !== undefined && input.pdfUri !== existing.pdfUri && input.pdfUri) {
-      next = mergeEntryPdfGeneration(next, input.pdfUri);
-    }
+    const { reminderCancelIdAfterUpdate, buildDiaryUpdateRecord, runAfterDiaryUpdateCommit } = await import(
+      "./firebaseUpdatePlan"
+    );
+    const cancelId = reminderCancelIdAfterUpdate(existing, input);
+    const next = buildDiaryUpdateRecord(existing, input);
     all[idx] = next;
     await saveAll(userId, all);
+    await runAfterDiaryUpdateCommit(cancelId, (id) => notificationsService.cancel(id));
     return next;
   },
 

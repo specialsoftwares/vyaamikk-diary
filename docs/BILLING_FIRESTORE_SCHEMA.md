@@ -244,11 +244,11 @@ unchanged counter can never satisfy it.
 
 Phase A wires the create-side clause into **`purchaseOrders` only**
 (representative path) and allowlists only `purchaseOrders` in
-`quotaLinkedCollection(...)`. Generalization = adding the other billable
-collections (`entries`, `customerCreditRecords`, `professionalPacks`,
-`letterheadDocs`) to the same two touch points plus the client batch
-integration — the pattern itself is collection-agnostic (the emulator suite
-demonstrates the allowlist boundary with a `letterheadDocs` attempt).
+`quotaLinkedCollection(...)`. Generalization = adding the other ordinary billable
+collections (`entries`, `customerCreditRecords`, `professionalPacks`)
+to the same two touch points plus the client batch
+integration. Round 15 removed `letterheadDocs` from `quotaLinkedCollection`
+(letterhead parent + validated diary mirror consume zero ordinary quota).
 `_saveLocks`, `completedSteps[]`, `clientRecordId`, `idempotencyKey` and
 serial counters are untouched by design (W-6).
 

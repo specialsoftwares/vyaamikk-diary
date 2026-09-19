@@ -17,9 +17,8 @@ import { notificationsService } from "@/services/notifications";
 
 import { packToCloudStorage } from "@/services/pdf/pdfCloudSync";
 import { dedupeProfessionalPacks } from "./dedupe";
-import { normaliseProfessionalPack } from "./normalize";
+import { createProfessionalPackAtomic, packFromFirestoreDoc } from "./atomicCreate";
 import type {
-  CreateProfessionalPackInput,
   ListProfessionalPacksOptions,
   ProfessionalPackRepository,
   UpdateProfessionalPackInput,
@@ -32,14 +31,6 @@ function col(userId: string) {
 function reminderJson(r: EntryReminder | null) {
   if (!r) return null;
   return { at: r.at, note: r.note, notificationId: r.notificationId };
-}
-
-/** Firestore document id wins — stored `id` may be empty from legacy creates. */
-function packFromFirestoreDoc(
-  docId: string,
-  data: Record<string, unknown>
-): ProfessionalServicePack | null {
-  return normaliseProfessionalPack({ ...data, id: docId }, "");
 }
 
 function applyFilters(
@@ -69,47 +60,7 @@ function applyFilters(
 
 export const firebaseProfessionalPackRepository: ProfessionalPackRepository = {
   async create(userId, input) {
-    const now = Date.now();
-    const ref = input.clientRecordId
-      ? doc(getFirebaseDb(), "users", userId, "professionalPacks", input.clientRecordId)
-      : doc(col(userId));
-
-    const existingSnap = await getDoc(ref);
-    if (existingSnap.exists()) {
-      const existing = packFromFirestoreDoc(
-        existingSnap.id,
-        existingSnap.data() as Record<string, unknown>
-      );
-      if (existing) return existing;
-    }
-
-    const pack: ProfessionalServicePack = {
-      id: ref.id,
-      userId,
-      ueid: input.ueid,
-      professionalCategory: input.professionalCategory,
-      matterType: input.matterType,
-      title: input.title.trim(),
-      facts: input.facts,
-      linkedEntryIds: input.linkedEntryIds ?? [],
-      attachments: input.attachments ?? [],
-      matterDate: input.matterDate,
-      dueDate: input.dueDate ?? null,
-      reminder: input.reminder ?? null,
-      status: input.status ?? "active",
-      professionalName: input.professionalName?.trim() || null,
-      professionalContact: input.professionalContact?.trim() || null,
-      notes: input.notes?.trim() || null,
-      pdfUri: input.pdfUri ?? null,
-      createdAt: now,
-      updatedAt: now,
-      deletedAt: null,
-    };
-    const stored = packToCloudStorage(pack);
-    stored.reminder = reminderJson(pack.reminder);
-    stored.id = ref.id;
-    await setDoc(ref, stored);
-    return pack;
+    return createProfessionalPackAtomic(getFirebaseDb(), userId, input);
   },
 
   async update(userId, input) {

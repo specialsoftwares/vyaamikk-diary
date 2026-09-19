@@ -106,6 +106,18 @@ export function evaluateProductionConfig(): GuardResult {
     };
   }
 
+  if (
+    process.env.EXPO_PUBLIC_FIREBASE_APP_CHECK_DEBUG_TOKEN ||
+    process.env.FIREBASE_APP_CHECK_DEBUG_TOKEN
+  ) {
+    return {
+      ok: false,
+      code: "PRODUCTION_CONFIG_INVALID",
+      stage: "CONFIG_LOADED",
+      message: "Production build forbids Firebase App Check debug tokens.",
+    };
+  }
+
   return { ok: true };
 }
 

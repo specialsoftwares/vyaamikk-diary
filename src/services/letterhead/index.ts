@@ -11,6 +11,7 @@ export type {
   LetterheadMargins,
   LetterheadDocument,
   LetterheadDocumentInput,
+  LetterheadDocumentCreateInput,
   LetterheadDocumentRepository,
   LetterheadEditHistoryEntry,
   LetterheadRepository,
@@ -68,4 +69,4 @@ export function getLetterheadRepository(): LetterheadRepository {
   return mockLetterheadRepository;
 }
 
-export { getLetterheadDocumentRepository } from "./documentRepository";
+export { getLetterheadDocumentRepository, setLetterheadDocumentRepositoryForTests } from "./documentRepository";

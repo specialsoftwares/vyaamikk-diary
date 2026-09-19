@@ -7,6 +7,7 @@ import type {
   EntrySource,
 } from "@/domain/businessEntry";
 import type { EntryReminder } from "@/domain/types";
+import type { SyncSessionToken } from "@/sync/syncSessionOwnership";
 
 export type { BusinessEntry, BusinessEntryType };
 
@@ -26,6 +27,13 @@ export interface CreateBusinessEntryInput {
   status?: EntryRecordStatus;
 }
 
+export type DiaryCreateOutcome = "created" | "existing";
+
+export interface DiaryCreateResult {
+  record: BusinessEntry;
+  outcome: DiaryCreateOutcome;
+}
+
 export interface UpdateBusinessEntryInput {
   id: string;
   title?: string;
@@ -37,6 +45,11 @@ export interface UpdateBusinessEntryInput {
   payload?: BusinessEntry["payload"];
   status?: EntryRecordStatus;
   pdfUri?: string | null;
+  /**
+   * When set, the production update must not overwrite a remote record whose
+   * `updatedAt` no longer matches this value (compare-and-swap).
+   */
+  expectedUpdatedAt?: number;
 }
 
 /** @deprecated Use CreateBusinessEntryInput */
@@ -56,7 +69,16 @@ export interface ListDiaryEntriesOptions {
 }
 
 export interface DiaryRepository {
-  create(userId: string, input: CreateBusinessEntryInput): Promise<BusinessEntry>;
+  create(
+    userId: string,
+    input: CreateBusinessEntryInput,
+    session?: SyncSessionToken | null
+  ): Promise<BusinessEntry>;
+  createWithOutcome(
+    userId: string,
+    input: CreateBusinessEntryInput,
+    session?: SyncSessionToken | null
+  ): Promise<DiaryCreateResult>;
   update(userId: string, input: UpdateBusinessEntryInput): Promise<BusinessEntry>;
   /** Permanently removes the entry document — no soft-delete tombstone. */
   hardDelete(userId: string, id: string): Promise<void>;

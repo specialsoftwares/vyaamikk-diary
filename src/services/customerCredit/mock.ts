@@ -15,6 +15,8 @@ import { AppError } from "@/domain/errors";
 import type { CustomerCreditRecord } from "@/domain/customerCredit";
 import { createLogger } from "@/utils/logger";
 
+import { stableRecordId } from "@/services/records/stableRecordId";
+
 import {
   appendPayment,
   applyFullClosure,
@@ -94,13 +96,13 @@ export const mockCustomerCreditRepository: CustomerCreditRepository = {
 
   async create(userId, input: CreateCustomerCreditInput) {
     if (!userId) throw new AppError("permission_denied", "Not signed in.");
+    const recordId = stableRecordId(input.clientRecordId, "cr");
     const all = await loadAll(userId);
-    const previewId = buildNewRecord(userId, 0, input, Date.now()).id;
-    const hit = all.find((r) => r.id === previewId);
+    const hit = all.find((r) => r.id === recordId);
     if (hit) return hit;
 
     const serial = await this.allocateSerial(userId);
-    const record = buildNewRecord(userId, serial, input, Date.now());
+    const record = buildNewRecord(userId, serial, input, Date.now(), recordId);
     all.unshift(record);
     await persist(userId, all);
     log.info("credit record created");

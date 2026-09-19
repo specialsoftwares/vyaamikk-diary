@@ -17,19 +17,22 @@ import {
   orderBy,
   query,
   setDoc,
+  type DocumentReference,
+  type Firestore,
+  type SetOptions,
 } from "firebase/firestore";
 
 import { AppError } from "@/domain/errors";
 import { getFirebaseDb } from "@/config/firebase";
 import { letterheadDocToCloudStorage } from "@/services/pdf/pdfCloudSync";
 import { stableRecordId } from "@/services/records/stableRecordId";
+import { assertDispatchedSession, type SyncSessionToken } from "@/sync/syncSessionOwnership";
 import { createLogger } from "@/utils/logger";
 
-import type {
-  LetterheadDocument,
-  LetterheadDocumentInput,
-  LetterheadDocumentRepository,
-} from "./types";
+import { createLetterheadDocumentAtomic } from "./atomicCreate";
+import { parseLetterheadDocument } from "./documentParse";
+import { isSupportedLetterheadParentInput } from "./letterheadMirrorPolicy";
+import type { LetterheadDocument, LetterheadDocumentRepository } from "./types";
 
 const log = createLogger("letterhead/docs-firebase");
 const COLLECTION = "letterheadDocs";
@@ -38,50 +41,68 @@ function userDocsCollection(userId: string) {
   return collection(getFirebaseDb(), "users", userId, COLLECTION);
 }
 
-function optStr(v: unknown): string | undefined {
-  return typeof v === "string" ? v : undefined;
+function fromDoc(id: string, raw: Record<string, unknown>, userId: string): LetterheadDocument {
+  return parseLetterheadDocument(id, raw, userId);
 }
 
-function fromDoc(id: string, raw: Record<string, unknown>, userId: string): LetterheadDocument {
-  const input = (raw.input ?? {}) as Partial<LetterheadDocumentInput>;
-  const editHistory = Array.isArray(raw.editHistory)
-    ? (raw.editHistory as LetterheadDocument["editHistory"])
-    : undefined;
-  return {
-    id,
-    userId,
-    ueid: String(raw.ueid ?? ""),
-    title: String(raw.title ?? ""),
-    input: {
-      title: String(input.title ?? ""),
-      date: Number(input.date ?? Date.now()),
-      reference: optStr(input.reference),
-      recipientName: optStr(input.recipientName),
-      recipientDesignation: optStr(input.recipientDesignation),
-      recipientCompany: optStr(input.recipientCompany),
-      recipientAddress: optStr(input.recipientAddress),
-      subject: String(input.subject ?? ""),
-      salutation: optStr(input.salutation),
-      body: String(input.body ?? ""),
-      closing: String(input.closing ?? ""),
-      name: String(input.name ?? ""),
-      designation: String(input.designation ?? ""),
-      place: String(input.place ?? ""),
-      useSignature: input.useSignature === true,
-      useStamp: input.useStamp === true,
-    },
-    templateRefUpdatedAt:
-      raw.templateRefUpdatedAt == null ? null : Number(raw.templateRefUpdatedAt),
-    pdfUri: typeof raw.pdfUri === "string" ? raw.pdfUri : null,
-    saved: Boolean(raw.saved ?? true),
-    firstGeneratedAt:
-      raw.firstGeneratedAt == null ? undefined : Number(raw.firstGeneratedAt),
-    lastEditedAt: raw.lastEditedAt == null ? null : Number(raw.lastEditedAt),
-    version: raw.version == null ? undefined : Number(raw.version),
-    editHistory,
-    createdAt: Number(raw.createdAt ?? Date.now()),
-    updatedAt: Number(raw.updatedAt ?? Date.now()),
+export type LetterheadDocumentPatch = Parameters<LetterheadDocumentRepository["update"]>[2];
+
+type LetterheadSnap = {
+  exists: () => boolean;
+  id: string;
+  data: () => Record<string, unknown> | undefined;
+};
+
+export type LetterheadUpdateDbDeps = {
+  getDoc?: (ref: DocumentReference) => Promise<LetterheadSnap>;
+  setDoc?: (
+    ref: DocumentReference,
+    data: Record<string, unknown>,
+    options?: SetOptions
+  ) => Promise<unknown>;
+  /** Test seam so production update can run without a live Firestore instance. */
+  docRef?: DocumentReference;
+  /**
+   * Test-only barrier after the internal getDoc snapshot is obtained and
+   * before the session recheck / setDoc. Must not recapture the live session.
+   */
+  afterInternalRead?: () => Promise<void>;
+};
+
+/**
+ * Production parent UPDATE dispatch. Rechecks the originating token after
+ * the internal getDoc await and before setDoc. Cloud payload always strips
+ * device-local pdfUri.
+ */
+export async function updateLetterheadDocumentOnDb(
+  db: Firestore,
+  userId: string,
+  id: string,
+  patch: LetterheadDocumentPatch,
+  session?: SyncSessionToken | null,
+  deps: LetterheadUpdateDbDeps = {}
+): Promise<LetterheadDocument> {
+  const getDocFn = deps.getDoc ?? (getDoc as LetterheadUpdateDbDeps["getDoc"])!;
+  const setDocFn = deps.setDoc ?? (setDoc as LetterheadUpdateDbDeps["setDoc"])!;
+  const ref = deps.docRef ?? doc(db, "users", userId, COLLECTION, id);
+  const snap = await getDocFn(ref);
+  if (deps.afterInternalRead) await deps.afterInternalRead();
+  if (!snap.exists()) throw new AppError("not_found", "Letterhead document not found.");
+  const existing = fromDoc(snap.id, snap.data() as Record<string, unknown>, userId);
+  const next: LetterheadDocument = {
+    ...existing,
+    ...patch,
+    input: patch.input ?? existing.input,
+    updatedAt: Date.now(),
   };
+  if (patch.input !== undefined && !isSupportedLetterheadParentInput(next.input)) {
+    throw new AppError("permission_denied", "Letterhead document is not valid.", undefined, {
+      reason: "letterhead_parent_input_invalid",
+    });
+  }
+  assertDispatchedSession(session, userId);
+  await setDocFn(ref, letterheadDocToCloudStorage(next), { merge: true });
+  return next;
 }
 
 export const firebaseLetterheadDocumentRepository: LetterheadDocumentRepository = {
@@ -100,46 +121,24 @@ export const firebaseLetterheadDocumentRepository: LetterheadDocumentRepository 
     return fromDoc(snap.id, snap.data() as Record<string, unknown>, userId);
   },
 
-  async create(userId, record) {
+  async create(userId, record, session) {
     if (!userId) throw new AppError("permission_denied", "Not signed in.");
-    const { clientRecordId, ...rest } = record;
-    const id = stableRecordId(clientRecordId, "lhd");
-    const ref = doc(getFirebaseDb(), "users", userId, COLLECTION, id);
-    const existingSnap = await getDoc(ref);
-    if (existingSnap.exists()) {
-      return fromDoc(
-        existingSnap.id,
-        existingSnap.data() as Record<string, unknown>,
-        userId
-      );
-    }
-
-    const now = Date.now();
-    const payload = letterheadDocToCloudStorage({
-      ...rest,
+    const nowMs = Date.now();
+    const id = stableRecordId(record.clientRecordId, "lhd");
+    const created = await createLetterheadDocumentAtomic(
+      getFirebaseDb(),
       userId,
-      createdAt: now,
-      updatedAt: now,
-    });
-    (payload as Record<string, unknown>).id = id;
-    await setDoc(ref, payload);
+      record,
+      session === undefined ? undefined : { session },
+      nowMs,
+      id
+    );
     log.info("doc created (firebase)");
-    return fromDoc(id, payload as Record<string, unknown>, userId);
+    return created;
   },
 
-  async update(userId, id, patch) {
-    const ref = doc(getFirebaseDb(), "users", userId, COLLECTION, id);
-    const snap = await getDoc(ref);
-    if (!snap.exists()) throw new AppError("not_found", "Letterhead document not found.");
-    const existing = fromDoc(snap.id, snap.data() as Record<string, unknown>, userId);
-    const next: LetterheadDocument = {
-      ...existing,
-      ...patch,
-      input: patch.input ?? existing.input,
-      updatedAt: Date.now(),
-    };
-    await setDoc(ref, letterheadDocToCloudStorage(next), { merge: true });
-    return next;
+  async update(userId, id, patch, session) {
+    return updateLetterheadDocumentOnDb(getFirebaseDb(), userId, id, patch, session);
   },
 
   async remove(userId, id) {

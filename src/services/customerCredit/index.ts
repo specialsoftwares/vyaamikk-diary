@@ -5,6 +5,7 @@ import { mockCustomerCreditRepository } from "./mock";
 import type { CustomerCreditRepository } from "./types";
 
 let cachedFirebaseCredit: CustomerCreditRepository | null = null;
+let testOverride: CustomerCreditRepository | null = null;
 
 export type {
   CustomerCreditRepository,
@@ -15,7 +16,12 @@ export type {
 
 export { recordTitle } from "./shared";
 
+export function setCustomerCreditRepositoryForTests(repo: CustomerCreditRepository | null): void {
+  testOverride = repo;
+}
+
 export function getCustomerCreditRepository(): CustomerCreditRepository {
+  if (testOverride) return testOverride;
   const backend = getActiveBackend();
   if (backend === "firebase-production" || backend === "firebase-shared-dev") {
     if (!cachedFirebaseCredit) {

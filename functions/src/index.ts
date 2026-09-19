@@ -70,6 +70,8 @@ export { reviewSubscriptionTaxCompliance } from "./billing/callables/reviewTaxCo
 export { prepareAndroidBillingAccount } from "./billing/callables/prepareAndroidBillingAccount";
 export { validateAndActivateAndroid } from "./billing/callables/validateAndActivateAndroid";
 export { androidRtdn } from "./billing/callables/androidRtdn";
+export { scheduledBillingReconciliation } from "./billing/scheduled/billingReconciliation";
+export { retryReconciliationWorkItem } from "./billing/callables/retryReconciliationWorkItem";
 
 /** VYD-33 App Store billing: exported for build, production-disabled (fail-closed). */
 export { prepareIOSBillingAccount } from "./billing/callables/prepareIOSBillingAccount";

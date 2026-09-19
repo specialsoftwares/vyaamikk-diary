@@ -14,7 +14,7 @@ import { spacing, typography, useThemedStyles } from "@/theme";
 export function SyncStatusBanner() {
   const t = useT();
   const router = useRouter();
-  const { status, pendingCount, clearSessionLock, flush } = useSync();
+  const { status, pendingCount, quotaBlockedCount, syncBlockedCount, clearSessionLock, flush, retryBlocked } = useSync();
   const styles = useThemedStyles((c) =>
     StyleSheet.create({
       wrap: {
@@ -63,6 +63,28 @@ export function SyncStatusBanner() {
       >
         <LocaleUiText style={styles.text}>{t("sync.sessionExpiredBanner")}</LocaleUiText>
         <LocaleUiText style={styles.action}>{t("sync.tapToReauth")}</LocaleUiText>
+      </Pressable>
+    );
+  }
+
+  if (status === "quota_blocked") {
+    return (
+      <Pressable style={[styles.wrap, styles.session]} onPress={() => void retryBlocked()}>
+        <LocaleUiText style={styles.text}>
+          {t("sync.quotaReachedBanner", { count: quotaBlockedCount || pendingCount })}
+        </LocaleUiText>
+        <LocaleUiText style={styles.action}>{t("sync.tapToRetry")}</LocaleUiText>
+      </Pressable>
+    );
+  }
+
+  if (status === "sync_blocked") {
+    return (
+      <Pressable style={[styles.wrap, styles.session]} onPress={() => void retryBlocked()}>
+        <LocaleUiText style={styles.text}>
+          {t("sync.permissionBanner", { count: syncBlockedCount || pendingCount })}
+        </LocaleUiText>
+        <LocaleUiText style={styles.action}>{t("sync.tapToRetry")}</LocaleUiText>
       </Pressable>
     );
   }

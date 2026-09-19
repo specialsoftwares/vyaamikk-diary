@@ -1,5 +1,8 @@
 # Dependencies
 node_modules/
+# Worktree copies may be a symlink (not a directory); still never commit.
+node_modules
+functions/node_modules
 
 # Expo / Metro
 .expo/

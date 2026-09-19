@@ -1,0 +1,592 @@
+{
+  "label": "Isolated component preview — not full-app or native validation.",
+  "capturedAt": "2026-09-18T14:36:48.880Z",
+  "capturedCodeSha": "c66f7727365aa80f2fe14f4339e1f9de42929f7a",
+  "candidateSha": "c66f7727365aa80f2fe14f4339e1f9de42929f7a",
+  "harnessUrl": "http://127.0.0.1:8092",
+  "captureMethod": "playwright-core Chrome page.screenshot viewport (not editor-panel crop)",
+  "cssZoomNote": "CSS zoom is browser evidence, not native Dynamic Type or Android/iOS accessibility validation. A full-viewport curtain scaled with document zoom can clip the CTA dock; unzoomed narrow captures show the dock, and enlarged education (scrollable) keeps See plans reachable.",
+  "hubRegularVsNarrowIdentical": false,
+  "captures": [
+    {
+      "file": "isolated-hub-en.png",
+      "path": "tools/billing-ux-harness/captures/isolated-hub-en.png",
+      "sha256": "32cf4b5321f4d5c41fe9b5481fc66aed9b48411c710c6bf87152c2ed521032cf",
+      "bytes": 140163,
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "devicePixelRatio": 2,
+      "language": "en",
+      "selectedState": "hub-en-phone-390x844",
+      "cssZoom": "1",
+      "scroll": {
+        "scrollHeight": 844,
+        "clientHeight": 844,
+        "scrollY": 0
+      },
+      "label": "Isolated component preview — not full-app or native validation."
+    },
+    {
+      "file": "isolated-hub-en-scrolled.png",
+      "path": "tools/billing-ux-harness/captures/isolated-hub-en-scrolled.png",
+      "sha256": "f41f8b92420517c65665ecdc768aae711690307010a07e600da696472825e782",
+      "bytes": 118982,
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "devicePixelRatio": 2,
+      "language": "en",
+      "selectedState": "hub-en-scrolled-end",
+      "cssZoom": "1",
+      "scroll": {
+        "scrollHeight": 844,
+        "clientHeight": 844,
+        "scrollY": 0
+      },
+      "label": "Isolated component preview — not full-app or native validation."
+    },
+    {
+      "file": "isolated-hub-en-narrow.png",
+      "path": "tools/billing-ux-harness/captures/isolated-hub-en-narrow.png",
+      "sha256": "72f6ab7c342e90b1ce9a226fa5ed98e627551a898d846d3957bcdfc07afd05a7",
+      "bytes": 105091,
+      "viewport": {
+        "width": 320,
+        "height": 720
+      },
+      "devicePixelRatio": 2,
+      "language": "en",
+      "selectedState": "hub-en-narrow-320x720",
+      "cssZoom": "1",
+      "scroll": {
+        "scrollHeight": 720,
+        "clientHeight": 720,
+        "scrollY": 0
+      },
+      "label": "Isolated component preview — not full-app or native validation."
+    },
+    {
+      "file": "isolated-education-en.png",
+      "path": "tools/billing-ux-harness/captures/isolated-education-en.png",
+      "sha256": "d9f9aa3cecda85c23de2c05af2ff599fd23e9dfdc032422cddfa1b4dd7554397",
+      "bytes": 193982,
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "devicePixelRatio": 2,
+      "language": "en",
+      "selectedState": "education-en",
+      "cssZoom": "1",
+      "scroll": {
+        "scrollHeight": 844,
+        "clientHeight": 844,
+        "scrollY": 0
+      },
+      "label": "Isolated component preview — not full-app or native validation."
+    },
+    {
+      "file": "isolated-education-en-enlarged.png",
+      "path": "tools/billing-ux-harness/captures/isolated-education-en-enlarged.png",
+      "sha256": "6b0dc07868e5e2c863fee598a51a00c434fb8c80aa93014eff4500fb068db68f",
+      "bytes": 123467,
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "devicePixelRatio": 2,
+      "language": "en",
+      "selectedState": "education-en-css-zoom-1.75",
+      "cssZoom": "1.75",
+      "scroll": {
+        "scrollHeight": 844,
+        "clientHeight": 844,
+        "scrollY": 0
+      },
+      "label": "Isolated component preview — not full-app or native validation."
+    },
+    {
+      "file": "isolated-education-en-scrolled.png",
+      "path": "tools/billing-ux-harness/captures/isolated-education-en-scrolled.png",
+      "sha256": "d54d2202adfef864d33c24948f7ffe49227cbaf49b498a3375d2eb43fd665418",
+      "bytes": 170419,
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "devicePixelRatio": 2,
+      "language": "en",
+      "selectedState": "education-en-scrolled-end",
+      "cssZoom": "1",
+      "scroll": {
+        "scrollHeight": 844,
+        "clientHeight": 844,
+        "scrollY": 0
+      },
+      "label": "Isolated component preview — not full-app or native validation."
+    },
+    {
+      "file": "isolated-sheet-record-limit-en.png",
+      "path": "tools/billing-ux-harness/captures/isolated-sheet-record-limit-en.png",
+      "sha256": "fcf87321684761ae4db8cc1ccff736e7ef9bb748a2f51eb93c076e7203621610",
+      "bytes": 154657,
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "devicePixelRatio": 2,
+      "language": "en",
+      "selectedState": "trigger-recordLimitReached",
+      "cssZoom": "1",
+      "scroll": {
+        "scrollHeight": 844,
+        "clientHeight": 844,
+        "scrollY": 0
+      },
+      "label": "Isolated component preview — not full-app or native validation."
+    },
+    {
+      "file": "isolated-sheet-feature-locked-en.png",
+      "path": "tools/billing-ux-harness/captures/isolated-sheet-feature-locked-en.png",
+      "sha256": "f8db214df1becd28da6f62120f4060e3b3962a4f803e0f2d63c2dcfcf9d417e5",
+      "bytes": 152923,
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "devicePixelRatio": 2,
+      "language": "en",
+      "selectedState": "trigger-featureLocked",
+      "cssZoom": "1",
+      "scroll": {
+        "scrollHeight": 844,
+        "clientHeight": 844,
+        "scrollY": 0
+      },
+      "label": "Isolated component preview — not full-app or native validation."
+    },
+    {
+      "file": "isolated-sheet-trial-ending-en.png",
+      "path": "tools/billing-ux-harness/captures/isolated-sheet-trial-ending-en.png",
+      "sha256": "ef5460de41508f11fe7da9655f00e3f01018ffd32144a642b870f6a1ed115486",
+      "bytes": 154801,
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "devicePixelRatio": 2,
+      "language": "en",
+      "selectedState": "trigger-trialExpiring",
+      "cssZoom": "1",
+      "scroll": {
+        "scrollHeight": 844,
+        "clientHeight": 844,
+        "scrollY": 0
+      },
+      "label": "Isolated component preview — not full-app or native validation."
+    },
+    {
+      "file": "isolated-sheet-manual-en.png",
+      "path": "tools/billing-ux-harness/captures/isolated-sheet-manual-en.png",
+      "sha256": "c11f48425719f2851896686fc68c93cfcdb8a14c9f344a436d02a82bbb9f5358",
+      "bytes": 155508,
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "devicePixelRatio": 2,
+      "language": "en",
+      "selectedState": "trigger-manualUpgrade",
+      "cssZoom": "1",
+      "scroll": {
+        "scrollHeight": 844,
+        "clientHeight": 844,
+        "scrollY": 0
+      },
+      "label": "Isolated component preview — not full-app or native validation."
+    },
+    {
+      "file": "isolated-sheet-period-quarterly-en.png",
+      "path": "tools/billing-ux-harness/captures/isolated-sheet-period-quarterly-en.png",
+      "sha256": "cfc4046818ce13683dff3795cea350489b39cfe01662c8c8e0fb0d597e002581",
+      "bytes": 156504,
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "devicePixelRatio": 2,
+      "language": "en",
+      "selectedState": "period-quarterly",
+      "cssZoom": "1",
+      "scroll": {
+        "scrollHeight": 844,
+        "clientHeight": 844,
+        "scrollY": 0
+      },
+      "label": "Isolated component preview — not full-app or native validation."
+    },
+    {
+      "file": "isolated-sheet-period-yearly-en.png",
+      "path": "tools/billing-ux-harness/captures/isolated-sheet-period-yearly-en.png",
+      "sha256": "3d03c8319c42a423f127ef7d776623406b096a14332b264d43cee20f90ec1e74",
+      "bytes": 157068,
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "devicePixelRatio": 2,
+      "language": "en",
+      "selectedState": "period-yearly",
+      "cssZoom": "1",
+      "scroll": {
+        "scrollHeight": 844,
+        "clientHeight": 844,
+        "scrollY": 0
+      },
+      "label": "Isolated component preview — not full-app or native validation."
+    },
+    {
+      "file": "isolated-sheet-trial-eligible-unavailable-en.png",
+      "path": "tools/billing-ux-harness/captures/isolated-sheet-trial-eligible-unavailable-en.png",
+      "sha256": "229a246219706b609e070b7c6d6f3176b3deb08ef74edc1afe7d3cdd9ccc7312",
+      "bytes": 158583,
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "devicePixelRatio": 2,
+      "language": "en",
+      "selectedState": "trial-eligible-professional-action-unavailable",
+      "cssZoom": "1",
+      "scroll": {
+        "scrollHeight": 844,
+        "clientHeight": 844,
+        "scrollY": 0
+      },
+      "label": "Isolated component preview — not full-app or native validation."
+    },
+    {
+      "file": "isolated-sheet-trial-eligible-en.png",
+      "path": "tools/billing-ux-harness/captures/isolated-sheet-trial-eligible-en.png",
+      "sha256": "d8f437e75aec1c9fc6915c7d635f3f534e9dd343b73a9bbab4db8b14acf9be0b",
+      "bytes": 156970,
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "devicePixelRatio": 2,
+      "language": "en",
+      "selectedState": "trial-eligible-professional-action-available",
+      "cssZoom": "1",
+      "scroll": {
+        "scrollHeight": 844,
+        "clientHeight": 844,
+        "scrollY": 0
+      },
+      "label": "Isolated component preview — not full-app or native validation."
+    },
+    {
+      "file": "isolated-sheet-trial-ineligible-en.png",
+      "path": "tools/billing-ux-harness/captures/isolated-sheet-trial-ineligible-en.png",
+      "sha256": "a72e247323380d249e4d03bbb42ce496543598b568a66e02912cc5d86dfcf6ec",
+      "bytes": 156044,
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "devicePixelRatio": 2,
+      "language": "en",
+      "selectedState": "trial-ineligible-professional-paid-purchase",
+      "cssZoom": "1",
+      "scroll": {
+        "scrollHeight": 844,
+        "clientHeight": 844,
+        "scrollY": 0
+      },
+      "label": "Isolated component preview — not full-app or native validation."
+    },
+    {
+      "file": "isolated-sheet-loading-en.png",
+      "path": "tools/billing-ux-harness/captures/isolated-sheet-loading-en.png",
+      "sha256": "ff56b24122f51cdf5b5df540cbb6aae5baa633c9310a083ca890fd2994504cfd",
+      "bytes": 134773,
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "devicePixelRatio": 2,
+      "language": "en",
+      "selectedState": "catalog-loading",
+      "cssZoom": "1",
+      "scroll": {
+        "scrollHeight": 844,
+        "clientHeight": 844,
+        "scrollY": 0
+      },
+      "label": "Isolated component preview — not full-app or native validation."
+    },
+    {
+      "file": "isolated-sheet-unavailable-en.png",
+      "path": "tools/billing-ux-harness/captures/isolated-sheet-unavailable-en.png",
+      "sha256": "50bbcbfca6215cc9716eda04c713ff8a4bed6689a556aa4c6c2859bd40e4e856",
+      "bytes": 137446,
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "devicePixelRatio": 2,
+      "language": "en",
+      "selectedState": "catalog-unavailable",
+      "cssZoom": "1",
+      "scroll": {
+        "scrollHeight": 844,
+        "clientHeight": 844,
+        "scrollY": 0
+      },
+      "label": "Isolated component preview — not full-app or native validation."
+    },
+    {
+      "file": "isolated-sheet-purchase-pending-en.png",
+      "path": "tools/billing-ux-harness/captures/isolated-sheet-purchase-pending-en.png",
+      "sha256": "a1e27fd21b95fafe3321ede810454a99b2a44d34df80fe6ec79a62fa7bf8db52",
+      "bytes": 158799,
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "devicePixelRatio": 2,
+      "language": "en",
+      "selectedState": "purchase-pending",
+      "cssZoom": "1",
+      "scroll": {
+        "scrollHeight": 844,
+        "clientHeight": 844,
+        "scrollY": 0
+      },
+      "label": "Isolated component preview — not full-app or native validation."
+    },
+    {
+      "file": "isolated-sheet-error-en.png",
+      "path": "tools/billing-ux-harness/captures/isolated-sheet-error-en.png",
+      "sha256": "1cd20a4544f43648e88d137df9af0f67212cff327aa43f80fe21f7019ed06bf2",
+      "bytes": 150129,
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "devicePixelRatio": 2,
+      "language": "en",
+      "selectedState": "purchase-error",
+      "cssZoom": "1",
+      "scroll": {
+        "scrollHeight": 844,
+        "clientHeight": 844,
+        "scrollY": 0
+      },
+      "label": "Isolated component preview — not full-app or native validation."
+    },
+    {
+      "file": "isolated-sheet-restore-pending-en.png",
+      "path": "tools/billing-ux-harness/captures/isolated-sheet-restore-pending-en.png",
+      "sha256": "924d8c05987e19411d42f03cbafdda74bc23875d4c095bb774af91fa7c621bf0",
+      "bytes": 158358,
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "devicePixelRatio": 2,
+      "language": "en",
+      "selectedState": "restore-pending",
+      "cssZoom": "1",
+      "scroll": {
+        "scrollHeight": 844,
+        "clientHeight": 844,
+        "scrollY": 0
+      },
+      "label": "Isolated component preview — not full-app or native validation."
+    },
+    {
+      "file": "isolated-sheet-record-limit-en-narrow.png",
+      "path": "tools/billing-ux-harness/captures/isolated-sheet-record-limit-en-narrow.png",
+      "sha256": "caa596f33f2a63c39cd3cdc0d464cddf79006c07d679989c815a3640787b6797",
+      "bytes": 127301,
+      "viewport": {
+        "width": 320,
+        "height": 720
+      },
+      "devicePixelRatio": 2,
+      "language": "en",
+      "selectedState": "trigger-recordLimitReached-narrow-cta-dock",
+      "cssZoom": "1",
+      "scroll": {
+        "scrollHeight": 720,
+        "clientHeight": 720,
+        "scrollY": 0
+      },
+      "label": "Isolated component preview — not full-app or native validation."
+    },
+    {
+      "file": "isolated-sheet-en-narrow-enlarged.png",
+      "path": "tools/billing-ux-harness/captures/isolated-sheet-en-narrow-enlarged.png",
+      "sha256": "e0958cff3706e7a7ac51908eb85fd734e34f58a23646875a530639160a12b412",
+      "bytes": 93401,
+      "viewport": {
+        "width": 320,
+        "height": 720
+      },
+      "devicePixelRatio": 2,
+      "language": "en",
+      "selectedState": "narrow-paywall-css-zoom-1.75-top",
+      "cssZoom": "1.75",
+      "scroll": {
+        "scrollHeight": 720,
+        "clientHeight": 720,
+        "scrollY": 0
+      },
+      "label": "Isolated component preview — not full-app or native validation."
+    },
+    {
+      "file": "isolated-hub-hi.png",
+      "path": "tools/billing-ux-harness/captures/isolated-hub-hi.png",
+      "sha256": "1c1fa85a9a39da7605ec800deb167734a8d2f699dd1477ab1137f3bb2ef6b6fa",
+      "bytes": 126286,
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "devicePixelRatio": 2,
+      "language": "hi",
+      "selectedState": "hub-hi",
+      "cssZoom": "1",
+      "scroll": {
+        "scrollHeight": 844,
+        "clientHeight": 844,
+        "scrollY": 0
+      },
+      "label": "Isolated component preview — not full-app or native validation."
+    },
+    {
+      "file": "isolated-hub-hi-trial-off.png",
+      "path": "tools/billing-ux-harness/captures/isolated-hub-hi-trial-off.png",
+      "sha256": "50991d9c755e8a79422c7dd04b1d898a17fbd83c7fe3d2262fb4ae76fef055b6",
+      "bytes": 126935,
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "devicePixelRatio": 2,
+      "language": "hi",
+      "selectedState": "hub-hi-trial-ineligible-toggle",
+      "cssZoom": "1",
+      "scroll": {
+        "scrollHeight": 844,
+        "clientHeight": 844,
+        "scrollY": 0
+      },
+      "label": "Isolated component preview — not full-app or native validation."
+    },
+    {
+      "file": "isolated-education-hi.png",
+      "path": "tools/billing-ux-harness/captures/isolated-education-hi.png",
+      "sha256": "894958e98e4208329d685c15f5e91d0366a188abbc279540b9b40f229db63d7a",
+      "bytes": 181086,
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "devicePixelRatio": 2,
+      "language": "hi",
+      "selectedState": "education-hi",
+      "cssZoom": "1",
+      "scroll": {
+        "scrollHeight": 844,
+        "clientHeight": 844,
+        "scrollY": 0
+      },
+      "label": "Isolated component preview — not full-app or native validation."
+    },
+    {
+      "file": "isolated-education-hi-enlarged.png",
+      "path": "tools/billing-ux-harness/captures/isolated-education-hi-enlarged.png",
+      "sha256": "b7ba77d2c74b8c5ec16d59d05cc5e6a50eb9026fd92df89c3fc48e8d666e5687",
+      "bytes": 108897,
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "devicePixelRatio": 2,
+      "language": "hi",
+      "selectedState": "education-hi-css-zoom-1.75",
+      "cssZoom": "1.75",
+      "scroll": {
+        "scrollHeight": 844,
+        "clientHeight": 844,
+        "scrollY": 0
+      },
+      "label": "Isolated component preview — not full-app or native validation."
+    },
+    {
+      "file": "isolated-sheet-record-limit-hi.png",
+      "path": "tools/billing-ux-harness/captures/isolated-sheet-record-limit-hi.png",
+      "sha256": "17bef9ca9d13b207aea4da036daf1004c1c1eb4ee7e3e04b7f34c001b6e37951",
+      "bytes": 148051,
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "devicePixelRatio": 2,
+      "language": "hi",
+      "selectedState": "trigger-recordLimitReached-hi",
+      "cssZoom": "1",
+      "scroll": {
+        "scrollHeight": 844,
+        "clientHeight": 844,
+        "scrollY": 0
+      },
+      "label": "Isolated component preview — not full-app or native validation."
+    },
+    {
+      "file": "isolated-sheet-record-limit-hi-narrow.png",
+      "path": "tools/billing-ux-harness/captures/isolated-sheet-record-limit-hi-narrow.png",
+      "sha256": "8ef253fb3c9b083b24277cc298f29ea19439e0ecede7f5818111b3f557131d41",
+      "bytes": 121448,
+      "viewport": {
+        "width": 320,
+        "height": 720
+      },
+      "devicePixelRatio": 2,
+      "language": "hi",
+      "selectedState": "trigger-recordLimitReached-hi-narrow-cta-dock",
+      "cssZoom": "1",
+      "scroll": {
+        "scrollHeight": 720,
+        "clientHeight": 720,
+        "scrollY": 0
+      },
+      "label": "Isolated component preview — not full-app or native validation."
+    },
+    {
+      "file": "isolated-contact-sheet.png",
+      "path": "tools/billing-ux-harness/captures/isolated-contact-sheet.png",
+      "sha256": "afb0d2403c50e873e9287a88107ce82e6a88c1ebe870cacf9feef86450e3d980",
+      "bytes": 3923304,
+      "viewport": {
+        "width": 1600,
+        "height": 2205
+      },
+      "devicePixelRatio": 1,
+      "language": "n/a",
+      "selectedState": "contact-sheet",
+      "cssZoom": "1",
+      "scroll": {
+        "scrollHeight": 0,
+        "clientHeight": 0,
+        "scrollY": 0
+      },
+      "label": "Isolated component preview — not full-app or native validation."
+    }
+  ]
+}

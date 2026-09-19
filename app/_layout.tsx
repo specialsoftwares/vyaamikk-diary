@@ -12,6 +12,7 @@ import { LocalDbProvider } from "@/state/localDb";
 import { AuthProvider } from "@/state/auth";
 import { SubscriptionProvider } from "@/subscription";
 import { IapProvider } from "@/billing/iap";
+import { QuotaUpsellHost } from "@/billing/quotaUpsell";
 import { SyncProvider } from "@/state/sync";
 import { I18nProvider } from "@/i18n";
 import { LocaleFontProvider } from "@/i18n/LocaleFontProvider";
@@ -34,7 +35,7 @@ const rootDataProviders = decideRootDataProviders();
 /**
  * Single stable provider tree for the entire app.
  *
- * LocalDb → Auth → Subscription → IAP → Sync → AppFeedback must remain mounted
+ * LocalDb → Auth → Subscription → IAP → QuotaUpsellHost → Sync → AppFeedback must remain mounted
  * across public routes, authenticated routes, redirects, and language
  * transitions. Subscription and IAP are uid-bound and must not remount per screen.
  */
@@ -62,9 +63,11 @@ function RootProviders({ children }: { children: React.ReactNode }) {
                   <AuthProvider>
                     <SubscriptionProvider>
                       <IapProvider>
-                        <SyncProvider>
-                          <AppFeedbackProvider>{children}</AppFeedbackProvider>
-                        </SyncProvider>
+                        <QuotaUpsellHost>
+                          <SyncProvider>
+                            <AppFeedbackProvider>{children}</AppFeedbackProvider>
+                          </SyncProvider>
+                        </QuotaUpsellHost>
                       </IapProvider>
                     </SubscriptionProvider>
                   </AuthProvider>

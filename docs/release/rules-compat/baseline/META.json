@@ -1,0 +1,38 @@
+{
+  "cli_user": "support.vyd@specialsoftwares.com",
+  "project": "vyaamikk-diary",
+  "exported_at": "2026-09-19T12:54:08.268Z",
+  "method": "GET firebaserules.googleapis.com releases + rulesets (read-only, no deploy)",
+  "releases": [
+    {
+      "name": "projects/vyaamikk-diary/releases/cloud.firestore",
+      "rulesetName": "projects/vyaamikk-diary/rulesets/9c02e187-bd1c-4a5f-bdcc-d8f070e0a5b2",
+      "createTime": "2026-06-05T17:54:06.077829Z",
+      "updateTime": "2026-08-12T22:34:33.748772Z"
+    },
+    {
+      "name": "projects/vyaamikk-diary/releases/firebase.storage/vyaamikk-diary.firebasestorage.app",
+      "rulesetName": "projects/vyaamikk-diary/rulesets/a2a0ddf7-9746-4dd2-bd48-29c9abc0e41f",
+      "createTime": "2026-07-23T21:49:47.992820Z",
+      "updateTime": "2026-07-23T21:51:17.651270Z"
+    }
+  ],
+  "cloud.firestore": {
+    "rulesetName": "projects/vyaamikk-diary/rulesets/9c02e187-bd1c-4a5f-bdcc-d8f070e0a5b2",
+    "file": "firestore.rules",
+    "bytes": 14724,
+    "sha256": "d8ee0abcd5a8f217f1fbe60af9651e5b4253b07cac72d0746c4e781a48052aa2",
+    "createTime": "2026-06-05T17:54:06.077829Z",
+    "updateTime": "2026-08-12T22:34:33.748772Z",
+    "mentionsAppCheck": false
+  },
+  "firebase.storage": {
+    "rulesetName": "projects/vyaamikk-diary/rulesets/a2a0ddf7-9746-4dd2-bd48-29c9abc0e41f",
+    "file": "storage.rules",
+    "bytes": 1133,
+    "sha256": "1a912051ba923a0e4ae29fd36b1741bcf0f5879cd53e6d4bd386c9d5a3b717d5",
+    "createTime": "2026-07-23T21:49:47.992820Z",
+    "updateTime": "2026-07-23T21:51:17.651270Z",
+    "mentionsAppCheck": false
+  }
+}

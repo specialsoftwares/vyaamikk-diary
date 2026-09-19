@@ -106,12 +106,18 @@ export interface SubscriptionStatusDoc {
 // ---------------------------------------------------------------------------
 
 /** Cloud record collections that consume monthly quota when CREATED. */
-export type BillableRecordCollection =
+export type QuotaLinkedRecordCollection =
   | "entries"
   | "purchaseOrders"
   | "customerCreditRecords"
-  | "professionalPacks"
-  | "letterheadDocs";
+  | "professionalPacks";
+
+/**
+ * `letterheadDocs` remains on this union only because historical
+ * `usageCurrent.lastRecordCollection` values may still name it. New letterhead
+ * creates must not write usage.
+ */
+export type BillableRecordCollection = QuotaLinkedRecordCollection | "letterheadDocs";
 
 /**
  * The only client-writable billing document, and only via the atomic
@@ -309,7 +315,12 @@ export interface AppStoreFinancialReviewDoc {
  * Never stores raw purchase tokens, plaintext credentials, or uid.
  * `financialEventId` is the resolver for the ledger owner.
  */
-export type BillingReconciliationQueueStatus = "pending" | "resolved";
+export type BillingReconciliationQueueStatus =
+  | "pending"
+  | "leased"
+  | "failed_retryable"
+  | "resolved"
+  | "terminal";
 
 export interface BillingReconciliationQueueDoc {
   reason: string;
@@ -320,7 +331,19 @@ export interface BillingReconciliationQueueDoc {
   updatedAt: number;
   resolvedAt: number | null;
   status: BillingReconciliationQueueStatus;
+  /** Forensic total claims, never reset by operator recovery. */
   attemptCount: number;
+  /**
+   * Remaining claim budget. Operator requeue restores this to 12 without
+   * wiping attemptCount. Missing on legacy docs is treated as
+   * max(0, 12 - attemptCount).
+   */
+  attemptBudgetRemaining?: number;
+  leaseOwner?: string | null;
+  leaseExpiresAt?: number | null;
+  nextAttemptAt?: number | null;
+  lastErrorCode?: string | null;
+  terminalReason?: string | null;
 }
 
 export interface CompanyBillingDoc {

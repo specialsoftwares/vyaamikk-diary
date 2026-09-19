@@ -1,17 +1,23 @@
 import { getActiveBackend } from "@/config/env";
 
-import { mockDiaryRepository } from "./mock";
-
 import type { DiaryRepository } from "./types";
 
 let cachedFirebaseDiary: DiaryRepository | null = null;
+let testOverride: DiaryRepository | null = null;
 
 export type {
   DiaryRepository,
+  DiaryCreateResult,
+  DiaryCreateOutcome,
   CreateDiaryEntryInput,
   UpdateDiaryEntryInput,
   ListDiaryEntriesOptions,
 } from "./types";
+
+/** Node/CI seam. Not used on device. */
+export function setDiaryRepositoryForTests(repo: DiaryRepository | null): void {
+  testOverride = repo;
+}
 
 /**
  * Diary storage mirrors auth: whenever Firestore is configured (either in
@@ -20,6 +26,7 @@ export type {
  * AsyncStorage mock and entries stay device-local.
  */
 export function getDiaryRepository(): DiaryRepository {
+  if (testOverride) return testOverride;
   const backend = getActiveBackend();
   if (backend === "firebase-production" || backend === "firebase-shared-dev") {
     if (!cachedFirebaseDiary) {
@@ -28,5 +35,5 @@ export function getDiaryRepository(): DiaryRepository {
     }
     return cachedFirebaseDiary;
   }
-  return mockDiaryRepository;
+  return require("./mock").mockDiaryRepository as DiaryRepository;
 }
