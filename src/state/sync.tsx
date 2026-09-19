@@ -17,9 +17,18 @@ import {
   sessionSyncGate,
   type SyncLockReason,
 } from "@/sync/sessionSyncGate";
-import { shouldClearSyncLockOnAuthTransition } from "@/sync/syncLockIdentityPolicy";
+import { applyAuthSyncIdentityTransition } from "@/sync/syncLockIdentityPolicy";
+import { syncSessionOwnership, type SyncSessionToken } from "@/sync/syncSessionOwnership";
+import {
+  acquireSyncActivity,
+  emptySyncUiSnapshotFor,
+  presentSyncUi,
+  refreshSyncPendingCounts,
+  retiredSyncUiSnapshot,
+  shouldReleaseSyncActivity,
+  type SyncUiSnapshot,
+} from "@/sync/syncUiPublication";
 import { localEntriesRepository } from "@/repositories/localEntriesRepository";
-import { syncQueueRepository } from "@/repositories/syncQueueRepository";
 import { getActiveBackend } from "@/config/env";
 import { runLetterheadStorageMigrationForUser } from "@/services/letterhead/letterheadStorageMigration";
 import { markFirstActionFreeze } from "@/diagnostics/firstActionFreezeDiag";
@@ -34,6 +43,8 @@ export type SyncUiStatus =
   | "syncing"
   | "offline"
   | "pending"
+  | "quota_blocked"
+  | "sync_blocked"
   | "session_expired"
   | "pulling";
 
@@ -41,7 +52,10 @@ interface SyncContextValue {
   status: SyncUiStatus;
   lockReason: SyncLockReason;
   pendingCount: number;
+  quotaBlockedCount: number;
+  syncBlockedCount: number;
   flush: () => Promise<void>;
+  retryBlocked: () => Promise<void>;
   clearSessionLock: () => void;
   pullFromCloud: () => Promise<void>;
   /** Pull-to-refresh: flush queue + pull cloud when online; local-only when offline/expired. */
@@ -54,32 +68,41 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   const { status: authStatus, user } = useAuth();
   const { status: dbStatus } = useLocalDb();
   const [lockReason, setLockReason] = useState<SyncLockReason>(null);
-  const [syncing, setSyncing] = useState(false);
-  const [pulling, setPulling] = useState(false);
   const [offline, setOffline] = useState(false);
-  const [pendingCount, setPendingCount] = useState(0);
+  const [storedUi, setStoredUi] = useState<SyncUiSnapshot>(retiredSyncUiSnapshot);
   const identityRef = useRef<{
     status: typeof authStatus;
     uid: string | null;
-  }>({ status: authStatus, uid: user?.uid ?? null });
+    generation: number;
+  }>({ status: "loading", uid: null, generation: 0 });
+
+  const nextUid = user?.uid ?? null;
+  if (identityRef.current.status !== authStatus || identityRef.current.uid !== nextUid) {
+    const token = applyAuthSyncIdentityTransition({
+      prevStatus: identityRef.current.status,
+      nextStatus: authStatus,
+      prevUid: identityRef.current.uid,
+      nextUid,
+    });
+    identityRef.current = {
+      status: authStatus,
+      uid: nextUid,
+      generation: token?.generation ?? 0,
+    };
+  }
+
+  const presented = presentSyncUi(nextUid, identityRef.current.generation, storedUi);
 
   useEffect(() => sessionSyncGate.subscribe(setLockReason), []);
 
-  // Process-wide sync lock must not survive logout / account switch.
   useEffect(() => {
-    const prev = identityRef.current;
-    const next = { status: authStatus, uid: user?.uid ?? null };
-    if (
-      shouldClearSyncLockOnAuthTransition({
-        prevStatus: prev.status,
-        nextStatus: next.status,
-        prevUid: prev.uid,
-        nextUid: next.uid,
-      })
-    ) {
-      sessionSyncGate.unlock();
-    }
-    identityRef.current = next;
+    const uid = user?.uid ?? null;
+    const generation = identityRef.current.generation;
+    setStoredUi((prev) => {
+      if (!uid) return retiredSyncUiSnapshot();
+      if (prev.owner?.uid === uid && prev.owner?.generation === generation) return prev;
+      return emptySyncUiSnapshotFor({ uid, generation });
+    });
   }, [authStatus, user?.uid]);
 
   useEffect(() => {
@@ -89,79 +112,129 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     return () => unsub();
   }, []);
 
+  const publishIfCurrent = useCallback((token: SyncSessionToken, patch: Partial<SyncUiSnapshot>) => {
+    if (!syncSessionOwnership.isCurrent(token)) return;
+    setStoredUi((prev) => {
+      if (!syncSessionOwnership.isCurrent(token)) return prev;
+      return {
+        ...prev,
+        owner: token,
+        ...patch,
+      };
+    });
+  }, []);
+
   const refreshPending = useCallback(async () => {
-    if (!user) {
-      setPendingCount(0);
+    const token = syncSessionOwnership.capture();
+    if (!token) {
+      setStoredUi(retiredSyncUiSnapshot());
       return;
     }
-    const pending = await localEntriesRepository.listPending(user.uid);
-    const queue = await syncQueueRepository.listForUser(user.uid);
-    const ids = new Set<string>();
-    for (const entry of pending) ids.add(entry.id);
-    for (const item of queue) {
-      if (item.entity === "entry") ids.add(item.entityId);
-    }
-    setPendingCount(ids.size);
-  }, [user]);
+    await refreshSyncPendingCounts(token, (counts) => {
+      publishIfCurrent(token, counts);
+    });
+  }, [publishIfCurrent]);
 
   const flush = useCallback(async () => {
-    if (!user || sessionSyncGate.isLocked()) return;
-    setSyncing(true);
+    const uid = user?.uid;
+    const token = syncSessionOwnership.capture();
+    if (!uid || !token || token.uid !== uid || sessionSyncGate.isLocked()) return;
+    const lease = acquireSyncActivity("flush", token);
+    publishIfCurrent(token, { syncing: true });
     try {
-      await syncEngine.flush(user.uid);
+      await syncEngine.flush(uid);
+      if (!syncSessionOwnership.isCurrent(token)) return;
       await refreshPending();
     } finally {
-      setSyncing(false);
+      if (shouldReleaseSyncActivity(lease)) publishIfCurrent(token, { syncing: false });
     }
-  }, [user, refreshPending]);
+  }, [user, refreshPending, publishIfCurrent]);
+
+  const retryBlocked = useCallback(async () => {
+    const uid = user?.uid;
+    const token = syncSessionOwnership.capture();
+    if (!uid || !token || token.uid !== uid || sessionSyncGate.isLocked()) return;
+    const lease = acquireSyncActivity("flush", token);
+    publishIfCurrent(token, { syncing: true });
+    try {
+      const unsynced = await localEntriesRepository.listUnsyncedRecords(uid);
+      if (!syncSessionOwnership.isCurrent(token)) return;
+      for (const record of unsynced) {
+        if (!syncSessionOwnership.isCurrent(token)) return;
+        if (!record.meta.autoRetry) {
+          await syncEngine.retryUnsyncedEntry(uid, record.entry.id);
+        }
+      }
+      if (!syncSessionOwnership.isCurrent(token)) return;
+      await refreshPending();
+    } finally {
+      if (shouldReleaseSyncActivity(lease)) publishIfCurrent(token, { syncing: false });
+    }
+  }, [user, refreshPending, publishIfCurrent]);
 
   const pullFromCloud = useCallback(async () => {
-    if (!user || sessionSyncGate.isLocked()) return;
-    setPulling(true);
+    const uid = user?.uid;
+    const token = syncSessionOwnership.capture();
+    if (!uid || !token || token.uid !== uid || sessionSyncGate.isLocked()) return;
+    const lease = acquireSyncActivity("pull", token);
+    publishIfCurrent(token, { pulling: true });
     try {
-      const count = await localEntriesRepository.countForUser(user.uid);
+      const count = await localEntriesRepository.countForUser(uid);
+      if (!syncSessionOwnership.isCurrent(token)) return;
       if (count === 0) {
-        await syncEngine.pullEntriesToLocalCache(user.uid);
+        await syncEngine.pullEntriesToLocalCache(uid);
       }
+      if (!syncSessionOwnership.isCurrent(token)) return;
       await refreshPending();
     } catch (e) {
       log.warn("pullFromCloud", e);
     } finally {
-      setPulling(false);
+      if (shouldReleaseSyncActivity(lease)) publishIfCurrent(token, { pulling: false });
     }
-  }, [user, refreshPending]);
+  }, [user, refreshPending, publishIfCurrent]);
 
   const runRefreshSync = useCallback(async (): Promise<{
     offline: boolean;
     sessionLocked: boolean;
   }> => {
+    const token = syncSessionOwnership.capture();
     const net = await NetInfo.fetch();
     const offline = !(net.isConnected ?? false);
     const sessionLocked = sessionSyncGate.isLocked();
 
-    if (!user) {
+    if (!user || !token) {
+      return { offline, sessionLocked };
+    }
+    if (!syncSessionOwnership.isCurrent(token)) {
       return { offline, sessionLocked };
     }
 
     await refreshPending();
+    if (!syncSessionOwnership.isCurrent(token)) {
+      return { offline, sessionLocked };
+    }
 
     if (offline || sessionLocked) {
       return { offline, sessionLocked };
     }
 
-    setSyncing(true);
+    const uid = user.uid;
+    const lease = acquireSyncActivity("flush", token);
+    publishIfCurrent(token, { syncing: true });
     try {
-      await syncEngine.flush(user.uid);
-      await syncEngine.pullEntriesToLocalCache(user.uid);
+      await syncEngine.flush(uid);
+      if (!syncSessionOwnership.isCurrent(token)) return { offline: false, sessionLocked: false };
+      await syncEngine.pullEntriesToLocalCache(uid);
+      if (!syncSessionOwnership.isCurrent(token)) return { offline: false, sessionLocked: false };
       await refreshPending();
     } catch (e) {
       log.warn("runRefreshSync", e);
     } finally {
-      setSyncing(false);
+      if (shouldReleaseSyncActivity(lease)) publishIfCurrent(token, { syncing: false });
     }
 
     return { offline: false, sessionLocked: false };
-  }, [user, refreshPending]);
+  }, [user, refreshPending, publishIfCurrent]);
 
   useEffect(() => {
     if (dbStatus !== "ready" || authStatus !== "signed_in" || !user) return;
@@ -199,24 +272,29 @@ export function SyncProvider({ children }: { children: ReactNode }) {
 
   const status: SyncUiStatus = useMemo(() => {
     if (lockReason === "session_expired") return "session_expired";
-    if (pulling) return "pulling";
-    if (syncing) return "syncing";
-    if (offline && pendingCount > 0) return "offline";
-    if (pendingCount > 0) return "pending";
+    if (presented.pulling) return "pulling";
+    if (presented.syncing) return "syncing";
+    if (presented.quotaBlockedCount > 0) return "quota_blocked";
+    if (presented.syncBlockedCount > 0) return "sync_blocked";
+    if (offline && presented.pendingCount > 0) return "offline";
+    if (presented.pendingCount > 0) return "pending";
     return "idle";
-  }, [lockReason, pulling, syncing, offline, pendingCount]);
+  }, [lockReason, presented, offline]);
 
   const value = useMemo(
     () => ({
       status,
       lockReason,
-      pendingCount,
+      pendingCount: presented.pendingCount,
+      quotaBlockedCount: presented.quotaBlockedCount,
+      syncBlockedCount: presented.syncBlockedCount,
       flush,
+      retryBlocked,
       clearSessionLock: () => sessionSyncGate.unlock(),
       pullFromCloud,
       runRefreshSync,
     }),
-    [status, lockReason, pendingCount, flush, pullFromCloud, runRefreshSync]
+    [status, lockReason, presented, flush, retryBlocked, pullFromCloud, runRefreshSync]
   );
 
   return <SyncContext.Provider value={value}>{children}</SyncContext.Provider>;

@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import type { Href } from "expo-router";
 
 import { LocaleUiText } from "@/components/ui/LocaleUiText";
+import { useT } from "@/i18n";
 import { useSmartBack, type NavigationOrigin } from "@/navigation";
 import { executiveHeaderBackStyle } from "@/theme/formLayer";
 import { spacing, typography, useThemedStyles } from "@/theme";
@@ -19,6 +20,8 @@ interface HeaderProps {
   fallback?: Href;
   onBackPress?: () => void;
   dirty?: boolean;
+  /** Visible control remains ←. Defaults to t("common.goBack"). */
+  backAccessibilityLabel?: string;
 }
 
 export function Header({
@@ -31,6 +34,7 @@ export function Header({
   fallback,
   onBackPress,
   dirty,
+  backAccessibilityLabel,
 }: HeaderProps) {
   /** Parent screens (e.g. composer) own `useSmartBack` + `usePreventRemove` — avoid duplicate hooks. */
   const { goBack: smartGoBack } = useSmartBack({
@@ -41,6 +45,8 @@ export function Header({
     enabled: showBack && !onBackPress,
   });
   const goBack = onBackPress ?? smartGoBack;
+  const t = useT();
+  const backLabel = backAccessibilityLabel ?? t("common.goBack");
   const styles = useThemedStyles((c) =>
     StyleSheet.create({
       container: { paddingBottom: spacing.md },
@@ -75,7 +81,7 @@ export function Header({
               pressed && { opacity: 0.7 },
             ]}
             accessibilityRole="button"
-            accessibilityLabel="Go back"
+            accessibilityLabel={backLabel}
           >
             <Text
               style={[

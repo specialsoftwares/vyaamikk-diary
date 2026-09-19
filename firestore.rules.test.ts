@@ -310,6 +310,15 @@ async function main() {
       })
     );
     check("save lock in_flight -> done allowed", true);
+    await assertSucceeds(
+      getDoc(doc(authedDb("carol"), "users", "carol", "_saveLocks", "rec-missing"))
+    );
+    check("save lock missing-doc get allowed for owner (transactional acquire)", true);
+
+    await assertFails(
+      getDoc(doc(authedDb("bob"), "users", "carol", "_saveLocks", "rec-1"))
+    );
+    check("save lock cross-UID read denied", true);
 
     await assertFails(
       setDoc(doc(authedDb("carol"), "users", "carol", "_saveLocks", "rec-bad"), {

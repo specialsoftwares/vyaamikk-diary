@@ -33,14 +33,13 @@ export const sessionSyncGate = {
 };
 
 export function isSyncAuthError(error: unknown): boolean {
-  const err = error instanceof AppError ? error : null;
-  if (!err) {
-    const msg = String(error);
-    return /unauthorized|permission|auth|token|401|403/i.test(msg);
+  const app = error instanceof AppError ? error : null;
+  if (app) {
+    return app.code === "session_expired" || app.code === "auth_not_configured";
   }
-  return (
-    err.code === "session_expired" ||
-    err.code === "permission_denied" ||
-    err.code === "auth_not_configured"
-  );
+  if (error && typeof error === "object" && "code" in error) {
+    const raw = String((error as { code: unknown }).code).replace(/^firestore\//, "");
+    return raw === "unauthenticated";
+  }
+  return false;
 }

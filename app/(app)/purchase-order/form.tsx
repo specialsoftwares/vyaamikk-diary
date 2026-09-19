@@ -42,6 +42,8 @@ import {
 } from "@/domain/purchaseOrder";
 import { getPurchaseOrderRepository } from "@/services/purchaseOrder";
 import { savePurchaseOrderWithPdf } from "@/services/purchaseOrder/saveWithPdf";
+import { notifyOrdinaryQuotaUpsell } from "@/billing/quotaUpsell";
+import { captureAdmissionToken } from "@/sync/syncSessionOwnership";
 import { pdfService } from "@/services/pdf/pdfService";
 import {
   gstinStateCode,
@@ -527,6 +529,7 @@ export default function PurchaseOrderFormScreen() {
     saveLockRef.current = true;
     setSubmitting(true);
     let succeeded = false;
+    const saveSession = captureAdmissionToken();
     try {
       const totalValue = taxSummary.grandTotal;
       const common = {
@@ -599,6 +602,15 @@ export default function PurchaseOrderFormScreen() {
         return;
       }
       setSubmitError(userFacingMessage(e) || t("purchaseOrder.errGenerate"));
+      if (!isEditing) {
+        notifyOrdinaryQuotaUpsell({
+          family: "purchase_order",
+          origin: "user_save",
+          clientRecordId: clientRecordIdRef.current,
+          session: saveSession,
+          error: e,
+        });
+      }
     } finally {
       setSubmitting(false);
       saveLockRef.current = false;

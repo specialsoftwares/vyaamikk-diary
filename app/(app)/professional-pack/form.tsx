@@ -11,6 +11,8 @@ import { useI18n, useT } from "@/i18n";
 import { getDiaryRepository } from "@/services/diary";
 import { getProfessionalPackRepository } from "@/services/professionalPack";
 import { saveProfessionalPackWithPdf } from "@/services/professionalPack/saveWithPdf";
+import { notifyOrdinaryQuotaUpsell } from "@/billing/quotaUpsell";
+import { captureAdmissionToken } from "@/sync/syncSessionOwnership";
 import { autoPackTitle } from "@/utils/professionalPack/display";
 import { validatePackForm } from "@/utils/professionalPack/validation";
 import { useSmartBack, confirmUnsavedChanges, requestComposerPickerReturn } from "@/navigation";
@@ -215,6 +217,7 @@ export default function ProfessionalPackFormScreen() {
       setSaving(true);
       setError(null);
       let succeeded = false;
+      const saveSession = captureAdmissionToken();
       try {
         await saveProfessionalPackWithPdf(
           user.uid,
@@ -272,6 +275,15 @@ export default function ProfessionalPackFormScreen() {
           return;
         }
         setError(userFacingMessage(e));
+        if (!packIdParam) {
+          notifyOrdinaryQuotaUpsell({
+            family: "professional_pack",
+            origin: "user_save",
+            clientRecordId: clientRecordIdRef.current,
+            session: saveSession,
+            error: e,
+          });
+        }
       } finally {
         setSaving(false);
         if (!succeeded) {

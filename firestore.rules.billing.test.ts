@@ -106,6 +106,48 @@ function poWithUsageBatch(
   return batch;
 }
 
+function entryWithUsageBatch(
+  db: Firestore,
+  uid: string,
+  entryId: string,
+  usage: Record<string, unknown>
+) {
+  const batch = writeBatch(db);
+  batch.set(doc(db, "users", uid, "entries", entryId), {
+    userId: uid,
+    title: "Diary entry",
+    createdAt: Date.now(),
+  });
+  batch.set(doc(db, "users", uid, "subscription", "usageCurrent"), usage);
+  return batch;
+}
+
+function letterheadWithUsageBatch(
+  db: Firestore,
+  uid: string,
+  docId: string,
+  usage: Record<string, unknown>
+) {
+  const batch = writeBatch(db);
+  batch.set(doc(db, "users", uid, "letterheadDocs", docId), {
+    userId: uid,
+    title: "Letter",
+    input: {
+      title: "Letter",
+      date: Date.now(),
+      subject: "Subject",
+      body: "Body of the letter.",
+      closing: "Yours",
+      name: "Owner",
+      designation: "Proprietor",
+      place: "Delhi",
+    },
+    createdAt: Date.now(),
+  });
+  batch.set(doc(db, "users", uid, "subscription", "usageCurrent"), usage);
+  return batch;
+}
+
 function usageDoc(
   monthKey: string,
   recordsThisMonth: number,
@@ -531,23 +573,129 @@ async function main() {
     );
     check("case 6: replayed create cannot consume again", true);
 
-    // Linkage scope: only Phase-A-linked collections may consume quota.
+    // Linkage scope: template config is not a billable collection.
     await assertFails(
       (() => {
         const db = qf();
         const b = writeBatch(db);
-        b.set(doc(db, "users", "quota-free", "letterheadDocs", "lh-1"), {
+        b.set(doc(db, "users", "quota-free", "config", "letterhead"), {
           userId: "quota-free",
           createdAt: Date.now(),
         });
         b.set(
           doc(db, "users", "quota-free", "subscription", "usageCurrent"),
-          usageDoc(monthNow, 3, "lh-1", "letterheadDocs")
+          usageDoc(monthNow, 3, "letterhead", "config")
         );
         return b.commit();
       })()
     );
     check("linkage allowlist: non-linked collection cannot consume quota", true);
+
+    // Entries remain Option-C linked; letterheadDocs are zero-quota.
+    // Template config stays ungated.
+    await assertFails(
+      setDoc(doc(qf(), "users", "quota-free", "entries", "en-bare"), {
+        userId: "quota-free",
+        title: "Bare entry",
+      })
+    );
+    check("P entry create without usage denied while enforcement on", true);
+
+    await assertSucceeds(
+      entryWithUsageBatch(
+        qf(),
+        "quota-free",
+        "en-1",
+        usageDoc(monthNow, 3, "en-1", "entries")
+      ).commit()
+    );
+    check("P entry create + genuine usage transition allowed", true);
+
+    await assertFails(
+      entryWithUsageBatch(
+        qf(),
+        "quota-free",
+        "en-2",
+        usageDoc(monthNow, 4, "en-1", "entries")
+      ).commit()
+    );
+    check("P two entries cannot share one increment", true);
+
+    await assertSucceeds(
+      updateDoc(doc(qf(), "users", "quota-free", "entries", "en-1"), {
+        userId: "quota-free",
+        title: "Edited diary entry",
+        updatedAt: Date.now(),
+      })
+    );
+    check("P entry edit does not consume quota", true);
+
+    await assertFails(
+      entryWithUsageBatch(
+        qf(),
+        "quota-free",
+        "en-1",
+        usageDoc(monthNow, 4, "en-1", "entries")
+      ).commit()
+    );
+    check("P entry replay cannot consume again", true);
+
+    await seedUser("quota-lh");
+    await seedSubscriptionStatus("quota-lh", {
+      plan: "free",
+      entitlementActive: true,
+      quotaEnforcementEnabled: true,
+    });
+    const qlh = () => authedDb("quota-lh");
+    await assertSucceeds(
+      setDoc(doc(qlh(), "users", "quota-lh", "letterheadDocs", "lh-bare"), {
+        userId: "quota-lh",
+        title: "Bare letter",
+        input: {
+          title: "Bare letter",
+          date: Date.now(),
+          subject: "Subject",
+          body: "Body",
+          closing: "Yours",
+          name: "Owner",
+          designation: "Proprietor",
+          place: "Delhi",
+        },
+        createdAt: Date.now(),
+      })
+    );
+    check("LH letterhead create without usage allowed while enforcement on", true);
+
+    await assertFails(
+      letterheadWithUsageBatch(
+        qlh(),
+        "quota-lh",
+        "lh-1",
+        usageDoc(monthNow, 1, "lh-1", "letterheadDocs")
+      ).commit()
+    );
+    check("LH letterhead create cannot mutate ordinary usage", true);
+
+    await assertSucceeds(
+      updateDoc(doc(qlh(), "users", "quota-lh", "letterheadDocs", "lh-bare"), {
+        userId: "quota-lh",
+        title: "Edited letter",
+        updatedAt: Date.now(),
+      })
+    );
+    check("LH letterhead edit does not consume quota", true);
+
+    await seedUser("quota-lh-off");
+    await seedSubscriptionStatus("quota-lh-off", { quotaEnforcementEnabled: false });
+    await assertSucceeds(
+      setDoc(doc(authedDb("quota-lh-off"), "users", "quota-lh-off", "letterheadDocs", "lh-off"), {
+        userId: "quota-lh-off",
+        title: "Off",
+        input: { title: "Off", date: Date.now(), subject: "S", body: "B", closing: "C", name: "N", designation: "D", place: "P" },
+        createdAt: Date.now(),
+      })
+    );
+    check("LH quotaEnforcementEnabled=false → plain letterhead create allowed", true);
 
     // Case 7 — concurrent creates racing for the final slot (24/25).
     await seedUser("quota-race");
@@ -729,6 +877,60 @@ async function main() {
       ).commit()
     );
     check("rollover: continuing a stale month (+1 on old monthKey) denied", true);
+
+    await assertFails(
+      entryWithUsageBatch(
+        qf(),
+        "quota-free",
+        "en-wrong-ptr",
+        usageDoc(monthNow, 4, "en-1", "entries")
+      ).commit()
+    );
+    check("P entry wrong usage pointer denied", true);
+
+    await seedUser("quota-en-cap");
+    await seedSubscriptionStatus("quota-en-cap", {
+      plan: "free",
+      entitlementActive: true,
+      quotaEnforcementEnabled: true,
+    });
+    await seedUsage("quota-en-cap", usageDoc(monthNow, 25, "seed-en", "entries"));
+    await assertFails(
+      entryWithUsageBatch(
+        authedDb("quota-en-cap"),
+        "quota-en-cap",
+        "en-26",
+        usageDoc(monthNow, 26, "en-26", "entries")
+      ).commit()
+    );
+    check("P entry over free cap denied", true);
+
+    await seedUser("quota-en-roll");
+    await seedSubscriptionStatus("quota-en-roll", {
+      plan: "free",
+      entitlementActive: true,
+      quotaEnforcementEnabled: true,
+    });
+    await seedUsage("quota-en-roll", usageDoc(monthPrev, 17, "old-en", "entries"));
+    await assertSucceeds(
+      entryWithUsageBatch(
+        authedDb("quota-en-roll"),
+        "quota-en-roll",
+        "en-roll",
+        usageDoc(monthNow, 1, "en-roll", "entries")
+      ).commit()
+    );
+    check("P entry rollover to current IST month allowed", true);
+
+    await assertFails(
+      entryWithUsageBatch(
+        authedDb("mallory"),
+        "quota-free",
+        "en-x",
+        usageDoc(monthNow, 4, "en-x", "entries")
+      ).commit()
+    );
+    check("P entry cross-UID create+usage denied", true);
 
     // Cross-user quota writes are impossible regardless of batch shape.
     await assertFails(
