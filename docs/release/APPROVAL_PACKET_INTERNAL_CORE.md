@@ -7,8 +7,9 @@
 - Branch: `release/public-android-combined`
 - Combination merge: `a3317148d6e24bc980bbe5637b65ecac84e45b0d` (#22+#24+#25)
 - Implementation (VYD-38/39, App Check source, Rules compat): `5d148f355a82a6bfae8b176d101ebce0b9877d16`
-- Previously reviewed docs head: `6c46a7067269eed679d9079efcf2bb30d43a588f`
-- **Exact application commit for this packet:** `fe55c226c07a1263d88663036e5f86d985cbb494` (this continuation’s source+docs commit; distinct from the reviewed docs-only head above). Recheck `git rev-parse HEAD` on the branch before any later approved build if a later docs-only SHA follows.
+- Previously reviewed docs head: `f875356efb4030d24fd60c5b80f1470b13d782a5` (Actions `35454180029` / job `105926441702` SUCCESS — **this packet’s core SHA is later**)
+- **Exact core-app application commit for this packet:** `b5cfbf7050e1e75d30acf274e82ca90259f02950` (App Check probes off the startup path + subscription operation isolation + typecheck). Recheck `git rev-parse HEAD` on the branch before any later approved build if a later SHA follows.
+- Paid-backend follow-up `24595dbd4ff6fe3c9c0031926e93ddeafae83954` is **not** required to review this internal-core source milestone.
 
 ## Requested binary (Play-installed production AAB)
 
@@ -29,6 +30,13 @@ A sideload APK (`preview` / `development` APK profiles) is a **separately labell
 - `UPDATE_BILLING_DETAILS_ENABLED` fail-closed
 - `BILLING_RECONCILIATION_ENABLED` / `BILLING_RECONCILIATION_OPERATOR_ENABLED` fail-closed
 - Purchases remain unavailable — expected
+
+## Core-app corrections in this packet (source)
+
+- Startup awaits bounded native App Check **provider initialize** only. Optional `getToken(false)` is detached; boot does not `getToken(true)`. Late diagnostics cannot replace a newer attempt. Production debug tokens remain forbidden. JS App Check is still uninitialized. No enforcement.
+- Subscription management uses separate load/save/restore/manage identities. Live auth UID must match the captured session UID. The screen publishes `maskManagementSnapshot` against live session, not a retired runtime snapshot. One IAP controller is preserved.
+
+Local `test:all` **139/139** in 250.4s on the later paid follow-up tree; focused App Check barrier + subscription-plan-static + runtime tests PASS on the core SHA. Fresh Actions are still required on HEAD.
 
 ## Rules (deploy-before-build for a working Save)
 

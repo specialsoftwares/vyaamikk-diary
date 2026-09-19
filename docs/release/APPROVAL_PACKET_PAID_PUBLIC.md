@@ -6,8 +6,8 @@
 
 - Keep original #20–#25 HOLD until independently accepted
 - Combined candidate `release/public-android-combined` contains their union plus VYD-38/39 and App Check source
-- Independently retrieved Actions on reviewed head `6c46a70`: run `35446043899` job `105905020493` SUCCESS; checkout `40ba879` merge into main `79d405d`; `test:all` **139/139** in 370.3s; `ci:verify` PASS including Expo config and invoice-renderer Docker
-- This continuation adds source after that head. Application commit `fe55c226c07a1263d88663036e5f86d985cbb494`. Local `test:all` **139/139 in 429.5s**; `LIVE_RULES_COMPAT` PASS including production save callers. **Require fresh Actions on `fe55c22` (and any later docs-only SHA) and its tested merge-ref**. Do not reuse 139/139 from `6c46a70` as the count for the new head.
+- Independently retrieved Actions on reviewed head `f875356`: run `35454180029` job `105926441702` SUCCESS; merge into main `79d405d`; `test:all` **139/139** in 374.4s; `ci:verify` PASS including Expo config and invoice-renderer Docker. **Do not reuse `6c46a70` / `35446043899`.**
+- This continuation adds core-app corrections at `b5cfbf7050e1e75d30acf274e82ca90259f02950` and paid-backend follow-up at `24595dbd4ff6fe3c9c0031926e93ddeafae83954`. Local `test:all` **139/139 in 250.4s**; `test:billing-maintenance-emulator` PASS. **Require fresh Actions on the branch HEAD (this packet’s docs commit) and its tested merge-ref**. Do not reuse 139/139 from `f875356` as the count for the new head.
 
 ## Gates (keep separate)
 
@@ -28,17 +28,17 @@
 - Readable `subscription/status` + `usageCurrent` + history + billingDetails (compat patch or full Rules)
 - RTDN Pub/Sub + IAM
 - KMS + diagnostic secret
-- Play products/base-plans matching `vyd_*` catalog — **store-unverified this session unless a later read-only pass succeeds**
-- License testers
+- Play products/base-plans matching `vyd_*` catalog — **Play Console 2026-09-20: no subscription products exist yet** (empty catalog). RTDN Pub/Sub topic empty. Creating products remains a gated store write.
+- License testers — two email lists present (Known Testers: 2 users; Owner: 3 users); response `RESPOND_NORMALLY`. Licence testing does not cover Play Integrity.
 - App Check: native tokens on a Play-installed binary, then monitor, then optional enforcement. JS CustomProvider **not accepted** (app-identity constraint). Phone Auth ≠ App Check.
 
 ## Management / reconciliation / GST
 
-- Settings → Subscription & billing is session-owned (UID+generation+op)
+- Settings → Subscription & billing uses separate load/save/restore/manage identities and masks retired snapshots against live auth UID + session generation
 - Quota presentation compares `monthKey` to current IST month; 80% warning on the subscription screen **and** a You-dashboard banner that opens Settings → Subscription (no purchase CTA; purchase-entry remains default-off)
 - Billing details: incomplete drafts may save; invoice-ready needs recipient, address1, 6-digit PIN, GST state. GSTIN optional; never client-verified
 - Purchase entry is default-off independent of the quota-upsell gate
-- Reconciliation: unique invocation IDs, live leases unclaimable, lease-checked worker complete (webhook resolve remains distinct), operator restores attempt budget and refuses active leases, config-disabled does not terminal-burn jobs, paginated due scan + indexes, structured adapter outcomes, stale-company **and never-reconciled (`lastReconciledAt == null`)** maintenance, ledger actual-vs-estimated commission reporting (nulls stay unknown). Flags closed. Documents that omit the `lastReconciledAt` field entirely are still outside the Firestore equality query.
+- Reconciliation: unique invocation IDs, live leases unclaimable, lease-checked worker complete (webhook resolve remains distinct), operator restores attempt budget and refuses active leases, config-disabled does not terminal-burn jobs, paginated due scan + indexes, structured adapter outcomes, stale-company maintenance via **document-id pagination** (null, omitted, and aged watermarks; sidecar backoff; overlapping-tick lease), ledger actual-vs-estimated commission reporting with paginated complete `_revenueReports` (nulls stay unknown; net never invented). Flags closed. No production backfill of omitted `lastReconciledAt`.
 - Tax-document handoff is a separate deploy dependency; ledger insertion does not create an invoice
 - Owner/CA must still confirm tax-responsibility policy
 
