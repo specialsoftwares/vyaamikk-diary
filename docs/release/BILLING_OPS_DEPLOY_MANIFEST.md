@@ -31,4 +31,4 @@ Redeploy previous Functions revision. Set flags back to unset/false. Console App
 
 ## Still pending (external)
 
-Real-store validation, RTDN delivery proof, Play product creation if missing, IAM for Android Publisher, invoice-renderer remaining CI if skipped locally.
+Real-store validation, RTDN delivery proof, Play product creation (catalog empty as of 2026-09-20 Console read; this closeout did not re-inspect), IAM for Android Publisher, KMS key + diagnostic secret, invoice-renderer remaining CI if skipped locally. Billing Functions remain undeployed. Source now fences refund gross, report `scanStartedAt`, and lease-checked maintenance backoff; those corrections do not authorize a Functions deploy.

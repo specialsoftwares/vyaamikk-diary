@@ -7,9 +7,9 @@
 - Branch: `release/public-android-combined`
 - Combination merge: `a3317148d6e24bc980bbe5637b65ecac84e45b0d` (#22+#24+#25)
 - Implementation (VYD-38/39, App Check source, Rules compat): `5d148f355a82a6bfae8b176d101ebce0b9877d16`
-- Previously reviewed docs head: `f875356efb4030d24fd60c5b80f1470b13d782a5` (Actions `35454180029` / job `105926441702` SUCCESS — **this packet’s core SHA is later**)
-- **Exact core-app application commit for this packet:** `b5cfbf7050e1e75d30acf274e82ca90259f02950` (App Check probes off the startup path + subscription operation isolation + typecheck). Recheck `git rev-parse HEAD` on the branch before any later approved build if a later SHA follows.
-- Paid-backend follow-up `24595dbd4ff6fe3c9c0031926e93ddeafae83954` is **not** required to review this internal-core source milestone.
+- Previously reviewed docs head: `d0de2f4afc42dcc757ed1d7bce565c26835c79ec` (Actions `35464695768` / job `105954793956` SUCCESS — **this packet’s core SHA is later**)
+- **Exact core-app application commit for this packet:** `e08a26f21b997eb8cde3687fe27a95aa018979aa` (subscription draft revision + originating-session binds; App Check probes remain off the startup path). Recheck `git rev-parse HEAD` on the branch before any later approved build if a later SHA follows.
+- Paid-backend follow-up `a1bd2a5bb72f19af6f98222cb8f5e983bca33ec6` is **not** required to review this internal-core source milestone. Billing stays off for this binary.
 
 ## Requested binary (Play-installed production AAB)
 
@@ -18,7 +18,7 @@
 - `EXPO_PUBLIC_APP_MODE=production`
 - Android package: `com.specialsoftwares.vyaamikkdiary`
 - Track: **Internal testing only**. No production track. No listing publish.
-- Proposed versionCode: **19** (unused at 2026-09-19 Play inspection). Recheck a complete Play inventory before build/upload. 19 is not reserved for later binaries.
+- Proposed versionCode: **19** (unused at 2026-09-19 Play inspection; Internal testing still RC4 vc17 at 2026-09-20 Console read). Recheck a complete Play inventory before build/upload. 19 is not reserved for later binaries.
 
 A sideload APK (`preview` / `development` APK profiles) is a **separately labelled later option**. It does not substitute for this Play-installed AAB milestone.
 
@@ -35,14 +35,17 @@ A sideload APK (`preview` / `development` APK profiles) is a **separately labell
 
 - Startup awaits bounded native App Check **provider initialize** only. Optional `getToken(false)` is detached; boot does not `getToken(true)`. Late diagnostics cannot replace a newer attempt. Production debug tokens remain forbidden. JS App Check is still uninitialized. No enforcement.
 - Subscription management uses separate load/save/restore/manage identities. Live auth UID must match the captured session UID. The screen publishes `maskManagementSnapshot` against live session, not a retired runtime snapshot. One IAP controller is preserved.
+- Save completion tracks the submitted draft revision and clears dirty only for that revision. A later edit during Save is kept; concurrent Saves are ignored while one is in flight; a second explicit Save is required for the retained draft. Form fields stay editable during Save.
+- Form/action callbacks bind the originating render session (`bindSetDraft` / `bindSaveDetails` / `bindRestore` / `bindManage` / `bindPresentUpgrade`). Retired callbacks do not recapture a later session and do not dispatch writes after the runtime has moved.
 
-Local `test:all` **139/139** in 250.4s on the later paid follow-up tree; focused App Check barrier + subscription-plan-static + runtime tests PASS on the core SHA. Fresh Actions are still required on HEAD.
+Local `test:all` **139/139** in 254.3s on the later paid follow-up tree; focused subscription runtime/presentation tests PASS on the core SHA. Fresh Actions are still required on HEAD.
 
 ## Rules (deploy-before-build for a working Save)
 
-- Baseline Firestore sha256 `d8ee0abcd5a8f217f1fbe60af9651e5b4253b07cac72d0746c4e781a48052aa2`
-- Proposed compat sha256 `b13d52559efd144bfbdd86daf426fd5ce81abceead4c87979cb9cee2d1a25e2c`
-- Emulator: `LIVE_RULES_COMPAT` including production `saveComposerEntry` / `saveLetterheadCreateWithPdf` / other family save callers (see `docs/release/rules-compat/LIVE_RULES_COMPAT.md`)
+- Baseline Firestore sha256 `d8ee0abcd5a8f217f1fbe60af9651e5b4253b07cac72d0746c4e781a48052aa2` — live re-export 2026-09-19T20:55Z, **no drift**
+- Proposed compat sha256 `b13d52559efd144bfbdd86daf426fd5ce81abceead4c87979cb9cee2d1a25e2c` (confirmed)
+- Exact later steps: `docs/release/rules-compat/LIVE_RULES_COMPAT.md`
+- Emulator: `LIVE_RULES_COMPAT` including production `saveComposerEntry` / `saveLetterheadCreateWithPdf` / other family save callers
 - Before any deploy: re-export live Rules and diff against `docs/release/rules-compat/baseline/`
 - Do **not** deploy canonical repo `firestore.rules` (quota/usage writes) for this internal billing-off build
 - Storage: no change
@@ -55,6 +58,7 @@ Upload and Play App Signing SHA-1/SHA-256 matched Firebase Android hashes. Reche
 
 - Billing Functions may remain undeployed
 - After Rules compat deploy, ordinary Save should acquire locks and CREATE with enforcement off / missing usage
+- Paid reporting/maintenance corrections are **not** a reason to turn billing on for this milestone
 
 ## Rollback / recovery
 

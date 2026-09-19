@@ -52,6 +52,8 @@ Session: `aeadmin@specialsoftwares.com` / SPECIAL SOFTWARES. Developer `51713461
 
 `gcloud` CLI and Python `googleapiclient` remain absent. That is not the Play Console blocker; catalog emptiness and empty RTDN topic are Console-visible configuration gaps, not a missing-tooling finding.
 
+Targeted closeout 2 (2026-09-20) did **not** repeat Play Console inspection. The empty catalog, empty RTDN topic, licence lists, and Internal RC4 vc17 findings above remain the last authenticated Console read.
+
 ## Merchant KYC (human payments-readiness)
 
 Separate from app code, developer verification, and App Check. Owner handles Google/BillDesk merchant KYC / PA-CB business and representative verification via the existing Play payment profile and Play Console payments support.

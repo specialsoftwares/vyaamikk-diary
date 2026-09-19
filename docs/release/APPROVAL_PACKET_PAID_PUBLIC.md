@@ -6,8 +6,8 @@
 
 - Keep original #20–#25 HOLD until independently accepted
 - Combined candidate `release/public-android-combined` contains their union plus VYD-38/39 and App Check source
-- Independently retrieved Actions on reviewed head `f875356`: run `35454180029` job `105926441702` SUCCESS; merge into main `79d405d`; `test:all` **139/139** in 374.4s; `ci:verify` PASS including Expo config and invoice-renderer Docker. **Do not reuse `6c46a70` / `35446043899`.**
-- This continuation adds core-app corrections at `b5cfbf7050e1e75d30acf274e82ca90259f02950` and paid-backend follow-up at `24595dbd4ff6fe3c9c0031926e93ddeafae83954`. Local `test:all` **139/139 in 250.4s**; `test:billing-maintenance-emulator` PASS. **Require fresh Actions on the branch HEAD (this packet’s docs commit) and its tested merge-ref**. Do not reuse 139/139 from `f875356` as the count for the new head.
+- Independently retrieved Actions on reviewed head `d0de2f4`: run `35464695768` job `105954793956` SUCCESS; merge into main `79d405d`; `test:all` **139/139** in 379.1s; `ci:verify` PASS including Expo config and invoice-renderer Docker. **Do not reuse that run for this packet’s later HEAD.**
+- This continuation adds core-app corrections at `e08a26f21b997eb8cde3687fe27a95aa018979aa` and paid-backend follow-up at `a1bd2a5bb72f19af6f98222cb8f5e983bca33ec6`. Local `test:all` **139/139 in 254.3s**. **Require fresh Actions on the branch HEAD (this packet’s docs commit) and its tested merge-ref**.
 
 ## Gates (keep separate)
 
@@ -23,22 +23,22 @@
 ## Backend / config still required (later approved deploys)
 
 - Canonical quota Firestore Rules (not only the billing-off compat patch) if enforcement-true accounts should save
-- Billing Functions deploy: `validateAndActivateAndroid`, `prepareAndroidBillingAccount`, `androidRtdn`, `updateBillingDetails`, `scheduledBillingReconciliation`
+- Billing Functions deploy: `validateAndActivateAndroid`, `prepareAndroidBillingAccount`, `androidRtdn`, `updateBillingDetails`, `scheduledBillingReconciliation` — **still undeployed** (Firebase `functions:list` this project: identity/auth/deletion only)
 - Flags still default closed: `PLAY_BILLING_ENABLED`, `UPDATE_BILLING_DETAILS_ENABLED`, `BILLING_RECONCILIATION_ENABLED`, `EXPO_PUBLIC_SUBSCRIPTION_PURCHASE_ENTRY_ENABLED`, `EXPO_PUBLIC_QUOTA_UPSELL_ENABLED`
 - Readable `subscription/status` + `usageCurrent` + history + billingDetails (compat patch or full Rules)
-- RTDN Pub/Sub + IAM
-- KMS + diagnostic secret
-- Play products/base-plans matching `vyd_*` catalog — **Play Console 2026-09-20: no subscription products exist yet** (empty catalog). RTDN Pub/Sub topic empty. Creating products remains a gated store write.
+- RTDN Pub/Sub + IAM — **Play Console 2026-09-20: Pub/Sub topic name empty**. Creating the topic remains a gated store/GCP write. Missing `gcloud` is not the blocker.
+- KMS + diagnostic secret — still required before paid activation; not present as a completed live config in this source packet
+- Play products/base-plans matching `vyd_*` catalog — **Play Console 2026-09-20: no subscription products exist yet** (empty catalog). Creating products remains a gated store write. This closeout did not repeat Console inspection.
 - License testers — two email lists present (Known Testers: 2 users; Owner: 3 users); response `RESPOND_NORMALLY`. Licence testing does not cover Play Integrity.
 - App Check: native tokens on a Play-installed binary, then monitor, then optional enforcement. JS CustomProvider **not accepted** (app-identity constraint). Phone Auth ≠ App Check.
 
 ## Management / reconciliation / GST
 
-- Settings → Subscription & billing uses separate load/save/restore/manage identities and masks retired snapshots against live auth UID + session generation
+- Settings → Subscription & billing uses separate load/save/restore/manage identities and masks retired snapshots against live auth UID + session generation. Draft/save/restore/manage/upgrade callbacks bind the originating session; Save completion keeps a newer unsaved edit.
 - Quota presentation compares `monthKey` to current IST month; 80% warning on the subscription screen **and** a You-dashboard banner that opens Settings → Subscription (no purchase CTA; purchase-entry remains default-off)
 - Billing details: incomplete drafts may save; invoice-ready needs recipient, address1, 6-digit PIN, GST state. GSTIN optional; never client-verified
 - Purchase entry is default-off independent of the quota-upsell gate
-- Reconciliation: unique invocation IDs, live leases unclaimable, lease-checked worker complete (webhook resolve remains distinct), operator restores attempt budget and refuses active leases, config-disabled does not terminal-burn jobs, paginated due scan + indexes, structured adapter outcomes, stale-company maintenance via **document-id pagination** (null, omitted, and aged watermarks; sidecar backoff; overlapping-tick lease), ledger actual-vs-estimated commission reporting with paginated complete `_revenueReports` (nulls stay unknown; net never invented). Flags closed. No production backfill of omitted `lastReconciledAt`.
+- Reconciliation: unique invocation IDs, live leases unclaimable, lease-checked worker complete (webhook resolve remains distinct), operator restores attempt budget and refuses active leases, config-disabled does not terminal-burn jobs, paginated due scan + indexes, structured adapter outcomes, stale-company maintenance via **document-id pagination** with sidecar backoff **fenced by the admitted maintenance lease** and current time, ledger actual-vs-estimated commission reporting with paginated complete `_revenueReports` (purchase/renewal inflows only in gross; refund/chargeback only in refunds; delayed older `scanStartedAt` cannot replace a newer complete report; nulls stay unknown; net never invented). Flags closed. No production backfill of omitted `lastReconciledAt`.
 - Tax-document handoff is a separate deploy dependency; ledger insertion does not create an invoice
 - Owner/CA must still confirm tax-responsibility policy
 
