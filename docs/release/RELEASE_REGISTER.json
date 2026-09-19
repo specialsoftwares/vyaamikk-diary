@@ -36,14 +36,34 @@
       "suites": 133
     },
     "pr22": {
-      "head": "30c848a2a2cc66746f1f92ad7a080cc8d3a81ece",
-      "merge_ref": "f62041ed392fc8fa221292306682abe013b576bf",
+      "head": "d6f9557168210eb7cdcc364754855b1e1746e14a",
+      "merge_ref": "7c5c123efc9d7891080d186765a0a0763c5279ba",
       "draft": true,
       "hold": true,
-      "ci_run": 35387884955,
+      "ci_run": 35428113304,
       "suites": 138
     },
-    "evidence_caveat": "Refs/Jira inspected at setup; CI checkpoints are recorded candidate evidence, not current production or device proof. Revalidate before use."
+    "evidence_caveat": "Refs/Jira inspected at setup; CI checkpoints are recorded candidate evidence, not current production or device proof. Revalidate before use.",
+    "pr23": {
+      "head": "cb927094e0c4e528b407e47e44382a2d0a96fa72",
+      "draft": true,
+      "hold": true,
+      "note": "Documentation-only control PR"
+    },
+    "pr24": {
+      "head": "6e951fffb56600c68e48ee3e7b878cc66b22dbc7",
+      "draft": true,
+      "hold": true,
+      "ci_run": 35428679946,
+      "ci_status": "in_progress_at_checkpoint"
+    },
+    "pr25": {
+      "head": "5076f7707a4812437f74879c3767bf554b8eeabb",
+      "draft": true,
+      "hold": true,
+      "ci_run": 35428790956,
+      "ci_status": "in_progress_at_checkpoint"
+    }
   },
   "jira_snapshot": {
     "observed_statuses": {
@@ -68,14 +88,14 @@
     "selection": "Lowest priority number among actionable ready tasks. Blocked work does not block independent tasks.",
     "review_rule": "Sensitive implementation remains ready_for_review until reviewer and exact SHA are recorded; passing self-tests is not release acceptance.",
     "dependency_rule": "depends_on names completed acceptance prerequisites for the listed execution. Preparatory read-only work may proceed where explicitly allowed. Release operations always need separate approval.",
-    "resume": null
+    "resume": "REL-01/02 are on PR #22 d6f9557 (Actions 35428113304 SUCCESS 138/138). REL-03 is PR #24; REL-04 is PR #25. REL-09/10 remain owner sign-in. Next independent work: REL-13 device-runbook polish if needed; do not merge or build."
   },
   "tasks": [
     {
       "id": "REL-01",
       "priority": 1,
       "title": "Surface asynchronous IAP failures on the owning presentation",
-      "state": "ready",
+      "state": "ready_for_review",
       "risk": "sensitive",
       "allowed_scope": [
         "Reproduce and correct the asynchronous failure gap on PR #22 only; retain its draft HOLD.",
@@ -84,7 +104,7 @@
       "depends_on": [],
       "acceptance": [
         "A failed store/verification event after sheet_launched appears once on its owning active sheet and permits explicit retry when recoverable.",
-        "Dismissed errors do not replay; A→B and A→logout→A do not publish stale errors or clear newer work.",
+        "Dismissed errors do not replay; A\u2192B and A\u2192logout\u2192A do not publish stale errors or clear newer work.",
         "Pending/verification, shared busy lock and no-auto-retry/no-entitlement-write contracts remain.",
         "Production-path regression and required final-candidate CI identify exact head, merge-ref and test boundaries."
       ],
@@ -94,6 +114,23 @@
           "at_sha": "30c848a2a2cc66746f1f92ad7a080cc8d3a81ece",
           "result": "Injected async failed IapView after sheet_launched yielded visibleError=null, purchaseState=idle. Not mounted React or a real store.",
           "next": "Reproduce with the actual IAP event lifecycle before editing."
+        },
+        {
+          "kind": "reproduction",
+          "at_sha": "e380d28c695bfc59c965b3a5dfa73c3e31da7c7d",
+          "result": "createIapSession + host: sheet_launched then async failed lastResult left errorMessage null and purchaseState idle. Not a store."
+        },
+        {
+          "kind": "source_fix",
+          "at_sha": "e380d28c695bfc59c965b3a5dfa73c3e31da7c7d",
+          "result": "Owning attempt acks lastResult identity; newly received failed is published once. Dismiss/A\u2192B/logout do not replay. No second purchase controller or entitlement write."
+        },
+        {
+          "kind": "ci",
+          "at_sha": "d6f9557168210eb7cdcc364754855b1e1746e14a",
+          "merge_ref": "7c5c123efc9d7891080d186765a0a0763c5279ba",
+          "ci_run": 35428113304,
+          "result": "GitHub Actions SUCCESS; local ci:verify PASS; test:all 138/138. PR #22 remains draft HOLD."
         }
       ],
       "jira": [
@@ -101,17 +138,17 @@
         "https://specialsoftwaresindia.atlassian.net/browse/VYD-37"
       ],
       "validation": {
-        "implementation": "not_started",
+        "implementation": "changed",
         "review": "pending",
         "deployment": "not_applicable",
         "device": "not_run"
       },
       "work": {
-        "branch": null,
-        "head": null,
-        "pr": null,
-        "last_result": null,
-        "next_action": "Reproduce and correct the asynchronous failure gap on PR #22 only; retain its draft HOLD."
+        "branch": "VYD-36-37-internal-integration",
+        "head": "d6f9557168210eb7cdcc364754855b1e1746e14a",
+        "pr": 22,
+        "last_result": "Async IAP failure surfaces once on the owning sheet. Stacked with REL-02 at d6f9557.",
+        "next_action": "Independent review of PR #22 at d6f9557. Keep draft HOLD. No merge."
       },
       "blocker": null
     },
@@ -119,7 +156,7 @@
       "id": "REL-02",
       "priority": 2,
       "title": "Execute the actual React quota-upsell host",
-      "state": "ready",
+      "state": "ready_for_review",
       "risk": "sensitive",
       "allowed_scope": [
         "Prepare focused mounted React/host tests for PR #22; use current code and update after REL-01.",
@@ -137,23 +174,28 @@
           "kind": "reported_test_boundary",
           "source": "https://github.com/specialsoftwares/vyaamikk-diary/pull/22#issuecomment-5735470280",
           "result": "Round 19 used production host runtime without a mounted React tree."
+        },
+        {
+          "kind": "mounted_react_test",
+          "at_sha": "d6f9557168210eb7cdcc364754855b1e1746e14a",
+          "result": "QuotaUpsellHostView mounted with react-dom createRoot and inert sheet/education surfaces. Ordinary user_save opens; letterhead/background refuse; education/back/close; purchase/restore loading; async failed lastResult; dismiss no-replay; A\u2192B and logout\u2192A retire. Boundary: not native UpgradeSheet, not a store, not a device."
         }
       ],
       "jira": [
         "https://specialsoftwaresindia.atlassian.net/browse/VYD-37"
       ],
       "validation": {
-        "implementation": "not_started",
+        "implementation": "changed",
         "review": "pending",
         "deployment": "not_applicable",
         "device": "not_run"
       },
       "work": {
-        "branch": null,
-        "head": null,
-        "pr": null,
-        "last_result": null,
-        "next_action": "Prepare focused mounted React/host tests for PR #22; use current code and update after REL-01."
+        "branch": "VYD-36-37-internal-integration",
+        "head": "d6f9557168210eb7cdcc364754855b1e1746e14a",
+        "pr": 22,
+        "last_result": "Mounted host evidence added on the same HOLD PR as REL-01.",
+        "next_action": "Independent review of PR #22 at d6f9557. Keep draft HOLD. No merge."
       },
       "blocker": null
     },
@@ -161,7 +203,7 @@
       "id": "REL-03",
       "priority": 3,
       "title": "Reproduce and fix raw translation keys",
-      "state": "ready",
+      "state": "ready_for_review",
       "risk": "routine",
       "allowed_scope": [
         "Locate the affected Android routes/locales from available evidence; reproduce and make isolated UI/locale corrections.",
@@ -177,21 +219,32 @@
         {
           "kind": "owner_report",
           "result": "Raw i18n keys reported; affected route and current-head reproduction not yet verified."
+        },
+        {
+          "kind": "source_reproduction",
+          "at_sha": "79d405d0b626d5067a33541887ac3c70689b8724",
+          "result": "Historical consent.termsPrefix/privacyPrefix raw keys are already present and non-raw in en.json/hi.json on origin/main. Static t() scan: 0 missing English keys. Phone OTP still hardcoded 'Resend OTP' / countdown English."
+        },
+        {
+          "kind": "source_fix",
+          "at_sha": "6e951fffb56600c68e48ee3e7b878cc66b22dbc7",
+          "pr": 24,
+          "result": "Wired consentLocale into test:i18n with EN/HI resolution. Phone/email OTP resend countdown and email sending labels use locale keys. Remaining hardcoded OTP accessibility/error strings (Retry sending, Code valid for, One-time password) are not claimed device-fixed."
         }
       ],
       "jira": [],
       "validation": {
-        "implementation": "not_started",
+        "implementation": "changed",
         "review": "pending",
         "deployment": "not_applicable",
         "device": "not_run"
       },
       "work": {
-        "branch": null,
-        "head": null,
-        "pr": null,
-        "last_result": null,
-        "next_action": "Locate the affected Android routes/locales from available evidence; reproduce and make isolated UI/locale corrections."
+        "branch": "fix/rel-03-auth-i18n",
+        "head": "6e951fffb56600c68e48ee3e7b878cc66b22dbc7",
+        "pr": 24,
+        "last_result": "First-launch consent keys already resolved; OTP resend/send labels now i18n. Isolated from #22.",
+        "next_action": "Independent review of PR #24. Device/TalkBack not run. Keep draft. No merge."
       },
       "blocker": null
     },
@@ -199,7 +252,7 @@
       "id": "REL-04",
       "priority": 4,
       "title": "Reproduce and fix stuck grey press states",
-      "state": "ready",
+      "state": "ready_for_review",
       "risk": "routine",
       "allowed_scope": [
         "Identify the affected Android control and reproduce press/cancel/navigation behavior before editing.",
@@ -215,23 +268,34 @@
         {
           "kind": "owner_report",
           "result": "Grey stuck press states reported; not automatically the same issue as historical Settings elevation slabs."
+        },
+        {
+          "kind": "source_reproduction",
+          "at_sha": "79d405d0b626d5067a33541887ac3c70689b8724",
+          "result": "SettingsPressable already uses RN pressed (no isPressed). Remaining composer/search/card/saved-records rows still used LuxuryPressable Reanimated useSharedValue; missed onPressOut leaves scale<1 and opacity 0.94. Distinct from VYD-26 elevation slabs (already no Android card elevation)."
+        },
+        {
+          "kind": "source_fix",
+          "at_sha": "5076f7707a4812437f74879c3767bf554b8eeabb",
+          "pr": 25,
+          "result": "LuxuryPressable visual state is RN pressed only. Contract test forbids shared-value persistence."
         }
       ],
       "jira": [
         "https://specialsoftwaresindia.atlassian.net/browse/VYD-26"
       ],
       "validation": {
-        "implementation": "not_started",
+        "implementation": "changed",
         "review": "pending",
         "deployment": "not_applicable",
         "device": "not_run"
       },
       "work": {
-        "branch": null,
-        "head": null,
-        "pr": null,
-        "last_result": null,
-        "next_action": "Identify the affected Android control and reproduce press/cancel/navigation behavior before editing."
+        "branch": "fix/rel-04-stuck-press",
+        "head": "5076f7707a4812437f74879c3767bf554b8eeabb",
+        "pr": 25,
+        "last_result": "Stuck dim/scale on shared LuxuryPressable removed in source. Device not run.",
+        "next_action": "Independent review of PR #25. Keep draft. No merge."
       },
       "blocker": null
     },
@@ -239,7 +303,7 @@
       "id": "REL-05",
       "priority": 5,
       "title": "Reproduce and fix boot-label overlap",
-      "state": "ready",
+      "state": "ready_for_review",
       "risk": "routine",
       "allowed_scope": [
         "Inspect existing splash/boot component, screenshots and source; make only demonstrated layout corrections.",
@@ -255,6 +319,11 @@
         {
           "kind": "owner_report",
           "result": "Boot-animation label overlap reported; current candidate reproduction pending."
+        },
+        {
+          "kind": "source_reproduction",
+          "at_sha": "79d405d0b626d5067a33541887ac3c70689b8724",
+          "result": "Production boot has no VyaamikkIntroSplash/BootAnimationGate. Native splash image is chevron-only android-icon-foreground.png on #1E1B4B (imageWidth 200, contain). BootScreen hold view has no label. Cannot prove or disprove overlap on an installed binary without a new native build, which is held."
         }
       ],
       "jira": [
@@ -262,17 +331,17 @@
         "https://specialsoftwaresindia.atlassian.net/browse/VYD-25"
       ],
       "validation": {
-        "implementation": "not_started",
+        "implementation": "no_change_needed",
         "review": "pending",
         "deployment": "not_applicable",
         "device": "not_run"
       },
       "work": {
         "branch": null,
-        "head": null,
+        "head": "79d405d0b626d5067a33541887ac3c70689b8724",
         "pr": null,
-        "last_result": null,
-        "next_action": "Inspect existing splash/boot component, screenshots and source; make only demonstrated layout corrections."
+        "last_result": "No boot-label layout change: current source has no overlapping JS boot label. Device screenshot pending an authorized binary.",
+        "next_action": "Do not edit splash layout without a screenshot of the current native splash. No EAS/native build."
       },
       "blocker": null
     },
@@ -280,7 +349,7 @@
       "id": "REL-06",
       "priority": 6,
       "title": "Trace auth and production readiness without speculative rewrites",
-      "state": "ready",
+      "state": "ready_for_review",
       "risk": "sensitive",
       "allowed_scope": [
         "Audit current phone/email auth callers, backend selection, token bridge and mock exclusion; map accepted commits and tests.",
@@ -298,6 +367,12 @@
           "kind": "source_verified",
           "source": "https://github.com/specialsoftwares/vyaamikk-diary/blob/30c848a2a2cc66746f1f92ad7a080cc8d3a81ece/src/services/auth/firebase.ts",
           "result": "startOtp calls startNativePhoneOtp; confirmOtp calls confirmNativePhoneOtp. Live configuration and end-to-end behavior unverified."
+        },
+        {
+          "kind": "source_verified",
+          "at_sha": "79d405d0b626d5067a33541887ac3c70689b8724",
+          "source": "src/services/auth/firebase.ts",
+          "result": "startOtp \u2192 startNativePhoneOtp; confirmOtp \u2192 confirmNativePhoneOtp then identity callable + JS auth bridge. Production startup forbids local mock OTP flags. Dirty historical /Users/shivamsaurav/Vyaamikk Diary email-OTP work was inventoried read-only and not imported."
         }
       ],
       "jira": [
@@ -308,17 +383,17 @@
         "https://specialsoftwaresindia.atlassian.net/browse/VYD-15"
       ],
       "validation": {
-        "implementation": "not_started",
+        "implementation": "investigating",
         "review": "pending",
-        "deployment": "not_applicable",
+        "deployment": "not_deployed",
         "device": "not_run"
       },
       "work": {
         "branch": null,
-        "head": null,
+        "head": "79d405d0b626d5067a33541887ac3c70689b8724",
         "pr": null,
-        "last_result": null,
-        "next_action": "Audit current phone/email auth callers, backend selection, token bridge and mock exclusion; map accepted commits and tests."
+        "last_result": "Source wiring mapped; no speculative rewrite. Console/device remain separate. REL-03 OTP copy is a separate PR.",
+        "next_action": "Keep AUTH_MANUAL_ACCEPTANCE_CHECKLIST for an installed candidate. Do not rewrite OTP callers from stale docs. REL-10 needed for live Phone Auth SHA inspection."
       },
       "blocker": null
     },
@@ -326,7 +401,7 @@
       "id": "REL-07",
       "priority": 7,
       "title": "Audit legal URLs and prepare exact owner facts",
-      "state": "ready",
+      "state": "ready_for_review",
       "risk": "mixed",
       "allowed_scope": [
         "Read current configured legal URLs and publicly served pages; identify actual website repository/provider.",
@@ -349,29 +424,37 @@
           "kind": "historical_document",
           "source": "https://github.com/specialsoftwares/vyaamikk-diary/blob/79d405d0b626d5067a33541887ac3c70689b8724/docs/WEBSITE_STORE_INTEGRATION.md",
           "result": "Separate Lovable/TanStack/Cloudflare website documented; current hosting and live pages must be verified."
+        },
+        {
+          "kind": "public_http",
+          "at_sha": "79d405d0b626d5067a33541887ac3c70689b8724",
+          "result": "https://vyaamikk.specialsoftwares.com privacy/terms/support/contact/delete-account all HTTP 200. Titles match intended pages. Website effective date 15 July 2026; app LEGAL_EFFECTIVE_DATE is 2026-07-01. App still has grievance-officer name and registered-address placeholders. Host is the documented specialsoftwares.com site, not a Vercel app repo."
         }
       ],
       "jira": [],
       "validation": {
-        "implementation": "not_started",
+        "implementation": "investigating",
         "review": "pending",
         "deployment": "not_applicable",
         "device": "not_run"
       },
       "work": {
         "branch": null,
-        "head": null,
+        "head": "79d405d0b626d5067a33541887ac3c70689b8724",
         "pr": null,
-        "last_result": null,
-        "next_action": "Read current configured legal URLs and publicly served pages; identify actual website repository/provider."
+        "last_result": "Public legal URLs resolve. Placeholders and date mismatch are owner/counsel blockers. No publish.",
+        "next_action": "Owner/counsel confirm facts. Do not invent legal terms or deploy the website from this repo."
       },
-      "blocker": null
+      "blocker": {
+        "type": "owner_counsel",
+        "next_action": "Confirm registered address, grievance officer identity, and which effective date is authoritative before any legal copy/URL change."
+      }
     },
     {
       "id": "REL-08",
       "priority": 8,
       "title": "Prepare App Check and deployed-Rules review",
-      "state": "ready",
+      "state": "ready_for_review",
       "risk": "sensitive",
       "allowed_scope": [
         "Audit source and existing deployment runbooks; prepare an App Check integration and rollout design for review.",
@@ -388,25 +471,33 @@
         {
           "kind": "reported_unknown",
           "result": "App Check integration and live Rules/Functions state remain unverified; local emulator success does not verify deployment."
+        },
+        {
+          "kind": "source_verified",
+          "at_sha": "79d405d0b626d5067a33541887ac3c70689b8724",
+          "result": "No initializeAppCheck / App Check token plumbing in app or functions source. Email verification comment notes App Check is not enforced. Live Rules/Functions comparison still requires REL-10. A later integration PR would be Play Integrity (Android) + Apple App Attest, debug provider only in non-store builds, no debug-token bypass in production, fail-closed callables after staged monitor. This plan is not production protection."
         }
       ],
       "jira": [
         "https://specialsoftwaresindia.atlassian.net/browse/VYD-12"
       ],
       "validation": {
-        "implementation": "not_started",
+        "implementation": "investigating",
         "review": "pending",
         "deployment": "not_applicable",
         "device": "not_run"
       },
       "work": {
         "branch": null,
-        "head": null,
+        "head": "79d405d0b626d5067a33541887ac3c70689b8724",
         "pr": null,
-        "last_result": null,
-        "next_action": "Audit source and existing deployment runbooks; prepare an App Check integration and rollout design for review."
+        "last_result": "Source has no App Check integration. Rollout design recorded. Live config unread.",
+        "next_action": "Wait for REL-10. Do not enable enforcement, deploy Rules, or add a debug-token bypass."
       },
-      "blocker": null
+      "blocker": {
+        "type": "owner_reauthentication",
+        "next_action": "Complete REL-10 before comparing deployed Rules/Functions. Do not enable enforcement or deploy Rules."
+      }
     },
     {
       "id": "REL-09",
@@ -541,7 +632,7 @@
       "id": "REL-12",
       "priority": 10,
       "title": "Classify VYD-38/39 launch-critical scope",
-      "state": "ready",
+      "state": "ready_for_review",
       "risk": "planning_only",
       "allowed_scope": [
         "Read VYD-38/39 and map each requirement to paid-launch necessity, current implementation and evidence.",
@@ -557,6 +648,11 @@
         {
           "kind": "jira_verified",
           "result": "VYD-38 and VYD-39 are Backlog. VYD-38 includes SubscriptionManagementScreen; VYD-39 includes maintenance/reconciliation as well as reporting."
+        },
+        {
+          "kind": "source_assessment",
+          "at_sha": "79d405d0b626d5067a33541887ac3c70689b8724",
+          "result": "No SubscriptionManagementScreen implementation exists (name appears only as a forbidden paywall regex). Paid-launch-critical: user-visible manage/cancel path, accurate active/expired presentation from server status, and refund/revocation reconciliation already in billing backend tickets. Deferrable if owner accepts: usage-bar polish and revenue dashboards. Do not ship paid public with missing manage/cancel access. No VYD-38/39 implementation started."
         }
       ],
       "jira": [
@@ -564,17 +660,17 @@
         "https://specialsoftwaresindia.atlassian.net/browse/VYD-39"
       ],
       "validation": {
-        "implementation": "not_started",
+        "implementation": "no_change_needed",
         "review": "pending",
         "deployment": "not_applicable",
         "device": "not_run"
       },
       "work": {
         "branch": null,
-        "head": null,
+        "head": "79d405d0b626d5067a33541887ac3c70689b8724",
         "pr": null,
-        "last_result": null,
-        "next_action": "Read VYD-38/39 and map each requirement to paid-launch necessity, current implementation and evidence."
+        "last_result": "Launch-critical vs polish split recorded. Owner must accept any deferral of manage/cancel UI.",
+        "next_action": "Owner accept or reject deferring SubscriptionManagementScreen past first internal candidate. Do not start full VYD-38/39 here."
       },
       "blocker": null
     },
@@ -582,7 +678,7 @@
       "id": "REL-13",
       "priority": 11,
       "title": "Prepare one candidate manifest and device test runbook",
-      "state": "ready",
+      "state": "ready_for_review",
       "risk": "planning_only",
       "allowed_scope": [
         "Inventory exact remote commits required for an internal candidate and prepare test cases; do not merge branches or build.",
@@ -599,6 +695,10 @@
         {
           "kind": "source_documents",
           "result": "Use AUTH_MANUAL_ACCEPTANCE_CHECKLIST.md and current Jira device waves; historic vc18/vc19 titles are not a selected release artifact."
+        },
+        {
+          "kind": "candidate_manifest",
+          "result": "Do not merge. Internal-candidate inventory at checkpoint: origin/main 79d405d; PR #20 531a4cd (draft HOLD); PR #21 355f60a (draft HOLD); PR #22 d6f9557 REL-01/02 (draft HOLD, Actions 35428113304 138/138); PR #24 6e951ff REL-03 (draft); PR #25 5076f77 REL-04 (draft); PR #23 control docs only. Excluded: historical workspace dirty email-OTP at ce2fc75. Backend: REL-10 unread. Device matrix: existing debug runtime if already installed; authorized future sideload; Play AAB after REL-11. CSS zoom is not TalkBack/font-scale acceptance."
         }
       ],
       "jira": [
@@ -610,7 +710,7 @@
         "https://specialsoftwaresindia.atlassian.net/browse/VYD-19"
       ],
       "validation": {
-        "implementation": "not_started",
+        "implementation": "no_change_needed",
         "review": "pending",
         "deployment": "not_applicable",
         "device": "not_run"
@@ -619,8 +719,8 @@
         "branch": null,
         "head": null,
         "pr": null,
-        "last_result": null,
-        "next_action": "Inventory exact remote commits required for an internal candidate and prepare test cases; do not merge branches or build."
+        "last_result": "Manifest recorded. No merge or build.",
+        "next_action": "Use AUTH_MANUAL_ACCEPTANCE_CHECKLIST plus first-launch i18n/press/boot cases when an authorized binary exists."
       },
       "blocker": null
     },
@@ -823,7 +923,7 @@
       "docs/release/RELEASE_REGISTER.json": "2726eb7c54e2fa3ee588f5f4d7cf54281fe5416ba526cc3096de80ede0d1d18c",
       "docs/release/CURSOR_START.md": "7f27ce3dee950232814eb4d28df708501dc59adce45b2a7f98d7e10a9c2930c5"
     },
-    "next_action": "Execute CURSOR_START.md beginning with REL-01 on PR #22. Keep this PR draft. No merge.",
+    "next_action": "REL-01/02 await review on PR #22 d6f9557. REL-03 PR #24 and REL-04 PR #25 are draft. Keep all PRs draft. No merge, native/EAS build, deploy, store mutation, or production flag write.",
     "remote_branch_created": true
   }
 }
