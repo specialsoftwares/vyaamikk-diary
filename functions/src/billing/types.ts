@@ -478,9 +478,19 @@ export interface RevenueReportDoc {
   refundsInPaise: number;
   actualPlatformCommissionInPaise: number;
   estimatedPlatformCommissionInPaise: number;
-  netRevenueEstimateInPaise: number;
+  /**
+   * Null when the month is incomplete or any contributing amount is unknown.
+   * Never invented from estimates, fees, or tax.
+   */
+  netRevenueEstimateInPaise: number | null;
   financialEventCount: number;
   generatedAt: number;
+  complete: boolean;
+  sampleTruncated: boolean;
+  grossUnknownCount: number;
+  actualCommissionUnknownCount: number;
+  estimatedCommissionUnknownCount: number;
+  refundsUnknownCount: number;
 }
 
 // ---------------------------------------------------------------------------

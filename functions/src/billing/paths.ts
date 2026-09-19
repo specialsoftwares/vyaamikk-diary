@@ -56,6 +56,18 @@ export function billingReconciliationQueuePath(queueId: string): string {
   return `_billingReconciliationQueue/${sanitizeDocId(queueId)}`;
 }
 
+export function billingMaintenanceSchedulePath(uid: string): string {
+  return `_billingMaintenanceSchedule/${uid}`;
+}
+
+export function staleMaintenanceLeasePath(): string {
+  return `_billingOps/staleMaintenanceLease`;
+}
+
+export function revenueReportPath(monthKey: string): string {
+  return `_revenueReports/${monthKey}`;
+}
+
 export function billingDetailsPath(uid: string): string {
   return `users/${uid}/subscription/billingDetails`;
 }

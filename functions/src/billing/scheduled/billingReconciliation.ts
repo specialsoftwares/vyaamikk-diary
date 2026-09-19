@@ -4,7 +4,7 @@
  */
 
 import { onSchedule } from "firebase-functions/v2/scheduler";
-import { getFirestore, type Firestore, type QueryDocumentSnapshot } from "firebase-admin/firestore";
+import { FieldPath, getFirestore, type Firestore, type QueryDocumentSnapshot } from "firebase-admin/firestore";
 
 import { createAppleSignedDataVerifier } from "../apple/appleVerifier";
 import { createAppStoreServerApiClient } from "../apple/appleApiClient";
@@ -42,12 +42,10 @@ import {
   reportLedgerCommissionsForMonth,
 } from "../reconciliationReporting";
 import {
-  collectStaleCompanyRows,
+  documentIdCompanyScanner,
   runStaleCompanyMaintenance,
-  STALE_COMPANY_REVALIDATION_MS,
-  type StaleCompanyRow,
 } from "../reconciliationMaintenance";
-import type { BillingEventLedgerDoc, CompanyBillingDoc } from "../types";
+import type { BillingEventLedgerDoc } from "../types";
 
 function configurationDisabled(code: string): StoreRevalidator {
   return async () => ({ kind: "configuration_disabled", resultSummary: code });
@@ -168,55 +166,54 @@ export const scheduledBillingReconciliation = onSchedule(
       maxItems: 10,
     });
 
-    const staleCutoff = nowMs() - STALE_COMPANY_REVALIDATION_MS;
-    const mapSnap = (doc: QueryDocumentSnapshot): StaleCompanyRow => {
-      const data = doc.data() as CompanyBillingDoc;
-      return {
-        uid: doc.id,
-        platform: data.platform,
-        lastReconciledAt: data.lastReconciledAt ?? null,
-        credentialFingerprint: data.credentialFingerprint ?? null,
-        latestOrderId: data.latestOrderId ?? null,
-        originalTransactionId: data.originalTransactionId ?? null,
-      };
-    };
-    const [agedSnap, neverSnap] = await Promise.all([
-      db
-        .collection("_companyBilling")
-        .where("lastReconciledAt", "<", staleCutoff)
-        .orderBy("lastReconciledAt")
-        .limit(10)
-        .get(),
-      db.collection("_companyBilling").where("lastReconciledAt", "==", null).limit(10).get(),
-    ]);
-    const staleRows: StaleCompanyRow[] = collectStaleCompanyRows({
-      neverReconciled: neverSnap.docs.map(mapSnap),
-      aged: agedSnap.docs.map(mapSnap),
-      maxItems: 10,
-    });
     const maintenance = await runStaleCompanyMaintenance({
       enabled: true,
       store,
-      scanner: {
-        listStale: async () => staleRows,
-      },
+      scanner: documentIdCompanyScanner(async (afterDocumentId, pageSize) => {
+        let q = db
+          .collection("_companyBilling")
+          .orderBy(FieldPath.documentId())
+          .limit(pageSize);
+        if (afterDocumentId) q = q.startAfter(afterDocumentId);
+        const snap = await q.get();
+        return {
+          docs: snap.docs.map((doc) => ({
+            id: doc.id,
+            data: doc.data() as Record<string, unknown>,
+          })),
+        };
+      }),
       revalidate,
       nowMs,
       maxItems: 10,
+      leaseOwner: `maint:${invocationId}`,
+      useDocumentIdScan: true,
     });
 
     const monthKey = istMonthKeyForMillis(nowMs());
-    const ledgerSnap = await db
-      .collection("_billingEventLedger")
-      .where("monthKey", "==", monthKey)
-      .limit(200)
-      .get();
-    const ledgerRows = ledgerSnap.docs.map((d) => d.data() as BillingEventLedgerDoc);
     const report = await reportLedgerCommissionsForMonth({
       scanner: {
-        listForMonth: async () => ledgerRows,
+        async listForMonth() {
+          return [];
+        },
+        async listForMonthPage(key, pageSize, afterId) {
+          let q = db
+            .collection("_billingEventLedger")
+            .where("monthKey", "==", key)
+            .orderBy(FieldPath.documentId())
+            .limit(pageSize);
+          if (afterId) q = q.startAfter(afterId);
+          const snap = await q.get();
+          return {
+            rows: snap.docs.map((d) => d.data() as BillingEventLedgerDoc),
+            lastId: snap.docs.length > 0 ? snap.docs[snap.docs.length - 1].id : null,
+            exhausted: snap.docs.length < pageSize,
+          };
+        },
       },
       monthKey,
+      persistTo: store,
+      nowMs,
     });
 
     billingLog("info", {

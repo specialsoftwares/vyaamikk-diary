@@ -37,6 +37,14 @@
       "fields": [
         { "fieldPath": "monthKey", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "_billingEventLedger",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "monthKey", "order": "ASCENDING" },
+        { "fieldPath": "__name__", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

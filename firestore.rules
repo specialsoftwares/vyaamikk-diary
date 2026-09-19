@@ -885,6 +885,12 @@ service cloud.firestore {
     match /_billingReconciliationQueue/{queueId} {
       allow read, write: if false;
     }
+    match /_billingMaintenanceSchedule/{uid} {
+      allow read, write: if false;
+    }
+    match /_billingOps/{docId} {
+      allow read, write: if false;
+    }
     match /_subscriptionInvoices/{invoiceId} {
       allow read, write: if false;
     }

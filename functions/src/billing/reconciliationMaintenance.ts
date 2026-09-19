@@ -4,15 +4,28 @@
  * A queue drainer cannot recover events that never created a work item.
  * This pass revalidates company rows whose lastReconciledAt is older than
  * the stale window, using current stored credentials — never queue reason.
+ *
+ * Progress uses document-id order over `_companyBilling` so omitted, null,
+ * and aged watermarks are visible without an equality query, and a poisoned
+ * first page cannot starve later accounts. Unverified accounts are not
+ * marked reconciled; backoff lives on `_billingMaintenanceSchedule/{uid}`.
  * Flags stay off; this is source only.
  */
 
-import { companyBillingPath } from "./paths";
+import {
+  billingMaintenanceSchedulePath,
+  companyBillingPath,
+  staleMaintenanceLeasePath,
+} from "./paths";
 import type { BillingStore } from "./store";
 import type { BillingPlatform, CompanyBillingDoc } from "./types";
 import type { StoreRevalidateOutcome, StoreRevalidator } from "./reconciliationConsumer";
 
 export const STALE_COMPANY_REVALIDATION_MS = 36 * 60 * 60 * 1000;
+export const STALE_MAINTENANCE_LEASE_TTL_MS = 120_000;
+export const MAINTENANCE_BACKOFF_MS = 6 * 60 * 60 * 1000;
+export const MAINTENANCE_SCAN_PAGE_SIZE = 40;
+export const MAINTENANCE_MAX_SCAN_PAGES = 8;
 
 export type StaleCompanyRow = {
   uid: string;
@@ -23,9 +36,29 @@ export type StaleCompanyRow = {
   originalTransactionId: string | null;
 };
 
+export type CompanyBillingScanDoc = {
+  id: string;
+  data: Record<string, unknown>;
+};
+
+export type CompanyBillingScanPage = {
+  docs: CompanyBillingScanDoc[];
+};
+
 export interface StaleCompanyScanner {
   listStale(nowMs: number, staleAfterMs: number, limit: number): Promise<StaleCompanyRow[]>;
+  readPage?(afterDocumentId: string | null, pageSize: number): Promise<CompanyBillingScanPage>;
 }
+
+export type MaintenanceTallies = {
+  scanned: number;
+  attempted: number;
+  verified: number;
+  pending: number;
+  skipped: number;
+  failed: number;
+  overlappingSkipped: boolean;
+};
 
 export function isStaleCompanyWatermark(
   lastReconciledAt: number | null | undefined,
@@ -49,6 +82,12 @@ export function companyDocToStaleRow(uid: string, doc: CompanyBillingDoc): Stale
   };
 }
 
+function scanDocToRow(doc: CompanyBillingScanDoc): StaleCompanyRow | null {
+  const platform = doc.data.platform;
+  if (platform !== "android" && platform !== "ios") return null;
+  return companyDocToStaleRow(doc.id, doc.data as unknown as CompanyBillingDoc);
+}
+
 /** Never-reconciled (null watermark) first — those never created a queue item. */
 export function collectStaleCompanyRows(input: {
   neverReconciled: StaleCompanyRow[];
@@ -69,20 +108,49 @@ export function collectStaleCompanyRows(input: {
 export function memoryStaleCompanyScanner(store: {
   docs: Map<string, Record<string, unknown>>;
 }): StaleCompanyScanner {
+  const listed = (): CompanyBillingScanDoc[] => {
+    const docs: CompanyBillingScanDoc[] = [];
+    for (const [path, raw] of store.docs) {
+      if (!path.startsWith("_companyBilling/")) continue;
+      docs.push({ id: path.slice("_companyBilling/".length), data: raw });
+    }
+    docs.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    return docs;
+  };
   return {
     async listStale(nowMs, staleAfterMs, limit) {
       const neverReconciled: StaleCompanyRow[] = [];
       const aged: StaleCompanyRow[] = [];
-      for (const [path, raw] of store.docs) {
-        if (!path.startsWith("_companyBilling/")) continue;
-        const doc = raw as unknown as CompanyBillingDoc;
-        if (!isStaleCompanyWatermark(doc.lastReconciledAt, nowMs, staleAfterMs)) continue;
-        const row = companyDocToStaleRow(path.slice("_companyBilling/".length), doc);
-        if (typeof doc.lastReconciledAt !== "number") neverReconciled.push(row);
+      for (const doc of listed()) {
+        const last = doc.data.lastReconciledAt as number | null | undefined;
+        if (!isStaleCompanyWatermark(last, nowMs, staleAfterMs)) continue;
+        const row = scanDocToRow(doc);
+        if (!row) continue;
+        if (typeof last !== "number") neverReconciled.push(row);
         else aged.push(row);
       }
       return collectStaleCompanyRows({ neverReconciled, aged, maxItems: limit });
     },
+    async readPage(afterDocumentId, pageSize) {
+      const all = listed();
+      const start = afterDocumentId
+        ? all.findIndex((d) => d.id === afterDocumentId) + 1
+        : 0;
+      const from = start < 0 ? all.length : start;
+      return { docs: all.slice(from, from + pageSize) };
+    },
+  };
+}
+
+export function documentIdCompanyScanner(readPage: (
+  afterDocumentId: string | null,
+  pageSize: number
+) => Promise<CompanyBillingScanPage>): StaleCompanyScanner {
+  return {
+    async listStale() {
+      return [];
+    },
+    readPage,
   };
 }
 
@@ -96,6 +164,104 @@ export function staleRevalidationQueueId(row: StaleCompanyRow): string | null {
   return `ios:stale-revalidate:${row.originalTransactionId.replace(/\//g, "_")}`;
 }
 
+export async function claimStaleMaintenanceLease(input: {
+  store: BillingStore;
+  owner: string;
+  nowMs: number;
+  ttlMs?: number;
+}): Promise<{ claimed: boolean; scanCursor: string | null }> {
+  const path = staleMaintenanceLeasePath();
+  const ttl = input.ttlMs ?? STALE_MAINTENANCE_LEASE_TTL_MS;
+  return input.store.runTransaction(async (tx) => {
+    const snap = await tx.get(path);
+    const data = snap.data();
+    const expiresAt = typeof data?.expiresAt === "number" ? data.expiresAt : 0;
+    const owner = typeof data?.owner === "string" ? data.owner : "";
+    const scanCursor =
+      typeof data?.scanCursor === "string" && data.scanCursor.length > 0 ? data.scanCursor : null;
+    if (owner.length > 0 && owner !== input.owner && expiresAt > input.nowMs) {
+      return { claimed: false, scanCursor: null };
+    }
+    tx.set(path, {
+      owner: input.owner,
+      expiresAt: input.nowMs + ttl,
+      scanCursor,
+      claimedAt: input.nowMs,
+    });
+    return { claimed: true, scanCursor };
+  });
+}
+
+export async function completeStaleMaintenanceLease(input: {
+  store: BillingStore;
+  owner: string;
+  scanCursor: string | null;
+  nowMs: number;
+}): Promise<void> {
+  const path = staleMaintenanceLeasePath();
+  await input.store.runTransaction(async (tx) => {
+    const snap = await tx.get(path);
+    const data = snap.data();
+    if (data?.owner !== input.owner) return;
+    tx.set(path, {
+      owner: null,
+      expiresAt: 0,
+      scanCursor: input.scanCursor,
+      releasedAt: input.nowMs,
+    });
+  });
+}
+
+export async function isMaintenanceAccountEligible(input: {
+  store: BillingStore;
+  uid: string;
+  nowMs: number;
+}): Promise<boolean> {
+  const path = billingMaintenanceSchedulePath(input.uid);
+  return input.store.runTransaction(async (tx) => {
+    const snap = await tx.get(path);
+    const next = snap.data()?.nextEligibleAt;
+    if (typeof next !== "number") return true;
+    return next <= input.nowMs;
+  });
+}
+
+export async function recordMaintenanceBackoff(input: {
+  store: BillingStore;
+  uid: string;
+  nowMs: number;
+  outcome: string;
+  backoffMs?: number;
+}): Promise<void> {
+  const path = billingMaintenanceSchedulePath(input.uid);
+  const delay = input.backoffMs ?? MAINTENANCE_BACKOFF_MS;
+  await input.store.runTransaction(async (tx) => {
+    await tx.get(path);
+    tx.set(path, {
+      uid: input.uid,
+      nextEligibleAt: input.nowMs + delay,
+      lastAttemptAt: input.nowMs,
+      lastOutcome: input.outcome,
+    });
+  });
+}
+
+function emptyTallies(): MaintenanceTallies {
+  return {
+    scanned: 0,
+    attempted: 0,
+    verified: 0,
+    pending: 0,
+    skipped: 0,
+    failed: 0,
+    overlappingSkipped: false,
+  };
+}
+
+function outcomeKind(outcome: StoreRevalidateOutcome): string {
+  return outcome.kind;
+}
+
 export async function runStaleCompanyMaintenance(input: {
   enabled: boolean;
   store: BillingStore;
@@ -104,45 +270,165 @@ export async function runStaleCompanyMaintenance(input: {
   nowMs: () => number;
   staleAfterMs?: number;
   maxItems?: number;
-}): Promise<{
-  scanned: number;
-  attempted: number;
-  verified: number;
-  pending: number;
-  skipped: number;
-}> {
-  const tallies = { scanned: 0, attempted: 0, verified: 0, pending: 0, skipped: 0 };
+  leaseOwner?: string;
+  scanPageSize?: number;
+  maxScanPages?: number;
+  useDocumentIdScan?: boolean;
+}): Promise<MaintenanceTallies> {
+  const tallies = emptyTallies();
   if (!input.enabled) return tallies;
   const staleAfterMs = input.staleAfterMs ?? STALE_COMPANY_REVALIDATION_MS;
   const maxItems = input.maxItems ?? 10;
-  const rows = await input.scanner.listStale(input.nowMs(), staleAfterMs, maxItems);
-  tallies.scanned = rows.length;
-  for (const row of rows) {
+  const now = input.nowMs();
+  const useScan = input.useDocumentIdScan === true && typeof input.scanner.readPage === "function";
+
+  let scanCursor: string | null = null;
+  let examinedLast: string | null = null;
+  let exhausted = false;
+  if (input.leaseOwner) {
+    const claim = await claimStaleMaintenanceLease({
+      store: input.store,
+      owner: input.leaseOwner,
+      nowMs: now,
+    });
+    if (!claim.claimed) {
+      tallies.overlappingSkipped = true;
+      return tallies;
+    }
+    scanCursor = claim.scanCursor;
+    examinedLast = claim.scanCursor;
+  }
+
+  try {
+    if (!useScan) {
+      const rows = await input.scanner.listStale(now, staleAfterMs, maxItems);
+      tallies.scanned = rows.length;
+      for (const row of rows) {
+        await processStaleRow({ input, row, tallies, now });
+      }
+      return tallies;
+    }
+
+    const pageSize = input.scanPageSize ?? MAINTENANCE_SCAN_PAGE_SIZE;
+    const maxPages = input.maxScanPages ?? MAINTENANCE_MAX_SCAN_PAGES;
+    let pages = 0;
+    let after = scanCursor;
+    let workSlots = 0;
+    const readPage = input.scanner.readPage!;
+
+    while (workSlots < maxItems && pages < maxPages) {
+      const page = await readPage(after, pageSize);
+      pages += 1;
+      if (page.docs.length === 0) {
+        exhausted = true;
+        break;
+      }
+      for (const doc of page.docs) {
+        examinedLast = doc.id;
+        after = doc.id;
+        const last = doc.data.lastReconciledAt as number | null | undefined;
+        if (!isStaleCompanyWatermark(last, now, staleAfterMs)) continue;
+        const row = scanDocToRow(doc);
+        if (!row) {
+          tallies.skipped += 1;
+          continue;
+        }
+        tallies.scanned += 1;
+        const slot = await processStaleRow({ input, row, tallies, now });
+        if (slot) workSlots += 1;
+        if (workSlots >= maxItems) break;
+      }
+      if (page.docs.length < pageSize) {
+        exhausted = true;
+        break;
+      }
+    }
+    return tallies;
+  } finally {
+    if (input.leaseOwner) {
+      await completeStaleMaintenanceLease({
+        store: input.store,
+        owner: input.leaseOwner,
+        scanCursor: useScan ? (exhausted ? null : examinedLast) : scanCursor,
+        nowMs: input.nowMs(),
+      });
+    }
+  }
+}
+
+async function processStaleRow(input: {
+  input: {
+    store: BillingStore;
+    revalidate: StoreRevalidator;
+  };
+  row: StaleCompanyRow;
+  tallies: MaintenanceTallies;
+  now: number;
+}): Promise<boolean> {
+  const { row, tallies } = input;
+  try {
+    const eligible = await isMaintenanceAccountEligible({
+      store: input.input.store,
+      uid: row.uid,
+      nowMs: input.now,
+    });
+    if (!eligible) {
+      tallies.skipped += 1;
+      return false;
+    }
     if (!staleRevalidationQueueId(row)) {
       tallies.skipped += 1;
-      continue;
+      await recordMaintenanceBackoff({
+        store: input.input.store,
+        uid: row.uid,
+        nowMs: input.now,
+        outcome: "missing_credential",
+      });
+      return true;
     }
     const companyPath = companyBillingPath(row.uid);
-    const companyPresent = await input.store.runTransaction(async (tx) => {
+    const companyPresent = await input.input.store.runTransaction(async (tx) => {
       const snap = await tx.get(companyPath);
       return snap.exists;
     });
     if (!companyPresent) {
       tallies.skipped += 1;
-      continue;
+      return true;
     }
     tallies.attempted += 1;
-    const outcome: StoreRevalidateOutcome = await input.revalidate({
+    const outcome: StoreRevalidateOutcome = await input.input.revalidate({
       platform: row.platform,
       uid: row.uid,
       financialEventId: `stale:${row.platform}`,
       credentialFingerprint: row.credentialFingerprint,
       reason: "stale_company_revalidation",
     });
-    if (outcome.kind === "verified") tallies.verified += 1;
-    else if (outcome.kind === "pending" || outcome.kind === "configuration_disabled") {
+    if (outcome.kind === "verified") {
+      tallies.verified += 1;
+      return true;
+    }
+    if (outcome.kind === "pending" || outcome.kind === "configuration_disabled") {
       tallies.pending += 1;
     }
+    await recordMaintenanceBackoff({
+      store: input.input.store,
+      uid: row.uid,
+      nowMs: input.now,
+      outcome: outcomeKind(outcome),
+    });
+    return true;
+  } catch {
+    tallies.failed += 1;
+    try {
+      await recordMaintenanceBackoff({
+        store: input.input.store,
+        uid: row.uid,
+        nowMs: input.now,
+        outcome: "isolated_failure",
+      });
+    } catch {
+      // Sidecar failure must not abort the remaining accounts.
+    }
+    return true;
   }
-  return tallies;
 }

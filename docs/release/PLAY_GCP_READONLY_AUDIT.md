@@ -37,6 +37,21 @@ Treat Play product/base-plan mapping as **source-defined, store-unverified** unt
 
 `check:firebase-client` this continuation: ok, with warnings that JS appId differs from Android appId (expected) and `google-services.json` has zero `oauth_client` entries.
 
+## Authenticated Play Console (2026-09-20, read-only)
+
+Session: `aeadmin@specialsoftwares.com` / SPECIAL SOFTWARES. Developer `5171346189091805855`. App `4972339006118168782`, package `com.specialsoftwares.vyaamikkdiary`. No Save, create, upload, or other mutation.
+
+| Surface | Finding |
+| --- | --- |
+| App dashboard | Draft app; Production **Inactive**; temporary unreviewed package name |
+| App list | Installed audience **0**; status Draft / Internal testing; last updated **26 Aug 2026**; Android developer verification: all apps successfully registered |
+| Subscriptions catalog | **Empty** — Console heading “Your app doesn't have any subscriptions yet”. Source catalog remains 3 products × 3 base plans (`vyd_starter` / `vyd_professional` / `vyd_business` × `monthly` / `quarterly` / `yearly`). No products were created. |
+| Monetisation setup / RTDN | Pub/Sub topic name **empty** (0/300). Notification content radio: **Subscriptions and voided purchases only**. Subscription pause **Enabled**. Play Billing license RSA public key **present** (not copied into the repo). Alternative billing / external offers / billing choice **not enrolled**. Billing-profile setup still shown as incomplete for alternative billing. **Save changes was not pressed.** |
+| Licence testing | Email lists **Known Testers (2 users)** and **Owner (3 users)**; response **RESPOND_NORMALLY**. Licence testing explicitly does **not** support Play Integrity API. **Save changes disabled / not pressed.** Email addresses were not opened or recorded. |
+| Internal testing | Track **Active**; latest release **Internal Testing RC4 vc17**; 1 version code; released 26 Aug 23:01; not reviewed. Testers tab: same two email lists (2 and 3 users); join-on-the-web is available. **Create new release / Copy link / Save not used.** |
+
+`gcloud` CLI and Python `googleapiclient` remain absent. That is not the Play Console blocker; catalog emptiness and empty RTDN topic are Console-visible configuration gaps, not a missing-tooling finding.
+
 ## Merchant KYC (human payments-readiness)
 
 Separate from app code, developer verification, and App Check. Owner handles Google/BillDesk merchant KYC / PA-CB business and representative verification via the existing Play payment profile and Play Console payments support.
