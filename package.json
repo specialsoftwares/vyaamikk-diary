@@ -94,7 +94,7 @@
     "test:share-text": "npx --yes tsx src/services/share/shareText.test.ts",
     "test:display-alias": "npx --yes tsx src/utils/displayAlias.test.ts",
     "test:i18n": "npx --yes tsx src/i18n/i18n.test.ts && npx --yes tsx src/i18n/i18nKeyConsistency.test.ts",
-    "test:settings-presentation": "npx --yes tsx src/components/settings/settingsPresentation.contract.test.ts",
+    "test:settings-presentation": "npx --yes tsx src/components/settings/settingsPresentation.contract.test.ts && npx --yes tsx src/components/ui/luxuryPressable.contract.test.ts",
     "test:formatters": "npx --yes tsx src/utils/formatters/formatters.test.ts",
     "test:pdf-labels": "npx --yes tsx src/utils/formatters/formatters.test.ts",
     "i18n:export-json": "npx --yes tsx scripts/export-locales-to-json.ts",
