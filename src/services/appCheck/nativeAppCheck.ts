@@ -54,9 +54,11 @@ export async function raceWithBudget<T>(
       throw err;
     }
   );
-  const timeout = clock.wait(budgetMs).then(() => {
+  const timeout = clock.wait(budgetMs).then(async (): Promise<
+    { kind: "done"; value: T } | { kind: "timeout" }
+  > => {
     if (settled) return guarded;
-    return { kind: "timeout" as const };
+    return { kind: "timeout" };
   });
   try {
     return await Promise.race([guarded, timeout]);

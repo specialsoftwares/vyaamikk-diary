@@ -107,19 +107,19 @@ async function main() {
         platform: "android",
         nativeAppId: "1:proj:android:xyz",
         initialize: async () => undefined,
-        getToken: async (forceRefresh) => {
+        getToken: async (forceRefresh: boolean) => {
           refreshCalls.push(forceRefresh);
           return { token: "native-token", expireTimeMillis: Date.now() - 1 };
         },
       },
     });
-    assert.deepEqual(refreshCalls, []);
+    assert.equal(refreshCalls.length, 0);
     const probed = await probeNativeAppCheckTokens({
       port: {
         platform: "android",
         nativeAppId: "1:proj:android:xyz",
         initialize: async () => undefined,
-        getToken: async (forceRefresh) => {
+        getToken: async (forceRefresh: boolean) => {
           refreshCalls.push(forceRefresh);
           return { token: "native-token", expireTimeMillis: Date.now() - 1 };
         },
