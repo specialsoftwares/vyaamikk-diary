@@ -128,6 +128,8 @@ export function createQuotaUpsellController(
   let errorRecoverable = false;
   let currentAttempt: Attempt | null = null;
   let attemptSeq = 0;
+  let latestIap: QuotaUpsellIapSlice | null = null;
+  let ackedIapResult: PurchaseFlowResult | null = null;
   const purchaseCalls: CanonicalSku[] = [];
   let restoreCalls = 0;
   let trialCalls = 0;
@@ -159,6 +161,48 @@ export function createQuotaUpsellController(
     if (isBusy(hostRestoreState)) hostRestoreState = "idle";
   }
 
+  function ackIapResult(result: PurchaseFlowResult | null | undefined): void {
+    ackedIapResult = result ?? null;
+  }
+
+  function ackLatestIapResult(): void {
+    ackIapResult(latestIap?.lastResult ?? ackedIapResult);
+  }
+
+  /**
+   * A purchase() callback may return sheet_launched while IAP is still active.
+   * A later IapView.lastResult failed must appear once on the owning live
+   * presentation. Do not replay an already-acked lastResult on reopen.
+   */
+  function publishAsyncIapFailureIfOwned(iap: QuotaUpsellIapSlice): void {
+    const result = iap.lastResult;
+    if (result == null || result === ackedIapResult) return;
+    if (result.kind !== "failed") {
+      ackIapResult(result);
+      return;
+    }
+    const attempt = currentAttempt;
+    if (attempt != null && !attempt.callbackReturned && syncSessionOwnership.isCurrent(attempt.session)) {
+      return;
+    }
+    if (
+      !presented() ||
+      attempt == null ||
+      !attempt.callbackReturned ||
+      !syncSessionOwnership.isCurrent(attempt.session)
+    ) {
+      ackIapResult(result);
+      return;
+    }
+    if (!durablePending(iap)) {
+      if (attempt.kind === "purchase") hostPurchaseState = "idle";
+      else hostRestoreState = "idle";
+    }
+    hostErrorMessage = result.message;
+    errorRecoverable = result.recoverable;
+    ackIapResult(result);
+  }
+
   function retirePresentation(): void {
     held = false;
     educationHeld = false;
@@ -172,6 +216,7 @@ export function createQuotaUpsellController(
 
   function finishAttempt(attempt: Attempt, result: PurchaseFlowResult): QuotaUpsellActionResult {
     if (currentAttempt?.id !== attempt.id) {
+      ackLatestIapResult();
       return { kind: "ignored_stale" };
     }
     currentAttempt = { ...attempt, callbackReturned: true };
@@ -181,6 +226,7 @@ export function createQuotaUpsellController(
       !presented()
     ) {
       idleHostOperations();
+      ackLatestIapResult();
       return { kind: "ignored_stale" };
     }
     const applied = applyResultState(result);
@@ -191,6 +237,7 @@ export function createQuotaUpsellController(
     }
     hostErrorMessage = applied.error;
     errorRecoverable = applied.recoverable;
+    ackIapResult(latestIap?.lastResult ?? result);
     return result;
   }
 
@@ -210,6 +257,7 @@ export function createQuotaUpsellController(
     currentAttempt = attempt;
     hostErrorMessage = null;
     errorRecoverable = false;
+    ackLatestIapResult();
     if (kind === "purchase") hostPurchaseState = "loading";
     else hostRestoreState = "loading";
     let result: PurchaseFlowResult;
@@ -244,6 +292,7 @@ export function createQuotaUpsellController(
       originSession = request.session;
       hostErrorMessage = null;
       errorRecoverable = false;
+      ackLatestIapResult();
       if (!keepIssuedStoreBusy()) {
         idleHostOperations();
       }
@@ -255,6 +304,7 @@ export function createQuotaUpsellController(
     },
 
     sync(iap) {
+      latestIap = iap;
       if (held && !syncSessionOwnership.isCurrent(originSession)) {
         retirePresentation();
       }
@@ -264,6 +314,7 @@ export function createQuotaUpsellController(
       if (hostRestoreState === "unavailable" && iap.available) {
         hostRestoreState = "idle";
       }
+      publishAsyncIapFailureIfOwned(iap);
       if (iapSettled(iap) && !awaitingCallback()) {
         if (hostPurchaseState === "loading" || hostPurchaseState === "pending") {
           hostPurchaseState = "idle";

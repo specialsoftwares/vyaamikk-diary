@@ -243,6 +243,86 @@ assert.equal(controller.snapshot().clientRecordId, "diary_1", "dismissal keeps t
 }
 
 {
+  controller.dismiss();
+  syncSessionOwnership.resetForTests();
+  const sessionAsync = syncSessionOwnership.beginSession("uid-a");
+  const opened = controller.present(quotaReq({ session: sessionAsync, clientRecordId: "async_a" }));
+  assert.equal(opened.ok, true);
+  const launchedResult: PurchaseFlowResult = { kind: "sheet_launched" };
+  purchaseImpl = async () => launchedResult;
+  controller.sync({
+    available: true,
+    pending: null,
+    purchaseInFlight: true,
+    lastResult: launchedResult,
+  });
+  const launched = await controller.purchase("vyd_starter_monthly");
+  assert.equal(launched.kind, "sheet_launched");
+  assert.equal(controller.snapshot().hostErrorMessage, null);
+
+  const asyncFailed: PurchaseFlowResult = {
+    kind: "failed",
+    recoverable: true,
+    message: "Couldn't verify this purchase.",
+  };
+  controller.sync({
+    available: true,
+    pending: null,
+    purchaseInFlight: false,
+    lastResult: asyncFailed,
+  });
+  assert.equal(controller.snapshot().hostErrorMessage, "Couldn't verify this purchase.");
+  assert.equal(controller.snapshot().errorRecoverable, true);
+  assert.equal(controller.snapshot().hostPurchaseState, "idle");
+  assert.equal(controller.snapshot().saveCalls, 0);
+
+  controller.dismiss();
+  const reopened = controller.present(quotaReq({ session: sessionAsync, clientRecordId: "async_a" }));
+  assert.equal(reopened.ok, true);
+  controller.sync({
+    available: true,
+    pending: null,
+    purchaseInFlight: false,
+    lastResult: asyncFailed,
+  });
+  assert.equal(controller.snapshot().hostErrorMessage, null, "acked failure is not replayed");
+
+  const retryLaunched: PurchaseFlowResult = { kind: "sheet_launched" };
+  purchaseImpl = async () => retryLaunched;
+  const retried = await controller.purchase("vyd_starter_monthly");
+  assert.equal(retried.kind, "sheet_launched");
+
+  const sessionB = syncSessionOwnership.beginSession("uid-b");
+  controller.sync({
+    available: true,
+    pending: null,
+    purchaseInFlight: false,
+    lastResult: asyncFailed,
+  });
+  assert.equal(controller.snapshot().visible, false);
+  const admittedB = controller.present(
+    quotaReq({ session: sessionB, family: "purchase_order", clientRecordId: "po_async_b" })
+  );
+  assert.equal(admittedB.ok, true);
+  const bGate = deferred<PurchaseFlowResult>();
+  purchaseImpl = () => bGate.promise;
+  const bAttempt = controller.purchase("vyd_starter_yearly");
+  assert.equal(controller.snapshot().hostPurchaseState, "loading");
+  controller.sync({
+    available: true,
+    pending: null,
+    purchaseInFlight: true,
+    lastResult: asyncFailed,
+  });
+  assert.equal(controller.snapshot().hostPurchaseState, "loading", "A's lastResult must not clear B");
+  assert.equal(controller.snapshot().hostErrorMessage, null);
+  bGate.resolve({ kind: "sheet_launched" });
+  const bResult = await bAttempt;
+  assert.equal(bResult.kind, "sheet_launched");
+  assert.equal(controller.snapshot().hostErrorMessage, null, "A's failure must not land on B");
+}
+
+{
   let hostOpens = 0;
   registerQuotaUpsellPresenter((request) => {
     hostOpens += 1;

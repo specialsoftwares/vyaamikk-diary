@@ -442,6 +442,45 @@ async function run(): Promise<void> {
   }
 
   {
+    purchaseImpl = async () => ({ kind: "sheet_launched" });
+    iap.purchaseInFlight = true;
+    iap.pending = {
+      version: 1,
+      uid: "uid-b",
+      platform: "android",
+      canonicalSku: "vyd_starter_monthly",
+      productId: "vyd_starter",
+      stage: "intent_created",
+      initiatedAt: 2,
+      updatedAt: 2,
+    };
+    const launchedResult: PurchaseFlowResult = { kind: "sheet_launched" };
+    iap.lastResult = launchedResult;
+    purchaseImpl = async () => launchedResult;
+    const launched = await runtime.purchase("vyd_starter_monthly");
+    assert.equal(launched.kind, "sheet_launched");
+    runtime.reconcile();
+    assert.equal(runtime.snapshot().hostErrorMessage, null);
+    assert.equal(sheetSurface(runtime, iap).model.errorMessage, null);
+
+    iap.purchaseInFlight = false;
+    iap.pending = null;
+    iap.lastResult = {
+      kind: "failed",
+      recoverable: true,
+      message: "Couldn't verify this purchase.",
+    };
+    runtime.reconcile();
+    const asyncFail = sheetSurface(runtime, iap);
+    assert.equal(asyncFail.model.errorMessage, "Couldn't verify this purchase.");
+    assert.equal(asyncFail.model.errorRetryEnabled, true);
+    assert.equal(asyncFail.model.purchaseState, "idle");
+    assert.equal(asyncFail.sheet.primaryEnabled, true);
+    assert.equal(asyncFail.sheet.primaryPress.type, "purchase");
+    assert.equal(runtime.snapshot().saveCalls, 0);
+  }
+
+  {
     const rejected = deferred<PurchaseFlowResult>();
     purchaseImpl = () => rejected.promise;
     let unhandled = 0;
