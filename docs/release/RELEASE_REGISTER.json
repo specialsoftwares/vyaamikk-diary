@@ -52,13 +52,17 @@
     },
     "evidence_caveat": "Refs/Jira inspected at setup; CI checkpoints are recorded candidate evidence, not current production or device proof. Revalidate before use.",
     "pr23": {
-      "head": "4cb8edec2f6882beefce45fb05df26a6f6ffea44",
-      "merge_ref": "96785a4cd2c8dc3bbfd36963b75aec66b54cb85e",
+      "head": "4be1bf1cdbe518fe0b4a260b14fcea1435e9948c",
+      "merge_ref": "d2ef07d9da1fc68266b52aec226511a338038255",
       "draft": true,
       "hold": true,
-      "ci_run": 35428924956,
+      "ci_run": 35430627279,
       "ci_status": "SUCCESS",
-      "note": "Documentation-only control PR. Checkpoint SHA 4cb8ede is the previous register commit; the commit that records this continuation will differ."
+      "note": "Documentation-only control PR. Independent review Actions 35430627279 SUCCESS 132/132 on merge-ref d2ef07d (parents 79d405d + 4be1bf1). A later GitHub-generated merge ref may differ; d2ef07d is the checkout actually tested. The commit that records Continuation 2 will differ from 4be1bf1.",
+      "head_prior": "4cb8edec2f6882beefce45fb05df26a6f6ffea44",
+      "ci_run_prior": 35428924956,
+      "merge_ref_prior": "96785a4cd2c8dc3bbfd36963b75aec66b54cb85e",
+      "suites": 132
     },
     "pr24": {
       "head": "9db22faf09f81f79a96ca1d94bbc0c99d17ee05b",
@@ -107,7 +111,7 @@
     "selection": "Lowest priority number among actionable ready tasks. Blocked work does not block independent tasks.",
     "review_rule": "Sensitive implementation remains ready_for_review until reviewer and exact SHA are recorded; passing self-tests is not release acceptance.",
     "dependency_rule": "depends_on names completed acceptance prerequisites for the listed execution. Preparatory read-only work may proceed where explicitly allowed. Release operations always need separate approval.",
-    "resume": "Continuation 1 recorded: REL-01 8adcd7b merge-ref 001a532 Actions 35429978574 SUCCESS 138/138. REL-03 9db22fa merge-ref f3f99e8 Actions 35430163500 SUCCESS 132/132. REL-04 5076f77 Actions 35428790956 SUCCESS 132/132. Docs on PR #23. REL-09/10 owner sign-in. Queue exhausted at source/planning; no merge/build."
+    "resume": "Continuation 2 recorded: docs corrected on PR #23; REL-03 focused test:env-shell-precedence PASS after copying approved gitignored .env; Firebase REL-10 read-only audit completed as support.vyd@specialsoftwares.com; Play still blocked in Cursor Chromium (aeadmin@specialsoftwares.com password challenge, Too many failed attempts; Safari session not shared). Independent review acceptances recorded for REL-01 source/injected-IAP, REL-03 EN/HI source, REL-02 mounted-host preserved, REL-04 source preserved. No merge/build/deploy/store/flag write."
   },
   "tasks": [
     {
@@ -116,7 +120,7 @@
       "title": "Surface asynchronous IAP failures on the owning presentation",
       "state": "ready_for_review",
       "risk": "sensitive",
-      "review_disposition": "changes_requested on d6f9557 for presentation-ownership; focused correction ready at 8adcd7b",
+      "review_disposition": "accepted at source/injected-production-IAP test scope at 8adcd7b; prior changes_requested on d6f9557 retained as history; native/store still pending",
       "allowed_scope": [
         "Reproduce and correct the asynchronous failure gap on PR #22 only; retain its draft HOLD.",
         "Use production createIapSession and host/runtime together with injected native/backend boundaries; no store activation."
@@ -124,7 +128,7 @@
       "depends_on": [],
       "acceptance": [
         "A failed store/verification event after sheet_launched appears once on its owning active sheet and permits explicit retry when recoverable.",
-        "Dismissed errors do not replay; A\u2192B and A\u2192logout\u2192A do not publish stale errors or clear newer work.",
+        "Dismissed errors do not replay; A→B and A→logout→A do not publish stale errors or clear newer work.",
         "Pending/verification, shared busy lock and no-auto-retry/no-entitlement-write contracts remain.",
         "Production-path regression and required final-candidate CI identify exact head, merge-ref and test boundaries."
       ],
@@ -143,7 +147,7 @@
         {
           "kind": "source_fix",
           "at_sha": "e380d28c695bfc59c965b3a5dfa73c3e31da7c7d",
-          "result": "Owning attempt acks lastResult identity; newly received failed is published once. Dismiss/A\u2192B/logout do not replay. No second purchase controller or entitlement write."
+          "result": "Owning attempt acks lastResult identity; newly received failed is published once. Dismiss/A→B/logout do not replay. No second purchase controller or entitlement write."
         },
         {
           "kind": "ci",
@@ -167,7 +171,14 @@
           "at_sha": "8adcd7b604257d00b43635e70d90e4e97e5bcd57",
           "merge_ref": "001a5322fca3df75df6fc04f448cffdde87a03ce",
           "ci_run": 35429978574,
-          "result": "quotaUpsellController.test.ts and quotaUpsell.iapSession.lifecycle.test.ts: same-record reopen, record_second late error, current attempt can still fail, A\u2192B and logout remain, purchaseCalls deltas. test:quota-upsell 8/8. Typecheck/eslint PASS. Local ci:verify PASS (Docker invoice-renderer skipped). Actions 35429978574 SUCCESS, test:all 138/138, ci:verify PASS including invoice-renderer image build. Checkout HEAD 001a532 (8adcd7b into 79d405d)."
+          "result": "quotaUpsellController.test.ts and quotaUpsell.iapSession.lifecycle.test.ts: same-record reopen, record_second late error, current attempt can still fail, A→B and logout remain, purchaseCalls deltas. test:quota-upsell 8/8. Typecheck/eslint PASS. Local ci:verify PASS (Docker invoice-renderer skipped). Actions 35429978574 SUCCESS, test:all 138/138, ci:verify PASS including invoice-renderer image build. Checkout HEAD 001a532 (8adcd7b into 79d405d)."
+        },
+        {
+          "kind": "independent_review_acceptance",
+          "at_sha": "8adcd7b604257d00b43635e70d90e4e97e5bcd57",
+          "merge_ref": "001a5322fca3df75df6fc04f448cffdde87a03ce",
+          "ci_run": 35429978574,
+          "result": "Continuation 2 independent review: REL-01 correction accepted at source/injected-production-IAP test scope. Late-error reproduction after dismiss/reopen: new sheet had no old error; only one store request issued. Current-purchase failure and early native-event failure still displayed. Production IAP/host lifecycle tests passed with injected external I/O. Not a Play purchase or native UpgradeSheet test. REL-02 mounted-host coverage preserved on the same PR."
         }
       ],
       "jira": [
@@ -176,18 +187,20 @@
       ],
       "validation": {
         "implementation": "changed",
-        "review": "changes_requested",
-        "review_on_sha": "d6f9557168210eb7cdcc364754855b1e1746e14a",
+        "review": "accepted_source_injected_iap",
+        "review_on_sha": "8adcd7b604257d00b43635e70d90e4e97e5bcd57",
         "correction_ready_sha": "8adcd7b604257d00b43635e70d90e4e97e5bcd57",
         "deployment": "not_applicable",
-        "device": "not_run"
+        "device": "not_run",
+        "prior_review": "changes_requested",
+        "prior_review_on_sha": "d6f9557168210eb7cdcc364754855b1e1746e14a"
       },
       "work": {
         "branch": "VYD-36-37-internal-integration",
         "head": "8adcd7b604257d00b43635e70d90e4e97e5bcd57",
         "pr": 22,
-        "last_result": "Presentation-ownership bound. Ordinary async-failure correction at e380d28 preserved. Stacked with REL-02.",
-        "next_action": "Independent review of PR #22 at 8adcd7b (tested merge-ref 001a532). Keep draft HOLD. No merge."
+        "last_result": "Independent review accepted source/injected-production-IAP scope at 8adcd7b (tested merge-ref 001a532, Actions 35429978574 SUCCESS 138/138). Native UpgradeSheet / real store still pending. Draft HOLD.",
+        "next_action": "Keep PR #22 draft HOLD. Native/store validation still pending. No merge."
       },
       "blocker": null
     },
@@ -217,7 +230,12 @@
         {
           "kind": "mounted_react_test",
           "at_sha": "d6f9557168210eb7cdcc364754855b1e1746e14a",
-          "result": "QuotaUpsellHostView mounted with react-dom createRoot and inert sheet/education surfaces. Ordinary user_save opens; letterhead/background refuse; education/back/close; purchase/restore loading; async failed lastResult; dismiss no-replay; A\u2192B and logout\u2192A retire. Boundary: not native UpgradeSheet, not a store, not a device. Injected surfaces return null: proves host effects/callback wiring only. Preserved on 8adcd7b."
+          "result": "QuotaUpsellHostView mounted with react-dom createRoot and inert sheet/education surfaces. Ordinary user_save opens; letterhead/background refuse; education/back/close; purchase/restore loading; async failed lastResult; dismiss no-replay; A→B and logout→A retire. Boundary: not native UpgradeSheet, not a store, not a device. Injected surfaces return null: proves host effects/callback wiring only. Preserved on 8adcd7b."
+        },
+        {
+          "kind": "independent_review_preservation",
+          "at_sha": "8adcd7b604257d00b43635e70d90e4e97e5bcd57",
+          "result": "Continuation 2: preserve REL-02 mounted-host coverage on #22. Injected surfaces still return null. Not native UpgradeSheet, store, or device acceptance."
         }
       ],
       "jira": [
@@ -233,8 +251,8 @@
         "branch": "VYD-36-37-internal-integration",
         "head": "8adcd7b604257d00b43635e70d90e4e97e5bcd57",
         "pr": 22,
-        "last_result": "Mounted host evidence preserved on the same HOLD PR as REL-01. Injected surfaces still return null.",
-        "next_action": "Independent review of PR #22 at 8adcd7b. Keep draft HOLD. No merge. Not native UpgradeSheet/device/store acceptance."
+        "last_result": "Mounted host evidence preserved on HOLD PR #22 at 8adcd7b. Independent review did not strip REL-02 coverage.",
+        "next_action": "Keep PR #22 draft HOLD. Not native UpgradeSheet/device/store acceptance. No merge."
       },
       "blocker": null
     },
@@ -277,22 +295,36 @@
           "merge_ref": "f3f99e84d0dd84c6a03898f6666a956f7a68094e",
           "ci_run": 35430163500,
           "result": "Remaining identified phone/email OTP UI/a11y strings routed through t(): codeSentTo, offlineVerify, retryAccountSetup, tryAgainIn, oneTimePassword, retrySending, sendFailed fallback, validFor, expired, inputA11y, resendA11y. EN/HI interpolation. countdown/validation/error-classification unchanged. Backend English error payloads still render when passed as error. ta/te/gu fall back to English. test:i18n + test:otp-countdown + onboardingOtpModel PASS. Typecheck/eslint PASS. Actions 35430163500 SUCCESS, test:all 132/132, ci:verify PASS including invoice-renderer image. Checkout HEAD f3f99e8 (9db22fa into 79d405d)."
+        },
+        {
+          "kind": "independent_review_acceptance",
+          "at_sha": "9db22faf09f81f79a96ca1d94bbc0c99d17ee05b",
+          "merge_ref": "f3f99e84d0dd84c6a03898f6666a956f7a68094e",
+          "ci_run": 35430163500,
+          "result": "Continuation 2: identified remaining REL-03 EN/HI UI/accessibility strings accepted at source scope. Changed OTP keys resolve in EN/HI with matching interpolation placeholders. Auth, countdown and error-classification behavior was not changed by the reviewed diff. Backend English error payloads and fallback languages remain declared limitations. TalkBack/device unverified."
+        },
+        {
+          "kind": "local_env_check",
+          "at_sha": "9db22faf09f81f79a96ca1d94bbc0c99d17ee05b",
+          "worktree": "/Users/shivamsaurav/vyd-worktrees/REL-03-raw-i18n",
+          "result": "First full local ci:verify failed: functions/node_modules missing (MODULE_NOT_FOUND in billing tests). After npm --prefix functions install --ignore-scripts, full local ci:verify failed only test:env-shell-precedence ENOENT .env. GitHub Actions 35430163500 SUCCESS 132/132 with its provisioned environment. Copied approved gitignored .env from VYD-36-37-internal-integration (EXPO_PUBLIC_APP_MODE=production; not printed, not committed, not a shared node_modules symlink). Focused npm run test:env-shell-precedence PASS. Focused pass does not retroactively make the failed full local ci:verify pass. Test not skipped or weakened."
         }
       ],
       "jira": [],
       "validation": {
         "implementation": "changed",
-        "review": "pending",
+        "review": "accepted_source_en_hi_ui_a11y",
         "source_phase": "identified_otp_ui_strings_localized",
         "deployment": "not_applicable",
-        "device": "not_run"
+        "device": "not_run",
+        "review_on_sha": "9db22faf09f81f79a96ca1d94bbc0c99d17ee05b"
       },
       "work": {
         "branch": "fix/rel-03-auth-i18n",
         "head": "9db22faf09f81f79a96ca1d94bbc0c99d17ee05b",
         "pr": 24,
-        "last_result": "Identified OTP UI strings localized EN/HI. Source remaining: backend English error payloads; non-EN/HI fallback. Device/TalkBack not run.",
-        "next_action": "Independent source review of PR #24 at 9db22fa. Device/TalkBack still pending. Keep draft. No merge."
+        "last_result": "Source EN/HI OTP UI/a11y accepted at 9db22fa. Focused local env-precedence PASS after approved .env copy. Failed full local ci:verify remains failed. Device/TalkBack not run.",
+        "next_action": "Keep PR #24 draft. Device/TalkBack still pending. No merge. Do not weaken test:env-shell-precedence."
       },
       "blocker": null
     },
@@ -334,6 +366,11 @@
           "merge_ref": "d219ae31cb0d82d17600d534c62c0f65312f6e9f",
           "ci_run": 35428790956,
           "result": "GitHub Actions SUCCESS, 132/132. PR #25 remains draft HOLD."
+        },
+        {
+          "kind": "independent_review_preservation",
+          "at_sha": "5076f7707a4812437f74879c3767bf554b8eeabb",
+          "result": "Continuation 2: prior REL-04 source acceptance preserved; native cancel/drag/navigation still pending."
         }
       ],
       "jira": [
@@ -342,7 +379,7 @@
       "validation": {
         "implementation": "changed",
         "review": "pending",
-        "source_review": "pending",
+        "source_review": "accepted_prior_source_scope",
         "native_acceptance": "not_run",
         "deployment": "not_applicable",
         "device": "not_run"
@@ -351,8 +388,8 @@
         "branch": "fix/rel-04-stuck-press",
         "head": "5076f7707a4812437f74879c3767bf554b8eeabb",
         "pr": 25,
-        "last_result": "Stuck dim/scale on shared LuxuryPressable removed in source (RN pressed). Source-string contract is not native cancel/drag/navigation. Device not run. No further speculative press refactor.",
-        "next_action": "Independent source review of PR #25. Native cancel/drag/navigation still pending. Keep draft. No merge."
+        "last_result": "Source RN pressed contract preserved at 5076f77. Native cancel/drag/navigation not run. Draft HOLD.",
+        "next_action": "Keep PR #25 draft. Native cancel/drag/navigation still pending. No merge."
       },
       "blocker": null
     },
@@ -430,7 +467,7 @@
           "kind": "source_verified",
           "at_sha": "79d405d0b626d5067a33541887ac3c70689b8724",
           "source": "src/services/auth/firebase.ts",
-          "result": "startOtp \u2192 startNativePhoneOtp; confirmOtp \u2192 confirmNativePhoneOtp then identity callable + JS auth bridge. Production startup forbids local mock OTP flags. Dirty historical /Users/shivamsaurav/Vyaamikk Diary email-OTP work was inventoried read-only and not imported."
+          "result": "startOtp → startNativePhoneOtp; confirmOtp → confirmNativePhoneOtp then identity callable + JS auth bridge. Production startup forbids local mock OTP flags. Dirty historical /Users/shivamsaurav/Vyaamikk Diary email-OTP work was inventoried read-only and not imported."
         }
       ],
       "jira": [
@@ -451,7 +488,7 @@
         "branch": null,
         "head": "79d405d0b626d5067a33541887ac3c70689b8724",
         "pr": null,
-        "last_result": "Source wiring mapped (startOtp\u2192startNativePhoneOtp). Not deployed-auth acceptance. Dirty historical email-OTP inventoried read-only, not imported. REL-03 OTP copy is a separate PR.",
+        "last_result": "Source wiring mapped (startOtp→startNativePhoneOtp). Not deployed-auth acceptance. Dirty historical email-OTP inventoried read-only, not imported. REL-03 OTP copy is a separate PR.",
         "next_action": "Keep AUTH_MANUAL_ACCEPTANCE_CHECKLIST for an installed candidate. Do not rewrite OTP callers from stale docs. REL-10 needed for live Phone Auth SHA inspection."
       },
       "blocker": null
@@ -488,7 +525,7 @@
           "kind": "public_http",
           "at_sha": "79d405d0b626d5067a33541887ac3c70689b8724",
           "checked_at": "2026-09-19T07:46:16Z",
-          "result": "privacy/terms/support/contact/delete-account HTTP/2 200 (Cursor curl). Website Effective 15 July 2026; app LEGAL_EFFECTIVE_DATE 2026-07-01. Independent web reader previously could not retrieve pages \u2014 Cursor evidence only, not legal-content approval."
+          "result": "privacy/terms/support/contact/delete-account HTTP/2 200 (Cursor curl). Website Effective 15 July 2026; app LEGAL_EFFECTIVE_DATE 2026-07-01. Independent web reader previously could not retrieve pages — Cursor evidence only, not legal-content approval."
         },
         {
           "kind": "fact_sheet",
@@ -547,6 +584,17 @@
           "kind": "design_document",
           "path": "docs/release/APP_CHECK_DESIGN.md",
           "result": "Packages, native vs JS SDK boundaries, initialization order, Phone Auth distinction, debug vs store, staged enforcement, rollback, old-client fail-closed, and unverified Console items. No SDK install or enforcement."
+        },
+        {
+          "kind": "design_correction",
+          "path": "docs/release/APP_CHECK_DESIGN.md",
+          "result": "Continuation 2: removed proposed Rules request.appCheck; split Console service enforcement vs deployed callable enforceAppCheck/request.app; removed categorical sideload-token and no-Play-fleet claims; CustomProvider labelled unproven. Dual-SDK analysis retained. No SDK install or enforcement."
+        },
+        {
+          "kind": "live_readonly_comparison",
+          "checked_at": "2026-09-19",
+          "cli_user": "support.vyd@specialsoftwares.com",
+          "result": "App Check providers registered; Firestore/Auth UNENFORCED; Storage not toggled; callable enforceAppCheck absent on deployed identity functions. Play Integrity App Check config present (tokenTtl 3600s; API minDeviceRecognitionLevel NO_INTEGRITY; PLAY_RECOGNIZED/LICENSED not in this payload). Live Firestore ruleset 9c02e187… updated 2026-08-12 does not match repo (repo adds quota/billing paths; live ordinary CREATE has no quotaEnforcementOn). Live Storage ruleset a2a0ddf7… updated 2026-07-23; catch-all deny present. Neither live nor repo Rules mention appCheck. Billing/GST functions exported in source are not deployed. No Rules/Functions deploy performed."
         }
       ],
       "jira": [
@@ -555,21 +603,18 @@
       "validation": {
         "implementation": "investigating",
         "review": "pending",
-        "source_phase": "design_drafted",
-        "deployment": "not_applicable",
+        "source_phase": "design_corrected_live_compared",
+        "deployment": "compared_not_enforced",
         "device": "not_run"
       },
       "work": {
         "branch": "release/bounded-autonomy-register",
         "head": null,
         "pr": 23,
-        "last_result": "APP_CHECK_DESIGN.md drafted. Source still has no App Check. Live config unread.",
-        "next_action": "Wait for REL-10 to compare deployed Rules/Functions. Do not enable enforcement, deploy Rules, or add a debug-token bypass."
+        "last_result": "APP_CHECK_DESIGN.md corrected. Live comparison recorded. Source still has no App Check client. Enforcement not enabled.",
+        "next_action": "Do not enable enforcement, deploy Rules, install App Check SDKs, or add a debug-token bypass. REL-09 still needed before Play-signing vs SHA mapping."
       },
-      "blocker": {
-        "type": "owner_reauthentication",
-        "next_action": "Complete REL-10 before comparing deployed Rules/Functions. Do not enable enforcement or deploy Rules."
-      }
+      "blocker": null
     },
     {
       "id": "REL-09",
@@ -590,6 +635,11 @@
         {
           "kind": "round19_report",
           "result": "Existing-account sign-in blocked at password challenge; app/track/versionCodes/certificates not inspected."
+        },
+        {
+          "kind": "cursor_browser_blocker",
+          "checked_at": "2026-09-19",
+          "result": "Owner completed Play sign-in in Safari on the existing developer account; that session is not shared with Cursor Chromium. Agent Play tab remained https://accounts.google.com/v3/signin/challenge/pwd continue=https://play.google.com/console for aeadmin@specialsoftwares.com with heading Too many failed attempts. Password was not entered or retried. No second developer account created. Package/tracks/versionCodes/certificates still uninspected."
         }
       ],
       "jira": [],
@@ -603,19 +653,19 @@
         "branch": null,
         "head": null,
         "pr": null,
-        "last_result": null,
-        "next_action": "Owner completes password/2FA in the existing developer account; agent may then perform read-only inspection."
+        "last_result": "Play Console unread in the agent browser. Safari session not transferable. Google lockout shown for aeadmin@specialsoftwares.com.",
+        "next_action": "After the Cursor Chromium lockout clears, complete password/2FA for the existing Play developer account inside Cursor’s browser (currently offering aeadmin@specialsoftwares.com), then open the existing app page. Do not create another developer account or retry while lockout is shown."
       },
       "blocker": {
         "type": "owner_sign_in",
-        "next_action": "Complete existing Play developer-account sign-in and indicate the existing app page is available."
+        "next_action": "Sign in to the existing Play developer account in Cursor’s Chromium after the current Too many failed attempts lockout clears; Safari sign-in does not grant the agent access. Then allow read-only inspect of package, tracks, versionCodes, and signing certificates."
       }
     },
     {
       "id": "REL-10",
       "priority": 1,
       "title": "Owner restores Firebase CLI read access",
-      "state": "blocked_human",
+      "state": "verified",
       "risk": "external",
       "allowed_scope": [
         "Owner runs firebase login --reauth in a local interactive terminal, selects existing project and verifies read access."
@@ -630,6 +680,14 @@
         {
           "kind": "round19_report",
           "result": "CLI account listed but project/apps/functions reads fail with expired credentials."
+        },
+        {
+          "kind": "cli_readonly_audit",
+          "checked_at": "2026-09-19",
+          "cli_user": "support.vyd@specialsoftwares.com",
+          "project": "vyaamikk-diary",
+          "project_number": "982505811909",
+          "result": "firebase login --reauth succeeded for this CLI user. Android/iOS/Web apps ACTIVE; Android/iOS package com.specialsoftwares.vyaamikkdiary. SHA_1 20f8150e213c9c3f84fdcac51e9e4dcceea242ad and d223f0a5effd8e2e421752d35ad7a00e19f82e59; SHA_256 e688fa0ba5fa3bd30585114f8c2143e1efdda1acbfdb9daadc42da896178752a and b9c521e3b57eab0c3d3dc7b85de91d67ef9f2abd90cc6950c5700b4f2636ce92. oauth_client count is not fingerprint evidence; google-services.json is not in the control worktree. Phone sign-in enabled; SMS allowlist IN; MFA DISABLED; five test phone numbers exist (values withheld). Deployed functions: identity/email/recovery/deletion/security including mintClientAuthToken; no billing/GST/RTDN names. Callable triggers empty (enforceAppCheck not set). App Check registered and unenforced. Live Rules hashes differ from repo; live Firestore lacks quotaEnforcementOn. PLAY_BILLING_ENABLED/APPSTORE_BILLING_ENABLED not present on deployed identity envs and billing handlers are not deployed. Per-user quotaEnforcementEnabled documents not read. No credentials copied. No deploy or flag write."
         }
       ],
       "jira": [
@@ -637,7 +695,7 @@
         "https://specialsoftwaresindia.atlassian.net/browse/VYD-12"
       ],
       "validation": {
-        "implementation": "not_started",
+        "implementation": "investigating",
         "review": "pending",
         "deployment": "not_applicable",
         "device": "not_run"
@@ -646,13 +704,10 @@
         "branch": null,
         "head": null,
         "pr": null,
-        "last_result": null,
-        "next_action": "Owner runs firebase login --reauth in a local interactive terminal, selects existing project and verifies read access."
+        "last_result": "Read-only Firebase audit complete for project/apps/SHA/Phone Auth/App Check/Functions list/Rules hashes. Remaining unknowns are Play Console and per-user documents.",
+        "next_action": "Do not rotate keys, deploy, or write flags. Use REL-09 for Play signing vs these SHA hashes."
       },
-      "blocker": {
-        "type": "owner_reauthentication",
-        "next_action": "Run firebase login --reauth locally; verify existing project read access."
-      }
+      "blocker": null
     },
     {
       "id": "REL-11",
@@ -679,6 +734,11 @@
         {
           "kind": "round19_report",
           "result": "EAS production AAB vc17 and preview APK vc19 reported. Upsell env key absent. Current Play uploads and live backend flags unknown."
+        },
+        {
+          "kind": "partial_preflight",
+          "checked_at": "2026-09-19",
+          "result": "Package com.specialsoftwares.vyaamikkdiary matches the Firebase Android app. eas.json production builds an AAB and preview an APK; both set EXPO_PUBLIC_APP_MODE=production; neither sets EXPO_PUBLIC_QUOTA_UPSELL_ENABLED. Source versionCode 19 remains unused-on-Play unknown. Firebase SHA hashes recorded; which cert is Play App Signing is unread. Billing functions not deployed; live Rules lack quota paths — billing-off internal testing does not require those deploys. REL-09 still blocks versionCode/track/certificate mapping."
         }
       ],
       "jira": [],
@@ -692,12 +752,12 @@
         "branch": null,
         "head": null,
         "pr": null,
-        "last_result": null,
-        "next_action": "After REL-09/10, inspect account, package, signing, deployed backend and EAS profile/environment metadata."
+        "last_result": "Firebase half of internal-AAB preflight recorded. Play tracks/versionCodes/signing still blocked on REL-09.",
+        "next_action": "After REL-09, map unused versionCode and upload vs Play App Signing certificates to the recorded Firebase SHA-256 hashes; then prepare a reviewable build proposal. Do not build."
       },
       "blocker": {
         "type": "dependencies_and_approval",
-        "next_action": "Complete listed prerequisites and prepare reviewable action; do not infer release approval."
+        "next_action": "Complete REL-09 Play inspect. REL-10 Firebase read is done. Do not infer release approval or bump versionCode yet."
       }
     },
     {
@@ -730,6 +790,11 @@
           "kind": "design_document",
           "path": "docs/release/PAID_LAUNCH_SCOPE.md",
           "result": "Paid-launch-critical vs polish split with file/symbol refs. Manage/cancel, status UI, refund/revocation consumer, GST billing-details UI are not labelled optional. VYD-38/39 remain Backlog; no implementation started."
+        },
+        {
+          "kind": "design_correction",
+          "path": "docs/release/PAID_LAUNCH_SCOPE.md",
+          "result": "Continuation 2: source vs live split; quota matrix; three gates; Play manage/cancel via settings link can meet cancellation-access; reconciliation consumer remains paid-launch engineering gate; billing functions not deployed."
         }
       ],
       "jira": [
@@ -747,8 +812,8 @@
         "branch": "release/bounded-autonomy-register",
         "head": null,
         "pr": 23,
-        "last_result": "PAID_LAUNCH_SCOPE.md. VYD-38/39 Backlog. Owner must accept any deferral of manage/cancel past first paid public.",
-        "next_action": "Owner accept or reject deferring SubscriptionManagementScreen past first paid public. Do not start full VYD-38/39 here. Internal billing-off candidate can omit purchase UI."
+        "last_result": "PAID_LAUNCH_SCOPE.md corrected. VYD-38/39 remain Backlog. No implementation started.",
+        "next_action": "Owner accept or reject deferring a dedicated SubscriptionManagementScreen past first paid public if a Settings store-manage link is provided instead. Do not start full VYD-38/39 here."
       },
       "blocker": null
     },
@@ -778,6 +843,11 @@
           "kind": "runbook",
           "path": "docs/release/INTERNAL_CANDIDATE_RUNBOOK.md",
           "result": "#22 contains #20/#21. #23 docs only. #24/#25 separate. Dirty historical email-OTP excluded. versionCode 19 unknown until Play inspect. Tests listed; none claimed run. Debug vs sideload vs Play-AAB distinguished."
+        },
+        {
+          "kind": "runbook_correction",
+          "path": "docs/release/INTERNAL_CANDIDATE_RUNBOOK.md",
+          "result": "Continuation 2: explicit quota matrix; three gates; live vs source backend; dev-client native binary identity vs separately served JS commit."
         }
       ],
       "jira": [
@@ -799,8 +869,8 @@
         "branch": "release/bounded-autonomy-register",
         "head": null,
         "pr": 23,
-        "last_result": "INTERNAL_CANDIDATE_RUNBOOK.md. No merge or build. Tests not executed.",
-        "next_action": "Use the runbook plus AUTH_MANUAL_ACCEPTANCE_CHECKLIST when an authorized binary exists. Do not assume versionCode 19 is free on Play."
+        "last_result": "INTERNAL_CANDIDATE_RUNBOOK.md corrected. No merge or build. Tests not executed.",
+        "next_action": "Use the runbook plus AUTH_MANUAL_ACCEPTANCE_CHECKLIST when an authorized binary exists. Do not assume versionCode 19 is free on Play. Record binary id and JS commit separately for any existing dev client."
       },
       "blocker": null
     },
@@ -1003,7 +1073,7 @@
       "docs/release/RELEASE_REGISTER.json": "2726eb7c54e2fa3ee588f5f4d7cf54281fe5416ba526cc3096de80ede0d1d18c",
       "docs/release/CURSOR_START.md": "7f27ce3dee950232814eb4d28df708501dc59adce45b2a7f98d7e10a9c2930c5"
     },
-    "next_action": "REL-01/02 await review on PR #22 8adcd7b (001a532 SUCCESS 138/138). REL-03 PR #24 9db22fa (f3f99e8 SUCCESS 132/132) and REL-04 PR #25 5076f77 remain draft. Control docs on #23. Keep all PRs draft. No merge, native/EAS build, deploy, store mutation, or production flag write.",
+    "next_action": "REL-01/02 await remaining native/store validation; source/injected-IAP review accepted at 8adcd7b (001a532 SUCCESS 138/138). REL-03 source EN/HI accepted at 9db22fa (f3f99e8 SUCCESS 132/132). REL-04 source preserved at 5076f77. REL-10 Firebase read-only done; REL-09 Play still blocked in Cursor browser. Keep all PRs draft. No merge, native/EAS build, deploy, store mutation, or production flag write.",
     "remote_branch_created": true
   }
 }
