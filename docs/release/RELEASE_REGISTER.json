@@ -811,10 +811,19 @@
     }
   ],
   "publication": {
-    "status": "prepared_not_published",
-    "attempt": "GitHub create_branch for release/bounded-autonomy-register",
-    "result": "403 Resource not accessible by integration",
-    "next_action": "Cursor may publish the documentation-only branch and draft PR using its existing authorized GitHub connection. Do not alter permissions or merge.",
-    "remote_branch_created": false
+    "status": "published_draft_pr",
+    "attempt": "git worktree from origin/main; git push origin release/bounded-autonomy-register; gh pr create --draft",
+    "result": "Draft PR #23 opened. Initial payload SHA-256 matched the handoff before this publication record.",
+    "pr": 23,
+    "url": "https://github.com/specialsoftwares/vyaamikk-diary/pull/23",
+    "head": "ecd06d144ff50ac9e13cecec65b171435caa581d",
+    "base": "79d405d0b626d5067a33541887ac3c70689b8724",
+    "initial_payload_sha256": {
+      "docs/release/AUTONOMOUS_EXECUTION.md": "f9937c129a72be1a935bcdf7c895281f19b7b10e643eae0ceb3d5aac3fd95236",
+      "docs/release/RELEASE_REGISTER.json": "2726eb7c54e2fa3ee588f5f4d7cf54281fe5416ba526cc3096de80ede0d1d18c",
+      "docs/release/CURSOR_START.md": "7f27ce3dee950232814eb4d28df708501dc59adce45b2a7f98d7e10a9c2930c5"
+    },
+    "next_action": "Execute CURSOR_START.md beginning with REL-01 on PR #22. Keep this PR draft. No merge.",
+    "remote_branch_created": true
   }
 }
