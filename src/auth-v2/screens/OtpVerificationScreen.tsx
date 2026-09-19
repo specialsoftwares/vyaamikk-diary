@@ -7,7 +7,6 @@ import { AuthV2PrimaryButton } from "@/auth-v2/components/AuthV2PrimaryButton";
 import { OnboardingInlineMessage } from "@/auth-v2/components/OnboardingInlineMessage";
 import { OnboardingOtpCells } from "@/auth-v2/components/OnboardingOtpCells";
 import {
-  OTP_OFFLINE_VERIFY_MESSAGE,
   classifyOtpVerifyFailure,
   resolveOtpVerifyUi,
   shouldAutoVerifyOtp,
@@ -92,7 +91,7 @@ export function OtpVerificationScreen({
 
   const displayPhone = formatDisplayPhone(phoneE164);
   const resolvedTitle = title ?? t("authV2.otp.title");
-  const resolvedSubtitle = subtitle ?? `Code sent to ${displayPhone}`;
+  const resolvedSubtitle = subtitle ?? t("authV2.otp.codeSentTo", { phone: displayPhone });
   const resolvedChangeNumber = changeNumberLabel ?? t("authV2.otp.changeNumber");
 
   const { remainingSeconds: resendRemaining, canResend } =
@@ -171,7 +170,7 @@ export function OtpVerificationScreen({
             {!online ? (
               <OnboardingInlineMessage
                 tone="info"
-                message={OTP_OFFLINE_VERIFY_MESSAGE}
+                message={t("authV2.otp.offlineVerify")}
                 testID="auth-v2-otp-offline"
               />
             ) : null}
@@ -183,17 +182,19 @@ export function OtpVerificationScreen({
             />
             {onRetryAccountSetup ? (
               <AuthTertiaryTextAction
-                label="Try again (no new SMS)"
+                label={t("authV2.otp.retryAccountSetup")}
                 onPress={onRetryAccountSetup}
                 disabled={loading}
                 purpose="retry"
-                accessibilityLabel="Try account setup again"
+                accessibilityLabel={t("authV2.otp.retryAccountSetupA11y")}
               />
             ) : null}
             {lockRemaining > 0 ? (
               <OnboardingInlineMessage
                 tone="danger"
-                message={`Try again in ${formatOtpCountdownMmSs(lockRemaining)}`}
+                message={t("authV2.otp.tryAgainIn", {
+                  time: formatOtpCountdownMmSs(lockRemaining),
+                })}
               />
             ) : null}
             {ui.showManualVerifyCta ? (
@@ -224,7 +225,7 @@ export function OtpVerificationScreen({
         error={Boolean(error)}
         testID="auth-v2-otp-input"
         accessibilityLabel={
-          loading ? "One-time password. Verifying your code." : "One-time password"
+          loading ? t("authV2.otp.oneTimePasswordVerifying") : t("authV2.otp.oneTimePassword")
         }
       />
 
@@ -232,13 +233,15 @@ export function OtpVerificationScreen({
         {resendRemaining > 0 ? (
           <LocaleUiText
             style={[styles.resendHint, { color: tokens.secondaryActionMuted }]}
-            accessibilityLabel={`Resend OTP in ${formatOtpCountdownMmSs(resendRemaining)}`}
+            accessibilityLabel={t("otp.resendCountdown", {
+              time: formatOtpCountdownMmSs(resendRemaining),
+            })}
           >
-            {`Resend OTP in ${formatOtpCountdownMmSs(resendRemaining)}`}
+            {t("otp.resendCountdown", { time: formatOtpCountdownMmSs(resendRemaining) })}
           </LocaleUiText>
         ) : (
           <AuthTertiaryTextAction
-            label={resending ? t("otp.resending") : "Resend OTP"}
+            label={resending ? t("otp.resending") : t("otp.resend")}
             onPress={() => {
               if (!canResend && resendAvailableAt != null) return;
               if (resending || loading) return;
@@ -248,7 +251,7 @@ export function OtpVerificationScreen({
             disabled={resendBlocked}
             loading={resending}
             purpose="retry"
-            accessibilityLabel="Resend OTP"
+            accessibilityLabel={t("otp.resend")}
             testID="auth-v2-otp-resend"
           />
         )}

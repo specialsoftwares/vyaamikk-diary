@@ -114,7 +114,14 @@
       "subtitle": "{{phone}} पर भेजा 6 अंकों का कोड डालें।",
       "verify": "सत्यापित करें",
       "verifying": "सत्यापन हो रहा है…",
-      "changeNumber": "मोबाइल नंबर बदलें"
+      "changeNumber": "मोबाइल नंबर बदलें",
+      "codeSentTo": "कोड {{phone}} पर भेजा गया",
+      "retryAccountSetup": "फिर कोशिश करें (नया SMS नहीं)",
+      "retryAccountSetupA11y": "खाता सेटअप फिर से आज़माएँ",
+      "tryAgainIn": "{{time}} में फिर कोशिश करें",
+      "oneTimePassword": "वन-टाइम पासवर्ड",
+      "oneTimePasswordVerifying": "वन-टाइम पासवर्ड. कोड सत्यापित हो रहा है.",
+      "offlineVerify": "आप ऑफ़लाइन हैं. यह कोड सत्यापित करने के लिए इंटरनेट से जुड़ें."
     },
     "email": {
       "title": "आपका ईमेल",
@@ -129,7 +136,14 @@
     "emailOtp": {
       "title": "अपने व्यावसायिक ईमेल की पुष्टि करें",
       "verify": "ईमेल सत्यापित करें",
-      "verifying": "सत्यापन हो रहा है…"
+      "verifying": "सत्यापन हो रहा है…",
+      "sending": "OTP भेजा जा रहा है…",
+      "retrySending": "फिर से भेजें",
+      "sendFailed": "सत्यापन कोड नहीं भेजा जा सका. ईमेल पता जाँचें और फिर कोशिश करें.",
+      "validFor": "कोड {{time}} तक मान्य है",
+      "expired": "कोड समाप्त हो गया — नया कोड माँगें.",
+      "inputA11y": "ईमेल सत्यापन कोड",
+      "resendA11y": "ईमेल OTP फिर भेजें"
     }
   },
   "consent": {
@@ -155,6 +169,7 @@
     "codePlaceholder": "••••••",
     "verify": "वेरीफाई करें",
     "resendIn": "{{seconds}} सेकंड में दोबारा भेजें",
+    "resendCountdown": "OTP {{time}} में फिर भेजें",
     "resending": "दोबारा भेज रहे हैं…",
     "resend": "OTP दोबारा भेजें",
     "notReceived": "कोड नहीं मिला?",
