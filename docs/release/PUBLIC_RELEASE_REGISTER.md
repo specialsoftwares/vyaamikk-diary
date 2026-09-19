@@ -16,7 +16,7 @@ Worktree: isolated `release/public-android-combined` (PR #26). Historical worksp
 | Previous reviewed head | `d0de2f4afc42dcc757ed1d7bce565c26835c79ec` |
 | Core-app application (draft revision + originating-session binds) | `e08a26f21b997eb8cde3687fe27a95aa018979aa` |
 | Paid-backend follow-up (inflow gross, report scanStartedAt, lease-fenced backoff) | `a1bd2a5bb72f19af6f98222cb8f5e983bca33ec6` |
-| Branch HEAD (this register) | *this commit — recheck `git rev-parse HEAD`* |
+| Branch HEAD (register/packets) | `c39adc53e7bfa863a418962804dafe2c80159803` |
 
 Local canonical `test:all` on the paid follow-up working tree: **139/139 passed in 254.3s**. Suite count stays 139. `typecheck`, `lint:eslint`, and `functions` build PASS. Fresh Actions are **required** on the exact HEAD of this continuation and its tested merge-ref into `79d405d`. Do not reuse `35464695768` as the gate for these new SHAs.
 
