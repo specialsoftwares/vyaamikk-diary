@@ -402,6 +402,84 @@ async function run(): Promise<void> {
     h.runtime.dispose();
   }
 
+  {
+    const h = createConnectedRuntime({});
+    h.runtime.attach();
+    await h.session.setAuth({ status: "signed_in", uid: "uid-a" });
+    await h.session.loadCatalog();
+    const sessionA = syncSessionOwnership.beginSession("uid-a");
+    assert.equal(
+      notifyOrdinaryQuotaUpsell(quotaReq({ session: sessionA, clientRecordId: "record_first" })).ok,
+      true
+    );
+    assert.equal((await h.runtime.purchase("vyd_professional_yearly")).kind, "sheet_launched");
+    assert.equal(h.purchaseRequests.length, 1);
+    h.runtime.dismiss();
+    assert.equal(
+      notifyOrdinaryQuotaUpsell(quotaReq({ session: sessionA, clientRecordId: "record_second" })).ok,
+      true
+    );
+    assert.equal(h.runtime.snapshot().visible, true);
+    assert.equal(surface(h.runtime, h.session.getView()).model.errorMessage, null);
+    h.emitError({ code: "billing-unavailable", message: "late first-sheet error" });
+    await until(
+      () =>
+        h.session.getView().lastResult?.kind === "failed" &&
+        h.session.getView().purchaseInFlight === false
+    );
+    assert.equal(
+      surface(h.runtime, h.session.getView()).model.errorMessage,
+      null,
+      "late error from dismissed presentation 1 must not attach to presentation 3"
+    );
+    assert.equal(h.purchaseRequests.length, 1);
+
+    assert.equal((await h.runtime.purchase("vyd_professional_yearly")).kind, "sheet_launched");
+    assert.equal(h.purchaseRequests.length, 2);
+    h.emitError({ code: "billing-unavailable", message: "second-sheet error" });
+    await until(
+      () =>
+        h.session.getView().lastResult?.kind === "failed" &&
+        h.session.getView().purchaseInFlight === false
+    );
+    assert.equal(
+      surface(h.runtime, h.session.getView()).model.errorMessage,
+      "Purchase didn't complete.",
+      "the current presentation can still show its own failure"
+    );
+    h.runtime.dispose();
+  }
+
+  {
+    const h = createConnectedRuntime({});
+    h.runtime.attach();
+    await h.session.setAuth({ status: "signed_in", uid: "uid-a" });
+    await h.session.loadCatalog();
+    const sessionA = syncSessionOwnership.beginSession("uid-a");
+    assert.equal(
+      notifyOrdinaryQuotaUpsell(quotaReq({ session: sessionA, clientRecordId: "same_record" })).ok,
+      true
+    );
+    assert.equal((await h.runtime.purchase("vyd_professional_yearly")).kind, "sheet_launched");
+    h.runtime.dismiss();
+    assert.equal(
+      notifyOrdinaryQuotaUpsell(quotaReq({ session: sessionA, clientRecordId: "same_record" })).ok,
+      true
+    );
+    h.emitError({ code: "billing-unavailable", message: "late same-id error" });
+    await until(
+      () =>
+        h.session.getView().lastResult?.kind === "failed" &&
+        h.session.getView().purchaseInFlight === false
+    );
+    assert.equal(
+      surface(h.runtime, h.session.getView()).model.errorMessage,
+      null,
+      "reopened same record id is a new presentation and must not show the old error"
+    );
+    h.runtime.dispose();
+  }
+
   registerQuotaUpsellPresenter(null);
   __setQuotaUpsellEnabledForTests(null);
   syncSessionOwnership.resetForTests();

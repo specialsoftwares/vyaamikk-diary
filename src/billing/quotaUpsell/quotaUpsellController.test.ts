@@ -323,6 +323,95 @@ assert.equal(controller.snapshot().clientRecordId, "diary_1", "dismissal keeps t
 }
 
 {
+  controller.dismiss();
+  syncSessionOwnership.resetForTests();
+  const sessionSame = syncSessionOwnership.beginSession("uid-a");
+  assert.equal(
+    controller.present(quotaReq({ session: sessionSame, clientRecordId: "record_first" })).ok,
+    true
+  );
+  const firstPresentation = controller.snapshot().presentationId;
+  const purchasesBefore = controller.snapshot().purchaseCalls.length;
+  const firstLaunch: PurchaseFlowResult = { kind: "sheet_launched" };
+  purchaseImpl = async () => firstLaunch;
+  assert.equal((await controller.purchase("vyd_starter_monthly")).kind, "sheet_launched");
+  assert.equal(controller.snapshot().purchaseCalls.length, purchasesBefore + 1);
+
+  controller.dismiss();
+  assert.equal(
+    controller.present(quotaReq({ session: sessionSame, clientRecordId: "record_first" })).ok,
+    true,
+    "same record id after dismiss is a new presentation"
+  );
+  assert.notEqual(controller.snapshot().presentationId, firstPresentation);
+  const lateFirstFailure: PurchaseFlowResult = {
+    kind: "failed",
+    recoverable: true,
+    message: "Purchase didn't complete.",
+  };
+  controller.sync({
+    available: true,
+    pending: null,
+    purchaseInFlight: false,
+    lastResult: lateFirstFailure,
+  });
+  assert.equal(
+    controller.snapshot().hostErrorMessage,
+    null,
+    "late error from a dismissed presentation does not attach to the reopened same record"
+  );
+
+  const secondLaunch: PurchaseFlowResult = { kind: "sheet_launched" };
+  purchaseImpl = async () => secondLaunch;
+  assert.equal((await controller.purchase("vyd_starter_monthly")).kind, "sheet_launched");
+  assert.equal(controller.snapshot().purchaseCalls.length, purchasesBefore + 2);
+  const ownFailure: PurchaseFlowResult = {
+    kind: "failed",
+    recoverable: true,
+    message: "Couldn't verify this purchase.",
+  };
+  controller.sync({
+    available: true,
+    pending: null,
+    purchaseInFlight: false,
+    lastResult: ownFailure,
+  });
+  assert.equal(controller.snapshot().hostErrorMessage, "Couldn't verify this purchase.");
+}
+
+{
+  controller.dismiss();
+  syncSessionOwnership.resetForTests();
+  const sessionDiff = syncSessionOwnership.beginSession("uid-a");
+  assert.equal(
+    controller.present(quotaReq({ session: sessionDiff, clientRecordId: "record_first" })).ok,
+    true
+  );
+  purchaseImpl = async () => ({ kind: "sheet_launched" });
+  assert.equal((await controller.purchase("vyd_starter_monthly")).kind, "sheet_launched");
+  controller.dismiss();
+  assert.equal(
+    controller.present(quotaReq({ session: sessionDiff, clientRecordId: "record_second" })).ok,
+    true
+  );
+  controller.sync({
+    available: true,
+    pending: null,
+    purchaseInFlight: false,
+    lastResult: {
+      kind: "failed",
+      recoverable: true,
+      message: "Purchase didn't complete.",
+    },
+  });
+  assert.equal(
+    controller.snapshot().hostErrorMessage,
+    null,
+    "late error from record first does not attach to record second"
+  );
+}
+
+{
   let hostOpens = 0;
   registerQuotaUpsellPresenter((request) => {
     hostOpens += 1;

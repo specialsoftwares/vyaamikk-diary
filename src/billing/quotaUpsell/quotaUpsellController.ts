@@ -171,9 +171,20 @@ export function createQuotaUpsellController(
 
   /**
    * A purchase() callback may return sheet_launched while IAP is still active.
-   * A later IapView.lastResult failed must appear once on the owning live
-   * presentation. Do not replay an already-acked lastResult on reopen.
+   * A later IapView.lastResult failed must appear once on the originating live
+   * presentation. A later sheet for another (or the same) record is a new
+   * presentationId and must not inherit that error. Do not replay an already
+   * acked lastResult. Stale lastResult is acked without publishing so it cannot
+   * suppress a newer attempt's unread result.
    */
+  function attemptOwnsCurrentPresentation(attempt: Attempt | null): attempt is Attempt {
+    return (
+      attempt != null &&
+      attempt.presentationId === presentationId &&
+      syncSessionOwnership.isCurrent(attempt.session)
+    );
+  }
+
   function publishAsyncIapFailureIfOwned(iap: QuotaUpsellIapSlice): void {
     const result = iap.lastResult;
     if (result == null || result === ackedIapResult) return;
@@ -182,15 +193,10 @@ export function createQuotaUpsellController(
       return;
     }
     const attempt = currentAttempt;
-    if (attempt != null && !attempt.callbackReturned && syncSessionOwnership.isCurrent(attempt.session)) {
+    if (attemptOwnsCurrentPresentation(attempt) && !attempt.callbackReturned) {
       return;
     }
-    if (
-      !presented() ||
-      attempt == null ||
-      !attempt.callbackReturned ||
-      !syncSessionOwnership.isCurrent(attempt.session)
-    ) {
+    if (!presented() || !attemptOwnsCurrentPresentation(attempt) || !attempt.callbackReturned) {
       ackIapResult(result);
       return;
     }
