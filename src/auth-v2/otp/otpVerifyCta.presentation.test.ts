@@ -22,8 +22,13 @@ assert.ok(screen.includes("tokens.secondaryAction"));
 assert.ok(screen.includes("AuthTertiaryTextAction"));
 assert.match(screen, /t\("otp\.resend"\)/);
 assert.ok(screen.includes("authV2.otp.changeNumber"));
-assert.ok(screen.includes("OTP_OFFLINE_VERIFY_MESSAGE"));
-assert.ok(screen.includes("One-time password. Verifying your code."));
+assert.ok(screen.includes("authV2.otp.offlineVerify"));
+assert.ok(screen.includes("authV2.otp.oneTimePasswordVerifying"));
+assert.ok(screen.includes("authV2.otp.oneTimePassword"));
+assert.ok(screen.includes("authV2.otp.codeSentTo"));
+assert.ok(screen.includes("authV2.otp.retryAccountSetup"));
+assert.ok(screen.includes("authV2.otp.tryAgainIn"));
+assert.equal(screen.includes("OTP_OFFLINE_VERIFY_MESSAGE"), false);
 
 // Recovery CTA uses the same invokeVerify / onVerify path.
 assert.ok(screen.includes("onPress={() => invokeVerify(code)}"));

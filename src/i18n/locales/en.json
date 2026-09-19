@@ -114,7 +114,14 @@
       "subtitle": "Enter the 6-digit code we sent to {{phone}}.",
       "verify": "Verify",
       "verifying": "Verifying…",
-      "changeNumber": "Change mobile number"
+      "changeNumber": "Change mobile number",
+      "codeSentTo": "Code sent to {{phone}}",
+      "retryAccountSetup": "Try again (no new SMS)",
+      "retryAccountSetupA11y": "Try account setup again",
+      "tryAgainIn": "Try again in {{time}}",
+      "oneTimePassword": "One-time password",
+      "oneTimePasswordVerifying": "One-time password. Verifying your code.",
+      "offlineVerify": "You're offline. Connect to the internet to verify this code."
     },
     "email": {
       "title": "Your email",
@@ -130,7 +137,13 @@
       "title": "Confirm your business email",
       "verify": "Verify email",
       "verifying": "Verifying…",
-      "sending": "Sending OTP…"
+      "sending": "Sending OTP…",
+      "retrySending": "Retry sending",
+      "sendFailed": "Could not send verification code. Please check the email address and try again.",
+      "validFor": "Code valid for {{time}}",
+      "expired": "Code expired — request a new one.",
+      "inputA11y": "Email verification code",
+      "resendA11y": "Resend email OTP"
     }
   },
   "consent": {
