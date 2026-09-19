@@ -6,7 +6,7 @@
 
 - Branch: `release/public-android-combined`
 - Combination merge: `a3317148d6e24bc980bbe5637b65ecac84e45b0d` (#22+#24+#25)
-- Subsequent source on this branch: VYD-38/39, App Check source, Rules compat artifacts (see git log after `a331714`)
+- Subsequent source on this branch: `5d148f355a82a6bfae8b176d101ebce0b9877d16` (VYD-38/39, App Check source, Rules compat artifacts)
 
 ## Rules (deploy-before-build for a working Save)
 

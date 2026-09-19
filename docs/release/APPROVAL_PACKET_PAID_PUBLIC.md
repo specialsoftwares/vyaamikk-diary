@@ -5,7 +5,7 @@
 ## Remaining source / PR set
 
 - Keep original #20–#25 HOLD until independently accepted
-- Combined candidate `release/public-android-combined` contains their union plus VYD-38/39 and App Check source
+- Combined candidate `release/public-android-combined` @ `5d148f355a82a6bfae8b176d101ebce0b9877d16` contains their union plus VYD-38/39 and App Check source
 - Local `test:all` **139/139 PASS** (2026-09-19) on this candidate. GitHub Actions `ci:verify` has not run on this SHA. Invoice-renderer Docker is not in `test:all`; include it in CI. Label local skips.
 
 ## Backend / config still required (later approved deploys)

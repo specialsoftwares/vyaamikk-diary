@@ -4,7 +4,7 @@ Fields are distinct. Source tests do not mark tickets complete. This assignment 
 
 | Work | Source implemented | Independently reviewed | Deployed | Device-tested | Store-tested | Public-ready |
 | --- | --- | --- | --- | --- | --- | --- |
-| Isolated #22+#24+#25 combination | Yes — branch `release/public-android-combined`, merge `a3317148d6e24bc980bbe5637b65ecac84e45b0d` plus implementation HEAD on this branch | No | No | No | No | No |
+| Isolated #22+#24+#25 combination | Yes — branch `release/public-android-combined`, merge `a3317148d6e24bc980bbe5637b65ecac84e45b0d`, implementation `5d148f355a82a6bfae8b176d101ebce0b9877d16` | No | No | No | No | No |
 | Live-Rules compatibility artifact | Yes — hashed baseline + proposed patch; emulator PASS 2026-09-19 | No (security-sensitive) | No | N/A | N/A | No |
 | VYD-38 subscription management | Yes — Settings entry, screen, presentManual, billing-details callable (flag closed), Play manage URL, history reader, EN/HI | No | No | No | No | No |
 | VYD-39 reconciliation consumer | Yes — leases/backoff/injected revalidation/scheduler/operator callable, flags closed | No | No | N/A | No | No |
