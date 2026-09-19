@@ -36,33 +36,52 @@
       "suites": 133
     },
     "pr22": {
-      "head": "d6f9557168210eb7cdcc364754855b1e1746e14a",
-      "merge_ref": "7c5c123efc9d7891080d186765a0a0763c5279ba",
+      "head": "8adcd7b604257d00b43635e70d90e4e97e5bcd57",
+      "merge_ref": "001a5322fca3df75df6fc04f448cffdde87a03ce",
+      "merge_ref_prior": "7c5c123efc9d7891080d186765a0a0763c5279ba",
+      "merge_ref_prior_head": "d6f9557168210eb7cdcc364754855b1e1746e14a",
       "draft": true,
       "hold": true,
-      "ci_run": 35428113304,
-      "suites": 138
+      "ci_run_prior": 35428113304,
+      "ci_run": 35429978574,
+      "ci_status": "SUCCESS",
+      "local_ci_verify": "PASS at 8adcd7b; invoice-renderer Docker skipped locally",
+      "suites": 138,
+      "suites_prior": 138,
+      "note": "Current tested merge-ref is 001a532 (8adcd7b into 79d405d). Do not copy 7c5c123 onto 8adcd7b. Checkpoint SHA in this object is the candidate head; the commit that records it is this control update."
     },
     "evidence_caveat": "Refs/Jira inspected at setup; CI checkpoints are recorded candidate evidence, not current production or device proof. Revalidate before use.",
     "pr23": {
-      "head": "cb927094e0c4e528b407e47e44382a2d0a96fa72",
+      "head": "4cb8edec2f6882beefce45fb05df26a6f6ffea44",
+      "merge_ref": "96785a4cd2c8dc3bbfd36963b75aec66b54cb85e",
       "draft": true,
       "hold": true,
-      "note": "Documentation-only control PR"
+      "ci_run": 35428924956,
+      "ci_status": "SUCCESS",
+      "note": "Documentation-only control PR. Checkpoint SHA 4cb8ede is the previous register commit; the commit that records this continuation will differ."
     },
     "pr24": {
-      "head": "6e951fffb56600c68e48ee3e7b878cc66b22dbc7",
+      "head": "9db22faf09f81f79a96ca1d94bbc0c99d17ee05b",
+      "merge_ref": "f3f99e84d0dd84c6a03898f6666a956f7a68094e",
+      "merge_ref_prior": "abedea3e6aef821718b6f2eb47cef78e71cd7486",
+      "merge_ref_prior_head": "6e951fffb56600c68e48ee3e7b878cc66b22dbc7",
       "draft": true,
       "hold": true,
-      "ci_run": 35428679946,
-      "ci_status": "in_progress_at_checkpoint"
+      "ci_run_prior": 35428679946,
+      "ci_status_prior": "SUCCESS",
+      "suites_prior": 132,
+      "ci_run": 35430163500,
+      "ci_status": "SUCCESS",
+      "suites": 132
     },
     "pr25": {
       "head": "5076f7707a4812437f74879c3767bf554b8eeabb",
+      "merge_ref": "d219ae31cb0d82d17600d534c62c0f65312f6e9f",
       "draft": true,
       "hold": true,
       "ci_run": 35428790956,
-      "ci_status": "in_progress_at_checkpoint"
+      "ci_status": "SUCCESS",
+      "suites": 132
     }
   },
   "jira_snapshot": {
@@ -88,7 +107,7 @@
     "selection": "Lowest priority number among actionable ready tasks. Blocked work does not block independent tasks.",
     "review_rule": "Sensitive implementation remains ready_for_review until reviewer and exact SHA are recorded; passing self-tests is not release acceptance.",
     "dependency_rule": "depends_on names completed acceptance prerequisites for the listed execution. Preparatory read-only work may proceed where explicitly allowed. Release operations always need separate approval.",
-    "resume": "REL-01/02 are on PR #22 d6f9557 (Actions 35428113304 SUCCESS 138/138). REL-03 is PR #24; REL-04 is PR #25. REL-09/10 remain owner sign-in. Next independent work: REL-13 device-runbook polish if needed; do not merge or build."
+    "resume": "Continuation 1 recorded: REL-01 8adcd7b merge-ref 001a532 Actions 35429978574 SUCCESS 138/138. REL-03 9db22fa merge-ref f3f99e8 Actions 35430163500 SUCCESS 132/132. REL-04 5076f77 Actions 35428790956 SUCCESS 132/132. Docs on PR #23. REL-09/10 owner sign-in. Queue exhausted at source/planning; no merge/build."
   },
   "tasks": [
     {
@@ -97,6 +116,7 @@
       "title": "Surface asynchronous IAP failures on the owning presentation",
       "state": "ready_for_review",
       "risk": "sensitive",
+      "review_disposition": "changes_requested on d6f9557 for presentation-ownership; focused correction ready at 8adcd7b",
       "allowed_scope": [
         "Reproduce and correct the asynchronous failure gap on PR #22 only; retain its draft HOLD.",
         "Use production createIapSession and host/runtime together with injected native/backend boundaries; no store activation."
@@ -131,6 +151,23 @@
           "merge_ref": "7c5c123efc9d7891080d186765a0a0763c5279ba",
           "ci_run": 35428113304,
           "result": "GitHub Actions SUCCESS; local ci:verify PASS; test:all 138/138. PR #22 remains draft HOLD."
+        },
+        {
+          "kind": "review_disposition",
+          "at_sha": "d6f9557168210eb7cdcc364754855b1e1746e14a",
+          "result": "changes_requested: dismiss after sheet_launched then reopen (same or different record) displayed the first purchase's late failed lastResult because publishAsyncIapFailureIfOwned did not require attempt.presentationId === current presentationId."
+        },
+        {
+          "kind": "source_fix",
+          "at_sha": "8adcd7b604257d00b43635e70d90e4e97e5bcd57",
+          "result": "attemptOwnsCurrentPresentation requires presentationId + current session. Unowned failed lastResult is acked without publishing so it cannot attach to a new presentation or suppress a newer unread result. Dismiss does not cancel the store op. No extra purchase/save/entitlement write."
+        },
+        {
+          "kind": "focused_tests",
+          "at_sha": "8adcd7b604257d00b43635e70d90e4e97e5bcd57",
+          "merge_ref": "001a5322fca3df75df6fc04f448cffdde87a03ce",
+          "ci_run": 35429978574,
+          "result": "quotaUpsellController.test.ts and quotaUpsell.iapSession.lifecycle.test.ts: same-record reopen, record_second late error, current attempt can still fail, A\u2192B and logout remain, purchaseCalls deltas. test:quota-upsell 8/8. Typecheck/eslint PASS. Local ci:verify PASS (Docker invoice-renderer skipped). Actions 35429978574 SUCCESS, test:all 138/138, ci:verify PASS including invoice-renderer image build. Checkout HEAD 001a532 (8adcd7b into 79d405d)."
         }
       ],
       "jira": [
@@ -139,16 +176,18 @@
       ],
       "validation": {
         "implementation": "changed",
-        "review": "pending",
+        "review": "changes_requested",
+        "review_on_sha": "d6f9557168210eb7cdcc364754855b1e1746e14a",
+        "correction_ready_sha": "8adcd7b604257d00b43635e70d90e4e97e5bcd57",
         "deployment": "not_applicable",
         "device": "not_run"
       },
       "work": {
         "branch": "VYD-36-37-internal-integration",
-        "head": "d6f9557168210eb7cdcc364754855b1e1746e14a",
+        "head": "8adcd7b604257d00b43635e70d90e4e97e5bcd57",
         "pr": 22,
-        "last_result": "Async IAP failure surfaces once on the owning sheet. Stacked with REL-02 at d6f9557.",
-        "next_action": "Independent review of PR #22 at d6f9557. Keep draft HOLD. No merge."
+        "last_result": "Presentation-ownership bound. Ordinary async-failure correction at e380d28 preserved. Stacked with REL-02.",
+        "next_action": "Independent review of PR #22 at 8adcd7b (tested merge-ref 001a532). Keep draft HOLD. No merge."
       },
       "blocker": null
     },
@@ -178,7 +217,7 @@
         {
           "kind": "mounted_react_test",
           "at_sha": "d6f9557168210eb7cdcc364754855b1e1746e14a",
-          "result": "QuotaUpsellHostView mounted with react-dom createRoot and inert sheet/education surfaces. Ordinary user_save opens; letterhead/background refuse; education/back/close; purchase/restore loading; async failed lastResult; dismiss no-replay; A\u2192B and logout\u2192A retire. Boundary: not native UpgradeSheet, not a store, not a device."
+          "result": "QuotaUpsellHostView mounted with react-dom createRoot and inert sheet/education surfaces. Ordinary user_save opens; letterhead/background refuse; education/back/close; purchase/restore loading; async failed lastResult; dismiss no-replay; A\u2192B and logout\u2192A retire. Boundary: not native UpgradeSheet, not a store, not a device. Injected surfaces return null: proves host effects/callback wiring only. Preserved on 8adcd7b."
         }
       ],
       "jira": [
@@ -192,10 +231,10 @@
       },
       "work": {
         "branch": "VYD-36-37-internal-integration",
-        "head": "d6f9557168210eb7cdcc364754855b1e1746e14a",
+        "head": "8adcd7b604257d00b43635e70d90e4e97e5bcd57",
         "pr": 22,
-        "last_result": "Mounted host evidence added on the same HOLD PR as REL-01.",
-        "next_action": "Independent review of PR #22 at d6f9557. Keep draft HOLD. No merge."
+        "last_result": "Mounted host evidence preserved on the same HOLD PR as REL-01. Injected surfaces still return null.",
+        "next_action": "Independent review of PR #22 at 8adcd7b. Keep draft HOLD. No merge. Not native UpgradeSheet/device/store acceptance."
       },
       "blocker": null
     },
@@ -229,22 +268,31 @@
           "kind": "source_fix",
           "at_sha": "6e951fffb56600c68e48ee3e7b878cc66b22dbc7",
           "pr": 24,
-          "result": "Wired consentLocale into test:i18n with EN/HI resolution. Phone/email OTP resend countdown and email sending labels use locale keys. Remaining hardcoded OTP accessibility/error strings (Retry sending, Code valid for, One-time password) are not claimed device-fixed."
+          "result": "Wired consentLocale into test:i18n with EN/HI resolution. Phone/email OTP resend countdown and email sending labels use locale keys. Frozen as accepted first slice."
+        },
+        {
+          "kind": "source_fix",
+          "at_sha": "9db22faf09f81f79a96ca1d94bbc0c99d17ee05b",
+          "pr": 24,
+          "merge_ref": "f3f99e84d0dd84c6a03898f6666a956f7a68094e",
+          "ci_run": 35430163500,
+          "result": "Remaining identified phone/email OTP UI/a11y strings routed through t(): codeSentTo, offlineVerify, retryAccountSetup, tryAgainIn, oneTimePassword, retrySending, sendFailed fallback, validFor, expired, inputA11y, resendA11y. EN/HI interpolation. countdown/validation/error-classification unchanged. Backend English error payloads still render when passed as error. ta/te/gu fall back to English. test:i18n + test:otp-countdown + onboardingOtpModel PASS. Typecheck/eslint PASS. Actions 35430163500 SUCCESS, test:all 132/132, ci:verify PASS including invoice-renderer image. Checkout HEAD f3f99e8 (9db22fa into 79d405d)."
         }
       ],
       "jira": [],
       "validation": {
         "implementation": "changed",
         "review": "pending",
+        "source_phase": "identified_otp_ui_strings_localized",
         "deployment": "not_applicable",
         "device": "not_run"
       },
       "work": {
         "branch": "fix/rel-03-auth-i18n",
-        "head": "6e951fffb56600c68e48ee3e7b878cc66b22dbc7",
+        "head": "9db22faf09f81f79a96ca1d94bbc0c99d17ee05b",
         "pr": 24,
-        "last_result": "First-launch consent keys already resolved; OTP resend/send labels now i18n. Isolated from #22.",
-        "next_action": "Independent review of PR #24. Device/TalkBack not run. Keep draft. No merge."
+        "last_result": "Identified OTP UI strings localized EN/HI. Source remaining: backend English error payloads; non-EN/HI fallback. Device/TalkBack not run.",
+        "next_action": "Independent source review of PR #24 at 9db22fa. Device/TalkBack still pending. Keep draft. No merge."
       },
       "blocker": null
     },
@@ -278,7 +326,14 @@
           "kind": "source_fix",
           "at_sha": "5076f7707a4812437f74879c3767bf554b8eeabb",
           "pr": 25,
-          "result": "LuxuryPressable visual state is RN pressed only. Contract test forbids shared-value persistence."
+          "result": "LuxuryPressable visual state is RN pressed only. Contract test forbids shared-value persistence. Source-string contract is not native cancel/drag/navigation."
+        },
+        {
+          "kind": "ci",
+          "at_sha": "5076f7707a4812437f74879c3767bf554b8eeabb",
+          "merge_ref": "d219ae31cb0d82d17600d534c62c0f65312f6e9f",
+          "ci_run": 35428790956,
+          "result": "GitHub Actions SUCCESS, 132/132. PR #25 remains draft HOLD."
         }
       ],
       "jira": [
@@ -287,6 +342,8 @@
       "validation": {
         "implementation": "changed",
         "review": "pending",
+        "source_review": "pending",
+        "native_acceptance": "not_run",
         "deployment": "not_applicable",
         "device": "not_run"
       },
@@ -294,8 +351,8 @@
         "branch": "fix/rel-04-stuck-press",
         "head": "5076f7707a4812437f74879c3767bf554b8eeabb",
         "pr": 25,
-        "last_result": "Stuck dim/scale on shared LuxuryPressable removed in source. Device not run.",
-        "next_action": "Independent review of PR #25. Keep draft. No merge."
+        "last_result": "Stuck dim/scale on shared LuxuryPressable removed in source (RN pressed). Source-string contract is not native cancel/drag/navigation. Device not run. No further speculative press refactor.",
+        "next_action": "Independent source review of PR #25. Native cancel/drag/navigation still pending. Keep draft. No merge."
       },
       "blocker": null
     },
@@ -333,6 +390,7 @@
       "validation": {
         "implementation": "no_change_needed",
         "review": "pending",
+        "source_phase": "complete_no_js_boot_label",
         "deployment": "not_applicable",
         "device": "not_run"
       },
@@ -340,8 +398,8 @@
         "branch": null,
         "head": "79d405d0b626d5067a33541887ac3c70689b8724",
         "pr": null,
-        "last_result": "No boot-label layout change: current source has no overlapping JS boot label. Device screenshot pending an authorized binary.",
-        "next_action": "Do not edit splash layout without a screenshot of the current native splash. No EAS/native build."
+        "last_result": "Source investigation complete: no overlapping JS boot label. Native splash chevron-only. Installed-binary symptom unresolved pending matching screenshot/build identity. No speculative layout edit. No new native build.",
+        "next_action": "Device screenshot of the current native splash on a known binary. No EAS/native build merely to close the source investigation."
       },
       "blocker": null
     },
@@ -385,6 +443,7 @@
       "validation": {
         "implementation": "investigating",
         "review": "pending",
+        "source_phase": "wiring_mapped",
         "deployment": "not_deployed",
         "device": "not_run"
       },
@@ -392,7 +451,7 @@
         "branch": null,
         "head": "79d405d0b626d5067a33541887ac3c70689b8724",
         "pr": null,
-        "last_result": "Source wiring mapped; no speculative rewrite. Console/device remain separate. REL-03 OTP copy is a separate PR.",
+        "last_result": "Source wiring mapped (startOtp\u2192startNativePhoneOtp). Not deployed-auth acceptance. Dirty historical email-OTP inventoried read-only, not imported. REL-03 OTP copy is a separate PR.",
         "next_action": "Keep AUTH_MANUAL_ACCEPTANCE_CHECKLIST for an installed candidate. Do not rewrite OTP callers from stale docs. REL-10 needed for live Phone Auth SHA inspection."
       },
       "blocker": null
@@ -428,21 +487,28 @@
         {
           "kind": "public_http",
           "at_sha": "79d405d0b626d5067a33541887ac3c70689b8724",
-          "result": "https://vyaamikk.specialsoftwares.com privacy/terms/support/contact/delete-account all HTTP 200. Titles match intended pages. Website effective date 15 July 2026; app LEGAL_EFFECTIVE_DATE is 2026-07-01. App still has grievance-officer name and registered-address placeholders. Host is the documented specialsoftwares.com site, not a Vercel app repo."
+          "checked_at": "2026-09-19T07:46:16Z",
+          "result": "privacy/terms/support/contact/delete-account HTTP/2 200 (Cursor curl). Website Effective 15 July 2026; app LEGAL_EFFECTIVE_DATE 2026-07-01. Independent web reader previously could not retrieve pages \u2014 Cursor evidence only, not legal-content approval."
+        },
+        {
+          "kind": "fact_sheet",
+          "path": "docs/release/REL07_LEGAL_FACT_SHEET.md",
+          "result": "URLs, timestamps, app vs site copy, and unresolved owner/counsel facts recorded. No URL or placeholder change. No website publish."
         }
       ],
       "jira": [],
       "validation": {
         "implementation": "investigating",
         "review": "pending",
+        "source_phase": "urls_and_placeholders_recorded",
         "deployment": "not_applicable",
         "device": "not_run"
       },
       "work": {
-        "branch": null,
-        "head": "79d405d0b626d5067a33541887ac3c70689b8724",
-        "pr": null,
-        "last_result": "Public legal URLs resolve. Placeholders and date mismatch are owner/counsel blockers. No publish.",
+        "branch": "release/bounded-autonomy-register",
+        "head": null,
+        "pr": 23,
+        "last_result": "Fact sheet docs/release/REL07_LEGAL_FACT_SHEET.md. HTTP 200 is not legal approval. Date/address/officer remain owner/counsel blockers.",
         "next_action": "Owner/counsel confirm facts. Do not invent legal terms or deploy the website from this repo."
       },
       "blocker": {
@@ -475,7 +541,12 @@
         {
           "kind": "source_verified",
           "at_sha": "79d405d0b626d5067a33541887ac3c70689b8724",
-          "result": "No initializeAppCheck / App Check token plumbing in app or functions source. Email verification comment notes App Check is not enforced. Live Rules/Functions comparison still requires REL-10. A later integration PR would be Play Integrity (Android) + Apple App Attest, debug provider only in non-store builds, no debug-token bypass in production, fail-closed callables after staged monitor. This plan is not production protection."
+          "result": "No initializeAppCheck / App Check token plumbing in app or functions source. Email verification comment notes App Check is not enforced. Live Rules/Functions comparison still requires REL-10."
+        },
+        {
+          "kind": "design_document",
+          "path": "docs/release/APP_CHECK_DESIGN.md",
+          "result": "Packages, native vs JS SDK boundaries, initialization order, Phone Auth distinction, debug vs store, staged enforcement, rollback, old-client fail-closed, and unverified Console items. No SDK install or enforcement."
         }
       ],
       "jira": [
@@ -484,15 +555,16 @@
       "validation": {
         "implementation": "investigating",
         "review": "pending",
+        "source_phase": "design_drafted",
         "deployment": "not_applicable",
         "device": "not_run"
       },
       "work": {
-        "branch": null,
-        "head": "79d405d0b626d5067a33541887ac3c70689b8724",
-        "pr": null,
-        "last_result": "Source has no App Check integration. Rollout design recorded. Live config unread.",
-        "next_action": "Wait for REL-10. Do not enable enforcement, deploy Rules, or add a debug-token bypass."
+        "branch": "release/bounded-autonomy-register",
+        "head": null,
+        "pr": 23,
+        "last_result": "APP_CHECK_DESIGN.md drafted. Source still has no App Check. Live config unread.",
+        "next_action": "Wait for REL-10 to compare deployed Rules/Functions. Do not enable enforcement, deploy Rules, or add a debug-token bypass."
       },
       "blocker": {
         "type": "owner_reauthentication",
@@ -652,7 +724,12 @@
         {
           "kind": "source_assessment",
           "at_sha": "79d405d0b626d5067a33541887ac3c70689b8724",
-          "result": "No SubscriptionManagementScreen implementation exists (name appears only as a forbidden paywall regex). Paid-launch-critical: user-visible manage/cancel path, accurate active/expired presentation from server status, and refund/revocation reconciliation already in billing backend tickets. Deferrable if owner accepts: usage-bar polish and revenue dashboards. Do not ship paid public with missing manage/cancel access. No VYD-38/39 implementation started."
+          "result": "No SubscriptionManagementScreen. Restore exists on UpgradeSheet only. No Play/App Store manage URLs. Backend RTDN/ASSN/transition/queue writers exist; queue consumer is not deployed (VYD-32 comment). Billing flags fail-closed."
+        },
+        {
+          "kind": "design_document",
+          "path": "docs/release/PAID_LAUNCH_SCOPE.md",
+          "result": "Paid-launch-critical vs polish split with file/symbol refs. Manage/cancel, status UI, refund/revocation consumer, GST billing-details UI are not labelled optional. VYD-38/39 remain Backlog; no implementation started."
         }
       ],
       "jira": [
@@ -662,15 +739,16 @@
       "validation": {
         "implementation": "no_change_needed",
         "review": "pending",
+        "source_phase": "scope_document",
         "deployment": "not_applicable",
         "device": "not_run"
       },
       "work": {
-        "branch": null,
-        "head": "79d405d0b626d5067a33541887ac3c70689b8724",
-        "pr": null,
-        "last_result": "Launch-critical vs polish split recorded. Owner must accept any deferral of manage/cancel UI.",
-        "next_action": "Owner accept or reject deferring SubscriptionManagementScreen past first internal candidate. Do not start full VYD-38/39 here."
+        "branch": "release/bounded-autonomy-register",
+        "head": null,
+        "pr": 23,
+        "last_result": "PAID_LAUNCH_SCOPE.md. VYD-38/39 Backlog. Owner must accept any deferral of manage/cancel past first paid public.",
+        "next_action": "Owner accept or reject deferring SubscriptionManagementScreen past first paid public. Do not start full VYD-38/39 here. Internal billing-off candidate can omit purchase UI."
       },
       "blocker": null
     },
@@ -697,8 +775,9 @@
           "result": "Use AUTH_MANUAL_ACCEPTANCE_CHECKLIST.md and current Jira device waves; historic vc18/vc19 titles are not a selected release artifact."
         },
         {
-          "kind": "candidate_manifest",
-          "result": "Do not merge. Internal-candidate inventory at checkpoint: origin/main 79d405d; PR #20 531a4cd (draft HOLD); PR #21 355f60a (draft HOLD); PR #22 d6f9557 REL-01/02 (draft HOLD, Actions 35428113304 138/138); PR #24 6e951ff REL-03 (draft); PR #25 5076f77 REL-04 (draft); PR #23 control docs only. Excluded: historical workspace dirty email-OTP at ce2fc75. Backend: REL-10 unread. Device matrix: existing debug runtime if already installed; authorized future sideload; Play AAB after REL-11. CSS zoom is not TalkBack/font-scale acceptance."
+          "kind": "runbook",
+          "path": "docs/release/INTERNAL_CANDIDATE_RUNBOOK.md",
+          "result": "#22 contains #20/#21. #23 docs only. #24/#25 separate. Dirty historical email-OTP excluded. versionCode 19 unknown until Play inspect. Tests listed; none claimed run. Debug vs sideload vs Play-AAB distinguished."
         }
       ],
       "jira": [
@@ -712,15 +791,16 @@
       "validation": {
         "implementation": "no_change_needed",
         "review": "pending",
+        "source_phase": "runbook_drafted",
         "deployment": "not_applicable",
         "device": "not_run"
       },
       "work": {
-        "branch": null,
+        "branch": "release/bounded-autonomy-register",
         "head": null,
-        "pr": null,
-        "last_result": "Manifest recorded. No merge or build.",
-        "next_action": "Use AUTH_MANUAL_ACCEPTANCE_CHECKLIST plus first-launch i18n/press/boot cases when an authorized binary exists."
+        "pr": 23,
+        "last_result": "INTERNAL_CANDIDATE_RUNBOOK.md. No merge or build. Tests not executed.",
+        "next_action": "Use the runbook plus AUTH_MANUAL_ACCEPTANCE_CHECKLIST when an authorized binary exists. Do not assume versionCode 19 is free on Play."
       },
       "blocker": null
     },
@@ -923,7 +1003,7 @@
       "docs/release/RELEASE_REGISTER.json": "2726eb7c54e2fa3ee588f5f4d7cf54281fe5416ba526cc3096de80ede0d1d18c",
       "docs/release/CURSOR_START.md": "7f27ce3dee950232814eb4d28df708501dc59adce45b2a7f98d7e10a9c2930c5"
     },
-    "next_action": "REL-01/02 await review on PR #22 d6f9557. REL-03 PR #24 and REL-04 PR #25 are draft. Keep all PRs draft. No merge, native/EAS build, deploy, store mutation, or production flag write.",
+    "next_action": "REL-01/02 await review on PR #22 8adcd7b (001a532 SUCCESS 138/138). REL-03 PR #24 9db22fa (f3f99e8 SUCCESS 132/132) and REL-04 PR #25 5076f77 remain draft. Control docs on #23. Keep all PRs draft. No merge, native/EAS build, deploy, store mutation, or production flag write.",
     "remote_branch_created": true
   }
 }
