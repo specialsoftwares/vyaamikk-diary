@@ -232,13 +232,15 @@ export function OtpVerificationScreen({
         {resendRemaining > 0 ? (
           <LocaleUiText
             style={[styles.resendHint, { color: tokens.secondaryActionMuted }]}
-            accessibilityLabel={`Resend OTP in ${formatOtpCountdownMmSs(resendRemaining)}`}
+            accessibilityLabel={t("otp.resendCountdown", {
+              time: formatOtpCountdownMmSs(resendRemaining),
+            })}
           >
-            {`Resend OTP in ${formatOtpCountdownMmSs(resendRemaining)}`}
+            {t("otp.resendCountdown", { time: formatOtpCountdownMmSs(resendRemaining) })}
           </LocaleUiText>
         ) : (
           <AuthTertiaryTextAction
-            label={resending ? t("otp.resending") : "Resend OTP"}
+            label={resending ? t("otp.resending") : t("otp.resend")}
             onPress={() => {
               if (!canResend && resendAvailableAt != null) return;
               if (resending || loading) return;
@@ -248,7 +250,7 @@ export function OtpVerificationScreen({
             disabled={resendBlocked}
             loading={resending}
             purpose="retry"
-            accessibilityLabel="Resend OTP"
+            accessibilityLabel={t("otp.resend")}
             testID="auth-v2-otp-resend"
           />
         )}

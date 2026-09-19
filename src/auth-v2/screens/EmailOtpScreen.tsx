@@ -75,7 +75,7 @@ export function EmailOtpScreen({
               label="Retry sending"
               onPress={onRetrySend}
               loading={sending}
-              loadingLabel="Sending OTP…"
+              loadingLabel={t("authV2.emailOtp.sending")}
               disabled={sending}
               purpose="retry"
               activeBg={tokens.ctaActiveBg}
@@ -88,7 +88,7 @@ export function EmailOtpScreen({
             <AuthV2PrimaryButton
               label={t("authV2.emailOtp.verify")}
               loading={loading || sending}
-              loadingLabel={sending ? "Sending OTP…" : t("authV2.emailOtp.verifying")}
+              loadingLabel={sending ? t("authV2.emailOtp.sending") : t("authV2.emailOtp.verifying")}
               disabled={!complete || !online || loading || !canVerify || sending}
               onPress={() => {
                 if (inFlightRef.current || loading) return;
@@ -113,7 +113,9 @@ export function EmailOtpScreen({
         </>
       }
     >
-      {sending ? <OnboardingInlineMessage tone="info" message="Sending OTP…" /> : null}
+      {sending ? (
+        <OnboardingInlineMessage tone="info" message={t("authV2.emailOtp.sending")} />
+      ) : null}
       {sendFailed ? (
         <OnboardingInlineMessage
           tone="danger"
@@ -144,7 +146,7 @@ export function EmailOtpScreen({
       <View style={styles.resendRow}>
         {resendRemaining > 0 ? (
           <LocaleUiText style={[styles.resendHint, { color: tokens.secondaryActionMuted }]}>
-            {`Resend OTP in ${formatOtpCountdownMmSs(resendRemaining)}`}
+            {t("otp.resendCountdown", { time: formatOtpCountdownMmSs(resendRemaining) })}
           </LocaleUiText>
         ) : (
           <AuthTertiaryTextAction

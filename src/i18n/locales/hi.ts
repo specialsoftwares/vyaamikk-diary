@@ -144,6 +144,7 @@ const hi: Translations = {
       title: "अपने व्यावसायिक ईमेल की पुष्टि करें",
       verify: "ईमेल सत्यापित करें",
       verifying: "सत्यापन हो रहा है…",
+      sending: "OTP भेजा जा रहा है…",
     },
   },
 
@@ -172,6 +173,7 @@ const hi: Translations = {
     codePlaceholder: "••••••",
     verify: "वेरीफाई करें",
     resendIn: "{{seconds}} सेकंड में दोबारा भेजें",
+    resendCountdown: "OTP {{time}} में फिर भेजें",
     resending: "दोबारा भेज रहे हैं…",
     resend: "OTP दोबारा भेजें",
     notReceived: "कोड नहीं मिला?",

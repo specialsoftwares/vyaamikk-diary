@@ -147,6 +147,7 @@ const en = {
       title: "Confirm your business email",
       verify: "Verify email",
       verifying: "Verifying…",
+      sending: "Sending OTP…",
     },
   },
 
@@ -179,6 +180,7 @@ const en = {
     codePlaceholder: "••••••",
     verify: "Verify",
     resendIn: "Resend in {{seconds}}s",
+    resendCountdown: "Resend OTP in {{time}}",
     resending: "Resending…",
     resend: "Resend OTP",
     notReceived: "Didn't get the code?",
