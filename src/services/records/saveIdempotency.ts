@@ -119,6 +119,19 @@ export type BeginSaveAttemptResult =
   | { action: "proceed"; clientRecordId: string; replay: false }
   | { action: "return_existing"; clientRecordId: string; recordId: string; replay: true };
 
+let beginSaveAttemptGate: (() => Promise<void>) | null = null;
+let completeSaveAttemptGate: (() => Promise<void>) | null = null;
+
+/** Test-only barrier at the start of beginSaveAttempt. */
+export function setBeginSaveAttemptGateForTests(gate: (() => Promise<void>) | null): void {
+  beginSaveAttemptGate = gate;
+}
+
+/** Test-only barrier at the start of completeSaveAttempt. */
+export function setCompleteSaveAttemptGateForTests(gate: (() => Promise<void>) | null): void {
+  completeSaveAttemptGate = gate;
+}
+
 /**
  * Repository-layer guard. Call before create/write.
  * Returns existing record id when the same idempotency key already completed.
@@ -126,6 +139,7 @@ export type BeginSaveAttemptResult =
 export async function beginSaveAttempt(
   ctx: SaveIdempotencyContext
 ): Promise<BeginSaveAttemptResult> {
+  await beginSaveAttemptGate?.();
   const existing = await readAttempt(ctx.userId, ctx.idempotencyKey);
   if (existing?.status === "completed" && existing.recordId) {
     return {
@@ -150,6 +164,7 @@ export async function completeSaveAttempt(
   ctx: SaveIdempotencyContext,
   recordId: string
 ): Promise<void> {
+  await completeSaveAttemptGate?.();
   await writeAttempt(ctx.userId, ctx.idempotencyKey, {
     clientRecordId: ctx.clientRecordId,
     recordId,
@@ -169,14 +184,32 @@ export async function failSaveAttempt(ctx: SaveIdempotencyContext): Promise<void
 }
 
 /** In-process mutex — survives re-renders, not hot reload. */
-const processLocks = new Set<string>();
+export type ProcessSaveLockOwner = symbol;
 
-export function acquireProcessSaveLock(lockKey: string): boolean {
-  if (processLocks.has(lockKey)) return false;
-  processLocks.add(lockKey);
-  return true;
+const processLocks = new Map<string, ProcessSaveLockOwner>();
+
+export function acquireOwnedProcessSaveLock(lockKey: string): ProcessSaveLockOwner | null {
+  if (!lockKey || processLocks.has(lockKey)) return null;
+  const owner = Symbol(lockKey);
+  processLocks.set(lockKey, owner);
+  return owner;
 }
 
-export function releaseProcessSaveLock(lockKey: string): void {
+export function acquireProcessSaveLock(lockKey: string): boolean {
+  return acquireOwnedProcessSaveLock(lockKey) != null;
+}
+
+/**
+ * Release a process reservation.
+ * When `owner` is provided, only that owner may clear the key — a stale
+ * cleanup must not drop a newer operation's reservation.
+ */
+export function releaseProcessSaveLock(lockKey: string, owner?: ProcessSaveLockOwner): void {
+  if (!lockKey) return;
+  if (owner !== undefined && processLocks.get(lockKey) !== owner) return;
   processLocks.delete(lockKey);
+}
+
+export function isProcessSaveLockHeld(lockKey: string): boolean {
+  return processLocks.has(lockKey);
 }

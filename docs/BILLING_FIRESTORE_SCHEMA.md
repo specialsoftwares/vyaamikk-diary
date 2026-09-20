@@ -35,6 +35,8 @@ schema-by-use: **no documents are pre-created to "initialize" collections.**
 | `_appStoreAccountIndex/{appAccountToken}` | Admin SDK only (App Store token → uid) | denied | denied |
 | `_appStoreFinancialReview/{reviewId}` | Admin SDK only (unsupported Apple financial corrections) | denied | denied |
 | `_billingReconciliationQueue/{queueId}` | Admin SDK only (durable Play/refund reconciliation work) | denied | denied |
+| `_billingMaintenanceSchedule/{uid}` | Admin SDK only (stale-maintenance backoff; not a reconciliation watermark) | denied | denied |
+| `_billingOps/staleMaintenanceLease` | Admin SDK only (overlapping maintenance lease + document-id cursor) | denied | denied |
 | `globalStats/paperSaved` | Admin SDK only | public (`read: if true`) | denied |
 
 Notes:
@@ -65,6 +67,15 @@ Notes:
   storing the raw token or calling the Play API with it. Collision onto a
   different uid fails closed (`play_credential_index_collision`). Clients
   have zero access.
+- `_billingMaintenanceSchedule/{uid}` stores `nextEligibleAt` after pending,
+  terminal, unavailable, or isolated revalidation failures. It is not a
+  successful-reconciliation watermark and must not bump
+  `_companyBilling.lastReconciledAt` for unverified accounts.
+  `_billingOps/staleMaintenanceLease` is a single-document overlapping-tick
+  lease plus a durable `_companyBilling` document-id cursor. Maintenance
+  pages `_companyBilling` with `FieldPath.documentId()` so omitted, null, and
+  aged watermarks are visible. No production backfill of missing
+  `lastReconciledAt` is required or authorized.
 - `_billingReconciliationQueue/{stableId}` is a server-only work record used
   when a verified financial event (for example a Play refund) is recorded but
   live entitlement cannot be authoritatively reconciled (expired token,
@@ -244,11 +255,11 @@ unchanged counter can never satisfy it.
 
 Phase A wires the create-side clause into **`purchaseOrders` only**
 (representative path) and allowlists only `purchaseOrders` in
-`quotaLinkedCollection(...)`. Generalization = adding the other billable
-collections (`entries`, `customerCreditRecords`, `professionalPacks`,
-`letterheadDocs`) to the same two touch points plus the client batch
-integration — the pattern itself is collection-agnostic (the emulator suite
-demonstrates the allowlist boundary with a `letterheadDocs` attempt).
+`quotaLinkedCollection(...)`. Generalization = adding the other ordinary billable
+collections (`entries`, `customerCreditRecords`, `professionalPacks`)
+to the same two touch points plus the client batch
+integration. Round 15 removed `letterheadDocs` from `quotaLinkedCollection`
+(letterhead parent + validated diary mirror consume zero ordinary quota).
 `_saveLocks`, `completedSteps[]`, `clientRecordId`, `idempotencyKey` and
 serial counters are untouched by design (W-6).
 

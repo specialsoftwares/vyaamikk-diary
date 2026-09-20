@@ -40,7 +40,10 @@ import {
 } from "@/repositories/formDraftsRepository";
 import { getDiaryRepository } from "@/services/diary";
 import { updateEntryLocalFirst } from "@/services/diary/localFirst";
+import { presentComposerWriteAcceptance } from "@/services/diary/composerSaveSteps";
 import { saveComposerEntry } from "@/services/diary/saveComposerEntry";
+import { notifyOrdinaryQuotaUpsell } from "@/billing/quotaUpsell";
+import { captureAdmissionToken } from "@/sync/syncSessionOwnership";
 import { logSaveDiagnostic } from "@/services/records/saveDiagnostics";
 import { lifecycleUiResetDiagnostics } from "@/services/records/saveLifecycleRunner";
 import {
@@ -104,6 +107,8 @@ export default function ComposerScreen() {
     entry: BusinessEntry;
     pdfFailed: boolean;
     mode: "created" | "updated";
+    cloudAccepted?: boolean;
+    syncFailureKind?: string;
   } | null>(null);
   const [draftSaveResult, setDraftSaveResult] = useState<FormDraftRecord | null>(null);
   const [unsavedSheetVisible, setUnsavedSheetVisible] = useState(false);
@@ -502,6 +507,7 @@ export default function ComposerScreen() {
       setSaving(true);
       setError(null);
       let succeeded = false;
+      const saveSession = captureAdmissionToken();
       try {
         logSaveDiagnostic({
           phase: "start",
@@ -543,7 +549,7 @@ export default function ComposerScreen() {
             cashPayload = resolved.payload;
             photoUploadFailed = resolved.photoUploadFailed;
           }
-          const updated = await updateEntryLocalFirst(user.uid, {
+          const write = await updateEntryLocalFirst(user.uid, {
             id: editingId,
             title,
             entryDate: parts.entryDate,
@@ -553,6 +559,8 @@ export default function ComposerScreen() {
             payload: saveEntryType === "business_cash_given" ? cashPayload : parts.payload,
             attachments,
           });
+          const updated = write.entry;
+          const presented = presentComposerWriteAcceptance(write);
           editingAttachmentsRef.current = updated.attachments ?? [];
           if (photoUploadFailed) {
             feedback.showWarning(t("composer.cashPaidPhotoUploadFailed"));
@@ -564,7 +572,13 @@ export default function ComposerScreen() {
           notifySearchIndexChanged();
           dirtyRef.current = false;
           setFormDirty(false);
-          setSaveResult({ entry: updated, pdfFailed: false, mode: "updated" });
+          setSaveResult({
+            entry: updated,
+            pdfFailed: false,
+            mode: "updated",
+            cloudAccepted: presented.cloudAccepted,
+            syncFailureKind: presented.syncFailureKind,
+          });
           void ingestComposerForm(
             { userId: user.uid, ueid: user.ueid },
             entryType,
@@ -573,7 +587,27 @@ export default function ComposerScreen() {
           if (footprintFailed) {
             feedback.showWarning(t("locationFootprints.saveAttachFailed"));
           }
-          feedback.showSuccess(t("composer.saveSuccess.updatedTitle"));
+          if (!presented.cloudAccepted) {
+            const localMsg =
+              presented.syncFailureKind === "quota_exhausted"
+                ? t("sync.savedLocallyQuota")
+                : presented.syncFailureKind === "permission_denied" ||
+                    presented.syncFailureKind === "quota_state_invalid"
+                  ? t("sync.savedLocallyPermission")
+                  : t("sync.savedLocallyPending");
+            feedback.showWarning(localMsg, t("sync.savedLocallyTitle"));
+            if (presented.syncFailureKind === "quota_exhausted") {
+              notifyOrdinaryQuotaUpsell({
+                family: "diary",
+                origin: "user_save",
+                clientRecordId: editingId,
+                session: saveSession,
+                failureKind: presented.syncFailureKind,
+              });
+            }
+          } else {
+            feedback.showSuccess(t("composer.saveSuccess.updatedTitle"));
+          }
           succeeded = true;
           return;
         }
@@ -581,7 +615,7 @@ export default function ComposerScreen() {
         if (!clientRecordIdRef.current) {
           clientRecordIdRef.current = generateClientRecordId("entry");
         }
-        let { entry, pdfFailed, failedSecondarySteps } = await saveComposerEntry(
+        let { entry, pdfFailed, failedSecondarySteps, cloudAccepted, syncFailureKind } = await saveComposerEntry(
           user.uid,
           {
             clientRecordId: clientRecordIdRef.current,
@@ -635,11 +669,15 @@ export default function ComposerScreen() {
             cashPaidPhotoState,
             cashPayload
           );
-          entry = await updateEntryLocalFirst(user.uid, {
+          const attachWrite = await updateEntryLocalFirst(user.uid, {
             id: entry.id,
             attachments: resolved.attachments,
             payload: resolved.payload,
           });
+          entry = attachWrite.entry;
+          if (!attachWrite.remoteAccepted) {
+            failedSecondarySteps = [...(failedSecondarySteps ?? []), "attachments"];
+          }
           if (resolved.photoUploadFailed) {
             feedback.showWarning(t("composer.cashPaidPhotoUploadFailed"));
           }
@@ -651,7 +689,7 @@ export default function ComposerScreen() {
         notifySearchIndexChanged();
         dirtyRef.current = false;
         setFormDirty(false);
-        setSaveResult({ entry, pdfFailed, mode: "created" });
+        setSaveResult({ entry, pdfFailed, mode: "created", cloudAccepted, syncFailureKind });
         succeeded = true;
         void ingestComposerForm(
           { userId: user.uid, ueid: user.ueid },
@@ -661,7 +699,24 @@ export default function ComposerScreen() {
         if (footprintFailed) {
           feedback.showWarning(t("locationFootprints.saveAttachFailed"));
         }
-        if (pdfFailed) {
+        if (!cloudAccepted) {
+          const localMsg =
+            syncFailureKind === "quota_exhausted"
+              ? t("sync.savedLocallyQuota")
+              : syncFailureKind === "permission_denied" || syncFailureKind === "quota_state_invalid"
+                ? t("sync.savedLocallyPermission")
+                : t("sync.savedLocallyPending");
+          feedback.showWarning(localMsg, t("sync.savedLocallyTitle"));
+          if (syncFailureKind === "quota_exhausted") {
+            notifyOrdinaryQuotaUpsell({
+              family: "diary",
+              origin: "user_save",
+              clientRecordId: clientRecordIdRef.current,
+              session: saveSession,
+              failureKind: syncFailureKind,
+            });
+          }
+        } else if (pdfFailed) {
           feedback.showWarning(t("pdf.entrySavedPdfFailed"), t("pdf.entrySavedTitle"));
         } else if (failedSecondarySteps && failedSecondarySteps.length > 0) {
           feedback.showWarning(
@@ -809,6 +864,8 @@ export default function ComposerScreen() {
         <ComposerSaveSuccess
           entry={saveResult.entry}
           pdfFailed={saveResult.pdfFailed}
+          cloudAccepted={saveResult.cloudAccepted}
+          syncFailureKind={saveResult.syncFailureKind}
           onAddAnother={onAddAnother}
         />
       </Screen>

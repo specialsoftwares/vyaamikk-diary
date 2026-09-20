@@ -267,11 +267,240 @@ service cloud.firestore {
       return cap == -1 || request.resource.data.recordsThisMonth <= cap;
     }
 
-    // Billable record collections whose CREATE consumes quota. Phase A
-    // proves the pattern on purchaseOrders; Phase G extends this list to all
-    // billable families together with the client batch integration.
+    // Billable record collections whose CREATE consumes quota.
+    // Letterhead documents and their validated automatic diary mirrors
+    // are not quota-linked under the adopted Round 15 policy.
     function quotaLinkedCollection(coll) {
-      return coll == 'purchaseOrders';
+      return coll == 'purchaseOrders'
+             || coll == 'customerCreditRecords'
+             || coll == 'professionalPacks'
+             || coll == 'entries';
+    }
+
+    function letterheadSupportedPayloadKeyList() {
+      return [
+        'letterheadDocumentId',
+        'subject',
+        'reference',
+        'body',
+        'closing',
+        'signerName',
+        'designation',
+        'place'
+      ];
+    }
+
+    function letterheadParentInputRequiredKeys() {
+      return ['title', 'date', 'subject', 'body', 'closing', 'name', 'designation', 'place'];
+    }
+
+    function letterheadParentInputAllowedKeys() {
+      return [
+        'title',
+        'date',
+        'subject',
+        'body',
+        'closing',
+        'name',
+        'designation',
+        'place',
+        'reference',
+        'recipientName',
+        'recipientDesignation',
+        'recipientCompany',
+        'recipientAddress',
+        'salutation',
+        'useSignature',
+        'useStamp'
+      ];
+    }
+
+    function optionalLetterString(data, key) {
+      return !data.keys().hasAny([key])
+             || data[key] == null
+             || data[key] is string;
+    }
+
+    function optionalLetterBool(data, key) {
+      return !data.keys().hasAny([key])
+             || data[key] == null
+             || data[key] is bool;
+    }
+
+    function letterheadParentInputSupported(input) {
+      // input.title is a required key and may be the blank form default.
+      // Document title (parent.title) remains nonempty and is resolved from
+      // input.title or input.subject.
+      return input is map
+             && input.keys().hasAll(letterheadParentInputRequiredKeys())
+             && input.keys().hasOnly(letterheadParentInputAllowedKeys())
+             && input.title is string
+             && input.title.size() <= 200
+             && input.date is int
+             && input.subject is string
+             && input.subject.size() > 0
+             && input.body is string
+             && input.body.size() > 0
+             && input.closing is string
+             && input.name is string
+             && input.designation is string
+             && input.place is string
+             && optionalLetterString(input, 'reference')
+             && optionalLetterString(input, 'recipientName')
+             && optionalLetterString(input, 'recipientDesignation')
+             && optionalLetterString(input, 'recipientCompany')
+             && optionalLetterString(input, 'recipientAddress')
+             && optionalLetterString(input, 'salutation')
+             && optionalLetterBool(input, 'useSignature')
+             && optionalLetterBool(input, 'useStamp');
+    }
+
+    function isSupportedLetterheadParentShape(parent) {
+      return parent.keys().hasAll(['userId', 'title', 'input'])
+             && parent.userId is string
+             && parent.title is string
+             && parent.title.size() > 0
+             && parent.title.size() <= 200
+             && letterheadParentInputSupported(parent.input);
+    }
+
+    function letterheadPdfUriAbsentOrNull(data) {
+      return data.get('pdfUri', null) == null;
+    }
+
+    function letterheadParentInputUpdateAllowed() {
+      return !resource.data.keys().hasAny(['input'])
+             ? (
+                 !request.resource.data.keys().hasAny(['input'])
+                 || letterheadParentInputSupported(request.resource.data.input)
+               )
+             : (
+                 request.resource.data.input == resource.data.input
+                 || letterheadParentInputSupported(request.resource.data.input)
+               );
+    }
+
+    function letterheadParentUpdateAllowed() {
+      return request.resource.data.userId == resource.data.userId
+             && request.resource.data.title is string
+             && request.resource.data.title.size() > 0
+             && request.resource.data.title.size() <= 200
+             && (
+               request.resource.data.get('pdfUri', null) == null
+               || request.resource.data.get('pdfUri', null) == resource.data.get('pdfUri', null)
+             )
+             && letterheadParentInputUpdateAllowed();
+    }
+
+    function letterheadMirrorPayloadSupported(payload) {
+      return payload is map
+             && payload.keys().hasOnly(letterheadSupportedPayloadKeyList())
+             && payload.keys().hasAll(['letterheadDocumentId', 'body'])
+             && payload.letterheadDocumentId is string
+             && payload.letterheadDocumentId.size() > 0
+             && payload.letterheadDocumentId.size() <= 200
+             && payload.body is string
+             && payload.body.size() > 0
+             && optionalLetterString(payload, 'subject')
+             && optionalLetterString(payload, 'reference')
+             && optionalLetterString(payload, 'closing')
+             && optionalLetterString(payload, 'signerName')
+             && optionalLetterString(payload, 'designation')
+             && optionalLetterString(payload, 'place');
+    }
+
+    function letterheadMirrorChangedStringField(after, affected, key) {
+      return !affected.hasAny([key])
+             || after[key] == null
+             || after[key] is string;
+    }
+
+    function letterheadMirrorPayloadUpdateAllowed() {
+      let before = resource.data.get('payload', {});
+      let after = request.resource.data.get('payload', {});
+      let affected = after.diff(before).affectedKeys();
+      return before is map
+             && after is map
+             && affected.hasOnly(letterheadSupportedPayloadKeyList())
+             && after.get('letterheadDocumentId', '')
+                  == before.get('letterheadDocumentId', '')
+             && (
+               !affected.hasAny(['body'])
+               || (after.body is string && after.body.size() > 0)
+             )
+             && letterheadMirrorChangedStringField(after, affected, 'subject')
+             && letterheadMirrorChangedStringField(after, affected, 'reference')
+             && letterheadMirrorChangedStringField(after, affected, 'closing')
+             && letterheadMirrorChangedStringField(after, affected, 'signerName')
+             && letterheadMirrorChangedStringField(after, affected, 'designation')
+             && letterheadMirrorChangedStringField(after, affected, 'place');
+    }
+
+    function letterheadMirrorCreateShape() {
+      return request.resource.data.get('notes', null) == null
+             && request.resource.data.get('reminder', null) == null
+             && request.resource.data.get('attachments', []).size() == 0
+             && letterheadMirrorPayloadSupported(request.resource.data.get('payload', {}));
+    }
+
+    function letterheadMirrorParentId() {
+      return request.resource.data.get('payload', {}).get('letterheadDocumentId', '');
+    }
+
+    // Genuine same-UID parent must already exist with the supported parent
+    // shape. A client entryType, parent id, exemption flag, deterministic
+    // id, or skeletal {userId} parent is not sufficient.
+    function isValidatedLetterheadMirrorCreate(uid, entryId) {
+      let parentId = letterheadMirrorParentId();
+      let parent = get(/databases/$(database)/documents/users/$(uid)/letterheadDocs/$(parentId)).data;
+      return request.resource.data.entryType == 'letterhead_matter'
+             && request.resource.data.get('source', '') == 'letterhead'
+             && request.resource.data.userId == uid
+             && letterheadMirrorCreateShape()
+             && parentId is string
+             && parentId.size() > 0
+             && parentId.size() <= 200
+             && entryId == parentId + ':matter'
+             && isSupportedLetterheadParentShape(parent)
+             && parent.userId == uid;
+    }
+
+    function afterEntryIsValidatedLetterheadMirror(uid, entryId) {
+      let after = getAfter(/databases/$(database)/documents/users/$(uid)/entries/$(entryId)).data;
+      let parentId = after.get('payload', {}).get('letterheadDocumentId', '');
+      let parent = get(/databases/$(database)/documents/users/$(uid)/letterheadDocs/$(parentId)).data;
+      return after.get('entryType', '') == 'letterhead_matter'
+             && after.get('source', '') == 'letterhead'
+             && parentId is string
+             && parentId.size() > 0
+             && entryId == parentId + ':matter'
+             && isSupportedLetterheadParentShape(parent)
+             && parent.userId == uid;
+    }
+
+    function letterheadMirrorLinkagePreserved() {
+      return resource.data.get('entryType', '') != 'letterhead_matter'
+             || (
+               request.resource.data.entryType == 'letterhead_matter'
+               && request.resource.data.get('source', '') == resource.data.get('source', '')
+               && letterheadMirrorPayloadUpdateAllowed()
+               && (
+                 request.resource.data.get('reminder', null) == resource.data.get('reminder', null)
+                 || request.resource.data.get('reminder', null) == null
+               )
+               && (
+                 request.resource.data.get('notes', null) == resource.data.get('notes', null)
+                 || request.resource.data.get('notes', null) == null
+               )
+               && request.resource.data.get('attachments', [])
+                    == resource.data.get('attachments', [])
+             );
+    }
+
+    function istMonthKeyShape(key) {
+      return key is string
+             && key.size() == 7
+             && key[4] == '-';
     }
 
     function usageDocShapeValid() {
@@ -301,7 +530,8 @@ service cloud.firestore {
       let rid = request.resource.data.lastRecordId;
       return quotaLinkedCollection(coll)
         && !exists(/databases/$(database)/documents/users/$(uid)/$(coll)/$(rid))
-        && existsAfter(/databases/$(database)/documents/users/$(uid)/$(coll)/$(rid));
+        && existsAfter(/databases/$(database)/documents/users/$(uid)/$(coll)/$(rid))
+        && !(coll == 'entries' && afterEntryIsValidatedLetterheadMirror(uid, rid));
     }
 
     // Record-side binding: a billable record CREATE under enforcement is
@@ -322,6 +552,7 @@ service cloud.firestore {
               (get(usageCurrentPath(uid)).data.monthKey == afterData.monthKey
                 && afterData.recordsThisMonth == get(usageCurrentPath(uid)).data.recordsThisMonth + 1)
               || (get(usageCurrentPath(uid)).data.monthKey != afterData.monthKey
+                && istMonthKeyShape(get(usageCurrentPath(uid)).data.monthKey)
                 && afterData.recordsThisMonth == 1)
             )
         );
@@ -345,10 +576,21 @@ service cloud.firestore {
         allow read: if isOwner(uid);
         allow create: if isActiveUser(uid)
                       && request.resource.data.userId == uid
-                      && entryTitleValid();
+                      && entryTitleValid()
+                      && (
+                        isValidatedLetterheadMirrorCreate(uid, entryId)
+                        || (
+                          request.resource.data.get('entryType', '') != 'letterhead_matter'
+                          && (
+                            !quotaEnforcementOn(uid)
+                            || usageConsumedForRecord(uid, 'entries', entryId)
+                          )
+                        )
+                      );
         allow update: if isActiveUser(uid)
                       && request.resource.data.userId == uid
-                      && entryTitleValid();
+                      && entryTitleValid()
+                      && letterheadMirrorLinkagePreserved();
         allow delete: if isActiveUser(uid);
       }
 
@@ -359,7 +601,11 @@ service cloud.firestore {
                       && request.resource.data.userId == uid
                       && request.resource.data.title is string
                       && request.resource.data.title.size() > 0
-                      && request.resource.data.title.size() <= 200;
+                      && request.resource.data.title.size() <= 200
+                      && (
+                        !quotaEnforcementOn(uid)
+                        || usageConsumedForRecord(uid, 'professionalPacks', packId)
+                      );
         allow update: if isActiveUser(uid)
                       && request.resource.data.userId == uid
                       && request.resource.data.title is string
@@ -369,9 +615,18 @@ service cloud.firestore {
       }
 
       // ---- Letterhead documents -----------------------------------------
+      // Template config / Storage uploads are not part of this create.
+      // Adopted policy: letterheadDocs CREATE does not consume ordinary quota.
       match /letterheadDocs/{docId} {
         allow read: if isOwner(uid);
-        allow create, update, delete: if isActiveUser(uid);
+        allow create: if isActiveUser(uid)
+                      && request.resource.data.userId == uid
+                      && isSupportedLetterheadParentShape(request.resource.data)
+                      && letterheadPdfUriAbsentOrNull(request.resource.data);
+        allow update: if isActiveUser(uid)
+                      && request.resource.data.userId == uid
+                      && letterheadParentUpdateAllowed();
+        allow delete: if isActiveUser(uid);
       }
 
       // ---- Letterhead template config -----------------------------------
@@ -384,7 +639,11 @@ service cloud.firestore {
       match /customerCreditRecords/{recordId} {
         allow read: if isOwner(uid);
         allow create: if isActiveUser(uid)
-                      && request.resource.data.userId == uid;
+                      && request.resource.data.userId == uid
+                      && (
+                        !quotaEnforcementOn(uid)
+                        || usageConsumedForRecord(uid, 'customerCreditRecords', recordId)
+                      );
         allow update: if isActiveUser(uid)
                       && request.resource.data.userId == uid;
         allow delete: if isActiveUser(uid);
@@ -427,7 +686,10 @@ service cloud.firestore {
       // ---- Save coordination locks --------------------------------------
       match /_saveLocks/{clientRecordId} {
         allow read: if isOwner(uid)
-                    && resource.data.userId == uid;
+                    && (
+                      resource == null
+                      || resource.data.userId == uid
+                    );
         allow create: if isActiveUser(uid)
                       && saveLockCreateValid(uid, clientRecordId);
         allow update: if isActiveUser(uid)
@@ -483,6 +745,7 @@ service cloud.firestore {
                         (resource.data.monthKey == request.resource.data.monthKey
                           && request.resource.data.recordsThisMonth == resource.data.recordsThisMonth + 1)
                         || (resource.data.monthKey != request.resource.data.monthKey
+                          && istMonthKeyShape(resource.data.monthKey)
                           && request.resource.data.recordsThisMonth == 1)
                       )
                       && usageWithinCap(uid)
@@ -620,6 +883,12 @@ service cloud.firestore {
       allow read, write: if false;
     }
     match /_billingReconciliationQueue/{queueId} {
+      allow read, write: if false;
+    }
+    match /_billingMaintenanceSchedule/{uid} {
+      allow read, write: if false;
+    }
+    match /_billingOps/{docId} {
       allow read, write: if false;
     }
     match /_subscriptionInvoices/{invoiceId} {

@@ -16,6 +16,8 @@ import { LOCAL_MOCK_DETERMINISTIC_MOBILE_OTP } from "@/services/auth/mobileOtpCo
 import { LOCAL_MOCK_DETERMINISTIC_EMAIL_OTP } from "@/services/auth/emailOtpConstants";
 import { AppError } from "@/domain/errors";
 import { isOnboardingUxPreviewEnabled } from "@/auth-v2/preview/onboardingPreviewGate";
+import { isBillingUxPreviewEnabled } from "@/components/billing/billingUxPreviewGate";
+import { isQuotaUpsellEnabled } from "@/billing/quotaUpsell/quotaUpsellGate";
 
 function withStoreSignals(fn: () => void): void {
   // Force production-like standalone signals for this process.
@@ -33,12 +35,24 @@ function withStoreSignals(fn: () => void): void {
 }
 
 withStoreSignals(() => {
+  delete process.env.EXPO_PUBLIC_QUOTA_UPSELL_ENABLED;
   assert.equal(isApprovedLocalMockMobileOtpEnvironment(), false);
   assert.equal(isApprovedLocalMockEmailOtpEnvironment(), false);
   assert.equal(
     isOnboardingUxPreviewEnabled(),
     false,
     "onboarding UX preview must stay production-inaccessible"
+  );
+  assert.equal(
+    isBillingUxPreviewEnabled(),
+    false,
+    "billing UX preview must stay production-inaccessible"
+  );
+
+  assert.equal(
+    isQuotaUpsellEnabled(),
+    false,
+    "quota upsell must stay production-inaccessible until explicitly enabled"
   );
 
   let mobileBlocked = false;

@@ -26,6 +26,14 @@ function checkpoint(list: StartupStage[], stage: StartupStage): void {
 export async function runStartupCoordinator(options?: {
   /** Test hook: skip native DB/Firebase side effects. */
   skipNativeSideEffects?: boolean;
+  /**
+   * Test seam: App Check layer used after JS Firebase is ready.
+   * Production always uses initializeAppCheckLayer (bounded init, detached probes).
+   */
+  initializeAppCheckLayerForTests?: (input: {
+    isProduction: boolean;
+    getJsApp?: () => unknown;
+  }) => Promise<unknown>;
 }): Promise<StartupOutcome> {
   const checkpoints: StartupStage[] = [];
   const skipNative = options?.skipNativeSideEffects === true;
@@ -76,6 +84,17 @@ export async function runStartupCoordinator(options?: {
     // native splash instead of waiting for one before the other. Do not
     // block this path on PIN warm, PDFs, dashboard stats, or analytics.
     const jsFirebaseTask = (async (): Promise<boolean> => {
+      const runAppCheckTestSeam = async (): Promise<void> => {
+        if (!options?.initializeAppCheckLayerForTests) return;
+        try {
+          await options.initializeAppCheckLayerForTests({
+            isProduction: env.isProduction,
+          });
+        } catch {
+          // Unenforced diagnostic seam.
+        }
+      };
+
       if (isFirebaseConfigured()) {
         if (!skipNative) {
           try {
@@ -83,6 +102,19 @@ export async function runStartupCoordinator(options?: {
             const { getApps } = await import("firebase/app");
             const app = getFirebaseApp();
             const ready = Boolean(app) || getApps().length > 0;
+            if (ready) {
+              try {
+                const initLayer =
+                  options?.initializeAppCheckLayerForTests ??
+                  (await import("@/services/appCheck/bootstrap")).initializeAppCheckLayer;
+                await initLayer({
+                  isProduction: env.isProduction,
+                  getJsApp: () => app,
+                });
+              } catch {
+                // Unenforced. Do not fail JS Firebase init on App Check.
+              }
+            }
             if (ready && env.firebase.projectId.length === 0) {
               throw new StartupError(
                 "FIREBASE_PROJECT_MISMATCH",
@@ -95,8 +127,10 @@ export async function runStartupCoordinator(options?: {
             throw toStartupError(e, "FIREBASE_JS_INIT_FAILED", "JS_FIREBASE_READY");
           }
         }
+        await runAppCheckTestSeam();
         return true;
       }
+      await runAppCheckTestSeam();
       if (env.isProduction) {
         throw new StartupError(
           "FIREBASE_JS_MISSING",

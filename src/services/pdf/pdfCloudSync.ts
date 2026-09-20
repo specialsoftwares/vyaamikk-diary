@@ -23,9 +23,22 @@ export function packToCloudStorage(pack: ProfessionalServicePack): Record<string
   return stored;
 }
 
+function omitUndefinedDeep(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(omitUndefinedDeep);
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+      if (nested === undefined) continue;
+      out[key] = omitUndefinedDeep(nested);
+    }
+    return out;
+  }
+  return value;
+}
+
 export function letterheadDocToCloudStorage(
   doc: Omit<LetterheadDocument, "id"> | LetterheadDocument
 ): Record<string, unknown> {
   const { pdfUri: _omit, ...rest } = doc;
-  return { ...rest, pdfUri: null };
+  return omitUndefinedDeep({ ...rest, pdfUri: null }) as Record<string, unknown>;
 }

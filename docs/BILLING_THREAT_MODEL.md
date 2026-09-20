@@ -48,6 +48,7 @@ Baseline architecture facts this model is tied to:
 - **Mitigation:** every billing path has explicit rules; server-only
   collections (`_companyBilling`, `_subscriptionAuditLog`,
   `_processedBillingEvents`, `_billingEventLedger`, `_revenueReports`,
+  `_billingMaintenanceSchedule`, `_billingOps`,
   `_trialLedger`, `_billingRateLimits`) are `read/write: false`; the quota
   transition validates shape (`hasOnly`), monotonicity (+1 or reset-to-1),
   cap, IST month, and same-batch record linkage — all proven in the emulator

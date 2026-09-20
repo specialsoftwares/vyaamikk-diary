@@ -1,10 +1,9 @@
 import { getActiveBackend } from "@/config/env";
 
-import { mockProfessionalPackRepository } from "./mock";
-
 import type { ProfessionalPackRepository } from "./types";
 
 let cachedFirebasePack: ProfessionalPackRepository | null = null;
+let testOverride: ProfessionalPackRepository | null = null;
 
 export type {
   ProfessionalPackRepository,
@@ -13,7 +12,12 @@ export type {
   ListProfessionalPacksOptions,
 } from "./types";
 
+export function setProfessionalPackRepositoryForTests(repo: ProfessionalPackRepository | null): void {
+  testOverride = repo;
+}
+
 export function getProfessionalPackRepository(): ProfessionalPackRepository {
+  if (testOverride) return testOverride;
   const backend = getActiveBackend();
   if (backend === "firebase-production" || backend === "firebase-shared-dev") {
     if (!cachedFirebasePack) {
@@ -22,5 +26,5 @@ export function getProfessionalPackRepository(): ProfessionalPackRepository {
     }
     return cachedFirebasePack;
   }
-  return mockProfessionalPackRepository;
+  return require("./mock").mockProfessionalPackRepository as ProfessionalPackRepository;
 }

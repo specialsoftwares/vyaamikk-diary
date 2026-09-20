@@ -7,6 +7,44 @@
         { "fieldPath": "status", "order": "ASCENDING" },
         { "fieldPath": "graceExpiresAt", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "_billingReconciliationQueue",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "nextAttemptAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "_billingReconciliationQueue",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "leaseExpiresAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "_companyBilling",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "lastReconciledAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "_billingEventLedger",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "monthKey", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "_billingEventLedger",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "monthKey", "order": "ASCENDING" },
+        { "fieldPath": "__name__", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

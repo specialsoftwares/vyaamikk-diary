@@ -72,10 +72,10 @@ export function EmailOtpScreen({
           {!online ? <Banner tone="warning" message={t("common.offlineHint")} /> : null}
           {sendFailed ? (
             <AuthV2PrimaryButton
-              label="Retry sending"
+              label={t("authV2.emailOtp.retrySending")}
               onPress={onRetrySend}
               loading={sending}
-              loadingLabel="Sending OTP…"
+              loadingLabel={t("authV2.emailOtp.sending")}
               disabled={sending}
               purpose="retry"
               activeBg={tokens.ctaActiveBg}
@@ -88,7 +88,7 @@ export function EmailOtpScreen({
             <AuthV2PrimaryButton
               label={t("authV2.emailOtp.verify")}
               loading={loading || sending}
-              loadingLabel={sending ? "Sending OTP…" : t("authV2.emailOtp.verifying")}
+              loadingLabel={sending ? t("authV2.emailOtp.sending") : t("authV2.emailOtp.verifying")}
               disabled={!complete || !online || loading || !canVerify || sending}
               onPress={() => {
                 if (inFlightRef.current || loading) return;
@@ -113,21 +113,25 @@ export function EmailOtpScreen({
         </>
       }
     >
-      {sending ? <OnboardingInlineMessage tone="info" message="Sending OTP…" /> : null}
+      {sending ? (
+        <OnboardingInlineMessage tone="info" message={t("authV2.emailOtp.sending")} />
+      ) : null}
       {sendFailed ? (
         <OnboardingInlineMessage
           tone="danger"
-          message={error || "Could not send verification code. Please check the email address and try again."}
+          message={error || t("authV2.emailOtp.sendFailed")}
         />
       ) : null}
       {!sending && !sendFailed && validityRemaining > 0 ? (
         <OnboardingInlineMessage
           tone="muted"
-          message={`Code valid for ${formatOtpCountdownMmSs(validityRemaining)}`}
+          message={t("authV2.emailOtp.validFor", {
+            time: formatOtpCountdownMmSs(validityRemaining),
+          })}
         />
       ) : null}
       {!sending && !sendFailed && expired ? (
-        <OnboardingInlineMessage tone="danger" message="Code expired — request a new one." />
+        <OnboardingInlineMessage tone="danger" message={t("authV2.emailOtp.expired")} />
       ) : null}
       {error && !sendFailed ? <OnboardingInlineMessage tone="danger" message={error} /> : null}
 
@@ -138,13 +142,13 @@ export function EmailOtpScreen({
         disabled={loading || sending}
         error={Boolean(error)}
         testID="auth-v2-email-otp-input"
-        accessibilityLabel="Email verification code"
+        accessibilityLabel={t("authV2.emailOtp.inputA11y")}
       />
 
       <View style={styles.resendRow}>
         {resendRemaining > 0 ? (
           <LocaleUiText style={[styles.resendHint, { color: tokens.secondaryActionMuted }]}>
-            {`Resend OTP in ${formatOtpCountdownMmSs(resendRemaining)}`}
+            {t("otp.resendCountdown", { time: formatOtpCountdownMmSs(resendRemaining) })}
           </LocaleUiText>
         ) : (
           <AuthTertiaryTextAction
@@ -156,7 +160,7 @@ export function EmailOtpScreen({
             disabled={resendBlocked}
             loading={resending}
             purpose="retry"
-            accessibilityLabel="Resend email OTP"
+            accessibilityLabel={t("authV2.emailOtp.resendA11y")}
             testID="auth-v2-email-otp-resend"
           />
         )}

@@ -15,6 +15,10 @@ import { EntryRow } from "@/components/diary/EntryRow";
 import { useAuth } from "@/state/auth";
 import { useIsOnline } from "@/state/network";
 import { useDiaryList } from "@/state/useDiaryList";
+import { useSubscription } from "@/subscription";
+import { readOwnerQuotaUsage } from "@/subscription/quotaUsageReader";
+import { youDashboardQuotaWarning } from "@/subscription/youDashboardQuotaWarning";
+import { syncSessionOwnership } from "@/sync/syncSessionOwnership";
 import {
   buildYouDashboardViewModel,
   YOU_DASHBOARD_ENTRY_LIMIT,
@@ -38,6 +42,8 @@ export default function YouTab() {
   const t = useT();
   const router = useRouter();
   const { user } = useAuth();
+  const subscription = useSubscription();
+  const session = syncSessionOwnership.capture();
   const online = useIsOnline();
   const { resolvedMode } = useTheme();
   const isDark = resolvedMode === "dark";
@@ -92,7 +98,9 @@ export default function YouTab() {
   const [activeDraftCount, setActiveDraftCount] = useState(0);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerWorkTeamExpanded, setPickerWorkTeamExpanded] = useState(false);
+  const [quotaWarn80, setQuotaWarn80] = useState(false);
   const navigation = useNavigation();
+  const monthlyRecordLimit = subscription.features.monthlyRecordLimit;
 
   useFocusEffect(
     useCallback(() => {
@@ -105,6 +113,37 @@ export default function YouTab() {
         setPickerOpen(true);
       }
     }, [])
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      const admittedUid = session?.uid ?? null;
+      const admittedGen = session?.generation ?? 0;
+      if (!userId || !admittedUid || admittedUid !== userId) {
+        setQuotaWarn80(false);
+        return () => {
+          cancelled = true;
+        };
+      }
+      setQuotaWarn80(false);
+      void (async () => {
+        const usage = await readOwnerQuotaUsage(userId);
+        if (cancelled) return;
+        const live = syncSessionOwnership.capture();
+        if (!live || live.uid !== admittedUid || live.generation !== admittedGen) return;
+        const warning = youDashboardQuotaWarning({
+          features: subscription.features,
+          usage,
+          nowMs: Date.now(),
+        });
+        setQuotaWarn80(warning.kind === "warn80");
+      })();
+      return () => {
+        cancelled = true;
+      };
+      // Ownership is UID + generation; monthlyRecordLimit is the cap used for 80%.
+    }, [userId, session?.uid, session?.generation, monthlyRecordLimit, subscription.features]) // eslint-disable-line react-hooks/exhaustive-deps -- session object identity is not the key
   );
 
   useEffect(() => {
@@ -321,6 +360,16 @@ export default function YouTab() {
             <View style={[styles.banner, styles.topOfflineWrap]}>
               <Banner tone="danger" message={error} />
             </View>
+          ) : null}
+          {quotaWarn80 ? (
+            <Pressable
+              style={[styles.banner, styles.topOfflineWrap]}
+              onPress={() => router.push("/(app)/settings/subscription")}
+              accessibilityRole="button"
+              accessibilityLabel={t("billing.management.quotaWarn80")}
+            >
+              <Banner tone="warning" message={t("billing.management.quotaWarn80")} />
+            </Pressable>
           ) : null}
           <View style={styles.topDivider} />
           <LastRefreshedHint message={refreshNote} />

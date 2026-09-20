@@ -88,6 +88,9 @@ assert.deepEqual(violations, [], `raw plan comparisons outside allowlist:\n${vio
   assert.equal(deps["react-native-iap"], undefined);
   assert.match(pkg.scripts?.["lint:eslint"] ?? "", /src\/subscription\/\*\*\/\*\.\{ts,tsx\}/);
   assert.match(pkg.scripts?.["lint:eslint"] ?? "", /src\/billing\/iap\/\*\*\/\*\.\{ts,tsx\}/);
+  assert.match(pkg.scripts?.["lint:eslint"] ?? "", /src\/components\/billing\/\*\*\/\*\.\{ts,tsx\}/);
+  assert.match(pkg.scripts?.["lint:eslint"] ?? "", /src\/billing\/quotaUpsell\/\*\*\/\*\.\{ts,tsx\}/);
+  assert.match(pkg.scripts?.["lint:eslint"] ?? "", /src\/services\/appCheck\/\*\*\/\*\.\{ts,tsx\}/);
   assert.match(pkg.scripts?.["lint:eslint"] ?? "", /app\/_layout\.tsx/);
 }
 

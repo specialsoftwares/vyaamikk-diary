@@ -20,12 +20,16 @@ interface ComposerSaveSuccessProps {
   entry: BusinessEntry;
   pdfFailed: boolean;
   onAddAnother: () => void;
+  cloudAccepted?: boolean;
+  syncFailureKind?: string;
 }
 
 export function ComposerSaveSuccess({
   entry: entryProp,
   pdfFailed,
   onAddAnother,
+  cloudAccepted = true,
+  syncFailureKind,
 }: ComposerSaveSuccessProps) {
   const t = useT();
   const { lang } = useI18n();
@@ -148,15 +152,26 @@ export function ComposerSaveSuccess({
     ? t("composer.saveSuccess.viewPdf")
     : t("composer.saveSuccess.generatePdf");
 
+  const localWarning =
+    !cloudAccepted
+      ? {
+          title: t("sync.savedLocallyTitle"),
+          message:
+            syncFailureKind === "quota_exhausted"
+              ? t("sync.savedLocallyQuota")
+              : syncFailureKind === "permission_denied" || syncFailureKind === "quota_state_invalid"
+                ? t("sync.savedLocallyPermission")
+                : t("sync.savedLocallyPending"),
+        }
+      : pdfFailed
+        ? { title: t("pdf.entrySavedTitle"), message: t("pdf.entrySavedPdfFailed") }
+        : null;
+
   return (
     <PremiumSuccessPrompt
-      title={t("composer.saveSuccess.title")}
+      title={cloudAccepted ? t("composer.saveSuccess.title") : t("sync.savedLocallyTitle")}
       subtitle={entry.title}
-      warning={
-        pdfFailed
-          ? { title: t("pdf.entrySavedTitle"), message: t("pdf.entrySavedPdfFailed") }
-          : null
-      }
+      warning={localWarning}
       accentKey={accentKeyForEntryType(entry.entryType)}
       trustMessages={[
         t("executive.trust.local_first"),

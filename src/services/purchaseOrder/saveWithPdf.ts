@@ -1,12 +1,10 @@
 import type { PurchaseOrder } from "@/domain/purchaseOrder";
 import type { UserProfile } from "@/domain/types";
 import { englishPdfT } from "@/i18n/englishPdfT";
-import { pdfService } from "@/services/pdf/pdfService";
 import {
   buildPurchaseOrderHtml,
   purchaseOrderPdfLabels,
 } from "@/services/pdf/purchaseOrderPdfService";
-import { readProfileLogoDataUri } from "@/services/profileLogo/storage";
 import { logSaveDiagnostic } from "@/services/records/saveDiagnostics";
 import {
   beginCoordinatedSave,
@@ -16,14 +14,20 @@ import {
   shouldRunStep,
 } from "@/services/records/saveCoordinator";
 import { SAVE_STEP, SaveStillInProgressError, hasCompletedStep } from "@/services/records/saveLockTypes";
-import type { SaveIdempotencyContext } from "@/services/records/saveIdempotency";
+import type { SaveIdempotencyContext, ProcessSaveLockOwner } from "@/services/records/saveIdempotency";
 import { releaseProcessSaveLock } from "@/services/records/saveIdempotency";
-import { syncInsightsFromPurchaseOrder } from "@/services/insights/insightSync";
-import { invalidateGlobalSearchIndex } from "@/services/search/globalSearchRepository";
 import { dayKey } from "@/utils/date";
 
 import { getPurchaseOrderRepository } from "./index";
 import type { CreatePurchaseOrderInput, UpdatePurchaseOrderInput } from "./types";
+import { pdfGenerateHook } from "@/services/pdf/pdfGenerateHook";
+
+let saveEffectsForTests: (() => Promise<void>) | null = null;
+
+/** Node/CI seam. Production still runs insights + search after PDF. */
+export function setPurchaseOrderSaveEffectsForTests(hook: (() => Promise<void>) | null): void {
+  saveEffectsForTests = hook;
+}
 
 export async function savePurchaseOrderWithPdf(
   userId: string,
@@ -42,6 +46,7 @@ export async function savePurchaseOrderWithPdf(
     params.update?.id ?? params.idempotency?.idempotencyKey ?? null;
   let idempotency = params.idempotency;
   let completedSteps: string[] = [];
+  let processLockOwner: ProcessSaveLockOwner | null = null;
 
   try {
     if (!isUpdate && idempotency && params.create) {
@@ -52,6 +57,7 @@ export async function savePurchaseOrderWithPdf(
       });
       idempotency = begun.idempotency;
       params.create.clientRecordId = begun.clientRecordId;
+      processLockOwner = begun.processLockOwner;
 
       if (begun.decision.action === "return_done") {
         const existing = await getPurchaseOrderRepository().getById(
@@ -91,10 +97,10 @@ export async function savePurchaseOrderWithPdf(
       throw new Error("PO save requires create or update input.");
     }
 
-    const hasLogo = Boolean(params.user.profileLogo?.localUri);
     let logoDataUri: string | null = null;
-    if (saved.useLogo && params.user.profileLogo?.localUri) {
+    if (saved.useLogo && params.user.profileLogo?.localUri && !pdfGenerateHook() && !saveEffectsForTests) {
       try {
+        const { readProfileLogoDataUri } = await import("@/services/profileLogo/storage");
         logoDataUri = await readProfileLogoDataUri(params.user.profileLogo);
       } catch {
         logoDataUri = null;
@@ -106,12 +112,15 @@ export async function savePurchaseOrderWithPdf(
       shouldRunStep(completedSteps, SAVE_STEP.PDF_URI_SAVED, { pdfUri: saved.pdfUri });
 
     if (needsPdf) {
-      const html = buildPurchaseOrderHtml({
-        po: saved,
-        locale: params.locale,
-        labels: purchaseOrderPdfLabels(englishPdfT()),
-        logoDataUri,
-      });
+    const hooked = pdfGenerateHook();
+    const html = hooked
+      ? ""
+      : buildPurchaseOrderHtml({
+          po: saved,
+          locale: params.locale,
+          labels: purchaseOrderPdfLabels(englishPdfT()),
+          logoDataUri,
+        });
       try {
         const pdfStep = await runRecordStepIfNeeded(
           {
@@ -122,17 +131,22 @@ export async function savePurchaseOrderWithPdf(
             completedSteps,
             clientRecordId: params.create?.clientRecordId,
           },
-          () =>
-            pdfService.generate({
+          async () => {
+            const hooked = pdfGenerateHook();
+            const generateInput = {
               html,
               fileNameHint: `${saved.poNumber}`,
               fileName: {
-                documentType: "purchaseOrder",
+                documentType: "purchaseOrder" as const,
                 supplierName: saved.vendorName,
                 poSerial: saved.poNumber,
                 date: dayKey(saved.poDate),
               },
-            })
+            };
+            if (hooked) return hooked(generateInput);
+            const { pdfService } = await import("@/services/pdf/pdfService");
+            return pdfService.generate(generateInput);
+          }
         );
         completedSteps = pdfStep.completedSteps;
         if (pdfStep.ran && pdfStep.result) {
@@ -164,7 +178,14 @@ export async function savePurchaseOrderWithPdf(
         completedSteps,
         clientRecordId: params.create?.clientRecordId,
       },
-      async () => syncInsightsFromPurchaseOrder(userId, params.create?.ueid ?? saved.ueid, saved)
+      async () => {
+        if (saveEffectsForTests) {
+          await saveEffectsForTests();
+          return;
+        }
+        const { syncInsightsFromPurchaseOrder } = await import("@/services/insights/insightSync");
+        await syncInsightsFromPurchaseOrder(userId, params.create?.ueid ?? saved.ueid, saved);
+      }
     );
     completedSteps = insightsStep.completedSteps;
 
@@ -177,15 +198,20 @@ export async function savePurchaseOrderWithPdf(
         completedSteps,
         clientRecordId: params.create?.clientRecordId,
       },
-      async () => invalidateGlobalSearchIndex()
+      async () => {
+        if (saveEffectsForTests) return;
+        const { invalidateGlobalSearchIndex } = await import("@/services/search/globalSearchRepository");
+        invalidateGlobalSearchIndex();
+      }
     );
 
     if (idempotency && !isUpdate) {
       await completeCoordinatedSave(idempotency, saved.id, {
         processLockKey: processLockKey ?? undefined,
+        processLockOwner: processLockOwner ?? undefined,
       });
     } else if (processLockKey) {
-      releaseProcessSaveLock(processLockKey);
+      releaseProcessSaveLock(processLockKey, processLockOwner ?? undefined);
     }
 
     logSaveDiagnostic({
@@ -200,10 +226,11 @@ export async function savePurchaseOrderWithPdf(
     if (idempotency && !isUpdate) {
       await failCoordinatedSave(idempotency, "po_save_failed", {
         processLockKey: processLockKey ?? undefined,
+        processLockOwner: processLockOwner ?? undefined,
         clearRegistry: false,
       });
     } else if (processLockKey) {
-      releaseProcessSaveLock(processLockKey);
+      releaseProcessSaveLock(processLockKey, processLockOwner ?? undefined);
     }
     throw e;
   }
