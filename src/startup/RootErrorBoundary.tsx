@@ -1,5 +1,6 @@
 import React, { Component, type ErrorInfo, type ReactNode } from "react";
 
+import { recordError } from "@/services/telemetry/crashReporter";
 import type { StartupDiagnostics } from "./types";
 import { buildDiagnostics } from "./diagnostics";
 import { StartupFailureScreen } from "./StartupFailureScreen";
@@ -34,6 +35,7 @@ export class RootErrorBoundary extends Component<Props, State> {
   componentDidCatch(error: Error, info: ErrorInfo): void {
     // Keep console evidence for release debugging without showing secrets.
     console.error("[RootErrorBoundary]", error?.message, info?.componentStack);
+    recordError(error, "ErrorBoundary");
   }
 
   private retry = (): void => {

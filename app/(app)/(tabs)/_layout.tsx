@@ -14,6 +14,7 @@ import {
 
 import { DeferredLocationFootprintConsentHost } from "@/components/location/DeferredLocationFootprintConsentHost";
 import { DeferredStatutoryPromptHost } from "@/components/statutory/DeferredStatutoryPromptHost";
+import { TelemetryConsentHost } from "@/components/telemetry/TelemetryConsentHost";
 import { resolveYouTabIconConcept } from "@/components/you/YouTabIcon";
 import { useT } from "@/i18n";
 import { useTheme } from "@/theme";
@@ -114,6 +115,7 @@ export default function TabsLayout() {
       </NavigationThemeProvider>
       <DeferredStatutoryPromptHost />
       <DeferredLocationFootprintConsentHost />
+      <TelemetryConsentHost />
     </>
   );
 }

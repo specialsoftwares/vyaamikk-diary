@@ -1,4 +1,7 @@
 {
+  "react-native": {
+    "crashlytics_auto_collection_enabled": false
+  },
   "firestore": {
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"

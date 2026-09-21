@@ -107,6 +107,7 @@ export async function runStartupCoordinator(options?: {
                 const initLayer =
                   options?.initializeAppCheckLayerForTests ??
                   (await import("@/services/appCheck/bootstrap")).initializeAppCheckLayer;
+                // App Check initialised here — once, before Firestore or Cloud Functions.
                 await initLayer({
                   isProduction: env.isProduction,
                   getJsApp: () => app,

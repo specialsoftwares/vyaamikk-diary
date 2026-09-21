@@ -10,6 +10,7 @@ import { decideRootDataProviders } from "@/config/rootDataProviders";
 import { AppFeedbackProvider } from "@/feedback/AppFeedback";
 import { LocalDbProvider } from "@/state/localDb";
 import { AuthProvider } from "@/state/auth";
+import { CrashReportingBridge } from "@/services/telemetry/CrashReportingBridge";
 import { SubscriptionProvider } from "@/subscription";
 import { IapProvider } from "@/billing/iap";
 import { QuotaUpsellHost } from "@/billing/quotaUpsell";
@@ -61,6 +62,7 @@ function RootProviders({ children }: { children: React.ReactNode }) {
               <LocaleFontProvider>
                 <LocalDbProvider>
                   <AuthProvider>
+                    <CrashReportingBridge />
                     <SubscriptionProvider>
                       <IapProvider>
                         <QuotaUpsellHost>

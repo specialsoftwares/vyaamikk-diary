@@ -9,6 +9,7 @@ import {
   SettingsNavCard,
   SettingsNavGroup,
 } from "@/components/settings";
+import { CrashReportsPreferenceRow } from "@/components/settings/CrashReportsPreferenceRow";
 import { Screen, SkeletonLoadingPanel, SkeletonSettingsSection, LocaleUiText } from "@/components/ui";
 import { isBillingUxPreviewEnabled } from "@/components/billing/billingUxPreviewGate";
 import { getAuthEntryHref } from "@/config/authWrapper";
@@ -198,6 +199,7 @@ export default function SettingsTab() {
           onPress={onLegalHub}
           embedded
         />
+        <CrashReportsPreferenceRow />
       </SettingsNavGroup>
 
       {__DEV__ ? (
