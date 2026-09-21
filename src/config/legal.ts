@@ -7,8 +7,8 @@ export const LEGAL_CONSENT_VERSION = "1.0.0";
 export const LEGAL_PRIVACY_VERSION = "1.0.0";
 export const LEGAL_TERMS_VERSION = "1.0.0";
 
-/** Placeholder until counsel confirms publication date. */
-export const LEGAL_EFFECTIVE_DATE = "2026-09-22";
+/** Publication date confirmed by the founder. */
+export const LEGAL_EFFECTIVE_DATE = "2026-07-27";
 
 /** Legal entity placeholders — counsel must confirm before store submission. */
 export const LEGAL_ENTITY_NAME = LEGAL_OPERATOR;
