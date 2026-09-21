@@ -9,7 +9,9 @@
       "environment": "preview",
       "autoIncrement": false,
       "env": {
-        "EXPO_PUBLIC_APP_MODE": "production"
+        "EXPO_PUBLIC_APP_MODE": "production",
+        "EXPO_PUBLIC_SUBSCRIPTION_PURCHASE_ENTRY_ENABLED": "1",
+        "EXPO_PUBLIC_QUOTA_UPSELL_ENABLED": "1"
       },
       "android": {
         "buildType": "apk"
@@ -19,7 +21,9 @@
       "autoIncrement": false,
       "environment": "production",
       "env": {
-        "EXPO_PUBLIC_APP_MODE": "production"
+        "EXPO_PUBLIC_APP_MODE": "production",
+        "EXPO_PUBLIC_SUBSCRIPTION_PURCHASE_ENTRY_ENABLED": "1",
+        "EXPO_PUBLIC_QUOTA_UPSELL_ENABLED": "1"
       },
       "android": {
         "buildType": "app-bundle"
