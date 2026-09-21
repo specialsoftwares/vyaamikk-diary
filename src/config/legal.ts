@@ -8,18 +8,18 @@ export const LEGAL_PRIVACY_VERSION = "1.0.0";
 export const LEGAL_TERMS_VERSION = "1.0.0";
 
 /** Placeholder until counsel confirms publication date. */
-export const LEGAL_EFFECTIVE_DATE = "2026-07-01";
+export const LEGAL_EFFECTIVE_DATE = "2026-09-22";
 
 /** Legal entity placeholders — counsel must confirm before store submission. */
 export const LEGAL_ENTITY_NAME = LEGAL_OPERATOR;
 export const LEGAL_ENTITY_ADDRESS =
-  "[REGISTERED ADDRESS — Delhi NCR, India — confirm with counsel]";
+  "841, Plot 35, Sector 6, Dwarka, New Delhi, Delhi - 110075, India";
 
 /** Public website origin from env (production: https://vyaamikk.specialsoftwares.com). */
 export const LEGAL_PUBLIC_WEBSITE = env.brand.websiteUrl;
 
 export const LEGAL_GRIEVANCE_OFFICER = {
-  name: "[GRIEVANCE OFFICER NAME — confirm with counsel]",
+  name: "Shivam Saurav, Designated Partner",
   email: "grievance@specialsoftwares.in",
   address: LEGAL_ENTITY_ADDRESS,
 } as const;
