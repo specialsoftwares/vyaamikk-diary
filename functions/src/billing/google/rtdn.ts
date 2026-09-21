@@ -13,6 +13,7 @@ import { CANONICAL_PLAY_PACKAGE_NAME } from "./playConstants";
 import {
   processAndroidPurchaseToken,
   processAndroidVoidedPurchase,
+  processAndroidPendingRefundReview,
   type AndroidBillingDeps,
   type AndroidBillingResult,
 } from "./androidSubscriptionAdapter";
@@ -114,16 +115,14 @@ export async function handleAndroidRtdn(
   }
 
   if (notification.pendingRefundReviewNotification) {
-    billingLog("error", {
-      platform: "android",
+    const pending = notification.pendingRefundReviewNotification;
+    return processAndroidPendingRefundReview(deps, {
+      pendingRefundToken: pending.pendingRefundToken,
+      orderId: pending.orderId,
+      obfuscatedAccountId: pending.obfuscatedAccountId,
+      refundReason: pending.refundReason,
+      eventTimeMillis: notification.eventTimeMillis,
       messageId,
-      result: "pending_refund_review_unimplemented",
-      causeCode: "pending_refund_review_unimplemented",
-    });
-    throw new BillingError({
-      clientCode: "temporary_unavailable",
-      causeCode: "pending_refund_review_unimplemented",
-      retryable: true,
     });
   }
 

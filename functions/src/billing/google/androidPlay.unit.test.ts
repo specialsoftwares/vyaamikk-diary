@@ -52,6 +52,7 @@ const TOKEN = "RAW_PURCHASE_TOKEN_SECRET_VALUE_DO_NOT_PERSIST";
 const TOKEN2 = "RAW_PURCHASE_TOKEN_SECRET_VALUE_REPLACEMENT";
 const LINKED = "RAW_LINKED_TOKEN_SECRET_VALUE_DO_NOT_PERSIST";
 const EXPIRED_TOKEN = "RAW_EXPIRED_PURCHASE_TOKEN_SECRET_DO_NOT_PERSIST";
+const PENDING_REFUND_TOKEN = "PENDING_REFUND_TOKEN_SECRET";
 const ORDER1 = "GPA.3311-PLAY-1";
 const ORDER2 = "GPA.3311-PLAY-2";
 
@@ -199,6 +200,12 @@ class FakePlay implements PlayApi {
   ackFailRemaining = 0;
   getSubCalls = 0;
   capturedTokens: string[] = [];
+  reviewRefundCalls: Array<{
+    orderId: string;
+    pendingRefundToken: string;
+    sampleContentProvided: boolean;
+    refundPreference: string;
+  }> = [];
 
   constructor(sub: GoogleSubscriptionPurchaseV2, order?: GoogleOrder) {
     this.sub = sub;
@@ -244,6 +251,15 @@ class FakePlay implements PlayApi {
       this.sub.acknowledgementState = "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED";
     }
   }
+
+  async reviewRefund(input: {
+    orderId: string;
+    pendingRefundToken: string;
+    sampleContentProvided: boolean;
+    refundPreference: string;
+  }): Promise<void> {
+    this.reviewRefundCalls.push(input);
+  }
 }
 
 function secretsIn(value: unknown): boolean {
@@ -252,7 +268,8 @@ function secretsIn(value: unknown): boolean {
     blob.includes(TOKEN) ||
     blob.includes(TOKEN2) ||
     blob.includes(LINKED) ||
-    blob.includes(EXPIRED_TOKEN)
+    blob.includes(EXPIRED_TOKEN) ||
+    blob.includes(PENDING_REFUND_TOKEN)
   );
 }
 
@@ -958,22 +975,34 @@ async function main() {
     assert.equal(revoked.to?.entitlementActive, false);
     assert.equal(revoked.to?.billingStatus, "expired");
 
-    await assert.rejects(
-      handleAndroidRtdn(deps, {
-        message: {
-          messageId: "pending-review",
-          data: Buffer.from(
-            JSON.stringify({
-              packageName: "com.specialsoftwares.vyaamikkdiary",
-              pendingRefundReviewNotification: { pendingRefundToken: "PENDING_REFUND_TOKEN_SECRET" },
-            })
-          ).toString("base64"),
-        },
-      }),
-      isCause("pending_refund_review_unimplemented")
-    );
+    const orphaned = await handleAndroidRtdn(deps, {
+      message: {
+        messageId: "pending-review-orphan",
+        data: Buffer.from(
+          JSON.stringify({
+            packageName: "com.specialsoftwares.vyaamikkdiary",
+            pendingRefundReviewNotification: { pendingRefundToken: PENDING_REFUND_TOKEN },
+          })
+        ).toString("base64"),
+      },
+    });
+    assert.equal(orphaned.httpStatus, 200);
+    assert.equal(orphaned.action, "pending_refund_review_orphaned");
+    const orphanAgain = await handleAndroidRtdn(deps, {
+      message: {
+        messageId: "pending-review-orphan-2",
+        data: Buffer.from(
+          JSON.stringify({
+            packageName: "com.specialsoftwares.vyaamikkdiary",
+            pendingRefundReviewNotification: { pendingRefundToken: PENDING_REFUND_TOKEN },
+          })
+        ).toString("base64"),
+      },
+    });
+    assert.equal(orphanAgain.action, "pending_refund_review_orphaned");
+    assert.equal(play.reviewRefundCalls.length, 0);
     const blob = JSON.stringify([...store.docs.entries()]);
-    assert.equal(blob.includes("PENDING_REFUND_TOKEN_SECRET"), false);
+    assert.equal(blob.includes(PENDING_REFUND_TOKEN), false);
   }
 
   // N. rate limit 5/min then 6th then next window
@@ -1891,7 +1920,7 @@ async function main() {
           data: Buffer.from(
             JSON.stringify({
               packageName: "com.specialsoftwares.vyaamikkdiary",
-              pendingRefundReviewNotification: { pendingRefundToken: "PENDING_REFUND_TOKEN_SECRET" },
+              pendingRefundReviewNotification: { pendingRefundToken: PENDING_REFUND_TOKEN },
             })
           ).toString("base64"),
         },
@@ -1900,10 +1929,105 @@ async function main() {
       oidcVerifier: verifier,
       playBillingEnabled: true,
       oidcExpected: expected,
-    }).catch((err: unknown) => err);
-    assert.ok(http instanceof BillingError);
-    assert.equal((http as InstanceType<typeof BillingError>).causeCode, "pending_refund_review_unimplemented");
-    assert.equal((http as InstanceType<typeof BillingError>).retryable, true);
+    });
+    assert.equal(http.status, 200);
+    assert.equal(http.body.ok, true);
+    assert.equal(http.body.action, "pending_refund_review_orphaned");
+  }
+
+  // ReviewRefund: 24h API + entitlement only when Play already refunded
+  {
+    const play = new FakePlay(activeSub(), paidOrder(ORDER1, "249"));
+    const { deps, store } = await primedDeps(play);
+    play.sub.acknowledgementState = "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED";
+    await processAndroidPurchaseToken(deps, {
+      purchaseToken: TOKEN,
+      callerUid: UID,
+      source: "androidValidation",
+      eventSource: "callable",
+    });
+    const obfuscated = obfuscatedAccountIdForUid(UID);
+    const pendingBody = (messageId: string) => ({
+      message: {
+        messageId,
+        data: Buffer.from(
+          JSON.stringify({
+            packageName: "com.specialsoftwares.vyaamikkdiary",
+            eventTimeMillis: String(NOW),
+            pendingRefundReviewNotification: {
+              pendingRefundToken: PENDING_REFUND_TOKEN,
+              orderId: ORDER1,
+              refundReason: 7,
+              obfuscatedAccountId: obfuscated,
+            },
+          })
+        ).toString("base64"),
+      },
+    });
+    const activeReview = await handleAndroidRtdn(deps, pendingBody("pending-active"));
+    assert.equal(activeReview.httpStatus, 200);
+    assert.equal(activeReview.action, "pending_refund_review_active_noop");
+    assert.equal(activeReview.billing?.to?.entitlementActive, true);
+    assert.equal(play.reviewRefundCalls.length, 1);
+    assert.equal(play.reviewRefundCalls[0]?.refundPreference, "NEUTRAL");
+    const activeAgain = await handleAndroidRtdn(deps, pendingBody("pending-active-dup"));
+    assert.equal(activeAgain.action, "pending_refund_review_active_noop");
+    assert.equal(play.reviewRefundCalls.length, 1);
+    assertNoSecrets(store);
+
+    const refundPlay = new FakePlay(activeSub(), paidOrder(ORDER1, "249"));
+    const refundedBundle = await primedDeps(refundPlay);
+    refundPlay.sub.acknowledgementState = "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED";
+    await processAndroidPurchaseToken(refundedBundle.deps, {
+      purchaseToken: TOKEN,
+      callerUid: UID,
+      source: "androidValidation",
+      eventSource: "callable",
+    });
+    refundPlay.sub = activeSub({
+      subscriptionState: "SUBSCRIPTION_STATE_EXPIRED",
+      acknowledgementState: "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED",
+    });
+    refundPlay.orders.set(ORDER1, refundedOrder(paidOrder(ORDER1, "249"), rfc(NOW)));
+    const issuedToken = "PENDING_REFUND_TOKEN_ISSUED_SECOND";
+    const issued = await handleAndroidRtdn(refundedBundle.deps, {
+      message: {
+        messageId: "pending-issued",
+        data: Buffer.from(
+          JSON.stringify({
+            packageName: "com.specialsoftwares.vyaamikkdiary",
+            eventTimeMillis: String(NOW),
+            pendingRefundReviewNotification: {
+              pendingRefundToken: issuedToken,
+              orderId: ORDER1,
+              refundReason: 7,
+              obfuscatedAccountId: obfuscatedAccountIdForUid(UID),
+            },
+          })
+        ).toString("base64"),
+      },
+    });
+    assert.equal(issued.httpStatus, 200);
+    assert.equal(issued.action, "pending_refund_review_refunded");
+    assert.equal(issued.billing?.to?.entitlementActive, false);
+    assert.equal(refundPlay.reviewRefundCalls.length, 1);
+    const issuedBlob = JSON.stringify([...refundedBundle.store.docs.entries()]);
+    assert.equal(issuedBlob.includes(issuedToken), false);
+
+    const client = new PlayApiClient({
+      getAccessToken: async () => "adc-token",
+      fetchImpl: async (url, init) => {
+        assert.match(url, /\/orders\/GPA\.3311-PLAY-1:reviewrefund$/);
+        assert.equal(init.method, "POST");
+        return { status: 200, ok: true };
+      },
+    });
+    await client.reviewRefund({
+      orderId: ORDER1,
+      pendingRefundToken: PENDING_REFUND_TOKEN,
+      sampleContentProvided: true,
+      refundPreference: "NEUTRAL",
+    });
   }
 
   // Round-3: chargeback, ownership completeness, owned-state order, etag lifecycle

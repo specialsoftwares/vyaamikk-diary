@@ -47,6 +47,7 @@ class FakePlay implements PlayApi {
   async acknowledgeSubscription(): Promise<void> {
     this.ackCalls += 1;
   }
+  async reviewRefund(): Promise<void> {}
 }
 
 async function main() {

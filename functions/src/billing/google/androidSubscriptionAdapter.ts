@@ -20,6 +20,7 @@ import { billingLog } from "../log";
 import {
   companyBillingPath,
   financialLedgerPath,
+  processedEventPath,
   sanitizeDocId,
   subscriptionStatusPath,
 } from "../paths";
@@ -29,7 +30,7 @@ import {
   refundReconciliationQueueId,
   resolveReconciliationWorkItem,
 } from "../reconciliationQueue";
-import type { BillingStore } from "../store";
+import { AlreadyExistsError, type BillingStore } from "../store";
 import {
   financialEventIdForStore,
   type CanonicalTransitionKind,
@@ -41,6 +42,7 @@ import type {
   BillingEventLedgerDoc,
   BillingMutationSource,
   CompanyBillingDoc,
+  ProcessedBillingEventDoc,
   SubscriptionStatusDoc,
   VyaamikkPlan,
 } from "../types";
@@ -65,9 +67,10 @@ import {
   ensurePlayCredentialIndex,
   playOwnershipIdentifiersPresent,
   resolvePlayPurchaseOwner,
+  resolveUidFromObfuscatedAccountId,
 } from "./playOwnership";
 import { parseGoogleEventTimeMillis, parseRfc3339Millis, parseRfc3339MillisOrNull } from "./playTime";
-import { assertPurchaseToken, assertOrderId } from "./playToken";
+import { assertPurchaseToken, assertOrderId, secretPrefixForLog } from "./playToken";
 import type { PlayApi } from "./playApiClient";
 import type {
   GoogleOrder,
@@ -1281,6 +1284,260 @@ export async function processAndroidVoidedPurchase(
       err instanceof BillingError ? err.causeCode : "refund_live_reconciliation_failed";
     return refundRecordedWithoutLiveReconcile(reason);
   }
+}
+
+const REFUNDED_ORDER_STATES = new Set(["REFUNDED", "ORDER_STATE_REFUNDED"]);
+
+export interface PendingRefundReviewResult {
+  httpStatus: number;
+  action: string;
+  billing?: AndroidBillingResult;
+}
+
+function pendingRefundReviewIdempotencyKey(pendingRefundToken: string): string {
+  return `android:pendingRefundReview:${credentialFingerprint(pendingRefundToken)}`;
+}
+
+async function readProcessedPendingRefundReview(
+  store: BillingStore,
+  idempotencyKey: string
+): Promise<ProcessedBillingEventDoc | null> {
+  return store.runTransaction(async (tx) => {
+    const snap = await tx.get(processedEventPath(sanitizeDocId(idempotencyKey)));
+    if (!snap.exists) return null;
+    return snap.data() as unknown as ProcessedBillingEventDoc;
+  });
+}
+
+async function persistProcessedPendingRefundReview(
+  store: BillingStore,
+  doc: ProcessedBillingEventDoc
+): Promise<void> {
+  const path = processedEventPath(sanitizeDocId(doc.idempotencyKey));
+  try {
+    await store.runTransaction(async (tx) => {
+      const snap = await tx.get(path);
+      if (snap.exists) return;
+      tx.create(path, doc as unknown as Record<string, unknown>);
+    });
+  } catch (err) {
+    if (err instanceof AlreadyExistsError) return;
+    throw err;
+  }
+}
+
+async function resolveUidForPendingRefundReview(
+  store: BillingStore,
+  input: { obfuscatedAccountId: unknown; orderId: string | null }
+): Promise<string | null> {
+  if (typeof input.obfuscatedAccountId === "string" && input.obfuscatedAccountId.length > 0) {
+    const fromAccount = await resolveUidFromObfuscatedAccountId(store, input.obfuscatedAccountId);
+    if (fromAccount) return fromAccount;
+  }
+  if (!input.orderId) return null;
+  const purchase = await readLedger(
+    store,
+    financialEventIdForStore({ platform: "android", eventType: "purchase", orderId: input.orderId })
+  );
+  if (purchase?.uid) return purchase.uid;
+  const renewal = await readLedger(
+    store,
+    financialEventIdForStore({ platform: "android", eventType: "renewal", orderId: input.orderId })
+  );
+  return renewal?.uid ?? null;
+}
+
+/**
+ * pendingRefundReviewNotification / orders.reviewrefund (VYD-32).
+ *
+ * This notification is a 24h chargeback-review signal. It is not a purchase
+ * token and must not be passed to subscriptionsv2.get. Entitlement changes
+ * only when Play already shows a completed refund (or an expired live
+ * subscription after decrypting the current credential). Always HTTP 200
+ * for a well-formed handled notification; retryable Play API failures still
+ * propagate so Pub/Sub can redeliver within the review window.
+ */
+export async function processAndroidPendingRefundReview(
+  deps: AndroidBillingDeps,
+  input: {
+    pendingRefundToken: unknown;
+    orderId: unknown;
+    obfuscatedAccountId: unknown;
+    refundReason?: unknown;
+    eventTimeMillis: unknown;
+    messageId: string;
+  }
+): Promise<PendingRefundReviewResult> {
+  const pendingRefundToken = assertPurchaseToken(input.pendingRefundToken);
+  const tokenPrefix = secretPrefixForLog(pendingRefundToken);
+  const idempotencyKey = pendingRefundReviewIdempotencyKey(pendingRefundToken);
+
+  const existing = await readProcessedPendingRefundReview(deps.store, idempotencyKey);
+  if (existing) {
+    billingLog("info", {
+      platform: "android",
+      messageId: input.messageId,
+      diagnosticUid: existing.diagnosticUid,
+      result: existing.resultSummary,
+    });
+    return { httpStatus: 200, action: existing.resultSummary };
+  }
+
+  const orderId =
+    typeof input.orderId === "string" && input.orderId.length > 0
+      ? assertOrderId(input.orderId)
+      : null;
+
+  if (orderId) {
+    await deps.play.reviewRefund({
+      orderId,
+      pendingRefundToken,
+      sampleContentProvided: true,
+      refundPreference: "NEUTRAL",
+    });
+  }
+
+  const uid = await resolveUidForPendingRefundReview(deps.store, {
+    obfuscatedAccountId: input.obfuscatedAccountId,
+    orderId,
+  });
+
+  if (!uid) {
+    billingLog("info", {
+      platform: "android",
+      messageId: input.messageId,
+      tokenPrefix,
+      result: "pending_refund_review_orphaned",
+    });
+    await persistProcessedPendingRefundReview(deps.store, {
+      idempotencyKey,
+      source: "rtdn",
+      processedAt: deps.nowMs(),
+      resultSummary: "pending_refund_review_orphaned",
+      requestFingerprint: credentialFingerprint(pendingRefundToken),
+      diagnosticUid: "unresolved",
+    });
+    return { httpStatus: 200, action: "pending_refund_review_orphaned" };
+  }
+
+  const diagnosticUid = deps.diagnosticUidFor(uid);
+  const company = await readCompany(deps.store, uid);
+  const purchaseToken = await decryptVerifiedCurrentPurchaseToken(deps.cipher, company);
+
+  let googleSubscriptionState: string | null = null;
+  if (purchaseToken) {
+    try {
+      const sub = await deps.play.getSubscriptionV2(purchaseToken);
+      googleSubscriptionState = sub.subscriptionState ?? null;
+    } catch (err) {
+      if (isRetryableBillingError(err)) throw err;
+      googleSubscriptionState = null;
+    }
+  }
+
+  let order: GoogleOrder | null = null;
+  if (orderId) {
+    try {
+      order = await deps.play.getOrder(orderId);
+    } catch (err) {
+      if (isRetryableBillingError(err)) throw err;
+      order = null;
+    }
+  }
+
+  const orderRefunded = order?.state != null && REFUNDED_ORDER_STATES.has(order.state);
+  const subExpired = googleSubscriptionState === "SUBSCRIPTION_STATE_EXPIRED";
+
+  if (orderRefunded && purchaseToken && orderId) {
+    let eventTimeMillis: number;
+    try {
+      eventTimeMillis = parseGoogleEventTimeMillis(
+        input.eventTimeMillis,
+        "missing_rtdn_event_time"
+      );
+    } catch {
+      eventTimeMillis = deps.nowMs();
+    }
+    const billing = await processAndroidVoidedPurchase(deps, {
+      purchaseToken,
+      orderId,
+      productType: 1,
+      refundType: 1,
+      source: "rtdn",
+      eventTimeMillis,
+    });
+    await persistProcessedPendingRefundReview(deps.store, {
+      idempotencyKey,
+      source: "rtdn",
+      processedAt: deps.nowMs(),
+      resultSummary: "pending_refund_review_refunded",
+      requestFingerprint: credentialFingerprint(pendingRefundToken),
+      diagnosticUid,
+    });
+    billingLog("info", {
+      diagnosticUid,
+      platform: "android",
+      messageId: input.messageId,
+      orderId,
+      googleSubscriptionState: googleSubscriptionState ?? undefined,
+      result: "pending_refund_review_refunded",
+    });
+    return { httpStatus: 200, action: "pending_refund_review_refunded", billing };
+  }
+
+  if (subExpired && purchaseToken) {
+    const billing = await processAndroidPurchaseToken(deps, {
+      purchaseToken,
+      source: "rtdn",
+      eventSource: "webhook",
+      expectedUid: uid,
+    });
+    await persistProcessedPendingRefundReview(deps.store, {
+      idempotencyKey,
+      source: "rtdn",
+      processedAt: deps.nowMs(),
+      resultSummary: "pending_refund_review_expired_reconciled",
+      requestFingerprint: credentialFingerprint(pendingRefundToken),
+      diagnosticUid,
+    });
+    billingLog("info", {
+      diagnosticUid,
+      platform: "android",
+      messageId: input.messageId,
+      googleSubscriptionState: googleSubscriptionState ?? undefined,
+      result: "pending_refund_review_expired_reconciled",
+    });
+    return {
+      httpStatus: 200,
+      action: "pending_refund_review_expired_reconciled",
+      billing,
+    };
+  }
+
+  billingLog("info", {
+    diagnosticUid,
+    platform: "android",
+    messageId: input.messageId,
+    orderId: orderId ?? undefined,
+    googleSubscriptionState: googleSubscriptionState ?? undefined,
+    result: "pending_refund_review_active_noop",
+  });
+  await persistProcessedPendingRefundReview(deps.store, {
+    idempotencyKey,
+    source: "rtdn",
+    processedAt: deps.nowMs(),
+    resultSummary: "pending_refund_review_active_noop",
+    requestFingerprint: credentialFingerprint(pendingRefundToken),
+    diagnosticUid,
+  });
+  return {
+    httpStatus: 200,
+    action: "pending_refund_review_active_noop",
+    billing: emptyResult(uid, diagnosticUid, "pending_refund_review_active_noop", {
+      googleSubscriptionState,
+      to: await readStatus(deps.store, uid),
+    }),
+  };
 }
 
 export {

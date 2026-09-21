@@ -27,6 +27,12 @@ export function assertPurchaseToken(value: unknown): string {
   return value;
 }
 
+/** First 8 characters for orphan logs. Never log the remainder. */
+export function secretPrefixForLog(value: string): string {
+  if (typeof value !== "string" || value.length === 0) return "";
+  return value.slice(0, 8);
+}
+
 export function assertOrderId(value: unknown): string {
   if (typeof value !== "string" || value.length === 0 || value.length > 256) {
     throw new BillingError({

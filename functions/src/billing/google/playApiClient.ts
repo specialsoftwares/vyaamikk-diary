@@ -27,10 +27,20 @@ export const PLAY_API_TIMEOUT_MS = 15_000;
 
 const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504]);
 
+export type PlayRefundPreference = "NEUTRAL" | "APPROVE" | "DECLINE";
+
+export interface PlayReviewRefundInput {
+  orderId: string;
+  pendingRefundToken: string;
+  sampleContentProvided: boolean;
+  refundPreference: PlayRefundPreference;
+}
+
 export interface PlayApi {
   getSubscriptionV2(purchaseToken: string): Promise<GoogleSubscriptionPurchaseV2>;
   getOrder(orderId: string): Promise<GoogleOrder>;
   acknowledgeSubscription(purchaseToken: string, productId: string): Promise<void>;
+  reviewRefund(input: PlayReviewRefundInput): Promise<void>;
 }
 
 export type PlayFetcher = (
@@ -292,6 +302,56 @@ export class PlayApiClient implements PlayApi {
         signal: ac.signal,
       });
       if (!res.ok) throw playHttpError(res.status);
+    } catch (err) {
+      if (err instanceof BillingError) throw err;
+      const name = err instanceof Error ? err.name : "";
+      if (name === "AbortError" || name === "TimeoutError") {
+        throw new BillingError({
+          clientCode: "temporary_unavailable",
+          causeCode: "play_api_timeout",
+          retryable: true,
+        });
+      }
+      throw new BillingError({
+        clientCode: "temporary_unavailable",
+        causeCode: "play_api_network",
+        retryable: true,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
+   * orders.reviewrefund — required within 24h of pendingRefundReviewNotification.
+   * Subsequent calls for the same pendingRefundToken are ignored by Google and
+   * still return OK. Never log pendingRefundToken or the request body.
+   */
+  async reviewRefund(input: PlayReviewRefundInput): Promise<void> {
+    const orderId = input.orderId;
+    const url =
+      `${PLAY_API_BASE}/${encodeURIComponent(this.packageName)}` +
+      `/orders/${encodeURIComponent(orderId)}:reviewrefund`;
+    const token = await this.getAccessToken();
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), this.timeoutMs);
+    try {
+      const res = await this.fetchImpl(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          pendingRefundToken: input.pendingRefundToken,
+          sampleContentProvided: input.sampleContentProvided,
+          refundPreference: input.refundPreference,
+        }),
+        signal: ac.signal,
+      });
+      if (res.ok || res.status === 409) return;
+      throw playHttpError(res.status);
     } catch (err) {
       if (err instanceof BillingError) throw err;
       const name = err instanceof Error ? err.name : "";

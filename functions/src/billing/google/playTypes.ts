@@ -214,7 +214,12 @@ export interface GoogleDeveloperNotification {
     version?: string;
   };
   pendingRefundReviewNotification?: {
+    version?: string;
     pendingRefundToken?: string;
+    orderId?: string;
+    refundReason?: number;
+    obfuscatedAccountId?: string;
+    obfuscatedProfileId?: string;
   };
 }
 

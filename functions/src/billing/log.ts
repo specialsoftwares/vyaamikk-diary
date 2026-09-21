@@ -25,6 +25,7 @@ export const BILLING_LOG_ALLOWED_KEYS = [
   "originalTransactionId",
   "notificationUUID",
   "reconciledAt",
+  "tokenPrefix",
 ] as const;
 
 export type BillingLogField = (typeof BILLING_LOG_ALLOWED_KEYS)[number];
