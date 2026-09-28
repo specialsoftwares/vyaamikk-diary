@@ -17,6 +17,7 @@ export {
   quantity,
 } from "./quantities";
 export {
+  appendPortalObservation,
   appendQcEvent,
   cancellationEvidenceError,
   emptyEwbHistories,
@@ -32,10 +33,12 @@ export { evidenceCompleteness, verifyOriginalBytes } from "./evidence";
 export {
   assembleManifest,
   cutMatchesEventStream,
+  EVIDENCE_INVENTORY_VERSION,
   EVIDENCE_PACK_SECTIONS,
   evaluatePackCompleteness,
   mayMarkComplete,
   pinEventCut,
+  REQUIRED_EVIDENCE_ITEMS,
 } from "./evidencePack";
 export { canonicalJson } from "./canonical";
 export { detectBrokenChain, hashCanonical } from "./hashChain";
@@ -43,3 +46,4 @@ export { freezeCommand } from "./command";
 export { InMemoryGoodsLedger } from "./ledger";
 export { createOfflineCapture } from "./offline";
 export { freezeSnapshot } from "./snapshot";
+export { derivePhysicalCustody } from "./custody";

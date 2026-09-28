@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 
 import {
   appendMovementEvent,
+  appendPortalObservation,
   appendQcEvent,
   emptyEwbHistories,
   latestCancellationEvidence,
   latestMovement,
   latestPortalStatus,
   latestQc,
+  linkReplacement,
   recordArrival,
   recordPortalCancellation,
 } from "./ewb";
@@ -81,5 +83,83 @@ assert.throws(() => {
 });
 evidence.reason = "mutated evidence";
 assert.equal(latestCancellationEvidence(histories)?.reason, "vehicle breakdown before dispatch");
+
+{
+  const emptyReason = { ...evidence, reason: "" };
+  const generic = appendPortalObservation(emptyEwbHistories(), {
+    observedAtUtc: "2026-09-28T10:00:00.000Z",
+    source: "imported_document",
+    verificationLevel: "imported_document",
+    status: "cancelled",
+    evidence: emptyReason,
+  });
+  assert.equal(generic.ok, true);
+  if (!generic.ok) throw new Error("generic");
+  assert.equal(generic.admission, "unvalidated_incomplete");
+  assert.equal(latestPortalStatus(generic.histories), "cancellation_unvalidated");
+  assert.equal(latestCancellationEvidence(generic.histories), null);
+  assert.equal(latestMovement(generic.histories), null);
+}
+
+{
+  const parsed = JSON.parse(
+    JSON.stringify({
+      observedAtUtc: "2026-09-28T10:00:00.000Z",
+      source: "user_reported",
+      verificationLevel: "user_reported",
+      status: "cancelled",
+      evidence: { reason: "", goodsMoved: "no", goodsMovedUnknownReason: null },
+    })
+  ) as unknown;
+  const fromJson = appendPortalObservation(emptyEwbHistories(), parsed);
+  assert.equal(fromJson.ok, true);
+  if (!fromJson.ok) throw new Error("json");
+  assert.equal(fromJson.admission, "unvalidated_incomplete");
+  assert.notEqual(latestPortalStatus(fromJson.histories), "cancelled");
+}
+
+{
+  const admitted = appendPortalObservation(emptyEwbHistories(), {
+    observedAtUtc: "2026-09-28T10:00:00.000Z",
+    source: "user_reported",
+    verificationLevel: "user_reported",
+    status: "cancelled",
+    evidence,
+  });
+  assert.equal(admitted.ok, true);
+  if (!admitted.ok) throw new Error("admitted");
+  assert.equal(admitted.admission, "admitted");
+  assert.equal(latestPortalStatus(admitted.histories), "cancelled");
+}
+
+{
+  const active = appendPortalObservation(emptyEwbHistories(), {
+    observedAtUtc: "2026-09-28T10:00:00.000Z",
+    source: "user_reported",
+    verificationLevel: "user_reported",
+    status: "generated_active",
+  });
+  assert.equal(active.ok, true);
+  if (!active.ok) throw new Error("active");
+  assert.equal(latestPortalStatus(active.histories), "generated_active");
+  const moved = appendMovementEvent(active.histories, {
+    atUtc: "2026-09-28T11:00:00.000Z",
+    movement: "in_transit",
+    reason: "left yard",
+  });
+  const qced = appendQcEvent(moved, {
+    atUtc: "2026-09-28T12:00:00.000Z",
+    qc: "hold",
+    reason: "awaiting sample",
+  });
+  const linked = linkReplacement(qced, {
+    previousEbn: "111",
+    newEbn: "222",
+    reason: "portal replacement",
+  });
+  assert.equal(latestPortalStatus(linked), "generated_active");
+  assert.equal(latestMovement(linked), "in_transit");
+  assert.equal(latestQc(linked), "hold");
+}
 
 console.log("goodsEvidence/ewb.test.ts: ok");

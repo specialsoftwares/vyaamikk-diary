@@ -122,6 +122,38 @@ export function isNonNegative(value: DecimalString): boolean {
   return compareDecimal(value, "0") >= 0;
 }
 
+export function quantityShapeError(
+  value: unknown,
+  options: { label: string; allowNegative?: boolean; requiredUnit?: string | null }
+): string | null {
+  if (value == null || typeof value !== "object") return `${options.label} is required`;
+  const qty = value as { value?: unknown; unit?: unknown; precision?: unknown };
+  if (typeof qty.value !== "string") return `${options.label} value is required`;
+  try {
+    assertDecimalString(qty.value);
+  } catch {
+    return `${options.label} is not a bounded decimal string`;
+  }
+  if (typeof qty.unit !== "string" || !qty.unit.trim()) return `${options.label} unit is required`;
+  if (options.requiredUnit && qty.unit !== options.requiredUnit) {
+    return `${options.label} unit must be ${options.requiredUnit}`;
+  }
+  if (
+    typeof qty.precision !== "number" ||
+    !Number.isInteger(qty.precision) ||
+    qty.precision < 0 ||
+    qty.precision > MAX_DECIMAL_FRACTION_DIGITS
+  ) {
+    return `${options.label} precision is invalid`;
+  }
+  const fraction = qty.value.includes(".") ? qty.value.split(".")[1]!.length : 0;
+  if (fraction > qty.precision) return `${options.label} precision does not cover the value`;
+  if (!options.allowNegative && compareDecimal(qty.value, "0") < 0) {
+    return `${options.label} must not be negative`;
+  }
+  return null;
+}
+
 export function sameUnit(a: Quantity, b: Quantity): boolean {
   return a.unit === b.unit;
 }

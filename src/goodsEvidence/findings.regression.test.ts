@@ -8,7 +8,13 @@ import { __setRuntimeSignalsForTests } from "@/config/env";
 
 import { freezeCommand } from "./command";
 import { assembleManifest } from "./evidencePack";
-import { recordPortalCancellation, emptyEwbHistories, latestCancellationEvidence } from "./ewb";
+import {
+  appendPortalObservation,
+  recordPortalCancellation,
+  emptyEwbHistories,
+  latestCancellationEvidence,
+  latestPortalStatus,
+} from "./ewb";
 import { isGoodsEvidenceEnabled } from "./featureFlag";
 import { InMemoryGoodsLedger } from "./ledger";
 import { sampleLine, sampleRegisterBody } from "./testFixtures";
@@ -508,6 +514,463 @@ function testLedger(): InMemoryGoodsLedger {
   );
   assert.equal(overLinked.ok, false);
   if (overLinked.ok) throw new Error("over linked");
+}
+
+{
+  const store = testLedger();
+  const invalid = store.register(
+    freezeCommand({
+      commandId: "bad_reg",
+      type: "registerGoodsReceipt",
+      ownerUid: "owner_1",
+      ledgerId: "ledger_1",
+      body: sampleRegisterBody({
+        receiptId: "bad_reg",
+        supplier: null as unknown as ReturnType<typeof sampleRegisterBody>["supplier"],
+        lines: [
+          sampleLine({
+            physicallyReceived: { value: "-5", unit: "kg", precision: 0 },
+          }),
+        ],
+      }),
+    })
+  );
+  assert.equal(invalid.ok, false);
+  if (invalid.ok) throw new Error("invalid register");
+  assert.equal(invalid.code, "invalid");
+  assert.equal(store.getOriginal("bad_reg"), undefined);
+  assert.equal(store.getEvents("bad_reg").length, 0);
+  const later = store.register(
+    freezeCommand({
+      commandId: "good_after_bad",
+      type: "registerGoodsReceipt",
+      ownerUid: "owner_1",
+      ledgerId: "ledger_1",
+      body: sampleRegisterBody({ receiptId: "good_after_bad" }),
+    })
+  );
+  assert.equal(later.ok, true);
+  if (!later.ok) throw new Error("later");
+  assert.equal(later.issuedNumber, "GRIN/MAIN/FY2026-27/000001");
+}
+
+{
+  const store = testLedger();
+  const duplicateLines = store.register(
+    freezeCommand({
+      commandId: "dup_lines",
+      type: "registerGoodsReceipt",
+      ownerUid: "owner_1",
+      ledgerId: "ledger_1",
+      body: sampleRegisterBody({
+        receiptId: "dup_lines",
+        lines: [sampleLine({ lineId: "line_1" }), sampleLine({ lineId: "line_1", description: "dup" })],
+      }),
+    })
+  );
+  assert.equal(duplicateLines.ok, false);
+  assert.equal(store.getOriginal("dup_lines"), undefined);
+}
+
+{
+  const store = testLedger();
+  const wrongType = freezeCommand({
+    commandId: "wrong_type",
+    type: "amendFields",
+    ownerUid: "owner_1",
+    ledgerId: "ledger_1",
+    body: sampleRegisterBody({ receiptId: "wrong_type" }) as unknown as {
+      receiptId: string;
+      expectedVersion: number;
+      reason: string;
+      changes: Record<string, unknown>;
+      clientObservedAtUtc: string;
+    },
+  });
+  const denied = store.register(wrongType as never);
+  assert.equal(denied.ok, false);
+  if (denied.ok) throw new Error("type");
+  assert.equal(denied.code, "invalid");
+  assert.equal(store.getOriginal("wrong_type"), undefined);
+}
+
+{
+  let throwNext = false;
+  let n = 0;
+  const store = new InMemoryGoodsLedger(
+    "owner_1",
+    "ledger_1",
+    {
+      nowMs: () => Date.UTC(2026, 8, 28, 12, 0, 0, 0),
+      uuid: () => {
+        if (throwNext) throw new Error("injected uuid failure");
+        return `atom_${++n}`;
+      },
+    },
+    "simulated-domain-test"
+  );
+  throwNext = true;
+  const regCmd = freezeCommand({
+    commandId: "atom_reg",
+    type: "registerGoodsReceipt",
+    ownerUid: "owner_1",
+    ledgerId: "ledger_1",
+    body: sampleRegisterBody({ receiptId: "atom_reg" }),
+  });
+  assert.throws(() => store.register(regCmd));
+  assert.equal(store.getOriginal("atom_reg"), undefined);
+  throwNext = false;
+  const issued = store.register(regCmd);
+  assert.equal(issued.ok, true);
+  if (!issued.ok) throw new Error("atom issued");
+  assert.equal(issued.issuedNumber, "GRIN/MAIN/FY2026-27/000001");
+
+  const beforeRemarks = store.getEffective("atom_reg")!.remarks;
+  const beforeHead = store.getView("atom_reg")!;
+  const amdCmd = freezeCommand({
+    commandId: "atom_amd",
+    type: "amendFields",
+    ownerUid: "owner_1",
+    ledgerId: "ledger_1",
+    body: {
+      receiptId: "atom_reg",
+      expectedVersion: 1,
+      reason: "note",
+      changes: { remarks: { kind: "present", value: "should not stick" } },
+      clientObservedAtUtc: "2026-09-28T13:00:00.000Z",
+    },
+  });
+  throwNext = true;
+  assert.throws(() => store.amend(amdCmd));
+  assert.deepEqual(store.getEffective("atom_reg")!.remarks, beforeRemarks);
+  assert.equal(store.getEvents("atom_reg").length, 1);
+  assert.equal(store.getView("atom_reg")!.eventVersion, beforeHead.eventVersion);
+  assert.equal(store.getView("atom_reg")!.headHash, beforeHead.headHash);
+  throwNext = false;
+  const retried = store.amend(amdCmd);
+  assert.equal(retried.ok, true);
+  assert.equal(store.getEvents("atom_reg").length, 2);
+  assert.equal(store.getEffective("atom_reg")!.remarks.kind, "present");
+
+  const beforeQty = store.getLineLedger("atom_reg", "line_1")!.dispatchedReturn.value;
+  const dispCmd = freezeCommand({
+    commandId: "atom_disp",
+    type: "dispatchReturn",
+    ownerUid: "owner_1",
+    ledgerId: "ledger_1",
+    body: {
+      receiptId: "atom_reg",
+      expectedVersion: 2,
+      reason: "partial return",
+      lineId: "line_1",
+      returnQty: { value: "5", unit: "bags", precision: 0 },
+      clientObservedAtUtc: "2026-09-28T15:00:00.000Z",
+    },
+  });
+  throwNext = true;
+  assert.throws(() => store.dispatchReturn(dispCmd));
+  assert.equal(store.getLineLedger("atom_reg", "line_1")!.dispatchedReturn.value, beforeQty);
+  assert.equal(store.getEvents("atom_reg").length, 2);
+  throwNext = false;
+  const dispatched = store.dispatchReturn(dispCmd);
+  assert.equal(dispatched.ok, true);
+  assert.equal(store.getLineLedger("atom_reg", "line_1")!.dispatchedReturn.value, "5");
+
+  const qcCmd = freezeCommand({
+    commandId: "atom_qc",
+    type: "recordQc",
+    ownerUid: "owner_1",
+    ledgerId: "ledger_1",
+    body: {
+      receiptId: "atom_reg",
+      expectedVersion: 3,
+      reason: "hold sample",
+      qcStatus: "hold" as const,
+      clientObservedAtUtc: "2026-09-28T16:00:00.000Z",
+    },
+  });
+  throwNext = true;
+  assert.throws(() => store.recordQc(qcCmd));
+  assert.equal(store.getView("atom_reg")!.qcStatus, null);
+  assert.equal(store.getEvents("atom_reg").length, 3);
+  throwNext = false;
+  assert.equal(store.recordQc(qcCmd).ok, true);
+  assert.equal(store.getView("atom_reg")!.qcStatus, "hold");
+
+  const linkedDispatch = store.getEvents("atom_reg").find((event) => event.type === "return_dispatched")!;
+  const corrCmd = freezeCommand({
+    commandId: "atom_corr",
+    type: "correctReturnDispatch",
+    ownerUid: "owner_1",
+    ledgerId: "ledger_1",
+    body: {
+      receiptId: "atom_reg",
+      expectedVersion: 4,
+      reason: "recount",
+      lineId: "line_1",
+      linkedEventId: linkedDispatch.eventId,
+      correctionQty: { value: "1", unit: "bags", precision: 0 },
+      clientObservedAtUtc: "2026-09-28T16:01:00.000Z",
+    },
+  });
+  throwNext = true;
+  assert.throws(() => store.correctReturnDispatch(corrCmd));
+  assert.equal(store.getLineLedger("atom_reg", "line_1")!.dispatchedReturn.value, "5");
+  throwNext = false;
+  assert.equal(store.correctReturnDispatch(corrCmd).ok, true);
+  assert.equal(store.getLineLedger("atom_reg", "line_1")!.dispatchedReturn.value, "4");
+
+  const voidCmd = freezeCommand({
+    commandId: "atom_void",
+    type: "voidWithReason",
+    ownerUid: "owner_1",
+    ledgerId: "ledger_1",
+    body: {
+      receiptId: "atom_reg",
+      expectedVersion: 5,
+      reason: "duplicate",
+      linkedReceiptId: null,
+      clientObservedAtUtc: "2026-09-28T16:02:00.000Z",
+    },
+  });
+  throwNext = true;
+  assert.throws(() => store.voidWithReason(voidCmd));
+  assert.equal(store.getView("atom_reg")!.voided, false);
+  throwNext = false;
+  assert.equal(store.voidWithReason(voidCmd).ok, true);
+  assert.equal(store.getView("atom_reg")!.voided, true);
+}
+
+{
+  const store = testLedger();
+  store.register(
+    freezeCommand({
+      commandId: "cust_reg",
+      type: "registerGoodsReceipt",
+      ownerUid: "owner_1",
+      ledgerId: "ledger_1",
+      body: sampleRegisterBody({ receiptId: "cust" }),
+    })
+  );
+  const partial = store.dispatchReturn(
+    freezeCommand({
+      commandId: "cust_part",
+      type: "dispatchReturn",
+      ownerUid: "owner_1",
+      ledgerId: "ledger_1",
+      body: {
+        receiptId: "cust",
+        expectedVersion: 1,
+        reason: "partial",
+        lineId: "line_1",
+        returnQty: { value: "5", unit: "bags", precision: 0 },
+        clientObservedAtUtc: "2026-09-28T15:00:00.000Z",
+      },
+    })
+  );
+  assert.equal(partial.ok, true);
+  assert.equal(store.getOriginal("cust")!.custody, "received");
+  assert.equal(store.getView("cust")!.custody, "partially_returned");
+  const replayPartial = store.dispatchReturn(
+    freezeCommand({
+      commandId: "cust_part",
+      type: "dispatchReturn",
+      ownerUid: "owner_1",
+      ledgerId: "ledger_1",
+      body: {
+        receiptId: "cust",
+        expectedVersion: 1,
+        reason: "partial",
+        lineId: "line_1",
+        returnQty: { value: "5", unit: "bags", precision: 0 },
+        clientObservedAtUtc: "2026-09-28T15:00:00.000Z",
+      },
+    })
+  );
+  assert.equal(replayPartial.ok, true);
+  if (!replayPartial.ok) throw new Error("replay");
+  assert.equal(replayPartial.replayed, true);
+  assert.equal(store.getLineLedger("cust", "line_1")!.dispatchedReturn.value, "5");
+  assert.equal(store.getView("cust")!.custody, "partially_returned");
+
+  const rest = store.dispatchReturn(
+    freezeCommand({
+      commandId: "cust_rest",
+      type: "dispatchReturn",
+      ownerUid: "owner_1",
+      ledgerId: "ledger_1",
+      body: {
+        receiptId: "cust",
+        expectedVersion: 2,
+        reason: "remainder",
+        lineId: "line_1",
+        returnQty: { value: "35", unit: "bags", precision: 0 },
+        clientObservedAtUtc: "2026-09-28T15:01:00.000Z",
+      },
+    })
+  );
+  assert.equal(rest.ok, true);
+  assert.equal(store.getView("cust")!.custody, "returned");
+  const linked = store.getEvents("cust").find((event) => event.type === "return_dispatched")!;
+  const restored = store.correctReturnDispatch(
+    freezeCommand({
+      commandId: "cust_corr",
+      type: "correctReturnDispatch",
+      ownerUid: "owner_1",
+      ledgerId: "ledger_1",
+      body: {
+        receiptId: "cust",
+        expectedVersion: 3,
+        reason: "recount first dispatch",
+        lineId: "line_1",
+        linkedEventId: linked.eventId,
+        correctionQty: { value: "5", unit: "bags", precision: 0 },
+        clientObservedAtUtc: "2026-09-28T15:02:00.000Z",
+      },
+    })
+  );
+  assert.equal(restored.ok, true);
+  assert.equal(store.getOriginal("cust")!.lines[0]!.physicallyReceived.value, "40");
+  assert.equal(store.getView("cust")!.custody, "partially_returned");
+}
+
+{
+  const store = testLedger();
+  store.register(
+    freezeCommand({
+      commandId: "held_reg",
+      type: "registerGoodsReceipt",
+      ownerUid: "owner_1",
+      ledgerId: "ledger_1",
+      body: sampleRegisterBody({
+        receiptId: "held",
+        lines: [
+          sampleLine({ lineId: "line_1", physicallyReceived: { value: "10", unit: "bags", precision: 0 } }),
+          sampleLine({
+            lineId: "line_2",
+            description: "Yarn",
+            physicallyReceived: { value: "10", unit: "bags", precision: 0 },
+            expectedOnThisDelivery: { value: "10", unit: "bags", precision: 0 },
+          }),
+        ],
+      }),
+    })
+  );
+  store.recordQc(
+    freezeCommand({
+      commandId: "held_qc",
+      type: "recordQc",
+      ownerUid: "owner_1",
+      ledgerId: "ledger_1",
+      body: {
+        receiptId: "held",
+        expectedVersion: 1,
+        reason: "sample",
+        qcStatus: "hold",
+        clientObservedAtUtc: "2026-09-28T16:00:00.000Z",
+      },
+    })
+  );
+  assert.equal(store.getView("held")!.custody, "held_for_qc");
+  store.dispatchReturn(
+    freezeCommand({
+      commandId: "held_ret",
+      type: "dispatchReturn",
+      ownerUid: "owner_1",
+      ledgerId: "ledger_1",
+      body: {
+        receiptId: "held",
+        expectedVersion: 2,
+        reason: "one line back",
+        lineId: "line_1",
+        returnQty: { value: "10", unit: "bags", precision: 0 },
+        clientObservedAtUtc: "2026-09-28T16:01:00.000Z",
+      },
+    })
+  );
+  assert.equal(store.getView("held")!.custody, "partially_returned");
+  assert.equal(store.getView("held")!.qcStatus, "hold");
+  const accepted = store.recordQc(
+    freezeCommand({
+      commandId: "held_acc",
+      type: "recordQc",
+      ownerUid: "owner_1",
+      ledgerId: "ledger_1",
+      body: {
+        receiptId: "held",
+        expectedVersion: 3,
+        reason: "cleared",
+        qcStatus: "accepted",
+        clientObservedAtUtc: "2026-09-28T16:02:00.000Z",
+      },
+    })
+  );
+  assert.equal(accepted.ok, true);
+  assert.equal(store.getView("held")!.qcStatus, "accepted");
+  assert.notEqual(store.getView("held")!.custody, "held_for_qc");
+  assert.equal(store.getOriginal("held")!.custody, "received");
+}
+
+{
+  const store = testLedger();
+  store.register(
+    freezeCommand({
+      commandId: "qc_reg",
+      type: "registerGoodsReceipt",
+      ownerUid: "owner_1",
+      ledgerId: "ledger_1",
+      body: sampleRegisterBody({ receiptId: "qc_flow" }),
+    })
+  );
+  store.recordQc(
+    freezeCommand({
+      commandId: "qc_hold",
+      type: "recordQc",
+      ownerUid: "owner_1",
+      ledgerId: "ledger_1",
+      body: {
+        receiptId: "qc_flow",
+        expectedVersion: 1,
+        reason: "hold",
+        qcStatus: "hold",
+        clientObservedAtUtc: "2026-09-28T16:00:00.000Z",
+      },
+    })
+  );
+  assert.equal(store.getView("qc_flow")!.custody, "held_for_qc");
+  store.recordQc(
+    freezeCommand({
+      commandId: "qc_rej",
+      type: "recordQc",
+      ownerUid: "owner_1",
+      ledgerId: "ledger_1",
+      body: {
+        receiptId: "qc_flow",
+        expectedVersion: 2,
+        reason: "wet",
+        qcStatus: "rejected",
+        clientObservedAtUtc: "2026-09-28T16:01:00.000Z",
+      },
+    })
+  );
+  assert.equal(store.getView("qc_flow")!.qcStatus, "rejected");
+  assert.equal(store.getView("qc_flow")!.custody, "received");
+  assert.notEqual(store.getView("qc_flow")!.custody, "refused_at_gate");
+}
+
+{
+  const generic = appendPortalObservation(emptyEwbHistories(), {
+    observedAtUtc: "2026-09-28T10:00:00.000Z",
+    source: "user_reported",
+    verificationLevel: "user_reported",
+    status: "cancelled",
+    evidence: { reason: "" },
+  });
+  assert.equal(generic.ok, true);
+  if (!generic.ok) throw new Error("generic cancel");
+  assert.equal(generic.admission, "unvalidated_incomplete");
+  assert.equal(latestPortalStatus(generic.histories), "cancellation_unvalidated");
+  assert.equal(latestCancellationEvidence(generic.histories), null);
 }
 
 console.log("goodsEvidence/findings.regression.test.ts: ok");

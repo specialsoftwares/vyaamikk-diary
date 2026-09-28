@@ -1,7 +1,8 @@
 import type { OriginalEvidence } from "./evidence";
 import { isSha256Hex } from "./evidence";
-import { detectBrokenChain } from "./hashChain";
-import type { GrinEvent } from "./types";
+import type { ItcDisposition } from "./exceptions";
+import { detectBrokenChain, hashOriginalSnapshot } from "./hashChain";
+import type { GrinEvent, ImmutableGrin } from "./types";
 
 export const EVIDENCE_PACK_SECTIONS = [
   "supplier",
@@ -14,6 +15,26 @@ export const EVIDENCE_PACK_SECTIONS = [
 
 export type EvidencePackSection = (typeof EVIDENCE_PACK_SECTIONS)[number];
 
+/** Versioned inventory of required coverage items. Integrity is separate from coverage. */
+export const EVIDENCE_INVENTORY_VERSION = 1 as const;
+
+export const REQUIRED_EVIDENCE_ITEMS = [
+  { itemId: "supplier_identity", section: "supplier" },
+  { itemId: "commercial_document", section: "commercialDocuments" },
+  { itemId: "movement_evidence", section: "movementEvidence" },
+  { itemId: "receipt_evidence", section: "receiptEvidence" },
+  { itemId: "accounting_payment_evidence", section: "accountingPaymentEvidence" },
+  { itemId: "gst_evidence", section: "gstEvidence" },
+] as const;
+
+export type EvidenceInventoryItemId = (typeof REQUIRED_EVIDENCE_ITEMS)[number]["itemId"];
+
+export type EvidenceItemDisposition =
+  | { itemId: EvidenceInventoryItemId; kind: "satisfied"; evidenceId: string }
+  | { itemId: EvidenceInventoryItemId; kind: "not_applicable"; reason: string };
+
+export type PackIntegrity = "verified" | "failed";
+export type PackCoverage = "complete" | "incomplete";
 export type PackCompleteness = "complete" | "incomplete";
 
 export interface PinnedEventCut {
@@ -27,19 +48,30 @@ export interface EventStreamCutInput {
   events: GrinEvent[];
 }
 
+export interface EvidenceLinkage {
+  ownerUid: string;
+  ledgerId: string;
+  purchaseCaseId: string;
+  receiptId: string;
+}
+
 export interface EvidencePackManifest {
   schemaVersion: 1;
+  inventoryVersion: typeof EVIDENCE_INVENTORY_VERSION;
   exportId: string;
   ownerUid: string;
   ledgerId: string;
   purchaseCaseId: string;
   pinnedCuts: PinnedEventCut[];
   sections: EvidencePackSection[];
+  integrity: PackIntegrity;
+  coverage: PackCoverage;
   completeness: PackCompleteness;
   incompleteReasons: string[];
   artifactHashes: Record<string, string>;
   templateVersion: string;
   parserVersions: Record<string, string>;
+  itcDisposition: ItcDisposition;
 }
 
 export function isPositiveInt(value: unknown): value is number {
@@ -66,13 +98,15 @@ export function cutMatchesEventStream(cut: PinnedEventCut, events: GrinEvent[]):
   if (sliced.length !== cut.eventVersion) {
     return `event cut ${cut.receiptId} version exceeds stream`;
   }
+  for (const event of sliced) {
+    if (event.receiptId !== cut.receiptId) {
+      return `event cut ${cut.receiptId} stream mixes receipts`;
+    }
+  }
   if (detectBrokenChain(sliced) !== null) {
     return `event cut ${cut.receiptId} stream is broken`;
   }
   const head = sliced[cut.eventVersion - 1]!;
-  if (head.receiptId !== cut.receiptId) {
-    return `event cut ${cut.receiptId} does not match stream receipt`;
-  }
   if (head.streamSequence !== cut.eventVersion || head.eventHash !== cut.headHash) {
     return `event cut ${cut.receiptId} does not match stream head`;
   }
@@ -86,47 +120,174 @@ function originalError(item: OriginalEvidence): string | null {
   return null;
 }
 
+function linkageError(
+  evidenceId: string,
+  link: EvidenceLinkage | undefined,
+  subject: { ownerUid: string; ledgerId: string; purchaseCaseId: string; receiptId?: string }
+): string | null {
+  if (!link) return `evidence link missing for ${evidenceId}`;
+  if (link.ownerUid !== subject.ownerUid) return `${evidenceId} owner does not match pack`;
+  if (link.ledgerId !== subject.ledgerId) return `${evidenceId} ledger does not match pack`;
+  if (link.purchaseCaseId !== subject.purchaseCaseId) return `${evidenceId} purchase case does not match pack`;
+  if (subject.receiptId && link.receiptId !== subject.receiptId) {
+    return `${evidenceId} receipt does not match cut`;
+  }
+  return null;
+}
+
+function issuanceAnchorError(
+  events: GrinEvent[],
+  originalSnapshot: ImmutableGrin | undefined,
+  subject: { ownerUid: string; ledgerId: string; receiptId: string }
+): string | null {
+  if (!originalSnapshot) return "original snapshot missing";
+  const issued = events.find((event) => event.type === "receipt_registered");
+  if (!issued) return "issuance event missing";
+  if (issued.receiptId !== subject.receiptId) return "issuance event receipt does not match cut";
+  if (originalSnapshot.receiptId !== subject.receiptId) return "original snapshot receipt does not match cut";
+  if (originalSnapshot.ownerUid !== subject.ownerUid) return "original snapshot owner does not match pack";
+  if (originalSnapshot.ledgerId !== subject.ledgerId) return "original snapshot ledger does not match pack";
+  const recomputed = hashOriginalSnapshot(originalSnapshot);
+  if (originalSnapshot.originalSnapshotHash && originalSnapshot.originalSnapshotHash !== recomputed) {
+    return "original snapshot hash does not match snapshot bytes";
+  }
+  if (issued.typedChanges.originalSnapshotHash !== recomputed) {
+    return "issuance snapshot anchor mismatch";
+  }
+  return null;
+}
+
+function streamIdentityError(
+  events: GrinEvent[],
+  subject: { ownerUid: string; receiptId: string }
+): string | null {
+  for (const event of events) {
+    if (event.receiptId !== subject.receiptId) return "event stream mixes receipts";
+    if (event.actorUid !== subject.ownerUid) return "event stream owner does not match pack";
+  }
+  return null;
+}
+
 export function evaluatePackCompleteness(input: {
+  ownerUid: string;
+  ledgerId: string;
+  purchaseCaseId: string;
   pinnedCuts: PinnedEventCut[];
   verifiedOriginals: OriginalEvidence[];
   artifactHashes: Record<string, string>;
   missingOrUnverifiable: string[];
   eventStreams?: EventStreamCutInput[];
-}): { completeness: PackCompleteness; incompleteReasons: string[] } {
+  originalSnapshots?: ImmutableGrin[];
+  inventoryDispositions?: EvidenceItemDisposition[];
+  evidenceLinks?: Record<string, EvidenceLinkage>;
+}): {
+  integrity: PackIntegrity;
+  coverage: PackCoverage;
+  completeness: PackCompleteness;
+  incompleteReasons: string[];
+} {
   const reasons: string[] = [...input.missingOrUnverifiable];
+  const integrityReasons: string[] = [];
   if (input.pinnedCuts.length === 0) {
-    reasons.push("no valid event cut");
+    integrityReasons.push("no valid event cut");
   }
   const streams = input.eventStreams ?? [];
+  const snapshots = input.originalSnapshots ?? [];
+  const links = input.evidenceLinks ?? {};
+  const originalsById = new Map(input.verifiedOriginals.map((item) => [item.evidenceId, item]));
+
   for (const cut of input.pinnedCuts) {
     const shape = cutShapeError(cut);
     if (shape) {
-      reasons.push(shape);
+      integrityReasons.push(shape);
       continue;
     }
     const stream = streams.find((item) => item.receiptId === cut.receiptId);
     if (!stream) {
-      reasons.push(`event stream missing for ${cut.receiptId}`);
+      integrityReasons.push(`event stream missing for ${cut.receiptId}`);
       continue;
     }
+    const identity = streamIdentityError(stream.events, { ownerUid: input.ownerUid, receiptId: cut.receiptId });
+    if (identity) integrityReasons.push(identity);
     const match = cutMatchesEventStream(cut, stream.events);
-    if (match) reasons.push(match);
+    if (match) integrityReasons.push(match);
+    const snapshot = snapshots.find((item) => item.receiptId === cut.receiptId);
+    const anchor = issuanceAnchorError(stream.events, snapshot, {
+      ownerUid: input.ownerUid,
+      ledgerId: input.ledgerId,
+      receiptId: cut.receiptId,
+    });
+    if (anchor) integrityReasons.push(anchor);
   }
+
   if (input.verifiedOriginals.length === 0) {
     reasons.push("no verified originals");
   }
   for (const original of input.verifiedOriginals) {
     const err = originalError(original);
-    if (err) reasons.push(err);
+    if (err) integrityReasons.push(err);
+    const hashed = input.artifactHashes[original.evidenceId];
+    if (hashed !== original.rawSha256) {
+      integrityReasons.push(`artifact hash missing or mismatched for ${original.evidenceId}`);
+    }
+    const linkErr = linkageError(original.evidenceId, links[original.evidenceId], {
+      ownerUid: input.ownerUid,
+      ledgerId: input.ledgerId,
+      purchaseCaseId: input.purchaseCaseId,
+    });
+    if (linkErr) integrityReasons.push(linkErr);
+  }
+  for (const artifactId of Object.keys(input.artifactHashes)) {
+    if (!originalsById.has(artifactId)) {
+      integrityReasons.push(`artifact ${artifactId} is not in the included evidence`);
+    }
+  }
+
+  const dispositions = input.inventoryDispositions ?? [];
+  const seenItems = new Set<string>();
+  const requiredIds = new Set<string>(REQUIRED_EVIDENCE_ITEMS.map((item) => item.itemId));
+  for (const disposition of dispositions) {
+    if (!requiredIds.has(disposition.itemId)) {
+      reasons.push(`unknown inventory item ${disposition.itemId}`);
+      continue;
+    }
+    if (seenItems.has(disposition.itemId)) {
+      reasons.push(`duplicate inventory item ${disposition.itemId}`);
+      continue;
+    }
+    seenItems.add(disposition.itemId);
+    if (disposition.kind === "not_applicable") {
+      if (!disposition.reason.trim()) reasons.push(`${disposition.itemId} not-applicable reason is empty`);
+      continue;
+    }
+    const original = originalsById.get(disposition.evidenceId);
+    if (!original) {
+      reasons.push(`required artifact omitted for ${disposition.itemId}`);
+      continue;
+    }
+    const originalErr = originalError(original);
+    if (originalErr) reasons.push(originalErr);
     const hashed = input.artifactHashes[original.evidenceId];
     if (hashed !== original.rawSha256) {
       reasons.push(`artifact hash missing or mismatched for ${original.evidenceId}`);
     }
   }
-  const unique = [...new Set(reasons)];
+  for (const required of REQUIRED_EVIDENCE_ITEMS) {
+    if (!seenItems.has(required.itemId)) {
+      reasons.push(`required item ${required.itemId} is unresolved`);
+    }
+  }
+
+  const uniqueIntegrity = [...new Set(integrityReasons)];
+  const uniqueCoverage = [...new Set(reasons)];
+  const integrity: PackIntegrity = uniqueIntegrity.length === 0 ? "verified" : "failed";
+  const coverage: PackCoverage = uniqueCoverage.length === 0 ? "complete" : "incomplete";
+  const incompleteReasons = [...new Set([...uniqueIntegrity, ...uniqueCoverage])];
   return {
-    completeness: unique.length === 0 ? "complete" : "incomplete",
-    incompleteReasons: unique,
+    integrity,
+    coverage,
+    completeness: integrity === "verified" && coverage === "complete" ? "complete" : "incomplete",
+    incompleteReasons,
   };
 }
 
@@ -140,35 +301,54 @@ export function assembleManifest(input: {
   artifactHashes: Record<string, string>;
   missingOrUnverifiable?: string[];
   eventStreams?: EventStreamCutInput[];
+  originalSnapshots?: ImmutableGrin[];
+  inventoryDispositions?: EvidenceItemDisposition[];
+  evidenceLinks?: Record<string, EvidenceLinkage>;
   templateVersion: string;
   parserVersions?: Record<string, string>;
 }): EvidencePackManifest {
   const pinnedCuts = input.pinnedCuts.map((cut) => ({ ...cut }));
   const evaluated = evaluatePackCompleteness({
+    ownerUid: input.ownerUid,
+    ledgerId: input.ledgerId,
+    purchaseCaseId: input.purchaseCaseId,
     pinnedCuts,
     verifiedOriginals: input.verifiedOriginals,
     artifactHashes: input.artifactHashes,
     missingOrUnverifiable: input.missingOrUnverifiable ?? [],
     eventStreams: input.eventStreams,
+    originalSnapshots: input.originalSnapshots,
+    inventoryDispositions: input.inventoryDispositions,
+    evidenceLinks: input.evidenceLinks,
   });
   return {
     schemaVersion: 1,
+    inventoryVersion: EVIDENCE_INVENTORY_VERSION,
     exportId: input.exportId,
     ownerUid: input.ownerUid,
     ledgerId: input.ledgerId,
     purchaseCaseId: input.purchaseCaseId,
     pinnedCuts,
     sections: [...EVIDENCE_PACK_SECTIONS],
+    integrity: evaluated.integrity,
+    coverage: evaluated.coverage,
     completeness: evaluated.completeness,
     incompleteReasons: evaluated.incompleteReasons,
     artifactHashes: { ...input.artifactHashes },
     templateVersion: input.templateVersion,
     parserVersions: input.parserVersions ?? {},
+    itcDisposition: "not_determined",
   };
 }
 
 export function mayMarkComplete(manifest: EvidencePackManifest): boolean {
-  return manifest.completeness === "complete" && manifest.incompleteReasons.length === 0;
+  return (
+    manifest.completeness === "complete" &&
+    manifest.integrity === "verified" &&
+    manifest.coverage === "complete" &&
+    manifest.incompleteReasons.length === 0 &&
+    manifest.itcDisposition === "not_determined"
+  );
 }
 
 export function cutMatchesHead(

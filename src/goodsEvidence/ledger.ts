@@ -4,9 +4,11 @@ import type {
   AmendFieldsBody,
   CorrectReturnDispatchBody,
   DispatchReturnBody,
+  GoodsCommandType,
   RecordQcBody,
   VoidWithReasonBody,
 } from "./command";
+import { derivePhysicalCustody } from "./custody";
 import { isGoodsEvidenceEnabled } from "./featureFlag";
 import { formatGrinNumber } from "./grinNumber";
 import { hashEventEnvelope, hashOriginalSnapshot } from "./hashChain";
@@ -15,7 +17,9 @@ import {
   applyReturnDispatch,
   compareDecimal,
   emptyLedgers,
+  IncompatibleUnitsError,
   QuantityBoundError,
+  quantityShapeError,
   subtractQuantity,
   type LineQuantityLedgers,
   type Quantity,
@@ -25,9 +29,12 @@ import { financialYearTokenForIstInstant, formatUtcIso } from "./time";
 import type { CommandAdmission, GrinEvent, GrinView, ImmutableGrin } from "./types";
 import {
   amendmentFieldError,
+  commandEnvelopeError,
   commandReasonError,
   effectiveRecordError,
   isAmendableGrinField,
+  mutationBodyError,
+  qcStatusError,
   registerBodyError,
 } from "./validate";
 
@@ -94,6 +101,24 @@ interface ReceiptState {
   lineLedgers: Map<string, LineQuantityLedgers>;
 }
 
+function cloneReceiptState(state: ReceiptState): ReceiptState {
+  return {
+    original: cloneSnapshot(state.original),
+    effective: cloneSnapshot(state.effective),
+    events: cloneSnapshot(state.events),
+    view: cloneSnapshot(state.view),
+    lineLedgers: cloneSnapshot(state.lineLedgers),
+  };
+}
+
+function syncViewCustody(state: ReceiptState): void {
+  state.view.custody = derivePhysicalCustody({
+    originalDisposition: state.original.custody,
+    qcStatus: state.view.qcStatus,
+    lineLedgers: state.lineLedgers.values(),
+  });
+}
+
 /**
  * SIMULATED in-memory command processor for domain/sequence tests.
  * Not a deployed callable, not distributed multi-device sequencing,
@@ -142,6 +167,8 @@ export class InMemoryGoodsLedger {
   register(command: FrozenCommand<RegisterGoodsReceiptBody>): RegisterOutcome {
     const blocked = this.productionBlock();
     if (blocked) return blocked;
+    const invalid = this.operationError(command, "registerGoodsReceipt");
+    if (invalid) return invalid;
     const identity = this.identityError(command);
     if (identity) return identity;
     const digestErr = this.digestError(command);
@@ -167,7 +194,7 @@ export class InMemoryGoodsLedger {
     const serverMs = this.clock.nowMs();
     const serverRegisteredAtUtc = formatUtcIso(serverMs);
     const fyToken = financialYearTokenForIstInstant(serverMs);
-    const serial = this.allocateSerial(fyToken);
+    const serial = this.peekSerial(fyToken);
     const issuedNumber = formatGrinNumber({
       series: body.series,
       fyToken,
@@ -203,6 +230,9 @@ export class InMemoryGoodsLedger {
       serverRegisteredAtUtc,
       originalSnapshotHash: null,
     };
+    const envelopeErr = effectiveRecordError(draft);
+    if (envelopeErr) return { ok: false, code: "invalid", detail: envelopeErr };
+
     const originalSnapshotHash = hashOriginalSnapshot(draft);
     const original = cloneSnapshot({ ...draft, originalSnapshotHash });
 
@@ -239,14 +269,14 @@ export class InMemoryGoodsLedger {
       voided: false,
       warnings: [],
     };
-
-    this.grins.set(original.receiptId, {
+    const state: ReceiptState = {
       original,
       effective: cloneSnapshot(original),
       events: [event],
       view,
       lineLedgers,
-    });
+    };
+    syncViewCustody(state);
 
     const result: RegisterSuccess = {
       ok: true,
@@ -258,77 +288,101 @@ export class InMemoryGoodsLedger {
       eventVersion: 1,
       headHash: event.eventHash,
     };
-    this.dedupe.set(key, { digest: command.digest, result: { ...result } });
+    this.commitRegister(fyToken, serial, original.receiptId, state, key, command.digest, result);
     return result;
   }
 
   amend(command: FrozenCommand<AmendFieldsBody>): MutationOutcome {
-    const prepared = this.prepareMutation(command, command.body.receiptId, command.body.expectedVersion, command.body.reason);
+    const prepared = this.prepareMutation(
+      command,
+      "amendFields",
+      command.body?.receiptId,
+      command.body?.expectedVersion,
+      command.body?.reason
+    );
     if (!prepared.ok) return prepared;
     if (prepared.replayed) return prepared;
 
-    const keys = Object.keys(command.body.changes);
+    const keys = Object.keys(command.body.changes ?? {});
     if (keys.length === 0) {
       return { ok: false, code: "invalid", detail: "amendment changes are required" };
     }
     const oldValues: Record<string, unknown> = {};
-    const next = cloneSnapshot(prepared.state.effective);
+    const next = cloneReceiptState(prepared.state);
     for (const key of keys) {
       if (!isAmendableGrinField(key)) {
         return { ok: false, code: "invalid", detail: `field ${key} is not amendable` };
       }
       const fieldErr = amendmentFieldError(key, command.body.changes[key]);
       if (fieldErr) return { ok: false, code: "invalid", detail: fieldErr };
-      oldValues[key] = cloneSnapshot((next as unknown as Record<string, unknown>)[key] ?? null);
-      (next as unknown as Record<string, unknown>)[key] = cloneSnapshot(command.body.changes[key]);
+      oldValues[key] = cloneSnapshot((next.effective as unknown as Record<string, unknown>)[key] ?? null);
+      (next.effective as unknown as Record<string, unknown>)[key] = cloneSnapshot(command.body.changes[key]);
     }
-    const envelopeErr = effectiveRecordError(next);
+    const envelopeErr = effectiveRecordError(next.effective);
     if (envelopeErr) return { ok: false, code: "invalid", detail: envelopeErr };
     void command.body.claimedOldValues;
-    prepared.state.effective = next;
-    const event = this.appendEvent(prepared.state, {
+    const event = this.buildNextEvent(next, {
       type: "field_amended",
       reason: command.body.reason.trim(),
       expectedPreviousVersion: command.body.expectedVersion,
       typedChanges: { oldValues, newValues: cloneSnapshot(command.body.changes) },
       clientObservedAtUtc: command.body.clientObservedAtUtc,
     });
-    return this.storeMutation(command, event.streamSequence);
+    this.finishEvent(next, event);
+    return this.commitMutation(command.body.receiptId, next, command, event.streamSequence);
   }
 
   recordQc(command: FrozenCommand<RecordQcBody>): MutationOutcome {
-    const prepared = this.prepareMutation(command, command.body.receiptId, command.body.expectedVersion, command.body.reason);
+    const prepared = this.prepareMutation(
+      command,
+      "recordQc",
+      command.body?.receiptId,
+      command.body?.expectedVersion,
+      command.body?.reason
+    );
     if (!prepared.ok) return prepared;
     if (prepared.replayed) return prepared;
-    const previousQc = prepared.state.view.qcStatus;
-    const event = this.appendEvent(prepared.state, {
+    const qcErr = qcStatusError(command.body.qcStatus);
+    if (qcErr) return { ok: false, code: "invalid", detail: qcErr };
+    const next = cloneReceiptState(prepared.state);
+    const previousQc = next.view.qcStatus;
+    const event = this.buildNextEvent(next, {
       type: previousQc == null ? "qc_decision" : "qc_reclassified",
       reason: command.body.reason.trim(),
       expectedPreviousVersion: command.body.expectedVersion,
       typedChanges: { oldQc: previousQc, newQc: command.body.qcStatus },
       clientObservedAtUtc: command.body.clientObservedAtUtc,
     });
-    prepared.state.view.qcStatus = command.body.qcStatus;
-    prepared.state.effective = cloneSnapshot({
-      ...prepared.state.effective,
-    });
-    if (command.body.qcStatus === "hold") prepared.state.view.custody = "held_for_qc";
-    return this.storeMutation(command, event.streamSequence);
+    next.view.qcStatus = command.body.qcStatus;
+    this.finishEvent(next, event);
+    return this.commitMutation(command.body.receiptId, next, command, event.streamSequence);
   }
 
   dispatchReturn(command: FrozenCommand<DispatchReturnBody>): MutationOutcome {
-    const prepared = this.prepareMutation(command, command.body.receiptId, command.body.expectedVersion, command.body.reason);
+    const prepared = this.prepareMutation(
+      command,
+      "dispatchReturn",
+      command.body?.receiptId,
+      command.body?.expectedVersion,
+      command.body?.reason
+    );
     if (!prepared.ok) return prepared;
     if (prepared.replayed) return prepared;
-    const ledger = prepared.state.lineLedgers.get(command.body.lineId);
+    const next = cloneReceiptState(prepared.state);
+    const ledger = next.lineLedgers.get(command.body.lineId);
     if (!ledger) {
       return { ok: false, code: "invalid", detail: "unknown line" };
     }
+    const qtyErr = quantityShapeError(command.body.returnQty, {
+      label: "returnQty",
+      requiredUnit: ledger.physicalReceived.unit,
+    });
+    if (qtyErr) return { ok: false, code: "invalid", detail: qtyErr };
     try {
       const physicalBefore = ledger.physicalReceived.value;
-      const next = applyReturnDispatch(ledger, command.body.returnQty);
-      prepared.state.lineLedgers.set(command.body.lineId, next);
-      const event = this.appendEvent(prepared.state, {
+      const updated = applyReturnDispatch(ledger, command.body.returnQty);
+      next.lineLedgers.set(command.body.lineId, updated);
+      const event = this.buildNextEvent(next, {
         type: "return_dispatched",
         reason: command.body.reason.trim(),
         expectedPreviousVersion: command.body.expectedVersion,
@@ -336,26 +390,35 @@ export class InMemoryGoodsLedger {
           lineId: command.body.lineId,
           unit: command.body.returnQty.unit,
           returnQty: cloneSnapshot(command.body.returnQty),
-          physicalReceivedUnchanged: next.physicalReceived.value === physicalBefore,
+          physicalReceivedUnchanged: updated.physicalReceived.value === physicalBefore,
         },
         clientObservedAtUtc: command.body.clientObservedAtUtc,
       });
-      prepared.state.view.custody = "returned";
-      return this.storeMutation(command, event.streamSequence);
+      this.finishEvent(next, event);
+      return this.commitMutation(command.body.receiptId, next, command, event.streamSequence);
     } catch (err) {
-      const detail = err instanceof QuantityBoundError ? err.message : "invalid return quantity";
-      return { ok: false, code: "invalid", detail };
+      if (err instanceof QuantityBoundError || err instanceof IncompatibleUnitsError) {
+        return { ok: false, code: "invalid", detail: err.message };
+      }
+      throw err;
     }
   }
 
   correctReturnDispatch(command: FrozenCommand<CorrectReturnDispatchBody>): MutationOutcome {
-    const prepared = this.prepareMutation(command, command.body.receiptId, command.body.expectedVersion, command.body.reason);
+    const prepared = this.prepareMutation(
+      command,
+      "correctReturnDispatch",
+      command.body?.receiptId,
+      command.body?.expectedVersion,
+      command.body?.reason
+    );
     if (!prepared.ok) return prepared;
     if (prepared.replayed) return prepared;
     if (!command.body.linkedEventId?.trim()) {
       return { ok: false, code: "invalid", detail: "linkedEventId is required for a return correction" };
     }
-    const linked = prepared.state.events.find(
+    const next = cloneReceiptState(prepared.state);
+    const linked = next.events.find(
       (event) => event.eventId === command.body.linkedEventId && event.type === "return_dispatched"
     );
     if (!linked) {
@@ -374,18 +437,23 @@ export class InMemoryGoodsLedger {
     if (command.body.correctionQty.unit !== linkedUnit) {
       return { ok: false, code: "invalid", detail: "correction unit must match the linked dispatch" };
     }
-    const remaining = remainingLinkedDispatch(prepared.state.events, linked.eventId, linkedQty);
+    const remaining = remainingLinkedDispatch(next.events, linked.eventId, linkedQty);
     if (compareDecimal(command.body.correctionQty.value, remaining.value) > 0) {
       return { ok: false, code: "invalid", detail: "correction exceeds remaining linked dispatch quantity" };
     }
-    const ledger = prepared.state.lineLedgers.get(linkedLineId);
+    const ledger = next.lineLedgers.get(linkedLineId);
     if (!ledger) {
       return { ok: false, code: "invalid", detail: "unknown line" };
     }
+    const qtyErr = quantityShapeError(command.body.correctionQty, {
+      label: "correctionQty",
+      requiredUnit: linkedUnit,
+    });
+    if (qtyErr) return { ok: false, code: "invalid", detail: qtyErr };
     try {
-      const next = applyReturnCorrection(ledger, command.body.correctionQty);
-      prepared.state.lineLedgers.set(linkedLineId, next);
-      const event = this.appendEvent(prepared.state, {
+      const updated = applyReturnCorrection(ledger, command.body.correctionQty);
+      next.lineLedgers.set(linkedLineId, updated);
+      const event = this.buildNextEvent(next, {
         type: "return_received",
         reason: command.body.reason.trim(),
         expectedPreviousVersion: command.body.expectedVersion,
@@ -393,30 +461,42 @@ export class InMemoryGoodsLedger {
           lineId: command.body.lineId,
           linkedEventId: command.body.linkedEventId,
           correctionQty: cloneSnapshot(command.body.correctionQty),
+          physicalReceivedUnchanged: true,
         },
         clientObservedAtUtc: command.body.clientObservedAtUtc,
       });
-      return this.storeMutation(command, event.streamSequence);
+      this.finishEvent(next, event);
+      return this.commitMutation(command.body.receiptId, next, command, event.streamSequence);
     } catch (err) {
-      const detail = err instanceof QuantityBoundError ? err.message : "invalid correction quantity";
-      return { ok: false, code: "invalid", detail };
+      if (err instanceof QuantityBoundError || err instanceof IncompatibleUnitsError) {
+        return { ok: false, code: "invalid", detail: err.message };
+      }
+      throw err;
     }
   }
 
   voidWithReason(command: FrozenCommand<VoidWithReasonBody>): MutationOutcome {
-    const prepared = this.prepareMutation(command, command.body.receiptId, command.body.expectedVersion, command.body.reason);
+    const prepared = this.prepareMutation(
+      command,
+      "voidWithReason",
+      command.body?.receiptId,
+      command.body?.expectedVersion,
+      command.body?.reason
+    );
     if (!prepared.ok) return prepared;
     if (prepared.replayed) return prepared;
-    const issuedNumber = prepared.state.original.issuedNumber;
-    const event = this.appendEvent(prepared.state, {
+    const next = cloneReceiptState(prepared.state);
+    const issuedNumber = next.original.issuedNumber;
+    const event = this.buildNextEvent(next, {
       type: "void_with_reason",
       reason: command.body.reason.trim(),
       expectedPreviousVersion: command.body.expectedVersion,
       typedChanges: { issuedNumberPreserved: issuedNumber, linkedReceiptId: command.body.linkedReceiptId },
       clientObservedAtUtc: command.body.clientObservedAtUtc,
     });
-    prepared.state.view.voided = true;
-    return this.storeMutation(command, event.streamSequence);
+    next.view.voided = true;
+    this.finishEvent(next, event);
+    return this.commitMutation(command.body.receiptId, next, command, event.streamSequence);
   }
 
   private productionBlock(): CommandAdmission & { ok: false } | null {
@@ -424,6 +504,15 @@ export class InMemoryGoodsLedger {
     if (!isGoodsEvidenceEnabled()) {
       return { ok: false, code: "disabled", detail: "goods evidence is not enabled" };
     }
+    return null;
+  }
+
+  private operationError(
+    command: FrozenCommand<unknown>,
+    expectedType: GoodsCommandType
+  ): CommandAdmission & { ok: false } | null {
+    const envelope = commandEnvelopeError(command, expectedType);
+    if (envelope) return { ok: false, code: "invalid", detail: envelope };
     return null;
   }
 
@@ -460,19 +549,24 @@ export class InMemoryGoodsLedger {
 
   private prepareMutation(
     command: FrozenCommand<unknown>,
-    receiptId: string,
-    expectedVersion: number,
-    reason: string
+    expectedType: GoodsCommandType,
+    receiptId: string | undefined,
+    expectedVersion: number | undefined,
+    reason: string | undefined
   ):
     | { ok: true; replayed: true; eventVersion: number }
     | { ok: true; replayed: false; state: ReceiptState }
     | (CommandAdmission & { ok: false }) {
     const blocked = this.productionBlock();
     if (blocked) return blocked;
+    const invalid = this.operationError(command, expectedType);
+    if (invalid) return invalid;
     const identity = this.identityError(command);
     if (identity) return identity;
     const digestErr = this.digestError(command);
     if (digestErr) return digestErr;
+    const bodyErr = mutationBodyError(command.body);
+    if (bodyErr) return { ok: false, code: "invalid", detail: bodyErr };
     const reasonErr = commandReasonError(reason);
     if (reasonErr) return { ok: false, code: "invalid", detail: reasonErr };
 
@@ -488,7 +582,7 @@ export class InMemoryGoodsLedger {
       return { ok: true, replayed: true, eventVersion: existing.result.eventVersion };
     }
 
-    const state = this.grins.get(receiptId);
+    const state = this.grins.get(receiptId ?? "");
     if (!state) return { ok: false, code: "invalid", detail: "unknown receipt" };
     if (state.view.voided) return { ok: false, code: "voided", detail: "receipt is void" };
     if (state.view.eventVersion !== expectedVersion) {
@@ -510,13 +604,35 @@ export class InMemoryGoodsLedger {
     return result;
   }
 
-  private allocateSerial(fyToken: string): number {
-    const next = this.nextSerialByFy.get(fyToken) ?? 1;
-    this.nextSerialByFy.set(fyToken, next + 1);
-    return next;
+  private peekSerial(fyToken: string): number {
+    return this.nextSerialByFy.get(fyToken) ?? 1;
   }
 
-  private appendEvent(
+  private commitRegister(
+    fyToken: string,
+    serial: number,
+    receiptId: string,
+    state: ReceiptState,
+    key: string,
+    digest: string,
+    result: RegisterSuccess
+  ): void {
+    this.grins.set(receiptId, state);
+    this.nextSerialByFy.set(fyToken, serial + 1);
+    this.dedupe.set(key, { digest, result: { ...result } });
+  }
+
+  private commitMutation(
+    receiptId: string,
+    next: ReceiptState,
+    command: FrozenCommand<unknown>,
+    eventVersion: number
+  ): MutationOutcome {
+    this.grins.set(receiptId, next);
+    return this.storeMutation(command, eventVersion);
+  }
+
+  private buildNextEvent(
     state: ReceiptState,
     input: {
       type: GrinEvent["type"];
@@ -527,17 +643,20 @@ export class InMemoryGoodsLedger {
     }
   ): GrinEvent {
     const previous = state.events[state.events.length - 1] ?? null;
-    const event = this.buildEvent({
+    return this.buildEvent({
       receiptId: state.original.receiptId,
       streamSequence: state.events.length + 1,
       previous,
       serverAcceptedAtUtc: formatUtcIso(this.clock.nowMs()),
       ...input,
     });
+  }
+
+  private finishEvent(state: ReceiptState, event: GrinEvent): void {
     state.events.push(event);
     state.view.eventVersion = event.streamSequence;
     state.view.headHash = event.eventHash;
-    return event;
+    syncViewCustody(state);
   }
 
   private buildEvent(input: {

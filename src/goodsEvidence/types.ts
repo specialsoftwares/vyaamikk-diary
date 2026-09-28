@@ -29,6 +29,7 @@ export type CustodyState =
   | "held_for_qc"
   | "accepted_for_stock"
   | "refused_at_gate"
+  | "partially_returned"
   | "returned";
 
 export type AcknowledgementOutcome = "signed" | "refused" | "unavailable" | "not_requested";
