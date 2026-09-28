@@ -196,15 +196,39 @@ export function assertNonNegativeLedgers(ledgers: LineQuantityLedgers): void {
 /**
  * A later return never rewrites the original physical-received quantity.
  * It only increases dispatchedReturn, bounded by remaining custody.
+ * Negative and zero quantities are not dispatches; corrections use a linked event.
  */
 export function applyReturnDispatch(
   ledgers: LineQuantityLedgers,
   returnQty: Quantity
 ): LineQuantityLedgers {
+  if (compareDecimal(returnQty.value, "0") <= 0) {
+    throw new QuantityBoundError("goodsEvidence: dispatch quantity must be positive");
+  }
   const next: LineQuantityLedgers = {
     ...ledgers,
     physicalReceived: { ...ledgers.physicalReceived },
     dispatchedReturn: addQuantity(ledgers.dispatchedReturn, returnQty),
+  };
+  assertNonNegativeLedgers(next);
+  return next;
+}
+
+/**
+ * Reverse part of a prior return. Requires a linked event id at the command layer.
+ * Quantity must be positive and not exceed dispatchedReturn.
+ */
+export function applyReturnCorrection(
+  ledgers: LineQuantityLedgers,
+  correctionQty: Quantity
+): LineQuantityLedgers {
+  if (compareDecimal(correctionQty.value, "0") <= 0) {
+    throw new QuantityBoundError("goodsEvidence: correction quantity must be positive");
+  }
+  const next: LineQuantityLedgers = {
+    ...ledgers,
+    physicalReceived: { ...ledgers.physicalReceived },
+    dispatchedReturn: subtractQuantity(ledgers.dispatchedReturn, correctionQty),
   };
   assertNonNegativeLedgers(next);
   return next;

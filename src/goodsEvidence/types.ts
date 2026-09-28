@@ -131,6 +131,8 @@ export interface ImmutableGrin extends SchemaVersioned {
   qualityCheckedByAttributed: OptionalText;
   remarks: OptionalText;
   acknowledgement: AcknowledgementState;
+  warehouse: OptionalText;
+  locationBin: OptionalText;
   captureProvenance: CaptureProvenance;
   capturedAtClientUtc: string;
   reportedArrivalAt: string;
@@ -169,4 +171,8 @@ export interface GrinView extends SchemaVersioned {
 
 export type CommandAdmission =
   | { ok: true; replayed: boolean }
-  | { ok: false; code: "digest_conflict" | "version_conflict" | "disabled" | "voided"; detail: string };
+  | {
+      ok: false;
+      code: "digest_conflict" | "version_conflict" | "disabled" | "voided" | "receipt_exists" | "invalid";
+      detail: string;
+    };

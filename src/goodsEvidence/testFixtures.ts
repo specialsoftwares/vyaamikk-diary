@@ -67,6 +67,8 @@ export function sampleRegisterBody(
     receivingEmployeeAttributed: { kind: "present", value: "Gate staff (attributed)" },
     qualityCheckedByAttributed: { kind: "not_supplied" },
     remarks: { kind: "not_supplied" },
+    warehouse: { kind: "present", value: "Main godown" },
+    locationBin: { kind: "present", value: "Bay A" },
     acknowledgement: {
       outcome: "not_requested",
       claimedRole: { kind: "not_supplied" },

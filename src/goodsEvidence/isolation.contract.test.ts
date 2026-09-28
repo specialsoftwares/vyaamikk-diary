@@ -67,11 +67,15 @@ const flag = readFileSync(join(moduleDir, "featureFlag.ts"), "utf8");
 assert.match(flag, /process\.env\.EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED === ["']1["']/);
 assert.match(flag, /store-or-standalone/);
 assert.match(flag, /env\.runtimeKind/);
+assert.doesNotMatch(flag, /__setGoodsEvidenceEnabledForTests/);
+assert.doesNotMatch(flag, /_testOverride/);
 assert.doesNotMatch(stripComments(flag), /process\.env\s*\[/);
 
 const ledger = readFileSync(join(moduleDir, "ledger.ts"), "utf8");
 assert.match(ledger, /SIMULATED/);
 assert.match(ledger, /Not a deployed callable/);
+assert.match(ledger, /simulated-domain-test/);
+assert.match(ledger, /originalSnapshotHash/);
 
 const offline = readFileSync(join(moduleDir, "offline.ts"), "utf8");
 assert.match(offline, /not a SQLite outbox/);

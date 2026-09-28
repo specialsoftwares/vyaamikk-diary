@@ -1,6 +1,7 @@
 import { sha256Hex } from "@/utils/sha256Hex";
 
 import { canonicalJson } from "./canonical";
+import { cloneSnapshot } from "./snapshot";
 import type { Quantity } from "./quantities";
 import type { EwbLink } from "./ewb";
 import type {
@@ -21,6 +22,7 @@ export type GoodsCommandType =
   | "amendFields"
   | "recordQc"
   | "dispatchReturn"
+  | "correctReturnDispatch"
   | "voidWithReason";
 
 export interface CommandEnvelope<TBody> {
@@ -36,16 +38,24 @@ export interface FrozenCommand<TBody> extends CommandEnvelope<TBody> {
 }
 
 export function freezeCommand<TBody>(command: CommandEnvelope<TBody>): FrozenCommand<TBody> {
+  const body = cloneSnapshot(command.body);
   const digest = sha256Hex(
     canonicalJson({
-      body: command.body,
+      body,
       commandId: command.commandId,
       ledgerId: command.ledgerId,
       ownerUid: command.ownerUid,
       type: command.type,
     })
   );
-  return { ...command, digest };
+  return {
+    commandId: command.commandId,
+    type: command.type,
+    ownerUid: command.ownerUid,
+    ledgerId: command.ledgerId,
+    body,
+    digest,
+  };
 }
 
 export function assertFrozenUnchanged<TBody>(
@@ -71,6 +81,8 @@ export interface RegisterGoodsReceiptBody {
   transport: TransportSnapshot;
   lines: ReceiptLine[];
   custody: CustodyState;
+  warehouse: OptionalText;
+  locationBin: OptionalText;
   receivingEmployeeAttributed: OptionalText;
   qualityCheckedByAttributed: OptionalText;
   remarks: OptionalText;
@@ -101,6 +113,16 @@ export interface DispatchReturnBody {
   reason: string;
   lineId: string;
   returnQty: Quantity;
+  clientObservedAtUtc: string;
+}
+
+export interface CorrectReturnDispatchBody {
+  receiptId: string;
+  expectedVersion: number;
+  reason: string;
+  lineId: string;
+  linkedEventId: string;
+  correctionQty: Quantity;
   clientObservedAtUtc: string;
 }
 

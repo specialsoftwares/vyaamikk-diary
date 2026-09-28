@@ -1,14 +1,11 @@
 import assert from "node:assert/strict";
 
 import { freezeCommand } from "./command";
-import { __setGoodsEvidenceEnabledForTests } from "./featureFlag";
 import { detectBrokenChain } from "./hashChain";
 import { InMemoryGoodsLedger } from "./ledger";
 import { createOfflineCapture } from "./offline";
 import { sampleRegisterBody } from "./testFixtures";
 import { financialYearTokenForIstInstant } from "./time";
-
-__setGoodsEvidenceEnabledForTests(true);
 
 assert.match(InMemoryGoodsLedger.simulationNotice, /^SIMULATED:/);
 
@@ -20,7 +17,7 @@ const clock = {
 
 function ledger(): InMemoryGoodsLedger {
   seq = 0;
-  return new InMemoryGoodsLedger("owner_1", "ledger_1", { ...clock });
+  return new InMemoryGoodsLedger("owner_1", "ledger_1", { ...clock }, "simulated-domain-test");
 }
 
 {
@@ -37,6 +34,11 @@ function ledger(): InMemoryGoodsLedger {
   if (!first.ok) throw new Error("expected success");
   assert.equal(first.issuedNumber, "GRIN/MAIN/FY2026-27/000001");
   assert.equal(first.replayed, false);
+  const issued = store.getEvents("receipt_1")[0]!;
+  assert.equal(
+    (issued.typedChanges as { originalSnapshotHash: string }).originalSnapshotHash,
+    store.getOriginal("receipt_1")!.originalSnapshotHash
+  );
 
   const replay = store.register(cmd);
   assert.equal(replay.ok, true);
@@ -89,7 +91,7 @@ function ledger(): InMemoryGoodsLedger {
   const boundary = new InMemoryGoodsLedger("owner_1", "ledger_1", {
     nowMs: () => t,
     uuid: () => `id_${++seq}`,
-  });
+  }, "simulated-domain-test");
   seq = 0;
   const before = boundary.register(
     freezeCommand({
@@ -147,16 +149,17 @@ function ledger(): InMemoryGoodsLedger {
         expectedVersion: 1,
         reason: "correct spelling",
         claimedOldValues: { issuedNumber: "WRONG" },
-        changes: { note: "spelling" },
+        changes: { remarks: { kind: "present", value: "spelling" } },
         clientObservedAtUtc: "2026-09-28T13:00:00.000Z",
       },
     })
   );
   assert.equal(firstAmend.ok, true);
   assert.deepEqual(store.getOriginal("amend_me")!.supplier, originalSupplier);
+  assert.equal(store.getEffective("amend_me")!.remarks.kind, "present");
   const amendEvent = store.getEvents("amend_me")[1]!;
   const storedOld = (amendEvent.typedChanges as { oldValues: Record<string, unknown> }).oldValues;
-  assert.equal(storedOld.note, null, "server uses projection, not client-claimed old values");
+  assert.deepEqual(storedOld.remarks, { kind: "not_supplied" });
   assert.equal("issuedNumber" in storedOld, false);
 
   const stale = store.amend(
@@ -169,7 +172,7 @@ function ledger(): InMemoryGoodsLedger {
         receiptId: "amend_me",
         expectedVersion: 1,
         reason: "stale",
-        changes: { note: "lost" },
+        changes: { remarks: { kind: "present", value: "lost" } },
         clientObservedAtUtc: "2026-09-28T13:01:00.000Z",
       },
     })
@@ -311,8 +314,7 @@ function ledger(): InMemoryGoodsLedger {
 }
 
 {
-  __setGoodsEvidenceEnabledForTests(false);
-  const store = ledger();
+  const store = new InMemoryGoodsLedger("owner_1", "ledger_1", { ...clock }, "production");
   const denied = store.register(
     freezeCommand({
       commandId: "denied",
@@ -326,7 +328,5 @@ function ledger(): InMemoryGoodsLedger {
   if (denied.ok) throw new Error("expected disabled");
   assert.equal(denied.code, "disabled");
 }
-
-__setGoodsEvidenceEnabledForTests(null);
 
 console.log("goodsEvidence/ledger.command.test.ts: ok");

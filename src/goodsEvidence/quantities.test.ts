@@ -71,4 +71,9 @@ assert.throws(
   /exceeds available custody/
 );
 
+assert.throws(
+  () => applyReturnDispatch(afterReturn, quantity("-1", "bags")),
+  /must be positive/
+);
+
 console.log("goodsEvidence/quantities.test.ts: ok");

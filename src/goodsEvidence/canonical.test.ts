@@ -76,4 +76,9 @@ assert.equal(detectBrokenChain([event1, event2]), null);
 const broken = { ...event2, previousHash: "deadbeef" };
 assert.equal(detectBrokenChain([event1, broken]), 1);
 
+assert.notEqual(hashCanonical({ a: 1 }), hashCanonical({ a: "1" }));
+assert.throws(() => canonicalize(new Date()));
+assert.throws(() => canonicalize([1, undefined, 2]));
+assert.notEqual(canonicalJson({ list: [1, 2] }), canonicalJson({ list: [1, null, 2] }));
+
 console.log("goodsEvidence/canonical.test.ts: ok");

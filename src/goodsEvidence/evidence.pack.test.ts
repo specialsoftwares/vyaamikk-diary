@@ -68,6 +68,7 @@ const incomplete = assembleManifest({
   ledgerId: "ledger_1",
   purchaseCaseId: "case_1",
   pinnedCuts: [cut],
+  verifiedOriginals: [],
   artifactHashes: { "invoice.pdf": originalHash },
   missingOrUnverifiable: ["ewb.pdf missing"],
   templateVersion: "1",
@@ -75,13 +76,28 @@ const incomplete = assembleManifest({
 assert.equal(incomplete.completeness, "incomplete");
 assert.equal(mayMarkComplete(incomplete), false);
 
+const verifiedOriginal = {
+  evidenceId: "ev_1",
+  category: "invoice" as const,
+  originalFileName: "invoice.pdf",
+  mime: "application/pdf",
+  byteSize: original.byteLength,
+  rawSha256: originalHash,
+  storageObjectGeneration: null,
+  captureProvenance: "test-double",
+  osConversionOccurred: false,
+  verification: "verified" as const,
+  isDerivative: false as const,
+};
+
 const complete = assembleManifest({
   exportId: "exp_2",
   ownerUid: "owner_1",
   ledgerId: "ledger_1",
   purchaseCaseId: "case_1",
   pinnedCuts: [cut],
-  artifactHashes: { "invoice.pdf": originalHash },
+  verifiedOriginals: [verifiedOriginal],
+  artifactHashes: { ev_1: originalHash },
   missingOrUnverifiable: [],
   templateVersion: "1",
 });

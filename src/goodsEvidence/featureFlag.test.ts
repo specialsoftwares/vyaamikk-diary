@@ -2,12 +2,11 @@ import assert from "node:assert/strict";
 
 import { __setRuntimeSignalsForTests, env } from "@/config/env";
 import { detectRuntimeKind } from "@/config/runtimeEnvironment";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-import {
-  __setGoodsEvidenceEnabledForTests,
-  isGoodsEvidenceBlockedByStoreRuntime,
-  isGoodsEvidenceEnabled,
-} from "./featureFlag";
+import { isGoodsEvidenceBlockedByStoreRuntime, isGoodsEvidenceEnabled } from "./featureFlag";
 
 const prevFlag = process.env.EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED;
 const prevMode = process.env.EXPO_PUBLIC_APP_MODE;
@@ -15,7 +14,6 @@ const prevMode = process.env.EXPO_PUBLIC_APP_MODE;
 const FLAG_VALUES = [undefined, "0", "true", "1"] as const;
 
 function restoreEnv(): void {
-  __setGoodsEvidenceEnabledForTests(null);
   __setRuntimeSignalsForTests(null);
   if (prevFlag == null) delete process.env.EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED;
   else process.env.EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED = prevFlag;
@@ -24,7 +22,6 @@ function restoreEnv(): void {
 }
 
 function applyFlag(value: (typeof FLAG_VALUES)[number]): void {
-  __setGoodsEvidenceEnabledForTests(null);
   if (value === undefined) delete process.env.EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED;
   else process.env.EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED = value;
 }
@@ -78,6 +75,13 @@ for (const value of FLAG_VALUES) {
     `production store-or-standalone: flag ${String(value)} stays off`
   );
 }
+
+const flagSource = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), "featureFlag.ts"),
+  "utf8"
+);
+assert.doesNotMatch(flagSource, /__setGoodsEvidenceEnabledForTests/);
+assert.doesNotMatch(flagSource, /_testOverride/);
 
 restoreEnv();
 
