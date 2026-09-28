@@ -186,6 +186,7 @@
     "test:workspace-completion": "npx --yes tsx src/auth-v2/profileReviewCompletion.contract.test.ts && npx --yes tsx src/auth-v2/workspaceCompletion.journey.test.ts",
     "test:harness-review-restart": "npx --yes tsx src/auth-v2/preview/harnessReviewRestart.test.ts",
     "test:harness-post-location-handoff": "npx --yes tsx src/auth-v2/preview/harnessPostLocationHandoff.test.ts",
+    "test:goods-evidence": "npx --yes tsx src/goodsEvidence/featureFlag.test.ts && npx --yes tsx src/goodsEvidence/quantities.test.ts && npx --yes tsx src/goodsEvidence/ewb.test.ts && npx --yes tsx src/goodsEvidence/exceptions.test.ts && npx --yes tsx src/goodsEvidence/canonical.test.ts && npx --yes tsx src/goodsEvidence/ledger.command.test.ts && npx --yes tsx src/goodsEvidence/evidence.pack.test.ts && npx --yes tsx src/goodsEvidence/isolation.contract.test.ts",
     "test:boot-release-gate": "npx --yes tsx src/boot/bootReleaseGate.contract.test.ts",
     "test:boot-production-startup": "npx --yes tsx src/boot/bootProductionStartup.contract.test.ts",
     "functions:build": "npm --prefix functions run build",
