@@ -178,6 +178,9 @@ export class InMemoryGoodsLedger {
     const replay = this.replayRegister(key, command.digest);
     if (replay) return replay;
 
+    const bodyErr = registerBodyError(command.body);
+    if (bodyErr) return { ok: false, code: "invalid", detail: bodyErr };
+
     const existingReceipt = this.grins.get(command.body.receiptId);
     if (existingReceipt) {
       return {
@@ -186,9 +189,6 @@ export class InMemoryGoodsLedger {
         detail: "receipt already issued; history cannot be replaced",
       };
     }
-
-    const bodyErr = registerBodyError(command.body);
-    if (bodyErr) return { ok: false, code: "invalid", detail: bodyErr };
 
     const body = cloneSnapshot(command.body);
     const serverMs = this.clock.nowMs();

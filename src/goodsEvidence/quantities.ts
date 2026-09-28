@@ -124,9 +124,17 @@ export function isNonNegative(value: DecimalString): boolean {
 
 export function quantityShapeError(
   value: unknown,
-  options: { label: string; allowNegative?: boolean; requiredUnit?: string | null }
+  options: {
+    label: string;
+    allowNegative?: boolean;
+    requiredUnit?: string | null;
+    /** Package counts are whole units of packaging, not a material measure. */
+    wholeCount?: boolean;
+  }
 ): string | null {
-  if (value == null || typeof value !== "object") return `${options.label} is required`;
+  if (value == null || typeof value !== "object" || Array.isArray(value)) {
+    return `${options.label} is required`;
+  }
   const qty = value as { value?: unknown; unit?: unknown; precision?: unknown };
   if (typeof qty.value !== "string") return `${options.label} value is required`;
   try {
@@ -150,6 +158,11 @@ export function quantityShapeError(
   if (fraction > qty.precision) return `${options.label} precision does not cover the value`;
   if (!options.allowNegative && compareDecimal(qty.value, "0") < 0) {
     return `${options.label} must not be negative`;
+  }
+  if (options.wholeCount) {
+    if (qty.precision !== 0 || qty.value.includes(".")) {
+      return `${options.label} must be a whole count`;
+    }
   }
   return null;
 }

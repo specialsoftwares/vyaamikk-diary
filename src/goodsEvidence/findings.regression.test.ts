@@ -973,4 +973,252 @@ function testLedger(): InMemoryGoodsLedger {
   assert.equal(latestCancellationEvidence(generic.histories), null);
 }
 
+{
+  const store = testLedger();
+  const kgInBags = store.register(
+    freezeCommand({
+      commandId: "kg_bags",
+      type: "registerGoodsReceipt",
+      ownerUid: "owner_1",
+      ledgerId: "ledger_1",
+      body: sampleRegisterBody({
+        receiptId: "kg_bags",
+        lines: [
+          sampleLine({
+            unit: "kg",
+            invoiceQuantity: { value: "100", unit: "kg", precision: 0 },
+            expectedOnThisDelivery: { value: "40", unit: "kg", precision: 0 },
+            physicallyReceived: { value: "40", unit: "kg", precision: 0 },
+            packageCount: { value: "2", unit: "bags", precision: 0 },
+          }),
+        ],
+      }),
+    })
+  );
+  assert.equal(kgInBags.ok, true);
+
+  const litresInDrums = store.register(
+    freezeCommand({
+      commandId: "l_drums",
+      type: "registerGoodsReceipt",
+      ownerUid: "owner_1",
+      ledgerId: "ledger_1",
+      body: sampleRegisterBody({
+        receiptId: "l_drums",
+        lines: [
+          sampleLine({
+            unit: "L",
+            invoiceQuantity: { value: "200", unit: "L", precision: 0 },
+            expectedOnThisDelivery: { value: "200", unit: "L", precision: 0 },
+            physicallyReceived: { value: "200", unit: "L", precision: 0 },
+            packageCount: { value: "4", unit: "drums", precision: 0 },
+          }),
+        ],
+      }),
+    })
+  );
+  assert.equal(litresInDrums.ok, true);
+
+  const piecesInCartons = store.register(
+    freezeCommand({
+      commandId: "pcs_cartons",
+      type: "registerGoodsReceipt",
+      ownerUid: "owner_1",
+      ledgerId: "ledger_1",
+      body: sampleRegisterBody({
+        receiptId: "pcs_cartons",
+        lines: [
+          sampleLine({
+            unit: "pcs",
+            invoiceQuantity: { value: "24", unit: "pcs", precision: 0 },
+            expectedOnThisDelivery: { value: "24", unit: "pcs", precision: 0 },
+            physicallyReceived: { value: "24", unit: "pcs", precision: 0 },
+            packageCount: { value: "2", unit: "cartons", precision: 0 },
+          }),
+        ],
+      }),
+    })
+  );
+  assert.equal(piecesInCartons.ok, true);
+
+  const fractionalPack = store.register(
+    freezeCommand({
+      commandId: "frac_pack",
+      type: "registerGoodsReceipt",
+      ownerUid: "owner_1",
+      ledgerId: "ledger_1",
+      body: sampleRegisterBody({
+        receiptId: "frac_pack",
+        lines: [sampleLine({ packageCount: { value: "2.5", unit: "bags", precision: 1 } })],
+      }),
+    })
+  );
+  assert.equal(fractionalPack.ok, false);
+  if (fractionalPack.ok) throw new Error("frac");
+  assert.equal(fractionalPack.code, "invalid");
+  assert.equal(store.getOriginal("frac_pack"), undefined);
+
+  const negativePack = store.register(
+    freezeCommand({
+      commandId: "neg_pack",
+      type: "registerGoodsReceipt",
+      ownerUid: "owner_1",
+      ledgerId: "ledger_1",
+      body: sampleRegisterBody({
+        receiptId: "neg_pack",
+        lines: [sampleLine({ packageCount: { value: "-1", unit: "bags", precision: 0 } })],
+      }),
+    })
+  );
+  assert.equal(negativePack.ok, false);
+
+  const mismatchedMaterial = store.register(
+    freezeCommand({
+      commandId: "bad_unit",
+      type: "registerGoodsReceipt",
+      ownerUid: "owner_1",
+      ledgerId: "ledger_1",
+      body: sampleRegisterBody({
+        receiptId: "bad_unit",
+        lines: [
+          sampleLine({
+            unit: "kg",
+            physicallyReceived: { value: "40", unit: "bags", precision: 0 },
+            expectedOnThisDelivery: { value: "40", unit: "kg", precision: 0 },
+            invoiceQuantity: { value: "40", unit: "kg", precision: 0 },
+          }),
+        ],
+      }),
+    })
+  );
+  assert.equal(mismatchedMaterial.ok, false);
+
+  const inconsistentWeights = store.register(
+    freezeCommand({
+      commandId: "wt_mix",
+      type: "registerGoodsReceipt",
+      ownerUid: "owner_1",
+      ledgerId: "ledger_1",
+      body: sampleRegisterBody({
+        receiptId: "wt_mix",
+        lines: [
+          sampleLine({
+            grossWeight: { value: "50", unit: "kg", precision: 0 },
+            tareWeight: { value: "2", unit: "bags", precision: 0 },
+            weightUnit: { kind: "present", value: "kg" },
+          }),
+        ],
+      }),
+    })
+  );
+  assert.equal(inconsistentWeights.ok, false);
+  if (inconsistentWeights.ok) throw new Error("weights");
+  assert.match(inconsistentWeights.detail, /weight units are inconsistent/);
+}
+
+{
+  const store = testLedger();
+  const numericBody = sampleRegisterBody({ receiptId: "numeric" });
+  (numericBody as { receiptId: unknown }).receiptId = 17;
+  const numeric = store.register(
+    freezeCommand({
+      commandId: "num_receipt",
+      type: "registerGoodsReceipt",
+      ownerUid: "owner_1",
+      ledgerId: "ledger_1",
+      body: numericBody,
+    })
+  );
+  assert.equal(typeof numericBody.receiptId, "number");
+  assert.equal(numeric.ok, false);
+  if (numeric.ok) throw new Error("numeric");
+  assert.equal(numeric.code, "invalid");
+  assert.equal(store.getOriginal("17"), undefined);
+  assert.equal(store.getOriginal("numeric"), undefined);
+
+  const nullBody = store.register(
+    freezeCommand({
+      commandId: "null_body",
+      type: "registerGoodsReceipt",
+      ownerUid: "owner_1",
+      ledgerId: "ledger_1",
+      body: null as unknown as ReturnType<typeof sampleRegisterBody>,
+    })
+  );
+  assert.equal(nullBody.ok, false);
+  if (nullBody.ok) throw new Error("null body");
+  assert.equal(nullBody.code, "invalid");
+
+  const arrayBody = store.register(
+    freezeCommand({
+      commandId: "array_body",
+      type: "registerGoodsReceipt",
+      ownerUid: "owner_1",
+      ledgerId: "ledger_1",
+      body: [] as unknown as ReturnType<typeof sampleRegisterBody>,
+    })
+  );
+  assert.equal(arrayBody.ok, false);
+  if (arrayBody.ok) throw new Error("array body");
+  assert.equal(arrayBody.code, "invalid");
+
+  const afterMalformed = store.register(
+    freezeCommand({
+      commandId: "after_malformed",
+      type: "registerGoodsReceipt",
+      ownerUid: "owner_1",
+      ledgerId: "ledger_1",
+      body: sampleRegisterBody({ receiptId: "after_malformed" }),
+    })
+  );
+  assert.equal(afterMalformed.ok, true);
+  if (!afterMalformed.ok) throw new Error("after malformed");
+  assert.equal(afterMalformed.issuedNumber, "GRIN/MAIN/FY2026-27/000001");
+
+  store.register(
+    freezeCommand({
+      commandId: "mut_base",
+      type: "registerGoodsReceipt",
+      ownerUid: "owner_1",
+      ledgerId: "ledger_1",
+      body: sampleRegisterBody({ receiptId: "mut_base" }),
+    })
+  );
+  const badChange = store.amend(
+    freezeCommand({
+      commandId: "mut_bad",
+      type: "amendFields",
+      ownerUid: "owner_1",
+      ledgerId: "ledger_1",
+      body: {
+        receiptId: "mut_base",
+        expectedVersion: 1,
+        reason: "bad warehouse",
+        changes: { warehouse: 17 },
+        clientObservedAtUtc: "2026-09-28T13:00:00.000Z",
+      },
+    })
+  );
+  assert.equal(badChange.ok, false);
+  if (badChange.ok) throw new Error("bad change");
+  assert.equal(badChange.code, "invalid");
+  assert.equal(store.getEffective("mut_base")!.warehouse.kind, "present");
+  const goodChange = store.amend(
+    freezeCommand({
+      commandId: "mut_good",
+      type: "amendFields",
+      ownerUid: "owner_1",
+      ledgerId: "ledger_1",
+      body: {
+        receiptId: "mut_base",
+        expectedVersion: 1,
+        reason: "warehouse note",
+        changes: { warehouse: { kind: "present", value: "Bay B" } },
+        clientObservedAtUtc: "2026-09-28T13:01:00.000Z",
+      },
+    })
+  );
+  assert.equal(goodChange.ok, true);
+}
+
 console.log("goodsEvidence/findings.regression.test.ts: ok");
