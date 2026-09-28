@@ -20,6 +20,7 @@ export {
   appendQcEvent,
   cancellationEvidenceError,
   emptyEwbHistories,
+  latestCancellationEvidence,
   latestMovement,
   latestPortalStatus,
   latestQc,
@@ -30,6 +31,7 @@ export { grinWithoutInvoice, gstr2bPurchaseWithoutGrin, isItcDetermined } from "
 export { evidenceCompleteness, verifyOriginalBytes } from "./evidence";
 export {
   assembleManifest,
+  cutMatchesEventStream,
   EVIDENCE_PACK_SECTIONS,
   evaluatePackCompleteness,
   mayMarkComplete,

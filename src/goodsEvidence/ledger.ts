@@ -13,15 +13,20 @@ import { hashEventEnvelope, hashOriginalSnapshot } from "./hashChain";
 import {
   applyReturnCorrection,
   applyReturnDispatch,
+  compareDecimal,
   emptyLedgers,
   QuantityBoundError,
+  subtractQuantity,
   type LineQuantityLedgers,
+  type Quantity,
 } from "./quantities";
 import { cloneSnapshot, freezeSnapshot } from "./snapshot";
 import { financialYearTokenForIstInstant, formatUtcIso } from "./time";
 import type { CommandAdmission, GrinEvent, GrinView, ImmutableGrin } from "./types";
 import {
+  amendmentFieldError,
   commandReasonError,
+  effectiveRecordError,
   isAmendableGrinField,
   registerBodyError,
 } from "./validate";
@@ -52,6 +57,29 @@ export interface RegisterSuccess {
 export type RegisterOutcome = RegisterSuccess | (CommandAdmission & { ok: false });
 
 export type MutationOutcome = (CommandAdmission & { eventVersion?: number });
+
+function asQuantity(value: unknown): Quantity | null {
+  if (!value || typeof value !== "object") return null;
+  const qty = value as Quantity;
+  if (typeof qty.value !== "string" || typeof qty.unit !== "string") return null;
+  return qty;
+}
+
+function remainingLinkedDispatch(
+  events: GrinEvent[],
+  linkedEventId: string,
+  dispatched: Quantity
+): Quantity {
+  let remaining: Quantity = { ...dispatched };
+  for (const event of events) {
+    if (event.type !== "return_received") continue;
+    if (event.typedChanges.linkedEventId !== linkedEventId) continue;
+    const correction = asQuantity(event.typedChanges.correctionQty);
+    if (!correction) continue;
+    remaining = subtractQuantity(remaining, correction);
+  }
+  return remaining;
+}
 
 interface DedupeRecord {
   digest: string;
@@ -249,9 +277,13 @@ export class InMemoryGoodsLedger {
       if (!isAmendableGrinField(key)) {
         return { ok: false, code: "invalid", detail: `field ${key} is not amendable` };
       }
+      const fieldErr = amendmentFieldError(key, command.body.changes[key]);
+      if (fieldErr) return { ok: false, code: "invalid", detail: fieldErr };
       oldValues[key] = cloneSnapshot((next as unknown as Record<string, unknown>)[key] ?? null);
       (next as unknown as Record<string, unknown>)[key] = cloneSnapshot(command.body.changes[key]);
     }
+    const envelopeErr = effectiveRecordError(next);
+    if (envelopeErr) return { ok: false, code: "invalid", detail: envelopeErr };
     void command.body.claimedOldValues;
     prepared.state.effective = next;
     const event = this.appendEvent(prepared.state, {
@@ -302,6 +334,7 @@ export class InMemoryGoodsLedger {
         expectedPreviousVersion: command.body.expectedVersion,
         typedChanges: {
           lineId: command.body.lineId,
+          unit: command.body.returnQty.unit,
           returnQty: cloneSnapshot(command.body.returnQty),
           physicalReceivedUnchanged: next.physicalReceived.value === physicalBefore,
         },
@@ -328,13 +361,30 @@ export class InMemoryGoodsLedger {
     if (!linked) {
       return { ok: false, code: "invalid", detail: "linked return_dispatched event not found" };
     }
-    const ledger = prepared.state.lineLedgers.get(command.body.lineId);
+    const linkedQty = asQuantity(linked.typedChanges.returnQty);
+    const linkedLineId = linked.typedChanges.lineId;
+    const linkedUnit =
+      typeof linked.typedChanges.unit === "string" ? linked.typedChanges.unit : linkedQty?.unit;
+    if (typeof linkedLineId !== "string" || !linkedQty || !linkedUnit) {
+      return { ok: false, code: "invalid", detail: "linked dispatch is missing line quantity" };
+    }
+    if (command.body.lineId !== linkedLineId) {
+      return { ok: false, code: "invalid", detail: "correction line must match the linked dispatch" };
+    }
+    if (command.body.correctionQty.unit !== linkedUnit) {
+      return { ok: false, code: "invalid", detail: "correction unit must match the linked dispatch" };
+    }
+    const remaining = remainingLinkedDispatch(prepared.state.events, linked.eventId, linkedQty);
+    if (compareDecimal(command.body.correctionQty.value, remaining.value) > 0) {
+      return { ok: false, code: "invalid", detail: "correction exceeds remaining linked dispatch quantity" };
+    }
+    const ledger = prepared.state.lineLedgers.get(linkedLineId);
     if (!ledger) {
       return { ok: false, code: "invalid", detail: "unknown line" };
     }
     try {
       const next = applyReturnCorrection(ledger, command.body.correctionQty);
-      prepared.state.lineLedgers.set(command.body.lineId, next);
+      prepared.state.lineLedgers.set(linkedLineId, next);
       const event = this.appendEvent(prepared.state, {
         type: "return_received",
         reason: command.body.reason.trim(),

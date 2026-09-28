@@ -3,7 +3,14 @@ import { createHash } from "node:crypto";
 
 import { GOODS_EVIDENCE_SIMULATION_NOTICE } from "./constants";
 import { derivativesMustNotReplaceOriginal, evidenceCompleteness, verifyOriginalBytes } from "./evidence";
-import { assembleManifest, cutMatchesHead, EVIDENCE_PACK_SECTIONS, mayMarkComplete, pinEventCut } from "./evidencePack";
+import {
+  assembleManifest,
+  cutMatchesHead,
+  EVIDENCE_PACK_SECTIONS,
+  mayMarkComplete,
+} from "./evidencePack";
+import { hashEventEnvelope } from "./hashChain";
+import type { GrinEvent } from "./types";
 
 assert.match(GOODS_EVIDENCE_SIMULATION_NOTICE, /^SIMULATED:/);
 
@@ -54,20 +61,20 @@ assert.equal(evidenceCompleteness("verified"), "complete");
 
 assert.equal(EVIDENCE_PACK_SECTIONS.length, 6);
 
-const cut = pinEventCut({
+const dummyCut = {
   receiptId: "r1",
   eventVersion: 2,
   headHash: "abc",
-});
-assert.equal(cutMatchesHead(cut, { eventVersion: 3, headHash: "abc" }), false);
-assert.equal(cutMatchesHead(cut, { eventVersion: 2, headHash: "abc" }), true);
+};
+assert.equal(cutMatchesHead(dummyCut, { eventVersion: 3, headHash: "abc" }), false);
+assert.equal(cutMatchesHead(dummyCut, { eventVersion: 2, headHash: "abc" }), true);
 
 const incomplete = assembleManifest({
   exportId: "exp_1",
   ownerUid: "owner_1",
   ledgerId: "ledger_1",
   purchaseCaseId: "case_1",
-  pinnedCuts: [cut],
+  pinnedCuts: [dummyCut],
   verifiedOriginals: [],
   artifactHashes: { "invoice.pdf": originalHash },
   missingOrUnverifiable: ["ewb.pdf missing"],
@@ -75,6 +82,33 @@ const incomplete = assembleManifest({
 });
 assert.equal(incomplete.completeness, "incomplete");
 assert.equal(mayMarkComplete(incomplete), false);
+
+const iso = "2026-09-28T12:00:00.000Z";
+const eventFields = {
+  eventId: "e1",
+  receiptId: "r1",
+  streamSequence: 1,
+  type: "receipt_registered" as const,
+  actorUid: "u1",
+  serverAcceptedAtUtc: iso,
+  clientObservedAtUtc: iso,
+  reason: "issued",
+  expectedPreviousVersion: 0,
+  typedChanges: { issuedNumber: "GRIN/MAIN/FY2026-27/000001" },
+  previousHash: null as string | null,
+};
+const eventHash = hashEventEnvelope(eventFields);
+const streamEvent: GrinEvent = {
+  schemaVersion: 1,
+  ...eventFields,
+  eventHash,
+  firestoreCommitTime: null,
+};
+const validCut = {
+  receiptId: "r1",
+  eventVersion: 1,
+  headHash: eventHash,
+};
 
 const verifiedOriginal = {
   evidenceId: "ev_1",
@@ -95,12 +129,26 @@ const complete = assembleManifest({
   ownerUid: "owner_1",
   ledgerId: "ledger_1",
   purchaseCaseId: "case_1",
-  pinnedCuts: [cut],
+  pinnedCuts: [validCut],
   verifiedOriginals: [verifiedOriginal],
   artifactHashes: { ev_1: originalHash },
+  eventStreams: [{ receiptId: "r1", events: [streamEvent] }],
   missingOrUnverifiable: [],
   templateVersion: "1",
 });
 assert.equal(mayMarkComplete(complete), true);
+
+const bogus = assembleManifest({
+  exportId: "exp_bad",
+  ownerUid: "owner_1",
+  ledgerId: "ledger_1",
+  purchaseCaseId: "case_1",
+  pinnedCuts: [{ receiptId: "r1", eventVersion: 1.5, headHash: "not-a-hash" }],
+  verifiedOriginals: [verifiedOriginal],
+  artifactHashes: { ev_1: originalHash },
+  eventStreams: [{ receiptId: "r1", events: [streamEvent] }],
+  templateVersion: "1",
+});
+assert.equal(bogus.completeness, "incomplete");
 
 console.log("goodsEvidence/evidence.pack.test.ts: ok");

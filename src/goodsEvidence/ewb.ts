@@ -3,6 +3,8 @@
  * Portal cancellation, internal movement and QC must not overwrite one another.
  */
 
+import { cloneSnapshot, freezeSnapshot } from "./snapshot";
+
 export type EwbPortalStatus =
   | "generated_active"
   | "cancelled"
@@ -33,31 +35,6 @@ export type EwbLink =
   | { kind: "not_applicable"; reason: string }
   | { kind: "unknown"; reason: string };
 
-export interface EwbPortalObservation {
-  status: EwbPortalStatus;
-  observedAtUtc: string;
-  source: string;
-  verificationLevel: EwbVerificationLevel;
-}
-
-export interface EwbMovementEvent {
-  atUtc: string;
-  movement: EwbInternalMovement;
-  reason: string;
-}
-
-export interface EwbQcEvent {
-  atUtc: string;
-  qc: "hold" | "accepted" | "partial" | "rejected";
-  reason: string;
-}
-
-export interface EwbReplacementLink {
-  previousEbn: string;
-  newEbn: string;
-  reason: string;
-}
-
 export type GoodsMoved = "yes" | "no" | "unknown";
 
 export interface EwbCancellationEvidence {
@@ -78,6 +55,34 @@ export interface EwbCancellationEvidence {
     | { kind: "not_applicable"; reason: string };
 }
 
+export interface EwbPortalObservationBase {
+  observedAtUtc: string;
+  source: string;
+  verificationLevel: EwbVerificationLevel;
+}
+
+export type EwbPortalObservation =
+  | (EwbPortalObservationBase & { status: Exclude<EwbPortalStatus, "cancelled"> })
+  | (EwbPortalObservationBase & { status: "cancelled"; evidence: EwbCancellationEvidence });
+
+export interface EwbMovementEvent {
+  atUtc: string;
+  movement: EwbInternalMovement;
+  reason: string;
+}
+
+export interface EwbQcEvent {
+  atUtc: string;
+  qc: "hold" | "accepted" | "partial" | "rejected";
+  reason: string;
+}
+
+export interface EwbReplacementLink {
+  previousEbn: string;
+  newEbn: string;
+  reason: string;
+}
+
 export interface EwbHistories {
   portal: EwbPortalObservation[];
   movementEvents: EwbMovementEvent[];
@@ -85,8 +90,12 @@ export interface EwbHistories {
   replacements: EwbReplacementLink[];
 }
 
+function seal(histories: EwbHistories): EwbHistories {
+  return freezeSnapshot(cloneSnapshot(histories));
+}
+
 export function emptyEwbHistories(): EwbHistories {
-  return { portal: [], movementEvents: [], qcEvents: [], replacements: [] };
+  return seal({ portal: [], movementEvents: [], qcEvents: [], replacements: [] });
 }
 
 export function latestMovement(histories: EwbHistories): EwbInternalMovement | null {
@@ -103,28 +112,36 @@ export function appendPortalObservation(
   histories: EwbHistories,
   observation: EwbPortalObservation
 ): EwbHistories {
-  return { ...histories, portal: [...histories.portal, observation] };
+  const current = cloneSnapshot(histories);
+  current.portal.push(freezeSnapshot(cloneSnapshot(observation)));
+  return seal(current);
 }
 
 export function appendMovementEvent(histories: EwbHistories, event: EwbMovementEvent): EwbHistories {
   if (!event.reason.trim()) {
     throw new Error("goodsEvidence: movement event reason is required");
   }
-  return { ...histories, movementEvents: [...histories.movementEvents, event] };
+  const current = cloneSnapshot(histories);
+  current.movementEvents.push(freezeSnapshot(cloneSnapshot(event)));
+  return seal(current);
 }
 
 export function appendQcEvent(histories: EwbHistories, event: EwbQcEvent): EwbHistories {
   if (!event.reason.trim()) {
     throw new Error("goodsEvidence: QC event reason is required");
   }
-  return { ...histories, qcEvents: [...histories.qcEvents, event] };
+  const current = cloneSnapshot(histories);
+  current.qcEvents.push(freezeSnapshot(cloneSnapshot(event)));
+  return seal(current);
 }
 
 export function linkReplacement(
   histories: EwbHistories,
   link: EwbReplacementLink
 ): EwbHistories {
-  return { ...histories, replacements: [...histories.replacements, link] };
+  const current = cloneSnapshot(histories);
+  current.replacements.push(freezeSnapshot(cloneSnapshot(link)));
+  return seal(current);
 }
 
 /** Delivery of goods does not cancel the portal EWB. */
@@ -166,10 +183,10 @@ export type CancellationResult =
   | { ok: true; histories: EwbHistories }
   | { ok: false; detail: string };
 
-/** Portal cancel is an observation; movement and QC event histories stay as they were. */
+/** Portal cancel stores the evidence with the observation; movement and QC stay as events. */
 export function recordPortalCancellation(
   histories: EwbHistories,
-  observation: Omit<EwbPortalObservation, "status">,
+  observation: EwbPortalObservationBase,
   evidence: EwbCancellationEvidence
 ): CancellationResult {
   const err = cancellationEvidenceError(evidence);
@@ -177,8 +194,9 @@ export function recordPortalCancellation(
   return {
     ok: true,
     histories: appendPortalObservation(histories, {
-      ...observation,
+      ...cloneSnapshot(observation),
       status: "cancelled",
+      evidence: cloneSnapshot(evidence),
     }),
   };
 }
@@ -188,7 +206,14 @@ export function latestPortalStatus(histories: EwbHistories): EwbPortalStatus | n
   return last ? last.status : null;
 }
 
-/** @deprecated Use latestMovement. Kept as a current-state helper. */
+export function latestCancellationEvidence(
+  histories: EwbHistories
+): EwbCancellationEvidence | null {
+  const last = histories.portal[histories.portal.length - 1];
+  if (!last || last.status !== "cancelled") return null;
+  return last.evidence;
+}
+
 export function currentMovement(histories: EwbHistories): EwbInternalMovement {
   return latestMovement(histories) ?? "planned";
 }
