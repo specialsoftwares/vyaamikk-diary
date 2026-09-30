@@ -1,0 +1,61 @@
+import { sha256Hex } from "@/utils/sha256Hex";
+
+import { canonicalJson } from "./canonical";
+import type { GrinEvent, ImmutableGrin } from "./types";
+
+export function hashCanonical(value: unknown): string {
+  return sha256Hex(canonicalJson(value));
+}
+
+export function hashOriginalSnapshot(grin: ImmutableGrin): string {
+  const { originalSnapshotHash: _ignored, ...rest } = grin;
+  return hashCanonical(rest);
+}
+
+export function hashEventEnvelope(input: {
+  eventId: string;
+  receiptId: string;
+  streamSequence: number;
+  type: GrinEvent["type"];
+  actorUid: string;
+  serverAcceptedAtUtc: string;
+  clientObservedAtUtc: string;
+  reason: string;
+  expectedPreviousVersion: number;
+  typedChanges: Record<string, unknown>;
+  previousHash: string | null;
+}): string {
+  return hashCanonical({
+    actorUid: input.actorUid,
+    clientObservedAtUtc: input.clientObservedAtUtc,
+    eventId: input.eventId,
+    expectedPreviousVersion: input.expectedPreviousVersion,
+    previousHash: input.previousHash,
+    reason: input.reason,
+    receiptId: input.receiptId,
+    serverAcceptedAtUtc: input.serverAcceptedAtUtc,
+    streamSequence: input.streamSequence,
+    type: input.type,
+    typedChanges: input.typedChanges,
+  });
+}
+
+export function linkPreviousHash(previous: GrinEvent | null, nextHash: string): {
+  previousHash: string | null;
+  eventHash: string;
+} {
+  return { previousHash: previous?.eventHash ?? null, eventHash: nextHash };
+}
+
+export function detectBrokenChain(events: GrinEvent[]): number | null {
+  let previous: string | null = null;
+  for (let i = 0; i < events.length; i++) {
+    const event = events[i]!;
+    if (event.streamSequence !== i + 1) return i;
+    if (event.previousHash !== previous) return i;
+    const recomputed = hashEventEnvelope(event);
+    if (recomputed !== event.eventHash) return i;
+    previous = event.eventHash;
+  }
+  return null;
+}
