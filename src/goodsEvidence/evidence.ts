@@ -16,6 +16,12 @@ export type EvidenceVerification = "pending" | "failed" | "verified";
 
 export type DerivativeKind = "thumbnail" | "ocr" | "crop" | "rotation" | "redacted";
 
+export interface LabelledEvidenceSupport {
+  /** Inventory items this original is claimed to support. Simulation metadata, not parsed content. */
+  inventoryItemIds: string[];
+  facts: string[];
+}
+
 export interface OriginalEvidence {
   evidenceId: string;
   category: EvidenceCategory;
@@ -28,6 +34,7 @@ export interface OriginalEvidence {
   osConversionOccurred: boolean;
   verification: EvidenceVerification;
   isDerivative: false;
+  labelledSupport?: LabelledEvidenceSupport;
 }
 
 export interface DerivativeEvidence {

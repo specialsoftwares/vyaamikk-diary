@@ -35,6 +35,7 @@ export {
   cutMatchesEventStream,
   EVIDENCE_INVENTORY_VERSION,
   EVIDENCE_PACK_SECTIONS,
+  EVIDENCE_SUPPORT_POLICY_VERSION,
   evaluatePackCompleteness,
   mayMarkComplete,
   pinEventCut,

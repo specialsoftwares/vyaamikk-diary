@@ -4,6 +4,17 @@ import type { ItcDisposition } from "./exceptions";
 import { detectBrokenChain, hashOriginalSnapshot } from "./hashChain";
 import { cloneSnapshot, freezeSnapshot } from "./snapshot";
 import type { GrinEvent, ImmutableGrin } from "./types";
+import {
+  EVIDENCE_SUPPORT_POLICY_VERSION,
+  notApplicableError,
+  originalSupportsItem,
+  REQUIRED_EVIDENCE_ITEMS,
+  snapshotSupport,
+  type EvidenceInventoryItemId,
+} from "./evidenceSupport";
+
+export { EVIDENCE_SUPPORT_POLICY_VERSION, REQUIRED_EVIDENCE_ITEMS } from "./evidenceSupport";
+export type { EvidenceInventoryItemId } from "./evidenceSupport";
 
 export const EVIDENCE_PACK_SECTIONS = [
   "supplier",
@@ -19,17 +30,6 @@ export type EvidencePackSection = (typeof EVIDENCE_PACK_SECTIONS)[number];
 /** Versioned inventory of required coverage items. Integrity is separate from coverage. */
 export const EVIDENCE_INVENTORY_VERSION = 1 as const;
 
-export const REQUIRED_EVIDENCE_ITEMS = [
-  { itemId: "supplier_identity", section: "supplier" },
-  { itemId: "commercial_document", section: "commercialDocuments" },
-  { itemId: "movement_evidence", section: "movementEvidence" },
-  { itemId: "receipt_evidence", section: "receiptEvidence" },
-  { itemId: "accounting_payment_evidence", section: "accountingPaymentEvidence" },
-  { itemId: "gst_evidence", section: "gstEvidence" },
-] as const;
-
-export type EvidenceInventoryItemId = (typeof REQUIRED_EVIDENCE_ITEMS)[number]["itemId"];
-
 export type EvidenceItemDisposition =
   | { itemId: EvidenceInventoryItemId; kind: "satisfied"; evidenceId: string }
   | {
@@ -38,7 +38,7 @@ export type EvidenceItemDisposition =
       snapshotReceiptId: string;
       reason: string;
     }
-  | { itemId: EvidenceInventoryItemId; kind: "not_applicable"; reason: string }
+  | { itemId: EvidenceInventoryItemId; kind: "not_applicable"; policyCode: string; reason: string }
   | { itemId: EvidenceInventoryItemId; kind: "missing"; reason: string }
   | { itemId: EvidenceInventoryItemId; kind: "unknown"; reason: string }
   | { itemId: EvidenceInventoryItemId; kind: "pending"; reason: string };
@@ -82,6 +82,18 @@ export interface InventoryItemEvaluation {
   evidenceId: string | null;
   snapshotReceiptId: string | null;
   reason: string | null;
+  policyCode: string | null;
+  supportPolicyVersion: typeof EVIDENCE_SUPPORT_POLICY_VERSION;
+  supportingFields: string[];
+  supportingEvidenceIds: string[];
+  provenance:
+    | "grin_snapshot_assertion"
+    | "labelled_original"
+    | "not_applicable"
+    | "missing"
+    | "unknown"
+    | "pending"
+    | "unresolved";
 }
 
 export interface PackVerificationAnchors {
@@ -105,6 +117,7 @@ export interface EvidencePackManifest {
   inventoryEvaluation: InventoryItemEvaluation[];
   evidenceAssociations: Record<string, EvidenceLinkage>;
   verificationAnchors: PackVerificationAnchors;
+  supportPolicyVersion: typeof EVIDENCE_SUPPORT_POLICY_VERSION;
   artifactHashes: Record<string, string>;
   templateVersion: string;
   parserVersions: Record<string, string>;
@@ -222,6 +235,75 @@ function issuanceAnchorError(
   return null;
 }
 
+function parseDisposition(value: unknown): EvidenceItemDisposition | { error: string } {
+  if (value == null || typeof value !== "object" || Array.isArray(value)) {
+    return { error: "inventory disposition is not an object" };
+  }
+  const record = value as Record<string, unknown>;
+  const itemId = record.itemId;
+  const requiredIds = new Set<string>(REQUIRED_EVIDENCE_ITEMS.map((item) => item.itemId));
+  if (typeof itemId !== "string" || !requiredIds.has(itemId)) {
+    return { error: `unknown inventory item ${String(itemId)}` };
+  }
+  const id = itemId as EvidenceInventoryItemId;
+  const kind = record.kind;
+  if (kind === "satisfied") {
+    if (typeof record.evidenceId !== "string" || !record.evidenceId.trim()) {
+      return { error: `${id} satisfied disposition is missing evidenceId` };
+    }
+    return { itemId: id, kind: "satisfied", evidenceId: record.evidenceId };
+  }
+  if (kind === "satisfied_from_snapshot") {
+    if (typeof record.snapshotReceiptId !== "string" || !record.snapshotReceiptId.trim()) {
+      return { error: `${id} snapshot disposition is missing snapshotReceiptId` };
+    }
+    if (typeof record.reason !== "string" || !record.reason.trim()) {
+      return { error: `${id} snapshot support reason is empty` };
+    }
+    return {
+      itemId: id,
+      kind: "satisfied_from_snapshot",
+      snapshotReceiptId: record.snapshotReceiptId,
+      reason: record.reason,
+    };
+  }
+  if (kind === "not_applicable") {
+    return {
+      itemId: id,
+      kind: "not_applicable",
+      policyCode: typeof record.policyCode === "string" ? record.policyCode : "",
+      reason: typeof record.reason === "string" ? record.reason : "",
+    };
+  }
+  if (kind === "missing" || kind === "unknown" || kind === "pending") {
+    if (typeof record.reason !== "string" || !record.reason.trim()) {
+      return { error: `${id} ${kind} reason is empty` };
+    }
+    return { itemId: id, kind, reason: record.reason };
+  }
+  return { error: `${id} has unsupported disposition kind` };
+}
+
+function emptyEvaluation(
+  required: (typeof REQUIRED_EVIDENCE_ITEMS)[number],
+  kind: InventoryItemEvaluation["kind"],
+  provenance: InventoryItemEvaluation["provenance"]
+): InventoryItemEvaluation {
+  return {
+    itemId: required.itemId,
+    section: required.section,
+    kind,
+    evidenceId: null,
+    snapshotReceiptId: null,
+    reason: null,
+    policyCode: null,
+    supportPolicyVersion: EVIDENCE_SUPPORT_POLICY_VERSION,
+    supportingFields: [],
+    supportingEvidenceIds: [],
+    provenance,
+  };
+}
+
 function streamIdentityError(
   events: GrinEvent[],
   subject: { ownerUid: string; receiptId: string }
@@ -330,52 +412,70 @@ export function evaluatePackCompleteness(input: {
 
   const dispositions = input.inventoryDispositions ?? [];
   const seenItems = new Set<string>();
-  const requiredIds = new Set<string>(REQUIRED_EVIDENCE_ITEMS.map((item) => item.itemId));
-  const byItem = new Map<string, EvidenceItemDisposition>();
-  for (const disposition of dispositions) {
-    if (!requiredIds.has(disposition.itemId)) {
-      reasons.push(`unknown inventory item ${disposition.itemId}`);
+  const evaluations = new Map<string, InventoryItemEvaluation>();
+  for (const raw of dispositions) {
+    const parsed = parseDisposition(raw);
+    if ("error" in parsed) {
+      reasons.push(parsed.error);
       continue;
     }
-    if (seenItems.has(disposition.itemId)) {
-      reasons.push(`duplicate inventory item ${disposition.itemId}`);
+    if (seenItems.has(parsed.itemId)) {
+      reasons.push(`duplicate inventory item ${parsed.itemId}`);
       continue;
     }
-    seenItems.add(disposition.itemId);
-    byItem.set(disposition.itemId, disposition);
-    if (disposition.kind === "not_applicable") {
-      if (typeof disposition.reason !== "string" || !disposition.reason.trim()) {
-        reasons.push(`${disposition.itemId} not-applicable reason is empty`);
-      }
+    seenItems.add(parsed.itemId);
+    const required = REQUIRED_EVIDENCE_ITEMS.find((item) => item.itemId === parsed.itemId)!;
+    if (parsed.kind === "not_applicable") {
+      const naErr = notApplicableError(parsed.itemId, parsed.policyCode, parsed.reason);
+      if (naErr) reasons.push(naErr);
+      evaluations.set(parsed.itemId, {
+        ...emptyEvaluation(required, "not_applicable", "not_applicable"),
+        reason: parsed.reason,
+        policyCode: parsed.policyCode,
+      });
       continue;
     }
-    if (
-      disposition.kind === "missing" ||
-      disposition.kind === "unknown" ||
-      disposition.kind === "pending"
-    ) {
-      if (typeof disposition.reason !== "string" || !disposition.reason.trim()) {
-        reasons.push(`${disposition.itemId} ${disposition.kind} reason is empty`);
-      } else {
-        reasons.push(`required item ${disposition.itemId} is ${disposition.kind}`);
-      }
+    if (parsed.kind === "missing" || parsed.kind === "unknown" || parsed.kind === "pending") {
+      reasons.push(`required item ${parsed.itemId} is ${parsed.kind}`);
+      evaluations.set(parsed.itemId, {
+        ...emptyEvaluation(required, parsed.kind, parsed.kind),
+        reason: parsed.reason,
+      });
       continue;
     }
-    if (disposition.kind === "satisfied_from_snapshot") {
-      if (typeof disposition.reason !== "string" || !disposition.reason.trim()) {
-        reasons.push(`${disposition.itemId} snapshot support reason is empty`);
+    if (parsed.kind === "satisfied_from_snapshot") {
+      if (typeof parsed.reason !== "string" || !parsed.reason.trim()) {
+        reasons.push(`${parsed.itemId} snapshot support reason is empty`);
       }
-      if (!includedReceiptIds.has(disposition.snapshotReceiptId)) {
-        reasons.push(`${disposition.itemId} snapshot receipt is not included in this pack`);
+      if (!includedReceiptIds.has(parsed.snapshotReceiptId)) {
+        reasons.push(`${parsed.itemId} snapshot receipt is not included in this pack`);
       }
-      if (!snapshotsByReceipt.has(disposition.snapshotReceiptId)) {
-        reasons.push(`${disposition.itemId} snapshot is not supplied`);
+      const snapshot = snapshotsByReceipt.get(parsed.snapshotReceiptId);
+      const support = snapshotSupport(parsed.itemId, snapshot);
+      if (!support.ok) {
+        reasons.push(support.detail);
+        evaluations.set(parsed.itemId, {
+          ...emptyEvaluation(required, "satisfied_from_snapshot", "grin_snapshot_assertion"),
+          snapshotReceiptId: parsed.snapshotReceiptId,
+          reason: parsed.reason,
+        });
+        continue;
       }
+      evaluations.set(parsed.itemId, {
+        ...emptyEvaluation(required, "satisfied_from_snapshot", "grin_snapshot_assertion"),
+        snapshotReceiptId: parsed.snapshotReceiptId,
+        reason: parsed.reason,
+        supportingFields: support.fields,
+      });
       continue;
     }
-    const original = originalsById.get(disposition.evidenceId);
+    const original = originalsById.get(parsed.evidenceId);
     if (!original) {
-      reasons.push(`required artifact omitted for ${disposition.itemId}`);
+      reasons.push(`required artifact omitted for ${parsed.itemId}`);
+      evaluations.set(parsed.itemId, {
+        ...emptyEvaluation(required, "satisfied", "labelled_original"),
+        evidenceId: parsed.evidenceId,
+      });
       continue;
     }
     const originalErr = originalError(original);
@@ -384,6 +484,16 @@ export function evaluatePackCompleteness(input: {
     if (hashed !== original.rawSha256) {
       reasons.push(`artifact hash missing or mismatched for ${original.evidenceId}`);
     }
+    const support = originalSupportsItem(original, parsed.itemId);
+    if (!support.ok) {
+      reasons.push(support.detail);
+    }
+    evaluations.set(parsed.itemId, {
+      ...emptyEvaluation(required, "satisfied", "labelled_original"),
+      evidenceId: parsed.evidenceId,
+      supportingEvidenceIds: [parsed.evidenceId],
+      supportingFields: support.ok ? support.facts : [],
+    });
   }
   for (const required of REQUIRED_EVIDENCE_ITEMS) {
     if (!seenItems.has(required.itemId)) {
@@ -391,27 +501,9 @@ export function evaluatePackCompleteness(input: {
     }
   }
 
-  const inventoryEvaluation: InventoryItemEvaluation[] = REQUIRED_EVIDENCE_ITEMS.map((required) => {
-    const disposition = byItem.get(required.itemId);
-    if (!disposition) {
-      return {
-        itemId: required.itemId,
-        section: required.section,
-        kind: "unresolved",
-        evidenceId: null,
-        snapshotReceiptId: null,
-        reason: null,
-      };
-    }
-    return {
-      itemId: required.itemId,
-      section: required.section,
-      kind: disposition.kind,
-      evidenceId: "evidenceId" in disposition ? disposition.evidenceId : null,
-      snapshotReceiptId: "snapshotReceiptId" in disposition ? disposition.snapshotReceiptId : null,
-      reason: "reason" in disposition ? disposition.reason : null,
-    };
-  });
+  const inventoryEvaluation: InventoryItemEvaluation[] = REQUIRED_EVIDENCE_ITEMS.map(
+    (required) => evaluations.get(required.itemId) ?? emptyEvaluation(required, "unresolved", "unresolved")
+  );
 
   const uniqueIntegrity = [...new Set(integrityReasons)];
   const uniqueCoverage = [...new Set(reasons)];
@@ -484,6 +576,7 @@ export function assembleManifest(input: {
       pinnedCuts,
       originalSnapshotHashes,
     }),
+    supportPolicyVersion: EVIDENCE_SUPPORT_POLICY_VERSION,
     artifactHashes: { ...input.artifactHashes },
     templateVersion: input.templateVersion,
     parserVersions: input.parserVersions ?? {},

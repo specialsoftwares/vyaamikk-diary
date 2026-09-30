@@ -8,6 +8,7 @@ import {
   assembleManifest,
   cutMatchesHead,
   EVIDENCE_PACK_SECTIONS,
+  EVIDENCE_SUPPORT_POLICY_VERSION,
   mayMarkComplete,
   REQUIRED_EVIDENCE_ITEMS,
 } from "./evidencePack";
@@ -231,18 +232,32 @@ const gstEvidence = {
   rawSha256: gstHash,
   captureProvenance: "labelled-simulation-fixture",
 };
-const completeOriginals = [invoiceEvidence, receiptEvidence, booksEvidence, gstEvidence];
+const movementBytes = new Uint8Array([3, 3, 3, 3]);
+const movementHash = hasher(movementBytes);
+const movementEvidence = {
+  ...verifiedOriginal,
+  evidenceId: "ev_move",
+  category: "lr_bilty" as const,
+  originalFileName: "lr.pdf",
+  mime: "application/pdf",
+  byteSize: movementBytes.byteLength,
+  rawSha256: movementHash,
+  captureProvenance: "labelled-simulation-fixture",
+};
+const completeOriginals = [invoiceEvidence, receiptEvidence, booksEvidence, gstEvidence, movementEvidence];
 const completeHashes = {
   ev_invoice: originalHash,
   ev_receipt: receiptHash,
   ev_books: booksHash,
   ev_gst: gstHash,
+  ev_move: movementHash,
 };
 const completeLinks = {
   ev_invoice: packLink,
   ev_receipt: packLink,
   ev_books: packLink,
   ev_gst: packLink,
+  ev_move: packLink,
 };
 const completeDispositions = [
   {
@@ -252,12 +267,7 @@ const completeDispositions = [
     reason: "supplier identity is recorded on the anchored GRIN snapshot",
   },
   { itemId: "commercial_document" as const, kind: "satisfied" as const, evidenceId: "ev_invoice" },
-  {
-    itemId: "movement_evidence" as const,
-    kind: "satisfied_from_snapshot" as const,
-    snapshotReceiptId: "pack_receipt",
-    reason: "EWB is recorded as none on the anchored GRIN snapshot",
-  },
+  { itemId: "movement_evidence" as const, kind: "satisfied" as const, evidenceId: "ev_move" },
   { itemId: "receipt_evidence" as const, kind: "satisfied" as const, evidenceId: "ev_receipt" },
   { itemId: "accounting_payment_evidence" as const, kind: "satisfied" as const, evidenceId: "ev_books" },
   { itemId: "gst_evidence" as const, kind: "satisfied" as const, evidenceId: "ev_gst" },
@@ -282,6 +292,20 @@ assert.equal(completePack.completeness, "complete");
 assert.equal(completePack.integrity, "verified");
 assert.equal(completePack.coverage, "complete");
 assert.equal(completePack.itcDisposition, "not_determined");
+assert.equal(completePack.supportPolicyVersion, EVIDENCE_SUPPORT_POLICY_VERSION);
+assert.ok(
+  (completePack.inventoryEvaluation.find((item) => item.itemId === "supplier_identity")?.supportingFields.length ?? 0) > 0
+);
+assert.ok(
+  completePack.inventoryEvaluation
+    .find((item) => item.itemId === "supplier_identity")
+    ?.supportingFields.includes("supplier.name")
+);
+assert.ok(
+  completePack.inventoryEvaluation
+    .find((item) => item.itemId === "supplier_identity")
+    ?.supportingFields.includes("supplier.registration.gstin")
+);
 assert.equal(mayMarkComplete(completePack), true);
 assert.equal(
   completePack.inventoryEvaluation.find((item) => item.itemId === "supplier_identity")?.kind,
@@ -319,6 +343,7 @@ const otherReceipt = assembleManifest({
     ev_receipt: packLink,
     ev_books: packLink,
     ev_gst: packLink,
+    ev_move: packLink,
   },
   templateVersion: "1",
 });
@@ -330,8 +355,8 @@ const missingBooks = assembleManifest({
   ledgerId: "ledger_1",
   purchaseCaseId: "case_1",
   pinnedCuts: [pin],
-  verifiedOriginals: [invoiceEvidence, receiptEvidence, gstEvidence],
-  artifactHashes: { ev_invoice: originalHash, ev_receipt: receiptHash, ev_gst: gstHash },
+  verifiedOriginals: [invoiceEvidence, receiptEvidence, gstEvidence, movementEvidence],
+  artifactHashes: { ev_invoice: originalHash, ev_receipt: receiptHash, ev_gst: gstHash, ev_move: movementHash },
   eventStreams: [{ receiptId: "pack_receipt", events: registeredEvents }],
   originalSnapshots: [originalSnapshot],
   inventoryDispositions: [
@@ -342,7 +367,7 @@ const missingBooks = assembleManifest({
       reason: "books are not in this simulation fixture",
     },
   ],
-  evidenceLinks: { ev_invoice: packLink, ev_receipt: packLink, ev_gst: packLink },
+  evidenceLinks: { ev_invoice: packLink, ev_receipt: packLink, ev_gst: packLink, ev_move: packLink },
   templateVersion: "1",
 });
 assert.equal(missingBooks.completeness, "incomplete");
@@ -357,8 +382,8 @@ const serviceNa = assembleManifest({
   ledgerId: "ledger_1",
   purchaseCaseId: "case_1",
   pinnedCuts: [pin],
-  verifiedOriginals: [invoiceEvidence, receiptEvidence, booksEvidence],
-  artifactHashes: { ev_invoice: originalHash, ev_receipt: receiptHash, ev_books: booksHash },
+  verifiedOriginals: [invoiceEvidence, receiptEvidence, booksEvidence, movementEvidence],
+  artifactHashes: { ev_invoice: originalHash, ev_receipt: receiptHash, ev_books: booksHash, ev_move: movementHash },
   eventStreams: [{ receiptId: "pack_receipt", events: registeredEvents }],
   originalSnapshots: [originalSnapshot],
   inventoryDispositions: [
@@ -366,10 +391,11 @@ const serviceNa = assembleManifest({
     {
       itemId: "gst_evidence",
       kind: "not_applicable",
+      policyCode: "not_a_gst_reported_goods_purchase",
       reason: "ISD credit; warehouse goods-receipt GST section does not apply",
     },
   ],
-  evidenceLinks: { ev_invoice: packLink, ev_receipt: packLink, ev_books: packLink },
+  evidenceLinks: { ev_invoice: packLink, ev_receipt: packLink, ev_books: packLink, ev_move: packLink },
   templateVersion: "1",
 });
 assert.equal(serviceNa.completeness, "complete");
@@ -401,6 +427,7 @@ const purchaseShared = assembleManifest({
     ev_receipt: packLink,
     ev_books: packLink,
     ev_gst: packLink,
+    ev_move: packLink,
   },
   templateVersion: "1",
 });
@@ -428,6 +455,7 @@ const duplicateAssoc = assembleManifest({
     ev_receipt: packLink,
     ev_books: packLink,
     ev_gst: packLink,
+    ev_move: packLink,
   },
   templateVersion: "1",
 });
@@ -475,6 +503,7 @@ const twoCut = assembleManifest({
     ev_receipt: packLink,
     ev_books: packLink,
     ev_gst: packLink,
+    ev_move: packLink,
   },
   templateVersion: "1",
 });
@@ -579,5 +608,340 @@ const pinnedAfterLater = assembleManifest({
 });
 assert.equal(pinnedAfterLater.completeness, completePack.completeness);
 assert.equal(pinnedAfterLater.pinnedCuts[0]?.headHash, completePack.pinnedCuts[0]?.headHash);
+
+{
+  const snapshotAll = REQUIRED_EVIDENCE_ITEMS.map((item) => ({
+    itemId: item.itemId,
+    kind: "satisfied_from_snapshot" as const,
+    snapshotReceiptId: "pack_receipt",
+    reason: "GRIN snapshot is present",
+  }));
+  const overstated = assembleManifest({
+    exportId: "exp_all_snapshot",
+    ownerUid: "owner_1",
+    ledgerId: "ledger_1",
+    purchaseCaseId: "case_1",
+    pinnedCuts: [pin],
+    verifiedOriginals: completeOriginals,
+    artifactHashes: completeHashes,
+    eventStreams: [{ receiptId: "pack_receipt", events: registeredEvents }],
+    originalSnapshots: [originalSnapshot],
+    inventoryDispositions: snapshotAll,
+    evidenceLinks: completeLinks,
+    templateVersion: "1",
+  });
+  assert.equal(overstated.completeness, "incomplete");
+  assert.equal(overstated.itcDisposition, "not_determined");
+  assert.ok(overstated.incompleteReasons.some((reason) => /accounting_payment_evidence/.test(reason)));
+  assert.ok(overstated.incompleteReasons.some((reason) => /gst_evidence/.test(reason)));
+  assert.ok(overstated.incompleteReasons.some((reason) => /movement_evidence/.test(reason)));
+}
+
+{
+  const ewbNone = assembleManifest({
+    exportId: "exp_ewb_none",
+    ownerUid: "owner_1",
+    ledgerId: "ledger_1",
+    purchaseCaseId: "case_1",
+    pinnedCuts: [pin],
+    verifiedOriginals: completeOriginals,
+    artifactHashes: completeHashes,
+    eventStreams: [{ receiptId: "pack_receipt", events: registeredEvents }],
+    originalSnapshots: [originalSnapshot],
+    inventoryDispositions: [
+      ...completeDispositions.filter((item) => item.itemId !== "movement_evidence"),
+      {
+        itemId: "movement_evidence",
+        kind: "satisfied_from_snapshot",
+        snapshotReceiptId: "pack_receipt",
+        reason: "EWB is recorded as none on the anchored GRIN snapshot",
+      },
+    ],
+    evidenceLinks: completeLinks,
+    templateVersion: "1",
+  });
+  assert.equal(ewbNone.completeness, "incomplete");
+  assert.ok(ewbNone.incompleteReasons.some((reason) => /movement_evidence cannot be satisfied from a GRIN snapshot/.test(reason)));
+}
+
+{
+  const unknownSupplier = packStore.register(
+    freezeCommand({
+      commandId: "unknown_sup",
+      type: "registerGoodsReceipt",
+      ownerUid: "owner_1",
+      ledgerId: "ledger_1",
+      body: sampleRegisterBody({
+        receiptId: "unknown_sup",
+        supplier: {
+          name: { kind: "unknown", reason: "not on document" },
+          registration: { kind: "not_supplied" },
+          address: { kind: "not_supplied" },
+          contact: { kind: "not_supplied" },
+        },
+      }),
+    })
+  );
+  assert.equal(unknownSupplier.ok, true);
+  const unknownSnap = packStore.getOriginal("unknown_sup")!;
+  const unknownEvents = packStore.getEvents("unknown_sup");
+  const unknownPin = {
+    receiptId: "unknown_sup",
+    eventVersion: 1,
+    headHash: unknownEvents[0]!.eventHash,
+  };
+  const unknownLink = { ...packLink, receiptId: "unknown_sup" };
+  const unknownIdentity = assembleManifest({
+    exportId: "exp_unknown_sup",
+    ownerUid: "owner_1",
+    ledgerId: "ledger_1",
+    purchaseCaseId: "case_1",
+    pinnedCuts: [unknownPin],
+    verifiedOriginals: completeOriginals.map((item) => item),
+    artifactHashes: completeHashes,
+    eventStreams: [{ receiptId: "unknown_sup", events: unknownEvents }],
+    originalSnapshots: [unknownSnap],
+    inventoryDispositions: [
+      {
+        itemId: "supplier_identity",
+        kind: "satisfied_from_snapshot",
+        snapshotReceiptId: "unknown_sup",
+        reason: "snapshot exists",
+      },
+      ...completeDispositions.filter((item) => item.itemId !== "supplier_identity"),
+    ],
+    evidenceLinks: {
+      ev_invoice: unknownLink,
+      ev_receipt: unknownLink,
+      ev_books: unknownLink,
+      ev_gst: unknownLink,
+      ev_move: unknownLink,
+    },
+    templateVersion: "1",
+  });
+  assert.equal(unknownIdentity.completeness, "incomplete");
+  assert.ok(
+    unknownIdentity.incompleteReasons.some((reason) => /supplier_identity snapshot fields are absent or unknown/.test(reason))
+  );
+}
+
+{
+  const unrelated = assembleManifest({
+    exportId: "exp_unrelated",
+    ownerUid: "owner_1",
+    ledgerId: "ledger_1",
+    purchaseCaseId: "case_1",
+    pinnedCuts: [pin],
+    verifiedOriginals: completeOriginals,
+    artifactHashes: completeHashes,
+    eventStreams: [{ receiptId: "pack_receipt", events: registeredEvents }],
+    originalSnapshots: [originalSnapshot],
+    inventoryDispositions: [
+      ...completeDispositions.filter((item) => item.itemId !== "gst_evidence"),
+      { itemId: "gst_evidence", kind: "satisfied", evidenceId: "ev_invoice" },
+    ],
+    evidenceLinks: completeLinks,
+    templateVersion: "1",
+  });
+  assert.equal(unrelated.completeness, "incomplete");
+  assert.ok(unrelated.incompleteReasons.some((reason) => /does not support gst_evidence/.test(reason)));
+}
+
+{
+  const parsedKind = JSON.parse(
+    JSON.stringify([
+      ...completeDispositions.filter((item) => item.itemId !== "gst_evidence"),
+      { itemId: "gst_evidence", kind: "looks_fine", evidenceId: "ev_gst" },
+    ])
+  );
+  const unsupportedKind = assembleManifest({
+    exportId: "exp_kind",
+    ownerUid: "owner_1",
+    ledgerId: "ledger_1",
+    purchaseCaseId: "case_1",
+    pinnedCuts: [pin],
+    verifiedOriginals: completeOriginals,
+    artifactHashes: completeHashes,
+    eventStreams: [{ receiptId: "pack_receipt", events: registeredEvents }],
+    originalSnapshots: [originalSnapshot],
+    inventoryDispositions: parsedKind,
+    evidenceLinks: completeLinks,
+    templateVersion: "1",
+  });
+  assert.equal(unsupportedKind.completeness, "incomplete");
+  assert.ok(unsupportedKind.incompleteReasons.some((reason) => /unsupported disposition kind/.test(reason)));
+}
+
+{
+  const reasonOnly = assembleManifest({
+    exportId: "exp_reason",
+    ownerUid: "owner_1",
+    ledgerId: "ledger_1",
+    purchaseCaseId: "case_1",
+    pinnedCuts: [pin],
+    verifiedOriginals: completeOriginals,
+    artifactHashes: completeHashes,
+    eventStreams: [{ receiptId: "pack_receipt", events: registeredEvents }],
+    originalSnapshots: [originalSnapshot],
+    inventoryDispositions: [
+      ...completeDispositions.filter((item) => item.itemId !== "movement_evidence"),
+      {
+        itemId: "movement_evidence",
+        kind: "satisfied_from_snapshot",
+        snapshotReceiptId: "pack_receipt",
+        reason: "EWB not required below any statutory threshold",
+      },
+    ],
+    evidenceLinks: completeLinks,
+    templateVersion: "1",
+  });
+  assert.equal(reasonOnly.completeness, "incomplete");
+}
+
+{
+  const sharedInvoice = {
+    ...invoiceEvidence,
+    labelledSupport: {
+      inventoryItemIds: ["commercial_document", "supplier_identity"],
+      facts: ["invoice_number", "supplier_name_on_invoice"],
+    },
+  };
+  const shared = assembleManifest({
+    exportId: "exp_shared_doc",
+    ownerUid: "owner_1",
+    ledgerId: "ledger_1",
+    purchaseCaseId: "case_1",
+    pinnedCuts: [pin],
+    verifiedOriginals: [sharedInvoice, receiptEvidence, booksEvidence, gstEvidence, movementEvidence],
+    artifactHashes: completeHashes,
+    eventStreams: [{ receiptId: "pack_receipt", events: registeredEvents }],
+    originalSnapshots: [originalSnapshot],
+    inventoryDispositions: [
+      { itemId: "supplier_identity", kind: "satisfied", evidenceId: "ev_invoice" },
+      { itemId: "commercial_document", kind: "satisfied", evidenceId: "ev_invoice" },
+      { itemId: "movement_evidence", kind: "satisfied", evidenceId: "ev_move" },
+      { itemId: "receipt_evidence", kind: "satisfied", evidenceId: "ev_receipt" },
+      { itemId: "accounting_payment_evidence", kind: "satisfied", evidenceId: "ev_books" },
+      { itemId: "gst_evidence", kind: "satisfied", evidenceId: "ev_gst" },
+    ],
+    evidenceLinks: completeLinks,
+    templateVersion: "1",
+  });
+  assert.equal(shared.completeness, "complete");
+  assert.equal(shared.itcDisposition, "not_determined");
+}
+
+{
+  const missingSourceAsNa = assembleManifest({
+    exportId: "exp_na_missing",
+    ownerUid: "owner_1",
+    ledgerId: "ledger_1",
+    purchaseCaseId: "case_1",
+    pinnedCuts: [pin],
+    verifiedOriginals: [invoiceEvidence, receiptEvidence, booksEvidence, movementEvidence],
+    artifactHashes: { ev_invoice: originalHash, ev_receipt: receiptHash, ev_books: booksHash, ev_move: movementHash },
+    eventStreams: [{ receiptId: "pack_receipt", events: registeredEvents }],
+    originalSnapshots: [originalSnapshot],
+    inventoryDispositions: [
+      ...completeDispositions.filter((item) => item.itemId !== "gst_evidence"),
+      {
+        itemId: "gst_evidence",
+        kind: "not_applicable",
+        policyCode: "not_a_gst_reported_goods_purchase",
+        reason: "GSTR import is not implemented",
+      },
+    ],
+    evidenceLinks: { ev_invoice: packLink, ev_receipt: packLink, ev_books: packLink, ev_move: packLink },
+    templateVersion: "1",
+  });
+  assert.equal(missingSourceAsNa.completeness, "incomplete");
+  assert.ok(missingSourceAsNa.incompleteReasons.some((reason) => /missing source, not inapplicability/.test(reason)));
+}
+
+{
+  const snapshotFacts = assembleManifest({
+    exportId: "exp_snapshot_facts",
+    ownerUid: "owner_1",
+    ledgerId: "ledger_1",
+    purchaseCaseId: "case_1",
+    pinnedCuts: [pin],
+    verifiedOriginals: [booksEvidence, gstEvidence, movementEvidence],
+    artifactHashes: { ev_books: booksHash, ev_gst: gstHash, ev_move: movementHash },
+    eventStreams: [{ receiptId: "pack_receipt", events: registeredEvents }],
+    originalSnapshots: [originalSnapshot],
+    inventoryDispositions: [
+      {
+        itemId: "supplier_identity",
+        kind: "satisfied_from_snapshot",
+        snapshotReceiptId: "pack_receipt",
+        reason: "supplier identity is recorded on the anchored GRIN snapshot",
+      },
+      {
+        itemId: "commercial_document",
+        kind: "satisfied_from_snapshot",
+        snapshotReceiptId: "pack_receipt",
+        reason: "supplier invoice number is recorded on the anchored GRIN snapshot",
+      },
+      { itemId: "movement_evidence", kind: "satisfied", evidenceId: "ev_move" },
+      {
+        itemId: "receipt_evidence",
+        kind: "satisfied_from_snapshot",
+        snapshotReceiptId: "pack_receipt",
+        reason: "issued receipt facts are recorded on the anchored GRIN snapshot",
+      },
+      { itemId: "accounting_payment_evidence", kind: "satisfied", evidenceId: "ev_books" },
+      { itemId: "gst_evidence", kind: "satisfied", evidenceId: "ev_gst" },
+    ],
+    evidenceLinks: { ev_books: packLink, ev_gst: packLink, ev_move: packLink },
+    templateVersion: "1",
+  });
+  assert.equal(snapshotFacts.completeness, "complete");
+  assert.equal(snapshotFacts.itcDisposition, "not_determined");
+  const receiptEval = snapshotFacts.inventoryEvaluation.find((item) => item.itemId === "receipt_evidence");
+  assert.equal(receiptEval?.kind, "satisfied_from_snapshot");
+  assert.ok(receiptEval?.supportingFields.includes("issuedNumber"));
+  assert.ok(receiptEval?.supportingFields.includes("reportedArrivalAt"));
+  assert.ok(receiptEval?.supportingFields.includes("warehouse"));
+  assert.ok(receiptEval?.supportingFields.includes("lines.physicallyReceived"));
+  const commercialEval = snapshotFacts.inventoryEvaluation.find((item) => item.itemId === "commercial_document");
+  assert.ok(commercialEval?.supportingFields.includes("commercial.supplierInvoiceNumber"));
+}
+
+{
+  const invoiceForIdentity = assembleManifest({
+    exportId: "exp_invoice_identity_unlabelled",
+    ownerUid: "owner_1",
+    ledgerId: "ledger_1",
+    purchaseCaseId: "case_1",
+    pinnedCuts: [pin],
+    verifiedOriginals: completeOriginals,
+    artifactHashes: completeHashes,
+    eventStreams: [{ receiptId: "pack_receipt", events: registeredEvents }],
+    originalSnapshots: [originalSnapshot],
+    inventoryDispositions: [
+      { itemId: "supplier_identity", kind: "satisfied", evidenceId: "ev_invoice" },
+      ...completeDispositions.filter((item) => item.itemId !== "supplier_identity"),
+    ],
+    evidenceLinks: completeLinks,
+    templateVersion: "1",
+  });
+  assert.equal(invoiceForIdentity.completeness, "incomplete");
+  assert.ok(invoiceForIdentity.incompleteReasons.some((reason) => /does not default-support supplier_identity/.test(reason)));
+}
+
+const replayRoundTrip = JSON.parse(JSON.stringify(completePack));
+assert.equal(replayRoundTrip.supportPolicyVersion, EVIDENCE_SUPPORT_POLICY_VERSION);
+assert.ok(Array.isArray(replayRoundTrip.inventoryEvaluation[0].supportingFields));
+assert.deepEqual(replayRoundTrip.inventoryEvaluation, completePack.inventoryEvaluation);
+const naRoundTrip = JSON.parse(JSON.stringify(serviceNa));
+assert.equal(naRoundTrip.supportPolicyVersion, EVIDENCE_SUPPORT_POLICY_VERSION);
+assert.equal(
+  naRoundTrip.inventoryEvaluation.find((item: { itemId: string }) => item.itemId === "gst_evidence")?.policyCode,
+  "not_a_gst_reported_goods_purchase"
+);
+assert.equal(
+  naRoundTrip.inventoryEvaluation.find((item: { itemId: string }) => item.itemId === "gst_evidence")?.kind,
+  "not_applicable"
+);
 
 console.log("goodsEvidence/evidence.pack.test.ts: ok");
