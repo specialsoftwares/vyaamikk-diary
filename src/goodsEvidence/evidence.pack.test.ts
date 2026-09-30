@@ -14,6 +14,7 @@ import {
 } from "./evidencePack";
 import { hashEventEnvelope } from "./hashChain";
 import { InMemoryGoodsLedger } from "./ledger";
+import { CHALLAN_ORIGINAL_SUPPORT, snapshotSupport } from "./evidenceSupport";
 import { sampleRegisterBody } from "./testFixtures";
 import type { GrinEvent } from "./types";
 
@@ -293,6 +294,18 @@ assert.equal(completePack.integrity, "verified");
 assert.equal(completePack.coverage, "complete");
 assert.equal(completePack.itcDisposition, "not_determined");
 assert.equal(completePack.supportPolicyVersion, EVIDENCE_SUPPORT_POLICY_VERSION);
+assert.equal(EVIDENCE_SUPPORT_POLICY_VERSION, 2);
+assert.equal(CHALLAN_ORIGINAL_SUPPORT, "deferred");
+assert.equal(
+  completePack.inventoryEvaluation.find((item) => item.itemId === "commercial_document")?.evidenceId,
+  "ev_invoice"
+);
+assert.equal(
+  completePack.inventoryEvaluation.find((item) => item.itemId === "commercial_document")?.kind,
+  "satisfied"
+);
+assert.ok(completeOriginals.some((item) => item.evidenceId === "ev_invoice" && item.category === "invoice"));
+assert.equal(snapshotSupport("commercial_document", originalSnapshot).ok, false);
 assert.ok(
   (completePack.inventoryEvaluation.find((item) => item.itemId === "supplier_identity")?.supportingFields.length ?? 0) > 0
 );
@@ -635,6 +648,7 @@ assert.equal(pinnedAfterLater.pinnedCuts[0]?.headHash, completePack.pinnedCuts[0
   assert.ok(overstated.incompleteReasons.some((reason) => /accounting_payment_evidence/.test(reason)));
   assert.ok(overstated.incompleteReasons.some((reason) => /gst_evidence/.test(reason)));
   assert.ok(overstated.incompleteReasons.some((reason) => /movement_evidence/.test(reason)));
+  assert.ok(overstated.incompleteReasons.some((reason) => /commercial_document cannot be satisfied from a GRIN snapshot/.test(reason)));
 }
 
 {
@@ -865,8 +879,8 @@ assert.equal(pinnedAfterLater.pinnedCuts[0]?.headHash, completePack.pinnedCuts[0
     ledgerId: "ledger_1",
     purchaseCaseId: "case_1",
     pinnedCuts: [pin],
-    verifiedOriginals: [booksEvidence, gstEvidence, movementEvidence],
-    artifactHashes: { ev_books: booksHash, ev_gst: gstHash, ev_move: movementHash },
+    verifiedOriginals: [invoiceEvidence, booksEvidence, gstEvidence, movementEvidence],
+    artifactHashes: { ev_invoice: originalHash, ev_books: booksHash, ev_gst: gstHash, ev_move: movementHash },
     eventStreams: [{ receiptId: "pack_receipt", events: registeredEvents }],
     originalSnapshots: [originalSnapshot],
     inventoryDispositions: [
@@ -876,12 +890,7 @@ assert.equal(pinnedAfterLater.pinnedCuts[0]?.headHash, completePack.pinnedCuts[0
         snapshotReceiptId: "pack_receipt",
         reason: "supplier identity is recorded on the anchored GRIN snapshot",
       },
-      {
-        itemId: "commercial_document",
-        kind: "satisfied_from_snapshot",
-        snapshotReceiptId: "pack_receipt",
-        reason: "supplier invoice number is recorded on the anchored GRIN snapshot",
-      },
+      { itemId: "commercial_document", kind: "satisfied", evidenceId: "ev_invoice" },
       { itemId: "movement_evidence", kind: "satisfied", evidenceId: "ev_move" },
       {
         itemId: "receipt_evidence",
@@ -892,7 +901,7 @@ assert.equal(pinnedAfterLater.pinnedCuts[0]?.headHash, completePack.pinnedCuts[0
       { itemId: "accounting_payment_evidence", kind: "satisfied", evidenceId: "ev_books" },
       { itemId: "gst_evidence", kind: "satisfied", evidenceId: "ev_gst" },
     ],
-    evidenceLinks: { ev_books: packLink, ev_gst: packLink, ev_move: packLink },
+    evidenceLinks: { ev_invoice: packLink, ev_books: packLink, ev_gst: packLink, ev_move: packLink },
     templateVersion: "1",
   });
   assert.equal(snapshotFacts.completeness, "complete");
@@ -904,7 +913,8 @@ assert.equal(pinnedAfterLater.pinnedCuts[0]?.headHash, completePack.pinnedCuts[0
   assert.ok(receiptEval?.supportingFields.includes("warehouse"));
   assert.ok(receiptEval?.supportingFields.includes("lines.physicallyReceived"));
   const commercialEval = snapshotFacts.inventoryEvaluation.find((item) => item.itemId === "commercial_document");
-  assert.ok(commercialEval?.supportingFields.includes("commercial.supplierInvoiceNumber"));
+  assert.equal(commercialEval?.kind, "satisfied");
+  assert.equal(commercialEval?.evidenceId, "ev_invoice");
 }
 
 {
@@ -927,6 +937,227 @@ assert.equal(pinnedAfterLater.pinnedCuts[0]?.headHash, completePack.pinnedCuts[0
   });
   assert.equal(invoiceForIdentity.completeness, "incomplete");
   assert.ok(invoiceForIdentity.incompleteReasons.some((reason) => /does not default-support supplier_identity/.test(reason)));
+}
+
+const withoutInvoiceOriginals = [receiptEvidence, booksEvidence, gstEvidence, movementEvidence];
+const withoutInvoiceHashes = { ev_receipt: receiptHash, ev_books: booksHash, ev_gst: gstHash, ev_move: movementHash };
+const withoutInvoiceLinks = {
+  ev_receipt: packLink,
+  ev_books: packLink,
+  ev_gst: packLink,
+  ev_move: packLink,
+};
+
+{
+  const invoiceRefOnly = assembleManifest({
+    exportId: "exp_invoice_ref_only",
+    ownerUid: "owner_1",
+    ledgerId: "ledger_1",
+    purchaseCaseId: "case_1",
+    pinnedCuts: [pin],
+    verifiedOriginals: withoutInvoiceOriginals,
+    artifactHashes: withoutInvoiceHashes,
+    eventStreams: [{ receiptId: "pack_receipt", events: registeredEvents }],
+    originalSnapshots: [originalSnapshot],
+    inventoryDispositions: [
+      ...completeDispositions.filter((item) => item.itemId !== "commercial_document"),
+      {
+        itemId: "commercial_document",
+        kind: "satisfied_from_snapshot",
+        snapshotReceiptId: "pack_receipt",
+        reason: "supplier invoice number is recorded on the anchored GRIN snapshot",
+      },
+    ],
+    evidenceLinks: withoutInvoiceLinks,
+    templateVersion: "1",
+  });
+  assert.equal(invoiceRefOnly.completeness, "incomplete");
+  assert.equal(invoiceRefOnly.itcDisposition, "not_determined");
+  assert.equal(invoiceRefOnly.supportPolicyVersion, 2);
+  assert.ok(
+    invoiceRefOnly.incompleteReasons.some((reason) =>
+      /commercial_document cannot be satisfied from a GRIN snapshot/.test(reason)
+    )
+  );
+  const invoiceRefRoundTrip = JSON.parse(JSON.stringify(invoiceRefOnly));
+  assert.equal(invoiceRefRoundTrip.supportPolicyVersion, 2);
+  assert.ok(
+    invoiceRefRoundTrip.incompleteReasons.some((reason: string) =>
+      /commercial_document cannot be satisfied from a GRIN snapshot/.test(reason)
+    )
+  );
+}
+
+{
+  const challanReg = packStore.register(
+    freezeCommand({
+      commandId: "challan_ref",
+      type: "registerGoodsReceipt",
+      ownerUid: "owner_1",
+      ledgerId: "ledger_1",
+      body: sampleRegisterBody({
+        receiptId: "challan_ref",
+        commercial: {
+          supplierInvoiceNumber: { kind: "not_supplied" },
+          supplierInvoiceDate: { kind: "not_supplied" },
+          supplierInvoiceValue: null,
+          purchaseOrderNumber: { kind: "not_supplied" },
+          purchaseOrderInternalId: { kind: "not_supplied" },
+          challanNumber: { kind: "present", value: "CH-99" },
+          missingDocumentReason: { kind: "not_supplied" },
+        },
+      }),
+    })
+  );
+  assert.equal(challanReg.ok, true);
+  const challanSnap = packStore.getOriginal("challan_ref")!;
+  const challanEvents = packStore.getEvents("challan_ref");
+  const challanPin = {
+    receiptId: "challan_ref",
+    eventVersion: 1,
+    headHash: challanEvents[0]!.eventHash,
+  };
+  const challanLink = { ...packLink, receiptId: "challan_ref" };
+  assert.equal(challanSnap.commercial.challanNumber.kind, "present");
+  assert.equal(snapshotSupport("commercial_document", challanSnap).ok, false);
+  const challanRefOnly = assembleManifest({
+    exportId: "exp_challan_ref_only",
+    ownerUid: "owner_1",
+    ledgerId: "ledger_1",
+    purchaseCaseId: "case_1",
+    pinnedCuts: [challanPin],
+    verifiedOriginals: withoutInvoiceOriginals,
+    artifactHashes: withoutInvoiceHashes,
+    eventStreams: [{ receiptId: "challan_ref", events: challanEvents }],
+    originalSnapshots: [challanSnap],
+    inventoryDispositions: [
+      ...completeDispositions.filter((item) => item.itemId !== "commercial_document"),
+      {
+        itemId: "commercial_document",
+        kind: "satisfied_from_snapshot",
+        snapshotReceiptId: "challan_ref",
+        reason: "challan number is recorded on the anchored GRIN snapshot",
+      },
+    ],
+    evidenceLinks: {
+      ev_receipt: challanLink,
+      ev_books: challanLink,
+      ev_gst: challanLink,
+      ev_move: challanLink,
+    },
+    templateVersion: "1",
+  });
+  assert.equal(challanRefOnly.completeness, "incomplete");
+  assert.ok(
+    challanRefOnly.incompleteReasons.some((reason) =>
+      /commercial_document cannot be satisfied from a GRIN snapshot/.test(reason)
+    )
+  );
+}
+
+{
+  const reasonOnlyCommercial = assembleManifest({
+    exportId: "exp_commercial_reason",
+    ownerUid: "owner_1",
+    ledgerId: "ledger_1",
+    purchaseCaseId: "case_1",
+    pinnedCuts: [pin],
+    verifiedOriginals: withoutInvoiceOriginals,
+    artifactHashes: withoutInvoiceHashes,
+    eventStreams: [{ receiptId: "pack_receipt", events: registeredEvents }],
+    originalSnapshots: [originalSnapshot],
+    inventoryDispositions: [
+      ...completeDispositions.filter((item) => item.itemId !== "commercial_document"),
+      {
+        itemId: "commercial_document",
+        kind: "satisfied_from_snapshot",
+        snapshotReceiptId: "pack_receipt",
+        reason: "the recorded invoice number is the retained commercial document",
+      },
+    ],
+    evidenceLinks: withoutInvoiceLinks,
+    templateVersion: "1",
+  });
+  assert.equal(reasonOnlyCommercial.completeness, "incomplete");
+}
+
+{
+  const unrelatedCommercial = assembleManifest({
+    exportId: "exp_unrelated_commercial",
+    ownerUid: "owner_1",
+    ledgerId: "ledger_1",
+    purchaseCaseId: "case_1",
+    pinnedCuts: [pin],
+    verifiedOriginals: completeOriginals,
+    artifactHashes: completeHashes,
+    eventStreams: [{ receiptId: "pack_receipt", events: registeredEvents }],
+    originalSnapshots: [originalSnapshot],
+    inventoryDispositions: [
+      ...completeDispositions.filter((item) => item.itemId !== "commercial_document"),
+      { itemId: "commercial_document", kind: "satisfied", evidenceId: "ev_gst" },
+    ],
+    evidenceLinks: completeLinks,
+    templateVersion: "1",
+  });
+  assert.equal(unrelatedCommercial.completeness, "incomplete");
+  assert.ok(unrelatedCommercial.incompleteReasons.some((reason) => /does not support commercial_document/.test(reason)));
+}
+
+{
+  const pendingInvoice = assembleManifest({
+    exportId: "exp_pending_invoice",
+    ownerUid: "owner_1",
+    ledgerId: "ledger_1",
+    purchaseCaseId: "case_1",
+    pinnedCuts: [pin],
+    verifiedOriginals: [{ ...invoiceEvidence, verification: "pending" as const }, receiptEvidence, booksEvidence, gstEvidence, movementEvidence],
+    artifactHashes: completeHashes,
+    eventStreams: [{ receiptId: "pack_receipt", events: registeredEvents }],
+    originalSnapshots: [originalSnapshot],
+    inventoryDispositions: completeDispositions,
+    evidenceLinks: completeLinks,
+    templateVersion: "1",
+  });
+  assert.equal(pendingInvoice.completeness, "incomplete");
+  assert.ok(pendingInvoice.incompleteReasons.some((reason) => /ev_invoice is not a verified original/.test(reason)));
+}
+
+{
+  const mismatchedInvoice = assembleManifest({
+    exportId: "exp_mismatch_invoice",
+    ownerUid: "owner_1",
+    ledgerId: "ledger_1",
+    purchaseCaseId: "case_1",
+    pinnedCuts: [pin],
+    verifiedOriginals: completeOriginals,
+    artifactHashes: { ...completeHashes, ev_invoice: hasher(new Uint8Array([9, 9, 9, 9])) },
+    eventStreams: [{ receiptId: "pack_receipt", events: registeredEvents }],
+    originalSnapshots: [originalSnapshot],
+    inventoryDispositions: completeDispositions,
+    evidenceLinks: completeLinks,
+    templateVersion: "1",
+  });
+  assert.equal(mismatchedInvoice.completeness, "incomplete");
+  assert.ok(mismatchedInvoice.incompleteReasons.some((reason) => /artifact hash missing or mismatched for ev_invoice/.test(reason)));
+}
+
+{
+  const omittedInvoice = assembleManifest({
+    exportId: "exp_omitted_invoice",
+    ownerUid: "owner_1",
+    ledgerId: "ledger_1",
+    purchaseCaseId: "case_1",
+    pinnedCuts: [pin],
+    verifiedOriginals: withoutInvoiceOriginals,
+    artifactHashes: withoutInvoiceHashes,
+    eventStreams: [{ receiptId: "pack_receipt", events: registeredEvents }],
+    originalSnapshots: [originalSnapshot],
+    inventoryDispositions: completeDispositions,
+    evidenceLinks: withoutInvoiceLinks,
+    templateVersion: "1",
+  });
+  assert.equal(omittedInvoice.completeness, "incomplete");
+  assert.ok(omittedInvoice.incompleteReasons.some((reason) => /required artifact omitted for commercial_document/.test(reason)));
 }
 
 const replayRoundTrip = JSON.parse(JSON.stringify(completePack));

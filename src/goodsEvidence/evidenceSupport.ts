@@ -3,13 +3,24 @@
  * Hash integrity is separate from whether nominated sources actually support an item.
  * Snapshot fields are recorded assertions, not independently verified external facts.
  * Labelled original support is simulation metadata, not OCR or live GST lookup.
+ *
+ * Policy versions:
+ * 1 — snapshot invoice/challan references could satisfy commercial_document (too broad).
+ * 2 — commercial_document requires an included commercial original. GRIN invoice/challan
+ *     numbers remain recorded references and do not themselves retain the document.
+ *     Snapshot support stays limited to supplier_identity and receipt_evidence.
+ *     Challan-original support is deferred; a challan is not labelled as an invoice
+ *     and does not determine ITC.
  */
 
 import type { EvidenceCategory, OriginalEvidence } from "./evidence";
 import type { OptionalText } from "./types";
 import type { ImmutableGrin } from "./types";
 
-export const EVIDENCE_SUPPORT_POLICY_VERSION = 1 as const;
+export const EVIDENCE_SUPPORT_POLICY_VERSION = 2 as const;
+
+/** Challan files are not a commercial_document original category in this policy version. */
+export const CHALLAN_ORIGINAL_SUPPORT = "deferred" as const;
 
 export const REQUIRED_EVIDENCE_ITEMS = [
   { itemId: "supplier_identity", section: "supplier" },
@@ -34,7 +45,6 @@ export const NOT_APPLICABLE_POLICY_CODES: Record<EvidenceInventoryItemId, readon
 
 export const SNAPSHOT_ELIGIBLE_ITEMS: readonly EvidenceInventoryItemId[] = [
   "supplier_identity",
-  "commercial_document",
   "receipt_evidence",
 ];
 
@@ -75,6 +85,13 @@ export function snapshotSupport(
   snapshot: ImmutableGrin | undefined
 ): { ok: true; fields: string[] } | { ok: false; detail: string } {
   if (!snapshot) return { ok: false, detail: `${itemId} snapshot is not supplied` };
+  if (itemId === "commercial_document") {
+    return {
+      ok: false,
+      detail:
+        "commercial_document cannot be satisfied from a GRIN snapshot; recorded invoice/challan references are not the document",
+    };
+  }
   if (!SNAPSHOT_ELIGIBLE_ITEMS.includes(itemId)) {
     return { ok: false, detail: `${itemId} cannot be satisfied from a GRIN snapshot` };
   }
@@ -87,16 +104,6 @@ export function snapshotSupport(
     ].filter((field): field is string => field != null);
     if (fields.length === 0) {
       return { ok: false, detail: "supplier_identity snapshot fields are absent or unknown" };
-    }
-    return { ok: true, fields };
-  }
-  if (itemId === "commercial_document") {
-    const fields = [
-      presentText(snapshot.commercial.supplierInvoiceNumber, "commercial.supplierInvoiceNumber"),
-      presentText(snapshot.commercial.challanNumber, "commercial.challanNumber"),
-    ].filter((field): field is string => field != null);
-    if (fields.length === 0) {
-      return { ok: false, detail: "commercial_document snapshot has no invoice or challan reference" };
     }
     return { ok: true, fields };
   }
