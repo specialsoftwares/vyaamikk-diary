@@ -7,7 +7,7 @@ Arrangement (2026-10-01): one coordinator plus five **local** Cursor Task subage
 
 | Task | Owner | Branch | Worktree | Dependency | Status | Evidence | Blocker | Next |
 |---|---|---|---|---|---|---|---|---|
-| Contract + ownership | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | G1 `c9623dd` | source_verified | `wave1b`; T1/T2/T4 merged; packaging wiring | Team 5 must review T1–T4 diffs independently | Wave 2 real adapters after T5 review |
+| Contract + ownership | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | G1 `c9623dd` | source_verified | `3fe5c46` packaging + CI scripts; callables unexported | Team 5 must review T1–T4 diffs independently | Wave 2 after T5 implementation review |
 | G1 undefined-object normalize + mutations + Functions packaging | team1 | `team/grin-t1-backend` | `grin-t1-backend` | contract wave1b | source_verified | `5c7543d` INJECTED + Firestore emulator; callables unexported | retention policy; live Admin wiring | Wave 2 callable export decision |
 | G2 evidence lifecycle | team2 | `team/grin-t2-evidence` | `grin-t2-evidence` | contract ports | source_verified | `8989b48` STORAGE + FIRESTORE emulator | live IAM not proven | Wave 2 link to Team 1 |
 | G3 SQLite outbox | team3 | `team/grin-t3-offline` | `grin-t3-offline` | command/result ports | source_verified | `3c1303b` SQLITE_HOST; catch fix reviewed | native death not claimed; FAKE server port | Wave 2 inject real G1 adapter |

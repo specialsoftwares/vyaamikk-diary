@@ -19,3 +19,8 @@ No subscription-management or reconciliation source change in G1. Billing handle
 Owner authorized isolated G1–G5 source plus G6 automated tests/review/device preparation. Combined branch `integration/grin-g1-g5-source` at contract `d9cf115`. Five local AI team agents on separate worktrees (not human review). PR #30 stays G1-only draft. No main merge, deploy, build, Play, or billing activation. Do not mark GRIN or device tickets Done.
 
 Paste onto the existing goods-evidence / GRIN issue if one exists; do not open a duplicate.
+
+## Wave 1 combined wiring (unsent, 2026-10-01)
+
+Combined head `3fe5c46775ec0f146fb6af549885771ffbcff68d` on `integration/grin-g1-g5-source`. Team commits merged: T1 `5c7543d`, T2 `8989b48`, T3 `3c1303b`, T4 `355e575`, T5 matrix `df5f0a5`. Functions GRIN callables remain unexported. Live Storage/Rules unchanged. GRIN default-off. versionCode 23 unchanged. Purchase-entry flags remain `"0"`. Native/device, billing, and public release stay open. Do not mark those tickets Done.
+
