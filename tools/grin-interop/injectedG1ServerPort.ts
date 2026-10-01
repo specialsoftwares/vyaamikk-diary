@@ -136,16 +136,18 @@ function isInjectedPort(value: unknown): value is GrinServerCommandPort {
 
 async function tryTeam1Port(deps: InjectedPortDeps): Promise<InjectedGrinServerPort | null> {
   const emulatorDir = join(dirname(fileURLToPath(import.meta.url)), "../goods-evidence-emulator");
-  const candidates = ["injectedGrinServerPort.ts", "serverPort.ts", "createInjectedGrinServerPort.ts"];
+  const candidates = ["serverPort.ts", "injectedGrinServerPort.ts", "createInjectedGrinServerPort.ts"];
+  const adapter = new GoodsEvidenceRegisterAdapter(deps.store, deps.clock);
   for (const name of candidates) {
     const file = join(emulatorDir, name);
     if (!existsSync(file)) continue;
     const spec = pathToFileURL(file).href;
     const mod = (await import(spec)) as {
-      createInjectedGrinServerPort?: (input: InjectedPortDeps) => GrinServerCommandPort | Promise<GrinServerCommandPort>;
+      createInjectedGrinServerPort?: (input: unknown) => GrinServerCommandPort | Promise<GrinServerCommandPort>;
     };
     if (typeof mod.createInjectedGrinServerPort !== "function") continue;
-    const created = await mod.createInjectedGrinServerPort(deps);
+    // Team 1 `serverPort.ts` takes GoodsEvidenceRegisterAdapter, not { store, clock }.
+    const created = await mod.createInjectedGrinServerPort(adapter);
     if (!isInjectedPort(created)) continue;
     const counted: InjectedGrinServerPort = {
       portKind: "INJECTED",

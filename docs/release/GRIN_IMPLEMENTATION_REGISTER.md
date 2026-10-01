@@ -15,7 +15,7 @@ The core-only Internal build packet is **deferred**. VersionCode 23 is source pr
 
 This register is not GRIN-complete from G1.
 
-Programme (2026-10-01): isolated G1–G5 source + G6 automated tests/review/device **preparation**. Combined branch `integration/grin-g1-g5-source`. Contract revision `2026-10-01.wave1b`. Team 5 implementation review `070a388` then findings re-review `6f920cd`: M1–M3 and L4 **closed**; finding fixes **approved**. G6 incomplete. Wave 2 adapter wiring started and is **not accepted** until external-review findings ER-1…ER-5 are mapped (see `GRIN_TEAM_BOARD.md`). Team 1 Wave 2 injected server port `091772e` is on combined pending T5 review. PR #30 remains the G1-only draft. Combined GitHub draft PR was not opened (`gh` unauthenticated).
+Programme (2026-10-01): isolated G1–G5 source + G6 automated tests/review/device **preparation**. Combined branch `integration/grin-g1-g5-source`. Contract revision `2026-10-01.wave1b`. Team 5 implementation review `070a388` then findings re-review `6f920cd`: M1–M3 and L4 **closed**; finding fixes **approved**. G6 incomplete. Wave 2 adapter wiring started and is **not accepted** until ER-1…ER-5 are mapped (see `GRIN_TEAM_BOARD.md`). Combined has Team 1 port `091772e` and Team 3 `22a848a` (CS-01, ER-1, ER-4 T3 half). ER-2/ER-3/ER-4 T5/ER-5 remain open. PR #30 remains the G1-only draft. Combined GitHub draft PR was not opened (`gh` unauthenticated).
 
 GRIN remains default-off. No main merge, deploy, EAS, Play, or billing activation in this programme.
 
@@ -50,7 +50,7 @@ Billing prepare/validate/RTDN/worker handlers **exist** (Cloud Functions v2 `asi
 
 ### G3 — Durable SQLite outbox
 
-**Status:** Wave 1 source on `team/grin-t3-offline` (`3c1303b`), merged to combined. Coordinator wired `DB_VERSION = 10`. `offline.ts` remains a labelled in-process fixture. Host tests are `SQLITE_HOST`, not native process-death. Open Wave 2 extras: **ER-1** retired-session completion / lease fencing after await; **ER-4** (with T5) real v9→v10 startup including GRIN-off.
+**Status:** Wave 1 source plus Wave 2 `22a848a` on combined: CS-01 SQLITE_HOST+INJECTED G1, **ER-1** `skipStaleCompletion` after await, **ER-4 T3 half** v9→v10 init-sequence test (GRIN-off; `init.ts` not edited). `offline.ts` remains a labelled in-process fixture. Host tests are `SQLITE_HOST`, not native process-death. Open: ER-4 T5 QA.
 
 **Acceptance (not implemented now):** durable device queue survives process death; interrupted register recovers via G1 replay/reconcile without a second serial; queue rows are bound to the signed-in owner/account; switching accounts cannot flush another owner’s commands; no locally invented issued numbers.
 
