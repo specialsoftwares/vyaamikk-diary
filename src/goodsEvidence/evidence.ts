@@ -1,3 +1,18 @@
+/**
+ * GRIN original-evidence domain (G2 Wave 1).
+ *
+ * Lifecycle and bounds live here. Durable Storage I/O lives in
+ * `tools/goods-evidence-storage` (emulator / FAKE_* ports). Not a live callable.
+ * Client hash is a claim. Trusted verification hashes stored bytes at a generation.
+ * This is not encrypted-backup.
+ */
+
+import {
+  EVIDENCE_STATE_TRANSITIONS,
+  type EvidenceObjectState,
+  type VerifiedEvidenceResult,
+} from "./ports";
+
 export type EvidenceCategory =
   | "invoice"
   | "ewb"
@@ -15,6 +30,45 @@ export type EvidenceCategory =
 export type EvidenceVerification = "pending" | "failed" | "verified";
 
 export type DerivativeKind = "thumbnail" | "ocr" | "crop" | "rotation" | "redacted";
+
+/** Wave 1 upload originals. Pack coverage of other categories is unchanged (policy v2). */
+export const WAVE1_ORIGINAL_CATEGORIES = [
+  "invoice",
+  "ewb",
+  "lr_bilty",
+  "weighment",
+  "vehicle",
+  "unloading",
+  "qc",
+  "acknowledgement",
+] as const;
+
+export type Wave1OriginalCategory = (typeof WAVE1_ORIGINAL_CATEGORIES)[number];
+
+export const ORIGINAL_OBJECT_KIND = "original" as const;
+export const DERIVATIVE_STORAGE_KINDS = ["thumbnail", "preview", "ocr"] as const;
+export type DerivativeStorageKind = (typeof DERIVATIVE_STORAGE_KINDS)[number];
+
+/** Technical safeguards, not legal or quota requirements. */
+export const MAX_PDF_ORIGINAL_BYTES = 15 * 1024 * 1024;
+export const MAX_IMAGE_ORIGINAL_BYTES = 10 * 1024 * 1024;
+export const MAX_DERIVATIVE_BYTES = 2 * 1024 * 1024;
+export const MAX_ORIGINALS_PER_RECEIPT = 24;
+export const MAX_DERIVATIVES_PER_ORIGINAL = 8;
+export const MAX_CONCURRENT_UPLOADS_PER_OWNER = 2;
+export const HASH_CHUNK_BYTES = 64 * 1024;
+export const OBJECT_KEY_MIN_LENGTH = 16;
+export const OBJECT_KEY_MAX_LENGTH = 64;
+export const GRIN_EVIDENCE_STORAGE_PREFIX = "grinEvidence";
+
+export const ALLOWED_ORIGINAL_MIME = [
+  "application/pdf",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+] as const;
+
+export type AllowedOriginalMime = (typeof ALLOWED_ORIGINAL_MIME)[number];
 
 export interface LabelledEvidenceSupport {
   /** Inventory items this original is claimed to support. Simulation metadata, not parsed content. */
@@ -53,6 +107,37 @@ export interface DerivativeEvidence {
  */
 export type ByteHasher = (bytes: Uint8Array) => string;
 
+/** Incremental hasher. Implementations must not buffer the whole file. */
+export type ChunkHasher = {
+  update(chunk: Uint8Array): void;
+  digestHex(): string;
+};
+
+export type ClientHashClaim = {
+  kind: "client_claim";
+  sha256: string;
+  byteSize: number;
+};
+
+export type TrustedStorageHash = {
+  kind: "trusted_storage";
+  sha256: string;
+  byteSize: number;
+  generation: string;
+};
+
+const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const OBJECT_KEY_RE = /^[A-Za-z0-9_-]{16,64}$/;
+const UID_PATH_RE = /^[A-Za-z0-9_-]{1,128}$/;
+const MIME_SET = new Set<string>(ALLOWED_ORIGINAL_MIME);
+const WAVE1_SET = new Set<string>(WAVE1_ORIGINAL_CATEGORIES);
+const DERIVATIVE_KIND_SET = new Set<string>(DERIVATIVE_STORAGE_KINDS);
+const STATE_SET = new Set<string>(Object.keys(EVIDENCE_STATE_TRANSITIONS));
+
+function hasForbiddenPathToken(value: string): boolean {
+  return value.includes("/") || value.includes("\\") || value.includes(".") || value === "..";
+}
+
 export function isSha256Hex(value: string): boolean {
   return /^[a-f0-9]{64}$/.test(value);
 }
@@ -80,5 +165,343 @@ export function derivativesMustNotReplaceOriginal(
     derivative.parentEvidenceId === original.evidenceId &&
     derivative.ownSha256 !== original.rawSha256 &&
     original.verification !== "pending"
+  );
+}
+
+export function isEvidenceObjectState(value: unknown): value is EvidenceObjectState {
+  return typeof value === "string" && STATE_SET.has(value);
+}
+
+/**
+ * Retry may remain in the same state. Replacement after verification uses a new
+ * object id; `rejected` and `linked` are terminal for this object id.
+ */
+export function isPermittedEvidenceTransition(
+  from: EvidenceObjectState,
+  to: EvidenceObjectState
+): boolean {
+  if (from === to) return true;
+  return EVIDENCE_STATE_TRANSITIONS[from].includes(to);
+}
+
+export function evidenceTransitionError(
+  from: EvidenceObjectState,
+  to: EvidenceObjectState
+): string | null {
+  if (isPermittedEvidenceTransition(from, to)) return null;
+  return `evidence state ${from} cannot move to ${to}`;
+}
+
+export function isWave1OriginalCategory(value: unknown): value is Wave1OriginalCategory {
+  return typeof value === "string" && WAVE1_SET.has(value);
+}
+
+export function wave1CategoryError(value: unknown): string | null {
+  if (!isWave1OriginalCategory(value)) return "evidence category is not a Wave 1 original category";
+  return null;
+}
+
+export function isAllowedOriginalMime(value: unknown): value is AllowedOriginalMime {
+  return typeof value === "string" && MIME_SET.has(value);
+}
+
+export function originalMimeError(value: unknown): string | null {
+  if (!isAllowedOriginalMime(value)) return "evidence mime is not an allowed original type";
+  return null;
+}
+
+export function maxBytesForOriginalMime(mime: AllowedOriginalMime): number {
+  return mime === "application/pdf" ? MAX_PDF_ORIGINAL_BYTES : MAX_IMAGE_ORIGINAL_BYTES;
+}
+
+export function originalSizeError(mime: AllowedOriginalMime, byteSize: unknown): string | null {
+  if (typeof byteSize !== "number" || !Number.isInteger(byteSize) || byteSize < 1) {
+    return "original byte size is invalid";
+  }
+  if (byteSize > maxBytesForOriginalMime(mime)) return "original exceeds the technical size limit";
+  return null;
+}
+
+export function derivativeSizeError(byteSize: unknown): string | null {
+  if (typeof byteSize !== "number" || !Number.isInteger(byteSize) || byteSize < 1) {
+    return "derivative byte size is invalid";
+  }
+  if (byteSize > MAX_DERIVATIVE_BYTES) return "derivative exceeds the technical size limit";
+  return null;
+}
+
+export function originalCountError(count: unknown): string | null {
+  if (typeof count !== "number" || !Number.isInteger(count) || count < 0) {
+    return "original count is invalid";
+  }
+  if (count >= MAX_ORIGINALS_PER_RECEIPT) return "original count exceeds the technical limit";
+  return null;
+}
+
+export function derivativeCountError(count: unknown): string | null {
+  if (typeof count !== "number" || !Number.isInteger(count) || count < 0) {
+    return "derivative count is invalid";
+  }
+  if (count >= MAX_DERIVATIVES_PER_ORIGINAL) return "derivative count exceeds the technical limit";
+  return null;
+}
+
+export function concurrentUploadError(inFlight: unknown): string | null {
+  if (typeof inFlight !== "number" || !Number.isInteger(inFlight) || inFlight < 0) {
+    return "upload concurrency count is invalid";
+  }
+  if (inFlight >= MAX_CONCURRENT_UPLOADS_PER_OWNER) {
+    return "upload concurrency exceeds the technical limit";
+  }
+  return null;
+}
+
+export function evidenceIdError(value: unknown): string | null {
+  if (typeof value !== "string") return "evidenceId is required";
+  if (hasForbiddenPathToken(value)) return "evidenceId is not a valid document id";
+  if (!ID_RE.test(value)) return "evidenceId is not a valid document id";
+  return null;
+}
+
+export function objectKeyError(value: unknown): string | null {
+  if (typeof value !== "string") return "object key is required";
+  if (hasForbiddenPathToken(value)) return "object key is not a safe identifier";
+  if (!OBJECT_KEY_RE.test(value)) return "object key is not a safe identifier";
+  if (value.length < OBJECT_KEY_MIN_LENGTH || value.length > OBJECT_KEY_MAX_LENGTH) {
+    return "object key is not a safe identifier";
+  }
+  return null;
+}
+
+export function pathUidError(value: unknown): string | null {
+  if (typeof value !== "string" || !value) return "owner uid is required";
+  if (hasForbiddenPathToken(value)) return "owner uid is not a safe path segment";
+  if (!UID_PATH_RE.test(value)) return "owner uid is not a safe path segment";
+  return null;
+}
+
+export function claimedSha256Error(value: unknown): string | null {
+  if (typeof value !== "string" || !isSha256Hex(value.toLowerCase())) {
+    return "client hash claim is not SHA-256";
+  }
+  return null;
+}
+
+export function generationError(value: unknown): string | null {
+  if (typeof value !== "string" || !value.trim()) return "storage generation is required";
+  if (value.length > 128) return "storage generation is invalid";
+  if (hasForbiddenPathToken(value) && value.includes("/")) return "storage generation is invalid";
+  return null;
+}
+
+export function isDerivativeStorageKind(value: unknown): value is DerivativeStorageKind {
+  return typeof value === "string" && DERIVATIVE_KIND_SET.has(value);
+}
+
+export function buildOriginalStoragePath(ownerUid: string, objectKey: string): string {
+  return `users/${ownerUid}/${GRIN_EVIDENCE_STORAGE_PREFIX}/${objectKey}/original`;
+}
+
+export function buildDerivativeStoragePath(
+  ownerUid: string,
+  objectKey: string,
+  derivativeKey: string
+): string {
+  return `users/${ownerUid}/${GRIN_EVIDENCE_STORAGE_PREFIX}/${objectKey}/derivatives/${derivativeKey}`;
+}
+
+/**
+ * Object paths are uid + random object key only. Filenames, receipt ids, categories,
+ * invoice numbers, and GSTIN-like tokens are rejected.
+ */
+export function storagePathShapeError(path: unknown): string | null {
+  if (typeof path !== "string" || !path) return "storage path is required";
+  if (path.startsWith("/") || path.includes("//") || path.includes("..") || path.includes("\\")) {
+    return "storage path is not a safe object path";
+  }
+  const parts = path.split("/");
+  if (parts[0] !== "users") return "storage path is not a safe object path";
+  if (parts[2] !== GRIN_EVIDENCE_STORAGE_PREFIX) return "storage path is not a safe object path";
+  const uidErr = pathUidError(parts[1]);
+  if (uidErr) return uidErr;
+  const keyErr = objectKeyError(parts[3]);
+  if (keyErr) return keyErr;
+  if (parts[4] === "original") {
+    if (parts.length !== 5) return "storage path is not a safe object path";
+    return null;
+  }
+  if (parts[4] === "derivatives") {
+    if (parts.length !== 6) return "storage path is not a safe object path";
+    return objectKeyError(parts[5]);
+  }
+  return "storage path is not a safe object path";
+}
+
+export function splitIntoHashChunks(
+  bytes: Uint8Array,
+  chunkBytes: number = HASH_CHUNK_BYTES
+): Uint8Array[] {
+  const size = chunkBytes > 0 ? chunkBytes : HASH_CHUNK_BYTES;
+  const out: Uint8Array[] = [];
+  for (let i = 0; i < bytes.byteLength; i += size) {
+    out.push(bytes.subarray(i, Math.min(i + size, bytes.byteLength)));
+  }
+  return out.length > 0 ? out : [bytes.subarray(0, 0)];
+}
+
+export async function hashBoundedChunks(
+  chunks: AsyncIterable<Uint8Array> | Iterable<Uint8Array>,
+  hasher: ChunkHasher,
+  chunkLimit: number = HASH_CHUNK_BYTES
+): Promise<{ sha256: string; byteSize: number }> {
+  let byteSize = 0;
+  const limit = chunkLimit > 0 ? chunkLimit : HASH_CHUNK_BYTES;
+  const iterable =
+    typeof (chunks as AsyncIterable<Uint8Array>)[Symbol.asyncIterator] === "function"
+      ? (chunks as AsyncIterable<Uint8Array>)
+      : (async function* consume() {
+          yield* chunks as Iterable<Uint8Array>;
+        })();
+  for await (const chunk of iterable) {
+    for (let i = 0; i < chunk.byteLength; i += limit) {
+      const slice = chunk.subarray(i, Math.min(i + limit, chunk.byteLength));
+      hasher.update(slice);
+    }
+    byteSize += chunk.byteLength;
+  }
+  return { sha256: hasher.digestHex(), byteSize };
+}
+
+export async function verifyOriginalChunks(
+  claimedSha256: string,
+  chunks: AsyncIterable<Uint8Array> | Iterable<Uint8Array>,
+  hasher: ChunkHasher
+): Promise<{ ok: true; actual: string; byteSize: number } | { ok: false; actual: string; byteSize: number }> {
+  const hashed = await hashBoundedChunks(chunks, hasher);
+  if (hashed.sha256 !== claimedSha256.toLowerCase()) {
+    return { ok: false, actual: hashed.sha256, byteSize: hashed.byteSize };
+  }
+  return { ok: true, actual: hashed.sha256, byteSize: hashed.byteSize };
+}
+
+export function clientClaimError(claim: unknown): string | null {
+  if (claim == null || typeof claim !== "object" || Array.isArray(claim)) {
+    return "client hash claim is required";
+  }
+  const record = claim as Record<string, unknown>;
+  if (record.kind !== "client_claim") return "client hash claim is required";
+  const hashErr = claimedSha256Error(record.sha256);
+  if (hashErr) return hashErr;
+  if (typeof record.byteSize !== "number" || !Number.isInteger(record.byteSize) || record.byteSize < 1) {
+    return "client hash claim size is invalid";
+  }
+  return null;
+}
+
+export function trustedHashMatchesClaim(
+  claim: ClientHashClaim,
+  trusted: TrustedStorageHash
+): boolean {
+  return claim.sha256.toLowerCase() === trusted.sha256 && claim.byteSize === trusted.byteSize;
+}
+
+export function replacementMustUseNewObjectId(
+  previousObjectKey: string,
+  nextObjectKey: string
+): boolean {
+  return previousObjectKey !== nextObjectKey;
+}
+
+export function originalRetentionError(
+  originalPresent: boolean,
+  originalHasTrustedHash: boolean
+): string | null {
+  if (!originalPresent) {
+    return "derivative cannot assert that a missing original is retained";
+  }
+  if (!originalHasTrustedHash) {
+    return "derivative cannot assert that an unverified original is retained";
+  }
+  return null;
+}
+
+export function verifiedEvidenceResultError(value: unknown): string | null {
+  if (value == null || typeof value !== "object" || Array.isArray(value)) {
+    return "VerifiedEvidenceResult is required";
+  }
+  const record = value as Record<string, unknown>;
+  const idErr = evidenceIdError(record.evidenceId);
+  if (idErr) return idErr;
+  const uidErr = pathUidError(record.ownerUid);
+  if (uidErr) return uidErr;
+  if (typeof record.ledgerId !== "string" || !ID_RE.test(record.ledgerId) || hasForbiddenPathToken(record.ledgerId)) {
+    return "ledgerId is not a valid document id";
+  }
+  if (typeof record.receiptId !== "string" || !ID_RE.test(record.receiptId) || hasForbiddenPathToken(record.receiptId)) {
+    return "receiptId is not a valid document id";
+  }
+  const catErr = wave1CategoryError(record.category);
+  if (catErr) return catErr;
+  const mimeErr = originalMimeError(record.mime);
+  if (mimeErr) return mimeErr;
+  const sizeErr = originalSizeError(record.mime as AllowedOriginalMime, record.byteSize);
+  if (sizeErr) return sizeErr;
+  if (typeof record.rawSha256 !== "string" || !isSha256Hex(record.rawSha256)) {
+    return "rawSha256 is not a trusted SHA-256";
+  }
+  const pathErr = storagePathShapeError(record.storagePath);
+  if (pathErr) return pathErr;
+  const genErr = generationError(record.generation);
+  if (genErr) return genErr;
+  if (typeof record.verifiedAtUtc !== "string" || !record.verifiedAtUtc.trim()) {
+    return "verifiedAtUtc is required";
+  }
+  return null;
+}
+
+export function buildVerifiedEvidenceResult(input: {
+  evidenceId: string;
+  ownerUid: string;
+  ledgerId: string;
+  receiptId: string;
+  category: Wave1OriginalCategory;
+  mime: AllowedOriginalMime;
+  trusted: TrustedStorageHash;
+  storagePath: string;
+  verifiedAtUtc: string;
+}): VerifiedEvidenceResult | { ok: false; detail: string } {
+  const result: VerifiedEvidenceResult = {
+    evidenceId: input.evidenceId,
+    ownerUid: input.ownerUid,
+    ledgerId: input.ledgerId,
+    receiptId: input.receiptId,
+    category: input.category,
+    mime: input.mime,
+    byteSize: input.trusted.byteSize,
+    rawSha256: input.trusted.sha256,
+    storagePath: input.storagePath,
+    generation: input.trusted.generation,
+    verifiedAtUtc: input.verifiedAtUtc,
+  };
+  const err = verifiedEvidenceResultError(result);
+  if (err) return { ok: false, detail: err };
+  return result;
+}
+
+export function verifiedResultsEquivalent(
+  left: VerifiedEvidenceResult,
+  right: VerifiedEvidenceResult
+): boolean {
+  return (
+    left.evidenceId === right.evidenceId &&
+    left.ownerUid === right.ownerUid &&
+    left.ledgerId === right.ledgerId &&
+    left.receiptId === right.receiptId &&
+    left.category === right.category &&
+    left.mime === right.mime &&
+    left.byteSize === right.byteSize &&
+    left.rawSha256 === right.rawSha256 &&
+    left.storagePath === right.storagePath &&
+    left.generation === right.generation
   );
 }
