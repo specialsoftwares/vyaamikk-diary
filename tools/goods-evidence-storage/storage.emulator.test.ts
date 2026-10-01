@@ -13,6 +13,7 @@ import {
   wrapAdminFirestore,
 } from "./harness";
 import { evidenceLabel, sampleBytes, sha256Bytes } from "./testSupport";
+import { evidenceObjectPath } from "./paths";
 
 const OWNER = "owner_emu";
 const OTHER = "mallory_emu";
@@ -157,6 +158,70 @@ async function main(): Promise<void> {
   const second = await blobs.putIfAbsent(reserved3.storagePath, sampleBytes(25, 16), "image/png");
   assert.equal(first.ok, true);
   assert.equal(second.ok, false);
+
+  evidenceLabel("STORAGE_EMULATOR", "stale complete cannot clobber newer verification");
+  const staleBytes = sampleBytes(31, 32);
+  const reservedStale = await adapter.reserve(
+    { uid: OWNER },
+    {
+      evidenceId: "ev_emu_stale",
+      ledgerId: LEDGER,
+      receiptId: RECEIPT,
+      category: "invoice",
+      mime: "application/pdf",
+      claimedSha256: sha256Bytes(staleBytes),
+      claimedByteSize: staleBytes.byteLength,
+    }
+  );
+  assert.equal(reservedStale.ok, true);
+  if (!reservedStale.ok) throw new Error("reserve stale");
+  await adapter.beginUpload({ uid: OWNER }, { evidenceId: "ev_emu_stale", ledgerId: LEDGER });
+  await blobs.putIfAbsent(reservedStale.storagePath, staleBytes, "application/pdf");
+  const racing = wrapAdminBlobStore(bucket);
+  const racingAdapter = new GoodsEvidenceStorageAdapter(fs, {
+    putIfAbsent: (path, bytes, contentType) => racing.putIfAbsent(path, bytes, contentType),
+    async stat(path) {
+      const result = await racing.stat(path);
+      const objectRef = db.doc(evidenceObjectPath(OWNER, LEDGER, "ev_emu_stale"));
+      const snap = await objectRef.get();
+      const rec = snap.data();
+      if (rec && rec.state === "uploading") {
+        await objectRef.set({
+          ...rec,
+          state: "verified",
+          generation: "emu-newer-gen",
+          actualSha256: "a".repeat(64),
+          actualByteSize: staleBytes.byteLength,
+          verifiedAtUtc: "2026-10-01T12:00:00.000Z",
+          lifecycleVersion: Number(rec.lifecycleVersion ?? 1) + 5,
+          verifiedResult: {
+            evidenceId: "ev_emu_stale",
+            ownerUid: OWNER,
+            ledgerId: LEDGER,
+            receiptId: RECEIPT,
+            category: "invoice",
+            mime: "application/pdf",
+            byteSize: staleBytes.byteLength,
+            rawSha256: "a".repeat(64),
+            storagePath: rec.storagePath,
+            generation: "emu-newer-gen",
+            verifiedAtUtc: "2026-10-01T12:00:00.000Z",
+          },
+        });
+      }
+      return result;
+    },
+    open: (path) => racing.open(path),
+  }, fixedClock(NOW));
+  const staleComplete = await racingAdapter.completeUpload(
+    { uid: OWNER },
+    { evidenceId: "ev_emu_stale", ledgerId: LEDGER }
+  );
+  assert.equal(staleComplete.ok, false);
+  if (!staleComplete.ok) assert.equal(staleComplete.code, "invalid");
+  const after = await db.doc(evidenceObjectPath(OWNER, LEDGER, "ev_emu_stale")).get();
+  assert.equal(after.data()?.state, "verified");
+  assert.equal(after.data()?.generation, "emu-newer-gen");
 
   console.log("tools/goods-evidence-storage/storage.emulator.test.ts: ok");
 }

@@ -12,7 +12,9 @@ import {
   buildOriginalStoragePath,
   buildVerifiedEvidenceResult,
   concurrentUploadError,
+  derivativeCountError,
   evidenceIdError,
+  evidenceReplayIdentityError,
   evidenceTransitionError,
   isAllowedOriginalMime,
   isDerivativeStorageKind,
@@ -22,6 +24,7 @@ import {
   originalMimeError,
   originalRetentionError,
   originalSizeError,
+  reservationIdentityError,
   storagePathShapeError,
   trustedHashMatchesClaim,
   verifiedEvidenceResultError,
@@ -30,6 +33,7 @@ import {
   wave1CategoryError,
   type AllowedOriginalMime,
   type ClientHashClaim,
+  type EvidenceReplayIdentity,
   type TrustedStorageHash,
   type Wave1OriginalCategory,
 } from "../../src/goodsEvidence/evidence";
@@ -39,6 +43,7 @@ import { documentIdError } from "./ids";
 import { logG2 } from "./log";
 import {
   admissionPath,
+  derivativeKeyPath,
   evidenceControlPath,
   evidenceLinkPath,
   evidenceObjectPath,
@@ -79,7 +84,7 @@ const RESERVE_KEYS = new Set([
   "claimedByteSize",
   "originalFileName",
 ]);
-const LIFECYCLE_KEYS = new Set(["evidenceId", "ledgerId"]);
+const LIFECYCLE_KEYS = new Set(["evidenceId", "ledgerId", "receiptId"]);
 const SERVER_FIELDS = new Set([
   "objectKey",
   "storagePath",
@@ -169,6 +174,8 @@ function parseRecord(data: Record<string, unknown> | undefined): EvidenceRecord 
   const verifiedResult =
     data.verifiedResult == null ? null : (data.verifiedResult as VerifiedEvidenceResult);
   if (data.verifiedResult != null && verifiedEvidenceResultError(data.verifiedResult)) return null;
+  const derivativeKeys = data.derivativeKeys == null ? [] : parseStringIds(data.derivativeKeys);
+  if (!derivativeKeys) return null;
   return {
     schemaVersion: 1,
     evidenceId: data.evidenceId,
@@ -191,6 +198,11 @@ function parseRecord(data: Record<string, unknown> | undefined): EvidenceRecord 
     originalFileName: typeof data.originalFileName === "string" ? data.originalFileName : null,
     reservationFingerprint: data.reservationFingerprint,
     verifiedResult,
+    derivativeKeys,
+    lifecycleVersion:
+      typeof data.lifecycleVersion === "number" && Number.isInteger(data.lifecycleVersion) && data.lifecycleVersion >= 1
+        ? data.lifecycleVersion
+        : 1,
     createdAtUtc: data.createdAtUtc,
     updatedAtUtc: data.updatedAtUtc,
   };
@@ -207,8 +219,76 @@ function objectKeyMapping(record: EvidenceRecord): Record<string, unknown> {
     evidenceId: record.evidenceId,
     ledgerId: record.ledgerId,
     receiptId: record.receiptId,
+    ownerUid: record.ownerUid,
     state: record.state,
   };
+}
+
+function derivativeKeyMapping(
+  record: EvidenceRecord,
+  derivativeKey: string,
+  kind: string
+): Record<string, unknown> {
+  return {
+    schemaVersion: 1,
+    derivativeKey,
+    parentObjectKey: record.objectKey,
+    evidenceId: record.evidenceId,
+    ledgerId: record.ledgerId,
+    receiptId: record.receiptId,
+    ownerUid: record.ownerUid,
+    kind,
+    state: "reserved",
+  };
+}
+
+function replayIdentityOf(record: EvidenceRecord): EvidenceReplayIdentity | null {
+  if (!isWave1OriginalCategory(record.category)) return null;
+  return {
+    ownerUid: record.ownerUid,
+    ledgerId: record.ledgerId,
+    receiptId: record.receiptId,
+    evidenceId: record.evidenceId,
+    category: record.category,
+    claimedSha256: record.claimedSha256,
+    claimedByteSize: record.claimedByteSize,
+  };
+}
+
+function objectKeyBindingError(record: EvidenceRecord, mapping: Record<string, unknown> | undefined): string | null {
+  if (!mapping) return "stored reservation identity is missing";
+  if (mapping.schemaVersion !== 1) return "stored reservation identity is missing";
+  if (mapping.objectKey !== record.objectKey) return "reservation identity does not match stored evidence";
+  if (mapping.evidenceId !== record.evidenceId) return "reservation identity does not match stored evidence";
+  if (mapping.ledgerId !== record.ledgerId) return "reservation identity does not match stored evidence";
+  if (mapping.receiptId !== record.receiptId) return "reservation identity does not match stored evidence";
+  if (mapping.ownerUid != null && mapping.ownerUid !== record.ownerUid) {
+    return "reservation identity does not match stored evidence";
+  }
+  return reservationIdentityError(record.objectKey, typeof mapping.objectKey === "string" ? mapping.objectKey : null);
+}
+
+function wouldClobberVerifiedOrLinked(
+  current: EvidenceRecord,
+  patch: Partial<EvidenceRecord>,
+  nextState: EvidenceRecord["state"]
+): boolean {
+  if (current.state !== "verified" && current.state !== "linked") return false;
+  if (nextState === "rejected") return false;
+  if (current.state === "verified" && nextState === "linked") return false;
+  if (nextState !== current.state) return true;
+  if (patch.generation != null && current.generation != null && patch.generation !== current.generation) return true;
+  if (patch.actualSha256 != null && current.actualSha256 != null && patch.actualSha256 !== current.actualSha256) {
+    return true;
+  }
+  if (
+    patch.verifiedResult &&
+    current.verifiedResult &&
+    !verifiedResultsEquivalent(current.verifiedResult, patch.verifiedResult)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 function lifecycleOk(
@@ -223,6 +303,15 @@ function lifecycleOk(
     evidenceId: record.evidenceId,
     state: record.state,
     verified: record.verifiedResult,
+    ownerUid: record.ownerUid,
+    ledgerId: record.ledgerId,
+    receiptId: record.receiptId,
+    category: record.category,
+    claimedSha256: record.claimedSha256,
+    actualSha256: record.actualSha256,
+    reservationId: record.objectKey,
+    claimedByteSize: record.claimedByteSize,
+    lifecycleVersion: record.lifecycleVersion,
   };
 }
 
@@ -305,6 +394,8 @@ export class GoodsEvidenceStorageAdapter {
         originalFileName: parsed.originalFileName,
         reservationFingerprint: parsed.fingerprint,
         verifiedResult: null,
+        derivativeKeys: [],
+        lifecycleVersion: 1,
         createdAtUtc: now,
         updatedAtUtc: now,
       };
@@ -337,7 +428,7 @@ export class GoodsEvidenceStorageAdapter {
   async completeUpload(caller: TrustedCaller, input: unknown): Promise<G2LifecycleResult> {
     const ids = await this.parseAuthorizedLifecycle(caller, input);
     if (!ids.ok) return ids;
-    const loaded = await this.loadAuthorized(ids.uid, ids.ledgerId, ids.evidenceId);
+    const loaded = await this.loadAuthorized(ids.uid, ids.ledgerId, ids.evidenceId, ids.receiptId);
     if (!loaded.ok) return loaded;
     if (loaded.record.state === "uploaded_unverified") {
       const stat = await this.blobs.stat(loaded.record.storagePath);
@@ -375,7 +466,7 @@ export class GoodsEvidenceStorageAdapter {
   async verify(caller: TrustedCaller, input: unknown): Promise<G2LifecycleResult> {
     const ids = await this.parseAuthorizedLifecycle(caller, input);
     if (!ids.ok) return ids;
-    const loaded = await this.loadAuthorized(ids.uid, ids.ledgerId, ids.evidenceId);
+    const loaded = await this.loadAuthorized(ids.uid, ids.ledgerId, ids.evidenceId, ids.receiptId);
     if (!loaded.ok) return loaded;
     const record = loaded.record;
     if (record.state === "verified" || record.state === "linked") {
@@ -383,6 +474,8 @@ export class GoodsEvidenceStorageAdapter {
       if (!stat || stat.generation !== record.generation) {
         return this.rejectReplaced(record);
       }
+      const binding = await this.reservationBinding(record);
+      if (!binding.ok) return binding;
       if (record.verifiedResult) return lifecycleOk(record, true, "grin_g2_verified");
     }
     if (record.state !== "uploaded_unverified" && record.state !== "orphan_pending_review") {
@@ -394,7 +487,7 @@ export class GoodsEvidenceStorageAdapter {
   async recoverOrphan(caller: TrustedCaller, input: unknown): Promise<G2LifecycleResult> {
     const ids = await this.parseAuthorizedLifecycle(caller, input);
     if (!ids.ok) return ids;
-    const loaded = await this.loadAuthorized(ids.uid, ids.ledgerId, ids.evidenceId);
+    const loaded = await this.loadAuthorized(ids.uid, ids.ledgerId, ids.evidenceId, ids.receiptId);
     if (!loaded.ok) return loaded;
     const record = loaded.record;
     const stat = await this.blobs.stat(record.storagePath);
@@ -423,6 +516,10 @@ export class GoodsEvidenceStorageAdapter {
       return this.hashAndBind(record, "verified");
     }
     if (record.state === "verified" || record.state === "linked") {
+      const stat = await this.blobs.stat(record.storagePath);
+      if (!stat || stat.generation !== record.generation) return this.rejectReplaced(record);
+      const binding = await this.reservationBinding(record);
+      if (!binding.ok) return binding;
       return lifecycleOk(record, true, "grin_g2_orphan");
     }
     return deny("invalid", "evidence is not recoverable as an orphan");
@@ -436,7 +533,7 @@ export class GoodsEvidenceStorageAdapter {
     if (shapeErr) return deny("invalid", shapeErr);
     const verified = input as VerifiedEvidenceResult;
     if (verified.ownerUid !== caller.uid) return deny("forbidden", GENERIC_DENY);
-    const loaded = await this.loadAuthorized(caller.uid, verified.ledgerId, verified.evidenceId);
+    const loaded = await this.loadAuthorized(caller.uid, verified.ledgerId, verified.evidenceId, verified.receiptId);
     if (!loaded.ok) return loaded;
     const record = loaded.record;
     if (record.receiptId !== verified.receiptId) return deny("forbidden", GENERIC_DENY);
@@ -483,7 +580,7 @@ export class GoodsEvidenceStorageAdapter {
   async getRecord(caller: TrustedCaller, input: unknown): Promise<G2LifecycleResult> {
     const ids = await this.parseAuthorizedLifecycle(caller, input);
     if (!ids.ok) return ids;
-    const loaded = await this.loadAuthorized(ids.uid, ids.ledgerId, ids.evidenceId);
+    const loaded = await this.loadAuthorized(ids.uid, ids.ledgerId, ids.evidenceId, ids.receiptId);
     if (!loaded.ok) return loaded;
     return lifecycleOk(loaded.record, false);
   }
@@ -491,11 +588,12 @@ export class GoodsEvidenceStorageAdapter {
   /**
    * Derivative paths are separate from originals. A derivative cannot assert that
    * a missing original is retained, and cannot produce VerifiedEvidenceResult.
+   * Parent object-key binding alone does not authorize unlimited derivatives.
    */
   async reserveDerivative(
     caller: TrustedCaller,
     input: unknown
-  ): Promise<{ ok: true; parentEvidenceId: string; storagePath: string; kind: string } | G2Deny> {
+  ): Promise<{ ok: true; parentEvidenceId: string; storagePath: string; kind: string; derivativeKey: string } | G2Deny> {
     if (!caller.uid) return deny("unauthenticated", GENERIC_DENY);
     const gatedInput = await this.authorizeInput(caller.uid, input);
     if (!gatedInput.ok) return gatedInput;
@@ -505,22 +603,57 @@ export class GoodsEvidenceStorageAdapter {
     const ledgerErr = documentIdError("ledgerId", input.ledgerId);
     if (ledgerErr) return deny("invalid", ledgerErr);
     if (!isDerivativeStorageKind(input.kind)) return deny("invalid", "derivative kind is invalid");
-    const loaded = await this.loadAuthorized(caller.uid, input.ledgerId as string, input.evidenceId as string);
+    const kind = input.kind;
+    const loaded = await this.loadAuthorized(caller.uid, input.ledgerId as string, input.evidenceId as string, null);
     if (!loaded.ok) return loaded;
+    if (loaded.record.state !== "verified" && loaded.record.state !== "linked") {
+      return deny("invalid", "derivative requires a verified original");
+    }
     const originalStat = await this.blobs.stat(loaded.record.storagePath);
     const retainErr = originalRetentionError(
       originalStat != null,
       loaded.record.actualSha256 != null && loaded.record.generation != null
     );
     if (retainErr) return deny("invalid", retainErr);
-    const derivativeKey = this.clock.objectKey();
-    const storagePath = buildDerivativeStoragePath(caller.uid, loaded.record.objectKey, derivativeKey);
-    return {
-      ok: true,
-      parentEvidenceId: loaded.record.evidenceId,
-      storagePath,
-      kind: input.kind,
-    };
+    return this.runAttempts(async (tx, attempt) => {
+      const objectRef = this.db.doc(evidenceObjectPath(caller.uid as string, loaded.record.ledgerId, loaded.record.evidenceId));
+      const objectSnap = await tx.get(objectRef);
+      const gated = await this.authorize(
+        tx,
+        caller.uid as string,
+        loaded.record.ledgerId,
+        loaded.record.receiptId,
+        attempt,
+        "newCommands"
+      );
+      if (!gated.ok) return gated;
+      if (!objectSnap.exists) return deny("not_found", "evidence object not found");
+      const current = parseRecord(objectSnap.data());
+      if (!current) return deny("integrity", GENERIC_DENY);
+      if (current.state !== "verified" && current.state !== "linked") {
+        return deny("invalid", "derivative requires a verified original");
+      }
+      const countErr = derivativeCountError(current.derivativeKeys.length);
+      if (countErr) return deny("invalid", countErr);
+      const derivativeKey = this.clock.objectKey();
+      const storagePath = buildDerivativeStoragePath(caller.uid as string, current.objectKey, derivativeKey);
+      const next: EvidenceRecord = {
+        ...current,
+        derivativeKeys: [...current.derivativeKeys, derivativeKey],
+        lifecycleVersion: current.lifecycleVersion + 1,
+        updatedAtUtc: formatUtcIso(this.clock.nowMs()),
+      };
+      tx.set(objectRef, { ...next });
+      tx.set(this.db.doc(objectKeyPath(next.ownerUid, next.objectKey)), objectKeyMapping(next));
+      tx.set(this.db.doc(derivativeKeyPath(next.ownerUid, derivativeKey)), derivativeKeyMapping(next, derivativeKey, kind));
+      return {
+        ok: true as const,
+        parentEvidenceId: current.evidenceId,
+        storagePath,
+        kind,
+        derivativeKey,
+      };
+    });
   }
 
   private async hashAndBind(
@@ -634,6 +767,9 @@ export class GoodsEvidenceStorageAdapter {
       }
       const record = parseRecord(objectSnap.data());
       if (!record) return deny("integrity", GENERIC_DENY);
+      if (ids.receiptId && record.receiptId !== ids.receiptId) {
+        return deny("invalid", "receipt does not match stored evidence");
+      }
       const gated = await this.authorize(tx, ids.uid, ids.ledgerId, record.receiptId, attempt, "newCommands");
       if (!gated.ok) return gated;
       const uploadingIds = parseStringIds(uploadSnap.data()?.uploadingIds);
@@ -650,7 +786,12 @@ export class GoodsEvidenceStorageAdapter {
           uploadingIds.push(token);
         }
         tx.set(uploadRef, { schemaVersion: 1, uploadingIds });
-        const next = { ...record, state: "uploading" as const, updatedAtUtc: now };
+        const next = {
+          ...record,
+          state: "uploading" as const,
+          lifecycleVersion: record.lifecycleVersion + 1,
+          updatedAtUtc: now,
+        };
         tx.set(objectRef, { ...next });
         tx.set(this.db.doc(objectKeyPath(ids.uid, next.objectKey)), objectKeyMapping(next));
         return lifecycleOk(next, false);
@@ -662,10 +803,15 @@ export class GoodsEvidenceStorageAdapter {
         schemaVersion: 1,
         uploadingIds: uploadingIds.filter((id) => id !== token),
       });
-      const next = { ...record, state: "reserved" as const, updatedAtUtc: now };
-      tx.set(objectRef, { ...next });
-      tx.set(this.db.doc(objectKeyPath(ids.uid, next.objectKey)), objectKeyMapping(next));
-      return lifecycleOk(next, false);
+      const next = {
+        ...record,
+        state: "reserved" as const,
+        lifecycleVersion: record.lifecycleVersion + 1,
+        updatedAtUtc: now,
+      };
+        tx.set(objectRef, { ...next });
+        tx.set(this.db.doc(objectKeyPath(ids.uid, next.objectKey)), objectKeyMapping(next));
+        return lifecycleOk(next, false);
     });
   }
 
@@ -680,9 +826,9 @@ export class GoodsEvidenceStorageAdapter {
     if (transErr) return deny("invalid", transErr);
     return this.runAttempts(async (tx, attempt) => {
       const objectRef = this.db.doc(evidenceObjectPath(record.ownerUid, record.ledgerId, record.evidenceId));
-      const objectSnap = await tx.get(objectRef);
       const uploadRef = this.db.doc(uploadControlPath(record.ownerUid));
-      const uploadSnap = await tx.get(uploadRef);
+      await tx.get(objectRef);
+      await tx.get(uploadRef);
       const gated = await this.authorize(
         tx,
         record.ownerUid,
@@ -692,14 +838,26 @@ export class GoodsEvidenceStorageAdapter {
         "newCommands"
       );
       if (!gated.ok) return gated;
+      const objectSnap = await tx.get(objectRef);
+      const uploadSnap = await tx.get(uploadRef);
       if (!objectSnap.exists) return deny("not_found", "evidence object not found");
       const current = parseRecord(objectSnap.data());
       if (!current) return deny("integrity", GENERIC_DENY);
+      const keySnap = await tx.get(this.db.doc(objectKeyPath(current.ownerUid, current.objectKey)));
+      if (objectKeyBindingError(current, keySnap.data())) return deny("integrity", GENERIC_DENY);
+      if (wouldClobberVerifiedOrLinked(current, patch, nextState)) {
+        return deny("invalid", "stale lifecycle patch");
+      }
+      if (current.lifecycleVersion !== record.lifecycleVersion && current.state !== record.state) {
+        const staleErr = evidenceTransitionError(current.state, nextState);
+        if (staleErr) return deny("invalid", "stale lifecycle patch");
+      }
       if (current.state === nextState && nextState !== "rejected") {
         const merged = { ...current, ...patch, state: nextState };
         if (current.generation === merged.generation && current.actualSha256 === merged.actualSha256) {
           return lifecycleOk(current, true, logEvent);
         }
+        return deny("invalid", "stale lifecycle patch");
       }
       const err = evidenceTransitionError(current.state, nextState);
       if (err) return deny("invalid", err);
@@ -711,7 +869,12 @@ export class GoodsEvidenceStorageAdapter {
           uploadingIds: uploadingIds.filter((id) => id !== token),
         });
       }
-      const next: EvidenceRecord = { ...current, ...patch, state: nextState };
+      const next: EvidenceRecord = {
+        ...current,
+        ...patch,
+        state: nextState,
+        lifecycleVersion: current.lifecycleVersion + 1,
+      };
       tx.set(objectRef, { ...next });
       tx.set(this.db.doc(objectKeyPath(next.ownerUid, next.objectKey)), objectKeyMapping(next));
       await extra?.(tx);
@@ -793,7 +956,7 @@ export class GoodsEvidenceStorageAdapter {
   private async parseAuthorizedLifecycle(
     caller: TrustedCaller,
     input: unknown
-  ): Promise<G2Deny | { ok: true; uid: string; ledgerId: string; evidenceId: string }> {
+  ): Promise<G2Deny | { ok: true; uid: string; ledgerId: string; evidenceId: string; receiptId: string | null }> {
     if (!caller.uid) return deny("unauthenticated", GENERIC_DENY);
     const gatedInput = await this.authorizeInput(caller.uid, input);
     if (!gatedInput.ok) return gatedInput;
@@ -803,7 +966,7 @@ export class GoodsEvidenceStorageAdapter {
   private parseLifecycle(
     caller: TrustedCaller,
     input: unknown
-  ): G2Deny | { ok: true; uid: string; ledgerId: string; evidenceId: string } {
+  ): G2Deny | { ok: true; uid: string; ledgerId: string; evidenceId: string; receiptId: string | null } {
     if (!caller.uid) return deny("unauthenticated", GENERIC_DENY);
     if (!isPlainObject(input)) return deny("invalid", "request is required");
     const extra = extraKeyError(input, LIFECYCLE_KEYS, "request");
@@ -812,19 +975,32 @@ export class GoodsEvidenceStorageAdapter {
     if (evidenceErr) return deny("invalid", evidenceErr);
     const ledgerErr = documentIdError("ledgerId", input.ledgerId);
     if (ledgerErr) return deny("invalid", ledgerErr);
-    return { ok: true, uid: caller.uid, ledgerId: input.ledgerId as string, evidenceId: input.evidenceId as string };
+    let receiptId: string | null = null;
+    if (input.receiptId != null) {
+      const receiptErr = documentIdError("receiptId", input.receiptId);
+      if (receiptErr) return deny("invalid", receiptErr);
+      receiptId = input.receiptId as string;
+    }
+    return {
+      ok: true,
+      uid: caller.uid,
+      ledgerId: input.ledgerId as string,
+      evidenceId: input.evidenceId as string,
+      receiptId,
+    };
   }
 
   private async loadAuthorized(
     uid: string,
     ledgerId: string,
-    evidenceId: string
+    evidenceId: string,
+    receiptId: string | null
   ): Promise<G2Deny | { ok: true; record: EvidenceRecord }> {
     return this.runAttempts(async (tx, attempt) => {
       const objectRef = this.db.doc(evidenceObjectPath(uid, ledgerId, evidenceId));
       const objectSnap = await tx.get(objectRef);
       if (!objectSnap.exists) {
-        const gatedMissing = await this.authorize(tx, uid, ledgerId, null, attempt, "newCommands");
+        const gatedMissing = await this.authorize(tx, uid, ledgerId, receiptId, attempt, "newCommands");
         if (!gatedMissing.ok) return gatedMissing;
         return deny("not_found", "evidence object not found");
       }
@@ -832,7 +1008,36 @@ export class GoodsEvidenceStorageAdapter {
       if (!record) return deny("integrity", GENERIC_DENY);
       const gated = await this.authorize(tx, uid, ledgerId, record.receiptId, attempt, "newCommands");
       if (!gated.ok) return gated;
+      const keySnap = await tx.get(this.db.doc(objectKeyPath(record.ownerUid, record.objectKey)));
+      if (objectKeyBindingError(record, keySnap.data())) return deny("integrity", GENERIC_DENY);
+      if (receiptId) {
+        const stored = replayIdentityOf(record);
+        if (!stored) return deny("integrity", GENERIC_DENY);
+        const claimed: EvidenceReplayIdentity = { ...stored, receiptId };
+        const identityErr = evidenceReplayIdentityError(stored, claimed);
+        if (identityErr) return deny("invalid", identityErr);
+      }
+      if (record.ownerUid !== uid || record.ledgerId !== ledgerId || record.evidenceId !== evidenceId) {
+        return deny("forbidden", GENERIC_DENY);
+      }
       return { ok: true as const, record };
+    });
+  }
+
+  private async reservationBinding(record: EvidenceRecord): Promise<{ ok: true } | G2Deny> {
+    return this.runAttempts(async (tx, attempt) => {
+      const gated = await this.authorize(
+        tx,
+        record.ownerUid,
+        record.ledgerId,
+        record.receiptId,
+        attempt,
+        "newCommands"
+      );
+      if (!gated.ok) return gated;
+      const keySnap = await tx.get(this.db.doc(objectKeyPath(record.ownerUid, record.objectKey)));
+      if (objectKeyBindingError(record, keySnap.data())) return deny("integrity", GENERIC_DENY);
+      return { ok: true as const };
     });
   }
 

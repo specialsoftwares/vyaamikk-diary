@@ -40,6 +40,11 @@ export function objectKeyPath(uid: string, objectKey: string): string {
   return `users/${uid}/grinEvidenceObjectKeys/${objectKey}`;
 }
 
+/** Per-derivative reservation. Parent object-key binding alone does not authorize derivatives. */
+export function derivativeKeyPath(uid: string, derivativeKey: string): string {
+  return `users/${uid}/grinEvidenceDerivativeKeys/${derivativeKey}`;
+}
+
 export function uploadFlightToken(ledgerId: string, evidenceId: string): string {
   return `${ledgerId}/${evidenceId}`;
 }

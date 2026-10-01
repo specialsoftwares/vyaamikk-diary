@@ -4,9 +4,24 @@ rules_version = '2';
  * Isolated G2 Storage Rules proposal copy for the emulator. Not live Rules.
  * Do not deploy from this file. Reviewed text: docs/release/proposals/team2/storage.rules.grin.md
  *
- * Client SDK create/read of originals requires signed-in owner, active account,
- * admission newCommands=allow, and a Firestore objectKey reservation in reserved/uploading.
- * Admin SDK / adapter bypass these rules.
+ * Upload admission is separate from reading already-retained evidence.
+ *
+ * Client SDK matrix (owner + active account + bound active ledger required on every allow):
+ *
+ * | objectKey.state        | create original                         | read original                                      | create derivative                                      | read derivative                    |
+ * |------------------------|-----------------------------------------|----------------------------------------------------|--------------------------------------------------------|------------------------------------|
+ * | missing / unreserved   | deny                                    | deny                                               | deny                                                   | deny                               |
+ * | reserved / uploading   | allow if newCommands=allow              | allow if newCommands=allow                         | deny (parent not verified/linked)                      | deny                               |
+ * | uploaded_unverified    | deny (no overwrite)                     | allow even if newCommands=deny                     | deny (parent not verified/linked)                      | deny                               |
+ * | verified / linked      | deny (no overwrite)                     | allow even if newCommands=deny                     | allow if newCommands=allow AND derivative reservation  | allow even if newCommands=deny     |
+ * | rejected               | deny                                    | deny                                               | deny                                                   | deny                               |
+ *
+ * newCommands=deny stops new uploads and in-flight reads. It does not erase read access
+ * to retained originals (uploaded_unverified / verified / linked) or their authorized
+ * derivatives. pending_deletion / inactive owner and retired/foreign ledgers deny all.
+ * update/delete always denied. Parent object-key binding alone does not authorize
+ * arbitrary derivatives — each derivative needs its own reserved/uploading reservation
+ * and a verified/linked parent. Admin SDK / adapter bypass these rules.
  */
 service firebase.storage {
   match /b/{bucket}/o {
@@ -41,16 +56,104 @@ service firebase.storage {
       return /databases/(default)/documents/users/$(userId)/grinEvidenceObjectKeys/$(objectKey);
     }
 
-    function hasFlightReservation(userId, objectKey) {
-      return firestore.exists(objectKeyDoc(userId, objectKey))
+    function objectKeyExists(userId, objectKey) {
+      return firestore.exists(objectKeyDoc(userId, objectKey));
+    }
+
+    function objectKeyState(userId, objectKey) {
+      return firestore.get(objectKeyDoc(userId, objectKey)).data.state;
+    }
+
+    function objectKeyLedgerId(userId, objectKey) {
+      return firestore.get(objectKeyDoc(userId, objectKey)).data.ledgerId;
+    }
+
+    function ledgerDoc(userId, ledgerId) {
+      return firestore.get(/databases/(default)/documents/users/$(userId)/goodsEvidenceLedgers/$(ledgerId));
+    }
+
+    function boundLedgerActive(userId, objectKey) {
+      return objectKeyExists(userId, objectKey)
+        && ledgerDoc(userId, objectKeyLedgerId(userId, objectKey)).data.ownerUid == userId
+        && ledgerDoc(userId, objectKeyLedgerId(userId, objectKey)).data.status == 'active';
+    }
+
+    function isFlightState(userId, objectKey) {
+      return objectKeyExists(userId, objectKey)
         && (
-          firestore.get(objectKeyDoc(userId, objectKey)).data.state == 'reserved'
-          || firestore.get(objectKeyDoc(userId, objectKey)).data.state == 'uploading'
+          objectKeyState(userId, objectKey) == 'reserved'
+          || objectKeyState(userId, objectKey) == 'uploading'
         );
     }
 
-    function hasObjectKeyBinding(userId, objectKey) {
-      return firestore.exists(objectKeyDoc(userId, objectKey));
+    function isRetainedOriginalState(userId, objectKey) {
+      return objectKeyExists(userId, objectKey)
+        && (
+          objectKeyState(userId, objectKey) == 'uploaded_unverified'
+          || objectKeyState(userId, objectKey) == 'verified'
+          || objectKeyState(userId, objectKey) == 'linked'
+        );
+    }
+
+    function isVerifiedOrLinked(userId, objectKey) {
+      return objectKeyExists(userId, objectKey)
+        && (
+          objectKeyState(userId, objectKey) == 'verified'
+          || objectKeyState(userId, objectKey) == 'linked'
+        );
+    }
+
+    // Upload admission: in-flight reservation only. Distinct from retained reads.
+    function hasFlightReservation(userId, objectKey) {
+      return isFlightState(userId, objectKey);
+    }
+
+    function canUploadOriginal(userId, objectKey) {
+      return ownerUserActive(userId)
+        && admissionAllowsNewCommands(userId)
+        && hasFlightReservation(userId, objectKey)
+        && boundLedgerActive(userId, objectKey);
+    }
+
+    function canReadOriginal(userId, objectKey) {
+      return ownerUserActive(userId)
+        && boundLedgerActive(userId, objectKey)
+        && (
+          (isFlightState(userId, objectKey) && admissionAllowsNewCommands(userId))
+          || isRetainedOriginalState(userId, objectKey)
+        );
+    }
+
+    function derivativeReservationDoc(userId, derivativeKey) {
+      return /databases/(default)/documents/users/$(userId)/grinEvidenceDerivativeKeys/$(derivativeKey);
+    }
+
+    function hasDerivativeFlightReservation(userId, objectKey, derivativeKey) {
+      return firestore.exists(derivativeReservationDoc(userId, derivativeKey))
+        && firestore.get(derivativeReservationDoc(userId, derivativeKey)).data.parentObjectKey == objectKey
+        && (
+          firestore.get(derivativeReservationDoc(userId, derivativeKey)).data.state == 'reserved'
+          || firestore.get(derivativeReservationDoc(userId, derivativeKey)).data.state == 'uploading'
+        )
+        && (
+          firestore.get(derivativeReservationDoc(userId, derivativeKey)).data.kind == 'thumbnail'
+          || firestore.get(derivativeReservationDoc(userId, derivativeKey)).data.kind == 'preview'
+          || firestore.get(derivativeReservationDoc(userId, derivativeKey)).data.kind == 'ocr'
+        );
+    }
+
+    function canCreateDerivative(userId, objectKey, derivativeKey) {
+      return ownerUserActive(userId)
+        && admissionAllowsNewCommands(userId)
+        && boundLedgerActive(userId, objectKey)
+        && isVerifiedOrLinked(userId, objectKey)
+        && hasDerivativeFlightReservation(userId, objectKey, derivativeKey);
+    }
+
+    function canReadDerivative(userId, objectKey) {
+      return ownerUserActive(userId)
+        && boundLedgerActive(userId, objectKey)
+        && isVerifiedOrLinked(userId, objectKey);
     }
 
     function allowedGrinOriginalMime() {
@@ -69,6 +172,12 @@ service firebase.storage {
         );
     }
 
+    function allowedDerivativeMime() {
+      return request.resource.contentType == 'image/jpeg'
+        || request.resource.contentType == 'image/png'
+        || request.resource.contentType == 'image/webp';
+    }
+
     function noClientVerificationMetadata() {
       return !('rawSha256' in request.resource.metadata)
         && !('verified' in request.resource.metadata)
@@ -78,12 +187,8 @@ service firebase.storage {
     }
 
     match /users/{userId}/grinEvidence/{objectKey}/original {
-      allow read: if ownerUserActive(userId)
-                  && admissionAllowsNewCommands(userId)
-                  && hasFlightReservation(userId, objectKey);
-      allow create: if ownerUserActive(userId)
-                    && admissionAllowsNewCommands(userId)
-                    && hasFlightReservation(userId, objectKey)
+      allow read: if canReadOriginal(userId, objectKey);
+      allow create: if canUploadOriginal(userId, objectKey)
                     && resource == null
                     && allowedGrinOriginalMime()
                     && withinOriginalSize()
@@ -92,15 +197,11 @@ service firebase.storage {
     }
 
     match /users/{userId}/grinEvidence/{objectKey}/derivatives/{derivativeKey} {
-      allow read: if ownerUserActive(userId)
-                  && admissionAllowsNewCommands(userId)
-                  && hasObjectKeyBinding(userId, objectKey);
-      allow create: if ownerUserActive(userId)
-                    && admissionAllowsNewCommands(userId)
-                    && hasObjectKeyBinding(userId, objectKey)
+      allow read: if canReadDerivative(userId, objectKey);
+      allow create: if canCreateDerivative(userId, objectKey, derivativeKey)
                     && resource == null
                     && request.resource.size < 2 * 1024 * 1024
-                    && request.resource.contentType.matches('image/.*')
+                    && allowedDerivativeMime()
                     && noClientVerificationMetadata();
       allow update, delete: if false;
     }

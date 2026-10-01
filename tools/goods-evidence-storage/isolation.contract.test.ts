@@ -59,6 +59,9 @@ assert.doesNotMatch(liveStorage, /grinEvidence/);
 
 const isolatedStorage = readFileSync(join(dir, "storage.rules"), "utf8");
 assert.match(isolatedStorage, /hasFlightReservation/);
+assert.match(isolatedStorage, /isRetainedOriginalState/);
+assert.match(isolatedStorage, /canReadOriginal/);
+assert.match(isolatedStorage, /hasDerivativeFlightReservation/);
 assert.match(isolatedStorage, /pending_deletion|status/);
 assert.doesNotMatch(isolatedStorage, /getDownloadURL/);
 

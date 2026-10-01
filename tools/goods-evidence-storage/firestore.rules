@@ -37,6 +37,11 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    match /users/{uid}/grinEvidenceDerivativeKeys/{derivativeKey} {
+      allow read: if isActiveOwner(uid);
+      allow create, update, delete: if false;
+    }
+
     match /users/{uid} {
       allow read: if isOwner(uid);
       allow write: if false;
