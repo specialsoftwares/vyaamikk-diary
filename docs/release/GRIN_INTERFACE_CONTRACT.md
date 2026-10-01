@@ -1,4 +1,4 @@
-# GRIN interface contract — revision 2026-10-01.wave1b
+# GRIN interface contract — revision 2026-10-02.wave2app
 
 Coordinator-owned. Teams implement against this text and `src/goodsEvidence/ports.ts`.
 A contract change requires dependent teams to acknowledge and retest.
@@ -9,7 +9,7 @@ Do not enable production admission to demonstrate the feature.
 Frozen ancestry: G1 `c9623dd` / PR #30. Domain `55f2df1` / PR #27 (support policy v2).
 Core app `6e3dbba` / docs `8b286ab` / PR #29. Do not alter those PRs.
 
-Wave 1b (this revision) answers Team 5 contract conflicts in `docs/release/proposals/team5/WAVE1_CONTRACT_REVIEW.md`. Dependent teams must acknowledge `2026-10-01.wave1b` and retest. The acceptance matrix was written against wave1; Team 5 re-acks after other teams land.
+Wave 1b (`2026-10-01.wave1b`) answered Team 5 contract conflicts. This revision adds application findings **F1–F4**. Dependent teams must acknowledge `2026-10-02.wave2app` and retest. W2-01…W2-05 remain in force; do not regress them.
 
 ## Identifiers
 
@@ -144,6 +144,72 @@ G1 emulator adapter remains under `tools/goods-evidence-emulator/**` until packa
 Emulator ports (do not share processes): G1 historical Firestore **8088**; Team 1 mutations **8090**; Team 2 Firestore **8091** + Storage **9200**.
 
 Live Rules: propose only under `docs/release/proposals/team1/firestore.rules.grin.md` and `docs/release/proposals/team2/storage.rules.grin.md`. Do not edit production `firestore.rules` / `storage.rules` in this programme. Unmatched Firestore paths already deny.
+
+## Application findings F1–F4 (2026-10-02.wave2app)
+
+These are distinct from W2-01…W2-05. PHASE 2 host/mount tests do **not** close them.
+
+### F1 — Screen callback ownership (Team 4, with Team 3)
+
+Cause: production screens call `requireLiveGrinApplicationRepository()` at dispatch. After A→B, A's callback mutates B.
+
+Required properties:
+
+- Bind every production action (create, amend, QC, return, EWB, file selection, export/share, navigation) to the **originating** `{ ownerUid, dispatchGeneration }` and that generation's repository.
+- Validate origin against live in-memory authority **and** `outbox.isSessionCurrent` before dispatch and after every await.
+- Never recapture the current account (`requireLiveGrinApplicationRepository`) to authorize an old callback.
+- `GrinAdmissionGate` must pass the host session into admitted bodies. `{() => children}` is forbidden.
+- Mask/reset retired form values, records, and selected attachments on origin mismatch / logout.
+- Immediate stale-action rejection must work **before** React owner effects run.
+- Connect lifecycle ownership to existing app session authority (`isBindingLive` + sqlite generation).
+- Remove sqlite `beginOwnerSession` / `endOwnerSession` from the React **render function** without an effect-window bypass: the in-memory live token (uid+generation) must flip synchronously when the admitted owner changes so A's captured origin fails immediately even if sqlite retirement is deferred. Team 3 may expose `advanceLiveToken` / in-memory generation if sqlite must not run in render.
+- Tests must execute the **actual production screen action binding or admitted body** with inert native surfaces. Do not substitute an inert child whose callback binds ownership differently. Cover A→B and A→logout→A.
+
+`getGrinApplicationRepository(ownerUid, dispatchGeneration)` is the dispatch entry. Team 4 should add `requireOriginGrinApplicationRepository(origin)` rather than recapturing live.
+
+### F2 — Server-confirmed state and valid mutations (Teams 1, 3, 4)
+
+`GrinApplicationRepository.clientExpectedVersion()` returning `0` is invalid (`expectedVersion must be a positive integer`). Do not replace `0` with a guessed constant or local queue count.
+
+Contract types (coordinator, `ports.ts`): `GrinConfirmedProjection`, `GrinReceiptReadResult`, `GRIN_NO_CONFIRMED_VERSION`.
+
+- Team 1: authorized retrieve of confirmed original, events, effective, `eventVersion`, `headHash`. Attach the same projection on register/mutate/reconcile **success** (or a dedicated `readReceipt` on composed + JS transport). Validate remote result shapes before the client accepts them. Recheck auth/session after network awaits. Keep Functions unexported. Isolated emulator composition is the proof path.
+- Team 3: durable sqlite confirmed projection **separate** from pending commands. Additive v10 columns only (no `DB_VERSION` bump). Persist confirmation only from a validated server success/read. Command ids/digests stay immutable; no silent rebase of a submitted command. Sequential mutation: do not dispatch mutation N+1 until N is confirmed or conflicted. Queued EWB/return rows are **not** confirmed history.
+- Team 4: `expectedVersion` is `confirmed.eventVersion` when present. If no confirmed version: retain the user's draft/intention locally and **do not** submit. Show pending / failed / conflicted operations separately from accepted events. Accepted amend/QC/return must appear in **effective**; original snapshot/hash unchanged.
+
+Required joined test (Team 3 owns `tools/grin-interop`, uses T1 INJECTED adapter + T4 repository, SQLITE_HOST + INJECTED, not NATIVE_DEVICE):
+
+Application repository creates receipt → G1 composition accepts → confirmation persists → repository creates amendment → G1 accepts → reopen sqlite / restart outbox shows updated effective and unchanged original.
+
+Also: QC, partial return, EWB observation, intervening `version_conflict`, lost-response recovery via reconcile/read. Label SQLITE_HOST / INJECTED. Do not claim emulator unless `FIRESTORE_EMULATOR_HOST` is set and the emulator path actually runs.
+
+### F3 — Attachments and real evidence packs (Teams 2, 4, with Team 3)
+
+Attachments today only list. `exportPack()` hardcodes empty cuts and `missingOriginal: true`. Honest placeholders are not functional completion.
+
+- Team 4: platform-safe capture/select (reuse existing picker gates; inject a test picker). Explicit `Wave1OriginalCategory`. Owner/session-bound picker and upload completion (F1 origin).
+- Team 3: durable local-original handling; do not release local bytes until verified generation; bounded concurrency (`MAX_CONCURRENT_UPLOADS_PER_OWNER`); no full-file base64 upload path.
+- Team 2: upload → stored-byte verification → receipt linkage → authorized retrieval. Persist structured identity (`GrinEvidenceUploadResult`). Recovery without duplicate evidence. Isolated Storage emulator remains the live-Rules-unchanged proof path.
+
+Pack: assemble from **persisted confirmed** events, snapshot anchors, associations, and originals at a pinned cut (`assembleManifest` / support policy v2). Invoice reference is not an invoice original. Missing/unknown remains incomplete. ITC always `not_determined`. Hashes are not legal truth.
+
+Both paths required:
+
+A. Missing evidence → export with explicit gaps (`mayMarkComplete` false).
+B. Correctly associated evidence satisfying coverage policy → policy-complete pack (`mayMarkComplete` true) without forcing completeness.
+
+### F4 — Mobile transport integration (Team 1, Team 4, coordinator)
+
+`e6a689b` is on combined: production default `createFirebaseJsGrinTransport`. SQLITE_HOST tests inject FAKE. Coordinator added `appBinding.defaultServerPort.unit.test.ts` to `test:grin-product`. That source-graph test is **not** an executed application/backend test.
+
+Still required:
+
+- Validate remote result shapes before durable acceptance (do not `as GrinRegisterResult` blindly).
+- Recheck session/attempt ownership after network awaits.
+- Complete corresponding evidence transport/composition (mobile JS client; server identity from callable auth). Isolated emulator composition proves the connected flow.
+- Unavailable backend/configuration failures stay explicit (`policy_denied` / unexported callable errors). Do not swallow.
+- Mobile `src/` must not import `firebase-admin`, Node `fs`, HostSqlite, or `tools/goods-evidence-*` adapters.
+- Production Functions exports remain HOLD. Absence does not block undeployed composed/emulator tests. Do not edit `functions/src/index.ts`.
 
 ## Unresolved product / policy choices (do not invent)
 

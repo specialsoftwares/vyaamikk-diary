@@ -15,7 +15,7 @@ The core-only Internal build packet is **deferred**. VersionCode 23 is source pr
 
 This register is not GRIN-complete from G1.
 
-Programme (2026-10-01): isolated G1–G5 source + G6 automated tests/review/device **preparation**. Combined branch `integration/grin-g1-g5-source`. Contract revision `2026-10-01.wave1b`. Team 5 implementation review `070a388` then findings re-review `6f920cd`: M1–M3 and L4 **closed**; finding fixes **approved**. G6 incomplete. Wave 2 T1 `cbcb1b9`, T2 `06d897a`, T3 `9a0de6d`, T4 `decac00`, coordinator glue `e94b78c`. Team 5 PHASE 2 `3fe4071` independently re-executed W2-01…W2-05 as reproduced-then-fixed on `e94b78c`. **Wave 2 is not accepted:** app still binds FAKE uninjected G1; Functions unexported; live Rules unchanged; native/Play/GST/2B open. T5 `c2ef669` CS-02 is a test, not W2-03 approval. PR #30 remains the G1-only draft. Combined GitHub draft PR was not opened (`gh` unauthenticated).
+Programme (2026-10-01): isolated G1–G5 source + G6 automated tests/review/device **preparation**. Combined branch `integration/grin-g1-g5-source`. Contract revision `2026-10-02.wave2app`. Team 5 implementation review `070a388` then findings re-review `6f920cd`: M1–M3 and L4 **closed**; finding fixes **approved**. G6 incomplete. Wave 2 T1 `cbcb1b9`, T2 `06d897a`, T3 `9a0de6d`, T4 session `decac00`, coordinator glue `e94b78c`, T4 transport `e6a689b` (on combined). Team 5 PHASE 2 `3fe4071` independently re-executed W2-01…W2-05 as reproduced-then-fixed on `e94b78c`. **Wave 2 is not accepted.** Application findings F1 (stale screen callbacks), F2 (expectedVersion 0 / no confirmed projection), F3 (list-only attachments / placeholder packs), F4 (transport composition not emulator-proven) are **open**. Functions unexported; live Rules unchanged; native/Play/GST/2B open. T5 `c2ef669` CS-02 is a test, not W2-03 approval. PR #30 remains the G1-only draft. Combined GitHub draft PR was not opened (`gh` unauthenticated).
 
 GRIN remains default-off. No main merge, deploy, EAS, Play, or billing activation in this programme.
 
@@ -25,7 +25,7 @@ GRIN remains default-off. No main merge, deploy, EAS, Play, or billing activatio
 
 **Status:** implemented on `integration/grin-g1-persistence` (emulator). Not live. Not production admission. Correction pass after `ee16ed9` closes serial fail-closed validation, line-identity projection, bounded unknown input, commit-after-success logging, retry-code classification, and dedicated adapter typecheck.
 
-**W2-06 (undeployed, on combined after `cbcb1b9`):** `functions/src/goodsEvidence/composed.ts` runs register/reconcile/mutate from authenticated `request.auth.uid` when tests inject the adapter and `GRIN_GOODS_EVIDENCE_FUNCTIONS` is exactly `"true"`. `callables.ts` stays fail-closed. Mobile `src/services/grin/transport/` is a Firebase JS `httpsCallable` port (no firebase-admin). App binding still uses labelled FAKE `createUninjectedGrinServerPort()`. `functions/src/index.ts` still has no GRIN export.
+**W2-06 (undeployed, on combined after `cbcb1b9` + `e6a689b`):** `functions/src/goodsEvidence/composed.ts` runs register/reconcile/mutate from authenticated `request.auth.uid` when tests inject the adapter and `GRIN_GOODS_EVIDENCE_FUNCTIONS` is exactly `"true"`. `callables.ts` stays fail-closed. Mobile `src/services/grin/transport/` is a Firebase JS `httpsCallable` port (no firebase-admin). App binding production default is `createFirebaseJsGrinTransport()`; SQLITE_HOST tests inject FAKE. F2 confirmed retrieve and F4 result-shape validation remain **open**. `functions/src/index.ts` still has no GRIN export.
 
 - Server-authoritative serial + IST FY; malformed existing counters return `integrity` (no coercion); exhaustion is `serial_exhausted`
 - Immutable issued snapshot, first event, command digest/result, initial projections
@@ -60,7 +60,7 @@ Billing prepare/validate/RTDN/worker handlers **exist** (Cloud Functions v2 `asi
 
 ### G4 — Receiving / inspection / amendment / EWB / return UI
 
-**Status:** Wave 2 W2-01 `decac00` on combined: `startGrinOwnerSession` is the only session starter; repository/bindings do not self-revive. Amend/QC/EWB/return/attachments/history/pack/exceptions use `GrinApplicationRepository`. Admission host mounts children only when admitted. App binding still uses labelled FAKE `createUninjectedGrinServerPort()` (T1 JS transport exists, not wired). Pricing/quota unresolved.
+**Status:** Wave 2 W2-01 `decac00` on combined: `startGrinOwnerSession` is the only session starter; repository/bindings do not self-revive. Amend/QC/EWB/return/attachments/history/pack/exceptions use `GrinApplicationRepository`. Admission host mounts children only when admitted. Transport `e6a689b` wires JS httpsCallable. **F1 open:** screens still recapture live repository on dispatch. **F2 open:** `clientExpectedVersion()` is `0`. Pricing/quota unresolved.
 
 **Acceptance (Wave 1 fixtures + emulator mutations, not native):** screens for receiving, inspection, amendment, EWB observation, return/rejection; durable adapters for those commands with the same auth/ledger gates; issued numbers remain immutable; EWB is recorded observation only; supplier-status / GSTR-2B fields stay user assertions unless a later verified connector exists.
 
@@ -68,7 +68,7 @@ Billing prepare/validate/RTDN/worker handlers **exist** (Cloud Functions v2 `asi
 
 ### G5 — Versioned evidence-pack / PDF export
 
-**Status:** Wave 2 `decac00` pack export uses persisted event cuts / local originals / explicit missing sources against the application repository. Completeness still fail-closed. Fixture repository remains test-only.
+**Status:** Wave 2 `decac00` pack export against the application repository still hardcodes empty pinned cuts and `missingOriginal: true` (**F3 open**). Completeness fail-closed. Fixture repository remains test-only.
 
 **Acceptance (not implemented now):** versioned pack bytes; explicit completeness explanations for missing originals/EWB/QC; footer remains “not a GST document / not ITC determination”; no silent backfill of missing evidence.
 

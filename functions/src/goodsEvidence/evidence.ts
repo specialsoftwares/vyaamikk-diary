@@ -32,7 +32,10 @@ export type EvidenceVerification = "pending" | "failed" | "verified";
 
 export type DerivativeKind = "thumbnail" | "ocr" | "crop" | "rotation" | "redacted";
 
-/** Wave 1 upload originals. Pack coverage of other categories is unchanged (policy v2). */
+/**
+ * Wave 1 upload originals. Pack coverage of other categories is unchanged (policy v2).
+ * Category is a declared assertion, not proof of document contents.
+ */
 export const WAVE1_ORIGINAL_CATEGORIES = [
   "invoice",
   "ewb",
@@ -198,7 +201,43 @@ export function isWave1OriginalCategory(value: unknown): value is Wave1OriginalC
 }
 
 export function wave1CategoryError(value: unknown): string | null {
+  if (value == null || value === "") return "evidence category is required";
   if (!isWave1OriginalCategory(value)) return "evidence category is not a Wave 1 original category";
+  return null;
+}
+
+/** Owner/ledger/receipt/id/category/hash/size that must match on every replay. */
+export type EvidenceReplayIdentity = {
+  ownerUid: string;
+  ledgerId: string;
+  receiptId: string;
+  evidenceId: string;
+  category: Wave1OriginalCategory;
+  claimedSha256: string;
+  claimedByteSize: number;
+};
+
+export function evidenceReplayIdentityError(
+  stored: EvidenceReplayIdentity,
+  claimed: EvidenceReplayIdentity
+): string | null {
+  if (stored.ownerUid !== claimed.ownerUid) return "owner does not match stored evidence";
+  if (stored.ledgerId !== claimed.ledgerId) return "ledger does not match stored evidence";
+  if (stored.receiptId !== claimed.receiptId) return "receipt does not match stored evidence";
+  if (stored.evidenceId !== claimed.evidenceId) return "evidenceId does not match stored evidence";
+  if (stored.category !== claimed.category) return "category does not match stored evidence";
+  if (stored.claimedSha256 !== claimed.claimedSha256) return "hash claim does not match stored evidence";
+  if (stored.claimedByteSize !== claimed.claimedByteSize) return "size claim does not match stored evidence";
+  return null;
+}
+
+export function reservationIdentityError(
+  storedReservationId: string | null | undefined,
+  claimedReservationId: string | null | undefined
+): string | null {
+  if (!storedReservationId) return "stored reservation identity is missing";
+  if (!claimedReservationId) return "reservation identity is required";
+  if (storedReservationId !== claimedReservationId) return "reservation identity does not match stored evidence";
   return null;
 }
 

@@ -50,6 +50,7 @@ export { freezeSnapshot } from "./snapshot";
 export { derivePhysicalCustody } from "./custody";
 export {
   GRIN_CONTRACT_REVISION,
+  GRIN_NO_CONFIRMED_VERSION,
   EVIDENCE_STATE_TRANSITIONS,
   evidenceVerificationOfState,
   DOMAIN_DISABLED_MAPS_TO,
@@ -64,4 +65,6 @@ export {
   type EvidenceObjectState,
   type OutboxLocalState,
   type PackAxes,
+  type GrinConfirmedProjection,
+  type GrinReceiptReadResult,
 } from "./ports";

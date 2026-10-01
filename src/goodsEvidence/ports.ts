@@ -7,8 +7,9 @@
  */
 
 import type { EvidenceCategory, EvidenceVerification } from "./evidence";
+import type { GrinEvent, ImmutableGrin } from "./types";
 
-export const GRIN_CONTRACT_REVISION = "2026-10-01.wave1b" as const;
+export const GRIN_CONTRACT_REVISION = "2026-10-02.wave2app" as const;
 
 /** ID charset: [A-Za-z0-9_-], length 1–64. commandId 8–128. Never rewritten. */
 export type GrinId = string;
@@ -205,3 +206,23 @@ export const DOMAIN_DISABLED_MAPS_TO: GrinDenyCode = "policy_denied";
 
 /** Durable adapter mapping. InMemory owner-mismatch `digest_conflict` is not used. */
 export const FOREIGN_LEDGER_MAPS_TO: GrinDenyCode = "forbidden";
+
+/**
+ * Server-confirmed receipt projection. Distinct from pending outbox commands.
+ * `expectedVersion` for mutations is `eventVersion` here, never 0, never a queue count.
+ * Queued EWB/return commands are not confirmed history.
+ */
+export type GrinConfirmedProjection = {
+  receiptId: string;
+  eventVersion: number;
+  headHash: string;
+  original: ImmutableGrin;
+  events: GrinEvent[];
+  effective: ImmutableGrin;
+};
+
+export type GrinReceiptReadSuccess = { ok: true; confirmed: GrinConfirmedProjection };
+export type GrinReceiptReadResult = GrinReceiptReadSuccess | GrinDeny;
+
+/** Client must not submit a mutation when this is the local outcome. */
+export const GRIN_NO_CONFIRMED_VERSION = "no_confirmed_version" as const;
