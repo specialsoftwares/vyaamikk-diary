@@ -256,6 +256,42 @@ async function main(): Promise<void> {
     assert.equal(later.ok, true);
   }
 
+  // pending_deletion / inactive: generic forbidden even if envelope is malformed or digest mismatches
+  {
+    const store = createInjectedStore();
+    seedInjectedOwner(store, OWNER, LEDGER);
+    const adapter = new GoodsEvidenceRegisterAdapter(store, fixedClock(NOW));
+    store.snapshot.set(`users/${OWNER}`, JSON.stringify({ uid: OWNER, status: "pending_deletion" }));
+    const malformed = await adapter.register({ uid: OWNER }, { extra: true, ledgerId: LEDGER });
+    assert.equal(malformed.ok, false);
+    if (!malformed.ok) {
+      assert.equal(malformed.code, "forbidden");
+      assert.equal(malformed.detail, "denied");
+    }
+    const rec = await adapter.reconcile({ uid: OWNER }, null);
+    assert.equal(rec.ok, false);
+    if (!rec.ok) {
+      assert.equal(rec.code, "forbidden");
+      assert.equal(rec.detail, "denied");
+    }
+    const mismatch = await adapter.register(
+      { uid: OWNER },
+      { ...envelope("command_pd1", sampleRegisterBody({ receiptId: "receipt_pd1" })), digest: "ff".repeat(32) }
+    );
+    assert.equal(mismatch.ok, false);
+    if (!mismatch.ok) {
+      assert.equal(mismatch.code, "forbidden");
+      assert.equal(mismatch.detail, "denied");
+    }
+    store.snapshot.set(`users/${OWNER}`, JSON.stringify({ uid: OWNER, status: "inactive" }));
+    const inactive = await adapter.register({ uid: OWNER }, { extra: true });
+    assert.equal(inactive.ok, false);
+    if (!inactive.ok) {
+      assert.equal(inactive.code, "forbidden");
+      assert.equal(inactive.detail, "denied");
+    }
+  }
+
   // INJECTED_PORT — omit vs undefined optional property: same digest / stored result.
   {
     const store = createInjectedStore();

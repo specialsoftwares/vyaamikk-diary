@@ -511,6 +511,98 @@ async function main(): Promise<void> {
     assert.equal(receipt.view.qcStatus, null);
   }
 
+  // authorized missing / unreadable receipt is not_found; foreign original stays forbidden
+  {
+    const store = createInjectedStore();
+    seedInjectedOwner(store, OWNER, LEDGER);
+    const adapter = new GoodsEvidenceRegisterAdapter(store, fixedClock(NOW));
+    const missing = await adapter.recordQc(
+      { uid: OWNER },
+      mutationEnvelope("command_nf1", "recordQc", {
+        receiptId: "receipt_missing",
+        expectedVersion: 1,
+        reason: "qc missing",
+        qcStatus: "accepted",
+        clientObservedAtUtc: "2026-09-28T19:00:00.000Z",
+      })
+    );
+    assert.equal(missing.ok, false);
+    if (!missing.ok) assert.equal(missing.code, "not_found");
+    store.snapshot.set(
+      receiptPath(OWNER, LEDGER, "receipt_corrupt"),
+      JSON.stringify({ view: { eventVersion: 1, voided: false }, lineLedgers: {} })
+    );
+    const corrupt = await adapter.recordQc(
+      { uid: OWNER },
+      mutationEnvelope("command_nf2", "recordQc", {
+        receiptId: "receipt_corrupt",
+        expectedVersion: 1,
+        reason: "qc corrupt",
+        qcStatus: "accepted",
+        clientObservedAtUtc: "2026-09-28T19:01:00.000Z",
+      })
+    );
+    assert.equal(corrupt.ok, false);
+    if (!corrupt.ok) assert.equal(corrupt.code, "not_found");
+    store.snapshot.set(
+      receiptPath(OWNER, LEDGER, "receipt_foreign"),
+      JSON.stringify({
+        original: { ownerUid: "other", ledgerId: LEDGER, receiptId: "receipt_foreign" },
+        view: { eventVersion: 1, voided: false, headHash: "aa" },
+        lineLedgers: {},
+      })
+    );
+    const foreign = await adapter.recordQc(
+      { uid: OWNER },
+      mutationEnvelope("command_nf3", "recordQc", {
+        receiptId: "receipt_foreign",
+        expectedVersion: 1,
+        reason: "qc foreign",
+        qcStatus: "accepted",
+        clientObservedAtUtc: "2026-09-28T19:02:00.000Z",
+      })
+    );
+    assert.equal(foreign.ok, false);
+    if (!foreign.ok) {
+      assert.equal(foreign.code, "forbidden");
+      assert.equal(foreign.detail, "denied");
+    }
+  }
+
+  // pending_deletion / inactive: generic forbidden even if envelope is malformed or digest mismatches
+  {
+    const store = createInjectedStore();
+    seedInjectedOwner(store, OWNER, LEDGER);
+    const adapter = new GoodsEvidenceRegisterAdapter(store, fixedClock(NOW));
+    const valid = mutationEnvelope("command_pd1", "recordQc", {
+      receiptId: "receipt_pd",
+      expectedVersion: 1,
+      reason: "qc",
+      qcStatus: "accepted",
+      clientObservedAtUtc: "2026-09-28T19:10:00.000Z",
+    });
+    store.snapshot.set(`users/${OWNER}`, JSON.stringify({ uid: OWNER, status: "pending_deletion" }));
+    const malformed = await adapter.recordQc({ uid: OWNER }, { extra: true, ledgerId: LEDGER });
+    assert.equal(malformed.ok, false);
+    if (!malformed.ok) {
+      assert.equal(malformed.code, "forbidden");
+      assert.equal(malformed.detail, "denied");
+    }
+    const mismatch = await adapter.recordQc({ uid: OWNER }, { ...valid, digest: "ff".repeat(32) });
+    assert.equal(mismatch.ok, false);
+    if (!mismatch.ok) {
+      assert.equal(mismatch.code, "forbidden");
+      assert.equal(mismatch.detail, "denied");
+    }
+    store.snapshot.set(`users/${OWNER}`, JSON.stringify({ uid: OWNER, status: "inactive" }));
+    const inactive = await adapter.recordQc({ uid: OWNER }, { extra: true });
+    assert.equal(inactive.ok, false);
+    if (!inactive.ok) {
+      assert.equal(inactive.code, "forbidden");
+      assert.equal(inactive.detail, "denied");
+    }
+  }
+
   // clock failure is not converted into invalid
   {
     const store = createInjectedStore();
