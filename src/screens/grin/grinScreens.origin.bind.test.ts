@@ -117,7 +117,7 @@ function installInertSurfaces(fields: FieldMap, presses: PressMap, banners: stri
       replace: () => undefined,
     }),
     useLocalSearchParams: <T extends Record<string, string | undefined>>() =>
-      ({ receiptId: "grcp_origin_a" }) as T,
+      ({ receiptId: "grcp_origin_a" }) as unknown as T,
     useFocusEffect: (effect) => {
       React.useEffect(() => {
         const cleanup = effect();

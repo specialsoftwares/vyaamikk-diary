@@ -16,7 +16,7 @@ import { sampleRegisterBody } from "@/goodsEvidence/testFixtures";
 import type { GrinEvent } from "@/goodsEvidence/types";
 import { createFakeGrinServerPort } from "@/services/grin/outbox/fakePorts";
 import { openHostSqlite, SQLITE_HOST, type HostSqlite } from "@/services/grin/outbox/hostSqlite";
-import { GrinOutbox } from "@/services/grin/outbox/outbox";
+import { GrinOutbox, type PersistMutationInput } from "@/services/grin/outbox/outbox";
 import { SQLITE_HOST_NOT_NATIVE_DEVICE } from "@/services/grin/outbox/types";
 import type { GrinDispatchSession } from "@/services/grin/outbox/types";
 
@@ -39,7 +39,7 @@ import {
   startGrinOwnerSession,
 } from "./appBinding";
 import { createUninjectedGrinServerPort } from "./uninjectedServer";
-import type { GrinMutationQueueInput, GrinOutboxApplicationSurface } from "./outboxContract";
+import type { GrinOutboxApplicationSurface } from "./outboxContract";
 import type { GrinApplicationRecord } from "./types";
 
 function body(receiptId: string, supplier: string) {
@@ -188,9 +188,10 @@ function main() {
     });
     const overlap = ledgerTwo.createQueued(body("grcp_app_1", "Other Ledger Supplier"));
     assert.equal(overlap.ledgerId, "secondary");
-    assert.equal(ledgerTwo.get("grcp_app_1")?.effective.supplier.name.kind, "present");
-    if (ledgerTwo.get("grcp_app_1")?.effective.supplier.name.kind === "present") {
-      assert.equal(ledgerTwo.get("grcp_app_1")?.effective.supplier.name.value, "Other Ledger Supplier");
+    const overlapName = ledgerTwo.get("grcp_app_1")?.effective.supplier.name;
+    assert.equal(overlapName?.kind, "present");
+    if (overlapName?.kind === "present") {
+      assert.equal(overlapName.value, "Other Ledger Supplier");
     }
     const primaryAgain = repo.get("grcp_app_1");
     assert.ok(primaryAgain);
@@ -253,12 +254,9 @@ function main() {
     assert.equal(beginCalls, 0);
     outbox.beginOwnerSession = originalBegin;
 
-    const mutationCalls: GrinMutationQueueInput[] = [];
+    const mutationCalls: PersistMutationInput[] = [];
     const withMutate = outbox as GrinOutbox & {
-      persistMutationAndQueue: (
-        session: GrinDispatchSession,
-        input: GrinMutationQueueInput
-      ) => ReturnType<GrinOutbox["persistDraftAndQueue"]>;
+      persistMutationAndQueue: GrinOutbox["persistMutationAndQueue"];
     };
     withMutate.persistMutationAndQueue = (session, input) => {
       mutationCalls.push(input);
@@ -290,7 +288,7 @@ function main() {
     });
     assert.equal(amended.receiptId, "grcp_app_2");
     assert.equal(mutationCalls.length, 1);
-    assert.equal(mutationCalls[0]?.commandType, "amendFields");
+    assert.equal(mutationCalls[0]?.type, "amendFields");
     assert.equal(
       (mutationCalls[0]?.body as { expectedVersion?: number }).expectedVersion,
       7,

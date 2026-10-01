@@ -167,7 +167,7 @@ function GrinEwbAdmittedBody({ session }: { session: GrinDispatchSession }): Rea
               { value: "generated_active", label: t("grin.ewb.status.generatedActive") },
               { value: "cancelled", label: t("grin.ewb.status.cancelled") },
             ]}
-            onChange={(value) => setStatus(value as typeof status)}
+            onChange={(value: string) => setStatus(value as typeof status)}
           />
           <TextField
             label={t("grin.exception.source")}

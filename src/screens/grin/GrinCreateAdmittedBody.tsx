@@ -341,7 +341,7 @@ export function GrinCreateAdmittedBody({ session }: { session: GrinDispatchSessi
               { value: "none", label: t("grin.optional.notSupplied") },
               { value: "not_applicable", label: t("grin.exception.kind.notApplicable") },
             ]}
-            onChange={(value) => setEwbKind(value as typeof ewbKind)}
+            onChange={(value: string) => setEwbKind(value as typeof ewbKind)}
           />
           {ewbKind === "present" ? (
             <>
@@ -350,7 +350,7 @@ export function GrinCreateAdmittedBody({ session }: { session: GrinDispatchSessi
                 label={t("grin.field.ewbGenerator")}
                 value={ewbGenerator}
                 options={generatorOptions}
-                onChange={(value) => setEwbGenerator(value as typeof ewbGenerator)}
+                onChange={(value: string) => setEwbGenerator(value as typeof ewbGenerator)}
               />
             </>
           ) : null}

@@ -67,14 +67,14 @@ async function productionPick(input: {
   pickerInFlight = true;
   try {
     const ImagePicker = await import("expo-image-picker");
-    const opts = {
-      mediaTypes: ["images"] as const,
+    const opts: import("expo-image-picker").ImagePickerOptions = {
+      mediaTypes: ["images"],
       allowsEditing: false,
       quality: 0.8,
       base64: false,
       exif: false,
     };
-    let result: { canceled: boolean; assets?: Array<{ uri: string; mimeType?: string; fileName?: string; fileSize?: number }> };
+    let result: import("expo-image-picker").ImagePickerResult;
     if (input.source === "camera") {
       const perm = await ImagePicker.requestCameraPermissionsAsync();
       if (!perm.granted) throw new Error("permission");

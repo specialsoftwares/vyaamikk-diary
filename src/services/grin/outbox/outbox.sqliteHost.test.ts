@@ -75,8 +75,10 @@ async function main() {
     migrateToV10(asMigrateDb(db));
     assert.equal(grinV10TablesPresent(asMigrateDb(db)), true);
     for (const column of GRIN_CONFIRMED_COLUMNS) {
-      const info = db.getAllSync<{ name: string }>("PRAGMA table_info(grin_local_receipts)");
-      assert.equal(info.some((row) => row.name === column), true, column);
+      const info: Array<{ name: string }> = db.getAllSync<{ name: string }>(
+        "PRAGMA table_info(grin_local_receipts)"
+      );
+      assert.equal(info.some((row: { name: string }) => row.name === column), true, column);
     }
     assert.equal(MAX_CONCURRENT_UPLOADS_PER_OWNER, 2);
     const kept = db.getFirstSync<{ id: string; payload_json: string }>(

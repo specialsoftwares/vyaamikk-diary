@@ -120,7 +120,7 @@ export function GrinAttachmentsAdmittedBody({
             label={t("grin.attachCategory")}
             value={category}
             options={categoryOptions}
-            onChange={(value) => setCategory(value as Wave1OriginalCategory)}
+            onChange={(value: string) => setCategory(value as Wave1OriginalCategory)}
           />
           <Button
             label={t("grin.attachLibrary")}

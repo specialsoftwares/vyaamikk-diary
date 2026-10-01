@@ -2,8 +2,8 @@
  * Validate and compare server-confirmed receipt projections.
  * Do not invent original / events / effective when the server did not return them.
  */
-import type { GrinConfirmedProjection, GrinEvent } from "@/goodsEvidence/ports";
-import type { ImmutableGrin } from "@/goodsEvidence/types";
+import type { GrinConfirmedProjection } from "@/goodsEvidence/ports";
+import type { GrinEvent, ImmutableGrin } from "@/goodsEvidence/types";
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === "object" && !Array.isArray(value);

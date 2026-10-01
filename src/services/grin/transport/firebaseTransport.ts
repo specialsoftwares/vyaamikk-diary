@@ -10,7 +10,7 @@ import { getFunctions, httpsCallable } from "firebase/functions";
 
 import { env } from "@/config/env";
 import { getFirebaseApp, getFirebaseAuth } from "@/config/firebase";
-import type { GrinReceiptReadResult } from "@/goodsEvidence/ports";
+import type { GrinDeny, GrinReceiptReadResult } from "@/goodsEvidence/ports";
 import { canonicalFunctionsRegion } from "@/services/auth/authFlowErrorPresentation";
 import type {
   GrinMutationEnvelope,
@@ -87,7 +87,7 @@ async function invokeCallable(
   ownerUid: string,
   name: string,
   payload: unknown
-): Promise<{ ok: true; raw: unknown } | { ok: false; result: ReturnType<typeof deny> | { ok: false; code: "policy_denied" | "unauthenticated"; detail: "denied" } }> {
+): Promise<{ ok: true; raw: unknown } | { ok: false; result: ReturnType<typeof deny> | GrinDeny }> {
   const before = ownerMatchesAuth(deps.currentAuth(), ownerUid);
   if (!before.ok) return before;
   let raw: unknown;

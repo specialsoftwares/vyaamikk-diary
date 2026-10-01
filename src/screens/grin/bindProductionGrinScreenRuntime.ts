@@ -47,12 +47,12 @@ export function bindProductionGrinScreenRuntime(): void {
     StyleSheet: RnStyleSheet,
     Platform: { OS: RnPlatform.OS },
     useSafeAreaInsets: useRnSafeAreaInsets,
-  });
+  } as unknown as Parameters<typeof installGrinSurfaces>[0]);
   installGrinScreenRuntime({
     useT,
     useThemedStyles,
     useRouter: useRnRouter,
-    useLocalSearchParams: useRnLocalSearchParams as GrinScreenRuntimeParams,
+    useLocalSearchParams: useRnLocalSearchParams as unknown as GrinScreenRuntimeParams,
     useFocusEffect: (effect) => {
       useRnFocusEffect(() => {
         const cleanup = effect();

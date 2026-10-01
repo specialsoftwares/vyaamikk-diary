@@ -4,7 +4,7 @@ import { MAX_DISPATCH_ATTEMPTS } from "./types";
 
 export type ClassifiedOutcome =
   | { kind: "success"; replayed: boolean }
-  | { kind: "conflicted"; code: "digest_conflict"; actionable: ActionableFailure }
+  | { kind: "conflicted"; code: "digest_conflict" | "version_conflict"; actionable: ActionableFailure }
   | { kind: "permanent"; code: string; actionable: ActionableFailure }
   | { kind: "retryable"; code: string; actionable: ActionableFailure };
 
