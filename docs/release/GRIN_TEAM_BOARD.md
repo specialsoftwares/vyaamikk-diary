@@ -5,11 +5,11 @@ Do not collapse to Done.
 
 Arrangement: one coordinator plus five **local** Cursor Task subagents on separate worktrees. AI roles, not human sign-off.
 
-Checkpoint inspected: `2593c2be6964955ecb1a433dc93c4096168ce9d2`. Combined F5 review tree: `7623eef`; T5 record `889f011`. W2-01…W2-05 and F1–F4 **reproduced-then-fixed** at stated hosts. Wave 2 / G6 / public release **not accepted**.
+Checkpoint inspected: `2593c2be6964955ecb1a433dc93c4096168ce9d2`. Combined F5 review tree: `7623eef`; T5 record `889f011`. Typecheck + local `ci:verify` SHA: `99ee60ceba2f7f4adec01f4e3559c485608687ac`. W2-01…W2-05 and F1–F4 **reproduced-then-fixed** at stated hosts. Wave 2 / G6 / public release **not accepted**.
 
 | Task | Owner | Branch | Worktree | Dependency | Status | Evidence | Blocker | Next |
 |---|---|---|---|---|---|---|---|---|
-| Integration | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | G1 `c9623dd` | review | T5 F5 `889f011` of `7623eef` | Functions unexported; no exact-head `ci:verify` yet | `ci:verify`; draft PR; STOP before main/deploy |
+| Integration | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | G1 `c9623dd` | source_verified | local `ci:verify` PASS on `99ee60c` (152/152; G1 `8088`; G2 `8091`+`9200`) | Functions unexported; `gh` unauthenticated; local Docker renderer skipped | STOP before main/deploy; draft PR if GitHub auth appears |
 | F2/F4 G1 readReceipt + transport | team1 | `team/grin-t1-backend` | `grin-t1-backend` | `4b560cd` | source_verified | T5 composed emulator 8088 | live export HOLD | Stay unexported |
 | F3 retrieve + pack inputs | team2 | `team/grin-t2-evidence` | `grin-t2-evidence` | `3ddd4f9` | source_verified | T5 pack A/B + STORAGE_EMULATOR 9200 | live IAM | Keep live Rules unchanged |
 | F1/F2 outbox confirmed + session token | team3 | `team/grin-t3-offline` | `grin-t3-offline` | `fa6d4a7` | source_verified | T5 SQLITE_HOST joined; leftover 0-shim not used as proof | native death not claimed | — |
@@ -41,8 +41,8 @@ Previous ER-1…ER-5 remain mapped. Mapping is not Wave 2 acceptance.
 
 | Gate | State |
 |---|---|
-| GRIN SOURCE IMPLEMENTATION | F1–F4 independently re-executed at stated hosts; **Wave 2 not accepted** |
-| COMBINED SOURCE REVIEW | T5 F5 `889f011` of `7623eef`; not G6 |
+| GRIN SOURCE IMPLEMENTATION | F1–F4 independently re-executed at stated hosts; typecheck closed at `99ee60c`; **Wave 2 not accepted** |
+| COMBINED SOURCE REVIEW | T5 F5 `889f011` of `7623eef`; local exact-head `ci:verify` on `99ee60c`; not G6; GitHub Actions not run (workflow is main/PR only) |
 | BACKEND DEPLOYMENT | not authorized |
 | INTERNAL BUILD | not authorized |
 | DEVICE ACCEPTANCE | device_pending |

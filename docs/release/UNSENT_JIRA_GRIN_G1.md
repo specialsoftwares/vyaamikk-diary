@@ -52,3 +52,7 @@ Merged onto `integration/grin-g1-g5-source`: T2 `06d897a719637abeb1301292af9d85f
 
 `889f01106c497e1d7feca3147cf86ea0c3c20d8f` on `team/grin-t5-qa` reviewed combined `7623eef446036cb6290e99b4adbe6f14fb19e198`. Independently re-executed F1–F4 as reproduced-then-fixed (origin.bind actual bodies; SQLITE_HOST+INJECTED join; G1 Firestore `127.0.0.1:8088`; T2 `8091`+`9200`). Wave 2 **not accepted**. Functions unexported. Live Rules unchanged. versionCode 23. Flags `"0"`. No NATIVE_DEVICE / TalkBack / Play / billing / public-release. Do not mark those tickets Done.
 
+## Coordinator typecheck + local ci:verify (unsent, 2026-10-02)
+
+Validated application SHA `99ee60ceba2f7f4adec01f4e3559c485608687ac` on `integration/grin-g1-g5-source` (parent `f2407cb3574d528dd0da6d061f6ab108f3a16a87`). Root `tsc --noEmit`, G1/G2 adapter typechecks, and `functions` `tsc` passed. Local `npm run ci:verify` exited 0: `test:all` 152/152 in 247.6s; G1 Firestore emulator `demo-vyaamikk-grin-g1` (composed ok); G2 Firestore+Storage `demo-vyaamikk-grin-g2` (storage + rules ok). Local invoice-renderer Docker skipped (`docker not available locally`). `gh` not logged in — no draft PR from this environment. Compare: https://github.com/specialsoftwares/vyaamikk-diary/compare/main...integration/grin-g1-g5-source . Functions GRIN callables remain unexported. Live Rules/IAM/secrets/flags unchanged. versionCode 23. Purchase-entry flags `"0"`. Wave 2 / G6 / device / billing / public-release **not** Done.
+
