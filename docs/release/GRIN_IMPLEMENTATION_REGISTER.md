@@ -15,7 +15,7 @@ The core-only Internal build packet is **deferred**. VersionCode 23 is source pr
 
 This register is not GRIN-complete from G1.
 
-Programme (2026-10-01): isolated G1–G5 source + G6 automated tests/review/device **preparation**. Combined branch `integration/grin-g1-g5-source`. Contract revision `2026-10-01.wave1b`. Team 5 implementation review `070a388` then findings re-review `6f920cd`: M1–M3 and L4 **closed**; finding fixes **approved**. G6 incomplete. Wave 2 adapter wiring started and is **not accepted** until ER-1…ER-5 are mapped (see `GRIN_TEAM_BOARD.md`). Combined has Team 1 `091772e`, Team 2 `4b10356` (ER-2/ER-3), Team 3 `22a848a` (CS-01, ER-1, ER-4 T3). ER-4 T5 and ER-5 remain open. PR #30 remains the G1-only draft. Combined GitHub draft PR was not opened (`gh` unauthenticated).
+Programme (2026-10-01): isolated G1–G5 source + G6 automated tests/review/device **preparation**. Combined branch `integration/grin-g1-g5-source`. Contract revision `2026-10-01.wave1b`. Team 5 implementation review `070a388` then findings re-review `6f920cd`: M1–M3 and L4 **closed**; finding fixes **approved**. G6 incomplete. Wave 2 T1–T5 source is on combined and is **not accepted**. ER-1…ER-5 are mapped to landed SQLITE_HOST / INJECTED_PORT / isolated-emulator tests (see `GRIN_TEAM_BOARD.md`). Combined Wave 2 source review is still pending. App list/create/detail use GrinOutbox; app G1 dispatch is still the labelled uninjected FAKE port. Mutate/pack screens still use labelled fixtures. PR #30 remains the G1-only draft. Combined GitHub draft PR was not opened (`gh` unauthenticated).
 
 GRIN remains default-off. No main merge, deploy, EAS, Play, or billing activation in this programme.
 
@@ -50,7 +50,7 @@ Billing prepare/validate/RTDN/worker handlers **exist** (Cloud Functions v2 `asi
 
 ### G3 — Durable SQLite outbox
 
-**Status:** Wave 1 source plus Wave 2 `22a848a` on combined: CS-01 SQLITE_HOST+INJECTED G1, **ER-1** `skipStaleCompletion` after await, **ER-4 T3 half** v9→v10 init-sequence test (GRIN-off; `init.ts` not edited). `offline.ts` remains a labelled in-process fixture. Host tests are `SQLITE_HOST`, not native process-death. Open: ER-4 T5 QA.
+**Status:** Wave 1 source plus Wave 2 `22a848a` on combined: CS-01 SQLITE_HOST+INJECTED G1, **ER-1** `skipStaleCompletion` after await, **ER-4 T3 half** v9→v10 init-sequence test (GRIN-off; `init.ts` not edited). **ER-4 T5 QA** `525233f` (`isGoodsEvidenceEnabled()` false). `offline.ts` remains a labelled in-process fixture. Host tests are `SQLITE_HOST`, not native process-death.
 
 **Acceptance (not implemented now):** durable device queue survives process death; interrupted register recovers via G1 replay/reconcile without a second serial; queue rows are bound to the signed-in owner/account; switching accounts cannot flush another owner’s commands; no locally invented issued numbers.
 
@@ -58,7 +58,7 @@ Billing prepare/validate/RTDN/worker handlers **exist** (Cloud Functions v2 `asi
 
 ### G4 — Receiving / inspection / amendment / EWB / return UI
 
-**Status:** Wave 1 source on `team/grin-t4-product` (`355e575`), merged to combined. Screens gated; `GrinFixtureRepository` labelled fake until Wave 2. Domain commands also have Team 1 durable emulator adapters (undeployed).
+**Status:** Wave 2 `786f73a` on combined: list/create/detail use labelled `GrinApplicationRepository` (GrinOutbox `listForOwner` / `persistDraftAndQueue`). `issuedNumber` stays null until G1 issues it. App binding still uses a labelled uninjected FAKE G1 port (queue-only until INJECTED server is wired in-app). Amend/QC/EWB/return/pack remain on labelled `GrinFixtureRepository`. AdmissionGate and store-runtime block remain. Pricing/quota unresolved.
 
 **Acceptance (Wave 1 fixtures + emulator mutations, not native):** screens for receiving, inspection, amendment, EWB observation, return/rejection; durable adapters for those commands with the same auth/ledger gates; issued numbers remain immutable; EWB is recorded observation only; supplier-status / GSTR-2B fields stay user assertions unless a later verified connector exists.
 
@@ -74,7 +74,7 @@ Billing prepare/validate/RTDN/worker handlers **exist** (Cloud Functions v2 `asi
 
 ### G6 — Combined device, accessibility, security, operational acceptance
 
-**Status:** Wave 1 matrix `df5f0a5`, implementation review `070a388`, findings re-review `6f920cd` (M1–M3 closed). Native/device remains `device_pending`. Must not mark complete from source/emulator tests. Open: **ER-4** QA of v9→v10 GRIN-off startup; **ER-5** execute combined workflows — `assertWorkflowNotExecuted` stubs are not CS passes.
+**Status:** Wave 1 matrix `df5f0a5`, implementation review `070a388`, findings re-review `6f920cd` (M1–M3 closed). Wave 2 ER-4/ER-5 `525233f`: GRIN-off v9→v10 SQLITE_HOST QA; CS-01…CS-11 host/injected slices via `runWorkflows.ts` (not `runIds` stubs). Native/device remains `device_pending`. Must not mark complete from source/emulator tests.
 
 **Acceptance (not implemented now):** Play-installed binary; TalkBack on GRIN screens; account switch and pending-deletion; safe diagnostics; operational runbook. Must not mark Done from source/emulator tests.
 
