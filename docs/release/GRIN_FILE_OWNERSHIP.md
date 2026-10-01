@@ -50,6 +50,8 @@ Put proposals under `docs/release/proposals/<team>/`.
 | `src/goodsEvidence/evidencePack.ts` | team4 | completeness model already exists |
 | `src/goodsEvidence/exceptions.ts` | team4 | |
 | `src/i18n/locales/*.json` | team4 | all locales, `grin.*` keys; keep key consistency |
+| `src/services/grin/repository/**` | team4 | Wave 2 app repository; must not ship FAKE counts as production |
+| `tools/grin-interop/**` | team3 | SQLITE_HOST + INJECTED G1/G2 interop tests; propose `package.json` script |
 | `tools/grin-acceptance/**` | team5 | combined scenarios |
 | `docs/release/GRIN_DEVICE_CHECKLIST.md` | team5 | pending native |
 | `docs/release/proposals/team5/**` | team5 | review notes |
