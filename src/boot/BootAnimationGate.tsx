@@ -1,8 +1,12 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { useFonts, Barlow_300Light } from "@expo-google-fonts/barlow";
 import { BarlowCondensed_700Bold } from "@expo-google-fonts/barlow-condensed";
 
+import {
+  bootFontsMayBlockProgress,
+  bootOverlayShouldMount,
+} from "@/boot/bootCompletion";
 import {
   BOOT_BRAND_MIN_MS,
   BOOT_REDUCED_MOTION_MS,
@@ -20,7 +24,7 @@ const BOOT_HOLD_TIMEOUT_MS = 12_000;
 /** Delay before showing calm hold copy while boot finishes. */
 const BOOT_HOLD_MESSAGE_DELAY_MS = 4_000;
 
-interface BootAnimationGateProps {
+export interface BootAnimationGateProps {
   visible: boolean;
   bootReady: boolean;
   routeResolved: boolean;
@@ -28,6 +32,8 @@ interface BootAnimationGateProps {
   onBlackMidpoint: () => void;
   onExitComplete: () => void;
   onHoldTimeout: () => void;
+  /** Test override only. Production uses useFonts. */
+  fontsLoaded?: boolean;
 }
 
 /**
@@ -43,14 +49,18 @@ export function BootAnimationGate({
   onBlackMidpoint,
   onExitComplete,
   onHoldTimeout,
+  fontsLoaded: fontsLoadedOverride,
 }: BootAnimationGateProps) {
   const reducedMotion = useBootReducedMotion();
-  const [fontsLoaded] = useFonts({
+  const [hookFontsLoaded] = useFonts({
     Barlow_300Light,
     BarlowCondensed_700Bold,
   });
+  const fontsLoaded =
+    typeof fontsLoadedOverride === "boolean" ? fontsLoadedOverride : hookFontsLoaded;
   const [brandMinElapsed, setBrandMinElapsed] = useState(false);
   const [showHoldMessage, setShowHoldMessage] = useState(false);
+  const fontReleasedRef = useRef(false);
 
   const canEnterApp = canReleaseBootToApp({
     brandMinElapsed,
@@ -85,9 +95,27 @@ export function BootAnimationGate({
     return () => clearTimeout(timer);
   }, [brandMinElapsed, canEnterApp, onHoldTimeout]);
 
-  if (!visible) return null;
+  useEffect(() => {
+    if (!visible) {
+      fontReleasedRef.current = false;
+      return;
+    }
+    if (!bootOverlayShouldMount({ visible, bootError })) return;
+    if (canEnterApp && !fontsLoaded && !fontReleasedRef.current) {
+      fontReleasedRef.current = true;
+      onExitComplete();
+    }
+  }, [visible, bootError, canEnterApp, fontsLoaded, onExitComplete]);
 
-  if (!fontsLoaded) {
+  if (!bootOverlayShouldMount({ visible, bootError })) return null;
+
+  if (
+    bootFontsMayBlockProgress({
+      fontsLoaded,
+      canEnterApp,
+      bootError,
+    })
+  ) {
     return <View style={styles.fontHold} />;
   }
 

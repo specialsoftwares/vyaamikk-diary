@@ -10,6 +10,10 @@ import {
   BOOT_REDUCED_MOTION_MS,
   canReleaseBootToApp,
 } from "@/config/brandMotion";
+import {
+  bootFontsMayBlockProgress,
+  bootOverlayShouldMount,
+} from "@/boot/bootCompletion";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -95,6 +99,30 @@ assert.doesNotMatch(
   gate,
   /if \(bootError && visible\)/,
   "bootError must not force onHoldTimeout navigation"
+);
+
+assert.equal(
+  bootOverlayShouldMount({ visible: true, bootError: true }),
+  false,
+  "bootError must not keep an overlay above retry"
+);
+assert.equal(
+  bootFontsMayBlockProgress({
+    fontsLoaded: false,
+    canEnterApp: true,
+    bootError: false,
+  }),
+  false,
+  "fonts must not block a ready route"
+);
+assert.equal(
+  bootFontsMayBlockProgress({
+    fontsLoaded: false,
+    canEnterApp: false,
+    bootError: true,
+  }),
+  false,
+  "fonts must not block retry"
 );
 
 assert.ok(BOOT_REDUCED_MOTION_MS >= 700);

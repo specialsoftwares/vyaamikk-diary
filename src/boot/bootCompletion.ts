@@ -2,8 +2,8 @@
  * Boot completion coordination — extracted so routing permission can be tested
  * without mounting React Native.
  *
- * Presentation timeouts are not permission to navigate. Destinations are bound
- * to the current boot attempt and session UID+generation from
+ * Presentation timeouts are not permission to navigate. Destinations and
+ * continuation actions are bound to the live session UID+generation from
  * `syncSessionOwnership`. Label: EXTRACTED_RUNTIME (not mounted React, not native).
  */
 
@@ -21,15 +21,32 @@ import type {
   BootRouteInput,
 } from "@/boot/resolveBootRoute";
 
+/** Existing signed-in destinations used by Later / View Drafts — not new routes. */
+export const BOOT_LATER_HREF = "/(app)/(tabs)/you" as Href;
+export const BOOT_VIEW_DRAFTS_HREF = "/(app)/drafts" as Href;
+
 export type BootOwner =
   | { kind: "loading" }
   | { kind: "signed_out" }
   | { kind: "signed_in"; uid: string; generation: number };
 
+export type BootLiveSnapshot = {
+  owner: BootOwner | null;
+  dbStatus: string;
+  authStatus: string;
+};
+
+/** Immutable handle for Continue/Later/View Drafts — not the live sheet pointer. */
+export type ContinuationTicket = {
+  attemptId: number;
+  owner: Extract<BootOwner, { kind: "signed_in" }>;
+  continuation: BootComposerDraftContinuation;
+};
+
 export type BootCompletionAction =
   | { type: "none" }
-  | { type: "navigate"; href: Href }
-  | { type: "show_continuation"; continuation: BootComposerDraftContinuation }
+  | { type: "navigate"; href: Href; owner: BootOwner }
+  | { type: "show_continuation"; ticket: ContinuationTicket }
   | { type: "hide_continuation" }
   | { type: "resolver_failed" };
 
@@ -81,6 +98,24 @@ export function sequenceHoldDurationMs(reducedMotion: boolean): number {
   return reducedMotion ? BOOT_REDUCED_MOTION_MS : BOOT_ANIMATION_MS;
 }
 
+/** Animation overlay must not cover Retry; bootError hides the gate. */
+export function bootOverlayShouldMount(args: {
+  visible: boolean;
+  bootError: boolean;
+}): boolean {
+  return args.visible && !args.bootError;
+}
+
+/** Fonts may wait on the brand surface; they must not block ready routing or retry. */
+export function bootFontsMayBlockProgress(args: {
+  fontsLoaded: boolean;
+  canEnterApp: boolean;
+  bootError: boolean;
+}): boolean {
+  if (args.bootError || args.canEnterApp) return false;
+  return !args.fontsLoaded;
+}
+
 /**
  * Production BootAnimationGate callbacks — both are presentation signals,
  * not permission to invent a destination.
@@ -109,7 +144,23 @@ function destinationCompatible(dest: BootDestination, owner: BootOwner): boolean
   return owner.kind === "signed_in";
 }
 
-export function createBootCompletionMachine() {
+function snapshotContinuation(
+  continuation: BootComposerDraftContinuation
+): BootComposerDraftContinuation {
+  return {
+    userId: continuation.userId,
+    draftId: continuation.draftId,
+    scopeKey: continuation.scopeKey,
+    entryId: continuation.entryId,
+    updatedAt: continuation.updatedAt,
+    composerHref: continuation.composerHref,
+    recordLabelKey: continuation.recordLabelKey,
+  };
+}
+
+export function createBootCompletionMachine(options?: {
+  live?: () => BootLiveSnapshot;
+}) {
   let attemptSeq = 0;
   let liveAttempt = 0;
   let currentOwner: BootOwner | null = null;
@@ -117,30 +168,74 @@ export function createBootCompletionMachine() {
     null;
   let navigated = false;
   let continuation: BootComposerDraftContinuation | null = null;
+  let shownTicket: ContinuationTicket | null = null;
   let routeFailed = false;
+
+  function defaultLive(): BootLiveSnapshot {
+    const owner = currentOwner;
+    const authStatus =
+      owner?.kind === "loading"
+        ? "loading"
+        : owner?.kind === "signed_in"
+          ? "signed_in"
+          : "signed_out";
+    return { owner, dbStatus: "ready", authStatus };
+  }
+
+  const readLive = options?.live ?? defaultLive;
 
   function retireLiveWork(): void {
     liveAttempt = 0;
     pending = null;
     continuation = null;
+    shownTicket = null;
     routeFailed = false;
+  }
+
+  function liveAllowsNavigation(expected: BootOwner): boolean {
+    const snap = readLive();
+    if (!computeBootReady(snap)) return false;
+    if (!ownersEqual(expected, snap.owner)) return false;
+    return true;
+  }
+
+  function ticketStillOwns(ticket: ContinuationTicket): boolean {
+    if (navigated) return false;
+    if (!shownTicket) return false;
+    if (ticket.attemptId !== shownTicket.attemptId) return false;
+    if (ticket.attemptId !== liveAttempt) return false;
+    if (!ownersEqual(ticket.owner, shownTicket.owner)) return false;
+    if (ticket.continuation.draftId !== shownTicket.continuation.draftId) return false;
+    if (ticket.continuation.userId !== shownTicket.continuation.userId) return false;
+    if (!continuation) return false;
+    if (continuation.draftId !== ticket.continuation.draftId) return false;
+    if (continuation.userId !== ticket.owner.uid) return false;
+    if (!liveAllowsNavigation(ticket.owner)) return false;
+    return true;
   }
 
   function applyPending(): BootCompletionAction {
     if (navigated) return { type: "none" };
-    if (!currentOwner || currentOwner.kind === "loading") return { type: "none" };
     if (!pending || pending.attemptId !== liveAttempt) return { type: "none" };
-    if (!ownersEqual(pending.owner, currentOwner)) return { type: "none" };
-    if (!destinationCompatible(pending.dest, currentOwner)) return { type: "none" };
+    if (!liveAllowsNavigation(pending.owner)) return { type: "none" };
+    if (!destinationCompatible(pending.dest, pending.owner)) return { type: "none" };
     const dest = pending.dest;
+    const owner = pending.owner;
     pending = null;
     if (dest.kind === "draft_continuation") {
-      continuation = dest.continuation;
-      return { type: "show_continuation", continuation: dest.continuation };
+      if (owner.kind !== "signed_in") return { type: "none" };
+      continuation = snapshotContinuation(dest.continuation);
+      shownTicket = {
+        attemptId: liveAttempt,
+        owner,
+        continuation: snapshotContinuation(dest.continuation),
+      };
+      return { type: "show_continuation", ticket: shownTicket };
     }
     navigated = true;
     continuation = null;
-    return { type: "navigate", href: dest.href };
+    shownTicket = null;
+    return { type: "navigate", href: dest.href, owner };
   }
 
   return {
@@ -158,6 +253,9 @@ export function createBootCompletionMachine() {
     },
     continuation(): BootComposerDraftContinuation | null {
       return continuation;
+    },
+    shownTicket(): ContinuationTicket | null {
+      return shownTicket;
     },
     owner(): BootOwner | null {
       return currentOwner;
@@ -186,6 +284,8 @@ export function createBootCompletionMachine() {
     ): Promise<BootCompletionAction> {
       if (navigated) return { type: "none" };
       if (owner.kind === "loading") return { type: "none" };
+      const start = readLive();
+      if (!ownersEqual(owner, start.owner)) return { type: "none" };
       if (!ownersEqual(owner, currentOwner)) return { type: "none" };
 
       attemptSeq += 1;
@@ -197,6 +297,8 @@ export function createBootCompletionMachine() {
       try {
         const dest = await resolve(input);
         if (attemptId !== liveAttempt) return { type: "none" };
+        const after = readLive();
+        if (!ownersEqual(owner, after.owner)) return { type: "none" };
         if (!ownersEqual(owner, currentOwner)) return { type: "none" };
         if (!destinationCompatible(dest, owner)) {
           routeFailed = true;
@@ -206,6 +308,8 @@ export function createBootCompletionMachine() {
         return { type: "none" };
       } catch {
         if (attemptId !== liveAttempt) return { type: "none" };
+        const after = readLive();
+        if (!ownersEqual(owner, after.owner)) return { type: "none" };
         routeFailed = true;
         pending = null;
         return { type: "resolver_failed" };
@@ -218,22 +322,44 @@ export function createBootCompletionMachine() {
     },
 
     continuationBelongsToCurrent(expectedUserId: string): boolean {
-      if (navigated) return false;
-      if (!continuation || continuation.userId !== expectedUserId) return false;
-      if (!currentOwner || currentOwner.kind !== "signed_in") return false;
-      return currentOwner.uid === continuation.userId;
+      if (!shownTicket) return false;
+      if (shownTicket.owner.uid !== expectedUserId) return false;
+      return ticketStillOwns(shownTicket);
     },
 
-    takeContinuationNavigation(href: Href): BootCompletionAction {
-      if (navigated) return { type: "none" };
-      if (!continuation) return { type: "none" };
-      if (!this.continuationBelongsToCurrent(continuation.userId)) {
-        continuation = null;
-        return { type: "hide_continuation" };
-      }
+    takeContinue(ticket: ContinuationTicket): BootCompletionAction {
+      if (!ticketStillOwns(ticket)) return { type: "none" };
+      const href = shownTicket!.continuation.composerHref;
       navigated = true;
       continuation = null;
-      return { type: "navigate", href };
+      shownTicket = null;
+      return { type: "navigate", href, owner: ticket.owner };
+    },
+
+    takeViewDrafts(ticket: ContinuationTicket): BootCompletionAction {
+      if (!ticketStillOwns(ticket)) return { type: "none" };
+      navigated = true;
+      continuation = null;
+      shownTicket = null;
+      return { type: "navigate", href: BOOT_VIEW_DRAFTS_HREF, owner: ticket.owner };
+    },
+
+    async takeLater(
+      ticket: ContinuationTicket,
+      ports: {
+        snooze: (userId: string) => Promise<void>;
+        clearActiveRoute: (userId: string) => Promise<void>;
+      }
+    ): Promise<BootCompletionAction> {
+      if (!ticketStillOwns(ticket)) return { type: "none" };
+      await ports.snooze(ticket.continuation.userId);
+      if (!ticketStillOwns(ticket)) return { type: "none" };
+      await ports.clearActiveRoute(ticket.continuation.userId);
+      if (!ticketStillOwns(ticket)) return { type: "none" };
+      navigated = true;
+      continuation = null;
+      shownTicket = null;
+      return { type: "navigate", href: BOOT_LATER_HREF, owner: ticket.owner };
     },
   };
 }

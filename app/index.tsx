@@ -1,34 +1,22 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { useRouter, type Href } from "expo-router";
+import { useRouter } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 
 import { BootAnimationGate } from "@/boot/BootAnimationGate";
 import { BootDraftContinuationSheet } from "@/boot/BootDraftContinuationSheet";
-import {
-  bootOwnerFromAuth,
-  computeBootReady,
-  computeRouteResolved,
-  createBootCompletionMachine,
-  createBootGateCompleters,
-  sequenceHoldDurationMs,
-  shouldShowLocalDbFailure,
-} from "@/boot/bootCompletion";
+import { BootScreenView } from "@/boot/BootScreenView";
 import { markBootNavigationSettled } from "@/boot/bootGate";
-import {
-  resolveBootDestination,
-  type BootComposerDraftContinuation,
-} from "@/boot/resolveBootRoute";
+import { resolveBootDestination } from "@/boot/resolveBootRoute";
 import { BRAND_SURFACE } from "@/config/brandMotion";
 import { useBootReducedMotion } from "@/components/boot/VyaamikkBootAnimation";
 import { LocalDbErrorScreen } from "@/components/sync/LocalDbErrorScreen";
+import { useT } from "@/i18n";
 import { activeRouteRepository } from "@/repositories/activeRouteRepository";
 import { snoozeBootDraftPrompt } from "@/services/drafts/draftBootSnooze";
 import { useAuth } from "@/state/auth";
 import { useLocalDb } from "@/state/localDb";
 import { syncSessionOwnership } from "@/sync/syncSessionOwnership";
-
-type BootPhase = "preparing" | "routing";
 
 /**
  * Boot: ledger open animation, then local DB → auth gates → route.
@@ -43,201 +31,53 @@ export default function BootScreen() {
   const { status: dbStatus, error: dbError } = useLocalDb();
   const router = useRouter();
   const reducedMotion = useBootReducedMotion();
-  const machineRef = useRef(createBootCompletionMachine());
-  const [phase, setPhase] = useState<BootPhase>("preparing");
-  const [continuation, setContinuation] =
-    useState<BootComposerDraftContinuation | null>(null);
-  const [sheetVisible, setSheetVisible] = useState(false);
-  const [destinationReady, setDestinationReady] = useState(false);
-  const [sequenceHoldDone, setSequenceHoldDone] = useState(false);
-  const [animationVisible, setAnimationVisible] = useState(true);
-  const [routeFailed, setRouteFailed] = useState(false);
-  const [resolveEpoch, setResolveEpoch] = useState(0);
-
-  const session = syncSessionOwnership.capture();
-  const sessionUid = session?.uid ?? null;
-  const sessionGen = session?.generation ?? null;
-  const owner = useMemo(
-    () =>
-      bootOwnerFromAuth(
-        status,
-        user?.uid ?? null,
-        sessionUid && sessionGen != null ? { uid: sessionUid, generation: sessionGen } : null
-      ),
-    [status, user?.uid, sessionUid, sessionGen]
-  );
-  const userRef = useRef(user);
-  userRef.current = user;
-  const bootReady = computeBootReady({ dbStatus, authStatus: status, owner });
-  const routeResolved = computeRouteResolved({
-    destinationReady,
-    sequenceHoldDone,
-    routeFailed,
-  });
-
-  const finishBootNavigation = useCallback(
-    (href: Href) => {
-      markBootNavigationSettled();
-      setAnimationVisible(false);
-      router.replace(href);
-      void SplashScreen.hideAsync().catch(() => {});
-    },
-    [router]
-  );
-
-  const applyAction = useCallback(
-    (action: ReturnType<typeof machineRef.current.tryComplete>) => {
-      if (action.type === "navigate") {
-        setSheetVisible(false);
-        setContinuation(null);
-        finishBootNavigation(action.href);
-        return;
-      }
-      if (action.type === "show_continuation") {
-        setContinuation(action.continuation);
-        setSheetVisible(true);
-        setAnimationVisible(false);
-        void SplashScreen.hideAsync().catch(() => {});
-        return;
-      }
-      if (action.type === "hide_continuation") {
-        setSheetVisible(false);
-        setContinuation(null);
-        return;
-      }
-      if (action.type === "resolver_failed") {
-        setRouteFailed(true);
-        setDestinationReady(false);
-      }
-    },
-    [finishBootNavigation]
-  );
-
-  useEffect(() => {
+  const t = useT();
+  const hideSplash = useCallback(() => {
     void SplashScreen.hideAsync().catch(() => {});
   }, []);
-
-  useEffect(() => {
-    const hide = machineRef.current.observeOwner(owner);
-    applyAction(hide);
-    setDestinationReady(machineRef.current.hasPendingDestination());
-    setRouteFailed(machineRef.current.isRouteFailed());
-  }, [applyAction, owner]);
-
-  useEffect(() => {
-    const ms = sequenceHoldDurationMs(reducedMotion);
-    const timer = setTimeout(() => setSequenceHoldDone(true), ms);
+  const schedule = useCallback((fn: () => void, ms: number) => {
+    const timer = setTimeout(fn, ms);
     return () => clearTimeout(timer);
-  }, [reducedMotion]);
-
-  useEffect(() => {
-    if (dbStatus !== "ready") return;
-    setPhase("routing");
-  }, [dbStatus]);
-
-  useEffect(() => {
-    if (phase !== "routing") return;
-    if (dbStatus !== "ready") return;
-    if (!owner || owner.kind === "loading") return;
-
-    let cancelled = false;
-    setRouteFailed(false);
-    void (async () => {
-      const action = await machineRef.current.resolveForOwner(
-        owner,
-        {
-          signedIn: owner.kind === "signed_in",
-          user: userRef.current,
-          justCreated,
-        },
-        resolveBootDestination
-      );
-      if (cancelled) return;
-      applyAction(action);
-      setDestinationReady(machineRef.current.hasPendingDestination());
-      setRouteFailed(machineRef.current.isRouteFailed());
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [phase, dbStatus, owner, justCreated, applyAction, resolveEpoch]);
-
-  const gateCompleters = useMemo(
-    () => createBootGateCompleters(machineRef.current),
-    []
-  );
-
-  const applyPresentationSignal = useCallback(
-    (which: "onExitComplete" | "onHoldTimeout") => {
-      applyAction(gateCompleters[which]());
-      setDestinationReady(machineRef.current.hasPendingDestination());
-    },
-    [applyAction, gateCompleters]
-  );
-
-  const handleContinueDraft = useCallback(() => {
-    if (!continuation) return;
-    applyAction(machineRef.current.takeContinuationNavigation(continuation.composerHref));
-  }, [applyAction, continuation]);
-
-  const handleLater = useCallback(async () => {
-    if (!continuation) return;
-    if (!machineRef.current.continuationBelongsToCurrent(continuation.userId)) {
-      applyAction({ type: "hide_continuation" });
-      return;
-    }
-    await snoozeBootDraftPrompt(continuation.userId);
-    await activeRouteRepository.clear(continuation.userId);
-    applyAction(machineRef.current.takeContinuationNavigation("/(app)/(tabs)/you"));
-  }, [applyAction, continuation]);
-
-  const handleViewDrafts = useCallback(() => {
-    if (!continuation) return;
-    if (!machineRef.current.continuationBelongsToCurrent(continuation.userId)) {
-      applyAction({ type: "hide_continuation" });
-      return;
-    }
-    applyAction(machineRef.current.takeContinuationNavigation("/(app)/drafts"));
-  }, [applyAction, continuation]);
-
-  const retryResolve = useCallback(() => {
-    setRouteFailed(false);
-    setDestinationReady(false);
-    setResolveEpoch((n) => n + 1);
   }, []);
 
-  if (shouldShowLocalDbFailure(dbStatus)) {
-    return <LocalDbErrorScreen message={dbError?.message} />;
-  }
-
   return (
-    <>
-      <View style={styles.hold} />
-      <BootAnimationGate
-        visible={animationVisible}
-        bootReady={bootReady}
-        routeResolved={routeResolved}
-        bootError={routeFailed}
-        onBlackMidpoint={() => undefined}
-        onExitComplete={() => applyPresentationSignal("onExitComplete")}
-        onHoldTimeout={() => applyPresentationSignal("onHoldTimeout")}
-      />
-      {routeFailed ? (
-        <View style={styles.retryWrap} pointerEvents="box-none">
-          <Pressable onPress={retryResolve} style={styles.retry} accessibilityRole="button">
-            <Text style={styles.retryLabel}>Retry</Text>
-          </Pressable>
-        </View>
-      ) : null}
-      <BootDraftContinuationSheet
-        visible={sheetVisible}
-        continuation={continuation}
-        onContinue={handleContinueDraft}
-        onLater={() => void handleLater()}
-        onViewDrafts={handleViewDrafts}
-      />
-    </>
+    <BootScreenView
+      ports={{
+        authStatus: status,
+        justCreated,
+        user,
+        dbStatus,
+        dbErrorMessage: dbError?.message,
+        reducedMotion,
+        captureSession: () => syncSessionOwnership.capture(),
+        resolveDestination: resolveBootDestination,
+        snoozeDraft: snoozeBootDraftPrompt,
+        clearActiveRoute: (userId) => activeRouteRepository.clear(userId),
+        replaceRoute: (href) => {
+          router.replace(href);
+        },
+        hideSplash,
+        markNavigationSettled: markBootNavigationSettled,
+        t,
+        schedule,
+        renderDbFailure: (message) => <LocalDbErrorScreen message={message} />,
+        renderBackdrop: () => <View style={styles.hold} />,
+        renderGate: (props) => <BootAnimationGate {...props} />,
+        renderRetry: ({ onPress, label }) => (
+          <View style={styles.retryWrap} pointerEvents="box-none">
+            <Pressable
+              onPress={onPress}
+              style={styles.retry}
+              accessibilityRole="button"
+              accessibilityLabel={label}
+            >
+              <Text style={styles.retryLabel}>{label}</Text>
+            </Pressable>
+          </View>
+        ),
+        renderSheet: (props) => <BootDraftContinuationSheet {...props} />,
+      }}
+    />
   );
 }
 
@@ -251,6 +91,8 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
     alignItems: "center",
     paddingBottom: 48,
+    zIndex: 20,
+    elevation: 20,
   },
   retry: {
     backgroundColor: "#C9A84C",

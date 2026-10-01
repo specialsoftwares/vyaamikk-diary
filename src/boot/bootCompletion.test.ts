@@ -18,6 +18,7 @@ import {
   createBootGateCompleters,
   sequenceHoldDurationMs,
   shouldShowLocalDbFailure,
+  type ContinuationTicket,
 } from "./bootCompletion";
 
 import {
@@ -54,7 +55,7 @@ function draftFor(uid: string): BootDestination {
     kind: "draft_continuation",
     continuation: {
       userId: uid,
-      draftId: "draft_1",
+      draftId: `draft_${uid}`,
       scopeKey: "invoice",
       entryId: null,
       updatedAt: 1,
@@ -199,8 +200,10 @@ async function main() {
     false,
     "retired draft continuation callbacks must not run"
   );
-  const stolen = machine.takeContinuationNavigation("/(app)/composer");
-  assert.equal(stolen.type, "none");
+  if (shown.type === "show_continuation") {
+    const stolen = machine.takeContinue(shown.ticket);
+    assert.equal(stolen.type, "none");
+  }
   assert.equal(machine.isNavigated(), false);
 }
 
@@ -223,7 +226,9 @@ async function main() {
   const shown = machine.tryComplete();
   assert.equal(shown.type, "show_continuation");
   assert.equal(machine.continuationBelongsToCurrent("A"), true);
-  const continued = machine.takeContinuationNavigation("/(app)/composer");
+  assert.equal(shown.type, "show_continuation");
+  const continued =
+    shown.type === "show_continuation" ? machine.takeContinue(shown.ticket) : { type: "none" as const };
   assert.equal(continued.type, "navigate");
   if (continued.type === "navigate") assert.equal(continued.href, "/(app)/composer");
 }
@@ -252,6 +257,113 @@ async function main() {
   assert.equal(bootOwnerFromAuth("signed_in", "A", null), null);
   assert.equal(bootOwnerFromAuth("loading", "A", token)?.kind, "loading");
   syncSessionOwnership.resetForTests();
+}
+
+{
+  const ownerA = { kind: "signed_in" as const, uid: "A", generation: 1 };
+  const ownerB = { kind: "signed_in" as const, uid: "B", generation: 2 };
+  const machine = createBootCompletionMachine();
+  machine.observeOwner(ownerA);
+  await machine.resolveForOwner(ownerA, input("A", true), async () => draftFor("A"));
+  const shownA = machine.tryComplete();
+  assert.equal(shownA.type, "show_continuation");
+  const ticketA = shownA.type === "show_continuation" ? shownA.ticket : null;
+  assert.ok(ticketA);
+  machine.observeOwner(ownerB);
+  await machine.resolveForOwner(ownerB, input("B", true), async () => draftFor("B"));
+  const shownB = machine.tryComplete();
+  assert.equal(shownB.type, "show_continuation");
+  const stolen = machine.takeContinue(ticketA as ContinuationTicket);
+  assert.equal(stolen.type, "none", "A's captured Continue must not adopt B's continuation");
+  assert.equal(machine.isNavigated(), false);
+  if (shownB.type === "show_continuation") {
+    const ok = machine.takeContinue(shownB.ticket);
+    assert.equal(ok.type, "navigate");
+    if (ok.type === "navigate") assert.equal(ok.href, "/(app)/composer");
+  }
+}
+
+{
+  const first = { kind: "signed_in" as const, uid: "A", generation: 1 };
+  const second = { kind: "signed_in" as const, uid: "A", generation: 3 };
+  const machine = createBootCompletionMachine();
+  machine.observeOwner(first);
+  await machine.resolveForOwner(first, input("A", true), async () => draftFor("A"));
+  const shown = machine.tryComplete();
+  const ticket1 = shown.type === "show_continuation" ? shown.ticket : null;
+  assert.ok(ticket1);
+  machine.observeOwner({ kind: "signed_out" });
+  machine.observeOwner(second);
+  await machine.resolveForOwner(second, input("A", true), async () => draftFor("A"));
+  const shown3 = machine.tryComplete();
+  assert.equal(shown3.type, "show_continuation");
+  assert.equal(machine.takeContinue(ticket1 as ContinuationTicket).type, "none");
+}
+
+{
+  const ownerA = { kind: "signed_in" as const, uid: "A", generation: 1 };
+  const ownerB = { kind: "signed_in" as const, uid: "B", generation: 2 };
+  const machine = createBootCompletionMachine();
+  machine.observeOwner(ownerA);
+  await machine.resolveForOwner(ownerA, input("A", true), async () => draftFor("A"));
+  const shownA = machine.tryComplete();
+  assert.equal(shownA.type, "show_continuation");
+  const ticketA = shownA.type === "show_continuation" ? shownA.ticket : null;
+  assert.ok(ticketA);
+  const snooze = deferred<void>();
+  const clears: string[] = [];
+  const laterP = machine.takeLater(ticketA as ContinuationTicket, {
+    snooze: () => snooze.promise,
+    clearActiveRoute: async (id) => {
+      clears.push(id);
+    },
+  });
+  machine.observeOwner(ownerB);
+  await machine.resolveForOwner(ownerB, input("B", true), async () => draftFor("B"));
+  machine.tryComplete();
+  snooze.resolve();
+  const later = await laterP;
+  assert.equal(later.type, "none");
+  assert.equal(clears.length, 0, "paused Later must not issue retired clear");
+  assert.equal(machine.isNavigated(), false);
+  assert.equal(machine.continuationBelongsToCurrent("B"), true);
+}
+
+{
+  const ownerA = { kind: "signed_in" as const, uid: "A", generation: 1 };
+  const ownerB = { kind: "signed_in" as const, uid: "B", generation: 2 };
+  let liveOwner: typeof ownerA | typeof ownerB = ownerA;
+  const machine = createBootCompletionMachine({
+    live: () => ({
+      owner: liveOwner,
+      dbStatus: "ready",
+      authStatus: "signed_in",
+    }),
+  });
+  machine.observeOwner(ownerA);
+  await machine.resolveForOwner(ownerA, input("A", true), async () => draftFor("A"));
+  const shownA = machine.tryComplete();
+  const ticketA = shownA.type === "show_continuation" ? shownA.ticket : null;
+  assert.ok(ticketA);
+  liveOwner = ownerB;
+  assert.equal(
+    machine.takeContinue(ticketA as ContinuationTicket).type,
+    "none",
+    "stale dispatch before observeOwner effect must be rejected"
+  );
+  assert.equal(machine.tryComplete().type, "none");
+}
+
+{
+  const owner = { kind: "signed_in" as const, uid: "A", generation: 1 };
+  let dbStatus = "ready";
+  const machine = createBootCompletionMachine({
+    live: () => ({ owner, dbStatus, authStatus: "signed_in" }),
+  });
+  machine.observeOwner(owner);
+  await machine.resolveForOwner(owner, input("A", true), async () => dashboard());
+  dbStatus = "opening";
+  assert.equal(machine.tryComplete().type, "none", "readiness lost before exit must not route");
 }
 
 {

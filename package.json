@@ -192,6 +192,7 @@
     "test:boot-release-gate": "npx --yes tsx src/boot/bootReleaseGate.contract.test.ts",
     "test:boot-production-startup": "npx --yes tsx src/boot/bootProductionStartup.contract.test.ts",
     "test:boot-completion": "npx --yes tsx src/boot/bootCompletion.test.ts",
+    "test:boot-screen-integration": "npx --yes tsx src/boot/bootScreen.integration.test.ts",
     "test:android-locale-configs": "npx --yes tsx plugins/withAndroidLocaleConfigs.test.ts",
     "functions:build": "npm --prefix functions run build",
     "functions:lint": "npm --prefix functions run lint",

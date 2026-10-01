@@ -46,6 +46,34 @@ android {
 }
 
 {
+  const semicolonSameLine = `
+android {
+    defaultConfig {
+        resConfigs "en"; applicationId "com.example.preserved"
+    }
+}
+`;
+  const next = apply(semicolonSameLine, "groovy");
+  assert.match(next, /resConfigs "en", "hi", "ta", "te", "gu"; applicationId "com\.example\.preserved"/);
+  const again = apply(next, "groovy");
+  assert.equal(again, next);
+}
+
+{
+  const neighbor = `
+android {
+    defaultConfig {
+        resConfigs "en" minSdkVersion 24
+        versionCode 22
+    }
+}
+`;
+  const next = apply(neighbor, "groovy");
+  assert.match(next, /resConfigs "en", "hi", "ta", "te", "gu" minSdkVersion 24/);
+  assert.match(next, /versionCode 22/);
+}
+
+{
   const commented = `
 android {
     defaultConfig {
@@ -57,6 +85,37 @@ android {
   const next = apply(commented, "groovy");
   assert.match(next, /resConfigs "en", "hi", "ta", "te", "gu"/);
   assert.match(next, /\/\/ resConfigs "en"/);
+}
+
+{
+  const commentStructure = `
+android {
+    // defaultConfig { }
+    defaultConfig {
+        /* defaultConfig { } */
+        applicationId "com.example"
+    }
+}
+`;
+  const next = apply(commentStructure, "groovy");
+  assert.match(next, /resConfigs "en", "hi", "ta", "te", "gu"/);
+  assert.match(next, /\/\/ defaultConfig \{ \}/);
+  assert.match(next, /\/\* defaultConfig \{ \} \*\//);
+}
+
+{
+  const quotedBraces = `
+android {
+    defaultConfig {
+        applicationId "weird{brace}"
+        buildConfigField "String", "NOTE", "not resConfigs"
+    }
+}
+`;
+  const next = apply(quotedBraces, "groovy");
+  assert.match(next, /applicationId "weird\{brace\}"/);
+  assert.match(next, /resConfigs "en", "hi", "ta", "te", "gu"/);
+  assert.match(next, /"not resConfigs"/);
 }
 
 {
@@ -101,6 +160,35 @@ android {
   const next = apply(blockComment, "groovy");
   assert.match(next, /resConfigs "en", "hi", "ta", "te", "gu"/);
   assert.match(next, /\/\* resConfigs "en" \*\//);
+}
+
+{
+  const multiline = `
+android {
+    defaultConfig {
+        resConfigs "en",
+            "hi"
+        applicationId "com.example"
+    }
+}
+`;
+  const before = multiline;
+  assert.throws(() => apply(multiline, "groovy"), /unsupported resConfigs shape/);
+  assert.equal(multiline, before, "unsupported shape must not return corrupted content");
+}
+
+{
+  const kotlinish = `
+android {
+    defaultConfig {
+        resConfigs += ["en"]
+        applicationId "com.example"
+    }
+}
+`;
+  const before = kotlinish;
+  assert.throws(() => apply(kotlinish, "groovy"), /unsupported resConfigs shape/);
+  assert.equal(kotlinish, before);
 }
 
 console.log("withAndroidLocaleConfigs.test.ts: ok (CONFIG_PLUGIN_SOURCE)");

@@ -12,7 +12,8 @@ Exact source-to-installed-vc22 correspondence: **UNVERIFIED**.
 | `origin/main` at assembly | `0da2f58970f23c7ce6cbefae6efffd49c731f44b` (unchanged vs security base) |
 | Historical workspace checkpoint | `draft/goods-evidence-domain-contract` at `55f2df1405c296336eea058238c8ae24e7a8b370` plus uncommitted boot/branding/Play-review files |
 | Candidate branch | `release/android-source-candidate` |
-| Starting reviewed head (this correction) | `0a89fff5e9a1f485209746de6966edcd643a5a85` |
+| Starting reviewed head (assembly) | `0a89fff5e9a1f485209746de6966edcd643a5a85` |
+| Previous correction head | `848eb9f58e9817fa56ce40b6998d3851d82cd004` |
 
 Imported deltas were taken from the historical **uncommitted** tree against that workspace’s own committed blobs. Those committed blobs matched `90c6948` for every included tracked file except `package.json` (security branch already added `test:safe-diagnostics`).
 
@@ -73,6 +74,26 @@ These replace the corresponding assembly bytes. They are not historical imports.
 | `plugins/withAndroidLocaleConfigs.test.ts` | Gradle fixture tests (new). Not device shrinking evidence | `765638859268a456c54b29e14d03e1b9dad41a259e571bd0e0e2e95186fbec6d` |
 | `package.json` | Adds `test:boot-completion` and `test:android-locale-configs`; lockfile unchanged | `22f19764751f39fde2a58b3e3b33caa423b255cac7d0a8542183097bba785fa1` |
 
+Review-account verifier bytes at `848eb9f` are **preserved and closed** (not modified in the boot/locale closeout).
+
+## Boot/locale closeout (after `848eb9f`)
+
+Continuation tickets bind Continue/Later/View Drafts to originating UID+generation+attempt. Dispatch consults live `syncSessionOwnership`. Locale replacement edits only a recognized `resConfigs` span.
+
+| Path | Correction | SHA-256 |
+|---|---|---|
+| `app/index.tsx` | Connected BootScreenView; Retry via `useT` | `c1742a59a3c86c63aaaf59d1914f8a902a0d15ef12045a038d2aada9f12d711c` |
+| `src/boot/BootScreenView.tsx` | Production boot wiring with injected surfaces (new) | `204d6fdaae374f2b52d768fd03fb513f8360acffbdee4f4d64acb743ff7f4918` |
+| `src/boot/bootCompletion.ts` | Tickets + live snapshot at dispatch/publication | `88e147bc2b638584b54751633b5de4bd9d62c6bab4ebe9c3cc483728d567da14` |
+| `src/boot/bootCompletion.test.ts` | EXTRACTED_RUNTIME stale Continue/Later/live-authority cases | `5bc6a0d9d0c63b982731da123c2f22f875f27e1c6aa272fe547a636296497433` |
+| `src/boot/bootScreen.integration.test.ts` | MOUNTED_REACT_INERT_NATIVE BootScreenView harness (new) | `c4f2daff68530cf92e2967978f6258f653cc8b22a721191119e3f7d224e6812a` |
+| `src/boot/BootAnimationGate.tsx` | Fonts/error must not block ready route or Retry | `f3be404d5919a13bae061171f1256a510197fcf82dc7211959ce2d855655f4c2` |
+| `src/boot/bootProductionStartup.contract.test.ts` | Contract points at BootScreenView wiring | `a40e3e013605384a8f74e83becbc533a97b14507ef44a59bfe88a50522b668c9` |
+| `src/boot/bootReleaseGate.contract.test.ts` | Overlay/font-block helpers | `884a689eceb6476b1c5eb4b349ff1756d0b3db7b01d443aa297471c33e58e5ff` |
+| `plugins/withAndroidLocaleConfigs.js` | Replace only recognized locale declaration | `ad52f57df9ba6b0dc0a788455435007159721e00b159bcf396b3e55be2278a8d` |
+| `plugins/withAndroidLocaleConfigs.test.ts` | Semicolon/neighbor/quoted-brace/unsupported fixtures | `30b54083acb1843e11bfad5a4ad71bb3caaaca677964f3dea5399bdfc5393c49` |
+| `package.json` | Adds `test:boot-screen-integration`; lockfile unchanged | `31bd8d628ae9ea38d9e7b0574ac354a439c741e42645ab6be2ef5aa16b31674e` |
+
 ## Excluded
 
 - Entire GRIN / goods-evidence tree (`src/goodsEvidence`, `test:goods-evidence`, `analysis/grin-slice2-closeout/**`)
@@ -94,11 +115,12 @@ These replace the corresponding assembly bytes. They are not historical imports.
 ## Validation boundaries
 
 - Isolated worktree locked dependencies
-- Focused: diagnostics, boot production/release/completion, Expo public config, injected-Admin review-account tests, locale plugin Gradle fixtures, typecheck, scoped ESLint of changed TypeScript paths
+- Focused: diagnostics, boot production/release/completion/screen-integration, Expo public config, injected-Admin review-account tests (unchanged), locale plugin Gradle fixtures, typecheck, scoped ESLint of changed TypeScript paths
 - `plugins/withAndroidLocaleConfigs.js` is validated by `test:android-locale-configs` (config-plugin source). Existing `lint:eslint` extra-globs do not include it. Direct ESLint of this JS file fails because the Expo flat config applies `@typescript-eslint/no-unused-vars` without loading `@typescript-eslint` for JS-only files. `eslint.config.js` was not changed.
-- `test:boot-completion` is EXTRACTED_RUNTIME (production machine + BootScreen/gate completers, deferred barriers, fake clocks). It is not a mounted React Native or device test.
-- `test:play-review-setup` is INJECTED_ADMIN_OFFLINE. It does not read live Firebase or print credentials.
-- Canonical: `npm run ci:verify` on the correction head (not run `36832610474`, which belongs to `0a89fff`)
+- `test:boot-completion` is EXTRACTED_RUNTIME. It does **not** cover the mounted screen-integration cases.
+- `test:boot-screen-integration` is MOUNTED_REACT with inert native/router/animation surfaces. It is not native rendering, TalkBack, Reanimated, or Play-installed proof.
+- `test:play-review-setup` is INJECTED_ADMIN_OFFLINE and was not modified in this closeout.
+- Canonical: `npm run ci:verify` on this closeout head (not run `36837638066`, which belongs to `848eb9f`)
 - Injected diagnostics tests do not prove native Crashlytics consent
 - Boot tests do not prove mounted device animation
 - Locale plugin tests do not prove Android resource shrinking on a device
