@@ -1,0 +1,91 @@
+import React, { useCallback, useMemo, useState } from "react";
+import { StyleSheet, View } from "react-native";
+import { useLocalSearchParams } from "expo-router";
+
+import { Banner, Button, Card, Header, Screen } from "@/components/ui";
+import { GRIN_DOCUMENT_FOOTER } from "@/goodsEvidence/constants";
+import { useT } from "@/i18n";
+import { getGrinFixtureRepository } from "@/services/grin/fixture";
+import { generateGrinPackPdf } from "@/services/grin/pdf/grinPdfAdapter";
+import { pdfService } from "@/services/pdf/pdfService";
+import { spacing, useThemedStyles } from "@/theme";
+
+import { GrinAdmissionGate, GrinFixtureNotices } from "./GrinAdmissionGate";
+import { GrinFieldRow } from "./GrinFieldRow";
+
+export function GrinPackScreen(): React.ReactElement {
+  const t = useT();
+  const { receiptId } = useLocalSearchParams<{ receiptId: string }>();
+  const record = receiptId ? getGrinFixtureRepository().get(receiptId) : null;
+  const pack = receiptId ? getGrinFixtureRepository().exportPack(receiptId) : null;
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const styles = useThemedStyles(() =>
+    StyleSheet.create({
+      wrap: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.xxl, gap: spacing.md },
+    })
+  );
+
+  const completeness = pack?.completenessLabel === "complete" ? t("grin.pack.complete") : t("grin.pack.incomplete");
+
+  const reasons = useMemo(() => pack?.manifest.incompleteReasons ?? [], [pack]);
+
+  const onExport = useCallback(async () => {
+    if (!record || !pack) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const pdf = await generateGrinPackPdf({ record, pack, t });
+      try {
+        await pdfService.share(pdf);
+      } catch {
+        // dismissed
+      }
+    } catch {
+      setError(t("grin.shareFailed"));
+    } finally {
+      setBusy(false);
+    }
+  }, [pack, record, t]);
+
+  return (
+    <GrinAdmissionGate title={t("grin.packTitle")}>
+      <Screen scroll>
+        <View style={styles.wrap}>
+          <Header title={t("grin.packTitle")} showBack />
+          <GrinFixtureNotices />
+          <Banner tone="info" message={GRIN_DOCUMENT_FOOTER} />
+          {error ? <Banner tone="danger" message={error} /> : null}
+          <Card elevated={false}>
+            <GrinFieldRow label={t("grin.pack.completeness")} value={completeness} />
+            <GrinFieldRow label={t("grin.pack.itcNotDetermined")} value={t("grin.pack.itcNotDetermined")} />
+            {pack?.missingOriginal ? (
+              <Banner tone="warning" message={t("grin.pack.missingOriginal")} />
+            ) : null}
+            {pack?.invoiceReferenceIsNotRetainedInvoice ? (
+              <Banner tone="warning" message={t("grin.pack.invoiceRefNotRetained")} />
+            ) : null}
+            {pack?.challanIsNotInvoice ? <Banner tone="info" message={t("grin.pack.challanNotInvoice")} /> : null}
+          </Card>
+          {reasons.map((reason) => (
+            <Banner
+              key={reason}
+              tone="warning"
+              message={
+                /missing original|no verified originals/i.test(reason)
+                  ? t("grin.pack.missingOriginal")
+                  : /challan/i.test(reason)
+                    ? t("grin.pack.challanNotInvoice")
+                    : /invoice reference|retained invoice|commercial_document/i.test(reason)
+                      ? t("grin.pack.invoiceRefNotRetained")
+                      : t("grin.pack.incomplete")
+              }
+            />
+          ))}
+          <Button label={t("grin.pack.export")} onPress={() => void onExport()} loading={busy} />
+        </View>
+      </Screen>
+    </GrinAdmissionGate>
+  );
+}
