@@ -159,9 +159,15 @@ async function main() {
       isPurchaseEntryEnabled: () => false,
     });
     runtime.setOwner(token("acct", 1));
+    await flush();
     const closed = runtime.presentUpgrade(token("acct", 1));
     assert.equal(closed.ok, false);
     assert.equal(closed.ok === false && closed.reason, "purchase_entry_closed");
+    assert.equal(runtime.snapshot().upgradeError, "purchase_entry_closed");
+    await runtime.restore(token("acct", 1));
+    assert.equal(runtime.snapshot().restoreError, null);
+    await runtime.manage("https://play.google.com/store/account/subscriptions", token("acct", 1));
+    assert.equal(runtime.snapshot().manageError, null);
     runtime.dispose();
   }
 

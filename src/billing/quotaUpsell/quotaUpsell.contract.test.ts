@@ -125,4 +125,42 @@ const settingsSrc = read("app/(app)/(tabs)/settings.tsx");
 assert.match(settingsSrc, /settings.subscriptionItem/);
 assert.match(settingsSrc, /settings\/subscription/);
 
+{
+  const eas = JSON.parse(read("eas.json")) as {
+    build: Record<
+      string,
+      {
+        autoIncrement?: boolean;
+        android?: { buildType?: string };
+        env?: Record<string, string>;
+      }
+    >;
+  };
+  for (const profile of ["preview", "production"] as const) {
+    const env = eas.build[profile]?.env ?? {};
+    assert.equal(
+      env.EXPO_PUBLIC_SUBSCRIPTION_PURCHASE_ENTRY_ENABLED,
+      "0",
+      `${profile} purchase-entry flag must be explicit 0`
+    );
+    assert.equal(
+      env.EXPO_PUBLIC_QUOTA_UPSELL_ENABLED,
+      "0",
+      `${profile} quota-upsell flag must be explicit 0`
+    );
+    assert.equal(env.EXPO_PUBLIC_APP_MODE, "production");
+    assert.equal(eas.build[profile]?.autoIncrement, false);
+  }
+  assert.equal(eas.build.preview?.android?.buildType, "apk");
+  assert.equal(eas.build.production?.android?.buildType, "app-bundle");
+}
+
+{
+  const screen = stripComments(read("src/components/billing/SubscriptionManagementScreen.tsx"));
+  assert.match(screen, /purchaseEntryOn \?/);
+  assert.match(screen, /billing\.management\.purchaseEntryClosed/);
+  assert.match(screen, /billing\.upgrade\.ctaRestore/);
+  assert.match(screen, /billing\.management\.managePlay/);
+}
+
 console.log("quotaUpsell.contract.test.ts: ok");
