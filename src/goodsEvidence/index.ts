@@ -48,3 +48,14 @@ export { InMemoryGoodsLedger } from "./ledger";
 export { createOfflineCapture } from "./offline";
 export { freezeSnapshot } from "./snapshot";
 export { derivePhysicalCustody } from "./custody";
+export {
+  GRIN_CONTRACT_REVISION,
+  EVIDENCE_STATE_TRANSITIONS,
+  type GrinCommandType,
+  type GrinDenyCode,
+  type GrinRegisterResult,
+  type GrinMutationResult,
+  type VerifiedEvidenceResult,
+  type EvidenceObjectState,
+  type OutboxLocalState,
+} from "./ports";

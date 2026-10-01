@@ -15,6 +15,10 @@ The core-only Internal build packet is **deferred**. VersionCode 23 is source pr
 
 This register is not GRIN-complete from G1.
 
+Programme (2026-10-01): isolated G1–G5 source + G6 automated tests/review/device **preparation**. Combined branch `integration/grin-g1-g5-source` from G1 `c9623dd`. PR #30 remains the G1-only draft. Contract: `docs/release/GRIN_INTERFACE_CONTRACT.md`. File owners: `docs/release/GRIN_FILE_OWNERSHIP.md`. Board: `docs/release/GRIN_TEAM_BOARD.md`.
+
+GRIN remains default-off. No main merge, deploy, EAS, Play, or billing activation in this programme.
+
 ## Slices
 
 ### G1 — Durable server register/reconcile (authorized now)
@@ -38,7 +42,7 @@ Billing prepare/validate/RTDN/worker handlers **exist** (Cloud Functions v2 `asi
 
 ### G2 — Protected original evidence upload
 
-**Status:** missing. Domain `evidence.ts` / hash verification exist as simulation only.
+**Status:** Wave 1 in progress on `team/grin-t2-evidence` (not live). Domain `evidence.ts` / hash verification exist as simulation; lifecycle ports are in `src/goodsEvidence/ports.ts`.
 
 **Acceptance (not implemented now):** untrusted upload rejected until auth/ownership/active ledger pass; original bytes stored off-client under owner-scoped paths; server computes hash and matches the declared digest; link is an event + pointer, never a rewrite of `original`; unauthenticated/cross-owner/pending-deletion denied; no PDF bodies in logs.
 
@@ -46,7 +50,7 @@ Billing prepare/validate/RTDN/worker handlers **exist** (Cloud Functions v2 `asi
 
 ### G3 — Durable SQLite outbox
 
-**Status:** missing. `offline.ts` is explicitly not a SQLite outbox.
+**Status:** Wave 1 in progress on `team/grin-t3-offline`. `offline.ts` remains a labelled in-process fixture, not the outbox.
 
 **Acceptance (not implemented now):** durable device queue survives process death; interrupted register recovers via G1 replay/reconcile without a second serial; queue rows are bound to the signed-in owner/account; switching accounts cannot flush another owner’s commands; no locally invented issued numbers.
 
@@ -54,7 +58,7 @@ Billing prepare/validate/RTDN/worker handlers **exist** (Cloud Functions v2 `asi
 
 ### G4 — Receiving / inspection / amendment / EWB / return UI
 
-**Status:** missing. Domain commands exist in-memory (`amendFields`, `recordQc`, `dispatchReturn`, `correctReturnDispatch`, `voidWithReason`, EWB histories).
+**Status:** Wave 1 in progress on `team/grin-t4-product` (labelled fixtures until Wave 2). Domain commands exist in-memory (`amendFields`, `recordQc`, `dispatchReturn`, `correctReturnDispatch`, `voidWithReason`, EWB histories).
 
 **Acceptance (not implemented now):** screens for receiving, inspection, amendment, EWB observation, return/rejection; durable adapters for those commands with the same auth/ledger gates; issued numbers remain immutable; EWB is recorded observation only; supplier-status / GSTR-2B fields stay user assertions unless a later verified connector exists.
 
@@ -62,7 +66,7 @@ Billing prepare/validate/RTDN/worker handlers **exist** (Cloud Functions v2 `asi
 
 ### G5 — Versioned evidence-pack / PDF export
 
-**Status:** missing. `evidencePack.ts` is a completeness model, not an export pipeline.
+**Status:** Wave 1 in progress on `team/grin-t4-product`. `evidencePack.ts` is a completeness model; export pipeline is not yet wired.
 
 **Acceptance (not implemented now):** versioned pack bytes; explicit completeness explanations for missing originals/EWB/QC; footer remains “not a GST document / not ITC determination”; no silent backfill of missing evidence.
 
@@ -70,7 +74,7 @@ Billing prepare/validate/RTDN/worker handlers **exist** (Cloud Functions v2 `asi
 
 ### G6 — Combined device, accessibility, security, operational acceptance
 
-**Status:** missing.
+**Status:** Wave 1 acceptance matrix on `team/grin-t5-qa`. Native/device remains `device_pending`. Must not mark complete from source/emulator tests.
 
 **Acceptance (not implemented now):** Play-installed binary; TalkBack on GRIN screens; account switch and pending-deletion; safe diagnostics; operational runbook. Must not mark Done from source/emulator tests.
 
