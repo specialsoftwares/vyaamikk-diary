@@ -7,12 +7,12 @@ Arrangement (2026-10-01): one coordinator plus five **local** Cursor Task subage
 
 | Task | Owner | Branch | Worktree | Dependency | Status | Evidence | Blocker | Next |
 |---|---|---|---|---|---|---|---|---|
-| Contract + ownership | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | G1 `c9623dd` | running | this doc + `GRIN_INTERFACE_CONTRACT.md` | — | launch teams |
-| G1 undefined-object normalize + mutations + Functions packaging | team1 | `team/grin-t1-backend` | `grin-t1-backend` | contract | ready | — | — | Wave 1 |
-| G2 evidence lifecycle | team2 | `team/grin-t2-evidence` | `grin-t2-evidence` | contract ports | ready | — | live IAM not in scope | Wave 1 |
-| G3 SQLite outbox | team3 | `team/grin-t3-offline` | `grin-t3-offline` | command/result ports | ready | — | native death not claimed | Wave 1 |
-| G4/G5 UI + pack (fixtures first) | team4 | `team/grin-t4-product` | `grin-t4-product` | ports + labelled fakes | ready | — | pricing/quota unresolved | Wave 1 |
-| G6 matrix + independent review | team5 | `team/grin-t5-qa` | `grin-t5-qa` | contract; later diffs | ready | — | NATIVE_DEVICE pending | Wave 1 matrix |
+| Contract + ownership | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | G1 `c9623dd` | source_verified | `d9cf115` contract | — | integrate team commits after review |
+| G1 undefined-object normalize + mutations + Functions packaging | team1 | `team/grin-t1-backend` | `grin-t1-backend` | contract `d9cf115` | running | — | — | Wave 1 implementation |
+| G2 evidence lifecycle | team2 | `team/grin-t2-evidence` | `grin-t2-evidence` | contract ports | running | — | live IAM not in scope | Wave 1 |
+| G3 SQLite outbox | team3 | `team/grin-t3-offline` | `grin-t3-offline` | command/result ports | running | — | native death not claimed | Wave 1 |
+| G4/G5 UI + pack (fixtures first) | team4 | `team/grin-t4-product` | `grin-t4-product` | ports + labelled fakes | running | — | pricing/quota unresolved | Wave 1 |
+| G6 matrix + independent review | team5 | `team/grin-t5-qa` | `grin-t5-qa` | contract; later diffs | running | — | NATIVE_DEVICE pending | Wave 1 matrix |
 
 ## Readiness (never one “ready”)
 
