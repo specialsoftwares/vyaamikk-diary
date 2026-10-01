@@ -23,6 +23,7 @@ Put proposals under `docs/release/proposals/<team>/`.
 | `app/(app)/(tabs)/saved-records.tsx` | coordinator | GRIN hub tile, gated |
 | `tools/goods-evidence-emulator/**` | team1 | G1 adapter + mutation emulator |
 | `functions/src/goodsEvidence/**` | team1 | generated/packaged domain + fail-closed callables |
+| `src/services/grin/transport/**` | team1 | mobile-safe httpsCallable-style client; no firebase-admin / HostSqlite / emulator imports |
 | `src/goodsEvidence/command.ts` | team1 | |
 | `src/goodsEvidence/validate.ts` | team1 | |
 | `src/goodsEvidence/canonical.ts` | team1 | omit-undefined is the contract; keep behaviour |

@@ -110,6 +110,8 @@ Client hash is a claim. Verification hashes stored bytes at the exact generation
 No cross-user dedup that leaks existence. No public bucket. No business details in object paths.
 This is **not** encrypted-backup.
 
+Wave 2 (W2-03 / W2-04, in flight): category is a declared `Wave1OriginalCategory` assertion, not proof of contents. Missing or unknown category **fails**; it is never coerced to `invoice`. Replay/recovery must re-validate owner, ledger, receipt association, evidenceId, hash, size and reservation identity even when an object is already verified or linked. Stored-byte verification is distinct from receipt linkage. `GrinEvidenceUploadResult` must return structured identity (`evidenceId`, `receiptId`, `ledgerId`, `category`, `claimedSha256`, `actualSha256`, `reservationId`; null when not durable) so the outbox can confirm **which** original became durable. Isolated Storage original **read** of retained `uploaded_unverified` / `verified` / `linked` objects is not gated on in-flight `reserved`/`uploading` reservations; stopping `newCommands` must not erase authorized retained reads. Overwrite/delete stay denied. Live production Rules remain unchanged.
+
 ## Offline queue
 
 States: `OutboxLocalState` in `src/services/grin/outbox/**` (Team 3). `offline.ts` remains a labelled in-process fixture and is **not** the outbox. Unique key `(ownerUid, ledgerId, commandId)`. `dispatchGeneration` increments on each dispatch lease; A→logout→A cannot reuse another generation’s worker.
@@ -117,6 +119,12 @@ Queued digest is frozen; edits cannot silently mutate a command already sent.
 Ambiguous network → reconcile/replay. Account switch: no dispatch or display of another owner’s work. Generation changes (A→logout→A) must not reuse the other generation’s in-flight worker.
 Account retirement does not silently delete unsynchronised local evidence.
 Host SQLite tests are not native process-death proof.
+
+Wave 2 (W2-01 / W2-02, in flight): only an explicit session lifecycle owner may call `beginOwnerSession`. A repository, binding, or stale callback must never start a session to recapture authority. Bind reads/writes/publication to live uid **and** generation **and** ledger. Lease acquisition uses a unique attempt identity; the same worker name must not reclaim a live lease. After awaits, completion writes command/receipt/evidence in one SQLite transaction fenced by that attempt. An expired or superseded attempt must not clear a newer lease, rewind state, publish an issued number, or mark an original durable.
+
+## Client / server boundary
+
+Node/Admin G1 and G2 adapters under `tools/goods-evidence-*` are **INJECTED test composition**, not the production mobile boundary. Mobile `src/` must not import `firebase-admin`, Node `fs`, host SQLite, or emulator tools. Mobile-safe transport (Team 1, `src/services/grin/transport/**`) uses the Firebase JS client; server owner identity is authenticated context, never a client-supplied UID. Functions GRIN handlers stay unexported from `functions/src/index.ts`.
 
 ## Pack manifest
 
