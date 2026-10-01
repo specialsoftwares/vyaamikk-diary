@@ -48,3 +48,7 @@ Merged onto `integration/grin-g1-g5-source`: T2 `06d897a719637abeb1301292af9d85f
 
 `3fe4071e95875a02b25f636739c1f04f8564bf09` on `team/grin-t5-qa` reviewed combined `e94b78cdc07458c457ba7ef5bb6308109d7ec2cd`. Independently re-executed W2-01…W2-05 as reproduced-then-fixed (SQLITE_HOST / INJECTED / isolated Storage emulator / mounted-inert). Wave 2 **not accepted**: app still FAKE uninjected G1; Functions unexported; live Rules unchanged; native/TalkBack/Play/live GST/2B open. Do not mark G6/device/billing/public-release Done.
 
+## Team 5 WAVE2APP F5 (unsent, 2026-10-02)
+
+`889f01106c497e1d7feca3147cf86ea0c3c20d8f` on `team/grin-t5-qa` reviewed combined `7623eef446036cb6290e99b4adbe6f14fb19e198`. Independently re-executed F1–F4 as reproduced-then-fixed (origin.bind actual bodies; SQLITE_HOST+INJECTED join; G1 Firestore `127.0.0.1:8088`; T2 `8091`+`9200`). Wave 2 **not accepted**. Functions unexported. Live Rules unchanged. versionCode 23. Flags `"0"`. No NATIVE_DEVICE / TalkBack / Play / billing / public-release. Do not mark those tickets Done.
+
