@@ -21,6 +21,7 @@ const files = [
   "workflows/cs09-missing-2b-supplier.test.ts",
   "workflows/cs10-replay-after-commit.injected.test.ts",
   "workflows/cs11-existing-product.test.ts",
+  "workflows/w2-mutation-keeps-register.sqliteHost.test.ts",
 ];
 
 if (process.env.FIRESTORE_EMULATOR_HOST) {

@@ -1,7 +1,7 @@
 /**
  * ER-4 Team 5 QA: SQLITE_HOST v9→v10 startup with GRIN admission off.
- * Does not edit migrateGrin.ts / outbox.ts / init.ts.
- * Not NATIVE_DEVICE. Not a CS-01 combined workflow.
+ * Calls production applyPendingLocalMigrations / initializeLocalDatabase.
+ * Does not copy applyInitV10Sequence. Not NATIVE_DEVICE. Not a CS-01 combined workflow.
  */
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -9,8 +9,10 @@ import os from "node:os";
 import path from "node:path";
 
 import { isGoodsEvidenceEnabled } from "@/goodsEvidence/featureFlag";
-import { execStatements, migrateToV7, migrateToV8, migrateToV9, tableExists } from "@/localDb/migrate";
-import { grinV10TablesPresent, migrateToV10 } from "@/localDb/migrateGrin";
+import { closeLocalDatabaseForTests, setLocalDatabaseForTests } from "@/localDb/database";
+import { applyPendingLocalMigrations, initializeLocalDatabase, resetLocalDatabaseInitStateForStartup } from "@/localDb/init";
+import { execStatements, migrateToV7, migrateToV8, migrateToV9, tableExists, tableHasColumn } from "@/localDb/migrate";
+import { GRIN_V10_INDEXES, grinV10TablesPresent } from "@/localDb/migrateGrin";
 import { DB_VERSION, MIGRATIONS_V1 } from "@/localDb/schema";
 import { openHostSqlite, SQLITE_HOST, type GrinSqlDb, type HostSqlite } from "@/services/grin/outbox/hostSqlite";
 import { SQLITE_HOST_NOT_NATIVE_DEVICE } from "@/services/grin/outbox/types";
@@ -27,27 +29,16 @@ function applyDiaryV9(db: GrinSqlDb): void {
 }
 
 function readSchemaVersion(database: GrinSqlDb): number {
-  const row = database.getFirstSync<{ value: string }>(
-    "SELECT value FROM meta WHERE key = ?",
-    ["schema_version"]
-  );
+  const row = database.getFirstSync<{ value: string }>("SELECT value FROM meta WHERE key = ?", ["schema_version"]);
   return row ? parseInt(row.value, 10) || 1 : 1;
 }
 
-/** Same v10 sequence `src/localDb/init.ts` uses after the v9 block. */
-function applyInitV10Sequence(database: GrinSqlDb): void {
-  let version = readSchemaVersion(database);
-  if (version < 10) {
-    migrateToV10(asMigrateDb(database));
-    version = 10;
-  }
-  if (version >= 10 && !tableExists(asMigrateDb(database), "grin_local_receipts")) {
-    migrateToV10(asMigrateDb(database));
-  }
-  database.runSync("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", [
-    "schema_version",
-    String(DB_VERSION),
-  ]);
+function indexExists(db: GrinSqlDb, name: string): boolean {
+  const row = db.getFirstSync<{ name: string }>(
+    "SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?",
+    [name]
+  );
+  return Boolean(row?.name);
 }
 
 function seedV9Diary(db: GrinSqlDb, entryId: string): void {
@@ -58,6 +49,34 @@ function seedV9Diary(db: GrinSqlDb, entryId: string): void {
     [entryId, "u_er4", JSON.stringify({ id: entryId, title: "ER-4 diary keep" }), "pending", 1, null, 1]
   );
   db.runSync("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", ["schema_version", "9"]);
+}
+
+function assertRequiredGrinV10(db: GrinSqlDb, diaryId: string): void {
+  const migrateDb = asMigrateDb(db);
+  assert.equal(tableExists(migrateDb, "grin_local_receipts"), true);
+  assert.equal(tableExists(migrateDb, "grin_outbox_commands"), true);
+  assert.equal(tableExists(migrateDb, "grin_owner_runtime"), true);
+  assert.equal(tableExists(migrateDb, "grin_local_evidence_files"), true);
+  assert.equal(tableHasColumn(migrateDb, "grin_local_evidence_files", "category"), true);
+  assert.equal(tableHasColumn(migrateDb, "grin_outbox_commands", "lease_attempt_id"), true);
+  for (const name of GRIN_V10_INDEXES) {
+    assert.equal(indexExists(db, name), true, `missing index ${name}`);
+  }
+  assert.equal(grinV10TablesPresent(migrateDb), true);
+  assert.equal(readSchemaVersion(db), 10);
+  assert.equal(DB_VERSION, 10);
+  const kept = db.getFirstSync<{ id: string; payload_json: string }>(
+    "SELECT id, payload_json FROM entries_local WHERE id = ?",
+    [diaryId]
+  );
+  assert.equal(kept?.id, diaryId);
+  assert.ok(kept?.payload_json.includes("ER-4 diary keep"));
+}
+
+async function runProductionInit(db: HostSqlite): Promise<void> {
+  resetLocalDatabaseInitStateForStartup();
+  setLocalDatabaseForTests(db);
+  await initializeLocalDatabase();
 }
 
 async function main(): Promise<void> {
@@ -82,17 +101,10 @@ async function main(): Promise<void> {
     assert.equal(grinV10TablesPresent(asMigrateDb(db)), false);
     assert.equal(tableExists(asMigrateDb(db), "grin_local_receipts"), false);
 
-    applyInitV10Sequence(db);
-
-    assert.equal(readSchemaVersion(db), 10);
-    assert.equal(DB_VERSION, 10);
-    assert.equal(grinV10TablesPresent(asMigrateDb(db)), true);
-    const kept = db.getFirstSync<{ id: string; payload_json: string }>(
-      "SELECT id, payload_json FROM entries_local WHERE id = ?",
-      ["keep_er4_diary"]
-    );
-    assert.equal(kept?.id, "keep_er4_diary");
-    assert.ok(kept?.payload_json.includes("ER-4 diary keep"));
+    await runProductionInit(db);
+    assertRequiredGrinV10(db, "keep_er4_diary");
+    applyPendingLocalMigrations(asMigrateDb(db));
+    assertRequiredGrinV10(db, "keep_er4_diary");
     assert.notEqual(process.env.EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED, "1");
     assert.equal(isGoodsEvidenceEnabled(), false);
 
@@ -101,17 +113,20 @@ async function main(): Promise<void> {
     repair.runSync("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", ["schema_version", "10"]);
     assert.equal(readSchemaVersion(repair), 10);
     assert.equal(tableExists(asMigrateDb(repair), "grin_local_receipts"), false);
-    applyInitV10Sequence(repair);
-    assert.equal(grinV10TablesPresent(asMigrateDb(repair)), true);
-    const repairedDiary = repair.getFirstSync<{ id: string }>(
-      "SELECT id FROM entries_local WHERE id = ?",
-      ["keep_er4_repair"]
-    );
-    assert.equal(repairedDiary?.id, "keep_er4_repair");
+    applyPendingLocalMigrations(asMigrateDb(repair));
+    assertRequiredGrinV10(repair, "keep_er4_repair");
+    assert.equal(isGoodsEvidenceEnabled(), false);
+
+    db.execSync("DROP TABLE grin_outbox_commands");
+    assert.equal(grinV10TablesPresent(asMigrateDb(db)), false);
+    applyPendingLocalMigrations(asMigrateDb(db));
+    assertRequiredGrinV10(db, "keep_er4_diary");
     assert.equal(isGoodsEvidenceEnabled(), false);
 
     console.log("tools/grin-acceptance/startup/v9-v10-grin-off.sqliteHost.test.ts: ok");
   } finally {
+    resetLocalDatabaseInitStateForStartup();
+    closeLocalDatabaseForTests();
     db?.close();
     repair?.close();
   }

@@ -9,7 +9,7 @@ Team 5 does **not** approve G1–G5 implementations. Presence of a path is an ob
 
 `npx --yes tsx tools/grin-acceptance/runIds.ts` passing means **matrix IDs exist**. It is **not** CS-01…CS-11 workflow evidence and must not be reported as a combined-scenario pass.
 
-Wave 2 ER-4/ER-5 executions (when present) live in `tools/grin-acceptance/startup/**` and `tools/grin-acceptance/workflows/**`, mapped in `docs/release/proposals/team5/WAVE2_ER45.md`. Those greens still use statuses below (`path_present_unapproved` / `tbd` / `device_pending`). They are not G6, not production admission, and not a row status of `complete` / `accepted` / `pass` / `done` / `approved`.
+Wave 2 ER-4/ER-5 executions (when present) live in `tools/grin-acceptance/startup/**` and `tools/grin-acceptance/workflows/**`, mapped in `docs/release/proposals/team5/WAVE2_ER45.md`. PHASE 2 independent review of landed W2-01…W2-05 is `docs/release/proposals/team5/WAVE2_PHASE2_REVIEW.md`. Those greens still use statuses below (`path_present_unapproved` / `tbd` / `device_pending`). They are not G6, not production admission, and not a row status of `complete` / `accepted` / `pass` / `done` / `approved`.
 
 ## Evidence labels
 
