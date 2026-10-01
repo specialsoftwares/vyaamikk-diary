@@ -3,7 +3,7 @@
  * App modules must not import firebase-admin. Production injects Team 1 / Team 2 adapters.
  */
 
-import type { GrinMutationResult, GrinRegisterResult } from "@/goodsEvidence/ports";
+import type { GrinMutationResult, GrinReconcileResult, GrinRegisterResult } from "@/goodsEvidence/ports";
 import type { GrinCommandType, LocalEvidenceRole } from "./types";
 
 export type GrinPortKind = "FAKE" | "INJECTED";
@@ -35,8 +35,11 @@ export type GrinServerCommandPort = {
     envelope: GrinRegisterEnvelope;
     digest: string;
   }): Promise<GrinRegisterResult>;
-  /** wave1b: reconcile can return GrinReconcileResult (register or mutation); type not on this branch. */
-  reconcile(input: { uid: string; ledgerId: string; commandId: string }): Promise<GrinRegisterResult>;
+  /**
+   * wave1b stored command result (register or mutation). Clients must not
+   * invent `issuedNumber` from a mutation success.
+   */
+  reconcile(input: { uid: string; ledgerId: string; commandId: string }): Promise<GrinReconcileResult>;
   mutate?(input: { uid: string; envelope: GrinMutationEnvelope; digest: string }): Promise<GrinMutationResult>;
 };
 

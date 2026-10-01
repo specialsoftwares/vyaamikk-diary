@@ -1,6 +1,12 @@
-import type { GrinCommandType, GrinRegisterResult, OutboxLocalState } from "@/goodsEvidence/ports";
+import type {
+  GrinCommandType,
+  GrinMutationResult,
+  GrinReconcileResult,
+  GrinRegisterResult,
+  OutboxLocalState,
+} from "@/goodsEvidence/ports";
 import { migrateToV10 } from "@/localDb/migrateGrin";
-import { classifyRegisterResult, isNetworkAmbiguous, nextRetryState } from "./classify";
+import { classifyRegisterResult, isNetworkAmbiguous, nextRetryState, type ClassifiedOutcome } from "./classify";
 import { freezeAdmittedCommand } from "./freeze";
 import type { GrinSqlDb } from "./hostSqlite";
 import {
@@ -14,7 +20,12 @@ import {
   mintReceiptId,
   receiptRowId,
 } from "./ids";
-import type { GrinEvidenceUploadPort, GrinRegisterEnvelope, GrinServerCommandPort } from "./ports";
+import type {
+  GrinEvidenceUploadPort,
+  GrinMutationEnvelope,
+  GrinRegisterEnvelope,
+  GrinServerCommandPort,
+} from "./ports";
 import { assertTransition, isUnsynchronisedState } from "./transitions";
 import type {
   ActionableFailure,
@@ -32,6 +43,54 @@ import {
 } from "./types";
 
 export { DURABLE_ORIGINAL_UPLOAD_CONDITION };
+
+const MUTATION_COMMAND_TYPES = new Set<GrinMutationEnvelope["type"]>([
+  "amendFields",
+  "recordQc",
+  "dispatchReturn",
+  "correctReturnDispatch",
+  "voidWithReason",
+  "recordEwbObservation",
+  "linkVerifiedEvidence",
+]);
+
+function isMutationCommandType(type: string): type is GrinMutationEnvelope["type"] {
+  return (MUTATION_COMMAND_TYPES as ReadonlySet<string>).has(type);
+}
+
+/** Reconcile is wave1b-shaped; register dispatch never invents issuedNumber from a mutation success. */
+function registerResultFromReconcile(result: GrinReconcileResult): GrinRegisterResult {
+  if (!result.ok) return result;
+  if (result.commandType === "registerGoodsReceipt") {
+    return {
+      ok: true,
+      replayed: result.replayed,
+      receiptId: result.receiptId,
+      issuedNumber: result.issuedNumber,
+      serial: result.serial,
+      serverRegisteredAtUtc: result.serverRegisteredAtUtc,
+      eventVersion: result.eventVersion,
+      headHash: result.headHash,
+    };
+  }
+  return { ok: false, code: "integrity", detail: "reconcile_result_not_register" };
+}
+
+function mutationResultFromReconcile(result: GrinReconcileResult): GrinMutationResult {
+  if (!result.ok) return result;
+  if (result.commandType !== "registerGoodsReceipt") {
+    return {
+      ok: true,
+      replayed: result.replayed,
+      receiptId: result.receiptId,
+      eventId: result.eventId,
+      eventVersion: result.eventVersion,
+      headHash: result.headHash,
+      serverAcceptedAtUtc: result.serverAcceptedAtUtc,
+    };
+  }
+  return { ok: false, code: "integrity", detail: "reconcile_result_not_mutation" };
+}
 
 const STATES: readonly OutboxLocalState[] = [
   "draft",
@@ -389,8 +448,9 @@ export class GrinOutbox {
       [session.ownerUid]
     );
     const now = this.clock.nowMs();
+    let slotsUsed = 0;
     for (const row of candidates) {
-      if (results.length >= limit) break;
+      if (slotsUsed >= limit) break;
       if (!this.isSessionCurrent(session)) {
         results.push({
           commandId: row.command_id,
@@ -412,6 +472,19 @@ export class GrinOutbox {
         continue;
       }
       const state = parseState(row.local_state);
+      if (state !== "attachment_pending" && !this.canDispatchCommandType(row.command_type)) {
+        // Do not acquire a lease for types this worker cannot dispatch.
+        const localState = state === "dispatching" ? "queued" : state;
+        if (state === "dispatching") this.releaseUnsupportedToQueued(row);
+        results.push({
+          commandId: row.command_id,
+          localState,
+          issuedNumber: null,
+          replayed: false,
+          skipped: "unsupported_type",
+        });
+        continue;
+      }
       if (!this.leaseFree(row, workerId, session.dispatchGeneration, now)) {
         results.push({
           commandId: row.command_id,
@@ -420,6 +493,7 @@ export class GrinOutbox {
           replayed: false,
           skipped: "lease_held",
         });
+        slotsUsed += 1;
         continue;
       }
       const leased = this.tryAcquireLease(session, workerId, row);
@@ -431,9 +505,11 @@ export class GrinOutbox {
           replayed: false,
           skipped: "lease_held",
         });
+        slotsUsed += 1;
         continue;
       }
       crashHook?.("after_dispatching");
+      slotsUsed += 1;
       if (state === "attachment_pending") {
         results.push(await this.processAttachments(session, workerId, row));
         continue;
@@ -568,21 +644,44 @@ export class GrinOutbox {
     return { ok: true };
   }
 
+  private canDispatchCommandType(commandType: string): boolean {
+    if (commandType === "registerGoodsReceipt") return true;
+    return typeof this.server.mutate === "function" && isMutationCommandType(commandType);
+  }
+
+  private releaseUnsupportedToQueued(snapshot: CommandRow): void {
+    const receipt = this.readReceipt(snapshot.owner_uid, snapshot.ledger_id, snapshot.receipt_id);
+    this.writeCommandAndReceipt(snapshot, {
+      localState: "queued",
+      issuedNumber: receipt?.issued_number ?? null,
+      serverRegisteredAtUtc: receipt?.server_registered_at_utc ?? null,
+      lastErrorCode: snapshot.last_error_code,
+      lastErrorActionable: (snapshot.last_error_actionable as ActionableFailure | null) ?? null,
+      attemptCount: snapshot.attempt_count,
+      clearLease: true,
+      now: this.clock.nowMs(),
+    });
+  }
+
   private async dispatchLeased(
     session: GrinDispatchSession,
     workerId: string,
     snapshot: CommandRow
   ): Promise<DispatchItemResult> {
     void workerId;
-    const commandType = snapshot.command_type as GrinCommandType;
-    if (commandType !== "registerGoodsReceipt") {
+    const commandType = snapshot.command_type;
+    if (!this.canDispatchCommandType(commandType)) {
+      this.releaseUnsupportedToQueued(snapshot);
       return {
         commandId: snapshot.command_id,
-        localState: parseState(snapshot.local_state),
+        localState: "queued",
         issuedNumber: null,
         replayed: false,
         skipped: "unsupported_type",
       };
+    }
+    if (isMutationCommandType(commandType)) {
+      return this.dispatchLeasedMutation(session, snapshot, commandType);
     }
     const envelope: GrinRegisterEnvelope = {
       commandId: snapshot.command_id,
@@ -601,11 +700,13 @@ export class GrinOutbox {
     } catch (err) {
       if (!isNetworkAmbiguous(err)) throw err;
       usedReconcile = true;
-      result = await this.server.reconcile({
-        uid: snapshot.owner_uid,
-        ledgerId: snapshot.ledger_id,
-        commandId: snapshot.command_id,
-      });
+      result = registerResultFromReconcile(
+        await this.server.reconcile({
+          uid: snapshot.owner_uid,
+          ledgerId: snapshot.ledger_id,
+          commandId: snapshot.command_id,
+        })
+      );
     }
     if (!this.isSessionCurrent(session) && snapshot.owner_uid !== session.ownerUid) {
       return {
@@ -617,6 +718,59 @@ export class GrinOutbox {
       };
     }
     return this.applyRegisterOutcome(snapshot, result, usedReconcile);
+  }
+
+  private async dispatchLeasedMutation(
+    session: GrinDispatchSession,
+    snapshot: CommandRow,
+    commandType: GrinMutationEnvelope["type"]
+  ): Promise<DispatchItemResult> {
+    const mutate = this.server.mutate;
+    if (!mutate) {
+      this.releaseUnsupportedToQueued(snapshot);
+      return {
+        commandId: snapshot.command_id,
+        localState: "queued",
+        issuedNumber: null,
+        replayed: false,
+        skipped: "unsupported_type",
+      };
+    }
+    const envelope: GrinMutationEnvelope = {
+      commandId: snapshot.command_id,
+      type: commandType,
+      ledgerId: snapshot.ledger_id,
+      body: parseJson(snapshot.frozen_payload_json),
+    };
+    let result: GrinMutationResult;
+    let usedReconcile = false;
+    try {
+      result = await mutate({
+        uid: snapshot.owner_uid,
+        envelope,
+        digest: snapshot.digest,
+      });
+    } catch (err) {
+      if (!isNetworkAmbiguous(err)) throw err;
+      usedReconcile = true;
+      result = mutationResultFromReconcile(
+        await this.server.reconcile({
+          uid: snapshot.owner_uid,
+          ledgerId: snapshot.ledger_id,
+          commandId: snapshot.command_id,
+        })
+      );
+    }
+    if (!this.isSessionCurrent(session) && snapshot.owner_uid !== session.ownerUid) {
+      return {
+        commandId: snapshot.command_id,
+        localState: "dispatching",
+        issuedNumber: null,
+        replayed: false,
+        skipped: "session_retired",
+      };
+    }
+    return this.applyMutationOutcome(snapshot, result, usedReconcile);
   }
 
   private applyRegisterOutcome(
@@ -649,14 +803,61 @@ export class GrinOutbox {
         replayed: result.replayed || usedReconcile,
       };
     }
+    return this.applyNonSuccessOutcome(snapshot, result, classified, usedReconcile, {
+      issuedNumber: null,
+      serverRegisteredAtUtc: null,
+    });
+  }
+
+  private applyMutationOutcome(
+    snapshot: CommandRow,
+    result: GrinMutationResult,
+    usedReconcile: boolean
+  ): DispatchItemResult {
+    const receipt = this.readReceipt(snapshot.owner_uid, snapshot.ledger_id, snapshot.receipt_id);
+    const issuedNumber = receipt?.issued_number ?? null;
+    const serverRegisteredAtUtc = receipt?.server_registered_at_utc ?? null;
+    const classified = classifyRegisterResult(result);
+    if (classified.kind === "success" && result.ok) {
+      const now = this.clock.nowMs();
+      this.writeCommandAndReceipt(snapshot, {
+        localState: "issued",
+        issuedNumber,
+        serverRegisteredAtUtc,
+        lastErrorCode: null,
+        lastErrorActionable: null,
+        clearLease: true,
+        now,
+      });
+      return {
+        commandId: snapshot.command_id,
+        localState: "issued",
+        issuedNumber,
+        replayed: result.replayed || usedReconcile,
+      };
+    }
+    return this.applyNonSuccessOutcome(snapshot, result, classified, usedReconcile, {
+      issuedNumber,
+      serverRegisteredAtUtc,
+    });
+  }
+
+  private applyNonSuccessOutcome(
+    snapshot: CommandRow,
+    result: GrinRegisterResult | GrinMutationResult,
+    classified: ClassifiedOutcome,
+    usedReconcile: boolean,
+    keep: { issuedNumber: string | null; serverRegisteredAtUtc: string | null }
+  ): DispatchItemResult {
+    const now = this.clock.nowMs();
     if (classified.kind === "success") {
       throw new Error("classified_success_without_ok");
     }
     if (classified.kind === "conflicted") {
       this.writeCommandAndReceipt(snapshot, {
         localState: "conflicted",
-        issuedNumber: null,
-        serverRegisteredAtUtc: null,
+        issuedNumber: keep.issuedNumber,
+        serverRegisteredAtUtc: keep.serverRegisteredAtUtc,
         lastErrorCode: classified.code,
         lastErrorActionable: classified.actionable,
         clearLease: true,
@@ -665,15 +866,15 @@ export class GrinOutbox {
       return {
         commandId: snapshot.command_id,
         localState: "conflicted",
-        issuedNumber: null,
+        issuedNumber: keep.issuedNumber,
         replayed: false,
       };
     }
     if (classified.kind === "permanent") {
       this.writeCommandAndReceipt(snapshot, {
         localState: "failed_permanent",
-        issuedNumber: null,
-        serverRegisteredAtUtc: null,
+        issuedNumber: keep.issuedNumber,
+        serverRegisteredAtUtc: keep.serverRegisteredAtUtc,
         lastErrorCode: classified.code,
         lastErrorActionable: classified.actionable,
         clearLease: true,
@@ -682,7 +883,7 @@ export class GrinOutbox {
       return {
         commandId: snapshot.command_id,
         localState: "failed_permanent",
-        issuedNumber: null,
+        issuedNumber: keep.issuedNumber,
         replayed: false,
       };
     }
@@ -691,8 +892,8 @@ export class GrinOutbox {
       const retry = nextRetryState(attemptCount, this.maxAttempts);
       this.writeCommandAndReceipt(snapshot, {
         localState: retry.state,
-        issuedNumber: null,
-        serverRegisteredAtUtc: null,
+        issuedNumber: keep.issuedNumber,
+        serverRegisteredAtUtc: keep.serverRegisteredAtUtc,
         lastErrorCode: "network_ambiguous",
         lastErrorActionable: retry.actionable,
         attemptCount,
@@ -702,7 +903,7 @@ export class GrinOutbox {
       return {
         commandId: snapshot.command_id,
         localState: retry.state,
-        issuedNumber: null,
+        issuedNumber: keep.issuedNumber,
         replayed: false,
       };
     }
@@ -711,8 +912,8 @@ export class GrinOutbox {
     const state = retry.state;
     this.writeCommandAndReceipt(snapshot, {
       localState: state,
-      issuedNumber: null,
-      serverRegisteredAtUtc: null,
+      issuedNumber: keep.issuedNumber,
+      serverRegisteredAtUtc: keep.serverRegisteredAtUtc,
       lastErrorCode: classified.code,
       lastErrorActionable: retry.actionable,
       attemptCount,
@@ -722,7 +923,7 @@ export class GrinOutbox {
     return {
       commandId: snapshot.command_id,
       localState: state,
-      issuedNumber: null,
+      issuedNumber: keep.issuedNumber,
       replayed: false,
     };
   }

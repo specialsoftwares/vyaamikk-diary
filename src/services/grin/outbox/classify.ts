@@ -1,4 +1,4 @@
-import type { GrinDenyCode, GrinRegisterResult } from "@/goodsEvidence/ports";
+import type { GrinDenyCode, GrinMutationResult, GrinRegisterResult } from "@/goodsEvidence/ports";
 import type { ActionableFailure, OutboxLocalState } from "./types";
 import { MAX_DISPATCH_ATTEMPTS } from "./types";
 
@@ -27,7 +27,7 @@ export function isNetworkAmbiguous(err: unknown): boolean {
   return err instanceof Error && /network|ECONNRESET|ETIMEDOUT|ambiguous/i.test(err.message);
 }
 
-export function classifyRegisterResult(result: GrinRegisterResult): ClassifiedOutcome {
+export function classifyRegisterResult(result: GrinRegisterResult | GrinMutationResult): ClassifiedOutcome {
   if (result.ok) return { kind: "success", replayed: result.replayed };
   if (result.code === "digest_conflict") {
     return { kind: "conflicted", code: result.code, actionable: "command_payload_mismatch" };

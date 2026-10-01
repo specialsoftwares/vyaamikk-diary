@@ -1,11 +1,18 @@
-import type { GrinRegisterResult, GrinRegisterSuccess } from "@/goodsEvidence/ports";
-import type { GrinEvidenceUploadPort, GrinServerCommandPort } from "./ports";
-import type { LocalEvidenceRole } from "./types";
+import type {
+  GrinDeny,
+  GrinMutationResult,
+  GrinMutationSuccess,
+  GrinReconcileResult,
+  GrinRegisterResult,
+  GrinRegisterSuccess,
+  GrinStoredCommandResult,
+} from "@/goodsEvidence/ports";
+import type { GrinEvidenceUploadPort, GrinMutationEnvelope, GrinServerCommandPort } from "./ports";
 
 type StoredCommand = {
   digest: string;
   receiptId: string;
-  result: GrinRegisterSuccess;
+  stored: GrinStoredCommandResult;
 };
 
 export type FakeGrinServerPort = GrinServerCommandPort & {
@@ -19,7 +26,7 @@ export type FakeGrinServerPort = GrinServerCommandPort & {
   waitUntilRegisterEntered(): Promise<void>;
 };
 
-export function createFakeGrinServerPort(): FakeGrinServerPort {
+export function createFakeGrinServerPort(opts?: { mutate?: boolean }): FakeGrinServerPort {
   const commands = new Map<string, StoredCommand>();
   const receipts = new Map<string, string>();
   const serials = new Map<string, number>();
@@ -34,7 +41,7 @@ export function createFakeGrinServerPort(): FakeGrinServerPort {
   function receiptKey(uid: string, ledgerId: string, receiptId: string): string {
     return `${uid}/${ledgerId}/${receiptId}`;
   }
-  function deny(code: Extract<GrinRegisterResult, { ok: false }>["code"]): GrinRegisterResult {
+  function deny(code: GrinDeny["code"]): GrinDeny {
     return { ok: false, code, detail: "denied" };
   }
 
@@ -64,7 +71,8 @@ export function createFakeGrinServerPort(): FakeGrinServerPort {
       const existing = commands.get(cmdKey(uid, ledgerId, commandId));
       if (existing) {
         if (existing.digest !== digest) return deny("digest_conflict");
-        return { ...existing.result, replayed: true };
+        if (existing.stored.commandType !== "registerGoodsReceipt") return deny("integrity");
+        return { ...existing.stored, replayed: true };
       }
       const rKey = receiptKey(uid, ledgerId, receiptId);
       if (receipts.has(rKey)) return deny("receipt_exists");
@@ -83,7 +91,8 @@ export function createFakeGrinServerPort(): FakeGrinServerPort {
         eventVersion: 1,
         headHash: "a".repeat(64),
       };
-      commands.set(cmdKey(uid, ledgerId, commandId), { digest, receiptId, result });
+      const stored: GrinStoredCommandResult = { ...result, commandType: "registerGoodsReceipt" };
+      commands.set(cmdKey(uid, ledgerId, commandId), { digest, receiptId, stored });
       receipts.set(rKey, commandId);
       if (port.dropNextResponse) {
         port.dropNextResponse = false;
@@ -97,14 +106,59 @@ export function createFakeGrinServerPort(): FakeGrinServerPort {
       }
       return result;
     },
-    async reconcile(input) {
+    async reconcile(input): Promise<GrinReconcileResult> {
       port.reconcileCalls += 1;
       if (port.denyCode && port.denyCode !== "not_found") return deny(port.denyCode);
       const stored = commands.get(cmdKey(input.uid, input.ledgerId, input.commandId));
       if (!stored) return deny("not_found");
-      return { ...stored.result, replayed: true };
+      return { ...stored.stored, replayed: true };
     },
   };
+
+  if (opts?.mutate) {
+    port.mutate = async (input): Promise<GrinMutationResult> => {
+      if (port.denyCode) return deny(port.denyCode);
+      const { uid, digest } = input;
+      const envelope: GrinMutationEnvelope = input.envelope;
+      const { commandId, ledgerId, body, type } = envelope;
+      const receiptId =
+        body && typeof body === "object" && typeof (body as { receiptId?: unknown }).receiptId === "string"
+          ? (body as { receiptId: string }).receiptId
+          : "";
+      const existing = commands.get(cmdKey(uid, ledgerId, commandId));
+      if (existing) {
+        if (existing.digest !== digest) return deny("digest_conflict");
+        if (existing.stored.commandType === "registerGoodsReceipt") return deny("integrity");
+        return { ...existing.stored, replayed: true };
+      }
+      const result: GrinMutationSuccess = {
+        ok: true,
+        replayed: false,
+        receiptId,
+        eventId: `gevt_${commandId}`,
+        eventVersion: 1,
+        headHash: "b".repeat(64),
+        serverAcceptedAtUtc: "2026-09-28T12:00:00.000Z",
+      };
+      commands.set(cmdKey(uid, ledgerId, commandId), {
+        digest,
+        receiptId,
+        stored: { ...result, commandType: type },
+      });
+      if (port.dropNextResponse) {
+        port.dropNextResponse = false;
+        const err = new Error("lost_server_response");
+        (err as { code?: string }).code = "network_ambiguous";
+        throw err;
+      }
+      if (port.throwNonNetworkAfterCommit) {
+        port.throwNonNetworkAfterCommit = false;
+        throw new TypeError("clock_failure");
+      }
+      return result;
+    };
+  }
+
   return port;
 }
 

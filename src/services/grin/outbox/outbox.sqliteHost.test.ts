@@ -425,6 +425,51 @@ async function main() {
     assert.equal(thrownRow?.issuedNumber, null);
     assert.equal(thrownRow?.serverRegisteredAtUtc, null);
 
+    const sessionC = box.beginOwnerSession("owner_c");
+    const amendQueued = box.persistDraftAndQueue(sessionC, {
+      ledgerId: "ledger_1",
+      receiptId: "grcp_amend_1",
+      commandId: "gcmd_amend01",
+      commandType: "amendFields",
+      body: { receiptId: "grcp_amend_1", expectedVersion: 1 },
+    });
+    assert.equal(amendQueued.localState, "queued");
+    assert.equal(amendQueued.issuedNumber, null);
+    const amendFlush = await box.dispatchDue(sessionC, "worker_c");
+    const amendItem = amendFlush.results.find((r) => r.commandId === "gcmd_amend01");
+    assert.equal(amendItem?.skipped, "unsupported_type");
+    assert.notEqual(amendItem?.localState, "dispatching");
+    assert.equal(amendItem?.localState, "queued");
+    const amendRow = peekQueuedCommand(db, "owner_c", "ledger_1", "gcmd_amend01");
+    assert.equal(amendRow?.commandType, "amendFields");
+    assert.equal(amendRow?.localState, "queued");
+    assert.equal(amendRow?.leaseWorkerId, null);
+    assert.equal(amendRow?.leaseUntilMs, null);
+    assert.equal(box.getRecord("owner_c", "ledger_1", "grcp_amend_1")?.localState, "queued");
+    assert.equal(box.getRecord("owner_c", "ledger_1", "grcp_amend_1")?.issuedNumber, null);
+
+    const mutateServer = createFakeGrinServerPort({ mutate: true });
+    const mutateBox = new GrinOutbox({ db, server: mutateServer, evidence, maxAttempts: 2 });
+    const sessionD = mutateBox.beginOwnerSession("owner_d");
+    const mutateQueued = mutateBox.persistDraftAndQueue(sessionD, {
+      ledgerId: "ledger_1",
+      receiptId: "grcp_amend_d",
+      commandId: "gcmd_amend_d",
+      commandType: "amendFields",
+      body: { receiptId: "grcp_amend_d", expectedVersion: 1 },
+    });
+    assert.equal(mutateQueued.localState, "queued");
+    const mutateFlush = await mutateBox.dispatchDue(sessionD, "worker_d");
+    const mutateItem = mutateFlush.results.find((r) => r.commandId === "gcmd_amend_d");
+    assert.equal(mutateItem?.skipped, undefined);
+    assert.equal(mutateItem?.localState, "issued");
+    assert.equal(mutateItem?.issuedNumber, null);
+    assert.equal(mutateServer.serialsIssued, 0);
+    const mutatePeek = peekQueuedCommand(db, "owner_d", "ledger_1", "gcmd_amend_d");
+    assert.equal(mutatePeek?.localState, "issued");
+    assert.equal(mutatePeek?.leaseWorkerId, null);
+    assert.equal(mutateBox.getRecord("owner_d", "ledger_1", "grcp_amend_d")?.issuedNumber, null);
+
     const diaryStill = db.getFirstSync<{ id: string }>(
       "SELECT id FROM entries_local WHERE id = ?",
       ["keep_diary_1"]
