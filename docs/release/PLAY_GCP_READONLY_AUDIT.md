@@ -54,6 +54,23 @@ Session: `aeadmin@specialsoftwares.com` / SPECIAL SOFTWARES. Developer `51713461
 
 Targeted closeout 2 (2026-09-20) did **not** repeat Play Console inspection. The empty catalog, empty RTDN topic, licence lists, and Internal RC4 vc17 findings above remain the last authenticated Console read.
 
+## Purchase-entry closeout session (2026-10-01, read-only)
+
+Worktree: `release/android-source-candidate` at accepted head `c139507` then the purchase-entry source correction. Historical workspace was not used.
+
+Attempted this session, **without** `firebase login --reauth`, EAS login, gcloud install, or Publisher-client install:
+
+| Tool | Result |
+| --- | --- |
+| `gcloud` | not on PATH |
+| `eas` CLI | not on PATH; not in `node_modules` |
+| Python `googleapiclient` | not installed |
+| `firebase` 14.20.0 `apps:list` / `functions:list --project vyaamikk-diary --non-interactive` | **Authentication Error: credentials are no longer valid.** Reauth was not performed. |
+
+Therefore this session did **not** obtain a complete Play uploaded-version inventory, a current Internal-track reread, EAS remote effective flags, or a signing-role reread. Dated observations above (Play versions 2026-09-19; Internal RC4 vc17 and empty subscriptions catalog 2026-09-20; Firebase app-identity 2026-09-19) remain the last successful reads. Missing local tools and expired Firebase CLI credentials are not a claim that Play Console, EAS, or Firebase services are unavailable.
+
+Do not re-upload versionCode 22. Do not assume 23 is unused. No unused versionCode is proposed from this incomplete inventory.
+
 ## Merchant KYC (human payments-readiness)
 
 Separate from app code, developer verification, and App Check. Owner handles Google/BillDesk merchant KYC / PA-CB business and representative verification via the existing Play payment profile and Play Console payments support.

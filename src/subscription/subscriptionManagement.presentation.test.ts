@@ -178,6 +178,8 @@ assert.equal(isKnownGstStateCode("MH"), false);
   assert.match(screen, /bindRestore\(liveSession\)/);
   assert.match(screen, /bindManage\(liveSession\)/);
   assert.match(screen, /bindPresentUpgrade\(liveSession\)/);
+  assert.match(screen, /purchaseEntryOn \?/);
+  assert.match(screen, /billing\.management\.purchaseEntryClosed/);
   assert.doesNotMatch(screen, /presentUpgrade\(syncSessionOwnership\.capture\(\)\)/);
   assert.match(screen, /quotaWarn80/);
   assert.doesNotMatch(screen, /grantProfessionalTrial/);
