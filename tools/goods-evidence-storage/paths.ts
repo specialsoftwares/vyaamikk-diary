@@ -35,6 +35,11 @@ export function uploadControlPath(uid: string): string {
   return `users/${uid}/goodsEvidenceUploadControl/runtime`;
 }
 
+/** Owner-scoped lookup so isolated Storage Rules can bind objectKey to a reservation. */
+export function objectKeyPath(uid: string, objectKey: string): string {
+  return `users/${uid}/grinEvidenceObjectKeys/${objectKey}`;
+}
+
 export function uploadFlightToken(ledgerId: string, evidenceId: string): string {
   return `${ledgerId}/${evidenceId}`;
 }
