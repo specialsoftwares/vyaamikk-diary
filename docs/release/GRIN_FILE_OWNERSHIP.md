@@ -37,6 +37,7 @@ Put proposals under `docs/release/proposals/<team>/`.
 | `src/goodsEvidence/evidence.ts` | team2 | |
 | `src/goodsEvidence/evidenceSupport.ts` | team2 | policy v2; do not weaken |
 | `tools/goods-evidence-storage/**` | team2 | new Storage emulator harness |
+| `docs/release/proposals/team1/firestore.rules.grin.md` | team1 | proposal only; do not edit live `firestore.rules` |
 | `docs/release/proposals/team2/storage.rules.grin.md` | team2 | proposal only; do not edit live `storage.rules` |
 | `src/services/grin/outbox/**` | team3 | |
 | `src/localDb/migrateGrin.ts` | team3 | v10 tables |

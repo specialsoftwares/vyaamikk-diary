@@ -15,7 +15,7 @@ The core-only Internal build packet is **deferred**. VersionCode 23 is source pr
 
 This register is not GRIN-complete from G1.
 
-Programme (2026-10-01): isolated G1–G5 source + G6 automated tests/review/device **preparation**. Combined branch `integration/grin-g1-g5-source` from G1 `c9623dd`. PR #30 remains the G1-only draft. Contract: `docs/release/GRIN_INTERFACE_CONTRACT.md`. File owners: `docs/release/GRIN_FILE_OWNERSHIP.md`. Board: `docs/release/GRIN_TEAM_BOARD.md`.
+Programme (2026-10-01): isolated G1–G5 source + G6 automated tests/review/device **preparation**. Combined branch `integration/grin-g1-g5-source`. Contract revision `2026-10-01.wave1b`. Team 5 matrix merged (`df5f0a5`); G1–G5 implementations not approved. PR #30 remains the G1-only draft.
 
 GRIN remains default-off. No main merge, deploy, EAS, Play, or billing activation in this programme.
 

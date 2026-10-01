@@ -51,11 +51,17 @@ export { derivePhysicalCustody } from "./custody";
 export {
   GRIN_CONTRACT_REVISION,
   EVIDENCE_STATE_TRANSITIONS,
+  evidenceVerificationOfState,
+  DOMAIN_DISABLED_MAPS_TO,
+  FOREIGN_LEDGER_MAPS_TO,
   type GrinCommandType,
   type GrinDenyCode,
   type GrinRegisterResult,
   type GrinMutationResult,
+  type GrinReconcileResult,
+  type ReconcileRequest,
   type VerifiedEvidenceResult,
   type EvidenceObjectState,
   type OutboxLocalState,
+  type PackAxes,
 } from "./ports";
