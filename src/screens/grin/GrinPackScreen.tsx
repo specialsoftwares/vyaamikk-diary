@@ -5,28 +5,27 @@ import { useFocusEffect, useLocalSearchParams } from "expo-router";
 import { Banner, Button, Card, Header, Screen } from "@/components/ui";
 import { GRIN_DOCUMENT_FOOTER } from "@/goodsEvidence/constants";
 import { useT } from "@/i18n";
-import {
-  requireLiveGrinApplicationRepository,
-  type GrinApplicationPackExport,
-  type GrinApplicationRecord,
-} from "@/services/grin/repository";
+import type { GrinApplicationPackExport, GrinApplicationRecord } from "@/services/grin/repository";
+import type { GrinDispatchSession } from "@/services/grin/outbox/types";
 import { generateGrinPackPdf } from "@/services/grin/pdf/grinPdfAdapter";
 import { pdfService } from "@/services/pdf/pdfService";
 import { spacing, useThemedStyles } from "@/theme";
 
 import { GrinAdmissionGate, GrinFixtureNotices } from "./GrinAdmissionGate";
 import { GrinFieldRow } from "./GrinFieldRow";
+import { originRepo, useFrozenGrinOrigin } from "./grinScreenHooks";
 
 export function GrinPackScreen(): React.ReactElement {
   const t = useT();
   return (
     <GrinAdmissionGate title={t("grin.packTitle")}>
-      <GrinPackAdmittedBody />
+      {(session) => <GrinPackAdmittedBody session={session} />}
     </GrinAdmissionGate>
   );
 }
 
-function GrinPackAdmittedBody(): React.ReactElement {
+function GrinPackAdmittedBody({ session }: { session: GrinDispatchSession }): React.ReactElement {
+  const origin = useFrozenGrinOrigin(session);
   const t = useT();
   const { receiptId } = useLocalSearchParams<{ receiptId: string }>();
   const [record, setRecord] = useState<GrinApplicationRecord | null>(null);
@@ -47,14 +46,14 @@ function GrinPackAdmittedBody(): React.ReactElement {
       return;
     }
     try {
-      const repo = requireLiveGrinApplicationRepository();
+      const repo = originRepo(origin);
       setRecord(repo.get(receiptId));
       setPack(repo.exportPack(receiptId));
     } catch {
       setRecord(null);
       setPack(null);
     }
-  }, [receiptId]);
+  }, [origin, receiptId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -70,19 +69,21 @@ function GrinPackAdmittedBody(): React.ReactElement {
     setBusy(true);
     setError(null);
     try {
-      requireLiveGrinApplicationRepository();
+      originRepo(origin);
       const pdf = await generateGrinPackPdf({ record, pack, t });
+      originRepo(origin);
       try {
         await pdfService.share(pdf);
       } catch {
         // dismissed
       }
+      originRepo(origin);
     } catch {
       setError(t("grin.shareFailed"));
     } finally {
       setBusy(false);
     }
-  }, [pack, record, t]);
+  }, [origin, pack, record, t]);
 
   return (
     <Screen scroll>

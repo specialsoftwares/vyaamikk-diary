@@ -4,22 +4,25 @@ import type {
   RecordEwbObservationBody,
   RecordQcBody,
 } from "@/goodsEvidence/command";
+import { isWave1OriginalCategory } from "@/goodsEvidence/evidence";
 import { assembleManifest, mayMarkComplete } from "@/goodsEvidence/evidencePack";
+import { assembleEvidencePackInputs, type GrinPackOriginalInput } from "@/goodsEvidence/evidencePackInputs";
 import {
   appendPortalObservation,
   emptyEwbHistories,
   type EwbHistories,
 } from "@/goodsEvidence/ewb";
 import { evaluateAllExceptionRules, type GrinExceptionBundle } from "@/goodsEvidence/exceptions";
-import type { GrinCommandType, OutboxLocalState } from "@/goodsEvidence/ports";
+import type { GrinCommandType, GrinConfirmedProjection, OutboxLocalState } from "@/goodsEvidence/ports";
 import { cloneSnapshot } from "@/goodsEvidence/snapshot";
 import { peekQueuedCommand, type GrinOutbox } from "@/services/grin/outbox/outbox";
 import { mintCommandId, mintReceiptId } from "@/services/grin/outbox/ids";
-import type { GrinDispatchSession, GrinLocalReceiptView } from "@/services/grin/outbox/types";
+import type { GrinDispatchSession, GrinLocalEvidenceFile, GrinLocalReceiptView } from "@/services/grin/outbox/types";
 
 import { asApplicationOutbox, type GrinMutationQueueInput } from "./outboxContract";
 import {
   GRIN_MUTATION_QUEUE_UNINJECTED,
+  GRIN_NO_CONFIRMED_VERSION,
   GRIN_SESSION_RETIRED,
 } from "./sessionErrors";
 import {
@@ -39,6 +42,7 @@ import type {
   GrinApplicationPackExport,
   GrinApplicationRecord,
   GrinApplicationRepositoryDeps,
+  GrinAttachOriginalInput,
   GrinCreateInput,
   GrinEwbObservationInput,
   GrinIncompleteReceipt,
@@ -65,6 +69,25 @@ const LOCAL_STATES: readonly OutboxLocalState[] = [
   "failed_retryable",
   "failed_permanent",
 ];
+
+const PENDING_OUTBOX_STATES: readonly OutboxLocalState[] = [
+  "draft",
+  "queued",
+  "dispatching",
+  "attachment_pending",
+  "conflicted",
+  "failed_retryable",
+  "failed_permanent",
+];
+
+function mintEvidenceId(): string {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-";
+  let out = "gev_";
+  for (let i = 0; i < 16; i += 1) {
+    out += alphabet[Math.floor(Math.random() * alphabet.length)]!;
+  }
+  return out;
+}
 
 function parseLocalState(raw: string): OutboxLocalState | "unknown_incomplete" {
   return (LOCAL_STATES as readonly string[]).includes(raw) ? (raw as OutboxLocalState) : "unknown_incomplete";
@@ -224,6 +247,16 @@ export class GrinApplicationRepository {
     this.assertLive("read");
     const trimmed = receiptId.trim();
     if (!trimmed) return [];
+    const confirmed = this.readConfirmedProjection(trimmed);
+    const confirmedItems: GrinLocalHistoryItem[] = (confirmed?.events ?? []).map((event) => ({
+      commandId: null,
+      commandType: event.type,
+      localState: "confirmed",
+      digest: event.eventHash,
+      source: "confirmed_event" as const,
+      eventId: event.eventId,
+      eventVersion: event.streamSequence,
+    }));
     const rows = this.db.getAllSync<CommandRowLite>(
       `SELECT command_id, command_type, digest, local_state, frozen_payload_json
          FROM grin_outbox_commands
@@ -231,13 +264,36 @@ export class GrinApplicationRepository {
         ORDER BY created_at ASC`,
       [this.ownerUid, this.ledgerId, trimmed]
     );
-    return rows.map((row) => ({
-      commandId: row.command_id,
-      commandType: (row.command_type as GrinCommandType) ?? "unreadable",
-      localState: parseLocalState(row.local_state),
-      digest: typeof row.digest === "string" && row.digest ? row.digest : null,
-      source: "local_outbox_queue" as const,
-    }));
+    const queueItems: GrinLocalHistoryItem[] = [];
+    for (const row of rows) {
+      const localState = parseLocalState(row.local_state);
+      if (localState === "unknown_incomplete") {
+        queueItems.push({
+          commandId: row.command_id,
+          commandType: (row.command_type as GrinCommandType) ?? "unreadable",
+          localState,
+          digest: typeof row.digest === "string" && row.digest ? row.digest : null,
+          source: "outbox_pending",
+        });
+        continue;
+      }
+      if (localState === "issued") continue;
+      if (!(PENDING_OUTBOX_STATES as readonly string[]).includes(localState)) continue;
+      const source =
+        localState === "conflicted"
+          ? ("outbox_conflicted" as const)
+          : localState === "failed_retryable" || localState === "failed_permanent"
+            ? ("outbox_failed" as const)
+            : ("outbox_pending" as const);
+      queueItems.push({
+        commandId: row.command_id,
+        commandType: (row.command_type as GrinCommandType) ?? "unreadable",
+        localState,
+        digest: typeof row.digest === "string" && row.digest ? row.digest : null,
+        source,
+      });
+    }
+    return [...confirmedItems, ...queueItems];
   }
 
   attachments(receiptId: string): GrinApplicationAttachment[] {
@@ -267,16 +323,45 @@ export class GrinApplicationRepository {
     });
   }
 
+  attachOriginal(input: GrinAttachOriginalInput): GrinApplicationAttachment {
+    this.assertLive("write");
+    if (!isWave1OriginalCategory(input.category)) {
+      throw new Error("invalid_evidence_category");
+    }
+    const receiptId = input.receiptId.trim();
+    if (!receiptId) throw new Error("missing_receipt_id");
+    const localPath = input.localPath.trim();
+    if (!localPath) throw new Error("missing_local_path");
+    const evidenceId = input.evidenceId?.trim() || mintEvidenceId();
+    this.outbox.attachLocalFile(this.session, {
+      ledgerId: this.ledgerId,
+      receiptId,
+      evidenceId,
+      role: "original",
+      localPath,
+      claimedSha256: input.claimedSha256 ?? null,
+      byteSize: input.byteSize ?? null,
+      category: input.category,
+    });
+    const attached = this.attachments(receiptId).find(
+      (item) => item.evidenceId === evidenceId && item.role === "original"
+    );
+    if (!attached) throw new Error("attached_original_unreadable");
+    return attached;
+  }
+
   ewbHistories(receiptId: string): EwbHistories {
     this.assertLive("read");
     let histories = emptyEwbHistories();
-    for (const item of this.history(receiptId)) {
-      if (item.commandType !== "recordEwbObservation") continue;
-      const queued = peekQueuedCommand(this.db, this.ownerUid, this.ledgerId, item.commandId);
-      const observation = observationFromQueuedPayload(queued?.frozenPayload);
-      if (!observation) continue;
-      const appended = appendPortalObservation(histories, observation);
-      if (appended.ok) histories = appended.histories;
+    const confirmed = this.readConfirmedProjection(receiptId);
+    if (confirmed) {
+      for (const event of confirmed.events) {
+        if (event.type !== "ewb_observation_recorded") continue;
+        const observation = event.typedChanges.observation ?? event.typedChanges;
+        const appended = appendPortalObservation(histories, observation);
+        if (appended.ok) histories = appended.histories;
+      }
+      return histories;
     }
     return histories;
   }
@@ -286,40 +371,45 @@ export class GrinApplicationRepository {
     if (!lookup) return null;
     this.assertLive("read");
     const trimmed = receiptId.trim();
-    const originalSnapshots = lookup.projection === "readable" ? [lookup.original] : [];
-    const missingOrUnverifiable = [
-      "server event cut is not retained locally",
-      "no verified originals retained locally",
-    ];
-    if (lookup.projection === "unknown_incomplete") {
-      missingOrUnverifiable.push("receipt projection is unknown or incomplete");
-    }
-    const commercial = lookup.projection === "readable" ? lookup.body.commercial : null;
-    const invoiceReferenceIsNotRetainedInvoice = commercial?.supplierInvoiceNumber.kind === "present";
-    const challanIsNotInvoice = commercial?.challanNumber.kind === "present";
+    const confirmed = this.readConfirmedProjection(trimmed);
+    const files = this.outbox.listLocalFiles(this.ownerUid, this.ledgerId, trimmed);
+    const packInputs = assembleEvidencePackInputs({
+      ownerUid: this.ownerUid,
+      ledgerId: this.ledgerId,
+      purchaseCaseId: `case-${trimmed}`,
+      confirmedCuts: confirmed
+        ? [
+            {
+              receiptId: trimmed,
+              events: confirmed.events,
+              originalSnapshot: confirmed.original,
+              eventVersion: confirmed.eventVersion,
+              headHash: confirmed.headHash,
+            },
+          ]
+        : [],
+      originals: files.filter((file) => file.role === "original").map((file) => toPackOriginalInput(file)),
+    });
+    const commercial =
+      confirmed?.original.commercial ??
+      (lookup.projection === "readable" ? lookup.body.commercial : null);
+    const hasInvoiceOriginal = packInputs.verifiedOriginals.some((item) => item.category === "invoice");
     const manifest = assembleManifest({
       exportId: `local-export-${this.ownerUid}-${this.ledgerId}-${trimmed}`,
       ownerUid: this.ownerUid,
       ledgerId: this.ledgerId,
       purchaseCaseId: `case-${trimmed}`,
-      pinnedCuts: [],
-      verifiedOriginals: [],
-      artifactHashes: {},
-      missingOrUnverifiable,
-      eventStreams: [],
-      originalSnapshots,
-      inventoryDispositions: [],
-      evidenceLinks: {},
+      ...packInputs,
       templateVersion: "grin-application-pack-v1",
     });
-    const complete = mayMarkComplete(manifest);
     return {
       manifest,
-      completenessLabel: complete ? "complete" : "incomplete",
+      completenessLabel: mayMarkComplete(manifest) ? "complete" : "incomplete",
       itcDisposition: "not_determined",
-      invoiceReferenceIsNotRetainedInvoice,
-      challanIsNotInvoice,
-      missingOriginal: true,
+      invoiceReferenceIsNotRetainedInvoice:
+        commercial?.supplierInvoiceNumber.kind === "present" && !hasInvoiceOriginal,
+      challanIsNotInvoice: commercial?.challanNumber.kind === "present",
+      missingOriginal: packInputs.verifiedOriginals.length === 0,
     };
   }
 
@@ -338,6 +428,7 @@ export class GrinApplicationRepository {
     this.assertLive("read");
     for (const item of this.history(receiptId).slice().reverse()) {
       if (item.commandType !== "dispatchReturn") continue;
+      if (!item.commandId) continue;
       const queued = peekQueuedCommand(this.db, this.ownerUid, this.ledgerId, item.commandId);
       const payload = queued?.frozenPayload;
       if (!payload || typeof payload !== "object") continue;
@@ -369,10 +460,32 @@ export class GrinApplicationRepository {
   }
 
   /**
-   * Client does not invent a server event version. 0 means no retained stream.
+   * expectedVersion is confirmed.eventVersion only. Never 0, never a queue count.
+   * Missing Team 3 getConfirmedProjection or a null projection fails closed.
    */
-  private clientExpectedVersion(_receiptId: string): number {
-    return 0;
+  private clientExpectedVersion(receiptId: string): number {
+    const confirmed = this.readConfirmedProjection(receiptId);
+    if (
+      !confirmed ||
+      typeof confirmed.eventVersion !== "number" ||
+      !Number.isInteger(confirmed.eventVersion) ||
+      confirmed.eventVersion < 1
+    ) {
+      throw new Error(GRIN_NO_CONFIRMED_VERSION);
+    }
+    return confirmed.eventVersion;
+  }
+
+  private readConfirmedProjection(receiptId: string): GrinConfirmedProjection | null {
+    const read = asApplicationOutbox(this.outbox).getConfirmedProjection;
+    if (typeof read !== "function") return null;
+    try {
+      const confirmed = read.call(this.outbox, this.ownerUid, this.ledgerId, receiptId.trim());
+      if (!confirmed || confirmed.receiptId !== receiptId.trim()) return null;
+      return confirmed;
+    } catch {
+      return null;
+    }
   }
 
   private listViews(): GrinLocalReceiptView[] {
@@ -401,7 +514,15 @@ export class GrinApplicationRepository {
     const payload = this.readPayload(view);
     const body = parseRegisterBody(payload);
     if (!body) return null;
-    return toApplicationRecord(view, body);
+    const record = toApplicationRecord(view, body);
+    const confirmed = this.readConfirmedProjection(view.receiptId);
+    if (!confirmed) return record;
+    return {
+      ...record,
+      original: cloneSnapshot(confirmed.original),
+      effective: cloneSnapshot(confirmed.effective),
+      issuedNumber: confirmed.original.issuedNumber ?? record.issuedNumber,
+    };
   }
 
   private incompleteFromView(view: GrinLocalReceiptView): GrinIncompleteReceipt {
@@ -439,10 +560,35 @@ export class GrinApplicationRepository {
   }
 }
 
-function observationFromQueuedPayload(payload: unknown): unknown {
-  if (!payload || typeof payload !== "object") return null;
-  const rec = payload as Partial<RecordEwbObservationBody>;
-  return rec.observation ?? null;
+function fileBasename(path: string): string {
+  const parts = path.trim().split(/[/\\]/);
+  return parts[parts.length - 1] || "original";
+}
+
+function mimeFromPath(path: string): string {
+  const name = path.toLowerCase();
+  if (name.endsWith(".pdf")) return "application/pdf";
+  if (name.endsWith(".png")) return "image/png";
+  if (name.endsWith(".webp")) return "image/webp";
+  if (name.endsWith(".jpg") || name.endsWith(".jpeg")) return "image/jpeg";
+  return "application/octet-stream";
+}
+
+function toPackOriginalInput(file: GrinLocalEvidenceFile): GrinPackOriginalInput {
+  const verified = file.uploadState === "verified" && file.originalDurable;
+  return {
+    evidenceId: file.evidenceId,
+    ownerUid: file.ownerUid,
+    ledgerId: file.ledgerId,
+    receiptId: file.receiptId,
+    category: file.category ?? "",
+    mime: mimeFromPath(file.localPath),
+    byteSize: file.byteSize ?? 0,
+    rawSha256: file.claimedSha256 ?? "",
+    generation: verified ? "verified" : null,
+    originalFileName: fileBasename(file.localPath),
+    state: verified ? "verified" : file.uploadState,
+  };
 }
 
 function exceptionBundleFromLookup(

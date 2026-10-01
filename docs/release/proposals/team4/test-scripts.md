@@ -6,6 +6,7 @@
 npx --yes tsx src/services/grin/repository/GrinApplicationRepository.test.ts
 npx --yes tsx src/services/grin/repository/appBinding.defaultServerPort.unit.test.ts
 npx --yes tsx src/screens/grin/grinScreens.react.mount.test.ts
+npx --yes tsx src/screens/grin/grinScreens.origin.bind.test.ts
 ```
 
 The repository and mount suites use HostSqlite (`SQLITE_HOST`, not `NATIVE_DEVICE`) and inject FAKE server ports so they do not call Firebase. The default-port unit test is a source-graph check (`createFirebaseJsGrinTransport` / `httpsCallable`); it is not NATIVE_DEVICE.

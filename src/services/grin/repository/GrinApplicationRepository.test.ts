@@ -6,11 +6,14 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import type { GrinConfirmedProjection } from "@/goodsEvidence/ports";
+import { cloneSnapshot } from "@/goodsEvidence/snapshot";
 import { sampleRegisterBody } from "@/goodsEvidence/testFixtures";
+import type { GrinEvent } from "@/goodsEvidence/types";
 import { createFakeGrinServerPort } from "@/services/grin/outbox/fakePorts";
 import { openHostSqlite, SQLITE_HOST, type HostSqlite } from "@/services/grin/outbox/hostSqlite";
 import { GrinOutbox } from "@/services/grin/outbox/outbox";
@@ -24,9 +27,10 @@ import {
   grinRepositoryIsFake,
 } from "./GrinApplicationRepository";
 import { GRIN_APPLICATION_REPOSITORY_KIND } from "./labels";
-import { GRIN_SESSION_RETIRED } from "./sessionErrors";
+import { GRIN_BINDING_RETIRED, GRIN_NO_CONFIRMED_VERSION, GRIN_SESSION_RETIRED } from "./sessionErrors";
 import {
   GRIN_APPLICATION_SERVER_PORT_LABEL,
+  advanceGrinLiveToken,
   getGrinApplicationRepository,
   resetGrinApplicationRepositoryForTests,
   retireGrinOwnerSession,
@@ -35,7 +39,8 @@ import {
   startGrinOwnerSession,
 } from "./appBinding";
 import { createUninjectedGrinServerPort } from "./uninjectedServer";
-import type { GrinMutationQueueInput } from "./outboxContract";
+import type { GrinMutationQueueInput, GrinOutboxApplicationSurface } from "./outboxContract";
+import type { GrinApplicationRecord } from "./types";
 
 function body(receiptId: string, supplier: string) {
   return sampleRegisterBody({
@@ -47,6 +52,54 @@ function body(receiptId: string, supplier: string) {
       contact: { kind: "not_supplied" },
     },
   });
+}
+
+function confirmedFromRecord(record: GrinApplicationRecord, eventVersion: number): GrinConfirmedProjection {
+  const event: GrinEvent = {
+    schemaVersion: 1,
+    eventId: `evt_${record.receiptId}_${eventVersion}`,
+    receiptId: record.receiptId,
+    streamSequence: eventVersion,
+    type: "receipt_registered",
+    actorUid: record.ownerUid,
+    serverAcceptedAtUtc: "2026-09-28T05:00:00.000Z",
+    clientObservedAtUtc: "2026-09-28T04:00:00.000Z",
+    reason: "server confirmed",
+    expectedPreviousVersion: eventVersion - 1,
+    typedChanges: {},
+    previousHash: null,
+    eventHash: "ab".repeat(32),
+    firestoreCommitTime: "2026-09-28T05:00:00.000Z",
+  };
+  return {
+    receiptId: record.receiptId,
+    eventVersion,
+    headHash: event.eventHash,
+    original: cloneSnapshot(record.original),
+    events: [event],
+    effective: cloneSnapshot(record.effective),
+  };
+}
+
+function installConfirmedProjections(outbox: GrinOutbox, rows: GrinConfirmedProjection[]): void {
+  const byId = new Map(rows.map((row) => [row.receiptId, row]));
+  (outbox as GrinOutboxApplicationSurface).getConfirmedProjection = (_ownerUid, _ledgerId, receiptId) =>
+    byId.get(receiptId) ?? null;
+}
+
+function markLocalOriginalVerified(
+  db: HostSqlite,
+  ownerUid: string,
+  evidenceId: string,
+  sha256: string,
+  byteSize: number
+): void {
+  db.runSync(
+    `UPDATE grin_local_evidence_files
+        SET upload_state = ?, original_durable = 1, claimed_sha256 = ?, byte_size = ?
+      WHERE owner_uid = ? AND evidence_id = ? AND role = ?`,
+    ["verified", sha256, byteSize, ownerUid, evidenceId, "original"]
+  );
 }
 
 function repoFor(
@@ -212,6 +265,24 @@ function main() {
       assert.equal(session.dispatchGeneration, sessionA2.dispatchGeneration);
       return outbox.getRecord(ownerA, GRIN_APPLICATION_LEDGER_ID, input.receiptId)!;
     };
+    assert.throws(
+      () =>
+        repoA2.amend({
+          receiptId: "grcp_app_2",
+          reason: "warehouse correction",
+          changes: { warehouse: { kind: "present", value: "Bay Z" } },
+        }),
+      (err: unknown) => err instanceof Error && err.message === GRIN_NO_CONFIRMED_VERSION
+    );
+    assert.equal(mutationCalls.length, 0, "missing getConfirmedProjection must not queue");
+    assert.throws(
+      () => repoA2.recordQc({ receiptId: "grcp_app_2", reason: "hold", qcStatus: "hold" }),
+      (err: unknown) => err instanceof Error && err.message === GRIN_NO_CONFIRMED_VERSION
+    );
+    assert.equal(mutationCalls.length, 0);
+
+    const confirmedApp2 = confirmedFromRecord(revived, 7);
+    installConfirmedProjections(outbox, [confirmedApp2]);
     const amended = repoA2.amend({
       receiptId: "grcp_app_2",
       reason: "warehouse correction",
@@ -220,6 +291,11 @@ function main() {
     assert.equal(amended.receiptId, "grcp_app_2");
     assert.equal(mutationCalls.length, 1);
     assert.equal(mutationCalls[0]?.commandType, "amendFields");
+    assert.equal(
+      (mutationCalls[0]?.body as { expectedVersion?: number }).expectedVersion,
+      7,
+      "expectedVersion must be confirmed.eventVersion, not 0 or a queue count"
+    );
     delete (withMutate as { persistMutationAndQueue?: unknown }).persistMutationAndQueue;
     const qc = repoA2.recordQc({
       receiptId: "grcp_app_2",
@@ -227,13 +303,57 @@ function main() {
       qcStatus: "hold",
     });
     assert.equal(qc.receiptId, "grcp_app_2");
-    assert.ok(repoA2.history("grcp_app_2").some((item) => item.commandType === "recordQc"));
+    const historyApp2 = repoA2.history("grcp_app_2");
+    assert.ok(historyApp2.some((item) => item.source === "confirmed_event" && item.commandType === "receipt_registered"));
+    assert.ok(historyApp2.some((item) => item.commandType === "recordQc" && item.source === "outbox_pending"));
+    assert.equal(
+      historyApp2.some((item) => item.commandType === "recordQc" && item.source === "confirmed_event"),
+      false,
+      "queued QC is not confirmed history"
+    );
 
     const pack = repoA2.exportPack("grcp_app_2");
     assert.ok(pack);
     assert.equal(pack.completenessLabel, "incomplete");
     assert.equal(pack.itcDisposition, "not_determined");
-    assert.equal(pack.missingOriginal, true);
+    assert.equal(pack.missingOriginal, true, "verifiedOriginals empty ⇒ missingOriginal");
+    // Path A: no confirmed cut and no verified original → missingOriginal.
+    const pathARecord = repoA2.createQueued(body("grcp_pack_a", "Pack A"));
+    const packA = repoA2.exportPack(pathARecord.receiptId);
+    assert.ok(packA);
+    assert.equal(packA.completenessLabel, "incomplete");
+    assert.equal(packA.itcDisposition, "not_determined");
+    assert.equal(packA.missingOriginal, true);
+    assert.equal(packA.invoiceReferenceIsNotRetainedInvoice, true);
+
+    const pathBRecord = repoA2.createQueued(body("grcp_pack_b", "Pack B"));
+    installConfirmedProjections(outbox, [confirmedApp2, confirmedFromRecord(pathBRecord, 1)]);
+    repoA2.attachOriginal({
+      receiptId: "grcp_pack_b",
+      category: "invoice",
+      localPath: "/tmp/grin-pack-b-invoice.pdf",
+      evidenceId: "ev_pack_b_invoice",
+      claimedSha256: "cd".repeat(32),
+      byteSize: 2048,
+    });
+    repoA2.attachOriginal({
+      receiptId: "grcp_pack_b",
+      category: "lr_bilty",
+      localPath: "/tmp/grin-pack-b-lr.jpg",
+      evidenceId: "ev_pack_b_lr",
+      claimedSha256: "ef".repeat(32),
+      byteSize: 1024,
+    });
+    markLocalOriginalVerified(db!, ownerA, "ev_pack_b_invoice", "cd".repeat(32), 2048);
+    markLocalOriginalVerified(db!, ownerA, "ev_pack_b_lr", "ef".repeat(32), 1024);
+    const packB = repoA2.exportPack("grcp_pack_b");
+    assert.ok(packB);
+    assert.equal(packB.itcDisposition, "not_determined");
+    assert.equal(packB.missingOriginal, false);
+    assert.equal(packB.invoiceReferenceIsNotRetainedInvoice, false);
+    assert.notEqual(packB.completenessLabel, "forced");
+    assert.ok(packB.completenessLabel === "complete" || packB.completenessLabel === "incomplete");
+
     const exceptions = repoA2.exceptions("grcp_app_2");
     assert.ok(exceptions);
     assert.equal(exceptions.itcAlwaysNotDetermined, true);
@@ -275,6 +395,21 @@ function main() {
     assert.equal(
       getGrinApplicationRepository(ownerA, liveFake.dispatchGeneration).originatingSession().ownerUid,
       ownerA
+    );
+    retireGrinOwnerSession();
+    const tokenA = startGrinOwnerSession(ownerA);
+    const tokenBound = getGrinApplicationRepository(ownerA, tokenA.dispatchGeneration);
+    tokenBound.list();
+    advanceGrinLiveToken("owner_b");
+    assert.throws(
+      () => tokenBound.list(),
+      (err: unknown) =>
+        err instanceof Error && (err.message === GRIN_SESSION_RETIRED || err.message === GRIN_BINDING_RETIRED),
+      "live token flip must retire A before sqlite persist"
+    );
+    assert.throws(
+      () => getGrinApplicationRepository(ownerA, tokenA.dispatchGeneration),
+      (err: unknown) => err instanceof Error && err.message === GRIN_BINDING_RETIRED
     );
     retireGrinOwnerSession();
     resetGrinApplicationRepositoryForTests();
@@ -329,10 +464,19 @@ function main() {
     const src = stripComments(readFileSync(join(screens, name), "utf8"));
     assert.match(src, /GrinAdmissionGate/, `${name} must keep admission wrapping`);
     assert.match(src, /AdmittedBody/, `${name} must mount repository work only in an admitted inner body`);
+    const bodyName = name.replace("Screen.tsx", "AdmittedBody.tsx");
+    const bodySrc = existsSync(join(screens, bodyName))
+      ? stripComments(readFileSync(join(screens, bodyName), "utf8"))
+      : "";
     assert.match(
+      `${src}\n${bodySrc}`,
+      /originRepo/,
+      `${name} must bind actions to the originating session`
+    );
+    assert.doesNotMatch(
       src,
       /requireLiveGrinApplicationRepository/,
-      `${name} must use the live application repository`
+      `${name} must not recapture the live repository`
     );
     assert.doesNotMatch(
       src,
@@ -340,6 +484,29 @@ function main() {
       `${name} must not call getGrinApplicationRepository from the outer screen`
     );
   }
+
+  for (const name of screenNames) {
+    const src = stripComments(readFileSync(join(screens, name), "utf8"));
+    assert.doesNotMatch(
+      src,
+      /requireLiveGrinApplicationRepository/,
+      `${name} must not recapture requireLiveGrinApplicationRepository`
+    );
+  }
+
+  const gateSrc = stripComments(readFileSync(join(screens, "GrinAdmissionGate.tsx"), "utf8"));
+  assert.doesNotMatch(gateSrc, /\{\(\) => children\}/, "AdmissionGate must pass the admitted session, not {() => children}");
+  const hostSrc = stripComments(readFileSync(join(screens, "GrinAdmittedSessionHost.tsx"), "utf8"));
+  assert.doesNotMatch(hostSrc, /beginOwnerSession/, "host render must not call sqlite beginOwnerSession");
+  assert.match(hostSrc, /advanceGrinLiveToken/, "host must flip the in-memory live token during render");
+  assert.match(hostSrc, /persistGrinOwnerSession/, "host must persist sqlite only after the token flip");
+  assert.match(hostSrc, /useLayoutEffect/, "sqlite persist must stay out of render");
+
+  assert.equal(existsSync(join(here, "packExport.ts")), false, "do not keep a parallel pack assembler");
+  const repoImplSrc = stripComments(readFileSync(join(here, "GrinApplicationRepository.ts"), "utf8"));
+  assert.match(repoImplSrc, /assembleEvidencePackInputs/, "exportPack must use Team 2 pack inputs");
+  assert.match(repoImplSrc, /GRIN_NO_CONFIRMED_VERSION/, "mutations must fail closed without confirmed version");
+  assert.doesNotMatch(repoImplSrc, /clientExpectedVersion\(0\)/, "expectedVersion must not be hardcoded 0");
 
   const repoSrc = stripComments(readFileSync(join(here, "GrinApplicationRepository.ts"), "utf8"));
   assert.doesNotMatch(repoSrc, /beginOwnerSession/, "repository must never call beginOwnerSession");

@@ -1,9 +1,15 @@
 /**
  * App binding and explicit GRIN session lifecycle.
  *
- * ONLY `startGrinOwnerSession` may call beginOwnerSession.
+ * ONLY `startGrinOwnerSession` / `persistGrinOwnerSession` may call beginOwnerSession.
  * `getGrinApplicationRepository`, the repository, and stale callbacks must
  * never revive a retired session.
+ *
+ * The in-memory live token (uid + generation) flips synchronously in
+ * `advanceGrinLiveToken` so A's captured origin fails immediately when B is
+ * admitted, even if sqlite `endOwnerSession` is deferred to
+ * `persistGrinOwnerSession` (useLayoutEffect). React render must not call
+ * sqlite begin/end.
  *
  * Uses the device/local sqlite already opened by localDb. Does not import
  * HostSqlite (Node SQLITE_HOST), firebase-admin, emulator tools, or node:fs.
@@ -42,7 +48,9 @@ type LiveBinding = {
 export const GRIN_APPLICATION_SERVER_PORT_LABEL =
   "INJECTED / FIREBASE_JS_HTTPS_CALLABLE. Not live deploy.";
 
+let liveToken: GrinDispatchSession | null = null;
 let live: LiveBinding | null = null;
+let pendingSqliteRetire: LiveBinding | null = null;
 let dbFactory: () => GrinApplicationDb = defaultDbFactory;
 let serverPortFactory: () => GrinServerCommandPort = defaultGrinServerPortFactory;
 
@@ -56,10 +64,29 @@ function defaultGrinServerPortFactory(): GrinServerCommandPort {
 
 function isLiveSession(session: GrinDispatchSession): boolean {
   return (
+    liveToken != null &&
+    liveToken.ownerUid === session.ownerUid &&
+    liveToken.dispatchGeneration === session.dispatchGeneration &&
     live != null &&
     live.ownerUid === session.ownerUid &&
     live.dispatchGeneration === session.dispatchGeneration
   );
+}
+
+function dropLiveRetrieval(previous: LiveBinding | null): void {
+  if (previous) {
+    pendingSqliteRetire = previous;
+  }
+  live = null;
+}
+
+function endSqliteBinding(binding: LiveBinding | null): void {
+  if (!binding) return;
+  try {
+    binding.outbox.endOwnerSession(binding.ownerUid);
+  } catch {
+    // Retirement must still drop the binding if sqlite end fails.
+  }
 }
 
 export function setGrinApplicationDbFactoryForTests(factory: (() => GrinApplicationDb) | null): void {
@@ -77,20 +104,70 @@ export function setGrinServerPortFactoryForTests(
 }
 
 /**
- * Explicit session lifecycle owner. The only production caller of
- * `outbox.beginOwnerSession`. Account change and logout retire the previous
- * binding first.
+ * Synchronous in-memory authority. Does not call sqlite begin/end.
+ * A's isBindingLive / origin lookup fail as soon as B (or logout) is admitted.
  */
-export function startGrinOwnerSession(ownerUid: string): GrinDispatchSession {
-  const uid = ownerUid.trim();
-  if (!uid) throw new Error("missing_owner_uid");
+export function advanceGrinLiveToken(ownerUid: string | null): GrinDispatchSession | null {
+  const uid = ownerUid?.trim() || null;
+  if (!uid) {
+    if (liveToken || live) {
+      dropLiveRetrieval(live);
+      liveToken = null;
+    }
+    return null;
+  }
 
-  if (live && live.ownerUid === uid && live.outbox.isSessionCurrent(live.repo.originatingSession())) {
+  if (
+    liveToken &&
+    live &&
+    liveToken.ownerUid === uid &&
+    live.ownerUid === uid &&
+    live.dispatchGeneration === liveToken.dispatchGeneration &&
+    live.outbox.isSessionCurrent(live.repo.originatingSession())
+  ) {
     return live.repo.originatingSession();
   }
 
-  if (live) {
-    retireGrinOwnerSession();
+  dropLiveRetrieval(live);
+  liveToken = { ownerUid: uid, dispatchGeneration: Number.NaN };
+  return liveToken;
+}
+
+/**
+ * Sqlite persist for the current in-memory token. Safe in useLayoutEffect.
+ * Must run only after `advanceGrinLiveToken` has already flipped the token.
+ */
+export function persistGrinOwnerSession(): GrinDispatchSession | null {
+  const retiring = pendingSqliteRetire;
+  pendingSqliteRetire = null;
+  if (retiring && (!liveToken || retiring.ownerUid !== liveToken.ownerUid)) {
+    endSqliteBinding(retiring);
+  } else if (retiring && liveToken && retiring.ownerUid === liveToken.ownerUid) {
+    pendingSqliteRetire = retiring;
+  }
+
+  if (!liveToken) {
+    endSqliteBinding(pendingSqliteRetire);
+    pendingSqliteRetire = null;
+    live = null;
+    return null;
+  }
+
+  const uid = liveToken.ownerUid;
+  if (
+    live &&
+    live.ownerUid === uid &&
+    live.outbox.isSessionCurrent(live.repo.originatingSession())
+  ) {
+    liveToken = live.repo.originatingSession();
+    pendingSqliteRetire = null;
+    return liveToken;
+  }
+
+  endSqliteBinding(pendingSqliteRetire);
+  pendingSqliteRetire = null;
+  if (live && live.ownerUid !== uid) {
+    endSqliteBinding(live);
   }
 
   const db = dbFactory();
@@ -108,8 +185,9 @@ export function startGrinOwnerSession(ownerUid: string): GrinDispatchSession {
     session,
     isBindingLive: isLiveSession,
   });
+  liveToken = { ownerUid: session.ownerUid, dispatchGeneration: session.dispatchGeneration };
   live = {
-    ownerUid: uid,
+    ownerUid: session.ownerUid,
     dispatchGeneration: session.dispatchGeneration,
     outbox,
     repo,
@@ -117,27 +195,39 @@ export function startGrinOwnerSession(ownerUid: string): GrinDispatchSession {
   return { ownerUid: session.ownerUid, dispatchGeneration: session.dispatchGeneration };
 }
 
+/**
+ * Explicit session lifecycle owner. The only production caller of
+ * `outbox.beginOwnerSession` besides persistGrinOwnerSession.
+ * Account change and logout retire the previous binding first.
+ * Non-React callers (tests, scripts) use this synchronous path.
+ */
+export function startGrinOwnerSession(ownerUid: string): GrinDispatchSession {
+  const uid = ownerUid.trim();
+  if (!uid) throw new Error("missing_owner_uid");
+  advanceGrinLiveToken(uid);
+  const session = persistGrinOwnerSession();
+  if (!session) throw new Error("missing_owner_uid");
+  return session;
+}
+
 export function retireGrinOwnerSession(): void {
-  const current = live;
-  live = null;
-  if (!current) return;
-  try {
-    current.outbox.endOwnerSession(current.ownerUid);
-  } catch {
-    // Retirement must still drop the binding if sqlite end fails.
-  }
+  advanceGrinLiveToken(null);
+  persistGrinOwnerSession();
 }
 
 export function getLiveGrinDispatchSession(): GrinDispatchSession | null {
-  if (!live) return null;
+  if (!live || !liveToken) return null;
+  if (liveToken.ownerUid !== live.ownerUid || liveToken.dispatchGeneration !== live.dispatchGeneration) {
+    return null;
+  }
   const session = live.repo.originatingSession();
   if (!live.outbox.isSessionCurrent(session)) return null;
   return session;
 }
 
 /**
- * Access the live repository for the originating UID and dispatchGeneration.
- * Does not start or revive a session.
+ * Access the repository for the originating UID and dispatchGeneration.
+ * Does not start or revive a session. Does not recapture a different live owner.
  */
 export function getGrinApplicationRepository(
   ownerUid: string,
@@ -145,11 +235,26 @@ export function getGrinApplicationRepository(
 ): GrinApplicationRepository {
   const uid = ownerUid.trim();
   if (!uid) throw new Error("missing_owner_uid");
-  if (!live) throw new Error(GRIN_SESSION_NOT_STARTED);
-  if (live.ownerUid !== uid || live.dispatchGeneration !== dispatchGeneration) {
+  if (!liveToken || liveToken.ownerUid !== uid || liveToken.dispatchGeneration !== dispatchGeneration) {
+    throw new Error(GRIN_BINDING_RETIRED);
+  }
+  if (!live || live.ownerUid !== uid || live.dispatchGeneration !== dispatchGeneration) {
+    throw new Error(GRIN_BINDING_RETIRED);
+  }
+  if (!live.outbox.isSessionCurrent(live.repo.originatingSession())) {
     throw new Error(GRIN_BINDING_RETIRED);
   }
   return live.repo;
+}
+
+/**
+ * Production action entry. Bind callbacks to the originating session, never
+ * `requireLiveGrinApplicationRepository`.
+ */
+export function requireOriginGrinApplicationRepository(
+  origin: GrinDispatchSession
+): GrinApplicationRepository {
+  return getGrinApplicationRepository(origin.ownerUid, origin.dispatchGeneration);
 }
 
 export function requireLiveGrinApplicationRepository(): GrinApplicationRepository {
@@ -159,7 +264,9 @@ export function requireLiveGrinApplicationRepository(): GrinApplicationRepositor
 }
 
 export function resetGrinApplicationRepositoryForTests(): void {
+  liveToken = null;
   live = null;
+  pendingSqliteRetire = null;
   dbFactory = defaultDbFactory;
   serverPortFactory = defaultGrinServerPortFactory;
 }

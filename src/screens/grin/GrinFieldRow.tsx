@@ -1,7 +1,9 @@
 import React from "react";
-import { StyleSheet, Text, View } from "react-native";
 
-import { spacing, typography, useThemedStyles } from "@/theme";
+import { spacing } from "@/theme/spacing";
+
+import { Text, View, StyleSheet } from "./grinSurfaces";
+import { useGrinThemedStyles } from "./grinScreenHooks";
 
 export function GrinFieldRow({
   label,
@@ -10,11 +12,11 @@ export function GrinFieldRow({
   label: string;
   value: string;
 }): React.ReactElement {
-  const styles = useThemedStyles((c) =>
+  const styles = useGrinThemedStyles((c) =>
     StyleSheet.create({
       row: { gap: spacing.xs, marginBottom: spacing.sm },
-      label: { ...typography.captionStrong, color: c.textMuted },
-      value: { ...typography.body, color: c.text },
+      label: { fontSize: 12, fontWeight: "700", color: c.textMuted },
+      value: { fontSize: 16, color: c.text },
     })
   );
   return (

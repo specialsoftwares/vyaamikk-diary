@@ -5,9 +5,16 @@ import type {
 } from "@/goodsEvidence/command";
 import type { EvidencePackManifest } from "@/goodsEvidence/evidencePack";
 import type { ExceptionEvaluation } from "@/goodsEvidence/exceptions";
+import type { Wave1OriginalCategory } from "@/goodsEvidence/evidence";
 import type { GrinCommandType, OutboxLocalState } from "@/goodsEvidence/ports";
 import type { Quantity } from "@/goodsEvidence/quantities";
-import type { CaptureProvenance, CustodyState, ImmutableGrin, QcStatus } from "@/goodsEvidence/types";
+import type {
+  CaptureProvenance,
+  CustodyState,
+  GrinEventType,
+  ImmutableGrin,
+  QcStatus,
+} from "@/goodsEvidence/types";
 import type { GrinOutbox } from "@/services/grin/outbox/outbox";
 import type { GrinDispatchSession, GrinLocalEvidenceFile, GrinLocalReceiptView } from "@/services/grin/outbox/types";
 
@@ -75,13 +82,28 @@ export type GrinIncompleteReceipt = {
 
 export type GrinApplicationLookup = GrinApplicationRecord | GrinIncompleteReceipt;
 
+export type GrinHistoryLane = "confirmed_event" | "outbox_pending" | "outbox_failed" | "outbox_conflicted";
+
 export type GrinLocalHistoryItem = {
-  commandId: string;
-  commandType: GrinCommandType | "unreadable";
-  localState: OutboxLocalState | "unknown_incomplete";
+  commandId: string | null;
+  commandType: GrinCommandType | GrinEventType | "unreadable";
+  localState: OutboxLocalState | "confirmed" | "unknown_incomplete";
   digest: string | null;
-  /** Local outbox row — not a server event id. */
-  source: "local_outbox_queue";
+  /** Confirmed events are distinct from pending/failed/conflicted outbox rows. */
+  source: GrinHistoryLane;
+  eventId?: string;
+  eventVersion?: number;
+};
+
+export type GrinAttachOriginalInput = {
+  receiptId: string;
+  category: Wave1OriginalCategory;
+  localPath: string;
+  claimedSha256?: string | null;
+  byteSize?: number | null;
+  evidenceId?: string;
+  mime?: string;
+  fileName?: string;
 };
 
 export type GrinApplicationAttachment = {

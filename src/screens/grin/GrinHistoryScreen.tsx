@@ -1,48 +1,65 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { useFocusEffect, useLocalSearchParams } from "expo-router";
 
 import { Banner, Card, EmptyState, FormSection, Header, Screen } from "@/components/ui";
 import { useT } from "@/i18n";
 import type { GrinCommandType } from "@/goodsEvidence/ports";
-import {
-  requireLiveGrinApplicationRepository,
-  type GrinApplicationLookup,
-  type GrinLocalHistoryItem,
-} from "@/services/grin/repository";
+import type { GrinEventType } from "@/goodsEvidence/types";
+import type { GrinApplicationLookup, GrinLocalHistoryItem } from "@/services/grin/repository";
 import { localStateLabel } from "@/services/grin/grinDisplay";
+import type { GrinDispatchSession } from "@/services/grin/outbox/types";
 import { spacing, useThemedStyles } from "@/theme";
 
 import { GrinAdmissionGate, GrinFixtureNotices } from "./GrinAdmissionGate";
 import { GrinFieldRow } from "./GrinFieldRow";
+import { originRepo, useFrozenGrinOrigin } from "./grinScreenHooks";
 
-function commandTypeLabel(type: GrinCommandType | "unreadable", t: (key: string) => string): string {
+function commandTypeLabel(
+  type: GrinCommandType | GrinEventType | "unreadable",
+  t: (key: string) => string
+): string {
   switch (type) {
     case "registerGoodsReceipt":
+    case "receipt_registered":
       return t("grin.event.receiptRegistered");
     case "amendFields":
+    case "field_amended":
       return t("grin.event.fieldAmended");
     case "recordQc":
+    case "qc_decision":
+    case "qc_reclassified":
       return t("grin.event.qcDecision");
     case "dispatchReturn":
+    case "return_dispatched":
       return t("grin.event.returnDispatched");
     case "recordEwbObservation":
+    case "ewb_observation_recorded":
       return t("grin.event.ewbObservation");
     default:
       return t("grin.event.other");
   }
 }
 
+function historyStateLabel(item: GrinLocalHistoryItem, t: (key: string) => string): string {
+  if (item.source === "confirmed_event" || item.localState === "confirmed") {
+    return t("grin.historyConfirmed");
+  }
+  if (item.localState === "unknown_incomplete") return t("grin.projection.incomplete");
+  return localStateLabel(item.localState, t);
+}
+
 export function GrinHistoryScreen(): React.ReactElement {
   const t = useT();
   return (
     <GrinAdmissionGate title={t("grin.historyTitle")}>
-      <GrinHistoryAdmittedBody />
+      {(session) => <GrinHistoryAdmittedBody session={session} />}
     </GrinAdmissionGate>
   );
 }
 
-function GrinHistoryAdmittedBody(): React.ReactElement {
+function GrinHistoryAdmittedBody({ session }: { session: GrinDispatchSession }): React.ReactElement {
+  const origin = useFrozenGrinOrigin(session);
   const t = useT();
   const { receiptId } = useLocalSearchParams<{ receiptId: string }>();
   const [lookup, setLookup] = useState<GrinApplicationLookup | null>(null);
@@ -60,14 +77,14 @@ function GrinHistoryAdmittedBody(): React.ReactElement {
       return;
     }
     try {
-      const repo = requireLiveGrinApplicationRepository();
+      const repo = originRepo(origin);
       setLookup(repo.lookup(receiptId));
       setEvents(repo.history(receiptId));
     } catch {
       setLookup(null);
       setEvents([]);
     }
-  }, [receiptId]);
+  }, [origin, receiptId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -80,35 +97,39 @@ function GrinHistoryAdmittedBody(): React.ReactElement {
       ? lookup.original.issuedNumber ?? t("grin.pdf.pendingNumber")
       : lookup?.issuedNumber ?? t("grin.pdf.pendingNumber");
 
-  const cards = useMemo(
-    () =>
-      [...events].reverse().map((event) => (
-        <Card key={event.commandId} elevated={false}>
+  const confirmed = events.filter((item) => item.source === "confirmed_event");
+  const pending = events.filter((item) => item.source !== "confirmed_event");
+
+  const renderLane = (items: GrinLocalHistoryItem[]) =>
+    items
+      .slice()
+      .reverse()
+      .map((event) => (
+        <Card key={event.eventId ?? event.commandId ?? `${event.commandType}-${event.digest}`} elevated={false}>
           <GrinFieldRow label={t("grin.historyTitle")} value={commandTypeLabel(event.commandType, t)} />
+          <GrinFieldRow label={t("grin.local.issued")} value={historyStateLabel(event, t)} />
           <GrinFieldRow
-            label={t("grin.local.issued")}
-            value={
-              event.localState === "unknown_incomplete"
-                ? t("grin.projection.incomplete")
-                : localStateLabel(event.localState, t)
-            }
+            label={event.source === "confirmed_event" ? t("grin.historyConfirmed") : t("grin.historyPending")}
+            value={event.source}
           />
-          <GrinFieldRow label={t("grin.historyLocalOnly")} value={event.source} />
         </Card>
-      )),
-    [events, t]
-  );
+      ));
 
   return (
     <Screen scroll>
       <View style={styles.wrap}>
         <Header title={t("grin.historyTitle")} showBack />
         <GrinFixtureNotices />
-        <Banner tone="info" message={t("grin.historyLocalOnly")} />
+        <Banner tone="info" message={t("grin.historyOutboxNotConfirmed")} />
         <FormSection title={t("grin.originalUnchanged")}>
           <GrinFieldRow label={t("grin.field.grinNumber")} value={originalNumber} />
         </FormSection>
-        {events.length === 0 ? <EmptyState title={t("grin.historyEmpty")} /> : cards}
+        <FormSection title={t("grin.historyConfirmed")}>
+          {confirmed.length === 0 ? <EmptyState title={t("grin.historyConfirmedEmpty")} /> : renderLane(confirmed)}
+        </FormSection>
+        <FormSection title={t("grin.historyPending")}>
+          {pending.length === 0 ? <EmptyState title={t("grin.historyEmpty")} /> : renderLane(pending)}
+        </FormSection>
       </View>
     </Screen>
   );

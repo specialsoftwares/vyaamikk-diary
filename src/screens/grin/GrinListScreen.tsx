@@ -1,20 +1,6 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { FlatList, Platform, StyleSheet, Text, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useFocusEffect, useRouter } from "expo-router";
 
-import {
-  Button,
-  Card,
-  EmptyState,
-  Header,
-  Screen,
-} from "@/components/ui";
-import { useT } from "@/i18n";
-import {
-  requireLiveGrinApplicationRepository,
-  type GrinApplicationListItem,
-} from "@/services/grin/repository";
+import type { GrinApplicationListItem } from "@/services/grin/repository";
 import {
   captureLabel,
   custodyLabel,
@@ -22,34 +8,61 @@ import {
   offlinePendingBannerText,
   qcLabel,
 } from "@/services/grin/grinDisplay";
-import { radius, spacing, typography, useThemedStyles } from "@/theme";
+import type { GrinDispatchSession } from "@/services/grin/outbox/types";
+import { radius, spacing } from "@/theme/spacing";
 
-import { GrinAdmissionGate, GrinFixtureNotices } from "./GrinAdmissionGate";
+import { grinMutationErrorMessage } from "./grinActionErrors";
+import { GrinAdmissionGate } from "./GrinAdmissionGate";
+import { GrinFixtureNotices } from "./GrinFixtureNotices";
+import { bindProductionGrinScreenRuntime } from "./bindProductionGrinScreenRuntime";
+import {
+  originRepo,
+  useFrozenGrinOrigin,
+  useGrinFocusEffect,
+  useGrinRouter,
+  useGrinT,
+  useGrinThemedStyles,
+} from "./grinScreenHooks";
+import {
+  Button,
+  Card,
+  EmptyState,
+  FlatList,
+  Header,
+  Platform,
+  Screen,
+  Text,
+  View,
+  StyleSheet,
+  useSafeAreaInsets,
+} from "./grinSurfaces";
 
 export function GrinListScreen(): React.ReactElement {
-  const t = useT();
+  bindProductionGrinScreenRuntime();
+  const t = useGrinT();
   return (
     <GrinAdmissionGate title={t("grin.listTitle")} subtitle={t("grin.listSubtitle")}>
-      <GrinListAdmittedBody />
+      {(session) => <GrinListAdmittedBody session={session} />}
     </GrinAdmissionGate>
   );
 }
 
-function GrinListAdmittedBody(): React.ReactElement {
-  const t = useT();
-  const router = useRouter();
+export function GrinListAdmittedBody({ session }: { session: GrinDispatchSession }): React.ReactElement {
+  const origin = useFrozenGrinOrigin(session);
+  const t = useGrinT();
+  const router = useGrinRouter();
   const insets = useSafeAreaInsets();
   const [items, setItems] = useState<GrinApplicationListItem[]>([]);
 
-  const styles = useThemedStyles((c) =>
+  const styles = useGrinThemedStyles((c) =>
     StyleSheet.create({
       headerWrap: { paddingHorizontal: spacing.lg, paddingTop: spacing.md },
       newBtn: { marginBottom: spacing.md },
       listContent: { gap: spacing.md, paddingHorizontal: spacing.lg },
       rowTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-      number: { ...typography.titleSm, color: c.text },
-      supplier: { ...typography.body, color: c.text },
-      meta: { ...typography.caption, color: c.textMuted },
+      number: { fontSize: 16, fontWeight: "700", color: c.text },
+      supplier: { fontSize: 16, color: c.text },
+      meta: { fontSize: 12, color: c.textMuted },
       pill: {
         alignSelf: "flex-start",
         backgroundColor: c.primaryLight,
@@ -58,7 +71,7 @@ function GrinListAdmittedBody(): React.ReactElement {
         borderRadius: radius.pill,
         marginTop: spacing.xs,
       },
-      pillText: { ...typography.micro, color: c.primaryDark },
+      pillText: { fontSize: 11, color: c.primaryDark },
       warnPill: {
         alignSelf: "flex-start",
         backgroundColor: "#FFF6E5",
@@ -67,27 +80,32 @@ function GrinListAdmittedBody(): React.ReactElement {
         borderRadius: radius.pill,
         marginTop: spacing.xs,
       },
-      warnText: { ...typography.micro, color: c.warning },
+      warnText: { fontSize: 11, color: c.warning },
     })
   );
 
   const load = useCallback(() => {
     try {
-      setItems(requireLiveGrinApplicationRepository().list());
-    } catch {
+      setItems(originRepo(origin).list());
+    } catch (caught) {
+      if (grinMutationErrorMessage(caught, t, "grin.errSave").retired) {
+        setItems([]);
+        return;
+      }
       setItems([]);
     }
-  }, []);
+  }, [origin, t]);
 
-  useFocusEffect(
+  useGrinFocusEffect(
     useCallback(() => {
       load();
     }, [load])
   );
 
   const goNew = useCallback(() => {
+    originRepo(origin);
     router.push("/(app)/grin/create");
-  }, [router]);
+  }, [origin, router]);
 
   const renderItem = useCallback(
     ({ item }: { item: GrinApplicationListItem }) => {
@@ -125,15 +143,16 @@ function GrinListAdmittedBody(): React.ReactElement {
             size="md"
             fullWidth={false}
             variant="secondary"
-            onPress={() =>
-              router.push({ pathname: "/(app)/grin/[receiptId]", params: { receiptId: item.receiptId } })
-            }
+            onPress={() => {
+              originRepo(origin);
+              router.push({ pathname: "/(app)/grin/[receiptId]", params: { receiptId: item.receiptId } });
+            }}
             style={{ marginTop: spacing.sm }}
           />
         </Card>
       );
     },
-    [router, styles, t]
+    [origin, router, styles, t]
   );
 
   const listPadding = useMemo(
@@ -150,7 +169,7 @@ function GrinListAdmittedBody(): React.ReactElement {
       </View>
       <FlatList
         data={items}
-        keyExtractor={(d) => d.receiptId}
+        keyExtractor={(d: GrinApplicationListItem) => d.receiptId}
         renderItem={renderItem}
         initialNumToRender={10}
         removeClippedSubviews={Platform.OS === "android"}

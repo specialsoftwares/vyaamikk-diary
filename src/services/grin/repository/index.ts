@@ -10,9 +10,12 @@ export {
 } from "./GrinApplicationRepository";
 export {
   GRIN_APPLICATION_SERVER_PORT_LABEL,
+  advanceGrinLiveToken,
   getGrinApplicationRepository,
   getLiveGrinDispatchSession,
+  persistGrinOwnerSession,
   requireLiveGrinApplicationRepository,
+  requireOriginGrinApplicationRepository,
   resetGrinApplicationRepositoryForTests,
   retireGrinOwnerSession,
   setGrinApplicationDbFactoryForTests,
@@ -22,6 +25,7 @@ export {
 export {
   GRIN_BINDING_RETIRED,
   GRIN_MUTATION_QUEUE_UNINJECTED,
+  GRIN_NO_CONFIRMED_VERSION,
   GRIN_SESSION_NOT_STARTED,
   GRIN_SESSION_RETIRED,
   isGrinSessionFenceError,
@@ -37,8 +41,10 @@ export type {
   GrinApplicationPackExport,
   GrinApplicationRecord,
   GrinApplicationRepositoryDeps,
+  GrinAttachOriginalInput,
   GrinCreateInput,
   GrinEwbObservationInput,
+  GrinHistoryLane,
   GrinIncompleteReceipt,
   GrinLocalHistoryItem,
   GrinQcInput,

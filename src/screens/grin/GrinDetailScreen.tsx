@@ -4,10 +4,8 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 
 import { Banner, Button, Card, EmptyState, FormSection, Header, Screen } from "@/components/ui";
 import { useT } from "@/i18n";
-import {
-  requireLiveGrinApplicationRepository,
-  type GrinApplicationLookup,
-} from "@/services/grin/repository";
+import type { GrinApplicationLookup } from "@/services/grin/repository";
+import type { GrinDispatchSession } from "@/services/grin/outbox/types";
 import {
   ackLabel,
   captureLabel,
@@ -26,17 +24,19 @@ import { spacing, useThemedStyles } from "@/theme";
 
 import { GrinAdmissionGate, GrinFixtureNotices } from "./GrinAdmissionGate";
 import { GrinFieldRow } from "./GrinFieldRow";
+import { originRepo, useFrozenGrinOrigin } from "./grinScreenHooks";
 
 export function GrinDetailScreen(): React.ReactElement {
   const t = useT();
   return (
     <GrinAdmissionGate title={t("grin.detailTitle")}>
-      <GrinDetailAdmittedBody />
+      {(session) => <GrinDetailAdmittedBody session={session} />}
     </GrinAdmissionGate>
   );
 }
 
-function GrinDetailAdmittedBody(): React.ReactElement {
+function GrinDetailAdmittedBody({ session }: { session: GrinDispatchSession }): React.ReactElement {
+  const origin = useFrozenGrinOrigin(session);
   const t = useT();
   const router = useRouter();
   const { receiptId } = useLocalSearchParams<{ receiptId: string }>();
@@ -57,11 +57,11 @@ function GrinDetailAdmittedBody(): React.ReactElement {
       return;
     }
     try {
-      setLookup(requireLiveGrinApplicationRepository().lookup(receiptId));
+      setLookup(originRepo(origin).lookup(receiptId));
     } catch {
       setLookup(null);
     }
-  }, [receiptId]);
+  }, [origin, receiptId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -72,9 +72,10 @@ function GrinDetailAdmittedBody(): React.ReactElement {
   const go = useCallback(
     (segment: string) => {
       if (!receiptId) return;
+      originRepo(origin);
       router.push(`/(app)/grin/${receiptId}/${segment}`);
     },
-    [receiptId, router]
+    [origin, receiptId, router]
   );
 
   const onPdf = useCallback(async () => {
@@ -82,19 +83,21 @@ function GrinDetailAdmittedBody(): React.ReactElement {
     setBusy(true);
     setActionError(null);
     try {
-      requireLiveGrinApplicationRepository();
+      originRepo(origin);
       const pdf = await generateGrinReceiptPdf({ record: lookup, t });
+      originRepo(origin);
       try {
         await pdfService.share(pdf);
       } catch {
         // dismissed
       }
+      originRepo(origin);
     } catch {
       setActionError(t("grin.shareFailed"));
     } finally {
       setBusy(false);
     }
-  }, [lookup, t]);
+  }, [lookup, origin, t]);
 
   if (!lookup) {
     return (

@@ -4,26 +4,26 @@ import { useFocusEffect, useLocalSearchParams } from "expo-router";
 
 import { Banner, Card, Header, Screen } from "@/components/ui";
 import { useT } from "@/i18n";
-import {
-  requireLiveGrinApplicationRepository,
-  type GrinApplicationExceptionView,
-} from "@/services/grin/repository";
+import type { GrinApplicationExceptionView } from "@/services/grin/repository";
+import type { GrinDispatchSession } from "@/services/grin/outbox/types";
 import { exceptionKindLabel, exceptionRuleLabel } from "@/services/grin/grinDisplay";
 import { spacing, useThemedStyles } from "@/theme";
 
 import { GrinAdmissionGate, GrinFixtureNotices } from "./GrinAdmissionGate";
 import { GrinFieldRow } from "./GrinFieldRow";
+import { originRepo, useFrozenGrinOrigin } from "./grinScreenHooks";
 
 export function GrinExceptionsScreen(): React.ReactElement {
   const t = useT();
   return (
     <GrinAdmissionGate title={t("grin.exceptionsTitle")}>
-      <GrinExceptionsAdmittedBody />
+      {(session) => <GrinExceptionsAdmittedBody session={session} />}
     </GrinAdmissionGate>
   );
 }
 
-function GrinExceptionsAdmittedBody(): React.ReactElement {
+function GrinExceptionsAdmittedBody({ session }: { session: GrinDispatchSession }): React.ReactElement {
+  const origin = useFrozenGrinOrigin(session);
   const t = useT();
   const { receiptId } = useLocalSearchParams<{ receiptId: string }>();
   const [view, setView] = useState<GrinApplicationExceptionView | null>(null);
@@ -39,11 +39,11 @@ function GrinExceptionsAdmittedBody(): React.ReactElement {
       return;
     }
     try {
-      setView(requireLiveGrinApplicationRepository().exceptions(receiptId));
+      setView(originRepo(origin).exceptions(receiptId));
     } catch {
       setView(null);
     }
-  }, [receiptId]);
+  }, [origin, receiptId]);
 
   useFocusEffect(
     useCallback(() => {

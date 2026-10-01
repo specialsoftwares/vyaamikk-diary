@@ -1,16 +1,16 @@
 import React from "react";
 import { StyleSheet, View } from "react-native";
 
-import { Banner, EmptyState, Header, Screen } from "@/components/ui";
+import { EmptyState, Header, Screen } from "@/components/ui";
 import { useT } from "@/i18n";
 import { useAuth } from "@/state/auth";
-import {
-  GRIN_APPLICATION_REPOSITORY_LABEL,
-  grinRepositoryIsFake,
-} from "@/services/grin/repository";
+import type { GrinDispatchSession } from "@/services/grin/outbox/types";
 import { spacing, useThemedStyles } from "@/theme";
 
 import { GrinAdmittedSessionHost } from "./GrinAdmittedSessionHost";
+import { bindProductionGrinScreenRuntime } from "./bindProductionGrinScreenRuntime";
+
+export { GrinFixtureNotices } from "./GrinFixtureNotices";
 
 export function GrinAdmissionGate({
   title,
@@ -20,9 +20,10 @@ export function GrinAdmissionGate({
 }: {
   title: string;
   subtitle?: string;
-  children: React.ReactNode;
+  children: (session: GrinDispatchSession) => React.ReactNode;
   showBack?: boolean;
 }): React.ReactElement {
+  bindProductionGrinScreenRuntime();
   const t = useT();
   const { user } = useAuth();
   const styles = useThemedStyles(() =>
@@ -55,22 +56,7 @@ export function GrinAdmissionGate({
       renderBlocked={() => blocked}
       renderUnavailable={() => unavailable}
     >
-      {() => children}
+      {children}
     </GrinAdmittedSessionHost>
-  );
-}
-
-export function GrinFixtureNotices({
-  repositoryLabel = GRIN_APPLICATION_REPOSITORY_LABEL,
-}: {
-  repositoryLabel?: string;
-} = {}): React.ReactElement {
-  const t = useT();
-  const banner = grinRepositoryIsFake(repositoryLabel) ? t("grin.fixtureBanner") : t("grin.queueBanner");
-  return (
-    <View style={{ gap: spacing.sm, marginBottom: spacing.md }}>
-      <Banner tone="info" message={banner} />
-      <Banner tone="warning" message={t("grin.pricingQuotaNote")} />
-    </View>
   );
 }

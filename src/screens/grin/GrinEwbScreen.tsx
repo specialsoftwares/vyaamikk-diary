@@ -5,26 +5,26 @@ import { useFocusEffect, useLocalSearchParams } from "expo-router";
 import { Banner, Button, Card, FormSection, Header, Screen, SelectField, TextField } from "@/components/ui";
 import { useT } from "@/i18n";
 import { emptyEwbHistories, type EwbHistories } from "@/goodsEvidence/ewb";
-import {
-  GRIN_MUTATION_QUEUE_UNINJECTED,
-  requireLiveGrinApplicationRepository,
-} from "@/services/grin/repository";
+import type { GrinDispatchSession } from "@/services/grin/outbox/types";
 import { movementLabel, portalStatusLabel, qcLabel } from "@/services/grin/grinDisplay";
 import { spacing, useThemedStyles } from "@/theme";
 
 import { GrinAdmissionGate, GrinFixtureNotices } from "./GrinAdmissionGate";
 import { GrinFieldRow } from "./GrinFieldRow";
+import { grinMutationErrorMessage } from "./grinActionErrors";
+import { originRepo, useFrozenGrinOrigin } from "./grinScreenHooks";
 
 export function GrinEwbScreen(): React.ReactElement {
   const t = useT();
   return (
     <GrinAdmissionGate title={t("grin.ewbTitle")}>
-      <GrinEwbAdmittedBody />
+      {(session) => <GrinEwbAdmittedBody session={session} />}
     </GrinAdmissionGate>
   );
 }
 
-function GrinEwbAdmittedBody(): React.ReactElement {
+function GrinEwbAdmittedBody({ session }: { session: GrinDispatchSession }): React.ReactElement {
+  const origin = useFrozenGrinOrigin(session);
   const t = useT();
   const { receiptId } = useLocalSearchParams<{ receiptId: string }>();
   const [histories, setHistories] = useState<EwbHistories>(emptyEwbHistories());
@@ -44,11 +44,11 @@ function GrinEwbAdmittedBody(): React.ReactElement {
       return;
     }
     try {
-      setHistories(requireLiveGrinApplicationRepository().ewbHistories(receiptId));
+      setHistories(originRepo(origin).ewbHistories(receiptId));
     } catch {
       setHistories(emptyEwbHistories());
     }
-  }, [receiptId]);
+  }, [origin, receiptId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -60,7 +60,7 @@ function GrinEwbAdmittedBody(): React.ReactElement {
     if (!receiptId) return;
     try {
       const observedAtUtc = new Date().toISOString();
-      requireLiveGrinApplicationRepository().recordEwbObservation({
+      originRepo(origin).recordEwbObservation({
         receiptId,
         reason: "Recorded portal observation — not e-way bill portal authority.",
         channel: "portal",
@@ -91,16 +91,14 @@ function GrinEwbAdmittedBody(): React.ReactElement {
                 verificationLevel: "imported_document",
               },
       });
-      setHistories(requireLiveGrinApplicationRepository().ewbHistories(receiptId));
+      setHistories(originRepo(origin).ewbHistories(receiptId));
       setError(null);
     } catch (caught) {
-      if (caught instanceof Error && caught.message === GRIN_MUTATION_QUEUE_UNINJECTED) {
-        setError(t("grin.mutationUnavailable"));
-        return;
-      }
-      setError(t("grin.errEwb"));
+      const mapped = grinMutationErrorMessage(caught, t, "grin.errEwb");
+      if (mapped.retired) setHistories(emptyEwbHistories());
+      setError(mapped.message);
     }
-  }, [receiptId, source, status, t]);
+  }, [origin, receiptId, source, status, t]);
 
   return (
     <Screen scroll>
