@@ -57,6 +57,25 @@ async function main(): Promise<void> {
     assert.equal(issued?.localState, "issued");
     assert.equal(box.getRecord("owner_a", "ledger_1", "grcp_cs03_a")?.ownerUid, "owner_a");
     assert.equal(box.getRecord("owner_b", "ledger_1", "grcp_cs03_a"), null);
+
+    const {
+      getGrinApplicationRepository,
+      resetGrinApplicationRepositoryForTests,
+      retireGrinOwnerSession,
+      setGrinApplicationDbFactoryForTests,
+      startGrinOwnerSession,
+    } = await import("@/services/grin/repository/appBinding");
+    const { GRIN_BINDING_RETIRED } = await import("@/services/grin/repository/sessionErrors");
+    resetGrinApplicationRepositoryForTests();
+    setGrinApplicationDbFactoryForTests(() => db);
+    const genA = startGrinOwnerSession("owner_cs03_bind");
+    const staleGet = () => getGrinApplicationRepository("owner_cs03_bind", genA.dispatchGeneration);
+    staleGet().list();
+    const genB = startGrinOwnerSession("owner_cs03_bind_b");
+    assert.notEqual(genB.ownerUid, genA.ownerUid);
+    assert.throws(staleGet, (err: unknown) => err instanceof Error && err.message === GRIN_BINDING_RETIRED);
+    retireGrinOwnerSession();
+    resetGrinApplicationRepositoryForTests();
     logWorkflowExecution("CS-03", ["SQLITE_HOST"]);
   } finally {
     db?.close();
