@@ -12,6 +12,7 @@ Exact source-to-installed-vc22 correspondence: **UNVERIFIED**.
 | `origin/main` at assembly | `0da2f58970f23c7ce6cbefae6efffd49c731f44b` (unchanged vs security base) |
 | Historical workspace checkpoint | `draft/goods-evidence-domain-contract` at `55f2df1405c296336eea058238c8ae24e7a8b370` plus uncommitted boot/branding/Play-review files |
 | Candidate branch | `release/android-source-candidate` |
+| Starting reviewed head (this correction) | `0a89fff5e9a1f485209746de6966edcd643a5a85` |
 
 Imported deltas were taken from the historical **uncommitted** tree against that workspace’s own committed blobs. Those committed blobs matched `90c6948` for every included tracked file except `package.json` (security branch already added `test:safe-diagnostics`).
 
@@ -51,6 +52,27 @@ Imported deltas were taken from the historical **uncommitted** tree against that
 | `docs/PLAY_REVIEW_SETUP.md` | derived from historical untracked doc; removed reviewer-inbox creation and email OTP instructions | `9f86bb4e89f533664d151b3eaf961e6789cdacae42ce9c6d0e30c07f7d2b24aa` |
 | `scripts/setup-play-review-account.contract.test.ts` | new offline contract for the admitted review files | `78794305dfbcba79e183191a69be1e4d6d56205aec13469530e345bd60c67c01` |
 
+Historical hashes above are the **assembly** bytes at `0a89fff`. They are not the bytes of the pre-build corrections below.
+
+## Pre-build corrections (reviewed after `0a89fff`)
+
+These replace the corresponding assembly bytes. They are not historical imports.
+
+| Path | Correction | SHA-256 |
+|---|---|---|
+| `app/index.tsx` | Boot completion uses session UID+generation; timeouts do not invent destinations | `032e13627dc49309d48a508a71511eb35842a223fff8b3e6cca6ad423ff6b9f3` |
+| `src/boot/bootCompletion.ts` | EXTRACTED_RUNTIME ownership machine (new) | `d59f30dc39c6171a1c216532ae30e1f58d560fc6c7f3ec6772cc2ea8e15d8000` |
+| `src/boot/bootCompletion.test.ts` | EXTRACTED_RUNTIME deferred-barrier / fake-clock tests (new) | `d9de8968849833dcecc04735a6b7466dd2a2246f78c95a7732946dc2b1fc90b0` |
+| `src/boot/BootAnimationGate.tsx` | Hold timeout remains presentation-only; bootError no longer forces navigation | `37934863d1024e2d63b2fe1fbb3b0e24fdd72fa131c28fbab0ffa4c268d45e1d` |
+| `src/boot/bootProductionStartup.contract.test.ts` | Contract updated for ownership wiring | `7a77464755edf3dcb5850bce6110dbc35005265866184265a8c4d0a3e9996f02` |
+| `src/boot/bootReleaseGate.contract.test.ts` | Assert bootError does not force onHoldTimeout | `a8e0f98dfa50744f637fe185a3832dcdc9cd939dd3706e3c4cd86d4d8b04b5cf` |
+| `scripts/setup-play-review-account.ts` | Read-only verifier bound to expected project/phone; no profile-value printing | `3d22701b77e1f8b2f0229e0a59132665779a6dbda5d2dff9422bc0631bbe0380` |
+| `scripts/setup-play-review-account.contract.test.ts` | Injected-Admin offline tests | `5e250a8c93b31862aea89fd9ee02dd12c5af5db4abc4f09535696699a84665c3` |
+| `docs/PLAY_REVIEW_SETUP.md` | Test-phone fixture wording; no session-termination claim | `c102fc26a5833eafed7f4d9e29cfb925e50d96a064088ee425a15ce703d03737` |
+| `plugins/withAndroidLocaleConfigs.js` | Distinguish comments from `resConfigs`; require en/hi/ta/te/gu | `de3e32ab9caa45b25b733b8b25ea60cf0bff00bb3c31a159ad95cdf27b93d3be` |
+| `plugins/withAndroidLocaleConfigs.test.ts` | Gradle fixture tests (new). Not device shrinking evidence | `765638859268a456c54b29e14d03e1b9dad41a259e571bd0e0e2e95186fbec6d` |
+| `package.json` | Adds `test:boot-completion` and `test:android-locale-configs`; lockfile unchanged | `22f19764751f39fde2a58b3e3b33caa423b255cac7d0a8542183097bba785fa1` |
+
 ## Excluded
 
 - Entire GRIN / goods-evidence tree (`src/goodsEvidence`, `test:goods-evidence`, `analysis/grin-slice2-closeout/**`)
@@ -72,9 +94,12 @@ Imported deltas were taken from the historical **uncommitted** tree against that
 ## Validation boundaries
 
 - Isolated worktree locked dependencies
-- Focused: diagnostics, boot contract, Expo public config, review-account offline contract, typecheck, lint of changed extra-glob TypeScript paths
-- `plugins/withAndroidLocaleConfigs.js` is inspected source; the existing Expo ESLint config cannot load `@typescript-eslint` for a JS-only file without changing `eslint.config.js`, which this assignment does not do
-- Canonical: `npm run ci:verify` on this candidate (not a rerun of PR #28)
+- Focused: diagnostics, boot production/release/completion, Expo public config, injected-Admin review-account tests, locale plugin Gradle fixtures, typecheck, scoped ESLint of changed TypeScript paths
+- `plugins/withAndroidLocaleConfigs.js` is validated by `test:android-locale-configs` (config-plugin source). Existing `lint:eslint` extra-globs do not include it. Direct ESLint of this JS file fails because the Expo flat config applies `@typescript-eslint/no-unused-vars` without loading `@typescript-eslint` for JS-only files. `eslint.config.js` was not changed.
+- `test:boot-completion` is EXTRACTED_RUNTIME (production machine + BootScreen/gate completers, deferred barriers, fake clocks). It is not a mounted React Native or device test.
+- `test:play-review-setup` is INJECTED_ADMIN_OFFLINE. It does not read live Firebase or print credentials.
+- Canonical: `npm run ci:verify` on the correction head (not run `36832610474`, which belongs to `0a89fff`)
 - Injected diagnostics tests do not prove native Crashlytics consent
-- Boot contract tests do not prove mounted device animation
+- Boot tests do not prove mounted device animation
+- Locale plugin tests do not prove Android resource shrinking on a device
 - `npx expo config --type public` is a non-build config gate, not a native prebuild

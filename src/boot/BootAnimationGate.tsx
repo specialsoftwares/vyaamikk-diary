@@ -71,12 +71,6 @@ export function BootAnimationGate({
   }, [visible, reducedMotion]);
 
   useEffect(() => {
-    if (bootError && visible) {
-      onHoldTimeout();
-    }
-  }, [bootError, onHoldTimeout, visible]);
-
-  useEffect(() => {
     if (!brandMinElapsed || canEnterApp) {
       setShowHoldMessage(false);
       return;

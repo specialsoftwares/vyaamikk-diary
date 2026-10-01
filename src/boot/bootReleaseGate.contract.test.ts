@@ -91,6 +91,12 @@ assert.match(
   "releaseToApp must exit mid-choreography when gate says ready"
 );
 
+assert.doesNotMatch(
+  gate,
+  /if \(bootError && visible\)/,
+  "bootError must not force onHoldTimeout navigation"
+);
+
 assert.ok(BOOT_REDUCED_MOTION_MS >= 700);
 
 console.log("bootReleaseGate.contract.test.ts: ok");
