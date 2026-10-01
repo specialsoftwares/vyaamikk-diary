@@ -5,10 +5,20 @@ import type {
   CorrectReturnDispatchBody,
   DispatchReturnBody,
   GoodsCommandType,
+  LinkVerifiedEvidenceBody,
+  RecordEwbObservationBody,
   RecordQcBody,
   VoidWithReasonBody,
 } from "./command";
 import { derivePhysicalCustody } from "./custody";
+import {
+  appendMovementEvent,
+  appendPortalObservation,
+  appendQcEvent,
+  emptyEwbHistories,
+  linkReplacement,
+  type EwbHistories,
+} from "./ewb";
 import { isGoodsEvidenceEnabled } from "./featureFlag";
 import { formatGrinNumber } from "./grinNumber";
 import { hashEventEnvelope, hashOriginalSnapshot } from "./hashChain";
@@ -35,7 +45,10 @@ import {
   isAmendableGrinField,
   mutationBodyError,
   qcStatusError,
+  recordEwbObservationBodyError,
   registerBodyError,
+  verifiedEvidenceIdentityError,
+  linkVerifiedEvidenceBodyError,
 } from "./validate";
 
 export interface LedgerClock {
@@ -99,6 +112,8 @@ interface ReceiptState {
   events: GrinEvent[];
   view: GrinView;
   lineLedgers: Map<string, LineQuantityLedgers>;
+  ewbHistories: EwbHistories;
+  linkedEvidenceIds: string[];
 }
 
 function cloneReceiptState(state: ReceiptState): ReceiptState {
@@ -108,6 +123,8 @@ function cloneReceiptState(state: ReceiptState): ReceiptState {
     events: cloneSnapshot(state.events),
     view: cloneSnapshot(state.view),
     lineLedgers: cloneSnapshot(state.lineLedgers),
+    ewbHistories: cloneSnapshot(state.ewbHistories),
+    linkedEvidenceIds: cloneSnapshot(state.linkedEvidenceIds),
   };
 }
 
@@ -162,6 +179,11 @@ export class InMemoryGoodsLedger {
   getLineLedger(receiptId: string, lineId: string): LineQuantityLedgers | undefined {
     const ledger = this.grins.get(receiptId)?.lineLedgers.get(lineId);
     return ledger ? freezeSnapshot(ledger) : undefined;
+  }
+
+  getEwbHistories(receiptId: string): EwbHistories | undefined {
+    const histories = this.grins.get(receiptId)?.ewbHistories;
+    return histories ? freezeSnapshot(histories) : undefined;
   }
 
   register(command: FrozenCommand<RegisterGoodsReceiptBody>): RegisterOutcome {
@@ -275,6 +297,8 @@ export class InMemoryGoodsLedger {
       events: [event],
       view,
       lineLedgers,
+      ewbHistories: emptyEwbHistories(),
+      linkedEvidenceIds: [],
     };
     syncViewCustody(state);
 
@@ -495,6 +519,88 @@ export class InMemoryGoodsLedger {
       clientObservedAtUtc: command.body.clientObservedAtUtc,
     });
     next.view.voided = true;
+    this.finishEvent(next, event);
+    return this.commitMutation(command.body.receiptId, next, command, event.streamSequence);
+  }
+
+  recordEwbObservation(command: FrozenCommand<RecordEwbObservationBody>): MutationOutcome {
+    const prepared = this.prepareMutation(
+      command,
+      "recordEwbObservation",
+      command.body?.receiptId,
+      command.body?.expectedVersion,
+      command.body?.reason
+    );
+    if (!prepared.ok) return prepared;
+    if (prepared.replayed) return prepared;
+    const bodyErr = recordEwbObservationBodyError(command.body);
+    if (bodyErr) return { ok: false, code: "invalid", detail: bodyErr };
+    const next = cloneReceiptState(prepared.state);
+    try {
+      if (command.body.channel === "portal") {
+        const appended = appendPortalObservation(next.ewbHistories, command.body.observation);
+        if (!appended.ok) return { ok: false, code: "invalid", detail: appended.detail };
+        next.ewbHistories = appended.histories;
+      } else if (command.body.channel === "movement") {
+        next.ewbHistories = appendMovementEvent(next.ewbHistories, command.body.observation);
+      } else if (command.body.channel === "qc") {
+        next.ewbHistories = appendQcEvent(next.ewbHistories, command.body.observation);
+      } else {
+        next.ewbHistories = linkReplacement(next.ewbHistories, command.body.observation);
+      }
+    } catch (err) {
+      if (err instanceof Error) return { ok: false, code: "invalid", detail: err.message };
+      throw err;
+    }
+    const event = this.buildNextEvent(next, {
+      type: "ewb_observation_recorded",
+      reason: command.body.reason.trim(),
+      expectedPreviousVersion: command.body.expectedVersion,
+      typedChanges: { channel: command.body.channel, observation: cloneSnapshot(command.body.observation) },
+      clientObservedAtUtc: command.body.clientObservedAtUtc,
+    });
+    this.finishEvent(next, event);
+    return this.commitMutation(command.body.receiptId, next, command, event.streamSequence);
+  }
+
+  linkVerifiedEvidence(command: FrozenCommand<LinkVerifiedEvidenceBody>): MutationOutcome {
+    const prepared = this.prepareMutation(
+      command,
+      "linkVerifiedEvidence",
+      command.body?.receiptId,
+      command.body?.expectedVersion,
+      command.body?.reason
+    );
+    if (!prepared.ok) return prepared;
+    if (prepared.replayed) return prepared;
+    const bodyErr = linkVerifiedEvidenceBodyError(command.body);
+    if (bodyErr) return { ok: false, code: "invalid", detail: bodyErr };
+    const identity = verifiedEvidenceIdentityError(command.body.verified, {
+      ownerUid: this.ownerUid,
+      ledgerId: this.ledgerId,
+      receiptId: command.body.receiptId,
+    });
+    if (identity) return { ok: false, code: "invalid", detail: identity };
+    if (prepared.state.linkedEvidenceIds.includes(command.body.verified.evidenceId)) {
+      return { ok: false, code: "invalid", detail: "evidence already linked" };
+    }
+    const next = cloneReceiptState(prepared.state);
+    next.linkedEvidenceIds.push(command.body.verified.evidenceId);
+    const event = this.buildNextEvent(next, {
+      type: "evidence_verified",
+      reason: command.body.reason.trim(),
+      expectedPreviousVersion: command.body.expectedVersion,
+      typedChanges: {
+        evidenceId: command.body.verified.evidenceId,
+        generation: command.body.verified.generation,
+        rawSha256: command.body.verified.rawSha256,
+        storagePath: command.body.verified.storagePath,
+        byteSize: command.body.verified.byteSize,
+        linkOnly: true,
+        bytesNotRehashed: true,
+      },
+      clientObservedAtUtc: command.body.clientObservedAtUtc,
+    });
     this.finishEvent(next, event);
     return this.commitMutation(command.body.receiptId, next, command, event.streamSequence);
   }

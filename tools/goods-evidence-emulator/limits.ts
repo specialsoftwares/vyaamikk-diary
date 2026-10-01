@@ -91,7 +91,11 @@ export function inputShapeError(value: unknown, label: string): string | null {
     }
     for (const key of Object.keys(current)) {
       if (PROTOTYPE_KEYS.has(key)) return `${label} contains a prototype key`;
-      const nested = walk((current as Record<string, unknown>)[key], depth + 1);
+      const nestedValue = (current as Record<string, unknown>)[key];
+      // Undefined object properties are omitted canonically; they are not non-JSON.
+      // Reproduced at c9623dd: { optional: undefined } was rejected as non-JSON.
+      if (nestedValue === undefined) continue;
+      const nested = walk(nestedValue, depth + 1);
       if (nested) return nested;
     }
     return null;
@@ -165,4 +169,47 @@ export function envelopeByteError(envelope: unknown): string | null {
     return "request body exceeds the technical UTF-8 byte limit";
   }
   return null;
+}
+
+/**
+ * Deep-copy JSON-shaped input, omitting undefined object properties.
+ * Does not mutate the caller value. Undefined/sparse array slots throw
+ * (they are invalid, not omitted). Non-JSON leftovers throw rather than
+ * becoming `invalid` at the adapter boundary.
+ */
+export function normalizeJsonCopy(value: unknown): unknown {
+  if (value === undefined) {
+    throw new Error("g1_normalize_undefined_root");
+  }
+  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new Error("g1_normalize_non_finite");
+    return Object.is(value, -0) ? 0 : value;
+  }
+  if (Array.isArray(value)) {
+    if (value.length !== Object.keys(value).length) {
+      throw new Error("g1_normalize_sparse_array");
+    }
+    return value.map((item, index) => {
+      if (item === undefined) {
+        throw new Error(`g1_normalize_undefined_array_${index}`);
+      }
+      return normalizeJsonCopy(item);
+    });
+  }
+  if (typeof value !== "object") {
+    throw new Error("g1_normalize_non_json");
+  }
+  const proto = Object.getPrototypeOf(value);
+  if (proto !== Object.prototype && proto !== null) {
+    throw new Error("g1_normalize_non_plain");
+  }
+  const out: Record<string, unknown> = {};
+  for (const key of Object.keys(value)) {
+    if (PROTOTYPE_KEYS.has(key)) throw new Error("g1_normalize_prototype_key");
+    const nested = (value as Record<string, unknown>)[key];
+    if (nested === undefined) continue;
+    out[key] = normalizeJsonCopy(nested);
+  }
+  return out;
 }

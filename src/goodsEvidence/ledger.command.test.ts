@@ -313,6 +313,110 @@ function ledger(): InMemoryGoodsLedger {
   assert.equal(original.captureProvenance, "offline");
 }
 
+// PURE_DOMAIN — omit vs undefined optional property is the same digest.
+{
+  const omitted = freezeCommand({
+    commandId: "omit_cmd",
+    type: "registerGoodsReceipt",
+    ownerUid: "owner_1",
+    ledgerId: "ledger_1",
+    body: sampleRegisterBody({ receiptId: "omit_r" }),
+  });
+  const withUndef = freezeCommand({
+    commandId: "omit_cmd",
+    type: "registerGoodsReceipt",
+    ownerUid: "owner_1",
+    ledgerId: "ledger_1",
+    body: { ...sampleRegisterBody({ receiptId: "omit_r" }), unusedOptional: undefined } as ReturnType<
+      typeof sampleRegisterBody
+    >,
+  });
+  assert.equal(omitted.digest, withUndef.digest);
+}
+
+// PURE_DOMAIN — EWB observation (unknown stays unknown; delivery does not cancel).
+{
+  const store = ledger();
+  store.register(
+    freezeCommand({
+      commandId: "ewb_reg",
+      type: "registerGoodsReceipt",
+      ownerUid: "owner_1",
+      ledgerId: "ledger_1",
+      body: sampleRegisterBody({ receiptId: "ewb_me" }),
+    })
+  );
+  const observed = store.recordEwbObservation(
+    freezeCommand({
+      commandId: "ewb_obs",
+      type: "recordEwbObservation",
+      ownerUid: "owner_1",
+      ledgerId: "ledger_1",
+      body: {
+        receiptId: "ewb_me",
+        expectedVersion: 1,
+        reason: "user reported portal status",
+        clientObservedAtUtc: "2026-09-28T16:00:00.000Z",
+        channel: "portal",
+        observation: {
+          observedAtUtc: "2026-09-28T16:00:00.000Z",
+          source: "user_reported",
+          verificationLevel: "user_reported",
+          status: "unknown",
+        },
+      },
+    })
+  );
+  assert.equal(observed.ok, true);
+  assert.equal(store.getEwbHistories("ewb_me")?.portal[0]?.status, "unknown");
+}
+
+// PURE_DOMAIN — linkVerifiedEvidence persists a pointer only (no byte hashing here).
+{
+  const store = ledger();
+  store.register(
+    freezeCommand({
+      commandId: "ev_reg",
+      type: "registerGoodsReceipt",
+      ownerUid: "owner_1",
+      ledgerId: "ledger_1",
+      body: sampleRegisterBody({ receiptId: "ev_me" }),
+    })
+  );
+  const linked = store.linkVerifiedEvidence(
+    freezeCommand({
+      commandId: "ev_link",
+      type: "linkVerifiedEvidence",
+      ownerUid: "owner_1",
+      ledgerId: "ledger_1",
+      body: {
+        receiptId: "ev_me",
+        expectedVersion: 1,
+        reason: "link verified original",
+        clientObservedAtUtc: "2026-09-28T17:00:00.000Z",
+        verified: {
+          evidenceId: "evidence_1",
+          ownerUid: "owner_1",
+          ledgerId: "ledger_1",
+          receiptId: "ev_me",
+          category: "invoice",
+          mime: "image/jpeg",
+          byteSize: 24,
+          rawSha256: "ab".repeat(32),
+          storagePath: "users/owner_1/objects/randomkey",
+          generation: "1",
+          verifiedAtUtc: "2026-09-28T16:59:00.000Z",
+        },
+      },
+    })
+  );
+  assert.equal(linked.ok, true);
+  const ev = store.getEvents("ev_me")[1]!;
+  assert.equal(ev.type, "evidence_verified");
+  assert.equal((ev.typedChanges as { bytesNotRehashed: boolean }).bytesNotRehashed, true);
+  assert.deepEqual(store.getOriginal("ev_me")?.remarks, sampleRegisterBody().remarks);
+}
+
 {
   const store = new InMemoryGoodsLedger("owner_1", "ledger_1", { ...clock }, "production");
   const denied = store.register(

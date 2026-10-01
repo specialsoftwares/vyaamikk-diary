@@ -3,7 +3,11 @@
  * Does not log request bodies, Error.message, or secrets.
  */
 
-export type G1LogEvent = "grin_g1_denied" | "grin_g1_committed" | "grin_g1_replayed";
+export type G1LogEvent =
+  | "grin_g1_denied"
+  | "grin_g1_committed"
+  | "grin_g1_mutation_committed"
+  | "grin_g1_replayed";
 
 const ALLOWED_META = new Set(["code", "attempt", "replayed", "policy"]);
 
