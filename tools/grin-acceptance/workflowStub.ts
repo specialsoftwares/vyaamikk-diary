@@ -7,7 +7,7 @@ const parsed = parseMatrix();
 const byId = new Map(parsed.map((row) => [row.id, row]));
 
 /**
- * Wave 1: prove the matrix ID exists. Does not execute the combined workflow.
+ * runIds.ts: prove the matrix ID exists. Does not execute the combined workflow.
  */
 export function assertMatrixIdExists(id: string): void {
   assert.equal(isMatrixId(id), true, `${id} missing from MATRIX_IDS`);
@@ -22,7 +22,9 @@ export function assertWorkflowNotExecuted(id: string): void {
   assert.ok(row, `${id} missing from matrix`);
   assert.doesNotMatch(row.status, /^(complete|accepted|pass|done|approved)$/);
   assert.doesNotMatch(row.requirement, /\b(PASS|ACCEPTED|COMPLETE)\b/);
-  console.log(`grin-acceptance stub ${id}: matrix id present; combined workflow not executed (${row.status})`);
+  console.log(
+    `grin-acceptance runIds ${id}: matrix id present; this runner does not execute the workflow (${row.status})`
+  );
 }
 
 export function assertNativeOrPlayPending(id: string, expected: "device_pending" | "play_pending"): void {

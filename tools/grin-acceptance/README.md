@@ -1,10 +1,15 @@
 # tools/grin-acceptance
 
-Team 5 Wave 1 scaffold. Combined GRIN workflows are **not** executed here.
+Team 5 owned QA harness. Not production. Not G6 completion.
 
-## What greens mean
+## Two runners (do not confuse them)
 
-`npx --yes tsx tools/grin-acceptance/runIds.ts` passing means every matrix ID in `docs/release/GRIN_ACCEPTANCE_MATRIX.md` exists and `NATIVE_DEVICE` / `PLAY_INSTALLED` rows are still pending. It does **not** mean CS-01…CS-11 passed.
+| Command | What a green exit means |
+|---|---|
+| `npx --yes tsx tools/grin-acceptance/runIds.ts` | Every matrix ID in `docs/release/GRIN_ACCEPTANCE_MATRIX.md` exists. **Not** CS-01…CS-11 workflow evidence. |
+| `npx --yes tsx tools/grin-acceptance/runWorkflows.ts` | ER-4 SQLITE_HOST v9→v10 GRIN-off QA plus the CS slices listed in `docs/release/proposals/team5/WAVE2_ER45.md`. Still **not** a matrix status of complete/accepted/pass/done/approved. Still **not** NATIVE_DEVICE. |
+
+`tools/grin-acceptance/scenarios/cs*.test.ts` stay ID-presence stubs imported by `runIds.ts`. Real CS work lives under `workflows/` and `startup/`.
 
 ## Layout
 
@@ -13,11 +18,14 @@ Team 5 Wave 1 scaffold. Combined GRIN workflows are **not** executed here.
 | `matrixIds.ts` | ID catalogue (must match the matrix tables) |
 | `parseMatrix.ts` | Parses six-column requirement rows |
 | `matrix.ids.test.ts` | Set equality + pending-label invariants |
-| `scenarios/cs*.test.ts` | Per combined-scenario stubs (Wave 2 fill) |
-| `security/security.rows.test.ts` | SEC-* stubs |
+| `scenarios/cs*.test.ts` | Per-ID presence stubs for `runIds.ts` |
+| `startup/v9-v10-grin-off.sqliteHost.test.ts` | ER-4 GRIN-off v9→v10 SQLITE_HOST QA |
+| `workflows/` | ER-5 CS executions; CS-01 runs Team 3 `npm run test:grin-interop` (not duplicated) |
+| `runWorkflows.ts` | Runs ER-4 + CS workflow files |
+| `security/security.rows.test.ts` | SEC-* ID stubs |
 | `device/` | Native/Play pending scripts + evidence envelope |
-| `runIds.ts` | Runs the Wave 1 id stubs |
+| `runIds.ts` | ID-presence only |
 
-Coordinator-owned `package.json` is not edited. Proposal: `docs/release/proposals/team5/package.json.test-grin-acceptance-ids.md`.
+Coordinator-owned `package.json` is not edited here. `test:grin-acceptance-ids` remains ID-presence.
 
 Device scripts exit 2 with `device_pending` / `play_pending`. They refuse EAS, Play, and firebase deploy.

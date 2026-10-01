@@ -58,4 +58,6 @@ const g6 = rows.filter((row) => row.id.startsWith("G6-R"));
 const forbiddenG6 = ["complete", "accepted", "pass", "done", "approved"];
 assert.ok(g6.every((row) => !forbiddenG6.includes(row.status)));
 
-console.log(`grin-acceptance/matrix.ids.test.ts: ${rows.length} ids present; combined workflows not executed`);
+console.log(
+  `grin-acceptance/matrix.ids.test.ts: ${rows.length} ids present; runIds does not execute CS workflows`
+);
