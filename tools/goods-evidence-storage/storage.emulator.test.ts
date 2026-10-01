@@ -223,6 +223,36 @@ async function main(): Promise<void> {
   assert.equal(after.data()?.state, "verified");
   assert.equal(after.data()?.generation, "emu-newer-gen");
 
+  evidenceLabel("STORAGE_EMULATOR", "retrieve hashes retained bytes when newCommands=deny");
+  await db.doc(`users/${OWNER}/goodsEvidenceAdmission/runtime`).set({
+    schemaVersion: 1,
+    newCommands: "deny",
+    reconciliation: "allow",
+  });
+  const retrieved = await adapter.retrieveOriginal(
+    { uid: OWNER },
+    { evidenceId: "ev_emu_1", ledgerId: LEDGER, receiptId: RECEIPT }
+  );
+  assert.equal(retrieved.ok, true);
+  if (!retrieved.ok) throw new Error("retrieve");
+  assert.equal(retrieved.state, "linked");
+  assert.equal(retrieved.actualSha256, sha256Bytes(bytes));
+  assert.equal(retrieved.claimedSha256, sha256Bytes(bytes));
+  assert.ok(retrieved.reservationId);
+  const listed = await adapter.listReceiptEvidenceIds(
+    { uid: OWNER },
+    { ledgerId: LEDGER, receiptId: RECEIPT }
+  );
+  assert.equal(listed.ok, true);
+  if (!listed.ok) throw new Error("list");
+  assert.ok(listed.evidenceIds.includes("ev_emu_1"));
+  const verifyDenied = await adapter.verify(
+    { uid: OWNER },
+    { evidenceId: "ev_emu_1", ledgerId: LEDGER, receiptId: RECEIPT }
+  );
+  assert.equal(verifyDenied.ok, false);
+  if (!verifyDenied.ok) assert.equal(verifyDenied.code, "policy_denied");
+
   console.log("tools/goods-evidence-storage/storage.emulator.test.ts: ok");
 }
 

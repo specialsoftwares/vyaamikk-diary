@@ -129,6 +129,44 @@ export type G2LifecycleSuccess = {
 export type G2ReserveResult = G2ReserveSuccess | G2Deny;
 export type G2LifecycleResult = G2LifecycleSuccess | G2Deny;
 
+/** Admission gate. `retain` parses admission but does not require `newCommands=allow`. */
+export type G2AdmissionGate = "newCommands" | "reconciliation" | "retain";
+
+export type G2RetainedState = "uploaded_unverified" | "verified" | "linked";
+
+/**
+ * Authorized retained original. Bytes are hashed via chunked `open()`, never returned as base64.
+ * `originalDurable` is not on this type — verified/linked means the stored original is retained.
+ */
+export type G2RetrieveSuccess = {
+  ok: true;
+  evidenceId: string;
+  ownerUid: string;
+  ledgerId: string;
+  receiptId: string;
+  category: string;
+  mime: string;
+  state: G2RetainedState;
+  claimedSha256: string;
+  actualSha256: string;
+  claimedByteSize: number;
+  byteSize: number;
+  reservationId: string;
+  generation: string;
+  storagePath: string;
+  originalFileName: string | null;
+  verified: VerifiedEvidenceResult | null;
+};
+
+export type G2RetrieveResult = G2RetrieveSuccess | G2Deny;
+
+export type G2ListSuccess = {
+  ok: true;
+  evidenceIds: string[];
+};
+
+export type G2ListResult = G2ListSuccess | G2Deny;
+
 export type G2Hooks = {
   afterReads?: (attempt: number) => Promise<void> | void;
 };

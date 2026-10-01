@@ -14,20 +14,56 @@ import { readFile } from "node:fs/promises";
 import {
   evidenceReplayIdentityError,
   isAllowedOriginalMime,
+  isRetainedOriginalState,
   isSha256Hex,
   isWave1OriginalCategory,
+  originalEvidenceFromVerifiedResult,
   originalSizeError,
   reservationIdentityError,
   type AllowedOriginalMime,
   type EvidenceReplayIdentity,
+  type OriginalEvidence,
   type Wave1OriginalCategory,
 } from "../../src/goodsEvidence/evidence";
+import type { VerifiedEvidenceResult } from "../../src/goodsEvidence/ports";
 import type { GrinEvidenceUploadPort, GrinEvidenceUploadResult } from "../../src/services/grin/outbox/ports";
 import { GoodsEvidenceStorageAdapter } from "./adapter";
 import { isRetryable } from "./retry";
-import type { G2BlobStore, G2Deny, G2LifecycleResult, G2ReserveResult } from "./types";
+import type {
+  G2BlobStore,
+  G2Deny,
+  G2LifecycleResult,
+  G2ReserveResult,
+  G2RetrieveResult,
+  G2RetrieveSuccess,
+} from "./types";
 
-export type GrinEvidencePort = GrinEvidenceUploadPort & { portKind: "INJECTED" };
+export type GrinEvidencePort = GrinEvidenceUploadPort & {
+  portKind: "INJECTED";
+  /**
+   * Extra method until Team 3 adds retrieve on GrinEvidenceUploadPort.
+   * Retained originals remain readable when newCommands=deny. Not a base64 download.
+   */
+  retrieveRetainedOriginal(input: {
+    uid: string;
+    ledgerId: string;
+    receiptId: string;
+    evidenceId: string;
+  }): Promise<GrinEvidenceRetrieveResult>;
+  /**
+   * Extra method until Team 3 adds list+retrieve. Does not allocate evidence objects.
+   */
+  listRetainedOriginals(input: {
+    uid: string;
+    ledgerId: string;
+    receiptId: string;
+  }): Promise<GrinEvidenceListResult>;
+  /**
+   * Extra method until Team 3 adds link. Requires newCommands=allow (a mutation).
+   * Upload already verify+links; this is for a stored VerifiedEvidenceResult.
+   */
+  linkVerified(input: { uid: string; verified: VerifiedEvidenceResult }): Promise<GrinEvidencePortResult>;
+};
 
 export type GrinEvidenceUploadInput = Parameters<GrinEvidenceUploadPort["upload"]>[0];
 
@@ -52,6 +88,22 @@ export type GrinEvidencePortResult = GrinEvidenceUploadResult & {
   actualSha256: string | null;
   reservationId: string | null;
 };
+
+/**
+ * Authorized retained original. `original` is set only for verified/linked.
+ * File bytes are not included. SQLITE_HOST Node readFile is not used here —
+ * hashing is the adapter chunked open() path.
+ */
+export type GrinEvidenceRetrieveResult =
+  | (G2RetrieveSuccess & {
+      original: OriginalEvidence | null;
+      originalDurable: boolean;
+    })
+  | (G2Deny & { original: null; originalDurable: false });
+
+export type GrinEvidenceListResult =
+  | { ok: true; retained: Array<Extract<GrinEvidenceRetrieveResult, { ok: true }>>; unverifiable: string[] }
+  | G2Deny;
 
 export type InjectedGrinEvidencePortDeps = {
   adapter: GoodsEvidenceStorageAdapter;
@@ -230,6 +282,16 @@ export function createInjectedGrinEvidencePort(deps: InjectedGrinEvidencePortDep
       }
       return uploadOriginal(deps, readLocalFile, portInput);
     },
+    async retrieveRetainedOriginal(input) {
+      const { uid, ledgerId, receiptId, evidenceId } = input;
+      return mapRetrieve(await deps.adapter.retrieveOriginal({ uid }, { ledgerId, receiptId, evidenceId }));
+    },
+    async listRetainedOriginals(input) {
+      return listAndRetrieve(deps.adapter, input);
+    },
+    async linkVerified(input) {
+      return mapLinkVerified(deps.adapter, input.uid, input.verified);
+    },
   };
   return port;
 }
@@ -247,6 +309,8 @@ async function uploadDerivative(
     return fail(input, true);
   }
   const kind = input.role === "thumbnail" ? "thumbnail" : "preview";
+  // Team 3 owns local-original retain/release. Thumbnail success is not originalDurable
+  // and must not release the local original.
   try {
     const reserved = await adapter.reserveDerivative(
       { uid: input.uid },
@@ -457,4 +521,74 @@ async function finishVerifyAndLink(
     return { ok: false, code: "invalid", detail: "receipt does not match stored evidence" };
   }
   return adapter.link(caller, current.verified);
+}
+
+function mapRetrieve(result: G2RetrieveResult): GrinEvidenceRetrieveResult {
+  if (!result.ok) {
+    return { ...result, original: null, originalDurable: false };
+  }
+  const verifiedOrLinked = result.state === "verified" || result.state === "linked";
+  const original =
+    verifiedOrLinked && result.verified
+      ? originalEvidenceFromVerifiedResult(result.verified, { originalFileName: result.originalFileName })
+      : null;
+  return {
+    ...result,
+    original,
+    originalDurable: verifiedOrLinked && Boolean(result.reservationId && result.generation),
+  };
+}
+
+async function listAndRetrieve(
+  adapter: GoodsEvidenceStorageAdapter,
+  input: { uid: string; ledgerId: string; receiptId: string }
+): Promise<GrinEvidenceListResult> {
+  const listed = await adapter.listReceiptEvidenceIds(
+    { uid: input.uid },
+    { ledgerId: input.ledgerId, receiptId: input.receiptId }
+  );
+  if (!listed.ok) return listed;
+  const retained: Array<Extract<GrinEvidenceRetrieveResult, { ok: true }>> = [];
+  const unverifiable: string[] = [];
+  for (const evidenceId of listed.evidenceIds) {
+    const retrieved = mapRetrieve(
+      await adapter.retrieveOriginal(
+        { uid: input.uid },
+        { evidenceId, ledgerId: input.ledgerId, receiptId: input.receiptId }
+      )
+    );
+    if (retrieved.ok && isRetainedOriginalState(retrieved.state)) {
+      retained.push(retrieved);
+    } else {
+      unverifiable.push(evidenceId);
+    }
+  }
+  return { ok: true, retained, unverifiable };
+}
+
+async function mapLinkVerified(
+  adapter: GoodsEvidenceStorageAdapter,
+  uid: string,
+  verified: VerifiedEvidenceResult
+): Promise<GrinEvidencePortResult> {
+  const input: GrinEvidencePortUploadInput = {
+    uid,
+    ledgerId: verified.ledgerId,
+    receiptId: verified.receiptId,
+    evidenceId: verified.evidenceId,
+    role: "original",
+    localPath: "",
+    claimedSha256: verified.rawSha256,
+    category: verified.category,
+    sizeBytes: verified.byteSize,
+  };
+  const category = isWave1OriginalCategory(verified.category) ? verified.category : null;
+  if (!category) return fail(input, false, verified.generation, null, verified.rawSha256);
+  try {
+    const linked = await adapter.link({ uid }, verified);
+    if (!linked.ok) return mapDeny(input, linked, verified.generation, category, verified.rawSha256);
+    return mapLifecycle(input, linked, category, verified.rawSha256);
+  } catch (err) {
+    return fail(input, isRetryable(err) || true, verified.generation, category, verified.rawSha256);
+  }
 }

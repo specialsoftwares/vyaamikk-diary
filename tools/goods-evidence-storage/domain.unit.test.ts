@@ -24,6 +24,7 @@ import {
   isPermittedEvidenceTransition,
   originalRetentionError,
   originalSizeError,
+  originalEvidenceFromVerifiedResult,
   replacementMustUseNewObjectId,
   reservationIdentityError,
   splitIntoHashChunks,
@@ -31,6 +32,7 @@ import {
   verifiedEvidenceResultError,
   verifyOriginalBytes,
   wave1CategoryError,
+  isRetainedOriginalState,
   type ChunkHasher,
 } from "../../src/goodsEvidence/evidence";
 import { EVIDENCE_STATE_TRANSITIONS, type EvidenceObjectState } from "../../src/goodsEvidence/ports";
@@ -164,6 +166,21 @@ async function main(): Promise<void> {
   assert.equal(verifiedEvidenceResultError(verified), null);
   assert.equal(verified.rawSha256, expected);
   assert.equal(verified.generation, "1");
+
+  evidenceLabel("PURE_DOMAIN", "retained original states and verified-to-original mapping");
+  assert.equal(isRetainedOriginalState("uploaded_unverified"), true);
+  assert.equal(isRetainedOriginalState("verified"), true);
+  assert.equal(isRetainedOriginalState("linked"), true);
+  assert.equal(isRetainedOriginalState("reserved"), false);
+  assert.equal(isRetainedOriginalState("uploading"), false);
+  assert.equal(isRetainedOriginalState("rejected"), false);
+  assert.equal(isRetainedOriginalState("orphan_pending_review"), false);
+  const mapped = originalEvidenceFromVerifiedResult(verified, { originalFileName: "invoice.pdf" });
+  assert.equal(mapped.isDerivative, false);
+  assert.equal(mapped.verification, "verified");
+  assert.equal(mapped.rawSha256, expected);
+  assert.equal(mapped.storageObjectGeneration, "1");
+  assert.equal(mapped.originalFileName, "invoice.pdf");
 
   evidenceLabel("PURE_DOMAIN", "replay identity must match owner ledger receipt id category hash size");
   const identity = {

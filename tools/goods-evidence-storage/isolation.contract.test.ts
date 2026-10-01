@@ -65,6 +65,12 @@ assert.match(isolatedStorage, /hasDerivativeFlightReservation/);
 assert.match(isolatedStorage, /pending_deletion|status/);
 assert.doesNotMatch(isolatedStorage, /getDownloadURL/);
 
+const packInputs = readFileSync(join(repoRoot, "src/goodsEvidence/evidencePackInputs.ts"), "utf8");
+assert.match(packInputs, /assembleEvidencePackInputs/);
+assert.match(packInputs, /invoice reference is not a retained invoice original/);
+assert.doesNotMatch(packInputs, /completeness:\s*["']complete["']/);
+assert.doesNotMatch(packInputs, /toString\(\s*["']base64["']\s*\)/);
+
 const appJson = readFileSync(join(repoRoot, "app.json"), "utf8");
 assert.doesNotMatch(appJson, /GOODS_EVIDENCE/);
 

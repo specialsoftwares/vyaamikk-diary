@@ -1039,6 +1039,48 @@ async function main(): Promise<void> {
     assert.equal(stored.generation, "newer-gen");
   }
 
+  evidenceLabel("INJECTED_PORT", "retrieve retained original when newCommands=deny; verify stays denied");
+  {
+    const { adapter, blobs, db } = adapterPair();
+    const bytes = sampleBytes(33);
+    const { verified } = await putAndVerify({
+      adapter,
+      blobs,
+      uid: OWNER,
+      ledgerId: LEDGER,
+      receiptId: RECEIPT,
+      evidenceId: "ev_retain",
+      bytes,
+    });
+    const linked = await adapter.link({ uid: OWNER }, verified);
+    assert.equal(linked.ok, true);
+    db.snapshot.set(
+      `users/${OWNER}/goodsEvidenceAdmission/runtime`,
+      JSON.stringify({ schemaVersion: 1, newCommands: "deny", reconciliation: "allow" })
+    );
+    const retrieved = await adapter.retrieveOriginal(
+      { uid: OWNER },
+      { evidenceId: "ev_retain", ledgerId: LEDGER, receiptId: RECEIPT }
+    );
+    assert.equal(retrieved.ok, true);
+    if (!retrieved.ok) throw new Error("retrieve");
+    assert.equal(retrieved.state, "linked");
+    assert.equal(retrieved.actualSha256, sha256Bytes(bytes));
+    assert.equal(retrieved.reservationId, verified.storagePath.split("/")[3]);
+    const verifyDenied = await adapter.verify(
+      { uid: OWNER },
+      { evidenceId: "ev_retain", ledgerId: LEDGER, receiptId: RECEIPT }
+    );
+    assert.equal(verifyDenied.ok, false);
+    if (!verifyDenied.ok) assert.equal(verifyDenied.code, "policy_denied");
+    const getDenied = await adapter.getRecord(
+      { uid: OWNER },
+      { evidenceId: "ev_retain", ledgerId: LEDGER, receiptId: RECEIPT }
+    );
+    assert.equal(getDenied.ok, false);
+    if (!getDenied.ok) assert.equal(getDenied.code, "policy_denied");
+  }
+
   console.log("tools/goods-evidence-storage/injected.unit.test.ts: ok");
 }
 

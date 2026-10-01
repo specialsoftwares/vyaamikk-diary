@@ -19,6 +19,7 @@ import {
   isAllowedOriginalMime,
   isDerivativeStorageKind,
   isPermittedEvidenceTransition,
+  isRetainedOriginalState,
   isWave1OriginalCategory,
   originalCountError,
   originalMimeError,
@@ -58,13 +59,16 @@ import { isRetryable } from "./retry";
 import type {
   AdmissionPolicy,
   EvidenceRecord,
+  G2AdmissionGate,
   G2BlobStore,
   G2Clock,
   G2Deny,
   G2Firestore,
   G2Hooks,
   G2LifecycleResult,
+  G2ListResult,
   G2ReserveResult,
+  G2RetrieveResult,
   G2Transaction,
   TrustedCaller,
 } from "./types";
@@ -85,6 +89,7 @@ const RESERVE_KEYS = new Set([
   "originalFileName",
 ]);
 const LIFECYCLE_KEYS = new Set(["evidenceId", "ledgerId", "receiptId"]);
+const RECEIPT_SCOPE_KEYS = new Set(["ledgerId", "receiptId"]);
 const SERVER_FIELDS = new Set([
   "objectKey",
   "storagePath",
@@ -586,6 +591,94 @@ export class GoodsEvidenceStorageAdapter {
   }
 
   /**
+   * Authorized read of a retained original. `newCommands=deny` does not erase this.
+   * Hashes stored bytes via chunked `open()`. Does not return file bytes or base64.
+   * Verify/link/reserve still require `newCommands=allow`. Read-only: no overwrite/delete.
+   */
+  async retrieveOriginal(caller: TrustedCaller, input: unknown): Promise<G2RetrieveResult> {
+    const ids = await this.parseAuthorizedLifecycle(caller, input, "retain");
+    if (!ids.ok) return ids;
+    const loaded = await this.loadAuthorized(ids.uid, ids.ledgerId, ids.evidenceId, ids.receiptId, {
+      policyKey: "retain",
+      retainedOnly: true,
+    });
+    if (!loaded.ok) return loaded;
+    const record = loaded.record;
+    if (!isRetainedOriginalState(record.state)) {
+      return deny("invalid", "original is not retained");
+    }
+    const opened = await this.blobs.open(record.storagePath);
+    if (!opened) return deny("not_found", "stored original is missing");
+    if (record.generation && opened.generation !== record.generation) {
+      return deny("integrity", GENERIC_DENY);
+    }
+    const hashed = await verifyOriginalChunks(record.claimedSha256, opened.chunks, nodeChunkHasher());
+    const after = await this.blobs.stat(record.storagePath);
+    if (!after || after.generation !== opened.generation) {
+      return deny("integrity", GENERIC_DENY);
+    }
+    const reauth = await this.parseAuthorizedLifecycle(caller, input, "retain");
+    if (!reauth.ok) return reauth;
+    if (record.state === "verified" || record.state === "linked") {
+      if (
+        !hashed.ok ||
+        hashed.actual !== record.actualSha256 ||
+        hashed.byteSize !== (record.actualByteSize ?? record.claimedByteSize)
+      ) {
+        return deny("integrity", GENERIC_DENY);
+      }
+    }
+    return {
+      ok: true,
+      evidenceId: record.evidenceId,
+      ownerUid: record.ownerUid,
+      ledgerId: record.ledgerId,
+      receiptId: record.receiptId,
+      category: record.category,
+      mime: record.mime,
+      state: record.state,
+      claimedSha256: record.claimedSha256,
+      actualSha256: hashed.actual,
+      claimedByteSize: record.claimedByteSize,
+      byteSize: hashed.byteSize,
+      reservationId: record.objectKey,
+      generation: opened.generation,
+      storagePath: record.storagePath,
+      originalFileName: record.originalFileName,
+      verified: record.verifiedResult,
+    };
+  }
+
+  /**
+   * Receipt-scoped evidence ids. Retained reads are not gated on `newCommands`.
+   * Does not allocate objects. Missing control is an empty list, not a new reservation.
+   */
+  async listReceiptEvidenceIds(caller: TrustedCaller, input: unknown): Promise<G2ListResult> {
+    if (!caller.uid) return deny("unauthenticated", GENERIC_DENY);
+    const gatedInput = await this.authorizeInput(caller.uid, input, "retain");
+    if (!gatedInput.ok) return gatedInput;
+    if (!isPlainObject(input)) return deny("invalid", "request is required");
+    const extra = extraKeyError(input, RECEIPT_SCOPE_KEYS, "request");
+    if (extra) return deny("invalid", extra);
+    const ledgerErr = documentIdError("ledgerId", input.ledgerId);
+    if (ledgerErr) return deny("invalid", ledgerErr);
+    const receiptErr = documentIdError("receiptId", input.receiptId);
+    if (receiptErr) return deny("invalid", receiptErr);
+    const uid = caller.uid;
+    const ledgerId = input.ledgerId as string;
+    const receiptId = input.receiptId as string;
+    return this.runAttempts(async (tx, attempt) => {
+      const gated = await this.authorize(tx, uid, ledgerId, receiptId, attempt, "retain");
+      if (!gated.ok) return gated;
+      const controlSnap = await tx.get(this.db.doc(evidenceControlPath(uid, ledgerId, receiptId)));
+      if (!controlSnap.exists) return { ok: true as const, evidenceIds: [] };
+      const originalIds = parseStringIds(controlSnap.data()?.originalIds);
+      if (!originalIds) return deny("integrity", GENERIC_DENY);
+      return { ok: true as const, evidenceIds: originalIds };
+    });
+  }
+
+  /**
    * Derivative paths are separate from originals. A derivative cannot assert that
    * a missing original is retained, and cannot produce VerifiedEvidenceResult.
    * Parent object-key binding alone does not authorize unlimited derivatives.
@@ -955,10 +1048,11 @@ export class GoodsEvidenceStorageAdapter {
 
   private async parseAuthorizedLifecycle(
     caller: TrustedCaller,
-    input: unknown
+    input: unknown,
+    policyKey: G2AdmissionGate = "newCommands"
   ): Promise<G2Deny | { ok: true; uid: string; ledgerId: string; evidenceId: string; receiptId: string | null }> {
     if (!caller.uid) return deny("unauthenticated", GENERIC_DENY);
-    const gatedInput = await this.authorizeInput(caller.uid, input);
+    const gatedInput = await this.authorizeInput(caller.uid, input, policyKey);
     if (!gatedInput.ok) return gatedInput;
     return this.parseLifecycle(caller, input);
   }
@@ -994,19 +1088,21 @@ export class GoodsEvidenceStorageAdapter {
     uid: string,
     ledgerId: string,
     evidenceId: string,
-    receiptId: string | null
+    receiptId: string | null,
+    options: { policyKey?: G2AdmissionGate; retainedOnly?: boolean } = {}
   ): Promise<G2Deny | { ok: true; record: EvidenceRecord }> {
+    const policyKey = options.policyKey ?? "newCommands";
     return this.runAttempts(async (tx, attempt) => {
       const objectRef = this.db.doc(evidenceObjectPath(uid, ledgerId, evidenceId));
       const objectSnap = await tx.get(objectRef);
       if (!objectSnap.exists) {
-        const gatedMissing = await this.authorize(tx, uid, ledgerId, receiptId, attempt, "newCommands");
+        const gatedMissing = await this.authorize(tx, uid, ledgerId, receiptId, attempt, policyKey);
         if (!gatedMissing.ok) return gatedMissing;
         return deny("not_found", "evidence object not found");
       }
       const record = parseRecord(objectSnap.data());
       if (!record) return deny("integrity", GENERIC_DENY);
-      const gated = await this.authorize(tx, uid, ledgerId, record.receiptId, attempt, "newCommands");
+      const gated = await this.authorize(tx, uid, ledgerId, record.receiptId, attempt, policyKey);
       if (!gated.ok) return gated;
       const keySnap = await tx.get(this.db.doc(objectKeyPath(record.ownerUid, record.objectKey)));
       if (objectKeyBindingError(record, keySnap.data())) return deny("integrity", GENERIC_DENY);
@@ -1019,6 +1115,9 @@ export class GoodsEvidenceStorageAdapter {
       }
       if (record.ownerUid !== uid || record.ledgerId !== ledgerId || record.evidenceId !== evidenceId) {
         return deny("forbidden", GENERIC_DENY);
+      }
+      if (options.retainedOnly && !isRetainedOriginalState(record.state)) {
+        return deny("invalid", "original is not retained");
       }
       return { ok: true as const, record };
     });
@@ -1041,7 +1140,11 @@ export class GoodsEvidenceStorageAdapter {
     });
   }
 
-  private async authorizeInput(uid: string, input: unknown): Promise<{ ok: true } | G2Deny> {
+  private async authorizeInput(
+    uid: string,
+    input: unknown,
+    policyKey: G2AdmissionGate = "newCommands"
+  ): Promise<{ ok: true } | G2Deny> {
     const peeked = peekScopeIds(input);
     return this.runAttempts(async (tx, attempt) => {
       const gated = await this.authorize(
@@ -1050,7 +1153,7 @@ export class GoodsEvidenceStorageAdapter {
         peeked.ledgerId,
         peeked.receiptId,
         attempt,
-        "newCommands"
+        policyKey
       );
       if (!gated.ok) return gated;
       return { ok: true as const };
@@ -1063,7 +1166,7 @@ export class GoodsEvidenceStorageAdapter {
     ledgerId: string | null,
     receiptId: string | null,
     attempt: number,
-    policyKey: "newCommands" | "reconciliation"
+    policyKey: G2AdmissionGate
   ): Promise<{ ok: true; policy: AdmissionPolicy } | G2Deny> {
     const userSnap = await tx.get(this.db.doc(userPath(uid)));
     const ledgerSnap = ledgerId ? await tx.get(this.db.doc(ledgerPath(uid, ledgerId))) : null;
@@ -1082,7 +1185,7 @@ export class GoodsEvidenceStorageAdapter {
     }
     const policy = parsePolicy(admissionSnap.data());
     if (!policy) return deny("policy_denied", GENERIC_DENY);
-    if (policy[policyKey] !== "allow") return deny("policy_denied", GENERIC_DENY);
+    if (policyKey !== "retain" && policy[policyKey] !== "allow") return deny("policy_denied", GENERIC_DENY);
     if (ledgerId && receiptId && receiptSnap && !receiptSnap.exists) {
       return deny("not_found", "receipt not found");
     }

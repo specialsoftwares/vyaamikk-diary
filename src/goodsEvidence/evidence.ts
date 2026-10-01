@@ -176,6 +176,17 @@ export function isEvidenceObjectState(value: unknown): value is EvidenceObjectSt
 }
 
 /**
+ * Originals that remain readable after `newCommands=deny`.
+ * Flight (`reserved` / `uploading`), `rejected`, and `orphan_pending_review` are not retained.
+ */
+export const RETAINED_ORIGINAL_STATES = ["uploaded_unverified", "verified", "linked"] as const;
+export type RetainedOriginalState = (typeof RETAINED_ORIGINAL_STATES)[number];
+
+export function isRetainedOriginalState(value: unknown): value is RetainedOriginalState {
+  return value === "uploaded_unverified" || value === "verified" || value === "linked";
+}
+
+/**
  * Retry may remain in the same state. Replacement after verification uses a new
  * object id; `rejected` and `linked` are terminal for this object id.
  */
@@ -543,4 +554,28 @@ export function verifiedResultsEquivalent(
     left.storagePath === right.storagePath &&
     left.generation === right.generation
   );
+}
+
+/**
+ * Pack/original view of a trusted verification. Does not copy object bytes.
+ * Hashes remain claims of stored bytes, not legal truth.
+ */
+export function originalEvidenceFromVerifiedResult(
+  verified: VerifiedEvidenceResult,
+  extras: { originalFileName?: string | null; labelledSupport?: LabelledEvidenceSupport } = {}
+): OriginalEvidence {
+  return {
+    evidenceId: verified.evidenceId,
+    category: verified.category,
+    originalFileName: extras.originalFileName && extras.originalFileName.trim() ? extras.originalFileName : "original",
+    mime: verified.mime,
+    byteSize: verified.byteSize,
+    rawSha256: verified.rawSha256,
+    storageObjectGeneration: verified.generation,
+    captureProvenance: "grin-g2-retained-original",
+    osConversionOccurred: false,
+    verification: "verified",
+    isDerivative: false,
+    labelledSupport: extras.labelledSupport,
+  };
 }

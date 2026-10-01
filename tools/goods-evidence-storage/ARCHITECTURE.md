@@ -33,11 +33,15 @@ Orphan recovery hashes stored bytes or rejects if the original is gone.
 
 ## Verification and link
 
-Client `claimedSha256` is a claim. Trusted verification streams stored bytes in `HASH_CHUNK_BYTES` (64 KiB) chunks, binds `generation`, and compares the claim. Link accepts only a `VerifiedEvidenceResult` whose hash/size/generation match the stored original. Finalize and link are idempotent.
+Client `claimedSha256` is a claim. Trusted verification streams stored bytes in `HASH_CHUNK_BYTES` (64 KiB) chunks, binds `generation`, and compares the claim. Link accepts only a `VerifiedEvidenceResult` whose hash/size/generation match the stored original. Finalize and link are idempotent. Authorized retrieve uses the same chunked `open()` hasher and does not return file bytes or base64. Host Node `readFile` on the upload port remains labelled not-a-native-memory-claim.
 
 ## Authorization
 
-Trusted uid, active user (no pending_deletion exception), ledger owner + active, receipt exists, admission `newCommands=allow` for new commands and verify/link. Auth uid wins over any body `ownerUid`. Cross-owner misses are `forbidden` (no existence leak). There is no global hash index. Isolated Storage Rules allow owner reads of retained (`uploaded_unverified` / `verified` / `linked`) originals even when `newCommands=deny`; that does not weaken adapter verify/link admission.
+Trusted uid, active user (no pending_deletion exception), ledger owner + active, receipt exists, admission `newCommands=allow` for new commands and verify/link. Auth uid wins over any body `ownerUid`. Cross-owner misses are `forbidden` (no existence leak). There is no global hash index. Isolated Storage Rules **and** adapter `retrieveOriginal` allow owner reads of retained (`uploaded_unverified` / `verified` / `linked`) originals even when `newCommands=deny`; that does not weaken adapter verify/link/reserve admission. Overwrite/delete stay denied.
+
+## Pack inputs
+
+`src/goodsEvidence/evidencePackInputs.ts` maps confirmed events + retained originals + associations into `assembleManifest` inputs. It does not force completeness. Missing, corrupt, or wrong-receipt originals stay incomplete. Invoice/challan snapshot fields are references, not retained originals. ITC is not determined here.
 
 ## Bounds (technical, not legal/quota)
 
