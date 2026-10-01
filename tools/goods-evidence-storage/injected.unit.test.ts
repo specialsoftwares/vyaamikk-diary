@@ -58,6 +58,50 @@ async function main(): Promise<void> {
     if (!denied.ok) assert.equal(denied.code, "forbidden");
   }
 
+  evidenceLabel("INJECTED_PORT", "pending_deletion garbage body is forbidden not invalid");
+  {
+    const db = FAKE_createInjectedFirestore();
+    FAKE_seedOwner(db, OWNER, LEDGER, RECEIPT, { userStatus: "pending_deletion" });
+    const pending = new GoodsEvidenceStorageAdapter(db, new FAKE_MemoryBlobStore(), testClock());
+    const garbage = { mime: 12, claimedByteSize: "nope", notAReserve: true };
+    const reserved = await pending.reserve({ uid: OWNER }, garbage);
+    assert.equal(reserved.ok, false);
+    if (!reserved.ok) {
+      assert.equal(reserved.code, "forbidden");
+      assert.notEqual(reserved.code, "invalid");
+    }
+    const shapedGarbage = {
+      evidenceId: "ev_pending_garbage",
+      ledgerId: LEDGER,
+      receiptId: RECEIPT,
+      category: "not-a-category",
+      mime: "text/plain",
+      claimedSha256: "not-a-hash",
+      claimedByteSize: -1,
+    };
+    const reservedShaped = await pending.reserve({ uid: OWNER }, shapedGarbage);
+    assert.equal(reservedShaped.ok, false);
+    if (!reservedShaped.ok) assert.equal(reservedShaped.code, "forbidden");
+    const completed = await pending.completeUpload({ uid: OWNER }, garbage);
+    assert.equal(completed.ok, false);
+    if (!completed.ok) assert.equal(completed.code, "forbidden");
+    const verified = await pending.verify({ uid: OWNER }, garbage);
+    assert.equal(verified.ok, false);
+    if (!verified.ok) assert.equal(verified.code, "forbidden");
+    const linked = await pending.link({ uid: OWNER }, garbage);
+    assert.equal(linked.ok, false);
+    if (!linked.ok) assert.equal(linked.code, "forbidden");
+    const unauthGarbage = await pending.reserve({ uid: null }, garbage);
+    assert.equal(unauthGarbage.ok, false);
+    if (!unauthGarbage.ok) assert.equal(unauthGarbage.code, "unauthenticated");
+    const activeDb = FAKE_createInjectedFirestore();
+    FAKE_seedOwner(activeDb, OWNER, LEDGER, RECEIPT);
+    const active = new GoodsEvidenceStorageAdapter(activeDb, new FAKE_MemoryBlobStore(), testClock());
+    const activeGarbage = await active.reserve({ uid: OWNER }, garbage);
+    assert.equal(activeGarbage.ok, false);
+    if (!activeGarbage.ok) assert.equal(activeGarbage.code, "invalid");
+  }
+
   evidenceLabel("INJECTED_PORT", "cross-owner deny does not leak existence");
   {
     const { adapter, blobs } = adapterPair();

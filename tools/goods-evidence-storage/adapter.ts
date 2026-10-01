@@ -110,6 +110,22 @@ function extraKeyError(value: Record<string, unknown>, allowed: Set<string>, lab
   return null;
 }
 
+function safeDocumentId(value: unknown): string | null {
+  return documentIdError("id", value) == null ? (value as string) : null;
+}
+
+/**
+ * Path-safe ledger/receipt ids for authz. Malformed values are omitted so a
+ * parse failure is not returned as the authorization result.
+ */
+function peekScopeIds(input: unknown): { ledgerId: string | null; receiptId: string | null } {
+  if (!isPlainObject(input)) return { ledgerId: null, receiptId: null };
+  return {
+    ledgerId: safeDocumentId(input.ledgerId),
+    receiptId: safeDocumentId(input.receiptId),
+  };
+}
+
 function parsePolicy(data: Record<string, unknown> | undefined): AdmissionPolicy | null {
   if (!data) return null;
   if (data.schemaVersion !== 1) return null;
@@ -208,9 +224,11 @@ export class GoodsEvidenceStorageAdapter {
 
   async reserve(caller: TrustedCaller, input: unknown): Promise<G2ReserveResult> {
     if (!caller.uid) return deny("unauthenticated", GENERIC_DENY);
+    const uid = caller.uid;
+    const gatedInput = await this.authorizeInput(uid, input);
+    if (!gatedInput.ok) return gatedInput;
     const parsed = this.parseReserve(input);
     if (!parsed.ok) return parsed;
-    const uid = caller.uid;
     return this.runAttempts(async (tx, attempt) => {
       const gated = await this.authorize(
         tx,
@@ -304,7 +322,7 @@ export class GoodsEvidenceStorageAdapter {
   }
 
   async completeUpload(caller: TrustedCaller, input: unknown): Promise<G2LifecycleResult> {
-    const ids = this.parseLifecycle(caller, input);
+    const ids = await this.parseAuthorizedLifecycle(caller, input);
     if (!ids.ok) return ids;
     const loaded = await this.loadAuthorized(ids.uid, ids.ledgerId, ids.evidenceId);
     if (!loaded.ok) return loaded;
@@ -342,7 +360,7 @@ export class GoodsEvidenceStorageAdapter {
   }
 
   async verify(caller: TrustedCaller, input: unknown): Promise<G2LifecycleResult> {
-    const ids = this.parseLifecycle(caller, input);
+    const ids = await this.parseAuthorizedLifecycle(caller, input);
     if (!ids.ok) return ids;
     const loaded = await this.loadAuthorized(ids.uid, ids.ledgerId, ids.evidenceId);
     if (!loaded.ok) return loaded;
@@ -361,7 +379,7 @@ export class GoodsEvidenceStorageAdapter {
   }
 
   async recoverOrphan(caller: TrustedCaller, input: unknown): Promise<G2LifecycleResult> {
-    const ids = this.parseLifecycle(caller, input);
+    const ids = await this.parseAuthorizedLifecycle(caller, input);
     if (!ids.ok) return ids;
     const loaded = await this.loadAuthorized(ids.uid, ids.ledgerId, ids.evidenceId);
     if (!loaded.ok) return loaded;
@@ -399,6 +417,8 @@ export class GoodsEvidenceStorageAdapter {
 
   async link(caller: TrustedCaller, input: unknown): Promise<G2LifecycleResult> {
     if (!caller.uid) return deny("unauthenticated", GENERIC_DENY);
+    const gatedInput = await this.authorizeInput(caller.uid, input);
+    if (!gatedInput.ok) return gatedInput;
     const shapeErr = verifiedEvidenceResultError(input);
     if (shapeErr) return deny("invalid", shapeErr);
     const verified = input as VerifiedEvidenceResult;
@@ -448,7 +468,7 @@ export class GoodsEvidenceStorageAdapter {
   }
 
   async getRecord(caller: TrustedCaller, input: unknown): Promise<G2LifecycleResult> {
-    const ids = this.parseLifecycle(caller, input);
+    const ids = await this.parseAuthorizedLifecycle(caller, input);
     if (!ids.ok) return ids;
     const loaded = await this.loadAuthorized(ids.uid, ids.ledgerId, ids.evidenceId);
     if (!loaded.ok) return loaded;
@@ -464,6 +484,8 @@ export class GoodsEvidenceStorageAdapter {
     input: unknown
   ): Promise<{ ok: true; parentEvidenceId: string; storagePath: string; kind: string } | G2Deny> {
     if (!caller.uid) return deny("unauthenticated", GENERIC_DENY);
+    const gatedInput = await this.authorizeInput(caller.uid, input);
+    if (!gatedInput.ok) return gatedInput;
     if (!isPlainObject(input)) return deny("invalid", "request is required");
     const evidenceErr = evidenceIdError(input.evidenceId);
     if (evidenceErr) return deny("invalid", evidenceErr);
@@ -584,7 +606,7 @@ export class GoodsEvidenceStorageAdapter {
     input: unknown,
     mode: "begin" | "retry"
   ): Promise<G2LifecycleResult> {
-    const ids = this.parseLifecycle(caller, input);
+    const ids = await this.parseAuthorizedLifecycle(caller, input);
     if (!ids.ok) return ids;
     return this.runAttempts(async (tx, attempt) => {
       const objectRef = this.db.doc(evidenceObjectPath(ids.uid, ids.ledgerId, ids.evidenceId));
@@ -744,6 +766,16 @@ export class GoodsEvidenceStorageAdapter {
     };
   }
 
+  private async parseAuthorizedLifecycle(
+    caller: TrustedCaller,
+    input: unknown
+  ): Promise<G2Deny | { ok: true; uid: string; ledgerId: string; evidenceId: string }> {
+    if (!caller.uid) return deny("unauthenticated", GENERIC_DENY);
+    const gatedInput = await this.authorizeInput(caller.uid, input);
+    if (!gatedInput.ok) return gatedInput;
+    return this.parseLifecycle(caller, input);
+  }
+
   private parseLifecycle(
     caller: TrustedCaller,
     input: unknown
@@ -780,32 +812,51 @@ export class GoodsEvidenceStorageAdapter {
     });
   }
 
+  private async authorizeInput(uid: string, input: unknown): Promise<{ ok: true } | G2Deny> {
+    const peeked = peekScopeIds(input);
+    return this.runAttempts(async (tx, attempt) => {
+      const gated = await this.authorize(
+        tx,
+        uid,
+        peeked.ledgerId,
+        peeked.receiptId,
+        attempt,
+        "newCommands"
+      );
+      if (!gated.ok) return gated;
+      return { ok: true as const };
+    });
+  }
+
   private async authorize(
     tx: G2Transaction,
     uid: string,
-    ledgerId: string,
+    ledgerId: string | null,
     receiptId: string | null,
     attempt: number,
     policyKey: "newCommands" | "reconciliation"
   ): Promise<{ ok: true; policy: AdmissionPolicy } | G2Deny> {
     const userSnap = await tx.get(this.db.doc(userPath(uid)));
-    const ledgerSnap = await tx.get(this.db.doc(ledgerPath(uid, ledgerId)));
+    const ledgerSnap = ledgerId ? await tx.get(this.db.doc(ledgerPath(uid, ledgerId))) : null;
     const admissionSnap = await tx.get(this.db.doc(admissionPath(uid)));
-    const receiptSnap = receiptId
-      ? await tx.get(this.db.doc(receiptPath(uid, ledgerId, receiptId)))
-      : null;
+    const receiptSnap =
+      ledgerId && receiptId ? await tx.get(this.db.doc(receiptPath(uid, ledgerId, receiptId))) : null;
     await this.hooks.afterReads?.(attempt);
     if (!userSnap.exists) return deny("forbidden", GENERIC_DENY);
     const user = userSnap.data();
     if ((user?.status ?? "active") !== "active") return deny("forbidden", GENERIC_DENY);
-    if (!ledgerSnap.exists) return deny("forbidden", GENERIC_DENY);
-    const ledger = ledgerSnap.data();
-    if (ledger?.ownerUid !== uid) return deny("forbidden", GENERIC_DENY);
-    if (ledger?.status !== "active") return deny("forbidden", GENERIC_DENY);
+    if (ledgerId) {
+      if (!ledgerSnap?.exists) return deny("forbidden", GENERIC_DENY);
+      const ledger = ledgerSnap.data();
+      if (ledger?.ownerUid !== uid) return deny("forbidden", GENERIC_DENY);
+      if (ledger?.status !== "active") return deny("forbidden", GENERIC_DENY);
+    }
     const policy = parsePolicy(admissionSnap.data());
     if (!policy) return deny("policy_denied", GENERIC_DENY);
     if (policy[policyKey] !== "allow") return deny("policy_denied", GENERIC_DENY);
-    if (receiptId && receiptSnap && !receiptSnap.exists) return deny("not_found", "receipt not found");
+    if (ledgerId && receiptId && receiptSnap && !receiptSnap.exists) {
+      return deny("not_found", "receipt not found");
+    }
     return { ok: true, policy };
   }
 
