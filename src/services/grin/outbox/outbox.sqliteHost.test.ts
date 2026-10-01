@@ -153,6 +153,7 @@ async function main() {
       localPath: "/tmp/grin-orig-1.bin",
       claimedSha256: "b".repeat(64),
       byteSize: 12,
+      category: "invoice",
     });
     box.attachLocalFile(sessionA1, {
       ledgerId: "ledger_1",
@@ -208,6 +209,7 @@ async function main() {
     const filesAfterOrig = box.listLocalFiles("owner_a", "ledger_1", "grcp_retry_1");
     assert.equal(filesAfterOrig.find((f) => f.role === "original")?.originalDurable, true);
     assert.equal(filesAfterOrig.find((f) => f.role === "original")?.retainLocal, true);
+    assert.equal(filesAfterOrig.find((f) => f.role === "original")?.category, "invoice");
     const released = box.releaseLocalOriginalIfDurable("owner_a", "ledger_1", "ev_orig_1");
     assert.equal(released.ok, true);
     assert.equal(box.listLocalFiles("owner_a", "ledger_1", "grcp_retry_1").find((f) => f.role === "original")?.retainLocal, false);
@@ -254,6 +256,8 @@ async function main() {
 
     const sessionB = box.beginOwnerSession("owner_b");
     assert.equal(box.listForOwner("owner_b").length, 0);
+    assert.equal(box.listForOwnerAndLedger("owner_a", "ledger_1").some((r) => r.receiptId === "grcp_lost_1"), true);
+    assert.equal(box.listForOwnerAndLedger("owner_a", "ledger_other").length, 0);
     assert.ok(box.listForOwner("owner_a").some((r) => r.receiptId === "grcp_lost_1"));
     const bFlush = await box.dispatchDue(sessionB, "worker_b");
     assert.equal(bFlush.processed, 0);
@@ -396,6 +400,8 @@ async function main() {
       evidenceId: "ev_retire_1",
       role: "original",
       localPath: "/tmp/grin-retire.bin",
+      category: "weighment",
+      byteSize: 8,
     });
     const hold = box.applyAccountRetirementHold("owner_a");
     assert.ok(hold.retainedUnsyncCount > 0);
@@ -571,6 +577,344 @@ async function main() {
     assert.equal(erMutRecover.results.find((r) => r.commandId === "gcmd_er3_001")?.localState, "issued");
     assert.equal(erMutRecover.results.find((r) => r.commandId === "gcmd_er3_001")?.replayed, true);
     assert.equal(erMutBox.getRecord("owner_er3", "ledger_1", "grcp_er3_1")?.issuedNumber, null);
+
+    // W2-01: retired persist must throw session_retired and must not self-revive.
+    const sessionRetirePersist = box.beginOwnerSession("owner_w201");
+    box.endOwnerSession("owner_w201");
+    assert.throws(
+      () =>
+        box.persistDraftAndQueue(sessionRetirePersist, {
+          ledgerId: "ledger_1",
+          receiptId: "grcp_w201_1",
+          commandId: "gcmd_w201_01",
+          body: body("grcp_w201_1"),
+        }),
+      (err: unknown) => err instanceof Error && err.message === "session_retired"
+    );
+    assert.throws(
+      () =>
+        box.persistMutationAndQueue(sessionRetirePersist, {
+          ledgerId: "ledger_1",
+          receiptId: "grcp_w201_1",
+          commandId: "gcmd_w201_m1",
+          type: "amendFields",
+          body: { receiptId: "grcp_w201_1", expectedVersion: 1 },
+        }),
+      (err: unknown) => err instanceof Error && err.message === "session_retired"
+    );
+    assert.equal(box.getRecord("owner_w201", "ledger_1", "grcp_w201_1"), null);
+    const runtimeW201 = db.getFirstSync<{ session_active: number; dispatch_generation: number }>(
+      "SELECT session_active, dispatch_generation FROM grin_owner_runtime WHERE owner_uid = ?",
+      ["owner_w201"]
+    );
+    assert.equal(Number(runtimeW201?.session_active), 0);
+
+    // W2-01 / W2-02: persistMutationAndQueue is a real queue, not an always-refusing stub.
+    const mutSession = mutateBox.beginOwnerSession("owner_w201b");
+    const issuedFirst = mutateBox.persistDraftAndQueue(mutSession, {
+      ledgerId: "ledger_1",
+      receiptId: "grcp_w201b",
+      commandId: "gcmd_w201b_r",
+      body: body("grcp_w201b"),
+    });
+    assert.equal(issuedFirst.localState, "queued");
+    const issuedFlush = await mutateBox.dispatchDue(mutSession, "worker_w201b");
+    assert.equal(issuedFlush.results.find((r) => r.commandId === "gcmd_w201b_r")?.localState, "issued");
+    const serialsBeforeMut = mutateServer.serialsIssued;
+    const mutQueued = mutateBox.persistMutationAndQueue(mutSession, {
+      ledgerId: "ledger_1",
+      receiptId: "grcp_w201b",
+      commandId: "gcmd_w201b_m2",
+      type: "recordQc",
+      body: { receiptId: "grcp_w201b", expectedVersion: 1 },
+    });
+    assert.equal(mutQueued.commandId, "gcmd_w201b_m2");
+    assert.equal(peekQueuedCommand(db, "owner_w201b", "ledger_1", "gcmd_w201b_m2")?.localState, "queued");
+    const againSame = mutateBox.persistMutationAndQueue(mutSession, {
+      ledgerId: "ledger_1",
+      receiptId: "grcp_w201b",
+      commandId: "gcmd_w201b_m2",
+      type: "recordQc",
+      body: { receiptId: "grcp_w201b", expectedVersion: 1 },
+    });
+    assert.equal(againSame.commandId, "gcmd_w201b_m2");
+    const mutDispatch = await mutateBox.dispatchDue(mutSession, "worker_w201b");
+    assert.equal(mutDispatch.results.find((r) => r.commandId === "gcmd_w201b_m2")?.localState, "issued");
+    assert.equal(mutateServer.serialsIssued, serialsBeforeMut);
+    assert.equal(mutateBox.getRecord("owner_w201b", "ledger_1", "grcp_w201b")?.issuedNumber != null, true);
+
+    const mutConflictSession = mutateBox.beginOwnerSession("owner_w201c");
+    const mutConflictQueued = mutateBox.persistMutationAndQueue(mutConflictSession, {
+      ledgerId: "ledger_1",
+      receiptId: "grcp_w201c",
+      commandId: "gcmd_w201c_m",
+      type: "amendFields",
+      body: { receiptId: "grcp_w201c", expectedVersion: 1 },
+    });
+    assert.equal(mutConflictQueued.localState, "queued");
+    const mutConflictIdempotent = mutateBox.persistMutationAndQueue(mutConflictSession, {
+      ledgerId: "ledger_1",
+      receiptId: "grcp_w201c",
+      commandId: "gcmd_w201c_m",
+      type: "amendFields",
+      body: { receiptId: "grcp_w201c", expectedVersion: 1 },
+    });
+    assert.equal(mutConflictIdempotent.localState, "queued");
+    const conflictedMut = mutateBox.persistMutationAndQueue(mutConflictSession, {
+      ledgerId: "ledger_1",
+      receiptId: "grcp_w201c",
+      commandId: "gcmd_w201c_m",
+      type: "amendFields",
+      body: { receiptId: "grcp_w201c", expectedVersion: 99 },
+    });
+    assert.equal(conflictedMut.localState, "conflicted");
+
+    // W2-02: concurrent dispatchDue with the same worker name must not both own the live attempt.
+    const sameWorkerServer = createFakeGrinServerPort();
+    const sameWorkerBox = new GrinOutbox({ db, server: sameWorkerServer });
+    const sessionSame = sameWorkerBox.beginOwnerSession("owner_same");
+    sameWorkerBox.persistDraftAndQueue(sessionSame, {
+      ledgerId: "ledger_1",
+      receiptId: "grcp_same_1",
+      commandId: "gcmd_same_01",
+      body: body("grcp_same_1"),
+    });
+    let releaseSame!: () => void;
+    sameWorkerServer.holdNextRegister = new Promise<void>((resolve) => {
+      releaseSame = resolve;
+    });
+    const firstSame = sameWorkerBox.dispatchDue(sessionSame, "worker_same");
+    await sameWorkerServer.waitUntilRegisterEntered();
+    const firstAttempt = peekQueuedCommand(db, "owner_same", "ledger_1", "gcmd_same_01");
+    assert.ok(firstAttempt?.leaseAttemptId);
+    const secondSame = await sameWorkerBox.dispatchDue(sessionSame, "worker_same");
+    assert.equal(
+      secondSame.results.some((r) => r.commandId === "gcmd_same_01" && r.skipped === "lease_held"),
+      true
+    );
+    assert.equal(peekQueuedCommand(db, "owner_same", "ledger_1", "gcmd_same_01")?.leaseAttemptId, firstAttempt?.leaseAttemptId);
+    releaseSame();
+    const firstSameDone = await firstSame;
+    sameWorkerServer.holdNextRegister = null;
+    assert.equal(firstSameDone.results.find((r) => r.commandId === "gcmd_same_01")?.localState, "issued");
+    assert.equal(sameWorkerServer.serialsIssued, 1);
+
+    // W2-02: expiry takeover; old success and old failure must not clobber the new attempt.
+    let fenceNow = 3_000_000;
+    const fenceClock = { nowMs: () => fenceNow };
+    const fenceServer = createFakeGrinServerPort();
+    const fenceBox = new GrinOutbox({ db, server: fenceServer, clock: fenceClock, leaseTtlMs: 1_000 });
+    const sessionFence = fenceBox.beginOwnerSession("owner_fence");
+    fenceBox.persistDraftAndQueue(sessionFence, {
+      ledgerId: "ledger_1",
+      receiptId: "grcp_fence_1",
+      commandId: "gcmd_fence01",
+      body: body("grcp_fence_1"),
+    });
+    let releaseFenceOld!: () => void;
+    fenceServer.holdNextRegister = new Promise<void>((resolve) => {
+      releaseFenceOld = resolve;
+    });
+    const oldAttemptDispatch = fenceBox.dispatchDue(sessionFence, "worker_fence_old");
+    await fenceServer.waitUntilRegisterEntered();
+    fenceNow += 5_000;
+    fenceServer.holdNextRegister = null;
+    fenceServer.refreshEnteredWait();
+    const newAttemptDispatch = fenceBox.dispatchDue(sessionFence, "worker_fence_new");
+    const stealUntil = Date.now() + 2_000;
+    let stolenFence = peekQueuedCommand(db, "owner_fence", "ledger_1", "gcmd_fence01");
+    while (stolenFence?.leaseWorkerId !== "worker_fence_new" && Date.now() < stealUntil) {
+      await Promise.resolve();
+      stolenFence = peekQueuedCommand(db, "owner_fence", "ledger_1", "gcmd_fence01");
+    }
+    assert.equal(stolenFence?.leaseWorkerId, "worker_fence_new");
+    const newAttemptId = stolenFence?.leaseAttemptId;
+    assert.ok(newAttemptId);
+    assert.notEqual(newAttemptId, firstAttempt?.leaseAttemptId);
+    const newDone = await newAttemptDispatch;
+    assert.equal(newDone.results.find((r) => r.commandId === "gcmd_fence01")?.localState, "issued");
+    assert.equal(fenceBox.getRecord("owner_fence", "ledger_1", "grcp_fence_1")?.issuedNumber, "GRIN/MAIN/FY2026-27/000001");
+    fenceServer.denyCode = "invalid";
+    releaseFenceOld();
+    const oldDone = await oldAttemptDispatch;
+    fenceServer.denyCode = null;
+    fenceServer.holdNextRegister = null;
+    assert.equal(oldDone.results.find((r) => r.commandId === "gcmd_fence01")?.skipped, "lease_held");
+    assert.equal(oldDone.results.find((r) => r.commandId === "gcmd_fence01")?.issuedNumber, null);
+    assert.notEqual(fenceBox.getRecord("owner_fence", "ledger_1", "grcp_fence_1")?.localState, "failed_permanent");
+    assert.equal(fenceBox.getRecord("owner_fence", "ledger_1", "grcp_fence_1")?.issuedNumber, "GRIN/MAIN/FY2026-27/000001");
+    assert.equal(peekQueuedCommand(db, "owner_fence", "ledger_1", "gcmd_fence01")?.leaseAttemptId, null);
+
+    // W2-02: retirement BEFORE an ambiguous failure would start reconcile.
+    const retireServer = createFakeGrinServerPort();
+    const retireBox = new GrinOutbox({ db, server: retireServer });
+    const sessionRetireRpc = retireBox.beginOwnerSession("owner_retire_rpc");
+    retireBox.persistDraftAndQueue(sessionRetireRpc, {
+      ledgerId: "ledger_1",
+      receiptId: "grcp_retire_rpc",
+      commandId: "gcmd_retrpc01",
+      body: body("grcp_retire_rpc"),
+    });
+    const reconcilesBeforeAmbiguous = retireServer.reconcileCalls;
+    let releaseRetireRpc!: () => void;
+    retireServer.holdNextRegister = new Promise<void>((resolve) => {
+      releaseRetireRpc = resolve;
+    });
+    const retireInflight = retireBox.dispatchDue(sessionRetireRpc, "worker_retire_rpc");
+    await retireServer.waitUntilRegisterEntered();
+    retireBox.endOwnerSession("owner_retire_rpc");
+    retireServer.dropNextResponse = true;
+    releaseRetireRpc();
+    const retireAmbiguous = await retireInflight;
+    retireServer.holdNextRegister = null;
+    assert.equal(retireAmbiguous.results.find((r) => r.commandId === "gcmd_retrpc01")?.skipped, "session_retired");
+    assert.equal(retireServer.reconcileCalls, reconcilesBeforeAmbiguous);
+    assert.equal(retireBox.getRecord("owner_retire_rpc", "ledger_1", "grcp_retire_rpc")?.issuedNumber, null);
+    const sessionRetireReplay = retireBox.beginOwnerSession("owner_retire_rpc");
+    const replayedRetire = await retireBox.dispatchDue(sessionRetireReplay, "worker_retire_rpc2");
+    assert.equal(replayedRetire.results.find((r) => r.commandId === "gcmd_retrpc01")?.localState, "issued");
+    assert.equal(replayedRetire.results.find((r) => r.commandId === "gcmd_retrpc01")?.replayed, true);
+    assert.equal(retireServer.serialsIssued, 1);
+
+    // W2-02: SQLITE_HOST reopen replay without a second serial (not NATIVE_DEVICE).
+    const replayServer = createFakeGrinServerPort();
+    replayServer.dropNextResponse = true;
+    let replayBox = new GrinOutbox({ db, server: replayServer });
+    const sessionReplay1 = replayBox.beginOwnerSession("owner_replay");
+    replayBox.persistDraftAndQueue(sessionReplay1, {
+      ledgerId: "ledger_1",
+      receiptId: "grcp_replay_1",
+      commandId: "gcmd_replay01",
+      body: body("grcp_replay_1"),
+    });
+    const lostReplay = await replayBox.dispatchDue(sessionReplay1, "worker_replay");
+    assert.equal(lostReplay.results.find((r) => r.commandId === "gcmd_replay01")?.replayed, true);
+    assert.equal(replayServer.serialsIssued, 1);
+    db = reopen();
+    replayBox = new GrinOutbox({ db, server: replayServer });
+    const sessionReplay2 = replayBox.beginOwnerSession("owner_replay");
+    const afterReopen = await replayBox.recoverAfterRestart(sessionReplay2, "worker_replay2");
+    const replayItem = afterReopen.results.find((r) => r.commandId === "gcmd_replay01");
+    assert.ok(replayItem == null || replayItem.localState === "issued" || replayItem.skipped);
+    assert.equal(replayBox.getRecord("owner_replay", "ledger_1", "grcp_replay_1")?.issuedNumber, "GRIN/MAIN/FY2026-27/000001");
+    assert.equal(replayServer.serialsIssued, 1);
+
+    // W2-02 / W2-03: account switch during original and derivative upload; derivative failure; identity fence.
+    const evServer = createFakeGrinServerPort();
+    const evPort = createFakeEvidenceUploadPort();
+    const evBox = new GrinOutbox({ db, server: evServer, evidence: evPort });
+    const sessionEv = evBox.beginOwnerSession("owner_ev");
+    evBox.persistDraftAndQueue(sessionEv, {
+      ledgerId: "ledger_1",
+      receiptId: "grcp_ev_1",
+      commandId: "gcmd_ev_0001",
+      body: body("grcp_ev_1"),
+    });
+    evBox.attachLocalFile(sessionEv, {
+      ledgerId: "ledger_1",
+      receiptId: "grcp_ev_1",
+      evidenceId: "ev_switch_1",
+      role: "original",
+      localPath: "/tmp/grin-switch.bin",
+      claimedSha256: "c".repeat(64),
+      byteSize: 20,
+      category: "ewb",
+    });
+    evBox.attachLocalFile(sessionEv, {
+      ledgerId: "ledger_1",
+      receiptId: "grcp_ev_1",
+      evidenceId: "ev_switch_1",
+      role: "thumbnail",
+      localPath: "/tmp/grin-switch.jpg",
+      byteSize: 3,
+    });
+    const registeredEv = await evBox.dispatchDue(sessionEv, "worker_ev");
+    assert.equal(registeredEv.results.find((r) => r.commandId === "gcmd_ev_0001")?.localState, "attachment_pending");
+
+    evPort.failNextDerivative = true;
+    evPort.remainingOriginalFails = 5;
+    const derivFail = await evBox.dispatchDue(sessionEv, "worker_ev");
+    assert.equal(derivFail.results.find((r) => r.commandId === "gcmd_ev_0001")?.localState, "attachment_pending");
+    const afterDerivFail = evBox.listLocalFiles("owner_ev", "ledger_1", "grcp_ev_1");
+    assert.notEqual(afterDerivFail.find((f) => f.role === "thumbnail")?.uploadState, "uploaded_derivative");
+    assert.equal(afterDerivFail.find((f) => f.role === "original")?.originalDurable, false);
+
+    evPort.holdUploadRole = "original";
+    evPort.remainingOriginalFails = 0;
+    evPort.failNextDerivative = false;
+    let releaseOrigUpload!: () => void;
+    evPort.holdNextUpload = new Promise<void>((resolve) => {
+      releaseOrigUpload = resolve;
+    });
+    evPort.refreshUploadEnteredWait();
+    const origInflight = evBox.dispatchDue(sessionEv, "worker_ev");
+    await evPort.waitUntilUploadEntered();
+    evBox.endOwnerSession("owner_ev");
+    releaseOrigUpload();
+    const origSwitched = await origInflight;
+    evPort.holdNextUpload = null;
+    evPort.holdUploadRole = null;
+    assert.equal(origSwitched.results.find((r) => r.commandId === "gcmd_ev_0001")?.skipped, "session_retired");
+    assert.equal(evBox.listLocalFiles("owner_ev", "ledger_1", "grcp_ev_1").find((f) => f.role === "original")?.originalDurable, false);
+
+    const sessionEv2 = evBox.beginOwnerSession("owner_ev");
+    evPort.mismatchOriginalIdentity = true;
+    const mismatchFlush = await evBox.dispatchDue(sessionEv2, "worker_ev2");
+    assert.equal(mismatchFlush.results.find((r) => r.commandId === "gcmd_ev_0001")?.localState, "attachment_pending");
+    assert.equal(evBox.listLocalFiles("owner_ev", "ledger_1", "grcp_ev_1").find((f) => f.role === "original")?.originalDurable, false);
+    evPort.mismatchOriginalIdentity = false;
+    const recoveredEv = await evBox.dispatchDue(sessionEv2, "worker_ev2");
+    assert.equal(recoveredEv.results.find((r) => r.commandId === "gcmd_ev_0001")?.localState, "issued");
+    const recoveredFiles = evBox.listLocalFiles("owner_ev", "ledger_1", "grcp_ev_1");
+    assert.equal(recoveredFiles.find((f) => f.role === "original")?.originalDurable, true);
+    assert.equal(recoveredFiles.find((f) => f.role === "original")?.category, "ewb");
+    assert.equal(recoveredFiles.find((f) => f.role === "thumbnail")?.originalDurable, false);
+    assert.equal(recoveredFiles.find((f) => f.role === "thumbnail")?.uploadState, "uploaded_derivative");
+
+    evPort.holdUploadRole = "thumbnail";
+    const sessionDeriv = evBox.beginOwnerSession("owner_ev_d");
+    evBox.persistDraftAndQueue(sessionDeriv, {
+      ledgerId: "ledger_1",
+      receiptId: "grcp_ev_d",
+      commandId: "gcmd_ev_d001",
+      body: body("grcp_ev_d"),
+    });
+    evBox.attachLocalFile(sessionDeriv, {
+      ledgerId: "ledger_1",
+      receiptId: "grcp_ev_d",
+      evidenceId: "ev_deriv_1",
+      role: "original",
+      localPath: "/tmp/grin-deriv.bin",
+      claimedSha256: "d".repeat(64),
+      byteSize: 9,
+      category: "vehicle",
+    });
+    evBox.attachLocalFile(sessionDeriv, {
+      ledgerId: "ledger_1",
+      receiptId: "grcp_ev_d",
+      evidenceId: "ev_deriv_1",
+      role: "thumbnail",
+      localPath: "/tmp/grin-deriv.jpg",
+      byteSize: 2,
+    });
+    await evBox.dispatchDue(sessionDeriv, "worker_ev_d");
+    evPort.remainingOriginalFails = 5;
+    evPort.refreshUploadEnteredWait();
+    let releaseThumb!: () => void;
+    evPort.holdNextUpload = new Promise<void>((resolve) => {
+      releaseThumb = resolve;
+    });
+    const thumbInflight = evBox.dispatchDue(sessionDeriv, "worker_ev_d");
+    await evPort.waitUntilUploadEntered();
+    evBox.endOwnerSession("owner_ev_d");
+    releaseThumb();
+    const thumbSwitched = await thumbInflight;
+    evPort.holdNextUpload = null;
+    evPort.holdUploadRole = null;
+    assert.equal(thumbSwitched.results.find((r) => r.commandId === "gcmd_ev_d001")?.skipped, "session_retired");
+    const thumbFiles = evBox.listLocalFiles("owner_ev_d", "ledger_1", "grcp_ev_d");
+    assert.notEqual(thumbFiles.find((f) => f.role === "thumbnail")?.uploadState, "uploaded_derivative");
+    assert.equal(thumbFiles.find((f) => f.role === "original")?.originalDurable, false);
 
     const diaryStill = db.getFirstSync<{ id: string }>(
       "SELECT id FROM entries_local WHERE id = ?",

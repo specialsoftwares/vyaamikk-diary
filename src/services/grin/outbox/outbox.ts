@@ -5,6 +5,7 @@ import type {
   GrinRegisterResult,
   OutboxLocalState,
 } from "@/goodsEvidence/ports";
+import { isWave1OriginalCategory, type Wave1OriginalCategory } from "@/goodsEvidence/evidence";
 import { migrateToV10 } from "@/localDb/migrateGrin";
 import { classifyRegisterResult, isNetworkAmbiguous, nextRetryState, type ClassifiedOutcome } from "./classify";
 import { freezeAdmittedCommand } from "./freeze";
@@ -16,17 +17,19 @@ import {
   assertReceiptId,
   commandRowId,
   evidenceRowId,
+  mintAttemptId,
   mintCommandId,
   mintReceiptId,
   receiptRowId,
 } from "./ids";
 import type {
   GrinEvidenceUploadPort,
+  GrinEvidenceUploadResult,
   GrinMutationEnvelope,
   GrinRegisterEnvelope,
   GrinServerCommandPort,
 } from "./ports";
-import { assertTransition, isUnsynchronisedState } from "./transitions";
+import { assertTransition, canTransition, isUnsynchronisedState } from "./transitions";
 import type {
   ActionableFailure,
   GrinDispatchSession,
@@ -138,6 +141,7 @@ type CommandRow = {
   lease_worker_id: string | null;
   lease_generation: number | null;
   lease_until_ms: number | null;
+  lease_attempt_id: string | null;
   dispatch_generation: number;
   created_at: number;
   updated_at: number;
@@ -153,6 +157,7 @@ type EvidenceRow = {
   local_path: string;
   claimed_sha256: string | null;
   byte_size: number | null;
+  category: string | null;
   upload_state: string;
   original_durable: number;
   retain_local: number;
@@ -175,6 +180,20 @@ export type PersistDraftInput = {
 
 export type QueueInput = PersistDraftInput & {
   commandType?: GrinCommandType;
+};
+
+export type PersistMutationInput = {
+  ledgerId: string;
+  receiptId: string;
+  type: GrinMutationEnvelope["type"];
+  body: unknown;
+  commandId?: string;
+};
+
+type AttemptFence = {
+  workerId: string;
+  attemptId: string;
+  generation: number;
 };
 
 export type SaveDraftResult =
@@ -247,6 +266,11 @@ export class GrinOutbox {
     migrateToV10(this.db as unknown as Parameters<typeof migrateToV10>[0]);
   }
 
+  /**
+   * Only session starter. persistDraftAndQueue, persistMutationAndQueue,
+   * dispatchDue, recoverAfterRestart, attachLocalFile, and completion must not
+   * call this to revive a retired session.
+   */
   beginOwnerSession(ownerUid: string): GrinDispatchSession {
     assertOwnerUid(ownerUid);
     const now = this.clock.nowMs();
@@ -396,6 +420,88 @@ export class GrinOutbox {
     return this.getRecord(session.ownerUid, ids.ledgerId, ids.receiptId)!;
   }
 
+  /**
+   * G4 mutations through the same admit contract as persistDraftAndQueue:
+   * immutable command identity, current session required, no self-revive.
+   * Does not call beginOwnerSession.
+   */
+  persistMutationAndQueue(session: GrinDispatchSession, input: PersistMutationInput): GrinLocalReceiptView {
+    this.assertSessionOwner(session, session.ownerUid);
+    if (!isMutationCommandType(input.type)) {
+      throw new Error("unsupported_type");
+    }
+    assertLedgerId(input.ledgerId);
+    assertReceiptId(input.receiptId);
+    const commandId = input.commandId ?? mintCommandId();
+    assertCommandId(commandId);
+    const frozen = freezeAdmittedCommand({
+      commandId,
+      type: input.type,
+      ownerUid: session.ownerUid,
+      ledgerId: input.ledgerId,
+      body: this.bodyWithReceiptId(input.body, input.receiptId),
+    });
+    const now = this.clock.nowMs();
+    this.db.withTransactionSync(() => {
+      const existingReceipt = this.readReceipt(session.ownerUid, input.ledgerId, input.receiptId);
+      const existingCommand = this.readCommand(session.ownerUid, input.ledgerId, frozen.commandId);
+      if (existingCommand) {
+        if (existingCommand.digest !== frozen.digest) {
+          this.markConflicted(existingReceipt, existingCommand, now);
+          return;
+        }
+        return;
+      }
+      if (!existingReceipt) {
+        this.insertReceipt({
+          ownerUid: session.ownerUid,
+          ledgerId: input.ledgerId,
+          receiptId: input.receiptId,
+          commandId: frozen.commandId,
+          digest: frozen.digest,
+          localState: "queued",
+          dispatchGeneration: session.dispatchGeneration,
+          payload: frozen.body,
+          now,
+        });
+      } else {
+        const from = parseState(existingReceipt.local_state);
+        const nextReceiptState: OutboxLocalState = from === "draft" ? "queued" : from;
+        if (from === "draft") assertTransition(from, nextReceiptState);
+        this.db.runSync(
+          `UPDATE grin_local_receipts
+              SET command_id = ?, digest = ?, local_state = ?, payload_json = ?, dispatch_generation = ?, updated_at = ?
+            WHERE id = ? AND owner_uid = ?`,
+          [
+            frozen.commandId,
+            frozen.digest,
+            nextReceiptState,
+            JSON.stringify(frozen.body),
+            session.dispatchGeneration,
+            now,
+            existingReceipt.id,
+            session.ownerUid,
+          ]
+        );
+      }
+      crashHook?.("after_receipt");
+      this.insertCommand({
+        ownerUid: session.ownerUid,
+        ledgerId: input.ledgerId,
+        commandId: frozen.commandId,
+        receiptId: input.receiptId,
+        commandType: input.type,
+        digest: frozen.digest,
+        frozenPayload: frozen.body,
+        localState: "queued",
+        dispatchGeneration: session.dispatchGeneration,
+        now,
+      });
+      crashHook?.("after_command");
+    });
+    return this.getRecord(session.ownerUid, input.ledgerId, input.receiptId)!;
+  }
+
   saveDraft(
     session: GrinDispatchSession,
     input: PersistDraftInput & { receiptId: string }
@@ -431,6 +537,16 @@ export class GrinOutbox {
     const rows = this.db.getAllSync<ReceiptRow>(
       `SELECT * FROM grin_local_receipts WHERE owner_uid = ? ORDER BY updated_at DESC`,
       [ownerUid]
+    );
+    return rows.map((row) => this.toView(row, this.readCommand(ownerUid, row.ledger_id, row.command_id)));
+  }
+
+  listForOwnerAndLedger(ownerUid: string, ledgerId: string): GrinLocalReceiptView[] {
+    assertOwnerUid(ownerUid);
+    assertLedgerId(ledgerId);
+    const rows = this.db.getAllSync<ReceiptRow>(
+      `SELECT * FROM grin_local_receipts WHERE owner_uid = ? AND ledger_id = ? ORDER BY updated_at DESC`,
+      [ownerUid, ledgerId]
     );
     return rows.map((row) => this.toView(row, this.readCommand(ownerUid, row.ledger_id, row.command_id)));
   }
@@ -511,10 +627,10 @@ export class GrinOutbox {
       crashHook?.("after_dispatching");
       slotsUsed += 1;
       if (state === "attachment_pending") {
-        results.push(await this.processAttachments(session, workerId, row));
+        results.push(await this.processAttachments(session, workerId, leased));
         continue;
       }
-      results.push(await this.dispatchLeased(session, workerId, row));
+      results.push(await this.dispatchLeased(session, workerId, leased));
     }
     return { processed: results.filter((r) => !r.skipped).length, results };
   }
@@ -533,17 +649,25 @@ export class GrinOutbox {
       localPath: string;
       claimedSha256?: string | null;
       byteSize?: number | null;
+      category?: unknown;
     }
   ): GrinLocalEvidenceFile {
     this.assertSessionOwner(session, session.ownerUid);
     assertReceiptId(input.receiptId);
+    let category: Wave1OriginalCategory | null = null;
+    if (input.role === "original") {
+      if (!isWave1OriginalCategory(input.category)) {
+        throw new Error("invalid_evidence_category");
+      }
+      category = input.category;
+    }
     const now = this.clock.nowMs();
     const id = evidenceRowId(session.ownerUid, input.ledgerId, input.evidenceId, input.role);
     this.db.runSync(
       `INSERT INTO grin_local_evidence_files (
          id, owner_uid, ledger_id, receipt_id, evidence_id, role, local_path, claimed_sha256,
-         byte_size, upload_state, original_durable, retain_local, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?, ?)`,
+         byte_size, category, upload_state, original_durable, retain_local, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?, ?)`,
       [
         id,
         session.ownerUid,
@@ -554,6 +678,7 @@ export class GrinOutbox {
         input.localPath,
         input.claimedSha256 ?? null,
         input.byteSize ?? null,
+        category,
         "local_only",
         now,
         now,
@@ -663,11 +788,47 @@ export class GrinOutbox {
     });
   }
 
+  private attemptFence(session: GrinDispatchSession, workerId: string, snapshot: CommandRow): AttemptFence | null {
+    if (!snapshot.lease_attempt_id) return null;
+    return {
+      workerId,
+      attemptId: snapshot.lease_attempt_id,
+      generation: session.dispatchGeneration,
+    };
+  }
+
+  private attemptOwns(
+    current: CommandRow | null,
+    fence: AttemptFence,
+    now: number
+  ): boolean {
+    if (!current) return false;
+    if (current.lease_worker_id !== fence.workerId) return false;
+    if (Number(current.lease_generation) !== fence.generation) return false;
+    if (current.lease_attempt_id !== fence.attemptId) return false;
+    if (Number(current.lease_until_ms ?? 0) <= now) return false;
+    return true;
+  }
+
+  private ownsLiveAttempt(
+    session: GrinDispatchSession,
+    fence: AttemptFence,
+    snapshot: CommandRow
+  ): boolean {
+    if (!this.isSessionCurrent(session)) return false;
+    const current = this.readCommand(snapshot.owner_uid, snapshot.ledger_id, snapshot.command_id);
+    return this.attemptOwns(current, fence, this.clock.nowMs());
+  }
+
   private async dispatchLeased(
     session: GrinDispatchSession,
     workerId: string,
     snapshot: CommandRow
   ): Promise<DispatchItemResult> {
+    const fence = this.attemptFence(session, workerId, snapshot);
+    if (!fence) {
+      return this.skipStaleCompletion(session, workerId, snapshot) ?? this.leaseHeldResult(snapshot);
+    }
     const commandType = snapshot.command_type;
     if (!this.canDispatchCommandType(commandType)) {
       this.releaseUnsupportedToQueued(snapshot);
@@ -680,8 +841,10 @@ export class GrinOutbox {
       };
     }
     if (isMutationCommandType(commandType)) {
-      return this.dispatchLeasedMutation(session, workerId, snapshot, commandType);
+      return this.dispatchLeasedMutation(session, workerId, snapshot, commandType, fence);
     }
+    const beforeRegister = this.skipStaleCompletion(session, workerId, snapshot);
+    if (beforeRegister) return beforeRegister;
     const envelope: GrinRegisterEnvelope = {
       commandId: snapshot.command_id,
       type: "registerGoodsReceipt",
@@ -698,6 +861,8 @@ export class GrinOutbox {
       });
     } catch (err) {
       if (!isNetworkAmbiguous(err)) throw err;
+      const beforeReconcile = this.skipStaleCompletion(session, workerId, snapshot);
+      if (beforeReconcile) return beforeReconcile;
       usedReconcile = true;
       result = registerResultFromReconcile(
         await this.server.reconcile({
@@ -709,14 +874,15 @@ export class GrinOutbox {
     }
     const stale = this.skipStaleCompletion(session, workerId, snapshot);
     if (stale) return stale;
-    return this.applyRegisterOutcome(snapshot, result, usedReconcile);
+    return this.applyRegisterOutcome(session, snapshot, result, usedReconcile, fence);
   }
 
   private async dispatchLeasedMutation(
     session: GrinDispatchSession,
     workerId: string,
     snapshot: CommandRow,
-    commandType: GrinMutationEnvelope["type"]
+    commandType: GrinMutationEnvelope["type"],
+    fence: AttemptFence
   ): Promise<DispatchItemResult> {
     const mutate = this.server.mutate;
     if (!mutate) {
@@ -729,6 +895,8 @@ export class GrinOutbox {
         skipped: "unsupported_type",
       };
     }
+    const beforeMutate = this.skipStaleCompletion(session, workerId, snapshot);
+    if (beforeMutate) return beforeMutate;
     const envelope: GrinMutationEnvelope = {
       commandId: snapshot.command_id,
       type: commandType,
@@ -745,6 +913,8 @@ export class GrinOutbox {
       });
     } catch (err) {
       if (!isNetworkAmbiguous(err)) throw err;
+      const beforeReconcile = this.skipStaleCompletion(session, workerId, snapshot);
+      if (beforeReconcile) return beforeReconcile;
       usedReconcile = true;
       result = mutationResultFromReconcile(
         await this.server.reconcile({
@@ -756,13 +926,13 @@ export class GrinOutbox {
     }
     const stale = this.skipStaleCompletion(session, workerId, snapshot);
     if (stale) return stale;
-    return this.applyMutationOutcome(snapshot, result, usedReconcile);
+    return this.applyMutationOutcome(session, snapshot, result, usedReconcile, fence);
   }
 
   /**
-   * After register/reconcile/mutate returns, do not persist if this session
-   * was retired (including same-owner) or the lease no longer belongs to
-   * this worker/generation. Does not mint issuedNumber from the server result.
+   * After register/reconcile/mutate/upload returns, do not persist if this
+   * session was retired, the unique attempt is no longer live, or the lease
+   * expired. Does not mint issuedNumber from the server result.
    */
   private skipStaleCompletion(
     session: GrinDispatchSession,
@@ -779,33 +949,30 @@ export class GrinOutbox {
         skipped: "session_retired",
       };
     }
+    const fence = this.attemptFence(session, workerId, snapshot);
     const current = this.readCommand(snapshot.owner_uid, snapshot.ledger_id, snapshot.command_id);
-    if (!current) {
-      return {
-        commandId: snapshot.command_id,
-        localState: parseState(snapshot.local_state),
-        issuedNumber: null,
-        replayed: false,
-        skipped: "lease_held",
-      };
-    }
-    const leaseGeneration = current.lease_generation == null ? null : Number(current.lease_generation);
-    if (current.lease_worker_id !== workerId || leaseGeneration !== session.dispatchGeneration) {
-      return {
-        commandId: snapshot.command_id,
-        localState: parseState(current.local_state),
-        issuedNumber: null,
-        replayed: false,
-        skipped: "lease_held",
-      };
+    if (!fence || !this.attemptOwns(current, fence, this.clock.nowMs())) {
+      return this.leaseHeldResult(current ?? snapshot);
     }
     return null;
   }
 
+  private leaseHeldResult(snapshot: CommandRow): DispatchItemResult {
+    return {
+      commandId: snapshot.command_id,
+      localState: parseState(snapshot.local_state),
+      issuedNumber: null,
+      replayed: false,
+      skipped: "lease_held",
+    };
+  }
+
   private applyRegisterOutcome(
+    session: GrinDispatchSession,
     snapshot: CommandRow,
     result: GrinRegisterResult,
-    usedReconcile: boolean
+    usedReconcile: boolean,
+    fence: AttemptFence
   ): DispatchItemResult {
     const now = this.clock.nowMs();
     const classified = classifyRegisterResult(result);
@@ -816,7 +983,7 @@ export class GrinOutbox {
         snapshot.receipt_id
       );
       const nextState: OutboxLocalState = pendingOriginals ? "attachment_pending" : "issued";
-      this.writeCommandAndReceipt(snapshot, {
+      const wrote = this.writeCommandAndReceipt(snapshot, {
         localState: nextState,
         issuedNumber: result.issuedNumber,
         serverRegisteredAtUtc: result.serverRegisteredAtUtc,
@@ -824,7 +991,12 @@ export class GrinOutbox {
         lastErrorActionable: null,
         clearLease: true,
         now,
+        session,
+        fence,
       });
+      if (!wrote) {
+        return this.skipStaleCompletion(session, fence.workerId, snapshot) ?? this.leaseHeldResult(snapshot);
+      }
       return {
         commandId: snapshot.command_id,
         localState: nextState,
@@ -832,16 +1004,18 @@ export class GrinOutbox {
         replayed: result.replayed || usedReconcile,
       };
     }
-    return this.applyNonSuccessOutcome(snapshot, result, classified, usedReconcile, {
+    return this.applyNonSuccessOutcome(session, snapshot, result, classified, usedReconcile, {
       issuedNumber: null,
       serverRegisteredAtUtc: null,
-    });
+    }, fence);
   }
 
   private applyMutationOutcome(
+    session: GrinDispatchSession,
     snapshot: CommandRow,
     result: GrinMutationResult,
-    usedReconcile: boolean
+    usedReconcile: boolean,
+    fence: AttemptFence
   ): DispatchItemResult {
     const receipt = this.readReceipt(snapshot.owner_uid, snapshot.ledger_id, snapshot.receipt_id);
     const issuedNumber = receipt?.issued_number ?? null;
@@ -849,7 +1023,7 @@ export class GrinOutbox {
     const classified = classifyRegisterResult(result);
     if (classified.kind === "success" && result.ok) {
       const now = this.clock.nowMs();
-      this.writeCommandAndReceipt(snapshot, {
+      const wrote = this.writeCommandAndReceipt(snapshot, {
         localState: "issued",
         issuedNumber,
         serverRegisteredAtUtc,
@@ -857,7 +1031,12 @@ export class GrinOutbox {
         lastErrorActionable: null,
         clearLease: true,
         now,
+        session,
+        fence,
       });
+      if (!wrote) {
+        return this.skipStaleCompletion(session, fence.workerId, snapshot) ?? this.leaseHeldResult(snapshot);
+      }
       return {
         commandId: snapshot.command_id,
         localState: "issued",
@@ -865,96 +1044,98 @@ export class GrinOutbox {
         replayed: result.replayed || usedReconcile,
       };
     }
-    return this.applyNonSuccessOutcome(snapshot, result, classified, usedReconcile, {
+    return this.applyNonSuccessOutcome(session, snapshot, result, classified, usedReconcile, {
       issuedNumber,
       serverRegisteredAtUtc,
-    });
+    }, fence);
   }
 
   private applyNonSuccessOutcome(
+    session: GrinDispatchSession,
     snapshot: CommandRow,
     result: GrinRegisterResult | GrinMutationResult,
     classified: ClassifiedOutcome,
     usedReconcile: boolean,
-    keep: { issuedNumber: string | null; serverRegisteredAtUtc: string | null }
+    keep: { issuedNumber: string | null; serverRegisteredAtUtc: string | null },
+    fence: AttemptFence
   ): DispatchItemResult {
     const now = this.clock.nowMs();
     if (classified.kind === "success") {
       throw new Error("classified_success_without_ok");
     }
-    if (classified.kind === "conflicted") {
-      this.writeCommandAndReceipt(snapshot, {
-        localState: "conflicted",
+    const writeOrSkip = (localState: OutboxLocalState, extra: {
+      lastErrorCode: string | null;
+      lastErrorActionable: ActionableFailure | null;
+      attemptCount?: number;
+    }): DispatchItemResult => {
+      const wrote = this.writeCommandAndReceipt(snapshot, {
+        localState,
         issuedNumber: keep.issuedNumber,
         serverRegisteredAtUtc: keep.serverRegisteredAtUtc,
-        lastErrorCode: classified.code,
-        lastErrorActionable: classified.actionable,
+        lastErrorCode: extra.lastErrorCode,
+        lastErrorActionable: extra.lastErrorActionable,
+        attemptCount: extra.attemptCount,
         clearLease: true,
         now,
+        session,
+        fence,
       });
+      if (!wrote) {
+        return this.skipStaleCompletion(session, fence.workerId, snapshot) ?? this.leaseHeldResult(snapshot);
+      }
       return {
         commandId: snapshot.command_id,
-        localState: "conflicted",
+        localState,
         issuedNumber: keep.issuedNumber,
         replayed: false,
       };
+    };
+    if (classified.kind === "conflicted") {
+      return writeOrSkip("conflicted", {
+        lastErrorCode: classified.code,
+        lastErrorActionable: classified.actionable,
+      });
     }
     if (classified.kind === "permanent") {
-      this.writeCommandAndReceipt(snapshot, {
-        localState: "failed_permanent",
-        issuedNumber: keep.issuedNumber,
-        serverRegisteredAtUtc: keep.serverRegisteredAtUtc,
+      return writeOrSkip("failed_permanent", {
         lastErrorCode: classified.code,
         lastErrorActionable: classified.actionable,
-        clearLease: true,
-        now,
       });
-      return {
-        commandId: snapshot.command_id,
-        localState: "failed_permanent",
-        issuedNumber: keep.issuedNumber,
-        replayed: false,
-      };
     }
     if (usedReconcile && result.ok === false && result.code === "not_found") {
       const attemptCount = Number(snapshot.attempt_count) + 1;
       const retry = nextRetryState(attemptCount, this.maxAttempts);
-      this.writeCommandAndReceipt(snapshot, {
-        localState: retry.state,
-        issuedNumber: keep.issuedNumber,
-        serverRegisteredAtUtc: keep.serverRegisteredAtUtc,
+      return writeOrSkip(retry.state, {
         lastErrorCode: "network_ambiguous",
         lastErrorActionable: retry.actionable,
         attemptCount,
-        clearLease: true,
-        now,
       });
-      return {
-        commandId: snapshot.command_id,
-        localState: retry.state,
-        issuedNumber: keep.issuedNumber,
-        replayed: false,
-      };
     }
     const attemptCount = Number(snapshot.attempt_count) + 1;
     const retry = nextRetryState(attemptCount, this.maxAttempts);
-    const state = retry.state;
-    this.writeCommandAndReceipt(snapshot, {
-      localState: state,
-      issuedNumber: keep.issuedNumber,
-      serverRegisteredAtUtc: keep.serverRegisteredAtUtc,
+    return writeOrSkip(retry.state, {
       lastErrorCode: classified.code,
       lastErrorActionable: retry.actionable,
       attemptCount,
-      clearLease: true,
-      now,
     });
-    return {
-      commandId: snapshot.command_id,
-      localState: state,
-      issuedNumber: keep.issuedNumber,
-      replayed: false,
-    };
+  }
+
+  private originalIdentityMatches(
+    file: GrinLocalEvidenceFile,
+    uploaded: GrinEvidenceUploadResult,
+    ownerUid: string
+  ): boolean {
+    if (!uploaded.ok || !uploaded.originalDurable) return false;
+    if (file.ownerUid !== ownerUid) return false;
+    if (uploaded.evidenceId !== file.evidenceId) return false;
+    if (uploaded.receiptId !== file.receiptId) return false;
+    if (uploaded.ledgerId !== file.ledgerId) return false;
+    if (uploaded.category !== file.category) return false;
+    const expected = file.claimedSha256;
+    if (expected) {
+      if (uploaded.actualSha256 !== expected && uploaded.claimedSha256 !== expected) return false;
+    }
+    return true;
   }
 
   private async processAttachments(
@@ -962,7 +1143,10 @@ export class GrinOutbox {
     workerId: string,
     snapshot: CommandRow
   ): Promise<DispatchItemResult> {
-    void workerId;
+    const fence = this.attemptFence(session, workerId, snapshot);
+    if (!fence) {
+      return this.skipStaleCompletion(session, workerId, snapshot) ?? this.leaseHeldResult(snapshot);
+    }
     const files = this.listLocalFiles(snapshot.owner_uid, snapshot.ledger_id, snapshot.receipt_id);
     if (!this.evidence) {
       return {
@@ -973,19 +1157,19 @@ export class GrinOutbox {
       };
     }
     for (const file of files) {
-      if (!this.isSessionCurrent(session)) {
-        return {
-          commandId: snapshot.command_id,
-          localState: "attachment_pending",
-          issuedNumber: this.readReceipt(snapshot.owner_uid, snapshot.ledger_id, snapshot.receipt_id)?.issued_number ?? null,
-          replayed: false,
-          skipped: "session_retired",
-        };
-      }
+      const before = this.skipStaleCompletion(session, workerId, snapshot);
+      if (before) return before;
       if (file.role !== "original" && file.uploadState !== "local_only" && file.uploadState !== "failed_retryable") {
         continue;
       }
       if (file.role === "original" && file.originalDurable) continue;
+      if (file.role === "original" && !isWave1OriginalCategory(file.category)) {
+        this.writeEvidenceUpload(session, snapshot, fence, file, "failed_retryable", false);
+        continue;
+      }
+      if (!this.ownsLiveAttempt(session, fence, snapshot)) {
+        return this.skipStaleCompletion(session, workerId, snapshot) ?? this.leaseHeldResult(snapshot);
+      }
       const uploaded = await this.evidence.upload({
         uid: snapshot.owner_uid,
         ledgerId: snapshot.ledger_id,
@@ -994,50 +1178,30 @@ export class GrinOutbox {
         role: file.role,
         localPath: file.localPath,
         claimedSha256: file.claimedSha256,
+        category: file.category,
+        sizeBytes: file.byteSize ?? 0,
       });
-      const now = this.clock.nowMs();
+      const after = this.skipStaleCompletion(session, workerId, snapshot);
+      if (after) return after;
       if (file.role === "thumbnail" || file.role === "metadata") {
-        this.db.runSync(
-          `UPDATE grin_local_evidence_files
-              SET upload_state = ?, original_durable = 0, retain_local = 1, updated_at = ?
-            WHERE id = ? AND owner_uid = ? AND role = ?`,
-          ["uploaded_derivative", now, evidenceRowId(snapshot.owner_uid, snapshot.ledger_id, file.evidenceId, file.role), snapshot.owner_uid, file.role]
-        );
+        if (uploaded.ok) {
+          this.writeEvidenceUpload(session, snapshot, fence, file, "uploaded_derivative", false);
+        } else {
+          this.writeEvidenceUpload(session, snapshot, fence, file, "failed_retryable", false);
+        }
         continue;
       }
-      if (uploaded.ok && uploaded.originalDurable) {
-        this.db.runSync(
-          `UPDATE grin_local_evidence_files
-              SET upload_state = ?, original_durable = 1, updated_at = ?
-            WHERE id = ? AND owner_uid = ? AND role = ?`,
-          [
-            "verified",
-            now,
-            evidenceRowId(snapshot.owner_uid, snapshot.ledger_id, file.evidenceId, "original"),
-            snapshot.owner_uid,
-            "original",
-          ]
-        );
+      if (this.originalIdentityMatches(file, uploaded, snapshot.owner_uid)) {
+        this.writeEvidenceUpload(session, snapshot, fence, file, "verified", true);
       } else {
-        this.db.runSync(
-          `UPDATE grin_local_evidence_files
-              SET upload_state = ?, original_durable = 0, retain_local = 1, updated_at = ?
-            WHERE id = ? AND owner_uid = ? AND role = ?`,
-          [
-            "failed_retryable",
-            now,
-            evidenceRowId(snapshot.owner_uid, snapshot.ledger_id, file.evidenceId, "original"),
-            snapshot.owner_uid,
-            "original",
-          ]
-        );
+        this.writeEvidenceUpload(session, snapshot, fence, file, "failed_retryable", false);
       }
     }
     const pending = this.hasUndurableOriginals(snapshot.owner_uid, snapshot.ledger_id, snapshot.receipt_id);
     const receipt = this.readReceipt(snapshot.owner_uid, snapshot.ledger_id, snapshot.receipt_id);
     const issuedNumber = receipt?.issued_number ?? null;
     const next: OutboxLocalState = pending ? "attachment_pending" : "issued";
-    this.writeCommandAndReceipt(snapshot, {
+    const wrote = this.writeCommandAndReceipt(snapshot, {
       localState: next,
       issuedNumber,
       serverRegisteredAtUtc: receipt?.server_registered_at_utc ?? null,
@@ -1045,7 +1209,12 @@ export class GrinOutbox {
       lastErrorActionable: pending ? "retry_when_online" : null,
       clearLease: true,
       now: this.clock.nowMs(),
+      session,
+      fence,
     });
+    if (!wrote) {
+      return this.skipStaleCompletion(session, workerId, snapshot) ?? this.leaseHeldResult(snapshot);
+    }
     return {
       commandId: snapshot.command_id,
       localState: next,
@@ -1054,36 +1223,65 @@ export class GrinOutbox {
     };
   }
 
-  private tryAcquireLease(session: GrinDispatchSession, workerId: string, row: CommandRow): boolean {
+  private writeEvidenceUpload(
+    session: GrinDispatchSession,
+    snapshot: CommandRow,
+    fence: AttemptFence,
+    file: GrinLocalEvidenceFile,
+    uploadState: GrinLocalEvidenceFile["uploadState"],
+    originalDurable: boolean
+  ): boolean {
+    const now = this.clock.nowMs();
+    const id = evidenceRowId(snapshot.owner_uid, snapshot.ledger_id, file.evidenceId, file.role);
+    let wrote = false;
+    this.db.withTransactionSync(() => {
+      if (!this.isSessionCurrent(session)) return;
+      const current = this.readCommand(snapshot.owner_uid, snapshot.ledger_id, snapshot.command_id);
+      if (!this.attemptOwns(current, fence, now)) return;
+      const result = this.db.runSync(
+        `UPDATE grin_local_evidence_files
+            SET upload_state = ?, original_durable = ?, retain_local = 1, updated_at = ?
+          WHERE id = ? AND owner_uid = ? AND role = ?`,
+        [uploadState, originalDurable ? 1 : 0, now, id, snapshot.owner_uid, file.role]
+      );
+      wrote = result.changes === 1;
+    });
+    return wrote;
+  }
+
+  private tryAcquireLease(session: GrinDispatchSession, workerId: string, row: CommandRow): CommandRow | null {
     const now = this.clock.nowMs();
     const from = parseState(row.local_state);
     const nextState: OutboxLocalState = from === "attachment_pending" ? "attachment_pending" : "dispatching";
     if (from !== nextState) assertTransition(from, nextState);
     const until = now + this.leaseTtlMs;
-    let acquired = false;
+    const attemptId = mintAttemptId();
+    let acquired: CommandRow | null = null;
     this.db.withTransactionSync(() => {
+      if (!this.isSessionCurrent(session)) return;
       const result = this.db.runSync(
         `UPDATE grin_outbox_commands
-            SET lease_worker_id = ?, lease_generation = ?, lease_until_ms = ?, local_state = ?, updated_at = ?
+            SET lease_worker_id = ?, lease_generation = ?, lease_until_ms = ?, lease_attempt_id = ?, local_state = ?, updated_at = ?
           WHERE id = ?
             AND owner_uid = ?
             AND local_state IN ('queued', 'failed_retryable', 'dispatching', 'attachment_pending')
             AND (
               lease_worker_id IS NULL
+              OR lease_until_ms IS NULL
               OR lease_until_ms <= ?
-              OR lease_worker_id = ?
+              OR lease_generation IS NULL
               OR lease_generation != ?
             )`,
         [
           workerId,
           session.dispatchGeneration,
           until,
+          attemptId,
           nextState,
           now,
           row.id,
           session.ownerUid,
           now,
-          workerId,
           session.dispatchGeneration,
         ]
       );
@@ -1092,20 +1290,20 @@ export class GrinOutbox {
         `UPDATE grin_local_receipts SET local_state = ?, updated_at = ? WHERE owner_uid = ? AND ledger_id = ? AND receipt_id = ?`,
         [nextState, now, row.owner_uid, row.ledger_id, row.receipt_id]
       );
-      acquired = true;
+      acquired = this.readCommand(row.owner_uid, row.ledger_id, row.command_id);
     });
     return acquired;
   }
 
   private leaseFree(
     row: CommandRow,
-    workerId: string,
+    _workerId: string,
     generation: number,
     now: number
   ): boolean {
+    void _workerId;
     if (!row.lease_worker_id) return true;
-    if (Number(row.lease_until_ms ?? 0) <= now) return true;
-    if (row.lease_worker_id === workerId) return true;
+    if (row.lease_until_ms == null || Number(row.lease_until_ms) <= now) return true;
     if (Number(row.lease_generation ?? -1) !== generation) return true;
     return false;
   }
@@ -1121,36 +1319,79 @@ export class GrinOutbox {
       attemptCount?: number;
       clearLease: boolean;
       now: number;
+      session?: GrinDispatchSession;
+      fence?: AttemptFence;
     }
-  ): void {
-    const fromCmd = this.readCommand(snapshot.owner_uid, snapshot.ledger_id, snapshot.command_id);
-    const from = fromCmd ? parseState(fromCmd.local_state) : parseState(snapshot.local_state);
-    assertTransition(from, args.localState);
+  ): boolean {
+    let wrote = false;
     this.db.withTransactionSync(() => {
-      this.db.runSync(
-        `UPDATE grin_outbox_commands
-            SET local_state = ?,
-                attempt_count = ?,
-                last_error_code = ?,
-                last_error_actionable = ?,
-                lease_worker_id = ?,
-                lease_generation = ?,
-                lease_until_ms = ?,
-                updated_at = ?
-          WHERE id = ? AND owner_uid = ?`,
-        [
-          args.localState,
-          args.attemptCount ?? snapshot.attempt_count,
-          args.lastErrorCode,
-          args.lastErrorActionable,
-          args.clearLease ? null : snapshot.lease_worker_id,
-          args.clearLease ? null : snapshot.lease_generation,
-          args.clearLease ? null : snapshot.lease_until_ms,
-          args.now,
-          snapshot.id,
-          snapshot.owner_uid,
-        ]
-      );
+      if (args.session && !this.isSessionCurrent(args.session)) return;
+      const fromCmd = this.readCommand(snapshot.owner_uid, snapshot.ledger_id, snapshot.command_id);
+      if (args.fence && !this.attemptOwns(fromCmd, args.fence, args.now)) return;
+      const from = fromCmd ? parseState(fromCmd.local_state) : parseState(snapshot.local_state);
+      if (!canTransition(from, args.localState)) return;
+      const commandResult = args.fence
+        ? this.db.runSync(
+            `UPDATE grin_outbox_commands
+                SET local_state = ?,
+                    attempt_count = ?,
+                    last_error_code = ?,
+                    last_error_actionable = ?,
+                    lease_worker_id = ?,
+                    lease_generation = ?,
+                    lease_until_ms = ?,
+                    lease_attempt_id = ?,
+                    updated_at = ?
+              WHERE id = ? AND owner_uid = ?
+                AND lease_attempt_id = ?
+                AND lease_worker_id = ?
+                AND lease_generation = ?
+                AND lease_until_ms > ?`,
+            [
+              args.localState,
+              args.attemptCount ?? snapshot.attempt_count,
+              args.lastErrorCode,
+              args.lastErrorActionable,
+              args.clearLease ? null : snapshot.lease_worker_id,
+              args.clearLease ? null : snapshot.lease_generation,
+              args.clearLease ? null : snapshot.lease_until_ms,
+              args.clearLease ? null : snapshot.lease_attempt_id,
+              args.now,
+              snapshot.id,
+              snapshot.owner_uid,
+              args.fence.attemptId,
+              args.fence.workerId,
+              args.fence.generation,
+              args.now,
+            ]
+          )
+        : this.db.runSync(
+            `UPDATE grin_outbox_commands
+                SET local_state = ?,
+                    attempt_count = ?,
+                    last_error_code = ?,
+                    last_error_actionable = ?,
+                    lease_worker_id = ?,
+                    lease_generation = ?,
+                    lease_until_ms = ?,
+                    lease_attempt_id = ?,
+                    updated_at = ?
+              WHERE id = ? AND owner_uid = ?`,
+            [
+              args.localState,
+              args.attemptCount ?? snapshot.attempt_count,
+              args.lastErrorCode,
+              args.lastErrorActionable,
+              args.clearLease ? null : snapshot.lease_worker_id,
+              args.clearLease ? null : snapshot.lease_generation,
+              args.clearLease ? null : snapshot.lease_until_ms,
+              args.clearLease ? null : snapshot.lease_attempt_id,
+              args.now,
+              snapshot.id,
+              snapshot.owner_uid,
+            ]
+          );
+      if (commandResult.changes !== 1) return;
       this.db.runSync(
         `UPDATE grin_local_receipts
             SET local_state = ?,
@@ -1168,7 +1409,9 @@ export class GrinOutbox {
           snapshot.receipt_id,
         ]
       );
+      wrote = true;
     });
+    return wrote;
   }
 
   private hasUndurableOriginals(ownerUid: string, ledgerId: string, receiptId: string): boolean {
@@ -1249,8 +1492,8 @@ export class GrinOutbox {
       `INSERT INTO grin_outbox_commands (
          id, owner_uid, ledger_id, command_id, receipt_id, command_type, digest, frozen_payload_json,
          local_state, attempt_count, max_attempts, last_error_code, last_error_actionable,
-         lease_worker_id, lease_generation, lease_until_ms, dispatch_generation, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, NULL, NULL, NULL, NULL, NULL, ?, ?, ?)`,
+         lease_worker_id, lease_generation, lease_until_ms, lease_attempt_id, dispatch_generation, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?, ?)`,
       [
         commandRowId(args.ownerUid, args.ledgerId, args.commandId),
         args.ownerUid,
@@ -1393,6 +1636,7 @@ export class GrinOutbox {
       localPath: row.local_path,
       claimedSha256: row.claimed_sha256,
       byteSize: row.byte_size == null ? null : Number(row.byte_size),
+      category: isWave1OriginalCategory(row.category) ? row.category : null,
       uploadState: row.upload_state as GrinLocalEvidenceFile["uploadState"],
       originalDurable: Number(row.original_durable) === 1,
       retainLocal: Number(row.retain_local) === 1,
@@ -1427,6 +1671,7 @@ export function peekQueuedCommand(
     leaseWorkerId: row.lease_worker_id,
     leaseGeneration: row.lease_generation == null ? null : Number(row.lease_generation),
     leaseUntilMs: row.lease_until_ms == null ? null : Number(row.lease_until_ms),
+    leaseAttemptId: row.lease_attempt_id ?? null,
     dispatchGeneration: Number(row.dispatch_generation),
   };
 }

@@ -1,6 +1,7 @@
+import type { Wave1OriginalCategory } from "@/goodsEvidence/evidence";
 import type { GrinCommandType, LocalReceiptRecord, OutboxLocalState } from "@/goodsEvidence/ports";
 
-export type { GrinCommandType, LocalReceiptRecord, OutboxLocalState };
+export type { GrinCommandType, LocalReceiptRecord, OutboxLocalState, Wave1OriginalCategory };
 
 export type GrinDispatchSession = {
   ownerUid: string;
@@ -26,6 +27,8 @@ export type GrinLocalEvidenceFile = {
   localPath: string;
   claimedSha256: string | null;
   byteSize: number | null;
+  /** Wave 1 original category; null for derivatives and unrepaired rows. */
+  category: Wave1OriginalCategory | null;
   uploadState: LocalEvidenceUploadState;
   originalDurable: boolean;
   retainLocal: boolean;
@@ -61,6 +64,7 @@ export type GrinQueuedCommand = {
   leaseWorkerId: string | null;
   leaseGeneration: number | null;
   leaseUntilMs: number | null;
+  leaseAttemptId: string | null;
   dispatchGeneration: number;
 };
 

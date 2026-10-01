@@ -7,7 +7,15 @@ import type {
   GrinRegisterSuccess,
   GrinStoredCommandResult,
 } from "@/goodsEvidence/ports";
-import type { GrinEvidenceUploadPort, GrinMutationEnvelope, GrinServerCommandPort } from "./ports";
+import { isWave1OriginalCategory } from "@/goodsEvidence/evidence";
+import type {
+  GrinEvidenceUploadInput,
+  GrinEvidenceUploadPort,
+  GrinEvidenceUploadResult,
+  GrinMutationEnvelope,
+  GrinServerCommandPort,
+} from "./ports";
+import type { LocalEvidenceRole } from "./types";
 
 type StoredCommand = {
   digest: string;
@@ -191,35 +199,132 @@ export function createFakeGrinServerPort(opts?: { mutate?: boolean }): FakeGrinS
   return port;
 }
 
+function notDurableResult(retryable: boolean, generation: string | null = null): GrinEvidenceUploadResult {
+  return {
+    ok: false,
+    originalDurable: false,
+    generation,
+    retryable,
+    evidenceId: null,
+    receiptId: null,
+    ledgerId: null,
+    category: null,
+    claimedSha256: null,
+    actualSha256: null,
+    reservationId: null,
+  };
+}
+
+function derivativeResult(ok: boolean, generation: string | null): GrinEvidenceUploadResult {
+  return {
+    ok,
+    originalDurable: false,
+    generation,
+    retryable: !ok,
+    evidenceId: null,
+    receiptId: null,
+    ledgerId: null,
+    category: null,
+    claimedSha256: null,
+    actualSha256: null,
+    reservationId: null,
+  };
+}
+
 export type FakeEvidenceUploadPort = GrinEvidenceUploadPort & {
   portKind: "FAKE";
   originalAttempts: number;
   thumbnailSuccesses: number;
   metadataSuccesses: number;
+  holdNextUpload: Promise<void> | null;
+  holdUploadRole: LocalEvidenceRole | null;
+  failNextDerivative: boolean;
+  mismatchOriginalIdentity: boolean;
+  remainingOriginalFails: number;
+  waitUntilUploadEntered(): Promise<void>;
+  refreshUploadEnteredWait(): void;
 };
 
 export function createFakeEvidenceUploadPort(opts?: { failOriginalTimes?: number }): FakeEvidenceUploadPort {
-  let remainingOriginalFails = opts?.failOriginalTimes ?? 0;
+  let notifyEntered: () => void = () => undefined;
+  let entered = new Promise<void>((resolve) => {
+    notifyEntered = resolve;
+  });
+
+  function armEntered(): void {
+    entered = new Promise<void>((resolve) => {
+      notifyEntered = resolve;
+    });
+  }
+
   const port: FakeEvidenceUploadPort = {
     portKind: "FAKE",
     originalAttempts: 0,
     thumbnailSuccesses: 0,
     metadataSuccesses: 0,
-    async upload(input) {
-      if (input.role === "thumbnail") {
-        port.thumbnailSuccesses += 1;
-        return { ok: true, originalDurable: false, generation: "thumb-gen", retryable: false };
+    holdNextUpload: null,
+    holdUploadRole: null,
+    failNextDerivative: false,
+    mismatchOriginalIdentity: false,
+    remainingOriginalFails: opts?.failOriginalTimes ?? 0,
+    waitUntilUploadEntered() {
+      return entered;
+    },
+    refreshUploadEnteredWait() {
+      armEntered();
+    },
+    async upload(input: GrinEvidenceUploadInput) {
+      const shouldHold = port.holdNextUpload && (port.holdUploadRole == null || port.holdUploadRole === input.role);
+      if (shouldHold) notifyEntered();
+      if (shouldHold && port.holdNextUpload) await port.holdNextUpload;
+
+      if (input.role === "thumbnail" || input.role === "metadata") {
+        if (port.failNextDerivative) {
+          port.failNextDerivative = false;
+          return derivativeResult(false, null);
+        }
+        if (input.role === "thumbnail") port.thumbnailSuccesses += 1;
+        else port.metadataSuccesses += 1;
+        return derivativeResult(true, input.role === "thumbnail" ? "thumb-gen" : "meta-gen");
       }
-      if (input.role === "metadata") {
-        port.metadataSuccesses += 1;
-        return { ok: true, originalDurable: false, generation: "meta-gen", retryable: false };
+
+      if (!isWave1OriginalCategory(input.category)) {
+        return notDurableResult(false);
       }
       port.originalAttempts += 1;
-      if (remainingOriginalFails > 0) {
-        remainingOriginalFails -= 1;
-        return { ok: false, originalDurable: false, generation: null, retryable: true };
+      if (port.remainingOriginalFails > 0) {
+        port.remainingOriginalFails -= 1;
+        return notDurableResult(true);
       }
-      return { ok: true, originalDurable: true, generation: "orig-gen-1", retryable: false };
+      const claimed = input.claimedSha256;
+      if (port.mismatchOriginalIdentity) {
+        return {
+          ok: true,
+          originalDurable: true,
+          generation: "orig-gen-mismatch",
+          retryable: false,
+          evidenceId: "ev_other",
+          receiptId: input.receiptId,
+          ledgerId: input.ledgerId,
+          category: input.category,
+          claimedSha256: claimed,
+          actualSha256: claimed,
+          reservationId: "resv_mismatch",
+        };
+      }
+      return {
+        ok: true,
+        originalDurable: true,
+        generation: "orig-gen-1",
+        retryable: false,
+        evidenceId: input.evidenceId,
+        receiptId: input.receiptId,
+        ledgerId: input.ledgerId,
+        category: input.category,
+        claimedSha256: claimed,
+        actualSha256: claimed,
+        reservationId: `resv_${input.evidenceId}`,
+      };
     },
   };
   return port;
