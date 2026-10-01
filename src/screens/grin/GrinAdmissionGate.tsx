@@ -2,16 +2,15 @@ import React from "react";
 import { StyleSheet, View } from "react-native";
 
 import { Banner, EmptyState, Header, Screen } from "@/components/ui";
-import {
-  isGoodsEvidenceBlockedByStoreRuntime,
-  isGoodsEvidenceEnabled,
-} from "@/goodsEvidence/featureFlag";
 import { useT } from "@/i18n";
+import { useAuth } from "@/state/auth";
 import {
   GRIN_APPLICATION_REPOSITORY_LABEL,
   grinRepositoryIsFake,
 } from "@/services/grin/repository";
 import { spacing, useThemedStyles } from "@/theme";
+
+import { GrinAdmittedSessionHost } from "./GrinAdmittedSessionHost";
 
 export function GrinAdmissionGate({
   title,
@@ -25,38 +24,39 @@ export function GrinAdmissionGate({
   showBack?: boolean;
 }): React.ReactElement {
   const t = useT();
+  const { user } = useAuth();
   const styles = useThemedStyles(() =>
     StyleSheet.create({
       wrap: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, gap: spacing.md },
     })
   );
 
-  if (isGoodsEvidenceBlockedByStoreRuntime()) {
-    return (
-      <Screen>
-        <View style={styles.wrap}>
-          <Header title={title} subtitle={subtitle} showBack={showBack} />
-          <EmptyState title={t("grin.storeBlockedTitle")} message={t("grin.storeBlockedBody")} />
-        </View>
-      </Screen>
-    );
-  }
+  const blocked = (
+    <Screen>
+      <View style={styles.wrap}>
+        <Header title={title} subtitle={subtitle} showBack={showBack} />
+        <EmptyState title={t("grin.storeBlockedTitle")} message={t("grin.storeBlockedBody")} />
+      </View>
+    </Screen>
+  );
 
-  if (!isGoodsEvidenceEnabled()) {
-    return (
-      <Screen>
-        <View style={styles.wrap}>
-          <Header title={title} subtitle={subtitle} showBack={showBack} />
-          <EmptyState title={t("grin.unavailableTitle")} message={t("grin.unavailableBody")} />
-        </View>
-      </Screen>
-    );
-  }
+  const unavailable = (
+    <Screen>
+      <View style={styles.wrap}>
+        <Header title={title} subtitle={subtitle} showBack={showBack} />
+        <EmptyState title={t("grin.unavailableTitle")} message={t("grin.unavailableBody")} />
+      </View>
+    </Screen>
+  );
 
   return (
-    <>
-      {children}
-    </>
+    <GrinAdmittedSessionHost
+      ownerUid={user?.uid ?? null}
+      renderBlocked={() => blocked}
+      renderUnavailable={() => unavailable}
+    >
+      {() => children}
+    </GrinAdmittedSessionHost>
   );
 }
 

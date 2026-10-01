@@ -2826,6 +2826,12 @@
     "fixtureBanner": "WAVE-1 FIXTURE: these screens use GrinFixtureRepository labelled fakes. They are not Firestore, SQLite, or Storage originals. Team 5 will replace them in Wave 2.",
     "queueBanner": "On-device queue: a GRIN number appears only after the server issues it. This is not a fixture list.",
     "pricingQuotaNote": "GRIN pricing and ordinary-record quota remain unresolved. This screen does not invent a price, a quota, or an upsell.",
+    "mutationUnavailable": "This change could not be queued. The outbox mutation contract is not injected.",
+    "historyLocalOnly": "These are local queue records, not a server event stream.",
+    "ewbObservationNotPortal": "This is a labelled observation. It is not e-way bill portal authority.",
+    "projection": {
+      "incomplete": "Projection incomplete — custody and other facts are not assumed."
+    },
     "listTitle": "Goods receipts",
     "listSubtitle": "Inspection notes captured for this ledger",
     "newAction": "New goods receipt",

@@ -5,7 +5,7 @@
  */
 
 export const GRIN_APPLICATION_REPOSITORY_LABEL =
-  "APPLICATION / WAVE-2: GrinApplicationRepository. Reads and writes via GrinOutbox (listForOwner / persistDraftAndQueue). Does not invent issuedNumber. Not GrinFixtureRepository. Not Firestore.";
+  "APPLICATION / WAVE-2: GrinApplicationRepository. Reads and writes via GrinOutbox (listForOwner / listForOwnerAndLedger when present / persistDraftAndQueue / persistMutationAndQueue when present). Does not invent issuedNumber. Does not revive a retired session. Not GrinFixtureRepository. Not Firestore.";
 
 export const GRIN_APPLICATION_REPOSITORY_KIND = "GrinApplicationRecord" as const;
 

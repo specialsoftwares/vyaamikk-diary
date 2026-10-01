@@ -5,7 +5,7 @@
 
 import { pdfGenerateHook } from "@/services/pdf/pdfGenerateHook";
 import { pdfService } from "@/services/pdf/pdfService";
-import type { GrinPackExport } from "@/services/grin/fixture/types";
+import type { GrinApplicationPackExport } from "@/services/grin/repository";
 import {
   buildGrinPackHtml,
   buildGrinReceiptHtml,
@@ -34,7 +34,7 @@ export async function generateGrinReceiptPdf(input: {
 
 export async function generateGrinPackPdf(input: {
   record: GrinPdfReceiptSource;
-  pack: GrinPackExport;
+  pack: GrinApplicationPackExport;
   t: (key: string, vars?: Record<string, string | number>) => string;
   locale?: "en-IN" | "hi-IN";
   labels?: GrinPdfLabels;

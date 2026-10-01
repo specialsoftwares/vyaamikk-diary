@@ -11,9 +11,10 @@ import {
   Screen,
 } from "@/components/ui";
 import { useT } from "@/i18n";
-import { useAuth } from "@/state/auth";
-import { getGrinApplicationRepository } from "@/services/grin/repository";
-import type { GrinApplicationListItem } from "@/services/grin/repository";
+import {
+  requireLiveGrinApplicationRepository,
+  type GrinApplicationListItem,
+} from "@/services/grin/repository";
 import {
   captureLabel,
   custodyLabel,
@@ -27,8 +28,16 @@ import { GrinAdmissionGate, GrinFixtureNotices } from "./GrinAdmissionGate";
 
 export function GrinListScreen(): React.ReactElement {
   const t = useT();
+  return (
+    <GrinAdmissionGate title={t("grin.listTitle")} subtitle={t("grin.listSubtitle")}>
+      <GrinListAdmittedBody />
+    </GrinAdmissionGate>
+  );
+}
+
+function GrinListAdmittedBody(): React.ReactElement {
+  const t = useT();
   const router = useRouter();
-  const { user } = useAuth();
   const insets = useSafeAreaInsets();
   const [items, setItems] = useState<GrinApplicationListItem[]>([]);
 
@@ -63,16 +72,12 @@ export function GrinListScreen(): React.ReactElement {
   );
 
   const load = useCallback(() => {
-    if (!user?.uid) {
-      setItems([]);
-      return;
-    }
     try {
-      setItems(getGrinApplicationRepository(user.uid).list());
+      setItems(requireLiveGrinApplicationRepository().list());
     } catch {
       setItems([]);
     }
-  }, [user?.uid]);
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -87,15 +92,18 @@ export function GrinListScreen(): React.ReactElement {
   const renderItem = useCallback(
     ({ item }: { item: GrinApplicationListItem }) => {
       const number = item.displayNumber ?? t("grin.pdf.pendingNumber");
+      const supplier = item.supplierName ?? t("grin.projection.incomplete");
       return (
         <Card elevated={false}>
           <View style={styles.rowTop}>
             <Text style={styles.number}>{number}</Text>
             <Text style={styles.meta}>{localStateLabel(item.localState, t)}</Text>
           </View>
-          <Text style={styles.supplier}>{item.supplierName}</Text>
+          <Text style={styles.supplier}>{supplier}</Text>
           <Text style={styles.meta}>
-            {custodyLabel(item.custody, t)} · {qcLabel(item.qcStatus, t)} · {captureLabel(item.captureProvenance, t)}
+            {item.projection === "unknown_incomplete"
+              ? t("grin.projection.incomplete")
+              : `${custodyLabel(item.custody, t)} · ${qcLabel(item.qcStatus, t)} · ${captureLabel(item.captureProvenance, t)}`}
           </Text>
           {item.offlinePending ? (
             <View style={styles.warnPill} accessibilityLabel={offlinePendingBannerText(t)}>
@@ -134,30 +142,28 @@ export function GrinListScreen(): React.ReactElement {
   );
 
   return (
-    <GrinAdmissionGate title={t("grin.listTitle")} subtitle={t("grin.listSubtitle")}>
-      <Screen padded={false} dismissKeyboardOnTap={false}>
-        <View style={styles.headerWrap}>
-          <Header title={t("grin.listTitle")} subtitle={t("grin.listSubtitle")} showBack />
-          <GrinFixtureNotices />
-          <Button label={t("grin.newAction")} onPress={goNew} style={styles.newBtn} />
-        </View>
-        <FlatList
-          data={items}
-          keyExtractor={(d) => d.receiptId}
-          renderItem={renderItem}
-          initialNumToRender={10}
-          removeClippedSubviews={Platform.OS === "android"}
-          contentContainerStyle={listPadding}
-          ListEmptyComponent={
-            <EmptyState
-              title={t("grin.emptyTitle")}
-              message={t("grin.emptyMessage")}
-              actionLabel={t("grin.newAction")}
-              onAction={goNew}
-            />
-          }
-        />
-      </Screen>
-    </GrinAdmissionGate>
+    <Screen padded={false} dismissKeyboardOnTap={false}>
+      <View style={styles.headerWrap}>
+        <Header title={t("grin.listTitle")} subtitle={t("grin.listSubtitle")} showBack />
+        <GrinFixtureNotices />
+        <Button label={t("grin.newAction")} onPress={goNew} style={styles.newBtn} />
+      </View>
+      <FlatList
+        data={items}
+        keyExtractor={(d) => d.receiptId}
+        renderItem={renderItem}
+        initialNumToRender={10}
+        removeClippedSubviews={Platform.OS === "android"}
+        contentContainerStyle={listPadding}
+        ListEmptyComponent={
+          <EmptyState
+            title={t("grin.emptyTitle")}
+            message={t("grin.emptyMessage")}
+            actionLabel={t("grin.newAction")}
+            onAction={goNew}
+          />
+        }
+      />
+    </Screen>
   );
 }
