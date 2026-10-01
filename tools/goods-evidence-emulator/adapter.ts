@@ -82,6 +82,7 @@ import type {
   G1Clock,
   G1CommandResult,
   G1Deny,
+  G1DocSnap,
   G1Firestore,
   G1Hooks,
   G1MutationResult,
@@ -97,8 +98,20 @@ export { isRetryable };
 const GENERIC_DENY = "denied";
 const MAX_TX_ATTEMPTS = 5;
 
+const ABSENT_SNAP: G1DocSnap = {
+  exists: false,
+  data: () => undefined,
+};
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+/** Safe ledger id for path reads. Does not mutate caller input or validate the rest of the body. */
+function peekLedgerId(input: unknown): string | null {
+  if (!isPlainObject(input)) return null;
+  if (documentIdError("ledgerId", input.ledgerId)) return null;
+  return input.ledgerId as string;
 }
 
 function deny(code: G1Deny["code"], detail: string): G1Deny {
@@ -170,6 +183,15 @@ type FrozenRegister = {
   digest: string;
 };
 
+type FrozenMutation = {
+  commandId: string;
+  type: MutationCommandType;
+  ownerUid: string;
+  ledgerId: string;
+  body: unknown;
+  digest: string;
+};
+
 type IssuedBuild = {
   original: ImmutableGrin;
   event: GrinEvent;
@@ -187,45 +209,26 @@ export class GoodsEvidenceRegisterAdapter {
 
   async register(caller: TrustedCaller, envelope: unknown): Promise<G1RegisterResult> {
     if (!caller.uid) return deny("unauthenticated", GENERIC_DENY);
-    const pre = this.prevalidate(envelope);
-    if (pre) return pre;
-    const normalized = normalizeJsonCopy(envelope) as {
-      commandId: string;
-      type: string;
-      ledgerId: string;
-      body: unknown;
-      digest?: string;
-    };
     const uid = caller.uid;
-    const digest = freezeDigest({
-      commandId: normalized.commandId,
-      type: "registerGoodsReceipt",
-      ownerUid: uid,
-      ledgerId: normalized.ledgerId,
-      body: normalized.body,
-    });
-    if (typeof normalized.digest === "string" && normalized.digest !== digest) {
-      return deny("digest_conflict", "same commandId with a different body");
-    }
-    const frozen: FrozenRegister = {
-      commandId: normalized.commandId,
-      type: "registerGoodsReceipt",
-      ownerUid: uid,
-      ledgerId: normalized.ledgerId,
-      body: normalized.body as RegisterGoodsReceiptBody,
-      digest,
-    };
-    const envelopeErr = commandEnvelopeError(frozen, "registerGoodsReceipt");
-    if (envelopeErr) return deny("invalid", envelopeErr);
-    const bodyErr = registerBodyError(frozen.body);
-    if (bodyErr) return deny("invalid", bodyErr);
 
     return this.runAttempts(async (tx, attempt) => {
+      const scope = await this.readAdmissionScope(tx, uid, envelope);
+      const gate = this.gate(
+        scope.admissionSnap.data(),
+        scope.userSnap.exists,
+        scope.userSnap.data(),
+        { peeked: scope.ledgerPeeked, exists: scope.ledgerSnap.exists, data: scope.ledgerSnap.data() },
+        uid
+      );
+      if (!gate.ok) return gate;
+      if (gate.policy.newCommands !== "allow") return deny("policy_denied", GENERIC_DENY);
+
+      const prepared = this.prepareRegister(envelope, uid);
+      if (!prepared.ok) return prepared;
+      const frozen = prepared.frozen;
+
       const serverMs = this.clock.nowMs();
       const fyToken = financialYearTokenForIstInstant(serverMs);
-      const userSnap = await tx.get(this.db.doc(userPath(uid)));
-      const ledgerSnap = await tx.get(this.db.doc(ledgerPath(uid, frozen.ledgerId)));
-      const admissionSnap = await tx.get(this.db.doc(admissionPath(uid)));
       const commandRef = this.db.doc(commandPath(uid, frozen.ledgerId, frozen.commandId));
       const commandSnap = await tx.get(commandRef);
       const receiptRef = this.db.doc(receiptPath(uid, frozen.ledgerId, frozen.body.receiptId));
@@ -233,10 +236,6 @@ export class GoodsEvidenceRegisterAdapter {
       const serialRef = this.db.doc(serialPath(uid, frozen.ledgerId, fyToken));
       const serialSnap = await tx.get(serialRef);
       await this.hooks.afterReads?.(attempt);
-
-      const gate = this.gate(admissionSnap.data(), userSnap.exists, userSnap.data(), ledgerSnap.exists, ledgerSnap.data(), uid);
-      if (!gate.ok) return gate;
-      if (gate.policy.newCommands !== "allow") return deny("policy_denied", GENERIC_DENY);
 
       if (commandSnap.exists) {
         const stored = commandSnap.data();
@@ -293,30 +292,25 @@ export class GoodsEvidenceRegisterAdapter {
 
   async reconcile(caller: TrustedCaller, input: unknown): Promise<G1CommandResult> {
     if (!caller.uid) return deny("unauthenticated", GENERIC_DENY);
-    if (!isPlainObject(input)) return deny("invalid", "reconcile request is required");
-    const shape = inputShapeError(input, "reconcile request");
-    if (shape) return deny("invalid", shape);
-    const extra = extraReconcileKeyError(input);
-    if (extra) return deny("invalid", extra);
-    const normalized = normalizeJsonCopy(input) as { ledgerId: unknown; commandId: unknown };
-    const ledgerErr = documentIdError("ledgerId", normalized.ledgerId);
-    if (ledgerErr) return deny("invalid", ledgerErr);
-    const cmdErr = commandIdError(normalized.commandId);
-    if (cmdErr) return deny("invalid", cmdErr);
     const uid = caller.uid;
-    const ledgerId = normalized.ledgerId as string;
-    const commandId = normalized.commandId as string;
 
     return this.runAttempts(async (tx, attempt) => {
-      const userSnap = await tx.get(this.db.doc(userPath(uid)));
-      const ledgerSnap = await tx.get(this.db.doc(ledgerPath(uid, ledgerId)));
-      const admissionSnap = await tx.get(this.db.doc(admissionPath(uid)));
-      const commandSnap = await tx.get(this.db.doc(commandPath(uid, ledgerId, commandId)));
-      await this.hooks.afterReads?.(attempt);
-
-      const gate = this.gate(admissionSnap.data(), userSnap.exists, userSnap.data(), ledgerSnap.exists, ledgerSnap.data(), uid);
+      const scope = await this.readAdmissionScope(tx, uid, input);
+      const gate = this.gate(
+        scope.admissionSnap.data(),
+        scope.userSnap.exists,
+        scope.userSnap.data(),
+        { peeked: scope.ledgerPeeked, exists: scope.ledgerSnap.exists, data: scope.ledgerSnap.data() },
+        uid
+      );
       if (!gate.ok) return gate;
       if (gate.policy.reconciliation !== "allow") return deny("policy_denied", GENERIC_DENY);
+
+      const prepared = this.prepareReconcile(input);
+      if (!prepared.ok) return prepared;
+      const commandSnap = await tx.get(this.db.doc(commandPath(uid, prepared.ledgerId, prepared.commandId)));
+      await this.hooks.afterReads?.(attempt);
+
       if (!commandSnap.exists) return deny("not_found", "command not found");
       const stored = commandSnap.data();
       const registerResult = storedSuccess(stored);
@@ -365,18 +359,129 @@ export class GoodsEvidenceRegisterAdapter {
     admission: Record<string, unknown> | undefined,
     userExists: boolean,
     user: Record<string, unknown> | undefined,
-    ledgerExists: boolean,
-    ledger: Record<string, unknown> | undefined,
+    ledger: { peeked: boolean; exists: boolean; data: Record<string, unknown> | undefined },
     uid: string
   ): { ok: true; policy: AdmissionPolicy } | G1Deny {
     if (!userExists) return deny("forbidden", GENERIC_DENY);
     if ((user?.status ?? "active") !== "active") return deny("forbidden", GENERIC_DENY);
-    if (!ledgerExists) return deny("forbidden", GENERIC_DENY);
-    if (ledger?.ownerUid !== uid) return deny("forbidden", GENERIC_DENY);
-    if (ledger?.status !== "active") return deny("forbidden", GENERIC_DENY);
+    if (ledger.peeked) {
+      if (!ledger.exists) return deny("forbidden", GENERIC_DENY);
+      if (ledger.data?.ownerUid !== uid) return deny("forbidden", GENERIC_DENY);
+      if (ledger.data?.status !== "active") return deny("forbidden", GENERIC_DENY);
+    }
     const policy = parsePolicy(admission);
     if (!policy) return deny("policy_denied", GENERIC_DENY);
     return { ok: true, policy };
+  }
+
+  private async readAdmissionScope(
+    tx: G1Transaction,
+    uid: string,
+    input: unknown
+  ): Promise<{
+    userSnap: G1DocSnap;
+    ledgerSnap: G1DocSnap;
+    admissionSnap: G1DocSnap;
+    ledgerPeeked: boolean;
+  }> {
+    const userSnap = await tx.get(this.db.doc(userPath(uid)));
+    const ledgerId = peekLedgerId(input);
+    const ledgerSnap = ledgerId ? await tx.get(this.db.doc(ledgerPath(uid, ledgerId))) : ABSENT_SNAP;
+    const admissionSnap = await tx.get(this.db.doc(admissionPath(uid)));
+    return { userSnap, ledgerSnap, admissionSnap, ledgerPeeked: ledgerId != null };
+  }
+
+  private prepareRegister(
+    envelope: unknown,
+    uid: string
+  ): { ok: true; frozen: FrozenRegister } | G1Deny {
+    const pre = this.prevalidate(envelope);
+    if (pre) return pre;
+    const normalized = normalizeJsonCopy(envelope) as {
+      commandId: string;
+      type: string;
+      ledgerId: string;
+      body: unknown;
+      digest?: string;
+    };
+    const digest = freezeDigest({
+      commandId: normalized.commandId,
+      type: "registerGoodsReceipt",
+      ownerUid: uid,
+      ledgerId: normalized.ledgerId,
+      body: normalized.body,
+    });
+    if (typeof normalized.digest === "string" && normalized.digest !== digest) {
+      return deny("digest_conflict", "same commandId with a different body");
+    }
+    const frozen: FrozenRegister = {
+      commandId: normalized.commandId,
+      type: "registerGoodsReceipt",
+      ownerUid: uid,
+      ledgerId: normalized.ledgerId,
+      body: normalized.body as RegisterGoodsReceiptBody,
+      digest,
+    };
+    const envelopeErr = commandEnvelopeError(frozen, "registerGoodsReceipt");
+    if (envelopeErr) return deny("invalid", envelopeErr);
+    const bodyErr = registerBodyError(frozen.body);
+    if (bodyErr) return deny("invalid", bodyErr);
+    return { ok: true, frozen };
+  }
+
+  private prepareReconcile(
+    input: unknown
+  ): { ok: true; ledgerId: string; commandId: string } | G1Deny {
+    if (!isPlainObject(input)) return deny("invalid", "reconcile request is required");
+    const shape = inputShapeError(input, "reconcile request");
+    if (shape) return deny("invalid", shape);
+    const extra = extraReconcileKeyError(input);
+    if (extra) return deny("invalid", extra);
+    const normalized = normalizeJsonCopy(input) as { ledgerId: unknown; commandId: unknown };
+    const ledgerErr = documentIdError("ledgerId", normalized.ledgerId);
+    if (ledgerErr) return deny("invalid", ledgerErr);
+    const cmdErr = commandIdError(normalized.commandId);
+    if (cmdErr) return deny("invalid", cmdErr);
+    return { ok: true, ledgerId: normalized.ledgerId as string, commandId: normalized.commandId as string };
+  }
+
+  private prepareMutation(
+    envelope: unknown,
+    expectedType: MutationCommandType,
+    uid: string
+  ): { ok: true; frozen: FrozenMutation } | G1Deny {
+    const pre = this.prevalidateMutation(envelope, expectedType);
+    if (pre) return pre;
+    const normalized = normalizeJsonCopy(envelope) as {
+      commandId: string;
+      type: string;
+      ledgerId: string;
+      body: unknown;
+      digest?: string;
+    };
+    const digest = freezeDigest({
+      commandId: normalized.commandId,
+      type: expectedType,
+      ownerUid: uid,
+      ledgerId: normalized.ledgerId,
+      body: normalized.body,
+    });
+    if (typeof normalized.digest === "string" && normalized.digest !== digest) {
+      return deny("digest_conflict", "same commandId with a different body");
+    }
+    const frozen: FrozenMutation = {
+      commandId: normalized.commandId,
+      type: expectedType,
+      ownerUid: uid,
+      ledgerId: normalized.ledgerId,
+      body: normalized.body,
+      digest,
+    };
+    const envelopeErr = commandEnvelopeError(frozen, expectedType);
+    if (envelopeErr) return deny("invalid", envelopeErr);
+    const bodyErr = this.mutationBodyError(expectedType, frozen.body);
+    if (bodyErr) return deny("invalid", bodyErr);
+    return { ok: true, frozen };
   }
 
   private prevalidate(envelope: unknown): G1Deny | null {
@@ -621,62 +726,32 @@ export class GoodsEvidenceRegisterAdapter {
     expectedType: MutationCommandType
   ): Promise<G1MutationResult> {
     if (!caller.uid) return deny("unauthenticated", GENERIC_DENY);
-    const pre = this.prevalidateMutation(envelope, expectedType);
-    if (pre) return pre;
-    const normalized = normalizeJsonCopy(envelope) as {
-      commandId: string;
-      type: string;
-      ledgerId: string;
-      body: unknown;
-      digest?: string;
-    };
     const uid = caller.uid;
-    const digest = freezeDigest({
-      commandId: normalized.commandId,
-      type: expectedType,
-      ownerUid: uid,
-      ledgerId: normalized.ledgerId,
-      body: normalized.body,
-    });
-    if (typeof normalized.digest === "string" && normalized.digest !== digest) {
-      return deny("digest_conflict", "same commandId with a different body");
-    }
-    const frozen = {
-      commandId: normalized.commandId,
-      type: expectedType,
-      ownerUid: uid,
-      ledgerId: normalized.ledgerId,
-      body: normalized.body,
-      digest,
-    };
-    const envelopeErr = commandEnvelopeError(frozen, expectedType);
-    if (envelopeErr) return deny("invalid", envelopeErr);
-    const bodyErr = this.mutationBodyError(expectedType, frozen.body);
-    if (bodyErr) return deny("invalid", bodyErr);
-    const receiptId = (frozen.body as { receiptId: string }).receiptId;
-    const expectedVersion = (frozen.body as { expectedVersion: number }).expectedVersion;
 
     return this.runAttempts(async (tx, attempt) => {
+      const scope = await this.readAdmissionScope(tx, uid, envelope);
+      const gate = this.gate(
+        scope.admissionSnap.data(),
+        scope.userSnap.exists,
+        scope.userSnap.data(),
+        { peeked: scope.ledgerPeeked, exists: scope.ledgerSnap.exists, data: scope.ledgerSnap.data() },
+        uid
+      );
+      if (!gate.ok) return gate;
+      if (gate.policy.newCommands !== "allow") return deny("policy_denied", GENERIC_DENY);
+
+      const prepared = this.prepareMutation(envelope, expectedType, uid);
+      if (!prepared.ok) return prepared;
+      const frozen = prepared.frozen;
+      const receiptId = (frozen.body as { receiptId: string }).receiptId;
+      const expectedVersion = (frozen.body as { expectedVersion: number }).expectedVersion;
+
       const serverMs = this.clock.nowMs();
-      const userSnap = await tx.get(this.db.doc(userPath(uid)));
-      const ledgerSnap = await tx.get(this.db.doc(ledgerPath(uid, frozen.ledgerId)));
-      const admissionSnap = await tx.get(this.db.doc(admissionPath(uid)));
       const commandRef = this.db.doc(commandPath(uid, frozen.ledgerId, frozen.commandId));
       const commandSnap = await tx.get(commandRef);
       const receiptRef = this.db.doc(receiptPath(uid, frozen.ledgerId, receiptId));
       const receiptSnap = await tx.get(receiptRef);
       await this.hooks.afterReads?.(attempt);
-
-      const gate = this.gate(
-        admissionSnap.data(),
-        userSnap.exists,
-        userSnap.data(),
-        ledgerSnap.exists,
-        ledgerSnap.data(),
-        uid
-      );
-      if (!gate.ok) return gate;
-      if (gate.policy.newCommands !== "allow") return deny("policy_denied", GENERIC_DENY);
 
       if (commandSnap.exists) {
         const stored = commandSnap.data();
@@ -691,9 +766,9 @@ export class GoodsEvidenceRegisterAdapter {
         return result;
       }
 
-      if (!receiptSnap.exists) return deny("invalid", "unknown receipt");
+      if (!receiptSnap.exists) return deny("not_found", "receipt not found");
       const receipt = hydrateReceipt(receiptSnap.data());
-      if (!receipt) return deny("invalid", "unknown receipt");
+      if (!receipt) return deny("not_found", "receipt not found");
       if (receipt.original.ownerUid !== uid || receipt.original.ledgerId !== frozen.ledgerId) {
         return deny("forbidden", GENERIC_DENY);
       }

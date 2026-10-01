@@ -40,7 +40,7 @@ Command identity: **owner uid + ledgerId + commandId**. Receipt identity conflic
 
 Implemented: `registerGoodsReceipt` + independent `reconcile({ ledgerId, commandId })` + durable mutations (`amendFields`, `recordQc`, `dispatchReturn`, `correctReturnDispatch`, `voidWithReason`, `recordEwbObservation`, `linkVerifiedEvidence`).
 
-Mutations use the same authenticated uid, owner/ledger, admission, scoped `commandId`+digest, `expectedVersion`, atomic event+projection+command-result, lost-response replay, and ABORTED-only retries as register. They append events and update `view` / line ledgers / `effective`. They never overwrite `original`. Serial allocation is not part of mutation write sets.
+Mutations use the same authenticated uid, owner/ledger, admission, scoped `commandId`+digest, `expectedVersion`, atomic event+projection+command-result, lost-response replay, and ABORTED-only retries as register. They append events and update `view` / line ledgers / `effective`. They never overwrite `original`. Serial allocation is not part of mutation write sets. After a successful gate, a missing or unreadable receipt is `not_found`; a hydrated receipt whose `original.ownerUid` / `original.ledgerId` does not match the caller remains `forbidden`.
 
 `InMemoryGoodsLedger` remains a labelled simulation (`simulated-domain-test`) and is not this adapter.
 
@@ -52,9 +52,9 @@ Undefined object properties: `inputShapeError` omits them (they are not non-JSON
 
 ## Transaction read/write set (register)
 
-Each attempt samples `clock.nowMs()` **at the start of that attempt** (production clock = Functions `Date.now()` later; test clocks are not production timestamps). IST FY uses that instant. Reported arrival is not used for FY or serial.
+Each attempt reads identity/admission first, then validates the command, then samples `clock.nowMs()` **before serial/FY and remaining document reads** (production clock = Functions `Date.now()` later; test clocks are not production timestamps). IST FY uses that instant. Reported arrival is not used for FY or serial.
 
-Reads (all before any write): `users/{uid}`, ledger, `users/{uid}/goodsEvidenceAdmission/runtime`, `commands/{commandId}`, `receipts/{receiptId}`, `serials/{fyToken}`. Auth, owner, active-account, and ledger checks run before feature policy.
+Reads (all before any write): `users/{uid}`, ledger (when `ledgerId` is a safe document id), `users/{uid}/goodsEvidenceAdmission/runtime`, then after admission and command validation: `commands/{commandId}`, `receipts/{receiptId}`, `serials/{fyToken}`. Checks run in order: unauthenticated → user / `pending_deletion` / inactive → ledger owner + `active` (when `ledgerId` is a safe document id) → admission config (including gated `newCommands` / `reconciliation`) → command validation. Feature policy is not skipped for a malformed envelope or client digest mismatch.
 
 Writes (new issue only, atomic): serial allocation, original snapshot, view + line projections, event, command receipt.
 
@@ -103,11 +103,11 @@ Counter path: `…/serials/{fyToken}` with `{ fyToken, nextSerial, lastIssuedSer
 | `unauthenticated` | missing uid |
 | `forbidden` | missing/inactive user, pending_deletion, retired/foreign ledger (generic `denied`; no existence leak) |
 | `policy_denied` | missing/malformed config, or gated submit/reconcile |
-| `not_found` | authorized reconcile of a missing command |
+| `not_found` | authorized reconcile of a missing command; authorized mutation of a missing or unreadable receipt |
 | `invalid` | IDs, envelope, size, sparse arrays, extra keys, domain validation |
 | `integrity` | existing serial counter is present but malformed (zero writes; no repair) |
 | `serial_exhausted` | well-formed counter has issued 999999 (no restart) |
-| `digest_conflict` | same commandId, different digest, while submit is allowed |
+| `digest_conflict` | same commandId, different digest, while submit is allowed (not returned to pending_deletion / inactive callers) |
 | `receipt_exists` | receipt already issued under another command |
 
 Auth uid wins over envelope `ownerUid`. Client-supplied server fields (`issuedNumber`, serial, hashes, …) are rejected.

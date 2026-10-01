@@ -246,6 +246,111 @@ async function main(): Promise<void> {
     assert.equal(receipt.data()?.view.qcStatus ?? null, null);
   }
 
+  {
+    await seedOwner(db, "owner_nf_fs", "ledger_nf_fs");
+    const adapter = new GoodsEvidenceRegisterAdapter(fs, fixedClock(NOW));
+    const missing = await adapter.recordQc(
+      { uid: "owner_nf_fs" },
+      mutationEnvelope(
+        "commandn01",
+        "recordQc",
+        {
+          receiptId: "receipt_missing_fs",
+          expectedVersion: 1,
+          reason: "qc missing",
+          qcStatus: "accepted",
+          clientObservedAtUtc: "2026-09-28T17:00:00.000Z",
+        },
+        "owner_nf_fs",
+        "ledger_nf_fs"
+      )
+    );
+    assert.equal(missing.ok, false);
+    if (!missing.ok) assert.equal(missing.code, "not_found");
+    await db.doc(receiptPath("owner_nf_fs", "ledger_nf_fs", "receipt_corrupt_fs")).set({
+      view: { eventVersion: 1, voided: false },
+      lineLedgers: {},
+    });
+    const corrupt = await adapter.recordQc(
+      { uid: "owner_nf_fs" },
+      mutationEnvelope(
+        "commandn02",
+        "recordQc",
+        {
+          receiptId: "receipt_corrupt_fs",
+          expectedVersion: 1,
+          reason: "qc corrupt",
+          qcStatus: "accepted",
+          clientObservedAtUtc: "2026-09-28T17:01:00.000Z",
+        },
+        "owner_nf_fs",
+        "ledger_nf_fs"
+      )
+    );
+    assert.equal(corrupt.ok, false);
+    if (!corrupt.ok) assert.equal(corrupt.code, "not_found");
+    await db.doc(receiptPath("owner_nf_fs", "ledger_nf_fs", "receipt_foreign_fs")).set({
+      original: { ownerUid: "other", ledgerId: "ledger_nf_fs", receiptId: "receipt_foreign_fs" },
+      view: { eventVersion: 1, voided: false, headHash: "aa" },
+      lineLedgers: {},
+    });
+    const foreign = await adapter.recordQc(
+      { uid: "owner_nf_fs" },
+      mutationEnvelope(
+        "commandn03",
+        "recordQc",
+        {
+          receiptId: "receipt_foreign_fs",
+          expectedVersion: 1,
+          reason: "qc foreign",
+          qcStatus: "accepted",
+          clientObservedAtUtc: "2026-09-28T17:02:00.000Z",
+        },
+        "owner_nf_fs",
+        "ledger_nf_fs"
+      )
+    );
+    assert.equal(foreign.ok, false);
+    if (!foreign.ok) {
+      assert.equal(foreign.code, "forbidden");
+      assert.equal(foreign.detail, "denied");
+    }
+    await seedOwner(db, "owner_nf_fs", "ledger_nf_fs", { userStatus: "pending_deletion" });
+    const malformed = await adapter.recordQc(
+      { uid: "owner_nf_fs" },
+      { extra: true, ledgerId: "ledger_nf_fs" }
+    );
+    const mismatch = await adapter.recordQc(
+      { uid: "owner_nf_fs" },
+      {
+        ...mutationEnvelope(
+          "commandn04",
+          "recordQc",
+          {
+            receiptId: "receipt_missing_fs",
+            expectedVersion: 1,
+            reason: "qc",
+            qcStatus: "accepted",
+            clientObservedAtUtc: "2026-09-28T17:03:00.000Z",
+          },
+          "owner_nf_fs",
+          "ledger_nf_fs"
+        ),
+        digest: "ff".repeat(32),
+      }
+    );
+    assert.equal(malformed.ok, false);
+    assert.equal(mismatch.ok, false);
+    if (!malformed.ok) {
+      assert.equal(malformed.code, "forbidden");
+      assert.equal(malformed.detail, "denied");
+    }
+    if (!mismatch.ok) {
+      assert.equal(mismatch.code, "forbidden");
+      assert.equal(mismatch.detail, "denied");
+    }
+  }
+
   console.log("tools/goods-evidence-emulator/mutations.emulator.test.ts: ok");
 }
 
