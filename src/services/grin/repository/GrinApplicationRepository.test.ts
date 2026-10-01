@@ -24,7 +24,7 @@ import {
   grinRepositoryIsFake,
 } from "./GrinApplicationRepository";
 import { GRIN_APPLICATION_REPOSITORY_KIND } from "./labels";
-import { GRIN_MUTATION_QUEUE_UNINJECTED, GRIN_SESSION_RETIRED } from "./sessionErrors";
+import { GRIN_SESSION_RETIRED } from "./sessionErrors";
 import {
   getGrinApplicationRepository,
   resetGrinApplicationRepositoryForTests,
@@ -218,15 +218,13 @@ function main() {
     assert.equal(mutationCalls.length, 1);
     assert.equal(mutationCalls[0]?.commandType, "amendFields");
     delete (withMutate as { persistMutationAndQueue?: unknown }).persistMutationAndQueue;
-    assert.throws(
-      () =>
-        repoA2.recordQc({
-          receiptId: "grcp_app_2",
-          reason: "hold",
-          qcStatus: "hold",
-        }),
-      (err: unknown) => err instanceof Error && err.message === GRIN_MUTATION_QUEUE_UNINJECTED
-    );
+    const qc = repoA2.recordQc({
+      receiptId: "grcp_app_2",
+      reason: "hold",
+      qcStatus: "hold",
+    });
+    assert.equal(qc.receiptId, "grcp_app_2");
+    assert.ok(repoA2.history("grcp_app_2").some((item) => item.commandType === "recordQc"));
 
     const pack = repoA2.exportPack("grcp_app_2");
     assert.ok(pack);

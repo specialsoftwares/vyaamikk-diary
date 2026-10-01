@@ -10,7 +10,8 @@
     "baseUrl": ".",
     "paths": {
       "@/utils/sha256Hex": ["../../src/utils/sha256Hex.ts"],
-      "@/goodsEvidence/ports": ["../../src/goodsEvidence/ports.ts"]
+      "@/goodsEvidence/ports": ["../../src/goodsEvidence/ports.ts"],
+      "@/goodsEvidence/evidence": ["../../src/goodsEvidence/evidence.ts"]
     }
   },
   "include": ["./**/*.ts", "../../src/goodsEvidence/canonical.ts", "../../src/goodsEvidence/constants.ts", "../../src/goodsEvidence/time.ts", "../../src/goodsEvidence/grinNumber.ts", "../../src/goodsEvidence/validate.ts", "../../src/goodsEvidence/quantities.ts", "../../src/goodsEvidence/types.ts", "../../src/goodsEvidence/ewb.ts", "../../src/goodsEvidence/snapshot.ts", "../../src/goodsEvidence/custody.ts", "../../src/goodsEvidence/command.ts", "../../src/goodsEvidence/ports.ts", "../../src/goodsEvidence/evidence.ts"],

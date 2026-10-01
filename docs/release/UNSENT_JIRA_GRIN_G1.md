@@ -40,3 +40,7 @@ Inspected combined `2593c2be6964955ecb1a433dc93c4096168ce9d2`. Combined advanced
 
 `cbcb1b9acbda254258676e5a7d7056296470d77a` on `team/grin-t1-backend`: authenticated undeployed G1 composition + mobile JS httpsCallable transport. `functions/src/index.ts` still has no GRIN export. App still uses the labelled uninjected FAKE port. Do not mark backend deploy or G6 Done.
 
+## Teams 2–4 Wave 2 landings (unsent, 2026-10-02)
+
+Merged onto `integration/grin-g1-g5-source`: T2 `06d897a719637abeb1301292af9d85fa370b8b8e` (identity + retained isolated Storage reads), T3 `9a0de6dd83ff51293698b69cd7dc23051e737b7b` (attempt fence + category persist + production v10 tests), T4 `decac00` (no session self-revive; remaining screens off fixtures). Coordinator glued `type`/`commandType` and stopped mutation from rewriting register `payload_json`. Wave 2 not accepted pending Team 5 PHASE 2. Live Rules/Functions unchanged. versionCode 23. Flags `"0"`. Do not mark G6/device/billing/public-release Done.
+

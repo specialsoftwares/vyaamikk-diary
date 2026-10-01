@@ -15,7 +15,7 @@ The core-only Internal build packet is **deferred**. VersionCode 23 is source pr
 
 This register is not GRIN-complete from G1.
 
-Programme (2026-10-01): isolated G1–G5 source + G6 automated tests/review/device **preparation**. Combined branch `integration/grin-g1-g5-source`. Contract revision `2026-10-01.wave1b`. Team 5 implementation review `070a388` then findings re-review `6f920cd`: M1–M3 and L4 **closed**; finding fixes **approved**. G6 incomplete. Wave 2 T1–T5 source was on combined `2593c2b` and is **not accepted**. Wave 2 corrections W2-01…W2-05 are in flight. Team 1 W2-06 `cbcb1b9` (authenticated composition + JS transport) is merged undeployed; Functions remain unexported. Coordinator extracted `src/localDb/applyPendingMigrations.ts` (production v1–v10 orchestrator). T5 `c2ef669` CS-02 evidence-port follow-up is integrated as a test, not independent approval of W2-03. Team 5 independently reproduced W2-01…W2-05 at `6b26903` (`bff108c`); mapping is not closure. PR #30 remains the G1-only draft. Combined GitHub draft PR was not opened (`gh` unauthenticated).
+Programme (2026-10-01): isolated G1–G5 source + G6 automated tests/review/device **preparation**. Combined branch `integration/grin-g1-g5-source`. Contract revision `2026-10-01.wave1b`. Team 5 implementation review `070a388` then findings re-review `6f920cd`: M1–M3 and L4 **closed**; finding fixes **approved**. G6 incomplete. Wave 2 corrections T1 `cbcb1b9`, T2 `06d897a`, T3 `9a0de6d`, T4 `decac00` are merged; T5 PHASE 1 repro `bff108c` is not closure. Wave 2 is **not accepted** pending T5 PHASE 2. Functions remain unexported. App still uses labelled FAKE uninjected G1 port. Coordinator extracted `src/localDb/applyPendingMigrations.ts`. T5 `c2ef669` CS-02 is a test, not W2-03 approval. PR #30 remains the G1-only draft. Combined GitHub draft PR was not opened (`gh` unauthenticated).
 
 GRIN remains default-off. No main merge, deploy, EAS, Play, or billing activation in this programme.
 
@@ -44,7 +44,7 @@ Billing prepare/validate/RTDN/worker handlers **exist** (Cloud Functions v2 `asi
 
 ### G2 — Protected original evidence upload
 
-**Status:** Wave 1 source plus Wave 2 `4b10356` on combined: INJECTED `evidencePort.ts`; **ER-2** `commitState` re-authorizes after blob I/O; **ER-3** isolated Storage SDK tests vs reservation/account/admission. Live Storage/IAM unchanged. Not production admission.
+**Status:** Wave 2 W2-03/W2-04 `06d897a` on combined: evidence identity (owner/ledger/receipt/id/hash/category) on replay; missing/invalid category fails (not invoice). Isolated Storage original **read** of retained `uploaded_unverified`/`verified`/`linked` is separate from upload admission; `newCommands=deny` does not erase those reads. Live `storage.rules` unchanged. ER-2 `commitState` re-authorization kept.
 
 **Acceptance (Wave 1 emulator/FAKE, not live):** untrusted upload rejected until auth/ownership/active ledger pass; original bytes stored off-client under owner-scoped paths; server computes hash and matches the declared digest; link is an event + pointer, never a rewrite of `original`; unauthenticated/cross-owner/pending-deletion denied; no PDF bodies in logs.
 
@@ -52,7 +52,7 @@ Billing prepare/validate/RTDN/worker handlers **exist** (Cloud Functions v2 `asi
 
 ### G3 — Durable SQLite outbox
 
-**Status:** Wave 1 source plus Wave 2 `22a848a` on combined: CS-01 SQLITE_HOST+INJECTED G1, **ER-1** `skipStaleCompletion` after await, **ER-4 T3 half** v9→v10 init-sequence test (GRIN-off; `init.ts` not edited). **ER-4 T5 QA** `525233f` (`isGoodsEvidenceEnabled()` false). `offline.ts` remains a labelled in-process fixture. Host tests are `SQLITE_HOST`, not native process-death.
+**Status:** Wave 2 W2-02/W2-05 `9a0de6d` on combined: unique `lease_attempt_id`; same worker cannot reclaim a live lease; retirement checked before ambiguous reconcile; `persistMutationAndQueue` + `listForOwnerAndLedger`; category column on local evidence files. W2-05 tests call `applyPendingLocalMigrations` / `initializeLocalDatabase`. Host tests are `SQLITE_HOST`, not native process-death. `offline.ts` remains a labelled in-process fixture.
 
 **Acceptance (not implemented now):** durable device queue survives process death; interrupted register recovers via G1 replay/reconcile without a second serial; queue rows are bound to the signed-in owner/account; switching accounts cannot flush another owner’s commands; no locally invented issued numbers.
 
@@ -60,7 +60,7 @@ Billing prepare/validate/RTDN/worker handlers **exist** (Cloud Functions v2 `asi
 
 ### G4 — Receiving / inspection / amendment / EWB / return UI
 
-**Status:** Wave 2 `786f73a` on combined: list/create/detail use labelled `GrinApplicationRepository` (GrinOutbox `listForOwner` / `persistDraftAndQueue`). `issuedNumber` stays null until G1 issues it. App binding still uses a labelled uninjected FAKE G1 port (queue-only until INJECTED server is wired in-app). Amend/QC/EWB/return/pack remain on labelled `GrinFixtureRepository`. AdmissionGate and store-runtime block remain. Pricing/quota unresolved.
+**Status:** Wave 2 W2-01 `decac00` on combined: `startGrinOwnerSession` is the only session starter; repository/bindings do not self-revive. Amend/QC/EWB/return/attachments/history/pack/exceptions use `GrinApplicationRepository`. Admission host mounts children only when admitted. App binding still uses labelled FAKE `createUninjectedGrinServerPort()` (T1 JS transport exists, not wired). Pricing/quota unresolved.
 
 **Acceptance (Wave 1 fixtures + emulator mutations, not native):** screens for receiving, inspection, amendment, EWB observation, return/rejection; durable adapters for those commands with the same auth/ledger gates; issued numbers remain immutable; EWB is recorded observation only; supplier-status / GSTR-2B fields stay user assertions unless a later verified connector exists.
 
@@ -68,7 +68,7 @@ Billing prepare/validate/RTDN/worker handlers **exist** (Cloud Functions v2 `asi
 
 ### G5 — Versioned evidence-pack / PDF export
 
-**Status:** Wave 1 source on `team/grin-t4-product` (`355e575`). Pack screens + `grinPdfAdapter` exist against fixtures. Completeness still fail-closed on missing originals.
+**Status:** Wave 2 `decac00` pack export uses persisted event cuts / local originals / explicit missing sources against the application repository. Completeness still fail-closed. Fixture repository remains test-only.
 
 **Acceptance (not implemented now):** versioned pack bytes; explicit completeness explanations for missing originals/EWB/QC; footer remains “not a GST document / not ITC determination”; no silent backfill of missing evidence.
 

@@ -18,7 +18,14 @@ export type GrinOutboxApplicationSurface = GrinOutbox & {
   listForOwnerAndLedger?(ownerUid: string, ledgerId: string): GrinLocalReceiptView[];
   persistMutationAndQueue?(
     session: GrinDispatchSession,
-    input: GrinMutationQueueInput
+    input: {
+      ledgerId: string;
+      receiptId: string;
+      type: GrinMutationQueueInput["commandType"];
+      commandType?: GrinMutationQueueInput["commandType"];
+      body: unknown;
+      commandId?: string;
+    }
   ): GrinLocalReceiptView;
 };
 

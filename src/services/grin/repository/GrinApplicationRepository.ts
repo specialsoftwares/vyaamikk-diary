@@ -358,6 +358,7 @@ export class GrinApplicationRepository {
     persist.call(this.outbox, this.session, {
       ledgerId: this.ledgerId,
       receiptId: input.receiptId,
+      type: input.commandType,
       commandType: input.commandType,
       body: input.body,
       commandId: input.commandId ?? mintCommandId(),
@@ -417,22 +418,24 @@ export class GrinApplicationRepository {
   }
 
   private readPayload(view: GrinLocalReceiptView): unknown {
-    try {
-      const queued = peekQueuedCommand(this.db, view.ownerUid, view.ledgerId, view.commandId);
-      if (queued) return queued.frozenPayload;
-    } catch {
-      // Corrupt command JSON is an incomplete projection, not a throw.
-    }
     const row = this.db.getFirstSync<{ payload_json: string }>(
       `SELECT payload_json FROM grin_local_receipts WHERE owner_uid = ? AND ledger_id = ? AND receipt_id = ?`,
       [view.ownerUid, view.ledgerId, view.receiptId]
     );
-    if (!row?.payload_json) return null;
-    try {
-      return JSON.parse(row.payload_json) as unknown;
-    } catch {
-      return null;
+    if (row?.payload_json) {
+      try {
+        return JSON.parse(row.payload_json) as unknown;
+      } catch {
+        // Fall through to the queued register command if the stored snapshot is unreadable.
+      }
     }
+    try {
+      const queued = peekQueuedCommand(this.db, view.ownerUid, view.ledgerId, view.commandId);
+      if (queued?.commandType === "registerGoodsReceipt") return queued.frozenPayload;
+    } catch {
+      // Corrupt command JSON is an incomplete projection, not a throw.
+    }
+    return null;
   }
 }
 

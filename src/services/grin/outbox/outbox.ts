@@ -470,13 +470,12 @@ export class GrinOutbox {
         if (from === "draft") assertTransition(from, nextReceiptState);
         this.db.runSync(
           `UPDATE grin_local_receipts
-              SET command_id = ?, digest = ?, local_state = ?, payload_json = ?, dispatch_generation = ?, updated_at = ?
+              SET command_id = ?, digest = ?, local_state = ?, dispatch_generation = ?, updated_at = ?
             WHERE id = ? AND owner_uid = ?`,
           [
             frozen.commandId,
             frozen.digest,
             nextReceiptState,
-            JSON.stringify(frozen.body),
             session.dispatchGeneration,
             now,
             existingReceipt.id,
