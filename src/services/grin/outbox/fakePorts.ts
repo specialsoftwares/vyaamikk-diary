@@ -13,6 +13,8 @@ export type FakeGrinServerPort = GrinServerCommandPort & {
   serialsIssued: number;
   holdNextRegister: Promise<void> | null;
   dropNextResponse: boolean;
+  throwNonNetworkAfterCommit: boolean;
+  reconcileCalls: number;
   denyCode: Extract<GrinRegisterResult, { ok: false }>["code"] | null;
   waitUntilRegisterEntered(): Promise<void>;
 };
@@ -41,6 +43,8 @@ export function createFakeGrinServerPort(): FakeGrinServerPort {
     serialsIssued: 0,
     holdNextRegister: null,
     dropNextResponse: false,
+    throwNonNetworkAfterCommit: false,
+    reconcileCalls: 0,
     denyCode: null,
     waitUntilRegisterEntered() {
       return entered;
@@ -87,9 +91,14 @@ export function createFakeGrinServerPort(): FakeGrinServerPort {
         (err as { code?: string }).code = "network_ambiguous";
         throw err;
       }
+      if (port.throwNonNetworkAfterCommit) {
+        port.throwNonNetworkAfterCommit = false;
+        throw new TypeError("clock_failure");
+      }
       return result;
     },
     async reconcile(input) {
+      port.reconcileCalls += 1;
       if (port.denyCode && port.denyCode !== "not_found") return deny(port.denyCode);
       const stored = commands.get(cmdKey(input.uid, input.ledgerId, input.commandId));
       if (!stored) return deny("not_found");

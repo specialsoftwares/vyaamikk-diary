@@ -35,6 +35,7 @@ export type GrinServerCommandPort = {
     envelope: GrinRegisterEnvelope;
     digest: string;
   }): Promise<GrinRegisterResult>;
+  /** wave1b: reconcile can return GrinReconcileResult (register or mutation); type not on this branch. */
   reconcile(input: { uid: string; ledgerId: string; commandId: string }): Promise<GrinRegisterResult>;
   mutate?(input: { uid: string; envelope: GrinMutationEnvelope; digest: string }): Promise<GrinMutationResult>;
 };

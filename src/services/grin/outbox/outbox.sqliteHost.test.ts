@@ -225,6 +225,7 @@ async function main() {
     assert.equal(lostItem?.localState, "issued");
     assert.equal(lostItem?.replayed, true);
     assert.equal(server.serialsIssued, 2);
+    assert.ok(server.reconcileCalls >= 1);
     assert.equal(box.getRecord("owner_a", "ledger_1", "grcp_lost_1")?.issuedNumber, "GRIN/MAIN/FY2026-27/000002");
 
     const holdBody = box.persistDraftAndQueue(sessionA2, {
@@ -405,6 +406,24 @@ async function main() {
     assert.equal(box.getRecord("owner_a", "ledger_1", "grcp_retire_1")?.localState, "queued");
     assert.equal(box.listLocalFiles("owner_a", "ledger_1", "grcp_retire_1")[0]?.retainLocal, true);
     assert.equal(box.listLocalFiles("owner_a", "ledger_1", "grcp_retire_1")[0]?.localPath, "/tmp/grin-retire.bin");
+
+    const reconcilesBeforeThrow = server.reconcileCalls;
+    server.throwNonNetworkAfterCommit = true;
+    const thrown = box.persistDraftAndQueue(sessionA4, {
+      ledgerId: "ledger_1",
+      receiptId: "grcp_throw_1",
+      commandId: "gcmd_throw01",
+      body: body("grcp_throw_1"),
+    });
+    assert.equal(thrown.issuedNumber, null);
+    await assert.rejects(
+      () => box.dispatchDue(sessionA4, "worker_throw"),
+      (err: unknown) => err instanceof TypeError && err.message === "clock_failure"
+    );
+    assert.equal(server.reconcileCalls, reconcilesBeforeThrow);
+    const thrownRow = box.getRecord("owner_a", "ledger_1", "grcp_throw_1");
+    assert.equal(thrownRow?.issuedNumber, null);
+    assert.equal(thrownRow?.serverRegisteredAtUtc, null);
 
     const diaryStill = db.getFirstSync<{ id: string }>(
       "SELECT id FROM entries_local WHERE id = ?",

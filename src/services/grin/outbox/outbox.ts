@@ -599,7 +599,7 @@ export class GrinOutbox {
         digest: snapshot.digest,
       });
     } catch (err) {
-      if (!isNetworkAmbiguous(err) && !(err instanceof Error)) throw err;
+      if (!isNetworkAmbiguous(err)) throw err;
       usedReconcile = true;
       result = await this.server.reconcile({
         uid: snapshot.owner_uid,
