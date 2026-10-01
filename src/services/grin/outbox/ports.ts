@@ -4,7 +4,12 @@
  */
 
 import type { Wave1OriginalCategory } from "@/goodsEvidence/evidence";
-import type { GrinMutationResult, GrinReconcileResult, GrinRegisterResult } from "@/goodsEvidence/ports";
+import type {
+  GrinMutationResult,
+  GrinReceiptReadResult,
+  GrinReconcileResult,
+  GrinRegisterResult,
+} from "@/goodsEvidence/ports";
 import type { GrinCommandType, LocalEvidenceRole } from "./types";
 
 export type GrinPortKind = "FAKE" | "INJECTED";
@@ -42,6 +47,11 @@ export type GrinServerCommandPort = {
    */
   reconcile(input: { uid: string; ledgerId: string; commandId: string }): Promise<GrinReconcileResult>;
   mutate?(input: { uid: string; envelope: GrinMutationEnvelope; digest: string }): Promise<GrinMutationResult>;
+  /**
+   * Authorized retrieve of confirmed original / events / effective.
+   * Absent on FAKE ports that do not implement retrieve — outbox must not invent confirmation.
+   */
+  readReceipt?(input: { uid: string; ledgerId: string; receiptId: string }): Promise<GrinReceiptReadResult>;
 };
 
 export type GrinEvidenceUploadInput = {

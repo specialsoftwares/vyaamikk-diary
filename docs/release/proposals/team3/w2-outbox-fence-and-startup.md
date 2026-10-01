@@ -23,7 +23,7 @@ Team 5 `tools/grin-acceptance/startup/v9-v10-grin-off.sqliteHost.test.ts` still 
 
 ## Additive v10 columns (no DB_VERSION bump)
 
-`migrateToV10` ALTERs `grin_local_evidence_files.category` and `grin_outbox_commands.lease_attempt_id` when missing. `grinV10TablesPresent` treats a missing category column (and missing required indexes / lease_attempt_id) as incomplete so coordinator re-runs `migrateToV10`.
+`migrateToV10` ALTERs `grin_local_evidence_files.category`, `grin_outbox_commands.lease_attempt_id`, and the five `grin_local_receipts.confirmed_*` columns when missing. `grinV10TablesPresent` treats missing confirmed columns as incomplete so coordinator re-runs `migrateToV10`. `DB_VERSION` stays 10.
 
 ## Not proposed
 

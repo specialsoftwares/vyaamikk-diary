@@ -32,6 +32,9 @@ export function classifyRegisterResult(result: GrinRegisterResult | GrinMutation
   if (result.code === "digest_conflict") {
     return { kind: "conflicted", code: result.code, actionable: "command_payload_mismatch" };
   }
+  if (result.code === "version_conflict") {
+    return { kind: "conflicted", code: result.code, actionable: "command_payload_mismatch" };
+  }
   if (result.code === "unauthenticated") {
     return { kind: "retryable", code: result.code, actionable: "sign_in_again" };
   }

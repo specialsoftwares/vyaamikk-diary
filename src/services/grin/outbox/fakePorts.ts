@@ -1,7 +1,9 @@
 import type {
+  GrinConfirmedProjection,
   GrinDeny,
   GrinMutationResult,
   GrinMutationSuccess,
+  GrinReceiptReadResult,
   GrinReconcileResult,
   GrinRegisterResult,
   GrinRegisterSuccess,
@@ -31,16 +33,19 @@ export type FakeGrinServerPort = GrinServerCommandPort & {
   dropNextResponse: boolean;
   throwNonNetworkAfterCommit: boolean;
   reconcileCalls: number;
+  readReceiptCalls: number;
   denyCode: Extract<GrinRegisterResult, { ok: false }>["code"] | null;
   waitUntilRegisterEntered(): Promise<void>;
   waitUntilMutateEntered(): Promise<void>;
   refreshEnteredWait(): void;
+  setConfirmedProjection(uid: string, ledgerId: string, confirmed: GrinConfirmedProjection): void;
 };
 
-export function createFakeGrinServerPort(opts?: { mutate?: boolean }): FakeGrinServerPort {
+export function createFakeGrinServerPort(opts?: { mutate?: boolean; readReceipt?: boolean }): FakeGrinServerPort {
   const commands = new Map<string, StoredCommand>();
   const receipts = new Map<string, string>();
   const serials = new Map<string, number>();
+  const projections = new Map<string, GrinConfirmedProjection>();
   let notifyEntered: () => void = () => undefined;
   let entered = new Promise<void>((resolve) => {
     notifyEntered = resolve;
@@ -80,6 +85,7 @@ export function createFakeGrinServerPort(opts?: { mutate?: boolean }): FakeGrinS
     dropNextResponse: false,
     throwNonNetworkAfterCommit: false,
     reconcileCalls: 0,
+    readReceiptCalls: 0,
     denyCode: null,
     waitUntilRegisterEntered() {
       return entered;
@@ -90,6 +96,9 @@ export function createFakeGrinServerPort(opts?: { mutate?: boolean }): FakeGrinS
     refreshEnteredWait() {
       armEntered();
       armMutateEntered();
+    },
+    setConfirmedProjection(uid, ledgerId, confirmed) {
+      projections.set(receiptKey(uid, ledgerId, confirmed.receiptId), confirmed);
     },
     async register(input) {
       notifyEntered();
@@ -129,6 +138,34 @@ export function createFakeGrinServerPort(opts?: { mutate?: boolean }): FakeGrinS
       const stored: GrinStoredCommandResult = { ...result, commandType: "registerGoodsReceipt" };
       commands.set(cmdKey(uid, ledgerId, commandId), { digest, receiptId, stored });
       receipts.set(rKey, commandId);
+      if (opts?.readReceipt) {
+        const original = { receiptId, schemaVersion: 1, ledgerId, ownerUid: uid };
+        projections.set(rKey, {
+          receiptId,
+          eventVersion: result.eventVersion,
+          headHash: result.headHash,
+          original: original as GrinConfirmedProjection["original"],
+          events: [
+            {
+              schemaVersion: 1,
+              eventId: `gevt_${commandId}`,
+              receiptId,
+              streamSequence: 1,
+              type: "receipt_registered",
+              actorUid: uid,
+              serverAcceptedAtUtc: result.serverRegisteredAtUtc,
+              clientObservedAtUtc: result.serverRegisteredAtUtc,
+              reason: "issued",
+              expectedPreviousVersion: 0,
+              typedChanges: {},
+              previousHash: null,
+              eventHash: result.headHash,
+              firestoreCommitTime: null,
+            },
+          ],
+          effective: original as GrinConfirmedProjection["effective"],
+        });
+      }
       if (port.dropNextResponse) {
         port.dropNextResponse = false;
         const err = new Error("lost_server_response");
@@ -150,6 +187,16 @@ export function createFakeGrinServerPort(opts?: { mutate?: boolean }): FakeGrinS
     },
   };
 
+  if (opts?.readReceipt) {
+    port.readReceipt = async (input): Promise<GrinReceiptReadResult> => {
+      port.readReceiptCalls += 1;
+      if (port.denyCode) return deny(port.denyCode);
+      const stored = projections.get(receiptKey(input.uid, input.ledgerId, input.receiptId));
+      if (!stored) return deny("not_found");
+      return { ok: true, confirmed: stored };
+    };
+  }
+
   if (opts?.mutate) {
     port.mutate = async (input): Promise<GrinMutationResult> => {
       notifyMutateEntered();
@@ -168,12 +215,22 @@ export function createFakeGrinServerPort(opts?: { mutate?: boolean }): FakeGrinS
         if (existing.stored.commandType === "registerGoodsReceipt") return deny("integrity");
         return { ...existing.stored, replayed: true };
       }
+      const expectedVersion =
+        body && typeof body === "object" && typeof (body as { expectedVersion?: unknown }).expectedVersion === "number"
+          ? (body as { expectedVersion: number }).expectedVersion
+          : 0;
+      const rKey = receiptKey(uid, ledgerId, receiptId);
+      const prior = projections.get(rKey);
+      if (opts?.readReceipt && prior && prior.eventVersion !== expectedVersion) {
+        return deny("version_conflict");
+      }
+      const nextVersion = prior ? prior.eventVersion + 1 : 1;
       const result: GrinMutationSuccess = {
         ok: true,
         replayed: false,
         receiptId,
         eventId: `gevt_${commandId}`,
-        eventVersion: 1,
+        eventVersion: nextVersion,
         headHash: "b".repeat(64),
         serverAcceptedAtUtc: "2026-09-28T12:00:00.000Z",
       };
@@ -182,6 +239,37 @@ export function createFakeGrinServerPort(opts?: { mutate?: boolean }): FakeGrinS
         receiptId,
         stored: { ...result, commandType: type },
       });
+      if (opts?.readReceipt) {
+        const original = prior?.original ?? ({ receiptId, schemaVersion: 1, ledgerId, ownerUid: uid } as GrinConfirmedProjection["original"]);
+        const events = [...(prior?.events ?? []), {
+          schemaVersion: 1,
+          eventId: result.eventId,
+          receiptId,
+          streamSequence: nextVersion,
+          type: type === "amendFields" ? "field_amended" : type === "recordQc" ? "qc_decision" : "ewb_observation_recorded",
+          actorUid: uid,
+          serverAcceptedAtUtc: result.serverAcceptedAtUtc,
+          clientObservedAtUtc: result.serverAcceptedAtUtc,
+          reason: "mutation",
+          expectedPreviousVersion: expectedVersion,
+          typedChanges: {},
+          previousHash: prior?.headHash ?? null,
+          eventHash: result.headHash,
+          firestoreCommitTime: null,
+        }];
+        const effective = {
+          ...(prior?.effective ?? original),
+          remarks: type === "amendFields" ? { kind: "present", value: "amended" } : (prior?.effective as { remarks?: unknown } | undefined)?.remarks,
+        } as GrinConfirmedProjection["effective"];
+        projections.set(rKey, {
+          receiptId,
+          eventVersion: nextVersion,
+          headHash: result.headHash,
+          original,
+          events: events as GrinConfirmedProjection["events"],
+          effective,
+        });
+      }
       if (port.dropNextResponse) {
         port.dropNextResponse = false;
         const err = new Error("lost_server_response");

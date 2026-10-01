@@ -88,6 +88,8 @@ export const DURABLE_ORIGINAL_UPLOAD_CONDITION =
 export const MAX_DISPATCH_ATTEMPTS = 5;
 export const DEFAULT_LEASE_TTL_MS = 30_000;
 
+export { MAX_CONCURRENT_UPLOADS_PER_OWNER } from "@/goodsEvidence/evidence";
+
 /** Host SQLite reopen is not native process-death acceptance. */
 export const SQLITE_HOST_NOT_NATIVE_DEVICE =
   "SQLITE_HOST tests are not NATIVE_DEVICE process-death proof.";

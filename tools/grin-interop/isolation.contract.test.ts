@@ -29,6 +29,7 @@ function stripComments(src: string): string {
 const interopFiles = walk(dir).filter((p) => !p.includes(".test."));
 assert.ok(interopFiles.some((p) => p.endsWith("injectedG1ServerPort.ts")));
 assert.ok(existsSync(join(dir, "cs01-offline-restart-register.sqliteHost.test.ts")));
+assert.ok(existsSync(join(dir, "f2-register-amend-confirm.sqliteHost.test.ts")));
 
 const interopForbidden = [/firebase-admin/, /formatGrinNumber/, /@google-cloud\/storage/];
 for (const file of interopFiles) {
@@ -52,5 +53,10 @@ const cs01 = readFileSync(join(dir, "cs01-offline-restart-register.sqliteHost.te
 assert.match(cs01, /NATIVE_DEVICE=not_claimed/);
 assert.match(cs01, /SQLITE_HOST/);
 assert.match(cs01, /INJECTED_PORT/);
+
+const f2 = readFileSync(join(dir, "f2-register-amend-confirm.sqliteHost.test.ts"), "utf8");
+assert.match(f2, /NATIVE_DEVICE=not_claimed/);
+assert.match(f2, /SQLITE_HOST/);
+assert.match(f2, /INJECTED/);
 
 console.log("tools/grin-interop/isolation.contract.test.ts: ok");
