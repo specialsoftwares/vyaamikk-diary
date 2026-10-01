@@ -1,0 +1,32 @@
+export function admissionPath(uid: string): string {
+  return `users/${uid}/goodsEvidenceAdmission/runtime`;
+}
+
+export function userPath(uid: string): string {
+  return `users/${uid}`;
+}
+
+export function ledgerPath(uid: string, ledgerId: string): string {
+  return `users/${uid}/goodsEvidenceLedgers/${ledgerId}`;
+}
+
+export function commandPath(uid: string, ledgerId: string, commandId: string): string {
+  return `${ledgerPath(uid, ledgerId)}/commands/${commandId}`;
+}
+
+export function serialPath(uid: string, ledgerId: string, fyToken: string): string {
+  return `${ledgerPath(uid, ledgerId)}/serials/${fyToken}`;
+}
+
+export function receiptPath(uid: string, ledgerId: string, receiptId: string): string {
+  return `${ledgerPath(uid, ledgerId)}/receipts/${receiptId}`;
+}
+
+export function eventPath(
+  uid: string,
+  ledgerId: string,
+  receiptId: string,
+  eventId: string
+): string {
+  return `${receiptPath(uid, ledgerId, receiptId)}/events/${eventId}`;
+}

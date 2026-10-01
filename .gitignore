@@ -72,6 +72,8 @@ firebase-adminsdk*.json
 google-credentials*.json
 firebase-debug.log
 firebase-debug.*.log
+firestore-debug.log
+firestore-debug.*.log
 *.local
 
 # Local databases

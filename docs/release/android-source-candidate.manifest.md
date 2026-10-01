@@ -3,6 +3,12 @@
 This is a **new committed source baseline** for review. It is **not** reconstructed vc22.
 Exact source-to-installed-vc22 correspondence: **UNVERIFIED**.
 
+## Owner-selected release scope (2026-10-01, integration branch)
+
+GRIN completion is **required** for the owner's intended release. The core-only Internal build packet is **deferred**. Encrypted PDF backup remains backlog. Billing preparation may continue; activation is **not** authorized. VersionCode 23 is unchanged and is not a build approval.
+
+See `docs/release/GRIN_IMPLEMENTATION_REGISTER.md`. G1 is emulator persistence only and is **not** GRIN-complete.
+
 ## Coordinates
 
 | Role | SHA |
@@ -134,7 +140,7 @@ Owner/session transition retires failure presentation as well as a displayed con
 - Live Firebase Rules were re-exported 2026-10-01: Firestore sha256 `b13d52559efd144bfbdd86daf426fd5ce81abceead4c87979cb9cee2d1a25e2c` (proposed compat patch, live since 2026-09-21); Storage still `1a912051ba923a0e4ae29fd36b1741bcf0f5879cd53e6d4bd386c9d5a3b717d5`. See `docs/release/rules-compat/live-export-2026-10-01/META.json`. This assignment did not deploy Rules.
 - Remote EAS `EXPO_PUBLIC_APP_MODE` exists as SENSITIVE. For eas-cli v16.28.0 configuration resolution, overlapping keys use **build-profile env**, so production profile `EXPO_PUBLIC_APP_MODE=production` wins over the unread remote value. Purchase-entry flags are profile-only `"0"`. This is configuration-resolution evidence, not build-worker/artifact evidence.
 - Native/EAS build, OTA, deploy, Play upload: **not authorized**
-- Encrypted PDF backup Phase 1 remains a separate design task. It is not in this candidate. GRIN slice 2 remains unauthorized
+- Encrypted PDF backup Phase 1 remains a separate design task. It is not in this candidate. G1 emulator persistence is authorized only on `integration/grin-g1-persistence`; G2–G6 still need a separate reviewed checkpoint. Production GRIN admission is not authorized.
 
 ## Validation boundaries
 
@@ -214,7 +220,7 @@ Build approval and Internal Testing upload approval remain **separate**. Neither
 | Live backend | Firestore live = proposed compat patch hash `b13d5255…` (since 2026-09-21). Storage = 2026-09-19 baseline hash. Billing Functions **are deployed**; enablement flags were **not** read. Client purchase-entry remains off. Repo-root Rules not live. |
 | Server billing activation | **prohibited** |
 | Security ancestry | `0da2f58` → `eb5f582` → `90c6948` preserved through `7e9e660` into `6e3dbba` |
-| GRIN / encrypted backup | not included; not prerequisites; not legal immunity |
+| GRIN / encrypted backup | Frozen core candidate (`6e3dbba` / PR #29) still excludes GRIN. Owner-selected intended release now **requires** GRIN completion; this integration branch starts G1 only. Encrypted PDF backup remains backlog. Not legal immunity. |
 | Native/device checks | outstanding (checklist below) |
 | VersionCode source preparation | **complete in source** (this assignment) |
 | B. EAS production AAB build | **not authorized** |
