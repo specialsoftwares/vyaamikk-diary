@@ -32,7 +32,9 @@ import {
   resetGrinApplicationRepositoryForTests,
   retireGrinOwnerSession,
   setGrinApplicationDbFactoryForTests,
+  setGrinServerPortFactoryForTests,
 } from "@/services/grin/repository";
+import { createUninjectedGrinServerPort } from "@/services/grin/repository/uninjectedServer";
 
 import { GrinAdmittedSessionHost } from "./GrinAdmittedSessionHost";
 
@@ -84,6 +86,11 @@ async function main(): Promise<void> {
       factoryCalls.push("db");
       return db as HostSqlite;
     });
+    const serverFactoryCalls: string[] = [];
+    setGrinServerPortFactoryForTests(() => {
+      serverFactoryCalls.push("server");
+      return createUninjectedGrinServerPort();
+    });
 
     const container = createMountContainer();
     root = createRoot(container);
@@ -122,6 +129,7 @@ async function main(): Promise<void> {
     });
     assert.equal(childMounts.length, 0, "store block must not mount admitted children");
     assert.equal(factoryCalls.length, 0, "store block must not open the repository database");
+    assert.equal(serverFactoryCalls.length, 0, "store block must not construct a server port");
 
     setExpoGoDev();
     delete process.env.EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED;
@@ -130,6 +138,7 @@ async function main(): Promise<void> {
     });
     assert.equal(childMounts.length, 0, "flag off must not mount admitted children");
     assert.equal(factoryCalls.length, 0, "flag off must not start a session");
+    assert.equal(serverFactoryCalls.length, 0, "flag off must not construct a server port");
 
     process.env.EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED = "1";
     await act(async () => {
@@ -138,6 +147,7 @@ async function main(): Promise<void> {
     assert.equal(childMounts.length, 1);
     assert.equal(childMounts[0]?.ownerUid, "owner_a");
     assert.equal(factoryCalls.length >= 1, true);
+    assert.equal(serverFactoryCalls.length >= 1, true, "admitted session must use the injected FAKE port");
     const genA = childMounts[0]!.dispatchGeneration;
     assert.ok(capturedCreate);
 

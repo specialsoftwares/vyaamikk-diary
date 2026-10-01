@@ -26,12 +26,15 @@ import {
 import { GRIN_APPLICATION_REPOSITORY_KIND } from "./labels";
 import { GRIN_SESSION_RETIRED } from "./sessionErrors";
 import {
+  GRIN_APPLICATION_SERVER_PORT_LABEL,
   getGrinApplicationRepository,
   resetGrinApplicationRepositoryForTests,
   retireGrinOwnerSession,
   setGrinApplicationDbFactoryForTests,
+  setGrinServerPortFactoryForTests,
   startGrinOwnerSession,
 } from "./appBinding";
+import { createUninjectedGrinServerPort } from "./uninjectedServer";
 import type { GrinMutationQueueInput } from "./outboxContract";
 
 function body(receiptId: string, supplier: string) {
@@ -239,12 +242,19 @@ function main() {
 
     resetGrinApplicationRepositoryForTests();
     setGrinApplicationDbFactoryForTests(() => db as HostSqlite);
+    let injectedPortCalls = 0;
+    setGrinServerPortFactoryForTests(() => {
+      injectedPortCalls += 1;
+      return createUninjectedGrinServerPort();
+    });
     const liveA = startGrinOwnerSession(ownerA);
+    assert.equal(injectedPortCalls, 1, "binding must use the injected FAKE server port");
     const bound = getGrinApplicationRepository(ownerA, liveA.dispatchGeneration);
     const queuedBOwnerPrep = bound.createQueued(body("grcp_bind_a", "Bound A"));
     assert.equal(queuedBOwnerPrep.issuedNumber, null);
     const staleBoundCreate = () => bound.createQueued(body("grcp_from_retired_a", "Should not queue"));
     const liveB = startGrinOwnerSession("owner_b_wave2");
+    assert.equal(injectedPortCalls, 2, "owner switch must construct a new injected FAKE port");
     assert.notEqual(liveB.ownerUid, ownerA);
     assert.throws(staleBoundCreate);
     assert.equal(outbox.getRecord(ownerA, GRIN_APPLICATION_LEDGER_ID, "grcp_from_retired_a"), null);
@@ -255,9 +265,17 @@ function main() {
 
     retireGrinOwnerSession();
     const liveA2 = startGrinOwnerSession(ownerA);
+    assert.equal(injectedPortCalls, 3);
     assert.notEqual(liveA2.dispatchGeneration, liveA.dispatchGeneration);
     assert.throws(() => getGrinApplicationRepository(ownerA, liveA.dispatchGeneration));
     getGrinApplicationRepository(ownerA, liveA2.dispatchGeneration).list();
+    retireGrinOwnerSession();
+    setGrinServerPortFactoryForTests(() => createFakeGrinServerPort());
+    const liveFake = startGrinOwnerSession(ownerA);
+    assert.equal(
+      getGrinApplicationRepository(ownerA, liveFake.dispatchGeneration).originatingSession().ownerUid,
+      ownerA
+    );
     retireGrinOwnerSession();
     resetGrinApplicationRepositoryForTests();
 
@@ -328,12 +346,31 @@ function main() {
   const bindingSrc = stripComments(readFileSync(join(here, "appBinding.ts"), "utf8"));
   assert.match(bindingSrc, /beginOwnerSession/, "lifecycle owner may start a session");
   assert.match(bindingSrc, /function startGrinOwnerSession/, "session start must be explicit");
+  assert.match(
+    bindingSrc,
+    /createFirebaseJsGrinTransport/,
+    "production default must bind Team 1 JS httpsCallable transport"
+  );
+  assert.match(bindingSrc, /function defaultGrinServerPortFactory/, "default factory must be explicit");
+  assert.doesNotMatch(
+    bindingSrc,
+    /createUninjectedGrinServerPort\s*\(/,
+    "production default must not construct the uninjected FAKE port"
+  );
+  assert.doesNotMatch(bindingSrc, /from ["'][^"']*uninjectedServer["']/, "appBinding must not import the FAKE uninjected port");
+  assert.match(GRIN_APPLICATION_SERVER_PORT_LABEL, /INJECTED \/ FIREBASE_JS_HTTPS_CALLABLE/);
+  assert.match(GRIN_APPLICATION_SERVER_PORT_LABEL, /Not live deploy/);
   const getFn = bindingSrc.slice(bindingSrc.indexOf("export function getGrinApplicationRepository"));
   assert.doesNotMatch(
     getFn.slice(0, 800),
     /beginOwnerSession/,
     "getGrinApplicationRepository must not start a session"
   );
+
+  const transportSrc = stripComments(readFileSync(join(here, "../transport/firebaseTransport.ts"), "utf8"));
+  assert.match(transportSrc, /httpsCallable/);
+  assert.match(transportSrc, /createFirebaseJsGrinTransport/);
+  assert.match(transportSrc, /portKind: "INJECTED"/);
 
   const repoFiles = readdirSync(here).filter((name) => name.endsWith(".ts") && !name.includes(".test."));
   for (const name of repoFiles) {
@@ -344,6 +381,12 @@ function main() {
       assert.doesNotMatch(src, /from ["']expo-sqlite["']/, `${name} must not import expo-sqlite`);
     }
     assert.doesNotMatch(src, /from ["'][^"']*hostSqlite["']/, `${name} must not import HostSqlite`);
+    assert.doesNotMatch(src, /tools\/goods-evidence/, `${name} must not import goods-evidence tools`);
+    if (name === "appBinding.ts") {
+      assert.doesNotMatch(src, /node:fs/, "appBinding must not import node:fs");
+      assert.doesNotMatch(src, /from ["']fs["']/, "appBinding must not import fs");
+      assert.doesNotMatch(src, /better-sqlite3/, "appBinding must not import better-sqlite3");
+    }
   }
 
   console.log("GrinApplicationRepository.test.ts: ok");

@@ -9,12 +9,14 @@ export {
   grinRepositoryIsFake,
 } from "./GrinApplicationRepository";
 export {
+  GRIN_APPLICATION_SERVER_PORT_LABEL,
   getGrinApplicationRepository,
   getLiveGrinDispatchSession,
   requireLiveGrinApplicationRepository,
   resetGrinApplicationRepositoryForTests,
   retireGrinOwnerSession,
   setGrinApplicationDbFactoryForTests,
+  setGrinServerPortFactoryForTests,
   startGrinOwnerSession,
 } from "./appBinding";
 export {

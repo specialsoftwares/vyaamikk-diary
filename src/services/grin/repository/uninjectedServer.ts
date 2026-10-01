@@ -1,7 +1,8 @@
 /**
- * Queue-only G1 stand-in until Team 1 injects a real server port.
- * portKind is FAKE because it is not an INJECTED Team 1 adapter.
- * It never issues GRIN numbers.
+ * FAKE always-deny G1 stand-in for SQLITE_HOST / mounted-inert tests.
+ * Production startGrinOwnerSession uses createFirebaseJsGrinTransport (INJECTED).
+ * Tests must inject this port (or createFakeGrinServerPort) so they never call Firebase.
+ * portKind is FAKE. It never issues GRIN numbers.
  */
 
 import type { GrinServerCommandPort } from "@/services/grin/outbox/ports";
