@@ -15,7 +15,7 @@ The core-only Internal build packet is **deferred**. VersionCode 23 is source pr
 
 This register is not GRIN-complete from G1.
 
-Programme (2026-10-01): isolated G1–G5 source + G6 automated tests/review/device **preparation**. Combined branch `integration/grin-g1-g5-source`. Contract revision `2026-10-01.wave1b`. Team 5 implementation review `070a388` then findings re-review `6f920cd`: M1–M3 and L4 **closed**; finding fixes **approved**. G6 incomplete. Wave 2 adapter wiring started. PR #30 remains the G1-only draft. Combined GitHub draft PR was not opened (`gh` unauthenticated).
+Programme (2026-10-01): isolated G1–G5 source + G6 automated tests/review/device **preparation**. Combined branch `integration/grin-g1-g5-source`. Contract revision `2026-10-01.wave1b`. Team 5 implementation review `070a388` then findings re-review `6f920cd`: M1–M3 and L4 **closed**; finding fixes **approved**. G6 incomplete. Wave 2 adapter wiring started and is **not accepted** until external-review findings ER-1…ER-5 are mapped (see `GRIN_TEAM_BOARD.md`). Team 1 Wave 2 injected server port `091772e` is on combined pending T5 review. PR #30 remains the G1-only draft. Combined GitHub draft PR was not opened (`gh` unauthenticated).
 
 GRIN remains default-off. No main merge, deploy, EAS, Play, or billing activation in this programme.
 
@@ -42,7 +42,7 @@ Billing prepare/validate/RTDN/worker handlers **exist** (Cloud Functions v2 `asi
 
 ### G2 — Protected original evidence upload
 
-**Status:** Wave 1 source on `team/grin-t2-evidence` (`8989b48`), merged to combined. Emulator/FAKE ports in `tools/goods-evidence-storage`. Live Storage/IAM unchanged. Not production admission.
+**Status:** Wave 1 source on `team/grin-t2-evidence` (`8989b48`), merged to combined. Emulator/FAKE ports in `tools/goods-evidence-storage`. Live Storage/IAM unchanged. Not production admission. Open Wave 2 extras: **ER-2** re-authorize inside the final write transaction after awaited blob I/O; **ER-3** Storage SDK tests vs reservation/account/admission (proposal rules only).
 
 **Acceptance (Wave 1 emulator/FAKE, not live):** untrusted upload rejected until auth/ownership/active ledger pass; original bytes stored off-client under owner-scoped paths; server computes hash and matches the declared digest; link is an event + pointer, never a rewrite of `original`; unauthenticated/cross-owner/pending-deletion denied; no PDF bodies in logs.
 
@@ -50,7 +50,7 @@ Billing prepare/validate/RTDN/worker handlers **exist** (Cloud Functions v2 `asi
 
 ### G3 — Durable SQLite outbox
 
-**Status:** Wave 1 source on `team/grin-t3-offline` (`3c1303b`), merged to combined. Coordinator wired `DB_VERSION = 10`. `offline.ts` remains a labelled in-process fixture. Host tests are `SQLITE_HOST`, not native process-death.
+**Status:** Wave 1 source on `team/grin-t3-offline` (`3c1303b`), merged to combined. Coordinator wired `DB_VERSION = 10`. `offline.ts` remains a labelled in-process fixture. Host tests are `SQLITE_HOST`, not native process-death. Open Wave 2 extras: **ER-1** retired-session completion / lease fencing after await; **ER-4** (with T5) real v9→v10 startup including GRIN-off.
 
 **Acceptance (not implemented now):** durable device queue survives process death; interrupted register recovers via G1 replay/reconcile without a second serial; queue rows are bound to the signed-in owner/account; switching accounts cannot flush another owner’s commands; no locally invented issued numbers.
 
@@ -74,7 +74,7 @@ Billing prepare/validate/RTDN/worker handlers **exist** (Cloud Functions v2 `asi
 
 ### G6 — Combined device, accessibility, security, operational acceptance
 
-**Status:** Wave 1 matrix `df5f0a5`, implementation review `070a388`, findings re-review `6f920cd` (M1–M3 closed). Native/device remains `device_pending`. Must not mark complete from source/emulator tests.
+**Status:** Wave 1 matrix `df5f0a5`, implementation review `070a388`, findings re-review `6f920cd` (M1–M3 closed). Native/device remains `device_pending`. Must not mark complete from source/emulator tests. Open: **ER-4** QA of v9→v10 GRIN-off startup; **ER-5** execute combined workflows — `assertWorkflowNotExecuted` stubs are not CS passes.
 
 **Acceptance (not implemented now):** Play-installed binary; TalkBack on GRIN screens; account switch and pending-deletion; safe diagnostics; operational runbook. Must not mark Done from source/emulator tests.
 
