@@ -7,16 +7,16 @@ Arrangement: one coordinator plus five **local** Cursor Task subagents on separa
 
 Checkpoint inspected: `2593c2be6964955ecb1a433dc93c4096168ce9d2`. Combined reviewed at `e94b78c`; T5 PHASE 2 `3fe4071`. Inspected W2-01…W2-05 **reproduced-then-fixed**. Wave 2 **not accepted**.
 
-T4 transport `e6a689b` is fast-forwarded onto combined. Production default is `createFirebaseJsGrinTransport`. Functions remain unexported. F1–F4 below are **distinct** from W2-01…W2-05 and were **not** closed by PHASE 2.
+T1–T4 application findings are merged onto combined pending Team 5 independent review of production paths. Functions remain unexported.
 
 | Task | Owner | Branch | Worktree | Dependency | Status | Evidence | Blocker | Next |
 |---|---|---|---|---|---|---|---|---|
-| Integration | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | G1 `c9623dd` | running | T2 `3ddd4f9` on combined; T1/T3/T4 still in flight | F1–F4 not independently reviewed | Integrate remaining landings; exact-head `ci:verify` |
-| W2-06 G1 mobile-safe composition | team1 | `team/grin-t1-backend` | `grin-t1-backend` | `cbcb1b9` | source_verified | composed + JS transport; Functions unexported | live export HOLD | F2 confirmed retrieve; F4 shape validation |
-| W2-03 identity + W2-04 read policy | team2 | `team/grin-t2-evidence` | `grin-t2-evidence` | `3ddd4f9` | source_verified | F3 retrieve + pack inputs; live Rules unchanged | live IAM | Team 4 wire `exportPack` to `assembleEvidencePackInputs` |
-| W2-02 lease/attempt + W2-05 tests | team3 | `team/grin-t3-offline` | `grin-t3-offline` | `9a0de6d` | source_verified | T5 PHASE 2 SQLITE_HOST fence | native death not claimed | F1 session token; F2 confirmed projection persistence |
-| W2-01 session bind + screens | team4 | `team/grin-t4-product` | `grin-t4-product` | `e6a689b` | source_verified | transport bound; W2-01 no self-revive | pricing/quota | F1 callback origin; F2 expectedVersion; F3 pack/attach |
-| Independent PHASE 2 review | team5 | `team/grin-t5-qa` | `grin-t5-qa` | `e94b78c` | source_verified | `3fe4071` WAVE2_PHASE2_REVIEW.md | NATIVE_DEVICE | F5 after F1–F4 land (do not start early) |
+| Integration | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | G1 `c9623dd` | review | T1+T2+T3+T4 merged; scripts updated | F5 not run | Team 5 production-path review; exact-head `ci:verify` |
+| F2/F4 G1 readReceipt + transport | team1 | `team/grin-t1-backend` | `grin-t1-backend` | `4b560cd` | source_verified | composed readReceipt; parseRemote; Functions unexported | live export HOLD | Stay unexported |
+| F3 retrieve + pack inputs | team2 | `team/grin-t2-evidence` | `grin-t2-evidence` | `3ddd4f9` | source_verified | INJECTED + STORAGE_EMULATOR pack A/B | live IAM | Keep live Rules unchanged |
+| F1/F2 outbox confirmed + session token | team3 | `team/grin-t3-offline` | `grin-t3-offline` | `fa6d4a7` | source_verified | SQLITE_HOST joined register→amend | native death not claimed | — |
+| F1 origin screens + F2/F3 repo | team4 | `team/grin-t4-product` | `grin-t4-product` | `26b602a` | source_verified | origin.bind actual bodies; assembleEvidencePackInputs | pricing/quota | — |
+| Independent F5 review | team5 | `team/grin-t5-qa` | `grin-t5-qa` | combined after T1–T4 | ready | — | NATIVE_DEVICE | Review integrated production paths |
 
 ## Wave 2 correction findings (closed at stated boundary; not Wave 2 acceptance)
 
@@ -28,23 +28,23 @@ T4 transport `e6a689b` is fast-forwarded onto combined. Production default is `c
 | W2-04 | Isolated original read required reserved/uploading | team2 | source_verified | T5 PHASE 2 isolated emulator; live Rules unchanged |
 | W2-05 | v9→v10 tests copied init sequence | team3 + coordinator; T5 | source_verified | T5 ER-4 now calls production orchestrator |
 
-## Application findings (open — not covered by W2-01…W2-05)
+## Application findings (open until Team 5 independently executes)
 
 | ID | Finding | Owner | Status | Next |
 |---|---|---|---|---|
-| F1 | Screen `onSave` recaptures `requireLiveGrinApplicationRepository()`; A→B dispatches A's values on B | team4 + team3 | running | Bind origin uid+generation; test actual screen bodies |
-| F2 | `clientExpectedVersion()` always `0`; G1 rejects positive-integer rule | team1 + team3 + team4 | running | Confirmed projection; refuse mutation without confirmed version |
-| F3 | Attachments list-only; `exportPack` hardcodes empty cuts / `missingOriginal: true` | team2 + team4 + team3 | running | T2 `3ddd4f9` retrieve/link/pack inputs (INJECTED + STORAGE_EMULATOR). T4 `exportPack`/capture and T3 local-original retain still open |
-| F4 | JS transport on combined (`e6a689b`); source-graph test is not executed composition | team1 + team4 + coordinator | running | Validate remote shapes; emulator composition; Functions stay unexported |
+| F1 | Screen `onSave` recaptured live repo; A→B dispatched A's values on B | team4 + team3 | source_verified | T4 `26b602a` origin bind + T3 live token; T5 must re-execute actual screen bodies |
+| F2 | `clientExpectedVersion()` always `0` | team1 + team3 + team4 | source_verified | T3 persist + T1 readReceipt + T4 fail-closed; T5 joined flow |
+| F3 | Attachments list-only; placeholder pack | team2 + team4 + team3 | source_verified | T2 pack inputs + T4 exportPack/capture; T5 pack A/B |
+| F4 | Transport composition not emulator-proven | team1 + team4 + coordinator | source_verified | T1 parseRemote + composed tests; T5 must not treat source-graph as e2e |
 
-Previous ER-1…ER-5 remain mapped (SQLITE_HOST / INJECTED / isolated emulator). Mapping is not Wave 2 acceptance.
+Previous ER-1…ER-5 remain mapped. Mapping is not Wave 2 acceptance.
 
 ## Readiness (never one “ready”)
 
 | Gate | State |
 |---|---|
-| GRIN SOURCE IMPLEMENTATION | W2 findings independently closed at host/injected/emulator boundary; F1–F4 **open**; **Wave 2 not accepted** |
-| COMBINED SOURCE REVIEW | T5 PHASE 2 `3fe4071` of `e94b78c` only; `e6a689b` and F1–F4 not independently reviewed |
+| GRIN SOURCE IMPLEMENTATION | T1–T4 F1–F4 source landed on combined; **not independently reviewed**; **Wave 2 not accepted** |
+| COMBINED SOURCE REVIEW | T5 PHASE 2 of `e94b78c` only; F1–F4 merged tree not reviewed |
 | BACKEND DEPLOYMENT | not authorized |
 | INTERNAL BUILD | not authorized |
 | DEVICE ACCEPTANCE | device_pending |
