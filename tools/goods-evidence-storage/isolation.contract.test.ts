@@ -12,6 +12,7 @@ const repoRoot = join(dir, "../..");
 
 const adapterFiles = [
   "adapter.ts",
+  "evidencePort.ts",
   "hash.ts",
   "ids.ts",
   "log.ts",
@@ -48,10 +49,18 @@ assert.match(fakeBlob, /FAKE_/);
 assert.match(fakeBlob, /not wired as production/i);
 
 const functionsIndex = readFileSync(join(repoRoot, "functions/src/index.ts"), "utf8");
-assert.doesNotMatch(functionsIndex, /goods-evidence-storage|GoodsEvidenceStorageAdapter|FAKE_MemoryBlobStore/);
+assert.doesNotMatch(
+  functionsIndex,
+  /goods-evidence-storage|GoodsEvidenceStorageAdapter|FAKE_MemoryBlobStore|createInjectedGrinEvidencePort/
+);
 
 const liveStorage = readFileSync(join(repoRoot, "storage.rules"), "utf8");
 assert.doesNotMatch(liveStorage, /grinEvidence/);
+
+const isolatedStorage = readFileSync(join(dir, "storage.rules"), "utf8");
+assert.match(isolatedStorage, /hasFlightReservation/);
+assert.match(isolatedStorage, /pending_deletion|status/);
+assert.doesNotMatch(isolatedStorage, /getDownloadURL/);
 
 const appJson = readFileSync(join(repoRoot, "app.json"), "utf8");
 assert.doesNotMatch(appJson, /GOODS_EVIDENCE/);

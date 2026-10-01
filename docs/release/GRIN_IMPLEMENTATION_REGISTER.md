@@ -15,7 +15,7 @@ The core-only Internal build packet is **deferred**. VersionCode 23 is source pr
 
 This register is not GRIN-complete from G1.
 
-Programme (2026-10-01): isolated G1–G5 source + G6 automated tests/review/device **preparation**. Combined branch `integration/grin-g1-g5-source`. Contract revision `2026-10-01.wave1b`. Team 5 implementation review `070a388` then findings re-review `6f920cd`: M1–M3 and L4 **closed**; finding fixes **approved**. G6 incomplete. Wave 2 adapter wiring started and is **not accepted** until ER-1…ER-5 are mapped (see `GRIN_TEAM_BOARD.md`). Combined has Team 1 port `091772e` and Team 3 `22a848a` (CS-01, ER-1, ER-4 T3 half). ER-2/ER-3/ER-4 T5/ER-5 remain open. PR #30 remains the G1-only draft. Combined GitHub draft PR was not opened (`gh` unauthenticated).
+Programme (2026-10-01): isolated G1–G5 source + G6 automated tests/review/device **preparation**. Combined branch `integration/grin-g1-g5-source`. Contract revision `2026-10-01.wave1b`. Team 5 implementation review `070a388` then findings re-review `6f920cd`: M1–M3 and L4 **closed**; finding fixes **approved**. G6 incomplete. Wave 2 adapter wiring started and is **not accepted** until ER-1…ER-5 are mapped (see `GRIN_TEAM_BOARD.md`). Combined has Team 1 `091772e`, Team 2 `4b10356` (ER-2/ER-3), Team 3 `22a848a` (CS-01, ER-1, ER-4 T3). ER-4 T5 and ER-5 remain open. PR #30 remains the G1-only draft. Combined GitHub draft PR was not opened (`gh` unauthenticated).
 
 GRIN remains default-off. No main merge, deploy, EAS, Play, or billing activation in this programme.
 
@@ -42,7 +42,7 @@ Billing prepare/validate/RTDN/worker handlers **exist** (Cloud Functions v2 `asi
 
 ### G2 — Protected original evidence upload
 
-**Status:** Wave 1 source on `team/grin-t2-evidence` (`8989b48`), merged to combined. Emulator/FAKE ports in `tools/goods-evidence-storage`. Live Storage/IAM unchanged. Not production admission. Open Wave 2 extras: **ER-2** re-authorize inside the final write transaction after awaited blob I/O; **ER-3** Storage SDK tests vs reservation/account/admission (proposal rules only).
+**Status:** Wave 1 source plus Wave 2 `4b10356` on combined: INJECTED `evidencePort.ts`; **ER-2** `commitState` re-authorizes after blob I/O; **ER-3** isolated Storage SDK tests vs reservation/account/admission. Live Storage/IAM unchanged. Not production admission.
 
 **Acceptance (Wave 1 emulator/FAKE, not live):** untrusted upload rejected until auth/ownership/active ledger pass; original bytes stored off-client under owner-scoped paths; server computes hash and matches the declared digest; link is an event + pointer, never a rewrite of `original`; unauthenticated/cross-owner/pending-deletion denied; no PDF bodies in logs.
 
