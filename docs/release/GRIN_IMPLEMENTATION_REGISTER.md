@@ -44,7 +44,7 @@ Billing prepare/validate/RTDN/worker handlers **exist** (Cloud Functions v2 `asi
 
 ### G2 — Protected original evidence upload
 
-**Status:** Wave 2 W2-03/W2-04 `06d897a` on combined: evidence identity (owner/ledger/receipt/id/hash/category) on replay; missing/invalid category fails (not invoice). Isolated Storage original **read** of retained `uploaded_unverified`/`verified`/`linked` is separate from upload admission; `newCommands=deny` does not erase those reads. Live `storage.rules` unchanged. ER-2 `commitState` re-authorization kept.
+**Status:** Wave 2 W2-03/W2-04 `06d897a` plus F3 `3ddd4f9` on combined: evidence identity on replay; missing/invalid category fails; isolated Storage original **read** of retained `uploaded_unverified`/`verified`/`linked` is separate from upload admission; `retrieveOriginal` / pack-input assembly (`assembleEvidencePackInputs`) for confirmed cuts. Live `storage.rules` unchanged. ER-2 `commitState` re-authorization kept. Team 4 `exportPack` still not wired to those inputs.
 
 **Acceptance (Wave 1 emulator/FAKE, not live):** untrusted upload rejected until auth/ownership/active ledger pass; original bytes stored off-client under owner-scoped paths; server computes hash and matches the declared digest; link is an event + pointer, never a rewrite of `original`; unauthenticated/cross-owner/pending-deletion denied; no PDF bodies in logs.
 

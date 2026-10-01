@@ -29,7 +29,7 @@ export {
   recordPortalCancellation,
 } from "./ewb";
 export { grinWithoutInvoice, gstr2bPurchaseWithoutGrin, isItcDetermined } from "./exceptions";
-export { evidenceCompleteness, verifyOriginalBytes } from "./evidence";
+export { evidenceCompleteness, verifyOriginalBytes, isRetainedOriginalState, originalEvidenceFromVerifiedResult } from "./evidence";
 export {
   assembleManifest,
   cutMatchesEventStream,
@@ -41,6 +41,12 @@ export {
   pinEventCut,
   REQUIRED_EVIDENCE_ITEMS,
 } from "./evidencePack";
+export {
+  assembleEvidencePackInputs,
+  type GrinConfirmedCutInput,
+  type GrinEvidencePackInputs,
+  type GrinPackOriginalInput,
+} from "./evidencePackInputs";
 export { canonicalJson } from "./canonical";
 export { detectBrokenChain, hashCanonical } from "./hashChain";
 export { freezeCommand } from "./command";
