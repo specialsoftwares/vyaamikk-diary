@@ -18,24 +18,25 @@ Any other value, including `"1"`, `"TRUE"`, missing, or empty, is deny.
 
 ## Suggested export (do not add until coordinator review)
 
-```ts
-/** GRIN goods-evidence callables: exported for build, production-disabled (fail-closed). */
-export {
-  handleGrinRegister,
-  handleGrinReconcile,
-  handleGrinMutation,
-} from "./goodsEvidence/callables";
-```
+Prefer wrapping `createComposedGrinCallables` with an injected adapter — not
+the fail-closed `handleGrin*` stubs, and not a live Admin Firestore wiring in
+this programme. Suggested names (do not export yet):
 
-If wrapping as Cloud Functions v2 `onCall`, keep the same gate **inside** the
-callable and default-deny. Example:
+- `grinRegisterGoodsReceipt`
+- `grinReconcileCommand`
+- `grinMutateGoodsReceipt`
+
+If wrapping as Cloud Functions v2 `onCall`, take identity from `request.auth.uid`
+only. Example:
 
 ```ts
 import { HttpsError, onCall } from "firebase-functions/v2/https";
-import { grinFunctionsEnabled, handleGrinRegister } from "./goodsEvidence/callables";
+import { createComposedGrinCallables } from "./goodsEvidence/composed";
+
+const composed = createComposedGrinCallables({ adapter /* injected in tests/emulator only */ });
 
 export const grinRegisterGoodsReceipt = onCall({ region: "asia-south1" }, async (request) => {
-  const result = await handleGrinRegister(request.auth?.uid ?? null, request.data);
+  const result = await composed.register({ auth: request.auth ?? null, data: request.data });
   if (!result.ok) {
     if (result.code === "unauthenticated") throw new HttpsError("unauthenticated", "denied");
     throw new HttpsError("failed-precondition", "denied");
@@ -44,9 +45,11 @@ export const grinRegisterGoodsReceipt = onCall({ region: "asia-south1" }, async 
 });
 ```
 
-`grinFunctionsEnabled()` is true only for the string `"true"`. Handlers in this
-slice still return `policy_denied` even then because the emulator adapter is not
-wired to live Admin Firestore here.
+`grinFunctionsEnabled()` is true only for the string `"true"`. `callables.ts`
+handlers still return `policy_denied` even then because they do not bind an
+adapter. Tests/emulator inject `GoodsEvidenceRegisterAdapter` through
+`composed.ts`. Do not import `tools/goods-evidence-emulator` from this
+entrypoint (tsc `rootDir` would move `lib/index.js`).
 
 Do not enable `EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED`. Do not remove the store-runtime block.
 

@@ -1,7 +1,8 @@
 /**
  * INJECTED GrinServerCommandPort wrapping GoodsEvidenceRegisterAdapter.
  *
- * Not a live callable. Do not import this module from functions/src/index.ts.
+ * TEST COMPOSITION only. Not a live callable. Do not import this module from
+ * functions/src/index.ts or from mobile src/services/grin/transport.
  * Isolated from React, Expo, and the client goods-evidence admission flag.
  *
  * Client `digest` is the locally frozen outbox identity. This port recomputes
