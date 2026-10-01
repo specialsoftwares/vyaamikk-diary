@@ -43,6 +43,7 @@ import {
   evidenceLinkPath,
   evidenceObjectPath,
   ledgerPath,
+  objectKeyPath,
   receiptPath,
   uploadControlPath,
   uploadFlightToken,
@@ -199,6 +200,17 @@ function claimOf(record: EvidenceRecord): ClientHashClaim {
   return { kind: "client_claim", sha256: record.claimedSha256, byteSize: record.claimedByteSize };
 }
 
+function objectKeyMapping(record: EvidenceRecord): Record<string, unknown> {
+  return {
+    schemaVersion: 1,
+    objectKey: record.objectKey,
+    evidenceId: record.evidenceId,
+    ledgerId: record.ledgerId,
+    receiptId: record.receiptId,
+    state: record.state,
+  };
+}
+
 function lifecycleOk(
   record: EvidenceRecord,
   replayed: boolean,
@@ -297,6 +309,7 @@ export class GoodsEvidenceStorageAdapter {
         updatedAtUtc: now,
       };
       tx.set(objectRef, { ...record });
+      tx.set(this.db.doc(objectKeyPath(uid, record.objectKey)), objectKeyMapping(record));
       tx.set(controlRef, {
         schemaVersion: 1,
         originalIds: [...originalIds, parsed.evidenceId],
@@ -639,6 +652,7 @@ export class GoodsEvidenceStorageAdapter {
         tx.set(uploadRef, { schemaVersion: 1, uploadingIds });
         const next = { ...record, state: "uploading" as const, updatedAtUtc: now };
         tx.set(objectRef, { ...next });
+        tx.set(this.db.doc(objectKeyPath(ids.uid, next.objectKey)), objectKeyMapping(next));
         return lifecycleOk(next, false);
       }
       if (record.state === "reserved") return lifecycleOk(record, true);
@@ -650,6 +664,7 @@ export class GoodsEvidenceStorageAdapter {
       });
       const next = { ...record, state: "reserved" as const, updatedAtUtc: now };
       tx.set(objectRef, { ...next });
+      tx.set(this.db.doc(objectKeyPath(ids.uid, next.objectKey)), objectKeyMapping(next));
       return lifecycleOk(next, false);
     });
   }
@@ -668,7 +683,15 @@ export class GoodsEvidenceStorageAdapter {
       const objectSnap = await tx.get(objectRef);
       const uploadRef = this.db.doc(uploadControlPath(record.ownerUid));
       const uploadSnap = await tx.get(uploadRef);
-      await this.hooks.afterReads?.(attempt);
+      const gated = await this.authorize(
+        tx,
+        record.ownerUid,
+        record.ledgerId,
+        record.receiptId,
+        attempt,
+        "newCommands"
+      );
+      if (!gated.ok) return gated;
       if (!objectSnap.exists) return deny("not_found", "evidence object not found");
       const current = parseRecord(objectSnap.data());
       if (!current) return deny("integrity", GENERIC_DENY);
@@ -690,6 +713,7 @@ export class GoodsEvidenceStorageAdapter {
       }
       const next: EvidenceRecord = { ...current, ...patch, state: nextState };
       tx.set(objectRef, { ...next });
+      tx.set(this.db.doc(objectKeyPath(next.ownerUid, next.objectKey)), objectKeyMapping(next));
       await extra?.(tx);
       return lifecycleOk(next, false, logEvent);
     });

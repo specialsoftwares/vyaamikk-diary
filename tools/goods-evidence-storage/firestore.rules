@@ -24,11 +24,17 @@ service cloud.firestore {
     }
 
     match /users/{uid}/goodsEvidenceAdmission/{docId} {
-      allow read, write: if false;
+      allow read: if isOwner(uid);
+      allow write: if false;
     }
 
     match /users/{uid}/goodsEvidenceUploadControl/{docId} {
       allow read, write: if false;
+    }
+
+    match /users/{uid}/grinEvidenceObjectKeys/{objectKey} {
+      allow read: if isActiveOwner(uid);
+      allow create, update, delete: if false;
     }
 
     match /users/{uid} {

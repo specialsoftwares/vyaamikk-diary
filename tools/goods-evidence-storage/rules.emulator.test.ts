@@ -21,9 +21,26 @@ import { evidenceLabel } from "./testSupport";
 const dir = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ID = "demo-vyaamikk-grin-g2";
 const OBJECT_KEY = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const UNRESERVED_KEY = "dddddddddddddddddddddddddddddddd";
 const ORIGINAL = `users/alice/grinEvidence/${OBJECT_KEY}/original`;
+const UNRESERVED = `users/alice/grinEvidence/${UNRESERVED_KEY}/original`;
 const DERIVATIVE = `users/alice/grinEvidence/${OBJECT_KEY}/derivatives/cccccccccccccccccccccccccccccccc`;
 const PDF = Buffer.from("%PDF-1.4 g2-original");
+
+async function seedReservation(
+  ctx: { firestore: () => { doc: (path: string) => { set: Function } } },
+  objectKey: string,
+  state: "reserved" | "uploading"
+): Promise<void> {
+  await ctx.firestore().doc(`users/alice/grinEvidenceObjectKeys/${objectKey}`).set({
+    schemaVersion: 1,
+    objectKey,
+    evidenceId: "ev_rules",
+    ledgerId: "ledger_g2",
+    receiptId: "receipt_g2",
+    state,
+  });
+}
 
 async function main(): Promise<void> {
   if (!process.env.FIRESTORE_EMULATOR_HOST || !process.env.FIREBASE_STORAGE_EMULATOR_HOST) {
@@ -39,11 +56,17 @@ async function main(): Promise<void> {
   try {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
       await ctx.firestore().doc("users/alice").set({ uid: "alice", status: "active" });
+      await ctx.firestore().doc("users/alice/goodsEvidenceAdmission/runtime").set({
+        schemaVersion: 1,
+        newCommands: "allow",
+        reconciliation: "allow",
+      });
       await ctx.firestore().doc("users/alice/goodsEvidenceLedgers/ledger_g2/evidenceObjects/ev_rules").set({
         schemaVersion: 1,
-        state: "uploaded_unverified",
+        state: "reserved",
         claimedSha256: "a".repeat(64),
       });
+      await seedReservation(ctx, OBJECT_KEY, "reserved");
     });
 
     const aliceStorage = testEnv.authenticatedContext("alice").storage();
@@ -51,6 +74,10 @@ async function main(): Promise<void> {
     const anonStorage = testEnv.unauthenticatedContext().storage();
     const aliceDb = testEnv.authenticatedContext("alice").firestore();
     const malloryDb = testEnv.authenticatedContext("mallory").firestore();
+
+    evidenceLabel("STORAGE_EMULATOR", "unreserved objectKey create/read denied");
+    await assertFails(uploadBytes(ref(aliceStorage, UNRESERVED), PDF, { contentType: "application/pdf" }));
+    await assertFails(getBytes(ref(aliceStorage, UNRESERVED)));
 
     evidenceLabel("STORAGE_EMULATOR", "owner create/read original; cross-owner and anon denied");
     await assertSucceeds(
@@ -67,6 +94,37 @@ async function main(): Promise<void> {
       })
     );
     await assertFails(deleteObject(ref(aliceStorage, ORIGINAL)));
+
+    evidenceLabel("STORAGE_EMULATOR", "pending_deletion owner create/read denied");
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc("users/alice").set({ uid: "alice", status: "pending_deletion" });
+    });
+    await assertFails(getBytes(ref(aliceStorage, ORIGINAL)));
+    await assertFails(uploadBytes(ref(aliceStorage, UNRESERVED), PDF, { contentType: "application/pdf" }));
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc("users/alice").set({ uid: "alice", status: "active" });
+      await seedReservation(ctx, UNRESERVED_KEY, "reserved");
+    });
+
+    evidenceLabel("STORAGE_EMULATOR", "admission deny blocks create/read");
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc("users/alice/goodsEvidenceAdmission/runtime").set({
+        schemaVersion: 1,
+        newCommands: "deny",
+        reconciliation: "allow",
+      });
+    });
+    await assertFails(getBytes(ref(aliceStorage, ORIGINAL)));
+    await assertFails(
+      uploadBytes(ref(aliceStorage, UNRESERVED), PDF, { contentType: "application/pdf" })
+    );
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc("users/alice/goodsEvidenceAdmission/runtime").set({
+        schemaVersion: 1,
+        newCommands: "allow",
+        reconciliation: "allow",
+      });
+    });
 
     evidenceLabel("STORAGE_EMULATOR", "unauthorized metadata edits denied");
     await assertFails(

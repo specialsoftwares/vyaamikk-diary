@@ -10,6 +10,12 @@ Live `storage.rules` today covers letterhead, attachments, PDFs, and company GST
 
 - Owner-only read/create on `users/{uid}/grinEvidence/{objectKey}/original` and `.../derivatives/{derivativeKey}`
 - Random object keys in the path; no receipt, category, filename, invoice, or GSTIN
+- Original create/read additionally requires:
+  - signed-in owner (`request.auth.uid == userId`)
+  - user `status == active` (pending_deletion / inactive denied)
+  - admission `newCommands == allow` on `users/{uid}/goodsEvidenceAdmission/runtime`
+  - a Firestore reservation at `users/{uid}/grinEvidenceObjectKeys/{objectKey}` whose `state` is `reserved` or `uploading`
+- Unreserved objectKey, pending_deletion owner, and admission deny fail client `uploadBytes` / `getBytes`
 - Original create: allowed MIME + size; no client verification metadata
 - Original and derivative **update/delete denied** to the client SDK
 - Default deny for every other path, including public reads
@@ -21,6 +27,25 @@ Admin SDK / Cloud Functions bypass these rules. Authorization for verify/link re
 ## Proposed additional matches (merge into live `storage.rules` after review)
 
 ```
+    function ownerUserActive(userId) {
+      return isOwner(userId)
+        && firestore.get(/databases/(default)/documents/users/$(userId)).data.get('status', 'active') == 'active';
+    }
+
+    function admissionAllowsNewCommands(userId) {
+      return firestore.exists(/databases/(default)/documents/users/$(userId)/goodsEvidenceAdmission/runtime)
+        && firestore.get(/databases/(default)/documents/users/$(userId)/goodsEvidenceAdmission/runtime).data.schemaVersion == 1
+        && firestore.get(/databases/(default)/documents/users/$(userId)/goodsEvidenceAdmission/runtime).data.newCommands == 'allow';
+    }
+
+    function hasFlightReservation(userId, objectKey) {
+      return firestore.exists(/databases/(default)/documents/users/$(userId)/grinEvidenceObjectKeys/$(objectKey))
+        && (
+          firestore.get(/databases/(default)/documents/users/$(userId)/grinEvidenceObjectKeys/$(objectKey)).data.state == 'reserved'
+          || firestore.get(/databases/(default)/documents/users/$(userId)/grinEvidenceObjectKeys/$(objectKey)).data.state == 'uploading'
+        );
+    }
+
     function allowedGrinOriginalMime() {
       return request.resource.contentType == 'application/pdf'
         || request.resource.contentType == 'image/jpeg'
@@ -43,8 +68,12 @@ Admin SDK / Cloud Functions bypass these rules. Authorization for verify/link re
     }
 
     match /users/{userId}/grinEvidence/{objectKey}/original {
-      allow read: if isOwner(userId);
-      allow create: if isOwner(userId)
+      allow read: if ownerUserActive(userId)
+                  && admissionAllowsNewCommands(userId)
+                  && hasFlightReservation(userId, objectKey);
+      allow create: if ownerUserActive(userId)
+                    && admissionAllowsNewCommands(userId)
+                    && hasFlightReservation(userId, objectKey)
                     && resource == null
                     && allowedGrinOriginalMime()
                     && withinGrinOriginalSize()
@@ -53,8 +82,12 @@ Admin SDK / Cloud Functions bypass these rules. Authorization for verify/link re
     }
 
     match /users/{userId}/grinEvidence/{objectKey}/derivatives/{derivativeKey} {
-      allow read: if isOwner(userId);
-      allow create: if isOwner(userId)
+      allow read: if ownerUserActive(userId)
+                  && admissionAllowsNewCommands(userId)
+                  && firestore.exists(/databases/(default)/documents/users/$(userId)/grinEvidenceObjectKeys/$(objectKey));
+      allow create: if ownerUserActive(userId)
+                    && admissionAllowsNewCommands(userId)
+                    && firestore.exists(/databases/(default)/documents/users/$(userId)/grinEvidenceObjectKeys/$(objectKey))
                     && resource == null
                     && request.resource.size < 2 * 1024 * 1024
                     && request.resource.contentType.matches('image/.*')
@@ -73,8 +106,9 @@ Client SDK must not create/update/delete:
 - `.../receipts/{receiptId}/evidenceLinks/{evidenceId}`
 - `.../receipts/{receiptId}/evidenceControl/{docId}`
 - `users/{uid}/goodsEvidenceUploadControl/{docId}`
+- `users/{uid}/grinEvidenceObjectKeys/{objectKey}` (adapter-written reservation lookup)
 
-Owner-active read may be allowed later; writes stay adapter/Admin. Isolated emulator file: `tools/goods-evidence-storage/firestore.rules`.
+Owner may read `users/{uid}`, `goodsEvidenceAdmission/runtime`, `grinEvidenceObjectKeys/{objectKey}`, and evidence metadata. Writes stay adapter/Admin. Isolated emulator file: `tools/goods-evidence-storage/firestore.rules`.
 
 ## Download / token access
 

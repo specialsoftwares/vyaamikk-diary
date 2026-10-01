@@ -3,6 +3,10 @@ rules_version = '2';
 /**
  * Isolated G2 Storage Rules proposal copy for the emulator. Not live Rules.
  * Do not deploy from this file. Reviewed text: docs/release/proposals/team2/storage.rules.grin.md
+ *
+ * Client SDK create/read of originals requires signed-in owner, active account,
+ * admission newCommands=allow, and a Firestore objectKey reservation in reserved/uploading.
+ * Admin SDK / adapter bypass these rules.
  */
 service firebase.storage {
   match /b/{bucket}/o {
@@ -12,6 +16,41 @@ service firebase.storage {
 
     function isOwner(userId) {
       return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function userDoc(userId) {
+      return firestore.get(/databases/(default)/documents/users/$(userId)).data;
+    }
+
+    function ownerUserActive(userId) {
+      return isOwner(userId)
+        && userDoc(userId).get('status', 'active') == 'active';
+    }
+
+    function admissionPath(userId) {
+      return /databases/(default)/documents/users/$(userId)/goodsEvidenceAdmission/runtime;
+    }
+
+    function admissionAllowsNewCommands(userId) {
+      return firestore.exists(admissionPath(userId))
+        && firestore.get(admissionPath(userId)).data.schemaVersion == 1
+        && firestore.get(admissionPath(userId)).data.newCommands == 'allow';
+    }
+
+    function objectKeyDoc(userId, objectKey) {
+      return /databases/(default)/documents/users/$(userId)/grinEvidenceObjectKeys/$(objectKey);
+    }
+
+    function hasFlightReservation(userId, objectKey) {
+      return firestore.exists(objectKeyDoc(userId, objectKey))
+        && (
+          firestore.get(objectKeyDoc(userId, objectKey)).data.state == 'reserved'
+          || firestore.get(objectKeyDoc(userId, objectKey)).data.state == 'uploading'
+        );
+    }
+
+    function hasObjectKeyBinding(userId, objectKey) {
+      return firestore.exists(objectKeyDoc(userId, objectKey));
     }
 
     function allowedGrinOriginalMime() {
@@ -39,8 +78,12 @@ service firebase.storage {
     }
 
     match /users/{userId}/grinEvidence/{objectKey}/original {
-      allow read: if isOwner(userId);
-      allow create: if isOwner(userId)
+      allow read: if ownerUserActive(userId)
+                  && admissionAllowsNewCommands(userId)
+                  && hasFlightReservation(userId, objectKey);
+      allow create: if ownerUserActive(userId)
+                    && admissionAllowsNewCommands(userId)
+                    && hasFlightReservation(userId, objectKey)
                     && resource == null
                     && allowedGrinOriginalMime()
                     && withinOriginalSize()
@@ -49,8 +92,12 @@ service firebase.storage {
     }
 
     match /users/{userId}/grinEvidence/{objectKey}/derivatives/{derivativeKey} {
-      allow read: if isOwner(userId);
-      allow create: if isOwner(userId)
+      allow read: if ownerUserActive(userId)
+                  && admissionAllowsNewCommands(userId)
+                  && hasObjectKeyBinding(userId, objectKey);
+      allow create: if ownerUserActive(userId)
+                    && admissionAllowsNewCommands(userId)
+                    && hasObjectKeyBinding(userId, objectKey)
                     && resource == null
                     && request.resource.size < 2 * 1024 * 1024
                     && request.resource.contentType.matches('image/.*')

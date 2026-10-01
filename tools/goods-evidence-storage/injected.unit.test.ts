@@ -4,9 +4,12 @@
 import assert from "node:assert/strict";
 
 import { GoodsEvidenceStorageAdapter } from "./adapter";
+import { createInjectedGrinEvidencePort } from "./evidencePort";
 import { FAKE_createInjectedFirestore, FAKE_seedOwner } from "./FAKE_injectedFirestore";
 import { FAKE_MemoryBlobStore } from "./FAKE_memoryBlobStore";
+import { evidenceObjectPath } from "./paths";
 import { evidenceLabel, putAndVerify, sampleBytes, sha256Bytes, testClock } from "./testSupport";
+import type { G2BlobStore } from "./types";
 
 const OWNER = "owner_g2";
 const OTHER = "mallory_g2";
@@ -585,6 +588,162 @@ async function main(): Promise<void> {
     assert.equal(b1.ok && b2.ok, true);
     assert.equal(b3.ok, false);
     if (!b3.ok) assert.equal(b3.code, "invalid");
+  }
+
+  evidenceLabel("INJECTED_PORT", "ER-2 commit after blob I/O re-checks pending_deletion");
+  {
+    const db = FAKE_createInjectedFirestore();
+    const inner = new FAKE_MemoryBlobStore();
+    FAKE_seedOwner(db, OWNER, LEDGER, RECEIPT);
+    const blobs: G2BlobStore = {
+      putIfAbsent: (path, bytes, contentType) => inner.putIfAbsent(path, bytes, contentType),
+      async stat(path) {
+        const result = await inner.stat(path);
+        db.snapshot.set(`users/${OWNER}`, JSON.stringify({ uid: OWNER, status: "pending_deletion" }));
+        return result;
+      },
+      open: (path) => inner.open(path),
+    };
+    const adapter = new GoodsEvidenceStorageAdapter(db, blobs, testClock());
+    const bytes = sampleBytes(21);
+    const reserved = await adapter.reserve(
+      { uid: OWNER },
+      {
+        evidenceId: "ev_er2",
+        ledgerId: LEDGER,
+        receiptId: RECEIPT,
+        category: "invoice",
+        mime: "application/pdf",
+        claimedSha256: sha256Bytes(bytes),
+        claimedByteSize: bytes.byteLength,
+      }
+    );
+    assert.equal(reserved.ok, true);
+    if (!reserved.ok) throw new Error("reserve");
+    const began = await adapter.beginUpload({ uid: OWNER }, { evidenceId: "ev_er2", ledgerId: LEDGER });
+    assert.equal(began.ok, true);
+    await inner.putIfAbsent(reserved.storagePath, bytes, "application/pdf");
+    const completed = await adapter.completeUpload({ uid: OWNER }, { evidenceId: "ev_er2", ledgerId: LEDGER });
+    assert.equal(completed.ok, false);
+    if (!completed.ok) {
+      assert.equal(completed.code, "forbidden");
+      assert.equal(completed.detail, "denied");
+    }
+    const raw = db.snapshot.get(evidenceObjectPath(OWNER, LEDGER, "ev_er2"));
+    assert.ok(raw);
+    const stored = JSON.parse(raw) as { state: string };
+    assert.equal(stored.state, "uploading");
+    assert.notEqual(stored.state, "uploaded_unverified");
+    assert.notEqual(stored.state, "verified");
+    assert.notEqual(stored.state, "linked");
+  }
+
+  evidenceLabel("INJECTED_PORT", "ER-2 verify commit after open re-checks admission");
+  {
+    const db = FAKE_createInjectedFirestore();
+    const inner = new FAKE_MemoryBlobStore();
+    FAKE_seedOwner(db, OWNER, LEDGER, RECEIPT);
+    const blobs: G2BlobStore = {
+      putIfAbsent: (path, bytes, contentType) => inner.putIfAbsent(path, bytes, contentType),
+      stat: (path) => inner.stat(path),
+      async open(path) {
+        const result = await inner.open(path);
+        db.snapshot.set(
+          `users/${OWNER}/goodsEvidenceAdmission/runtime`,
+          JSON.stringify({ schemaVersion: 1, newCommands: "deny", reconciliation: "allow" })
+        );
+        return result;
+      },
+    };
+    const adapter = new GoodsEvidenceStorageAdapter(db, blobs, testClock());
+    const bytes = sampleBytes(22);
+    const reserved = await adapter.reserve(
+      { uid: OWNER },
+      {
+        evidenceId: "ev_er2v",
+        ledgerId: LEDGER,
+        receiptId: RECEIPT,
+        category: "invoice",
+        mime: "application/pdf",
+        claimedSha256: sha256Bytes(bytes),
+        claimedByteSize: bytes.byteLength,
+      }
+    );
+    assert.equal(reserved.ok, true);
+    if (!reserved.ok) throw new Error("reserve");
+    await adapter.beginUpload({ uid: OWNER }, { evidenceId: "ev_er2v", ledgerId: LEDGER });
+    await inner.putIfAbsent(reserved.storagePath, bytes, "application/pdf");
+    const completed = await adapter.completeUpload({ uid: OWNER }, { evidenceId: "ev_er2v", ledgerId: LEDGER });
+    assert.equal(completed.ok, true);
+    if (!completed.ok) throw new Error("complete");
+    assert.equal(completed.state, "uploaded_unverified");
+    const verified = await adapter.verify({ uid: OWNER }, { evidenceId: "ev_er2v", ledgerId: LEDGER });
+    assert.equal(verified.ok, false);
+    if (!verified.ok) {
+      assert.equal(verified.code, "policy_denied");
+      assert.equal(verified.detail, "denied");
+    }
+    const raw = db.snapshot.get(evidenceObjectPath(OWNER, LEDGER, "ev_er2v"));
+    assert.ok(raw);
+    const stored = JSON.parse(raw) as { state: string };
+    assert.equal(stored.state, "uploaded_unverified");
+    assert.notEqual(stored.state, "verified");
+    assert.notEqual(stored.state, "linked");
+  }
+
+  evidenceLabel("INJECTED_PORT", "outbox evidence port uploads original and treats client hash as a claim");
+  {
+    const { adapter, blobs } = adapterPair();
+    const bytes = Uint8Array.from([0x25, 0x50, 0x44, 0x46, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7]);
+    const wrongClaim = "c".repeat(64);
+    const files = new Map<string, Uint8Array>([["/tmp/grin-orig.pdf", bytes]]);
+    const port = createInjectedGrinEvidencePort({
+      adapter,
+      blobs,
+      readLocalFile: async (localPath) => {
+        const found = files.get(localPath);
+        if (!found) throw new Error("missing");
+        return found;
+      },
+    });
+    assert.equal(port.portKind, "INJECTED");
+    const uploaded = await port.upload({
+      uid: OWNER,
+      ledgerId: LEDGER,
+      receiptId: RECEIPT,
+      evidenceId: "ev_port",
+      role: "original",
+      localPath: "/tmp/grin-orig.pdf",
+      claimedSha256: wrongClaim,
+    });
+    assert.equal(uploaded.ok, false);
+    assert.equal(uploaded.originalDurable, false);
+    assert.equal(uploaded.retryable, false);
+    const matching = await port.upload({
+      uid: OWNER,
+      ledgerId: LEDGER,
+      receiptId: RECEIPT,
+      evidenceId: "ev_port2",
+      role: "original",
+      localPath: "/tmp/grin-orig.pdf",
+      claimedSha256: sha256Bytes(bytes),
+    });
+    assert.equal(matching.ok, true);
+    assert.equal(matching.originalDurable, true);
+    assert.equal(typeof matching.generation, "string");
+    assert.ok(matching.generation);
+    const replayed = await port.upload({
+      uid: OWNER,
+      ledgerId: LEDGER,
+      receiptId: RECEIPT,
+      evidenceId: "ev_port2",
+      role: "original",
+      localPath: "/tmp/grin-orig.pdf",
+      claimedSha256: sha256Bytes(bytes),
+    });
+    assert.equal(replayed.ok, true);
+    assert.equal(replayed.originalDurable, true);
+    assert.equal(replayed.generation, matching.generation);
   }
 
   console.log("tools/goods-evidence-storage/injected.unit.test.ts: ok");
