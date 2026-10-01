@@ -1,11 +1,15 @@
 import React, { useCallback, useMemo, useState } from "react";
 import { StyleSheet, View } from "react-native";
-import { useLocalSearchParams } from "expo-router";
+import { useFocusEffect, useLocalSearchParams } from "expo-router";
 
 import { Banner, Button, Card, Header, Screen } from "@/components/ui";
 import { GRIN_DOCUMENT_FOOTER } from "@/goodsEvidence/constants";
 import { useT } from "@/i18n";
-import { GRIN_FIXTURE_REPOSITORY_LABEL, getGrinFixtureRepository } from "@/services/grin/fixture";
+import {
+  requireLiveGrinApplicationRepository,
+  type GrinApplicationPackExport,
+  type GrinApplicationRecord,
+} from "@/services/grin/repository";
 import { generateGrinPackPdf } from "@/services/grin/pdf/grinPdfAdapter";
 import { pdfService } from "@/services/pdf/pdfService";
 import { spacing, useThemedStyles } from "@/theme";
@@ -15,9 +19,18 @@ import { GrinFieldRow } from "./GrinFieldRow";
 
 export function GrinPackScreen(): React.ReactElement {
   const t = useT();
+  return (
+    <GrinAdmissionGate title={t("grin.packTitle")}>
+      <GrinPackAdmittedBody />
+    </GrinAdmissionGate>
+  );
+}
+
+function GrinPackAdmittedBody(): React.ReactElement {
+  const t = useT();
   const { receiptId } = useLocalSearchParams<{ receiptId: string }>();
-  const record = receiptId ? getGrinFixtureRepository().get(receiptId) : null;
-  const pack = receiptId ? getGrinFixtureRepository().exportPack(receiptId) : null;
+  const [record, setRecord] = useState<GrinApplicationRecord | null>(null);
+  const [pack, setPack] = useState<GrinApplicationPackExport | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -27,8 +40,29 @@ export function GrinPackScreen(): React.ReactElement {
     })
   );
 
-  const completeness = pack?.completenessLabel === "complete" ? t("grin.pack.complete") : t("grin.pack.incomplete");
+  const load = useCallback(() => {
+    if (!receiptId) {
+      setRecord(null);
+      setPack(null);
+      return;
+    }
+    try {
+      const repo = requireLiveGrinApplicationRepository();
+      setRecord(repo.get(receiptId));
+      setPack(repo.exportPack(receiptId));
+    } catch {
+      setRecord(null);
+      setPack(null);
+    }
+  }, [receiptId]);
 
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load])
+  );
+
+  const completeness = pack?.completenessLabel === "complete" ? t("grin.pack.complete") : t("grin.pack.incomplete");
   const reasons = useMemo(() => pack?.manifest.incompleteReasons ?? [], [pack]);
 
   const onExport = useCallback(async () => {
@@ -36,6 +70,7 @@ export function GrinPackScreen(): React.ReactElement {
     setBusy(true);
     setError(null);
     try {
+      requireLiveGrinApplicationRepository();
       const pdf = await generateGrinPackPdf({ record, pack, t });
       try {
         await pdfService.share(pdf);
@@ -50,42 +85,40 @@ export function GrinPackScreen(): React.ReactElement {
   }, [pack, record, t]);
 
   return (
-    <GrinAdmissionGate title={t("grin.packTitle")}>
-      <Screen scroll>
-        <View style={styles.wrap}>
-          <Header title={t("grin.packTitle")} showBack />
-          <GrinFixtureNotices repositoryLabel={GRIN_FIXTURE_REPOSITORY_LABEL} />
-          <Banner tone="info" message={GRIN_DOCUMENT_FOOTER} />
-          {error ? <Banner tone="danger" message={error} /> : null}
-          <Card elevated={false}>
-            <GrinFieldRow label={t("grin.pack.completeness")} value={completeness} />
-            <GrinFieldRow label={t("grin.pack.itcNotDetermined")} value={t("grin.pack.itcNotDetermined")} />
-            {pack?.missingOriginal ? (
-              <Banner tone="warning" message={t("grin.pack.missingOriginal")} />
-            ) : null}
-            {pack?.invoiceReferenceIsNotRetainedInvoice ? (
-              <Banner tone="warning" message={t("grin.pack.invoiceRefNotRetained")} />
-            ) : null}
-            {pack?.challanIsNotInvoice ? <Banner tone="info" message={t("grin.pack.challanNotInvoice")} /> : null}
-          </Card>
-          {reasons.map((reason) => (
-            <Banner
-              key={reason}
-              tone="warning"
-              message={
-                /missing original|no verified originals/i.test(reason)
-                  ? t("grin.pack.missingOriginal")
-                  : /challan/i.test(reason)
-                    ? t("grin.pack.challanNotInvoice")
-                    : /invoice reference|retained invoice|commercial_document/i.test(reason)
-                      ? t("grin.pack.invoiceRefNotRetained")
+    <Screen scroll>
+      <View style={styles.wrap}>
+        <Header title={t("grin.packTitle")} showBack />
+        <GrinFixtureNotices />
+        <Banner tone="info" message={GRIN_DOCUMENT_FOOTER} />
+        {error ? <Banner tone="danger" message={error} /> : null}
+        <Card elevated={false}>
+          <GrinFieldRow label={t("grin.pack.completeness")} value={completeness} />
+          <GrinFieldRow label={t("grin.pack.itcNotDetermined")} value={t("grin.pack.itcNotDetermined")} />
+          {pack?.missingOriginal ? <Banner tone="warning" message={t("grin.pack.missingOriginal")} /> : null}
+          {pack?.invoiceReferenceIsNotRetainedInvoice ? (
+            <Banner tone="warning" message={t("grin.pack.invoiceRefNotRetained")} />
+          ) : null}
+          {pack?.challanIsNotInvoice ? <Banner tone="info" message={t("grin.pack.challanNotInvoice")} /> : null}
+        </Card>
+        {reasons.map((reason) => (
+          <Banner
+            key={reason}
+            tone="warning"
+            message={
+              /missing original|no verified originals/i.test(reason)
+                ? t("grin.pack.missingOriginal")
+                : /challan/i.test(reason)
+                  ? t("grin.pack.challanNotInvoice")
+                  : /invoice reference|retained invoice|commercial_document/i.test(reason)
+                    ? t("grin.pack.invoiceRefNotRetained")
+                    : /event cut|projection/i.test(reason)
+                      ? t("grin.projection.incomplete")
                       : t("grin.pack.incomplete")
-              }
-            />
-          ))}
-          <Button label={t("grin.pack.export")} onPress={() => void onExport()} loading={busy} />
-        </View>
-      </Screen>
-    </GrinAdmissionGate>
+            }
+          />
+        ))}
+        <Button label={t("grin.pack.export")} onPress={() => void onExport()} loading={busy} />
+      </View>
+    </Screen>
   );
 }

@@ -30,7 +30,8 @@ export function formatMoneyMinor(value: { currency: string; minorUnits: number }
   return `${value.currency} ${major}`;
 }
 
-export function custodyLabel(custody: CustodyState, t: TFn): string {
+export function custodyLabel(custody: CustodyState | null, t: TFn): string {
+  if (custody == null) return t("grin.projection.incomplete");
   switch (custody) {
     case "received":
       return t("grin.custody.received");
@@ -95,7 +96,8 @@ export function localStateLabel(state: OutboxLocalState, t: TFn): string {
   }
 }
 
-export function captureLabel(value: CaptureProvenance, t: TFn): string {
+export function captureLabel(value: CaptureProvenance | null, t: TFn): string {
+  if (value == null) return t("grin.projection.incomplete");
   switch (value) {
     case "online":
       return t("grin.capture.online");

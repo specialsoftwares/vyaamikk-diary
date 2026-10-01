@@ -4,9 +4,10 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 
 import { Banner, Button, Card, EmptyState, FormSection, Header, Screen } from "@/components/ui";
 import { useT } from "@/i18n";
-import { useAuth } from "@/state/auth";
-import { getGrinApplicationRepository } from "@/services/grin/repository";
-import type { GrinApplicationRecord } from "@/services/grin/repository";
+import {
+  requireLiveGrinApplicationRepository,
+  type GrinApplicationLookup,
+} from "@/services/grin/repository";
 import {
   ackLabel,
   captureLabel,
@@ -28,10 +29,18 @@ import { GrinFieldRow } from "./GrinFieldRow";
 
 export function GrinDetailScreen(): React.ReactElement {
   const t = useT();
+  return (
+    <GrinAdmissionGate title={t("grin.detailTitle")}>
+      <GrinDetailAdmittedBody />
+    </GrinAdmissionGate>
+  );
+}
+
+function GrinDetailAdmittedBody(): React.ReactElement {
+  const t = useT();
   const router = useRouter();
-  const { user } = useAuth();
   const { receiptId } = useLocalSearchParams<{ receiptId: string }>();
-  const [record, setRecord] = useState<GrinApplicationRecord | null>(null);
+  const [lookup, setLookup] = useState<GrinApplicationLookup | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -43,16 +52,16 @@ export function GrinDetailScreen(): React.ReactElement {
   );
 
   const load = useCallback(() => {
-    if (!receiptId || !user?.uid) {
-      setRecord(null);
+    if (!receiptId) {
+      setLookup(null);
       return;
     }
     try {
-      setRecord(getGrinApplicationRepository(user.uid).get(receiptId));
+      setLookup(requireLiveGrinApplicationRepository().lookup(receiptId));
     } catch {
-      setRecord(null);
+      setLookup(null);
     }
-  }, [receiptId, user?.uid]);
+  }, [receiptId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -69,11 +78,12 @@ export function GrinDetailScreen(): React.ReactElement {
   );
 
   const onPdf = useCallback(async () => {
-    if (!record) return;
+    if (!lookup || lookup.projection !== "readable") return;
     setBusy(true);
     setActionError(null);
     try {
-      const pdf = await generateGrinReceiptPdf({ record, t });
+      requireLiveGrinApplicationRepository();
+      const pdf = await generateGrinReceiptPdf({ record: lookup, t });
       try {
         await pdfService.share(pdf);
       } catch {
@@ -84,21 +94,34 @@ export function GrinDetailScreen(): React.ReactElement {
     } finally {
       setBusy(false);
     }
-  }, [record, t]);
+  }, [lookup, t]);
 
-  if (!record) {
+  if (!lookup) {
     return (
-      <GrinAdmissionGate title={t("grin.detailTitle")}>
-        <Screen>
-          <View style={styles.wrap}>
-            <Header title={t("grin.detailTitle")} showBack />
-            <EmptyState title={t("grin.notFound")} />
-          </View>
-        </Screen>
-      </GrinAdmissionGate>
+      <Screen>
+        <View style={styles.wrap}>
+          <Header title={t("grin.detailTitle")} showBack />
+          <EmptyState title={t("grin.notFound")} />
+        </View>
+      </Screen>
     );
   }
 
+  if (lookup.projection === "unknown_incomplete") {
+    return (
+      <Screen scroll>
+        <View style={styles.wrap}>
+          <Header title={t("grin.detailTitle")} showBack />
+          <GrinFixtureNotices />
+          <Banner tone="warning" message={t("grin.projection.incomplete")} />
+          <GrinFieldRow label={t("grin.field.grinNumber")} value={lookup.issuedNumber ?? t("grin.pdf.pendingNumber")} />
+          <GrinFieldRow label={t("grin.local.issued")} value={localStateLabel(lookup.localState, t)} />
+        </View>
+      </Screen>
+    );
+  }
+
+  const record = lookup;
   const grin = record.effective;
   const original = record.original;
   const line = grin.lines[0];
@@ -112,8 +135,7 @@ export function GrinDetailScreen(): React.ReactElement {
           : t("grin.optional.notSupplied");
 
   return (
-    <GrinAdmissionGate title={t("grin.detailTitle")}>
-      <Screen scroll>
+    <Screen scroll>
         <View style={styles.wrap}>
           <Header
             title={grin.issuedNumber ?? t("grin.pdf.pendingNumber")}
@@ -236,6 +258,5 @@ export function GrinDetailScreen(): React.ReactElement {
           </View>
         </View>
       </Screen>
-    </GrinAdmissionGate>
   );
 }

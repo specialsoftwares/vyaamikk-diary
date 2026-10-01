@@ -73,6 +73,23 @@ export function gateRefusalOf(body: RegisterGoodsReceiptBody): GrinApplicationLi
   return body.custody === "refused_at_gate" ? "refused_at_gate" : "none";
 }
 
+export function incompleteListItem(view: GrinLocalReceiptView): GrinApplicationListItem {
+  return {
+    receiptId: view.receiptId,
+    displayNumber: view.issuedNumber,
+    supplierName: null,
+    localState: view.localState,
+    custody: null,
+    qcStatus: null,
+    captureProvenance: null,
+    reportedArrivalAt: null,
+    serverRegisteredAtUtc: view.serverRegisteredAtUtc,
+    offlinePending: view.localState !== "issued" || view.issuedNumber == null,
+    gateRefusal: "unknown_incomplete",
+    projection: "unknown_incomplete",
+  };
+}
+
 export function toApplicationRecord(
   view: GrinLocalReceiptView,
   body: RegisterGoodsReceiptBody
@@ -100,6 +117,7 @@ export function toApplicationRecord(
     original: snapshot,
     effective: cloneSnapshot(snapshot),
     gateRefusal: gateRefusalOf(aligned),
+    projection: "readable",
   };
 }
 
@@ -107,7 +125,7 @@ export function toListItem(record: GrinApplicationRecord): GrinApplicationListIt
   return {
     receiptId: record.receiptId,
     displayNumber: record.issuedNumber,
-    supplierName: supplierNameFromBody(record.body, record.receiptId),
+    supplierName: supplierNameFromBody(record.body, "") || null,
     localState: record.localState,
     custody: record.effective.custody,
     qcStatus: record.effective.lines[0]?.qcStatus ?? null,
@@ -116,5 +134,6 @@ export function toListItem(record: GrinApplicationRecord): GrinApplicationListIt
     serverRegisteredAtUtc: record.serverRegisteredAtUtc,
     offlinePending: record.localState !== "issued" || record.issuedNumber == null,
     gateRefusal: record.gateRefusal,
+    projection: "readable",
   };
 }
