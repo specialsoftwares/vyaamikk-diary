@@ -13,6 +13,7 @@ import {
   tableExists,
   tableHasColumn,
 } from "./migrate";
+import { migrateToV10 } from "./migrateGrin";
 
 const log = createLogger("localDb");
 
@@ -96,6 +97,10 @@ export function initializeLocalDatabase(): Promise<void> {
         migrateToV9(database);
         version = 9;
       }
+      if (version < 10) {
+        migrateToV10(database);
+        version = 10;
+      }
 
       if (version >= 3 && !tableHasColumn(database, "form_drafts", "source")) {
         migrateToV3(database);
@@ -125,6 +130,9 @@ export function initializeLocalDatabase(): Promise<void> {
         !tableHasColumn(database, "entries_local", "origin_revision")
       ) {
         migrateToV9(database);
+      }
+      if (version >= 10 && !tableExists(database, "grin_local_receipts")) {
+        migrateToV10(database);
       }
 
       database.runSync(

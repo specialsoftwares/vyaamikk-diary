@@ -50,7 +50,7 @@ Billing prepare/validate/RTDN/worker handlers **exist** (Cloud Functions v2 `asi
 
 ### G3 — Durable SQLite outbox
 
-**Status:** Wave 1 in progress on `team/grin-t3-offline`. `offline.ts` remains a labelled in-process fixture, not the outbox.
+**Status:** Wave 1 source on `team/grin-t3-offline` (`3c1303b`), merged to combined. Coordinator wired `DB_VERSION = 10`. `offline.ts` remains a labelled in-process fixture. Host tests are `SQLITE_HOST`, not native process-death.
 
 **Acceptance (not implemented now):** durable device queue survives process death; interrupted register recovers via G1 replay/reconcile without a second serial; queue rows are bound to the signed-in owner/account; switching accounts cannot flush another owner’s commands; no locally invented issued numbers.
 

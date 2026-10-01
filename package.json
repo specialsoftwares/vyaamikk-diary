@@ -194,6 +194,7 @@
     "test:goods-evidence-g1-unit": "npx --yes tsx tools/goods-evidence-emulator/hash.parity.test.ts && npx --yes tsx tools/goods-evidence-emulator/limits.test.ts && npx --yes tsx tools/goods-evidence-emulator/isolation.contract.test.ts && npx --yes tsx tools/goods-evidence-emulator/serial.test.ts && npx --yes tsx tools/goods-evidence-emulator/retry.test.ts && npx --yes tsx tools/goods-evidence-emulator/injected.unit.test.ts",
     "test:goods-evidence-g1-emulator": "firebase emulators:exec --only firestore --project demo-vyaamikk-grin-g1 --config tools/goods-evidence-emulator/firebase.json \"npx --yes tsx tools/goods-evidence-emulator/register.emulator.test.ts && npx --yes tsx tools/goods-evidence-emulator/rules.emulator.test.ts && npx --yes tsx tools/goods-evidence-emulator/register.parity.test.ts && npx --yes tsx tools/goods-evidence-emulator/corrections.emulator.test.ts\"",
     "test:grin-acceptance-ids": "npx --yes tsx tools/grin-acceptance/runIds.ts",
+    "test:grin-outbox": "npx --yes tsx src/services/grin/outbox/outbox.isolation.contract.test.ts && npx --yes tsx src/services/grin/outbox/outbox.sqliteHost.test.ts",
     "test:boot-release-gate": "npx --yes tsx src/boot/bootReleaseGate.contract.test.ts",
     "test:boot-production-startup": "npx --yes tsx src/boot/bootProductionStartup.contract.test.ts",
     "test:boot-completion": "npx --yes tsx src/boot/bootCompletion.test.ts",

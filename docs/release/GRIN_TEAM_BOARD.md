@@ -10,7 +10,7 @@ Arrangement (2026-10-01): one coordinator plus five **local** Cursor Task subage
 | Contract + ownership | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | G1 `c9623dd` | source_verified | `wave1b` after Team 5 review | teams 1–4 still on wave1 head | acknowledge wave1b after T1–T4 land |
 | G1 undefined-object normalize + mutations + Functions packaging | team1 | `team/grin-t1-backend` | `grin-t1-backend` | contract wave1b | running | uncommitted | must extend GoodsCommandType; stored mutation reconcile | Wave 1 implementation |
 | G2 evidence lifecycle | team2 | `team/grin-t2-evidence` | `grin-t2-evidence` | contract ports | running | uncommitted | live IAM not in scope; category bound to EvidenceCategory | Wave 1 |
-| G3 SQLite outbox | team3 | `team/grin-t3-offline` | `grin-t3-offline` | command/result ports | running | uncommitted | native death not claimed | Wave 1 |
+| G3 SQLite outbox | team3 | `team/grin-t3-offline` | `grin-t3-offline` | command/result ports | source_verified | `3c1303b` SQLITE_HOST; catch fix reviewed | native death not claimed; FAKE server port | Wave 2 inject real G1 adapter |
 | G4/G5 UI + pack (fixtures first) | team4 | `team/grin-t4-product` | `grin-t4-product` | ports + labelled fakes | running | uncommitted | all ten exception evaluators; no ITC clearance | Wave 1 |
 | G6 matrix + independent contract review | team5 | `team/grin-t5-qa` | `grin-t5-qa` | wave1 contract | source_verified | `df5f0a5` 137 IDs; implementations not approved | NATIVE_DEVICE pending | re-ack wave1b; review T1–T4 diffs |
 

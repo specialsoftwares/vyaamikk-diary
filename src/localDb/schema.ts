@@ -1,7 +1,8 @@
 /** SQLite schema — single on-device source of truth for drafts, cache, and sync queue. */
 
 export const DB_NAME = "vyaamikk_diary.db";
-export const DB_VERSION = 9;
+/** v10 adds GRIN outbox tables only (no diary column changes). */
+export const DB_VERSION = 10;
 
 export const MIGRATIONS_V1 = `
 PRAGMA journal_mode = WAL;
