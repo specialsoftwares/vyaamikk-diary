@@ -28,6 +28,7 @@ const DOMAIN_FILES = [
   "command.ts",
   "hashChain.ts",
   "ports.ts",
+  "evidence.ts",
 ] as const;
 
 const GENERATED_HEADER =

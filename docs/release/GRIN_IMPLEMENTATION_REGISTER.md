@@ -15,7 +15,7 @@ The core-only Internal build packet is **deferred**. VersionCode 23 is source pr
 
 This register is not GRIN-complete from G1.
 
-Programme (2026-10-01): isolated G1–G5 source + G6 automated tests/review/device **preparation**. Combined branch `integration/grin-g1-g5-source`. Contract revision `2026-10-01.wave1b`. Team 5 matrix merged (`df5f0a5`); G1–G5 implementations not approved. PR #30 remains the G1-only draft.
+Programme (2026-10-01): isolated G1–G5 source + G6 automated tests/review/device **preparation**. Combined branch `integration/grin-g1-g5-source`. Contract revision `2026-10-01.wave1b`. Team 5 matrix merged (`df5f0a5`). Wave 1 team commits merged: T1 `5c7543d`, T2 `8989b48`, T3 `3c1303b`, T4 `355e575`. Implementations are **not** G6-approved; Team 5 must still review those diffs independently. PR #30 remains the G1-only draft. Combined draft PR is not opened until packaging wiring is committed and Team 5 records an implementation review.
 
 GRIN remains default-off. No main merge, deploy, EAS, Play, or billing activation in this programme.
 
@@ -42,11 +42,11 @@ Billing prepare/validate/RTDN/worker handlers **exist** (Cloud Functions v2 `asi
 
 ### G2 — Protected original evidence upload
 
-**Status:** Wave 1 in progress on `team/grin-t2-evidence` (not live). Domain `evidence.ts` / hash verification exist as simulation; lifecycle ports are in `src/goodsEvidence/ports.ts`.
+**Status:** Wave 1 source on `team/grin-t2-evidence` (`8989b48`), merged to combined. Emulator/FAKE ports in `tools/goods-evidence-storage`. Live Storage/IAM unchanged. Not production admission.
 
-**Acceptance (not implemented now):** untrusted upload rejected until auth/ownership/active ledger pass; original bytes stored off-client under owner-scoped paths; server computes hash and matches the declared digest; link is an event + pointer, never a rewrite of `original`; unauthenticated/cross-owner/pending-deletion denied; no PDF bodies in logs.
+**Acceptance (Wave 1 emulator/FAKE, not live):** untrusted upload rejected until auth/ownership/active ledger pass; original bytes stored off-client under owner-scoped paths; server computes hash and matches the declared digest; link is an event + pointer, never a rewrite of `original`; unauthenticated/cross-owner/pending-deletion denied; no PDF bodies in logs.
 
-**Depends on:** G1 receipt identity. **External:** Cloud Storage rules/IAM (not in this slice). **Blocked by:** separate review + live Storage/IAM authorization.
+**Depends on:** G1 receipt identity. **External:** Cloud Storage rules/IAM (proposal only). **Blocked by:** live Storage/IAM authorization (not in this programme).
 
 ### G3 — Durable SQLite outbox
 
@@ -58,15 +58,15 @@ Billing prepare/validate/RTDN/worker handlers **exist** (Cloud Functions v2 `asi
 
 ### G4 — Receiving / inspection / amendment / EWB / return UI
 
-**Status:** Wave 1 in progress on `team/grin-t4-product` (labelled fixtures until Wave 2). Domain commands exist in-memory (`amendFields`, `recordQc`, `dispatchReturn`, `correctReturnDispatch`, `voidWithReason`, EWB histories).
+**Status:** Wave 1 source on `team/grin-t4-product` (`355e575`), merged to combined. Screens gated; `GrinFixtureRepository` labelled fake until Wave 2. Domain commands also have Team 1 durable emulator adapters (undeployed).
 
-**Acceptance (not implemented now):** screens for receiving, inspection, amendment, EWB observation, return/rejection; durable adapters for those commands with the same auth/ledger gates; issued numbers remain immutable; EWB is recorded observation only; supplier-status / GSTR-2B fields stay user assertions unless a later verified connector exists.
+**Acceptance (Wave 1 fixtures + emulator mutations, not native):** screens for receiving, inspection, amendment, EWB observation, return/rejection; durable adapters for those commands with the same auth/ledger gates; issued numbers remain immutable; EWB is recorded observation only; supplier-status / GSTR-2B fields stay user assertions unless a later verified connector exists.
 
-**Depends on:** G1 (and likely G3 for offline capture).
+**Depends on:** G1 (and G3 for offline capture). Saved Records hub tile not wired.
 
 ### G5 — Versioned evidence-pack / PDF export
 
-**Status:** Wave 1 in progress on `team/grin-t4-product`. `evidencePack.ts` is a completeness model; export pipeline is not yet wired.
+**Status:** Wave 1 source on `team/grin-t4-product` (`355e575`). Pack screens + `grinPdfAdapter` exist against fixtures. Completeness still fail-closed on missing originals.
 
 **Acceptance (not implemented now):** versioned pack bytes; explicit completeness explanations for missing originals/EWB/QC; footer remains “not a GST document / not ITC determination”; no silent backfill of missing evidence.
 
@@ -95,19 +95,19 @@ Billing prepare/validate/RTDN/worker handlers **exist** (Cloud Functions v2 `asi
 | Server serial, issued number, IST FY, original snapshot hash, first event | G1 | implemented (emulator) |
 | Command idempotency / digest / receipt identity / reconcile | G1 | implemented (emulator) |
 | EWB link on register (`ewb: none` or recorded observation) | G1 | stored as submitted observation; **not** statutory applicability or live portal verification |
-| Original evidence bytes + server hash + linkage | G2 | missing |
-| `evidence_registered` / `evidence_verified` events | G2 | domain types only |
-| Offline capture / durable SQLite outbox / interrupted sync | G3 | `offline.ts` simulated; not SQLite |
-| Amend fields | G4 | simulated domain command |
-| QC decision / reclassify | G4 | simulated domain command |
-| Return/rejection dispatch and correction | G4 | simulated domain command |
-| Void with reason (preserve issued number) | G4 | simulated domain command |
-| EWB histories / `ewb_observation_recorded` / `ewb_linked` | G4 | simulated; not live EWB |
-| Screens: receiving, inspection, amendment, EWB, return | G4 | missing |
+| Original evidence bytes + server hash + linkage | G2 | Wave 1 emulator/FAKE; not live Storage |
+| `evidence_registered` / `evidence_verified` events | G2 | domain + emulator link event; not live |
+| Offline capture / durable SQLite outbox / interrupted sync | G3 | SQLite v10 + SQLITE_HOST tests; `offline.ts` fixture remains; not native death |
+| Amend fields | G4 | emulator adapter + fixture UI |
+| QC decision / reclassify | G4 | emulator adapter + fixture UI |
+| Return/rejection dispatch and correction | G4 | emulator adapter + fixture UI |
+| Void with reason (preserve issued number) | G4 | emulator adapter + fixture UI |
+| EWB histories / `ewb_observation_recorded` / `ewb_linked` | G4 | emulator observation; not live EWB |
+| Screens: receiving, inspection, amendment, EWB, return | G4 | gated fixture screens; Saved Records tile not wired |
 | Exception helpers (`grinWithoutInvoice`, GSTR-2B prompts, supplier suspended, amount mismatch, cancelled EWB, …) | G4/G5 | domain helpers only; ITC disposition always `not_determined` |
 | Manually recorded GSTR-2B / supplier-status values | G5/G6 | **assertions**, not verified live integrations |
-| Versioned evidence-pack / PDF export / completeness explanations | G5 | `evidencePack.ts` model only |
-| Device, accessibility, security, operational acceptance | G6 | missing |
+| Versioned evidence-pack / PDF export / completeness explanations | G5 | fixture pack + grinPdfAdapter; missing original remains incomplete |
+| Device, accessibility, security, operational acceptance | G6 | matrix + device_pending scripts; not executed |
 | Encrypted PDF backup | backlog | deferred |
 | Production GRIN admission / store-runtime flag | later | default-off; not enabled |
 

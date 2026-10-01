@@ -21,3 +21,11 @@ This is an extra AI review layer, not human certification. Not G6. Not native pr
 ## Catch review
 
 Original catch reconciled on any `Error`. Fixed to `if (!isNetworkAmbiguous(err)) throw err` with SQLITE_HOST TypeError regression.
+
+## Coordinator typecheck-only follow-up (combined)
+
+Root `tsc` failed after merge. Bounded fixes on combined (behavior preserved):
+
+- `hostSqlite.ts`: `ChildProcess` plus stderr-null guard for `stdio: ["ignore","ignore","pipe"]`
+- `outbox.ts`: after success/conflicted/permanent, remaining classified kind is retryable; use `retry.actionable` (the previous else branch was `never`)
+- `tools/grin-acceptance/matrix.ids.test.ts`: G6 forbidden-status check via string list so `complete` is not compared against a union that excludes it

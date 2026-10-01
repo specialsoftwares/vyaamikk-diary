@@ -3,7 +3,7 @@
  * sync surface. Host process restart is not NATIVE_DEVICE process-death proof.
  */
 
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -56,7 +56,7 @@ function readJson(filePath: string): BridgeOk {
 
 export class HostSqlite implements GrinSqlDb {
   readonly executionLabel = SQLITE_HOST;
-  private readonly child: ChildProcessWithoutNullStreams;
+  private readonly child: ChildProcess;
   private readonly ipcDir: string;
   private seq = 0;
   private txDepth = 0;
@@ -67,12 +67,18 @@ export class HostSqlite implements GrinSqlDb {
     fs.rmSync(this.ipcDir, { recursive: true, force: true });
     fs.mkdirSync(this.ipcDir, { recursive: true });
     const bridge = path.join(path.dirname(fileURLToPath(import.meta.url)), "sqliteHostBridge.py");
-    this.child = spawn("python3", ["-u", bridge, dbPath, this.ipcDir], {
+    const child = spawn("python3", ["-u", bridge, dbPath, this.ipcDir], {
       stdio: ["ignore", "ignore", "pipe"],
     });
-    this.child.stderr.setEncoding("utf8");
+    const stderrStream = child.stderr;
+    if (!stderrStream) {
+      child.kill();
+      throw new Error("SQLITE_HOST missing stderr pipe");
+    }
+    this.child = child;
+    stderrStream.setEncoding("utf8");
     let stderr = "";
-    this.child.stderr.on("data", (chunk) => {
+    stderrStream.on("data", (chunk) => {
       stderr += chunk;
     });
     try {

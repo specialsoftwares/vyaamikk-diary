@@ -708,13 +708,13 @@ export class GrinOutbox {
     }
     const attemptCount = Number(snapshot.attempt_count) + 1;
     const retry = nextRetryState(attemptCount, this.maxAttempts);
-    const state = classified.kind === "retryable" ? retry.state : retry.state;
+    const state = retry.state;
     this.writeCommandAndReceipt(snapshot, {
       localState: state,
       issuedNumber: null,
       serverRegisteredAtUtc: null,
       lastErrorCode: classified.code,
-      lastErrorActionable: classified.kind === "retryable" ? retry.actionable : classified.actionable,
+      lastErrorActionable: retry.actionable,
       attemptCount,
       clearLease: true,
       now,

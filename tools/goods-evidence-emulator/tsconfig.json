@@ -12,6 +12,6 @@
       "@/utils/sha256Hex": ["../../src/utils/sha256Hex.ts"]
     }
   },
-  "include": ["./**/*.ts", "../../src/goodsEvidence/canonical.ts", "../../src/goodsEvidence/constants.ts", "../../src/goodsEvidence/time.ts", "../../src/goodsEvidence/grinNumber.ts", "../../src/goodsEvidence/validate.ts", "../../src/goodsEvidence/quantities.ts", "../../src/goodsEvidence/types.ts", "../../src/goodsEvidence/ewb.ts", "../../src/goodsEvidence/snapshot.ts", "../../src/goodsEvidence/custody.ts", "../../src/goodsEvidence/command.ts", "../../src/goodsEvidence/ports.ts"],
+  "include": ["./**/*.ts", "../../src/goodsEvidence/canonical.ts", "../../src/goodsEvidence/constants.ts", "../../src/goodsEvidence/time.ts", "../../src/goodsEvidence/grinNumber.ts", "../../src/goodsEvidence/validate.ts", "../../src/goodsEvidence/quantities.ts", "../../src/goodsEvidence/types.ts", "../../src/goodsEvidence/ewb.ts", "../../src/goodsEvidence/snapshot.ts", "../../src/goodsEvidence/custody.ts", "../../src/goodsEvidence/command.ts", "../../src/goodsEvidence/ports.ts", "../../src/goodsEvidence/evidence.ts"],
   "exclude": ["./**/*.test.ts", "./harness.ts", "./packageFunctionsGoodsEvidence.ts"]
 }

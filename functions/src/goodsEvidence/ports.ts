@@ -7,7 +7,9 @@
  * Schema: GOODS_EVIDENCE_SCHEMA_VERSION = 1.
  */
 
-export const GRIN_CONTRACT_REVISION = "2026-10-01.wave1" as const;
+import type { EvidenceCategory, EvidenceVerification } from "./evidence";
+
+export const GRIN_CONTRACT_REVISION = "2026-10-01.wave1b" as const;
 
 /** ID charset: [A-Za-z0-9_-], length 1–64. commandId 8–128. Never rewritten. */
 export type GrinId = string;
@@ -71,6 +73,11 @@ export type GrinMutationSuccess = {
   serverAcceptedAtUtc: string;
 };
 
+/**
+ * `detail` is an allowlisted generic string for operators/tests.
+ * Clients must not show `detail` as user copy. Never echo request bodies.
+ * Auth/ledger failures use the same generic detail so existence does not leak.
+ */
 export type GrinDeny = { ok: false; code: GrinDenyCode; detail: string };
 
 export type GrinRegisterResult = GrinRegisterSuccess | GrinDeny;
@@ -85,6 +92,21 @@ export type GrinCommandType =
   | "voidWithReason"
   | "recordEwbObservation"
   | "linkVerifiedEvidence";
+
+export type ReconcileRequest = {
+  ledgerId: string;
+  commandId: string;
+};
+
+/**
+ * Stored command documents include `commandType` so reconcile can parse
+ * register vs mutation results. G1 `storedSuccess` must not assume register fields.
+ */
+export type GrinStoredCommandResult =
+  | (GrinRegisterSuccess & { commandType: "registerGoodsReceipt" })
+  | (GrinMutationSuccess & { commandType: Exclude<GrinCommandType, "registerGoodsReceipt"> });
+
+export type GrinReconcileResult = GrinStoredCommandResult | GrinDeny;
 
 /**
  * Canonicalization: sorted keys, UTF-8 JSON, explicit nulls, omitted undefined
@@ -133,7 +155,7 @@ export type VerifiedEvidenceResult = {
   ownerUid: string;
   ledgerId: string;
   receiptId: string;
-  category: string;
+  category: EvidenceCategory;
   mime: string;
   byteSize: number;
   rawSha256: string;
@@ -141,6 +163,13 @@ export type VerifiedEvidenceResult = {
   generation: string;
   verifiedAtUtc: string;
 };
+
+/** Maps object lifecycle to the domain completeness badge (`evidence.ts`). */
+export function evidenceVerificationOfState(state: EvidenceObjectState): EvidenceVerification {
+  if (state === "verified" || state === "linked") return "verified";
+  if (state === "rejected") return "failed";
+  return "pending";
+}
 
 export type OutboxLocalState =
   | "draft"
@@ -165,3 +194,15 @@ export type LocalReceiptRecord = {
 };
 
 export type PackCompletenessLabel = "complete" | "incomplete";
+
+export type PackAxes = {
+  integrity: "verified" | "failed";
+  coverage: "complete" | "incomplete";
+  completeness: PackCompletenessLabel;
+};
+
+/** Durable adapter mapping. InMemory `disabled` is not a callable code. */
+export const DOMAIN_DISABLED_MAPS_TO: GrinDenyCode = "policy_denied";
+
+/** Durable adapter mapping. InMemory owner-mismatch `digest_conflict` is not used. */
+export const FOREIGN_LEDGER_MAPS_TO: GrinDenyCode = "forbidden";
