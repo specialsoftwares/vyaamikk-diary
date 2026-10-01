@@ -9,12 +9,12 @@ import path from "node:path";
 
 import { sampleRegisterBody } from "@/goodsEvidence/testFixtures";
 import { execStatements, migrateToV7, migrateToV8, migrateToV9 } from "@/localDb/migrate";
-import { migrateToV10, grinV10TablesPresent } from "@/localDb/migrateGrin";
+import { migrateToV10, grinV10TablesPresent, GRIN_CONFIRMED_COLUMNS } from "@/localDb/migrateGrin";
 import { MIGRATIONS_V1 } from "@/localDb/schema";
 import { createFakeEvidenceUploadPort, createFakeGrinServerPort } from "./fakePorts";
 import { openHostSqlite, SQLITE_HOST, type HostSqlite } from "./hostSqlite";
 import { GrinOutbox, peekQueuedCommand, setOutboxCrashHook } from "./outbox";
-import { DURABLE_ORIGINAL_UPLOAD_CONDITION, SQLITE_HOST_NOT_NATIVE_DEVICE } from "./types";
+import { DURABLE_ORIGINAL_UPLOAD_CONDITION, MAX_CONCURRENT_UPLOADS_PER_OWNER, SQLITE_HOST_NOT_NATIVE_DEVICE } from "./types";
 import type { GrinSqlDb } from "./hostSqlite";
 
 function asMigrateDb(db: GrinSqlDb): Parameters<typeof migrateToV9>[0] {
@@ -74,6 +74,11 @@ async function main() {
 
     migrateToV10(asMigrateDb(db));
     assert.equal(grinV10TablesPresent(asMigrateDb(db)), true);
+    for (const column of GRIN_CONFIRMED_COLUMNS) {
+      const info = db.getAllSync<{ name: string }>("PRAGMA table_info(grin_local_receipts)");
+      assert.equal(info.some((row) => row.name === column), true, column);
+    }
+    assert.equal(MAX_CONCURRENT_UPLOADS_PER_OWNER, 2);
     const kept = db.getFirstSync<{ id: string; payload_json: string }>(
       "SELECT id, payload_json FROM entries_local WHERE id = ?",
       ["keep_diary_1"]
@@ -915,6 +920,148 @@ async function main() {
     const thumbFiles = evBox.listLocalFiles("owner_ev_d", "ledger_1", "grcp_ev_d");
     assert.notEqual(thumbFiles.find((f) => f.role === "thumbnail")?.uploadState, "uploaded_derivative");
     assert.equal(thumbFiles.find((f) => f.role === "original")?.originalDurable, false);
+
+    // F1: in-memory claim flips live token without sqlite begin; A is retired before persistEnd.
+    const f1Box = new GrinOutbox({ db, server: createFakeGrinServerPort() });
+    const claimedA = f1Box.claimOwnerSession("owner_f1_a");
+    const sqliteBeforeBegin = db.getFirstSync<{ dispatch_generation: number; session_active: number }>(
+      "SELECT dispatch_generation, session_active FROM grin_owner_runtime WHERE owner_uid = ?",
+      ["owner_f1_a"]
+    );
+    assert.equal(sqliteBeforeBegin, null);
+    assert.equal(f1Box.isSessionCurrent(claimedA), true);
+    const claimedB = f1Box.claimOwnerSession("owner_f1_b");
+    assert.equal(f1Box.isSessionCurrent(claimedA), false);
+    assert.equal(f1Box.isSessionCurrent(claimedB), true);
+    f1Box.persistBeginOwnerSession(claimedB);
+    const sqliteB = db.getFirstSync<{ dispatch_generation: number; session_active: number }>(
+      "SELECT dispatch_generation, session_active FROM grin_owner_runtime WHERE owner_uid = ?",
+      ["owner_f1_b"]
+    );
+    assert.equal(Number(sqliteB?.session_active), 1);
+    assert.equal(Number(sqliteB?.dispatch_generation), claimedB.dispatchGeneration);
+    f1Box.persistEndOwnerSession(claimedA);
+    assert.equal(f1Box.isSessionCurrent(claimedA), false);
+
+    const logoutA1 = f1Box.beginOwnerSession("owner_f1_logout");
+    f1Box.persistDraftAndQueue(logoutA1, {
+      ledgerId: "ledger_1",
+      receiptId: "grcp_f1_logout",
+      commandId: "gcmd_f1logout",
+      body: body("grcp_f1_logout"),
+    });
+    f1Box.endOwnerSession("owner_f1_logout");
+    assert.equal(f1Box.isSessionCurrent(logoutA1), false);
+    const logoutA2 = f1Box.beginOwnerSession("owner_f1_logout");
+    assert.notEqual(logoutA2.dispatchGeneration, logoutA1.dispatchGeneration);
+    assert.equal(f1Box.isSessionCurrent(logoutA1), false);
+    const staleLogout = await f1Box.dispatchDue(logoutA1, "worker_f1_old_gen");
+    assert.equal(staleLogout.processed, 0);
+    const freshLogout = await f1Box.dispatchDue(logoutA2, "worker_f1_new_gen");
+    assert.equal(freshLogout.results.find((r) => r.commandId === "gcmd_f1logout")?.localState, "issued");
+
+    // F2: without readReceipt, confirmation stays null (T4 must refuse mutation).
+    assert.equal(f1Box.getConfirmedProjection("owner_a", "ledger_1", "grcp_retry_1"), null);
+
+    const confirmServer = createFakeGrinServerPort({ mutate: true, readReceipt: true });
+    const confirmBox = new GrinOutbox({ db, server: confirmServer });
+    const confirmSession = confirmBox.beginOwnerSession("owner_f2");
+    confirmBox.persistDraftAndQueue(confirmSession, {
+      ledgerId: "ledger_1",
+      receiptId: "grcp_f2_1",
+      commandId: "gcmd_f2_reg",
+      body: body("grcp_f2_1"),
+    });
+    const confirmReg = await confirmBox.dispatchDue(confirmSession, "worker_f2");
+    assert.equal(confirmReg.results.find((r) => r.commandId === "gcmd_f2_reg")?.localState, "issued");
+    const confirmed1 = confirmBox.getConfirmedProjection("owner_f2", "ledger_1", "grcp_f2_1");
+    assert.ok(confirmed1);
+    assert.equal(confirmed1.eventVersion >= 1, true);
+    assert.equal(confirmed1.receiptId, "grcp_f2_1");
+    assert.ok(Array.isArray(confirmed1.events));
+    assert.equal(confirmServer.readReceiptCalls >= 1, true);
+
+    confirmBox.persistMutationAndQueue(confirmSession, {
+      ledgerId: "ledger_1",
+      receiptId: "grcp_f2_1",
+      commandId: "gcmd_f2_m1",
+      type: "amendFields",
+      body: { receiptId: "grcp_f2_1", expectedVersion: confirmed1.eventVersion, reason: "note", clientObservedAtUtc: "2026-09-28T13:00:00.000Z" },
+    });
+    confirmBox.persistMutationAndQueue(confirmSession, {
+      ledgerId: "ledger_1",
+      receiptId: "grcp_f2_1",
+      commandId: "gcmd_f2_m2",
+      type: "recordQc",
+      body: { receiptId: "grcp_f2_1", expectedVersion: confirmed1.eventVersion, reason: "qc", qcStatus: "accepted", clientObservedAtUtc: "2026-09-28T13:01:00.000Z" },
+    });
+    let releaseM1!: () => void;
+    confirmServer.holdNextMutate = new Promise<void>((resolve) => {
+      releaseM1 = resolve;
+    });
+    const sequentialInflight = confirmBox.dispatchDue(confirmSession, "worker_f2");
+    await confirmServer.waitUntilMutateEntered();
+    const overlapping = await confirmBox.dispatchDue(confirmSession, "worker_f2b");
+    assert.equal(
+      overlapping.results.some((r) => r.commandId === "gcmd_f2_m2" && r.skipped === "predecessor_inflight"),
+      true
+    );
+    confirmServer.holdNextMutate = null;
+    releaseM1();
+    const sequential = await sequentialInflight;
+    assert.equal(sequential.results.find((r) => r.commandId === "gcmd_f2_m1")?.localState, "issued");
+    const confirmedAfterM1 = confirmBox.getConfirmedProjection("owner_f2", "ledger_1", "grcp_f2_1");
+    assert.ok(confirmedAfterM1 && confirmedAfterM1.eventVersion >= 2);
+    const afterFirstMut = await confirmBox.dispatchDue(confirmSession, "worker_f2");
+    const m2Result =
+      sequential.results.find((r) => r.commandId === "gcmd_f2_m2") ??
+      afterFirstMut.results.find((r) => r.commandId === "gcmd_f2_m2");
+    assert.equal(m2Result?.localState ?? peekQueuedCommand(db, "owner_f2", "ledger_1", "gcmd_f2_m2")?.localState, "conflicted");
+
+    const staleVersion = confirmBox.persistMutationAndQueue(confirmSession, {
+      ledgerId: "ledger_1",
+      receiptId: "grcp_f2_1",
+      commandId: "gcmd_f2_conflict",
+      type: "amendFields",
+      body: { receiptId: "grcp_f2_1", expectedVersion: 1, reason: "stale", clientObservedAtUtc: "2026-09-28T13:02:00.000Z" },
+    });
+    assert.equal(peekQueuedCommand(db, "owner_f2", "ledger_1", "gcmd_f2_conflict")?.localState, "queued");
+    void staleVersion;
+    const conflictedFlush = await confirmBox.dispatchDue(confirmSession, "worker_f2");
+    assert.equal(conflictedFlush.results.find((r) => r.commandId === "gcmd_f2_conflict")?.localState, "conflicted");
+    const conflictedPeek = peekQueuedCommand(db, "owner_f2", "ledger_1", "gcmd_f2_conflict");
+    assert.equal(conflictedPeek?.localState, "conflicted");
+    assert.equal(conflictedPeek?.digest, staleVersion.digest);
+
+    confirmServer.dropNextResponse = true;
+    const lostSession = confirmBox.beginOwnerSession("owner_f2_lost");
+    confirmBox.persistDraftAndQueue(lostSession, {
+      ledgerId: "ledger_1",
+      receiptId: "grcp_f2_lost",
+      commandId: "gcmd_f2_lost",
+      body: body("grcp_f2_lost"),
+    });
+    const lostConfirm = await confirmBox.dispatchDue(lostSession, "worker_f2_lost");
+    assert.equal(lostConfirm.results.find((r) => r.commandId === "gcmd_f2_lost")?.replayed, true);
+    const lostProjection = confirmBox.getConfirmedProjection("owner_f2_lost", "ledger_1", "grcp_f2_lost");
+    assert.ok(lostProjection);
+    const firstHash = lostProjection.headHash;
+    const replayLost = await confirmBox.dispatchDue(lostSession, "worker_f2_lost");
+    assert.ok(replayLost.results.find((r) => r.commandId === "gcmd_f2_lost") == null || replayLost.results.find((r) => r.commandId === "gcmd_f2_lost")?.skipped);
+    assert.equal(confirmBox.getConfirmedProjection("owner_f2_lost", "ledger_1", "grcp_f2_lost")?.headHash, firstHash);
+
+    assert.throws(
+      () =>
+        confirmBox.persistConfirmedProjection(lostSession, {
+          receiptId: "grcp_f2_lost",
+          eventVersion: 0,
+          headHash: "a".repeat(64),
+          original: { receiptId: "grcp_f2_lost" } as never,
+          events: [],
+          effective: { receiptId: "grcp_f2_lost" } as never,
+        }),
+      (err: unknown) => err instanceof Error && err.message === "invalid_confirmed_projection"
+    );
 
     const diaryStill = db.getFirstSync<{ id: string }>(
       "SELECT id FROM entries_local WHERE id = ?",

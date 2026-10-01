@@ -31,6 +31,15 @@ export const GRIN_V10_INDEXES = [
   "idx_grin_evidence_receipt",
 ] as const;
 
+/** Additive v10 confirmed-projection columns. No DB_VERSION bump. */
+export const GRIN_CONFIRMED_COLUMNS = [
+  "confirmed_event_version",
+  "confirmed_head_hash",
+  "confirmed_original_json",
+  "confirmed_events_json",
+  "confirmed_effective_json",
+] as const;
+
 export const GRIN_MIGRATIONS_V10 = `
 CREATE TABLE IF NOT EXISTS grin_local_receipts (
   id TEXT PRIMARY KEY NOT NULL,
@@ -44,6 +53,11 @@ CREATE TABLE IF NOT EXISTS grin_local_receipts (
   server_registered_at_utc TEXT,
   dispatch_generation INTEGER NOT NULL DEFAULT 0,
   payload_json TEXT NOT NULL,
+  confirmed_event_version INTEGER,
+  confirmed_head_hash TEXT,
+  confirmed_original_json TEXT,
+  confirmed_events_json TEXT,
+  confirmed_effective_json TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -146,6 +160,23 @@ export function migrateToV10(db: Db): void {
   ) {
     db.execSync("ALTER TABLE grin_outbox_commands ADD COLUMN lease_attempt_id TEXT");
   }
+  if (tableExists(db, "grin_local_receipts")) {
+    if (!tableHasColumn(db, "grin_local_receipts", "confirmed_event_version")) {
+      db.execSync("ALTER TABLE grin_local_receipts ADD COLUMN confirmed_event_version INTEGER");
+    }
+    if (!tableHasColumn(db, "grin_local_receipts", "confirmed_head_hash")) {
+      db.execSync("ALTER TABLE grin_local_receipts ADD COLUMN confirmed_head_hash TEXT");
+    }
+    if (!tableHasColumn(db, "grin_local_receipts", "confirmed_original_json")) {
+      db.execSync("ALTER TABLE grin_local_receipts ADD COLUMN confirmed_original_json TEXT");
+    }
+    if (!tableHasColumn(db, "grin_local_receipts", "confirmed_events_json")) {
+      db.execSync("ALTER TABLE grin_local_receipts ADD COLUMN confirmed_events_json TEXT");
+    }
+    if (!tableHasColumn(db, "grin_local_receipts", "confirmed_effective_json")) {
+      db.execSync("ALTER TABLE grin_local_receipts ADD COLUMN confirmed_effective_json TEXT");
+    }
+  }
 }
 
 /**
@@ -163,5 +194,8 @@ export function grinV10TablesPresent(db: Db): boolean {
   }
   if (!tableHasColumn(db, "grin_local_evidence_files", "category")) return false;
   if (!tableHasColumn(db, "grin_outbox_commands", "lease_attempt_id")) return false;
+  for (const column of GRIN_CONFIRMED_COLUMNS) {
+    if (!tableHasColumn(db, "grin_local_receipts", column)) return false;
+  }
   return GRIN_V10_INDEXES.every((name) => grinIndexExists(db, name));
 }

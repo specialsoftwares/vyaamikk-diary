@@ -1,13 +1,16 @@
 import type {
   GrinCommandType,
+  GrinConfirmedProjection,
   GrinMutationResult,
+  GrinReceiptReadResult,
   GrinReconcileResult,
   GrinRegisterResult,
   OutboxLocalState,
 } from "@/goodsEvidence/ports";
-import { isWave1OriginalCategory, type Wave1OriginalCategory } from "@/goodsEvidence/evidence";
+import { isWave1OriginalCategory, MAX_CONCURRENT_UPLOADS_PER_OWNER, type Wave1OriginalCategory } from "@/goodsEvidence/evidence";
 import { migrateToV10 } from "@/localDb/migrateGrin";
 import { classifyRegisterResult, isNetworkAmbiguous, nextRetryState, type ClassifiedOutcome } from "./classify";
+import { confirmedProjectionJson, parseConfirmedProjection } from "./confirmedProjection";
 import { freezeAdmittedCommand } from "./freeze";
 import type { GrinSqlDb } from "./hostSqlite";
 import {
@@ -39,6 +42,12 @@ import type {
   LocalEvidenceRole,
   OutboxCrashPhase,
 } from "./types";
+import {
+  liveTokenCurrent,
+  memoryGenerationForOwner,
+  nextDispatchGeneration,
+  type LiveSessionToken,
+} from "./sessionAuthority";
 import {
   DEFAULT_LEASE_TTL_MS,
   DURABLE_ORIGINAL_UPLOAD_CONDITION,
@@ -120,6 +129,11 @@ type ReceiptRow = {
   server_registered_at_utc: string | null;
   dispatch_generation: number;
   payload_json: string;
+  confirmed_event_version: number | null;
+  confirmed_head_hash: string | null;
+  confirmed_original_json: string | null;
+  confirmed_events_json: string | null;
+  confirmed_effective_json: string | null;
   created_at: number;
   updated_at: number;
 };
@@ -213,7 +227,12 @@ export type DispatchItemResult = {
   localState: OutboxLocalState;
   issuedNumber: string | null;
   replayed: boolean;
-  skipped?: "session_retired" | "lease_held" | "owner_mismatch" | "unsupported_type";
+  skipped?:
+    | "session_retired"
+    | "lease_held"
+    | "owner_mismatch"
+    | "unsupported_type"
+    | "predecessor_inflight";
 };
 
 export type DispatchReport = {
@@ -252,6 +271,9 @@ export class GrinOutbox {
   private readonly clock: Clock;
   private readonly leaseTtlMs: number;
   private readonly maxAttempts: number;
+  /** Process-local live token. Not durable. Restart falls back to sqlite. */
+  private liveToken: LiveSessionToken | null = null;
+  private readonly inFlightUploadsByOwner = new Map<string, number>();
 
   constructor(deps: GrinOutboxDeps) {
     this.db = deps.db;
@@ -267,35 +289,106 @@ export class GrinOutbox {
   }
 
   /**
+   * Combined claim + sqlite persist. Prefer claimOwnerSession + persistBeginOwnerSession
+   * when sqlite must not run inside a React render.
    * Only session starter. persistDraftAndQueue, persistMutationAndQueue,
    * dispatchDue, recoverAfterRestart, attachLocalFile, and completion must not
    * call this to revive a retired session.
    */
   beginOwnerSession(ownerUid: string): GrinDispatchSession {
+    const session = this.claimOwnerSession(ownerUid);
+    this.persistBeginOwnerSession(session);
+    return session;
+  }
+
+  /**
+   * Immediate in-memory live token. generation = max(persisted, memory)+1.
+   * Does not write sqlite. Making B current retires A's captured origin now.
+   */
+  claimOwnerSession(ownerUid: string): GrinDispatchSession {
     assertOwnerUid(ownerUid);
+    const persisted = Number(this.readRuntime(ownerUid)?.dispatch_generation ?? 0);
+    const memory = memoryGenerationForOwner(this.liveToken, ownerUid);
+    const dispatchGeneration = nextDispatchGeneration(persisted, memory);
+    this.liveToken = { ownerUid, dispatchGeneration, active: true };
+    return { ownerUid, dispatchGeneration };
+  }
+
+  /** Alias for claimOwnerSession (contract F1 advanceLiveToken). */
+  advanceLiveToken(ownerUid: string): GrinDispatchSession {
+    return this.claimOwnerSession(ownerUid);
+  }
+
+  persistBeginOwnerSession(session: GrinDispatchSession): void {
+    assertOwnerUid(session.ownerUid);
+    if (
+      this.liveToken &&
+      (this.liveToken.ownerUid !== session.ownerUid ||
+        this.liveToken.dispatchGeneration !== session.dispatchGeneration ||
+        !this.liveToken.active)
+    ) {
+      return;
+    }
     const now = this.clock.nowMs();
-    let generation = 0;
     this.db.withTransactionSync(() => {
-      const row = this.readRuntime(ownerUid);
-      generation = (row?.dispatch_generation ?? 0) + 1;
+      const row = this.readRuntime(session.ownerUid);
+      const persisted = Number(row?.dispatch_generation ?? 0);
+      if (persisted > session.dispatchGeneration) return;
       this.upsertRuntime({
-        owner_uid: ownerUid,
-        dispatch_generation: generation,
+        owner_uid: session.ownerUid,
+        dispatch_generation: session.dispatchGeneration,
         session_active: 1,
         retirement_hold: row?.retirement_hold ?? 0,
         retirement_at: row?.retirement_at ?? null,
         updated_at: now,
       });
     });
-    return { ownerUid, dispatchGeneration: generation };
+  }
+
+  persistEndOwnerSession(session: GrinDispatchSession): void {
+    assertOwnerUid(session.ownerUid);
+    const now = this.clock.nowMs();
+    if (
+      this.liveToken &&
+      this.liveToken.ownerUid === session.ownerUid &&
+      this.liveToken.dispatchGeneration === session.dispatchGeneration
+    ) {
+      const next = nextDispatchGeneration(
+        Number(this.readRuntime(session.ownerUid)?.dispatch_generation ?? 0),
+        this.liveToken.dispatchGeneration
+      );
+      this.liveToken = { ownerUid: session.ownerUid, dispatchGeneration: next, active: false };
+    }
+    this.db.withTransactionSync(() => {
+      const row = this.readRuntime(session.ownerUid);
+      const persisted = Number(row?.dispatch_generation ?? 0);
+      if (persisted > session.dispatchGeneration && Number(row?.session_active) === 0) return;
+      const generation = nextDispatchGeneration(persisted, session.dispatchGeneration);
+      this.upsertRuntime({
+        owner_uid: session.ownerUid,
+        dispatch_generation: generation,
+        session_active: 0,
+        retirement_hold: row?.retirement_hold ?? 0,
+        retirement_at: row?.retirement_at ?? null,
+        updated_at: now,
+      });
+    });
   }
 
   endOwnerSession(ownerUid: string): void {
     assertOwnerUid(ownerUid);
+    const live =
+      this.liveToken?.ownerUid === ownerUid
+        ? { ownerUid, dispatchGeneration: this.liveToken.dispatchGeneration }
+        : null;
+    if (live) {
+      this.persistEndOwnerSession(live);
+      return;
+    }
     const now = this.clock.nowMs();
     this.db.withTransactionSync(() => {
       const row = this.readRuntime(ownerUid);
-      const generation = (row?.dispatch_generation ?? 0) + 1;
+      const generation = nextDispatchGeneration(Number(row?.dispatch_generation ?? 0), 0);
       this.upsertRuntime({
         owner_uid: ownerUid,
         dispatch_generation: generation,
@@ -308,6 +401,8 @@ export class GrinOutbox {
   }
 
   isSessionCurrent(session: GrinDispatchSession): boolean {
+    const fromMemory = liveTokenCurrent(this.liveToken, session);
+    if (fromMemory !== null) return fromMemory;
     const row = this.readRuntime(session.ownerUid);
     if (!row) return false;
     return Number(row.session_active) === 1 && Number(row.dispatch_generation) === session.dispatchGeneration;
@@ -550,6 +645,67 @@ export class GrinOutbox {
     return rows.map((row) => this.toView(row, this.readCommand(ownerUid, row.ledger_id, row.command_id)));
   }
 
+  getConfirmedProjection(
+    ownerUid: string,
+    ledgerId: string,
+    receiptId: string
+  ): GrinConfirmedProjection | null {
+    assertOwnerUid(ownerUid);
+    assertLedgerId(ledgerId);
+    assertReceiptId(receiptId);
+    const row = this.readReceipt(ownerUid, ledgerId, receiptId);
+    if (!row) return null;
+    if (row.confirmed_event_version == null || row.confirmed_head_hash == null) return null;
+    if (
+      row.confirmed_original_json == null ||
+      row.confirmed_events_json == null ||
+      row.confirmed_effective_json == null
+    ) {
+      return null;
+    }
+    try {
+      return parseConfirmedProjection(
+        {
+          receiptId: row.receipt_id,
+          eventVersion: Number(row.confirmed_event_version),
+          headHash: row.confirmed_head_hash,
+          original: JSON.parse(row.confirmed_original_json) as unknown,
+          events: JSON.parse(row.confirmed_events_json) as unknown,
+          effective: JSON.parse(row.confirmed_effective_json) as unknown,
+        },
+        receiptId
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  persistConfirmedProjection(session: GrinDispatchSession, confirmed: GrinConfirmedProjection): void {
+    this.assertSessionOwner(session, session.ownerUid);
+    const parsed = parseConfirmedProjection(confirmed, confirmed.receiptId);
+    if (!parsed) throw new Error("invalid_confirmed_projection");
+    const now = this.clock.nowMs();
+    this.db.withTransactionSync(() => {
+      if (!this.isSessionCurrent(session)) throw new Error("session_retired");
+      const ledgerId = this.ledgerIdForConfirmed(session.ownerUid, parsed);
+      if (!ledgerId) throw new Error("invalid_confirmed_projection");
+      this.upsertConfirmedProjection(session.ownerUid, ledgerId, parsed, now);
+    });
+  }
+
+  listCommandsForReceipt(ownerUid: string, ledgerId: string, receiptId: string): GrinQueuedCommand[] {
+    assertOwnerUid(ownerUid);
+    assertLedgerId(ledgerId);
+    assertReceiptId(receiptId);
+    const rows = this.db.getAllSync<CommandRow>(
+      `SELECT * FROM grin_outbox_commands
+        WHERE owner_uid = ? AND ledger_id = ? AND receipt_id = ?
+        ORDER BY created_at ASC`,
+      [ownerUid, ledgerId, receiptId]
+    );
+    return rows.map((row) => this.toQueued(row));
+  }
+
   async dispatchDue(session: GrinDispatchSession, workerId: string, limit = 8): Promise<DispatchReport> {
     const results: DispatchItemResult[] = [];
     if (!this.isSessionCurrent(session)) {
@@ -597,6 +753,16 @@ export class GrinOutbox {
           issuedNumber: null,
           replayed: false,
           skipped: "unsupported_type",
+        });
+        continue;
+      }
+      if (this.hasInFlightPredecessorMutation(row)) {
+        results.push({
+          commandId: row.command_id,
+          localState: state,
+          issuedNumber: null,
+          replayed: false,
+          skipped: "predecessor_inflight",
         });
         continue;
       }
@@ -873,7 +1039,10 @@ export class GrinOutbox {
     }
     const stale = this.skipStaleCompletion(session, workerId, snapshot);
     if (stale) return stale;
-    return this.applyRegisterOutcome(session, snapshot, result, usedReconcile, fence);
+    const confirmed = await this.readValidatedConfirmation(session, workerId, snapshot);
+    const afterRead = this.skipStaleCompletion(session, workerId, snapshot);
+    if (afterRead) return afterRead;
+    return this.applyRegisterOutcome(session, snapshot, result, usedReconcile, fence, confirmed);
   }
 
   private async dispatchLeasedMutation(
@@ -925,7 +1094,10 @@ export class GrinOutbox {
     }
     const stale = this.skipStaleCompletion(session, workerId, snapshot);
     if (stale) return stale;
-    return this.applyMutationOutcome(session, snapshot, result, usedReconcile, fence);
+    const confirmed = await this.readValidatedConfirmation(session, workerId, snapshot);
+    const afterRead = this.skipStaleCompletion(session, workerId, snapshot);
+    if (afterRead) return afterRead;
+    return this.applyMutationOutcome(session, snapshot, result, usedReconcile, fence, confirmed);
   }
 
   /**
@@ -971,7 +1143,8 @@ export class GrinOutbox {
     snapshot: CommandRow,
     result: GrinRegisterResult,
     usedReconcile: boolean,
-    fence: AttemptFence
+    fence: AttemptFence,
+    confirmed: GrinConfirmedProjection | null
   ): DispatchItemResult {
     const now = this.clock.nowMs();
     const classified = classifyRegisterResult(result);
@@ -992,6 +1165,7 @@ export class GrinOutbox {
         now,
         session,
         fence,
+        confirmed,
       });
       if (!wrote) {
         return this.skipStaleCompletion(session, fence.workerId, snapshot) ?? this.leaseHeldResult(snapshot);
@@ -1014,7 +1188,8 @@ export class GrinOutbox {
     snapshot: CommandRow,
     result: GrinMutationResult,
     usedReconcile: boolean,
-    fence: AttemptFence
+    fence: AttemptFence,
+    confirmed: GrinConfirmedProjection | null
   ): DispatchItemResult {
     const receipt = this.readReceipt(snapshot.owner_uid, snapshot.ledger_id, snapshot.receipt_id);
     const issuedNumber = receipt?.issued_number ?? null;
@@ -1032,6 +1207,7 @@ export class GrinOutbox {
         now,
         session,
         fence,
+        confirmed,
       });
       if (!wrote) {
         return this.skipStaleCompletion(session, fence.workerId, snapshot) ?? this.leaseHeldResult(snapshot);
@@ -1169,17 +1345,25 @@ export class GrinOutbox {
       if (!this.ownsLiveAttempt(session, fence, snapshot)) {
         return this.skipStaleCompletion(session, workerId, snapshot) ?? this.leaseHeldResult(snapshot);
       }
-      const uploaded = await this.evidence.upload({
-        uid: snapshot.owner_uid,
-        ledgerId: snapshot.ledger_id,
-        receiptId: snapshot.receipt_id,
-        evidenceId: file.evidenceId,
-        role: file.role,
-        localPath: file.localPath,
-        claimedSha256: file.claimedSha256,
-        category: file.category,
-        sizeBytes: file.byteSize ?? 0,
-      });
+      if (!this.beginOwnerUploadSlot(snapshot.owner_uid)) {
+        break;
+      }
+      let uploaded;
+      try {
+        uploaded = await this.evidence.upload({
+          uid: snapshot.owner_uid,
+          ledgerId: snapshot.ledger_id,
+          receiptId: snapshot.receipt_id,
+          evidenceId: file.evidenceId,
+          role: file.role,
+          localPath: file.localPath,
+          claimedSha256: file.claimedSha256,
+          category: file.category,
+          sizeBytes: file.byteSize ?? 0,
+        });
+      } finally {
+        this.endOwnerUploadSlot(snapshot.owner_uid);
+      }
       const after = this.skipStaleCompletion(session, workerId, snapshot);
       if (after) return after;
       if (file.role === "thumbnail" || file.role === "metadata") {
@@ -1320,6 +1504,7 @@ export class GrinOutbox {
       now: number;
       session?: GrinDispatchSession;
       fence?: AttemptFence;
+      confirmed?: GrinConfirmedProjection | null;
     }
   ): boolean {
     let wrote = false;
@@ -1408,9 +1593,172 @@ export class GrinOutbox {
           snapshot.receipt_id,
         ]
       );
+      if (args.confirmed) {
+        this.upsertConfirmedProjection(snapshot.owner_uid, snapshot.ledger_id, args.confirmed, args.now);
+      }
       wrote = true;
     });
     return wrote;
+  }
+
+  private hasInFlightPredecessorMutation(snapshot: CommandRow): boolean {
+    if (!isMutationCommandType(snapshot.command_type)) return false;
+    const prior = this.db.getFirstSync<{ n: number }>(
+      `SELECT COUNT(*) as n FROM grin_outbox_commands
+        WHERE owner_uid = ? AND ledger_id = ? AND receipt_id = ?
+          AND command_id != ?
+          AND command_type != 'registerGoodsReceipt'
+          AND created_at <= ?
+          AND local_state IN ('queued', 'dispatching', 'failed_retryable')`,
+      [
+        snapshot.owner_uid,
+        snapshot.ledger_id,
+        snapshot.receipt_id,
+        snapshot.command_id,
+        snapshot.created_at,
+      ]
+    );
+    return Number(prior?.n ?? 0) > 0;
+  }
+
+  private async readValidatedConfirmation(
+    _session: GrinDispatchSession,
+    _workerId: string,
+    snapshot: CommandRow
+  ): Promise<GrinConfirmedProjection | null> {
+    void _session;
+    void _workerId;
+    const read = this.server.readReceipt;
+    if (typeof read !== "function") return null;
+    let result: GrinReceiptReadResult;
+    try {
+      result = await read({
+        uid: snapshot.owner_uid,
+        ledgerId: snapshot.ledger_id,
+        receiptId: snapshot.receipt_id,
+      });
+    } catch {
+      return null;
+    }
+    if (!result.ok) return null;
+    return parseConfirmedProjection(result.confirmed, snapshot.receipt_id);
+  }
+
+  /**
+   * Idempotent for the same projection. Refuses a different projection at the
+   * same eventVersion (lost-response replay must not double-apply).
+   * Advances when eventVersion is strictly greater.
+   */
+  private upsertConfirmedProjection(
+    ownerUid: string,
+    ledgerId: string,
+    confirmed: GrinConfirmedProjection,
+    now: number
+  ): void {
+    const row = this.readReceipt(ownerUid, ledgerId, confirmed.receiptId);
+    if (!row) return;
+    const current = this.projectionFromReceiptRow(row);
+    if (current) {
+      if (current.eventVersion > confirmed.eventVersion) return;
+      if (current.eventVersion === confirmed.eventVersion) return;
+    }
+    const json = confirmedProjectionJson(confirmed);
+    this.db.runSync(
+      `UPDATE grin_local_receipts
+          SET confirmed_event_version = ?,
+              confirmed_head_hash = ?,
+              confirmed_original_json = ?,
+              confirmed_events_json = ?,
+              confirmed_effective_json = ?,
+              updated_at = ?
+        WHERE owner_uid = ? AND ledger_id = ? AND receipt_id = ?`,
+      [
+        confirmed.eventVersion,
+        confirmed.headHash,
+        json.original,
+        json.events,
+        json.effective,
+        now,
+        ownerUid,
+        ledgerId,
+        confirmed.receiptId,
+      ]
+    );
+  }
+
+  private ledgerIdForConfirmed(ownerUid: string, confirmed: GrinConfirmedProjection): string | null {
+    const fromOriginal =
+      confirmed.original && typeof confirmed.original.ledgerId === "string"
+        ? confirmed.original.ledgerId
+        : null;
+    if (fromOriginal) return fromOriginal;
+    const rows = this.db.getAllSync<ReceiptRow>(
+      `SELECT * FROM grin_local_receipts WHERE owner_uid = ? AND receipt_id = ?`,
+      [ownerUid, confirmed.receiptId]
+    );
+    if (rows.length === 1) return rows[0]!.ledger_id;
+    return null;
+  }
+
+  private projectionFromReceiptRow(row: ReceiptRow): GrinConfirmedProjection | null {
+    if (row.confirmed_event_version == null || row.confirmed_head_hash == null) return null;
+    if (
+      row.confirmed_original_json == null ||
+      row.confirmed_events_json == null ||
+      row.confirmed_effective_json == null
+    ) {
+      return null;
+    }
+    try {
+      return parseConfirmedProjection(
+        {
+          receiptId: row.receipt_id,
+          eventVersion: Number(row.confirmed_event_version),
+          headHash: row.confirmed_head_hash,
+          original: JSON.parse(row.confirmed_original_json) as unknown,
+          events: JSON.parse(row.confirmed_events_json) as unknown,
+          effective: JSON.parse(row.confirmed_effective_json) as unknown,
+        },
+        row.receipt_id
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  private beginOwnerUploadSlot(ownerUid: string): boolean {
+    const n = this.inFlightUploadsByOwner.get(ownerUid) ?? 0;
+    if (n >= MAX_CONCURRENT_UPLOADS_PER_OWNER) return false;
+    this.inFlightUploadsByOwner.set(ownerUid, n + 1);
+    return true;
+  }
+
+  private endOwnerUploadSlot(ownerUid: string): void {
+    const n = this.inFlightUploadsByOwner.get(ownerUid) ?? 0;
+    if (n <= 1) this.inFlightUploadsByOwner.delete(ownerUid);
+    else this.inFlightUploadsByOwner.set(ownerUid, n - 1);
+  }
+
+  private toQueued(row: CommandRow): GrinQueuedCommand {
+    return {
+      ownerUid: row.owner_uid,
+      ledgerId: row.ledger_id,
+      commandId: row.command_id,
+      receiptId: row.receipt_id,
+      commandType: row.command_type as GrinCommandType,
+      digest: row.digest,
+      frozenPayload: parseJson(row.frozen_payload_json),
+      localState: parseState(row.local_state),
+      attemptCount: Number(row.attempt_count),
+      maxAttempts: Number(row.max_attempts),
+      lastErrorCode: row.last_error_code,
+      lastErrorActionable: (row.last_error_actionable as ActionableFailure | null) ?? null,
+      leaseWorkerId: row.lease_worker_id,
+      leaseGeneration: row.lease_generation == null ? null : Number(row.lease_generation),
+      leaseUntilMs: row.lease_until_ms == null ? null : Number(row.lease_until_ms),
+      leaseAttemptId: row.lease_attempt_id ?? null,
+      dispatchGeneration: Number(row.dispatch_generation),
+    };
   }
 
   private hasUndurableOriginals(ownerUid: string, ledgerId: string, receiptId: string): boolean {

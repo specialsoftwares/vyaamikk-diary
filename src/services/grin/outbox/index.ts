@@ -1,4 +1,4 @@
-export { migrateToV10, GRIN_DB_TARGET_VERSION, GRIN_MIGRATIONS_V10, grinV10TablesPresent, GRIN_V10_INDEXES } from "@/localDb/migrateGrin";
+export { migrateToV10, GRIN_DB_TARGET_VERSION, GRIN_MIGRATIONS_V10, grinV10TablesPresent, GRIN_V10_INDEXES, GRIN_CONFIRMED_COLUMNS } from "@/localDb/migrateGrin";
 export { GrinOutbox, setOutboxCrashHook, peekQueuedCommand, DURABLE_ORIGINAL_UPLOAD_CONDITION } from "./outbox";
 export type {
   DispatchReport,
@@ -23,9 +23,16 @@ export type {
 } from "./ports";
 export {
   DEFAULT_LEASE_TTL_MS,
+  MAX_CONCURRENT_UPLOADS_PER_OWNER,
   MAX_DISPATCH_ATTEMPTS,
   SQLITE_HOST_NOT_NATIVE_DEVICE,
 } from "./types";
+export { parseConfirmedProjection } from "./confirmedProjection";
+export {
+  liveTokenCurrent,
+  nextDispatchGeneration,
+  type LiveSessionToken,
+} from "./sessionAuthority";
 export type {
   ActionableFailure,
   GrinDispatchSession,

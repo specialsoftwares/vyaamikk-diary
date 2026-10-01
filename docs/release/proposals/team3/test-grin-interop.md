@@ -7,8 +7,10 @@ Wave 2 CS-01 lives under `tools/grin-interop/**` (Team 3). It opens **SQLITE_HOS
 ## Proposed `package.json` script
 
 ```json
-"test:grin-interop": "npx --yes tsx tools/grin-interop/isolation.contract.test.ts && npx --yes tsx tools/grin-interop/cs01-offline-restart-register.sqliteHost.test.ts"
+"test:grin-interop": "npx --yes tsx tools/grin-interop/isolation.contract.test.ts && npx --yes tsx tools/grin-interop/cs01-offline-restart-register.sqliteHost.test.ts && npx --yes tsx tools/grin-interop/f2-register-amend-confirm.sqliteHost.test.ts"
 ```
+
+F2 joined test: `tools/grin-interop/f2-register-amend-confirm.sqliteHost.test.ts` (SQLITE_HOST + INJECTED). Emulator variant only when `FIRESTORE_EMULATOR_HOST` is set; unset logs `EMULATOR_VARIANT=not_run` and is not counted as pass.
 
 Run today with `npx tsx` on those files. Do not add the script until coordinator owns the lockfile change.
 

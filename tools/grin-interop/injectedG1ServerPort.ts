@@ -10,10 +10,11 @@ import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { fileURLToPath } from "node:url";
 
-import type { GrinCommandType, GrinMutationResult, GrinReconcileResult, GrinRegisterResult } from "@/goodsEvidence/ports";
+import type { GrinCommandType, GrinMutationResult, GrinReceiptReadResult, GrinReconcileResult, GrinRegisterResult } from "@/goodsEvidence/ports";
 import type { GrinMutationEnvelope, GrinServerCommandPort } from "@/services/grin/outbox/ports";
+import { parseConfirmedProjection } from "@/services/grin/outbox/confirmedProjection";
 import { GoodsEvidenceRegisterAdapter } from "../goods-evidence-emulator/adapter";
-import { commandPath } from "../goods-evidence-emulator/paths";
+import { commandPath, receiptPath } from "../goods-evidence-emulator/paths";
 import type { InjectedStore } from "../goods-evidence-emulator/injectedStore";
 import type { G1Clock, G1CommandResult, TrustedCaller } from "../goods-evidence-emulator/types";
 
@@ -34,6 +35,7 @@ export type InjectedGrinServerPort = GrinServerCommandPort & {
   portSource: string;
   registerCalls: number;
   reconcileCalls: number;
+  readReceiptCalls: number;
 };
 
 export type InjectedPortDeps = {
@@ -73,6 +75,50 @@ function toReconcileResult(result: G1CommandResult, storedType: string | undefin
   return { ok: false, code: "integrity", detail: "reconcile_result_missing_command_type" };
 }
 
+function readReceiptFromStore(
+  store: InjectedStore,
+  uid: string,
+  ledgerId: string,
+  receiptId: string
+): GrinReceiptReadResult {
+  const raw = store.snapshot.get(receiptPath(uid, ledgerId, receiptId));
+  if (!raw) return { ok: false, code: "not_found", detail: "denied" };
+  let data: Record<string, unknown>;
+  try {
+    data = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return { ok: false, code: "integrity", detail: "denied" };
+  }
+  const view = data.view && typeof data.view === "object" ? (data.view as Record<string, unknown>) : null;
+  const prefix = `${receiptPath(uid, ledgerId, receiptId)}/events/`;
+  const events: unknown[] = [];
+  for (const [path, eventRaw] of store.snapshot) {
+    if (!path.startsWith(prefix)) continue;
+    const rest = path.slice(prefix.length);
+    if (!rest || rest.includes("/")) continue;
+    try {
+      events.push(JSON.parse(eventRaw) as unknown);
+    } catch {
+      return { ok: false, code: "integrity", detail: "denied" };
+    }
+  }
+  events.sort((a, b) => {
+    const sa = a && typeof a === "object" ? Number((a as { streamSequence?: unknown }).streamSequence ?? 0) : 0;
+    const sb = b && typeof b === "object" ? Number((b as { streamSequence?: unknown }).streamSequence ?? 0) : 0;
+    return sa - sb;
+  });
+  const confirmed = parseConfirmedProjection({
+    receiptId,
+    eventVersion: view?.eventVersion,
+    headHash: view?.headHash,
+    original: data.original,
+    events,
+    effective: data.effective ?? data.original,
+  }, receiptId);
+  if (!confirmed) return { ok: false, code: "integrity", detail: "denied" };
+  return { ok: true, confirmed };
+}
+
 function wrapAdapter(deps: InjectedPortDeps): InjectedGrinServerPort {
   const adapter = new GoodsEvidenceRegisterAdapter(deps.store, deps.clock);
   const port: InjectedGrinServerPort = {
@@ -80,6 +126,7 @@ function wrapAdapter(deps: InjectedPortDeps): InjectedGrinServerPort {
     portSource: "wrap:GoodsEvidenceRegisterAdapter",
     registerCalls: 0,
     reconcileCalls: 0,
+    readReceiptCalls: 0,
     async register(input): Promise<GrinRegisterResult> {
       port.registerCalls += 1;
       const caller: TrustedCaller = { uid: input.uid };
@@ -120,6 +167,10 @@ function wrapAdapter(deps: InjectedPortDeps): InjectedGrinServerPort {
           return { ok: false, code: "invalid", detail: "unsupported mutation type" };
       }
     },
+    async readReceipt(input): Promise<GrinReceiptReadResult> {
+      port.readReceiptCalls += 1;
+      return readReceiptFromStore(deps.store, input.uid, input.ledgerId, input.receiptId);
+    },
   };
   return port;
 }
@@ -154,6 +205,7 @@ async function tryTeam1Port(deps: InjectedPortDeps): Promise<InjectedGrinServerP
       portSource: `team1:${name}`,
       registerCalls: 0,
       reconcileCalls: 0,
+      readReceiptCalls: 0,
       async register(input) {
         counted.registerCalls += 1;
         return created.register(input);
@@ -163,6 +215,13 @@ async function tryTeam1Port(deps: InjectedPortDeps): Promise<InjectedGrinServerP
         return created.reconcile(input);
       },
       mutate: created.mutate ? (input) => created.mutate!(input) : undefined,
+      async readReceipt(input) {
+        counted.readReceiptCalls += 1;
+        if (typeof created.readReceipt === "function") {
+          return created.readReceipt(input);
+        }
+        return readReceiptFromStore(deps.store, input.uid, input.ledgerId, input.receiptId);
+      },
     };
     return counted;
   }
