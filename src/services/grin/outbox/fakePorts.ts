@@ -19,11 +19,14 @@ export type FakeGrinServerPort = GrinServerCommandPort & {
   portKind: "FAKE";
   serialsIssued: number;
   holdNextRegister: Promise<void> | null;
+  holdNextMutate: Promise<void> | null;
   dropNextResponse: boolean;
   throwNonNetworkAfterCommit: boolean;
   reconcileCalls: number;
   denyCode: Extract<GrinRegisterResult, { ok: false }>["code"] | null;
   waitUntilRegisterEntered(): Promise<void>;
+  waitUntilMutateEntered(): Promise<void>;
+  refreshEnteredWait(): void;
 };
 
 export function createFakeGrinServerPort(opts?: { mutate?: boolean }): FakeGrinServerPort {
@@ -34,6 +37,22 @@ export function createFakeGrinServerPort(opts?: { mutate?: boolean }): FakeGrinS
   let entered = new Promise<void>((resolve) => {
     notifyEntered = resolve;
   });
+  let notifyMutateEntered: () => void = () => undefined;
+  let mutateEntered = new Promise<void>((resolve) => {
+    notifyMutateEntered = resolve;
+  });
+
+  function armEntered(): void {
+    entered = new Promise<void>((resolve) => {
+      notifyEntered = resolve;
+    });
+  }
+
+  function armMutateEntered(): void {
+    mutateEntered = new Promise<void>((resolve) => {
+      notifyMutateEntered = resolve;
+    });
+  }
 
   function cmdKey(uid: string, ledgerId: string, commandId: string): string {
     return `${uid}/${ledgerId}/${commandId}`;
@@ -49,12 +68,20 @@ export function createFakeGrinServerPort(opts?: { mutate?: boolean }): FakeGrinS
     portKind: "FAKE",
     serialsIssued: 0,
     holdNextRegister: null,
+    holdNextMutate: null,
     dropNextResponse: false,
     throwNonNetworkAfterCommit: false,
     reconcileCalls: 0,
     denyCode: null,
     waitUntilRegisterEntered() {
       return entered;
+    },
+    waitUntilMutateEntered() {
+      return mutateEntered;
+    },
+    refreshEnteredWait() {
+      armEntered();
+      armMutateEntered();
     },
     async register(input) {
       notifyEntered();
@@ -117,6 +144,8 @@ export function createFakeGrinServerPort(opts?: { mutate?: boolean }): FakeGrinS
 
   if (opts?.mutate) {
     port.mutate = async (input): Promise<GrinMutationResult> => {
+      notifyMutateEntered();
+      if (port.holdNextMutate) await port.holdNextMutate;
       if (port.denyCode) return deny(port.denyCode);
       const { uid, digest } = input;
       const envelope: GrinMutationEnvelope = input.envelope;

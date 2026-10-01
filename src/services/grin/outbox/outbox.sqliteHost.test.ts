@@ -470,6 +470,108 @@ async function main() {
     assert.equal(mutatePeek?.leaseWorkerId, null);
     assert.equal(mutateBox.getRecord("owner_d", "ledger_1", "grcp_amend_d")?.issuedNumber, null);
 
+    // ER-1: same-owner session retirement during in-flight register must not persist issuedNumber.
+    const er1Server = createFakeGrinServerPort();
+    const er1Box = new GrinOutbox({ db, server: er1Server });
+    const sessionEr1 = er1Box.beginOwnerSession("owner_er1");
+    const er1Queued = er1Box.persistDraftAndQueue(sessionEr1, {
+      ledgerId: "ledger_1",
+      receiptId: "grcp_er1_1",
+      commandId: "gcmd_er1_001",
+      body: body("grcp_er1_1"),
+    });
+    assert.equal(er1Queued.localState, "queued");
+    let releaseEr1!: () => void;
+    er1Server.holdNextRegister = new Promise<void>((resolve) => {
+      releaseEr1 = resolve;
+    });
+    const er1Inflight = er1Box.dispatchDue(sessionEr1, "worker_er1");
+    await er1Server.waitUntilRegisterEntered();
+    er1Box.endOwnerSession("owner_er1");
+    releaseEr1();
+    const er1Done = await er1Inflight;
+    er1Server.holdNextRegister = null;
+    const er1Item = er1Done.results.find((r) => r.commandId === "gcmd_er1_001");
+    assert.equal(er1Item?.skipped, "session_retired");
+    assert.equal(er1Done.processed, 0);
+    assert.equal(er1Box.getRecord("owner_er1", "ledger_1", "grcp_er1_1")?.issuedNumber, null);
+    assert.equal(er1Box.getRecord("owner_er1", "ledger_1", "grcp_er1_1")?.localState, "dispatching");
+    assert.equal(er1Server.serialsIssued, 1);
+    const sessionEr1b = er1Box.beginOwnerSession("owner_er1");
+    const er1Recover = await er1Box.dispatchDue(sessionEr1b, "worker_er1_b");
+    const er1Recovered = er1Recover.results.find((r) => r.commandId === "gcmd_er1_001");
+    assert.equal(er1Recovered?.localState, "issued");
+    assert.equal(er1Recovered?.replayed, true);
+    assert.equal(er1Server.serialsIssued, 1);
+    assert.equal(er1Box.getRecord("owner_er1", "ledger_1", "grcp_er1_1")?.issuedNumber, "GRIN/MAIN/FY2026-27/000001");
+
+    // ER-1: stale worker must not persist after another worker takes the lease during await.
+    let nowMs = 2_000_000;
+    const leaseClock = { nowMs: () => nowMs };
+    const leaseServer = createFakeGrinServerPort();
+    const leaseBox = new GrinOutbox({ db, server: leaseServer, clock: leaseClock, leaseTtlMs: 1_000 });
+    const sessionLease = leaseBox.beginOwnerSession("owner_er2");
+    const leaseQueued = leaseBox.persistDraftAndQueue(sessionLease, {
+      ledgerId: "ledger_1",
+      receiptId: "grcp_er2_1",
+      commandId: "gcmd_er2_001",
+      body: body("grcp_er2_1"),
+    });
+    assert.equal(leaseQueued.localState, "queued");
+    let releaseLease!: () => void;
+    leaseServer.holdNextRegister = new Promise<void>((resolve) => {
+      releaseLease = resolve;
+    });
+    const staleWorker = leaseBox.dispatchDue(sessionLease, "worker_er2_a");
+    await leaseServer.waitUntilRegisterEntered();
+    nowMs += 5_000;
+    const winnerWorker = leaseBox.dispatchDue(sessionLease, "worker_er2_b");
+    const stealDeadline = Date.now() + 2_000;
+    let stolen = peekQueuedCommand(db, "owner_er2", "ledger_1", "gcmd_er2_001");
+    while (stolen?.leaseWorkerId !== "worker_er2_b" && Date.now() < stealDeadline) {
+      await Promise.resolve();
+      stolen = peekQueuedCommand(db, "owner_er2", "ledger_1", "gcmd_er2_001");
+    }
+    assert.equal(stolen?.leaseWorkerId, "worker_er2_b");
+    releaseLease();
+    const [staleDone, winnerDone] = await Promise.all([staleWorker, winnerWorker]);
+    leaseServer.holdNextRegister = null;
+    assert.equal(staleDone.results.find((r) => r.commandId === "gcmd_er2_001")?.skipped, "lease_held");
+    assert.equal(staleDone.results.find((r) => r.commandId === "gcmd_er2_001")?.issuedNumber, null);
+    assert.equal(winnerDone.results.find((r) => r.commandId === "gcmd_er2_001")?.localState, "issued");
+    assert.equal(leaseServer.serialsIssued, 1);
+    assert.equal(leaseBox.getRecord("owner_er2", "ledger_1", "grcp_er2_1")?.issuedNumber, "GRIN/MAIN/FY2026-27/000001");
+
+    const erMutServer = createFakeGrinServerPort({ mutate: true });
+    const erMutBox = new GrinOutbox({ db, server: erMutServer });
+    const sessionErMut = erMutBox.beginOwnerSession("owner_er3");
+    const erMutQueued = erMutBox.persistDraftAndQueue(sessionErMut, {
+      ledgerId: "ledger_1",
+      receiptId: "grcp_er3_1",
+      commandId: "gcmd_er3_001",
+      commandType: "amendFields",
+      body: { receiptId: "grcp_er3_1", expectedVersion: 1 },
+    });
+    assert.equal(erMutQueued.localState, "queued");
+    let releaseMut!: () => void;
+    erMutServer.holdNextMutate = new Promise<void>((resolve) => {
+      releaseMut = resolve;
+    });
+    const erMutInflight = erMutBox.dispatchDue(sessionErMut, "worker_er3");
+    await erMutServer.waitUntilMutateEntered();
+    erMutBox.endOwnerSession("owner_er3");
+    releaseMut();
+    const erMutDone = await erMutInflight;
+    erMutServer.holdNextMutate = null;
+    assert.equal(erMutDone.results.find((r) => r.commandId === "gcmd_er3_001")?.skipped, "session_retired");
+    assert.equal(erMutDone.processed, 0);
+    assert.equal(erMutBox.getRecord("owner_er3", "ledger_1", "grcp_er3_1")?.localState, "dispatching");
+    const sessionErMut2 = erMutBox.beginOwnerSession("owner_er3");
+    const erMutRecover = await erMutBox.dispatchDue(sessionErMut2, "worker_er3_b");
+    assert.equal(erMutRecover.results.find((r) => r.commandId === "gcmd_er3_001")?.localState, "issued");
+    assert.equal(erMutRecover.results.find((r) => r.commandId === "gcmd_er3_001")?.replayed, true);
+    assert.equal(erMutBox.getRecord("owner_er3", "ledger_1", "grcp_er3_1")?.issuedNumber, null);
+
     const diaryStill = db.getFirstSync<{ id: string }>(
       "SELECT id FROM entries_local WHERE id = ?",
       ["keep_diary_1"]

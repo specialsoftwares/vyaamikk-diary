@@ -668,7 +668,6 @@ export class GrinOutbox {
     workerId: string,
     snapshot: CommandRow
   ): Promise<DispatchItemResult> {
-    void workerId;
     const commandType = snapshot.command_type;
     if (!this.canDispatchCommandType(commandType)) {
       this.releaseUnsupportedToQueued(snapshot);
@@ -681,7 +680,7 @@ export class GrinOutbox {
       };
     }
     if (isMutationCommandType(commandType)) {
-      return this.dispatchLeasedMutation(session, snapshot, commandType);
+      return this.dispatchLeasedMutation(session, workerId, snapshot, commandType);
     }
     const envelope: GrinRegisterEnvelope = {
       commandId: snapshot.command_id,
@@ -708,20 +707,14 @@ export class GrinOutbox {
         })
       );
     }
-    if (!this.isSessionCurrent(session) && snapshot.owner_uid !== session.ownerUid) {
-      return {
-        commandId: snapshot.command_id,
-        localState: "dispatching",
-        issuedNumber: null,
-        replayed: false,
-        skipped: "session_retired",
-      };
-    }
+    const stale = this.skipStaleCompletion(session, workerId, snapshot);
+    if (stale) return stale;
     return this.applyRegisterOutcome(snapshot, result, usedReconcile);
   }
 
   private async dispatchLeasedMutation(
     session: GrinDispatchSession,
+    workerId: string,
     snapshot: CommandRow,
     commandType: GrinMutationEnvelope["type"]
   ): Promise<DispatchItemResult> {
@@ -761,16 +754,52 @@ export class GrinOutbox {
         })
       );
     }
-    if (!this.isSessionCurrent(session) && snapshot.owner_uid !== session.ownerUid) {
+    const stale = this.skipStaleCompletion(session, workerId, snapshot);
+    if (stale) return stale;
+    return this.applyMutationOutcome(snapshot, result, usedReconcile);
+  }
+
+  /**
+   * After register/reconcile/mutate returns, do not persist if this session
+   * was retired (including same-owner) or the lease no longer belongs to
+   * this worker/generation. Does not mint issuedNumber from the server result.
+   */
+  private skipStaleCompletion(
+    session: GrinDispatchSession,
+    workerId: string,
+    snapshot: CommandRow
+  ): DispatchItemResult | null {
+    if (!this.isSessionCurrent(session)) {
+      const current = this.readCommand(snapshot.owner_uid, snapshot.ledger_id, snapshot.command_id);
       return {
         commandId: snapshot.command_id,
-        localState: "dispatching",
+        localState: current ? parseState(current.local_state) : parseState(snapshot.local_state),
         issuedNumber: null,
         replayed: false,
         skipped: "session_retired",
       };
     }
-    return this.applyMutationOutcome(snapshot, result, usedReconcile);
+    const current = this.readCommand(snapshot.owner_uid, snapshot.ledger_id, snapshot.command_id);
+    if (!current) {
+      return {
+        commandId: snapshot.command_id,
+        localState: parseState(snapshot.local_state),
+        issuedNumber: null,
+        replayed: false,
+        skipped: "lease_held",
+      };
+    }
+    const leaseGeneration = current.lease_generation == null ? null : Number(current.lease_generation);
+    if (current.lease_worker_id !== workerId || leaseGeneration !== session.dispatchGeneration) {
+      return {
+        commandId: snapshot.command_id,
+        localState: parseState(current.local_state),
+        issuedNumber: null,
+        replayed: false,
+        skipped: "lease_held",
+      };
+    }
+    return null;
   }
 
   private applyRegisterOutcome(
