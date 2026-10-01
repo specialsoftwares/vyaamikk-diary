@@ -78,6 +78,22 @@ export type G1MutationResult = G1MutationSuccess | G1Deny;
 
 export type G1CommandResult = G1RegisterResult | G1MutationResult;
 
+export type G1MutationCommandType =
+  | "amendFields"
+  | "recordQc"
+  | "dispatchReturn"
+  | "correctReturnDispatch"
+  | "voidWithReason"
+  | "recordEwbObservation"
+  | "linkVerifiedEvidence";
+
+/** wave1b stored command result. Reconcile must not assume register-only fields. */
+export type G1StoredCommandResult =
+  | (G1RegisterSuccess & { commandType: "registerGoodsReceipt" })
+  | (G1MutationSuccess & { commandType: G1MutationCommandType });
+
+export type G1ReconcileResult = G1StoredCommandResult | G1Deny;
+
 export type AdmissionPolicy = {
   schemaVersion: 1;
   newCommands: "allow" | "deny";

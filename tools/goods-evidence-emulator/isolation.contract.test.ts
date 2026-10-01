@@ -15,13 +15,16 @@ const adapterFiles = [
   "serial.ts",
   "retry.ts",
   "mutations.ts",
+  "serverPort.ts",
 ].map((name) => join(dir, name));
 
 assert.ok(adapterFiles.includes(join(dir, "adapter.ts")));
+assert.ok(adapterFiles.includes(join(dir, "serverPort.ts")));
 
 const forbidden = [
   /from ["']react["']/,
   /from ["']react-native["']/,
+  /from ["']expo/,
   /from ["']@\/config/,
   /from ["']@\/localDb/,
   /from ["']@\/utils\/sha256Hex/,
@@ -39,7 +42,10 @@ for (const file of adapterFiles) {
 }
 
 const functionsIndex = readFileSync(join(dir, "../../functions/src/index.ts"), "utf8");
-assert.doesNotMatch(functionsIndex, /goodsEvidence|GoodsEvidenceRegisterAdapter|grin-g1/);
+assert.doesNotMatch(
+  functionsIndex,
+  /goodsEvidence|GoodsEvidenceRegisterAdapter|grin-g1|createInjectedGrinServerPort|serverPort/
+);
 
 const functionsTsconfig = readFileSync(join(dir, "../../functions/tsconfig.json"), "utf8");
 assert.match(functionsTsconfig, /"outDir": "lib"/);

@@ -3,7 +3,9 @@
 Coordinator-owned. Team 1 did not edit `package.json` / `package-lock.json`.
 
 New files are runnable with `npx tsx` today. Please add them to the existing
-G1 command lists (do not replace or drop current files):
+G1 command lists (do not replace or drop current files).
+
+Wave 2 one-liner for `test:goods-evidence-g1-unit`: `npx --yes tsx tools/goods-evidence-emulator/serverPort.injected.unit.test.ts`
 
 ## `test:goods-evidence-g1-unit`
 
@@ -11,6 +13,7 @@ Append:
 
 - `npx --yes tsx tools/goods-evidence-emulator/mutations.injected.unit.test.ts`
 - `npx --yes tsx tools/goods-evidence-emulator/packaging.unit.test.ts`
+- `npx --yes tsx tools/goods-evidence-emulator/serverPort.injected.unit.test.ts`
 
 ## `test:goods-evidence-g1-emulator`
 

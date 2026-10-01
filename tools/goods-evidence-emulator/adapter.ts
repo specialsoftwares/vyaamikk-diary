@@ -85,8 +85,10 @@ import type {
   G1DocSnap,
   G1Firestore,
   G1Hooks,
+  G1MutationCommandType,
   G1MutationResult,
   G1MutationSuccess,
+  G1ReconcileResult,
   G1RegisterResult,
   G1RegisterSuccess,
   G1Transaction,
@@ -151,6 +153,14 @@ function storedSuccess(data: Record<string, unknown> | undefined): G1RegisterSuc
     eventVersion: result.eventVersion,
     headHash: result.headHash,
   };
+}
+
+function mutationCommandTypeOf(value: unknown): G1MutationCommandType | null {
+  if (typeof value !== "string") return null;
+  for (const type of MUTATION_COMMAND_TYPES) {
+    if (type === value) return type;
+  }
+  return null;
 }
 
 function storedMutationSuccess(data: Record<string, unknown> | undefined): G1MutationSuccess | null {
@@ -290,7 +300,7 @@ export class GoodsEvidenceRegisterAdapter {
     });
   }
 
-  async reconcile(caller: TrustedCaller, input: unknown): Promise<G1CommandResult> {
+  async reconcile(caller: TrustedCaller, input: unknown): Promise<G1ReconcileResult> {
     if (!caller.uid) return deny("unauthenticated", GENERIC_DENY);
     const uid = caller.uid;
 
@@ -315,13 +325,15 @@ export class GoodsEvidenceRegisterAdapter {
       const stored = commandSnap.data();
       const registerResult = storedSuccess(stored);
       if (registerResult) {
+        if (stored?.type !== "registerGoodsReceipt") return deny("not_found", "command not found");
         logG1("grin_g1_replayed", { replayed: true, attempt });
-        return registerResult;
+        return { ...registerResult, commandType: "registerGoodsReceipt" };
       }
       const mutationResult = storedMutationSuccess(stored);
-      if (mutationResult) {
+      const mutationType = mutationCommandTypeOf(stored?.type);
+      if (mutationResult && mutationType) {
         logG1("grin_g1_replayed", { replayed: true, attempt });
-        return mutationResult;
+        return { ...mutationResult, commandType: mutationType };
       }
       return deny("not_found", "command not found");
     });

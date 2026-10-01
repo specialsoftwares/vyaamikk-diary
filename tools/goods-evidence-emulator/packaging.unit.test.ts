@@ -20,7 +20,10 @@ const functionsIndex = readFileSync(join(dir, "../../functions/src/index.ts"), "
 const functionsTsconfig = readFileSync(join(dir, "../../functions/tsconfig.json"), "utf8");
 const functionsPkg = readFileSync(join(dir, "../../functions/package.json"), "utf8");
 
-assert.doesNotMatch(functionsIndex, /goodsEvidence|GoodsEvidenceRegisterAdapter|grin-g1/);
+assert.doesNotMatch(
+  functionsIndex,
+  /goodsEvidence|GoodsEvidenceRegisterAdapter|grin-g1|createInjectedGrinServerPort|serverPort/
+);
 assert.match(functionsTsconfig, /"outDir": "lib"/);
 assert.doesNotMatch(functionsTsconfig, /rootDir/);
 assert.match(functionsPkg, /"main": "lib\/index.js"/);
