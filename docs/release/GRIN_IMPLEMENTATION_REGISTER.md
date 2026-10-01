@@ -15,7 +15,7 @@ The core-only Internal build packet is **deferred**. VersionCode 23 is source pr
 
 This register is not GRIN-complete from G1.
 
-Programme (2026-10-01): isolated G1–G5 source + G6 automated tests/review/device **preparation**. Combined branch `integration/grin-g1-g5-source`. Contract revision `2026-10-01.wave1b`. Team 5 matrix merged (`df5f0a5`). Wave 1 team commits merged: T1 `5c7543d`, T2 `8989b48`, T3 `3c1303b`, T4 `355e575`. Implementations are **not** G6-approved; Team 5 must still review those diffs independently. PR #30 remains the G1-only draft. Combined draft PR is not opened until packaging wiring is committed and Team 5 records an implementation review.
+Programme (2026-10-01): isolated G1–G5 source + G6 automated tests/review/device **preparation**. Combined branch `integration/grin-g1-g5-source`. Contract revision `2026-10-01.wave1b`. Team 5 implementation review `070a388`: **Wave 1 source approved with findings** (not production, not G6, not main merge). Open findings M1–M3 assigned to Teams 1–3. PR #30 remains the G1-only draft. Combined GitHub draft PR was not opened (`gh` unauthenticated).
 
 GRIN remains default-off. No main merge, deploy, EAS, Play, or billing activation in this programme.
 
@@ -74,7 +74,7 @@ Billing prepare/validate/RTDN/worker handlers **exist** (Cloud Functions v2 `asi
 
 ### G6 — Combined device, accessibility, security, operational acceptance
 
-**Status:** Wave 1 acceptance matrix on `team/grin-t5-qa`. Native/device remains `device_pending`. Must not mark complete from source/emulator tests.
+**Status:** Wave 1 matrix `df5f0a5` plus implementation review `070a388` (**approved with findings**). Native/device remains `device_pending`. Must not mark complete from source/emulator tests.
 
 **Acceptance (not implemented now):** Play-installed binary; TalkBack on GRIN screens; account switch and pending-deletion; safe diagnostics; operational runbook. Must not mark Done from source/emulator tests.
 
