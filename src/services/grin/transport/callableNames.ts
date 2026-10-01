@@ -12,6 +12,8 @@
 export const GRIN_REGISTER_CALLABLE = "grinRegisterGoodsReceipt";
 export const GRIN_RECONCILE_CALLABLE = "grinReconcileCommand";
 export const GRIN_MUTATE_CALLABLE = "grinMutateGoodsReceipt";
+export const GRIN_READ_CALLABLE = "grinReadGoodsReceipt";
+export const GRIN_UPLOAD_EVIDENCE_CALLABLE = "grinUploadEvidence";
 
 export type GrinHttpsCallablePayload = {
   envelope: unknown;
@@ -21,4 +23,19 @@ export type GrinHttpsCallablePayload = {
 export type GrinHttpsReconcilePayload = {
   ledgerId: string;
   commandId: string;
+};
+
+export type GrinHttpsReadPayload = {
+  ledgerId: string;
+  receiptId: string;
+};
+
+export type GrinHttpsEvidencePayload = {
+  ledgerId: string;
+  receiptId: string;
+  evidenceId: string;
+  role: string;
+  claimedSha256: string | null;
+  category: unknown;
+  sizeBytes: number;
 };

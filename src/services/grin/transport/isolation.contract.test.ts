@@ -50,5 +50,8 @@ const transport = readFileSync(join(dir, "firebaseTransport.ts"), "utf8");
 assert.match(transport, /httpsCallable/);
 assert.match(transport, /currentAuth/);
 assert.doesNotMatch(transport, /createInjectedGrinServerPort/);
+assert.doesNotMatch(stripComments(transport), /as GrinRegisterResult/);
+assert.doesNotMatch(stripComments(transport), /as GrinMutationResult/);
+assert.doesNotMatch(stripComments(transport), /as GrinReconcileResult/);
 
 console.log("src/services/grin/transport/isolation.contract.test.ts: ok");

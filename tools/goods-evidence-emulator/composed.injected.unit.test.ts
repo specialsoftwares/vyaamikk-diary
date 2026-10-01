@@ -119,6 +119,30 @@ async function main(): Promise<void> {
   assert.equal(store.snapshot.has(receiptPath(OWNER, LEDGER, "receipt_c01")), true);
   assert.equal(store.snapshot.has(receiptPath(ATTACKER, LEDGER, "receipt_c01")), false);
 
+  assert.equal("confirmed" in registered, true, "register SUCCESS may attach confirmed");
+  if (!("confirmed" in registered) || !registered.ok) throw new Error("expected register confirmed");
+  const registeredConfirmed = registered.confirmed;
+  assert.equal(registeredConfirmed.receiptId, "receipt_c01");
+  assert.equal(registeredConfirmed.eventVersion, registered.eventVersion);
+  assert.equal(registeredConfirmed.headHash, registered.headHash);
+  assert.equal(registeredConfirmed.events.length, 1);
+  assert.equal(registeredConfirmed.events[0]?.type, "receipt_registered");
+  assert.deepEqual(registeredConfirmed.original.remarks, { kind: "not_supplied" });
+  assert.equal(registeredConfirmed.effective.remarks.kind, "not_supplied");
+  assert.equal(registeredConfirmed.original.originalSnapshotHash, registeredConfirmed.effective.originalSnapshotHash);
+
+  const afterRegisterRead = await callables.readReceipt({
+    auth: { uid: OWNER },
+    data: { ledgerId: LEDGER, receiptId: "receipt_c01", uid: ATTACKER },
+  });
+  assert.equal(afterRegisterRead.ok, true);
+  if (!afterRegisterRead.ok) throw new Error("expected read after register");
+  assert.equal(afterRegisterRead.confirmed.eventVersion, 1);
+  assert.equal(afterRegisterRead.confirmed.headHash, registered.headHash);
+  assert.equal(afterRegisterRead.confirmed.events.length, 1);
+  assert.deepEqual(afterRegisterRead.confirmed.original.remarks, { kind: "not_supplied" });
+  assert.equal(afterRegisterRead.confirmed.effective.remarks.kind, "not_supplied");
+
   const replayed = await callables.register({
     auth: { uid: OWNER },
     data: registerPayload("command_c01", "receipt_c01"),
@@ -173,6 +197,95 @@ async function main(): Promise<void> {
     assert.equal(mutateReconcile.eventId, mutated.eventId);
     assert.equal("issuedNumber" in mutateReconcile, false);
   }
+
+  assert.equal("confirmed" in mutated, true, "mutate SUCCESS may attach confirmed");
+  if (!("confirmed" in mutated) || !mutated.ok) throw new Error("expected mutate confirmed");
+  assert.equal(mutated.confirmed.eventVersion, mutated.eventVersion);
+  assert.equal(mutated.confirmed.headHash, mutated.headHash);
+  assert.equal(mutated.confirmed.events.length, 2);
+  assert.equal(mutated.confirmed.events[1]?.type, "field_amended");
+  assert.deepEqual(mutated.confirmed.original.remarks, { kind: "not_supplied" });
+  assert.equal(mutated.confirmed.effective.remarks.kind, "present");
+  if (mutated.confirmed.effective.remarks.kind === "present") {
+    assert.equal(mutated.confirmed.effective.remarks.value, "composed amend");
+  }
+  assert.equal(
+    mutated.confirmed.original.originalSnapshotHash,
+    afterRegisterRead.confirmed.original.originalSnapshotHash,
+    "original snapshot/hash must not change on amend"
+  );
+
+  const afterAmendRead = await callables.readReceipt({
+    auth: { uid: OWNER },
+    data: { ledgerId: LEDGER, receiptId: "receipt_c01" },
+  });
+  assert.equal(afterAmendRead.ok, true);
+  if (!afterAmendRead.ok) throw new Error("expected read after amend");
+  assert.equal(afterAmendRead.confirmed.eventVersion, 2);
+  assert.equal(afterAmendRead.confirmed.headHash, mutated.headHash);
+  assert.equal(afterAmendRead.confirmed.events.length, 2);
+  assert.deepEqual(afterAmendRead.confirmed.original.remarks, { kind: "not_supplied" });
+  assert.equal(afterAmendRead.confirmed.effective.remarks.kind, "present");
+  if (afterAmendRead.confirmed.effective.remarks.kind === "present") {
+    assert.equal(afterAmendRead.confirmed.effective.remarks.value, "composed amend");
+  }
+
+  const foreignRead = await callables.readReceipt({
+    auth: { uid: ATTACKER },
+    data: { ledgerId: LEDGER, receiptId: "receipt_c01" },
+  });
+  assert.equal(foreignRead.ok, false);
+  if (foreignRead.ok) throw new Error("expected foreign read deny");
+  assert.equal(foreignRead.code, "forbidden");
+
+  const missingRead = await callables.readReceipt({
+    auth: { uid: OWNER },
+    data: { ledgerId: LEDGER, receiptId: "receipt_missing" },
+  });
+  assert.equal(missingRead.ok, false);
+  if (missingRead.ok) throw new Error("expected missing read not_found");
+  assert.equal(missingRead.code, "not_found");
+
+  const unbound = createComposedGrinCallables({
+    adapter: null,
+    env: ENABLED,
+  });
+  const unboundDenied = await unbound.readReceipt({
+    auth: { uid: OWNER },
+    data: { ledgerId: LEDGER, receiptId: "receipt_c01" },
+  });
+  assert.equal(unboundDenied.ok, false);
+  if (unboundDenied.ok) throw new Error("expected unbound adapter deny");
+  assert.equal(unboundDenied.code, "policy_denied");
+
+  const zeroVersion = freezeCommand({
+    commandId: "command_c03",
+    type: "amendFields",
+    ownerUid: OWNER,
+    ledgerId: LEDGER,
+    body: {
+      receiptId: "receipt_c01",
+      expectedVersion: 0,
+      reason: "must not coerce zero",
+      changes: { remarks: { kind: "present", value: "coerced" } },
+      clientObservedAtUtc: "2026-09-28T14:00:00.000Z",
+    },
+  });
+  const coerced = await callables.mutate({
+    auth: { uid: OWNER },
+    data: {
+      envelope: {
+        commandId: zeroVersion.commandId,
+        type: zeroVersion.type,
+        ledgerId: zeroVersion.ledgerId,
+        body: zeroVersion.body,
+      },
+      digest: zeroVersion.digest,
+    },
+  });
+  assert.equal(coerced.ok, false, "expectedVersion 0 must not be coerced to 1");
+  if (coerced.ok) throw new Error("expected version 0 deny");
+  assert.equal(coerced.code, "invalid");
 
   console.log("tools/goods-evidence-emulator/composed.injected.unit.test.ts: ok (INJECTED / not live deploy)");
 }

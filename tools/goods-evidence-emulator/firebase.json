@@ -6,6 +6,16 @@
     "firestore": {
       "port": 8088,
       "host": "127.0.0.1"
+    },
+    "hub": {
+      "port": 4408
+    },
+    "ui": {
+      "enabled": false,
+      "port": 4008
+    },
+    "logging": {
+      "port": 4508
     }
   }
 }

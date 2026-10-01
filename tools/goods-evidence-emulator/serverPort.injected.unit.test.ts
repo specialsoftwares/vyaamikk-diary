@@ -134,6 +134,22 @@ async function main(): Promise<void> {
     assert.equal("issuedNumber" in mutateReconcile, false);
   }
 
+  const readAfterAmend = await port.readReceipt({
+    uid: OWNER,
+    ledgerId: LEDGER,
+    receiptId: "receipt_p01",
+  });
+  assert.equal(readAfterAmend.ok, true);
+  if (!readAfterAmend.ok) throw new Error("expected injected port read");
+  assert.equal(readAfterAmend.confirmed.eventVersion, 2);
+  assert.equal(readAfterAmend.confirmed.headHash, mutated.headHash);
+  assert.equal(readAfterAmend.confirmed.events.length, 2);
+  assert.deepEqual(readAfterAmend.confirmed.original.remarks, { kind: "not_supplied" });
+  assert.equal(readAfterAmend.confirmed.effective.remarks.kind, "present");
+  if (readAfterAmend.confirmed.effective.remarks.kind === "present") {
+    assert.equal(readAfterAmend.confirmed.effective.remarks.value, "via injected port");
+  }
+
   console.log("tools/goods-evidence-emulator/serverPort.injected.unit.test.ts: ok (INJECTED_PORT)");
 }
 

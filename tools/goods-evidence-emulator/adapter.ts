@@ -29,6 +29,7 @@ import {
 } from "../../src/goodsEvidence/quantities";
 import { cloneSnapshot } from "../../src/goodsEvidence/snapshot";
 import { financialYearTokenForIstInstant, formatUtcIso } from "../../src/goodsEvidence/time";
+import type { GrinConfirmedProjection, GrinReceiptReadResult } from "../../src/goodsEvidence/ports";
 import type { GrinEvent, GrinView, ImmutableGrin } from "../../src/goodsEvidence/types";
 import {
   commandEnvelopeError,
@@ -45,6 +46,7 @@ import { commandIdError, documentIdError, lineIdError } from "./ids";
 import {
   envelopeByteError,
   extraEnvelopeKeyError,
+  extraReadKeyError,
   extraReconcileKeyError,
   inputShapeError,
   lineCountError,
@@ -70,6 +72,7 @@ import {
   admissionPath,
   commandPath,
   eventPath,
+  eventsCollectionPath,
   ledgerPath,
   receiptPath,
   serialPath,
@@ -161,6 +164,78 @@ function mutationCommandTypeOf(value: unknown): G1MutationCommandType | null {
     if (type === value) return type;
   }
   return null;
+}
+
+function hydrateStoredEvent(data: Record<string, unknown> | undefined): GrinEvent | null {
+  if (!data) return null;
+  if (data.schemaVersion !== GOODS_EVIDENCE_SCHEMA_VERSION) return null;
+  if (typeof data.eventId !== "string" || data.eventId.length === 0) return null;
+  if (typeof data.receiptId !== "string" || data.receiptId.length === 0) return null;
+  if (typeof data.streamSequence !== "number" || !Number.isInteger(data.streamSequence) || data.streamSequence < 1) {
+    return null;
+  }
+  if (typeof data.type !== "string" || data.type.length === 0) return null;
+  if (typeof data.actorUid !== "string" || data.actorUid.length === 0) return null;
+  if (typeof data.serverAcceptedAtUtc !== "string") return null;
+  if (typeof data.clientObservedAtUtc !== "string") return null;
+  if (typeof data.reason !== "string") return null;
+  if (
+    typeof data.expectedPreviousVersion !== "number" ||
+    !Number.isInteger(data.expectedPreviousVersion) ||
+    data.expectedPreviousVersion < 0
+  ) {
+    return null;
+  }
+  if (!isPlainObject(data.typedChanges)) return null;
+  if (data.previousHash !== null && typeof data.previousHash !== "string") return null;
+  if (typeof data.eventHash !== "string" || data.eventHash.length === 0) return null;
+  if (data.firestoreCommitTime !== null && typeof data.firestoreCommitTime !== "string") return null;
+  return {
+    schemaVersion: GOODS_EVIDENCE_SCHEMA_VERSION,
+    eventId: data.eventId,
+    receiptId: data.receiptId,
+    streamSequence: data.streamSequence,
+    type: data.type as GrinEvent["type"],
+    actorUid: data.actorUid,
+    serverAcceptedAtUtc: data.serverAcceptedAtUtc,
+    clientObservedAtUtc: data.clientObservedAtUtc,
+    reason: data.reason,
+    expectedPreviousVersion: data.expectedPreviousVersion,
+    typedChanges: data.typedChanges,
+    previousHash: data.previousHash,
+    eventHash: data.eventHash,
+    firestoreCommitTime: data.firestoreCommitTime,
+  };
+}
+
+function assembleConfirmed(
+  receipt: PersistedReceipt,
+  events: GrinEvent[],
+  receiptId: string
+): GrinConfirmedProjection | null {
+  if (typeof receipt.view.eventVersion !== "number" || !Number.isInteger(receipt.view.eventVersion)) {
+    return null;
+  }
+  if (receipt.view.eventVersion < 1) return null;
+  if (typeof receipt.view.headHash !== "string" || receipt.view.headHash.length === 0) return null;
+  if (receipt.original.receiptId !== receiptId || receipt.effective.receiptId !== receiptId) return null;
+  const ordered = [...events].sort((a, b) => a.streamSequence - b.streamSequence);
+  if (ordered.length !== receipt.view.eventVersion) return null;
+  for (let i = 0; i < ordered.length; i++) {
+    const event = ordered[i]!;
+    if (event.streamSequence !== i + 1) return null;
+    if (event.receiptId !== receiptId) return null;
+  }
+  const head = ordered[ordered.length - 1];
+  if (!head || head.eventHash !== receipt.view.headHash) return null;
+  return {
+    receiptId,
+    eventVersion: receipt.view.eventVersion,
+    headHash: receipt.view.headHash,
+    original: cloneSnapshot(receipt.original),
+    events: ordered.map((event) => cloneSnapshot(event)),
+    effective: cloneSnapshot(receipt.effective),
+  };
 }
 
 function storedMutationSuccess(data: Record<string, unknown> | undefined): G1MutationSuccess | null {
@@ -367,6 +442,54 @@ export class GoodsEvidenceRegisterAdapter {
     return this.mutate(caller, envelope, "linkVerifiedEvidence");
   }
 
+  /**
+   * Authorized retrieve of confirmed original, events, effective, eventVersion, headHash.
+   * Same identity/ledger/admission gate as mutations. Foreign callers forbidden.
+   * Missing authorized receipt not_found. Does not invent versions.
+   */
+  async readReceipt(caller: TrustedCaller, input: unknown): Promise<GrinReceiptReadResult> {
+    if (!caller.uid) return deny("unauthenticated", GENERIC_DENY);
+    const uid = caller.uid;
+
+    return this.runReadAttempts(async (tx, attempt) => {
+      const scope = await this.readAdmissionScope(tx, uid, input);
+      const gate = this.gate(
+        scope.admissionSnap.data(),
+        scope.userSnap.exists,
+        scope.userSnap.data(),
+        { peeked: scope.ledgerPeeked, exists: scope.ledgerSnap.exists, data: scope.ledgerSnap.data() },
+        uid
+      );
+      if (!gate.ok) return gate;
+      if (gate.policy.newCommands !== "allow") return deny("policy_denied", GENERIC_DENY);
+
+      const prepared = this.prepareRead(input);
+      if (!prepared.ok) return prepared;
+
+      const receiptRef = this.db.doc(receiptPath(uid, prepared.ledgerId, prepared.receiptId));
+      const receiptSnap = await tx.get(receiptRef);
+      const eventSnaps = await tx.list(eventsCollectionPath(uid, prepared.ledgerId, prepared.receiptId));
+      await this.hooks.afterReads?.(attempt);
+
+      if (!receiptSnap.exists) return deny("not_found", "receipt not found");
+      const receipt = hydrateReceipt(receiptSnap.data());
+      if (!receipt) return deny("not_found", "receipt not found");
+      if (receipt.original.ownerUid !== uid || receipt.original.ledgerId !== prepared.ledgerId) {
+        return deny("forbidden", GENERIC_DENY);
+      }
+
+      const events: GrinEvent[] = [];
+      for (const snap of eventSnaps) {
+        const event = hydrateStoredEvent(snap.data());
+        if (!event) return deny("integrity", GENERIC_DENY);
+        events.push(event);
+      }
+      const confirmed = assembleConfirmed(receipt, events, prepared.receiptId);
+      if (!confirmed) return deny("integrity", GENERIC_DENY);
+      return { ok: true, confirmed };
+    });
+  }
+
   private gate(
     admission: Record<string, unknown> | undefined,
     userExists: boolean,
@@ -455,6 +578,22 @@ export class GoodsEvidenceRegisterAdapter {
     const cmdErr = commandIdError(normalized.commandId);
     if (cmdErr) return deny("invalid", cmdErr);
     return { ok: true, ledgerId: normalized.ledgerId as string, commandId: normalized.commandId as string };
+  }
+
+  private prepareRead(
+    input: unknown
+  ): { ok: true; ledgerId: string; receiptId: string } | G1Deny {
+    if (!isPlainObject(input)) return deny("invalid", "read request is required");
+    const shape = inputShapeError(input, "read request");
+    if (shape) return deny("invalid", shape);
+    const extra = extraReadKeyError(input);
+    if (extra) return deny("invalid", extra);
+    const normalized = normalizeJsonCopy(input) as { ledgerId: unknown; receiptId: unknown };
+    const ledgerErr = documentIdError("ledgerId", normalized.ledgerId);
+    if (ledgerErr) return deny("invalid", ledgerErr);
+    const receiptErr = documentIdError("receiptId", normalized.receiptId);
+    if (receiptErr) return deny("invalid", receiptErr);
+    return { ok: true, ledgerId: normalized.ledgerId as string, receiptId: normalized.receiptId as string };
   }
 
   private prepareMutation(
@@ -884,6 +1023,32 @@ export class GoodsEvidenceRegisterAdapter {
         } else {
           logG1("grin_g1_mutation_committed", { replayed: false });
         }
+      }
+      return outcome;
+    }
+    throw last;
+  }
+
+  private async runReadAttempts(
+    fn: (tx: G1Transaction, attempt: number) => Promise<GrinReceiptReadResult>
+  ): Promise<GrinReceiptReadResult> {
+    let last: unknown;
+    for (let attempt = 1; attempt <= MAX_TX_ATTEMPTS; attempt++) {
+      let outcome: GrinReceiptReadResult | undefined;
+      try {
+        await this.db.runTransaction(
+          async (tx) => {
+            outcome = await fn(tx, attempt);
+          },
+          { maxAttempts: 1 }
+        );
+      } catch (err) {
+        last = err;
+        if (attempt < MAX_TX_ATTEMPTS && isRetryable(err)) continue;
+        throw err;
+      }
+      if (!outcome) {
+        throw new Error("g1_transaction_missing_result");
       }
       return outcome;
     }

@@ -3,7 +3,7 @@
  * Used to reproduce reviewer findings and unit-test adapter behavior
  * without the Firestore emulator. Not a production backend.
  */
-import type { G1DocRef, G1DocSnap, G1Firestore, G1Transaction } from "./types";
+import type { G1DocRef, G1DocSnap, G1Firestore, G1QueryDocSnap, G1Transaction } from "./types";
 
 export type InjectedStore = G1Firestore & {
   snapshot: Map<string, string>;
@@ -44,6 +44,25 @@ export function createInjectedStore(): InjectedStore {
         },
         set(ref: G1DocRef, data: Record<string, unknown>) {
           staged.set(ref.path, persist(JSON.parse(JSON.stringify(data)) as Record<string, unknown>));
+        },
+        async list(collectionPath: string): Promise<G1QueryDocSnap[]> {
+          const prefix = `${collectionPath.replace(/\/$/, "")}/`;
+          const seen = new Map<string, G1QueryDocSnap>();
+          const consider = (path: string, raw: string | undefined) => {
+            if (!path.startsWith(prefix)) return;
+            const rest = path.slice(prefix.length);
+            if (!rest || rest.includes("/")) return;
+            const data = restore(raw);
+            seen.set(path, {
+              id: rest,
+              path,
+              exists: data != null,
+              data: () => (data == null ? undefined : { ...data }),
+            });
+          };
+          for (const [path, raw] of snapshot) consider(path, raw);
+          for (const [path, raw] of staged) consider(path, raw);
+          return [...seen.values()].filter((snap) => snap.exists);
         },
       };
       const result = await fn(tx);

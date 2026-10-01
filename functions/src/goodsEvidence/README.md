@@ -10,8 +10,9 @@ Do not hand-duplicate canonical JSON, validation, or command rules.
   is `"true"` because no adapter is bound there.
 - `composed.ts` is the tests/emulator composition: when the env is exactly
   `"true"` **and** `GoodsEvidenceRegisterAdapter` is injected, register /
-  reconcile / mutate run. Owner identity is `request.auth.uid` / `AuthData.uid`.
-  Client uid and digest are not authority. Any other env value is deny.
+  reconcile / mutate / readReceipt run. Owner identity is `request.auth.uid` / `AuthData.uid`.
+  Client uid and digest are not authority. Any other env value, or an unbound
+  adapter, is deny.
 - No React, Expo, `@/config`, localDb, or client hash helpers. Hashing uses Node `crypto`.
 - Do not change `ensureAccountDeletionJob` / `retireIdentity` / `completeAccountDeletion`
   / `scheduledDeletionCleanup`. GRIN records are owner-scoped under `users/{uid}/…`.

@@ -3,6 +3,11 @@ export interface G1DocSnap {
   data(): Record<string, unknown> | undefined;
 }
 
+export interface G1QueryDocSnap extends G1DocSnap {
+  readonly id: string;
+  readonly path: string;
+}
+
 export interface G1DocRef {
   readonly path: string;
 }
@@ -10,6 +15,8 @@ export interface G1DocRef {
 export interface G1Transaction {
   get(ref: G1DocRef): Promise<G1DocSnap>;
   set(ref: G1DocRef, data: Record<string, unknown>): void;
+  /** Direct children of a collection path. Used by authorized receipt reads. */
+  list(collectionPath: string): Promise<G1QueryDocSnap[]>;
 }
 
 export interface G1Firestore {

@@ -10,12 +10,16 @@ import { fileURLToPath } from "node:url";
 
 import {
   GRIN_MUTATE_CALLABLE,
+  GRIN_READ_CALLABLE,
   GRIN_RECONCILE_CALLABLE,
   GRIN_REGISTER_CALLABLE,
+  GRIN_UPLOAD_EVIDENCE_CALLABLE,
   grinFunctionsEnabled,
   handleGrinMutation,
+  handleGrinRead,
   handleGrinReconcile,
   handleGrinRegister,
+  handleGrinUploadEvidence,
 } from "../../functions/src/goodsEvidence/callables";
 import {
   DOMAIN_FILES,
@@ -37,7 +41,7 @@ const composedSrc = readFileSync(join(packaged, "composed.ts"), "utf8");
 
 assert.doesNotMatch(
   functionsIndex,
-  /goodsEvidence|GoodsEvidenceRegisterAdapter|grin-g1|createInjectedGrinServerPort|serverPort|grinRegisterGoodsReceipt|grinReconcileCommand|grinMutateGoodsReceipt|composed/
+  /goodsEvidence|GoodsEvidenceRegisterAdapter|grin-g1|createInjectedGrinServerPort|serverPort|grinRegisterGoodsReceipt|grinReconcileCommand|grinMutateGoodsReceipt|grinReadGoodsReceipt|grinUploadEvidence|composed/
 );
 assert.match(functionsTsconfig, /"outDir": "lib"/);
 assert.doesNotMatch(functionsTsconfig, /rootDir/);
@@ -46,6 +50,8 @@ assert.match(functionsPkg, /"main": "lib\/index.js"/);
 assert.match(transportNames, new RegExp(`"${GRIN_REGISTER_CALLABLE}"`));
 assert.match(transportNames, new RegExp(`"${GRIN_RECONCILE_CALLABLE}"`));
 assert.match(transportNames, new RegExp(`"${GRIN_MUTATE_CALLABLE}"`));
+assert.match(transportNames, new RegExp(`"${GRIN_READ_CALLABLE}"`));
+assert.match(transportNames, new RegExp(`"${GRIN_UPLOAD_EVIDENCE_CALLABLE}"`));
 
 assert.match(composedSrc, /request\.auth\.uid \/ AuthData\.uid/);
 assert.match(composedSrc, /GRIN_GOODS_EVIDENCE_FUNCTIONS/);
@@ -104,12 +110,18 @@ async function main(): Promise<void> {
   assert.equal(rec.code, "policy_denied");
   const mut = await handleGrinMutation("uid_1", {});
   assert.equal(mut.code, "policy_denied");
+  const read = await handleGrinRead("uid_1", { ledgerId: "l", receiptId: "r" });
+  assert.equal(read.code, "policy_denied");
+  const upload = await handleGrinUploadEvidence("uid_1", {});
+  assert.equal(upload.code, "policy_denied");
 
   const previous = process.env.GRIN_GOODS_EVIDENCE_FUNCTIONS;
   process.env.GRIN_GOODS_EVIDENCE_FUNCTIONS = "true";
   try {
     const stillClosed = await handleGrinRegister("uid_1", { commandId: "command01" });
     assert.equal(stillClosed.code, "policy_denied");
+    const readStillClosed = await handleGrinRead("uid_1", { ledgerId: "l", receiptId: "r" });
+    assert.equal(readStillClosed.code, "policy_denied");
   } finally {
     if (previous == null) delete process.env.GRIN_GOODS_EVIDENCE_FUNCTIONS;
     else process.env.GRIN_GOODS_EVIDENCE_FUNCTIONS = previous;

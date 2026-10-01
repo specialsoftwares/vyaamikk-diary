@@ -9,6 +9,7 @@ export const MAX_INPUT_NODES = 4096;
 
 const ENVELOPE_KEYS = new Set(["commandId", "type", "ownerUid", "ledgerId", "body", "digest"]);
 const RECONCILE_KEYS = new Set(["ledgerId", "commandId"]);
+const READ_KEYS = new Set(["ledgerId", "receiptId"]);
 const PROTOTYPE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 const SERVER_FIELDS = new Set([
@@ -44,6 +45,16 @@ export function extraReconcileKeyError(value: unknown): string | null {
   }
   for (const key of Object.keys(value as object)) {
     if (!RECONCILE_KEYS.has(key)) return "extra reconcile fields are not allowed";
+  }
+  return null;
+}
+
+export function extraReadKeyError(value: unknown): string | null {
+  if (value == null || typeof value !== "object" || Array.isArray(value)) {
+    return "read request is required";
+  }
+  for (const key of Object.keys(value as object)) {
+    if (!READ_KEYS.has(key)) return "extra read fields are not allowed";
   }
   return null;
 }

@@ -30,3 +30,7 @@ export function eventPath(
 ): string {
   return `${receiptPath(uid, ledgerId, receiptId)}/events/${eventId}`;
 }
+
+export function eventsCollectionPath(uid: string, ledgerId: string, receiptId: string): string {
+  return `${receiptPath(uid, ledgerId, receiptId)}/events`;
+}
