@@ -24,6 +24,12 @@ export function formatG1Log(event: G1LogEvent, meta?: Record<string, unknown>): 
 }
 
 export function logG1(event: G1LogEvent, meta?: Record<string, unknown>): void {
-  if (process.env.GRIN_G1_LOG !== "1") return;
-  console.log(formatG1Log(event, meta));
+  try {
+    const line = formatG1Log(event, meta);
+    if (process.env.GRIN_G1_LOG === "1") {
+      console.log(line);
+    }
+  } catch {
+    // Logging must not change the register/reconcile result.
+  }
 }

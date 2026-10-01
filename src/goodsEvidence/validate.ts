@@ -130,6 +130,9 @@ function lineError(line: unknown, index: number): string | null {
   if (!isPlainObject(line)) return `line[${index}] is required`;
   const record = line as unknown as ReceiptLine;
   if (typeof record.lineId !== "string" || !record.lineId.trim()) return `line[${index}] lineId is required`;
+  if (record.lineId === "__proto__" || record.lineId === "constructor" || record.lineId === "prototype") {
+    return `line[${index}] lineId is not a valid line identity`;
+  }
   if (typeof record.description !== "string" || !record.description.trim()) {
     return `line[${index}] description is required`;
   }

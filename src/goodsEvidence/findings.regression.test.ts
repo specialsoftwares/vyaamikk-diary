@@ -574,6 +574,25 @@ function testLedger(): InMemoryGoodsLedger {
 
 {
   const store = testLedger();
+  const protoLine = store.register(
+    freezeCommand({
+      commandId: "proto_line",
+      type: "registerGoodsReceipt",
+      ownerUid: "owner_1",
+      ledgerId: "ledger_1",
+      body: sampleRegisterBody({
+        receiptId: "proto_line",
+        lines: [sampleLine({ lineId: "__proto__" })],
+      }),
+    })
+  );
+  assert.equal(protoLine.ok, false);
+  assert.equal(store.getOriginal("proto_line"), undefined);
+  assert.equal(store.getLineLedger("proto_line", "__proto__"), undefined);
+}
+
+{
+  const store = testLedger();
   const wrongType = freezeCommand({
     commandId: "wrong_type",
     type: "amendFields",

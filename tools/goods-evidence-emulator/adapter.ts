@@ -22,10 +22,12 @@ import {
   registerBodyError,
 } from "../../src/goodsEvidence/validate";
 import { freezeDigest, hashEventEnvelope, hashOriginalSnapshot } from "./hash";
-import { commandIdError, documentIdError } from "./ids";
+import { commandIdError, documentIdError, lineIdError } from "./ids";
 import {
   envelopeByteError,
   extraEnvelopeKeyError,
+  extraReconcileKeyError,
+  inputShapeError,
   lineCountError,
   serverFieldError,
   sparseArrayError,
@@ -41,6 +43,8 @@ import {
   serialPath,
   userPath,
 } from "./paths";
+import { isRetryable } from "./retry";
+import { allocateFromCounter } from "./serial";
 import type {
   AdmissionPolicy,
   G1Clock,
@@ -51,6 +55,8 @@ import type {
   G1Transaction,
   TrustedCaller,
 } from "./types";
+
+export { isRetryable };
 
 const GENERIC_DENY = "denied";
 const MAX_TX_ATTEMPTS = 5;
@@ -99,13 +105,6 @@ function storedSuccess(data: Record<string, unknown> | undefined): G1RegisterSuc
     eventVersion: result.eventVersion,
     headHash: result.headHash,
   };
-}
-
-export function isRetryable(err: unknown): boolean {
-  const code = isPlainObject(err) ? err.code : undefined;
-  if (code === 10 || code === "ABORTED" || code === 16) return true;
-  const msg = err instanceof Error ? err.message : String(err);
-  return /ABORTED|contention|too much contention/i.test(msg);
 }
 
 type FrozenRegister = {
@@ -201,8 +200,9 @@ export class GoodsEvidenceRegisterAdapter {
         return deny("receipt_exists", "receipt already issued; history cannot be replaced");
       }
 
-      const serial =
-        typeof serialSnap.data()?.nextSerial === "number" ? (serialSnap.data()!.nextSerial as number) : 1;
+      const allocated = allocateFromCounter(serialSnap.exists, serialSnap.data(), fyToken);
+      if (!allocated.ok) return deny(allocated.code, GENERIC_DENY);
+      const serial = allocated.serial;
       const issued = this.buildIssued(frozen, uid, serverMs, fyToken, serial);
       if (!("result" in issued)) return issued;
 
@@ -230,16 +230,17 @@ export class GoodsEvidenceRegisterAdapter {
         receiptId: issued.original.receiptId,
         result: { ...issued.result, replayed: false },
       });
-      logG1("grin_g1_committed", { attempt, replayed: false });
       return issued.result;
     });
   }
 
-  async reconcile(
-    caller: TrustedCaller,
-    input: { ledgerId: unknown; commandId: unknown }
-  ): Promise<G1RegisterResult> {
+  async reconcile(caller: TrustedCaller, input: unknown): Promise<G1RegisterResult> {
     if (!caller.uid) return deny("unauthenticated", GENERIC_DENY);
+    if (!isPlainObject(input)) return deny("invalid", "reconcile request is required");
+    const shape = inputShapeError(input, "reconcile request");
+    if (shape) return deny("invalid", shape);
+    const extra = extraReconcileKeyError(input);
+    if (extra) return deny("invalid", extra);
     const ledgerErr = documentIdError("ledgerId", input.ledgerId);
     if (ledgerErr) return deny("invalid", ledgerErr);
     const cmdErr = commandIdError(input.commandId);
@@ -285,11 +286,13 @@ export class GoodsEvidenceRegisterAdapter {
   }
 
   private prevalidate(envelope: unknown): Extract<G1RegisterResult, { ok: false }> | null {
+    if (!isPlainObject(envelope)) return deny("invalid", "command envelope is required");
+    const shape = inputShapeError(envelope, "command envelope");
+    if (shape) return deny("invalid", shape);
     const extra = extraEnvelopeKeyError(envelope);
     if (extra) return deny("invalid", extra);
     const bytes = envelopeByteError(envelope);
     if (bytes) return deny("invalid", bytes);
-    if (!isPlainObject(envelope)) return deny("invalid", "command envelope is required");
     const cmdErr = commandIdError(envelope.commandId);
     if (cmdErr) return deny("invalid", cmdErr);
     const ledgerErr = documentIdError("ledgerId", envelope.ledgerId);
@@ -299,6 +302,14 @@ export class GoodsEvidenceRegisterAdapter {
     }
     const receiptErr = documentIdError("receiptId", (envelope.body as { receiptId?: unknown })?.receiptId);
     if (receiptErr) return deny("invalid", receiptErr);
+    if (isPlainObject(envelope.body) && Array.isArray(envelope.body.lines)) {
+      for (let i = 0; i < envelope.body.lines.length; i++) {
+        const line = envelope.body.lines[i];
+        const lineId = isPlainObject(line) ? line.lineId : undefined;
+        const idErr = lineIdError(lineId, i);
+        if (idErr) return deny("invalid", idErr);
+      }
+    }
     const sparse = sparseArrayError(envelope.body, "body");
     if (sparse) return deny("invalid", sparse);
     const server = serverFieldError(envelope.body);
@@ -389,7 +400,7 @@ export class GoodsEvidenceRegisterAdapter {
       eventHash,
       firestoreCommitTime: null,
     };
-    const lineLedgers: Record<string, LineQuantityLedgers> = {};
+    const lineLedgers = Object.create(null) as Record<string, LineQuantityLedgers>;
     for (const line of original.lines) {
       const ledgers = emptyLedgers(line.unit);
       ledgers.physicalReceived = { ...line.physicallyReceived };
@@ -397,6 +408,9 @@ export class GoodsEvidenceRegisterAdapter {
         ledgers.acceptedForStock = emptyLedgers(line.unit).acceptedForStock;
       }
       lineLedgers[line.lineId] = cloneSnapshot(ledgers);
+      if (!Object.prototype.hasOwnProperty.call(lineLedgers, line.lineId)) {
+        return deny("invalid", "line identity could not be projected");
+      }
     }
     const view: GrinView = {
       schemaVersion: GOODS_EVIDENCE_SCHEMA_VERSION,
@@ -453,6 +467,9 @@ export class GoodsEvidenceRegisterAdapter {
       }
       if (!outcome) {
         throw new Error("g1_transaction_missing_result");
+      }
+      if (outcome.ok && outcome.replayed === false) {
+        logG1("grin_g1_committed", { replayed: false });
       }
       return outcome;
     }

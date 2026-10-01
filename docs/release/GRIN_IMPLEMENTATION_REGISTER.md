@@ -19,16 +19,18 @@ This register is not GRIN-complete from G1.
 
 ### G1 — Durable server register/reconcile (authorized now)
 
-**Status:** implemented on `integration/grin-g1-persistence` (emulator). Not live. Not production admission.
+**Status:** implemented on `integration/grin-g1-persistence` (emulator). Not live. Not production admission. Correction pass after `ee16ed9` closes serial fail-closed validation, line-identity projection, bounded unknown input, commit-after-success logging, retry-code classification, and dedicated adapter typecheck.
 
-- Server-authoritative serial + IST FY
+- Server-authoritative serial + IST FY; malformed existing counters return `integrity` (no coercion); exhaustion is `serial_exhausted`
 - Immutable issued snapshot, first event, command digest/result, initial projections
+- Line IDs: ordinary ids including `toString` persist as own keys; `__proto__` / `constructor` / `prototype` rejected
 - Auth / owner / active-account / ledger / admission config
 - Replay, digest_conflict, receipt_exists, reconcile not_found vs generic deny
 - Isolated emulator Rules (not deployed)
+- `npm run typecheck:goods-evidence-g1` is part of `ci:verify`
 
 **Acceptance:** see `tools/goods-evidence-emulator/ARCHITECTURE.md` and G1 tests.
-**Not proven:** production load, native offline, Storage, legal evidentiary sufficiency.
+**Not proven:** production load, native offline, Storage, legal evidentiary sufficiency. Test clocks are not live commit timestamps. `firestoreCommitTime` remains null.
 
 ### Live billing (read-only, 2026-10-01)
 

@@ -1,17 +1,19 @@
 import assert from "node:assert/strict";
 
 import { sampleRegisterBody } from "../../src/goodsEvidence/testFixtures";
+import { commandIdError, documentIdError, lineIdError } from "./ids";
 import {
   MAX_ENVELOPE_UTF8_BYTES,
+  MAX_INPUT_DEPTH,
   envelopeByteError,
   extraEnvelopeKeyError,
+  inputShapeError,
   lineCountError,
   serverFieldError,
   sparseArrayError,
   textLimitError,
   utf8ByteLength,
 } from "./limits";
-import { commandIdError, documentIdError } from "./ids";
 import { formatG1Log, sanitizeG1Meta } from "./log";
 
 {
@@ -60,12 +62,24 @@ import { formatG1Log, sanitizeG1Meta } from "./log";
   assert.equal(documentIdError("receiptId", ".."), "receiptId is not a valid document id");
   assert.equal(commandIdError("short"), "commandId is not a valid document id");
   assert.equal(commandIdError("command1"), null);
+  assert.equal(lineIdError("__proto__", 0), "line[0] lineId is not a valid line identity");
+  assert.equal(lineIdError("constructor", 0), "line[0] lineId is not a valid line identity");
+  assert.equal(lineIdError("toString"), null);
+  assert.equal(lineIdError("line_1"), null);
 }
 
 {
   const dirty = sanitizeG1Meta({ code: "forbidden", message: "secret", attempt: 2, body: { a: 1 } });
   assert.deepEqual(dirty, { code: "forbidden", attempt: 2 });
   assert.doesNotMatch(formatG1Log("grin_g1_denied", { code: "forbidden", message: "nope" }), /nope/);
+}
+
+{
+  let deep: unknown = { leaf: true };
+  for (let i = 0; i < MAX_INPUT_DEPTH + 2; i++) deep = { nested: deep };
+  assert.match(inputShapeError(deep, "command envelope") ?? "", /nesting limit/);
+  assert.equal(inputShapeError({ ok: true, nested: { a: 1 } }, "command envelope"), null);
+  assert.match(inputShapeError({ n: 1n }, "command envelope") ?? "", /non-JSON/);
 }
 
 console.log("tools/goods-evidence-emulator/limits.test.ts: ok");

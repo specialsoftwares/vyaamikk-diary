@@ -42,7 +42,9 @@ export type G1DenyCode =
   | "not_found"
   | "invalid"
   | "digest_conflict"
-  | "receipt_exists";
+  | "receipt_exists"
+  | "integrity"
+  | "serial_exhausted";
 
 export type G1RegisterSuccess = {
   ok: true;
