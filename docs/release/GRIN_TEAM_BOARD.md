@@ -10,7 +10,7 @@ Checkpoint inspected: `2593c2be6964955ecb1a433dc93c4096168ce9d2`. Combined advan
 | Task | Owner | Branch | Worktree | Dependency | Status | Evidence | Blocker | Next |
 |---|---|---|---|---|---|---|---|---|
 | Contract + W2-05 orchestrator | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | G1 `c9623dd` | running | `applyPendingLocalMigrations` extracted from `init.ts` | Wave 2 not accepted | Integrate W2-01…W2-05; T5 independent review |
-| W2-06 G1 mobile-safe composition | team1 | `team/grin-t1-backend` | `grin-t1-backend` | Wave 2 port `091772e` | running | Functions still unexported | live export HOLD | Authenticated transport + emulator composition |
+| W2-06 G1 mobile-safe composition | team1 | `team/grin-t1-backend` | `grin-t1-backend` | Wave 2 port `091772e` | review | `cbcb1b9` composed callables + JS transport; Functions still unexported | live export HOLD; app still FAKE uninjected port | T5 PHASE 2 after T2–T4 land |
 | W2-03 identity + W2-04 read policy | team2 | `team/grin-t2-evidence` | `grin-t2-evidence` | `4b10356` | running | ER-2 commitState kept | live IAM | Category/receipt identity; post-verify reads |
 | W2-02 lease/attempt + W2-03 persist + W2-05 tests | team3 | `team/grin-t3-offline` | `grin-t3-offline` | `22a848a` | running | ER-1 skipStaleCompletion | native death not claimed | Unique attempt fence; call production orchestrator |
 | W2-01 stale session + remaining fixture screens | team4 | `team/grin-t4-product` | `grin-t4-product` | `786f73a` | running | list/create/detail outbox | pricing/quota unresolved | No self-revive; switch amend/QC/EWB/return/pack |

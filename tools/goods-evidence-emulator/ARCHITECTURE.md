@@ -7,6 +7,9 @@ Domain checkpoint `55f2df1405c296336eea058238c8ae24e7a8b370`. Core candidate `6e
 
 - Adapter: `tools/goods-evidence-emulator/**` (trusted emulator backend).
 - Generated Functions domain: `functions/src/goodsEvidence/**` via `packageFunctionsGoodsEvidence.ts`. Undeployed. Fail-closed handlers in `callables.ts` are not exported from `functions/src/index.ts`.
+- `composed.ts` is tests/emulator composition (INJECTED / EMULATOR / not live deploy). It injects `GoodsEvidenceRegisterAdapter`; it does not import that adapter (rootDir would lift `lib/index.js`).
+- Mobile transport is `src/services/grin/transport/**` (Firebase JS `httpsCallable`). It must not import this emulator folder.
+- `tools/goods-evidence-emulator/serverPort.ts` remains TEST COMPOSITION. Do not wire it into the app.
 - Production `functions/src/index.ts`, `functions/tsconfig.json`, and `functions/package.json` are unchanged.
 - Direct `functions/src` → `src/goodsEvidence` imports are forbidden (tsc `rootDir` lifts; `lib/index.js` would move).
 - Adapter imports alias-free domain files via relative paths (`canonical`, `constants`, `time`, `grinNumber`, `validate`, `quantities`, `types`, `snapshot`, `custody`, `ewb`, `command`, `ports`) plus Node `createHash("sha256")` over `canonicalJson`. Not `@/utils/sha256Hex`.

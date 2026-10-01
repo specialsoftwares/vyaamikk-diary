@@ -1,6 +1,7 @@
 /**
  * INJECTED_PORT-adjacent packaging check (source isolation + fail-closed handlers).
  * Generated files live under functions/src/goodsEvidence. They are undeployed.
+ * Label: INJECTED / not live deploy.
  */
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
@@ -8,25 +9,49 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  GRIN_MUTATE_CALLABLE,
+  GRIN_RECONCILE_CALLABLE,
+  GRIN_REGISTER_CALLABLE,
   grinFunctionsEnabled,
   handleGrinMutation,
   handleGrinReconcile,
   handleGrinRegister,
 } from "../../functions/src/goodsEvidence/callables";
+import {
+  DOMAIN_FILES,
+  HASH_NODE,
+  expectedGeneratedSource,
+} from "./packageFunctionsGoodsEvidence";
 
 const dir = dirname(fileURLToPath(import.meta.url));
 const packaged = join(dir, "../../functions/src/goodsEvidence");
+const sourceDir = join(dir, "../../src/goodsEvidence");
 const functionsIndex = readFileSync(join(dir, "../../functions/src/index.ts"), "utf8");
 const functionsTsconfig = readFileSync(join(dir, "../../functions/tsconfig.json"), "utf8");
 const functionsPkg = readFileSync(join(dir, "../../functions/package.json"), "utf8");
+const transportNames = readFileSync(
+  join(dir, "../../src/services/grin/transport/callableNames.ts"),
+  "utf8"
+);
+const composedSrc = readFileSync(join(packaged, "composed.ts"), "utf8");
 
 assert.doesNotMatch(
   functionsIndex,
-  /goodsEvidence|GoodsEvidenceRegisterAdapter|grin-g1|createInjectedGrinServerPort|serverPort/
+  /goodsEvidence|GoodsEvidenceRegisterAdapter|grin-g1|createInjectedGrinServerPort|serverPort|grinRegisterGoodsReceipt|grinReconcileCommand|grinMutateGoodsReceipt|composed/
 );
 assert.match(functionsTsconfig, /"outDir": "lib"/);
 assert.doesNotMatch(functionsTsconfig, /rootDir/);
 assert.match(functionsPkg, /"main": "lib\/index.js"/);
+
+assert.match(transportNames, new RegExp(`"${GRIN_REGISTER_CALLABLE}"`));
+assert.match(transportNames, new RegExp(`"${GRIN_RECONCILE_CALLABLE}"`));
+assert.match(transportNames, new RegExp(`"${GRIN_MUTATE_CALLABLE}"`));
+
+assert.match(composedSrc, /request\.auth\.uid \/ AuthData\.uid/);
+assert.match(composedSrc, /GRIN_GOODS_EVIDENCE_FUNCTIONS/);
+assert.doesNotMatch(composedSrc, /from ["'][^"']*tools\/goods-evidence-emulator/);
+assert.doesNotMatch(composedSrc, /from ["']firebase-admin["']/);
+assert.doesNotMatch(composedSrc, /from ["']\.\.\/\.\.\/src\//);
 
 const forbidden = [
   /from ["']react["']/,
@@ -38,6 +63,10 @@ const forbidden = [
   /from ["']@\/utils\/sha256Hex/,
   /EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED/,
   /isGoodsEvidenceEnabled/,
+  /from ["']firebase-admin["']/,
+  /from ["']better-sqlite3["']/,
+  /from ["'][^"']*tools\/goods-evidence-emulator/,
+  /from ["'][^"']*tools\/goods-evidence-storage/,
 ];
 
 for (const name of readdirSync(packaged)) {
@@ -48,8 +77,21 @@ for (const name of readdirSync(packaged)) {
   }
 }
 
+for (const name of DOMAIN_FILES) {
+  const raw = readFileSync(join(sourceDir, name), "utf8");
+  const expected = expectedGeneratedSource(name, raw);
+  const actual = readFileSync(join(packaged, name), "utf8");
+  assert.equal(actual, expected, `${name} drifted from src/goodsEvidence`);
+}
+assert.equal(readFileSync(join(packaged, "hashNode.ts"), "utf8"), HASH_NODE);
+assert.equal(
+  JSON.parse(readFileSync(join(packaged, "generated.manifest.json"), "utf8")).source,
+  "src/goodsEvidence"
+);
+
 assert.equal(grinFunctionsEnabled({}), false);
 assert.equal(grinFunctionsEnabled({ GRIN_GOODS_EVIDENCE_FUNCTIONS: "1" }), false);
+assert.equal(grinFunctionsEnabled({ GRIN_GOODS_EVIDENCE_FUNCTIONS: "TRUE" }), false);
 assert.equal(grinFunctionsEnabled({ GRIN_GOODS_EVIDENCE_FUNCTIONS: "true" }), true);
 
 async function main(): Promise<void> {
@@ -73,7 +115,7 @@ async function main(): Promise<void> {
     else process.env.GRIN_GOODS_EVIDENCE_FUNCTIONS = previous;
   }
 
-  console.log("tools/goods-evidence-emulator/packaging.unit.test.ts: ok");
+  console.log("tools/goods-evidence-emulator/packaging.unit.test.ts: ok (INJECTED / not live deploy)");
 }
 
 main().catch((err) => {

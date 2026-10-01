@@ -36,3 +36,7 @@ Inspected combined `2593c2be6964955ecb1a433dc93c4096168ce9d2`. Combined advanced
 
 `bff108c3d20a6806fad70e99b7c0bfe01d3e038c` on `team/grin-t5-qa`. Independently reproduced W2-01…W2-05 against `6b26903`. Mapping is not closure. Wave 2 not accepted. Native/TalkBack/Play/live GST/2B not run. Do not mark G6/device/billing/public-release Done.
 
+## Team 1 W2-06 (unsent, 2026-10-02)
+
+`cbcb1b9acbda254258676e5a7d7056296470d77a` on `team/grin-t1-backend`: authenticated undeployed G1 composition + mobile JS httpsCallable transport. `functions/src/index.ts` still has no GRIN export. App still uses the labelled uninjected FAKE port. Do not mark backend deploy or G6 Done.
+

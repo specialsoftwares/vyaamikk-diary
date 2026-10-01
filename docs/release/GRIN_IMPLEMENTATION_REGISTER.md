@@ -15,7 +15,7 @@ The core-only Internal build packet is **deferred**. VersionCode 23 is source pr
 
 This register is not GRIN-complete from G1.
 
-Programme (2026-10-01): isolated G1–G5 source + G6 automated tests/review/device **preparation**. Combined branch `integration/grin-g1-g5-source`. Contract revision `2026-10-01.wave1b`. Team 5 implementation review `070a388` then findings re-review `6f920cd`: M1–M3 and L4 **closed**; finding fixes **approved**. G6 incomplete. Wave 2 T1–T5 source was on combined `2593c2b` and is **not accepted**. Wave 2 corrections W2-01…W2-05 are in flight. Coordinator extracted `src/localDb/applyPendingMigrations.ts` (production v1–v10 orchestrator). T5 `c2ef669` CS-02 evidence-port follow-up is integrated as a test, not independent approval of W2-03. Team 5 independently reproduced W2-01…W2-05 at `6b26903` (`bff108c`); mapping is not closure. PR #30 remains the G1-only draft. Combined GitHub draft PR was not opened (`gh` unauthenticated).
+Programme (2026-10-01): isolated G1–G5 source + G6 automated tests/review/device **preparation**. Combined branch `integration/grin-g1-g5-source`. Contract revision `2026-10-01.wave1b`. Team 5 implementation review `070a388` then findings re-review `6f920cd`: M1–M3 and L4 **closed**; finding fixes **approved**. G6 incomplete. Wave 2 T1–T5 source was on combined `2593c2b` and is **not accepted**. Wave 2 corrections W2-01…W2-05 are in flight. Team 1 W2-06 `cbcb1b9` (authenticated composition + JS transport) is merged undeployed; Functions remain unexported. Coordinator extracted `src/localDb/applyPendingMigrations.ts` (production v1–v10 orchestrator). T5 `c2ef669` CS-02 evidence-port follow-up is integrated as a test, not independent approval of W2-03. Team 5 independently reproduced W2-01…W2-05 at `6b26903` (`bff108c`); mapping is not closure. PR #30 remains the G1-only draft. Combined GitHub draft PR was not opened (`gh` unauthenticated).
 
 GRIN remains default-off. No main merge, deploy, EAS, Play, or billing activation in this programme.
 
@@ -24,6 +24,8 @@ GRIN remains default-off. No main merge, deploy, EAS, Play, or billing activatio
 ### G1 — Durable server register/reconcile (authorized now)
 
 **Status:** implemented on `integration/grin-g1-persistence` (emulator). Not live. Not production admission. Correction pass after `ee16ed9` closes serial fail-closed validation, line-identity projection, bounded unknown input, commit-after-success logging, retry-code classification, and dedicated adapter typecheck.
+
+**W2-06 (undeployed, on combined after `cbcb1b9`):** `functions/src/goodsEvidence/composed.ts` runs register/reconcile/mutate from authenticated `request.auth.uid` when tests inject the adapter and `GRIN_GOODS_EVIDENCE_FUNCTIONS` is exactly `"true"`. `callables.ts` stays fail-closed. Mobile `src/services/grin/transport/` is a Firebase JS `httpsCallable` port (no firebase-admin). App binding still uses labelled FAKE `createUninjectedGrinServerPort()`. `functions/src/index.ts` still has no GRIN export.
 
 - Server-authoritative serial + IST FY; malformed existing counters return `integrity` (no coercion); exhaustion is `serial_exhausted`
 - Immutable issued snapshot, first event, command digest/result, initial projections
