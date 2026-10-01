@@ -160,6 +160,7 @@ export function BootScreenView({ ports }: { ports: BootScreenViewPorts }) {
       return;
     }
     if (action.type === "hide_continuation") {
+      // Owner change retires continuation AND failure surfaces; restore resolving/boot.
       setSheetVisible(false);
       setContinuation(null);
       setTicket(null);

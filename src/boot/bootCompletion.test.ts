@@ -18,6 +18,7 @@ import {
   createBootGateCompleters,
   sequenceHoldDurationMs,
   shouldShowLocalDbFailure,
+  type BootCompletionAction,
   type ContinuationTicket,
 } from "./bootCompletion";
 
@@ -135,6 +136,120 @@ async function main() {
   assert.equal(action.type, "resolver_failed");
   assert.equal(machine.isRouteFailed(), true);
   assert.equal(machine.tryComplete().type, "none", "resolver rejection must not navigate");
+}
+
+{
+  // EXTRACTED applyAction/effect sequence: failure surface is presentation state.
+  let animationVisible = true;
+  let routeFailed = false;
+  let destinationReady = false;
+  const applyAction = (action: BootCompletionAction) => {
+    if (action.type === "hide_continuation") {
+      destinationReady = false;
+      routeFailed = false;
+      animationVisible = true;
+      return;
+    }
+    if (action.type === "resolver_failed") {
+      routeFailed = true;
+      destinationReady = false;
+      animationVisible = false;
+    }
+  };
+  const machine = createBootCompletionMachine();
+  const ownerA = { kind: "signed_in" as const, uid: "A", generation: 1 };
+  const ownerB = { kind: "signed_in" as const, uid: "B", generation: 2 };
+  machine.observeOwner(ownerA);
+  applyAction(
+    await machine.resolveForOwner(ownerA, input("A", true), async () => {
+      throw new Error("SYNTHETIC_RESOLVER_FAILURE");
+    })
+  );
+  assert.equal(animationVisible, false);
+  assert.equal(routeFailed, true);
+  const retired = machine.observeOwner(ownerB);
+  applyAction(retired);
+  routeFailed = machine.isRouteFailed();
+  destinationReady = machine.hasPendingDestination();
+  assert.equal(retired.type, "hide_continuation", "owner change retires failure presentation");
+  assert.equal(machine.isRouteFailed(), false, "retired failure must not remain latched");
+  assert.equal(animationVisible && !routeFailed, true, "boot surface restored for B");
+  await machine.resolveForOwner(ownerB, input("B", true), async () => dashboard());
+  destinationReady = machine.hasPendingDestination();
+  assert.equal(destinationReady, true);
+  const done = machine.tryComplete();
+  assert.equal(done.type, "navigate");
+  if (done.type === "navigate") assert.equal(done.href, "/(app)/(tabs)/you");
+}
+
+{
+  const machine = createBootCompletionMachine();
+  const ownerA = { kind: "signed_in" as const, uid: "A", generation: 1 };
+  machine.observeOwner(ownerA);
+  await machine.resolveForOwner(ownerA, input("A", true), async () => {
+    throw new Error("SYNTHETIC_RESOLVER_FAILURE");
+  });
+  const signedOut = machine.observeOwner({ kind: "signed_out" });
+  assert.equal(signedOut.type, "hide_continuation");
+  assert.equal(machine.isRouteFailed(), false);
+  await machine.resolveForOwner({ kind: "signed_out" }, input(null, false), async () =>
+    route(getAuthEntryHref())
+  );
+  const auth = machine.tryComplete();
+  assert.equal(auth.type, "navigate");
+  if (auth.type === "navigate") assert.equal(auth.href, getAuthEntryHref());
+}
+
+{
+  const machine = createBootCompletionMachine();
+  const gen1 = { kind: "signed_in" as const, uid: "A", generation: 1 };
+  const gen3 = { kind: "signed_in" as const, uid: "A", generation: 3 };
+  machine.observeOwner(gen1);
+  await machine.resolveForOwner(gen1, input("A", true), async () => {
+    throw new Error("SYNTHETIC_RESOLVER_FAILURE");
+  });
+  machine.observeOwner({ kind: "signed_out" });
+  const next = machine.observeOwner(gen3);
+  assert.equal(next.type, "hide_continuation");
+  assert.equal(machine.isRouteFailed(), false);
+  await machine.resolveForOwner(gen3, input("A", true), async () => dashboard());
+  const done = machine.tryComplete();
+  assert.equal(done.type, "navigate");
+  if (done.type === "navigate") assert.equal(done.href, "/(app)/(tabs)/you");
+}
+
+{
+  const machine = createBootCompletionMachine();
+  const ownerA = { kind: "signed_in" as const, uid: "A", generation: 1 };
+  const ownerB = { kind: "signed_in" as const, uid: "B", generation: 2 };
+  const late = deferred<BootDestination>();
+  machine.observeOwner(ownerA);
+  const pendingA = machine.resolveForOwner(ownerA, input("A", true), () => late.promise);
+  machine.observeOwner(ownerB);
+  await machine.resolveForOwner(ownerB, input("B", true), async () => dashboard());
+  late.reject(new Error("SYNTHETIC_LATE_REJECTION"));
+  assert.equal((await pendingA).type, "none");
+  assert.equal(machine.isRouteFailed(), false, "A's late rejection must not fail B");
+  const done = machine.tryComplete();
+  assert.equal(done.type, "navigate");
+  if (done.type === "navigate") assert.equal(done.href, "/(app)/(tabs)/you");
+}
+
+{
+  const machine = createBootCompletionMachine();
+  const ownerA = { kind: "signed_in" as const, uid: "A", generation: 1 };
+  const ownerB = { kind: "signed_in" as const, uid: "B", generation: 2 };
+  const late = deferred<BootDestination>();
+  machine.observeOwner(ownerA);
+  const pendingA = machine.resolveForOwner(ownerA, input("A", true), () => late.promise);
+  machine.observeOwner(ownerB);
+  await machine.resolveForOwner(ownerB, input("B", true), async () => dashboard());
+  late.resolve(onboarding());
+  assert.equal((await pendingA).type, "none");
+  assert.equal(machine.hasPendingDestination(), true);
+  const done = machine.tryComplete();
+  assert.equal(done.type, "navigate");
+  if (done.type === "navigate") assert.equal(done.href, "/(app)/(tabs)/you");
 }
 
 {

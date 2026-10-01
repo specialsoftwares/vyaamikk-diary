@@ -266,11 +266,10 @@ export function createBootCompletionMachine(options?: {
         currentOwner = next;
         return { type: "none" };
       }
-      const hadContinuation = continuation != null;
       retireLiveWork();
       currentOwner = next;
-      if (hadContinuation) return { type: "hide_continuation" };
-      return { type: "none" };
+      // Retire all previous presentation, including a failure surface, not only a sheet.
+      return { type: "hide_continuation" };
     },
 
     /**

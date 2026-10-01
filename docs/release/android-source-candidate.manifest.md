@@ -14,6 +14,7 @@ Exact source-to-installed-vc22 correspondence: **UNVERIFIED**.
 | Candidate branch | `release/android-source-candidate` |
 | Starting reviewed head (assembly) | `0a89fff5e9a1f485209746de6966edcd643a5a85` |
 | Previous correction head | `848eb9f58e9817fa56ce40b6998d3851d82cd004` |
+| Boot/locale closeout head | `a4dcfa40cbfdb4915f716813a0ae2b463613f082` |
 
 Imported deltas were taken from the historical **uncommitted** tree against that workspace’s own committed blobs. Those committed blobs matched `90c6948` for every included tracked file except `package.json` (security branch already added `test:safe-diagnostics`).
 
@@ -94,6 +95,19 @@ Continuation tickets bind Continue/Later/View Drafts to originating UID+generati
 | `plugins/withAndroidLocaleConfigs.test.ts` | Semicolon/neighbor/quoted-brace/unsupported fixtures | `30b54083acb1843e11bfad5a4ad71bb3caaaca677964f3dea5399bdfc5393c49` |
 | `package.json` | Adds `test:boot-screen-integration`; lockfile unchanged | `31bd8d628ae9ea38d9e7b0574ac354a439c741e42645ab6be2ef5aa16b31674e` |
 
+Locale plugin bytes at `a4dcfa4` are **preserved**. Review-account verifier bytes at `848eb9f` remain **preserved and closed**.
+
+## Resolver-failure owner-change (after `a4dcfa4`)
+
+Owner/session transition retires failure presentation as well as a displayed continuation, and restores the current owner's resolving/boot surface. Destinations are still taken from the current resolver; presentation timeout still does not invent a route.
+
+| Path | Correction | SHA-256 |
+|---|---|---|
+| `src/boot/bootCompletion.ts` | `observeOwner` returns `hide_continuation` on any owner change | `4168912f2677fe32146ef65fc8a893b63dabad90eb942dc604ab0a57fc63d627` |
+| `src/boot/BootScreenView.tsx` | Existing `hide_continuation` restores boot surface after failure retirement | `97e1ff7f80a96e959fa2496609b2c960aeb85b7fbf6ee122eccdadf177c09eed` |
+| `src/boot/bootCompletion.test.ts` | EXTRACTED_RUNTIME failure→owner-change applyAction sequence | `0cb352a9819786a327d7dd44c35a8f8d94835e6d82a19e4e50c451e2befbc3b4` |
+| `src/boot/bootScreen.integration.test.ts` | Mounted failure→B / signed-out / gen3 / late settlement cases | `12bce60b9be0d180e8018c715aadd4a65a05b4ea1d3f7b15144be50e67f1dc94` |
+
 ## Excluded
 
 - Entire GRIN / goods-evidence tree (`src/goodsEvidence`, `test:goods-evidence`, `analysis/grin-slice2-closeout/**`)
@@ -120,7 +134,7 @@ Continuation tickets bind Continue/Later/View Drafts to originating UID+generati
 - `test:boot-completion` is EXTRACTED_RUNTIME. It does **not** cover the mounted screen-integration cases.
 - `test:boot-screen-integration` is MOUNTED_REACT with inert native/router/animation surfaces. It is not native rendering, TalkBack, Reanimated, or Play-installed proof.
 - `test:play-review-setup` is INJECTED_ADMIN_OFFLINE and was not modified in this closeout.
-- Canonical: `npm run ci:verify` on this closeout head (not run `36837638066`, which belongs to `848eb9f`)
+- Canonical: `npm run ci:verify` on this resolver-failure owner-change head (not run `36843046525`, which belongs to `a4dcfa4`)
 - Injected diagnostics tests do not prove native Crashlytics consent
 - Boot tests do not prove mounted device animation
 - Locale plugin tests do not prove Android resource shrinking on a device

@@ -21,6 +21,7 @@ import type { BootAnimationGateProps } from "@/boot/BootAnimationGate";
 import type { BootDraftContinuationSheetProps } from "@/boot/BootDraftContinuationSheet";
 import { BootScreenView } from "@/boot/BootScreenView";
 import type { BootDestination } from "@/boot/resolveBootRoute";
+import { getAuthEntryHref } from "@/config/authWrapper";
 import type { UserProfile } from "@/domain/types";
 import { syncSessionOwnership } from "@/sync/syncSessionOwnership";
 
@@ -93,6 +94,7 @@ async function main(): Promise<void> {
     sheet: BootDraftContinuationSheetProps | null;
     retry: { onPress: () => void; label: string } | null;
   } = { gate: null, sheet: null, retry: null };
+  let retryMounted = false;
   let fontsLoaded = true;
   let resolveImpl: () => Promise<BootDestination> = async () => dashboard();
   let snoozeImpl: (userId: string) => Promise<void> = async (userId) => {
@@ -102,7 +104,7 @@ async function main(): Promise<void> {
   const model = {
     authStatus: "signed_in" as "loading" | "signed_out" | "signed_in",
     justCreated: false,
-    user: user("A"),
+    user: user("A") as UserProfile | null,
     dbStatus: "ready",
   };
 
@@ -115,6 +117,27 @@ async function main(): Promise<void> {
       }
     }, [props]);
     return null;
+  }
+
+  function InertRetry(props: { onPress: () => void; label: string }) {
+    latest.retry = props;
+    retryMounted = true;
+    useEffect(() => {
+      latest.retry = props;
+      retryMounted = true;
+      return () => {
+        retryMounted = false;
+        if (latest.retry === props) latest.retry = null;
+      };
+    }, [props]);
+    return React.createElement("button", {
+      "data-retry": props.label,
+      onClick: props.onPress,
+    });
+  }
+
+  function retryIsCurrent(): boolean {
+    return retryMounted && latest.retry != null;
   }
 
   function Harness() {
@@ -142,13 +165,7 @@ async function main(): Promise<void> {
         renderDbFailure: () => React.createElement("div", { "data-db": "failed" }),
         renderBackdrop: () => null,
         renderGate: (props) => React.createElement(InertGate, props),
-        renderRetry: (props) => {
-          latest.retry = props;
-          return React.createElement("button", {
-            "data-retry": props.label,
-            onClick: props.onPress,
-          });
-        },
+        renderRetry: (props) => React.createElement(InertRetry, props),
         renderSheet: (props) => {
           latest.sheet = props;
           return null;
@@ -170,7 +187,18 @@ async function main(): Promise<void> {
     latest.gate = null;
     latest.sheet = null;
     latest.retry = null;
+    retryMounted = false;
     await render();
+  }
+
+  async function exitVisibleGate(label: string) {
+    assert.ok(latest.gate, `${label}: gate props exist`);
+    assert.equal(latest.gate.visible, true, `${label}: completion requires a visible gate`);
+    assert.equal(latest.gate.bootError, false, `${label}: error overlay must not cover completion`);
+    const exit = latest.gate.onExitComplete;
+    await act(async () => {
+      exit();
+    });
   }
 
   async function holdAndExit() {
@@ -312,7 +340,7 @@ async function main(): Promise<void> {
     await Promise.resolve();
   });
   await flush();
-  assert.ok(latest.retry, "6: resolver rejection presents Retry");
+  assert.equal(retryIsCurrent(), true, "6: resolver rejection presents Retry");
   assert.equal(latest.retry!.label, "common.retry");
   assert.equal(latest.gate?.visible, false, "Retry is not covered by the animation overlay");
   resolveImpl = async () => dashboard();
@@ -363,7 +391,7 @@ async function main(): Promise<void> {
     await Promise.resolve();
   });
   await flush();
-  assert.ok(latest.retry, "8: resolver failure remains reachable with failed fonts");
+  assert.equal(retryIsCurrent(), true, "8: resolver failure remains reachable with failed fonts");
   assert.equal(latest.retry!.label, "common.retry");
   assert.equal(latest.gate?.visible, false);
 
@@ -382,6 +410,220 @@ async function main(): Promise<void> {
     latest.gate?.onExitComplete();
   });
   assert.equal(navigated.length, 1);
+
+  navigated.length = 0;
+  fontsLoaded = true;
+  model.authStatus = "signed_in";
+  model.dbStatus = "ready";
+  model.user = user("A");
+  syncSessionOwnership.resetForTests();
+  syncSessionOwnership.beginSession("A");
+  const failA = deferred<BootDestination>();
+  resolveImpl = () => failA.promise;
+  await remount();
+  await act(async () => {
+    clock.advance(0);
+  });
+  await act(async () => {
+    failA.reject(new Error("SYNTHETIC_RESOLVER_FAILURE"));
+    await Promise.resolve();
+  });
+  await flush();
+  assert.equal(retryIsCurrent(), true, "10: A's resolver failure presents Retry");
+  assert.equal(latest.gate?.visible, false);
+  const staleRetryA = latest.retry;
+  const bReady = deferred<BootDestination>();
+  resolveImpl = () => bReady.promise;
+  model.user = user("B");
+  syncSessionOwnership.endSession();
+  syncSessionOwnership.beginSession("B");
+  await render();
+  await flush();
+  assert.equal(retryIsCurrent(), false, "10: stale A Retry is not currently rendered");
+  assert.notEqual(latest.retry, staleRetryA);
+  assert.notEqual(latest.sheet?.visible, true, "10: no stale sheet");
+  assert.equal(latest.gate?.visible, true, "10: boot surface restored while B is resolving");
+  assert.equal(navigated.length, 0);
+  bReady.resolve(dashboard());
+  await flush();
+  assert.equal(retryIsCurrent(), false);
+  assert.equal(latest.gate?.visible, true, "10: B's ready route still has a visible gate");
+  await exitVisibleGate("10: B completes via current presentation");
+  assert.equal(navigated.length, 1, "10: exactly one B navigation");
+  assert.equal(navigated[0], "/(app)/(tabs)/you");
+
+  navigated.length = 0;
+  syncSessionOwnership.resetForTests();
+  syncSessionOwnership.beginSession("A");
+  model.authStatus = "signed_in";
+  model.user = user("A");
+  const failThenOut = deferred<BootDestination>();
+  resolveImpl = () => failThenOut.promise;
+  await remount();
+  await act(async () => {
+    clock.advance(0);
+  });
+  await act(async () => {
+    failThenOut.reject(new Error("SYNTHETIC_RESOLVER_FAILURE"));
+    await Promise.resolve();
+  });
+  await flush();
+  assert.equal(retryIsCurrent(), true);
+  model.authStatus = "signed_out";
+  model.user = null;
+  syncSessionOwnership.endSession();
+  resolveImpl = async () => ({ kind: "route", href: getAuthEntryHref() });
+  await render();
+  await flush();
+  assert.equal(retryIsCurrent(), false, "11: signed-out does not keep A's Retry");
+  assert.equal(latest.gate?.visible, true, "11: signed-out boot surface restored");
+  await exitVisibleGate("11: signed-out completes via visible gate");
+  assert.equal(navigated.length, 1);
+  assert.equal(navigated[0], getAuthEntryHref());
+
+  navigated.length = 0;
+  syncSessionOwnership.resetForTests();
+  syncSessionOwnership.beginSession("A");
+  model.authStatus = "signed_in";
+  model.user = user("A");
+  const failThenGen = deferred<BootDestination>();
+  resolveImpl = () => failThenGen.promise;
+  await remount();
+  await act(async () => {
+    clock.advance(0);
+  });
+  await act(async () => {
+    failThenGen.reject(new Error("SYNTHETIC_RESOLVER_FAILURE"));
+    await Promise.resolve();
+  });
+  await flush();
+  const signedOutHold = deferred<BootDestination>();
+  resolveImpl = () => signedOutHold.promise;
+  model.authStatus = "signed_out";
+  model.user = null;
+  syncSessionOwnership.endSession();
+  await render();
+  await flush();
+  assert.equal(retryIsCurrent(), false);
+  assert.equal(latest.gate?.visible, true);
+  syncSessionOwnership.beginSession("A");
+  model.authStatus = "signed_in";
+  model.user = user("A");
+  resolveImpl = async () => dashboard();
+  await render();
+  await flush();
+  assert.equal(retryIsCurrent(), false, "12: new generation does not keep retired Retry");
+  assert.equal(latest.gate?.visible, true, "12: A gen3 boot surface restored");
+  await exitVisibleGate("12: new generation completes via visible gate");
+  assert.equal(navigated.length, 1);
+  assert.equal(navigated[0], "/(app)/(tabs)/you");
+
+  navigated.length = 0;
+  syncSessionOwnership.resetForTests();
+  syncSessionOwnership.beginSession("A");
+  model.authStatus = "signed_in";
+  model.user = user("A");
+  const failA2 = deferred<BootDestination>();
+  resolveImpl = () => failA2.promise;
+  await remount();
+  await act(async () => {
+    clock.advance(0);
+  });
+  await act(async () => {
+    failA2.reject(new Error("SYNTHETIC_RESOLVER_FAILURE"));
+    await Promise.resolve();
+  });
+  await flush();
+  const failB = deferred<BootDestination>();
+  resolveImpl = () => failB.promise;
+  model.user = user("B");
+  syncSessionOwnership.endSession();
+  syncSessionOwnership.beginSession("B");
+  await render();
+  await flush();
+  assert.equal(latest.gate?.visible, true, "13: B restoring surface before B fails");
+  await act(async () => {
+    failB.reject(new Error("SYNTHETIC_RESOLVER_FAILURE"));
+    await Promise.resolve();
+  });
+  await flush();
+  assert.equal(retryIsCurrent(), true, "13: B's resolver failure presents reachable Retry");
+  assert.equal(latest.retry!.label, "common.retry");
+  assert.equal(latest.gate?.visible, false);
+  resolveImpl = async () => dashboard();
+  await act(async () => {
+    latest.retry!.onPress();
+  });
+  await flush();
+  await exitVisibleGate("13: B Retry then current presentation");
+  assert.equal(navigated.length, 1);
+  assert.equal(navigated[0], "/(app)/(tabs)/you");
+
+  navigated.length = 0;
+  syncSessionOwnership.resetForTests();
+  syncSessionOwnership.beginSession("A");
+  model.authStatus = "signed_in";
+  model.user = user("A");
+  const lateA = deferred<BootDestination>();
+  resolveImpl = () => lateA.promise;
+  await remount();
+  await act(async () => {
+    clock.advance(0);
+  });
+  await flush();
+  const bHold = deferred<BootDestination>();
+  resolveImpl = () => bHold.promise;
+  model.user = user("B");
+  syncSessionOwnership.endSession();
+  syncSessionOwnership.beginSession("B");
+  await render();
+  await flush();
+  assert.equal(latest.gate?.visible, true, "14: B surface visible before late A settles");
+  assert.equal(retryIsCurrent(), false);
+  bHold.resolve(dashboard());
+  await flush();
+  await act(async () => {
+    lateA.reject(new Error("SYNTHETIC_LATE_REJECTION"));
+    await Promise.resolve();
+  });
+  await flush();
+  assert.equal(retryIsCurrent(), false, "14: A's late rejection does not present Retry");
+  assert.equal(latest.gate?.visible, true, "14: B gate remains after A's late rejection");
+  assert.equal(latest.gate?.bootError, false);
+  assert.equal(navigated.length, 0);
+  await exitVisibleGate("14: B still completes via visible gate");
+  assert.equal(navigated.length, 1);
+  assert.equal(navigated[0], "/(app)/(tabs)/you");
+
+  navigated.length = 0;
+  syncSessionOwnership.resetForTests();
+  syncSessionOwnership.beginSession("A");
+  model.authStatus = "signed_in";
+  model.user = user("A");
+  const lateResultA = deferred<BootDestination>();
+  resolveImpl = () => lateResultA.promise;
+  await remount();
+  await act(async () => {
+    clock.advance(0);
+  });
+  await flush();
+  resolveImpl = async () => dashboard();
+  model.user = user("B");
+  syncSessionOwnership.endSession();
+  syncSessionOwnership.beginSession("B");
+  await render();
+  await flush();
+  assert.equal(latest.gate?.visible, true);
+  await act(async () => {
+    lateResultA.resolve(draft("A"));
+    await Promise.resolve();
+  });
+  await flush();
+  assert.equal(retryIsCurrent(), false, "14b: A's late result does not steal B");
+  assert.equal(navigated.length, 0);
+  await exitVisibleGate("14b: B completes after A's late result");
+  assert.equal(navigated.length, 1);
+  assert.equal(navigated[0], "/(app)/(tabs)/you");
 
   await act(async () => {
     root.unmount();
