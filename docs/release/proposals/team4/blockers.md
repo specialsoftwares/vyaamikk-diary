@@ -2,11 +2,11 @@
 
 ## Pricing / quota
 
-GRIN pricing and ordinary-record quota remain unresolved. Wave 1 screens show `grin.pricingQuotaNote` and `GrinFixtureRepository.pricingQuotaBlocker`. No price, quota, or upsell is invented.
+GRIN pricing and ordinary-record quota remain unresolved. Screens show `grin.pricingQuotaNote`. No price, quota, or upsell is invented.
 
 ## Production adapters
 
-Screens bind to `GrinFixtureRepository` (`FAKE / WAVE-1 FIXTURE`). Wave 2 must replace this with Team 1/2/3 adapters. Team 5 can grep `GrinFixtureRepository` and `GrinFixtureRecord`.
+List/create/detail bind to `GrinApplicationRepository` (`APPLICATION / WAVE-2`) via GrinOutbox `listForOwner` / `persistDraftAndQueue`. `issuedNumber` stays null until G1 issues it. `GrinFixtureRepository` remains labelled `FAKE` for tests and for amend/QC/EWB/return/pack screens not yet switched.
 
 ## Other unresolved (not invented here)
 
@@ -15,3 +15,4 @@ Screens bind to `GrinFixtureRepository` (`FAKE / WAVE-1 FIXTURE`). Wave 2 must r
 - Production admission / store-runtime enablement (screens check `isGoodsEvidenceEnabled()`; store-or-standalone stays off)
 - Hub tile on Saved Records (proposed only)
 - `src/goodsEvidence/index.ts` public exports for the new exception helpers (coordinator-owned)
+- Team 1/2 INJECTED outbox ports (queue-only uninjected server until those land)

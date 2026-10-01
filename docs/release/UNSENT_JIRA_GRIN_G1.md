@@ -28,3 +28,7 @@ Combined head `3fe5c46775ec0f146fb6af549885771ffbcff68d` on `integration/grin-g1
 
 `070a388` on `team/grin-t5-qa`: Wave 1 source **approved with findings**. Medium: mutation missing receipt `invalid` vs `not_found`; validation before auth gate; outbox lease then skip unsupported types. Not G6. Not production. Do not mark GRIN or device tickets Done.
 
+## Wave 2 corrections start (unsent, 2026-10-02)
+
+Inspected combined `2593c2be6964955ecb1a433dc93c4096168ce9d2`. W2-01…W2-05 assigned on isolated `integration/grin-g1-g5-source`. T5 `c2ef669` CS-02 evidence-port test integrated (not W2-03 approval). Coordinator extracted production `applyPendingLocalMigrations`. Functions still unexported. Live Rules unchanged. versionCode 23. Purchase-entry flags `"0"`. Do not mark G6/device/billing/public-release Done. `gh` unauthenticated — no combined PR from this environment.
+

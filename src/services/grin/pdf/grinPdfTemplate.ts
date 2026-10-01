@@ -1,8 +1,14 @@
 import { GRIN_DOCUMENT_FOOTER } from "@/goodsEvidence/constants";
 import { buildPdfHtmlDocument } from "@/services/pdf/pdfDocumentShell";
 import { escapeHtml } from "@/utils/escapeHtml";
-import type { GrinFixtureRecord } from "@/services/grin/fixture/types";
+import type { ImmutableGrin } from "@/goodsEvidence/types";
 import type { GrinPackExport } from "@/services/grin/fixture/types";
+
+export type GrinPdfReceiptSource = {
+  receiptId: string;
+  original: ImmutableGrin;
+  effective: ImmutableGrin;
+};
 
 export type GrinPdfLabels = {
   title: string;
@@ -74,7 +80,7 @@ function row(label: string, value: string): string {
 }
 
 export function buildGrinReceiptHtml(input: {
-  record: GrinFixtureRecord;
+  record: GrinPdfReceiptSource;
   labels: GrinPdfLabels;
   locale?: "en-IN" | "hi-IN";
 }): string {
@@ -141,7 +147,7 @@ export function buildGrinReceiptHtml(input: {
 }
 
 export function buildGrinPackHtml(input: {
-  record: GrinFixtureRecord;
+  record: GrinPdfReceiptSource;
   pack: GrinPackExport;
   labels: GrinPdfLabels;
   locale?: "en-IN" | "hi-IN";

@@ -5,33 +5,37 @@ Do not collapse to Done.
 
 Arrangement: one coordinator plus five **local** Cursor Task subagents on separate worktrees. AI roles, not human sign-off.
 
+Checkpoint inspected: `2593c2be6964955ecb1a433dc93c4096168ce9d2`. Combined advanced with coordinator W2-05 extract + T5 `c2ef669` (CS-02 via evidence port; T5 test is **not** independent approval of W2-03).
+
 | Task | Owner | Branch | Worktree | Dependency | Status | Evidence | Blocker | Next |
 |---|---|---|---|---|---|---|---|---|
-| Contract + ownership | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | G1 `c9623dd` | source_verified | T5 re-review `6f920cd` merged | Wave 2 + ER-1…ER-5 | Integrate team commits; do not accept Wave 2 until ER mapped |
-| G1 injected server port | team1 | `team/grin-t1-backend` | `grin-t1-backend` | M1/M2 approved | review | `091772e` INJECTED `createInjectedGrinServerPort`; no ER assigned | Functions unexported | T5 Wave 2 review after ER-1…ER-5 land |
-| G2 injected evidence port + ER-2/ER-3 | team2 | `team/grin-t2-evidence` | `grin-t2-evidence` | M2 approved | review | `4b10356` INJECTED evidencePort; ER-2/ER-3 tested; live `storage.rules` unchanged | live IAM | T5 Wave 2 review |
-| G3 CS-01 interop + ER-1/ER-4 | team3 | `team/grin-t3-offline` | `grin-t3-offline` | M3 approved | review | `22a848a` CS-01 SQLITE_HOST+INJECTED; ER-1 fenced; ER-4 T3 half tested | native death not claimed | T5 Wave 2 review; ER-4 T5 QA still open |
-| G4 outbox-backed repository | team4 | `team/grin-t4-product` | `grin-t4-product` | T5 findings closed | running | Wave 2 repository in flight (no new ER) | pricing/quota | Finish repository; keep FAKE labelled |
-| G6 + ER-4/ER-5 | team5 | `team/grin-t5-qa` | `grin-t5-qa` | combined `9cd0928` | running | `6f920cd` M1–M3 closed; CS stubs are **not** workflow passes | NATIVE_DEVICE pending | Execute combined workflows; GRIN-off v9→v10 |
+| Contract + W2-05 orchestrator | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | G1 `c9623dd` | running | `applyPendingLocalMigrations` extracted from `init.ts` | Wave 2 not accepted | Integrate W2-01…W2-05; T5 independent review |
+| W2-06 G1 mobile-safe composition | team1 | `team/grin-t1-backend` | `grin-t1-backend` | Wave 2 port `091772e` | running | Functions still unexported | live export HOLD | Authenticated transport + emulator composition |
+| W2-03 identity + W2-04 read policy | team2 | `team/grin-t2-evidence` | `grin-t2-evidence` | `4b10356` | running | ER-2 commitState kept | live IAM | Category/receipt identity; post-verify reads |
+| W2-02 lease/attempt + W2-03 persist + W2-05 tests | team3 | `team/grin-t3-offline` | `grin-t3-offline` | `22a848a` | running | ER-1 skipStaleCompletion | native death not claimed | Unique attempt fence; call production orchestrator |
+| W2-01 stale session + remaining fixture screens | team4 | `team/grin-t4-product` | `grin-t4-product` | `786f73a` | running | list/create/detail outbox | pricing/quota unresolved | No self-revive; switch amend/QC/EWB/return/pack |
+| Independent review + executed workflows | team5 | `team/grin-t5-qa` | `grin-t5-qa` | combined after W2-01…05 | running | `c2ef669` CS-02 port test (not W2-03 approval) | NATIVE_DEVICE | Reproduce W2 then review T1–T4 diffs |
 
-## External-review findings (do not accept Wave 2 until mapped)
+## Wave 2 correction findings
 
-| ID | Finding | Owner | Already covered by in-flight Wave 2? | Status | Next |
-|---|---|---|---|---|---|
-| ER-1 | Retired-session completion and lease fencing in the outbox | team3 | **No** at assign time. | **fix+test landed** (`22a848a` `skipStaleCompletion`; SQLITE_HOST outbox tests). Not NATIVE_DEVICE. Attachment post-await write not in this finding’s diagnosed path. | T5 Wave 2 review |
-| ER-2 | Recheck authorization inside the final evidence-write transaction after awaited file operations | team2 | **No** at assign time. | **fix+test landed** (`4b10356` `commitState` re-`authorize()`; INJECTED_PORT pending_deletion/admission after blob I/O) | T5 Wave 2 review |
-| ER-3 | Test direct Storage SDK access against reservation/account/admission restrictions | team2 | **Partial** at assign time. | **fix+test landed** (isolated `storage.rules` + SDK tests: unreserved / pending_deletion / admission deny). Live `storage.rules` **unchanged** | T5 Wave 2 review; live IAM still unproven |
-| ER-4 | Real v9→v10 startup migration, including GRIN-off startup | team3 + team5 | **No** at assign time. | **T3 half fix+test landed** (`migrateGrin.v9Startup.sqliteHost.test.ts`; `init.ts` unchanged). **T5 QA still open** | T5: GRIN-off `isGoodsEvidenceEnabled()` + diary preserved |
-| ER-5 | Execute combined workflows; acceptance-ID stubs are not workflow passes | team5 | **No.** T3 CS-01 and T2 evidencePort now exist on combined; stubs are still not passes. | running | T5: execute CS-01 via T3 interop; CS-02 against G2 INJECTED/emulator if possible |
+| ID | Finding | Owner | Status | Next |
+|---|---|---|---|---|
+| W2-01 | Retired repository `ensureSession()` calls `beginOwnerSession` and queues from a stale callback | team4 + team3 session API | running | T4: no self-revive; bind UID+generation; T3: persistDraftAndQueue stays session-gated |
+| W2-02 | Ambiguous failure reconciles before retirement; attachments unfenced; same worker reclaims live lease | team3 | running | Unique attempt identity; check before each RPC; atomic completion |
+| W2-03 | Verified R1 evidenceId returns durable for R2+different hash; missing category → invoice | team2 + team3 (`ports.ts`) | running | T3 owns `ports.ts`; T2 owns `evidencePort.ts` |
+| W2-04 | Storage original read requires reserved/uploading, so verify/link drops client read | team2 | running | Isolated rules only; keep ER-2 commitState re-auth |
+| W2-05 | v9→v10 tests copied init sequence | team3 + coordinator; T5 validates | running | Tests must call `applyPendingLocalMigrations` / `initializeLocalDatabase` after inject |
+
+Previous ER-1…ER-5 remain mapped (SQLITE_HOST / INJECTED / isolated emulator). Mapping is not Wave 2 acceptance.
 
 ## Readiness (never one “ready”)
 
 | Gate | State |
 |---|---|
-| GRIN SOURCE IMPLEMENTATION | Wave 1 findings closed; Wave 2 **not accepted** until ER-1…ER-5 mapped |
-| COMBINED SOURCE REVIEW | Wave 1 + findings re-review recorded; Wave 2 not reviewed |
+| GRIN SOURCE IMPLEMENTATION | Wave 2 corrections in flight; **not accepted** |
+| COMBINED SOURCE REVIEW | Wave 1 only; Wave 2 corrections not reviewed |
 | BACKEND DEPLOYMENT | not authorized |
 | INTERNAL BUILD | not authorized |
 | DEVICE ACCEPTANCE | device_pending |
-| PAID BILLING ACCEPTANCE | not authorized; flags remain `"0"` |
+| PAID BILLING ACCEPTANCE | not authorized; flags `"0"` |
 | PUBLIC RELEASE | not authorized |

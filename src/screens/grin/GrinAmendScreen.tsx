@@ -4,7 +4,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 
 import { Banner, Button, FormSection, Header, Screen, TextField } from "@/components/ui";
 import { useT } from "@/i18n";
-import { getGrinFixtureRepository, presentText } from "@/services/grin/fixture";
+import { GRIN_FIXTURE_REPOSITORY_LABEL, getGrinFixtureRepository, presentText } from "@/services/grin/fixture";
 import { formatOptionalText } from "@/services/grin/grinDisplay";
 import { spacing, useThemedStyles } from "@/theme";
 
@@ -53,7 +53,7 @@ export function GrinAmendScreen(): React.ReactElement {
       <Screen scroll>
         <View style={styles.wrap}>
           <Header title={t("grin.amendTitle")} subtitle={t("grin.amendIntro")} showBack />
-          <GrinFixtureNotices />
+          <GrinFixtureNotices repositoryLabel={GRIN_FIXTURE_REPOSITORY_LABEL} />
           <Banner tone="info" message={t("grin.originalUnchanged")} />
           {error ? <Banner tone="danger" message={error} /> : null}
           <FormSection title={t("grin.section.remarks")}>
