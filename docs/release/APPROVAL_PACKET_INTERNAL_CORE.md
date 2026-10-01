@@ -1,5 +1,7 @@
 # Approval packet 1 — first internal core-flow milestone
 
+**Historical packet.** Current Internal Testing, Play inventory, and the frozen Android source candidate are recorded in `docs/release/android-source-candidate.manifest.md` (accepted application SHA `7e9e660`, Play inventory 2026-10-01). Do not treat the versionCodes or Internal RC4 vc17 notes below as current.
+
 **Not self-approved. Core QA has not passed. This is a request packet, not a green light. Do not build or upload in this assignment.**
 
 ## Combined app

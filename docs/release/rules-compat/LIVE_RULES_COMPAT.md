@@ -44,8 +44,10 @@ Independent execution of production `beginCoordinatedSave` with an existing **do
 
 - CLI user: `support.vyd@specialsoftwares.com`
 - Project: `vyaamikk-diary`
-- Method: `GET https://firebaserules.googleapis.com/v1/projects/vyaamikk-diary/releases` then `rulesets/{id}` (token refresh via Firebase CLI; no deploy)
+- Method: `GET firebaserules.googleapis.com/v1/projects/vyaamikk-diary/releases` then `rulesets/{id}` (token refresh via Firebase CLI; no deploy)
 - Result: **no drift**. Live Firestore remains ruleset `9c02e187-bd1c-4a5f-bdcc-d8f070e0a5b2` sha256 `d8ee0abcd5a8f217f1fbe60af9651e5b4253b07cac72d0746c4e781a48052aa2`. Live Storage remains `a2a0ddf7-9746-4dd2-bd48-29c9abc0e41f` sha256 `1a912051ba923a0e4ae29fd36b1741bcf0f5879cd53e6d4bd386c9d5a3b717d5`. Baseline files were **not** replaced.
+
+2026-10-01: a live re-export was **not** obtained (Firebase CLI credentials expired; Firebase Console required identity re-verification; neither was retried). This 2026-09-19 export is therefore the last hashed live snapshot. Compatibility of `7e9e660` against **current** live Rules is **blocked**, not re-verified.
 
 Proposed artifact hash **confirmed**: `b13d52559efd144bfbdd86daf426fd5ce81abceead4c87979cb9cee2d1a25e2c`.
 

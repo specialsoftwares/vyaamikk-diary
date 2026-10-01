@@ -16,14 +16,15 @@ Exact source-to-installed-vc22 correspondence: **UNVERIFIED**.
 | Previous correction head | `848eb9f58e9817fa56ce40b6998d3851d82cd004` |
 | Boot/locale closeout head | `a4dcfa40cbfdb4915f716813a0ae2b463613f082` |
 | Resolver-failure owner-change head | `c139507961b890c79a72f053158ade86d4b957d2` |
-| Purchase-entry closeout | the commit on `release/android-source-candidate` immediately after `c139507`; exact SHA is the pushed HEAD that GitHub Actions tests. Do not reuse CI run `36847262564`. |
+| **Accepted application head (frozen)** | `7e9e66055db20d5289424c61347bc72a64fd94e3` |
+| Application CI (do not attach to later docs-only SHAs) | run `36864750074` / job `110377363521` / merge-ref `68d8b7fc4368414432b6a9ea0cbbd2d7f16a55da` |
 
 Imported deltas were taken from the historical **uncommitted** tree against that workspace’s own committed blobs. Those committed blobs matched `90c6948` for every included tracked file except `package.json` (security branch already added `test:safe-diagnostics`).
 
 ## App / package / version (source review only)
 
 - `version`: `1.0.0`
-- `android.versionCode`: **22** — admitted because the imported `app.json` still declares it. **Not approved for another Play upload.** A later build must use a freshly verified unused Play versionCode.
+- `android.versionCode`: **22** in source `app.json` (unchanged). **Not uploadable again.** Play complete inventory 2026-10-01T13:29:51Z includes 22. Proposed next unused upload code: **23** (requires a later versionCode-only commit; not applied here).
 - Package: `com.specialsoftwares.vyaamikkdiary`
 - `eas.json` purchase-entry and quota-upsell flags were **explicit `"0"`** after `c139507` in `build.preview.env` and `build.production.env`. Other profile fields from `90c6948` are preserved (`EXPO_PUBLIC_APP_MODE=production`, `autoIncrement=false`, preview APK, production app-bundle). Development profiles still omit both flags (runtime default-off).
 - No EAS remote environment write was performed.
@@ -122,14 +123,15 @@ Owner/session transition retires failure presentation as well as a displayed con
 
 ## Unresolved / needs later owner action
 
-- Installed vc22 correspondence remains unverified
-- Live Play review account is **not** created or verified here; `review:verify-account` is live-only and not run in this assignment
-- App onboarding may still require identity steps beyond the five Firestore fields the script checks
-- Server fail-closed billing is unchanged. Client purchase-entry and quota-upsell flags are now explicit `"0"` in preview/production `eas.json`; hiding the Settings CTA is **not** a security boundary (dispatcher still refuses with `purchase_entry_closed`)
-- versionCode 22 is source-admitted only. This assignment did **not** change `app.json`. Do not re-upload 22. Do not assume 23 is unused.
-- Complete Play uploaded-version inventory was **not** obtained on 2026-10-01 (see preflight). No unused versionCode is proposed from this session.
+- Installed vc22 correspondence remains unverified (separate from this candidate)
+- Live Play review account is **not** created or verified here; `review:verify-account` is live-only and not run
+- App onboarding may still require identity steps beyond the five Firestore fields the offline verifier checks
+- Server fail-closed billing is unchanged. Client purchase-entry and quota-upsell flags are explicit `"0"` in preview/production `eas.json`. Hiding the Settings CTA is **not** a security boundary
+- Source `app.json` still declares versionCode **22**. Do not re-upload 22. Fresh Play inventory (2026-10-01) makes **23** the next suitable unused code; `app.json` was **not** changed
+- Live Firebase Rules/Functions were **not** re-exported this session (CLI expired; Console re-verification blocked). Last hashed export remains 2026-09-19
+- Remote EAS `EXPO_PUBLIC_APP_MODE` exists as SENSITIVE; its value was not read. Unresolved whether it overrides `eas.json` `production`
 - Native/EAS build, OTA, deploy, Play upload: **not authorized**
-- Encrypted PDF backup Phase 1 remains a separate design task. It is not in this candidate.
+- Encrypted PDF backup Phase 1 remains a separate design task. It is not in this candidate. GRIN slice 2 remains unauthorized
 
 ## Validation boundaries
 
@@ -139,8 +141,8 @@ Owner/session transition retires failure presentation as well as a displayed con
 - `test:boot-completion` is EXTRACTED_RUNTIME. It does **not** cover the mounted screen-integration cases.
 - `test:boot-screen-integration` is MOUNTED_REACT with inert native/router/animation surfaces. It is not native rendering, TalkBack, Reanimated, or Play-installed proof.
 - `test:play-review-setup` is INJECTED_ADMIN_OFFLINE and was not modified in this closeout.
-- Canonical: `npm run ci:verify` on the purchase-entry closeout SHA after push (draft PR #29). Do **not** reuse run `36847262564` (`c139507` merge `c8a1b87784e2952f1ea06b57f10471cb0aff2c80`) or run `36843046525` (`a4dcfa4`)
-- Local focused suites before push: `test:quota-upsell`, `test:subscription-plan-static`, `test:billing-presentation`, `test:save-idempotency`, `test:save-hardening`, `test:letterhead-quota-lifecycle`, `test:save-lifecycle`, `typecheck`, `lint:eslint`. Canonical GitHub Actions is still required on the pushed head.
+- Canonical application CI: `npm run ci:verify` on **`7e9e660`** — GitHub Actions run `36864750074` / job `110377363521`, merge-ref `68d8b7fc4368414432b6a9ea0cbbd2d7f16a55da`, parents `0da2f58` + `7e9e660`, `test:all` 144/144, `ci:verify` PASS. That run does **not** cover any later documentation SHA.
+- Do **not** reuse run `36847262564` (`c139507`) or `36843046525` (`a4dcfa4`) for `7e9e660`.
 - Injected diagnostics tests do not prove native Crashlytics consent
 - Boot tests do not prove mounted device animation
 - Locale plugin tests do not prove Android resource shrinking on a device
@@ -171,56 +173,83 @@ Development EAS profiles omit both flags; runtime stays default-off unless env i
 |---|---|---|
 | `eas.json` | preview + production explicit `"0"` for both purchase-entry flags | `420470814c57ea88324cf7cf2f0c1a8c2838269c6b72533c7b77e6389f6b1fee` |
 | `src/components/billing/SubscriptionManagementScreen.tsx` | Hide Upgrade CTA when purchase entry is off; keep restore/manage/plan | `40a73b4585caf891e0498d7a7d5035b0dfda22f525f9f581bcce7491a3dd6c75` |
-| `src/billing/quotaUpsell/quotaUpsell.contract.test.ts` | eas.json `"0"` + CTA gating shape | `fb10854d22d3a4d01a60271d0d0bcd0a4119a5d4a5f04022004ac52c4f1fcd36` |
-| `src/billing/quotaUpsell/quotaUpsellDecision.test.ts` | flag-off ordinary + manual dispatch | `4d1157125abba4e071fd640731cdd9e821d47093ce140c6eb1caa9c28cb80ad3` |
-| `src/billing/quotaUpsell/quotaUpsellHost.lifecycle.test.ts` | mounted flag-off quota/manual | `9e7faa12e47e8b23de913a51c23661cc29bd48d840074cfc707651f336ada7d7` |
-| `src/subscription/subscriptionManagement.presentation.test.ts` | CTA hidden + closed copy | `f0c63fef6484f179cbe476809829f0fba90a22d34dbd1c8dfbfc9d20d1df8e06` |
-| `src/subscription/subscriptionManagement.runtime.test.ts` | restore/manage still available when purchase entry is off | `7ed87f60ab6cffc90fda40bfa759bb7d59473635573b0f39d6c570077d1b2c78` |
+| `src/billing/quotaUpsell/quotaUpsell.contract.test.ts` | SOURCE_CONTRACT / file-string: eas.json `"0"` + CTA gating shape | `fb10854d22d3a4d01a60271d0d0bcd0a4119a5d4a5f04022004ac52c4f1fcd36` |
+| `src/billing/quotaUpsell/quotaUpsellDecision.test.ts` | EXTRACTED_RUNTIME: flag-off ordinary + manual dispatch | `4d1157125abba4e071fd640731cdd9e821d47093ce140c6eb1caa9c28cb80ad3` |
+| `src/billing/quotaUpsell/quotaUpsellHost.lifecycle.test.ts` | EXTRACTED host runtime + notify presenter (no React tree, not native SubscriptionManagementScreen, not Play purchase, not device restore) | `9e7faa12e47e8b23de913a51c23661cc29bd48d840074cfc707651f336ada7d7` |
+| `src/subscription/subscriptionManagement.presentation.test.ts` | SOURCE_CONTRACT / file-string: CTA hidden + closed copy | `f0c63fef6484f179cbe476809829f0fba90a22d34dbd1c8dfbfc9d20d1df8e06` |
+| `src/subscription/subscriptionManagement.runtime.test.ts` | EXTRACTED_RUNTIME (inert runtime, not mounted React): restore/manage still available when purchase entry is off | `7ed87f60ab6cffc90fda40bfa759bb7d59473635573b0f39d6c570077d1b2c78` |
 
 Existing i18n key `billing.management.purchaseEntryClosed` (en/hi) is reused. No new commercial copy. No mock purchase-success path.
 
+## Evidence chronology (do not collapse these)
+
+**A. Owner-reported history (not a Play read):**
+- vc21 EAS build `5e1e124b-7a8c-49ec-a4bb-2b7264844dc4` was reported uploaded to Internal Testing.
+- vc22 EAS build `72cb7254-0be9-4f92-a514-dbfab2b1150d` was reported finished as a production AAB.
+- Exact source correspondence of installed/uploaded vc22 remains **UNVERIFIED**.
+
+**B. Earlier direct observations (historical; not current):**
+- 2026-09-19 Play uploaded versionCodes: 17, 16, 15, 14, 13, 10. 18 unused *then*.
+- 2026-09-20 Console: Internal Testing RC4 **vc17**; Production Inactive. That is **not** the current internal release.
+
+**C. Fresh observations this assignment (2026-10-01):**
+- Play Console session: `aeadmin@specialsoftwares.com` / SPECIAL SOFTWARES, developer `5171346189091805855`, app `4972339006118168782`, package `com.specialsoftwares.vyaamikkdiary`. Draft app; temporary unreviewed package name. No Save, create, upload, or track mutation.
+- Complete App bundles inventory (All app bundles, unfiltered, pager **1–9 of 9**, 2026-10-01T13:29:51Z): **22 (Active), 20, 19, 17, 16, 15, 14, 13, 10 (Inactive)**. Not present: 21, 18, 23, 11, 12.
+- Current Internal Testing (2026-10-01T13:30:32Z): track **Active**; latest release **Vyaamikk Diary (Vc22)**; version codes **22** only. Do not cite vc17 as current.
+- Production track (2026-10-01T13:31:03Z): **Inactive**. No production release.
+- Play Integrity API: **not integrated** (Protected with Play, 2026-10-01T13:31:39Z). Certificate fingerprints were **not** re-copied. Last dated upload/Play App Signing/Firebase hash match remains 2026-09-19.
+- A finished EAS build is **not** proof of a Play upload. vc21 exists on EAS and is **absent** from the current Play AAB inventory. vc22 exists on both EAS (finished) and Play Internal (active).
+
 ## Read-only internal-build preflight (2026-10-01)
 
-**Not a build. Not an upload.**
+**Not a build. Not an upload. Application source `7e9e660` was not modified.**
 
-| Read | Result this session |
+| Read | Fresh result |
 |---|---|
-| Complete Play uploaded-version inventory | **Not read.** `gcloud` not on PATH. Python `googleapiclient` not installed. No Android Publisher client. A single filtered search was not used as a substitute. |
-| Current Internal Testing release | **Not re-read.** Last authenticated Console observation remains **2026-09-20**: track Active, Internal Testing RC4 **vc17**, package `com.specialsoftwares.vyaamikkdiary`. Missing tooling is not a claim that Play Console is unavailable. |
-| EAS production profile / effective public flags | Source `eas.json` only: production `android.buildType=app-bundle`, `EXPO_PUBLIC_APP_MODE=production`, both purchase-entry flags `"0"`, `autoIncrement=false`. `eas` CLI not on PATH; no EAS remote env or whoami. |
-| Package identity | Source `app.json`: `com.specialsoftwares.vyaamikkdiary`, `version` `1.0.0`, `versionCode` **22** (unchanged this assignment). |
-| Signing-role evidence | **Not re-read.** Last dated match remains **2026-09-19** in `PLAY_GCP_READONLY_AUDIT.md` (upload vs Play App Signing vs Firebase Android hashes). Recheck before any later upload. |
-| Firebase apps/functions | CLI present (`firebase` 14.20.0). `apps:list` / `functions:list --project vyaamikk-diary --non-interactive` failed: **credentials no longer valid**. `firebase login --reauth` was **not** run. Last successful Firebase reads remain **2026-09-19**. |
+| Complete Play uploaded-version inventory | **Read** via authenticated Play Console All app bundles (`bundle-explorer-selector`), unfiltered, **1–9 of 9**. Codes above. Missing `gcloud` / `googleapiclient` did not block this Console read. |
+| Current Internal Testing | **Vc22 / versionCode 22**, track Active. |
+| Production track | **Inactive**. |
+| EAS account/project | `npx eas-cli@16.28.0` (npx cache, not repo `node_modules`). whoami `vydspecial2026` (Owner). Also Owner of `special-softwares`. Project `@vydspecial2026/vyaamikk-diary` ID `00bb47ff-b22f-4a64-ace8-a0e7275fd2a1`. Expo website login was a sign-in wall; CLI session was used instead. |
+| EAS production / preview profiles (source `eas.json`) | production: `android.buildType=app-bundle`, `environment=production`, `autoIncrement=false`, `cli.appVersionSource=local`. preview: APK, `environment=preview`, `autoIncrement=false`. Both set `EXPO_PUBLIC_APP_MODE=production` and both purchase-entry flags `"0"`. Recent EAS history: production builds are `distribution=STORE`; preview builds `INTERNAL` — consistent with those profiles. |
+| Remote EAS env (production and preview lists) | Purchase-entry and quota-upsell names **absent** (no remote `"1"` override of those two flags). `EXPO_PUBLIC_APP_MODE` **present**, Visibility **SENSITIVE**, value **not read** (`--include-sensitive` not used). Unresolved: whether the unread remote `EXPO_PUBLIC_APP_MODE` overrides `eas.json`. No EAS remote write. |
+| Package identity | Source `app.json`: `com.specialsoftwares.vyaamikkdiary`, `1.0.0`, versionCode **22** (unchanged). Play Console shows the same package. |
+| Signing-role | Play “Prevent unofficial installs / 1 of 1 service active” on Protected with Play. App-signing certificate SHA-1/SHA-256 **not** re-read this session. Do not treat that as a new fingerprint match. |
+| Firebase / live Rules | **Blocked.** `firebase` 14.20.0: credentials no longer valid; reauth not performed. Firebase Console: Google “Verify it’s you” for `authuser=0`; password not retried. Last successful Rules export remains **2026-09-19** (`docs/release/rules-compat/baseline/META.json`). Live compatibility for this candidate: **blocked**, not verified, not shown incompatible. Do not assume the proposed Rules patch was deployed. Do not assume repo Rules equal live Rules. |
 
-Prior complete Play versionCodes (2026-09-19): **17, 16, 15, 14, 13, 10**. 18 was unused **at that inspection**. That inventory is stale relative to source/installed **vc22** claims.
+**Proposed unused versionCode: 23.** Highest uploaded Play AAB is 22; Play requires a strictly greater code. 21 and 18 are unused on Play but are **not** suitable because 22 is already uploaded. Do not change `app.json` in this assignment.
 
-**Proposed unused versionCode:** not assigned from this session’s evidence. Do not re-upload 22. Do not assume 23 is available. After a later complete inventory, pick an integer that is unused on Play, then change `app.json` on a **fresh committed/tested SHA**. This closeout SHA is **not** a final build SHA if versionCode must change.
+## Internal-build approval packet (request only — none of A/B/C granted)
 
-## Internal-build packet (request only — authorization not granted)
+`7e9e660` is the **accepted application checkpoint**. CI run `36864750074` applies to that SHA only.
 
-Clean-tree requirement: build only from a clean checkout of the purchase-entry closeout SHA after canonical CI on that exact head.
+A later **versionCode-only** commit (permission A) will create a **new build-source SHA**. That SHA must receive applicable validation before a build. **No artifact exists yet for that new SHA.** Do not describe `7e9e660` as the final build SHA if versionCode will change. Do not reconstruct old vc22 as a substitute for provenance of the new candidate.
+
+Clean-tree requirement: a separately authorized EAS production AAB must be built from a clean, identified checkout of the **build-source SHA** (after any approved versionCode commit), not from a dirty tree.
 
 | Field | Value |
 |---|---|
-| Source SHA | pushed HEAD of `release/android-source-candidate` after this closeout (record exact SHA + CI on PR #29; do not reuse `c139507` / run `36847262564`) |
+| Accepted application SHA | `7e9e66055db20d5289424c61347bc72a64fd94e3` |
+| Application CI | run `36864750074` / job `110377363521` / merge-ref `68d8b7fc4368414432b6a9ea0cbbd2d7f16a55da` / parents `0da2f58970f23c7ce6cbefae6efffd49c731f44b` + `7e9e660` / 144/144 / `ci:verify` PASS |
 | Package | `com.specialsoftwares.vyaamikkdiary` |
-| EAS profile | `production` / Android **app-bundle** |
-| Destination | existing **Internal Testing only**. No production track. No listing publish. |
-| versionCode | source still **22**; **do not upload 22**. Unused code **unassigned** until a complete current inventory. Any later `app.json` bump requires a new SHA and a new CI run. |
-| Purchase-entry flags | both `"0"` in preview and production `eas.json` |
+| EAS | account `vydspecial2026`; project `@vydspecial2026/vyaamikk-diary` (`00bb47ff-b22f-4a64-ace8-a0e7275fd2a1`); profile **production** / Android **app-bundle**; `autoIncrement=false`; `appVersionSource=local` |
+| Destination | existing **Internal Testing only**. Production track is Inactive. No listing publish. |
+| Proposed versionCode | **23** (Play inventory 2026-10-01T13:29:51Z). Source still **22** until permission A. |
+| Purchase-entry flags | both `"0"` in `eas.json` preview+production; **not** present in remote EAS env lists. Effective future build: eas.json unless a later remote write adds them. Remote `EXPO_PUBLIC_APP_MODE` value unread (SENSITIVE). |
 | Server billing activation | **prohibited** |
-| Security ancestry | `0da2f58` → `eb5f582` → `90c6948` preserved |
-| GRIN | not included |
-| Encrypted PDF backup | not included; not a release claim |
-| Native/device checks | still outstanding |
-| Build authorization | **not granted** |
-| Internal upload authorization | **not granted** |
+| Live backend compatibility | **blocked this session** (Firebase CLI/Console). Last hashed Rules export 2026-09-19. Proposed compat patch is still source-only. |
+| Security ancestry | `0da2f58` → `eb5f582` → `90c6948` preserved on `7e9e660` |
+| GRIN | not included; not a prerequisite |
+| Encrypted PDF backup | not included; not a prerequisite |
+| Native/device checks | outstanding (checklist below, all pending) |
+| A. VersionCode-only source preparation | **not granted** |
+| B. EAS production AAB build | **not granted** |
+| C. Internal Testing upload/release | **not granted** |
 | Public release readiness | **not established** |
 
-Later artifact evidence (record after a separately authorized build; these do **not** prove deterministic binary reproducibility):
+Planned artifact evidence after a separately authorized build (traceability, **not** deterministic binary reproducibility):
 
-- EAS build ID and actual source reference
-- Build profile and resolved public flags
+- EAS build ID and actual source SHA
+- Build profile and resolved public flags (including both purchase-entry flags and `EXPO_PUBLIC_APP_MODE`)
 - AAB SHA-256
 - Package/versionCode extracted from the artifact
 - Signing certificate role
@@ -229,10 +258,23 @@ Later artifact evidence (record after a separately authorized build; these do **
 
 Installed vc22 provenance remains a separate unresolved historical fact. This candidate must have its own traceable build.
 
-## Reviewer prerequisites (not performed here)
+## Device and reviewer checklist (later authorized binary — all pending)
 
-- Authorized owner completes onboarding on the intended production binary
-- Read-only account verification is separately authorized (`review:verify-account` not run)
-- Fresh sign-in reaches the dashboard on a device
-- Offline verifier tests are not dashboard proof
+Do not create/modify the reviewer account or run live verification in this assignment. Injected-Admin offline tests are not reviewer-access proof.
+
+| Case | Status |
+|---|---|
+| Cold start and Reduce Motion | pending |
+| Returning sign-in and incomplete onboarding | pending |
+| Reviewer account fresh sign-in reaches dashboard | pending |
+| Ordinary save and same-ID retry | pending |
+| Letterhead create / PDF / share | pending |
+| Process death and PDF recovery | pending |
+| Account switching and retired content | pending |
+| Purchase entry absent | pending |
+| Current plan / manage / restore presentation | pending |
+| Five supported languages after shrinking | pending |
+| Consent-controlled diagnostics and native failure recovery | pending |
+
+Owner still must complete onboarding on the intended production binary. Read-only account verification is a separate later authorization.
 
