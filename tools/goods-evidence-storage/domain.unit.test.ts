@@ -18,12 +18,14 @@ import {
   buildOriginalStoragePath,
   buildVerifiedEvidenceResult,
   concurrentUploadError,
+  evidenceReplayIdentityError,
   evidenceTransitionError,
   hashBoundedChunks,
   isPermittedEvidenceTransition,
   originalRetentionError,
   originalSizeError,
   replacementMustUseNewObjectId,
+  reservationIdentityError,
   splitIntoHashChunks,
   storagePathShapeError,
   verifiedEvidenceResultError,
@@ -83,6 +85,10 @@ async function main(): Promise<void> {
   ]);
   assert.equal(wave1CategoryError("invoice"), null);
   assert.ok(wave1CategoryError("stock_accounting"));
+  assert.ok(wave1CategoryError(undefined));
+  assert.ok(wave1CategoryError(null));
+  assert.ok(wave1CategoryError(""));
+  assert.ok(wave1CategoryError("Invoice"));
   assert.deepEqual([...ALLOWED_ORIGINAL_MIME], [
     "application/pdf",
     "image/jpeg",
@@ -158,6 +164,23 @@ async function main(): Promise<void> {
   assert.equal(verifiedEvidenceResultError(verified), null);
   assert.equal(verified.rawSha256, expected);
   assert.equal(verified.generation, "1");
+
+  evidenceLabel("PURE_DOMAIN", "replay identity must match owner ledger receipt id category hash size");
+  const identity = {
+    ownerUid: "owner1",
+    ledgerId: "ledger1",
+    receiptId: "receipt1",
+    evidenceId: "ev1",
+    category: "invoice" as const,
+    claimedSha256: expected,
+    claimedByteSize: payload.byteLength,
+  };
+  assert.equal(evidenceReplayIdentityError(identity, identity), null);
+  assert.ok(evidenceReplayIdentityError(identity, { ...identity, receiptId: "receipt2" }));
+  assert.ok(evidenceReplayIdentityError(identity, { ...identity, claimedSha256: "b".repeat(64) }));
+  assert.ok(evidenceReplayIdentityError(identity, { ...identity, category: "weighment" }));
+  assert.ok(reservationIdentityError(null, "objectkeyobjectkey"));
+  assert.equal(reservationIdentityError("aaaaaaaaaaaaaaaa", "aaaaaaaaaaaaaaaa"), null);
 
   evidenceLabel("PURE_DOMAIN", "replacement requires a new object id; derivatives cannot assert missing originals");
   assert.equal(replacementMustUseNewObjectId("aaa", "aaa"), false);

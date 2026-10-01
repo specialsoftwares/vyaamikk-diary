@@ -11,7 +11,9 @@ Coordinator-owned: `package.json`, root `tsconfig.json`. Team 2 does not merge t
 "test:goods-evidence-g2-emulator": "firebase emulators:exec --only firestore,storage --project demo-vyaamikk-grin-g2 --config tools/goods-evidence-storage/firebase.json \"npx --yes tsx tools/goods-evidence-storage/storage.emulator.test.ts && npx --yes tsx tools/goods-evidence-storage/rules.emulator.test.ts\""
 ```
 
-`injected.unit.test.ts` covers `createInjectedGrinEvidencePort` (INJECTED outbox port) plus ER-2 post-await authorize.
+`injected.unit.test.ts` covers `createInjectedGrinEvidencePort` (INJECTED outbox port), W2-03 evidence identity/category replay, ER-2 post-await authorize, and stale lifecycle fencing.
+
+`rules.emulator.test.ts` uses the **client Storage SDK** against isolated Rules (not Admin SDK) for W2-04: reservation upload, unreserved/wrong-owner/invalid-account/retired-ledger deny, retained reads after uploaded_unverified/verified/linked, newCommands stop vs retained reads, overwrite/delete deny, derivative reservations, client metadata clobber deny.
 
 Ports: Firestore **8091**, Storage **9200**. Do not reuse Team 1 **8090** / G1 **8088** / default **8080**/**9199**.
 

@@ -65,6 +65,7 @@ async function executeInjectedPortReplay(): Promise<void> {
     role: "original" as const,
     localPath: LOCAL_PATH,
     claimedSha256: sha256Bytes(bytes),
+    category: "invoice" as const,
   };
   const uploaded = await port.upload(input);
   assert.equal(uploaded.ok, true);

@@ -37,7 +37,7 @@ Client `claimedSha256` is a claim. Trusted verification streams stored bytes in 
 
 ## Authorization
 
-Trusted uid, active user (no pending_deletion exception), ledger owner + active, receipt exists, admission `newCommands=allow`. Auth uid wins over any body `ownerUid`. Cross-owner misses are `forbidden` (no existence leak). There is no global hash index.
+Trusted uid, active user (no pending_deletion exception), ledger owner + active, receipt exists, admission `newCommands=allow` for new commands and verify/link. Auth uid wins over any body `ownerUid`. Cross-owner misses are `forbidden` (no existence leak). There is no global hash index. Isolated Storage Rules allow owner reads of retained (`uploaded_unverified` / `verified` / `linked`) originals even when `newCommands=deny`; that does not weaken adapter verify/link admission.
 
 ## Bounds (technical, not legal/quota)
 

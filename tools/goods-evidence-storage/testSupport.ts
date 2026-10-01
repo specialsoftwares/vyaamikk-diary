@@ -5,7 +5,7 @@ import { FAKE_MemoryBlobStore } from "./FAKE_memoryBlobStore";
 import type { G2Clock, G2LifecycleResult, G2ReserveResult } from "./types";
 import type { VerifiedEvidenceResult } from "../../src/goodsEvidence/ports";
 
-export type EvidenceLabel = "STORAGE_EMULATOR" | "FIRESTORE_EMULATOR" | "INJECTED_PORT" | "PURE_DOMAIN";
+export type EvidenceLabel = "STORAGE_EMULATOR" | "FIRESTORE_EMULATOR" | "INJECTED_PORT" | "INJECTED" | "PURE_DOMAIN" | "SQLITE_HOST";
 
 export function evidenceLabel(label: EvidenceLabel, name: string): void {
   console.log(`[${label}] ${name}`);

@@ -94,6 +94,8 @@ export type EvidenceRecord = {
   originalFileName: string | null;
   reservationFingerprint: string;
   verifiedResult: VerifiedEvidenceResult | null;
+  derivativeKeys: string[];
+  lifecycleVersion: number;
   createdAtUtc: string;
   updatedAtUtc: string;
 };
@@ -113,6 +115,15 @@ export type G2LifecycleSuccess = {
   evidenceId: string;
   state: EvidenceObjectState;
   verified: VerifiedEvidenceResult | null;
+  ownerUid: string;
+  ledgerId: string;
+  receiptId: string;
+  category: string;
+  claimedSha256: string;
+  actualSha256: string | null;
+  reservationId: string;
+  claimedByteSize: number;
+  lifecycleVersion: number;
 };
 
 export type G2ReserveResult = G2ReserveSuccess | G2Deny;
