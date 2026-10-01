@@ -1,0 +1,66 @@
+export interface G1DocSnap {
+  readonly exists: boolean;
+  data(): Record<string, unknown> | undefined;
+}
+
+export interface G1DocRef {
+  readonly path: string;
+}
+
+export interface G1Transaction {
+  get(ref: G1DocRef): Promise<G1DocSnap>;
+  set(ref: G1DocRef, data: Record<string, unknown>): void;
+}
+
+export interface G1Firestore {
+  doc(path: string): G1DocRef;
+  runTransaction<T>(
+    fn: (tx: G1Transaction) => Promise<T>,
+    options?: { maxAttempts?: number }
+  ): Promise<T>;
+}
+
+export interface G1Clock {
+  nowMs: () => number;
+  uuid: () => string;
+}
+
+export interface TrustedCaller {
+  /** Authenticated Firebase uid. Null if unauthenticated. Not taken from the body. */
+  uid: string | null;
+}
+
+export interface G1Hooks {
+  /** Invoked after every determining read and before any write, per attempt. */
+  afterReads?: (attempt: number) => Promise<void> | void;
+}
+
+export type G1DenyCode =
+  | "unauthenticated"
+  | "forbidden"
+  | "policy_denied"
+  | "not_found"
+  | "invalid"
+  | "digest_conflict"
+  | "receipt_exists"
+  | "integrity"
+  | "serial_exhausted";
+
+export type G1RegisterSuccess = {
+  ok: true;
+  replayed: boolean;
+  receiptId: string;
+  issuedNumber: string;
+  serial: number;
+  serverRegisteredAtUtc: string;
+  eventVersion: number;
+  headHash: string;
+};
+
+export type G1RegisterResult = G1RegisterSuccess | { ok: false; code: G1DenyCode; detail: string };
+
+export type AdmissionPolicy = {
+  schemaVersion: 1;
+  newCommands: "allow" | "deny";
+  reconciliation: "allow" | "deny";
+};

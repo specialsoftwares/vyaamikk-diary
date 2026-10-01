@@ -10,8 +10,8 @@
       "autoIncrement": false,
       "env": {
         "EXPO_PUBLIC_APP_MODE": "production",
-        "EXPO_PUBLIC_SUBSCRIPTION_PURCHASE_ENTRY_ENABLED": "1",
-        "EXPO_PUBLIC_QUOTA_UPSELL_ENABLED": "1"
+        "EXPO_PUBLIC_SUBSCRIPTION_PURCHASE_ENTRY_ENABLED": "0",
+        "EXPO_PUBLIC_QUOTA_UPSELL_ENABLED": "0"
       },
       "android": {
         "buildType": "apk"
@@ -22,8 +22,8 @@
       "environment": "production",
       "env": {
         "EXPO_PUBLIC_APP_MODE": "production",
-        "EXPO_PUBLIC_SUBSCRIPTION_PURCHASE_ENTRY_ENABLED": "1",
-        "EXPO_PUBLIC_QUOTA_UPSELL_ENABLED": "1"
+        "EXPO_PUBLIC_SUBSCRIPTION_PURCHASE_ENTRY_ENABLED": "0",
+        "EXPO_PUBLIC_QUOTA_UPSELL_ENABLED": "0"
       },
       "android": {
         "buildType": "app-bundle"

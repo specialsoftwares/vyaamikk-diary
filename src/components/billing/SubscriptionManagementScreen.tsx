@@ -218,20 +218,23 @@ export function SubscriptionManagementScreen() {
           </>
         )}
         {subscription.error ? <LocaleUiText style={styles.error}>{subscription.error}</LocaleUiText> : null}
-        <PremiumActionButton
-          label={t("billing.management.upgradeCta")}
-          onPress={() => {
-            const result = runtime.bindPresentUpgrade(liveSession)();
-            if (!result.ok && result.reason !== "purchase_entry_closed") {
-              /* runtime already recorded upgradeError */
-            }
-          }}
-          disabled={storeBusy || !purchaseEntryOn}
-          accessibilityLabel={t("billing.management.upgradeCta")}
-        />
-        {upgradeErrorCopy ? <LocaleUiText style={styles.error}>{upgradeErrorCopy}</LocaleUiText> : null}
-        {!purchaseEntryOn ? (
+        {purchaseEntryOn ? (
+          <PremiumActionButton
+            label={t("billing.management.upgradeCta")}
+            onPress={() => {
+              const result = runtime.bindPresentUpgrade(liveSession)();
+              if (!result.ok && result.reason !== "purchase_entry_closed") {
+                /* runtime already recorded upgradeError */
+              }
+            }}
+            disabled={storeBusy}
+            accessibilityLabel={t("billing.management.upgradeCta")}
+          />
+        ) : (
           <LocaleUiText style={styles.muted}>{t("billing.management.purchaseEntryClosed")}</LocaleUiText>
+        )}
+        {purchaseEntryOn && upgradeErrorCopy ? (
+          <LocaleUiText style={styles.error}>{upgradeErrorCopy}</LocaleUiText>
         ) : null}
         <PremiumActionButton
           variant="secondary"

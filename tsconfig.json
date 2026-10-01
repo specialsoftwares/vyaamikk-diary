@@ -19,6 +19,7 @@
     "node_modules",
     "functions",
     "tools/onboarding-ux-harness",
+    "tools/goods-evidence-emulator",
     "services"
   ]
 }

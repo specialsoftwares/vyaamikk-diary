@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "target": "ES2022",
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/utils/sha256Hex": ["../../src/utils/sha256Hex.ts"]
+    }
+  },
+  "include": ["./**/*.ts", "../../src/goodsEvidence/canonical.ts", "../../src/goodsEvidence/constants.ts", "../../src/goodsEvidence/time.ts", "../../src/goodsEvidence/grinNumber.ts", "../../src/goodsEvidence/validate.ts", "../../src/goodsEvidence/quantities.ts", "../../src/goodsEvidence/types.ts", "../../src/goodsEvidence/ewb.ts", "../../src/goodsEvidence/snapshot.ts", "../../src/goodsEvidence/custody.ts", "../../src/goodsEvidence/command.ts"],
+  "exclude": ["./**/*.test.ts", "./harness.ts"]
+}
