@@ -84,6 +84,7 @@ async function executeInjectedPortReplay(): Promise<void> {
 async function main(): Promise<void> {
   runExistingG2("test:goods-evidence-g2-unit");
   await executeInjectedPortReplay();
+  const labels: Array<"INJECTED_PORT" | "STORAGE_EMULATOR" | "FIRESTORE_EMULATOR"> = ["INJECTED_PORT"];
   if (process.env.STORAGE_EMULATOR_HOST && process.env.FIRESTORE_EMULATOR_HOST) {
     const emu = spawnSync(
       "npx",
@@ -91,10 +92,11 @@ async function main(): Promise<void> {
       { cwd: root, stdio: "inherit", env: process.env }
     );
     if (emu.status !== 0) process.exit(emu.status ?? 1);
+    labels.push("STORAGE_EMULATOR", "FIRESTORE_EMULATOR");
   } else {
     console.log("CS-02 STORAGE_EMULATOR not run (STORAGE_EMULATOR_HOST / FIRESTORE_EMULATOR_HOST unset)");
   }
-  logWorkflowExecution("CS-02", ["INJECTED_PORT"]);
+  logWorkflowExecution("CS-02", labels);
 }
 
 void main().catch((e) => {

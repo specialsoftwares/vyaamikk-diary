@@ -1,5 +1,8 @@
 /**
  * CS-03 QA slice: SQLITE_HOST outbox owner isolation (no cross-owner list/dispatch).
+ * After A→B, A's captured session is retired (processed=0). Re-bind A to dispatch
+ * A's queued command. First WAVE2APP execution still expected stale A to issue —
+ * that assertion is pre-fence and is not the CS-03 property.
  * Not STORAGE_EMULATOR, not UI export, not NATIVE_DEVICE account-switch.
  */
 import assert from "node:assert/strict";
@@ -15,6 +18,7 @@ import { createFakeEvidenceUploadPort, createFakeGrinServerPort } from "@/servic
 import { openHostSqlite, SQLITE_HOST, type GrinSqlDb, type HostSqlite } from "@/services/grin/outbox/hostSqlite";
 import { GrinOutbox } from "@/services/grin/outbox/outbox";
 import { SQLITE_HOST_NOT_NATIVE_DEVICE } from "@/services/grin/outbox/types";
+import { createUninjectedGrinServerPort } from "@/services/grin/repository/uninjectedServer";
 
 import { logWorkflowExecution } from "../workflowEvidence";
 
@@ -52,22 +56,31 @@ async function main(): Promise<void> {
     const bFlush = await box.dispatchDue(sessionB, "worker_b");
     assert.equal(bFlush.processed, 0);
     assert.equal(server.serialsIssued, 0);
-    const aFlush = await box.dispatchDue(sessionA, "worker_a");
+    const staleAFlush = await box.dispatchDue(sessionA, "worker_a_stale");
+    assert.equal(staleAFlush.processed, 0, "A→B must retire A's dispatch session immediately");
+    assert.equal(box.isSessionCurrent(sessionA), false);
+    assert.equal(box.getRecord("owner_a", "ledger_1", "grcp_cs03_a")?.localState, "queued");
+    const sessionA2 = box.beginOwnerSession("owner_a");
+    assert.notEqual(sessionA2.dispatchGeneration, sessionA.dispatchGeneration);
+    const aFlush = await box.dispatchDue(sessionA2, "worker_a_rebind");
     const issued = aFlush.results.find((r) => r.commandId === "gcmd_cs03_a");
     assert.equal(issued?.localState, "issued");
     assert.equal(box.getRecord("owner_a", "ledger_1", "grcp_cs03_a")?.ownerUid, "owner_a");
     assert.equal(box.getRecord("owner_b", "ledger_1", "grcp_cs03_a"), null);
+    assert.equal(server.serialsIssued, 1);
 
     const {
       getGrinApplicationRepository,
       resetGrinApplicationRepositoryForTests,
       retireGrinOwnerSession,
       setGrinApplicationDbFactoryForTests,
+      setGrinServerPortFactoryForTests,
       startGrinOwnerSession,
     } = await import("@/services/grin/repository/appBinding");
     const { GRIN_BINDING_RETIRED } = await import("@/services/grin/repository/sessionErrors");
     resetGrinApplicationRepositoryForTests();
     setGrinApplicationDbFactoryForTests(() => db);
+    setGrinServerPortFactoryForTests(() => createUninjectedGrinServerPort());
     const genA = startGrinOwnerSession("owner_cs03_bind");
     const staleGet = () => getGrinApplicationRepository("owner_cs03_bind", genA.dispatchGeneration);
     staleGet().list();
