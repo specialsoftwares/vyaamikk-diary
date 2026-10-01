@@ -8,35 +8,55 @@
 import { env } from "@/config/env";
 
 import {
-  SAFE_DIAGNOSTIC_FAILED,
-  SAFE_FALLBACK_SCOPE,
   classifyLogMessage,
   classifyScope,
-  inspectWithoutThrowing,
   sanitizeLogMetadata,
+  type SafeMetaValue,
 } from "./safeDiagnostics";
 
 type Level = "debug" | "info" | "warn" | "error";
+type Sink = (...args: unknown[]) => void;
+
+function selectSink(level: Level): Sink {
+  if (level === "error") return console.error;
+  if (level === "warn") return console.warn;
+  return console.log;
+}
+
+function writeSink(sink: Sink, args: unknown[]): void {
+  try {
+    sink(...args);
+  } catch {
+    // Broken sinks must not throw into application code or retry with raw input.
+  }
+}
 
 function emit(level: Level, scope: string, message: string, data?: unknown) {
   if (env.isProduction && (level === "debug" || level === "info")) return;
-  const fn =
-    level === "error"
-      ? console.error
-      : level === "warn"
-        ? console.warn
-        : console.log;
+  let sink: Sink;
   try {
-    inspectWithoutThrowing(data);
+    sink = selectSink(level);
+  } catch {
+    return;
+  }
+  try {
     const safeScope = classifyScope(scope);
     const classified = classifyLogMessage(typeof message === "string" ? message : "");
+    const payload = Object.create(null) as Record<string, SafeMetaValue>;
+    payload.event = classified.event;
     const meta = sanitizeLogMetadata(data);
-    const payload = meta
-      ? { ...meta, event: classified.event }
-      : { event: classified.event };
-    fn(`[${safeScope}]`, classified.summary, payload);
+    if (meta) {
+      for (const key of Object.keys(meta)) {
+        if (key === "event") continue;
+        const value = meta[key];
+        if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+          payload[key] = value;
+        }
+      }
+    }
+    writeSink(sink, [`[${safeScope}]`, classified.summary, payload]);
   } catch {
-    fn(`[${SAFE_FALLBACK_SCOPE}]`, SAFE_DIAGNOSTIC_FAILED, { event: SAFE_DIAGNOSTIC_FAILED });
+    return;
   }
 }
 

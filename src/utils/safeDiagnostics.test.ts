@@ -14,7 +14,6 @@ import {
   classifyLogMessage,
   classifyScope,
   createSafeDiagnosticError,
-  inspectWithoutThrowing,
   sanitizeLogMetadata,
 } from "./safeDiagnostics";
 
@@ -23,8 +22,8 @@ const DOC = "WIDGET-BATCH-Q7-LEDGER";
 const QUERY = "SYNTHETIC_VALUE_Q7";
 
 function assertNoSensitive(value: unknown): void {
-  const blob = JSON.stringify(value);
-  assert.doesNotMatch(blob, new RegExp(EMAIL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  const blob = JSON.stringify(value) ?? "null";
+  assert.doesNotMatch(blob, /alice\.reviewer@example\.invalid/);
   assert.doesNotMatch(blob, /WIDGET-BATCH-Q7-LEDGER/);
   assert.doesNotMatch(blob, /SYNTHETIC_VALUE_Q7/);
   assert.doesNotMatch(blob, /password=VALUE/);
@@ -50,6 +49,10 @@ function assertNoSensitive(value: unknown): void {
   assert.equal(callable.event, "identity_callable_failed");
   const badCallable = classifyLogMessage(`callable ${EMAIL} failed`);
   assert.equal(badCallable.event, SAFE_UNCLASSIFIED_EVENT);
+  for (const protoName of ["constructor", "toString", "valueOf", "__proto__"]) {
+    const mapped = classifyLogMessage(protoName);
+    assert.equal(mapped.event, SAFE_UNCLASSIFIED_EVENT, protoName);
+  }
 }
 
 {
@@ -72,12 +75,14 @@ function assertNoSensitive(value: unknown): void {
     html: `<!DOCTYPE html><html><body>${DOC}</body></html>`,
     customData: { email: EMAIL },
     notes: DOC,
+    event: "WIDGET-BATCH-Q7-LEDGER",
     code: "UNCAUGHT_JS_ERROR",
     stage: "ROUTER_READY",
     count: 3,
     ms: 40,
     retryable: true,
     op: "save",
+    attemptId: "SYNTHETIC_VALUE_Q7",
   });
   assert.ok(meta);
   assert.equal(meta!.code, "UNCAUGHT_JS_ERROR");
@@ -86,10 +91,54 @@ function assertNoSensitive(value: unknown): void {
   assert.equal(meta!.ms, 40);
   assert.equal(meta!.retryable, true);
   assert.equal(meta!.op, "save");
+  assert.equal(meta!.event, undefined);
+  assert.equal(meta!.attemptId, undefined);
   assert.equal(meta!.email, undefined);
   assert.equal(meta!.href, undefined);
   assert.equal(meta!.message, undefined);
   assertNoSensitive(meta);
+}
+
+{
+  const rejected = sanitizeLogMetadata({
+    code: "WIDGET-BATCH-Q7-LEDGER",
+    attemptId: "SYNTHETIC_VALUE_Q7",
+    event: "SYNTHETIC_VALUE_Q7",
+  });
+  assert.equal(rejected, undefined);
+}
+
+{
+  const reserved = sanitizeLogMetadata(
+    JSON.parse('{"constructor":"SYNTHETIC_VALUE_Q7","toString":"WIDGET-BATCH-Q7-LEDGER"}')
+  );
+  assert.equal(reserved, undefined);
+  assertNoSensitive(reserved);
+
+  const inherited = Object.create({
+    code: "WIDGET-BATCH-Q7-LEDGER",
+    count: 99,
+  });
+  inherited.stage = "BOOT";
+  const inheritedMeta = sanitizeLogMetadata(inherited);
+  assert.equal(inheritedMeta?.stage, "BOOT");
+  assert.equal(inheritedMeta?.code, undefined);
+  assert.equal(inheritedMeta?.count, undefined);
+  assertNoSensitive(inheritedMeta);
+
+  const proxy = new Proxy(
+    { stage: "BOOT" },
+    {
+      getOwnPropertyDescriptor(target, prop) {
+        if (prop === "count") throw new Error(`desc ${QUERY}`);
+        return Reflect.getOwnPropertyDescriptor(target, prop);
+      },
+    }
+  );
+  const proxyMeta = sanitizeLogMetadata(proxy);
+  assert.equal(proxyMeta?.stage, "BOOT");
+  assert.equal(proxyMeta?.count, undefined);
+  assertNoSensitive(proxyMeta);
 }
 
 {
@@ -112,33 +161,36 @@ function assertNoSensitive(value: unknown): void {
 {
   const cyclic: Record<string, unknown> = { code: "save_failed", self: null };
   cyclic.self = cyclic;
-  assert.equal(inspectWithoutThrowing(cyclic), "ok");
   const meta = sanitizeLogMetadata(cyclic);
   assert.equal(meta?.code, "save_failed");
   assertNoSensitive(meta);
 }
 
 {
-  const huge = { attemptId: "x".repeat(5000), code: "unknown" };
-  const meta = sanitizeLogMetadata(huge);
-  assert.equal(meta?.attemptId, undefined);
-  assert.equal(meta?.code, "unknown");
-}
-
-{
-  const poisoned = {};
+  let allowedGets = 0;
+  let unknownGets = 0;
+  const poisoned: Record<string, unknown> = {};
   Object.defineProperty(poisoned, "count", {
     enumerable: true,
     get() {
+      allowedGets += 1;
       throw new Error(`getter boom ${EMAIL} ${DOC}`);
+    },
+  });
+  Object.defineProperty(poisoned, "notes", {
+    enumerable: true,
+    get() {
+      unknownGets += 1;
+      return DOC;
     },
   });
   Object.defineProperty(poisoned, "stage", {
     enumerable: true,
     value: "BOOT",
   });
-  assert.equal(inspectWithoutThrowing(poisoned), "ok");
   const meta = sanitizeLogMetadata(poisoned);
+  assert.equal(allowedGets, 0);
+  assert.equal(unknownGets, 0);
   assert.equal(meta?.stage, "BOOT");
   assert.equal(meta?.count, undefined);
   assertNoSensitive(meta);

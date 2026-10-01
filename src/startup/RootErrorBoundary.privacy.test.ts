@@ -115,16 +115,42 @@ __setRuntimeSignalsForTests({
 {
   const origError = console.error;
   console.error = () => {};
-  let retried = false;
-  const retry = () => {
-    retried = true;
-  };
+  let helperCompleted = false;
   assert.doesNotThrow(() => {
     reportUncaughtRenderError(new Error(`boom ${EMAIL}`));
-    retry();
+    helperCompleted = true;
   });
-  assert.equal(retried, true, "reporting must not stop Retry");
+  assert.equal(helperCompleted, true, "reporting helper must complete");
   console.error = origError;
+}
+
+{
+  const origError = console.error;
+  console.error = () => {
+    throw new Error("SYNTHETIC_SINK_FAILURE");
+  };
+  const calls: { kind: string }[] = [];
+  __resetCrashReportingForTests();
+  __setCrashlyticsClientForTests({
+    setCrashlyticsCollectionEnabled: async () => {},
+    log: () => {
+      calls.push({ kind: "log" });
+    },
+    recordError: () => {
+      calls.push({ kind: "recordError" });
+    },
+    setUserId: () => {},
+  });
+  setCrashReportingEnabled(true);
+  assert.doesNotThrow(() =>
+    reportUncaughtRenderError(new Error(`sink ${EMAIL} ${DOC}`))
+  );
+  assert.ok(
+    calls.some((row) => row.kind === "recordError"),
+    "log sink failure must not prevent recordError"
+  );
+  console.error = origError;
+  __resetCrashReportingForTests();
 }
 
 __setRuntimeSignalsForTests(null);
