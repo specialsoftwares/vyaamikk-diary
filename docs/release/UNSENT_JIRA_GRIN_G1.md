@@ -32,3 +32,7 @@ Combined head `3fe5c46775ec0f146fb6af549885771ffbcff68d` on `integration/grin-g1
 
 Inspected combined `2593c2be6964955ecb1a433dc93c4096168ce9d2`. Combined advanced to `6b2690315ae746013a02a982f4c76a75d9ac3915` (W2-05 orchestrator extract + T5 `c2ef669` CS-02 test, not W2-03 approval). W2-01…W2-06 assigned on isolated `integration/grin-g1-g5-source`. Functions still unexported. Live Rules unchanged. versionCode 23. Purchase-entry flags `"0"`. Do not mark G6/device/billing/public-release Done. `gh` unauthenticated — no combined PR from this environment. Manual compare: https://github.com/specialsoftwares/vyaamikk-diary/compare/main...integration/grin-g1-g5-source
 
+## Team 5 Wave 2 PHASE 1 reproductions (unsent, 2026-10-02)
+
+`bff108c3d20a6806fad70e99b7c0bfe01d3e038c` on `team/grin-t5-qa`. Independently reproduced W2-01…W2-05 against `6b26903`. Mapping is not closure. Wave 2 not accepted. Native/TalkBack/Play/live GST/2B not run. Do not mark G6/device/billing/public-release Done.
+
