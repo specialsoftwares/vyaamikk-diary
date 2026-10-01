@@ -14,6 +14,8 @@ export const GRIN_FUNCTIONS_ENV = "GRIN_GOODS_EVIDENCE_FUNCTIONS";
 export const GRIN_REGISTER_CALLABLE = "grinRegisterGoodsReceipt";
 export const GRIN_RECONCILE_CALLABLE = "grinReconcileCommand";
 export const GRIN_MUTATE_CALLABLE = "grinMutateGoodsReceipt";
+export const GRIN_READ_CALLABLE = "grinReadGoodsReceipt";
+export const GRIN_UPLOAD_EVIDENCE_CALLABLE = "grinUploadEvidence";
 
 export type GrinFunctionsDeny = {
   ok: false;
@@ -55,6 +57,24 @@ export async function handleGrinReconcile(
 export async function handleGrinMutation(
   uid: string | null,
   _envelope: unknown
+): Promise<GrinFunctionsDeny> {
+  if (!uid) return deny("unauthenticated");
+  if (!grinFunctionsEnabled()) return deny("policy_denied");
+  return deny("policy_denied");
+}
+
+export async function handleGrinRead(
+  uid: string | null,
+  _input: unknown
+): Promise<GrinFunctionsDeny> {
+  if (!uid) return deny("unauthenticated");
+  if (!grinFunctionsEnabled()) return deny("policy_denied");
+  return deny("policy_denied");
+}
+
+export async function handleGrinUploadEvidence(
+  uid: string | null,
+  _input: unknown
 ): Promise<GrinFunctionsDeny> {
   if (!uid) return deny("unauthenticated");
   if (!grinFunctionsEnabled()) return deny("policy_denied");

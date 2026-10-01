@@ -3,8 +3,8 @@
  *
  * INJECTED / EMULATOR / not live deploy. Not exported from functions/src/index.ts.
  * When GRIN_GOODS_EVIDENCE_FUNCTIONS is exactly "true" and tests/emulator inject
- * GoodsEvidenceRegisterAdapter, register / reconcile / mutate run through that
- * adapter. Any other env value is fail-closed deny.
+ * GoodsEvidenceRegisterAdapter, register / reconcile / mutate / readReceipt run
+ * through that adapter. Any other env value, or an unbound adapter, is fail-closed deny.
  *
  * Owner identity is request.auth.uid / AuthData.uid only. Client uid, ownerUid,
  * and digest are not server authority. Digest is recomputed inside the adapter.
@@ -12,7 +12,9 @@
 
 import { grinFunctionsEnabled } from "./callables";
 import type {
+  GrinConfirmedProjection,
   GrinMutationResult,
+  GrinReceiptReadResult,
   GrinReconcileResult,
   GrinRegisterResult,
 } from "./ports";
@@ -48,14 +50,20 @@ export type ComposedGrinAdapter = {
   voidWithReason(caller: TrustedCaller, envelope: unknown): Promise<GrinMutationResult>;
   recordEwbObservation(caller: TrustedCaller, envelope: unknown): Promise<GrinMutationResult>;
   linkVerifiedEvidence(caller: TrustedCaller, envelope: unknown): Promise<GrinMutationResult>;
+  readReceipt(caller: TrustedCaller, input: unknown): Promise<GrinReceiptReadResult>;
 };
+
+export type ComposedRegisterResult = GrinRegisterResult & { confirmed?: GrinConfirmedProjection };
+export type ComposedMutationResult = GrinMutationResult & { confirmed?: GrinConfirmedProjection };
+export type ComposedReconcileResult = GrinReconcileResult & { confirmed?: GrinConfirmedProjection };
 
 export type ComposedGrinCallables = {
   compositionKind: "UNDEPLOYED_COMPOSED";
   compositionLabel: "INJECTED / EMULATOR / not live deploy";
-  register(request: GrinCallableRequest): Promise<GrinRegisterResult>;
-  reconcile(request: GrinCallableRequest): Promise<GrinReconcileResult>;
-  mutate(request: GrinCallableRequest): Promise<GrinMutationResult>;
+  register(request: GrinCallableRequest): Promise<ComposedRegisterResult>;
+  reconcile(request: GrinCallableRequest): Promise<ComposedReconcileResult>;
+  mutate(request: GrinCallableRequest): Promise<ComposedMutationResult>;
+  readReceipt(request: GrinCallableRequest): Promise<GrinReceiptReadResult>;
 };
 
 function deny<C extends "unauthenticated" | "policy_denied" | "invalid">(
@@ -102,10 +110,66 @@ export function trustedReconcileInput(data: unknown): unknown {
   };
 }
 
+export function trustedReadInput(data: unknown): unknown {
+  if (!isPlainObject(data)) return data;
+  const source = isPlainObject(data.envelope) ? data.envelope : data;
+  return {
+    ledgerId: source.ledgerId,
+    receiptId: source.receiptId,
+  };
+}
+
 function envelopeType(data: unknown): string | undefined {
   if (!isPlainObject(data)) return undefined;
   const source = isPlainObject(data.envelope) ? data.envelope : data;
   return typeof source.type === "string" ? source.type : undefined;
+}
+
+function ledgerIdOf(data: unknown): unknown {
+  if (!isPlainObject(data)) return undefined;
+  const source = isPlainObject(data.envelope) ? data.envelope : data;
+  return source.ledgerId;
+}
+
+function confirmedMatches(
+  confirmed: GrinConfirmedProjection,
+  result: { receiptId: string; eventVersion: number; headHash: string }
+): boolean {
+  return (
+    confirmed.receiptId === result.receiptId &&
+    confirmed.eventVersion === result.eventVersion &&
+    confirmed.headHash === result.headHash
+  );
+}
+
+async function attachConfirmedIfValid<
+  T extends { ok: boolean } & Partial<{ receiptId: string; eventVersion: number; headHash: string }>,
+>(
+  adapter: ComposedGrinAdapter,
+  uid: string,
+  data: unknown,
+  result: T
+): Promise<T & { confirmed?: GrinConfirmedProjection }> {
+  if (!result.ok) return result;
+  if (typeof result.receiptId !== "string") return result;
+  if (typeof result.eventVersion !== "number") return result;
+  if (typeof result.headHash !== "string") return result;
+  const ledgerId = ledgerIdOf(data);
+  if (typeof ledgerId !== "string") return result;
+  try {
+    const read = await adapter.readReceipt({ uid }, { ledgerId, receiptId: result.receiptId });
+    if (!read.ok) return result;
+    if (!confirmedMatches(read.confirmed, {
+      receiptId: result.receiptId,
+      eventVersion: result.eventVersion,
+      headHash: result.headHash,
+    })) {
+      return result;
+    }
+    return { ...result, confirmed: read.confirmed };
+  } catch {
+    return result;
+  }
 }
 
 function dispatchMutation(
@@ -136,21 +200,21 @@ function dispatchMutation(
 }
 
 export function createComposedGrinCallables(deps: {
-  adapter: ComposedGrinAdapter;
+  adapter?: ComposedGrinAdapter | null;
   env?: NodeJS.ProcessEnv;
 }): ComposedGrinCallables {
   const env = deps.env ?? process.env;
-  const adapter = deps.adapter;
+  const adapter = deps.adapter ?? null;
 
   function authorize(
     request: GrinCallableRequest
   ):
-    | { ok: true; uid: string }
+    | { ok: true; uid: string; adapter: ComposedGrinAdapter }
     | { ok: false; result: { ok: false; code: "unauthenticated" | "policy_denied"; detail: "denied" } } {
     const uid = uidFromAuth(request.auth);
     if (!uid) return { ok: false, result: deny("unauthenticated") };
-    if (!grinFunctionsEnabled(env)) return { ok: false, result: deny("policy_denied") };
-    return { ok: true, uid };
+    if (!grinFunctionsEnabled(env) || adapter == null) return { ok: false, result: deny("policy_denied") };
+    return { ok: true, uid, adapter };
   }
 
   return {
@@ -159,19 +223,32 @@ export function createComposedGrinCallables(deps: {
     async register(request) {
       const authz = authorize(request);
       if (!authz.ok) return authz.result;
-      return adapter.register({ uid: authz.uid }, trustedCommandEnvelope(request.data));
+      const result = await authz.adapter.register({ uid: authz.uid }, trustedCommandEnvelope(request.data));
+      return attachConfirmedIfValid(authz.adapter, authz.uid, request.data, result);
     },
     async reconcile(request) {
       const authz = authorize(request);
       if (!authz.ok) return authz.result;
-      return adapter.reconcile({ uid: authz.uid }, trustedReconcileInput(request.data));
+      const result = await authz.adapter.reconcile({ uid: authz.uid }, trustedReconcileInput(request.data));
+      return attachConfirmedIfValid(authz.adapter, authz.uid, request.data, result);
     },
     async mutate(request) {
       const authz = authorize(request);
       if (!authz.ok) return authz.result;
       const type = envelopeType(request.data);
       if (!type) return deny("invalid");
-      return dispatchMutation(adapter, authz.uid, trustedCommandEnvelope(request.data), type);
+      const result = await dispatchMutation(
+        authz.adapter,
+        authz.uid,
+        trustedCommandEnvelope(request.data),
+        type
+      );
+      return attachConfirmedIfValid(authz.adapter, authz.uid, request.data, result);
+    },
+    async readReceipt(request) {
+      const authz = authorize(request);
+      if (!authz.ok) return authz.result;
+      return authz.adapter.readReceipt({ uid: authz.uid }, trustedReadInput(request.data));
     },
   };
 }

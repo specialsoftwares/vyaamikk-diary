@@ -59,6 +59,15 @@ export function wrapAdminFirestore(db: AdminDb): G1Firestore {
           set(ref, data) {
             tx.set(db.doc(ref.path), JSON.parse(JSON.stringify(data)) as Record<string, unknown>);
           },
+          async list(collectionPath) {
+            const querySnap = await tx.get(db.collection(collectionPath));
+            return querySnap.docs.map((doc) => ({
+              id: doc.id,
+              path: doc.ref.path,
+              exists: doc.exists,
+              data: () => doc.data() as Record<string, unknown> | undefined,
+            }));
+          },
         };
         return await fn(wrapped);
       }, options);

@@ -12,6 +12,7 @@
 
 import type {
   GrinMutationResult,
+  GrinReceiptReadResult,
   GrinReconcileResult,
   GrinRegisterResult,
 } from "../../src/goodsEvidence/ports";
@@ -25,6 +26,11 @@ import { GoodsEvidenceRegisterAdapter } from "./adapter";
 export type InjectedGrinServerPort = GrinServerCommandPort & {
   portKind: "INJECTED";
   mutate: NonNullable<GrinServerCommandPort["mutate"]>;
+  readReceipt(input: {
+    uid: string;
+    ledgerId: string;
+    receiptId: string;
+  }): Promise<GrinReceiptReadResult>;
 };
 
 function adapterEnvelope(
@@ -96,6 +102,16 @@ export function createInjectedGrinServerPort(adapter: GoodsEvidenceRegisterAdapt
     }): Promise<GrinMutationResult> {
       void input.digest;
       return dispatchMutation(adapter, input.uid, input.envelope);
+    },
+    async readReceipt(input: {
+      uid: string;
+      ledgerId: string;
+      receiptId: string;
+    }): Promise<GrinReceiptReadResult> {
+      return adapter.readReceipt(
+        { uid: input.uid },
+        { ledgerId: input.ledgerId, receiptId: input.receiptId }
+      );
     },
   };
   return port;

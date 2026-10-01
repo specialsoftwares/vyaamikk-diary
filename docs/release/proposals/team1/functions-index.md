@@ -25,6 +25,8 @@ this programme. Suggested names (do not export yet):
 - `grinRegisterGoodsReceipt`
 - `grinReconcileCommand`
 - `grinMutateGoodsReceipt`
+- `grinReadGoodsReceipt` (F2 authorized confirmed retrieve; undeployed)
+- `grinUploadEvidence` (F4 mobile JS evidence client; fail-closed when unexported; not a Storage adapter)
 
 If wrapping as Cloud Functions v2 `onCall`, take identity from `request.auth.uid`
 only. Example:
