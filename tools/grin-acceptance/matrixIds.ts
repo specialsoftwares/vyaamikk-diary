@@ -3,7 +3,7 @@
  * Human source of truth: docs/release/GRIN_ACCEPTANCE_MATRIX.md
  * This module must stay in lockstep with table IDs in that file.
  *
- * Combined workflows are not executed here. Stubs only prove IDs exist.
+ * ID catalogue only. Combined CS workflows are not executed from runIds.ts.
  */
 
 export const EVIDENCE_LABELS = [

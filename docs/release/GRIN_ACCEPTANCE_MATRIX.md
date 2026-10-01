@@ -7,7 +7,9 @@ Ancestry on this branch: HEAD of `docs/release/GRIN_INTERFACE_CONTRACT.md` plus 
 
 Team 5 does **not** approve G1–G5 implementations. Presence of a path is an observation, not acceptance. Another agent reviewing this work is an extra review layer, not external certification or human sign-off.
 
-Wave 1 automated evidence in `tools/grin-acceptance/**` only asserts that these IDs exist. Combined workflows are not executed and must not be reported as passing.
+`npx --yes tsx tools/grin-acceptance/runIds.ts` passing means **matrix IDs exist**. It is **not** CS-01…CS-11 workflow evidence and must not be reported as a combined-scenario pass.
+
+Wave 2 ER-4/ER-5 executions (when present) live in `tools/grin-acceptance/startup/**` and `tools/grin-acceptance/workflows/**`, mapped in `docs/release/proposals/team5/WAVE2_ER45.md`. Those greens still use statuses below (`path_present_unapproved` / `tbd` / `device_pending`). They are not G6, not production admission, and not a row status of `complete` / `accepted` / `pass` / `done` / `approved`.
 
 ## Evidence labels
 
@@ -222,17 +224,17 @@ Host/emulator labels may be used for later Wave 2 fills. `NATIVE_DEVICE` and `PL
 
 | ID | Slice | Requirement | Implementation path | Evidence labels | Status |
 |---|---|---|---|---|---|
-| CS-01 | G3+G1 | Offline receipt → restart → reconnect → exactly one issued GRIN | TBD outbox + G1 replay/reconcile; native death is DEV-01 | SQLITE_HOST+FIRESTORE_EMULATOR | tbd |
-| CS-02 | G2+G1 | Upload completes but response/link fails → safe recovery (no silent second verified object; `orphan_pending_review` or equivalent) | TBD G2 lifecycle | STORAGE_EMULATOR+FIRESTORE_EMULATOR | tbd |
-| CS-03 | G2+G3+G4+G5 | Account change during save/upload/export → no cross-account publication | TBD outbox + Storage + export adapters | SQLITE_HOST+STORAGE_EMULATOR+FIRESTORE_EMULATOR+MOUNTED_REACT_INERT_NATIVE | tbd |
-| CS-04 | G1 | Two concurrent registrations → unique scoped serials (distinct receipts share owner+ledger+FY counter without duplicate serials; identical commandId collapses to one issue + replay) | `tools/goods-evidence-emulator/register.emulator.test.ts` (unapproved observation) | FIRESTORE_EMULATOR | path_present_unapproved |
-| CS-05 | G4 | Two amendments against one version → controlled `version_conflict`; matching digest replay remains zero extra events | `src/goodsEvidence/ledger.ts` (simulated); durable adapter TBD | PURE_DOMAIN | path_present_unapproved |
-| CS-06 | G4 | Partial rejection/return → conserved quantities and preserved original physical-received / original custody | `src/goodsEvidence/quantities.ts`; `ledger.ts` | PURE_DOMAIN | path_present_unapproved |
-| CS-07 | G2+G5 | Missing/replaced/tampered evidence → incomplete or rejected pack; derivatives cannot complete a missing original | `src/goodsEvidence/evidencePack.ts`; Storage generation TBD | PURE_DOMAIN+STORAGE_EMULATOR | tbd |
-| CS-08 | G4 | EWB cancellation → retained facts without fabricated movement; delivery does not cancel EWB; unknown `goodsMoved` stays unknown | `src/goodsEvidence/ewb.ts` | PURE_DOMAIN | path_present_unapproved |
-| CS-09 | G4+G5 | Missing 2B/supplier data → unknown / `unknown_incomplete_source`, not automatic compliance clearance; ITC stays `not_determined` | `src/goodsEvidence/exceptions.ts` | PURE_DOMAIN | path_present_unapproved |
-| CS-10 | G1+G3 | Failure after commit → replay of the original result (`replayed: true`, zero writes, same issued number) | `tools/goods-evidence-emulator/adapter.ts`; outbox TBD | FIRESTORE_EMULATOR | path_present_unapproved |
-| CS-11 | core | Existing diary / PO / credit / pack / letterhead behavior remains intact (see REG-*) | `src/goodsEvidence/isolation.contract.test.ts`; existing suite pointers in REG-* | PURE_DOMAIN+MOUNTED_REACT_INERT_NATIVE | path_present_unapproved |
+| CS-01 | G3+G1 | Offline receipt → restart → reconnect → exactly one issued GRIN | `tools/grin-interop/cs01-offline-restart-register.sqliteHost.test.ts` via `npm run test:grin-interop` (Team 3; not duplicated). Host reopen is not NATIVE_DEVICE (DEV-01 still `device_pending`). `runIds.ts` CS-01 stub is **not** this evidence. | SQLITE_HOST+INJECTED_PORT | path_present_unapproved |
+| CS-02 | G2+G1 | Upload completes but response/link fails → safe recovery (no silent second verified object; `orphan_pending_review` or equivalent) | `tools/grin-acceptance/workflows/cs02-upload-link.injected.test.ts` (G2 INJECTED_PORT orphan); G1 link + STORAGE_EMULATOR not executed | INJECTED_PORT+STORAGE_EMULATOR+FIRESTORE_EMULATOR | path_present_unapproved |
+| CS-03 | G2+G3+G4+G5 | Account change during save/upload/export → no cross-account publication | `tools/grin-acceptance/workflows/cs03-account-change.sqliteHost.test.ts` (outbox owner isolation only); Storage/export/UI not executed | SQLITE_HOST+STORAGE_EMULATOR+FIRESTORE_EMULATOR+MOUNTED_REACT_INERT_NATIVE | path_present_unapproved |
+| CS-04 | G1 | Two concurrent registrations → unique scoped serials (distinct receipts share owner+ledger+FY counter without duplicate serials; identical commandId collapses to one issue + replay) | `tools/grin-acceptance/workflows/cs04-concurrent-serials.injected.test.ts`; emulator file needs `FIRESTORE_EMULATOR_HOST` | INJECTED_PORT+FIRESTORE_EMULATOR | path_present_unapproved |
+| CS-05 | G4 | Two amendments against one version → controlled `version_conflict`; matching digest replay remains zero extra events | `tools/grin-acceptance/workflows/cs05-amendment-conflict.injected.test.ts` (durable G1 adapter) | INJECTED_PORT | path_present_unapproved |
+| CS-06 | G4 | Partial rejection/return → conserved quantities and preserved original physical-received / original custody | `tools/grin-acceptance/workflows/cs06-partial-return.injected.test.ts` | INJECTED_PORT | path_present_unapproved |
+| CS-07 | G2+G5 | Missing/replaced/tampered evidence → incomplete or rejected pack; derivatives cannot complete a missing original | `tools/grin-acceptance/workflows/cs07-tampered-evidence-pack.test.ts`; STORAGE_EMULATOR generation mismatch not executed here | PURE_DOMAIN+INJECTED_PORT+STORAGE_EMULATOR | path_present_unapproved |
+| CS-08 | G4 | EWB cancellation → retained facts without fabricated movement; delivery does not cancel EWB; unknown `goodsMoved` stays unknown | `tools/grin-acceptance/workflows/cs08-ewb-cancellation.test.ts` (no live GST/EWB portal) | PURE_DOMAIN | path_present_unapproved |
+| CS-09 | G4+G5 | Missing 2B/supplier data → unknown / `unknown_incomplete_source`, not automatic compliance clearance; ITC stays `not_determined` | `tools/grin-acceptance/workflows/cs09-missing-2b-supplier.test.ts` (no live GST portal) | PURE_DOMAIN | path_present_unapproved |
+| CS-10 | G1+G3 | Failure after commit → replay of the original result (`replayed: true`, zero writes, same issued number) | `tools/grin-acceptance/workflows/cs10-replay-after-commit.injected.test.ts`; Functions unexported; outbox lost-response not this file | INJECTED_PORT+FIRESTORE_EMULATOR | path_present_unapproved |
+| CS-11 | core | Existing diary / PO / credit / pack / letterhead behavior remains intact (see REG-*) | `tools/grin-acceptance/workflows/cs11-existing-product.test.ts` isolation only; REG-* / MOUNTED not re-run; diary row also ER-4 SQLITE_HOST | PURE_DOMAIN+MOUNTED_REACT_INERT_NATIVE | path_present_unapproved |
 
 ---
 
@@ -299,4 +301,5 @@ Not authorized in this programme. Rows are placeholders.
 - G1–G5 production implementations are **not** accepted.
 - G6 is **not** complete.
 - Device, billing, and public release are **not** complete.
-- Wave 1 `tools/grin-acceptance` greens mean “matrix IDs exist”, not “combined workflows pass”.
+- `runIds.ts` greens mean “matrix IDs exist”, not “combined workflows pass”.
+- Wave 2 is **not** accepted. G6 / device / billing / public release stay not Done.

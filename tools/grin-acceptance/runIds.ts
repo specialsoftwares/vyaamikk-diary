@@ -14,4 +14,6 @@ import "./security/security.rows.test";
 import "./slices/g1-g6-and-regression.test";
 import "./device/pending.rows.test";
 
-console.log("grin-acceptance runIds: matrix id stubs only; combined workflows not executed");
+console.log(
+  "grin-acceptance runIds: matrix ID presence only; not CS-01…CS-11 workflow evidence (see runWorkflows.ts / WAVE2_ER45.md)"
+);
