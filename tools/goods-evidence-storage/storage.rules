@@ -1,0 +1,65 @@
+rules_version = '2';
+
+/**
+ * Isolated G2 Storage Rules proposal copy for the emulator. Not live Rules.
+ * Do not deploy from this file. Reviewed text: docs/release/proposals/team2/storage.rules.grin.md
+ */
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function allowedGrinOriginalMime() {
+      return request.resource.contentType == 'application/pdf'
+        || request.resource.contentType == 'image/jpeg'
+        || request.resource.contentType == 'image/png'
+        || request.resource.contentType == 'image/webp';
+    }
+
+    function withinOriginalSize() {
+      return request.resource.size < 15 * 1024 * 1024
+        && (
+          request.resource.contentType == 'application/pdf'
+            ? request.resource.size < 15 * 1024 * 1024
+            : request.resource.size < 10 * 1024 * 1024
+        );
+    }
+
+    function noClientVerificationMetadata() {
+      return !('rawSha256' in request.resource.metadata)
+        && !('verified' in request.resource.metadata)
+        && !('state' in request.resource.metadata)
+        && !('generationBind' in request.resource.metadata)
+        && !('verifiedAtUtc' in request.resource.metadata);
+    }
+
+    match /users/{userId}/grinEvidence/{objectKey}/original {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId)
+                    && resource == null
+                    && allowedGrinOriginalMime()
+                    && withinOriginalSize()
+                    && noClientVerificationMetadata();
+      allow update, delete: if false;
+    }
+
+    match /users/{userId}/grinEvidence/{objectKey}/derivatives/{derivativeKey} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId)
+                    && resource == null
+                    && request.resource.size < 2 * 1024 * 1024
+                    && request.resource.contentType.matches('image/.*')
+                    && noClientVerificationMetadata();
+      allow update, delete: if false;
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
