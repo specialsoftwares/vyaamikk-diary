@@ -18,13 +18,16 @@ Exact source-to-installed-vc22 correspondence: **UNVERIFIED**.
 | Resolver-failure owner-change head | `c139507961b890c79a72f053158ade86d4b957d2` |
 | **Accepted application head (frozen)** | `7e9e66055db20d5289424c61347bc72a64fd94e3` |
 | Application CI (do not attach to later docs-only SHAs) | run `36864750074` / job `110377363521` / merge-ref `68d8b7fc4368414432b6a9ea0cbbd2d7f16a55da` |
+| Docs-only preflight SHA | `cca0c5b8d2cb21f519ba40af5889f20e4b763711` |
+| **VersionCode source SHA (proposed build source)** | `6e3dbba9b2173fbb5ffde8ffbbccd5b7dac3e559` |
+| VersionCode CI (do not attach to later docs-only SHAs) | run `36874104343` / job `110408998132` / merge-ref `f922e2b1da988de30782818905bdf7dc72bfecb9` |
 
 Imported deltas were taken from the historical **uncommitted** tree against that workspace’s own committed blobs. Those committed blobs matched `90c6948` for every included tracked file except `package.json` (security branch already added `test:safe-diagnostics`).
 
 ## App / package / version (source review only)
 
 - `version`: `1.0.0`
-- `android.versionCode`: **22** in source `app.json` (unchanged). **Not uploadable again.** Play complete inventory 2026-10-01T13:29:51Z includes 22. Proposed next unused upload code: **23** (requires a later versionCode-only commit; not applied here).
+- `android.versionCode`: **23** in source `app.json` after versionCode-only commit `6e3dbba9b2173fbb5ffde8ffbbccd5b7dac3e559`. Version name remains `1.0.0`. This is **not** a reservation of 23. Play complete inventory 2026-10-01T13:29:51Z: 22 active; 20, 19, 17, 16, 15, 14, 13, 10 inactive; **23 absent**. Recheck inventory before a later authorized build/upload.
 - Package: `com.specialsoftwares.vyaamikkdiary`
 - `eas.json` purchase-entry and quota-upsell flags were **explicit `"0"`** after `c139507` in `build.preview.env` and `build.production.env`. Other profile fields from `90c6948` are preserved (`EXPO_PUBLIC_APP_MODE=production`, `autoIncrement=false`, preview APK, production app-bundle). Development profiles still omit both flags (runtime default-off).
 - No EAS remote environment write was performed.
@@ -127,9 +130,9 @@ Owner/session transition retires failure presentation as well as a displayed con
 - Live Play review account is **not** created or verified here; `review:verify-account` is live-only and not run
 - App onboarding may still require identity steps beyond the five Firestore fields the offline verifier checks
 - Server fail-closed billing is unchanged. Client purchase-entry and quota-upsell flags are explicit `"0"` in preview/production `eas.json`. Hiding the Settings CTA is **not** a security boundary
-- Source `app.json` still declares versionCode **22**. Do not re-upload 22. Fresh Play inventory (2026-10-01) makes **23** the next suitable unused code; `app.json` was **not** changed
-- Live Firebase Rules/Functions were **not** re-exported this session (CLI expired; Console re-verification blocked). Last hashed export remains 2026-09-19
-- Remote EAS `EXPO_PUBLIC_APP_MODE` exists as SENSITIVE; its value was not read. Unresolved whether it overrides `eas.json` `production`
+- Source `app.json` declares versionCode **23** at `6e3dbba`. Do not re-upload 22. Play inventory (2026-10-01T13:29:51Z) makes **23** the next suitable unused code. This commit does **not** reserve 23.
+- Live Firebase Rules were re-exported 2026-10-01: Firestore sha256 `b13d52559efd144bfbdd86daf426fd5ce81abceead4c87979cb9cee2d1a25e2c` (proposed compat patch, live since 2026-09-21); Storage still `1a912051ba923a0e4ae29fd36b1741bcf0f5879cd53e6d4bd386c9d5a3b717d5`. See `docs/release/rules-compat/live-export-2026-10-01/META.json`. This assignment did not deploy Rules.
+- Remote EAS `EXPO_PUBLIC_APP_MODE` exists as SENSITIVE. For eas-cli v16.28.0 configuration resolution, overlapping keys use **build-profile env**, so production profile `EXPO_PUBLIC_APP_MODE=production` wins over the unread remote value. Purchase-entry flags are profile-only `"0"`. This is configuration-resolution evidence, not build-worker/artifact evidence.
 - Native/EAS build, OTA, deploy, Play upload: **not authorized**
 - Encrypted PDF backup Phase 1 remains a separate design task. It is not in this candidate. GRIN slice 2 remains unauthorized
 
@@ -141,8 +144,8 @@ Owner/session transition retires failure presentation as well as a displayed con
 - `test:boot-completion` is EXTRACTED_RUNTIME. It does **not** cover the mounted screen-integration cases.
 - `test:boot-screen-integration` is MOUNTED_REACT with inert native/router/animation surfaces. It is not native rendering, TalkBack, Reanimated, or Play-installed proof.
 - `test:play-review-setup` is INJECTED_ADMIN_OFFLINE and was not modified in this closeout.
-- Canonical application CI: `npm run ci:verify` on **`7e9e660`** — GitHub Actions run `36864750074` / job `110377363521`, merge-ref `68d8b7fc4368414432b6a9ea0cbbd2d7f16a55da`, parents `0da2f58` + `7e9e660`, `test:all` 144/144, `ci:verify` PASS. That run does **not** cover any later documentation SHA.
-- Do **not** reuse run `36847262564` (`c139507`) or `36843046525` (`a4dcfa4`) for `7e9e660`.
+- Canonical application CI for frozen `7e9e660`: `npm run ci:verify` — GitHub Actions run `36864750074` / job `110377363521`, merge-ref `68d8b7fc4368414432b6a9ea0cbbd2d7f16a55da`, parents `0da2f58` + `7e9e660`, `test:all` 144/144, `ci:verify` PASS. That run does **not** cover later SHAs.
+- Canonical application CI for versionCode source `6e3dbba`: GitHub Actions workflow **CI**, job **verify**, run `36874104343` / job `110408998132`, event `pull_request` attempt 1, conclusion **success**. Checkout `git checkout --force refs/remotes/pull/29/merge`. Merge-ref `f922e2b1da988de30782818905bdf7dc72bfecb9` (`HEAD is now at f922e2b Merge 6e3dbba9b2173fbb5ffde8ffbbccd5b7dac3e559 into 0da2f58970f23c7ce6cbefae6efffd49c731f44b`). Parents `0da2f58970f23c7ce6cbefae6efffd49c731f44b` (base) + `6e3dbba9b2173fbb5ffde8ffbbccd5b7dac3e559` (head). `test:all` **144/144** in 303.6s; **ci:verify PASS**. No `SKIP` lines in the job log. Do **not** reuse `36864750074`. Do **not** reuse `36847262564` or `36843046525`.
 - Injected diagnostics tests do not prove native Crashlytics consent
 - Boot tests do not prove mounted device animation
 - Locale plugin tests do not prove Android resource shrinking on a device
@@ -181,6 +184,63 @@ Development EAS profiles omit both flags; runtime stays default-off unless env i
 
 Existing i18n key `billing.management.purchaseEntryClosed` (en/hi) is reused. No new commercial copy. No mock purchase-success path.
 
+## VersionCode source preparation (after frozen `7e9e660` / docs `cca0c5b`)
+
+Application diff is **only** `app.json` `android.versionCode` 22 → 23. Version name `1.0.0`, package, EAS production app-bundle, `autoIncrement=false`, `appVersionSource=local`, `EXPO_PUBLIC_APP_MODE=production`, both purchase-entry flags `"0"`, legal date `2026-07-27`, security ancestry, boot, locale plugin, and ledger V assets are unchanged.
+
+| Role | SHA |
+|---|---|
+| Accepted application checkpoint | `7e9e66055db20d5289424c61347bc72a64fd94e3` |
+| Docs-only preflight | `cca0c5b8d2cb21f519ba40af5889f20e4b763711` |
+| **Proposed build-source (versionCode 23)** | `6e3dbba9b2173fbb5ffde8ffbbccd5b7dac3e559` |
+| Current installed vc22 | Play Internal Active 22; exact source correspondence **UNVERIFIED**. This candidate does **not** reconstruct vc22. |
+
+`app.json` content SHA-256 at `6e3dbba`: `3d2a8653bc4eb0cd94746788258fd96711d82eed4e30d0e1ef718624cff8fb3a`.
+
+## Build-approval packet (request only — build and upload not authorized)
+
+Build approval and Internal Testing upload approval remain **separate**. Neither is granted. No AAB exists for `6e3dbba`.
+
+| Field | Value |
+|---|---|
+| Proposed build-source SHA | `6e3dbba9b2173fbb5ffde8ffbbccd5b7dac3e559` |
+| Canonical CI | workflow **CI** / job **verify** / run [`36874104343`](https://github.com/specialsoftwares/vyaamikk-diary/actions/runs/36874104343) / job [`110408998132`](https://github.com/specialsoftwares/vyaamikk-diary/actions/runs/36874104343/job/110408998132) / success / merge-ref `f922e2b1da988de30782818905bdf7dc72bfecb9` / parents `0da2f58` + `6e3dbba` / `test:all` 144/144 / `ci:verify` PASS / no SKIP lines. Do not cite `36864750074`. |
+| Package | `com.specialsoftwares.vyaamikkdiary` |
+| Version name | `1.0.0` |
+| Proposed versionCode | **23** (Play complete inventory 2026-10-01T13:29:51Z; later pager still 1–9 of 9 at 14:02:46Z). Not reserved. Recheck before upload. |
+| EAS | account `vydspecial2026`; project `@vydspecial2026/vyaamikk-diary` (`00bb47ff-b22f-4a64-ace8-a0e7275fd2a1`); profile **production**; Android **app-bundle** (`eas.json` `build.production.android.buildType`); `distribution=store` (resolved); `environment=production`; `autoIncrement=false`; `cli.appVersionSource=local` |
+| Effective public flags (configuration resolution, eas-cli v16.28.0 + `eas config`) | `EXPO_PUBLIC_APP_MODE=production`; `EXPO_PUBLIC_SUBSCRIPTION_PURCHASE_ENTRY_ENABLED=0`; `EXPO_PUBLIC_QUOTA_UPSELL_ENABLED=0`. Profile env wins over remote Sensitive `EXPO_PUBLIC_APP_MODE`. Not artifact evidence. |
+| Signing-role | Upload-key SHA-1/SHA-256 match Firebase. App-signing SHA-256 (Digital Asset Links) matches Firebase. App-signing SHA-1 not copied from Play text. Play Integrity API not integrated. |
+| Live backend | Firestore live = proposed compat patch hash `b13d5255…` (since 2026-09-21). Storage = 2026-09-19 baseline hash. Billing Functions **are deployed**; enablement flags were **not** read. Client purchase-entry remains off. Repo-root Rules not live. |
+| Server billing activation | **prohibited** |
+| Security ancestry | `0da2f58` → `eb5f582` → `90c6948` preserved through `7e9e660` into `6e3dbba` |
+| GRIN / encrypted backup | not included; not prerequisites; not legal immunity |
+| Native/device checks | outstanding (checklist below) |
+| VersionCode source preparation | **complete in source** (this assignment) |
+| B. EAS production AAB build | **not authorized** |
+| C. Internal Testing upload | **not authorized** |
+| Public release | **not authorized** |
+
+Clean-tree requirement: a separately authorized EAS production AAB must be built from a clean checkout of the **build-source SHA** (`6e3dbba` unless a later authorized application commit supersedes it), not from a dirty tree and not from a later docs-only SHA.
+
+### Required artifact evidence after a future approved build (not run)
+
+- EAS build ID
+- Actual source SHA used by the worker
+- AAB SHA-256
+- Package and versionCode extracted from the AAB
+- Signing certificate role
+- R8 mapping availability
+- Resolved build settings for the three public flags above
+
+### Required evidence after a future approved Internal Testing upload (not run)
+
+- Artifact verification of the fields above
+- A **current** complete Play inventory check (23 is unused as of 2026-10-01T13:29:51Z, not reserved)
+- Upload to **Internal Testing only**. No production track. No public submission.
+
+Installed vc22 provenance remains a separate unresolved historical fact.
+
 ## Evidence chronology (do not collapse these)
 
 **A. Owner-reported history (not a Play read):**
@@ -197,12 +257,12 @@ Existing i18n key `billing.management.purchaseEntryClosed` (en/hi) is reused. No
 - Complete App bundles inventory (All app bundles, unfiltered, pager **1–9 of 9**, 2026-10-01T13:29:51Z): **22 (Active), 20, 19, 17, 16, 15, 14, 13, 10 (Inactive)**. Not present: 21, 18, 23, 11, 12.
 - Current Internal Testing (2026-10-01T13:30:32Z): track **Active**; latest release **Vyaamikk Diary (Vc22)**; version codes **22** only. Do not cite vc17 as current.
 - Production track (2026-10-01T13:31:03Z): **Inactive**. No production release.
-- Play Integrity API: **not integrated** (Protected with Play, 2026-10-01T13:31:39Z). Certificate fingerprints were **not** re-copied. Last dated upload/Play App Signing/Firebase hash match remains 2026-09-19.
+- Play Integrity API: **not integrated** (Protected with Play, 2026-10-01T13:31:39Z). App signing fingerprints re-read 2026-10-01T14:06Z (upload-key SHA-1/SHA-256 and app-signing SHA-256 matched current Firebase Android hashes; app-signing SHA-1 not in page text).
 - A finished EAS build is **not** proof of a Play upload. vc21 exists on EAS and is **absent** from the current Play AAB inventory. vc22 exists on both EAS (finished) and Play Internal (active).
 
 ## Read-only internal-build preflight (2026-10-01)
 
-**Not a build. Not an upload. Application source `7e9e660` was not modified.**
+**Not a build. Not an upload.** Application source after this assignment is versionCode-only on top of frozen `7e9e660`.
 
 | Read | Fresh result |
 |---|---|
@@ -211,52 +271,12 @@ Existing i18n key `billing.management.purchaseEntryClosed` (en/hi) is reused. No
 | Production track | **Inactive**. |
 | EAS account/project | `npx eas-cli@16.28.0` (npx cache, not repo `node_modules`). whoami `vydspecial2026` (Owner). Also Owner of `special-softwares`. Project `@vydspecial2026/vyaamikk-diary` ID `00bb47ff-b22f-4a64-ace8-a0e7275fd2a1`. Expo website login was a sign-in wall; CLI session was used instead. |
 | EAS production / preview profiles (source `eas.json`) | production: `android.buildType=app-bundle`, `environment=production`, `autoIncrement=false`, `cli.appVersionSource=local`. preview: APK, `environment=preview`, `autoIncrement=false`. Both set `EXPO_PUBLIC_APP_MODE=production` and both purchase-entry flags `"0"`. Recent EAS history: production builds are `distribution=STORE`; preview builds `INTERNAL` — consistent with those profiles. |
-| Remote EAS env (production and preview lists) | Purchase-entry and quota-upsell names **absent** (no remote `"1"` override of those two flags). `EXPO_PUBLIC_APP_MODE` **present**, Visibility **SENSITIVE**, value **not read** (`--include-sensitive` not used). Unresolved: whether the unread remote `EXPO_PUBLIC_APP_MODE` overrides `eas.json`. No EAS remote write. |
-| Package identity | Source `app.json`: `com.specialsoftwares.vyaamikkdiary`, `1.0.0`, versionCode **22** (unchanged). Play Console shows the same package. |
-| Signing-role | Play “Prevent unofficial installs / 1 of 1 service active” on Protected with Play. App-signing certificate SHA-1/SHA-256 **not** re-read this session. Do not treat that as a new fingerprint match. |
-| Firebase / live Rules | **Blocked.** `firebase` 14.20.0: credentials no longer valid; reauth not performed. Firebase Console: Google “Verify it’s you” for `authuser=0`; password not retried. Last successful Rules export remains **2026-09-19** (`docs/release/rules-compat/baseline/META.json`). Live compatibility for this candidate: **blocked**, not verified, not shown incompatible. Do not assume the proposed Rules patch was deployed. Do not assume repo Rules equal live Rules. |
+| Remote EAS env (production and preview lists) | Purchase-entry and quota-upsell names **absent**. `EXPO_PUBLIC_APP_MODE` **present**, Visibility **SENSITIVE**, value **not read**. eas-cli v16.28.0 + `eas config` overlap warning: profile env **wins** for `EXPO_PUBLIC_APP_MODE`. Effective configuration-resolution public flags: APP_MODE=`production`, both purchase-entry flags=`0`. Not build-worker/artifact evidence. No EAS remote write. |
+| Package identity | Source `app.json` at `6e3dbba`: `com.specialsoftwares.vyaamikkdiary`, `1.0.0`, versionCode **23**. `npx expo config --type public` with the three production-profile public flags set: same package / `1.0.0` / 23. Play Console shows the same package. |
+| Signing-role | Play App signing page 2026-10-01T14:06Z (read-only). Upload-key SHA-1/SHA-256 match Firebase Android hashes `20f8150e…` / `e688fa0b…`. Digital Asset Links app-signing SHA-256 matches Firebase `b9c521e3…`. Play App signing SHA-1 value was not in page text (copy control only); Firebase also lists SHA-1 `d223f0a5…` as the remaining registered hash. Play Integrity API still **not integrated**. |
+| Firebase / live Rules | **Exported 2026-10-01.** Firestore live sha256 `b13d52559efd144bfbdd86daf426fd5ce81abceead4c87979cb9cee2d1a25e2c` (proposed compat patch; ruleset `a19b4a83-…`; updated 2026-09-21). Storage still `1a912051ba923a0e4ae29fd36b1741bcf0f5879cd53e6d4bd386c9d5a3b717d5`. This assignment did not deploy. Repo-root `firestore.rules` is not live. Do not use the 2026-09-19 baseline as current live Firestore. |
 
-**Proposed unused versionCode: 23.** Highest uploaded Play AAB is 22; Play requires a strictly greater code. 21 and 18 are unused on Play but are **not** suitable because 22 is already uploaded. Do not change `app.json` in this assignment.
-
-## Internal-build approval packet (request only — none of A/B/C granted)
-
-`7e9e660` is the **accepted application checkpoint**. CI run `36864750074` applies to that SHA only.
-
-A later **versionCode-only** commit (permission A) will create a **new build-source SHA**. That SHA must receive applicable validation before a build. **No artifact exists yet for that new SHA.** Do not describe `7e9e660` as the final build SHA if versionCode will change. Do not reconstruct old vc22 as a substitute for provenance of the new candidate.
-
-Clean-tree requirement: a separately authorized EAS production AAB must be built from a clean, identified checkout of the **build-source SHA** (after any approved versionCode commit), not from a dirty tree.
-
-| Field | Value |
-|---|---|
-| Accepted application SHA | `7e9e66055db20d5289424c61347bc72a64fd94e3` |
-| Application CI | run `36864750074` / job `110377363521` / merge-ref `68d8b7fc4368414432b6a9ea0cbbd2d7f16a55da` / parents `0da2f58970f23c7ce6cbefae6efffd49c731f44b` + `7e9e660` / 144/144 / `ci:verify` PASS |
-| Package | `com.specialsoftwares.vyaamikkdiary` |
-| EAS | account `vydspecial2026`; project `@vydspecial2026/vyaamikk-diary` (`00bb47ff-b22f-4a64-ace8-a0e7275fd2a1`); profile **production** / Android **app-bundle**; `autoIncrement=false`; `appVersionSource=local` |
-| Destination | existing **Internal Testing only**. Production track is Inactive. No listing publish. |
-| Proposed versionCode | **23** (Play inventory 2026-10-01T13:29:51Z). Source still **22** until permission A. |
-| Purchase-entry flags | both `"0"` in `eas.json` preview+production; **not** present in remote EAS env lists. Effective future build: eas.json unless a later remote write adds them. Remote `EXPO_PUBLIC_APP_MODE` value unread (SENSITIVE). |
-| Server billing activation | **prohibited** |
-| Live backend compatibility | **blocked this session** (Firebase CLI/Console). Last hashed Rules export 2026-09-19. Proposed compat patch is still source-only. |
-| Security ancestry | `0da2f58` → `eb5f582` → `90c6948` preserved on `7e9e660` |
-| GRIN | not included; not a prerequisite |
-| Encrypted PDF backup | not included; not a prerequisite |
-| Native/device checks | outstanding (checklist below, all pending) |
-| A. VersionCode-only source preparation | **not granted** |
-| B. EAS production AAB build | **not granted** |
-| C. Internal Testing upload/release | **not granted** |
-| Public release readiness | **not established** |
-
-Planned artifact evidence after a separately authorized build (traceability, **not** deterministic binary reproducibility):
-
-- EAS build ID and actual source SHA
-- Build profile and resolved public flags (including both purchase-entry flags and `EXPO_PUBLIC_APP_MODE`)
-- AAB SHA-256
-- Package/versionCode extracted from the artifact
-- Signing certificate role
-- R8 mapping availability
-- Device-installed artifact identity
-
-Installed vc22 provenance remains a separate unresolved historical fact. This candidate must have its own traceable build.
+**Proposed unused versionCode: 23 — applied in source** at `6e3dbba`. Highest uploaded Play AAB at 2026-10-01T13:29:51Z is 22. 21 and 18 remain unused on Play but are **not** suitable because 22 is already uploaded. This does not reserve 23.
 
 ## Device and reviewer checklist (later authorized binary — all pending)
 

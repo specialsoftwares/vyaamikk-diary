@@ -81,17 +81,38 @@ Session: `aeadmin@specialsoftwares.com` / SPECIAL SOFTWARES. Developer `51713461
 
 **Owner-reported vs this read:** EAS vc21 `5e1e124b-…` is **finished** on EAS and **not** in the Play AAB inventory. EAS vc22 `72cb7254-…` is **finished** on EAS **and** present as Internal Testing Active 22. A finished EAS build is not itself a Play upload.
 
-**Proposed next unused versionCode: 23** (strictly greater than highest uploaded 22). Do not re-upload 22. `app.json` was not changed.
+**Proposed next unused versionCode: 23** (strictly greater than highest uploaded 22). Do not re-upload 22. Source preparation later set `app.json` `android.versionCode` to 23 on `6e3dbba9b2173fbb5ffde8ffbbccd5b7dac3e559`. That does **not** reserve 23. Recheck inventory before any later authorized build/upload. Recheck 2026-10-01T14:02:46Z still showed pager **1–9 of 9** (no tenth uploaded bundle). A search for `23` did not finish rendering a table in that session.
 
 ## Fresh EAS CLI (2026-10-01, npx eas-cli@16.28.0, not repo node_modules)
 
 Account `vydspecial2026` (Owner). Project `@vydspecial2026/vyaamikk-diary` `00bb47ff-b22f-4a64-ace8-a0e7275fd2a1`. Expo website was a login wall; CLI session was used. No remote env write. No build. Secret/sensitive values were not printed (`--include-sensitive` not used). Purchase-entry / quota-upsell names absent from remote production and preview env lists. `EXPO_PUBLIC_APP_MODE` exists remotely as SENSITIVE (value unread).
 
+Pinned `eas-cli@16.28.0` `packages/eas-cli/src/build/evaluateConfigWithEnvVarsAsync.ts` merges `{ ...serverEnvVars, ...buildProfile.env }` (profile env wins on overlap). `eas config --platform android --profile production` (2026-10-01, configuration-resolution only — not a build-worker or artifact): selected profile **production**, EAS environment **production**, `distribution=store`, `autoIncrement=false`, no profile `extends`. Overlap warning: remote and profile both define `EXPO_PUBLIC_APP_MODE`; **build profile values are used**. Resolved public flags from the production profile env:
+
+- `EXPO_PUBLIC_APP_MODE=production`
+- `EXPO_PUBLIC_SUBSCRIPTION_PURCHASE_ENTRY_ENABLED=0`
+- `EXPO_PUBLIC_QUOTA_UPSELL_ENABLED=0`
+
+`app.config.js` only remaps `googleServicesFile` from env; it does not change versionCode or those flags. No `eas-build-*` hooks in this candidate. Later authorized AAB evidence must still record the same three values from the build worker/artifact.
+
 Recent Android production AABs include vc22 `72cb7254-0be9-4f92-a514-dbfab2b1150d` (FINISHED, git `0da2f58`, `isGitWorkingTreeDirty` absent from JSON) and vc21 `5e1e124b-7a8c-49ec-a4bb-2b7264844dc4` (FINISHED). Preview profile history remains APK/`INTERNAL`.
 
-## Fresh Firebase (2026-10-01) — blocked
+## Fresh Firebase (2026-10-01, session restored, read-only)
 
-CLI credentials expired; Console required “Verify it’s you” for `authuser=0`. Reauth/password not retried. Last Rules hashes remain the 2026-09-19 export. Live compatibility for the Android source candidate is **blocked this session**, not a fabricated deploy finding.
+CLI user `support.vyd@specialsoftwares.com`. Project `vyaamikk-diary` (`982505811909`). `firebase use` → `vyaamikk-diary`. Android app `1:982505811909:android:784cb8df7f5523beea25ac`. No Rules/Functions/IAM deploy. No secret values printed. Deprecated `functions:config:get` payload was empty (`{}`); that is not a billing-enablement proof.
+
+Live Rules hashes: see `docs/release/rules-compat/live-export-2026-10-01/META.json` and `LIVE_RULES_COMPAT.md`. Firestore live sha256 `b13d52559efd144bfbdd86daf426fd5ce81abceead4c87979cb9cee2d1a25e2c` (proposed compat patch, ruleset `a19b4a83-…`, updated 2026-09-21). Storage still `1a912051ba923a0e4ae29fd36b1741bcf0f5879cd53e6d4bd386c9d5a3b717d5`.
+
+Deployed Functions (asia-south1, nodejs20) **include** billing/tax handlers that were absent on 2026-09-19, among them: `androidRtdn`, `prepareAndroidBillingAccount`, `prepareIOSBillingAccount`, `validateAndActivateAndroid`, `validateAndActivateIOS`, `updateBillingDetails`, `scheduledBillingReconciliation`, `retryReconciliationWorkItem`, `reviewSubscriptionTaxCompliance`, `generateGstr1WorkingPapers`, `getInvoiceDownloadUrl`, `markGstr1Filed`, plus identity/auth/deletion callables. Handler presence is **not** `PLAY_BILLING_ENABLED=true`. Client purchase-entry flags remain `"0"`. Do not treat this list as a live billing-on finding.
+
+Android SHA certificates registered in Firebase (2026-10-01 `apps:android:sha:list`):
+
+- SHA-1 `20f8150e213c9c3f84fdcac51e9e4dcceea242ad`
+- SHA-1 `d223f0a5effd8e2e421752d35ad7a00e19f82e59`
+- SHA-256 `e688fa0ba5fa3bd30585114f8c2143e1efdda1acbfdb9daadc42da896178752a`
+- SHA-256 `b9c521e3b57eab0c3d3dc7b85de91d67ef9f2abd90cc6950c5700b4f2636ce92`
+
+Play Console App signing (2026-10-01T14:06Z, read-only, no key change/reset): upload-key SHA-1 `20:F8:15:0E:…:42:AD` and SHA-256 `E6:88:FA:0B:…:75:2A` match the first Firebase SHA-1 and first Firebase SHA-256. Digital Asset Links app-signing SHA-256 `B9:C5:21:E3:…:CE:92` matches the second Firebase SHA-256. Play App signing SHA-1 was a copy-control without the colon value in page text; it was **not** newly matched to Firebase SHA-1 `d223f0a5…` from that text. `APP_CHECK_DESIGN.md` is not in this candidate, so the 2026-09-19 “matched APP_CHECK_DESIGN.md” note was not re-opened against a repo file.
 
 ## Merchant KYC (human payments-readiness)
 
