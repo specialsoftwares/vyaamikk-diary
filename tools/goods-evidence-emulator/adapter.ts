@@ -1,13 +1,27 @@
 /**
- * G1 durable register/reconcile adapter (emulator).
+ * G1/G4 durable register, reconcile, and mutation adapter (emulator).
  *
  * Not a live callable. Do not import this adapter into the production Functions entrypoint.
  * Does not import client runtime, React, @/config, localDb, or @/utils/sha256Hex.
+ *
+ * Trusted identity is the authenticated uid. InMemoryGoodsLedger is not this backend.
  */
 
 import { GOODS_EVIDENCE_SCHEMA_VERSION } from "../../src/goodsEvidence/constants";
-import type { RegisterGoodsReceiptBody } from "../../src/goodsEvidence/command";
+import {
+  MUTATION_COMMAND_TYPES,
+  type AmendFieldsBody,
+  type CorrectReturnDispatchBody,
+  type DispatchReturnBody,
+  type LinkVerifiedEvidenceBody,
+  type MutationCommandType,
+  type RecordEwbObservationBody,
+  type RecordQcBody,
+  type RegisterGoodsReceiptBody,
+  type VoidWithReasonBody,
+} from "../../src/goodsEvidence/command";
 import { derivePhysicalCustody } from "../../src/goodsEvidence/custody";
+import { emptyEwbHistories } from "../../src/goodsEvidence/ewb";
 import { formatGrinNumber } from "../../src/goodsEvidence/grinNumber";
 import {
   emptyLedgers,
@@ -18,8 +32,13 @@ import { financialYearTokenForIstInstant, formatUtcIso } from "../../src/goodsEv
 import type { GrinEvent, GrinView, ImmutableGrin } from "../../src/goodsEvidence/types";
 import {
   commandEnvelopeError,
+  commandReasonError,
   effectiveRecordError,
+  linkVerifiedEvidenceBodyError,
+  mutationBodyError,
+  recordEwbObservationBodyError,
   registerBodyError,
+  verifiedEvidenceIdentityError,
 } from "../../src/goodsEvidence/validate";
 import { freezeDigest, hashEventEnvelope, hashOriginalSnapshot } from "./hash";
 import { commandIdError, documentIdError, lineIdError } from "./ids";
@@ -29,11 +48,24 @@ import {
   extraReconcileKeyError,
   inputShapeError,
   lineCountError,
+  normalizeJsonCopy,
   serverFieldError,
   sparseArrayError,
   textLimitError,
 } from "./limits";
 import { logG1 } from "./log";
+import {
+  applyAmendFields,
+  applyCorrectReturnDispatch,
+  applyDispatchReturn,
+  applyLinkVerifiedEvidence,
+  applyRecordEwbObservation,
+  applyRecordQc,
+  applyVoidWithReason,
+  hydrateReceipt,
+  persistableReceipt,
+  type PersistedReceipt,
+} from "./mutations";
 import {
   admissionPath,
   commandPath,
@@ -48,8 +80,12 @@ import { allocateFromCounter } from "./serial";
 import type {
   AdmissionPolicy,
   G1Clock,
+  G1CommandResult,
+  G1Deny,
   G1Firestore,
   G1Hooks,
+  G1MutationResult,
+  G1MutationSuccess,
   G1RegisterResult,
   G1RegisterSuccess,
   G1Transaction,
@@ -65,10 +101,7 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === "object" && !Array.isArray(value);
 }
 
-function deny(
-  code: Extract<G1RegisterResult, { ok: false }>["code"],
-  detail: string
-): Extract<G1RegisterResult, { ok: false }> {
+function deny(code: G1Deny["code"], detail: string): G1Deny {
   logG1("grin_g1_denied", { code });
   return { ok: false, code, detail };
 }
@@ -107,6 +140,27 @@ function storedSuccess(data: Record<string, unknown> | undefined): G1RegisterSuc
   };
 }
 
+function storedMutationSuccess(data: Record<string, unknown> | undefined): G1MutationSuccess | null {
+  const result = data?.result;
+  if (!isPlainObject(result)) return null;
+  if (result.ok !== true) return null;
+  if (typeof result.issuedNumber === "string") return null;
+  if (typeof result.receiptId !== "string") return null;
+  if (typeof result.eventId !== "string") return null;
+  if (typeof result.eventVersion !== "number") return null;
+  if (typeof result.headHash !== "string") return null;
+  if (typeof result.serverAcceptedAtUtc !== "string") return null;
+  return {
+    ok: true,
+    replayed: true,
+    receiptId: result.receiptId,
+    eventId: result.eventId,
+    eventVersion: result.eventVersion,
+    headHash: result.headHash,
+    serverAcceptedAtUtc: result.serverAcceptedAtUtc,
+  };
+}
+
 type FrozenRegister = {
   commandId: string;
   type: "registerGoodsReceipt";
@@ -135,7 +189,7 @@ export class GoodsEvidenceRegisterAdapter {
     if (!caller.uid) return deny("unauthenticated", GENERIC_DENY);
     const pre = this.prevalidate(envelope);
     if (pre) return pre;
-    const parsed = envelope as {
+    const normalized = normalizeJsonCopy(envelope) as {
       commandId: string;
       type: string;
       ledgerId: string;
@@ -143,23 +197,22 @@ export class GoodsEvidenceRegisterAdapter {
       digest?: string;
     };
     const uid = caller.uid;
-    const bodyClone = cloneSnapshot(parsed.body);
     const digest = freezeDigest({
-      commandId: parsed.commandId,
+      commandId: normalized.commandId,
       type: "registerGoodsReceipt",
       ownerUid: uid,
-      ledgerId: parsed.ledgerId,
-      body: bodyClone,
+      ledgerId: normalized.ledgerId,
+      body: normalized.body,
     });
-    if (typeof parsed.digest === "string" && parsed.digest !== digest) {
+    if (typeof normalized.digest === "string" && normalized.digest !== digest) {
       return deny("digest_conflict", "same commandId with a different body");
     }
     const frozen: FrozenRegister = {
-      commandId: parsed.commandId,
+      commandId: normalized.commandId,
       type: "registerGoodsReceipt",
       ownerUid: uid,
-      ledgerId: parsed.ledgerId,
-      body: bodyClone as RegisterGoodsReceiptBody,
+      ledgerId: normalized.ledgerId,
+      body: normalized.body as RegisterGoodsReceiptBody,
       digest,
     };
     const envelopeErr = commandEnvelopeError(frozen, "registerGoodsReceipt");
@@ -213,8 +266,12 @@ export class GoodsEvidenceRegisterAdapter {
       });
       tx.set(receiptRef, {
         original: issued.original,
+        effective: cloneSnapshot(issued.original),
         view: issued.view,
         lineLedgers: issued.lineLedgers,
+        ewbHistories: emptyEwbHistories(),
+        returnDispatches: Object.create(null),
+        linkedEvidence: [],
       });
       tx.set(
         this.db.doc(eventPath(uid, frozen.ledgerId, issued.original.receiptId, issued.event.eventId)),
@@ -234,20 +291,21 @@ export class GoodsEvidenceRegisterAdapter {
     });
   }
 
-  async reconcile(caller: TrustedCaller, input: unknown): Promise<G1RegisterResult> {
+  async reconcile(caller: TrustedCaller, input: unknown): Promise<G1CommandResult> {
     if (!caller.uid) return deny("unauthenticated", GENERIC_DENY);
     if (!isPlainObject(input)) return deny("invalid", "reconcile request is required");
     const shape = inputShapeError(input, "reconcile request");
     if (shape) return deny("invalid", shape);
     const extra = extraReconcileKeyError(input);
     if (extra) return deny("invalid", extra);
-    const ledgerErr = documentIdError("ledgerId", input.ledgerId);
+    const normalized = normalizeJsonCopy(input) as { ledgerId: unknown; commandId: unknown };
+    const ledgerErr = documentIdError("ledgerId", normalized.ledgerId);
     if (ledgerErr) return deny("invalid", ledgerErr);
-    const cmdErr = commandIdError(input.commandId);
+    const cmdErr = commandIdError(normalized.commandId);
     if (cmdErr) return deny("invalid", cmdErr);
     const uid = caller.uid;
-    const ledgerId = input.ledgerId as string;
-    const commandId = input.commandId as string;
+    const ledgerId = normalized.ledgerId as string;
+    const commandId = normalized.commandId as string;
 
     return this.runAttempts(async (tx, attempt) => {
       const userSnap = await tx.get(this.db.doc(userPath(uid)));
@@ -260,11 +318,47 @@ export class GoodsEvidenceRegisterAdapter {
       if (!gate.ok) return gate;
       if (gate.policy.reconciliation !== "allow") return deny("policy_denied", GENERIC_DENY);
       if (!commandSnap.exists) return deny("not_found", "command not found");
-      const result = storedSuccess(commandSnap.data());
-      if (!result) return deny("not_found", "command not found");
-      logG1("grin_g1_replayed", { replayed: true, attempt });
-      return result;
+      const stored = commandSnap.data();
+      const registerResult = storedSuccess(stored);
+      if (registerResult) {
+        logG1("grin_g1_replayed", { replayed: true, attempt });
+        return registerResult;
+      }
+      const mutationResult = storedMutationSuccess(stored);
+      if (mutationResult) {
+        logG1("grin_g1_replayed", { replayed: true, attempt });
+        return mutationResult;
+      }
+      return deny("not_found", "command not found");
     });
+  }
+
+  async amendFields(caller: TrustedCaller, envelope: unknown): Promise<G1MutationResult> {
+    return this.mutate(caller, envelope, "amendFields");
+  }
+
+  async recordQc(caller: TrustedCaller, envelope: unknown): Promise<G1MutationResult> {
+    return this.mutate(caller, envelope, "recordQc");
+  }
+
+  async dispatchReturn(caller: TrustedCaller, envelope: unknown): Promise<G1MutationResult> {
+    return this.mutate(caller, envelope, "dispatchReturn");
+  }
+
+  async correctReturnDispatch(caller: TrustedCaller, envelope: unknown): Promise<G1MutationResult> {
+    return this.mutate(caller, envelope, "correctReturnDispatch");
+  }
+
+  async voidWithReason(caller: TrustedCaller, envelope: unknown): Promise<G1MutationResult> {
+    return this.mutate(caller, envelope, "voidWithReason");
+  }
+
+  async recordEwbObservation(caller: TrustedCaller, envelope: unknown): Promise<G1MutationResult> {
+    return this.mutate(caller, envelope, "recordEwbObservation");
+  }
+
+  async linkVerifiedEvidence(caller: TrustedCaller, envelope: unknown): Promise<G1MutationResult> {
+    return this.mutate(caller, envelope, "linkVerifiedEvidence");
   }
 
   private gate(
@@ -274,7 +368,7 @@ export class GoodsEvidenceRegisterAdapter {
     ledgerExists: boolean,
     ledger: Record<string, unknown> | undefined,
     uid: string
-  ): { ok: true; policy: AdmissionPolicy } | Extract<G1RegisterResult, { ok: false }> {
+  ): { ok: true; policy: AdmissionPolicy } | G1Deny {
     if (!userExists) return deny("forbidden", GENERIC_DENY);
     if ((user?.status ?? "active") !== "active") return deny("forbidden", GENERIC_DENY);
     if (!ledgerExists) return deny("forbidden", GENERIC_DENY);
@@ -285,7 +379,7 @@ export class GoodsEvidenceRegisterAdapter {
     return { ok: true, policy };
   }
 
-  private prevalidate(envelope: unknown): Extract<G1RegisterResult, { ok: false }> | null {
+  private prevalidate(envelope: unknown): G1Deny | null {
     if (!isPlainObject(envelope)) return deny("invalid", "command envelope is required");
     const shape = inputShapeError(envelope, "command envelope");
     if (shape) return deny("invalid", shape);
@@ -327,7 +421,7 @@ export class GoodsEvidenceRegisterAdapter {
     serverMs: number,
     fyToken: string,
     serial: number
-  ): IssuedBuild | Extract<G1RegisterResult, { ok: false }> {
+  ): IssuedBuild | G1Deny {
     const serverRegisteredAtUtc = formatUtcIso(serverMs);
     let issuedNumber: string;
     try {
@@ -446,13 +540,242 @@ export class GoodsEvidenceRegisterAdapter {
     };
   }
 
-  private async runAttempts(
-    fn: (tx: G1Transaction, attempt: number) => Promise<G1RegisterResult>
-  ): Promise<G1RegisterResult> {
+  private prevalidateMutation(envelope: unknown, expectedType: MutationCommandType): G1Deny | null {
+    if (!isPlainObject(envelope)) return deny("invalid", "command envelope is required");
+    const shape = inputShapeError(envelope, "command envelope");
+    if (shape) return deny("invalid", shape);
+    const extra = extraEnvelopeKeyError(envelope);
+    if (extra) return deny("invalid", extra);
+    const bytes = envelopeByteError(envelope);
+    if (bytes) return deny("invalid", bytes);
+    const cmdErr = commandIdError(envelope.commandId);
+    if (cmdErr) return deny("invalid", cmdErr);
+    const ledgerErr = documentIdError("ledgerId", envelope.ledgerId);
+    if (ledgerErr) return deny("invalid", ledgerErr);
+    if (envelope.type !== expectedType) {
+      return deny("invalid", `command type must be ${expectedType}`);
+    }
+    if (!(MUTATION_COMMAND_TYPES as readonly string[]).includes(expectedType)) {
+      return deny("invalid", `command type must be ${expectedType}`);
+    }
+    const receiptErr = documentIdError("receiptId", (envelope.body as { receiptId?: unknown })?.receiptId);
+    if (receiptErr) return deny("invalid", receiptErr);
+    if (expectedType === "dispatchReturn" || expectedType === "correctReturnDispatch") {
+      const lineId = (envelope.body as { lineId?: unknown })?.lineId;
+      const idErr = lineIdError(lineId);
+      if (idErr) return deny("invalid", idErr);
+    }
+    if (expectedType === "linkVerifiedEvidence") {
+      const evidenceId = (envelope.body as { verified?: { evidenceId?: unknown } })?.verified?.evidenceId;
+      const evidenceErr = documentIdError("evidenceId", evidenceId);
+      if (evidenceErr) return deny("invalid", evidenceErr);
+    }
+    const sparse = sparseArrayError(envelope.body, "body");
+    if (sparse) return deny("invalid", sparse);
+    const server = serverFieldError(envelope.body);
+    if (server) return deny("invalid", server);
+    const text = textLimitError(envelope.body);
+    if (text) return deny("invalid", text);
+    return null;
+  }
+
+  private mutationBodyError(type: MutationCommandType, body: unknown): string | null {
+    const reason = isPlainObject(body) ? body.reason : undefined;
+    const base = mutationBodyError(body) ?? commandReasonError(reason);
+    if (base) return base;
+    if (type === "recordEwbObservation") return recordEwbObservationBodyError(body);
+    if (type === "linkVerifiedEvidence") return linkVerifiedEvidenceBodyError(body);
+    return null;
+  }
+
+  private applyMutation(
+    type: MutationCommandType,
+    receipt: PersistedReceipt,
+    body: unknown,
+    eventId: string,
+    uid: string
+  ): ReturnType<typeof applyAmendFields> {
+    if (type === "amendFields") return applyAmendFields(receipt, body as AmendFieldsBody);
+    if (type === "recordQc") return applyRecordQc(receipt, body as RecordQcBody);
+    if (type === "dispatchReturn") return applyDispatchReturn(receipt, body as DispatchReturnBody, eventId);
+    if (type === "correctReturnDispatch") {
+      return applyCorrectReturnDispatch(receipt, body as CorrectReturnDispatchBody);
+    }
+    if (type === "voidWithReason") return applyVoidWithReason(receipt, body as VoidWithReasonBody);
+    if (type === "recordEwbObservation") {
+      return applyRecordEwbObservation(receipt, body as RecordEwbObservationBody);
+    }
+    const verifiedBody = body as LinkVerifiedEvidenceBody;
+    const identity = verifiedEvidenceIdentityError(verifiedBody.verified, {
+      ownerUid: uid,
+      ledgerId: receipt.original.ledgerId,
+      receiptId: receipt.original.receiptId,
+    });
+    if (identity) return { ok: false, detail: identity };
+    return applyLinkVerifiedEvidence(receipt, verifiedBody);
+  }
+
+  private async mutate(
+    caller: TrustedCaller,
+    envelope: unknown,
+    expectedType: MutationCommandType
+  ): Promise<G1MutationResult> {
+    if (!caller.uid) return deny("unauthenticated", GENERIC_DENY);
+    const pre = this.prevalidateMutation(envelope, expectedType);
+    if (pre) return pre;
+    const normalized = normalizeJsonCopy(envelope) as {
+      commandId: string;
+      type: string;
+      ledgerId: string;
+      body: unknown;
+      digest?: string;
+    };
+    const uid = caller.uid;
+    const digest = freezeDigest({
+      commandId: normalized.commandId,
+      type: expectedType,
+      ownerUid: uid,
+      ledgerId: normalized.ledgerId,
+      body: normalized.body,
+    });
+    if (typeof normalized.digest === "string" && normalized.digest !== digest) {
+      return deny("digest_conflict", "same commandId with a different body");
+    }
+    const frozen = {
+      commandId: normalized.commandId,
+      type: expectedType,
+      ownerUid: uid,
+      ledgerId: normalized.ledgerId,
+      body: normalized.body,
+      digest,
+    };
+    const envelopeErr = commandEnvelopeError(frozen, expectedType);
+    if (envelopeErr) return deny("invalid", envelopeErr);
+    const bodyErr = this.mutationBodyError(expectedType, frozen.body);
+    if (bodyErr) return deny("invalid", bodyErr);
+    const receiptId = (frozen.body as { receiptId: string }).receiptId;
+    const expectedVersion = (frozen.body as { expectedVersion: number }).expectedVersion;
+
+    return this.runAttempts(async (tx, attempt) => {
+      const serverMs = this.clock.nowMs();
+      const userSnap = await tx.get(this.db.doc(userPath(uid)));
+      const ledgerSnap = await tx.get(this.db.doc(ledgerPath(uid, frozen.ledgerId)));
+      const admissionSnap = await tx.get(this.db.doc(admissionPath(uid)));
+      const commandRef = this.db.doc(commandPath(uid, frozen.ledgerId, frozen.commandId));
+      const commandSnap = await tx.get(commandRef);
+      const receiptRef = this.db.doc(receiptPath(uid, frozen.ledgerId, receiptId));
+      const receiptSnap = await tx.get(receiptRef);
+      await this.hooks.afterReads?.(attempt);
+
+      const gate = this.gate(
+        admissionSnap.data(),
+        userSnap.exists,
+        userSnap.data(),
+        ledgerSnap.exists,
+        ledgerSnap.data(),
+        uid
+      );
+      if (!gate.ok) return gate;
+      if (gate.policy.newCommands !== "allow") return deny("policy_denied", GENERIC_DENY);
+
+      if (commandSnap.exists) {
+        const stored = commandSnap.data();
+        if (stored?.digest !== frozen.digest) {
+          return deny("digest_conflict", "same commandId with a different body");
+        }
+        const result = storedMutationSuccess(stored);
+        if (!result || stored?.type !== expectedType) {
+          return deny("digest_conflict", "commandId is not this mutation command");
+        }
+        logG1("grin_g1_replayed", { replayed: true, attempt });
+        return result;
+      }
+
+      if (!receiptSnap.exists) return deny("invalid", "unknown receipt");
+      const receipt = hydrateReceipt(receiptSnap.data());
+      if (!receipt) return deny("invalid", "unknown receipt");
+      if (receipt.original.ownerUid !== uid || receipt.original.ledgerId !== frozen.ledgerId) {
+        return deny("forbidden", GENERIC_DENY);
+      }
+      if (receipt.view.voided) return deny("voided", "receipt is void");
+      if (receipt.view.eventVersion !== expectedVersion) {
+        return deny(
+          "version_conflict",
+          `intervening amendment at version ${receipt.view.eventVersion}`
+        );
+      }
+
+      const eventId = this.clock.uuid();
+      const applied = this.applyMutation(expectedType, receipt, frozen.body, eventId, uid);
+      if (!applied.ok) return deny("invalid", applied.detail);
+
+      const serverAcceptedAtUtc = formatUtcIso(serverMs);
+      const streamSequence = receipt.view.eventVersion + 1;
+      const eventHash = hashEventEnvelope({
+        eventId,
+        receiptId,
+        streamSequence,
+        type: applied.eventType,
+        actorUid: uid,
+        serverAcceptedAtUtc,
+        clientObservedAtUtc: (frozen.body as { clientObservedAtUtc: string }).clientObservedAtUtc,
+        reason: (frozen.body as { reason: string }).reason.trim(),
+        expectedPreviousVersion: expectedVersion,
+        typedChanges: applied.typedChanges,
+        previousHash: receipt.view.headHash,
+      });
+      const event: GrinEvent = {
+        schemaVersion: GOODS_EVIDENCE_SCHEMA_VERSION,
+        eventId,
+        receiptId,
+        streamSequence,
+        type: applied.eventType,
+        actorUid: uid,
+        serverAcceptedAtUtc,
+        clientObservedAtUtc: (frozen.body as { clientObservedAtUtc: string }).clientObservedAtUtc,
+        reason: (frozen.body as { reason: string }).reason.trim(),
+        expectedPreviousVersion: expectedVersion,
+        typedChanges: cloneSnapshot(applied.typedChanges),
+        previousHash: receipt.view.headHash,
+        eventHash,
+        firestoreCommitTime: null,
+      };
+      applied.next.view.eventVersion = streamSequence;
+      applied.next.view.headHash = eventHash;
+      const persisted = persistableReceipt(applied.next);
+      persisted.original = cloneSnapshot(receipt.original);
+      tx.set(receiptRef, persisted);
+      tx.set(this.db.doc(eventPath(uid, frozen.ledgerId, receiptId, eventId)), { ...event });
+      const result: G1MutationSuccess = {
+        ok: true,
+        replayed: false,
+        receiptId,
+        eventId,
+        eventVersion: streamSequence,
+        headHash: eventHash,
+        serverAcceptedAtUtc,
+      };
+      tx.set(commandRef, {
+        schemaVersion: GOODS_EVIDENCE_SCHEMA_VERSION,
+        ownerUid: uid,
+        ledgerId: frozen.ledgerId,
+        commandId: frozen.commandId,
+        type: expectedType,
+        digest: frozen.digest,
+        receiptId,
+        result: { ...result, replayed: false },
+      });
+      return result;
+    });
+  }
+
+  private async runAttempts<T extends G1CommandResult>(
+    fn: (tx: G1Transaction, attempt: number) => Promise<T>
+  ): Promise<T> {
     let last: unknown;
     for (let attempt = 1; attempt <= MAX_TX_ATTEMPTS; attempt++) {
       // Capture locally. The Firestore SDK/emulator may drop the callback return value.
-      let outcome: G1RegisterResult | undefined;
+      let outcome: T | undefined;
       try {
         await this.db.runTransaction(
           async (tx) => {
@@ -469,7 +792,11 @@ export class GoodsEvidenceRegisterAdapter {
         throw new Error("g1_transaction_missing_result");
       }
       if (outcome.ok && outcome.replayed === false) {
-        logG1("grin_g1_committed", { replayed: false });
+        if ("issuedNumber" in outcome) {
+          logG1("grin_g1_committed", { replayed: false });
+        } else {
+          logG1("grin_g1_mutation_committed", { replayed: false });
+        }
       }
       return outcome;
     }

@@ -1,0 +1,19 @@
+{
+  "source": "src/goodsEvidence",
+  "files": [
+    "canonical.ts",
+    "constants.ts",
+    "time.ts",
+    "grinNumber.ts",
+    "validate.ts",
+    "quantities.ts",
+    "types.ts",
+    "ewb.ts",
+    "snapshot.ts",
+    "custody.ts",
+    "command.ts",
+    "hashChain.ts",
+    "ports.ts",
+    "hashNode.ts"
+  ]
+}

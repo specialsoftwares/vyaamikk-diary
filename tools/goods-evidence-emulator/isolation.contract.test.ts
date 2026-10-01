@@ -14,6 +14,7 @@ const adapterFiles = [
   "types.ts",
   "serial.ts",
   "retry.ts",
+  "mutations.ts",
 ].map((name) => join(dir, name));
 
 assert.ok(adapterFiles.includes(join(dir, "adapter.ts")));

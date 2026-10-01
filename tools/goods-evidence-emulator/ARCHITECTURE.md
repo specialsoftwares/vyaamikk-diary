@@ -5,11 +5,11 @@ Domain checkpoint `55f2df1405c296336eea058238c8ae24e7a8b370`. Core candidate `6e
 
 ## Packaging
 
-- Adapter: `tools/goods-evidence-emulator/**` only.
+- Adapter: `tools/goods-evidence-emulator/**` (trusted emulator backend).
+- Generated Functions domain: `functions/src/goodsEvidence/**` via `packageFunctionsGoodsEvidence.ts`. Undeployed. Fail-closed handlers in `callables.ts` are not exported from `functions/src/index.ts`.
 - Production `functions/src/index.ts`, `functions/tsconfig.json`, and `functions/package.json` are unchanged.
 - Direct `functions/src` → `src/goodsEvidence` imports are forbidden (tsc `rootDir` lifts; `lib/index.js` would move).
-- Adapter imports alias-free domain files via relative paths (`canonical`, `constants`, `time`, `grinNumber`, `validate`, `quantities`, `types`, `snapshot`, `custody`) plus `import type` of `RegisterGoodsReceiptBody`.
-- Hashing: Node `createHash("sha256")` over `canonicalJson`. Not `@/utils/sha256Hex`.
+- Adapter imports alias-free domain files via relative paths (`canonical`, `constants`, `time`, `grinNumber`, `validate`, `quantities`, `types`, `snapshot`, `custody`, `ewb`, `command`, `ports`) plus Node `createHash("sha256")` over `canonicalJson`. Not `@/utils/sha256Hex`.
 - Tests may import `InMemoryGoodsLedger` / `freezeCommand`.
 - Firestore Admin is injected by tests (`harness.ts`). The adapter depends on `G1Firestore`, not `firebase-admin`.
 - Emulator config: `tools/goods-evidence-emulator/firebase.json` (Firestore **8088**, project `demo-vyaamikk-grin-g1`). Isolated Rules file; **do not deploy**.
@@ -38,9 +38,17 @@ Command identity: **owner uid + ledgerId + commandId**. Receipt identity conflic
 
 ## Command scope (this slice)
 
-Implemented: `registerGoodsReceipt` + independent `reconcile({ ledgerId, commandId })`.
+Implemented: `registerGoodsReceipt` + independent `reconcile({ ledgerId, commandId })` + durable mutations (`amendFields`, `recordQc`, `dispatchReturn`, `correctReturnDispatch`, `voidWithReason`, `recordEwbObservation`, `linkVerifiedEvidence`).
 
-Not in G1: amend, QC, returns, EWB screens, evidence upload, SQLite outbox, PDF packs.
+Mutations use the same authenticated uid, owner/ledger, admission, scoped `commandId`+digest, `expectedVersion`, atomic event+projection+command-result, lost-response replay, and ABORTED-only retries as register. They append events and update `view` / line ledgers / `effective`. They never overwrite `original`. Serial allocation is not part of mutation write sets.
+
+`InMemoryGoodsLedger` remains a labelled simulation (`simulated-domain-test`) and is not this adapter.
+
+Undefined object properties: `inputShapeError` omits them (they are not non-JSON). The adapter `normalizeJsonCopy`s a **copy** of caller input before digest/validation/persistence and does not mutate the caller. Required fields still fail after omit. Undefined/sparse array entries remain `invalid`. Clock/UUID/commit failures still throw.
+
+`serverAcceptedAtUtc` / `serverRegisteredAtUtc` are sampled from `clock.nowMs()` at the start of the successful attempt. That is the attempt clock, not Firestore commit time. `firestoreCommitTime` is stored as `null` in this slice and must not be described as an actual commit timestamp. It is excluded from hashes.
+
+`pending_deletion` remains `forbidden` with **no** replay exception for register, reconcile, or mutations.
 
 ## Transaction read/write set (register)
 
@@ -56,7 +64,9 @@ Retries: adapter loop only on gRPC/Firestore **ABORTED** (`code === 10` or `"ABO
 
 The adapter captures the attempt result in a local variable after determining reads/writes. It does not depend on the Firestore SDK returning the callback value (the emulator may drop that return). An aborted attempt is not returned to the caller.
 
-`firestoreCommitTime` stays `null` in this slice (canonical exclusion; not mixed into `eventHash`). The injected test clock is not live server/commit-time evidence. Persistence writes JSON-clone documents so omitted `undefined` object fields match canonical JSON; that clone is a persistence-only normalization.
+`grin_g1_mutation_committed` is emitted once after `runTransaction` resolves for a new mutation (`ok && replayed === false`), never on abort/replay.
+
+`firestoreCommitTime` stays `null` in this slice (canonical exclusion; not mixed into `eventHash`). Null here is a placeholder, not evidence that Firestore committed at a known time. The injected test clock is not live server/commit-time evidence. Persistence writes JSON-clone documents so omitted `undefined` object fields match canonical JSON; adapter input is separately normalized on a copy before digest.
 
 ## Serial counters
 
@@ -78,7 +88,7 @@ Counter path: `…/serials/{fyToken}` with `{ fyToken, nextSerial, lastIssuedSer
 - ≤ 50 lines
 - Nesting depth ≤ 32; object/array nodes ≤ 4096 (before recursive walks / `JSON.stringify`)
 - IDs `[A-Za-z0-9_-]{1,64}`; commandId 8–128; `/`, `.`, `..` rejected (never rewritten)
-- Object `undefined` omitted by canonical JSON; sparse/undefined array slots rejected
+- Object `undefined` omitted by canonical JSON and by adapter `normalizeJsonCopy` (copy; caller input is not mutated); sparse/undefined array slots rejected
 - `reconcile` accepts `unknown` and rejects null/arrays/wrong shapes with `invalid`
 - Non-JSON values (bigint, functions, Dates, circular structures) are `invalid` at the adapter boundary; clock/UUID/commit failures still throw
 

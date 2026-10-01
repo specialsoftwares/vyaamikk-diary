@@ -1,3 +1,6 @@
+/**
+ * INJECTED_PORT — durable G1 register/reconcile on an in-process Firestore stand-in.
+ */
 import assert from "node:assert/strict";
 
 import { freezeCommand } from "../../src/goodsEvidence/command";
@@ -251,6 +254,61 @@ async function main(): Promise<void> {
       envelope("command_c09", sampleRegisterBody({ receiptId: "receipt_c09" }))
     );
     assert.equal(later.ok, true);
+  }
+
+  // INJECTED_PORT — omit vs undefined optional property: same digest / stored result.
+  {
+    const store = createInjectedStore();
+    seedInjectedOwner(store, OWNER, LEDGER);
+    const adapter = new GoodsEvidenceRegisterAdapter(store, fixedClock(NOW));
+    const base = sampleRegisterBody({ receiptId: "receipt_omit" });
+    const omitted = envelope("commandomit", base);
+    const callerBody = { ...base, unusedOptional: undefined as undefined };
+    const withUndef = {
+      commandId: "commandomit",
+      type: "registerGoodsReceipt" as const,
+      ownerUid: OWNER,
+      ledgerId: LEDGER,
+      body: callerBody,
+      digest: omitted.digest,
+    };
+    const first = await adapter.register({ uid: OWNER }, omitted);
+    assert.equal(first.ok, true);
+    const replay = await adapter.register({ uid: OWNER }, withUndef);
+    assert.equal(replay.ok && replay.replayed, true);
+    if (first.ok && replay.ok) {
+      assert.equal(replay.issuedNumber, first.issuedNumber);
+      assert.equal(replay.headHash, first.headHash);
+    }
+    assert.equal("unusedOptional" in callerBody, true);
+    assert.equal(callerBody.unusedOptional, undefined);
+
+    const requiredMissing = await adapter.register(
+      { uid: OWNER },
+      {
+        commandId: "commandreq1",
+        type: "registerGoodsReceipt",
+        ownerUid: OWNER,
+        ledgerId: LEDGER,
+        body: { ...sampleRegisterBody({ receiptId: "receipt_req1" }), receiptId: undefined },
+      }
+    );
+    assert.equal(requiredMissing.ok, false);
+    if (!requiredMissing.ok) assert.equal(requiredMissing.code, "invalid");
+    assert.equal(store.snapshot.has(receiptPath(OWNER, LEDGER, "receipt_req1")), false);
+
+    const undefArray = await adapter.register(
+      { uid: OWNER },
+      {
+        commandId: "commandarr1",
+        type: "registerGoodsReceipt",
+        ownerUid: OWNER,
+        ledgerId: LEDGER,
+        body: { ...sampleRegisterBody({ receiptId: "receipt_arr1" }), lines: [sampleLine(), undefined] },
+      }
+    );
+    assert.equal(undefArray.ok, false);
+    if (!undefArray.ok) assert.equal(undefArray.code, "invalid");
   }
 
   // Clock failure is not converted into invalid

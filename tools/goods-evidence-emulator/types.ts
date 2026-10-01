@@ -44,7 +44,9 @@ export type G1DenyCode =
   | "digest_conflict"
   | "receipt_exists"
   | "integrity"
-  | "serial_exhausted";
+  | "serial_exhausted"
+  | "version_conflict"
+  | "voided";
 
 export type G1RegisterSuccess = {
   ok: true;
@@ -57,7 +59,24 @@ export type G1RegisterSuccess = {
   headHash: string;
 };
 
-export type G1RegisterResult = G1RegisterSuccess | { ok: false; code: G1DenyCode; detail: string };
+export type G1Deny = { ok: false; code: G1DenyCode; detail: string };
+
+export type G1RegisterResult = G1RegisterSuccess | G1Deny;
+
+export type G1MutationSuccess = {
+  ok: true;
+  replayed: boolean;
+  receiptId: string;
+  eventId: string;
+  eventVersion: number;
+  headHash: string;
+  /** Attempt clock at the successful commit attempt; not firestoreCommitTime. */
+  serverAcceptedAtUtc: string;
+};
+
+export type G1MutationResult = G1MutationSuccess | G1Deny;
+
+export type G1CommandResult = G1RegisterResult | G1MutationResult;
 
 export type AdmissionPolicy = {
   schemaVersion: 1;
