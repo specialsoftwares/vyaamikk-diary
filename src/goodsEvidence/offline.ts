@@ -4,6 +4,8 @@ import type { CaptureProvenance } from "./types";
 /**
  * SIMULATED in-process draft shape. This is not a SQLite outbox, not a
  * durable local file inventory, and not server registration.
+ *
+ * The durable queue lives in `src/services/grin/outbox` (host SQLite / expo-sqlite).
  */
 
 export interface OfflineCapture {
