@@ -20,7 +20,7 @@ Team 5 owned QA harness. Not production. Not G6 completion.
 | `matrix.ids.test.ts` | Set equality + pending-label invariants |
 | `scenarios/cs*.test.ts` | Per-ID presence stubs for `runIds.ts` |
 | `startup/v9-v10-grin-off.sqliteHost.test.ts` | ER-4 GRIN-off v9→v10 SQLITE_HOST QA |
-| `workflows/` | ER-5 CS executions; CS-01 runs Team 3 `npm run test:grin-interop` (not duplicated) |
+| `workflows/` | ER-5 CS executions; CS-01 runs Team 3 `npm run test:grin-interop` (not duplicated); CS-02 runs Team 2 `createInjectedGrinEvidencePort` + existing `npm run test:goods-evidence-g2-unit` (adapter not copied) |
 | `runWorkflows.ts` | Runs ER-4 + CS workflow files |
 | `security/security.rows.test.ts` | SEC-* ID stubs |
 | `device/` | Native/Play pending scripts + evidence envelope |

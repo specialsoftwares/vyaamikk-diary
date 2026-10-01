@@ -4,7 +4,7 @@ AI QA role. **Wave 2 is not accepted.** G6 / device / billing / public release s
 
 `runIds.ts` is ID-presence only. It is **not** CS workflow evidence. `tools/grin-acceptance/scenarios/cs01-*.test.ts` remains a stub, not a CS-01 pass.
 
-Combined ancestry for this work: merge of `origin/integration/grin-g1-g5-source` at `3229b67e29ed25a58f73fe20bd7735c4e499f11a` (includes Team 3 CS-01 merge `9982f76`).
+Combined ancestry for this work: merge of `origin/integration/grin-g1-g5-source` including Team 2 Wave 2 `createInjectedGrinEvidencePort` (`tools/goods-evidence-storage/evidencePort.ts`, merge `4b10356` / docs `3ce1a57`) and Team 3 CS-01 (`9982f76`).
 
 ## ER-4 — v9→v10 startup with GRIN off
 
@@ -22,7 +22,7 @@ File: `tools/grin-acceptance/startup/v9-v10-grin-off.sqliteHost.test.ts`
 | ID | Executed? | Labels | Still open |
 |---|---|---|---|
 | CS-01 | **Yes** (Team 3 `npm run test:grin-interop`; not duplicated) | SQLITE_HOST+INJECTED_PORT (`INJECTED_SOURCE=team1:serverPort.ts`) | NATIVE_DEVICE process-death (DEV-01); FIRESTORE_EMULATOR lost-network reconnect |
-| CS-02 | **Yes** (G2 orphan after lost blob) | INJECTED_PORT | STORAGE_EMULATOR; G1 `linkVerifiedEvidence`; no second verified object on emulator bytes |
+| CS-02 | **Yes** (Team 2 `npm run test:goods-evidence-g2-unit` + `createInjectedGrinEvidencePort` replay; adapter not copied) | INJECTED_PORT | STORAGE_EMULATOR unless hosts already set; G1 `linkVerifiedEvidence` |
 | CS-03 | **Yes** (outbox owner isolation) | SQLITE_HOST | Storage/export/UI; NATIVE_DEVICE account-switch (DEV-03) |
 | CS-04 | **Yes** (distinct serials + identical-command replay on injected store) | INJECTED_PORT | FIRESTORE_EMULATOR concurrent barriers unless `FIRESTORE_EMULATOR_HOST` is set for `cs04-concurrent-serials.emulator.test.ts` |
 | CS-05 | **Yes** (`version_conflict` + digest replay) | INJECTED_PORT | NATIVE_DEVICE / production callable |

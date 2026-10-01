@@ -42,7 +42,8 @@ Put proposals under `docs/release/proposals/<team>/`.
 | `src/services/grin/outbox/**` | team3 | |
 | `src/localDb/migrateGrin.ts` | team3 | v10 tables |
 | `src/goodsEvidence/offline.ts` | team3 | keep simulation notice; real outbox is not this file |
-| `src/localDb/init.ts` | coordinator | Team 3 proposes `migrateToV10` call |
+| `src/localDb/init.ts` | coordinator | Calls `applyPendingLocalMigrations`; Team 3 proposes GRIN repairs |
+| `src/localDb/applyPendingMigrations.ts` | coordinator | Production v1–v10 orchestrator; tests must call this, not a copied sequence |
 | `src/localDb/schema.ts` | coordinator | `DB_VERSION` bump via Team 3 proposal |
 | `app/(app)/grin/**` | team4 | screens |
 | `src/screens/grin/**` | team4 | if used |

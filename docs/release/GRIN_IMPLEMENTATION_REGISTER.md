@@ -15,7 +15,7 @@ The core-only Internal build packet is **deferred**. VersionCode 23 is source pr
 
 This register is not GRIN-complete from G1.
 
-Programme (2026-10-01): isolated G1–G5 source + G6 automated tests/review/device **preparation**. Combined branch `integration/grin-g1-g5-source`. Contract revision `2026-10-01.wave1b`. Team 5 implementation review `070a388` then findings re-review `6f920cd`: M1–M3 and L4 **closed**; finding fixes **approved**. G6 incomplete. Wave 2 T1–T5 source is on combined and is **not accepted**. ER-1…ER-5 are mapped to landed SQLITE_HOST / INJECTED_PORT / isolated-emulator tests (see `GRIN_TEAM_BOARD.md`). Combined Wave 2 source review is still pending. App list/create/detail use GrinOutbox; app G1 dispatch is still the labelled uninjected FAKE port. Mutate/pack screens still use labelled fixtures. PR #30 remains the G1-only draft. Combined GitHub draft PR was not opened (`gh` unauthenticated).
+Programme (2026-10-01): isolated G1–G5 source + G6 automated tests/review/device **preparation**. Combined branch `integration/grin-g1-g5-source`. Contract revision `2026-10-01.wave1b`. Team 5 implementation review `070a388` then findings re-review `6f920cd`: M1–M3 and L4 **closed**; finding fixes **approved**. G6 incomplete. Wave 2 T1–T5 source was on combined `2593c2b` and is **not accepted**. Wave 2 corrections W2-01…W2-05 are in flight. Coordinator extracted `src/localDb/applyPendingMigrations.ts` (production v1–v10 orchestrator). T5 `c2ef669` CS-02 evidence-port follow-up is integrated as a test, not independent approval of W2-03. PR #30 remains the G1-only draft. Combined GitHub draft PR was not opened (`gh` unauthenticated).
 
 GRIN remains default-off. No main merge, deploy, EAS, Play, or billing activation in this programme.
 
