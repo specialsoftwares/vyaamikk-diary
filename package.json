@@ -19,6 +19,8 @@
     "start:prod-dev-client:tunnel": "EXPO_PUBLIC_APP_MODE=production expo start --dev-client --tunnel --port 8081 --clear",
     "start:prod-dev-client:firebase-test-phones": "EXPO_PUBLIC_APP_MODE=production EXPO_PUBLIC_FIREBASE_PHONE_AUTH_TEST_MODE=1 REACT_NATIVE_PACKAGER_HOSTNAME=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo 127.0.0.1) expo start --dev-client --lan --port 8081 --clear",
     "android:live": "npx --yes tsx scripts/android-live.ts",
+    "review:verify-account": "npx --yes tsx scripts/setup-play-review-account.ts",
+    "test:play-review-setup": "npx --yes tsx scripts/setup-play-review-account.contract.test.ts",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",

@@ -1,7 +1,7 @@
 /**
- * Production boot: finished native mark (not construction grid), no React
- * boot choreography, no artificial brand-minimum gate, splash released on
- * every terminal path, routing not blocked on optional prefetch / PIN warm.
+ * Production boot: finished ledger mark (not construction grid), the ledger
+ * open animation plays before routing, splash released on every terminal
+ * path, routing not blocked on optional prefetch / PIN warm.
  */
 
 import assert from "node:assert/strict";
@@ -44,8 +44,10 @@ const forbiddenGrid = readFileSync(join(root, "assets/splash-icon.png"));
 assert.ok(splashBytes.length > 0, "finished splash mark must exist");
 assert.equal(splashBytes.equals(forbiddenGrid), false, "finished mark is not the grid PNG");
 
-assert.doesNotMatch(bootScreen, /BootAnimationGate/);
-assert.doesNotMatch(bootScreen, /VyaamikkBootAnimation/);
+assert.match(bootScreen, /BootAnimationGate/, "ledger open animation must mount");
+assert.match(bootScreen, /resolveBootDestination/);
+assert.match(bootScreen, /BOOT_ANIMATION_MS/);
+assert.match(bootScreen, /BOOT_REDUCED_MOTION_MS/);
 assert.doesNotMatch(bootScreen, /consumeBootAnimationSlot/);
 assert.doesNotMatch(bootScreen, /BOOT_BRAND_MIN_MS/);
 assert.doesNotMatch(bootScreen, /logoCircle/);

@@ -23,10 +23,10 @@
     "android": {
       "softwareKeyboardLayoutMode": "resize",
       "package": "com.specialsoftwares.vyaamikkdiary",
-      "versionCode": 20,
+      "versionCode": 22,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
-        "backgroundColor": "#EEF1FF",
+        "backgroundColor": "#1E1B4B",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -49,11 +49,16 @@
       [
         "expo-build-properties",
         {
+          "android": {
+            "enableMinifyInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true
+          },
           "ios": {
             "useFrameworks": "static"
           }
         }
       ],
+      "./plugins/withAndroidLocaleConfigs.js",
       "expo-iap",
       [
         "expo-router",
