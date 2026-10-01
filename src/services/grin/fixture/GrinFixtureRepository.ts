@@ -1,6 +1,6 @@
 /**
- * WAVE-1 LABELLED FAKE. Not a production GRIN adapter.
- * Team 5: grep `GrinFixtureRepository` — replace this in Wave 2.
+ * WAVE-1 LABELLED FAKE. Tests only. Not a production GRIN adapter.
+ * Team 5: list/create/detail use `src/services/grin/repository`.
  */
 
 import { assembleManifest, mayMarkComplete } from "@/goodsEvidence/evidencePack";

@@ -4,7 +4,7 @@ import { useLocalSearchParams } from "expo-router";
 
 import { Banner, Button, Card, FormSection, Header, Screen, SelectField, TextField } from "@/components/ui";
 import { useT } from "@/i18n";
-import { getGrinFixtureRepository } from "@/services/grin/fixture";
+import { GRIN_FIXTURE_REPOSITORY_LABEL, getGrinFixtureRepository } from "@/services/grin/fixture";
 import {
   movementLabel,
   portalStatusLabel,
@@ -66,7 +66,7 @@ export function GrinEwbScreen(): React.ReactElement {
       <Screen scroll>
         <View style={styles.wrap}>
           <Header title={t("grin.ewbTitle")} showBack />
-          <GrinFixtureNotices />
+          <GrinFixtureNotices repositoryLabel={GRIN_FIXTURE_REPOSITORY_LABEL} />
           <Banner tone="info" message={t("grin.ewbPortalVsMovement")} />
           <Banner tone="warning" message={t("grin.ewbDeliveryDoesNotCancel")} />
           {error ? <Banner tone="danger" message={error} /> : null}

@@ -5,7 +5,7 @@ import { useLocalSearchParams } from "expo-router";
 import { Card, EmptyState, FormSection, Header, Screen } from "@/components/ui";
 import { useT } from "@/i18n";
 import type { GrinEventType } from "@/goodsEvidence/types";
-import { getGrinFixtureRepository } from "@/services/grin/fixture";
+import { GRIN_FIXTURE_REPOSITORY_LABEL, getGrinFixtureRepository } from "@/services/grin/fixture";
 import { spacing, useThemedStyles } from "@/theme";
 
 import { GrinAdmissionGate, GrinFixtureNotices } from "./GrinAdmissionGate";
@@ -62,7 +62,7 @@ export function GrinHistoryScreen(): React.ReactElement {
       <Screen scroll>
         <View style={styles.wrap}>
           <Header title={t("grin.historyTitle")} showBack />
-          <GrinFixtureNotices />
+          <GrinFixtureNotices repositoryLabel={GRIN_FIXTURE_REPOSITORY_LABEL} />
           <FormSection title={t("grin.originalUnchanged")}>
             <GrinFieldRow label={t("grin.field.grinNumber")} value={originalNumber} />
           </FormSection>

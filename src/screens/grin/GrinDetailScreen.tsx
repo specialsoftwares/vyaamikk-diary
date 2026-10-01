@@ -4,8 +4,9 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 
 import { Banner, Button, Card, EmptyState, FormSection, Header, Screen } from "@/components/ui";
 import { useT } from "@/i18n";
-import { getGrinFixtureRepository } from "@/services/grin/fixture";
-import type { GrinFixtureRecord } from "@/services/grin/fixture/types";
+import { useAuth } from "@/state/auth";
+import { getGrinApplicationRepository } from "@/services/grin/repository";
+import type { GrinApplicationRecord } from "@/services/grin/repository";
 import {
   ackLabel,
   captureLabel,
@@ -28,8 +29,9 @@ import { GrinFieldRow } from "./GrinFieldRow";
 export function GrinDetailScreen(): React.ReactElement {
   const t = useT();
   const router = useRouter();
+  const { user } = useAuth();
   const { receiptId } = useLocalSearchParams<{ receiptId: string }>();
-  const [record, setRecord] = useState<GrinFixtureRecord | null>(null);
+  const [record, setRecord] = useState<GrinApplicationRecord | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -41,9 +43,16 @@ export function GrinDetailScreen(): React.ReactElement {
   );
 
   const load = useCallback(() => {
-    if (!receiptId) return;
-    setRecord(getGrinFixtureRepository().get(receiptId));
-  }, [receiptId]);
+    if (!receiptId || !user?.uid) {
+      setRecord(null);
+      return;
+    }
+    try {
+      setRecord(getGrinApplicationRepository(user.uid).get(receiptId));
+    } catch {
+      setRecord(null);
+    }
+  }, [receiptId, user?.uid]);
 
   useFocusEffect(
     useCallback(() => {
@@ -119,7 +128,7 @@ export function GrinDetailScreen(): React.ReactElement {
 
           <FormSection title={t("grin.section.identity")}>
             <GrinFieldRow label={t("grin.field.grinNumber")} value={grin.issuedNumber ?? t("grin.pdf.pendingNumber")} />
-            <GrinFieldRow label={t("grin.field.custody")} value={custodyLabel(record.view.custody, t)} />
+            <GrinFieldRow label={t("grin.field.custody")} value={custodyLabel(grin.custody, t)} />
             <GrinFieldRow label={t("grin.local.issued")} value={localStateLabel(record.localState, t)} />
             {record.gateRefusal === "refused_at_gate" ? (
               <GrinFieldRow label={t("grin.gateRejection")} value={t("grin.gateRejection")} />
@@ -187,7 +196,7 @@ export function GrinDetailScreen(): React.ReactElement {
               <GrinFieldRow label={t("grin.field.packageCount")} value={formatQuantity(line.packageCount, t)} />
               <GrinFieldRow label={t("grin.field.shortage")} value={shortageLabel(line.shortageOrExcess, t)} />
               <GrinFieldRow label={t("grin.field.damage")} value={formatOptionalText(line.condition, t)} />
-              <GrinFieldRow label={t("grin.field.qc")} value={qcLabel(record.view.qcStatus ?? line.qcStatus, t)} />
+              <GrinFieldRow label={t("grin.field.qc")} value={qcLabel(line.qcStatus, t)} />
             </FormSection>
           ) : null}
 

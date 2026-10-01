@@ -5,17 +5,17 @@
 
 import { pdfGenerateHook } from "@/services/pdf/pdfGenerateHook";
 import { pdfService } from "@/services/pdf/pdfService";
-import type { GrinFixtureRecord } from "@/services/grin/fixture/types";
 import type { GrinPackExport } from "@/services/grin/fixture/types";
 import {
   buildGrinPackHtml,
   buildGrinReceiptHtml,
   grinPdfLabelsFromT,
   type GrinPdfLabels,
+  type GrinPdfReceiptSource,
 } from "./grinPdfTemplate";
 
 export async function generateGrinReceiptPdf(input: {
-  record: GrinFixtureRecord;
+  record: GrinPdfReceiptSource;
   t: (key: string, vars?: Record<string, string | number>) => string;
   locale?: "en-IN" | "hi-IN";
   labels?: GrinPdfLabels;
@@ -33,7 +33,7 @@ export async function generateGrinReceiptPdf(input: {
 }
 
 export async function generateGrinPackPdf(input: {
-  record: GrinFixtureRecord;
+  record: GrinPdfReceiptSource;
   pack: GrinPackExport;
   t: (key: string, vars?: Record<string, string | number>) => string;
   locale?: "en-IN" | "hi-IN";
@@ -54,4 +54,4 @@ export async function generateGrinPackPdf(input: {
 }
 
 export { grinPdfLabelsFromT, buildGrinReceiptHtml, buildGrinPackHtml };
-export type { GrinPdfLabels };
+export type { GrinPdfLabels, GrinPdfReceiptSource };
