@@ -3,6 +3,7 @@
  * App modules must not import firebase-admin. Production injects Team 1 / Team 2 adapters.
  */
 
+import type { Wave1OriginalCategory } from "@/goodsEvidence/evidence";
 import type { GrinMutationResult, GrinReconcileResult, GrinRegisterResult } from "@/goodsEvidence/ports";
 import type { GrinCommandType, LocalEvidenceRole } from "./types";
 
@@ -43,11 +44,38 @@ export type GrinServerCommandPort = {
   mutate?(input: { uid: string; envelope: GrinMutationEnvelope; digest: string }): Promise<GrinMutationResult>;
 };
 
+export type GrinEvidenceUploadInput = {
+  uid: string;
+  ledgerId: string;
+  receiptId: string;
+  evidenceId: string;
+  role: LocalEvidenceRole;
+  localPath: string;
+  claimedSha256: string | null;
+  /**
+   * Required for originals. Typed unknown so callers cannot skip validation.
+   * Validated as Wave1OriginalCategory; missing/invalid fails. NEVER default to invoice.
+   */
+  category: unknown;
+  sizeBytes: number;
+};
+
+/**
+ * Structured identity is populated only when the original is durable.
+ * Derivatives and failures must leave these fields null.
+ */
 export type GrinEvidenceUploadResult = {
   ok: boolean;
   originalDurable: boolean;
   generation: string | null;
   retryable: boolean;
+  evidenceId: string | null;
+  receiptId: string | null;
+  ledgerId: string | null;
+  category: Wave1OriginalCategory | null;
+  claimedSha256: string | null;
+  actualSha256: string | null;
+  reservationId: string | null;
 };
 
 /**
@@ -56,13 +84,5 @@ export type GrinEvidenceUploadResult = {
  */
 export type GrinEvidenceUploadPort = {
   portKind: GrinPortKind;
-  upload(input: {
-    uid: string;
-    ledgerId: string;
-    receiptId: string;
-    evidenceId: string;
-    role: LocalEvidenceRole;
-    localPath: string;
-    claimedSha256: string | null;
-  }): Promise<GrinEvidenceUploadResult>;
+  upload(input: GrinEvidenceUploadInput): Promise<GrinEvidenceUploadResult>;
 };

@@ -8,7 +8,9 @@ Same-owner `endOwnerSession` and lease steal during in-flight register/mutate ar
 
 ## ER-4 (Team 3 half)
 
-New file `src/localDb/migrateGrin.v9Startup.sqliteHost.test.ts` walks a v9 HostSqlite file through the **same v10 steps** init.ts uses (`version < 10` migrate, `version >= 10 && !grin_local_receipts` repair, write `schema_version` 10). GRIN flag unset / not `"1"`; tables still created. Does not enable the flag.
+`src/localDb/migrateGrin.v9Startup.sqliteHost.test.ts` injects HostSqlite via `setLocalDatabaseForTests` / `resetLocalDatabaseInitStateForStartup` then `initializeLocalDatabase()`, or calls `applyPendingLocalMigrations(db)`. It does **not** copy `applyInitV10Sequence`. GRIN flag unset / `"0"`; tables still created. Does not enable the flag. **SQLITE_HOST**. Not NATIVE_DEVICE.
+
+Team 5 `tools/grin-acceptance/startup/v9-v10-grin-off.sqliteHost.test.ts` still copies init; T3 did not edit that file.
 
 ## Proposed `package.json` addition
 

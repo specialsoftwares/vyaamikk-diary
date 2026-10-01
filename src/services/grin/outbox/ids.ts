@@ -22,6 +22,11 @@ export function mintWorkerId(): string {
   return `gwrk_${randomChars(10)}`;
 }
 
+/** Unique identity for one lease acquisition. Not worker name + generation. */
+export function mintAttemptId(): string {
+  return `gatt_${randomChars(20)}`;
+}
+
 export function assertCommandId(commandId: string): void {
   if (commandId.length < 8 || commandId.length > 128 || !ID_RE.test(commandId) || FORBIDDEN.has(commandId)) {
     throw new Error("invalid_command_id");
