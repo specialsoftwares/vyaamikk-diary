@@ -4,7 +4,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 
 import { Banner, Button, FormSection, Header, Screen, TextField } from "@/components/ui";
 import { useT } from "@/i18n";
-import { getGrinFixtureRepository } from "@/services/grin/fixture";
+import { GRIN_FIXTURE_REPOSITORY_LABEL, getGrinFixtureRepository } from "@/services/grin/fixture";
 import { formatQuantity } from "@/services/grin/grinDisplay";
 import { spacing, useThemedStyles } from "@/theme";
 
@@ -49,7 +49,7 @@ export function GrinReturnScreen(): React.ReactElement {
       <Screen scroll>
         <View style={styles.wrap}>
           <Header title={t("grin.returnTitle")} subtitle={t("grin.returnIntro")} showBack />
-          <GrinFixtureNotices />
+          <GrinFixtureNotices repositoryLabel={GRIN_FIXTURE_REPOSITORY_LABEL} />
           <Banner tone="info" message={t("grin.returnUnitHint")} />
           <Banner tone="info" message={t("grin.returnWeightSeparate")} />
           <Banner tone="info" message={t("grin.returnPackagesSeparate")} />

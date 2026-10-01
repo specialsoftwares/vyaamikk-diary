@@ -7,6 +7,10 @@ import {
   isGoodsEvidenceEnabled,
 } from "@/goodsEvidence/featureFlag";
 import { useT } from "@/i18n";
+import {
+  GRIN_APPLICATION_REPOSITORY_LABEL,
+  grinRepositoryIsFake,
+} from "@/services/grin/repository";
 import { spacing, useThemedStyles } from "@/theme";
 
 export function GrinAdmissionGate({
@@ -56,11 +60,16 @@ export function GrinAdmissionGate({
   );
 }
 
-export function GrinFixtureNotices(): React.ReactElement {
+export function GrinFixtureNotices({
+  repositoryLabel = GRIN_APPLICATION_REPOSITORY_LABEL,
+}: {
+  repositoryLabel?: string;
+} = {}): React.ReactElement {
   const t = useT();
+  const banner = grinRepositoryIsFake(repositoryLabel) ? t("grin.fixtureBanner") : t("grin.queueBanner");
   return (
     <View style={{ gap: spacing.sm, marginBottom: spacing.md }}>
-      <Banner tone="info" message={t("grin.fixtureBanner")} />
+      <Banner tone="info" message={banner} />
       <Banner tone="warning" message={t("grin.pricingQuotaNote")} />
     </View>
   );

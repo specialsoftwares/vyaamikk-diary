@@ -4,7 +4,7 @@ import { useLocalSearchParams } from "expo-router";
 
 import { Banner, Card, Header, Screen } from "@/components/ui";
 import { useT } from "@/i18n";
-import { getGrinFixtureRepository } from "@/services/grin/fixture";
+import { GRIN_FIXTURE_REPOSITORY_LABEL, getGrinFixtureRepository } from "@/services/grin/fixture";
 import { exceptionKindLabel, exceptionRuleLabel } from "@/services/grin/grinDisplay";
 import { spacing, useThemedStyles } from "@/theme";
 
@@ -26,7 +26,7 @@ export function GrinExceptionsScreen(): React.ReactElement {
       <Screen scroll>
         <View style={styles.wrap}>
           <Header title={t("grin.exceptionsTitle")} showBack />
-          <GrinFixtureNotices />
+          <GrinFixtureNotices repositoryLabel={GRIN_FIXTURE_REPOSITORY_LABEL} />
           <Banner tone="info" message={t("grin.exception.itcNote")} />
           {(view?.evaluations ?? []).map((item) => {
             const source =

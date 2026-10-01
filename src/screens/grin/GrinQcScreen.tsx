@@ -5,7 +5,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { Banner, Button, FormSection, Header, Screen, TextField } from "@/components/ui";
 import { useT } from "@/i18n";
 import type { QcStatus } from "@/goodsEvidence/types";
-import { getGrinFixtureRepository } from "@/services/grin/fixture";
+import { GRIN_FIXTURE_REPOSITORY_LABEL, getGrinFixtureRepository } from "@/services/grin/fixture";
 import { qcLabel } from "@/services/grin/grinDisplay";
 import { spacing, useThemedStyles } from "@/theme";
 
@@ -43,7 +43,7 @@ export function GrinQcScreen(): React.ReactElement {
       <Screen scroll>
         <View style={styles.wrap}>
           <Header title={t("grin.qcTitle")} showBack />
-          <GrinFixtureNotices />
+          <GrinFixtureNotices repositoryLabel={GRIN_FIXTURE_REPOSITORY_LABEL} />
           {error ? <Banner tone="danger" message={error} /> : null}
           <FormSection title={t("grin.section.inspection")}>
             <GrinFieldRow label={t("grin.field.qc")} value={qcLabel(record?.view.qcStatus ?? null, t)} />

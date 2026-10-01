@@ -5,7 +5,7 @@ import { useLocalSearchParams } from "expo-router";
 import { Banner, Button, Card, Header, Screen } from "@/components/ui";
 import { GRIN_DOCUMENT_FOOTER } from "@/goodsEvidence/constants";
 import { useT } from "@/i18n";
-import { getGrinFixtureRepository } from "@/services/grin/fixture";
+import { GRIN_FIXTURE_REPOSITORY_LABEL, getGrinFixtureRepository } from "@/services/grin/fixture";
 import { generateGrinPackPdf } from "@/services/grin/pdf/grinPdfAdapter";
 import { pdfService } from "@/services/pdf/pdfService";
 import { spacing, useThemedStyles } from "@/theme";
@@ -54,7 +54,7 @@ export function GrinPackScreen(): React.ReactElement {
       <Screen scroll>
         <View style={styles.wrap}>
           <Header title={t("grin.packTitle")} showBack />
-          <GrinFixtureNotices />
+          <GrinFixtureNotices repositoryLabel={GRIN_FIXTURE_REPOSITORY_LABEL} />
           <Banner tone="info" message={GRIN_DOCUMENT_FOOTER} />
           {error ? <Banner tone="danger" message={error} /> : null}
           <Card elevated={false}>

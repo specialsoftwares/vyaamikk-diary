@@ -1,13 +1,11 @@
 # Team 4 proposal — test scripts
 
-`package.json` is coordinator-owned. Please add these Wave 1 verify commands to `test:goods-evidence` (or a new `test:grin-product` suite included in `test:all`):
+`package.json` is coordinator-owned. Wave 1 `test:grin-product` already includes fixture/PDF/locale tests. Wave 2 adds:
 
 ```
-npx --yes tsx src/services/grin/fixture/GrinFixtureRepository.test.ts
-npx --yes tsx src/services/grin/pdf/grinPdfAdapter.test.ts
-npx --yes tsx src/i18n/grinLocaleKeys.test.ts
+npx --yes tsx src/services/grin/repository/GrinApplicationRepository.test.ts
 ```
 
-`src/goodsEvidence/exceptions.test.ts` is already invoked by `test:goods-evidence`.
+That suite uses HostSqlite (`SQLITE_HOST`, not `NATIVE_DEVICE`) and does not import firebase-admin into `src/screens`.
 
 Team 4 does not bump versionCode, enable billing, or add deploy jobs.

@@ -4,7 +4,7 @@ import { useLocalSearchParams } from "expo-router";
 
 import { Banner, Card, EmptyState, Header, Screen } from "@/components/ui";
 import { useT } from "@/i18n";
-import { getGrinFixtureRepository } from "@/services/grin/fixture";
+import { GRIN_FIXTURE_REPOSITORY_LABEL, getGrinFixtureRepository } from "@/services/grin/fixture";
 import { spacing, useThemedStyles } from "@/theme";
 
 import { GrinAdmissionGate, GrinFixtureNotices } from "./GrinAdmissionGate";
@@ -26,7 +26,7 @@ export function GrinAttachmentsScreen(): React.ReactElement {
       <Screen scroll>
         <View style={styles.wrap}>
           <Header title={t("grin.attachmentsTitle")} showBack />
-          <GrinFixtureNotices />
+          <GrinFixtureNotices repositoryLabel={GRIN_FIXTURE_REPOSITORY_LABEL} />
           {attachments.length === 0 ? <EmptyState title={t("grin.emptyTitle")} /> : null}
           {attachments.map((item) => (
             <Card key={item.evidenceId} elevated={false}>

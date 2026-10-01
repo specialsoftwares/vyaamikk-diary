@@ -8,7 +8,8 @@ import { quantity } from "@/goodsEvidence/quantities";
 import { classifyShortageOrExcess } from "@/goodsEvidence/quantities";
 import type { AcknowledgementOutcome, CaptureProvenance, CustodyState } from "@/goodsEvidence/types";
 import type { EwbLink } from "@/goodsEvidence/ewb";
-import { draftFromFormDefaults, getGrinFixtureRepository, presentText } from "@/services/grin/fixture";
+import { useAuth } from "@/state/auth";
+import { draftFromFormDefaults, getGrinApplicationRepository, presentText } from "@/services/grin/repository";
 import { spacing, useThemedStyles } from "@/theme";
 
 import { GrinAdmissionGate, GrinFixtureNotices } from "./GrinAdmissionGate";
@@ -17,6 +18,7 @@ import { GrinChoiceRow } from "./GrinChoiceRow";
 export function GrinCreateScreen(): React.ReactElement {
   const t = useT();
   const router = useRouter();
+  const { user } = useAuth();
   const styles = useThemedStyles(() =>
     StyleSheet.create({
       wrap: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.xxl, gap: spacing.md },
@@ -81,6 +83,10 @@ export function GrinCreateScreen(): React.ReactElement {
   const onSave = useCallback(() => {
     if (!supplierName.trim() || !material.trim()) {
       setError(t("grin.errRequired"));
+      return;
+    }
+    if (!user?.uid) {
+      setError(t("grin.errSave"));
       return;
     }
     setBusy(true);
@@ -189,7 +195,7 @@ export function GrinCreateScreen(): React.ReactElement {
         statement: ackStatement.trim() || t("grin.ack.notRequested"),
         explanation: { kind: "not_supplied" },
       };
-      const saved = getGrinFixtureRepository().createQueued(draft);
+      const saved = getGrinApplicationRepository(user.uid).createQueued(draft);
       router.replace({ pathname: "/(app)/grin/[receiptId]", params: { receiptId: saved.receiptId } });
     } catch {
       setError(t("grin.errSave"));
@@ -235,6 +241,7 @@ export function GrinCreateScreen(): React.ReactElement {
     tareWeight,
     timeZone,
     transporter,
+    user?.uid,
     vehicle,
     warehouse,
     weightUnit,

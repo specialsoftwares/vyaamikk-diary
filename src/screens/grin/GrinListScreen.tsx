@@ -11,8 +11,9 @@ import {
   Screen,
 } from "@/components/ui";
 import { useT } from "@/i18n";
-import { getGrinFixtureRepository } from "@/services/grin/fixture";
-import type { GrinListItem } from "@/services/grin/fixture/types";
+import { useAuth } from "@/state/auth";
+import { getGrinApplicationRepository } from "@/services/grin/repository";
+import type { GrinApplicationListItem } from "@/services/grin/repository";
 import {
   captureLabel,
   custodyLabel,
@@ -27,8 +28,9 @@ import { GrinAdmissionGate, GrinFixtureNotices } from "./GrinAdmissionGate";
 export function GrinListScreen(): React.ReactElement {
   const t = useT();
   const router = useRouter();
+  const { user } = useAuth();
   const insets = useSafeAreaInsets();
-  const [items, setItems] = useState<GrinListItem[]>([]);
+  const [items, setItems] = useState<GrinApplicationListItem[]>([]);
 
   const styles = useThemedStyles((c) =>
     StyleSheet.create({
@@ -61,8 +63,16 @@ export function GrinListScreen(): React.ReactElement {
   );
 
   const load = useCallback(() => {
-    setItems(getGrinFixtureRepository().list());
-  }, []);
+    if (!user?.uid) {
+      setItems([]);
+      return;
+    }
+    try {
+      setItems(getGrinApplicationRepository(user.uid).list());
+    } catch {
+      setItems([]);
+    }
+  }, [user?.uid]);
 
   useFocusEffect(
     useCallback(() => {
@@ -75,7 +85,7 @@ export function GrinListScreen(): React.ReactElement {
   }, [router]);
 
   const renderItem = useCallback(
-    ({ item }: { item: GrinListItem }) => {
+    ({ item }: { item: GrinApplicationListItem }) => {
       const number = item.displayNumber ?? t("grin.pdf.pendingNumber");
       return (
         <Card elevated={false}>
