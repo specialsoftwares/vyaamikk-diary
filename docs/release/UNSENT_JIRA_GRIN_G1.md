@@ -44,3 +44,7 @@ Inspected combined `2593c2be6964955ecb1a433dc93c4096168ce9d2`. Combined advanced
 
 Merged onto `integration/grin-g1-g5-source`: T2 `06d897a719637abeb1301292af9d85fa370b8b8e` (identity + retained isolated Storage reads), T3 `9a0de6dd83ff51293698b69cd7dc23051e737b7b` (attempt fence + category persist + production v10 tests), T4 `decac00` (no session self-revive; remaining screens off fixtures). Coordinator glued `type`/`commandType` and stopped mutation from rewriting register `payload_json`. Wave 2 not accepted pending Team 5 PHASE 2. Live Rules/Functions unchanged. versionCode 23. Flags `"0"`. Do not mark G6/device/billing/public-release Done.
 
+## Team 5 Wave 2 PHASE 2 (unsent, 2026-10-02)
+
+`3fe4071e95875a02b25f636739c1f04f8564bf09` on `team/grin-t5-qa` reviewed combined `e94b78cdc07458c457ba7ef5bb6308109d7ec2cd`. Independently re-executed W2-01…W2-05 as reproduced-then-fixed (SQLITE_HOST / INJECTED / isolated Storage emulator / mounted-inert). Wave 2 **not accepted**: app still FAKE uninjected G1; Functions unexported; live Rules unchanged; native/TalkBack/Play/live GST/2B open. Do not mark G6/device/billing/public-release Done.
+

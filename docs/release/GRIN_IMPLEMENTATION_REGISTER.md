@@ -15,7 +15,7 @@ The core-only Internal build packet is **deferred**. VersionCode 23 is source pr
 
 This register is not GRIN-complete from G1.
 
-Programme (2026-10-01): isolated G1–G5 source + G6 automated tests/review/device **preparation**. Combined branch `integration/grin-g1-g5-source`. Contract revision `2026-10-01.wave1b`. Team 5 implementation review `070a388` then findings re-review `6f920cd`: M1–M3 and L4 **closed**; finding fixes **approved**. G6 incomplete. Wave 2 corrections T1 `cbcb1b9`, T2 `06d897a`, T3 `9a0de6d`, T4 `decac00` are merged; T5 PHASE 1 repro `bff108c` is not closure. Wave 2 is **not accepted** pending T5 PHASE 2. Functions remain unexported. App still uses labelled FAKE uninjected G1 port. Coordinator extracted `src/localDb/applyPendingMigrations.ts`. T5 `c2ef669` CS-02 is a test, not W2-03 approval. PR #30 remains the G1-only draft. Combined GitHub draft PR was not opened (`gh` unauthenticated).
+Programme (2026-10-01): isolated G1–G5 source + G6 automated tests/review/device **preparation**. Combined branch `integration/grin-g1-g5-source`. Contract revision `2026-10-01.wave1b`. Team 5 implementation review `070a388` then findings re-review `6f920cd`: M1–M3 and L4 **closed**; finding fixes **approved**. G6 incomplete. Wave 2 T1 `cbcb1b9`, T2 `06d897a`, T3 `9a0de6d`, T4 `decac00`, coordinator glue `e94b78c`. Team 5 PHASE 2 `3fe4071` independently re-executed W2-01…W2-05 as reproduced-then-fixed on `e94b78c`. **Wave 2 is not accepted:** app still binds FAKE uninjected G1; Functions unexported; live Rules unchanged; native/Play/GST/2B open. T5 `c2ef669` CS-02 is a test, not W2-03 approval. PR #30 remains the G1-only draft. Combined GitHub draft PR was not opened (`gh` unauthenticated).
 
 GRIN remains default-off. No main merge, deploy, EAS, Play, or billing activation in this programme.
 
@@ -76,7 +76,7 @@ Billing prepare/validate/RTDN/worker handlers **exist** (Cloud Functions v2 `asi
 
 ### G6 — Combined device, accessibility, security, operational acceptance
 
-**Status:** Wave 1 matrix `df5f0a5`, implementation review `070a388`, findings re-review `6f920cd` (M1–M3 closed). Wave 2 ER-4/ER-5 `525233f`: GRIN-off v9→v10 SQLITE_HOST QA; CS-01…CS-11 host/injected slices via `runWorkflows.ts` (not `runIds` stubs). Independent W2-01…W2-05 reproductions `bff108c` (not closure). Native/device remains `device_pending`. Must not mark complete from source/emulator tests.
+**Status:** Wave 1 matrix `df5f0a5`, implementation review `070a388`, findings re-review `6f920cd` (M1–M3 closed). Wave 2 ER-4/ER-5 `525233f`. Independent W2-01…W2-05 PHASE 1 repro `bff108c` then PHASE 2 `3fe4071` (reproduced-then-fixed on `e94b78c`; Wave 2 not accepted). Native/device remains `device_pending`. Must not mark complete from source/emulator tests.
 
 **Acceptance (not implemented now):** Play-installed binary; TalkBack on GRIN screens; account switch and pending-deletion; safe diagnostics; operational runbook. Must not mark Done from source/emulator tests.
 
