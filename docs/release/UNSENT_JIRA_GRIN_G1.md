@@ -100,3 +100,7 @@ Merged T5 PHASE 3 onto combined. Extended `tools/goods-evidence-emulator/functio
 
 Independent follow-up `ee4be8aa460beb4b0a22c3ad6f559c13873e58dc` of combined `cd5b5f43702b65b7a06d50c56413d26369b6920e`. `npm run test:goods-evidence-g1-functions-emulator` independently re-executed: persistGrinOwnerSession → processAttachments → real `httpsCallable` (not mocked); hasher factory not injected; unset hosts failed as required. Labels: EMULATOR / SQLITE_HOST / HOST_FILESYSTEM / not NATIVE_DEVICE / not live deploy. `functions/src/index.ts` HOLD. versionCode 23. Purchase-entry flags `"0"`. GRIN default-off. **Wave 2 not accepted.** Do not mark GRIN / G6 / billing / public-release Done.
 
+## Local ci:verify after PHASE 4 board (unsent, 2026-10-02)
+
+Local `npm run ci:verify` on `9050a1305fd4df2132db57f6494913b38d8e767d` (parent `ee4be8a`). `test:all` 152/152. G1/G2/Functions-emulator suites executed including joined persistGrinOwnerSession httpsCallable. **Local validation passed with Docker stage skipped.** GitHub Actions canonical run (renderer Docker) was not obtained (`gh` unauthenticated; workflow is `main` / PR-to-`main` / `workflow_dispatch` only). `functions/src/index.ts` HOLD. versionCode 23. Flags `"0"`. **Wave 2 not accepted.** Do not mark GRIN / G6 / billing / public-release Done.
+

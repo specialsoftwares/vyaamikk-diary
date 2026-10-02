@@ -9,7 +9,7 @@ Checkpoint inspected: combined includes T5 PHASE 4 `ee4be8a` of `cd5b5f4`. Histo
 
 | Task | Owner | Branch | Worktree | Dependency | Status | Evidence | Blocker | Next |
 |---|---|---|---|---|---|---|---|---|
-| Integration | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | G1 `c9623dd` | running | T5 PHASE 4 `ee4be8a` of `cd5b5f4`; joined persist httpsCallable independently re-executed | Functions unexported; `gh` unauthenticated | Canonical GitHub CI still blocked; do not mark Wave 2 / G6 Done |
+| Integration | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | G1 `c9623dd` | running | T5 PHASE 4 `ee4be8a` of `cd5b5f4`; local `ci:verify` at `9050a13` with Docker skipped | Functions unexported; `gh` unauthenticated | GitHub canonical CI still blocked; do not mark Wave 2 / G6 Done |
 | E1 evidence composition | team1 | `team/grin-t1-backend` | `grin-t1-backend` | `15bd2a6` | source_verified | persistGrinOwnerSession → processAttachments → real httpsCallable on isolated Functions emulator | live export HOLD | Stay unexported / undeployed |
 | E1/E2/E4/E5 evidence integrity | team2 | `team/grin-t2-evidence` | `grin-t2-evidence` | `29c6d3f` | source_verified | G2 unit + STORAGE_EMULATOR 8091/9200 | live IAM | Stay undeployed |
 | E2/E3 admission + descriptors | team3 | `team/grin-t3-offline` | `grin-t3-offline` | `0d0dd84` | source_verified | SQLITE_HOST outbox + capture columns | native death not claimed | Stay undeployed |
