@@ -68,3 +68,7 @@ Starting combined HEAD `13f90ed33ce60a701eb2e3a73a1e279f2be1888f`. Contract `202
 
 `29c6d3fd85482f207299dc0195047f624170585b` on `team/grin-t2-evidence`: stored-byte `actualSha256`, upload categories include stock_accounting/payment/gst/return_document, pack A/B/C/D INJECTED, STORAGE_EMULATOR 8091/9200. Functions still unexported. Live Rules unchanged. T1 JS/Functions round-trip, T3 admission/descriptors, T4 picker/appBinding remain open. Do not mark GRIN Done.
 
+## Team 3 E2/E3 verification admission (unsent, 2026-10-02)
+
+`0d0dd841d4ec37e05313ce4070a86968fe6510b9` on `team/grin-t3-offline`: `originalIdentityMatches` requires actual SHA-256 of retained local bytes; additive descriptor columns; `expectedVersion===0` shim removed. SQLITE_HOST outbox + F2 interop. T1 transport and T4 picker/pack still open. Do not mark GRIN / G6 Done.
+
