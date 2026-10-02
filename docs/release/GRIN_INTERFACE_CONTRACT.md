@@ -1,4 +1,4 @@
-# GRIN interface contract — revision 2026-10-02.wave2app
+# GRIN interface contract — revision 2026-10-02.wave2evidence
 
 Coordinator-owned. Teams implement against this text and `src/goodsEvidence/ports.ts`.
 A contract change requires dependent teams to acknowledge and retest.
@@ -9,7 +9,7 @@ Do not enable production admission to demonstrate the feature.
 Frozen ancestry: G1 `c9623dd` / PR #30. Domain `55f2df1` / PR #27 (support policy v2).
 Core app `6e3dbba` / docs `8b286ab` / PR #29. Do not alter those PRs.
 
-Wave 1b (`2026-10-01.wave1b`) answered Team 5 contract conflicts. This revision adds application findings **F1–F4**. Dependent teams must acknowledge `2026-10-02.wave2app` and retest. W2-01…W2-05 remain in force; do not regress them.
+Wave 1b (`2026-10-01.wave1b`) answered Team 5 contract conflicts. `2026-10-02.wave2app` added F1–F4. This revision adds evidence-workflow findings **E1–E5**. Dependent teams must acknowledge `2026-10-02.wave2evidence` and retest. W2-01…W2-05 and F1–F4 remain in force; do not regress them.
 
 ## Identifiers
 
@@ -211,10 +211,114 @@ Still required:
 - Mobile `src/` must not import `firebase-admin`, Node `fs`, HostSqlite, or `tools/goods-evidence-*` adapters.
 - Production Functions exports remain HOLD. Absence does not block undeployed composed/emulator tests. Do not edit `functions/src/index.ts`.
 
+## Evidence workflow findings E1–E5 (2026-10-02.wave2evidence)
+
+Starting combined HEAD `13f90ed` / validated application `99ee60c`. Preserve F1–F4 and W2-01…W2-05.
+
+### Default production composition
+
+`persistGrinOwnerSession` must construct:
+
+```
+new GrinOutbox({ db, server: serverPortFactory(), evidence: evidencePortFactory() })
+```
+
+- Default `serverPortFactory` remains `createFirebaseJsGrinTransport`.
+- Default `evidencePortFactory` is `createFirebaseJsGrinEvidenceTransport` (Team 1). Tests inject FAKE / uninjected / null via `setGrinEvidencePortFactoryForTests` (Team 4, same pattern as the server factory).
+- `evidence: undefined` is not a production default. A missing **backend** (unexported callable, unauthenticated, network) must yield `attachment_pending` / retryable deny with `originalDurable: false`, never success.
+- Default-off / store-blocked admission must not start GRIN services. Hiding UI is not authorization.
+- Mobile `src/` must not import Admin SDK, Node `fs`, HostSqlite, or `tools/goods-evidence-*`. Isolated Functions-emulator entrypoint lives under `tools/goods-evidence-emulator/**` and may compose the same production handler factories. Do **not** export GRIN from `functions/src/index.ts`.
+
+### E1 — App evidence port (Team 1 + Team 2; Team 4 wires `appBinding`)
+
+At `99ee60c` the outbox is constructed without `evidence`, so `processAttachments` returns `attachment_pending`. `createFirebaseJsGrinEvidenceTransport` currently voids `localPath` and never uploads bytes.
+
+Required connected path (not a pre-injected successful `GrinEvidenceUploadResult`):
+
+1. Retain local original bytes (E4) and queue `attachOriginal`.
+2. Reserve (G2 reservation identity).
+3. Upload retained bytes via Firebase **JS** Storage (chunked / resumable; no full-file base64 logging).
+4. Trusted verify hashes **stored** bytes at the returned generation.
+5. Link via `linkVerifiedEvidence` (event + pointer; never rewrite `original`).
+6. Reopen sqlite / restart outbox: original remains durable with the server descriptor.
+
+Acceptance: production composition with platform/auth/network redirected to **local emulators**. Do not mock `httpsCallable` in the round-trip case. Document any remaining injected boundary (auth test user, emulator hosts, Feature flag `GRIN_GOODS_EVIDENCE_FUNCTIONS=true` on the **emulator process only**).
+
+### E2 — Verification admission (Team 2 + Team 3)
+
+`originalIdentityMatches` must **not** accept (a) echoed client claim when `actualSha256` differs, or (b) null local claim and null returned hashes when other IDs match.
+
+Before marking durable:
+
+- `uploaded.ok && originalDurable` is **not** sufficient.
+- `actualSha256` must be `isSha256Hex` and must equal the hash of the **captured local retained bytes** (bounded chunks). An echoed `claimedSha256` cannot substitute.
+- Match owner (auth uid), ledger, receipt, evidenceId, category, measured `sizeBytes`, storage object identity (`storagePath` / object key) and actual generation.
+- Reject missing, malformed, mismatched, stale, wrong-owner/receipt/ledger/category/evidenceId, invalid generation, size mismatch.
+- Session retirement / lease takeover after the await must not persist durability (`ownsLiveAttempt` / `skipStaleCompletion` already required by W2-02).
+- Hash equality proves byte integrity, not document truth or legal sufficiency.
+
+Extend `GrinEvidenceUploadResult` (Team 3 `outbox/ports.ts`) so a durable success includes: `ownerUid`, `mime`, `sizeBytes`, `storagePath`, `generation` (real object generation, never the literal `"verified"`), `actualSha256`, `reservationId`, plus existing identity fields. Non-durable results keep identity fields null.
+
+Required tests: the listed negatives plus one positive case with known bytes and independently computed SHA-256.
+
+### E3 — Trusted verification metadata (Team 3)
+
+`writeEvidenceUpload` must persist the verified descriptor atomically under the current session and attempt fence: actual hash, size, MIME, object identity/generation, association, capture provenance. Keep `claimed_sha256` distinct from `actual_sha256`.
+
+Additive SQLite only (no `DB_VERSION` bump, do not rewrite `migrateToV10` CREATE TABLE). Idempotent `ALTER TABLE ... ADD COLUMN` via `tableHasColumn`, same pattern as confirmed-projection columns.
+
+Older rows without trustworthy descriptors remain pending/incomplete. Do not backfill fictional generations, hashes, or provenance.
+
+`toPackOriginalInput` (Team 4) must use the retained **actual** hash, MIME, and generation. Remove `generation: "verified"` substitution and filename MIME guessing when a descriptor exists.
+
+Stale completion must not overwrite a newer descriptor or make another receipt's original durable. SQLITE_HOST reopen must show the exact descriptor.
+
+Team 3 must **remove** `bindRepoAmendToConfirmed` (the `expectedVersion === 0` rewrite) from `tools/grin-interop/f2-register-amend-confirm.sqliteHost.test.ts`. No test adapter may repair an invalid production command.
+
+### E4 — Original capture and PDF selection (Team 2 + Team 4)
+
+`grinOriginalPicker` at `99ee60c` is images-only, `quality: 0.8`, URI-only, `claimedSha256: null`, missing size → 0.
+
+Required:
+
+- PDF/document selection (`application/pdf`) and supported image import (`image/jpeg|png|webp`) plus camera capture. Unsupported MIME fails explicitly.
+- Copy selected bytes into a durable **app-owned** file **before** `attachOriginal`. A temporary picker URI is not offline retention.
+- Hash and measure retained bytes with `hashBoundedChunks` / `HASH_CHUNK_BYTES`. Do not silently recompress a selected original and label it unchanged.
+- Distinguish capture provenance: `camera_capture` | `imported_original` | `os_conversion` | `derivative`. Do **not** hardcode `osConversionOccurred: false` without evidence from the pinned `expo-image-picker` / document-picker behaviour. If conversion cannot be ruled out, label `os_conversion` (or unknown) and do not claim byte identity with the OS source.
+- Verify `quality` / editing behaviour against pinned Expo 54 (`expo-image-picker ~17.0.11`). `quality: 1` alone does not prove identity.
+- Origin-bound picker/copy/hash: retired callbacks must not attach to a new account. Dispose uncommitted temporary copies after retirement/cancellation; never delete queued or retained originals.
+- No filenames, document bodies, or hashes in logs/telemetry.
+
+Proof (label SQLITE_HOST / host filesystem; NATIVE_DEVICE not claimed): PDF import, supported image import, camera capture (injected camera bytes), cancellation, denied permission, missing/inaccurate picker size, oversize, changed bytes, temporary source disappearance, sqlite reopen, account switch while picker/copy/hash awaits.
+
+Coordinator owns adding `expo-document-picker` to `package.json` when Team 4 proposes the exact SDK 54 version.
+
+### E5 — Pack coverage reachable and precise (Team 2 + Team 4)
+
+Extend upload categories so the app, outbox, server validation, sqlite descriptors, and support policy v2 share the same declared set: existing Wave 1 originals **plus** `stock_accounting`, `payment`, `gst`, `return_document`. Category remains a declared assertion, not live GSTR-2B / payment / supplier-status verification.
+
+Do not weaken policy v2. Invoice reference ≠ retained commercial original. ITC always `not_determined`. Do not relabel a missing integration as `not_applicable` to produce a green badge.
+
+Pack export must distinguish:
+
+- **coverage** (inventory evaluation at a pinned cut) from
+- **bundled artifacts** (whether original bytes are included in the export payload).
+
+If the export is a manifest + PDF summary, label it as such; do not claim originals are bundled when they are not. When integrity is claimed, retrieve the pinned objects and verify stored/retrieved bytes against the retained actual hash.
+
+Replace boolean complete/incomplete success checks with explicit cases:
+
+- A. Required evidence absent → incomplete with **specific** `incompleteReasons`.
+- B. All required policy items genuinely supplied through repository/transport → `mayMarkComplete` true without forcing completeness.
+- C. Corrupt, missing, wrong-owner, wrong-receipt, wrong-generation, unavailable artifact → incomplete or error as appropriate.
+- D. Later receipt events do not rewrite an earlier pinned export.
+
+Team 4 must mount **actual** EWB, attachment/picker, and pack/share admitted bodies in origin.bind tests (inert native surfaces), including retirement before dispatch and after each relevant await. Do not claim cancellation of an OS share already launched; prevent new retired actions and publication of retired results.
+
 ## Unresolved product / policy choices (do not invent)
 
-- GRIN pricing / ordinary-record quota.
-- Retention/deletion of GRIN + Storage objects after account deletion.
+- GRIN pricing / ordinary-record quota — **owner decision pending**. Options (not selected): (A) GRIN counts against ordinary-record quota; (B) separate GRIN quota; (C) GRIN unused while default-off. Do not implement a silent bypass of account-deletion or quota.
+- Retention/deletion of GRIN + Storage objects after account deletion — **owner decision pending**. Options (not selected): (A) delete with account; (B) retain for a legal-hold window; (C) export-then-delete. Deletion jobs must not be altered in this programme.
 - Production admission flag, server admission, client visibility, deploy order (activation design later; not enabled here).
 - Encrypted PDF backup (backlog).
 - Live EWB / GSTR-2B / supplier-status integrations (manual assertions + `unknown` only).

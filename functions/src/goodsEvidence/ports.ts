@@ -10,7 +10,7 @@
 import type { EvidenceCategory, EvidenceVerification } from "./evidence";
 import type { GrinEvent, ImmutableGrin } from "./types";
 
-export const GRIN_CONTRACT_REVISION = "2026-10-02.wave2app" as const;
+export const GRIN_CONTRACT_REVISION = "2026-10-02.wave2evidence" as const;
 
 /** ID charset: [A-Za-z0-9_-], length 1–64. commandId 8–128. Never rewritten. */
 export type GrinId = string;

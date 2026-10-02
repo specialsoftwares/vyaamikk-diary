@@ -7,7 +7,7 @@ import {
   evidenceVerificationOfState,
 } from "./ports";
 
-assert.equal(GRIN_CONTRACT_REVISION, "2026-10-02.wave2app");
+assert.equal(GRIN_CONTRACT_REVISION, "2026-10-02.wave2evidence");
 assert.equal(DOMAIN_DISABLED_MAPS_TO, "policy_denied");
 assert.equal(FOREIGN_LEDGER_MAPS_TO, "forbidden");
 assert.equal(evidenceVerificationOfState("reserved"), "pending");

@@ -62,3 +62,4 @@ Team 5 does not own production implementations. A Team 5 code fix needs another 
 
 Do not share `node_modules` symlinks across worktrees.
 Emulator ports: Team 1 Firestore **8090**; Team 2 Firestore **8091** + Storage **9200**; G1 historical **8088** remains for existing tests until coordinator unifies.
+Isolated Functions-emulator GRIN entrypoint: `tools/goods-evidence-emulator/**` (Team 1). Never `functions/src/index.ts`.

@@ -56,3 +56,7 @@ Merged onto `integration/grin-g1-g5-source`: T2 `06d897a719637abeb1301292af9d85f
 
 Validated application SHA `99ee60ceba2f7f4adec01f4e3559c485608687ac` on `integration/grin-g1-g5-source` (parent `f2407cb3574d528dd0da6d061f6ab108f3a16a87`). Root `tsc --noEmit`, G1/G2 adapter typechecks, and `functions` `tsc` passed. Local `npm run ci:verify` exited 0: `test:all` 152/152 in 247.6s; G1 Firestore emulator `demo-vyaamikk-grin-g1` (composed ok); G2 Firestore+Storage `demo-vyaamikk-grin-g2` (storage + rules ok). Local invoice-renderer Docker skipped (`docker not available locally`). `gh` not logged in — no draft PR from this environment. Compare: https://github.com/specialsoftwares/vyaamikk-diary/compare/main...integration/grin-g1-g5-source . Functions GRIN callables remain unexported. Live Rules/IAM/secrets/flags unchanged. versionCode 23. Purchase-entry flags `"0"`. Wave 2 / G6 / device / billing / public-release **not** Done.
 
+## Evidence workflow E1–E5 start (unsent, 2026-10-02)
+
+Starting combined HEAD `13f90ed33ce60a701eb2e3a73a1e279f2be1888f`. Contract `2026-10-02.wave2evidence`. Findings E1–E5 are **open** at application SHA `99ee60c` (missing evidence port; invalid verification admission; lost verification metadata; image-only picker; incomplete pack categories). Do not mark GRIN / G6 / billing / public-release Done.
+

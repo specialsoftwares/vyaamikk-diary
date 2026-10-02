@@ -5,16 +5,16 @@ Do not collapse to Done.
 
 Arrangement: one coordinator plus five **local** Cursor Task subagents on separate worktrees. AI roles, not human sign-off.
 
-Checkpoint inspected: `2593c2be6964955ecb1a433dc93c4096168ce9d2`. Combined F5 review tree: `7623eef`; T5 record `889f011`. Typecheck + local `ci:verify` SHA: `99ee60ceba2f7f4adec01f4e3559c485608687ac`. W2-01…W2-05 and F1–F4 **reproduced-then-fixed** at stated hosts. Wave 2 / G6 / public release **not accepted**.
+Checkpoint inspected: combined `13f90ed33ce60a701eb2e3a73a1e279f2be1888f` (= origin). Validated application `99ee60c`. T5 F5 reviewed `7623eef`. `origin/main` `0da2f58970f23c7ce6cbefae6efffd49c731f44b`. Historical workspace `55f2df1` dirty — **untouched**. Contract `2026-10-02.wave2evidence`. Wave 2 / G6 / public release **not accepted**.
 
 | Task | Owner | Branch | Worktree | Dependency | Status | Evidence | Blocker | Next |
 |---|---|---|---|---|---|---|---|---|
-| Integration | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | G1 `c9623dd` | source_verified | local `ci:verify` PASS on `99ee60c` (152/152; G1 `8088`; G2 `8091`+`9200`) | Functions unexported; `gh` unauthenticated; local Docker renderer skipped | STOP before main/deploy; draft PR if GitHub auth appears |
-| F2/F4 G1 readReceipt + transport | team1 | `team/grin-t1-backend` | `grin-t1-backend` | `4b560cd` | source_verified | T5 composed emulator 8088 | live export HOLD | Stay unexported |
-| F3 retrieve + pack inputs | team2 | `team/grin-t2-evidence` | `grin-t2-evidence` | `3ddd4f9` | source_verified | T5 pack A/B + STORAGE_EMULATOR 9200 | live IAM | Keep live Rules unchanged |
-| F1/F2 outbox confirmed + session token | team3 | `team/grin-t3-offline` | `grin-t3-offline` | `fa6d4a7` | source_verified | T5 SQLITE_HOST joined; leftover 0-shim not used as proof | native death not claimed | — |
-| F1 origin screens + F2/F3 repo | team4 | `team/grin-t4-product` | `grin-t4-product` | `26b602a` | source_verified | T5 origin.bind actual bodies | pricing/quota; EWB/picker/pack-share bodies not mounted | — |
-| Independent F5 review | team5 | `team/grin-t5-qa` | `grin-t5-qa` | `889f011` | source_verified | WAVE2APP_F5_REVIEW.md | NATIVE_DEVICE | Do not accept Wave 2 |
+| Integration | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | G1 `c9623dd` | running | E1–E5 contract published | Functions unexported; `gh` unauthenticated | Integrate T1–T4 then T5 re-review |
+| E1 evidence composition | team1 | `team/grin-t1-backend` | `grin-t1-backend` | combined HEAD | ready | — | live export HOLD | JS→Functions-emulator round-trip; stay unexported |
+| E1/E2/E4/E5 evidence integrity | team2 | `team/grin-t2-evidence` | `grin-t2-evidence` | combined HEAD | ready | — | live IAM | Categories + stored-byte verify + retrieve |
+| E2/E3 admission + descriptors | team3 | `team/grin-t3-offline` | `grin-t3-offline` | combined HEAD | ready | leftover 0-shim | native death not claimed | Persist descriptor; remove 0-shim |
+| E4 picker + E5 pack + E1 wire | team4 | `team/grin-t4-product` | `grin-t4-product` | combined HEAD | ready | EWB/picker/pack-share not mounted | pricing/quota unresolved | Durable copy; mount EWB/picker/pack |
+| Independent E1–E5 review | team5 | `team/grin-t5-qa` | `grin-t5-qa` | combined HEAD | ready | F5 of `7623eef` | NATIVE_DEVICE | Reproduce E1–E5 then re-review |
 
 ## Wave 2 correction findings (closed at stated boundary; not Wave 2 acceptance)
 
@@ -30,10 +30,20 @@ Checkpoint inspected: `2593c2be6964955ecb1a433dc93c4096168ce9d2`. Combined F5 re
 
 | ID | Finding | Owner | Status | Next |
 |---|---|---|---|---|
-| F1 | Screen `onSave` recaptured live repo; A→B dispatched A's values on B | team4 + team3 | source_verified | T5 origin.bind Amend/QC/Return/Create; EWB/picker/pack-share bodies not mounted |
-| F2 | `clientExpectedVersion()` always `0` | team1 + team3 + team4 | source_verified | T5 SQLITE_HOST+INJECTED full join; Firestore variant register+confirm only |
-| F3 | Attachments list-only; placeholder pack | team2 + team4 + team3 | source_verified | T5 pack A/B + STORAGE_EMULATOR; live Rules unchanged |
-| F4 | Transport composition not emulator-proven | team1 + team4 + coordinator | source_verified | T5 composed FIRESTORE_EMULATOR 8088; no mobile JS→Functions-emulator round-trip |
+| F1 | Screen `onSave` recaptured live repo; A→B dispatched A's values on B | team4 + team3 | source_verified | Preserve; extend origin.bind to EWB/picker/pack |
+| F2 | `clientExpectedVersion()` always `0` | team1 + team3 + team4 | source_verified | Remove leftover 0-shim |
+| F3 | Attachments list-only; placeholder pack | team2 + team4 + team3 | source_verified | E1–E5 make the pack path real |
+| F4 | Transport composition not emulator-proven | team1 + team4 + coordinator | source_verified | E1 adds evidence port + Functions-emulator |
+
+## Evidence workflow findings (open at `13f90ed` / `99ee60c`)
+
+| ID | Finding | Owner | Status | Next |
+|---|---|---|---|---|
+| E1 | Production `GrinOutbox` has `evidence: null`; transport voids `localPath` | team1 + team2 + team4 | ready | Wire factory; JS Storage + composed callables |
+| E2 | `originalIdentityMatches` accepts echoed claim / null hashes | team2 + team3 | ready | Require actual SHA-256 of local retained bytes |
+| E3 | Upload persists flags only; pack uses claimed hash and `generation="verified"` | team3 + team4 | ready | Additive descriptor columns; pack from actual |
+| E4 | Picker images-only, quality 0.8, URI-only, size 0, no hash | team2 + team4 | ready | PDF + durable copy + bounded hash |
+| E5 | App categories omit stock/payment/GST/return; pack assertions too coarse | team2 + team4 | ready | Shared category set; A/B/C/D pack proofs |
 
 Previous ER-1…ER-5 remain mapped. Mapping is not Wave 2 acceptance.
 
@@ -41,8 +51,8 @@ Previous ER-1…ER-5 remain mapped. Mapping is not Wave 2 acceptance.
 
 | Gate | State |
 |---|---|
-| GRIN SOURCE IMPLEMENTATION | F1–F4 independently re-executed at stated hosts; typecheck closed at `99ee60c`; **Wave 2 not accepted** |
-| COMBINED SOURCE REVIEW | T5 F5 `889f011` of `7623eef`; local exact-head `ci:verify` on `99ee60c`; not G6; GitHub Actions not run (workflow is main/PR only) |
+| GRIN SOURCE IMPLEMENTATION | F1–F4 closed at stated hosts; **E1–E5 open** at `99ee60c`; Wave 2 not accepted |
+| COMBINED SOURCE REVIEW | T5 F5 `889f011` of `7623eef`; E1–E5 re-review pending |
 | BACKEND DEPLOYMENT | not authorized |
 | INTERNAL BUILD | not authorized |
 | DEVICE ACCEPTANCE | device_pending |
