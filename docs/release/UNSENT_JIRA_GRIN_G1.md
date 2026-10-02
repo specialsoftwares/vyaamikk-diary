@@ -64,3 +64,7 @@ Starting combined HEAD `13f90ed33ce60a701eb2e3a73a1e279f2be1888f`. Contract `202
 
 `4711f7d71060e61556e368137f81ab90babbe509` on `team/grin-t5-qa` independently executed all eight E1–E5 cases against combined `41670aa85c32cb174277930ca08eed3a5af93243` (SQLITE_HOST / INJECTED / HOST_FILESYSTEM). All **reproduced**. Mapping is not closure. Wave 2 **not accepted**. STORAGE_EMULATOR / FIRESTORE_EMULATOR / NATIVE_DEVICE not claimed. Do not mark GRIN / G6 / billing / public-release Done.
 
+## Team 2 E1–E5 evidence integrity (unsent, 2026-10-02)
+
+`29c6d3fd85482f207299dc0195047f624170585b` on `team/grin-t2-evidence`: stored-byte `actualSha256`, upload categories include stock_accounting/payment/gst/return_document, pack A/B/C/D INJECTED, STORAGE_EMULATOR 8091/9200. Functions still unexported. Live Rules unchanged. T1 JS/Functions round-trip, T3 admission/descriptors, T4 picker/appBinding remain open. Do not mark GRIN Done.
+

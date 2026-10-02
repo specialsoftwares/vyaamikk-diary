@@ -5,16 +5,16 @@ Do not collapse to Done.
 
 Arrangement: one coordinator plus five **local** Cursor Task subagents on separate worktrees. AI roles, not human sign-off.
 
-Checkpoint inspected: combined now `4711f7d71060e61556e368137f81ab90babbe509` (T5 E1–E5 repro on `41670aa`). Validated application `99ee60c`. T5 F5 reviewed `7623eef`. `origin/main` `0da2f58970f23c7ce6cbefae6efffd49c731f44b`. Historical workspace `55f2df1` dirty — **untouched**. Contract `2026-10-02.wave2evidence`. Wave 2 / G6 / public release **not accepted**.
+Checkpoint inspected: combined includes T5 E1–E5 repro `4711f7d` and Team 2 `29c6d3f`. Validated application `99ee60c`. T5 F5 reviewed `7623eef`. `origin/main` `0da2f58970f23c7ce6cbefae6efffd49c731f44b`. Historical workspace `55f2df1` dirty — **untouched**. Contract `2026-10-02.wave2evidence`. Wave 2 / G6 / public release **not accepted**.
 
 | Task | Owner | Branch | Worktree | Dependency | Status | Evidence | Blocker | Next |
 |---|---|---|---|---|---|---|---|---|
-| Integration | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | G1 `c9623dd` | running | T5 E1–E5 repro `4711f7d` of `41670aa` | Functions unexported; `gh` unauthenticated | Integrate T1–T4 then T5 re-review |
-| E1 evidence composition | team1 | `team/grin-t1-backend` | `grin-t1-backend` | combined HEAD | running | T5 reproduced E1a/E1b | live export HOLD | JS→Functions-emulator round-trip; stay unexported |
-| E1/E2/E4/E5 evidence integrity | team2 | `team/grin-t2-evidence` | `grin-t2-evidence` | combined HEAD | running | T5 reproduced E2/E5 | live IAM | Categories + stored-byte verify + retrieve |
+| Integration | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | G1 `c9623dd` | running | T2 `29c6d3f` merged; T5 repro `4711f7d` | Functions unexported; `gh` unauthenticated | Integrate T1/T3/T4 then T5 re-review |
+| E1 evidence composition | team1 | `team/grin-t1-backend` | `grin-t1-backend` | combined HEAD | running | T5 reproduced E1a/E1b; T2 G2 port landed | live export HOLD | JS→Functions-emulator round-trip; stay unexported |
+| E1/E2/E4/E5 evidence integrity | team2 | `team/grin-t2-evidence` | `grin-t2-evidence` | `29c6d3f` | source_verified | G2 unit + STORAGE_EMULATOR 8091/9200 | live IAM | Stay undeployed |
 | E2/E3 admission + descriptors | team3 | `team/grin-t3-offline` | `grin-t3-offline` | combined HEAD | running | T5 reproduced E2/E3 | native death not claimed | Persist descriptor; remove 0-shim |
-| E4 picker + E5 pack + E1 wire | team4 | `team/grin-t4-product` | `grin-t4-product` | combined HEAD | running | T5 reproduced E4/E5 | pricing/quota unresolved | Durable copy; mount EWB/picker/pack |
-| Independent E1–E5 review | team5 | `team/grin-t5-qa` | `grin-t5-qa` | `4711f7d` | review | WAVE2EVIDENCE_E1_E5_REPRO.md — all 8 cases reproduced | NATIVE_DEVICE | Re-review after T1–T4 land |
+| E4 picker + E5 pack + E1 wire | team4 | `team/grin-t4-product` | `grin-t4-product` | combined HEAD | running | T5 reproduced E4/E5; T2 categories ready | pricing/quota unresolved | Durable copy; mount EWB/picker/pack |
+| Independent E1–E5 review | team5 | `team/grin-t5-qa` | `grin-t5-qa` | `4711f7d` | review | WAVE2EVIDENCE_E1_E5_REPRO.md — all 8 cases reproduced | NATIVE_DEVICE | Re-review after T1/T3/T4 land |
 
 ## Wave 2 correction findings (closed at stated boundary; not Wave 2 acceptance)
 
@@ -39,11 +39,11 @@ Checkpoint inspected: combined now `4711f7d71060e61556e368137f81ab90babbe509` (T
 
 | ID | Finding | Owner | Status | Next |
 |---|---|---|---|---|
-| E1 | Production `GrinOutbox` has `evidence: null`; transport voids `localPath` | team1 + team2 + team4 | ready | Wire factory; JS Storage + composed callables |
-| E2 | `originalIdentityMatches` accepts echoed claim / null hashes | team2 + team3 | ready | Require actual SHA-256 of local retained bytes |
+| E1 | Production `GrinOutbox` has `evidence: null`; transport voids `localPath` | team1 + team2 + team4 | running | T2 G2 port landed; T1 transport + T4 factory still open |
+| E2 | `originalIdentityMatches` accepts echoed claim / null hashes | team2 + team3 | running | T2 stored actualSha256 landed; T3 admission still open |
 | E3 | Upload persists flags only; pack uses claimed hash and `generation="verified"` | team3 + team4 | ready | Additive descriptor columns; pack from actual |
-| E4 | Picker images-only, quality 0.8, URI-only, size 0, no hash | team2 + team4 | ready | PDF + durable copy + bounded hash |
-| E5 | App categories omit stock/payment/GST/return; pack assertions too coarse | team2 + team4 | ready | Shared category set; A/B/C/D pack proofs |
+| E4 | Picker images-only, quality 0.8, URI-only, size 0, no hash | team2 + team4 | running | T2 hash helpers/provenance landed; T4 picker still open |
+| E5 | App categories omit stock/payment/GST/return; pack assertions too coarse | team2 + team4 | running | T2 upload categories + pack A/B/C/D INJECTED; T4 app list/export still open |
 
 Previous ER-1…ER-5 remain mapped. Mapping is not Wave 2 acceptance.
 
