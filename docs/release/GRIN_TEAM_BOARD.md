@@ -5,16 +5,16 @@ Do not collapse to Done.
 
 Arrangement: one coordinator plus five **local** Cursor Task subagents on separate worktrees. AI roles, not human sign-off.
 
-Checkpoint inspected: combined includes T5 PHASE 3 `d3d48fc` of `d4b6e1f` plus coordinator joined persist→emulator proof. Historical workspace `55f2df1` dirty — **untouched**. Contract `2026-10-02.wave2evidence`. Wave 2 / G6 / public release **not accepted**.
+Checkpoint inspected: combined includes T5 PHASE 4 `ee4be8a` of `cd5b5f4`. Historical workspace `55f2df1` dirty — **untouched**. Contract `2026-10-02.wave2evidence`. Wave 2 / G6 / public release **not accepted**.
 
 | Task | Owner | Branch | Worktree | Dependency | Status | Evidence | Blocker | Next |
 |---|---|---|---|---|---|---|---|---|
-| Integration | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | G1 `c9623dd` | running | T5 PHASE 3 `d3d48fc`; joined persistGrinOwnerSession httpsCallable emulator | Functions unexported; `gh` unauthenticated | T5 follow-up of joined persist SHA; do not mark Wave 2 / G6 Done |
+| Integration | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | G1 `c9623dd` | running | T5 PHASE 4 `ee4be8a` of `cd5b5f4`; joined persist httpsCallable independently re-executed | Functions unexported; `gh` unauthenticated | Canonical GitHub CI still blocked; do not mark Wave 2 / G6 Done |
 | E1 evidence composition | team1 | `team/grin-t1-backend` | `grin-t1-backend` | `15bd2a6` | source_verified | persistGrinOwnerSession → processAttachments → real httpsCallable on isolated Functions emulator | live export HOLD | Stay unexported / undeployed |
 | E1/E2/E4/E5 evidence integrity | team2 | `team/grin-t2-evidence` | `grin-t2-evidence` | `29c6d3f` | source_verified | G2 unit + STORAGE_EMULATOR 8091/9200 | live IAM | Stay undeployed |
 | E2/E3 admission + descriptors | team3 | `team/grin-t3-offline` | `grin-t3-offline` | `0d0dd84` | source_verified | SQLITE_HOST outbox + capture columns | native death not claimed | Stay undeployed |
 | E4 picker + E5 pack + E1 wire | team4 | `team/grin-t4-product` | `grin-t4-product` | `83f10f8` | source_verified | picker HOST_FILESYSTEM; pack uses retained conversion | NATIVE_DEVICE; pricing/quota | Stay undeployed |
-| Independent E1–E5 review | team5 | `team/grin-t5-qa` | `grin-t5-qa` | `d3d48fc` of `d4b6e1f` | review | PHASE 3: hasher/conversion pass at SQLITE_HOST; joined persist-emulator not yet independently re-executed | NATIVE_DEVICE | Follow-up of joined persist SHA |
+| Independent E1–E5 review | team5 | `team/grin-t5-qa` | `grin-t5-qa` | `ee4be8a` of `cd5b5f4` | source_verified | PHASE 4: joined persist→emulator pass at SQLITE_HOST / HOST_FILESYSTEM / EMULATOR | NATIVE_DEVICE | Stay undeployed; Wave 2 not accepted |
 
 ## Wave 2 correction findings (closed at stated boundary; not Wave 2 acceptance)
 
@@ -39,7 +39,7 @@ Checkpoint inspected: combined includes T5 PHASE 3 `d3d48fc` of `d4b6e1f` plus c
 
 | ID | Finding | Owner | Status | Next |
 |---|---|---|---|---|
-| E1 | Production `GrinOutbox` omitted evidence; transport voided `localPath` | team1 + team2 + team4 + coordinator | source_verified | persist → processAttachments → real httpsCallable (isolated Functions emulator); live export HOLD |
+| E1 | Production `GrinOutbox` omitted evidence; transport voided `localPath` | team1 + team2 + team4 + coordinator | source_verified | T5 PHASE 4 `ee4be8a` independently re-executed joined persist httpsCallable; live export HOLD |
 | E2 | `originalIdentityMatches` accepted echoed claim / null hashes | team2 + team3 | source_verified | SQLITE_HOST negatives + known-bytes; production hasher matches independent SHA-256 |
 | E3 | Upload persisted flags only; pack used claimed hash and `generation="verified"` | team3 + team4 | source_verified | descriptors + capture columns; stale fence |
 | E4 | Picker images-only, quality 0.8, URI-only, size 0, no hash | team2 + team4 + coordinator | source_verified | pack uses retained conversion (`unknown` unless evidenced); HOST_FILESYSTEM picker; T5 PHASE 3 `d3d48fc` |
@@ -51,8 +51,8 @@ Previous ER-1…ER-5 remain mapped. Mapping is not Wave 2 acceptance.
 
 | Gate | State |
 |---|---|
-| GRIN SOURCE IMPLEMENTATION | F1–F4 preserved; E1–E5 source closed at SQLITE_HOST / INJECTED / isolated Functions emulator including persistGrinOwnerSession httpsCallable; Wave 2 not accepted pending T5 of joined SHA |
-| COMBINED SOURCE REVIEW | T5 F5 `889f011` of `7623eef`; T5 E1–E5 PHASE 1 `4711f7d`; T5 PHASE 2 `049e7e0` of `ae0339a`; T5 PHASE 3 `d3d48fc` of `d4b6e1f`; joined persist-emulator not yet independently re-executed; Wave 2 not accepted |
+| GRIN SOURCE IMPLEMENTATION | F1–F4 preserved; E1–E5 source closed at SQLITE_HOST / INJECTED / isolated Functions emulator including persistGrinOwnerSession httpsCallable; Wave 2 not accepted |
+| COMBINED SOURCE REVIEW | T5 F5 `889f011` of `7623eef`; T5 E1–E5 PHASE 1 `4711f7d`; T5 PHASE 2 `049e7e0` of `ae0339a`; T5 PHASE 3 `d3d48fc` of `d4b6e1f`; T5 PHASE 4 `ee4be8a` of `cd5b5f4`; Wave 2 not accepted |
 | BACKEND DEPLOYMENT | not authorized |
 | INTERNAL BUILD | not authorized |
 | DEVICE ACCEPTANCE | device_pending |

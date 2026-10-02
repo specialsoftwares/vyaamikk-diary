@@ -96,3 +96,7 @@ Independent follow-up `d3d48fc8138ee407784788acf1209d9dc4e8de45` of combined `d4
 
 Merged T5 PHASE 3 onto combined. Extended `tools/goods-evidence-emulator/functions-roundtrip.emulator.test.ts` so one object goes through `persistGrinOwnerSession` → `processAttachments` → real Firebase JS `httpsCallable` against the isolated Functions emulator (hasher remains production APP_FILESYSTEM; SQLITE_HOST + HOST_FILESYSTEM injected). `npm run test:goods-evidence-g1-functions-emulator` passed. `functions/src/index.ts` HOLD. Live Rules unchanged. versionCode 23. Purchase-entry flags `"0"`. GRIN default-off. **Wave 2 not accepted** pending Team 5 re-execution of the joined SHA. Do not mark GRIN / G6 / billing / public-release Done.
 
+## Team 5 E1 joined persist PHASE 4 (unsent, 2026-10-02)
+
+Independent follow-up `ee4be8aa460beb4b0a22c3ad6f559c13873e58dc` of combined `cd5b5f43702b65b7a06d50c56413d26369b6920e`. `npm run test:goods-evidence-g1-functions-emulator` independently re-executed: persistGrinOwnerSession → processAttachments → real `httpsCallable` (not mocked); hasher factory not injected; unset hosts failed as required. Labels: EMULATOR / SQLITE_HOST / HOST_FILESYSTEM / not NATIVE_DEVICE / not live deploy. `functions/src/index.ts` HOLD. versionCode 23. Purchase-entry flags `"0"`. GRIN default-off. **Wave 2 not accepted.** Do not mark GRIN / G6 / billing / public-release Done.
+
