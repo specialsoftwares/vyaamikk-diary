@@ -7,7 +7,17 @@ import type {
   GrinRegisterResult,
   OutboxLocalState,
 } from "@/goodsEvidence/ports";
-import { isWave1OriginalCategory, MAX_CONCURRENT_UPLOADS_PER_OWNER, type Wave1OriginalCategory } from "@/goodsEvidence/evidence";
+import {
+  generationError,
+  HASH_CHUNK_BYTES,
+  hashBoundedChunks,
+  isAllowedOriginalMime,
+  isSha256Hex,
+  isWave1OriginalCategory,
+  MAX_CONCURRENT_UPLOADS_PER_OWNER,
+  storagePathShapeError,
+  type Wave1OriginalCategory,
+} from "@/goodsEvidence/evidence";
 import { migrateToV10 } from "@/localDb/migrateGrin";
 import { classifyRegisterResult, isNetworkAmbiguous, nextRetryState, type ClassifiedOutcome } from "./classify";
 import { confirmedProjectionJson, parseConfirmedProjection } from "./confirmedProjection";
@@ -37,6 +47,7 @@ import type {
   ActionableFailure,
   GrinDispatchSession,
   GrinLocalEvidenceFile,
+  GrinLocalOriginalHasher,
   GrinLocalReceiptView,
   GrinQueuedCommand,
   LocalEvidenceRole,
@@ -175,7 +186,21 @@ type EvidenceRow = {
   upload_state: string;
   original_durable: number;
   retain_local: number;
+  actual_sha256: string | null;
+  mime: string | null;
+  size_bytes: number | null;
+  storage_path: string | null;
+  object_generation: string | null;
+  reservation_id: string | null;
+  capture_provenance: string | null;
 };
+
+type LocalOriginalHash = {
+  sha256: string;
+  byteSize: number;
+};
+
+const FORBIDDEN_OBJECT_GENERATION = "verified";
 
 type RuntimeRow = {
   owner_uid: string;
@@ -262,6 +287,11 @@ export type GrinOutboxDeps = {
   clock?: Clock;
   leaseTtlMs?: number;
   maxAttempts?: number;
+  /**
+   * Required to mark an original durable. SQLITE_HOST injects node fs chunks
+   * at HASH_CHUNK_BYTES (not NATIVE_DEVICE). Echoed claimedSha256 cannot substitute.
+   */
+  localOriginalHasher?: GrinLocalOriginalHasher | null;
 };
 
 export class GrinOutbox {
@@ -271,6 +301,7 @@ export class GrinOutbox {
   private readonly clock: Clock;
   private readonly leaseTtlMs: number;
   private readonly maxAttempts: number;
+  private readonly localOriginalHasher: GrinLocalOriginalHasher | null;
   /** Process-local live token. Not durable. Restart falls back to sqlite. */
   private liveToken: LiveSessionToken | null = null;
   private readonly inFlightUploadsByOwner = new Map<string, number>();
@@ -282,6 +313,7 @@ export class GrinOutbox {
     this.clock = deps.clock ?? { nowMs: () => Date.now() };
     this.leaseTtlMs = deps.leaseTtlMs ?? DEFAULT_LEASE_TTL_MS;
     this.maxAttempts = deps.maxAttempts ?? MAX_DISPATCH_ATTEMPTS;
+    this.localOriginalHasher = deps.localOriginalHasher ?? null;
   }
 
   ensureSchema(): void {
@@ -815,6 +847,7 @@ export class GrinOutbox {
       claimedSha256?: string | null;
       byteSize?: number | null;
       category?: unknown;
+      captureProvenance?: string | null;
     }
   ): GrinLocalEvidenceFile {
     this.assertSessionOwner(session, session.ownerUid);
@@ -831,8 +864,9 @@ export class GrinOutbox {
     this.db.runSync(
       `INSERT INTO grin_local_evidence_files (
          id, owner_uid, ledger_id, receipt_id, evidence_id, role, local_path, claimed_sha256,
-         byte_size, category, upload_state, original_durable, retain_local, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?, ?)`,
+         byte_size, category, upload_state, original_durable, retain_local, capture_provenance,
+         created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?, ?, ?)`,
       [
         id,
         session.ownerUid,
@@ -845,6 +879,7 @@ export class GrinOutbox {
         input.byteSize ?? null,
         category,
         "local_only",
+        input.captureProvenance ?? null,
         now,
         now,
       ]
@@ -1295,21 +1330,57 @@ export class GrinOutbox {
     });
   }
 
+  private async hashRetainedOriginalBytes(localPath: string): Promise<LocalOriginalHash | null> {
+    const hasher = this.localOriginalHasher;
+    if (!hasher) return null;
+    try {
+      const hashed = await hashBoundedChunks(
+        hasher.chunksForPath(localPath),
+        hasher.createHasher(),
+        HASH_CHUNK_BYTES
+      );
+      if (!isSha256Hex(hashed.sha256) || hashed.byteSize < 1) return null;
+      return hashed;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Echoed claimedSha256 must not substitute. actualSha256 must be SHA-256 of
+   * retained local bytes (injected chunk hasher). Null hashes fail closed.
+   */
   private originalIdentityMatches(
     file: GrinLocalEvidenceFile,
     uploaded: GrinEvidenceUploadResult,
-    ownerUid: string
+    ownerUid: string,
+    localHash: LocalOriginalHash | null
   ): boolean {
     if (!uploaded.ok || !uploaded.originalDurable) return false;
+    if (!localHash) return false;
     if (file.ownerUid !== ownerUid) return false;
+    if (uploaded.ownerUid !== ownerUid) return false;
+    if (uploaded.ownerUid !== file.ownerUid) return false;
     if (uploaded.evidenceId !== file.evidenceId) return false;
     if (uploaded.receiptId !== file.receiptId) return false;
     if (uploaded.ledgerId !== file.ledgerId) return false;
     if (uploaded.category !== file.category) return false;
-    const expected = file.claimedSha256;
-    if (expected) {
-      if (uploaded.actualSha256 !== expected && uploaded.claimedSha256 !== expected) return false;
+    if (!isWave1OriginalCategory(uploaded.category)) return false;
+    if (!isAllowedOriginalMime(uploaded.mime)) return false;
+    if (typeof uploaded.sizeBytes !== "number" || !Number.isInteger(uploaded.sizeBytes) || uploaded.sizeBytes < 1) {
+      return false;
     }
+    if (uploaded.sizeBytes !== localHash.byteSize) return false;
+    if (file.byteSize != null && file.byteSize !== localHash.byteSize) return false;
+    if (file.byteSize != null && uploaded.sizeBytes !== file.byteSize) return false;
+    if (typeof uploaded.generation !== "string" || uploaded.generation === FORBIDDEN_OBJECT_GENERATION) {
+      return false;
+    }
+    if (generationError(uploaded.generation) != null) return false;
+    if (storagePathShapeError(uploaded.storagePath) != null) return false;
+    if (typeof uploaded.reservationId !== "string" || uploaded.reservationId.length < 1) return false;
+    if (typeof uploaded.actualSha256 !== "string" || !isSha256Hex(uploaded.actualSha256)) return false;
+    if (uploaded.actualSha256 !== localHash.sha256) return false;
     return true;
   }
 
@@ -1339,7 +1410,7 @@ export class GrinOutbox {
       }
       if (file.role === "original" && file.originalDurable) continue;
       if (file.role === "original" && !isWave1OriginalCategory(file.category)) {
-        this.writeEvidenceUpload(session, snapshot, fence, file, "failed_retryable", false);
+        this.writeEvidenceUpload(session, snapshot, fence, file, "failed_retryable", false, null);
         continue;
       }
       if (!this.ownsLiveAttempt(session, fence, snapshot)) {
@@ -1368,16 +1439,23 @@ export class GrinOutbox {
       if (after) return after;
       if (file.role === "thumbnail" || file.role === "metadata") {
         if (uploaded.ok) {
-          this.writeEvidenceUpload(session, snapshot, fence, file, "uploaded_derivative", false);
+          this.writeEvidenceUpload(session, snapshot, fence, file, "uploaded_derivative", false, uploaded);
         } else {
-          this.writeEvidenceUpload(session, snapshot, fence, file, "failed_retryable", false);
+          this.writeEvidenceUpload(session, snapshot, fence, file, "failed_retryable", false, uploaded);
         }
         continue;
       }
-      if (this.originalIdentityMatches(file, uploaded, snapshot.owner_uid)) {
-        this.writeEvidenceUpload(session, snapshot, fence, file, "verified", true);
+      if (uploaded.ok && uploaded.originalDurable) {
+        const localHash = await this.hashRetainedOriginalBytes(file.localPath);
+        const afterHash = this.skipStaleCompletion(session, workerId, snapshot);
+        if (afterHash) return afterHash;
+        if (this.originalIdentityMatches(file, uploaded, snapshot.owner_uid, localHash)) {
+          this.writeEvidenceUpload(session, snapshot, fence, file, "verified", true, uploaded);
+        } else {
+          this.writeEvidenceUpload(session, snapshot, fence, file, "failed_retryable", false, uploaded);
+        }
       } else {
-        this.writeEvidenceUpload(session, snapshot, fence, file, "failed_retryable", false);
+        this.writeEvidenceUpload(session, snapshot, fence, file, "failed_retryable", false, uploaded);
       }
     }
     const pending = this.hasUndurableOriginals(snapshot.owner_uid, snapshot.ledger_id, snapshot.receipt_id);
@@ -1412,7 +1490,8 @@ export class GrinOutbox {
     fence: AttemptFence,
     file: GrinLocalEvidenceFile,
     uploadState: GrinLocalEvidenceFile["uploadState"],
-    originalDurable: boolean
+    originalDurable: boolean,
+    uploaded: GrinEvidenceUploadResult | null
   ): boolean {
     const now = this.clock.nowMs();
     const id = evidenceRowId(snapshot.owner_uid, snapshot.ledger_id, file.evidenceId, file.role);
@@ -1421,11 +1500,61 @@ export class GrinOutbox {
       if (!this.isSessionCurrent(session)) return;
       const current = this.readCommand(snapshot.owner_uid, snapshot.ledger_id, snapshot.command_id);
       if (!this.attemptOwns(current, fence, now)) return;
+      if (originalDurable && uploaded) {
+        const result = this.db.runSync(
+          `UPDATE grin_local_evidence_files
+              SET upload_state = ?,
+                  original_durable = 1,
+                  retain_local = 1,
+                  actual_sha256 = ?,
+                  mime = ?,
+                  size_bytes = ?,
+                  storage_path = ?,
+                  object_generation = ?,
+                  reservation_id = ?,
+                  capture_provenance = ?,
+                  updated_at = ?
+            WHERE id = ?
+              AND owner_uid = ?
+              AND role = ?
+              AND receipt_id = ?
+              AND (
+                (original_durable = 0 AND actual_sha256 IS NULL)
+                OR (
+                  actual_sha256 = ?
+                  AND object_generation = ?
+                  AND storage_path = ?
+                  AND reservation_id = ?
+                )
+              )`,
+          [
+            uploadState,
+            uploaded.actualSha256,
+            uploaded.mime,
+            uploaded.sizeBytes,
+            uploaded.storagePath,
+            uploaded.generation,
+            uploaded.reservationId,
+            file.captureProvenance,
+            now,
+            id,
+            snapshot.owner_uid,
+            file.role,
+            file.receiptId,
+            uploaded.actualSha256,
+            uploaded.generation,
+            uploaded.storagePath,
+            uploaded.reservationId,
+          ]
+        );
+        wrote = result.changes === 1;
+        return;
+      }
       const result = this.db.runSync(
         `UPDATE grin_local_evidence_files
-            SET upload_state = ?, original_durable = ?, retain_local = 1, updated_at = ?
-          WHERE id = ? AND owner_uid = ? AND role = ?`,
-        [uploadState, originalDurable ? 1 : 0, now, id, snapshot.owner_uid, file.role]
+            SET upload_state = ?, original_durable = 0, retain_local = 1, updated_at = ?
+          WHERE id = ? AND owner_uid = ? AND role = ? AND receipt_id = ? AND original_durable = 0`,
+        [uploadState, now, id, snapshot.owner_uid, file.role, file.receiptId]
       );
       wrote = result.changes === 1;
     });
@@ -1987,6 +2116,13 @@ export class GrinOutbox {
       uploadState: row.upload_state as GrinLocalEvidenceFile["uploadState"],
       originalDurable: Number(row.original_durable) === 1,
       retainLocal: Number(row.retain_local) === 1,
+      actualSha256: row.actual_sha256 ?? null,
+      mime: row.mime ?? null,
+      verifiedSizeBytes: row.size_bytes == null ? null : Number(row.size_bytes),
+      storagePath: row.storage_path ?? null,
+      objectGeneration: row.object_generation ?? null,
+      reservationId: row.reservation_id ?? null,
+      captureProvenance: row.capture_provenance ?? null,
     };
   }
 }

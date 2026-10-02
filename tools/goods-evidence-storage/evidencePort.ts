@@ -173,13 +173,22 @@ function identityResult(
     claimedSha256: string | null;
     actualSha256: string | null;
     reservationId: string | null;
+    ownerUid?: string | null;
+    mime?: string | null;
+    sizeBytes?: number | null;
+    storagePath?: string | null;
   }
 ): GrinEvidencePortResult {
+  const durable = extras.ok && extras.originalDurable;
   return {
     ok: extras.ok,
     originalDurable: extras.originalDurable,
     generation: extras.generation,
     retryable: extras.retryable,
+    ownerUid: durable ? extras.ownerUid ?? input.uid : null,
+    mime: durable ? extras.mime ?? null : null,
+    sizeBytes: durable ? extras.sizeBytes ?? null : null,
+    storagePath: durable ? extras.storagePath ?? null : null,
     evidenceId: input.evidenceId,
     receiptId: input.receiptId,
     ledgerId: input.ledgerId,
@@ -244,6 +253,10 @@ function mapLifecycle(
     claimedSha256,
     actualSha256,
     reservationId: durable ? result.reservationId : null,
+    ownerUid: durable ? result.ownerUid : null,
+    mime: durable ? result.verified?.mime ?? null : null,
+    sizeBytes: durable ? result.verified?.byteSize ?? null : null,
+    storagePath: durable ? result.verified?.storagePath ?? null : null,
   });
 }
 

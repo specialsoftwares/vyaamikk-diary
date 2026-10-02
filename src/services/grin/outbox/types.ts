@@ -1,5 +1,6 @@
-import type { Wave1OriginalCategory } from "@/goodsEvidence/evidence";
+import type { ChunkHasher, Wave1OriginalCategory } from "@/goodsEvidence/evidence";
 import type { GrinCommandType, LocalReceiptRecord, OutboxLocalState } from "@/goodsEvidence/ports";
+import type { SqliteExecutionLabel } from "./hostSqlite";
 
 export type { GrinCommandType, LocalReceiptRecord, OutboxLocalState, Wave1OriginalCategory };
 
@@ -32,6 +33,15 @@ export type GrinLocalEvidenceFile = {
   uploadState: LocalEvidenceUploadState;
   originalDurable: boolean;
   retainLocal: boolean;
+  /** Trusted descriptor; null on old rows and non-durable originals. */
+  actualSha256: string | null;
+  mime: string | null;
+  verifiedSizeBytes: number | null;
+  storagePath: string | null;
+  /** Storage object generation. Never the literal `"verified"`. */
+  objectGeneration: string | null;
+  reservationId: string | null;
+  captureProvenance: string | null;
 };
 
 export type ActionableFailure =
@@ -93,3 +103,13 @@ export { MAX_CONCURRENT_UPLOADS_PER_OWNER } from "@/goodsEvidence/evidence";
 /** Host SQLite reopen is not native process-death acceptance. */
 export const SQLITE_HOST_NOT_NATIVE_DEVICE =
   "SQLITE_HOST tests are not NATIVE_DEVICE process-death proof.";
+
+/**
+ * Injected chunk hasher for retained local originals.
+ * SQLITE_HOST uses node fs chunks at HASH_CHUNK_BYTES. That is not NATIVE_DEVICE.
+ */
+export type GrinLocalOriginalHasher = {
+  executionLabel: SqliteExecutionLabel;
+  createHasher: () => ChunkHasher;
+  chunksForPath: (localPath: string) => AsyncIterable<Uint8Array> | Iterable<Uint8Array>;
+};

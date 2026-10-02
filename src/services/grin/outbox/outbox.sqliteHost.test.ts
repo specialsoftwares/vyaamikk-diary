@@ -3,16 +3,19 @@
  * Not NATIVE_DEVICE process-death proof.
  */
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { HASH_CHUNK_BYTES } from "@/goodsEvidence/evidence";
 import { sampleRegisterBody } from "@/goodsEvidence/testFixtures";
 import { execStatements, migrateToV7, migrateToV8, migrateToV9 } from "@/localDb/migrate";
-import { migrateToV10, grinV10TablesPresent, GRIN_CONFIRMED_COLUMNS } from "@/localDb/migrateGrin";
+import { migrateToV10, grinV10TablesPresent, GRIN_CONFIRMED_COLUMNS, GRIN_EVIDENCE_DESCRIPTOR_COLUMNS } from "@/localDb/migrateGrin";
 import { MIGRATIONS_V1 } from "@/localDb/schema";
 import { createFakeEvidenceUploadPort, createFakeGrinServerPort } from "./fakePorts";
 import { openHostSqlite, SQLITE_HOST, type HostSqlite } from "./hostSqlite";
+import { createSqliteHostLocalOriginalHasher } from "./hostLocalOriginalHasher";
 import { GrinOutbox, peekQueuedCommand, setOutboxCrashHook } from "./outbox";
 import { DURABLE_ORIGINAL_UPLOAD_CONDITION, MAX_CONCURRENT_UPLOADS_PER_OWNER, SQLITE_HOST_NOT_NATIVE_DEVICE } from "./types";
 import type { GrinSqlDb } from "./hostSqlite";
@@ -80,7 +83,14 @@ async function main() {
       );
       assert.equal(info.some((row: { name: string }) => row.name === column), true, column);
     }
+    for (const column of GRIN_EVIDENCE_DESCRIPTOR_COLUMNS) {
+      const info: Array<{ name: string }> = db.getAllSync<{ name: string }>(
+        "PRAGMA table_info(grin_local_evidence_files)"
+      );
+      assert.equal(info.some((row: { name: string }) => row.name === column), true, column);
+    }
     assert.equal(MAX_CONCURRENT_UPLOADS_PER_OWNER, 2);
+    assert.equal(HASH_CHUNK_BYTES, 64 * 1024);
     const kept = db.getFirstSync<{ id: string; payload_json: string }>(
       "SELECT id, payload_json FROM entries_local WHERE id = ?",
       ["keep_diary_1"]
@@ -103,9 +113,23 @@ async function main() {
     );
     assert.equal(Number(origin?.dispatch_generation ?? -1), 0);
 
+    const originalsDir = path.join(tmp, "originals");
+    fs.mkdirSync(originalsDir, { recursive: true });
+    const localOriginalHasher = createSqliteHostLocalOriginalHasher();
+    assert.equal(localOriginalHasher.executionLabel, SQLITE_HOST);
+    const writeKnownOriginal = (name: string, bytes: Uint8Array) => {
+      const localPath = path.join(originalsDir, name);
+      fs.writeFileSync(localPath, bytes);
+      return {
+        localPath,
+        sha256: createHash("sha256").update(bytes).digest("hex"),
+        sizeBytes: bytes.byteLength,
+      };
+    };
+
     const server = createFakeGrinServerPort();
     const evidence = createFakeEvidenceUploadPort({ failOriginalTimes: 1 });
-    let box = new GrinOutbox({ db, server, evidence, maxAttempts: 2 });
+    let box = new GrinOutbox({ db, server, evidence, maxAttempts: 2, localOriginalHasher });
 
     const sessionA1 = box.beginOwnerSession("owner_a");
     const queued = box.persistDraftAndQueue(sessionA1, {
@@ -152,15 +176,17 @@ async function main() {
       body: body("grcp_retry_1"),
     });
     assert.equal(q2.localState, "queued");
+    const retryOriginal = writeKnownOriginal("grin-orig-1.bin", Buffer.from("grin-retry-original-bytes"));
     box.attachLocalFile(sessionA1, {
       ledgerId: "ledger_1",
       receiptId: "grcp_retry_1",
       evidenceId: "ev_orig_1",
       role: "original",
-      localPath: "/tmp/grin-orig-1.bin",
-      claimedSha256: "b".repeat(64),
-      byteSize: 12,
+      localPath: retryOriginal.localPath,
+      claimedSha256: retryOriginal.sha256,
+      byteSize: retryOriginal.sizeBytes,
       category: "invoice",
+      captureProvenance: "imported_original",
     });
     box.attachLocalFile(sessionA1, {
       ledgerId: "ledger_1",
@@ -172,7 +198,7 @@ async function main() {
     });
 
     db = reopen();
-    box = new GrinOutbox({ db, server, evidence, maxAttempts: 2 });
+    box = new GrinOutbox({ db, server, evidence, maxAttempts: 2, localOriginalHasher });
     const afterRestart = box.getRecord("owner_a", "ledger_1", "grcp_retry_1");
     assert.equal(afterRestart?.receiptId, "grcp_retry_1");
     assert.equal(afterRestart?.commandId, "gcmd_retry_01");
@@ -217,6 +243,12 @@ async function main() {
     assert.equal(filesAfterOrig.find((f) => f.role === "original")?.originalDurable, true);
     assert.equal(filesAfterOrig.find((f) => f.role === "original")?.retainLocal, true);
     assert.equal(filesAfterOrig.find((f) => f.role === "original")?.category, "invoice");
+    assert.equal(filesAfterOrig.find((f) => f.role === "original")?.actualSha256, retryOriginal.sha256);
+    assert.equal(filesAfterOrig.find((f) => f.role === "original")?.claimedSha256, retryOriginal.sha256);
+    assert.notEqual(filesAfterOrig.find((f) => f.role === "original")?.objectGeneration, "verified");
+    assert.equal(filesAfterOrig.find((f) => f.role === "original")?.mime, "application/pdf");
+    assert.equal(filesAfterOrig.find((f) => f.role === "original")?.verifiedSizeBytes, retryOriginal.sizeBytes);
+    assert.equal(filesAfterOrig.find((f) => f.role === "original")?.captureProvenance, "imported_original");
     const released = box.releaseLocalOriginalIfDurable("owner_a", "ledger_1", "ev_orig_1");
     assert.equal(released.ok, true);
     assert.equal(box.listLocalFiles("owner_a", "ledger_1", "grcp_retry_1").find((f) => f.role === "original")?.retainLocal, false);
@@ -384,7 +416,7 @@ async function main() {
       setOutboxCrashHook(null);
     }
     db = reopen();
-    box = new GrinOutbox({ db, server, evidence, maxAttempts: 2 });
+    box = new GrinOutbox({ db, server, evidence, maxAttempts: 2, localOriginalHasher });
     const midDispatch = box.getRecord("owner_a", "ledger_1", "grcp_disp_1");
     assert.equal(midDispatch?.localState, "dispatching");
     assert.equal(midDispatch?.commandId, "gcmd_disp_01");
@@ -809,7 +841,7 @@ async function main() {
     // W2-02 / W2-03: account switch during original and derivative upload; derivative failure; identity fence.
     const evServer = createFakeGrinServerPort();
     const evPort = createFakeEvidenceUploadPort();
-    const evBox = new GrinOutbox({ db, server: evServer, evidence: evPort });
+    const evBox = new GrinOutbox({ db, server: evServer, evidence: evPort, localOriginalHasher });
     const sessionEv = evBox.beginOwnerSession("owner_ev");
     evBox.persistDraftAndQueue(sessionEv, {
       ledgerId: "ledger_1",
@@ -817,15 +849,17 @@ async function main() {
       commandId: "gcmd_ev_0001",
       body: body("grcp_ev_1"),
     });
+    const switchOriginal = writeKnownOriginal("grin-switch.bin", Buffer.from("grin-switch-original-bytes"));
     evBox.attachLocalFile(sessionEv, {
       ledgerId: "ledger_1",
       receiptId: "grcp_ev_1",
       evidenceId: "ev_switch_1",
       role: "original",
-      localPath: "/tmp/grin-switch.bin",
-      claimedSha256: "c".repeat(64),
-      byteSize: 20,
+      localPath: switchOriginal.localPath,
+      claimedSha256: switchOriginal.sha256,
+      byteSize: switchOriginal.sizeBytes,
       category: "ewb",
+      captureProvenance: "imported_original",
     });
     evBox.attachLocalFile(sessionEv, {
       ledgerId: "ledger_1",
@@ -1064,6 +1098,305 @@ async function main() {
         }),
       (err: unknown) => err instanceof Error && err.message === "invalid_confirmed_projection"
     );
+
+    // E2/E3: drive originalIdentityMatches through production processAttachments (not a copy).
+    const { buildOriginalStoragePath } = await import("@/goodsEvidence/evidence");
+    const e2Owner = "owner_e2";
+    const e2Ledger = "ledger_1";
+    function e2StoragePath(uid: string, evidenceId: string): string {
+      const key = `hostobj${evidenceId}`.replace(/[^A-Za-z0-9_-]/g, "x").padEnd(16, "x").slice(0, 64);
+      return buildOriginalStoragePath(uid, key);
+    }
+    async function enqueueOriginal(opts: {
+      receiptId: string;
+      commandId: string;
+      evidenceId: string;
+      bytes: Uint8Array;
+      category?: "invoice" | "ewb" | "weighment";
+      claimedSha256?: string | null;
+      byteSize?: number | null;
+      captureProvenance?: string | null;
+    }) {
+      const e2Server = createFakeGrinServerPort();
+      const e2Port = createFakeEvidenceUploadPort();
+      const e2Box = new GrinOutbox({
+        db: db!,
+        server: e2Server,
+        evidence: e2Port,
+        localOriginalHasher,
+      });
+      const session = e2Box.beginOwnerSession(e2Owner);
+      e2Box.persistDraftAndQueue(session, {
+        ledgerId: e2Ledger,
+        receiptId: opts.receiptId,
+        commandId: opts.commandId,
+        body: body(opts.receiptId),
+      });
+      const known = writeKnownOriginal(`${opts.evidenceId}.bin`, opts.bytes);
+      e2Box.attachLocalFile(session, {
+        ledgerId: e2Ledger,
+        receiptId: opts.receiptId,
+        evidenceId: opts.evidenceId,
+        role: "original",
+        localPath: known.localPath,
+        claimedSha256: opts.claimedSha256 === undefined ? known.sha256 : opts.claimedSha256,
+        byteSize: opts.byteSize === undefined ? known.sizeBytes : opts.byteSize,
+        category: opts.category ?? "invoice",
+        captureProvenance: opts.captureProvenance ?? "imported_original",
+      });
+      const registered = await e2Box.dispatchDue(session, `worker_${opts.commandId}_reg`);
+      assert.equal(registered.results.find((r) => r.commandId === opts.commandId)?.localState, "attachment_pending");
+      return { e2Box, e2Port, session, known };
+    }
+
+    const echoKnown = Buffer.from("grin-e2-echo-claimed-must-not-substitute");
+    const echoCase = await enqueueOriginal({
+      receiptId: "grcp_e2_echo",
+      commandId: "gcmd_e2_echo",
+      evidenceId: "ev_e2_echo",
+      bytes: echoKnown,
+    });
+    echoCase.e2Port.nextOriginalResult = {
+      ok: true,
+      originalDurable: true,
+      generation: "orig-gen-1",
+      retryable: false,
+      ownerUid: e2Owner,
+      mime: "application/pdf",
+      sizeBytes: echoCase.known.sizeBytes,
+      storagePath: e2StoragePath(e2Owner, "ev_e2_echo"),
+      evidenceId: "ev_e2_echo",
+      receiptId: "grcp_e2_echo",
+      ledgerId: e2Ledger,
+      category: "invoice",
+      claimedSha256: echoCase.known.sha256,
+      actualSha256: "0".repeat(64),
+      reservationId: "resv_e2_echo",
+    };
+    const echoFlush = await echoCase.e2Box.dispatchDue(echoCase.session, "worker_e2_echo");
+    assert.equal(echoFlush.results.find((r) => r.commandId === "gcmd_e2_echo")?.localState, "attachment_pending");
+    assert.equal(echoCase.e2Box.listLocalFiles(e2Owner, e2Ledger, "grcp_e2_echo").find((f) => f.role === "original")?.originalDurable, false);
+
+    const nullCase = await enqueueOriginal({
+      receiptId: "grcp_e2_null",
+      commandId: "gcmd_e2_null",
+      evidenceId: "ev_e2_null",
+      bytes: Buffer.from("grin-e2-null-hashes"),
+      claimedSha256: null,
+    });
+    nullCase.e2Port.nextOriginalResult = {
+      ok: true,
+      originalDurable: true,
+      generation: "orig-gen-1",
+      retryable: false,
+      ownerUid: e2Owner,
+      mime: "application/pdf",
+      sizeBytes: nullCase.known.sizeBytes,
+      storagePath: e2StoragePath(e2Owner, "ev_e2_null"),
+      evidenceId: "ev_e2_null",
+      receiptId: "grcp_e2_null",
+      ledgerId: e2Ledger,
+      category: "invoice",
+      claimedSha256: null,
+      actualSha256: null,
+      reservationId: "resv_e2_null",
+    };
+    await nullCase.e2Box.dispatchDue(nullCase.session, "worker_e2_null");
+    assert.equal(nullCase.e2Box.listLocalFiles(e2Owner, e2Ledger, "grcp_e2_null").find((f) => f.role === "original")?.originalDurable, false);
+
+    const mismatchCases: Array<{
+      name: string;
+      receiptId: string;
+      commandId: string;
+      evidenceId: string;
+      patch: Parameters<typeof Object.assign>[1] & Record<string, unknown>;
+    }> = [
+      { name: "owner", receiptId: "grcp_e2_own", commandId: "gcmd_e2_own", evidenceId: "ev_e2_own", patch: { ownerUid: "other_owner" } },
+      { name: "receipt", receiptId: "grcp_e2_rcp", commandId: "gcmd_e2_rcp", evidenceId: "ev_e2_rcp", patch: { receiptId: "grcp_other" } },
+      { name: "ledger", receiptId: "grcp_e2_led", commandId: "gcmd_e2_led", evidenceId: "ev_e2_led", patch: { ledgerId: "ledger_other" } },
+      { name: "category", receiptId: "grcp_e2_cat", commandId: "gcmd_e2_cat", evidenceId: "ev_e2_cat", patch: { category: "ewb" } },
+      { name: "evidenceId", receiptId: "grcp_e2_eid", commandId: "gcmd_e2_eid", evidenceId: "ev_e2_eid", patch: { evidenceId: "ev_other" } },
+      { name: "size", receiptId: "grcp_e2_sz", commandId: "gcmd_e2_sz", evidenceId: "ev_e2_sz", patch: { sizeBytes: 1 } },
+      { name: "generation", receiptId: "grcp_e2_gen", commandId: "gcmd_e2_gen", evidenceId: "ev_e2_gen", patch: { generation: "verified" } },
+      { name: "invalid-generation", receiptId: "grcp_e2_igen", commandId: "gcmd_e2_igen", evidenceId: "ev_e2_igen", patch: { generation: "" } },
+    ];
+    for (const mismatch of mismatchCases) {
+      const packed = await enqueueOriginal({
+        receiptId: mismatch.receiptId,
+        commandId: mismatch.commandId,
+        evidenceId: mismatch.evidenceId,
+        bytes: Buffer.from(`grin-e2-${mismatch.name}`),
+      });
+      packed.e2Port.originalResultPatch = mismatch.patch as never;
+      await packed.e2Box.dispatchDue(packed.session, `worker_${mismatch.commandId}`);
+      assert.equal(
+        packed.e2Box.listLocalFiles(e2Owner, e2Ledger, mismatch.receiptId).find((f) => f.role === "original")?.originalDurable,
+        false,
+        mismatch.name
+      );
+    }
+
+    const positiveBytes = new Uint8Array(HASH_CHUNK_BYTES + 17);
+    positiveBytes.fill(0x5a);
+    positiveBytes.set(Buffer.from("GRIN-E2-KNOWN"));
+    const independentPositive = createHash("sha256").update(positiveBytes).digest("hex");
+    const positive = await enqueueOriginal({
+      receiptId: "grcp_e2_ok",
+      commandId: "gcmd_e2_ok",
+      evidenceId: "ev_e2_ok",
+      bytes: positiveBytes,
+    });
+    assert.equal(positive.known.sha256, independentPositive);
+    const positiveFlush = await positive.e2Box.dispatchDue(positive.session, "worker_e2_ok");
+    assert.equal(positiveFlush.results.find((r) => r.commandId === "gcmd_e2_ok")?.localState, "issued");
+    const positiveFile = positive.e2Box.listLocalFiles(e2Owner, e2Ledger, "grcp_e2_ok").find((f) => f.role === "original");
+    assert.equal(positiveFile?.originalDurable, true);
+    assert.equal(positiveFile?.actualSha256, independentPositive);
+    assert.equal(positiveFile?.claimedSha256, independentPositive);
+    assert.equal(positiveFile?.mime, "application/pdf");
+    assert.equal(positiveFile?.verifiedSizeBytes, positiveBytes.byteLength);
+    assert.equal(positiveFile?.objectGeneration, "orig-gen-1");
+    assert.notEqual(positiveFile?.objectGeneration, "verified");
+    assert.ok(positiveFile?.storagePath);
+    assert.equal(positiveFile?.reservationId, "resv_ev_e2_ok");
+    assert.equal(positiveFile?.captureProvenance, "imported_original");
+
+    db = reopen();
+    const reopenedBox = new GrinOutbox({ db, server: createFakeGrinServerPort(), localOriginalHasher });
+    const reopenedFile = reopenedBox.listLocalFiles(e2Owner, e2Ledger, "grcp_e2_ok").find((f) => f.role === "original");
+    assert.equal(reopenedFile?.actualSha256, independentPositive);
+    assert.equal(reopenedFile?.mime, "application/pdf");
+    assert.equal(reopenedFile?.verifiedSizeBytes, positiveBytes.byteLength);
+    assert.equal(reopenedFile?.objectGeneration, "orig-gen-1");
+    assert.equal(reopenedFile?.storagePath, positiveFile?.storagePath);
+    assert.equal(reopenedFile?.reservationId, "resv_ev_e2_ok");
+    assert.equal(reopenedFile?.captureProvenance, "imported_original");
+    assert.equal(reopenedFile?.claimedSha256, independentPositive);
+    assert.equal(reopenedFile?.originalDurable, true);
+    console.log(`SQLITE_EXECUTION=${SQLITE_HOST}`);
+    console.log("NATIVE_DEVICE=not_claimed (E2/E3 SQLITE_HOST chunk hasher)");
+
+    const otherReceipt = await enqueueOriginal({
+      receiptId: "grcp_e2_b",
+      commandId: "gcmd_e2_b",
+      evidenceId: "ev_e2_b",
+      bytes: Buffer.from("grin-e2-other-receipt"),
+    });
+    otherReceipt.e2Port.originalResultPatch = { receiptId: "grcp_e2_ok", evidenceId: "ev_e2_ok" };
+    await otherReceipt.e2Box.dispatchDue(otherReceipt.session, "worker_e2_b");
+    assert.equal(otherReceipt.e2Box.listLocalFiles(e2Owner, e2Ledger, "grcp_e2_b").find((f) => f.role === "original")?.originalDurable, false);
+    assert.equal(reopenedBox.listLocalFiles(e2Owner, e2Ledger, "grcp_e2_ok").find((f) => f.role === "original")?.objectGeneration, "orig-gen-1");
+
+    db.runSync(
+      `UPDATE grin_local_evidence_files SET original_durable = 0 WHERE evidence_id = ? AND owner_uid = ? AND role = ?`,
+      ["ev_e2_ok", e2Owner, "original"]
+    );
+    const staleOverwriteServer = createFakeGrinServerPort();
+    const staleOverwritePort = createFakeEvidenceUploadPort();
+    staleOverwritePort.originalResultPatch = {
+      actualSha256: "f".repeat(64),
+      generation: "orig-gen-stale",
+      reservationId: "resv_stale",
+    };
+    const staleOverwriteBox = new GrinOutbox({
+      db,
+      server: staleOverwriteServer,
+      evidence: staleOverwritePort,
+      localOriginalHasher,
+    });
+    const staleSession = staleOverwriteBox.beginOwnerSession(e2Owner);
+    await staleOverwriteBox.dispatchDue(staleSession, "worker_e2_stale");
+    const afterStale = staleOverwriteBox.listLocalFiles(e2Owner, e2Ledger, "grcp_e2_ok").find((f) => f.role === "original");
+    assert.equal(afterStale?.actualSha256, independentPositive);
+    assert.equal(afterStale?.objectGeneration, "orig-gen-1");
+    assert.notEqual(afterStale?.objectGeneration, "orig-gen-stale");
+
+    db.runSync(
+      `INSERT INTO grin_local_evidence_files (
+         id, owner_uid, ledger_id, receipt_id, evidence_id, role, local_path, claimed_sha256,
+         byte_size, category, upload_state, original_durable, retain_local, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?, ?)`,
+      [
+        `${e2Owner}\t${e2Ledger}\tev_e2_old\toriginal`,
+        e2Owner,
+        e2Ledger,
+        "grcp_e2_old",
+        "ev_e2_old",
+        "original",
+        path.join(originalsDir, "missing-old.bin"),
+        null,
+        8,
+        "invoice",
+        "local_only",
+        Date.now(),
+        Date.now(),
+      ]
+    );
+    const oldRow = reopenedBox.listLocalFiles(e2Owner, e2Ledger, "grcp_e2_old").find((f) => f.role === "original");
+    assert.equal(oldRow?.originalDurable, false);
+    assert.equal(oldRow?.actualSha256, null);
+    assert.equal(oldRow?.objectGeneration, null);
+    assert.equal(oldRow?.mime, null);
+    assert.equal(oldRow?.storagePath, null);
+    assert.equal(oldRow?.reservationId, null);
+
+    let e2LeaseNow = Date.now();
+    const e2LeaseClock = { nowMs: () => e2LeaseNow };
+    const e2LeaseServer = createFakeGrinServerPort();
+    const e2LeasePort = createFakeEvidenceUploadPort();
+    const e2LeaseBox = new GrinOutbox({
+      db,
+      server: e2LeaseServer,
+      evidence: e2LeasePort,
+      localOriginalHasher,
+      clock: e2LeaseClock,
+      leaseTtlMs: 1_000,
+    });
+    const e2LeaseSession = e2LeaseBox.beginOwnerSession("owner_e2_lease");
+    e2LeaseBox.persistDraftAndQueue(e2LeaseSession, {
+      ledgerId: e2Ledger,
+      receiptId: "grcp_e2_lease",
+      commandId: "gcmd_e2_lease",
+      body: body("grcp_e2_lease"),
+    });
+    const e2LeaseKnown = writeKnownOriginal("ev_e2_lease.bin", Buffer.from("grin-e2-lease-takeover"));
+    e2LeaseBox.attachLocalFile(e2LeaseSession, {
+      ledgerId: e2Ledger,
+      receiptId: "grcp_e2_lease",
+      evidenceId: "ev_e2_lease",
+      role: "original",
+      localPath: e2LeaseKnown.localPath,
+      claimedSha256: e2LeaseKnown.sha256,
+      byteSize: e2LeaseKnown.sizeBytes,
+      category: "invoice",
+    });
+    const e2LeaseReg = await e2LeaseBox.dispatchDue(e2LeaseSession, "worker_e2_lease_reg");
+    assert.equal(e2LeaseReg.results.find((r) => r.commandId === "gcmd_e2_lease")?.localState, "attachment_pending");
+    e2LeasePort.holdUploadRole = "original";
+    let releaseE2LeaseUpload!: () => void;
+    e2LeasePort.holdNextUpload = new Promise<void>((resolve) => {
+      releaseE2LeaseUpload = resolve;
+    });
+    e2LeasePort.refreshUploadEnteredWait();
+    const staleE2Lease = e2LeaseBox.dispatchDue(e2LeaseSession, "worker_e2_lease_old");
+    await e2LeasePort.waitUntilUploadEntered();
+    e2LeaseNow += 5_000;
+    const winnerE2Lease = e2LeaseBox.dispatchDue(e2LeaseSession, "worker_e2_lease_new");
+    const e2StealUntil = Date.now() + 2_000;
+    let stolenE2Lease = peekQueuedCommand(db, "owner_e2_lease", e2Ledger, "gcmd_e2_lease");
+    while (stolenE2Lease?.leaseWorkerId !== "worker_e2_lease_new" && Date.now() < e2StealUntil) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      stolenE2Lease = peekQueuedCommand(db, "owner_e2_lease", e2Ledger, "gcmd_e2_lease");
+    }
+    assert.equal(stolenE2Lease?.leaseWorkerId, "worker_e2_lease_new");
+    releaseE2LeaseUpload();
+    const staleE2LeaseDone = await staleE2Lease;
+    assert.equal(staleE2LeaseDone.results.find((r) => r.commandId === "gcmd_e2_lease")?.skipped, "lease_held");
+    e2LeasePort.holdNextUpload = null;
+    e2LeasePort.holdUploadRole = null;
+    const winnerE2LeaseDone = await winnerE2Lease;
+    assert.equal(winnerE2LeaseDone.results.find((r) => r.commandId === "gcmd_e2_lease")?.localState, "issued");
+    assert.equal(e2LeaseBox.listLocalFiles("owner_e2_lease", e2Ledger, "grcp_e2_lease").find((f) => f.role === "original")?.originalDurable, true);
 
     const diaryStill = db.getFirstSync<{ id: string }>(
       "SELECT id FROM entries_local WHERE id = ?",

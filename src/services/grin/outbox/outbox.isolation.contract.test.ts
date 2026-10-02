@@ -47,4 +47,18 @@ const offline = readFileSync(join(repoRoot, "src/goodsEvidence/offline.ts"), "ut
 assert.match(offline, /not a SQLite outbox/);
 assert.match(offline, /SIMULATED in-process draft shape/);
 
+const outboxSrc = stripComments(readFileSync(join(dir, "outbox.ts"), "utf8"));
+assert.doesNotMatch(outboxSrc, /from "node:fs"/);
+assert.doesNotMatch(outboxSrc, /from "node:crypto"/);
+assert.doesNotMatch(outboxSrc, /hostLocalOriginalHasher/);
+assert.match(outboxSrc, /hashBoundedChunks/);
+assert.match(outboxSrc, /isSha256Hex/);
+assert.doesNotMatch(outboxSrc, /uploaded\.claimedSha256 !== expected/);
+assert.doesNotMatch(outboxSrc, /generation: "verified"/);
+
+const hasherSrc = readFileSync(join(dir, "hostLocalOriginalHasher.ts"), "utf8");
+assert.match(hasherSrc, /HASH_CHUNK_BYTES/);
+assert.match(hasherSrc, /SQLITE_HOST/);
+assert.match(hasherSrc, /NATIVE_DEVICE/);
+
 console.log("outbox.isolation.contract.test.ts: ok");

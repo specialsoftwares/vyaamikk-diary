@@ -73,12 +73,17 @@ export type GrinEvidenceUploadInput = {
 /**
  * Structured identity is populated only when the original is durable.
  * Derivatives and failures must leave these fields null.
+ * `generation` is the storage object generation, never the literal `"verified"`.
  */
 export type GrinEvidenceUploadResult = {
   ok: boolean;
   originalDurable: boolean;
   generation: string | null;
   retryable: boolean;
+  ownerUid: string | null;
+  mime: string | null;
+  sizeBytes: number | null;
+  storagePath: string | null;
   evidenceId: string | null;
   receiptId: string | null;
   ledgerId: string | null;
@@ -87,6 +92,30 @@ export type GrinEvidenceUploadResult = {
   actualSha256: string | null;
   reservationId: string | null;
 };
+
+/** Non-durable / closed results keep identity and descriptor fields null. */
+export function nonDurableEvidenceUploadResult(
+  retryable: boolean,
+  generation: string | null = null
+): GrinEvidenceUploadResult {
+  return {
+    ok: false,
+    originalDurable: false,
+    generation,
+    retryable,
+    ownerUid: null,
+    mime: null,
+    sizeBytes: null,
+    storagePath: null,
+    evidenceId: null,
+    receiptId: null,
+    ledgerId: null,
+    category: null,
+    claimedSha256: null,
+    actualSha256: null,
+    reservationId: null,
+  };
+}
 
 /**
  * INJECTED: host supplies Team 2 storage adapter.
