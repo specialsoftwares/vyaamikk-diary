@@ -22,12 +22,13 @@
  * SQLITE_HOST / mounted-inert tests MUST inject createUninjectedGrinServerPort or
  * createFakeGrinServerPort via setGrinServerPortFactoryForTests, and FAKE / closed
  * evidence via setGrinEvidencePortFactoryForTests. Do not call live Firebase.
+ * Tests that need SQLITE_HOST node-fs hashing inject setGrinLocalOriginalHasherFactoryForTests.
  */
 
 import { getLocalDatabase } from "@/localDb/database";
 import { GrinOutbox } from "@/services/grin/outbox/outbox";
 import type { GrinEvidenceUploadPort, GrinServerCommandPort } from "@/services/grin/outbox/ports";
-import type { GrinDispatchSession } from "@/services/grin/outbox/types";
+import type { GrinDispatchSession, GrinLocalOriginalHasher } from "@/services/grin/outbox/types";
 import {
   createFirebaseJsGrinEvidenceTransport,
   createFirebaseJsGrinTransport,
@@ -35,6 +36,7 @@ import {
 
 import { GrinApplicationRepository } from "./GrinApplicationRepository";
 import { GRIN_APPLICATION_LEDGER_ID } from "./labels";
+import { createAppLocalOriginalHasher } from "./localOriginalHasher";
 import {
   GRIN_BINDING_RETIRED,
   GRIN_SESSION_NOT_STARTED,
@@ -62,6 +64,7 @@ let pendingSqliteRetire: LiveBinding | null = null;
 let dbFactory: () => GrinApplicationDb = defaultDbFactory;
 let serverPortFactory: () => GrinServerCommandPort = defaultGrinServerPortFactory;
 let evidencePortFactory: () => GrinEvidenceUploadPort = defaultGrinEvidencePortFactory;
+let hasherFactory: () => GrinLocalOriginalHasher = defaultGrinLocalOriginalHasherFactory;
 
 function defaultDbFactory(): GrinApplicationDb {
   return getLocalDatabase() as unknown as GrinApplicationDb;
@@ -73,6 +76,10 @@ function defaultGrinServerPortFactory(): GrinServerCommandPort {
 
 function defaultGrinEvidencePortFactory(): GrinEvidenceUploadPort {
   return createFirebaseJsGrinEvidenceTransport();
+}
+
+function defaultGrinLocalOriginalHasherFactory(): GrinLocalOriginalHasher {
+  return createAppLocalOriginalHasher();
 }
 
 function isLiveSession(session: GrinDispatchSession): boolean {
@@ -125,6 +132,16 @@ export function setGrinEvidencePortFactoryForTests(
   factory: (() => GrinEvidenceUploadPort) | null
 ): void {
   evidencePortFactory = factory ?? defaultGrinEvidencePortFactory;
+}
+
+/**
+ * SQLITE_HOST tests may inject the node-fs hasher. Pass null to restore
+ * createAppLocalOriginalHasher (Expo FileSystem / injected retention fs).
+ */
+export function setGrinLocalOriginalHasherFactoryForTests(
+  factory: (() => GrinLocalOriginalHasher) | null
+): void {
+  hasherFactory = factory ?? defaultGrinLocalOriginalHasherFactory;
 }
 
 /**
@@ -199,6 +216,7 @@ export function persistGrinOwnerSession(): GrinDispatchSession | null {
     db,
     server: serverPortFactory(),
     evidence: evidencePortFactory(),
+    localOriginalHasher: hasherFactory(),
   });
   outbox.ensureSchema();
   const session = outbox.beginOwnerSession(uid);
@@ -295,4 +313,5 @@ export function resetGrinApplicationRepositoryForTests(): void {
   dbFactory = defaultDbFactory;
   serverPortFactory = defaultGrinServerPortFactory;
   evidencePortFactory = defaultGrinEvidencePortFactory;
+  hasherFactory = defaultGrinLocalOriginalHasherFactory;
 }

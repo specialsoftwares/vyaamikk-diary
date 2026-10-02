@@ -656,6 +656,9 @@ function main() {
   assert.equal(existsSync(join(here, "packExport.ts")), false, "do not keep a parallel pack assembler");
   const repoImplSrc = stripComments(readFileSync(join(here, "GrinApplicationRepository.ts"), "utf8"));
   assert.match(repoImplSrc, /assembleEvidencePackInputs/, "exportPack must use Team 2 pack inputs");
+  const packInputsSrc = stripComments(readFileSync(join(here, "../../../goodsEvidence/evidencePackInputs.ts"), "utf8"));
+  assert.doesNotMatch(packInputsSrc, /osConversionOccurred:\s*false/, "pack must not invent osConversionOccurred false");
+  assert.match(packInputsSrc, /normalizeOsConversionOccurred/);
   assert.match(repoImplSrc, /GRIN_NO_CONFIRMED_VERSION/, "mutations must fail closed without confirmed version");
   assert.doesNotMatch(repoImplSrc, /clientExpectedVersion\(0\)/, "expectedVersion must not be hardcoded 0");
 
@@ -673,6 +676,9 @@ function main() {
   assert.match(bindingSrc, /createFirebaseJsGrinEvidenceTransport/, "production default must bind Team 1 JS evidence transport");
   assert.match(bindingSrc, /function defaultGrinEvidencePortFactory/, "default evidence factory must be explicit");
   assert.match(bindingSrc, /evidence:\s*evidencePortFactory\(\)/, "outbox must be constructed with evidencePortFactory");
+  assert.match(bindingSrc, /localOriginalHasher:\s*hasherFactory\(\)/, "persistGrinOwnerSession must pass the production hasher");
+  assert.match(bindingSrc, /createAppLocalOriginalHasher/);
+  assert.match(bindingSrc, /function defaultGrinLocalOriginalHasherFactory/);
   assert.match(GRIN_APPLICATION_EVIDENCE_PORT_LABEL, /FIREBASE_JS_HTTPS_CALLABLE evidence/);
   assert.doesNotMatch(
     bindingSrc,

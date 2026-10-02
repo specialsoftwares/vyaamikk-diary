@@ -212,6 +212,7 @@ async function main(): Promise<void> {
   assert.equal(mapped.rawSha256, expected);
   assert.equal(mapped.storageObjectGeneration, "1");
   assert.equal(mapped.originalFileName, "invoice.pdf");
+  assert.equal(mapped.osConversionOccurred, "unknown");
 
   evidenceLabel("PURE_DOMAIN", "replay identity must match owner ledger receipt id category hash size");
   const identity = {

@@ -10,7 +10,7 @@ import path from "node:path";
 import { applyPendingLocalMigrations, initializeLocalDatabase, resetLocalDatabaseInitStateForStartup } from "./init";
 import { closeLocalDatabaseForTests, setLocalDatabaseForTests } from "./database";
 import { execStatements, migrateToV7, migrateToV8, migrateToV9, tableExists, tableHasColumn } from "./migrate";
-import { GRIN_CONFIRMED_COLUMNS, GRIN_EVIDENCE_DESCRIPTOR_COLUMNS, GRIN_V10_INDEXES, grinV10TablesPresent } from "./migrateGrin";
+import { GRIN_CONFIRMED_COLUMNS, GRIN_EVIDENCE_CAPTURE_COLUMNS, GRIN_EVIDENCE_DESCRIPTOR_COLUMNS, GRIN_V10_INDEXES, grinV10TablesPresent } from "./migrateGrin";
 import { DB_VERSION, MIGRATIONS_V1 } from "./schema";
 import { openHostSqlite, SQLITE_HOST, type HostSqlite } from "@/services/grin/outbox/hostSqlite";
 import { SQLITE_HOST_NOT_NATIVE_DEVICE } from "@/services/grin/outbox/types";
@@ -89,6 +89,9 @@ function assertRequiredGrinV10(db: GrinSqlDb): void {
     assert.equal(tableHasColumn(migrateDb, "grin_local_receipts", column), true, column);
   }
   for (const column of GRIN_EVIDENCE_DESCRIPTOR_COLUMNS) {
+    assert.equal(tableHasColumn(migrateDb, "grin_local_evidence_files", column), true, column);
+  }
+  for (const column of GRIN_EVIDENCE_CAPTURE_COLUMNS) {
     assert.equal(tableHasColumn(migrateDb, "grin_local_evidence_files", column), true, column);
   }
   for (const name of GRIN_V10_INDEXES) {

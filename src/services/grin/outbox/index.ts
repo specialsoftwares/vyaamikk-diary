@@ -1,4 +1,4 @@
-export { migrateToV10, GRIN_DB_TARGET_VERSION, GRIN_MIGRATIONS_V10, grinV10TablesPresent, GRIN_V10_INDEXES, GRIN_CONFIRMED_COLUMNS, GRIN_EVIDENCE_DESCRIPTOR_COLUMNS } from "@/localDb/migrateGrin";
+export { migrateToV10, GRIN_DB_TARGET_VERSION, GRIN_MIGRATIONS_V10, grinV10TablesPresent, GRIN_V10_INDEXES, GRIN_CONFIRMED_COLUMNS, GRIN_EVIDENCE_DESCRIPTOR_COLUMNS, GRIN_EVIDENCE_CAPTURE_COLUMNS } from "@/localDb/migrateGrin";
 export { GrinOutbox, setOutboxCrashHook, peekQueuedCommand, DURABLE_ORIGINAL_UPLOAD_CONDITION } from "./outbox";
 export type {
   DispatchReport,
@@ -27,6 +27,16 @@ export {
   MAX_CONCURRENT_UPLOADS_PER_OWNER,
   MAX_DISPATCH_ATTEMPTS,
   SQLITE_HOST_NOT_NATIVE_DEVICE,
+  APP_FILESYSTEM,
+} from "./types";
+export type {
+  ActionableFailure,
+  GrinDispatchSession,
+  GrinLocalEvidenceFile,
+  GrinLocalOriginalHasher,
+  HasherExecutionLabel,
+  GrinLocalReceiptView,
+  LocalEvidenceRole,
 } from "./types";
 export { parseConfirmedProjection } from "./confirmedProjection";
 export {
@@ -34,12 +44,4 @@ export {
   nextDispatchGeneration,
   type LiveSessionToken,
 } from "./sessionAuthority";
-export type {
-  ActionableFailure,
-  GrinDispatchSession,
-  GrinLocalEvidenceFile,
-  GrinLocalOriginalHasher,
-  GrinLocalReceiptView,
-  LocalEvidenceRole,
-} from "./types";
 export { mintAttemptId, mintCommandId, mintReceiptId } from "./ids";

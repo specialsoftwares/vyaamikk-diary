@@ -63,6 +63,10 @@ for (const file of files) {
   }
 }
 
+const packInputs = stripComments(readFileSync(join(moduleDir, "evidencePackInputs.ts"), "utf8"));
+assert.doesNotMatch(packInputs, /osConversionOccurred:\s*false/);
+assert.match(packInputs, /normalizeOsConversionOccurred/);
+
 const flag = readFileSync(join(moduleDir, "featureFlag.ts"), "utf8");
 assert.match(flag, /process\.env\.EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED === ["']1["']/);
 assert.match(flag, /store-or-standalone/);

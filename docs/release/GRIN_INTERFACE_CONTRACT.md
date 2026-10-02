@@ -220,11 +220,17 @@ Starting combined HEAD `13f90ed` / validated application `99ee60c`. Preserve F1â
 `persistGrinOwnerSession` must construct:
 
 ```
-new GrinOutbox({ db, server: serverPortFactory(), evidence: evidencePortFactory() })
+new GrinOutbox({
+  db,
+  server: serverPortFactory(),
+  evidence: evidencePortFactory(),
+  localOriginalHasher: hasherFactory(),
+})
 ```
 
 - Default `serverPortFactory` remains `createFirebaseJsGrinTransport`.
 - Default `evidencePortFactory` is `createFirebaseJsGrinEvidenceTransport` (Team 1). Tests inject FAKE / uninjected / null via `setGrinEvidencePortFactoryForTests` (Team 4, same pattern as the server factory).
+- Default `hasherFactory` is `createAppLocalOriginalHasher` (APP_FILESYSTEM / Expo FileSystem; tests inject SQLITE_HOST node-fs via `setGrinLocalOriginalHasherFactoryForTests`). Without a hasher, admission fail-closes (`originalDurable: false`).
 - `evidence: undefined` is not a production default. A missing **backend** (unexported callable, unauthenticated, network) must yield `attachment_pending` / retryable deny with `originalDurable: false`, never success.
 - Default-off / store-blocked admission must not start GRIN services. Hiding UI is not authorization.
 - Mobile `src/` must not import Admin SDK, Node `fs`, HostSqlite, or `tools/goods-evidence-*`. Isolated Functions-emulator entrypoint lives under `tools/goods-evidence-emulator/**` and may compose the same production handler factories. Do **not** export GRIN from `functions/src/index.ts`.

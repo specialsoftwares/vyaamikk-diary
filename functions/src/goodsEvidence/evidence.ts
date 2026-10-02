@@ -59,6 +59,15 @@ export const ORIGINAL_CAPTURE_PROVENANCES = [
 
 export type OriginalCaptureProvenance = (typeof ORIGINAL_CAPTURE_PROVENANCES)[number];
 
+/** Pinned picker conversion. `false` only when conversion is known not to have occurred. */
+export type OsConversionOccurred = boolean | "unknown";
+
+export function normalizeOsConversionOccurred(value: unknown): OsConversionOccurred {
+  if (value === true) return true;
+  if (value === false) return false;
+  return "unknown";
+}
+
 export const ORIGINAL_OBJECT_KIND = "original" as const;
 export const DERIVATIVE_STORAGE_KINDS = ["thumbnail", "preview", "ocr"] as const;
 export type DerivativeStorageKind = (typeof DERIVATIVE_STORAGE_KINDS)[number];
@@ -99,7 +108,7 @@ export interface OriginalEvidence {
   rawSha256: string;
   storageObjectGeneration: string | null;
   captureProvenance: string;
-  osConversionOccurred: boolean;
+  osConversionOccurred: OsConversionOccurred;
   verification: EvidenceVerification;
   isDerivative: false;
   labelledSupport?: LabelledEvidenceSupport;
@@ -662,7 +671,7 @@ export function originalEvidenceFromVerifiedResult(
     originalFileName?: string | null;
     labelledSupport?: LabelledEvidenceSupport;
     captureProvenance?: OriginalCaptureProvenance | string;
-    osConversionOccurred?: boolean;
+    osConversionOccurred?: OsConversionOccurred;
   } = {}
 ): OriginalEvidence {
   return {
@@ -674,7 +683,7 @@ export function originalEvidenceFromVerifiedResult(
     rawSha256: verified.rawSha256,
     storageObjectGeneration: verified.generation,
     captureProvenance: extras.captureProvenance ?? "grin-g2-retained-original",
-    osConversionOccurred: extras.osConversionOccurred === true,
+    osConversionOccurred: normalizeOsConversionOccurred(extras.osConversionOccurred),
     verification: "verified",
     isDerivative: false,
     labelledSupport: extras.labelledSupport,

@@ -54,6 +54,15 @@ export const GRIN_EVIDENCE_DESCRIPTOR_COLUMNS = [
   "capture_provenance",
 ] as const;
 
+/**
+ * Additive v10 capture-claim columns on local originals.
+ * Distinct from trusted verification (`mime` / `actual_sha256`).
+ */
+export const GRIN_EVIDENCE_CAPTURE_COLUMNS = [
+  "os_conversion_occurred",
+  "claimed_mime",
+] as const;
+
 export const GRIN_MIGRATIONS_V10 = `
 CREATE TABLE IF NOT EXISTS grin_local_receipts (
   id TEXT PRIMARY KEY NOT NULL,
@@ -213,6 +222,12 @@ export function migrateToV10(db: Db): void {
     if (!tableHasColumn(db, "grin_local_evidence_files", "capture_provenance")) {
       db.execSync("ALTER TABLE grin_local_evidence_files ADD COLUMN capture_provenance TEXT");
     }
+    if (!tableHasColumn(db, "grin_local_evidence_files", "os_conversion_occurred")) {
+      db.execSync("ALTER TABLE grin_local_evidence_files ADD COLUMN os_conversion_occurred TEXT");
+    }
+    if (!tableHasColumn(db, "grin_local_evidence_files", "claimed_mime")) {
+      db.execSync("ALTER TABLE grin_local_evidence_files ADD COLUMN claimed_mime TEXT");
+    }
   }
 }
 
@@ -235,6 +250,9 @@ export function grinV10TablesPresent(db: Db): boolean {
     if (!tableHasColumn(db, "grin_local_receipts", column)) return false;
   }
   for (const column of GRIN_EVIDENCE_DESCRIPTOR_COLUMNS) {
+    if (!tableHasColumn(db, "grin_local_evidence_files", column)) return false;
+  }
+  for (const column of GRIN_EVIDENCE_CAPTURE_COLUMNS) {
     if (!tableHasColumn(db, "grin_local_evidence_files", column)) return false;
   }
   return GRIN_V10_INDEXES.every((name) => grinIndexExists(db, name));

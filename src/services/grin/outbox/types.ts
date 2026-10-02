@@ -44,6 +44,9 @@ export type GrinLocalEvidenceFile = {
   objectGeneration: string | null;
   reservationId: string | null;
   captureProvenance: string | null;
+  /** Capture claim. Never inferred as false for missing rows. */
+  osConversionOccurred: boolean | "unknown";
+  claimedMime: string | null;
 };
 
 export type ActionableFailure =
@@ -106,12 +109,16 @@ export { MAX_CONCURRENT_UPLOADS_PER_OWNER } from "@/goodsEvidence/evidence";
 export const SQLITE_HOST_NOT_NATIVE_DEVICE =
   "SQLITE_HOST tests are not NATIVE_DEVICE process-death proof.";
 
+export const APP_FILESYSTEM = "APP_FILESYSTEM" as const;
+export type HasherExecutionLabel = SqliteExecutionLabel | typeof APP_FILESYSTEM;
+
 /**
  * Injected chunk hasher for retained local originals.
  * SQLITE_HOST uses node fs chunks at HASH_CHUNK_BYTES. That is not NATIVE_DEVICE.
+ * Production persistGrinOwnerSession uses APP_FILESYSTEM (Expo FileSystem).
  */
 export type GrinLocalOriginalHasher = {
-  executionLabel: SqliteExecutionLabel;
+  executionLabel: HasherExecutionLabel;
   createHasher: () => ChunkHasher;
   chunksForPath: (localPath: string) => AsyncIterable<Uint8Array> | Iterable<Uint8Array>;
 };

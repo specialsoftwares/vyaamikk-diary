@@ -15,6 +15,7 @@ import {
   isSha256Hex,
   isWave1OriginalCategory,
   MAX_CONCURRENT_UPLOADS_PER_OWNER,
+  normalizeOsConversionOccurred,
   storagePathShapeError,
   type Wave1OriginalCategory,
 } from "@/goodsEvidence/evidence";
@@ -193,6 +194,8 @@ type EvidenceRow = {
   object_generation: string | null;
   reservation_id: string | null;
   capture_provenance: string | null;
+  os_conversion_occurred: string | null;
+  claimed_mime: string | null;
 };
 
 type LocalOriginalHash = {
@@ -201,6 +204,13 @@ type LocalOriginalHash = {
 };
 
 const FORBIDDEN_OBJECT_GENERATION = "verified";
+
+function encodeOsConversion(value: unknown): string {
+  const normalized = normalizeOsConversionOccurred(value);
+  if (normalized === true) return "true";
+  if (normalized === false) return "false";
+  return "unknown";
+}
 
 type RuntimeRow = {
   owner_uid: string;
@@ -848,6 +858,8 @@ export class GrinOutbox {
       byteSize?: number | null;
       category?: unknown;
       captureProvenance?: string | null;
+      osConversionOccurred?: boolean | "unknown";
+      mime?: string | null;
     }
   ): GrinLocalEvidenceFile {
     this.assertSessionOwner(session, session.ownerUid);
@@ -865,8 +877,9 @@ export class GrinOutbox {
       `INSERT INTO grin_local_evidence_files (
          id, owner_uid, ledger_id, receipt_id, evidence_id, role, local_path, claimed_sha256,
          byte_size, category, upload_state, original_durable, retain_local, capture_provenance,
+         os_conversion_occurred, claimed_mime,
          created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?, ?, ?, ?, ?)`,
       [
         id,
         session.ownerUid,
@@ -880,6 +893,8 @@ export class GrinOutbox {
         category,
         "local_only",
         input.captureProvenance ?? null,
+        encodeOsConversion(input.osConversionOccurred),
+        input.mime?.trim() || null,
         now,
         now,
       ]
@@ -2123,6 +2138,8 @@ export class GrinOutbox {
       objectGeneration: row.object_generation ?? null,
       reservationId: row.reservation_id ?? null,
       captureProvenance: row.capture_provenance ?? null,
+      osConversionOccurred: normalizeOsConversionOccurred(row.os_conversion_occurred),
+      claimedMime: row.claimed_mime ?? null,
     };
   }
 }

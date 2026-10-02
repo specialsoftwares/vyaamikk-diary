@@ -344,6 +344,8 @@ export class GrinApplicationRepository {
       byteSize: input.byteSize ?? null,
       category: input.category,
       captureProvenance: input.captureProvenance ?? null,
+      osConversionOccurred: input.osConversionOccurred,
+      mime: input.mime ?? null,
     });
     const attached = this.attachments(receiptId).find(
       (item) => item.evidenceId === evidenceId && item.role === "original"
@@ -588,6 +590,8 @@ function toPackOriginalInput(file: GrinLocalEvidenceFile): GrinPackOriginalInput
     generation,
     originalFileName: "original",
     state: verified ? "verified" : file.uploadState,
+    captureProvenance: file.captureProvenance,
+    osConversionOccurred: file.osConversionOccurred,
   };
 }
 

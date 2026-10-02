@@ -16,9 +16,12 @@ import path from "node:path";
 
 import { HASH_CHUNK_BYTES, MAX_IMAGE_ORIGINAL_BYTES, MAX_PDF_ORIGINAL_BYTES } from "@/goodsEvidence/evidence";
 import { sampleRegisterBody } from "@/goodsEvidence/testFixtures";
+import { createFakeEvidenceUploadPort, createFakeGrinServerPort } from "@/services/grin/outbox/fakePorts";
 import { openHostSqlite, SQLITE_HOST, type HostSqlite } from "@/services/grin/outbox/hostSqlite";
-import { SQLITE_HOST_NOT_NATIVE_DEVICE } from "@/services/grin/outbox/types";
+import type { GrinOutbox } from "@/services/grin/outbox/outbox";
+import { APP_FILESYSTEM, SQLITE_HOST_NOT_NATIVE_DEVICE } from "@/services/grin/outbox/types";
 import {
+  GRIN_APPLICATION_LEDGER_ID,
   GRIN_BINDING_RETIRED,
   getGrinApplicationRepository,
   resetGrinApplicationRepositoryForTests,
@@ -118,6 +121,7 @@ async function main(): Promise<void> {
     db = openHostSqlite(dbPath);
     assert.equal(db.executionLabel, SQLITE_HOST);
     console.log(`SQLITE_EXECUTION=${SQLITE_HOST}`);
+    console.log(`HOST_FILESYSTEM=${os.platform()} ${retainRoot}`);
     console.log(`NATIVE_DEVICE=not_claimed (${SQLITE_HOST_NOT_NATIVE_DEVICE})`);
 
     setGrinApplicationDbFactoryForTests(() => db as HostSqlite);
@@ -189,11 +193,17 @@ async function main(): Promise<void> {
     const attachedPdf = repoA.attachments("grcp_pick_a").find((item) => item.localPathPresent);
     assert.ok(attachedPdf);
     assert.equal(attachedPdf.originalDurable, false, "missing backend must not look like success");
-    const storedPdf = db.getFirstSync<{ capture_provenance: string | null }>(
-      `SELECT capture_provenance FROM grin_local_evidence_files WHERE owner_uid = ? AND receipt_id = ? AND claimed_sha256 = ?`,
+    const storedPdf = db.getFirstSync<{
+      capture_provenance: string | null;
+      os_conversion_occurred: string | null;
+      claimed_mime: string | null;
+    }>(
+      `SELECT capture_provenance, os_conversion_occurred, claimed_mime FROM grin_local_evidence_files WHERE owner_uid = ? AND receipt_id = ? AND claimed_sha256 = ?`,
       ["owner_a", "grcp_pick_a", sha256(pdfBytes)]
     );
     assert.equal(storedPdf?.capture_provenance, "imported_original");
+    assert.equal(storedPdf?.os_conversion_occurred, "unknown");
+    assert.equal(storedPdf?.claimed_mime, "application/pdf");
 
     const jpegBytes = new Uint8Array([0xff, 0xd8, 0xff, 0x01, 0x02, 0x03, 0xd9]);
     const jpegPath = writeTemp(tmp, "source.jpg", jpegBytes);
@@ -327,11 +337,69 @@ async function main(): Promise<void> {
     const afterReopen = repoA2.attachments("grcp_pick_a");
     assert.ok(afterReopen.some((item) => item.claimedSha256 === sha256(pdfBytes)));
     assert.equal(fs.existsSync(pdfPicked.localPath), true, "sqlite reopen must keep queued original bytes");
-    const reopenedPdf = db.getFirstSync<{ capture_provenance: string | null }>(
-      `SELECT capture_provenance FROM grin_local_evidence_files WHERE owner_uid = ? AND receipt_id = ? AND claimed_sha256 = ?`,
+    const reopenedPdf = db.getFirstSync<{
+      capture_provenance: string | null;
+      os_conversion_occurred: string | null;
+      claimed_mime: string | null;
+    }>(
+      `SELECT capture_provenance, os_conversion_occurred, claimed_mime FROM grin_local_evidence_files WHERE owner_uid = ? AND receipt_id = ? AND claimed_sha256 = ?`,
       ["owner_a", "grcp_pick_a", sha256(pdfBytes)]
     );
     assert.equal(reopenedPdf?.capture_provenance, "imported_original");
+    assert.equal(reopenedPdf?.os_conversion_occurred, "unknown");
+    assert.equal(reopenedPdf?.claimed_mime, "application/pdf");
+
+    retireGrinOwnerSession();
+    setGrinServerPortFactoryForTests(() => createFakeGrinServerPort());
+    setGrinEvidencePortFactoryForTests(() => createFakeEvidenceUploadPort());
+    const hasherPdfBytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34, 0x0a]);
+    const hasherPdfPath = writeTemp(tmp, "hasher.pdf", hasherPdfBytes);
+    setGrinOriginalOsBridgeForTests({
+      async pickDocument() {
+        return { uri: hasherPdfPath, mime: "application/pdf", fileName: "hasher.pdf", size: hasherPdfBytes.byteLength };
+      },
+      async requestMediaLibraryPermission() {
+        return true;
+      },
+    });
+    const sessionH = startGrinOwnerSession("owner_hasher");
+    const repoH = getGrinApplicationRepository("owner_hasher", sessionH.dispatchGeneration);
+    const boxH = (repoH as unknown as { outbox: GrinOutbox }).outbox;
+    const hasherLabel = (boxH as unknown as { localOriginalHasher: { executionLabel: string } | null }).localOriginalHasher;
+    assert.equal(hasherLabel?.executionLabel, APP_FILESYSTEM);
+    repoH.createQueued(
+      sampleRegisterBody({
+        receiptId: "grcp_hasher",
+        supplier: {
+          name: { kind: "present", value: "Hasher" },
+          registration: { kind: "registered", gstin: "29BBBBB0000B1Z5" },
+          address: { kind: "not_supplied" },
+          contact: { kind: "not_supplied" },
+        },
+      })
+    );
+    const hasherPicked = await pickGrinOriginal({ source: "library", category: "invoice", origin: sessionH });
+    assert.ok(hasherPicked);
+    repoH.attachOriginal({
+      receiptId: "grcp_hasher",
+      category: "invoice",
+      localPath: hasherPicked.localPath,
+      claimedSha256: hasherPicked.claimedSha256,
+      byteSize: hasherPicked.byteSize,
+      mime: hasherPicked.mime,
+      captureProvenance: hasherPicked.captureProvenance,
+      osConversionOccurred: hasherPicked.osConversionOccurred,
+    });
+    commitGrinOriginalRetention(hasherPicked.localPath);
+    const registered = await boxH.dispatchDue(sessionH, "worker_hasher");
+    assert.ok(registered.results.some((item) => item.commandId && item.localState === "attachment_pending"));
+    const uploaded = await boxH.dispatchDue(sessionH, "worker_hasher");
+    assert.ok(uploaded.results.some((item) => item.localState === "issued"));
+    const hasherFiles = boxH.listLocalFiles("owner_hasher", GRIN_APPLICATION_LEDGER_ID, "grcp_hasher");
+    const durable = hasherFiles.find((file) => file.role === "original");
+    assert.equal(durable?.originalDurable, true, "persistGrinOwnerSession hasher must admit known retained bytes");
+    assert.equal(durable?.osConversionOccurred, "unknown");
+    assert.equal(durable?.actualSha256, sha256(hasherPdfBytes));
   } finally {
     retireGrinOwnerSession();
     resetGrinApplicationRepositoryForTests();

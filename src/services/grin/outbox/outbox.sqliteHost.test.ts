@@ -11,7 +11,7 @@ import path from "node:path";
 import { HASH_CHUNK_BYTES } from "@/goodsEvidence/evidence";
 import { sampleRegisterBody } from "@/goodsEvidence/testFixtures";
 import { execStatements, migrateToV7, migrateToV8, migrateToV9 } from "@/localDb/migrate";
-import { migrateToV10, grinV10TablesPresent, GRIN_CONFIRMED_COLUMNS, GRIN_EVIDENCE_DESCRIPTOR_COLUMNS } from "@/localDb/migrateGrin";
+import { migrateToV10, grinV10TablesPresent, GRIN_CONFIRMED_COLUMNS, GRIN_EVIDENCE_CAPTURE_COLUMNS, GRIN_EVIDENCE_DESCRIPTOR_COLUMNS } from "@/localDb/migrateGrin";
 import { MIGRATIONS_V1 } from "@/localDb/schema";
 import { createFakeEvidenceUploadPort, createFakeGrinServerPort } from "./fakePorts";
 import { openHostSqlite, SQLITE_HOST, type HostSqlite } from "./hostSqlite";
@@ -83,7 +83,7 @@ async function main() {
       );
       assert.equal(info.some((row: { name: string }) => row.name === column), true, column);
     }
-    for (const column of GRIN_EVIDENCE_DESCRIPTOR_COLUMNS) {
+    for (const column of [...GRIN_EVIDENCE_DESCRIPTOR_COLUMNS, ...GRIN_EVIDENCE_CAPTURE_COLUMNS]) {
       const info: Array<{ name: string }> = db.getAllSync<{ name: string }>(
         "PRAGMA table_info(grin_local_evidence_files)"
       );

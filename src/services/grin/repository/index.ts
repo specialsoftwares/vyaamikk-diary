@@ -27,6 +27,7 @@ export {
   retireGrinOwnerSession,
   setGrinApplicationDbFactoryForTests,
   setGrinEvidencePortFactoryForTests,
+  setGrinLocalOriginalHasherFactoryForTests,
   setGrinServerPortFactoryForTests,
   startGrinOwnerSession,
 } from "./appBinding";

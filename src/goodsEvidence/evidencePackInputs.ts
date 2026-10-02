@@ -14,9 +14,11 @@ import {
   isEvidenceCategory,
   isRetainedOriginalState,
   isSha256Hex,
+  normalizeOsConversionOccurred,
   type EvidenceCategory,
   type LabelledEvidenceSupport,
   type OriginalEvidence,
+  type OsConversionOccurred,
 } from "./evidence";
 import {
   notApplicableError,
@@ -46,6 +48,8 @@ export type GrinPackOriginalInput = {
   generation: string | null;
   originalFileName: string | null;
   state: string;
+  captureProvenance?: string | null;
+  osConversionOccurred?: OsConversionOccurred;
   labelledSupport?: LabelledEvidenceSupport;
 };
 
@@ -179,8 +183,11 @@ export function assembleEvidencePackInputs(input: {
       byteSize: original.byteSize,
       rawSha256: original.rawSha256,
       storageObjectGeneration: original.generation,
-      captureProvenance: "grin-g2-retained-original",
-      osConversionOccurred: false,
+      captureProvenance:
+        original.captureProvenance && original.captureProvenance.trim()
+          ? original.captureProvenance
+          : "grin-g2-retained-original",
+      osConversionOccurred: normalizeOsConversionOccurred(original.osConversionOccurred),
       verification: "verified",
       isDerivative: false,
       labelledSupport: original.labelledSupport,

@@ -34,8 +34,11 @@ function main(): void {
   assert.match(bindingSrc, /function defaultGrinServerPortFactory/);
   assert.match(bindingSrc, /server:\s*serverPortFactory\(\)/);
   assert.match(bindingSrc, /evidence:\s*evidencePortFactory\(\)/);
+  assert.match(bindingSrc, /localOriginalHasher:\s*hasherFactory\(\)/);
   assert.match(bindingSrc, /createFirebaseJsGrinEvidenceTransport/);
+  assert.match(bindingSrc, /createAppLocalOriginalHasher/);
   assert.match(bindingSrc, /function defaultGrinEvidencePortFactory/);
+  assert.match(bindingSrc, /function defaultGrinLocalOriginalHasherFactory/);
   assert.doesNotMatch(bindingSrc, /createUninjectedGrinServerPort\s*\(/);
   assert.doesNotMatch(bindingSrc, /from ["'][^"']*uninjectedServer["']/);
   assert.doesNotMatch(bindingSrc, /firebase-admin/);

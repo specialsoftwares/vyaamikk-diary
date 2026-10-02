@@ -84,3 +84,7 @@ Starting combined HEAD `13f90ed33ce60a701eb2e3a73a1e279f2be1888f`. Contract `202
 
 Independent QA of corrected combined `ae0339a30edd92e92f4b05f734fddb4710aacaf4` on `team/grin-t5-qa`. PHASE 1 mapping at `41670aa` / `4711f7d` is not closure. Executed: persistGrinOwnerSession wires both JS ports; Functions-emulator real `httpsCallable` (unset hosts fail); SQLITE_HOST E2/E3; Firestore adapter register→amend→QC→return→read-confirmed; mounted EWB/attachments/pack with retirement. E4 remaining: pack assembler hardcodes `osConversionOccurred: false`. Production persist still has no `localOriginalHasher`. `functions/src/index.ts` HOLD. versionCode 23. Purchase-entry flags `"0"`. GRIN default-off. **Wave 2 not accepted.** Do not mark GRIN / G6 / billing / public-release Done.
 
+## Coordinator E4/E1 source closeout after T5 PHASE 2 (unsent, 2026-10-02)
+
+T5 PHASE 2 `049e7e0` of `ae0339a` left two source gaps. Combined follow-up: persist `os_conversion_occurred` / `claimed_mime` (additive ALTER, no DB_VERSION bump); pack assembler uses retained conversion via `normalizeOsConversionOccurred` (never invents `false`); `persistGrinOwnerSession` passes `createAppLocalOriginalHasher` (APP_FILESYSTEM); FIPS 180-4 K typo `0fc19cd6`→`0fc19dc6` so production chunk hashes match independent SHA-256. `test:grin-product` + `test:grin-outbox` SQLITE_HOST passed including persist-hasher durable PDF. `functions/src/index.ts` HOLD. versionCode 23. Flags `"0"`. **Wave 2 not accepted** pending T5 follow-up. Do not mark GRIN / G6 / billing / public-release Done.
+

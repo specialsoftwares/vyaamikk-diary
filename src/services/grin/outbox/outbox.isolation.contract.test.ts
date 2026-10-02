@@ -55,6 +55,8 @@ assert.match(outboxSrc, /hashBoundedChunks/);
 assert.match(outboxSrc, /isSha256Hex/);
 assert.doesNotMatch(outboxSrc, /uploaded\.claimedSha256 !== expected/);
 assert.doesNotMatch(outboxSrc, /generation: "verified"/);
+assert.match(outboxSrc, /os_conversion_occurred/);
+assert.match(outboxSrc, /claimed_mime/);
 
 const hasherSrc = readFileSync(join(dir, "hostLocalOriginalHasher.ts"), "utf8");
 assert.match(hasherSrc, /HASH_CHUNK_BYTES/);
