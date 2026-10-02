@@ -1,0 +1,95 @@
+rules_version = '2';
+
+/**
+ * Isolated Team 1 Functions-emulator Firestore Rules. Not live Rules. Do not deploy.
+ * Combines G1 command/receipt paths with G2 object-key bindings for Storage rules.
+ * Admin SDK / adapters still authorize callers. Client writes stay denied.
+ */
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function userData(uid) {
+      return get(/databases/$(database)/documents/users/$(uid)).data;
+    }
+
+    function isActiveOwner(uid) {
+      return isOwner(uid) && userData(uid).get('status', 'active') == 'active';
+    }
+
+    match /users/{uid}/goodsEvidenceAdmission/{docId} {
+      allow read: if isOwner(uid);
+      allow write: if false;
+    }
+
+    match /users/{uid}/goodsEvidenceUploadControl/{docId} {
+      allow read, write: if false;
+    }
+
+    match /users/{uid}/grinEvidenceObjectKeys/{objectKey} {
+      allow read: if isActiveOwner(uid);
+      allow create, update, delete: if false;
+    }
+
+    match /users/{uid}/grinEvidenceDerivativeKeys/{derivativeKey} {
+      allow read: if isActiveOwner(uid);
+      allow create, update, delete: if false;
+    }
+
+    match /users/{uid} {
+      allow read: if isOwner(uid);
+      allow write: if false;
+    }
+
+    match /users/{uid}/goodsEvidenceLedgers/{ledgerId} {
+      allow read: if isActiveOwner(uid);
+      allow create, update, delete: if false;
+
+      match /commands/{commandId} {
+        allow read: if isActiveOwner(uid);
+        allow create, update, delete: if false;
+      }
+
+      match /serials/{fyToken} {
+        allow read: if isActiveOwner(uid);
+        allow create, update, delete: if false;
+      }
+
+      match /evidenceObjects/{evidenceId} {
+        allow read: if isActiveOwner(uid);
+        allow create, update, delete: if false;
+      }
+
+      match /receipts/{receiptId} {
+        allow read: if isActiveOwner(uid);
+        allow create, update, delete: if false;
+
+        match /events/{eventId} {
+          allow read: if isActiveOwner(uid);
+          allow create, update, delete: if false;
+        }
+
+        match /evidenceLinks/{evidenceId} {
+          allow read: if isActiveOwner(uid);
+          allow create, update, delete: if false;
+        }
+
+        match /evidenceControl/{docId} {
+          allow read: if isActiveOwner(uid);
+          allow create, update, delete: if false;
+        }
+      }
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

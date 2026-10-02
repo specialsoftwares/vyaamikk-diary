@@ -28,6 +28,7 @@ const EXCLUDE = new Set([
   "test:billing-apple-emulator", // emulator suite — separate ci:verify stage
   "test:billing-maintenance-emulator", // emulator suite — separate ci:verify stage
   "test:goods-evidence-g1-emulator", // G1 Firestore emulator — separate ci:verify stage
+  "test:goods-evidence-g1-functions-emulator", // isolated Functions+Firestore+Storage+Auth — separate ci:verify stage
   "test:goods-evidence-g2-emulator", // G2 Firestore+Storage emulator — separate ci:verify stage
   "test:invoice-renderer", // requires services/subscription-invoice-renderer node_modules
   "test:invoice-renderer-build", // npm ci + tsc; run by ci:verify

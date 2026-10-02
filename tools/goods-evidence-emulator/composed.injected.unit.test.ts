@@ -4,6 +4,8 @@
  */
 import assert from "node:assert/strict";
 
+import { createHash } from "node:crypto";
+
 import { createComposedGrinCallables } from "../../functions/src/goodsEvidence/composed";
 import { freezeCommand } from "../../src/goodsEvidence/command";
 import { sampleRegisterBody } from "../../src/goodsEvidence/testFixtures";
@@ -11,6 +13,10 @@ import { GoodsEvidenceRegisterAdapter } from "./adapter";
 import { fixedClock } from "./harness";
 import { createInjectedStore, seedInjectedOwner } from "./injectedStore";
 import { eventPath, receiptPath } from "./paths";
+import { GoodsEvidenceStorageAdapter } from "../goods-evidence-storage/adapter";
+import { FAKE_createInjectedFirestore, FAKE_seedOwner } from "../goods-evidence-storage/FAKE_injectedFirestore";
+import { FAKE_MemoryBlobStore } from "../goods-evidence-storage/FAKE_memoryBlobStore";
+import { testClock as g2Clock } from "../goods-evidence-storage/testSupport";
 
 const NOW = Date.UTC(2026, 8, 28, 12, 0, 0, 0);
 const OWNER = "owner_composed";
@@ -286,6 +292,109 @@ async function main(): Promise<void> {
   assert.equal(coerced.ok, false, "expectedVersion 0 must not be coerced to 1");
   if (coerced.ok) throw new Error("expected version 0 deny");
   assert.equal(coerced.code, "invalid");
+
+  const g2db = FAKE_createInjectedFirestore();
+  const blobs = new FAKE_MemoryBlobStore();
+  FAKE_seedOwner(g2db, OWNER, LEDGER, "receipt_c01");
+  const storageAdapter = new GoodsEvidenceStorageAdapter(g2db, blobs, g2Clock());
+  const withEvidence = createComposedGrinCallables({
+    adapter,
+    evidence: storageAdapter,
+    env: ENABLED,
+  });
+
+  const missingBackend = createComposedGrinCallables({
+    adapter,
+    evidence: null,
+    env: ENABLED,
+  });
+  const pending = await missingBackend.uploadEvidence({
+    auth: { uid: OWNER },
+    data: { ledgerId: LEDGER, receiptId: "receipt_c01", evidenceId: "evidence_c01" },
+  });
+  assert.equal(pending.ok, false);
+  assert.equal(pending.originalDurable, false);
+  assert.equal(pending.retryable, true);
+  assert.equal(pending.actualSha256, null);
+
+  const pdf = new Uint8Array(32);
+  pdf.set([0x25, 0x50, 0x44, 0x46]);
+  pdf.fill(9, 4);
+  const actual = createHash("sha256").update(pdf).digest("hex");
+  const wrongClaim = "ab".repeat(32);
+  assert.notEqual(wrongClaim, actual);
+
+  const reserved = await withEvidence.reserveEvidence({
+    auth: { uid: OWNER },
+    data: {
+      evidenceId: "evidence_c01",
+      ledgerId: LEDGER,
+      receiptId: "receipt_c01",
+      category: "invoice",
+      mime: "application/pdf",
+      claimedSha256: actual,
+      claimedByteSize: pdf.byteLength,
+      uid: ATTACKER,
+      actualSha256: wrongClaim,
+    },
+  });
+  assert.equal(reserved.ok, true, "auth uid must win; client actualSha256 is not authority");
+  if (!reserved.ok) throw new Error("expected reserve");
+  const began = await withEvidence.beginEvidenceUpload({
+    auth: { uid: OWNER },
+    data: { evidenceId: "evidence_c01", ledgerId: LEDGER, receiptId: "receipt_c01" },
+  });
+  assert.equal(began.ok, true);
+  await blobs.putIfAbsent(reserved.storagePath, pdf, "application/pdf");
+  const uploaded = await withEvidence.uploadEvidence({
+    auth: { uid: OWNER },
+    data: { evidenceId: "evidence_c01", ledgerId: LEDGER, receiptId: "receipt_c01", actualSha256: wrongClaim },
+  });
+  assert.equal(uploaded.ok, true, "GrinUploadEvidence requires stored-byte verification");
+  assert.equal(uploaded.originalDurable, true);
+  assert.equal(uploaded.actualSha256, actual);
+  assert.notEqual(uploaded.actualSha256, wrongClaim);
+  assert.notEqual(uploaded.generation, "verified");
+  assert.equal(uploaded.evidenceId, "evidence_c01");
+
+  const reservedBad = await withEvidence.reserveEvidence({
+    auth: { uid: OWNER },
+    data: {
+      evidenceId: "evidence_c02",
+      ledgerId: LEDGER,
+      receiptId: "receipt_c01",
+      category: "invoice",
+      mime: "application/pdf",
+      claimedSha256: wrongClaim,
+      claimedByteSize: pdf.byteLength,
+    },
+  });
+  assert.equal(reservedBad.ok, true);
+  if (!reservedBad.ok) throw new Error("expected reserve of mismatched claim");
+  await withEvidence.beginEvidenceUpload({
+    auth: { uid: OWNER },
+    data: { evidenceId: "evidence_c02", ledgerId: LEDGER, receiptId: "receipt_c01" },
+  });
+  await blobs.putIfAbsent(reservedBad.storagePath, pdf, "application/pdf");
+  const mismatched = await withEvidence.uploadEvidence({
+    auth: { uid: OWNER },
+    data: { evidenceId: "evidence_c02", ledgerId: LEDGER, receiptId: "receipt_c01" },
+  });
+  assert.equal(mismatched.ok, false, "echoed client claim must not succeed when stored bytes differ");
+  assert.equal(mismatched.originalDurable, false);
+
+  const afterLink = await withEvidence.readReceipt({
+    auth: { uid: OWNER },
+    data: { ledgerId: LEDGER, receiptId: "receipt_c01" },
+  });
+  assert.equal(afterLink.ok, true);
+  if (!afterLink.ok) throw new Error("expected read after evidence link");
+  assert.equal(
+    afterLink.confirmed.events.some((event) => event.type === "evidence_verified"),
+    true,
+    "G1 linkVerifiedEvidence must append evidence_verified"
+  );
+  assert.deepEqual(afterLink.confirmed.original.remarks, { kind: "not_supplied" });
 
   console.log("tools/goods-evidence-emulator/composed.injected.unit.test.ts: ok (INJECTED / not live deploy)");
 }

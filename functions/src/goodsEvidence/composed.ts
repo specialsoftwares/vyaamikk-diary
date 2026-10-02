@@ -4,20 +4,26 @@
  * INJECTED / EMULATOR / not live deploy. Not exported from functions/src/index.ts.
  * When GRIN_GOODS_EVIDENCE_FUNCTIONS is exactly "true" and tests/emulator inject
  * GoodsEvidenceRegisterAdapter, register / reconcile / mutate / readReceipt run
- * through that adapter. Any other env value, or an unbound adapter, is fail-closed deny.
+ * through that adapter. Evidence reserve / beginUpload / uploadEvidence (complete +
+ * stored-byte verify + G2 link) inject the same G2 adapter surface. Any other env
+ * value, or an unbound adapter, is fail-closed deny. GrinUploadEvidence must not
+ * succeed without hashing stored bytes; the client hash is a claim only.
  *
  * Owner identity is request.auth.uid / AuthData.uid only. Client uid, ownerUid,
  * and digest are not server authority. Digest is recomputed inside the adapter.
  */
 
 import { grinFunctionsEnabled } from "./callables";
+import { isSha256Hex, isWave1OriginalCategory } from "./evidence";
 import type {
   GrinConfirmedProjection,
   GrinMutationResult,
   GrinReceiptReadResult,
   GrinReconcileResult,
   GrinRegisterResult,
+  VerifiedEvidenceResult,
 } from "./ports";
+import { formatUtcIso } from "./time";
 
 const GENERIC_DENY = "denied" as const;
 
@@ -57,6 +63,45 @@ export type ComposedRegisterResult = GrinRegisterResult & { confirmed?: GrinConf
 export type ComposedMutationResult = GrinMutationResult & { confirmed?: GrinConfirmedProjection };
 export type ComposedReconcileResult = GrinReconcileResult & { confirmed?: GrinConfirmedProjection };
 
+/**
+ * Structural G2 adapter. Local so this module does not import tools/.
+ * Caller identity is TrustedCaller.uid (request.auth.uid), never the body.
+ */
+export type ComposedEvidenceAdapter = {
+  reserve(caller: TrustedCaller, input: unknown): Promise<unknown>;
+  beginUpload(caller: TrustedCaller, input: unknown): Promise<unknown>;
+  completeUpload(caller: TrustedCaller, input: unknown): Promise<unknown>;
+  verify(caller: TrustedCaller, input: unknown): Promise<unknown>;
+  link(caller: TrustedCaller, input: unknown): Promise<unknown>;
+};
+
+export type ComposedEvidenceReserveSuccess = {
+  ok: true;
+  replayed: boolean;
+  evidenceId: string;
+  objectKey: string;
+  storagePath: string;
+  state: "reserved" | "uploading";
+};
+
+export type ComposedEvidenceReserveResult =
+  | ComposedEvidenceReserveSuccess
+  | { ok: false; code: "unauthenticated" | "forbidden" | "policy_denied" | "not_found" | "invalid" | "integrity"; detail: "denied" };
+
+export type ComposedEvidenceUploadResult = {
+  ok: boolean;
+  originalDurable: boolean;
+  generation: string | null;
+  retryable: boolean;
+  evidenceId: string | null;
+  receiptId: string | null;
+  ledgerId: string | null;
+  category: string | null;
+  claimedSha256: string | null;
+  actualSha256: string | null;
+  reservationId: string | null;
+};
+
 export type ComposedGrinCallables = {
   compositionKind: "UNDEPLOYED_COMPOSED";
   compositionLabel: "INJECTED / EMULATOR / not live deploy";
@@ -64,6 +109,9 @@ export type ComposedGrinCallables = {
   reconcile(request: GrinCallableRequest): Promise<ComposedReconcileResult>;
   mutate(request: GrinCallableRequest): Promise<ComposedMutationResult>;
   readReceipt(request: GrinCallableRequest): Promise<GrinReceiptReadResult>;
+  reserveEvidence(request: GrinCallableRequest): Promise<ComposedEvidenceReserveResult>;
+  beginEvidenceUpload(request: GrinCallableRequest): Promise<ComposedEvidenceUploadResult>;
+  uploadEvidence(request: GrinCallableRequest): Promise<ComposedEvidenceUploadResult>;
 };
 
 function deny<C extends "unauthenticated" | "policy_denied" | "invalid">(
@@ -116,6 +164,288 @@ export function trustedReadInput(data: unknown): unknown {
   return {
     ledgerId: source.ledgerId,
     receiptId: source.receiptId,
+  };
+}
+
+const EVIDENCE_SERVER_FIELDS = new Set([
+  "objectKey",
+  "storagePath",
+  "generation",
+  "actualSha256",
+  "actualByteSize",
+  "verifiedAtUtc",
+  "ownerUid",
+  "uid",
+  "state",
+]);
+
+/**
+ * Client uid / ownerUid / actual hash / generation are never authority.
+ * Reserve admits declared category/mime/claim only.
+ */
+export function trustedEvidenceReserveInput(data: unknown): unknown {
+  if (!isPlainObject(data)) return data;
+  const source = isPlainObject(data.envelope) ? data.envelope : data;
+  const out: Record<string, unknown> = {
+    evidenceId: source.evidenceId,
+    ledgerId: source.ledgerId,
+    receiptId: source.receiptId,
+    category: source.category,
+    mime: source.mime,
+    claimedSha256: source.claimedSha256,
+    claimedByteSize: source.claimedByteSize,
+  };
+  if (typeof source.originalFileName === "string") {
+    out.originalFileName = source.originalFileName;
+  }
+  for (const key of EVIDENCE_SERVER_FIELDS) {
+    delete out[key];
+  }
+  return out;
+}
+
+export function trustedEvidenceLifecycleInput(data: unknown): unknown {
+  if (!isPlainObject(data)) return data;
+  const source = isPlainObject(data.envelope) ? data.envelope : data;
+  return {
+    evidenceId: source.evidenceId,
+    ledgerId: source.ledgerId,
+    receiptId: source.receiptId,
+  };
+}
+
+function evidenceClosed(retryable: boolean): ComposedEvidenceUploadResult {
+  return {
+    ok: false,
+    originalDurable: false,
+    generation: null,
+    retryable,
+    evidenceId: null,
+    receiptId: null,
+    ledgerId: null,
+    category: null,
+    claimedSha256: null,
+    actualSha256: null,
+    reservationId: null,
+  };
+}
+
+function isEvidenceDenyCode(
+  code: unknown
+): code is ComposedEvidenceReserveResult extends { ok: false } ? ComposedEvidenceReserveResult["code"] : never {
+  return (
+    code === "unauthenticated" ||
+    code === "forbidden" ||
+    code === "policy_denied" ||
+    code === "not_found" ||
+    code === "invalid" ||
+    code === "integrity"
+  );
+}
+
+function parseEvidenceDeny(value: unknown): Extract<ComposedEvidenceReserveResult, { ok: false }> | null {
+  if (!isPlainObject(value) || value.ok !== false) return null;
+  if (!isEvidenceDenyCode(value.code)) return null;
+  return { ok: false, code: value.code, detail: GENERIC_DENY };
+}
+
+export function parseEvidenceReserveResult(value: unknown): ComposedEvidenceReserveResult {
+  const denied = parseEvidenceDeny(value);
+  if (denied) return denied;
+  if (!isPlainObject(value) || value.ok !== true) {
+    return { ok: false, code: "invalid", detail: GENERIC_DENY };
+  }
+  if (typeof value.replayed !== "boolean") {
+    return { ok: false, code: "invalid", detail: GENERIC_DENY };
+  }
+  if (typeof value.evidenceId !== "string" || value.evidenceId.length === 0) {
+    return { ok: false, code: "invalid", detail: GENERIC_DENY };
+  }
+  if (typeof value.objectKey !== "string" || value.objectKey.length === 0) {
+    return { ok: false, code: "invalid", detail: GENERIC_DENY };
+  }
+  if (typeof value.storagePath !== "string" || value.storagePath.length === 0) {
+    return { ok: false, code: "invalid", detail: GENERIC_DENY };
+  }
+  if (value.state !== "reserved" && value.state !== "uploading") {
+    return { ok: false, code: "invalid", detail: GENERIC_DENY };
+  }
+  return {
+    ok: true,
+    replayed: value.replayed,
+    evidenceId: value.evidenceId,
+    objectKey: value.objectKey,
+    storagePath: value.storagePath,
+    state: value.state,
+  };
+}
+
+function retryableEvidenceDeny(code: string): boolean {
+  return code === "unauthenticated" || code === "not_found";
+}
+
+function mapEvidenceAdapterDeny(value: unknown): ComposedEvidenceUploadResult {
+  const denied = parseEvidenceDeny(value);
+  if (denied) return evidenceClosed(retryableEvidenceDeny(denied.code));
+  return evidenceClosed(true);
+}
+
+function parseVerifiedResult(value: unknown, uid: string): VerifiedEvidenceResult | null {
+  if (!isPlainObject(value)) return null;
+  if (typeof value.evidenceId !== "string" || value.evidenceId.length === 0) return null;
+  if (value.ownerUid !== uid) return null;
+  if (typeof value.ledgerId !== "string" || value.ledgerId.length === 0) return null;
+  if (typeof value.receiptId !== "string" || value.receiptId.length === 0) return null;
+  if (!isWave1OriginalCategory(value.category)) return null;
+  if (typeof value.mime !== "string" || value.mime.length === 0) return null;
+  if (typeof value.byteSize !== "number" || !Number.isInteger(value.byteSize) || value.byteSize < 1) {
+    return null;
+  }
+  if (typeof value.rawSha256 !== "string" || !isSha256Hex(value.rawSha256)) return null;
+  if (typeof value.storagePath !== "string" || value.storagePath.length === 0) return null;
+  if (typeof value.generation !== "string" || value.generation.length === 0) return null;
+  if (value.generation === "verified") return null;
+  if (typeof value.verifiedAtUtc !== "string" || value.verifiedAtUtc.length === 0) return null;
+  return {
+    evidenceId: value.evidenceId,
+    ownerUid: value.ownerUid as string,
+    ledgerId: value.ledgerId,
+    receiptId: value.receiptId,
+    category: value.category,
+    mime: value.mime,
+    byteSize: value.byteSize,
+    rawSha256: value.rawSha256,
+    storagePath: value.storagePath,
+    generation: value.generation,
+    verifiedAtUtc: value.verifiedAtUtc,
+  };
+}
+
+type ParsedLifecycle = {
+  ok: true;
+  state: string;
+  actualSha256: string | null;
+  claimedSha256: string | null;
+  reservationId: string | null;
+  evidenceId: string;
+  receiptId: string;
+  ledgerId: string;
+  category: string | null;
+  verified: VerifiedEvidenceResult | null;
+};
+
+function parseLifecycle(value: unknown, uid: string): ParsedLifecycle | ComposedEvidenceUploadResult {
+  const denied = parseEvidenceDeny(value);
+  if (denied) return mapEvidenceAdapterDeny(denied);
+  if (!isPlainObject(value) || value.ok !== true) return evidenceClosed(false);
+  if (typeof value.state !== "string") return evidenceClosed(false);
+  if (typeof value.evidenceId !== "string" || value.evidenceId.length === 0) return evidenceClosed(false);
+  if (typeof value.receiptId !== "string" || value.receiptId.length === 0) return evidenceClosed(false);
+  if (typeof value.ledgerId !== "string" || value.ledgerId.length === 0) return evidenceClosed(false);
+  const actual =
+    typeof value.actualSha256 === "string" && isSha256Hex(value.actualSha256) ? value.actualSha256 : null;
+  const claimed =
+    typeof value.claimedSha256 === "string" && isSha256Hex(value.claimedSha256) ? value.claimedSha256 : null;
+  const reservationId = typeof value.reservationId === "string" && value.reservationId.length > 0
+    ? value.reservationId
+    : null;
+  const category = isWave1OriginalCategory(value.category) ? value.category : null;
+  const verified = parseVerifiedResult(value.verified, uid);
+  return {
+    ok: true,
+    state: value.state,
+    actualSha256: actual,
+    claimedSha256: claimed,
+    reservationId,
+    evidenceId: value.evidenceId,
+    receiptId: value.receiptId,
+    ledgerId: value.ledgerId,
+    category,
+    verified,
+  };
+}
+
+async function linkReceiptPointer(
+  adapter: ComposedGrinAdapter,
+  uid: string,
+  verified: VerifiedEvidenceResult
+): Promise<{ ok: true } | { ok: false; retryable: boolean }> {
+  const read = await adapter.readReceipt(
+    { uid },
+    { ledgerId: verified.ledgerId, receiptId: verified.receiptId }
+  );
+  if (!read.ok) {
+    return { ok: false, retryable: read.code === "not_found" };
+  }
+  if (read.confirmed.eventVersion < 1) return { ok: false, retryable: false };
+  const commandId = `evlink_${verified.evidenceId}`;
+  const linked = await adapter.linkVerifiedEvidence(
+    { uid },
+    {
+      commandId,
+      type: "linkVerifiedEvidence",
+      ledgerId: verified.ledgerId,
+      body: {
+        receiptId: verified.receiptId,
+        expectedVersion: read.confirmed.eventVersion,
+        reason: "link verified original",
+        clientObservedAtUtc: formatUtcIso(Date.now()),
+        verified,
+      },
+    }
+  );
+  if (!linked.ok) {
+    const retryable =
+      linked.code === "version_conflict" || linked.code === "not_found" || linked.code === "unauthenticated";
+    return { ok: false, retryable };
+  }
+  return { ok: true };
+}
+
+async function completeVerifyLink(
+  evidence: ComposedEvidenceAdapter,
+  ledger: ComposedGrinAdapter | null,
+  uid: string,
+  lifecycle: unknown
+): Promise<ComposedEvidenceUploadResult> {
+  const completed = parseLifecycle(await evidence.completeUpload({ uid }, lifecycle), uid);
+  if (!("state" in completed) || !completed.ok) {
+    return completed as ComposedEvidenceUploadResult;
+  }
+  if (completed.state === "rejected") return evidenceClosed(false);
+  const verifiedRaw = parseLifecycle(await evidence.verify({ uid }, lifecycle), uid);
+  if (!("state" in verifiedRaw) || !verifiedRaw.ok) {
+    return verifiedRaw as ComposedEvidenceUploadResult;
+  }
+  if (verifiedRaw.state === "rejected") return evidenceClosed(false);
+  // Stored-byte verification is mandatory. Client claimedSha256 cannot substitute.
+  if (!verifiedRaw.actualSha256 || !verifiedRaw.verified) return evidenceClosed(false);
+  if (verifiedRaw.verified.rawSha256 !== verifiedRaw.actualSha256) return evidenceClosed(false);
+  if (verifiedRaw.verified.ownerUid !== uid) return evidenceClosed(false);
+  const linkedRaw = parseLifecycle(await evidence.link({ uid }, verifiedRaw.verified), uid);
+  if (!("state" in linkedRaw) || !linkedRaw.ok) {
+    return linkedRaw as ComposedEvidenceUploadResult;
+  }
+  if (linkedRaw.state !== "linked") return evidenceClosed(linkedRaw.state !== "rejected");
+  if (!linkedRaw.actualSha256 || linkedRaw.actualSha256 !== verifiedRaw.actualSha256) {
+    return evidenceClosed(false);
+  }
+  if (ledger) {
+    const pointer = await linkReceiptPointer(ledger, uid, verifiedRaw.verified);
+    if (!pointer.ok) return evidenceClosed(pointer.retryable);
+  }
+  return {
+    ok: true,
+    originalDurable: true,
+    generation: verifiedRaw.verified.generation,
+    retryable: false,
+    evidenceId: verifiedRaw.evidenceId,
+    receiptId: verifiedRaw.receiptId,
+    ledgerId: verifiedRaw.ledgerId,
+    category: verifiedRaw.category,
+    claimedSha256: verifiedRaw.claimedSha256,
+    actualSha256: verifiedRaw.actualSha256,
+    reservationId: linkedRaw.reservationId,
   };
 }
 
@@ -201,10 +531,12 @@ function dispatchMutation(
 
 export function createComposedGrinCallables(deps: {
   adapter?: ComposedGrinAdapter | null;
+  evidence?: ComposedEvidenceAdapter | null;
   env?: NodeJS.ProcessEnv;
 }): ComposedGrinCallables {
   const env = deps.env ?? process.env;
   const adapter = deps.adapter ?? null;
+  const evidence = deps.evidence ?? null;
 
   function authorize(
     request: GrinCallableRequest
@@ -215,6 +547,17 @@ export function createComposedGrinCallables(deps: {
     if (!uid) return { ok: false, result: deny("unauthenticated") };
     if (!grinFunctionsEnabled(env) || adapter == null) return { ok: false, result: deny("policy_denied") };
     return { ok: true, uid, adapter };
+  }
+
+  function authorizeEvidence(
+    request: GrinCallableRequest
+  ):
+    | { ok: true; uid: string; evidence: ComposedEvidenceAdapter }
+    | { ok: false; result: ComposedEvidenceUploadResult } {
+    const uid = uidFromAuth(request.auth);
+    if (!uid) return { ok: false, result: evidenceClosed(false) };
+    if (!grinFunctionsEnabled(env) || evidence == null) return { ok: false, result: evidenceClosed(true) };
+    return { ok: true, uid, evidence };
   }
 
   return {
@@ -249,6 +592,49 @@ export function createComposedGrinCallables(deps: {
       const authz = authorize(request);
       if (!authz.ok) return authz.result;
       return authz.adapter.readReceipt({ uid: authz.uid }, trustedReadInput(request.data));
+    },
+    async reserveEvidence(request) {
+      const uid = uidFromAuth(request.auth);
+      if (!uid) return { ok: false, code: "unauthenticated", detail: GENERIC_DENY };
+      if (!grinFunctionsEnabled(env) || evidence == null) {
+        return { ok: false, code: "policy_denied", detail: GENERIC_DENY };
+      }
+      const raw = await evidence.reserve({ uid }, trustedEvidenceReserveInput(request.data));
+      return parseEvidenceReserveResult(raw);
+    },
+    async beginEvidenceUpload(request) {
+      const authz = authorizeEvidence(request);
+      if (!authz.ok) return authz.result;
+      const raw = await authz.evidence.beginUpload(
+        { uid: authz.uid },
+        trustedEvidenceLifecycleInput(request.data)
+      );
+      const parsed = parseLifecycle(raw, authz.uid);
+      if (!("state" in parsed) || !parsed.ok) return parsed as ComposedEvidenceUploadResult;
+      if (parsed.state === "rejected") return evidenceClosed(false);
+      return {
+        ok: true,
+        originalDurable: false,
+        generation: null,
+        retryable: false,
+        evidenceId: parsed.evidenceId,
+        receiptId: parsed.receiptId,
+        ledgerId: parsed.ledgerId,
+        category: parsed.category,
+        claimedSha256: parsed.claimedSha256,
+        actualSha256: null,
+        reservationId: parsed.reservationId,
+      };
+    },
+    async uploadEvidence(request) {
+      const authz = authorizeEvidence(request);
+      if (!authz.ok) return authz.result;
+      return completeVerifyLink(
+        authz.evidence,
+        adapter,
+        authz.uid,
+        trustedEvidenceLifecycleInput(request.data)
+      );
     },
   };
 }

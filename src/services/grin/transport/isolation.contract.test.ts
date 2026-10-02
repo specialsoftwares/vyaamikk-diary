@@ -54,4 +54,12 @@ assert.doesNotMatch(stripComments(transport), /as GrinRegisterResult/);
 assert.doesNotMatch(stripComments(transport), /as GrinMutationResult/);
 assert.doesNotMatch(stripComments(transport), /as GrinReconcileResult/);
 
+const evidence = stripComments(readFileSync(join(dir, "evidenceTransport.ts"), "utf8"));
+assert.match(evidence, /httpsCallable/);
+assert.match(evidence, /uploadBytesResumable/);
+assert.match(evidence, /readLocalBytes/);
+assert.doesNotMatch(evidence, /void input\.localPath/);
+assert.doesNotMatch(evidence, /firebase-admin/);
+assert.doesNotMatch(evidence, /createInjectedGrinEvidencePort/);
+
 console.log("src/services/grin/transport/isolation.contract.test.ts: ok");

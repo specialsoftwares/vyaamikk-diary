@@ -9,16 +9,20 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  GRIN_BEGIN_EVIDENCE_CALLABLE,
   GRIN_MUTATE_CALLABLE,
   GRIN_READ_CALLABLE,
   GRIN_RECONCILE_CALLABLE,
   GRIN_REGISTER_CALLABLE,
+  GRIN_RESERVE_EVIDENCE_CALLABLE,
   GRIN_UPLOAD_EVIDENCE_CALLABLE,
   grinFunctionsEnabled,
+  handleGrinBeginEvidenceUpload,
   handleGrinMutation,
   handleGrinRead,
   handleGrinReconcile,
   handleGrinRegister,
+  handleGrinReserveEvidence,
   handleGrinUploadEvidence,
 } from "../../functions/src/goodsEvidence/callables";
 import {
@@ -51,10 +55,14 @@ assert.match(transportNames, new RegExp(`"${GRIN_REGISTER_CALLABLE}"`));
 assert.match(transportNames, new RegExp(`"${GRIN_RECONCILE_CALLABLE}"`));
 assert.match(transportNames, new RegExp(`"${GRIN_MUTATE_CALLABLE}"`));
 assert.match(transportNames, new RegExp(`"${GRIN_READ_CALLABLE}"`));
+assert.match(transportNames, new RegExp(`"${GRIN_RESERVE_EVIDENCE_CALLABLE}"`));
+assert.match(transportNames, new RegExp(`"${GRIN_BEGIN_EVIDENCE_CALLABLE}"`));
 assert.match(transportNames, new RegExp(`"${GRIN_UPLOAD_EVIDENCE_CALLABLE}"`));
 
 assert.match(composedSrc, /request\.auth\.uid \/ AuthData\.uid/);
 assert.match(composedSrc, /GRIN_GOODS_EVIDENCE_FUNCTIONS/);
+assert.match(composedSrc, /uploadEvidence/);
+assert.match(composedSrc, /stored bytes/);
 assert.doesNotMatch(composedSrc, /from ["'][^"']*tools\/goods-evidence-emulator/);
 assert.doesNotMatch(composedSrc, /from ["']firebase-admin["']/);
 assert.doesNotMatch(composedSrc, /from ["']\.\.\/\.\.\/src\//);
@@ -114,6 +122,10 @@ async function main(): Promise<void> {
   assert.equal(read.code, "policy_denied");
   const upload = await handleGrinUploadEvidence("uid_1", {});
   assert.equal(upload.code, "policy_denied");
+  const reserve = await handleGrinReserveEvidence("uid_1", {});
+  assert.equal(reserve.code, "policy_denied");
+  const begin = await handleGrinBeginEvidenceUpload("uid_1", {});
+  assert.equal(begin.code, "policy_denied");
 
   const previous = process.env.GRIN_GOODS_EVIDENCE_FUNCTIONS;
   process.env.GRIN_GOODS_EVIDENCE_FUNCTIONS = "true";
