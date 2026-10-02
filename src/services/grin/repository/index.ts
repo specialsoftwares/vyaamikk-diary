@@ -9,6 +9,13 @@ export {
   grinRepositoryIsFake,
 } from "./GrinApplicationRepository";
 export {
+  GRIN_ATTACH_CATEGORIES,
+  isEvidenceCategory,
+  isGrinAttachCategory,
+} from "./attachCategories";
+export type { GrinAttachCategory } from "./attachCategories";
+export {
+  GRIN_APPLICATION_EVIDENCE_PORT_LABEL,
   GRIN_APPLICATION_SERVER_PORT_LABEL,
   advanceGrinLiveToken,
   getGrinApplicationRepository,
@@ -19,6 +26,7 @@ export {
   resetGrinApplicationRepositoryForTests,
   retireGrinOwnerSession,
   setGrinApplicationDbFactoryForTests,
+  setGrinEvidencePortFactoryForTests,
   setGrinServerPortFactoryForTests,
   startGrinOwnerSession,
 } from "./appBinding";
@@ -30,7 +38,11 @@ export {
   GRIN_SESSION_RETIRED,
   isGrinSessionFenceError,
 } from "./sessionErrors";
-export { createUninjectedGrinServerPort, GRIN_UNINJECTED_SERVER_DETAIL } from "./uninjectedServer";
+export {
+  createUninjectedGrinEvidencePort,
+  createUninjectedGrinServerPort,
+  GRIN_UNINJECTED_SERVER_DETAIL,
+} from "./uninjectedServer";
 export type {
   GrinAmendInput,
   GrinApplicationAttachment,

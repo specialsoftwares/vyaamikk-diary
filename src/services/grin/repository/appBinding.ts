@@ -20,14 +20,18 @@
  * This is not the uninjected FAKE always-deny port.
  *
  * SQLITE_HOST / mounted-inert tests MUST inject createUninjectedGrinServerPort or
- * createFakeGrinServerPort via setGrinServerPortFactoryForTests. Do not call live Firebase.
+ * createFakeGrinServerPort via setGrinServerPortFactoryForTests, and FAKE / closed
+ * evidence via setGrinEvidencePortFactoryForTests. Do not call live Firebase.
  */
 
 import { getLocalDatabase } from "@/localDb/database";
 import { GrinOutbox } from "@/services/grin/outbox/outbox";
-import type { GrinServerCommandPort } from "@/services/grin/outbox/ports";
+import type { GrinEvidenceUploadPort, GrinServerCommandPort } from "@/services/grin/outbox/ports";
 import type { GrinDispatchSession } from "@/services/grin/outbox/types";
-import { createFirebaseJsGrinTransport } from "@/services/grin/transport";
+import {
+  createFirebaseJsGrinEvidenceTransport,
+  createFirebaseJsGrinTransport,
+} from "@/services/grin/transport";
 
 import { GrinApplicationRepository } from "./GrinApplicationRepository";
 import { GRIN_APPLICATION_LEDGER_ID } from "./labels";
@@ -48,11 +52,16 @@ type LiveBinding = {
 export const GRIN_APPLICATION_SERVER_PORT_LABEL =
   "INJECTED / FIREBASE_JS_HTTPS_CALLABLE. Not live deploy.";
 
+/** INJECTED JS evidence callable. Fail-closed when unexported. Not live deploy. */
+export const GRIN_APPLICATION_EVIDENCE_PORT_LABEL =
+  "INJECTED / FIREBASE_JS_HTTPS_CALLABLE evidence. Not live deploy; fail-closed when unexported.";
+
 let liveToken: GrinDispatchSession | null = null;
 let live: LiveBinding | null = null;
 let pendingSqliteRetire: LiveBinding | null = null;
 let dbFactory: () => GrinApplicationDb = defaultDbFactory;
 let serverPortFactory: () => GrinServerCommandPort = defaultGrinServerPortFactory;
+let evidencePortFactory: () => GrinEvidenceUploadPort = defaultGrinEvidencePortFactory;
 
 function defaultDbFactory(): GrinApplicationDb {
   return getLocalDatabase() as unknown as GrinApplicationDb;
@@ -60,6 +69,10 @@ function defaultDbFactory(): GrinApplicationDb {
 
 function defaultGrinServerPortFactory(): GrinServerCommandPort {
   return createFirebaseJsGrinTransport();
+}
+
+function defaultGrinEvidencePortFactory(): GrinEvidenceUploadPort {
+  return createFirebaseJsGrinEvidenceTransport();
 }
 
 function isLiveSession(session: GrinDispatchSession): boolean {
@@ -101,6 +114,17 @@ export function setGrinServerPortFactoryForTests(
   factory: (() => GrinServerCommandPort) | null
 ): void {
   serverPortFactory = factory ?? defaultGrinServerPortFactory;
+}
+
+/**
+ * SQLITE_HOST / mounted-inert tests inject FAKE, uninjected, or a closed port.
+ * Pass null to restore the production default (createFirebaseJsGrinEvidenceTransport).
+ * Missing backend must stay originalDurable: false — never a silent success.
+ */
+export function setGrinEvidencePortFactoryForTests(
+  factory: (() => GrinEvidenceUploadPort) | null
+): void {
+  evidencePortFactory = factory ?? defaultGrinEvidencePortFactory;
 }
 
 /**
@@ -174,6 +198,7 @@ export function persistGrinOwnerSession(): GrinDispatchSession | null {
   const outbox = new GrinOutbox({
     db,
     server: serverPortFactory(),
+    evidence: evidencePortFactory(),
   });
   outbox.ensureSchema();
   const session = outbox.beginOwnerSession(uid);
@@ -269,4 +294,5 @@ export function resetGrinApplicationRepositoryForTests(): void {
   pendingSqliteRetire = null;
   dbFactory = defaultDbFactory;
   serverPortFactory = defaultGrinServerPortFactory;
+  evidencePortFactory = defaultGrinEvidencePortFactory;
 }

@@ -13,6 +13,8 @@ import { fileURLToPath } from "node:url";
 import type { GrinConfirmedProjection } from "@/goodsEvidence/ports";
 import { cloneSnapshot } from "@/goodsEvidence/snapshot";
 import { sampleRegisterBody } from "@/goodsEvidence/testFixtures";
+import { hashEventEnvelope, hashOriginalSnapshot } from "@/goodsEvidence/hashChain";
+import { mayMarkComplete } from "@/goodsEvidence/evidencePack";
 import type { GrinEvent } from "@/goodsEvidence/types";
 import { createFakeGrinServerPort } from "@/services/grin/outbox/fakePorts";
 import { openHostSqlite, SQLITE_HOST, type HostSqlite } from "@/services/grin/outbox/hostSqlite";
@@ -29,16 +31,18 @@ import {
 import { GRIN_APPLICATION_REPOSITORY_KIND } from "./labels";
 import { GRIN_BINDING_RETIRED, GRIN_NO_CONFIRMED_VERSION, GRIN_SESSION_RETIRED } from "./sessionErrors";
 import {
+  GRIN_APPLICATION_EVIDENCE_PORT_LABEL,
   GRIN_APPLICATION_SERVER_PORT_LABEL,
   advanceGrinLiveToken,
   getGrinApplicationRepository,
   resetGrinApplicationRepositoryForTests,
   retireGrinOwnerSession,
   setGrinApplicationDbFactoryForTests,
+  setGrinEvidencePortFactoryForTests,
   setGrinServerPortFactoryForTests,
   startGrinOwnerSession,
 } from "./appBinding";
-import { createUninjectedGrinServerPort } from "./uninjectedServer";
+import { createUninjectedGrinEvidencePort, createUninjectedGrinServerPort } from "./uninjectedServer";
 import type { GrinOutboxApplicationSurface } from "./outboxContract";
 import type { GrinApplicationRecord } from "./types";
 
@@ -87,18 +91,103 @@ function installConfirmedProjections(outbox: GrinOutbox, rows: GrinConfirmedProj
     byId.get(receiptId) ?? null;
 }
 
-function markLocalOriginalVerified(
+function packConfirmedFromRecord(record: GrinApplicationRecord): GrinConfirmedProjection {
+  const original = cloneSnapshot(record.original);
+  original.issuedNumber = original.issuedNumber ?? `GRIN-TEST-${record.receiptId}`;
+  original.originalSnapshotHash = hashOriginalSnapshot(original);
+  const envelope = {
+    eventId: `evt_${record.receiptId}_1`,
+    receiptId: record.receiptId,
+    streamSequence: 1,
+    type: "receipt_registered" as const,
+    actorUid: record.ownerUid,
+    serverAcceptedAtUtc: "2026-09-28T05:00:00.000Z",
+    clientObservedAtUtc: "2026-09-28T04:00:00.000Z",
+    reason: "server confirmed",
+    expectedPreviousVersion: 0,
+    typedChanges: { originalSnapshotHash: original.originalSnapshotHash },
+    previousHash: null,
+  };
+  const eventHash = hashEventEnvelope(envelope);
+  const event: GrinEvent = {
+    schemaVersion: 1,
+    ...envelope,
+    eventHash,
+    firestoreCommitTime: "2026-09-28T05:00:00.000Z",
+  };
+  return {
+    receiptId: record.receiptId,
+    eventVersion: 1,
+    headHash: eventHash,
+    original,
+    events: [event],
+    effective: cloneSnapshot({ ...record.effective, issuedNumber: original.issuedNumber }),
+  };
+}
+
+function ensureDescriptorColumns(db: HostSqlite): void {
+  const cols = db.getAllSync<{ name: string }>("PRAGMA table_info(grin_local_evidence_files)");
+  const names = new Set(cols.map((col) => col.name));
+  if (!names.has("actual_sha256")) db.execSync("ALTER TABLE grin_local_evidence_files ADD COLUMN actual_sha256 TEXT");
+  if (!names.has("mime")) db.execSync("ALTER TABLE grin_local_evidence_files ADD COLUMN mime TEXT");
+  if (!names.has("generation")) db.execSync("ALTER TABLE grin_local_evidence_files ADD COLUMN generation TEXT");
+}
+
+function markVerifiedDescriptor(
   db: HostSqlite,
   ownerUid: string,
   evidenceId: string,
   sha256: string,
-  byteSize: number
+  byteSize: number,
+  mime: string,
+  generation: string
 ): void {
+  ensureDescriptorColumns(db);
   db.runSync(
     `UPDATE grin_local_evidence_files
-        SET upload_state = ?, original_durable = 1, claimed_sha256 = ?, byte_size = ?
+        SET upload_state = ?, original_durable = 1, claimed_sha256 = ?, actual_sha256 = ?, byte_size = ?, mime = ?, generation = ?
       WHERE owner_uid = ? AND evidence_id = ? AND role = ?`,
-    ["verified", sha256, byteSize, ownerUid, evidenceId, "original"]
+    ["verified", sha256, sha256, byteSize, mime, generation, ownerUid, evidenceId, "original"]
+  );
+}
+
+function insertExtraCategoryOriginal(
+  db: HostSqlite,
+  input: {
+    ownerUid: string;
+    receiptId: string;
+    evidenceId: string;
+    category: string;
+    sha256: string;
+    byteSize: number;
+  }
+): void {
+  ensureDescriptorColumns(db);
+  const now = Date.now();
+  db.runSync(
+    `INSERT INTO grin_local_evidence_files (
+       id, owner_uid, ledger_id, receipt_id, evidence_id, role, local_path, claimed_sha256,
+       byte_size, category, upload_state, original_durable, retain_local, created_at, updated_at,
+       actual_sha256, mime, generation
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?, ?, ?)`,
+    [
+      `${input.ownerUid}\t${GRIN_APPLICATION_LEDGER_ID}\t${input.evidenceId}\toriginal`,
+      input.ownerUid,
+      GRIN_APPLICATION_LEDGER_ID,
+      input.receiptId,
+      input.evidenceId,
+      "original",
+      `/tmp/${input.evidenceId}.pdf`,
+      input.sha256,
+      input.byteSize,
+      input.category,
+      "verified",
+      now,
+      now,
+      input.sha256,
+      "application/pdf",
+      `gen-${input.evidenceId}`,
+    ]
   );
 }
 
@@ -315,42 +404,141 @@ function main() {
     assert.equal(pack.completenessLabel, "incomplete");
     assert.equal(pack.itcDisposition, "not_determined");
     assert.equal(pack.missingOriginal, true, "verifiedOriginals empty ⇒ missingOriginal");
-    // Path A: no confirmed cut and no verified original → missingOriginal.
+    assert.equal(pack.coverage, "incomplete");
+    assert.equal(pack.bundledArtifacts, "none");
+    assert.equal(pack.exportKind, "manifest_and_pdf_summary");
+    assert.equal(pack.originalsBundled, false);
+
+    // A. Required evidence absent → incomplete with specific incompleteReasons.
     const pathARecord = repoA2.createQueued(body("grcp_pack_a", "Pack A"));
     const packA = repoA2.exportPack(pathARecord.receiptId);
     assert.ok(packA);
     assert.equal(packA.completenessLabel, "incomplete");
     assert.equal(packA.itcDisposition, "not_determined");
     assert.equal(packA.missingOriginal, true);
+    assert.equal(packA.coverage, "incomplete");
     assert.equal(packA.invoiceReferenceIsNotRetainedInvoice, true);
+    assert.ok(packA.manifest.incompleteReasons.some((reason) => /commercial_document|invoice reference|no verified originals/i.test(reason)));
+    assert.equal(mayMarkComplete(packA.manifest), false);
 
+    // B. Required originals genuinely supplied → mayMarkComplete without forcing completeness.
     const pathBRecord = repoA2.createQueued(body("grcp_pack_b", "Pack B"));
-    installConfirmedProjections(outbox, [confirmedApp2, confirmedFromRecord(pathBRecord, 1)]);
-    repoA2.attachOriginal({
+    const confirmedB = packConfirmedFromRecord(pathBRecord);
+    installConfirmedProjections(outbox, [confirmedApp2, confirmedB]);
+    const invoiceHash = "cd".repeat(32);
+    const lrHash = "ef".repeat(32);
+    const unloadHash = "ab".repeat(32);
+    const booksHash = "11".repeat(32);
+    const gstHash = "22".repeat(32);
+    const attachedInvoice = repoA2.attachOriginal({
       receiptId: "grcp_pack_b",
       category: "invoice",
       localPath: "/tmp/grin-pack-b-invoice.pdf",
       evidenceId: "ev_pack_b_invoice",
-      claimedSha256: "cd".repeat(32),
+      claimedSha256: invoiceHash,
       byteSize: 2048,
+      mime: "application/pdf",
     });
+    assert.equal(attachedInvoice.originalDurable, false, "missing backend must not look like success");
     repoA2.attachOriginal({
       receiptId: "grcp_pack_b",
       category: "lr_bilty",
-      localPath: "/tmp/grin-pack-b-lr.jpg",
+      localPath: "/tmp/grin-pack-b-lr.pdf",
       evidenceId: "ev_pack_b_lr",
-      claimedSha256: "ef".repeat(32),
+      claimedSha256: lrHash,
       byteSize: 1024,
+      mime: "application/pdf",
     });
-    markLocalOriginalVerified(db!, ownerA, "ev_pack_b_invoice", "cd".repeat(32), 2048);
-    markLocalOriginalVerified(db!, ownerA, "ev_pack_b_lr", "ef".repeat(32), 1024);
+    repoA2.attachOriginal({
+      receiptId: "grcp_pack_b",
+      category: "unloading",
+      localPath: "/tmp/grin-pack-b-gate.pdf",
+      evidenceId: "ev_pack_b_gate",
+      claimedSha256: unloadHash,
+      byteSize: 512,
+      mime: "application/pdf",
+    });
+    markVerifiedDescriptor(db!, ownerA, "ev_pack_b_invoice", invoiceHash, 2048, "application/pdf", "gen-invoice-1");
+    markVerifiedDescriptor(db!, ownerA, "ev_pack_b_lr", lrHash, 1024, "application/pdf", "gen-lr-1");
+    markVerifiedDescriptor(db!, ownerA, "ev_pack_b_gate", unloadHash, 512, "application/pdf", "gen-gate-1");
+    insertExtraCategoryOriginal(db!, {
+      ownerUid: ownerA,
+      receiptId: "grcp_pack_b",
+      evidenceId: "ev_pack_b_books",
+      category: "stock_accounting",
+      sha256: booksHash,
+      byteSize: 256,
+    });
+    insertExtraCategoryOriginal(db!, {
+      ownerUid: ownerA,
+      receiptId: "grcp_pack_b",
+      evidenceId: "ev_pack_b_gst",
+      category: "gst",
+      sha256: gstHash,
+      byteSize: 128,
+    });
     const packB = repoA2.exportPack("grcp_pack_b");
     assert.ok(packB);
     assert.equal(packB.itcDisposition, "not_determined");
     assert.equal(packB.missingOriginal, false);
     assert.equal(packB.invoiceReferenceIsNotRetainedInvoice, false);
+    assert.equal(packB.coverage, "complete");
+    assert.equal(packB.manifest.integrity, "verified");
+    assert.equal(packB.bundledArtifacts, "none");
+    assert.equal(packB.originalsBundled, false);
+    assert.equal(mayMarkComplete(packB.manifest), true);
     assert.notEqual(packB.completenessLabel, "forced");
-    assert.ok(packB.completenessLabel === "complete" || packB.completenessLabel === "incomplete");
+    assert.equal(packB.completenessLabel, "complete");
+    assert.equal(packB.manifest.supportPolicyVersion, 2);
+
+    // C. Corrupt / wrong-generation artifact → incomplete.
+    const pathCRecord = repoA2.createQueued(body("grcp_pack_c", "Pack C"));
+    installConfirmedProjections(outbox, [confirmedApp2, confirmedB, packConfirmedFromRecord(pathCRecord)]);
+    repoA2.attachOriginal({
+      receiptId: "grcp_pack_c",
+      category: "invoice",
+      localPath: "/tmp/grin-pack-c-invoice.pdf",
+      evidenceId: "ev_pack_c_invoice",
+      claimedSha256: invoiceHash,
+      byteSize: 2048,
+      mime: "application/pdf",
+    });
+    markVerifiedDescriptor(db!, ownerA, "ev_pack_c_invoice", "00".repeat(32), 2048, "application/pdf", "verified");
+    const packC = repoA2.exportPack("grcp_pack_c");
+    assert.ok(packC);
+    assert.equal(packC.completenessLabel, "incomplete");
+    assert.equal(mayMarkComplete(packC.manifest), false);
+    assert.ok(packC.manifest.incompleteReasons.length > 0);
+
+    // D. Later events do not rewrite an earlier pinned export.
+    const packBPinned = packB.manifest.pinnedCuts[0];
+    assert.ok(packBPinned);
+    const laterB = packConfirmedFromRecord(pathBRecord);
+    laterB.eventVersion = 2;
+    laterB.events = [
+      laterB.events[0]!,
+      {
+        ...laterB.events[0]!,
+        eventId: "evt_pack_b_2",
+        streamSequence: 2,
+        type: "field_amended",
+        expectedPreviousVersion: 1,
+        previousHash: laterB.events[0]!.eventHash,
+        eventHash: "33".repeat(32),
+        typedChanges: { remarks: "later" },
+      },
+    ];
+    laterB.headHash = "33".repeat(32);
+    installConfirmedProjections(outbox, [confirmedApp2, laterB, packConfirmedFromRecord(pathCRecord)]);
+    assert.equal(packB.manifest.pinnedCuts[0]?.eventVersion, packBPinned.eventVersion);
+    assert.equal(packB.manifest.pinnedCuts[0]?.headHash, packBPinned.headHash);
+    const packBLater = repoA2.exportPack("grcp_pack_b");
+    assert.ok(packBLater);
+    assert.notEqual(packBLater.manifest.pinnedCuts[0]?.eventVersion, packB.manifest.pinnedCuts[0]?.eventVersion);
+
+    const repoImplNoGuess = stripComments(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "GrinApplicationRepository.ts"), "utf8"));
+    assert.doesNotMatch(repoImplNoGuess, /generation:\s*verified\s*\?/, "must not substitute generation verified");
+    assert.doesNotMatch(repoImplNoGuess, /mimeFromPath/, "must not guess MIME from path when packing");
 
     const exceptions = repoA2.exceptions("grcp_app_2");
     assert.ok(exceptions);
@@ -361,18 +549,25 @@ function main() {
     resetGrinApplicationRepositoryForTests();
     setGrinApplicationDbFactoryForTests(() => db as HostSqlite);
     let injectedPortCalls = 0;
+    let evidencePortCalls = 0;
     setGrinServerPortFactoryForTests(() => {
       injectedPortCalls += 1;
       return createUninjectedGrinServerPort();
     });
+    setGrinEvidencePortFactoryForTests(() => {
+      evidencePortCalls += 1;
+      return createUninjectedGrinEvidencePort();
+    });
     const liveA = startGrinOwnerSession(ownerA);
     assert.equal(injectedPortCalls, 1, "binding must use the injected FAKE server port");
+    assert.equal(evidencePortCalls, 1, "binding must use the injected FAKE evidence port");
     const bound = getGrinApplicationRepository(ownerA, liveA.dispatchGeneration);
     const queuedBOwnerPrep = bound.createQueued(body("grcp_bind_a", "Bound A"));
     assert.equal(queuedBOwnerPrep.issuedNumber, null);
     const staleBoundCreate = () => bound.createQueued(body("grcp_from_retired_a", "Should not queue"));
     const liveB = startGrinOwnerSession("owner_b_wave2");
     assert.equal(injectedPortCalls, 2, "owner switch must construct a new injected FAKE port");
+    assert.equal(evidencePortCalls, 2, "owner switch must construct a new injected evidence port");
     assert.notEqual(liveB.ownerUid, ownerA);
     assert.throws(staleBoundCreate);
     assert.equal(outbox.getRecord(ownerA, GRIN_APPLICATION_LEDGER_ID, "grcp_from_retired_a"), null);
@@ -384,6 +579,7 @@ function main() {
     retireGrinOwnerSession();
     const liveA2 = startGrinOwnerSession(ownerA);
     assert.equal(injectedPortCalls, 3);
+    assert.equal(evidencePortCalls, 3);
     assert.notEqual(liveA2.dispatchGeneration, liveA.dispatchGeneration);
     assert.throws(() => getGrinApplicationRepository(ownerA, liveA.dispatchGeneration));
     getGrinApplicationRepository(ownerA, liveA2.dispatchGeneration).list();
@@ -517,6 +713,10 @@ function main() {
     "production default must bind Team 1 JS httpsCallable transport"
   );
   assert.match(bindingSrc, /function defaultGrinServerPortFactory/, "default factory must be explicit");
+  assert.match(bindingSrc, /createFirebaseJsGrinEvidenceTransport/, "production default must bind Team 1 JS evidence transport");
+  assert.match(bindingSrc, /function defaultGrinEvidencePortFactory/, "default evidence factory must be explicit");
+  assert.match(bindingSrc, /evidence:\s*evidencePortFactory\(\)/, "outbox must be constructed with evidencePortFactory");
+  assert.match(GRIN_APPLICATION_EVIDENCE_PORT_LABEL, /FIREBASE_JS_HTTPS_CALLABLE evidence/);
   assert.doesNotMatch(
     bindingSrc,
     /createUninjectedGrinServerPort\s*\(/,

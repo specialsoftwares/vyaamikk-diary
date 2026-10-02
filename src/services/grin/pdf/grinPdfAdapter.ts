@@ -4,7 +4,6 @@
  */
 
 import { pdfGenerateHook } from "@/services/pdf/pdfGenerateHook";
-import { pdfService } from "@/services/pdf/pdfService";
 import type { GrinApplicationPackExport } from "@/services/grin/repository";
 import {
   buildGrinPackHtml,
@@ -29,6 +28,7 @@ export async function generateGrinReceiptPdf(input: {
   const fileNameHint = input.record.effective.issuedNumber ?? input.record.receiptId;
   const hooked = pdfGenerateHook();
   if (hooked) return hooked({ html, fileNameHint });
+  const { pdfService } = await import("@/services/pdf/pdfService");
   return pdfService.generate({ html, fileNameHint });
 }
 
@@ -50,6 +50,7 @@ export async function generateGrinPackPdf(input: {
   const fileNameHint = `${input.record.receiptId}-evidence-pack-${completeness}`;
   const hooked = pdfGenerateHook();
   if (hooked) return hooked({ html, fileNameHint });
+  const { pdfService } = await import("@/services/pdf/pdfService");
   return pdfService.generate({ html, fileNameHint });
 }
 

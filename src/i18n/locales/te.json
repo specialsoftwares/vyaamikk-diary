@@ -2612,8 +2612,16 @@
       "vehicle": "Vehicle",
       "unloading": "Unloading / gate",
       "qc": "Inspection photo",
-      "acknowledgement": "Acknowledgement"
+      "acknowledgement": "Acknowledgement",
+      "stock_accounting": "స్టాక్ / బుక్స్",
+      "payment": "చెల్లింపు",
+      "gst": "GST పత్రం",
+      "return_document": "రిటర్న్ పత్రం"
     },
+    "attachPermissionDenied": "ఫోటో లేదా ఫైల్ అనుమతి ఇవ్వలేదు.",
+    "attachUnsupportedType": "ఆ ఫైల్ రకాన్ని అసలుగా ఉంచలేం. PDF, JPEG, PNG లేదా WebP వాడండి.",
+    "attachTooLarge": "ఆ అసలు ఈ పరికరంలో ఉంచడానికి చాలా పెద్దది.",
+    "attachSourceMissing": "ఎంచుకున్న ఫైల్ ఇక లేదు. మళ్లీ ఎంచుకోండి.",
     "shareFailed": "పత్రాన్ని షేర్ చేయలేకపోయాం. మళ్లీ ప్రయత్నించండి.",
     "attributionNotSignature": "ఉద్యోగి లేదా డ్రైవర్ పేర్లు ధృవీకరించిన సంతకాలు కావు.",
     "originalUnchanged": "అసలు జారీ సరుకు రసీదు స్థానంలో సవరించబడదు.",
@@ -2800,6 +2808,12 @@
       "invoiceRefNotRetained": "GRINపై ఇన్‌వాయిస్ నంబర్ రిఫరెన్స్ మాత్రమే; ఉంచిన ఇన్‌వాయిస్ కాదు.",
       "challanNotInvoice": "చలాన్ ఇన్‌వాయిస్ కాదు.",
       "missingOriginal": "అసలు లేదు — ఈ ప్యాక్ అసంపూర్ణం.",
+      "coverage": "కవరేజ్",
+      "coverageComplete": "కవరేజ్ పూర్తి",
+      "coverageIncomplete": "కవరేజ్ అసంపూర్ణం",
+      "bundledArtifacts": "బండిల్ అయిన ఫైళ్లు",
+      "manifestPdfSummary": "మానిఫెస్ట్ మరియు PDF సారాంశం",
+      "originalsNotBundled": "ఈ ఎగుమతి మానిఫెస్ట్ మరియు PDF సారాంశం. అసలు బైట్లు బండిల్ కాలేదు.",
       "export": "సాక్ష్య ప్యాక్ PDF ఎగుమతి"
     },
     "attachment": {

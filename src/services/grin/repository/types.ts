@@ -5,7 +5,8 @@ import type {
 } from "@/goodsEvidence/command";
 import type { EvidencePackManifest } from "@/goodsEvidence/evidencePack";
 import type { ExceptionEvaluation } from "@/goodsEvidence/exceptions";
-import type { Wave1OriginalCategory } from "@/goodsEvidence/evidence";
+import type { EvidenceCategory } from "@/goodsEvidence/evidence";
+import type { GrinAttachCategory } from "./attachCategories";
 import type { GrinCommandType, OutboxLocalState } from "@/goodsEvidence/ports";
 import type { Quantity } from "@/goodsEvidence/quantities";
 import type {
@@ -97,13 +98,16 @@ export type GrinLocalHistoryItem = {
 
 export type GrinAttachOriginalInput = {
   receiptId: string;
-  category: Wave1OriginalCategory;
+  category: GrinAttachCategory | EvidenceCategory;
   localPath: string;
   claimedSha256?: string | null;
   byteSize?: number | null;
   evidenceId?: string;
   mime?: string;
   fileName?: string;
+  captureProvenance?: string;
+  osConversionOccurred?: boolean | "unknown";
+  generation?: string | null;
 };
 
 export type GrinApplicationAttachment = {
@@ -119,6 +123,8 @@ export type GrinApplicationAttachment = {
   isDerivative: boolean;
 };
 
+export type GrinPackExportKind = "manifest_and_pdf_summary";
+
 export type GrinApplicationPackExport = {
   manifest: EvidencePackManifest;
   completenessLabel: "complete" | "incomplete";
@@ -126,6 +132,15 @@ export type GrinApplicationPackExport = {
   invoiceReferenceIsNotRetainedInvoice: boolean;
   challanIsNotInvoice: boolean;
   missingOriginal: boolean;
+  /** Inventory evaluation at the pinned cut. Distinct from bundled artifacts. */
+  coverage: EvidencePackManifest["coverage"];
+  /**
+   * Whether original bytes are in the export payload.
+   * Current export is a manifest + PDF summary only — originals are not bundled.
+   */
+  bundledArtifacts: "none";
+  exportKind: GrinPackExportKind;
+  originalsBundled: false;
 };
 
 export type GrinApplicationExceptionView = {
