@@ -10,6 +10,13 @@ import { FAKE_MemoryBlobStore } from "./FAKE_memoryBlobStore";
 import { evidenceObjectPath, receiptPath } from "./paths";
 import { evidenceLabel, putAndVerify, sampleBytes, sha256Bytes, testClock } from "./testSupport";
 import type { G2BlobStore } from "./types";
+import {
+  durableUploadIdentityError,
+  hashBoundedChunks,
+  HASH_CHUNK_BYTES,
+  type ChunkHasher,
+} from "../../src/goodsEvidence/evidence";
+import { createHash } from "node:crypto";
 
 const OWNER = "owner_g2";
 const OTHER = "mallory_g2";
@@ -769,6 +776,13 @@ async function main(): Promise<void> {
     assert.equal(uploaded.originalDurable, false);
     assert.equal(uploaded.retryable, false);
     assert.equal(uploaded.reservationId, null);
+    assert.equal(uploaded.claimedSha256, wrongClaim);
+    assert.equal(uploaded.actualSha256, sha256Bytes(bytes));
+    assert.notEqual(uploaded.actualSha256, uploaded.claimedSha256);
+    assert.equal(uploaded.ownerUid, null);
+    assert.equal(uploaded.mime, null);
+    assert.equal(uploaded.sizeBytes, null);
+    assert.equal(uploaded.storagePath, null);
     const matching = await port.upload(
       originalUpload("ev_port2", RECEIPT, "/tmp/grin-orig.pdf", sha256Bytes(bytes), "invoice")
     );
@@ -776,12 +790,18 @@ async function main(): Promise<void> {
     assert.equal(matching.originalDurable, true);
     assert.equal(typeof matching.generation, "string");
     assert.ok(matching.generation);
+    assert.notEqual(matching.generation, "verified");
     assert.equal(matching.evidenceId, "ev_port2");
     assert.equal(matching.receiptId, RECEIPT);
     assert.equal(matching.ledgerId, LEDGER);
     assert.equal(matching.category, "invoice");
     assert.equal(matching.claimedSha256, sha256Bytes(bytes));
     assert.equal(matching.actualSha256, sha256Bytes(bytes));
+    assert.equal(matching.ownerUid, OWNER);
+    assert.equal(matching.mime, "application/pdf");
+    assert.equal(matching.sizeBytes, bytes.byteLength);
+    assert.ok(matching.storagePath);
+    assert.match(matching.storagePath, new RegExp(`^users/${OWNER}/grinEvidence/`));
     assert.ok(matching.reservationId);
     const replayed = await port.upload(
       originalUpload("ev_port2", RECEIPT, "/tmp/grin-orig.pdf", sha256Bytes(bytes), "invoice")
@@ -791,6 +811,67 @@ async function main(): Promise<void> {
     assert.equal(replayed.generation, matching.generation);
     assert.equal(replayed.reservationId, matching.reservationId);
     assert.equal(replayed.category, "invoice");
+    assert.equal(replayed.ownerUid, OWNER);
+    assert.equal(replayed.sizeBytes, bytes.byteLength);
+  }
+
+  evidenceLabel("INJECTED_PORT", "E2 echoed claim matching local bytes still requires stored actualSha256");
+  {
+    const independent = sha256Bytes(pdfBytes(7));
+    const echoed = {
+      ok: true,
+      originalDurable: true,
+      ownerUid: OWNER,
+      ledgerId: LEDGER,
+      receiptId: RECEIPT,
+      evidenceId: "ev_echo",
+      category: "invoice",
+      mime: "application/pdf",
+      sizeBytes: 16,
+      storagePath: `users/${OWNER}/grinEvidence/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/original`,
+      generation: "1",
+      claimedSha256: independent,
+      actualSha256: independent,
+      reservationId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    };
+    const retained = {
+      ownerUid: OWNER,
+      ledgerId: LEDGER,
+      receiptId: RECEIPT,
+      evidenceId: "ev_echo",
+      category: "invoice" as const,
+      mime: "application/pdf" as const,
+      sizeBytes: 16,
+      storagePath: echoed.storagePath,
+      generation: "1",
+      retainedSha256: independent,
+    };
+    assert.equal(durableUploadIdentityError(retained, echoed), null);
+    assert.ok(
+      durableUploadIdentityError(retained, {
+        ...echoed,
+        claimedSha256: independent,
+        actualSha256: sha256Bytes(pdfBytes(8)),
+      })
+    );
+    assert.ok(durableUploadIdentityError(retained, { ...echoed, actualSha256: null }));
+    assert.ok(durableUploadIdentityError(retained, { ...echoed, receiptId: "other" }));
+    assert.ok(durableUploadIdentityError(retained, { ...echoed, ownerUid: OTHER }));
+    assert.ok(durableUploadIdentityError(retained, { ...echoed, generation: "verified" }));
+    const hasher: ChunkHasher = (() => {
+      const hash = createHash("sha256");
+      return {
+        update(chunk: Uint8Array) {
+          hash.update(chunk);
+        },
+        digestHex() {
+          return hash.digest("hex");
+        },
+      };
+    })();
+    const measured = await hashBoundedChunks([pdfBytes(7)], hasher, HASH_CHUNK_BYTES);
+    assert.equal(measured.sha256, independent);
+    assert.equal(measured.byteSize, 16);
   }
 
   evidenceLabel("INJECTED_PORT", "W2-03 verified R1 must not make a different R2 file durable");
@@ -901,6 +982,40 @@ async function main(): Promise<void> {
       assert.equal(replayed.reservationId, uploaded.reservationId);
       assert.equal(replayed.generation, uploaded.generation);
       assert.equal(replayed.category, item.category);
+    }
+  }
+
+  evidenceLabel("INJECTED_PORT", "E5 stock_accounting payment gst return_document upload without invoice coercion");
+  {
+    const { adapter, blobs } = adapterPair();
+    const stock = pdfBytes(11);
+    const payment = pdfBytes(12);
+    const gst = pdfBytes(13);
+    const ret = pdfBytes(14);
+    const files = new Map<string, Uint8Array>([
+      ["/tmp/grin-stock.pdf", stock],
+      ["/tmp/grin-pay.pdf", payment],
+      ["/tmp/grin-gst.pdf", gst],
+      ["/tmp/grin-return.pdf", ret],
+    ]);
+    const port = makePort(adapter, blobs, files);
+    const cases = [
+      { id: "ev_cat_stock", path: "/tmp/grin-stock.pdf", bytes: stock, category: "stock_accounting" },
+      { id: "ev_cat_pay", path: "/tmp/grin-pay.pdf", bytes: payment, category: "payment" },
+      { id: "ev_cat_gst", path: "/tmp/grin-gst.pdf", bytes: gst, category: "gst" },
+      { id: "ev_cat_return", path: "/tmp/grin-return.pdf", bytes: ret, category: "return_document" },
+    ];
+    for (const item of cases) {
+      const uploaded = await port.upload(
+        originalUpload(item.id, RECEIPT, item.path, sha256Bytes(item.bytes), item.category)
+      );
+      assert.equal(uploaded.ok, true, item.id);
+      assert.equal(uploaded.originalDurable, true, item.id);
+      assert.equal(uploaded.category, item.category);
+      assert.notEqual(uploaded.category, "invoice");
+      assert.equal(uploaded.actualSha256, sha256Bytes(item.bytes));
+      assert.equal(uploaded.ownerUid, OWNER);
+      assert.notEqual(uploaded.generation, "verified");
     }
   }
 

@@ -29,7 +29,31 @@ export {
   recordPortalCancellation,
 } from "./ewb";
 export { grinWithoutInvoice, gstr2bPurchaseWithoutGrin, isItcDetermined } from "./exceptions";
-export { evidenceCompleteness, verifyOriginalBytes, isRetainedOriginalState, originalEvidenceFromVerifiedResult } from "./evidence";
+export {
+  evidenceCompleteness,
+  verifyOriginalBytes,
+  isRetainedOriginalState,
+  originalEvidenceFromVerifiedResult,
+  hashBoundedChunks,
+  splitIntoHashChunks,
+  HASH_CHUNK_BYTES,
+  isSha256Hex,
+  isWave1OriginalCategory,
+  isUploadOriginalCategory,
+  isEvidenceCategory,
+  isOriginalCaptureProvenance,
+  durableUploadIdentityError,
+  WAVE1_ORIGINAL_CATEGORIES,
+  UPLOAD_ORIGINAL_CATEGORIES,
+  ORIGINAL_CAPTURE_PROVENANCES,
+  type Wave1OriginalCategory,
+  type UploadOriginalCategory,
+  type EvidenceCategory,
+  type OriginalCaptureProvenance,
+  type ChunkHasher,
+  type DurableUploadIdentityExpected,
+  type DurableUploadIdentityActual,
+} from "./evidence";
 export {
   assembleManifest,
   cutMatchesEventStream,

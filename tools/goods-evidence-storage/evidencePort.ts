@@ -12,6 +12,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 
 import {
+  durableUploadIdentityError,
   evidenceReplayIdentityError,
   isAllowedOriginalMime,
   isRetainedOriginalState,
@@ -76,8 +77,11 @@ export type GrinEvidencePortUploadInput = GrinEvidenceUploadInput & {
 };
 
 /**
- * Local extension until Team 3 adds the same fields to GrinEvidenceUploadResult.
- * reservationId is null when the original is not durable (not verified+linked for this identity).
+ * Local extension until Team 3 adds ownerUid/mime/sizeBytes/storagePath.
+ * `actualSha256` is the hash of stored bytes (never a copy of claimedSha256).
+ * reservationId and the extra identity fields are null when the original is not durable.
+ * W2-03 still echoes evidenceId/receiptId/ledgerId/category/claimedSha256 from the request
+ * so a failed replay can be matched without coercing durability.
  */
 export type GrinEvidencePortResult = GrinEvidenceUploadResult & {
   evidenceId: string;
@@ -87,6 +91,10 @@ export type GrinEvidencePortResult = GrinEvidenceUploadResult & {
   claimedSha256: string | null;
   actualSha256: string | null;
   reservationId: string | null;
+  ownerUid: string | null;
+  mime: string | null;
+  sizeBytes: number | null;
+  storagePath: string | null;
 };
 
 /**
@@ -162,6 +170,23 @@ function sniffOriginalMime(bytes: Uint8Array, localPath: string): AllowedOrigina
   return null;
 }
 
+function storedActualSha256(result: Extract<G2LifecycleResult, { ok: true }>): string | null {
+  if (typeof result.actualSha256 === "string" && isSha256Hex(result.actualSha256)) {
+    return result.actualSha256;
+  }
+  const verifiedHash = result.verified?.rawSha256;
+  if (typeof verifiedHash === "string" && isSha256Hex(verifiedHash)) {
+    return verifiedHash;
+  }
+  return null;
+}
+
+function storedGeneration(result: Extract<G2LifecycleResult, { ok: true }>): string | null {
+  const generation = result.verified?.generation ?? result.generation;
+  if (typeof generation !== "string" || !generation || generation === "verified") return null;
+  return generation;
+}
+
 function identityResult(
   input: GrinEvidencePortUploadInput,
   extras: {
@@ -173,6 +198,10 @@ function identityResult(
     claimedSha256: string | null;
     actualSha256: string | null;
     reservationId: string | null;
+    ownerUid: string | null;
+    mime: string | null;
+    sizeBytes: number | null;
+    storagePath: string | null;
   }
 ): GrinEvidencePortResult {
   return {
@@ -187,6 +216,10 @@ function identityResult(
     claimedSha256: extras.claimedSha256,
     actualSha256: extras.actualSha256,
     reservationId: extras.reservationId,
+    ownerUid: extras.ownerUid,
+    mime: extras.mime,
+    sizeBytes: extras.sizeBytes,
+    storagePath: extras.storagePath,
   };
 }
 
@@ -207,6 +240,10 @@ function fail(
     claimedSha256,
     actualSha256,
     reservationId: null,
+    ownerUid: null,
+    mime: null,
+    sizeBytes: null,
+    storagePath: null,
   });
 }
 
@@ -228,22 +265,69 @@ function mapLifecycle(
   input: GrinEvidencePortUploadInput,
   result: G2LifecycleResult,
   category: Wave1OriginalCategory,
-  claimedSha256: string
+  claimedSha256: string,
+  retainedSha256: string
 ): GrinEvidencePortResult {
   if (!result.ok) return mapDeny(input, result, null, category, claimedSha256);
-  const generation = result.verified?.generation ?? null;
-  const actualSha256 = result.actualSha256 ?? result.verified?.rawSha256 ?? null;
+  const generation = storedGeneration(result);
+  const actualSha256 = storedActualSha256(result);
+  const mime = result.verified?.mime ?? result.mime;
+  const sizeBytes = result.verified?.byteSize ?? result.actualByteSize;
+  const storagePath = result.verified?.storagePath ?? result.storagePath;
   const linked = result.state === "linked";
-  const durable = linked && Boolean(generation && result.reservationId);
+  let durable =
+    linked &&
+    actualSha256 != null &&
+    generation != null &&
+    Boolean(result.reservationId) &&
+    isAllowedOriginalMime(mime) &&
+    typeof sizeBytes === "number";
+  if (durable && isAllowedOriginalMime(mime) && typeof sizeBytes === "number" && generation && actualSha256) {
+    const identityErr = durableUploadIdentityError(
+      {
+        ownerUid: result.ownerUid,
+        ledgerId: result.ledgerId,
+        receiptId: result.receiptId,
+        evidenceId: result.evidenceId,
+        category,
+        mime,
+        sizeBytes,
+        storagePath,
+        generation,
+        retainedSha256,
+      },
+      {
+        ok: true,
+        originalDurable: true,
+        ownerUid: result.ownerUid,
+        ledgerId: result.ledgerId,
+        receiptId: result.receiptId,
+        evidenceId: result.evidenceId,
+        category,
+        mime,
+        sizeBytes,
+        storagePath,
+        generation,
+        claimedSha256,
+        actualSha256,
+        reservationId: result.reservationId,
+      }
+    );
+    if (identityErr) durable = false;
+  }
   return identityResult(input, {
     ok: durable,
     originalDurable: durable,
-    generation: durable ? generation : generation,
+    generation,
     retryable: durable ? false : result.state === "rejected" ? false : true,
     category,
     claimedSha256,
     actualSha256,
     reservationId: durable ? result.reservationId : null,
+    ownerUid: durable ? result.ownerUid : null,
+    mime: durable && isAllowedOriginalMime(mime) ? mime : null,
+    sizeBytes: durable && typeof sizeBytes === "number" ? sizeBytes : null,
+    storagePath: durable ? storagePath : null,
   });
 }
 
@@ -331,6 +415,10 @@ async function uploadDerivative(
       claimedSha256: isSha256Hex((input.claimedSha256 ?? "").toLowerCase()) ? input.claimedSha256!.toLowerCase() : null,
       actualSha256: null,
       reservationId: null,
+      ownerUid: null,
+      mime: null,
+      sizeBytes: null,
+      storagePath: null,
     });
   } catch (err) {
     return fail(input, isRetryable(err) || true);
@@ -383,7 +471,7 @@ function replayIdentityError(
   claimedByteSize: number,
   localHash: string
 ): string | null {
-  if (!isWave1OriginalCategory(existing.category)) return "stored category is not a Wave 1 original category";
+  if (!isWave1OriginalCategory(existing.category)) return "stored category is not an upload original category";
   const stored: EvidenceReplayIdentity = {
     ownerUid: existing.ownerUid,
     ledgerId: existing.ledgerId,
@@ -406,13 +494,16 @@ function replayIdentityError(
   if (identityErr) return identityErr;
   const reservationErr = reservationIdentityError(existing.reservationId, existing.reservationId);
   if (reservationErr) return reservationErr;
-  if (existing.actualSha256 && existing.actualSha256 !== localHash) {
-    return "local bytes do not match stored original";
+  if (existing.state === "verified" || existing.state === "linked") {
+    if (!existing.actualSha256 || !isSha256Hex(existing.actualSha256)) {
+      return "stored original is missing actual SHA-256";
+    }
+    if (existing.actualSha256 !== localHash) {
+      return "local bytes do not match stored original";
+    }
+    return null;
   }
-  if (
-    (existing.state === "verified" || existing.state === "linked") &&
-    localHash !== existing.claimedSha256
-  ) {
+  if (existing.actualSha256 && existing.actualSha256 !== localHash) {
     return "local bytes do not match stored original";
   }
   return null;
@@ -454,10 +545,22 @@ async function driveMatching(
 ): Promise<GrinEvidencePortResult> {
   if (existing.state === "orphan_pending_review") {
     const recovered = await deps.adapter.recoverOrphan(caller, lifecycle);
-    return mapLifecycle(input, await finishVerifyAndLink(deps.adapter, caller, lifecycle, recovered), category, claimedSha256);
+    return mapLifecycle(
+      input,
+      await finishVerifyAndLink(deps.adapter, caller, lifecycle, recovered),
+      category,
+      claimedSha256,
+      localSha256(bytes)
+    );
   }
   if (existing.state === "uploaded_unverified" || existing.state === "verified" || existing.state === "linked") {
-    return mapLifecycle(input, await finishVerifyAndLink(deps.adapter, caller, lifecycle, existing), category, claimedSha256);
+    return mapLifecycle(
+      input,
+      await finishVerifyAndLink(deps.adapter, caller, lifecycle, existing),
+      category,
+      claimedSha256,
+      localSha256(bytes)
+    );
   }
   const reserved = await deps.adapter.reserve(caller, {
     evidenceId: input.evidenceId,
@@ -490,14 +593,33 @@ async function putCompleteVerifyLink(
   if (!completed.ok) {
     if (completed.code === "not_found") {
       const recovered = await deps.adapter.recoverOrphan(caller, lifecycle);
-      return mapLifecycle(input, await finishVerifyAndLink(deps.adapter, caller, lifecycle, recovered), category, claimedSha256);
+      return mapLifecycle(
+        input,
+        await finishVerifyAndLink(deps.adapter, caller, lifecycle, recovered),
+        category,
+        claimedSha256,
+        localSha256(bytes)
+      );
     }
     return mapDeny(input, completed, null, category, claimedSha256);
   }
   if (completed.state === "rejected") {
-    return fail(input, false, completed.verified?.generation ?? null, category, claimedSha256, completed.actualSha256);
+    return fail(
+      input,
+      false,
+      completed.generation ?? completed.verified?.generation ?? null,
+      category,
+      claimedSha256,
+      completed.actualSha256
+    );
   }
-  return mapLifecycle(input, await finishVerifyAndLink(deps.adapter, caller, lifecycle, completed), category, claimedSha256);
+  return mapLifecycle(
+    input,
+    await finishVerifyAndLink(deps.adapter, caller, lifecycle, completed),
+    category,
+    claimedSha256,
+    localSha256(bytes)
+  );
 }
 
 async function finishVerifyAndLink(
@@ -587,7 +709,7 @@ async function mapLinkVerified(
   try {
     const linked = await adapter.link({ uid }, verified);
     if (!linked.ok) return mapDeny(input, linked, verified.generation, category, verified.rawSha256);
-    return mapLifecycle(input, linked, category, verified.rawSha256);
+    return mapLifecycle(input, linked, category, verified.rawSha256, verified.rawSha256);
   } catch (err) {
     return fail(input, isRetryable(err) || true, verified.generation, category, verified.rawSha256);
   }

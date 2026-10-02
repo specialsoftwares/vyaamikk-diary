@@ -312,10 +312,14 @@ function lifecycleOk(
     ledgerId: record.ledgerId,
     receiptId: record.receiptId,
     category: record.category,
+    mime: record.mime,
     claimedSha256: record.claimedSha256,
     actualSha256: record.actualSha256,
     reservationId: record.objectKey,
     claimedByteSize: record.claimedByteSize,
+    actualByteSize: record.actualByteSize,
+    storagePath: record.storagePath,
+    generation: record.generation,
     lifecycleVersion: record.lifecycleVersion,
   };
 }

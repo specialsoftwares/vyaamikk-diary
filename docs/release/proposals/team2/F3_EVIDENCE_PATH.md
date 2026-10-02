@@ -4,7 +4,10 @@ Not a live callable. GRIN stays default-off. Live `storage.rules` / `firestore.r
 
 ## What Team 2 added
 
-- Upload still hashes stored bytes at generation, verifies, and links. Structured identity is on `GrinEvidencePortResult` (`evidenceId`, `receiptId`, `ledgerId`, `category`, `claimedSha256`, `actualSha256`, `reservationId`). Missing/invalid category fails (never invoice).
+- Upload hashes **stored** bytes at generation, verifies, and links. Durable `GrinEvidencePortResult` includes `ownerUid`, `mime`, `sizeBytes`, `storagePath`, `generation` (never the literal `"verified"`), `actualSha256` of stored bytes, `reservationId`. Echoed `claimedSha256` is never copied into `actualSha256`. Use `durableUploadIdentityError` (Team 3 `originalIdentityMatches` should not treat claim as actual).
+- `UPLOAD_ORIGINAL_CATEGORIES` / `WAVE1_ORIGINAL_CATEGORIES` include `stock_accounting`, `payment`, `gst`, `return_document`. Missing/invalid still fails (never invoice). Policy v2 is unchanged.
+- Extra methods on `createInjectedGrinEvidencePort`: `retrieveRetainedOriginal`, `listRetainedOriginals`, `linkVerified`. These hash stored bytes; they do not return a pre-injected success.
+- Pack inputs distinguish **coverage** (`packPayloadKind: "manifest_and_hashes"`) from **bundled artifacts** (`originalBytesBundled: false`).
 - `GoodsEvidenceStorageAdapter.retrieveOriginal` / `listReceiptEvidenceIds` read retained originals (`uploaded_unverified` / `verified` / `linked`) when `newCommands=deny`. Verify/link/reserve still require `newCommands=allow`. Overwrite/delete stay denied.
 - Extra methods on `createInjectedGrinEvidencePort` (base `GrinEvidenceUploadPort.upload` unchanged): `retrieveRetainedOriginal`, `listRetainedOriginals`, `linkVerified`.
 - `src/goodsEvidence/evidencePackInputs.ts` produces `verifiedOriginals` / `evidenceLinks` / `artifactHashes` for Team 4 `assembleManifest`. Completeness is not forced.
