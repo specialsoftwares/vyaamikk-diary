@@ -33,6 +33,9 @@ function main(): void {
   assert.match(bindingSrc, /from ["']@\/services\/grin\/transport["']/);
   assert.match(bindingSrc, /function defaultGrinServerPortFactory/);
   assert.match(bindingSrc, /server:\s*serverPortFactory\(\)/);
+  assert.match(bindingSrc, /evidence:\s*evidencePortFactory\(\)/);
+  assert.match(bindingSrc, /createFirebaseJsGrinEvidenceTransport/);
+  assert.match(bindingSrc, /function defaultGrinEvidencePortFactory/);
   assert.doesNotMatch(bindingSrc, /createUninjectedGrinServerPort\s*\(/);
   assert.doesNotMatch(bindingSrc, /from ["'][^"']*uninjectedServer["']/);
   assert.doesNotMatch(bindingSrc, /firebase-admin/);

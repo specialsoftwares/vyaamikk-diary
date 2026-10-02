@@ -35,6 +35,10 @@ export type GrinPdfLabels = {
   materialQty: string;
   weight: string;
   packages: string;
+  coverage: string;
+  bundledArtifacts: string;
+  manifestPdfSummary: string;
+  originalsNotBundled: string;
 };
 
 export function grinPdfLabelsFromT(
@@ -65,6 +69,10 @@ export function grinPdfLabelsFromT(
     materialQty: t("grin.field.receivedQty"),
     weight: t("grin.field.netWeight"),
     packages: t("grin.field.packageCount"),
+    coverage: t("grin.pack.coverage"),
+    bundledArtifacts: t("grin.pack.bundledArtifacts"),
+    manifestPdfSummary: t("grin.pack.manifestPdfSummary"),
+    originalsNotBundled: t("grin.pack.originalsNotBundled"),
   };
 }
 
@@ -148,19 +156,32 @@ export function buildGrinReceiptHtml(input: {
 
 export function buildGrinPackHtml(input: {
   record: GrinPdfReceiptSource;
-  pack: GrinApplicationPackExport;
+  pack: {
+    completenessLabel: "complete" | "incomplete";
+    itcDisposition: "not_determined";
+    invoiceReferenceIsNotRetainedInvoice: boolean;
+    challanIsNotInvoice: boolean;
+    missingOriginal: boolean;
+    manifest: GrinApplicationPackExport["manifest"];
+    coverage?: "complete" | "incomplete";
+  };
   labels: GrinPdfLabels;
   locale?: "en-IN" | "hi-IN";
 }): string {
   const { pack, labels, record } = input;
   const completeness = pack.completenessLabel === "complete" ? labels.complete : labels.incomplete;
+  const coverage = pack.coverage === "complete" ? labels.complete : labels.incomplete;
   const reasons = pack.manifest.incompleteReasons.map((reason) => `<li>${escapeHtml(reason)}</li>`).join("");
   const body = `
     <h1>${escapeHtml(labels.title)}</h1>
     <p class="legal-strip">${escapeHtml(GRIN_DOCUMENT_FOOTER)}</p>
+    <p>${escapeHtml(labels.manifestPdfSummary)}</p>
+    <p>${escapeHtml(labels.originalsNotBundled)}</p>
     <table class="meta">
       ${row(labels.number, record.effective.issuedNumber ?? labels.pendingNumber)}
       ${row(labels.completeness, completeness)}
+      ${row(labels.coverage, coverage)}
+      ${row(labels.bundledArtifacts, labels.manifestPdfSummary)}
       ${row(labels.itcNotDetermined, pack.itcDisposition)}
     </table>
     ${pack.invoiceReferenceIsNotRetainedInvoice ? `<p>${escapeHtml("Invoice reference is not a retained invoice.")}</p>` : ""}

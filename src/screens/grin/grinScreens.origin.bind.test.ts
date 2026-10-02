@@ -36,16 +36,22 @@ import {
   resetGrinApplicationRepositoryForTests,
   retireGrinOwnerSession,
   setGrinApplicationDbFactoryForTests,
+  setGrinEvidencePortFactoryForTests,
   setGrinServerPortFactoryForTests,
   startGrinOwnerSession,
 } from "@/services/grin/repository";
-import { createUninjectedGrinServerPort } from "@/services/grin/repository/uninjectedServer";
+import { createUninjectedGrinEvidencePort, createUninjectedGrinServerPort } from "@/services/grin/repository/uninjectedServer";
+import { setPdfGenerateHookForTests } from "@/services/pdf/pdfGenerateHook";
 import { lightColors } from "@/theme/palettes";
 
 import { GrinAmendAdmittedBody } from "./GrinAmendAdmittedBody";
+import { GrinAttachmentsAdmittedBody } from "./GrinAttachmentsAdmittedBody";
 import { GrinCreateAdmittedBody } from "./GrinCreateAdmittedBody";
+import { GrinEwbAdmittedBody } from "./GrinEwbAdmittedBody";
+import { GrinPackAdmittedBody, setGrinPackShareForTests } from "./GrinPackAdmittedBody";
 import { GrinQcAdmittedBody } from "./GrinQcAdmittedBody";
 import { GrinReturnAdmittedBody } from "./GrinReturnAdmittedBody";
+import { resetGrinOriginalPickerForTests, setGrinOriginalPickerForTests } from "./grinOriginalPicker";
 import { installGrinScreenRuntime } from "./grinScreenHooks";
 import { installGrinSurfaces, type GrinSurfaces } from "./grinSurfaces";
 
@@ -88,6 +94,13 @@ function installInertSurfaces(fields: FieldMap, presses: PressMap, banners: stri
     }
     return React.createElement("button", { "data-chip": key }, key);
   };
+  const SelectField = (props: Record<string, unknown>) => {
+    const key = String(props.accessibilityLabel ?? props.label ?? "");
+    if (typeof props.onChange === "function") {
+      fields.set(`select:${key}`, props.onChange as (value: string) => void);
+    }
+    return React.createElement("select", { "data-select": key });
+  };
   const surfaces: GrinSurfaces = {
     Screen: passthrough("section"),
     Header: passthrough("header"),
@@ -95,7 +108,7 @@ function installInertSurfaces(fields: FieldMap, presses: PressMap, banners: stri
     Button,
     FormSection: passthrough("fieldset"),
     TextField,
-    SelectField: passthrough("select"),
+    SelectField,
     Card: passthrough("article"),
     EmptyState: passthrough("div"),
     View: passthrough("div"),
@@ -156,6 +169,8 @@ async function main(): Promise<void> {
 
     setGrinApplicationDbFactoryForTests(() => db as HostSqlite);
     setGrinServerPortFactoryForTests(() => createUninjectedGrinServerPort());
+    setGrinEvidencePortFactoryForTests(() => createUninjectedGrinEvidencePort());
+    setGrinPackShareForTests(async () => undefined);
 
     const sessionA = startGrinOwnerSession("owner_a");
     const repoA = getGrinApplicationRepository("owner_a", sessionA.dispatchGeneration);
@@ -313,12 +328,112 @@ async function main(): Promise<void> {
     assert.equal(repoBCreate.list().length, listedBefore);
     assert.ok(banners.includes("grin.errSessionRetired"));
     assert.equal(GRIN_APPLICATION_LEDGER_ID.length > 0, true);
+
+    const sessionAEwb = startGrinOwnerSession("owner_a");
+    getGrinApplicationRepository("owner_a", sessionAEwb.dispatchGeneration).createQueued(
+      body("grcp_origin_a", "Origin A supplier")
+    );
+    await mount(React.createElement(GrinEwbAdmittedBody, { session: sessionAEwb }));
+    const ewbSave = presses.get("grin.ewbRecordPortal");
+    assert.ok(ewbSave, "EWB admitted body must bind record portal");
+    const sessionBEwb = startGrinOwnerSession("owner_b");
+    const repoBEwb = getGrinApplicationRepository("owner_b", sessionBEwb.dispatchGeneration);
+    let bEwb = 0;
+    const originalEwb = repoBEwb.recordEwbObservation.bind(repoBEwb);
+    repoBEwb.recordEwbObservation = ((input) => {
+      bEwb += 1;
+      return originalEwb(input);
+    }) as typeof repoBEwb.recordEwbObservation;
+    banners.length = 0;
+    await act(async () => {
+      ewbSave();
+    });
+    assert.equal(bEwb, 0, "captured A EWB onRecord must not call B.recordEwbObservation");
+    assert.ok(banners.includes("grin.errSessionRetired"));
+
+    const sessionAAttach = startGrinOwnerSession("owner_a");
+    getGrinApplicationRepository("owner_a", sessionAAttach.dispatchGeneration).createQueued(
+      body("grcp_origin_a", "Origin A supplier")
+    );
+    let releasePick: (() => void) | null = null;
+    const heldPick = new Promise<void>((resolve) => {
+      releasePick = resolve;
+    });
+    let pickerCompleted = 0;
+    setGrinOriginalPickerForTests(async () => {
+      await heldPick;
+      pickerCompleted += 1;
+      return {
+        localPath: "/tmp/retired-must-not-attach.pdf",
+        mime: "application/pdf",
+        byteSize: 12,
+        claimedSha256: "aa".repeat(32),
+        fileName: "original",
+        captureProvenance: "imported_original",
+        osConversionOccurred: "unknown",
+      };
+    });
+    await mount(React.createElement(GrinAttachmentsAdmittedBody, { session: sessionAAttach }));
+    const attachLibrary = presses.get("grin.attachLibrary");
+    assert.ok(attachLibrary, "attachments admitted body must bind library pick");
+    const attachInFlight = act(async () => {
+      attachLibrary();
+    });
+    const sessionBAttach = startGrinOwnerSession("owner_b");
+    const repoBAttach = getGrinApplicationRepository("owner_b", sessionBAttach.dispatchGeneration);
+    let bAttach = 0;
+    const originalAttach = repoBAttach.attachOriginal.bind(repoBAttach);
+    repoBAttach.attachOriginal = ((input) => {
+      bAttach += 1;
+      return originalAttach(input);
+    }) as typeof repoBAttach.attachOriginal;
+    banners.length = 0;
+    releasePick!();
+    await attachInFlight;
+    assert.equal(pickerCompleted, 1);
+    assert.equal(bAttach, 0, "retired picker must not attach to a new account");
+    assert.ok(banners.includes("grin.errSessionRetired"));
+    resetGrinOriginalPickerForTests();
+
+    const sessionAPack = startGrinOwnerSession("owner_a");
+    getGrinApplicationRepository("owner_a", sessionAPack.dispatchGeneration).createQueued(
+      body("grcp_origin_a", "Origin A supplier")
+    );
+    let shareCalls = 0;
+    setGrinPackShareForTests(async () => {
+      shareCalls += 1;
+    });
+    let releasePdf: (() => void) | null = null;
+    const heldPdf = new Promise<void>((resolve) => {
+      releasePdf = resolve;
+    });
+    setPdfGenerateHookForTests(async () => {
+      await heldPdf;
+      return { uri: "/tmp/grin-pack.pdf", fileName: "pack.pdf" };
+    });
+    await mount(React.createElement(GrinPackAdmittedBody, { session: sessionAPack }));
+    const exportPress = presses.get("grin.pack.export");
+    assert.ok(exportPress, "pack admitted body must bind export");
+    const exportInFlight = act(async () => {
+      exportPress();
+    });
+    startGrinOwnerSession("owner_b");
+    banners.length = 0;
+    releasePdf!();
+    await exportInFlight;
+    assert.equal(shareCalls, 0, "retired pack export must not publish a share");
+    assert.ok(banners.includes("grin.errSessionRetired"));
+    setPdfGenerateHookForTests(null);
+    setGrinPackShareForTests(null);
   } finally {
     await act(async () => {
       root?.unmount();
     });
     retireGrinOwnerSession();
     resetGrinApplicationRepositoryForTests();
+    resetGrinOriginalPickerForTests();
+    setGrinPackShareForTests(null);
+    setPdfGenerateHookForTests(null);
     try {
       db?.close();
     } catch {

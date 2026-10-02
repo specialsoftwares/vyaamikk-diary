@@ -2612,8 +2612,16 @@
       "vehicle": "Vehicle",
       "unloading": "Unloading / gate",
       "qc": "Inspection photo",
-      "acknowledgement": "Acknowledgement"
+      "acknowledgement": "Acknowledgement",
+      "stock_accounting": "સ્ટોક / ચોપડા",
+      "payment": "ચુકવણી",
+      "gst": "GST દસ્તાવેજ",
+      "return_document": "રિટર્ન દસ્તાવેજ"
     },
+    "attachPermissionDenied": "ફોટો અથવા ફાઇલની પરવાનગી મળી નથી.",
+    "attachUnsupportedType": "આ ફાઇલ પ્રકારને મૂળ તરીકે રાખી શકાતો નથી. PDF, JPEG, PNG અથવા WebP વાપરો.",
+    "attachTooLarge": "આ મૂળ આ ઉપકરણ પર રાખવા માટે ખૂબ મોટું છે.",
+    "attachSourceMissing": "પસંદ કરેલી ફાઇલ હવે ઉપલબ્ધ નથી. ફરી પસંદ કરો.",
     "shareFailed": "દસ્તાવેજ શેર થઈ શક્યો નહીં. ફરી પ્રયાસ કરો.",
     "attributionNotSignature": "કર્મચારી કે ડ્રાઇવરના આપેલા નામ ચકાસાયેલા સહી નથી.",
     "originalUnchanged": "મૂળ જારી માલ રસીદ જગ્યાએ સંપાદિત થતી નથી.",
@@ -2800,6 +2808,12 @@
       "invoiceRefNotRetained": "GRIN પર ઇન્વૉઇસ નંબર સંદર્ભ છે, રાખેલું ઇન્વૉઇસ નથી.",
       "challanNotInvoice": "ચલણ ઇન્વૉઇસ નથી.",
       "missingOriginal": "મૂળ ગાયબ — આ પેક અધૂરું છે.",
+      "coverage": "કવરેજ",
+      "coverageComplete": "કવરેજ પૂર્ણ",
+      "coverageIncomplete": "કવરેજ અધૂરું",
+      "bundledArtifacts": "બંડલ થયેલી ફાઇલો",
+      "manifestPdfSummary": "મેનિફેસ્ટ અને PDF સારાંશ",
+      "originalsNotBundled": "આ નિકાસ મેનિફેસ્ટ અને PDF સારાંશ છે. મૂળ બાઇટ્સ બંડલ નથી.",
       "export": "પુરાવા પેક PDF નિકાસ"
     },
     "attachment": {

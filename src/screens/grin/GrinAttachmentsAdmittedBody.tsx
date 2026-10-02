@@ -1,6 +1,7 @@
 import React, { useCallback, useState } from "react";
 
-import { WAVE1_ORIGINAL_CATEGORIES, type Wave1OriginalCategory } from "@/goodsEvidence/evidence";
+import type { GrinAttachCategory } from "@/services/grin/repository";
+import { GRIN_ATTACH_CATEGORIES } from "@/services/grin/repository";
 import type { GrinApplicationAttachment } from "@/services/grin/repository";
 import type { GrinDispatchSession } from "@/services/grin/outbox/types";
 import { spacing } from "@/theme/spacing";
@@ -8,7 +9,11 @@ import { spacing } from "@/theme/spacing";
 import { grinMutationErrorMessage } from "./grinActionErrors";
 import { GrinFieldRow } from "./GrinFieldRow";
 import { GrinFixtureNotices } from "./GrinFixtureNotices";
-import { pickGrinOriginal } from "./grinOriginalPicker";
+import {
+  commitGrinOriginalRetention,
+  discardUncommittedGrinOriginal,
+  pickGrinOriginal,
+} from "./grinOriginalPicker";
 import {
   originRepo,
   useFrozenGrinOrigin,
@@ -19,6 +24,18 @@ import {
 } from "./grinScreenHooks";
 import { Banner, Button, Card, EmptyState, FormSection, Header, Screen, SelectField, View, StyleSheet } from "./grinSurfaces";
 
+function attachPickerErrorKey(message: string): string | null {
+  if (message === "picker_host_not_ready") return "grin.attachPickerNotReady";
+  if (message === "picker_in_flight") return "grin.attachPickerBusy";
+  if (message === "invalid_evidence_category") return "grin.attachNeedCategory";
+  if (message === "permission") return "grin.attachPermissionDenied";
+  if (message === "unsupported_mime") return "grin.attachUnsupportedType";
+  if (message === "too_large") return "grin.attachTooLarge";
+  if (message === "source_missing") return "grin.attachSourceMissing";
+  if (message === "empty_original") return "grin.attachFailed";
+  return null;
+}
+
 export function GrinAttachmentsAdmittedBody({
   session,
 }: {
@@ -28,7 +45,7 @@ export function GrinAttachmentsAdmittedBody({
   const t = useGrinT();
   const { receiptId } = useGrinLocalSearchParams<{ receiptId: string }>();
   const [attachments, setAttachments] = useState<GrinApplicationAttachment[]>([]);
-  const [category, setCategory] = useState<Wave1OriginalCategory>("invoice");
+  const [category, setCategory] = useState<GrinAttachCategory>("invoice");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const styles = useGrinThemedStyles(() =>
@@ -69,11 +86,13 @@ export function GrinAttachmentsAdmittedBody({
       if (!receiptId) return;
       setBusy(true);
       setError(null);
+      let retainedPath: string | null = null;
       try {
         originRepo(origin);
-        const picked = await pickGrinOriginal({ source, category });
+        const picked = await pickGrinOriginal({ source, category, origin });
         originRepo(origin);
         if (!picked) return;
+        retainedPath = picked.localPath;
         originRepo(origin).attachOriginal({
           receiptId,
           category,
@@ -82,21 +101,19 @@ export function GrinAttachmentsAdmittedBody({
           byteSize: picked.byteSize,
           mime: picked.mime,
           fileName: picked.fileName,
+          captureProvenance: picked.captureProvenance,
+          osConversionOccurred: picked.osConversionOccurred,
         });
+        commitGrinOriginalRetention(picked.localPath);
+        retainedPath = null;
         originRepo(origin);
         setAttachments(originRepo(origin).attachments(receiptId));
       } catch (caught) {
+        if (retainedPath) await discardUncommittedGrinOriginal(retainedPath);
         const mapped = grinMutationErrorMessage(caught, t, "grin.attachFailed");
         if (mapped.retired) maskRetired();
-        if (caught instanceof Error && caught.message === "picker_host_not_ready") {
-          setError(t("grin.attachPickerNotReady"));
-        } else if (caught instanceof Error && caught.message === "picker_in_flight") {
-          setError(t("grin.attachPickerBusy"));
-        } else if (caught instanceof Error && caught.message === "invalid_evidence_category") {
-          setError(t("grin.attachNeedCategory"));
-        } else {
-          setError(mapped.message);
-        }
+        const pickerKey = caught instanceof Error ? attachPickerErrorKey(caught.message) : null;
+        setError(pickerKey ? t(pickerKey) : mapped.message);
       } finally {
         setBusy(false);
       }
@@ -104,7 +121,7 @@ export function GrinAttachmentsAdmittedBody({
     [category, maskRetired, origin, receiptId, t]
   );
 
-  const categoryOptions = WAVE1_ORIGINAL_CATEGORIES.map((value) => ({
+  const categoryOptions = GRIN_ATTACH_CATEGORIES.map((value) => ({
     value,
     label: t(`grin.category.${value}`),
   }));
@@ -120,7 +137,7 @@ export function GrinAttachmentsAdmittedBody({
             label={t("grin.attachCategory")}
             value={category}
             options={categoryOptions}
-            onChange={(value: string) => setCategory(value as Wave1OriginalCategory)}
+            onChange={(value: string) => setCategory(value as GrinAttachCategory)}
           />
           <Button
             label={t("grin.attachLibrary")}

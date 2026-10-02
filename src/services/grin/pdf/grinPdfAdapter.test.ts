@@ -29,6 +29,10 @@ const labels: GrinPdfLabels = {
   materialQty: "Quantity received",
   weight: "Net weight",
   packages: "Package count",
+  coverage: "Coverage",
+  bundledArtifacts: "Bundled artifacts",
+  manifestPdfSummary: "Manifest and PDF summary — originals are not bundled",
+  originalsNotBundled: "Original bytes are not included in this export.",
 };
 
 const repo = GrinFixtureRepository.seeded();

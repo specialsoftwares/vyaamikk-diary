@@ -2871,8 +2871,16 @@
       "vehicle": "Vehicle",
       "unloading": "Unloading / gate",
       "qc": "Inspection photo",
-      "acknowledgement": "Acknowledgement"
+      "acknowledgement": "Acknowledgement",
+      "stock_accounting": "Stock / books",
+      "payment": "Payment",
+      "gst": "GST document",
+      "return_document": "Return document"
     },
+    "attachPermissionDenied": "Photo or file access was not granted.",
+    "attachUnsupportedType": "That file type cannot be kept as an original. Use PDF, JPEG, PNG, or WebP.",
+    "attachTooLarge": "That original is too large to keep on this device.",
+    "attachSourceMissing": "The selected file is no longer available. Choose it again.",
     "shareFailed": "Couldn't share the document. Please try again.",
     "attributionNotSignature": "Attributed employee or driver names are not verified signatures.",
     "originalUnchanged": "The original issued goods receipt is not edited in place.",
@@ -3059,6 +3067,12 @@
       "invoiceRefNotRetained": "An invoice number on the GRIN is a reference, not a retained invoice.",
       "challanNotInvoice": "A challan is not an invoice.",
       "missingOriginal": "Missing original — this pack is incomplete.",
+      "coverage": "Coverage",
+      "coverageComplete": "Coverage complete",
+      "coverageIncomplete": "Coverage incomplete",
+      "bundledArtifacts": "Bundled artifacts",
+      "manifestPdfSummary": "Manifest and PDF summary",
+      "originalsNotBundled": "This export is a manifest and PDF summary. Original bytes are not bundled.",
       "export": "Export evidence pack PDF"
     },
     "attachment": {

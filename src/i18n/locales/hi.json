@@ -2767,8 +2767,16 @@
       "vehicle": "वाहन",
       "unloading": "अनलोडिंग / गेट",
       "qc": "निरीक्षण फ़ोटो",
-      "acknowledgement": "पावती"
+      "acknowledgement": "पावती",
+      "stock_accounting": "स्टॉक / बही",
+      "payment": "भुगतान",
+      "gst": "जीएसटी दस्तावेज़",
+      "return_document": "वापसी दस्तावेज़"
     },
+    "attachPermissionDenied": "फ़ोटो या फ़ाइल की अनुमति नहीं मिली।",
+    "attachUnsupportedType": "इस फ़ाइल प्रकार को मूल के रूप में नहीं रखा जा सकता। PDF, JPEG, PNG या WebP चुनें।",
+    "attachTooLarge": "यह मूल इस डिवाइस पर रखने के लिए बहुत बड़ा है।",
+    "attachSourceMissing": "चुनी गई फ़ाइल अब उपलब्ध नहीं है। फिर चुनें।",
     "shareFailed": "दस्तावेज़ साझा नहीं हो सका। फिर कोशिश करें।",
     "attributionNotSignature": "कर्मचारी या ड्राइवर के attributed नाम सत्यापित हस्ताक्षर नहीं हैं।",
     "originalUnchanged": "मूल जारी माल रसीद जगह पर संपादित नहीं होती।",
@@ -2955,6 +2963,12 @@
       "invoiceRefNotRetained": "GRIN पर इनवॉइस नंबर संदर्भ है, रखा हुआ इनवॉइस नहीं।",
       "challanNotInvoice": "चालान इनवॉइस नहीं है।",
       "missingOriginal": "मूल गायब — यह पैक अधूरा है।",
+      "coverage": "कवरेज",
+      "coverageComplete": "कवरेज पूर्ण",
+      "coverageIncomplete": "कवरेज अधूरा",
+      "bundledArtifacts": "बंडल की गई फ़ाइलें",
+      "manifestPdfSummary": "मैनिफ़ेस्ट और PDF सारांश",
+      "originalsNotBundled": "यह निर्यात मैनिफ़ेस्ट और PDF सारांश है। मूल बाइट्स बंडल नहीं हैं।",
       "export": "साक्ष्य पैक PDF निर्यात करें"
     },
     "attachment": {
