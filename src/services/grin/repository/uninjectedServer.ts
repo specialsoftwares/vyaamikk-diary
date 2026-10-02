@@ -6,6 +6,7 @@
  */
 
 import type { GrinEvidenceUploadPort, GrinServerCommandPort } from "@/services/grin/outbox/ports";
+import { nonDurableEvidenceUploadResult } from "@/services/grin/outbox/ports";
 
 export const GRIN_UNINJECTED_SERVER_DETAIL = "g1_server_not_injected";
 
@@ -26,19 +27,7 @@ export function createUninjectedGrinEvidencePort(): GrinEvidenceUploadPort {
   return {
     portKind: "FAKE",
     async upload() {
-      return {
-        ok: false,
-        originalDurable: false,
-        generation: null,
-        retryable: true,
-        evidenceId: null,
-        receiptId: null,
-        ledgerId: null,
-        category: null,
-        claimedSha256: null,
-        actualSha256: null,
-        reservationId: null,
-      };
+      return nonDurableEvidenceUploadResult(true);
     },
   };
 }

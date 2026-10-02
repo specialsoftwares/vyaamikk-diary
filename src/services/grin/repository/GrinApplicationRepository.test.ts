@@ -125,14 +125,6 @@ function packConfirmedFromRecord(record: GrinApplicationRecord): GrinConfirmedPr
   };
 }
 
-function ensureDescriptorColumns(db: HostSqlite): void {
-  const cols = db.getAllSync<{ name: string }>("PRAGMA table_info(grin_local_evidence_files)");
-  const names = new Set(cols.map((col) => col.name));
-  if (!names.has("actual_sha256")) db.execSync("ALTER TABLE grin_local_evidence_files ADD COLUMN actual_sha256 TEXT");
-  if (!names.has("mime")) db.execSync("ALTER TABLE grin_local_evidence_files ADD COLUMN mime TEXT");
-  if (!names.has("generation")) db.execSync("ALTER TABLE grin_local_evidence_files ADD COLUMN generation TEXT");
-}
-
 function markVerifiedDescriptor(
   db: HostSqlite,
   ownerUid: string,
@@ -140,54 +132,13 @@ function markVerifiedDescriptor(
   sha256: string,
   byteSize: number,
   mime: string,
-  generation: string
+  objectGeneration: string
 ): void {
-  ensureDescriptorColumns(db);
   db.runSync(
     `UPDATE grin_local_evidence_files
-        SET upload_state = ?, original_durable = 1, claimed_sha256 = ?, actual_sha256 = ?, byte_size = ?, mime = ?, generation = ?
+        SET upload_state = ?, original_durable = 1, claimed_sha256 = ?, actual_sha256 = ?, byte_size = ?, size_bytes = ?, mime = ?, object_generation = ?
       WHERE owner_uid = ? AND evidence_id = ? AND role = ?`,
-    ["verified", sha256, sha256, byteSize, mime, generation, ownerUid, evidenceId, "original"]
-  );
-}
-
-function insertExtraCategoryOriginal(
-  db: HostSqlite,
-  input: {
-    ownerUid: string;
-    receiptId: string;
-    evidenceId: string;
-    category: string;
-    sha256: string;
-    byteSize: number;
-  }
-): void {
-  ensureDescriptorColumns(db);
-  const now = Date.now();
-  db.runSync(
-    `INSERT INTO grin_local_evidence_files (
-       id, owner_uid, ledger_id, receipt_id, evidence_id, role, local_path, claimed_sha256,
-       byte_size, category, upload_state, original_durable, retain_local, created_at, updated_at,
-       actual_sha256, mime, generation
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?, ?, ?)`,
-    [
-      `${input.ownerUid}\t${GRIN_APPLICATION_LEDGER_ID}\t${input.evidenceId}\toriginal`,
-      input.ownerUid,
-      GRIN_APPLICATION_LEDGER_ID,
-      input.receiptId,
-      input.evidenceId,
-      "original",
-      `/tmp/${input.evidenceId}.pdf`,
-      input.sha256,
-      input.byteSize,
-      input.category,
-      "verified",
-      now,
-      now,
-      input.sha256,
-      "application/pdf",
-      `gen-${input.evidenceId}`,
-    ]
+    ["verified", sha256, sha256, byteSize, byteSize, mime, objectGeneration, ownerUid, evidenceId, "original"]
   );
 }
 
@@ -461,22 +412,28 @@ function main() {
     markVerifiedDescriptor(db!, ownerA, "ev_pack_b_invoice", invoiceHash, 2048, "application/pdf", "gen-invoice-1");
     markVerifiedDescriptor(db!, ownerA, "ev_pack_b_lr", lrHash, 1024, "application/pdf", "gen-lr-1");
     markVerifiedDescriptor(db!, ownerA, "ev_pack_b_gate", unloadHash, 512, "application/pdf", "gen-gate-1");
-    insertExtraCategoryOriginal(db!, {
-      ownerUid: ownerA,
+    repoA2.attachOriginal({
       receiptId: "grcp_pack_b",
-      evidenceId: "ev_pack_b_books",
       category: "stock_accounting",
-      sha256: booksHash,
+      localPath: "/tmp/grin-pack-b-books.pdf",
+      evidenceId: "ev_pack_b_books",
+      claimedSha256: booksHash,
       byteSize: 256,
+      mime: "application/pdf",
+      captureProvenance: "imported_original",
     });
-    insertExtraCategoryOriginal(db!, {
-      ownerUid: ownerA,
+    repoA2.attachOriginal({
       receiptId: "grcp_pack_b",
-      evidenceId: "ev_pack_b_gst",
       category: "gst",
-      sha256: gstHash,
+      localPath: "/tmp/grin-pack-b-gst.pdf",
+      evidenceId: "ev_pack_b_gst",
+      claimedSha256: gstHash,
       byteSize: 128,
+      mime: "application/pdf",
+      captureProvenance: "imported_original",
     });
+    markVerifiedDescriptor(db!, ownerA, "ev_pack_b_books", booksHash, 256, "application/pdf", "gen-books-1");
+    markVerifiedDescriptor(db!, ownerA, "ev_pack_b_gst", gstHash, 128, "application/pdf", "gen-gst-1");
     const packB = repoA2.exportPack("grcp_pack_b");
     assert.ok(packB);
     assert.equal(packB.itcDisposition, "not_determined");

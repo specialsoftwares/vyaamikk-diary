@@ -343,13 +343,7 @@ export class GrinApplicationRepository {
       claimedSha256: input.claimedSha256 ?? null,
       byteSize: input.byteSize ?? null,
       category: input.category,
-    });
-    writeCaptureDescriptorIfPresent(this.db, {
-      ownerUid: this.ownerUid,
-      evidenceId,
-      mime: input.mime ?? null,
-      claimedSha256: input.claimedSha256 ?? null,
-      generation: input.generation ?? null,
+      captureProvenance: input.captureProvenance ?? null,
     });
     const attached = this.attachments(receiptId).find(
       (item) => item.evidenceId === evidenceId && item.role === "original"
@@ -396,7 +390,7 @@ export class GrinApplicationRepository {
             },
           ]
         : [],
-      originals: files.filter((file) => file.role === "original").map((file) => toPackOriginalInput(this.db, file)),
+      originals: files.filter((file) => file.role === "original").map((file) => toPackOriginalInput(file)),
     });
     const commercial =
       confirmed?.original.commercial ??
@@ -572,89 +566,26 @@ export class GrinApplicationRepository {
   }
 }
 
-function fileColumn(row: Record<string, unknown> | null, names: string[]): unknown {
-  if (!row) return null;
-  for (const name of names) {
-    if (name in row && row[name] != null) return row[name];
-  }
-  return null;
-}
-
-function readEvidenceDescriptor(
-  db: GrinApplicationDb,
-  file: GrinLocalEvidenceFile
-): {
-  actualSha256: string | null;
-  mime: string | null;
-  generation: string | null;
-  category: string | null;
-} {
-  let row: Record<string, unknown> | null = null;
-  try {
-    row = db.getFirstSync<Record<string, unknown>>(
-      `SELECT * FROM grin_local_evidence_files WHERE owner_uid = ? AND evidence_id = ? AND role = ?`,
-      [file.ownerUid, file.evidenceId, file.role]
-    );
-  } catch {
-    row = null;
-  }
-  const actualRaw = fileColumn(row, ["actual_sha256", "actualSha256"]);
-  const mimeRaw = fileColumn(row, ["mime"]);
-  const generationRaw = fileColumn(row, ["generation", "storage_generation", "object_generation"]);
-  const categoryRaw = fileColumn(row, ["category"]);
-  const actualSha256 = typeof actualRaw === "string" && isSha256Hex(actualRaw) ? actualRaw : null;
-  const mime = typeof mimeRaw === "string" && mimeRaw.trim() ? mimeRaw.trim() : null;
-  const generation =
-    typeof generationRaw === "string" && generationRaw.trim() && generationRaw !== "verified"
-      ? generationRaw.trim()
-      : null;
-  const category = typeof categoryRaw === "string" && categoryRaw.trim() ? categoryRaw.trim() : null;
-  return { actualSha256, mime, generation, category };
-}
-
-function writeCaptureDescriptorIfPresent(
-  db: GrinApplicationDb,
-  input: { ownerUid: string; evidenceId: string; mime: string | null; claimedSha256: string | null; generation: string | null }
-): void {
-  try {
-    const info = db.getAllSync<{ name: string }>("PRAGMA table_info(grin_local_evidence_files)");
-    const names = new Set(info.map((col) => col.name));
-    const sets: string[] = [];
-    const args: unknown[] = [];
-    if (names.has("mime") && input.mime) {
-      sets.push("mime = ?");
-      args.push(input.mime);
-    }
-    if (names.has("generation") && input.generation && input.generation !== "verified") {
-      sets.push("generation = ?");
-      args.push(input.generation);
-    }
-    if (sets.length === 0) return;
-    args.push(input.ownerUid, input.evidenceId, "original");
-    db.runSync(
-      `UPDATE grin_local_evidence_files SET ${sets.join(", ")} WHERE owner_uid = ? AND evidence_id = ? AND role = ?`,
-      args
-    );
-  } catch {
-    // Descriptor columns are Team 3 additive schema. Missing columns stay pending.
-  }
-}
-
-function toPackOriginalInput(db: GrinApplicationDb, file: GrinLocalEvidenceFile): GrinPackOriginalInput {
+function toPackOriginalInput(file: GrinLocalEvidenceFile): GrinPackOriginalInput {
   const verified = file.uploadState === "verified" && file.originalDurable;
-  const descriptor = readEvidenceDescriptor(db, file);
+  const actual =
+    typeof file.actualSha256 === "string" && isSha256Hex(file.actualSha256) ? file.actualSha256 : "";
+  const generation =
+    typeof file.objectGeneration === "string" &&
+    file.objectGeneration.trim() &&
+    file.objectGeneration !== "verified"
+      ? file.objectGeneration
+      : null;
   return {
     evidenceId: file.evidenceId,
     ownerUid: file.ownerUid,
     ledgerId: file.ledgerId,
     receiptId: file.receiptId,
-    category: isGrinAttachCategory(descriptor.category)
-      ? descriptor.category
-      : (file.category ?? ""),
-    mime: descriptor.mime ?? "",
-    byteSize: file.byteSize ?? 0,
-    rawSha256: descriptor.actualSha256 ?? "",
-    generation: descriptor.generation,
+    category: isGrinAttachCategory(file.category) ? file.category : (file.category ?? ""),
+    mime: file.mime ?? "",
+    byteSize: file.verifiedSizeBytes ?? file.byteSize ?? 0,
+    rawSha256: actual,
+    generation,
     originalFileName: "original",
     state: verified ? "verified" : file.uploadState,
   };

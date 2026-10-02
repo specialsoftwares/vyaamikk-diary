@@ -189,6 +189,11 @@ async function main(): Promise<void> {
     const attachedPdf = repoA.attachments("grcp_pick_a").find((item) => item.localPathPresent);
     assert.ok(attachedPdf);
     assert.equal(attachedPdf.originalDurable, false, "missing backend must not look like success");
+    const storedPdf = db.getFirstSync<{ capture_provenance: string | null }>(
+      `SELECT capture_provenance FROM grin_local_evidence_files WHERE owner_uid = ? AND receipt_id = ? AND claimed_sha256 = ?`,
+      ["owner_a", "grcp_pick_a", sha256(pdfBytes)]
+    );
+    assert.equal(storedPdf?.capture_provenance, "imported_original");
 
     const jpegBytes = new Uint8Array([0xff, 0xd8, 0xff, 0x01, 0x02, 0x03, 0xd9]);
     const jpegPath = writeTemp(tmp, "source.jpg", jpegBytes);
@@ -322,6 +327,11 @@ async function main(): Promise<void> {
     const afterReopen = repoA2.attachments("grcp_pick_a");
     assert.ok(afterReopen.some((item) => item.claimedSha256 === sha256(pdfBytes)));
     assert.equal(fs.existsSync(pdfPicked.localPath), true, "sqlite reopen must keep queued original bytes");
+    const reopenedPdf = db.getFirstSync<{ capture_provenance: string | null }>(
+      `SELECT capture_provenance FROM grin_local_evidence_files WHERE owner_uid = ? AND receipt_id = ? AND claimed_sha256 = ?`,
+      ["owner_a", "grcp_pick_a", sha256(pdfBytes)]
+    );
+    assert.equal(reopenedPdf?.capture_provenance, "imported_original");
   } finally {
     retireGrinOwnerSession();
     resetGrinApplicationRepositoryForTests();

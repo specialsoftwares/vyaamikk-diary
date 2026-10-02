@@ -107,7 +107,6 @@ export type GrinAttachOriginalInput = {
   fileName?: string;
   captureProvenance?: string;
   osConversionOccurred?: boolean | "unknown";
-  generation?: string | null;
 };
 
 export type GrinApplicationAttachment = {
