@@ -55,7 +55,7 @@ Trusted uid, active user (no pending_deletion exception), ledger owner + active,
 | Concurrent uploads per owner | 2 |
 | MIME | `application/pdf`, `image/jpeg`, `image/png`, `image/webp` |
 
-Wave 1 original categories: supplier invoice, E-Way Bill, LR/GR/bilty, weighment, vehicle/number-plate, unloading/material, QC, acknowledgement.
+Wave 1 original categories plus E5 uploads: invoice, E-Way Bill, LR/GR/bilty, weighment, vehicle/number-plate, unloading/material, QC, acknowledgement, stock_accounting, payment, gst, return_document. Category remains a declared assertion. Missing/unknown fails; never invoice. Policy v2 is unchanged (`return_document` does not satisfy a required inventory item by default).
 
 ## FAKE_* vs emulator
 

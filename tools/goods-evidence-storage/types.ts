@@ -119,10 +119,14 @@ export type G2LifecycleSuccess = {
   ledgerId: string;
   receiptId: string;
   category: string;
+  mime: string;
   claimedSha256: string;
   actualSha256: string | null;
   reservationId: string;
   claimedByteSize: number;
+  actualByteSize: number | null;
+  storagePath: string;
+  generation: string | null;
   lifecycleVersion: number;
 };
 

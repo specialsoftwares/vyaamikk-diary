@@ -68,8 +68,16 @@ assert.doesNotMatch(isolatedStorage, /getDownloadURL/);
 const packInputs = readFileSync(join(repoRoot, "src/goodsEvidence/evidencePackInputs.ts"), "utf8");
 assert.match(packInputs, /assembleEvidencePackInputs/);
 assert.match(packInputs, /invoice reference is not a retained invoice original/);
+assert.match(packInputs, /packPayloadKind: "manifest_and_hashes"/);
+assert.match(packInputs, /originalBytesBundled: false/);
 assert.doesNotMatch(packInputs, /completeness:\s*["']complete["']/);
 assert.doesNotMatch(packInputs, /toString\(\s*["']base64["']\s*\)/);
+
+const evidencePort = readFileSync(join(dir, "evidencePort.ts"), "utf8");
+assert.doesNotMatch(evidencePort, /actualSha256:\s*claimed/);
+assert.doesNotMatch(evidencePort, /actualSha256\s*=\s*claimedSha256/);
+assert.match(evidencePort, /storedActualSha256/);
+assert.doesNotMatch(evidencePort, /toString\(\s*["']base64["']\s*\)/);
 
 const appJson = readFileSync(join(repoRoot, "app.json"), "utf8");
 assert.doesNotMatch(appJson, /GOODS_EVIDENCE/);

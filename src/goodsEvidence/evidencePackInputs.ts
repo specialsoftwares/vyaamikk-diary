@@ -10,9 +10,10 @@
  */
 
 import {
+  generationError,
+  isEvidenceCategory,
   isRetainedOriginalState,
   isSha256Hex,
-  isWave1OriginalCategory,
   type EvidenceCategory,
   type LabelledEvidenceSupport,
   type OriginalEvidence,
@@ -71,17 +72,13 @@ export type GrinEvidencePackInputs = {
   inventoryDispositions: EvidenceItemDisposition[];
   eventStreams: EventStreamCutInput[];
   originalSnapshots: ImmutableGrin[];
+  /**
+   * Coverage is inventory evaluation at the pinned cut.
+   * This assembler does not copy original bytes into an export payload.
+   */
+  packPayloadKind: "manifest_and_hashes";
+  originalBytesBundled: false;
 };
-
-function isEvidenceCategory(value: unknown): value is EvidenceCategory {
-  return (
-    isWave1OriginalCategory(value) ||
-    value === "stock_accounting" ||
-    value === "payment" ||
-    value === "gst" ||
-    value === "return_document"
-  );
-}
 
 function snapshotHasInvoiceReference(snapshot: ImmutableGrin): boolean {
   return snapshot.commercial?.supplierInvoiceNumber?.kind === "present";
@@ -163,6 +160,15 @@ export function assembleEvidencePackInputs(input: {
     }
     if (typeof original.byteSize !== "number" || !Number.isInteger(original.byteSize) || original.byteSize < 1) {
       missingOrUnverifiable.push(`${original.evidenceId} is corrupt`);
+      continue;
+    }
+    if (original.generation === "verified") {
+      missingOrUnverifiable.push(`${original.evidenceId} generation is not a storage object generation`);
+      continue;
+    }
+    const genErr = generationError(original.generation);
+    if (genErr) {
+      missingOrUnverifiable.push(`${original.evidenceId} ${genErr}`);
       continue;
     }
     const mapped: OriginalEvidence = {
@@ -290,5 +296,7 @@ export function assembleEvidencePackInputs(input: {
     inventoryDispositions,
     eventStreams,
     originalSnapshots,
+    packPayloadKind: "manifest_and_hashes",
+    originalBytesBundled: false,
   };
 }

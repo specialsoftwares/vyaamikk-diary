@@ -1,6 +1,6 @@
 # G2 Wave 1 remaining work
 
-Implemented on `team/grin-t2-evidence`: domain lifecycle, injected adapter, Storage+Firestore emulator harness, reviewed Storage Rules proposal, W2-03 identity/category replay, W2-04 retained-read matrix on the isolated Rules copy, F3 retrieve + pack-input assembly (paths A and B at G2).
+Implemented on `team/grin-t2-evidence`: domain lifecycle, injected adapter, Storage+Firestore emulator harness, reviewed Storage Rules proposal, W2-03 identity/category replay, W2-04 retained-read matrix on the isolated Rules copy, F3 retrieve + pack-input assembly, E1 stored-byte port path, E2 actual-hash admission helper, E4 hash exports + capture provenance types, E5 upload categories and pack A/B/C/D.
 
 ## Remaining (not this slice)
 

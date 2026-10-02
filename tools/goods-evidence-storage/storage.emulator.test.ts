@@ -5,6 +5,7 @@
 import assert from "node:assert/strict";
 
 import { GoodsEvidenceStorageAdapter } from "./adapter";
+import { createInjectedGrinEvidencePort } from "./evidencePort";
 import {
   adminAppReady,
   fixedClock,
@@ -222,6 +223,60 @@ async function main(): Promise<void> {
   const after = await db.doc(evidenceObjectPath(OWNER, LEDGER, "ev_emu_stale")).get();
   assert.equal(after.data()?.state, "verified");
   assert.equal(after.data()?.generation, "emu-newer-gen");
+
+  evidenceLabel("STORAGE_EMULATOR", "E1 port hashes stored emulator bytes then retrieve/link");
+  const portBytes = sampleBytes(41, 64);
+  const port = createInjectedGrinEvidencePort({
+    adapter,
+    blobs,
+    readLocalFile: async (localPath) => {
+      if (localPath !== "/tmp/grin-e1.pdf") throw new Error("missing");
+      return portBytes;
+    },
+  });
+  const uploaded = await port.upload({
+    uid: OWNER,
+    ledgerId: LEDGER,
+    receiptId: RECEIPT,
+    evidenceId: "ev_emu_e1",
+    role: "original",
+    localPath: "/tmp/grin-e1.pdf",
+    claimedSha256: sha256Bytes(portBytes),
+    category: "invoice",
+    sizeBytes: portBytes.byteLength,
+  });
+  assert.equal(uploaded.ok, true);
+  assert.equal(uploaded.originalDurable, true);
+  assert.equal(uploaded.actualSha256, sha256Bytes(portBytes));
+  assert.equal(uploaded.claimedSha256, sha256Bytes(portBytes));
+  assert.notEqual(uploaded.generation, "verified");
+  assert.equal(uploaded.ownerUid, OWNER);
+  assert.equal(uploaded.mime, "application/pdf");
+  assert.equal(uploaded.sizeBytes, portBytes.byteLength);
+  assert.ok(uploaded.storagePath);
+  assert.ok(uploaded.reservationId);
+  const e1Linked = await (async () => {
+    const record = await adapter.getRecord(
+      { uid: OWNER },
+      { evidenceId: "ev_emu_e1", ledgerId: LEDGER, receiptId: RECEIPT }
+    );
+    assert.equal(record.ok, true);
+    if (!record.ok || !record.verified) throw new Error("e1 verified");
+    return port.linkVerified({ uid: OWNER, verified: record.verified });
+  })();
+  assert.equal(e1Linked.originalDurable, true);
+  assert.equal(e1Linked.actualSha256, sha256Bytes(portBytes));
+  const retrievedE1 = await port.retrieveRetainedOriginal({
+    uid: OWNER,
+    ledgerId: LEDGER,
+    receiptId: RECEIPT,
+    evidenceId: "ev_emu_e1",
+  });
+  assert.equal(retrievedE1.ok, true);
+  if (!retrievedE1.ok) throw new Error("e1 retrieve");
+  assert.equal(retrievedE1.actualSha256, sha256Bytes(portBytes));
+  assert.equal(retrievedE1.originalDurable, true);
+  assert.equal("bytes" in retrievedE1, false);
 
   evidenceLabel("STORAGE_EMULATOR", "retrieve hashes retained bytes when newCommands=deny");
   await db.doc(`users/${OWNER}/goodsEvidenceAdmission/runtime`).set({

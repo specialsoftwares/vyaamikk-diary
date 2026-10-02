@@ -14,14 +14,21 @@ import {
   MAX_IMAGE_ORIGINAL_BYTES,
   MAX_ORIGINALS_PER_RECEIPT,
   MAX_PDF_ORIGINAL_BYTES,
+  ORIGINAL_CAPTURE_PROVENANCES,
+  UPLOAD_ORIGINAL_CATEGORIES,
   WAVE1_ORIGINAL_CATEGORIES,
   buildOriginalStoragePath,
   buildVerifiedEvidenceResult,
   concurrentUploadError,
+  durableUploadIdentityError,
   evidenceReplayIdentityError,
   evidenceTransitionError,
   hashBoundedChunks,
+  isEvidenceCategory,
+  isOriginalCaptureProvenance,
   isPermittedEvidenceTransition,
+  isUploadOriginalCategory,
+  isWave1OriginalCategory,
   originalRetentionError,
   originalSizeError,
   originalEvidenceFromVerifiedResult,
@@ -74,7 +81,8 @@ async function main(): Promise<void> {
   assert.ok(evidenceTransitionError("reserved", "verified"));
   assert.ok(evidenceTransitionError("uploading", "orphan_pending_review"));
 
-  evidenceLabel("PURE_DOMAIN", "wave 1 original categories and mime/size/count bounds");
+  evidenceLabel("PURE_DOMAIN", "upload original categories include stock payment gst return_document");
+  assert.deepEqual([...UPLOAD_ORIGINAL_CATEGORIES], [...WAVE1_ORIGINAL_CATEGORIES]);
   assert.deepEqual([...WAVE1_ORIGINAL_CATEGORIES], [
     "invoice",
     "ewb",
@@ -84,13 +92,23 @@ async function main(): Promise<void> {
     "unloading",
     "qc",
     "acknowledgement",
+    "stock_accounting",
+    "payment",
+    "gst",
+    "return_document",
   ]);
-  assert.equal(wave1CategoryError("invoice"), null);
-  assert.ok(wave1CategoryError("stock_accounting"));
+  for (const category of WAVE1_ORIGINAL_CATEGORIES) {
+    assert.equal(isWave1OriginalCategory(category), true);
+    assert.equal(isUploadOriginalCategory(category), true);
+    assert.equal(isEvidenceCategory(category), true);
+    assert.equal(wave1CategoryError(category), null);
+  }
   assert.ok(wave1CategoryError(undefined));
   assert.ok(wave1CategoryError(null));
   assert.ok(wave1CategoryError(""));
   assert.ok(wave1CategoryError("Invoice"));
+  assert.ok(wave1CategoryError("challan"));
+  assert.ok(!isEvidenceCategory("invoice_reference"));
   assert.deepEqual([...ALLOWED_ORIGINAL_MIME], [
     "application/pdf",
     "image/jpeg",
@@ -129,6 +147,19 @@ async function main(): Promise<void> {
   const evidenceSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../src/goodsEvidence/evidence.ts"), "utf8");
   assert.doesNotMatch(evidenceSrc, /toString\(\s*["']base64["']\s*\)/);
   assert.doesNotMatch(evidenceSrc, /btoa\(/);
+  assert.match(evidenceSrc, /HASH_CHUNK_BYTES = 64 \* 1024/);
+  assert.match(evidenceSrc, /export async function hashBoundedChunks/);
+
+  evidenceLabel("PURE_DOMAIN", "E4 original capture provenance is documented and distinct from receipt capture");
+  assert.deepEqual([...ORIGINAL_CAPTURE_PROVENANCES], [
+    "camera_capture",
+    "imported_original",
+    "os_conversion",
+    "derivative",
+  ]);
+  assert.equal(isOriginalCaptureProvenance("camera_capture"), true);
+  assert.equal(isOriginalCaptureProvenance("offline"), false);
+  assert.equal(isOriginalCaptureProvenance("online"), false);
 
   evidenceLabel("PURE_DOMAIN", "VerifiedEvidenceResult shape matches ports.ts");
   const trusted = {
@@ -205,6 +236,70 @@ async function main(): Promise<void> {
   assert.ok(originalRetentionError(false, false));
   assert.ok(originalRetentionError(true, false));
   assert.equal(originalRetentionError(true, true), null);
+
+  evidenceLabel("PURE_DOMAIN", "E2 actualSha256 cannot be an echoed claim or missing hash");
+  const expectedIdentity = {
+    ownerUid: "owner1",
+    ledgerId: "ledger1",
+    receiptId: "receipt1",
+    evidenceId: "ev_ports_1",
+    category: "invoice" as const,
+    mime: "application/pdf" as const,
+    sizeBytes: payload.byteLength,
+    storagePath: path,
+    generation: "1",
+    retainedSha256: expected,
+  };
+  const matchingUpload = {
+    ok: true,
+    originalDurable: true,
+    ownerUid: "owner1",
+    ledgerId: "ledger1",
+    receiptId: "receipt1",
+    evidenceId: "ev_ports_1",
+    category: "invoice",
+    mime: "application/pdf",
+    sizeBytes: payload.byteLength,
+    storagePath: path,
+    generation: "1",
+    claimedSha256: expected,
+    actualSha256: expected,
+    reservationId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  };
+  assert.equal(durableUploadIdentityError(expectedIdentity, matchingUpload), null);
+  const otherHash = "b".repeat(64);
+  assert.ok(
+    durableUploadIdentityError(expectedIdentity, {
+      ...matchingUpload,
+      claimedSha256: expected,
+      actualSha256: otherHash,
+    })
+  );
+  assert.ok(
+    durableUploadIdentityError(expectedIdentity, {
+      ...matchingUpload,
+      claimedSha256: expected,
+      actualSha256: null,
+    })
+  );
+  assert.ok(
+    durableUploadIdentityError(expectedIdentity, {
+      ...matchingUpload,
+      ownerUid: "other-owner",
+    })
+  );
+  assert.ok(
+    durableUploadIdentityError(expectedIdentity, {
+      ...matchingUpload,
+      receiptId: "receipt-other",
+    })
+  );
+  assert.ok(
+    durableUploadIdentityError(expectedIdentity, {
+      ...matchingUpload,
+      generation: "verified",
+    })
+  );
 
   evidenceLabel("PURE_DOMAIN", "policy v2 file not weakened");
   const support = readFileSync(

@@ -13,29 +13,12 @@ import {
   type VerifiedEvidenceResult,
 } from "./ports";
 
-export type EvidenceCategory =
-  | "invoice"
-  | "ewb"
-  | "lr_bilty"
-  | "weighment"
-  | "vehicle"
-  | "unloading"
-  | "qc"
-  | "acknowledgement"
-  | "stock_accounting"
-  | "payment"
-  | "gst"
-  | "return_document";
-
-export type EvidenceVerification = "pending" | "failed" | "verified";
-
-export type DerivativeKind = "thumbnail" | "ocr" | "crop" | "rotation" | "redacted";
-
 /**
- * Wave 1 upload originals. Pack coverage of other categories is unchanged (policy v2).
- * Category is a declared assertion, not proof of document contents.
+ * Declared original categories for app / outbox / server / sqlite / pack (E5).
+ * Category is an assertion, not proof of contents, live GSTR-2B, payment, or supplier status.
+ * Missing or unknown fails; never coerced to invoice.
  */
-export const WAVE1_ORIGINAL_CATEGORIES = [
+export const UPLOAD_ORIGINAL_CATEGORIES = [
   "invoice",
   "ewb",
   "lr_bilty",
@@ -44,9 +27,36 @@ export const WAVE1_ORIGINAL_CATEGORIES = [
   "unloading",
   "qc",
   "acknowledgement",
+  "stock_accounting",
+  "payment",
+  "gst",
+  "return_document",
 ] as const;
 
-export type Wave1OriginalCategory = (typeof WAVE1_ORIGINAL_CATEGORIES)[number];
+/** Same declared set as `UPLOAD_ORIGINAL_CATEGORIES` so Wave-1 checkers stay consistent. */
+export const WAVE1_ORIGINAL_CATEGORIES = UPLOAD_ORIGINAL_CATEGORIES;
+
+export type UploadOriginalCategory = (typeof UPLOAD_ORIGINAL_CATEGORIES)[number];
+export type Wave1OriginalCategory = UploadOriginalCategory;
+export type EvidenceCategory = UploadOriginalCategory;
+
+export type EvidenceVerification = "pending" | "failed" | "verified";
+
+export type DerivativeKind = "thumbnail" | "ocr" | "crop" | "rotation" | "redacted";
+
+/**
+ * File-level capture provenance for retained originals (E4). Distinct from receipt
+ * `CaptureProvenance` (`online` | `offline` | `late_entry` in types.ts).
+ * Do not hardcode `os_conversion` away without evidence from the pinned picker.
+ */
+export const ORIGINAL_CAPTURE_PROVENANCES = [
+  "camera_capture",
+  "imported_original",
+  "os_conversion",
+  "derivative",
+] as const;
+
+export type OriginalCaptureProvenance = (typeof ORIGINAL_CAPTURE_PROVENANCES)[number];
 
 export const ORIGINAL_OBJECT_KIND = "original" as const;
 export const DERIVATIVE_STORAGE_KINDS = ["thumbnail", "preview", "ocr"] as const;
@@ -133,9 +143,10 @@ const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const OBJECT_KEY_RE = /^[A-Za-z0-9_-]{16,64}$/;
 const UID_PATH_RE = /^[A-Za-z0-9_-]{1,128}$/;
 const MIME_SET = new Set<string>(ALLOWED_ORIGINAL_MIME);
-const WAVE1_SET = new Set<string>(WAVE1_ORIGINAL_CATEGORIES);
+const UPLOAD_SET = new Set<string>(UPLOAD_ORIGINAL_CATEGORIES);
 const DERIVATIVE_KIND_SET = new Set<string>(DERIVATIVE_STORAGE_KINDS);
 const STATE_SET = new Set<string>(Object.keys(EVIDENCE_STATE_TRANSITIONS));
+const ORIGINAL_CAPTURE_SET = new Set<string>(ORIGINAL_CAPTURE_PROVENANCES);
 
 function hasForbiddenPathToken(value: string): boolean {
   return value.includes("/") || value.includes("\\") || value.includes(".") || value === "..";
@@ -206,14 +217,26 @@ export function evidenceTransitionError(
   return `evidence state ${from} cannot move to ${to}`;
 }
 
+export function isUploadOriginalCategory(value: unknown): value is UploadOriginalCategory {
+  return typeof value === "string" && UPLOAD_SET.has(value);
+}
+
 export function isWave1OriginalCategory(value: unknown): value is Wave1OriginalCategory {
-  return typeof value === "string" && WAVE1_SET.has(value);
+  return isUploadOriginalCategory(value);
+}
+
+export function isEvidenceCategory(value: unknown): value is EvidenceCategory {
+  return isUploadOriginalCategory(value);
 }
 
 export function wave1CategoryError(value: unknown): string | null {
   if (value == null || value === "") return "evidence category is required";
-  if (!isWave1OriginalCategory(value)) return "evidence category is not a Wave 1 original category";
+  if (!isUploadOriginalCategory(value)) return "evidence category is not an upload original category";
   return null;
+}
+
+export function isOriginalCaptureProvenance(value: unknown): value is OriginalCaptureProvenance {
+  return typeof value === "string" && ORIGINAL_CAPTURE_SET.has(value);
 }
 
 /** Owner/ledger/receipt/id/category/hash/size that must match on every replay. */
@@ -248,6 +271,74 @@ export function reservationIdentityError(
   if (!storedReservationId) return "stored reservation identity is missing";
   if (!claimedReservationId) return "reservation identity is required";
   if (storedReservationId !== claimedReservationId) return "reservation identity does not match stored evidence";
+  return null;
+}
+
+/**
+ * E2 durability admission. Compare `actualSha256` to the hash of captured local
+ * retained bytes. An echoed `claimedSha256` never substitutes. Missing actual,
+ * the literal generation `"verified"`, or wrong identity fields fail.
+ */
+export type DurableUploadIdentityExpected = {
+  ownerUid: string;
+  ledgerId: string;
+  receiptId: string;
+  evidenceId: string;
+  category: UploadOriginalCategory;
+  mime: AllowedOriginalMime;
+  sizeBytes: number;
+  storagePath: string;
+  generation: string;
+  retainedSha256: string;
+};
+
+export type DurableUploadIdentityActual = {
+  ok?: boolean;
+  originalDurable?: boolean;
+  ownerUid?: string | null;
+  ledgerId?: string | null;
+  receiptId?: string | null;
+  evidenceId?: string | null;
+  category?: string | null;
+  mime?: string | null;
+  sizeBytes?: number | null;
+  storagePath?: string | null;
+  generation?: string | null;
+  claimedSha256?: string | null;
+  actualSha256?: string | null;
+  reservationId?: string | null;
+};
+
+export function durableUploadIdentityError(
+  expected: DurableUploadIdentityExpected,
+  uploaded: DurableUploadIdentityActual
+): string | null {
+  if (uploaded.ok === false || uploaded.originalDurable === false) {
+    return "original is not durable";
+  }
+  if (typeof uploaded.actualSha256 !== "string" || !isSha256Hex(uploaded.actualSha256)) {
+    return "actualSha256 is missing";
+  }
+  if (!isSha256Hex(expected.retainedSha256)) {
+    return "retained hash is not SHA-256";
+  }
+  if (uploaded.actualSha256 !== expected.retainedSha256) {
+    return "actualSha256 does not match retained original bytes";
+  }
+  if (uploaded.generation == null || uploaded.generation === "" || uploaded.generation === "verified") {
+    return "generation is not a storage object generation";
+  }
+  const genErr = generationError(uploaded.generation);
+  if (genErr) return genErr;
+  if (uploaded.ownerUid !== expected.ownerUid) return "owner does not match stored evidence";
+  if (uploaded.ledgerId !== expected.ledgerId) return "ledger does not match stored evidence";
+  if (uploaded.receiptId !== expected.receiptId) return "receipt does not match stored evidence";
+  if (uploaded.evidenceId !== expected.evidenceId) return "evidenceId does not match stored evidence";
+  if (uploaded.category !== expected.category) return "category does not match stored evidence";
+  if (uploaded.mime !== expected.mime) return "mime does not match stored evidence";
+  if (uploaded.sizeBytes !== expected.sizeBytes) return "size does not match stored original";
+  if (uploaded.storagePath !== expected.storagePath) return "storagePath does not match stored original";
+  if (!uploaded.reservationId) return "reservation identity is missing";
   return null;
 }
 
@@ -399,6 +490,10 @@ export function splitIntoHashChunks(
   return out.length > 0 ? out : [bytes.subarray(0, 0)];
 }
 
+/**
+ * Hash retained original bytes in bounded chunks. Team 3/4 must inject a
+ * `ChunkHasher` and must not load the whole file as base64.
+ */
 export async function hashBoundedChunks(
   chunks: AsyncIterable<Uint8Array> | Iterable<Uint8Array>,
   hasher: ChunkHasher,
@@ -514,7 +609,7 @@ export function buildVerifiedEvidenceResult(input: {
   ownerUid: string;
   ledgerId: string;
   receiptId: string;
-  category: Wave1OriginalCategory;
+  category: UploadOriginalCategory;
   mime: AllowedOriginalMime;
   trusted: TrustedStorageHash;
   storagePath: string;
@@ -562,7 +657,12 @@ export function verifiedResultsEquivalent(
  */
 export function originalEvidenceFromVerifiedResult(
   verified: VerifiedEvidenceResult,
-  extras: { originalFileName?: string | null; labelledSupport?: LabelledEvidenceSupport } = {}
+  extras: {
+    originalFileName?: string | null;
+    labelledSupport?: LabelledEvidenceSupport;
+    captureProvenance?: OriginalCaptureProvenance | string;
+    osConversionOccurred?: boolean;
+  } = {}
 ): OriginalEvidence {
   return {
     evidenceId: verified.evidenceId,
@@ -572,8 +672,8 @@ export function originalEvidenceFromVerifiedResult(
     byteSize: verified.byteSize,
     rawSha256: verified.rawSha256,
     storageObjectGeneration: verified.generation,
-    captureProvenance: "grin-g2-retained-original",
-    osConversionOccurred: false,
+    captureProvenance: extras.captureProvenance ?? "grin-g2-retained-original",
+    osConversionOccurred: extras.osConversionOccurred === true,
     verification: "verified",
     isDerivative: false,
     labelledSupport: extras.labelledSupport,
