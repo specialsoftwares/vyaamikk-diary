@@ -12,7 +12,9 @@ QA artefacts. Not production implementations. Not G6 completion.
 | `WAVE2_PHASE2_REVIEW.md` | PHASE 2 re-execution after T1–T4 landings — inspected defects no longer reproduce; **Wave 2 not accepted** |
 | `WAVE2APP_F5_REVIEW.md` | Independent F1–F4 production-path review on combined `7623eef`; **Wave 2 / public release / G6 not accepted** |
 | `WAVE2EVIDENCE_E1_E5_REPRO.md` | Independent E1–E5 evidence-workflow reproductions on combined `41670aa`; **Wave 2 not accepted** |
+| `WAVE2EVIDENCE_E1_E5_REREVIEW.md` | PHASE 2 independent rereview of corrected combined `ae0339a`; E4 remaining; **Wave 2 not accepted** |
 | `wave2evidence-e1-e5-repro.ts` | SQLITE_HOST / INJECTED / host-filesystem drivers for E1–E5 |
+| `wave2evidence-e1-e5-rereview.ts` | PHASE 2 persistGrinOwnerSession inspection + unset-host failure |
 | `wave2-w2-repro.ts` | PHASE 1 SQLITE_HOST / INJECTED / mounted-inert drivers |
 | `wave2-phase2-repro.ts` | PHASE 2 re-execution of the same findings |
 | `wave2-w2-04-rules.emulator.ts` | Isolated STORAGE_EMULATOR original-read (PHASE 1 deny / PHASE 2 retained) |

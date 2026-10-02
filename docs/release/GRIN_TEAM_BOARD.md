@@ -5,16 +5,16 @@ Do not collapse to Done.
 
 Arrangement: one coordinator plus five **local** Cursor Task subagents on separate worktrees. AI roles, not human sign-off.
 
-Checkpoint inspected: combined includes T5 repro `4711f7d`, Team 2 `29c6d3f`, Team 3 `0d0dd84`, Team 4 `83f10f8`, Team 1 `15bd2a6`. Validated application `99ee60c`. T5 F5 reviewed `7623eef`. `origin/main` `0da2f58970f23c7ce6cbefae6efffd49c731f44b`. Historical workspace `55f2df1` dirty — **untouched**. Contract `2026-10-02.wave2evidence`. Wave 2 / G6 / public release **not accepted**.
+Checkpoint inspected: combined `ae0339a` (T5 PHASE 2 rereview). Includes T5 PHASE 1 `4711f7d`, Team 2 `29c6d3f`, Team 3 `0d0dd84`, Team 4 `83f10f8`, Team 1 `15bd2a6`. T5 F5 reviewed `7623eef`. Historical workspace `55f2df1` dirty — **untouched**. Contract `2026-10-02.wave2evidence`. Wave 2 / G6 / public release **not accepted**.
 
 | Task | Owner | Branch | Worktree | Dependency | Status | Evidence | Blocker | Next |
 |---|---|---|---|---|---|---|---|---|
-| Integration | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | G1 `c9623dd` | running | T1–T4 merged; JS httpsCallable round-trip green | Functions unexported; `gh` unauthenticated | Team 5 re-review of corrected tree |
+| Integration | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | G1 `c9623dd` | running | T1–T4 merged; T5 PHASE 2 rereview of `ae0339a` | Functions unexported; E4 remaining; `gh` unauthenticated | Do not mark Wave 2 / G6 Done |
 | E1 evidence composition | team1 | `team/grin-t1-backend` | `grin-t1-backend` | `15bd2a6` | source_verified | `test:goods-evidence-g1-functions-emulator` real httpsCallable | live export HOLD | Stay unexported / undeployed |
 | E1/E2/E4/E5 evidence integrity | team2 | `team/grin-t2-evidence` | `grin-t2-evidence` | `29c6d3f` | source_verified | G2 unit + STORAGE_EMULATOR 8091/9200 | live IAM | Stay undeployed |
 | E2/E3 admission + descriptors | team3 | `team/grin-t3-offline` | `grin-t3-offline` | `0d0dd84` | source_verified | SQLITE_HOST outbox + F2 interop without 0-shim | native death not claimed | Stay undeployed |
 | E4 picker + E5 pack + E1 wire | team4 | `team/grin-t4-product` | `grin-t4-product` | `83f10f8` | source_verified | `test:grin-product` SQLITE_HOST including picker/origin.bind/pack A–D | NATIVE_DEVICE; pricing/quota | Stay undeployed |
-| Independent E1–E5 review | team5 | `team/grin-t5-qa` | `grin-t5-qa` | `4711f7d` | running | WAVE2EVIDENCE_E1_E5_REPRO.md — all 8 cases reproduced | NATIVE_DEVICE | Re-review corrected combined tree |
+| Independent E1–E5 review | team5 | `team/grin-t5-qa` | `grin-t5-qa` | `ae0339a` | review | WAVE2EVIDENCE_E1_E5_REREVIEW.md — E1–E3/E5 pass at labelled hosts; E4 remaining | NATIVE_DEVICE; pack `osConversionOccurred: false`; hasher unwired on persist | Do not mark Wave 2 / G6 Done |
 
 ## Wave 2 correction findings (closed at stated boundary; not Wave 2 acceptance)
 
@@ -35,15 +35,15 @@ Checkpoint inspected: combined includes T5 repro `4711f7d`, Team 2 `29c6d3f`, Te
 | F3 | Attachments list-only; placeholder pack | team2 + team4 + team3 | source_verified | E1–E5 make the pack path real |
 | F4 | Transport composition not emulator-proven | team1 + team4 + coordinator | source_verified | E1 adds evidence port + Functions-emulator |
 
-## Evidence workflow findings (open at `13f90ed` / `99ee60c`)
+## Evidence workflow findings (T5 PHASE 2 rereview of `ae0339a`; Wave 2 not accepted)
 
 | ID | Finding | Owner | Status | Next |
 |---|---|---|---|---|
-| E1 | Production `GrinOutbox` has `evidence: null`; transport voids `localPath` | team1 + team2 + team4 | source_verified | Isolated Functions-emulator httpsCallable round-trip; live export HOLD |
-| E2 | `originalIdentityMatches` accepts echoed claim / null hashes | team2 + team3 | source_verified | SQLITE_HOST admission; T1 round-trip still open |
-| E3 | Upload persists flags only; pack uses claimed hash and `generation="verified"` | team3 + team4 | source_verified | Pack inputs use `actualSha256` / `object_generation`; T1 round-trip still open |
-| E4 | Picker images-only, quality 0.8, URI-only, size 0, no hash | team2 + team4 | source_verified | SQLITE_HOST / host filesystem; NATIVE_DEVICE remains G6 |
-| E5 | App categories omit stock/payment/GST/return; pack assertions too coarse | team2 + team4 | source_verified | App attach + pack A/B/C/D SQLITE_HOST; originals not bundled |
+| E1 | Production `GrinOutbox` omitted evidence; transport voided `localPath` | team1 + team2 + team4 | source_verified | T5 PHASE 2: construction + isolated Functions `httpsCallable` executed; hasher still unwired on persist; live export HOLD |
+| E2 | `originalIdentityMatches` accepted echoed claim / null hashes | team2 + team3 | source_verified | T5 PHASE 2 SQLITE_HOST negatives + known-bytes; hash is integrity not legal truth |
+| E3 | Upload persisted flags only; pack used claimed hash and `generation="verified"` | team3 + team4 | source_verified | T5 PHASE 2 SQLITE_HOST descriptors + stale fence; pack maps actual hash/generation/mime |
+| E4 | Picker images-only, quality 0.8, URI-only, size 0, no hash | team2 + team4 | review | T5 PHASE 2: picker quality 0.8 gone and durable copy executed; pack assembler still hardcodes `osConversionOccurred: false` |
+| E5 | App categories omit stock/payment/GST/return; pack assertions too coarse | team2 + team4 | source_verified | T5 PHASE 2 attach + pack A/B/C/D; originals not bundled; app pack B stamps sqlite in tests |
 
 Previous ER-1…ER-5 remain mapped. Mapping is not Wave 2 acceptance.
 
@@ -51,8 +51,8 @@ Previous ER-1…ER-5 remain mapped. Mapping is not Wave 2 acceptance.
 
 | Gate | State |
 |---|---|
-| GRIN SOURCE IMPLEMENTATION | F1–F4 and E1–E5 closed at stated hosts (emulator/SQLITE_HOST/INJECTED); Wave 2 not accepted |
-| COMBINED SOURCE REVIEW | T5 F5 `889f011` of `7623eef`; T5 E1–E5 **reproduced** at `4711f7d`; T5 re-review of corrected tree in flight; Wave 2 not accepted |
+| GRIN SOURCE IMPLEMENTATION | F1–F4 preserved; E1–E3/E5 pass at labelled hosts; E4 remaining pack `osConversionOccurred: false`; Wave 2 not accepted |
+| COMBINED SOURCE REVIEW | T5 F5 `889f011` of `7623eef`; T5 E1–E5 PHASE 1 `4711f7d` of `41670aa`; T5 PHASE 2 rereview of `ae0339a`; Wave 2 not accepted |
 | BACKEND DEPLOYMENT | not authorized |
 | INTERNAL BUILD | not authorized |
 | DEVICE ACCEPTANCE | device_pending |

@@ -80,3 +80,7 @@ Starting combined HEAD `13f90ed33ce60a701eb2e3a73a1e279f2be1888f`. Contract `202
 
 `15bd2a6bd1bc04f0605112e095a1eb0c314be224` on `team/grin-t1-backend`, merged to combined. Isolated `tools/goods-evidence-emulator/functions-entry` compose reserve → JS Storage upload → stored-byte verify. `npm run test:goods-evidence-g1-functions-emulator` passed with real `httpsCallable` (not mocked) on demo-vyaamikk-grin-t1. `functions/src/index.ts` still has no GRIN export. Live Rules unchanged. versionCode 23. Purchase-entry flags `"0"`. Team 5 re-review next. Do not mark GRIN / G6 / billing / public-release Done.
 
+## Team 5 E1–E5 PHASE 2 rereview (unsent, 2026-10-02)
+
+Independent QA of corrected combined `ae0339a30edd92e92f4b05f734fddb4710aacaf4` on `team/grin-t5-qa`. PHASE 1 mapping at `41670aa` / `4711f7d` is not closure. Executed: persistGrinOwnerSession wires both JS ports; Functions-emulator real `httpsCallable` (unset hosts fail); SQLITE_HOST E2/E3; Firestore adapter register→amend→QC→return→read-confirmed; mounted EWB/attachments/pack with retirement. E4 remaining: pack assembler hardcodes `osConversionOccurred: false`. Production persist still has no `localOriginalHasher`. `functions/src/index.ts` HOLD. versionCode 23. Purchase-entry flags `"0"`. GRIN default-off. **Wave 2 not accepted.** Do not mark GRIN / G6 / billing / public-release Done.
+
