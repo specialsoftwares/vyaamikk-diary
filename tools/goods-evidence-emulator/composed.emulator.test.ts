@@ -182,6 +182,93 @@ async function main(): Promise<void> {
     assert.deepEqual(mutated.confirmed.original.remarks, { kind: "not_supplied" });
   }
 
+  function qcPayload(commandId: string, receiptId: string, expectedVersion: number) {
+    const frozen = freezeCommand({
+      commandId,
+      type: "recordQc",
+      ownerUid: OWNER,
+      ledgerId: LEDGER,
+      body: {
+        receiptId,
+        expectedVersion,
+        reason: "emulator qc hold",
+        qcStatus: "hold",
+        clientObservedAtUtc: "2026-09-28T13:10:00.000Z",
+      },
+    });
+    return {
+      envelope: {
+        commandId: frozen.commandId,
+        type: frozen.type,
+        ledgerId: frozen.ledgerId,
+        body: frozen.body,
+      },
+    };
+  }
+
+  function returnPayload(commandId: string, receiptId: string, expectedVersion: number) {
+    const frozen = freezeCommand({
+      commandId,
+      type: "dispatchReturn",
+      ownerUid: OWNER,
+      ledgerId: LEDGER,
+      body: {
+        receiptId,
+        expectedVersion,
+        reason: "emulator return",
+        lineId: "line_1",
+        returnQty: { value: "4", unit: "bags", precision: 0 },
+        clientObservedAtUtc: "2026-09-28T13:20:00.000Z",
+      },
+    });
+    return {
+      envelope: {
+        commandId: frozen.commandId,
+        type: frozen.type,
+        ledgerId: frozen.ledgerId,
+        body: frozen.body,
+      },
+    };
+  }
+
+  const qc = await callables.mutate({
+    auth: { uid: OWNER },
+    data: qcPayload("command_e03", "receipt_e01", 2),
+  });
+  assert.equal(qc.ok, true, "EMULATOR register→amend→QC");
+  if (!qc.ok) throw new Error("expected qc");
+  assert.equal(qc.eventVersion, 3);
+
+  const returned = await callables.mutate({
+    auth: { uid: OWNER },
+    data: returnPayload("command_e04", "receipt_e01", 3),
+  });
+  assert.equal(returned.ok, true, "EMULATOR QC→return");
+  if (!returned.ok) throw new Error("expected return");
+  assert.equal(returned.eventVersion, 4);
+
+  const confirmedPath = await callables.readReceipt({
+    auth: { uid: OWNER },
+    data: { ledgerId: LEDGER, receiptId: "receipt_e01" },
+  });
+  assert.equal(confirmedPath.ok, true, "EMULATOR read-confirmed after return");
+  if (!confirmedPath.ok) throw new Error("expected confirmed path");
+  assert.equal(confirmedPath.confirmed.eventVersion, 4);
+  assert.equal(confirmedPath.confirmed.headHash, returned.headHash);
+  assert.equal(confirmedPath.confirmed.events.map((event) => event.type).join(","), [
+    "receipt_registered",
+    "field_amended",
+    "qc_decision",
+    "return_dispatched",
+  ].join(","));
+  assert.deepEqual(confirmedPath.confirmed.original.remarks, { kind: "not_supplied" });
+  assert.equal(
+    confirmedPath.confirmed.original.originalSnapshotHash,
+    afterRegisterRead.confirmed.original.originalSnapshotHash
+  );
+  assert.equal("confirmed" in qc, true);
+  assert.equal("confirmed" in returned, true);
+
   const foreignRead = await callables.readReceipt({
     auth: { uid: ATTACKER },
     data: { ledgerId: LEDGER, receiptId: "receipt_e01" },

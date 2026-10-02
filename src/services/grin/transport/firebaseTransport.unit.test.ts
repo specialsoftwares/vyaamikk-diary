@@ -12,7 +12,6 @@ import {
   GRIN_READ_CALLABLE,
   GRIN_RECONCILE_CALLABLE,
   GRIN_REGISTER_CALLABLE,
-  GRIN_UPLOAD_EVIDENCE_CALLABLE,
 } from "./callableNames";
 
 const OWNER = "owner_transport";
@@ -201,10 +200,19 @@ async function main(): Promise<void> {
   if (afterAwait.ok) throw new Error("expected forbidden after auth change");
   assert.equal(afterAwait.code, "forbidden");
 
+  const pdfBytes = Uint8Array.from([0x25, 0x50, 0x44, 0x46, 1, 2, 3, 4, 5, 6, 7, 8]);
+  let putCalled = false;
   const evidence = createFirebaseGrinEvidenceTransport({
     currentAuth: () => ({ uid: OWNER }),
-    call: async (name) => {
-      assert.equal(name, GRIN_UPLOAD_EVIDENCE_CALLABLE);
+    readLocalBytes: async (localPath) => {
+      assert.equal(localPath, "/tmp/retained-original");
+      return pdfBytes;
+    },
+    putObject: async () => {
+      putCalled = true;
+      throw new Error("must not upload when reserve is unexported");
+    },
+    call: async () => {
       throw Object.assign(new Error("not found"), { code: "functions/not-found" });
     },
   });
@@ -214,16 +222,45 @@ async function main(): Promise<void> {
     receiptId: "receipt_t01",
     evidenceId: "evidence_t01",
     role: "original",
-    localPath: "/tmp/not-read",
+    localPath: "/tmp/retained-original",
     claimedSha256: HASH,
     category: "invoice",
-    sizeBytes: 12,
+    sizeBytes: pdfBytes.byteLength,
   });
   assert.equal(evidenceClosed.ok, false);
   assert.equal(evidenceClosed.originalDurable, false);
   assert.equal(evidenceClosed.evidenceId, null);
   assert.equal(evidenceClosed.actualSha256, null);
   assert.equal(evidenceClosed.retryable, true);
+  assert.equal(putCalled, false, "missing backend must not mark original durable");
+
+  let liveEvidenceUid = OWNER;
+  const switchedEvidence = createFirebaseGrinEvidenceTransport({
+    currentAuth: () => ({ uid: liveEvidenceUid }),
+    readLocalBytes: async () => {
+      liveEvidenceUid = OTHER;
+      return pdfBytes;
+    },
+    putObject: async () => {
+      throw new Error("must not upload after auth change");
+    },
+    call: async () => {
+      throw new Error("must not call after auth change");
+    },
+  });
+  const afterReadSwitch = await switchedEvidence.upload({
+    uid: OWNER,
+    ledgerId: "ledger_t",
+    receiptId: "receipt_t01",
+    evidenceId: "evidence_t01",
+    role: "original",
+    localPath: "/tmp/retained-original",
+    claimedSha256: HASH,
+    category: "invoice",
+    sizeBytes: pdfBytes.byteLength,
+  });
+  assert.equal(afterReadSwitch.ok, false);
+  assert.equal(afterReadSwitch.originalDurable, false);
 
   console.log("src/services/grin/transport/firebaseTransport.unit.test.ts: ok (INJECTED / not live deploy)");
 }

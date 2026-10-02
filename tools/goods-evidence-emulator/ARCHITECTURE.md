@@ -8,7 +8,13 @@ Domain checkpoint `55f2df1405c296336eea058238c8ae24e7a8b370`. Core candidate `6e
 - Adapter: `tools/goods-evidence-emulator/**` (trusted emulator backend).
 - Generated Functions domain: `functions/src/goodsEvidence/**` via `packageFunctionsGoodsEvidence.ts`. Undeployed. Fail-closed handlers in `callables.ts` are not exported from `functions/src/index.ts`.
 - `composed.ts` is tests/emulator composition (INJECTED / EMULATOR / not live deploy). It injects `GoodsEvidenceRegisterAdapter`; it does not import that adapter (rootDir would lift `lib/index.js`).
-- Mobile transport is `src/services/grin/transport/**` (Firebase JS `httpsCallable`). It must not import this emulator folder.
+- Mobile transport is `src/services/grin/transport/**` (Firebase JS `httpsCallable` +
+  JS Storage for evidence bytes). It must not import this emulator folder.
+- Isolated Functions-emulator entry (E1): `tools/goods-evidence-emulator/functions-entry/**`.
+  Composes `createComposedGrinCallables` with G1 + G2 adapters. Ports: Functions **5002**,
+  Firestore **8090**, Storage **9201**, Auth **9100**, project `demo-vyaamikk-grin-t1`.
+  `GRIN_GOODS_EVIDENCE_FUNCTIONS=true` on that emulator process only. Not
+  `functions/src/index.ts`. Do not deploy.
 - `tools/goods-evidence-emulator/serverPort.ts` remains TEST COMPOSITION. Do not wire it into the app.
 - Production `functions/src/index.ts`, `functions/tsconfig.json`, and `functions/package.json` are unchanged.
 - Direct `functions/src` → `src/goodsEvidence` imports are forbidden (tsc `rootDir` lifts; `lib/index.js` would move).
