@@ -10,7 +10,7 @@ import path from "node:path";
 import { applyPendingLocalMigrations, initializeLocalDatabase, resetLocalDatabaseInitStateForStartup } from "./init";
 import { closeLocalDatabaseForTests, setLocalDatabaseForTests } from "./database";
 import { execStatements, migrateToV7, migrateToV8, migrateToV9, tableExists, tableHasColumn } from "./migrate";
-import { GRIN_CONFIRMED_COLUMNS, GRIN_V10_INDEXES, grinV10TablesPresent } from "./migrateGrin";
+import { GRIN_CONFIRMED_COLUMNS, GRIN_EVIDENCE_DESCRIPTOR_COLUMNS, GRIN_V10_INDEXES, grinV10TablesPresent } from "./migrateGrin";
 import { DB_VERSION, MIGRATIONS_V1 } from "./schema";
 import { openHostSqlite, SQLITE_HOST, type HostSqlite } from "@/services/grin/outbox/hostSqlite";
 import { SQLITE_HOST_NOT_NATIVE_DEVICE } from "@/services/grin/outbox/types";
@@ -85,11 +85,12 @@ function assertRequiredGrinV10(db: GrinSqlDb): void {
   assert.equal(tableExists(migrateDb, "grin_local_evidence_files"), true);
   assert.equal(tableHasColumn(migrateDb, "grin_local_evidence_files", "category"), true);
   assert.equal(tableHasColumn(migrateDb, "grin_outbox_commands", "lease_attempt_id"), true);
-  assert.equal(tableHasColumn(migrateDb, "grin_local_receipts", "confirmed_event_version"), true);
-  assert.equal(tableHasColumn(migrateDb, "grin_local_receipts", "confirmed_head_hash"), true);
-  assert.equal(tableHasColumn(migrateDb, "grin_local_receipts", "confirmed_original_json"), true);
-  assert.equal(tableHasColumn(migrateDb, "grin_local_receipts", "confirmed_events_json"), true);
-  assert.equal(tableHasColumn(migrateDb, "grin_local_receipts", "confirmed_effective_json"), true);
+  for (const column of GRIN_CONFIRMED_COLUMNS) {
+    assert.equal(tableHasColumn(migrateDb, "grin_local_receipts", column), true, column);
+  }
+  for (const column of GRIN_EVIDENCE_DESCRIPTOR_COLUMNS) {
+    assert.equal(tableHasColumn(migrateDb, "grin_local_evidence_files", column), true, column);
+  }
   for (const name of GRIN_V10_INDEXES) {
     assert.equal(indexExists(db, name), true, `missing index ${name}`);
   }
@@ -270,6 +271,38 @@ async function main(): Promise<void> {
       assert.equal(readSchemaVersion(db), 10);
       applyPendingLocalMigrations(asMigrateDb(db));
       assert.equal(tableHasColumn(asMigrateDb(db), "grin_local_receipts", "confirmed_event_version"), true);
+      assertRequiredGrinV10(db);
+    });
+
+    await withHostFile(async (db) => {
+      seedV9Diary(db);
+      applyPendingLocalMigrations(asMigrateDb(db));
+      db.execSync("DROP TABLE grin_local_evidence_files");
+      db.execSync(`
+        CREATE TABLE grin_local_evidence_files (
+          id TEXT PRIMARY KEY NOT NULL,
+          owner_uid TEXT NOT NULL,
+          ledger_id TEXT NOT NULL,
+          receipt_id TEXT NOT NULL,
+          evidence_id TEXT NOT NULL,
+          role TEXT NOT NULL,
+          local_path TEXT NOT NULL,
+          claimed_sha256 TEXT,
+          byte_size INTEGER,
+          category TEXT,
+          upload_state TEXT NOT NULL,
+          original_durable INTEGER NOT NULL DEFAULT 0,
+          retain_local INTEGER NOT NULL DEFAULT 1,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )
+      `);
+      assert.equal(tableHasColumn(asMigrateDb(db), "grin_local_evidence_files", "category"), true);
+      assert.equal(tableHasColumn(asMigrateDb(db), "grin_local_evidence_files", "actual_sha256"), false);
+      assert.equal(grinV10TablesPresent(asMigrateDb(db)), false);
+      applyPendingLocalMigrations(asMigrateDb(db));
+      assert.equal(tableHasColumn(asMigrateDb(db), "grin_local_evidence_files", "actual_sha256"), true);
+      assert.equal(tableHasColumn(asMigrateDb(db), "grin_local_evidence_files", "object_generation"), true);
       assertRequiredGrinV10(db);
     });
 

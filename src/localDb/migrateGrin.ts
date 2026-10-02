@@ -40,6 +40,20 @@ export const GRIN_CONFIRMED_COLUMNS = [
   "confirmed_effective_json",
 ] as const;
 
+/**
+ * Additive v10 trusted-verification descriptor columns on local originals.
+ * Do not rewrite migrateToV10 CREATE TABLE. Old rows stay NULL (pending/incomplete).
+ */
+export const GRIN_EVIDENCE_DESCRIPTOR_COLUMNS = [
+  "actual_sha256",
+  "mime",
+  "size_bytes",
+  "storage_path",
+  "object_generation",
+  "reservation_id",
+  "capture_provenance",
+] as const;
+
 export const GRIN_MIGRATIONS_V10 = `
 CREATE TABLE IF NOT EXISTS grin_local_receipts (
   id TEXT PRIMARY KEY NOT NULL,
@@ -177,6 +191,29 @@ export function migrateToV10(db: Db): void {
       db.execSync("ALTER TABLE grin_local_receipts ADD COLUMN confirmed_effective_json TEXT");
     }
   }
+  if (tableExists(db, "grin_local_evidence_files")) {
+    if (!tableHasColumn(db, "grin_local_evidence_files", "actual_sha256")) {
+      db.execSync("ALTER TABLE grin_local_evidence_files ADD COLUMN actual_sha256 TEXT");
+    }
+    if (!tableHasColumn(db, "grin_local_evidence_files", "mime")) {
+      db.execSync("ALTER TABLE grin_local_evidence_files ADD COLUMN mime TEXT");
+    }
+    if (!tableHasColumn(db, "grin_local_evidence_files", "size_bytes")) {
+      db.execSync("ALTER TABLE grin_local_evidence_files ADD COLUMN size_bytes INTEGER");
+    }
+    if (!tableHasColumn(db, "grin_local_evidence_files", "storage_path")) {
+      db.execSync("ALTER TABLE grin_local_evidence_files ADD COLUMN storage_path TEXT");
+    }
+    if (!tableHasColumn(db, "grin_local_evidence_files", "object_generation")) {
+      db.execSync("ALTER TABLE grin_local_evidence_files ADD COLUMN object_generation TEXT");
+    }
+    if (!tableHasColumn(db, "grin_local_evidence_files", "reservation_id")) {
+      db.execSync("ALTER TABLE grin_local_evidence_files ADD COLUMN reservation_id TEXT");
+    }
+    if (!tableHasColumn(db, "grin_local_evidence_files", "capture_provenance")) {
+      db.execSync("ALTER TABLE grin_local_evidence_files ADD COLUMN capture_provenance TEXT");
+    }
+  }
 }
 
 /**
@@ -196,6 +233,9 @@ export function grinV10TablesPresent(db: Db): boolean {
   if (!tableHasColumn(db, "grin_outbox_commands", "lease_attempt_id")) return false;
   for (const column of GRIN_CONFIRMED_COLUMNS) {
     if (!tableHasColumn(db, "grin_local_receipts", column)) return false;
+  }
+  for (const column of GRIN_EVIDENCE_DESCRIPTOR_COLUMNS) {
+    if (!tableHasColumn(db, "grin_local_evidence_files", column)) return false;
   }
   return GRIN_V10_INDEXES.every((name) => grinIndexExists(db, name));
 }

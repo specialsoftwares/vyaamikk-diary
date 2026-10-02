@@ -9,7 +9,7 @@ import type {
   GrinRegisterSuccess,
   GrinStoredCommandResult,
 } from "@/goodsEvidence/ports";
-import { isWave1OriginalCategory } from "@/goodsEvidence/evidence";
+import { buildOriginalStoragePath, isWave1OriginalCategory } from "@/goodsEvidence/evidence";
 import type {
   GrinEvidenceUploadInput,
   GrinEvidenceUploadPort,
@@ -17,6 +17,7 @@ import type {
   GrinMutationEnvelope,
   GrinServerCommandPort,
 } from "./ports";
+import { nonDurableEvidenceUploadResult } from "./ports";
 import type { LocalEvidenceRole } from "./types";
 
 type StoredCommand = {
@@ -288,34 +289,37 @@ export function createFakeGrinServerPort(opts?: { mutate?: boolean; readReceipt?
 }
 
 function notDurableResult(retryable: boolean, generation: string | null = null): GrinEvidenceUploadResult {
-  return {
-    ok: false,
-    originalDurable: false,
-    generation,
-    retryable,
-    evidenceId: null,
-    receiptId: null,
-    ledgerId: null,
-    category: null,
-    claimedSha256: null,
-    actualSha256: null,
-    reservationId: null,
-  };
+  return nonDurableEvidenceUploadResult(retryable, generation);
 }
 
 function derivativeResult(ok: boolean, generation: string | null): GrinEvidenceUploadResult {
   return {
+    ...nonDurableEvidenceUploadResult(!ok, generation),
     ok,
     originalDurable: false,
-    generation,
-    retryable: !ok,
-    evidenceId: null,
-    receiptId: null,
-    ledgerId: null,
-    category: null,
-    claimedSha256: null,
-    actualSha256: null,
-    reservationId: null,
+  };
+}
+
+function durableOriginalResult(input: GrinEvidenceUploadInput, extras?: Partial<GrinEvidenceUploadResult>): GrinEvidenceUploadResult {
+  const category = isWave1OriginalCategory(input.category) ? input.category : null;
+  const objectKey = `${"testhostobjectkey".padEnd(16, "x")}${input.evidenceId}`.slice(0, 64);
+  const claimed = input.claimedSha256;
+  return {
+    ok: true,
+    originalDurable: true,
+    generation: extras?.generation ?? "orig-gen-1",
+    retryable: false,
+    ownerUid: extras?.ownerUid ?? input.uid,
+    mime: extras?.mime ?? "application/pdf",
+    sizeBytes: extras?.sizeBytes ?? input.sizeBytes,
+    storagePath: extras?.storagePath ?? buildOriginalStoragePath(input.uid, objectKey.replace(/[^A-Za-z0-9_-]/g, "x")),
+    evidenceId: extras?.evidenceId ?? input.evidenceId,
+    receiptId: extras?.receiptId ?? input.receiptId,
+    ledgerId: extras?.ledgerId ?? input.ledgerId,
+    category: extras?.category !== undefined ? extras.category : category,
+    claimedSha256: extras?.claimedSha256 !== undefined ? extras.claimedSha256 : claimed,
+    actualSha256: extras?.actualSha256 !== undefined ? extras.actualSha256 : claimed,
+    reservationId: extras?.reservationId ?? `resv_${input.evidenceId}`,
   };
 }
 
@@ -329,6 +333,8 @@ export type FakeEvidenceUploadPort = GrinEvidenceUploadPort & {
   failNextDerivative: boolean;
   mismatchOriginalIdentity: boolean;
   remainingOriginalFails: number;
+  nextOriginalResult: GrinEvidenceUploadResult | null;
+  originalResultPatch: Partial<GrinEvidenceUploadResult> | null;
   waitUntilUploadEntered(): Promise<void>;
   refreshUploadEnteredWait(): void;
 };
@@ -355,6 +361,8 @@ export function createFakeEvidenceUploadPort(opts?: { failOriginalTimes?: number
     failNextDerivative: false,
     mismatchOriginalIdentity: false,
     remainingOriginalFails: opts?.failOriginalTimes ?? 0,
+    nextOriginalResult: null,
+    originalResultPatch: null,
     waitUntilUploadEntered() {
       return entered;
     },
@@ -384,35 +392,21 @@ export function createFakeEvidenceUploadPort(opts?: { failOriginalTimes?: number
         port.remainingOriginalFails -= 1;
         return notDurableResult(true);
       }
-      const claimed = input.claimedSha256;
-      if (port.mismatchOriginalIdentity) {
-        return {
-          ok: true,
-          originalDurable: true,
-          generation: "orig-gen-mismatch",
-          retryable: false,
-          evidenceId: "ev_other",
-          receiptId: input.receiptId,
-          ledgerId: input.ledgerId,
-          category: input.category,
-          claimedSha256: claimed,
-          actualSha256: claimed,
-          reservationId: "resv_mismatch",
-        };
+      if (port.nextOriginalResult) {
+        const next = port.nextOriginalResult;
+        port.nextOriginalResult = null;
+        return next;
       }
-      return {
-        ok: true,
-        originalDurable: true,
-        generation: "orig-gen-1",
-        retryable: false,
-        evidenceId: input.evidenceId,
-        receiptId: input.receiptId,
-        ledgerId: input.ledgerId,
-        category: input.category,
-        claimedSha256: claimed,
-        actualSha256: claimed,
-        reservationId: `resv_${input.evidenceId}`,
-      };
+      const patch = port.originalResultPatch;
+      if (port.mismatchOriginalIdentity) {
+        return durableOriginalResult(input, {
+          evidenceId: "ev_other",
+          reservationId: "resv_mismatch",
+          generation: "orig-gen-mismatch",
+          ...patch,
+        });
+      }
+      return durableOriginalResult(input, patch ?? undefined);
     },
   };
   return port;

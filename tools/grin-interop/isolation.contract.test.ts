@@ -58,5 +58,7 @@ const f2 = readFileSync(join(dir, "f2-register-amend-confirm.sqliteHost.test.ts"
 assert.match(f2, /NATIVE_DEVICE=not_claimed/);
 assert.match(f2, /SQLITE_HOST/);
 assert.match(f2, /INJECTED/);
+assert.doesNotMatch(f2, /bindRepoAmendToConfirmed/);
+assert.doesNotMatch(f2, /rec\.expectedVersion === 0/);
 
 console.log("tools/grin-interop/isolation.contract.test.ts: ok");

@@ -11,6 +11,9 @@
  *
  * Host reopen is not NATIVE_DEVICE process-death proof.
  * Mobile src/ must not import this file or tools/goods-evidence-emulator.
+ *
+ * Production repo reads getConfirmedProjection. This file must not rewrite
+ * an invalid expectedVersion.
  */
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -19,7 +22,6 @@ import path from "node:path";
 
 import { sampleRegisterBody } from "@/goodsEvidence/testFixtures";
 import { quantity } from "@/goodsEvidence/quantities";
-import { GRIN_NO_CONFIRMED_VERSION } from "@/goodsEvidence/ports";
 import { DB_VERSION } from "@/localDb/schema";
 import { openHostSqlite, SQLITE_HOST, type HostSqlite } from "@/services/grin/outbox/hostSqlite";
 import { GrinOutbox } from "@/services/grin/outbox/outbox";
@@ -47,30 +49,6 @@ function interopClock(nowMs: number): G1Clock {
     nowMs: () => nowMs,
     uuid: () => `evtf2${String(++seq).padStart(8, "0")}`,
   };
-}
-
-/**
- * Team 4 repo.amend still hardcodes expectedVersion 0. This host-test shim
- * rewrites 0 to confirmed.eventVersion so the joined flow can call repo.amend
- * without editing Team 4 files. Production T4 must read getConfirmedProjection.
- */
-function bindRepoAmendToConfirmed(outbox: GrinOutbox): void {
-  const persist = outbox.persistMutationAndQueue.bind(outbox);
-  outbox.persistMutationAndQueue = ((session, input) => {
-    const body = input.body;
-    if (body && typeof body === "object") {
-      const rec = body as { expectedVersion?: unknown; receiptId?: string };
-      if (rec.expectedVersion === 0 && typeof rec.receiptId === "string") {
-        const confirmed = outbox.getConfirmedProjection(session.ownerUid, input.ledgerId, rec.receiptId);
-        if (!confirmed) throw new Error(GRIN_NO_CONFIRMED_VERSION);
-        return persist(session, {
-          ...input,
-          body: { ...(rec as Record<string, unknown>), expectedVersion: confirmed.eventVersion },
-        });
-      }
-    }
-    return persist(session, input);
-  }) as GrinOutbox["persistMutationAndQueue"];
 }
 
 function wrapLostMutate(server: InjectedGrinServerPort): { dropNext(): void } {
@@ -142,7 +120,6 @@ async function main(): Promise<void> {
 
     let box = new GrinOutbox({ db, server });
     box.ensureSchema();
-    bindRepoAmendToConfirmed(box);
     let session = box.beginOwnerSession(OWNER);
     let repo = repoFor(box, db, session);
 
@@ -209,7 +186,6 @@ async function main(): Promise<void> {
 
     db = reopen();
     box = new GrinOutbox({ db, server });
-    bindRepoAmendToConfirmed(box);
     const afterReopen = box.getConfirmedProjection(OWNER, LEDGER, RECEIPT);
     assert.ok(afterReopen);
     assert.equal(warehouseOf(afterReopen.original.warehouse), "Main godown");

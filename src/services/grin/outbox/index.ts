@@ -1,4 +1,4 @@
-export { migrateToV10, GRIN_DB_TARGET_VERSION, GRIN_MIGRATIONS_V10, grinV10TablesPresent, GRIN_V10_INDEXES, GRIN_CONFIRMED_COLUMNS } from "@/localDb/migrateGrin";
+export { migrateToV10, GRIN_DB_TARGET_VERSION, GRIN_MIGRATIONS_V10, grinV10TablesPresent, GRIN_V10_INDEXES, GRIN_CONFIRMED_COLUMNS, GRIN_EVIDENCE_DESCRIPTOR_COLUMNS } from "@/localDb/migrateGrin";
 export { GrinOutbox, setOutboxCrashHook, peekQueuedCommand, DURABLE_ORIGINAL_UPLOAD_CONDITION } from "./outbox";
 export type {
   DispatchReport,
@@ -21,6 +21,7 @@ export type {
   GrinEvidenceUploadResult,
   GrinPortKind,
 } from "./ports";
+export { nonDurableEvidenceUploadResult } from "./ports";
 export {
   DEFAULT_LEASE_TTL_MS,
   MAX_CONCURRENT_UPLOADS_PER_OWNER,
@@ -37,6 +38,7 @@ export type {
   ActionableFailure,
   GrinDispatchSession,
   GrinLocalEvidenceFile,
+  GrinLocalOriginalHasher,
   GrinLocalReceiptView,
   LocalEvidenceRole,
 } from "./types";

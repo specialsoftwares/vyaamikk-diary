@@ -204,11 +204,16 @@ function identityResult(
     storagePath: string | null;
   }
 ): GrinEvidencePortResult {
+  const durable = extras.ok && extras.originalDurable;
   return {
     ok: extras.ok,
     originalDurable: extras.originalDurable,
     generation: extras.generation,
     retryable: extras.retryable,
+    ownerUid: durable ? extras.ownerUid ?? input.uid : null,
+    mime: durable ? extras.mime ?? null : null,
+    sizeBytes: durable ? extras.sizeBytes ?? null : null,
+    storagePath: durable ? extras.storagePath ?? null : null,
     evidenceId: input.evidenceId,
     receiptId: input.receiptId,
     ledgerId: input.ledgerId,
@@ -216,10 +221,6 @@ function identityResult(
     claimedSha256: extras.claimedSha256,
     actualSha256: extras.actualSha256,
     reservationId: extras.reservationId,
-    ownerUid: extras.ownerUid,
-    mime: extras.mime,
-    sizeBytes: extras.sizeBytes,
-    storagePath: extras.storagePath,
   };
 }
 
