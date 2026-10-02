@@ -8,11 +8,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import type { SqliteExecutionLabel } from "./types";
+
 export const SQLITE_HOST = "SQLITE_HOST" as const;
 export const NATIVE_DEVICE = "NATIVE_DEVICE" as const;
 export const MAP_STANDIN = "MAP_STANDIN" as const;
 
-export type SqliteExecutionLabel = typeof SQLITE_HOST | typeof NATIVE_DEVICE | typeof MAP_STANDIN;
+export type { SqliteExecutionLabel };
 
 export type GrinSqlDb = {
   runSync: (sql: string, params?: unknown[]) => { changes: number };

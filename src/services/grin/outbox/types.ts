@@ -1,8 +1,10 @@
 import type { ChunkHasher, Wave1OriginalCategory } from "@/goodsEvidence/evidence";
 import type { GrinCommandType, LocalReceiptRecord, OutboxLocalState } from "@/goodsEvidence/ports";
-import type { SqliteExecutionLabel } from "./hostSqlite";
 
 export type { GrinCommandType, LocalReceiptRecord, OutboxLocalState, Wave1OriginalCategory };
+
+/** Host sqlite execution labels. Keep this union here so G1 typecheck does not load node:fs. */
+export type SqliteExecutionLabel = "SQLITE_HOST" | "NATIVE_DEVICE" | "MAP_STANDIN";
 
 export type GrinDispatchSession = {
   ownerUid: string;

@@ -356,6 +356,10 @@ async function main(): Promise<void> {
   assert.notEqual(uploaded.actualSha256, wrongClaim);
   assert.notEqual(uploaded.generation, "verified");
   assert.equal(uploaded.evidenceId, "evidence_c01");
+  assert.equal(uploaded.ownerUid, OWNER);
+  assert.equal(uploaded.mime, "application/pdf");
+  assert.equal(uploaded.sizeBytes, pdf.byteLength);
+  assert.equal(uploaded.storagePath, reserved.storagePath);
 
   const reservedBad = await withEvidence.reserveEvidence({
     auth: { uid: OWNER },

@@ -76,3 +76,7 @@ Starting combined HEAD `13f90ed33ce60a701eb2e3a73a1e279f2be1888f`. Contract `202
 
 `83f10f871515eee192d9ebae6d277351d50577ae` on `team/grin-t4-product`, merged to combined. Production `GrinOutbox` now receives `evidencePortFactory()` (`createFirebaseJsGrinEvidenceTransport`). PDF/image/camera retention hashes retained bytes; pack is a manifest/PDF summary (`originalsBundled: false`). `test:grin-product` SQLITE_HOST passed including picker, origin.bind, pack A–D. `expo-document-picker ~14.0.8` added. NATIVE_DEVICE not claimed. T1 JS→Functions-emulator round-trip still open. Functions unexported. versionCode 23. Purchase-entry flags `"0"`. Do not mark GRIN / G6 / billing / public-release Done.
 
+## Team 1 E1 Functions-emulator round-trip (unsent, 2026-10-02)
+
+`15bd2a6bd1bc04f0605112e095a1eb0c314be224` on `team/grin-t1-backend`, merged to combined. Isolated `tools/goods-evidence-emulator/functions-entry` compose reserve → JS Storage upload → stored-byte verify. `npm run test:goods-evidence-g1-functions-emulator` passed with real `httpsCallable` (not mocked) on demo-vyaamikk-grin-t1. `functions/src/index.ts` still has no GRIN export. Live Rules unchanged. versionCode 23. Purchase-entry flags `"0"`. Team 5 re-review next. Do not mark GRIN / G6 / billing / public-release Done.
+
