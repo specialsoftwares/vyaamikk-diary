@@ -60,3 +60,7 @@ Validated application SHA `99ee60ceba2f7f4adec01f4e3559c485608687ac` on `integra
 
 Starting combined HEAD `13f90ed33ce60a701eb2e3a73a1e279f2be1888f`. Contract `2026-10-02.wave2evidence`. Findings E1–E5 are **open** at application SHA `99ee60c` (missing evidence port; invalid verification admission; lost verification metadata; image-only picker; incomplete pack categories). Do not mark GRIN / G6 / billing / public-release Done.
 
+## Team 5 E1–E5 reproductions (unsent, 2026-10-02)
+
+`4711f7d71060e61556e368137f81ab90babbe509` on `team/grin-t5-qa` independently executed all eight E1–E5 cases against combined `41670aa85c32cb174277930ca08eed3a5af93243` (SQLITE_HOST / INJECTED / HOST_FILESYSTEM). All **reproduced**. Mapping is not closure. Wave 2 **not accepted**. STORAGE_EMULATOR / FIRESTORE_EMULATOR / NATIVE_DEVICE not claimed. Do not mark GRIN / G6 / billing / public-release Done.
+

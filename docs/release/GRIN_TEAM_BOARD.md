@@ -5,16 +5,16 @@ Do not collapse to Done.
 
 Arrangement: one coordinator plus five **local** Cursor Task subagents on separate worktrees. AI roles, not human sign-off.
 
-Checkpoint inspected: combined `13f90ed33ce60a701eb2e3a73a1e279f2be1888f` (= origin). Validated application `99ee60c`. T5 F5 reviewed `7623eef`. `origin/main` `0da2f58970f23c7ce6cbefae6efffd49c731f44b`. Historical workspace `55f2df1` dirty — **untouched**. Contract `2026-10-02.wave2evidence`. Wave 2 / G6 / public release **not accepted**.
+Checkpoint inspected: combined now `4711f7d71060e61556e368137f81ab90babbe509` (T5 E1–E5 repro on `41670aa`). Validated application `99ee60c`. T5 F5 reviewed `7623eef`. `origin/main` `0da2f58970f23c7ce6cbefae6efffd49c731f44b`. Historical workspace `55f2df1` dirty — **untouched**. Contract `2026-10-02.wave2evidence`. Wave 2 / G6 / public release **not accepted**.
 
 | Task | Owner | Branch | Worktree | Dependency | Status | Evidence | Blocker | Next |
 |---|---|---|---|---|---|---|---|---|
-| Integration | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | G1 `c9623dd` | running | E1–E5 contract published | Functions unexported; `gh` unauthenticated | Integrate T1–T4 then T5 re-review |
-| E1 evidence composition | team1 | `team/grin-t1-backend` | `grin-t1-backend` | combined HEAD | ready | — | live export HOLD | JS→Functions-emulator round-trip; stay unexported |
-| E1/E2/E4/E5 evidence integrity | team2 | `team/grin-t2-evidence` | `grin-t2-evidence` | combined HEAD | ready | — | live IAM | Categories + stored-byte verify + retrieve |
-| E2/E3 admission + descriptors | team3 | `team/grin-t3-offline` | `grin-t3-offline` | combined HEAD | ready | leftover 0-shim | native death not claimed | Persist descriptor; remove 0-shim |
-| E4 picker + E5 pack + E1 wire | team4 | `team/grin-t4-product` | `grin-t4-product` | combined HEAD | ready | EWB/picker/pack-share not mounted | pricing/quota unresolved | Durable copy; mount EWB/picker/pack |
-| Independent E1–E5 review | team5 | `team/grin-t5-qa` | `grin-t5-qa` | combined HEAD | ready | F5 of `7623eef` | NATIVE_DEVICE | Reproduce E1–E5 then re-review |
+| Integration | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | G1 `c9623dd` | running | T5 E1–E5 repro `4711f7d` of `41670aa` | Functions unexported; `gh` unauthenticated | Integrate T1–T4 then T5 re-review |
+| E1 evidence composition | team1 | `team/grin-t1-backend` | `grin-t1-backend` | combined HEAD | running | T5 reproduced E1a/E1b | live export HOLD | JS→Functions-emulator round-trip; stay unexported |
+| E1/E2/E4/E5 evidence integrity | team2 | `team/grin-t2-evidence` | `grin-t2-evidence` | combined HEAD | running | T5 reproduced E2/E5 | live IAM | Categories + stored-byte verify + retrieve |
+| E2/E3 admission + descriptors | team3 | `team/grin-t3-offline` | `grin-t3-offline` | combined HEAD | running | T5 reproduced E2/E3 | native death not claimed | Persist descriptor; remove 0-shim |
+| E4 picker + E5 pack + E1 wire | team4 | `team/grin-t4-product` | `grin-t4-product` | combined HEAD | running | T5 reproduced E4/E5 | pricing/quota unresolved | Durable copy; mount EWB/picker/pack |
+| Independent E1–E5 review | team5 | `team/grin-t5-qa` | `grin-t5-qa` | `4711f7d` | review | WAVE2EVIDENCE_E1_E5_REPRO.md — all 8 cases reproduced | NATIVE_DEVICE | Re-review after T1–T4 land |
 
 ## Wave 2 correction findings (closed at stated boundary; not Wave 2 acceptance)
 
@@ -52,7 +52,7 @@ Previous ER-1…ER-5 remain mapped. Mapping is not Wave 2 acceptance.
 | Gate | State |
 |---|---|
 | GRIN SOURCE IMPLEMENTATION | F1–F4 closed at stated hosts; **E1–E5 open** at `99ee60c`; Wave 2 not accepted |
-| COMBINED SOURCE REVIEW | T5 F5 `889f011` of `7623eef`; E1–E5 re-review pending |
+| COMBINED SOURCE REVIEW | T5 F5 `889f011` of `7623eef`; T5 E1–E5 **reproduced** at `4711f7d` of `41670aa`; fixes still in flight; Wave 2 not accepted |
 | BACKEND DEPLOYMENT | not authorized |
 | INTERNAL BUILD | not authorized |
 | DEVICE ACCEPTANCE | device_pending |
