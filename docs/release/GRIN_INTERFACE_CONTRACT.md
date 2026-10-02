@@ -237,7 +237,7 @@ new GrinOutbox({
 
 ### E1 — App evidence port (Team 1 + Team 2; Team 4 wires `appBinding`)
 
-At `99ee60c` the outbox is constructed without `evidence`, so `processAttachments` returns `attachment_pending`. `createFirebaseJsGrinEvidenceTransport` currently voids `localPath` and never uploads bytes.
+At `99ee60c` the outbox was constructed without `evidence`, so `processAttachments` returned `attachment_pending`, and the JS evidence transport voided `localPath`. Combined production composition now supplies `evidencePortFactory()` and `hasherFactory()`. Isolated emulator proof: `tools/goods-evidence-emulator/functions-roundtrip.emulator.test.ts` runs both a direct JS transport upload and `persistGrinOwnerSession` → `processAttachments` → real `httpsCallable` (not mocked). Remaining injected boundaries are listed in that file (emulator hosts, auth token, Admin seed, SQLITE_HOST, HOST_FILESYSTEM chunk reads / node `readFile`). Live `functions/src/index.ts` stays unexported.
 
 Required connected path (not a pre-injected successful `GrinEvidenceUploadResult`):
 

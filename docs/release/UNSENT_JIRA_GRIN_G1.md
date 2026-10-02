@@ -88,3 +88,11 @@ Independent QA of corrected combined `ae0339a30edd92e92f4b05f734fddb4710aacaf4` 
 
 T5 PHASE 2 `049e7e0` of `ae0339a` left two source gaps. Combined follow-up: persist `os_conversion_occurred` / `claimed_mime` (additive ALTER, no DB_VERSION bump); pack assembler uses retained conversion via `normalizeOsConversionOccurred` (never invents `false`); `persistGrinOwnerSession` passes `createAppLocalOriginalHasher` (APP_FILESYSTEM); FIPS 180-4 K typo `0fc19cd6`→`0fc19dc6` so production chunk hashes match independent SHA-256. `test:grin-product` + `test:grin-outbox` SQLITE_HOST passed including persist-hasher durable PDF. `functions/src/index.ts` HOLD. versionCode 23. Flags `"0"`. **Wave 2 not accepted** pending T5 follow-up. Do not mark GRIN / G6 / billing / public-release Done.
 
+## Team 5 E4/hasher PHASE 3 (unsent, 2026-10-02)
+
+Independent follow-up `d3d48fc8138ee407784788acf1209d9dc4e8de45` of combined `d4b6e1fa0a6adf8dff7dd4b774d05150474b9603`. Hasher and conversion mapping passed at SQLITE_HOST / HOST_FILESYSTEM. Remaining source gap named there: joined persistGrinOwnerSession → processAttachments → real httpsCallable was not executed (FAKE evidence for hasher durable; separate transport for emulator round-trip).
+
+## Coordinator joined persist→emulator proof (unsent, 2026-10-02)
+
+Merged T5 PHASE 3 onto combined. Extended `tools/goods-evidence-emulator/functions-roundtrip.emulator.test.ts` so one object goes through `persistGrinOwnerSession` → `processAttachments` → real Firebase JS `httpsCallable` against the isolated Functions emulator (hasher remains production APP_FILESYSTEM; SQLITE_HOST + HOST_FILESYSTEM injected). `npm run test:goods-evidence-g1-functions-emulator` passed. `functions/src/index.ts` HOLD. Live Rules unchanged. versionCode 23. Purchase-entry flags `"0"`. GRIN default-off. **Wave 2 not accepted** pending Team 5 re-execution of the joined SHA. Do not mark GRIN / G6 / billing / public-release Done.
+
