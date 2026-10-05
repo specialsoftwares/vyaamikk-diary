@@ -49,6 +49,7 @@ try {
 
   const hub = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../../app/(app)/(tabs)/saved-records.tsx"), "utf8");
   assert.match(hub, /shouldShowGrinRecordsHubEntry/);
+  assert.match(hub, /loadSavedRecordsData/);
   assert.match(hub, /\/\(app\)\/grin/);
   assert.doesNotMatch(hub, /createUninjectedGrinServerPort/);
   assert.doesNotMatch(hub, /GrinFixtureRepository/);
