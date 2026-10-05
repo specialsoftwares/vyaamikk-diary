@@ -54,7 +54,7 @@ new binary.
 | BLD | No Internal AAB this SHA; Play inventory stale (2026-10-01) |
 | DEV | NATIVE_DEVICE / PLAY_INSTALLED **NOT RUN** |
 | PAY | Restricted store billing **NOT RUN**; client purchase-entry `"0"`; live `PLAY_BILLING_ENABLED` **absent**; Pub/Sub topics **0**; Play catalog **NOT RUN** (no androidpublisher scope) |
-| LIST | Privacy date mismatch (site 15 Jul vs app 27 Jul — do not backdate). `/~flock.js` is Tinybird collector with `data-proxy-url="/~api/analytics"` (POST 202). Delete page mailto is documented, not automatically defective. Play 512/feature graphic **are git-tracked** in this candidate. Dashboard screenshots `safeForPublic: false` (5). |
+| LIST | Privacy date mismatch (site 15 Jul vs app 27 Jul — do not backdate). `/~flock.js` is Tinybird collector with `data-proxy-url="/~api/analytics"` (POST 202). Delete page mailto is documented, not automatically defective. Play 512/feature graphic **are git-tracked** in this candidate (Team 5 independent hash **PASS**). Dashboard screenshots `safeForPublic: false` (5). `PLAY_SUBMISSION_READINESS.md` artwork line still stale pending Team 4. |
 | IAM | Shared Editor residual on identity/deletion/billing SA |
 | W2 | Wave 2 not accepted |
 

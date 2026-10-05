@@ -156,3 +156,7 @@ Coordinator register `docs/release/RELEASE_COMPLETION_REGISTER.md`. Application 
 
 Owner wrote: GRIN included in existing Starter/Professional/Business (no separate SKU); one new issuance consumes one monthly record allowance; proposed storage 1/5/20 GiB pending economics; warn 80/95 refuse at cap; no silent delete; expiry 90-day read then 30-day notice; explicit deletion requested 180 days vs implemented 15 days vs public-approved UNRESOLVED. Source implementation authorized; **no** live deploy/billing/Play. Testers: owner+two, identities not supplied. Synthetic GRIN until lifecycle implemented. Artwork `store/play-icon-512.png` and feature graphic **are git-tracked**. `/~flock.js` is Tinybird with first-party `/~api/analytics` proxy (POST 202). Do not mark device/billing/public Done. Next offer still A1 isolated Firestore Rules.
 
+## Team 5 policy QA (unsent, 2026-10-06)
+
+Independent QA on application `5d5df3d` (Team 2 unmerged, not reviewed). Ops-guard **34/34 TOOLING** (not application CI). Public deletion/retention **SOURCE FAIL** (P8): GRIN still absent from purge prefixes; nested ledger children would remain even if first-level names were appended; **180 requested does not close**. Issuance monthly allowance **SOURCE FAIL for public GRIN** (P3): register does not increment `recordsThisMonth`. Artwork hashes independently **PASS** (git-tracked). Expected-FAIL regressions live under `docs/release/proposals/team5/` (not `ci:verify`). Do not mark GRIN / device / billing / public-release Done.
+

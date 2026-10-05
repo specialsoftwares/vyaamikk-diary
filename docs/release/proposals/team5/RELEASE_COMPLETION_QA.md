@@ -16,13 +16,67 @@ Ops-guard A/B at `228a8f5` is **not** reopened (no new reproduction).
 Confirmation-refresh `dcc325a`, Admin config `4aac867`, Internal-GRIN
 visibility `4409366` are **not** reopened.
 
-Inspected `/Users/shivamsaurav/vyd-worktrees/grin-combined` on
-`integration/grin-g1-g5-source`. Git tree was not edited. Application
-paths vs `5d5df3d` were empty on `functions src eas.json app.json app
-firebase.json` at inspect time. Origin `main` remains
-`0da2f58970f23c7ce6cbefae6efffd49c731f44b`.
+Prior session inspected `/Users/shivamsaurav/vyd-worktrees/grin-combined`
+on `integration/grin-g1-g5-source` (tree not edited). This continuation
+worked only in `grin-t5-qa`. Application paths vs `5d5df3d` remain empty
+on `functions src eas.json app.json app firebase.json`. Origin `main`
+remains `0da2f58970f23c7ce6cbefae6efffd49c731f44b`.
 
-## What was executed
+## 2026-10-06 continuation
+
+Independent re-run on `/Users/shivamsaurav/vyd-worktrees/grin-t5-qa`
+`aa5253e`. Combined / historical dirty workspace **not** edited. No live
+mutate. Policy review: `POLICY_QA.md`. Team 2 unmerged product code
+**not reviewed** (same SHA, clean worktree).
+
+### This session executed
+
+| Check | Label | Result |
+|---|---|---|
+| `git diff --stat 5d5df3d -- functions src eas.json app.json app firebase.json` empty | SOURCE | **PASS** |
+| `shasum -a 256 store/play-icon-512.png store/play-feature-graphic.png` + `git ls-files` | SOURCE | **PASS** — tracked; hashes match coordinator values |
+| `unset GRIN_OPS_ALLOW_LIVE; node --test docs/release/packets/grin-ops/grin-functions-op.test.mjs` | TOOLING (`228a8f5`; not application CI) | **34/34**. A/B not reopened |
+| `npx tsx src/goodsEvidence/isolation.contract.test.ts` | SOURCE | exit **0** |
+| `npx tsx src/goodsEvidence/featureFlag.test.ts` | SOURCE | exit **0** |
+| `npx tsx functions/src/deletion/deletion.unit.test.ts` | SOURCE | exit **0** (diary purge; GRIN still absent) |
+| `npx tsx tools/goods-evidence-emulator/production-exports.injected.unit.test.ts` | INJECTED | exit **0** |
+| `npx tsx tools/goods-evidence-emulator/packaging.unit.test.ts` | INJECTED | exit **0**. Gate exact `"true"` |
+| `npx tsx tools/goods-evidence-emulator/isolation.contract.test.ts` | SOURCE | exit **0** |
+| `npx tsx tools/goods-evidence-storage/isolation.contract.test.ts` | SOURCE | exit **0** |
+| `npx tsx src/services/grin/outbox/outbox.isolation.contract.test.ts` | SOURCE | exit **0** |
+| `npx tsx src/services/grin/transport/isolation.contract.test.ts` | SOURCE | exit **0** |
+| `npx tsx tools/grin-interop/isolation.contract.test.ts` | SOURCE | exit **0** |
+| `npx tsx src/boot/bootProductionStartup.contract.test.ts` | SOURCE | exit **0** |
+| `npx tsx src/billing/quotaUpsell/quotaUpsell.contract.test.ts` | SOURCE | exit **0** |
+| `npx tsx src/services/savedRecords/grinHubEntry.test.ts` | INJECTED | exit **0** |
+| `npx tsx src/services/grin/repository/GrinApplicationRepository.test.ts` | SQLITE_HOST | exit **0**. `originalsBundled=false` |
+| `node --test docs/release/proposals/team5/public-deletion-retention.regression.test.mjs` | SOURCE | **3 fail / 1 pass** (expected). GRIN not in purge; 180 not implemented |
+| `node --test docs/release/proposals/team5/issuance-monthly-allowance.regression.test.mjs` | SOURCE | **1 fail / 2 pass** (expected). Register does not consume allowance |
+| `test:live-rules-grin-merged` / G1/G2 Functions emulator | EMULATOR | **NOT RUN** |
+| Live inspect / Functions / Rules / IAM / env / EAS / Play | LIVE_BACKEND | **NOT RUN** |
+
+### Continuation verdict vs prior pass
+
+Prior SOURCE PASS on cross-account, silent-alteration of register/verify,
+duplicate serials, launch/sign-in/save/PDF wiring, ops pin, leakage, and
+crash-on-render is **not** reopened. New evidence vs **approved-for-source**
+owner policy:
+
+| Priority | SOURCE this session | EMULATOR | LIVE_BACKEND |
+|---|---|---|---|
+| Cross-account access/writes | **PASS** (unchanged) | **NOT RUN** | **NOT RUN** |
+| Lost or silently altered records/evidence | **PASS** (unchanged; pack still summary) | **NOT RUN** | **NOT RUN** |
+| Duplicate issuance / false entitlement | **FAIL** public — issuance does not consume monthly allowance (`P3-2026-10-06`). Serial/`receipt_exists` not reopened | **NOT RUN** | **NOT RUN** |
+| Launch / sign-in / save / PDF / GRIN | **PASS** (source contracts re-run) | **NOT RUN** | **NOT RUN** |
+| Wrong-project / bucket / source | **PASS** (ops pin `5d5df3d`; project/bucket unchanged in tooling) | **NOT RUN** | **NOT RUN** |
+| Sensitive-data leakage | **PASS** (unchanged; not re-logged) | **NOT RUN** | **NOT RUN** |
+| Resource crash on supported normal use | **PASS** (Wave 2 not accepted) | **NOT RUN** | **NOT RUN** |
+| Public deletion/retention enforcement | **FAIL** — not closed by 180-day request (`P8-2026-10-06`) | **NOT RUN** | **NOT RUN** |
+
+Artwork tracking in `PLAY_SUBMISSION_READINESS.md` is stale (Team 4).
+Hashes independently verified **PASS**.
+
+## What was executed (prior session)
 
 | Check | Label | Result |
 |---|---|---|
@@ -147,32 +201,51 @@ explicit retain hold). Do not attach GRIN purge silently in this SHA.
 
 **None** that reopen ops-guard A/B, `dcc325a`, `4aac867`, or `4409366`.
 
-Public deletion/retention is a **public-release blocker** (priority 8
-SOURCE **FAIL**). Documented unset. Not a new silent-alteration bug in
-the register/verify path.
+**2026-10-06 blockers (public GRIN / public submission):**
+
+- **P8-2026-10-06** — Public deletion/retention SOURCE **FAIL**. GRIN paths
+  are still absent from the implemented deletion architecture. 15-day
+  grace is implemented diary deletion. 180-day requested is **not**
+  implemented and **not** Play-certified. Do not mark this FAIL closed
+  because the owner wrote 180 days.
+- **P3-2026-10-06** — Issuance does not consume monthly record allowance
+  (`g1/adapter.ts` register). False entitlement vs approved “one
+  issuance = one record” policy. Serial/`receipt_exists` not reopened.
 
 ## Assessed backlog (not release-blocking)
 
-- `eas.json` development profiles omit explicit purchase-entry `"0"`
-  (still not `"1"`).
+- `eas.json` development / `development-production-otp` omit explicit
+  purchase-entry `"0"` (still not `"1"`).
 - No in-app Internal wipe-warning string (Packet D is operator
   disclosure).
+- Storage 1/5/20 GiB **pending economics**; warn95 and GiB refuse-at-cap
+  not in source. No silent delete observed. Public upload stays blocked
+  until a cap or residual-cost acceptance exists.
+- 90-day expiry read + 30-day notice: no production purge job this
+  assignment (expected absence).
+- `PLAY_SUBMISSION_READINESS.md` artwork “not in this worktree” line is
+  stale (Team 4). Hashes independently verified. Onboarding wording and
+  live `flock.js` were not independently re-verified this session.
 
 ## Remaining approval boundary
 
 HOLD: `GRIN_OPS_ALLOW_LIVE=1`, isolated Rules deploy, tester seeding,
 Internal AAB, Play, billing, Wave 2 / G6, `main` merge, NATIVE_DEVICE.
-Public GRIN blocked until Packet D deletion/retention is chosen and
-implemented. This review is not human certification and not a live
-backend.
+Public GRIN blocked until deletion architecture includes GRIN **and** a
+public-approved window exists, **and** issuance consumes monthly
+allowance (Team 2 not merged / not reviewed). This review is not human
+certification and not a live authorization.
 
 ## Bounded verdict
+
+Current as of 2026-10-06 continuation. Prior session table is superseded
+for priority 3 and 8.
 
 | Priority | SOURCE | EMULATOR | LIVE_BACKEND |
 |---|---|---|---|
 | Cross-account access/writes | **PASS** | **NOT RUN** | **NOT RUN** |
 | Lost or silently altered records/evidence | **PASS** | **NOT RUN** | **NOT RUN** |
-| Duplicate issuance / false entitlement | **PASS** | **NOT RUN** | **NOT RUN** |
+| Duplicate issuance / false entitlement | **FAIL** (issuance allowance) | **NOT RUN** | **NOT RUN** |
 | Launch / sign-in / save / PDF / GRIN | **PASS** | **NOT RUN** | **NOT RUN** |
 | Wrong-project / bucket / source | **PASS** | **NOT RUN** | **NOT RUN** |
 | Sensitive-data leakage | **PASS** | **NOT RUN** | **NOT RUN** |

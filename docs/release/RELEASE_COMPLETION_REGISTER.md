@@ -40,7 +40,7 @@ Do not reopen ops-guard A/B without a new concrete reproduction.
 
 | Gate | State |
 |---|---|
-| SOURCE READY | Candidate at `5d5df3d` + canonical CI. Policy **source** in flight (Team 2). Wave 2 not accepted. |
+| SOURCE READY | Candidate at `5d5df3d` + canonical CI. Team 5: public deletion **FAIL**; issuance allowance **FAIL** public until Team 2. Wave 2 not accepted. |
 | BACKEND PILOT READY | Prepared; **not authorized**; GRIN seven **ABSENT** on live |
 | INTERNAL BUILD READY | Prepared; **not authorized**; versionCode 23 not reserved; no `internal-grin` / `5d5df3d` EAS AAB |
 | DEVICE ACCEPTED | Execution sheet ready; **NOT RUN** |
@@ -82,7 +82,7 @@ purchase-entry remains `"0"`. Play Console catalog **NOT RUN**.
 | 2 Policy | Owner choices recorded; implementing issuance/storage/expiry/export in team worktree | Economics confirm; 180-day public policy; no live purge |
 | 3 Build/device | Profile freeze, Packet B, device sheet | EAS/native build; Play upload (separate) |
 | 4 Billing/Play | Source trace, Packet C, listing worksheet | Product/price/activation/submission |
-| 5 QA | Independent SOURCE review `RELEASE_COMPLETION_QA.md` (34/34 tooling re-run; public deletion **FAIL**) | Does not own implementation |
+| 5 QA | Independent SOURCE review `POLICY_QA.md` + `RELEASE_COMPLETION_QA.md` continuation. Tooling 34/34. Public deletion **FAIL** (P8). Issuance allowance **FAIL** public (P3). Artwork hashes **PASS**. Team 2 code **not reviewed**. | Does not own implementation; re-review after Team 2 merge |
 
 ---
 
