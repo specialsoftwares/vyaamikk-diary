@@ -16,11 +16,13 @@ QA artefacts. Not production implementations. Not G6 completion.
 | `WAVE2EVIDENCE_E4_HASHER_FOLLOWUP.md` | PHASE 3 independent follow-up of E4/hasher at coordinator closeout `d4b6e1f`; **Wave 2 not accepted** |
 | `WAVE2EVIDENCE_E1_JOINED_FOLLOWUP.md` | PHASE 4 independent re-execution of joined persistGrinOwnerSession → Functions-emulator at `cd5b5f4`; **Wave 2 not accepted** |
 | `WAVE2EVIDENCE_FILEIO_PACK.md` | Independent file-IO + complete-pack review at `2cbacff`; **Wave 2 not accepted** |
+| `WAVE2EVIDENCE_CONFIRMATION_REFRESH.md` | Independent confirmation-refresh after evidence linkage at `dcc325a`; **Wave 2 not accepted** |
 | `wave2evidence-e1-e5-repro.ts` | SQLITE_HOST / INJECTED / host-filesystem drivers for E1–E5 |
 | `wave2evidence-e1-e5-rereview.ts` | PHASE 2 persistGrinOwnerSession inspection + unset-host failure |
 | `wave2evidence-e4-hasher-followup.ts` | PHASE 3 persist hasher / conversion persist / SHA-256 inspection |
 | `wave2evidence-e1-joined-followup.ts` | PHASE 4 persist wiring inspection + unset-host failure |
 | `wave2evidence-fileio-pack.ts` | File-IO / pack wiring inspection + unset-host failure |
+| `wave2evidence-confirmation-refresh.ts` | Confirmation-refresh wiring + HOLDs + Packets A/B + unset-host failure |
 | `wave2-w2-repro.ts` | PHASE 1 SQLITE_HOST / INJECTED / mounted-inert drivers |
 | `wave2-phase2-repro.ts` | PHASE 2 re-execution of the same findings |
 | `wave2-w2-04-rules.emulator.ts` | Isolated STORAGE_EMULATOR original-read (PHASE 1 deny / PHASE 2 retained) |
