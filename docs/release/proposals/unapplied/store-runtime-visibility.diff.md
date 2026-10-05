@@ -1,15 +1,18 @@
-# Unapplied — Internal-build GRIN visibility (Packet B HOLD)
+# Applied (Internal-GRIN profile) — Packet B visibility
 
-Status: **proposal only**. Do not apply while Packet B HOLD remains.
-Default store runtime stays blocked. Purchase-entry stays `"0"`.
+Status: **applied on `eas.json` `build.internal-grin` only**, not on
+`build.production`. Ordinary production/preview/development profiles stay
+GRIN-off. Purchase-entry stays `"0"`.
 
 This is visibility only. Server admission remains the security boundary.
 Do not detect Internal Testing vs production from Play Console, installer
 metadata, or a client channel flag.
 
-## 1. `eas.json` `build.production.env` only
+## 1. Distinct `internal-grin` profile (not production.env)
 
-Keep existing purchase-entry and quota-upsell `"0"`. Add:
+The originally proposed production.env patch was **not** used. Promoting a
+production AAB must not show GRIN UI. `internal-grin` copies production
+app-bundle settings and sets:
 
 ```json
 "EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED": "1",

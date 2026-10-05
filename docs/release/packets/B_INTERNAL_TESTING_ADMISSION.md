@@ -1,8 +1,9 @@
-# Packet B — Production-profile Internal Testing AAB (unapplied)
+# Packet B — Production-profile Internal Testing AAB (visibility source applied)
 
-Status: **review only**. This closeout does **not** remove the store-runtime
-block and does **not** authorize an Internal Testing build. Does not authorize
-EAS, Play upload, or OTA. Purchase-entry stays `"0"`. Encrypted PDF backup
+Status: **Internal-GRIN visibility is in source** on `eas.json`
+`build.internal-grin` only (`4409366`). Ordinary production/preview stay
+GRIN-off. This still does **not** authorize an Internal Testing build, EAS,
+Play upload, or OTA. Purchase-entry stays `"0"`. Encrypted PDF backup
 out of scope.
 
 There is **no trustworthy Play-track signal inside the app**. Do not read
@@ -28,20 +29,20 @@ Play-installed run.
 
 ## 2. Exact source/config change for testers to **see** GRIN on a store-runtime build
 
-Today:
+Applied at `4409366` on a **distinct** `eas.json` `build.internal-grin`
+profile (not `build.production.env`). Ordinary production/preview remain
+GRIN-off so promoting a production AAB does not show GRIN UI.
 
-- `isGoodsEvidenceBlockedByStoreRuntime()` is true when
-  `env.runtimeKind === "store-or-standalone"` (Play-installed / release:
-  `RuntimeSignals.isDev === false` and `appOwnership` is not `"expo"`).
-- `isGoodsEvidenceEnabled()` returns false **before** reading
-  `EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED` whenever that block is true.
-- `eas.json` production/preview do **not** set `EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED`.
+- `isGoodsEvidenceBlockedByStoreRuntime()` is true on store-or-standalone
+  unless `EXPO_PUBLIC_GOODS_EVIDENCE_STORE_RUNTIME_ADMIT === "1"`.
+- `isGoodsEvidenceEnabled()` still requires `EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED === "1"`
+  after that check.
+- Hub tile: `shouldShowGrinRecordsHubEntry()` on Saved Records.
+- Visibility only. Server admission (Packet A §6) remains the security boundary.
 
-**Proposed later patch (do not apply now).** Exact diff and test cases:
-`docs/release/proposals/unapplied/store-runtime-visibility.diff.md`.
-Visibility only. Server admission (Packet A §6) remains the security boundary.
+Exact later notes: `docs/release/proposals/unapplied/store-runtime-visibility.diff.md`.
 
-Required behaviour after apply:
+Required behaviour (now in source):
 
 - Default store runtime remains blocked unless the admit flag is `"1"` on
   that Internal AAB.
@@ -52,9 +53,9 @@ Required behaviour after apply:
 - No installer or Play-track detection used as authorization.
 - Purchase-entry remains `"0"`.
 
-This is a **build-time public env** baked into that AAB. It is not a Play-track
-detector. If this AAB is promoted to production by mistake, GRIN **UI** could
-appear; non-seeded uids still fail closed on callables/Rules.
+This is a **build-time public env** baked into the Internal-GRIN AAB. It is
+not a Play-track detector. If that AAB is promoted to production by mistake,
+GRIN **UI** could appear; non-seeded uids still fail closed on callables/Rules.
 
 **Do not** remove the store-runtime block globally without the admit flag.
 
@@ -73,9 +74,9 @@ Play licence-tester emails are **not** Firestore admission.
 
 Build **only** from a later owner-approved SHA that contains:
 
-- application `84c748d026d4229cded55d3ddc281a15858322c9` (or a fast-forward
-  that preserves confirmation-refresh `dcc325a` and this packaging),
-- the Packet B visibility patch if that patch is approved,
+- application `4409366f0a0862ef18d5825c47dedaae9b7f9f3f` (or a fast-forward
+  that preserves confirmation-refresh `dcc325a`, Admin config `4aac867`, and
+  this Internal-GRIN visibility),
 - no dirty historical workspace.
 
 Record after EAS (when authorized):
@@ -84,8 +85,8 @@ Record after EAS (when authorized):
 |---|---|
 | Git SHA | `eas build` JSON `gitCommitHash`; must match `git rev-parse HEAD` of the tagged commit |
 | Working tree dirty | must be false |
-| Profile | `production` / `app-bundle` / `distribution=store` |
-| Resolved public env | from the **build worker** (profile env wins over remote on overlap, `eas-cli` merge order). Required: `EXPO_PUBLIC_APP_MODE=production`; purchase-entry `"0"`; quota-upsell `"0"`; GRIN flags only if the owner approved §2 |
+| Profile | `internal-grin` / `app-bundle` (not ordinary `production`) |
+| Resolved public env | from the **build worker**. Required: `EXPO_PUBLIC_APP_MODE=production`; purchase-entry `"0"`; quota-upsell `"0"`; both GRIN visibility flags `"1"` only on `internal-grin` |
 | `expo.version` | `1.0.0` until owner changes it |
 | versionCode | **chosen after** §5 inventory, written to `app.json` immediately before the build |
 

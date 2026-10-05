@@ -160,10 +160,12 @@ parity/drift check. `functions/src` does not import `tools/` at runtime.
 
 1. ~~Generate adapters + production compose~~ — landed at `84c748d`.
 2. ~~Fail-closed Admin project/bucket resolution~~ — landed at `4aac867`.
-3. Export the seven `onCall` wrappers from `functions/src/index.ts`
-   (unapplied proposal).
+3. ~~Export the seven `onCall` wrappers from `functions/src/index.ts`~~ —
+   landed at `4409366` as **lazy** `productionExports.ts` (eager index
+   compose was rejected). Not live deploy.
 4. Set `GRIN_GOODS_EVIDENCE_FUNCTIONS=true` only on those seven function
    instances (Firebase Functions env / secrets), not as an `EXPO_PUBLIC_*` key.
+   First live Functions deploy must leave this unset.
 
 Exporting the current `handleGrin*` stubs would still always `policy_denied`.
 Do not wrap those stubs and call that a working backend.
@@ -348,7 +350,7 @@ Storage download URLs.
    **Functions only** with `GRIN_GOODS_EVIDENCE_FUNCTIONS` unset → callables
    exist but deny. Smoke: unauthenticated and non-seeded uid get deny.
    Production compose exists at `4aac867` (config resolution; parent packaging
-   `84c748d`). Do not deploy stubs.
+   `84c748d`). Lazy exports exist at `4409366`. Do not deploy stubs.
 5. Set `GRIN_GOODS_EVIDENCE_FUNCTIONS=true` on the seven functions.
 6. Seed tester admission + ledger docs (Admin). Do not seed production uids.
 7. Smoke tests in §11. Do not enable client store-runtime GRIN in this packet.

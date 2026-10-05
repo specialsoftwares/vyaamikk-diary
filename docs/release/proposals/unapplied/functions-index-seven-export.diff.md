@@ -1,16 +1,23 @@
-# Unapplied — seven GRIN exports from `functions/src/index.ts`
+# Applied (lazy) — seven GRIN exports from `functions/src/index.ts`
 
-Status: **proposal only**. Do not apply in this packaging slice.
-`functions/src/index.ts` must keep GRIN exports absent until a later owner
-authorization. Isolation tests assert the names are not present.
+Status: **applied via lazy `productionExports.ts`**, not the eager diff below.
+Owner authorized source wiring on 2026-10-05. Do **not** apply the eager
+`createProductionGrinCallables()` at index module load — that would resolve
+Admin project/bucket during identity/billing discovery.
 
-Authoritative composition after this slice: `createProductionGrinCallables`
-in `functions/src/goodsEvidence/productionCompose.ts`. Do not export the
-fail-closed `handleGrin*` stubs as a working backend.
+Exact production names are re-exported from
+`functions/src/goodsEvidence/productionExports.ts`. Composition loads
+`./productionCompose` only on the first GRIN invocation. A
+`GrinAdminConfigError` returns `{ ok: false, code: "policy_denied", detail: "denied" }`
+and does not guess a project or bucket.
 
-Production JS entry remains `functions/lib/index.js` after `npm --prefix
-functions run build`. Do not change `functions/package.json` `"main"` or add
-`rootDir` to `functions/tsconfig.json`.
+Do not export the fail-closed `handleGrin*` stubs as a working backend.
+Do not export `grinBeginEvidence`.
+
+Production JS entry remains `functions/lib/index.js`. Do not change
+`functions/package.json` `"main"` or add `rootDir` to `functions/tsconfig.json`.
+
+The eager diff below is retained as the rejected cold-start shape.
 
 ## Exact diff (unapplied)
 
