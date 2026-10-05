@@ -116,3 +116,15 @@ Independent QA of application SHA `2cbacff6d21caae3d721127fb1a353e4c553be11`; do
 
 Local `npm run ci:verify` on application SHA `2cbacff6d21caae3d721127fb1a353e4c553be11` (tested checkout parent `23cc0001daa6c9970bf60ed771c87cc5742904ab`). `test:all` 152/152 in 335.7s. `test:goods-evidence-g1-functions-emulator` included `pack-complete.emulator.test.ts`. Elapsed 522401 ms, exit 0. **Local validation passed with Docker stage skipped** (`docker not available locally; GitHub Actions CI will run the renderer image build`). GitHub Actions canonical run (renderer Docker) was not obtained (`gh auth status`: not logged into any GitHub hosts; workflow `CI` is `main` / PR-to-`main` / `workflow_dispatch` only). No existing combined PR could be listed. Draft PR not created. Compare: https://github.com/specialsoftwares/vyaamikk-diary/compare/main...integration/grin-g1-g5-source . `functions/src/index.ts` HOLD. versionCode 23. Flags `"0"`. **Wave 2 not accepted.** Do not mark GRIN / G6 / billing / public-release Done.
 
+## Post-upload confirmation refresh (unsent, 2026-10-05)
+
+Application SHA `dcc325a9fb0d0094ab8bc05cc7ea3d27a7e2ab7a` (parent `d55a53cb33b8a5e170986f8af9c1f2f6ebf5091e`). After durable originals, `processAttachments` calls `readValidatedConfirmation` and persists via existing monotonic upsert. Failed reads stay `attachment_pending` without reissuing or dropping local files. `pack-complete.emulator.test.ts` no longer calls `persistConfirmedProjection`. Packets A/B: export `grinBeginEvidenceUpload`; Internal Testing artifact is a production-profile AAB; APK is a separate device-test artifact; no in-app Play-track signal; store-runtime block unchanged. Do not mark GRIN / G6 / billing / public-release Done.
+
+## Team 5 confirmation-refresh review (unsent, 2026-10-05)
+
+Independent QA of application SHA `dcc325a9fb0d0094ab8bc05cc7ea3d27a7e2ab7a`; docs commit `1d5ab2fc60dedd49584993c20936e1a1a22c1fc8`. SQLITE_HOST + unassisted pack-complete emulator executed. Unset hosts failed as required. **Wave 2 not accepted.** NATIVE_DEVICE / upload memory / policy / Play remain open.
+
+## Local ci:verify after confirmation refresh (unsent, 2026-10-05)
+
+Local `npm run ci:verify` on application SHA `dcc325a9fb0d0094ab8bc05cc7ea3d27a7e2ab7a`. `test:all` 152/152 in 289.2s. pack-complete included. Elapsed 459288 ms, exit 0. **Local validation passed with Docker stage skipped.** GitHub Actions canonical run (renderer Docker) was not obtained (`gh` unauthenticated; ChatGPT connector draft-PR HTTP 403 “Resource not accessible by integration.”). Compare: https://github.com/specialsoftwares/vyaamikk-diary/compare/main...integration/grin-g1-g5-source . Do not mark GRIN / G6 / billing / public-release Done.
+
