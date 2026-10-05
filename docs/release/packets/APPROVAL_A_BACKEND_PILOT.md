@@ -120,22 +120,28 @@ disable ≠ retained data. In-flight calls are **not** cancelled by disable.
 
 ## Auth/admission on production composition (EMULATOR, not LIVE_BACKEND)
 
-`tools/goods-evidence-emulator/production-compose.gates.emulator.test.ts`:
+Honest table: `docs/release/proposals/team1/AUTH_ADMISSION_COVERAGE.md`.
+`production-compose.gates.emulator.test.ts` is **register-heavy**. Do not treat
+EMULATOR as LIVE_BACKEND. These GAPs are **not** passing tests.
 
 | Scenario | Production compose |
 |---|---|
-| Unauthenticated | COVERED |
-| Non-admitted / missing / malformed admission | COVERED |
-| Inactive / pending_deletion | COVERED (register) |
-| Cross-owner read / wrong ledger | COVERED |
-| Replay / digest_conflict | COVERED |
+| Unauthenticated register | COVERED |
+| Unauthenticated on the other six names | **GAP** |
+| `auth: null` through `runProductionGrinCallable` | **GAP** (SOURCE) |
+| Non-admitted / missing / malformed admission | COVERED (register; mutate/reserve after deny) |
+| Inactive / pending_deletion | COVERED (register only) |
+| Cross-owner read / wrong ledger | COVERED (loose codes) |
+| OTHER register on OWNER ledger | **GAP** |
+| Replay / digest_conflict | COVERED (register) |
 | Concurrent register | COVERED |
 | Admission deny after originals linked | COVERED (originals survive) |
-| Retired ledger | GAP here; COVERED on adapter `register.emulator.test.ts` |
-| version_conflict | GAP here; COVERED INJECTED `mutations.injected.unit.test.ts` |
+| Retired ledger | **GAP** here; COVERED on adapter `register.emulator.test.ts` |
+| mutate `version_conflict` | **GAP** here; COVERED INJECTED `mutations.injected.unit.test.ts` |
 
-Do not treat EMULATOR as LIVE_BACKEND. Adding the two GAP rows is a later
-source/test change (not this packet’s live apply).
+Smallest later adds (not this packet’s live apply): retired ledger
+register+reserve; pending reconcile; mutate `version_conflict`; unauth on all
+seven; OTHER register; SOURCE `auth: null` on register and uploadEvidence.
 
 ---
 

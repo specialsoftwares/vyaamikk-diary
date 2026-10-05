@@ -50,9 +50,10 @@ If B: count cap _____  byte cap _____  over-limit = refuse new original (recomme
 Today: `retireIdentity` / `completeAccountDeletion` purge Storage prefixes
 `users/{uid}/letterhead|attachments|pdfs/` only
 (`functions/src/deletion/userOwnedStoragePaths.ts`). **`grinEvidence/` is not
-in that list.** Firestore GRIN trees are not named in the deletion job.
-Pending-deletion users already fail closed on **new** GRIN commands (EMULATOR
-production-compose gates). That is not a retention policy.
+in that list.** Firestore `USER_SUBCOLLECTIONS` has no `goodsEvidence*` trees
+and is **not recursive**. Pending-deletion users already fail closed on
+**new** GRIN commands (EMULATOR production-compose gates, register only).
+That is not a retention policy.
 
 | Option | Consequence | Required implementation |
 |---|---|---|

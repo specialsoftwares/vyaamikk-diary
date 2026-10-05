@@ -74,6 +74,10 @@ Account `vydspecial2026` / project `@vydspecial2026/vyaamikk-diary`.
 Write the chosen code into `app.json` immediately before the approved
 build, on a clean committed tree. Changing versionCode is an application
 commit → new SHA → new CI (do not cite `37351685421` for that tree).
+`src/goodsEvidence/isolation.contract.test.ts` currently asserts
+`"versionCode": 23`. If Play already has 23, **stop** and cut that new SHA
+together with the isolation assertion — do not ship 24+ while the test
+still requires 23.
 
 ---
 
