@@ -4,10 +4,13 @@ Status: **reviewable deploy proposal**. Not authorization. Do not edit live
 `functions/src/index.ts`, `firestore.rules`, `storage.rules`, IAM, indexes,
 secrets, or production flags from this packet. Do not run `firebase deploy`.
 
-Reviewed application SHA: `84c748d026d4229cded55d3ddc281a15858322c9`
-(production Admin composition). Confirmation-refresh remains
-`dcc325a9fb0d0094ab8bc05cc7ea3d27a7e2ab7a`. Published docs head as of the
-prior packet: `ba3233720ddec89020ff55672846ab219d9e5231`.
+Reviewed application SHA: `4aac867af015d83f6ec3badb0748ff3b4bcc1a22`
+(fail-closed Admin project/bucket resolution). Parent packaging
+`84c748d026d4229cded55d3ddc281a15858322c9` had the bucket-guess defect.
+Confirmation-refresh remains `dcc325a9fb0d0094ab8bc05cc7ea3d27a7e2ab7a`.
+Prior published packaging docs head:
+`f1be0db6c050b948fe1084a9bd68f24bddc5a4f3`. Do not reuse CI run
+`37330701057` as evidence for this correction.
 
 ## 1. Target project and region
 
@@ -22,6 +25,79 @@ prior packet: `ba3233720ddec89020ff55672846ab219d9e5231`.
 | Env gate | `GRIN_GOODS_EVIDENCE_FUNCTIONS` must be exactly `"true"`. `"1"`, `"TRUE"`, missing, empty = deny |
 
 Client configuration (`EXPO_PUBLIC_*`) is **not** backend authorization.
+
+## 1b. Production Admin project/bucket resolution
+
+`createProductionGrinCallables` must bind Firestore and Storage to the **same**
+default Admin app after `resolveGrinAdminBinding` validates project and bucket
+together (`functions/src/goodsEvidence/productionAdminConfig.ts`).
+
+Deployment target (later authorized read-only preflight; **not** a generic
+code fallback):
+
+| Item | Value |
+|---|---|
+| Project | `vyaamikk-diary` |
+| Storage bucket | `vyaamikk-diary.firebasestorage.app` |
+
+Do not hardcode that pair as a missing-config fallback.
+
+### Precedence (first present wins; contradictory values fail closed)
+
+1. `GRIN_ADMIN_PROJECT` / `GRIN_ADMIN_STORAGE_BUCKET` — explicit validated
+   override (isolated emulator npm script sets the demo pair).
+2. `FIREBASE_STORAGE_BUCKET` — bucket only.
+3. `FIREBASE_CONFIG` JSON `projectId` / `storageBucket` — Firebase runtime.
+4. `GCLOUD_PROJECT` / `GCLOUD_PROJECT_ID` — project only.
+5. Existing **default** (`[DEFAULT]`) Admin app `options.projectId` /
+   `options.storageBucket` when still missing.
+
+Rules:
+
+- No silent production fallback to `demo-vyaamikk-grin-t1`.
+- No guessed `${projectId}.appspot.com` suffix.
+- Legacy `*.appspot.com` is allowed only when that bucket is **explicitly**
+  present in an override, `FIREBASE_STORAGE_BUCKET`, `FIREBASE_CONFIG`, or
+  the existing default app.
+- Named Admin apps without a usable default app fail closed
+  (`grin_admin_config_no_default_app`). Do not initialize a second default
+  app beside identity/billing.
+- Existing default app whose project/bucket disagrees with requested values
+  fails closed (`grin_admin_config_conflict`). Do not mutate or reinitialize
+  that app.
+- Missing or malformed required configuration fails closed
+  (`grin_admin_config_missing` / `grin_admin_config_malformed`). Diagnostics
+  are those fixed codes only. Do not print `FIREBASE_CONFIG` or `process.env`.
+
+Isolated emulator defaults stay on the emulator npm script
+(`GRIN_ADMIN_PROJECT=demo-vyaamikk-grin-t1`,
+`GRIN_ADMIN_STORAGE_BUCKET=demo-vyaamikk-grin-t1.appspot.com`). Emulator
+hosts alone must not select a demo project in production.
+
+### Secret-free preflight (no document/object reads)
+
+```bash
+# Inspect env only. Does not initialize a live Admin app.
+# Prints {ok, projectId, storageBucket, appName, initialized} or {ok:false, code}.
+npx --yes tsx tools/goods-evidence-emulator/grinAdminConfigPreflight.ts
+```
+
+Expected for the live Functions runtime shape (values only; do not cat the
+JSON yourself into logs):
+
+`{"ok":true,"projectId":"vyaamikk-diary","storageBucket":"vyaamikk-diary.firebasestorage.app","appName":"[DEFAULT]","initialized":true}`
+
+After `firebase login --reauth`, a later **read-only** operations pass may
+confirm `firebase use` / `gcloud config get-value project` equal
+`vyaamikk-diary` and that the project's default bucket name is
+`vyaamikk-diary.firebasestorage.app`. That pass is not this slice. Do not
+retry expired credentials here. Do not export indexes, Rules, or IAM.
+
+### Limitation preserved
+
+`newCommands=deny` also blocks G1 `grinReadGoodsReceipt`. A retained Storage
+GET of an already-uploaded original does **not** mean the full app can still
+read or export records.
 
 ## 2. Exact callable exports (names are the contract)
 
@@ -83,9 +159,10 @@ parity/drift check. `functions/src` does not import `tools/` at runtime.
 **Remaining before a working live export (unapplied):**
 
 1. ~~Generate adapters + production compose~~ — landed at `84c748d`.
-2. Export the seven `onCall` wrappers from `functions/src/index.ts`
+2. ~~Fail-closed Admin project/bucket resolution~~ — landed at `4aac867`.
+3. Export the seven `onCall` wrappers from `functions/src/index.ts`
    (unapplied proposal).
-3. Set `GRIN_GOODS_EVIDENCE_FUNCTIONS=true` only on those seven function
+4. Set `GRIN_GOODS_EVIDENCE_FUNCTIONS=true` only on those seven function
    instances (Firebase Functions env / secrets), not as an `EXPO_PUBLIC_*` key.
 
 Exporting the current `handleGrin*` stubs would still always `policy_denied`.
@@ -270,7 +347,8 @@ Storage download URLs.
 4. Apply the unapplied seven-export on the authorized SHA; deploy
    **Functions only** with `GRIN_GOODS_EVIDENCE_FUNCTIONS` unset → callables
    exist but deny. Smoke: unauthenticated and non-seeded uid get deny.
-   Production compose already exists at `84c748d`; do not deploy stubs.
+   Production compose exists at `4aac867` (config resolution; parent packaging
+   `84c748d`). Do not deploy stubs.
 5. Set `GRIN_GOODS_EVIDENCE_FUNCTIONS=true` on the seven functions.
 6. Seed tester admission + ledger docs (Admin). Do not seed production uids.
 7. Smoke tests in §11. Do not enable client store-runtime GRIN in this packet.
@@ -319,7 +397,6 @@ deletion is Packet D, not this rollback.
 - Encrypted PDF backup remains backlog.
 - Purchase-entry flags stay `"0"`.
 - Production compose exists; `functions/src/index.ts` GRIN export remains HOLD.
-- Additive live Rules merge waits on `firebase login --reauth`.
 - Additive live Rules merge waits on `firebase login --reauth`.
 - No live IAM write. Prefix condition not read back from the project.
 - Client store-runtime enablement is Packet B, separate approval.

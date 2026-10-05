@@ -19,6 +19,7 @@ QA artefacts. Not production implementations. Not G6 completion.
 | `WAVE2EVIDENCE_CONFIRMATION_REFRESH.md` | Independent confirmation-refresh after evidence linkage at `dcc325a`; **Wave 2 not accepted** |
 | `RELEASE_CANDIDATE_GATE_REVIEW.md` | Independent release-candidate gate of application `dcc325a` plus packets A–E / T2 / listing / secret-scan / closure checklist; **Wave 2 not accepted** |
 | `PACKAGING_SLICE_REVIEW.md` | Independent review of production Admin composition at `84c748d`; emulator evidence; **Wave 2 not accepted** |
+| `ADMIN_CONFIG_RESOLUTION_REVIEW.md` | Independent reproduction of the `84c748d` project/bucket resolver failure and inspection of the fail-closed correction; **Wave 2 not accepted** |
 | `wave2evidence-e1-e5-repro.ts` | SQLITE_HOST / INJECTED / host-filesystem drivers for E1–E5 |
 | `wave2evidence-e1-e5-rereview.ts` | PHASE 2 persistGrinOwnerSession inspection + unset-host failure |
 | `wave2evidence-e4-hasher-followup.ts` | PHASE 3 persist hasher / conversion persist / SHA-256 inspection |
