@@ -29,7 +29,7 @@ TOOLING (ops-guard suite; not application CI).
 | version | **1.0.0** / versionCode **23 unreserved** |
 | firebase-tools | **14.20.0** |
 | gcloud | **ABSENT** on this workstation (required on apply host for enable/disable) |
-| eas CLI | **present** (`eas-cli/24.10.0`); no `internal-grin` or `5d5df3d` Android builds; highest EAS versionCode **22** |
+| eas CLI | **present** on combined earlier as `eas-cli/24.10.0`; Team 3 this session used `npx eas-cli@16.28.0`. No `internal-grin` or `5d5df3d` Android builds; highest EAS versionCode **22**. Play inventory **NOT RUN** (Console ToS / aeadmin lockout) |
 | gh | not authenticated (git push of #31 still succeeded) |
 
 Do not reopen ops-guard A/B without a new concrete reproduction.
@@ -42,7 +42,7 @@ Do not reopen ops-guard A/B without a new concrete reproduction.
 |---|---|
 | SOURCE READY | Candidate at `5d5df3d` + canonical CI. Team 5: public deletion **FAIL**; issuance allowance **FAIL** public until Team 2. Wave 2 not accepted. |
 | BACKEND PILOT READY | Prepared; **not authorized**; GRIN seven **ABSENT** on live |
-| INTERNAL BUILD READY | Prepared; **not authorized**; versionCode 23 not reserved; no `internal-grin` / `5d5df3d` EAS AAB |
+| INTERNAL BUILD READY | Prepared; **not authorized**; Play inventory **NOT RUN**; versionCode 23 not reserved; no `internal-grin` / `5d5df3d` EAS AAB; B1≠B2 |
 | DEVICE ACCEPTED | Execution sheet ready; **NOT RUN** |
 | BILLING ACCEPTED | Source fail-closed; live handlers **present**; `PLAY_BILLING_ENABLED` absent; catalog **NOT RUN**; purchases **off** |
 | PUBLIC SUBMISSION READY | Blocked on lifecycle implementation + economics confirm + device + billing + listing/disclosure |
@@ -80,7 +80,7 @@ purchase-entry remains `"0"`. Play Console catalog **NOT RUN**.
 |---|---|---|
 | 1 Backend | Enable/disable method, Packet A, privilege proposal, auth/admission coverage | Live Functions/Rules/IAM/admission/enable |
 | 2 Policy | Owner choices recorded; implementing issuance/storage/expiry/export in team worktree | Economics confirm; 180-day public policy; no live purge |
-| 3 Build/device | Profile freeze, Packet B, device sheet | EAS/native build; Play upload (separate) |
+| 3 Build/device | Play inventory **NOT RUN** (ToS / aeadmin lockout). EAS: no `internal-grin` / no `5d5df3d`; highest vc22. Device sheet **NOT RUN**. B1≠B2, neither granted. | EAS/native build; Play upload (separate); Play Console re-read |
 | 4 Billing/Play | Source trace, Packet C, listing worksheet | Product/price/activation/submission |
 | 5 QA | Independent SOURCE review `POLICY_QA.md` + `RELEASE_COMPLETION_QA.md` continuation. Tooling 34/34. Public deletion **FAIL** (P8). Issuance allowance **FAIL** public (P3). Artwork hashes **PASS**. Team 2 code **not reviewed**. | Does not own implementation; re-review after Team 2 merge |
 

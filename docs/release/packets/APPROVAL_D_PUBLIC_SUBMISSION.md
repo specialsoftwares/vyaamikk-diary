@@ -51,7 +51,7 @@ new binary.
 | POL | Pricing A recorded. Storage 1/5/20 GiB **pending economics**. Explicit deletion public window **UNRESOLVED** (15d implemented vs 180d requested) |
 | DEL | Deletion job does not purge GRIN Storage/Firestore; no production purge job this assignment |
 | BCK | Live GRIN Functions absent; Rules additive undeployed |
-| BLD | No Internal AAB this SHA; Play inventory stale (2026-10-01) |
+| BLD | No Internal AAB this SHA; Play inventory **NOT RUN** 2026-10-06 (`support.vyd` ToS page; `aeadmin` lockout). EAS highest vc22 `72cb7254` git `0da2f58` is **not** this SHA |
 | DEV | NATIVE_DEVICE / PLAY_INSTALLED **NOT RUN** |
 | PAY | Restricted store billing **NOT RUN**; client purchase-entry `"0"`; live `PLAY_BILLING_ENABLED` **absent**; Pub/Sub topics **0**; Play catalog **NOT RUN** (no androidpublisher scope) |
 | LIST | Privacy date mismatch (site 15 Jul vs app 27 Jul — do not backdate). `/~flock.js` is Tinybird collector with `data-proxy-url="/~api/analytics"` (POST 202). Delete page mailto is documented, not automatically defective. Play 512/feature graphic **are git-tracked** in this candidate (Team 5 independent hash **PASS**). Dashboard screenshots `safeForPublic: false` (5). `PLAY_SUBMISSION_READINESS.md` artwork line still stale pending Team 4. |

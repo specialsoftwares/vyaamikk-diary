@@ -42,18 +42,39 @@ non-seeded uids still fail closed on callables/Rules.
 
 Compile-time purchase flags: changing them later requires a **new** binary.
 
+`eas config --platform android --profile internal-grin` (Team 3, 2026-10-06,
+`npx eas-cli@16.28.0`, no mutation): profile env as above; resolved
+`distribution=store`; overlap warning remote production `EXPO_PUBLIC_APP_MODE`
+vs profile — **profile wins**. `git status` unchanged.
+
 ---
 
 ## Play version inventory
 
-### Play Console — NOT RUN this session
-No Play Developer API / gcloud here. Last complete Console read: **2026-10-01**
-(Internal **vc22 Active**; 23 absent; production Inactive). Owner must re-open
-App bundle explorer (unfiltered) immediately before choosing a code.
+### Play Console — NOT RUN 2026-10-06 (2026-10-01 read is STALE)
+
+Do **not** reuse Internal vc22 Active / 23 absent as current fact. Do **not**
+reuse “catalog empty.” Do **not** invent versionCodes. Firebase ADC was **not**
+used as Android Publisher.
+
+Exact blockers this session (Team 3):
+
+1. `support.vyd@specialsoftwares.com` redirected to
+   `https://play.google.com/console/u/0/accept-terms`. Terms **not** accepted.
+2. `aeadmin@specialsoftwares.com` password challenge: **“Too many failed
+   attempts.”** Password not entered.
+3. `gcloud` / `googleapiclient` absent. `eas submit:list` is **not** a command
+   in `eas-cli@16.28.0` (`command submit:list not found`) — not a Play-track
+   read.
+
+Owner must re-open App bundle explorer (unfiltered) immediately before
+choosing a code.
 
 ### EAS Android — RUN 2026-10-06 (not Play tracks)
+
 Account `vydspecial2026` / project `@vydspecial2026/vyaamikk-diary`.
-`eas build:list --platform android --limit 50`:
+`npx eas-cli@16.28.0 build:list --platform android --limit 50 --non-interactive --json`
+(28 Android builds):
 
 | Finding | Value |
 |---|---|
@@ -61,10 +82,10 @@ Account `vydspecial2026` / project `@vydspecial2026/vyaamikk-diary`.
 | Builds of SHA `5d5df3d…` | **none** |
 | Highest EAS `appBuildVersion` | **22** |
 | versionCode **23** on EAS | **absent** |
-| Latest store AAB on EAS | vc**22**, profile `production`, id `72cb7254-0be9-4f92-a514-dbfab2b1150d`, git `0da2f58…` (2026-09-23). **Do not reuse** as Internal-GRIN. |
-| `eas submit:list` | `[]` — **not** a Play-track read |
+| Latest store AAB on EAS | vc**22**, profile `production`, id `72cb7254-0be9-4f92-a514-dbfab2b1150d`, git `0da2f58…` (2026-09-23). **Do not reuse** as Internal-GRIN. **Not this SHA.** |
+| EAS vc21 | `5e1e124b-…`, same git `0da2f58…`. Finished on EAS ≠ uploaded to Play |
 
-`adb`: no devices this session.
+`adb devices -l`: empty this session.
 
 **Before selecting versionCode:** owner records every Play versionCode + track
 + status. Choose unused integer **strictly greater** than the highest
@@ -112,7 +133,10 @@ B1. No production track. No store listing submission.
 ## Device execution
 
 Owner/tester sheet: `docs/release/packets/DEVICE_EXECUTION_SHEET.md`.
-All rows **NOT RUN** until hardware. Host/emulator is not a device pass.
+All executable rows **NOT RUN** until hardware. XR is **N/A until backend**.
+Host/emulator is not a device pass. Freeze draft:
+`docs/release/proposals/team3/APPROVAL_B_DRAFT.md`. Handoff:
+`docs/release/proposals/team3/DEVICE_HANDOFF.md`.
 
 GRIN end-to-end on device needs Approval A live backend + admission.
 Without that, GRIN register rows are `backend_absent`, not a product pass.

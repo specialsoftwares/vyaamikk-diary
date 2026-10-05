@@ -160,3 +160,7 @@ Owner wrote: GRIN included in existing Starter/Professional/Business (no separat
 
 Independent QA on application `5d5df3d` (Team 2 unmerged, not reviewed). Ops-guard **34/34 TOOLING** (not application CI). Public deletion/retention **SOURCE FAIL** (P8): GRIN still absent from purge prefixes; nested ledger children would remain even if first-level names were appended; **180 requested does not close**. Issuance monthly allowance **SOURCE FAIL for public GRIN** (P3): register does not increment `recordsThisMonth`. Artwork hashes independently **PASS** (git-tracked). Expected-FAIL regressions live under `docs/release/proposals/team5/` (not `ci:verify`). Do not mark GRIN / device / billing / public-release Done.
 
+## Team 3 Android / device (unsent, 2026-10-06)
+
+Play uploaded-version inventory **NOT RUN**: `support.vyd` Play Console ToS not accepted; `aeadmin` “Too many failed attempts”; Firebase token not used as Publisher. EAS (`npx eas-cli@16.28.0`): no `internal-grin`, no git `5d5df3d`, highest vc22 `72cb7254` production AAB git `0da2f58` — not this SHA. vc23 unreserved. Device sheet all executable rows **NOT RUN** (`adb` empty). B1 build ≠ B2 upload; neither granted. Artwork tracked in candidate tree. Do not mark device / Internal build Done.
+
