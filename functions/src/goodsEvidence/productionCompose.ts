@@ -1,8 +1,9 @@
 /**
  * Production Admin composition for undeployed GRIN callables.
  *
- * Binds packaged G1/G2 adapters to Admin Firestore + Storage. Not exported
- * from functions/src/index.ts. Isolated Functions-emulator entry re-exports
+ * Binds packaged G1/G2 adapters to one resolved Admin app's Firestore + Storage.
+ * Project and bucket come from productionAdminConfig.ts. Not exported from
+ * functions/src/index.ts. Isolated Functions-emulator entry re-exports
  * createProductionGrinCallables as createIsolatedGrinCallables.
  *
  * Clock is Date.now() / crypto on this process (server attempt time).
@@ -16,7 +17,7 @@
  */
 import { randomBytes, randomUUID } from "node:crypto";
 
-import { getApps, initializeApp } from "firebase-admin/app";
+import { getApps, initializeApp, type App } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 
@@ -26,12 +27,47 @@ import { GoodsEvidenceRegisterAdapter } from "./g1/adapter";
 import type { G1Firestore, G1Transaction } from "./g1/types";
 import { GoodsEvidenceStorageAdapter } from "./g2/adapter";
 import type { G2BlobStore, G2Clock, G2Firestore, G2Transaction } from "./g2/types";
+import {
+  resolveGrinAdminBinding,
+  type GrinAdminAppLike,
+  type GrinAdminAppPorts,
+} from "./productionAdminConfig";
 
-export const ISOLATED_FUNCTIONS_PROJECT = "demo-vyaamikk-grin-t1";
-export const ISOLATED_STORAGE_BUCKET = `${ISOLATED_FUNCTIONS_PROJECT}.appspot.com`;
+export {
+  GRIN_ADMIN_CONFIG_CODES,
+  GRIN_ADMIN_DEFAULT_APP_NAME,
+  GrinAdminConfigError,
+  ISOLATED_FUNCTIONS_PROJECT,
+  ISOLATED_STORAGE_BUCKET,
+  preflightGrinAdminBinding,
+  resolveGrinAdminBinding,
+} from "./productionAdminConfig";
+export type {
+  GrinAdminAppLike,
+  GrinAdminAppPorts,
+  GrinAdminBindingPreflight,
+  GrinAdminConfigCode,
+  ResolvedGrinAdminBinding,
+} from "./productionAdminConfig";
+
 export const PRODUCTION_COMPOSITION_KIND = "PRODUCTION_ADMIN_COMPOSED" as const;
 
 type AdminDb = ReturnType<typeof getFirestore>;
+type AdminBucket = ReturnType<ReturnType<typeof getStorage>["bucket"]>;
+
+export type GrinAdminRuntimePorts = GrinAdminAppPorts & {
+  getFirestore(app: GrinAdminAppLike): AdminDb;
+  getStorage(app: GrinAdminAppLike): { bucket(name: string): AdminBucket };
+};
+
+export function liveGrinAdminRuntimePorts(): GrinAdminRuntimePorts {
+  return {
+    getApps: () => getApps(),
+    initializeApp: (options) => initializeApp(options),
+    getFirestore: (app) => getFirestore(app as App),
+    getStorage: (app) => getStorage(app as App),
+  };
+}
 
 function wrapG1Firestore(db: AdminDb): G1Firestore {
   return {
@@ -92,7 +128,7 @@ function wrapG2Firestore(db: AdminDb): G2Firestore {
   };
 }
 
-function wrapAdminBlobStore(bucket: ReturnType<ReturnType<typeof getStorage>["bucket"]>): G2BlobStore {
+function wrapAdminBlobStore(bucket: AdminBucket): G2BlobStore {
   return {
     async putIfAbsent(path, bytes, contentType) {
       const file = bucket.file(path);
@@ -177,30 +213,23 @@ function productionG2Clock(): G2Clock {
   };
 }
 
-function ensureAdminApp(env: NodeJS.ProcessEnv): { projectId: string; storageBucket: string } {
-  const projectId = env.GCLOUD_PROJECT || env.GCLOUD_PROJECT_ID || ISOLATED_FUNCTIONS_PROJECT;
-  const storageBucket = env.FIREBASE_STORAGE_BUCKET || `${projectId}.appspot.com`;
-  if (getApps().length === 0) {
-    initializeApp({ projectId, storageBucket });
-  }
-  return { projectId, storageBucket };
-}
-
 /**
  * Real Admin Firestore/Storage adapters + composed callables.
  * Fail-closed unless GRIN_GOODS_EVIDENCE_FUNCTIONS === "true" (composed.ts).
+ * Firestore and Storage bind to the same resolved default Admin app.
  */
 export function createProductionGrinCallables(
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
+  ports: GrinAdminRuntimePorts = liveGrinAdminRuntimePorts()
 ): ComposedGrinCallables {
-  const { storageBucket } = ensureAdminApp(env);
-  const db = getFirestore();
+  const binding = resolveGrinAdminBinding(env, ports);
+  const db = ports.getFirestore(binding.app);
   try {
     db.settings({ ignoreUndefinedProperties: true });
   } catch {
     // settings may only be applied once per process
   }
-  const bucket = getStorage().bucket(storageBucket);
+  const bucket = ports.getStorage(binding.app).bucket(binding.storageBucket);
   const registerAdapter = new GoodsEvidenceRegisterAdapter(wrapG1Firestore(db), productionG1Clock());
   const storageAdapter = new GoodsEvidenceStorageAdapter(
     wrapG2Firestore(db),

@@ -7,7 +7,8 @@ Authoritative sources:
 
 - Domain: `src/goodsEvidence`
 - Adapters: `tools/goods-evidence-emulator` (G1) and `tools/goods-evidence-storage` (G2)
-- Hand-written here: `callables.ts`, `composed.ts`, `productionCompose.ts`
+- Hand-written here: `callables.ts`, `composed.ts`, `productionCompose.ts`,
+  `productionAdminConfig.ts`
 
 - Not exported from `functions/src/index.ts` in this slice.
 - Production entrypoint remains `functions/lib/index.js`.
@@ -15,9 +16,10 @@ Authoritative sources:
   is `"true"` because no adapter is bound there.
 - `composed.ts` is the callable factory. It injects adapters; it does not
   import `tools/` (that would lift `rootDir`).
-- `productionCompose.ts` binds Admin Firestore/Storage to the packaged G1/G2
-  adapters. Isolated Functions-emulator entry re-exports
-  `createProductionGrinCallables`. Still not `index.ts`.
+- `productionCompose.ts` binds packaged G1/G2 adapters to one resolved Admin
+  app. `productionAdminConfig.ts` selects project and Storage bucket with
+  explicit precedence and fail-closed diagnostics. Isolated Functions-emulator
+  entry re-exports `createProductionGrinCallables`. Still not `index.ts`.
 - Owner identity is `request.auth.uid`. Client uid, digest, and claimed hash
   are not authority. `grinUploadEvidence` must not succeed without hashing
   stored bytes.

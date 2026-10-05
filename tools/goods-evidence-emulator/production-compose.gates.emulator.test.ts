@@ -75,7 +75,8 @@ async function main(): Promise<void> {
   assert.match(productionSrc, /wrapAdminBlobStore/);
   assert.match(productionSrc, /MAX_PDF_ORIGINAL_BYTES/);
   assert.match(productionSrc, /async open\(path, generation\)/);
-  assert.match(productionSrc, /getStorage\(\)\.bucket\(storageBucket\)/);
+  assert.match(productionSrc, /getStorage\(binding\.app\)\.bucket\(binding\.storageBucket\)/);
+  assert.match(productionSrc, /resolveGrinAdminBinding/);
   assert.doesNotMatch(productionSrc, /from ["'][^"']*tools\//);
 
   const authHost = requireEnv("FIREBASE_AUTH_EMULATOR_HOST");

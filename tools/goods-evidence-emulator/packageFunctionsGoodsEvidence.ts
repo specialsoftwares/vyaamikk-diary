@@ -84,7 +84,13 @@ const FORBIDDEN = [
   /isGoodsEvidenceEnabled/,
 ];
 
-export const KEEP = new Set(["callables.ts", "composed.ts", "README.md", "productionCompose.ts"]);
+export const KEEP = new Set([
+  "callables.ts",
+  "composed.ts",
+  "README.md",
+  "productionCompose.ts",
+  "productionAdminConfig.ts",
+]);
 
 export function rewrite(src: string): string {
   return src.replace(/from ["']@\/utils\/sha256Hex["']/g, 'from "./hashNode"');

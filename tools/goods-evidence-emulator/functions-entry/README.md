@@ -22,6 +22,10 @@ fail-closed `handleGrin*` stubs as this composition.
 
 - Emulator hosts above (`FIRESTORE_EMULATOR_HOST`, `FIREBASE_AUTH_EMULATOR_HOST`, `FIREBASE_STORAGE_EMULATOR_HOST`). Unset hosts fail the round-trip test; they are not counted as pass.
 - `GRIN_GOODS_EVIDENCE_FUNCTIONS=true` on the **emulator process only**.
+- Explicit emulator Admin target: `GRIN_ADMIN_PROJECT=demo-vyaamikk-grin-t1` and
+  `GRIN_ADMIN_STORAGE_BUCKET=demo-vyaamikk-grin-t1.appspot.com`. Missing those
+  values must not select a production project, and production must not fall
+  back to this demo pair.
 - Auth test user via Auth emulator custom token for the seeded uid.
 - Admin SDK seed of user / ledger / admission (test setup, not the mobile client).
 - Isolated Rules copies in this folder (not live `firestore.rules` / `storage.rules`).

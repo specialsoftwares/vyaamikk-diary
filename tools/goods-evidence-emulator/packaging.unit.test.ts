@@ -30,6 +30,7 @@ import {
   G1_ADAPTER_FILES,
   G2_ADAPTER_FILES,
   HASH_NODE,
+  KEEP,
   expectedGeneratedAdapterSource,
   expectedGeneratedSource,
 } from "./packageFunctionsGoodsEvidence";
@@ -105,7 +106,10 @@ function walkTs(dir: string, out: string[] = []): string[] {
 for (const file of walkTs(packaged)) {
   const rel = file.slice(packaged.length + 1);
   const src = readFileSync(file, "utf8");
-  const patterns = rel === "productionCompose.ts" ? forbiddenDomain.filter((p) => !String(p).includes("firebase-admin")) : forbiddenDomain;
+  const patterns =
+    rel === "productionCompose.ts" || rel === "productionAdminConfig.ts"
+      ? forbiddenDomain.filter((p) => !String(p).includes("firebase-admin"))
+      : forbiddenDomain;
   for (const pattern of patterns) {
     assert.doesNotMatch(src, pattern, `${rel} must not match ${pattern}`);
   }
@@ -122,9 +126,22 @@ assert.match(productionCompose, /MAX_PDF_ORIGINAL_BYTES/);
 assert.match(productionCompose, /Date\.now\(\)/);
 assert.match(productionCompose, /createProductionGrinCallables/);
 assert.match(productionCompose, /async open\(path, generation\)/);
-assert.match(productionCompose, /getStorage\(\)\.bucket\(storageBucket\)/);
+assert.match(productionCompose, /getStorage\(binding\.app\)\.bucket\(binding\.storageBucket\)/);
 assert.doesNotMatch(productionCompose, /handleGrinRegister/);
 assert.doesNotMatch(productionCompose, /from ["'][^"']*tools\//);
+assert.match(productionCompose, /resolveGrinAdminBinding/);
+
+const productionAdminConfig = readFileSync(join(packaged, "productionAdminConfig.ts"), "utf8");
+assert.match(productionAdminConfig, /FIREBASE_CONFIG/);
+assert.match(productionAdminConfig, /GRIN_ADMIN_STORAGE_BUCKET/);
+assert.match(productionAdminConfig, /grin_admin_config_missing/);
+assert.doesNotMatch(productionAdminConfig, /\$\{projectId\}\.appspot\.com/);
+assert.doesNotMatch(
+  productionAdminConfig,
+  /GCLOUD_PROJECT \|\| env\.GCLOUD_PROJECT_ID \|\| ISOLATED_FUNCTIONS_PROJECT/
+);
+assert.equal(KEEP.has("productionCompose.ts"), true);
+assert.equal(KEEP.has("productionAdminConfig.ts"), true);
 
 const functionsEntryCompose = readFileSync(join(dir, "functions-entry/compose.ts"), "utf8");
 assert.match(functionsEntryCompose, /createProductionGrinCallables as createIsolatedGrinCallables/);
