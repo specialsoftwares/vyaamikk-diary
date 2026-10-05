@@ -16,6 +16,8 @@ const PERMANENT: Record<string, ActionableFailure> = {
   integrity: "server_serial_integrity",
   serial_exhausted: "serial_range_exhausted",
   voided: "account_or_ledger_not_usable",
+  quota_exhausted: "monthly_quota_exhausted",
+  quota_state_invalid: "quota_state_unreadable",
 };
 
 export function isNetworkAmbiguous(err: unknown): boolean {

@@ -1,6 +1,11 @@
 /**
  * Final account purge orchestrator.
  *
+ * THREE DISTINCT DELETION-WINDOW FACTS (do not collapse):
+ * 1. Implemented: DELETION_GRACE_MS = 15 days (this file). Do not change to 180.
+ * 2. Owner-requested policy: 180 days — NOT legally / Play approved.
+ * 3. Policy ultimately approved for public operation: UNRESOLVED.
+ *
  * Cleanup order (recoverable):
  * 1. Acquire lease on deletionJobs/{uid} (generation check)
  * 2. Abort if user reactivated (status active) or job cancelled
@@ -29,6 +34,7 @@ import {
 } from "./deletionJob";
 import { purgeUserSubcollectionsFully } from "./firestorePurge";
 import { purgeAllUserOwnedStorage } from "./storagePurge";
+import { INCLUDE_GRIN_IN_ACCOUNT_PURGE, purgeGrinEvidenceIfEnabled } from "./grinCleanup";
 
 const USERS = "users";
 const PHONE_INDEX = "phoneIndex";
@@ -327,6 +333,28 @@ export async function runFinalAccountPurge(uid: string): Promise<FinalPurgeResul
       );
       if (!storageResult.verifiedEmpty) {
         throw new Error("storage_verify_not_empty");
+      }
+      if (INCLUDE_GRIN_IN_ACCOUNT_PURGE) {
+        const grin = await purgeGrinEvidenceIfEnabled({
+          uid,
+          bucket: getAdminBucket() as unknown as import("./storagePurge").StorageBucketLike,
+          db: {
+            async listCollection(path: string) {
+              const snap = await getAdminDb().collection(path).limit(400).get();
+              return snap.docs.map((d) => ({ id: d.id, ref: { path: d.ref.path } }));
+            },
+            async listSubcollections(docPath: string) {
+              const cols = await getAdminDb().doc(docPath).listCollections();
+              return cols.map((c) => c.id);
+            },
+            async delete(path: string) {
+              await getAdminDb().doc(path).delete();
+            },
+          },
+        });
+        if (!grin.completed) {
+          throw new Error(grin.detail);
+        }
       }
       phases.storage = "done";
       await patchJob(uid, { phases });

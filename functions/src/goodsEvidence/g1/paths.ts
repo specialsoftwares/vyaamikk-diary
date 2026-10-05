@@ -35,3 +35,11 @@ export function eventPath(
 export function eventsCollectionPath(uid: string, ledgerId: string, receiptId: string): string {
   return `${receiptPath(uid, ledgerId, receiptId)}/events`;
 }
+
+export function subscriptionStatusPath(uid: string): string {
+  return `users/${uid}/subscription/status`;
+}
+
+export function usageCurrentPath(uid: string): string {
+  return `users/${uid}/subscription/usageCurrent`;
+}

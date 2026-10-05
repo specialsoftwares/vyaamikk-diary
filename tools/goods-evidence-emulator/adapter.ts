@@ -31,6 +31,7 @@ import { cloneSnapshot } from "../../src/goodsEvidence/snapshot";
 import { financialYearTokenForIstInstant, formatUtcIso } from "../../src/goodsEvidence/time";
 import type { GrinConfirmedProjection, GrinReceiptReadResult } from "../../src/goodsEvidence/ports";
 import type { GrinEvent, GrinView, ImmutableGrin } from "../../src/goodsEvidence/types";
+import { grinAccessPhase, mayIssueOrUploadGrinCloud } from "../../src/goodsEvidence/entitlementLifecycle";
 import {
   commandEnvelopeError,
   commandReasonError,
@@ -76,8 +77,11 @@ import {
   ledgerPath,
   receiptPath,
   serialPath,
+  subscriptionStatusPath,
+  usageCurrentPath,
   userPath,
 } from "./paths";
+import { decideGrinIssuanceQuota } from "./quota";
 import { isRetryable } from "./retry";
 import { allocateFromCounter } from "./serial";
 import type {
@@ -320,6 +324,10 @@ export class GoodsEvidenceRegisterAdapter {
       const receiptSnap = await tx.get(receiptRef);
       const serialRef = this.db.doc(serialPath(uid, frozen.ledgerId, fyToken));
       const serialSnap = await tx.get(serialRef);
+      const statusRef = this.db.doc(subscriptionStatusPath(uid));
+      const statusSnap = await tx.get(statusRef);
+      const usageRef = this.db.doc(usageCurrentPath(uid));
+      const usageSnap = await tx.get(usageRef);
       await this.hooks.afterReads?.(attempt);
 
       if (commandSnap.exists) {
@@ -337,12 +345,37 @@ export class GoodsEvidenceRegisterAdapter {
         return deny("receipt_exists", "receipt already issued; history cannot be replaced");
       }
 
+      const phase = grinAccessPhase(statusSnap.exists ? statusSnap.data() : undefined, serverMs);
+      if (!mayIssueOrUploadGrinCloud(phase)) {
+        return deny("policy_denied", "subscription expired; new issuance is not available");
+      }
+
+      const quota = decideGrinIssuanceQuota({
+        statusExists: statusSnap.exists,
+        statusData: statusSnap.exists ? statusSnap.data() : undefined,
+        usageRaw: usageSnap.exists ? usageSnap.data() : undefined,
+        recordId: frozen.body.receiptId,
+        nowMs: serverMs,
+      });
+      if (quota.kind === "quota_exhausted") {
+        return deny(
+          "quota_exhausted",
+          "Monthly record limit reached. This save was not completed."
+        );
+      }
+      if (quota.kind === "quota_state_invalid") {
+        return deny("quota_state_invalid", "Usage state is unreadable. This save was not completed.");
+      }
+
       const allocated = allocateFromCounter(serialSnap.exists, serialSnap.data(), fyToken);
       if (!allocated.ok) return deny(allocated.code, GENERIC_DENY);
       const serial = allocated.serial;
       const issued = this.buildIssued(frozen, uid, serverMs, fyToken, serial);
       if (!("result" in issued)) return issued;
 
+      if (quota.kind === "write") {
+        tx.set(usageRef, { ...quota.doc });
+      }
       tx.set(serialRef, {
         fyToken,
         nextSerial: serial + 1,

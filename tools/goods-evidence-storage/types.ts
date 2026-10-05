@@ -11,7 +11,9 @@ export type G2DenyCode =
   | "policy_denied"
   | "not_found"
   | "invalid"
-  | "integrity";
+  | "integrity"
+  | "quota_exhausted"
+  | "quota_state_invalid";
 
 export type G2Deny = { ok: false; code: G2DenyCode; detail: string };
 
@@ -105,6 +107,13 @@ export type EvidenceRecord = {
   updatedAtUtc: string;
 };
 
+export type G2StorageWarning = {
+  level: "warn_80" | "warn_95";
+  usedBytes: number;
+  capBytes: number;
+  percent: number;
+};
+
 export type G2ReserveSuccess = {
   ok: true;
   replayed: boolean;
@@ -112,6 +121,8 @@ export type G2ReserveSuccess = {
   objectKey: string;
   storagePath: string;
   state: "reserved" | "uploading";
+  storageWarning?: G2StorageWarning;
+  storageOverLimitRetained?: boolean;
 };
 
 export type G2LifecycleSuccess = {
@@ -176,6 +187,35 @@ export type G2ListSuccess = {
 
 export type G2ListResult = G2ListSuccess | G2Deny;
 
+export type G2DownloadSuccess = {
+  ok: true;
+  evidenceId: string;
+  kind: "original";
+  bytes: Uint8Array;
+  byteSize: number;
+  mime: string;
+  actualSha256: string;
+  generation: string;
+  storagePath: string;
+};
+
+export type G2DownloadResult = G2DownloadSuccess | G2Deny;
+
+export type G2StorageStatus = {
+  ok: true;
+  usedBytes: number;
+  capBytes: number | null;
+  enforcementOn: boolean;
+  overLimitRetained: boolean;
+  warning: G2StorageWarning | null;
+  reservedOriginalBytes: number;
+  retainedOriginalBytes: number;
+  reservedDerivativeBytes: number;
+  retainedDerivativeBytes: number;
+};
+
 export type G2Hooks = {
   afterReads?: (attempt: number) => Promise<void> | void;
+  /** Test-only. Production must omit. PROPOSED caps stay in storageQuota.ts. */
+  storageCapOverrideBytes?: number;
 };

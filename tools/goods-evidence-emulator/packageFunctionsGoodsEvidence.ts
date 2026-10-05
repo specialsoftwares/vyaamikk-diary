@@ -36,6 +36,7 @@ export const DOMAIN_FILES = [
   "hashChain.ts",
   "ports.ts",
   "evidence.ts",
+  "entitlementLifecycle.ts",
 ] as const;
 
 export const G1_ADAPTER_FILES = [
@@ -49,6 +50,7 @@ export const G1_ADAPTER_FILES = [
   "paths.ts",
   "retry.ts",
   "serial.ts",
+  "quota.ts",
 ] as const;
 
 export const G2_ADAPTER_FILES = [
@@ -59,6 +61,7 @@ export const G2_ADAPTER_FILES = [
   "log.ts",
   "paths.ts",
   "retry.ts",
+  "storageQuota.ts",
 ] as const;
 
 export const GENERATED_HEADER =

@@ -30,6 +30,8 @@ const DENY_CODES = new Set<GrinDenyCode>([
   "serial_exhausted",
   "version_conflict",
   "voided",
+  "quota_exhausted",
+  "quota_state_invalid",
 ]);
 
 const MUTATION_COMMAND_TYPES = new Set<Exclude<GrinCommandType, "registerGoodsReceipt">>([

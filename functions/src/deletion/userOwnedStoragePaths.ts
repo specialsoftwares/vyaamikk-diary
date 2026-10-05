@@ -3,6 +3,10 @@
  * Keep in sync with mobile `src/services/storage/userOwnedStoragePaths.ts`
  * and `storage.rules` (`users/{userId}/letterhead|attachments|pdfs/...`).
  *
+ * GRIN evidence lives under `users/{uid}/grinEvidence/` and is listed in
+ * `grinCleanupLists.ts`, not here. Do not add `grinEvidence` to this array
+ * until INCLUDE_GRIN_IN_ACCOUNT_PURGE is owner-approved (default false).
+ *
  * Profile logos are device-local only (not uploaded to Storage).
  * Generated PDF file URIs are stripped before Firestore sync; optional
  * cloud PDF objects use `users/{uid}/pdfs/...` when uploaded.
