@@ -11,9 +11,11 @@ Guarded commands (replace copy-paste snippets):
 
 Stub tests (not application CI):
 `node --test docs/release/packets/grin-ops/grin-functions-op.test.mjs`
-(15/15 pass this session).
+(34/34 pass this session; not GitHub `ci:verify`).
 
-Team 5: `docs/release/proposals/team5/INTERNAL_GRIN_PREFLIGHT_PACKET_REVIEW.md`.
+Team 5: `docs/release/proposals/team5/INTERNAL_GRIN_OPS_GUARD_REVIEW.md`
+(prior packet review remains
+`docs/release/proposals/team5/INTERNAL_GRIN_PREFLIGHT_PACKET_REVIEW.md`).
 
 ---
 
@@ -59,6 +61,13 @@ dotenv. Direct Cloud Run env edits are not used.
 
 ## 3. Read-only live preflight — **verified** (2026-10-06)
 
+These reads succeeded. They are **not** relabelled failed because later tooling
+lacked guards. The 2026-10-06 inspect was an authenticated HTTP 200 Functions
+list (39 unrelated names, seven GRIN names not among them), not an HTTP 403
+empty body. Subsequent ops-guard work distinguishes PRESENT / ABSENT /
+UNKNOWN; a 403/401/500/malformed/incomplete list is UNKNOWN and must not be
+treated as absence.
+
 `firebase login --reauth` completed as `support.vyd@specialsoftwares.com`.
 Inspect via `node docs/release/packets/grin-ops/grin-functions-op.mjs inspect`
 (Google APIs; token never printed). No mutation.
@@ -67,11 +76,11 @@ Inspect via `node docs/release/packets/grin-ops/grin-functions-op.mjs inspect`
 |---|---|
 | Project | `vyaamikk-diary` / **`982505811909`** (HTTP 200) |
 | Bucket | `vyaamikk-diary.firebasestorage.app` projectNumber **`982505811909`** (belongs) |
-| GRIN seven callables | **all ABSENT** (genuinely new) |
+| GRIN seven callables | **all ABSENT** on that complete 200 inventory (genuinely new at inspect time) |
 | Unrelated asia-south1 functions | **39** present (identity/email/deletion/billing). Not in GRIN `--only` list. |
 | Runtime SA (from `mintClientAuthToken`) | `982505811909-compute@developer.gserviceaccount.com` |
-| Project IAM for that SA | **`roles/editor`** (HTTP 200). Residual: Editor includes Storage object delete. Do not *use* delete as rollback. Do not add more roles this packet. |
-| Firestore database IAM API | HTTP **501** (not used; Editor is project-level) |
+| Project IAM for that SA | **`roles/editor`** (HTTP 200). Broad privilege **exists**. Not granting a new delete role does **not** remove Editor’s existing delete capability. Do not change this shared account now (risk to existing functions). Least-privilege tightening is an **explicit security decision before public GRIN activation**, not this packet. Do not *use* delete as rollback. |
+| Firestore database IAM API | HTTP **501** = **unsupported / unknown**. Not “no permissions” and not a successful empty-policy check. Editor remains the project-level residual. |
 | Bucket IAM bindings for that SA | none listed (HTTP 200); Editor remains the residual |
 | Firestore rules sha256 | `b13d52559efd144bfbdd86daf426fd5ce81abceead4c87979cb9cee2d1a25e2c` **= baseline** |
 | Storage rules sha256 | `1a912051ba923a0e4ae29fd36b1741bcf0f5879cd53e6d4bd386c9d5a3b717d5` **= baseline** |
@@ -134,6 +143,19 @@ Executable: `docs/release/packets/grin-ops/grin-functions-op.mjs`
 Guarantees (stub-proven):
 
 - Validates cwd, pin, and deployment inputs first.
+- Live pin is the approved application SHA `5d5df3d…`. `GRIN_OPS_PINNED_SHA`,
+  endpoint fixtures, HTTP stubs, bin injection, and test-hang are **rejected
+  in live mode before inspection or mutation**.
+- Stub mode requires an **absolute injected executor**. It does not fall back
+  to `firebase` / `gcloud` on PATH.
+- Incomplete or empty fixtures are rejected (not treated as absent).
+- Functions inspect validates HTTP status and response shape, follows
+  `nextPageToken` pagination, and records `functionsInventory`
+  `{status,complete,reason,pages}`. PRESENT / ABSENT / UNKNOWN. Failed,
+  malformed, or incomplete inventory is UNKNOWN and **blocks deployment**.
+  Absence requires an authenticated complete inventory (or an explicit
+  not-found on a correctly scoped lookup).
+- Project identity and bucket membership must verify before deployment.
 - Rejects dirty/untracked `functions src eas.json app.json app firebase.json`;
   does not reset or stash.
 - Abort on every failed prerequisite; failed prechecks never invoke Firebase
@@ -144,11 +166,15 @@ Guarantees (stub-proven):
   **only** those, including on failure and SIGTERM.
 - Preserves the deploy executable’s exit status; does not claim PASS on
   failure.
+- Failed Rules exports do **not** overwrite existing rollback files with empty
+  bytes.
+- Live firebase spawn checks the actual CLI `--version` against reviewed
+  **14.20.0**.
 - Prints no env values, tokens, or credentials.
 - Does not rely solely on `set -e`.
 
 Mutating commands also require `GRIN_OPS_ALLOW_LIVE=1` on the apply host
-(unset here; `stub` is tests only).
+(unset here; `stub` is tests only). `GRIN_OPS_ALLOW_LIVE=1` remains **HOLD**.
 
 ### 6.1 Inspect (read-only; already run)
 
@@ -193,7 +219,11 @@ GRIN_OPS_ALLOW_LIVE=1 node docs/release/packets/grin-ops/grin-functions-op.mjs d
 ```
 
 Live enable/disable re-inspects the seven endpoints first (no fixture). Not
-authorized now. This workstation has no `gcloud`.
+authorized now. This workstation has no `gcloud`. The pure helper
+`applyGcloudGateUpdate` is **not** proof that a real gcloud deploy preserves
+configuration. Keep enable/disable approval separate until the chosen CLI
+path and post-operation verification are supported by evidence. Do **not**
+execute enablement to obtain that evidence.
 
 Post-operation: `inspect` again; confirm seven `gate=on|off` only. Do not
 dump env.
@@ -233,10 +263,27 @@ Play, `main` merge: unset.
 
 **No live mutation is requested now.**
 
-The smallest later **single** approval, if granted separately: isolated
-**Firestore Rules** deploy only (`--config` proposed-grin
-`firebase.rules-only.json --only firestore:rules --project vyaamikk-diary`),
-against the no-drift 2026-10-06 export. Not Storage, not Functions, not
+Isolated Firestore Rules is a **separate** operation and does not depend on
+this Functions helper. Prepare, then wait for a single owner approval; do
+not execute without it:
+
+| Prepared item | Value |
+|---|---|
+| Reviewed isolated config hash | `d224b75385b451433e5c59bdbf0cc147697fbe88e773c11dab44f3b71e3e8a74` |
+| Merged Firestore hash | `551203b8b11991fc1d49d42aa6a818fedeca8530654f7505de949b62a1ae298b` |
+| Live Firestore baseline (2026-10-06) | `b13d52559efd144bfbdd86daf426fd5ce81abceead4c87979cb9cee2d1a25e2c` |
+| Rollback bytes | `docs/release/rules-compat/live-export-2026-10-06/firestore.rules` |
+| Post-deploy verify | fresh export sha256 must equal the merged Firestore hash; release still `cloud.firestore`; no Functions/Storage/IAM/env writes |
+
+Command if later approved (Firestore only):
+
+```bash
+firebase deploy --project vyaamikk-diary --non-interactive \
+  --config docs/release/rules-compat/proposed-grin/firebase.rules-only.json \
+  --only firestore:rules
+```
+
+Re-export immediately after and compare. Not Storage, not Functions, not
 enablement, not admission, not EAS/Play/billing/`main`.
 
 STOP.

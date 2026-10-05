@@ -19,7 +19,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
 
 const require = createRequire(import.meta.url);
@@ -58,6 +58,20 @@ export const CLI_DOTENV_NAMES = Object.freeze([
   ".env.local",
 ]);
 
+export const REVIEWED_FIREBASE_CLI = "14.20.0";
+export const PRESENCE_PRESENT = "present";
+export const PRESENCE_ABSENT = "absent";
+export const PRESENCE_UNKNOWN = "unknown";
+
+const LIVE_FORBIDDEN_ENV = Object.freeze([
+  "GRIN_OPS_ENDPOINT_FIXTURE",
+  "GRIN_OPS_PINNED_SHA",
+  "GRIN_OPS_TEST_HANG",
+  "GRIN_OPS_HTTP_STUB",
+  "FIREBASE_BIN",
+  "GCLOUD_BIN",
+]);
+
 export class OpsAbort extends Error {
   constructor(message, code = 2) {
     super(message);
@@ -75,8 +89,26 @@ function env(name, fallback = "") {
   return v == null || v === "" ? fallback : v;
 }
 
+function envSet(name) {
+  const v = process.env[name];
+  return v != null && v !== "";
+}
+
+function allowLive() {
+  return env("GRIN_OPS_ALLOW_LIVE");
+}
+
 export function pinnedAppSha() {
+  if (allowLive() === "1") return PINNED_APP_SHA;
   return env("GRIN_OPS_PINNED_SHA", PINNED_APP_SHA);
+}
+
+export function assertLiveOverridesRejected() {
+  if (allowLive() !== "1") return;
+  const set = LIVE_FORBIDDEN_ENV.filter((name) => envSet(name));
+  if (set.length) {
+    abort(`live mode rejects test overrides (${set.join(", ")}) before inspection or mutation`);
+  }
 }
 
 export function firebaseToolsRoot() {
@@ -313,21 +345,49 @@ export function parseEndpointFixture(raw) {
   return JSON.parse(raw);
 }
 
-function defaultEndpointFixtureAllAbsent() {
-  const out = {};
-  for (const name of GRIN_FUNCTIONS) out[name] = { exists: false };
-  return out;
-}
-
 export function loadEndpointFixture(pathOrJson) {
-  if (!pathOrJson) return defaultEndpointFixtureAllAbsent();
+  if (!pathOrJson) abort("endpoint fixture is missing; incomplete entries are not absent");
   const text = existsSync(pathOrJson) ? readFileSync(pathOrJson, "utf8") : pathOrJson;
-  return parseEndpointFixture(text);
+  let parsed;
+  try {
+    parsed = parseEndpointFixture(text);
+  } catch {
+    abort("endpoint fixture is not valid JSON");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    abort("endpoint fixture must be an object with an entry per GRIN function");
+  }
+  const out = {};
+  const missing = [];
+  for (const name of GRIN_FUNCTIONS) {
+    const e = parsed[name];
+    if (!e || typeof e !== "object") {
+      missing.push(name);
+      continue;
+    }
+    const presence = e.presence;
+    if (presence !== PRESENCE_PRESENT && presence !== PRESENCE_ABSENT && presence !== PRESENCE_UNKNOWN) {
+      abort(`${name} fixture presence must be present, absent, or unknown`);
+    }
+    out[name] = {
+      presence,
+      exists: presence === PRESENCE_PRESENT,
+      sourceOrigin: e.sourceOrigin || (presence === PRESENCE_ABSENT ? "absent" : "unknown"),
+      gateOn: !!e.gateOn,
+    };
+  }
+  if (missing.length) abort(`endpoint fixture is incomplete (${missing.join(", ")}); incomplete is not absent`);
+  return out;
 }
 
 export function assertAllAbsent(fixture) {
   for (const name of GRIN_FUNCTIONS) {
-    if (fixture[name]?.exists) {
+    const e = fixture[name];
+    if (!e || e.presence == null) abort(`${name} presence UNKNOWN; refusing (incomplete fixture)`);
+    if (e.presence === PRESENCE_UNKNOWN) {
+      abort(`${name} presence UNKNOWN; refusing gate-off-initial`);
+    }
+    if (e.presence === PRESENCE_PRESENT || e.exists) {
       abort(
         `${name} already exists remotely; gate-off-initial is only for genuinely new endpoints. Inspect first. Existing remote env is merged when no dotenv is loaded.`,
       );
@@ -337,10 +397,14 @@ export function assertAllAbsent(fixture) {
 
 export function assertAllPresentForGateUpdate(fixture) {
   for (const name of GRIN_FUNCTIONS) {
-    if (!fixture[name]?.exists) {
+    const e = fixture[name];
+    if (!e || e.presence === PRESENCE_UNKNOWN) {
+      abort(`${name} presence UNKNOWN; enable/disable requires an existing endpoint`);
+    }
+    if (e.presence !== PRESENCE_PRESENT) {
       abort(`${name} is not deployed; enable/disable via env update requires an existing endpoint`);
     }
-    const origin = fixture[name].sourceOrigin || "unknown";
+    const origin = e.sourceOrigin || "unknown";
     if (!gcloudUpdateAllowed(origin)) {
       abort(
         `${name} source origin is ${origin}; gcloud functions deploy without --source would use cwd. Refusing.`,
@@ -353,41 +417,95 @@ export function fixtureFromInspect(report) {
   const out = {};
   for (const name of GRIN_FUNCTIONS) {
     const e = report.grinEndpoints[name] || {};
+    const presence = e.presence || PRESENCE_UNKNOWN;
     out[name] = {
-      exists: !!e.exists,
-      sourceOrigin: e.sourceOrigin || "absent",
+      presence,
+      exists: presence === PRESENCE_PRESENT,
+      sourceOrigin: e.sourceOrigin || presence,
       gateOn: !!e.gateOn,
     };
   }
   return out;
 }
 
-function allowLive() {
-  return env("GRIN_OPS_ALLOW_LIVE");
+export function requireVerifiedIdentity(report) {
+  if (report.project?.httpStatus !== 200 || !report.project?.matchesExpected) {
+    abort("project identity not verified; refusing");
+  }
+  if (report.bucket?.httpStatus !== 200 || !report.bucket?.belongsToProject) {
+    abort("bucket membership not verified; refusing");
+  }
 }
 
-export async function resolveEndpointFixture() {
-  const raw = env("GRIN_OPS_ENDPOINT_FIXTURE");
-  if (raw) return loadEndpointFixture(raw);
-  if (allowLive() === "1") {
-    const report = await inspectLive();
+export function requireCompleteInventory(report) {
+  if (!report.functionsInventory?.complete || report.functionsInventory?.status !== 200) {
+    abort(
+      `Functions inventory incomplete or unsuccessful (status=${report.functionsInventory?.status} complete=${report.functionsInventory?.complete} reason=${report.functionsInventory?.reason}); UNKNOWN, not absent`,
+    );
+  }
+}
+
+export function requireCompleteAbsentInventory(report) {
+  requireCompleteInventory(report);
+  if (report.functionsInventory?.allGrinAbsent !== true) {
+    abort("Functions inventory is not a complete genuine absence");
+  }
+}
+
+async function resolveEndpointFixture(fetchImpl) {
+  const mode = allowLive();
+  if (mode === "1") {
+    assertLiveOverridesRejected();
+    const report = await inspectLive({ fetchImpl });
+    requireVerifiedIdentity(report);
+    requireCompleteInventory(report);
     return fixtureFromInspect(report);
   }
-  return defaultEndpointFixtureAllAbsent();
+  if (envSet("GRIN_OPS_HTTP_STUB") || fetchImpl) {
+    const stub = fetchImpl || (await loadHttpStubFetch());
+    const report = await inspectLive({ fetchImpl: stub });
+    requireVerifiedIdentity(report);
+    requireCompleteInventory(report);
+    return fixtureFromInspect(report);
+  }
+  const raw = env("GRIN_OPS_ENDPOINT_FIXTURE");
+  if (!raw) abort("stub mode requires a complete GRIN_OPS_ENDPOINT_FIXTURE or GRIN_OPS_HTTP_STUB");
+  return loadEndpointFixture(raw);
+}
+
+function requireStubExecutor(envName) {
+  const p = process.env[envName];
+  if (!p) {
+    abort(`stub mode requires ${envName} as an explicit harmless executor; no PATH fallback`);
+  }
+  if (p === "firebase" || p === "gcloud" || !isAbsolute(p) || !existsSync(p)) {
+    abort(`stub mode ${envName} must be an absolute path to an injected executor`);
+  }
+  return p;
 }
 
 function firebaseBin() {
-  return env("FIREBASE_BIN", "firebase");
+  if (allowLive() === "1") return "firebase";
+  return requireStubExecutor("FIREBASE_BIN");
 }
 
 function gcloudBin() {
-  return env("GCLOUD_BIN", "gcloud");
+  if (allowLive() === "1") return "gcloud";
+  return requireStubExecutor("GCLOUD_BIN");
 }
 
 function requireStubOrLive() {
   const v = allowLive();
   if (v === "stub" || v === "1") return v;
   abort("mutating operation blocked: GRIN_OPS_ALLOW_LIVE is unset (not authorized by this packet alone)");
+}
+
+export function assertReviewedFirebaseCli(bin = "firebase") {
+  const r = spawnSync(bin, ["--version"], { encoding: "utf8" });
+  const ver = (r.stdout || "").trim().split(/\s+/).pop();
+  if (r.status !== 0 || ver !== REVIEWED_FIREBASE_CLI) {
+    abort(`firebase CLI version is ${ver || "unknown"}, reviewed pin is ${REVIEWED_FIREBASE_CLI}`);
+  }
 }
 
 function installCleanup(sessionDir) {
@@ -420,9 +538,13 @@ export function runGateOffInitial(cwd, fixture) {
   precheckMutating(cwd);
   assertAllAbsent(fixture);
   const mode = requireStubOrLive();
+  if (mode === "1") {
+    assertLiveOverridesRejected();
+    assertReviewedFirebaseCli("firebase");
+  }
   const sessionDir = createSessionDir();
   const cleanup = installCleanup(sessionDir);
-  if (env("GRIN_OPS_TEST_HANG") === "1") {
+  if (mode === "stub" && env("GRIN_OPS_TEST_HANG") === "1") {
     writeFileSync(join(sessionDir, "hang"), "1", { mode: 0o600 });
     const handle = setInterval(() => {}, 1 << 30);
     process.on("SIGTERM", () => {
@@ -448,10 +570,11 @@ export function runGateOffInitial(cwd, fixture) {
 export function runGcloudGate(cwd, fixture, gateValue, label) {
   precheckMutating(cwd);
   assertAllPresentForGateUpdate(fixture);
-  requireStubOrLive();
+  const mode = requireStubOrLive();
+  if (mode === "1") assertLiveOverridesRejected();
   const sessionDir = createSessionDir();
   const cleanup = installCleanup(sessionDir);
-  if (env("GRIN_OPS_TEST_HANG") === "1") {
+  if (mode === "stub" && env("GRIN_OPS_TEST_HANG") === "1") {
     writeFileSync(join(sessionDir, "hang"), "1", { mode: 0o600 });
     return { sessionDir, hanging: true };
   }
@@ -488,7 +611,7 @@ export async function firebaseAccessToken() {
   return token;
 }
 
-async function gcpFetch(token, url, { method = "GET", body = null } = {}) {
+async function defaultGcpFetch(token, url, { method = "GET", body = null } = {}) {
   const headers = { Authorization: `Bearer ${token}`, Accept: "application/json" };
   if (body) headers["Content-Type"] = "application/json";
   const res = await fetch(url, {
@@ -498,12 +621,26 @@ async function gcpFetch(token, url, { method = "GET", body = null } = {}) {
   });
   const text = await res.text();
   let json = null;
-  try {
-    json = text ? JSON.parse(text) : null;
-  } catch {
-    json = null;
+  let parseOk = true;
+  if (text) {
+    try {
+      json = JSON.parse(text);
+    } catch {
+      json = null;
+      parseOk = false;
+    }
   }
-  return { status: res.status, json, bytes: Buffer.byteLength(text) };
+  return { status: res.status, json, bytes: Buffer.byteLength(text), parseOk };
+}
+
+export async function loadHttpStubFetch() {
+  const spec = env("GRIN_OPS_HTTP_STUB");
+  if (!spec) return null;
+  if (allowLive() === "1") abort("live mode rejects GRIN_OPS_HTTP_STUB");
+  const href = spec.startsWith("file:") ? spec : pathToFileURL(resolve(spec)).href;
+  const mod = await import(href);
+  if (typeof mod.gcpFetch !== "function") abort("GRIN_OPS_HTTP_STUB must export gcpFetch");
+  return mod.gcpFetch;
 }
 
 function sha256Hex(buf) {
@@ -533,53 +670,118 @@ function sourceFromV2Function(fn) {
   return { origin: "unknown", ref: "" };
 }
 
-export async function inspectLive({ exportDir } = {}) {
-  const token = await firebaseAccessToken();
-  const emailMod = require(join(firebaseToolsRoot(), "lib", "auth.js"));
-  const account = emailMod.getGlobalDefaultAccount();
-  const cliUser = account?.user?.email || "";
+export async function listFunctionsPaginated(gcpCall) {
+  const items = [];
+  let pageToken = "";
+  let pages = 0;
+  const maxPages = 50;
+  do {
+    const qs = new URLSearchParams({ pageSize: "100" });
+    if (pageToken) qs.set("pageToken", pageToken);
+    const url = `https://cloudfunctions.googleapis.com/v2/projects/${PROJECT_ID}/locations/${REGION}/functions?${qs}`;
+    const res = await gcpCall(url);
+    if (res.status !== 200 || res.parseOk === false) {
+      return {
+        ok: false,
+        complete: false,
+        status: res.status,
+        reason: res.parseOk === false ? "malformed" : "http",
+        items,
+        pages,
+      };
+    }
+    if (!res.json || typeof res.json !== "object") {
+      return { ok: false, complete: false, status: res.status, reason: "shape", items, pages };
+    }
+    const funcs = res.json.functions;
+    if (funcs != null && !Array.isArray(funcs)) {
+      return { ok: false, complete: false, status: res.status, reason: "shape", items, pages };
+    }
+    items.push(...(funcs || []));
+    pageToken = res.json.nextPageToken || "";
+    pages += 1;
+    if (pages > maxPages) {
+      return { ok: false, complete: false, status: res.status, reason: "pagination_limit", items, pages };
+    }
+  } while (pageToken);
+  return { ok: true, complete: true, status: 200, reason: "ok", items, pages };
+}
 
-  const project = await gcpFetch(
-    token,
+function mapListedFunction(fn) {
+  const id = (fn.name || "").split("/").pop();
+  const src = sourceFromV2Function(fn);
+  const envPart = envSummaryFromServiceConfig(fn.serviceConfig);
+  return {
+    id,
+    presence: PRESENCE_PRESENT,
+    exists: true,
+    platform: "gen2",
+    region: REGION,
+    runtime: fn.buildConfig?.runtime || fn.serviceConfig?.revision || "",
+    sourceOrigin: src.origin,
+    sourceRefKind: src.origin,
+    ...envPart,
+  };
+}
+
+export function writeRollbackIfSuccessful(filePath, content, ok) {
+  if (!ok || typeof content !== "string" || content.length === 0) {
+    return { written: false };
+  }
+  writeFileSync(filePath, content, { mode: 0o644 });
+  return { written: true };
+}
+
+export async function inspectLive({ exportDir, fetchImpl } = {}) {
+  let token = "";
+  let cliUser = "";
+  let gcpCall = fetchImpl;
+  if (!gcpCall) {
+    token = await firebaseAccessToken();
+    const emailMod = require(join(firebaseToolsRoot(), "lib", "auth.js"));
+    const account = emailMod.getGlobalDefaultAccount();
+    cliUser = account?.user?.email || "";
+    gcpCall = (url, opts) => defaultGcpFetch(token, url, opts);
+  }
+
+  const project = await gcpCall(
     `https://cloudresourcemanager.googleapis.com/v1/projects/${PROJECT_ID}`,
   );
-  const projectNumber = project.json?.projectNumber || "";
-  const projectId = project.json?.projectId || "";
+  const projectOk =
+    project.status === 200 &&
+    project.parseOk !== false &&
+    project.json &&
+    project.json.projectId === PROJECT_ID &&
+    String(project.json.projectNumber) === PROJECT_NUMBER;
+  const projectNumber = projectOk ? String(project.json.projectNumber) : "";
+  const projectId = projectOk ? project.json.projectId : "";
 
-  const bucket = await gcpFetch(
-    token,
-    `https://storage.googleapis.com/storage/v1/b/${BUCKET}`,
-  );
-  const bucketProjectNumber = String(bucket.json?.projectNumber || "");
+  const bucket = await gcpCall(`https://storage.googleapis.com/storage/v1/b/${BUCKET}`);
+  const bucketOk =
+    bucket.status === 200 &&
+    bucket.parseOk !== false &&
+    bucket.json &&
+    (bucket.json.name === BUCKET || bucket.json.id === BUCKET) &&
+    String(bucket.json.projectNumber) === PROJECT_NUMBER;
+  const bucketProjectNumber = bucketOk ? String(bucket.json.projectNumber) : "";
 
-  const fnList = await gcpFetch(
-    token,
-    `https://cloudfunctions.googleapis.com/v2/projects/${PROJECT_ID}/locations/${REGION}/functions?pageSize=200`,
-  );
-
-  const listed = (fnList.json?.functions || []).map((fn) => {
-    const id = (fn.name || "").split("/").pop();
-    const src = sourceFromV2Function(fn);
-    const envPart = envSummaryFromServiceConfig(fn.serviceConfig);
-    return {
-      id,
-      exists: true,
-      platform: "gen2",
-      region: REGION,
-      runtime: fn.buildConfig?.runtime || fn.serviceConfig?.revision || "",
-      sourceOrigin: src.origin,
-      sourceRefKind: src.origin,
-      ...envPart,
-    };
-  });
-
+  const inventory = await listFunctionsPaginated(gcpCall);
+  const listed = inventory.ok ? inventory.items.map(mapListedFunction) : [];
   const byId = Object.fromEntries(listed.map((e) => [e.id, e]));
   const grin = {};
   for (const name of GRIN_FUNCTIONS) {
-    grin[name] = byId[name]
-      ? { exists: true, ...byId[name] }
-      : { exists: false, sourceOrigin: "absent" };
+    if (!inventory.complete || !inventory.ok) {
+      grin[name] = { presence: PRESENCE_UNKNOWN, exists: false, sourceOrigin: "unknown" };
+    } else if (byId[name]) {
+      grin[name] = { ...byId[name], presence: PRESENCE_PRESENT };
+    } else {
+      grin[name] = { presence: PRESENCE_ABSENT, exists: false, sourceOrigin: "absent" };
+    }
   }
+  const allGrinAbsent =
+    inventory.complete &&
+    inventory.ok &&
+    GRIN_FUNCTIONS.every((n) => grin[n].presence === PRESENCE_ABSENT);
 
   const unrelated = listed.filter((e) => !GRIN_FUNCTIONS.includes(e.id)).map((e) => ({
     id: e.id,
@@ -595,72 +797,64 @@ export async function inspectLive({ exportDir } = {}) {
     unrelated.find((e) => e.serviceAccount)?.serviceAccount ||
     "";
 
-  const iam = await gcpFetch(
-    token,
+  const iam = await gcpCall(
     `https://cloudresourcemanager.googleapis.com/v1/projects/${PROJECT_ID}:getIamPolicy`,
     { method: "POST", body: { options: { requestedPolicyVersion: 3 } } },
   );
   const saRoles = [];
-  const bindings = iam.json?.bindings || [];
-  for (const b of bindings) {
-    const members = b.members || [];
-    if (probeSa && members.includes(`serviceAccount:${probeSa}`)) {
-      saRoles.push(b.role);
+  if (iam.status === 200 && iam.parseOk !== false && Array.isArray(iam.json?.bindings)) {
+    for (const b of iam.json.bindings) {
+      const members = b.members || [];
+      if (probeSa && members.includes(`serviceAccount:${probeSa}`)) saRoles.push(b.role);
     }
+    saRoles.sort();
   }
-  saRoles.sort();
 
-  const dbIam = await gcpFetch(
-    token,
+  const dbIam = await gcpCall(
     `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default):getIamPolicy`,
     { method: "POST", body: {} },
   );
+  const dbIamState =
+    dbIam.status === 501
+      ? "unsupported"
+      : dbIam.status === 200
+        ? "ok"
+        : "unknown";
   const dbRoles = [];
-  for (const b of dbIam.json?.bindings || []) {
-    const members = b.members || [];
-    if (probeSa && members.includes(`serviceAccount:${probeSa}`)) {
-      dbRoles.push(b.role);
+  if (dbIamState === "ok" && Array.isArray(dbIam.json?.bindings)) {
+    for (const b of dbIam.json.bindings) {
+      const members = b.members || [];
+      if (probeSa && members.includes(`serviceAccount:${probeSa}`)) dbRoles.push(b.role);
     }
+    dbRoles.sort();
   }
-  dbRoles.sort();
 
-  const bucketIam = await gcpFetch(
-    token,
-    `https://storage.googleapis.com/storage/v1/b/${BUCKET}/iam`,
-  );
+  const bucketIam = await gcpCall(`https://storage.googleapis.com/storage/v1/b/${BUCKET}/iam`);
   const bucketRoles = [];
-  for (const b of bucketIam.json?.bindings || []) {
-    const members = b.members || [];
-    if (probeSa && members.includes(`serviceAccount:${probeSa}`)) {
-      bucketRoles.push(b.role);
+  if (bucketIam.status === 200 && Array.isArray(bucketIam.json?.bindings)) {
+    for (const b of bucketIam.json.bindings) {
+      const members = b.members || [];
+      if (probeSa && members.includes(`serviceAccount:${probeSa}`)) bucketRoles.push(b.role);
     }
+    bucketRoles.sort();
   }
-  bucketRoles.sort();
 
-  const releases = await gcpFetch(
-    token,
+  const releases = await gcpCall(
     `https://firebaserules.googleapis.com/v1/projects/${PROJECT_ID}/releases`,
-  );
-  const releaseList = releases.json?.releases || [];
-  const fsRelease = releaseList.find((r) => r.name?.endsWith("/releases/cloud.firestore"));
-  const stRelease = releaseList.find((r) =>
-    String(r.name || "").includes(`/releases/firebase.storage/${BUCKET}`),
   );
 
   async function exportRuleset(release, label) {
     if (!release?.rulesetName) {
-      return { ok: false, label, error: "release missing" };
+      return { ok: false, label, error: "release missing", httpStatus: 0, content: "" };
     }
-    const rs = await gcpFetch(
-      token,
-      `https://firebaserules.googleapis.com/v1/${release.rulesetName}`,
-    );
-    const files = rs.json?.source?.files || [];
-    const file = files[0];
-    const content = file?.content || "";
+    const rs = await gcpCall(`https://firebaserules.googleapis.com/v1/${release.rulesetName}`);
+    const files = rs.json?.source?.files;
+    const file = Array.isArray(files) ? files[0] : null;
+    const content = typeof file?.content === "string" ? file.content : "";
+    const ok = rs.status === 200 && rs.parseOk !== false && content.length > 0;
     const buf = Buffer.from(content, "utf8");
     return {
-      ok: rs.status === 200,
+      ok,
       httpStatus: rs.status,
       label,
       releaseName: release.name,
@@ -668,12 +862,18 @@ export async function inspectLive({ exportDir } = {}) {
       createTime: release.createTime || rs.json?.createTime || "",
       updateTime: release.updateTime || "",
       sourceFileName: file?.name || "",
-      bytes: buf.length,
-      sha256: sha256Hex(buf),
-      content,
+      bytes: ok ? buf.length : 0,
+      sha256: ok ? sha256Hex(buf) : "",
+      content: ok ? content : "",
     };
   }
 
+  const releaseList =
+    releases.status === 200 && Array.isArray(releases.json?.releases) ? releases.json.releases : [];
+  const fsRelease = releaseList.find((r) => r.name?.endsWith("/releases/cloud.firestore"));
+  const stRelease = releaseList.find((r) =>
+    String(r.name || "").includes(`/releases/firebase.storage/${BUCKET}`),
+  );
   const firestoreRules = await exportRuleset(fsRelease, "firestore");
   const storageRules = await exportRuleset(stRelease, "storage");
 
@@ -690,34 +890,46 @@ export async function inspectLive({ exportDir } = {}) {
       httpStatus: project.status,
       projectId,
       projectNumber,
-      matchesExpected:
-        projectId === PROJECT_ID && String(projectNumber) === PROJECT_NUMBER,
+      matchesExpected: projectOk,
     },
     bucket: {
       httpStatus: bucket.status,
-      name: bucket.json?.name || BUCKET,
+      name: bucketOk ? BUCKET : "",
       projectNumber: bucketProjectNumber,
-      belongsToProject: bucketProjectNumber === String(projectNumber || PROJECT_NUMBER),
+      belongsToProject: bucketOk,
+    },
+    functionsInventory: {
+      status: inventory.status,
+      complete: inventory.complete,
+      ok: inventory.ok,
+      reason: inventory.reason,
+      pages: inventory.pages,
+      listedCount: listed.length,
+      allGrinAbsent,
     },
     runtime: {
       probeFunction: "mintClientAuthToken",
       serviceAccount: probeSa,
       projectIamHttp: iam.status,
       firestoreDbIamHttp: dbIam.status,
+      firestoreDbIamState: dbIamState,
       bucketIamHttp: bucketIam.status,
       projectRoles: saRoles,
       firestoreDatabaseRoles: dbRoles,
       bucketRoles,
-      hasStorageObjectsDelete: saRoles.concat(dbRoles, bucketRoles).some((r) =>
+      hasStorageObjectsDelete: saRoles.concat(bucketRoles).some((r) =>
         /storage\.objectAdmin|storage\.admin|storage\.objects\.delete|^roles\/editor$|^roles\/owner$/i.test(r),
       ),
+      editorResidualDelete:
+        saRoles.includes("roles/editor") || saRoles.includes("roles/owner"),
     },
     grinEndpoints: grin,
     unrelatedEndpointCount: unrelated.length,
     unrelatedIds: unrelated.map((e) => e.id).sort(),
-    allGrinAbsent: GRIN_FUNCTIONS.every((n) => !grin[n].exists),
+    allGrinAbsent,
     cloud_firestore: {
       httpStatus: firestoreRules.httpStatus,
+      ok: firestoreRules.ok,
       release: firestoreRules.releaseName,
       rulesetName: firestoreRules.rulesetName,
       createTime: firestoreRules.createTime,
@@ -725,10 +937,11 @@ export async function inspectLive({ exportDir } = {}) {
       sourceFileName: firestoreRules.sourceFileName,
       bytes: firestoreRules.bytes,
       sha256: firestoreRules.sha256,
-      matchesApprovedBaseline: firestoreRules.sha256 === BASELINE_FS,
+      matchesApprovedBaseline: firestoreRules.ok && firestoreRules.sha256 === BASELINE_FS,
     },
     firebase_storage: {
       httpStatus: storageRules.httpStatus,
+      ok: storageRules.ok,
       release: storageRules.releaseName,
       rulesetName: storageRules.rulesetName,
       createTime: storageRules.createTime,
@@ -736,25 +949,35 @@ export async function inspectLive({ exportDir } = {}) {
       sourceFileName: storageRules.sourceFileName,
       bytes: storageRules.bytes,
       sha256: storageRules.sha256,
-      matchesApprovedBaseline: storageRules.sha256 === BASELINE_ST,
+      matchesApprovedBaseline: storageRules.ok && storageRules.sha256 === BASELINE_ST,
     },
   };
 
   if (exportDir) {
     const dir = resolve(exportDir);
-    writeFileSync(join(dir, "firestore.rules"), firestoreRules.content || "", { mode: 0o644 });
-    writeFileSync(join(dir, "storage.rules"), storageRules.content || "", { mode: 0o644 });
+    const fsWrite = writeRollbackIfSuccessful(
+      join(dir, "firestore.rules"),
+      firestoreRules.content,
+      firestoreRules.ok,
+    );
+    const stWrite = writeRollbackIfSuccessful(
+      join(dir, "storage.rules"),
+      storageRules.content,
+      storageRules.ok,
+    );
+    report.rulesExport = { firestoreWritten: fsWrite.written, storageWritten: stWrite.written };
     const meta = { ...report };
     delete meta.grinEndpoints;
     meta.grin = {
       allAbsent: report.allGrinAbsent,
+      inventory: report.functionsInventory,
       endpoints: Object.fromEntries(
         GRIN_FUNCTIONS.map((n) => [
           n,
           {
-            exists: grin[n].exists,
+            presence: grin[n].presence,
             gateOn: grin[n].gateOn || false,
-            sourceOrigin: grin[n].sourceOrigin || "absent",
+            sourceOrigin: grin[n].sourceOrigin || grin[n].presence,
             otherUserKeyCount: grin[n].otherUserKeyCount || 0,
             secretBindingCount: grin[n].secretBindingCount || 0,
           },
@@ -777,25 +1000,29 @@ function printInspect(report) {
     `bucket ${report.bucket.name} projectNumber=${report.bucket.projectNumber} belongs=${report.bucket.belongsToProject} http=${report.bucket.httpStatus}`,
   );
   lines.push(
-    `runtime_sa=${report.runtime.serviceAccount || "(none)"} project_iam_http=${report.runtime.projectIamHttp} db_iam_http=${report.runtime.firestoreDbIamHttp} bucket_iam_http=${report.runtime.bucketIamHttp} project_roles=${report.runtime.projectRoles.join(",") || "(none)"} db_roles=${(report.runtime.firestoreDatabaseRoles || []).join(",") || "(none)"} bucket_roles=${report.runtime.bucketRoles.join(",") || "(none)"} storage_delete=${report.runtime.hasStorageObjectsDelete}`,
+    `functions_inventory status=${report.functionsInventory.status} complete=${report.functionsInventory.complete} reason=${report.functionsInventory.reason} pages=${report.functionsInventory.pages}`,
+  );
+  lines.push(
+    `runtime_sa=${report.runtime.serviceAccount || "(none)"} project_iam_http=${report.runtime.projectIamHttp} db_iam_http=${report.runtime.firestoreDbIamHttp} db_iam_state=${report.runtime.firestoreDbIamState} bucket_iam_http=${report.runtime.bucketIamHttp} project_roles=${report.runtime.projectRoles.join(",") || "(none)"} db_roles=${(report.runtime.firestoreDatabaseRoles || []).join(",") || "(none)"} bucket_roles=${report.runtime.bucketRoles.join(",") || "(none)"} storage_delete=${report.runtime.hasStorageObjectsDelete} editor_residual_delete=${report.runtime.editorResidualDelete}`,
   );
   lines.push(`grin_all_absent=${report.allGrinAbsent}`);
   for (const name of GRIN_FUNCTIONS) {
     const e = report.grinEndpoints[name];
-    if (!e.exists) {
-      lines.push(`${name} ABSENT`);
-    } else {
+    const presence = (e.presence || PRESENCE_UNKNOWN).toUpperCase();
+    if (e.presence === PRESENCE_PRESENT) {
       lines.push(
-        `${name} PRESENT origin=${e.sourceOrigin} gate=${e.gateOn ? "on" : "off"} other_user_keys=${e.otherUserKeyCount} secrets=${e.secretBindingCount}`,
+        `${name} ${presence} origin=${e.sourceOrigin} gate=${e.gateOn ? "on" : "off"} other_user_keys=${e.otherUserKeyCount} secrets=${e.secretBindingCount}`,
       );
+    } else {
+      lines.push(`${name} ${presence}`);
     }
   }
   lines.push(`unrelated_functions=${report.unrelatedEndpointCount}`);
   lines.push(
-    `firestore sha256=${report.cloud_firestore.sha256} baseline_match=${report.cloud_firestore.matchesApprovedBaseline} ruleset=${report.cloud_firestore.rulesetName}`,
+    `firestore ok=${report.cloud_firestore.ok} sha256=${report.cloud_firestore.sha256} baseline_match=${report.cloud_firestore.matchesApprovedBaseline} ruleset=${report.cloud_firestore.rulesetName}`,
   );
   lines.push(
-    `storage sha256=${report.firebase_storage.sha256} baseline_match=${report.firebase_storage.matchesApprovedBaseline} ruleset=${report.firebase_storage.rulesetName}`,
+    `storage ok=${report.firebase_storage.ok} sha256=${report.firebase_storage.sha256} baseline_match=${report.firebase_storage.matchesApprovedBaseline} ruleset=${report.firebase_storage.rulesetName}`,
   );
   process.stdout.write(lines.join("\n") + "\n");
 }
@@ -810,11 +1037,18 @@ async function main(argv) {
   const cmd = argv[2];
   const cwd = env("GRIN_OPS_REPO", process.cwd());
   try {
+    if (allowLive() === "1") assertLiveOverridesRejected();
     if (cmd === "inspect") {
       const exportDir = env("GRIN_OPS_EXPORT_DIR");
       if (exportDir && !existsSync(exportDir)) abort(`export dir missing: ${exportDir}`);
-      const report = await inspectLive({ exportDir: exportDir || undefined });
+      const fetchImpl = await loadHttpStubFetch();
+      const report = await inspectLive({
+        exportDir: exportDir || undefined,
+        fetchImpl: fetchImpl || undefined,
+      });
       printInspect(report);
+      requireVerifiedIdentity(report);
+      requireCompleteInventory(report);
       return 0;
     }
     if (cmd === "check-preflight") {
