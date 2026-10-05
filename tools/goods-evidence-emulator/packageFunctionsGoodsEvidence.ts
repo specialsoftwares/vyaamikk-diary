@@ -90,6 +90,7 @@ export const KEEP = new Set([
   "README.md",
   "productionCompose.ts",
   "productionAdminConfig.ts",
+  "productionExports.ts",
 ]);
 
 export function rewrite(src: string): string {

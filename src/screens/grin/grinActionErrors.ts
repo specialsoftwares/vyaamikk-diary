@@ -4,6 +4,10 @@ import {
   isGrinSessionFenceError,
 } from "@/services/grin/repository";
 
+export function grinFeatureNotAdmitted(actionable: string | null | undefined): boolean {
+  return actionable === "feature_not_admitted";
+}
+
 export function grinMutationErrorMessage(
   caught: unknown,
   t: (key: string) => string,

@@ -40,12 +40,15 @@ import { createUninjectedGrinEvidencePort, createUninjectedGrinServerPort } from
 import { GrinAdmittedSessionHost } from "./GrinAdmittedSessionHost";
 
 const prevFlag = process.env.EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED;
+const prevAdmit = process.env.EXPO_PUBLIC_GOODS_EVIDENCE_STORE_RUNTIME_ADMIT;
 const prevMode = process.env.EXPO_PUBLIC_APP_MODE;
 
 function restoreEnv(): void {
   __setRuntimeSignalsForTests(null);
   if (prevFlag == null) delete process.env.EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED;
   else process.env.EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED = prevFlag;
+  if (prevAdmit == null) delete process.env.EXPO_PUBLIC_GOODS_EVIDENCE_STORE_RUNTIME_ADMIT;
+  else process.env.EXPO_PUBLIC_GOODS_EVIDENCE_STORE_RUNTIME_ADMIT = prevAdmit;
   if (prevMode == null) delete process.env.EXPO_PUBLIC_APP_MODE;
   else process.env.EXPO_PUBLIC_APP_MODE = prevMode;
 }
@@ -76,6 +79,7 @@ async function main(): Promise<void> {
   const factoryCalls: string[] = [];
   const childMounts: GrinDispatchSession[] = [];
   let capturedCreate: (() => void) | null = null;
+  const gateStates: string[] = [];
 
   try {
     db = openHostSqlite(dbPath);
@@ -104,8 +108,14 @@ async function main(): Promise<void> {
     function HostTree(props: { ownerUid: string | null }): React.ReactElement {
       return React.createElement(GrinAdmittedSessionHost, {
         ownerUid: props.ownerUid,
-        renderBlocked: () => React.createElement("div", { "data-state": "blocked" }, "blocked"),
-        renderUnavailable: () => React.createElement("div", { "data-state": "unavailable" }, "unavailable"),
+        renderBlocked: () => {
+          gateStates.push("blocked");
+          return React.createElement("div", { "data-state": "blocked" }, "blocked");
+        },
+        renderUnavailable: () => {
+          gateStates.push("unavailable");
+          return React.createElement("div", { "data-state": "unavailable" }, "unavailable");
+        },
         children: (session: GrinDispatchSession) => {
           childMounts.push(session);
           if (!capturedCreate) {
@@ -130,6 +140,7 @@ async function main(): Promise<void> {
 
     process.env.EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED = "1";
     setStoreRuntime();
+    delete process.env.EXPO_PUBLIC_GOODS_EVIDENCE_STORE_RUNTIME_ADMIT;
     await act(async () => {
       root!.render(React.createElement(HostTree, { ownerUid: "owner_a" }));
     });
@@ -137,6 +148,7 @@ async function main(): Promise<void> {
     assert.equal(factoryCalls.length, 0, "store block must not open the repository database");
     assert.equal(serverFactoryCalls.length, 0, "store block must not construct a server port");
     assert.equal(evidenceFactoryCalls.length, 0, "store block must not construct an evidence port");
+    assert.equal(gateStates[gateStates.length - 1], "blocked");
 
     setExpoGoDev();
     delete process.env.EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED;
@@ -147,6 +159,7 @@ async function main(): Promise<void> {
     assert.equal(factoryCalls.length, 0, "flag off must not start a session");
     assert.equal(serverFactoryCalls.length, 0, "flag off must not construct a server port");
     assert.equal(evidenceFactoryCalls.length, 0, "flag off must not construct an evidence port");
+    assert.equal(gateStates[gateStates.length - 1], "unavailable");
 
     process.env.EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED = "1";
     await act(async () => {
@@ -198,6 +211,22 @@ async function main(): Promise<void> {
     const relogin = childMounts[childMounts.length - 1];
     assert.equal(relogin?.ownerUid, "owner_a");
     assert.notEqual(relogin?.dispatchGeneration, genA);
+
+    process.env.EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED = "1";
+    process.env.EXPO_PUBLIC_GOODS_EVIDENCE_STORE_RUNTIME_ADMIT = "1";
+    setStoreRuntime();
+    await act(async () => {
+      root!.render(React.createElement(HostTree, { ownerUid: "owner_internal" }));
+    });
+    const internal = childMounts[childMounts.length - 1];
+    assert.equal(internal?.ownerUid, "owner_internal", "Internal-GRIN flags must open the module");
+
+    delete process.env.EXPO_PUBLIC_GOODS_EVIDENCE_STORE_RUNTIME_ADMIT;
+    await act(async () => {
+      root!.render(React.createElement(HostTree, { ownerUid: "owner_internal" }));
+    });
+    assert.equal(gateStates[gateStates.length - 1], "blocked");
+    assert.throws(() => requireLiveGrinApplicationRepository());
   } finally {
     await act(async () => {
       root?.unmount();

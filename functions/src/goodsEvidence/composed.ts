@@ -1,7 +1,8 @@
 /**
  * Isolated undeployed GRIN callable composition.
  *
- * INJECTED / EMULATOR / not live deploy. Not exported from functions/src/index.ts.
+ * INJECTED / EMULATOR / not live deploy. Index re-exports lazy wrappers from
+ * productionExports.ts, not this factory.
  * When GRIN_GOODS_EVIDENCE_FUNCTIONS is exactly "true" and tests/emulator inject
  * GoodsEvidenceRegisterAdapter, register / reconcile / mutate / readReceipt run
  * through that adapter. Evidence reserve / beginUpload / uploadEvidence (complete +

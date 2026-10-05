@@ -355,6 +355,7 @@ function testLedger(): InMemoryGoodsLedger {
     platform: "android",
   });
   process.env.EXPO_PUBLIC_APP_MODE = "production";
+  delete process.env.EXPO_PUBLIC_GOODS_EVIDENCE_STORE_RUNTIME_ADMIT;
   process.env.EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED = "1";
   assert.equal(isGoodsEvidenceEnabled(), false, "store runtime cannot be overridden");
   const productionLedger = new InMemoryGoodsLedger(

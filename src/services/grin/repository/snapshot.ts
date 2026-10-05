@@ -87,6 +87,7 @@ export function incompleteListItem(view: GrinLocalReceiptView): GrinApplicationL
     offlinePending: view.localState !== "issued" || view.issuedNumber == null,
     gateRefusal: "unknown_incomplete",
     projection: "unknown_incomplete",
+    lastErrorActionable: view.lastErrorActionable,
   };
 }
 
@@ -135,5 +136,6 @@ export function toListItem(record: GrinApplicationRecord): GrinApplicationListIt
     offlinePending: record.localState !== "issued" || record.issuedNumber == null,
     gateRefusal: record.gateRefusal,
     projection: "readable",
+    lastErrorActionable: record.outbox.lastErrorActionable,
   };
 }

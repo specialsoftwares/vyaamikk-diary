@@ -76,10 +76,12 @@ assert.match(packInputs, /normalizeOsConversionOccurred/);
 
 const flag = readFileSync(join(moduleDir, "featureFlag.ts"), "utf8");
 assert.match(flag, /process\.env\.EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED === ["']1["']/);
+assert.match(flag, /EXPO_PUBLIC_GOODS_EVIDENCE_STORE_RUNTIME_ADMIT === ["']1["']/);
 assert.match(flag, /store-or-standalone/);
 assert.match(flag, /env\.runtimeKind/);
 assert.doesNotMatch(flag, /__setGoodsEvidenceEnabledForTests/);
 assert.doesNotMatch(flag, /_testOverride/);
+assert.doesNotMatch(flag, /InstallReferrer|getInstallerPackageName|getInstallReferrer/);
 assert.doesNotMatch(stripComments(flag), /process\.env\s*\[/);
 
 const ledger = readFileSync(join(moduleDir, "ledger.ts"), "utf8");
@@ -93,7 +95,25 @@ assert.match(offline, /not a SQLite outbox/);
 
 const appJson = readFileSync(join(repoRoot, "app.json"), "utf8");
 assert.doesNotMatch(appJson, /GOODS_EVIDENCE/);
-const eas = readFileSync(join(repoRoot, "eas.json"), "utf8");
-assert.doesNotMatch(eas, /GOODS_EVIDENCE/);
+assert.match(appJson, /"versionCode":\s*23/);
+const eas = JSON.parse(readFileSync(join(repoRoot, "eas.json"), "utf8")) as {
+  build: Record<string, { env?: Record<string, string>; android?: { buildType?: string } }>;
+};
+for (const profile of ["preview", "production", "development", "development-production-otp"]) {
+  const env = eas.build[profile]?.env ?? {};
+  assert.equal(env.EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED, undefined, `${profile} must stay GRIN-off`);
+  assert.equal(env.EXPO_PUBLIC_GOODS_EVIDENCE_STORE_RUNTIME_ADMIT, undefined, `${profile} must not admit store GRIN`);
+  if (env.EXPO_PUBLIC_SUBSCRIPTION_PURCHASE_ENTRY_ENABLED != null) {
+    assert.equal(env.EXPO_PUBLIC_SUBSCRIPTION_PURCHASE_ENTRY_ENABLED, "0");
+  }
+}
+const internalGrin = eas.build["internal-grin"];
+assert.ok(internalGrin, "internal-grin EAS profile required");
+assert.equal(internalGrin.android?.buildType, "app-bundle");
+assert.equal(internalGrin.env?.EXPO_PUBLIC_APP_MODE, "production");
+assert.equal(internalGrin.env?.EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED, "1");
+assert.equal(internalGrin.env?.EXPO_PUBLIC_GOODS_EVIDENCE_STORE_RUNTIME_ADMIT, "1");
+assert.equal(internalGrin.env?.EXPO_PUBLIC_SUBSCRIPTION_PURCHASE_ENTRY_ENABLED, "0");
+assert.equal(internalGrin.env?.EXPO_PUBLIC_QUOTA_UPSELL_ENABLED, "0");
 
 console.log("goodsEvidence/isolation.contract.test.ts: ok");

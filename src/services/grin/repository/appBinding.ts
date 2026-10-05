@@ -15,9 +15,9 @@
  * HostSqlite (Node SQLITE_HOST), firebase-admin, emulator tools, or node:fs.
  *
  * Production server port is Team 1 `createFirebaseJsGrinTransport` (INJECTED /
- * FIREBASE_JS_HTTPS_CALLABLE, compositionLabel "not live deploy"). Callables remain
- * unexported, so live dispatch fails honestly until the coordinator export HOLD lifts.
- * This is not the uninjected FAKE always-deny port.
+ * FIREBASE_JS_HTTPS_CALLABLE). Live dispatch still requires the Functions
+ * export and GRIN_GOODS_EVIDENCE_FUNCTIONS=true. This is not the uninjected
+ * FAKE always-deny port.
  *
  * SQLITE_HOST / mounted-inert tests MUST inject createUninjectedGrinServerPort or
  * createFakeGrinServerPort via setGrinServerPortFactoryForTests, and FAKE / closed

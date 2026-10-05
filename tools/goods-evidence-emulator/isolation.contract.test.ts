@@ -42,10 +42,14 @@ for (const file of adapterFiles) {
 }
 
 const functionsIndex = readFileSync(join(dir, "../../functions/src/index.ts"), "utf8");
-assert.doesNotMatch(
-  functionsIndex,
-  /goodsEvidence|GoodsEvidenceRegisterAdapter|grin-g1|createInjectedGrinServerPort|serverPort|grinRegisterGoodsReceipt|grinReserveEvidence|grinUploadEvidence/
-);
+assert.match(functionsIndex, /from ["']\.\/goodsEvidence\/productionExports["']/);
+assert.match(functionsIndex, /grinRegisterGoodsReceipt/);
+assert.match(functionsIndex, /grinBeginEvidenceUpload/);
+assert.doesNotMatch(functionsIndex, /GoodsEvidenceRegisterAdapter/);
+assert.doesNotMatch(functionsIndex, /createInjectedGrinServerPort/);
+assert.doesNotMatch(functionsIndex, /handleGrinRegister/);
+assert.doesNotMatch(functionsIndex, /createProductionGrinCallables\s*\(/);
+assert.doesNotMatch(functionsIndex, /from ["']\.\/goodsEvidence\/productionCompose["']/);
 
 const functionsEntry = readFileSync(join(dir, "functions-entry/handlers.ts"), "utf8");
 assert.match(functionsEntry, /createIsolatedGrinCallables/);

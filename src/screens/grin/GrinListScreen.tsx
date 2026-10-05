@@ -11,7 +11,7 @@ import {
 import type { GrinDispatchSession } from "@/services/grin/outbox/types";
 import { radius, spacing } from "@/theme/spacing";
 
-import { grinMutationErrorMessage } from "./grinActionErrors";
+import { grinFeatureNotAdmitted, grinMutationErrorMessage } from "./grinActionErrors";
 import { GrinAdmissionGate } from "./GrinAdmissionGate";
 import { GrinFixtureNotices } from "./GrinFixtureNotices";
 import { bindProductionGrinScreenRuntime } from "./bindProductionGrinScreenRuntime";
@@ -159,6 +159,17 @@ export function GrinListAdmittedBody({ session }: { session: GrinDispatchSession
     () => [styles.listContent, { paddingBottom: insets.bottom + spacing.xxl }],
     [styles.listContent, insets.bottom]
   );
+
+  if (items.some((item) => grinFeatureNotAdmitted(item.lastErrorActionable))) {
+    return (
+      <Screen padded={false} dismissKeyboardOnTap={false}>
+        <View style={styles.headerWrap}>
+          <Header title={t("grin.listTitle")} subtitle={t("grin.listSubtitle")} showBack />
+          <EmptyState title={t("grin.unavailableTitle")} message={t("grin.unavailableBody")} />
+        </View>
+      </Screen>
+    );
+  }
 
   return (
     <Screen padded={false} dismissKeyboardOnTap={false}>

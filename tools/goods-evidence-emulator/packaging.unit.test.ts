@@ -47,10 +47,20 @@ const transportNames = readFileSync(
 );
 const composedSrc = readFileSync(join(packaged, "composed.ts"), "utf8");
 
-assert.doesNotMatch(
-  functionsIndex,
-  /goodsEvidence|GoodsEvidenceRegisterAdapter|grin-g1|createInjectedGrinServerPort|serverPort|grinRegisterGoodsReceipt|grinReconcileCommand|grinMutateGoodsReceipt|grinReadGoodsReceipt|grinUploadEvidence|composed/
-);
+assert.match(functionsIndex, /from ["']\.\/goodsEvidence\/productionExports["']/);
+assert.match(functionsIndex, /grinRegisterGoodsReceipt/);
+assert.match(functionsIndex, /grinReconcileCommand/);
+assert.match(functionsIndex, /grinMutateGoodsReceipt/);
+assert.match(functionsIndex, /grinReadGoodsReceipt/);
+assert.match(functionsIndex, /grinReserveEvidence/);
+assert.match(functionsIndex, /grinBeginEvidenceUpload/);
+assert.match(functionsIndex, /grinUploadEvidence/);
+assert.doesNotMatch(functionsIndex, /GoodsEvidenceRegisterAdapter/);
+assert.doesNotMatch(functionsIndex, /createInjectedGrinServerPort/);
+assert.doesNotMatch(functionsIndex, /handleGrinRegister/);
+assert.doesNotMatch(functionsIndex, /createProductionGrinCallables\s*\(/);
+assert.doesNotMatch(functionsIndex, /from ["']\.\/goodsEvidence\/productionCompose["']/);
+assert.doesNotMatch(functionsIndex, /grinBeginEvidence[^U]/);
 assert.match(functionsTsconfig, /"outDir": "lib"/);
 assert.doesNotMatch(functionsTsconfig, /rootDir/);
 assert.match(functionsPkg, /"main": "lib\/index.js"/);
@@ -142,6 +152,12 @@ assert.doesNotMatch(
 );
 assert.equal(KEEP.has("productionCompose.ts"), true);
 assert.equal(KEEP.has("productionAdminConfig.ts"), true);
+assert.equal(KEEP.has("productionExports.ts"), true);
+const productionExports = readFileSync(join(packaged, "productionExports.ts"), "utf8");
+assert.match(productionExports, /import\(["']\.\/productionCompose["']\)/);
+assert.match(productionExports, /region:\s*["']asia-south1["']/);
+assert.doesNotMatch(productionExports.replace(/import\(["']\.\/productionCompose["']\)/, ""), /from ["']\.\/productionCompose["']/);
+assert.doesNotMatch(productionExports, /from ["']firebase-admin/);
 
 const functionsEntryCompose = readFileSync(join(dir, "functions-entry/compose.ts"), "utf8");
 assert.match(functionsEntryCompose, /createProductionGrinCallables as createIsolatedGrinCallables/);

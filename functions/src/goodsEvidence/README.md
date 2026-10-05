@@ -8,10 +8,13 @@ Authoritative sources:
 - Domain: `src/goodsEvidence`
 - Adapters: `tools/goods-evidence-emulator` (G1) and `tools/goods-evidence-storage` (G2)
 - Hand-written here: `callables.ts`, `composed.ts`, `productionCompose.ts`,
-  `productionAdminConfig.ts`
+  `productionAdminConfig.ts`, `productionExports.ts`
 
-- Not exported from `functions/src/index.ts` in this slice.
-- Production entrypoint remains `functions/lib/index.js`.
+- Production entrypoint `functions/src/index.ts` re-exports seven lazy GRIN
+  `onCall` wrappers from `productionExports.ts`. Composition is not the
+  always-deny `handleGrin*` stubs. Isolated emulator entry remains
+  `tools/goods-evidence-emulator/functions-entry/**` and is not deployed.
+- Production JS entry remains `functions/lib/index.js`.
 - `callables.ts` stays fail-closed even when `GRIN_GOODS_EVIDENCE_FUNCTIONS`
   is `"true"` because no adapter is bound there.
 - `composed.ts` is the callable factory. It injects adapters; it does not

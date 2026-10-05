@@ -17,7 +17,7 @@ import type {
   QcStatus,
 } from "@/goodsEvidence/types";
 import type { GrinOutbox } from "@/services/grin/outbox/outbox";
-import type { GrinDispatchSession, GrinLocalEvidenceFile, GrinLocalReceiptView } from "@/services/grin/outbox/types";
+import type { ActionableFailure, GrinDispatchSession, GrinLocalEvidenceFile, GrinLocalReceiptView } from "@/services/grin/outbox/types";
 
 import type { GRIN_APPLICATION_REPOSITORY_KIND } from "./labels";
 
@@ -50,6 +50,7 @@ export type GrinApplicationListItem = {
   offlinePending: boolean;
   gateRefusal: GrinGateRefusal;
   projection: GrinProjectionCompleteness;
+  lastErrorActionable: ActionableFailure | null;
 };
 
 export type GrinApplicationRecord = {

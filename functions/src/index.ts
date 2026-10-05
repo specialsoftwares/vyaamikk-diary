@@ -77,3 +77,19 @@ export { retryReconciliationWorkItem } from "./billing/callables/retryReconcilia
 export { prepareIOSBillingAccount } from "./billing/callables/prepareIOSBillingAccount";
 export { validateAndActivateIOS } from "./billing/callables/validateAndActivateIOS";
 export { appStoreServerNotificationsV2 } from "./billing/callables/appStoreServerNotificationsV2";
+
+/**
+ * GRIN production callables. Lazy Admin composition lives in productionExports
+ * so a missing GRIN project/bucket cannot block identity/email/deletion/billing
+ * discovery or cold starts. Server gate remains default-off
+ * (GRIN_GOODS_EVIDENCE_FUNCTIONS must be exactly "true").
+ */
+export {
+  grinRegisterGoodsReceipt,
+  grinReconcileCommand,
+  grinMutateGoodsReceipt,
+  grinReadGoodsReceipt,
+  grinReserveEvidence,
+  grinBeginEvidenceUpload,
+  grinUploadEvidence,
+} from "./goodsEvidence/productionExports";

@@ -2,9 +2,11 @@
  * Production Admin composition for undeployed GRIN callables.
  *
  * Binds packaged G1/G2 adapters to one resolved Admin app's Firestore + Storage.
- * Project and bucket come from productionAdminConfig.ts. Not exported from
- * functions/src/index.ts. Isolated Functions-emulator entry re-exports
- * createProductionGrinCallables as createIsolatedGrinCallables.
+ * Project and bucket come from productionAdminConfig.ts. Production index
+ * re-exports lazy onCall wrappers from productionExports.ts; it must not
+ * call createProductionGrinCallables at module load. Isolated
+ * Functions-emulator entry re-exports createProductionGrinCallables as
+ * createIsolatedGrinCallables.
  *
  * Clock is Date.now() / crypto on this process (server attempt time).
  * Adapter firestoreCommitTime stays null and is not a commit timestamp.
@@ -244,6 +246,6 @@ export function createProductionGrinCallables(
   return {
     ...composed,
     compositionKind: "UNDEPLOYED_COMPOSED",
-    compositionLabel: `${PRODUCTION_COMPOSITION_KIND} / not live deploy / not functions\/src\/index.ts`,
+    compositionLabel: `${PRODUCTION_COMPOSITION_KIND} / not live deploy / lazy productionExports`,
   };
 }
