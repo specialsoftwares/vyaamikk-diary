@@ -9,7 +9,7 @@ Checkpoint inspected: combined application `5d5df3d` + tooling `228a8f5` (draft 
 
 | Task | Owner | Branch | Worktree | Dependency | Status | Evidence | Blocker | Next |
 |---|---|---|---|---|---|---|---|---|
-| Integration | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | later than `5d5df3d` | running | Application `b845e8a`; last canonical CI still `37351685421` on `5d5df3d` only | live mutate / EAS / Play / billing HOLD | Canonical CI; Team 5 re-review; owner GiB confirm |
+| Integration | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | later than `5d5df3d` | running | Application `b845e8a`; local `ci:verify` PASS on `7761af6` (159/159; Docker skip). GitHub Actions id for this SHA **unknown** (`gh` unauth) | live mutate / EAS / Play / billing HOLD | Team 5 re-review; owner GiB confirm; A1 |
 | Backend pilot | team1 | `team/grin-t1-backend` | `grin-t1-backend` | ops-guard closed | review | Slice `88d8c8b` folded as `086aa73`. Auth GAP EMULATOR/INJECTED PASS. A1 still independently offerable. | `GRIN_OPS_ALLOW_LIVE=1` HOLD; mixed-state not wired | A1 then A3 after owner approval |
 | Policy / deletion | team2 | `team/grin-t2-evidence` | `grin-t2-evidence` | owner choices recorded | review | Slice `14e56f3` folded. Issuance lock PASS. P8 still FAIL (purge flag false). Economics alternative 256 MiB/1/5 GiB. | advertising GiB; live purge; 180d public | Owner confirm GiB; Team 5 re-review |
 | Build / device | team3 | `team/grin-t3-offline` | `grin-t3-offline` | versionCode inventory stale | review | `DEVICE_HANDOFF.md`: Play inventory NOT RUN; EAS no internal-grin / no 5d5df3d; vc23 unreserved; artwork tracked; device NOT RUN | EAS/Play B1/B2 HOLD; no device | Owner Console re-read then B1 |

@@ -19,8 +19,9 @@ TOOLING (ops-guard suite; not application CI).
 | Repo | `specialsoftwares/vyaamikk-diary` |
 | Branch | `integration/grin-g1-g5-source` |
 | Draft PR | #31 (no duplicate PR; auto-merge off) |
-| **Application SHA** | `b845e8a30262b9e8740fa53b55e9a0f237caea0b` — Team 2 quota/storage/lifecycle on top of `e2524ff`. Do **not** cite CI `37351685421`. Canonical CI: **not yet run** on this tree. |
-| Last canonical-CI SHA | `5d5df3d54df08953bfb26db39a9b7f5e3d67ed47` — run **`37351685421`** / job **`111903806888`**. Do not reuse `37344993645`. |
+| **Application SHA** | `b845e8a30262b9e8740fa53b55e9a0f237caea0b` — Team 2 quota/storage/lifecycle. Docs pin `7761af65bb22a416f5e7da884f36c21355634e46`. |
+| Local `ci:verify` | **PASS** on `7761af6` (includes `b845e8a`). `test:all` **159/159** in 273.9s. Invoice-renderer Docker **skipped** (no local Docker; host `tsc`+tests ran). **Not** a GitHub Actions run id. Do **not** cite `37351685421`. |
+| Last GitHub Actions canonical CI | `5d5df3d54df08953bfb26db39a9b7f5e3d67ed47` — run **`37351685421`** / job **`111903806888`**. Applies to `5d5df3d` only. `gh` still unauthenticated here. |
 | Team 2 slice | `14e56f3802e29825708db591a5feb5bf8b000178` on `team/grin-t2-evidence` |
 | `git diff` vs `5d5df3d` | **non-empty** on `functions/src/goodsEvidence` (issuance quota, storage accounting, expiry). Ops pin for live GRIN deploy must be **re-reviewed** before A3. |
 | Live billing restriction | **Not deployed.** Live handlers still only the enablement key (absent). |
@@ -43,12 +44,12 @@ Do not reopen ops-guard A/B without a new concrete reproduction.
 
 | Gate | State |
 |---|---|
-| SOURCE READY | Issuance quota **in source** (P3 lock PASS). Storage/expiry/export **in source**. Public deletion **still FAIL** (P8): `INCLUDE_GRIN_IN_ACCOUNT_PURGE=false`. Billing allowlist + Team 1 auth tests present. Wave 2 not accepted. Last canonical CI remains `5d5df3d` / `37351685421`. Do not advertise GiB. |
+| SOURCE READY | Local `ci:verify` **PASS** on `7761af6`. Issuance quota in source (P3 lock PASS). Storage/expiry/export in source. Public deletion **still FAIL** (P8). Wave 2 not accepted. Do not advertise GiB. Not NATIVE_DEVICE / LIVE_BACKEND. |
 | BACKEND PILOT READY | Prepared; **not authorized**; GRIN seven **ABSENT** on live. Create-absent-only planner exists, **not wired**. Enable/disable still UNPROVEN on firebase-created gen2. |
 | INTERNAL BUILD READY | Prepared; **not authorized**; Play inventory **NOT RUN**; versionCode 23 not reserved; no `internal-grin` / `5d5df3d` EAS AAB; B1≠B2 |
 | DEVICE ACCEPTED | Execution sheet ready; **NOT RUN** |
 | BILLING ACCEPTED | Source fail-closed + **undeployed** tester UID allowlist; live `PLAY_BILLING_ENABLED` absent; catalog **NOT RUN**; purchases **off**. Team 4: keep 15-day deletion; do not ship 180-day pending as Play deletion. |
-| PUBLIC SUBMISSION READY | Blocked on owner GiB confirm, public deletion policy, device, billing, listing/disclosure, canonical CI |
+| PUBLIC SUBMISSION READY | Blocked on owner GiB confirm, public deletion policy, device, billing, listing/disclosure. Local `ci:verify` is not Play/device acceptance. |
 | PUBLIC ROLLOUT APPROVED | Not authorized |
 
 ---
