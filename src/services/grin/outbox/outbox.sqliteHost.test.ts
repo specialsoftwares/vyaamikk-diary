@@ -912,6 +912,101 @@ async function main() {
     assert.equal(recoveredFiles.find((f) => f.role === "thumbnail")?.originalDurable, false);
     assert.equal(recoveredFiles.find((f) => f.role === "thumbnail")?.uploadState, "uploaded_derivative");
 
+    const refreshServer = createFakeGrinServerPort({ readReceipt: true });
+    const refreshEvidence = createFakeEvidenceUploadPort();
+    const refreshBox = new GrinOutbox({
+      db,
+      server: refreshServer,
+      evidence: refreshEvidence,
+      localOriginalHasher,
+    });
+    const refreshOwner = "owner_confirm_refresh";
+    const refreshSession = refreshBox.beginOwnerSession(refreshOwner);
+    const refreshKnown = writeKnownOriginal("grin-confirm.bin", Buffer.from("grin-confirm-refresh-bytes"));
+    refreshBox.persistDraftAndQueue(refreshSession, {
+      ledgerId: "ledger_1",
+      receiptId: "grcp_confirm_1",
+      commandId: "gcmd_confirm_1",
+      body: body("grcp_confirm_1"),
+    });
+    refreshBox.attachLocalFile(refreshSession, {
+      ledgerId: "ledger_1",
+      receiptId: "grcp_confirm_1",
+      evidenceId: "ev_confirm_1",
+      role: "original",
+      localPath: refreshKnown.localPath,
+      claimedSha256: refreshKnown.sha256,
+      byteSize: refreshKnown.sizeBytes,
+      category: "invoice",
+      captureProvenance: "imported_original",
+    });
+    const refreshReg = await refreshBox.dispatchDue(refreshSession, "worker_confirm");
+    assert.equal(refreshReg.results.find((r) => r.commandId === "gcmd_confirm_1")?.localState, "attachment_pending");
+    const confirmV1 = refreshBox.getConfirmedProjection(refreshOwner, "ledger_1", "grcp_confirm_1");
+    assert.equal(confirmV1?.eventVersion, 1);
+    assert.equal(refreshBox.getRecord(refreshOwner, "ledger_1", "grcp_confirm_1")?.issuedNumber, "GRIN/MAIN/FY2026-27/000001");
+    refreshServer.failNextRead = true;
+    const refreshFail = await refreshBox.dispatchDue(refreshSession, "worker_confirm");
+    assert.equal(refreshFail.results.find((r) => r.commandId === "gcmd_confirm_1")?.localState, "attachment_pending");
+    assert.equal(
+      refreshBox.listLocalFiles(refreshOwner, "ledger_1", "grcp_confirm_1").find((f) => f.role === "original")?.originalDurable,
+      true
+    );
+    assert.equal(refreshBox.getConfirmedProjection(refreshOwner, "ledger_1", "grcp_confirm_1")?.eventVersion, 1);
+    assert.equal(refreshBox.getRecord(refreshOwner, "ledger_1", "grcp_confirm_1")?.issuedNumber, "GRIN/MAIN/FY2026-27/000001");
+    assert.equal(refreshServer.serialsIssued, 1);
+    const confirmV2 = {
+      receiptId: "grcp_confirm_1",
+      eventVersion: 2,
+      headHash: "b".repeat(64),
+      original: confirmV1!.original,
+      effective: confirmV1!.effective,
+      events: [
+        ...confirmV1!.events,
+        {
+          ...confirmV1!.events[0]!,
+          eventId: "gevt_ev_confirm_1",
+          streamSequence: 2,
+          type: "evidence_verified" as const,
+          expectedPreviousVersion: 1,
+          previousHash: confirmV1!.headHash,
+          eventHash: "b".repeat(64),
+          typedChanges: { evidenceId: "ev_confirm_1", rawSha256: refreshKnown.sha256 },
+        },
+      ],
+    };
+    refreshServer.setConfirmedProjection(refreshOwner, "ledger_1", confirmV2);
+    refreshServer.refreshEnteredWait();
+    let releaseConfirmRead!: () => void;
+    refreshServer.holdNextRead = new Promise<void>((resolve) => {
+      releaseConfirmRead = resolve;
+    });
+    const confirmInflight = refreshBox.dispatchDue(refreshSession, "worker_confirm");
+    await refreshServer.waitUntilReadEntered();
+    refreshBox.endOwnerSession(refreshOwner);
+    releaseConfirmRead();
+    const confirmStolen = await confirmInflight;
+    refreshServer.holdNextRead = null;
+    assert.equal(confirmStolen.results.find((r) => r.commandId === "gcmd_confirm_1")?.skipped, "session_retired");
+    assert.equal(refreshBox.getConfirmedProjection(refreshOwner, "ledger_1", "grcp_confirm_1")?.eventVersion, 1);
+    const refreshSession2 = refreshBox.beginOwnerSession(refreshOwner);
+    assert.notEqual(refreshSession2.dispatchGeneration, refreshSession.dispatchGeneration);
+    const refreshOk = await refreshBox.dispatchDue(refreshSession2, "worker_confirm_2");
+    assert.equal(refreshOk.results.find((r) => r.commandId === "gcmd_confirm_1")?.localState, "issued");
+    const storedV2 = refreshBox.getConfirmedProjection(refreshOwner, "ledger_1", "grcp_confirm_1");
+    assert.equal(storedV2?.eventVersion, 2);
+    assert.equal(storedV2?.headHash, "b".repeat(64));
+    assert.equal(JSON.stringify(storedV2?.original), JSON.stringify(confirmV1?.original));
+    assert.equal(refreshBox.getRecord(refreshOwner, "ledger_1", "grcp_confirm_1")?.issuedNumber, "GRIN/MAIN/FY2026-27/000001");
+    assert.equal(refreshServer.serialsIssued, 1);
+    refreshBox.persistConfirmedProjection(refreshSession2, {
+      ...confirmV2,
+      eventVersion: 1,
+      headHash: "c".repeat(64),
+    });
+    assert.equal(refreshBox.getConfirmedProjection(refreshOwner, "ledger_1", "grcp_confirm_1")?.eventVersion, 2);
+    assert.equal(refreshBox.getConfirmedProjection(refreshOwner, "ledger_1", "grcp_confirm_1")?.headHash, "b".repeat(64));
+
     evPort.holdUploadRole = "thumbnail";
     const sessionDeriv = evBox.beginOwnerSession("owner_ev_d");
     evBox.persistDraftAndQueue(sessionDeriv, {

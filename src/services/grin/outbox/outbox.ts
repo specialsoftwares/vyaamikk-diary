@@ -1476,17 +1476,30 @@ export class GrinOutbox {
     const pending = this.hasUndurableOriginals(snapshot.owner_uid, snapshot.ledger_id, snapshot.receipt_id);
     const receipt = this.readReceipt(snapshot.owner_uid, snapshot.ledger_id, snapshot.receipt_id);
     const issuedNumber = receipt?.issued_number ?? null;
-    const next: OutboxLocalState = pending ? "attachment_pending" : "issued";
+    const beforeConfirm = this.skipStaleCompletion(session, workerId, snapshot);
+    if (beforeConfirm) return beforeConfirm;
+
+    let confirmed: GrinConfirmedProjection | null = null;
+    const canRefresh = typeof this.server.readReceipt === "function";
+    if (!pending && canRefresh) {
+      confirmed = await this.readValidatedConfirmation(session, workerId, snapshot);
+      const afterRead = this.skipStaleCompletion(session, workerId, snapshot);
+      if (afterRead) return afterRead;
+    }
+    // Originals remain durable when confirmation refresh fails; retry that read only.
+    const confirmationPending = !pending && canRefresh && confirmed == null;
+    const next: OutboxLocalState = pending || confirmationPending ? "attachment_pending" : "issued";
     const wrote = this.writeCommandAndReceipt(snapshot, {
       localState: next,
       issuedNumber,
       serverRegisteredAtUtc: receipt?.server_registered_at_utc ?? null,
-      lastErrorCode: pending ? "attachment_retry" : null,
-      lastErrorActionable: pending ? "retry_when_online" : null,
+      lastErrorCode: pending ? "attachment_retry" : confirmationPending ? "confirmation_refresh" : null,
+      lastErrorActionable: pending || confirmationPending ? "retry_when_online" : null,
       clearLease: true,
       now: this.clock.nowMs(),
       session,
       fence,
+      confirmed,
     });
     if (!wrote) {
       return this.skipStaleCompletion(session, workerId, snapshot) ?? this.leaseHeldResult(snapshot);

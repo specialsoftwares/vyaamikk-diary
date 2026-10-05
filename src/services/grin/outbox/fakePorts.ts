@@ -31,6 +31,8 @@ export type FakeGrinServerPort = GrinServerCommandPort & {
   serialsIssued: number;
   holdNextRegister: Promise<void> | null;
   holdNextMutate: Promise<void> | null;
+  holdNextRead: Promise<void> | null;
+  failNextRead: boolean;
   dropNextResponse: boolean;
   throwNonNetworkAfterCommit: boolean;
   reconcileCalls: number;
@@ -38,6 +40,7 @@ export type FakeGrinServerPort = GrinServerCommandPort & {
   denyCode: Extract<GrinRegisterResult, { ok: false }>["code"] | null;
   waitUntilRegisterEntered(): Promise<void>;
   waitUntilMutateEntered(): Promise<void>;
+  waitUntilReadEntered(): Promise<void>;
   refreshEnteredWait(): void;
   setConfirmedProjection(uid: string, ledgerId: string, confirmed: GrinConfirmedProjection): void;
 };
@@ -55,6 +58,10 @@ export function createFakeGrinServerPort(opts?: { mutate?: boolean; readReceipt?
   let mutateEntered = new Promise<void>((resolve) => {
     notifyMutateEntered = resolve;
   });
+  let notifyReadEntered: () => void = () => undefined;
+  let readEntered = new Promise<void>((resolve) => {
+    notifyReadEntered = resolve;
+  });
 
   function armEntered(): void {
     entered = new Promise<void>((resolve) => {
@@ -65,6 +72,12 @@ export function createFakeGrinServerPort(opts?: { mutate?: boolean; readReceipt?
   function armMutateEntered(): void {
     mutateEntered = new Promise<void>((resolve) => {
       notifyMutateEntered = resolve;
+    });
+  }
+
+  function armReadEntered(): void {
+    readEntered = new Promise<void>((resolve) => {
+      notifyReadEntered = resolve;
     });
   }
 
@@ -83,6 +96,8 @@ export function createFakeGrinServerPort(opts?: { mutate?: boolean; readReceipt?
     serialsIssued: 0,
     holdNextRegister: null,
     holdNextMutate: null,
+    holdNextRead: null,
+    failNextRead: false,
     dropNextResponse: false,
     throwNonNetworkAfterCommit: false,
     reconcileCalls: 0,
@@ -94,9 +109,13 @@ export function createFakeGrinServerPort(opts?: { mutate?: boolean; readReceipt?
     waitUntilMutateEntered() {
       return mutateEntered;
     },
+    waitUntilReadEntered() {
+      return readEntered;
+    },
     refreshEnteredWait() {
       armEntered();
       armMutateEntered();
+      armReadEntered();
     },
     setConfirmedProjection(uid, ledgerId, confirmed) {
       projections.set(receiptKey(uid, ledgerId, confirmed.receiptId), confirmed);
@@ -190,7 +209,13 @@ export function createFakeGrinServerPort(opts?: { mutate?: boolean; readReceipt?
 
   if (opts?.readReceipt) {
     port.readReceipt = async (input): Promise<GrinReceiptReadResult> => {
+      notifyReadEntered();
       port.readReceiptCalls += 1;
+      if (port.failNextRead) {
+        port.failNextRead = false;
+        throw new Error("lost_confirmation");
+      }
+      if (port.holdNextRead) await port.holdNextRead;
       if (port.denyCode) return deny(port.denyCode);
       const stored = projections.get(receiptKey(input.uid, input.ledgerId, input.receiptId));
       if (!stored) return deny("not_found");

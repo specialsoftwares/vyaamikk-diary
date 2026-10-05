@@ -11,6 +11,9 @@ authorization.
 
 ## Proposed callable exports
 
+Names below are copied from the implemented JS transport contract in
+`src/services/grin/transport/callableNames.ts`. Do not invent aliases.
+
 Gate: `process.env.GRIN_GOODS_EVIDENCE_FUNCTIONS === "true"` only. Any other
 value is deny. Identity is `request.auth.uid` only.
 
@@ -20,7 +23,9 @@ value is deny. Identity is `request.auth.uid` only.
 | `grinReconcileCommand` | lost-response | Clients stay `failed_retryable` until restored |
 | `grinMutateGoodsReceipt` | amend / QC / return / EWB | Queued mutations stay pending |
 | `grinReadGoodsReceipt` | confirmed retrieve | Packs/history cannot refresh confirmed cuts |
-| `grinReserveEvidence` / `grinBeginEvidence` / `grinUploadEvidence` | reserve → begin → stored-byte verify → link | In-flight originals stay unverified; local files remain retained |
+| `grinReserveEvidence` | reserve Storage object | In-flight originals stay unreserved |
+| `grinBeginEvidenceUpload` | begin stored-byte verify flight | Not `grinBeginEvidence` — that name is not in the contract |
+| `grinUploadEvidence` | stored-byte verify → link | In-flight originals stay unverified; local files remain retained |
 
 Do not export Admin SDK or emulator adapters from the production entry.
 
@@ -38,7 +43,7 @@ Do not export Admin SDK or emulator adapters from the production entry.
 | Knob | Current | Proposed later change | Consequence |
 |---|---|---|---|
 | `EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED` | unset / not `"1"` | `"1"` only on an authorized binary | Still off on Play/store runtimes because of the store-runtime block |
-| `isGoodsEvidenceBlockedByStoreRuntime()` | true when `runtimeKind === "store-or-standalone"` | unchanged in this closeout | Play-installed APK cannot open GRIN even if the public env is `"1"` |
+| `isGoodsEvidenceBlockedByStoreRuntime()` | true when `runtimeKind === "store-or-standalone"` | unchanged in this closeout | Play-installed production-profile artifacts cannot open GRIN even if the public env is `"1"` |
 | Firestore `goodsEvidenceAdmission/runtime` | not in production | `newCommands` / `reconciliation` allow only for seeded Internal Testing uids | Fail-closed for everyone else |
 | `GRIN_GOODS_EVIDENCE_FUNCTIONS` | unexported | `"true"` on the Functions deploy that first exports GRIN | Without it, JS callables stay fail-closed |
 

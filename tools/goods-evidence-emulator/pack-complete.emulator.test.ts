@@ -3,9 +3,9 @@
  * writes verification columns directly).
  *
  * Production repository/outbox composition → register receipt → attach actual
- * labelled synthetic files → real Firebase JS httpsCallable/Storage against the
- * isolated emulators → server stored-byte verification → writeEvidenceUpload
- * (not replaced) → SQLite close/reopen → exportPack.
+ * labelled synthetic files → normal dispatchDue (upload, server stored-byte
+ * verify, automatic confirmation persistence) → SQLite close/reopen →
+ * exportPack. A separate read-only server query is the assertion oracle only.
  *
  * Synthetic bytes prove policy coverage and object identity only. They are not
  * legal truth, OCR, GST, or 2B evidence.
@@ -35,7 +35,6 @@ import { connectStorageEmulator, getStorage } from "firebase/storage";
 
 import { readPrefixFromHandle } from "../../src/goodsEvidence/boundedRead";
 import { HASH_CHUNK_BYTES, MAX_PDF_ORIGINAL_BYTES } from "../../src/goodsEvidence/evidence";
-import type { GrinConfirmedProjection } from "../../src/goodsEvidence/ports";
 import { mayMarkComplete } from "../../src/goodsEvidence/evidencePack";
 import { sampleRegisterBody } from "../../src/goodsEvidence/testFixtures";
 import type { GrinOutbox } from "../../src/services/grin/outbox";
@@ -309,7 +308,8 @@ async function main(): Promise<void> {
       session: NonNullable<ReturnType<typeof persistGrinOwnerSession>>;
       names: string[];
       tmp: string;
-    }) => Promise<T>
+    }) => Promise<T>,
+    opts?: { failConfirmAfterUploadOnce?: boolean }
   ): Promise<T> {
     const tmp = fs.mkdtempSync(join(tmpdir(), `grin-pack-${label}-`));
     const dbPath = join(tmp, "grin.sqlite");
@@ -318,12 +318,21 @@ async function main(): Promise<void> {
     let sqlite: HostSqlite | null = openHostSqlite(dbPath);
     const names: string[] = [];
     const hostFs = createHostFs(retainRoot);
+    let sawEvidenceUpload = false;
+    let failConfirmOnce = Boolean(opts?.failConfirmAfterUploadOnce);
     try {
       assert.equal(sqlite.executionLabel, SQLITE_HOST);
       setGrinApplicationDbFactoryForTests(() => sqlite as HostSqlite);
       setGrinServerPortFactoryForTests(() =>
         createFirebaseGrinTransport({
-          call: realCall,
+          call: async (name, data) => {
+            names.push(name);
+            if (name === GRIN_READ_CALLABLE && sawEvidenceUpload && failConfirmOnce) {
+              failConfirmOnce = false;
+              throw new Error("interrupted_confirmation_read");
+            }
+            return realCall(name, data);
+          },
           currentAuth,
         })
       );
@@ -345,6 +354,7 @@ async function main(): Promise<void> {
           },
           call: async (name, data) => {
             names.push(name);
+            if (name === GRIN_UPLOAD_EVIDENCE_CALLABLE) sawEvidenceUpload = true;
             return realCall(name, data);
           },
         })
@@ -411,7 +421,9 @@ async function main(): Promise<void> {
     }
   }
 
-  await withPersist("complete", async ({ sqlite, box, repo, session, names, tmp }) => {
+  await withPersist(
+    "complete",
+    async ({ sqlite, box, repo, session, names, tmp }) => {
     const receiptId = "receipt_pack_complete";
     repo.createQueued(sampleRegisterBody({ receiptId }));
     const files = writeCategoryFiles(tmp, receiptId, REQUIRED);
@@ -420,15 +432,27 @@ async function main(): Promise<void> {
     assert.ok(names.includes(GRIN_RESERVE_EVIDENCE_CALLABLE));
     assert.ok(names.includes(GRIN_BEGIN_EVIDENCE_CALLABLE));
     assert.ok(names.includes(GRIN_UPLOAD_EVIDENCE_CALLABLE));
+    assert.ok(names.includes(GRIN_READ_CALLABLE));
+
+    const localConfirmed = box.getConfirmedProjection(OWNER, GRIN_APPLICATION_LEDGER_ID, receiptId);
+    assert.ok(localConfirmed, "dispatch must persist the evidence-bearing confirmation");
+    const issuedOriginalJson = JSON.stringify(localConfirmed.original);
 
     const read = await realCall(GRIN_READ_CALLABLE, {
       ledgerId: GRIN_APPLICATION_LEDGER_ID,
       receiptId,
     });
     assert.equal((read as { ok?: boolean }).ok, true);
-    const confirmed = (read as { confirmed: { events: Array<Record<string, unknown>>; eventVersion: number } }).confirmed;
+    const confirmed = (read as { confirmed: { events: Array<Record<string, unknown>>; eventVersion: number; headHash: string; original: unknown } }).confirmed;
+    assert.equal(localConfirmed.eventVersion, confirmed.eventVersion);
+    assert.equal(localConfirmed.headHash, confirmed.headHash);
+    assert.equal(JSON.stringify(localConfirmed.original), JSON.stringify(confirmed.original));
     const verifiedEvents = confirmed.events.filter((event) => event.type === "evidence_verified");
     assert.equal(verifiedEvents.length, files.length, "each original must be server-verified");
+    assert.equal(
+      localConfirmed.events.filter((event) => event.type === "evidence_verified").length,
+      files.length
+    );
 
     for (const file of files) {
       const row = box
@@ -450,8 +474,6 @@ async function main(): Promise<void> {
       assert.equal(pointer.byteSize, file.bytes.byteLength);
       assert.equal(row?.objectGeneration, pointer.generation);
     }
-
-    box.persistConfirmedProjection(session, (read as { confirmed: GrinConfirmedProjection }).confirmed);
 
     retireGrinOwnerSession();
     sqlite.close();
@@ -492,6 +514,10 @@ async function main(): Promise<void> {
       assert.equal(later.itcDisposition, "not_determined");
       assert.notEqual(later.manifest.pinnedCuts[0]?.headHash, pinned.headHash);
       assert.equal(pack.manifest.pinnedCuts[0]?.headHash, pinned.headHash);
+      const afterAmend = reopenedBox.getConfirmedProjection(OWNER, GRIN_APPLICATION_LEDGER_ID, receiptId);
+      assert.ok(afterAmend);
+      assert.ok(afterAmend.eventVersion > localConfirmed.eventVersion);
+      assert.equal(JSON.stringify(afterAmend.original), issuedOriginalJson);
 
       reopened.runSync(`UPDATE grin_local_evidence_files SET object_generation = ? WHERE evidence_id = ? AND owner_uid = ?`, [
         "verified",
@@ -516,7 +542,9 @@ async function main(): Promise<void> {
         // ignore
       }
     }
-  });
+  },
+    { failConfirmAfterUploadOnce: true }
+  );
 
   await withPersist("interrupt", async ({ box, repo, session, tmp }) => {
     const receiptId = "receipt_pack_interrupt";
