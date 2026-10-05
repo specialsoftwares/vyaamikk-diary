@@ -11,7 +11,7 @@ Branch: `team/grin-t1-backend`
 | Pin | Value |
 |---|---|
 | Starting SHA | `aa5253e4e070195227055cde836d6b528d5e0070` |
-| Final SHA | *filled after commit* |
+| Final SHA | Team slice `88d8c8b450a3a381e58e63948fa33ecf17d4555b`; combined cherry-pick `086aa73d336c6c5e0cfd356d32ccb7cdfc344cf4` |
 | Application SHA (accepted) | `5d5df3d54df08953bfb26db39a9b7f5e3d67ed47` |
 | Ops tooling SHA (accepted) | `228a8f58ac83d3c71e853cdccb6e4c4fa64c251f` |
 | firebase-tools | **14.20.0** (installed CLI + `package.json`) |

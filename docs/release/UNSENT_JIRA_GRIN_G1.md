@@ -168,3 +168,7 @@ Play uploaded-version inventory **NOT RUN**: `support.vyd` Play Console ToS not 
 
 Integrated fail-closed `PLAY_BILLING_TESTER_UIDS` on prepare/validate **behind** `PLAY_BILLING_ENABLED` (empty list denies all). **Not enabled. Not deployed. No UIDs invented.** `npm run test:billing-play-constants` pass; `test:billing-google-play` pass. Do **not** cite CI `37351685421` for this tree. Live handlers still only the absent enablement key. Play catalog **NOT RUN**. Listing: pre-complete email/profile; do not advertise unreachable GRIN; diary amounts/credit/payment are financial data; flock.js first-party POST 202; keep **15-day** deletion, do not ship 180-day pending as Play deletion. Do not mark billing / public-release Done.
 
+## Team 1 backend (unsent, 2026-10-06)
+
+Folded slice `88d8c8b` as combined `086aa73`. Auth GAP tests re-run on combined: ops-guard+planner **43/43**; injected unit **ok**; `test:goods-evidence-g1-functions-emulator` **exit 0**. A1 isolated Firestore Rules still independently offerable. Mixed-state create-absent-only planner **not wired**. gcloud enable/disable **UNPROVEN**. GRIN seven still **ABSENT**. Do not deploy. Do not mark backend/GRIN Done.
+

@@ -4,8 +4,11 @@
 Approval of A1 does not approve A2–A7. Do not set `GRIN_OPS_ALLOW_LIVE=1`
 from this file.
 
-Pinned application: `5d5df3d54df08953bfb26db39a9b7f5e3d67ed47`
-Ops helper: `228a8f58ac83d3c71e853cdccb6e4c4fa64c251f`
+Pinned GRIN Functions application: `5d5df3d54df08953bfb26db39a9b7f5e3d67ed47`
+(`git diff` empty on `functions/src/goodsEvidence`). Combined HEAD also
+includes the fail-closed billing tester allowlist (`0c91c47`) and Team 1
+auth GAP tests (`086aa73`). Do **not** cite CI `37351685421` for that later
+tree. Ops helper: `228a8f58ac83d3c71e853cdccb6e4c4fa64c251f`.
 Working directory: repository root. Isolated Rules config only — never
 repo-root quota Firestore (`233b05b7…`).
 
@@ -42,7 +45,7 @@ If firebase deploy fails after some endpoints exist:
 2. Record each name: PRESENT / ABSENT / UNKNOWN + revision if present.
 3. Do **not** re-run all-seven create (`assertAllAbsent` will refuse PRESENT names).
 4. `enable`/`disable` also refuse unless **all seven** are PRESENT.
-5. That mixed state is **stuck** in the current helper. Remaining ABSENT names need a **new bounded approval** for a subset `--only` list (not implemented: journal dir + `create-absent-only`). UNKNOWN blocks.
+5. That mixed state is **stuck** in the current helper. Remaining ABSENT names need a **new bounded approval** for a subset `--only` list. A fail-closed planner exists at `docs/release/proposals/team1/grin-functions-absent-only.mjs` (**not wired** into `grin-functions-op.mjs`; do not run it live). UNKNOWN blocks.
 
 `enable`/`disable` are sequential; a mid-loop gcloud failure leaves already-updated names updated and **deletes** the temp session journal. Record names by inspect, not by assuming PASS.
 
