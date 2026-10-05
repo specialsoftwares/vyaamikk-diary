@@ -125,6 +125,7 @@ function packConfirmedFromRecord(record: GrinApplicationRecord): GrinConfirmedPr
   };
 }
 
+/** SQLITE_HOST repository unit helper. Not writeEvidenceUpload. Not joined emulator acceptance. */
 function markVerifiedDescriptor(
   db: HostSqlite,
   ownerUid: string,
@@ -372,7 +373,9 @@ function main() {
     assert.ok(packA.manifest.incompleteReasons.some((reason) => /commercial_document|invoice reference|no verified originals/i.test(reason)));
     assert.equal(mayMarkComplete(packA.manifest), false);
 
-    // B. Required originals genuinely supplied → mayMarkComplete without forcing completeness.
+    // B. SQLITE_HOST unit: populate verification columns via markVerifiedDescriptor.
+    // Joined persist/outbox/emulator/writeEvidenceUpload/exportPack lives in
+    // tools/goods-evidence-emulator/pack-complete.emulator.test.ts.
     const pathBRecord = repoA2.createQueued(body("grcp_pack_b", "Pack B"));
     const confirmedB = packConfirmedFromRecord(pathBRecord);
     installConfirmedProjections(outbox, [confirmedApp2, confirmedB]);

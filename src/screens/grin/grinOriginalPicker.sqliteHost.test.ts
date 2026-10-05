@@ -59,10 +59,26 @@ function createHostFs(rootDir: string): GrinOriginalRetentionFs {
     async ensureDir(dir: string) {
       fs.mkdirSync(dir, { recursive: true });
     },
-    async copyFile(fromPath: string, toPath: string) {
+    async copyFile(fromPath: string, toPath: string, maxBytes: number) {
       if (!fs.existsSync(fromPath)) throw new Error("source_missing");
+      if (fs.statSync(fromPath).size > maxBytes) throw new Error("too_large");
       fs.mkdirSync(path.dirname(toPath), { recursive: true });
-      fs.copyFileSync(fromPath, toPath);
+      const src = fs.openSync(fromPath, "r");
+      const dest = fs.openSync(toPath, "w");
+      try {
+        const buf = Buffer.alloc(HASH_CHUNK_BYTES);
+        let total = 0;
+        for (;;) {
+          const n = fs.readSync(src, buf, 0, HASH_CHUNK_BYTES, null);
+          if (n <= 0) break;
+          total += n;
+          if (total > maxBytes) throw new Error("too_large");
+          fs.writeSync(dest, buf, 0, n);
+        }
+      } finally {
+        fs.closeSync(src);
+        fs.closeSync(dest);
+      }
     },
     async writeBytes(toPath: string, bytes: Uint8Array) {
       fs.mkdirSync(path.dirname(toPath), { recursive: true });

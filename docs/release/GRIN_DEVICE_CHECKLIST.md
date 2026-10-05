@@ -81,6 +81,15 @@ PLAY-01 outline: Play-installed binary; `isGoodsEvidenceEnabled()` remains false
 
 These outlines are not evidence.
 
+## File-IO / pack closeout additions (still `device_pending`)
+
+See `docs/release/packets/C_DEVICE_CHECKLIST.md` for the expanded later
+device list: picker/PDF/camera, offline capture, process death, account
+switching, upload interruption, receipt mutations, evidence export,
+languages, TalkBack, low-memory operation, and existing diary/auth/save/PDF
+regressions. Native RSS/PSS for 15 MiB originals is not claimed from
+FileHandle unit tests.
+
 ## Wave 1 result
 
 | Gate | State |

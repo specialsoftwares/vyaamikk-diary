@@ -211,6 +211,14 @@ async function productionPick(input: {
       osConversionOccurred: provenance.osConversionOccurred,
       ownerUid,
       injectedBytes: asset.injectedBytes ?? null,
+      isAborted: () => {
+        try {
+          assertOrigin(input.origin);
+          return false;
+        } catch {
+          return true;
+        }
+      },
     });
     retainedPath = retained.localPath;
     assertOrigin(input.origin);

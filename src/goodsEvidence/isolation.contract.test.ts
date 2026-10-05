@@ -63,6 +63,13 @@ for (const file of files) {
   }
 }
 
+const bounded = stripComments(readFileSync(join(moduleDir, "boundedRead.ts"), "utf8"));
+assert.doesNotMatch(bounded, /expo-file-system/);
+assert.doesNotMatch(bounded, /readAsStringAsync/);
+assert.doesNotMatch(bounded, /\batob\b/);
+assert.match(bounded, /handle\.readBytes/);
+assert.match(bounded, /closeOnce/);
+
 const packInputs = stripComments(readFileSync(join(moduleDir, "evidencePackInputs.ts"), "utf8"));
 assert.doesNotMatch(packInputs, /osConversionOccurred:\s*false/);
 assert.match(packInputs, /normalizeOsConversionOccurred/);

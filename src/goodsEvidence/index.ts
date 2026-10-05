@@ -73,6 +73,14 @@ export {
   type GrinEvidencePackInputs,
   type GrinPackOriginalInput,
 } from "./evidencePackInputs";
+export {
+  iterateBoundedChunks,
+  limitChunks,
+  MAX_ORIGINAL_READ_BYTES,
+  MIME_SNIFF_BYTES,
+  readPrefixFromHandle,
+  type GrinBoundedFileHandle,
+} from "./boundedRead";
 export { canonicalJson } from "./canonical";
 export { detectBrokenChain, hashCanonical } from "./hashChain";
 export { freezeCommand } from "./command";

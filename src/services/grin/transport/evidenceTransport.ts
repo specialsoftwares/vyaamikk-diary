@@ -1,13 +1,21 @@
 /**
  * Mobile-safe JS evidence transport.
  *
- * Reserve via httpsCallable, upload retained bytes with Firebase JS Storage
- * (resumable; not a full-file base64 callable body), then verify stored bytes
- * via grinUploadEvidence. Rechecks auth after every await. Parses remote
- * shapes. Fail-closed when unexported: originalDurable false, retryable pending.
+ * Hashing/sniffing use FileHandle reads of HASH_CHUNK_BYTES / 16 bytes.
+ * Upload uses Expo `File` (Blob) with Firebase `uploadBytesResumable`.
+ * That API slices a Blob per resumable chunk; it does **not** prove bounded
+ * JS or native peak memory. Avoidable full-file base64 expansion is removed.
  *
- * Isolation: Firebase JS client only. No Admin SDK, node:fs, HostSqlite, or
- * tools/goods-evidence-* adapters.
+ * JS allocations in the production path:
+ * - mime sniff: MIME_SNIFF_BYTES (16)
+ * - hasher (outbox): HASH_CHUNK_BYTES (64 KiB) via FileHandle
+ * - upload: Expo File Blob handed to Firebase. Worst-case JS copy remains
+ *   unmeasured on device. Enforced ceiling MAX_PDF_ORIGINAL_BYTES (15 MiB)
+ *   / MAX_IMAGE_ORIGINAL_BYTES (10 MiB) and MAX_CONCURRENT_UPLOADS_PER_OWNER=2.
+ * - Test injections may still pass a full Uint8Array up to that ceiling.
+ *
+ * Device peak-memory acceptance is G6 pending. Isolation: Firebase JS client
+ * only. No Admin SDK, node:fs, HostSqlite, or tools/goods-evidence-* adapters.
  */
 
 import { getFunctions, httpsCallable } from "firebase/functions";
@@ -16,11 +24,20 @@ import { getStorage, ref, uploadBytesResumable, getMetadata } from "firebase/sto
 import { env } from "@/config/env";
 import { getFirebaseApp, getFirebaseAuth, getFirebaseStorage } from "@/config/firebase";
 import {
+  MIME_SNIFF_BYTES,
+  iterateBoundedChunks,
+  readPrefixFromHandle,
+} from "@/goodsEvidence/boundedRead";
+import {
+  MAX_PDF_ORIGINAL_BYTES,
   isAllowedOriginalMime,
   isSha256Hex,
   isWave1OriginalCategory,
+  maxBytesForOriginalMime,
+  originalSizeError,
   type AllowedOriginalMime,
 } from "@/goodsEvidence/evidence";
+import { createGrinSha256ChunkHasher } from "@/screens/grin/grinOriginalHash";
 import { canonicalFunctionsRegion } from "@/services/auth/authFlowErrorPresentation";
 import type {
   GrinEvidenceUploadInput,
@@ -51,13 +68,24 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 export type EvidenceObjectPutResult = { generation: string };
 
+export type EvidenceObjectPutInput = {
+  storagePath: string;
+  contentType: string;
+  /** Test injection. Production passes `localPath` instead of a JS copy of the file. */
+  bytes?: Uint8Array;
+  localPath?: string;
+};
+
 export type FirebaseGrinEvidenceTransportDeps = FirebaseGrinTransportDeps & {
-  readLocalBytes: (localPath: string) => Promise<Uint8Array>;
-  putObject: (input: {
-    storagePath: string;
-    bytes: Uint8Array;
-    contentType: string;
-  }) => Promise<EvidenceObjectPutResult>;
+  /**
+   * Test/host injection. When present, the full retained file is materialized
+   * up to MAX_PDF_ORIGINAL_BYTES. Production omits this and uses FileHandle
+   * prefix + Expo File Blob upload.
+   */
+  readLocalBytes?: (localPath: string) => Promise<Uint8Array>;
+  readPrefix?: (localPath: string) => Promise<Uint8Array>;
+  fileSize?: (localPath: string) => Promise<number | null>;
+  putObject: (input: EvidenceObjectPutInput) => Promise<EvidenceObjectPutResult>;
 };
 
 export type FirebaseGrinEvidenceTransport = GrinEvidenceUploadPort & {
@@ -198,23 +226,45 @@ export function createFirebaseGrinEvidenceTransport(
       }
       if (!isWave1OriginalCategory(input.category)) return closed(false);
 
-      let bytes: Uint8Array;
-      try {
-        bytes = await deps.readLocalBytes(input.localPath);
-      } catch {
-        return closed(true);
+      let bytes: Uint8Array | null = null;
+      let mime: AllowedOriginalMime | null = null;
+      let sizeBytes = 0;
+      if (deps.readLocalBytes) {
+        try {
+          bytes = await deps.readLocalBytes(input.localPath);
+        } catch {
+          return closed(true);
+        }
+        if (!stillOwner(deps, input.uid)) return closed(false);
+        if (bytes.byteLength > MAX_PDF_ORIGINAL_BYTES) return closed(false);
+        mime = sniffOriginalMime(bytes);
+        sizeBytes = bytes.byteLength;
+      } else {
+        try {
+          const prefix = deps.readPrefix
+            ? await deps.readPrefix(input.localPath)
+            : await defaultReadPrefix(input.localPath);
+          const measured = deps.fileSize
+            ? await deps.fileSize(input.localPath)
+            : await defaultFileSize(input.localPath);
+          mime = sniffOriginalMime(prefix);
+          sizeBytes = measured ?? 0;
+        } catch {
+          return closed(true);
+        }
+        if (!stillOwner(deps, input.uid)) return closed(false);
       }
-      if (!stillOwner(deps, input.uid)) return closed(false);
-
-      const mime = sniffOriginalMime(bytes);
       if (!mime || !isAllowedOriginalMime(mime)) return closed(false);
-      if (input.sizeBytes > 0 && input.sizeBytes !== bytes.byteLength) return closed(false);
+      if (originalSizeError(mime, sizeBytes)) return closed(false);
+      if (input.sizeBytes > 0 && input.sizeBytes !== sizeBytes) return closed(false);
 
       let claimed = input.claimedSha256;
       if (claimed && isSha256Hex(claimed.toLowerCase())) {
         claimed = claimed.toLowerCase();
-      } else {
+      } else if (bytes) {
         claimed = await sha256HexBytes(bytes);
+      } else {
+        claimed = await defaultHashLocalPath(input.localPath, maxBytesForOriginalMime(mime));
       }
       if (!claimed || !isSha256Hex(claimed)) return closed(true);
       if (!stillOwner(deps, input.uid)) return closed(false);
@@ -226,7 +276,7 @@ export function createFirebaseGrinEvidenceTransport(
         category: input.category,
         mime,
         claimedSha256: claimed,
-        claimedByteSize: bytes.byteLength,
+        claimedByteSize: sizeBytes,
       };
       const reservedCall = await invoke(deps, input.uid, GRIN_RESERVE_EVIDENCE_CALLABLE, reservePayload);
       if (!reservedCall.ok) return closed(reservedCall.retryable);
@@ -247,8 +297,9 @@ export function createFirebaseGrinEvidenceTransport(
       try {
         await deps.putObject({
           storagePath: reserved.storagePath,
-          bytes,
           contentType: mime,
+          bytes: bytes ?? undefined,
+          localPath: input.localPath,
         });
       } catch {
         // Object may already exist from a lost response. Verify still hashes stored bytes.
@@ -274,38 +325,46 @@ function defaultCurrentAuth(): GrinAuthSnapshot {
   return uid ? { uid } : null;
 }
 
-async function defaultReadLocalBytes(localPath: string): Promise<Uint8Array> {
-  if (!localPath) throw new Error("missing local original");
-  try {
-    const href = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(localPath) ? localPath : `file://${localPath}`;
-    const response = await fetch(href);
-    if (response.ok) {
-      return new Uint8Array(await response.arrayBuffer());
-    }
-  } catch {
-    // Expo FileSystem fallback below.
-  }
-  const FileSystem = require("expo-file-system/legacy") as {
-    readAsStringAsync: (uri: string, opts: { encoding: string }) => Promise<string>;
-    EncodingType: { Base64: string };
-  };
-  const base64 = await FileSystem.readAsStringAsync(localPath, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
+async function defaultReadPrefix(localPath: string): Promise<Uint8Array> {
+  const { File } = await import("expo-file-system");
+  const file = new File(localPath);
+  if (!file.exists) throw new Error("missing local original");
+  return readPrefixFromHandle(() => file.open(), MIME_SNIFF_BYTES);
 }
 
-async function defaultPutObject(input: {
-  storagePath: string;
-  bytes: Uint8Array;
-  contentType: string;
-}): Promise<EvidenceObjectPutResult> {
+async function defaultFileSize(localPath: string): Promise<number | null> {
+  const { File } = await import("expo-file-system");
+  const file = new File(localPath);
+  if (!file.exists) return null;
+  const size = file.size;
+  return typeof size === "number" && Number.isInteger(size) && size > 0 ? size : null;
+}
+
+async function defaultHashLocalPath(localPath: string, maxBytes: number): Promise<string> {
+  const { File } = await import("expo-file-system");
+  const file = new File(localPath);
+  if (!file.exists) throw new Error("missing local original");
+  const hasher = createGrinSha256ChunkHasher();
+  for await (const chunk of iterateBoundedChunks(() => file.open(), { maxBytes })) {
+    hasher.update(chunk);
+  }
+  return hasher.digestHex();
+}
+
+async function defaultPutObject(input: EvidenceObjectPutInput): Promise<EvidenceObjectPutResult> {
   const storage = getFirebaseStorage();
   const objectRef = ref(storage, input.storagePath);
-  const task = uploadBytesResumable(objectRef, input.bytes, { contentType: input.contentType });
+  let data: Blob | Uint8Array;
+  if (input.bytes) {
+    if (input.bytes.byteLength > MAX_PDF_ORIGINAL_BYTES) throw new Error("too_large");
+    data = input.bytes;
+  } else if (input.localPath) {
+    const { File } = await import("expo-file-system");
+    data = new File(input.localPath);
+  } else {
+    throw new Error("missing local original");
+  }
+  const task = uploadBytesResumable(objectRef, data, { contentType: input.contentType });
   await new Promise<void>((resolve, reject) => {
     task.on("state_changed", undefined, reject, () => resolve());
   });
@@ -318,8 +377,9 @@ export function createFirebaseJsGrinEvidenceTransport(): FirebaseGrinEvidenceTra
   return createFirebaseGrinEvidenceTransport({
     call: defaultCall,
     currentAuth: defaultCurrentAuth,
-    readLocalBytes: defaultReadLocalBytes,
     putObject: defaultPutObject,
+    readPrefix: defaultReadPrefix,
+    fileSize: defaultFileSize,
   });
 }
 

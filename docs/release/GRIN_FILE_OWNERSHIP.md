@@ -7,6 +7,7 @@ Put proposals under `docs/release/proposals/<team>/`.
 |---|---|---|
 | `docs/release/GRIN_INTERFACE_CONTRACT.md` | coordinator | |
 | `docs/release/GRIN_FILE_OWNERSHIP.md` | coordinator | |
+| `docs/release/packets/**` | coordinator | undeployed review packets A–E; not live deploy |
 | `docs/release/GRIN_TEAM_BOARD.md` | coordinator | |
 | `docs/release/GRIN_IMPLEMENTATION_REGISTER.md` | coordinator | |
 | `docs/release/GRIN_ACCEPTANCE_MATRIX.md` | team5 | created by Team 5 |
@@ -36,6 +37,7 @@ Put proposals under `docs/release/proposals/<team>/`.
 | `src/goodsEvidence/grinNumber.ts` | team1 | |
 | `src/goodsEvidence/time.ts` | team1 | |
 | `src/goodsEvidence/evidence.ts` | team2 | |
+| `src/goodsEvidence/boundedRead.ts` | team2 | platform-free FileHandle iterator; production Expo adapter stays in Team 4 retention |
 | `src/goodsEvidence/evidenceSupport.ts` | team2 | policy v2; do not weaken |
 | `tools/goods-evidence-storage/**` | team2 | new Storage emulator harness |
 | `docs/release/proposals/team1/firestore.rules.grin.md` | team1 | proposal only; do not edit live `firestore.rules` |

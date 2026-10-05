@@ -58,8 +58,14 @@ const evidence = stripComments(readFileSync(join(dir, "evidenceTransport.ts"), "
 assert.match(evidence, /httpsCallable/);
 assert.match(evidence, /uploadBytesResumable/);
 assert.match(evidence, /readLocalBytes/);
+assert.match(evidence, /iterateBoundedChunks/);
+assert.match(evidence, /readPrefixFromHandle/);
 assert.doesNotMatch(evidence, /void input\.localPath/);
 assert.doesNotMatch(evidence, /firebase-admin/);
 assert.doesNotMatch(evidence, /createInjectedGrinEvidencePort/);
+assert.doesNotMatch(evidence, /\batob\b/);
+assert.doesNotMatch(evidence, /readAsStringAsync/);
+assert.doesNotMatch(evidence, /arrayBuffer\(\)/);
+assert.doesNotMatch(evidence, /EncodingType/);
 
 console.log("src/services/grin/transport/isolation.contract.test.ts: ok");

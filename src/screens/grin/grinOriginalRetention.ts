@@ -7,6 +7,12 @@
  */
 
 import {
+  iterateBoundedChunks,
+  limitChunks,
+  MAX_ORIGINAL_READ_BYTES,
+  type GrinBoundedFileHandle,
+} from "@/goodsEvidence/boundedRead";
+import {
   ALLOWED_ORIGINAL_MIME,
   HASH_CHUNK_BYTES,
   MAX_IMAGE_ORIGINAL_BYTES,
@@ -38,12 +44,13 @@ export type GrinRetainedOriginal = {
 export type GrinOriginalRetentionFs = {
   documentDirectory: string;
   ensureDir(dir: string): Promise<void>;
-  copyFile(fromPath: string, toPath: string): Promise<void>;
+  copyFile(fromPath: string, toPath: string, maxBytes: number): Promise<void>;
   writeBytes(toPath: string, bytes: Uint8Array): Promise<void>;
   deleteFile(path: string): Promise<void>;
   fileExists(path: string): Promise<boolean>;
   fileSize(path: string): Promise<number | null>;
   readChunks(path: string): AsyncIterable<Uint8Array>;
+  openHandle?(path: string): GrinBoundedFileHandle;
 };
 
 let injectedFs: GrinOriginalRetentionFs | null = null;
@@ -96,61 +103,85 @@ function joinDir(root: string, ...parts: string[]): string {
 }
 
 async function productionFs(): Promise<GrinOriginalRetentionFs> {
-  const FileSystem = await import("expo-file-system/legacy");
-  const documentDirectory = FileSystem.documentDirectory ?? "";
+  const { File, Directory, Paths } = await import("expo-file-system");
+  const documentDirectory = Paths.document.uri;
   if (!documentDirectory) throw new Error("retention_dir_unavailable");
+
+  function openHandle(path: string): GrinBoundedFileHandle {
+    const file = new File(path);
+    if (!file.exists) throw new Error("source_missing");
+    return file.open();
+  }
+
   return {
     documentDirectory,
+    openHandle,
     async ensureDir(dir: string) {
-      const info = await FileSystem.getInfoAsync(dir);
-      if (!info.exists) await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+      const directory = new Directory(dir);
+      if (!directory.exists) directory.create({ intermediates: true, idempotent: true });
     },
-    async copyFile(fromPath: string, toPath: string) {
-      await FileSystem.copyAsync({ from: fromPath, to: toPath });
+    async copyFile(fromPath: string, toPath: string, maxBytes: number) {
+      const dest = new File(toPath);
+      if (dest.exists) dest.delete();
+      dest.create();
+      const destHandle = dest.open();
+      let destClosed = false;
+      const closeDest = () => {
+        if (destClosed) return;
+        destClosed = true;
+        try {
+          destHandle.close();
+        } catch {
+          // Handle must not leak even if close throws.
+        }
+      };
+      try {
+        for await (const chunk of iterateBoundedChunks(() => openHandle(fromPath), { maxBytes })) {
+          destHandle.writeBytes(chunk);
+        }
+        closeDest();
+      } catch (error) {
+        closeDest();
+        try {
+          if (dest.exists) dest.delete();
+        } catch {
+          // uncommitted dest only
+        }
+        throw error;
+      }
     },
     async writeBytes(toPath: string, bytes: Uint8Array) {
-      let binary = "";
-      for (let i = 0; i < bytes.byteLength; i += 1) binary += String.fromCharCode(bytes[i]!);
-      const base64 = btoa(binary);
-      await FileSystem.writeAsStringAsync(toPath, base64, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
+      const dest = new File(toPath);
+      if (!dest.exists) dest.create();
+      dest.write(bytes);
     },
     async deleteFile(path: string) {
       try {
-        const info = await FileSystem.getInfoAsync(path);
-        if (info.exists) await FileSystem.deleteAsync(path, { idempotent: true });
+        const file = new File(path);
+        if (file.exists) file.delete();
       } catch {
         // Best-effort dispose of uncommitted temps.
       }
     },
     async fileExists(path: string) {
       try {
-        const info = await FileSystem.getInfoAsync(path);
-        return Boolean(info.exists);
+        return new File(path).exists;
       } catch {
         return false;
       }
     },
     async fileSize(path: string) {
       try {
-        const info = await FileSystem.getInfoAsync(path);
-        if (info.exists && "size" in info && typeof info.size === "number") return info.size;
+        const file = new File(path);
+        if (!file.exists) return null;
+        const size = file.size;
+        return typeof size === "number" && Number.isInteger(size) && size > 0 ? size : null;
       } catch {
         return null;
       }
-      return null;
     },
     async *readChunks(path: string) {
-      const raw = await FileSystem.readAsStringAsync(path, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-      const binary = atob(raw);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i) & 0xff;
-      for (let i = 0; i < bytes.byteLength; i += HASH_CHUNK_BYTES) {
-        yield bytes.subarray(i, Math.min(i + HASH_CHUNK_BYTES, bytes.byteLength));
-      }
+      yield* iterateBoundedChunks(() => openHandle(path), { maxBytes: MAX_ORIGINAL_READ_BYTES });
     },
   };
 }
@@ -166,9 +197,17 @@ function hasher(): ChunkHasher {
 
 export async function hashRetainedOriginal(
   fs: GrinOriginalRetentionFs,
-  localPath: string
+  localPath: string,
+  maxBytes: number,
+  isAborted?: () => boolean
 ): Promise<{ sha256: string; byteSize: number }> {
-  return hashBoundedChunks(fs.readChunks(localPath), hasher(), HASH_CHUNK_BYTES);
+  const chunks = fs.openHandle
+    ? iterateBoundedChunks(() => {
+        const handle = fs.openHandle!(localPath);
+        return handle;
+      }, { maxBytes, isAborted })
+    : limitChunks(fs.readChunks(localPath), { maxBytes, isAborted });
+  return hashBoundedChunks(chunks, hasher(), HASH_CHUNK_BYTES);
 }
 
 export async function retainPickedOriginal(input: {
@@ -178,12 +217,21 @@ export async function retainPickedOriginal(input: {
   osConversionOccurred: GrinOsConversion;
   ownerUid: string;
   injectedBytes?: Uint8Array | null;
+  isAborted?: () => boolean;
 }): Promise<GrinRetainedOriginal> {
   const fs = await resolveGrinOriginalRetentionFs();
-  if (input.injectedBytes && input.injectedBytes.byteLength > 0) {
-    // Camera/host tests may supply bytes instead of a picker URI.
-  } else if (!(await fs.fileExists(input.sourcePath))) {
+  const maxBytes = maxOriginalBytes(input.mime);
+  const abort = () => Boolean(input.isAborted?.());
+  if (abort()) throw new Error("read_interrupted");
+
+  const injected = input.injectedBytes && input.injectedBytes.byteLength > 0 ? input.injectedBytes : null;
+  if (!injected && !(await fs.fileExists(input.sourcePath))) {
     throw new Error("source_missing");
+  }
+  if (injected && injected.byteLength > maxBytes) throw new Error("too_large");
+  if (!injected) {
+    const sourceSize = await fs.fileSize(input.sourcePath);
+    if (sourceSize != null && sourceSize > maxBytes) throw new Error("too_large");
   }
 
   const dir = joinDir(fs.documentDirectory, "grin-originals", input.ownerUid);
@@ -191,18 +239,20 @@ export async function retainPickedOriginal(input: {
   const dest = joinDir(dir, `${mintObjectKey()}.${extForMime(input.mime)}`);
   uncommitted.add(dest);
   try {
-    if (input.injectedBytes && input.injectedBytes.byteLength > 0) {
-      await fs.writeBytes(dest, input.injectedBytes);
+    if (abort()) throw new Error("read_interrupted");
+    if (injected) {
+      await fs.writeBytes(dest, injected);
     } else {
-      await fs.copyFile(input.sourcePath, dest);
+      await fs.copyFile(input.sourcePath, dest, maxBytes);
     }
     if (!(await fs.fileExists(dest))) throw new Error("source_missing");
-    const hashed = await hashRetainedOriginal(fs, dest);
+    if (abort()) throw new Error("read_interrupted");
+    const hashed = await hashRetainedOriginal(fs, dest, maxBytes, abort);
     if (hashed.byteSize < 1) {
       await discardUncommittedGrinOriginal(dest);
       throw new Error("empty_original");
     }
-    if (hashed.byteSize > maxOriginalBytes(input.mime)) {
+    if (hashed.byteSize > maxBytes) {
       await discardUncommittedGrinOriginal(dest);
       throw new Error("too_large");
     }

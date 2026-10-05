@@ -14,7 +14,8 @@
  * - Auth emulator custom token for the seeded uid.
  * - Admin seed of user/ledger/admission.
  * - SQLITE_HOST + HOST_FILESYSTEM retention chunks for the persist hasher.
- *   Production transport uses fetch / Expo FileSystem, not node:fs.
+ *   This emulator injects readLocalBytes. Production uses Expo FileHandle
+ *   prefix + File Blob upload (not fetch/atob/readAsStringAsync).
  *
  * Label: EMULATOR / SQLITE_HOST / HOST_FILESYSTEM / not live deploy / not NATIVE_DEVICE.
  */
@@ -93,10 +94,26 @@ function createHostFs(rootDir: string): GrinOriginalRetentionFs {
     async ensureDir(dir) {
       fs.mkdirSync(dir, { recursive: true });
     },
-    async copyFile(fromPath, toPath) {
+    async copyFile(fromPath, toPath, maxBytes) {
       if (!fs.existsSync(fromPath)) throw new Error("source_missing");
+      if (fs.statSync(fromPath).size > maxBytes) throw new Error("too_large");
       fs.mkdirSync(dirname(toPath), { recursive: true });
-      fs.copyFileSync(fromPath, toPath);
+      const src = fs.openSync(fromPath, "r");
+      const dest = fs.openSync(toPath, "w");
+      try {
+        const buf = Buffer.alloc(HASH_CHUNK_BYTES);
+        let total = 0;
+        for (;;) {
+          const n = fs.readSync(src, buf, 0, HASH_CHUNK_BYTES, null);
+          if (n <= 0) break;
+          total += n;
+          if (total > maxBytes) throw new Error("too_large");
+          fs.writeSync(dest, buf, 0, n);
+        }
+      } finally {
+        fs.closeSync(src);
+        fs.closeSync(dest);
+      }
     },
     async writeBytes(toPath, bytes) {
       fs.mkdirSync(dirname(toPath), { recursive: true });
@@ -255,6 +272,7 @@ async function main(): Promise<void> {
       return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
     },
     putObject: async (input) => {
+      if (!input.bytes) throw new Error("emulator injection requires bytes");
       return putReservedObjectWithJsStorage({
         storage: jsStorage,
         storagePath: input.storagePath,
@@ -349,6 +367,7 @@ async function main(): Promise<void> {
           return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
         },
         putObject: async (input) => {
+          if (!input.bytes) throw new Error("emulator injection requires bytes");
           return putReservedObjectWithJsStorage({
             storage: jsStorage,
             storagePath: input.storagePath,
