@@ -144,3 +144,11 @@ Application SHA `5d5df3d54df08953bfb26db39a9b7f5e3d67ed47` on `integration/grin-
 
 Application SHA still `5d5df3d`. Guarded tool `docs/release/packets/grin-ops/grin-functions-op.mjs`; stub tests 15/15. Firebase dotenv enable/disable **blocked** (replace semantics). Alternative: per-function `gcloud functions deploy --update-env-vars` without `--source` after GCS/repo origin check. Live inspect: project `982505811909`; bucket belongs; all seven GRIN functions **absent**; runtime SA default compute `roles/editor`; Firestore/Storage hashes match approved baseline; rollback export `docs/release/rules-compat/live-export-2026-10-06/`. No live deploy, env write, Rules/IAM change, tester seed, EAS, Play, billing, or `main` merge. **Wave 2 not accepted.** Do not mark GRIN / G6 / billing / public-release / device Done.
 
+## Ops-guard correction (unsent, 2026-10-06)
+
+Tooling SHA `228a8f58ac83d3c71e853cdccb6e4c4fa64c251f`. Ops tests **34/34** (not application CI). Fail-closed inspect: 403/incomplete ≠ absent. Live mode rejects fixtures/pin/hang. Application SHA unchanged `5d5df3d`. Draft PR #31. Do not mark GRIN / device / billing / public-release Done.
+
+## Five-team release completion start (unsent, 2026-10-06)
+
+Coordinator register `docs/release/RELEASE_COMPLETION_REGISTER.md`. Application `5d5df3d` / CI `37351685421`. Tooling `228a8f5`. Refreshed inspect: GRIN seven still ABSENT, inventory complete, Rules hashes still baseline. Approval packets A–D prepared; **no** live mutation, EAS, Play upload, billing activation, or `main` merge. Owner policy sheet still blank (pricing/quota/retention). Device and live-store billing **NOT RUN**. Next offer: isolated Firestore Rules only (A1). **Wave 2 not accepted.** Do not mark GRIN / G6 / device / billing / public-release Done.
+

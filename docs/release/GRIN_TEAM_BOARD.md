@@ -5,11 +5,16 @@ Do not collapse to Done.
 
 Arrangement: one coordinator plus five **local** Cursor Task subagents on separate worktrees. AI roles, not human sign-off.
 
-Checkpoint inspected: combined includes T5 PHASE 4 `ee4be8a` of `cd5b5f4`. Historical workspace `55f2df1` dirty — **untouched**. Contract `2026-10-02.wave2evidence`. Wave 2 / G6 / public release **not accepted**.
+Checkpoint inspected: combined application `5d5df3d` + tooling `228a8f5` (draft PR #31). Historical workspace `55f2df1` dirty — **untouched**. Contract `2026-10-02.wave2evidence`. Wave 2 / G6 / public release **not accepted**.
 
 | Task | Owner | Branch | Worktree | Dependency | Status | Evidence | Blocker | Next |
 |---|---|---|---|---|---|---|---|---|
-| Integration | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | G1 `c9623dd` | running | T5 PHASE 4 `ee4be8a` of `cd5b5f4`; local `ci:verify` at `9050a13` with Docker skipped | Functions unexported; `gh` unauthenticated | GitHub canonical CI still blocked; do not mark Wave 2 / G6 Done |
+| Integration | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | application `5d5df3d` | running | CI `37351685421`; ops-guard `228a8f5` 34/34 TOOLING; register `RELEASE_COMPLETION_REGISTER.md` | live mutate / EAS / Play / billing HOLD | Approval A1 Firestore Rules; owner policy sheet |
+| Backend pilot | team1 | same combined | proposals only | ops-guard closed | review | Packet `APPROVAL_A_BACKEND_PILOT.md`; GRIN seven ABSENT | `GRIN_OPS_ALLOW_LIVE=1` HOLD | A1 then A3 |
+| Policy / deletion | team2 | same | proposals only | Packet D blank | blocked | `OWNER_POLICY_DECISION_SHEET.md`; `grinEvidence/` not in purge prefixes | owner choices | public evidence blocked |
+| Build / device | team3 | same | proposals only | versionCode inventory stale | device_pending | `APPROVAL_B_INTERNAL_BUILD.md`; `DEVICE_EXECUTION_SHEET.md` all NOT RUN | EAS/Play inventory | B1 then B2 |
+| Billing / Play | team4 | same | proposals only | purchase-entry `"0"` | blocked | `APPROVAL_C_RESTRICTED_BILLING.md`; billing **names** deployed, enablement unknown | activation HOLD | license-test inventory |
+| Independent QA | team5 | same | proposals only | no new app SHA | source_verified | `RELEASE_COMPLETION_QA.md`: SOURCE pass on 7 priorities; public deletion/retention **FAIL**; EMULATOR/LIVE_BACKEND/NATIVE_DEVICE NOT RUN | NATIVE_DEVICE | Packet D then re-execution |
 | E1 evidence composition | team1 | `team/grin-t1-backend` | `grin-t1-backend` | `15bd2a6` | source_verified | persistGrinOwnerSession → processAttachments → real httpsCallable on isolated Functions emulator | live export HOLD | Stay unexported / undeployed |
 | E1/E2/E4/E5 evidence integrity | team2 | `team/grin-t2-evidence` | `grin-t2-evidence` | `29c6d3f` | source_verified | G2 unit + STORAGE_EMULATOR 8091/9200 | live IAM | Stay undeployed |
 | E2/E3 admission + descriptors | team3 | `team/grin-t3-offline` | `grin-t3-offline` | `0d0dd84` | source_verified | SQLITE_HOST outbox + capture columns | native death not claimed | Stay undeployed |
