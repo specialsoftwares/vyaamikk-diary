@@ -5,6 +5,8 @@ Ancestry on this branch: HEAD of `docs/release/GRIN_INTERFACE_CONTRACT.md` plus 
 
 **This matrix is not G6 completion.** Native device and Play-installed rows are `device_pending` / `play_pending` only. Those tests have not occurred. Billing, public release, Internal Testing, EAS, and live backends are out of scope for this programme.
 
+**Operational closeout list (finite):** `docs/release/GRIN_CLOSURE_CHECKLIST.md`. Use that checklist for release-candidate gates. Many G2 `tbd` rows below are **stale vs later source** and must not be treated as “implementation missing.”
+
 Team 5 does **not** approve G1–G5 implementations. Presence of a path is an observation, not acceptance. Another agent reviewing this work is an extra review layer, not external certification or human sign-off.
 
 `npx --yes tsx tools/grin-acceptance/runIds.ts` passing means **matrix IDs exist**. It is **not** CS-01…CS-11 workflow evidence and must not be reported as a combined-scenario pass.

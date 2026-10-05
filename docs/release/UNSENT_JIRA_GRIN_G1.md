@@ -128,3 +128,7 @@ Independent QA of application SHA `dcc325a9fb0d0094ab8bc05cc7ea3d27a7e2ab7a`; do
 
 Local `npm run ci:verify` on application SHA `dcc325a9fb0d0094ab8bc05cc7ea3d27a7e2ab7a`. `test:all` 152/152 in 289.2s. pack-complete included. Elapsed 459288 ms, exit 0. **Local validation passed with Docker stage skipped.** GitHub Actions canonical run (renderer Docker) was not obtained (`gh` unauthenticated; ChatGPT connector draft-PR HTTP 403 “Resource not accessible by integration.”). Compare: https://github.com/specialsoftwares/vyaamikk-diary/compare/main...integration/grin-g1-g5-source . Do not mark GRIN / G6 / billing / public-release Done.
 
+## Release candidate packets (unsent, 2026-10-05)
+
+Operational packets under `docs/release/packets/` (A backend proposal, B Internal AAB, C device checklist, D owner options with recommendations, E billing/public, T2 device-upload, Play listing worksheet, secret scan, coordinator A–G). Finite checklist `docs/release/GRIN_CLOSURE_CHECKLIST.md`. Team 5 independent gate: `docs/release/proposals/team5/RELEASE_CANDIDATE_GATE_REVIEW.md` (RC-01…RC-11; Wave 2 not accepted; SQLITE_HOST/emulator not re-run this session). Combined still `integration/grin-g1-g5-source`. Application SHA `dcc325a`. Published head at packet start `7411940`. No combined PR (`gh` still unauthenticated; GitHub search empty; Actions `total_count` 0 on the branch). **Not a live Jira update.** Source completion does not close device, deployment, or billing tickets. Do not mark GRIN / G6 / billing / public-release Done.
+

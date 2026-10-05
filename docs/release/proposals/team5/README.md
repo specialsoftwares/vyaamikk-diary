@@ -17,6 +17,7 @@ QA artefacts. Not production implementations. Not G6 completion.
 | `WAVE2EVIDENCE_E1_JOINED_FOLLOWUP.md` | PHASE 4 independent re-execution of joined persistGrinOwnerSession → Functions-emulator at `cd5b5f4`; **Wave 2 not accepted** |
 | `WAVE2EVIDENCE_FILEIO_PACK.md` | Independent file-IO + complete-pack review at `2cbacff`; **Wave 2 not accepted** |
 | `WAVE2EVIDENCE_CONFIRMATION_REFRESH.md` | Independent confirmation-refresh after evidence linkage at `dcc325a`; **Wave 2 not accepted** |
+| `RELEASE_CANDIDATE_GATE_REVIEW.md` | Independent release-candidate gate of application `dcc325a` plus packets A–E / T2 / listing / secret-scan / closure checklist; **Wave 2 not accepted** |
 | `wave2evidence-e1-e5-repro.ts` | SQLITE_HOST / INJECTED / host-filesystem drivers for E1–E5 |
 | `wave2evidence-e1-e5-rereview.ts` | PHASE 2 persistGrinOwnerSession inspection + unset-host failure |
 | `wave2evidence-e4-hasher-followup.ts` | PHASE 3 persist hasher / conversion persist / SHA-256 inspection |
