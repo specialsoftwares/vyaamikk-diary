@@ -1,6 +1,6 @@
 # Auth / admission coverage — production GRIN paths
 
-Label discipline: **COVERED** only if an existing test asserts the outcome. **GAP** otherwise. Tests were **read**, not re-executed this session. Do not treat this table as a passing run.
+Label discipline: **COVERED** only if an existing test asserts the outcome. **GAP** otherwise. Team 1 this session **re-executed** the production-compose Functions emulator and the named INJECTED unit files (see `POLICY_BACKEND_HANDOFF.md`). Do not treat EMULATOR as LIVE_BACKEND.
 
 Production live path (lazy):
 
@@ -39,10 +39,10 @@ Legend: **COVERED** = existing test on that module’s real path. **GAP** = no s
 
 | Module | Status | Evidence / smallest add |
 |---|---|---|
-| `callables.ts` | **COVERED** (register only among stubs that return `code`) | `packaging.unit.test.ts:207–208` `handleGrinRegister(null)` → `unauthenticated`. Other six stubs: same `if (!uid)` (`callables.ts:46–100`) but **GAP** to call them with `null` (reconcile/mutate/read/evidence only tested with `"uid_1"` → `policy_denied`). **SOURCE** add: one loop over all seven `handleGrin*` with `null`. |
-| `composed.ts` | **COVERED** (register + empty auth) | `composed.injected.unit.test.ts:103–111`. **GAP** on production **begin/upload** shape: `authorizeEvidence` returns `evidenceClosed(false)` **without** `code: "unauthenticated"` (`composed.ts:571–572`). **SOURCE** add: `beginEvidenceUpload` / `uploadEvidence` with `auth: null`, assert closed + no durable original. |
-| `productionCompose.ts` | **COVERED** (register only) | `production-compose.gates.emulator.test.ts:188–190`. **GAP** other six names. **EMULATOR** add: `callAs(null, NAME, …)` for reconcile/mutate/read/reserve/begin/upload. |
-| `productionExports.ts` | **GAP** | `production-exports.injected.unit.test.ts` always passes `{ uid: "uid_…" }`. `wrapGrin` maps missing auth to `null` (`:60–62`, `:86–89`) but untested. **SOURCE** add: `runProductionGrinCallable("register", { auth: null, data: {} }, loadRealOrInjected)` expects `unauthenticated` when compose is bound, or closed evidence for begin/upload. |
+| `callables.ts` | **COVERED** (all seven stubs) | `packaging.unit.test.ts` loops `handleGrin*` with `null` → `unauthenticated`. |
+| `composed.ts` | **COVERED** (register + empty auth; begin/upload closed) | `composed.injected.unit.test.ts:103–111` register. begin/upload `auth: null` → `ok: false`, `originalDurable: false`, **no** `code: "unauthenticated"` (`authorizeEvidence` `composed.ts:571–572`). **GAP**: composed `reserveEvidence` with `auth: null` (has `code` on that path). |
+| `productionCompose.ts` | **COVERED** (all seven) | `production-compose.gates.emulator.test.ts` `callAs(null, …)` register/reconcile/mutate/read/reserve → `unauthenticated`; begin/upload → closed evidence (no `code`). |
+| `productionExports.ts` | **COVERED** (register + uploadEvidence) | `runProductionGrinCallable("register"\|"uploadEvidence", { auth: null, … })`. **GAP**: other five methods through `runProductionGrinCallable`; `wrapGrin` onCall is not invoked in this INJECTED test. |
 
 `liveRulesGrinMerged.emulator.test.ts` does not call callables. Unauthenticated Storage/Firestore client is not this scenario.
 
@@ -52,8 +52,8 @@ Legend: **COVERED** = existing test on that module’s real path. **GAP** = no s
 |---|---|---|
 | `callables.ts` | N/A / always `policy_denied` when uid present | Stubs never read admission (`packaging.unit.test.ts:204–228`). Not production coverage. |
 | `composed.ts` | **GAP** (delegates to adapter `gate`) | No admission-deny case in `composed.injected.unit.test.ts` / `composed.emulator.test.ts`. |
-| `productionCompose.ts` | **COVERED** (register: deny / missing / malformed; later mutate + reserve while denied) | deny `:200–212`; missing `:258–270`; malformed `ALLOW` `:272–289`; after `newCommands=deny`: register `:536–538`, mutate `:540–555`, reserve `:557–568`. Reconcile while `reconciliation=allow` still succeeds `:575–582`. **GAP**: begin/upload/read while denied (G1 read still requires `newCommands=allow` — noted at `:585–587` as NOT_ESTABLISHED for that contract on all names). **EMULATOR** add: `grinReadGoodsReceipt` + `grinBeginEvidenceUpload` after deny. |
-| `productionExports.ts` | **GAP** | Config/`TRUE` env deny only (`production-exports.injected.unit.test.ts:169–176`), not admission documents. |
+| `productionCompose.ts` | **COVERED** (register deny/missing/malformed; mutate/reserve/read/begin/upload while denied) | After `newCommands=deny`: register/mutate/reserve/read `policy_denied`; begin/upload closed evidence; reconcile still succeeds while `reconciliation=allow`. G1 read still requires `newCommands=allow` (NOT_ESTABLISHED as a product contract; this is the current fail-closed behaviour). |
+| `productionExports.ts` | **GAP** | Config/`TRUE` env deny only, not admission documents. |
 
 Rules: owner cannot **write** admission (`liveRulesGrinMerged.emulator.test.ts:267–271`) — client write deny, not callable admission.
 
@@ -63,7 +63,7 @@ Rules: owner cannot **write** admission (`liveRulesGrinMerged.emulator.test.ts:2
 |---|---|---|
 | `callables.ts` | N/A | Stubs ignore ledger/owner. |
 | `composed.ts` | **COVERED** (read) | `composed.injected.unit.test.ts:239–245` foreign `readReceipt` → `forbidden`. |
-| `productionCompose.ts` | **COVERED** (read only, code loose) | `production-compose.gates.emulator.test.ts:291–301` OTHER reads OWNER receipt; OWNER reads OTHER_LEDGER; asserts `forbidden` **or** `policy_denied` **or** `not_found`. **GAP**: OTHER `register`/`mutate`/`reserve` on OWNER `ledgerId`. **EMULATOR** add: `callAs(OTHER, GRIN_REGISTER_CALLABLE, OWNER ledger envelope)` expect `forbidden`. |
+| `productionCompose.ts` | **COVERED** (read loose codes; OTHER register/mutate/reserve `forbidden`) | OTHER read OWNER receipt / OWNER read OTHER_LEDGER: `forbidden` **or** `policy_denied` **or** `not_found`. OTHER register/mutate/reserve on OWNER `ledgerId` → `forbidden`. **GAP**: OTHER begin/upload. |
 | `productionExports.ts` | **GAP** | No owner check in the wrapper. |
 
 Rules: cross-owner GRIN receipt read denied (`liveRulesGrinMerged.emulator.test.ts:301–304`) — client SDK, not Admin/callable.
@@ -74,7 +74,7 @@ Rules: cross-owner GRIN receipt read denied (`liveRulesGrinMerged.emulator.test.
 |---|---|---|
 | `callables.ts` | N/A | No user-status read. |
 | `composed.ts` | **GAP** | No inactive/pending cases in composed tests. Adapter **SOURCE/EMULATOR**: `register.emulator.test.ts` pending; `injected.unit.test.ts` / `mutations.injected.unit.test.ts` pending+inactive (not production compose). |
-| `productionCompose.ts` | **COVERED** (register only) | inactive `:192–194` `forbidden`; pending_deletion `:196–198` `forbidden`; both seeded with admission `allow` (`:133–134`) so this is status-before-admission. **GAP**: reconcile/mutate/read/evidence as inactive or pending (including “no replay exception”). **EMULATOR** add: pending uid `grinReconcileCommand` on an existing commandId → `forbidden`. |
+| `productionCompose.ts` | **COVERED** (register + reconcile/mutate/read; no replay exception) | inactive/pending register `forbidden`. Same uids reconcile/mutate/read `forbidden`. Flip-to-pending / flip-to-inactive after a successful register: reconcile of that commandId, mutate, and read are `forbidden` (no replay exception). **GAP**: begin/upload/reserve as inactive or pending. |
 | `productionExports.ts` | **GAP** | |
 
 Rules: `pending_deletion` cannot **read** GRIN receipts via client SDK (`liveRulesGrinMerged.emulator.test.ts:306–329`). Does not prove callable Admin path.
@@ -85,7 +85,7 @@ Rules: `pending_deletion` cannot **read** GRIN receipts via client SDK (`liveRul
 |---|---|---|
 | `callables.ts` | N/A | |
 | `composed.ts` | **GAP** | |
-| `productionCompose.ts` | **GAP** | `seedUser` always writes ledger `status: "active"` (`production-compose.gates.emulator.test.ts:115–118`). Adapter **EMULATOR** only: `register.emulator.test.ts:227–234` retired → `forbidden`. G2 `authorize` also requires `ledger.status === "active"` (`g2/adapter.ts:1188–1189`). **EMULATOR** add: production compose register + reserve against `status: "retired"`. |
+| `productionCompose.ts` | **COVERED** (register + reserve + mutate) | Retired ledger register/reserve `forbidden`. Register-then-retire then mutate `forbidden`. **GAP**: retired read. |
 | `productionExports.ts` | **GAP** | |
 | `liveRulesGrinMerged.emulator.test.ts` | **GAP** | No retired-ledger matcher case (Storage retired is `tools/goods-evidence-storage/rules.emulator.test.ts`, not the named live-merged file). |
 
@@ -95,7 +95,7 @@ Rules: `pending_deletion` cannot **read** GRIN receipts via client SDK (`liveRul
 |---|---|---|
 | `callables.ts` | N/A | Ignores envelope; gated deny only. |
 | `composed.ts` | **COVERED** (partial) | `expectedVersion: 0` mutate → `invalid` (`composed.injected.unit.test.ts:267–294`). Unknown mutate type → `deny("invalid")` (`composed.ts:541–542`) **GAP** (no test). Client uid/digest stripped (`trustedCommandEnvelope` `:146–155`) **COVERED** (`composed.injected.unit.test.ts` authenticated uid wins). |
-| `productionCompose.ts` | **COVERED** (malformed admission; G2 stored-byte mismatches) | Admission `newCommands: "ALLOW"` `:272–289`. Wrong claimed hash `:347–380`; wrong size `:382–412`; generation change `:414–455`; unbound PUT path Rules 403 `:457–493`; wrong receipt association `:495–525`. **GAP**: malformed command envelope (missing `commandId` / non-object body) on register via production compose. **EMULATOR** add: register `{ envelope: { type: "registerGoodsReceipt" } }` → `invalid` not a serial. |
+| `productionCompose.ts` | **COVERED** (malformed admission; envelope missing `commandId`; G2 stored-byte mismatches) | Admission `newCommands: "ALLOW"` → `policy_denied`. Register `{ envelope: { type: "registerGoodsReceipt" } }` → `invalid`, no serial. Stored-byte hash/size/generation/path/association mismatches remain COVERED. |
 | `productionExports.ts` | **COVERED** (Admin **config** malformed → `policy_denied`) | `production-exports.injected.unit.test.ts:119–126`. Not command-shape malformed. |
 
 ### 7. Replay (same commandId + digest)
@@ -104,7 +104,7 @@ Rules: `pending_deletion` cannot **read** GRIN receipts via client SDK (`liveRul
 |---|---|---|
 | `callables.ts` | N/A | No persistence. |
 | `composed.ts` | **COVERED** (register) | `composed.injected.unit.test.ts:152–159` `replayed: true`, same issued number. |
-| `productionCompose.ts` | **COVERED** (register + reconcile lost-response) | register replay `:221–224`; `grinReconcileCommand` `:226–234`. **GAP**: mutate replay (same digest) on production compose. **EMULATOR** add: second `amendFields` same commandId+digest → `replayed: true`. |
+| `productionCompose.ts` | **COVERED** (register + reconcile lost-response + mutate same digest) | Second `amendFields` with same commandId+digest → `replayed: true`. |
 | `productionExports.ts` | **GAP** | Wrapper does not implement replay. |
 
 ### 8. Conflicting digest / version
@@ -113,31 +113,31 @@ Rules: `pending_deletion` cannot **read** GRIN receipts via client SDK (`liveRul
 |---|---|---|
 | `callables.ts` | N/A | |
 | `composed.ts` | **COVERED** (digest_conflict on register) | `composed.injected.unit.test.ts:166–167`. **GAP** `version_conflict` on composed (mutate stale `expectedVersion`). Adapter **SOURCE**: `mutations.injected.unit.test.ts:143–170`. |
-| `productionCompose.ts` | **COVERED** (register digest_conflict only) | `:236–239`. **GAP** `version_conflict` on `grinMutateGoodsReceipt`. **EMULATOR** add: two amends with `expectedVersion: 1`; second → `version_conflict`. |
+| `productionCompose.ts` | **COVERED** (register digest_conflict + mutate `version_conflict`) | Two amends with `expectedVersion: 1`; second → `version_conflict`. |
 | `productionExports.ts` | **GAP** | |
 
 ---
 
 ## Production-compose callable cheat sheet (honest)
 
-`production-compose.gates.emulator.test.ts` is the only **EMULATOR** proof of `createProductionGrinCallables`. Coverage is **register-heavy**:
+`production-compose.gates.emulator.test.ts` is the **EMULATOR** proof of `createProductionGrinCallables`. Re-executed this Team 1 session (`npm run test:goods-evidence-g1-functions-emulator`, exit 0).
 
 | Callable | unauth | non-admitted | cross-owner | inactive/pending | retired | malformed | replay | digest/version |
 |---|---|---|---|---|---|---|---|---|
-| `grinRegisterGoodsReceipt` | COVERED | COVERED | GAP | COVERED | GAP | admission COVERED; envelope GAP | COVERED | digest COVERED; version N/A |
-| `grinReconcileCommand` | GAP | GAP (success while newCommands deny + recon allow) | GAP | GAP | GAP | GAP | COVERED (lost-response) | GAP |
-| `grinMutateGoodsReceipt` | GAP | COVERED (after deny) | GAP | GAP | GAP | GAP | GAP | GAP version_conflict |
-| `grinReadGoodsReceipt` | GAP | GAP | COVERED (loose codes) | GAP | GAP | GAP | N/A | N/A |
-| `grinReserveEvidence` | GAP | COVERED (after deny) | GAP | GAP | GAP | GAP | GAP | N/A |
-| `grinBeginEvidenceUpload` | GAP | GAP | GAP | GAP | GAP | GAP | GAP | N/A |
-| `grinUploadEvidence` | GAP | GAP | GAP | GAP | GAP | stored-byte mismatches COVERED | GAP | claimed vs actual COVERED |
+| `grinRegisterGoodsReceipt` | COVERED | COVERED | COVERED (`forbidden`) | COVERED | COVERED | admission + envelope COVERED | COVERED | digest COVERED; version N/A |
+| `grinReconcileCommand` | COVERED | COVERED (success while newCommands deny + recon allow) | GAP | COVERED (no replay exception) | GAP | GAP | COVERED (lost-response) | GAP |
+| `grinMutateGoodsReceipt` | COVERED | COVERED (after deny) | COVERED (`forbidden`) | COVERED | COVERED | GAP | COVERED | COVERED `version_conflict` |
+| `grinReadGoodsReceipt` | COVERED | COVERED (`policy_denied`) | COVERED (loose codes) | COVERED | GAP | GAP | N/A | N/A |
+| `grinReserveEvidence` | COVERED | COVERED (after deny) | COVERED (`forbidden`) | GAP | COVERED | GAP | GAP | N/A |
+| `grinBeginEvidenceUpload` | COVERED (closed, no `code`) | COVERED (closed) | GAP | GAP | GAP | GAP | GAP | N/A |
+| `grinUploadEvidence` | COVERED (closed, no `code`) | COVERED (closed) | GAP | GAP | GAP | stored-byte mismatches COVERED | GAP | claimed vs actual COVERED |
 
 ---
 
-## Smallest tests to add (priority)
+## Remaining GAPs (after this Team 1 add)
 
-1. **EMULATOR** (`production-compose.gates.emulator.test.ts`): retired ledger register+reserve; pending_deletion reconcile (no replay exception); mutate `version_conflict`; unauthenticated on all seven names; OTHER register on OWNER ledger.
-2. **SOURCE** (`production-exports.injected.unit.test.ts`): `auth: null` through `runProductionGrinCallable` for `register` and `uploadEvidence`.
-3. **SOURCE** (`composed.injected.unit.test.ts`): `beginEvidenceUpload` unauthenticated closed result (documents the missing `code` field).
+1. **EMULATOR**: OTHER begin/upload; inactive/pending reserve/begin/upload; retired read/reconcile; composed-path unknown mutate type; malformed reconcile/mutate envelopes.
+2. **SOURCE**: `runProductionGrinCallable` `auth: null` on the other five names; composed `reserveEvidence` `auth: null`; `wrapGrin` onCall not invoked.
+3. **Rules**: `liveRulesGrinMerged.emulator.test.ts` still has no retired-ledger matcher (not this callable packet).
 
-Do not mark these as passing. They are not in the tree.
+Do not treat EMULATOR as LIVE_BACKEND. Admin fail-closed is unchanged. `DELETION_GRACE_MS` is unchanged.

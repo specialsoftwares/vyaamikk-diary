@@ -206,6 +206,19 @@ async function main(): Promise<void> {
   assert.equal(denied.code, "policy_denied");
   const unauth = await handleGrinRegister(null, {});
   assert.equal(unauth.code, "unauthenticated");
+  const unauthAll = await Promise.all([
+    handleGrinRegister(null, {}),
+    handleGrinReconcile(null, {}),
+    handleGrinMutation(null, {}),
+    handleGrinRead(null, {}),
+    handleGrinReserveEvidence(null, {}),
+    handleGrinBeginEvidenceUpload(null, {}),
+    handleGrinUploadEvidence(null, {}),
+  ]);
+  for (const row of unauthAll) {
+    assert.equal(row.ok, false);
+    assert.equal(row.code, "unauthenticated");
+  }
   const rec = await handleGrinReconcile("uid_1", { ledgerId: "l", commandId: "command01" });
   assert.equal(rec.code, "policy_denied");
   const mut = await handleGrinMutation("uid_1", {});
