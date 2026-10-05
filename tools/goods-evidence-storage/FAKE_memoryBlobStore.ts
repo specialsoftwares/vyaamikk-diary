@@ -45,9 +45,10 @@ export class FAKE_MemoryBlobStore implements G2BlobStore {
     return { generation: stored.generation, byteSize: stored.bytes.byteLength, contentType: stored.contentType };
   }
 
-  async open(path: string): Promise<G2BlobRead | null> {
+  async open(path: string, generation?: string | null): Promise<G2BlobRead | null> {
     const stored = this.objects.get(path);
     if (!stored) return null;
+    if (generation && stored.generation !== generation) return null;
     const bytes = stored.bytes;
     return {
       generation: stored.generation,

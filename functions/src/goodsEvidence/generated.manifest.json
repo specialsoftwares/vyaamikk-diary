@@ -1,5 +1,7 @@
 {
-  "source": "src/goodsEvidence",
+  "domainSource": "src/goodsEvidence",
+  "g1AdapterSource": "tools/goods-evidence-emulator",
+  "g2AdapterSource": "tools/goods-evidence-storage",
   "files": [
     "canonical.ts",
     "constants.ts",
@@ -15,6 +17,23 @@
     "hashChain.ts",
     "ports.ts",
     "evidence.ts",
-    "hashNode.ts"
+    "hashNode.ts",
+    "g1/adapter.ts",
+    "g1/types.ts",
+    "g1/hash.ts",
+    "g1/ids.ts",
+    "g1/limits.ts",
+    "g1/log.ts",
+    "g1/mutations.ts",
+    "g1/paths.ts",
+    "g1/retry.ts",
+    "g1/serial.ts",
+    "g2/adapter.ts",
+    "g2/types.ts",
+    "g2/hash.ts",
+    "g2/ids.ts",
+    "g2/log.ts",
+    "g2/paths.ts",
+    "g2/retry.ts"
   ]
 }

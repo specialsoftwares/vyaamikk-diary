@@ -51,6 +51,9 @@ const functionsEntry = readFileSync(join(dir, "functions-entry/handlers.ts"), "u
 assert.match(functionsEntry, /createIsolatedGrinCallables/);
 assert.match(functionsEntry, /grinUploadEvidence/);
 assert.doesNotMatch(functionsEntry, /from ["'][^"']*functions\/src\/index/);
+const functionsEntryCompose = readFileSync(join(dir, "functions-entry/compose.ts"), "utf8");
+assert.match(functionsEntryCompose, /createProductionGrinCallables as createIsolatedGrinCallables/);
+assert.doesNotMatch(functionsEntryCompose, /from ["']\.\.\/adapter["']/);
 
 const functionsTsconfig = readFileSync(join(dir, "../../functions/tsconfig.json"), "utf8");
 assert.match(functionsTsconfig, /"outDir": "lib"/);

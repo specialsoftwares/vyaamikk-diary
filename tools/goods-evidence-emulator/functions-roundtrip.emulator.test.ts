@@ -157,6 +157,11 @@ function splitHostPort(raw: string, fallbackPort: number): { host: string; port:
 }
 
 async function main(): Promise<void> {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const composeSrc = fs.readFileSync(join(here, "functions-entry/compose.ts"), "utf8");
+  assert.match(composeSrc, /createProductionGrinCallables as createIsolatedGrinCallables/);
+  assert.doesNotMatch(composeSrc, /GoodsEvidenceRegisterAdapter/);
+
   const firestoreHost = requireEnv("FIRESTORE_EMULATOR_HOST");
   const authHost = requireEnv("FIREBASE_AUTH_EMULATOR_HOST");
   const storageHost = requireEnv("FIREBASE_STORAGE_EMULATOR_HOST");
@@ -168,7 +173,6 @@ async function main(): Promise<void> {
   const auth = splitHostPort(authHost, 9100);
   const storage = splitHostPort(storageHost, 9201);
 
-  const here = dirname(fileURLToPath(import.meta.url));
   const functionsRequire = createRequire(join(here, "../../functions/package.json"));
   const adminApp = functionsRequire("firebase-admin/app") as typeof import("firebase-admin/app");
   const adminAuth = functionsRequire("firebase-admin/auth") as typeof import("firebase-admin/auth");
@@ -315,6 +319,14 @@ async function main(): Promise<void> {
   assert.ok(names.includes(GRIN_RESERVE_EVIDENCE_CALLABLE));
   assert.ok(names.includes(GRIN_BEGIN_EVIDENCE_CALLABLE));
   assert.ok(names.includes(GRIN_UPLOAD_EVIDENCE_CALLABLE));
+  assert.ok(
+    names.indexOf(GRIN_RESERVE_EVIDENCE_CALLABLE) < names.indexOf(GRIN_BEGIN_EVIDENCE_CALLABLE),
+    "client order is reserve then begin"
+  );
+  assert.ok(
+    names.indexOf(GRIN_BEGIN_EVIDENCE_CALLABLE) < names.indexOf(GRIN_UPLOAD_EVIDENCE_CALLABLE),
+    "client order is begin then PUT then verify/link (uploadEvidence)"
+  );
   assert.equal(names.includes(GRIN_REGISTER_CALLABLE), false);
 
   const read = await realCall(GRIN_READ_CALLABLE, { ledgerId: LEDGER, receiptId: RECEIPT });

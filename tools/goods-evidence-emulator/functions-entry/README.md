@@ -2,10 +2,11 @@
 
 Not live deploy. Not `functions/src/index.ts`. Do not deploy.
 
-This folder is the E1 isolated Functions-emulator entrypoint. It wraps
-`createComposedGrinCallables` from `functions/src/goodsEvidence/composed.ts`
-with the G1 Firestore adapter and G2 Storage adapter. Production
-`functions/src/index.ts` stays on HOLD (no GRIN export).
+This folder is the E1 isolated Functions-emulator entrypoint. It re-exports
+`createProductionGrinCallables` from `functions/src/goodsEvidence/productionCompose.ts`
+(Admin Firestore + Storage bound to packaged G1/G2 adapters). Production
+`functions/src/index.ts` stays on HOLD (no GRIN export). Do not treat the
+fail-closed `handleGrin*` stubs as this composition.
 
 ## Ports (do not share the G1 8088 or G2 8091/9200 processes)
 

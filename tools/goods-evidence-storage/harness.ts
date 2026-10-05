@@ -118,11 +118,13 @@ export function wrapAdminBlobStore(bucket: {
         contentType: String(meta.contentType ?? ""),
       };
     },
-    async open(path) {
+    async open(path, generation) {
       const file = bucket.file(path);
       const [exists] = await file.exists();
       if (!exists) return null;
       const [meta] = await file.getMetadata();
+      const actualGeneration = String(meta.generation);
+      if (generation && actualGeneration !== String(generation)) return null;
       const stream = file.createReadStream();
       async function* chunks(): AsyncGenerator<Uint8Array> {
         for await (const piece of stream) {
@@ -133,7 +135,7 @@ export function wrapAdminBlobStore(bucket: {
         }
       }
       return {
-        generation: String(meta.generation),
+        generation: actualGeneration,
         byteSize: Number(meta.size),
         contentType: String(meta.contentType ?? ""),
         chunks: chunks(),

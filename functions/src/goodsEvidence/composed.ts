@@ -108,7 +108,7 @@ export type ComposedEvidenceUploadResult = {
 
 export type ComposedGrinCallables = {
   compositionKind: "UNDEPLOYED_COMPOSED";
-  compositionLabel: "INJECTED / EMULATOR / not live deploy";
+  compositionLabel: string;
   register(request: GrinCallableRequest): Promise<ComposedRegisterResult>;
   reconcile(request: GrinCallableRequest): Promise<ComposedReconcileResult>;
   mutate(request: GrinCallableRequest): Promise<ComposedMutationResult>;

@@ -1,7 +1,12 @@
 /**
- * Copy src/goodsEvidence domain into functions/src/goodsEvidence.
- * Single source: do not hand-duplicate canonical/validate/command rules.
- * Rewrites client sha256 to Node crypto. Does not lift functions rootDir.
+ * Copy src/goodsEvidence domain and tools G1/G2 adapters into
+ * functions/src/goodsEvidence. Single source: do not hand-duplicate.
+ * Rewrites client sha256 to Node crypto and adapter domain imports to
+ * packaged relatives. Does not lift functions rootDir.
+ *
+ * Authoritative sources:
+ * - Domain: src/goodsEvidence
+ * - Adapters: tools/goods-evidence-emulator / tools/goods-evidence-storage
  *
  * Run: npx tsx tools/goods-evidence-emulator/packageFunctionsGoodsEvidence.ts
  */
@@ -13,6 +18,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "../..");
 const sourceDir = join(repoRoot, "src/goodsEvidence");
 const destDir = join(repoRoot, "functions/src/goodsEvidence");
+const g1SourceDir = join(repoRoot, "tools/goods-evidence-emulator");
+const g2SourceDir = join(repoRoot, "tools/goods-evidence-storage");
 
 export const DOMAIN_FILES = [
   "canonical.ts",
@@ -29,6 +36,29 @@ export const DOMAIN_FILES = [
   "hashChain.ts",
   "ports.ts",
   "evidence.ts",
+] as const;
+
+export const G1_ADAPTER_FILES = [
+  "adapter.ts",
+  "types.ts",
+  "hash.ts",
+  "ids.ts",
+  "limits.ts",
+  "log.ts",
+  "mutations.ts",
+  "paths.ts",
+  "retry.ts",
+  "serial.ts",
+] as const;
+
+export const G2_ADAPTER_FILES = [
+  "adapter.ts",
+  "types.ts",
+  "hash.ts",
+  "ids.ts",
+  "log.ts",
+  "paths.ts",
+  "retry.ts",
 ] as const;
 
 export const GENERATED_HEADER =
@@ -48,19 +78,29 @@ const FORBIDDEN = [
   /from ["']react-native["']/,
   /from ["']@\//,
   /from ["']expo/,
-  /localDb/,
+  /from ["'][^"']*localDb/,
+  /from ["'][^"']*tools\/goods-evidence/,
   /EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED/,
   /isGoodsEvidenceEnabled/,
 ];
 
-export const KEEP = new Set(["callables.ts", "composed.ts", "README.md"]);
+export const KEEP = new Set(["callables.ts", "composed.ts", "README.md", "productionCompose.ts"]);
 
 export function rewrite(src: string): string {
   return src.replace(/from ["']@\/utils\/sha256Hex["']/g, 'from "./hashNode"');
 }
 
+export function rewriteAdapterDomainImports(src: string): string {
+  return src.replace(/from ["']\.\.\/\.\.\/src\/goodsEvidence\/([^"']+)["']/g, 'from "../$1"');
+}
+
 export function expectedGeneratedSource(_fileName: string, raw: string): string {
   const rewritten = rewrite(raw);
+  return rewritten.startsWith("/** GENERATED") ? rewritten : `${GENERATED_HEADER}${rewritten}`;
+}
+
+export function expectedGeneratedAdapterSource(raw: string): string {
+  const rewritten = rewriteAdapterDomainImports(raw);
   return rewritten.startsWith("/** GENERATED") ? rewritten : `${GENERATED_HEADER}${rewritten}`;
 }
 
@@ -72,12 +112,34 @@ function assertSafe(file: string, src: string): void {
   }
 }
 
+function writeAdapterTree(
+  fromDir: string,
+  toDir: string,
+  files: readonly string[],
+  label: string
+): string[] {
+  mkdirSync(toDir, { recursive: true });
+  const written: string[] = [];
+  for (const name of files) {
+    const raw = readFileSync(join(fromDir, name), "utf8");
+    const body = expectedGeneratedAdapterSource(raw);
+    assertSafe(`${label}/${name}`, body);
+    writeFileSync(join(toDir, name), body);
+    written.push(`${label}/${name}`);
+  }
+  return written;
+}
+
 export function packageFunctionsGoodsEvidence(options?: {
   sourceDir?: string;
   destDir?: string;
+  g1SourceDir?: string;
+  g2SourceDir?: string;
 }): void {
   const fromDir = options?.sourceDir ?? sourceDir;
   const toDir = options?.destDir ?? destDir;
+  const fromG1 = options?.g1SourceDir ?? g1SourceDir;
+  const fromG2 = options?.g2SourceDir ?? g2SourceDir;
   mkdirSync(toDir, { recursive: true });
   for (const name of readdirSync(toDir)) {
     if (KEEP.has(name)) continue;
@@ -93,9 +155,21 @@ export function packageFunctionsGoodsEvidence(options?: {
     writeFileSync(join(toDir, name), body);
   }
 
+  const g1Files = writeAdapterTree(fromG1, join(toDir, "g1"), G1_ADAPTER_FILES, "g1");
+  const g2Files = writeAdapterTree(fromG2, join(toDir, "g2"), G2_ADAPTER_FILES, "g2");
+
   writeFileSync(
     join(toDir, "generated.manifest.json"),
-    `${JSON.stringify({ source: "src/goodsEvidence", files: [...DOMAIN_FILES, "hashNode.ts"] }, null, 2)}\n`
+    `${JSON.stringify(
+      {
+        domainSource: "src/goodsEvidence",
+        g1AdapterSource: "tools/goods-evidence-emulator",
+        g2AdapterSource: "tools/goods-evidence-storage",
+        files: [...DOMAIN_FILES, "hashNode.ts", ...g1Files, ...g2Files],
+      },
+      null,
+      2
+    )}\n`
   );
 }
 
