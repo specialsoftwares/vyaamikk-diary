@@ -25,6 +25,18 @@ Add `"tools/goods-evidence-storage"` next to `"tools/goods-evidence-emulator"` s
 
 This branch includes that exclude so `npm run typecheck` stays green; coordinator should keep it on combine.
 
+## Additional Team 2 focused tests (run via `npx tsx`; coordinator may add scripts)
+
+```
+"test:grin-t2-quota": "npx --yes tsx tools/goods-evidence-emulator/quota.injected.unit.test.ts",
+"test:grin-t2-storage-quota": "npx --yes tsx tools/goods-evidence-storage/storageQuota.injected.unit.test.ts",
+"test:grin-t2-cleanup": "npx --yes tsx functions/src/deletion/grinCleanup.unit.test.ts",
+"test:grin-t2-lifecycle": "npx --yes tsx src/goodsEvidence/entitlementLifecycle.test.ts",
+"test:grin-t2-export": "npx --yes tsx src/services/grin/export/receiptAuditExport.test.ts"
+```
+
+Do not edit root `package.json` from this worktree. Existing G1/G2/deletion/products/usageTransition scripts still apply.
+
 ## Not proposed
 
 - Enabling `EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED`

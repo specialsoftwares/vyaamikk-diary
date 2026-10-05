@@ -49,7 +49,11 @@ export type GrinDenyCode =
   | "integrity"
   | "serial_exhausted"
   | "version_conflict"
-  | "voided";
+  | "voided"
+  /** First issuance only — monthly record cap (Admin G1). */
+  | "quota_exhausted"
+  /** Malformed usageCurrent; never first-create. */
+  | "quota_state_invalid";
 
 export type GrinRegisterSuccess = {
   ok: true;

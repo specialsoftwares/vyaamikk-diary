@@ -61,7 +61,9 @@ export type ActionableFailure =
   | "serial_range_exhausted"
   | "retry_exhausted"
   | "unsync_evidence_retained"
-  | "deletion_policy_unresolved";
+  | "deletion_policy_unresolved"
+  | "monthly_quota_exhausted"
+  | "quota_state_unreadable";
 
 export type GrinQueuedCommand = {
   ownerUid: string;

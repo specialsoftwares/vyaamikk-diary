@@ -15,6 +15,7 @@ const adapterFiles = [
   "serial.ts",
   "retry.ts",
   "mutations.ts",
+  "quota.ts",
   "serverPort.ts",
 ].map((name) => join(dir, name));
 

@@ -1,7 +1,8 @@
 /**
- * Team 5 SOURCE regression: public deletion/retention at application SHA
- * 5d5df3d. Expected FAIL until GRIN paths are in the implemented deletion
- * architecture AND a public-approved window exists.
+ * Team 5 SOURCE regression: public deletion/retention. Expected FAIL until
+ * GRIN paths are in the *default* implemented deletion architecture AND a
+ * public-approved window exists. Team 2 lists exist behind
+ * INCLUDE_GRIN_IN_ACCOUNT_PURGE=false; that does not close this suite.
  *
  * 15-day grace is implemented diary deletion. 180-day requested is neither
  * implemented nor Play-certified. Do not "fix" this suite by weakening

@@ -19,6 +19,7 @@ import { peekQueuedCommand, type GrinOutbox } from "@/services/grin/outbox/outbo
 import { mintCommandId, mintReceiptId } from "@/services/grin/outbox/ids";
 import type { GrinDispatchSession, GrinLocalEvidenceFile, GrinLocalReceiptView } from "@/services/grin/outbox/types";
 
+import { assembleGrinExitExport, type GrinReceiptAuditExport } from "@/services/grin/export";
 import { asApplicationOutbox, type GrinMutationQueueInput } from "./outboxContract";
 import { isGrinAttachCategory } from "./attachCategories";
 import {
@@ -419,6 +420,38 @@ export class GrinApplicationRepository {
       exportKind: "manifest_and_pdf_summary",
       originalsBundled: false,
     };
+  }
+
+  /**
+   * Receipt/audit JSON + optional original download. Pack PDF is not this path
+   * and remains originalsBundled=false (not a complete archive).
+   */
+  exportReceiptAudit(receiptId: string): GrinReceiptAuditExport | null {
+    this.assertLive("read");
+    const lookup = this.lookup(receiptId);
+    if (!lookup) return null;
+    const trimmed = receiptId.trim();
+    const confirmed = this.readConfirmedProjection(trimmed);
+    const files = this.outbox.listLocalFiles(this.ownerUid, this.ledgerId, trimmed);
+    const result = assembleGrinExitExport({
+      receiptId: trimmed,
+      ownerUid: this.ownerUid,
+      ledgerId: this.ledgerId,
+      confirmed,
+      sessionLive: true,
+      files: files.map((file) => ({
+        evidenceId: file.evidenceId,
+        role: file.role,
+        localPath: file.localPath,
+        byteSize: file.verifiedSizeBytes ?? file.byteSize,
+        claimedSha256: file.claimedSha256,
+        actualSha256: file.actualSha256,
+        mime: file.mime,
+        originalDurable: file.originalDurable,
+      })),
+    });
+    if ("ok" in result.audit && result.audit.ok === false) return null;
+    return result.audit as GrinReceiptAuditExport;
   }
 
   exceptions(receiptId: string): GrinApplicationExceptionView | null {

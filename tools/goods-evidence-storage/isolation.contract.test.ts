@@ -18,6 +18,7 @@ const adapterFiles = [
   "log.ts",
   "paths.ts",
   "retry.ts",
+  "storageQuota.ts",
   "types.ts",
   "FAKE_memoryBlobStore.ts",
   "FAKE_injectedFirestore.ts",

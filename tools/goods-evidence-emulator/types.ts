@@ -53,7 +53,9 @@ export type G1DenyCode =
   | "integrity"
   | "serial_exhausted"
   | "version_conflict"
-  | "voided";
+  | "voided"
+  | "quota_exhausted"
+  | "quota_state_invalid";
 
 export type G1RegisterSuccess = {
   ok: true;

@@ -86,8 +86,28 @@ export type ComposedEvidenceReserveSuccess = {
 };
 
 export type ComposedEvidenceReserveResult =
-  | ComposedEvidenceReserveSuccess
-  | { ok: false; code: "unauthenticated" | "forbidden" | "policy_denied" | "not_found" | "invalid" | "integrity"; detail: "denied" };
+  | (ComposedEvidenceReserveSuccess & {
+      storageWarning?: {
+        level: "warn_80" | "warn_95";
+        usedBytes: number;
+        capBytes: number;
+        percent: number;
+      };
+      storageOverLimitRetained?: boolean;
+    })
+  | {
+      ok: false;
+      code:
+        | "unauthenticated"
+        | "forbidden"
+        | "policy_denied"
+        | "not_found"
+        | "invalid"
+        | "integrity"
+        | "quota_exhausted"
+        | "quota_state_invalid";
+      detail: string;
+    };
 
 export type ComposedEvidenceUploadResult = {
   ok: boolean;
@@ -248,14 +268,17 @@ function isEvidenceDenyCode(
     code === "policy_denied" ||
     code === "not_found" ||
     code === "invalid" ||
-    code === "integrity"
+    code === "integrity" ||
+    code === "quota_exhausted" ||
+    code === "quota_state_invalid"
   );
 }
 
 function parseEvidenceDeny(value: unknown): Extract<ComposedEvidenceReserveResult, { ok: false }> | null {
   if (!isPlainObject(value) || value.ok !== false) return null;
   if (!isEvidenceDenyCode(value.code)) return null;
-  return { ok: false, code: value.code, detail: GENERIC_DENY };
+  const detail = typeof value.detail === "string" && value.detail.length > 0 ? value.detail : GENERIC_DENY;
+  return { ok: false, code: value.code, detail };
 }
 
 export function parseEvidenceReserveResult(value: unknown): ComposedEvidenceReserveResult {
@@ -279,6 +302,7 @@ export function parseEvidenceReserveResult(value: unknown): ComposedEvidenceRese
   if (value.state !== "reserved" && value.state !== "uploading") {
     return { ok: false, code: "invalid", detail: GENERIC_DENY };
   }
+  const warning = parseStorageWarning(value.storageWarning);
   return {
     ok: true,
     replayed: value.replayed,
@@ -286,7 +310,24 @@ export function parseEvidenceReserveResult(value: unknown): ComposedEvidenceRese
     objectKey: value.objectKey,
     storagePath: value.storagePath,
     state: value.state,
+    ...(warning ? { storageWarning: warning } : {}),
+    ...(value.storageOverLimitRetained === true ? { storageOverLimitRetained: true } : {}),
   };
+}
+
+function parseStorageWarning(value: unknown): {
+  level: "warn_80" | "warn_95";
+  usedBytes: number;
+  capBytes: number;
+  percent: number;
+} | undefined {
+  if (value == null || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const rec = value as Record<string, unknown>;
+  if (rec.level !== "warn_80" && rec.level !== "warn_95") return undefined;
+  if (typeof rec.usedBytes !== "number" || typeof rec.capBytes !== "number" || typeof rec.percent !== "number") {
+    return undefined;
+  }
+  return { level: rec.level, usedBytes: rec.usedBytes, capBytes: rec.capBytes, percent: rec.percent };
 }
 
 function retryableEvidenceDeny(code: string): boolean {

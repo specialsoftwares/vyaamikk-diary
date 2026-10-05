@@ -17,6 +17,7 @@
     "hashChain.ts",
     "ports.ts",
     "evidence.ts",
+    "entitlementLifecycle.ts",
     "hashNode.ts",
     "g1/adapter.ts",
     "g1/types.ts",
@@ -28,12 +29,14 @@
     "g1/paths.ts",
     "g1/retry.ts",
     "g1/serial.ts",
+    "g1/quota.ts",
     "g2/adapter.ts",
     "g2/types.ts",
     "g2/hash.ts",
     "g2/ids.ts",
     "g2/log.ts",
     "g2/paths.ts",
-    "g2/retry.ts"
+    "g2/retry.ts",
+    "g2/storageQuota.ts"
   ]
 }

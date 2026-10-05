@@ -48,3 +48,11 @@ export function derivativeKeyPath(uid: string, derivativeKey: string): string {
 export function uploadFlightToken(ledgerId: string, evidenceId: string): string {
   return `${ledgerId}/${evidenceId}`;
 }
+
+export function subscriptionStatusPath(uid: string): string {
+  return `users/${uid}/subscription/status`;
+}
+
+export function storageAccountingPath(uid: string): string {
+  return `users/${uid}/goodsEvidenceStorage/accounting`;
+}

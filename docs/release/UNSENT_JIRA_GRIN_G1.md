@@ -172,3 +172,7 @@ Integrated fail-closed `PLAY_BILLING_TESTER_UIDS` on prepare/validate **behind**
 
 Folded slice `88d8c8b` as combined `086aa73`. Auth GAP tests re-run on combined: ops-guard+planner **43/43**; injected unit **ok**; `test:goods-evidence-g1-functions-emulator` **exit 0**. A1 isolated Firestore Rules still independently offerable. Mixed-state create-absent-only planner **not wired**. gcloud enable/disable **UNPROVEN**. GRIN seven still **ABSENT**. Do not deploy. Do not mark backend/GRIN Done.
 
+## Team 2 quota / lifecycle (unsent, 2026-10-06)
+
+Folded slice `14e56f3` onto combined. First GRIN register consumes one monthly slot in the Admin transaction; mutate/evidence/reconcile do not. Storage 1/5/20 GiB labelled `PROPOSED_PENDING_OWNER_CONFIRMATION` — **do not advertise**; alternative **256 MiB / 1 GiB / 5 GiB**. `INCLUDE_GRIN_IN_ACCOUNT_PURGE=false`. `DELETION_GRACE_MS` 15 days unchanged. Focused INJECTED tests + G1/G2/functions emulators **exit 0**. Issuance SOURCE lock **PASS**. Public deletion SOURCE **FAIL** (P8). Do not cite CI `37351685421`. Do not deploy. Do not mark GRIN / deletion / public-release Done.
+

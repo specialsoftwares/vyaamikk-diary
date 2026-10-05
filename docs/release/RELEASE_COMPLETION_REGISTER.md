@@ -19,15 +19,16 @@ TOOLING (ops-guard suite; not application CI).
 | Repo | `specialsoftwares/vyaamikk-diary` |
 | Branch | `integration/grin-g1-g5-source` |
 | Draft PR | #31 (no duplicate PR; auto-merge off) |
-| **Application SHA** | `086aa73d336c6c5e0cfd356d32ccb7cdfc344cf4` (Team 1 auth GAP tests) on top of `0c91c473edf26c2fc591eb15762b1497e7f05fdc` (tester allowlist). GRIN `functions/src/goodsEvidence` still matches `5d5df3d`. Do **not** cite CI `37351685421` for this tree. Canonical CI: **not run** (Team 2 still in flight). |
+| **Application SHA** | **this commit** — Team 2 quota/storage/lifecycle on top of `e2524ff` (Team 4 allowlist + Team 1 auth tests). Do **not** cite CI `37351685421`. Canonical CI: **not yet run** on this tree. |
 | Last canonical-CI SHA | `5d5df3d54df08953bfb26db39a9b7f5e3d67ed47` — run **`37351685421`** / job **`111903806888`**. Do not reuse `37344993645`. |
-| `git diff` vs `5d5df3d` | billing allowlist + emulator auth tests + docs; **empty** on `functions/src/goodsEvidence` |
+| Team 2 slice | `14e56f3802e29825708db591a5feb5bf8b000178` on `team/grin-t2-evidence` |
+| `git diff` vs `5d5df3d` | **non-empty** on `functions/src/goodsEvidence` (issuance quota, storage accounting, expiry). Ops pin for live GRIN deploy must be **re-reviewed** before A3. |
 | Live billing restriction | **Not deployed.** Live handlers still only the enablement key (absent). |
 | **Operational tooling SHA** | `228a8f58ac83d3c71e853cdccb6e4c4fa64c251f` |
 | Docs checkpoint (Team 4 billing fold) | `aa5253e4e070195227055cde836d6b528d5e0070` |
 | Tooling suite | `node --test docs/release/packets/grin-ops/grin-functions-op.test.mjs` **34/34** (TOOLING, not application CI) |
 | Merge-base / `origin/main` | `0da2f58970f23c7ce6cbefae6efffd49c731f44b` |
-| `git diff` application pin | empty on `functions src eas.json app.json app firebase.json` |
+| `git diff` application pin | **stale for this tree** — `functions/src/goodsEvidence` now differs from `5d5df3d`. Do not deploy GRIN from the old pin. |
 | version | **1.0.0** / versionCode **23 unreserved** |
 | firebase-tools | **14.20.0** |
 | gcloud | **ABSENT** on this workstation (required on apply host for enable/disable) |
@@ -42,12 +43,12 @@ Do not reopen ops-guard A/B without a new concrete reproduction.
 
 | Gate | State |
 |---|---|
-| SOURCE READY | Billing tester allowlist (fail-closed; not live). Team 1 auth GAP tests **PASS** on EMULATOR/INJECTED. GRIN issuance/deletion still Team 5 FAIL until Team 2. Wave 2 not accepted. Last canonical CI remains `5d5df3d` / `37351685421`. |
+| SOURCE READY | Issuance quota **in source** (P3 lock PASS). Storage/expiry/export **in source**. Public deletion **still FAIL** (P8): `INCLUDE_GRIN_IN_ACCOUNT_PURGE=false`. Billing allowlist + Team 1 auth tests present. Wave 2 not accepted. Last canonical CI remains `5d5df3d` / `37351685421`. Do not advertise GiB. |
 | BACKEND PILOT READY | Prepared; **not authorized**; GRIN seven **ABSENT** on live. Create-absent-only planner exists, **not wired**. Enable/disable still UNPROVEN on firebase-created gen2. |
 | INTERNAL BUILD READY | Prepared; **not authorized**; Play inventory **NOT RUN**; versionCode 23 not reserved; no `internal-grin` / `5d5df3d` EAS AAB; B1≠B2 |
 | DEVICE ACCEPTED | Execution sheet ready; **NOT RUN** |
 | BILLING ACCEPTED | Source fail-closed + **undeployed** tester UID allowlist; live `PLAY_BILLING_ENABLED` absent; catalog **NOT RUN**; purchases **off**. Team 4: keep 15-day deletion; do not ship 180-day pending as Play deletion. |
-| PUBLIC SUBMISSION READY | Blocked on lifecycle implementation + economics confirm + device + billing + listing/disclosure |
+| PUBLIC SUBMISSION READY | Blocked on owner GiB confirm, public deletion policy, device, billing, listing/disclosure, canonical CI |
 | PUBLIC ROLLOUT APPROVED | Not authorized |
 
 ---
@@ -81,10 +82,10 @@ purchase-entry remains `"0"`. Play Console catalog **NOT RUN**.
 | Team | Authorized work this session | Approval still required |
 |---|---|---|
 | 1 Backend | Auth GAP tests added (EMULATOR/INJECTED PASS). A1 independently offerable. Enable/disable: dotenv blocked; gcloud UNPROVEN. Mixed-state planner not wired. | Live Functions/Rules/IAM/admission/enable |
-| 2 Policy | Owner choices recorded; implementing issuance/storage/expiry/export in team worktree | Economics confirm; 180-day public policy; no live purge |
+| 2 Policy | Issuance+storage+expiry+export folded (`14e56f3`). Economics: do not advertise 1/5/20; alternative **256 MiB / 1 GiB / 5 GiB**. `INCLUDE_GRIN_IN_ACCOUNT_PURGE=false`. 15-day grace unchanged. | Owner GiB confirm; 180-day public policy; no live purge |
 | 3 Build/device | Play inventory **NOT RUN** (ToS / aeadmin lockout). EAS: no `internal-grin` / no `5d5df3d`; highest vc22. Device sheet **NOT RUN**. B1≠B2, neither granted. | EAS/native build; Play upload (separate); Play Console re-read |
 | 4 Billing/Play | Tester UID allowlist in source (empty=deny; not enabled). PLAY_SUBMISSION_READINESS corrected. Data safety rebuild. 180-day: keep 15-day. Catalog **NOT RUN**. | Product/price/activation/submission; billing Functions deploy of this SHA |
-| 5 QA | Independent SOURCE review `POLICY_QA.md` + `RELEASE_COMPLETION_QA.md` continuation. Tooling 34/34. Public deletion **FAIL** (P8). Issuance allowance **FAIL** public (P3). Artwork hashes **PASS**. Team 2 code **not reviewed**. | Does not own implementation; re-review after Team 2 merge |
+| 5 QA | Prior P3 public FAIL is **source-closed** (issuance lock PASS). P8 public deletion **still FAIL**. Team 2 production paths need independent re-review. | Does not own implementation; re-review this SHA |
 
 ---
 
@@ -96,14 +97,15 @@ implementation and tests** only. Not live deploy / billing / Play publish.
 | Topic | Owner choice | Residual hold |
 |---|---|---|
 | GRIN pricing | **A — include in existing Starter / Professional / Business.** No separate SKU. One new issuance consumes one monthly record allowance. | Packet E real-store acceptance before public commercial copy |
-| Storage quota | **Proposed 1 / 5 / 20 GiB** per account, warn 80/95, refuse at cap, no silent delete. **Advertising blocked** until Team 2 economics. | Owner confirm allowances or the one alternative |
+| Storage quota | **Proposed 1 / 5 / 20 GiB** in source, labelled pending confirmation. **Do not advertise.** Team 2 alternative: **256 MiB / 1 GiB / 5 GiB**. | Owner confirm proposal or alternative |
 | Active / expiry | Keep issued evidence while entitled. After genuine expiry: 90-day read/export then 30-day notice. **No production purge job this assignment.** | Source state machine only until approved deploy |
-| Explicit deletion | **Three facts, not one:** implemented **15 days**; owner requested **180 days**; public-approved policy **UNRESOLVED**. | Team 2+4 recommendation; do not advertise 180 |
+| Explicit deletion | **Three facts, not one:** implemented **15 days**; owner requested **180 days**; public-approved policy **UNRESOLVED**. Team 2+4: keep 15-day; do not ship 180 as Play deletion. | Owner public-policy decision |
 | Export | Pack is summary (`originalsBundled=false`). Originals + record export required. ZIP optional. | Device proof NOT RUN |
 | Testers | Owner + two trusted testers, separate accounts. Identities **not supplied**. | Owner UIDs/devices |
 
-Internal Testing: **synthetic** GRIN evidence until lifecycle is implemented
-and approved. Real customer GRIN evidence remains blocked until then.
+Internal Testing: **synthetic** GRIN evidence until lifecycle is **approved
+for live use**. Source machinery exists; `INCLUDE_GRIN_IN_ACCOUNT_PURGE`
+stays false. Real customer GRIN evidence remains blocked until then.
 
 ---
 

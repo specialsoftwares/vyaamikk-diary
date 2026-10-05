@@ -26,6 +26,8 @@ import {
   originalMimeError,
   originalRetentionError,
   originalSizeError,
+  MAX_PDF_ORIGINAL_BYTES,
+  MAX_DERIVATIVE_BYTES,
   reservationIdentityError,
   storagePathShapeError,
   trustedHashMatchesClaim,
@@ -40,6 +42,7 @@ import {
   type Wave1OriginalCategory,
 } from "../evidence";
 import type { EvidenceObjectState, VerifiedEvidenceResult } from "../ports";
+import { grinAccessPhase, mayIssueOrUploadGrinCloud } from "../entitlementLifecycle";
 import { nodeChunkHasher, sha256Utf8 } from "./hash";
 import { documentIdError } from "./ids";
 import { logG2 } from "./log";
@@ -52,11 +55,28 @@ import {
   ledgerPath,
   objectKeyPath,
   receiptPath,
+  storageAccountingPath,
+  subscriptionStatusPath,
   uploadControlPath,
   uploadFlightToken,
   userPath,
 } from "./paths";
 import { isRetryable } from "./retry";
+import {
+  admitStorageReservation,
+  chargedStorageBytes,
+  derivativeHoldKey,
+  emptyStorageAccounting,
+  originalHoldKey,
+  parseStorageAccounting,
+  releaseReservedHold,
+  repairStorageAccounting,
+  retainStorageHold,
+  storageCapBytesFromStatus,
+  storageWarningFor,
+  type StorageAccountingDoc,
+  type StorageInventoryItem,
+} from "./storageQuota";
 import type {
   AdmissionPolicy,
   EvidenceRecord,
@@ -70,6 +90,8 @@ import type {
   G2ListResult,
   G2ReserveResult,
   G2RetrieveResult,
+  G2StorageStatus,
+  G2DownloadResult,
   G2Transaction,
   TrustedCaller,
 } from "./types";
@@ -354,6 +376,13 @@ export class GoodsEvidenceStorageAdapter {
       const objectSnap = await tx.get(objectRef);
       const controlRef = this.db.doc(evidenceControlPath(uid, parsed.ledgerId, parsed.receiptId));
       const controlSnap = await tx.get(controlRef);
+      const accounting = await this.readAccountingAdmission(tx, uid, {
+        holdKey: originalHoldKey(parsed.evidenceId),
+        kind: "original",
+        bytes: parsed.claimedByteSize,
+        replay: objectSnap.exists,
+      });
+      if (!accounting.ok) return accounting;
       const now = formatUtcIso(this.clock.nowMs());
       if (objectSnap.exists) {
         const record = parseRecord(objectSnap.data());
@@ -372,8 +401,14 @@ export class GoodsEvidenceStorageAdapter {
           objectKey: record.objectKey,
           storagePath: record.storagePath,
           state: record.state,
+          ...(accounting.warning ? { storageWarning: accounting.warning } : {}),
+          ...(accounting.overLimitRetained ? { storageOverLimitRetained: true } : {}),
         };
       }
+
+      const expired = await this.denyExpiredNewCloud(tx, uid);
+      if (!expired.ok) return expired;
+
       const originalIds = parseStringIds(controlSnap.data()?.originalIds);
       if (!originalIds) return deny("integrity", GENERIC_DENY);
       const countErr = originalCountError(originalIds.length);
@@ -415,6 +450,9 @@ export class GoodsEvidenceStorageAdapter {
         schemaVersion: 1,
         originalIds: [...originalIds, parsed.evidenceId],
       });
+      if (accounting.next) {
+        tx.set(this.db.doc(storageAccountingPath(uid)), { ...accounting.next });
+      }
       logG2("grin_g2_reserved", { replayed: false, state: "reserved" });
       return {
         ok: true as const,
@@ -423,6 +461,8 @@ export class GoodsEvidenceStorageAdapter {
         objectKey: record.objectKey,
         storagePath: record.storagePath,
         state: "reserved" as const,
+        ...(accounting.warning ? { storageWarning: accounting.warning } : {}),
+        ...(accounting.overLimitRetained ? { storageOverLimitRetained: true } : {}),
       };
     });
   }
@@ -733,7 +773,16 @@ export class GoodsEvidenceStorageAdapter {
       }
       const countErr = derivativeCountError(current.derivativeKeys.length);
       if (countErr) return deny("invalid", countErr);
+      const expired = await this.denyExpiredNewCloud(tx, caller.uid as string);
+      if (!expired.ok) return expired;
       const derivativeKey = this.clock.objectKey();
+      const accounting = await this.readAccountingAdmission(tx, caller.uid as string, {
+        holdKey: derivativeHoldKey(derivativeKey),
+        kind: "derivative",
+        bytes: MAX_DERIVATIVE_BYTES,
+        replay: false,
+      });
+      if (!accounting.ok) return accounting;
       const storagePath = buildDerivativeStoragePath(caller.uid as string, current.objectKey, derivativeKey);
       const next: EvidenceRecord = {
         ...current,
@@ -744,6 +793,9 @@ export class GoodsEvidenceStorageAdapter {
       tx.set(objectRef, { ...next });
       tx.set(this.db.doc(objectKeyPath(next.ownerUid, next.objectKey)), objectKeyMapping(next));
       tx.set(this.db.doc(derivativeKeyPath(next.ownerUid, derivativeKey)), derivativeKeyMapping(next, derivativeKey, kind));
+      if (accounting.next) {
+        tx.set(this.db.doc(storageAccountingPath(next.ownerUid)), { ...accounting.next });
+      }
       return {
         ok: true as const,
         parentEvidenceId: current.evidenceId,
@@ -752,6 +804,199 @@ export class GoodsEvidenceStorageAdapter {
         derivativeKey,
       };
     });
+  }
+
+  /**
+   * Owner download of a retained original. Missing/corrupt ≠ success.
+   * Derivatives cannot use this path. Viewing after expiry remains allowed.
+   */
+  async downloadOriginal(caller: TrustedCaller, input: unknown): Promise<G2DownloadResult> {
+    const retrieved = await this.retrieveOriginal(caller, input);
+    if (!retrieved.ok) return retrieved;
+    const opened = await this.blobs.open(retrieved.storagePath, retrieved.generation);
+    if (!opened) return deny("not_found", "stored original is missing");
+    const parts: Uint8Array[] = [];
+    let total = 0;
+    for await (const chunk of opened.chunks) {
+      total += chunk.byteLength;
+      if (total > MAX_PDF_ORIGINAL_BYTES) {
+        return deny("invalid", "original exceeds the technical size limit");
+      }
+      parts.push(chunk);
+    }
+    if (total < 1) return deny("not_found", "stored original is missing");
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const part of parts) {
+      bytes.set(part, offset);
+      offset += part.byteLength;
+    }
+    if (retrieved.byteSize !== total) return deny("integrity", GENERIC_DENY);
+    return {
+      ok: true,
+      evidenceId: retrieved.evidenceId,
+      kind: "original",
+      bytes,
+      byteSize: total,
+      mime: retrieved.mime,
+      actualSha256: retrieved.actualSha256,
+      generation: opened.generation,
+      storagePath: retrieved.storagePath,
+    };
+  }
+
+  async storageStatus(caller: TrustedCaller): Promise<G2StorageStatus | G2Deny> {
+    if (!caller.uid) return deny("unauthenticated", GENERIC_DENY);
+    const uid = caller.uid;
+    return this.runAttempts(async (tx) => {
+      const statusSnap = await tx.get(this.db.doc(subscriptionStatusPath(uid)));
+      const accountingSnap = await tx.get(this.db.doc(storageAccountingPath(uid)));
+      const parsed = parseStorageAccounting(accountingSnap.exists ? accountingSnap.data() : undefined);
+      if (parsed && "malformed" in parsed) {
+        return deny("quota_state_invalid", "Storage accounting is unreadable.");
+      }
+      const doc = parsed ?? emptyStorageAccounting(formatUtcIso(this.clock.nowMs()));
+      const capResolved =
+        this.hooks.storageCapOverrideBytes ??
+        storageCapBytesFromStatus(statusSnap.exists ? statusSnap.data() : undefined, statusSnap.exists);
+      const enforcementOn = capResolved !== "enforcement_off";
+      const capBytes = enforcementOn ? capResolved : null;
+      const used = chargedStorageBytes(doc);
+      return {
+        ok: true as const,
+        usedBytes: used,
+        capBytes,
+        enforcementOn,
+        overLimitRetained: capBytes != null && used > capBytes,
+        warning: capBytes != null ? storageWarningFor(used, capBytes) : null,
+        reservedOriginalBytes: doc.reservedOriginalBytes,
+        retainedOriginalBytes: doc.retainedOriginalBytes,
+        reservedDerivativeBytes: doc.reservedDerivativeBytes,
+        retainedDerivativeBytes: doc.retainedDerivativeBytes,
+      };
+    });
+  }
+
+  /** Recount from inventory. Never deletes evidence objects or blobs. */
+  async repairAccounting(
+    caller: TrustedCaller,
+    inventory: StorageInventoryItem[]
+  ): Promise<G2StorageStatus | G2Deny> {
+    if (!caller.uid) return deny("unauthenticated", GENERIC_DENY);
+    const uid = caller.uid;
+    const now = formatUtcIso(this.clock.nowMs());
+    const repaired = repairStorageAccounting(inventory, now);
+    return this.runAttempts(async (tx) => {
+      const statusSnap = await tx.get(this.db.doc(subscriptionStatusPath(uid)));
+      await tx.get(this.db.doc(storageAccountingPath(uid)));
+      tx.set(this.db.doc(storageAccountingPath(uid)), { ...repaired });
+      const capResolved =
+        this.hooks.storageCapOverrideBytes ??
+        storageCapBytesFromStatus(statusSnap.exists ? statusSnap.data() : undefined, statusSnap.exists);
+      const used = chargedStorageBytes(repaired);
+      const capBytes = capResolved === "enforcement_off" ? null : capResolved;
+      return {
+        ok: true as const,
+        usedBytes: used,
+        capBytes,
+        enforcementOn: capBytes != null,
+        overLimitRetained: capBytes != null && used > capBytes,
+        warning: capBytes != null ? storageWarningFor(used, capBytes) : null,
+        reservedOriginalBytes: repaired.reservedOriginalBytes,
+        retainedOriginalBytes: repaired.retainedOriginalBytes,
+        reservedDerivativeBytes: repaired.reservedDerivativeBytes,
+        retainedDerivativeBytes: repaired.retainedDerivativeBytes,
+      };
+    });
+  }
+
+  async releaseAbandonedReservation(
+    caller: TrustedCaller,
+    input: unknown
+  ): Promise<G2LifecycleResult> {
+    const ids = await this.parseAuthorizedLifecycle(caller, input);
+    if (!ids.ok) return ids;
+    const loaded = await this.loadAuthorized(ids.uid, ids.ledgerId, ids.evidenceId, ids.receiptId);
+    if (!loaded.ok) return loaded;
+    if (loaded.record.state !== "reserved" && loaded.record.state !== "uploading") {
+      return deny("invalid", "only reserved or uploading reservations can be abandoned");
+    }
+    return this.commitState(loaded.record, {
+      state: "rejected",
+      updatedAtUtc: formatUtcIso(this.clock.nowMs()),
+    }, "grin_g2_state");
+  }
+
+  private async denyExpiredNewCloud(tx: G2Transaction, uid: string): Promise<{ ok: true } | G2Deny> {
+    const statusSnap = await tx.get(this.db.doc(subscriptionStatusPath(uid)));
+    const phase = grinAccessPhase(
+      statusSnap.exists ? statusSnap.data() : undefined,
+      this.clock.nowMs()
+    );
+    if (!mayIssueOrUploadGrinCloud(phase)) {
+      return deny("policy_denied", "subscription expired; new cloud uploads are not available");
+    }
+    return { ok: true as const };
+  }
+
+  private async readAccountingAdmission(
+    tx: G2Transaction,
+    uid: string,
+    input: { holdKey: string; kind: "original" | "derivative"; bytes: number; replay: boolean }
+  ): Promise<
+    | {
+        ok: true;
+        next: StorageAccountingDoc | null;
+        warning: { level: "warn_80" | "warn_95"; usedBytes: number; capBytes: number; percent: number } | null;
+        overLimitRetained: boolean;
+      }
+    | G2Deny
+  > {
+    const statusSnap = await tx.get(this.db.doc(subscriptionStatusPath(uid)));
+    const accountingSnap = await tx.get(this.db.doc(storageAccountingPath(uid)));
+    const parsed = parseStorageAccounting(accountingSnap.exists ? accountingSnap.data() : undefined);
+    if (parsed && "malformed" in parsed) {
+      return deny("quota_state_invalid", "Storage accounting is unreadable. This upload was not accepted.");
+    }
+    const capResolved =
+      this.hooks.storageCapOverrideBytes ??
+      storageCapBytesFromStatus(statusSnap.exists ? statusSnap.data() : undefined, statusSnap.exists);
+    if (capResolved === "enforcement_off") {
+      return { ok: true as const, next: null, warning: null, overLimitRetained: false };
+    }
+    if (input.replay) {
+      const doc = parsed ?? emptyStorageAccounting(formatUtcIso(this.clock.nowMs()));
+      const used = chargedStorageBytes(doc);
+      return {
+        ok: true as const,
+        next: null,
+        warning: storageWarningFor(used, capResolved),
+        overLimitRetained: used > capResolved,
+      };
+    }
+    const admitted = admitStorageReservation({
+      existing: parsed,
+      holdKey: input.holdKey,
+      kind: input.kind,
+      bytes: input.bytes,
+      capBytes: capResolved,
+      updatedAtUtc: formatUtcIso(this.clock.nowMs()),
+    });
+    if (!admitted.ok) {
+      if (admitted.code === "quota_exhausted") {
+        return deny(
+          "quota_exhausted",
+          "Cloud storage allowance reached. This upload was not accepted."
+        );
+      }
+      return deny("quota_state_invalid", "Storage accounting is unreadable. This upload was not accepted.");
+    }
+    return {
+      ok: true as const,
+      next: admitted.next,
+      warning: admitted.warning,
+      overLimitRetained: admitted.overLimitRetained,
+    };
   }
 
   private async hashAndBind(
@@ -876,6 +1121,8 @@ export class GoodsEvidenceStorageAdapter {
       const now = formatUtcIso(this.clock.nowMs());
       if (mode === "begin") {
         if (record.state === "uploading") return lifecycleOk(record, true);
+        const expired = await this.denyExpiredNewCloud(tx, ids.uid);
+        if (!expired.ok) return expired;
         const transErr = evidenceTransitionError(record.state, "uploading");
         if (transErr) return deny("invalid", transErr);
         if (!uploadingIds.includes(token)) {
@@ -925,8 +1172,10 @@ export class GoodsEvidenceStorageAdapter {
     return this.runAttempts(async (tx, attempt) => {
       const objectRef = this.db.doc(evidenceObjectPath(record.ownerUid, record.ledgerId, record.evidenceId));
       const uploadRef = this.db.doc(uploadControlPath(record.ownerUid));
+      const accountingRef = this.db.doc(storageAccountingPath(record.ownerUid));
       await tx.get(objectRef);
       await tx.get(uploadRef);
+      const accountingSnap = await tx.get(accountingRef);
       const gated = await this.authorize(
         tx,
         record.ownerUid,
@@ -975,6 +1224,26 @@ export class GoodsEvidenceStorageAdapter {
       };
       tx.set(objectRef, { ...next });
       tx.set(this.db.doc(objectKeyPath(next.ownerUid, next.objectKey)), objectKeyMapping(next));
+      const parsedAccounting = parseStorageAccounting(
+        accountingSnap.exists ? accountingSnap.data() : undefined
+      );
+      if (parsedAccounting && !("malformed" in parsedAccounting)) {
+        const holdKey = originalHoldKey(record.evidenceId);
+        const stamp = next.updatedAtUtc;
+        if (nextState === "rejected" && (current.state === "reserved" || current.state === "uploading")) {
+          tx.set(accountingRef, { ...releaseReservedHold(parsedAccounting, holdKey, stamp) });
+        } else if (
+          nextState === "uploaded_unverified" ||
+          nextState === "verified" ||
+          nextState === "linked"
+        ) {
+          const bytes = next.actualByteSize ?? next.claimedByteSize;
+          const retained = retainStorageHold(parsedAccounting, holdKey, bytes, stamp);
+          if (!("malformed" in retained)) {
+            tx.set(accountingRef, { ...retained });
+          }
+        }
+      }
       await extra?.(tx);
       return lifecycleOk(next, false, logEvent);
     });

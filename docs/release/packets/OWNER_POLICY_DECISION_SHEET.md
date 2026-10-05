@@ -63,20 +63,13 @@ Behaviour:
 - Handle concurrent reservations, retry, abandoned uploads, accounting
   repair, and downgrade-over-limit **without deleting existing evidence**.
 
-**Advertising hold:** Team 2 must validate economics against expected
-catalog paise and public GCP list prices (asia-south1 Storage / Firestore /
-Functions / egress). If the proposal is not supportable, return **one**
-specific alternative for owner approval. Do not silently change allowances.
-
-Coordinator bound (2026-10-06, **not** a substitute for Team 2’s model):
-GCS Mumbai is listed on the public Storage pricing page; the fetched
-markdown omitted the Standard $/GB-month cell — treat exact Mumbai storage
-unit price as **UNKNOWN** until cited. Egress to internet after the
-project-level free band is the likely heavy-use cost driver (public
-Firestore table: $0.12/GiB APAC after 10 GiB). Starter expected ₹99/month
-cannot absorb unbounded download of cap-sized libraries. Typical few-receipt
-usage is likely supportable; heavy 1–20 GiB + repeated original downloads
-may not be. Alternative if Team 2 concurs: **256 MiB / 1 GiB / 5 GiB**.
+**Advertising hold (Team 2 SOURCE, 2026-10-06):** Typical usage supports
+the proposal. Heavy 20 GiB + repeated downloads can exceed business monthly
+₹499 after an assumed 15% store cut. **Do not advertise 1/5/20 GiB.**
+Code constants remain those values labelled
+`PROPOSED_PENDING_OWNER_CONFIRMATION`. **Single alternative for owner
+approval: 256 MiB / 1 GiB / 5 GiB.** See
+`docs/release/proposals/team2/STORAGE_ECONOMICS.md`.
 
 ---
 

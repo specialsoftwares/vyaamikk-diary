@@ -81,6 +81,15 @@ export {
   readPrefixFromHandle,
   type GrinBoundedFileHandle,
 } from "./boundedRead";
+export {
+  grinAccessPhase,
+  genuineExpiryAtMs,
+  mayIssueOrUploadGrinCloud,
+  mayReadDownloadExportGrin,
+  GRIN_EXPIRED_READ_EXPORT_MS,
+  GRIN_EXPIRED_FINAL_NOTICE_MS,
+  type GrinAccessPhase,
+} from "./entitlementLifecycle";
 export { canonicalJson } from "./canonical";
 export { detectBrokenChain, hashCanonical } from "./hashChain";
 export { freezeCommand } from "./command";

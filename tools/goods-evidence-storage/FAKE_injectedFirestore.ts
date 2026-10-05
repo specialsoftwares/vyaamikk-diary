@@ -9,6 +9,7 @@ export type FAKE_InjectedFirestore = G2Firestore & {
   appliedWrites: number;
   failNextCommit: boolean;
   failCommitError: unknown;
+  throwOnGet: Map<string, unknown>;
 };
 
 function persist(data: Record<string, unknown>): string {
@@ -27,6 +28,7 @@ export function FAKE_createInjectedFirestore(): FAKE_InjectedFirestore {
     appliedWrites: 0,
     failNextCommit: false,
     failCommitError: Object.assign(new Error("injected_commit_rejected"), { code: 10 }),
+    throwOnGet: new Map(),
     doc(path: string) {
       return { path };
     },
@@ -34,6 +36,9 @@ export function FAKE_createInjectedFirestore(): FAKE_InjectedFirestore {
       const staged = new Map<string, string>();
       const tx: G2Transaction = {
         async get(ref: G2DocRef): Promise<G2DocSnap> {
+          if (store.throwOnGet.has(ref.path)) {
+            throw store.throwOnGet.get(ref.path);
+          }
           const raw = staged.has(ref.path) ? staged.get(ref.path) : snapshot.get(ref.path);
           const data = restore(raw);
           return {

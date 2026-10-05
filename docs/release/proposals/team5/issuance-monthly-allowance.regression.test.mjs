@@ -7,7 +7,8 @@
  * adding GRIN to client Rules quotaLinkedCollection (client create is false)
  * or by charging mutate / read / evidence.
  *
- * Label: SOURCE. Not application CI.
+ * After Team 2 fold this suite is a positive lock: register must consume;
+ * mutate / G2 must not. Label: SOURCE. Not application CI.
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
