@@ -19,8 +19,10 @@ TOOLING (ops-guard suite; not application CI).
 | Repo | `specialsoftwares/vyaamikk-diary` |
 | Branch | `integration/grin-g1-g5-source` |
 | Draft PR | #31 (no duplicate PR; auto-merge off) |
-| **Application SHA** | `5d5df3d54df08953bfb26db39a9b7f5e3d67ed47` |
-| Application CI | run **`37351685421`**, job **`111903806888`**, `ci:verify` success. Do not reuse `37344993645`. Do not cite this CI for later application changes. |
+| **Application SHA** | **New** this integration (tester allowlist). GRIN `functions/src/goodsEvidence` still matches `5d5df3d`. Do **not** cite CI `37351685421` for this tree. Canonical CI: **not run** (Team 2 still in flight). |
+| Last canonical-CI SHA | `5d5df3d54df08953bfb26db39a9b7f5e3d67ed47` — run **`37351685421`** / job **`111903806888`**. Do not reuse `37344993645`. |
+| `git diff` vs `5d5df3d` | billing allowlist + docs; **empty** on `functions/src/goodsEvidence` |
+| Live billing restriction | **Not deployed.** Live handlers still only the enablement key (absent). |
 | **Operational tooling SHA** | `228a8f58ac83d3c71e853cdccb6e4c4fa64c251f` |
 | Docs checkpoint (Team 4 billing fold) | `aa5253e4e070195227055cde836d6b528d5e0070` |
 | Tooling suite | `node --test docs/release/packets/grin-ops/grin-functions-op.test.mjs` **34/34** (TOOLING, not application CI) |
@@ -40,11 +42,11 @@ Do not reopen ops-guard A/B without a new concrete reproduction.
 
 | Gate | State |
 |---|---|
-| SOURCE READY | Candidate at `5d5df3d` + canonical CI. Team 5: public deletion **FAIL**; issuance allowance **FAIL** public until Team 2. Wave 2 not accepted. |
+| SOURCE READY | Billing tester allowlist in source (fail-closed; not live). GRIN issuance/deletion still Team 5 FAIL until Team 2. Wave 2 not accepted. Last canonical CI remains `5d5df3d` / `37351685421`. |
 | BACKEND PILOT READY | Prepared; **not authorized**; GRIN seven **ABSENT** on live |
 | INTERNAL BUILD READY | Prepared; **not authorized**; Play inventory **NOT RUN**; versionCode 23 not reserved; no `internal-grin` / `5d5df3d` EAS AAB; B1≠B2 |
 | DEVICE ACCEPTED | Execution sheet ready; **NOT RUN** |
-| BILLING ACCEPTED | Source fail-closed; live handlers **present**; `PLAY_BILLING_ENABLED` absent; catalog **NOT RUN**; purchases **off** |
+| BILLING ACCEPTED | Source fail-closed + **undeployed** tester UID allowlist; live `PLAY_BILLING_ENABLED` absent; catalog **NOT RUN**; purchases **off**. Team 4: keep 15-day deletion; do not ship 180-day pending as Play deletion. |
 | PUBLIC SUBMISSION READY | Blocked on lifecycle implementation + economics confirm + device + billing + listing/disclosure |
 | PUBLIC ROLLOUT APPROVED | Not authorized |
 
@@ -81,7 +83,7 @@ purchase-entry remains `"0"`. Play Console catalog **NOT RUN**.
 | 1 Backend | Enable/disable method, Packet A, privilege proposal, auth/admission coverage | Live Functions/Rules/IAM/admission/enable |
 | 2 Policy | Owner choices recorded; implementing issuance/storage/expiry/export in team worktree | Economics confirm; 180-day public policy; no live purge |
 | 3 Build/device | Play inventory **NOT RUN** (ToS / aeadmin lockout). EAS: no `internal-grin` / no `5d5df3d`; highest vc22. Device sheet **NOT RUN**. B1≠B2, neither granted. | EAS/native build; Play upload (separate); Play Console re-read |
-| 4 Billing/Play | Source trace, Packet C, listing worksheet | Product/price/activation/submission |
+| 4 Billing/Play | Tester UID allowlist in source (empty=deny; not enabled). PLAY_SUBMISSION_READINESS corrected. Data safety rebuild. 180-day: keep 15-day. Catalog **NOT RUN**. | Product/price/activation/submission; billing Functions deploy of this SHA |
 | 5 QA | Independent SOURCE review `POLICY_QA.md` + `RELEASE_COMPLETION_QA.md` continuation. Tooling 34/34. Public deletion **FAIL** (P8). Issuance allowance **FAIL** public (P3). Artwork hashes **PASS**. Team 2 code **not reviewed**. | Does not own implementation; re-review after Team 2 merge |
 
 ---

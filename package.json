@@ -67,6 +67,7 @@
     "test:billing-gst-compliance-emulator": "firebase emulators:exec --only firestore --project demo-vyaamikk \"npx --yes tsx functions/src/billing/tax/gst.compliance.emulator.test.ts\"",
     "test:billing-google-money": "npx --yes tsx functions/src/billing/google/playMoney.unit.test.ts",
     "test:billing-google-play": "npx --yes tsx functions/src/billing/google/androidPlay.unit.test.ts",
+    "test:billing-play-constants": "npx --yes tsx functions/src/billing/google/playConstants.unit.test.ts",
     "test:billing-google-play-emulator": "firebase emulators:exec --only firestore --project demo-vyaamikk \"npx --yes tsx functions/src/billing/google/googlePlay.emulator.test.ts\"",
     "test:billing-apple-money": "npx --yes tsx functions/src/billing/apple/appleMoney.unit.test.ts",
     "test:billing-apple": "npx --yes tsx functions/src/billing/apple/appleVerifier.unit.test.ts && npx --yes tsx functions/src/billing/apple/appleIos.unit.test.ts",

@@ -53,8 +53,8 @@ new binary.
 | BCK | Live GRIN Functions absent; Rules additive undeployed |
 | BLD | No Internal AAB this SHA; Play inventory **NOT RUN** 2026-10-06 (`support.vyd` ToS page; `aeadmin` lockout). EAS highest vc22 `72cb7254` git `0da2f58` is **not** this SHA |
 | DEV | NATIVE_DEVICE / PLAY_INSTALLED **NOT RUN** |
-| PAY | Restricted store billing **NOT RUN**; client purchase-entry `"0"`; live `PLAY_BILLING_ENABLED` **absent**; Pub/Sub topics **0**; Play catalog **NOT RUN** (no androidpublisher scope) |
-| LIST | Privacy date mismatch (site 15 Jul vs app 27 Jul — do not backdate). `/~flock.js` is Tinybird collector with `data-proxy-url="/~api/analytics"` (POST 202). Delete page mailto is documented, not automatically defective. Play 512/feature graphic **are git-tracked** in this candidate (Team 5 independent hash **PASS**). Dashboard screenshots `safeForPublic: false` (5). `PLAY_SUBMISSION_READINESS.md` artwork line still stale pending Team 4. |
+| PAY | Restricted store billing **NOT RUN**; client purchase-entry `"0"`; live `PLAY_BILLING_ENABLED` **absent**; Pub/Sub topics **0**; Play catalog **NOT RUN**. Tester UID allowlist is **source only** (not on live Functions). RTDN still UID-ungated. |
+| LIST | Privacy date mismatch (site 15 Jul vs app 27 Jul — do not backdate). `/~flock.js` Tinybird via first-party `/~api/analytics` (POST 202). Mailto deletion documented. Artwork git-tracked. Dashboard shots `safeForPublic: false`. Owner/tester must finish email+profile **before** review. Do not advertise unreachable GRIN. Keep 15-day deletion; do not ship 180-day pending as Play deletion. |
 | IAM | Shared Editor residual on identity/deletion/billing SA |
 | W2 | Wave 2 not accepted |
 

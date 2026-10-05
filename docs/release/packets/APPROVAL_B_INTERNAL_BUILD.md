@@ -104,9 +104,10 @@ still requires 23.
 
 ## B1 — Build approval (requested separately)
 
-Prerequisites: clean `git status` on deployment paths; HEAD application
-tree = `5d5df3d` (or a later approved SHA); inventory recorded; versionCode
-written and committed.
+Prerequisites: clean `git status` on deployment paths; HEAD is the
+**coordinator freeze SHA** (no longer `5d5df3d` after the tester-allowlist
+integration; Team 2 may move it again); inventory recorded; versionCode
+written and committed. Do not cite CI `37351685421` for a later tree.
 
 Record after EAS (when authorized):
 

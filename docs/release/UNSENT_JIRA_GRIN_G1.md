@@ -164,3 +164,7 @@ Independent QA on application `5d5df3d` (Team 2 unmerged, not reviewed). Ops-gua
 
 Play uploaded-version inventory **NOT RUN**: `support.vyd` Play Console ToS not accepted; `aeadmin` “Too many failed attempts”; Firebase token not used as Publisher. EAS (`npx eas-cli@16.28.0`): no `internal-grin`, no git `5d5df3d`, highest vc22 `72cb7254` production AAB git `0da2f58` — not this SHA. vc23 unreserved. Device sheet all executable rows **NOT RUN** (`adb` empty). B1 build ≠ B2 upload; neither granted. Artwork tracked in candidate tree. Do not mark device / Internal build Done.
 
+## Team 4 billing / Play (unsent, 2026-10-06)
+
+Integrated fail-closed `PLAY_BILLING_TESTER_UIDS` on prepare/validate **behind** `PLAY_BILLING_ENABLED` (empty list denies all). **Not enabled. Not deployed. No UIDs invented.** `npm run test:billing-play-constants` pass; `test:billing-google-play` pass. Do **not** cite CI `37351685421` for this tree. Live handlers still only the absent enablement key. Play catalog **NOT RUN**. Listing: pre-complete email/profile; do not advertise unreachable GRIN; diary amounts/credit/payment are financial data; flock.js first-party POST 202; keep **15-day** deletion, do not ship 180-day pending as Play deletion. Do not mark billing / public-release Done.
+

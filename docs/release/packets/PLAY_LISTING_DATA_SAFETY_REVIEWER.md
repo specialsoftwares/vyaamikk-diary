@@ -21,10 +21,12 @@ Do **not** claim:
 - ITC eligibility or credit claims
 - That a pack PDF contains original invoice files (`originalsBundled=false`)
 - Encrypted backup of PDFs (backlog)
+- A live 14-day Professional trial (source-only; no client grant)
 - That GRIN is included in a priced SKU until Packet D records A or B
 - Unbounded evidence storage
+- That GRIN is available on a binary where admission/Functions cannot reach it
 
-Accurate short description addendum **if GRIN is visible on the submitted
+Accurate short description addendum **if GRIN is visible and reachable on the submitted
 build**:
 
 > Goods receipts (GRIN) are an optional internal-testing workflow for recording
@@ -32,12 +34,13 @@ build**:
 > summaries; original files stay in app storage. The app does not verify GST
 > returns, e-way bills, or ITC eligibility.
 
-If GRIN is **not** visible: omit that paragraph.
+If GRIN is **not** visible **or not reachable**: omit that paragraph.
 
 ## Data safety (delta vs existing provisional worksheet)
 
-Existing worksheet: `docs/privacy-legal-audit/PLAY_DATA_SAFETY_PROVISIONAL_ANSWERS.md`
-(not submitted). GRIN does not add new Play data-type **categories** beyond
+Base worksheet: `docs/privacy-legal-audit/PLAY_DATA_SAFETY_PROVISIONAL_ANSWERS.md`
+(not submitted). Rebuild from actual flows:
+`docs/release/proposals/team4/DATA_SAFETY_REBUILD.md`. GRIN does not add new Play data-type **categories** beyond
 files/photos already declared, but it **does** upload owner-selected PDFs and
 images to Firebase Storage under the signed-in uid.
 
@@ -49,10 +52,12 @@ Declare (when GRIN upload is actually in the submitted binary):
 | Files and docs | Yes, if the user attaches PDFs | Same | App functionality |
 | User IDs | Yes (Firebase Auth uid) | Infrastructure | Account |
 
-Do not declare financial/tax documents as a separate Play type if the form has
-none; they are user files. Encrypted in transit: HTTPS. Encrypted at rest:
-Google Cloud default — **[EXTERNAL VERIFICATION REQUIRED]** (same caveat as
-the existing worksheet).
+User-entered diary amounts, credit ledgers, payment-request bank details, and
+GSTIN are **financial / other financial info** even while Play IAP is off —
+see DATA_SAFETY_REBUILD.md. Tax PDFs the user attaches are **files**, not a
+separate Play “tax document” type. Encrypted in transit: HTTPS. Encrypted at
+rest: Google Cloud default — **[EXTERNAL VERIFICATION REQUIRED]**. Do not
+claim encrypted backup or an accredited audit.
 
 Account deletion: existing 15-day grace for cloud diary records. **GRIN
 Storage originals are not yet in that job** (Packet D). Until Packet D option
@@ -70,15 +75,17 @@ Keep:
 - OTP: `654321` if the live test-phone fixture is present
 - No reviewer email inbox
 
-Add **only if** the submitted AAB shows GRIN:
+Add **only if** the submitted AAB is `internal-grin` **and** GRIN is actually
+reachable for that reviewer (admission arranged; Functions present):
 
-> GRIN (goods receipt) may appear after onboarding. You may create a synthetic
-> receipt and attach a small test image. You do not need to complete a GST
-> filing. If register fails, the account may not be admitted for this test
-> feature; diary Save/PDF still demonstrate core app function.
+> GRIN (goods receipt) is enabled for this internal test account. You may create
+> a synthetic receipt and attach a small test image. You do not need to complete
+> a GST filing.
 
-If GRIN is hidden: do not mention GRIN. Reviewers must still reach main tabs
-via the existing onboarding path.
+If GRIN is hidden **or** cannot be reached: omit that paragraph **and do not
+advertise GRIN** on that AAB. Reviewers must reach You / Calendar / Settings
+because the owner pre-completed email verification and profile setup — not by
+finishing onboarding from a founder inbox.
 
 Do not put service-account keys, upload-keystores, or customer documents in
 Play Console.

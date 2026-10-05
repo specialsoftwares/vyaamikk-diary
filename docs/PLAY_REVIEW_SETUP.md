@@ -30,8 +30,9 @@ Using a production Android build on a real device (not Expo Go):
 2. Enter phone number: +91 9000000000
 3. Tap Send OTP.
 4. Enter code: 654321.
-5. Complete whatever onboarding the current production app still requires.
-6. Confirm the main app tabs are reachable with a fresh sign-in.
+5. Complete email verification and business profile setup as the owner/tester (not as Play reviewer copy).
+6. Confirm You / Calendar / Settings are reachable with a **fresh** sign-in using only the test phone and OTP.
+7. Do not leave email or profile steps for the Play reviewer. Do not use a founder inbox.
 
 Do **not** create a dedicated reviewer email inbox for this Play path.
 Do **not** put inbox passwords or email OTPs in Play Console instructions.
@@ -49,8 +50,9 @@ That read-only script binds to `EXPO_PUBLIC_FIREBASE_PROJECT_ID` and checks only
 - `users/{uid}` has name, businessName, phoneE164, ueid, and status=active
 
 Passing the script is a **partial profile check**. It is **not** proof that a
-reviewer can reach the dashboard. Device onboarding and a fresh reviewer sign-in
-are still required. Source inspection is also not proof that the live account exists.
+reviewer can reach the dashboard, and it does not currently assert verified
+email. Owner must still confirm email verification + profile completion on
+device before Play review. A fresh reviewer sign-in is still required.
 
 Do not run the live script during source assembly. Do not execute emergency
 revocation from this document.
@@ -78,12 +80,12 @@ SIGN-IN STEPS:
 1. Enter phone number: +91 9000000000
 2. Tap "Send OTP"
 3. When prompted for the verification code, enter: 654321
-4. If the test account was pre-configured, complete any remaining onboarding, then continue
+4. The review account is pre-configured (email verified, profile complete). Continue into the main app (You / Calendar / Settings). Do not create a new profile or use a founder email inbox.
 
 No SMS is sent when the Firebase test-phone fixture is configured.
 
 **Checkbox — "Sign-in details provide full access including premium or paid content":**
-check only if that statement remains true for the submitted build.
+check only if the reviewer can actually use paid/premium content on the **intended installed binary**. Purchase-entry flags alone are not enough. Do not check while purchases, live trial grant, and GRIN are closed or unreachable.
 
 ## Security properties
 
