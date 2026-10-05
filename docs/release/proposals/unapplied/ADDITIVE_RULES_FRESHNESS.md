@@ -8,13 +8,15 @@ Do **not** deploy. Keep this artifact separate from repo-root quota
 Attempted read-only re-export of live rulesets for project `vyaamikk-diary`
 as CLI user `support.vyd@specialsoftwares.com`:
 
-| Probe | Result |
-|---|---|
-| `GET https://firebaserules.googleapis.com/v1/projects/vyaamikk-diary/releases` with the stored Firebase CLI access token | HTTP **401** |
-| `firebase projects:list --non-interactive` | Authentication Error: credentials no longer valid; `firebase login --reauth` required |
+| Probe | When | Result |
+|---|---|---|
+| `firebase login:list --non-interactive` | 2026-10-05 | Logged in as `support.vyd@specialsoftwares.com` |
+| `firebase projects:list --non-interactive` | 2026-10-05 (one try, not retried) | exit 2: credentials no longer valid; `firebase login --reauth` required |
+| Prior `GET …/releases` with stored CLI token | earlier session | HTTP **401** |
 
 No new live bytes were written. Do not treat the 2026-10-01 export as
-re-validated today.
+re-validated on 2026-10-05. Isolated Rules config (undeployed):
+`docs/release/rules-compat/proposed-grin/firebase.rules-only.json`.
 
 Last authorized live export remains
 `docs/release/rules-compat/live-export-2026-10-01/META.json`
