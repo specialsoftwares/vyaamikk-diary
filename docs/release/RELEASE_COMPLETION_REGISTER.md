@@ -22,6 +22,7 @@ TOOLING (ops-guard suite; not application CI).
 | **Application SHA** | `5d5df3d54df08953bfb26db39a9b7f5e3d67ed47` |
 | Application CI | run **`37351685421`**, job **`111903806888`**, `ci:verify` success. Do not reuse `37344993645`. Do not cite this CI for later application changes. |
 | **Operational tooling SHA** | `228a8f58ac83d3c71e853cdccb6e4c4fa64c251f` |
+| Docs checkpoint (Team 4 billing fold) | `aa5253e4e070195227055cde836d6b528d5e0070` |
 | Tooling suite | `node --test docs/release/packets/grin-ops/grin-functions-op.test.mjs` **34/34** (TOOLING, not application CI) |
 | Merge-base / `origin/main` | `0da2f58970f23c7ce6cbefae6efffd49c731f44b` |
 | `git diff` application pin | empty on `functions src eas.json app.json app firebase.json` |
@@ -39,13 +40,13 @@ Do not reopen ops-guard A/B without a new concrete reproduction.
 
 | Gate | State |
 |---|---|
-| SOURCE | Candidate at `5d5df3d` + canonical CI. Wave 2 not accepted. |
-| BACKEND PILOT | Prepared; **not authorized**; GRIN seven **ABSENT** on live |
-| INTERNAL BUILD | Prepared; **not authorized**; versionCode 23 not reserved |
-| DEVICE | Execution sheet ready; **NOT RUN** |
-| BILLING | Source fail-closed; live handlers **present**; enablement **unknown**; purchases **off** |
-| PUBLIC SUBMISSION | Blocked on policy + device + billing + listing |
-| PUBLIC ROLLOUT | Not authorized |
+| SOURCE READY | Candidate at `5d5df3d` + canonical CI. Policy **source** in flight (Team 2). Wave 2 not accepted. |
+| BACKEND PILOT READY | Prepared; **not authorized**; GRIN seven **ABSENT** on live |
+| INTERNAL BUILD READY | Prepared; **not authorized**; versionCode 23 not reserved; no `internal-grin` / `5d5df3d` EAS AAB |
+| DEVICE ACCEPTED | Execution sheet ready; **NOT RUN** |
+| BILLING ACCEPTED | Source fail-closed; live handlers **present**; `PLAY_BILLING_ENABLED` absent; catalog **NOT RUN**; purchases **off** |
+| PUBLIC SUBMISSION READY | Blocked on lifecycle implementation + economics confirm + device + billing + listing/disclosure |
+| PUBLIC ROLLOUT APPROVED | Not authorized |
 
 ---
 
@@ -78,24 +79,29 @@ purchase-entry remains `"0"`. Play Console catalog **NOT RUN**.
 | Team | Authorized work this session | Approval still required |
 |---|---|---|
 | 1 Backend | Enable/disable method, Packet A, privilege proposal, auth/admission coverage | Live Functions/Rules/IAM/admission/enable |
-| 2 Policy | Owner decision sheet; inspect deletion/quota (GRIN prefix **not** in purge list) | Written owner choices before public evidence |
+| 2 Policy | Owner choices recorded; implementing issuance/storage/expiry/export in team worktree | Economics confirm; 180-day public policy; no live purge |
 | 3 Build/device | Profile freeze, Packet B, device sheet | EAS/native build; Play upload (separate) |
 | 4 Billing/Play | Source trace, Packet C, listing worksheet | Product/price/activation/submission |
 | 5 QA | Independent SOURCE review `RELEASE_COMPLETION_QA.md` (34/34 tooling re-run; public deletion **FAIL**) | Does not own implementation |
 
 ---
 
-## Owner decisions still blank
+## Owner decisions (recorded 2026-10-06)
 
-See `docs/release/packets/OWNER_POLICY_DECISION_SHEET.md`.
+See `docs/release/packets/OWNER_POLICY_DECISION_SHEET.md`. Authorize **source
+implementation and tests** only. Not live deploy / billing / Play publish.
 
-| Topic | Owner choice | Blocks |
+| Topic | Owner choice | Residual hold |
 |---|---|---|
-| GRIN pricing | **not recorded** | Public GRIN; Packet E for whichever plan customers pay through |
-| Storage quota | **not recorded** | Public GRIN upload (or written residual-cost acceptance) |
-| Retention/deletion | **not recorded** | Public release; production admission that accumulates customer originals |
+| GRIN pricing | **A — include in existing Starter / Professional / Business.** No separate SKU. One new issuance consumes one monthly record allowance. | Packet E real-store acceptance before public commercial copy |
+| Storage quota | **Proposed 1 / 5 / 20 GiB** per account, warn 80/95, refuse at cap, no silent delete. **Advertising blocked** until Team 2 economics. | Owner confirm allowances or the one alternative |
+| Active / expiry | Keep issued evidence while entitled. After genuine expiry: 90-day read/export then 30-day notice. **No production purge job this assignment.** | Source state machine only until approved deploy |
+| Explicit deletion | **Three facts, not one:** implemented **15 days**; owner requested **180 days**; public-approved policy **UNRESOLVED**. | Team 2+4 recommendation; do not advertise 180 |
+| Export | Pack is summary (`originalsBundled=false`). Originals + record export required. ZIP optional. | Device proof NOT RUN |
+| Testers | Owner + two trusted testers, separate accounts. Identities **not supplied**. | Owner UIDs/devices |
 
-Internal Testing may use **synthetic** evidence only while retention is unset.
+Internal Testing: **synthetic** GRIN evidence until lifecycle is implemented
+and approved. Real customer GRIN evidence remains blocked until then.
 
 ---
 

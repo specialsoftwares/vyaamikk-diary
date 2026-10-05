@@ -76,9 +76,9 @@ packet.
 
 | Topic | Owner choice | Blocks |
 |---|---|---|
-| Pricing | **not recorded** | Public GRIN until a written plan exists **and** real-store acceptance for that plan |
-| Storage quota | **not recorded** | Public GRIN upload until per-owner bytes/count exists or a written residual-cost acceptance |
-| Retention | **not recorded** | Production admission that accumulates originals; public release until delete-or-retain is implemented |
+| Pricing | **A — include in existing plans** (2026-10-06). See `OWNER_POLICY_DECISION_SHEET.md`. | Packet E real-store acceptance; public copy |
+| Storage quota | **Proposed 1/5/20 GiB pending economics** | Advertising; public upload until implemented + confirmed |
+| Retention | **Expiry 90+30 (source).** Explicit deletion: implemented 15d vs requested 180d vs public UNRESOLVED | Public GRIN evidence; production purge job not this assignment |
 
 Do not mark GRIN, G6, billing, or public release Done until the chosen rows
 exist in writing.

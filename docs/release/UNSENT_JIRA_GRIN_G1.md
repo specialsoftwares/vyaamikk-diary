@@ -152,3 +152,7 @@ Tooling SHA `228a8f58ac83d3c71e853cdccb6e4c4fa64c251f`. Ops tests **34/34** (not
 
 Coordinator register `docs/release/RELEASE_COMPLETION_REGISTER.md`. Application `5d5df3d` / CI `37351685421`. Tooling `228a8f5`. Refreshed inspect: GRIN seven still ABSENT, inventory complete, Rules hashes still baseline. Approval packets A–D prepared; **no** live mutation, EAS, Play upload, billing activation, or `main` merge. Owner policy sheet still blank (pricing/quota/retention). Device and live-store billing **NOT RUN**. Next offer: isolated Firestore Rules only (A1). **Wave 2 not accepted.** Do not mark GRIN / G6 / device / billing / public-release Done.
 
+## Owner policies recorded (unsent, 2026-10-06)
+
+Owner wrote: GRIN included in existing Starter/Professional/Business (no separate SKU); one new issuance consumes one monthly record allowance; proposed storage 1/5/20 GiB pending economics; warn 80/95 refuse at cap; no silent delete; expiry 90-day read then 30-day notice; explicit deletion requested 180 days vs implemented 15 days vs public-approved UNRESOLVED. Source implementation authorized; **no** live deploy/billing/Play. Testers: owner+two, identities not supplied. Synthetic GRIN until lifecycle implemented. Artwork `store/play-icon-512.png` and feature graphic **are git-tracked**. `/~flock.js` is Tinybird with first-party `/~api/analytics` proxy (POST 202). Do not mark device/billing/public Done. Next offer still A1 isolated Firestore Rules.
+

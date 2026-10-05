@@ -1,78 +1,160 @@
 # Owner decision sheet — GRIN pricing, quota, retention
 
-Collect once. Recommendations are not an owner decision and not legal advice.
-Do not invent a statutory retention period. Encrypted PDF backup = backlog.
-No “zero knowledge,” legal immunity, automatic GST eligibility, or live
-2B/EWB claims.
+Encrypted PDF backup = backlog. No “zero knowledge,” legal immunity,
+automatic GST eligibility, or live 2B/EWB claims. Not legal advice.
 
-Source of options: `D_OWNER_POLICY_OPTIONS.md`. **Owner choice: blank.**
+Recorded **2026-10-06** from the consolidated owner policy mission.
+These decisions authorize **source implementation and tests**. They do **not**
+authorize live deployment, billing activation, or Play publication.
+
+Source of original options: `D_OWNER_POLICY_OPTIONS.md`.
 
 ---
 
-## Q1. How do testers and later customers pay for GRIN?
+## Q1. How testers and later customers pay for GRIN?
 
-| Option | Internal Testing | Public 18 Oct |
-|---|---|---|
-| **A. Include in existing diary plan** | No new SKU. Still needs Packet E real-store acceptance of that diary plan. Storage cost on current subscription. Needs a technical/commercial cap. | Unblocks commercial copy only after store purchase/acknowledge/entitlement tests for the diary SKU. |
-| **B. Separate GRIN Play product** | Public GRIN waits for SKU + Packet E. | New product, Functions billing env, client purchase-entry only after that programme. |
-| **C. Invite-only Internal, no priced SKU** | Fine for named testers. Cannot be a public Play feature. | Does **not** satisfy public release. |
-| **D. Leave unset** | GRIN stays default-off. | No public claim of a priced feature. |
+**Owner choice: A — include GRIN in existing Starter, Professional and
+Business subscriptions.**
 
-**Recommendation:** Internal candidate → **C**. Public → owner writes **A or B**, then Packet E for that plan.
+- No separate GRIN SKU at launch.
+- Preserve existing approved prices; do not invent prices or trial terms.
+- Source expected paise (not live Play display authority) remain
+  `functions/src/billing/products.ts`: starter 9900 / 24900 / 79900;
+  professional 24900 / 64900 / 199900; business 49900 / 129900 / 399900.
+- Count **one newly issued GRIN** against the applicable plan **monthly
+  record allowance** (free 25, starter 100, professional/business unlimited).
+- Retry, amendment, QC, return, evidence attachment and reconciliation
+  **must not** consume another issuance.
+- Integrate atomically/idempotently with existing quota
+  (`atomicBillableCreate` / `usageCurrent` / Functions register transaction).
+- Preserve ordinary diary and letterhead quota behavior.
 
-**Owner choice:** _________________
+Internal Testing still uses **synthetic** evidence until lifecycle
+implementation is reviewed. Public commercial copy still needs Packet E
+real-store acceptance of the diary SKU.
 
 ---
 
 ## Q2. What count/byte limits apply, and what happens at the limit?
 
-Already in source (technical, not a commercial quota): 15 MiB PDF / 10 MiB
-image per original; **24 originals per receipt**; 2 concurrent uploads per
-owner; policy v2 categories. **No** per-owner byte/object GRIN counter.
-Diary `counters` is a different product.
+**Owner choice: B — per-owner retained-storage allowances, plus existing
+technical ceilings, subject to cost validation before advertising.**
 
-| Option | At the limit | Required implementation |
-|---|---|---|
-| **A. Technical ceilings only** | Tester can still fill Storage with many 15 MiB PDFs. | Manual Storage watch. Residual cost on the owner. |
-| **B. Per-owner object count + total bytes** | New original refused (`policy_denied`); already-linked objects kept; no silent truncate; issued history preserved. | Authoritative backend counters. Required before **public** upload unless residual-cost is accepted in writing. |
-| **C. Per-receipt cap only (current)** | Unbounded object count across receipts remains. | None beyond current domain. |
-| **D. Leave unset** | Do not publish a fair-use number. | No listing claim of a storage quota. |
+Proposed (total retained per subscribed account, not per device, not a
+monthly reset):
 
-**Recommendation:** Internal → **A** plus manual watch. Public upload → **B**.
+| Plan | Allowance |
+|---|---|
+| Starter | 1 GiB |
+| Professional | 5 GiB |
+| Business | 20 GiB |
 
-**Owner choice:** _________________
-If B: count cap _____  byte cap _____  over-limit = refuse new original (recommended).
+Include original files and retained derivatives. Keep 15 MiB PDF / 10 MiB
+image technical limits and two concurrent uploads per owner.
+
+Behaviour:
+
+- Warn at 80% and 95%.
+- At the cap: refuse additional cloud uploads clearly; preserve
+  viewing/download/export; keep local pending evidence visibly unsynced.
+- Never claim an upload succeeded when it did not.
+- Never silently delete old evidence or charge overage fees.
+- No age-based purge of issued evidence merely to make room.
+- Handle concurrent reservations, retry, abandoned uploads, accounting
+  repair, and downgrade-over-limit **without deleting existing evidence**.
+
+**Advertising hold:** Team 2 must validate economics against expected
+catalog paise and public GCP list prices (asia-south1 Storage / Firestore /
+Functions / egress). If the proposal is not supportable, return **one**
+specific alternative for owner approval. Do not silently change allowances.
+
+Coordinator bound (2026-10-06, **not** a substitute for Team 2’s model):
+GCS Mumbai is listed on the public Storage pricing page; the fetched
+markdown omitted the Standard $/GB-month cell — treat exact Mumbai storage
+unit price as **UNKNOWN** until cited. Egress to internet after the
+project-level free band is the likely heavy-use cost driver (public
+Firestore table: $0.12/GiB APAC after 10 GiB). Starter expected ₹99/month
+cannot absorb unbounded download of cap-sized libraries. Typical few-receipt
+usage is likely supportable; heavy 1–20 GiB + repeated original downloads
+may not be. Alternative if Team 2 concurs: **256 MiB / 1 GiB / 5 GiB**.
 
 ---
 
-## Q3. What happens to GRIN data after account / ledger retirement?
+## Q3. Active accounts, expiry, deletion, export
 
-Today: `retireIdentity` / `completeAccountDeletion` purge Storage prefixes
-`users/{uid}/letterhead|attachments|pdfs/` only
-(`functions/src/deletion/userOwnedStoragePaths.ts`). **`grinEvidence/` is not
-in that list.** Firestore `USER_SUBCOLLECTIONS` has no `goodsEvidence*` trees
-and is **not recursive**. Pending-deletion users already fail closed on
-**new** GRIN commands (EMULATOR production-compose gates, register only).
-That is not a retention policy.
+Keep these clocks **distinct**. Do not substitute one for another.
 
-| Option | Consequence | Required implementation |
+### Active entitled accounts
+
+Preserve issued GRIN records/evidence while the account remains entitled,
+within the selected storage policy. No age-based purge. Corrections and
+voids preserve history.
+
+### Subscription expiry (owner-approved for source)
+
+After entitlement **genuinely** expires:
+
+1. Stop new paid issuance/uploads as applicable.
+2. Provide **90 days** of read/download/export access.
+3. Before a subsequent purge, provide a further **30-day** final notice.
+4. Do not purge during valid entitlement or merely because one payment failed.
+5. Renewal and retry must not race with deletion.
+6. Deletion must not run without the required notice and eligibility evidence.
+
+This is **separate** from an explicit account-deletion request.
+**No production purge job** from this assignment. Source state machine +
+tests only.
+
+### Explicit account deletion — three facts (do not collapse)
+
+| # | Fact | Status |
 |---|---|---|
-| **A. Delete GRIN Firestore + Storage with the account** | Aligns with diary deletion. Issued numbers and originals disappear. Any tax-retention duty is on the **owner**, not this app. | Later Functions change to purge `users/{uid}/goodsEvidence*` and `users/{uid}/grinEvidence/**` from the existing job. Reuse `purgePrefixPaged` / subcollection purge. Not a Console one-off. |
-| **B. Keep for a stated window, then purge** | Hold class + access deny + later job. Window length is owner+counsel. | Undeployed. **Do not pick a number in this sheet.** |
-| **C. Keep until export, then delete** | Needs an export that bundles originals (`originalsBundled=false` today). | Not implemented. |
-| **D. Leave unset** | Do not accumulate customer originals. | Internal: synthetic data + wipe warning. Public blocked. |
+| 1 | **Current implemented behavior** | `DELETION_GRACE_MS` = **15 days** (`functions/src/deletion/finalPurge.ts`). Live website `/privacy` and `/delete-account` also describe 15 days (fetched 2026-10-06). |
+| 2 | **Owner-requested policy** | Change the proposed window from 30 days to **180 days**. Recorded exactly. **Not** described as legally or Play-approved. |
+| 3 | **Policy approved for public operation** | **UNRESOLVED.** Do not advertise or activate 180 days. Do not silently substitute 15 or 30. |
 
-**Recommendation:** Internal → **D** with synthetic evidence and wipe warning.
-Public → **A or B chosen in writing and implemented.**
+Team 2 + Team 4 must recommend whether 180 days can be justified for
+explicit deletion, needed disclosures, lawful-retention exceptions, or a
+**separate optional 180-day recovery/archive** product. An alternative
+needs owner confirmation. Do not reinterpret the request as an approved
+archive SKU.
 
-**Owner choice:** _________________
-If B, window (owner+counsel): _________________
+While unresolved: prepare reusable GRIN cleanup lists and tests; do not
+report deletion complete while associated live data remains; do not attach
+a production purge job.
+
+Existing Storage purge prefixes remain `letterhead | attachments | pdfs`
+only. `users/{uid}/grinEvidence/` is **not** in that list. Firestore
+`USER_SUBCOLLECTIONS` has no `goodsEvidence*` trees and is **not**
+recursive.
+
+### Exit and export
+
+Before expiry-related purging or account deletion: offer a working way to
+obtain **originals** and receipt/audit records. Current pack PDF is a
+summary (`originalsBundled=false`). Do not call that summary a complete
+archive. ZIP is optional; usable original downloads + record export are
+required.
 
 ---
 
-## While choices are blank
+## Testers
 
-- Do not implement a speculative extra quota framework.
-- Do not attach GRIN paths to deletion jobs silently.
-- Real customer GRIN evidence remains blocked.
-- Public submission / rollout remain blocked (see Approval D).
+Arrangement accepted: owner plus two trusted testers, separate accounts.
+Identities, Firebase UIDs and devices still need owner input. Do not invent
+them. No passwords/OTPs/tokens in the repository. Synthetic GRIN evidence
+until lifecycle is implemented and approved.
+
+---
+
+## Implementation status (this session)
+
+| Item | State |
+|---|---|
+| Owner choices recorded | **this document** |
+| Issuance quota + storage accounting + expiry SM | Team 2 source (separate worktree) |
+| GRIN paths on existing deletion job | prepare in source; **not live** |
+| 180-day public policy | recommendation only |
+| Advertising 1/5/20 GiB | blocked on economics confirmation |
+| Live Functions/Rules/IAM | HOLD |
+| Production purge job | **not introduced** |
