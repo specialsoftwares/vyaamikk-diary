@@ -37,32 +37,20 @@ Today:
   `EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED` whenever that block is true.
 - `eas.json` production/preview do **not** set `EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED`.
 
-**Proposed later patch (do not apply now).** Visibility only. Server admission
-(Packet A §6) remains the security boundary.
+**Proposed later patch (do not apply now).** Exact diff and test cases:
+`docs/release/proposals/unapplied/store-runtime-visibility.diff.md`.
+Visibility only. Server admission (Packet A §6) remains the security boundary.
 
-1. `eas.json` `build.production.env` (this Internal AAB only):
+Required behaviour after apply:
 
-   ```json
-   "EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED": "1",
-   "EXPO_PUBLIC_GOODS_EVIDENCE_STORE_RUNTIME_ADMIT": "1"
-   ```
-
-   Keep `EXPO_PUBLIC_SUBSCRIPTION_PURCHASE_ENTRY_ENABLED": "0"` and
-   `EXPO_PUBLIC_QUOTA_UPSELL_ENABLED": "0"`.
-
-2. `src/goodsEvidence/featureFlag.ts`:
-
-   ```ts
-   export function isGoodsEvidenceBlockedByStoreRuntime(): boolean {
-     if (process.env.EXPO_PUBLIC_GOODS_EVIDENCE_STORE_RUNTIME_ADMIT === "1") {
-       return false;
-     }
-     return env.runtimeKind === "store-or-standalone";
-   }
-   ```
-
-   Isolation tests must keep asserting that **without** the admit flag, store
-   runtime stays blocked even if `EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED === "1"`.
+- Default store runtime remains blocked unless the admit flag is `"1"` on
+  that Internal AAB.
+- Explicit test-build visibility does not grant backend access.
+- A visible but non-admitted account must see an honest unavailable state
+  (`feature_not_admitted` → `grin.unavailableTitle` / body), not a retryable
+  network error and not a GRIN number.
+- No installer or Play-track detection used as authorization.
+- Purchase-entry remains `"0"`.
 
 This is a **build-time public env** baked into that AAB. It is not a Play-track
 detector. If this AAB is promoted to production by mistake, GRIN **UI** could
@@ -85,8 +73,8 @@ Play licence-tester emails are **not** Firestore admission.
 
 Build **only** from a later owner-approved SHA that contains:
 
-- application `dcc325a9fb0d0094ab8bc05cc7ea3d27a7e2ab7a` (or a fast-forward
-  that preserves it),
+- application `84c748d026d4229cded55d3ddc281a15858322c9` (or a fast-forward
+  that preserves confirmation-refresh `dcc325a` and this packaging),
 - the Packet B visibility patch if that patch is approved,
 - no dirty historical workspace.
 
@@ -166,3 +154,5 @@ Clean-install on D2 is a separate row (Packet C).
 - Play create-release / upload / tester-list mutation
 - Applying §2 in this assignment
 - Main merge
+- While Packet D retention is unset, Internal Testing must use **synthetic**
+  evidence only. A wipe warning is disclosure, not a deletion implementation.

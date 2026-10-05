@@ -7,7 +7,9 @@ Historical row-by-row matrix: `docs/release/GRIN_ACCEPTANCE_MATRIX.md`
 (many G2 rows still say `tbd` and are **stale vs source**). Do not treat that
 file as the operational gate. This checklist is the finite closeout list.
 
-Application SHA in scope: `dcc325a9fb0d0094ab8bc05cc7ea3d27a7e2ab7a`.
+Application SHA in scope: `84c748d026d4229cded55d3ddc281a15858322c9`
+(packaging). Confirmation-refresh `dcc325a9fb0d0094ab8bc05cc7ea3d27a7e2ab7a`
+is preserved.
 Evidence labels: `source`, `injected`, `SQLITE_HOST`, `emulator`, `native device`,
 `play-installed`.
 
@@ -21,8 +23,8 @@ Evidence labels: `source`, `injected`, `SQLITE_HOST`, `emulator`, `native device
 | S4 | Post-upload confirmation refresh; failed read stays `attachment_pending` / `confirmation_refresh`; no second serial; completion fenced after awaits | source + SQLITE_HOST + emulator | source | closed at labelled hosts (`dcc325a`); do not reopen without new repro |
 | S5 | Pack export is summary; `originalsBundled=false`; ITC `not_determined` | emulator + SQLITE_HOST | source | closed at labelled hosts |
 | S6 | GRIN default-off; store-runtime block; purchase-entry `"0"`; legal date `2026-07-27` | source | source | still true |
-| S7 | Production Admin compose + `index.ts` GRIN exports | source | **deployment** | **open** — adapters still under `tools/` |
-| S8 | Canonical GitHub `ci:verify` (renderer Docker + joined GRIN emulators) | GitHub Actions | source/CI | **open** — no combined PR; local Docker-skipped run is not this row |
+| S7 | Production Admin compose; `index.ts` GRIN exports still HOLD | source + emulator | **deployment** | compose closed at labelled hosts (`84c748d`); export unapplied |
+| S8 | Canonical GitHub `ci:verify` (renderer Docker + joined GRIN emulators) | GitHub Actions | source/CI | **partial** — run `37309701455` / job `111761813010` success on packet head `ba32337`; **missing** on application `84c748d` until owner push |
 
 ## Deployment
 

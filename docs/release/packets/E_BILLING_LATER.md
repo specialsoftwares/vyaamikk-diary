@@ -7,9 +7,12 @@ Status: **not authorized**. Not started by this closeout.
 - Client purchase-entry flags stay `"0"` on production and preview EAS profiles.
 - Diary SKU Cloud Functions may exist in source; live enablement is **unknown**
   and is not GRIN enablement.
-- Real-store purchase, acknowledge, GST invoice for a GRIN SKU (if Packet D
-  chooses option B), refund/entitlement mapping: **separate**.
-- Do not reuse GRIN source SHA `dcc325a` as billing acceptance.
+- If users pay through an **existing diary plan**, that is still store billing:
+  real-store purchase, acknowledge, entitlement, and GST invoice tests remain
+  required. Including GRIN in the current plan does **not** skip Packet E.
+- A separate GRIN Play/App Store product is only one possible commercial model
+  (Packet D). Real-store work for that SKU is also Packet E, not this candidate.
+- Do not reuse GRIN source SHA `dcc325a` or `84c748d` as billing acceptance.
 
 No Play product create, no flag flip, no Functions billing env change from
 this packet.
@@ -19,11 +22,13 @@ this packet.
 Public Play production (or any unauthenticated store listing that presents GRIN
 as a general feature) additionally requires, beyond Internal Testing:
 
-1. Packet D written choices for pricing (A or B) and retention (A or B
-   implemented).
-2. Packet D storage quota option B implemented (or owner-accepted written
-   residual of A — default here is **B required**).
-3. Packet E billing activation if pricing option B.
+1. Packet D written choice for how customers pay (existing diary plan **or**
+   separate GRIN product) **and** Packet E real-store acceptance for that plan.
+2. Packet D retention chosen in writing and implemented (delete-with-account
+   or retain-for-a-stated-window).
+3. Packet D storage quota (per-owner bytes/count) implemented, or
+   owner-accepted written residual of technical-ceilings-only — default here
+   is **per-owner quota required**.
 4. Store-runtime + admission model that does **not** rely on an Internal-only
    admit flag unless production is intentionally invite-only (that is not
    public release).

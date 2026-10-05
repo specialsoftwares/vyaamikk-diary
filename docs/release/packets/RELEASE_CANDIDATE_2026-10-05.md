@@ -1,5 +1,9 @@
 # GRIN release candidate — coordinator packet (2026-10-05)
 
+Superseded for packaging closeout by
+`docs/release/packets/PACKAGING_CLOSEOUT_2026-10-05.md`.
+This file remains the earlier RC snapshot (application then `dcc325a`).
+
 Not authorization for main merge, production exports, live deploy, EAS/native
 build, OTA, Play mutation, billing activation, or public rollout.
 

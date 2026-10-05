@@ -4,8 +4,10 @@ Status: **reviewable deploy proposal**. Not authorization. Do not edit live
 `functions/src/index.ts`, `firestore.rules`, `storage.rules`, IAM, indexes,
 secrets, or production flags from this packet. Do not run `firebase deploy`.
 
-Reviewed application SHA: `dcc325a9fb0d0094ab8bc05cc7ea3d27a7e2ab7a`.
-Published docs head as of this packet: see coordinator closeout.
+Reviewed application SHA: `84c748d026d4229cded55d3ddc281a15858322c9`
+(production Admin composition). Confirmation-refresh remains
+`dcc325a9fb0d0094ab8bc05cc7ea3d27a7e2ab7a`. Published docs head as of the
+prior packet: `ba3233720ddec89020ff55672846ab219d9e5231`.
 
 ## 1. Target project and region
 
@@ -38,7 +40,8 @@ Not `grinBeginEvidence` — that name is not in the contract. Do not export it.
 | `grinUploadEvidence` | `.uploadEvidence` | Stored-byte verify → link |
 
 Proposed production wrapper (still unapplied) matches the isolated emulator
-`tools/goods-evidence-emulator/functions-entry/handlers.ts`:
+`tools/goods-evidence-emulator/functions-entry/handlers.ts` wrapping
+`createProductionGrinCallables`:
 
 ```ts
 onCall({ region: "asia-south1" }, async (request) => {
@@ -46,6 +49,11 @@ onCall({ region: "asia-south1" }, async (request) => {
   return run({ auth, data: request.data });
 });
 ```
+
+Exact seven-export text:
+`docs/release/proposals/unapplied/functions-index-seven-export.diff.md`.
+Do not apply it in this slice. Isolation tests require those names absent
+from `functions/src/index.ts`.
 
 Identity is `request.auth.uid` only. Client uid, digest, and claimed hash are
 not authority. Do not export Admin SDK or emulator adapters from the production
@@ -59,30 +67,29 @@ Global options already apply (`functions/src/globalOptions.ts`): `cpu: gcf_gen1`
 `concurrency: 1`, `maxInstances: 3`. Keep those unless a later scale review
 says otherwise.
 
-### Production packaging gap (deployment source, not an architecture rewrite)
+### Production packaging (this slice) vs remaining export HOLD
 
 `functions/src/goodsEvidence/callables.ts` stays fail-closed even when the env
-is `"true"` because it binds no adapter. `composed.ts` can run only if a
-`GoodsEvidenceRegisterAdapter` + G2 evidence adapter are injected.
+is `"true"` because it binds no adapter. That is intentional: those stubs are
+not the production backend.
 
-Those adapters today live under `tools/goods-evidence-emulator/**` and
-`tools/goods-evidence-storage/**`. `functions/src` must not import `tools/`
-(`rootDir` would move `lib/index.js`).
+`productionCompose.ts` binds packaged G1/G2 adapters to Admin Firestore and
+the bound Storage bucket. Isolated Functions-emulator entry re-exports
+`createProductionGrinCallables as createIsolatedGrinCallables`. Packaging is
+generated from authoritative sources (`src/goodsEvidence`,
+`tools/goods-evidence-emulator`, `tools/goods-evidence-storage`) with a
+parity/drift check. `functions/src` does not import `tools/` at runtime.
 
-**Required before a working live export (still unapplied):**
+**Remaining before a working live export (unapplied):**
 
-1. Generate or copy adapter sources into `functions/src/goodsEvidence/` (or a
-   sibling under `functions/src`) without Expo/`@/`/React.
-2. Add `functions/src/goodsEvidence/productionCompose.ts` that wraps Admin
-   Firestore + Storage the same way `functions-entry/compose.ts` does for the
-   emulator.
-3. Export the seven `onCall` wrappers from `functions/src/index.ts`.
-4. Set `GRIN_GOODS_EVIDENCE_FUNCTIONS=true` only on those seven function
+1. ~~Generate adapters + production compose~~ — landed at `84c748d`.
+2. Export the seven `onCall` wrappers from `functions/src/index.ts`
+   (unapplied proposal).
+3. Set `GRIN_GOODS_EVIDENCE_FUNCTIONS=true` only on those seven function
    instances (Firebase Functions env / secrets), not as an `EXPO_PUBLIC_*` key.
 
-Until those four steps exist, exporting the current `handleGrin*` stubs would
-deploy callables that always return `policy_denied`. That is fail-closed, not a
-working backend.
+Exporting the current `handleGrin*` stubs would still always `policy_denied`.
+Do not wrap those stubs and call that a working backend.
 
 ## 3. Fresh live Rules baseline (do not use repo-root quota Rules)
 
@@ -101,12 +108,13 @@ Repo-root hashes as of this packet (do **not** deploy as the live replacement):
 | `firestore.rules` (quota candidate) | `233b05b7b810b484171257f4dafe78fd0fdea5762ed6848cf8b49cd327fd58cc` |
 | `storage.rules` (repo, includes `company/**` denies) | `19fcc761dc8d5a923efb45ed589a598690bd3bb2159fab827f3ce30c17a60452` |
 
-**Rule:** merge GRIN matchers into a **fresh live export**, not into repo-root
-quota Firestore Rules. `test:live-rules-compat` exists to keep that distinction.
-
-**Before any authorized Rules deploy:** re-export live Firestore and Storage
-rulesets; abort if sha256 differs from the table above without an owner-reviewed
-explanation.
+**This assignment could not refresh that export.** Firebase CLI credentials
+for `support.vyd@specialsoftwares.com` returned HTTP 401 on
+`firebaserules.googleapis.com` and `firebase projects:list` required
+`firebase login --reauth`. See
+`docs/release/proposals/unapplied/ADDITIVE_RULES_FRESHNESS.md`.
+Do not merge GRIN matchers into a claimed-fresh live file until that
+re-export succeeds.
 
 Live Firestore and Storage currently have **no** `goodsEvidence` / `grinEvidence`
 matchers.
@@ -200,14 +208,18 @@ No pending-deletion replay exception.
 Play reviewer phone fixture (`+91 9000000000`) is **not** GRIN admission unless
 that Auth uid is explicitly seeded.
 
-## 7. Required service identities and least privilege
+## 7. Service identities and permission matrix
 
-| Identity | Use | Least privilege |
-|---|---|---|
-| Default Cloud Functions runtime SA for `asia-south1` (existing identity/deletion functions) | Admin Firestore transactions + Storage `download`/metadata for stored-byte verify | Prefer a **dedicated** GRIN runtime SA if the owner will not grant default SA extra Storage object access. Minimum: Firestore read/write on `users/{uid}/goodsEvidence*` and `users/{uid}/grinEvidence*`; Storage object get on `users/*/grinEvidence/**`. Do not grant `storage.objects.delete` for the first export. |
-| Firebase Auth | `request.auth.uid` | Existing. No new OAuth clients. |
-| Client SDK (mobile) | `httpsCallable` + `uploadBytesResumable` to reserved paths | Bound by Rules above. |
-| Humans in Firebase Console | Break-glass | Not a worker identity. Console overwrite/delete is a residual admin risk. |
+Firestore Security Rules do **not** constrain Admin SDK access. There is no
+supported document-path IAM isolation for GRIN collections. Concrete matrix
+(principal, API operation, supported resource scope, permission/role, residual
+access): `docs/release/proposals/unapplied/IAM_PERMISSION_MATRIX.md`.
+
+Storage prefix IAM conditions are a documented GCS feature
+(`resource.name.startsWith` on
+`projects/_/buckets/vyaamikk-diary.firebasestorage.app/objects/users/`).
+That prefix was **not** read back from live IAM in this slice. A `users/`
+prefix still covers letterhead and attachments, not only `grinEvidence`.
 
 Do not commit service-account JSON. Use the existing authorized Functions
 runtime identity or a new SA created in Console/IAM by the owner.
@@ -217,21 +229,22 @@ beyond `GRIN_GOODS_EVIDENCE_FUNCTIONS=true` on the seven functions.
 
 ## 8. Upload reservation, immutable originals, stored-byte verification, linkage
 
-Order already implemented in composed evidence callables + G2 adapter:
+Inspected client order in `src/services/grin/transport/evidenceTransport.ts`
+(do not reorder working transport to match an older packet):
 
-1. `grinReserveEvidence` — creates objectKey binding + flight `reserved`.
-2. Client PUT to `storagePath` (resumable). Rules deny overwrite of a non-flight state.
-3. `grinBeginEvidenceUpload` — marks `uploading` if still owned/authorized.
-4. `grinUploadEvidence` — Admin reads **stored bytes** at the bound generation,
-   hashes them (64 KiB chunks), compares to reservation claim, then links.
-   Client hash is a claim only. Success without stored-byte hash is forbidden.
-5. Link is an event + pointer on the receipt. Replacement after verify needs a
-   **new** object id.
+1. `grinReserveEvidence` — objectKey binding + flight `reserved`.
+2. `grinBeginEvidenceUpload` — marks `uploading` if still owned/authorized.
+3. Client PUT / `uploadBytesResumable` to the reserved `storagePath`.
+   Lost-response retry still calls verify/link if the object already exists.
+4. `grinUploadEvidence` — Admin reads **stored bytes** at the bound bucket
+   path, records the **actual generation** from object metadata, hashes in
+   64 KiB chunks with a 15 MiB ceiling, independently of the client claim,
+   then links to the authorized receipt/category. Success without stored-byte
+   hash is forbidden.
+5. Client confirmation via `grinReadGoodsReceipt` (already at `dcc325a`).
 
-Idempotent retries must not issue a second receipt or re-upload a verified
-original. Local confirmation refresh after linkage is a **client** concern
-(already at `dcc325a`); the server remains source of confirmed cuts via
-`grinReadGoodsReceipt`.
+Replacement after verify needs a **new** object id. Idempotent retries must
+not issue a second receipt or re-upload a verified original.
 
 ## 9. Operational limits and safe diagnostics
 
@@ -254,9 +267,10 @@ Storage download URLs.
    the merged file; deploy **Firestore Rules only**.
 3. Merge GRIN Storage matchers into that live Storage source; emulator-test;
    deploy **Storage Rules only**.
-4. Land production compose + `index.ts` exports on the authorized SHA; deploy
+4. Apply the unapplied seven-export on the authorized SHA; deploy
    **Functions only** with `GRIN_GOODS_EVIDENCE_FUNCTIONS` unset → callables
    exist but deny. Smoke: unauthenticated and non-seeded uid get deny.
+   Production compose already exists at `84c748d`; do not deploy stubs.
 5. Set `GRIN_GOODS_EVIDENCE_FUNCTIONS=true` on the seven functions.
 6. Seed tester admission + ledger docs (Admin). Do not seed production uids.
 7. Smoke tests in §11. Do not enable client store-runtime GRIN in this packet.
@@ -273,12 +287,14 @@ Use synthetic data only.
 2. Authenticated non-seeded uid → `policy_denied` / generic deny.
 3. Seeded tester: register → one serial; replay same commandId+digest →
    `replayed: true`; no second serial.
-4. Seeded tester: reserve → PUT original → begin → uploadEvidence →
-   `originalDurable true` and `actualSha256` of stored bytes.
+4. Seeded tester: reserve → begin → PUT original → `grinUploadEvidence` →
+   `originalDurable true` and `actualSha256` of stored bytes. Then client
+   confirmation via `grinReadGoodsReceipt`.
 5. Wrong owner / path / generation / hash → deny; object not linked.
 6. Client SDK update/delete of original → deny.
-7. `newCommands=deny` after a verified original → retained **read** still
-   allow; new reserve deny.
+7. `newCommands=deny` after a verified original → new reserve deny; Storage
+   Rules still allow retained original **client** reads; G1
+   `grinReadGoodsReceipt` currently still requires `newCommands=allow`.
 8. Existing diary/PO/credit/letterhead Saves still succeed under live-compat
    Rules (re-run `test:live-rules-compat` against the merged file before
    deploy).
@@ -289,7 +305,7 @@ Use synthetic data only.
 |---|---|---|
 | Unset `GRIN_GOODS_EVIDENCE_FUNCTIONS` or set any value other than `"true"` | Callables deny; clients stay `failed_retryable` / non-durable | Prefer this as first disable |
 | Remove the seven exports and redeploy Functions | Callables missing; clients fail closed | Second disable |
-| Set all admission docs to `deny` | Seeded testers stop new commands; retained reads still allowed by Storage Rules | Use when UI is still visible |
+| Set all admission docs to `deny` | Seeded testers stop new commands; Storage Rules still allow retained original **client** reads; G1 `grinReadGoodsReceipt` currently still requires `newCommands=allow` | Use when UI is still visible; do not treat callable read as retained Storage read |
 | Revert Storage/Firestore GRIN matchers | Client SDK cannot read originals; Admin still can | Only after a read plan; **do not delete** objects or serial docs |
 | Delete GRIN Firestore/Storage data | Destroys issued numbers and originals | **Forbidden** as rollback |
 
@@ -302,4 +318,8 @@ deletion is Packet D, not this rollback.
 - No live deploy from this packet.
 - Encrypted PDF backup remains backlog.
 - Purchase-entry flags stay `"0"`.
+- Production compose exists; `functions/src/index.ts` GRIN export remains HOLD.
+- Additive live Rules merge waits on `firebase login --reauth`.
+- Additive live Rules merge waits on `firebase login --reauth`.
+- No live IAM write. Prefix condition not read back from the project.
 - Client store-runtime enablement is Packet B, separate approval.
