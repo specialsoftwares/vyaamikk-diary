@@ -73,6 +73,7 @@
     "test:grin-t2-cleanup": "npx --yes tsx functions/src/deletion/grinCleanup.unit.test.ts",
     "test:grin-t2-lifecycle": "npx --yes tsx src/goodsEvidence/entitlementLifecycle.test.ts",
     "test:grin-t2-export": "npx --yes tsx src/services/grin/export/receiptAuditExport.test.ts",
+    "test:grin-t5-issuance-non-register": "npx --yes tsx docs/release/proposals/team5/issuance-non-register-no-consume.injected.ts",
     "test:billing-google-play-emulator": "firebase emulators:exec --only firestore --project demo-vyaamikk \"npx --yes tsx functions/src/billing/google/googlePlay.emulator.test.ts\"",
     "test:billing-apple-money": "npx --yes tsx functions/src/billing/apple/appleMoney.unit.test.ts",
     "test:billing-apple": "npx --yes tsx functions/src/billing/apple/appleVerifier.unit.test.ts && npx --yes tsx functions/src/billing/apple/appleIos.unit.test.ts",

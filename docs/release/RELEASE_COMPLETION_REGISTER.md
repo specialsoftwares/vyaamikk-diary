@@ -44,7 +44,7 @@ Do not reopen ops-guard A/B without a new concrete reproduction.
 
 | Gate | State |
 |---|---|
-| SOURCE READY | Local `ci:verify` **PASS** on `7761af6`. Issuance quota in source (P3 lock PASS). Storage/expiry/export in source. Public deletion **still FAIL** (P8). Wave 2 not accepted. Do not advertise GiB. Not NATIVE_DEVICE / LIVE_BACKEND. |
+| SOURCE READY | Local `ci:verify` **PASS** on `7761af6`. Team 5 independent T2 review: **P3 PASS**, **P8 FAIL**. Storage/expiry/export in source. Wave 2 not accepted. Do not advertise GiB. Not NATIVE_DEVICE / LIVE_BACKEND. |
 | BACKEND PILOT READY | Prepared; **not authorized**; GRIN seven **ABSENT** on live. Create-absent-only planner exists, **not wired**. Enable/disable still UNPROVEN on firebase-created gen2. |
 | INTERNAL BUILD READY | Prepared; **not authorized**; Play inventory **NOT RUN**; versionCode 23 not reserved; no `internal-grin` / `5d5df3d` EAS AAB; B1≠B2 |
 | DEVICE ACCEPTED | Execution sheet ready; **NOT RUN** |
@@ -86,7 +86,7 @@ purchase-entry remains `"0"`. Play Console catalog **NOT RUN**.
 | 2 Policy | Issuance+storage+expiry+export folded (`14e56f3`). Economics: do not advertise 1/5/20; alternative **256 MiB / 1 GiB / 5 GiB**. `INCLUDE_GRIN_IN_ACCOUNT_PURGE=false`. 15-day grace unchanged. | Owner GiB confirm; 180-day public policy; no live purge |
 | 3 Build/device | Play inventory **NOT RUN** (ToS / aeadmin lockout). EAS: no `internal-grin` / no `5d5df3d`; highest vc22. Device sheet **NOT RUN**. B1≠B2, neither granted. | EAS/native build; Play upload (separate); Play Console re-read |
 | 4 Billing/Play | Tester UID allowlist in source (empty=deny; not enabled). PLAY_SUBMISSION_READINESS corrected. Data safety rebuild. 180-day: keep 15-day. Catalog **NOT RUN**. | Product/price/activation/submission; billing Functions deploy of this SHA |
-| 5 QA | Prior P3 public FAIL is **source-closed** (issuance lock PASS). P8 public deletion **still FAIL**. Team 2 production paths need independent re-review. | Does not own implementation; re-review this SHA |
+| 5 QA | Independent T2 review `POLICY_QA_T2.md` (`365f9f3`). **P3 PASS** (production register INJECTED). **P8 FAIL** unchanged. No new blockers. Device/Play/live **NOT RUN**. | Does not own implementation |
 
 ---
 
