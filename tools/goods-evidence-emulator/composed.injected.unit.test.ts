@@ -303,6 +303,21 @@ async function main(): Promise<void> {
     env: ENABLED,
   });
 
+  const unauthBegin = await withEvidence.beginEvidenceUpload({
+    auth: null,
+    data: { evidenceId: "evidence_unauth", ledgerId: LEDGER, receiptId: "receipt_c01" },
+  });
+  assert.equal(unauthBegin.ok, false);
+  assert.equal(unauthBegin.originalDurable, false);
+  assert.equal("code" in unauthBegin, false, "authorizeEvidence closed result has no unauthenticated code");
+  const unauthUpload = await withEvidence.uploadEvidence({
+    auth: null,
+    data: { evidenceId: "evidence_unauth", ledgerId: LEDGER, receiptId: "receipt_c01" },
+  });
+  assert.equal(unauthUpload.ok, false);
+  assert.equal(unauthUpload.originalDurable, false);
+  assert.equal("code" in unauthUpload, false);
+
   const missingBackend = createComposedGrinCallables({
     adapter,
     evidence: null,

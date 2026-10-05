@@ -109,12 +109,13 @@ async function main(): Promise<void> {
     uid: string,
     status: string,
     admission: "allow" | "deny" | "missing",
-    ledgerId = LEDGER
+    ledgerId = LEDGER,
+    ledgerStatus = "active"
   ): Promise<void> {
     await db.doc(`users/${uid}`).set({ uid, status });
     await db.doc(`users/${uid}/goodsEvidenceLedgers/${ledgerId}`).set({
       ownerUid: uid,
-      status: "active",
+      status: ledgerStatus,
     });
     const admissionRef = db.doc(`users/${uid}/goodsEvidenceAdmission/runtime`);
     if (admission === "missing") {
@@ -162,12 +163,18 @@ async function main(): Promise<void> {
     return result.data;
   }
 
-  function registerEnvelope(commandId: string, receiptId: string, extra?: string) {
+  function registerEnvelope(
+    commandId: string,
+    receiptId: string,
+    extra?: string,
+    ownerUid = OWNER,
+    ledgerId = LEDGER
+  ) {
     const frozen = freezeCommand({
       commandId,
       type: "registerGoodsReceipt",
-      ownerUid: OWNER,
-      ledgerId: LEDGER,
+      ownerUid,
+      ledgerId,
       body: sampleRegisterBody({
         receiptId,
         ...(extra ? { capturedAtClientUtc: "2026-09-28T04:01:00.000Z" } : {}),
@@ -185,9 +192,90 @@ async function main(): Promise<void> {
     };
   }
 
+  function amendPayload(
+    commandId: string,
+    receiptId: string,
+    expectedVersion: number,
+    remarks: string,
+    ownerUid = OWNER,
+    ledgerId = LEDGER
+  ) {
+    const frozen = freezeCommand({
+      commandId,
+      type: "amendFields",
+      ownerUid,
+      ledgerId,
+      body: {
+        receiptId,
+        expectedVersion,
+        reason: "correct remarks",
+        changes: { remarks: { kind: "present", value: remarks } },
+        clientObservedAtUtc: "2026-09-28T13:00:00.000Z",
+      },
+    });
+    return {
+      envelope: {
+        commandId: frozen.commandId,
+        type: frozen.type,
+        ledgerId: frozen.ledgerId,
+        body: frozen.body,
+      },
+      digest: frozen.digest,
+      frozen,
+    };
+  }
+
+  function assertClosedEvidence(result: Record<string, unknown>): void {
+    assert.equal(result.ok, false);
+    assert.equal(result.originalDurable, false);
+  }
+
   const unauth = asRecord(await callAs(null, GRIN_REGISTER_CALLABLE, registerEnvelope("commandg1unauth", "receiptg1unauth")));
   assert.equal(unauth.ok, false);
   assert.equal(unauth.code, "unauthenticated");
+
+  const unauthReconcile = asRecord(
+    await callAs(null, GRIN_RECONCILE_CALLABLE, { ledgerId: LEDGER, commandId: "commandg1unauth" })
+  );
+  assert.equal(unauthReconcile.ok, false);
+  assert.equal(unauthReconcile.code, "unauthenticated");
+  const unauthMutate = asRecord(await callAs(null, GRIN_MUTATE_CALLABLE, amendPayload("commandg1unamut", "receiptg1unauth", 1, "nope")));
+  assert.equal(unauthMutate.ok, false);
+  assert.equal(unauthMutate.code, "unauthenticated");
+  const unauthRead = asRecord(
+    await callAs(null, GRIN_READ_CALLABLE, { ledgerId: LEDGER, receiptId: "receiptg1unauth" })
+  );
+  assert.equal(unauthRead.ok, false);
+  assert.equal(unauthRead.code, "unauthenticated");
+  const unauthReserve = asRecord(
+    await callAs(null, GRIN_RESERVE_EVIDENCE_CALLABLE, {
+      ledgerId: LEDGER,
+      receiptId: "receiptg1unauth",
+      evidenceId: "evidenceg1unxx",
+      category: "invoice",
+      mime: "application/pdf",
+      claimedSha256: "ab".repeat(32),
+      claimedByteSize: 64,
+    })
+  );
+  assert.equal(unauthReserve.ok, false);
+  assert.equal(unauthReserve.code, "unauthenticated");
+  const unauthBegin = asRecord(
+    await callAs(null, GRIN_BEGIN_EVIDENCE_CALLABLE, {
+      ledgerId: LEDGER,
+      receiptId: "receiptg1unauth",
+      evidenceId: "evidenceg1unxx",
+    })
+  );
+  assertClosedEvidence(unauthBegin);
+  const unauthUpload = asRecord(
+    await callAs(null, GRIN_UPLOAD_EVIDENCE_CALLABLE, {
+      ledgerId: LEDGER,
+      receiptId: "receiptg1unauth",
+      evidenceId: "evidenceg1unxx",
+    })
+  );
+  assertClosedEvidence(unauthUpload);
 
   const inactive = asRecord(await callAs(INACTIVE, GRIN_REGISTER_CALLABLE, registerEnvelope("commandg1inact", "receiptg1inact")));
   assert.equal(inactive.ok, false);
@@ -196,6 +284,38 @@ async function main(): Promise<void> {
   const pending = asRecord(await callAs(PENDING, GRIN_REGISTER_CALLABLE, registerEnvelope("commandg1pend", "receiptg1pend")));
   assert.equal(pending.ok, false);
   assert.equal(pending.code, "forbidden");
+
+  const inactiveReconcile = asRecord(
+    await callAs(INACTIVE, GRIN_RECONCILE_CALLABLE, { ledgerId: LEDGER, commandId: "commandg1inact" })
+  );
+  assert.equal(inactiveReconcile.ok, false);
+  assert.equal(inactiveReconcile.code, "forbidden");
+  const inactiveMutate = asRecord(
+    await callAs(INACTIVE, GRIN_MUTATE_CALLABLE, amendPayload("commandg1inamut", "receiptg1inact", 1, "nope", INACTIVE))
+  );
+  assert.equal(inactiveMutate.ok, false);
+  assert.equal(inactiveMutate.code, "forbidden");
+  const inactiveRead = asRecord(
+    await callAs(INACTIVE, GRIN_READ_CALLABLE, { ledgerId: LEDGER, receiptId: "receiptg1inact" })
+  );
+  assert.equal(inactiveRead.ok, false);
+  assert.equal(inactiveRead.code, "forbidden");
+
+  const pendingReconcileEmpty = asRecord(
+    await callAs(PENDING, GRIN_RECONCILE_CALLABLE, { ledgerId: LEDGER, commandId: "commandg1pend" })
+  );
+  assert.equal(pendingReconcileEmpty.ok, false);
+  assert.equal(pendingReconcileEmpty.code, "forbidden");
+  const pendingMutate = asRecord(
+    await callAs(PENDING, GRIN_MUTATE_CALLABLE, amendPayload("commandg1pemut", "receiptg1pend", 1, "nope", PENDING))
+  );
+  assert.equal(pendingMutate.ok, false);
+  assert.equal(pendingMutate.code, "forbidden");
+  const pendingRead = asRecord(
+    await callAs(PENDING, GRIN_READ_CALLABLE, { ledgerId: LEDGER, receiptId: "receiptg1pend" })
+  );
+  assert.equal(pendingRead.ok, false);
+  assert.equal(pendingRead.code, "forbidden");
 
   await seedUser("denied_prod_gates", "active", "deny");
   const denied = asRecord(
@@ -299,6 +419,151 @@ async function main(): Promise<void> {
   );
   assert.equal(crossLedger.ok, false);
   assert.ok(crossLedger.code === "forbidden" || crossLedger.code === "policy_denied" || crossLedger.code === "not_found");
+
+  const otherRegister = asRecord(
+    await callAs(OTHER, GRIN_REGISTER_CALLABLE, registerEnvelope("commandg1xownr", "receiptg1xownr", undefined, OTHER, LEDGER))
+  );
+  assert.equal(otherRegister.ok, false);
+  assert.equal(otherRegister.code, "forbidden");
+  const otherMutate = asRecord(
+    await callAs(OTHER, GRIN_MUTATE_CALLABLE, amendPayload("commandg1xownm", "receiptg1first", 1, "nope", OTHER, LEDGER))
+  );
+  assert.equal(otherMutate.ok, false);
+  assert.equal(otherMutate.code, "forbidden");
+  const otherReserve = asRecord(
+    await callAs(OTHER, GRIN_RESERVE_EVIDENCE_CALLABLE, {
+      ledgerId: LEDGER,
+      receiptId: "receiptg1first",
+      evidenceId: "evidenceg1xown",
+      category: "invoice",
+      mime: "application/pdf",
+      claimedSha256: "ab".repeat(32),
+      claimedByteSize: 64,
+    })
+  );
+  assert.equal(otherReserve.ok, false);
+  assert.equal(otherReserve.code, "forbidden");
+
+  const malformedEnvelope = asRecord(
+    await callAs(OWNER, GRIN_REGISTER_CALLABLE, { envelope: { type: "registerGoodsReceipt" } })
+  );
+  assert.equal(malformedEnvelope.ok, false);
+  assert.equal(malformedEnvelope.code, "invalid");
+  assert.equal(malformedEnvelope.serial, undefined);
+
+  await seedUser("retired_prod_gates", "active", "allow", LEDGER, "retired");
+  const retiredRegister = asRecord(
+    await callAs(
+      "retired_prod_gates",
+      GRIN_REGISTER_CALLABLE,
+      registerEnvelope("commandg1retdr", "receiptg1retdr", undefined, "retired_prod_gates")
+    )
+  );
+  assert.equal(retiredRegister.ok, false);
+  assert.equal(retiredRegister.code, "forbidden");
+  const retiredReserve = asRecord(
+    await callAs("retired_prod_gates", GRIN_RESERVE_EVIDENCE_CALLABLE, {
+      ledgerId: LEDGER,
+      receiptId: "receiptg1first",
+      evidenceId: "evidenceg1retd",
+      category: "invoice",
+      mime: "application/pdf",
+      claimedSha256: "ab".repeat(32),
+      claimedByteSize: 64,
+    })
+  );
+  assert.equal(retiredReserve.ok, false);
+  assert.equal(retiredReserve.code, "forbidden");
+
+  await seedUser("retire_after_g", "active", "allow");
+  const retireSeed = registerEnvelope("commandg1reta0", "receiptg1reta0", undefined, "retire_after_g");
+  const retireRegistered = asRecord(await callAs("retire_after_g", GRIN_REGISTER_CALLABLE, retireSeed));
+  assert.equal(retireRegistered.ok, true);
+  await db.doc(`users/retire_after_g/goodsEvidenceLedgers/${LEDGER}`).set(
+    { ownerUid: "retire_after_g", status: "retired" },
+    { merge: true }
+  );
+  const retiredMutate = asRecord(
+    await callAs(
+      "retire_after_g",
+      GRIN_MUTATE_CALLABLE,
+      amendPayload("commandg1retam", "receiptg1reta0", 1, "nope", "retire_after_g")
+    )
+  );
+  assert.equal(retiredMutate.ok, false);
+  assert.equal(retiredMutate.code, "forbidden");
+
+  await seedUser("flip_pending_g", "active", "allow");
+  const flipPendingEnv = registerEnvelope("commandg1flip0", "receiptg1flip0", undefined, "flip_pending_g");
+  const flipPendingReg = asRecord(await callAs("flip_pending_g", GRIN_REGISTER_CALLABLE, flipPendingEnv));
+  assert.equal(flipPendingReg.ok, true);
+  await db.doc("users/flip_pending_g").set({ uid: "flip_pending_g", status: "pending_deletion" }, { merge: true });
+  const flipPendingReconcile = asRecord(
+    await callAs("flip_pending_g", GRIN_RECONCILE_CALLABLE, {
+      ledgerId: LEDGER,
+      commandId: flipPendingEnv.frozen.commandId,
+    })
+  );
+  assert.equal(flipPendingReconcile.ok, false);
+  assert.equal(flipPendingReconcile.code, "forbidden");
+  const flipPendingMutate = asRecord(
+    await callAs(
+      "flip_pending_g",
+      GRIN_MUTATE_CALLABLE,
+      amendPayload("commandg1flipm", "receiptg1flip0", 1, "nope", "flip_pending_g")
+    )
+  );
+  assert.equal(flipPendingMutate.ok, false);
+  assert.equal(flipPendingMutate.code, "forbidden");
+  const flipPendingRead = asRecord(
+    await callAs("flip_pending_g", GRIN_READ_CALLABLE, { ledgerId: LEDGER, receiptId: "receiptg1flip0" })
+  );
+  assert.equal(flipPendingRead.ok, false);
+  assert.equal(flipPendingRead.code, "forbidden");
+
+  await seedUser("flip_inactive_g", "active", "allow");
+  const flipInactiveEnv = registerEnvelope("commandg1flin0", "receiptg1flin0", undefined, "flip_inactive_g");
+  const flipInactiveReg = asRecord(await callAs("flip_inactive_g", GRIN_REGISTER_CALLABLE, flipInactiveEnv));
+  assert.equal(flipInactiveReg.ok, true);
+  await db.doc("users/flip_inactive_g").set({ uid: "flip_inactive_g", status: "inactive" }, { merge: true });
+  const flipInactiveReconcile = asRecord(
+    await callAs("flip_inactive_g", GRIN_RECONCILE_CALLABLE, {
+      ledgerId: LEDGER,
+      commandId: flipInactiveEnv.frozen.commandId,
+    })
+  );
+  assert.equal(flipInactiveReconcile.ok, false);
+  assert.equal(flipInactiveReconcile.code, "forbidden");
+  const flipInactiveMutate = asRecord(
+    await callAs(
+      "flip_inactive_g",
+      GRIN_MUTATE_CALLABLE,
+      amendPayload("commandg1flinm", "receiptg1flin0", 1, "nope", "flip_inactive_g")
+    )
+  );
+  assert.equal(flipInactiveMutate.ok, false);
+  assert.equal(flipInactiveMutate.code, "forbidden");
+  const flipInactiveRead = asRecord(
+    await callAs("flip_inactive_g", GRIN_READ_CALLABLE, { ledgerId: LEDGER, receiptId: "receiptg1flin0" })
+  );
+  assert.equal(flipInactiveRead.ok, false);
+  assert.equal(flipInactiveRead.code, "forbidden");
+
+  const versionSeed = registerEnvelope("commandg1verc0", "receiptg1verc0");
+  const versionRegistered = asRecord(await callAs(OWNER, GRIN_REGISTER_CALLABLE, versionSeed));
+  assert.equal(versionRegistered.ok, true);
+  const amendOnce = amendPayload("commandg1verc1", "receiptg1verc0", 1, "one");
+  const amendFirst = asRecord(await callAs(OWNER, GRIN_MUTATE_CALLABLE, amendOnce));
+  assert.equal(amendFirst.ok, true);
+  assert.equal(amendFirst.replayed, false);
+  const amendReplay = asRecord(await callAs(OWNER, GRIN_MUTATE_CALLABLE, amendOnce));
+  assert.equal(amendReplay.ok, true);
+  assert.equal(amendReplay.replayed, true);
+  const amendStale = asRecord(
+    await callAs(OWNER, GRIN_MUTATE_CALLABLE, amendPayload("commandg1verc2", "receiptg1verc0", 1, "two"))
+  );
+  assert.equal(amendStale.ok, false);
+  assert.equal(amendStale.code, "version_conflict");
 
   const pdf = new Uint8Array(64);
   pdf.set([0x25, 0x50, 0x44, 0x46]);
@@ -566,6 +831,28 @@ async function main(): Promise<void> {
     })
   );
   assert.equal(reserveWhileDenied.ok, false);
+
+  const readWhileDenied = asRecord(
+    await callAs(OWNER, GRIN_READ_CALLABLE, { ledgerId: LEDGER, receiptId: "receiptg1first" })
+  );
+  assert.equal(readWhileDenied.ok, false);
+  assert.equal(readWhileDenied.code, "policy_denied");
+  const beginWhileDenied = asRecord(
+    await callAs(OWNER, GRIN_BEGIN_EVIDENCE_CALLABLE, {
+      ledgerId: LEDGER,
+      receiptId: "receiptg1first",
+      evidenceId: "evidenceg1okxx",
+    })
+  );
+  assertClosedEvidence(beginWhileDenied);
+  const uploadWhileDenied = asRecord(
+    await callAs(OWNER, GRIN_UPLOAD_EVIDENCE_CALLABLE, {
+      ledgerId: LEDGER,
+      receiptId: "receiptg1first",
+      evidenceId: "evidenceg1okxx",
+    })
+  );
+  assertClosedEvidence(uploadWhileDenied);
 
   const [originalSurvived] = await bucket.file(linkedOriginalPath).exists();
   assert.equal(originalSurvived, true);

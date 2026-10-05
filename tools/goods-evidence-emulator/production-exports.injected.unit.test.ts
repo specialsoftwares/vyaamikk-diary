@@ -16,10 +16,15 @@ import {
   createProductionGrinCallables,
 } from "../../functions/src/goodsEvidence/productionCompose";
 import {
+  createComposedGrinCallables,
+  type ComposedEvidenceAdapter,
+  type ComposedGrinAdapter,
+  type ComposedGrinCallables,
+} from "../../functions/src/goodsEvidence/composed";
+import {
   PRODUCTION_GRIN_CALLABLE_NAMES,
   runProductionGrinCallable,
 } from "../../functions/src/goodsEvidence/productionExports";
-import type { ComposedGrinCallables } from "../../functions/src/goodsEvidence/composed";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const indexSrc = readFileSync(join(here, "../../functions/src/index.ts"), "utf8");
@@ -174,6 +179,48 @@ async function main(): Promise<void> {
       )
   );
   assert.equal(result && typeof result === "object" && "code" in result && result.code === "policy_denied", true);
+}
+
+{
+  const mustNotRun = async () => {
+    throw new Error("adapter must not run when auth is null");
+  };
+  const adapter = {
+    register: mustNotRun,
+    reconcile: mustNotRun,
+    amendFields: mustNotRun,
+    recordQc: mustNotRun,
+    dispatchReturn: mustNotRun,
+    correctReturnDispatch: mustNotRun,
+    voidWithReason: mustNotRun,
+    recordEwbObservation: mustNotRun,
+    linkVerifiedEvidence: mustNotRun,
+    readReceipt: mustNotRun,
+  } as unknown as ComposedGrinAdapter;
+  const evidence = {
+    reserve: mustNotRun,
+    beginUpload: mustNotRun,
+    completeUpload: mustNotRun,
+    verify: mustNotRun,
+    link: mustNotRun,
+  } as unknown as ComposedEvidenceAdapter;
+  const load = async () =>
+    createComposedGrinCallables({
+      adapter,
+      evidence,
+      env: { GRIN_GOODS_EVIDENCE_FUNCTIONS: "true" },
+    });
+  const registerNull = await runProductionGrinCallable("register", { auth: null, data: {} }, load);
+  assert.equal(
+    registerNull && typeof registerNull === "object" && "code" in registerNull && registerNull.code === "unauthenticated",
+    true
+  );
+  const uploadNull = await runProductionGrinCallable("uploadEvidence", { auth: null, data: {} }, load);
+  assert.equal(uploadNull && typeof uploadNull === "object" && "ok" in uploadNull && uploadNull.ok === false, true);
+  assert.equal(
+    uploadNull && typeof uploadNull === "object" && "originalDurable" in uploadNull && uploadNull.originalDurable === false,
+    true
+  );
 }
 
 console.log("tools/goods-evidence-emulator/production-exports.injected.unit.test.ts: ok (INJECTED / not live deploy)");
