@@ -19,7 +19,7 @@ TOOLING (ops-guard suite; not application CI).
 | Repo | `specialsoftwares/vyaamikk-diary` |
 | Branch | `integration/grin-g1-g5-source` |
 | Draft PR | #31 (no duplicate PR; auto-merge off) |
-| **Application SHA** | **this commit** — Team 2 quota/storage/lifecycle on top of `e2524ff` (Team 4 allowlist + Team 1 auth tests). Do **not** cite CI `37351685421`. Canonical CI: **not yet run** on this tree. |
+| **Application SHA** | `b845e8a30262b9e8740fa53b55e9a0f237caea0b` — Team 2 quota/storage/lifecycle on top of `e2524ff`. Do **not** cite CI `37351685421`. Canonical CI: **not yet run** on this tree. |
 | Last canonical-CI SHA | `5d5df3d54df08953bfb26db39a9b7f5e3d67ed47` — run **`37351685421`** / job **`111903806888`**. Do not reuse `37344993645`. |
 | Team 2 slice | `14e56f3802e29825708db591a5feb5bf8b000178` on `team/grin-t2-evidence` |
 | `git diff` vs `5d5df3d` | **non-empty** on `functions/src/goodsEvidence` (issuance quota, storage accounting, expiry). Ops pin for live GRIN deploy must be **re-reviewed** before A3. |
