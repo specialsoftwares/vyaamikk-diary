@@ -51,7 +51,8 @@ new binary.
 | BCK | Live GRIN Functions absent; Rules additive undeployed |
 | BLD | No Internal AAB this SHA; Play inventory stale (2026-10-01) |
 | DEV | NATIVE_DEVICE / PLAY_INSTALLED **NOT RUN** |
-| PAY | Restricted store billing **NOT RUN**; client purchase-entry `"0"` |
+| PAY | Restricted store billing **NOT RUN**; client purchase-entry `"0"`; live `PLAY_BILLING_ENABLED` **absent**; Pub/Sub topics **0**; Play catalog **NOT RUN** (no androidpublisher scope) |
+| LIST | Privacy date mismatch (site 15 Jul vs app 27 Jul); `/~flock.js` vs “no third-party analytics”; delete page is mailto |
 | IAM | Shared Editor residual on identity/deletion/billing SA |
 | W2 | Wave 2 not accepted |
 

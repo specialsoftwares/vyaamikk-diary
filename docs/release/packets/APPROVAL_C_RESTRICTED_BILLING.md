@@ -41,11 +41,20 @@ and iOS siblings). Runtime SA is the shared default compute Editor.
 `BILLING_RECONCILIATION_ENABLED`, `PLAY_PACKAGE_NAME`,
 `PLAY_RTDN_PUSH_SERVICE_ACCOUNT`, `BILLING_KMS_KEY_NAME` are **absent**
 (`present: false`) on those handlers. Source therefore fail-closes
-(`=== "true"`). Secret binding count **0**. This replaces the stale
-“catalog empty / billing disabled” guess with **key-absence** on live
-handlers. It is **not** Play Console catalog proof.
+(`=== "true"`). Secret binding count **0**. `firebase functions:config:get`
+`{}` does **not** prove flags false.
 
-Play products/prices/license testers: **NOT RUN** (no Play Console).
+Also this session (read-only; no env values):
+
+| Surface | Result |
+|---|---|
+| Pub/Sub topics in `vyaamikk-diary` | HTTP 200, **0 topics** — RTDN push not wired |
+| Cloud Scheduler | `scheduledBillingReconciliation` job **exists**; tick returns immediately unless `BILLING_RECONCILIATION_ENABLED === "true"` |
+| Secret Manager listed names | email secrets only; **`BILLING_DIAG_UID_SECRET` not listed** |
+| Cloud KMS API | **403** unused/disabled |
+| Play Android Publisher (`inappproducts`) | **403** insufficient scopes (Firebase token has no `androidpublisher`) |
+
+Do **not** reuse 2026-09-20 “catalog empty.” Catalog remains **NOT RUN**.
 Internal track membership is **not** a billing security boundary.
 
 ### PLAY catalog / prices / license testers
@@ -61,15 +70,22 @@ Internal track membership is **not** a billing security boundary.
 
 ## Source trace
 
-prepare (`prepareAndroidBillingAccount` → obfuscated Play account) →
-store transaction (Play Billing Library / `expo-iap`, client flag off) →
-server `validateAndActivateAndroid` → acknowledgement inside that path →
-entitlement/quota (`deriveEntitlement`, Option C quota) →
-RTDN `androidRtdn` + `scheduledBillingReconciliation` /
-`retryReconciliationWorkItem`.
+`purchaseEntryGate.ts` (`=== "1"`) → `iapSession.ts`
+(`prepareAndroidBillingAccount`) → Play sheet → `iapPurchaseProcessor.ts` →
+`validateAndActivateAndroid.ts` (`subscriptionsv2.get`) → server ack in
+`androidSubscriptionAdapter.ts` → `deriveEntitlement.ts` /
+`subscription/status` (Rules deny client writes) → quota
+`atomicBillableCreate.ts` + Firestore Rules → RTDN `rtdn.ts` +
+`scheduledBillingReconciliation.ts` / `retryReconciliationWorkItem`.
 
-GST invoice path is separate (`getInvoiceDownloadUrl`, etc.) and
-production-disabled.
+RTDN OIDC requires `PLAY_RTDN_PUSH_AUDIENCE` +
+`PLAY_RTDN_PUSH_SERVICE_ACCOUNT`; both absent live →
+`rtdn_oidc_config_missing` if the HTTPS endpoint were hit while billing
+were enabled. GST invoice path is separate and production-disabled.
+
+EAS remote production/preview env **name lists** do not include
+purchase-entry flags; `eas config` profile env still `"0"` (profile wins
+for `EXPO_PUBLIC_APP_MODE`). That does **not** change the existing vc22 AAB.
 
 ---
 
@@ -105,8 +121,8 @@ A completed purchase callback is **not** complete billing acceptance.
    button is not a control. If activation is required, implement and review a
    **tester restriction** (allow-list on uid / license-test account) **before**
    requesting enablement.
-4. Identify residual: Editor runtime SA; RTDN URL unauthenticated-by-default
-   unless pubsub OIDC is verified live (**NOT RUN**).
+4. Identify residual: Editor runtime SA; **0 Pub/Sub topics**; KMS unused;
+   RTDN OIDC keys absent. Hiding a button is not a control.
 5. Disablement: set `PLAY_BILLING_ENABLED` back off; client flags `"0"` on the
    next binary. In-flight Play purchases are not cancelled by a Functions gate.
 
@@ -114,16 +130,20 @@ A completed purchase callback is **not** complete billing acceptance.
 
 ## Play listing (not submitted)
 
-Worksheet: `PLAY_LISTING_DATA_SAFETY_REVIEWER.md`.
+Worksheet: `PLAY_LISTING_DATA_SAFETY_REVIEWER.md` and
+`PLAY_SUBMISSION_READINESS.md` (Team 4, this session).
 
 - Reviewer: `+91 9000000000` / OTP `654321` only if live test-phone fixture
-  verified. **No founder email OTP/password** in Play instructions.
+  verified. **No founder email OTP/password** in Play instructions. Do not
+  check “full access including premium” while purchase-entry is `"0"`.
+- Live `/privacy` and `/delete-account` HTTP **200**. Privacy **effective
+  15 Jul 2026** vs in-app **27 Jul 2026** — reconcile before submission.
+- Delete page is **mailto**, not a ticket. GRIN Storage is not in the
+  deletion job; do not claim those files vanish with the account.
+- Live privacy HTML loads `/~flock.js` while copy says no third-party
+  analytics — **contradictory** until owner/website audit.
 - Do not claim live GST/2B/EWB, ITC eligibility, bundled originals, encrypted
   backup, or unbounded GRIN storage.
-- Data safety: until retention is implemented, do **not** claim GRIN files
-  delete with the account.
-- Listing assets/screenshots/audience: **NOT RUN** vs live Console this
-  session — treat `docs/release/play-listing/DRAFTS.md` as draft.
 
 ---
 
