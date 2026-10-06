@@ -5,16 +5,16 @@ Do not collapse to Done.
 
 Arrangement: one coordinator plus five **local** Cursor Task subagents on separate worktrees. AI roles, not human sign-off.
 
-Checkpoint: PR **#31**. CI-tested head `0d7aa17` / app `520f9f9` / GHA **`37425360211`**. Current application **`56f2040`** (T2 capacity; CI **NOT RUN**; pin **STALE**). Tooling successor `0d7aa17` (not byte-identical to `228a8f5`). S1/S2 closed at INJECTED+EMULATOR. P3 accepted. P8 open. Device/live/billing/public **not accepted**.
+Checkpoint **2026-10-06 13:59:** Combined HEAD `998f303` docs-only. Application **`56f2040`** (verified empty diff on functions/src/app). **Do not build `520f9f9`.** Owner selected **1/3/10 GiB** and **45-day** deletion (source not wired). OnePlus 12R Android 16 vc22 available today. S1/S2 closed. P3 accepted. P8 open (GRIN purge flag false). Device/live/billing/public **not accepted**. `gh` unauthenticated — canonical CI for `56f2040` **NOT observed this session**.
 
 | Task | Owner | Branch | Worktree | Dependency | Status | Evidence | Blocker | Next |
 |---|---|---|---|---|---|---|---|---|
-| Integration | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | `56f2040` | running | A1 presented; T2 `56f2040` T5 SOURCE+INJECTED PASS; T4 two writes | live mutate / EAS / Play / billing HOLD | Owner A1 grant; owner GiB + deletion; B1 not granted; pin unapplied |
-| Backend pilot | team1 | `team/grin-t1-pin-after-56f2040` | `grin-t1-backend` | A1 hashes | review | Pin proposed `841f9c4`, unapplied. A1 `80da828` unchanged. A2–A7 gaps named. | `GRIN_OPS_ALLOW_LIVE=1` HOLD | Owner A1 grant; do not apply pin; A4 UIDs |
-| Policy / deletion | team2 | `team/grin-t2-capacity` | `grin-t2-evidence` | `2cebe32` | review | Holds bound + cleanup tests; flag false; P8 FAIL | advertising GiB; live purge | Do not reopen S1/S2; do not flip P8 |
-| Build / device | team3 | `team/grin-t3-freeze` | `grin-t3-offline` | freeze `520f9f9` + CI `37425360211` | review | `CURRENT_HEAD_VS_FREEZE.md` `d4a8197`. `56f2040` not the freeze. B1≠B2 ungranted. | EAS/Play B1/B2 HOLD | Do not B1 `56f2040`; re-read Play explorer before B1 |
-| Billing / Play | team4 | `team/grin-t4-product` | `grin-t4-product` | purchase-entry `"0"` | review | `TWO_OWNER_DECISIONS.md` `7e4ed20`. Catalog NOT RUN. | activation HOLD | Owner fills GiB + A–D; no website/Save/submit |
-| Independent QA | team5 | `team/grin-t5-qa` | `grin-t5-qa` | newly landed only | source_verified | `REVIEW_56f2040.md` `7865384`. SOURCE+INJECTED PASS. P8 FAIL. | NATIVE_DEVICE | Wait next landed source; not device/live |
+| Integration | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | `56f2040` | running | Owner 1/3/10 + 45d recorded; freeze `520f9f9` retired for build | live HOLD | Fold T2 owner-choice; pin+CI on new SHA; present packet |
+| Backend pilot | team1 | `team/grin-t1-pin-after-56f2040` | `grin-t1-backend` | candidate SHA | running | Consolidated selectable packet; gcloud proof; smoke harness | `GRIN_OPS_ALLOW_LIVE=1` HOLD | Do not execute; pin after T2 SHA |
+| Policy / deletion | team2 | new provenance | `grin-t2-evidence` | `56f2040` | running | Wire 1/3/10 + 45d; preserve S1/S2/P3; flag false | advertising; live purge | Do not reopen S1/S2; do not flip P8 |
+| Build / device | team3 | new provenance | `grin-t3-offline` | selected candidate ≠ `520f9f9` | running | OnePlus 12R vc22 upgrade; device scripts; B1≠B2 | EAS/Play HOLD; UIDs private | Recheck Play inventory before B1; no unauthorized build |
+| Billing / Play | team4 | `team/grin-t4-product` | `grin-t4-product` | purchase-entry `"0"` | running | Record 1/3/10 + 45d; restricted-billing packet | activation HOLD | Catalog when access; no Save/submit |
+| Independent QA | team5 | `team/grin-t5-qa` | `grin-t5-qa` | newly landed only | running | `REVIEW_56f2040.md` done; next T2 owner-choice | NATIVE_DEVICE | Review 1/3/10+45d source; leftover P3-FAIL files stay uncommitted |
 | E1 evidence composition | team1 | `team/grin-t1-backend` | `grin-t1-backend` | `15bd2a6` | source_verified | persistGrinOwnerSession → processAttachments → real httpsCallable on isolated Functions emulator | live export HOLD | Stay unexported / undeployed |
 | E1/E2/E4/E5 evidence integrity | team2 | `team/grin-t2-evidence` | `grin-t2-evidence` | `29c6d3f` | source_verified | G2 unit + STORAGE_EMULATOR 8091/9200 | live IAM | Stay undeployed |
 | E2/E3 admission + descriptors | team3 | `team/grin-t3-offline` | `grin-t3-offline` | `0d0dd84` | source_verified | SQLITE_HOST outbox + capture columns | native death not claimed | Stay undeployed |

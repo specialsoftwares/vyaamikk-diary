@@ -8,12 +8,11 @@ the consolidated owner policy mission. Those decisions authorize **source
 implementation and tests**. They do **not** authorize live deployment,
 billing activation, or Play publication.
 
-Two writes still blank (Team 4 product sheets — owner must fill the rows):
+Owner writes **2026-10-06 13:59** (this chat). Source implementation authorized.
+Live deploy / billing / Play publish still **not** authorized.
 
-- Explicit deletion public window:
-  `docs/release/proposals/team4/DELETION_15_VS_180_OWNER_SHEET.md`
-- Storage GiB table:
-  `docs/release/proposals/team4/STORAGE_OWNER_CHOICE.md`
+- Storage: **Starter 1 GiB / Professional 3 GiB / Business 10 GiB** (neither 1/5/20 nor 256 MiB/1/5 GiB). **Do not advertise.**
+- Explicit deletion: **45-day** cancellation window after a confirmed account-deletion request. **Supersedes** the 180-day request. Implemented code is still 15 days until Team 2 lands the constant. `INCLUDE_GRIN_IN_ACCOUNT_PURGE` stays **false** until separately approved.
 
 Source of original options: `D_OWNER_POLICY_OPTIONS.md`.
 
@@ -49,19 +48,15 @@ real-store acceptance of the diary SKU. Purchase-entry stays `"0"`.
 existing technical ceilings (warn 80/95; refuse at cap; no silent delete;
 no overage). That framework is **not** reopened here.
 
-**GiB table: still one owner write.** Do not silently replace 1 / 5 / 20.
-Do not advertise. Do not call the smaller table guaranteed profitable.
-GCS bucket location **UNKNOWN**.
+**Owner choice 2026-10-06:** Starter **1 GiB** / Professional **3 GiB** / Business **10 GiB**.
+Neither option 1 (1/5/20) nor option 2 (256 MiB/1/5 GiB). **Do not advertise.**
+Source constants still 1/5/20 until Team 2 wires this table. GCS location **UNKNOWN**.
 
-| Option | Starter | Professional | Business |
-|---|---|---|---|
-| **1 — original proposal** (wired, pending confirmation) | 1 GiB | 5 GiB | 20 GiB |
-| **2 — smaller alternative** (named, not the live cap) | 256 MiB | 1 GiB | 5 GiB |
-
-**Owner choice (1 / 2 / UNRESOLVED):** _________________
-
-Fill the row on `docs/release/proposals/team4/STORAGE_OWNER_CHOICE.md`.
-Economics: combined `docs/release/proposals/team2/STORAGE_ECONOMICS.md`.
+| Option | Starter | Professional | Business | Status |
+|---|---|---|---|---|
+| Original proposal | 1 GiB | 5 GiB | 20 GiB | Not selected |
+| Smaller alternative | 256 MiB | 1 GiB | 5 GiB | Not selected |
+| **Owner 2026-10-06** | **1 GiB** | **3 GiB** | **10 GiB** | **Selected. Not yet wired. Do not advertise.** |
 
 ---
 
@@ -97,17 +92,13 @@ Owner plain-language sheet (choices **A–D blank** until the owner writes):
 
 | # | Fact | Status |
 |---|---|---|
-| 1 | **Current implemented behavior** | `DELETION_GRACE_MS` = **15 days**. Live `/privacy` and `/delete-account` also describe 15 days. **Not** “the owner already chose 15.” |
-| 2 | **Owner-requested policy** | **180 days** after an explicit account-deletion request. **Not** legally/Play approved. |
-| 3 | **Policy approved for public operation** | **UNRESOLVED.** Do not advertise or activate 180 days. Do not silently substitute 15 or 30. |
+| 1 | **Current implemented behavior** | `DELETION_GRACE_MS` = **15 days**. Live `/privacy` and `/delete-account` also describe 15 days. |
+| 2 | **Superseded request** | **180 days** — **superseded** 2026-10-06. Do not implement 180. |
+| 3 | **Owner policy 2026-10-06** | **45-day** cancellation window after a **confirmed** account-deletion request. Source not yet wired. Play: freeze ≠ delete. `INCLUDE_GRIN_IN_ACCOUNT_PURGE` stays **false** until separately approved. |
 
-Changing `DELETION_GRACE_MS` does **not** implement a safe 180-day policy.
-Play User Data (fetched 2026-10-06): temporary deactivation, disabling, or
-freezing **does not qualify** as account deletion. Optional 180-day
-recoverability would be a **separate archive product**. **P8 stays open.**
-Do not flip `INCLUDE_GRIN_IN_ACCOUNT_PURGE`.
+Changing `DELETION_GRACE_MS` from 15 to 45 implements the **pending-then-purge clock** for account deletion. It does **not** by itself: enable GRIN purge, change subscription expiry (90+30), create a recoverable archive, or satisfy Play if the account is only frozen. Subscription expiry remains 90+30. Optional archive remains a separate product.
 
-**Owner choice (A / B / C / D):** _________________
+**Owner choice:** **45 days** (recorded 2026-10-06). Not 15. Not 180. Not 30.
 
 ### Exit and export
 

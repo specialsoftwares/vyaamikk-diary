@@ -23,18 +23,20 @@ Do not rewrite those files as if they were re-run today.
 |---|---|
 | Repo / branch / PR | `specialsoftwares/vyaamikk-diary` `integration/grin-g1-g5-source` draft **#31** (no duplicate; auto-merge off) |
 | **CI-tested PR head** | `0d7aa17a6efcf3ce6874269eb57afda0a2b45559` (parent `074f082`). Application blobs **= `520f9f9`**. |
-| **Current application SHA** | `56f2040e30159579edc0cbfbc88e2ba706a6abd2` (cherry-pick of T2 `2cebe32` on `team/grin-t2-capacity`; parent S1/S2 `520f9f9` / `0cd3473`). `git diff --stat 520f9f9 56f2040 -- functions src tools/goods-evidence-storage` **non-empty** (holds-capacity telemetry + inactive GRIN cleanup lists/tests). Pre-fix `b845e8a`. |
-| **Internal AAB freeze candidate** | Still **`520f9f9`** + GHA **`37425360211`**. B1≠B2, **neither granted**. Do **not** treat `56f2040` as the freeze until a new SHA + matching canonical CI. |
+| **Current application SHA** | **`56f2040e30159579edc0cbfbc88e2ba706a6abd2`** (verified 2026-10-06 13:59: `git diff --stat 56f2040 HEAD -- functions src eas.json app.json app firebase.json tools/goods-evidence-storage` **empty**. Combined HEAD `998f303` is docs-only). Has accepted S1/S2 + capacity/cleanup. **Does not yet contain** owner 1/3/10 GiB or 45-day deletion. |
+| **Selected Internal candidate** | **`56f2040` plus the in-flight owner-choice source** (1/3/10 GiB + 45-day grace). **Do not build `520f9f9`.** After T2 lands, retarget freeze + pin + CI to that new SHA. |
 | Helper `PINNED_APP_SHA` | **`520f9f9`** (constant at tooling `0d7aa17`). **STALE vs current application `56f2040`**. Proposed only: `PIN_UPDATE_AFTER_56f2040.diff.md`. **Not applied.** Do not set `GRIN_OPS_PINNED_SHA`. A3 **HOLD**. A1 does not run the helper. |
 | **Tooling SHA** | **`0d7aa17`** — successor for the `520f9f9` pin. **Not** byte-identical to `228a8f5` (`grin-functions-op.mjs` **+1/−1**: pin constant only). |
 | Historical ops-guard baseline | `228a8f58ac83d3c71e853cdccb6e4c4fa64c251f`. Suite **34/34** recorded on **that** tree. Same suite **34/34** re-run after the pin apply on the successor tree (TOOLING, not application CI). Live mode still rejects `GRIN_OPS_PINNED_SHA`. |
 | **Canonical CI** | Independently observed GitHub Actions run **`37425360211`**, job **`112143748428`**, workflow head **`0d7aa17`**, verify + canonical repository gate **success**. Skipped steps: **none observed** in jobs API. Covers application **`520f9f9` only**. **Not** a CI pass for `56f2040`. Do **not** cite `37379529193` (`41b05a4`) or `37351685421` (`5d5df3d`). Inner suite counts **not invented**. `gh` unauthenticated here. |
 | S1 / S2 | **Closed** at SOURCE / INJECTED / named G2 EMULATOR (`127.0.0.1:8091` / `9200`, `demo-vyaamikk-grin-g2`). Not reopened (no new reproduction). Not live. Not device. |
 | P3 | **ACCEPTED** (first GRIN register consumes one monthly slot; replay/amend/QC/return/evidence/reconcile do not). Coordinator re-ran `quota.injected.unit.test.ts` **PASS** after the T2 fold. |
-| P8 | **OPEN / FAIL** (`INCLUDE_GRIN_IN_ACCOUNT_PURGE=false`; `DELETION_GRACE_MS` 15 days; public deletion policy UNRESOLVED). Cleanup lists/tests exist; this is **not** an operational deletion service. |
+| P8 | **OPEN / FAIL** (`INCLUDE_GRIN_IN_ACCOUNT_PURGE=false`; implemented grace still **15 days** until T2 wires **45**; owner **45-day** policy selected 2026-10-06, supersedes 180). Cleanup lists exist; **not** an operational deletion service. GRIN still omitted from default purge. |
 | Device / live backend / billing / public | **Not accepted** |
-| Next approval | **A1 presented** (`A1_PRESENT.md`) — isolated Firestore Rules only; **not executed**. A2–A7 not implied. Rules hashes unchanged vs `520f9f9`. |
-| Pending owner decisions | Storage GiB (1/5/20 vs 256 MiB/1/5 GiB); public deletion window (15 implemented / 180 requested / UNRESOLVED). |
+| Next approval | Consolidated selectable backend/build packet (this chat). **Not executed.** Do not build `520f9f9`. |
+| Owner storage (2026-10-06) | **Starter 1 GiB / Professional 3 GiB / Business 10 GiB.** Source not yet wired. **Do not advertise.** |
+| Owner deletion (2026-10-06) | **45-day** cancellation window after confirmed account-deletion request. Supersedes 180-day request. Implemented still **15** until source lands. Play freeze ≠ delete still applies. |
+| Device named | OnePlus 12R, Android 16, vc22 installed, available today. **Upgrade device.** Clean-install device **unnamed**. Firebase UIDs **not in repo**. |
 | versionCode | **23 UNRESERVED**. Play explorer 2026-10-06: highest uploaded **vc22**. |
 | Merge-base / `origin/main` | `0da2f58970f23c7ce6cbefae6efffd49c731f44b` |
 
@@ -44,16 +46,31 @@ reproduction. Do not reopen S1/S2 without a new reproduction.
 
 ---
 
+## Today execution board (2026-10-06)
+
+| Item | Owner | Next action | Dependency | Evidence | Blocker |
+|---|---|---|---|---|---|
+| Wire 1/3/10 GiB + 45-day grace | T2 | Source constants + tests | `56f2040` | not landed | none for source |
+| Canonical CI on selected SHA | coordinator | Observe GHA after T2 fold | T2 SHA | `gh` unauthenticated | GitHub login |
+| Pin helper to selected SHA | T1 propose / coordinator apply | After T5 review of T2 SHA | T2+T5 | proposed diffs only | A3 HOLD until applied |
+| Consolidated backend packet | T1 | Fill gcloud proof, SA, smoke harness | A1 hashes exist | A1/A2 hashes | live inspect may be stale |
+| Internal AAB packet | T3 | Retarget off `520f9f9`; Play recheck before B1 | selected SHA + CI | OnePlus 12R named | B1 ungranted |
+| Restricted billing packet | T4 | Tester allowlist SOURCE; catalog if access | purchase-entry `"0"` | fail-closed | activation HOLD |
+| Phone acceptance | T3 + owner | vc22 upgrade today | AAB + private UIDs | device **NOT RUN** | no AAB; UIDs not supplied |
+| Review T2 owner-choice | T5 | Targeted review when T2 commits | T2 SHA | `REVIEW_56f2040` done | leftover P3-FAIL files stay dirty |
+
+---
+
 ## Readiness
 
 | Gate | State |
 |---|---|
-| SOURCE READY | CI-matched freeze `520f9f9` + tooling `0d7aa17` + GHA **`37425360211`**. Current application **`56f2040`**: T5 SOURCE+INJECTED **PASS** (`REVIEW_56f2040.md`); **canonical GHA NOT RUN**; G2 emulator for this slice **NOT RUN**. S1/S2 closed at INJECTED+EMULATOR on `520f9f9`. P3 accepted. **P8 FAIL**. Do not advertise GiB. |
-| BACKEND PILOT READY | **A1 offerable, not authorized.** GRIN seven **ABSENT**. A2–A7 HOLD. |
-| INTERNAL BUILD READY | Freeze SHA **`520f9f9`** + CI **`37425360211`** (`APPROVAL_B_DRAFT.md`). Current HEAD application is **`56f2040`** — **not** that freeze. B1≠B2, **neither granted**. vc23 unreserved. Owner device form **blank**. |
-| DEVICE ACCEPTED | **NOT RUN** (no hardware; testers unnamed) |
+| SOURCE READY | Application **`56f2040`** T5 SOURCE+INJECTED PASS. Owner 1/3/10 + 45d **not wired**. Canonical GHA for `56f2040` **NOT observed** (`gh` unauthenticated). **Do not build `520f9f9`.** P3 accepted. **P8 FAIL**. |
+| BACKEND PILOT READY | Consolidated packet in coordinator chat. **Not authorized.** GRIN seven **ABSENT**. |
+| INTERNAL BUILD READY | Retarget to selected candidate after T2+CI. B1≠B2 **neither granted**. vc23 unreserved. OnePlus 12R named; UIDs not in repo. |
+| DEVICE ACCEPTED | **NOT RUN**. OnePlus 12R available today — not yet executed. |
 | BILLING ACCEPTED | Fail-closed; catalog **NOT RUN**; purchases **off** |
-| PUBLIC SUBMISSION READY | Blocked on owner GiB, public deletion policy, device, billing, listing |
+| PUBLIC SUBMISSION READY | Blocked on wired 1/3/10+45d, device, billing, listing. Owner writes recorded. |
 | PUBLIC ROLLOUT APPROVED | Not authorized |
 
 ---
@@ -102,11 +119,11 @@ implementation and tests** only. Not live deploy / billing / Play publish.
 | Topic | Owner choice | Residual hold |
 |---|---|---|
 | GRIN pricing | **A — include in existing Starter / Professional / Business.** No separate SKU. One new issuance consumes one monthly record allowance. | Packet E real-store acceptance before public commercial copy |
-| Storage quota | **UNRESOLVED.** Option 1: 1/5/20 GiB (wired, pending confirmation). Option 2: 256 MiB/1/5 GiB (named, not live, not guaranteed profitable). **Do not advertise either.** See `STORAGE_OWNER_CHOICE.md`. | Owner writes one choice |
+| Storage quota | **Owner 2026-10-06: 1 / 3 / 10 GiB.** Not advertised. Source still 1/5/20 until T2. | Wire constants; do not advertise |
 | Active / expiry | Keep issued evidence while entitled. After genuine expiry: 90-day read/export then 30-day notice. **No production purge job this assignment.** | Source state machine only until approved deploy |
-| Explicit deletion | **Three facts, not one:** implemented **15 days**; owner requested **180 days**; public-approved policy **UNRESOLVED**. Team 4 Play-risk framing: do not ship 180-day pending as deletion; do **not** treat 15 as the recorded owner choice; do not substitute 30. See `DELETION_15_VS_180_OWNER_SHEET.md`. | Owner+counsel fill A/B/C/D on that sheet |
+| Explicit deletion | **Owner 2026-10-06: 45-day** cancellation window after confirmed request. **Supersedes 180.** Implemented still **15** until T2. Play freeze ≠ delete. `INCLUDE_GRIN_IN_ACCOUNT_PURGE=false`. | Wire 45-day clock; do not flip GRIN purge flag |
 | Export | Pack is summary (`originalsBundled=false`). Originals + record export required. ZIP optional. | Device proof NOT RUN |
-| Testers | Owner + two trusted testers, separate accounts. Identities **not supplied**. | Owner UIDs/devices |
+| Testers | Owner + two trusted testers. OnePlus 12R Android 16 vc22 **named**. UIDs **not in repo**. Clean-install device unnamed. | Private UIDs in chat or out-of-repo file |
 
 Internal Testing: **synthetic** GRIN evidence until lifecycle is **approved
 for live use**. Source machinery exists; `INCLUDE_GRIN_IN_ACCOUNT_PURGE`
