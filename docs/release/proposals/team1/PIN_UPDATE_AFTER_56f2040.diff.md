@@ -1,4 +1,7 @@
-# Proposed helper pin update — AFTER 56f2040 (unapplied)
+# Proposed helper pin update — AFTER 56f2040 (unapplied) — **SUPERSEDED**
+
+**Superseded by** `PIN_UPDATE_AFTER_313025f.diff.md`. Do **not** pin
+`56f2040`. Application is now `313025f902b0a3416815da7ce75a3a7d6bec9559`.
 
 **Do not apply this patch now.** Do not rewrite
 `docs/release/packets/grin-ops/grin-functions-op.mjs` in this Team 1

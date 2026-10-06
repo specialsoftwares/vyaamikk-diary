@@ -18,24 +18,24 @@ others. Never combine A1+A2 as one grant (`--only firestore:rules,storage`).
 |---|---|
 | Team 1 worktree | `/Users/shivamsaurav/vyd-worktrees/grin-t1-backend` |
 | Branch | `team/grin-t1-consolidated-1310` from `841f9c405cffb0c0e1a95fd883a3c46b27a228e3` |
-| Combined (read-only) | `/Users/shivamsaurav/vyd-worktrees/grin-combined` observed `c45518a89a22ac3134e1b9e56f2c9ee97142ac1f` (docs after `998f303`; still empty vs application on `functions/src`) |
-| T2 worktree (read-only) | `/Users/shivamsaurav/vyd-worktrees/grin-t2-evidence` `2cebe32a8a78dc1928c5abc984a29887ccf7a954` — `git diff --stat 56f2040 HEAD -- functions src eas.json app.json app firebase.json` **empty** |
-| **Selected candidate SHA** | `56f2040e30159579edc0cbfbc88e2ba706a6abd2` — **must be retargeted** when T2 commits owner 1/3/10 GiB + 45-day grace (not committed on T2 at packet time; combined `c45518a` records the choice as docs only: “Source constants are not yet wired”) |
-| Combined helper `PINNED_APP_SHA` | `520f9f98bc952fd7f30a907da9e85774629a69c0` — **STALE** vs candidate |
+| Combined (read-only) | `/Users/shivamsaurav/vyd-worktrees/grin-combined` published `5b3b4cebc607ccbfc0ae366e049fc2e499ccaead` (docs after `313025f`; empty vs application on DEPLOYMENT_PATHS) |
+| T2 worktree (read-only) | `/Users/shivamsaurav/vyd-worktrees/grin-t2-evidence` `ad72d793c60406e7595a3887f21b63b62e11b4d8` — `git diff --stat 313025f HEAD -- functions src eas.json app.json app firebase.json` **empty** |
+| **Selected candidate SHA (Functions)** | `313025f902b0a3416815da7ce75a3a7d6bec9559` (T2 1/3/10 GiB + 45-day). Supersedes `56f2040`. |
+| Combined helper `PINNED_APP_SHA` | `520f9f98bc952fd7f30a907da9e85774629a69c0` — **STALE** vs `313025f` |
 | This worktree helper | still `5d5df3d54df08953bfb26db39a9b7f5e3d67ed47` — **not rewritten** |
 | Historical ops-guard 34/34 | `228a8f58ac83d3c71e853cdccb6e4c4fa64c251f` |
 | Tooling successor | `0d7aa17a6efcf3ce6874269eb57afda0a2b45559` (`PINNED_APP_SHA=520f9f9`; not byte-identical to `228a8f5`) |
-| Canonical CI | GHA **`37425360211`** covers `0d7aa17` / `520f9f9` **only**, **not** `56f2040` |
+| Canonical CI | GHA **`37425360211`** covers `0d7aa17` / `520f9f9` **only**, **not** `313025f` |
 | `GRIN_OPS_ALLOW_LIVE` / `GRIN_OPS_PINNED_SHA` / `GRIN_OPS_EXPORT_DIR` | **unset** |
 | firebase-tools | **14.20.0** |
 | `gcloud` | **ABSENT** on this host |
-| This worktree vs `56f2040` DEPLOYMENT_PATHS | **non-empty** — **not** an A3 apply host |
-| Combined vs `56f2040` DEPLOYMENT_PATHS | **empty** (docs-only HEAD) |
+| This worktree vs `313025f` DEPLOYMENT_PATHS | **non-empty** — **not** an A3 apply host |
+| Combined vs `313025f` DEPLOYMENT_PATHS | **empty** (docs-only HEAD `5b3b4ce`) |
+| Pin proposal | `docs/release/proposals/team1/PIN_UPDATE_AFTER_313025f.diff.md` (unapplied). `PIN_UPDATE_AFTER_56f2040.diff.md` is **superseded**. |
 
-Do **not** pin this packet’s helper constant to `56f2040` in git. T2’s owner
-1/3/10 GiB + 45-day wiring will create a **new** application SHA. The proposed
-one-line pin (Scope 3 / pin appendix) targets the **selected candidate** and
-must be retargeted to T2’s application commit when that exists.
+Do **not** pin `56f2040`, `520f9f9`, `b845e8a`, or combined docs HEAD `5b3b4ce`.
+A3 remains **HOLD** until the coordinator applies the `313025f` pin **after
+Team 5 review**. This Team 1 session does not rewrite the helper.
 
 ---
 
@@ -104,7 +104,7 @@ grant. Direct Cloud Run env edit is forbidden. Firebase dotenv is blocked.
 |---|---|---|---|
 | **1 — A1** | Isolated Firestore Rules only | **YES** (after owner grant + inspect still = baseline) | — |
 | **2 — A2** | Isolated Storage Rules only | **YES** (separate grant; never with A1) | — |
-| **3 — A3** | Seven Functions create, gate off | **HOLD** until coordinator pin-update to **selected candidate** (then retarget if T2 commits) + apply-host empty vs that SHA | Helper pin still `520f9f9`; this worktree is not the apply host; mixed-state resume is a **separate** packet |
+| **3 — A3** | Seven Functions create, gate off | **HOLD** until coordinator pin-update to **`313025f` after T5 review** + apply-host empty vs that SHA | Helper pin still `520f9f9`; this worktree is not the apply host; mixed-state resume is a **separate** packet |
 | **4 — IAM** | Runtime identity | **Not required for this pilot** | Do **not** add roles to the shared Editor SA |
 | **5 — Testers** | Admission writes + billing UID grammar | **YES** for format/validation; **HOLD** for writes until owner UIDs (private, not git) | Empty `PLAY_BILLING_TESTER_UIDS` already fail-closed in source |
 | **6 — Gate** | Enable / disable | **UNPROVEN — REFUSED** | gcloud omitted-`--source` preservation unproven |
@@ -253,18 +253,20 @@ Gate key **`GRIN_GOODS_EVIDENCE_FUNCTIONS`**. Absent on create ⇒
 `grinFunctionsEnabled` false. Exact `"true"` is on; `"false"` / missing / `"1"` /
 `"TRUE"` are off.
 
-**Pin must match the selected candidate.** Combined helper is still `520f9f9`
-(STALE). Proposed pin (unapplied, appendix) currently names `56f2040`. **Retarget
-that one-liner to T2’s new application SHA when T2 commits 1/3/10 GiB + 45-day
-grace.** Do not env-override (`GRIN_OPS_PINNED_SHA` is rejected in live mode).
+**Pin must match Functions candidate `313025f`.** Combined helper is still
+`520f9f9` (STALE). Proposed pin (unapplied):
+`docs/release/proposals/team1/PIN_UPDATE_AFTER_313025f.diff.md`. Do **not**
+pin `56f2040`. Do not env-override (`GRIN_OPS_PINNED_SHA` is rejected in live
+mode). A3 stays **HOLD** until the coordinator applies that pin after Team 5
+review of `313025f`.
 
 Apply-host check after pin:
 
 ```bash
-git diff --quiet <SELECTED_CANDIDATE_SHA> -- functions src eas.json app.json app firebase.json
+git diff --quiet 313025f902b0a3416815da7ce75a3a7d6bec9559 -- functions src eas.json app.json app firebase.json
 ```
 
-Combined HEAD is empty vs `56f2040` today. This Team 1 worktree is **not**.
+Combined `5b3b4ce` is empty vs `313025f`. This Team 1 worktree is **not**.
 
 Preconditions from inspect (complete inventory required; this session: all seven
 **ABSENT**, unrelated 39, project/bucket match). Failed inspect = **UNKNOWN**,
@@ -423,18 +425,19 @@ A4 UIDs + a **proven** A6. Until then the harness refuses rather than calling
 
 ## Proposed helper pin (unapplied; do not rewrite the helper in this commit)
 
+Canonical proposed diff:
+`docs/release/proposals/team1/PIN_UPDATE_AFTER_313025f.diff.md`.
+`PIN_UPDATE_AFTER_56f2040.diff.md` is **superseded**.
+
 Current combined constant:
 
 ```js
 export const PINNED_APP_SHA = "520f9f98bc952fd7f30a907da9e85774629a69c0";
 ```
 
-Selected candidate **today**: `56f2040e30159579edc0cbfbc88e2ba706a6abd2`.
-**Must be retargeted** to T2’s application SHA when
-`/Users/shivamsaurav/vyd-worktrees/grin-t2-evidence` has a non-empty
-DEPLOYMENT_PATHS diff vs `56f2040` (owner 1/3/10 GiB + 45-day grace). Do not
-pin combined docs HEAD. Do not pin `520f9f9`. Do not pin `b845e8a`. Do not
-apply this from Team 1.
+Functions candidate: `313025f902b0a3416815da7ce75a3a7d6bec9559`.
+Do **not** pin `56f2040`, `520f9f9`, `b845e8a`, or docs HEAD `5b3b4ce`.
+Do not apply this from Team 1.
 
 ```diff
 --- a/docs/release/packets/grin-ops/grin-functions-op.mjs
@@ -444,12 +447,14 @@ apply this from Team 1.
  const require = createRequire(import.meta.url);
  
 -export const PINNED_APP_SHA = "520f9f98bc952fd7f30a907da9e85774629a69c0";
-+export const PINNED_APP_SHA = "56f2040e30159579edc0cbfbc88e2ba706a6abd2";
++export const PINNED_APP_SHA = "313025f902b0a3416815da7ce75a3a7d6bec9559";
  export const PROJECT_ID = "vyaamikk-diary";
 ```
 
-After coordinator apply (on combined, after Team 5 pass on the **then-current**
-candidate): `unset GRIN_OPS_ALLOW_LIVE GRIN_OPS_PINNED_SHA PINNED_APP_SHA; node --test docs/release/packets/grin-ops/grin-functions-op.test.mjs` must be **34/34**, including UNKNOWN ≠ ABSENT and live override rejections. Canonical CI `37425360211` does **not** cover `56f2040`.
+After coordinator apply (on combined, after Team 5 pass on `313025f`):
+`unset GRIN_OPS_ALLOW_LIVE GRIN_OPS_PINNED_SHA PINNED_APP_SHA; node --test docs/release/packets/grin-ops/grin-functions-op.test.mjs`
+must be **34/34**, including UNKNOWN ≠ ABSENT and live override rejections.
+Canonical CI `37425360211` does **not** cover `313025f`. A3 remains HOLD.
 
 ---
 
@@ -457,7 +462,7 @@ candidate): `unset GRIN_OPS_ALLOW_LIVE GRIN_OPS_PINNED_SHA PINNED_APP_SHA; node 
 
 1. **A1** — exact Firestore command + hashes in Scope 1, after inspect still = `b13d5255…`.
 2. **A2** — exact Storage command + hashes in Scope 2, after inspect still = `1a912051…`. Not implied by A1.
-3. **A3** — HOLD until pin-update to the selected (possibly retargeted) candidate. Mixed-state resume not included.
+3. **A3** — HOLD until coordinator pin-update to `313025f` **after T5 review**. Mixed-state resume not included. Do not pin `56f2040`.
 4. **IAM** — no grant needed for this pilot.
 5. **Testers** — HOLD for writes until owner-named UIDs (private file). Grammar is ready.
 6. **Gate enable/disable** — **REFUSED / UNPROVEN**.
