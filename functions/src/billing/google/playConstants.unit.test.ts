@@ -1,6 +1,8 @@
 /**
  * Play billing enablement + fail-closed tester UID allowlist.
  * Does not enable billing. Does not invent owner tester emails/UIDs.
+ * Already-owned expire/refund/restore after delist is proven in
+ * androidPlay.unit.test.ts (not a voided-function source-string check).
  * Run: npm run test:billing-play-constants
  */
 
@@ -166,29 +168,31 @@ const adapterSrc = readFileSync(
 
 for (const [name, src] of [
   ["prepareAndroidBillingAccount", prepareSrc],
-  ["validateAndActivateAndroid", validateSrc],
 ] as const) {
   const enabledIdx = src.indexOf("isPlayBillingEnabled()");
   const allowIdx = src.indexOf("assertPlayBillingTesterAllowed(request.auth.uid)");
   assert.ok(enabledIdx >= 0, `${name} must check PLAY_BILLING_ENABLED`);
-  assert.ok(allowIdx >= 0, `${name} must assert the tester allowlist`);
+  assert.ok(allowIdx >= 0, `${name} must assert the tester allowlist for new Play-account bind`);
   assert.ok(
     enabledIdx < allowIdx,
     `${name} must keep the allowlist behind PLAY_BILLING_ENABLED`
   );
 }
 
+const validateEnabledIdx = validateSrc.indexOf("isPlayBillingEnabled()");
+assert.ok(validateEnabledIdx >= 0, "validateAndActivateAndroid must check PLAY_BILLING_ENABLED");
+assert.equal(
+  validateSrc.includes("assertPlayBillingTesterAllowed(request.auth.uid)"),
+  false,
+  "validate must not pre-assert allowlist; already-owned restore is adapter-gated"
+);
+
 assert.ok(validateSrc.includes("enforceRestrictedTesters: true"));
 assert.ok(rtdnSrc.includes("enforceRestrictedTesters: true"));
 assert.ok(reconSrc.includes("enforceRestrictedTesters: true"));
 assert.ok(adapterSrc.includes("assertPlayBillingTesterAllowedIfEnforced"));
+assert.ok(adapterSrc.includes("alreadyOwnsSameUidPurchaseToken"));
 assert.equal(adapterSrc.includes("processAndroidVoidedPurchase"), true);
-const voidedFn = adapterSrc.slice(adapterSrc.indexOf("export async function processAndroidVoidedPurchase"));
-assert.equal(
-  voidedFn.includes("assertPlayBillingTesterAllowedIfEnforced"),
-  false,
-  "voided/refund revocation must not require the tester allowlist"
-);
 
 assert.equal(prepareSrc.includes("PLAY_BILLING_ENABLED=true"), false);
 assert.equal(validateSrc.includes("PLAY_BILLING_ENABLED=true"), false);

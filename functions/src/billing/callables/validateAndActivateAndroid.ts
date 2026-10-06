@@ -5,9 +5,10 @@
  * Never accepts uid/plan/price/expiry/entitlement/order amount as authority.
  *
  * Production export is fail-closed while PLAY_BILLING_ENABLED is not true.
- * After enablement, PLAY_BILLING_TESTER_UIDS is a fail-closed UID allowlist
- * (empty/absent denies all). This callable does not enable billing.
- * Core handler is fully testable through injected deps.
+ * After enablement, the adapter's tester allowlist denies NEW grants
+ * (empty/absent PLAY_BILLING_TESTER_UIDS denies first bind). Already-owned
+ * same-uid restore/reconcile is not blocked by delist. This callable does
+ * not enable billing. Core handler is fully testable through injected deps.
  */
 
 import { HttpsError, onCall } from "firebase-functions/v2/https";
@@ -24,7 +25,6 @@ import {
   type AndroidBillingDeps,
 } from "../google/androidSubscriptionAdapter";
 import {
-  assertPlayBillingTesterAllowed,
   billingKmsKeyNameFromEnv,
   isPlayBillingEnabled,
   playPackageNameFromEnv,
@@ -92,7 +92,6 @@ export const validateAndActivateAndroid = onCall(
       );
     }
     try {
-      assertPlayBillingTesterAllowed(request.auth.uid);
       const data = (request.data ?? {}) as Record<string, unknown>;
       const result = await handleValidateAndActivateAndroid(productionDeps(), {
         uid: request.auth.uid,

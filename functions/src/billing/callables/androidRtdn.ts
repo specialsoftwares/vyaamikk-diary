@@ -3,8 +3,9 @@
  *
  * Authenticated via OIDC (PLAY_RTDN_PUSH_SERVICE_ACCOUNT / AUDIENCE).
  * Production is fail-closed while PLAY_BILLING_ENABLED is not true.
- * After enablement, delivery still requires PLAY_BILLING_TESTER_UIDS
- * (empty/absent denies all). Hidden buttons are not this control.
+ * After enablement, NEW grants still require PLAY_BILLING_TESTER_UIDS
+ * (empty/absent denies first bind). Already-owned token lifecycle is not
+ * blocked by delist. Hidden buttons are not this control.
  */
 
 import { onRequest } from "firebase-functions/v2/https";
