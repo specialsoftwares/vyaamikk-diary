@@ -1,37 +1,42 @@
-# Device execution sheet — Internal GRIN candidate
+# Device execution sheet — Internal GRIN candidate (`candidate-1310`)
 
 Who: owner plus two named testers on hardware. Coordinator/AI does **not**
 physically execute. Tick only after the named run. Synthetic data only while
 retention is unset.
 
-All rows **NOT RUN**. Host / emulator / SQLITE_HOST / mounted inert React
-results are not device passes. This session (`adb devices -l`): **no
-attached device**. Do not convert host/emulator/CI greens into PASS.
+All executable rows **NOT RUN**. Host / emulator / SQLITE_HOST / mounted
+inert React results are not device passes. This session (`adb devices -l`):
+**no attached device**. Do not convert host/emulator/CI greens into PASS.
 
 Contract: `2026-10-02.wave2evidence`.
 Intended binary (after Approval B, **not granted**): Play Internal AAB
-`internal-grin` at application **`520f9f98bc952fd7f30a907da9e85774629a69c0`**
-(canonical CI GHA `37425360211` / job `112143748428` / head `0d7aa17`)
-**or** labelled sideload APK. Do **not** cite `37379529193`. Label the
-artifact: `PLAY_INSTALLED` vs `NATIVE_DEVICE`.
+`internal-grin` at named freeze-prepare
+**`56f2040e30159579edc0cbfbc88e2ba706a6abd2`** (**will retarget** when T2
+lands 1/3/10 GiB + 45-day) **or** labelled sideload APK. **Do not** build
+retired freeze `520f9f9`. **Do not** cite GHA `37425360211` as CI for
+`56f2040`. Label the artifact: `PLAY_INSTALLED` vs `NATIVE_DEVICE`.
+
+Scripts (prepared **without** waiting for an AAB; refuse PASS without a
+phone): `docs/release/proposals/team3/device/`.
 
 Sideload APK and Play Internal AAB remain distinct. Historical EAS AAB
 `72cb7254-0be9-4f92-a514-dbfab2b1150d` (vc22, profile `production`, git
 `0da2f58970f2`) is **not** this SHA and is **not** an Internal-GRIN candidate.
 
 Pre-record: device ID, Android version, RAM, versionCode, AAB/APK sha256,
-auth method, backend (`LIVE_BACKEND` seeded vs `backend_absent`).
+auth method, backend (`LIVE_BACKEND` seeded vs `backend_absent`). Do not
+invent identifiers.
 
-Upgrade device = current Internal **vc22** (Play Console 2026-10-06:
-Internal **Active**, latest **Vyaamikk Diary (Vc22)**; re-read before B1).
-Clean device = D2.
+Upgrade device = **OnePlus 12R**, Android 16, Play Internal **vc22 yes**,
+available **today**. Clean device = D2 (**unnamed**).
 
 `versionCode` 23 is **UNRESERVED** (Play explorer 2026-10-06: 23 absent;
-still not reserved). Never assume it remains available.
+highest uploaded **vc22**; still not reserved). **Re-read** explorer
+immediately before B1. Never assume 23 remains available.
 
 ---
 
-## Testers (owner input still required)
+## Testers (UIDs stay out of git)
 
 Arrangement accepted: **owner + two testers**. Identifiers via approved
 **private channel** — `docs/release/proposals/team3/OWNER_DEVICE_FORM.md`.
@@ -39,25 +44,27 @@ Identities, UIDs, emails, and passwords stay **blank in git**. Do not invent.
 
 | Slot | Role | Display name | Firebase uid | Play Internal email | Phone | Auth notes |
 |---|---|---|---|---|---|---|
-| O | Owner | | | | | Owner fills. No password in this sheet. |
+| O | Owner | | *(private channel)* | *(private channel)* | | D1 OnePlus 12R / Android 16 / vc22. No password in this sheet. Available today. |
 | T1 | Tester 1 | | | | | Owner fills. |
 | T2 | Tester 2 | | | | | Owner fills. |
 
 Admission docs (`users/{uid}/goodsEvidenceAdmission/runtime`) are Approval A,
 not this sheet. Play licence-tester emails are **not** Firestore admission.
 
-Required hardware: D1 (Play Internal vc22 upgrade) + D2 (clean Android 12+)
-+ TalkBack-capable device (may be D1/D2). Identities and device IDs are
-**gaps** until the owner fills them. Evidence for each row:
-`docs/release/proposals/team3/DEVICE_HANDOFF.md` (no hardware = NOT RUN).
+Required hardware: D1 (OnePlus 12R, Play Internal vc22 upgrade) + D2 (clean
+Android 12+, **unnamed**) + TalkBack-capable device (may be D1). Evidence
+for each row: `docs/release/proposals/team3/DEVICE_HANDOFF.md` (no hardware
+= NOT RUN).
+
+Live GRIN seven **ABSENT**. Useful GRIN rows need later backend.
 
 ---
 
 | ID | Steps | Expected | Label | Status |
 |---|---|---|---|---|
-| D0 | Record identities; confirm artifact class | Identities written by owner; no guessed vc22 reconstruction from a commit label | — | NOT RUN |
-| D1 | Upgrade install over vc22 via Play | Play shows new versionCode; cold start; existing diary/PO/credit/letterhead/PDF still work; SQLite v10 migrates | PLAY_INSTALLED | NOT RUN |
-| D2 | Clean install | Same launch/sign-in; empty local DB | PLAY_INSTALLED or NATIVE_DEVICE | NOT RUN |
+| D0 | Record identities; confirm artifact class | Identities via private channel; D1 OnePlus 12R named; no guessed vc22 reconstruction from a commit label | — | NOT RUN |
+| D1 | Upgrade install over vc22 via Play on OnePlus 12R | Play shows new versionCode; cold start; existing diary/PO/credit/letterhead/PDF still work; SQLite v10 migrates | PLAY_INSTALLED | NOT RUN |
+| D2 | Clean install (device still unnamed) | Same launch/sign-in; empty local DB | PLAY_INSTALLED or NATIVE_DEVICE | NOT RUN |
 | D3 | Force-stop; reboot; open app | Splash completes; main tabs; legal date `2026-07-27`; no token printed | same | NOT RUN |
 | D4 | Sign-in phone OTP | Session bound to that uid | same | NOT RUN |
 | D5 | Reviewer login `+91 9000000000` / `654321` **only if** live test-phone fixture verified | Reaches tabs; **no founder email** | same | NOT RUN |
@@ -93,4 +100,5 @@ Required hardware: D1 (Play Internal vc22 upgrade) + D2 (clean Android 12+)
 
 If no device is accessible, this sheet stays **NOT RUN** (XR remains
 **N/A until backend**) and is the owner handoff. Do not convert CI greens
-into D1–C2 passes.
+into D1–C2 passes. Host SQLite / mounted inert React is **not** device
+evidence.

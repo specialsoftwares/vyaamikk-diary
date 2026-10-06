@@ -67,7 +67,7 @@ reproduction. Do not reopen S1/S2 without a new reproduction.
 |---|---|
 | SOURCE READY | Application **`56f2040`** T5 SOURCE+INJECTED PASS. Owner 1/3/10 + 45d **not wired**. Canonical GHA for `56f2040` **NOT observed** (`gh` unauthenticated). **Do not build `520f9f9`.** P3 accepted. **P8 FAIL**. |
 | BACKEND PILOT READY | Consolidated packet in coordinator chat. **Not authorized.** GRIN seven **ABSENT**. |
-| INTERNAL BUILD READY | Retarget to selected candidate after T2+CI. B1≠B2 **neither granted**. vc23 unreserved. OnePlus 12R named; UIDs not in repo. |
+| INTERNAL BUILD READY | Freeze-prepare **`56f2040`** (`APPROVAL_B_DRAFT.md` `ddd1598`). **Do not build `520f9f9`.** Retarget after T2 1/3/10+45d + CI. B1≠B2 **neither granted**. vc23 unreserved. OnePlus 12R named; clean-install unnamed; UIDs not in repo. |
 | DEVICE ACCEPTED | **NOT RUN**. OnePlus 12R available today — not yet executed. |
 | BILLING ACCEPTED | Fail-closed; catalog **NOT RUN**; purchases **off** |
 | PUBLIC SUBMISSION READY | Blocked on wired 1/3/10+45d, device, billing, listing. Owner writes recorded. |
@@ -105,7 +105,7 @@ purchase-entry remains `"0"`. Play Console catalog **NOT RUN**.
 |---|---|---|
 | 1 Backend | A1 **presented** (`80da828`). Pin update **proposed only** (`PIN_UPDATE_AFTER_56f2040.diff.md` `841f9c4`) — helper still `520f9f9`. A2 scoped, waiting grant. A3 HOLD (stale pin + no `56f2040` CI). A4 UIDs missing. A5 SA/GCS unread. A6 `--source` unproven. A7 no LIVE_BACKEND harness. Not executed. | Owner A1 grant; do not apply pin from this fold |
 | 2 Policy | Capacity folded (`2cebe32` → combined `56f2040`). `MAX_STORAGE_HOLDS=2500` substantiated (technical, not SKU). 15 MiB-PDF fill of proposed 20 GiB **not blocked**. Derivative fill of 20 GiB **cannot** fit one doc — no integer raise. Economics: bucket location **UNKNOWN**. Inactive cleanup tests with flag **false**. P8 still FAIL. | Owner GiB confirm; 180-day public policy; no live purge; pin review |
-| 3 Build/device | Freeze **`520f9f9`** + GHA **`37425360211`** unchanged (`CURRENT_HEAD_VS_FREEZE.md` `d4a8197`). Current application **`56f2040` is not the freeze.** B1 must not build `56f2040` under this packet. vc23 **unreserved**. Device form blank. B1≠B2, neither granted. | EAS/native build of freeze SHA; Play upload (separate) |
+| 3 Build/device | Freeze-prepare **`56f2040`** (`ddd1598` on `team/grin-t3-candidate-1310`). **`520f9f9` retired** for new builds. Will retarget when T2 1/3/10+45d lands. B1≠B2 **ungranted**. OnePlus 12R Android 16 vc22 **today** (upgrade). Clean-install **blank**. UIDs not in git. Device rows **NOT RUN**. | EAS B1 of selected SHA after CI; Play B2 separate |
 | 4 Billing/Play | Two owner writes presented (`TWO_OWNER_DECISIONS.md` `7e4ed20`). Deletion 15/180/UNRESOLVED; storage 1/5/20 vs 256 MiB/1/5 GiB. Catalog **NOT RUN**. Purchase-entry `"0"`. | Owner fills both sheets; no activation/Save/submit |
 | 5 QA | `REVIEW_56f2040.md` (`7865384`). SOURCE+INJECTED **PASS** for holds-capacity fail-closed and inactive cleanup (flag false). S1/S2 preserved. **P3 ACCEPTED**. **P8 FAIL**. Emulator/device/live/billing **NOT RUN**. Canonical GHA does **not** cover `56f2040`. | Not device/live; pin still stale |
 
