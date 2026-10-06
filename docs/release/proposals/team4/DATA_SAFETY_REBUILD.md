@@ -4,10 +4,12 @@
 rewrite. In-app legal baseline remains `LEGAL_EFFECTIVE_DATE` **2026-07-27**
 (`src/config/legal.ts`). Do not backdate new terms onto that constant.
 
-**Application SHA described:** `520f9f9` (no installed binary of that SHA).
-Prior `5d5df3d` pin is STALE for this freeze. Combined READ-ONLY `aea65c1`.
-CI `37425360211` on `0d7aa17`.
-**Live website fetch:** 2026-10-05T21:18Z.
+**Application SHA described:** `540e07aa07f376716484adb879ce66cb9fb170ce`
+(Internal GRIN candidate; purchase-entry `"0"`). Prior freeze notes that cited
+`520f9f9` / `5d5df3d` are **STALE for this pin**. Canonical CI for this
+application: GHA **`37445383607`** on `7e0d629` (docs-only delta to `540e07a`).
+**Live website fetch:** 2026-10-05T21:18Z (not re-fetched this pass).
+**Not submitted.** No customer data in screenshots.
 
 Legend: **COLLECTED** by the app/backend · **SHARED** only when Play’s sharing
 definition is met · **PROCESSOR** Firebase/Google acting on instructions ·

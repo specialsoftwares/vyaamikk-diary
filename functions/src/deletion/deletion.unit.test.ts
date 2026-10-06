@@ -9,6 +9,7 @@ import {
   accountPurgeMayComplete,
   EMPTY_PHASES,
 } from "./deletionJob";
+import { DELETION_GRACE_MS } from "./finalPurge";
 import {
   deleteOwnedFile,
   purgePrefixPaged,
@@ -17,6 +18,26 @@ import {
 } from "./storagePurge";
 import { deleteAuthUserIdempotent } from "./authDelete";
 import { isObjectOwnedByUser } from "./userOwnedStoragePaths";
+
+function testGraceDeadlineAndCancel() {
+  assert.equal(DELETION_GRACE_MS, 45 * 24 * 60 * 60 * 1000);
+  const requestedAt = 1_700_000_000_000;
+  const nowInsideGrace = requestedAt + DELETION_GRACE_MS - 1;
+  const nowPastGrace = requestedAt + DELETION_GRACE_MS + 1;
+  const pending = initialDeletionJob({
+    uid: "u1",
+    requestedAt,
+    graceExpiresAt: requestedAt + DELETION_GRACE_MS,
+    now: requestedAt,
+  });
+  assert.equal(shouldPromoteToReady(pending, nowInsideGrace), false, "inside 45-day window");
+  assert.equal(shouldPromoteToReady(pending, nowPastGrace), true, "after 45-day deadline");
+  assert.equal(
+    canAcquireLease({ ...pending, status: "cancelled" }, nowPastGrace),
+    false,
+    "cancelled job must not be leased after deadline"
+  );
+}
 
 function testJobLease() {
   const now = 1_000_000;
@@ -183,6 +204,7 @@ async function testAuthIdempotent() {
 }
 
 async function main() {
+  testGraceDeadlineAndCancel();
   testJobLease();
   testPhases();
   testAccountPurgeMayComplete();

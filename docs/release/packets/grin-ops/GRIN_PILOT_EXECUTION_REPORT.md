@@ -58,11 +58,14 @@ Private before/after archives: `/tmp/grin-e-evidence/` (not in git).
 
 | Scenario | Result |
 |---|---|
-| unauthenticated_denial | Requires `code=unauthenticated` (or HTTP 401) |
-| authenticated path | Firebase **client** phone OTP; `/session` verifies ID token via Google securetoken certs for `vyaamikk-diary`; `body.uid` ignored |
+| unauthenticated_denial | **PASS** (prior LIVE; `code=unauthenticated`) |
+| authenticated path | **WAITING** — client phone OTP blocked; see `AUTH_SMS_DIAGNOSIS.md` (limit **UNKNOWN**) |
+| authenticated registration / replay / upload-verify / confirm / narrow read | **NOT RUN** (blocked on Auth) |
 | non_admitted / cross_owner | **NOT RUN** |
 
-Harness corrections (tooling after `3a24bb8`): verified claims only; in-memory Auth + clear after handoff; one-use nonce + same-origin + body size; no `users/{uid}` create fallback; confirmation/replay/evidence tightened; `read_export` reported as **NARROW** (authorized read + local manifest assembly, not production PDF/export).
+Harness corrections:
+- `17b8a68`: verified claims; in-memory Auth; nonce/origin/body bounds; no `users/{uid}` create; narrow read (not production PDF export)
+- `20df6b9`: `sendInFlight` + `throttled` (no auto-retry); cancel/timeout retire pending handoff; controller unit tests (injected Auth, no SMS)
 
 `iamcredentials.signJwt` remains unused. No IAM expansion.
 
@@ -75,11 +78,12 @@ cd <combined-worktree>
 node --test docs/release/packets/grin-ops/grin-functions-patch-env.test.mjs \
   docs/release/packets/grin-ops/grin-functions-op.test.mjs \
   docs/release/packets/grin-ops/grin-live-f-signin.test.mjs \
+  docs/release/packets/grin-ops/grin-live-f-signin-controller.test.mjs \
   docs/release/packets/grin-ops/grin-live-f-evidence.test.mjs \
   docs/release/proposals/team1/grin-pilot-smoke.test.mjs
 ```
 
-Expected: **62 PASS** (patch-env + ops-guard + F sign-in/evidence + smoke gate).
+Auth controller + `/session` tests: **12 PASS** locally (2026-10-07). Full suite count may differ; re-run before citing.
 
 ---
 
