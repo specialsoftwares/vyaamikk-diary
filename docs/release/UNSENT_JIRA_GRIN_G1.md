@@ -236,3 +236,7 @@ Cherry-pick of `2cebe32` (`team/grin-t2-capacity`) onto combined as `56f2040e301
 
 `docs/release/proposals/team4/TWO_OWNER_DECISIONS.md` + `STORAGE_OWNER_CHOICE.md` + refreshed deletion sheet (team `7e4ed20` on `team/grin-t4-product`). T4 recorded combined `aea65c1` / application `520f9f9` as its checkout — **historical**; current application is `56f2040` (T2 already folded; not re-cherry-picked). Deletion: 15 implemented / 180 requested / public UNRESOLVED; A–D blank; freeze ≠ delete. Storage: 1/5/20 vs 256 MiB/1/5 GiB; one write; neither advertised. Catalog **NOT RUN**. Purchase-entry `"0"`. No activation/Save/submit. Do not mark billing / public-release Done.
 
+## Team 3 freeze vs current HEAD (unsent, 2026-10-06)
+
+`docs/release/proposals/team3/CURRENT_HEAD_VS_FREEZE.md` (team `d4a8197` on `team/grin-t3-freeze`). Freeze remains **`520f9f9`** + GHA **`37425360211`**. Current application **`56f2040` is not the freeze.** T3 observed combined docs HEAD `28182c2` — **historical**; later T4 docs fold is `09452a9`; application blobs still `56f2040`. B1 ≠ B2; **neither granted**. Do not build `56f2040` under the `520f9f9` packet. No EAS/Play write. Do not mark device / Internal Testing Done.
+

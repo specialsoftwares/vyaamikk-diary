@@ -33,6 +33,13 @@ for this freeze.
 | CI / helper-pin HEAD | `0d7aa17a6efcf3ce6874269eb57afda0a2b45559` | Canonical CI head. Adds Functions helper pin to `520f9f9` (plus intervening test-script/`package.json` wiring). `git diff --stat 520f9f9 0d7aa17 -- functions src eas.json app.json app firebase.json tools/goods-evidence-storage` **empty**. Use `0d7aa17` only if the owner insists the helper pin is in the freeze tree. Application blobs remain `520f9f9`. |
 | Combined docs | `aea65c170adb25f09ca1045593f18847df2f3b30` | Docs-only after `0d7aa17`. **Not** an application SHA. Coordinator-owned. |
 
+**2026-10-06 (after T2 capacity fold):** Combined **current application** is
+`56f2040e30159579edc0cbfbc88e2ba706a6abd2` — **not** this freeze. Canonical
+GHA `37425360211` does **not** cover `56f2040`. **B1 must not build
+`56f2040` under this `520f9f9` packet.** Do not silently retarget B1.
+A later freeze needs a new SHA + matching canonical CI. Table:
+`CURRENT_HEAD_VS_FREEZE.md`.
+
 A later **material source change** (versionCode rewrite, purchase-entry/quota/GRIN
 flag change, or any other application commit) requires a **new binary** and a
 **new CI**. Do not rebuild from a dirty tree. Do not reuse historical AAB
