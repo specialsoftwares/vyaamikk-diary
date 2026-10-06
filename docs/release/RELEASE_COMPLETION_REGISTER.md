@@ -69,7 +69,7 @@ reproduction. Do not reopen S1/S2 without a new reproduction.
 | BACKEND PILOT READY | Consolidated packet in coordinator chat. **Not authorized.** GRIN seven **ABSENT**. |
 | INTERNAL BUILD READY | Candidate **`fcda7cd`**. **Do not build `520f9f9` / `56f2040` / `313025f` alone.** B1≠B2 **neither granted**. Canonical CI **NOT RUN**. |
 | DEVICE ACCEPTED | **NOT RUN**. OnePlus 12R available today — not yet executed. |
-| BILLING ACCEPTED | Fail-closed tester SOURCE landed; catalog **NOT RUN**; purchases **off**; REAL-CHARGE tests **not run** |
+| BILLING ACCEPTED | Tester SOURCE+INJECTED **PASS** (`bbcb144`); catalog **NOT RUN**; purchases **off**; REAL-CHARGE **not run** |
 | PUBLIC SUBMISSION READY | Blocked on wired 1/3/10+45d, device, billing, listing. Owner writes recorded. |
 | PUBLIC ROLLOUT APPROVED | Not authorized |
 
