@@ -40,7 +40,7 @@ Provisional guidance: declare **service providers** per Play’s definitions car
 | Users can request delete account & data? | Yes |
 | In-app pathway? | Yes — Settings → Delete Account & Data |
 | Web link resource? | https://vyaamikk.specialsoftwares.com/delete-account |
-| Data deleted? | Cloud DB records after 15-day grace; limitations apply (see deletion disclosure) |
+| Data deleted? | **After T2:** 45-day cancellation window then purge of app-controlled cloud records the job actually deletes. **Today (implemented):** 15-day grace still in code and live `/privacy`. **Do not Save 15-day copy after T2. Do not Save now.** See `docs/release/proposals/team4/DELETION_45_PLAY_DISCLOSURE.md`. |
 | Additional retention? | Yes — limited anti-abuse indexes; device residual; shared PDFs |
 
 ---

@@ -46,7 +46,10 @@ import type {
   SubscriptionStatusDoc,
   VyaamikkPlan,
 } from "../types";
-import { CANONICAL_PLAY_PACKAGE_NAME } from "./playConstants";
+import {
+  assertPlayBillingTesterAllowedIfEnforced,
+  CANONICAL_PLAY_PACKAGE_NAME,
+} from "./playConstants";
 import { googlePaidOrderTotalToPaise } from "./playMoney";
 import {
   playLifecycleIdempotencyKey,
@@ -96,6 +99,14 @@ export interface AndroidBillingDeps {
   nowMs: () => number;
   postCommitTaxHandoff?: PostCommitTaxHandoff;
   packageName?: string;
+  /**
+   * Production wrappers set true. Empty PLAY_BILLING_TESTER_UIDS then denies
+   * entitlement grants (callables, RTDN, reconciliation). Unit tests omit this
+   * so catalog/state matrices stay independent of the allowlist. Voided-purchase
+   * revocation does not use this gate.
+   */
+  enforceRestrictedTesters?: boolean;
+  restrictedTesterEnv?: NodeJS.ProcessEnv;
 }
 
 export interface AndroidBillingResult {
@@ -799,6 +810,11 @@ async function reconcileFetchedSubscription(
     assertOwnerMatchesCaller(owner.uid, input.callerUid);
   }
   const uid = owner.uid;
+  assertPlayBillingTesterAllowedIfEnforced(
+    uid,
+    deps.enforceRestrictedTesters,
+    deps.restrictedTesterEnv ?? process.env
+  );
   const diagnosticUid = deps.diagnosticUidFor(uid);
 
   const linkedRaw = input.sub.linkedPurchaseToken;

@@ -129,6 +129,7 @@ export const scheduledBillingReconciliation = onSchedule(
         }),
         diagnosticUidFor,
         nowMs,
+        enforceRestrictedTesters: true,
       };
       android = createAndroidStoreRevalidator(androidDeps, androidDeps.cipher);
     }

@@ -84,8 +84,8 @@ packet.
 | Topic | Owner choice | Blocks |
 |---|---|---|
 | Pricing | **A — include in existing plans** (2026-10-06). **Do not reopen.** | Packet E real-store acceptance; public copy |
-| Storage quota | **Proposed 1/5/20 GiB pending confirmation** vs alternative **256 MiB / 1 GiB / 5 GiB**. Owner must write **one** table. See `STORAGE_OWNER_CHOICE.md`. | Advertising; public upload until confirmed |
-| Retention | **Expiry 90+30 (source).** Explicit deletion: implemented **15 days** vs requested **180 days** vs public **UNRESOLVED**. A/B/C/D blank. See `DELETION_15_VS_180_OWNER_SHEET.md`. | Public GRIN evidence; **P8 open**; production purge job not this assignment |
+| Storage quota | **Owner 1 / 3 / 10 GiB** (2026-10-06). **Do not advertise.** Source still 1/5/20 until T2. | Advertising; public upload copy |
+| Retention | **Expiry 90+30 (source).** Explicit deletion: owner **45-day** (supersedes 180); implemented **15** until T2. See `DELETION_45_PLAY_DISCLOSURE.md`. | Public GRIN evidence; **P8 open**; production purge job not this assignment |
 
 Do not mark GRIN, G6, billing, or public release Done until the chosen rows
 exist in writing.

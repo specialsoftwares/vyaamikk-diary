@@ -8,14 +8,13 @@ the consolidated owner policy mission. Those decisions authorize **source
 implementation and tests**. They do **not** authorize live deployment,
 billing activation, or Play publication.
 
-Two writes still blank (Team 4 product sheets — owner must fill the rows):
+Owner writes **2026-10-06** (this continue):
 
-- Explicit deletion public window:
-  `docs/release/proposals/team4/DELETION_15_VS_180_OWNER_SHEET.md`
-- Storage GiB table:
-  `docs/release/proposals/team4/STORAGE_OWNER_CHOICE.md`
+- Storage: **Starter 1 GiB / Professional 3 GiB / Business 10 GiB**. **Do not advertise.**
+- Explicit deletion: **45-day** cancellation window after a confirmed request. **Supersedes 180.** Implemented still 15 until Team 2. Play freeze ≠ delete. `INCLUDE_GRIN_IN_ACCOUNT_PURGE` stays **false**.
 
 Source of original options: `D_OWNER_POLICY_OPTIONS.md`.
+Sheets: `STORAGE_OWNER_CHOICE.md`, `DELETION_45_PLAY_DISCLOSURE.md`.
 
 ---
 
@@ -49,16 +48,15 @@ real-store acceptance of the diary SKU. Purchase-entry stays `"0"`.
 existing technical ceilings (warn 80/95; refuse at cap; no silent delete;
 no overage). That framework is **not** reopened here.
 
-**GiB table: still one owner write.** Do not silently replace 1 / 5 / 20.
-Do not advertise. Do not call the smaller table guaranteed profitable.
-GCS bucket location **UNKNOWN**.
+**Owner choice 2026-10-06:** Starter **1 GiB** / Professional **3 GiB** / Business **10 GiB**.
+Neither option 1 (1/5/20) nor option 2 (256 MiB/1/5 GiB). **Do not advertise.**
+Source constants still 1/5/20 until Team 2 wires this table. GCS location **UNKNOWN**.
 
-| Option | Starter | Professional | Business |
-|---|---|---|---|
-| **1 — original proposal** (wired, pending confirmation) | 1 GiB | 5 GiB | 20 GiB |
-| **2 — smaller alternative** (named, not the live cap) | 256 MiB | 1 GiB | 5 GiB |
-
-**Owner choice (1 / 2 / UNRESOLVED):** _________________
+| Option | Starter | Professional | Business | Status |
+|---|---|---|---|---|
+| Original proposal | 1 GiB | 5 GiB | 20 GiB | Not selected |
+| Smaller alternative | 256 MiB | 1 GiB | 5 GiB | Not selected |
+| **Owner 2026-10-06** | **1 GiB** | **3 GiB** | **10 GiB** | **Selected. Not yet wired. Do not advertise.** |
 
 Fill the row on `docs/release/proposals/team4/STORAGE_OWNER_CHOICE.md`.
 Economics: combined `docs/release/proposals/team2/STORAGE_ECONOMICS.md`.
@@ -92,22 +90,17 @@ tests only. Do **not** substitute 30 as the account-deletion window.
 
 ### Explicit account deletion — three facts (do not collapse)
 
-Owner plain-language sheet (choices **A–D blank** until the owner writes):
-`docs/release/proposals/team4/DELETION_15_VS_180_OWNER_SHEET.md`.
+Play / privacy worksheet: `docs/release/proposals/team4/DELETION_45_PLAY_DISCLOSURE.md`.
 
 | # | Fact | Status |
 |---|---|---|
-| 1 | **Current implemented behavior** | `DELETION_GRACE_MS` = **15 days**. Live `/privacy` and `/delete-account` also describe 15 days. **Not** “the owner already chose 15.” |
-| 2 | **Owner-requested policy** | **180 days** after an explicit account-deletion request. **Not** legally/Play approved. |
-| 3 | **Policy approved for public operation** | **UNRESOLVED.** Do not advertise or activate 180 days. Do not silently substitute 15 or 30. |
+| 1 | **Current implemented behavior** | `DELETION_GRACE_MS` = **15 days**. Live `/privacy` and `/delete-account` also describe 15 days. |
+| 2 | **Superseded request** | **180 days** — **superseded** 2026-10-06. Do not implement 180. |
+| 3 | **Owner policy 2026-10-06** | **45-day** cancellation window after a **confirmed** account-deletion request. Source not yet wired. Play: freeze ≠ delete. `INCLUDE_GRIN_IN_ACCOUNT_PURGE` stays **false** until separately approved. |
 
-Changing `DELETION_GRACE_MS` does **not** implement a safe 180-day policy.
-Play User Data (fetched 2026-10-06): temporary deactivation, disabling, or
-freezing **does not qualify** as account deletion. Optional 180-day
-recoverability would be a **separate archive product**. **P8 stays open.**
-Do not flip `INCLUDE_GRIN_IN_ACCOUNT_PURGE`.
+Changing `DELETION_GRACE_MS` from 15 to 45 implements the **pending-then-purge clock**. It does **not** by itself: enable GRIN purge, change subscription expiry (90+30), create a recoverable archive, or satisfy Play if the account is only frozen.
 
-**Owner choice (A / B / C / D):** _________________
+**Owner choice:** **45 days** (recorded 2026-10-06). Not 15. Not 180. Not 30.
 
 ### Exit and export
 
@@ -133,9 +126,9 @@ until lifecycle is implemented and approved.
 | Item | State |
 |---|---|
 | Q1 GRIN-in-existing-plans | **recorded** — do not reopen |
-| Storage GiB 1/5/20 vs 256 MiB/1/5 | **UNRESOLVED** — `STORAGE_OWNER_CHOICE.md` |
-| 180-day public deletion policy | **UNRESOLVED.** A–D blank. Engineering hold at implemented 15 days is **not** a recorded owner choice |
-| Advertising 1/5/20 GiB | blocked |
+| Storage GiB | **1 / 3 / 10 selected** — not wired here; **do not advertise** |
+| Explicit deletion | **45-day** owner policy; implemented **15** until T2; 180 superseded |
+| Advertising GiB | blocked |
 | Live Functions/Rules/IAM / Play catalog | HOLD / catalog **NOT RUN** |
 | Production purge job | **not introduced** |
 | Purchase-entry | **`"0"`** |

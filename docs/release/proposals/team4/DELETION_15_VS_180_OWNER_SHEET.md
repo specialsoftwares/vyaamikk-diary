@@ -1,5 +1,13 @@
 # Owner decision: account deletion 15 days vs 180 days
 
+**SUPERSEDED 2026-10-06.** Owner selected a **45-day** cancellation window
+after a confirmed account-deletion request. Do **not** implement 180. Do
+**not** treat implemented 15 as the owner’s choice. Canonical worksheet:
+`DELETION_45_PLAY_DISCLOSURE.md`.
+
+This file is kept as provenance for the earlier 15-vs-180 ask. Choices A–D
+below are **not** the live owner write.
+
 **This is not a recorded owner choice.** Team 4 cannot close the public
 deletion window for you. Counsel has not signed this. Google Play has not
 approved a number in this repository. This sheet is **not legal advice** and

@@ -1,12 +1,10 @@
 # Team 4 billing / Play handoff
 
 Worktree: `/Users/shivamsaurav/vyd-worktrees/grin-t4-product`  
-Branch: `team/grin-t4-product` (do **not** force-push; already ahead of origin).  
-Combined READ-ONLY HEAD: `aea65c170adb25f09ca1045593f18847df2f3b30`  
-Application SHA to describe: `520f9f98bc952fd7f30a907da9e85774629a69c0`
-(**no AAB of this SHA**).  
-Canonical CI: GitHub Actions run **`37425360211`** on `0d7aa17`.  
+Branch: `team/grin-t4-product` (do **not** force-push).  
+Combined READ-ONLY HEAD: `c45518a` (application `56f2040`; do not build `520f9f9`).  
 Client purchase-entry: **`"0"`** on production / preview / `internal-grin`.
+**GRIN readiness ≠ billing readiness.**
 
 HOLD: Play Save, catalog mutation, seeding, purchases, billing activation,
 website publish, submission.
@@ -15,42 +13,36 @@ website publish, submission.
 
 ---
 
-## Two owner decisions (blank until the owner writes)
+## Two owner decisions (recorded 2026-10-06)
 
 Index: `TWO_OWNER_DECISIONS.md`.
 
-1. **Deletion public window** — `DELETION_15_VS_180_OWNER_SHEET.md`  
-   Three facts, do not collapse: **Implemented = 15 days**; **Owner
-   requested = 180 days**; **Final public policy = UNRESOLVED**. Choices
-   A/B/C/D **blank**. **P8 open**. Do not record 15 as the owner’s choice.
-   Do not promise that changing `DELETION_GRACE_MS` is a safe 180-day
-   policy. Play User Data (2026-10-06): freeze / disable ≠ delete.
+1. **Deletion** — **45-day** cancellation window after confirmed request.
+   Supersedes 180. Implemented 15 until T2. Freeze ≠ delete. Constant change
+   is pending clock, not archive, not GRIN purge.
+   `DELETION_45_PLAY_DISCLOSURE.md`.
 
-2. **Storage GiB table** — `STORAGE_OWNER_CHOICE.md`  
-   Present **both** original **1 / 5 / 20 GiB** (wired, not advertised)
-   **and** alternative **256 MiB / 1 GiB / 5 GiB** (not wired, not
-   guaranteed profitable). Request **one** final choice. GCS location
-   **UNKNOWN**. Team 2 economics on combined:
-   `docs/release/proposals/team2/STORAGE_ECONOMICS.md`.
+2. **Storage** — **1 / 3 / 10 GiB**. **Do not advertise.**
+   `STORAGE_OWNER_CHOICE.md`.
 
 ---
 
 ## Billing (live vs source)
 
 - Live asia-south1 billing handlers **ACTIVE** (2026-10-06). `PLAY_BILLING_ENABLED` **key absent** → source fail-closed (`=== "true"`). Client purchase-entry **`"0"`**. Pub/Sub topics **0**. KMS unused. Do **not** reuse 2026-09-20 “catalog empty” / “billing disabled.”
-- Play catalog / prices / license testers: **NOT RUN**. This continue: no Play Console session; `gcloud` **absent**; Python `googleapiclient` **absent**; **do not use Firebase token as Play Android Publisher** (prior Publisher call **403**). Catalog stays **unknown**, not “empty.”
+- Play catalog / prices / license testers: **NOT RUN**. This continue: no Play Console session; `gcloud` **absent**; Python `googleapiclient` **absent**; **do not use Firebase token as Play Android Publisher** (prior Publisher call **403**). Catalog stays **unknown**, not “empty.” Pub/Sub inspect **NOT RUN** (`gcloud` absent) — do not reuse a prior “0 topics” count as a fresh inspect.
 - Trace confirmed: `purchaseEntryGate` → `iapSession` → `iapPurchaseProcessor` → `validateAndActivateAndroid` → `androidSubscriptionAdapter` → `deriveEntitlement` → `atomicBillableCreate` → `rtdn`.
-- `PLAY_BILLING_ENABLED=true` would expose **all** authenticated callers. Internal track / hidden button are not backend controls.
-- **Implemented (fail-closed, not enabled):** `PLAY_BILLING_TESTER_UIDS` UID allowlist **after** the enablement check on prepare/validate. Empty list denies everyone. Tests: `npm run test:billing-play-constants`. **No tester emails/UIDs invented. Billing not flipped. Not deployed.** Residual: RTDN/reconciliation still UID-ungated (Pub/Sub 0). See `RESTRICTED_TESTER_ALLOWLIST.md`.
+- `PLAY_BILLING_ENABLED=true` would expose **all** authenticated callers unless the UID allowlist also passes. Internal track / hidden button are not backend controls.
+- **Implemented (fail-closed, not enabled):** `PLAY_BILLING_TESTER_UIDS` (CSV or JSON) **after** enablement on prepare/validate **and** `enforceRestrictedTesters` on production RTDN + Android reconciliation. Empty list denies everyone. Tests: `npm run test:billing-play-constants`. **No tester emails/UIDs invented. Billing not flipped. Not deployed.** See `RESTRICTED_TESTER_ALLOWLIST.md`.
 - Team 3: freeze purchase-entry `"0"` on ordinary Internal GRIN. Billing-test binary = **separate later profile/SHA**.
-- Acceptance matrix (purchase, restore, pending, cancel, renewal, refund/revocation, duplicate RTDN, account switch, expiry, reconciliation): **SOURCE** where tests exist; all **LIVE_STORE NOT RUN**. `APPROVAL_C_RESTRICTED_BILLING.md`.
+- Executable SOURCE plan: `docs/release/packets/RESTRICTED_BILLING_ACCEPTANCE_PLAN.md`. LIVE_STORE **NOT RUN**. **REAL-CHARGE RISK** tests named there (do not execute). Packet: `APPROVAL_C_RESTRICTED_BILLING.md`.
 
 ### RTDN + entitlement reconciliation (readiness, not activation)
 
 | Piece | SOURCE | LIVE |
 |---|---|---|
 | `androidRtdn` HTTP | Exported asia-south1; `PLAY_BILLING_ENABLED` then OIDC (`PLAY_RTDN_PUSH_AUDIENCE` + `PLAY_RTDN_PUSH_SERVICE_ACCOUNT`) | Handler **ACTIVE**; enablement key **absent**; Pub/Sub topics **0**. If the HTTPS endpoint were hit while billing were enabled and OIDC env absent → `rtdn_oidc_config_missing` |
-| `PLAY_BILLING_TESTER_UIDS` on RTDN | **Not applied** (residual) | N/A while Pub/Sub 0 |
+| `PLAY_BILLING_TESTER_UIDS` on RTDN | Production deps `enforceRestrictedTesters: true` (SOURCE). Empty list denies grant. | Inspect **NOT RUN** this continue |
 | `scheduledBillingReconciliation` | Tick no-ops unless `BILLING_RECONCILIATION_ENABLED === "true"` | Job **exists**; reconciliation env key **absent** |
 | Entitlement write | `deriveEntitlement` → `users/{uid}/subscription/status`; Rules deny client writes | Fail-closed with billing off |
 | Duplicate RTDN / refund / revoke | Unit/emulator in `functions/src/billing/**` | **LIVE_STORE NOT RUN** |
@@ -80,7 +72,7 @@ Do **not** wire Pub/Sub, set OIDC, or enable reconciliation from this file.
 - In-app legal baseline **2026-07-27** preserved. Live `/privacy` effective **15 July 2026**. Do not backdate.
 - Website (re-read delete-account 2026-10-06): `/privacy` 200 (prior); `/delete-account` 200 email `support.vyd@specialsoftwares.com` (Play-allowed; identifies app + Ananya LLP). **Do not invent a form. Do not call mailto inherently defective.** Inbox monitoring **NOT RUN**.
 - `/~flock.js` 200 (~21KB, Tinybird). `data-proxy-url="/~api/analytics"` → browser POST first-party; POST **202**, GET **404**. App does **not** load flock.js. Upstream Tinybird forward **UNKNOWN** — **do not claim flock.js forwards solely from 202**. Cloudflare `__cf_bm` is hosting, not an app SDK.
-- Explicit account deletion — **three facts, do not collapse:** (1) **Implemented = 15 days**; (2) **Owner requested = 180 days**; (3) **Public-approved policy = UNRESOLVED**. See `DELETION_15_VS_180_OWNER_SHEET.md`.
+- Explicit account deletion — owner **45-day** policy; implemented **15** until T2; 180 superseded. See `DELETION_45_PLAY_DISCLOSURE.md`. **Do not Save Play. Do not publish website.**
 
 ---
 

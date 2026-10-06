@@ -87,6 +87,7 @@
     "test:client-profile-patch": "npx --yes tsx src/services/auth/clientProfilePatchPayload.test.ts",
     "test:auth-wrapper": "npx --yes tsx src/config/authWrapper.test.ts",
     "test:play-review-phone": "npx --yes tsx src/auth-v2/playReviewPhoneContract.test.ts",
+    "test:deletion-grace-copy": "npx --yes tsx src/content/legal/deletionGraceCopy.unit.test.ts",
     "dev:reset-local": "npx --yes tsx scripts/dev-reset-cli.ts local",
     "dev:reset-firebase": "npx --yes tsx scripts/dev-reset-cli.ts firebase",
     "dev:reset-user": "npx --yes tsx scripts/dev-reset-cli.ts user",

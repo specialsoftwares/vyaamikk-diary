@@ -31,7 +31,10 @@ You do **not** need to reinstall the App to start an in-App deletion when you ca
 
 ## What happens after you confirm
 
-1. Your account enters **pending deletion** with a **15-day grace period**.  
+1. Your account enters **pending deletion** with a grace period of
+   **`DELETION_GRACE_DAYS` days** (implemented **15** until Team 2 wires
+   owner **45-day** policy; **do not publish 15-day copy after T2**).  
+   Canonical: `docs/release/proposals/team4/DELETION_45_PLAY_DISCLOSURE.md`.  
 2. During this period, access to normal App use is restricted according to product rules.  
 3. Where reactivation is offered, it requires **in-App verification** (for example a verification code to your registered business email). **Replying to an email is not enough to reactivate.**  
 4. After the grace period, we run final deletion steps for **App-controlled cloud database records** linked to your account.
