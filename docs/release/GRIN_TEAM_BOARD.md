@@ -5,16 +5,16 @@ Do not collapse to Done.
 
 Arrangement: one coordinator plus five **local** Cursor Task subagents on separate worktrees. AI roles, not human sign-off.
 
-Checkpoint **2026-10-06 14:18:** Application **`fcda7cd`** (restricted testers on `313025f`). T5 PASS is for `313025f` only. Pin STALE. CI **NOT RUN**. Do not build older SHAs. Billing not activated. Device/live/public **not accepted**.
+Checkpoint **2026-10-06 14:32:** Application **`fcda7cd`**. T5 SOURCE+INJECTED **PASS** (`bbcb144`). Pin STALE until CI. Do not apply pin. Billing not activated. Device/live/public **not accepted**.
 
 | Task | Owner | Branch | Worktree | Dependency | Status | Evidence | Blocker | Next |
 |---|---|---|---|---|---|---|---|---|
-| Integration | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | `fcda7cd` | running | billing-tester SOURCE folded on 1/3/10+45d | live HOLD | T5 of `fcda7cd`; pin+CI; do not execute A1 |
-| Backend pilot | team1 | `team/grin-t1-consolidated-1310` | `grin-t1-backend` | `fcda7cd` | review | Packet `b7eb5ce` + pin-diff `fcda7cd` proposed. Helper not rewritten. | `GRIN_OPS_ALLOW_LIVE=1` HOLD | Owner letters; pin after CI+T5 |
+| Integration | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | `fcda7cd` | running | T5 PASS `bbcb144`; pin unapplied | live HOLD | Pin after CI; do not execute A1 |
+| Backend pilot | team1 | `team/grin-t1-consolidated-1310` | `grin-t1-backend` | `fcda7cd` | review | Packet `b7eb5ce` + pin-diff `fcda7cd` proposed. Helper not rewritten. | `GRIN_OPS_ALLOW_LIVE=1` HOLD | Owner letters; pin after CI |
 | Policy / deletion | team2 | `team/grin-t2-owner-choice-1310` | `grin-t2-evidence` | `ad72d79` | review | 1/3/10 live; 45d grace; flag false; P8 FAIL | advertising; live purge | Do not reopen S1/S2; do not flip P8 |
 | Build / device | team3 | `team/grin-t3-candidate-1310` | `grin-t3-offline` | `fcda7cd` | review | `21fac5b` named `313025f` — **superseded**. B1≠B2 ungranted. | EAS/Play HOLD | Recheck Play before B1 of `fcda7cd` |
 | Billing / Play | team4 | `team/grin-t4-product` | `grin-t4-product` | purchase-entry `"0"` | review | Folded `fcda7cd`. Catalog NOT RUN. REAL-CHARGE named. | activation HOLD | No Save/submit; private UIDs |
-| Independent QA | team5 | `team/grin-t5-qa` | `grin-t5-qa` | newly landed only | source_verified | `REVIEW_313025f.md` `123e42f`. `fcda7cd` **pending**. P8 FAIL. | NATIVE_DEVICE | Review `fcda7cd` vs `313025f`; leftover P3-FAIL stay dirty |
+| Independent QA | team5 | `team/grin-t5-review-fcda7cd` | `grin-t5-qa` | newly landed only | source_verified | `REVIEW_fcda7cd.md` `bbcb144`. SOURCE+INJECTED PASS. P8 FAIL. | NATIVE_DEVICE | Next landed source; leftover P3-FAIL stay dirty |
 | E1 evidence composition | team1 | `team/grin-t1-backend` | `grin-t1-backend` | `15bd2a6` | source_verified | persistGrinOwnerSession → processAttachments → real httpsCallable on isolated Functions emulator | live export HOLD | Stay unexported / undeployed |
 | E1/E2/E4/E5 evidence integrity | team2 | `team/grin-t2-evidence` | `grin-t2-evidence` | `29c6d3f` | source_verified | G2 unit + STORAGE_EMULATOR 8091/9200 | live IAM | Stay undeployed |
 | E2/E3 admission + descriptors | team3 | `team/grin-t3-offline` | `grin-t3-offline` | `0d0dd84` | source_verified | SQLITE_HOST outbox + capture columns | native death not claimed | Stay undeployed |

@@ -272,3 +272,7 @@ Cherry-pick of `ad72d79` (`team/grin-t2-owner-choice-1310`) onto combined as `31
 
 Application **`fcda7cd64e9622e50c38223a7156f0f6b8ca5576`** on `integration/grin-g1-g5-source`. Empty `PLAY_BILLING_TESTER_UIDS` denies all. Purchase-entry **`"0"`**. Catalog/RTDN **NOT RUN**. REAL-CHARGE-01..05 named, not run. Pin still `520f9f9` — **STALE vs `fcda7cd`**. T5 PASS is for `313025f` only. Do not build `313025f` alone. Do not activate billing. Do not mark billing / device / public Done.
 
+## Team 5 review fcda7cd (unsent, 2026-10-06)
+
+`docs/release/proposals/team5/REVIEW_fcda7cd.md` (team `bbcb144` on `team/grin-t5-review-fcda7cd`). SOURCE+INJECTED **PASS** at `fcda7cd` for fail-closed Play testers. Purchase-entry `"0"`. **P3 ACCEPTED**. **P8 FAIL**. S1/S2 not reopened. Pin STALE. Canonical CI **NOT RUN**. Voided-purchase vs de-listed tester is a billing-activation residual, not an Internal GRIN blocker. GRIN readiness ≠ billing readiness. Do not apply pin. Do not mark device / billing / public Done.
+
