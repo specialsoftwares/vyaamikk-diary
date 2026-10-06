@@ -24,7 +24,7 @@ import { createHash } from "node:crypto";
 
 const require = createRequire(import.meta.url);
 
-export const PINNED_APP_SHA = "520f9f98bc952fd7f30a907da9e85774629a69c0";
+export const PINNED_APP_SHA = "540e07aa07f376716484adb879ce66cb9fb170ce";
 export const PROJECT_ID = "vyaamikk-diary";
 export const PROJECT_NUMBER = "982505811909";
 export const REGION = "asia-south1";
