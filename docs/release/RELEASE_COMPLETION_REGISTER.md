@@ -49,7 +49,7 @@ team branches. Do not reopen ops-guard A/B without a new reproduction.
 |---|---|
 | SOURCE READY | Application `520f9f9` + tooling `0d7aa17`. Canonical GHA **`37425360211` success**. S1/S2 closed at INJECTED+EMULATOR. P3 accepted. **P8 FAIL**. Do not advertise GiB. |
 | BACKEND PILOT READY | **A1 offerable, not authorized.** GRIN seven **ABSENT**. A2–A7 HOLD. |
-| INTERNAL BUILD READY | Freeze SHA **`520f9f9`** + CI **`37425360211`**. B1≠B2, **neither granted**. vc23 unreserved. |
+| INTERNAL BUILD READY | Freeze SHA **`520f9f9`** + CI **`37425360211`** (`APPROVAL_B_DRAFT.md`). B1≠B2, **neither granted**. vc23 unreserved. Owner device form **blank**. |
 | DEVICE ACCEPTED | **NOT RUN** (no hardware; testers unnamed) |
 | BILLING ACCEPTED | Fail-closed; catalog **NOT RUN**; purchases **off** |
 | PUBLIC SUBMISSION READY | Blocked on owner GiB, public deletion policy, device, billing, listing |
@@ -87,7 +87,7 @@ purchase-entry remains `"0"`. Play Console catalog **NOT RUN**.
 |---|---|---|
 | 1 Backend | T1 `REVIEW_AFTER_S1_S2` SOURCE PASS (`80b802f`). Pin **applied** `PINNED_APP_SHA=520f9f9` after T5 INJECTED+EMULATOR PASS. Ops-guard 34/34 re-run. A1 still independently offerable. A3 HOLD. No env-override. | Live Functions/Rules/IAM/admission/enable |
 | 2 Policy | S1/S2 folded (`0cd3473` → combined `520f9f9`). Holds `1.o.{len}.{ledgerId}.{len}.{evidenceId}`; `MAX_STORAGE_HOLDS=2500`. Economics: bucket location **UNKNOWN**; do not advertise 1/5/20; 256 MiB/1/5 GiB alternative not selected, not guaranteed profitable. `INCLUDE_GRIN_IN_ACCOUNT_PURGE=false`. 15-day grace unchanged. | Owner GiB confirm; 180-day public policy; no live purge |
-| 3 Build/device | Play explorer **RUN** 2026-10-06 (vc22 highest uploaded; 23 **unreserved**). Freeze SHA candidate `520f9f9` **only after** matching canonical CI. Device sheet **NOT RUN**. B1≠B2, neither granted. | EAS/native build; Play upload (separate); Play Console re-read before B1 |
+| 3 Build/device | Freeze **`520f9f9`** + GHA **`37425360211`**. Play explorer 2026-10-06 must be **re-read before B1**. vc23 **unreserved**. Owner device form blank. Device rows **NOT RUN**. B1≠B2, neither granted. | EAS/native build; Play upload (separate) |
 | 4 Billing/Play | Owner sheet `DELETION_15_VS_180_OWNER_SHEET.md` (15 implemented / 180 requested / public UNRESOLVED). Catalog **NOT RUN**. Allowlist SOURCE, not live. | Product/price/activation/submission; owner A/B/C/D |
 | 5 QA | Post-fix `S1_S2_POST_FIX.md` (`1e33894`). **S1 PASS** / **S2 PASS** INJECTED + G2 EMULATOR `8091`. **P3 ACCEPTED**. **P8 FAIL**. Device/Play/live/GHA **NOT RUN**. | Does not own implementation; not device/live/billing |
 

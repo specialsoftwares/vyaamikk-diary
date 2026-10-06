@@ -216,3 +216,7 @@ Cherry-pick of `0cd3473` (`team/grin-t2-s1s2`) onto combined as `520f9f98bc952fd
 
 Published PR #31 head `0d7aa17`. Application `520f9f9`. Tooling successor `0d7aa17` (helper pin constant only vs historical ops-guard `228a8f5`; not byte-identical). Independently observed GHA run **`37425360211`** job **`112143748428`** verify + canonical gate **success**; skipped none observed. S1/S2 closed at INJECTED+EMULATOR. P3 accepted. P8 open. Device/live/billing/public not accepted. A1 isolated Firestore Rules **offerable, not executed**. Do not mark GRIN / device / billing / public-release Done.
 
+## Team 3 Internal AAB freeze (unsent, 2026-10-06)
+
+`docs/release/proposals/team3/APPROVAL_B_DRAFT.md` + `OWNER_DEVICE_FORM.md` (team `8ca2b59` on `team/grin-t3-freeze`). Freeze application **`520f9f9`** with canonical CI **`37425360211`** (head `0d7aa17`). B1 ≠ B2; **neither granted**. versionCode **23 UNRESERVED**. Re-read Play explorer before B1. Testers/phones blank; `adb` empty → **NOT RUN**. No EAS/Play write. Do not mark device / Internal Testing Done.
+

@@ -1,25 +1,25 @@
 # Approval B — Internal Testing Android build / upload
 
-**HOLD — freeze SHA not assigned.** Do **not** build from this packet’s
-historical pin `5d5df3d` / CI `37351685421`. Current application
-`b845e8a` is **pre-S1/S2** and is also **not** the Internal AAB freeze.
+**Freeze assigned. B1 and B2 not granted.** Do **not** build from historical
+pin `5d5df3d` / CI `37351685421` or from pre-S1/S2 `b845e8a`.
 
-Current freeze draft: `docs/release/proposals/team3/APPROVAL_B_DRAFT.md`
-(Play inventory 2026-10-06; versionCode 23 **UNRESERVED**; B1/B2 not
-granted). Owner may approve **B1** only after a post-S1/S2 application
-SHA and matching canonical CI. Device sheet:
-`docs/release/proposals/team3/DEVICE_HANDOFF.md`.
+Freeze draft: `docs/release/proposals/team3/APPROVAL_B_DRAFT.md`  
+Owner device form (blank): `docs/release/proposals/team3/OWNER_DEVICE_FORM.md`
+
+```
+Application SHA: 520f9f98bc952fd7f30a907da9e85774629a69c0
+Canonical CI:    GHA 37425360211 / job 112143748428 / head 0d7aa17 success
+Version name:    1.0.0
+versionCode:     23 UNRESERVED
+EAS profile:     internal-grin (AAB)
+Package:         com.specialsoftwares.vyaamikkdiary
+```
 
 **Build approval ≠ upload approval.** Neither is granted by this file.
 No EAS/native/prebuild/OTA from this packet. No production promotion.
-
-Application SHA to freeze **before** the build request:
-`PLACEHOLDER — post-S1/S2 application SHA (not b845e8a, not 5d5df3d)`
-Canonical CI: `PLACEHOLDER — matching GitHub Actions success on that SHA
-(do not reuse 37379529193 or 37351685421)`. If application source changes
-later, this packet is invalid; assign a new SHA and new CI. Do not cite
-`5d5df3d` CI for a later tree. Do not override the ops-tool pin with
-`GRIN_OPS_PINNED_SHA` in live mode.
+Re-read Play App bundle explorer immediately before B1. Do not cite
+`37379529193` or `37351685421` for this freeze. Do not env-override
+`PINNED_APP_SHA` in live mode.
 
 ---
 

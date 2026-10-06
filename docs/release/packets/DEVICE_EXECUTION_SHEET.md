@@ -4,16 +4,16 @@ Who: owner plus two named testers on hardware. Coordinator/AI does **not**
 physically execute. Tick only after the named run. Synthetic data only while
 retention is unset.
 
-All rows **NOT RUN**. Host / emulator / SQLITE_HOST results are not device
-passes. This session (`adb devices -l`): **no attached device**. Do not
-convert host/emulator/CI greens into PASS.
+All rows **NOT RUN**. Host / emulator / SQLITE_HOST / mounted inert React
+results are not device passes. This session (`adb devices -l`): **no
+attached device**. Do not convert host/emulator/CI greens into PASS.
 
 Contract: `2026-10-02.wave2evidence`.
-Intended binary (after Approval B): Play Internal AAB `internal-grin` at
-the **post-S1/S2 freeze SHA** (placeholder; **not** `b845e8a` / `41b05a4`)
-**or** labelled sideload APK. Current checkpoint application `b845e8a` /
-PR head `41b05a4` / GHA `37379529193` is **pre-S1/S2**. Label the artifact:
-`PLAY_INSTALLED` vs `NATIVE_DEVICE`.
+Intended binary (after Approval B, **not granted**): Play Internal AAB
+`internal-grin` at application **`520f9f98bc952fd7f30a907da9e85774629a69c0`**
+(canonical CI GHA `37425360211` / job `112143748428` / head `0d7aa17`)
+**or** labelled sideload APK. Do **not** cite `37379529193`. Label the
+artifact: `PLAY_INSTALLED` vs `NATIVE_DEVICE`.
 
 Sideload APK and Play Internal AAB remain distinct. Historical EAS AAB
 `72cb7254-0be9-4f92-a514-dbfab2b1150d` (vc22, profile `production`, git
@@ -33,8 +33,9 @@ still not reserved). Never assume it remains available.
 
 ## Testers (owner input still required)
 
-Arrangement accepted: **owner + two testers**. Identities, UIDs, emails, and
-passwords are **blank until the owner fills them**. Do not invent.
+Arrangement accepted: **owner + two testers**. Identifiers via approved
+**private channel** — `docs/release/proposals/team3/OWNER_DEVICE_FORM.md`.
+Identities, UIDs, emails, and passwords stay **blank in git**. Do not invent.
 
 | Slot | Role | Display name | Firebase uid | Play Internal email | Phone | Auth notes |
 |---|---|---|---|---|---|---|
