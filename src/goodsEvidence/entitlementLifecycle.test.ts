@@ -48,5 +48,7 @@ assert.equal(mayIssueOrUploadGrinCloud("expired_purge_eligible"), false);
 assert.equal(mayReadDownloadExportGrin("expired_purge_eligible"), true);
 assert.equal(90 * DAY, GRIN_EXPIRED_READ_EXPORT_MS);
 assert.equal(30 * DAY, GRIN_EXPIRED_FINAL_NOTICE_MS);
+assert.notEqual(45 * DAY, GRIN_EXPIRED_READ_EXPORT_MS, "account-deletion 45-day window is not expiry 90");
+assert.notEqual(45 * DAY, GRIN_EXPIRED_FINAL_NOTICE_MS, "account-deletion 45-day window is not expiry final-notice 30");
 
 console.log("entitlementLifecycle.test.ts: ok (SOURCE / INJECTED clock)");

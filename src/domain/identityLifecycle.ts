@@ -3,8 +3,14 @@ import type { AccountStatus } from "./accountDeletion";
 /** UEID registry entry lifecycle (Firestore `ueidIndex`). */
 export type UeidIndexStatus = "active" | "retired";
 
-/** Grace period before pending deletion becomes final. */
-export const DELETION_GRACE_DAYS = 15;
+/**
+ * Cancellation window after a confirmed account-deletion request.
+ * Owner 2026-10-06: 45 days (SUPERSEDES 15; not 180). Distinct from
+ * subscription expiry 90+30 and from optional archive. After this window
+ * the existing purge path still deletes non-GRIN account data (Play: freeze
+ * ≠ delete). GRIN stays omitted until INCLUDE_GRIN_IN_ACCOUNT_PURGE.
+ */
+export const DELETION_GRACE_DAYS = 45;
 
 export const DELETION_GRACE_MS = DELETION_GRACE_DAYS * 24 * 60 * 60 * 1000;
 

@@ -1,7 +1,7 @@
 /**
  * INJECTED — GRIN cleanup lists, flag off by default, behavioral purge when force:true.
  * Not an operational deletion service. Does not change scheduledDeletionCleanup.
- * DELETION_GRACE_MS stays 15 days. INCLUDE_GRIN_IN_ACCOUNT_PURGE stays false.
+ * DELETION_GRACE_MS is 45 days (SUPERSEDES 15; not 180). INCLUDE_GRIN_IN_ACCOUNT_PURGE stays false.
  * P8 public deletion remains FAIL.
  */
 import assert from "node:assert/strict";
@@ -57,6 +57,7 @@ assert.equal((USER_STORAGE_CATEGORIES as readonly string[]).includes("grinEviden
 const inventory = describeGrinDeletionInventory("u1");
 assert.ok(inventory.some((e) => e.path.includes("grinEvidence/") && e.kind === "storage_prefix"));
 assert.ok(inventory.some((e) => e.path.includes("evidenceObjects")));
+assert.ok(inventory.some((e) => e.notes.includes("reservations")));
 assert.ok(inventory.some((e) => e.path.includes("goodsEvidenceStorage/accounting")));
 assert.ok(inventory.some((e) => e.path.includes("grinEvidenceObjectKeys")));
 assert.ok(inventory.some((e) => e.path.includes("grinEvidenceDerivativeKeys")));
@@ -64,10 +65,25 @@ assert.ok(inventory.some((e) => e.path.includes("goodsEvidenceUploadControl")));
 assert.ok(inventory.some((e) => e.notes.includes("derivatives")));
 
 const finalPurgeSrc = readFileSync(join(dir, "finalPurge.ts"), "utf8");
-assert.match(finalPurgeSrc, /DELETION_GRACE_MS = 15 \* 24 \* 60 \* 60 \* 1000/);
+assert.match(finalPurgeSrc, /DELETION_GRACE_MS = 45 \* 24 \* 60 \* 60 \* 1000/);
 assert.match(finalPurgeSrc, /INCLUDE_GRIN_IN_ACCOUNT_PURGE/);
 assert.doesNotMatch(finalPurgeSrc, /DELETION_GRACE_MS = 180/);
 assert.match(finalPurgeSrc, /if \(INCLUDE_GRIN_IN_ACCOUNT_PURGE\)/);
+assert.match(finalPurgeSrc, /purgeAllUserOwnedStorage/);
+assert.match(finalPurgeSrc, /purgeUserSubcollectionsFully/);
+assert.match(finalPurgeSrc, /deleteAuthUserIdempotent/);
+
+const identitySrc = readFileSync(join(dir, "../../../src/domain/identityLifecycle.ts"), "utf8");
+assert.match(identitySrc, /DELETION_GRACE_DAYS = 45/);
+assert.doesNotMatch(identitySrc, /DELETION_GRACE_DAYS = 180/);
+assert.doesNotMatch(identitySrc, /DELETION_GRACE_DAYS = 15/);
+
+const phoneSrc = readFileSync(join(dir, "../identity/resolveOrCreateUserByPhone.ts"), "utf8");
+assert.match(phoneSrc, /DELETION_GRACE_MS = 45 \* 24 \* 60 \* 60 \* 1000/);
+assert.doesNotMatch(phoneSrc, /DELETION_GRACE_MS = 180/);
+
+assert.ok((USER_SUBCOLLECTIONS as readonly string[]).includes("entries"));
+assert.ok((USER_STORAGE_CATEGORIES as readonly string[]).includes("letterhead"));
 
 const lifecycleSrc = readFileSync(join(dir, "lifecycle.ts"), "utf8");
 assert.match(lifecycleSrc, /scheduledDeletionCleanup/);
@@ -134,6 +150,7 @@ function seedOwnerGrinTree(uid: string): Map<string, Set<string>> {
     [`${ledger}/commands/cmd1`, new Set()],
     [`${ledger}/serials/fy26`, new Set()],
     [`${ledger}/evidenceObjects/ev1`, new Set()],
+    [`${ledger}/evidenceObjects/ev_reserved`, new Set()],
     [receipt, new Set(["events", "evidenceLinks", "evidenceControl"])],
     [`${receipt}/events/e1`, new Set()],
     [`${receipt}/evidenceLinks/ev1`, new Set()],
@@ -150,6 +167,7 @@ function seedOwnerStorage(uid: string): string[] {
   return [
     `users/${uid}/grinEvidence/objA/original`,
     `users/${uid}/grinEvidence/objA/derivatives/derA`,
+    `users/${uid}/grinEvidence/objReserved/original`,
   ];
 }
 
@@ -189,7 +207,7 @@ async function main(): Promise<void> {
     assert.equal(done.completed, true);
     assert.equal(done.failed, false);
     assert.equal(done.detail, "grin_purge_completed");
-    assert.equal(done.storageDeleted, 2);
+    assert.equal(done.storageDeleted, 3);
     assert.equal(done.firestoreDeleted, seedOwnerGrinTree("u1").size);
     assert.equal(await countGrinFirestoreDocs(db, "u1"), 0);
     assert.deepEqual(

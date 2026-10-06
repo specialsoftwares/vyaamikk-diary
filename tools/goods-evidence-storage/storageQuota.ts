@@ -1,9 +1,9 @@
 /**
  * Per-account GRIN cloud storage accounting.
  *
- * Proposed GiB caps are PROPOSED_PENDING_OWNER_CONFIRMATION — economics HOLD
- * for advertising (see docs/release/proposals/team2/STORAGE_ECONOMICS.md).
- * Alternative pending owner approval: 256 MiB / 1 GiB / 5 GiB.
+ * Live cap table (owner-selected 2026-10-06, source only — do not advertise):
+ * Starter 1 GiB / Professional 3 GiB / Business 10 GiB.
+ * Historical 1/5/20 and alternative 256 MiB/1/5 GiB remain named non-live tables.
  *
  * Total retained per account (not per device, not monthly reset).
  * Originals and retained derivatives both count. Derivatives use a distinct
@@ -19,7 +19,18 @@
 
 export const GIB = 1024 * 1024 * 1024;
 
-/** PROPOSED_PENDING_OWNER_CONFIRMATION — do not advertise these numbers. */
+/**
+ * Owner-selected live caps (2026-10-06). Source implementation only.
+ * Do not advertise. Not a Play listing. Not an unlimited-files promise.
+ */
+export const OWNER_SELECTED_STORAGE_CAPS_BYTES = {
+  free: 0,
+  starter: 1 * GIB,
+  professional: 3 * GIB,
+  business: 10 * GIB,
+} as const;
+
+/** Historical unconfirmed 1/5/20 table — not the live lookup. */
 export const PROPOSED_PENDING_OWNER_CONFIRMATION_STORAGE_CAPS_BYTES = {
   free: 0,
   starter: 1 * GIB,
@@ -40,13 +51,14 @@ export const STORAGE_WARN_95 = 0.95;
 
 /**
  * Technical holds-map entry limit. Not a customer storage entitlement.
+ * Not an unlimited-files promise. Not advertised.
  * Not proof that every permitted document fits Firestore — that is checked
  * separately by `estimateStorageAccountingDocumentBytes` at maximum identifier
  * lengths. See docs/release/proposals/team2/HOLDS_MAP_BOUND.md.
  *
  * Firestore documents are bounded (~1 MiB). This map is not indefinite scale.
  * Tiny files and full derivative fan-out can hit this entry limit before the
- * proposed byte cap. Admission then fails closed; existing holds are kept.
+ * live byte cap. Admission then fails closed; existing holds are kept.
  */
 export const MAX_STORAGE_HOLDS = 2500;
 
@@ -537,12 +549,12 @@ export function storageCapBytesFromStatus(
   if (statusData?.quotaEnforcementEnabled !== true) return "enforcement_off";
   const entitled = statusData.entitlementActive === true;
   const plan = entitled ? statusData.plan : "free";
-  if (plan === "starter") return PROPOSED_PENDING_OWNER_CONFIRMATION_STORAGE_CAPS_BYTES.starter;
+  if (plan === "starter") return OWNER_SELECTED_STORAGE_CAPS_BYTES.starter;
   if (plan === "professional") {
-    return PROPOSED_PENDING_OWNER_CONFIRMATION_STORAGE_CAPS_BYTES.professional;
+    return OWNER_SELECTED_STORAGE_CAPS_BYTES.professional;
   }
-  if (plan === "business") return PROPOSED_PENDING_OWNER_CONFIRMATION_STORAGE_CAPS_BYTES.business;
-  return PROPOSED_PENDING_OWNER_CONFIRMATION_STORAGE_CAPS_BYTES.free;
+  if (plan === "business") return OWNER_SELECTED_STORAGE_CAPS_BYTES.business;
+  return OWNER_SELECTED_STORAGE_CAPS_BYTES.free;
 }
 
 export function storageWarningFor(usedBytes: number, capBytes: number): StorageWarning | null {

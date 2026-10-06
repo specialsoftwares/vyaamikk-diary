@@ -2,9 +2,11 @@
  * Final account purge orchestrator.
  *
  * THREE DISTINCT DELETION-WINDOW FACTS (do not collapse):
- * 1. Implemented: DELETION_GRACE_MS = 15 days (this file). Do not change to 180.
- * 2. Owner-requested policy: 180 days — NOT legally / Play approved.
- * 3. Policy ultimately approved for public operation: UNRESOLVED.
+ * 1. Implemented: DELETION_GRACE_MS = 45 days (this file). SUPERSEDES 15.
+ *    Not 180. After the cancellation window, non-GRIN account data is
+ *    actually deleted on this path (Play: freeze ≠ delete).
+ * 2. Owner-requested 180-day hold — SUPERSEDED for this clock; not implemented.
+ * 3. Public/Play-certified listing copy: still UNRESOLVED. Do not advertise.
  *
  * Cleanup order (recoverable):
  * 1. Acquire lease on deletionJobs/{uid} (generation check)
@@ -42,7 +44,7 @@ const UEID_INDEX = "ueidIndex";
 const EMAIL_INDEX = "emailIndex";
 const RETIRED_PHONES = "retiredPhones";
 
-export const DELETION_GRACE_MS = 15 * 24 * 60 * 60 * 1000;
+export const DELETION_GRACE_MS = 45 * 24 * 60 * 60 * 1000;
 
 function workerId(): string {
   return `w_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;

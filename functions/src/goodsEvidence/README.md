@@ -29,6 +29,6 @@ Authoritative sources:
 - Isolated Functions-emulator entrypoint: `tools/goods-evidence-emulator/functions-entry/**`.
   Do not deploy it as production.
 - No React, Expo, `@/config`, localDb, or client hash helpers.
-- Account-deletion grace remains 15 days. GRIN Storage/Firestore cleanup lists
+- Account-deletion cancellation window is 45 days (SUPERSEDES 15; not 180). GRIN Storage/Firestore cleanup lists
   exist behind `INCLUDE_GRIN_IN_ACCOUNT_PURGE` (default false). Do not wire a
   production purge scheduler from this package.

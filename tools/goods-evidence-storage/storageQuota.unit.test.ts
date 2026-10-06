@@ -8,6 +8,8 @@ import {
   FIRESTORE_MAX_DOCUMENT_BYTES,
   GIB,
   MAX_STORAGE_HOLDS,
+  OWNER_ALTERNATIVE_STORAGE_CAPS_BYTES,
+  OWNER_SELECTED_STORAGE_CAPS_BYTES,
   PROPOSED_PENDING_OWNER_CONFIRMATION_STORAGE_CAPS_BYTES,
   admitStorageReservation,
   chargedStorageBytes,
@@ -22,6 +24,7 @@ import {
   retainStorageHold,
   releaseReservedHold,
   sampleMaxLengthHolds,
+  storageCapBytesFromStatus,
   type StorageAccountingDoc,
   type StorageHoldIdentity,
 } from "./storageQuota";
@@ -58,6 +61,57 @@ function admitNew200(existing: StorageAccountingDoc | null) {
 
 async function main(): Promise<void> {
   assert.equal(MAX_STORAGE_HOLDS, 2500);
+  assert.ok(MAX_STORAGE_HOLDS < Number.POSITIVE_INFINITY, "2500 is not an unlimited-files promise");
+  assert.equal(OWNER_SELECTED_STORAGE_CAPS_BYTES.starter, 1 * GIB);
+  assert.equal(OWNER_SELECTED_STORAGE_CAPS_BYTES.professional, 3 * GIB);
+  assert.equal(OWNER_SELECTED_STORAGE_CAPS_BYTES.business, 10 * GIB);
+  assert.equal(PROPOSED_PENDING_OWNER_CONFIRMATION_STORAGE_CAPS_BYTES.professional, 5 * GIB);
+  assert.equal(PROPOSED_PENDING_OWNER_CONFIRMATION_STORAGE_CAPS_BYTES.business, 20 * GIB);
+  assert.equal(OWNER_ALTERNATIVE_STORAGE_CAPS_BYTES.starter, 256 * 1024 * 1024);
+  assert.equal(OWNER_ALTERNATIVE_STORAGE_CAPS_BYTES.professional, 1 * GIB);
+  assert.equal(OWNER_ALTERNATIVE_STORAGE_CAPS_BYTES.business, 5 * GIB);
+  assert.equal(
+    storageCapBytesFromStatus(
+      { quotaEnforcementEnabled: true, entitlementActive: true, plan: "starter" },
+      true
+    ),
+    OWNER_SELECTED_STORAGE_CAPS_BYTES.starter
+  );
+  assert.equal(
+    storageCapBytesFromStatus(
+      { quotaEnforcementEnabled: true, entitlementActive: true, plan: "professional" },
+      true
+    ),
+    OWNER_SELECTED_STORAGE_CAPS_BYTES.professional
+  );
+  assert.equal(
+    storageCapBytesFromStatus(
+      { quotaEnforcementEnabled: true, entitlementActive: true, plan: "business" },
+      true
+    ),
+    OWNER_SELECTED_STORAGE_CAPS_BYTES.business
+  );
+  assert.notEqual(
+    storageCapBytesFromStatus(
+      { quotaEnforcementEnabled: true, entitlementActive: true, plan: "professional" },
+      true
+    ),
+    PROPOSED_PENDING_OWNER_CONFIRMATION_STORAGE_CAPS_BYTES.professional
+  );
+  assert.notEqual(
+    storageCapBytesFromStatus(
+      { quotaEnforcementEnabled: true, entitlementActive: true, plan: "business" },
+      true
+    ),
+    PROPOSED_PENDING_OWNER_CONFIRMATION_STORAGE_CAPS_BYTES.business
+  );
+  assert.notEqual(
+    storageCapBytesFromStatus(
+      { quotaEnforcementEnabled: true, entitlementActive: true, plan: "starter" },
+      true
+    ),
+    OWNER_ALTERNATIVE_STORAGE_CAPS_BYTES.starter
+  );
 
   {
     const a = originalHoldKey("ab", "c");
@@ -242,15 +296,20 @@ async function main(): Promise<void> {
   }
 
   {
-    const originalsAt20Gib = proposedPdfOriginalWorkloadBlockedByHoldsMap(
+    const originalsAt10Gib = proposedPdfOriginalWorkloadBlockedByHoldsMap(
+      OWNER_SELECTED_STORAGE_CAPS_BYTES.business
+    );
+    assert.equal(originalsAt10Gib.originalSlots, 682);
+    assert.equal(originalsAt10Gib.blocked, false);
+    assert.ok(originalsAt10Gib.estimatedDocumentBytes < FIRESTORE_MAX_DOCUMENT_BYTES);
+    const historical20Gib = proposedPdfOriginalWorkloadBlockedByHoldsMap(
       PROPOSED_PENDING_OWNER_CONFIRMATION_STORAGE_CAPS_BYTES.business
     );
-    assert.equal(originalsAt20Gib.originalSlots, 1365);
-    assert.equal(originalsAt20Gib.blocked, false);
-    assert.ok(originalsAt20Gib.estimatedDocumentBytes < FIRESTORE_MAX_DOCUMENT_BYTES);
+    assert.equal(historical20Gib.originalSlots, 1365);
+    assert.equal(historical20Gib.blocked, false);
     for (const cap of [
-      PROPOSED_PENDING_OWNER_CONFIRMATION_STORAGE_CAPS_BYTES.starter,
-      PROPOSED_PENDING_OWNER_CONFIRMATION_STORAGE_CAPS_BYTES.professional,
+      OWNER_SELECTED_STORAGE_CAPS_BYTES.starter,
+      OWNER_SELECTED_STORAGE_CAPS_BYTES.professional,
     ]) {
       const workload = proposedPdfOriginalWorkloadBlockedByHoldsMap(cap);
       assert.equal(workload.blocked, false);

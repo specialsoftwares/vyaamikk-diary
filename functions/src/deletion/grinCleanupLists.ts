@@ -3,9 +3,11 @@
  *
  * THREE DISTINCT FACTS (do not collapse):
  * 1. Implemented grace: functions/src/deletion/finalPurge.ts
- *    DELETION_GRACE_MS = 15 days.
- * 2. Owner-requested policy window: 180 days (NOT legally / Play approved).
- * 3. Policy ultimately approved for public operation: UNRESOLVED.
+ *    DELETION_GRACE_MS = 45 days (SUPERSEDES 15; not 180). After this
+ *    cancellation window, non-GRIN data is actually deleted (Play: freeze
+ *    ≠ delete). GRIN omitted until INCLUDE_GRIN_IN_ACCOUNT_PURGE.
+ * 2. Owner-requested 180-day hold: SUPERSEDED for this clock; not implemented.
+ * 3. Policy ultimately approved for public operation: UNRESOLVED. Do not advertise.
  *
  * INCLUDE_GRIN_IN_ACCOUNT_PURGE defaults false so existing
  * scheduledDeletionCleanup / runFinalAccountPurge MUST NOT purge live
