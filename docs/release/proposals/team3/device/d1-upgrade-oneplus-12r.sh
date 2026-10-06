@@ -15,9 +15,9 @@ Device (owner-supplied, do not invent IDs):
   current: Play Internal vc22 YES
   available: TODAY
   path: PLAY_INSTALLED upgrade over vc22 (not sideload labelled PLAY_INSTALLED)
-  binary: coordinator-selected FINAL SHA after billing correction + matching CI
-          (current app blobs fcda7cd may be superseded; do not build
-          520f9f9 / 56f2040 / 313025f alone)
+  binary: 540e07aa07f376716484adb879ce66cb9fb170ce
+          (do not rebuild 520f9f9 / 56f2040 / 313025f / fcda7cd / 60c4bc1
+          alone; do not checkout 7e0d629 as B1)
   purchase-entry: OFF — this is not an interactive purchase-test build
 
 Steps (after B1+B2, neither granted; this instruction does not authorize them):

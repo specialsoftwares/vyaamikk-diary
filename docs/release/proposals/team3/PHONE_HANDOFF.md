@@ -2,19 +2,21 @@
 
 **2026-10-06.** AI Team 3 (build / device). Not human sign-off.  
 Worktree `/Users/shivamsaurav/vyd-worktrees/grin-t3-offline`.  
-Provenance branch `team/grin-t3-phone-handoff`. Do **not** force-push
-`origin/team/grin-t3-offline`. Historical workspace was **read-only**.
+Provenance branch `team/grin-t3-aab-540e07a` (from
+`team/grin-t3-phone-handoff` `5692e25`). Do **not** force-push
+`origin/team/grin-t3-offline` or `origin/team/grin-t3-phone-handoff`.
+Combined and historical workspace were **read-only**.
 `package.json` / `eas.json` / `app.json` were **not** edited this pass.
 
-**This instruction does not authorize B1 or B2.** Coordinator will not
-build until a complete batch is lettered **after billing-lifecycle
-correction + matching completed canonical CI**. B1 ≠ B2. Neither is
-granted. No `eas build`, `eas submit`, Play write, OTA, prebuild, or
-uninstall of the owner phone.
+**This instruction does not authorize B1 or B2.** Named Internal AAB is
+application `540e07a`. Recheck Play immediately before B1 remains
+**required**. B1 ≠ B2. Neither is granted. Restricted billing is **not**
+a prerequisite for this billing-off GRIN Internal AAB. No `eas build`,
+`eas submit`, Play write, OTA, prebuild, or uninstall of the owner phone.
 
 This branch is **docs provenance**, not a B1 checkout. Application blobs
-here are **not** the Internal AAB source. Combined docs HEAD is **not**
-a B1 checkout.
+here are **not** the Internal AAB source. Combined docs HEAD `7e0d629`
+is **not** a B1 checkout.
 
 Related: `APPROVAL_B_DRAFT.md`, `OWNER_DEVICE_FORM.md`,
 `CURRENT_HEAD_VS_FREEZE.md`, `device/`. Older `DEVICE_HANDOFF.md` is
@@ -25,48 +27,58 @@ superseded by this file for the phone path.
 ## 1. Internal AAB target (copy this block)
 
 ```
-Internal AAB SHA:  coordinator-selected FINAL application SHA
-                   after billing-lifecycle correction + matching
-                   completed canonical CI — not an intermediate
-Current app blobs (observation only, may be superseded):
-                   fcda7cd64e9622e50c38223a7156f0f6b8ca5576
-Docs HEAD observed (not a B1 checkout):
-                   70bdfe4b2ea2a7cf6a9fe5f1cf7bf08ff6ebc4e9
-                   (application blobs = fcda7cd)
-Canonical CI:      GHA 37440328976 IN_PROGRESS on 70bdfe4
-                   (verify job 112192249694). IN_PROGRESS ≠ matching CI.
-                   Do not cite GHA 37425360211 (covers 520f9f9 only).
-Do not build alone: 520f9f9 / 56f2040 / 313025f
-Version name:      1.0.0 (re-read at FINAL SHA)
+Internal AAB SHA:  540e07aa07f376716484adb879ce66cb9fb170ce
+B1 checkout:       540e07aa07f376716484adb879ce66cb9fb170ce
+                   (not 7e0d629 — that checkout is docs/QA only)
+CI-tested checkout: 7e0d629023198333ed384ae076285925e98047d6
+                   parent d4c7ed4cb49d1bb5547fe3738702016bd1bcc36f
+Canonical CI:      GHA 37445383607 SUCCESS
+                   verify job 112208918347 on 7e0d629
+                   540e07a..7e0d629 DEPLOYMENT_PATHS empty (docs/QA only)
+Do not rebuild alone: 520f9f9 / 56f2040 / 313025f / fcda7cd / 60c4bc1
+                   (older packets exist)
+Do not cite as this candidate's CI:
+                   GHA 37425360211 (520f9f9) or 37440328976 (fcda7cd/70bdfe4)
+Version name:      1.0.0 (re-read at 540e07a immediately before B1)
 versionCode:       23 UNRESERVED — re-read Play explorer immediately before B1
 EAS profile:       internal-grin
 Android type:      AAB (app-bundle)
 Package:           com.specialsoftwares.vyaamikkdiary
-B1 / B2:           neither granted (B1 ≠ B2)
-Purchase-entry:    OFF (see §2)
+B1 / B2:           neither granted (B1 ≠ B2). Recheck-Play-before-B1 required.
+Purchase-entry:    OFF (see §2). Billing activation off.
+Restricted billing is NOT a prerequisite for this billing-off GRIN Internal AAB.
+P8:                FAIL operationally. GRIN synthetic-only until later backend.
 ```
 
 | Tree | SHA | Use |
 |---|---|---|
-| **B1 checkout** | Coordinator-selected **FINAL** application SHA after billing-lifecycle correction **and** matching **completed** canonical CI | **Only** this |
-| Current application (may be superseded) | `fcda7cd64e9622e50c38223a7156f0f6b8ca5576` | Observation. Restricted Play-tester SOURCE on 1/3/10 GiB + 45-day. **Do not treat as FINAL** if correction lands later |
-| Combined docs HEAD | `70bdfe4b2ea2a7cf6a9fe5f1cf7bf08ff6ebc4e9` | Docs; `git diff --stat fcda7cd 70bdfe4 -- functions src eas.json app.json` empty. **Not** a B1 checkout |
-| Canonical CI | GHA `37440328976` **IN_PROGRESS** | Checkout `70bdfe4` (app blobs = `fcda7cd`). Not success. Not a letter. |
-| Do **not** build alone | `520f9f9` / `56f2040` / `313025f` | Retired freeze / superseded freeze-prepare / pre-tester-SOURCE |
+| **B1 checkout** | `540e07aa07f376716484adb879ce66cb9fb170ce` | **Only** this |
+| CI-tested checkout | `7e0d629023198333ed384ae076285925e98047d6` | Canonical CI SUCCESS; docs/QA after `540e07a`. **Not** a B1 checkout |
+| Checkout parent | `d4c7ed4cb49d1bb5547fe3738702016bd1bcc36f` | Parent of `7e0d629` |
+| Canonical CI | GHA `37445383607` **SUCCESS**, job `112208918347` | Covers `540e07a` because `540e07a`..`7e0d629` DEPLOYMENT_PATHS empty. Not a letter. |
+| Do **not** rebuild alone | `520f9f9` / `56f2040` / `313025f` / `fcda7cd` / `60c4bc1` | Older packets exist |
+| This provenance branch | `team/grin-t3-aab-540e07a` | Docs only. **Not** a B1 checkout |
 
 Do not start `eas build` from this provenance branch, from Combined docs
-HEAD, or from a dirty tree. A later material source change (billing
-correction, versionCode rewrite, purchase-entry / quota / GRIN flag
+HEAD `7e0d629`, or from a dirty tree. Do not rebuild `520f9f9` /
+`56f2040` / `313025f` / `fcda7cd` / `60c4bc1` alone. A later material
+source change (versionCode rewrite, purchase-entry / quota / GRIN flag
 change) requires a **new binary** and a **new CI**. Do not reuse
 historical EAS AAB `72cb7254-…` (vc22, profile `production`, git
 `0da2f58`).
+
+After owner letters **B1** (not granted; **do not execute** now): recheck
+Play inventory, then `eas build --profile internal-grin` of `540e07a`,
+then later **B2** Internal upload (separate letter), then **D1** upgrade
+over vc22.
 
 ---
 
 ## 2. This Internal GRIN AAB is not a purchase-test build
 
-On `internal-grin` at current application `fcda7cd` (re-verify at FINAL
-SHA before B1):
+On `internal-grin` at application `540e07a` (`git show
+540e07aa07f376716484adb879ce66cb9fb170ce:eas.json`; re-read immediately
+before B1):
 
 | Key | Value |
 |---|---|
@@ -86,17 +98,18 @@ membership, a visible upgrade control, and a Firebase UID in chat are
 
 ## 3. Private Firebase Auth UID (never git)
 
-Owner slot **O** used an **existing** Firebase Auth account. The UID was
-received **2026-10-06** via coordinator chat and stored **out-of-repo**
-(UID-only file + separate operator notes). `validate-uids` **count=1**
-(values not printed). **Supply is not live admission or deployment.**
-Admission **writes HOLD**. `PLAY_BILLING_TESTER_UIDS` remains empty
-(fail-closed; not this identifier). T1/T2 UIDs still missing.
+Slot **O** Firebase Auth UID is **already received privately** (count=1).
+Do **not** ask again. Do **not** write UIDs, emails, or phones into git.
+T1 / T2 stay unnamed — additional testers are **optional**. Live
+cross-account tests need another authenticated user.
+
+Coordinator used coordinator chat or an **out-of-repo** file the
+coordinator named. **Firebase Auth UIDs only.**
 
 Do **not** request or accept passwords, OTPs, API keys, recovery codes,
-or service-account JSON. Do **not** commit UIDs, Play emails, phones, or
-a filled testers file to git. Hash a UID in shared logs if a correlation
-id is required.
+or service-account JSON. Do **not** commit UIDs, Play emails, or a filled
+testers file to git. Hash a UID in shared logs if a correlation id is
+required.
 
 Three identifiers stay distinct:
 
@@ -104,9 +117,13 @@ Three identifiers stay distinct:
 |---|---|---|
 | Firebase Auth UID | Account id for Auth / Firestore path / (later) GRIN admission seed | Not a Play email |
 | Play Internal tester email | Play Console Internal Testing list | Not a Firebase UID; not GRIN admission |
-| GRIN admission | `users/{uid}/goodsEvidenceAdmission/runtime` (Approval A, **not** present; writes HOLD) | Not Play list membership |
+| GRIN admission | `users/{uid}/goodsEvidenceAdmission/runtime` (Approval A, **not** present) | Not Play list membership |
 
 Play Internal email ≠ Firebase UID ≠ GRIN admission.
+
+### Exact one-line ask (already satisfied for slot O — do not send again)
+
+Please reply here (or in an out-of-repo file I name) with your Firebase Auth UID only — no password, OTP, key, or recovery code; do not git it. Play Internal email is separate from that UID and from GRIN admission.
 
 Slots O / T1 / T2 stay blank in git. Form:
 `docs/release/proposals/team3/OWNER_DEVICE_FORM.md`.
@@ -146,9 +163,10 @@ Reminder (stale until re-read):
    **uploaded** Play versionCode. Do not re-upload 22.
 5. If 23 is still unused it **may** be used. If Play already has 23,
    **stop** — `src/goodsEvidence/isolation.contract.test.ts` at
-   `fcda7cd` asserts `"versionCode": 23`. Do not ship 24+ while that
+   `540e07a` asserts `"versionCode": 23`. Do not ship 24+ while that
    test still requires 23; cut the new SHA with both changes.
-6. Re-read `git show FINAL_SHA:eas.json` and `git show FINAL_SHA:app.json`
+6. Re-read `git show 540e07aa07f376716484adb879ce66cb9fb170ce:eas.json` and
+   `git show 540e07aa07f376716484adb879ce66cb9fb170ce:app.json`
    for package, profile `internal-grin`, AAB `buildType`, GRIN `"1"`,
    purchase-entry `"0"`, quota-upsell `"0"`, `PLAY_BILLING` unset.
 7. Confirm intended backend dest is still production project
@@ -163,21 +181,22 @@ is not a Play-track read.
 ## 5. B1 artifact verification (commands only — do not run)
 
 B1, if later lettered, is `eas build --profile internal-grin --platform android`
-from a **clean** checkout of the **FINAL** SHA, after the inventory
-recheck and a committed versionCode if it must change.
+from a **clean** checkout of `540e07aa07f376716484adb879ce66cb9fb170ce`,
+after the inventory recheck and a committed versionCode if it must
+change. Do **not** checkout `7e0d629` as the B1 source.
 
 Do **not** run the following until that letter exists.
 
 ```bash
-# 0. Checkout FINAL SHA in a clean worktree (not this provenance branch).
+# 0. Checkout 540e07a in a clean worktree (not this provenance branch).
 git fetch origin
-git rev-parse HEAD                    # must equal FINAL SHA
+git rev-parse HEAD                    # must equal 540e07aa07f376716484adb879ce66cb9fb170ce
 git status --porcelain                # must be empty
-git diff --stat FINAL_SHA -- functions src eas.json app.json app package.json
+git diff --stat 540e07aa07f376716484adb879ce66cb9fb170ce -- functions src eas.json app.json app package.json
 # empty. If not, stop.
 
-git show FINAL_SHA:eas.json
-git show FINAL_SHA:app.json
+git show 540e07aa07f376716484adb879ce66cb9fb170ce:eas.json
+git show 540e07aa07f376716484adb879ce66cb9fb170ce:app.json
 # Confirm internal-grin: AAB, GRIN 1, purchase-entry 0, quota-upsell 0,
 # PLAY_BILLING unset, package com.specialsoftwares.vyaamikkdiary.
 
@@ -188,7 +207,7 @@ git show FINAL_SHA:app.json
 # npx eas-cli@16.28.0 build:view "$EAS_BUILD_ID" --json
 # Required fields:
 #   id
-#   gitCommitHash          == FINAL SHA
+#   gitCommitHash          == 540e07aa07f376716484adb879ce66cb9fb170ce
 #   appBuildVersion        == chosen Play-unused versionCode
 #   metadata / expoConfig / env (worker, not local eas.json / eas config):
 #     EXPO_PUBLIC_APP_MODE=production
@@ -208,7 +227,7 @@ git show FINAL_SHA:app.json
 # Expect:
 #   package=com.specialsoftwares.vyaamikkdiary
 #   android:versionCode=<chosen unused integer>
-#   android:versionName=1.0.0   (unless owner changed it at FINAL SHA)
+#   android:versionName=1.0.0   (unless owner changed it at 540e07a)
 
 # 5. Mapping / ProGuard: download from the EAS artifact store privately.
 #    Do not commit. Upload-cert vs Play App Signing: compare privately;
@@ -279,14 +298,15 @@ Each script refuses `eas` / `play` / `deploy` / `ota` / `prebuild` /
 ### 7.2 D1 sequence (after B1+B2, neither granted)
 
 Pre-record on every row: model OnePlus 12R, Android 16, RAM, installed
-versionCode / versionName, AAB sha256, `GIT_COMMIT_ON_BINARY` = FINAL
-SHA, artifact `PLAY_INSTALLED`, tester slot O (UID via private channel),
+versionCode / versionName, AAB sha256, `GIT_COMMIT_ON_BINARY` =
+`540e07aa07f376716484adb879ce66cb9fb170ce`, artifact `PLAY_INSTALLED`,
+tester slot O (UID already received privately; do not ask again),
 backend `LIVE_BACKEND_SEEDED` vs `backend_absent`. Do not invent
 serials, IMEIs, or Android IDs.
 
 | ID | What to run on OnePlus 12R | Required evidence | Status |
 |---|---|---|---|
-| D0 | UID via private channel; confirm artifact class | Firebase UID not in git; Play email separate; GRIN admission separate | **UID received privately** (slot O, existing account, `count=1`). Artifact class **unconfirmed** (no Internal-GRIN AAB). D writes **HOLD**. T1/T2 missing |
+| D0 | Slot O UID already received privately (count=1); confirm artifact class | Do **not** ask O again; UID not in git; Play email separate; GRIN admission separate; T1/T2 optional | NOT RUN |
 | D1 | Play-install **over vc22** (not sideload labelled PLAY_INSTALLED) | Play shows new versionCode; cold start; existing diary/PO/credit/letterhead/PDF still open; SQLite v10 migrates | NOT RUN |
 | D3 | Force-stop; reboot; open | Splash completes; main tabs; legal date `2026-07-27`; no token printed | NOT RUN |
 | D4 | Phone OTP on the tester's own number | Session bound to that uid; **no OTP in git**; hash uid in shared logs | NOT RUN |
@@ -356,12 +376,14 @@ owner agrees to the loss above. Team 3 will not perform that wipe.
 - EAS/native/prebuild/OTA; **no** `eas build` / `eas submit`
 - Play upload / Internal track / production promotion / listing Save
 - Approval **B1** and **B2** (separate later letters; **neither granted**)
-- Billing-lifecycle correction + matching **completed** canonical CI
-- FINAL application SHA (current `fcda7cd` may be superseded)
+- Recheck Play inventory **immediately before** authorized B1 of `540e07a`
 - versionCode **23 reservation** (none; unused on Play as of 2026-10-06)
-- Play explorer **re-read** immediately before B1
 - Approval A live GRIN backend / original-read (XR) — seven **ABSENT**
-- Private Firebase UIDs (chat / out-of-repo only)
+- P8 **FAIL** operationally (`INCLUDE_GRIN_IN_ACCOUNT_PURGE` false). GRIN
+  **synthetic-only** until later backend
+- Restricted billing is **not** a prerequisite for this billing-off AAB
+- Private Firebase UIDs: slot O received privately (count=1), do **not**
+  ask again; T1/T2 unnamed and optional
 - NATIVE_DEVICE / PLAY_INSTALLED execution (`adb` empty this session)
 - D2 clean-install **unnamed** and **not executed**
 - Interactive purchase-test (flags off; not this GRIN AAB)

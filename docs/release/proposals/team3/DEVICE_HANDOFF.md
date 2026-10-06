@@ -2,20 +2,23 @@
 
 **Superseded for the phone path.** Use
 `docs/release/proposals/team3/PHONE_HANDOFF.md` and
-`APPROVAL_B_DRAFT.md`. Named Internal AAB is the coordinator-selected
-**FINAL** SHA after billing-lifecycle correction + matching completed
-CI — not `56f2040` / `313025f` / `520f9f9` alone. Current app blobs
-(may be superseded): `fcda7cd`. B1 ≠ B2; **neither granted**.
+`APPROVAL_B_DRAFT.md`. Named Internal AAB is application
+`540e07aa07f376716484adb879ce66cb9fb170ce`. Canonical CI GHA
+`37445383607` **SUCCESS** on `7e0d629` (docs/QA only vs `540e07a`).
+Do **not** rebuild `56f2040` / `313025f` / `520f9f9` / `fcda7cd` /
+`60c4bc1` alone. B1 ≠ B2; **neither granted**. Recheck-Play-before-B1
+required.
 
 **2026-10-06.** Worktree `/Users/shivamsaurav/vyd-worktrees/grin-t3-offline`.  
-Provenance branch `team/grin-t3-phone-handoff`. Combined and historical
+Provenance branch `team/grin-t3-aab-540e07a`. Combined and historical
 workspace were **read-only**. `package.json` / `eas.json` / `app.json`
 were **not** edited. No EAS/native/prebuild/OTA. No Play write. Do not
-force-push `origin/team/grin-t3-offline`. `gh` unauthenticated.
+force-push `origin/team/grin-t3-offline` or
+`origin/team/grin-t3-phone-handoff`. `gh` unauthenticated.
 
 This branch is **docs provenance**, not a B1 checkout. The freeze-prepare
 tables below named `56f2040` are **historical** and **not** the B1
-checkout.
+checkout. B1 checkout is `540e07a`.
 
 ---
 
@@ -244,7 +247,7 @@ Screenshots: **state labels only**.
 
 | ID | What to run | Required evidence | Status |
 |---|---|---|---|
-| D0 | Owner fills O/T1/T2; confirm artifact class | Named identities via private channel; D1 OnePlus 12R recorded; no guessed vc22-from-commit | Slot **O UID received privately** (`count=1`, not in git). T1/T2 still missing. Artifact class unconfirmed (no Internal-GRIN AAB). D writes HOLD |
+| D0 | Owner fills O/T1/T2; confirm artifact class | Named identities via private channel; D1 OnePlus 12R recorded; no guessed vc22-from-commit | NOT RUN — UIDs blank in git; D1 model filled |
 | D1 | Upgrade install over vc22 via Play on **OnePlus 12R** | Play shows new versionCode; cold start; existing diary/PO/credit/letterhead/PDF still work; SQLite v10 migrates. Photos of About/version + one existing record. `PLAY_INSTALLED` only | NOT RUN — no adb / no Internal-GRIN AAB |
 | D2 | Clean install | Empty local DB; same launch/sign-in. Label `PLAY_INSTALLED` or `NATIVE_DEVICE` | NOT RUN — D2 unnamed; no hardware attached |
 | D3 | Force-stop; reboot; open | Splash completes; main tabs; legal date `2026-07-27`; no token printed | NOT RUN |

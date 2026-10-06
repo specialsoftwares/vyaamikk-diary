@@ -6,9 +6,9 @@ set -euo pipefail
 
 DEVICE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PACKAGE_NAME="${PACKAGE_NAME:-com.specialsoftwares.vyaamikkdiary}"
-CURRENT_APP_BLOBS="${CURRENT_APP_BLOBS:-fcda7cd64e9622e50c38223a7156f0f6b8ca5576}"
-FINAL_SHA="${FINAL_SHA:-coordinator_selected_after_billing_correction_and_matching_ci}"
-RETIRED_DO_NOT_BUILD="${RETIRED_DO_NOT_BUILD:-520f9f9/56f2040/313025f_alone}"
+CURRENT_APP_BLOBS="${CURRENT_APP_BLOBS:-540e07aa07f376716484adb879ce66cb9fb170ce}"
+FINAL_SHA="${FINAL_SHA:-540e07aa07f376716484adb879ce66cb9fb170ce}"
+RETIRED_DO_NOT_BUILD="${RETIRED_DO_NOT_BUILD:-520f9f9/56f2040/313025f/fcda7cd/60c4bc1_alone}"
 
 refuse_release_actions() {
   case "${1:-}" in
@@ -36,7 +36,7 @@ print_common_header() {
   echo "CURRENT_APP_BLOBS=${CURRENT_APP_BLOBS}"
   echo "FINAL_SHA=${FINAL_SHA}"
   echo "RETIRED_DO_NOT_BUILD=${RETIRED_DO_NOT_BUILD}"
-  echo "NOTE=internal_aab_is_final_sha_after_billing_correction_and_matching_ci"
+  echo "NOTE=internal_aab_is_540e07a_ci_37445383607_success_on_7e0d629_docs_only"
   echo "PURCHASE_ENTRY=off"
   echo "B1=not_granted"
   echo "B2=not_granted"

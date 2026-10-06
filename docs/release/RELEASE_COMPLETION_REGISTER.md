@@ -54,7 +54,7 @@ reproduction. Do not reopen S1/S2 without a new reproduction.
 | Canonical CI on selected SHA | coordinator | GHA **`37445383607` SUCCESS** job `112208918347` on `7e0d629` / app **`540e07a`** | done | public API | — |
 | Pin helper to selected SHA | coordinator apply | **Applied** `PINNED_APP_SHA=540e07a`. Ops-guard **34/34** | T5 PASS + CI SUCCESS | TOOLING 34/34 | A3 not executed |
 | Consolidated backend packet | T1 | **Landed** `a28bfb0`. C names **`540e07a`**. Pin HOLD until CI SUCCESS | owner letter of complete batch | inspect 2026-10-06 | A6 UNPROVEN; no live execute |
-| Internal AAB packet | T3 | **Landed** `PHONE_HANDOFF.md`. B1 of `540e07a` after pin+CI SUCCESS | CI SUCCESS | OnePlus 12R named | B1 ungranted |
+| Internal AAB packet | T3 | **Landed** `PHONE_HANDOFF.md` `c200712`. B1 checkout **`540e07a`**. Recheck Play before B1 | owner B1 letter | OnePlus 12R named | B1 ungranted |
 | Restricted billing packet | T4 | **Landed** in `60c4bc1`. T5 SOURCE+INJECTED **PASS** `c69ffb9`. Catalog **NOT RUN** | pin of `540e07a` after CI | FakePlay nine cases | activation HOLD |
 | P8 production path | T2 | **Landed** packet `b08690d` + inert wiring `540e07a`. Flag **false** | owner live grant later | `grinCleanup` + `deletion.unit` PASS | do not flip; synthetic-only |
 | Phone acceptance | T3 + owner | vc22 upgrade after B2 | AAB + private UID on file | device **NOT RUN** | no AAB; D writes HOLD |
@@ -107,7 +107,7 @@ purchase-entry remains `"0"`. Play Console catalog **NOT RUN**.
 |---|---|---|
 | 1 Backend | A–F packet. Pin **applied** to `540e07a`. A/B two commands. C live HOLD. D `count=1` writes HOLD. E LIVE HOLD. F INJECTED YES / LIVE HOLD. **Not executed.** | Owner letters complete batch; inspect first |
 | 2 Policy | P8 packet `b08690d` + inert wiring `540e07a`. Flag **false**. P3 PASS. P8 FAIL operationally. GRIN **synthetic-only**. **Do not advertise.** | Live purge grant = one-line flip; not done |
-| 3 Build/device | `PHONE_HANDOFF.md`. OnePlus 12R upgrade. B1≠B2 **ungranted**. Purchase-entry `"0"`. Device **NOT RUN**. Slot O UID private. | EAS B1 of `540e07a` after owner letter; Play B2 separate |
+| 3 Build/device | `PHONE_HANDOFF.md` `c200712`. B1 checkout **`540e07a`**. B1≠B2 **ungranted**. Purchase-entry `"0"`. Device **NOT RUN**. Slot O UID private. | Recheck Play, then owner-lettered B1; Play B2 separate |
 | 4 Billing/Play | Lifecycle correction in **`60c4bc1`**. T5 SOURCE+INJECTED **PASS** (`c69ffb9`). Catalog **NOT RUN**. Purchase-entry `"0"`. | Activation HOLD |
 | 5 QA | `REVIEW_540e07a.md` **PASS** `b3b1c97`. **P8 FAIL** operationally. Device/live **NOT RUN**. | Leftover P3-FAIL stay dirty |
 

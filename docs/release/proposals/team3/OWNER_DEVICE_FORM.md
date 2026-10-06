@@ -9,24 +9,25 @@ recovery codes into git. Do not write Firebase tester UIDs into this file.
 identifier from the Firebase UID and from GRIN admission
 (`users/{uid}/goodsEvidenceAdmission/runtime`, Approval A — not present).
 
-Owner slot **O** UID received privately **2026-10-06** (existing
-account; out-of-repo; `count=1`). Values **not in this file**. Supply is
-**not** live admission. T1/T2 still via private channel only.
+Exact coordinator → owner ask (already satisfied for slot **O** — do
+**not** send again; T1/T2 optional if later named):
 
-Internal AAB: coordinator-selected **FINAL** application SHA after
-billing-lifecycle correction + matching **completed** canonical CI —
-not an intermediate. Current app blobs (may be superseded):
-`fcda7cd64e9622e50c38223a7156f0f6b8ca5576`. Combined docs HEAD
-`70bdfe4` is **not** a B1 checkout.  
-Do **not** build `520f9f9` / `56f2040` / `313025f` alone.  
-Canonical CI GHA `37440328976` **IN_PROGRESS** on `70bdfe4` (app blobs =
-`fcda7cd`). IN_PROGRESS ≠ matching CI. Do not cite GHA `37425360211`.  
-Profile: `internal-grin` AAB. B1 ≠ B2; **neither granted**. This
-instruction does **not** authorize B1/B2.  
+Please reply here (or in an out-of-repo file I name) with your Firebase Auth UID only — no password, OTP, key, or recovery code; do not git it. Play Internal email is separate from that UID and from GRIN admission.
+
+Internal AAB: application `540e07aa07f376716484adb879ce66cb9fb170ce`.
+Canonical CI GHA `37445383607` **SUCCESS**, job `112208918347`, tested
+checkout `7e0d629` (parent `d4c7ed4`; `540e07a`..`7e0d629` DEPLOYMENT_PATHS
+empty — docs/QA only). **Do not** checkout `7e0d629` as B1.
+Do **not** rebuild `520f9f9` / `56f2040` / `313025f` / `fcda7cd` /
+`60c4bc1` alone. Do not cite GHA `37425360211` or `37440328976` as this
+candidate's CI.
+Profile: `internal-grin` AAB. B1 ≠ B2; **neither granted**. Recheck Play
+immediately before B1 remains **required**. This instruction does **not**
+authorize B1/B2.
 Purchase-entry `"0"`, quota-upsell `"0"`, `PLAY_BILLING` unset — this
-GRIN build is **not** an interactive purchase-test build unless a later
-reviewed configuration enables the restricted purchase interface with
-server-side tester authorization intact.  
+GRIN build is **not** an interactive purchase-test build. Billing
+activation is **off**. Restricted billing is **not** a prerequisite.
+P8 **FAIL**. GRIN synthetic-only until later backend.  
 `adb devices -l` this session: **empty** → every execution row
 **NOT RUN**, never PASS.  
 Host SQLite / mounted inert React / emulator / CI are **not**
@@ -40,9 +41,9 @@ Handoff: `docs/release/proposals/team3/PHONE_HANDOFF.md`.
 
 | Slot | Role | Availability (dates) | Notes |
 |---|---|---|---|
-| O | Owner | **today** (2026-10-06) | Firebase Auth UID **received privately 2026-10-06** (out-of-repo). Grammar valid (`count=1`). Values **not in git**. Admission **writes HOLD**. Play Internal email separately, also private. |
-| T1 | Trusted tester 1 | | Firebase Auth UID via private channel |
-| T2 | Trusted tester 2 | | Firebase Auth UID via private channel |
+| O | Owner | **today** (2026-10-06) | Firebase Auth UID **already received privately** (count=1). Do **not** ask again. Play Internal email separately, also private. Neither in git. |
+| T1 | Trusted tester 1 | optional | Unnamed. Additional testers optional. UID via private channel if later named |
+| T2 | Trusted tester 2 | optional | Unnamed. Additional testers optional. UID via private channel if later named |
 
 Do not request passwords / OTPs / keys / recovery codes here. Play list ≠
 Firestore admission (Approval A) ≠ Firebase UID.

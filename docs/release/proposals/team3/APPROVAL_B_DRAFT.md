@@ -1,19 +1,20 @@
-# Approval B freeze-prepare — Team 3 (`team/grin-t3-phone-handoff`)
+# Approval B freeze-prepare — Team 3 (`team/grin-t3-aab-540e07a`)
 
 **Not authorization.** This packet prepares Internal AAB + OnePlus 12R
 upgrade handoff. **B1 ≠ B2. Neither granted.** This instruction does
-**not** authorize B1 or B2. Coordinator will not build until a complete
-batch is lettered **after billing-lifecycle correction + matching
-completed canonical CI**.
+**not** authorize B1 or B2. Named Internal AAB is application `540e07a`.
+Recheck Play immediately before B1 remains **required**. Restricted
+billing is **not** a prerequisite for this billing-off GRIN Internal AAB.
 
 No EAS/native/prebuild/OTA. No Play upload. No `eas build`. No
 `eas submit`. Combined `/Users/shivamsaurav/vyd-worktrees/grin-combined`
 was **read-only**. Historical workspace was **read-only**. Do **not**
-force-push `origin/team/grin-t3-offline`.
+force-push `origin/team/grin-t3-offline` or
+`origin/team/grin-t3-phone-handoff`.
 
 Worktree: `/Users/shivamsaurav/vyd-worktrees/grin-t3-offline`  
-Provenance branch: `team/grin-t3-phone-handoff` (from
-`team/grin-t3-candidate-1310` `21fac5b`). This branch is **docs
+Provenance branch: `team/grin-t3-aab-540e07a` (from
+`team/grin-t3-phone-handoff` `5692e25`). This branch is **docs
 provenance**. It is **not** a B1 checkout. Application blobs on this
 branch are **not** the Internal AAB source.
 
@@ -24,39 +25,41 @@ Phone handoff: `docs/release/proposals/team3/PHONE_HANDOFF.md`.
 ## Internal AAB pin (copy this block)
 
 ```
-Internal AAB SHA:  coordinator-selected FINAL application SHA
-                   after billing-lifecycle correction + matching
-                   completed canonical CI — not an intermediate
-Current app blobs (observation only, may be superseded):
-                   fcda7cd64e9622e50c38223a7156f0f6b8ca5576
-Docs HEAD observed (not a B1 checkout):
-                   70bdfe4b2ea2a7cf6a9fe5f1cf7bf08ff6ebc4e9
-                   (application blobs = fcda7cd)
-Canonical CI:      GHA 37440328976 IN_PROGRESS on 70bdfe4
-                   (verify job 112192249694). IN_PROGRESS ≠ matching CI.
-                   Do not cite GHA 37425360211 (covers 520f9f9 only).
-Do not build alone: 520f9f9 / 56f2040 / 313025f
-Version name:      1.0.0 (re-read at FINAL SHA)
+Internal AAB SHA:  540e07aa07f376716484adb879ce66cb9fb170ce
+B1 checkout:       540e07aa07f376716484adb879ce66cb9fb170ce
+                   (not 7e0d629 — that checkout is docs/QA only)
+CI-tested checkout: 7e0d629023198333ed384ae076285925e98047d6
+                   parent d4c7ed4cb49d1bb5547fe3738702016bd1bcc36f
+Canonical CI:      GHA 37445383607 SUCCESS
+                   verify job 112208918347 on 7e0d629
+                   540e07a..7e0d629 DEPLOYMENT_PATHS empty (docs/QA only)
+Do not rebuild alone: 520f9f9 / 56f2040 / 313025f / fcda7cd / 60c4bc1
+                   (older packets exist)
+Do not cite as this candidate's CI:
+                   GHA 37425360211 (520f9f9) or 37440328976 (fcda7cd/70bdfe4)
+Version name:      1.0.0 (re-read at 540e07a immediately before B1)
 versionCode:       23 UNRESERVED — re-read Play explorer immediately before B1
 EAS profile:       internal-grin
 Android type:      AAB (app-bundle)
 Package:           com.specialsoftwares.vyaamikkdiary
-B1 / B2:           neither granted (B1 ≠ B2)
+B1 / B2:           neither granted (B1 ≠ B2). Recheck-Play-before-B1 required.
 Purchase-entry:    OFF — this is not an interactive purchase-test build
+Restricted billing is NOT a prerequisite for this billing-off GRIN Internal AAB.
+P8:                FAIL operationally. GRIN synthetic-only until later backend.
 ```
 
 | Tree | SHA | What it is |
 |---|---|---|
-| **B1 checkout** | Coordinator-selected **FINAL** application SHA after billing-lifecycle correction **and** matching **completed** canonical CI | **Only** this |
-| Current application (may be superseded) | `fcda7cd64e9622e50c38223a7156f0f6b8ca5576` | Restricted Play-tester SOURCE on 1/3/10 GiB + 45-day. T5 SOURCE+INJECTED PASS does **not** grant B1. **Do not treat as FINAL** if correction lands later |
-| Combined docs HEAD | `70bdfe4b2ea2a7cf6a9fe5f1cf7bf08ff6ebc4e9` | Docs; application blobs **= `fcda7cd`**. **Not** a B1 checkout |
-| Canonical CI | GHA `37440328976` **IN_PROGRESS** | Checkout `70bdfe4`. Not success. Not a letter. |
-| Retired / superseded (do **not** build alone) | `520f9f98bc952fd7f30a907da9e85774629a69c0` / `56f2040e30159579edc0cbfbc88e2ba706a6abd2` / `313025f902b0a3416815da7ce75a3a7d6bec9559` | Retired freeze / superseded freeze-prepare / pre-tester-SOURCE |
-| Retired matching CI | GHA `37425360211` | Covers `520f9f9` only |
+| **B1 checkout** | `540e07aa07f376716484adb879ce66cb9fb170ce` | **Only** this |
+| CI-tested checkout | `7e0d629023198333ed384ae076285925e98047d6` | Canonical CI SUCCESS; docs/QA after `540e07a`. **Not** a B1 checkout |
+| Checkout parent | `d4c7ed4cb49d1bb5547fe3738702016bd1bcc36f` | Parent of `7e0d629` |
+| Canonical CI | GHA `37445383607` **SUCCESS**, job `112208918347` | Covers `540e07a` because DEPLOYMENT_PATHS empty. Not a letter. |
+| Retired / superseded (do **not** rebuild alone) | `520f9f9` / `56f2040` / `313025f` / `fcda7cd` / `60c4bc1` | Older packets exist |
+| Retired matching CI | GHA `37425360211` (`520f9f9`) / GHA `37440328976` (`fcda7cd`/`70bdfe4`) | Not this candidate |
 
-Do not silently retarget to Combined docs HEAD. Do not start `eas build`
-from this provenance branch. A later **material source change** (billing
-correction, versionCode rewrite, purchase-entry / quota / GRIN flag
+Do not silently retarget to Combined docs HEAD `7e0d629`. Do not start
+`eas build` from this provenance branch. A later **material source
+change** (versionCode rewrite, purchase-entry / quota / GRIN flag
 change) requires a **new binary** and a **new CI**. Do not rebuild from a
 dirty tree. Do not reuse historical AAB `72cb7254-…` git `0da2f58`.
 
@@ -66,11 +69,13 @@ See `CURRENT_HEAD_VS_FREEZE.md`.
 
 ## This GRIN AAB is not a purchase-test build
 
-`internal-grin` at `fcda7cd` (re-verify at FINAL SHA): purchase-entry
-`"0"`, quota-upsell `"0"`, `EXPO_PUBLIC_PLAY_BILLING` **unset**. This
-Internal GRIN build is **not** an interactive purchase-test build unless
-a later reviewed configuration enables the restricted purchase interface
-**with server-side tester authorization intact**.
+`internal-grin` at `540e07a`: purchase-entry `"0"`, quota-upsell `"0"`,
+`EXPO_PUBLIC_PLAY_BILLING` **unset**. Billing activation is **off**.
+Restricted billing is **not** a prerequisite for this billing-off GRIN
+Internal AAB. This Internal GRIN build is **not** an interactive
+purchase-test build unless a later reviewed configuration enables the
+restricted purchase interface **with server-side tester authorization
+intact**.
 
 ---
 
@@ -78,7 +83,7 @@ a later reviewed configuration enables the restricted purchase interface
 
 | Gate | What it authorizes | This draft |
 |---|---|---|
-| **B1 — Build** | `eas build --profile internal-grin --platform android` from a **clean** checkout of the **FINAL** SHA, after Play inventory is **re-read** and `versionCode` is written/committed if it must change | **not granted** |
+| **B1 — Build** | `eas build --profile internal-grin --platform android` from a **clean** checkout of `540e07a`, after Play inventory is **re-read** and `versionCode` is written/committed if it must change | **not granted** |
 | **B2 — Upload** | Play Internal Testing track upload of the B1 AAB only, after B1 evidence (buildId, worker env, AAB sha256, bundletool dump) | **not granted**; requested only after B1 evidence, as a **separate later letter** |
 
 B1 does not imply B2. B2 does not imply production promotion, store
@@ -87,11 +92,12 @@ separate `NATIVE_DEVICE` artifact — never the B2 upload.
 
 ---
 
-## Package / version / profile / flags (from `eas.json` + `app.json` at `fcda7cd`)
+## Package / version / profile / flags (from `eas.json` + `app.json` at `540e07a`)
 
-Verified by `git show fcda7cd:eas.json` and `git show fcda7cd:app.json`.
-**Re-read at FINAL SHA before B1.** **No** `eas build` / `eas submit` /
-`eas config` this session.
+Verified by `git show 540e07aa07f376716484adb879ce66cb9fb170ce:eas.json`
+and `git show 540e07aa07f376716484adb879ce66cb9fb170ce:app.json`.
+**Re-read at `540e07a` immediately before B1.** **No** `eas build` /
+`eas submit` / `eas config` this session.
 
 | Key | `internal-grin` | `production` / `preview` |
 |---|---|---|
@@ -117,7 +123,7 @@ AAB.
 Visibility is **not** backend admission (Approval A). Compile-time flags:
 changing them later requires a new binary.
 
-`src/goodsEvidence/isolation.contract.test.ts` at `fcda7cd` asserts
+`src/goodsEvidence/isolation.contract.test.ts` at `540e07a` asserts
 `"versionCode": 23` and `internal-grin` GRIN `"1"`. If Play already has
 23 at B1 time, **stop** — do not ship 24+ while that test still requires
 23.
@@ -191,14 +197,15 @@ GRIN device tests need **later** backend.
 
 ## B1 evidence to record (when owner authorizes later)
 
-Prerequisites: FINAL SHA settled (billing correction + matching
-**completed** CI); **clean** checkout of that SHA; Play inventory
-**re-read**; versionCode written and committed if it must change.
+Prerequisites: **B1 letter** (not granted); **clean** checkout of
+`540e07aa07f376716484adb879ce66cb9fb170ce`; Play inventory **re-read**;
+versionCode written and committed if it must change. Do **not** checkout
+`7e0d629` as the B1 source.
 
 Commands (do not run now): `PHONE_HANDOFF.md` §5.
 
 - EAS `buildId`
-- `gitCommitHash` matching the FINAL SHA
+- `gitCommitHash` matching `540e07aa07f376716484adb879ce66cb9fb170ce`
 - resolved public env from the **build worker** (not only `eas.json`)
 - AAB sha256
 - `bundletool dump manifest` package / versionCode / versionName
