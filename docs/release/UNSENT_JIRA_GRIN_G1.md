@@ -220,3 +220,11 @@ Published PR #31 head `0d7aa17`. Application `520f9f9`. Tooling successor `0d7aa
 
 `docs/release/proposals/team3/APPROVAL_B_DRAFT.md` + `OWNER_DEVICE_FORM.md` (team `8ca2b59` on `team/grin-t3-freeze`). Freeze application **`520f9f9`** with canonical CI **`37425360211`** (head `0d7aa17`). B1 ≠ B2; **neither granted**. versionCode **23 UNRESERVED**. Re-read Play explorer before B1. Testers/phones blank; `adb` empty → **NOT RUN**. No EAS/Play write. Do not mark device / Internal Testing Done.
 
+## Team 5 pin/CI closeout (unsent, 2026-10-06)
+
+`docs/release/proposals/team5/CLOSEOUT_0d7aa17.md` (team `00fd822`). TOOLING **34/34** + SOURCE CI PASS at `0d7aa17` / GHA **`37425360211`**. S1/S2 not reopened. **P3 ACCEPTED**. **P8 FAIL**. Device/live/billing **NOT RUN**. Dirty leftover POLICY_QA files **not folded**. Do not mark GRIN / device / billing / public-release Done.
+
+## Team 1 A1 present (unsent, 2026-10-06)
+
+`docs/release/proposals/team1/A1_PRESENT.md` + `A2_A7_REMAINING.md` (team `80da828` on `team/grin-t1-a1-present`). Isolated Firestore Rules hashes re-verified. Live baseline preserved. **Not executed.** A2–A7 remain separate HOLDs. Do not mark backend / GRIN Done.
+

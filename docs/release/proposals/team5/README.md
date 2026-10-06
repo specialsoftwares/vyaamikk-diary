@@ -33,6 +33,7 @@ QA artefacts. Not production implementations. Not G6 completion.
 | `S1_S2_POST_FIX.md` | Independent INJECTED + named G2 EMULATOR review at `520f9f9`; **S1/S2 PASS** at that boundary; P3 ACCEPTED; P8 FAIL; GHA/device/live **NOT RUN** |
 | `s1-s2-post-fix.injected.ts` | Post-fix adapter harness |
 | `s1-s2-post-fix.emulator.ts` | Post-fix Firestore emulator harness (`127.0.0.1:8091` / `demo-vyaamikk-grin-g2`) |
+| `CLOSEOUT_0d7aa17.md` | Pin + SOURCE CI review at `0d7aa17`; TOOLING+SOURCE CI PASS; P3 ACCEPTED; P8 FAIL; not device/live |
 | `wave2evidence-e1-e5-repro.ts` | SQLITE_HOST / INJECTED / host-filesystem drivers for E1–E5 |
 | `wave2evidence-e1-e5-rereview.ts` | PHASE 2 persistGrinOwnerSession inspection + unset-host failure |
 | `wave2evidence-e4-hasher-followup.ts` | PHASE 3 persist hasher / conversion persist / SHA-256 inspection |

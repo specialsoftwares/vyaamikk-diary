@@ -9,12 +9,12 @@ Checkpoint: PR **#31** head `0d7aa17`. Application `520f9f9`. Tooling successor 
 
 | Task | Owner | Branch | Worktree | Dependency | Status | Evidence | Blocker | Next |
 |---|---|---|---|---|---|---|---|---|
-| Integration | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | `0d7aa17` | running | GHA `37425360211` success; app `520f9f9`; pin applied; P3 PASS; P8 FAIL | live mutate / EAS / Play / billing HOLD | A1 offer; owner GiB + deletion; B1 freeze |
-| Backend pilot | team1 | `team/grin-t1-review-after-s1-s2` | `grin-t1-backend` | A1 hashes | running | Present A1; A2–A7 scoped separately | `GRIN_OPS_ALLOW_LIVE=1` HOLD | Owner A1 grant; remaining backend packets |
+| Integration | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | `0d7aa17` | running | GHA `37425360211`; app `520f9f9`; A1 presented; T3 freeze docs | live mutate / EAS / Play / billing HOLD | Owner A1 grant; owner GiB + deletion; B1 not granted |
+| Backend pilot | team1 | `team/grin-t1-a1-present` | `grin-t1-backend` | A1 hashes | review | `A1_PRESENT.md` `80da828`. Rules only. A2–A7 remaining. Not executed. | `GRIN_OPS_ALLOW_LIVE=1` HOLD | Owner A1 grant; remaining backend packets |
 | Policy / deletion | team2 | `team/grin-t2-s1s2` | `grin-t2-evidence` | `0cd3473` | running | Holds-bound 2500; economics; inactive deletion | advertising GiB; live purge | Do not reopen S1/S2; do not flip P8 |
 | Build / device | team3 | `team/grin-t3-freeze` | `grin-t3-offline` | freeze `520f9f9` + CI `37425360211` | review | `APPROVAL_B_DRAFT.md` `8ca2b59`. vc23 unreserved. Device form blank. B1≠B2 not granted. | EAS/Play B1/B2 HOLD | Re-read Play explorer before B1; no unauthorized build |
 | Billing / Play | team4 | `team/grin-t4-product` | `grin-t4-product` | purchase-entry `"0"` | running | Two owner decisions: GiB + 15/180; billing matrix | activation HOLD | Catalog NOT RUN; no website publish |
-| Independent QA | team5 | `team/grin-t5-qa` | `grin-t5-qa` | newly landed only | running | Preserve S1/S2/P3; review pin/CI/new policy | NATIVE_DEVICE | Not whole-history; not device/live/billing |
+| Independent QA | team5 | `team/grin-t5-qa` | `grin-t5-qa` | newly landed only | source_verified | `CLOSEOUT_0d7aa17.md` `00fd822`. TOOLING+SOURCE CI PASS. P8 FAIL. | NATIVE_DEVICE | Wait T2/T4 new source; not device/live |
 | E1 evidence composition | team1 | `team/grin-t1-backend` | `grin-t1-backend` | `15bd2a6` | source_verified | persistGrinOwnerSession → processAttachments → real httpsCallable on isolated Functions emulator | live export HOLD | Stay unexported / undeployed |
 | E1/E2/E4/E5 evidence integrity | team2 | `team/grin-t2-evidence` | `grin-t2-evidence` | `29c6d3f` | source_verified | G2 unit + STORAGE_EMULATOR 8091/9200 | live IAM | Stay undeployed |
 | E2/E3 admission + descriptors | team3 | `team/grin-t3-offline` | `grin-t3-offline` | `0d0dd84` | source_verified | SQLITE_HOST outbox + capture columns | native death not claimed | Stay undeployed |

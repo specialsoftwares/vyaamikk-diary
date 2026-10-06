@@ -7,10 +7,13 @@ Scope of this offer: **Firestore Rules only**. Not Storage, not Functions,
 not IAM, not tester admission, not enablement, not EAS, not billing, not
 `main` merge.
 
+A1 changes Firestore access rules only. It does not deploy Functions, change Storage Rules/IAM, seed testers, enable GRIN, build the app, enable payments, or submit to Play.
+
 Worktree: `/Users/shivamsaurav/vyd-worktrees/grin-t1-backend`  
-Branch: `team/grin-t1-backend` (do **not** pull `origin/team/grin-t1-backend`)  
-HEAD this packet: team `3efd762`; combined fold follows. Starting checkout:
-`e981587b77e8598cd6ea99286f71a5afe18db08e`.
+Branch: do **not** pull `origin/team/grin-t1-backend`. Presentation of this
+packet: `docs/release/proposals/team1/A1_PRESENT.md` (hashes re-verified
+2026-10-06 on combined `aea65c1`). Starting checkout of the original
+refresh: `e981587b77e8598cd6ea99286f71a5afe18db08e`.
 
 `GRIN_OPS_ALLOW_LIVE` was **unset**. `GRIN_OPS_PINNED_SHA` was **unset**.
 `GRIN_OPS_EXPORT_DIR` was **unset** (inspect did not write). gcloud is
@@ -23,35 +26,26 @@ HEAD this packet: team `3efd762`; combined fold follows. Starting checkout:
 
 | Pin | Value | Status |
 |---|---|---|
-| Ops-guard / helper bytes | `228a8f58ac83d3c71e853cdccb6e4c4fa64c251f` | **KEEP.** `git diff 228a8f58 -- docs/release/packets/grin-ops/grin-functions-op.mjs docs/release/packets/grin-ops/grin-functions-op.test.mjs` is **empty**. Suite **34/34** this session (`node --test docs/release/packets/grin-ops/grin-functions-op.test.mjs`). No successor tooling SHA. |
-| Helper `PINNED_APP_SHA` | `5d5df3d54df08953bfb26db39a9b7f5e3d67ed47` | **STALE** vs application `b845e8a30262b9e8740fa53b55e9a0f237caea0b`. `git diff --stat 5d5df3d -- functions src eas.json app.json app firebase.json` is **non-empty** (includes `functions/src/goodsEvidence`). Do **not** bypass with `GRIN_OPS_PINNED_SHA` / fixtures / HTTP stubs. Live mode already rejects those overrides. |
-| Application this tree | `b845e8a30262b9e8740fa53b55e9a0f237caea0b` | Team 2 quota/storage/lifecycle. `git diff b845e8a HEAD -- functions/src/goodsEvidence` **empty**. **Pre-S1/S2.** Do **not** pin this SHA for A3. |
+| Historical ops-guard | `228a8f58ac83d3c71e853cdccb6e4c4fa64c251f` | **KEEP as baseline.** Suite **34/34** at that SHA (pin was `5d5df3d`). |
+| Tooling successor | `0d7aa17a6efcf3ce6874269eb57afda0a2b45559` | **Pin constant only** vs `228a8f5` (`PINNED_APP_SHA=520f9f9`). **Not** byte-identical. Combined helper 34/34 re-run 2026-10-06. |
+| Helper `PINNED_APP_SHA` at successor | `520f9f98bc952fd7f30a907da9e85774629a69c0` | Applied on combined at `0d7aa17`. Do **not** env-override. Live mode already rejects `GRIN_OPS_PINNED_SHA`. This Team 1 worktree helper is still `5d5df3d` and was **not** rewritten here. |
+| Application | `520f9f98bc952fd7f30a907da9e85774629a69c0` | S1/S2. Do **not** pin `b845e8a`. Canonical GHA run **`37425360211`** job **`112143748428`** success (published head `0d7aa17`). |
 | Repo-root quota Firestore | `233b05b7b810b484171257f4dafe78fd0fdea5762ed6848cf8b49cd327fd58cc` | **Never** `firebase deploy` from repo `firebase.json`. |
 
 **A1 does not execute the Functions helper.** Isolated Rules deploy uses
-firebase CLI `--config` / `--only firestore:rules` only. Stale
-`PINNED_APP_SHA` does **not** block offering A1.
+firebase CLI `--config` / `--only firestore:rules` only. Helper pin does
+**not** block offering A1.
 
-**A3 (`gate-off-initial`) must wait** for a **reviewed** helper pin update
-**after** S1/S2 storage corrections land. Proposed (unapplied) patch:
-`docs/release/proposals/team1/PIN_UPDATE_AFTER_S1_S2.diff.md`. Do **not**
-rewrite `grin-functions-op.mjs` this session. Do **not** pin `b845e8a`.
+**A3 (`gate-off-initial`)** pin wait is **done on combined** (`0d7aa17`).
+A3 remains **HOLD** — not executed, not implied by A1. See
+`A2_A7_REMAINING.md`. Do **not** pin `b845e8a`. Do **not** rewrite
+`grin-functions-op.mjs` from this Team 1 worktree.
 
 ### `REVIEW_AFTER_S1_S2`
 
-S1/S2 corrected application artifact is **not** in this worktree. This
-checkout still has:
-
-- S1: `numField` can yield `NaN`; `parseStorageAccounting` rejects
-  counters `< 0` but not `NaN`; `admitStorageReservation` can still admit
-  past the cap on corrupt counters.
-- S2: `originalHoldKey(evidenceId)` → `original:${evidenceId}` (no
-  `ledgerId`).
-
-Coordinator constraint:
-`docs/release/proposals/coordinator/S1_S2_STORAGE_CONSTRAINT.md`. Re-review
-the corrected SHA before any Functions pin update. A1 Rules bytes do not
-depend on that SHA.
+Recorded: `docs/release/proposals/team1/REVIEW_AFTER_S1_S2.md` (team
+`80b802f`). SOURCE PASS at `520f9f9`. Coordinator applied the helper pin at
+`0d7aa17`. A1 Rules bytes do not depend on the Functions pin.
 
 ---
 
@@ -172,14 +166,15 @@ are identifiers, not the rollback bytes.
 
 | Item | State |
 |---|---|
-| A2 Storage Rules | HOLD. Merged Storage `6b8959929b86ac2eab41fc591dc1fbf5bb03b80a226226d43bf4c8e72391c76b`. |
-| A3 seven-function create, gate off | HOLD. Pin `5d5df3d` is **STALE**. Wait for reviewed pin **after S1/S2**. |
-| Mixed-state `create-absent-only` | Planner exists (`grin-functions-absent-only.mjs`); **not wired** into `grin-functions-op.mjs`. Do not blindly retry all-seven create. |
-| A6 enable / disable | gcloud `--update-env-vars` without `--source` on a firebase-created gen2 callable remains **UNPROVEN**. gcloud **ABSENT** here. Firebase dotenv remains **blocked**. |
-| A4 tester seed / A5 IAM / A7 smoke | HOLD. Do not alter shared Editor. |
+| A2 Storage Rules | HOLD. Not implied by A1. See `A2_A7_REMAINING.md`. Merged Storage `6b8959929b86ac2eab41fc591dc1fbf5bb03b80a226226d43bf4c8e72391c76b`. |
+| A3 seven-function create, gate off | HOLD. Not implied by A1. Pin `520f9f9` / helper `0d7aa17`. This t1 worktree is not the apply host. |
+| Mixed-state `create-absent-only` | Planner exists (`grin-functions-absent-only.mjs`); **not wired** into `grin-functions-op.mjs`. Do not blindly retry all-seven create. UNKNOWN blocks. |
+| A6 enable / disable | HOLD. gcloud `--update-env-vars` without `--source` on a firebase-created gen2 callable remains **UNPROVEN**. Firebase dotenv remains **blocked**. Live override rejections preserved. |
+| A4 tester seed / A5 IAM / A7 smoke | HOLD. Not implied by A1. Do not alter shared Editor. |
 | `GRIN_OPS_ALLOW_LIVE=1` | **unset** / HOLD |
 
 ---
 
-**Owner grant requested later:** A1 only, using the exact command and hashes
-in this file, after a fresh inspect that still matches the live baseline.
+**Owner grant requested:** A1 only — present packet
+`docs/release/proposals/team1/A1_PRESENT.md`, after a fresh inspect that
+still matches the live baseline. A2–A7 remain HOLD.

@@ -33,7 +33,7 @@ rewrite those files as if they were re-run today.
 | P3 | **ACCEPTED** (first GRIN register consumes one monthly slot; replay/amend/QC/return/evidence/reconcile do not). |
 | P8 | **OPEN / FAIL** (`INCLUDE_GRIN_IN_ACCOUNT_PURGE=false`; public deletion policy UNRESOLVED). |
 | Device / live backend / billing / public | **Not accepted** |
-| Next approval | **A1** isolated Firestore Rules only — not executed. See below. |
+| Next approval | **A1 presented** (`A1_PRESENT.md`) — isolated Firestore Rules only; **not executed**. A2–A7 not implied. |
 | Pending owner decisions | Storage GiB (1/5/20 vs 256 MiB/1/5 GiB); public deletion window (15 implemented / 180 requested / UNRESOLVED). |
 | versionCode | **23 UNRESERVED**. Play explorer 2026-10-06: highest uploaded **vc22**. |
 | Merge-base / `origin/main` | `0da2f58970f23c7ce6cbefae6efffd49c731f44b` |
@@ -85,11 +85,11 @@ purchase-entry remains `"0"`. Play Console catalog **NOT RUN**.
 
 | Team | Authorized work this session | Approval still required |
 |---|---|---|
-| 1 Backend | T1 `REVIEW_AFTER_S1_S2` SOURCE PASS (`80b802f`). Pin **applied** `PINNED_APP_SHA=520f9f9` after T5 INJECTED+EMULATOR PASS. Ops-guard 34/34 re-run. A1 still independently offerable. A3 HOLD. No env-override. | Live Functions/Rules/IAM/admission/enable |
+| 1 Backend | A1 **presented** (`A1_PRESENT.md` `80da828`). Isolated Firestore Rules only. A2–A7 **HOLD**, not implied. Hashes re-verified. Not executed. | Owner A1 grant; A2–A7 remain separate |
 | 2 Policy | S1/S2 folded (`0cd3473` → combined `520f9f9`). Holds `1.o.{len}.{ledgerId}.{len}.{evidenceId}`; `MAX_STORAGE_HOLDS=2500`. Economics: bucket location **UNKNOWN**; do not advertise 1/5/20; 256 MiB/1/5 GiB alternative not selected, not guaranteed profitable. `INCLUDE_GRIN_IN_ACCOUNT_PURGE=false`. 15-day grace unchanged. | Owner GiB confirm; 180-day public policy; no live purge |
 | 3 Build/device | Freeze **`520f9f9`** + GHA **`37425360211`**. Play explorer 2026-10-06 must be **re-read before B1**. vc23 **unreserved**. Owner device form blank. Device rows **NOT RUN**. B1≠B2, neither granted. | EAS/native build; Play upload (separate) |
 | 4 Billing/Play | Owner sheet `DELETION_15_VS_180_OWNER_SHEET.md` (15 implemented / 180 requested / public UNRESOLVED). Catalog **NOT RUN**. Allowlist SOURCE, not live. | Product/price/activation/submission; owner A/B/C/D |
-| 5 QA | Post-fix `S1_S2_POST_FIX.md` (`1e33894`). **S1 PASS** / **S2 PASS** INJECTED + G2 EMULATOR `8091`. **P3 ACCEPTED**. **P8 FAIL**. Device/Play/live/GHA **NOT RUN**. | Does not own implementation; not device/live/billing |
+| 5 QA | Pin/CI closeout `CLOSEOUT_0d7aa17.md` (`00fd822`). TOOLING+SOURCE CI **PASS**. S1/S2 not reopened. **P3 ACCEPTED**. **P8 FAIL**. Device/live/billing **NOT RUN**. T3 freeze docs landed after this review. | Waiting T2/T4 new source; not device/live |
 
 ---
 
