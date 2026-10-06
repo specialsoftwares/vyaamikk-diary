@@ -1,12 +1,14 @@
 # Play submission readiness (Team 4) — worksheet, not submitted
 
 **Status:** truthful prep only. Do **not** Save, publish, or submit in Play Console from this file.  
-**Application SHA:** `5d5df3d54df08953bfb26db39a9b7f5e3d67ed47`  
-**Packet SHA (this tree):** `aa5253e4e070195227055cde836d6b528d5e0070` plus Team 4 docs/allowlist on this branch.  
-**Packet E:** billing/public-release gates **not authorized**.  
-**Inspection:** 2026-10-06 (IST). Website HTTP 2026-10-05T21:18Z.
+**Application SHA:** `520f9f98bc952fd7f30a907da9e85774629a69c0` (**no AAB of this SHA**). Do not describe a `5d5df3d` installed binary as current.  
+**Combined READ-ONLY HEAD:** `aea65c170adb25f09ca1045593f18847df2f3b30`. Canonical CI run **`37425360211`** on `0d7aa17`.  
+**This Team 4 branch:** `team/grin-t4-product` (do not force-push).  
+**Packet E:** billing/public-release gates **not authorized**. Purchase-entry stays `"0"`.  
+**Inspection:** 2026-10-06 (IST). Delete-account re-read this continue. Play catalog **NOT RUN**.
 
 Worksheets: `docs/release/packets/PLAY_LISTING_DATA_SAFETY_REVIEWER.md`, `docs/PLAY_REVIEW_SETUP.md`, `docs/release/proposals/team4/DATA_SAFETY_REBUILD.md`.
+Owner writes still blank: `docs/release/proposals/team4/TWO_OWNER_DECISIONS.md`.
 
 Legend: **VERIFIED** this session · **SOURCE** in repo · **STALE** older note not re-read · **NOT RUN**.
 
@@ -17,7 +19,7 @@ Legend: **VERIFIED** this session · **SOURCE** in repo · **STALE** older note 
 | Fact | Status |
 |---|---|
 | Latest EAS production AAB is **vc22** `72cb7254-…` git `0da2f58`, profile `production` | prior **VERIFIED** (`eas build:list`); **not re-listed** this session (`eas` not on PATH) |
-| No EAS AAB of application SHA `5d5df3d` / vc23 / profile `internal-grin` | **SOURCE** this tree; **NOT RUN** EAS inventory this session. **Do not describe a 5d5df3d installed binary — none was built.** |
+| No EAS AAB of application SHA `520f9f9` / vc23 / profile `internal-grin` | **SOURCE** freeze candidate on combined; **NOT RUN** EAS inventory this session (`eas` not on PATH). **Do not describe a 520f9f9 installed binary — none was built.** Prior `5d5df3d` pin is **STALE**. |
 | Source `versionCode` 23; Play inventory of Active tracks | **NOT RUN** (last Console read 2026-10-01: Internal vc22 Active, Production Inactive, 23 absent — **STALE**) |
 | Client purchase-entry / quota-upsell `"0"` on production / preview / `internal-grin` | **SOURCE** `eas.json`. Coordinate with Team 3: freeze `"0"` for the ordinary Internal GRIN binary. A billing-test binary would be a **separate later profile/SHA**. |
 | GRIN UI on Play-installed builds | Only if an **`internal-grin` AAB** is uploaded. Ordinary `production` profile does **not** set GRIN flags. Live GRIN Functions were **ABSENT** (2026-10-06). |
@@ -76,7 +78,7 @@ On the intended Internal GRIN / production-profile binary (purchase-entry `"0"`,
 
 Conflict: `docs/play-review/PLAY_CONSOLE_SIGN_IN_DETAILS_TEMPLATE.md` still has a “linked review email” placeholder — **do not paste** that into Console. `docs/play-review/PLAY_REVIEW_ACCOUNT_SETUP_RUNBOOK.md` email step is owner-private, not Play reviewer copy.
 
-Owner must still: configure the Firebase test phone live (**NOT RUN**); pre-onboard (phone + **verified email** + completed profile) on a production-like build; run `npm run review:verify-account` as a **partial** profile check only. Device verification of the **intended installed binary** is **NOT RUN** — none built for `5d5df3d`.
+Owner must still: configure the Firebase test phone live (**NOT RUN**); pre-onboard (phone + **verified email** + completed profile) on a production-like build; run `npm run review:verify-account` as a **partial** profile check only. Device verification of the **intended installed binary** is **NOT RUN** — none built for `520f9f9`. A fully onboarded reviewer account on that SHA is **not** available until an AAB exists.
 
 ---
 
@@ -86,8 +88,8 @@ Owner must still: configure the Firebase test phone live (**NOT RUN**); pre-onbo
 |---|---|
 | App name / package | **SOURCE** `app.json`: Vyaamikk Diary / `com.specialsoftwares.vyaamikkdiary` |
 | Adaptive / launcher icons | **SOURCE** `app.json` → `assets/icon.png`, `assets/android-icon-*` |
-| Play 512 icon / feature graphic | **VERIFIED git-tracked in this candidate** (also present at application SHA `5d5df3d`): `store/play-icon-512.png` sha256 `cc550cb8450c62d5b991da56d0e5989db9ee14fb7d971b679848728caf401f5a`; `store/play-feature-graphic.png` sha256 `b17f8082b5b7f025ce0ecfc23d0dd096c8997a945f5960198e135b27d10dddd1`; `store/play-icon-512-masked-preview.png` sha256 `a0c18f35fde4a2585fb0a6d6131441552c7a784992bebee7ae248b081fd51a30`. Prior worksheet claim that they were not in the worktree was **wrong**. Play Console upload **NOT RUN**. |
-| Phone screenshots | `public-site/assets/screenshots/` + `screenshots.manifest.json`. **Do not upload** `dashboard-en`, `dashboard-hi`, `dashboard-ta`, `dashboard-te`, `dashboard-gu` (`safeForPublic: false` — demo profile / company names). Public-safe set includes location-access-en, new-record-*, statutory-info-en. **NOT RUN** whether any are already in Play Console. |
+| Play 512 icon / feature graphic | **VERIFIED git-tracked in this candidate**: `store/play-icon-512.png` sha256 `cc550cb8450c62d5b991da56d0e5989db9ee14fb7d971b679848728caf401f5a`; `store/play-feature-graphic.png` sha256 `b17f8082b5b7f025ce0ecfc23d0dd096c8997a945f5960198e135b27d10dddd1`; `store/play-icon-512-masked-preview.png` sha256 `a0c18f35fde4a2585fb0a6d6131441552c7a784992bebee7ae248b081fd51a30`. Play Console upload **NOT RUN**. |
+| Phone screenshots | `public-site/assets/screenshots/` + `screenshots.manifest.json`. **Public-safe (`true`):** `location-access-en`, `new-record-en`, `new-record-hi`, `new-record-te`, `new-record-gu`, `statutory-info-en`. **Do not upload** `dashboard-en`, `dashboard-hi`, `dashboard-ta`, `dashboard-te`, `dashboard-gu` (`safeForPublic: false` — demo profile / company names). **NOT RUN** whether any are already in Play Console. |
 | Short / full description | Draft: `docs/release/play-listing/DRAFTS.md` (**SOURCE**, not submitted). Do **not** claim live GSTN/GSTR-2B/EWB verification, ITC, originals bundled in packs, encrypted PDF backup, GRIN-in-SKU, unbounded evidence storage, or a **live** 14-day trial (`PLAY_LISTING_DATA_SAFETY_REVIEWER.md`, `DATA_SAFETY_REBUILD.md`). |
 | Website “Launching on iOS and Android” | **VERIFIED** on live `.com` (JSON-LD). Align listing so it does not imply a public production track if only Internal exists (**Play track NOT RUN**). |
 
@@ -165,7 +167,7 @@ Play Console privacy URL should be the live `.com` page. Owner/counsel must reco
 | GRIN `users/{uid}/grinEvidence/**` | **Not** in deletion prefixes | **SOURCE** |
 | Firestore GRIN / billing subcollections | **Not** in `USER_SUBCOLLECTIONS` purge list | **SOURCE** |
 | Live deletion job behaviour | **NOT RUN** | do not execute deletion |
-| Owner 180-day hold request | **Not** implemented; **not** Play/legal approved. Public-approved window **UNRESOLVED** (implemented 15 ≠ owner choice). See `docs/release/proposals/team4/DELETION_15_VS_180_OWNER_SHEET.md`. | **SOURCE** proposal only |
+| Owner 180-day hold request | **Not** implemented; **not** Play/legal approved. **Three facts:** implemented **15 days**; owner requested **180 days**; public-approved window **UNRESOLVED**. Do not record 15 as the owner’s choice. Changing `DELETION_GRACE_MS` is not a safe 180-day policy. See `docs/release/proposals/team4/DELETION_15_VS_180_OWNER_SHEET.md`. | **SOURCE** |
 
 Play Data safety / account deletion answers: in-app **yes**; web URL **yes**; additional retention **yes** (anti-abuse indexes, device residual, shared PDFs, **GRIN originals until Packet D**).
 
@@ -175,11 +177,11 @@ Play Data safety / account deletion answers: in-app **yes**; web URL **yes**; ad
 
 | Feature | Gate | What reviewers can do | Status |
 |---|---|---|---|
-| Core diary / PDF / calendar | Signed-in active account with **verified email + completed profile** (owner pre-onboards) | Must work with the test phone on the intended binary | **SOURCE**; **intended 5d5df3d binary not built**; device **NOT RUN** |
+| Core diary / PDF / calendar | Signed-in active account with **verified email + completed profile** (owner pre-onboards) | Must work with the test phone on the intended binary | **SOURCE**; **intended 520f9f9 binary not built**; device **NOT RUN** |
 | Paid plans / IAP | Client `EXPO_PUBLIC_SUBSCRIPTION_PURCHASE_ENTRY_ENABLED === "1"`; server `PLAY_BILLING_ENABLED === "true"` plus fail-closed `PLAY_BILLING_TESTER_UIDS` | **Closed** on intended Internal binary. Settings shows purchase-entry closed. Restore may still call validate and fail closed on server. | **SOURCE**; live enablement key **absent** (2026-10-06) |
 | 14-day Professional trial | Server `grantProfessionalTrial`; `CLIENT_MANUAL_TRIAL_START_SUPPORTED === false`; no client callable; not wired from identity create | **Source-only.** Do not tell reviewers or the listing that a live trial is granted. | **SOURCE** |
 | Quota upsell sheet | independent `"1"` flag | Off on these EAS profiles | **SOURCE** |
-| GRIN | Client flags + **server** admission + Functions `GRIN_GOODS_EVIDENCE_FUNCTIONS` | Live GRIN callables **ABSENT**. Visible UI only on `internal-grin` AAB (**not built** for `5d5df3d`). Do not advertise GRIN unless it is reachable. | **VERIFIED** Functions list 2026-10-06; **SOURCE** Packet B |
+| GRIN | Client flags + **server** admission + Functions `GRIN_GOODS_EVIDENCE_FUNCTIONS` | Live GRIN callables **ABSENT**. Visible UI only on `internal-grin` AAB (**not built** for `520f9f9`). Do not advertise GRIN unless it is reachable. | **VERIFIED** Functions list 2026-10-06; **SOURCE** Packet B |
 | Billing details / GSTIN | `UPDATE_BILLING_DETAILS_ENABLED` | Flag absent live; GSTIN format-only, never client-verified GSTN/2B/EWB | **SOURCE** + live env 2026-10-06 |
 
 Do not check Play “full access including premium” unless the reviewer can actually use paid/premium content on the submitted installed binary.
@@ -190,10 +192,10 @@ Do not check Play “full access including premium” unless the reviewer can ac
 
 | Item | Finding | Status |
 |---|---|---|
-| Packet D commercial choice | **not recorded** | **SOURCE** `D_OWNER_POLICY_OPTIONS.md` |
+| Packet D commercial choice | **GRIN-in-existing-plans recorded** (2026-10-06). **Do not reopen.** Remaining owner writes: storage GiB (`STORAGE_OWNER_CHOICE.md`); explicit-deletion public window (`DELETION_15_VS_180_OWNER_SHEET.md`). | **SOURCE** |
 | In-app copy | “Prices shown are from Google Play”; manage/cancel in Google Play; 14-day trial is **policy/source**, not a live store SKU and not a client-startable grant | **SOURCE** `src/i18n/locales/en.ts`, `upgradePresentation.ts` |
 | Catalog paise | Functions `expectedPriceInPaise` — **not** display authority | **SOURCE** `functions/src/billing/products.ts` |
-| Live Play prices / base plans / catalog | **NOT RUN** this session. Exact blocker: no Play Console session; `gcloud` absent; no Android Publisher client; **Firebase tokens must not be used as Play Android Publisher**. | **NOT RUN** |
+| Live Play prices / base plans / catalog | **NOT RUN** this session. Exact blocker: no Play Console session; `gcloud` absent; no Android Publisher client; **Firebase tokens must not be used as Play Android Publisher**. Do **not** reuse “catalog empty.” | **NOT RUN** |
 | Public listing paid claims | Forbidden until Packet D + Packet E real-store acceptance | **SOURCE** Packet E |
 | Merchant KYC | Owner/Play payments profile | **NOT RUN** this session |
 
@@ -205,13 +207,14 @@ Play **Internal Testing** worksheet can be drafted from `PLAY_REVIEW_SETUP.md` +
 
 Blockers to treat as open (non-exhaustive):
 
-1. No binary of SHA `5d5df3d` / vc23 / `internal-grin` on EAS — **cannot verify the intended installed binary**.
-2. Purchase-entry stays `"0"`; Packet E real-store matrix **NOT RUN**; Play catalog **NOT RUN** (no Publisher/Console route).
+1. No binary of SHA `520f9f9` / vc23 / `internal-grin` on EAS — **cannot verify the intended installed binary**. Reviewer account is **not** fully onboarded on that SHA.
+2. Purchase-entry stays `"0"`; Packet E real-store matrix **NOT RUN**; Play catalog **NOT RUN** (no Publisher/Console route this continue: `gcloud` absent, `googleapiclient` absent).
 3. Privacy **date mismatch** (site 15 Jul 2026 vs app 27 Jul 2026). Do not backdate the in-app 2026-07-27 baseline.
-4. GRIN files (and GRIN/billing Firestore collections) not in the deletion job; listing/Data safety must not claim they vanish with the account.
-5. Website first-party `/~api/analytics` ingest is live (POST 202); privacy copy says no third-party analytics. Server-side Tinybird forward **UNKNOWN**. Not an app SDK.
+4. Explicit deletion: implemented **15 days** vs requested **180 days** vs public **UNRESOLVED** (`DELETION_15_VS_180_OWNER_SHEET.md`). GRIN files not in the deletion job; listing/Data safety must not claim they vanish with the account. **P8 open.**
+5. Website first-party `/~api/analytics` ingest is live (POST 202); privacy copy says no third-party analytics. Server-side Tinybird forward **UNKNOWN**. Do not claim `flock.js` forwards solely from 202. Not an app SDK.
 6. Play Console inventory, Data safety form, and listing Save: **NOT RUN** / not submitted.
 7. Reviewer fixture live in Firebase + pre-onboarded email/profile: **NOT RUN**.
 8. In-app privacy still calls email optional; onboarding **requires** verified email.
+9. Storage GiB: original **1 / 5 / 20** still pending confirmation vs alternative **256 MiB / 1 GiB / 5 GiB** (`STORAGE_OWNER_CHOICE.md`). Do not advertise.
 
 Human sign-off (owner, counsel, Play Console operator) is still required. This document is not that sign-off.

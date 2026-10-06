@@ -1,7 +1,8 @@
 # Restricted tester allowlist (SOURCE) — not enablement
 
-**Not authorization.** No `PLAY_BILLING_ENABLED` flip, no tester UID invention,
-no Play product create, no purchase.
+**Not authorization.** No tester UID invention. Empty/absent
+`PLAY_BILLING_TESTER_UIDS` **denies all** even if billing were enabled.
+Application SHA `520f9f9`. Combined `aea65c1`. CI `37425360211` on `0d7aa17`.
 
 ## Why Internal track / hidden button is not enough
 

@@ -7,8 +7,16 @@ is **not immunity** from Play, DPDP, or any other law.
 
 Worktree: `/Users/shivamsaurav/vyd-worktrees/grin-t4-product`  
 Branch: `team/grin-t4-product`  
-Fetched Play Help: **2026-10-06**. Confirm again in Play Console Help before
-any listing or Data safety Save.
+Combined (READ-ONLY): `aea65c170adb25f09ca1045593f18847df2f3b30`  
+Application SHA to describe: `520f9f98bc952fd7f30a907da9e85774629a69c0`
+(no AAB of this SHA).  
+Canonical CI: run `37425360211` on `0d7aa17`.  
+Fetched Play Help: **2026-10-06** (this continue; same calendar day as the
+prior sheet). Confirm again in Play Console Help before any listing or
+Data safety Save.
+
+The other remaining owner write is storage caps:
+`STORAGE_OWNER_CHOICE.md`. **Do not reopen** GRIN-in-existing-plans.
 
 Do **not** publish website copy, flip billing, or submit Play forms from this
 file.
@@ -17,19 +25,42 @@ file.
 
 ## Three facts (do not collapse)
 
+These are **three different statements**. Do not merge them into “the
+deletion window is 15 days” or “the owner chose 180 days.”
+
 | # | Fact | What it is today | What it is not |
 |---|---|---|---|
-| 1 | **Implemented** | **15 days.** `DELETION_GRACE_DAYS` / `DELETION_GRACE_MS` in `src/domain/identityLifecycle.ts` and `functions/src/deletion/finalPurge.ts` (and the same 15-day constant in identity resolve). Live `/privacy` and `/delete-account` copy also say 15-day pending deletion. | Not “the owner already chose 15.” Not Play-certified. Not a public-policy close. |
-| 2 | **Owner requested** | **180 days** of recoverability after an **explicit account-deletion request**. | Not implemented. **Not** legally reviewed. **Not** Play-approved. Not a GST/tax retention period invented by this app. |
-| 3 | **Public-approved policy** | **UNRESOLVED.** | Not 15 by default. Not 180. Not 30. Not “keep shipping until someone objects.” |
+| 1 | **Implemented** | **15 days.** `DELETION_GRACE_DAYS` / `DELETION_GRACE_MS` in `src/domain/identityLifecycle.ts` and `functions/src/deletion/finalPurge.ts` (and the same 15-day constant in identity resolve). Live `/privacy` and `/delete-account` copy also say 15-day pending deletion (re-read 2026-10-06). | Not “the owner already chose 15.” Not Play-certified. Not a public-policy close. Not Team 4 recording 15 as your final product decision. |
+| 2 | **Owner requested** | **180 days** of recoverability after an **explicit account-deletion request**. | Not implemented. **Not** legally reviewed. **Not** Play-approved. Not a GST/tax retention period invented by this app. Not the 90+30 expiry clock. |
+| 3 | **Final public-approved policy** | **UNRESOLVED.** | Not 15 by default. Not 180. Not 30. Not “keep shipping until someone objects.” |
 
 Leaving the code at 15 days until you write a public window is an
-**engineering hold**. It is **not** Team 4 recording 15 days as your final
-product decision.
+**engineering hold**. It is **not** Team 4 recording 15 days as your choice.
 
 Do **not** substitute **30 days**. Thirty days in this programme is the
-**subscription-expiry notice** after a 90-day read window (see below), not
-the account-deletion clock.
+**subscription-expiry notice** after a 90-day read window (see clocks
+below), not the account-deletion clock.
+
+---
+
+## Changing `DELETION_GRACE_MS` does not implement a safe 180-day policy
+
+If someone later sets `DELETION_GRACE_MS` (or `DELETION_GRACE_DAYS`) from
+15 to 180, that change would only **lengthen the pending-deletion freeze**.
+It would **not**, by itself:
+
+- make six months of a disabled, fully recoverable workspace count as
+  **account deletion** under Play User Data (freeze / disable ≠ delete);
+- add GRIN Storage or GRIN Firestore trees to the production purge (P8);
+- write counsel-approved `/privacy`, `/delete-account`, in-app legal, or
+  Play Data safety copy;
+- create the **optional recoverable archive** product (that is a different
+  control — see clocks);
+- close public-approved policy (fact 3 stays UNRESOLVED until you + counsel
+  write it).
+
+Team 4 **will not** change `DELETION_GRACE_MS` in this slice. Do **not**
+treat a constant edit as the 180-day product.
 
 ---
 
@@ -39,14 +70,15 @@ Do not mix them in listing copy, privacy text, or Functions jobs.
 
 | Clock | What the user did | What the clock is | Status here |
 |---|---|---|---|
-| **Explicit account deletion** | User (or web mailto) asked to **delete the Vyaamikk Diary account** | Pending (`pending_deletion`) then purge after the **deletion grace** | Implemented **15 days**. Requested **180 days**. Public **UNRESOLVED**. |
+| **Explicit account deletion** | User (or web email) asked to **delete the Vyaamikk Diary account** | Pending (`pending_deletion`) then purge after the **deletion grace** | Implemented **15 days**. Requested **180 days**. Public **UNRESOLVED**. |
 | **Subscription / GRIN expiry (90+30)** | Paid/trial entitlement **ended**; the user did **not** ask to delete the account | Owner-described: **90 days** read/export, then **30 days** final notice. `expired_purge_eligible` is source machinery in other GRIN slices; **no production purge scheduler** is authorized from this sheet | **Not** account deletion. Do not stretch deletion grace to match 90+30, and do not shrink 90+30 to 15. |
 | **Optional archival product** | User would **choose** “keep a recoverable copy” instead of (or in addition to) timely deletion | A **separate product** with its own consent, listing language, and implementation | **Not built.** Must not be the only deletion control. Must not be labelled “delete account.” |
 
 Play Data safety also has a **different** 90-day idea: a badge for data that
-is automatically deleted or anonymized **within 90 days of collection**. That
-badge is **not** this app’s account-deletion grace and is **not** a reason to
-pick 90 (or 30) as the deletion window.
+is automatically deleted or anonymized **within 90 days of collection**
+([Data safety Help — answer 10787469](https://support.google.com/googleplay/android-developer/answer/10787469),
+fetched 2026-10-06). That badge is **not** this app’s account-deletion grace
+and is **not** a reason to pick 90 (or 30) as the deletion window.
 
 ---
 
@@ -90,12 +122,13 @@ warns against.
 ## Official Play / Help references (fetched 2026-10-06)
 
 Read the live articles again before any Console Save. Policy text can change.
+Quoted language below is from Play Console Help as fetched this session.
 
 | Source | URL | What it says that matters here |
 |---|---|---|
-| **User Data policy — Account Deletion Requirement** | [Play Console Help — User Data](https://support.google.com/googleplay/android-developer/answer/10144311) | Apps that create accounts must offer deletion **in-app and on an external web resource**. Delete associated user data on request. **Temporary deactivation, disabling, or “freezing” does not qualify as account deletion.** Extra retention only for legitimate security, fraud-prevention, or **regulatory** reasons, and **must be disclosed** (for example in the privacy policy). Key consideration: “Account freezing is not a valid substitute.” |
-| **Understanding Google Play’s app account deletion requirements** | [Play Console Help — answer 13327111](https://support.google.com/googleplay/android-developer/answer/13327111) | Same in-app + web rule. Web link must load, be easy to find, name the app/developer as on the listing. Pathway may be **a form, a customer-service email, or similar**. **Mailto is not automatically defective.** Fulfil requests in a **“reasonably quick” period**; Play does **not** publish a 15 / 30 / 180 day SLA. “Check with your legal advisors” — local law may be stricter. |
-| **Data safety section** | [Play Console Help — answer 10787469](https://support.google.com/googleplay/android-developer/answer/10787469) | Data safety answers must match real deletion behaviour. The 90-day auto-delete **badge** is a **collection** disclosure, not this deletion-grace decision. |
+| **User Data policy — Account Deletion Requirement** | [Play Console Help — User Data](https://support.google.com/googleplay/android-developer/answer/10144311) | Apps that create accounts must offer deletion **in-app and on an external web resource**. “When you delete an app account based on a user's request, you must also delete the user data associated with that app account.” **“Temporary account deactivation, disabling, or ‘freezing’ the app account does not qualify as account deletion.”** Extra retention only for legitimate security, fraud-prevention, or **regulatory** reasons, and **must be disclosed** (for example in the privacy policy). Key consideration table: **“Account freezing is not a valid substitute.”** Do / Don't: **“Don't present account freezing as a substitute for deletion.”** “Upon user request, delete all associated user data; merely freezing the account is not sufficient.” |
+| **Understanding Google Play’s app account deletion requirements** | [Play Console Help — answer 13327111](https://support.google.com/googleplay/android-developer/answer/13327111) | Same in-app + web rule. Web link must load, be easy to find, name the app/developer as on the listing. Pathway may be **a form, a customer-service email, or similar**. **Mailto / support email is not automatically defective.** Fulfil requests in a **“reasonably quick” period**; Play does **not** publish a 15 / 30 / 180 day SLA. “Check with your legal advisors” — local law may be stricter. |
+| **Data safety section** | [Play Console Help — answer 10787469](https://support.google.com/googleplay/android-developer/answer/10787469) | Data safety answers must match real deletion behaviour. The 90-day auto-delete **badge** is a **collection** disclosure (delete or anonymize within 90 days of collection), not this deletion-grace decision. |
 | **Policy announcement (5 April 2023)** | [Play Console Help — answer 13411745](https://support.google.com/googleplay/android-developer/answer/13411745) | Account deletion requirement added under User Data; Data safety questions may show on the store listing. |
 | **Android Developers Blog (6 March 2024)** | [Designing your account deletion experience](https://android-developers.googleblog.com/2024/03/designing-your-account-deletion-experience-google-play.html) | **UX guidance**, not a numbered Play SLA: explain consequences, consider recovery **“within a reasonable timeframe,”** and keep a web path that does **not** require reinstall. This blog does **not** approve 180 days. |
 
@@ -138,7 +171,7 @@ will **not** flip `INCLUDE_GRIN_IN_ACCOUNT_PURGE`.
 | Choice | Plain meaning | What would have to happen later (not this slice) |
 |---|---|---|
 | **A.** Keep **15-day** pending then purge as the **public** deletion story | Accidental-reversal window, then erase what the job actually deletes | Counsel + Play listing / Data safety / `/privacy` / `/delete-account` must **say 15** as the approved public term. In-app legal baseline stays **2026-07-27**; live site today says **15 July 2026**. Do **not** backdate. New terms are a **new** revision. |
-| **B.** Make **180-day** pending-then-purge the deletion story | Six-month freeze labelled as deletion | High Play-policy risk unless counsel documents a legitimate disclosed basis. Would still need GRIN in the purge architecture before public GRIN claims. **Not recommended as “deletion.”** |
+| **B.** Make **180-day** pending-then-purge the deletion story | Six-month freeze labelled as deletion | High Play-policy risk unless counsel documents a legitimate disclosed basis. Would still need GRIN in the purge architecture before public GRIN claims. **Not recommended as “deletion.”** Changing `DELETION_GRACE_MS` to 180 is **not** this choice implemented safely. |
 | **C.** Keep a **timely** deletion path, and offer **optional 180-day archive** as a **different** button | Recoverability without pretending freeze is delete | New product: consent, copy, implementation, counsel. Pack PDFs today are `originalsBundled=false` — they are **not** that archive. |
 | **D.** Leave **UNRESOLVED** | Current state | Code stays at implemented 15 days. Public GRIN / public deletion claims stay blocked. **P8 remains open.** |
 
@@ -174,13 +207,14 @@ originals vanish with the account.
 
 ## Website and mailto (do not “fix” from this file)
 
-Live `https://vyaamikk.specialsoftwares.com/delete-account` (HTTP 200):
-in-app path plus
-`mailto:support.vyd@specialsoftwares.com?subject=Vyaamikk%20Diary%3A%20Account%20deletion%20request`.
-The page names Vyaamikk Diary and Ananya Engineered Industrial Components &
+Live `https://vyaamikk.specialsoftwares.com/delete-account` (HTTP 200,
+re-read 2026-10-06 this continue): in-app path plus a **customer-service
+email** to `support.vyd@specialsoftwares.com` (page tells the user to
+identify Vyaamikk Diary in the subject; no reinstall required). The page
+names Vyaamikk Diary and Ananya Engineered Industrial Components &
 Pay Systems LLP. Play Help allows a customer-service email. **Do not call
-mailto inherently defective. Do not invent a form. Do not publish website
-changes from this file.** Inbox monitoring: **NOT RUN**.
+mailto / support-email inherently defective. Do not invent a form. Do not
+publish website changes from this file.** Inbox monitoring: **NOT RUN**.
 
 Live `/privacy` effective date on page: **15 July 2026**. In-app
 `LEGAL_EFFECTIVE_DATE`: **2026-07-27**. Preserve the in-app baseline. **Do
@@ -188,7 +222,8 @@ not backdate** a 180-day (or any new) term onto 2026-07-27.
 
 Website `/~api/analytics` POST **202** does **not**, by itself, prove that
 the first-party proxy forwards to Tinybird or any other external processor.
-Upstream forward remains **UNKNOWN**.
+Upstream forward remains **UNKNOWN**. Do **not** claim `flock.js` forwards
+solely from that 202.
 
 ---
 
@@ -199,7 +234,8 @@ Upstream forward remains **UNKNOWN**.
   behind enablement**; empty list denies all. **Not enabled. Not deployed
   from this file.**
 - Play catalog / prices / license testers: **NOT RUN**. Do **not** reuse
-  “catalog empty.”
+  “catalog empty.” This continue: `gcloud` absent; no Android Publisher
+  client; no Play Console session.
 - Acceptance matrix (purchase, restore, pending, cancel, renewal, refund,
   duplicate RTDN, account switch, expiry, reconciliation): **SOURCE** tests
   where they exist; **LIVE_STORE NOT RUN**. See
@@ -209,14 +245,17 @@ Upstream forward remains **UNKNOWN**.
 - Reviewer onboarding: owner/tester finishes **email + profile before
   review**. Reviewer uses `+91 9000000000` / OTP `654321` only if the live
   fixture is verified. No founder inbox in Play instructions.
-  `docs/PLAY_REVIEW_SETUP.md`.
+  `docs/PLAY_REVIEW_SETUP.md`. **No `520f9f9` AAB** to complete that
+  onboarding on the intended binary.
 
 ---
 
 ## Pointers
 
+- Index of both remaining asks: `TWO_OWNER_DECISIONS.md`
+- Storage GiB (the other remaining write): `STORAGE_OWNER_CHOICE.md`
 - Engineering notes (not this owner sheet): `DELETION_WINDOW_180_PLAY.md`
 - Handoff: `BILLING_PLAY_HANDOFF.md`
 - Data safety rebuild: `DATA_SAFETY_REBUILD.md`
-- Packet D (pricing / quota / GRIN retention — also unset):
+- Packet D (pricing recorded; storage GiB and public deletion still open):
   `docs/release/packets/D_OWNER_POLICY_OPTIONS.md`

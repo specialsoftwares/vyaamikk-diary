@@ -22,8 +22,11 @@ Do **not** claim:
 - That a pack PDF contains original invoice files (`originalsBundled=false`)
 - Encrypted backup of PDFs (backlog)
 - A live 14-day Professional trial (source-only; no client grant)
-- That GRIN is included in a priced SKU until Packet D records A or B
-- Unbounded evidence storage
+- That GRIN is included in a priced SKU until Packet E real-store
+  acceptance of the **already recorded** “include in existing plans” choice
+  (do **not** reopen that choice here)
+- Unbounded evidence storage, or a confirmed GiB allowance, until the owner
+  writes `STORAGE_OWNER_CHOICE.md`
 - That GRIN is available on a binary where admission/Functions cannot reach it
 
 Accurate short description addendum **if GRIN is visible and reachable on the submitted
@@ -61,12 +64,18 @@ claim encrypted backup or an accredited audit.
 
 Account deletion: **implemented 15-day** grace for cloud diary records;
 owner **requested 180 days** (not legally/Play approved); public-approved
-window **UNRESOLVED**. See `DELETION_15_VS_180_OWNER_SHEET.md`. **GRIN
+window **UNRESOLVED**. Do **not** record 15 as the owner’s choice. Changing
+`DELETION_GRACE_MS` is not a safe 180-day policy. Play User Data: freeze /
+disable ≠ delete. See `DELETION_15_VS_180_OWNER_SHEET.md`. **GRIN
 Storage originals are not yet in that job** (P8 open). Until Packet D
 retention is implemented, Data safety must **not** claim GRIN files are
 deleted with the account. Do **not** flip `INCLUDE_GRIN_IN_ACCOUNT_PURGE`.
 Safer Internal text: “Goods-evidence files used in internal testing may be
 retained until testers are wiped or a deletion policy ships.”
+
+Storage GiB (separate owner write, do not advertise): original **1 / 5 / 20
+GiB** vs alternative **256 MiB / 1 GiB / 5 GiB** —
+`STORAGE_OWNER_CHOICE.md`. Do not reopen GRIN-in-existing-plans.
 
 ## Reviewer instructions (Play Console sign-in details)
 

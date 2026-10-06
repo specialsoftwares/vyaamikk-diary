@@ -4,7 +4,9 @@
 rewrite. In-app legal baseline remains `LEGAL_EFFECTIVE_DATE` **2026-07-27**
 (`src/config/legal.ts`). Do not backdate new terms onto that constant.
 
-**Application SHA described:** `5d5df3d` (no installed binary of that SHA).
+**Application SHA described:** `520f9f9` (no installed binary of that SHA).
+Prior `5d5df3d` pin is STALE for this freeze. Combined READ-ONLY `aea65c1`.
+CI `37425360211` on `0d7aa17`.
 **Live website fetch:** 2026-10-05T21:18Z.
 
 Legend: **COLLECTED** by the app/backend · **SHARED** only when Play’s sharing
@@ -144,7 +146,7 @@ Live `/privacy` (HTTP 200) includes:
 | `GET /~api/analytics` | **404** |
 | `POST /~api/analytics` (empty Tinybird-shaped JSON) | **202** `Accepted` — ingest is live |
 | Default Tinybird URL in the script | Present as fallback if proxy attributes are missing |
-| Server-side forward to Tinybird / others | **UNKNOWN** (202 does not reveal upstream) |
+| Server-side forward to Tinybird / others | **UNKNOWN** (202 does not reveal upstream; **do not claim flock.js forwards solely from 202**) |
 | App load of flock.js | **None** (`src/` has no flock/tinybird) |
 | Live privacy copy | “This marketing website itself does not load third-party analytics…” — **browser** destination is first-party; **processor** behind the proxy is unknown |
 | Cloudflare `__cf_bm` | CDN bot-management cookie on HTML responses — hosting, not an app SDK |
@@ -155,10 +157,13 @@ Do not publish website changes from this file.
 
 ## 7. Account deletion (implemented)
 
-See `DELETION_15_VS_180_OWNER_SHEET.md` (three facts: implemented **15 days**;
-owner requested **180 days**, not legally/Play approved; public-approved
-policy **UNRESOLVED**). Mailto web path is documented and identifies the
+See `DELETION_15_VS_180_OWNER_SHEET.md` (three facts, do not collapse:
+implemented **15 days**; owner requested **180 days**, not legally/Play
+approved; public-approved policy **UNRESOLVED**). Do not record 15 as the
+owner’s choice. Changing `DELETION_GRACE_MS` is not a safe 180-day policy.
+Mailto / support-email web path is documented and identifies the
 developer/app; Play allows it. Do not treat mailto as inherently defective.
 Do not build a form. GRIN Storage and several Firestore collections are
 **not** in the purge lists — do not claim full erasure of those objects.
 **P8 remains open.** Do not flip `INCLUDE_GRIN_IN_ACCOUNT_PURGE`.
+Storage GiB (separate owner write): `STORAGE_OWNER_CHOICE.md`.
