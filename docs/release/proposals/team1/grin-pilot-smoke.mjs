@@ -6,7 +6,7 @@
  * Labels:
  *   INJECTED     — default; synthetic in-process adapters (no live project)
  *   EMULATOR     — isolated demo project only; not LIVE_BACKEND
- *   LIVE_BACKEND — refused: A6 gcloud omitted-source preservation is UNPROVEN
+ *   LIVE_BACKEND — refused: E gcloud omitted-source preservation is UNPROVEN
  *
  * Owner Firebase Auth UIDs are supplied privately (not in git). This module
  * never prints UID values, tokens, or env values.
@@ -155,14 +155,14 @@ export function liveBackendAdmission({
       allowed: false,
       label: SMOKE_LABEL_LIVE,
       reason:
-        "LIVE_BACKEND refused: gcloud omitted --source preservation on firebase-created gen2 callables is UNPROVEN (A6). Do not enable live GRIN to obtain that evidence.",
+        "LIVE_BACKEND refused: gcloud omitted --source preservation on firebase-created gen2 callables is UNPROVEN (E). Do not enable live GRIN to obtain that evidence.",
     };
   }
   if (smokeLive !== "1" || allowLive !== "1") {
     return {
       allowed: false,
       label: SMOKE_LABEL_LIVE,
-      reason: "LIVE_BACKEND requires a later approved pilot (GRIN_PILOT_SMOKE_LIVE=1 and GRIN_OPS_ALLOW_LIVE=1) after A3+A4+A6",
+      reason: "LIVE_BACKEND requires a later approved pilot (GRIN_PILOT_SMOKE_LIVE=1 and GRIN_OPS_ALLOW_LIVE=1) after C+D+E and an owner live-smoke letter",
     };
   }
   return { allowed: true, label: SMOKE_LABEL_LIVE, reason: "admitted" };
@@ -231,7 +231,7 @@ function runValidateUids(filePath) {
 
 function printUsage() {
   process.stdout.write(`Usage: node grin-pilot-smoke.mjs [injected|emulator|live|validate-uids <file>]
-INJECTED is the default (synthetic). LIVE_BACKEND is refused while A6 is UNPROVEN.
+INJECTED is the default (synthetic). LIVE_BACKEND is refused while E is UNPROVEN.
 Never prints UID values. Owner UID files must be outside git.
 `);
 }

@@ -69,7 +69,7 @@ test("owner UID files inside the repo are rejected; empty file fail-closes", () 
   assert.equal(loaded.uids.length, 2);
 });
 
-test("LIVE_BACKEND is refused while A6 is UNPROVEN even if live env is set", () => {
+test("LIVE_BACKEND is refused while E is UNPROVEN even if live env is set", () => {
   const decision = liveBackendAdmission({
     allowLive: "1",
     smokeLive: "1",

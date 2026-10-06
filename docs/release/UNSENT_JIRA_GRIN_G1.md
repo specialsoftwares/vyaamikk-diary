@@ -284,3 +284,11 @@ GHA **`37440328976`** **success**. Job `112192249694` `verify` **success**. Chec
 
 `PHONE_HANDOFF.md` (team `5692e25` on `team/grin-t3-phone-handoff`). OnePlus 12R upgrade over vc22. B1≠B2 ungranted. Purchase-entry `"0"` — not a purchase-test build. Device **NOT RUN**. Do not uninstall vc22 without owner agreement. UIDs not in git. Do not mark device Done.
 
+## Team 1 executable A–F batch (unsent, 2026-10-06)
+
+`CONSOLIDATED_PILOT_PACKET.md` (team `a28bfb0` on `team/grin-t1-executable-batch`). A/B two separate commands. C HOLD pin. D Firestore admission doc (not SOURCE allowlist). E UNPROVEN. F INJECTED yes / LIVE HOLD. **Not executed.**
+
+## Team 4 already-owned lifecycle (unsent, 2026-10-06)
+
+Application **`60c4bc179c46b8986ab0dbd2c95db0e4a5ceb49a`** (`ccfd845` on `team/grin-t4-lifecycle-allowlist`). New grants fail-closed; already-owned expire/refund/restore skip allowlist. Coordinator SOURCE tests PASS. T5 **pending**. Do not pin. Do not activate billing.
+
