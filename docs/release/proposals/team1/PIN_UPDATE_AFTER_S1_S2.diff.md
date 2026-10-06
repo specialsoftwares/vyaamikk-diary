@@ -11,9 +11,10 @@ Current helper constant:
 export const PINNED_APP_SHA = "5d5df3d54df08953bfb26db39a9b7f5e3d67ed47";
 ```
 
-That pin is **STALE** vs application `b845e8a30262b9e8740fa53b55e9a0f237caea0b`
-(`git diff` non-empty on `functions/src/goodsEvidence`). `b845e8a` is itself
-**pre-S1/S2** and must **not** become the live Functions pin.
+That pin is **STALE** vs application `520f9f98bc952fd7f30a907da9e85774629a69c0`
+(S1/S2; cherry-pick of `0cd3473`). Do **not** pin `b845e8a` (pre-S1/S2).
+Do **not** apply this patch until Team 5 post-fix review and Team 1
+`REVIEW_AFTER_S1_S2` both record pass at the stated boundary.
 
 Ops-guard tooling pin stays
 `228a8f58ac83d3c71e853cdccb6e4c4fa64c251f` until a successor helper commit
@@ -40,7 +41,7 @@ change only; it is not that successor until applied **and** re-tested.
 ## Proposed diff (placeholder SHA)
 
 Replace `<SUCCESSOR_SHA_AFTER_S1_S2>` with the reviewed post-S1/S2
-application SHA only.
+application SHA only. Candidate (unreviewed): `520f9f98bc952fd7f30a907da9e85774629a69c0`.
 
 ```diff
 --- a/docs/release/packets/grin-ops/grin-functions-op.mjs

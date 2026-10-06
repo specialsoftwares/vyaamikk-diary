@@ -198,5 +198,9 @@ Packet `docs/release/proposals/team1/A1_PACKET_REFRESH.md` (team `3efd762`). Iso
 
 ## Team 3 Internal AAB packet (unsent, 2026-10-06)
 
-`docs/release/proposals/team3/APPROVAL_B_DRAFT.md` + `DEVICE_HANDOFF.md` (team `7bdf375`). Play App bundle explorer **RUN** 2026-10-06 (read-only): highest uploaded **vc22**; 23/21/18 absent; Internal **Active Vc22**. versionCode **23 UNRESERVED**. Freeze SHA is a **placeholder** until post-S1/S2 application SHA + matching CI (do not freeze `b845e8a` / `41b05a4`; do not reuse CI `37379529193` for a later SHA). Identities blank. `adb devices` empty. No EAS/native/Play write. B1≠B2, neither granted. Do not mark device / Internal Testing Done.
+`docs/release/proposals/team3/APPROVAL_B_DRAFT.md` + `DEVICE_HANDOFF.md` (team `7bdf375`). Play App bundle explorer **RUN** 2026-10-06 (read-only): highest uploaded **vc22**; 23/21/18 absent; Internal **Active Vc22**. versionCode **23 UNRESERVED**. Freeze SHA candidate `520f9f9` **only after** matching canonical CI (do not reuse CI `37379529193`). Identities blank. `adb devices` empty. No EAS/native/Play write. B1≠B2, neither granted. Do not mark device / Internal Testing Done.
+
+## Team 2 S1/S2 fold (unsent, 2026-10-06)
+
+Cherry-pick of `0cd3473` (`team/grin-t2-s1s2`) onto combined as `520f9f98bc952fd7f30a907da9e85774629a69c0`. Pre-fix (`b845e8a`): S1 admitted charged 1100/1000; S2 one hold `original:{evidenceId}`. Post-fix: `quota_state_invalid` zero writes on corrupt docs; holds `1.o.{len}.{ledgerId}.{len}.{evidenceId}`; `MAX_STORAGE_HOLDS=2500`. Coordinator focused tests PASS (helper, injected adapter, G2 unit, G2 emulator S1/S2, P3, deletion lists, packager parity). Canonical GHA **NOT YET** for this SHA. Do not cite `37379529193`. Pin `5d5df3d` still STALE — do not pin until T5+T1 review; no env-override. Bucket location UNKNOWN. Do not advertise 1/5/20 GiB. P8 open (`INCLUDE_GRIN_IN_ACCOUNT_PURGE=false`). No deploy. Do not mark GRIN / device / billing / public-release Done.
 

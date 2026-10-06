@@ -19,12 +19,13 @@ TOOLING (ops-guard suite; not application CI).
 | Repo | `specialsoftwares/vyaamikk-diary` |
 | Branch | `integration/grin-g1-g5-source` |
 | Draft PR | #31 (no duplicate PR; auto-merge off) |
-| **Application SHA** | `b845e8a30262b9e8740fa53b55e9a0f237caea0b` — Team 2 quota/storage/lifecycle (pre-S1/S2). |
-| **PR / checkout HEAD** | `41b05a49e8e60597b63a35f22825878bc1945dee` (`integration/grin-g1-g5-source`, PR #31). |
-| GitHub Actions canonical CI | run **`37379529193`**, job **`111997702708`**, workflow head **`41b05a4`**, verify / canonical CI step **success**. Do **not** cite `37351685421` for this tree. `gh` still unauthenticated here; run/job/head recorded from independent observation matching this checkout. |
+| **Application SHA** | `520f9f98bc952fd7f30a907da9e85774629a69c0` — S1/S2 storage accounting (cherry-pick of Team 2 `0cd3473` on `team/grin-t2-s1s2`). Pre-fix was `b845e8a`. |
+| **PR / checkout HEAD** | This coordinator fold (scripts + register) on `integration/grin-g1-g5-source`, PR #31. Application blobs match `520f9f9`. |
+| GitHub Actions canonical CI | **NOT YET** for `520f9f9`. Do **not** cite run **`37379529193`** (that success is `41b05a4` only) or `37351685421`. `gh` still unauthenticated here. |
 | `7761af6` → `41b05a4` | Team 5 `POLICY_QA_T2.md` + INJECTED non-register issuance lock **and** `package.json` `test:grin-t5-issuance-non-register`. **Not** exclusively narrative documentation. |
 | Local `ci:verify` | **PASS** on `7761af6` (includes `b845e8a`). `test:all` **159/159** in 273.9s. Invoice-renderer Docker skipped locally. |
-| Team 2 slice | `14e56f3802e29825708db591a5feb5bf8b000178` on `team/grin-t2-evidence` |
+| Team 2 S1/S2 slice | `0cd3473ab5aee2d88d31662e29794839bd9ee8aa` on `team/grin-t2-s1s2` (local `team/grin-t2-evidence` not force-pushed) |
+| Team 2 quota/lifecycle slice | `14e56f3802e29825708db591a5feb5bf8b000178` |
 | `git diff` vs `5d5df3d` | **non-empty** on `functions/src/goodsEvidence` (issuance quota, storage accounting, expiry). Ops pin for live GRIN deploy must be **re-reviewed** before A3. |
 | Live billing restriction | **Not deployed.** Live handlers still only the enablement key (absent). |
 | **Operational tooling SHA** | `228a8f58ac83d3c71e853cdccb6e4c4fa64c251f` |
@@ -46,7 +47,7 @@ Do not reopen ops-guard A/B without a new concrete reproduction.
 
 | Gate | State |
 |---|---|
-| SOURCE READY | GitHub Actions `37379529193` / job `111997702708` **success** on `41b05a4`. P3 accepted. **P8 FAIL**. **S1 FAIL** and **S2 FAIL** independently reproduced (INJECTED real G2 adapter at `b845e8a`; Team 5 `4c1e8a7`). Application still pre-fix. Do not advertise GiB. |
+| SOURCE READY | S1/S2 source folded at `520f9f9`. Coordinator focused tests **PASS** (helper, injected adapter, G2 unit, G2 emulator including Firestore S1/S2, P3 issuance, deletion lists, G2 typecheck). Packager parity **empty**. Canonical GHA for this SHA **NOT YET**. P3 accepted. **P8 FAIL**. Team 5 post-fix review **pending**. Do not advertise GiB. |
 | BACKEND PILOT READY | Prepared; **not authorized**; GRIN seven **ABSENT** on live. Create-absent-only planner exists, **not wired**. Enable/disable still UNPROVEN on firebase-created gen2. |
 | INTERNAL BUILD READY | Packet prepared (`APPROVAL_B_DRAFT.md`); **not authorized**; freeze SHA **placeholder** (post-S1/S2). Play inventory **RUN** 2026-10-06; versionCode 23 not reserved; no `internal-grin` / `5d5df3d` EAS AAB; B1≠B2 |
 | DEVICE ACCEPTED | Execution sheet ready; **NOT RUN** |
@@ -84,11 +85,11 @@ purchase-entry remains `"0"`. Play Console catalog **NOT RUN**.
 
 | Team | Authorized work this session | Approval still required |
 |---|---|---|
-| 1 Backend | A1 packet refreshed (`A1_PACKET_REFRESH.md`). Isolated Firestore Rules still independently offerable. Functions pin `5d5df3d` **STALE**; A3 waits for post-S1/S2 pin. Ops-guard `228a8f5` 34/34. | Live Functions/Rules/IAM/admission/enable |
-| 2 Policy | Issuance+storage+expiry+export folded (`14e56f3`). Economics: do not advertise 1/5/20; alternative **256 MiB / 1 GiB / 5 GiB**. `INCLUDE_GRIN_IN_ACCOUNT_PURGE=false`. 15-day grace unchanged. | Owner GiB confirm; 180-day public policy; no live purge |
-| 3 Build/device | Play App bundle explorer **RUN** 2026-10-06 (highest uploaded vc22; 23 unused, **unreserved**). Internal AAB freeze **placeholder** until post-S1/S2 SHA+CI. Device sheet **NOT RUN** (no hardware; identities blank). B1≠B2, neither granted. | EAS/native build; Play upload (separate); Play Console re-read before B1 |
+| 1 Backend | A1 packet still independently offerable. Functions pin `5d5df3d` **STALE** vs `520f9f9`. Do **not** pin until Team 5 review + Team 1 `REVIEW_AFTER_S1_S2`. Do not env-override. Ops-guard `228a8f5` 34/34. | Live Functions/Rules/IAM/admission/enable |
+| 2 Policy | S1/S2 folded (`0cd3473` → combined `520f9f9`). Holds `1.o.{len}.{ledgerId}.{len}.{evidenceId}`; `MAX_STORAGE_HOLDS=2500`. Economics: bucket location **UNKNOWN**; do not advertise 1/5/20; 256 MiB/1/5 GiB alternative not selected, not guaranteed profitable. `INCLUDE_GRIN_IN_ACCOUNT_PURGE=false`. 15-day grace unchanged. | Owner GiB confirm; 180-day public policy; no live purge |
+| 3 Build/device | Play explorer **RUN** 2026-10-06 (vc22 highest uploaded; 23 **unreserved**). Freeze SHA candidate `520f9f9` **only after** matching canonical CI. Device sheet **NOT RUN**. B1≠B2, neither granted. | EAS/native build; Play upload (separate); Play Console re-read before B1 |
 | 4 Billing/Play | Owner sheet `DELETION_15_VS_180_OWNER_SHEET.md` (15 implemented / 180 requested / public UNRESOLVED). Catalog **NOT RUN**. Allowlist SOURCE, not live. | Product/price/activation/submission; owner A/B/C/D |
-| 5 QA | Pre-fix S1/S2 INJECTED adapter reproduction (`S1_S2_PRE_FIX.md`, team `4c1e8a7`). **S1 FAIL** (charged 1100 vs cap 1000). **S2 FAIL** (two ledgers, one hold, charged 200 not 450). **P3 ACCEPTED**. **P8 FAIL**. **WAITING_FOR_FIX**. Device/Play/live **NOT RUN**. | Does not own implementation; post-fix review after Team 2 lands |
+| 5 QA | Pre-fix S1/S2 FAIL recorded (`S1_S2_PRE_FIX.md`). Post-fix independent review **pending** on `520f9f9`. **P3 ACCEPTED**. **P8 FAIL**. Device/Play/live **NOT RUN**. | Post-fix adapter + named emulator hosts |
 
 ---
 

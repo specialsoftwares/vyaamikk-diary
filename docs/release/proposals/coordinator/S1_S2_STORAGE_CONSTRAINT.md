@@ -51,6 +51,13 @@ Tests: identical replay once; same evidenceId different ledgers separately;
 cross-owner isolated; conflict fail-closed; concurrent near-cap cannot both
 exceed; verify/reject/retry cannot move another item's hold.
 
+## Implementation status (coordinator fold)
+
+Landed on combined as `520f9f98bc952fd7f30a907da9e85774629a69c0` (cherry-pick
+of `0cd3473`). Independent Team 5 post-fix review **pending**. Canonical GHA
+for this SHA **NOT YET**. Do not cite `37379529193`. Do not pin Functions.
+Do not advertise GiB. P8 unchanged (`INCLUDE_GRIN_IN_ACCOUNT_PURGE=false`).
+
 ## Bounded holds map
 
 Firestore documents are bounded (~1 MiB). Document the max hold-map size
