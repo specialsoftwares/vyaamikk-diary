@@ -24,6 +24,7 @@ QA artefacts. Not production implementations. Not G6 completion.
 | `INTERNAL_GRIN_PREFLIGHT_PACKET_REVIEW.md` | Independent packet + guarded-tooling review at `520b42b`; **Wave 2 not accepted** |
 | `INTERNAL_GRIN_OPS_GUARD_REVIEW.md` | Independent A/B reproduction of ops-guard inspection/live-isolation defects and the fail-closed correction; **Wave 2 not accepted** |
 | `RELEASE_COMPLETION_QA.md` | Independent release-blocking QA at application `5d5df3d` / tooling `228a8f5`; public deletion/retention SOURCE FAIL; **Wave 2 not accepted** |
+| `REVIEW_56f2040.md` | Independent QA of application `56f2040` (T2 capacity/cleanup vs freeze `520f9f9`); **P8 FAIL**; S1/S2/P3 preserved; device/live/billing/public **NOT RUN** |
 | `wave2evidence-e1-e5-repro.ts` | SQLITE_HOST / INJECTED / host-filesystem drivers for E1–E5 |
 | `wave2evidence-e1-e5-rereview.ts` | PHASE 2 persistGrinOwnerSession inspection + unset-host failure |
 | `wave2evidence-e4-hasher-followup.ts` | PHASE 3 persist hasher / conversion persist / SHA-256 inspection |
