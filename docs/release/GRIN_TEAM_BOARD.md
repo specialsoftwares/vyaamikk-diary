@@ -5,12 +5,13 @@ Do not collapse to Done.
 
 Arrangement: one coordinator plus five **local** Cursor Task subagents on separate worktrees. AI roles, not human sign-off.
 
-Checkpoint **2026-10-06 17:25:** GHA **`37445383607` SUCCESS** on `7e0d629` / app `540e07a`. Helper pin **applied**. Ops-guard **34/34**. A–F **not executed**. P8 FAIL. Device/live/public **not accepted**.
+Checkpoint **2026-10-06 18:15:** T1 E procedure `9365dd1` SOURCE/STUB; LIVE HOLD. T5 pin review `626cfa9` PASS. T3 AAB `c200712` folded. A–F **not executed**.
 
 | Task | Owner | Branch | Worktree | Dependency | Status | Evidence | Blocker | Next |
 |---|---|---|---|---|---|---|---|---|
 | Integration | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | `540e07a` | running | T5 folded; pin applied; CI SUCCESS | live HOLD | Owner letter of A–F; do not execute |
-| Backend pilot | team1 | `team/grin-t1-executable-batch` | `grin-t1-backend` | `540e07a` | review | Packet `a28bfb0`. A/B on paper; C HOLD pin after CI SUCCESS | `GRIN_OPS_ALLOW_LIVE=1` HOLD | Owner letters complete batch; no live execute |
+| Independent QA | team5 | `team/grin-t5-review-pin-540e07a` | `grin-t5-qa` | newly landed only | source_verified | `REVIEW_PIN_540e07a.md` `626cfa9` PASS. P8 FAIL. | NATIVE_DEVICE | Leftover P3-FAIL stay dirty |
+| Backend pilot | team1 | `team/grin-t1-e-procedure` | `grin-t1-backend` | `540e07a` | review | `E_ENABLE_DISABLE.md` `9365dd1`. SOURCE/STUB; LIVE HOLD | `gcloud` ABSENT; seven ABSENT | Do not live-enable |
 | Billing / Play | team4 | `team/grin-t4-lifecycle-allowlist` | `grin-t4-product` | purchase-entry `"0"` | review | T5 PASS `c69ffb9` at `60c4bc1`. Catalog NOT RUN. | activation HOLD | No Save/submit |
 | Independent QA | team5 | `team/grin-t5-review-540e07a` | `grin-t5-qa` | newly landed only | source_verified | `REVIEW_540e07a.md` `b3b1c97` PASS. P8 FAIL operationally. | NATIVE_DEVICE | Leftover P3-FAIL stay dirty |
 | Policy / deletion | team2 | `team/grin-t2-p8-proposal` | `grin-t2-evidence` | `b08690d` | review | Packet + inert wiring `540e07a`. Flag false. P8 FAIL. | live purge | Do not flip; synthetic-only |

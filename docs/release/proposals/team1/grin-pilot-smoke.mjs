@@ -6,7 +6,7 @@
  * Labels:
  *   INJECTED     — default; synthetic in-process adapters (no live project)
  *   EMULATOR     — isolated demo project only; not LIVE_BACKEND
- *   LIVE_BACKEND — refused: E gcloud omitted-source preservation is UNPROVEN
+ *   LIVE_BACKEND — refused: E is SOURCE/STUB-supported, not live-executable
  *
  * Owner Firebase Auth UIDs are supplied privately (not in git). This module
  * never prints UID values, tokens, or env values.
@@ -22,6 +22,92 @@ export const SMOKE_LABEL_LIVE = "LIVE_BACKEND";
 
 export const PLAY_BILLING_TESTER_UIDS_ENV = "PLAY_BILLING_TESTER_UIDS";
 export const GATE_KEY = "GRIN_GOODS_EVIDENCE_FUNCTIONS";
+export const E_PROJECT = "vyaamikk-diary";
+export const E_REGION = "asia-south1";
+export const E_APPLICATION_SHA = "540e07aa07f376716484adb879ce66cb9fb170ce";
+export const E_SOURCE_STUB_STATUS = "SUPPORTED";
+export const E_LIVE_STATUS = "HOLD";
+export const E_LIVE_EXECUTABLE = false;
+
+export const E_SEVEN_NAMES = Object.freeze([
+  "grinRegisterGoodsReceipt",
+  "grinReconcileCommand",
+  "grinMutateGoodsReceipt",
+  "grinReadGoodsReceipt",
+  "grinReserveEvidence",
+  "grinBeginEvidenceUpload",
+  "grinUploadEvidence",
+]);
+
+/** Helper enable: buildGcloudGateArgs(name, "true"). Disable uses "false", not remove. */
+export function expectedGcloudEnableArgs(functionName) {
+  return [
+    "functions",
+    "deploy",
+    functionName,
+    `--project=${E_PROJECT}`,
+    `--region=${E_REGION}`,
+    "--gen2",
+    `--update-env-vars=${GATE_KEY}=true`,
+  ];
+}
+
+export function expectedGcloudDisableArgs(functionName) {
+  return [
+    "functions",
+    "deploy",
+    functionName,
+    `--project=${E_PROJECT}`,
+    `--region=${E_REGION}`,
+    "--gen2",
+    `--update-env-vars=${GATE_KEY}=false`,
+  ];
+}
+
+export function eArgvUnsafe(args) {
+  if (args.includes("--source") || args.some((a) => a.startsWith("--source="))) return true;
+  if (args.includes("--set-env-vars") || args.some((a) => a.startsWith("--set-env-vars="))) {
+    return true;
+  }
+  if (args.includes("--clear-env-vars")) return true;
+  return false;
+}
+
+/**
+ * Inspect readback: gate on/off by key presence/name only.
+ * Never include env values, tokens, or secret payloads.
+ */
+export function inspectGateReadback(endpoint) {
+  const gatePresent = Object.prototype.hasOwnProperty.call(endpoint.env || {}, GATE_KEY);
+  const gateOn = (endpoint.env || {})[GATE_KEY] === "true";
+  return {
+    name: endpoint.name,
+    presence: endpoint.presence,
+    origin: endpoint.sourceOrigin,
+    gate: gateOn ? "on" : "off",
+    gatePresent,
+    otherUserKeyCount: endpoint.otherUserKeyCount,
+    secretBindingCount: endpoint.secretBindingCount,
+  };
+}
+
+/** Sequential helper loop: first failure stops; already-updated names stay. Not a rollback. */
+export function simulateGcloudGateLoop(names, failAtIndex = -1) {
+  const updated = [];
+  for (let i = 0; i < names.length; i++) {
+    if (i === failAtIndex) {
+      return {
+        ok: false,
+        updated,
+        remaining: names.slice(i),
+        mixedGate: updated.length > 0,
+        rolledBack: false,
+      };
+    }
+    updated.push(names[i]);
+  }
+  return { ok: true, updated, remaining: [], mixedGate: false, rolledBack: false };
+}
 
 /** Firebase Auth UID: 1–128 of [A-Za-z0-9_-]. Rejects emails, paths, whitespace. */
 export const FIREBASE_AUTH_UID = /^[A-Za-z0-9_-]{1,128}$/;
@@ -150,12 +236,12 @@ export function liveBackendAdmission({
       reason: "LIVE_BACKEND refuses pin/fixture/HTTP stubs/test-hang overrides",
     };
   }
-  if (!gcloudProven) {
+  if (!E_LIVE_EXECUTABLE || !gcloudProven) {
     return {
       allowed: false,
       label: SMOKE_LABEL_LIVE,
       reason:
-        "LIVE_BACKEND refused: gcloud omitted --source preservation on firebase-created gen2 callables is UNPROVEN (E). Do not enable live GRIN to obtain that evidence.",
+        "LIVE_BACKEND refused: E is SOURCE/STUB-supported, not live-executable (gcloud omitted --source preservation on firebase-created gen2 callables is UNPROVEN). Do not enable live GRIN to obtain that evidence.",
     };
   }
   if (smokeLive !== "1" || allowLive !== "1") {
@@ -178,6 +264,21 @@ export const SMOKE_SCENARIOS = Object.freeze([
   "confirmation",
   "read_export",
 ]);
+
+/**
+ * LIVE cross_owner_denial needs a second real authenticated uid.
+ * INJECTED uses synthetic OTHER. T1/T2 are unnamed — live case HOLD.
+ */
+export const SMOKE_SCENARIO_LIVE_REQUIREMENTS = Object.freeze({
+  authenticated_success: { requiresSecondAuthenticatedUid: false },
+  unauthenticated_denial: { requiresSecondAuthenticatedUid: false },
+  non_admitted_denial: { requiresSecondAuthenticatedUid: false },
+  cross_owner_denial: { requiresSecondAuthenticatedUid: true },
+  register_replay: { requiresSecondAuthenticatedUid: false },
+  upload_verification: { requiresSecondAuthenticatedUid: false },
+  confirmation: { requiresSecondAuthenticatedUid: false },
+  read_export: { requiresSecondAuthenticatedUid: false },
+});
 
 function runInjected() {
   const r = spawnSync("npx", ["--yes", "tsx", INJECTED], {
@@ -231,8 +332,9 @@ function runValidateUids(filePath) {
 
 function printUsage() {
   process.stdout.write(`Usage: node grin-pilot-smoke.mjs [injected|emulator|live|validate-uids <file>]
-INJECTED is the default (synthetic). LIVE_BACKEND is refused while E is UNPROVEN.
+INJECTED is the default (synthetic). LIVE_BACKEND is refused; E is not live-executable.
 Never prints UID values. Owner UID files must be outside git.
+Live cross_owner_denial requires a second authenticated account (unnamed).
 `);
 }
 

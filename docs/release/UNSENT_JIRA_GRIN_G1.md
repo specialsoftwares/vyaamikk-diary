@@ -316,3 +316,11 @@ Owner slot **O** uses an **existing** Firebase Auth account. UID stored **out-of
 
 Helper `PINNED_APP_SHA` set to application **`540e07a`**. TOOLING ops-guard **34/34**. Live overrides still rejected. Not A3 execute. Do not mark backend Done.
 
+## Team 1 E procedure (unsent, 2026-10-06)
+
+`E_ENABLE_DISABLE.md` (team `9365dd1` on `team/grin-t1-e-procedure`). SOURCE/STUB procedure complete. LIVE **HOLD** (`gcloud` absent; seven ABSENT; firebase-created preservation unproven). INJECTED smoke PASS. Live `cross_owner_denial` needs a second authenticated account. Do not mark backend Done.
+
+## Team 5 review pin 2d33f6d (unsent, 2026-10-06)
+
+`REVIEW_PIN_540e07a.md` (team `626cfa9` on `team/grin-t5-review-pin-540e07a`). SOURCE+TOOLING **PASS**. Ops-guard **34/34**. Not A3 execute. **P8 FAIL**. Leftover P3-FAIL stay dirty. Do not mark backend Done.
+

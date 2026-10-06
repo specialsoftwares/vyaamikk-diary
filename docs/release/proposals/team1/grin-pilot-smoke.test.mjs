@@ -10,11 +10,22 @@ import {
   FIREBASE_AUTH_UID,
   PLAY_BILLING_TESTER_UIDS_ENV,
   SMOKE_LABEL_LIVE,
+  E_APPLICATION_SHA,
+  E_LIVE_EXECUTABLE,
+  E_LIVE_STATUS,
+  E_SEVEN_NAMES,
+  E_SOURCE_STUB_STATUS,
+  expectedGcloudDisableArgs,
+  expectedGcloudEnableArgs,
+  eArgvUnsafe,
+  inspectGateReadback,
   liveBackendAdmission,
   loadOwnerUidFile,
   parseFirebaseAuthUids,
   parsePlayBillingTesterUids,
   pathIsInsideRepo,
+  simulateGcloudGateLoop,
+  SMOKE_SCENARIO_LIVE_REQUIREMENTS,
   SMOKE_SCENARIOS,
 } from "./grin-pilot-smoke.mjs";
 
@@ -101,4 +112,47 @@ test("smoke scenario list is the restricted-pilot set", () => {
     "confirmation",
     "read_export",
   ]);
+  assert.equal(SMOKE_SCENARIO_LIVE_REQUIREMENTS.cross_owner_denial.requiresSecondAuthenticatedUid, true);
+  for (const name of SMOKE_SCENARIOS) {
+    if (name === "cross_owner_denial") continue;
+    assert.equal(SMOKE_SCENARIO_LIVE_REQUIREMENTS[name].requiresSecondAuthenticatedUid, false);
+  }
+});
+
+test("E SOURCE argv omits --source and disable uses false not remove", () => {
+  assert.equal(E_APPLICATION_SHA, "540e07aa07f376716484adb879ce66cb9fb170ce");
+  assert.equal(E_SOURCE_STUB_STATUS, "SUPPORTED");
+  assert.equal(E_LIVE_STATUS, "HOLD");
+  assert.equal(E_LIVE_EXECUTABLE, false);
+  assert.equal(E_SEVEN_NAMES.length, 7);
+  const enable = expectedGcloudEnableArgs("grinRegisterGoodsReceipt");
+  const disable = expectedGcloudDisableArgs("grinRegisterGoodsReceipt");
+  assert.equal(eArgvUnsafe(enable), false);
+  assert.equal(eArgvUnsafe(disable), false);
+  assert.ok(enable.includes("--update-env-vars=GRIN_GOODS_EVIDENCE_FUNCTIONS=true"));
+  assert.ok(disable.includes("--update-env-vars=GRIN_GOODS_EVIDENCE_FUNCTIONS=false"));
+  assert.equal(disable.some((a) => a.includes("--remove-env-vars")), false);
+  assert.equal(eArgvUnsafe([...enable, "--source=."]), true);
+  assert.equal(eArgvUnsafe([...enable, "--set-env-vars=FOO=1"]), true);
+  assert.equal(eArgvUnsafe([...enable, "--clear-env-vars"]), true);
+});
+
+test("inspect readback is gate name/on-off only; mixed-gate is not rollback", () => {
+  const on = inspectGateReadback({
+    name: "grinRegisterGoodsReceipt",
+    presence: "present",
+    sourceOrigin: "gcs",
+    env: { GRIN_GOODS_EVIDENCE_FUNCTIONS: "true", OTHER: "keep" },
+    otherUserKeyCount: 1,
+    secretBindingCount: 2,
+  });
+  assert.equal(on.gate, "on");
+  assert.equal(on.gatePresent, true);
+  assert.equal(Object.hasOwn(on, "env"), false);
+  const mixed = simulateGcloudGateLoop(E_SEVEN_NAMES, 3);
+  assert.equal(mixed.ok, false);
+  assert.equal(mixed.updated.length, 3);
+  assert.equal(mixed.remaining.length, 4);
+  assert.equal(mixed.mixedGate, true);
+  assert.equal(mixed.rolledBack, false);
 });

@@ -68,7 +68,7 @@ reproduction. Do not reopen S1/S2 without a new reproduction.
 | Gate | State |
 |---|---|
 | SOURCE READY | Application **`540e07a`**. T5 SOURCE+INJECTED **PASS** (`b3b1c97`). GHA **`37445383607` SUCCESS** on `7e0d629`. Helper pin **applied**. **P8 FAIL** (flag false). |
-| BACKEND PILOT READY | A–F packet present. **Not executed.** A/B YES on paper after inspect=baseline. C pin **applied**, live create HOLD (owner letter). D UID `count=1` writes HOLD. E LIVE HOLD (`gcloud` absent; seven ABSENT; preservation not live-verified). F INJECTED YES / LIVE HOLD. |
+| BACKEND PILOT READY | A–F packet present. **Not executed.** A/B YES on paper. C pin applied, live HOLD. D `count=1` writes HOLD. E SOURCE/STUB procedure (`E_ENABLE_DISABLE.md`); LIVE HOLD. F INJECTED YES / LIVE HOLD. |
 | INTERNAL BUILD READY | T3 `PHONE_HANDOFF.md`. B1 of **`540e07a`** after owner letter. B1≠B2 **neither granted**. Not a purchase-test build. Recheck Play before B1. |
 | DEVICE ACCEPTED | **NOT RUN**. OnePlus 12R available today — not yet executed. |
 | BILLING ACCEPTED | Lifecycle SOURCE+INJECTED **PASS** at `60c4bc1` (`c69ffb9`); catalog **NOT RUN**; purchases **off**; REAL-CHARGE **not run** |
@@ -105,11 +105,11 @@ purchase-entry remains `"0"`. Play Console catalog **NOT RUN**.
 
 | Team | Authorized work this session | Approval still required |
 |---|---|---|
-| 1 Backend | A–F packet. Pin **applied** to `540e07a`. A/B two commands. C live HOLD. D `count=1` writes HOLD. E LIVE HOLD. F INJECTED YES / LIVE HOLD. **Not executed.** | Owner letters complete batch; inspect first |
+| 1 Backend | A–F packet. Pin **applied**. E procedure `E_ENABLE_DISABLE.md` `9365dd1`. A/B paper YES. C/D/E live HOLD. F INJECTED YES. **Not executed.** | Owner letters; inspect first; E not live-executable |
 | 2 Policy | P8 packet `b08690d` + inert wiring `540e07a`. Flag **false**. P3 PASS. P8 FAIL operationally. GRIN **synthetic-only**. **Do not advertise.** | Live purge grant = one-line flip; not done |
 | 3 Build/device | `PHONE_HANDOFF.md` `c200712`. B1 checkout **`540e07a`**. B1≠B2 **ungranted**. Purchase-entry `"0"`. Device **NOT RUN**. Slot O UID private. | Recheck Play, then owner-lettered B1; Play B2 separate |
 | 4 Billing/Play | Lifecycle correction in **`60c4bc1`**. T5 SOURCE+INJECTED **PASS** (`c69ffb9`). Catalog **NOT RUN**. Purchase-entry `"0"`. | Activation HOLD |
-| 5 QA | `REVIEW_540e07a.md` **PASS** `b3b1c97`. **P8 FAIL** operationally. Device/live **NOT RUN**. | Leftover P3-FAIL stay dirty |
+| 5 QA | `REVIEW_PIN_540e07a.md` `626cfa9` SOURCE+TOOLING **PASS**. App review `b3b1c97` stands. **P8 FAIL**. | Leftover P3-FAIL stay dirty |
 
 ---
 

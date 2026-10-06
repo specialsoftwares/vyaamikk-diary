@@ -40,6 +40,7 @@ QA artefacts. Not production implementations. Not G6 completion.
 | `REVIEW_fcda7cd.md` | Independent QA of application `fcda7cd` (restricted Play testers vs `313025f`); SOURCE+INJECTED **PASS**; **P8 FAIL**; pin STALE; GRIN ≠ billing |
 | `REVIEW_60c4bc1.md` | Independent QA of application `60c4bc1` (already-owned Play lifecycle vs `fcda7cd`); SOURCE+INJECTED **PASS**; **P8 FAIL**; `540e07a` out of scope |
 | `REVIEW_540e07a.md` | Independent QA of application `540e07a` (inert P8 production-path vs `60c4bc1`); SOURCE+INJECTED **PASS**; **P8 FAIL** operationally; flag false; not a live grant |
+| `REVIEW_PIN_540e07a.md` | Independent QA of helper pin tooling `2d33f6d`; SOURCE+TOOLING **PASS**; ops-guard **34/34**; not A3 execute |
 | `REVIEW_OWNER_CHOICE_CHECKLIST.md` | Pre-landing assertions for 1/3/10 + 45-day |
 | `wave2evidence-e1-e5-repro.ts` | SQLITE_HOST / INJECTED / host-filesystem drivers for E1–E5 |
 | `wave2evidence-e1-e5-rereview.ts` | PHASE 2 persistGrinOwnerSession inspection + unset-host failure |
