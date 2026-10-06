@@ -1,0 +1,223 @@
+# Team 3 handoff — Android build / real-phone acceptance
+
+**2026-10-06.** Worktree `/Users/shivamsaurav/vyd-worktrees/grin-t3-offline`.  
+Branch `team/grin-t3-offline` @ `aa5253e4e070195227055cde836d6b528d5e0070`.  
+Historical dirty workspace and `grin-combined` were **not** edited.  
+`package.json` / `eas.json` / `app.json` were **not** edited.  
+No EAS/native/prebuild/OTA. No Play upload. No phone results invented.
+
+---
+
+## Freeze SHA rule (Internal AAB)
+
+| Pin | Value | Use |
+|---|---|---|
+| Current application (pre-S1/S2) | `b845e8a30262b9e8740fa53b55e9a0f237caea0b` | Checkpoint only. **Not** the Internal AAB freeze. |
+| Current PR head | `41b05a49e8e60597b63a35f22825878bc1945dee` | PR #31. Docs/QA fold on top of `b845e8a`. **Not** the Internal AAB freeze. |
+| Current canonical CI | GitHub Actions run **`37379529193`** success on `41b05a4` (job **`111997702708`** from coordinator register; `gh` unauthenticated here) | Proves this pre-S1/S2 tree. **Do not** cite for a later SHA. |
+| **Internal AAB freeze SHA** | **PLACEHOLDER — post-S1/S2 application SHA + matching canonical CI success** | Owner may approve **B1** only after that SHA exists. |
+| Superseded pins | `5d5df3d` / CI `37351685421` | Invalid for this checkpoint and for B1. |
+
+S1/S2 storage fixes are **not in** `b845e8a` / `41b05a4`. Internal AAB freeze **must wait**. Do not build from a dirty tree. Do not reuse historical EAS AAB `72cb7254-…` (vc22, profile `production`, git `0da2f58`).
+
+A later **material source change** (S1/S2 merge, versionCode rewrite, purchase-entry/quota/GRIN flag change, or any other application commit) requires a **new binary** and a **new CI**.
+
+---
+
+## Play uploaded-version inventory — **RUN** 2026-10-06T05:51Z–05:53Z
+
+Read-only Play Console `u/1`. Developer **SPECIAL SOFTWARES** `5171346189091805855`. App `4972339006118168782`. Package `com.specialsoftwares.vyaamikkdiary`. Draft / temporary unreviewed name. **No** Save, upload, Create new release, Pause, Promote, or ToS accept.
+
+Android Publisher API: **not invoked**. `gcloud` absent. No ADC. Firebase / `support.vyd` token **not** used as Publisher. `eas submit:list` is not a Play-track read.
+
+Unfiltered **App bundle explorer** (`…/bundle-explorer-selector`, Add filter empty): heading **9 app versions**, pager **1–9 of 9**.
+
+| versionCode | versionName | File type | Uploaded | Status |
+|---|---|---|---|---|
+| **22** | 1.0.0 | App bundle Enhanced | 23 Sept 2026, 08:56 | **Active** |
+| 20 | 1.0.0 | App bundle Enhanced | 22 Sept 2026, 07:17 | Inactive |
+| 19 | 1.0.0 | App bundle Enhanced | 21 Sept 2026, 08:30 | Inactive |
+| 17 | 1.0.0 | App bundle Enhanced | 26 Aug 2026, 17:28 | Inactive |
+| 16 | 1.0.0 | App bundle Enhanced | 25 Aug 2026, 17:42 | Inactive |
+| 15 | 1.0.0 | App bundle Enhanced | 13 Aug 2026, 01:10 | Inactive |
+| 14 | 1.0.0 | App bundle Enhanced | 12 Aug 2026, 23:01 | Inactive |
+| 13 | 1.0.0 | App bundle Enhanced | 9 Aug 2026, 13:06 | Inactive |
+| 10 | 1.0.0 | App bundle Enhanced | 9 Aug 2026, 10:38 | Inactive |
+
+Searches **23**, **21**, **18**: **0 app versions / No results**. Highest **uploaded** Play versionCode = **22**.
+
+Tracks (same session):
+
+| Track | Status |
+|---|---|
+| Internal testing | **Active**. Latest release **Vyaamikk Diary (Vc22)**. 1 version code. Available to internal testers, full roll-out, 23 Sept 2026 14:28. Not reviewed. |
+| Production | **Inactive**. No production release. |
+| Open testing | Inactive |
+| Closed testing | Inactive |
+
+App-list “Last updated **5 Oct 2026**” is **not** a new uploaded versionCode (explorer still ends at vc22 / 23 Sept).
+
+Testers tab opened; **Save disabled**. Join-on-the-web exists. Emails / names **not copied**. Play lists are **not** Firestore admission and **not** the O/T1/T2 identity table.
+
+**versionCode 23 is still UNRESERVED.** `app.json` `"versionCode": 23` and `isolation.contract.test.ts` asserting 23 do **not** reserve Play. This inventory may go stale before the post-S1/S2 SHA exists. **Re-read App bundle explorer (unfiltered) immediately before writing a code at B1.** Choose an unused integer **strictly greater** than the then-highest **uploaded** Play versionCode. If 23 is still unused it **may** be used. If Play already has 23, **stop** — do not ship 24+ while the isolation test still requires 23; cut a new SHA with both changes. Do not re-upload 22.
+
+---
+
+## Reproducible Internal AAB packet (B1 later — not authorized)
+
+### Artifact classes (do not mix)
+
+| Artifact | EAS profile (`eas.json`) | Android type | Resolved use |
+|---|---|---|---|
+| **Play Internal Testing candidate** | **`internal-grin`** | `app-bundle` (AAB) | **Only** this profile has GRIN flags `"1"`. Ordinary `production` is the wrong AAB. |
+| Ordinary store AAB | `production` | `app-bundle` | GRIN flags **unset** (not `"1"`). Not Internal-GRIN. |
+| Sideload / USB | `preview` or `development*` | `apk` | **NATIVE_DEVICE** only. Not a Play Internal upload. |
+
+Do not submit a preview APK to Internal Testing. Do not call a local APK a `PLAY_INSTALLED` run.
+
+### Flags — source `eas.json` `build.internal-grin` (file read this session; no mutation)
+
+Prior `eas config --platform android --profile internal-grin` (2026-10-06, configuration only): profile env wins on overlap with remote production `EXPO_PUBLIC_APP_MODE`; resolved `distribution=store`. Not repeated this session (no EAS start).
+
+| Key | `internal-grin` | `production` / `preview` |
+|---|---|---|
+| `EXPO_PUBLIC_APP_MODE` | `production` | `production` |
+| `EXPO_PUBLIC_SUBSCRIPTION_PURCHASE_ENTRY_ENABLED` | `"0"` | `"0"` |
+| `EXPO_PUBLIC_QUOTA_UPSELL_ENABLED` | `"0"` | `"0"` |
+| `EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED` | **`"1"`** | unset (not `"1"`) |
+| `EXPO_PUBLIC_GOODS_EVIDENCE_STORE_RUNTIME_ADMIT` | **`"1"`** | unset (not `"1"`) |
+| Android `buildType` | `app-bundle` | `app-bundle` / preview `apk` |
+| `autoIncrement` | `false` | `false` |
+| `environment` | `production` | production / preview |
+
+Visibility is **not** backend admission (Approval A). Compile-time flags: changing them later requires a new binary.
+
+### Separate approvals (do not collapse)
+
+| Gate | Authorizes | This packet |
+|---|---|---|
+| **B1 — Build** | `eas build --profile internal-grin --platform android` from a **clean** tree at the **post-S1/S2 freeze SHA**, after a **fresh** Play inventory and committed versionCode | **not granted** — packet ready for owner once that SHA + CI exist |
+| **B2 — Internal upload** | Play Internal Testing upload of the **B1 AAB only**, after B1 evidence | **not granted**; request only after B1 evidence |
+
+B1 does not imply B2. B2 does not imply production promotion, listing Save, or OTA.
+
+### B1 evidence (when owner authorizes later)
+
+- EAS `buildId`
+- `gitCommitHash` = tagged post-S1/S2 freeze SHA (clean tree)
+- resolved public env from the **build worker** (not only `eas.json` / `eas config`)
+- AAB sha256
+- `bundletool dump manifest` package / versionCode / versionName
+- upload-cert role vs Play App Signing (**do not** commit fingerprints)
+- mapping/ProGuard stored **privately** (not git)
+
+### Prior EAS Android list (2026-10-06, not Play tracks; not re-run this pass)
+
+`npx eas-cli@16.28.0 build:list`: 28 Android builds. **No** `internal-grin`. **No** git `5d5df3d…`. Highest EAS `appBuildVersion` **22**. EAS vc**23** absent. Latest store AAB: vc22 `72cb7254-0be9-4f92-a514-dbfab2b1150d`, profile **`production`**, git `0da2f58…`. **Not this SHA. Not Internal-GRIN.** Finished EAS ≠ Play upload.
+
+---
+
+## Owner device checklist
+
+Coordinator/AI does **not** physically execute. `adb devices -l` this session: **empty**. Host / emulator / SQLITE_HOST / CI greens are **not** device PASS. **No hardware = NOT RUN, not PASS.**
+
+### Who can execute
+
+Arrangement: **owner + two trusted testers**. Identities were **not supplied**. Slots stay blank. **Do not invent** names, UIDs, emails, or passwords.
+
+| Slot | Role | Display name | Firebase uid | Play Internal email | Phone | Device ID / model / API / RAM |
+|---|---|---|---|---|---|---|
+| O | Owner | | | | | Owner fills. No password here. |
+| T1 | Tester 1 | | | | | Owner fills. |
+| T2 | Tester 2 | | | | | Owner fills. |
+
+Play Internal list membership ≠ Firestore `users/{uid}/goodsEvidenceAdmission/runtime` (Approval A). Owner must add the three people to the Internal testers list **and** seed admission separately.
+
+### Required physical devices
+
+| Slot | Requirement | Gap this session |
+|---|---|---|
+| **D1 upgrade** | Phone that currently has Play Internal **vc22** (`com.specialsoftwares.vyaamikkdiary`) | **Unknown which phone.** No adb. |
+| **D2 clean** | Second Android 12+ phone, **or** D1 after uninstall only after the D1 upgrade record is saved | **No second device identified.** |
+| TalkBack | Hardware that can run TalkBack for A11 (may be D1 or D2) | **Not identified.** |
+| Optional low-RAM | ≤ 4 GiB RAM for M1 if available | **Not identified.** |
+
+If only one phone exists: D1 first, then D2 on the same device after logs are saved. That still needs the owner to name the phone.
+
+### Pre-record (every executable row)
+
+Device ID, model, Android API, RAM, installed versionCode, AAB/APK sha256, artifact label (`PLAY_INSTALLED` vs `NATIVE_DEVICE`), tester slot (O/T1/T2), auth method, backend (`LIVE_BACKEND` seeded vs `backend_absent`). Synthetic evidence only while Packet D retention is unset.
+
+Upgrade path = Play-install **over vc22**. Clean path = D2. Sideload APK rows must not be labelled `PLAY_INSTALLED`.
+
+Executable sheet: `docs/release/packets/DEVICE_EXECUTION_SHEET.md`. All rows **NOT RUN** (XR **N/A until backend**).
+
+### Evidence requirements (do not tick PASS without these)
+
+No customer PDFs, GSTIN, tokens, or raw uids in shared artefacts. Screenshots: **state labels only**.
+
+| ID | What to run | Required evidence | Status |
+|---|---|---|---|
+| D0 | Owner fills O/T1/T2; confirm artifact class | Named identities in the sheet (owner-written); no guessed vc22-from-commit | NOT RUN — identities blank |
+| D1 | Upgrade install over vc22 via Play | Play shows new versionCode; cold start; existing diary/PO/credit/letterhead/PDF still work; SQLite v10 migrates. Photos of About/version + one existing record. `PLAY_INSTALLED` only | NOT RUN — no hardware |
+| D2 | Clean install | Empty local DB; same launch/sign-in. Label `PLAY_INSTALLED` or `NATIVE_DEVICE` | NOT RUN |
+| D3 | Force-stop; reboot; open | Splash completes; main tabs; legal date `2026-07-27`; no token printed | NOT RUN |
+| D4 | Sign-in phone OTP | Session bound to that uid (hash uid in shared logs) | NOT RUN |
+| D5 | Reviewer login `+91 9000000000` / `654321` **only if** live test-phone fixture verified | Reaches tabs; **no founder email** | NOT RUN |
+| D6 | Email / profile onboarding if shown | Completes; consents recorded | NOT RUN |
+| D7 | Ordinary diary create/edit/save | Persists; no GRIN-induced loss | NOT RUN |
+| D8 | PDF export of a diary record | PDF generates; ITC/GST claims unchanged (app does not assert live 2B/EWB) | NOT RUN |
+| D9 | Saved Records hub | Ordinary records listed; GRIN tile only if Internal-GRIN flags baked | NOT RUN |
+| G1 | GRIN create online (seeded admission) | One serial; no duplicate. Needs `PLAY_INSTALLED` + `LIVE_BACKEND` | NOT RUN |
+| G2 | Airplane mode create; force-stop; relaunch offline; reconnect | Local serial null while queued; **exactly one** issued serial after reconnect. `networkSteps` + `issuedNumbersObserved` | NOT RUN |
+| G3 | Reserve → upload evidence → confirmation | Stored-byte verify; failed read stays pending/confirmation_refresh; no second serial | NOT RUN |
+| G4 | QC, amend non-original field, partial return, EWB observation (manual) | `original` snapshot unchanged; history appends; expectedVersion conflicts surface | NOT RUN |
+| G5 | Pack / export | Summary; `originalsBundled=false`; ITC `not_determined`; missing originals explicit. **Not** an archive of original files | NOT RUN |
+| G6 | GRIN UI hidden or `backend_absent` | Record `blocked_by_runtime` or `backend_absent` — **not** a product pass | NOT RUN |
+| G7 | Original download / export of a verified original (**not** pack-as-archive) | Original PDF/image leaves the device as the retained file (share/save/open), distinct from G5. If no control: `missing_control` | NOT RUN |
+| I1 | Interrupt upload; retry | Original intact; no duplicate evidence id | NOT RUN |
+| I2 | Process death during save/upload; restart | No duplicate issuance; pending work recoverable or honestly failed | NOT RUN |
+| I3 | Account switch / logout during pending work | No cross-account publication; hashed uids only | NOT RUN |
+| P1 | Picker / camera permission grant | File attached | NOT RUN |
+| P2 | Permission deny / picker cancel | Honest cancel; no crash; no zero-byte original claimed verified | NOT RUN |
+| P3 | Maximum admitted files on one receipt | Policy deny or cap message; already-linked kept | NOT RUN |
+| Q80 | Ordinary monthly usage ≥80% of cap | `quotaWarn80` (or equivalent). Quota-upsell sheet **must not** appear (`EXPO_PUBLIC_QUOTA_UPSELL_ENABLED` `"0"`) | NOT RUN |
+| Q95 | ≥95% of cap | Dedicated 95% copy **if present on the binary**; else record the actual string (`warnAt80` today; **no** `quotaWarn95` key) | NOT RUN |
+| QCAP | Hit ordinary monthly cap | Cap messaging; new save stays on device or is honestly refused; upsell remains off | NOT RUN |
+| XR | Expiry-read window for a stored GRIN original | **N/A until backend**. Do not mark PASS | N/A (backend) |
+| W1 | Repeated daily-use | No sustained unusable jank; record duration | NOT RUN |
+| M1 | RSS/PSS on representative phones during G3 | `dumpsys meminfo` numbers; OOM-free **not** claimed from source | NOT RUN |
+| L1 | Five languages `en`, `hi`, `ta`, `te`, `gu` | Switch through all five; no clipped critical actions | NOT RUN |
+| L2 | Large text / font scale | Primary actions reachable | NOT RUN |
+| L3 | Keyboard | Fields not permanently covered; save reachable | NOT RUN |
+| A11 | TalkBack | Sign-in, save, GRIN primary actions announced; TalkBack version recorded | NOT RUN |
+| C1 | Crash reporting consent disabled | No upload of crashes beyond documented fail-closed | NOT RUN |
+| C2 | Consent enabled | Crashlytics test non-fatal **only if** owner allows | NOT RUN |
+
+---
+
+## Listing artwork (this tree — tracked; **not** claimed in Play Console)
+
+`git ls-files` tracks the three store files. Hashes (`shasum -a 256`):
+
+| File | sha256 | Pixels |
+|---|---|---|
+| `store/play-icon-512.png` | `cc550cb8450c62d5b991da56d0e5989db9ee14fb7d971b679848728caf401f5a` | 512×512 PNG |
+| `store/play-feature-graphic.png` | `b17f8082b5b7f025ce0ecfc23d0dd096c8997a945f5960198e135b27d10dddd1` | 1024×500 PNG |
+| `store/play-icon-512-masked-preview.png` | `a0c18f35fde4a2585fb0a6d6131441552c7a784992bebee7ae248b081fd51a30` | 512×512 PNG |
+
+Files in git ≠ uploaded to Play (listing Save **NOT RUN**).
+
+---
+
+## Remaining HOLDs
+
+- EAS/native/prebuild/OTA; **no** `eas build` / `eas submit`
+- Play upload / Internal track / production promotion / listing Save
+- versionCode **23 reservation** (none; unused on Play as of this read, still unreserved)
+- Approval **B1** and **B2** (separate; neither granted)
+- Internal AAB freeze SHA (wait for post-S1/S2 SHA + CI)
+- Approval A live GRIN backend / original-read (XR)
+- Packet D retention / commercial quota
+- NATIVE_DEVICE / PLAY_INSTALLED execution (no hardware)
+- Tester identity fill-in by owner
