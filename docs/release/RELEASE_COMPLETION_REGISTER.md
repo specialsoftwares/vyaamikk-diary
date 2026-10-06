@@ -22,13 +22,13 @@ Do not rewrite those files as if they were re-run today.
 | Item | Current value |
 |---|---|
 | Repo / branch / PR | `specialsoftwares/vyaamikk-diary` `integration/grin-g1-g5-source` draft **#31** (no duplicate; auto-merge off) |
-| **CI-tested PR head** | `0d7aa17a6efcf3ce6874269eb57afda0a2b45559` (parent `074f082`). Application blobs **= `520f9f9`**. |
+| **CI-tested PR head** | GHA **`37440328976`** **success** (job `112192249694` `verify`). Checkout **`70bdfe4b2ea2a7cf6a9fe5f1cf7bf08ff6ebc4e9`**. Application blobs **= `fcda7cd`**. Prior completed run `37425360211` covers `520f9f9` / `0d7aa17` only. |
 | **Current application SHA** | **`fcda7cd64e9622e50c38223a7156f0f6b8ca5576`** (restricted Play tester fail-closed SOURCE on `313025f` 1/3/10+45d). T5 SOURCE+INJECTED **PASS** (`REVIEW_fcda7cd.md` `bbcb144`). **Do not advertise GiB.** Purchase-entry **`"0"`**. |
-| **Selected Internal candidate** | **`fcda7cd`**. **Do not build `520f9f9`, `56f2040`, or `313025f` alone.** B1≠B2 **neither granted**. Canonical CI **NOT RUN**. T5 PASS does **not** apply the helper pin. |
+| **Selected Internal candidate** | **`fcda7cd` until billing-lifecycle correction lands.** Then retarget once. **Do not build `520f9f9`, `56f2040`, or `313025f` alone.** B1≠B2 **neither granted**. Pin **not** applied (correction still in flight). |
 | Helper `PINNED_APP_SHA` | **`520f9f9`** — **STALE vs `fcda7cd`**. `PIN_UPDATE_AFTER_313025f.diff.md` is **superseded**. **Not applied.** A3 **HOLD**. |
 | **Tooling SHA** | **`0d7aa17`** — successor for the `520f9f9` pin. **Not** byte-identical to `228a8f5` (`grin-functions-op.mjs` **+1/−1**: pin constant only). |
 | Historical ops-guard baseline | `228a8f58ac83d3c71e853cdccb6e4c4fa64c251f`. Suite **34/34** recorded on **that** tree. Same suite **34/34** re-run after the pin apply on the successor tree (TOOLING, not application CI). Live mode still rejects `GRIN_OPS_PINNED_SHA`. |
-| **Canonical CI** | GHA **`37425360211`** covers **`520f9f9` only**. **Not** a CI pass for `56f2040`, `313025f`, or **`fcda7cd`**. Do **not** cite `37379529193` or `37351685421`. Inner suite counts **not invented**. `gh` unauthenticated here. |
+| **Canonical CI** | GHA **`37440328976`** **completed success**. Job `112192249694` `verify` **success**. Checkout **`70bdfe4`** (application **`fcda7cd`**). Event `pull_request`. Do **not** pin yet: T4 already-owned lifecycle correction is still in flight. |
 | S1 / S2 | **Closed** at SOURCE / INJECTED / named G2 EMULATOR (`127.0.0.1:8091` / `9200`, `demo-vyaamikk-grin-g2`). Not reopened (no new reproduction). Not live. Not device. |
 | P3 | **ACCEPTED**. Coordinator re-ran `quota.injected.unit.test.ts` **PASS** after `313025f`. |
 | P8 | **OPEN / FAIL** (`INCLUDE_GRIN_IN_ACCOUNT_PURGE=false`; grace **45 days** in source; GRIN omitted from default purge). Not an operational deletion service. |
@@ -51,12 +51,12 @@ reproduction. Do not reopen S1/S2 without a new reproduction.
 | Item | Owner | Next action | Dependency | Evidence | Blocker |
 |---|---|---|---|---|---|
 | Wire 1/3/10 GiB + 45-day grace | T2 | **Landed** combined `313025f` (`ad72d79`) | done | coordinator tests PASS | do not advertise; P8 still FAIL |
-| Canonical CI on selected SHA | coordinator | Observe GHA after T2 fold | T2 SHA | `gh` unauthenticated | GitHub login |
-| Pin helper to selected SHA | coordinator apply | After matching CI on `fcda7cd` | T5 PASS `bbcb144`; CI missing | `PIN_UPDATE_AFTER_fcda7cd.diff.md` unapplied | A3 HOLD |
-| Consolidated backend packet | T1 | Owner letters; A6 still UNPROVEN | A1 hashes exist | inspect 2026-10-06 | gcloud absent; CI missing |
-| Internal AAB packet | T3 | Recheck Play immediately before B1 | `fcda7cd` + CI | OnePlus 12R named | B1 ungranted |
-| Restricted billing packet | T4 | **Landed** `fcda7cd`; catalog if access | purchase-entry `"0"` | fail-closed SOURCE | activation HOLD |
-| Phone acceptance | T3 + owner | vc22 upgrade today | AAB + private UIDs | device **NOT RUN** | no AAB; UIDs not supplied |
+| Canonical CI on selected SHA | coordinator | **Recorded** `37440328976` success on `70bdfe4` / app `fcda7cd` | done | public API | do not pin until T4 correction |
+| Pin helper to selected SHA | coordinator apply | After T4 lifecycle SHA + matching CI | T4 in flight | `PIN_UPDATE_AFTER_fcda7cd.diff.md` would be intermediate | A3 HOLD |
+| Consolidated backend packet | T1 | Executable A–F batch in flight | A1 hashes exist | inspect 2026-10-06 | gcloud absent; A6 UNPROVEN |
+| Internal AAB packet | T3 | **Landed** `PHONE_HANDOFF.md` `5692e25`. B1 of FINAL SHA after T4+CI | T4 + CI | OnePlus 12R named | B1 ungranted |
+| Restricted billing packet | T4 | Lifecycle allowlist vs already-owned expire/refund | purchase-entry `"0"` | T4 dirty on `team/grin-t4-lifecycle-allowlist` | activation HOLD |
+| Phone acceptance | T3 + owner | vc22 upgrade after B2 | AAB + private UIDs | device **NOT RUN** | no AAB; UIDs not supplied |
 | Review billing-tester slice | T5 | **Landed** `REVIEW_fcda7cd.md` `bbcb144` | done | SOURCE+INJECTED PASS | leftover P3-FAIL files stay dirty |
 
 ---
@@ -65,9 +65,9 @@ reproduction. Do not reopen S1/S2 without a new reproduction.
 
 | Gate | State |
 |---|---|
-| SOURCE READY | Application **`fcda7cd`**. T5 SOURCE+INJECTED **PASS** (`REVIEW_fcda7cd.md`). Canonical GHA **NOT RUN**. **Do not advertise GiB.** P3 accepted. **P8 FAIL**. GRIN readiness ≠ billing readiness. |
-| BACKEND PILOT READY | Consolidated packet in coordinator chat. **Not authorized.** GRIN seven **ABSENT**. |
-| INTERNAL BUILD READY | Candidate **`fcda7cd`**. **Do not build `520f9f9` / `56f2040` / `313025f` alone.** B1≠B2 **neither granted**. Canonical CI **NOT RUN**. |
+| SOURCE READY | Application **`fcda7cd`**. T5 SOURCE+INJECTED **PASS**. Canonical GHA **`37440328976` success** on `70bdfe4`. **Do not advertise GiB.** P3 accepted. **P8 FAIL**. Do not pin until T4 correction. |
+| BACKEND PILOT READY | Packet not complete A–F. **Not executed.** GRIN seven **ABSENT**. |
+| INTERNAL BUILD READY | T3 `PHONE_HANDOFF.md` `5692e25`. B1 of **FINAL** SHA after T4+CI. B1≠B2 **neither granted**. This AAB is **not** a purchase-test build. |
 | DEVICE ACCEPTED | **NOT RUN**. OnePlus 12R available today — not yet executed. |
 | BILLING ACCEPTED | Tester SOURCE+INJECTED **PASS** (`bbcb144`); catalog **NOT RUN**; purchases **off**; REAL-CHARGE **not run** |
 | PUBLIC SUBMISSION READY | Blocked on wired 1/3/10+45d, device, billing, listing. Owner writes recorded. |
@@ -105,7 +105,7 @@ purchase-entry remains `"0"`. Play Console catalog **NOT RUN**.
 |---|---|---|
 | 1 Backend | Smoke harness folded from `9ae9624`. Packet retargeted `b7eb5ce`. A1/A2 executable on paper. A3 HOLD. A6 UNPROVEN **refused**. INJECTED smoke PASS. LIVE **REFUSED**. | Owner letters; pin after CI on selected SHA |
 | 2 Policy | Owner-choice folded (`ad72d79` → combined `313025f`). Live caps **1/3/10 GiB**. Grace **45 days**. `INCLUDE_GRIN_IN_ACCOUNT_PURGE=false`. P3 PASS. P8 FAIL. **Do not advertise.** | No live purge; pin after CI |
-| 3 Build/device | Packet `21fac5b` named `313025f`; **superseded for new builds by `fcda7cd`**. B1≠B2 **ungranted**. OnePlus 12R Android 16 vc22 **today** (upgrade). Clean-install **blank**. UIDs not in git. Device rows **NOT RUN**. | EAS B1 of `fcda7cd` after CI; Play B2 separate |
+| 3 Build/device | `PHONE_HANDOFF.md` `5692e25` on `team/grin-t3-phone-handoff`. OnePlus 12R upgrade path. B1≠B2 **ungranted**. Purchase-entry `"0"`. Device **NOT RUN**. | EAS B1 of FINAL SHA after T4+CI; Play B2 separate |
 | 4 Billing/Play | Restricted-tester SOURCE folded (`b04bf97` → combined `fcda7cd`). Empty allowlist denies all. Catalog **NOT RUN**. REAL-CHARGE-01..05 **named, not run**. Purchase-entry `"0"`. Voided-purchase vs de-listed tester is a **billing-activation residual**, not an Internal GRIN blocker. | Activation HOLD; private UIDs |
 | 5 QA | `REVIEW_fcda7cd.md` (`bbcb144`). SOURCE+INJECTED **PASS** for billing-tester slice. **P3 ACCEPTED**. **P8 FAIL**. S1/S2 preserved. Device/live **NOT RUN**. | Not device/live; pin still stale until CI |
 

@@ -276,3 +276,11 @@ Application **`fcda7cd64e9622e50c38223a7156f0f6b8ca5576`** on `integration/grin-
 
 `docs/release/proposals/team5/REVIEW_fcda7cd.md` (team `bbcb144` on `team/grin-t5-review-fcda7cd`). SOURCE+INJECTED **PASS** at `fcda7cd` for fail-closed Play testers. Purchase-entry `"0"`. **P3 ACCEPTED**. **P8 FAIL**. S1/S2 not reopened. Pin STALE. Canonical CI **NOT RUN**. Voided-purchase vs de-listed tester is a billing-activation residual, not an Internal GRIN blocker. GRIN readiness ≠ billing readiness. Do not apply pin. Do not mark device / billing / public Done.
 
+## Canonical CI 37440328976 (unsent, 2026-10-06)
+
+GHA **`37440328976`** **success**. Job `112192249694` `verify` **success**. Checkout **`70bdfe4b2ea2a7cf6a9fe5f1cf7bf08ff6ebc4e9`**. Application blobs **= `fcda7cd`**. Do **not** pin (T4 lifecycle correction in flight). Do not mark backend / device Done.
+
+## Team 3 phone handoff (unsent, 2026-10-06)
+
+`PHONE_HANDOFF.md` (team `5692e25` on `team/grin-t3-phone-handoff`). OnePlus 12R upgrade over vc22. B1≠B2 ungranted. Purchase-entry `"0"` — not a purchase-test build. Device **NOT RUN**. Do not uninstall vc22 without owner agreement. UIDs not in git. Do not mark device Done.
+

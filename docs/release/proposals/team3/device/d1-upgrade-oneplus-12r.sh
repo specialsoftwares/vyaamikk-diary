@@ -15,19 +15,30 @@ Device (owner-supplied, do not invent IDs):
   current: Play Internal vc22 YES
   available: TODAY
   path: PLAY_INSTALLED upgrade over vc22 (not sideload labelled PLAY_INSTALLED)
+  binary: coordinator-selected FINAL SHA after billing correction + matching CI
+          (current app blobs fcda7cd may be superseded; do not build
+          520f9f9 / 56f2040 / 313025f alone)
+  purchase-entry: OFF — this is not an interactive purchase-test build
 
-Steps (after B1+B2, neither granted):
+Steps (after B1+B2, neither granted; this instruction does not authorize them):
   1. Re-read Play App bundle explorer immediately before the authorized build.
   2. Confirm Internal Testing offers a versionCode strictly greater than the
      then-highest uploaded Play code (reminder: 2026-10-06 highest vc22;
      vc23 UNRESERVED).
   3. On the OnePlus 12R, update from Play over the existing vc22 install.
+     Do not uninstall. Do not clear data.
   4. Cold start. Record About / versionCode / versionName.
   5. Confirm existing diary, PO, credit, letterhead, PDF still open.
   6. Confirm SQLite v10 migrated (app usable; no data-loss prompt).
-  7. Fill RESULT_CAPTURE.template.md. Hash uids. No OTPs in git.
+  7. Continue PHONE_HANDOFF.md §7: startup, OTP/onboarding/reviewer,
+     diary save/PDF, GRIN offline capture/sync/attachments/amendments/
+     QC/returns/export, interrupted upload, process death, account
+     switching, languages, accessibility, low-memory.
+  8. Fill RESULT_CAPTURE.template.md. Hash uids. No OTPs in git.
 
 Do not run this as PASS because a host SQLite fixture is green.
+adb empty => NOT_RUN, never PASS.
+
 EOF
 
 require_physical_device D1

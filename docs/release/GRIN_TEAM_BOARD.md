@@ -5,15 +5,15 @@ Do not collapse to Done.
 
 Arrangement: one coordinator plus five **local** Cursor Task subagents on separate worktrees. AI roles, not human sign-off.
 
-Checkpoint **2026-10-06 14:32:** Application **`fcda7cd`**. T5 SOURCE+INJECTED **PASS** (`bbcb144`). Pin STALE until CI. Do not apply pin. Billing not activated. Device/live/public **not accepted**.
+Checkpoint **2026-10-06 14:51:** GHA **`37440328976` success** on `70bdfe4` / app `fcda7cd`. Pin **not** applied (T4 correction in flight). T3 phone handoff `5692e25` folded. B1/B2 ungranted. Device/live/public **not accepted**.
 
 | Task | Owner | Branch | Worktree | Dependency | Status | Evidence | Blocker | Next |
 |---|---|---|---|---|---|---|---|---|
-| Integration | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | `fcda7cd` | running | T5 PASS `bbcb144`; pin unapplied | live HOLD | Pin after CI; do not execute A1 |
-| Backend pilot | team1 | `team/grin-t1-consolidated-1310` | `grin-t1-backend` | `fcda7cd` | review | Packet `b7eb5ce` + pin-diff `fcda7cd` proposed. Helper not rewritten. | `GRIN_OPS_ALLOW_LIVE=1` HOLD | Owner letters; pin after CI |
-| Policy / deletion | team2 | `team/grin-t2-owner-choice-1310` | `grin-t2-evidence` | `ad72d79` | review | 1/3/10 live; 45d grace; flag false; P8 FAIL | advertising; live purge | Do not reopen S1/S2; do not flip P8 |
-| Build / device | team3 | `team/grin-t3-candidate-1310` | `grin-t3-offline` | `fcda7cd` | review | `21fac5b` named `313025f` — **superseded**. B1≠B2 ungranted. | EAS/Play HOLD | Recheck Play before B1 of `fcda7cd` |
-| Billing / Play | team4 | `team/grin-t4-product` | `grin-t4-product` | purchase-entry `"0"` | review | Folded `fcda7cd`. Catalog NOT RUN. REAL-CHARGE named. | activation HOLD | No Save/submit; private UIDs |
+| Integration | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | `fcda7cd` | running | CI `37440328976` success; pin unapplied | live HOLD | Wait T4 SHA; pin once; do not execute A1 |
+| Backend pilot | team1 | `team/grin-t1-executable-batch` | `grin-t1-backend` | `fcda7cd` | running | A–F packet in flight | `GRIN_OPS_ALLOW_LIVE=1` HOLD | Complete batch; no live execute |
+| Policy / deletion | team2 | `team/grin-t2-p8-proposal` | `grin-t2-evidence` | `ad72d79` | running | P8 production-path packet in flight; flag false | advertising; live purge | Do not flip P8 for a green test |
+| Build / device | team3 | `team/grin-t3-phone-handoff` | `grin-t3-offline` | FINAL after T4 | review | `PHONE_HANDOFF.md` `5692e25`. B1≠B2 ungranted. | EAS/Play HOLD | Recheck Play before B1 of FINAL SHA |
+| Billing / Play | team4 | `team/grin-t4-lifecycle-allowlist` | `grin-t4-product` | purchase-entry `"0"` | running | already-owned expire/refund vs allowlist | activation HOLD | No Save/submit; private UIDs |
 | Independent QA | team5 | `team/grin-t5-review-fcda7cd` | `grin-t5-qa` | newly landed only | source_verified | `REVIEW_fcda7cd.md` `bbcb144`. SOURCE+INJECTED PASS. P8 FAIL. | NATIVE_DEVICE | Next landed source; leftover P3-FAIL stay dirty |
 | E1 evidence composition | team1 | `team/grin-t1-backend` | `grin-t1-backend` | `15bd2a6` | source_verified | persistGrinOwnerSession → processAttachments → real httpsCallable on isolated Functions emulator | live export HOLD | Stay unexported / undeployed |
 | E1/E2/E4/E5 evidence integrity | team2 | `team/grin-t2-evidence` | `grin-t2-evidence` | `29c6d3f` | source_verified | G2 unit + STORAGE_EMULATOR 8091/9200 | live IAM | Stay undeployed |
