@@ -22,20 +22,20 @@ Do not rewrite those files as if they were re-run today.
 | Item | Current value |
 |---|---|
 | Repo / branch / PR | `specialsoftwares/vyaamikk-diary` `integration/grin-g1-g5-source` draft **#31** (no duplicate; auto-merge off) |
-| **CI-tested PR head** | GHA **`37445383607` IN_PROGRESS** (checkout **`7e0d629`**). Non-docs diff vs **`540e07a` is empty** — this is the matching-CI attempt. Prior success **`37440328976`** covers **`fcda7cd` / `70bdfe4` only**. Do **not** push while this gate is IN_PROGRESS. |
+| **CI-tested PR head** | GHA **`37445383607` SUCCESS**, job **`112208918347` `verify`**. Checkout **`7e0d629023198333ed384ae076285925e98047d6`**. Parent **`d4c7ed4`**. Application blobs **= `540e07a`**. Prior success `37440328976` covers `fcda7cd` / `70bdfe4` only. |
 | **Current application SHA** | **`540e07aa07f376716484adb879ce66cb9fb170ce`** (P8 inert purge path on `60c4bc1` billing lifecycle). Flag **`INCLUDE_GRIN_IN_ACCOUNT_PURGE=false`**. Purchase-entry **`"0"`**. **Do not advertise GiB.** |
-| **Selected Internal candidate** | **`540e07a`**. T5 SOURCE+INJECTED **PASS** (`b3b1c97`). **Do not pin yet** (matching CI IN_PROGRESS). Do not build `60c4bc1` / `fcda7cd` / `520f9f9` / `56f2040` / `313025f` alone. B1≠B2 **neither granted**. |
-| Helper `PINNED_APP_SHA` | **`520f9f9`** — **STALE vs `540e07a`**. Do **not** pin until GHA **`37445383607` SUCCESS**. **Not applied.** A3 **HOLD**. |
-| **Tooling SHA** | **`0d7aa17`** — successor for the `520f9f9` pin. **Not** byte-identical to `228a8f5` (`grin-functions-op.mjs` **+1/−1**: pin constant only). |
-| Historical ops-guard baseline | `228a8f58ac83d3c71e853cdccb6e4c4fa64c251f`. Suite **34/34** recorded on **that** tree. Same suite **34/34** re-run after the pin apply on the successor tree (TOOLING, not application CI). Live mode still rejects `GRIN_OPS_PINNED_SHA`. |
-| **Canonical CI** | GHA **`37445383607` IN_PROGRESS** on `7e0d629` / app **`540e07a`**. Prior success **`37440328976`** is **`fcda7cd` only**. Do not pin until this run **SUCCESS**. Do not create trigger commits. |
+| **Selected Internal candidate** | **`540e07a`**. T5 SOURCE+INJECTED **PASS** (`b3b1c97`). Matching CI **SUCCESS**. Do not build `60c4bc1` / `fcda7cd` / `520f9f9` / `56f2040` / `313025f` alone. B1≠B2 **neither granted**. |
+| Helper `PINNED_APP_SHA` | **`540e07aa07f376716484adb879ce66cb9fb170ce`** — **applied**. Live mode still rejects `GRIN_OPS_PINNED_SHA`. A3 **not executed**. |
+| **Tooling SHA** | **`2d33f6d252d66a89d6fcef5cf75feaf268e7e7b2`** — helper `PINNED_APP_SHA` only. **Separate from** application `540e07a`. Ops-guard **34/34**. Historical `228a8f5` / `0d7aa17` remain history. |
+| Historical ops-guard baseline | `228a8f58ac83d3c71e853cdccb6e4c4fa64c251f` **34/34**. Re-run after this pin: **34/34**. Live mode still rejects `GRIN_OPS_PINNED_SHA`. UNKNOWN inventory still refuses mutate. |
+| **Canonical CI** | GHA **`37445383607` SUCCESS** on `7e0d629` / app **`540e07a`**. Job `112208918347`. |
 | S1 / S2 | **Closed** at SOURCE / INJECTED / named G2 EMULATOR (`127.0.0.1:8091` / `9200`, `demo-vyaamikk-grin-g2`). Not reopened (no new reproduction). Not live. Not device. |
 | P3 | **ACCEPTED**. Coordinator re-ran `quota.injected.unit.test.ts` **PASS** after `313025f`. |
 | P8 | **OPEN / FAIL** (flag **false**; GRIN omitted from default purge). Production-path packet + inert wiring landed (`540e07a`). Later grant = one-line flip. **Not flipped. Not live.** GRIN **synthetic-only**. |
 | Owner storage (2026-10-06) | **1 / 3 / 10 GiB wired** as `OWNER_SELECTED_STORAGE_CAPS_BYTES`. Historical 1/5/20 and 256 MiB/1/5 named, not live. **Do not advertise.** |
 | Owner deletion (2026-10-06) | **45-day** grace wired (`DELETION_GRACE_DAYS=45`). Supersedes 180. Play freeze ≠ delete. GRIN purge flag **false**. |
 | Device / live backend / billing / public | **Not accepted** |
-| Next approval | A–F batch in `CONSOLIDATED_PILOT_PACKET.md`. **Not executed.** Candidate **`540e07a`**. Pin after **`37445383607` SUCCESS**. P8 live flip **separate**. |
+| Next approval | A–F in `CONSOLIDATED_PILOT_PACKET.md`. **Not executed.** Owner has not lettered live ops. P8 live flip **separate**. |
 | Device named | OnePlus 12R, Android 16, vc22 installed, available today. **Upgrade device.** Clean-install device **unnamed**. Owner Firebase UID **received privately (out-of-repo)**. Values **not in git**. Admission **writes HOLD**. |
 | versionCode | **23 UNRESERVED**. Play explorer 2026-10-06: highest uploaded **vc22**. |
 | Merge-base / `origin/main` | `0da2f58970f23c7ce6cbefae6efffd49c731f44b` |
@@ -51,8 +51,8 @@ reproduction. Do not reopen S1/S2 without a new reproduction.
 | Item | Owner | Next action | Dependency | Evidence | Blocker |
 |---|---|---|---|---|---|
 | Wire 1/3/10 GiB + 45-day grace | T2 | **Landed** combined `313025f` (`ad72d79`) | done | coordinator tests PASS | do not advertise; P8 still FAIL |
-| Canonical CI on selected SHA | coordinator | GHA **`37445383607` IN_PROGRESS** on `7e0d629` / app **`540e07a`**. Do **not** push | T5 of `540e07a` **PASS** | public API | do not cancel this run |
-| Pin helper to selected SHA | coordinator apply | After **`37445383607` SUCCESS** | T5 PASS `b3b1c97` | do not pin while IN_PROGRESS | A3 HOLD |
+| Canonical CI on selected SHA | coordinator | GHA **`37445383607` SUCCESS** job `112208918347` on `7e0d629` / app **`540e07a`** | done | public API | — |
+| Pin helper to selected SHA | coordinator apply | **Applied** `PINNED_APP_SHA=540e07a`. Ops-guard **34/34** | T5 PASS + CI SUCCESS | TOOLING 34/34 | A3 not executed |
 | Consolidated backend packet | T1 | **Landed** `a28bfb0`. C names **`540e07a`**. Pin HOLD until CI SUCCESS | owner letter of complete batch | inspect 2026-10-06 | A6 UNPROVEN; no live execute |
 | Internal AAB packet | T3 | **Landed** `PHONE_HANDOFF.md`. B1 of `540e07a` after pin+CI SUCCESS | CI SUCCESS | OnePlus 12R named | B1 ungranted |
 | Restricted billing packet | T4 | **Landed** in `60c4bc1`. T5 SOURCE+INJECTED **PASS** `c69ffb9`. Catalog **NOT RUN** | pin of `540e07a` after CI | FakePlay nine cases | activation HOLD |
@@ -67,9 +67,9 @@ reproduction. Do not reopen S1/S2 without a new reproduction.
 
 | Gate | State |
 |---|---|
-| SOURCE READY | Application **`540e07a`**. T5 SOURCE+INJECTED **PASS** (`REVIEW_540e07a.md` `b3b1c97`). GHA **`37445383607` IN_PROGRESS** on `7e0d629` (app blobs **= `540e07a`**). **P8 FAIL** (flag false). |
-| BACKEND PILOT READY | A–F packet `a28bfb0` present. **Not executed.** A/B YES on paper; C HOLD pin of `540e07a` until **`37445383607` SUCCESS**; D writes HOLD; E UNPROVEN; F LIVE HOLD. |
-| INTERNAL BUILD READY | T3 `PHONE_HANDOFF.md`. B1 of **`540e07a`** after pin + **`37445383607` SUCCESS**. B1≠B2 **neither granted**. Not a purchase-test build. |
+| SOURCE READY | Application **`540e07a`**. T5 SOURCE+INJECTED **PASS** (`b3b1c97`). GHA **`37445383607` SUCCESS** on `7e0d629`. Helper pin **applied**. **P8 FAIL** (flag false). |
+| BACKEND PILOT READY | A–F packet present. **Not executed.** A/B YES on paper after inspect=baseline. C pin **applied**, live create HOLD (owner letter). D UID `count=1` writes HOLD. E LIVE HOLD (`gcloud` absent; seven ABSENT; preservation not live-verified). F INJECTED YES / LIVE HOLD. |
+| INTERNAL BUILD READY | T3 `PHONE_HANDOFF.md`. B1 of **`540e07a`** after owner letter. B1≠B2 **neither granted**. Not a purchase-test build. Recheck Play before B1. |
 | DEVICE ACCEPTED | **NOT RUN**. OnePlus 12R available today — not yet executed. |
 | BILLING ACCEPTED | Lifecycle SOURCE+INJECTED **PASS** at `60c4bc1` (`c69ffb9`); catalog **NOT RUN**; purchases **off**; REAL-CHARGE **not run** |
 | PUBLIC SUBMISSION READY | Blocked on wired 1/3/10+45d, device, billing, listing. Owner writes recorded. |
@@ -105,9 +105,9 @@ purchase-entry remains `"0"`. Play Console catalog **NOT RUN**.
 
 | Team | Authorized work this session | Approval still required |
 |---|---|---|
-| 1 Backend | A–F packet `a28bfb0`. A/B two commands. C HOLD pin of `540e07a` until matching CI SUCCESS. D validate-uids YES / writes HOLD. E UNPROVEN. F INJECTED YES / LIVE HOLD. **Not executed.** | Owner letters complete batch after pin + inspect |
+| 1 Backend | A–F packet. Pin **applied** to `540e07a`. A/B two commands. C live HOLD. D `count=1` writes HOLD. E LIVE HOLD. F INJECTED YES / LIVE HOLD. **Not executed.** | Owner letters complete batch; inspect first |
 | 2 Policy | P8 packet `b08690d` + inert wiring `540e07a`. Flag **false**. P3 PASS. P8 FAIL operationally. GRIN **synthetic-only**. **Do not advertise.** | Live purge grant = one-line flip; not done |
-| 3 Build/device | `PHONE_HANDOFF.md`. OnePlus 12R upgrade. B1≠B2 **ungranted**. Purchase-entry `"0"`. Device **NOT RUN**. Slot O UID private. | EAS B1 of `540e07a` after pin+CI SUCCESS; Play B2 separate |
+| 3 Build/device | `PHONE_HANDOFF.md`. OnePlus 12R upgrade. B1≠B2 **ungranted**. Purchase-entry `"0"`. Device **NOT RUN**. Slot O UID private. | EAS B1 of `540e07a` after owner letter; Play B2 separate |
 | 4 Billing/Play | Lifecycle correction in **`60c4bc1`**. T5 SOURCE+INJECTED **PASS** (`c69ffb9`). Catalog **NOT RUN**. Purchase-entry `"0"`. | Activation HOLD |
 | 5 QA | `REVIEW_540e07a.md` **PASS** `b3b1c97`. **P8 FAIL** operationally. Device/live **NOT RUN**. | Leftover P3-FAIL stay dirty |
 

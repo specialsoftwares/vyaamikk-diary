@@ -306,5 +306,9 @@ Owner slot **O** uses an **existing** Firebase Auth account. UID stored **out-of
 
 ## Team 5 review 540e07a (unsent, 2026-10-06)
 
-`REVIEW_540e07a.md` (team `b3b1c97` on `team/grin-t5-review-540e07a`). SOURCE+INJECTED **PASS** for inert P8 production-path. Flag **false**. **P8 FAIL** operationally. Packet is **not** a live grant. Helper pin still `520f9f9` STALE. Canonical GHA **`37445383607` IN_PROGRESS** on `7e0d629` (app blobs = `540e07a`). Do not pin until SUCCESS. Do not flip the flag. Do not mark P8 / device / live Done.
+`REVIEW_540e07a.md` (team `b3b1c97`). SOURCE+INJECTED **PASS**. Flag **false**. **P8 FAIL**. GHA **`37445383607` SUCCESS** job `112208918347` on `7e0d629`. Helper pin **applied** to `540e07a`. Ops-guard **34/34**. Do not flip the flag. Do not mark P8 / device / live Done.
+
+## Coordinator pin apply 540e07a (unsent, 2026-10-06)
+
+Helper `PINNED_APP_SHA` set to application **`540e07a`**. TOOLING ops-guard **34/34**. Live overrides still rejected. Not A3 execute. Do not mark backend Done.
 

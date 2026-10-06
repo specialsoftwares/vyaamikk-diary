@@ -35,7 +35,7 @@ that must not run until their stated blocker clears.
 |---|---|---|---|
 | **A** Firestore Rules | Isolated `--only firestore:rules` | **YES** (after owner letter + inspect still = live baseline) | Hashes, command, verification, rollback, stop conditions complete. firebase-tools **14.20.0**. |
 | **B** Storage Rules | Isolated `--only storage` | **YES** (after owner letter + inspect still = live baseline) | Same isolated JSON, **separate** command and verification. May be lettered in the same owner response as A; must still run as its own command. |
-| **C** Functions gate-off-initial | Seven named create, gate key **absent** | **HOLD** | Helper `PINNED_APP_SHA` is still `520f9f9` (**STALE vs `540e07a`**). T5 of `540e07a` **PASS**. Do **not** apply the pin until matching CI **SUCCESS**. GRIN Functions tree is combined application **`540e07a`**. |
+| **C** Functions gate-off-initial | Seven named create, gate key **absent** | **HOLD** (procedure YES; live not lettered) | Helper `PINNED_APP_SHA` is **`540e07a` (applied)**. T5 PASS + GHA `37445383607` SUCCESS. Do not execute until owner letters C. Inspect must show seven ABSENT. |
 | **D** Tester admission | Admin/Firestore document write | **YES** for UID grammar / validate-uids (`count=1`); **HOLD** for writes | Mechanism is **not** a SOURCE allowlist. Owner UID is on a private out-of-repo file. **Supply is not authorization.** `PLAY_BILLING_TESTER_UIDS` is a **separate** Functions env/secret and is **not** authorized to be set now. |
 | **E** Gate enable / disable | gcloud `--update-env-vars` without `--source` | **HOLD — UNPROVEN** | firebase-tools **14.20.0** dotenv **REPLACE** is proven **blocked**. Helper enable/disable **intends** omitted-`--source` gcloud **only if** inspect `sourceOrigin` is `gcs` or `repo`. That preservation is **UNPROVEN** (`gcloud` **ABSENT**). Do not claim proven. |
 | **F** Synthetic smoke | INJECTED harness; LIVE_BACKEND | **INJECTED YES**; **LIVE HOLD** | Case list complete. `LIVE_BACKEND` stays refused until **E is proven AND** the owner letters live smoke. Synthetic data only. |
@@ -310,12 +310,11 @@ remains whatever it was. Do not Editor-delete objects.
 
 ## C — Seven Functions, gate-off-initial
 
-**HOLD.** Selected artifact SHA for the GRIN Functions tree is
+**HOLD for live execute.** Selected artifact SHA for the GRIN Functions tree is
 `540e07aa07f376716484adb879ce66cb9fb170ce`. T5 SOURCE+INJECTED **PASS**
-(`b3b1c97`). Helper `PINNED_APP_SHA` is still
-`520f9f98bc952fd7f30a907da9e85774629a69c0` (**STALE**). Do **not** apply
-the pin from this packet. C does not run until the coordinator pins after
-matching canonical CI **SUCCESS**, then a later owner letter.
+(`b3b1c97`). GHA **`37445383607` SUCCESS** on `7e0d629`. Coordinator
+applied helper `PINNED_APP_SHA` to **`540e07a`**. C still does **not** run
+until a later owner letter. Inspect must remain complete seven **ABSENT**.
 
 Region **`asia-south1`**, codebase `default`, project **`vyaamikk-diary`**.
 Runtime identity stays
