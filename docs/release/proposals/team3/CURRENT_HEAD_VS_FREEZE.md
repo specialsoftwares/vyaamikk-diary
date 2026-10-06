@@ -1,15 +1,25 @@
-# Internal AAB candidate — T2 landed
+# Internal AAB candidate — billing correction pending
 
 **2026-10-06.** Team 3 observation only. Combined is **read-only**. No
-EAS/Play. B1 ≠ B2; **neither granted**. Canonical CI: **still none**.
+EAS/Play. B1 ≠ B2; **neither granted**. This instruction does **not**
+authorize B1/B2.
 
-The freeze-prepare of `56f2040` is **superseded**.
+The Internal AAB is the coordinator-selected **FINAL** application SHA
+**after billing-lifecycle correction + matching completed canonical CI**,
+not an intermediate.
 
 | What | SHA |
 |---|---|
-| **Internal candidate (named)** | `313025f902b0a3416815da7ce75a3a7d6bec9559` — owner 1/3/10 GiB + 45-day deletion |
-| Canonical CI | **NOT RUN** — do not cite GHA `37425360211` (`520f9f9` only) |
-| Do **not** build | `520f9f9` (retired freeze) **or** `56f2040` (superseded freeze-prepare) |
+| **B1 checkout** | FINAL application SHA after billing correction + matching **completed** CI |
+| Current application (may be superseded) | `fcda7cd64e9622e50c38223a7156f0f6b8ca5576` |
+| Combined docs HEAD (not a B1 checkout) | `70bdfe4b2ea2a7cf6a9fe5f1cf7bf08ff6ebc4e9` (app blobs = `fcda7cd`) |
+| Canonical CI | GHA `37440328976` **IN_PROGRESS** on `70bdfe4` — not matching CI |
+| Do **not** build alone | `520f9f9` / `56f2040` / `313025f` |
+| Do **not** cite as this candidate's CI | GHA `37425360211` (`520f9f9` only) |
 
-This provenance branch is **not** a B1 checkout. Do not build Combined docs
-HEAD (`5b3b4ce`). Profile `internal-grin` AAB. versionCode **23 UNRESERVED**.
+This provenance branch (`team/grin-t3-phone-handoff`) is **not** a B1
+checkout. Do not build Combined docs HEAD. Profile `internal-grin` AAB.
+versionCode **23 UNRESERVED**. Purchase-entry **off** — not a purchase-test
+build.
+
+Phone handoff: `PHONE_HANDOFF.md`.

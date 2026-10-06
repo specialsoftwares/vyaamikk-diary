@@ -6,8 +6,9 @@ set -euo pipefail
 
 DEVICE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PACKAGE_NAME="${PACKAGE_NAME:-com.specialsoftwares.vyaamikkdiary}"
-NAMED_FREEZE="${NAMED_FREEZE:-56f2040e30159579edc0cbfbc88e2ba706a6abd2}"
-RETIRED_FREEZE="${RETIRED_FREEZE:-520f9f98bc952fd7f30a907da9e85774629a69c0}"
+CURRENT_APP_BLOBS="${CURRENT_APP_BLOBS:-fcda7cd64e9622e50c38223a7156f0f6b8ca5576}"
+FINAL_SHA="${FINAL_SHA:-coordinator_selected_after_billing_correction_and_matching_ci}"
+RETIRED_DO_NOT_BUILD="${RETIRED_DO_NOT_BUILD:-520f9f9/56f2040/313025f_alone}"
 
 refuse_release_actions() {
   case "${1:-}" in
@@ -32,9 +33,11 @@ print_common_header() {
   local row_id="$1"
   echo "ROW_ID=${row_id}"
   echo "PACKAGE=${PACKAGE_NAME}"
-  echo "NAMED_FREEZE=${NAMED_FREEZE}"
-  echo "RETIRED_FREEZE=${RETIRED_FREEZE}"
-  echo "NOTE=will_retarget_when_T2_commits_1_3_10_GiB_and_45_day"
+  echo "CURRENT_APP_BLOBS=${CURRENT_APP_BLOBS}"
+  echo "FINAL_SHA=${FINAL_SHA}"
+  echo "RETIRED_DO_NOT_BUILD=${RETIRED_DO_NOT_BUILD}"
+  echo "NOTE=internal_aab_is_final_sha_after_billing_correction_and_matching_ci"
+  echo "PURCHASE_ENTRY=off"
   echo "B1=not_granted"
   echo "B2=not_granted"
   echo "AAB_REQUIRED_TO_PREPARE_SCRIPT=no"

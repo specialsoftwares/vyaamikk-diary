@@ -23,6 +23,8 @@ echo "D1_AVAILABLE=today"
 echo "D2_DEVICE="
 echo "XR=N/A_until_backend"
 echo "LIVE_GRIN_SEVEN=ABSENT"
+echo "PURCHASE_ENTRY=off"
+echo "NOT_A_PURCHASE_TEST_BUILD=true"
 
 for id in "${ROWS[@]}"; do
   echo "ROW ${id}=NOT_RUN"

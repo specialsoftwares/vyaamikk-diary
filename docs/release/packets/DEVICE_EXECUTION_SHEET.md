@@ -8,13 +8,17 @@ All executable rows **NOT RUN**. Host / emulator / SQLITE_HOST / mounted
 inert React results are not device passes. This session (`adb devices -l`):
 **no attached device**. Do not convert host/emulator/CI greens into PASS.
 
+Phone handoff: `docs/release/proposals/team3/PHONE_HANDOFF.md`.
+
 Contract: `2026-10-02.wave2evidence`.
 Intended binary (after Approval B, **not granted**): Play Internal AAB
-`internal-grin` at named freeze-prepare
-**`56f2040e30159579edc0cbfbc88e2ba706a6abd2`** (**will retarget** when T2
-lands 1/3/10 GiB + 45-day) **or** labelled sideload APK. **Do not** build
-retired freeze `520f9f9`. **Do not** cite GHA `37425360211` as CI for
-`56f2040`. Label the artifact: `PLAY_INSTALLED` vs `NATIVE_DEVICE`.
+`internal-grin` at the coordinator-selected **FINAL** application SHA
+after billing-lifecycle correction + matching **completed** canonical CI
+— **not** an intermediate; **not** `520f9f9` / `56f2040` / `313025f`
+alone. Current app blobs (may be superseded): `fcda7cd`. Canonical CI
+GHA `37440328976` **IN_PROGRESS** on `70bdfe4` is not matching CI.
+Label the artifact: `PLAY_INSTALLED` vs `NATIVE_DEVICE`. This GRIN AAB
+is **not** an interactive purchase-test build (purchase-entry `"0"`).
 
 Scripts (prepared **without** waiting for an AAB; refuse PASS without a
 phone): `docs/release/proposals/team3/device/`.
@@ -53,7 +57,7 @@ not this sheet. Play licence-tester emails are **not** Firestore admission.
 
 Required hardware: D1 (OnePlus 12R, Play Internal vc22 upgrade) + D2 (clean
 Android 12+, **unnamed**) + TalkBack-capable device (may be D1). Evidence
-for each row: `docs/release/proposals/team3/DEVICE_HANDOFF.md` (no hardware
+for each row: `docs/release/proposals/team3/PHONE_HANDOFF.md` (no hardware
 = NOT RUN).
 
 Live GRIN seven **ABSENT**. Useful GRIN rows need later backend.

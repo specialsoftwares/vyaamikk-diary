@@ -1,13 +1,21 @@
 # Team 3 handoff — Android build / real-phone acceptance (`candidate-1310`)
 
-**2026-10-06.** Worktree `/Users/shivamsaurav/vyd-worktrees/grin-t3-offline`.  
-Provenance branch `team/grin-t3-candidate-1310` (from `team/grin-t3-freeze`
-`d4a8197`). Combined and historical workspace were **read-only**.
-`package.json` / `eas.json` / `app.json` were **not** edited. No
-EAS/native/prebuild/OTA. No Play write. Do not force-push
-`origin/team/grin-t3-offline`. `gh` unauthenticated.
+**Superseded for the phone path.** Use
+`docs/release/proposals/team3/PHONE_HANDOFF.md` and
+`APPROVAL_B_DRAFT.md`. Named Internal AAB is the coordinator-selected
+**FINAL** SHA after billing-lifecycle correction + matching completed
+CI — not `56f2040` / `313025f` / `520f9f9` alone. Current app blobs
+(may be superseded): `fcda7cd`. B1 ≠ B2; **neither granted**.
 
-This branch is **docs provenance**, not a B1 checkout.
+**2026-10-06.** Worktree `/Users/shivamsaurav/vyd-worktrees/grin-t3-offline`.  
+Provenance branch `team/grin-t3-phone-handoff`. Combined and historical
+workspace were **read-only**. `package.json` / `eas.json` / `app.json`
+were **not** edited. No EAS/native/prebuild/OTA. No Play write. Do not
+force-push `origin/team/grin-t3-offline`. `gh` unauthenticated.
+
+This branch is **docs provenance**, not a B1 checkout. The freeze-prepare
+tables below named `56f2040` are **historical** and **not** the B1
+checkout.
 
 ---
 
