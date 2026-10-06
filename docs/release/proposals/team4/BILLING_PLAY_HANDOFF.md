@@ -27,7 +27,7 @@ HOLD: Play Save, catalog mutation, seeding, purchases, billing activation, websi
 - In-app legal baseline **2026-07-27** preserved. Live `/privacy` effective **15 July 2026**. Do not backdate.
 - Website (2026-10-05T21:18Z): `/privacy` 200; `/delete-account` 200 mailto `support.vyd@specialsoftwares.com` (Play-allowed; identifies app + Ananya LLP). **Do not invent a form.** Inbox monitoring **NOT RUN**.
 - `/~flock.js` 200 (~21KB, Tinybird). `data-proxy-url="/~api/analytics"` → browser POST first-party; POST **202**, GET **404**. App does **not** load flock.js. Upstream Tinybird forward **UNKNOWN**. Cloudflare `__cf_bm` is hosting, not an app SDK.
-- 180-day hold: **not** Play/legal approved. Recommend **keep 15-day grace**; do not ship 180-day pending as “deletion” (Play: freeze ≠ delete). Optional archive would be a **separate product**. GRIN `grinEvidence` (and GRIN/billing Firestore collections) **not** in purge lists. `DELETION_WINDOW_180_PLAY.md`.
+- Explicit account deletion — **three facts, do not collapse:** (1) **Implemented = 15 days** (`DELETION_GRACE_MS` + live site copy); (2) **Owner requested = 180 days** (not legally/Play approved); (3) **Public-approved policy = UNRESOLVED**. Leaving code at 15 days is an engineering hold, **not** a recorded owner choice. Do **not** substitute 30 (that is expiry notice in 90+30). Do **not** ship 180-day pending as “deletion” (Play User Data: freeze/disable ≠ delete). Optional 180-day recoverability would be a **separate archive product**. Subscription/GRIN expiry **90+30** is a different clock. **P8 remains open** while production purge omits GRIN and public policy is unresolved. Do **not** flip `INCLUDE_GRIN_IN_ACCOUNT_PURGE`. Owner sheet: `DELETION_15_VS_180_OWNER_SHEET.md`.
 
 ## Not done (HOLD)
 

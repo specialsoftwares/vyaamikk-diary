@@ -100,17 +100,22 @@ tests only.
 
 ### Explicit account deletion — three facts (do not collapse)
 
+Owner plain-language sheet (choices A–D **blank** until the owner writes):
+`docs/release/proposals/team4/DELETION_15_VS_180_OWNER_SHEET.md`.
+
 | # | Fact | Status |
 |---|---|---|
-| 1 | **Current implemented behavior** | `DELETION_GRACE_MS` = **15 days** (`functions/src/deletion/finalPurge.ts`). Live website `/privacy` and `/delete-account` also describe 15 days (fetched 2026-10-06). |
-| 2 | **Owner-requested policy** | Change the proposed window from 30 days to **180 days**. Recorded exactly. **Not** described as legally or Play-approved. |
+| 1 | **Current implemented behavior** | `DELETION_GRACE_MS` = **15 days**. Live `/privacy` and `/delete-account` also describe 15 days. **Not** “the owner already chose 15.” |
+| 2 | **Owner-requested policy** | **180 days** after an explicit account-deletion request. **Not** legally/Play approved. |
 | 3 | **Policy approved for public operation** | **UNRESOLVED.** Do not advertise or activate 180 days. Do not silently substitute 15 or 30. |
 
-Team 2 + Team 4 must recommend whether 180 days can be justified for
-explicit deletion, needed disclosures, lawful-retention exceptions, or a
-**separate optional 180-day recovery/archive** product. An alternative
-needs owner confirmation. Do not reinterpret the request as an approved
-archive SKU.
+Team 4 Play-risk framing (not a recorded owner choice): do **not** ship
+180-day `pending_deletion` as deletion (Play: freeze ≠ delete). Do **not**
+treat implemented 15 days as the public-policy answer. Do **not** pick 30
+(that is expiry notice in 90+30). Optional 180-day recoverability would be
+a **separate archive product**. **P8 stays open** while production purge
+omits GRIN and the public window is unresolved. Do not flip
+`INCLUDE_GRIN_IN_ACCOUNT_PURGE`.
 
 While unresolved: prepare reusable GRIN cleanup lists and tests; do not
 report deletion complete while associated live data remains; do not attach
@@ -147,7 +152,7 @@ until lifecycle is implemented and approved.
 | Owner choices recorded | **this document** |
 | Issuance quota + storage accounting + expiry SM | Team 2 source (separate worktree) |
 | GRIN paths on existing deletion job | prepare in source; **not live** |
-| 180-day public policy | recommendation only |
+| 180-day public policy | **UNRESOLVED.** Owner sheet choices A–D blank. Engineering hold at implemented 15 days is **not** a recorded owner choice |
 | Advertising 1/5/20 GiB | blocked on economics confirmation |
 | Live Functions/Rules/IAM | HOLD |
 | Production purge job | **not introduced** |

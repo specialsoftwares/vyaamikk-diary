@@ -1,7 +1,14 @@
-# 180-day deletion hold vs Play (Team 4 proposal)
+# 180-day deletion hold vs Play (Team 4 engineering notes)
+
+**PRIMARY owner decision sheet:**
+`docs/release/proposals/team4/DELETION_15_VS_180_OWNER_SHEET.md`
 
 **Not implemented. Not legally approved. Not Play-approved.** Do not silently
-reinterpret this as a shipped archive product.
+reinterpret this as a shipped archive product. Do **not** treat implemented
+15 days as the owner’s recorded public-policy choice.
+
+Three facts, do not collapse: **implemented = 15 days**; **owner requested =
+180 days**; **public-approved policy = UNRESOLVED**.
 
 Owner requested a **180-day** hold. Current code is a **15-day** pending
 window (`DELETION_GRACE_DAYS` / `DELETION_GRACE_MS` = 15 days) in:
@@ -44,8 +51,9 @@ Mailbox monitoring: **NOT RUN**.
 
 ## 2. Can 180 days be justified as the deletion grace?
 
-**Recommendation: no, not as the pending-deletion window that replaces
-today’s 15-day grace.**
+**Play-risk framing (not an owner decision recorded here):** not as the
+pending-deletion window that *replaces* today’s implemented 15-day grace
+*and is then labelled deletion*.
 
 A 180-day period during which the account stays `pending_deletion` (disabled,
 data retained, reversible by re-OTP) is **account freezing**, which Play
@@ -54,8 +62,10 @@ fixed Play SLA, but six months of holding the full workspace after a verified
 deletion request is hard to defend as deletion and is not a recorded
 regulatory retention basis.
 
-Keep **15-day** accidental-reversal grace as the implemented product unless
-counsel writes a **different** legal basis.
+Engineering **does not change** `DELETION_GRACE_MS` in this slice. That
+hold is **not** “the owner chose 15.” Public-approved policy remains
+**UNRESOLVED** until the owner + counsel fill the decision row on
+`DELETION_15_VS_180_OWNER_SHEET.md`. Do **not** substitute 30 days.
 
 ---
 
@@ -66,7 +76,7 @@ opt-in archive** — not as “deletion”:
 
 | Model | Play posture | Product |
 |---|---|---|
-| A. 15-day pending then purge (current) | Matches “delete after a short reversal window” if disclosed | **Keep** unless counsel says otherwise |
+| A. 15-day pending then purge (current implementation) | Matches “delete after a short reversal window” **if** counsel makes it the public-approved term | Owner+counsel must still write it; not silently kept |
 | B. 180-day pending then purge | Looks like freeze; high Play/policy risk | **Do not ship as deletion** |
 | C. User chooses “Archive 180 days” **instead of** delete | Not deletion; must not be the only control; listing must not call it delete | New product; counsel; not this candidate |
 | D. Delete the app account promptly; retain a **minimal** legally required subset (e.g. retired phone index) for a stated period | Allowed if disclosed | Closest to Play’s “additional retention” language |
@@ -91,6 +101,10 @@ Firestore `USER_SUBCOLLECTIONS` is also a fixed list (`entries`,
 **Not included:** `goodsEvidenceAdmission`, `goodsEvidenceUploadControl`,
 `grinEvidenceObjectKeys`, `grinEvidenceDerivativeKeys`, `goodsEvidenceLedgers`,
 and billing docs under `subscription` / related billing collections.
+
+**P8 remains open** while production purge omits GRIN and public-approved
+deletion policy is UNRESOLVED. Do **not** flip `INCLUDE_GRIN_IN_ACCOUNT_PURGE`.
+180 requested does not close P8.
 
 Until Packet D retention is implemented, Data safety and `/delete-account`
 must **not** claim GRIN originals (or those Firestore collections) vanish with
