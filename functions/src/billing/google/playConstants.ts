@@ -10,8 +10,9 @@
  * were true, prepare/validate callables would otherwise serve every
  * authenticated caller. PLAY_BILLING_TESTER_UIDS is a fail-closed UID
  * allowlist used only after that enablement check. Empty/absent list
- * denies all callers. This module does not enable billing and does not
- * invent tester emails or UIDs.
+ * denies NEW grants. Already-owned same-uid token lifecycle is not gated
+ * by allowlist membership. This module does not enable billing and does
+ * not invent tester emails or UIDs.
  *
  * Owner supplies Firebase Auth UIDs privately. Do not commit them.
  * Input format (same env/secret name):
@@ -140,7 +141,10 @@ export function assertPlayBillingTesterAllowed(
   }
 }
 
-/** Production adapters set enforce=true so RTDN/reconciliation cannot grant. */
+/**
+ * Production adapters set enforce=true so RTDN/reconciliation cannot make
+ * NEW grants. Callers skip this when the uid already owns this token.
+ */
 export function assertPlayBillingTesterAllowedIfEnforced(
   uid: string,
   enforce: boolean | undefined,
