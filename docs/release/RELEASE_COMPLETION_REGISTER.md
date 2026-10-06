@@ -12,34 +12,34 @@ TOOLING (ops-guard suite; not application CI).
 
 ---
 
-## Coordinates (verified this session)
+## Current state (authoritative — 2026-10-06 closeout)
 
-| Item | Value |
+Single table. Later team reports under this file are **historical evidence**.
+If they still say “unapplied pin”, “unpushed”, or “canonical CI pending”
+for `520f9f9` / `0d7aa17`, those lines are **superseded** here. Do not
+rewrite those files as if they were re-run today.
+
+| Item | Current value |
 |---|---|
-| Repo | `specialsoftwares/vyaamikk-diary` |
-| Branch | `integration/grin-g1-g5-source` |
-| Draft PR | #31 (no duplicate PR; auto-merge off) |
-| **Application SHA** | `520f9f98bc952fd7f30a907da9e85774629a69c0` — S1/S2 storage accounting (cherry-pick of Team 2 `0cd3473` on `team/grin-t2-s1s2`). Pre-fix was `b845e8a`. |
-| **PR / checkout HEAD** | This coordinator fold (scripts + register) on `integration/grin-g1-g5-source`, PR #31. Application blobs match `520f9f9`. |
-| GitHub Actions canonical CI | **NOT YET** for `520f9f9`. Do **not** cite run **`37379529193`** (that success is `41b05a4` only) or `37351685421`. `gh` still unauthenticated here. |
-| `7761af6` → `41b05a4` | Team 5 `POLICY_QA_T2.md` + INJECTED non-register issuance lock **and** `package.json` `test:grin-t5-issuance-non-register`. **Not** exclusively narrative documentation. |
-| Local `ci:verify` | **PASS** on `7761af6` (includes `b845e8a`). `test:all` **159/159** in 273.9s. Invoice-renderer Docker skipped locally. |
-| Team 2 S1/S2 slice | `0cd3473ab5aee2d88d31662e29794839bd9ee8aa` on `team/grin-t2-s1s2` (local `team/grin-t2-evidence` not force-pushed) |
-| Team 2 quota/lifecycle slice | `14e56f3802e29825708db591a5feb5bf8b000178` |
-| `git diff` vs `5d5df3d` | **non-empty** on `functions/src/goodsEvidence` (issuance quota, storage accounting, expiry). Helper pin is now `520f9f9`. A3 live Functions still HOLD. |
-| Live billing restriction | **Not deployed.** Live handlers still only the enablement key (absent). |
-| **Operational tooling SHA** | Fail-closed origin `228a8f58ac83d3c71e853cdccb6e4c4fa64c251f`. Helper `PINNED_APP_SHA` now `520f9f9` (applied after T1+T5). Pin-apply commit is a **candidate** ops-guard successor. |
-| Docs checkpoint (Team 4 billing fold) | `aa5253e4e070195227055cde836d6b528d5e0070` |
-| Tooling suite | `node --test docs/release/packets/grin-ops/grin-functions-op.test.mjs` **34/34** after pin apply (TOOLING, not application CI). Live mode still rejects `GRIN_OPS_PINNED_SHA`. |
+| Repo / branch / PR | `specialsoftwares/vyaamikk-diary` `integration/grin-g1-g5-source` draft **#31** (no duplicate; auto-merge off) |
+| **PR / published HEAD** | `0d7aa17a6efcf3ce6874269eb57afda0a2b45559` |
+| Tested checkout parent | `074f082a9f17ef1e8c53958cffc8b13bc0a6c5a8` (docs fold of T5 post-fix). Application ancestor `520f9f9`. |
+| **Application SHA** | `520f9f98bc952fd7f30a907da9e85774629a69c0` (S1/S2; cherry-pick of `0cd3473`). `git diff --stat 520f9f9 0d7aa17 -- functions src eas.json app.json app firebase.json tools/goods-evidence-storage` **empty**. Pre-fix was `b845e8a`. |
+| Helper `PINNED_APP_SHA` | **`520f9f9`** (constant in `grin-functions-op.mjs` at `0d7aa17`) |
+| **Tooling SHA** | **`0d7aa17`** — successor. **Not** byte-identical to `228a8f5` (`grin-functions-op.mjs` **+1/−1**: pin constant only). |
+| Historical ops-guard baseline | `228a8f58ac83d3c71e853cdccb6e4c4fa64c251f`. Suite **34/34** recorded on **that** tree. Same suite **34/34** re-run after the pin apply on the successor tree (TOOLING, not application CI). Live mode still rejects `GRIN_OPS_PINNED_SHA`. |
+| **Canonical CI** | Independently observed GitHub Actions run **`37425360211`**, job **`112143748428`**, workflow head **`0d7aa17`**, verify + canonical repository gate **success**. Skipped steps: **none observed** in jobs API. Do **not** cite `37379529193` (`41b05a4`) or `37351685421` (`5d5df3d`) for this tree. Inner suite counts **not invented**. `gh` unauthenticated here. |
+| S1 / S2 | **Closed** at SOURCE / INJECTED / named G2 EMULATOR (`127.0.0.1:8091` / `9200`, `demo-vyaamikk-grin-g2`). Not live. Not device. |
+| P3 | **ACCEPTED** (first GRIN register consumes one monthly slot; replay/amend/QC/return/evidence/reconcile do not). |
+| P8 | **OPEN / FAIL** (`INCLUDE_GRIN_IN_ACCOUNT_PURGE=false`; public deletion policy UNRESOLVED). |
+| Device / live backend / billing / public | **Not accepted** |
+| Next approval | **A1** isolated Firestore Rules only — not executed. See below. |
+| Pending owner decisions | Storage GiB (1/5/20 vs 256 MiB/1/5 GiB); public deletion window (15 implemented / 180 requested / UNRESOLVED). |
+| versionCode | **23 UNRESERVED**. Play explorer 2026-10-06: highest uploaded **vc22**. |
 | Merge-base / `origin/main` | `0da2f58970f23c7ce6cbefae6efffd49c731f44b` |
-| `git diff` application pin | Helper `PINNED_APP_SHA` = `520f9f9`. `git diff --stat 520f9f9 HEAD -- functions src eas.json app.json app firebase.json` **empty**. Do not env-override. A3 still HOLD. |
-| version | **1.0.0** / versionCode **23 unreserved** |
-| firebase-tools | **14.20.0** |
-| gcloud | **ABSENT** on this workstation (required on apply host for enable/disable) |
-| eas CLI | **present** on combined earlier as `eas-cli/24.10.0`; Team 3 used `npx eas-cli@16.28.0`. No `internal-grin` or `5d5df3d` Android builds; highest EAS versionCode **22**. Play App bundle explorer **RUN** 2026-10-06 (read-only): 9 versions; highest uploaded **vc22 Active**; searches 23/21/18 empty; Internal testing **Active Vc22**. versionCode **23 UNRESERVED**. |
-| gh | not authenticated (git push of #31 still succeeded) |
 
-Do not reopen ops-guard A/B without a new concrete reproduction.
+Do not cherry-pick `0cd3473` / `520f9f9` again. Do not force-push divergent
+team branches. Do not reopen ops-guard A/B without a new reproduction.
 
 ---
 
@@ -47,12 +47,12 @@ Do not reopen ops-guard A/B without a new concrete reproduction.
 
 | Gate | State |
 |---|---|
-| SOURCE READY | S1/S2 source at `520f9f9`. Team 5 **S1 PASS / S2 PASS** at INJECTED + named G2 EMULATOR (`1e33894`). Team 1 SOURCE PASS (`80b802f`). Helper `PINNED_APP_SHA=520f9f9` applied; ops-guard 34/34 re-run. P3 accepted. **P8 FAIL**. Canonical GHA for this SHA **NOT YET**. Do not cite `37379529193`. Do not advertise GiB. |
-| BACKEND PILOT READY | Prepared; **not authorized**; GRIN seven **ABSENT** on live. Create-absent-only planner exists, **not wired**. Enable/disable still UNPROVEN on firebase-created gen2. |
-| INTERNAL BUILD READY | Packet prepared (`APPROVAL_B_DRAFT.md`); **not authorized**; freeze SHA **placeholder** (post-S1/S2). Play inventory **RUN** 2026-10-06; versionCode 23 not reserved; no `internal-grin` / `5d5df3d` EAS AAB; B1≠B2 |
-| DEVICE ACCEPTED | Execution sheet ready; **NOT RUN** |
-| BILLING ACCEPTED | Source fail-closed + **undeployed** tester UID allowlist; live `PLAY_BILLING_ENABLED` absent; catalog **NOT RUN**; purchases **off**. Deletion: 15 implemented / 180 requested / public UNRESOLVED. |
-| PUBLIC SUBMISSION READY | Blocked on owner GiB confirm, public deletion policy, device, billing, listing/disclosure. Local `ci:verify` is not Play/device acceptance. |
+| SOURCE READY | Application `520f9f9` + tooling `0d7aa17`. Canonical GHA **`37425360211` success**. S1/S2 closed at INJECTED+EMULATOR. P3 accepted. **P8 FAIL**. Do not advertise GiB. |
+| BACKEND PILOT READY | **A1 offerable, not authorized.** GRIN seven **ABSENT**. A2–A7 HOLD. |
+| INTERNAL BUILD READY | Freeze SHA **`520f9f9`** + CI **`37425360211`**. B1≠B2, **neither granted**. vc23 unreserved. |
+| DEVICE ACCEPTED | **NOT RUN** (no hardware; testers unnamed) |
+| BILLING ACCEPTED | Fail-closed; catalog **NOT RUN**; purchases **off** |
+| PUBLIC SUBMISSION READY | Blocked on owner GiB, public deletion policy, device, billing, listing |
 | PUBLIC ROLLOUT APPROVED | Not authorized |
 
 ---
@@ -113,17 +113,40 @@ stays false. Real customer GRIN evidence remains blocked until then.
 
 ---
 
-## Next concrete approval
+## Next concrete approval — A1 (not executed)
 
-Offer **Approval A1 independently**: isolated **Firestore Rules** only
-(`firebase.rules-only.json --only firestore:rules --project vyaamikk-diary`).
-Does not depend on Functions helper execution. Not Storage, not Functions,
-not enablement, not EAS, not billing.
+**A1 changes Firestore access rules only. It does not deploy Functions,
+change Storage Rules/IAM, seed testers, enable GRIN, build the app,
+enable payments, or submit to Play.**
+
+Exact later command (firebase-tools **14.20.0**, cwd repo root):
+
+```bash
+firebase deploy --project vyaamikk-diary --non-interactive \
+  --config docs/release/rules-compat/proposed-grin/firebase.rules-only.json \
+  --only firestore:rules
+```
+
+Hashes re-checked on combined `0d7aa17` this session (`shasum -a 256`):
+
+| Artifact | sha256 |
+|---|---|
+| Isolated config `firebase.rules-only.json` | `d224b75385b451433e5c59bdbf0cc147697fbe88e773c11dab44f3b71e3e8a74` |
+| Proposed merged Firestore | `551203b8b11991fc1d49d42aa6a818fedeca8530654f7505de949b62a1ae298b` |
+| Live baseline / rollback Firestore | `b13d52559efd144bfbdd86daf426fd5ce81abceead4c87979cb9cee2d1a25e2c` |
+| **Forbidden** repo-root `firestore.rules` | `233b05b7b810b484171257f4dafe78fd0fdea5762ed6848cf8b49cd327fd58cc` |
+
+Live inspect 2026-10-06: Firestore sha256 **= baseline**. If a future inspect
+differs, **abort** — do not apply this merged file. Rollback bytes:
+`docs/release/rules-compat/live-export-2026-10-06/`. After a later grant,
+post-deploy live Firestore sha256 must equal **`551203b8…`**; Storage
+`1a912051…` unchanged; GRIN seven still ABSENT.
+
+Do **not** execute A1 without explicit owner approval. A2–A7 are **not**
+implied.
 
 Full packets: `APPROVAL_A_BACKEND_PILOT.md`, `APPROVAL_B_INTERNAL_BUILD.md`,
 `APPROVAL_C_RESTRICTED_BILLING.md`, `APPROVAL_D_PUBLIC_SUBMISSION.md`.
-
-Approval of one packet does not imply the others.
 
 HOLD until written: main merge, live Functions/Rules/IAM/env writes, tester
 admission, GRIN activation, EAS/native/OTA, Play upload/track/product,
