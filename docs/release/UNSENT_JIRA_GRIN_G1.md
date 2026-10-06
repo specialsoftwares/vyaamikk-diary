@@ -248,3 +248,7 @@ Cherry-pick of `2cebe32` (`team/grin-t2-capacity`) onto combined as `56f2040e301
 
 `docs/release/proposals/team5/REVIEW_56f2040.md` (team `7865384` on `team/grin-t5-qa`). SOURCE+INJECTED **PASS** at application `56f2040` (holds-capacity fail-closed; inactive cleanup flag false). S1/S2 not reopened. **P3 ACCEPTED**. **P8 FAIL**. Emulator/device/live/billing **NOT RUN**. Canonical GHA **`37425360211` does not cover `56f2040`**. Helper pin still `520f9f9` STALE. Freeze remains `520f9f9`. Dirty leftover POLICY_QA files **not folded**. Do not mark GRIN / device / billing / public-release Done.
 
+## Team 3 Internal freeze-prepare 56f2040 (unsent, 2026-10-06)
+
+`docs/release/proposals/team3/APPROVAL_B_DRAFT.md` + device scripts (team `ddd1598` on `team/grin-t3-candidate-1310`). Freeze-prepare **`56f2040`**. **`520f9f9` retired for new builds.** Will retarget when T2 1/3/10+45d lands. B1 ≠ B2; **neither granted**. OnePlus 12R / Android 16 / vc22 / today filled (upgrade). Clean-install **unnamed**. UIDs not in git. `adb` empty → **NOT RUN**. No EAS/Play write. Do not mark device / Internal Testing Done.
+
