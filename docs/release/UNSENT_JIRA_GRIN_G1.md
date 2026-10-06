@@ -256,3 +256,15 @@ Cherry-pick of `2cebe32` (`team/grin-t2-capacity`) onto combined as `56f2040e301
 
 Cherry-pick of `ad72d79` (`team/grin-t2-owner-choice-1310`) onto combined as `313025f902b0a3416815da7ce75a3a7d6bec9559`. Live caps **1/3/10 GiB**. Grace **45 days**. Historical 1/5/20 and 256 MiB/1/5 named, not live. **Do not advertise.** `INCLUDE_GRIN_IN_ACCOUNT_PURGE=false`. **P3 PASS**. **P8 FAIL**. Helper pin still `520f9f9` — **STALE vs `313025f`**. Canonical CI **NOT RUN**. Do not build `520f9f9`. Do not mark GRIN / device / billing / public-release Done.
 
+## Team 5 review 313025f (unsent, 2026-10-06)
+
+`docs/release/proposals/team5/REVIEW_313025f.md` (team `123e42f`). SOURCE+INJECTED **PASS** at `313025f` (1/3/10 live; 45-day both clocks; flag false). **P3 ACCEPTED**. **P8 FAIL**. S1/S2 not reopened. Pin STALE. Device/live **NOT RUN**. Do not mark GRIN / device / billing Done.
+
+## Team 1 pin proposal 313025f (unsent, 2026-10-06)
+
+`PIN_UPDATE_AFTER_313025f.diff.md` + `CONSOLIDATED_PILOT_PACKET.md` (team `b7eb5ce`). Helper **not rewritten**. A1 **not executed**. A3 HOLD until pin+CI. Do not mark backend Done.
+
+## Team 3 candidate 313025f (unsent, 2026-10-06)
+
+`APPROVAL_B_DRAFT.md` (team `21fac5b`). Internal candidate **`313025f`**. Do not build `520f9f9` or `56f2040`. B1≠B2 ungranted. Canonical CI **NOT RUN**. Do not mark device Done.
+
