@@ -27,6 +27,9 @@ QA artefacts. Not production implementations. Not G6 completion.
 | `POLICY_QA.md` | 2026-10-06 owner-policy vs `5d5df3d` source; 15 vs 180 vs unresolved; artwork hashes; Team 2 not reviewed |
 | `public-deletion-retention.regression.test.mjs` | Expected-FAIL SOURCE regression: GRIN not in purge; 180 not implemented |
 | `issuance-monthly-allowance.regression.test.mjs` | Expected-FAIL SOURCE regression: register does not consume monthly allowance |
+| `POLICY_QA_T2.md` | Independent T2 review at `b845e8a`; **P3 PASS** on production register INJECTED; **P8 FAIL** |
+| `S1_S2_PRE_FIX.md` | Independent INJECTED G2 adapter reproduction of S1/S2 at `b845e8a`; **WAITING_FOR_FIX**; P3 unchanged ACCEPTED |
+| `s1-s2-pre-fix.injected.ts` | Pre-fix harness: exit 0 means defects reproduced, not a product pass |
 | `wave2evidence-e1-e5-repro.ts` | SQLITE_HOST / INJECTED / host-filesystem drivers for E1–E5 |
 | `wave2evidence-e1-e5-rereview.ts` | PHASE 2 persistGrinOwnerSession inspection + unset-host failure |
 | `wave2evidence-e4-hasher-followup.ts` | PHASE 3 persist hasher / conversion persist / SHA-256 inspection |

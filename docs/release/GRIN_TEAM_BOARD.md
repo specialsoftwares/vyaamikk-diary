@@ -5,16 +5,16 @@ Do not collapse to Done.
 
 Arrangement: one coordinator plus five **local** Cursor Task subagents on separate worktrees. AI roles, not human sign-off.
 
-Checkpoint: PR #31 head `41b05a4` / application `b845e8a` / GHA `37379529193`. Tooling `228a8f5`. Historical workspace **untouched**. Wave 2 / G6 / public release **not accepted**. Open **S1** / **S2**.
+Checkpoint: PR #31 docs head advancing on application `b845e8a` / GHA `37379529193` (that CI is for `41b05a4` only). Tooling `228a8f5`. Historical workspace **untouched**. Wave 2 / G6 / public release **not accepted**. Open **S1** / **S2** (independently reproduced; **WAITING_FOR_FIX**).
 
 | Task | Owner | Branch | Worktree | Dependency | Status | Evidence | Blocker | Next |
 |---|---|---|---|---|---|---|---|---|
-| Integration | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | `41b05a4` | running | GHA `37379529193` success; app `b845e8a`; P3 PASS; P8 FAIL; S1/S2 open | live mutate / EAS / Play / billing HOLD | Fold S1/S2; owner GiB; A1 |
+| Integration | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | `41b05a4` + docs | running | GHA `37379529193` on `41b05a4`; app `b845e8a`; P3 PASS; P8 FAIL; S1/S2 reproduced INJECTED | live mutate / EAS / Play / billing HOLD | Fold S1/S2 fix; owner GiB; A1 |
 | Backend pilot | team1 | `team/grin-t1-backend` | `grin-t1-backend` | ops-guard `228a8f5` | review | `A1_PACKET_REFRESH.md` `3efd762`. A1 independently offerable. Pin `5d5df3d` STALE; A3 after S1/S2. | `GRIN_OPS_ALLOW_LIVE=1` HOLD | Owner A1 grant; `REVIEW_AFTER_S1_S2` |
 | Policy / deletion | team2 | `team/grin-t2-evidence` | `grin-t2-evidence` | `41b05a4` | running | P3 preserved. S1/S2 storage accounting. Economics revision. | advertising GiB; live purge | Close S1/S2; improved economics |
-| Build / device | team3 | `team/grin-t3-offline` | `grin-t3-offline` | Play inventory NOT RUN | running | Device sheet NOT RUN; vc23 unreserved | EAS/Play B1/B2 HOLD | Reproducible Internal AAB packet; no unauthorized build |
+| Build / device | team3 | `team/grin-t3-offline` | `grin-t3-offline` | Play inventory RUN 2026-10-06 | review | `APPROVAL_B_DRAFT.md` `7bdf375`. vc23 unreserved. Freeze SHA placeholder post-S1/S2. No phone results. | EAS/Play B1/B2 HOLD | Owner B1 only after post-S1/S2 SHA+CI; no unauthorized build |
 | Billing / Play | team4 | `team/grin-t4-product` | `grin-t4-product` | purchase-entry `"0"` | review | `DELETION_15_VS_180_OWNER_SHEET.md` `ec4a03d`. Catalog NOT RUN. | activation HOLD; public deletion UNRESOLVED | Owner fills A/B/C/D; no website publish |
-| Independent QA | team5 | `team/grin-t5-qa` | `grin-t5-qa` | pre-fix `41b05a4` | running | P3 PASS; P8 FAIL; reproduce S1/S2 then review fix | NATIVE_DEVICE | S1/S2 separate from P8 |
+| Independent QA | team5 | `team/grin-t5-qa` | `grin-t5-qa` | pre-fix `b845e8a` | review | `S1_S2_PRE_FIX.md` `4c1e8a7`. S1/S2 FAIL reproduced INJECTED; P3 ACCEPTED; P8 FAIL | NATIVE_DEVICE; WAITING_FOR_FIX | Post-fix adapter+emulator review; S1/S2 separate from P8 |
 | E1 evidence composition | team1 | `team/grin-t1-backend` | `grin-t1-backend` | `15bd2a6` | source_verified | persistGrinOwnerSession → processAttachments → real httpsCallable on isolated Functions emulator | live export HOLD | Stay unexported / undeployed |
 | E1/E2/E4/E5 evidence integrity | team2 | `team/grin-t2-evidence` | `grin-t2-evidence` | `29c6d3f` | source_verified | G2 unit + STORAGE_EMULATOR 8091/9200 | live IAM | Stay undeployed |
 | E2/E3 admission + descriptors | team3 | `team/grin-t3-offline` | `grin-t3-offline` | `0d0dd84` | source_verified | SQLITE_HOST outbox + capture columns | native death not claimed | Stay undeployed |

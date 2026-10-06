@@ -35,7 +35,7 @@ TOOLING (ops-guard suite; not application CI).
 | version | **1.0.0** / versionCode **23 unreserved** |
 | firebase-tools | **14.20.0** |
 | gcloud | **ABSENT** on this workstation (required on apply host for enable/disable) |
-| eas CLI | **present** on combined earlier as `eas-cli/24.10.0`; Team 3 this session used `npx eas-cli@16.28.0`. No `internal-grin` or `5d5df3d` Android builds; highest EAS versionCode **22**. Play inventory **NOT RUN** (Console ToS / aeadmin lockout) |
+| eas CLI | **present** on combined earlier as `eas-cli/24.10.0`; Team 3 used `npx eas-cli@16.28.0`. No `internal-grin` or `5d5df3d` Android builds; highest EAS versionCode **22**. Play App bundle explorer **RUN** 2026-10-06 (read-only): 9 versions; highest uploaded **vc22 Active**; searches 23/21/18 empty; Internal testing **Active Vc22**. versionCode **23 UNRESERVED**. |
 | gh | not authenticated (git push of #31 still succeeded) |
 
 Do not reopen ops-guard A/B without a new concrete reproduction.
@@ -46,11 +46,11 @@ Do not reopen ops-guard A/B without a new concrete reproduction.
 
 | Gate | State |
 |---|---|
-| SOURCE READY | GitHub Actions `37379529193` / job `111997702708` **success** on `41b05a4`. P3 accepted. **P8 FAIL**. Open storage defects **S1** (corrupt accounting can bypass cap) and **S2** (hold key omits ledgerId). Do not advertise GiB. |
+| SOURCE READY | GitHub Actions `37379529193` / job `111997702708` **success** on `41b05a4`. P3 accepted. **P8 FAIL**. **S1 FAIL** and **S2 FAIL** independently reproduced (INJECTED real G2 adapter at `b845e8a`; Team 5 `4c1e8a7`). Application still pre-fix. Do not advertise GiB. |
 | BACKEND PILOT READY | Prepared; **not authorized**; GRIN seven **ABSENT** on live. Create-absent-only planner exists, **not wired**. Enable/disable still UNPROVEN on firebase-created gen2. |
-| INTERNAL BUILD READY | Prepared; **not authorized**; Play inventory **NOT RUN**; versionCode 23 not reserved; no `internal-grin` / `5d5df3d` EAS AAB; B1≠B2 |
+| INTERNAL BUILD READY | Packet prepared (`APPROVAL_B_DRAFT.md`); **not authorized**; freeze SHA **placeholder** (post-S1/S2). Play inventory **RUN** 2026-10-06; versionCode 23 not reserved; no `internal-grin` / `5d5df3d` EAS AAB; B1≠B2 |
 | DEVICE ACCEPTED | Execution sheet ready; **NOT RUN** |
-| BILLING ACCEPTED | Source fail-closed + **undeployed** tester UID allowlist; live `PLAY_BILLING_ENABLED` absent; catalog **NOT RUN**; purchases **off**. Team 4: keep 15-day deletion; do not ship 180-day pending as Play deletion. |
+| BILLING ACCEPTED | Source fail-closed + **undeployed** tester UID allowlist; live `PLAY_BILLING_ENABLED` absent; catalog **NOT RUN**; purchases **off**. Deletion: 15 implemented / 180 requested / public UNRESOLVED. |
 | PUBLIC SUBMISSION READY | Blocked on owner GiB confirm, public deletion policy, device, billing, listing/disclosure. Local `ci:verify` is not Play/device acceptance. |
 | PUBLIC ROLLOUT APPROVED | Not authorized |
 
@@ -86,9 +86,9 @@ purchase-entry remains `"0"`. Play Console catalog **NOT RUN**.
 |---|---|---|
 | 1 Backend | A1 packet refreshed (`A1_PACKET_REFRESH.md`). Isolated Firestore Rules still independently offerable. Functions pin `5d5df3d` **STALE**; A3 waits for post-S1/S2 pin. Ops-guard `228a8f5` 34/34. | Live Functions/Rules/IAM/admission/enable |
 | 2 Policy | Issuance+storage+expiry+export folded (`14e56f3`). Economics: do not advertise 1/5/20; alternative **256 MiB / 1 GiB / 5 GiB**. `INCLUDE_GRIN_IN_ACCOUNT_PURGE=false`. 15-day grace unchanged. | Owner GiB confirm; 180-day public policy; no live purge |
-| 3 Build/device | Play inventory **NOT RUN** (ToS / aeadmin lockout). EAS: no `internal-grin` / no `5d5df3d`; highest vc22. Device sheet **NOT RUN**. B1≠B2, neither granted. | EAS/native build; Play upload (separate); Play Console re-read |
+| 3 Build/device | Play App bundle explorer **RUN** 2026-10-06 (highest uploaded vc22; 23 unused, **unreserved**). Internal AAB freeze **placeholder** until post-S1/S2 SHA+CI. Device sheet **NOT RUN** (no hardware; identities blank). B1≠B2, neither granted. | EAS/native build; Play upload (separate); Play Console re-read before B1 |
 | 4 Billing/Play | Owner sheet `DELETION_15_VS_180_OWNER_SHEET.md` (15 implemented / 180 requested / public UNRESOLVED). Catalog **NOT RUN**. Allowlist SOURCE, not live. | Product/price/activation/submission; owner A/B/C/D |
-| 5 QA | Independent T2 review `POLICY_QA_T2.md` (`365f9f3`). **P3 PASS** (production register INJECTED). **P8 FAIL** unchanged. No new blockers. Device/Play/live **NOT RUN**. | Does not own implementation |
+| 5 QA | Pre-fix S1/S2 INJECTED adapter reproduction (`S1_S2_PRE_FIX.md`, team `4c1e8a7`). **S1 FAIL** (charged 1100 vs cap 1000). **S2 FAIL** (two ledgers, one hold, charged 200 not 450). **P3 ACCEPTED**. **P8 FAIL**. **WAITING_FOR_FIX**. Device/Play/live **NOT RUN**. | Does not own implementation; post-fix review after Team 2 lands |
 
 ---
 

@@ -10,9 +10,10 @@ convert host/emulator/CI greens into PASS.
 
 Contract: `2026-10-02.wave2evidence`.
 Intended binary (after Approval B): Play Internal AAB `internal-grin` at
-application `5d5df3d54df08953bfb26db39a9b7f5e3d67ed47` (or later coordinator-
-assigned SHA after Team 2 source lands) **or** labelled sideload APK.
-Label the artifact: `PLAY_INSTALLED` vs `NATIVE_DEVICE`.
+the **post-S1/S2 freeze SHA** (placeholder; **not** `b845e8a` / `41b05a4`)
+**or** labelled sideload APK. Current checkpoint application `b845e8a` /
+PR head `41b05a4` / GHA `37379529193` is **pre-S1/S2**. Label the artifact:
+`PLAY_INSTALLED` vs `NATIVE_DEVICE`.
 
 Sideload APK and Play Internal AAB remain distinct. Historical EAS AAB
 `72cb7254-0be9-4f92-a514-dbfab2b1150d` (vc22, profile `production`, git
@@ -21,10 +22,12 @@ Sideload APK and Play Internal AAB remain distinct. Historical EAS AAB
 Pre-record: device ID, Android version, RAM, versionCode, AAB/APK sha256,
 auth method, backend (`LIVE_BACKEND` seeded vs `backend_absent`).
 
-Upgrade device = current Internal **vc22** (Play-track identity is **NOT RUN**
-this session; last Console read 2026-10-01 is **STALE**). Clean device = D2.
+Upgrade device = current Internal **vc22** (Play Console 2026-10-06:
+Internal **Active**, latest **Vyaamikk Diary (Vc22)**; re-read before B1).
+Clean device = D2.
 
-`versionCode` 23 is **UNRESERVED**. Never assume it remains available.
+`versionCode` 23 is **UNRESERVED** (Play explorer 2026-10-06: 23 absent;
+still not reserved). Never assume it remains available.
 
 ---
 
@@ -41,6 +44,11 @@ passwords are **blank until the owner fills them**. Do not invent.
 
 Admission docs (`users/{uid}/goodsEvidenceAdmission/runtime`) are Approval A,
 not this sheet. Play licence-tester emails are **not** Firestore admission.
+
+Required hardware: D1 (Play Internal vc22 upgrade) + D2 (clean Android 12+)
++ TalkBack-capable device (may be D1/D2). Identities and device IDs are
+**gaps** until the owner fills them. Evidence for each row:
+`docs/release/proposals/team3/DEVICE_HANDOFF.md` (no hardware = NOT RUN).
 
 ---
 

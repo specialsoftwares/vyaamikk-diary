@@ -192,3 +192,11 @@ Packet `docs/release/proposals/team1/A1_PACKET_REFRESH.md` (team `3efd762`). Iso
 
 `docs/release/proposals/team4/DELETION_15_VS_180_OWNER_SHEET.md` (team `ec4a03d`). Three facts: implemented **15 days**; owner requested **180 days**; public-approved policy **UNRESOLVED**. Play-risk framing: do not ship 180-day pending as deletion; do not treat 15 as the recorded owner choice; do not substitute 30. Catalog **NOT RUN**. P8 remains open. No website publish. Do not mark billing / public-release Done.
 
+## Team 5 S1/S2 pre-fix reproduction (unsent, 2026-10-06)
+
+`docs/release/proposals/team5/S1_S2_PRE_FIX.md` (team `4c1e8a7`). Application blobs still `b845e8a`. Real G2 `reserve` against injected persistence: **S1 FAIL** — four malformed/inconsistent `retainedOriginalBytes` cases admitted over cap (charged **1100**, writes +4). **S2 FAIL** — same owner, two owned ledgers, same `evidenceId`: two evidence docs, one hold `original:ev_s2_shared`, charged **200 not 450**. Helper admit is not sole proof. Existing `storageQuota.injected.unit.test.ts` exit 0 does not cover S1/S2. **P3 ACCEPTED** (unchanged). **P8 FAIL** (unchanged). EMULATOR / device / live / billing / public **NOT RUN**. **WAITING_FOR_FIX.** Do not mark GRIN / device / billing / public-release Done.
+
+## Team 3 Internal AAB packet (unsent, 2026-10-06)
+
+`docs/release/proposals/team3/APPROVAL_B_DRAFT.md` + `DEVICE_HANDOFF.md` (team `7bdf375`). Play App bundle explorer **RUN** 2026-10-06 (read-only): highest uploaded **vc22**; 23/21/18 absent; Internal **Active Vc22**. versionCode **23 UNRESERVED**. Freeze SHA is a **placeholder** until post-S1/S2 application SHA + matching CI (do not freeze `b845e8a` / `41b05a4`; do not reuse CI `37379529193` for a later SHA). Identities blank. `adb devices` empty. No EAS/native/Play write. B1≠B2, neither granted. Do not mark device / Internal Testing Done.
+
