@@ -10,7 +10,7 @@ Checkpoint: PR **#31**. CI-tested head `0d7aa17` / app `520f9f9` / GHA **`374253
 | Task | Owner | Branch | Worktree | Dependency | Status | Evidence | Blocker | Next |
 |---|---|---|---|---|---|---|---|---|
 | Integration | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | `56f2040` | running | A1 presented; T2 `56f2040`; T4 two writes folded | live mutate / EAS / Play / billing HOLD | Owner A1 grant; owner GiB + deletion; T5 review `56f2040`; B1 not granted |
-| Backend pilot | team1 | `team/grin-t1-a1-present` | `grin-t1-backend` | A1 hashes | review | `A1_PRESENT.md` `80da828`. Rules only. A2–A7 remaining. Not executed. | `GRIN_OPS_ALLOW_LIVE=1` HOLD | Owner A1 grant; remaining backend packets |
+| Backend pilot | team1 | `team/grin-t1-pin-after-56f2040` | `grin-t1-backend` | A1 hashes | review | Pin proposed `841f9c4`, unapplied. A1 `80da828` unchanged. A2–A7 gaps named. | `GRIN_OPS_ALLOW_LIVE=1` HOLD | Owner A1 grant; do not apply pin; A4 UIDs |
 | Policy / deletion | team2 | `team/grin-t2-capacity` | `grin-t2-evidence` | `2cebe32` | review | Holds bound + cleanup tests; flag false; P8 FAIL | advertising GiB; live purge | Do not reopen S1/S2; do not flip P8 |
 | Build / device | team3 | `team/grin-t3-freeze` | `grin-t3-offline` | freeze `520f9f9` + CI `37425360211` | review | `CURRENT_HEAD_VS_FREEZE.md` `d4a8197`. `56f2040` not the freeze. B1≠B2 ungranted. | EAS/Play B1/B2 HOLD | Do not B1 `56f2040`; re-read Play explorer before B1 |
 | Billing / Play | team4 | `team/grin-t4-product` | `grin-t4-product` | purchase-entry `"0"` | review | `TWO_OWNER_DECISIONS.md` `7e4ed20`. Catalog NOT RUN. | activation HOLD | Owner fills GiB + A–D; no website/Save/submit |
