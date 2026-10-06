@@ -2,6 +2,8 @@
  * Restricted-pilot smoke — INJECTED (synthetic).
  * Label: INJECTED. Not EMULATOR. Not LIVE_BACKEND. Not a live deploy.
  * Synthetic owner/other/denied ids only. Do not invent production UIDs.
+ * OTHER is INJECTED-only. Live cross_owner_denial requires a second
+ * authenticated account (T1/T2 unnamed — LIVE HOLD).
  */
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -208,7 +210,7 @@ async function main(): Promise<void> {
   assert.equal(blobs.objects.has(String(reserved.storagePath)), true, "original remains in blob store; pack does not bundle bytes");
 
   process.stdout.write(
-    `grin-pilot-smoke.injected PASS scenarios=authenticated_success,unauthenticated_denial,non_admitted_denial,cross_owner_denial,register_replay,upload_verification,confirmation,read_export label=${LABEL}\n`,
+    `grin-pilot-smoke.injected PASS scenarios=authenticated_success,unauthenticated_denial,non_admitted_denial,cross_owner_denial,register_replay,upload_verification,confirmation,read_export label=${LABEL} live=false e_live_executable=false cross_owner_live_requires_second_account=true\n`,
   );
 }
 

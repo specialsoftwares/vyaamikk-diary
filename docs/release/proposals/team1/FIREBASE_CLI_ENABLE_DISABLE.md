@@ -1,5 +1,9 @@
 # Firebase CLI 14.20.0 — supported GRIN enable/disable method (SOURCE)
 
+The reviewed E procedure is `E_ENABLE_DISABLE.md`. This note remains SOURCE
+for installed firebase-tools **14.20.0** `inferDetailsFromExisting` only.
+It does **not** make E live-executable.
+
 Not live proof. `applyGcloudGateUpdate` remains a pure helper. This note is
 from the **installed** CLI at
 `$(dirname $(which firebase))/../lib/node_modules/firebase-tools`

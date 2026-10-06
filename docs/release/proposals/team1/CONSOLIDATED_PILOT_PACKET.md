@@ -3,9 +3,18 @@
 **Not authorization.** This file does not set `GRIN_OPS_ALLOW_LIVE`. Do not
 deploy from this session. Combined is coordinator-owned. Do not rewrite
 `docs/release/packets/grin-ops/grin-functions-op.mjs`. Do not force-push
-`origin/team/grin-t1-backend`. Do not invent tester UIDs. Keep identifiers
-out of git. Do not deploy, set `GRIN_OPS_ALLOW_LIVE=1`, run EAS, Play, or
-billing activation from this packet.
+`origin/team/grin-t1-backend` or `origin/team/grin-t1-executable-batch`.
+Do not invent tester UIDs. Keep identifiers out of git. Do not deploy, set
+`GRIN_OPS_ALLOW_LIVE=1`, run EAS, Play, billing activation, or
+`INCLUDE_GRIN_IN_ACCOUNT_PURGE` flip from this packet.
+
+This is a **billing-off** Internal GRIN restricted pilot. Restricted Play
+billing is **not** a prerequisite. Do **not** call it payment-tested or
+public-ready. P8 remains **FAIL** (`INCLUDE_GRIN_IN_ACCOUNT_PURGE=false`).
+
+**E procedure (this provenance):** `E_ENABLE_DISABLE.md`. SOURCE/STUB
+supported; **LIVE HOLD**. E is **not** live-executable. C–F missing inputs
+stay HOLD.
 
 A changes Firestore access rules only. B changes Storage rules only. Owner
 **A and B MAY be approved in ONE owner response as TWO explicitly scoped
@@ -28,10 +37,10 @@ that must not run until their stated blocker clears.
 |---|---|---|---|
 | **A** Firestore Rules | Isolated `--only firestore:rules` | **YES** (after owner letter + inspect still = live baseline) | Hashes, command, verification, rollback, stop conditions complete. firebase-tools **14.20.0**. |
 | **B** Storage Rules | Isolated `--only storage` | **YES** (after owner letter + inspect still = live baseline) | Same isolated JSON, **separate** command and verification. May be lettered in the same owner response as A; must still run as its own command. |
-| **C** Functions gate-off-initial | Seven named create, gate key **absent** | **HOLD** | Helper `PINNED_APP_SHA` is still `520f9f9` (**STALE**). Do **not** apply the pin. HOLD until the coordinator pins the **FINAL** candidate **after billing-lifecycle correction + matching CI**. Name `fcda7cd` as the GRIN Functions tree unless combined application paths move. |
-| **D** Tester admission | Admin/Firestore document write | **YES** for UID grammar / validate-uids; **HOLD** for writes | Mechanism is **not** a SOURCE allowlist. Writes wait on owner UIDs supplied **privately out-of-repo**. `PLAY_BILLING_TESTER_UIDS` is a **separate** Functions env/secret and is **not** authorized to be set now. |
-| **E** Gate enable / disable | gcloud `--update-env-vars` without `--source` | **HOLD — UNPROVEN** | firebase-tools **14.20.0** dotenv **REPLACE** is proven **blocked**. Helper enable/disable **intends** omitted-`--source` gcloud **only if** inspect `sourceOrigin` is `gcs` or `repo`. That preservation is **UNPROVEN** (`gcloud` **ABSENT**). Do not claim proven. |
-| **F** Synthetic smoke | INJECTED harness; LIVE_BACKEND | **INJECTED YES**; **LIVE HOLD** | Case list complete. `LIVE_BACKEND` stays refused until **E is proven AND** the owner letters live smoke. Synthetic data only. |
+| **C** Functions gate-off-initial | Seven named create, gate key **absent** | **HOLD** | Application **`540e07a`**. Coordinator applied combined helper pin. Canonical CI **`37445383607` SUCCESS**. T5 PASS. Seven **ABSENT** live. Owner letter still required. This worktree is **not** the apply host. |
+| **D** Tester admission | Admin/Firestore document write | **YES** for UID grammar / validate-uids (`count=1`); **HOLD** for writes | Owner UID already on a private out-of-repo file. **Reuse; do not ask again.** Supply is not authorization. Initial admission = that **one** UID only. `PLAY_BILLING_TESTER_UIDS` stays empty/fail-closed and is **not** GRIN admission. |
+| **E** Gate enable / disable | gcloud `--update-env-vars` without `--source`; disable uses **`false`** not remove | **SOURCE/STUB supported procedure; LIVE HOLD — not live-executable** | Reviewed in `E_ENABLE_DISABLE.md`. Official gcloud omitted-`--source` docs are **SOURCE**. They do **not** make LIVE firebase-created gen2 preservation proven. `gcloud` **ABSENT** = LIVE HOLD. Seven **ABSENT** = E cannot run until after C. |
+| **F** Synthetic smoke | INJECTED harness; LIVE_BACKEND | **INJECTED YES**; **LIVE HOLD** | Harness finished in-process. `LIVE_BACKEND` stays refused. Live `cross_owner_denial` requires a **second authenticated account** (T1/T2 unnamed). |
 
 IAM / runtime identity is **not** a row in this batch. Inspected residual:
 `982505811909-compute@developer.gserviceaccount.com` already has
@@ -44,29 +53,34 @@ IAM / runtime identity is **not** a row in this batch. Inspected residual:
 | Item | Value |
 |---|---|
 | Team 1 worktree | `/Users/shivamsaurav/vyd-worktrees/grin-t1-backend` |
-| Provenance branch | `team/grin-t1-executable-batch` |
-| Combined (read-only) | `/Users/shivamsaurav/vyd-worktrees/grin-combined` HEAD `70bdfe4b2ea2a7cf6a9fe5f1cf7bf08ff6ebc4e9` (docs) |
-| **GRIN Functions tree** | `fcda7cd64e9622e50c38223a7156f0f6b8ca5576` unless combined `functions` / `src` / `eas.json` / `app.json` / `app` / `firebase.json` move. Billing-lifecycle correction may land **after** this packet; pin/candidate SHA is **coordinator-owned**. |
-| Combined vs `fcda7cd` on those paths | **empty** (application blobs = `fcda7cd`) |
-| This worktree vs `fcda7cd` on those paths | **non-empty** — **not** a C apply host |
-| Combined helper `PINNED_APP_SHA` | `520f9f98bc952fd7f30a907da9e85774629a69c0` — **STALE**. **Do not apply a pin from Team 1.** |
-| This worktree helper | still `5d5df3d54df08953bfb26db39a9b7f5e3d67ed47` — **not rewritten** |
+| Provenance branch | `team/grin-t1-e-procedure` (from `a28bfb0` `team/grin-t1-executable-batch`) |
+| Combined (read-only) | `/Users/shivamsaurav/vyd-worktrees/grin-combined` HEAD `9b3d5e009f26d9dda93f0ec640bccd01ac504468` |
+| **Application checkpoint** | `540e07aa07f376716484adb879ce66cb9fb170ce` |
+| CI-tested checkout | `7e0d629023198333ed384ae076285925e98047d6` (parent `d4c7ed4cb49d1bb5547fe3738702016bd1bcc36f`) |
+| `540e07a`..`7e0d629` on `DEPLOYMENT_PATHS` | **empty** |
+| Combined helper `PINNED_APP_SHA` | **`540e07a`** (coordinator-applied; Team 1 does **not** rewrite the helper) |
+| This worktree helper | still `5d5df3d54df08953bfb26db39a9b7f5e3d67ed47` — **not rewritten**. Enable/disable argv matches combined. |
+| This worktree vs `540e07a` on `DEPLOYMENT_PATHS` | **non-empty** — **not** a C apply host |
 | Historical ops-guard 34/34 | `228a8f58ac83d3c71e853cdccb6e4c4fa64c251f` |
-| Canonical CI | GHA **`37440328976` IN_PROGRESS** on checkout **`70bdfe4`** (docs HEAD; application blobs = `fcda7cd`). Do **not** create trigger commits. Prior run `37425360211` covers `0d7aa17` / `520f9f9` **only**. |
-| T5 on `fcda7cd` | `docs/release/proposals/team5/REVIEW_fcda7cd.md` (combined) SOURCE+INJECTED PASS for the billing-tester slice; helper pin recorded STALE; canonical GHA was NOT RUN in that review. |
+| Canonical CI | GHA **`37445383607` SUCCESS**, job **`112208918347` `verify`**, checkout **`7e0d629`** |
+| T5 | `REVIEW_540e07a.md` `b3b1c97` SOURCE+INJECTED **PASS** |
+| P8 | **FAIL** (`INCLUDE_GRIN_IN_ACCOUNT_PURGE=false`; not flipped) |
+| Owner UID file | private, out of repo; `validate-uids` **`count=1`**. Reuse; do not ask again. |
+| `PLAY_BILLING_TESTER_UIDS` | empty / fail-closed; **not** GRIN admission |
 | `GRIN_OPS_ALLOW_LIVE` / `GRIN_OPS_PINNED_SHA` / `GRIN_OPS_EXPORT_DIR` | **unset** (this session) |
 | firebase-tools | **14.20.0** (`firebase --version`) |
-| `gcloud` | **ABSENT** on this host |
+| `gcloud` | **ABSENT** on this host → E **LIVE HOLD** |
+| GRIN seven live | **ABSENT** → E cannot run until after **C** |
 
-Do **not** pin `520f9f9`, `56f2040`, `313025f`, `b845e8a`, or combined docs
-HEAD `70bdfe4`. Combined’s
-`docs/release/proposals/team1/PIN_UPDATE_AFTER_fcda7cd.diff.md` is
-**unapplied and coordinator-owned**. Team 1 does **not** apply it: billing
-correction may supersede `fcda7cd`. C stays HOLD until the coordinator
-pins the **FINAL** candidate after that correction **and** matching CI.
+Do **not** pin `520f9f9`, `56f2040`, `313025f`, `fcda7cd`, `60c4bc1`, or
+`b845e8a` from this packet. Coordinator owns the pin apply on combined
+(`PIN_APPLIED_540e07a.md`). Team 1 does **not** rewrite
+`docs/release/packets/grin-ops/grin-functions-op.mjs`.
 
-`PIN_UPDATE_AFTER_313025f.diff.md` and `PIN_UPDATE_AFTER_56f2040.diff.md`
-on this worktree are **superseded** as apply proposals.
+`PIN_UPDATE_AFTER_313025f.diff.md`, `PIN_UPDATE_AFTER_56f2040.diff.md`, and
+`PIN_UPDATE_AFTER_fcda7cd.diff.md` are **superseded** as apply proposals.
+
+C–F missing inputs stay **HOLD**. E is **not** live-executable.
 
 ---
 
@@ -125,7 +139,12 @@ mutate.** Re-inspect until complete. Do not infer absence from a failed list.
 
 ---
 
-## Preservation proof (firebase-tools 14.20.0) — E remains UNPROVEN
+## Preservation proof (firebase-tools 14.20.0) — SOURCE/STUB vs LIVE
+
+E is a **supported SOURCE/STUB procedure** (`E_ENABLE_DISABLE.md`). E is
+**not live-executable**. Official gcloud docs may support omitted `--source`
+on existing GCS/repo functions as **SOURCE**; they do **not** make LIVE
+firebase-created gen2 preservation proven. `gcloud` **ABSENT** = LIVE HOLD.
 
 Installed CLI: `firebase --version` → **14.20.0**. SOURCE inspection of
 `$(dirname $(which firebase))/../lib/node_modules/firebase-tools`
@@ -146,11 +165,13 @@ node --test docs/release/proposals/team1/firebase-tools-14.20.0-infer-details.te
 | Re-deploy **with** any CLI dotenv **replaces** user env (remote-only keys dropped, including the gate) | YES | `usedDotenv=true` skips merge. **Firebase dotenv enable/disable is BLOCKED.** |
 | Helper `gcloud` argv omits `--source` / `--set-env-vars` / `--clear-env-vars` | YES (argv + stub tests on combined helper) | `gcloudArgsUnsafe`; `applyGcloudGateUpdate` is a **pure object transform**, not a live gcloud run |
 | Inspect origin `gcs` when v2 `storageSource.bucket` is set | YES (helper SOURCE) | `sourceFromV2Function`. **Not** proof that omitted-`--source` gcloud preserves that archive |
-| `gcloud functions deploy --gen2 --update-env-vars` **without** `--source` preserves source archive, secrets, ingress, runtime SA, and other user keys on a **firebase-created** gen2 callable | **UNPROVEN** | `gcloud` **ABSENT** here. Do not enable live GRIN to obtain that evidence. Official docs for GCS/repo origin do **not** prove firebase-CLI staging `storageSource` is treated as reusable GCS origin by this host’s (absent) gcloud |
+| Official gcloud: omitted `--source` leaves GCS/repo source; `--update-env-vars` does not clear other keys | **SOURCE only** | [gcloud functions deploy](https://cloud.google.com/sdk/gcloud/reference/functions/deploy). **Not** LIVE proof for firebase-created gen2 |
+| `gcloud functions deploy --gen2 --update-env-vars` **without** `--source` preserves source archive, secrets, ingress, runtime SA, and other user keys on a **firebase-created** gen2 callable | **LIVE UNPROVEN** | `gcloud` **ABSENT**. Do not claim LIVE proven. Do not enable live GRIN to obtain that evidence. Scratch/non-prod function created the same way remains the required LIVE evidence. |
 
-**E is refused until that last row is proven** on a scratch/non-prod
+**E LIVE is refused** until that last row is proven on a scratch/non-prod
 function created the same way as GRIN. Direct Cloud Run env edit is
-forbidden. Firebase dotenv is blocked.
+forbidden. Firebase dotenv is blocked. Seven **ABSENT** = E cannot run
+until after C.
 
 ---
 
@@ -303,14 +324,13 @@ remains whatever it was. Do not Editor-delete objects.
 
 ## C — Seven Functions, gate-off-initial
 
-**HOLD.** Selected artifact SHA for the GRIN Functions tree is
-`fcda7cd64e9622e50c38223a7156f0f6b8ca5576` **unless** combined application
-paths move. Pin/candidate SHA after billing-lifecycle correction is
-**coordinator-owned**. Helper `PINNED_APP_SHA` is still
-`520f9f98bc952fd7f30a907da9e85774629a69c0` (**STALE**). Do **not** apply
-the pin from this packet. C does not run until the coordinator pins the
-**FINAL** candidate after billing correction **and** matching CI, then a
-later owner letter.
+**HOLD.** Application checkpoint is
+`540e07aa07f376716484adb879ce66cb9fb170ce`. Coordinator applied combined
+helper `PINNED_APP_SHA` to **`540e07a`**. Canonical CI **`37445383607`
+SUCCESS**. T5 SOURCE+INJECTED **PASS** (`b3b1c97`). C still does **not**
+run until a later owner letter. Inspect must remain complete seven
+**ABSENT**. This Team 1 worktree is **not** the apply host. Team 1 does
+**not** rewrite the helper. E cannot run until after C.
 
 Region **`asia-south1`**, codebase `default`, project **`vyaamikk-diary`**.
 Runtime identity stays
@@ -330,10 +350,10 @@ grinBeginEvidenceUpload
 grinUploadEvidence
 ```
 
-Apply-host command **after** pin-update, on a tree whose
+Apply-host command **after** owner letter, on a tree whose
 `functions` / `src` / `eas.json` / `app.json` / `app` / `firebase.json`
-diff vs the **pinned** SHA is empty (combined `70bdfe4` is empty vs
-`fcda7cd` today; this Team 1 worktree is **not**). **Not this session:**
+diff vs **`540e07a`** is empty (combined helper is pinned; this Team 1
+worktree is **not**). **Not this session:**
 
 ```bash
 unset GRIN_OPS_PINNED_SHA GRIN_OPS_EXPORT_DIR PINNED_APP_SHA
@@ -397,9 +417,9 @@ Re-inspect without `GRIN_OPS_EXPORT_DIR`. Require:
 
 ### C stop conditions
 
-- Pin still `520f9f9` or any SHA other than the coordinator FINAL candidate
-- Canonical CI not matching the FINAL candidate (run `37440328976` is
-  **IN_PROGRESS** on docs HEAD `70bdfe4`; do not treat IN_PROGRESS as PASS)
+- Pin other than coordinator-applied **`540e07a`**
+- Canonical CI not matching `540e07a` (required run is **`37445383607`
+  SUCCESS** on `7e0d629`; do not cite `37440328976`)
 - This worktree used as apply host (DEPLOYMENT_PATHS vs pin **non-empty**)
 - Inspect UNKNOWN
 - Any of the seven PRESENT before create
@@ -423,9 +443,12 @@ Re-inspect without `GRIN_OPS_EXPORT_DIR`. Require:
 
 ## D — Tester admission (Admin/Firestore document; **not** a SOURCE allowlist)
 
-**HOLD for writes** until the owner supplies Firebase Auth UIDs privately
-(out of repo). Grammar / validator is **YES** now. Do not invent UIDs.
-Values **never** enter git and are **never printed**.
+**HOLD for writes** until the owner letters the write. Grammar / validator
+is **YES** now. Owner UID is already on a private out-of-repo file;
+`validate-uids` **`count=1`**. **Reuse; do not ask again.** Initial
+admission = that **one** UID only. Do not invent UIDs. Values **never**
+enter git and are **never printed**. T1/T2 remain unnamed; live
+cross-account tests require a **second authenticated user**.
 
 This is **not**:
 
@@ -563,7 +586,15 @@ scope. GRIN admission **allow** does not admit Play billing testers.
 
 ---
 
-## E — Gate enable / disable — UNPROVEN, HOLD
+## E — Gate enable / disable — SOURCE/STUB procedure; LIVE HOLD
+
+Reviewed procedure: **`E_ENABLE_DISABLE.md`**. **Not live-executable.**
+Application `540e07a`. Helper
+`docs/release/packets/grin-ops/grin-functions-op.mjs` (combined pin
+`540e07a`; do not rewrite). firebase-tools **14.20.0**. Region
+`asia-south1`. Project `vyaamikk-diary`. Disable uses **`false`**, not
+remove. `gcloud` **ABSENT** = LIVE HOLD. Seven **ABSENT** = E cannot run
+until after C.
 
 Env key: **`GRIN_GOODS_EVIDENCE_FUNCTIONS`**.
 
@@ -580,13 +611,14 @@ update-one-key). `GRIN_OPS_METHOD=firebase-dotenv` aborts in the helper.
 Direct Cloud Run env edit is forbidden. `--source` / `--set-env-vars` /
 `--clear-env-vars` are rejected by `gcloudArgsUnsafe`.
 
-### Intended operation (NOT a grant; NOT executable until preservation is proven)
+### Intended operation (NOT a grant; **not live-executable**)
 
-Helper `enable` / `disable` (combined
-`docs/release/packets/grin-ops/grin-functions-op.mjs`; **do not rewrite**
-that file from this packet) intends, **only if** inspect `sourceOrigin` is
-`gcs` or `repo` for **all seven**, sequential gcloud **without**
-`--source`:
+SOURCE/STUB: helper `enable` / `disable` (combined
+`docs/release/packets/grin-ops/grin-functions-op.mjs`; **do not rewrite**)
+intends, **only if** inspect `sourceOrigin` is `gcs` or `repo` for **all
+seven**, sequential gcloud **without** `--source`. Official gcloud docs
+support omitted `--source` on existing GCS/repo functions as **SOURCE**.
+They do **not** make LIVE firebase-created gen2 preservation proven.
 
 Enable:
 
@@ -631,21 +663,30 @@ an allowed rollback only after the same omitted-`--source` preservation is
 proven.** Do not run remove as a shortcut around unproven gcloud.
 
 Inspect `sourceOrigin=gcs` from firebase-created v2 `storageSource.bucket`
-**allows** the helper to attempt the loop; it does **not** prove
+**allows** the helper to attempt the loop; it does **not** prove LIVE
 preservation. Origin `local` or `unknown` **refuses** (cwd upload risk).
 All seven must be **PRESENT**. Any UNKNOWN or ABSENT refuses enable/disable.
 
-### What is proven vs not
+### Post-operation readback (never dump secrets)
+
+`inspect` prints `gate=on|off` by key presence / exact `"true"` only, plus
+`other_user_keys=<count>` and `secrets=<count>`. Never print env values,
+tokens, or secret payloads. After enable: all seven `gate=on`. After
+disable: all seven `gate=off`. Mixed gate is **not** success.
+
+### SOURCE/STUB vs LIVE
 
 | Claim | Status |
 |---|---|
-| Dotenv REPLACE on firebase-tools 14.20.0 | **Proven blocked** (SOURCE + in-process test) |
-| Helper argv omits `--source` / `--set-env-vars` / `--clear-env-vars` | **Proven** (stub tests on combined helper) |
-| `gcloud` omitted-`--source` preserves firebase-created gen2 source/secrets/ingress/SA/other keys | **UNPROVEN** — `gcloud` **ABSENT**. Do not claim proven. Do not enable live GRIN to obtain that evidence. Scratch/non-prod function created the same way remains the required evidence. Apply host must also record `gcloud version` (helper does not pin it). |
+| Dotenv REPLACE on firebase-tools 14.20.0 | **SOURCE proven blocked** |
+| Helper argv omits `--source` / `--set-env-vars` / `--clear-env-vars`; `applyGcloudGateUpdate` preserves unrelated keys | **STUB proven** (pure object transform + stub spawn) |
+| Official gcloud omitted `--source` on existing GCS/repo functions | **SOURCE documented** — not LIVE |
+| UNKNOWN inventory / origin not `gcs`/`repo` refuses enable/disable | **STUB proven** |
+| LIVE firebase-created gen2 omitted-`--source` preservation | **UNPROVEN** — `gcloud` **ABSENT**. Do not claim LIVE proven. |
 
 ### E stop conditions
 
-- Preservation UNPROVEN (current state) — **do not run**
+- E **not live-executable** (current): LIVE preservation UNPROVEN; `gcloud` ABSENT; seven ABSENT (C not done)
 - `gcloud` absent on the apply host
 - Inspect UNKNOWN
 - Mixed PRESENT/ABSENT, or any origin not `gcs`/`repo`
@@ -668,9 +709,11 @@ Example: enable fails on the 4th name → names 1–3 may be `gate=on`, names
 **Stop.** Inspect. Do not claim rolled back. Do not re-run
 `gate-off-initial`. Do not firebase-dotenv “to fix”.
 
-In-scope recovery **after preservation is proven**: `disable` (or proven
+In-scope recovery **after LIVE preservation is proven**: `disable` (or proven
 `--remove-env-vars`) on names that are PRESENT **and** `gate=on`. Until
-preservation is proven, mixed-gate recovery is a **separate packet**.
+LIVE is proven, mixed-gate recovery is a **separate packet**. Mixed-gate
+is **not** rolled back. Mid-loop **stop**. Disable after successful enable
+is the scoped rollback (same omitted-`--source` argv, `false` not remove).
 
 ### E rollback of a **successful** enable (only after preservation proven)
 
@@ -686,22 +729,23 @@ disable ≠ data delete. Do not Editor-delete receipts.
 
 ## F — Synthetic smoke harness
 
-Files already at:
+Files:
 
-- `docs/release/proposals/team1/grin-pilot-smoke.mjs` (gate + labels)
-- `docs/release/proposals/team1/grin-pilot-smoke.injected.ts` (INJECTED)
+- `docs/release/proposals/team1/grin-pilot-smoke.mjs` (gate + labels + E SOURCE argv)
+- `docs/release/proposals/team1/grin-pilot-smoke.injected.ts` (INJECTED; finished)
 - `docs/release/proposals/team1/grin-pilot-smoke.test.mjs`
+- Procedure: `docs/release/proposals/team1/E_ENABLE_DISABLE.md`
 
-`LIVE_BACKEND` is refused in source until E is proven **and** the owner
-letters live smoke. This session does **not** flip
-`liveBackendAdmission({ gcloudProven })` off its default `false`.
+`LIVE_BACKEND` is refused in source. This session does **not** flip
+`liveBackendAdmission({ gcloudProven })` off its default `false`. Do not
+wait for backend deploy. Synthetic harness is the F deliverable now.
 
 | Label | Command | Status |
 |---|---|---|
 | **INJECTED** | `node docs/release/proposals/team1/grin-pilot-smoke.mjs injected` (default) or `npx --yes tsx docs/release/proposals/team1/grin-pilot-smoke.injected.ts` | **Executable now** — synthetic data only; no live project |
 | Gate / UID tests | `node --test docs/release/proposals/team1/grin-pilot-smoke.test.mjs` | **Executable now** |
 | **EMULATOR** | `npm run test:goods-evidence-g1-functions-emulator` or `node …/grin-pilot-smoke.mjs emulator` inside `emulators:exec` | Existing EMULATOR coverage; **not** LIVE_BACKEND |
-| **LIVE_BACKEND** | `node docs/release/proposals/team1/grin-pilot-smoke.mjs live` | **REFUSED** (exit 2) even with `GRIN_OPS_ALLOW_LIVE=1` / `GRIN_PILOT_SMOKE_LIVE=1` until E proven **and** owner letters live smoke |
+| **LIVE_BACKEND** | `node docs/release/proposals/team1/grin-pilot-smoke.mjs live` | **REFUSED** (exit 2) even with `GRIN_OPS_ALLOW_LIVE=1` / `GRIN_PILOT_SMOKE_LIVE=1`. E is **not** live-executable. |
 
 ### F case list (required; synthetic data only)
 
@@ -715,7 +759,7 @@ receipt / evidence ids only. Do not reuse production diary data.
 | **authenticated_success** | Admitted owner uid (D allow). Gate on for LIVE; INJECTED env exact `"true"`. Register a **new** synthetic receipt. | `ok=true`, `replayed=false`, `confirmed` present |
 | **unauthenticated_denial** | `auth=null` register | `ok=false`, `code=unauthenticated` |
 | **non_admitted_denial** | Authenticated uid with deny/missing/malformed admission | `ok=false`, `code=policy_denied` |
-| **cross_owner_denial** | Other admitted uid reads owner receipt; other registers into owner ledger | read `forbidden` **or** `policy_denied` **or** `not_found`; register `forbidden` |
+| **cross_owner_denial** | INJECTED: synthetic OTHER uid (`other_pilot_inj`) reads owner receipt / registers into owner ledger. **LIVE:** requires a **second authenticated user**. T1/T2 still unnamed — live case **HOLD**. | read `forbidden` **or** `policy_denied` **or** `not_found`; register `forbidden` |
 | **register_replay** | Same frozen commandId as authenticated_success | `ok=true`, `replayed=true`, same `issuedNumber` |
 | **upload_verification** | reserve → begin → PUT reserved original → `grinUploadEvidence`. Client `claimedSha256` is a **claim**; verify **stored bytes**. | `ok=true`, `originalDurable=true`, `actualSha256` equals stored-byte sha256 |
 | **confirmation** | Register and owner `grinReadGoodsReceipt` | `confirmed` on register/read (`receiptId`, events) |
@@ -751,13 +795,17 @@ Preconditions for that later run:
 2. Owner letters **live smoke** (separate from A–E)
 3. C: all seven **PRESENT**
 4. E: all seven `gate=on` (exact `"true"`)
-5. D: owner-named UIDs admitted; file still outside git
+5. D: the one owner UID admitted (count=1); file still outside git. Live
+   `cross_owner_denial` additionally requires a **second named authenticated
+   account** (T1/T2 currently unnamed → that LIVE case stays HOLD)
 6. Inspect complete; not UNKNOWN; unrelated still 39
 7. Synthetic ids only; no production receipt mutation
 
 ### F stop conditions
 
-- LIVE requested while E UNPROVEN — refuse (current harness)
+- LIVE requested while E is **not live-executable** — refuse (current harness)
+- Live `cross_owner_denial` requested without a second named authenticated
+  account — refuse (T1/T2 unnamed)
 - Owner has not lettered live smoke — refuse
 - Inspect UNKNOWN; mixed PRESENT/ABSENT; mixed `gate=on`/`off`
 - UID file inside repo / empty / parse fail
@@ -788,15 +836,18 @@ operations. Still two firebase commands, two verifications, two rollbacks.
 2. **B** — exact Storage command + hashes in B, after inspect still =
    `1a912051…`. Not implied by A. Never
    `--only firestore:rules,storage`.
-3. **C** — HOLD until coordinator pin of the **FINAL** candidate after
-   billing correction + matching CI, then owner letter. Mixed-state resume
-   not included. Do not pin `520f9f9` / `313025f` / `56f2040` / docs HEAD.
-4. **D** — HOLD for writes until owner-named UIDs (private file). Grammar
-   is ready. `PLAY_BILLING_TESTER_UIDS` is **not** lettered here.
-5. **E** — **HOLD / UNPROVEN**. Do not letter enable until omitted-`--source`
-   preservation is proven. Dotenv remains blocked.
-6. **F LIVE_BACKEND** — **HOLD** until E is proven **and** a separate owner
-   letter for live smoke. INJECTED is already executable.
+3. **C** — **HOLD**. Pin is coordinator-applied `540e07a` on combined. Still
+   needs owner letter. Seven ABSENT. Mixed-state resume not included. This
+   worktree is not the apply host.
+4. **D** — **HOLD for writes**. UID already on the private file (`count=1`).
+   Do not ask again. Grammar is ready. `PLAY_BILLING_TESTER_UIDS` stays
+   empty/fail-closed and is **not** lettered here.
+5. **E** — **SOURCE/STUB procedure complete; LIVE HOLD — not live-executable.**
+   Do not letter live enable while `gcloud` is ABSENT and omitted-`--source`
+   LIVE preservation is unproven. Dotenv remains blocked. See
+   `E_ENABLE_DISABLE.md`.
+6. **F LIVE_BACKEND** — **HOLD**. INJECTED is executable now. Live
+   `cross_owner_denial` requires a second authenticated account (unnamed).
 
 IAM: no grant needed for this pilot; do not add roles to the shared Editor
 SA.
