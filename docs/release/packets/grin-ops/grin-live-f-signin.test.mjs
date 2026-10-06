@@ -218,3 +218,22 @@ test("/session enforces nonce, same-origin, body size, and one-use", async () =>
   assert.equal(second.status, 409);
   assert.equal(second.json.reason, "nonce_reused");
 });
+
+test("/session rejects handoff after timeout/session_closed", async () => {
+  const admitted = "owner_uid_test_abc";
+  const nonce = "nonce-closed";
+  const origin = "http://127.0.0.1:8787";
+  const token = mintToken({ sub: admitted });
+  const closed = await handleSessionPost({
+    rawBody: JSON.stringify({ idToken: token, sessionNonce: nonce }),
+    admittedUid: admitted,
+    expectedNonce: nonce,
+    origin,
+    reqHeaders: { origin },
+    verifyIdToken: (t, o) => verifyFirebaseIdToken(t, { ...o, certs: CERTS }),
+    nonceConsumed: () => false,
+    sessionClosed: () => true,
+  });
+  assert.equal(closed.status, 409);
+  assert.equal(closed.json.reason, "session_closed");
+});

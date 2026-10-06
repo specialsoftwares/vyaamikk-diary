@@ -8,12 +8,13 @@
  * - /session verifies Firebase ID token via Google securetoken certs for
  *   vyaamikk-diary; identity is claims.sub only (body.uid is ignored).
  * - One-use session nonce + same-origin checks + bounded body size.
+ * - Send/confirm guarded by grin-live-f-signin-controller.mjs (no auto-retry).
  * - No signJwt, IAM expansion, or service-account keys.
  */
 import { createServer } from "node:http";
 import { readFileSync, existsSync } from "node:fs";
-import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   MAX_SESSION_BODY_BYTES,
   assertSameOriginHandoff,
@@ -29,6 +30,8 @@ export const DEFAULT_HOST = "127.0.0.1";
 const UID_FILE =
   process.env.GRIN_OWNER_UID_FILE ||
   "/Users/shivamsaurav/vyd-private/grin-owner-admission.txt";
+const HERE = dirname(fileURLToPath(import.meta.url));
+const CONTROLLER_PATH = resolve(HERE, "grin-live-f-signin-controller.mjs");
 
 function fail(msg) {
   process.stderr.write(`SIGNIN ABORT: ${msg}\n`);
@@ -101,6 +104,7 @@ export function pageHtml(cfgJson, sessionNonce) {
 <body>
   <h1>GRIN pilot local sign-in</h1>
   <p>Sign in as the already-admitted owner with Firebase phone OTP. Enter the OTP here. Do not paste tokens into chat.</p>
+  <p><strong>Use this tab only</strong> after an intentional harness restart — old tabs keep old code.</p>
   <label>Phone (E.164)<input id="phone" type="tel" autocomplete="tel" placeholder="+91…" /></label>
   <div id="recaptcha-container"></div>
   <button id="send" type="button">Send OTP</button>
@@ -117,61 +121,36 @@ export function pageHtml(cfgJson, sessionNonce) {
       signInWithPhoneNumber,
       signOut,
     } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+    import { createPhoneOtpController } from "/grin-live-f-signin-controller.mjs";
 
     const cfg = ${cfgJson};
     const sessionNonce = ${nonceJson};
     const app = initializeApp(cfg);
     const auth = initializeAuth(app, { persistence: inMemoryPersistence });
-    let confirmation = null;
     const status = document.getElementById("status");
     const phoneEl = document.getElementById("phone");
     const otpEl = document.getElementById("otp");
-    function setStatus(t) { status.textContent = t; }
-    async function clearLocalAuth(reason) {
-      confirmation = null;
-      phoneEl.value = "";
-      otpEl.value = "";
-      document.getElementById("confirm").disabled = true;
-      try { await signOut(auth); } catch (_) {}
-      if (reason) setStatus(reason);
-    }
+    const sendBtn = document.getElementById("send");
+    const confirmBtn = document.getElementById("confirm");
+    let ctrl = null;
 
     window.recaptchaVerifier = new RecaptchaVerifier(auth, "recaptcha-container", {
       size: "normal",
-      callback: () => setStatus("reCAPTCHA complete. Send OTP."),
+      callback: () => {
+        if (!ctrl) return;
+        const s = ctrl.getState();
+        if (!s.throttled && !s.sendInFlight) status.textContent = "reCAPTCHA complete. Send OTP.";
+      },
     });
 
-    document.getElementById("cancel").onclick = () => {
-      clearLocalAuth("Cleared. Tokens were not stored. You may close this tab.");
-    };
-
-    document.getElementById("send").onclick = async () => {
-      try {
-        const phone = phoneEl.value.trim();
-        if (!phone.startsWith("+")) {
-          setStatus("Use E.164 phone (leading +).");
-          return;
-        }
-        setStatus("Sending OTP…");
-        confirmation = await signInWithPhoneNumber(auth, phone, window.recaptchaVerifier);
-        document.getElementById("confirm").disabled = false;
-        setStatus("OTP sent. Enter the code below.");
-      } catch (e) {
-        const code = e && e.code ? String(e.code) : "error";
-        setStatus("Send failed: " + code + ". If domain/provider config is required, stop and report that exact change; do not expand IAM.");
-      }
-    };
-
-    document.getElementById("confirm").onclick = async () => {
-      try {
-        const code = otpEl.value.trim();
-        if (!confirmation) {
-          setStatus("Send OTP first.");
-          return;
-        }
-        setStatus("Confirming…");
+    ctrl = createPhoneOtpController({
+      signInWithPhoneNumber: (phone) =>
+        signInWithPhoneNumber(auth, phone, window.recaptchaVerifier),
+      confirmAndGetIdToken: async (confirmation, code) => {
         const cred = await confirmation.confirm(code);
-        const idToken = await cred.user.getIdToken(true);
+        return cred.user.getIdToken(true);
+      },
+      handoffSession: async (idToken) => {
         const res = await fetch("/session", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -179,17 +158,22 @@ export function pageHtml(cfgJson, sessionNonce) {
           credentials: "same-origin",
         });
         const body = await res.json().catch(() => ({ ok: false }));
-        await clearLocalAuth(null);
-        if (!res.ok || !body.ok) {
-          setStatus("Session rejected by local harness. Tokens were not printed or stored.");
-          return;
-        }
-        setStatus("Signed in and handed off. Local Auth cleared. You can close this tab; the harness continues.");
-      } catch (e) {
-        const code = e && e.code ? String(e.code) : "error";
-        await clearLocalAuth("Confirm failed: " + code);
-      }
+        return { ok: !!(res.ok && body && body.ok) };
+      },
+      signOut: () => signOut(auth),
+      setStatus: (t) => { status.textContent = t; },
+      getPhone: () => phoneEl.value,
+      getOtp: () => otpEl.value,
+      setSendDisabled: (d) => { sendBtn.disabled = d; },
+      setConfirmDisabled: (d) => { confirmBtn.disabled = d; },
+      clearInputs: () => { phoneEl.value = ""; otpEl.value = ""; },
+    });
+
+    document.getElementById("cancel").onclick = () => {
+      ctrl.cancel("Cleared. Tokens were not stored. You may close this tab.");
     };
+    sendBtn.onclick = () => { void ctrl.send(); };
+    confirmBtn.onclick = () => { void ctrl.confirm(); };
   </script>
 </body>
 </html>`;
@@ -208,7 +192,11 @@ export async function handleSessionPost({
   verifyIdToken = verifyFirebaseIdToken,
   projectId = VERIFY_PROJECT_ID,
   nonceConsumed,
+  sessionClosed,
 }) {
+  if (sessionClosed && sessionClosed()) {
+    return { status: 409, json: { ok: false, reason: "session_closed" } };
+  }
   if (Buffer.byteLength(rawBody, "utf8") > MAX_SESSION_BODY_BYTES) {
     return { status: 413, json: { ok: false, reason: "body_too_large" } };
   }
@@ -297,6 +285,18 @@ export function waitForOwnerClientSession({
           res.end(html);
           return;
         }
+        if (
+          req.method === "GET" &&
+          url.pathname === "/grin-live-f-signin-controller.mjs"
+        ) {
+          const src = readFileSync(CONTROLLER_PATH, "utf8");
+          res.writeHead(200, {
+            "Content-Type": "text/javascript; charset=utf-8",
+            "Cache-Control": "no-store",
+          });
+          res.end(src);
+          return;
+        }
         if (req.method === "POST" && url.pathname === "/session") {
           const chunks = [];
           let size = 0;
@@ -323,6 +323,7 @@ export function waitForOwnerClientSession({
             reqHeaders: req.headers,
             verifyIdToken,
             nonceConsumed: () => nonceUsed,
+            sessionClosed: () => settled,
           });
           res.writeHead(result.status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
           res.end(JSON.stringify(result.json));
