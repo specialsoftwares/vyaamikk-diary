@@ -3,18 +3,26 @@
 Encrypted PDF backup = backlog. No “zero knowledge,” legal immunity,
 automatic GST eligibility, or live 2B/EWB claims. Not legal advice.
 
-Recorded **2026-10-06** from the consolidated owner policy mission.
-These decisions authorize **source implementation and tests**. They do **not**
-authorize live deployment, billing activation, or Play publication.
+**Do not reopen Q1 (GRIN in existing plans).** Recorded **2026-10-06** from
+the consolidated owner policy mission. Those decisions authorize **source
+implementation and tests**. They do **not** authorize live deployment,
+billing activation, or Play publication.
+
+Two writes still blank (Team 4 product sheets — owner must fill the rows):
+
+- Explicit deletion public window:
+  `docs/release/proposals/team4/DELETION_15_VS_180_OWNER_SHEET.md`
+- Storage GiB table:
+  `docs/release/proposals/team4/STORAGE_OWNER_CHOICE.md`
 
 Source of original options: `D_OWNER_POLICY_OPTIONS.md`.
 
 ---
 
-## Q1. How testers and later customers pay for GRIN?
+## Q1. How do testers and later customers pay for GRIN?
 
 **Owner choice: A — include GRIN in existing Starter, Professional and
-Business subscriptions.**
+Business subscriptions.** (Recorded 2026-10-06. **Do not reopen.**)
 
 - No separate GRIN SKU at launch.
 - Preserve existing approved prices; do not invent prices or trial terms.
@@ -31,45 +39,29 @@ Business subscriptions.**
 
 Internal Testing still uses **synthetic** evidence until lifecycle
 implementation is reviewed. Public commercial copy still needs Packet E
-real-store acceptance of the diary SKU.
+real-store acceptance of the diary SKU. Purchase-entry stays `"0"`.
 
 ---
 
 ## Q2. What count/byte limits apply, and what happens at the limit?
 
-**Owner choice: B — per-owner retained-storage allowances, plus existing
-technical ceilings, subject to cost validation before advertising.**
+**Behaviour recorded: B — per-owner retained-storage allowances**, plus
+existing technical ceilings (warn 80/95; refuse at cap; no silent delete;
+no overage). That framework is **not** reopened here.
 
-Proposed (total retained per subscribed account, not per device, not a
-monthly reset):
+**GiB table: still one owner write.** Do not silently replace 1 / 5 / 20.
+Do not advertise. Do not call the smaller table guaranteed profitable.
+GCS bucket location **UNKNOWN**.
 
-| Plan | Allowance |
-|---|---|
-| Starter | 1 GiB |
-| Professional | 5 GiB |
-| Business | 20 GiB |
+| Option | Starter | Professional | Business |
+|---|---|---|---|
+| **1 — original proposal** (wired, pending confirmation) | 1 GiB | 5 GiB | 20 GiB |
+| **2 — smaller alternative** (named, not the live cap) | 256 MiB | 1 GiB | 5 GiB |
 
-Include original files and retained derivatives. Keep 15 MiB PDF / 10 MiB
-image technical limits and two concurrent uploads per owner.
+**Owner choice (1 / 2 / UNRESOLVED):** _________________
 
-Behaviour:
-
-- Warn at 80% and 95%.
-- At the cap: refuse additional cloud uploads clearly; preserve
-  viewing/download/export; keep local pending evidence visibly unsynced.
-- Never claim an upload succeeded when it did not.
-- Never silently delete old evidence or charge overage fees.
-- No age-based purge of issued evidence merely to make room.
-- Handle concurrent reservations, retry, abandoned uploads, accounting
-  repair, and downgrade-over-limit **without deleting existing evidence**.
-
-**Advertising hold (Team 2 SOURCE, 2026-10-06):** Typical usage supports
-the proposal. Heavy 20 GiB + repeated downloads can exceed business monthly
-₹499 after an assumed 15% store cut. **Do not advertise 1/5/20 GiB.**
-Code constants remain those values labelled
-`PROPOSED_PENDING_OWNER_CONFIRMATION`. **Single alternative for owner
-approval: 256 MiB / 1 GiB / 5 GiB.** See
-`docs/release/proposals/team2/STORAGE_ECONOMICS.md`.
+Fill the row on `docs/release/proposals/team4/STORAGE_OWNER_CHOICE.md`.
+Economics: combined `docs/release/proposals/team2/STORAGE_ECONOMICS.md`.
 
 ---
 
@@ -96,11 +88,11 @@ After entitlement **genuinely** expires:
 
 This is **separate** from an explicit account-deletion request.
 **No production purge job** from this assignment. Source state machine +
-tests only.
+tests only. Do **not** substitute 30 as the account-deletion window.
 
 ### Explicit account deletion — three facts (do not collapse)
 
-Owner plain-language sheet (choices A–D **blank** until the owner writes):
+Owner plain-language sheet (choices **A–D blank** until the owner writes):
 `docs/release/proposals/team4/DELETION_15_VS_180_OWNER_SHEET.md`.
 
 | # | Fact | Status |
@@ -109,22 +101,13 @@ Owner plain-language sheet (choices A–D **blank** until the owner writes):
 | 2 | **Owner-requested policy** | **180 days** after an explicit account-deletion request. **Not** legally/Play approved. |
 | 3 | **Policy approved for public operation** | **UNRESOLVED.** Do not advertise or activate 180 days. Do not silently substitute 15 or 30. |
 
-Team 4 Play-risk framing (not a recorded owner choice): do **not** ship
-180-day `pending_deletion` as deletion (Play: freeze ≠ delete). Do **not**
-treat implemented 15 days as the public-policy answer. Do **not** pick 30
-(that is expiry notice in 90+30). Optional 180-day recoverability would be
-a **separate archive product**. **P8 stays open** while production purge
-omits GRIN and the public window is unresolved. Do not flip
-`INCLUDE_GRIN_IN_ACCOUNT_PURGE`.
+Changing `DELETION_GRACE_MS` does **not** implement a safe 180-day policy.
+Play User Data (fetched 2026-10-06): temporary deactivation, disabling, or
+freezing **does not qualify** as account deletion. Optional 180-day
+recoverability would be a **separate archive product**. **P8 stays open.**
+Do not flip `INCLUDE_GRIN_IN_ACCOUNT_PURGE`.
 
-While unresolved: prepare reusable GRIN cleanup lists and tests; do not
-report deletion complete while associated live data remains; do not attach
-a production purge job.
-
-Existing Storage purge prefixes remain `letterhead | attachments | pdfs`
-only. `users/{uid}/grinEvidence/` is **not** in that list. Firestore
-`USER_SUBCOLLECTIONS` has no `goodsEvidence*` trees and is **not**
-recursive.
+**Owner choice (A / B / C / D):** _________________
 
 ### Exit and export
 
@@ -145,14 +128,14 @@ until lifecycle is implemented and approved.
 
 ---
 
-## Implementation status (this session)
+## Implementation status (this Team 4 continue)
 
 | Item | State |
 |---|---|
-| Owner choices recorded | **this document** |
-| Issuance quota + storage accounting + expiry SM | Team 2 source (separate worktree) |
-| GRIN paths on existing deletion job | prepare in source; **not live** |
-| 180-day public policy | **UNRESOLVED.** Owner sheet choices A–D blank. Engineering hold at implemented 15 days is **not** a recorded owner choice |
-| Advertising 1/5/20 GiB | blocked on economics confirmation |
-| Live Functions/Rules/IAM | HOLD |
+| Q1 GRIN-in-existing-plans | **recorded** — do not reopen |
+| Storage GiB 1/5/20 vs 256 MiB/1/5 | **UNRESOLVED** — `STORAGE_OWNER_CHOICE.md` |
+| 180-day public deletion policy | **UNRESOLVED.** A–D blank. Engineering hold at implemented 15 days is **not** a recorded owner choice |
+| Advertising 1/5/20 GiB | blocked |
+| Live Functions/Rules/IAM / Play catalog | HOLD / catalog **NOT RUN** |
 | Production purge job | **not introduced** |
+| Purchase-entry | **`"0"`** |

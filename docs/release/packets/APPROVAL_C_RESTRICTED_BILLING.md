@@ -11,11 +11,7 @@ Do not reuse stale “catalog empty” or “billing disabled” as current fact
 
 ## Actual current state
 
-### SOURCE (`5d5df3d` + tester allowlist in this integration)
-
-GRIN `goodsEvidence` tree remains identical to `5d5df3d`. Billing callables
-gained a fail-closed `PLAY_BILLING_TESTER_UIDS` gate. **Do not cite**
-CI `37351685421` for this tree. Live billing Functions are **not** this SHA.
+### SOURCE (application `520f9f9`; this Team 4 tree documents that freeze — no AAB)
 
 - Gate: `PLAY_BILLING_ENABLED === "true"` (`functions/src/billing/google/playConstants.ts`).
   Default off. Callables throw `failed-precondition` when unset.
@@ -71,11 +67,12 @@ Internal track membership is **not** a billing security boundary.
 
 ### PLAY catalog / prices / license testers
 
-**NOT RUN** this Team 4 session. Exact blocker: no Play Console session in
+**NOT RUN** this Team 4 continue. Exact blocker: no Play Console session in
 this worktree; `gcloud` not on PATH; Python `googleapiclient` not installed;
 **Firebase access tokens must not be used as Play Android Publisher** (prior
 Publisher `inappproducts` call was **403**). Catalog, prices, base plans, and
-license-tester lists stay **unknown**.
+license-tester lists stay **unknown**. Combined HEAD `aea65c1`. Canonical CI
+`37425360211` on `0d7aa17`. Application SHA `520f9f9`.
 
 Do **not** reuse 2026-09-20 “catalog empty.” Last Internal track note
 2026-10-01: vc22 Active — **STALE** vs a fresh Console read. Source catalog
@@ -107,7 +104,7 @@ RTDN OIDC requires `PLAY_RTDN_PUSH_AUDIENCE` +
 were enabled. GST invoice path is separate and production-disabled.
 
 EAS profile env still `"0"` for purchase-entry / quota-upsell. That does
-**not** change the existing vc22 AAB. No AAB of `5d5df3d` was built.
+**not** change the existing vc22 AAB. No AAB of `520f9f9` was built (prior `5d5df3d` pin is STALE).
 
 ---
 
@@ -139,7 +136,7 @@ A completed purchase callback is **not** complete billing acceptance.
 1. Freeze binary flags **before** requesting a build (Approval B). Ordinary
    Internal-GRIN AAB keeps purchase-entry **`"0"`** (Team 3). A billing-test
    AAB is a **different** profile/SHA. Do not claim an existing AAB changed
-   because source flags changed. No `5d5df3d` binary exists.
+   because source flags changed. No `520f9f9` binary exists.
 2. Owner-named Google accounts **and** matching Firebase Auth UIDs. Verify
    **license-test** status in Play Console before invoking purchases. Do not
    invent emails/UIDs here.

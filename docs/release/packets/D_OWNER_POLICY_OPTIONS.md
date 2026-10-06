@@ -1,9 +1,16 @@
 # Packet D — Owner policy choices (recommendations; not selected)
 
-GRIN pricing, storage quota, and retention after account/ledger retirement are
-**unset**. Encrypted PDF backup remains backlog. ITC stays `not_determined` in
+Encrypted PDF backup remains backlog. ITC stays `not_determined` in
 source. Do not treat emulator results as policy. This is not legal advice.
 Counsel/legal sign-off is not performed here.
+
+**Do not reopen GRIN-in-existing-plans.** That pricing choice is **recorded**
+(2026-10-06): include GRIN in existing Starter / Professional / Business.
+See `OWNER_POLICY_DECISION_SHEET.md`. Remaining owner writes from Team 4:
+
+- Storage GiB table: `docs/release/proposals/team4/STORAGE_OWNER_CHOICE.md`
+- Explicit-deletion public window:
+  `docs/release/proposals/team4/DELETION_15_VS_180_OWNER_SHEET.md`
 
 Each topic lists the choices in plain language, cost/consequence, and what
 must be implemented. **No choice is recorded on the owner’s behalf.**
@@ -17,11 +24,11 @@ must be implemented. **No choice is recorded on the owner’s behalf.**
 | Invite-only Internal Testing, no priced SKU | Fine for a named tester set. **Cannot** be a public Play feature. Tester storage still costs the project. | Seed admission for named uids only. Wipe warning if retention is unset. |
 | Leave it unset | GRIN stays default-off. No public claim of a priced feature. | No commercial copy in listing/Data safety that implies GRIN is generally available. |
 
-**Recommendation for the 6 Oct Internal candidate:** invite-only Internal
-Testing with no priced SKU. Public-release target 18 Oct stays blocked until
-the owner writes either “included in the existing diary plan” or “separate
-GRIN product,” **and** Packet E real-store acceptance exists for whatever
-plan customers actually pay through.
+**Q1 is closed:** include GRIN in existing plans (recorded 2026-10-06). **Do
+not reopen.** Packet E real-store acceptance of that diary SKU is still
+required before public commercial copy. Internal Testing remains invite-only
+with synthetic evidence until lifecycle is approved. Purchase-entry stays
+`"0"`. Do not create a separate GRIN Play product from this packet.
 
 ## 2. Storage limits and over-limit behaviour
 
@@ -76,9 +83,9 @@ packet.
 
 | Topic | Owner choice | Blocks |
 |---|---|---|
-| Pricing | **A — include in existing plans** (2026-10-06). See `OWNER_POLICY_DECISION_SHEET.md`. | Packet E real-store acceptance; public copy |
-| Storage quota | **Proposed 1/5/20 GiB pending economics** | Advertising; public upload until implemented + confirmed |
-| Retention | **Expiry 90+30 (source).** Explicit deletion: implemented 15d vs requested 180d vs public UNRESOLVED | Public GRIN evidence; production purge job not this assignment |
+| Pricing | **A — include in existing plans** (2026-10-06). **Do not reopen.** | Packet E real-store acceptance; public copy |
+| Storage quota | **Proposed 1/5/20 GiB pending confirmation** vs alternative **256 MiB / 1 GiB / 5 GiB**. Owner must write **one** table. See `STORAGE_OWNER_CHOICE.md`. | Advertising; public upload until confirmed |
+| Retention | **Expiry 90+30 (source).** Explicit deletion: implemented **15 days** vs requested **180 days** vs public **UNRESOLVED**. A/B/C/D blank. See `DELETION_15_VS_180_OWNER_SHEET.md`. | Public GRIN evidence; **P8 open**; production purge job not this assignment |
 
 Do not mark GRIN, G6, billing, or public release Done until the chosen rows
 exist in writing.

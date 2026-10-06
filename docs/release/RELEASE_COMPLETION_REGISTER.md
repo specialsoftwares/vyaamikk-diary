@@ -89,7 +89,7 @@ purchase-entry remains `"0"`. Play Console catalog **NOT RUN**.
 | 1 Backend | A1 **presented** (`A1_PRESENT.md` `80da828`). Isolated Firestore Rules only. A2–A7 **HOLD**. Helper pin **STALE** vs `56f2040` — do not apply without T1 review. Not executed. | Owner A1 grant; pin review for A3; A2–A7 remain separate |
 | 2 Policy | Capacity folded (`2cebe32` → combined `56f2040`). `MAX_STORAGE_HOLDS=2500` substantiated (technical, not SKU). 15 MiB-PDF fill of proposed 20 GiB **not blocked**. Derivative fill of 20 GiB **cannot** fit one doc — no integer raise. Economics: bucket location **UNKNOWN**. Inactive cleanup tests with flag **false**. P8 still FAIL. | Owner GiB confirm; 180-day public policy; no live purge; pin review |
 | 3 Build/device | Freeze **`520f9f9`** + GHA **`37425360211`**. Play explorer 2026-10-06 must be **re-read before B1**. vc23 **unreserved**. Owner device form blank. Device rows **NOT RUN**. B1≠B2, neither granted. | EAS/native build; Play upload (separate) |
-| 4 Billing/Play | Owner sheet `DELETION_15_VS_180_OWNER_SHEET.md` (15 implemented / 180 requested / public UNRESOLVED). Catalog **NOT RUN**. Allowlist SOURCE, not live. | Product/price/activation/submission; owner A/B/C/D |
+| 4 Billing/Play | Two owner writes presented (`TWO_OWNER_DECISIONS.md` `7e4ed20`). Deletion 15/180/UNRESOLVED; storage 1/5/20 vs 256 MiB/1/5 GiB. Catalog **NOT RUN**. Purchase-entry `"0"`. | Owner fills both sheets; no activation/Save/submit |
 | 5 QA | Pin/CI closeout `CLOSEOUT_0d7aa17.md` covers `0d7aa17` / `520f9f9` only. T2 `56f2040` is **new source** — review that slice only. S1/S2/P3 preserved. **P8 FAIL**. Device/live/billing **NOT RUN**. | Review `56f2040`; not device/live |
 
 ---
@@ -102,7 +102,7 @@ implementation and tests** only. Not live deploy / billing / Play publish.
 | Topic | Owner choice | Residual hold |
 |---|---|---|
 | GRIN pricing | **A — include in existing Starter / Professional / Business.** No separate SKU. One new issuance consumes one monthly record allowance. | Packet E real-store acceptance before public commercial copy |
-| Storage quota | **Proposed 1 / 5 / 20 GiB** in source, labelled pending confirmation. **Do not advertise.** Team 2 alternative: **256 MiB / 1 GiB / 5 GiB**. | Owner confirm proposal or alternative |
+| Storage quota | **UNRESOLVED.** Option 1: 1/5/20 GiB (wired, pending confirmation). Option 2: 256 MiB/1/5 GiB (named, not live, not guaranteed profitable). **Do not advertise either.** See `STORAGE_OWNER_CHOICE.md`. | Owner writes one choice |
 | Active / expiry | Keep issued evidence while entitled. After genuine expiry: 90-day read/export then 30-day notice. **No production purge job this assignment.** | Source state machine only until approved deploy |
 | Explicit deletion | **Three facts, not one:** implemented **15 days**; owner requested **180 days**; public-approved policy **UNRESOLVED**. Team 4 Play-risk framing: do not ship 180-day pending as deletion; do **not** treat 15 as the recorded owner choice; do not substitute 30. See `DELETION_15_VS_180_OWNER_SHEET.md`. | Owner+counsel fill A/B/C/D on that sheet |
 | Export | Pack is summary (`originalsBundled=false`). Originals + record export required. ZIP optional. | Device proof NOT RUN |

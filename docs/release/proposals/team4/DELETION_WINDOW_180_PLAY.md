@@ -3,12 +3,22 @@
 **PRIMARY owner decision sheet:**
 `docs/release/proposals/team4/DELETION_15_VS_180_OWNER_SHEET.md`
 
+Application SHA to describe: `520f9f9` (no AAB). Combined READ-ONLY
+`aea65c1`. CI `37425360211` on `0d7aa17`.
+
 **Not implemented. Not legally approved. Not Play-approved.** Do not silently
 reinterpret this as a shipped archive product. Do **not** treat implemented
 15 days as the owner’s recorded public-policy choice.
 
 Three facts, do not collapse: **implemented = 15 days**; **owner requested =
 180 days**; **public-approved policy = UNRESOLVED**.
+
+**Changing `DELETION_GRACE_MS` from 15 to 180 is not a safe 180-day
+deletion policy.** It would only lengthen pending-deletion freeze. Play
+User Data (answer 10144311, fetched 2026-10-06): “Temporary account
+deactivation, disabling, or ‘freezing’ the app account does not qualify as
+account deletion.” Engineering **does not** change that constant in this
+slice.
 
 Owner requested a **180-day** hold. Current code is a **15-day** pending
 window (`DELETION_GRACE_DAYS` / `DELETION_GRACE_MS` = 15 days) in:

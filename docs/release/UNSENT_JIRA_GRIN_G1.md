@@ -232,3 +232,7 @@ Published PR #31 head `0d7aa17`. Application `520f9f9`. Tooling successor `0d7aa
 
 Cherry-pick of `2cebe32` (`team/grin-t2-capacity`) onto combined as `56f2040e30159579edc0cbfbc88e2ba706a6abd2`. `MAX_STORAGE_HOLDS=2500` remains a technical limit; 15 MiB-PDF fill of proposed 20 GiB not blocked; derivative fill of 20 GiB cannot fit one Firestore document (no integer raise; no redesign). Bucket location **UNKNOWN**. `INCLUDE_GRIN_IN_ACCOUNT_PURGE=false`. `DELETION_GRACE_MS` 15 days. Cleanup is **not** an operational deletion service. **P8 FAIL**. Helper pin remains `520f9f9` — **STALE vs `56f2040`**; do not env-override; A3 HOLD. Canonical GHA **`37425360211` does not cover `56f2040`**. Internal freeze candidate remains `520f9f9`. Coordinator local tests PASS (storageQuota unit+injected, grinCleanup unit, quota injected, g2 unit, entitlement lifecycle). Do not mark GRIN / device / billing / public-release Done.
 
+## Team 4 two owner decisions (unsent, 2026-10-06)
+
+`docs/release/proposals/team4/TWO_OWNER_DECISIONS.md` + `STORAGE_OWNER_CHOICE.md` + refreshed deletion sheet (team `7e4ed20` on `team/grin-t4-product`). T4 recorded combined `aea65c1` / application `520f9f9` as its checkout — **historical**; current application is `56f2040` (T2 already folded; not re-cherry-picked). Deletion: 15 implemented / 180 requested / public UNRESOLVED; A–D blank; freeze ≠ delete. Storage: 1/5/20 vs 256 MiB/1/5 GiB; one write; neither advertised. Catalog **NOT RUN**. Purchase-entry `"0"`. No activation/Save/submit. Do not mark billing / public-release Done.
+

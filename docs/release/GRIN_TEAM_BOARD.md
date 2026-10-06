@@ -9,11 +9,11 @@ Checkpoint: PR **#31**. CI-tested head `0d7aa17` / app `520f9f9` / GHA **`374253
 
 | Task | Owner | Branch | Worktree | Dependency | Status | Evidence | Blocker | Next |
 |---|---|---|---|---|---|---|---|---|
-| Integration | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | `56f2040` | running | A1 presented; T2 capacity folded; freeze still `520f9f9`+CI | live mutate / EAS / Play / billing HOLD | Owner A1 grant; owner GiB + deletion; T5 review `56f2040`; B1 not granted |
+| Integration | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | `56f2040` | running | A1 presented; T2 `56f2040`; T4 two writes folded | live mutate / EAS / Play / billing HOLD | Owner A1 grant; owner GiB + deletion; T5 review `56f2040`; B1 not granted |
 | Backend pilot | team1 | `team/grin-t1-a1-present` | `grin-t1-backend` | A1 hashes | review | `A1_PRESENT.md` `80da828`. Rules only. A2–A7 remaining. Not executed. | `GRIN_OPS_ALLOW_LIVE=1` HOLD | Owner A1 grant; remaining backend packets |
 | Policy / deletion | team2 | `team/grin-t2-capacity` | `grin-t2-evidence` | `2cebe32` | review | Holds bound + cleanup tests; flag false; P8 FAIL | advertising GiB; live purge | Do not reopen S1/S2; do not flip P8 |
 | Build / device | team3 | `team/grin-t3-freeze` | `grin-t3-offline` | freeze `520f9f9` + CI `37425360211` | review | `APPROVAL_B_DRAFT.md` `8ca2b59`. vc23 unreserved. Device form blank. B1≠B2 not granted. | EAS/Play B1/B2 HOLD | Re-read Play explorer before B1; no unauthorized build |
-| Billing / Play | team4 | `team/grin-t4-product` | `grin-t4-product` | purchase-entry `"0"` | running | Two owner decisions: GiB + 15/180; billing matrix | activation HOLD | Catalog NOT RUN; no website publish |
+| Billing / Play | team4 | `team/grin-t4-product` | `grin-t4-product` | purchase-entry `"0"` | review | `TWO_OWNER_DECISIONS.md` `7e4ed20`. Catalog NOT RUN. | activation HOLD | Owner fills GiB + A–D; no website/Save/submit |
 | Independent QA | team5 | `team/grin-t5-qa` | `grin-t5-qa` | newly landed only | running | Closeout `00fd822` covers `0d7aa17` only | NATIVE_DEVICE | Review `56f2040` capacity/cleanup only; not device/live |
 | E1 evidence composition | team1 | `team/grin-t1-backend` | `grin-t1-backend` | `15bd2a6` | source_verified | persistGrinOwnerSession → processAttachments → real httpsCallable on isolated Functions emulator | live export HOLD | Stay unexported / undeployed |
 | E1/E2/E4/E5 evidence integrity | team2 | `team/grin-t2-evidence` | `grin-t2-evidence` | `29c6d3f` | source_verified | G2 unit + STORAGE_EMULATOR 8091/9200 | live IAM | Stay undeployed |
