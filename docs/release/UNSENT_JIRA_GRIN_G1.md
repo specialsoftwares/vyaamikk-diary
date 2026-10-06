@@ -252,3 +252,7 @@ Cherry-pick of `2cebe32` (`team/grin-t2-capacity`) onto combined as `56f2040e301
 
 `docs/release/proposals/team3/APPROVAL_B_DRAFT.md` + device scripts (team `ddd1598` on `team/grin-t3-candidate-1310`). Freeze-prepare **`56f2040`**. **`520f9f9` retired for new builds.** Will retarget when T2 1/3/10+45d lands. B1 ≠ B2; **neither granted**. OnePlus 12R / Android 16 / vc22 / today filled (upgrade). Clean-install **unnamed**. UIDs not in git. `adb` empty → **NOT RUN**. No EAS/Play write. Do not mark device / Internal Testing Done.
 
+## Team 2 owner-choice 1/3/10 + 45d (unsent, 2026-10-06)
+
+Cherry-pick of `ad72d79` (`team/grin-t2-owner-choice-1310`) onto combined as `313025f902b0a3416815da7ce75a3a7d6bec9559`. Live caps **1/3/10 GiB**. Grace **45 days**. Historical 1/5/20 and 256 MiB/1/5 named, not live. **Do not advertise.** `INCLUDE_GRIN_IN_ACCOUNT_PURGE=false`. **P3 PASS**. **P8 FAIL**. Helper pin still `520f9f9` — **STALE vs `313025f`**. Canonical CI **NOT RUN**. Do not build `520f9f9`. Do not mark GRIN / device / billing / public-release Done.
+

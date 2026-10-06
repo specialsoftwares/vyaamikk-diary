@@ -12,7 +12,7 @@ Owner writes **2026-10-06 13:59** (this chat). Source implementation authorized.
 Live deploy / billing / Play publish still **not** authorized.
 
 - Storage: **Starter 1 GiB / Professional 3 GiB / Business 10 GiB** (neither 1/5/20 nor 256 MiB/1/5 GiB). **Do not advertise.**
-- Explicit deletion: **45-day** cancellation window after a confirmed account-deletion request. **Supersedes** the 180-day request. Implemented code is still 15 days until Team 2 lands the constant. `INCLUDE_GRIN_IN_ACCOUNT_PURGE` stays **false** until separately approved.
+- Explicit deletion: **45-day** cancellation window after a confirmed account-deletion request. **Supersedes** the 180-day request. **Wired** in `313025f` (`DELETION_GRACE_DAYS=45`). `INCLUDE_GRIN_IN_ACCOUNT_PURGE` stays **false** until separately approved.
 
 Source of original options: `D_OWNER_POLICY_OPTIONS.md`.
 
@@ -50,7 +50,7 @@ no overage). That framework is **not** reopened here.
 
 **Owner choice 2026-10-06:** Starter **1 GiB** / Professional **3 GiB** / Business **10 GiB**.
 Neither option 1 (1/5/20) nor option 2 (256 MiB/1/5 GiB). **Do not advertise.**
-Source constants still 1/5/20 until Team 2 wires this table. GCS location **UNKNOWN**.
+**Wired** as `OWNER_SELECTED_STORAGE_CAPS_BYTES` on `313025f`. GCS location **UNKNOWN**. **Do not advertise.**
 
 | Option | Starter | Professional | Business | Status |
 |---|---|---|---|---|
@@ -94,7 +94,7 @@ Owner plain-language sheet (choices **A–D blank** until the owner writes):
 |---|---|---|
 | 1 | **Current implemented behavior** | `DELETION_GRACE_MS` = **15 days**. Live `/privacy` and `/delete-account` also describe 15 days. |
 | 2 | **Superseded request** | **180 days** — **superseded** 2026-10-06. Do not implement 180. |
-| 3 | **Owner policy 2026-10-06** | **45-day** cancellation window after a **confirmed** account-deletion request. Source not yet wired. Play: freeze ≠ delete. `INCLUDE_GRIN_IN_ACCOUNT_PURGE` stays **false** until separately approved. |
+| 3 | **Owner policy 2026-10-06** | **45-day** grace **wired** (`313025f`). Play freeze ≠ delete. `INCLUDE_GRIN_IN_ACCOUNT_PURGE` stays **false**. |
 
 Changing `DELETION_GRACE_MS` from 15 to 45 implements the **pending-then-purge clock** for account deletion. It does **not** by itself: enable GRIN purge, change subscription expiry (90+30), create a recoverable archive, or satisfy Play if the account is only frozen. Subscription expiry remains 90+30. Optional archive remains a separate product.
 
