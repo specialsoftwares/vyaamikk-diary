@@ -84,7 +84,7 @@ purchase-entry remains `"0"`. Play Console catalog **NOT RUN**.
 
 | Team | Authorized work this session | Approval still required |
 |---|---|---|
-| 1 Backend | Auth GAP tests added (EMULATOR/INJECTED PASS). A1 independently offerable. Enable/disable: dotenv blocked; gcloud UNPROVEN. Mixed-state planner not wired. | Live Functions/Rules/IAM/admission/enable |
+| 1 Backend | A1 packet refreshed (`A1_PACKET_REFRESH.md`). Isolated Firestore Rules still independently offerable. Functions pin `5d5df3d` **STALE**; A3 waits for post-S1/S2 pin. Ops-guard `228a8f5` 34/34. | Live Functions/Rules/IAM/admission/enable |
 | 2 Policy | Issuance+storage+expiry+export folded (`14e56f3`). Economics: do not advertise 1/5/20; alternative **256 MiB / 1 GiB / 5 GiB**. `INCLUDE_GRIN_IN_ACCOUNT_PURGE=false`. 15-day grace unchanged. | Owner GiB confirm; 180-day public policy; no live purge |
 | 3 Build/device | Play inventory **NOT RUN** (ToS / aeadmin lockout). EAS: no `internal-grin` / no `5d5df3d`; highest vc22. Device sheet **NOT RUN**. B1≠B2, neither granted. | EAS/native build; Play upload (separate); Play Console re-read |
 | 4 Billing/Play | Tester UID allowlist in source (empty=deny; not enabled). PLAY_SUBMISSION_READINESS corrected. Data safety rebuild. 180-day: keep 15-day. Catalog **NOT RUN**. | Product/price/activation/submission; billing Functions deploy of this SHA |

@@ -5,15 +5,13 @@ Approval of A1 does not approve A2–A7. Do not set `GRIN_OPS_ALLOW_LIVE=1`
 from this file.
 
 Pinned GRIN Functions application: `5d5df3d54df08953bfb26db39a9b7f5e3d67ed47`
-(`git diff` empty on `functions/src/goodsEvidence`). Combined HEAD also
-includes the fail-closed billing tester allowlist (`0c91c47`) and Team 1
-auth GAP tests (`086aa73`). Do **not** cite CI `37351685421` for that later
-tree. Ops helper: `228a8f58ac83d3c71e853cdccb6e4c4fa64c251f`.
-Working directory: repository root. Isolated Rules config only — never
-repo-root quota Firestore (`233b05b7…`).
-
-Refresh inspect immediately before each apply. 2026-10-06 this session:
-inventory complete HTTP 200, seven GRIN **ABSENT**, Rules hashes = baseline.
+is **STALE** vs application `b845e8a` (pre-S1/S2). A1 does **not** run the
+Functions helper, so A1 can still be offered. **A3 waits** for a reviewed
+pin after S1/S2 — do **not** pin `b845e8a`; do **not** env-override
+`PINNED_APP_SHA`. Ops helper: `228a8f58ac83d3c71e853cdccb6e4c4fa64c251f`
+(34/34). Fresh inspect 2026-10-06: GRIN seven **ABSENT**, Firestore
+`b13d5255…` = baseline. Packet:
+`docs/release/proposals/team1/A1_PACKET_REFRESH.md`.
 
 ---
 

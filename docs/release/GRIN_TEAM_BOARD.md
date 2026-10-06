@@ -10,7 +10,7 @@ Checkpoint: PR #31 head `41b05a4` / application `b845e8a` / GHA `37379529193`. T
 | Task | Owner | Branch | Worktree | Dependency | Status | Evidence | Blocker | Next |
 |---|---|---|---|---|---|---|---|---|
 | Integration | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | `41b05a4` | running | GHA `37379529193` success; app `b845e8a`; P3 PASS; P8 FAIL; S1/S2 open | live mutate / EAS / Play / billing HOLD | Fold S1/S2; owner GiB; A1 |
-| Backend pilot | team1 | `team/grin-t1-backend` | `grin-t1-backend` | ops-guard `228a8f5` | running | A1 independently offerable; pin still `5d5df3d` until S1/S2 SHA | `GRIN_OPS_ALLOW_LIVE=1` HOLD | Fresh A1 packet; do not env-override pin |
+| Backend pilot | team1 | `team/grin-t1-backend` | `grin-t1-backend` | ops-guard `228a8f5` | review | `A1_PACKET_REFRESH.md` `3efd762`. A1 independently offerable. Pin `5d5df3d` STALE; A3 after S1/S2. | `GRIN_OPS_ALLOW_LIVE=1` HOLD | Owner A1 grant; `REVIEW_AFTER_S1_S2` |
 | Policy / deletion | team2 | `team/grin-t2-evidence` | `grin-t2-evidence` | `41b05a4` | running | P3 preserved. S1/S2 storage accounting. Economics revision. | advertising GiB; live purge | Close S1/S2; improved economics |
 | Build / device | team3 | `team/grin-t3-offline` | `grin-t3-offline` | Play inventory NOT RUN | running | Device sheet NOT RUN; vc23 unreserved | EAS/Play B1/B2 HOLD | Reproducible Internal AAB packet; no unauthorized build |
 | Billing / Play | team4 | `team/grin-t4-product` | `grin-t4-product` | purchase-entry `"0"` | running | Allowlist SOURCE; catalog NOT RUN; 15 vs 180 UNRESOLVED | activation HOLD | Decision sheet 15/180; no website publish |

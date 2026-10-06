@@ -184,3 +184,7 @@ Reviewed application `b845e8a` (`POLICY_QA_T2.md`, team commit `365f9f3`). **P3 
 
 PR #31 head `41b05a49e8e60597b63a35f22825878bc1945dee` matches this checkout. GitHub Actions run **`37379529193`** job **`111997702708`** verify/canonical CI **success**. `7761af6`→`41b05a4` includes Team 5 QA files and a `package.json` test script — not exclusively narrative. Open **S1** (corrupt accounting can bypass storage cap) and **S2** (hold key omits ledgerId). P3 remains accepted. P8 remains FAIL. Do not cite `37351685421` for this tree. Do not mark GRIN / device / billing / public-release Done.
 
+## Team 1 A1 refresh (unsent, 2026-10-06)
+
+Packet `docs/release/proposals/team1/A1_PACKET_REFRESH.md` (team `3efd762`). Isolated Firestore Rules still independently offerable (`firebase.rules-only.json --only firestore:rules`). Live baseline `b13d5255…`; proposed merged `551203b8…`; config `d224b753…`. Functions pin `5d5df3d` **STALE** vs `b845e8a`; A3 waits for reviewed pin **after S1/S2** — do not pin `b845e8a`, do not env-override. Ops-guard remains `228a8f5` 34/34. No live deploy. Do not mark backend/GRIN Done.
+
