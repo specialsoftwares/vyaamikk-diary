@@ -1,4 +1,4 @@
-# Device execution sheet — Internal GRIN candidate (`candidate-1310`)
+# Device execution sheet — Internal GRIN candidate (`540e07a`)
 
 Who: owner plus two named testers on hardware. Coordinator/AI does **not**
 physically execute. Tick only after the named run. Synthetic data only while
@@ -12,13 +12,16 @@ Phone handoff: `docs/release/proposals/team3/PHONE_HANDOFF.md`.
 
 Contract: `2026-10-02.wave2evidence`.
 Intended binary (after Approval B, **not granted**): Play Internal AAB
-`internal-grin` at the coordinator-selected **FINAL** application SHA
-after billing-lifecycle correction + matching **completed** canonical CI
-— **not** an intermediate; **not** `520f9f9` / `56f2040` / `313025f`
-alone. Current app blobs (may be superseded): `fcda7cd`. Canonical CI
-GHA `37440328976` **IN_PROGRESS** on `70bdfe4` is not matching CI.
+`internal-grin` at application `540e07aa07f376716484adb879ce66cb9fb170ce`.
+Canonical CI GHA `37445383607` **SUCCESS**, job `112208918347`, tested
+checkout `7e0d629` (parent `d4c7ed4`; `540e07a`..`7e0d629` DEPLOYMENT_PATHS
+empty — docs/QA only). **Not** `7e0d629` as B1; **not** `520f9f9` /
+`56f2040` / `313025f` / `fcda7cd` / `60c4bc1` alone. Recheck Play
+immediately before B1 remains **required**.
 Label the artifact: `PLAY_INSTALLED` vs `NATIVE_DEVICE`. This GRIN AAB
 is **not** an interactive purchase-test build (purchase-entry `"0"`).
+Restricted billing is **not** a prerequisite. P8 **FAIL**. GRIN
+synthetic-only until later backend.
 
 Scripts (prepared **without** waiting for an AAB; refuse PASS without a
 phone): `docs/release/proposals/team3/device/`.
@@ -48,9 +51,9 @@ Identities, UIDs, emails, and passwords stay **blank in git**. Do not invent.
 
 | Slot | Role | Display name | Firebase uid | Play Internal email | Phone | Auth notes |
 |---|---|---|---|---|---|---|
-| O | Owner | | *(private channel)* | *(private channel)* | | D1 OnePlus 12R / Android 16 / vc22. No password in this sheet. Available today. |
-| T1 | Tester 1 | | | | | Owner fills. |
-| T2 | Tester 2 | | | | | Owner fills. |
+| O | Owner | | *(private; already received; do not git)* | *(private channel)* | | D1 OnePlus 12R / Android 16 / vc22. UID count=1 received privately — do **not** ask again. No password in this sheet. Available today. |
+| T1 | Tester 1 | | | | | Optional / unnamed. Owner fills if used. |
+| T2 | Tester 2 | | | | | Optional / unnamed. Owner fills if used. |
 
 Admission docs (`users/{uid}/goodsEvidenceAdmission/runtime`) are Approval A,
 not this sheet. Play licence-tester emails are **not** Firestore admission.
@@ -66,7 +69,7 @@ Live GRIN seven **ABSENT**. Useful GRIN rows need later backend.
 
 | ID | Steps | Expected | Label | Status |
 |---|---|---|---|---|
-| D0 | Record identities; confirm artifact class | Identities via private channel; D1 OnePlus 12R named; no guessed vc22 reconstruction from a commit label | — | NOT RUN |
+| D0 | Slot O UID already received privately (count=1); confirm artifact class | Do **not** ask O again; identities stay out of git; D1 OnePlus 12R named; no guessed vc22 reconstruction from a commit label | — | NOT RUN |
 | D1 | Upgrade install over vc22 via Play on OnePlus 12R | Play shows new versionCode; cold start; existing diary/PO/credit/letterhead/PDF still work; SQLite v10 migrates | PLAY_INSTALLED | NOT RUN |
 | D2 | Clean install (device still unnamed) | Same launch/sign-in; empty local DB | PLAY_INSTALLED or NATIVE_DEVICE | NOT RUN |
 | D3 | Force-stop; reboot; open app | Splash completes; main tabs; legal date `2026-07-27`; no token printed | same | NOT RUN |

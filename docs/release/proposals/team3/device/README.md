@@ -4,10 +4,11 @@ Prepared **without waiting for an AAB**. No EAS / Play write / prebuild /
 OTA. B1 ≠ B2; **neither granted**. This instruction does **not**
 authorize B1/B2.
 
-Internal AAB = coordinator-selected **FINAL** SHA after billing-lifecycle
-correction + matching **completed** CI. Current app blobs (may be
-superseded): `fcda7cd`. Do **not** build `520f9f9` / `56f2040` /
-`313025f` alone.
+Internal AAB = application `540e07aa07f376716484adb879ce66cb9fb170ce`.
+Canonical CI GHA `37445383607` **SUCCESS** on `7e0d629` (docs/QA only).
+Do **not** rebuild `520f9f9` / `56f2040` / `313025f` / `fcda7cd` /
+`60c4bc1` alone. Recheck-Play-before-B1 required. B1 ≠ B2; **neither
+granted**.
 
 **No connected phone = NOT RUN, never PASS.** Host SQLite / mounted inert
 React / emulator / CI greens are **not** device evidence.
