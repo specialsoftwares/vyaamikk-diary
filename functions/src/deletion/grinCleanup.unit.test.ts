@@ -2,7 +2,7 @@
  * INJECTED — GRIN cleanup lists, flag off by default, behavioral purge when force:true.
  * Not an operational deletion service. Does not change scheduledDeletionCleanup.
  * DELETION_GRACE_MS is 45 days (SUPERSEDES 15; not 180). INCLUDE_GRIN_IN_ACCOUNT_PURGE stays false.
- * P8 public deletion remains FAIL.
+ * P8 public deletion remains FAIL until owner live grant. Packet is not authorization.
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -69,9 +69,16 @@ assert.match(finalPurgeSrc, /DELETION_GRACE_MS = 45 \* 24 \* 60 \* 60 \* 1000/);
 assert.match(finalPurgeSrc, /INCLUDE_GRIN_IN_ACCOUNT_PURGE/);
 assert.doesNotMatch(finalPurgeSrc, /DELETION_GRACE_MS = 180/);
 assert.match(finalPurgeSrc, /if \(INCLUDE_GRIN_IN_ACCOUNT_PURGE\)/);
+assert.match(finalPurgeSrc, /P8 GRIN gate: independent of diary phase-done flags/);
+assert.match(finalPurgeSrc, /startAfter/);
+assert.match(finalPurgeSrc, /accountPurgeMayComplete/);
 assert.match(finalPurgeSrc, /purgeAllUserOwnedStorage/);
 assert.match(finalPurgeSrc, /purgeUserSubcollectionsFully/);
 assert.match(finalPurgeSrc, /deleteAuthUserIdempotent/);
+assert.doesNotMatch(
+  finalPurgeSrc,
+  /if \(phases\.storage !== "done"\)[\s\S]*if \(INCLUDE_GRIN_IN_ACCOUNT_PURGE\)[\s\S]*phases\.storage = "done"/
+);
 
 const identitySrc = readFileSync(join(dir, "../../../src/domain/identityLifecycle.ts"), "utf8");
 assert.match(identitySrc, /DELETION_GRACE_DAYS = 45/);
@@ -360,6 +367,58 @@ async function main(): Promise<void> {
     assert.ok(eventIdx < receiptIdx, "event child must be deleted before receipt parent");
     assert.ok(receiptIdx < ledgerIdx, "receipt must be deleted before ledger parent");
     assert.equal(db.paths().some((p) => p.startsWith("users/u1/")), false);
+  }
+
+  {
+    const ledger = "users/u1/goodsEvidenceLedgers/led1";
+    const receipt = `${ledger}/receipts/r1`;
+    const db = mockFirestore(
+      new Map<string, Set<string>>([
+        [ledger, new Set()],
+        [`${ledger}/commands/cmd1`, new Set()],
+        [receipt, new Set()],
+        [`${receipt}/events/e1`, new Set()],
+        [`${receipt}/evidenceLinks/ev1`, new Set()],
+        [`users/u1/goodsEvidenceStorage/accounting`, new Set()],
+      ])
+    );
+    const wrapped: GrinFirestoreLike = {
+      listCollection: (path) => db.listCollection(path),
+      async listSubcollections() {
+        return [];
+      },
+      delete: (path) => db.delete(path),
+    };
+    const done = await purgeGrinEvidenceIfEnabled({
+      uid: "u1",
+      bucket: mockBucket([]),
+      db: wrapped,
+      force: true,
+    });
+    assert.equal(done.completed, true, "known nested ids must be visited when listSubcollections is empty");
+    assert.equal(await countGrinFirestoreDocs(db, "u1"), 0);
+    assert.equal(db.paths().some((p) => p.startsWith("users/u1/")), false);
+  }
+
+  {
+    const db = mockFirestore(seedOwnerGrinTree("u1"));
+    const wrapped: GrinFirestoreLike = {
+      listCollection: (path) => db.listCollection(path),
+      listSubcollections: (path) => db.listSubcollections(path),
+      async delete() {
+        /* leave docs in place */
+      },
+    };
+    const leftover = await purgeGrinEvidenceIfEnabled({
+      uid: "u1",
+      bucket: mockBucket([]),
+      db: wrapped,
+      force: true,
+    });
+    assert.equal(leftover.completed, false);
+    assert.equal(leftover.firestoreExhausted, false);
+    assert.equal(leftover.detail, "grin_firestore_incomplete");
+    assert.ok(await countGrinFirestoreDocs(db, "u1") > 0);
   }
 
   console.log("grinCleanup.unit.test.ts: ok (INJECTED)");

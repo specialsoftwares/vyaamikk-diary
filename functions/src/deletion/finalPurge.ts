@@ -20,7 +20,7 @@
  * Grace period users are never finally deleted.
  */
 
-import { FieldValue } from "firebase-admin/firestore";
+import { FieldValue, type Query, type QueryDocumentSnapshot } from "firebase-admin/firestore";
 
 import { getAdminAuth, getAdminBucket, getAdminDb } from "../admin";
 import { normalizePhoneE164 } from "../identity/shared";
@@ -28,7 +28,7 @@ import { deleteAuthUserIdempotent } from "./authDelete";
 import {
   DELETION_JOBS,
   MAX_ATTEMPTS_BEFORE_MANUAL,
-  allPhasesDone,
+  accountPurgeMayComplete,
   canAcquireLease,
   classifyProviderError,
   initialDeletionJob,
@@ -282,6 +282,45 @@ async function patchJob(uid: string, patch: Record<string, unknown>): Promise<vo
     .set({ ...patch, updatedAt: Date.now() }, { merge: true });
 }
 
+const GRIN_FIRESTORE_LIST_PAGE = 400;
+
+/**
+ * Production GRIN adapter. Pages until a short page — a single limit(400)
+ * would strand the rest and could still look "empty" to a matching count.
+ */
+export async function listGrinCollectionPaged(path: string): Promise<
+  { id: string; ref: { path: string } }[]
+> {
+  const col = getAdminDb().collection(path);
+  const docs: { id: string; ref: { path: string } }[] = [];
+  let last: QueryDocumentSnapshot | undefined;
+  for (;;) {
+    let q: Query = col.limit(GRIN_FIRESTORE_LIST_PAGE);
+    if (last) q = q.startAfter(last);
+    const snap = await q.get();
+    if (snap.empty) break;
+    for (const d of snap.docs) {
+      docs.push({ id: d.id, ref: { path: d.ref.path } });
+    }
+    last = snap.docs[snap.docs.length - 1];
+    if (snap.size < GRIN_FIRESTORE_LIST_PAGE) break;
+  }
+  return docs;
+}
+
+function adminGrinFirestoreAdapter(): import("./grinCleanup").GrinFirestoreLike {
+  return {
+    listCollection: (path) => listGrinCollectionPaged(path),
+    async listSubcollections(docPath: string) {
+      const cols = await getAdminDb().doc(docPath).listCollections();
+      return cols.map((c) => c.id);
+    },
+    async delete(path: string) {
+      await getAdminDb().doc(path).delete();
+    },
+  };
+}
+
 export type FinalPurgeResult = {
   ok: boolean;
   detail: string;
@@ -336,33 +375,11 @@ export async function runFinalAccountPurge(uid: string): Promise<FinalPurgeResul
       if (!storageResult.verifiedEmpty) {
         throw new Error("storage_verify_not_empty");
       }
-      if (INCLUDE_GRIN_IN_ACCOUNT_PURGE) {
-        const grin = await purgeGrinEvidenceIfEnabled({
-          uid,
-          bucket: getAdminBucket() as unknown as import("./storagePurge").StorageBucketLike,
-          db: {
-            async listCollection(path: string) {
-              const snap = await getAdminDb().collection(path).limit(400).get();
-              return snap.docs.map((d) => ({ id: d.id, ref: { path: d.ref.path } }));
-            },
-            async listSubcollections(docPath: string) {
-              const cols = await getAdminDb().doc(docPath).listCollections();
-              return cols.map((c) => c.id);
-            },
-            async delete(path: string) {
-              await getAdminDb().doc(path).delete();
-            },
-          },
-        });
-        if (!grin.completed) {
-          throw new Error(grin.detail);
-        }
-      }
       phases.storage = "done";
       await patchJob(uid, { phases });
     }
 
-    // Phase: Firestore subcollections
+    // Phase: Firestore subcollections (diary USER_SUBCOLLECTIONS only).
     if (phases.firestore !== "done") {
       phases.firestore = "in_progress";
       await patchJob(uid, { phases });
@@ -373,6 +390,24 @@ export async function runFinalAccountPurge(uid: string): Promise<FinalPurgeResul
       }
       phases.firestore = "done";
       await patchJob(uid, { phases });
+    }
+
+    // P8 GRIN gate: independent of diary phase-done flags.
+    // Skipped while INCLUDE_GRIN_IN_ACCOUNT_PURGE is false (current production).
+    // After an owner live grant + flag flip, in-flight jobs that already
+    // finished diary storage/firestore still purge GRIN before indexes/Auth.
+    let grinCompleted = !INCLUDE_GRIN_IN_ACCOUNT_PURGE;
+    if (INCLUDE_GRIN_IN_ACCOUNT_PURGE) {
+      await assertStillPendingOrDeletedStub(uid, generation);
+      const grin = await purgeGrinEvidenceIfEnabled({
+        uid,
+        bucket: getAdminBucket() as unknown as import("./storagePurge").StorageBucketLike,
+        db: adminGrinFirestoreAdapter(),
+      });
+      grinCompleted = grin.completed;
+      if (!grin.completed) {
+        throw new Error(grin.detail);
+      }
     }
 
     // Phase: indexes + mark deleted
@@ -405,7 +440,13 @@ export async function runFinalAccountPurge(uid: string): Promise<FinalPurgeResul
       await patchJob(uid, { phases });
     }
 
-    if (!allPhasesDone(phases)) {
+    if (
+      !accountPurgeMayComplete({
+        phases,
+        includeGrinInAccountPurge: INCLUDE_GRIN_IN_ACCOUNT_PURGE,
+        grinCompleted,
+      })
+    ) {
       throw new Error("phases_incomplete");
     }
 
