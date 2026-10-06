@@ -75,6 +75,7 @@ function productionDeps(): AndroidBillingDeps {
     }),
     diagnosticUidFor: (uid) => diagnosticUidHmac(secret, uid),
     nowMs: () => Date.now(),
+    enforceRestrictedTesters: true,
   };
 }
 

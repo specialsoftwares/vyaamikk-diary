@@ -68,6 +68,7 @@
     "test:billing-google-money": "npx --yes tsx functions/src/billing/google/playMoney.unit.test.ts",
     "test:billing-google-play": "npx --yes tsx functions/src/billing/google/androidPlay.unit.test.ts",
     "test:billing-play-constants": "npx --yes tsx functions/src/billing/google/playConstants.unit.test.ts",
+    "test:deletion-grace-copy": "npx --yes tsx src/content/legal/deletionGraceCopy.unit.test.ts",
     "test:grin-t2-quota": "npx --yes tsx tools/goods-evidence-emulator/quota.injected.unit.test.ts",
     "test:grin-t2-storage-quota": "npx --yes tsx tools/goods-evidence-storage/storageQuota.unit.test.ts && npx --yes tsx tools/goods-evidence-storage/storageQuota.injected.unit.test.ts",
     "test:grin-t2-cleanup": "npx --yes tsx functions/src/deletion/grinCleanup.unit.test.ts",

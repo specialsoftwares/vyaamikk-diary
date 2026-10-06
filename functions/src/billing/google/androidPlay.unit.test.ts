@@ -2802,6 +2802,52 @@ async function main() {
     }
   }
 
+  // Restricted testers: empty allowlist denies grant; listed UID may grant
+  {
+    const play = new FakePlay(activeSub(), paidOrder(ORDER1, "249"));
+    const { deps, store } = await primedDeps(play);
+    deps.enforceRestrictedTesters = true;
+    deps.restrictedTesterEnv = { PLAY_BILLING_ENABLED: "true" };
+    await assert.rejects(
+      processAndroidPurchaseToken(deps, {
+        purchaseToken: TOKEN,
+        callerUid: UID,
+        source: "androidValidation",
+        eventSource: "callable",
+      }),
+      isCause("play_billing_tester_not_allowlisted")
+    );
+    assert.equal(store.docs.has(`users/${UID}/subscription/status`), false);
+
+    deps.restrictedTesterEnv = {
+      PLAY_BILLING_ENABLED: "true",
+      PLAY_BILLING_TESTER_UIDS: JSON.stringify({ uids: [UID] }),
+    };
+    const granted = await processAndroidPurchaseToken(deps, {
+      purchaseToken: TOKEN,
+      callerUid: UID,
+      source: "androidValidation",
+      eventSource: "callable",
+    });
+    assert.equal(granted.to?.entitlementActive, true);
+
+    const rtdnPlay = new FakePlay(activeSub(), paidOrder(ORDER2, "249"));
+    const rtdnPrimed = await primedDeps(rtdnPlay);
+    rtdnPrimed.deps.enforceRestrictedTesters = true;
+    rtdnPrimed.deps.restrictedTesterEnv = { PLAY_BILLING_ENABLED: "true" };
+    await assert.rejects(
+      handleAndroidRtdn(
+        rtdnPrimed.deps,
+        rtdnBody(
+          { subscriptionNotification: { notificationType: 4, purchaseToken: TOKEN } },
+          "restricted-deny"
+        )
+      ),
+      isCause("play_billing_tester_not_allowlisted")
+    );
+    assert.equal(rtdnPrimed.store.docs.has(`users/${UID}/subscription/status`), false);
+  }
+
   // Source-level: adapter never logs tokens
   {
     const src = [
