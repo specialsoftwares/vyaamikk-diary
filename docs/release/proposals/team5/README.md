@@ -30,6 +30,9 @@ QA artefacts. Not production implementations. Not G6 completion.
 | `POLICY_QA_T2.md` | Independent T2 review at `b845e8a`; **P3 PASS** on production register INJECTED; **P8 FAIL** |
 | `S1_S2_PRE_FIX.md` | Independent INJECTED G2 adapter reproduction of S1/S2 at `b845e8a`; **WAITING_FOR_FIX**; P3 unchanged ACCEPTED |
 | `s1-s2-pre-fix.injected.ts` | Pre-fix harness: exit 0 means defects reproduced, not a product pass |
+| `S1_S2_POST_FIX.md` | Independent INJECTED + named G2 EMULATOR review at `520f9f9`; **S1/S2 PASS** at that boundary; P3 ACCEPTED; P8 FAIL; GHA/device/live **NOT RUN** |
+| `s1-s2-post-fix.injected.ts` | Post-fix adapter harness |
+| `s1-s2-post-fix.emulator.ts` | Post-fix Firestore emulator harness (`127.0.0.1:8091` / `demo-vyaamikk-grin-g2`) |
 | `wave2evidence-e1-e5-repro.ts` | SQLITE_HOST / INJECTED / host-filesystem drivers for E1–E5 |
 | `wave2evidence-e1-e5-rereview.ts` | PHASE 2 persistGrinOwnerSession inspection + unset-host failure |
 | `wave2evidence-e4-hasher-followup.ts` | PHASE 3 persist hasher / conversion persist / SHA-256 inspection |

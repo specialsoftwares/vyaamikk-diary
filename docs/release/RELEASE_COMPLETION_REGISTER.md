@@ -47,7 +47,7 @@ Do not reopen ops-guard A/B without a new concrete reproduction.
 
 | Gate | State |
 |---|---|
-| SOURCE READY | S1/S2 source folded at `520f9f9`. Coordinator focused tests **PASS** (helper, injected adapter, G2 unit, G2 emulator including Firestore S1/S2, P3 issuance, deletion lists, G2 typecheck). Packager parity **empty**. Canonical GHA for this SHA **NOT YET**. P3 accepted. **P8 FAIL**. Team 5 post-fix review **pending**. Do not advertise GiB. |
+| SOURCE READY | S1/S2 source at `520f9f9`. Team 5 **S1 PASS / S2 PASS** at INJECTED + named G2 EMULATOR (`127.0.0.1:8091` / `9200`, `demo-vyaamikk-grin-g2`; `1e33894`). P3 accepted. **P8 FAIL**. Canonical GHA for this SHA **NOT YET**. Do not cite `37379529193`. Do not advertise GiB. Pin still unapplied pending Team 1. |
 | BACKEND PILOT READY | Prepared; **not authorized**; GRIN seven **ABSENT** on live. Create-absent-only planner exists, **not wired**. Enable/disable still UNPROVEN on firebase-created gen2. |
 | INTERNAL BUILD READY | Packet prepared (`APPROVAL_B_DRAFT.md`); **not authorized**; freeze SHA **placeholder** (post-S1/S2). Play inventory **RUN** 2026-10-06; versionCode 23 not reserved; no `internal-grin` / `5d5df3d` EAS AAB; B1≠B2 |
 | DEVICE ACCEPTED | Execution sheet ready; **NOT RUN** |
@@ -85,11 +85,11 @@ purchase-entry remains `"0"`. Play Console catalog **NOT RUN**.
 
 | Team | Authorized work this session | Approval still required |
 |---|---|---|
-| 1 Backend | A1 packet still independently offerable. Functions pin `5d5df3d` **STALE** vs `520f9f9`. Do **not** pin until Team 5 review + Team 1 `REVIEW_AFTER_S1_S2`. Do not env-override. Ops-guard `228a8f5` 34/34. | Live Functions/Rules/IAM/admission/enable |
+| 1 Backend | A1 still independently offerable. Pin `5d5df3d` **STALE** vs `520f9f9`. Team 5 post-fix **PASS** at INJECTED+EMULATOR. Do **not** pin until Team 1 `REVIEW_AFTER_S1_S2`. Do not env-override. Ops-guard `228a8f5`. | Live Functions/Rules/IAM/admission/enable |
 | 2 Policy | S1/S2 folded (`0cd3473` → combined `520f9f9`). Holds `1.o.{len}.{ledgerId}.{len}.{evidenceId}`; `MAX_STORAGE_HOLDS=2500`. Economics: bucket location **UNKNOWN**; do not advertise 1/5/20; 256 MiB/1/5 GiB alternative not selected, not guaranteed profitable. `INCLUDE_GRIN_IN_ACCOUNT_PURGE=false`. 15-day grace unchanged. | Owner GiB confirm; 180-day public policy; no live purge |
 | 3 Build/device | Play explorer **RUN** 2026-10-06 (vc22 highest uploaded; 23 **unreserved**). Freeze SHA candidate `520f9f9` **only after** matching canonical CI. Device sheet **NOT RUN**. B1≠B2, neither granted. | EAS/native build; Play upload (separate); Play Console re-read before B1 |
 | 4 Billing/Play | Owner sheet `DELETION_15_VS_180_OWNER_SHEET.md` (15 implemented / 180 requested / public UNRESOLVED). Catalog **NOT RUN**. Allowlist SOURCE, not live. | Product/price/activation/submission; owner A/B/C/D |
-| 5 QA | Pre-fix S1/S2 FAIL recorded (`S1_S2_PRE_FIX.md`). Post-fix independent review **pending** on `520f9f9`. **P3 ACCEPTED**. **P8 FAIL**. Device/Play/live **NOT RUN**. | Post-fix adapter + named emulator hosts |
+| 5 QA | Post-fix `S1_S2_POST_FIX.md` (`1e33894`). **S1 PASS** / **S2 PASS** INJECTED + G2 EMULATOR `8091`. **P3 ACCEPTED**. **P8 FAIL**. Device/Play/live/GHA **NOT RUN**. | Does not own implementation; not device/live/billing |
 
 ---
 

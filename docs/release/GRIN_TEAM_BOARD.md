@@ -5,16 +5,16 @@ Do not collapse to Done.
 
 Arrangement: one coordinator plus five **local** Cursor Task subagents on separate worktrees. AI roles, not human sign-off.
 
-Checkpoint: application `520f9f9` (S1/S2; cherry-pick of `0cd3473`). GHA `37379529193` remains **`41b05a4` only** — do not cite for this SHA. Tooling `228a8f5`. Historical workspace **untouched**. Wave 2 / G6 / public release **not accepted**. S1/S2 source folded; Team 5 post-fix review pending.
+Checkpoint: application `520f9f9` (S1/S2). Team 5 post-fix **PASS** at INJECTED + named G2 EMULATOR. GHA `37379529193` remains **`41b05a4` only**. Tooling `228a8f5`. Wave 2 / G6 / public **not accepted**. Pin unapplied pending Team 1.
 
 | Task | Owner | Branch | Worktree | Dependency | Status | Evidence | Blocker | Next |
 |---|---|---|---|---|---|---|---|---|
-| Integration | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | `520f9f9` | running | S1/S2 folded; focused tests PASS; canonical CI pending; P3 PASS; P8 FAIL | live mutate / EAS / Play / billing HOLD | Canonical CI; T5 review; owner GiB; A1 |
-| Backend pilot | team1 | `team/grin-t1-backend` | `grin-t1-backend` | ops-guard `228a8f5` | review | `A1_PACKET_REFRESH.md` `3efd762`. A1 independently offerable. Pin `5d5df3d` STALE vs `520f9f9`. | `GRIN_OPS_ALLOW_LIVE=1` HOLD | `REVIEW_AFTER_S1_S2`; do not pin until T5; no env-override |
+| Integration | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | `520f9f9` | running | T5 S1/S2 PASS INJECTED+EMULATOR; canonical CI pending; P3 PASS; P8 FAIL | live mutate / EAS / Play / billing HOLD | Canonical CI; T1 pin review; owner GiB; A1 |
+| Backend pilot | team1 | `team/grin-t1-backend` | `grin-t1-backend` | ops-guard `228a8f5` | running | A1 still offerable. Pin `5d5df3d` STALE vs `520f9f9`. T5 post-fix PASS. | `GRIN_OPS_ALLOW_LIVE=1` HOLD | `REVIEW_AFTER_S1_S2`; no env-override |
 | Policy / deletion | team2 | `team/grin-t2-s1s2` | `grin-t2-evidence` | `0cd3473` | review | S1/S2 `S1_S2_HANDOFF.md`. P3 preserved. Holds-map 2500. Economics location UNKNOWN. | advertising GiB; live purge | Owner GiB; P8 still open |
 | Build / device | team3 | `team/grin-t3-offline` | `grin-t3-offline` | Play inventory RUN 2026-10-06 | review | `APPROVAL_B_DRAFT.md` `7bdf375`. vc23 unreserved. Freeze candidate `520f9f9` after CI. No phone results. | EAS/Play B1/B2 HOLD | Owner B1 only after matching CI; no unauthorized build |
 | Billing / Play | team4 | `team/grin-t4-product` | `grin-t4-product` | purchase-entry `"0"` | review | `DELETION_15_VS_180_OWNER_SHEET.md` `ec4a03d`. Catalog NOT RUN. | activation HOLD; public deletion UNRESOLVED | Owner fills A/B/C/D; no website publish |
-| Independent QA | team5 | `team/grin-t5-qa` | `grin-t5-qa` | post-fix `520f9f9` | running | Pre-fix FAIL `4c1e8a7`. Post-fix review of real adapters + named emulator hosts | NATIVE_DEVICE | S1/S2 separate from P8; do not mark device/live/billing |
+| Independent QA | team5 | `team/grin-t5-qa` | `grin-t5-qa` | `520f9f9` | review | `S1_S2_POST_FIX.md` `1e33894`. S1/S2 PASS INJECTED+EMULATOR `8091`; P3 ACCEPTED; P8 FAIL | NATIVE_DEVICE | Not device/live/billing/GHA |
 | E1 evidence composition | team1 | `team/grin-t1-backend` | `grin-t1-backend` | `15bd2a6` | source_verified | persistGrinOwnerSession → processAttachments → real httpsCallable on isolated Functions emulator | live export HOLD | Stay unexported / undeployed |
 | E1/E2/E4/E5 evidence integrity | team2 | `team/grin-t2-evidence` | `grin-t2-evidence` | `29c6d3f` | source_verified | G2 unit + STORAGE_EMULATOR 8091/9200 | live IAM | Stay undeployed |
 | E2/E3 admission + descriptors | team3 | `team/grin-t3-offline` | `grin-t3-offline` | `0d0dd84` | source_verified | SQLITE_HOST outbox + capture columns | native death not claimed | Stay undeployed |
