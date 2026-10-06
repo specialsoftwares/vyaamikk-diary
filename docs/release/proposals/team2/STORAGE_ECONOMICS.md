@@ -27,7 +27,7 @@ This note does **not** impose a download cap, rate limit, or other undisclosed r
 | Item | Value | How known |
 |---|---|---|
 | Bucket name | `vyaamikk-diary.firebasestorage.app` | SOURCE (`productionAdminConfig` / live pin) |
-| Bucket location | **UNKNOWN** | Read-only GCS `storage.buckets.get` returned HTTP **401** without ADC; `gcloud`/`gsutil` not installed in this worktree. **Do not treat Functions region as the bucket location.** |
+| Bucket location | **UNKNOWN** | Anonymous GCS `storage.buckets.get` HTTP **401**. Firebase CLI is logged in but no Application Default Credentials / `gcloud` were used (would be extra OAuth, still a mutate risk to request). **Do not treat Functions region as the bucket location.** |
 | Functions callable region | `asia-south1` (Mumbai) | SOURCE for Cloud Run/Functions metering only |
 | Storage class assumed for models | Standard, single-region, flat namespace | ASSUMPTION until bucket location/class is read |
 
@@ -153,9 +153,17 @@ Repeated full-library download on a **20 GiB** business account can exceed **mon
 - Heavy 20 GiB + repeated downloads **need not** sit under business monthly or yearly-effective net.
 - **Do not** describe **256 MiB / 1 GiB / 5 GiB** as guaranteed profitable. As a **sensitivity**, 5 GiB × 4 downloads × $0.12 ≈ $2.40 plus ~$0.13 storage is **under** business **monthly** net ~$5.05 with the listed assumptions, and **near / above** business **yearly-effective** net ~$3.37 if downloads are repeated. Starter 256 MiB × 4 downloads × $0.12 ≈ $0.12 is under starter monthly net **in that same sensitivity**, not as a promise.
 
-**1 / 5 / 20 remains proposed pending owner confirmation.** **256 MiB / 1 GiB / 5 GiB remains an alternative, not a selected replacement.** Do not silently change the wired constants. Do not add an undisclosed download restriction to “make the numbers work.”
+**Owner must still choose.** This note does not pick a cap.
 
-HOLD: public copy, Play listing, in-app storage marketing.
+| Option | Meaning | This slice |
+|---|---|---|
+| **A — 1 / 5 / 20 GiB** | Currently wired, labelled `PROPOSED_PENDING_OWNER_CONFIRMATION` | **Not confirmed. Do not advertise.** |
+| **B — 256 MiB / 1 GiB / 5 GiB** | Sensitivity only | **Alternative, not a selected replacement, not wired, not guaranteed profitable.** |
+| **C — other** | Owner names different ceilings | Not implemented here |
+
+Do not silently replace A with B. Do not add an undisclosed download restriction to “make the numbers work.”
+
+HOLD: public copy, Play listing, in-app storage marketing. Owner decision required.
 
 ## Behaviour implemented in source (not live deploy)
 
@@ -164,4 +172,4 @@ HOLD: public copy, Play listing, in-app storage marketing.
 - Keep 15 MiB PDF / 10 MiB image and two concurrent uploads.
 - Concurrent reservations, retry, abandoned holds, explicit authorized `repairAccounting`, downgrade-over-limit **without deleting** evidence.
 - Derivatives distinguishable from originals; both count toward the retained total.
-- Malformed/inconsistent accounting and colliding hold identity fail closed (S1/S2). Holds map is bounded by the Firestore ~1 MiB document (`MAX_STORAGE_HOLDS = 2500`); not indefinite scale.
+- Malformed/inconsistent accounting and colliding hold identity fail closed (S1/S2). Holds map has a **technical** entry limit (`MAX_STORAGE_HOLDS = 2500`); not a customer entitlement; not indefinite scale. See `HOLDS_MAP_BOUND.md`.

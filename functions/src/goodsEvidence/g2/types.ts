@@ -213,6 +213,10 @@ export type G2StorageStatus = {
   retainedOriginalBytes: number;
   reservedDerivativeBytes: number;
   retainedDerivativeBytes: number;
+  /** Technical ledger entry count. Not a customer file-count SKU. */
+  holdCount: number;
+  holdsCapacity: number;
+  holdsAtCapacity: boolean;
 };
 
 export type G2Hooks = {

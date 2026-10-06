@@ -66,6 +66,8 @@ import {
   admitStorageReservation,
   chargedStorageBytes,
   emptyStorageAccounting,
+  HOLDS_MAP_CAPACITY_DETAIL,
+  MAX_STORAGE_HOLDS,
   parseStorageAccounting,
   releaseReservedHold,
   repairStorageAccounting,
@@ -868,6 +870,7 @@ export class GoodsEvidenceStorageAdapter {
       const enforcementOn = capResolved !== "enforcement_off";
       const capBytes = enforcementOn ? capResolved : null;
       const used = chargedStorageBytes(doc);
+      const holdCount = Object.keys(doc.holds).length;
       return {
         ok: true as const,
         usedBytes: used,
@@ -879,6 +882,9 @@ export class GoodsEvidenceStorageAdapter {
         retainedOriginalBytes: doc.retainedOriginalBytes,
         reservedDerivativeBytes: doc.reservedDerivativeBytes,
         retainedDerivativeBytes: doc.retainedDerivativeBytes,
+        holdCount,
+        holdsCapacity: MAX_STORAGE_HOLDS,
+        holdsAtCapacity: holdCount >= MAX_STORAGE_HOLDS,
       };
     });
   }
@@ -904,6 +910,7 @@ export class GoodsEvidenceStorageAdapter {
         storageCapBytesFromStatus(statusSnap.exists ? statusSnap.data() : undefined, statusSnap.exists);
       const used = chargedStorageBytes(repaired);
       const capBytes = capResolved === "enforcement_off" ? null : capResolved;
+      const holdCount = Object.keys(repaired.holds).length;
       return {
         ok: true as const,
         usedBytes: used,
@@ -915,6 +922,9 @@ export class GoodsEvidenceStorageAdapter {
         retainedOriginalBytes: repaired.retainedOriginalBytes,
         reservedDerivativeBytes: repaired.reservedDerivativeBytes,
         retainedDerivativeBytes: repaired.retainedDerivativeBytes,
+        holdCount,
+        holdsCapacity: MAX_STORAGE_HOLDS,
+        holdsAtCapacity: holdCount >= MAX_STORAGE_HOLDS,
       };
     });
   }
@@ -991,6 +1001,9 @@ export class GoodsEvidenceStorageAdapter {
           "quota_exhausted",
           "Cloud storage allowance reached. This upload was not accepted."
         );
+      }
+      if (admitted.reason === "holds_map_at_capacity") {
+        return deny("quota_state_invalid", HOLDS_MAP_CAPACITY_DETAIL);
       }
       return deny("quota_state_invalid", "Storage accounting is unreadable. This upload was not accepted.");
     }

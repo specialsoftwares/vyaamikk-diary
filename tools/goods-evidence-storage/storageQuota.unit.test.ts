@@ -5,17 +5,23 @@
 import assert from "node:assert/strict";
 
 import {
+  FIRESTORE_MAX_DOCUMENT_BYTES,
+  GIB,
   MAX_STORAGE_HOLDS,
+  PROPOSED_PENDING_OWNER_CONFIRMATION_STORAGE_CAPS_BYTES,
   admitStorageReservation,
   chargedStorageBytes,
   derivativeHoldKey,
   encodeStorageHoldKey,
+  estimateStorageAccountingDocumentBytes,
   originalHoldKey,
   parseStorageAccounting,
   parseStorageHoldKey,
+  proposedPdfOriginalWorkloadBlockedByHoldsMap,
   repairStorageAccounting,
   retainStorageHold,
   releaseReservedHold,
+  sampleMaxLengthHolds,
   type StorageAccountingDoc,
   type StorageHoldIdentity,
 } from "./storageQuota";
@@ -233,6 +239,64 @@ async function main(): Promise<void> {
       assert.equal(releasedOther.retainedOriginalBytes, 900);
       assert.ok(releasedOther.holds[originalHoldKey(LEDGER, "ev_old")]);
     }
+  }
+
+  {
+    const originalsAt20Gib = proposedPdfOriginalWorkloadBlockedByHoldsMap(
+      PROPOSED_PENDING_OWNER_CONFIRMATION_STORAGE_CAPS_BYTES.business
+    );
+    assert.equal(originalsAt20Gib.originalSlots, 1365);
+    assert.equal(originalsAt20Gib.blocked, false);
+    assert.ok(originalsAt20Gib.estimatedDocumentBytes < FIRESTORE_MAX_DOCUMENT_BYTES);
+    for (const cap of [
+      PROPOSED_PENDING_OWNER_CONFIRMATION_STORAGE_CAPS_BYTES.starter,
+      PROPOSED_PENDING_OWNER_CONFIRMATION_STORAGE_CAPS_BYTES.professional,
+    ]) {
+      const workload = proposedPdfOriginalWorkloadBlockedByHoldsMap(cap);
+      assert.equal(workload.blocked, false);
+      assert.ok(workload.estimatedDocumentBytes < FIRESTORE_MAX_DOCUMENT_BYTES);
+    }
+    const maxIdOriginals = estimateStorageAccountingDocumentBytes({
+      holds: sampleMaxLengthHolds(MAX_STORAGE_HOLDS, 0),
+    });
+    const maxIdDerivatives = estimateStorageAccountingDocumentBytes({
+      holds: sampleMaxLengthHolds(0, MAX_STORAGE_HOLDS),
+    });
+    const mixedFanoutAtCap = estimateStorageAccountingDocumentBytes({
+      holds: sampleMaxLengthHolds(277, 2216),
+    });
+    const blockedFanout = estimateStorageAccountingDocumentBytes({
+      holds: sampleMaxLengthHolds(660, 5280),
+    });
+    assert.ok(maxIdOriginals < FIRESTORE_MAX_DOCUMENT_BYTES);
+    assert.ok(maxIdDerivatives < FIRESTORE_MAX_DOCUMENT_BYTES);
+    assert.ok(mixedFanoutAtCap < FIRESTORE_MAX_DOCUMENT_BYTES);
+    assert.ok(blockedFanout > FIRESTORE_MAX_DOCUMENT_BYTES);
+    assert.ok(MAX_STORAGE_HOLDS * 1 < GIB, "entry limit is not a byte entitlement");
+    const holds = Object.create(null) as StorageAccountingDoc["holds"];
+    for (let i = 0; i < MAX_STORAGE_HOLDS; i += 1) {
+      holds[originalHoldKey("led", `e${i}`)] = { kind: "original", bytes: 1, phase: "retained" };
+    }
+    const full: StorageAccountingDoc = {
+      schemaVersion: 1,
+      reservedOriginalBytes: 0,
+      retainedOriginalBytes: MAX_STORAGE_HOLDS,
+      reservedDerivativeBytes: 0,
+      retainedDerivativeBytes: 0,
+      holds,
+      updatedAtUtc: "2026-10-01T00:00:00.000Z",
+    };
+    const snapshotKeys = Object.keys(full.holds);
+    const denied = admitStorageReservation({
+      existing: full,
+      identity: { kind: "original", ledgerId: "led", evidenceId: "e_extra" },
+      bytes: 1,
+      capBytes: 1_000_000_000,
+      updatedAtUtc: STAMP,
+    });
+    assert.equal(denied.ok, false);
+    assert.equal(Object.keys(full.holds).length, MAX_STORAGE_HOLDS);
+    assert.deepEqual(Object.keys(full.holds), snapshotKeys);
   }
 
   console.log("storageQuota.unit.test.ts: ok (PURE_DOMAIN)");

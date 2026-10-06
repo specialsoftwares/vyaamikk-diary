@@ -8,7 +8,14 @@ import { GoodsEvidenceStorageAdapter } from "./adapter";
 import { FAKE_createInjectedFirestore, FAKE_seedOwner } from "./FAKE_injectedFirestore";
 import { FAKE_MemoryBlobStore } from "./FAKE_memoryBlobStore";
 import { evidenceObjectPath, receiptPath, storageAccountingPath, subscriptionStatusPath } from "./paths";
-import { originalHoldKey, parseStorageAccounting, chargedStorageBytes, PROPOSED_PENDING_OWNER_CONFIRMATION_STORAGE_CAPS_BYTES } from "./storageQuota";
+import {
+  HOLDS_MAP_CAPACITY_DETAIL,
+  MAX_STORAGE_HOLDS,
+  originalHoldKey,
+  parseStorageAccounting,
+  chargedStorageBytes,
+  PROPOSED_PENDING_OWNER_CONFIRMATION_STORAGE_CAPS_BYTES,
+} from "./storageQuota";
 import { putAndVerify, sampleBytes, sha256Bytes, testClock } from "./testSupport";
 
 const OWNER = "owner_storage_q";
@@ -616,6 +623,78 @@ async function main(): Promise<void> {
       assert.equal(parsed.holds[originalHoldKey(LEDGER, "ev_other_hold")], undefined);
       assert.equal(chargedStorageBytes(parsed), 150);
     }
+  }
+
+  {
+    const { adapter, blobs, db } = pair(1_000_000_000);
+    const kept = sampleBytes(21, 80);
+    await putAndVerify({
+      adapter,
+      blobs,
+      uid: OWNER,
+      ledgerId: LEDGER,
+      receiptId: RECEIPT,
+      evidenceId: "ev_capacity_keep",
+      bytes: kept,
+    });
+    const holds: Record<string, { kind: "original"; bytes: number; phase: "retained" }> = {
+      [originalHoldKey(LEDGER, "ev_capacity_keep")]: { kind: "original", bytes: 80, phase: "retained" },
+    };
+    let retained = 80;
+    for (let i = 0; i < MAX_STORAGE_HOLDS - 1; i += 1) {
+      holds[originalHoldKey(LEDGER, `filler${i}`)] = { kind: "original", bytes: 1, phase: "retained" };
+      retained += 1;
+    }
+    db.snapshot.set(
+      storageAccountingPath(OWNER),
+      persist({
+        schemaVersion: 1,
+        reservedOriginalBytes: 0,
+        retainedOriginalBytes: retained,
+        reservedDerivativeBytes: 0,
+        retainedDerivativeBytes: 0,
+        holds,
+        updatedAtUtc: "2026-10-01T00:00:00.000Z",
+      })
+    );
+    const before = db.snapshot.get(storageAccountingPath(OWNER));
+    const denied = await adapter.reserve(
+      { uid: OWNER },
+      {
+        evidenceId: "ev_capacity_new",
+        ledgerId: LEDGER,
+        receiptId: RECEIPT,
+        category: "invoice",
+        mime: "application/pdf",
+        claimedSha256: sha256Bytes(sampleBytes(22, 16)),
+        claimedByteSize: 16,
+      }
+    );
+    assert.equal(denied.ok, false);
+    if (!denied.ok) {
+      assert.equal(denied.code, "quota_state_invalid");
+      assert.equal(denied.detail, HOLDS_MAP_CAPACITY_DETAIL);
+    }
+    assert.equal(db.snapshot.has(evidenceObjectPath(OWNER, LEDGER, "ev_capacity_new")), false);
+    assert.equal(db.snapshot.get(storageAccountingPath(OWNER)), before);
+    const status = await adapter.storageStatus({ uid: OWNER });
+    assert.equal(status.ok, true);
+    if (status.ok) {
+      assert.equal(status.holdCount, MAX_STORAGE_HOLDS);
+      assert.equal(status.holdsCapacity, MAX_STORAGE_HOLDS);
+      assert.equal(status.holdsAtCapacity, true);
+    }
+    const downloaded = await adapter.downloadOriginal(
+      { uid: OWNER },
+      { evidenceId: "ev_capacity_keep", ledgerId: LEDGER, receiptId: RECEIPT }
+    );
+    assert.equal(downloaded.ok, true);
+    if (downloaded.ok) assert.equal(downloaded.byteSize, 80);
+    const viewed = await adapter.retrieveOriginal(
+      { uid: OWNER },
+      { evidenceId: "ev_capacity_keep", ledgerId: LEDGER, receiptId: RECEIPT }
+    );
+    assert.equal(viewed.ok, true);
   }
 
   console.log("storageQuota.injected.unit.test.ts: ok (INJECTED)");
