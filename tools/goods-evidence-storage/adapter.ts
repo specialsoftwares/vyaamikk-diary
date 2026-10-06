@@ -64,9 +64,7 @@ import { isRetryable } from "./retry";
 import {
   admitStorageReservation,
   chargedStorageBytes,
-  derivativeHoldKey,
   emptyStorageAccounting,
-  originalHoldKey,
   parseStorageAccounting,
   releaseReservedHold,
   repairStorageAccounting,
@@ -74,6 +72,7 @@ import {
   storageCapBytesFromStatus,
   storageWarningFor,
   type StorageAccountingDoc,
+  type StorageHoldIdentity,
   type StorageInventoryItem,
 } from "./storageQuota";
 import type {
@@ -376,8 +375,11 @@ export class GoodsEvidenceStorageAdapter {
       const controlRef = this.db.doc(evidenceControlPath(uid, parsed.ledgerId, parsed.receiptId));
       const controlSnap = await tx.get(controlRef);
       const accounting = await this.readAccountingAdmission(tx, uid, {
-        holdKey: originalHoldKey(parsed.evidenceId),
-        kind: "original",
+        identity: {
+          kind: "original",
+          ledgerId: parsed.ledgerId,
+          evidenceId: parsed.evidenceId,
+        },
         bytes: parsed.claimedByteSize,
         replay: objectSnap.exists,
       });
@@ -776,8 +778,12 @@ export class GoodsEvidenceStorageAdapter {
       if (!expired.ok) return expired;
       const derivativeKey = this.clock.objectKey();
       const accounting = await this.readAccountingAdmission(tx, caller.uid as string, {
-        holdKey: derivativeHoldKey(derivativeKey),
-        kind: "derivative",
+        identity: {
+          kind: "derivative",
+          ledgerId: current.ledgerId,
+          evidenceId: current.evidenceId,
+          derivativeKey,
+        },
         bytes: MAX_DERIVATIVE_BYTES,
         replay: false,
       });
@@ -885,6 +891,9 @@ export class GoodsEvidenceStorageAdapter {
     const uid = caller.uid;
     const now = formatUtcIso(this.clock.nowMs());
     const repaired = repairStorageAccounting(inventory, now);
+    if ("malformed" in repaired) {
+      return deny("quota_state_invalid", "Storage accounting is unreadable. This upload was not accepted.");
+    }
     return this.runAttempts(async (tx) => {
       const statusSnap = await tx.get(this.db.doc(subscriptionStatusPath(uid)));
       await tx.get(this.db.doc(storageAccountingPath(uid)));
@@ -941,7 +950,11 @@ export class GoodsEvidenceStorageAdapter {
   private async readAccountingAdmission(
     tx: G2Transaction,
     uid: string,
-    input: { holdKey: string; kind: "original" | "derivative"; bytes: number; replay: boolean }
+    input: {
+      identity: StorageHoldIdentity;
+      bytes: number;
+      replay: boolean;
+    }
   ): Promise<
     | {
         ok: true;
@@ -963,23 +976,13 @@ export class GoodsEvidenceStorageAdapter {
     if (capResolved === "enforcement_off") {
       return { ok: true as const, next: null, warning: null, overLimitRetained: false };
     }
-    if (input.replay) {
-      const doc = parsed ?? emptyStorageAccounting(formatUtcIso(this.clock.nowMs()));
-      const used = chargedStorageBytes(doc);
-      return {
-        ok: true as const,
-        next: null,
-        warning: storageWarningFor(used, capResolved),
-        overLimitRetained: used > capResolved,
-      };
-    }
     const admitted = admitStorageReservation({
       existing: parsed,
-      holdKey: input.holdKey,
-      kind: input.kind,
+      identity: input.identity,
       bytes: input.bytes,
       capBytes: capResolved,
       updatedAtUtc: formatUtcIso(this.clock.nowMs()),
+      replay: input.replay,
     });
     if (!admitted.ok) {
       if (admitted.code === "quota_exhausted") {
@@ -992,7 +995,7 @@ export class GoodsEvidenceStorageAdapter {
     }
     return {
       ok: true as const,
-      next: admitted.next,
+      next: admitted.replayed ? null : admitted.next,
       warning: admitted.warning,
       overLimitRetained: admitted.overLimitRetained,
     };
@@ -1207,6 +1210,48 @@ export class GoodsEvidenceStorageAdapter {
       }
       const err = evidenceTransitionError(current.state, nextState);
       if (err) return deny("invalid", err);
+      const parsedAccounting = parseStorageAccounting(
+        accountingSnap.exists ? accountingSnap.data() : undefined
+      );
+      if (parsedAccounting && "malformed" in parsedAccounting) {
+        return deny("quota_state_invalid", "Storage accounting is unreadable. This upload was not accepted.");
+      }
+      const next: EvidenceRecord = {
+        ...current,
+        ...patch,
+        state: nextState,
+        lifecycleVersion: current.lifecycleVersion + 1,
+      };
+      const identity: StorageHoldIdentity = {
+        kind: "original",
+        ledgerId: record.ledgerId,
+        evidenceId: record.evidenceId,
+      };
+      let nextAccounting: StorageAccountingDoc | null = null;
+      if (parsedAccounting) {
+        const stamp = next.updatedAtUtc;
+        if (nextState === "rejected" && (current.state === "reserved" || current.state === "uploading")) {
+          const released = releaseReservedHold(parsedAccounting, identity, stamp);
+          if ("malformed" in released) {
+            return deny("quota_state_invalid", "Storage accounting is unreadable. This upload was not accepted.");
+          }
+          nextAccounting = released;
+        } else if (
+          nextState === "uploaded_unverified" ||
+          nextState === "verified" ||
+          nextState === "linked"
+        ) {
+          const bytes = next.actualByteSize ?? next.claimedByteSize;
+          const retained = retainStorageHold(parsedAccounting, identity, bytes, stamp);
+          if ("malformed" in retained) {
+            if (retained.reason !== "hold_missing") {
+              return deny("quota_state_invalid", "Storage accounting is unreadable. This upload was not accepted.");
+            }
+          } else {
+            nextAccounting = retained;
+          }
+        }
+      }
       const uploadingIds = parseStringIds(uploadSnap.data()?.uploadingIds) ?? [];
       const token = uploadFlightToken(record.ledgerId, record.evidenceId);
       if (current.state === "uploading" && nextState !== "uploading") {
@@ -1215,33 +1260,10 @@ export class GoodsEvidenceStorageAdapter {
           uploadingIds: uploadingIds.filter((id) => id !== token),
         });
       }
-      const next: EvidenceRecord = {
-        ...current,
-        ...patch,
-        state: nextState,
-        lifecycleVersion: current.lifecycleVersion + 1,
-      };
       tx.set(objectRef, { ...next });
       tx.set(this.db.doc(objectKeyPath(next.ownerUid, next.objectKey)), objectKeyMapping(next));
-      const parsedAccounting = parseStorageAccounting(
-        accountingSnap.exists ? accountingSnap.data() : undefined
-      );
-      if (parsedAccounting && !("malformed" in parsedAccounting)) {
-        const holdKey = originalHoldKey(record.evidenceId);
-        const stamp = next.updatedAtUtc;
-        if (nextState === "rejected" && (current.state === "reserved" || current.state === "uploading")) {
-          tx.set(accountingRef, { ...releaseReservedHold(parsedAccounting, holdKey, stamp) });
-        } else if (
-          nextState === "uploaded_unverified" ||
-          nextState === "verified" ||
-          nextState === "linked"
-        ) {
-          const bytes = next.actualByteSize ?? next.claimedByteSize;
-          const retained = retainStorageHold(parsedAccounting, holdKey, bytes, stamp);
-          if (!("malformed" in retained)) {
-            tx.set(accountingRef, { ...retained });
-          }
-        }
+      if (nextAccounting) {
+        tx.set(accountingRef, { ...nextAccounting });
       }
       await extra?.(tx);
       return lifecycleOk(next, false, logEvent);

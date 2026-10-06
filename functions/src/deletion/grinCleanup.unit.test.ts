@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   INCLUDE_GRIN_IN_ACCOUNT_PURGE,
+  GRIN_FIRESTORE_USER_COLLECTIONS,
   allGrinFirestoreCollectionIds,
   grinEvidenceStoragePrefix,
 } from "./grinCleanupLists";
@@ -17,12 +18,27 @@ import {
   type GrinFirestoreLike,
 } from "./grinCleanup";
 import type { StorageBucketLike, StorageFileLike } from "./storagePurge";
+import { USER_SUBCOLLECTIONS } from "./firestorePurge";
+import { USER_STORAGE_CATEGORIES } from "./userOwnedStoragePaths";
 
 const dir = dirname(fileURLToPath(import.meta.url));
 
 assert.equal(INCLUDE_GRIN_IN_ACCOUNT_PURGE, false);
+assert.deepEqual([...GRIN_FIRESTORE_USER_COLLECTIONS], [
+  "goodsEvidenceLedgers",
+  "goodsEvidenceAdmission",
+  "goodsEvidenceUploadControl",
+  "grinEvidenceObjectKeys",
+  "grinEvidenceDerivativeKeys",
+  "goodsEvidenceStorage",
+]);
 assert.ok(allGrinFirestoreCollectionIds().includes("goodsEvidenceLedgers"));
+assert.ok(allGrinFirestoreCollectionIds().includes("goodsEvidenceStorage"));
 assert.equal(grinEvidenceStoragePrefix("u1"), "users/u1/grinEvidence/");
+for (const col of GRIN_FIRESTORE_USER_COLLECTIONS) {
+  assert.equal((USER_SUBCOLLECTIONS as readonly string[]).includes(col), false);
+}
+assert.equal((USER_STORAGE_CATEGORIES as readonly string[]).includes("grinEvidence"), false);
 
 const finalPurgeSrc = readFileSync(join(dir, "finalPurge.ts"), "utf8");
 assert.match(finalPurgeSrc, /DELETION_GRACE_MS = 15 \* 24 \* 60 \* 60 \* 1000/);
