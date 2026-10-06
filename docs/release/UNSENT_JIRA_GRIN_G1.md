@@ -228,3 +228,7 @@ Published PR #31 head `0d7aa17`. Application `520f9f9`. Tooling successor `0d7aa
 
 `docs/release/proposals/team1/A1_PRESENT.md` + `A2_A7_REMAINING.md` (team `80da828` on `team/grin-t1-a1-present`). Isolated Firestore Rules hashes re-verified. Live baseline preserved. **Not executed.** A2–A7 remain separate HOLDs. Do not mark backend / GRIN Done.
 
+## Team 2 capacity / inactive cleanup fold (unsent, 2026-10-06)
+
+Cherry-pick of `2cebe32` (`team/grin-t2-capacity`) onto combined as `56f2040e30159579edc0cbfbc88e2ba706a6abd2`. `MAX_STORAGE_HOLDS=2500` remains a technical limit; 15 MiB-PDF fill of proposed 20 GiB not blocked; derivative fill of 20 GiB cannot fit one Firestore document (no integer raise; no redesign). Bucket location **UNKNOWN**. `INCLUDE_GRIN_IN_ACCOUNT_PURGE=false`. `DELETION_GRACE_MS` 15 days. Cleanup is **not** an operational deletion service. **P8 FAIL**. Helper pin remains `520f9f9` — **STALE vs `56f2040`**; do not env-override; A3 HOLD. Canonical GHA **`37425360211` does not cover `56f2040`**. Internal freeze candidate remains `520f9f9`. Coordinator local tests PASS (storageQuota unit+injected, grinCleanup unit, quota injected, g2 unit, entitlement lifecycle). Do not mark GRIN / device / billing / public-release Done.
+

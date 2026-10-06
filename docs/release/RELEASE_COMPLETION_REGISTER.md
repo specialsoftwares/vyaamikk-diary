@@ -12,34 +12,35 @@ TOOLING (ops-guard suite; not application CI).
 
 ---
 
-## Current state (authoritative — 2026-10-06 closeout)
+## Current state (authoritative — 2026-10-06)
 
 Single table. Later team reports under this file are **historical evidence**.
 If they still say “unapplied pin”, “unpushed”, or “canonical CI pending”
-for `520f9f9` / `0d7aa17`, those lines are **superseded** here. Do not
-rewrite those files as if they were re-run today.
+for `520f9f9` / `0d7aa17`, those lines are **superseded** for that SHA.
+Do not rewrite those files as if they were re-run today.
 
 | Item | Current value |
 |---|---|
 | Repo / branch / PR | `specialsoftwares/vyaamikk-diary` `integration/grin-g1-g5-source` draft **#31** (no duplicate; auto-merge off) |
-| **PR / published HEAD** | `0d7aa17a6efcf3ce6874269eb57afda0a2b45559` |
-| Tested checkout parent | `074f082a9f17ef1e8c53958cffc8b13bc0a6c5a8` (docs fold of T5 post-fix). Application ancestor `520f9f9`. |
-| **Application SHA** | `520f9f98bc952fd7f30a907da9e85774629a69c0` (S1/S2; cherry-pick of `0cd3473`). `git diff --stat 520f9f9 0d7aa17 -- functions src eas.json app.json app firebase.json tools/goods-evidence-storage` **empty**. Pre-fix was `b845e8a`. |
-| Helper `PINNED_APP_SHA` | **`520f9f9`** (constant in `grin-functions-op.mjs` at `0d7aa17`) |
-| **Tooling SHA** | **`0d7aa17`** — successor. **Not** byte-identical to `228a8f5` (`grin-functions-op.mjs` **+1/−1**: pin constant only). |
+| **CI-tested PR head** | `0d7aa17a6efcf3ce6874269eb57afda0a2b45559` (parent `074f082`). Application blobs **= `520f9f9`**. |
+| **Current application SHA** | `56f2040e30159579edc0cbfbc88e2ba706a6abd2` (cherry-pick of T2 `2cebe32` on `team/grin-t2-capacity`; parent S1/S2 `520f9f9` / `0cd3473`). `git diff --stat 520f9f9 56f2040 -- functions src tools/goods-evidence-storage` **non-empty** (holds-capacity telemetry + inactive GRIN cleanup lists/tests). Pre-fix `b845e8a`. |
+| **Internal AAB freeze candidate** | Still **`520f9f9`** + GHA **`37425360211`**. B1≠B2, **neither granted**. Do **not** treat `56f2040` as the freeze until a new SHA + matching canonical CI. |
+| Helper `PINNED_APP_SHA` | **`520f9f9`** (constant at tooling `0d7aa17`). **STALE vs current application `56f2040`**. Do not rewrite the helper this fold. Do not set `GRIN_OPS_PINNED_SHA`. A3 **HOLD**. A1 does not run the helper. |
+| **Tooling SHA** | **`0d7aa17`** — successor for the `520f9f9` pin. **Not** byte-identical to `228a8f5` (`grin-functions-op.mjs` **+1/−1**: pin constant only). |
 | Historical ops-guard baseline | `228a8f58ac83d3c71e853cdccb6e4c4fa64c251f`. Suite **34/34** recorded on **that** tree. Same suite **34/34** re-run after the pin apply on the successor tree (TOOLING, not application CI). Live mode still rejects `GRIN_OPS_PINNED_SHA`. |
-| **Canonical CI** | Independently observed GitHub Actions run **`37425360211`**, job **`112143748428`**, workflow head **`0d7aa17`**, verify + canonical repository gate **success**. Skipped steps: **none observed** in jobs API. Do **not** cite `37379529193` (`41b05a4`) or `37351685421` (`5d5df3d`) for this tree. Inner suite counts **not invented**. `gh` unauthenticated here. |
-| S1 / S2 | **Closed** at SOURCE / INJECTED / named G2 EMULATOR (`127.0.0.1:8091` / `9200`, `demo-vyaamikk-grin-g2`). Not live. Not device. |
-| P3 | **ACCEPTED** (first GRIN register consumes one monthly slot; replay/amend/QC/return/evidence/reconcile do not). |
-| P8 | **OPEN / FAIL** (`INCLUDE_GRIN_IN_ACCOUNT_PURGE=false`; public deletion policy UNRESOLVED). |
+| **Canonical CI** | Independently observed GitHub Actions run **`37425360211`**, job **`112143748428`**, workflow head **`0d7aa17`**, verify + canonical repository gate **success**. Skipped steps: **none observed** in jobs API. Covers application **`520f9f9` only**. **Not** a CI pass for `56f2040`. Do **not** cite `37379529193` (`41b05a4`) or `37351685421` (`5d5df3d`). Inner suite counts **not invented**. `gh` unauthenticated here. |
+| S1 / S2 | **Closed** at SOURCE / INJECTED / named G2 EMULATOR (`127.0.0.1:8091` / `9200`, `demo-vyaamikk-grin-g2`). Not reopened (no new reproduction). Not live. Not device. |
+| P3 | **ACCEPTED** (first GRIN register consumes one monthly slot; replay/amend/QC/return/evidence/reconcile do not). Coordinator re-ran `quota.injected.unit.test.ts` **PASS** after the T2 fold. |
+| P8 | **OPEN / FAIL** (`INCLUDE_GRIN_IN_ACCOUNT_PURGE=false`; `DELETION_GRACE_MS` 15 days; public deletion policy UNRESOLVED). Cleanup lists/tests exist; this is **not** an operational deletion service. |
 | Device / live backend / billing / public | **Not accepted** |
-| Next approval | **A1 presented** (`A1_PRESENT.md`) — isolated Firestore Rules only; **not executed**. A2–A7 not implied. |
+| Next approval | **A1 presented** (`A1_PRESENT.md`) — isolated Firestore Rules only; **not executed**. A2–A7 not implied. Rules hashes unchanged vs `520f9f9`. |
 | Pending owner decisions | Storage GiB (1/5/20 vs 256 MiB/1/5 GiB); public deletion window (15 implemented / 180 requested / UNRESOLVED). |
 | versionCode | **23 UNRESERVED**. Play explorer 2026-10-06: highest uploaded **vc22**. |
 | Merge-base / `origin/main` | `0da2f58970f23c7ce6cbefae6efffd49c731f44b` |
 
-Do not cherry-pick `0cd3473` / `520f9f9` again. Do not force-push divergent
-team branches. Do not reopen ops-guard A/B without a new reproduction.
+Do not cherry-pick `0cd3473` / `520f9f9` / `2cebe32` again. Do not force-push
+divergent team branches. Do not reopen ops-guard A/B without a new
+reproduction. Do not reopen S1/S2 without a new reproduction.
 
 ---
 
@@ -47,9 +48,9 @@ team branches. Do not reopen ops-guard A/B without a new reproduction.
 
 | Gate | State |
 |---|---|
-| SOURCE READY | Application `520f9f9` + tooling `0d7aa17`. Canonical GHA **`37425360211` success**. S1/S2 closed at INJECTED+EMULATOR. P3 accepted. **P8 FAIL**. Do not advertise GiB. |
+| SOURCE READY | CI-matched freeze `520f9f9` + tooling `0d7aa17` + GHA **`37425360211`**. Current application **`56f2040`** (T2 capacity/cleanup) has local SOURCE/INJECTED tests; **canonical GHA NOT RUN**. S1/S2 closed at INJECTED+EMULATOR. P3 accepted. **P8 FAIL**. Do not advertise GiB. |
 | BACKEND PILOT READY | **A1 offerable, not authorized.** GRIN seven **ABSENT**. A2–A7 HOLD. |
-| INTERNAL BUILD READY | Freeze SHA **`520f9f9`** + CI **`37425360211`** (`APPROVAL_B_DRAFT.md`). B1≠B2, **neither granted**. vc23 unreserved. Owner device form **blank**. |
+| INTERNAL BUILD READY | Freeze SHA **`520f9f9`** + CI **`37425360211`** (`APPROVAL_B_DRAFT.md`). Current HEAD application is **`56f2040`** — **not** that freeze. B1≠B2, **neither granted**. vc23 unreserved. Owner device form **blank**. |
 | DEVICE ACCEPTED | **NOT RUN** (no hardware; testers unnamed) |
 | BILLING ACCEPTED | Fail-closed; catalog **NOT RUN**; purchases **off** |
 | PUBLIC SUBMISSION READY | Blocked on owner GiB, public deletion policy, device, billing, listing |
@@ -85,11 +86,11 @@ purchase-entry remains `"0"`. Play Console catalog **NOT RUN**.
 
 | Team | Authorized work this session | Approval still required |
 |---|---|---|
-| 1 Backend | A1 **presented** (`A1_PRESENT.md` `80da828`). Isolated Firestore Rules only. A2–A7 **HOLD**, not implied. Hashes re-verified. Not executed. | Owner A1 grant; A2–A7 remain separate |
-| 2 Policy | S1/S2 folded (`0cd3473` → combined `520f9f9`). Holds `1.o.{len}.{ledgerId}.{len}.{evidenceId}`; `MAX_STORAGE_HOLDS=2500`. Economics: bucket location **UNKNOWN**; do not advertise 1/5/20; 256 MiB/1/5 GiB alternative not selected, not guaranteed profitable. `INCLUDE_GRIN_IN_ACCOUNT_PURGE=false`. 15-day grace unchanged. | Owner GiB confirm; 180-day public policy; no live purge |
+| 1 Backend | A1 **presented** (`A1_PRESENT.md` `80da828`). Isolated Firestore Rules only. A2–A7 **HOLD**. Helper pin **STALE** vs `56f2040` — do not apply without T1 review. Not executed. | Owner A1 grant; pin review for A3; A2–A7 remain separate |
+| 2 Policy | Capacity folded (`2cebe32` → combined `56f2040`). `MAX_STORAGE_HOLDS=2500` substantiated (technical, not SKU). 15 MiB-PDF fill of proposed 20 GiB **not blocked**. Derivative fill of 20 GiB **cannot** fit one doc — no integer raise. Economics: bucket location **UNKNOWN**. Inactive cleanup tests with flag **false**. P8 still FAIL. | Owner GiB confirm; 180-day public policy; no live purge; pin review |
 | 3 Build/device | Freeze **`520f9f9`** + GHA **`37425360211`**. Play explorer 2026-10-06 must be **re-read before B1**. vc23 **unreserved**. Owner device form blank. Device rows **NOT RUN**. B1≠B2, neither granted. | EAS/native build; Play upload (separate) |
 | 4 Billing/Play | Owner sheet `DELETION_15_VS_180_OWNER_SHEET.md` (15 implemented / 180 requested / public UNRESOLVED). Catalog **NOT RUN**. Allowlist SOURCE, not live. | Product/price/activation/submission; owner A/B/C/D |
-| 5 QA | Pin/CI closeout `CLOSEOUT_0d7aa17.md` (`00fd822`). TOOLING+SOURCE CI **PASS**. S1/S2 not reopened. **P3 ACCEPTED**. **P8 FAIL**. Device/live/billing **NOT RUN**. T3 freeze docs landed after this review. | Waiting T2/T4 new source; not device/live |
+| 5 QA | Pin/CI closeout `CLOSEOUT_0d7aa17.md` covers `0d7aa17` / `520f9f9` only. T2 `56f2040` is **new source** — review that slice only. S1/S2/P3 preserved. **P8 FAIL**. Device/live/billing **NOT RUN**. | Review `56f2040`; not device/live |
 
 ---
 
@@ -127,7 +128,7 @@ firebase deploy --project vyaamikk-diary --non-interactive \
   --only firestore:rules
 ```
 
-Hashes re-checked on combined `0d7aa17` this session (`shasum -a 256`):
+Hashes re-checked on combined after the T2 fold (`shasum -a 256`; Rules blobs unchanged vs `520f9f9`):
 
 | Artifact | sha256 |
 |---|---|
