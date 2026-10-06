@@ -48,7 +48,7 @@ Identities, UIDs, emails, and passwords stay **blank in git**. Do not invent.
 
 | Slot | Role | Display name | Firebase uid | Play Internal email | Phone | Auth notes |
 |---|---|---|---|---|---|---|
-| O | Owner | | *(private channel)* | *(private channel)* | | D1 OnePlus 12R / Android 16 / vc22. No password in this sheet. Available today. |
+| O | Owner | | *(received privately; not in git)* | *(private channel)* | *(private)* | Existing account. D1 OnePlus 12R / Android 16 / vc22. Admission writes HOLD. No password in this sheet. |
 | T1 | Tester 1 | | | | | Owner fills. |
 | T2 | Tester 2 | | | | | Owner fills. |
 

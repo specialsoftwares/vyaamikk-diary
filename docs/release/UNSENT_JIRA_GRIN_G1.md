@@ -294,7 +294,7 @@ Application **`60c4bc179c46b8986ab0dbd2c95db0e4a5ceb49a`** (`ccfd845` on `team/g
 
 ## Owner UID received privately (unsent, 2026-10-06)
 
-Owner Firebase Auth UID stored **out-of-repo**. `validate-uids` count=1. Values **not in git / PRs / this note**. Admission **writes HOLD**. Supply is **not** live authorization. T1/T2 UIDs still missing. Do not mark backend / device Done.
+Owner slot **O** uses an **existing** Firebase Auth account. UID stored **out-of-repo**. `validate-uids` count=1. Values **not in git / PRs / this note**. Admission **writes HOLD**. Supply is **not** live authorization. Not `PLAY_BILLING_TESTER_UIDS`. T1/T2 UIDs still missing. Device D1 remains OnePlus 12R / Android 16 / vc22. Do not mark backend / device Done.
 
 ## Team 2 P8 production path (unsent, 2026-10-06)
 

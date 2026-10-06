@@ -244,7 +244,7 @@ Screenshots: **state labels only**.
 
 | ID | What to run | Required evidence | Status |
 |---|---|---|---|
-| D0 | Owner fills O/T1/T2; confirm artifact class | Named identities via private channel; D1 OnePlus 12R recorded; no guessed vc22-from-commit | NOT RUN — UIDs blank in git; D1 model filled |
+| D0 | Owner fills O/T1/T2; confirm artifact class | Named identities via private channel; D1 OnePlus 12R recorded; no guessed vc22-from-commit | Slot **O UID received privately** (`count=1`, not in git). T1/T2 still missing. Artifact class unconfirmed (no Internal-GRIN AAB). D writes HOLD |
 | D1 | Upgrade install over vc22 via Play on **OnePlus 12R** | Play shows new versionCode; cold start; existing diary/PO/credit/letterhead/PDF still work; SQLite v10 migrates. Photos of About/version + one existing record. `PLAY_INSTALLED` only | NOT RUN — no adb / no Internal-GRIN AAB |
 | D2 | Clean install | Empty local DB; same launch/sign-in. Label `PLAY_INSTALLED` or `NATIVE_DEVICE` | NOT RUN — D2 unnamed; no hardware attached |
 | D3 | Force-stop; reboot; open | Splash completes; main tabs; legal date `2026-07-27`; no token printed | NOT RUN |

@@ -125,7 +125,7 @@ implementation and tests** only. Not live deploy / billing / Play publish.
 | Active / expiry | Keep issued evidence while entitled. After genuine expiry: 90-day read/export then 30-day notice. **No production purge job this assignment.** | Source state machine only until approved deploy |
 | Explicit deletion | **45-day grace wired.** Supersedes 180. Play freeze ≠ delete. `INCLUDE_GRIN_IN_ACCOUNT_PURGE=false`. | Do not flip GRIN purge flag |
 | Export | Pack is summary (`originalsBundled=false`). Originals + record export required. ZIP optional. | Device proof NOT RUN |
-| Testers | Owner + two trusted testers. OnePlus 12R Android 16 vc22 **named**. Owner UID **received privately**. Values **not in repo**. Clean-install device unnamed. | D writes HOLD; T1/T2 UIDs still missing |
+| Testers | Owner + two trusted testers. OnePlus 12R Android 16 vc22 **named**. Owner slot **O** uses an **existing** account; UID **received privately**. Values **not in repo**. Clean-install device unnamed. | D writes HOLD; T1/T2 UIDs still missing |
 
 Internal Testing: **synthetic** GRIN evidence until lifecycle is **approved
 for live use**. Source machinery exists; `INCLUDE_GRIN_IN_ACCOUNT_PURGE`

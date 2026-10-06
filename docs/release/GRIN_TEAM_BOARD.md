@@ -5,7 +5,7 @@ Do not collapse to Done.
 
 Arrangement: one coordinator plus five **local** Cursor Task subagents on separate worktrees. AI roles, not human sign-off.
 
-Checkpoint **2026-10-06 15:14:** T5 **PASS** at `60c4bc1` (billing lifecycle). Application **`540e07a`** still needs T5. Pin **not** applied. Device/live/public **not accepted**.
+Checkpoint **2026-10-06 15:16:** Slot **O** existing-account UID on private file (`validate-uids` count=1). D writes **HOLD**. T5 **PASS** at `60c4bc1`. Application **`540e07a`** still needs T5. Pin **not** applied. Device/live/public **not accepted**.
 
 | Task | Owner | Branch | Worktree | Dependency | Status | Evidence | Blocker | Next |
 |---|---|---|---|---|---|---|---|---|
@@ -14,7 +14,7 @@ Checkpoint **2026-10-06 15:14:** T5 **PASS** at `60c4bc1` (billing lifecycle). A
 | Billing / Play | team4 | `team/grin-t4-lifecycle-allowlist` | `grin-t4-product` | purchase-entry `"0"` | review | T5 PASS `c69ffb9` at `60c4bc1`. Catalog NOT RUN. | activation HOLD | No Save/submit |
 | Independent QA | team5 | `team/grin-t5-review-60c4bc1` | `grin-t5-qa` | newly landed only | source_verified | `REVIEW_60c4bc1.md` `c69ffb9` PASS. `540e07a` pending. | NATIVE_DEVICE | Leftover P3-FAIL stay dirty |
 | Policy / deletion | team2 | `team/grin-t2-p8-proposal` | `grin-t2-evidence` | `b08690d` | review | Packet + inert wiring `540e07a`. Flag false. P8 FAIL. | live purge | Do not flip; synthetic-only |
-| Build / device | team3 | `team/grin-t3-phone-handoff` | `grin-t3-offline` | `540e07a` | review | `PHONE_HANDOFF.md` `5692e25`. B1≠B2 ungranted. | EAS/Play HOLD | Recheck Play before B1 of `540e07a` |
+| Build / device | team3 | `team/grin-t3-phone-handoff` | `grin-t3-offline` | `540e07a` | review | `PHONE_HANDOFF.md`. Slot O UID private `count=1`. B1≠B2 ungranted. | EAS/Play HOLD | Recheck Play before B1 of `540e07a` |
 | E1 evidence composition | team1 | `team/grin-t1-backend` | `grin-t1-backend` | `15bd2a6` | source_verified | persistGrinOwnerSession → processAttachments → real httpsCallable on isolated Functions emulator | live export HOLD | Stay unexported / undeployed |
 | E1/E2/E4/E5 evidence integrity | team2 | `team/grin-t2-evidence` | `grin-t2-evidence` | `29c6d3f` | source_verified | G2 unit + STORAGE_EMULATOR 8091/9200 | live IAM | Stay undeployed |
 | E2/E3 admission + descriptors | team3 | `team/grin-t3-offline` | `grin-t3-offline` | `0d0dd84` | source_verified | SQLITE_HOST outbox + capture columns | native death not claimed | Stay undeployed |

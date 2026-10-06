@@ -84,15 +84,19 @@ membership, a visible upgrade control, and a Firebase UID in chat are
 
 ---
 
-## 3. Private Firebase Auth UID request (never git)
+## 3. Private Firebase Auth UID (never git)
 
-Coordinator asks the owner **once**, using coordinator chat or an
-**out-of-repo** file the coordinator names. **Firebase Auth UIDs only.**
+Owner slot **O** used an **existing** Firebase Auth account. The UID was
+received **2026-10-06** via coordinator chat and stored **out-of-repo**
+(UID-only file + separate operator notes). `validate-uids` **count=1**
+(values not printed). **Supply is not live admission or deployment.**
+Admission **writes HOLD**. `PLAY_BILLING_TESTER_UIDS` remains empty
+(fail-closed; not this identifier). T1/T2 UIDs still missing.
 
 Do **not** request or accept passwords, OTPs, API keys, recovery codes,
-or service-account JSON. Do **not** commit UIDs, Play emails, or a filled
-testers file to git. Hash a UID in shared logs if a correlation id is
-required.
+or service-account JSON. Do **not** commit UIDs, Play emails, phones, or
+a filled testers file to git. Hash a UID in shared logs if a correlation
+id is required.
 
 Three identifiers stay distinct:
 
@@ -100,13 +104,9 @@ Three identifiers stay distinct:
 |---|---|---|
 | Firebase Auth UID | Account id for Auth / Firestore path / (later) GRIN admission seed | Not a Play email |
 | Play Internal tester email | Play Console Internal Testing list | Not a Firebase UID; not GRIN admission |
-| GRIN admission | `users/{uid}/goodsEvidenceAdmission/runtime` (Approval A, **not** present) | Not Play list membership |
+| GRIN admission | `users/{uid}/goodsEvidenceAdmission/runtime` (Approval A, **not** present; writes HOLD) | Not Play list membership |
 
 Play Internal email ≠ Firebase UID ≠ GRIN admission.
-
-### Exact one-line ask (coordinator → owner)
-
-Please reply here (or in an out-of-repo file I name) with your Firebase Auth UID only — no password, OTP, key, or recovery code; do not git it. Play Internal email is separate from that UID and from GRIN admission.
 
 Slots O / T1 / T2 stay blank in git. Form:
 `docs/release/proposals/team3/OWNER_DEVICE_FORM.md`.
@@ -286,7 +286,7 @@ serials, IMEIs, or Android IDs.
 
 | ID | What to run on OnePlus 12R | Required evidence | Status |
 |---|---|---|---|
-| D0 | UID via private channel; confirm artifact class | Firebase UID not in git; Play email separate; GRIN admission separate | NOT RUN |
+| D0 | UID via private channel; confirm artifact class | Firebase UID not in git; Play email separate; GRIN admission separate | **UID received privately** (slot O, existing account, `count=1`). Artifact class **unconfirmed** (no Internal-GRIN AAB). D writes **HOLD**. T1/T2 missing |
 | D1 | Play-install **over vc22** (not sideload labelled PLAY_INSTALLED) | Play shows new versionCode; cold start; existing diary/PO/credit/letterhead/PDF still open; SQLite v10 migrates | NOT RUN |
 | D3 | Force-stop; reboot; open | Splash completes; main tabs; legal date `2026-07-27`; no token printed | NOT RUN |
 | D4 | Phone OTP on the tester's own number | Session bound to that uid; **no OTP in git**; hash uid in shared logs | NOT RUN |

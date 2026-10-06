@@ -9,9 +9,9 @@ recovery codes into git. Do not write Firebase tester UIDs into this file.
 identifier from the Firebase UID and from GRIN admission
 (`users/{uid}/goodsEvidenceAdmission/runtime`, Approval A — not present).
 
-Exact coordinator → owner ask (one line):
-
-Please reply here (or in an out-of-repo file I name) with your Firebase Auth UID only — no password, OTP, key, or recovery code; do not git it. Play Internal email is separate from that UID and from GRIN admission.
+Owner slot **O** UID received privately **2026-10-06** (existing
+account; out-of-repo; `count=1`). Values **not in this file**. Supply is
+**not** live admission. T1/T2 still via private channel only.
 
 Internal AAB: coordinator-selected **FINAL** application SHA after
 billing-lifecycle correction + matching **completed** canonical CI —
