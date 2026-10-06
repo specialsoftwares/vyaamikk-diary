@@ -244,3 +244,7 @@ Cherry-pick of `2cebe32` (`team/grin-t2-capacity`) onto combined as `56f2040e301
 
 `docs/release/proposals/team1/PIN_UPDATE_AFTER_56f2040.diff.md` + refreshed `A2_A7_REMAINING.md` (team `841f9c4` on `team/grin-t1-pin-after-56f2040`). Helper **not rewritten**. Pin remains `520f9f9` — **STALE vs `56f2040`**. Proposed only. T1 observed combined `28182c2` — **historical**; later docs folds do not change application blobs. A1 hashes still match; **not executed**. A3 HOLD. A4 UIDs missing. A5 SA/GCS unread. A6 omitted-`--source` unproven. A7 no LIVE_BACKEND harness. Do not mark backend / GRIN Done.
 
+## Team 5 review 56f2040 (unsent, 2026-10-06)
+
+`docs/release/proposals/team5/REVIEW_56f2040.md` (team `7865384` on `team/grin-t5-qa`). SOURCE+INJECTED **PASS** at application `56f2040` (holds-capacity fail-closed; inactive cleanup flag false). S1/S2 not reopened. **P3 ACCEPTED**. **P8 FAIL**. Emulator/device/live/billing **NOT RUN**. Canonical GHA **`37425360211` does not cover `56f2040`**. Helper pin still `520f9f9` STALE. Freeze remains `520f9f9`. Dirty leftover POLICY_QA files **not folded**. Do not mark GRIN / device / billing / public-release Done.
+
