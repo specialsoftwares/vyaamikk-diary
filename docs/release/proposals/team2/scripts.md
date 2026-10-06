@@ -6,9 +6,9 @@ Coordinator-owned: `package.json`, root `tsconfig.json`. Team 2 does not merge t
 
 ```
 "typecheck:goods-evidence-g2": "tsc --noEmit -p tools/goods-evidence-storage/tsconfig.json",
-"test:goods-evidence-g2-unit": "npx --yes tsx tools/goods-evidence-storage/domain.unit.test.ts && npx --yes tsx tools/goods-evidence-storage/injected.unit.test.ts && npx --yes tsx tools/goods-evidence-storage/pack.injected.test.ts && npx --yes tsx tools/goods-evidence-storage/isolation.contract.test.ts",
+"test:goods-evidence-g2-unit": "npx --yes tsx tools/goods-evidence-storage/domain.unit.test.ts && npx --yes tsx tools/goods-evidence-storage/storageQuota.unit.test.ts && npx --yes tsx tools/goods-evidence-storage/injected.unit.test.ts && npx --yes tsx tools/goods-evidence-storage/pack.injected.test.ts && npx --yes tsx tools/goods-evidence-storage/isolation.contract.test.ts",
 
-"test:goods-evidence-g2-emulator": "firebase emulators:exec --only firestore,storage --project demo-vyaamikk-grin-g2 --config tools/goods-evidence-storage/firebase.json \"npx --yes tsx tools/goods-evidence-storage/storage.emulator.test.ts && npx --yes tsx tools/goods-evidence-storage/rules.emulator.test.ts\""
+"test:goods-evidence-g2-emulator": "firebase emulators:exec --only firestore,storage --project demo-vyaamikk-grin-g2 --config tools/goods-evidence-storage/firebase.json \"npx --yes tsx tools/goods-evidence-storage/storage.emulator.test.ts && npx --yes tsx tools/goods-evidence-storage/storageQuota.emulator.test.ts && npx --yes tsx tools/goods-evidence-storage/rules.emulator.test.ts\""
 ```
 
 `injected.unit.test.ts` covers `createInjectedGrinEvidencePort` (INJECTED outbox port), W2-03 evidence identity/category replay, ER-2 post-await authorize, stale lifecycle fencing, and retained retrieve when `newCommands=deny`.
@@ -29,7 +29,8 @@ This branch includes that exclude so `npm run typecheck` stays green; coordinato
 
 ```
 "test:grin-t2-quota": "npx --yes tsx tools/goods-evidence-emulator/quota.injected.unit.test.ts",
-"test:grin-t2-storage-quota": "npx --yes tsx tools/goods-evidence-storage/storageQuota.injected.unit.test.ts",
+"test:grin-t2-storage-quota": "npx --yes tsx tools/goods-evidence-storage/storageQuota.unit.test.ts && npx --yes tsx tools/goods-evidence-storage/storageQuota.injected.unit.test.ts",
+"test:grin-t2-storage-quota-emulator": "firebase emulators:exec --only firestore,storage --project demo-vyaamikk-grin-g2 --config tools/goods-evidence-storage/firebase.json \"npx --yes tsx tools/goods-evidence-storage/storageQuota.emulator.test.ts\"",
 "test:grin-t2-cleanup": "npx --yes tsx functions/src/deletion/grinCleanup.unit.test.ts",
 "test:grin-t2-lifecycle": "npx --yes tsx src/goodsEvidence/entitlementLifecycle.test.ts",
 "test:grin-t2-export": "npx --yes tsx src/services/grin/export/receiptAuditExport.test.ts"

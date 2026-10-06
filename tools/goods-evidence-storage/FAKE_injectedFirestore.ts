@@ -23,6 +23,7 @@ function restore(raw: string | undefined): Record<string, unknown> | undefined {
 
 export function FAKE_createInjectedFirestore(): FAKE_InjectedFirestore {
   const snapshot = new Map<string, string>();
+  const versions = new Map<string, number>();
   const store: FAKE_InjectedFirestore = {
     snapshot,
     appliedWrites: 0,
@@ -34,10 +35,14 @@ export function FAKE_createInjectedFirestore(): FAKE_InjectedFirestore {
     },
     async runTransaction(fn) {
       const staged = new Map<string, string>();
+      const readAt = new Map<string, number>();
       const tx: G2Transaction = {
         async get(ref: G2DocRef): Promise<G2DocSnap> {
           if (store.throwOnGet.has(ref.path)) {
             throw store.throwOnGet.get(ref.path);
+          }
+          if (!readAt.has(ref.path)) {
+            readAt.set(ref.path, versions.get(ref.path) ?? 0);
           }
           const raw = staged.has(ref.path) ? staged.get(ref.path) : snapshot.get(ref.path);
           const data = restore(raw);
@@ -55,8 +60,14 @@ export function FAKE_createInjectedFirestore(): FAKE_InjectedFirestore {
         store.failNextCommit = false;
         throw store.failCommitError;
       }
+      for (const [path, seen] of readAt) {
+        if ((versions.get(path) ?? 0) !== seen) {
+          throw Object.assign(new Error("injected_transaction_aborted"), { code: 10 });
+        }
+      }
       for (const [path, raw] of staged) {
         snapshot.set(path, raw);
+        versions.set(path, (versions.get(path) ?? 0) + 1);
         store.appliedWrites += 1;
       }
       return result;
