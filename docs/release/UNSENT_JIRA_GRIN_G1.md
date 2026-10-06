@@ -208,3 +208,7 @@ Cherry-pick of `0cd3473` (`team/grin-t2-s1s2`) onto combined as `520f9f98bc952fd
 
 `docs/release/proposals/team5/S1_S2_POST_FIX.md` (team `1e33894`). Application `520f9f9` / combined HEAD at review `1ca33d6`. **S1 PASS** / **S2 PASS** at INJECTED + named G2 EMULATOR `127.0.0.1:8091` / `9200` project `demo-vyaamikk-grin-g2`. Corrupt counters: `quota_state_invalid`, zero writes. Two ledgers charged **450** with distinct `1.o.{len}.{ledgerId}.{len}.{evidenceId}` holds. Replay once; other owner isolated; conflict fail-closed; contention 600/1000. **P3 ACCEPTED**. **P8 FAIL**. Confirmation-refresh / immutable-original not reopened. Canonical GHA / NATIVE_DEVICE / LIVE_BACKEND / billing / public **NOT RUN**. Do not cite `37379529193` for `520f9f9`. Do not mark GRIN / device / billing / public-release Done.
 
+## Team 1 REVIEW_AFTER_S1_S2 + pin apply (unsent, 2026-10-06)
+
+`docs/release/proposals/team1/REVIEW_AFTER_S1_S2.md` (team `80b802f` on `team/grin-t1-review-after-s1-s2`). SOURCE PASS / TOOLING PASS at `520f9f9` vs ops-guard origin `228a8f5` 34/34. A1 still independently offerable. Coordinator applied `PINNED_APP_SHA=520f9f9` after T5 INJECTED+EMULATOR PASS; ops-guard **34/34** re-run; live mode still rejects env pin override. Pin-apply commit is a **candidate** ops-guard successor. A3 **HOLD**. No `GRIN_OPS_ALLOW_LIVE=1`. Canonical GHA for `520f9f9` **NOT YET**. Do not cite `37379529193`. Do not mark backend / GRIN Done.
+

@@ -1,47 +1,28 @@
-# Proposed helper pin update — AFTER S1/S2 only (unapplied)
+# Helper pin update — applied after T1 + T5 review
 
-**Do not apply this patch now.** Do not rewrite
-`docs/release/packets/grin-ops/grin-functions-op.mjs` in this Team 1
-session. Do not set `GRIN_OPS_PINNED_SHA`, fixtures, HTTP stubs, or
-`GRIN_OPS_ALLOW_LIVE=1` to “work around” the stale pin.
+Coordinator applied the one-line `PINNED_APP_SHA` change **after**:
 
-Current helper constant:
+- Team 1 `REVIEW_AFTER_S1_S2.md` SOURCE PASS at `520f9f9` (`80b802f`)
+- Team 5 `S1_S2_POST_FIX.md` INJECTED + named G2 EMULATOR PASS (`1e33894`)
+
+Do **not** set `GRIN_OPS_PINNED_SHA`, fixtures, HTTP stubs, or
+`GRIN_OPS_ALLOW_LIVE=1`. Live mode still rejects those overrides (ops-guard
+test “live mode rejects source-pin override before mutation”).
+
+Applied constant:
 
 ```js
-export const PINNED_APP_SHA = "5d5df3d54df08953bfb26db39a9b7f5e3d67ed47";
+export const PINNED_APP_SHA = "520f9f98bc952fd7f30a907da9e85774629a69c0";
 ```
 
-That pin is **STALE** vs application `520f9f98bc952fd7f30a907da9e85774629a69c0`
-(S1/S2; cherry-pick of `0cd3473`). Do **not** pin `b845e8a` (pre-S1/S2).
-Do **not** apply this patch until Team 5 post-fix review and Team 1
-`REVIEW_AFTER_S1_S2` both record pass at the stated boundary.
+Do **not** pin `b845e8a`. Empty vs `5d5df3d` is **not** the goal.
 
-Ops-guard tooling pin stays
-`228a8f58ac83d3c71e853cdccb6e4c4fa64c251f` until a successor helper commit
-is verified with the **same** 34/34 suite. This proposal is one constant
-change only; it is not that successor until applied **and** re-tested.
-
-## Preconditions (all required)
-
-1. S1/S2 corrected application SHA has landed and been independently
-   reviewed (`REVIEW_AFTER_S1_S2`). Corrupt accounting must not bypass the
-   cap; hold keys must include durable `ledgerId` identity.
-2. `git diff --stat <SUCCESSOR> -- functions src eas.json app.json app firebase.json`
-   is the reviewed deployment tree (or coordinator-named equivalent). Empty
-   vs `5d5df3d` is **not** expected and is **not** the goal.
-3. Do **not** substitute `b845e8a`.
-4. After applying, run
-   `node --test docs/release/packets/grin-ops/grin-functions-op.test.mjs`
-   and require **34/34**. Record the new helper commit as a candidate
-   ops-guard successor only if that suite still passes. Until then, keep
-   citing `228a8f58…`.
-5. Live mode must still reject `GRIN_OPS_PINNED_SHA` (existing
-   `assertLiveOverridesRejected`). A3 then uses the new constant, not env.
-
-## Proposed diff (placeholder SHA)
-
-Replace `<SUCCESSOR_SHA_AFTER_S1_S2>` with the reviewed post-S1/S2
-application SHA only. Candidate (unreviewed): `520f9f98bc952fd7f30a907da9e85774629a69c0`.
+Ops-guard **34/34** re-run on this helper after the constant change
+(`unset GRIN_OPS_ALLOW_LIVE GRIN_OPS_PINNED_SHA PINNED_APP_SHA`). The
+previous verified fail-closed bytes remain `228a8f58…`. This pin-apply
+commit is a **candidate** ops-guard successor only; A3 (`gate-off-initial`)
+stays **HOLD** until the owner authorizes live Functions. Isolated
+Firestore A1 does not wait on Functions deploy.
 
 ```diff
 --- a/docs/release/packets/grin-ops/grin-functions-op.mjs
@@ -51,9 +32,6 @@ application SHA only. Candidate (unreviewed): `520f9f98bc952fd7f30a907da9e857746
  const require = createRequire(import.meta.url);
  
 -export const PINNED_APP_SHA = "5d5df3d54df08953bfb26db39a9b7f5e3d67ed47";
-+export const PINNED_APP_SHA = "<SUCCESSOR_SHA_AFTER_S1_S2>";
++export const PINNED_APP_SHA = "520f9f98bc952fd7f30a907da9e85774629a69c0";
  export const PROJECT_ID = "vyaamikk-diary";
 ```
-
-A3 (`gate-off-initial`) remains HOLD until this reviewed pin exists.
-Isolated Firestore A1 does not wait on this patch.

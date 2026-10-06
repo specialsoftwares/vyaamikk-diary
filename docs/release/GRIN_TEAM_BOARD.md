@@ -5,12 +5,12 @@ Do not collapse to Done.
 
 Arrangement: one coordinator plus five **local** Cursor Task subagents on separate worktrees. AI roles, not human sign-off.
 
-Checkpoint: application `520f9f9` (S1/S2). Team 5 post-fix **PASS** at INJECTED + named G2 EMULATOR. GHA `37379529193` remains **`41b05a4` only**. Tooling `228a8f5`. Wave 2 / G6 / public **not accepted**. Pin unapplied pending Team 1.
+Checkpoint: application `520f9f9` (S1/S2). Helper `PINNED_APP_SHA` applied to `520f9f9` after T1 SOURCE PASS + T5 INJECTED+EMULATOR PASS. GHA `37379529193` remains **`41b05a4` only**. Fail-closed origin `228a8f5`. Wave 2 / G6 / public **not accepted**. A3 HOLD.
 
 | Task | Owner | Branch | Worktree | Dependency | Status | Evidence | Blocker | Next |
 |---|---|---|---|---|---|---|---|---|
-| Integration | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | `520f9f9` | running | T5 S1/S2 PASS INJECTED+EMULATOR; canonical CI pending; P3 PASS; P8 FAIL | live mutate / EAS / Play / billing HOLD | Canonical CI; T1 pin review; owner GiB; A1 |
-| Backend pilot | team1 | `team/grin-t1-backend` | `grin-t1-backend` | ops-guard `228a8f5` | running | A1 still offerable. Pin `5d5df3d` STALE vs `520f9f9`. T5 post-fix PASS. | `GRIN_OPS_ALLOW_LIVE=1` HOLD | `REVIEW_AFTER_S1_S2`; no env-override |
+| Integration | coordinator | `integration/grin-g1-g5-source` | `grin-combined` | `520f9f9` | running | T5 S1/S2 PASS INJECTED+EMULATOR; pin applied; canonical CI pending; P3 PASS; P8 FAIL | live mutate / EAS / Play / billing HOLD | Canonical CI; owner GiB; A1 |
+| Backend pilot | team1 | `team/grin-t1-review-after-s1-s2` | `grin-t1-backend` | ops-guard `228a8f5` | review | `REVIEW_AFTER_S1_S2.md` `80b802f` SOURCE PASS. Pin applied by coordinator after T5. A1 still offerable. A3 HOLD. | `GRIN_OPS_ALLOW_LIVE=1` HOLD | Owner A1 grant; no live Functions |
 | Policy / deletion | team2 | `team/grin-t2-s1s2` | `grin-t2-evidence` | `0cd3473` | review | S1/S2 `S1_S2_HANDOFF.md`. P3 preserved. Holds-map 2500. Economics location UNKNOWN. | advertising GiB; live purge | Owner GiB; P8 still open |
 | Build / device | team3 | `team/grin-t3-offline` | `grin-t3-offline` | Play inventory RUN 2026-10-06 | review | `APPROVAL_B_DRAFT.md` `7bdf375`. vc23 unreserved. Freeze candidate `520f9f9` after CI. No phone results. | EAS/Play B1/B2 HOLD | Owner B1 only after matching CI; no unauthorized build |
 | Billing / Play | team4 | `team/grin-t4-product` | `grin-t4-product` | purchase-entry `"0"` | review | `DELETION_15_VS_180_OWNER_SHEET.md` `ec4a03d`. Catalog NOT RUN. | activation HOLD; public deletion UNRESOLVED | Owner fills A/B/C/D; no website publish |

@@ -26,13 +26,13 @@ TOOLING (ops-guard suite; not application CI).
 | Local `ci:verify` | **PASS** on `7761af6` (includes `b845e8a`). `test:all` **159/159** in 273.9s. Invoice-renderer Docker skipped locally. |
 | Team 2 S1/S2 slice | `0cd3473ab5aee2d88d31662e29794839bd9ee8aa` on `team/grin-t2-s1s2` (local `team/grin-t2-evidence` not force-pushed) |
 | Team 2 quota/lifecycle slice | `14e56f3802e29825708db591a5feb5bf8b000178` |
-| `git diff` vs `5d5df3d` | **non-empty** on `functions/src/goodsEvidence` (issuance quota, storage accounting, expiry). Ops pin for live GRIN deploy must be **re-reviewed** before A3. |
+| `git diff` vs `5d5df3d` | **non-empty** on `functions/src/goodsEvidence` (issuance quota, storage accounting, expiry). Helper pin is now `520f9f9`. A3 live Functions still HOLD. |
 | Live billing restriction | **Not deployed.** Live handlers still only the enablement key (absent). |
-| **Operational tooling SHA** | `228a8f58ac83d3c71e853cdccb6e4c4fa64c251f` |
+| **Operational tooling SHA** | Fail-closed origin `228a8f58ac83d3c71e853cdccb6e4c4fa64c251f`. Helper `PINNED_APP_SHA` now `520f9f9` (applied after T1+T5). Pin-apply commit is a **candidate** ops-guard successor. |
 | Docs checkpoint (Team 4 billing fold) | `aa5253e4e070195227055cde836d6b528d5e0070` |
-| Tooling suite | `node --test docs/release/packets/grin-ops/grin-functions-op.test.mjs` **34/34** (TOOLING, not application CI) |
+| Tooling suite | `node --test docs/release/packets/grin-ops/grin-functions-op.test.mjs` **34/34** after pin apply (TOOLING, not application CI). Live mode still rejects `GRIN_OPS_PINNED_SHA`. |
 | Merge-base / `origin/main` | `0da2f58970f23c7ce6cbefae6efffd49c731f44b` |
-| `git diff` application pin | **stale for this tree** — `functions/src/goodsEvidence` now differs from `5d5df3d`. Do not deploy GRIN from the old pin. |
+| `git diff` application pin | Helper `PINNED_APP_SHA` = `520f9f9`. `git diff --stat 520f9f9 HEAD -- functions src eas.json app.json app firebase.json` **empty**. Do not env-override. A3 still HOLD. |
 | version | **1.0.0** / versionCode **23 unreserved** |
 | firebase-tools | **14.20.0** |
 | gcloud | **ABSENT** on this workstation (required on apply host for enable/disable) |
@@ -47,7 +47,7 @@ Do not reopen ops-guard A/B without a new concrete reproduction.
 
 | Gate | State |
 |---|---|
-| SOURCE READY | S1/S2 source at `520f9f9`. Team 5 **S1 PASS / S2 PASS** at INJECTED + named G2 EMULATOR (`127.0.0.1:8091` / `9200`, `demo-vyaamikk-grin-g2`; `1e33894`). P3 accepted. **P8 FAIL**. Canonical GHA for this SHA **NOT YET**. Do not cite `37379529193`. Do not advertise GiB. Pin still unapplied pending Team 1. |
+| SOURCE READY | S1/S2 source at `520f9f9`. Team 5 **S1 PASS / S2 PASS** at INJECTED + named G2 EMULATOR (`1e33894`). Team 1 SOURCE PASS (`80b802f`). Helper `PINNED_APP_SHA=520f9f9` applied; ops-guard 34/34 re-run. P3 accepted. **P8 FAIL**. Canonical GHA for this SHA **NOT YET**. Do not cite `37379529193`. Do not advertise GiB. |
 | BACKEND PILOT READY | Prepared; **not authorized**; GRIN seven **ABSENT** on live. Create-absent-only planner exists, **not wired**. Enable/disable still UNPROVEN on firebase-created gen2. |
 | INTERNAL BUILD READY | Packet prepared (`APPROVAL_B_DRAFT.md`); **not authorized**; freeze SHA **placeholder** (post-S1/S2). Play inventory **RUN** 2026-10-06; versionCode 23 not reserved; no `internal-grin` / `5d5df3d` EAS AAB; B1≠B2 |
 | DEVICE ACCEPTED | Execution sheet ready; **NOT RUN** |
@@ -85,7 +85,7 @@ purchase-entry remains `"0"`. Play Console catalog **NOT RUN**.
 
 | Team | Authorized work this session | Approval still required |
 |---|---|---|
-| 1 Backend | A1 still independently offerable. Pin `5d5df3d` **STALE** vs `520f9f9`. Team 5 post-fix **PASS** at INJECTED+EMULATOR. Do **not** pin until Team 1 `REVIEW_AFTER_S1_S2`. Do not env-override. Ops-guard `228a8f5`. | Live Functions/Rules/IAM/admission/enable |
+| 1 Backend | T1 `REVIEW_AFTER_S1_S2` SOURCE PASS (`80b802f`). Pin **applied** `PINNED_APP_SHA=520f9f9` after T5 INJECTED+EMULATOR PASS. Ops-guard 34/34 re-run. A1 still independently offerable. A3 HOLD. No env-override. | Live Functions/Rules/IAM/admission/enable |
 | 2 Policy | S1/S2 folded (`0cd3473` → combined `520f9f9`). Holds `1.o.{len}.{ledgerId}.{len}.{evidenceId}`; `MAX_STORAGE_HOLDS=2500`. Economics: bucket location **UNKNOWN**; do not advertise 1/5/20; 256 MiB/1/5 GiB alternative not selected, not guaranteed profitable. `INCLUDE_GRIN_IN_ACCOUNT_PURGE=false`. 15-day grace unchanged. | Owner GiB confirm; 180-day public policy; no live purge |
 | 3 Build/device | Play explorer **RUN** 2026-10-06 (vc22 highest uploaded; 23 **unreserved**). Freeze SHA candidate `520f9f9` **only after** matching canonical CI. Device sheet **NOT RUN**. B1≠B2, neither granted. | EAS/native build; Play upload (separate); Play Console re-read before B1 |
 | 4 Billing/Play | Owner sheet `DELETION_15_VS_180_OWNER_SHEET.md` (15 implemented / 180 requested / public UNRESOLVED). Catalog **NOT RUN**. Allowlist SOURCE, not live. | Product/price/activation/submission; owner A/B/C/D |

@@ -4,13 +4,13 @@
 Approval of A1 does not approve A2–A7. Do not set `GRIN_OPS_ALLOW_LIVE=1`
 from this file.
 
-Pinned GRIN Functions application: `5d5df3d54df08953bfb26db39a9b7f5e3d67ed47`
-is **STALE** vs application `b845e8a` (pre-S1/S2). A1 does **not** run the
-Functions helper, so A1 can still be offered. **A3 waits** for a reviewed
-pin after S1/S2 — do **not** pin `b845e8a`; do **not** env-override
-`PINNED_APP_SHA`. Ops helper: `228a8f58ac83d3c71e853cdccb6e4c4fa64c251f`
-(34/34). Fresh inspect 2026-10-06: GRIN seven **ABSENT**, Firestore
-`b13d5255…` = baseline. Packet:
+Pinned GRIN Functions application: `520f9f98bc952fd7f30a907da9e85774629a69c0`
+(S1/S2). Do **not** pin `b845e8a`. Do **not** env-override
+`PINNED_APP_SHA`. A1 does **not** run the Functions helper, so A1 remains
+independently offerable. **A3 stays HOLD** (no live Functions). Ops helper
+fail-closed origin `228a8f58ac83d3c71e853cdccb6e4c4fa64c251f`; pin-apply
+commit is a candidate successor after 34/34. Fresh inspect 2026-10-06:
+GRIN seven **ABSENT**, Firestore `b13d5255…` = baseline. Packet:
 `docs/release/proposals/team1/A1_PACKET_REFRESH.md`.
 
 ---
