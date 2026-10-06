@@ -1,5 +1,10 @@
 # Approval B freeze-prepare — Team 3 (`candidate-1310`)
 
+**Superseded freeze-prepare.** Named Internal candidate is now
+`313025f902b0a3416815da7ce75a3a7d6bec9559` (1/3/10 GiB + 45-day). Canonical
+CI **still none**. B1 ≠ B2; **neither granted**. Do **not** build `520f9f9`
+or `56f2040`. See `CURRENT_HEAD_VS_FREEZE.md`. No EAS/Play this pass.
+
 **Not authorization.** Build approval ≠ upload approval. Neither is granted
 by this file. No EAS/native/prebuild/OTA. No Play upload. No `eas build`.
 No `eas submit`. Combined `/Users/shivamsaurav/vyd-worktrees/grin-combined`
