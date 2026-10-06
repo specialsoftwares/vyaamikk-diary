@@ -296,3 +296,7 @@ Application **`60c4bc179c46b8986ab0dbd2c95db0e4a5ceb49a`** (`ccfd845` on `team/g
 
 Owner Firebase Auth UID stored **out-of-repo**. `validate-uids` count=1. Values **not in git / PRs / this note**. Admission **writes HOLD**. Supply is **not** live authorization. T1/T2 UIDs still missing. Do not mark backend / device Done.
 
+## Team 2 P8 production path (unsent, 2026-10-06)
+
+`P8_PRODUCTION_PATH_PACKET.md` (team `b08690d`) folded as application **`540e07aa07f376716484adb879ce66cb9fb170ce`**. Flag **false**. Inert independent GRIN gate + paged list + `accountPurgeMayComplete`. Coordinator `grinCleanup` + `deletion.unit` PASS. **Not** a live grant. GRIN **synthetic-only**. Do not flip. Do not mark P8 Done.
+
