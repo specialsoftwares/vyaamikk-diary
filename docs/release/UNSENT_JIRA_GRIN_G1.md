@@ -304,3 +304,7 @@ Owner slot **O** uses an **existing** Firebase Auth account. UID stored **out-of
 
 `REVIEW_60c4bc1.md` (team `c69ffb9` on `team/grin-t5-review-60c4bc1`). SOURCE+INJECTED **PASS** for already-owned Play lifecycle after delist. New grants fail-closed. **P8 FAIL**. Device/live **NOT RUN**. Do not pin `60c4bc1` (`540e07a` is current). Do not mark billing / device Done.
 
+## Team 5 review 540e07a (unsent, 2026-10-06)
+
+`REVIEW_540e07a.md` (team `b3b1c97` on `team/grin-t5-review-540e07a`). SOURCE+INJECTED **PASS** for inert P8 production-path. Flag **false**. **P8 FAIL** operationally. Packet is **not** a live grant. Helper pin still `520f9f9` STALE. Canonical GHA **`37445383607` IN_PROGRESS** on `7e0d629` (app blobs = `540e07a`). Do not pin until SUCCESS. Do not flip the flag. Do not mark P8 / device / live Done.
+
