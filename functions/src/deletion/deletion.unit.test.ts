@@ -6,6 +6,7 @@ import {
   initialDeletionJob,
   shouldPromoteToReady,
   allPhasesDone,
+  accountPurgeMayComplete,
   EMPTY_PHASES,
 } from "./deletionJob";
 import {
@@ -49,6 +50,50 @@ function testPhases() {
       firestore: "done",
       indexes: "done",
       auth: "done",
+    }),
+    true
+  );
+}
+
+function testAccountPurgeMayComplete() {
+  const done = {
+    storage: "done" as const,
+    firestore: "done" as const,
+    indexes: "done" as const,
+    auth: "done" as const,
+  };
+  assert.equal(
+    accountPurgeMayComplete({
+      phases: EMPTY_PHASES,
+      includeGrinInAccountPurge: false,
+      grinCompleted: true,
+    }),
+    false,
+    "diary phases incomplete must not complete"
+  );
+  assert.equal(
+    accountPurgeMayComplete({
+      phases: done,
+      includeGrinInAccountPurge: false,
+      grinCompleted: false,
+    }),
+    true,
+    "flag-false production may complete with GRIN trees still present"
+  );
+  assert.equal(
+    accountPurgeMayComplete({
+      phases: done,
+      includeGrinInAccountPurge: true,
+      grinCompleted: false,
+    }),
+    false,
+    "flag-true interruption must not mark completed"
+  );
+  assert.equal(
+    accountPurgeMayComplete({
+      phases: done,
+      includeGrinInAccountPurge: true,
+      grinCompleted: true,
     }),
     true
   );
@@ -140,6 +185,7 @@ async function testAuthIdempotent() {
 async function main() {
   testJobLease();
   testPhases();
+  testAccountPurgeMayComplete();
   testClassify();
   await testStoragePurgePagination();
   await testAlreadyMissing();
