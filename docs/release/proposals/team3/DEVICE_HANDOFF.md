@@ -1,30 +1,34 @@
 # Team 3 handoff — Android build / real-phone acceptance
 
 **2026-10-06.** Worktree `/Users/shivamsaurav/vyd-worktrees/grin-t3-offline`.  
-Branch `team/grin-t3-offline` @ `aa5253e4e070195227055cde836d6b528d5e0070`.  
-Historical dirty workspace and `grin-combined` were **not** edited.  
-`package.json` / `eas.json` / `app.json` were **not** edited.  
-No EAS/native/prebuild/OTA. No Play upload. No phone results invented.
+Provenance branch `team/grin-t3-freeze`. Combined `aea65c1` and historical
+workspace were **read-only**. `package.json` / `eas.json` / `app.json` were
+**not** edited. No EAS/native/prebuild/OTA. No Play upload. No phone results
+invented. Do not force-push `team/grin-t3-offline`.
 
 ---
 
-## Freeze SHA rule (Internal AAB)
+## Freeze SHA (Internal AAB)
+
+Copy block: `docs/release/proposals/team3/APPROVAL_B_DRAFT.md`.
 
 | Pin | Value | Use |
 |---|---|---|
-| Current application (pre-S1/S2) | `b845e8a30262b9e8740fa53b55e9a0f237caea0b` | Checkpoint only. **Not** the Internal AAB freeze. |
-| Current PR head | `41b05a49e8e60597b63a35f22825878bc1945dee` | PR #31. Docs/QA fold on top of `b845e8a`. **Not** the Internal AAB freeze. |
-| Current canonical CI | GitHub Actions run **`37379529193`** success on `41b05a4` (job **`111997702708`** from coordinator register; `gh` unauthenticated here) | Proves this pre-S1/S2 tree. **Do not** cite for a later SHA. |
-| **Internal AAB freeze SHA** | **PLACEHOLDER — post-S1/S2 application SHA + matching canonical CI success** | Owner may approve **B1** only after that SHA exists. |
-| Superseded pins | `5d5df3d` / CI `37351685421` | Invalid for this checkpoint and for B1. |
+| **Application freeze** | `520f9f98bc952fd7f30a907da9e85774629a69c0` | Clean checkout for B1. S1/S2 application. |
+| Canonical CI | GHA run **`37425360211`**, job **`112143748428`**, head **`0d7aa17a6efcf3ce6874269eb57afda0a2b45559`**, verify + canonical gate **success** (skipped none observed) | Matching CI. **Do not** cite `37379529193`. |
+| Helper-pin tree | `0d7aa17` | Use only if owner insists pin is in the freeze tree. Application blobs still `520f9f9`. |
+| Combined docs | `aea65c1` | Docs-only after `0d7aa17`. Not an application SHA. |
 
-S1/S2 storage fixes are **not in** `b845e8a` / `41b05a4`. Internal AAB freeze **must wait**. Do not build from a dirty tree. Do not reuse historical EAS AAB `72cb7254-…` (vc22, profile `production`, git `0da2f58`).
+Do not build from a dirty tree. Do not reuse historical EAS AAB `72cb7254-…` (vc22, profile `production`, git `0da2f58`).
 
-A later **material source change** (S1/S2 merge, versionCode rewrite, purchase-entry/quota/GRIN flag change, or any other application commit) requires a **new binary** and a **new CI**.
+A later **material source change** (versionCode rewrite, purchase-entry/quota/GRIN flag change, or any other application commit) requires a **new binary** and a **new CI**.
 
 ---
 
-## Play uploaded-version inventory — **RUN** 2026-10-06T05:51Z–05:53Z
+## Play uploaded-version inventory — **RUN** 2026-10-06T05:51Z–05:53Z — **RE-READ immediately before B1**
+
+The table below is a reminder (highest uploaded **vc22**; 23 unused). It is
+**not** the B1-time inventory.
 
 Read-only Play Console `u/1`. Developer **SPECIAL SOFTWARES** `5171346189091805855`. App `4972339006118168782`. Package `com.specialsoftwares.vyaamikkdiary`. Draft / temporary unreviewed name. **No** Save, upload, Create new release, Pause, Promote, or ToS accept.
 
@@ -59,7 +63,7 @@ App-list “Last updated **5 Oct 2026**” is **not** a new uploaded versionCode
 
 Testers tab opened; **Save disabled**. Join-on-the-web exists. Emails / names **not copied**. Play lists are **not** Firestore admission and **not** the O/T1/T2 identity table.
 
-**versionCode 23 is still UNRESERVED.** `app.json` `"versionCode": 23` and `isolation.contract.test.ts` asserting 23 do **not** reserve Play. This inventory may go stale before the post-S1/S2 SHA exists. **Re-read App bundle explorer (unfiltered) immediately before writing a code at B1.** Choose an unused integer **strictly greater** than the then-highest **uploaded** Play versionCode. If 23 is still unused it **may** be used. If Play already has 23, **stop** — do not ship 24+ while the isolation test still requires 23; cut a new SHA with both changes. Do not re-upload 22.
+**versionCode 23 is still UNRESERVED.** `app.json` `"versionCode": 23` and `isolation.contract.test.ts` asserting 23 do **not** reserve Play. **Re-read App bundle explorer (unfiltered) immediately before B1** — this 2026-10-06 list (highest uploaded **vc22**; 23 unused) is a reminder, not a live read at build time. Choose an unused integer **strictly greater** than the then-highest **uploaded** Play versionCode. If 23 is still unused it **may** be used. If Play already has 23, **stop** — do not ship 24+ while the isolation test still requires 23; cut a new SHA with both changes. Do not re-upload 22.
 
 ---
 
@@ -75,9 +79,9 @@ Testers tab opened; **Save disabled**. Join-on-the-web exists. Emails / names **
 
 Do not submit a preview APK to Internal Testing. Do not call a local APK a `PLAY_INSTALLED` run.
 
-### Flags — source `eas.json` `build.internal-grin` (file read this session; no mutation)
+### Flags — `git show 520f9f9:eas.json` (no EAS started)
 
-Prior `eas config --platform android --profile internal-grin` (2026-10-06, configuration only): profile env wins on overlap with remote production `EXPO_PUBLIC_APP_MODE`; resolved `distribution=store`. Not repeated this session (no EAS start).
+This worktree `eas.json` matches `520f9f9` (`git diff` empty). Prior `eas config` (2026-10-06, configuration only): profile env wins on overlap; resolved `distribution=store`. Not repeated (no EAS start).
 
 | Key | `internal-grin` | `production` / `preview` |
 |---|---|---|
@@ -96,7 +100,7 @@ Visibility is **not** backend admission (Approval A). Compile-time flags: changi
 
 | Gate | Authorizes | This packet |
 |---|---|---|
-| **B1 — Build** | `eas build --profile internal-grin --platform android` from a **clean** tree at the **post-S1/S2 freeze SHA**, after a **fresh** Play inventory and committed versionCode | **not granted** — packet ready for owner once that SHA + CI exist |
+| **B1 — Build** | `eas build --profile internal-grin --platform android` from a **clean** checkout of **`520f9f9`** (or `0d7aa17` if helper pin must be in-tree), after Play inventory is **re-read** and committed versionCode | **not granted** |
 | **B2 — Internal upload** | Play Internal Testing upload of the **B1 AAB only**, after B1 evidence | **not granted**; request only after B1 evidence |
 
 B1 does not imply B2. B2 does not imply production promotion, listing Save, or OTA.
@@ -104,7 +108,7 @@ B1 does not imply B2. B2 does not imply production promotion, listing Save, or O
 ### B1 evidence (when owner authorizes later)
 
 - EAS `buildId`
-- `gitCommitHash` = tagged post-S1/S2 freeze SHA (clean tree)
+- `gitCommitHash` = tagged freeze `520f9f9` (clean tree; or `0d7aa17` if helper pin required)
 - resolved public env from the **build worker** (not only `eas.json` / `eas config`)
 - AAB sha256
 - `bundletool dump manifest` package / versionCode / versionName
@@ -119,7 +123,11 @@ B1 does not imply B2. B2 does not imply production promotion, listing Save, or O
 
 ## Owner device checklist
 
-Coordinator/AI does **not** physically execute. `adb devices -l` this session: **empty**. Host / emulator / SQLITE_HOST / CI greens are **not** device PASS. **No hardware = NOT RUN, not PASS.**
+Coordinator/AI does **not** physically execute. `adb devices -l` this session: **empty**. Host / emulator / SQLITE_HOST / mounted inert React / CI greens are **not** device PASS. **No hardware = NOT RUN, not PASS.**
+
+Blank form (private-channel identifiers): `docs/release/proposals/team3/OWNER_DEVICE_FORM.md`.
+
+Live GRIN (Approval A) is **NOT present** — GRIN seven **ABSENT**. XR / original-read **N/A until backend**. Synthetic GRIN until lifecycle is approved.
 
 ### Who can execute
 
@@ -214,10 +222,10 @@ Files in git ≠ uploaded to Play (listing Save **NOT RUN**).
 
 - EAS/native/prebuild/OTA; **no** `eas build` / `eas submit`
 - Play upload / Internal track / production promotion / listing Save
-- versionCode **23 reservation** (none; unused on Play as of this read, still unreserved)
-- Approval **B1** and **B2** (separate; neither granted)
-- Internal AAB freeze SHA (wait for post-S1/S2 SHA + CI)
-- Approval A live GRIN backend / original-read (XR)
+- versionCode **23 reservation** (none; unused on Play as of 2026-10-06, still unreserved)
+- Approval **B1** and **B2** (separate; **neither granted**)
+- Play explorer **re-read** immediately before B1
+- Approval A live GRIN backend / original-read (XR) — seven **ABSENT**
 - Packet D retention / commercial quota
 - NATIVE_DEVICE / PLAY_INSTALLED execution (no hardware)
-- Tester identity fill-in by owner
+- Owner device form fill-in via private channel
