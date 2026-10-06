@@ -292,3 +292,7 @@ GHA **`37440328976`** **success**. Job `112192249694` `verify` **success**. Chec
 
 Application **`60c4bc179c46b8986ab0dbd2c95db0e4a5ceb49a`** (`ccfd845` on `team/grin-t4-lifecycle-allowlist`). New grants fail-closed; already-owned expire/refund/restore skip allowlist. Coordinator SOURCE tests PASS. T5 **pending**. Do not pin. Do not activate billing.
 
+## Owner UID received privately (unsent, 2026-10-06)
+
+Owner Firebase Auth UID stored **out-of-repo**. `validate-uids` count=1. Values **not in git / PRs / this note**. Admission **writes HOLD**. Supply is **not** live authorization. T1/T2 UIDs still missing. Do not mark backend / device Done.
+

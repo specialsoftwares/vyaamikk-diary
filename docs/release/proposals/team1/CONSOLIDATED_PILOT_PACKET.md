@@ -36,7 +36,7 @@ that must not run until their stated blocker clears.
 | **A** Firestore Rules | Isolated `--only firestore:rules` | **YES** (after owner letter + inspect still = live baseline) | Hashes, command, verification, rollback, stop conditions complete. firebase-tools **14.20.0**. |
 | **B** Storage Rules | Isolated `--only storage` | **YES** (after owner letter + inspect still = live baseline) | Same isolated JSON, **separate** command and verification. May be lettered in the same owner response as A; must still run as its own command. |
 | **C** Functions gate-off-initial | Seven named create, gate key **absent** | **HOLD** | Helper `PINNED_APP_SHA` is still `520f9f9` (**STALE**). Do **not** apply the pin. HOLD until the coordinator pins the **FINAL** candidate **after billing-lifecycle correction + matching CI**. Name `fcda7cd` as the GRIN Functions tree unless combined application paths move. |
-| **D** Tester admission | Admin/Firestore document write | **YES** for UID grammar / validate-uids; **HOLD** for writes | Mechanism is **not** a SOURCE allowlist. Writes wait on owner UIDs supplied **privately out-of-repo**. `PLAY_BILLING_TESTER_UIDS` is a **separate** Functions env/secret and is **not** authorized to be set now. |
+| **D** Tester admission | Admin/Firestore document write | **YES** for UID grammar / validate-uids (`count=1`); **HOLD** for writes | Mechanism is **not** a SOURCE allowlist. Owner UID is on a private out-of-repo file. **Supply is not authorization.** `PLAY_BILLING_TESTER_UIDS` is a **separate** Functions env/secret and is **not** authorized to be set now. |
 | **E** Gate enable / disable | gcloud `--update-env-vars` without `--source` | **HOLD — UNPROVEN** | firebase-tools **14.20.0** dotenv **REPLACE** is proven **blocked**. Helper enable/disable **intends** omitted-`--source` gcloud **only if** inspect `sourceOrigin` is `gcs` or `repo`. That preservation is **UNPROVEN** (`gcloud` **ABSENT**). Do not claim proven. |
 | **F** Synthetic smoke | INJECTED harness; LIVE_BACKEND | **INJECTED YES**; **LIVE HOLD** | Case list complete. `LIVE_BACKEND` stays refused until **E is proven AND** the owner letters live smoke. Synthetic data only. |
 
@@ -430,9 +430,11 @@ Re-inspect without `GRIN_OPS_EXPORT_DIR`. Require:
 
 ## D — Tester admission (Admin/Firestore document; **not** a SOURCE allowlist)
 
-**HOLD for writes** until the owner supplies Firebase Auth UIDs privately
-(out of repo). Grammar / validator is **YES** now. Do not invent UIDs.
-Values **never** enter git and are **never printed**.
+**HOLD for writes.** Owner Firebase Auth UID was supplied privately
+(out-of-repo) on 2026-10-06. `validate-uids` **count=1** (values not
+printed). **That supply does not authorize live admission or deployment.**
+Trusted testers T1/T2 still missing. Grammar / validator is **YES**. Do not
+invent UIDs. Values **never** enter git and are **never printed**.
 
 This is **not**:
 

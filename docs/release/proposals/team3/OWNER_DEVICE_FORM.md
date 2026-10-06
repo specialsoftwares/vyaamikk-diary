@@ -40,7 +40,7 @@ Handoff: `docs/release/proposals/team3/PHONE_HANDOFF.md`.
 
 | Slot | Role | Availability (dates) | Notes |
 |---|---|---|---|
-| O | Owner | **today** (2026-10-06) | Firebase Auth UID via **private channel**. Play Internal email separately, also private. Neither in git. |
+| O | Owner | **today** (2026-10-06) | Firebase Auth UID **received privately 2026-10-06** (out-of-repo). Grammar valid (`count=1`). Values **not in git**. Admission **writes HOLD**. Play Internal email separately, also private. |
 | T1 | Trusted tester 1 | | Firebase Auth UID via private channel |
 | T2 | Trusted tester 2 | | Firebase Auth UID via private channel |
 

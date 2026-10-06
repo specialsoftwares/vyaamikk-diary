@@ -5,7 +5,7 @@ Do not collapse to Done.
 
 Arrangement: one coordinator plus five **local** Cursor Task subagents on separate worktrees. AI roles, not human sign-off.
 
-Checkpoint **2026-10-06 14:56:** Application **`60c4bc1`**. T1 A–F packet folded. Pin **not** applied. T5 of `60c4bc1` pending. Device/live/public **not accepted**.
+Checkpoint **2026-10-06 15:07:** Application **`60c4bc1`**. Owner UID received privately (out-of-repo). Admission writes **HOLD**. Pin **not** applied. Device/live/public **not accepted**.
 
 | Task | Owner | Branch | Worktree | Dependency | Status | Evidence | Blocker | Next |
 |---|---|---|---|---|---|---|---|---|

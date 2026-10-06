@@ -36,7 +36,7 @@ Do not rewrite those files as if they were re-run today.
 | Owner deletion (2026-10-06) | **45-day** grace wired (`DELETION_GRACE_DAYS=45`). Supersedes 180. Play freeze ≠ delete. GRIN purge flag **false**. |
 | Device / live backend / billing / public | **Not accepted** |
 | Next approval | A–F batch in `CONSOLIDATED_PILOT_PACKET.md`. **Not executed.** Candidate **`60c4bc1`** after T5+CI. Do not pin `fcda7cd`. |
-| Device named | OnePlus 12R, Android 16, vc22 installed, available today. **Upgrade device.** Clean-install device **unnamed**. Firebase UIDs **not in repo**. |
+| Device named | OnePlus 12R, Android 16, vc22 installed, available today. **Upgrade device.** Clean-install device **unnamed**. Owner Firebase UID **received privately (out-of-repo)**. Values **not in git**. Admission **writes HOLD**. |
 | versionCode | **23 UNRESERVED**. Play explorer 2026-10-06: highest uploaded **vc22**. |
 | Merge-base / `origin/main` | `0da2f58970f23c7ce6cbefae6efffd49c731f44b` |
 
@@ -56,7 +56,7 @@ reproduction. Do not reopen S1/S2 without a new reproduction.
 | Consolidated backend packet | T1 | **Landed** `CONSOLIDATED_PILOT_PACKET.md` `a28bfb0`. A/B executable on paper; C–E HOLD | owner letter of complete batch | inspect 2026-10-06 | A6 UNPROVEN; no live execute |
 | Internal AAB packet | T3 | **Landed** `PHONE_HANDOFF.md` `5692e25`. B1 of `60c4bc1` after T5+CI | T5 + CI | OnePlus 12R named | B1 ungranted |
 | Restricted billing packet | T4 | **Landed** `60c4bc1` (`ccfd845`). Catalog **NOT RUN** | T5 of `60c4bc1` | coordinator tests PASS | activation HOLD |
-| Phone acceptance | T3 + owner | vc22 upgrade after B2 | AAB + private UIDs | device **NOT RUN** | no AAB; UIDs not supplied |
+| Phone acceptance | T3 + owner | vc22 upgrade after B2 | AAB + private UID on file | device **NOT RUN** | no AAB; D writes HOLD |
 | Review `60c4bc1` lifecycle | T5 | Independent rerun vs `fcda7cd` | `60c4bc1` | `REVIEW_fcda7cd` stands | leftover P3-FAIL stay dirty |
 
 ---
@@ -123,7 +123,7 @@ implementation and tests** only. Not live deploy / billing / Play publish.
 | Active / expiry | Keep issued evidence while entitled. After genuine expiry: 90-day read/export then 30-day notice. **No production purge job this assignment.** | Source state machine only until approved deploy |
 | Explicit deletion | **45-day grace wired.** Supersedes 180. Play freeze ≠ delete. `INCLUDE_GRIN_IN_ACCOUNT_PURGE=false`. | Do not flip GRIN purge flag |
 | Export | Pack is summary (`originalsBundled=false`). Originals + record export required. ZIP optional. | Device proof NOT RUN |
-| Testers | Owner + two trusted testers. OnePlus 12R Android 16 vc22 **named**. UIDs **not in repo**. Clean-install device unnamed. | Private UIDs in chat or out-of-repo file |
+| Testers | Owner + two trusted testers. OnePlus 12R Android 16 vc22 **named**. Owner UID **received privately**. Values **not in repo**. Clean-install device unnamed. | D writes HOLD; T1/T2 UIDs still missing |
 
 Internal Testing: **synthetic** GRIN evidence until lifecycle is **approved
 for live use**. Source machinery exists; `INCLUDE_GRIN_IN_ACCOUNT_PURGE`
