@@ -55,10 +55,10 @@ reproduction. Do not reopen S1/S2 without a new reproduction.
 | Pin helper to selected SHA | coordinator apply | After T5 of **`540e07a`** + matching CI | T5 pending | do not pin `60c4bc1` | A3 HOLD |
 | Consolidated backend packet | T1 | **Landed** `a28bfb0`. Retarget C to `540e07a` after T5+CI | owner letter of complete batch | inspect 2026-10-06 | A6 UNPROVEN; no live execute |
 | Internal AAB packet | T3 | **Landed** `PHONE_HANDOFF.md`. B1 of `540e07a` after T5+CI | T5 + CI | OnePlus 12R named | B1 ungranted |
-| Restricted billing packet | T4 | **Landed** in `60c4bc1` (`ccfd845`). Catalog **NOT RUN** | T5 | coordinator tests PASS | activation HOLD |
+| Restricted billing packet | T4 | **Landed** in `60c4bc1`. T5 SOURCE+INJECTED **PASS** `c69ffb9`. Catalog **NOT RUN** | T5 of `540e07a` for pin | FakePlay nine cases | activation HOLD |
 | P8 production path | T2 | **Landed** packet `b08690d` + inert wiring `540e07a`. Flag **false** | owner live grant later | `grinCleanup` + `deletion.unit` PASS | do not flip; synthetic-only |
 | Phone acceptance | T3 + owner | vc22 upgrade after B2 | AAB + private UID on file | device **NOT RUN** | no AAB; D writes HOLD |
-| Review `60c4bc1` lifecycle | T5 | Independent rerun vs `fcda7cd` | `60c4bc1` | in flight | leftover P3-FAIL stay dirty |
+| Review `60c4bc1` lifecycle | T5 | **Landed** `REVIEW_60c4bc1.md` `c69ffb9`. SOURCE+INJECTED **PASS** | done | FakePlay nine cases | leftover P3-FAIL stay dirty |
 | Review `540e07a` P8 wiring | T5 | Independent review vs `60c4bc1` | `540e07a` | coordinator tests PASS | leftover P3-FAIL stay dirty |
 
 ---
@@ -67,11 +67,11 @@ reproduction. Do not reopen S1/S2 without a new reproduction.
 
 | Gate | State |
 |---|---|
-| SOURCE READY | Application **`540e07a`**. Coordinator deletion tests PASS. T5 of `60c4bc1` and `540e07a` **pending**. GHA `37440328976` covers **`fcda7cd` only**. **P8 FAIL** (flag false). |
+| SOURCE READY | Application **`540e07a`**. T5 SOURCE+INJECTED **PASS** for billing lifecycle at `60c4bc1` (`c69ffb9`). T5 of **`540e07a` P8 wiring pending**. GHA `37440328976` covers **`fcda7cd` only**. **P8 FAIL** (flag false). |
 | BACKEND PILOT READY | A–F packet `a28bfb0` present. **Not executed.** A/B YES on paper; C HOLD pin of `540e07a`; D writes HOLD; E UNPROVEN; F LIVE HOLD. |
 | INTERNAL BUILD READY | T3 `PHONE_HANDOFF.md`. B1 of **`540e07a`** after T5+CI. B1≠B2 **neither granted**. Not a purchase-test build. |
 | DEVICE ACCEPTED | **NOT RUN**. OnePlus 12R available today — not yet executed. |
-| BILLING ACCEPTED | Tester SOURCE+INJECTED **PASS** (`bbcb144`); catalog **NOT RUN**; purchases **off**; REAL-CHARGE **not run** |
+| BILLING ACCEPTED | Lifecycle SOURCE+INJECTED **PASS** at `60c4bc1` (`c69ffb9`); catalog **NOT RUN**; purchases **off**; REAL-CHARGE **not run** |
 | PUBLIC SUBMISSION READY | Blocked on wired 1/3/10+45d, device, billing, listing. Owner writes recorded. |
 | PUBLIC ROLLOUT APPROVED | Not authorized |
 
@@ -108,8 +108,8 @@ purchase-entry remains `"0"`. Play Console catalog **NOT RUN**.
 | 1 Backend | A–F packet `a28bfb0`. A/B two commands. C HOLD pin of `540e07a`. D validate-uids YES / writes HOLD. E UNPROVEN. F INJECTED YES / LIVE HOLD. **Not executed.** | Owner letters complete batch after T5+CI of `540e07a` |
 | 2 Policy | P8 packet `b08690d` + inert wiring `540e07a`. Flag **false**. P3 PASS. P8 FAIL operationally. GRIN **synthetic-only**. **Do not advertise.** | Live purge grant = one-line flip; not done |
 | 3 Build/device | `PHONE_HANDOFF.md` `5692e25`. OnePlus 12R upgrade. B1≠B2 **ungranted**. Purchase-entry `"0"`. Device **NOT RUN**. | EAS B1 of `540e07a` after T5+CI; Play B2 separate |
-| 4 Billing/Play | Lifecycle correction in **`60c4bc1`**. Already folded. Catalog **NOT RUN**. Purchase-entry `"0"`. | Activation HOLD; T5 of lifecycle slice |
-| 5 QA | `REVIEW_fcda7cd.md` stands. **`60c4bc1` and `540e07a` pending.** P8 FAIL. Device/live **NOT RUN**. | Independent reviews; leftover P3-FAIL stay dirty |
+| 4 Billing/Play | Lifecycle correction in **`60c4bc1`**. T5 SOURCE+INJECTED **PASS** (`c69ffb9`). Catalog **NOT RUN**. Purchase-entry `"0"`. | Activation HOLD |
+| 5 QA | `REVIEW_60c4bc1.md` **PASS**. **`540e07a` P8 wiring pending.** P8 FAIL. Device/live **NOT RUN**. | Independent P8 review; leftover P3-FAIL stay dirty |
 
 ---
 

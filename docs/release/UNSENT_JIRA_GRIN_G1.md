@@ -290,7 +290,7 @@ GHA **`37440328976`** **success**. Job `112192249694` `verify` **success**. Chec
 
 ## Team 4 already-owned lifecycle (unsent, 2026-10-06)
 
-Application **`60c4bc179c46b8986ab0dbd2c95db0e4a5ceb49a`** (`ccfd845` on `team/grin-t4-lifecycle-allowlist`). New grants fail-closed; already-owned expire/refund/restore skip allowlist. Coordinator SOURCE tests PASS. T5 **pending**. Do not pin. Do not activate billing.
+Application **`60c4bc179c46b8986ab0dbd2c95db0e4a5ceb49a`** (`ccfd845` on `team/grin-t4-lifecycle-allowlist`). New grants fail-closed; already-owned expire/refund/restore skip allowlist. Coordinator SOURCE tests PASS. T5 SOURCE+INJECTED **PASS** (`c69ffb9`). Do not pin (`540e07a` is current application). Do not activate billing.
 
 ## Owner UID received privately (unsent, 2026-10-06)
 
@@ -299,4 +299,8 @@ Owner Firebase Auth UID stored **out-of-repo**. `validate-uids` count=1. Values 
 ## Team 2 P8 production path (unsent, 2026-10-06)
 
 `P8_PRODUCTION_PATH_PACKET.md` (team `b08690d`) folded as application **`540e07aa07f376716484adb879ce66cb9fb170ce`**. Flag **false**. Inert independent GRIN gate + paged list + `accountPurgeMayComplete`. Coordinator `grinCleanup` + `deletion.unit` PASS. **Not** a live grant. GRIN **synthetic-only**. Do not flip. Do not mark P8 Done.
+
+## Team 5 review 60c4bc1 (unsent, 2026-10-06)
+
+`REVIEW_60c4bc1.md` (team `c69ffb9` on `team/grin-t5-review-60c4bc1`). SOURCE+INJECTED **PASS** for already-owned Play lifecycle after delist. New grants fail-closed. **P8 FAIL**. Device/live **NOT RUN**. Do not pin `60c4bc1` (`540e07a` is current). Do not mark billing / device Done.
 
