@@ -68,12 +68,32 @@ historical EAS AAB `72cb7254-…` (vc22, profile `production`, git
 `0da2f58`).
 
 After owner letters **B1** (not granted; **do not execute** now): recheck
-Play inventory, then `eas build --profile internal-grin` of `540e07a`,
-then later **B2** Internal upload (separate letter), then **D1** upgrade
-over vc22.
+Play inventory immediately, then `eas build --profile internal-grin` of
+`540e07aa07f376716484adb879ce66cb9fb170ce`, then later **B2** Internal
+upload (separate letter), then **D1** upgrade over vc22 on OnePlus 12R.
+
+**Prepared 2026-10-06 (not executed):** B1 checkout remains `540e07a`.
+versionCode 23 UNRESERVED until Play recheck. Purchase-entry `"0"`.
+P8 FAIL. This file is still not a B1/B2 grant.
+
+Executable packet (still unexecuted):
+`docs/release/proposals/team3/INTERNAL_AAB_540e07a_PACKET.md`.
 
 ---
 
+## OnePlus 12R upgrade checklist (D1; after B2; not authorized now)
+
+1. Confirm phone: OnePlus 12R, Android 16, installed **vc22**.
+2. Confirm Play Internal track has the B2-uploaded `540e07a` AAB (vc23 after
+   reservation).
+3. Upgrade in place (do **not** uninstall / clear data without a separate
+   owner agreement).
+4. Capture results in `device/RESULT_CAPTURE.template.md`.
+5. Backend gate state is independent: today seven GRIN callables are
+   **gate=off**; device GRIN UI may appear while callables deny until a
+   later proven E enable.
+
+---
 ## 2. This Internal GRIN AAB is not a purchase-test build
 
 On `internal-grin` at application `540e07a` (`git show

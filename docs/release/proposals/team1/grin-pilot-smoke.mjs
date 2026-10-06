@@ -1,12 +1,20 @@
 #!/usr/bin/env node
 /**
  * GRIN restricted-pilot smoke gate.
- * Not authorization. Does not set GRIN_OPS_ALLOW_LIVE.
+ * Not authorization. Does not set GRIN_OPS_ALLOW_LIVE by itself.
  *
  * Labels:
  *   INJECTED     — default; synthetic in-process adapters (no live project)
  *   EMULATOR     — isolated demo project only; not LIVE_BACKEND
- *   LIVE_BACKEND — refused: E is SOURCE/STUB-supported, not live-executable
+ *   LIVE_BACKEND — client Firebase phone OTP session + callable smoke
+ *
+ * Auth boundary for LIVE_BACKEND:
+ *   - Owner signs in on the local Firebase JS phone OTP surface
+ *     (grin-live-f-signin.mjs). OTP is never requested in chat/logs.
+ *   - Session UID must match the private out-of-repo admission file.
+ *   - Callables use that client ID token (httpsCallable-shaped).
+ *   - Does not mint arbitrary-user tokens, grant Token Creator, create
+ *     service-account keys, or call iamcredentials.signJwt.
  *
  * Owner Firebase Auth UIDs are supplied privately (not in git). This module
  * never prints UID values, tokens, or env values.
@@ -26,8 +34,11 @@ export const E_PROJECT = "vyaamikk-diary";
 export const E_REGION = "asia-south1";
 export const E_APPLICATION_SHA = "540e07aa07f376716484adb879ce66cb9fb170ce";
 export const E_SOURCE_STUB_STATUS = "SUPPORTED";
-export const E_LIVE_STATUS = "HOLD";
-export const E_LIVE_EXECUTABLE = false;
+/** LIVE E (Functions v2 env PATCH) proven 2026-10-06; omitted-source gcloud remains FAILED. */
+export const E_LIVE_STATUS = "PROVEN_PATCH";
+export const E_LIVE_EXECUTABLE = true;
+export const E_AUTH_BOUNDARY = "firebase-client-phone-otp";
+export const FAILED_E_PROCEDURE = "gcloud-functions-deploy-omitted-source";
 
 export const E_SEVEN_NAMES = Object.freeze([
   "grinRegisterGoodsReceipt",
@@ -39,7 +50,10 @@ export const E_SEVEN_NAMES = Object.freeze([
   "grinUploadEvidence",
 ]);
 
-/** Helper enable: buildGcloudGateArgs(name, "true"). Disable uses "false", not remove. */
+/**
+ * Historical argv shape for the retired omitted-source gcloud route.
+ * Kept for refuse tests. Runtime enable/disable uses Functions v2 PATCH.
+ */
 export function expectedGcloudEnableArgs(functionName) {
   return [
     "functions",
@@ -228,6 +242,9 @@ export function liveBackendAdmission({
   allowLive = process.env.GRIN_OPS_ALLOW_LIVE,
   smokeLive = process.env.GRIN_PILOT_SMOKE_LIVE,
   gcloudProven = false,
+  patchProven = process.env.GRIN_OPS_PATCH_PROVEN === "0"
+    ? false
+    : process.env.GRIN_OPS_PATCH_PROVEN === "1" || E_LIVE_EXECUTABLE,
 } = {}) {
   if (allowLive === "1" && (process.env.GRIN_OPS_PINNED_SHA || process.env.GRIN_OPS_ENDPOINT_FIXTURE || process.env.GRIN_OPS_TEST_HANG || process.env.GRIN_OPS_HTTP_STUB)) {
     return {
@@ -236,22 +253,27 @@ export function liveBackendAdmission({
       reason: "LIVE_BACKEND refuses pin/fixture/HTTP stubs/test-hang overrides",
     };
   }
-  if (!E_LIVE_EXECUTABLE || !gcloudProven) {
+  if (!E_LIVE_EXECUTABLE || (!gcloudProven && !patchProven)) {
     return {
       allowed: false,
       label: SMOKE_LABEL_LIVE,
       reason:
-        "LIVE_BACKEND refused: E is SOURCE/STUB-supported, not live-executable (gcloud omitted --source preservation on firebase-created gen2 callables is UNPROVEN). Do not enable live GRIN to obtain that evidence.",
+        "LIVE_BACKEND refused: E LIVE not proven (Functions v2 PATCH preservation required; omitted-source gcloud remains FAILED)",
     };
   }
   if (smokeLive !== "1" || allowLive !== "1") {
     return {
       allowed: false,
       label: SMOKE_LABEL_LIVE,
-      reason: "LIVE_BACKEND requires a later approved pilot (GRIN_PILOT_SMOKE_LIVE=1 and GRIN_OPS_ALLOW_LIVE=1) after C+D+E and an owner live-smoke letter",
+      reason: "LIVE_BACKEND requires GRIN_PILOT_SMOKE_LIVE=1 and GRIN_OPS_ALLOW_LIVE=1 after C+D+E and an owner live-smoke letter",
     };
   }
-  return { allowed: true, label: SMOKE_LABEL_LIVE, reason: "admitted" };
+  return {
+    allowed: true,
+    label: SMOKE_LABEL_LIVE,
+    reason: "admitted",
+    authBoundary: E_AUTH_BOUNDARY,
+  };
 }
 
 export const SMOKE_SCENARIOS = Object.freeze([
@@ -315,7 +337,25 @@ function runEmulator() {
 
 function runLive() {
   const decision = liveBackendAdmission();
-  abort(decision.reason);
+  if (!decision.allowed) abort(decision.reason);
+  const liveF = join(HERE, "../../packets/grin-ops/grin-live-f.ts");
+  if (!existsSync(liveF)) abort("grin-live-f.ts missing");
+  process.stdout.write(
+    `grin-pilot-smoke: LIVE_BACKEND admitted authBoundary=${E_AUTH_BOUNDARY} (owner OTP on local Firebase client; tokens/UIDs never printed)\n`,
+  );
+  const r = spawnSync("npx", ["--yes", "tsx", liveF], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      GRIN_OPS_ALLOW_LIVE: "1",
+      GRIN_PILOT_SMOKE_LIVE: "1",
+      GRIN_OPS_PATCH_PROVEN: "1",
+    },
+  });
+  if (r.status !== 0) abort(`LIVE_BACKEND smoke failed with status ${r.status ?? "null"}`, r.status || 2);
+  process.stdout.write(`grin-pilot-smoke: PASS label=${SMOKE_LABEL_LIVE} authBoundary=${E_AUTH_BOUNDARY}\n`);
 }
 
 function runValidateUids(filePath) {
@@ -332,9 +372,11 @@ function runValidateUids(filePath) {
 
 function printUsage() {
   process.stdout.write(`Usage: node grin-pilot-smoke.mjs [injected|emulator|live|validate-uids <file>]
-INJECTED is the default (synthetic). LIVE_BACKEND is refused; E is not live-executable.
+INJECTED is the default (synthetic).
+LIVE_BACKEND uses Firebase client phone OTP on the local sign-in surface (no signJwt).
 Never prints UID values. Owner UID files must be outside git.
 Live cross_owner_denial requires a second authenticated account (unnamed).
+Retired E route ${FAILED_E_PROCEDURE} remains FAILED.
 `);
 }
 

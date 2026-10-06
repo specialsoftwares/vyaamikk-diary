@@ -352,46 +352,52 @@ test("successful simulated gate-off deploys exactly seven intended function name
   rmSync(bins, { recursive: true, force: true });
 });
 
-test("successful simulated enable issues seven gcloud updates without --source", () => {
+test("omitted-source gcloud enable is FAILED and not executable", () => {
   const repo = makeRepo();
   const bins = mkdtempSync(join(tmpdir(), "grin-bins-"));
   const gcloud = stubBin(bins, "gcloud");
   const r = runOp(repo, "enable", {
     GRIN_OPS_ALLOW_LIVE: "stub",
     GCLOUD_BIN: gcloud.path,
+    GRIN_OPS_METHOD: "gcloud-update-env-vars",
     GRIN_OPS_ENDPOINT_FIXTURE: JSON.stringify(presentGcsFixture),
   });
-  assert.equal(r.status, 0, r.stderr);
-  const log = readFileSync(gcloud.log, "utf8");
-  const lines = log.trim().split("\n");
-  assert.equal(lines.length, 7);
-  for (const name of GRIN_FUNCTIONS) {
-    assert.ok(lines.some((l) => l.includes(`functions deploy ${name} `)));
-  }
-  assert.ok(lines.every((l) => l.includes("--update-env-vars=" + GATE_KEY + "=true")));
-  assert.ok(lines.every((l) => !l.includes("--source")));
-  assert.ok(lines.every((l) => !l.includes("--set-env-vars")));
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /FAILED/);
+  assert.equal(existsSync(gcloud.log), false);
   rmSync(repo.dir, { recursive: true, force: true });
   rmSync(bins, { recursive: true, force: true });
 });
 
-test("local source origin blocks gcloud env update", () => {
+test("successful simulated enable issues seven functions v2 env PATCH operations", () => {
   const repo = makeRepo();
-  const bins = mkdtempSync(join(tmpdir(), "grin-bins-"));
-  const gcloud = stubBin(bins, "gcloud");
+  const r = runOp(repo, "enable", {
+    GRIN_OPS_ALLOW_LIVE: "stub",
+    GRIN_OPS_HTTP_STUB: join(HERE, "grin-ops-patch-http-stub.mjs"),
+    GRIN_OPS_ENDPOINT_FIXTURE: JSON.stringify(presentGcsFixture),
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /PASS \(functions v2 PATCH/);
+  assert.doesNotMatch(r.stdout, /ya29\./);
+  for (const name of GRIN_FUNCTIONS) {
+    assert.match(r.stdout, new RegExp(`name=${name} gate=on`));
+  }
+  rmSync(repo.dir, { recursive: true, force: true });
+});
+
+test("local source origin is allowed for functions v2 env PATCH", () => {
+  const repo = makeRepo();
   const local = Object.fromEntries(
     GRIN_FUNCTIONS.map((n) => [n, { presence: "present", sourceOrigin: "local" }]),
   );
   const r = runOp(repo, "disable", {
     GRIN_OPS_ALLOW_LIVE: "stub",
-    GCLOUD_BIN: gcloud.path,
+    GRIN_OPS_HTTP_STUB: join(HERE, "grin-ops-patch-http-stub.mjs"),
     GRIN_OPS_ENDPOINT_FIXTURE: JSON.stringify(local),
   });
-  assert.notEqual(r.status, 0);
-  assert.match(r.stderr, /cwd/);
-  assert.equal(existsSync(gcloud.log), false);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /PASS \(functions v2 PATCH/);
   rmSync(repo.dir, { recursive: true, force: true });
-  rmSync(bins, { recursive: true, force: true });
 });
 
 test("existing remote GRIN endpoint blocks gate-off-initial firebase create", () => {

@@ -37,8 +37,8 @@ that must not run until their stated blocker clears.
 | **B** Storage Rules | Isolated `--only storage` | **YES** (after owner letter + inspect still = live baseline) | Same isolated JSON, **separate** command and verification. May be lettered in the same owner response as A; must still run as its own command. |
 | **C** Functions gate-off-initial | Seven named create, gate key **absent** | **HOLD** (procedure YES; live not lettered) | Helper `PINNED_APP_SHA` is **`540e07a` (applied)**. T5 PASS + GHA `37445383607` SUCCESS. Do not execute until owner letters C. Inspect must show seven ABSENT. |
 | **D** Tester admission | Admin/Firestore document write | **YES** for UID grammar / validate-uids (`count=1`); **HOLD** for writes | Mechanism is **not** a SOURCE allowlist. Owner UID is on a private out-of-repo file. **Supply is not authorization.** `PLAY_BILLING_TESTER_UIDS` is a **separate** Functions env/secret and is **not** authorized to be set now. |
-| **E** Gate enable / disable | gcloud `--update-env-vars` without `--source`; disable uses **`false`** | **SOURCE/STUB procedure; LIVE HOLD** | Reviewed in `E_ENABLE_DISABLE.md`. Official omitted-`--source` docs are SOURCE only. LIVE firebase-created gen2 preservation **UNPROVEN**. `gcloud` **ABSENT**. Seven **ABSENT** until after C. |
-| **F** Synthetic smoke | INJECTED harness; LIVE_BACKEND | **INJECTED YES**; **LIVE HOLD** | Harness finished. Live `cross_owner_denial` needs a **second authenticated account** (unnamed). |
+| **E** Gate enable / disable | Functions v2 `PATCH` `updateMask=serviceConfig.environmentVariables` | **LIVE PASS** (2026-10-06) | omitted-`--source` gcloud **FAILED** (refuses). Probe + seven: archive-identical PATCH; gates **on**. Proven disable = PATCH `false`. |
+| **F** Synthetic smoke | INJECTED harness; LIVE_BACKEND via client phone OTP | **INJECTED YES**; **LIVE partial** | Unauthenticated **PASS**. Authenticated scenarios require owner OTP on local Firebase client sign-in (no signJwt / Token Creator). Cross-owner **NOT RUN**. |
 
 IAM / runtime identity is **not** a row in this batch. Inspected residual:
 `982505811909-compute@developer.gserviceaccount.com` already has
@@ -707,7 +707,7 @@ letters live smoke. This session does **not** flip
 | **INJECTED** | `node docs/release/proposals/team1/grin-pilot-smoke.mjs injected` (default) or `npx --yes tsx docs/release/proposals/team1/grin-pilot-smoke.injected.ts` | **Executable now** — synthetic data only; no live project |
 | Gate / UID tests | `node --test docs/release/proposals/team1/grin-pilot-smoke.test.mjs` | **Executable now** |
 | **EMULATOR** | `npm run test:goods-evidence-g1-functions-emulator` or `node …/grin-pilot-smoke.mjs emulator` inside `emulators:exec` | Existing EMULATOR coverage; **not** LIVE_BACKEND |
-| **LIVE_BACKEND** | `node docs/release/proposals/team1/grin-pilot-smoke.mjs live` | **REFUSED** (exit 2) even with `GRIN_OPS_ALLOW_LIVE=1` / `GRIN_PILOT_SMOKE_LIVE=1` until E proven **and** owner letters live smoke |
+| **LIVE_BACKEND** | `GRIN_OPS_ALLOW_LIVE=1 GRIN_PILOT_SMOKE_LIVE=1 node docs/release/proposals/team1/grin-pilot-smoke.mjs live` | **Admitted after E PATCH proof**; owner completes Firebase client phone OTP on local sign-in surface. No signJwt / Token Creator. Cross-owner **NOT RUN**. |
 
 ### F case list (required; synthetic data only)
 

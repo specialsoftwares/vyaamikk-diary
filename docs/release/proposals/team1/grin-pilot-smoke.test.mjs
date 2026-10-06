@@ -85,19 +85,51 @@ test("LIVE_BACKEND is refused while E is UNPROVEN even if live env is set", () =
     allowLive: "1",
     smokeLive: "1",
     gcloudProven: false,
+    patchProven: false,
   });
   assert.equal(decision.allowed, false);
   assert.equal(decision.label, SMOKE_LABEL_LIVE);
-  assert.match(decision.reason, /UNPROVEN/);
+  assert.match(decision.reason, /not proven|FAILED/i);
 });
 
-test("CLI live subcommand refuses and does not invent UIDs", () => {
+test("LIVE_BACKEND admits when PATCH-proven and live env is set", () => {
+  const decision = liveBackendAdmission({
+    allowLive: "1",
+    smokeLive: "1",
+    gcloudProven: false,
+    patchProven: true,
+  });
+  assert.equal(decision.allowed, true);
+  assert.equal(decision.authBoundary, "firebase-client-phone-otp");
+});
+
+test("CLI live subcommand refuses when PATCH proven is forced off", () => {
   const r = spawnSync(process.execPath, [SMOKE, "live"], {
     encoding: "utf8",
-    env: { ...process.env, GRIN_OPS_ALLOW_LIVE: "1", GRIN_PILOT_SMOKE_LIVE: "1" },
+    env: {
+      ...process.env,
+      GRIN_OPS_ALLOW_LIVE: "1",
+      GRIN_PILOT_SMOKE_LIVE: "1",
+      GRIN_OPS_PATCH_PROVEN: "0",
+    },
   });
   assert.notEqual(r.status, 0);
-  assert.match(r.stderr, /UNPROVEN/);
+  assert.match(r.stderr, /not proven|FAILED/i);
+  assert.doesNotMatch(r.stdout + r.stderr, /@/);
+});
+
+test("CLI live subcommand refuses pin/fixture overrides", () => {
+  const r = spawnSync(process.execPath, [SMOKE, "live"], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      GRIN_OPS_ALLOW_LIVE: "1",
+      GRIN_PILOT_SMOKE_LIVE: "1",
+      GRIN_OPS_PINNED_SHA: "deadbeef",
+    },
+  });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /refuses pin|fixture|HTTP stubs|test-hang/i);
   assert.doesNotMatch(r.stdout + r.stderr, /@/);
 });
 
@@ -122,8 +154,8 @@ test("smoke scenario list is the restricted-pilot set", () => {
 test("E SOURCE argv omits --source and disable uses false not remove", () => {
   assert.equal(E_APPLICATION_SHA, "540e07aa07f376716484adb879ce66cb9fb170ce");
   assert.equal(E_SOURCE_STUB_STATUS, "SUPPORTED");
-  assert.equal(E_LIVE_STATUS, "HOLD");
-  assert.equal(E_LIVE_EXECUTABLE, false);
+  assert.equal(E_LIVE_STATUS, "PROVEN_PATCH");
+  assert.equal(E_LIVE_EXECUTABLE, true);
   assert.equal(E_SEVEN_NAMES.length, 7);
   const enable = expectedGcloudEnableArgs("grinRegisterGoodsReceipt");
   const disable = expectedGcloudDisableArgs("grinRegisterGoodsReceipt");

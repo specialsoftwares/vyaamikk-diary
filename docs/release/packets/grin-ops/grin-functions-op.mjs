@@ -21,6 +21,15 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
+import {
+  ENV_UPDATE_MASK,
+  FAILED_E_PROCEDURE,
+  PROBE_FUNCTION,
+  PatchAbort,
+  formatGateResult,
+  makeTokenArchiveComparator,
+  patchGateOnFunction,
+} from "./grin-functions-patch-env.mjs";
 
 const require = createRequire(import.meta.url);
 
@@ -461,6 +470,8 @@ async function resolveEndpointFixture(fetchImpl) {
     requireCompleteInventory(report);
     return fixtureFromInspect(report);
   }
+  const raw = env("GRIN_OPS_ENDPOINT_FIXTURE");
+  if (raw) return loadEndpointFixture(raw);
   if (envSet("GRIN_OPS_HTTP_STUB") || fetchImpl) {
     const stub = fetchImpl || (await loadHttpStubFetch());
     const report = await inspectLive({ fetchImpl: stub });
@@ -468,9 +479,7 @@ async function resolveEndpointFixture(fetchImpl) {
     requireCompleteInventory(report);
     return fixtureFromInspect(report);
   }
-  const raw = env("GRIN_OPS_ENDPOINT_FIXTURE");
-  if (!raw) abort("stub mode requires a complete GRIN_OPS_ENDPOINT_FIXTURE or GRIN_OPS_HTTP_STUB");
-  return loadEndpointFixture(raw);
+  abort("stub mode requires a complete GRIN_OPS_ENDPOINT_FIXTURE or GRIN_OPS_HTTP_STUB");
 }
 
 function requireStubExecutor(envName) {
@@ -567,33 +576,91 @@ export function runGateOffInitial(cwd, fixture) {
   return { status: 0, sessionDir };
 }
 
+export function gcloudOmittedSourceStatus() {
+  return "FAILED";
+}
+
 export function runGcloudGate(cwd, fixture, gateValue, label) {
+  abort(
+    `${FAILED_E_PROCEDURE} is FAILED for gcloud 588.0.0 + firebase-created gen2 (omitted --source used cwd and started a rebuild). Do not retry against GRIN. Use functions v2 PATCH ${ENV_UPDATE_MASK}.`,
+  );
+}
+
+export async function runPatchEnvGate(cwd, fixture, gateValue, label, { names = GRIN_FUNCTIONS, gcpCall, compareSourceArchives } = {}) {
   precheckMutating(cwd);
-  assertAllPresentForGateUpdate(fixture);
+  for (const name of names) {
+    if (!GRIN_FUNCTIONS.includes(name)) abort("enable/disable is limited to the seven GRIN names");
+  }
+  assertAllPresentForEnvPatch(fixture, names);
   const mode = requireStubOrLive();
   if (mode === "1") assertLiveOverridesRejected();
-  const sessionDir = createSessionDir();
-  const cleanup = installCleanup(sessionDir);
-  if (mode === "stub" && env("GRIN_OPS_TEST_HANG") === "1") {
-    writeFileSync(join(sessionDir, "hang"), "1", { mode: 0o600 });
-    return { sessionDir, hanging: true };
+  if (env("GRIN_OPS_METHOD", "functions-v2-patch-env") === "gcloud-update-env-vars") {
+    abort(`${FAILED_E_PROCEDURE} is not executable`);
   }
-  let lastStatus = 0;
-  try {
-    for (const name of GRIN_FUNCTIONS) {
-      const args = buildGcloudGateArgs(name, gateValue);
-      if (gcloudArgsUnsafe(args)) abort("internal error: gcloud args would replace source or env set");
-      const result = runTool(gcloudBin(), args, { cwd, sessionDir });
-      lastStatus = result.status;
-      if (result.status !== 0) {
-        throw new OpsAbort(`gcloud functions deploy ${name} failed with status ${result.status}`, result.status);
-      }
+  if (env("GRIN_OPS_METHOD", "functions-v2-patch-env") === "firebase-dotenv") {
+    abort("Firebase dotenv enablement is blocked: loading dotenv replaces prior user env on selected endpoints");
+  }
+  if (env("GRIN_OPS_METHOD", "functions-v2-patch-env") === "run-update-env") {
+    abort("direct Cloud Run env edit is forbidden");
+  }
+  let call = gcpCall;
+  let archiveCompare = compareSourceArchives;
+  if (!call) {
+    if (mode === "stub") {
+      const stub = await loadHttpStubFetch();
+      if (!stub) abort("stub patch-env requires GRIN_OPS_HTTP_STUB");
+      call = stub;
+    } else {
+      const token = await firebaseAccessToken();
+      call = (url, opts) => defaultGcpFetch(token, url, opts);
+      archiveCompare = makeTokenArchiveComparator(token);
     }
-  } finally {
-    cleanup();
   }
-  process.stdout.write(`${label}: PASS (seven gcloud --update-env-vars/--remove-env-vars, no --source)\n`);
-  return { status: lastStatus, sessionDir };
+  const results = [];
+  for (const name of names) {
+    const result = await patchGateOnFunction(call, name, gateValue, {
+      compareSourceArchives: archiveCompare,
+    });
+    results.push(result);
+    process.stdout.write(`${label}: ${formatGateResult(result)}\n`);
+  }
+  process.stdout.write(`${label}: PASS (functions v2 PATCH ${ENV_UPDATE_MASK}, serialized, no source)\n`);
+  return { status: 0, results };
+}
+
+export function assertAllPresentForEnvPatch(fixture, names = GRIN_FUNCTIONS) {
+  for (const name of names) {
+    const e = fixture[name];
+    if (!e || e.presence === PRESENCE_UNKNOWN) {
+      abort(`${name} presence UNKNOWN; env patch requires an existing endpoint`);
+    }
+    if (e.presence !== PRESENCE_PRESENT) {
+      abort(`${name} is not deployed; env patch requires an existing endpoint`);
+    }
+  }
+}
+
+export async function runPatchProbeGate(gateValue, { gcpCall, compareSourceArchives } = {}) {
+  const mode = requireStubOrLive();
+  if (mode === "1") assertLiveOverridesRejected();
+  let call = gcpCall;
+  let archiveCompare = compareSourceArchives;
+  if (!call) {
+    if (mode === "stub") {
+      const stub = await loadHttpStubFetch();
+      if (!stub) abort("stub patch-probe requires GRIN_OPS_HTTP_STUB");
+      call = stub;
+    } else {
+      const token = await firebaseAccessToken();
+      call = (url, opts) => defaultGcpFetch(token, url, opts);
+      archiveCompare = makeTokenArchiveComparator(token);
+    }
+  }
+  const result = await patchGateOnFunction(call, PROBE_FUNCTION, gateValue, {
+    compareSourceArchives: archiveCompare,
+  });
+  process.stdout.write(`patch-probe: ${formatGateResult(result)}\n`);
+  return result;
 }
 
 function redactRulesetName(name) {
@@ -1028,8 +1095,9 @@ function printInspect(report) {
 }
 
 function printUsage() {
-  process.stdout.write(`Usage: node grin-functions-op.mjs <inspect|check-preflight|gate-off-initial|enable|disable>
+  process.stdout.write(`Usage: node grin-functions-op.mjs <inspect|check-preflight|gate-off-initial|enable|disable|patch-probe true|false>
 Mutating commands require GRIN_OPS_ALLOW_LIVE=stub|1 and never emit secrets.
+E uses functions v2 PATCH ${ENV_UPDATE_MASK}. omitted-source gcloud deploy is FAILED.
 `);
 }
 
@@ -1056,6 +1124,12 @@ async function main(argv) {
       process.stdout.write("check-preflight: PASS\n");
       return 0;
     }
+    if (cmd === "patch-probe") {
+      const value = argv[3];
+      if (value !== "true" && value !== "false") abort("patch-probe requires true or false");
+      await runPatchProbeGate(value);
+      return 0;
+    }
     const fixture = await resolveEndpointFixture();
     if (cmd === "gate-off-initial") {
       const result = runGateOffInitial(cwd, fixture);
@@ -1063,25 +1137,29 @@ async function main(argv) {
       return 0;
     }
     if (cmd === "enable") {
-      if (env("GRIN_OPS_METHOD", "gcloud-update-env-vars") === "firebase-dotenv") {
+      if (env("GRIN_OPS_METHOD", "functions-v2-patch-env") === "firebase-dotenv") {
         abort("Firebase dotenv enablement is blocked: loading dotenv replaces prior user env on selected endpoints");
       }
-      const result = runGcloudGate(cwd, fixture, "true", "enable");
-      if (result?.hanging) await new Promise(() => {});
+      if (env("GRIN_OPS_METHOD", "functions-v2-patch-env") === "gcloud-update-env-vars") {
+        abort(`${FAILED_E_PROCEDURE} is FAILED and not executable`);
+      }
+      await runPatchEnvGate(cwd, fixture, "true", "enable");
       return 0;
     }
     if (cmd === "disable") {
-      if (env("GRIN_OPS_METHOD", "gcloud-update-env-vars") === "firebase-dotenv") {
+      if (env("GRIN_OPS_METHOD", "functions-v2-patch-env") === "firebase-dotenv") {
         abort("Firebase dotenv disablement is blocked: loading dotenv replaces prior user env on selected endpoints");
       }
-      const result = runGcloudGate(cwd, fixture, "false", "disable");
-      if (result?.hanging) await new Promise(() => {});
+      if (env("GRIN_OPS_METHOD", "functions-v2-patch-env") === "gcloud-update-env-vars") {
+        abort(`${FAILED_E_PROCEDURE} is FAILED and not executable`);
+      }
+      await runPatchEnvGate(cwd, fixture, "false", "disable");
       return 0;
     }
     printUsage();
     return 2;
   } catch (err) {
-    if (err instanceof OpsAbort) {
+    if (err instanceof OpsAbort || err instanceof PatchAbort) {
       process.stderr.write(`ABORT: ${err.message}\n`);
       return typeof err.code === "number" ? err.code : 2;
     }
