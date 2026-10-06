@@ -3,15 +3,20 @@
  * Never prints UIDs, tokens, API keys, or env values.
  * Cross-owner / non-admitted remain NOT RUN.
  * Does not use iamcredentials.signJwt or Admin-substituted client success.
+ * Does not create users/{uid}; existing active account is a precondition.
  */
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 
 import { freezeCommand } from "../../../../src/goodsEvidence/command";
 import { sampleRegisterBody } from "../../../../src/goodsEvidence/testFixtures";
 import { assembleEvidencePackInputs } from "../../../../src/goodsEvidence/evidencePackInputs";
 import { waitForOwnerClientSession } from "./grin-live-f-signin.mjs";
+import {
+  assertConfirmedProjection,
+  assertReplayPreservesIssuance,
+  assertUnauthenticatedDenial,
+} from "./grin-live-f-evidence.mjs";
 
 const PROJECT = "vyaamikk-diary";
 const REGION = "asia-south1";
@@ -24,7 +29,7 @@ const UID_FILE =
   process.env.GRIN_OWNER_UID_FILE ||
   "/Users/shivamsaurav/vyd-private/grin-owner-admission.txt";
 
-type ScenarioStatus = "PASS" | "FAIL" | "NOT_RUN";
+type ScenarioStatus = "PASS" | "FAIL" | "NOT_RUN" | "NARROW";
 const results: Record<string, ScenarioStatus> = {
   authenticated_success: "NOT_RUN",
   unauthenticated_denial: "NOT_RUN",
@@ -33,6 +38,7 @@ const results: Record<string, ScenarioStatus> = {
   register_replay: "NOT_RUN",
   upload_verification: "NOT_RUN",
   confirmation: "NOT_RUN",
+  /** Authorized read + local manifest assembly only — not production PDF/export acceptance. */
   read_export: "NOT_RUN",
 };
 
@@ -133,7 +139,7 @@ function resultOf(json: Record<string, unknown>): Record<string, unknown> {
 
 async function main() {
   process.stdout.write(
-    "LIVE_F start label=LIVE_BACKEND synthetic=true authBoundary=firebase-client-phone-otp\n",
+    "LIVE_F start label=LIVE_BACKEND synthetic=true authBoundary=firebase-client-phone-otp-verified-idtoken\n",
   );
   results.non_admitted_denial = "NOT_RUN";
   results.cross_owner_denial = "NOT_RUN";
@@ -149,18 +155,16 @@ async function main() {
 
   const userDoc = await gcpJson(accessToken, fsDocUrl(`users/${expectedUid}`));
   if (userDoc.status === 404) {
-    const created = await gcpJson(accessToken, fsDocUrl(`users/${expectedUid}`), {
-      method: "PATCH",
-      body: strFields({ uid: expectedUid, status: "active" }),
-    });
-    if (created.status !== 200) fail("seed users/{uid} failed");
-    process.stdout.write("LIVE_F seeded users/{uid} status=active\n");
-  } else if (userDoc.status === 200) {
-    process.stdout.write("LIVE_F users/{uid} already present\n");
-  } else {
-    fail("users/{uid} read failed");
+    fail("users/{uid} missing; existing active account is a precondition (no create fallback)");
   }
+  if (userDoc.status !== 200) fail("users/{uid} read failed");
+  const userFields = (userDoc.json.fields || {}) as Record<string, unknown>;
+  if (fieldStr(userFields, "status") !== "active") {
+    fail("users/{uid} is not status=active; ineligible");
+  }
+  process.stdout.write("LIVE_F existing_account_eligible=true\n");
 
+  // Authorized synthetic-ledger setup only (separate from account eligibility).
   const ledgerDoc = await gcpJson(
     accessToken,
     fsDocUrl(`users/${expectedUid}/goodsEvidenceLedgers/${LEDGER}`),
@@ -171,14 +175,14 @@ async function main() {
       fsDocUrl(`users/${expectedUid}/goodsEvidenceLedgers/${LEDGER}`),
       { method: "PATCH", body: strFields({ ownerUid: expectedUid, status: "active" }) },
     );
-    if (created.status !== 200) fail("seed ledger_pilot_live failed");
-    process.stdout.write("LIVE_F seeded synthetic ledger_pilot_live\n");
+    if (created.status !== 200) fail("authorized synthetic ledger_pilot_live setup failed");
+    process.stdout.write("LIVE_F synthetic_ledger_setup=created ledger_pilot_live\n");
   } else if (ledgerDoc.status === 200) {
     const fields = (ledgerDoc.json.fields || {}) as Record<string, unknown>;
     if (fieldStr(fields, "ownerUid") !== expectedUid || fieldStr(fields, "status") !== "active") {
       fail("ledger_pilot_live ownership/status mismatch");
     }
-    process.stdout.write("LIVE_F ledger_pilot_live ownership/status verified\n");
+    process.stdout.write("LIVE_F synthetic_ledger_setup=verified ledger_pilot_live\n");
   } else {
     fail("ledger read failed");
   }
@@ -218,23 +222,24 @@ async function main() {
 
   const unauth = await callable("grinRegisterGoodsReceipt", payload, null);
   const unauthRes = resultOf(unauth.json);
-  const unauthCode = String(unauthRes.code || unauthRes.status || "").toLowerCase();
-  if (unauth.http === 401 || unauthCode.includes("unauth") || unauthRes.ok === false) {
+  if (assertUnauthenticatedDenial(unauth.http, unauthRes)) {
     results.unauthenticated_denial = "PASS";
   } else {
     results.unauthenticated_denial = "FAIL";
   }
   process.stdout.write(
-    `LIVE_F unauthenticated_denial=${results.unauthenticated_denial} http=${unauth.http}\n`,
+    `LIVE_F unauthenticated_denial=${results.unauthenticated_denial} http=${unauth.http} code=${String(unauthRes.code || "none")}\n`,
   );
-  if (results.unauthenticated_denial !== "PASS") fail("unauthenticated_denial unexpected");
+  if (results.unauthenticated_denial !== "PASS") {
+    fail("unauthenticated_denial expected code=unauthenticated");
+  }
 
   process.stdout.write(
-    "LIVE_F waiting for owner Firebase client phone OTP on local sign-in surface…\n",
+    "LIVE_F waiting for owner Firebase client phone OTP on hardened local sign-in surface…\n",
   );
   const session = await waitForOwnerClientSession({ repoRoot: process.cwd() });
-  if (session.uid !== expectedUid) fail("session UID did not match admission file");
-  process.stdout.write("LIVE_F session_uid_matches_admission=true\n");
+  if (session.uid !== expectedUid) fail("verified session UID did not match admission file");
+  process.stdout.write("LIVE_F session_uid_matches_admission=true verified_id_token=true\n");
   const idToken = session.idToken;
 
   const registered = await callable("grinRegisterGoodsReceipt", payload, idToken);
@@ -247,21 +252,43 @@ async function main() {
     fail("authenticated_success register failed");
   }
   results.authenticated_success = "PASS";
-  if ("confirmed" in reg) results.confirmation = "PASS";
   const issued = reg.issuedNumber;
+  const receiptId = String(reg.receiptId || RECEIPT);
+  if (receiptId !== RECEIPT) fail("register returned unexpected receiptId");
+  if (issued == null) fail("register missing issuedNumber");
+
+  if (reg.confirmed && typeof reg.confirmed === "object") {
+    const confCheck = assertConfirmedProjection(reg.confirmed as Record<string, unknown>, {
+      receiptId: RECEIPT,
+      ownerUid: expectedUid,
+    });
+    if (!confCheck.ok) {
+      results.confirmation = "FAIL";
+      fail(`confirmation invalid: ${confCheck.reason}`);
+    }
+    results.confirmation = "PASS";
+  }
+
   process.stdout.write(
-    `LIVE_F authenticated_success=PASS replayed=${String(reg.replayed)} confirmed=${String("confirmed" in reg)} issued_present=${issued != null}\n`,
+    `LIVE_F authenticated_success=PASS replayed=${String(reg.replayed)} issued_present=true receipt_ok=true\n`,
   );
 
   const replayed = await callable("grinRegisterGoodsReceipt", payload, idToken);
   const rep = resultOf(replayed.json);
-  if (rep.ok === true && rep.replayed === true && rep.issuedNumber === issued) {
+  if (
+    assertReplayPreservesIssuance(
+      { ok: true, issuedNumber: issued, receiptId: RECEIPT },
+      rep,
+    )
+  ) {
     results.register_replay = "PASS";
   } else {
     results.register_replay = "FAIL";
-    fail("register_replay failed or duplicate issuance");
+    fail("register_replay failed: must preserve issuedNumber and receiptId");
   }
-  process.stdout.write("LIVE_F register_replay=PASS no_duplicate_issuance=true\n");
+  process.stdout.write(
+    "LIVE_F register_replay=PASS preserved_issuedNumber=true preserved_receiptId=true no_duplicate_issuance=true\n",
+  );
 
   const pdf = new Uint8Array(32);
   pdf.set([0x25, 0x50, 0x44, 0x46]);
@@ -332,10 +359,26 @@ async function main() {
   const read = resultOf(readCall.json);
   if (read.ok !== true) {
     results.read_export = "FAIL";
-    fail("readReceipt failed");
+    fail("authorized readReceipt failed");
   }
-  if ("confirmed" in read) results.confirmation = "PASS";
   const confirmed = (read.confirmed || {}) as Record<string, unknown>;
+  const confCheck = assertConfirmedProjection(confirmed, {
+    receiptId: RECEIPT,
+    ownerUid: expectedUid,
+  });
+  if (!confCheck.ok) {
+    results.confirmation = "FAIL";
+    fail(`read confirmation invalid: ${confCheck.reason}`);
+  }
+  results.confirmation = "PASS";
+
+  // Evidence linkage: events or confirmed projection should reference the receipt;
+  // originals pathway is verified via durable upload above.
+  const events = Array.isArray(confirmed.events) ? confirmed.events : [];
+  process.stdout.write(
+    `LIVE_F confirmation=PASS eventVersion_present=${confirmed.eventVersion != null} headHash_present=${typeof confirmed.headHash === "string"} events=${events.length}\n`,
+  );
+
   const pack = assembleEvidencePackInputs({
     ownerUid: expectedUid,
     ledgerId: LEDGER,
@@ -343,7 +386,7 @@ async function main() {
     confirmedCuts: [
       {
         receiptId: String(confirmed.receiptId || RECEIPT),
-        events: Array.isArray(confirmed.events) ? (confirmed.events as never[]) : [],
+        events: events as never[],
         originalSnapshot: confirmed.original as never,
         eventVersion: confirmed.eventVersion as never,
         headHash: confirmed.headHash as never,
@@ -367,11 +410,12 @@ async function main() {
   });
   if (pack.originalBytesBundled !== false || pack.packPayloadKind !== "manifest_and_hashes") {
     results.read_export = "FAIL";
-    fail("export pack bundled original bytes");
+    fail("local manifest assembly unexpected shape");
   }
-  results.read_export = "PASS";
+  // Narrow proof: authorized read + local manifest assembly. Not production PDF/export.
+  results.read_export = "NARROW";
   process.stdout.write(
-    "LIVE_F read_export=PASS pack=manifest_and_hashes original_bytes_bundled=false\n",
+    "LIVE_F read_export=NARROW proof=authorized_read_plus_local_manifest_assembly not_production_pdf_export\n",
   );
   process.stdout.write("LIVE_F synthetic_usage_consumed=1_register_issuance_plus_evidence_path\n");
 
@@ -383,12 +427,15 @@ async function main() {
     ([k, v]) => v === "FAIL" && k !== "cross_owner_denial" && k !== "non_admitted_denial",
   );
   if (hardFail) fail("one or more required scenarios failed");
-  const pending =
+  if (
     results.authenticated_success !== "PASS" ||
     results.register_replay !== "PASS" ||
     results.upload_verification !== "PASS" ||
-    results.read_export !== "PASS";
-  if (pending) fail("authenticated scenarios incomplete");
+    results.confirmation !== "PASS" ||
+    (results.read_export !== "PASS" && results.read_export !== "NARROW")
+  ) {
+    fail("authenticated scenarios incomplete");
+  }
 }
 
 main().catch((err) => {

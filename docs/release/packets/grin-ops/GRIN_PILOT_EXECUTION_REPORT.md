@@ -58,22 +58,13 @@ Private before/after archives: `/tmp/grin-e-evidence/` (not in git).
 
 | Scenario | Result |
 |---|---|
-| unauthenticated_denial | **PASS** (anonymous callable deny) |
-| authenticated_success / register_replay / upload_verification / confirmation / read_export | **PENDING** client phone OTP session |
-| non_admitted_denial | **NOT RUN** |
-| cross_owner_denial | **NOT RUN** |
+| unauthenticated_denial | Requires `code=unauthenticated` (or HTTP 401) |
+| authenticated path | Firebase **client** phone OTP; `/session` verifies ID token via Google securetoken certs for `vyaamikk-diary`; `body.uid` ignored |
+| non_admitted / cross_owner | **NOT RUN** |
 
-`iamcredentials.signJwt` on the Compute default SA returned **403**. That is an
-**operator auth-boundary** choice under the “no IAM expansion” rule — **not** an
-application IAM defect and **not** a reason to grant Token Creator.
+Harness corrections (tooling after `3a24bb8`): verified claims only; in-memory Auth + clear after handoff; one-use nonce + same-origin + body size; no `users/{uid}` create fallback; confirmation/replay/evidence tightened; `read_export` reported as **NARROW** (authorized read + local manifest assembly, not production PDF/export).
 
-Authenticated F uses Firebase **client** phone sign-in on a local surface
-(`docs/release/packets/grin-ops/grin-live-f-signin.mjs`). Owner enters OTP in
-that UI. Session UID is checked against the private admission file. Callables
-use that same client ID token. Admin writes are not substituted for client-path
-success.
-
-Synthetic ledger id: `ledger_pilot_live` (ownership/status verified before use).
+`iamcredentials.signJwt` remains unused. No IAM expansion.
 
 ---
 
@@ -82,11 +73,13 @@ Synthetic ledger id: `ledger_pilot_live` (ownership/status verified before use).
 ```bash
 cd <combined-worktree>
 node --test docs/release/packets/grin-ops/grin-functions-patch-env.test.mjs \
-  docs/release/packets/grin-ops/grin-functions-op.test.mjs
-node --test docs/release/proposals/team1/grin-pilot-smoke.test.mjs
+  docs/release/packets/grin-ops/grin-functions-op.test.mjs \
+  docs/release/packets/grin-ops/grin-live-f-signin.test.mjs \
+  docs/release/packets/grin-ops/grin-live-f-evidence.test.mjs \
+  docs/release/proposals/team1/grin-pilot-smoke.test.mjs
 ```
 
-Expected: **54 PASS** (patch-env + ops-guard + smoke gate; recorded at publish).
+Expected: **62 PASS** (patch-env + ops-guard + F sign-in/evidence + smoke gate).
 
 ---
 
