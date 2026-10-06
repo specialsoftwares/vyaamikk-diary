@@ -6,6 +6,7 @@
 
 import {
   INCLUDE_GRIN_IN_ACCOUNT_PURGE,
+  GRIN_KNOWN_NESTED_COLLECTION_IDS,
   allGrinFirestoreCollectionIds,
   allGrinStoragePrefixes,
 } from "./grinCleanupLists";
@@ -84,25 +85,57 @@ export async function purgeGrinFirestoreTrees(
   for (const root of roots) {
     deleted += await deleteCollectionRecursive(db, root);
   }
-  for (const root of roots) {
-    const leftover = await db.listCollection(root);
-    if (leftover.length > 0) return { deleted, exhausted: false };
-  }
+  const leftover = await countGrinFirestoreDocs(db, uid);
+  if (leftover > 0) return { deleted, exhausted: false };
   return { deleted, exhausted: true };
+}
+
+function uniqueSubs(discovered: string[]): string[] {
+  const seen = new Set<string>();
+  const ordered: string[] = [];
+  for (const name of [...discovered, ...GRIN_KNOWN_NESTED_COLLECTION_IDS]) {
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    ordered.push(name);
+  }
+  return ordered;
 }
 
 async function deleteCollectionRecursive(db: GrinFirestoreLike, collectionPath: string): Promise<number> {
   let deleted = 0;
   const docs = await db.listCollection(collectionPath);
   for (const doc of docs) {
-    const subs = await db.listSubcollections(doc.ref.path);
-    for (const sub of subs) {
+    const discovered = await db.listSubcollections(doc.ref.path);
+    for (const sub of uniqueSubs(discovered)) {
       deleted += await deleteCollectionRecursive(db, `${doc.ref.path}/${sub}`);
     }
     await db.delete(doc.ref.path);
     deleted += 1;
   }
   return deleted;
+}
+
+/** Walk the same child-first order used by delete. Used to verify removal. */
+export async function countGrinFirestoreDocs(db: GrinFirestoreLike, uid: string): Promise<number> {
+  let count = 0;
+  const roots = allGrinFirestoreCollectionIds().map((col) => `users/${uid}/${col}`);
+  for (const root of roots) {
+    count += await countCollectionRecursive(db, root);
+  }
+  return count;
+}
+
+async function countCollectionRecursive(db: GrinFirestoreLike, collectionPath: string): Promise<number> {
+  let count = 0;
+  const docs = await db.listCollection(collectionPath);
+  for (const doc of docs) {
+    const discovered = await db.listSubcollections(doc.ref.path);
+    for (const sub of uniqueSubs(discovered)) {
+      count += await countCollectionRecursive(db, `${doc.ref.path}/${sub}`);
+    }
+    count += 1;
+  }
+  return count;
 }
 
 /**

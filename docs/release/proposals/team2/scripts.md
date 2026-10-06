@@ -32,6 +32,7 @@ This branch includes that exclude so `npm run typecheck` stays green; coordinato
 "test:grin-t2-storage-quota": "npx --yes tsx tools/goods-evidence-storage/storageQuota.unit.test.ts && npx --yes tsx tools/goods-evidence-storage/storageQuota.injected.unit.test.ts",
 "test:grin-t2-storage-quota-emulator": "firebase emulators:exec --only firestore,storage --project demo-vyaamikk-grin-g2 --config tools/goods-evidence-storage/firebase.json \"npx --yes tsx tools/goods-evidence-storage/storageQuota.emulator.test.ts\"",
 "test:grin-t2-cleanup": "npx --yes tsx functions/src/deletion/grinCleanup.unit.test.ts",
+"test:grin-t2-holds-bound": "npx --yes tsx tools/goods-evidence-storage/storageQuota.unit.test.ts",
 "test:grin-t2-lifecycle": "npx --yes tsx src/goodsEvidence/entitlementLifecycle.test.ts",
 "test:grin-t2-export": "npx --yes tsx src/services/grin/export/receiptAuditExport.test.ts"
 ```

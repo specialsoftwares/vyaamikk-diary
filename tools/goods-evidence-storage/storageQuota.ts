@@ -39,25 +39,23 @@ export const STORAGE_WARN_80 = 0.8;
 export const STORAGE_WARN_95 = 0.95;
 
 /**
- * Firestore documents are bounded (~1 MiB). The holds map is not indefinite scale.
+ * Technical holds-map entry limit. Not a customer storage entitlement.
+ * Not proof that every permitted document fits Firestore — that is checked
+ * separately by `estimateStorageAccountingDocumentBytes` at maximum identifier
+ * lengths. See docs/release/proposals/team2/HOLDS_MAP_BOUND.md.
  *
- * Size model (Firestore field-name + 32 B/field + nested map; 64-char ids):
- *   original hold ≈ 300–380 bytes; derivative hold ≈ 380–450 bytes.
- *   1 MiB / 450 ≈ 2,300–2,600 entries before a document-size write failure.
- *
- * Intended 15 MiB-PDF workload at the proposed 20 GiB cap:
- *   floor(20 GiB / 15 MiB) = 1,365 originals. 1,365 < 2,500, so the byte cap
- *   is reached first for that workload (with ~150–200 KiB document headroom).
- *
- * 10 MiB images filling 20 GiB = 2,048 originals — still under this bound.
- * Tiny files, or 8 derivatives × 1,365 originals (~12k holds), hit this bound
- * before the byte cap. Fail closed; do not redesign the document in this slice.
- *
- * 2,500 is the smallest reviewable integer that keeps the 15 MiB-PDF-at-20-GiB
- * originals workload (and a 10 MiB-image fill plus a few in-flight holds)
- * inside the ~1 MiB document with margin. Not a product file-count SKU.
+ * Firestore documents are bounded (~1 MiB). This map is not indefinite scale.
+ * Tiny files and full derivative fan-out can hit this entry limit before the
+ * proposed byte cap. Admission then fails closed; existing holds are kept.
  */
 export const MAX_STORAGE_HOLDS = 2500;
+
+/** Official Firestore document size ceiling (bytes). */
+export const FIRESTORE_MAX_DOCUMENT_BYTES = 1_048_576;
+
+export const HOLD_ID_MAX_LENGTH = 64;
+export const DERIVATIVE_KEY_MAX_LENGTH = 64;
+export const ACCOUNTING_UID_MAX_LENGTH = 128;
 
 export const STORAGE_HOLD_KEY_VERSION = 1 as const;
 
@@ -263,6 +261,133 @@ export function emptyStorageAccounting(updatedAtUtc: string): StorageAccountingD
     retainedDerivativeBytes: 0,
     holds: Object.create(null) as Record<string, StorageHold>,
     updatedAtUtc,
+  };
+}
+
+/** User-facing hold-map refusal. Does not name GiB or the entry integer. */
+export const HOLDS_MAP_CAPACITY_DETAIL =
+  "Too many stored files for this account's storage ledger. Existing files can still be viewed, downloaded, or exported. This upload was not accepted.";
+
+/**
+ * Firestore string size: UTF-8 bytes + 1.
+ * https://firebase.google.com/docs/firestore/storage-size
+ */
+export function firestoreStringBytes(value: string): number {
+  return Buffer.byteLength(value, "utf8") + 1;
+}
+
+function firestoreFieldBytes(name: string, valueBytes: number): number {
+  return firestoreStringBytes(name) + valueBytes + 32;
+}
+
+function firestoreIntegerValueBytes(): number {
+  return 8;
+}
+
+function firestoreHoldValueBytes(kind: StorageHoldKind): number {
+  const kindValue = kind === "original" ? "original" : "derivative";
+  return (
+    firestoreFieldBytes("kind", firestoreStringBytes(kindValue)) +
+    firestoreFieldBytes("bytes", firestoreIntegerValueBytes()) +
+    firestoreFieldBytes("phase", firestoreStringBytes("reserved"))
+  );
+}
+
+/**
+ * One `holds` map entry at the supplied key. Uses official field-name + 32 B
+ * + nested map sizing. Identifier length is taken from the key, not assumed.
+ */
+export function estimateHoldMapEntryBytes(kind: StorageHoldKind, holdKey: string): number {
+  return firestoreFieldBytes(holdKey, firestoreHoldValueBytes(kind));
+}
+
+function firestoreDocumentNameBytes(uid: string): number {
+  const segments = ["users", uid, "goodsEvidenceStorage", "accounting"];
+  let total = 16;
+  for (const segment of segments) {
+    total += firestoreStringBytes(segment) - 1 + 16;
+  }
+  return total;
+}
+
+function accountingScalarFieldBytes(): number {
+  return (
+    firestoreFieldBytes("schemaVersion", firestoreIntegerValueBytes()) +
+    firestoreFieldBytes("reservedOriginalBytes", firestoreIntegerValueBytes()) +
+    firestoreFieldBytes("retainedOriginalBytes", firestoreIntegerValueBytes()) +
+    firestoreFieldBytes("reservedDerivativeBytes", firestoreIntegerValueBytes()) +
+    firestoreFieldBytes("retainedDerivativeBytes", firestoreIntegerValueBytes()) +
+    firestoreFieldBytes("updatedAtUtc", firestoreStringBytes("2026-10-01T00:00:00.000Z"))
+  );
+}
+
+export type HoldSizeSample = { kind: StorageHoldKind; holdKey: string };
+
+/**
+ * Estimated Firestore document bytes for an accounting doc. Worst-case uid
+ * length defaults to ACCOUNTING_UID_MAX_LENGTH. This is an estimate of the
+ * official size model, not a live Firestore measurement.
+ */
+export function estimateStorageAccountingDocumentBytes(params: {
+  uid?: string;
+  holds: HoldSizeSample[];
+}): number {
+  const uid = params.uid ?? "u".repeat(ACCOUNTING_UID_MAX_LENGTH);
+  let holdsMap = 0;
+  for (const hold of params.holds) {
+    holdsMap += estimateHoldMapEntryBytes(hold.kind, hold.holdKey);
+  }
+  return (
+    firestoreDocumentNameBytes(uid) +
+    accountingScalarFieldBytes() +
+    firestoreFieldBytes("holds", holdsMap)
+  );
+}
+
+export function maxLengthOriginalHoldKey(): string {
+  const id = "L".repeat(HOLD_ID_MAX_LENGTH);
+  return originalHoldKey(id, id);
+}
+
+export function maxLengthDerivativeHoldKey(): string {
+  const id = "L".repeat(HOLD_ID_MAX_LENGTH);
+  const deriv = "D".repeat(DERIVATIVE_KEY_MAX_LENGTH);
+  return derivativeHoldKey(id, id, deriv);
+}
+
+export function sampleMaxLengthHolds(originals: number, derivatives: number): HoldSizeSample[] {
+  const originalKey = maxLengthOriginalHoldKey();
+  const derivativeKey = maxLengthDerivativeHoldKey();
+  const holds: HoldSizeSample[] = [];
+  for (let i = 0; i < originals; i += 1) holds.push({ kind: "original", holdKey: originalKey });
+  for (let i = 0; i < derivatives; i += 1) holds.push({ kind: "derivative", holdKey: derivativeKey });
+  return holds;
+}
+
+export function proposedCapOriginalSlots(capBytes: number, originalBytes: number): number {
+  if (!isPositiveSafeInteger(capBytes) || !isPositiveSafeInteger(originalBytes)) return 0;
+  return Math.floor(capBytes / originalBytes);
+}
+
+/**
+ * True when the intended 15 MiB-PDF originals fill of a proposed cap needs
+ * more hold entries than MAX_STORAGE_HOLDS, or the max-id document estimate
+ * exceeds 1 MiB. Derivative fan-out is reported separately and is not this
+ * originals-only workload.
+ */
+export function proposedPdfOriginalWorkloadBlockedByHoldsMap(capBytes: number): {
+  blocked: boolean;
+  originalSlots: number;
+  estimatedDocumentBytes: number;
+} {
+  const originalSlots = proposedCapOriginalSlots(capBytes, 15 * 1024 * 1024);
+  const estimatedDocumentBytes = estimateStorageAccountingDocumentBytes({
+    holds: sampleMaxLengthHolds(originalSlots, 0),
+  });
+  return {
+    blocked: originalSlots > MAX_STORAGE_HOLDS || estimatedDocumentBytes > FIRESTORE_MAX_DOCUMENT_BYTES,
+    originalSlots,
+    estimatedDocumentBytes,
   };
 }
 

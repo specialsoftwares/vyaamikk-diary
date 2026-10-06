@@ -45,3 +45,103 @@ export function allGrinStoragePrefixes(uid: string): string[] {
 export function allGrinFirestoreCollectionIds(): readonly GrinFirestoreUserCollection[] {
   return GRIN_FIRESTORE_USER_COLLECTIONS;
 }
+
+/**
+ * Nested collection ids that GRIN writes under the user trees.
+ * Recursion must visit these even if listSubcollections is incomplete,
+ * otherwise a parent delete can strand children.
+ */
+export const GRIN_KNOWN_NESTED_COLLECTION_IDS = [
+  "receipts",
+  "commands",
+  "serials",
+  "evidenceObjects",
+  "events",
+  "evidenceLinks",
+  "evidenceControl",
+] as const;
+
+export type GrinDeletionInventoryEntry = {
+  kind: "storage_prefix" | "firestore_root" | "firestore_nested" | "reservation_or_temp";
+  path: string;
+  notes: string;
+};
+
+/** SOURCE inventory. Not an operational deletion service. Flag stays false. */
+export function describeGrinDeletionInventory(uid: string): GrinDeletionInventoryEntry[] {
+  const id = uid.trim() || "{uid}";
+  const ledger = `users/${id}/goodsEvidenceLedgers/{ledgerId}`;
+  const receipt = `${ledger}/receipts/{receiptId}`;
+  return [
+    {
+      kind: "storage_prefix",
+      path: grinEvidenceStoragePrefix(id),
+      notes: "originals at …/{objectKey}/original and derivatives at …/{objectKey}/derivatives/{derivativeKey}",
+    },
+    {
+      kind: "firestore_root",
+      path: `users/${id}/goodsEvidenceLedgers`,
+      notes: "ledgers; nested receipts, commands, serials, evidenceObjects",
+    },
+    {
+      kind: "firestore_nested",
+      path: `${ledger}/receipts`,
+      notes: "issued receipts",
+    },
+    {
+      kind: "firestore_nested",
+      path: `${ledger}/commands`,
+      notes: "register/mutate command docs",
+    },
+    {
+      kind: "firestore_nested",
+      path: `${ledger}/serials`,
+      notes: "FY serial tokens",
+    },
+    {
+      kind: "firestore_nested",
+      path: `${ledger}/evidenceObjects`,
+      notes: "evidence reservations and retained originals metadata",
+    },
+    {
+      kind: "firestore_nested",
+      path: `${receipt}/events`,
+      notes: "receipt event history",
+    },
+    {
+      kind: "firestore_nested",
+      path: `${receipt}/evidenceLinks`,
+      notes: "verified evidence pointers",
+    },
+    {
+      kind: "firestore_nested",
+      path: `${receipt}/evidenceControl`,
+      notes: "per-receipt original id control / temps",
+    },
+    {
+      kind: "reservation_or_temp",
+      path: `users/${id}/goodsEvidenceAdmission/runtime`,
+      notes: "admission policy runtime",
+    },
+    {
+      kind: "reservation_or_temp",
+      path: `users/${id}/goodsEvidenceUploadControl/runtime`,
+      notes: "in-flight upload reservations",
+    },
+    {
+      kind: "reservation_or_temp",
+      path: `users/${id}/grinEvidenceObjectKeys/{objectKey}`,
+      notes: "object-key reservation bindings",
+    },
+    {
+      kind: "reservation_or_temp",
+      path: `users/${id}/grinEvidenceDerivativeKeys/{derivativeKey}`,
+      notes: "derivative reservation bindings",
+    },
+    {
+      kind: "firestore_root",
+      path: `users/${id}/goodsEvidenceStorage/accounting`,
+      notes: "per-account storage accounting + holds map",
+    },
+  ];
+}
