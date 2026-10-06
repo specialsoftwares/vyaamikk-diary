@@ -268,3 +268,7 @@ Cherry-pick of `ad72d79` (`team/grin-t2-owner-choice-1310`) onto combined as `31
 
 `APPROVAL_B_DRAFT.md` (team `21fac5b`). Internal candidate **`313025f`**. Do not build `520f9f9` or `56f2040`. B1≠B2 ungranted. Canonical CI **NOT RUN**. Do not mark device Done.
 
+## Team 4 restricted-tester SOURCE fold (unsent, 2026-10-06)
+
+Application **`fcda7cd64e9622e50c38223a7156f0f6b8ca5576`** on `integration/grin-g1-g5-source`. Empty `PLAY_BILLING_TESTER_UIDS` denies all. Purchase-entry **`"0"`**. Catalog/RTDN **NOT RUN**. REAL-CHARGE-01..05 named, not run. Pin still `520f9f9` — **STALE vs `fcda7cd`**. T5 PASS is for `313025f` only. Do not build `313025f` alone. Do not activate billing. Do not mark billing / device / public Done.
+

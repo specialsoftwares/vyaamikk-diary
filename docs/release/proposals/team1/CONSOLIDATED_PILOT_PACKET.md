@@ -1,5 +1,12 @@
 # Team 1 consolidated restricted-pilot packet
 
+**Coordinator supersession 2026-10-06:** Functions / Internal candidate is
+**`fcda7cd64e9622e50c38223a7156f0f6b8ca5576`**, not `313025f`. Pin proposal
+`PIN_UPDATE_AFTER_fcda7cd.diff.md` supersedes `PIN_UPDATE_AFTER_313025f.diff.md`.
+A3 on `313025f` would omit fail-closed Play tester restriction. Rules hashes
+below are unchanged. Combined published HEAD after this docs commit is
+**not** the application SHA.
+
 **Not authorization.** This file does not set `GRIN_OPS_ALLOW_LIVE`. Do not
 deploy from this session. Combined is coordinator-owned. Do not rewrite
 `docs/release/packets/grin-ops/grin-functions-op.mjs`. Do not force-push
@@ -104,7 +111,7 @@ grant. Direct Cloud Run env edit is forbidden. Firebase dotenv is blocked.
 |---|---|---|---|
 | **1 — A1** | Isolated Firestore Rules only | **YES** (after owner grant + inspect still = baseline) | — |
 | **2 — A2** | Isolated Storage Rules only | **YES** (separate grant; never with A1) | — |
-| **3 — A3** | Seven Functions create, gate off | **HOLD** until coordinator pin-update to **`313025f` after T5 review** + apply-host empty vs that SHA | Helper pin still `520f9f9`; this worktree is not the apply host; mixed-state resume is a **separate** packet |
+| **3 — A3** | Seven Functions create, gate off | **HOLD** until coordinator pin-update to **`fcda7cd` after T5 review + CI** + apply-host empty vs that SHA | Helper pin still `520f9f9`; this worktree is not the apply host; mixed-state resume is a **separate** packet |
 | **4 — IAM** | Runtime identity | **Not required for this pilot** | Do **not** add roles to the shared Editor SA |
 | **5 — Testers** | Admission writes + billing UID grammar | **YES** for format/validation; **HOLD** for writes until owner UIDs (private, not git) | Empty `PLAY_BILLING_TESTER_UIDS` already fail-closed in source |
 | **6 — Gate** | Enable / disable | **UNPROVEN — REFUSED** | gcloud omitted-`--source` preservation unproven |

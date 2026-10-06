@@ -157,13 +157,14 @@ Do not publish website changes from this file.
 
 ## 7. Account deletion (implemented)
 
-See `DELETION_15_VS_180_OWNER_SHEET.md` (three facts, do not collapse:
-implemented **15 days**; owner requested **180 days**, not legally/Play
-approved; public-approved policy **UNRESOLVED**). Do not record 15 as the
-owner’s choice. Changing `DELETION_GRACE_MS` is not a safe 180-day policy.
+See `DELETION_45_PLAY_DISCLOSURE.md` (implemented **15 days** until T2;
+owner **45-day** policy, 180 superseded; freeze ≠ delete; constant change
+is the pending clock, not archive, not GRIN purge). Do not record 15 as the
+owner’s choice. **Do not Save Play with 15-day copy after T2 lands.**
 Mailto / support-email web path is documented and identifies the
 developer/app; Play allows it. Do not treat mailto as inherently defective.
 Do not build a form. GRIN Storage and several Firestore collections are
 **not** in the purge lists — do not claim full erasure of those objects.
 **P8 remains open.** Do not flip `INCLUDE_GRIN_IN_ACCOUNT_PURGE`.
-Storage GiB (separate owner write): `STORAGE_OWNER_CHOICE.md`.
+Storage GiB: **1 / 3 / 10 selected. Do not advertise.**
+`STORAGE_OWNER_CHOICE.md`.

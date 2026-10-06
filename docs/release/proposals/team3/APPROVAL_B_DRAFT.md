@@ -1,9 +1,13 @@
 # Approval B freeze-prepare — Team 3 (`candidate-1310`)
 
-**Superseded freeze-prepare.** Named Internal candidate is now
-`313025f902b0a3416815da7ce75a3a7d6bec9559` (1/3/10 GiB + 45-day). Canonical
-CI **still none**. B1 ≠ B2; **neither granted**. Do **not** build `520f9f9`
-or `56f2040`. See `CURRENT_HEAD_VS_FREEZE.md`. No EAS/Play this pass.
+**Coordinator supersession 2026-10-06:** Named Internal candidate is now
+`fcda7cd64e9622e50c38223a7156f0f6b8ca5576` (1/3/10 GiB + 45-day + restricted
+Play tester SOURCE). Canonical CI **still none**. B1 ≠ B2; **neither granted**.
+Do **not** build `520f9f9`, `56f2040`, or `313025f` alone. See
+`CURRENT_HEAD_VS_FREEZE.md`. No EAS/Play this pass.
+
+**Historical T3 pin below named `313025f` / `56f2040`.** Those lines are
+**superseded for new builds.** Recheck Play inventory immediately before B1.
 
 **Not authorization.** Build approval ≠ upload approval. Neither is granted
 by this file. No EAS/native/prebuild/OTA. No Play upload. No `eas build`.

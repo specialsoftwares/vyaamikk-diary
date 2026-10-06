@@ -1,9 +1,37 @@
 # Owner decision: GRIN retained-storage caps (ONE choice)
 
-**This is not a recorded owner choice.** Team 4 does not pick the GiB table
-for you. Counsel has not signed this. Google Play has not approved these
-numbers. This sheet is **not advertising**, **not a store listing**, and
-**not** a profitability guarantee.
+**Owner 2026-10-06: Starter 1 GiB / Professional 3 GiB / Business 10 GiB.**
+Neither the original 1/5/20 table nor the 256 MiB/1/5 alternative.
+**Do not advertise.** Team 4 does not wire constants (Team 2). Counsel has
+not signed this as a Play listing. GCS location **UNKNOWN**.
+
+Worktree: `/Users/shivamsaurav/vyd-worktrees/grin-t4-product`  
+Branch: `team/grin-t4-product`  
+Combined (READ-ONLY): `c45518a` — application `56f2040`. Do not build `520f9f9`.
+
+Do **not** publish website copy, flip billing, Save a Play listing, or
+advertise storage sizes from this file.
+
+**Do not reopen** “GRIN in existing Starter / Professional / Business.”
+
+| Option | Starter | Professional | Business | Status |
+|---|---|---|---|---|
+| Original proposal | 1 GiB | 5 GiB | 20 GiB | Not selected |
+| Smaller alternative | 256 MiB | 1 GiB | 5 GiB | Not selected |
+| **Owner 2026-10-06** | **1 GiB** | **3 GiB** | **10 GiB** | **Selected. Not advertised. Not wired in this tree.** |
+
+**Owner choice:** **1 / 3 / 10 GiB** (recorded 2026-10-06).
+
+The remainder of this file is historical trade-off text for the two
+unselected tables. Cost assumptions stay labelled. Team 2 economics on
+combined: `docs/release/proposals/team2/STORAGE_ECONOMICS.md`.
+
+---
+
+## Historical ask (closed)
+
+The 1-vs-2 blank row below is **closed** by **1 / 3 / 10 GiB** above. Do not
+treat the remainder as unresolved.
 
 Worktree: `/Users/shivamsaurav/vyd-worktrees/grin-t4-product`  
 Branch: `team/grin-t4-product`  

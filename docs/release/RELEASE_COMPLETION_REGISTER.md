@@ -23,19 +23,19 @@ Do not rewrite those files as if they were re-run today.
 |---|---|
 | Repo / branch / PR | `specialsoftwares/vyaamikk-diary` `integration/grin-g1-g5-source` draft **#31** (no duplicate; auto-merge off) |
 | **CI-tested PR head** | `0d7aa17a6efcf3ce6874269eb57afda0a2b45559` (parent `074f082`). Application blobs **= `520f9f9`**. |
-| **Current application SHA** | **`313025f902b0a3416815da7ce75a3a7d6bec9559`** (cherry-pick of T2 `ad72d79` on `team/grin-t2-owner-choice-1310`; parent application `56f2040` / `2cebe32`). Live caps **1/3/10 GiB**. Deletion grace **45 days**. `git diff --stat ad72d79 313025f -- functions src tools/goods-evidence-storage` **empty**. **Do not advertise.** |
-| **Selected Internal candidate** | **`313025f`**. **Do not build `520f9f9`.** T3 freeze-prepare `56f2040` (`ddd1598`) is **superseded** for new builds. B1≠B2 **neither granted**. Canonical CI **NOT RUN** for `313025f`. |
-| Helper `PINNED_APP_SHA` | **`520f9f9`** — **STALE vs `313025f`**. Proposed: `PIN_UPDATE_AFTER_313025f.diff.md` (`b7eb5ce`). **Not applied.** `PIN_UPDATE_AFTER_56f2040.diff.md` **superseded**. Do not set `GRIN_OPS_PINNED_SHA`. A3 **HOLD**. |
+| **Current application SHA** | **`fcda7cd64e9622e50c38223a7156f0f6b8ca5576`** (restricted Play tester fail-closed SOURCE on `313025f`). `313025f` remains the GRIN 1/3/10+45d tree. T5 SOURCE+INJECTED PASS covers **`313025f`**, not this billing slice. **Do not advertise GiB.** Purchase-entry **`"0"`**. |
+| **Selected Internal candidate** | **`fcda7cd`** (includes `313025f` GRIN policy + restricted-tester SOURCE). **Do not build `520f9f9`, `56f2040`, or `313025f` alone.** B1≠B2 **neither granted**. Canonical CI **NOT RUN**. T5 has not reviewed `fcda7cd`. |
+| Helper `PINNED_APP_SHA` | **`520f9f9`** — **STALE vs `fcda7cd`**. `PIN_UPDATE_AFTER_313025f.diff.md` is **superseded**. **Not applied.** A3 **HOLD**. |
 | **Tooling SHA** | **`0d7aa17`** — successor for the `520f9f9` pin. **Not** byte-identical to `228a8f5` (`grin-functions-op.mjs` **+1/−1**: pin constant only). |
 | Historical ops-guard baseline | `228a8f58ac83d3c71e853cdccb6e4c4fa64c251f`. Suite **34/34** recorded on **that** tree. Same suite **34/34** re-run after the pin apply on the successor tree (TOOLING, not application CI). Live mode still rejects `GRIN_OPS_PINNED_SHA`. |
-| **Canonical CI** | GHA **`37425360211`** covers **`520f9f9` only**. **Not** a CI pass for `56f2040` or **`313025f`**. Do **not** cite `37379529193` or `37351685421`. Inner suite counts **not invented**. `gh` unauthenticated here. |
+| **Canonical CI** | GHA **`37425360211`** covers **`520f9f9` only**. **Not** a CI pass for `56f2040`, `313025f`, or **`fcda7cd`**. Do **not** cite `37379529193` or `37351685421`. Inner suite counts **not invented**. `gh` unauthenticated here. |
 | S1 / S2 | **Closed** at SOURCE / INJECTED / named G2 EMULATOR (`127.0.0.1:8091` / `9200`, `demo-vyaamikk-grin-g2`). Not reopened (no new reproduction). Not live. Not device. |
 | P3 | **ACCEPTED**. Coordinator re-ran `quota.injected.unit.test.ts` **PASS** after `313025f`. |
 | P8 | **OPEN / FAIL** (`INCLUDE_GRIN_IN_ACCOUNT_PURGE=false`; grace **45 days** in source; GRIN omitted from default purge). Not an operational deletion service. |
 | Owner storage (2026-10-06) | **1 / 3 / 10 GiB wired** as `OWNER_SELECTED_STORAGE_CAPS_BYTES`. Historical 1/5/20 and 256 MiB/1/5 named, not live. **Do not advertise.** |
 | Owner deletion (2026-10-06) | **45-day** grace wired (`DELETION_GRACE_DAYS=45`). Supersedes 180. Play freeze ≠ delete. GRIN purge flag **false**. |
 | Device / live backend / billing / public | **Not accepted** |
-| Next approval | Consolidated selectable backend/build packet. **Not executed.** Candidate **`313025f`**. Do not build `520f9f9`. |
+| Next approval | Consolidated selectable backend/build packet. **Not executed.** Candidate **`fcda7cd`**. Do not build `520f9f9` / `56f2040` / `313025f` alone. |
 | Device named | OnePlus 12R, Android 16, vc22 installed, available today. **Upgrade device.** Clean-install device **unnamed**. Firebase UIDs **not in repo**. |
 | versionCode | **23 UNRESERVED**. Play explorer 2026-10-06: highest uploaded **vc22**. |
 | Merge-base / `origin/main` | `0da2f58970f23c7ce6cbefae6efffd49c731f44b` |
@@ -52,12 +52,12 @@ reproduction. Do not reopen S1/S2 without a new reproduction.
 |---|---|---|---|---|---|
 | Wire 1/3/10 GiB + 45-day grace | T2 | **Landed** combined `313025f` (`ad72d79`) | done | coordinator tests PASS | do not advertise; P8 still FAIL |
 | Canonical CI on selected SHA | coordinator | Observe GHA after T2 fold | T2 SHA | `gh` unauthenticated | GitHub login |
-| Pin helper to selected SHA | T1 propose / coordinator apply | After T5 review of T2 SHA | T2+T5 | proposed diffs only | A3 HOLD until applied |
-| Consolidated backend packet | T1 | Fill gcloud proof, SA, smoke harness | A1 hashes exist | A1/A2 hashes | live inspect may be stale |
-| Internal AAB packet | T3 | Retarget off `520f9f9`; Play recheck before B1 | selected SHA + CI | OnePlus 12R named | B1 ungranted |
-| Restricted billing packet | T4 | Tester allowlist SOURCE; catalog if access | purchase-entry `"0"` | fail-closed | activation HOLD |
+| Pin helper to selected SHA | T1 propose / coordinator apply | After T5 review of **`fcda7cd`** | T5 + CI | `PIN_UPDATE_AFTER_fcda7cd.diff.md` unapplied | A3 HOLD |
+| Consolidated backend packet | T1 | Owner letters; A6 still UNPROVEN | A1 hashes exist | inspect 2026-10-06 | gcloud absent; CI missing |
+| Internal AAB packet | T3 | Recheck Play immediately before B1 | `fcda7cd` + CI | OnePlus 12R named | B1 ungranted |
+| Restricted billing packet | T4 | **Landed** `fcda7cd`; catalog if access | purchase-entry `"0"` | fail-closed SOURCE | activation HOLD |
 | Phone acceptance | T3 + owner | vc22 upgrade today | AAB + private UIDs | device **NOT RUN** | no AAB; UIDs not supplied |
-| Review T2 owner-choice | T5 | Targeted review when T2 commits | T2 SHA | `REVIEW_56f2040` done | leftover P3-FAIL files stay dirty |
+| Review billing-tester slice | T5 | Targeted review of `fcda7cd` vs `313025f` | `fcda7cd` | `REVIEW_313025f` done | leftover P3-FAIL files stay dirty |
 
 ---
 
@@ -65,11 +65,11 @@ reproduction. Do not reopen S1/S2 without a new reproduction.
 
 | Gate | State |
 |---|---|
-| SOURCE READY | Application **`313025f`**. T5 SOURCE+INJECTED **PASS** (`REVIEW_313025f.md`). Canonical GHA **NOT RUN**. **Do not build `520f9f9`.** P3 accepted. **P8 FAIL**. Do not advertise GiB. |
+| SOURCE READY | GRIN policy **`313025f`** T5 PASS. Billing-tester SOURCE **`fcda7cd`** coordinator tests PASS; T5 **not yet** on `fcda7cd`. Canonical GHA **NOT RUN**. **Do not advertise GiB.** P3 accepted. **P8 FAIL**. |
 | BACKEND PILOT READY | Consolidated packet in coordinator chat. **Not authorized.** GRIN seven **ABSENT**. |
-| INTERNAL BUILD READY | Candidate **`313025f`** (`APPROVAL_B_DRAFT.md` `21fac5b`). **Do not build `520f9f9` or `56f2040`.** B1≠B2 **neither granted**. Canonical CI **NOT RUN**. |
+| INTERNAL BUILD READY | Candidate **`fcda7cd`**. **Do not build `520f9f9` / `56f2040` / `313025f` alone.** B1≠B2 **neither granted**. Canonical CI **NOT RUN**. |
 | DEVICE ACCEPTED | **NOT RUN**. OnePlus 12R available today — not yet executed. |
-| BILLING ACCEPTED | Fail-closed; catalog **NOT RUN**; purchases **off** |
+| BILLING ACCEPTED | Fail-closed tester SOURCE landed; catalog **NOT RUN**; purchases **off**; REAL-CHARGE tests **not run** |
 | PUBLIC SUBMISSION READY | Blocked on wired 1/3/10+45d, device, billing, listing. Owner writes recorded. |
 | PUBLIC ROLLOUT APPROVED | Not authorized |
 
@@ -103,10 +103,10 @@ purchase-entry remains `"0"`. Play Console catalog **NOT RUN**.
 
 | Team | Authorized work this session | Approval still required |
 |---|---|---|
-| 1 Backend | Consolidated packet `CONSOLIDATED_PILOT_PACKET.md` (`b7eb5ce`). Pin proposed `PIN_UPDATE_AFTER_313025f.diff.md` — **not applied**. A1 not executed. A3 HOLD (CI missing). | Owner letter-grant; do not apply pin without CI |
+| 1 Backend | Smoke harness folded from `9ae9624`. Packet retargeted `b7eb5ce`. A1/A2 executable on paper. A3 HOLD. A6 UNPROVEN **refused**. INJECTED smoke PASS. LIVE **REFUSED**. | Owner letters; pin after CI on selected SHA |
 | 2 Policy | Owner-choice folded (`ad72d79` → combined `313025f`). Live caps **1/3/10 GiB**. Grace **45 days**. `INCLUDE_GRIN_IN_ACCOUNT_PURGE=false`. P3 PASS. P8 FAIL. **Do not advertise.** | No live purge; pin+CI; T5 review |
-| 3 Build/device | Freeze-prepare **`56f2040`** (`ddd1598` on `team/grin-t3-candidate-1310`). **`520f9f9` retired** for new builds. Will retarget when T2 1/3/10+45d lands. B1≠B2 **ungranted**. OnePlus 12R Android 16 vc22 **today** (upgrade). Clean-install **blank**. UIDs not in git. Device rows **NOT RUN**. | EAS B1 of selected SHA after CI; Play B2 separate |
-| 4 Billing/Play | Two owner writes presented (`TWO_OWNER_DECISIONS.md` `7e4ed20`). Deletion 15/180/UNRESOLVED; storage 1/5/20 vs 256 MiB/1/5 GiB. Catalog **NOT RUN**. Purchase-entry `"0"`. | Owner fills both sheets; no activation/Save/submit |
+| 3 Build/device | Packet `21fac5b` named `313025f`; **superseded for new builds by `fcda7cd`**. B1≠B2 **ungranted**. OnePlus 12R Android 16 vc22 **today** (upgrade). Clean-install **blank**. UIDs not in git. Device rows **NOT RUN**. | EAS B1 of `fcda7cd` after CI; Play B2 separate |
+| 4 Billing/Play | Restricted-tester SOURCE folded (`b04bf97` → combined `fcda7cd`). Empty allowlist denies all. Catalog **NOT RUN**. REAL-CHARGE-01..05 **named, not run**. Purchase-entry `"0"`. 45-day Play disclosure drafted; **no Save/publish**. | Activation HOLD; private UIDs |
 | 5 QA | `REVIEW_313025f.md` (`123e42f`). SOURCE+INJECTED **PASS** for 1/3/10 + 45d. **P3 ACCEPTED**. **P8 FAIL**. S1/S2 preserved. Device/live **NOT RUN**. | Not device/live; pin still stale |
 
 ---

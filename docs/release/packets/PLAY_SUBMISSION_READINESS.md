@@ -1,14 +1,13 @@
 # Play submission readiness (Team 4) — worksheet, not submitted
 
 **Status:** truthful prep only. Do **not** Save, publish, or submit in Play Console from this file.  
-**Application SHA:** `520f9f98bc952fd7f30a907da9e85774629a69c0` (**no AAB of this SHA**). Do not describe a `5d5df3d` installed binary as current.  
-**Combined READ-ONLY HEAD:** `aea65c170adb25f09ca1045593f18847df2f3b30`. Canonical CI run **`37425360211`** on `0d7aa17`.  
+**Combined READ-ONLY HEAD:** `c45518a` (application `56f2040`; do not build `520f9f9`). Canonical CI for `56f2040` **NOT observed** this Team 4 continue.  
 **This Team 4 branch:** `team/grin-t4-product` (do not force-push).  
-**Packet E:** billing/public-release gates **not authorized**. Purchase-entry stays `"0"`.  
-**Inspection:** 2026-10-06 (IST). Delete-account re-read this continue. Play catalog **NOT RUN**.
+**Packet E:** billing/public-release gates **not authorized**. Purchase-entry stays `"0"`. **GRIN readiness ≠ billing readiness.**  
+**Inspection:** 2026-10-06 (IST). Play catalog **NOT RUN**. Owner writes recorded: 1/3/10 GiB (do not advertise); 45-day deletion (implemented 15 until T2).
 
 Worksheets: `docs/release/packets/PLAY_LISTING_DATA_SAFETY_REVIEWER.md`, `docs/PLAY_REVIEW_SETUP.md`, `docs/release/proposals/team4/DATA_SAFETY_REBUILD.md`.
-Owner writes still blank: `docs/release/proposals/team4/TWO_OWNER_DECISIONS.md`.
+Owner writes recorded: `docs/release/proposals/team4/TWO_OWNER_DECISIONS.md`.
 
 Legend: **VERIFIED** this session · **SOURCE** in repo · **STALE** older note not re-read · **NOT RUN**.
 
@@ -167,7 +166,7 @@ Play Console privacy URL should be the live `.com` page. Owner/counsel must reco
 | GRIN `users/{uid}/grinEvidence/**` | **Not** in deletion prefixes | **SOURCE** |
 | Firestore GRIN / billing subcollections | **Not** in `USER_SUBCOLLECTIONS` purge list | **SOURCE** |
 | Live deletion job behaviour | **NOT RUN** | do not execute deletion |
-| Owner 180-day hold request | **Not** implemented; **not** Play/legal approved. **Three facts:** implemented **15 days**; owner requested **180 days**; public-approved window **UNRESOLVED**. Do not record 15 as the owner’s choice. Changing `DELETION_GRACE_MS` is not a safe 180-day policy. See `docs/release/proposals/team4/DELETION_15_VS_180_OWNER_SHEET.md`. | **SOURCE** |
+| Owner deletion policy | **45-day** cancellation window (2026-10-06; supersedes 180). Implemented **15 days** until T2. Play freeze ≠ delete. Changing `DELETION_GRACE_MS` to 45 is the pending clock, not an archive, not GRIN purge. **Do not Save Play with 15-day copy after T2.** See `docs/release/proposals/team4/DELETION_45_PLAY_DISCLOSURE.md`. | **SOURCE** |
 
 Play Data safety / account deletion answers: in-app **yes**; web URL **yes**; additional retention **yes** (anti-abuse indexes, device residual, shared PDFs, **GRIN originals until Packet D**).
 
@@ -192,7 +191,7 @@ Do not check Play “full access including premium” unless the reviewer can ac
 
 | Item | Finding | Status |
 |---|---|---|
-| Packet D commercial choice | **GRIN-in-existing-plans recorded** (2026-10-06). **Do not reopen.** Remaining owner writes: storage GiB (`STORAGE_OWNER_CHOICE.md`); explicit-deletion public window (`DELETION_15_VS_180_OWNER_SHEET.md`). | **SOURCE** |
+| Packet D commercial choice | **GRIN-in-existing-plans recorded** (2026-10-06). **Do not reopen.** Storage **1/3/10 GiB** selected — **do not advertise**. Explicit deletion **45-day** (`DELETION_45_PLAY_DISCLOSURE.md`); implemented 15 until T2. | **SOURCE** |
 | In-app copy | “Prices shown are from Google Play”; manage/cancel in Google Play; 14-day trial is **policy/source**, not a live store SKU and not a client-startable grant | **SOURCE** `src/i18n/locales/en.ts`, `upgradePresentation.ts` |
 | Catalog paise | Functions `expectedPriceInPaise` — **not** display authority | **SOURCE** `functions/src/billing/products.ts` |
 | Live Play prices / base plans / catalog | **NOT RUN** this session. Exact blocker: no Play Console session; `gcloud` absent; no Android Publisher client; **Firebase tokens must not be used as Play Android Publisher**. Do **not** reuse “catalog empty.” | **NOT RUN** |
@@ -210,11 +209,11 @@ Blockers to treat as open (non-exhaustive):
 1. No binary of SHA `520f9f9` / vc23 / `internal-grin` on EAS — **cannot verify the intended installed binary**. Reviewer account is **not** fully onboarded on that SHA.
 2. Purchase-entry stays `"0"`; Packet E real-store matrix **NOT RUN**; Play catalog **NOT RUN** (no Publisher/Console route this continue: `gcloud` absent, `googleapiclient` absent).
 3. Privacy **date mismatch** (site 15 Jul 2026 vs app 27 Jul 2026). Do not backdate the in-app 2026-07-27 baseline.
-4. Explicit deletion: implemented **15 days** vs requested **180 days** vs public **UNRESOLVED** (`DELETION_15_VS_180_OWNER_SHEET.md`). GRIN files not in the deletion job; listing/Data safety must not claim they vanish with the account. **P8 open.**
+4. Explicit deletion: owner **45-day** policy vs implemented **15 days** until T2 (`DELETION_45_PLAY_DISCLOSURE.md`). Do **not** Save 15-day Data safety after T2. GRIN files not in the deletion job. **P8 open.**
 5. Website first-party `/~api/analytics` ingest is live (POST 202); privacy copy says no third-party analytics. Server-side Tinybird forward **UNKNOWN**. Do not claim `flock.js` forwards solely from 202. Not an app SDK.
 6. Play Console inventory, Data safety form, and listing Save: **NOT RUN** / not submitted.
 7. Reviewer fixture live in Firebase + pre-onboarded email/profile: **NOT RUN**.
 8. In-app privacy still calls email optional; onboarding **requires** verified email.
-9. Storage GiB: original **1 / 5 / 20** still pending confirmation vs alternative **256 MiB / 1 GiB / 5 GiB** (`STORAGE_OWNER_CHOICE.md`). Do not advertise.
+9. Storage GiB: **1 / 3 / 10 selected. Do not advertise** (`STORAGE_OWNER_CHOICE.md`).
 
 Human sign-off (owner, counsel, Play Console operator) is still required. This document is not that sign-off.

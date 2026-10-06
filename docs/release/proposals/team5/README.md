@@ -36,6 +36,8 @@ QA artefacts. Not production implementations. Not G6 completion.
 | `CLOSEOUT_0d7aa17.md` | Pin + SOURCE CI review at `0d7aa17`; TOOLING+SOURCE CI PASS; P3 ACCEPTED; P8 FAIL; not device/live |
 | `REVIEW_56f2040.md` | Independent QA of application `56f2040` (T2 capacity/cleanup vs freeze `520f9f9`); **P8 FAIL**; S1/S2/P3 preserved; device/live/billing/public **NOT RUN** |
 | `REVIEW_313025f.md` | Independent QA of application `313025f` (1/3/10 GiB + 45-day vs `56f2040`); SOURCE+INJECTED **PASS**; **P8 FAIL**; pin STALE |
+| `REVIEW_ad72d79.md` | Independent QA of T2 provenance `ad72d79` (same slice as `313025f`); historical worktree review |
+| `REVIEW_OWNER_CHOICE_CHECKLIST.md` | Pre-landing assertions for 1/3/10 + 45-day |
 | `wave2evidence-e1-e5-repro.ts` | SQLITE_HOST / INJECTED / host-filesystem drivers for E1–E5 |
 | `wave2evidence-e1-e5-rereview.ts` | PHASE 2 persistGrinOwnerSession inspection + unset-host failure |
 | `wave2evidence-e4-hasher-followup.ts` | PHASE 3 persist hasher / conversion persist / SHA-256 inspection |

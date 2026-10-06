@@ -9,6 +9,12 @@ This document is Play Console copy and developer checklist only.
 It does not create reviewer email inboxes, store inbox passwords, or prove that
 onboarding has been completed.
 
+**GRIN readiness is not billing readiness.** Intended Internal binaries keep
+purchase-entry `"0"`. Do not tell reviewers they can buy a plan. Do not check
+Play “full access including premium” unless paid surfaces are actually
+reachable on the installed binary. Public purchases stay off until a separate
+approval (`APPROVAL_C_RESTRICTED_BILLING.md` is restricted-billing only).
+
 ## One-time developer setup (not performed by source assembly)
 
 ### 1. Firebase test phone fixture

@@ -5,10 +5,9 @@ or an out-of-repo file). Do **not** invent names, emails, UIDs, or
 passwords. Do not paste secrets, OTPs, keys, or recovery codes into git.
 Do not write Firebase tester UIDs into this file.
 
-Named freeze-prepare: `56f2040e30159579edc0cbfbc88e2ba706a6abd2` (**will
-retarget** when T2 lands 1/3/10 GiB + 45-day).  
-Retired freeze: `520f9f9` — **do not build**.  
-Canonical CI on `56f2040`: **NOT RUN** (GHA `37425360211` covers `520f9f9`
+Named Internal candidate: `fcda7cd64e9622e50c38223a7156f0f6b8ca5576`.  
+Retired for new builds: `520f9f9`, `56f2040`, `313025f` alone.  
+Canonical CI on `fcda7cd`: **NOT RUN** (GHA `37425360211` covers `520f9f9`
 only).  
 Profile: `internal-grin` AAB. B1 ≠ B2; **neither granted**.  
 `adb devices -l` this session: **empty** → every execution row **NOT RUN**,

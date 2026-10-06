@@ -1,7 +1,14 @@
 # 180-day deletion hold vs Play (Team 4 engineering notes)
 
+**SUPERSEDED 2026-10-06.** Owner policy is **45-day** pending-then-purge, not
+180. See `DELETION_45_PLAY_DISCLOSURE.md`. Do not implement 180. Changing
+`DELETION_GRACE_MS` to 45 is the pending clock, not a recoverable archive,
+not GRIN purge, and freeze still ≠ delete.
+
+The notes below were written against the earlier 180-day request.
+
 **PRIMARY owner decision sheet:**
-`docs/release/proposals/team4/DELETION_15_VS_180_OWNER_SHEET.md`
+`docs/release/proposals/team4/DELETION_45_PLAY_DISCLOSURE.md`
 
 Application SHA to describe: `520f9f9` (no AAB). Combined READ-ONLY
 `aea65c1`. CI `37425360211` on `0d7aa17`.

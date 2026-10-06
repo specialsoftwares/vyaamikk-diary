@@ -25,8 +25,8 @@ Do **not** claim:
 - That GRIN is included in a priced SKU until Packet E real-store
   acceptance of the **already recorded** “include in existing plans” choice
   (do **not** reopen that choice here)
-- Unbounded evidence storage, or a confirmed GiB allowance, until the owner
-  writes `STORAGE_OWNER_CHOICE.md`
+- Unbounded evidence storage, or advertising a GiB allowance (owner selected
+  1/3/10 GiB; **do not advertise**)
 - That GRIN is available on a binary where admission/Functions cannot reach it
 
 Accurate short description addendum **if GRIN is visible and reachable on the submitted
@@ -62,19 +62,19 @@ separate Play “tax document” type. Encrypted in transit: HTTPS. Encrypted at
 rest: Google Cloud default — **[EXTERNAL VERIFICATION REQUIRED]**. Do not
 claim encrypted backup or an accredited audit.
 
-Account deletion: **implemented 15-day** grace for cloud diary records;
-owner **requested 180 days** (not legally/Play approved); public-approved
-window **UNRESOLVED**. Do **not** record 15 as the owner’s choice. Changing
-`DELETION_GRACE_MS` is not a safe 180-day policy. Play User Data: freeze /
-disable ≠ delete. See `DELETION_15_VS_180_OWNER_SHEET.md`. **GRIN
-Storage originals are not yet in that job** (P8 open). Until Packet D
-retention is implemented, Data safety must **not** claim GRIN files are
-deleted with the account. Do **not** flip `INCLUDE_GRIN_IN_ACCOUNT_PURGE`.
-Safer Internal text: “Goods-evidence files used in internal testing may be
-retained until testers are wiped or a deletion policy ships.”
+Account deletion: **owner policy 45-day** cancellation window after confirmed
+request (2026-10-06; supersedes 180). **Wired in source** (`DELETION_GRACE_DAYS=45`
+on `313025f` / `fcda7cd`). Play User Data: freeze / disable ≠ delete. The
+45-day clock is not a recoverable archive and not GRIN purge. **Do not Save
+Play or publish website until listing copy matches the wired 45-day window.**
+Live `/privacy` may still show 15 days — HOLD. See
+`DELETION_45_PLAY_DISCLOSURE.md`. **GRIN Storage originals are not yet in
+that job** (P8 open). Data safety must **not** claim GRIN files are deleted
+with the account. Do **not** flip `INCLUDE_GRIN_IN_ACCOUNT_PURGE`. Safer
+Internal text: “Goods-evidence files used in internal testing may be retained
+until testers are wiped or a deletion policy ships.”
 
-Storage GiB (separate owner write, do not advertise): original **1 / 5 / 20
-GiB** vs alternative **256 MiB / 1 GiB / 5 GiB** —
+Storage GiB: **1 / 3 / 10 selected. Do not advertise.**
 `STORAGE_OWNER_CHOICE.md`. Do not reopen GRIN-in-existing-plans.
 
 ## Reviewer instructions (Play Console sign-in details)
