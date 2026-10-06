@@ -4,8 +4,10 @@
 accounting document. It is **not**:
 
 - a customer storage SKU or advertised file-count allowance
+- an unlimited-files promise
 - proof that every permitted document will be accepted by Firestore
-- a replacement for the proposed byte caps (1 / 5 / 20 GiB, unconfirmed)
+- a replacement for the live byte caps (Starter 1 GiB / Professional 3 GiB /
+  Business 10 GiB, owner-selected 2026-10-06, **do not advertise**)
 
 The official Firestore document ceiling is **1,048,576 bytes**. Live write
 acceptance is still Firestore’s. The estimator below uses the published
@@ -18,31 +20,33 @@ uid 128).
 
 | Sample | Estimated document bytes | vs 1 MiB |
 |---|---|---|
-| 1,365 max-id originals (15 MiB PDF fill of proposed 20 GiB) | computed in `storageQuota.unit.test.ts` | under |
+| 682 max-id originals (15 MiB PDF fill of live **10 GiB**) | computed in `storageQuota.unit.test.ts` | under |
+| 1,365 max-id originals (historical 20 GiB table, not live) | under | under |
 | 2,500 max-id originals | under | under |
 | 2,500 max-id derivatives | under | under |
 | 277 originals + 2,216 derivatives (15 MiB + 8×2 MiB near entry cap) | under | under |
-| 660 originals + 5,280 derivatives (15 MiB + 8×2 MiB fill of 20 GiB) | **over** | cannot fit one document |
+| 660 originals + 5,280 derivatives (15 MiB + 8×2 MiB fill of historical 20 GiB) | **over** | cannot fit one document |
 
 2,500 worst-case derivative keys leave tens of KiB of estimator headroom.
 That is why the entry integer stays **2,500** rather than the ~2,750
 estimator-only maximum: fail closed **before** an opaque Firestore
 document-too-large write.
 
-## Intended 15 MiB-PDF / proposed-cap workload
+## Intended 15 MiB-PDF / live-cap workload
 
-`floor(20 GiB / 15 MiB) = 1,365` originals. 1,365 < 2,500, and the max-id
-document estimate is under 1 MiB. Starter 1 GiB and Professional 5 GiB
+`floor(10 GiB / 15 MiB) = 682` originals. 682 < 2,500, and the max-id
+document estimate is under 1 MiB. Starter 1 GiB and Professional 3 GiB
 originals-only fills are also under. **No correction.** Raising the integer
-cannot make a 15 MiB + 8-derivative fill of 20 GiB fit (~5,940 holds,
-estimator over 1 MiB). That needs a sharded accounting document — out of
-scope.
+cannot make a 15 MiB + 8-derivative fill of 10 GiB fit (330 groups × 9
+holds = 2,970, over the entry limit). That needs a sharded accounting
+document — out of scope. Historical 20 GiB originals-only still fits
+(1,365); its full derivative fill still does not.
 
 ## What hits the entry limit first
 
-- Tiny files (1 byte × 2,500 ≪ any proposed GiB cap)
-- Full derivative fan-out (8 × 2 MiB per original) around **~8.4 GiB** of a
-  proposed 20 GiB byte cap (277 groups × 9 holds)
+- Tiny files (1 byte × 2,500 ≪ any GiB cap)
+- Full derivative fan-out (8 × 2 MiB per original) around **~8.4 GiB**
+  (277 groups × 9 holds)
 
 Admission then returns `quota_state_invalid` with
 `HOLDS_MAP_CAPACITY_DETAIL` (no GiB named). Existing holds are **not**

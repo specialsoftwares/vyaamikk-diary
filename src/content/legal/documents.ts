@@ -1,3 +1,5 @@
+import { DELETION_GRACE_DAYS } from "@/domain/identityLifecycle";
+
 export interface LegalSection {
   title: string;
   paragraphs: string[];
@@ -43,7 +45,7 @@ export const PRIVACY_POLICY_SECTIONS: LegalSection[] = [
   {
     title: "Retention & deletion",
     paragraphs: [
-      "Active data is retained while your account is active. Account deletion starts a 15-day grace period before final erasure steps.",
+      `Active data is retained while your account is active. Account deletion starts a ${DELETION_GRACE_DAYS}-day cancellation window before final erasure of app-controlled account data. This window is not a freeze-only hold.`,
       "Delete your account in Settings → Delete Account & Data, or request deletion at our web page.",
       "Exported or shared PDFs outside the app cannot be withdrawn or deleted by us.",
     ],

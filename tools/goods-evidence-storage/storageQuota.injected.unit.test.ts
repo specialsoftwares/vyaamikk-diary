@@ -15,6 +15,7 @@ import {
   parseStorageAccounting,
   chargedStorageBytes,
   PROPOSED_PENDING_OWNER_CONFIRMATION_STORAGE_CAPS_BYTES,
+  OWNER_SELECTED_STORAGE_CAPS_BYTES,
 } from "./storageQuota";
 import { putAndVerify, sampleBytes, sha256Bytes, testClock } from "./testSupport";
 
@@ -45,7 +46,11 @@ function pair(capOverride?: number) {
 }
 
 async function main(): Promise<void> {
-  assert.equal(PROPOSED_PENDING_OWNER_CONFIRMATION_STORAGE_CAPS_BYTES.starter, 1024 * 1024 * 1024);
+  assert.equal(OWNER_SELECTED_STORAGE_CAPS_BYTES.starter, 1024 * 1024 * 1024);
+  assert.equal(OWNER_SELECTED_STORAGE_CAPS_BYTES.professional, 3 * 1024 * 1024 * 1024);
+  assert.equal(OWNER_SELECTED_STORAGE_CAPS_BYTES.business, 10 * 1024 * 1024 * 1024);
+  assert.equal(PROPOSED_PENDING_OWNER_CONFIRMATION_STORAGE_CAPS_BYTES.professional, 5 * 1024 * 1024 * 1024);
+  assert.equal(PROPOSED_PENDING_OWNER_CONFIRMATION_STORAGE_CAPS_BYTES.business, 20 * 1024 * 1024 * 1024);
 
   {
     const { adapter } = pair(1000);

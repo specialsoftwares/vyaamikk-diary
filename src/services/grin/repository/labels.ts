@@ -13,7 +13,7 @@ export const GRIN_APPLICATION_REPOSITORY_KIND = "GrinApplicationRecord" as const
 export const GRIN_APPLICATION_LEDGER_ID = "primary";
 
 export const GRIN_PRICING_QUOTA_UNRESOLVED =
-  "GRIN is included in existing Starter/Professional/Business (no separate SKU; SOURCE expected paise only, not Play). Issuance uses the ordinary monthly record allowance in source. Storage GiB caps are PROPOSED_PENDING_OWNER_CONFIRMATION and must not be advertised.";
+  "GRIN is included in existing Starter/Professional/Business (no separate SKU; SOURCE expected paise only, not Play). Issuance uses the ordinary monthly record allowance in source. Owner-selected retained-storage caps are wired in source and must not be advertised.";
 
 export function grinRepositoryIsFake(label: string): boolean {
   return label.startsWith("FAKE /") || label.includes("FAKE / WAVE-");
