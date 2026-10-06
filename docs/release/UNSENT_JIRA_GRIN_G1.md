@@ -180,3 +180,7 @@ Folded slice `14e56f3` onto combined. First GRIN register consumes one monthly s
 
 Reviewed application `b845e8a` (`POLICY_QA_T2.md`, team commit `365f9f3`). **P3 PASS** on the production register transaction (INJECTED, not only the string scan). **P8 FAIL** unchanged (`INCLUDE_GRIN_IN_ACCOUNT_PURGE=false`; default prefixes omit GRIN). No new blockers. GiB still pending owner confirmation. Device / Play / live **NOT RUN**. Do not mark GRIN / device / billing / public-release Done.
 
+## Checkpoint 41b05a4 / GHA 37379529193 (unsent, 2026-10-06)
+
+PR #31 head `41b05a49e8e60597b63a35f22825878bc1945dee` matches this checkout. GitHub Actions run **`37379529193`** job **`111997702708`** verify/canonical CI **success**. `7761af6`→`41b05a4` includes Team 5 QA files and a `package.json` test script — not exclusively narrative. Open **S1** (corrupt accounting can bypass storage cap) and **S2** (hold key omits ledgerId). P3 remains accepted. P8 remains FAIL. Do not cite `37351685421` for this tree. Do not mark GRIN / device / billing / public-release Done.
+
