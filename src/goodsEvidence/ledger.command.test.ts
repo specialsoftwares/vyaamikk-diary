@@ -288,7 +288,7 @@ function ledger(): InMemoryGoodsLedger {
   assert.equal(pending.issuedNumber, null);
   assert.equal(pending.serverRegisteredAtUtc, null);
   assert.equal(pending.provisionalExport, true);
-  assert.match(pending.banner, /server registration pending/);
+  assert.match(pending.banner, /Waiting to sync/);
 
   const store = ledger();
   const issued = store.register(

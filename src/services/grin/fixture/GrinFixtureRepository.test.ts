@@ -113,7 +113,7 @@ if (amend.ok) {
   }
 }
 
-assert.equal(OFFLINE_PENDING_BANNER, "Captured offline — server registration pending");
+assert.equal(OFFLINE_PENDING_BANNER, "Saved on this phone. Waiting to sync.");
 assert.match(GRIN_DOCUMENT_FOOTER, /not a GST Receipt Voucher/);
 
 console.log("GrinFixtureRepository.test.ts: ok");
