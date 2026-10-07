@@ -1,23 +1,19 @@
 /**
- * Letterhead gate.
+ * Letterhead gate — "Your letterhead".
  *
- *   • No config saved → "Set up letterhead" CTA → /letterhead/setup
- *   • Config saved    → preview + "Create document" CTA → /letterhead/create
- *                       plus "Replace" and "Remove"
- *
- * All other screens (setup, create) assume they own the flow they were
- * routed into; this gate is the only entry point.
+ * Missing template → two choices (scan/upload vs create with logo).
+ * Existing template → preview + create / edit / replace; stays active until
+ * a replacement save succeeds.
  */
 
 import React, { useCallback, useState } from "react";
-import { Alert, Image, StyleSheet, Text, View } from "react-native";
+import { Alert, Image, Pressable, StyleSheet, View } from "react-native";
 import { useFocusEffect, useRouter, useLocalSearchParams } from "expo-router";
 
 import {
   Banner,
   Button,
   Card,
-  EmptyState,
   ErrorState,
   Header,
   Loader,
@@ -26,6 +22,7 @@ import {
 } from "@/components/ui";
 import { useAuth } from "@/state/auth";
 import {
+  getDocumentScannerCapability,
   getLetterheadRepository,
   type LetterheadConfig,
 } from "@/services/letterhead";
@@ -46,11 +43,24 @@ export default function LetterheadGateScreen() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [removing, setRemoving] = useState(false);
 
+  const scannerCap = getDocumentScannerCapability();
+
   const styles = useThemedStyles((colors) =>
     StyleSheet.create({
       bannerWrap: { marginBottom: spacing.md },
-      emptyWrap: { paddingVertical: spacing.lg },
       body: { gap: spacing.lg },
+      benefit: { ...typography.body, color: colors.textMuted, marginBottom: spacing.sm },
+      choiceCard: {
+        gap: spacing.xs,
+        padding: spacing.md,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: colors.divider,
+        borderRadius: radius.md,
+        backgroundColor: colors.surface,
+      },
+      choiceTitle: { ...typography.titleMd, color: colors.text },
+      choiceBody: { ...typography.body, color: colors.textMuted },
+      choiceHint: { ...typography.caption, color: colors.textSubtle, marginTop: spacing.xs },
       preview: { gap: spacing.sm, padding: spacing.md },
       imageFrame: {
         width: "100%",
@@ -61,6 +71,14 @@ export default function LetterheadGateScreen() {
         position: "relative",
       },
       image: { width: "100%", height: "100%" },
+      generatedPreview: {
+        flex: 1,
+        padding: spacing.md,
+        justifyContent: "flex-start",
+        gap: spacing.sm,
+      },
+      generatedName: { ...typography.titleMd, color: colors.text },
+      generatedLine: { ...typography.caption, color: colors.textMuted },
       writableOverlay: {
         position: "absolute",
         borderWidth: 2,
@@ -122,6 +140,16 @@ export default function LetterheadGateScreen() {
     );
   };
 
+  const openScanOrUpload = () => {
+    router.push({
+      pathname: "/(app)/letterhead/setup",
+      params: { entry: scannerCap.canScan ? "scan" : "gallery" },
+    });
+  };
+
+  const isGenerated =
+    config?.sourceType === "generated_layout" && Boolean(config.generatedLayout);
+
   return (
     <Screen scroll>
       <Header
@@ -137,6 +165,8 @@ export default function LetterheadGateScreen() {
         }}
       />
 
+      <LocaleUiText style={styles.benefit}>{t("letterhead.gateBenefit")}</LocaleUiText>
+
       {actionError ? (
         <View style={styles.bannerWrap}>
           <Banner tone="danger" message={actionError} />
@@ -148,26 +178,85 @@ export default function LetterheadGateScreen() {
       ) : error ? (
         <ErrorState message={error} onRetry={load} />
       ) : !config ? (
-        <View style={styles.emptyWrap}>
-          <EmptyState
-            title={t("letterhead.gateMissingTitle")}
-            message={t("letterhead.gateMissingMessage")}
-            actionLabel={t("letterhead.gateSetup")}
-            onAction={() => router.push("/(app)/letterhead/setup")}
-          />
+        <View style={styles.body}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t("letterhead.entryScanTitle")}
+            onPress={openScanOrUpload}
+            style={styles.choiceCard}
+          >
+            <LocaleUiText style={styles.choiceTitle}>
+              {t("letterhead.entryScanTitle")}
+            </LocaleUiText>
+            <LocaleUiText style={styles.choiceBody}>
+              {t("letterhead.entryScanBody")}
+            </LocaleUiText>
+            {!scannerCap.canScan ? (
+              <LocaleUiText style={styles.choiceHint}>
+                {t("letterhead.entryScannerUnavailable")}
+              </LocaleUiText>
+            ) : null}
+          </Pressable>
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={t("letterhead.entryLogoTitle")}
+            onPress={() => router.push("/(app)/letterhead/generate")}
+            style={styles.choiceCard}
+          >
+            <LocaleUiText style={styles.choiceTitle}>
+              {t("letterhead.entryLogoTitle")}
+            </LocaleUiText>
+            <LocaleUiText style={styles.choiceBody}>
+              {t("letterhead.entryLogoBody")}
+            </LocaleUiText>
+          </Pressable>
         </View>
       ) : (
         <View style={styles.body}>
           <Card style={styles.preview}>
             <View style={styles.imageFrame}>
-              <Image
-                source={{ uri: config.imageDataUri ?? undefined }}
-                style={styles.image}
-                resizeMode="contain"
-                accessible
-                accessibilityLabel={t("letterhead.gateTitle")}
-              />
-              {/* Translucent overlay marking the writable area */}
+              {isGenerated ? (
+                <View style={styles.generatedPreview}>
+                  {config.generatedLayout?.logoUri ? (
+                    <Image
+                      source={{ uri: config.generatedLayout.logoUri }}
+                      style={{ width: 72, height: 48 }}
+                      resizeMode="contain"
+                      accessible
+                      accessibilityLabel={t("letterhead.entryLogoTitle")}
+                    />
+                  ) : null}
+                  {config.generatedLayout?.businessName ? (
+                    <LocaleUiText style={styles.generatedName}>
+                      {config.generatedLayout.businessName}
+                    </LocaleUiText>
+                  ) : null}
+                  {config.generatedLayout?.address ? (
+                    <LocaleUiText style={styles.generatedLine}>
+                      {config.generatedLayout.address}
+                    </LocaleUiText>
+                  ) : null}
+                  {config.generatedLayout?.contact ? (
+                    <LocaleUiText style={styles.generatedLine}>
+                      {config.generatedLayout.contact}
+                    </LocaleUiText>
+                  ) : null}
+                  {config.generatedLayout?.gstin ? (
+                    <LocaleUiText style={styles.generatedLine}>
+                      GSTIN: {config.generatedLayout.gstin}
+                    </LocaleUiText>
+                  ) : null}
+                </View>
+              ) : (
+                <Image
+                  source={{ uri: config.imageDataUri ?? undefined }}
+                  style={styles.image}
+                  resizeMode="contain"
+                  accessible
+                  accessibilityLabel={t("letterhead.gateTitle")}
+                />
+              )}
               <View
                 pointerEvents="none"
                 style={[
@@ -200,9 +289,20 @@ export default function LetterheadGateScreen() {
               onPress={() => router.push("/(app)/letterhead/history")}
             />
             <Button
+              label={t("letterhead.gateEdit")}
+              variant="ghost"
+              onPress={() =>
+                router.push(
+                  isGenerated
+                    ? "/(app)/letterhead/generate"
+                    : "/(app)/letterhead/setup"
+                )
+              }
+            />
+            <Button
               label={t("letterhead.gateReplace")}
               variant="ghost"
-              onPress={() => router.push("/(app)/letterhead/setup")}
+              onPress={openScanOrUpload}
             />
             <Button
               label={t("letterhead.gateRemove")}
@@ -216,4 +316,3 @@ export default function LetterheadGateScreen() {
     </Screen>
   );
 }
-

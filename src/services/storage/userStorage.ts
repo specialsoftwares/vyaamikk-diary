@@ -3,13 +3,21 @@
  *
  * Canonical remote reference is `storagePath`; `downloadUrl` is an optional
  * client-side cache and may be refreshed via `getDownloadUrlForPath`.
+ *
+ * React Native note (RN ≥ 0.74): `uploadString` / Uint8Array multipart uploads
+ * call `new Blob([…ArrayBufferView…])`, which RN's BlobManager rejects with
+ * "Creating blobs from 'ArrayBuffer' and 'ArrayBufferView' are not supported".
+ * Uploads therefore write through an on-disk Expo `File` (a real Blob) and
+ * `uploadBytesResumable` — same pattern as GRIN evidence transport.
  */
 
+import * as FileSystem from "expo-file-system/legacy";
 import {
   deleteObject,
   getDownloadURL,
+  getMetadata,
   ref,
-  uploadString,
+  uploadBytesResumable,
   type UploadMetadata,
 } from "firebase/storage";
 
@@ -105,38 +113,123 @@ function extFromMime(mime: string): string {
   return "bin";
 }
 
+function isLocalFileUri(uri: string): boolean {
+  const t = uri.trim();
+  return (
+    t.startsWith("file://") ||
+    t.startsWith("content://") ||
+    t.startsWith("/") ||
+    t.startsWith("file:")
+  );
+}
+
+async function deleteTempQuietly(uri: string): Promise<void> {
+  try {
+    await FileSystem.deleteAsync(uri, { idempotent: true });
+  } catch {
+    // best-effort cleanup
+  }
+}
+
+/**
+ * Upload an on-disk file via Expo File + resumable upload.
+ * Avoids RN BlobManager rejection of ArrayBuffer-backed Blobs.
+ */
+export async function uploadLocalFileToPath(
+  storagePath: string,
+  localUri: string,
+  contentType: string
+): Promise<StorageUploadResult> {
+  if (!isUserStorageAvailable()) throw new FirebaseNotConfiguredError();
+
+  const { File } = await import("expo-file-system");
+  const file = new File(localUri);
+  if (!file.exists) {
+    throw new Error("Local file missing for Storage upload.");
+  }
+
+  const metadata: UploadMetadata = { contentType };
+  const objectRef = storageRefForPath(storagePath);
+  const task = uploadBytesResumable(objectRef, file, metadata);
+  await new Promise<void>((resolve, reject) => {
+    task.on("state_changed", undefined, reject, () => resolve());
+  });
+
+  let downloadUrl: string | undefined;
+  try {
+    downloadUrl = await getDownloadURL(objectRef);
+  } catch (e) {
+    log.warn("getDownloadURL after upload", e);
+  }
+
+  try {
+    await getMetadata(objectRef);
+  } catch (e) {
+    log.warn("getMetadata after upload", e);
+  }
+
+  return { storagePath, downloadUrl };
+}
+
 async function uploadBase64ToPath(
   storagePath: string,
   base64: string,
   contentType: string
 ): Promise<StorageUploadResult> {
-  const metadata: UploadMetadata = { contentType };
-  await uploadString(storageRefForPath(storagePath), base64, "base64", metadata);
-  let downloadUrl: string | undefined;
-  try {
-    downloadUrl = await getDownloadURL(storageRefForPath(storagePath));
-  } catch (e) {
-    log.warn("getDownloadURL after upload", e);
+  const cacheRoot = FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? "";
+  if (!cacheRoot) {
+    throw new Error("No writable cache directory for Storage upload.");
   }
-  return { storagePath, downloadUrl };
+  const ext = extFromMime(contentType);
+  const tmp = `${cacheRoot}storage-upload-${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2, 8)}.${ext}`;
+
+  await FileSystem.writeAsStringAsync(tmp, base64, {
+    encoding: FileSystem.EncodingType.Base64,
+  });
+  try {
+    return await uploadLocalFileToPath(storagePath, tmp, contentType);
+  } finally {
+    await deleteTempQuietly(tmp);
+  }
 }
 
+/**
+ * Upload a letterhead template from a data URI or a local file URI.
+ */
 export async function uploadLetterheadImage(
   userId: string,
-  dataUri: string,
+  imageUri: string,
   fileName?: string
 ): Promise<StorageUploadResult> {
   if (!isUserStorageAvailable()) throw new FirebaseNotConfiguredError();
-  const parsed = parseDataUri(dataUri);
-  if (!parsed) {
-    throw new Error("Letterhead image must be a base64 data URI.");
+  const trimmed = imageUri.trim();
+  if (!trimmed) {
+    throw new Error("Letterhead image URI is empty.");
   }
-  const ext = extFromMime(parsed.mime);
-  const safeName = sanitizeStorageFileName(
-    fileName ?? `letterhead-${Date.now()}.${ext}`
-  );
-  const storagePath = getUserStoragePath(userId, "letterhead", safeName);
-  return uploadBase64ToPath(storagePath, parsed.base64, parsed.mime);
+
+  const parsed = parseDataUri(trimmed);
+  if (parsed) {
+    const ext = extFromMime(parsed.mime);
+    const safeName = sanitizeStorageFileName(
+      fileName ?? `letterhead-${Date.now()}.${ext}`
+    );
+    const storagePath = getUserStoragePath(userId, "letterhead", safeName);
+    return uploadBase64ToPath(storagePath, parsed.base64, parsed.mime);
+  }
+
+  if (isLocalFileUri(trimmed)) {
+    const mime = inferContentType(fileName ?? trimmed, "image/jpeg");
+    const ext = extFromMime(mime);
+    const safeName = sanitizeStorageFileName(
+      fileName ?? `letterhead-${Date.now()}.${ext}`
+    );
+    const storagePath = getUserStoragePath(userId, "letterhead", safeName);
+    return uploadLocalFileToPath(storagePath, trimmed, mime);
+  }
+
+  throw new Error("Letterhead image must be a local file URI or base64 data URI.");
 }
 
 export async function uploadRecordAttachment(

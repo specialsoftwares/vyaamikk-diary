@@ -1,15 +1,13 @@
 /**
  * Letterhead asset picker (signature + stamp).
  *
- * Picks a small PNG/JPEG from the photo library and returns it as a base64
- * data URI so it round-trips through AsyncStorage / Firestore the same way
- * the template image does. Assets are user-scoped — they live on the user's
- * `LetterheadConfig` and are never shared globally.
- *
- * These images are decorative overlays placed inside the writable area, so
- * they are kept deliberately small (the picker downscales aggressively).
+ * Picks a small PNG/JPEG from the photo library. Reads bytes via FileSystem
+ * (not ImagePicker `base64: true`) so Hermes never builds ArrayBuffer-backed
+ * Blobs during selection. Assets remain inline data URIs on LetterheadConfig
+ * (small enough for Firestore headroom).
  */
 
+import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 import { Platform } from "react-native";
 
@@ -39,16 +37,29 @@ function inferMime(asset: ImagePicker.ImagePickerAsset): string {
   return "image/png";
 }
 
-function toPickedAsset(asset: ImagePicker.ImagePickerAsset): PickedLetterheadAsset {
-  if (!asset.base64) {
-    throw new LetterheadAssetError("read_failed");
+async function toPickedAsset(
+  asset: ImagePicker.ImagePickerAsset
+): Promise<PickedLetterheadAsset> {
+  if (!asset.uri) throw new LetterheadAssetError("read_failed");
+
+  let base64 = asset.base64 ?? null;
+  if (!base64) {
+    try {
+      base64 = await FileSystem.readAsStringAsync(asset.uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+    } catch {
+      throw new LetterheadAssetError("read_failed");
+    }
   }
-  const approxBytes = Math.ceil((asset.base64.length * 3) / 4);
+  if (!base64) throw new LetterheadAssetError("read_failed");
+
+  const approxBytes = Math.ceil((base64.length * 3) / 4);
   if (approxBytes > MAX_ASSET_BYTES) {
     throw new LetterheadAssetError("too_large");
   }
   return {
-    dataUri: `data:${inferMime(asset)};base64,${asset.base64}`,
+    dataUri: `data:${inferMime(asset)};base64,${base64}`,
     width: asset.width ?? 0,
     height: asset.height ?? 0,
     approxBytes,
@@ -69,7 +80,6 @@ export async function hasMediaLibraryPermission(): Promise<boolean> {
  * when the user cancels. Throws `LetterheadAssetError` on read/size failure.
  */
 export async function pickLetterheadAsset(): Promise<PickedLetterheadAsset | null> {
-  // Process-death recovery (Android): a pending result may exist.
   const pending = await ImagePicker.getPendingResultAsync();
   if (pending && "assets" in pending && pending.assets?.[0]) {
     return toPickedAsset(pending.assets[0]);
@@ -79,7 +89,8 @@ export async function pickLetterheadAsset(): Promise<PickedLetterheadAsset | nul
     mediaTypes: ["images"],
     allowsEditing: true,
     quality: Platform.OS === "ios" ? 0.7 : 0.6,
-    base64: true,
+    // Avoid ImagePicker-owned base64 bridge on large photos; read via FS.
+    base64: false,
     exif: false,
   });
   if (result.canceled || !result.assets?.[0]) return null;

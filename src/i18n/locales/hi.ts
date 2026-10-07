@@ -1604,26 +1604,53 @@ const hi: Translations = {
   letterhead: {
     addAction: "+ लेटरहेड",
     addActionSubtitle: "अपने A4 लेटरहेड पर दस्तावेज़ बनाएं",
-    gateTitle: "लेटरहेड",
+    gateTitle: "आपका लेटरहेड",
+    gateBenefit:
+      "अपने बिज़नेस लेटरहेड से प्रोफेशनल पत्र बनाएं।",
     gateMissingTitle: "अभी कोई लेटरहेड नहीं",
     gateMissingMessage:
-      "प्रोफेशनल दस्तावेज़ बनाने के लिए एक A4 लेटरहेड इमेज जोड़ें।",
+      "अपने प्रिंटेड लेटरहेड का खाली पन्ना स्कैन करें, या लोगो से नया बनाएं।",
     gateSetup: "लेटरहेड सेट करें",
     gateCreate: "लेटरहेड दस्तावेज़ बनाएं",
     gateReplace: "लेटरहेड बदलें",
+    gateEdit: "लेटरहेड संपादित करें",
     gateRemove: "लेटरहेड हटाएं",
     gateRemoveConfirm: "अपना सेव किया लेटरहेड हटाएं?",
     gateRemoveConfirmBody:
       "आप कभी भी नया लेटरहेड जोड़ सकते हैं। पहले से शेयर किए दस्तावेज़ पर असर नहीं होगा।",
 
+    entryScanTitle: "लेटरहेड स्कैन या अपलोड करें",
+    entryScanBody: "अपने मौजूदा लेटरहेड का खाली पन्ना इस्तेमाल करें।",
+    entryLogoTitle: "बिज़नेस लोगो से बनाएं",
+    entryLogoBody: "अपने लोगो और बिज़नेस विवरण से लेआउट चुनें।",
+    entryScannerUnavailable:
+      "इस डिवाइस पर स्कैनर उपलब्ध नहीं है। आप गैलरी से फोटो चुन सकते हैं।",
+    entryCouldNotOpenPhoto: "यह फोटो नहीं खुल सकी।",
+
+    genLayoutSection: "लोगो की जगह",
+    genAppearanceSection: "दिखावट",
+    genDetailsSection: "व्यवसाय विवरण",
+    genAlignLeft: "बाएँ",
+    genAlignCenter: "मध्य",
+    genAlignRight: "दाएँ",
+    genAppearanceOriginal: "मूल",
+    genAppearanceColor: "रंगीन",
+    genAppearanceGrayscale: "ग्रेस्केल",
+    genAppearanceMono: "काला-सफ़ेद",
+    genFieldAddress: "पता",
+    genFieldContact: "संपर्क",
+    genFieldGstin: "GSTIN",
+
     helperBase:
-      "आपका अपलोड किया लेटरहेड दस्तावेज़ का आधार रहता है। व्यामिक डायरी केवल आपकी सामग्री को सुरक्षित लेखन क्षेत्र में रखती है।",
+      "आपका लेटरहेड दस्तावेज़ का आधार रहता है। सामग्री केवल आपके तय लेखन क्षेत्र में रखी जाती है।",
 
     setupTitle: "लेटरहेड सेट करें",
     setupIntro:
-      "अपने प्रिंटेड लेटरहेड की पोर्ट्रेट A4 इमेज चुनें, फिर वह खाली जगह चिह्नित करें जहाँ टेक्स्ट जाएगा।",
+      "अपने लेटरहेड का खाली पोर्ट्रेट पन्ना इस्तेमाल करें। प्रीव्यू दिखने के बाद लेखन क्षेत्र चिह्नित करें।",
     setupPick: "लेटरहेड इमेज चुनें",
     setupReplace: "अलग इमेज चुनें",
+    setupSaveFailedUnchanged:
+      "सेव नहीं हो सका; आपका मौजूदा लेटरहेड वैसा ही है।",
     setupAdjust: "लिखने योग्य क्षेत्र",
     setupTopMargin: "ऊपर मार्जिन (%)",
     setupBottomMargin: "नीचे मार्जिन (%)",

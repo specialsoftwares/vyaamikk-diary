@@ -83,14 +83,77 @@ export const LetterheadPreview = memo(function LetterheadPreview({
     right: `${config.margins.rightPct}%` as const,
   };
 
+  const generated = config.generatedLayout;
+  const isGenerated =
+    config.sourceType === "generated_layout" && Boolean(generated);
+
   return (
     <View>
       <View style={styles.frame}>
-        {config.imageDataUri ? (
+        {isGenerated && generated ? (
+          <View
+            style={{
+              position: "absolute",
+              top: 8,
+              left: 10,
+              right: 10,
+              flexDirection:
+                generated.logoAlign === "center" ? "column" : "row",
+              alignItems:
+                generated.logoAlign === "center"
+                  ? "center"
+                  : generated.logoAlign === "right"
+                    ? "flex-start"
+                    : "flex-start",
+              justifyContent:
+                generated.logoAlign === "right"
+                  ? "flex-end"
+                  : generated.logoAlign === "center"
+                    ? "center"
+                    : "flex-start",
+              gap: 6,
+            }}
+          >
+            {generated.logoUri ? (
+              <Image
+                source={{ uri: generated.logoUri }}
+                style={{ width: 48, height: 32 }}
+                resizeMode="contain"
+              />
+            ) : null}
+            <View
+              style={{
+                alignItems:
+                  generated.logoAlign === "center"
+                    ? "center"
+                    : generated.logoAlign === "right"
+                      ? "flex-end"
+                      : "flex-start",
+              }}
+            >
+              {generated.businessName ? (
+                <Text style={{ fontSize: 9, fontWeight: "700", color: "#0F1226" }}>
+                  {generated.businessName}
+                </Text>
+              ) : null}
+              {generated.address ? (
+                <Text style={{ fontSize: 7, color: "#5C5F7A" }}>{generated.address}</Text>
+              ) : null}
+              {generated.contact ? (
+                <Text style={{ fontSize: 7, color: "#5C5F7A" }}>{generated.contact}</Text>
+              ) : null}
+              {generated.gstin ? (
+                <Text style={{ fontSize: 7, color: "#5C5F7A" }}>
+                  GSTIN: {generated.gstin}
+                </Text>
+              ) : null}
+            </View>
+          </View>
+        ) : config.imageDataUri ? (
           <Image
             source={{ uri: config.imageDataUri }}
             style={styles.bg}
-            resizeMode="stretch"
+            resizeMode="contain"
           />
         ) : null}
         <View pointerEvents="none" style={[styles.writable, writableStyle]}>

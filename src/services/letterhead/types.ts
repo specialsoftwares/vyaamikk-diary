@@ -11,6 +11,12 @@
  */
 
 import type { SyncSessionToken } from "@/sync/syncSessionOwnership";
+import type {
+  LetterheadGeneratedLayout,
+  LetterheadSourceType,
+} from "./letterheadGeneratedLayout";
+
+export type { LetterheadGeneratedLayout, LetterheadSourceType } from "./letterheadGeneratedLayout";
 
 export interface LetterheadMargins {
   /** % of page height from the top of A4 where content starts. */
@@ -25,12 +31,20 @@ export interface LetterheadMargins {
 
 export interface LetterheadConfig {
   userId: string;
+  /**
+   * How this template was produced. Legacy configs without the field are
+   * treated as `imported_image`.
+   */
+  sourceType?: LetterheadSourceType | null;
+  /** Present when `sourceType === "generated_layout"`. */
+  generatedLayout?: LetterheadGeneratedLayout | null;
   /** Original image dimensions in pixels — useful for preview-time aspect. */
   imageWidth: number;
   imageHeight: number;
   /**
    * Legacy inline base64 (e.g. `data:image/png;base64,...`). Superseded by
    * `letterheadImageStoragePath` when migrated to Firebase Storage.
+   * Also holds download URLs after Storage upload, or local file URIs during save.
    */
   imageDataUri?: string | null;
   /** Canonical Firebase Storage object path for the template image. */
@@ -119,6 +133,11 @@ export interface LetterheadRepository {
  *     letterhead, old records still point at the timestamp that was
  *     active when they were created. We don't persist the template image
  *     bytes per-document — that would balloon storage.
+ *   • Re-generating a PDF for an old letter currently resolves the *live*
+ *     LetterheadConfig (not a frozen template snapshot). Shared PDFs that
+ *     were already exported remain unchanged on disk; in-app regenerate
+ *     can diverge from the historical template. Isolating true per-letter
+ *     snapshots is a separate change — not altered in letterhead-repair.
  *   • `pdfUri` is best-effort. Generated PDFs are short-lived OS temp
  *     files; on next regenerate the URI is refreshed. UI should
  *     gracefully handle a missing/invalid URI by regenerating from the

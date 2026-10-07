@@ -46,6 +46,32 @@ export {
   type PickedLetterheadAsset,
 } from "./letterheadAssetService";
 export {
+  LetterheadCandidateError,
+  MAX_TEMPLATE_COMPRESSED_BYTES,
+  MAX_TEMPLATE_LONG_EDGE_PX,
+  assertCandidateOwner,
+  persistLetterheadCandidateFromAsset,
+  persistLetterheadCandidateFromLocalFile,
+  readCandidateDataUri,
+  retireLetterheadCandidate,
+  type LetterheadCandidateImage,
+} from "./letterheadCandidateImage";
+export {
+  DEFAULT_GENERATED_LAYOUT,
+  isLetterheadGeneratedLayout,
+  validateWritingMargins,
+  type LetterheadAppearance,
+  type LetterheadGeneratedLayout,
+  type LetterheadLogoAlign,
+  type LetterheadSourceType,
+} from "./letterheadGeneratedLayout";
+export {
+  getDocumentScanner,
+  getDocumentScannerCapability,
+  scanLetterheadDocument,
+  setDocumentScannerForTests,
+} from "./documentScanner";
+export {
   LETTERHEAD_DRAFT_KIND,
   LETTERHEAD_DRAFT_SCOPE,
   draftPayloadToLetterheadInput,

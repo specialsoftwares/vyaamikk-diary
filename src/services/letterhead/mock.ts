@@ -26,7 +26,9 @@ export const mockLetterheadRepository: LetterheadRepository = {
     if (!raw) return null;
     try {
       const parsed = JSON.parse(raw) as LetterheadConfig;
-      if (!parsed.imageDataUri) return null;
+      const hasGenerated =
+        parsed.sourceType === "generated_layout" && Boolean(parsed.generatedLayout);
+      if (!parsed.imageDataUri && !hasGenerated) return null;
       return parsed;
     } catch {
       return null;

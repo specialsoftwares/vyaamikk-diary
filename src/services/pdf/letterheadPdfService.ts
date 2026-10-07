@@ -73,12 +73,19 @@ export async function buildLetterheadHtml(
   const { config, doc, labels, locale = "en-IN" } = input;
   const warnings: string[] = [];
 
-  const { uri: templateSrc } = await resolveLetterheadImageSource(config);
-  if (!templateSrc?.trim()) {
+  const isGenerated =
+    config.sourceType === "generated_layout" && Boolean(config.generatedLayout);
+  const { uri: templateSrc } = isGenerated
+    ? { uri: null as string | null }
+    : await resolveLetterheadImageSource(config);
+  if (!isGenerated && !templateSrc?.trim()) {
     throw new Error("Letterhead template image is missing.");
   }
 
   const inch = marginsToInches(config.margins);
+  const generatedHeaderHtml = isGenerated
+    ? buildGeneratedHeaderHtml(config.generatedLayout!)
+    : "";
   const dateStr = formatDate(doc.date, locale);
 
   // --- Content blocks (each escaped; blank fields render as nothing) ---------
@@ -193,11 +200,39 @@ export async function buildLetterheadHtml(
     width: 210mm;
     height: 297mm;
     z-index: 0;
-    object-fit: fill;
-    object-position: top left;
+    object-fit: contain;
+    object-position: top center;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
+  .generated-header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 210mm;
+    padding: 12mm 14mm 6mm;
+    z-index: 0;
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 10pt;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .generated-header.align-center { justify-content: center; text-align: center; flex-direction: column; align-items: center; }
+  .generated-header.align-right { justify-content: flex-end; text-align: right; flex-direction: row-reverse; }
+  .generated-header.align-left { justify-content: flex-start; text-align: left; }
+  .generated-logo {
+    max-width: 72pt;
+    max-height: 48pt;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+  }
+  .generated-logo.mono { filter: grayscale(1) contrast(1.15); }
+  .generated-logo.grayscale { filter: grayscale(1); }
+  .generated-text { font-size: 10pt; line-height: 1.35; color: #0F1226; }
+  .generated-name { font-size: 13pt; font-weight: 700; margin-bottom: 2pt; }
   .content {
     position: relative;
     z-index: 1;
@@ -281,7 +316,11 @@ export async function buildLetterheadHtml(
 </style>
 </head>
 <body>
-  <img class="letterhead-bg" src="${attrEsc(templateSrc)}" alt="" />
+  ${
+    isGenerated
+      ? generatedHeaderHtml
+      : `<img class="letterhead-bg" src="${attrEsc(templateSrc!)}" alt="" />`
+  }
   <div class="content">
     ${titleBlock}
     ${dateBlock}
@@ -303,6 +342,42 @@ export async function buildLetterheadHtml(
 }
 
 const attrEsc = escapeHtmlAttr;
+
+function buildGeneratedHeaderHtml(
+  layout: NonNullable<LetterheadConfig["generatedLayout"]>
+): string {
+  const alignClass =
+    layout.logoAlign === "center"
+      ? "align-center"
+      : layout.logoAlign === "right"
+        ? "align-right"
+        : "align-left";
+  const logoFilter =
+    layout.appearance === "mono"
+      ? "mono"
+      : layout.appearance === "grayscale"
+        ? "grayscale"
+        : "";
+  const logo = layout.logoUri?.trim()
+    ? `<img class="generated-logo ${logoFilter}" src="${attrEsc(layout.logoUri.trim())}" alt="" />`
+    : "";
+  const lines = [
+    layout.businessName?.trim(),
+    layout.address?.trim(),
+    layout.contact?.trim(),
+    layout.gstin?.trim() ? `GSTIN: ${layout.gstin.trim()}` : null,
+  ].filter((l): l is string => Boolean(l && l.length));
+  const text = lines.length
+    ? `<div class="generated-text">${lines
+        .map((l, i) =>
+          i === 0 && layout.businessName?.trim()
+            ? `<div class="generated-name">${escapeHtml(l)}</div>`
+            : `<div>${escapeHtml(l).replace(/\n/g, "<br/>")}</div>`
+        )
+        .join("")}</div>`
+    : "";
+  return `<div class="generated-header ${alignClass}">${logo}${text}</div>`;
+}
 
 function formatDate(ms: number, locale: string): string {
   try {

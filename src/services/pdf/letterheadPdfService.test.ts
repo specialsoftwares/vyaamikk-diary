@@ -35,6 +35,23 @@ assert(
   "letterhead template image layer must remain"
 );
 
+assert(
+  /object-fit:\s*contain/.test(serviceSource),
+  "imported letterhead PDF must use object-fit:contain (no stretch)"
+);
+assert(
+  serviceSource.includes("generated-header"),
+  "generated layout must render an HTML header (text stays text)"
+);
+assert(
+  serviceSource.includes("buildGeneratedHeaderHtml"),
+  "generated layout header builder must remain"
+);
+assert(
+  serviceSource.includes('sourceType === "generated_layout"'),
+  "PDF path must branch on generated_layout source type"
+);
+
 // Multi-page guarantees: the template repeats on every page via a fixed-position
 // background layer, and the writable area is enforced by @page margins so body
 // text that overflows continues inside the safe area on subsequent pages.

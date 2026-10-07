@@ -31,6 +31,9 @@ function configDocRef(userId: string) {
 }
 
 function hasTemplateImage(data: Partial<LetterheadConfig>): boolean {
+  if (data.sourceType === "generated_layout" && data.generatedLayout) {
+    return true;
+  }
   return Boolean(
     data.letterheadImageStoragePath?.trim() || data.imageDataUri?.trim()
   );
@@ -42,6 +45,8 @@ function mapConfigFromFirestore(
 ): LetterheadConfig {
   return {
     userId,
+    sourceType: data.sourceType ?? "imported_image",
+    generatedLayout: data.generatedLayout ?? null,
     imageWidth: Number(data.imageWidth ?? 0),
     imageHeight: Number(data.imageHeight ?? 0),
     imageDataUri: data.imageDataUri ?? null,
@@ -87,12 +92,18 @@ export const firebaseLetterheadRepository: LetterheadRepository = {
       : null;
     const existing = existingData ? mapConfigFromFirestore(userId, existingData) : null;
 
-    const inlineImage = patch.imageDataUri?.trim() ?? "";
-    const useStorage = Boolean(inlineImage) && isUserStorageAvailable();
+    const incomingImage = patch.imageDataUri?.trim() ?? "";
+    const isDataUri = /^data:[^;]+;base64,/i.test(incomingImage);
+    const isLocalFile =
+      incomingImage.startsWith("file:") ||
+      incomingImage.startsWith("content:") ||
+      (incomingImage.startsWith("/") && !incomingImage.startsWith("//"));
+    const hasNewImage = Boolean(incomingImage) && (isDataUri || isLocalFile);
+    const useStorage = hasNewImage && isUserStorageAvailable();
 
-    if (!useStorage) {
+    if (!useStorage && isDataUri) {
       const approxSize =
-        inlineImage.length +
+        incomingImage.length +
         (patch.signatureDataUri?.length ?? 0) +
         (patch.stampDataUri?.length ?? 0) +
         256;
@@ -115,15 +126,26 @@ export const firebaseLetterheadRepository: LetterheadRepository = {
       }
     }
 
+    const isGeneratedSave =
+      patch.sourceType === "generated_layout" && Boolean(patch.generatedLayout);
+
     let letterheadImageStoragePath =
       existing?.letterheadImageStoragePath ?? null;
     let letterheadImageDownloadUrl = existing?.letterheadImageDownloadUrl ?? null;
     let letterheadImageUpdatedAt = existing?.letterheadImageUpdatedAt ?? null;
     let imageDataUri: string | null | ReturnType<typeof deleteField> =
-      inlineImage || existing?.imageDataUri || null;
+      hasNewImage
+        ? incomingImage
+        : existing?.imageDataUri || null;
 
-    if (useStorage && inlineImage) {
-      const uploaded = await uploadLetterheadImage(userId, inlineImage);
+    if (isGeneratedSave) {
+      // Generated templates are layout + optional small logo — clear page image.
+      letterheadImageStoragePath = null;
+      letterheadImageDownloadUrl = null;
+      letterheadImageUpdatedAt = null;
+      imageDataUri = null;
+    } else if (useStorage && incomingImage) {
+      const uploaded = await uploadLetterheadImage(userId, incomingImage);
       letterheadImageStoragePath = uploaded.storagePath;
       letterheadImageDownloadUrl = uploaded.downloadUrl ?? null;
       letterheadImageUpdatedAt = now;
@@ -132,6 +154,16 @@ export const firebaseLetterheadRepository: LetterheadRepository = {
 
     const next: LetterheadConfig = {
       ...patch,
+      sourceType: isGeneratedSave
+        ? "generated_layout"
+        : patch.sourceType === "imported_image"
+          ? "imported_image"
+          : existing?.sourceType ?? "imported_image",
+      generatedLayout: isGeneratedSave
+        ? patch.generatedLayout ?? null
+        : patch.sourceType === "imported_image"
+          ? null
+          : existing?.generatedLayout ?? null,
       signatureDataUri: patch.signatureDataUri ?? null,
       stampDataUri: patch.stampDataUri ?? null,
       defaultSenderName: patch.defaultSenderName ?? null,
@@ -152,7 +184,7 @@ export const firebaseLetterheadRepository: LetterheadRepository = {
     };
 
     const firestorePayload: Record<string, unknown> = { ...next };
-    if (useStorage && inlineImage) {
+    if (useStorage && incomingImage) {
       firestorePayload.imageDataUri = deleteField();
     }
 
