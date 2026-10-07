@@ -193,7 +193,7 @@ export function GrinReturnAdmittedBody({ session }: { session: GrinDispatchSessi
                     <TextField
                       label={t("grin.returnPickLineQty")}
                       value={selected[line.lineId] ?? ""}
-                      onChangeText={(v) => setSelected((prev) => ({ ...prev, [line.lineId]: v }))}
+                      onChangeText={(v: string) => setSelected((prev) => ({ ...prev, [line.lineId]: v }))}
                       keyboardType="decimal-pad"
                       hint={line.unit}
                     />
@@ -210,7 +210,7 @@ export function GrinReturnAdmittedBody({ session }: { session: GrinDispatchSessi
           <TextField
             label={t("grin.returnQty")}
             value={selected[primaryLineId] ?? ""}
-            onChangeText={(v) => setSelected((prev) => ({ ...prev, [primaryLineId]: v }))}
+            onChangeText={(v: string) => setSelected((prev) => ({ ...prev, [primaryLineId]: v }))}
             keyboardType="decimal-pad"
             accessibilityLabel={t("grin.returnQty")}
           />

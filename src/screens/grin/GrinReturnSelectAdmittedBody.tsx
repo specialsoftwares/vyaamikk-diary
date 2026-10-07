@@ -1,7 +1,11 @@
 import React, { useCallback, useMemo, useState } from "react";
 
 import type { GrinDispatchSession } from "@/services/grin/outbox/types";
-import { filterOwnerReceipts } from "@/services/grin/repository/grinReceiptSearch";
+import {
+  filterOwnerReceipts,
+  type GrinReceiptSearchHit,
+} from "@/services/grin/repository/grinReceiptSearch";
+import type { GrinApplicationListItem } from "@/services/grin/repository/types";
 import { spacing } from "@/theme/spacing";
 
 import { grinMutationErrorMessage } from "./grinActionErrors";
@@ -31,7 +35,7 @@ export function GrinReturnSelectAdmittedBody({
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [items, setItems] = useState<ReturnType<typeof filterOwnerReceipts>>([]);
+  const [items, setItems] = useState<GrinApplicationListItem[]>([]);
 
   const styles = useGrinThemedStyles((c) =>
     StyleSheet.create({
