@@ -12,16 +12,18 @@ TOOLING (ops-guard suite; not application CI).
 
 ---
 
-## Current state (authoritative — 2026-10-07 addendum)
+## Current state (authoritative — 2026-10-07 correction closeout)
 
 | Item | Current value |
 |---|---|
 | Repo / branch / PR | `specialsoftwares/vyaamikk-diary` `integration/grin-g1-g5-source` draft **#31** |
-| **Installed Internal application (unchanged)** | **`540e07aa07f376716484adb879ce66cb9fb170ce`** / **vc23** Internal Testing. New source does **not** update that binary or deployed Functions. Do **not** reuse vc23 build/CI evidence for the new tree. |
-| **Source HEAD (UX + deps)** | **`4c2e97bc7589c67812f56d8d53cc64bd33d5e134`** — `ef6da69` customer UX/copy; `a31bcf2` targeted dep overrides; follow-ups `b17139a`/`4c2e97b` banner+mount-safe. Ancestor **`06bb0dc`** NARROW CI fix **preserved** (GHA **`37579049948`** / job **`112654332416`**). `read_export=NARROW` remains authorized receipt read + local manifest — **not** production PDF/export acceptance. |
-| **Canonical CI on new source** | GHA **`37587670103` SUCCESS**, job **`112681481020` `verify`**, checkout **`4c2e97b`**. `test:all` **161/161**; `ci:verify PASS`; skipped stages **none**. Do not cite `37579049948` / vc23 for this tree. |
-| Customer UX | + New Record → Material Movement → **Goods receipt & inspection (GRIN)** when admitted; basic goods-received preserved; Saved Records remains the find path. Developer fixture banners removed from production notices. Benefit copy + 5 locales. Readable arrival date/time; ISO storage unchanged. |
-| Dependency closeout | Criticals cleared (shell-quote, websocket-driver, Functions proxy-addr/busboy/grpc/form-data). Renderer **`extract-zip@2.0.1`** remains high (no fixed release). Expo/RN major “fixes” **not** started. Evidence: `analysis/deps-security-closeout/TRIAGE.md`. |
+| **Installed / deployed pin (unchanged)** | Application **`540e07aa07f376716484adb879ce66cb9fb170ce`** / **vc23** Internal Testing. **GRIN Functions were previously deployed and enabled**; this source assignment does **not** redeploy or change them. Do **not** say “no live Functions.” Do **not** reuse vc23 build/CI evidence for the new tree. |
+| **Reviewed source (prior)** | **`4c2e97b`** (UX/deps); docs head was **`bfd47b0`**. |
+| **Source HEAD (this correction)** | Content commits **`d22adbd`** (arrival-cancel + nav tests) + **`970db3a`** (dep round-2) on `integration/grin-g1-g5-source` (+ docs tip). Reviewed prior **`4c2e97b`**; docs ancestor **`bfd47b0`**. Ancestor **`06bb0dc`** NARROW CI fix **preserved**. `read_export=NARROW` unchanged. Exact tip SHA recorded after push/CI. |
+| **Canonical CI** | Prior SUCCESS on **`4c2e97b`**: GHA **`37587670103`** / **`112681481020`**. Matching CI for this tip recorded after GHA completes — do not infer from file presence. |
+| Customer UX | + New Record → Material Movement → **Goods receipt & inspection** when admitted; basic goods-received preserved; Saved Records find path unchanged. Arrival picker: only `event.type==="set"` commits/advances; dismiss cancels without timestamp mutation; unavailable picker shows banner (no fake Change→Done). |
+| Tests wired into `test:grin-product` (discovered by `test:all`) | `composerMovementGrin.contract.test.ts`, `materialMovementDestinations.test.ts` (enabled/disabled + destination admission + basic receipt preserved), `GrinArrivalDateTimeField.test.ts` (injected picker; not NATIVE_DEVICE). |
+| Dependency closeout | Round-2 cleared browserslist / fast-uri / http-cache-semantics / xmldom / js-yaml highs. **`basic-ftp` = major-version override 6.2.2** (API smoke). **`image-size@1.2.1`** remains (Metro 1.x; fix is 2.0.3+). **`extract-zip@2.0.1`** remains; builder now sets `PUPPETEER_SKIP_DOWNLOAD`. Evidence: `analysis/deps-security-closeout/TRIAGE.md`. |
 | Device D1 | Continue OnePlus 12R upgrade over installed vc23 when owner available. **No** uninstall / clear / OTP retry loops. |
 | HOLDs | No new EAS / Play upload / Functions deploy / billing / purge / main / public from this assignment. |
 
