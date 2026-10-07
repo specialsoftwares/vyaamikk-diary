@@ -55,8 +55,7 @@ export function GrinReturnSelectAdmittedBody({
     setLoading(true);
     setError(null);
     try {
-      const listed = originRepo(origin).list();
-      setItems(filterOwnerReceipts(listed, ""));
+      setItems(originRepo(origin).list());
     } catch (caught) {
       const mapped = grinMutationErrorMessage(caught, t, "grin.returnSelectUnavailable");
       if (mapped.retired) {
@@ -77,7 +76,10 @@ export function GrinReturnSelectAdmittedBody({
     }, [load])
   );
 
-  const filtered = useMemo(() => filterOwnerReceipts(items, query), [items, query]);
+  const filtered: GrinReceiptSearchHit[] = useMemo(
+    () => filterOwnerReceipts(items, query),
+    [items, query]
+  );
 
   return (
     <Screen scroll>
