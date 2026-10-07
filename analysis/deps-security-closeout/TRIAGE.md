@@ -66,8 +66,8 @@ See prior sections in git history; overrides retained: `shell-quote@1.12.0`, `we
 | Where extraction can run | `@puppeteer/browsers` `fileUtil` dynamically imports `extract-zip` when unpacking a browser archive during Puppeteer browser install. |
 | Docker builder (before) | `FROM node:22… AS builder` ran `npm ci` **without** `PUPPETEER_SKIP_DOWNLOAD` → install script could download Chromium and invoke `extract-zip`. |
 | Docker runtime | Base `ghcr.io/puppeteer/puppeteer:24.22.3` already has Chromium; `PUPPETEER_SKIP_DOWNLOAD=true` then `npm ci --omit=dev` — download/extract skipped at runtime install. |
-| Mitigation applied | Set **`PUPPETEER_SKIP_DOWNLOAD=true` in the builder stage** as well (builder only needs `tsc`). Documented in Dockerfile. |
-| Remaining risk | Package still present in the install tree; any future path that downloads a browser archive without skip still hits unfixed `extract-zip`. Trusted network / pinned `puppeteer@24.22.3` reduces supply-chain odds but is **not** archive-integrity proof. **Finding kept open — not silently cleared.** |
+| Mitigation applied | (1) Set **`PUPPETEER_SKIP_DOWNLOAD=true` in the Dockerfile builder stage** (builder only needs `tsc`). (2) **`scripts/ci/test-invoice-renderer-build.sh`** now exports and passes **`PUPPETEER_SKIP_DOWNLOAD=true`** into the separate Node 22 `docker run` container **and** the local host `npm ci` fallback, with an explicit assert that the env is `true` before install. The Dockerfile `ENV` does **not** configure that separate CI container — the script must set it. |
+| Remaining risk | Package still present in the install tree; **not patched and not removed.** Any future path that downloads a browser archive without skip still hits unfixed `extract-zip`. Trusted network / pinned `puppeteer@24.22.3` reduces supply-chain odds but is **not** archive-integrity proof. **Finding kept open — not silently cleared.** Retained for public-release review; not a material credential/tester-data risk for a restricted Internal AAB build that does not ship this renderer service. |
 
 ## Overrides (compatibility justification)
 
