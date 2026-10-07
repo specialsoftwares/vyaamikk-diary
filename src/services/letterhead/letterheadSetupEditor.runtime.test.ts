@@ -402,7 +402,7 @@ async function main() {
     const cand = candidate("alice", session.generation);
     runtime.setCandidate(cand);
     runtime.setSignatureUri("data:image/png;base64,sigEdit");
-    runtime.setMargins({ top: 42, bottom: 42, left: 20, right: 20 });
+    runtime.setMargins({ topPct: 42, bottomPct: 42, leftPct: 20, rightPct: 20 });
 
     getHold.resolve(null);
     await flush();
@@ -411,7 +411,7 @@ async function main() {
     assert.equal(snap.existing, null);
     assert.equal(snap.candidate?.localUri, cand.localUri);
     assert.equal(snap.signatureUri, "data:image/png;base64,sigEdit");
-    assert.equal(snap.margins.top, 42);
+    assert.equal(snap.margins.topPct, 42);
     assert.equal(retired.length, 0);
     runtime.dispose();
   }
@@ -433,13 +433,13 @@ async function main() {
     runtime.setCandidate(candidate("alice", session.generation));
     runtime.setSignatureUri("data:image/png;base64,newSig");
     runtime.setDefaultName("Edited Name");
-    runtime.setMargins({ top: 55, bottom: 10, left: 10, right: 10 });
+    runtime.setMargins({ topPct: 55, bottomPct: 10, leftPct: 10, rightPct: 10 });
 
     getHold.resolve(
       fakeConfig({
         userId: "alice",
         imageDataUri: "data:image/jpeg;base64,/9j/saved",
-        margins: { top: 1, bottom: 1, left: 1, right: 1 },
+        margins: { topPct: 1, bottomPct: 1, leftPct: 1, rightPct: 1 },
         signatureDataUri: "data:image/png;base64,oldSig",
         stampDataUri: "data:image/png;base64,oldStamp",
         defaultSenderName: "Saved Name",
@@ -452,7 +452,7 @@ async function main() {
     assert.equal(snap.existing?.defaultSenderName, "Saved Name");
     assert.equal(snap.defaultName, "Edited Name");
     assert.equal(snap.signatureUri, "data:image/png;base64,newSig");
-    assert.equal(snap.margins.top, 55);
+    assert.equal(snap.margins.topPct, 55);
     assert.ok(snap.candidate);
     runtime.dispose();
   }
