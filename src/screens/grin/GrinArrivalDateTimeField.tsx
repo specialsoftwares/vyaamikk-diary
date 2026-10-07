@@ -1,15 +1,38 @@
 import React, { useMemo, useState } from "react";
-import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
-import DateTimePicker from "@react-native-community/datetimepicker";
 
 import { formatEntryDate } from "@/utils/date";
-import { spacing, typography, useThemedStyles } from "@/theme";
+import { spacing } from "@/theme/spacing";
 
-import { useGrinT } from "./grinScreenHooks";
+import { useGrinT, useGrinThemedStyles } from "./grinScreenHooks";
+import { Button, Platform, StyleSheet, Text, View } from "./grinSurfaces";
+
+type DateTimePickerComponent = React.ComponentType<{
+  value: Date;
+  mode: "date" | "time" | "datetime";
+  display?: string;
+  onChange: (event: unknown, date?: Date) => void;
+}>;
+
+function loadDateTimePicker(): DateTimePickerComponent | null {
+  if (Platform.OS === "web") return null;
+  try {
+    // Lazy: Node GRIN mount suites must not resolve this at module load.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const mod = require("@react-native-community/datetimepicker") as {
+      default?: DateTimePickerComponent;
+    };
+    return mod.default ?? (mod as unknown as DateTimePickerComponent);
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Displays a readable local date/time while keeping the stored value as ISO-8601.
  * Timezone string remains a separate parent field (validation / FY numbering).
+ *
+ * Avoid `@/theme` barrel / typography imports here — they pull `react-native`
+ * and break Node mount suites (esbuild TransformError on RN index).
  */
 export function GrinArrivalDateTimeField({
   label,
@@ -22,9 +45,9 @@ export function GrinArrivalDateTimeField({
 }): React.ReactElement {
   const t = useGrinT();
   const [phase, setPhase] = useState<"closed" | "date" | "time">("closed");
-  const styles = useThemedStyles((c) =>
+  const styles = useGrinThemedStyles((c) =>
     StyleSheet.create({
-      label: { ...typography.captionStrong, color: c.textMuted, marginBottom: spacing.xs },
+      label: { fontSize: 12, fontWeight: "700", color: c.textMuted, marginBottom: spacing.xs },
       row: {
         flexDirection: "row",
         alignItems: "center",
@@ -33,14 +56,14 @@ export function GrinArrivalDateTimeField({
         paddingVertical: spacing.sm + 2,
         paddingHorizontal: spacing.md,
         borderRadius: 12,
-        borderWidth: StyleSheet.hairlineWidth,
+        borderWidth: 1,
         borderColor: c.divider,
         backgroundColor: c.surface,
         marginBottom: spacing.sm,
       },
-      value: { ...typography.body, color: c.text, flex: 1 },
-      link: { ...typography.captionStrong, color: c.primary },
-      hint: { ...typography.caption, color: c.textMuted, marginBottom: spacing.sm },
+      value: { fontSize: 15, color: c.text, flex: 1 },
+      hint: { fontSize: 12, color: c.textMuted, marginBottom: spacing.sm },
+      actions: { flexDirection: "row", gap: spacing.sm, marginBottom: spacing.sm },
     })
   );
 
@@ -61,22 +84,24 @@ export function GrinArrivalDateTimeField({
   }, [parsed, valueIso]);
 
   const commit = (next: Date) => onChangeIso(next.toISOString());
+  const Picker = phase === "closed" ? null : loadDateTimePicker();
 
   return (
     <View>
       <Text style={styles.label}>{label}</Text>
-      <Pressable
-        style={styles.row}
-        onPress={() => setPhase(Platform.OS === "ios" ? "date" : "date")}
-        accessibilityRole="button"
-        accessibilityLabel={label}
-      >
+      <View style={styles.row} accessibilityLabel={label}>
         <Text style={styles.value}>{display}</Text>
-        <Text style={styles.link}>{t("grin.field.changeArrival")}</Text>
-      </Pressable>
+        <Button
+          label={t("grin.field.changeArrival")}
+          size="sm"
+          fullWidth={false}
+          variant="secondary"
+          onPress={() => setPhase("date")}
+        />
+      </View>
       <Text style={styles.hint}>{t("grin.field.arrivalStoredHint")}</Text>
-      {phase !== "closed" && Platform.OS === "ios" ? (
-        <DateTimePicker
+      {Picker && phase !== "closed" && Platform.OS === "ios" ? (
+        <Picker
           value={parsed}
           mode="datetime"
           display="spinner"
@@ -86,8 +111,8 @@ export function GrinArrivalDateTimeField({
           }}
         />
       ) : null}
-      {phase === "date" && Platform.OS !== "ios" ? (
-        <DateTimePicker
+      {Picker && phase === "date" && Platform.OS === "android" ? (
+        <Picker
           value={parsed}
           mode="date"
           display="default"
@@ -103,8 +128,8 @@ export function GrinArrivalDateTimeField({
           }}
         />
       ) : null}
-      {phase === "time" && Platform.OS !== "ios" ? (
-        <DateTimePicker
+      {Picker && phase === "time" && Platform.OS === "android" ? (
+        <Picker
           value={parsed}
           mode="time"
           display="default"
@@ -117,10 +142,16 @@ export function GrinArrivalDateTimeField({
           }}
         />
       ) : null}
-      {phase !== "closed" && Platform.OS === "ios" ? (
-        <Pressable onPress={() => setPhase("closed")} accessibilityRole="button">
-          <Text style={styles.link}>{t("common.done")}</Text>
-        </Pressable>
+      {phase !== "closed" && (Platform.OS === "ios" || !Picker) ? (
+        <View style={styles.actions}>
+          <Button
+            label={t("common.done")}
+            size="sm"
+            fullWidth={false}
+            variant="secondary"
+            onPress={() => setPhase("closed")}
+          />
+        </View>
       ) : null}
     </View>
   );
