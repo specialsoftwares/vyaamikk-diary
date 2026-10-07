@@ -9,7 +9,7 @@ Updated: **2026-10-07** (PR #32 targeted closeout)
 | Dirty main workspace | `draft/goods-evidence-domain-contract` — **not edited** |
 | Reviewed / corrected branch | `fix/letterhead-repair-scan` |
 | Prior reviewed HEAD | `7f8e464a6ebf0054eefb1d9929c8ab86d244cde7` (CI 37657944118 / verify 112920723927) |
-| Frozen tip | **set after this closeout commit + CI** |
+| Closeout tip | **`6b9d5760314e4f1703e03ba68b6e183377b5c9aa`** (CI 37670254136 / verify 112959900623) |
 | Application freeze (vc24 AAB) | `7c938f8` · EAS `c931da3d-…` · **unchanged** |
 | Isolation | Worktree `/Users/shivamsaurav/vyd-worktrees/letterhead-repair` |
 
