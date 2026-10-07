@@ -264,10 +264,17 @@ async function renderFreshPdfs(): Promise<string[]> {
     }
   }
 
-  const chromeBin =
-    process.env.LETTERHEAD_CHROME_BIN ||
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-  if (!fs.existsSync(chromeBin)) {
+  const chromeCandidates = [
+    process.env.LETTERHEAD_CHROME_BIN,
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/usr/bin/google-chrome",
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+    "/usr/lib/chromium/chromium",
+  ].filter((p): p is string => Boolean(p && p.trim()));
+  const chromeBin = chromeCandidates.find((p) => fs.existsSync(p));
+  if (!chromeBin) {
     return [];
   }
 
