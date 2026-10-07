@@ -531,9 +531,10 @@
       "movementReceivedSub": "શું આવ્યું તેની ઝડપી નોંધ — GRIN નંબર અથવા સંપૂર્ણ નિરીક્ષણ વિના.",
       "movementReturn": "પરત / બદલી",
       "movementReturnSub": "પાછા મોકલેલો અથવા બદલાયેલો સામાન નોંધો.",
+      "movementReturnGrinSub": "તમારા એકાઉન્ટમાંથી માલની રસીદ પસંદ કરો, પછી લાઇન અને જથ્થો પસંદ કરો.",
       "paymentRequest": "ચુકવણી વિનંતી",
       "movementGrin": "સામાન પ્રાપ્તિ અને નિરીક્ષણ",
-      "movementGrinSub": "શું આવ્યું તે નોંધો, ઘટ અથવા નુકસાન નોંધો, અને દસ્તાવેજો એકસાથે રાખો."
+      "movementGrinSub": "પ્રાપ્ત માલ, નિરીક્ષણ પરિણામ અને સહાયક દસ્તાવેજો એકસાથે નોંધો."
     },
     "types": {
       "material_dispatched": "Sent / transport",
@@ -2614,7 +2615,7 @@
     "notFound": "આ માલ રસીદ મળી નહીં.",
     "detailTitle": "માલ રસીદ",
     "createTitle": "સામાન પ્રાપ્તિ અને નિરીક્ષણ",
-    "createIntro": "શું આવ્યું તે નોંધો, ઘટ અથવા નુકસાન નોંધો, અને દસ્તાવેજો એકસાથે રાખો.",
+    "createIntro": "પ્રાપ્ત માલ, નિરીક્ષણ પરિણામ અને સહાયક દસ્તાવેજો એકસાથે નોંધો.",
     "saveAction": "સેવ કરો",
     "errRequired": "સપ્લાયરનું નામ અને સામગ્રીનું વર્ણન દાખલ કરો.",
     "errSave": "આ માલ રસીદ સેવ થઈ શકી નહીં. ફરી પ્રયાસ કરો.",
@@ -2912,6 +2913,23 @@
       "acknowledgement": "સ્વીકૃતિ",
       "remarks": "નોંધ",
       "originalUnchanged": "મૂળ જારી નોંધ:"
-    }
+    },
+    "receivedOnOptional": "પ્રાપ્તિ તારીખ (વૈકલ્પિક)",
+    "receivedOnHint": "માત્ર તારીખ — ચોક્કસ આગમન સમય નહીં. અજ્ઞાત હોય તો ખાલી રાખો.",
+    "advancedDetails": "વધુ વિગતો (વૈકલ્પિક)",
+    "returnSelectTitle": "માલની રસીદ પસંદ કરો",
+    "returnSelectIntro": "સપ્લાયર, નંબર અથવા ઇન્વૉઇસથી તમારી રસીદો શોધો. અન્ય એકાઉન્ટ નથી દેખાતા.",
+    "returnSelectSearch": "રસીદો શોધો",
+    "returnSelectEmpty": "આ એકાઉન્ટમાં કોઈ મેળ ખાતી રસીદ નથી.",
+    "returnSelectLoading": "રસીદો લોડ થઈ રહી છે…",
+    "returnSelectUnavailable": "હમણાં રસીદો યાદી કરી શકાતી નથી. ફરી પ્રયાસ કરો.",
+    "returnLineSelect": "પરત કરવા માટે લાઇન પસંદ કરો",
+    "returnOriginalQty": "મૂળ રીતે પ્રાપ્ત",
+    "returnAlreadyReturned": "પહેલેથી પરત / બાકી",
+    "returnAvailable": "પરત કરવા ઉપલબ્ધ",
+    "returnBatchNotRecorded": "બેચ/લોટ નોંધાયેલ નથી",
+    "returnReplacementNote": "પરત નોંધવાથી બદલી સ્ટોક બનતો નથી. વાસ્તવિક આગમન નવી માલ રસીદ તરીકે નોંધો.",
+    "returnNoLines": "આ રસીદમાં પરત યોગ્ય લાઇન નથી.",
+    "returnPickLineQty": "પરત કરવાનો જથ્થો"
   }
 }

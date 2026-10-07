@@ -25,13 +25,17 @@ const movementSrc = readFileSync(
 assert.match(movementSrc, /isGoodsEvidenceEnabled/);
 assert.match(movementSrc, /materialMovementDestinations/);
 assert.match(movementSrc, /\/\(app\)\/grin\/create/);
+assert.match(movementSrc, /\/\(app\)\/grin\/return-select/);
 assert.doesNotMatch(
   movementSrc,
   /entryTypeForMovementKind\(["']grin/,
   "GRIN must not route through material_received composer"
 );
-assert.match(movementSrc, /MATERIAL_MOVEMENT_SUB_OPTIONS\.map/);
-assert.match(movementSrc, /MATERIAL_MOVEMENT_GRIN_OPTION/);
+assert.doesNotMatch(
+  movementSrc,
+  /MATERIAL_MOVEMENT_SUB_OPTIONS\.map/,
+  "picker must render unified destinations, not raw SUB_OPTIONS + separate GRIN"
+);
 
 const noticesSrc = readFileSync(
   join(__dirname, "../screens/grin/GrinFixtureNotices.tsx"),
@@ -44,14 +48,16 @@ assert.doesNotMatch(noticesSrc, /queueBanner/);
 
 const options = (en as { composer: { options: Record<string, string> } }).composer.options;
 assert.equal(options.movementGrin, "Goods receipt & inspection");
-assert.match(options.movementGrinSub, /shortages or damage/i);
+assert.match(options.movementGrinSub, /shortages or damage|supporting documents|inspection/i);
 assert.match(options.movementReceivedSub, /without a GRIN/i);
 assert.notEqual(options.movementReceived, options.movementGrin);
+assert.ok(options.movementReturnGrinSub);
 
-const grin = (en as { grin: { offlinePendingBanner: string; createTitle: string; pdf: { pendingNumber: string } } })
+const grin = (en as { grin: { offlinePendingBanner: string; createTitle: string; createIntro: string; pdf: { pendingNumber: string } } })
   .grin;
 assert.equal(grin.offlinePendingBanner, OFFLINE_PENDING_BANNER);
 assert.equal(grin.createTitle, "Goods receipt & inspection");
+assert.match(grin.createIntro, /received goods|inspection|supporting documents/i);
 assert.match(grin.pdf.pendingNumber, /after registration/i);
 assert.doesNotMatch(grin.pdf.pendingNumber, /^Pending registration$/);
 

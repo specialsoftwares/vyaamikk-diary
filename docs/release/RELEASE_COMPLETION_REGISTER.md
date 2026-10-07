@@ -12,11 +12,25 @@ TOOLING (ops-guard suite; not application CI).
 
 ---
 
-## Current state (authoritative — 2026-10-07 B2 vc24 Internal)
+## Current state (authoritative — 2026-10-08 source candidate after Letterhead merge)
 
 | Item | Current value |
 |---|---|
-| Repo / branch / PR | `specialsoftwares/vyaamikk-diary` `integration/grin-g1-g5-source` draft **#31** |
+| Repo / branch / PR | `specialsoftwares/vyaamikk-diary` · integration HEAD **`1be1dae`** (merged PR **#32**) · application branch **`feature/unified-material-movement-aso`** (this candidate) |
+| **Included source** | Letterhead repair (ownership, dirty-load, single-flight, MIME, contain, fresh-PDF) + unified MM entry + lean GRIN create + owner-scoped return select/multi-line return + ASO/UX docs |
+| **Letterhead merge parents** | `1f302b9` + `b274fe8` → merge **`1be1daedc67f4ef59f579a92c1b7262d1af5904c`** |
+| **Letterhead CI-tested SHA** | **`eccc783`** · GHA **`37693886315`** / verify **`113040537404`** SUCCESS (branch only — not combined-tree proof) |
+| **Combined-tree CI** | _(fill after canonical CI on this candidate tip)_ |
+| **Backend compatibility** | No live Functions/Rules/IAM/config changes in this task. New Firestore indexes not required for owner-scoped local list search. `CaptureProvenance.unknown` / ArrivalObservation schema **deferred**. |
+| **Device pending** | Native Expo upload, ML Kit scanner, expo-print; MM create/return TalkBack; Play upgrade path |
+| **Play / EAS artifact (unchanged)** | Installed/uploaded Internal remains **`7c938f8` / vc24** · EAS **`c931da3d-…`** — **this source candidate is not that AAB** |
+| HOLDs | No main merge, billing, purge, Functions deploy, EAS/OTA, Play writes, website publish from this instruction. |
+
+## Prior pin (authoritative — 2026-10-07 B2 vc24 Internal) — artifact identity only
+
+| Item | Current value |
+|---|---|
+| Repo / branch / PR | `specialsoftwares/vyaamikk-diary` `integration/grin-g1-g5-source` draft **#31** (historical pin context) |
 | **Play Internal Active** | **`7c938f8` / vc24** — release **24 (1.0.0)** Available to internal testers · Released **7 Oct 20:30** · Not reviewed. GRIN Functions previously deployed/enabled — this upload did **not** redeploy them. |
 | **B1 application SHA** | **`7c938f836891411752e6fa6af8879ddfe275ab60`** — vc24 + renderer CI `PUPPETEER_SKIP_DOWNLOAD` for separate Node 22 container. Parent `13da527`. NARROW preserved. |
 | **Matching CI (application)** | GHA **`37616692491` SUCCESS** / job **`112776635103`** on **`7c938f8`**. `test:all` 161/161; `ci:verify PASS`; CI log shows `PUPPETEER_SKIP_DOWNLOAD=true`. |
