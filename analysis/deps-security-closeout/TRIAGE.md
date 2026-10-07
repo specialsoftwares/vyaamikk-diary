@@ -1,99 +1,89 @@
-# Dependency security closeout — 2026-10-07T0639Z
+# Dependency security closeout — 2026-10-07 (round 2)
 
 Dated audits (no credentials / private data):
 
-| Tree | Before | After targeted overrides |
-|------|--------|--------------------------|
-| Root (`package-lock.json`) | 63 total (2 critical, 38 high, 23 moderate) | 56 total (**0 critical**, 33 high, 23 moderate) |
-| Root `--omit=dev` | 61 (2 critical, 37 high) | *omit=dev is not runtime reachability* — same production-dep tree still lists install-tree findings |
-| Functions | 16 (1 critical, 3 high, 12 moderate) | **12 moderate only** (0 critical / 0 high) |
-| Invoice renderer | 9 (8 high, 1 moderate) | 5 (4 high, 1 moderate) |
+| Tree | Prior after (`root-audit-after.json`) | Round 2 (`root-audit-after-round2.json`) |
+|------|----------------------------------------|------------------------------------------|
+| Root | 56 total (0 critical, 33 high, 23 moderate) | **53** total (**0 critical**, **28** high, **25** moderate) |
+| Functions | 12 moderate only | unchanged this round |
+| Invoice renderer | 5 (4 high, 1 moderate) | **5** (4 high via `extract-zip`/`puppeteer`, 1 moderate); **`basic-ftp` CLEARED** |
 
 Corrections applied to prior report framing:
 
-1. **`--omit=dev` does not establish runtime reachability.** It only excludes packages marked `devDependencies`. Production-marked packages such as `react-native`, `firebase`, and Expo tooling still pull Metro / CLI / debugger helpers into the install tree.
-2. **Parent-package findings are not automatic advisory noise.** A parent listed as `high` because a child is vulnerable is still a real lockfile finding; assess the child’s operation and whether untrusted input reaches it.
-3. **Deprecation warnings ≠ security advisories.** `uuid` / `jsrsasign` deprecations seen during install are separate from GHSA rows.
-4. **Upgrade/downgrade claims verified against installed versions.** npm’s “fixAvailable: expo@44 / react-native@0.86 / firebase@9.14 / puppeteer@19.8.0” suggestions are SemVer-major (or outright downgrades) and were **not** applied.
+1. **`--omit=dev` does not establish runtime reachability.**
+2. **Parent-package findings are not automatic advisory noise.**
+3. **Deprecation warnings ≠ security advisories.**
+4. **`fixAvailable:true` is not a compatibility guarantee.** Each residual was inspected for installed version, consuming constraints, and fixed range before override.
+5. **Do not group all residuals under “requires Expo/RN major.”** Several highs cleared with same-major overrides (below). Others truly need Metro/RN/Expo majors or have no fixed release.
+6. **`basic-ftp` 5.3.1→6.2.2 is a major-version override**, not a patch/minor. Consumer API verified separately from `tsc`.
 
-## Critical / high records (explicit)
+## Round-2 targeted root overrides (compatible)
 
-### shell-quote (root) — FIXED
+| Package | Installed before → after | Fixed range / note | Consumer | Exposure |
+|---------|--------------------------|--------------------|----------|----------|
+| `browserslist` | 4.28.2 → **4.29.3** | advisory `<=4.28.6` | Expo Metro / Babel targets | Build tooling (query cache / stats) |
+| `fast-uri` | 3.1.2 → **3.1.8** | advisory `3.0.0–3.1.7` | `ajv` via `expo-build-properties` | URI parse/serialize in schema tooling |
+| `http-cache-semantics` | 4.2.0 → **4.3.0** | advisory `<=4.2.0` | `got` via `@expo/ngrok` | HTTP cache freshness (dev tunnel helper) |
+| `js-yaml@4` | 4.3.0 → **4.3.2** | merge-key / omap highs | eslint / `@expo/xcpretty` | YAML parse of config (dev/CI) |
+| `js-yaml@3` | 3.14.2 → **3.15.2** | merge-key highs on 3.x | `@istanbuljs/load-nyc-config` | Jest/Babel coverage config |
+| `@xmldom/xmldom@0.8` | 0.8.13 → **0.8.15** | `<=0.8.14` | `@expo/plist` | Plist/XML parse in Expo CLI |
+| `@xmldom/xmldom@0.9` | 0.9.10 → **0.9.12** | `<=0.9.11` | `plist` via RN Firebase auth | Apple plist parsing |
+
+Verification: `npm ls` shows overridden versions; round-2 audit marks **browserslist / fast-uri / http-cache-semantics / @xmldom/xmldom CLEARED**.
+
+### Remaining after round 2 (individually)
+
+| Package | Why not closed | Classification |
+|---------|----------------|----------------|
+| `image-size@1.2.1` | Advisory range includes through **2.0.2**; fixed in **2.0.3+** only. Metro `0.83.3` depends on **1.x**. Forcing 2.x is a **major** for that consumer — not applied. `fixAvailable:true` here means “upgrade to 2.x”, not a 1.x patch. | **Remaining high — Metro/image-size major** |
+| `js-yaml@3.15.2` | Merge-key highs cleared; residual **moderate** is via **`argparse`** (parent still listed). Clearing needs RN/Jest stack move (`fixAvailable` suggests RN **0.86.3** major) or argparse fix path. | **Remaining moderate — transitive argparse / Jest** |
+| Expo / RN / Firebase / Metro / `node-forge` / `postcss` / Jest parents | npm proposes Expo 44 / RN 0.86 / Firebase 9.14 — **SemVer-major or downgrade**; not started. | **Requires separate SDK migration program** |
+
+## Prior critical / high records (still accurate)
+
+### shell-quote / websocket-driver / Functions proxy-addr — FIXED (round 1)
+
+See prior sections in git history; overrides retained: `shell-quote@1.12.0`, `websocket-driver@0.7.5`, Functions `proxy-addr@2.0.8`, `@fastify/busboy@3.2.2`, `@grpc/grpc-js@1.14.5`, `form-data@2@2.5.6`.
+
+### Invoice renderer — `basic-ftp` (major-version override)
 
 | Field | Value |
 |-------|-------|
-| Resolved before → after | **1.8.4 → 1.12.0** (override) |
-| Advisories | GHSA-395f-4hp3-45gv (DoS in `parse`, ≤1.8.4); GHSA-pqg4-j6r4-53mv / CVE-2026-102422 (`quote()` injection, ≥1.8.4 <1.11.0) |
-| Fixed range | ≥1.11.0 (installed 1.12.0) |
-| Path | `react-native` → `react-devtools-core` → `shell-quote` |
-| Vulnerable operation | `parse()` / `quote()` on attacker-influenced tokens |
-| Attacker-controlled input | Untrusted strings passed into shell quoting (typical in CLI / debugger helper paths) |
-| Exposure | **Build / Metro / RN tooling**, not an app UI API. Still material on developer/CI hosts that process untrusted paths. Not evidence of mobile RCE by itself. |
-| Fix justification | Patch-only override; API-compatible for consumers expecting `^1.6.1`. |
+| Resolved | **5.3.1 → 6.2.2** via renderer `overrides` |
+| Label | **Major-version override** (not patch/minor) |
+| Advisory | GHSA-c475-qrg2-pj4r (ReDoS in Unix `list()` parser) |
+| Path | `puppeteer` → `@puppeteer/browsers` → `proxy-agent` → `pac-proxy-agent` → `get-uri` → `basic-ftp` |
+| Consuming API | `get-uri/dist/ftp.js` uses `new Client()`, `client.access(...)`, `client.list(...)`, `downloadTo`, `close` |
+| Verification | `src/basicFtpOverride.smoke.test.ts` asserts version **6.2.2** + those methods + `parseList` on a short valid line. **Not** network FTP acceptance. `tsc` alone was treated as insufficient. |
+| Audit | `basic-ftp` **CLEARED** in `renderer-audit-after-round2.json` |
 
-### websocket-driver (root) — FIXED; Functions already patched
-
-| Field | Value |
-|-------|-------|
-| Resolved before → after | Root **0.7.4 → 0.7.5**; Functions already **0.7.5** |
-| Advisories | GHSA-mp7j-qc5w-4988; GHSA-xv26-6w52-cph6 (fixed ≥0.7.5) |
-| Path | `firebase` / `@react-native-firebase/app` → `@firebase/database` → `faye-websocket` → `websocket-driver` |
-| Vulnerable operation | WebSocket frame compression / length-header handling in the **Node** `websocket-driver` implementation |
-| Attacker-controlled input | Malicious WebSocket peer (Realtime Database wire protocol) |
-| Exposure | **Install-tree only for the mobile app**: no `getDatabase` / RTDB usage under `src/`. Do **not** equate presence with mobile runtime use of Node RTDB websockets. Functions Admin SDK path retains the package for Admin RTDB capability; version already ≥0.7.5 after override pin. |
-
-### proxy-addr (Functions) — FIXED
+### Invoice renderer — `extract-zip@2.0.1` (UNRESOLVED)
 
 | Field | Value |
 |-------|-------|
-| Resolved before → after | **2.0.7 → 2.0.8** |
-| Advisory | GHSA-jqcg-44mw-7w3h (IP spoofing via IPv4-mapped IPv6 trust subnet), CVSS 9.1 |
-| Fixed range | ≥2.0.8 |
-| Path | `firebase-functions` → `express` → `proxy-addr` |
-| Vulnerable operation | Client IP resolution when trust-proxy / subnet checks are used |
-| Attacker-controlled input | `X-Forwarded-For` / related forwarded headers |
-| Exposure | **Functions HTTP runtime** (Express via firebase-functions). Cloud Functions sits behind Google’s front-end; spoofing impact depends on trust-proxy configuration. Patched regardless. |
-
-### Functions highs — FIXED
-
-| Package | Before → after | GHSA / notes | Path |
-|---------|----------------|--------------|------|
-| `@fastify/busboy` | 3.2.0 → **3.2.2** | GHSA-xjh9-v7x6-24jw, GHSA-x8mw-p69m-v3mx, GHSA-gxm5-99cw-xjw9 | `firebase-admin` multipart |
-| `@grpc/grpc-js` | 1.14.4 → **1.14.5** | GHSA-m9gg-hp2v-232j, GHSA-f596-whhp-79r4 | `google-gax` / Firestore Admin |
-| `form-data@2` | 2.5.5 → **2.5.6** | GHSA-hmw2-7cc7-3qxx | optional `@google-cloud/storage` types path |
-
-Verification: `functions` `npm audit` → **0 critical / 0 high**; `npm run build` PASS.
-
-### Invoice renderer highs
-
-| Package | Status | Notes |
-|---------|--------|-------|
-| `basic-ftp` | **FIXED** 5.3.1 → **6.2.2** (override) | GHSA-c475-qrg2-pj4r via `proxy-agent` → Chromium download stack |
-| `extract-zip@2.0.1` | **UNRESOLVED** | GHSA-jmr9-qjv8-65gv / GHSA-7pqw-9j4j-h8q3 — **no fixed release** on npm (`latest` still 2.0.1). npm’s “fix” downgrades puppeteer to 19.8.0 (rejected). |
-| Parent `puppeteer` / `@puppeteer/browsers` | Remains high only via `extract-zip` | Build/image bake tooling |
-
-**extract-zip exposure:** used when Puppeteer unpacks browser archives during image/CI setup. Attacker-controlled input requires a malicious archive (supply-chain or MITM of Chromium download). Mitigations in place: pinned `puppeteer@24.22.3`, Docker/CI trusted network, no application acceptance of untrusted zips. **Remaining high — treated as release-visible risk, not silently cleared.** Safe elimination needs upstream `extract-zip` patch or Puppeteer packaging change (not an Expo SDK migration).
-
-### Root remaining highs (not force-fixed)
-
-Cluster around Expo SDK 54 / RN 0.81 / Firebase 12 / Metro / Jest / `node-forge` / `postcss` / `@xmldom/xmldom` / `braces` / `fast-uri`. npm proposes Expo 44, RN 0.86, or Firebase 9.14 — **incompatible major moves; not started**. Additional patch overrides applied where compatible: `compression@1.8.2`, `source-map-js@1.2.2`, `nanoid@3@3.3.20`, `undici@6@6.29.0`, `brace-expansion` majors 1/2/5.
+| Advisories | GHSA-jmr9-qjv8-65gv / GHSA-7pqw-9j4j-h8q3 |
+| Fixed release | **None** on npm (`latest` still 2.0.1). npm “fix” downgrades puppeteer → rejected. |
+| Where extraction can run | `@puppeteer/browsers` `fileUtil` dynamically imports `extract-zip` when unpacking a browser archive during Puppeteer browser install. |
+| Docker builder (before) | `FROM node:22… AS builder` ran `npm ci` **without** `PUPPETEER_SKIP_DOWNLOAD` → install script could download Chromium and invoke `extract-zip`. |
+| Docker runtime | Base `ghcr.io/puppeteer/puppeteer:24.22.3` already has Chromium; `PUPPETEER_SKIP_DOWNLOAD=true` then `npm ci --omit=dev` — download/extract skipped at runtime install. |
+| Mitigation applied | Set **`PUPPETEER_SKIP_DOWNLOAD=true` in the builder stage** as well (builder only needs `tsc`). Documented in Dockerfile. |
+| Remaining risk | Package still present in the install tree; any future path that downloads a browser archive without skip still hits unfixed `extract-zip`. Trusted network / pinned `puppeteer@24.22.3` reduces supply-chain odds but is **not** archive-integrity proof. **Finding kept open — not silently cleared.** |
 
 ## Overrides (compatibility justification)
 
-| Tree | Override | Why safe |
-|------|----------|----------|
-| Root | `shell-quote@1.12.0` | Semver-minor within consumers’ `^1.6.1` |
-| Root | `websocket-driver@0.7.5` | Patch within `>=0.5.1` |
-| Root | `compression`, `source-map-js`, `nanoid@3`, `undici@6`, `brace-expansion@1/2/5` | Patch/minor within major lines already present |
-| Functions | `proxy-addr@2.0.8`, `@fastify/busboy@3.2.2`, `@grpc/grpc-js@1.14.5`, `form-data@2@2.5.6`, pins above | Patch within existing majors; Functions build verified |
-| Renderer | `basic-ftp@6.2.2`, `undici@6@6.29.0` | Patch/minor; renderer `tsc` build verified |
+| Tree | Override | Why applied |
+|------|----------|-------------|
+| Root | round-1 pins + `browserslist@4.29.3`, `fast-uri@3.1.8`, `http-cache-semantics@4.3.0`, `js-yaml@3@3.15.2`, `js-yaml@4@4.3.2`, `@xmldom/xmldom@0.8@0.8.15`, `@xmldom/xmldom@0.9@0.9.12` | Same major (or dual 0.8/0.9 pins); consumers accept these ranges |
+| Root | *(not)* `image-size@2.0.4` | Metro locked to 1.x; major consumer break risk |
+| Renderer | `basic-ftp@6.2.2` | **Major-version override**; get-uri Client API verified by smoke test |
+| Renderer | `undici@6@6.29.0` | Patch within major |
 
 **Not used:** `npm audit fix --force`, Expo downgrade, RN major upgrade, blanket audit suppression, CI weakening.
 
 ## Evidence files
 
-- `root-audit.json` / `root-audit-after.json`
+- `root-audit.json` / `root-audit-after.json` / **`root-audit-after-round2.json`**
 - `root-audit-omit-dev.json` (methodological control only)
 - `functions-audit.json` / `functions-audit-after.json`
-- `renderer-audit.json` / `renderer-audit-after.json`
+- `renderer-audit.json` / `renderer-audit-after.json` / **`renderer-audit-after-round2.json`**
 - `RUN.txt` (UTC stamp)

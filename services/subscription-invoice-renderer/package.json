@@ -8,7 +8,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/main.js",
-    "test": "tsx src/protocol.test.ts && tsx src/server.test.ts"
+    "test": "tsx src/protocol.test.ts && tsx src/server.test.ts && tsx src/basicFtpOverride.smoke.test.ts"
   },
   "dependencies": {
     "puppeteer": "24.22.3"
