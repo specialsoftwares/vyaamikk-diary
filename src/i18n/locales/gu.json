@@ -1305,7 +1305,13 @@
     "genAppearanceMono": "કાળો અને સફેદ",
     "genFieldAddress": "સરનામું",
     "genFieldContact": "સંપર્ક",
-    "genFieldGstin": "GSTIN"
+    "genFieldGstin": "GSTIN",
+    "genRefreshProfile": "પ્રોફાઇલમાંથી વિગતો તાજી કરો",
+    "genRetryLogo": "લોગો ફરી પ્રયાસ કરો",
+    "setupDecrease": "ઘટાડો",
+    "setupIncrease": "વધારો",
+    "setupGalleryFallback": "ગેલરીમાંથી ફોટો પસંદ કરો (આ આપોઆપ સ્કેન નથી).",
+    "incompleteGalleryAppearance": "ગેલરી ફોટોના રંગ ગોઠવણ હજુ ઉપલબ્ધ નથી. સ્કેન કરતી વખતે સ્કેનર ફિલ્ટર અથવા લોગો માર્ગ વાપરો."
   },
   "materialMovement": {
     "ewayBillLabel": "E-way Bill No. / EBN",

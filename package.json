@@ -86,6 +86,7 @@
     "test:financial-year": "npx --yes tsx src/utils/financialYear.test.ts",
     "test:deletion": "npx --yes tsx src/services/records/permanentDeletion.test.ts",
     "test:smoke-refinement": "npx --yes tsx scripts/smoke-refinement-pass.ts",
+        "test:letterhead-repair": "npx --no-install tsx --test src/services/storage/userStorage.uploadPath.contract.test.ts src/services/storage/userStorageUpload.boundary.test.ts src/services/letterhead/letterheadCandidateImage.test.ts src/services/letterhead/letterheadSetupPick.contract.test.ts src/services/letterhead/documentScanner/documentScanner.contract.test.ts src/services/letterhead/letterheadGeneratedLayout.test.ts src/services/letterhead/letterheadVisualSpec.test.ts src/services/letterhead/letterheadGenerateRestore.test.ts && npx --no-install tsx src/services/pdf/letterheadPdfService.test.ts && npx --no-install tsx src/services/pdf/letterheadPdfRender.inspection.test.ts",
     "test:letterhead-pdf": "npx --yes tsx src/services/pdf/letterheadPdfService.test.ts",
     "test:letterhead-quota-lifecycle": "npx --yes tsx src/services/letterhead/letterheadAccessPolicy.test.ts && npx --yes tsx src/services/letterhead/letterheadMirrorPolicy.test.ts && npx --yes tsx src/services/letterhead/saveWithPdf.lifecycle.test.ts",
     "test:pdf-redesign": "npx --yes tsx src/services/pdf/pdfRedesign.test.ts",

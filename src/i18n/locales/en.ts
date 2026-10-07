@@ -1718,6 +1718,12 @@ const en = {
     genFieldAddress: "Address",
     genFieldContact: "Contact",
     genFieldGstin: "GSTIN",
+    genRefreshProfile: "Refresh details from profile",
+    genRetryLogo: "Retry logo",
+    setupDecrease: "Decrease",
+    setupIncrease: "Increase",
+    setupGalleryFallback: "Choose a photo from your gallery (not an automatic scan).",
+    incompleteGalleryAppearance: "Colour adjustments for gallery photos are not available yet. Use the scanner filters when scanning, or the logo letterhead path.",
 
     helperBase:
       "Your letterhead remains the document base. Matter is placed only inside the writing area you set.",

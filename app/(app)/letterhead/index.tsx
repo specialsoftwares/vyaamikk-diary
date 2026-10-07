@@ -26,6 +26,10 @@ import {
   getLetterheadRepository,
   type LetterheadConfig,
 } from "@/services/letterhead";
+import {
+  generatedHeaderFlex,
+  IMPORTED_PAGE_FIT,
+} from "@/services/letterhead/letterheadVisualSpec";
 import { useT } from "@/i18n";
 import { radius, spacing, typography, useThemedStyles } from "@/theme";
 import { userFacingMessage } from "@/domain/errors";
@@ -79,6 +83,7 @@ export default function LetterheadGateScreen() {
       },
       generatedName: { ...typography.titleMd, color: colors.text },
       generatedLine: { ...typography.caption, color: colors.textMuted },
+      appearanceNote: { ...typography.caption, color: colors.textSubtle },
       writableOverlay: {
         position: "absolute",
         borderWidth: 2,
@@ -216,46 +221,91 @@ export default function LetterheadGateScreen() {
         <View style={styles.body}>
           <Card style={styles.preview}>
             <View style={styles.imageFrame}>
-              {isGenerated ? (
-                <View style={styles.generatedPreview}>
-                  {config.generatedLayout?.logoUri ? (
-                    <Image
-                      source={{ uri: config.generatedLayout.logoUri }}
-                      style={{ width: 72, height: 48 }}
-                      resizeMode="contain"
-                      accessible
-                      accessibilityLabel={t("letterhead.entryLogoTitle")}
-                    />
-                  ) : null}
-                  {config.generatedLayout?.businessName ? (
-                    <LocaleUiText style={styles.generatedName}>
-                      {config.generatedLayout.businessName}
-                    </LocaleUiText>
-                  ) : null}
-                  {config.generatedLayout?.address ? (
-                    <LocaleUiText style={styles.generatedLine}>
-                      {config.generatedLayout.address}
-                    </LocaleUiText>
-                  ) : null}
-                  {config.generatedLayout?.contact ? (
-                    <LocaleUiText style={styles.generatedLine}>
-                      {config.generatedLayout.contact}
-                    </LocaleUiText>
-                  ) : null}
-                  {config.generatedLayout?.gstin ? (
-                    <LocaleUiText style={styles.generatedLine}>
-                      GSTIN: {config.generatedLayout.gstin}
-                    </LocaleUiText>
-                  ) : null}
-                </View>
+              {isGenerated && config.generatedLayout ? (
+                (() => {
+                  const layout = config.generatedLayout;
+                  const flex = generatedHeaderFlex(layout.logoAlign);
+                  const logoOk =
+                    Boolean(layout.logoUri) &&
+                    (layout.logoUri!.startsWith("data:") ||
+                      layout.logoUri!.startsWith("http"));
+                  return (
+                    <View
+                      style={[
+                        styles.generatedPreview,
+                        {
+                          flexDirection: flex.flexDirection,
+                          justifyContent: flex.justifyContent,
+                          alignItems: flex.alignItems,
+                        },
+                      ]}
+                    >
+                      {logoOk ? (
+                        <Image
+                          source={{ uri: layout.logoUri! }}
+                          style={{ width: 72, height: 48 }}
+                          resizeMode="contain"
+                          accessible
+                          accessibilityLabel={t("letterhead.entryLogoTitle")}
+                        />
+                      ) : null}
+                      <View style={{ alignItems: flex.alignItems }}>
+                        {layout.businessName ? (
+                          <LocaleUiText
+                            style={[styles.generatedName, { textAlign: flex.textAlign }]}
+                          >
+                            {layout.businessName}
+                          </LocaleUiText>
+                        ) : null}
+                        {layout.address ? (
+                          <LocaleUiText
+                            style={[styles.generatedLine, { textAlign: flex.textAlign }]}
+                          >
+                            {layout.address}
+                          </LocaleUiText>
+                        ) : null}
+                        {layout.contact ? (
+                          <LocaleUiText
+                            style={[styles.generatedLine, { textAlign: flex.textAlign }]}
+                          >
+                            {layout.contact}
+                          </LocaleUiText>
+                        ) : null}
+                        {layout.gstin ? (
+                          <LocaleUiText
+                            style={[styles.generatedLine, { textAlign: flex.textAlign }]}
+                          >
+                            GSTIN: {layout.gstin}
+                          </LocaleUiText>
+                        ) : null}
+                        {layout.appearance === "grayscale" ||
+                        layout.appearance === "mono" ? (
+                          <LocaleUiText style={styles.appearanceNote}>
+                            {layout.appearance === "mono"
+                              ? t("letterhead.genAppearanceMono")
+                              : t("letterhead.genAppearanceGrayscale")}{" "}
+                            (PDF)
+                          </LocaleUiText>
+                        ) : null}
+                      </View>
+                    </View>
+                  );
+                })()
               ) : (
-                <Image
-                  source={{ uri: config.imageDataUri ?? undefined }}
-                  style={styles.image}
-                  resizeMode="contain"
-                  accessible
-                  accessibilityLabel={t("letterhead.gateTitle")}
-                />
+                <View
+                  style={{
+                    flex: 1,
+                    justifyContent: "flex-start",
+                  }}
+                >
+                  <Image
+                    source={{ uri: config.imageDataUri ?? undefined }}
+                    style={styles.image}
+                    resizeMode={IMPORTED_PAGE_FIT}
+                    accessible
+                    accessibilityLabel={t("letterhead.gateTitle")}
+                  />
+                </View>
               )}
               <View
                 pointerEvents="none"

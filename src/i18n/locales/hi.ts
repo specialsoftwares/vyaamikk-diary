@@ -1640,6 +1640,12 @@ const hi: Translations = {
     genFieldAddress: "पता",
     genFieldContact: "संपर्क",
     genFieldGstin: "GSTIN",
+    genRefreshProfile: "प्रोफ़ाइल से विवरण ताज़ा करें",
+    genRetryLogo: "लोगो फिर से लोड करें",
+    setupDecrease: "घटाएँ",
+    setupIncrease: "बढ़ाएँ",
+    setupGalleryFallback: "गैलरी से फोटो चुनें (यह स्वचालित स्कैन नहीं है)।",
+    incompleteGalleryAppearance: "गैलरी फोटो के रंग समायोजन अभी उपलब्ध नहीं हैं। स्कैन करते समय स्कैनर फ़िल्टर या लोगो वाला पथ उपयोग करें।",
 
     helperBase:
       "आपका लेटरहेड दस्तावेज़ का आधार रहता है। सामग्री केवल आपके तय लेखन क्षेत्र में रखी जाती है।",

@@ -1,22 +1,22 @@
-# Letterhead PDF evidence (source / injected)
+# Letterhead PDF evidence
 
-Date: 2026-10-07
+Date: 2026-10-07 (PR #32 corrections)
 
-## What was checked
+## Fixtures
 
-| Check | Method | Result |
-|---|---|---|
-| Imported page uses `object-fit: contain` | `letterheadPdfService.test.ts` source contract | Pass |
-| Generated layouts use HTML header (text not fully rasterized) | same + `buildGeneratedHeaderHtml` | Pass |
-| `@page` margins drive writing area (multi-page) | existing source contract | Pass |
-| Fixed template layer for continuation pages | existing source contract | Pass |
-| No platform branding in letterhead PDF | existing source contract | Pass |
-| Visual A4 page render (Chromium / device print) | **Not run** — needs matching native/CI Chromium job or device export | Pending device/build |
+Directory: `docs/release/packets/letterhead/pdf-fixtures/`
 
-## Representative HTML expectations (post-fix)
+| Case | Observation |
+|---|---|
+| `imported-contain-top.html` | `object-fit: contain` + `object-position: top center` |
+| `generated-left/center/right.html` | Header flex matches PDF align classes; long bilingual name/address |
+| `generated-mono.html` | `filter: grayscale(1) contrast(3)` on logo |
+| `multi-page-body.html` | Long body + `@page` margins for continuation |
 
-- Imported: `<img class="letterhead-bg" … object-fit: contain>`
-- Generated: `<div class="generated-header align-{left\|center\|right}">` + optional logo `<img class="generated-logo">` + text lines
-- Body content in `.content` inside `@page` margins derived from `%` writing area
+Open HTML in a desktop browser at print preview (A4) for visual check.
 
-Device visual inspection of exported pages (pale watermark, long Indian-script address, transparent logo, multi-page) remains a **next-build** item.
+## Not claimed
+
+- Android Print / expo-print device raster
+- Pixel-perfect match to physical letterhead stock
+- Gallery photo appearance transforms (incomplete; see continuity packet)

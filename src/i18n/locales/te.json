@@ -1305,7 +1305,13 @@
     "genAppearanceMono": "నలుపు & తెలుపు",
     "genFieldAddress": "చిరునామా",
     "genFieldContact": "సంప్రదింపు",
-    "genFieldGstin": "GSTIN"
+    "genFieldGstin": "GSTIN",
+    "genRefreshProfile": "ప్రొఫైల్ నుండి వివరాలు రిఫ్రెష్ చేయండి",
+    "genRetryLogo": "లోగో మళ్లీ ప్రయత్నించండి",
+    "setupDecrease": "తగ్గించు",
+    "setupIncrease": "పెంచు",
+    "setupGalleryFallback": "గ్యాలరీ నుండి ఫోటో ఎంచుకోండి (ఆటోమేటిక్ స్కాన్ కాదు).",
+    "incompleteGalleryAppearance": "గ్యాలరీ ఫోటో రంగు సర్దుబాట్లు ఇంకా లేవు. స్కాన్ చేసేటప్పుడు స్కానర్ ఫిల్టర్లు లేదా లోగో మార్గం ఉపయోగించండి."
   },
   "materialMovement": {
     "ewayBillLabel": "E-way Bill No. / EBN",

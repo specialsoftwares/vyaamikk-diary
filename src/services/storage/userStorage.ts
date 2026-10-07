@@ -1,29 +1,23 @@
 /**
- * Per-user Firebase Storage helpers (firebase/storage JS SDK).
+ * Per-user Firebase Storage helpers (firebase/storage JS SDK for reads/delete;
+ * uploads via media REST + Expo FileSystem — see userStorageUpload.ts).
  *
- * Canonical remote reference is `storagePath`; `downloadUrl` is an optional
- * client-side cache and may be refreshed via `getDownloadUrlForPath`.
- *
- * React Native note (RN ≥ 0.74): `uploadString` / Uint8Array multipart uploads
- * call `new Blob([…ArrayBufferView…])`, which RN's BlobManager rejects with
- * "Creating blobs from 'ArrayBuffer' and 'ArrayBufferView' are not supported".
- * Uploads therefore write through an on-disk Expo `File` (a real Blob) and
- * `uploadBytesResumable` — same pattern as GRIN evidence transport.
+ * React Native note (RN ≥ 0.74 / firebase 12.14.0):
+ * - `uploadString` and multipart `FbsBlob.getBlob` build ArrayBufferView Blobs
+ *   that RN BlobManager rejects.
+ * - Expo `File` is not a runtime Blob; its `slice` also hits that path.
+ * Uploads therefore use authenticated `FileSystem.uploadAsync` (BINARY_CONTENT)
+ * and verify remote size. Same uid-scoped paths and Storage Rules as before.
  */
 
 import * as FileSystem from "expo-file-system/legacy";
-import {
-  deleteObject,
-  getDownloadURL,
-  getMetadata,
-  ref,
-  uploadBytesResumable,
-  type UploadMetadata,
-} from "firebase/storage";
+import { deleteObject, getDownloadURL, ref } from "firebase/storage";
 
 import { env, isFirebaseConfigured } from "@/config/env";
 import { FirebaseNotConfiguredError, getFirebaseStorage } from "@/config/firebase";
 import { createLogger } from "@/utils/logger";
+
+import { uploadLocalFileViaMediaApi } from "./userStorageUpload";
 
 const log = createLogger("storage/user");
 
@@ -34,6 +28,8 @@ export type UserStorageCategory = "letterhead" | "attachments" | "pdfs";
 export interface StorageUploadResult {
   storagePath: string;
   downloadUrl?: string;
+  localBytes?: number;
+  remoteBytes?: number;
 }
 
 export function isUserStorageAvailable(): boolean {
@@ -132,8 +128,8 @@ async function deleteTempQuietly(uri: string): Promise<void> {
 }
 
 /**
- * Upload an on-disk file via Expo File + resumable upload.
- * Avoids RN BlobManager rejection of ArrayBuffer-backed Blobs.
+ * Upload an on-disk file via authenticated media REST + Expo uploadAsync.
+ * Never passes Expo File / Uint8Array into Firebase JS Blob constructors.
  */
 export async function uploadLocalFileToPath(
   storagePath: string,
@@ -141,34 +137,17 @@ export async function uploadLocalFileToPath(
   contentType: string
 ): Promise<StorageUploadResult> {
   if (!isUserStorageAvailable()) throw new FirebaseNotConfiguredError();
-
-  const { File } = await import("expo-file-system");
-  const file = new File(localUri);
-  if (!file.exists) {
-    throw new Error("Local file missing for Storage upload.");
-  }
-
-  const metadata: UploadMetadata = { contentType };
-  const objectRef = storageRefForPath(storagePath);
-  const task = uploadBytesResumable(objectRef, file, metadata);
-  await new Promise<void>((resolve, reject) => {
-    task.on("state_changed", undefined, reject, () => resolve());
+  const verified = await uploadLocalFileViaMediaApi({
+    storagePath,
+    localUri,
+    contentType,
   });
-
-  let downloadUrl: string | undefined;
-  try {
-    downloadUrl = await getDownloadURL(objectRef);
-  } catch (e) {
-    log.warn("getDownloadURL after upload", e);
-  }
-
-  try {
-    await getMetadata(objectRef);
-  } catch (e) {
-    log.warn("getMetadata after upload", e);
-  }
-
-  return { storagePath, downloadUrl };
+  return {
+    storagePath: verified.storagePath,
+    downloadUrl: verified.downloadUrl,
+    localBytes: verified.localBytes,
+    remoteBytes: verified.remoteBytes,
+  };
 }
 
 async function uploadBase64ToPath(

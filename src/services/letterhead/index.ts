@@ -66,6 +66,15 @@ export {
   type LetterheadSourceType,
 } from "./letterheadGeneratedLayout";
 export {
+  APPEARANCE_CSS_FILTER,
+  generatedHeaderFlex,
+  IMPORTED_PAGE_FIT,
+  IMPORTED_PAGE_POSITION,
+  LETTERHEAD_A4_ASPECT,
+  pdfAlignClass,
+  SUPPORTED_APPEARANCES,
+} from "./letterheadVisualSpec";
+export {
   getDocumentScanner,
   getDocumentScannerCapability,
   scanLetterheadDocument,

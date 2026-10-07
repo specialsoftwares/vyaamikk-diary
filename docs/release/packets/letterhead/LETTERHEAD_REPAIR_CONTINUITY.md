@@ -1,79 +1,46 @@
 # Letterhead repair — continuity & next-build packet
 
-Updated: **2026-10-07**
+Updated: **2026-10-07** (PR #32 targeted corrections)
 
-## Continuity snapshot (before this work)
+## Continuity snapshot
 
 | Item | Value |
 |---|---|
-| Dirty main workspace | `draft/goods-evidence-domain-contract` @ `55f2df1` — **not edited** |
-| GRIN integration tip | `integration/grin-g1-g5-source` @ `1f302b9` (docs tip after B2) |
-| Application freeze (vc24 AAB) | `7c938f836891411752e6fa6af8879ddfe275ab60` |
-| Latest EAS (finished) | `c931da3d-4dcb-472e-9c63-f72217c6d95c` · profile `internal-grin` · **vc24** · source `7c938f8` |
-| Prior Internal (vc23) | EAS `8c789fa9-…` · source `540e07a` |
-| Isolation branch / worktree | `fix/letterhead-repair-scan` · `/Users/shivamsaurav/vyd-worktrees/letterhead-repair` |
-| Letterhead source tip | `2579cf7` (this packet’s implementation commit) |
-| Base | Branched from `1f302b9` (integration tip); **not** substituted into frozen vc24 AAB |
+| Dirty main workspace | `draft/goods-evidence-domain-contract` — **not edited** |
+| Reviewed / corrected branch | `fix/letterhead-repair-scan` |
+| Frozen next-build SHA | **`<FILL_AFTER_COMMIT>`** (this tip after CI) |
+| Prior reviewed HEAD | `f59598629347383ac47f78da095122fd7db125ee` |
+| Application freeze (vc24 AAB) | `7c938f8` · EAS `c931da3d-…` · **unchanged** |
+| Isolation | Worktree `/Users/shivamsaurav/vyd-worktrees/letterhead-repair` |
 
-Expo SDK **54** / RN **0.81.5**. AGENTS.md points at Expo v56 docs — project runtime remains SDK 54; native changes follow installed SDK.
+## Finding status
 
-## Root cause (inspected code hazard)
+| # | Finding | Status | Evidence boundary |
+|---|---|---|---|
+| 1 | Upload / Expo File / Blob | **Fixed** | Locked SDKs prove Expo File ≠ `instanceof Blob`; `File.slice` builds ArrayBufferView Blob; multipart ≤256KiB uses `FbsBlob.getBlob`. Upload now: Expo `uploadAsync` BINARY_CONTENT → Storage media REST + auth Bearer; size verified via `getMetadata`. Owner gallery-time error remains **reported gallery-time error; exact device stack not captured** — not attributed to Save. |
+| 2 | Restore generated on Edit | **Fixed** | `generate.tsx` loads saved layout; profile only for new / explicit refresh. Durable logo = data:/https only. |
+| 3 | Preview ↔ PDF consistency | **Fixed** | `letterheadVisualSpec`; right = row-reverse; imported contain + top center; mono = `grayscale(1) contrast(3)`. RN preview notes grayscale/mono as PDF-applied. |
+| 4 | Session ownership | **Fixed** | `beginLetterheadCapture` / `assertCandidateOwner` use `SyncSessionToken`; fileGeneration is path-only. |
+| 5 | File lifecycle / size limits | **Fixed** | candidateRef unmount cleanup; long-edge reject; MIME sniff; Image.getSize; asset size before base64. |
+| 6 | Writing-area UX | **Fixed** | Validator on both paths + repo save; visual steppers + overlay. |
+| Gallery appearance editing | **Incomplete** | Documented in UI (`incompleteGalleryAppearance`); scanner filters cover scan path. No native image-manipulator added. |
+| Logo replace in generate | **Partial** | Retry logo from profile; no separate gallery logo pick yet. |
+| Historical PDF snapshot | **Pre-existing** | Still live-template on regenerate; not claimed fixed. |
 
-Owner device message: `Creating blobs from 'ArrayBuffer' and 'ArrayBufferView' are not supported`.
+## Native dependency change
 
-**Proven in source (matches Firebase JS SDK issue #8648 on RN ≥ 0.74):**
+**None.** Upload uses existing `expo-file-system/legacy` `uploadAsync` + Firebase Auth ID token. No `@react-native-firebase/storage`, no `expo-blob` global patch.
 
-1. `uploadLetterheadImage` → `uploadString(..., "base64")`.
-2. Firebase Storage multipart upload builds `new Blob([string, Uint8Array, string])`.
-3. React Native `BlobManager` rejects ArrayBufferView parts with that exact string.
+Affected shared callers of `userStorage` (attachments / letterhead migration / letterhead save): all now go through media REST path.
 
-This fires on **save / Storage migration upload**, not on ImagePicker’s native base64 encode. Owner reported the error immediately after gallery selection without intentionally pressing Save — possible concurrent background migration (`runLetterheadStorageMigrationForUser`) or an accidental save gesture. **Device stack not captured this session**; treated as inspected code hazard + injected contracts, not PLAY_INSTALLED reproduction.
+## Tests
 
-Secondary hazards fixed in the same pass:
+`npm run test:letterhead-repair` — discovered by `test:all` via package.json.
 
-- Template pick used `base64: true` and kept full-resolution data URIs in React state.
-- Preview/`PDF` used `object-fit` / `resizeMode` stretch for imported pages.
-
-## What this source changes
-
-1. **Storage upload** — Expo `File` + `uploadBytesResumable` (no `uploadString`).
-2. **File-based template candidate** — copy to app-private cache; preview via `file://`; upload from file.
-3. **Entry UX** — “Your letterhead” + scan/upload vs create-with-logo.
-4. **Generated layout model** — logo left/centre/right; snapshotted profile fields; PDF HTML header (text stays text).
-5. **Android scanner boundary** — `@infinitered/react-native-mlkit-document-scanner@5.0.0` behind `documentScanner/` (JPEG, pageLimit 1, gallery import, `BASE_WITH_FILTER`). iOS returns explicit `unavailable` (no claimed support).
-
-## Historical letter ↔ template semantics (isolated, unchanged)
-
-Saved letters store `templateRefUpdatedAt` and input fields, **not** a copy of
-template image/layout bytes. Re-exporting an old letter uses the **current**
-`LetterheadConfig`. Already-shared PDF files on disk are unaffected; in-app
-regenerate can diverge after a template edit. True per-letter snapshots are
-out of scope for this repair (documented only).
-
-## Explicitly not done / not authorized
-
-- New paid EAS build, Play upload, Functions/Rules, billing, purge, main merge, public release.
-- Device camera/scanner/TalkBack matrix (needs matching native build).
-- iOS VisionKit scanner implementation.
-- App-side appearance filters for gallery imports (scanner `BASE_WITH_FILTER` covers scan path; generated path has appearance).
+PDF fixtures: `docs/release/packets/letterhead/pdf-fixtures/` (HTML A4 inspection; not device Print).
 
 ## Next-build packet (when separately authorized)
 
-Exact one-line request:
+> OWNER APPROVAL — EAS Android profile `internal-grin` from letterhead-repair SHA `<FILL_AFTER_COMMIT>` only. Includes `@infinitered/react-native-mlkit-document-scanner@5.0.0` (already in source). Select a **new** versionCode after checking current Play inventory — do **not** reuse vc24. No auto-submit; no Play upload from this packet alone.
 
-> OWNER APPROVAL — EAS Android `internal-grin` (or named profile) from letterhead-repair SHA `2579cf7` (or later tip on `fix/letterhead-repair-scan`): native module `@infinitered/react-native-mlkit-document-scanner@5.0.0`; no auto-submit; no Play upload.
-
-Device checks after that build: gallery pick → preview → save; Android scan cancel/success; Play upgrade over installed data; TalkBack on entry choices; PDF inspect for imported + generated.
-
-## Focused tests run (this worktree)
-
-```
-npx tsx --test \
-  src/services/storage/userStorage.uploadPath.contract.test.ts \
-  src/services/letterhead/letterheadCandidateImage.test.ts \
-  src/services/letterhead/letterheadSetupPick.contract.test.ts \
-  src/services/letterhead/documentScanner/documentScanner.contract.test.ts \
-  src/services/letterhead/letterheadGeneratedLayout.test.ts
-```
-
-Result: **14/14 pass** (source/injected). Not evidence of native scanning on device.
+Device checks after that build: gallery→preview→save (Blob error gone); size below/above 256KiB; Android scan; TalkBack; PDF pages.

@@ -1,18 +1,18 @@
 /**
- * LetterheadPreview — lightweight, in-app visual approximation of the
- * letterhead PDF. Renders the uploaded template image at A4 aspect ratio and
- * overlays the composed matter inside the configured writable area.
- *
- * This is a *preview-like confirmation* (acceptance criterion #8), not a
- * pixel-perfect render — the final PDF uses the exact template and margins.
- * Memoized so typing in the form doesn't thrash the image layer.
+ * LetterheadPreview — in-app confirmation using the same geometry/appearance
+ * spec as the PDF (`letterheadVisualSpec`). Not a pixel-perfect print engine.
  */
 
 import React, { memo, useMemo } from "react";
-import { LocaleUiText } from "@/components/ui/LocaleUiText";
 import { Image, StyleSheet, Text, View } from "react-native";
 
+import { LocaleUiText } from "@/components/ui/LocaleUiText";
 import type { LetterheadConfig, LetterheadDocumentInput } from "@/services/letterhead";
+import {
+  generatedHeaderFlex,
+  IMPORTED_PAGE_FIT,
+  LETTERHEAD_A4_ASPECT,
+} from "@/services/letterhead/letterheadVisualSpec";
 import { useT } from "@/i18n";
 import { radius, typography, useThemedStyles } from "@/theme";
 import { formatShortDate } from "@/utils/date";
@@ -31,7 +31,7 @@ export const LetterheadPreview = memo(function LetterheadPreview({
     StyleSheet.create({
       frame: {
         width: "100%",
-        aspectRatio: 210 / 297,
+        aspectRatio: LETTERHEAD_A4_ASPECT,
         borderRadius: radius.md,
         overflow: "hidden",
         backgroundColor: "#FFFFFF",
@@ -40,10 +40,7 @@ export const LetterheadPreview = memo(function LetterheadPreview({
         position: "relative",
       },
       bg: { width: "100%", height: "100%" },
-      writable: {
-        position: "absolute",
-        overflow: "hidden",
-      },
+      writable: { position: "absolute", overflow: "hidden" },
       dateRow: { fontSize: 7, color: "#5C5F7A", textAlign: "right" },
       reference: { fontSize: 7, color: "#5C5F7A", marginTop: 2 },
       recipient: { fontSize: 7.5, color: "#0F1226", marginTop: 4 },
@@ -54,6 +51,10 @@ export const LetterheadPreview = memo(function LetterheadPreview({
       signer: { fontSize: 7.5, color: "#0F1226", fontWeight: "700", marginTop: 4 },
       signerRole: { fontSize: 7, color: "#5C5F7A" },
       hint: { ...typography.caption, color: c.textSubtle, marginTop: 8 },
+      genPad: { position: "absolute", top: 8, left: 10, right: 10, gap: 6 },
+      genName: { fontSize: 9, fontWeight: "700", color: "#0F1226" },
+      genLine: { fontSize: 7, color: "#5C5F7A" },
+      appearanceNote: { fontSize: 6, color: "#5C5F7A", marginTop: 2 },
     })
   );
 
@@ -86,75 +87,69 @@ export const LetterheadPreview = memo(function LetterheadPreview({
   const generated = config.generatedLayout;
   const isGenerated =
     config.sourceType === "generated_layout" && Boolean(generated);
+  const headerFlex = generated ? generatedHeaderFlex(generated.logoAlign) : null;
+  const appearanceNeedsPdf =
+    generated?.appearance === "grayscale" || generated?.appearance === "mono";
 
   return (
     <View>
       <View style={styles.frame}>
-        {isGenerated && generated ? (
+        {isGenerated && generated && headerFlex ? (
           <View
-            style={{
-              position: "absolute",
-              top: 8,
-              left: 10,
-              right: 10,
-              flexDirection:
-                generated.logoAlign === "center" ? "column" : "row",
-              alignItems:
-                generated.logoAlign === "center"
-                  ? "center"
-                  : generated.logoAlign === "right"
-                    ? "flex-start"
-                    : "flex-start",
-              justifyContent:
-                generated.logoAlign === "right"
-                  ? "flex-end"
-                  : generated.logoAlign === "center"
-                    ? "center"
-                    : "flex-start",
-              gap: 6,
-            }}
+            style={[
+              styles.genPad,
+              {
+                flexDirection: headerFlex.flexDirection,
+                justifyContent: headerFlex.justifyContent,
+                alignItems: headerFlex.alignItems,
+              },
+            ]}
           >
-            {generated.logoUri ? (
+            {generated.logoUri &&
+            (generated.logoUri.startsWith("data:") ||
+              generated.logoUri.startsWith("http")) ? (
               <Image
                 source={{ uri: generated.logoUri }}
                 style={{ width: 48, height: 32 }}
                 resizeMode="contain"
               />
             ) : null}
-            <View
-              style={{
-                alignItems:
-                  generated.logoAlign === "center"
-                    ? "center"
-                    : generated.logoAlign === "right"
-                      ? "flex-end"
-                      : "flex-start",
-              }}
-            >
+            <View style={{ alignItems: headerFlex.alignItems }}>
               {generated.businessName ? (
-                <Text style={{ fontSize: 9, fontWeight: "700", color: "#0F1226" }}>
+                <Text style={[styles.genName, { textAlign: headerFlex.textAlign }]}>
                   {generated.businessName}
                 </Text>
               ) : null}
               {generated.address ? (
-                <Text style={{ fontSize: 7, color: "#5C5F7A" }}>{generated.address}</Text>
+                <Text style={[styles.genLine, { textAlign: headerFlex.textAlign }]}>
+                  {generated.address}
+                </Text>
               ) : null}
               {generated.contact ? (
-                <Text style={{ fontSize: 7, color: "#5C5F7A" }}>{generated.contact}</Text>
+                <Text style={[styles.genLine, { textAlign: headerFlex.textAlign }]}>
+                  {generated.contact}
+                </Text>
               ) : null}
               {generated.gstin ? (
-                <Text style={{ fontSize: 7, color: "#5C5F7A" }}>
+                <Text style={[styles.genLine, { textAlign: headerFlex.textAlign }]}>
                   GSTIN: {generated.gstin}
+                </Text>
+              ) : null}
+              {appearanceNeedsPdf ? (
+                <Text style={styles.appearanceNote}>
+                  {generated.appearance === "mono" ? "B&W" : "Grayscale"} (PDF)
                 </Text>
               ) : null}
             </View>
           </View>
         ) : config.imageDataUri ? (
-          <Image
-            source={{ uri: config.imageDataUri }}
-            style={styles.bg}
-            resizeMode="contain"
-          />
+          <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, justifyContent: "flex-start" }}>
+            <Image
+              source={{ uri: config.imageDataUri }}
+              style={{ width: "100%", height: "100%" }}
+              resizeMode={IMPORTED_PAGE_FIT}
+            />
+          </View>
         ) : null}
         <View pointerEvents="none" style={[styles.writable, writableStyle]}>
           <Text style={styles.dateRow}>
@@ -166,9 +161,7 @@ export const LetterheadPreview = memo(function LetterheadPreview({
               {t("letterhead.labels.reference")}: {input.reference.trim()}
             </Text>
           ) : null}
-          {recipientText ? (
-            <Text style={styles.recipient}>{recipientText}</Text>
-          ) : null}
+          {recipientText ? <Text style={styles.recipient}>{recipientText}</Text> : null}
           {input.subject?.trim() ? (
             <Text style={styles.subject}>
               {t("letterhead.labels.subject")}: {input.subject.trim()}

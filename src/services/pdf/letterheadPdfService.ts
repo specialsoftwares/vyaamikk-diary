@@ -229,7 +229,8 @@ export async function buildLetterheadHtml(
     height: auto;
     object-fit: contain;
   }
-  .generated-logo.mono { filter: grayscale(1) contrast(1.15); }
+  /* Real CSS filters — mono is high-contrast B&W, not opacity greying. */
+  .generated-logo.mono { filter: grayscale(1) contrast(3); }
   .generated-logo.grayscale { filter: grayscale(1); }
   .generated-text { font-size: 10pt; line-height: 1.35; color: #0F1226; }
   .generated-name { font-size: 13pt; font-weight: 700; margin-bottom: 2pt; }
@@ -346,6 +347,8 @@ const attrEsc = escapeHtmlAttr;
 function buildGeneratedHeaderHtml(
   layout: NonNullable<LetterheadConfig["generatedLayout"]>
 ): string {
+  // Keep CSS class names in sync with letterheadVisualSpec.pdfAlignClass /
+  // appearanceCssFilterClass (imported dynamically avoided to keep PDF pure).
   const alignClass =
     layout.logoAlign === "center"
       ? "align-center"
@@ -358,9 +361,16 @@ function buildGeneratedHeaderHtml(
       : layout.appearance === "grayscale"
         ? "grayscale"
         : "";
-  const logo = layout.logoUri?.trim()
-    ? `<img class="generated-logo ${logoFilter}" src="${attrEsc(layout.logoUri.trim())}" alt="" />`
-    : "";
+  // Only embed durable data: URIs or https — never device-local file:// logos.
+  const logoSrc = layout.logoUri?.trim() ?? "";
+  const logoOk =
+    logoSrc.startsWith("data:") ||
+    logoSrc.startsWith("https://") ||
+    logoSrc.startsWith("http://");
+  const logo =
+    logoOk
+      ? `<img class="generated-logo ${logoFilter}" src="${attrEsc(logoSrc)}" alt="" />`
+      : "";
   const lines = [
     layout.businessName?.trim(),
     layout.address?.trim(),

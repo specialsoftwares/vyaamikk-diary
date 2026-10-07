@@ -10,6 +10,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AppError } from "@/domain/errors";
 import { createLogger } from "@/utils/logger";
 
+import { validateWritingMargins } from "./letterheadGeneratedLayout";
 import type { LetterheadConfig, LetterheadRepository } from "./types";
 
 const log = createLogger("letterhead/mock");
@@ -37,6 +38,10 @@ export const mockLetterheadRepository: LetterheadRepository = {
 
   async save(userId, patch) {
     if (!userId) throw new AppError("permission_denied", "Not signed in.");
+    const marginsCheck = validateWritingMargins(patch.margins);
+    if (!marginsCheck.ok) {
+      throw new AppError("save_failed", "Writing area margins are invalid.");
+    }
     const now = Date.now();
     const existing = await this.get(userId);
     const next: LetterheadConfig = {

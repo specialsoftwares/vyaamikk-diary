@@ -1305,7 +1305,13 @@
     "genAppearanceMono": "கருப்பு வெள்ளை",
     "genFieldAddress": "முகவரி",
     "genFieldContact": "தொடர்பு",
-    "genFieldGstin": "GSTIN"
+    "genFieldGstin": "GSTIN",
+    "genRefreshProfile": "சுயவிவரத்திலிருந்து விவரங்களைப் புதுப்பிக்கவும்",
+    "genRetryLogo": "லோகோவை மீண்டும் முயற்சிக்கவும்",
+    "setupDecrease": "குறைக்க",
+    "setupIncrease": "அதிகரிக்க",
+    "setupGalleryFallback": "கேலரியிலிருந்து படத்தைத் தேர்ந்தெடுக்கவும் (தானியங்கி ஸ்கேன் அல்ல).",
+    "incompleteGalleryAppearance": "கேலரி பட நிற மாற்றங்கள் இன்னும் இல்லை. ஸ்கேன் செய்யும்போது ஸ்கேனர் வடிகட்டிகள் அல்லது லோகோ பாதையைப் பயன்படுத்துங்கள்."
   },
   "materialMovement": {
     "ewayBillLabel": "E-way Bill No. / EBN",

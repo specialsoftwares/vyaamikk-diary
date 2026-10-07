@@ -20,6 +20,7 @@ import {
 } from "@/services/storage/userStorage";
 
 import { resolveLetterheadImageSource } from "./letterheadImageResolver";
+import { validateWritingMargins } from "./letterheadGeneratedLayout";
 import type { LetterheadConfig, LetterheadRepository } from "./types";
 
 const log = createLogger("letterhead/firebase");
@@ -75,6 +76,9 @@ export const firebaseLetterheadRepository: LetterheadRepository = {
     if (!hasTemplateImage(data)) return null;
 
     const config = mapConfigFromFirestore(userId, data);
+    if (!validateWritingMargins(config.margins).ok) {
+      config.margins = { topPct: 19, bottomPct: 11, leftPct: 12, rightPct: 12 };
+    }
     const resolved = await resolveLetterheadImageSource(config);
     if (resolved.uri) {
       config.imageDataUri = resolved.uri;
@@ -84,6 +88,11 @@ export const firebaseLetterheadRepository: LetterheadRepository = {
 
   async save(userId, patch) {
     if (!userId) throw new AppError("permission_denied", "Not signed in.");
+
+    const marginsCheck = validateWritingMargins(patch.margins);
+    if (!marginsCheck.ok) {
+      throw new AppError("save_failed", "Writing area margins are invalid.");
+    }
 
     const now = Date.now();
     const snap = await getDoc(configDocRef(userId));
@@ -101,11 +110,17 @@ export const firebaseLetterheadRepository: LetterheadRepository = {
     const hasNewImage = Boolean(incomingImage) && (isDataUri || isLocalFile);
     const useStorage = hasNewImage && isUserStorageAvailable();
 
+    const generatedLogo = patch.generatedLayout?.logoUri?.trim() ?? "";
+    const generatedLogoBytes = generatedLogo.startsWith("data:")
+      ? Math.ceil(((generatedLogo.split(",")[1] ?? "").length * 3) / 4)
+      : 0;
+
     if (!useStorage && isDataUri) {
       const approxSize =
         incomingImage.length +
         (patch.signatureDataUri?.length ?? 0) +
         (patch.stampDataUri?.length ?? 0) +
+        generatedLogoBytes +
         256;
       if (approxSize > APPROX_DOC_LIMIT_BYTES) {
         throw new AppError(
@@ -117,11 +132,12 @@ export const firebaseLetterheadRepository: LetterheadRepository = {
       const approxSize =
         (patch.signatureDataUri?.length ?? 0) +
         (patch.stampDataUri?.length ?? 0) +
+        generatedLogoBytes +
         256;
       if (approxSize > APPROX_DOC_LIMIT_BYTES) {
         throw new AppError(
           "save_failed",
-          "Signature or stamp image is too large. Try a smaller image."
+          "Signature, stamp, or logo image is too large. Try a smaller image."
         );
       }
     }

@@ -1,14 +1,12 @@
 /**
- * Letterhead setup: pick template image + adjust writable area + optional
- * signature/stamp assets and reusable letter defaults, then save.
+ * Letterhead setup: pick/scan template + writing area + signature/stamp + save.
  *
- * Template selection copies into an app-private file (no full-resolution
- * base64 in React state). Storage upload uses Expo File + resumable upload
- * so React Native never builds ArrayBuffer-backed Blobs (RN ≥ 0.74).
+ * Uploads use authenticated media REST (no Firebase JS Blob construction).
+ * Candidate ownership uses SyncSessionToken; fileGeneration is path-only.
  */
 
-import React, { useCallback, useEffect, useState } from "react";
-import { Image, InteractionManager, Platform, StyleSheet, Text, View } from "react-native";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Image, InteractionManager, Platform, StyleSheet, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 
@@ -22,6 +20,7 @@ import {
   TextField,
   LocaleUiText,
 } from "@/components/ui";
+import { WritingAreaControls } from "@/components/letterhead/WritingAreaControls";
 import { useAuth } from "@/state/auth";
 import {
   analyzeTemplateImage,
@@ -32,9 +31,11 @@ import {
   type LetterheadConfig,
   type LetterheadMargins,
   type TemplateWarningKey,
+  validateWritingMargins,
 } from "@/services/letterhead";
 import {
   assertCandidateOwner,
+  beginLetterheadCapture,
   LetterheadCandidateError,
   persistLetterheadCandidateFromAsset,
   persistLetterheadCandidateFromLocalFile,
@@ -46,8 +47,9 @@ import {
   getDocumentScannerCapability,
   scanLetterheadDocument,
 } from "@/services/letterhead/documentScanner";
+import { IMPORTED_PAGE_FIT } from "@/services/letterhead/letterheadVisualSpec";
 import { useT } from "@/i18n";
-import { radius, spacing, typography, useThemedStyles } from "@/theme";
+import { spacing, typography, useThemedStyles } from "@/theme";
 import { AppError, userFacingMessage } from "@/domain/errors";
 import { getActiveBackend } from "@/config/env";
 
@@ -65,12 +67,19 @@ export default function LetterheadSetupScreen() {
   const t = useT();
   const router = useRouter();
   const { entry } = useLocalSearchParams<{ entry?: string }>();
+  const scannerOk = getDocumentScannerCapability().canScan;
   const preferredEntry: TemplateEntry =
-    entry === "scan" && getDocumentScannerCapability().canScan ? "scan" : "gallery";
+    entry === "scan" && scannerOk ? "scan" : "gallery";
+  const isGalleryFallback = preferredEntry === "gallery";
   const { user } = useAuth();
 
   const [existing, setExisting] = useState<LetterheadConfig | null>(null);
   const [candidate, setCandidate] = useState<LetterheadCandidateImage | null>(null);
+  const candidateRef = useRef<LetterheadCandidateImage | null>(null);
+  const mountedRef = useRef(true);
+  const pickGuard = useRef(false);
+  const saveGuard = useRef(false);
+
   const [margins, setMargins] = useState<LetterheadMargins>(DEFAULT_LETTERHEAD_MARGINS);
   const [signatureUri, setSignatureUri] = useState<string | null>(null);
   const [stampUri, setStampUri] = useState<string | null>(null);
@@ -90,32 +99,6 @@ export default function LetterheadSetupScreen() {
       lead: { ...typography.body, color: colors.textMuted, marginBottom: spacing.lg },
       banner: { marginBottom: spacing.md },
       card: { gap: spacing.md, padding: spacing.md },
-      imageFrame: {
-        width: "100%",
-        aspectRatio: 210 / 297,
-        borderRadius: radius.md,
-        overflow: "hidden",
-        backgroundColor: colors.surfaceMuted,
-        position: "relative",
-      },
-      imageFramePlaceholder: {
-        alignItems: "center",
-        justifyContent: "center",
-        borderWidth: 1,
-        borderColor: colors.divider,
-        borderStyle: "dashed",
-      },
-      image: { width: "100%", height: "100%" },
-      placeholderText: { ...typography.titleLg, color: colors.textSubtle, letterSpacing: 2 },
-      writableOverlay: {
-        position: "absolute",
-        borderWidth: 2,
-        borderColor: colors.primary,
-        borderStyle: "dashed",
-        backgroundColor: colors.primaryLight,
-        opacity: 0.5,
-        borderRadius: 4,
-      },
       sectionHeading: {
         ...typography.captionStrong,
         color: colors.textMuted,
@@ -124,17 +107,11 @@ export default function LetterheadSetupScreen() {
         marginTop: spacing.lg,
         marginBottom: spacing.sm,
       },
-      marginRow: { flexDirection: "row", gap: spacing.md },
-      marginField: { flex: 1 },
-      assetRow: {
-        flexDirection: "row",
-        alignItems: "center",
-        gap: spacing.md,
-      },
+      assetRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
       assetThumb: {
         width: 64,
         height: 40,
-        borderRadius: radius.sm,
+        borderRadius: 6,
         backgroundColor: colors.surfaceMuted,
         borderWidth: StyleSheet.hairlineWidth,
         borderColor: colors.divider,
@@ -143,8 +120,28 @@ export default function LetterheadSetupScreen() {
       assetLabel: { ...typography.captionStrong, color: colors.text, marginBottom: spacing.xs },
       assetHint: { ...typography.caption, color: colors.textSubtle, marginTop: spacing.xs },
       cta: { marginTop: spacing.lg },
+      bgImage: { width: "100%", height: "100%" },
     })
   );
+
+  const replaceCandidate = useCallback((next: LetterheadCandidateImage | null) => {
+    const prev = candidateRef.current;
+    candidateRef.current = next;
+    setCandidate(next);
+    if (prev && prev.localUri !== next?.localUri) {
+      void retireLetterheadCandidate(prev);
+    }
+  }, []);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      const owned = candidateRef.current;
+      candidateRef.current = null;
+      if (owned) void retireLetterheadCandidate(owned);
+    };
+  }, []);
 
   useEffect(() => {
     if (!user) return;
@@ -152,7 +149,7 @@ export default function LetterheadSetupScreen() {
     void getLetterheadRepository()
       .get(user.uid)
       .then((c) => {
-        if (cancelled || !c) return;
+        if (cancelled || !mountedRef.current || !c) return;
         setExisting(c);
         setMargins(c.margins ?? DEFAULT_LETTERHEAD_MARGINS);
         setSignatureUri(c.signatureDataUri ?? null);
@@ -167,33 +164,28 @@ export default function LetterheadSetupScreen() {
     };
   }, [user]);
 
-  useEffect(() => {
-    return () => {
-      void retireLetterheadCandidate(candidate);
-    };
-    // Only retire on unmount of the last candidate reference held in closure
-    // via explicit replace paths below; avoid retiring the live candidate on
-    // every state change.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const applyCandidate = useCallback((next: LetterheadCandidateImage) => {
-    setCandidate((prev) => {
-      if (prev) void retireLetterheadCandidate(prev);
-      return next;
-    });
-    setTemplateWarnings(
-      analyzeTemplateImage({
-        width: next.width,
-        height: next.height,
-        approxBytes: next.approxBytes,
-      }).warnings
-    );
-  }, []);
+  const applyCandidate = useCallback(
+    (next: LetterheadCandidateImage) => {
+      if (!mountedRef.current) {
+        void retireLetterheadCandidate(next);
+        return;
+      }
+      replaceCandidate(next);
+      setTemplateWarnings(
+        analyzeTemplateImage({
+          width: next.width,
+          height: next.height,
+          approxBytes: next.approxBytes,
+        }).warnings
+      );
+    },
+    [replaceCandidate]
+  );
 
   const captureTemplateFromGallery = useCallback((): Promise<boolean> => {
     return (async () => {
       if (!user?.uid) throw new LetterheadCandidateError("wrong_owner");
+      const ctx = beginLetterheadCapture(user.uid);
 
       const pending = await ImagePicker.getPendingResultAsync();
       let asset: ImagePicker.ImagePickerAsset | null = null;
@@ -204,7 +196,6 @@ export default function LetterheadSetupScreen() {
           mediaTypes: ["images"],
           allowsEditing: false,
           quality: 1,
-          // File-based path — do not request ImagePicker base64 into JS heap.
           base64: false,
           exif: false,
         });
@@ -212,7 +203,11 @@ export default function LetterheadSetupScreen() {
         asset = result.assets[0];
       }
 
-      const next = await persistLetterheadCandidateFromAsset(user.uid, asset);
+      const next = await persistLetterheadCandidateFromAsset(ctx, asset);
+      if (!mountedRef.current) {
+        await retireLetterheadCandidate(next);
+        return false;
+      }
       applyCandidate(next);
       return true;
     })();
@@ -221,21 +216,26 @@ export default function LetterheadSetupScreen() {
   const captureTemplateFromScanner = useCallback((): Promise<boolean> => {
     return (async () => {
       if (!user?.uid) throw new LetterheadCandidateError("wrong_owner");
+      const ctx = beginLetterheadCapture(user.uid);
       const scanned = await scanLetterheadDocument({
         pageLimit: 1,
         galleryImportAllowed: true,
       });
       if (scanned.status === "canceled") return false;
       if (scanned.status === "unavailable") {
-        setError(t("letterhead.entryScannerUnavailable"));
+        if (mountedRef.current) setError(t("letterhead.entryScannerUnavailable"));
         return captureTemplateFromGallery();
       }
       if (scanned.status !== "success") {
         throw new LetterheadCandidateError("read_failed");
       }
-      const next = await persistLetterheadCandidateFromLocalFile(user.uid, scanned.localUri, {
+      const next = await persistLetterheadCandidateFromLocalFile(ctx, scanned.localUri, {
         mimeType: "image/jpeg",
       });
+      if (!mountedRef.current) {
+        await retireLetterheadCandidate(next);
+        return false;
+      }
       applyCandidate(next);
       return true;
     })();
@@ -249,6 +249,7 @@ export default function LetterheadSetupScreen() {
   const captureAsset = useCallback(async (kind: "signature" | "stamp"): Promise<boolean> => {
     const asset = await pickLetterheadAsset();
     if (!asset) return false;
+    if (!mountedRef.current) return false;
     if (kind === "signature") setSignatureUri(asset.dataUri);
     else setStampUri(asset.dataUri);
     return true;
@@ -256,54 +257,49 @@ export default function LetterheadSetupScreen() {
 
   const runPick = useCallback(
     async (target: PickTarget) => {
-      if (target === "template") {
-        await captureTemplate();
-      } else {
-        await captureAsset(target);
-      }
+      if (target === "template") await captureTemplate();
+      else await captureAsset(target);
     },
     [captureTemplate, captureAsset]
   );
 
   const startPick = useCallback(
     async (target: PickTarget) => {
-      if (picking || permissionBusy) return;
+      if (pickGuard.current || picking || permissionBusy) return;
+      pickGuard.current = true;
       setError(null);
       setPendingTarget(target);
 
-      // ML Kit Document Scanner owns its camera/gallery UI — do not require
-      // app media-library permission before launching the scanner.
       const skipGalleryPermission =
-        target === "template" &&
-        preferredEntry === "scan" &&
-        getDocumentScannerCapability().canScan;
+        target === "template" && preferredEntry === "scan" && scannerOk;
 
-      if (Platform.OS === "android" && !skipGalleryPermission) {
-        const current = await ImagePicker.getMediaLibraryPermissionsAsync();
-        if (!current.granted) {
-          if (current.canAskAgain === false) {
-            setError(t("letterhead.setupPermissionDenied"));
+      try {
+        if (Platform.OS === "android" && !skipGalleryPermission) {
+          const current = await ImagePicker.getMediaLibraryPermissionsAsync();
+          if (!current.granted) {
+            if (current.canAskAgain === false) {
+              setError(t("letterhead.setupPermissionDenied"));
+              return;
+            }
+            setShowPermissionRationale(true);
             return;
           }
-          setShowPermissionRationale(true);
-          return;
         }
-      }
 
-      setPicking(true);
-      try {
+        setPicking(true);
         await runPick(target);
       } catch (e) {
-        setError(mapPickError(e, t));
+        if (mountedRef.current) setError(mapPickError(e, t));
       } finally {
         setPicking(false);
+        pickGuard.current = false;
       }
     },
-    [picking, permissionBusy, runPick, preferredEntry, t]
+    [picking, permissionBusy, runPick, preferredEntry, scannerOk, t]
   );
 
   const onRationaleAllow = useCallback(async () => {
-    if (permissionBusy) return;
+    if (permissionBusy || pickGuard.current) return;
     setPermissionBusy(true);
     setError(null);
     try {
@@ -314,32 +310,33 @@ export default function LetterheadSetupScreen() {
         return;
       }
       await waitForPickerPresentation();
+      pickGuard.current = true;
       setPicking(true);
       await runPick(pendingTarget);
     } catch (e) {
-      setError(mapPickError(e, t));
+      if (mountedRef.current) setError(mapPickError(e, t));
     } finally {
       setPicking(false);
       setPermissionBusy(false);
+      pickGuard.current = false;
     }
   }, [permissionBusy, runPick, pendingTarget, t]);
-
-  const updateMargin = (key: keyof LetterheadMargins) => (raw: string) => {
-    const cleaned = raw.replace(/[^0-9]/g, "").slice(0, 2);
-    const n = Math.max(0, Math.min(80, parseInt(cleaned || "0", 10)));
-    setMargins((m) => ({ ...m, [key]: n }));
-  };
 
   const templateUri = candidate?.localUri ?? existing?.imageDataUri ?? null;
 
   const onSave = async () => {
-    if (!user) return;
+    if (!user || saveGuard.current) return;
     setError(null);
     if (!templateUri) {
       setError(t("letterhead.setupNeedImage"));
       return;
     }
-    if (saving) return;
+    const bounds = validateWritingMargins(margins);
+    if (!bounds.ok) {
+      setError(t("letterhead.setupSaveFailedUnchanged"));
+      return;
+    }
+    saveGuard.current = true;
     setSaving(true);
     const previousExisting = existing;
     try {
@@ -348,7 +345,6 @@ export default function LetterheadSetupScreen() {
         assertCandidateOwner(candidate, user.uid);
         const backend = getActiveBackend();
         if (backend === "local-mock") {
-          // Mock has no Storage — persist inline data URI once at commit.
           imageForSave = await readCandidateDataUri(candidate);
         } else {
           imageForSave = candidate.localUri;
@@ -369,24 +365,25 @@ export default function LetterheadSetupScreen() {
         defaultComplimentaryClose: defaultClose.trim() || null,
         repeatTemplateAllPages: true,
       });
+      if (!mountedRef.current) return;
       setExisting(saved);
       if (candidate) {
-        await retireLetterheadCandidate(candidate);
+        const done = candidate;
+        candidateRef.current = null;
         setCandidate(null);
+        await retireLetterheadCandidate(done);
       }
       router.replace("/(app)/letterhead");
     } catch (e) {
-      // Keep prepared candidate + previous active template.
       if (previousExisting) setExisting(previousExisting);
       if (e instanceof AppError && e.code === "save_failed") {
         setError(t("letterhead.setupImageTooLarge"));
-      } else if (e instanceof LetterheadCandidateError && e.code === "wrong_owner") {
-        setError(t("letterhead.setupSaveFailedUnchanged"));
       } else {
         setError(t("letterhead.setupSaveFailedUnchanged"));
       }
     } finally {
       setSaving(false);
+      saveGuard.current = false;
     }
   };
 
@@ -396,6 +393,12 @@ export default function LetterheadSetupScreen() {
     <Screen scroll form>
       <Header title={t("letterhead.setupTitle")} showBack backFrom="letterhead" />
       <LocaleUiText style={styles.lead}>{t("letterhead.setupIntro")}</LocaleUiText>
+
+      {isGalleryFallback ? (
+        <View style={styles.banner}>
+          <Banner tone="info" message={t("letterhead.setupGalleryFallback")} />
+        </View>
+      ) : null}
 
       {error ? (
         <View style={styles.banner}>
@@ -410,27 +413,28 @@ export default function LetterheadSetupScreen() {
       ))}
 
       <Card style={styles.card}>
-        {templateUri ? (
-          <View style={styles.imageFrame}>
-            <Image source={{ uri: templateUri }} style={styles.image} resizeMode="contain" />
-            <View
-              pointerEvents="none"
-              style={[
-                styles.writableOverlay,
-                {
-                  top: `${margins.topPct}%`,
-                  bottom: `${margins.bottomPct}%`,
-                  left: `${margins.leftPct}%`,
-                  right: `${margins.rightPct}%`,
-                },
-              ]}
-            />
-          </View>
-        ) : (
-          <View style={[styles.imageFrame, styles.imageFramePlaceholder]}>
-            <Text style={styles.placeholderText}>A4</Text>
-          </View>
-        )}
+        <WritingAreaControls
+          margins={margins}
+          onChange={setMargins}
+          background={
+            templateUri ? (
+              <Image
+                source={{ uri: templateUri }}
+                style={styles.bgImage}
+                resizeMode={IMPORTED_PAGE_FIT}
+              />
+            ) : undefined
+          }
+          labels={{
+            section: t("letterhead.setupAdjust"),
+            top: t("letterhead.setupTopMargin"),
+            bottom: t("letterhead.setupBottomMargin"),
+            left: t("letterhead.setupLeftMargin"),
+            right: t("letterhead.setupRightMargin"),
+            decrease: t("letterhead.setupDecrease"),
+            increase: t("letterhead.setupIncrease"),
+          }}
+        />
         <Button
           label={templateUri ? t("letterhead.setupReplace") : t("letterhead.setupPick")}
           variant="secondary"
@@ -438,50 +442,14 @@ export default function LetterheadSetupScreen() {
           loading={picking && pendingTarget === "template"}
           disabled={busy}
         />
-        {preferredEntry === "scan" && getDocumentScannerCapability().canScan ? (
+        {preferredEntry === "scan" && scannerOk ? (
+          <LocaleUiText style={styles.assetHint}>{t("letterhead.entryScanBody")}</LocaleUiText>
+        ) : (
           <LocaleUiText style={styles.assetHint}>
-            {t("letterhead.entryScanBody")}
+            {t("letterhead.incompleteGalleryAppearance")}
           </LocaleUiText>
-        ) : null}
+        )}
       </Card>
-
-      <LocaleUiText style={styles.sectionHeading}>{t("letterhead.setupAdjust")}</LocaleUiText>
-      <View style={styles.marginRow}>
-        <TextField
-          label={t("letterhead.setupTopMargin")}
-          keyboardType="number-pad"
-          value={String(margins.topPct)}
-          onChangeText={updateMargin("topPct")}
-          maxLength={2}
-          containerStyle={styles.marginField}
-        />
-        <TextField
-          label={t("letterhead.setupBottomMargin")}
-          keyboardType="number-pad"
-          value={String(margins.bottomPct)}
-          onChangeText={updateMargin("bottomPct")}
-          maxLength={2}
-          containerStyle={styles.marginField}
-        />
-      </View>
-      <View style={styles.marginRow}>
-        <TextField
-          label={t("letterhead.setupLeftMargin")}
-          keyboardType="number-pad"
-          value={String(margins.leftPct)}
-          onChangeText={updateMargin("leftPct")}
-          maxLength={2}
-          containerStyle={styles.marginField}
-        />
-        <TextField
-          label={t("letterhead.setupRightMargin")}
-          keyboardType="number-pad"
-          value={String(margins.rightPct)}
-          onChangeText={updateMargin("rightPct")}
-          maxLength={2}
-          containerStyle={styles.marginField}
-        />
-      </View>
 
       <LocaleUiText style={styles.sectionHeading}>{t("letterhead.assetsSection")}</LocaleUiText>
       <Card style={styles.card}>
@@ -600,12 +568,12 @@ function mapPickError(e: unknown, t: (k: string) => string): string {
   if (e instanceof LetterheadCandidateError) {
     if (e.code === "too_large") return t("letterhead.setupImageTooLarge");
     if (e.code === "wrong_owner") return t("letterhead.setupSaveFailedUnchanged");
+    if (e.code === "unsupported_format") return t("letterhead.entryCouldNotOpenPhoto");
     return t("letterhead.setupImageReadFailed");
   }
   if (e instanceof Error && e.message === "IMAGE_READ_FAILED") {
     return t("letterhead.setupImageReadFailed");
   }
-  // Never surface raw RN Blob / Storage internals.
   const raw = e instanceof Error ? e.message : "";
   if (/Creating blobs from|ArrayBufferView/i.test(raw)) {
     return t("letterhead.setupImageReadFailed");

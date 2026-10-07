@@ -1,0 +1,12 @@
+{
+  "outDir": "/Users/shivamsaurav/vyd-worktrees/letterhead-repair/docs/release/packets/letterhead/pdf-fixtures",
+  "cases": [
+    "imported-contain-top",
+    "generated-left",
+    "generated-center",
+    "generated-right",
+    "generated-mono",
+    "multi-page-body"
+  ],
+  "note": "HTML fixtures locked to letterheadPdfService.css rules. Open in a browser for visual A4 check. Device Print remains separate."
+}

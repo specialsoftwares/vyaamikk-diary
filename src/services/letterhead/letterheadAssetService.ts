@@ -42,6 +42,19 @@ async function toPickedAsset(
 ): Promise<PickedLetterheadAsset> {
   if (!asset.uri) throw new LetterheadAssetError("read_failed");
 
+  // Bound before allocating full-file base64.
+  if (typeof asset.fileSize === "number" && asset.fileSize > MAX_ASSET_BYTES) {
+    throw new LetterheadAssetError("too_large");
+  }
+  try {
+    const info = await FileSystem.getInfoAsync(asset.uri);
+    if (info.exists && "size" in info && typeof info.size === "number") {
+      if (info.size > MAX_ASSET_BYTES) throw new LetterheadAssetError("too_large");
+    }
+  } catch (e) {
+    if (e instanceof LetterheadAssetError) throw e;
+  }
+
   let base64 = asset.base64 ?? null;
   if (!base64) {
     try {
