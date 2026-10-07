@@ -332,3 +332,7 @@ Source HEAD **`4c2e97bc7589c67812f56d8d53cc64bd33d5e134`** on PR #31 (`ef6da69` 
 
 Correction tip **`6150c5b`** on PR #31 after reviewed **`4c2e97b`** / docs **`bfd47b0`**. Arrival picker: only `set` commits/advances; dismiss at date or time preserves original ISO (datetimepicker 8.4.4 `originalValue` on dismiss). Unavailable picker: banner, no Change. Nav destinations helper + behavioral tests; `composerMovementGrin` + arrival wired into `test:grin-product`. Dep round-2: browserslist/fast-uri/http-cache-semantics/js-yaml/xmldom overrides; `basic-ftp` labeled **major-version override** with get-uri API smoke; builder `PUPPETEER_SKIP_DOWNLOAD`; `extract-zip` + `image-size@1.x` remain open. Canonical CI **`37603081878`** / job **`112731923950`** SUCCESS (`test:all` 161/161, `ci:verify PASS`). Installed/deployed remain **`540e07a`/vc23**; GRIN Functions previously live — this assignment did not update them. D1 when device available. No build/upload/deploy/billing/purge/main/public.
 
+
+## B1 vc24 EAS AAB (unsent, 2026-10-07)
+
+Application **`7c938f8`** / versionCode **24**. Matching CI **`37616692491`** / **`112776635103`**. EAS **`c931da3d-4dcb-472e-9c63-f72217c6d95c` FINISHED** (internal-grin STORE AAB). AAB SHA-256 `dbda921d…`. Upload-key MATCH. Play inventory highest Active **23**; **24 unused**. Play upload **not** authorized. Installed remains **`540e07a`/vc23**. Do not mark device / billing / public Done.

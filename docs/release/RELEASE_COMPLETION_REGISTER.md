@@ -12,20 +12,25 @@ TOOLING (ops-guard suite; not application CI).
 
 ---
 
-## Current state (authoritative — 2026-10-07 correction closeout)
+## Current state (authoritative — 2026-10-07 B1 vc24 AAB)
 
 | Item | Current value |
 |---|---|
 | Repo / branch / PR | `specialsoftwares/vyaamikk-diary` `integration/grin-g1-g5-source` draft **#31** |
-| **Installed / deployed pin (unchanged)** | Application **`540e07aa07f376716484adb879ce66cb9fb170ce`** / **vc23** Internal Testing. **GRIN Functions were previously deployed and enabled**; this source assignment does **not** redeploy or change them. Do **not** say “no live Functions.” Do **not** reuse vc23 build/CI evidence for the new tree. |
-| **Reviewed source (prior)** | **`4c2e97b`** (UX/deps); docs head was **`bfd47b0`**. |
-| **Source HEAD (this correction)** | Tip **`6150c5b5d7e1c34bffbb51750dea3eb3c4ef2ffb`** (`d22adbd` arrival-cancel + nav tests; `970db3a` dep round-2; `6150c5b` docs). Reviewed prior **`4c2e97b`**; docs ancestor **`bfd47b0`**. Ancestor **`06bb0dc`** NARROW CI fix **preserved**. `read_export=NARROW` unchanged. |
-| **Canonical CI** | GHA **`37603081878` SUCCESS**, job **`112731923950` `verify`**, checkout **`6150c5b`**. `test:all` **161/161** (includes `test:grin-product` with arrival + destinations + contract); `ci:verify PASS`; `basicFtpOverride.smoke` ok in renderer tests. Prior SUCCESS on **`4c2e97b`**: **`37587670103`** / **`112681481020`**. |
-| Customer UX | + New Record → Material Movement → **Goods receipt & inspection** when admitted; basic goods-received preserved; Saved Records find path unchanged. Arrival picker: only `event.type==="set"` commits/advances; dismiss cancels without timestamp mutation; unavailable picker shows banner (no fake Change→Done). |
-| Tests wired into `test:grin-product` (discovered by `test:all`) | `composerMovementGrin.contract.test.ts`, `materialMovementDestinations.test.ts` (enabled/disabled + destination admission + basic receipt preserved), `GrinArrivalDateTimeField.test.ts` (injected picker; not NATIVE_DEVICE). |
-| Dependency closeout | Round-2 cleared browserslist / fast-uri / http-cache-semantics / xmldom / js-yaml highs. **`basic-ftp` = major-version override 6.2.2** (API smoke). **`image-size@1.2.1`** remains (Metro 1.x; fix is 2.0.3+). **`extract-zip@2.0.1`** remains; builder now sets `PUPPETEER_SKIP_DOWNLOAD`. Evidence: `analysis/deps-security-closeout/TRIAGE.md`. |
-| Device D1 | Continue OnePlus 12R upgrade over installed vc23 when owner available. **No** uninstall / clear / OTP retry loops. |
-| HOLDs | No new EAS / Play upload / Functions deploy / billing / purge / main / public from this assignment. |
+| **Installed Internal (Play Active)** | Still **`540e07a` / vc23**. vc24 AAB built; **not uploaded**. GRIN Functions previously deployed/enabled — this build did **not** redeploy them. |
+| **B1 application SHA** | **`7c938f836891411752e6fa6af8879ddfe275ab60`** — vc24 + renderer CI `PUPPETEER_SKIP_DOWNLOAD` for separate Node 22 container. Parent `13da527`. NARROW preserved. |
+| **Matching CI (application)** | GHA **`37616692491` SUCCESS** / job **`112776635103`** on **`7c938f8`**. `test:all` 161/161; `ci:verify PASS`; CI log shows `PUPPETEER_SKIP_DOWNLOAD=true`. |
+| **EAS B1 (COMPLETE)** | Build **`c931da3d-4dcb-472e-9c63-f72217c6d95c`** FINISHED — profile `internal-grin`, STORE AAB, no auto-submit. AAB SHA-256 `dbda921d…bfd43d`; package `com.specialsoftwares.vyaamikkdiary` **1.0.0 / 24**; upload-key SHA-256 **MATCH** established key. Archive under access-controlled `vyd-private` (not public repo). |
+| Customer UX (in AAB) | GRIN under Material Movement when admitted; arrival cancel fix; basic goods-received + Saved Records preserved. |
+| Dependency residuals | `extract-zip@2.0.1` / `image-size@1.2.1` **open** (mitigated for this Internal build; not patched/removed). Retained for public-release review. |
+| Device D1 | Continue on installed **vc23** when owner available; after separate upload auth, upgrade path is vc24. **No** uninstall / clear / OTP loops. |
+| HOLDs | **Play upload not authorized.** No billing / purge / Functions deploy / main / public / OTA from this instruction. |
+
+---
+
+## Prior (2026-10-07 correction closeout — superseded for B1 pin)
+
+Correction tip **`6150c5b`** / CI **`37603081878`**. Succeeded by application freeze **`7c938f8`** + EAS B1 above. Installed Play pin remained **vc23**.
 
 ---
 
