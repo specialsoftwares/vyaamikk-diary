@@ -1657,6 +1657,7 @@ const hi: Translations = {
     setupReplace: "अलग इमेज चुनें",
     setupSaveFailedUnchanged:
       "सेव नहीं हो सका; आपका मौजूदा लेटरहेड वैसा ही है।",
+    setupLoadFailed: "लेटरहेड लोड नहीं हो सका। फिर कोशिश करें।",
     setupAdjust: "लिखने योग्य क्षेत्र",
     setupTopMargin: "ऊपर मार्जिन (%)",
     setupBottomMargin: "नीचे मार्जिन (%)",

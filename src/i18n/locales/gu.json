@@ -1293,6 +1293,7 @@
     "entryScannerUnavailable": "આ ડિવાઇસ પર સ્કેનર ઉપલબ્ધ નથી. તમે ગેલરીમાંથી ફોટો પસંદ કરી શકો છો.",
     "entryCouldNotOpenPhoto": "આ ફોટો ખોલી શકાયો નહીં.",
     "setupSaveFailedUnchanged": "સેવ થઈ શક્યું નહીં; તમારું હાલનું લેટરહેડ યથાવત્ છે.",
+    "setupLoadFailed": "લેટરહેડ લોડ થઈ શક્યું નહીં. ફરી પ્રયાસ કરો.",
     "genLayoutSection": "લોગો સ્થાન",
     "genAppearanceSection": "દેખાવ",
     "genDetailsSection": "વ્યવસાય વિગતો",

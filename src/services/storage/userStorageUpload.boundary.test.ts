@@ -59,6 +59,40 @@ test("userStorage upload path uses media REST + uploadAsync, not uploadBytesResu
   assert.match(coreSrc, /Refusing production Storage URL while emulator host is set/);
 });
 
+test("production default media request construction (endpoint, query, binary, content-type, auth header)", async () => {
+  const { buildMediaUploadUrl } = await import("./userStorageUploadCore");
+  const prev = process.env.FIREBASE_STORAGE_EMULATOR_HOST;
+  delete process.env.FIREBASE_STORAGE_EMULATOR_HOST;
+  try {
+    const url = buildMediaUploadUrl("users/alice/letterhead/sample.jpg", {
+      bucket: "vyaamikk-diary.appspot.com",
+      emulatorHost: null,
+    });
+    assert.match(url, /^https:\/\/firebasestorage\.googleapis\.com\/v0\/b\//);
+    assert.match(url, /\/o\?name=/);
+    assert.match(url, /uploadType=media/);
+    assert.doesNotMatch(url, /uploadType=multipart/);
+  } finally {
+    if (prev === undefined) delete process.env.FIREBASE_STORAGE_EMULATOR_HOST;
+    else process.env.FIREBASE_STORAGE_EMULATOR_HOST = prev;
+  }
+
+  // Production ports: raw binary upload type, Content-Type, Authorization present
+  // (Bearer scheme). Do not assert or print token values.
+  assert.match(uploadSrc, /FileSystemUploadType\.BINARY_CONTENT/);
+  assert.match(uploadSrc, /httpMethod:\s*"POST"/);
+  assert.match(uploadSrc, /Authorization:\s*`Bearer \$\{idToken\}`/);
+  assert.match(uploadSrc, /"Content-Type":\s*contentType/);
+  assert.match(uploadSrc, /createDefaultMediaUploadPorts/);
+  // Emulator multipart adapter is separately labelled — not this production path.
+  const mediaRest = fs.readFileSync(
+    path.join(import.meta.dirname, "letterheadMediaRest.emulator.test.ts"),
+    "utf8"
+  );
+  assert.match(mediaRest, /EMULATOR_MULTIPART_ADAPTER/);
+  assert.match(mediaRest, /NOT[\s\S]*identical production wire-format/);
+});
+
 test("attachment helpers share the same media upload path", () => {
   assert.match(storageSrc, /export async function uploadRecordAttachment/);
   assert.match(storageSrc, /uploadBase64ToPath/);

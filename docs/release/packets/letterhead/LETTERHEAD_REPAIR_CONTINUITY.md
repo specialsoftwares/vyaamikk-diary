@@ -1,6 +1,6 @@
 # Letterhead repair — continuity & next-build packet
 
-Updated: **2026-10-08** (PR #32 final targeted corrections)
+Updated: **2026-10-08** (PR #32 runtime regression corrections)
 
 ## Continuity snapshot
 
@@ -8,19 +8,28 @@ Updated: **2026-10-08** (PR #32 final targeted corrections)
 |---|---|
 | Dirty main workspace | `draft/goods-evidence-domain-contract` — **not edited** |
 | Reviewed / corrected branch | `fix/letterhead-repair-scan` |
-| Prior closeout HEAD | `6b9d5760314e4f1703e03ba68b6e183377b5c9aa` (CI 37670254136 / verify 112959900623) |
-| Final corrections tip | **`ff8dd1782225ca5d68a4be9bb1e52cbbfac187a4`** (CI 37679423265 / verify 112991830178) |
+| Prior closeout HEAD | `ff8dd1782225ca5d68a4be9bb1e52cbbfac187a4` (CI 37679423265 / verify 112991830178) |
+| Runtime regression tip | **_(set after CI)_** |
 | Application freeze (vc24 AAB) | `7c938f8` · EAS `c931da3d-…` · **unchanged** |
 | Isolation | Worktree `/Users/shivamsaurav/vyd-worktrees/letterhead-repair` |
+| Material Movement / unified GRIN | **Queued** — starts only after Letterhead is merged into `integration/grin-g1-g5-source` (do not merge main to satisfy) |
 
-## Final corrections (this tip)
+## Runtime regression corrections (this tip)
 
 | # | Item | Status | Notes |
 |---|---|---|---|
-| 1 | Retired editor state | **Done** | Production `createLetterheadSetupEditorRuntime` binds editor/completions to uid+generation; clears all retired-owner template/signature/stamp/sender fields; A→B / A→logout→A / B-null-load via runtime + memory repo + mounted setup wiring. Does **not** claim issued remote writes can be cancelled. |
-| 2 | Tall-image contain | **Done** | `computeImportedContainLayout` uses `min(frameW/imgW, frameH/imgH)`; 400×800 in 210×297 → 148.5×297; setup + document preview share geometry; tall fixture in PDF render. |
-| 3 | Joined evidence | **Done** | Rules SDK labelled; media-REST joined emulator via production upload core + host transport; owner bytes / anon+cross-owner deny; fresh PDF gate under `pdf-fresh-*` (committed `pdf/` does not count); CI installs Chromium. |
-| 4 | Prior accepted work | **Preserved** | Session/upload checks, MIME admission, cleanup, production HTML extraction. |
+| 1 | Initial load vs concurrent edits | **Done** | Dirty-editor policy: delayed/retried `get` updates `existing` baseline only; never clears dirty candidate/signature/margins/sender. `load_failed` + screen retry. Prior A→B / A→logout→A kept. |
+| 2 | Single-flight save | **Done** | Synchronous owner/attempt-bound flight before first await; old finally cannot unlock newer owner. |
+| 3 | Upload evidence labelling | **Done** | `EMULATOR_MULTIPART_ADAPTER` labelled; production request-construction test for media endpoint/query/BINARY_CONTENT/Content-Type/Bearer presence (no credential print). Native Expo binary-media still device-pending. |
+| 4 | Prior accepted work | **Preserved** | Ownership, MIME, cleanup, contain-geometry, fresh-PDF. |
+
+## Prior final corrections (retained)
+
+| # | Item | Status | Notes |
+|---|---|---|---|
+| 1 | Retired editor state | **Done** | uid+generation-bound runtime; clear retired-owner fields. |
+| 2 | Tall-image contain | **Done** | `min(frameW/imgW, frameH/imgH)`; 400×800 → 148.5×297. |
+| 3 | Joined evidence | **Done** | Rules SDK + media-REST emulator + fresh PDF gate. |
 
 ## Prior closeout items (retained)
 

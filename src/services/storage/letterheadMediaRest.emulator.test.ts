@@ -1,11 +1,19 @@
 /**
- * Joined Storage emulator test: production uploadLocalFileViaMediaApi core +
- * actual media-REST request shape through a host transport adapter.
+ * EMULATOR_MULTIPART_ADAPTER
+ *
+ * Joined Storage emulator test: production `uploadLocalFileViaMediaApi` core with
+ * a host transport that substitutes multipart for production binary media and
+ * uses emulator-specific Firebase-scheme mock auth.
+ *
+ * This is useful owner/deny/byte evidence against the emulator. It is NOT
+ * identical production wire-format acceptance (production defaults:
+ * uploadType=media, BINARY_CONTENT, Bearer ID token — see
+ * userStorageUpload.boundary.test.ts / createDefaultMediaUploadPorts).
  *
  * - Owner success + downloaded-byte equality
  * - Anonymous / cross-owner denial
  * - No Admin bypass, production endpoints, or production credentials
- * - Native Expo uploadAsync remains device-pending
+ * - Native Expo binary-media success remains device-pending
  *
  * Keep letterheadStorage.emulator.test.ts as the Rules SDK (uploadBytes) suite.
  */

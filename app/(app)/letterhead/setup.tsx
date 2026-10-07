@@ -168,6 +168,7 @@ export default function LetterheadSetupScreen() {
       assetLabel: { ...typography.captionStrong, color: colors.text, marginBottom: spacing.xs },
       assetHint: { ...typography.caption, color: colors.textSubtle, marginTop: spacing.xs },
       cta: { marginTop: spacing.lg },
+      retry: { marginTop: spacing.sm },
     })
   );
 
@@ -349,11 +350,13 @@ export default function LetterheadSetupScreen() {
     pickError ??
     (snap.error === "need_image"
       ? t("letterhead.setupNeedImage")
-      : snap.error === "session_retired"
-        ? t("letterhead.setupSaveFailedUnchanged")
-        : snap.error
+      : snap.error === "load_failed"
+        ? t("letterhead.setupLoadFailed")
+        : snap.error === "session_retired"
           ? t("letterhead.setupSaveFailedUnchanged")
-          : null);
+          : snap.error
+            ? t("letterhead.setupSaveFailedUnchanged")
+            : null);
 
   const onSave = async () => {
     if (!user || snap.saving) return;
@@ -395,6 +398,14 @@ export default function LetterheadSetupScreen() {
       {displayError ? (
         <View style={styles.banner}>
           <Banner tone="danger" message={displayError} />
+          {snap.error === "load_failed" && !pickError ? (
+            <Button
+              label={t("common.retry")}
+              onPress={() => void runtime.load()}
+              disabled={snap.loading || busy}
+              style={styles.retry}
+            />
+          ) : null}
         </View>
       ) : null}
 

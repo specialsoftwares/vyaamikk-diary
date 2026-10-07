@@ -5,6 +5,15 @@
  * (uid + generation). Stale completions from a retired owner never restore that
  * owner's fields onto, or clear, the current owner's editor.
  *
+ * Load policy: mark the editor dirty on user edits. A delayed or retried get()
+ * must not overwrite dirty fields (candidate / margins / signature / stamp /
+ * sender). The saved-template baseline (`existing`) is still updated when the
+ * owner is live. Load failures surface `load_failed` so the screen can retry
+ * via `load()`.
+ *
+ * Save policy: synchronous single-flight guard before the first await, bound to
+ * an owner/attempt token so an older save's finally cannot unlock a newer owner.
+ *
  * Does not claim already-issued remote writes can be cancelled.
  */
 
@@ -63,6 +72,13 @@ export type LetterheadSetupEditorPorts = {
   liveSession?: () => SyncSessionToken | null;
 };
 
+type SaveFlight = {
+  /** Monotonic attempt id for this runtime instance. */
+  attempt: number;
+  /** Owner key at the moment the flight was claimed. */
+  ownerKey: string;
+};
+
 function emptySnapshot(ownerKey: string): LetterheadSetupEditorSnapshot {
   return {
     ownerKey,
@@ -105,6 +121,10 @@ export function createLetterheadSetupEditorRuntime(ports: LetterheadSetupEditorP
   let owner: SyncSessionToken | null = null;
   let loadSeq = 0;
   let saveSeq = 0;
+  /** True after any user edit for the current owner; cleared on setOwner. */
+  let editorDirty = false;
+  let saveAttempt = 0;
+  let saveFlight: SaveFlight | null = null;
   let published = emptySnapshot("signed_out#0");
   const listeners = new Set<() => void>();
 
@@ -123,6 +143,10 @@ export function createLetterheadSetupEditorRuntime(ports: LetterheadSetupEditorP
   function setPublished(next: LetterheadSetupEditorSnapshot): void {
     published = next;
     emit();
+  }
+
+  function bumpEdit(): void {
+    editorDirty = true;
   }
 
   async function retireCandidateQuietly(
@@ -144,7 +168,18 @@ export function createLetterheadSetupEditorRuntime(ports: LetterheadSetupEditorP
     try {
       const config = await ports.get(opOwner.uid);
       if (seq !== loadSeq || !stillOwns(opOwner)) return;
+
       if (!config) {
+        if (editorDirty) {
+          // Keep dirty edits; only refresh the saved-template baseline.
+          setPublished({
+            ...published,
+            loading: false,
+            existing: null,
+            error: null,
+          });
+          return;
+        }
         const key = ownerKeyOf(opOwner);
         const prev = published.candidate;
         setPublished({
@@ -154,6 +189,17 @@ export function createLetterheadSetupEditorRuntime(ports: LetterheadSetupEditorP
         void retireCandidateQuietly(prev);
         return;
       }
+
+      if (editorDirty) {
+        setPublished({
+          ...published,
+          loading: false,
+          existing: config,
+          error: null,
+        });
+        return;
+      }
+
       setPublished({
         ...published,
         loading: false,
@@ -166,10 +212,11 @@ export function createLetterheadSetupEditorRuntime(ports: LetterheadSetupEditorP
         defaultClose: config.defaultComplimentaryClose ?? "",
         candidate: published.candidate,
         templateWarnings: published.templateWarnings,
+        error: null,
       });
     } catch {
       if (seq !== loadSeq || !stillOwns(opOwner)) return;
-      setPublished({ ...published, loading: false });
+      setPublished({ ...published, loading: false, error: "load_failed" });
     }
   }
 
@@ -185,6 +232,7 @@ export function createLetterheadSetupEditorRuntime(ports: LetterheadSetupEditorP
 
     setOwner(session: SyncSessionToken | null): void {
       owner = session;
+      editorDirty = false;
       const key = ownerKeyOf(session);
       const prevCandidate = published.candidate;
       setPublished(emptySnapshot(key));
@@ -204,6 +252,7 @@ export function createLetterheadSetupEditorRuntime(ports: LetterheadSetupEditorP
         void retireCandidateQuietly(next);
         return;
       }
+      bumpEdit();
       const prev = published.candidate;
       setPublished({
         ...published,
@@ -217,31 +266,37 @@ export function createLetterheadSetupEditorRuntime(ports: LetterheadSetupEditorP
 
     setMargins(margins: LetterheadMargins): void {
       if (!stillOwns(owner)) return;
+      bumpEdit();
       setPublished({ ...published, margins });
     },
 
     setSignatureUri(uri: string | null): void {
       if (!stillOwns(owner)) return;
+      bumpEdit();
       setPublished({ ...published, signatureUri: uri });
     },
 
     setStampUri(uri: string | null): void {
       if (!stillOwns(owner)) return;
+      bumpEdit();
       setPublished({ ...published, stampUri: uri });
     },
 
     setDefaultName(v: string): void {
       if (!stillOwns(owner)) return;
+      bumpEdit();
       setPublished({ ...published, defaultName: v });
     },
 
     setDefaultTitle(v: string): void {
       if (!stillOwns(owner)) return;
+      bumpEdit();
       setPublished({ ...published, defaultTitle: v });
     },
 
     setDefaultClose(v: string): void {
       if (!stillOwns(owner)) return;
+      bumpEdit();
       setPublished({ ...published, defaultClose: v });
     },
 
@@ -270,6 +325,13 @@ export function createLetterheadSetupEditorRuntime(ports: LetterheadSetupEditorP
         return { navigate: false };
       }
 
+      const flightOwnerKey = ownerKeyOf(opOwner);
+      // Synchronous single-flight: same-owner in-flight save must not re-enter.
+      if (saveFlight && saveFlight.ownerKey === flightOwnerKey) {
+        return { navigate: false };
+      }
+      const attempt = ++saveAttempt;
+      saveFlight = { attempt, ownerKey: flightOwnerKey };
       const seq = ++saveSeq;
       setPublished({ ...published, saving: true, error: null });
 
@@ -310,6 +372,7 @@ export function createLetterheadSetupEditorRuntime(ports: LetterheadSetupEditorP
         }
 
         const done = published.candidate;
+        editorDirty = false;
         setPublished({
           ...published,
           saving: false,
@@ -345,6 +408,15 @@ export function createLetterheadSetupEditorRuntime(ports: LetterheadSetupEditorP
           });
         }
         return { navigate: false };
+      } finally {
+        // Only the owning attempt may clear the flight — not a retired owner's finally.
+        if (
+          saveFlight &&
+          saveFlight.attempt === attempt &&
+          saveFlight.ownerKey === flightOwnerKey
+        ) {
+          saveFlight = null;
+        }
       }
     },
 
@@ -353,6 +425,7 @@ export function createLetterheadSetupEditorRuntime(ports: LetterheadSetupEditorP
       const prev = published.candidate;
       published = emptySnapshot("signed_out#0");
       owner = null;
+      saveFlight = null;
       void retireCandidateQuietly(prev);
     },
   };

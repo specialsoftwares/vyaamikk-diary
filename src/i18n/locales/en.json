@@ -1652,6 +1652,7 @@
     "entryScannerUnavailable": "Scanner is unavailable on this device. You can still choose a photo from your gallery.",
     "entryCouldNotOpenPhoto": "Could not open this photo.",
     "setupSaveFailedUnchanged": "Could not save; your current letterhead is unchanged.",
+    "setupLoadFailed": "Could not load your letterhead. Try again.",
     "genLayoutSection": "Logo placement",
     "genAppearanceSection": "Appearance",
     "genDetailsSection": "Business details",

@@ -1735,6 +1735,7 @@ const en = {
     setupReplace: "Choose a different image",
     setupSaveFailedUnchanged:
       "Could not save; your current letterhead is unchanged.",
+    setupLoadFailed: "Could not load your letterhead. Try again.",
     setupAdjust: "Writable area",
     setupTopMargin: "Top margin (%)",
     setupBottomMargin: "Bottom margin (%)",

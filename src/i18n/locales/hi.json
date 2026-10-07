@@ -1595,6 +1595,7 @@
     "entryScannerUnavailable": "इस डिवाइस पर स्कैनर उपलब्ध नहीं है। आप गैलरी से फोटो चुन सकते हैं।",
     "entryCouldNotOpenPhoto": "यह फोटो खोला नहीं जा सका।",
     "setupSaveFailedUnchanged": "सेव नहीं हो सका; आपका मौजूदा लेटरहेड वैसा ही है।",
+    "setupLoadFailed": "लेटरहेड लोड नहीं हो सका। फिर कोशिश करें।",
     "genLayoutSection": "लोगो की जगह",
     "genAppearanceSection": "दिखावट",
     "genDetailsSection": "व्यवसाय विवरण",
