@@ -15,8 +15,9 @@ import {
 } from "@/sync/syncSessionOwnership";
 
 import type { LetterheadCandidateImage } from "./letterheadCandidateImage";
+import type { TemplateWarningKey } from "./letterheadTemplateService";
 import { DEFAULT_LETTERHEAD_MARGINS } from "./types";
-import type { LetterheadConfig, LetterheadMargins, TemplateWarningKey } from "./types";
+import type { LetterheadConfig, LetterheadMargins } from "./types";
 
 export type LetterheadSetupEditorSnapshot = {
   ownerKey: string;
