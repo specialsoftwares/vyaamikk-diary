@@ -123,7 +123,7 @@ export function GrinListAdmittedBody({ session }: { session: GrinDispatchSession
               ? t("grin.projection.incomplete")
               : `${custodyLabel(item.custody, t)} · ${qcLabel(item.qcStatus, t)} · ${captureLabel(item.captureProvenance, t)}`}
           </Text>
-          {item.offlinePending ? (
+          {item.offlinePending || item.displayNumber == null ? (
             <View style={styles.warnPill} accessibilityLabel={offlinePendingBannerText(t)}>
               <Text style={styles.warnText}>{offlinePendingBannerText(t)}</Text>
             </View>

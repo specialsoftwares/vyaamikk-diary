@@ -9,6 +9,7 @@ import type { GrinDispatchSession } from "@/services/grin/outbox/types";
 import { spacing } from "@/theme/spacing";
 
 import { grinMutationErrorMessage } from "./grinActionErrors";
+import { GrinArrivalDateTimeField } from "./GrinArrivalDateTimeField";
 import { GrinChoiceRow } from "./GrinChoiceRow";
 import { GrinFixtureNotices } from "./GrinFixtureNotices";
 import {
@@ -272,11 +273,10 @@ export function GrinCreateAdmittedBody({ session }: { session: GrinDispatchSessi
             editable={false}
             accessibilityLabel={t("grin.field.grinNumber")}
           />
-          <TextField
+          <GrinArrivalDateTimeField
             label={t("grin.field.reportedArrival")}
-            value={reportedArrival}
-            onChangeText={setReportedArrival}
-            accessibilityLabel={t("grin.field.reportedArrival")}
+            valueIso={reportedArrival}
+            onChangeIso={setReportedArrival}
           />
           <TextField
             label={t("grin.field.timeZone")}

@@ -11,7 +11,7 @@ export const CANONICAL_JSON_VERSION = "1" as const;
 export const GRIN_DOCUMENT_FOOTER =
   "Internal goods receipt evidence — not a GST Receipt Voucher, tax invoice, or determination of ITC eligibility.";
 
-export const OFFLINE_PENDING_BANNER = "Captured offline — server registration pending";
+export const OFFLINE_PENDING_BANNER = "Saved on this phone. Waiting to sync.";
 
 export const DEFAULT_GRIN_SERIES = "MAIN";
 

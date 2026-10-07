@@ -92,6 +92,17 @@ export const MATERIAL_MOVEMENT_SUB_OPTIONS: MaterialMovementSubOption[] = [
   },
 ];
 
+/**
+ * Separate GRIN creation entry under Material Movement.
+ * Not a BusinessEntryType — routes to admitted GRIN create, never the basic
+ * material_received composer path (avoids dual-path quota consumption).
+ */
+export const MATERIAL_MOVEMENT_GRIN_OPTION = {
+  id: "grin_create" as const,
+  labelKey: "movementGrin",
+  subtitleKey: "movementGrinSub",
+};
+
 export function entryTypeForMovementKind(kind: MaterialMovementKind): BusinessEntryType {
   return entryTypeFromMovementKind(kind);
 }

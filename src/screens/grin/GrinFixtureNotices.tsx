@@ -9,17 +9,20 @@ import { spacing } from "@/theme/spacing";
 import { Banner, View } from "./grinSurfaces";
 import { useGrinT } from "./grinScreenHooks";
 
+/**
+ * Fixture/demo notice only. Production GRIN surfaces use createIntro /
+ * offline pending pills for customer-facing status — no repeated developer banners.
+ */
 export function GrinFixtureNotices({
   repositoryLabel = GRIN_APPLICATION_REPOSITORY_LABEL,
 }: {
   repositoryLabel?: string;
-} = {}): React.ReactElement {
+} = {}): React.ReactElement | null {
   const t = useGrinT();
-  const banner = grinRepositoryIsFake(repositoryLabel) ? t("grin.fixtureBanner") : t("grin.queueBanner");
+  if (!grinRepositoryIsFake(repositoryLabel)) return null;
   return (
     <View style={{ gap: spacing.sm, marginBottom: spacing.md }}>
-      <Banner tone="info" message={banner} />
-      <Banner tone="warning" message={t("grin.pricingQuotaNote")} />
+      <Banner tone="warning" message={t("grin.fixtureBanner")} />
     </View>
   );
 }
