@@ -8,7 +8,8 @@ Updated: **2026-10-07** (PR #32 targeted corrections)
 |---|---|
 | Dirty main workspace | `draft/goods-evidence-domain-contract` — **not edited** |
 | Reviewed / corrected branch | `fix/letterhead-repair-scan` |
-| Frozen next-build SHA | **`fed948d0c2057e351104490a0fca7b30754847c6`** (this tip after CI) |
+| Frozen next-build SHA | **`0d1a5bfe071c4de289c335ed15a690778dec28bb`** (this tip after CI) |
+| Implementation commit | `e5194924b1dddcd1dfff9e1e35b172506c978538` |
 | Prior reviewed HEAD | `f59598629347383ac47f78da095122fd7db125ee` |
 | Application freeze (vc24 AAB) | `7c938f8` · EAS `c931da3d-…` · **unchanged** |
 | Isolation | Worktree `/Users/shivamsaurav/vyd-worktrees/letterhead-repair` |
@@ -41,6 +42,6 @@ PDF fixtures: `docs/release/packets/letterhead/pdf-fixtures/` (HTML A4 inspectio
 
 ## Next-build packet (when separately authorized)
 
-> OWNER APPROVAL — EAS Android profile `internal-grin` from letterhead-repair SHA `fed948d0c2057e351104490a0fca7b30754847c6` only. Includes `@infinitered/react-native-mlkit-document-scanner@5.0.0` (already in source). Select a **new** versionCode after checking current Play inventory — do **not** reuse vc24. No auto-submit; no Play upload from this packet alone.
+> OWNER APPROVAL — EAS Android profile `internal-grin` from letterhead-repair SHA `0d1a5bfe071c4de289c335ed15a690778dec28bb` only. Includes `@infinitered/react-native-mlkit-document-scanner@5.0.0` (already in source). Select a **new** versionCode after checking current Play inventory — do **not** reuse vc24. No auto-submit; no Play upload from this packet alone.
 
 Device checks after that build: gallery→preview→save (Blob error gone); size below/above 256KiB; Android scan; TalkBack; PDF pages.
