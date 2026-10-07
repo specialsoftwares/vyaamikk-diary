@@ -1,8 +1,8 @@
-# Next Internal Testing upload packet — vc24 (NOT AUTHORIZED)
+# Next Internal Testing upload packet — vc24 (**B2 COMPLETE**)
 
-Build complete. **Play upload remains separately authorized.**
+Build + Internal Testing upload complete. Device D1 remains separate.
 
-## Artifact to upload (when authorized)
+## Artifact uploaded
 
 | Item | Value |
 |---|---|
@@ -15,13 +15,20 @@ Build complete. **Play upload remains separately authorized.**
 | Profile flags | purchase-entry `0`, quota-upsell `0`, GRIN enabled+admit `1` |
 | Durable archive | access-controlled `vyd-private` (path not published) |
 
-## Required owner steps (future authorization only)
+## B2 result (2026-10-07)
 
-1. Re-read Play App bundle explorer (confirm 24 still unused).
-2. Create Internal Testing release with this AAB only — do not broaden testers.
-3. Publish to existing Internal track; do not promote Production.
-4. Owner D1: Play upgrade over installed vc23 on OnePlus 12R — no uninstall/clear/OTP loops.
-5. Record PLAY_INSTALLED evidence; do not mark live/billing/public Done from upload alone.
+| Item | Value |
+|---|---|
+| Track | Internal testing — Active |
+| Release | **24 (1.0.0)** — Available to internal testers · Released **7 Oct 20:30** |
+| Tester link | `https://play.google.com/apps/internaltest/4699683181760265777` |
+| Testers | Unchanged |
+| Production / open / closed | Not touched |
+
+## Remaining owner step
+
+1. Owner D1: Play upgrade over installed vc23 on OnePlus 12R — no uninstall/clear/OTP loops.
+2. Record PLAY_INSTALLED evidence; do not mark live/billing/public Done from upload alone.
 
 ## Explicitly out of scope until separately authorized
 

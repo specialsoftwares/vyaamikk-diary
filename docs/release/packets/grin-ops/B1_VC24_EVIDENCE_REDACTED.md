@@ -1,4 +1,4 @@
-# B1 evidence (redacted) — vc24 internal-grin
+# B1 / B2 evidence (redacted) — vc24 internal-grin
 
 **No credentials, keystore material, tester emails, UIDs, or phone numbers.**
 
@@ -14,13 +14,6 @@ Updated: **2026-10-07**
 | Version | `1.0.0` / versionCode **24** |
 | EAS profile | `internal-grin` |
 
-## Installed Internal (unchanged until upload)
-
-| Item | Value |
-|---|---|
-| Installed | **`540e07a` / vc23** |
-| Note | This vc24 AAB is **not** uploaded; Play Active remains **23** until a separate upload authorization |
-
 ## B1 — EAS AAB (complete)
 
 | Item | Value |
@@ -30,6 +23,7 @@ Updated: **2026-10-07**
 | AAB SHA-256 | `dbda921d1da8b425aaa3f8b0556cf5e43665ab7bd189138a12c20d2b06bfd43d` |
 | Mapping SHA-256 | `09e2fe76ece46e4b6080d2e996ab265ee7b69c04ff25109036fad1b588c744ba` |
 | Auto-submit | **No** |
+| Durable archive | Outside repository under access-controlled local private storage (path not published) |
 
 ## Signing (public fingerprints only)
 
@@ -40,18 +34,32 @@ Updated: **2026-10-07**
 
 Upload key SHA-1: `20:F8:15:0E:21:3C:9C:3F:84:FD:CA:C5:1E:9E:4D:CC:EE:A2:42:AD`
 
-## Play inventory (pre-B1 live read)
+## Play inventory (pre-B2 live read)
 
 - Unfiltered: **10** versions (1–10 of 10)
-- Highest Active: **23** (`1.0.0`)
-- Search `24`: **No results**
+- Highest Active before upload: **23** (`1.0.0`)
+- Search `24`: **No results** → versionCode 24 unused before upload
+- Re-verified AAB SHA-256 **MATCH** + upload-key **MATCH** before upload
 
-## B2 — Internal Testing upload
+## B2 — Internal Testing upload (complete)
 
-**NOT AUTHORIZED / NOT DONE** by the build instruction.
+| Item | Value |
+|---|---|
+| Status | **COMPLETE** (upload + publish to Internal Testing) |
+| Track | **Internal testing** (Active) — existing tester audience unchanged |
+| Release | **24 (1.0.0)** |
+| Console status | Available to internal testers · Released **7 Oct 20:30** (local) · Not reviewed |
+| Latest release (track summary) | **24 (1.0.0)** |
+| Tester join / update link | `https://play.google.com/apps/internaltest/4699683181760265777` |
+| Tester lists observed | Known Testers / Owner — **not edited** (Save disabled) |
+| Production / open / closed | Not modified |
+| Billing / purge / Functions / OTA / main / public | Not authorized / not done |
+
+**Upload ≠ device acceptance.** D1: Play upgrade over installed vc23 on OnePlus 12R — **no** uninstall / clear / OTP loops.
 
 ## Explicit limitations
 
-- Upload ≠ device acceptance
-- Existing vc23 testing may continue when owner available
-- No uninstall / clear / OTP loops
+- Authenticated LIVE F: still **WAITING**
+- P8 purge: off
+- Payments / purchase-entry: off
+- Device PLAY_INSTALLED for vc24: **pending owner D1**

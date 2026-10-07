@@ -12,19 +12,20 @@ TOOLING (ops-guard suite; not application CI).
 
 ---
 
-## Current state (authoritative — 2026-10-07 B1 vc24 AAB)
+## Current state (authoritative — 2026-10-07 B2 vc24 Internal)
 
 | Item | Current value |
 |---|---|
 | Repo / branch / PR | `specialsoftwares/vyaamikk-diary` `integration/grin-g1-g5-source` draft **#31** |
-| **Installed Internal (Play Active)** | Still **`540e07a` / vc23**. vc24 AAB built; **not uploaded**. GRIN Functions previously deployed/enabled — this build did **not** redeploy them. |
+| **Play Internal Active** | **`7c938f8` / vc24** — release **24 (1.0.0)** Available to internal testers · Released **7 Oct 20:30** · Not reviewed. GRIN Functions previously deployed/enabled — this upload did **not** redeploy them. |
 | **B1 application SHA** | **`7c938f836891411752e6fa6af8879ddfe275ab60`** — vc24 + renderer CI `PUPPETEER_SKIP_DOWNLOAD` for separate Node 22 container. Parent `13da527`. NARROW preserved. |
 | **Matching CI (application)** | GHA **`37616692491` SUCCESS** / job **`112776635103`** on **`7c938f8`**. `test:all` 161/161; `ci:verify PASS`; CI log shows `PUPPETEER_SKIP_DOWNLOAD=true`. |
 | **EAS B1 (COMPLETE)** | Build **`c931da3d-4dcb-472e-9c63-f72217c6d95c`** FINISHED — profile `internal-grin`, STORE AAB, no auto-submit. AAB SHA-256 `dbda921d…bfd43d`; package `com.specialsoftwares.vyaamikkdiary` **1.0.0 / 24**; upload-key SHA-256 **MATCH** established key. Archive under access-controlled `vyd-private` (not public repo). |
+| **B2 (COMPLETE)** | Uploaded verified AAB only to existing Internal Testing track. Tester lists unchanged. Join link `https://play.google.com/apps/internaltest/4699683181760265777`. Production / open / closed not modified. |
 | Customer UX (in AAB) | GRIN under Material Movement when admitted; arrival cancel fix; basic goods-received + Saved Records preserved. |
 | Dependency residuals | `extract-zip@2.0.1` / `image-size@1.2.1` **open** (mitigated for this Internal build; not patched/removed). Retained for public-release review. |
-| Device D1 | Continue on installed **vc23** when owner available; after separate upload auth, upgrade path is vc24. **No** uninstall / clear / OTP loops. |
-| HOLDs | **Play upload not authorized.** No billing / purge / Functions deploy / main / public / OTA from this instruction. |
+| Device D1 | Owner: Play upgrade over installed **vc23** → **vc24** — **no** uninstall / clear / OTP loops. PLAY_INSTALLED evidence pending. |
+| HOLDs | No billing / purge / Functions deploy / main / public / OTA from this instruction. Upload ≠ device acceptance. |
 
 ---
 
