@@ -13,10 +13,14 @@ const uploadSrc = fs.readFileSync(
   path.join(import.meta.dirname, "userStorageUpload.ts"),
   "utf8"
 );
+const coreSrc = fs.readFileSync(
+  path.join(import.meta.dirname, "userStorageUploadCore.ts"),
+  "utf8"
+);
 const storageSrc = fs.readFileSync(path.join(import.meta.dirname, "userStorage.ts"), "utf8");
 
 test("multipart threshold matches Firebase JS SDK (256 KiB)", () => {
-  assert.match(uploadSrc, /FIREBASE_STORAGE_MULTIPART_THRESHOLD_BYTES = 256 \* 1024/);
+  assert.match(coreSrc, /FIREBASE_STORAGE_MULTIPART_THRESHOLD_BYTES = 256 \* 1024/);
   const sdk = fs.readFileSync(
     path.join(root, "node_modules/@firebase/storage/dist/index.esm.js"),
     "utf8"
@@ -49,9 +53,10 @@ test("userStorage upload path uses media REST + uploadAsync, not uploadBytesResu
   assert.match(storageCode, /uploadLocalFileViaMediaApi/);
   assert.match(uploadSrc, /uploadAsync/);
   assert.match(uploadSrc, /FileSystemUploadType\.BINARY_CONTENT/);
-  assert.match(uploadSrc, /remoteBytes !== localBytes/);
+  assert.match(coreSrc, /remoteBytes !== localBytes/);
   assert.match(uploadSrc, /Authorization/);
   assert.match(uploadSrc, /Bearer/);
+  assert.match(coreSrc, /Refusing production Storage URL while emulator host is set/);
 });
 
 test("attachment helpers share the same media upload path", () => {

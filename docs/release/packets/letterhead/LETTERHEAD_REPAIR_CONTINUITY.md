@@ -1,6 +1,6 @@
 # Letterhead repair — continuity & next-build packet
 
-Updated: **2026-10-07** (PR #32 targeted corrections)
+Updated: **2026-10-07** (PR #32 targeted closeout)
 
 ## Continuity snapshot
 
@@ -8,40 +8,49 @@ Updated: **2026-10-07** (PR #32 targeted corrections)
 |---|---|
 | Dirty main workspace | `draft/goods-evidence-domain-contract` — **not edited** |
 | Reviewed / corrected branch | `fix/letterhead-repair-scan` |
-| Frozen next-build SHA | **`902138730c65c73cb50767d1b18fa5b9e9f2a452`** (this tip after CI) |
-| Implementation commit | `e5194924b1dddcd1dfff9e1e35b172506c978538` |
-| Prior reviewed HEAD | `f59598629347383ac47f78da095122fd7db125ee` |
+| Prior reviewed HEAD | `7f8e464a6ebf0054eefb1d9929c8ab86d244cde7` (CI 37657944118 / verify 112920723927) |
+| Frozen tip | **set after this closeout commit + CI** |
 | Application freeze (vc24 AAB) | `7c938f8` · EAS `c931da3d-…` · **unchanged** |
 | Isolation | Worktree `/Users/shivamsaurav/vyd-worktrees/letterhead-repair` |
 
-## Finding status
+## Closeout items (this tip)
+
+| # | Item | Status | Notes |
+|---|---|---|---|
+| 1 | Ownership through save | **Done** | uid+generation on repo/upload; recheck after awaits; stale UI/nav suppressed; clearRetiredEditorState; deferred A→B / A→logout→A tests. Does **not** claim issued remote writes can be cancelled. |
+| 2 | File cleanup + format admission | **Done** | staging/final tracked; JPEG/PNG/WebP magic (RIFF≠WebP); picker MIME never admits; prior template preserved on ownership failure. |
+| 3 | Preview / print geometry | **Done** | right = row-reverse + flex-start; `ImportedLetterheadImage` top-centred contain; production `composeLetterheadHtml` → HTML + Chromium/Chrome PDFs. Gallery appearance editing remains **incomplete**. |
+| 4 | Upload boundary execution | **Done** | injected-port exec tests; Storage emulator owner allow / anon+cross-owner deny; no production URL under emulator host; attachments share helper. |
+
+## Finding status (retained)
 
 | # | Finding | Status | Evidence boundary |
 |---|---|---|---|
-| 1 | Upload / Expo File / Blob | **Fixed** | Locked SDKs prove Expo File ≠ `instanceof Blob`; `File.slice` builds ArrayBufferView Blob; multipart ≤256KiB uses `FbsBlob.getBlob`. Upload now: Expo `uploadAsync` BINARY_CONTENT → Storage media REST + auth Bearer; size verified via `getMetadata`. Owner gallery-time error remains **reported gallery-time error; exact device stack not captured** — not attributed to Save. |
-| 2 | Restore generated on Edit | **Fixed** | `generate.tsx` loads saved layout; profile only for new / explicit refresh. Durable logo = data:/https only. |
-| 3 | Preview ↔ PDF consistency | **Fixed** | `letterheadVisualSpec`; right = row-reverse; imported contain + top center; mono = `grayscale(1) contrast(3)`. RN preview notes grayscale/mono as PDF-applied. |
-| 4 | Session ownership | **Fixed** | `beginLetterheadCapture` / `assertCandidateOwner` use `SyncSessionToken`; fileGeneration is path-only. |
-| 5 | File lifecycle / size limits | **Fixed** | candidateRef unmount cleanup; long-edge reject; MIME sniff; Image.getSize; asset size before base64. |
-| 6 | Writing-area UX | **Fixed** | Validator on both paths + repo save; visual steppers + overlay. |
-| Gallery appearance editing | **Incomplete** | Documented in UI (`incompleteGalleryAppearance`); scanner filters cover scan path. No native image-manipulator added. |
-| Logo replace in generate | **Partial** | Retry logo from profile; no separate gallery logo pick yet. |
-| Historical PDF snapshot | **Pre-existing** | Still live-template on regenerate; not claimed fixed. |
+| 1 | Upload / Expo File / Blob | **Fixed** | media REST + `uploadAsync` BINARY_CONTENT; size via getMetadata. Owner gallery-time error remains **reported; exact device stack not captured**. |
+| 2 | Restore generated on Edit | **Fixed** | |
+| 3 | Preview ↔ PDF consistency | **Fixed** | |
+| 4 | Session ownership | **Fixed** | through save/upload |
+| 5 | File lifecycle / size limits | **Fixed** | |
+| 6 | Writing-area UX | **Fixed** | |
+| Gallery appearance editing | **Incomplete** | Do not call complete |
+| Logo replace in generate | **Partial** | |
+| Historical PDF snapshot | **Pre-existing** | live-template on regenerate |
 
 ## Native dependency change
 
-**None.** Upload uses existing `expo-file-system/legacy` `uploadAsync` + Firebase Auth ID token. No `@react-native-firebase/storage`, no `expo-blob` global patch.
-
-Affected shared callers of `userStorage` (attachments / letterhead migration / letterhead save): all now go through media REST path.
+**None.** Upload uses existing `expo-file-system/legacy` `uploadAsync` + Firebase Auth ID token.
 
 ## Tests
 
-`npm run test:letterhead-repair` — discovered by `test:all` via package.json.
+- `npm run test:letterhead-repair` — 53 node tests + PDF HTML/PDF inspection
+- `npm run test:letterhead-storage-emulator` — Rules unit tests (also in `ci:verify`)
 
-PDF fixtures: `docs/release/packets/letterhead/pdf-fixtures/` (HTML A4 inspection; not device Print).
+Device-pending (not replaced by host tests): native upload, scanner, Print acceptance.
+
+PDF fixtures: `docs/release/packets/letterhead/pdf-fixtures/` (HTML + PDF; device Print still pending).
 
 ## Next-build packet (when separately authorized)
 
-> OWNER APPROVAL — EAS Android profile `internal-grin` from letterhead-repair SHA `902138730c65c73cb50767d1b18fa5b9e9f2a452` only. Includes `@infinitered/react-native-mlkit-document-scanner@5.0.0` (already in source). Select a **new** versionCode after checking current Play inventory — do **not** reuse vc24. No auto-submit; no Play upload from this packet alone.
+> OWNER APPROVAL — EAS Android profile `internal-grin` from letterhead-repair tip SHA only (after this closeout CI). Includes `@infinitered/react-native-mlkit-document-scanner@5.0.0`. Select a **new** versionCode after checking Play inventory — do **not** reuse vc24. No auto-submit; no Play upload from this packet alone.
 
-Device checks after that build: gallery→preview→save (Blob error gone); size below/above 256KiB; Android scan; TalkBack; PDF pages.
+Device checks after that build: gallery→preview→save; size below/above 256KiB; Android scan; TalkBack; Print PDF pages.

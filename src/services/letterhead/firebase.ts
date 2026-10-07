@@ -18,6 +18,10 @@ import {
   isUserStorageAvailable,
   uploadLetterheadImage,
 } from "@/services/storage/userStorage";
+import {
+  assertDispatchedSession,
+  type SyncSessionToken,
+} from "@/sync/syncSessionOwnership";
 
 import { resolveLetterheadImageSource } from "./letterheadImageResolver";
 import { validateWritingMargins } from "./letterheadGeneratedLayout";
@@ -86,8 +90,9 @@ export const firebaseLetterheadRepository: LetterheadRepository = {
     return config;
   },
 
-  async save(userId, patch) {
+  async save(userId, patch, session?: SyncSessionToken | null) {
     if (!userId) throw new AppError("permission_denied", "Not signed in.");
+    assertDispatchedSession(session, userId);
 
     const marginsCheck = validateWritingMargins(patch.margins);
     if (!marginsCheck.ok) {
@@ -96,6 +101,7 @@ export const firebaseLetterheadRepository: LetterheadRepository = {
 
     const now = Date.now();
     const snap = await getDoc(configDocRef(userId));
+    assertDispatchedSession(session, userId);
     const existingData = snap.exists()
       ? (snap.data() as Partial<LetterheadConfig>)
       : null;
@@ -161,13 +167,21 @@ export const firebaseLetterheadRepository: LetterheadRepository = {
       letterheadImageUpdatedAt = null;
       imageDataUri = null;
     } else if (useStorage && incomingImage) {
-      const uploaded = await uploadLetterheadImage(userId, incomingImage);
+      assertDispatchedSession(session, userId);
+      const uploaded = await uploadLetterheadImage(
+        userId,
+        incomingImage,
+        undefined,
+        session
+      );
+      assertDispatchedSession(session, userId);
       letterheadImageStoragePath = uploaded.storagePath;
       letterheadImageDownloadUrl = uploaded.downloadUrl ?? null;
       letterheadImageUpdatedAt = now;
       imageDataUri = deleteField();
     }
 
+    assertDispatchedSession(session, userId);
     const next: LetterheadConfig = {
       ...patch,
       sourceType: isGeneratedSave
@@ -204,7 +218,9 @@ export const firebaseLetterheadRepository: LetterheadRepository = {
       firestorePayload.imageDataUri = deleteField();
     }
 
+    assertDispatchedSession(session, userId);
     await setDoc(configDocRef(userId), firestorePayload, { merge: false });
+    assertDispatchedSession(session, userId);
     log.info("letterhead saved (firebase)");
 
     if (useStorage && letterheadImageDownloadUrl) {

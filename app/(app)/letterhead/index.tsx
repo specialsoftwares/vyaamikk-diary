@@ -26,10 +26,8 @@ import {
   getLetterheadRepository,
   type LetterheadConfig,
 } from "@/services/letterhead";
-import {
-  generatedHeaderFlex,
-  IMPORTED_PAGE_FIT,
-} from "@/services/letterhead/letterheadVisualSpec";
+import { generatedHeaderFlex } from "@/services/letterhead/letterheadVisualSpec";
+import { ImportedLetterheadImage } from "@/components/letterhead/ImportedLetterheadImage";
 import { useT } from "@/i18n";
 import { radius, spacing, typography, useThemedStyles } from "@/theme";
 import { userFacingMessage } from "@/domain/errors";
@@ -291,22 +289,14 @@ export default function LetterheadGateScreen() {
                     </View>
                   );
                 })()
-              ) : (
-                <View
-                  style={{
-                    flex: 1,
-                    justifyContent: "flex-start",
-                  }}
-                >
-                  <Image
-                    source={{ uri: config.imageDataUri ?? undefined }}
-                    style={styles.image}
-                    resizeMode={IMPORTED_PAGE_FIT}
-                    accessible
-                    accessibilityLabel={t("letterhead.gateTitle")}
-                  />
-                </View>
-              )}
+              ) : config.imageDataUri ? (
+                <ImportedLetterheadImage
+                  uri={config.imageDataUri}
+                  width={config.imageWidth}
+                  height={config.imageHeight}
+                  accessibilityLabel={t("letterhead.gateTitle")}
+                />
+              ) : null}
               <View
                 pointerEvents="none"
                 style={[

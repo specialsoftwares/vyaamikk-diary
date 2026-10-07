@@ -9,9 +9,10 @@ import {
   pdfAlignClass,
 } from "./letterheadVisualSpec";
 
-test("right alignment uses row-reverse (matches PDF CSS)", () => {
+test("right alignment uses row-reverse + flex-start (matches PDF CSS)", () => {
   const right = generatedHeaderFlex("right");
   assert.equal(right.flexDirection, "row-reverse");
+  assert.equal(right.justifyContent, "flex-start");
   assert.equal(pdfAlignClass("right"), "align-right");
 });
 

@@ -1,12 +1,22 @@
 {
   "outDir": "/Users/shivamsaurav/vyd-worktrees/letterhead-repair/docs/release/packets/letterhead/pdf-fixtures",
-  "cases": [
-    "imported-contain-top",
-    "generated-left",
-    "generated-center",
-    "generated-right",
-    "generated-mono",
-    "multi-page-body"
+  "html": [
+    "generated-center.html",
+    "generated-left.html",
+    "generated-mono.html",
+    "generated-right.html",
+    "imported-a4ish.html",
+    "imported-contain-top.html",
+    "imported-tall.html",
+    "multi-page-body.html"
   ],
-  "note": "HTML fixtures locked to letterheadPdfService.css rules. Open in a browser for visual A4 check. Device Print remains separate."
+  "pdfs": [
+    "imported-contain-top.pdf",
+    "imported-a4ish.pdf",
+    "generated-left.pdf",
+    "generated-center.pdf",
+    "generated-right.pdf",
+    "multi-page-body.pdf"
+  ],
+  "note": "HTML from composeLetterheadHtml + Chromium PDF. Device Print still pending."
 }

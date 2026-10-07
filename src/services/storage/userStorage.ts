@@ -17,6 +17,8 @@ import { env, isFirebaseConfigured } from "@/config/env";
 import { FirebaseNotConfiguredError, getFirebaseStorage } from "@/config/firebase";
 import { createLogger } from "@/utils/logger";
 
+import type { SyncSessionToken } from "@/sync/syncSessionOwnership";
+
 import { uploadLocalFileViaMediaApi } from "./userStorageUpload";
 
 const log = createLogger("storage/user");
@@ -127,6 +129,11 @@ async function deleteTempQuietly(uri: string): Promise<void> {
   }
 }
 
+export type StorageUploadSession = {
+  userId: string;
+  session?: SyncSessionToken | null;
+};
+
 /**
  * Upload an on-disk file via authenticated media REST + Expo uploadAsync.
  * Never passes Expo File / Uint8Array into Firebase JS Blob constructors.
@@ -134,13 +141,16 @@ async function deleteTempQuietly(uri: string): Promise<void> {
 export async function uploadLocalFileToPath(
   storagePath: string,
   localUri: string,
-  contentType: string
+  contentType: string,
+  ownership?: StorageUploadSession
 ): Promise<StorageUploadResult> {
   if (!isUserStorageAvailable()) throw new FirebaseNotConfiguredError();
   const verified = await uploadLocalFileViaMediaApi({
     storagePath,
     localUri,
     contentType,
+    userId: ownership?.userId,
+    session: ownership?.session,
   });
   return {
     storagePath: verified.storagePath,
@@ -153,7 +163,8 @@ export async function uploadLocalFileToPath(
 async function uploadBase64ToPath(
   storagePath: string,
   base64: string,
-  contentType: string
+  contentType: string,
+  ownership?: StorageUploadSession
 ): Promise<StorageUploadResult> {
   const cacheRoot = FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? "";
   if (!cacheRoot) {
@@ -168,7 +179,7 @@ async function uploadBase64ToPath(
     encoding: FileSystem.EncodingType.Base64,
   });
   try {
-    return await uploadLocalFileToPath(storagePath, tmp, contentType);
+    return await uploadLocalFileToPath(storagePath, tmp, contentType, ownership);
   } finally {
     await deleteTempQuietly(tmp);
   }
@@ -180,13 +191,15 @@ async function uploadBase64ToPath(
 export async function uploadLetterheadImage(
   userId: string,
   imageUri: string,
-  fileName?: string
+  fileName?: string,
+  session?: SyncSessionToken | null
 ): Promise<StorageUploadResult> {
   if (!isUserStorageAvailable()) throw new FirebaseNotConfiguredError();
   const trimmed = imageUri.trim();
   if (!trimmed) {
     throw new Error("Letterhead image URI is empty.");
   }
+  const ownership: StorageUploadSession = { userId, session };
 
   const parsed = parseDataUri(trimmed);
   if (parsed) {
@@ -195,7 +208,7 @@ export async function uploadLetterheadImage(
       fileName ?? `letterhead-${Date.now()}.${ext}`
     );
     const storagePath = getUserStoragePath(userId, "letterhead", safeName);
-    return uploadBase64ToPath(storagePath, parsed.base64, parsed.mime);
+    return uploadBase64ToPath(storagePath, parsed.base64, parsed.mime, ownership);
   }
 
   if (isLocalFileUri(trimmed)) {
@@ -205,7 +218,7 @@ export async function uploadLetterheadImage(
       fileName ?? `letterhead-${Date.now()}.${ext}`
     );
     const storagePath = getUserStoragePath(userId, "letterhead", safeName);
-    return uploadLocalFileToPath(storagePath, trimmed, mime);
+    return uploadLocalFileToPath(storagePath, trimmed, mime, ownership);
   }
 
   throw new Error("Letterhead image must be a local file URI or base64 data URI.");
@@ -215,7 +228,8 @@ export async function uploadRecordAttachment(
   userId: string,
   recordId: string,
   dataUri: string,
-  fileName?: string
+  fileName?: string,
+  session?: SyncSessionToken | null
 ): Promise<StorageUploadResult> {
   if (!isUserStorageAvailable()) throw new FirebaseNotConfiguredError();
   const parsed = parseDataUri(dataUri);
@@ -227,7 +241,10 @@ export async function uploadRecordAttachment(
     fileName ?? `attachment-${Date.now()}.${ext}`
   );
   const storagePath = getUserStoragePath(userId, "attachments", recordId, safeName);
-  return uploadBase64ToPath(storagePath, parsed.base64, parsed.mime);
+  return uploadBase64ToPath(storagePath, parsed.base64, parsed.mime, {
+    userId,
+    session,
+  });
 }
 
 export async function uploadRecordAttachmentBase64(
@@ -235,7 +252,8 @@ export async function uploadRecordAttachmentBase64(
   recordId: string,
   base64: string,
   contentType: string,
-  fileName?: string
+  fileName?: string,
+  session?: SyncSessionToken | null
 ): Promise<StorageUploadResult> {
   if (!isUserStorageAvailable()) throw new FirebaseNotConfiguredError();
   const ext = extFromMime(contentType);
@@ -243,7 +261,7 @@ export async function uploadRecordAttachmentBase64(
     fileName ?? `attachment-${Date.now()}.${ext}`
   );
   const storagePath = getUserStoragePath(userId, "attachments", recordId, safeName);
-  return uploadBase64ToPath(storagePath, base64, contentType);
+  return uploadBase64ToPath(storagePath, base64, contentType, { userId, session });
 }
 
 export async function getDownloadUrlForPath(storagePath: string): Promise<string | null> {

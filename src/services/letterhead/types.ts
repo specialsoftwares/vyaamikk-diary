@@ -117,9 +117,15 @@ export interface LetterheadDocumentInput {
 
 export interface LetterheadRepository {
   get(userId: string): Promise<LetterheadConfig | null>;
+  /**
+   * Persist letterhead config. Pass the initiating `SyncSessionToken` so
+   * upload/Firestore writes recheck ownership after each await. Explicit
+   * `null` fails closed; `undefined` skips the check (legacy callers).
+   */
   save(
     userId: string,
-    patch: Omit<LetterheadConfig, "userId" | "createdAt" | "updatedAt">
+    patch: Omit<LetterheadConfig, "userId" | "createdAt" | "updatedAt">,
+    session?: SyncSessionToken | null
   ): Promise<LetterheadConfig>;
   remove(userId: string): Promise<void>;
 }

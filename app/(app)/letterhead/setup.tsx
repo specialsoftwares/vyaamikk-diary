@@ -47,7 +47,13 @@ import {
   getDocumentScannerCapability,
   scanLetterheadDocument,
 } from "@/services/letterhead/documentScanner";
-import { IMPORTED_PAGE_FIT } from "@/services/letterhead/letterheadVisualSpec";
+import { ImportedLetterheadImage } from "@/components/letterhead/ImportedLetterheadImage";
+import {
+  captureAdmissionToken,
+  mayIssueRemoteWork,
+} from "@/sync/syncSessionOwnership";
+import { SaveRetryableError } from "@/services/records/saveLockTypes";
+import { StorageUploadOwnershipError } from "@/services/storage/userStorageUpload";
 import { useT } from "@/i18n";
 import { spacing, typography, useThemedStyles } from "@/theme";
 import { AppError, userFacingMessage } from "@/domain/errors";
@@ -146,10 +152,12 @@ export default function LetterheadSetupScreen() {
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
+    const session = captureAdmissionToken();
     void getLetterheadRepository()
       .get(user.uid)
       .then((c) => {
         if (cancelled || !mountedRef.current || !c) return;
+        if (!session || !mayIssueRemoteWork(session, user.uid)) return;
         setExisting(c);
         setMargins(c.margins ?? DEFAULT_LETTERHEAD_MARGINS);
         setSignatureUri(c.signatureDataUri ?? null);
@@ -158,7 +166,11 @@ export default function LetterheadSetupScreen() {
         setDefaultTitle(c.defaultSenderTitle ?? "");
         setDefaultClose(c.defaultComplimentaryClose ?? "");
       })
-      .catch(() => {});
+      .catch(() => {
+        // Load errors must not apply retired-owner state.
+        if (cancelled || !mountedRef.current) return;
+        if (!session || !mayIssueRemoteWork(session, user.uid)) return;
+      });
     return () => {
       cancelled = true;
     };
@@ -247,13 +259,17 @@ export default function LetterheadSetupScreen() {
   }, [preferredEntry, captureTemplateFromScanner, captureTemplateFromGallery]);
 
   const captureAsset = useCallback(async (kind: "signature" | "stamp"): Promise<boolean> => {
+    if (!user?.uid) return false;
+    const session = captureAdmissionToken();
+    if (!session || !mayIssueRemoteWork(session, user.uid)) return false;
     const asset = await pickLetterheadAsset();
     if (!asset) return false;
     if (!mountedRef.current) return false;
+    if (!mayIssueRemoteWork(session, user.uid)) return false;
     if (kind === "signature") setSignatureUri(asset.dataUri);
     else setStampUri(asset.dataUri);
     return true;
-  }, []);
+  }, [user?.uid]);
 
   const runPick = useCallback(
     async (target: PickTarget) => {
@@ -324,6 +340,14 @@ export default function LetterheadSetupScreen() {
 
   const templateUri = candidate?.localUri ?? existing?.imageDataUri ?? null;
 
+  const clearRetiredEditorState = useCallback(() => {
+    const owned = candidateRef.current;
+    candidateRef.current = null;
+    setCandidate(null);
+    setTemplateWarnings([]);
+    if (owned) void retireLetterheadCandidate(owned);
+  }, []);
+
   const onSave = async () => {
     if (!user || saveGuard.current) return;
     setError(null);
@@ -336,6 +360,7 @@ export default function LetterheadSetupScreen() {
       setError(t("letterhead.setupSaveFailedUnchanged"));
       return;
     }
+    const session = captureAdmissionToken();
     saveGuard.current = true;
     setSaving(true);
     const previousExisting = existing;
@@ -346,26 +371,40 @@ export default function LetterheadSetupScreen() {
         const backend = getActiveBackend();
         if (backend === "local-mock") {
           imageForSave = await readCandidateDataUri(candidate);
+          assertCandidateOwner(candidate, user.uid);
         } else {
           imageForSave = candidate.localUri;
         }
       }
 
-      const saved = await getLetterheadRepository().save(user.uid, {
-        sourceType: "imported_image",
-        generatedLayout: null,
-        imageDataUri: imageForSave,
-        imageWidth: candidate?.width ?? existing?.imageWidth ?? 0,
-        imageHeight: candidate?.height ?? existing?.imageHeight ?? 0,
-        margins,
-        signatureDataUri: signatureUri,
-        stampDataUri: stampUri,
-        defaultSenderName: defaultName.trim() || null,
-        defaultSenderTitle: defaultTitle.trim() || null,
-        defaultComplimentaryClose: defaultClose.trim() || null,
-        repeatTemplateAllPages: true,
-      });
+      const saved = await getLetterheadRepository().save(
+        user.uid,
+        {
+          sourceType: "imported_image",
+          generatedLayout: null,
+          imageDataUri: imageForSave,
+          imageWidth: candidate?.width ?? existing?.imageWidth ?? 0,
+          imageHeight: candidate?.height ?? existing?.imageHeight ?? 0,
+          margins,
+          signatureDataUri: signatureUri,
+          stampDataUri: stampUri,
+          defaultSenderName: defaultName.trim() || null,
+          defaultSenderTitle: defaultTitle.trim() || null,
+          defaultComplimentaryClose: defaultClose.trim() || null,
+          repeatTemplateAllPages: true,
+        },
+        session
+      );
       if (!mountedRef.current) return;
+      if (
+        session !== undefined &&
+        (!session || !mayIssueRemoteWork(session, user.uid))
+      ) {
+        // Stale completion — suppress navigation/state publish; keep prior template.
+        if (previousExisting) setExisting(previousExisting);
+        clearRetiredEditorState();
+        return;
+      }
       setExisting(saved);
       if (candidate) {
         const done = candidate;
@@ -376,9 +415,18 @@ export default function LetterheadSetupScreen() {
       router.replace("/(app)/letterhead");
     } catch (e) {
       if (previousExisting) setExisting(previousExisting);
+      const retired =
+        (e instanceof LetterheadCandidateError && e.code === "wrong_owner") ||
+        (e instanceof SaveRetryableError && e.failureCode === "session_retired") ||
+        e instanceof StorageUploadOwnershipError ||
+        (session !== undefined &&
+          (!session || !mayIssueRemoteWork(session, user.uid)));
+      if (retired) {
+        clearRetiredEditorState();
+      }
       if (e instanceof AppError && e.code === "save_failed") {
         setError(t("letterhead.setupImageTooLarge"));
-      } else {
+      } else if (mountedRef.current) {
         setError(t("letterhead.setupSaveFailedUnchanged"));
       }
     } finally {
@@ -418,10 +466,10 @@ export default function LetterheadSetupScreen() {
           onChange={setMargins}
           background={
             templateUri ? (
-              <Image
-                source={{ uri: templateUri }}
-                style={styles.bgImage}
-                resizeMode={IMPORTED_PAGE_FIT}
+              <ImportedLetterheadImage
+                uri={templateUri}
+                width={candidate?.width ?? existing?.imageWidth}
+                height={candidate?.height ?? existing?.imageHeight}
               />
             ) : undefined
           }

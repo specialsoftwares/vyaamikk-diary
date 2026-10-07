@@ -256,7 +256,9 @@ export default function LetterheadGenerateScreen() {
         }
       })
       .catch(() => {
-        if (!cancelled && mounted.current) applyProfileAsNew();
+        if (cancelled || !mounted.current) return;
+        if (!session || !mayIssueRemoteWork(session, user.uid)) return;
+        applyProfileAsNew();
       })
       .finally(() => {
         if (!cancelled && mounted.current) setLoading(false);
@@ -330,24 +332,40 @@ export default function LetterheadGenerateScreen() {
       if (!mayIssueRemoteWork(session, user.uid)) {
         throw new Error("session_retired");
       }
-      await getLetterheadRepository().save(user.uid, {
-        sourceType: "generated_layout",
-        generatedLayout: layout,
-        imageDataUri: null,
-        imageWidth: 0,
-        imageHeight: 0,
-        margins,
-        signatureDataUri: prior?.signatureDataUri ?? null,
-        stampDataUri: prior?.stampDataUri ?? null,
-        defaultSenderName:
-          layout.businessName ?? prior?.defaultSenderName ?? null,
-        defaultSenderTitle: prior?.defaultSenderTitle ?? user.designation?.trim() ?? null,
-        defaultComplimentaryClose: prior?.defaultComplimentaryClose ?? null,
-        repeatTemplateAllPages: true,
-      });
+      await getLetterheadRepository().save(
+        user.uid,
+        {
+          sourceType: "generated_layout",
+          generatedLayout: layout,
+          imageDataUri: null,
+          imageWidth: 0,
+          imageHeight: 0,
+          margins,
+          signatureDataUri: prior?.signatureDataUri ?? null,
+          stampDataUri: prior?.stampDataUri ?? null,
+          defaultSenderName:
+            layout.businessName ?? prior?.defaultSenderName ?? null,
+          defaultSenderTitle:
+            prior?.defaultSenderTitle ?? user.designation?.trim() ?? null,
+          defaultComplimentaryClose: prior?.defaultComplimentaryClose ?? null,
+          repeatTemplateAllPages: true,
+        },
+        session
+      );
+      if (!mayIssueRemoteWork(session, user.uid)) {
+        // Stale completion — do not navigate or publish UI as success.
+        return;
+      }
       if (mounted.current) router.replace("/(app)/letterhead");
     } catch {
-      if (mounted.current) setError(t("letterhead.setupSaveFailedUnchanged"));
+      if (mounted.current) {
+        setError(t("letterhead.setupSaveFailedUnchanged"));
+        // Retired owner: drop draft editor fields sourced from a prior session.
+        if (!mayIssueRemoteWork(session, user.uid)) {
+          setLogoDataUri(null);
+          setIncludeLogo(false);
+        }
+      }
     } finally {
       if (mounted.current) setSaving(false);
       saveGuard.current = false;

@@ -72,9 +72,10 @@ export function generatedHeaderFlex(align: LetterheadLogoAlign): GeneratedHeader
     };
   }
   if (align === "right") {
+    // row-reverse: main-start is on the right → flex-start packs to the right.
     return {
       flexDirection: "row-reverse",
-      justifyContent: "flex-end",
+      justifyContent: "flex-start",
       alignItems: "flex-start",
       textAlign: "right",
     };

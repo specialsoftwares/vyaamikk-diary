@@ -18,6 +18,13 @@ import {
 } from "@/sync/syncSessionOwnership";
 import { createLogger } from "@/utils/logger";
 
+import {
+  ownedCandidateTempUris,
+  sniffImageMimeFromBase64Head,
+} from "./letterheadImageMime";
+
+export { ownedCandidateTempUris } from "./letterheadImageMime";
+
 const log = createLogger("letterhead/candidate");
 
 /** Compressed-byte cap before expensive processing (~4 MB). */
@@ -84,16 +91,11 @@ export async function sniffImageMime(localUri: string): Promise<string | null> {
   try {
     const head = await FileSystem.readAsStringAsync(localUri, {
       encoding: FileSystem.EncodingType.Base64,
-      length: 24,
+      // Enough for RIFF....WEBP (12 bytes → ~16 base64 chars; read extra).
+      length: 48,
       position: 0,
     });
-    // Decode a few bytes via known base64 prefixes (avoid full Buffer in RN).
-    if (head.startsWith("/9j/")) return "image/jpeg";
-    if (head.startsWith("iVBOR")) return "image/png";
-    if (head.startsWith("UklGR") && head.includes("V0VC")) return "image/webp";
-    // WebP: RIFF....WEBP — base64 often starts with UklGRxxx
-    if (head.startsWith("UklGR")) return "image/webp";
-    return null;
+    return sniffImageMimeFromBase64Head(head);
   } catch {
     return null;
   }
@@ -136,7 +138,7 @@ export function assertCaptureStillOwned(
 async function persistCopiedCandidate(
   ctx: CandidateCaptureContext,
   sourceUri: string,
-  hintedMime?: string | null,
+  _hintedMime?: string | null,
   hintedSize?: { width: number; height: number } | null
 ): Promise<LetterheadCandidateImage> {
   assertCaptureStillOwned(ctx, ctx.session.uid);
@@ -146,55 +148,80 @@ async function persistCopiedCandidate(
   const fileGeneration = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   // Stage with a neutral extension; rename after sniff.
   const staging = `${dir}/tpl-${fileGeneration}.bin`;
+  let finalPath: string | null = null;
+
+  const cleanupOwnedTemps = async () => {
+    for (const uri of ownedCandidateTempUris(staging, finalPath)) {
+      await deleteQuietly(uri);
+    }
+  };
 
   try {
     await FileSystem.copyAsync({ from: sourceUri, to: staging });
   } catch (e) {
     log.warn("copy candidate failed", e);
+    await cleanupOwnedTemps();
     throw new LetterheadCandidateError("read_failed");
   }
 
   try {
     assertCaptureStillOwned(ctx, ctx.session.uid);
 
-    const sniffed = await sniffImageMime(staging);
-    const mime = sniffed ?? (hintedMime?.startsWith("image/") ? hintedMime : null);
+    // Magic bytes only — picker MIME is never an admission ticket.
+    const mime = await sniffImageMime(staging);
     if (!mime) {
-      await deleteQuietly(staging);
+      await cleanupOwnedTemps();
       throw new LetterheadCandidateError("unsupported_format");
     }
 
     const dest = `${dir}/tpl-${fileGeneration}.${extFromMime(mime)}`;
     if (dest !== staging) {
-      await FileSystem.moveAsync({ from: staging, to: dest });
+      try {
+        await FileSystem.moveAsync({ from: staging, to: dest });
+        finalPath = dest;
+      } catch (e) {
+        log.warn("rename candidate failed", e);
+        await cleanupOwnedTemps();
+        throw new LetterheadCandidateError("read_failed");
+      }
+    } else {
+      finalPath = staging;
     }
 
-    const info = await FileSystem.getInfoAsync(dest);
-    if (!info.exists) throw new LetterheadCandidateError("read_failed");
+    const info = await FileSystem.getInfoAsync(finalPath);
+    if (!info.exists) {
+      await cleanupOwnedTemps();
+      throw new LetterheadCandidateError("read_failed");
+    }
     const size =
       info.exists && "size" in info && typeof info.size === "number" ? info.size : 0;
     if (size <= 0 || size > MAX_TEMPLATE_COMPRESSED_BYTES) {
-      await deleteQuietly(dest);
+      await cleanupOwnedTemps();
       throw new LetterheadCandidateError(size > MAX_TEMPLATE_COMPRESSED_BYTES ? "too_large" : "read_failed");
     }
 
     let width = Math.max(0, Math.round(hintedSize?.width ?? 0));
     let height = Math.max(0, Math.round(hintedSize?.height ?? 0));
     if (width <= 0 || height <= 0) {
-      const measured = await readImageSize(dest);
-      width = measured.width;
-      height = measured.height;
+      try {
+        const measured = await readImageSize(finalPath);
+        width = measured.width;
+        height = measured.height;
+      } catch (e) {
+        await cleanupOwnedTemps();
+        throw e;
+      }
     }
     const longEdge = Math.max(width, height);
     if (longEdge > MAX_TEMPLATE_LONG_EDGE_PX) {
-      await deleteQuietly(dest);
+      await cleanupOwnedTemps();
       throw new LetterheadCandidateError("too_large");
     }
 
     assertCaptureStillOwned(ctx, ctx.session.uid);
 
     return {
-      localUri: dest,
+      localUri: finalPath,
       mimeType: mime,
       width,
       height,
@@ -204,7 +231,7 @@ async function persistCopiedCandidate(
       fileGeneration,
     };
   } catch (e) {
-    await deleteQuietly(staging);
+    await cleanupOwnedTemps();
     throw e;
   }
 }

@@ -7,10 +7,10 @@ import React, { memo, useMemo } from "react";
 import { Image, StyleSheet, Text, View } from "react-native";
 
 import { LocaleUiText } from "@/components/ui/LocaleUiText";
+import { ImportedLetterheadImage } from "@/components/letterhead/ImportedLetterheadImage";
 import type { LetterheadConfig, LetterheadDocumentInput } from "@/services/letterhead";
 import {
   generatedHeaderFlex,
-  IMPORTED_PAGE_FIT,
   LETTERHEAD_A4_ASPECT,
 } from "@/services/letterhead/letterheadVisualSpec";
 import { useT } from "@/i18n";
@@ -143,13 +143,11 @@ export const LetterheadPreview = memo(function LetterheadPreview({
             </View>
           </View>
         ) : config.imageDataUri ? (
-          <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, justifyContent: "flex-start" }}>
-            <Image
-              source={{ uri: config.imageDataUri }}
-              style={{ width: "100%", height: "100%" }}
-              resizeMode={IMPORTED_PAGE_FIT}
-            />
-          </View>
+          <ImportedLetterheadImage
+            uri={config.imageDataUri}
+            width={config.imageWidth}
+            height={config.imageHeight}
+          />
         ) : null}
         <View pointerEvents="none" style={[styles.writable, writableStyle]}>
           <Text style={styles.dateRow}>

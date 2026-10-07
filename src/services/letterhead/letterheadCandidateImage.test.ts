@@ -1,12 +1,14 @@
 /**
- * Injected contracts for candidate ownership, size policy, and cleanup.
- * Source-only — avoid importing RN Image under node --test.
+ * Candidate ownership, size policy, and cleanup contracts.
+ * Pure helpers execute under node; RN Image paths stay source-checked.
  */
 
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
+
+import { ownedCandidateTempUris } from "./letterheadImageMime";
 
 const src = fs.readFileSync(
   path.join(import.meta.dirname, "letterheadCandidateImage.ts"),
@@ -35,7 +37,29 @@ test("long-edge oversize is rejected (not a no-op)", () => {
 test("MIME is sniffed from magic bytes; unsupported formats rejected", () => {
   assert.match(src, /sniffImageMime/);
   assert.match(src, /unsupported_format/);
-  assert.match(src, /\/9j\//);
+  assert.match(src, /Magic bytes only/);
+  assert.match(src, /cleanupOwnedTemps/);
+});
+
+test("partial-copy failure cleans staging only", () => {
+  assert.deepEqual(
+    ownedCandidateTempUris("/cache/tpl-1.bin", null),
+    ["/cache/tpl-1.bin"]
+  );
+});
+
+test("rename failure cleans staging + final when both exist", () => {
+  assert.deepEqual(
+    ownedCandidateTempUris("/cache/tpl-1.bin", "/cache/tpl-1.jpg"),
+    ["/cache/tpl-1.bin", "/cache/tpl-1.jpg"]
+  );
+  assert.deepEqual(
+    ownedCandidateTempUris("/cache/tpl-1.jpg", "/cache/tpl-1.jpg"),
+    ["/cache/tpl-1.jpg"]
+  );
+  assert.match(src, /rename candidate failed/);
+  assert.match(src, /copy candidate failed/);
+  assert.match(src, /cleanupOwnedTemps|ownedCandidateTempUris/);
 });
 
 test("scanner/local files read dimensions via Image.getSize when missing", () => {
