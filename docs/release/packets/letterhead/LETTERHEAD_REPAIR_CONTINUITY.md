@@ -9,7 +9,7 @@ Updated: **2026-10-08** (PR #32 runtime regression corrections)
 | Dirty main workspace | `draft/goods-evidence-domain-contract` — **not edited** |
 | Reviewed / corrected branch | `fix/letterhead-repair-scan` |
 | Prior closeout HEAD | `ff8dd1782225ca5d68a4be9bb1e52cbbfac187a4` (CI 37679423265 / verify 112991830178) |
-| Runtime regression tip | **_(set after CI)_** |
+| Runtime regression tip | **`eccc783f624668b1a8c4382d6cb8f22bee3a449a`** (CI 37693886315 / verify 113040537404) |
 | Application freeze (vc24 AAB) | `7c938f8` · EAS `c931da3d-…` · **unchanged** |
 | Isolation | Worktree `/Users/shivamsaurav/vyd-worktrees/letterhead-repair` |
 | Material Movement / unified GRIN | **Queued** — starts only after Letterhead is merged into `integration/grin-g1-g5-source` (do not merge main to satisfy) |
