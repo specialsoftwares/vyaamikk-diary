@@ -432,7 +432,8 @@ async function main() {
     results.register_replay !== "PASS" ||
     results.upload_verification !== "PASS" ||
     results.confirmation !== "PASS" ||
-    (results.read_export !== "PASS" && results.read_export !== "NARROW")
+    // read_export success is NARROW (authorized read + local manifest), never PASS.
+    results.read_export !== "NARROW"
   ) {
     fail("authenticated scenarios incomplete");
   }
