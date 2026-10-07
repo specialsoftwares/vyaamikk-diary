@@ -20,7 +20,7 @@ TOOLING (ops-guard suite; not application CI).
 | **Included source** | Letterhead repair (ownership, dirty-load, single-flight, MIME, contain, fresh-PDF) + unified MM entry + lean GRIN create + owner-scoped return select/multi-line return + ASO/UX docs |
 | **Letterhead merge parents** | `1f302b9` + `b274fe8` → merge **`1be1daedc67f4ef59f579a92c1b7262d1af5904c`** |
 | **Letterhead CI-tested SHA** | **`eccc783`** · GHA **`37693886315`** / verify **`113040537404`** SUCCESS (branch only — not combined-tree proof) |
-| **Combined-tree CI** | _(fill after canonical CI on this candidate tip)_ |
+| **Combined-tree CI** | GHA **`37699830269` SUCCESS** / verify **`113060362670`** on tip **`56837f17fb7d4354120282841fbcd6faf71c1bf5`** (workflow_dispatch). PR **#33**. |
 | **Backend compatibility** | No live Functions/Rules/IAM/config changes in this task. New Firestore indexes not required for owner-scoped local list search. `CaptureProvenance.unknown` / ArrivalObservation schema **deferred**. |
 | **Device pending** | Native Expo upload, ML Kit scanner, expo-print; MM create/return TalkBack; Play upgrade path |
 | **Play / EAS artifact (unchanged)** | Installed/uploaded Internal remains **`7c938f8` / vc24** · EAS **`c931da3d-…`** — **this source candidate is not that AAB** |
