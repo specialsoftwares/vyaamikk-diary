@@ -22,6 +22,7 @@ const EXCLUDE = new Set([
   "test:live-rules-compat", // live-export compatibility emulator — separate ci:verify stage
   "test:storage-rules", // storage emulator suite — separate ci:verify stage
   "test:letterhead-storage-emulator", // letterhead Storage rules emulator — separate ci:verify stage
+  "test:letterhead-media-rest-emulator", // media-REST joined emulator — separate ci:verify stage
   "test:resolve-or-create-phone-emulator", // emulator suite — separate ci:verify stage
   "test:billing-transaction-emulator", // emulator suite — separate ci:verify stage
   "test:billing-gst-compliance-emulator", // emulator suite — separate ci:verify stage

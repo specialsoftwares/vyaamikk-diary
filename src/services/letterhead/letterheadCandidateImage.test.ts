@@ -18,6 +18,10 @@ const setupSrc = fs.readFileSync(
   path.join(import.meta.dirname, "../../../app/(app)/letterhead/setup.tsx"),
   "utf8"
 );
+const runtimeSrc = fs.readFileSync(
+  path.join(import.meta.dirname, "letterheadSetupEditorRuntime.ts"),
+  "utf8"
+);
 
 test("candidate uses SyncSessionToken, not fileGeneration as auth", () => {
   assert.match(src, /sessionGeneration/);
@@ -66,10 +70,12 @@ test("scanner/local files read dimensions via Image.getSize when missing", () =>
   assert.match(src, /Image\.getSize/);
 });
 
-test("setup cleans candidate via ref on unmount, not null-closing effect", () => {
-  assert.match(setupSrc, /candidateRef/);
+test("setup retires candidates via editor runtime dispose, not null-closing effect", () => {
+  assert.match(setupSrc, /createLetterheadSetupEditorRuntime/);
+  assert.match(setupSrc, /runtime\.dispose\(\)/);
   assert.match(setupSrc, /mountedRef/);
-  assert.match(setupSrc, /retireLetterheadCandidate\(owned\)/);
+  assert.match(runtimeSrc, /retireCandidateQuietly/);
+  assert.match(runtimeSrc, /dispose\(\): void/);
   assert.doesNotMatch(
     setupSrc,
     /useEffect\(\(\) => \{\s*return \(\) => \{\s*void retireLetterheadCandidate\(candidate\)/

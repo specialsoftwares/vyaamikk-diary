@@ -1,6 +1,9 @@
 /**
- * Isolated Storage emulator: owner allow / anon+cross-owner deny for letterhead
- * and attachment paths. Uses rules-unit-testing uploadBytes (Node) — not Admin bypass.
+ * Rules SDK suite (labelled accurately): owner allow / anon+cross-owner deny
+ * for letterhead and attachment paths via Firebase JS `uploadBytes` against the
+ * Storage emulator. Not Admin bypass. Not the production media-REST upload path
+ * (see letterheadMediaRest.emulator.test.ts for that joined suite).
+ *
  * Verifies downloaded bytes. Does not call production endpoints.
  *
  * Run via: firebase emulators:exec --only storage (see package.json script).

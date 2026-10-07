@@ -167,20 +167,50 @@ const multi = writeCase(
 assert.match(multi.html, /Paragraph 45/);
 assert.match(multi.html, /grayscale/);
 
-const pdfDir = path.join(outDir, "pdf");
-fs.mkdirSync(pdfDir, { recursive: true });
+/** Required fresh renders — committed PDFs under pdf/ do not count. */
+const REQUIRED_PDF_NAMES = [
+  "imported-contain-top",
+  "imported-tall",
+  "imported-a4ish",
+  "generated-left",
+  "generated-center",
+  "generated-right",
+  "multi-page-body",
+] as const;
 
-async function tryRenderPdfs(): Promise<string[]> {
-  const names = [
-    "imported-contain-top",
-    "imported-a4ish",
-    "generated-left",
-    "generated-center",
-    "generated-right",
-    "multi-page-body",
-  ];
+const freshPdfDir = path.join(outDir, `pdf-fresh-${Date.now()}`);
+fs.mkdirSync(freshPdfDir, { recursive: true });
 
-  // Prefer Chromium via puppeteer when present; else host Chrome headless.
+/** Inspect production HTML for clipping / stacking / header placement. */
+function inspectHtmlGeometry(name: string, html: string): void {
+  if (name.startsWith("imported-")) {
+    assert.match(html, /object-fit:\s*contain/, `${name}: contain`);
+    assert.match(html, /object-position:\s*top center/, `${name}: top centre`);
+    assert.match(html, /class="letterhead-bg"/, `${name}: bg layer`);
+    assert.match(html, /\.letterhead-bg\s*\{[^}]*position:\s*fixed/, `${name}: fixed bg`);
+  }
+  if (name.startsWith("generated-")) {
+    assert.match(html, /class="generated-header/, `${name}: header`);
+    assert.match(html, /\.generated-header\s*\{[^}]*position:\s*fixed/, `${name}: fixed header`);
+  }
+  assert.match(html, /\.content\s*\{[^}]*z-index:\s*1/, `${name}: body above letterhead`);
+  assert.doesNotMatch(html, /object-fit:\s*cover/, `${name}: must not cover-crop`);
+  assert.doesNotMatch(html, /object-fit:\s*fill/, `${name}: must not stretch-fill`);
+}
+
+for (const name of REQUIRED_PDF_NAMES) {
+  const html = fs.readFileSync(path.join(outDir, `${name}.html`), "utf8");
+  inspectHtmlGeometry(name, html);
+}
+
+function countPdfPages(pdfBytes: Buffer): number {
+  const text = pdfBytes.toString("latin1");
+  const matches = text.match(/\/Type\s*\/Page(?![sA-Za-z])/g);
+  return matches ? matches.length : 0;
+}
+
+async function renderFreshPdfs(): Promise<string[]> {
+  const names = [...REQUIRED_PDF_NAMES];
   const require = createRequire(import.meta.url);
   const puppeteerCandidates = [
     path.join(
@@ -211,15 +241,17 @@ async function tryRenderPdfs(): Promise<string[]> {
           const html = fs.readFileSync(path.join(outDir, `${name}.html`), "utf8");
           const page = await browser.newPage();
           await page.setContent(html, { waitUntil: "load" });
-          const pdfBytes = await page.pdf({
-            format: "A4",
-            printBackground: true,
-            preferCSSPageSize: true,
-          });
-          const pdfPath = path.join(pdfDir, `${name}.pdf`);
+          const pdfBytes = Buffer.from(
+            await page.pdf({
+              format: "A4",
+              printBackground: true,
+              preferCSSPageSize: true,
+            })
+          );
+          const pdfPath = path.join(freshPdfDir, `${name}.pdf`);
           fs.writeFileSync(pdfPath, pdfBytes);
           assert.ok(pdfBytes.byteLength > 1000, `${name} PDF too small`);
-          assert.equal(String.fromCharCode(...pdfBytes.slice(0, 4)), "%PDF");
+          assert.equal(pdfBytes.subarray(0, 4).toString("ascii"), "%PDF");
           written.push(pdfPath);
           await page.close?.();
         }
@@ -228,7 +260,7 @@ async function tryRenderPdfs(): Promise<string[]> {
       }
       return written;
     } catch {
-      // try next / fall through to Chrome CLI
+      // fall through to Chrome CLI
     }
   }
 
@@ -236,9 +268,6 @@ async function tryRenderPdfs(): Promise<string[]> {
     process.env.LETTERHEAD_CHROME_BIN ||
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
   if (!fs.existsSync(chromeBin)) {
-    console.log(
-      "letterheadPdfRender: no puppeteer/Chrome — HTML fixtures only (device Print pending)"
-    );
     return [];
   }
 
@@ -246,7 +275,8 @@ async function tryRenderPdfs(): Promise<string[]> {
   const written: string[] = [];
   for (const name of names) {
     const htmlPath = path.join(outDir, `${name}.html`);
-    const pdfPath = path.join(pdfDir, `${name}.pdf`);
+    const pdfPath = path.join(freshPdfDir, `${name}.pdf`);
+    const started = Date.now();
     const r = spawnSync(
       chromeBin,
       [
@@ -262,6 +292,8 @@ async function tryRenderPdfs(): Promise<string[]> {
       console.log(`letterheadPdfRender: Chrome PDF failed for ${name}`, r.stderr?.slice(0, 200));
       continue;
     }
+    const st = fs.statSync(pdfPath);
+    assert.ok(st.mtimeMs >= started - 1000, `${name}: PDF must be freshly written`);
     const pdfBytes = fs.readFileSync(pdfPath);
     assert.ok(pdfBytes.byteLength > 1000, `${name} PDF too small`);
     assert.equal(pdfBytes.subarray(0, 4).toString("ascii"), "%PDF");
@@ -271,19 +303,49 @@ async function tryRenderPdfs(): Promise<string[]> {
 }
 
 async function main(): Promise<void> {
-  const pdfs = await tryRenderPdfs();
+  const pdfs = await renderFreshPdfs();
+  const basenames = new Set(pdfs.map((p) => path.basename(p, ".pdf")));
+
+  // Required-render check: old committed PDFs must not satisfy this.
+  const missing = REQUIRED_PDF_NAMES.filter((n) => !basenames.has(n));
+  assert.equal(
+    missing.length,
+    0,
+    `Required PDFs were not freshly rendered (missing: ${missing.join(", ")}). ` +
+      "Committed pdf/ fixtures do not count. Provide Chrome/puppeteer on the host."
+  );
+
+  const multiBytes = fs.readFileSync(path.join(freshPdfDir, "multi-page-body.pdf"));
+  assert.ok(
+    countPdfPages(multiBytes) >= 2,
+    "multi-page-body must span ≥2 PDF pages (body must not collapse into header)"
+  );
+
+  const tallBytes = fs.readFileSync(path.join(freshPdfDir, "imported-tall.pdf"));
+  assert.ok(tallBytes.byteLength > 1000, "imported-tall PDF present");
+  assert.equal(countPdfPages(tallBytes), 1, "imported-tall single page");
+
+  // Publish a stable copy for docs without treating it as the freshness gate.
+  const stablePdfDir = path.join(outDir, "pdf");
+  fs.mkdirSync(stablePdfDir, { recursive: true });
+  for (const name of REQUIRED_PDF_NAMES) {
+    fs.copyFileSync(
+      path.join(freshPdfDir, `${name}.pdf`),
+      path.join(stablePdfDir, `${name}.pdf`)
+    );
+  }
 
   fs.writeFileSync(
     path.join(outDir, "MANIFEST.json"),
     JSON.stringify(
       {
         outDir,
+        freshPdfDir,
         html: fs.readdirSync(outDir).filter((f) => f.endsWith(".html")),
-        pdfs: pdfs.map((p) => path.basename(p)),
+        pdfsFresh: [...basenames],
         note:
-          pdfs.length > 0
-            ? "HTML from composeLetterheadHtml + Chromium PDF. Device Print still pending."
-            : "HTML from composeLetterheadHtml. PDF raster skipped (no puppeteer); device Print pending.",
+          "Fresh HTML from composeLetterheadHtml + Chromium/Chrome PDF. " +
+          "Freshness gated on pdf-fresh-* (not committed pdf/). Device Print still pending.",
       },
       null,
       2
@@ -294,7 +356,7 @@ async function main(): Promise<void> {
     "letterheadPdfRender.inspection.test.ts: ok",
     "html=",
     fs.readdirSync(outDir).filter((f) => f.endsWith(".html")).length,
-    "pdf=",
+    "pdfFresh=",
     pdfs.length
   );
 }

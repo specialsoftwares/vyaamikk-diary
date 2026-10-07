@@ -1,5 +1,6 @@
 {
   "outDir": "/Users/shivamsaurav/vyd-worktrees/letterhead-repair/docs/release/packets/letterhead/pdf-fixtures",
+  "freshPdfDir": "/Users/shivamsaurav/vyd-worktrees/letterhead-repair/docs/release/packets/letterhead/pdf-fixtures/pdf-fresh-1791402050074",
   "html": [
     "generated-center.html",
     "generated-left.html",
@@ -10,13 +11,14 @@
     "imported-tall.html",
     "multi-page-body.html"
   ],
-  "pdfs": [
-    "imported-contain-top.pdf",
-    "imported-a4ish.pdf",
-    "generated-left.pdf",
-    "generated-center.pdf",
-    "generated-right.pdf",
-    "multi-page-body.pdf"
+  "pdfsFresh": [
+    "imported-contain-top",
+    "imported-tall",
+    "imported-a4ish",
+    "generated-left",
+    "generated-center",
+    "generated-right",
+    "multi-page-body"
   ],
-  "note": "HTML from composeLetterheadHtml + Chromium PDF. Device Print still pending."
+  "note": "Fresh HTML from composeLetterheadHtml + Chromium/Chrome PDF. Freshness gated on pdf-fresh-* (not committed pdf/). Device Print still pending."
 }
