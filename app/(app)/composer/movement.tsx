@@ -9,6 +9,7 @@ import {
   MATERIAL_MOVEMENT_SUB_OPTIONS,
   entryTypeForMovementKind,
 } from "@/domain/composerOptions";
+import { materialMovementDestinations } from "@/domain/materialMovementDestinations";
 import type { MaterialMovementKind } from "@/domain/materialMovement";
 import { isGoodsEvidenceEnabled } from "@/goodsEvidence/featureFlag";
 import { useT } from "@/i18n";
@@ -23,7 +24,11 @@ export default function MaterialMovementPickerScreen() {
   const t = useT();
   const router = useRouter();
   const { from } = useLocalSearchParams<{ from?: string }>();
-  const showGrin = useMemo(() => isGoodsEvidenceEnabled(), []);
+  const destinations = useMemo(
+    () => materialMovementDestinations({ goodsEvidenceEnabled: isGoodsEvidenceEnabled() }),
+    []
+  );
+  const showGrin = destinations.some((d) => d.kind === "grin_create");
 
   const styles = useThemedStyles((c) =>
     StyleSheet.create({

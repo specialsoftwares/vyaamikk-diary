@@ -23,6 +23,7 @@ const movementSrc = readFileSync(
   "utf8"
 );
 assert.match(movementSrc, /isGoodsEvidenceEnabled/);
+assert.match(movementSrc, /materialMovementDestinations/);
 assert.match(movementSrc, /\/\(app\)\/grin\/create/);
 assert.doesNotMatch(
   movementSrc,

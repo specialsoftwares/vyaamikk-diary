@@ -2975,7 +2975,8 @@
       "capture": "How this was captured",
       "custody": "Custody",
       "changeArrival": "Change",
-      "arrivalStoredHint": "Shown in your local date and time. The exact timestamp is stored for records."
+      "arrivalStoredHint": "Shown in your local date and time. The exact timestamp is stored for records.",
+      "arrivalPickerUnavailable": "Date and time picking is not available on this screen. The stored arrival time is unchanged."
     },
     "action": {
       "inspect": "Inspection",
