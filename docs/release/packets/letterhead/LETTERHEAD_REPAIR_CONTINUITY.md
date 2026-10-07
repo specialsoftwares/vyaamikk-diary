@@ -12,6 +12,7 @@ Updated: **2026-10-07**
 | Latest EAS (finished) | `c931da3d-4dcb-472e-9c63-f72217c6d95c` · profile `internal-grin` · **vc24** · source `7c938f8` |
 | Prior Internal (vc23) | EAS `8c789fa9-…` · source `540e07a` |
 | Isolation branch / worktree | `fix/letterhead-repair-scan` · `/Users/shivamsaurav/vyd-worktrees/letterhead-repair` |
+| Letterhead source tip | `2579cf7` (this packet’s implementation commit) |
 | Base | Branched from `1f302b9` (integration tip); **not** substituted into frozen vc24 AAB |
 
 Expo SDK **54** / RN **0.81.5**. AGENTS.md points at Expo v56 docs — project runtime remains SDK 54; native changes follow installed SDK.
