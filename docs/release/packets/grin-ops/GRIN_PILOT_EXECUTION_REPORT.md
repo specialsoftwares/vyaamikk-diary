@@ -87,7 +87,16 @@ Auth controller + `/session` tests: **12 PASS** locally (2026-10-07). Full suite
 
 ---
 
-## Out of scope (unchanged)
+## B1 / B2 (store path)
 
-No EAS build, Play upload, billing activation, purge activation, IAM expansion,
-main merge, or public rollout from this report.
+| Letter | State |
+|---|---|
+| B1 Internal AAB | **COMPLETE** — EAS `8c789fa9-…`; AAB SHA-256 `dc2dbf61…`; pin `540e07a`; purchase/quota off |
+| B2 Internal Testing | **COMPLETE** — vc23 released to Internal testing 2026-10-07; see `B1_B2_EVIDENCE_REDACTED.md` |
+| D1 device upgrade | Owner install pending; upload ≠ acceptance |
+| Billing / purge / main / public | Still out of scope |
+
+## Still out of scope
+
+Billing activation, purge activation, IAM expansion, main merge, OTA, public
+rollout. Authenticated LIVE F remains WAITING.

@@ -1,12 +1,22 @@
-# Internal AAB packet — B1 READY FOR OWNER DECISION
+# Internal AAB packet — B1 COMPLETE · B2 COMPLETE · D1 OWNER INSTALL
 
-**Not authorization.** Do not run `eas build`, `eas submit`, Play upload, OTA,
-or prebuild until the owner grants **B1**. Existing A–F backend approval does
-**not** grant B1/B2. Authenticated F pending does **not** block preparing an
-Internal test build; that limitation must stay explicit on the build.
+**Application pin unchanged.** Do not rebuild. Do not promote beyond Internal
+Testing. Billing, purge, main merge, OTA, and public rollout remain unauthorized.
 
 Updated **2026-10-07**. Tooling-only Auth harness published separately
-(`20df6b9`); **application pin unchanged**.
+(`20df6b9` / later docs); **AAB remains** `540e07a`.
+
+Redacted evidence: `docs/release/packets/grin-ops/B1_B2_EVIDENCE_REDACTED.md`.
+
+---
+
+## Status
+
+| Letter | State |
+|---|---|
+| **B1** EAS Internal AAB | **COMPLETE** — EAS `8c789fa9-705a-4a97-9d87-ba6d6dbd3b88` |
+| **B2** Play Internal Testing upload | **COMPLETE** — release **23 (1.0.0)** on Internal testing; Released 7 Oct 10:45 |
+| **D1** OnePlus 12R upgrade over vc22 | Authorized; **owner installs** via Play; no uninstall / clear data |
 
 ---
 
@@ -22,9 +32,10 @@ Updated **2026-10-07**. Tooling-only Auth harness published separately
 | Do **not** rebuild alone | `520f9f9` / `56f2040` / `313025f` / `fcda7cd` / `60c4bc1` |
 | Package | `com.specialsoftwares.vyaamikkdiary` |
 | EAS profile | `internal-grin` → Android **AAB** (`app-bundle`), `environment: production`, `autoIncrement: false` |
-| Version name | `1.0.0` at `540e07a` — re-read immediately before B1 |
-| versionCode | **23 in source — UNRESERVED until Play recheck** (do not assume reserved) |
-| Signing | Play App Signing at Google; upload key on EAS `@vydspecial2026/vyaamikk-diary` (no fingerprints in git) |
+| Version name | `1.0.0` |
+| versionCode | **23** — Play inventory 2026-10-07: unused before B2 upload |
+| AAB SHA-256 | `dc2dbf61d6fda549f77a4e16cbf093b0d3b61fa011a7902cfc6dd6925e3ae24c` |
+| Signing | Upload-key SHA-256 matches Play UPLOAD cert; APP-SIGNING cert distinct (see redacted evidence) |
 | Backend destination | production `vyaamikk-diary` / `982505811909`, Functions `asia-south1`, bucket `vyaamikk-diary.firebasestorage.app` |
 | Device path | OnePlus 12R, Android 16, **upgrade over installed vc22** (D1 after B2). Do not uninstall vc22 or clear app data. |
 
@@ -56,28 +67,18 @@ Billing-off Internal GRIN AAB. Not a purchase-test build.
 built for install/upgrade pathing; it does **not** prove authenticated LIVE F
 or device GRIN end-to-end against a verified owner OTP session.
 
-## Pre-B1 checklist (owner letter required)
+## B1 result (complete — do not rebuild)
 
-1. **Play App bundle explorer (unfiltered) immediately before build** — highest uploaded code; confirm **23** still free. Unused ≠ reserved.
-2. Clean git worktree at exactly `540e07a` (not Combined docs HEAD alone).
-3. Re-read `eas.json` / `app.json` flags match the table above.
-4. Only then: `eas build --profile internal-grin --platform android` of `540e07a`.
+EAS `8c789fa9-705a-4a97-9d87-ba6d6dbd3b88` FINISHED; AAB + mapping archived
+outside the repository (access-controlled private storage). Auto-submit was off.
 
-## B1 request (decision only)
+## B2 / D1 (owner authorized 2026-10-07)
 
-**Request:** Owner approval to run **B1** = EAS Internal AAB build of application
-`540e07aa07f376716484adb879ce66cb9fb170ce` with profile `internal-grin`, after
-fresh Play inventory confirms versionCode **23** (or a newly committed free
-code if 23 is taken).
-
-**Not requested here:** B2 upload, D1 device, billing activation, purge
-activation, main merge, public release.
-
-## B2 / D1 (separate letters; not granted)
-
-- **B2:** upload that AAB to Play Internal Testing.
-- **D1:** upgrade OnePlus 12R over vc22; capture device result under
-  `docs/release/proposals/team3/device/`.
+- **B2:** upload **this exact** AAB to existing Internal Testing track / existing
+  tester audience only. Do not expand testers; do not touch production/open/closed.
+- **D1:** owner in-place Play update over vc22 on OnePlus 12R; agent verifies
+  package/version after install and guides synthetic GRIN checks. No uninstall,
+  clear data, billing, or purge.
 
 ## Related
 
