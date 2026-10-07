@@ -61,7 +61,7 @@ out of scope for this repair (documented only).
 
 Exact one-line request:
 
-> OWNER APPROVAL — EAS Android `internal-grin` (or named profile) from letterhead-repair SHA `<fill after commit>`: native module `@infinitered/react-native-mlkit-document-scanner@5.0.0`; no auto-submit; no Play upload.
+> OWNER APPROVAL — EAS Android `internal-grin` (or named profile) from letterhead-repair SHA `2579cf7` (or later tip on `fix/letterhead-repair-scan`): native module `@infinitered/react-native-mlkit-document-scanner@5.0.0`; no auto-submit; no Play upload.
 
 Device checks after that build: gallery pick → preview → save; Android scan cancel/success; Play upgrade over installed data; TalkBack on entry choices; PDF inspect for imported + generated.
 
