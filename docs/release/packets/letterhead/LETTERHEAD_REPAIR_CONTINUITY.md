@@ -1,6 +1,6 @@
 # Letterhead repair — continuity & next-build packet
 
-Updated: **2026-10-07** (PR #32 targeted closeout)
+Updated: **2026-10-08** (PR #32 final targeted corrections)
 
 ## Continuity snapshot
 
@@ -8,19 +8,28 @@ Updated: **2026-10-07** (PR #32 targeted closeout)
 |---|---|
 | Dirty main workspace | `draft/goods-evidence-domain-contract` — **not edited** |
 | Reviewed / corrected branch | `fix/letterhead-repair-scan` |
-| Prior reviewed HEAD | `7f8e464a6ebf0054eefb1d9929c8ab86d244cde7` (CI 37657944118 / verify 112920723927) |
-| Closeout tip | **`6b9d5760314e4f1703e03ba68b6e183377b5c9aa`** (CI 37670254136 / verify 112959900623) |
+| Prior closeout HEAD | `6b9d5760314e4f1703e03ba68b6e183377b5c9aa` (CI 37670254136 / verify 112959900623) |
+| Final corrections tip | **`ff8dd1782225ca5d68a4be9bb1e52cbbfac187a4`** (CI 37679423265 / verify 112991830178) |
 | Application freeze (vc24 AAB) | `7c938f8` · EAS `c931da3d-…` · **unchanged** |
 | Isolation | Worktree `/Users/shivamsaurav/vyd-worktrees/letterhead-repair` |
 
-## Closeout items (this tip)
+## Final corrections (this tip)
 
 | # | Item | Status | Notes |
 |---|---|---|---|
-| 1 | Ownership through save | **Done** | uid+generation on repo/upload; recheck after awaits; stale UI/nav suppressed; clearRetiredEditorState; deferred A→B / A→logout→A tests. Does **not** claim issued remote writes can be cancelled. |
-| 2 | File cleanup + format admission | **Done** | staging/final tracked; JPEG/PNG/WebP magic (RIFF≠WebP); picker MIME never admits; prior template preserved on ownership failure. |
-| 3 | Preview / print geometry | **Done** | right = row-reverse + flex-start; `ImportedLetterheadImage` top-centred contain; production `composeLetterheadHtml` → HTML + Chromium/Chrome PDFs. Gallery appearance editing remains **incomplete**. |
-| 4 | Upload boundary execution | **Done** | injected-port exec tests; Storage emulator owner allow / anon+cross-owner deny; no production URL under emulator host; attachments share helper. |
+| 1 | Retired editor state | **Done** | Production `createLetterheadSetupEditorRuntime` binds editor/completions to uid+generation; clears all retired-owner template/signature/stamp/sender fields; A→B / A→logout→A / B-null-load via runtime + memory repo + mounted setup wiring. Does **not** claim issued remote writes can be cancelled. |
+| 2 | Tall-image contain | **Done** | `computeImportedContainLayout` uses `min(frameW/imgW, frameH/imgH)`; 400×800 in 210×297 → 148.5×297; setup + document preview share geometry; tall fixture in PDF render. |
+| 3 | Joined evidence | **Done** | Rules SDK labelled; media-REST joined emulator via production upload core + host transport; owner bytes / anon+cross-owner deny; fresh PDF gate under `pdf-fresh-*` (committed `pdf/` does not count); CI installs Chromium. |
+| 4 | Prior accepted work | **Preserved** | Session/upload checks, MIME admission, cleanup, production HTML extraction. |
+
+## Prior closeout items (retained)
+
+| # | Item | Status | Notes |
+|---|---|---|---|
+| 1 | Ownership through save | **Done** | uid+generation on repo/upload; recheck after awaits; stale UI/nav suppressed. |
+| 2 | File cleanup + format admission | **Done** | staging/final tracked; JPEG/PNG/WebP magic; picker MIME never admits. |
+| 3 | Preview / print geometry | **Done** | right = row-reverse + flex-start; production `composeLetterheadHtml`. Gallery appearance editing remains **incomplete**. |
+| 4 | Upload boundary execution | **Done** | injected-port exec; Storage emulator; no production URL under emulator host. |
 
 ## Finding status (retained)
 
@@ -42,12 +51,13 @@ Updated: **2026-10-07** (PR #32 targeted closeout)
 
 ## Tests
 
-- `npm run test:letterhead-repair` — 53 node tests + PDF HTML/PDF inspection
-- `npm run test:letterhead-storage-emulator` — Rules unit tests (also in `ci:verify`)
+- `npm run test:letterhead-repair` — node contract/runtime/geometry + PDF HTML/fresh-PDF inspection
+- `npm run test:letterhead-storage-emulator` — Rules SDK (`uploadBytes`) labelled; in `ci:verify`
+- `npm run test:letterhead-media-rest-emulator` — production upload core + media-REST host adapter; in `ci:verify`
 
-Device-pending (not replaced by host tests): native upload, scanner, Print acceptance.
+Device-pending (not replaced by host tests): native Expo upload, scanner, Print acceptance.
 
-PDF fixtures: `docs/release/packets/letterhead/pdf-fixtures/` (HTML + PDF; device Print still pending).
+PDF fixtures: `docs/release/packets/letterhead/pdf-fixtures/` (HTML + optional committed PDF). Freshness gate writes under `pdf-fresh-*` and fails if Chromium/Chrome cannot freshly render required PDFs.
 
 ## Next-build packet (when separately authorized)
 
