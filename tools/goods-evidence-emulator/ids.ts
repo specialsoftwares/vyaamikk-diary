@@ -1,0 +1,31 @@
+const DOC_ID = /^[A-Za-z0-9_-]{1,64}$/;
+const COMMAND_ID = /^[A-Za-z0-9_-]{8,128}$/;
+const UNSAFE_LINE_IDS = new Set(["__proto__", "constructor", "prototype"]);
+
+function hasForbiddenPathToken(value: string): boolean {
+  return value.includes("/") || value.includes(".") || value === ".." || value.includes("\\");
+}
+
+export function documentIdError(label: string, value: unknown): string | null {
+  if (typeof value !== "string") return `${label} is required`;
+  if (hasForbiddenPathToken(value)) return `${label} is not a valid document id`;
+  if (!DOC_ID.test(value)) return `${label} is not a valid document id`;
+  return null;
+}
+
+export function commandIdError(value: unknown): string | null {
+  if (typeof value !== "string") return "commandId is required";
+  if (hasForbiddenPathToken(value)) return "commandId is not a valid document id";
+  if (!COMMAND_ID.test(value)) return "commandId is not a valid document id";
+  return null;
+}
+
+/** Line identities used as projection keys. Prototype keys are never rewritten. */
+export function lineIdError(value: unknown, index?: number): string | null {
+  const label = index == null ? "lineId" : `line[${index}] lineId`;
+  if (typeof value !== "string") return `${label} is required`;
+  if (UNSAFE_LINE_IDS.has(value)) return `${label} is not a valid line identity`;
+  if (hasForbiddenPathToken(value)) return `${label} is not a valid line identity`;
+  if (!DOC_ID.test(value)) return `${label} is not a valid line identity`;
+  return null;
+}

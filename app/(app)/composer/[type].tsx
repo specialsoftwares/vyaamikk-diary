@@ -170,6 +170,12 @@ export default function ComposerScreen() {
       saveDraft: { ...typography.captionStrong, color: c.primary },
       saveDraftDisabled: { color: c.textMuted, opacity: 0.55 },
       saveDraftHidden: { opacity: 0 },
+      benefit: {
+        ...typography.body,
+        color: c.textMuted,
+        marginBottom: spacing.md,
+        paddingHorizontal: spacing.lg,
+      },
     })
   );
 
@@ -872,17 +878,22 @@ export default function ComposerScreen() {
     );
   }
 
+  const option = composerOptionForType(entryType);
+  const benefitCopy = option
+    ? t(`composer.options.${option.subtitleKey}`)
+    : t("composer.formSubtitle");
+
   return (
     <Screen scroll form scrollRef={scrollRef}>
       <Header
         variant="executive"
         title={formTitle}
-        subtitle={t("composer.formSubtitle")}
         showBack
         backFrom="you"
         onBackPress={tryBack}
         rightSlot={saveDraftHeader}
       />
+      <LocaleUiText style={linkStyles.benefit}>{benefitCopy}</LocaleUiText>
       <BusinessComposerForm
         key={`${entryType}-${activeDraftId ?? "new"}-${editingId ?? ""}`}
         entryType={entryType}

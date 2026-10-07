@@ -1,0 +1,52 @@
+/**
+ * FY-scoped GRIN serial allocation. Missing counters initialize at 1.
+ * Existing documents are fail-closed: no string coercion, truncation, or repair.
+ */
+export const MAX_ISSUED_SERIAL = 999_999;
+
+export type SerialAllocation =
+  | { ok: true; serial: number }
+  | { ok: false; code: "integrity" | "serial_exhausted" };
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && !Object.is(value, -0);
+}
+
+/**
+ * `exists === false` is a fresh FY counter.
+ * An existing document must carry integer nextSerial / lastIssuedSerial, matching
+ * fyToken, and nextSerial === lastIssuedSerial + 1.
+ */
+export function allocateFromCounter(
+  exists: boolean,
+  data: Record<string, unknown> | undefined,
+  fyToken: string
+): SerialAllocation {
+  if (!exists) {
+    return { ok: true, serial: 1 };
+  }
+  if (!isPlainObject(data)) return { ok: false, code: "integrity" };
+  if (data.fyToken !== fyToken) return { ok: false, code: "integrity" };
+  if (!isSafeInteger(data.nextSerial) || !isSafeInteger(data.lastIssuedSerial)) {
+    return { ok: false, code: "integrity" };
+  }
+  const nextSerial = data.nextSerial;
+  const lastIssuedSerial = data.lastIssuedSerial;
+  if (lastIssuedSerial < 1 || lastIssuedSerial > MAX_ISSUED_SERIAL) {
+    return { ok: false, code: "integrity" };
+  }
+  if (nextSerial !== lastIssuedSerial + 1) {
+    return { ok: false, code: "integrity" };
+  }
+  if (nextSerial === MAX_ISSUED_SERIAL + 1) {
+    return { ok: false, code: "serial_exhausted" };
+  }
+  if (nextSerial < 2 || nextSerial > MAX_ISSUED_SERIAL) {
+    return { ok: false, code: "integrity" };
+  }
+  return { ok: true, serial: nextSerial };
+}

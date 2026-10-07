@@ -1,6 +1,13 @@
 /**
  * Final account purge orchestrator.
  *
+ * THREE DISTINCT DELETION-WINDOW FACTS (do not collapse):
+ * 1. Implemented: DELETION_GRACE_MS = 45 days (this file). SUPERSEDES 15.
+ *    Not 180. After the cancellation window, non-GRIN account data is
+ *    actually deleted on this path (Play: freeze ≠ delete).
+ * 2. Owner-requested 180-day hold — SUPERSEDED for this clock; not implemented.
+ * 3. Public/Play-certified listing copy: still UNRESOLVED. Do not advertise.
+ *
  * Cleanup order (recoverable):
  * 1. Acquire lease on deletionJobs/{uid} (generation check)
  * 2. Abort if user reactivated (status active) or job cancelled
@@ -13,7 +20,7 @@
  * Grace period users are never finally deleted.
  */
 
-import { FieldValue } from "firebase-admin/firestore";
+import { FieldValue, type Query, type QueryDocumentSnapshot } from "firebase-admin/firestore";
 
 import { getAdminAuth, getAdminBucket, getAdminDb } from "../admin";
 import { normalizePhoneE164 } from "../identity/shared";
@@ -21,7 +28,7 @@ import { deleteAuthUserIdempotent } from "./authDelete";
 import {
   DELETION_JOBS,
   MAX_ATTEMPTS_BEFORE_MANUAL,
-  allPhasesDone,
+  accountPurgeMayComplete,
   canAcquireLease,
   classifyProviderError,
   initialDeletionJob,
@@ -29,6 +36,7 @@ import {
 } from "./deletionJob";
 import { purgeUserSubcollectionsFully } from "./firestorePurge";
 import { purgeAllUserOwnedStorage } from "./storagePurge";
+import { INCLUDE_GRIN_IN_ACCOUNT_PURGE, purgeGrinEvidenceIfEnabled } from "./grinCleanup";
 
 const USERS = "users";
 const PHONE_INDEX = "phoneIndex";
@@ -36,7 +44,7 @@ const UEID_INDEX = "ueidIndex";
 const EMAIL_INDEX = "emailIndex";
 const RETIRED_PHONES = "retiredPhones";
 
-export const DELETION_GRACE_MS = 15 * 24 * 60 * 60 * 1000;
+export const DELETION_GRACE_MS = 45 * 24 * 60 * 60 * 1000;
 
 function workerId(): string {
   return `w_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -274,6 +282,45 @@ async function patchJob(uid: string, patch: Record<string, unknown>): Promise<vo
     .set({ ...patch, updatedAt: Date.now() }, { merge: true });
 }
 
+const GRIN_FIRESTORE_LIST_PAGE = 400;
+
+/**
+ * Production GRIN adapter. Pages until a short page — a single limit(400)
+ * would strand the rest and could still look "empty" to a matching count.
+ */
+export async function listGrinCollectionPaged(path: string): Promise<
+  { id: string; ref: { path: string } }[]
+> {
+  const col = getAdminDb().collection(path);
+  const docs: { id: string; ref: { path: string } }[] = [];
+  let last: QueryDocumentSnapshot | undefined;
+  for (;;) {
+    let q: Query = col.limit(GRIN_FIRESTORE_LIST_PAGE);
+    if (last) q = q.startAfter(last);
+    const snap = await q.get();
+    if (snap.empty) break;
+    for (const d of snap.docs) {
+      docs.push({ id: d.id, ref: { path: d.ref.path } });
+    }
+    last = snap.docs[snap.docs.length - 1];
+    if (snap.size < GRIN_FIRESTORE_LIST_PAGE) break;
+  }
+  return docs;
+}
+
+function adminGrinFirestoreAdapter(): import("./grinCleanup").GrinFirestoreLike {
+  return {
+    listCollection: (path) => listGrinCollectionPaged(path),
+    async listSubcollections(docPath: string) {
+      const cols = await getAdminDb().doc(docPath).listCollections();
+      return cols.map((c) => c.id);
+    },
+    async delete(path: string) {
+      await getAdminDb().doc(path).delete();
+    },
+  };
+}
+
 export type FinalPurgeResult = {
   ok: boolean;
   detail: string;
@@ -332,7 +379,7 @@ export async function runFinalAccountPurge(uid: string): Promise<FinalPurgeResul
       await patchJob(uid, { phases });
     }
 
-    // Phase: Firestore subcollections
+    // Phase: Firestore subcollections (diary USER_SUBCOLLECTIONS only).
     if (phases.firestore !== "done") {
       phases.firestore = "in_progress";
       await patchJob(uid, { phases });
@@ -343,6 +390,24 @@ export async function runFinalAccountPurge(uid: string): Promise<FinalPurgeResul
       }
       phases.firestore = "done";
       await patchJob(uid, { phases });
+    }
+
+    // P8 GRIN gate: independent of diary phase-done flags.
+    // Skipped while INCLUDE_GRIN_IN_ACCOUNT_PURGE is false (current production).
+    // After an owner live grant + flag flip, in-flight jobs that already
+    // finished diary storage/firestore still purge GRIN before indexes/Auth.
+    let grinCompleted = !INCLUDE_GRIN_IN_ACCOUNT_PURGE;
+    if (INCLUDE_GRIN_IN_ACCOUNT_PURGE) {
+      await assertStillPendingOrDeletedStub(uid, generation);
+      const grin = await purgeGrinEvidenceIfEnabled({
+        uid,
+        bucket: getAdminBucket() as unknown as import("./storagePurge").StorageBucketLike,
+        db: adminGrinFirestoreAdapter(),
+      });
+      grinCompleted = grin.completed;
+      if (!grin.completed) {
+        throw new Error(grin.detail);
+      }
     }
 
     // Phase: indexes + mark deleted
@@ -375,7 +440,13 @@ export async function runFinalAccountPurge(uid: string): Promise<FinalPurgeResul
       await patchJob(uid, { phases });
     }
 
-    if (!allPhasesDone(phases)) {
+    if (
+      !accountPurgeMayComplete({
+        phases,
+        includeGrinInAccountPurge: INCLUDE_GRIN_IN_ACCOUNT_PURGE,
+        grinCompleted,
+      })
+    ) {
       throw new Error("phases_incomplete");
     }
 

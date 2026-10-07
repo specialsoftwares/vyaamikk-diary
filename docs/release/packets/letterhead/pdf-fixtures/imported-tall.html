@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  @page {
+    size: A4;
+    margin: 2.22in 0.99in 1.29in 0.99in;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: #FFFFFF;
+    font-family:
+      -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto",
+      "Noto Sans", "Noto Sans Devanagari", "Mangal", "Kohinoor Devanagari",
+      sans-serif;
+    color: #0F1226;
+    font-size: 11.5pt;
+    line-height: 1.3;
+    -webkit-font-smoothing: antialiased;
+  }
+  .letterhead-bg {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 210mm;
+    height: 297mm;
+    z-index: 0;
+    object-fit: contain;
+    object-position: top center;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .generated-header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 210mm;
+    padding: 12mm 14mm 6mm;
+    z-index: 0;
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 10pt;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .generated-header.align-center { justify-content: center; text-align: center; flex-direction: column; align-items: center; }
+  .generated-header.align-right { justify-content: flex-start; text-align: right; flex-direction: row-reverse; }
+  .generated-header.align-left { justify-content: flex-start; text-align: left; }
+  .generated-logo {
+    max-width: 72pt;
+    max-height: 48pt;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+  }
+  .generated-logo.mono { filter: grayscale(1) contrast(3); }
+  .generated-logo.grayscale { filter: grayscale(1); }
+  .generated-text { font-size: 10pt; line-height: 1.35; color: #0F1226; }
+  .generated-name { font-size: 13pt; font-weight: 700; margin-bottom: 2pt; }
+  .content { position: relative; z-index: 1; }
+  .title { font-size: 15pt; font-weight: 700; text-align: center; margin-bottom: 8pt; }
+  .date-row { text-align: right; color: #5C5F7A; font-size: 10pt; margin-bottom: 8pt; }
+  .reference { color: #5C5F7A; font-size: 10pt; margin-bottom: 8pt; }
+  .recipient { margin-bottom: 12pt; line-height: 1.35; }
+  .recipient-label { color: #5C5F7A; font-size: 10pt; margin-bottom: 2pt; }
+  .subject { font-size: 11.5pt; margin-bottom: 10pt; padding-bottom: 4pt; border-bottom: 1pt solid #E6E8F0; }
+  .salutation { margin-bottom: 8pt; }
+  .body { white-space: pre-wrap; word-wrap: break-word; text-align: left; font-size: 11.5pt; line-height: 1.3; }
+  .closing { margin-top: 16pt; }
+  .sign-block { margin-top: 6pt; page-break-inside: avoid; }
+  .stamp-wrap { margin-bottom: 4pt; }
+  .stamp-img { max-width: 130pt; max-height: 130pt; width: auto; height: auto; object-fit: contain; }
+  .sign-img { max-width: 180pt; max-height: 70pt; width: auto; height: auto; object-fit: contain; display: block; margin-bottom: 2pt; }
+  .sign-space { height: 70pt; }
+  .signer-name { font-weight: 700; font-size: 11.5pt; }
+  .signer-role { color: #5C5F7A; font-size: 10pt; margin-top: 2pt; }
+</style>
+</head>
+<body>
+  <img class="letterhead-bg" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAAICAYAAADRmmy5AAAAE0lEQVQIW2NkYGD4z8DAwMAIYwIADfwB/WqK2VwAAAAASUVORK5CYII=" alt="" />
+  <div class="content">
+    <div class="title">Inspection letter</div>
+    <div class="date-row">Date: 07 October 2026 &nbsp;&middot;&nbsp; Chennai</div>
+    <div class="reference">Ref: LH-CLOSEOUT</div>
+    <div class="recipient"><div class="recipient-label">To:</div><div>Acme Traders</div><div>12 Market Road<br/>Chennai 600001</div></div>
+    <div class="subject"><strong>Subject: Letterhead PDF closeout</strong></div>
+    <div class="salutation">Dear Sir/Madam,</div>
+    <div class="body">One-page body.</div>
+    <div class="closing">Yours faithfully,</div>
+    <div class="sign-block">
+          
+          
+          <div class="signer-name">Owner</div>
+          <div class="signer-role">Proprietor</div>
+        </div>
+  </div>
+</body>
+</html>

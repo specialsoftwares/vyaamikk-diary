@@ -1,7 +1,7 @@
 /**
- * Production boot: finished native mark (not construction grid), no React
- * boot choreography, no artificial brand-minimum gate, splash released on
- * every terminal path, routing not blocked on optional prefetch / PIN warm.
+ * Production boot: finished ledger mark (not construction grid), the ledger
+ * open animation plays before routing, splash released on every terminal
+ * path, routing not blocked on optional prefetch / PIN warm.
  */
 
 import assert from "node:assert/strict";
@@ -44,22 +44,37 @@ const forbiddenGrid = readFileSync(join(root, "assets/splash-icon.png"));
 assert.ok(splashBytes.length > 0, "finished splash mark must exist");
 assert.equal(splashBytes.equals(forbiddenGrid), false, "finished mark is not the grid PNG");
 
-assert.doesNotMatch(bootScreen, /BootAnimationGate/);
-assert.doesNotMatch(bootScreen, /VyaamikkBootAnimation/);
+const bootCompletion = readFileSync(join(root, "src/boot/bootCompletion.ts"), "utf8");
+const bootGate = readFileSync(join(root, "src/boot/BootAnimationGate.tsx"), "utf8");
+const bootView = readFileSync(join(root, "src/boot/BootScreenView.tsx"), "utf8");
+
+assert.match(bootScreen, /BootAnimationGate/, "ledger open animation must mount");
+assert.match(bootScreen, /BootScreenView/);
+assert.match(bootView, /createBootCompletionMachine/);
+assert.match(bootView, /createBootGateCompleters/);
+assert.match(bootView, /computeBootReady/);
+assert.match(bootView, /shouldShowLocalDbFailure/);
+assert.match(bootView, /takeContinue/);
+assert.match(bootView, /takeLater/);
+assert.match(bootScreen, /syncSessionOwnership/);
+assert.match(bootScreen, /resolveBootDestination/);
+assert.match(bootView, /sequenceHoldDurationMs|sequenceHoldMs/);
+assert.match(bootCompletion, /BOOT_ANIMATION_MS/);
+assert.match(bootCompletion, /BOOT_REDUCED_MOTION_MS/);
+assert.doesNotMatch(bootScreen, /routingStartedRef/);
+assert.doesNotMatch(bootView, /routingStartedRef/);
+assert.doesNotMatch(bootGate, /if \(bootError && visible\)/);
 assert.doesNotMatch(bootScreen, /consumeBootAnimationSlot/);
 assert.doesNotMatch(bootScreen, /BOOT_BRAND_MIN_MS/);
 assert.doesNotMatch(bootScreen, /logoCircle/);
 assert.doesNotMatch(bootScreen, /VyaamikkIntroSplash/);
 assert.match(bootScreen, /BRAND_SURFACE/);
-assert.match(bootScreen, /finishBootNavigation/);
-assert.match(bootScreen, /getAuthEntryHref/);
-assert.match(bootScreen, /routingStartedRef/);
+assert.match(bootView, /finishBootNavigation/);
 assert.match(bootScreen, /SplashScreen\.hideAsync/);
-assert.match(
-  bootScreen,
-  /dbStatus === "failed"/,
-  "local-db failure must hide splash / reach LocalDbErrorScreen"
-);
+assert.match(bootScreen, /LocalDbErrorScreen/);
+assert.match(bootView, /shouldShowLocalDbFailure/);
+assert.match(bootScreen, /useT/);
+assert.match(bootView, /common\.retry/);
 
 assert.match(
   bootstrap,

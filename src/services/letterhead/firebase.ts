@@ -18,8 +18,13 @@ import {
   isUserStorageAvailable,
   uploadLetterheadImage,
 } from "@/services/storage/userStorage";
+import {
+  assertDispatchedSession,
+  type SyncSessionToken,
+} from "@/sync/syncSessionOwnership";
 
 import { resolveLetterheadImageSource } from "./letterheadImageResolver";
+import { validateWritingMargins } from "./letterheadGeneratedLayout";
 import type { LetterheadConfig, LetterheadRepository } from "./types";
 
 const log = createLogger("letterhead/firebase");
@@ -31,6 +36,9 @@ function configDocRef(userId: string) {
 }
 
 function hasTemplateImage(data: Partial<LetterheadConfig>): boolean {
+  if (data.sourceType === "generated_layout" && data.generatedLayout) {
+    return true;
+  }
   return Boolean(
     data.letterheadImageStoragePath?.trim() || data.imageDataUri?.trim()
   );
@@ -42,6 +50,8 @@ function mapConfigFromFirestore(
 ): LetterheadConfig {
   return {
     userId,
+    sourceType: data.sourceType ?? "imported_image",
+    generatedLayout: data.generatedLayout ?? null,
     imageWidth: Number(data.imageWidth ?? 0),
     imageHeight: Number(data.imageHeight ?? 0),
     imageDataUri: data.imageDataUri ?? null,
@@ -70,6 +80,9 @@ export const firebaseLetterheadRepository: LetterheadRepository = {
     if (!hasTemplateImage(data)) return null;
 
     const config = mapConfigFromFirestore(userId, data);
+    if (!validateWritingMargins(config.margins).ok) {
+      config.margins = { topPct: 19, bottomPct: 11, leftPct: 12, rightPct: 12 };
+    }
     const resolved = await resolveLetterheadImageSource(config);
     if (resolved.uri) {
       config.imageDataUri = resolved.uri;
@@ -77,24 +90,43 @@ export const firebaseLetterheadRepository: LetterheadRepository = {
     return config;
   },
 
-  async save(userId, patch) {
+  async save(userId, patch, session?: SyncSessionToken | null) {
     if (!userId) throw new AppError("permission_denied", "Not signed in.");
+    assertDispatchedSession(session, userId);
+
+    const marginsCheck = validateWritingMargins(patch.margins);
+    if (!marginsCheck.ok) {
+      throw new AppError("save_failed", "Writing area margins are invalid.");
+    }
 
     const now = Date.now();
     const snap = await getDoc(configDocRef(userId));
+    assertDispatchedSession(session, userId);
     const existingData = snap.exists()
       ? (snap.data() as Partial<LetterheadConfig>)
       : null;
     const existing = existingData ? mapConfigFromFirestore(userId, existingData) : null;
 
-    const inlineImage = patch.imageDataUri?.trim() ?? "";
-    const useStorage = Boolean(inlineImage) && isUserStorageAvailable();
+    const incomingImage = patch.imageDataUri?.trim() ?? "";
+    const isDataUri = /^data:[^;]+;base64,/i.test(incomingImage);
+    const isLocalFile =
+      incomingImage.startsWith("file:") ||
+      incomingImage.startsWith("content:") ||
+      (incomingImage.startsWith("/") && !incomingImage.startsWith("//"));
+    const hasNewImage = Boolean(incomingImage) && (isDataUri || isLocalFile);
+    const useStorage = hasNewImage && isUserStorageAvailable();
 
-    if (!useStorage) {
+    const generatedLogo = patch.generatedLayout?.logoUri?.trim() ?? "";
+    const generatedLogoBytes = generatedLogo.startsWith("data:")
+      ? Math.ceil(((generatedLogo.split(",")[1] ?? "").length * 3) / 4)
+      : 0;
+
+    if (!useStorage && isDataUri) {
       const approxSize =
-        inlineImage.length +
+        incomingImage.length +
         (patch.signatureDataUri?.length ?? 0) +
         (patch.stampDataUri?.length ?? 0) +
+        generatedLogoBytes +
         256;
       if (approxSize > APPROX_DOC_LIMIT_BYTES) {
         throw new AppError(
@@ -106,32 +138,62 @@ export const firebaseLetterheadRepository: LetterheadRepository = {
       const approxSize =
         (patch.signatureDataUri?.length ?? 0) +
         (patch.stampDataUri?.length ?? 0) +
+        generatedLogoBytes +
         256;
       if (approxSize > APPROX_DOC_LIMIT_BYTES) {
         throw new AppError(
           "save_failed",
-          "Signature or stamp image is too large. Try a smaller image."
+          "Signature, stamp, or logo image is too large. Try a smaller image."
         );
       }
     }
+
+    const isGeneratedSave =
+      patch.sourceType === "generated_layout" && Boolean(patch.generatedLayout);
 
     let letterheadImageStoragePath =
       existing?.letterheadImageStoragePath ?? null;
     let letterheadImageDownloadUrl = existing?.letterheadImageDownloadUrl ?? null;
     let letterheadImageUpdatedAt = existing?.letterheadImageUpdatedAt ?? null;
     let imageDataUri: string | null | ReturnType<typeof deleteField> =
-      inlineImage || existing?.imageDataUri || null;
+      hasNewImage
+        ? incomingImage
+        : existing?.imageDataUri || null;
 
-    if (useStorage && inlineImage) {
-      const uploaded = await uploadLetterheadImage(userId, inlineImage);
+    if (isGeneratedSave) {
+      // Generated templates are layout + optional small logo — clear page image.
+      letterheadImageStoragePath = null;
+      letterheadImageDownloadUrl = null;
+      letterheadImageUpdatedAt = null;
+      imageDataUri = null;
+    } else if (useStorage && incomingImage) {
+      assertDispatchedSession(session, userId);
+      const uploaded = await uploadLetterheadImage(
+        userId,
+        incomingImage,
+        undefined,
+        session
+      );
+      assertDispatchedSession(session, userId);
       letterheadImageStoragePath = uploaded.storagePath;
       letterheadImageDownloadUrl = uploaded.downloadUrl ?? null;
       letterheadImageUpdatedAt = now;
       imageDataUri = deleteField();
     }
 
+    assertDispatchedSession(session, userId);
     const next: LetterheadConfig = {
       ...patch,
+      sourceType: isGeneratedSave
+        ? "generated_layout"
+        : patch.sourceType === "imported_image"
+          ? "imported_image"
+          : existing?.sourceType ?? "imported_image",
+      generatedLayout: isGeneratedSave
+        ? patch.generatedLayout ?? null
+        : patch.sourceType === "imported_image"
+          ? null
+          : existing?.generatedLayout ?? null,
       signatureDataUri: patch.signatureDataUri ?? null,
       stampDataUri: patch.stampDataUri ?? null,
       defaultSenderName: patch.defaultSenderName ?? null,
@@ -152,11 +214,13 @@ export const firebaseLetterheadRepository: LetterheadRepository = {
     };
 
     const firestorePayload: Record<string, unknown> = { ...next };
-    if (useStorage && inlineImage) {
+    if (useStorage && incomingImage) {
       firestorePayload.imageDataUri = deleteField();
     }
 
+    assertDispatchedSession(session, userId);
     await setDoc(configDocRef(userId), firestorePayload, { merge: false });
+    assertDispatchedSession(session, userId);
     log.info("letterhead saved (firebase)");
 
     if (useStorage && letterheadImageDownloadUrl) {

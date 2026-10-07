@@ -3,6 +3,9 @@
  *
  * Authenticated via OIDC (PLAY_RTDN_PUSH_SERVICE_ACCOUNT / AUDIENCE).
  * Production is fail-closed while PLAY_BILLING_ENABLED is not true.
+ * After enablement, NEW grants still require PLAY_BILLING_TESTER_UIDS
+ * (empty/absent denies first bind). Already-owned token lifecycle is not
+ * blocked by delist. Hidden buttons are not this control.
  */
 
 import { onRequest } from "firebase-functions/v2/https";
@@ -47,6 +50,7 @@ function productionDeps(): AndroidBillingDeps {
     }),
     diagnosticUidFor: (uid) => diagnosticUidHmac(secret, uid),
     nowMs: () => Date.now(),
+    enforceRestrictedTesters: true,
   };
 }
 

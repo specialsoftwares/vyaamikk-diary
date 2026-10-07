@@ -1,14 +1,17 @@
-import React, { useCallback } from "react";
+import React, { useCallback, useMemo } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 
 import { Header, Screen, LocaleUiText } from "@/components/ui";
 import {
+  MATERIAL_MOVEMENT_GRIN_OPTION,
   MATERIAL_MOVEMENT_SUB_OPTIONS,
   entryTypeForMovementKind,
 } from "@/domain/composerOptions";
+import { materialMovementDestinations } from "@/domain/materialMovementDestinations";
 import type { MaterialMovementKind } from "@/domain/materialMovement";
+import { isGoodsEvidenceEnabled } from "@/goodsEvidence/featureFlag";
 import { useT } from "@/i18n";
 import { useSmartBack, requestComposerPickerReturn } from "@/navigation";
 import { LuxuryPressable } from "@/components/ui/LuxuryPressable";
@@ -21,6 +24,11 @@ export default function MaterialMovementPickerScreen() {
   const t = useT();
   const router = useRouter();
   const { from } = useLocalSearchParams<{ from?: string }>();
+  const destinations = useMemo(
+    () => materialMovementDestinations({ goodsEvidenceEnabled: isGoodsEvidenceEnabled() }),
+    []
+  );
+  const showGrin = destinations.some((d) => d.kind === "grin_create");
 
   const styles = useThemedStyles((c) =>
     StyleSheet.create({
@@ -44,7 +52,7 @@ export default function MaterialMovementPickerScreen() {
     }
   }, [router, performBack]);
 
-  const onPick = useCallback(
+  const onPickComposer = useCallback(
     (kind: MaterialMovementKind) => {
       const type = entryTypeForMovementKind(kind);
       router.push({
@@ -59,6 +67,11 @@ export default function MaterialMovementPickerScreen() {
     [router]
   );
 
+  const onPickGrin = useCallback(() => {
+    // Admission is enforced on the GRIN create screen — never bypass here.
+    router.push("/(app)/grin/create");
+  }, [router]);
+
   return (
     <Screen padded>
       <Header title={t("materialMovement.pickerTitle")} showBack onBackPress={navigateBack} />
@@ -70,9 +83,17 @@ export default function MaterialMovementPickerScreen() {
             kind={opt.kind}
             label={t(`composer.options.${opt.labelKey}`)}
             subtitle={t(`composer.options.${opt.subtitleKey}`)}
-            onPress={() => onPick(opt.kind)}
+            onPress={() => onPickComposer(opt.kind)}
           />
         ))}
+        {showGrin ? (
+          <MovementOptionRow
+            kind="grin"
+            label={t(`composer.options.${MATERIAL_MOVEMENT_GRIN_OPTION.labelKey}`)}
+            subtitle={t(`composer.options.${MATERIAL_MOVEMENT_GRIN_OPTION.subtitleKey}`)}
+            onPress={onPickGrin}
+          />
+        ) : null}
       </View>
     </Screen>
   );
@@ -84,7 +105,7 @@ function MovementOptionRow({
   subtitle,
   onPress,
 }: {
-  kind: MaterialMovementKind;
+  kind: MaterialMovementKind | "grin";
   label: string;
   subtitle: string;
   onPress: () => void;
@@ -97,7 +118,9 @@ function MovementOptionRow({
           ? "material_received"
           : kind === "return"
             ? "material_return"
-            : "material_dispatched"
+            : kind === "grin"
+              ? "material_received"
+              : "material_dispatched"
     )
   );
   const { resolvedMode } = useTheme();
@@ -131,7 +154,9 @@ function MovementOptionRow({
       ? "truck-delivery-outline"
       : kind === "received"
         ? "package-down"
-        : "swap-horizontal";
+        : kind === "grin"
+          ? "clipboard-check-outline"
+          : "swap-horizontal";
 
   return (
     <LuxuryPressable style={styles.row} onPress={onPress} accessibilityRole="button">

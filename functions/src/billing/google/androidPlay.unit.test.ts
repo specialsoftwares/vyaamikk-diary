@@ -318,6 +318,36 @@ async function primedDeps(play: FakePlay, handoff?: PostCommitTaxHandoff): Promi
   return { deps, store, cipher, taxCalls };
 }
 
+function restrictedTesterEnv(uids: readonly string[]): NodeJS.ProcessEnv {
+  return {
+    PLAY_BILLING_ENABLED: "true",
+    PLAY_BILLING_TESTER_UIDS:
+      uids.length === 0 ? "" : JSON.stringify({ uids: [...uids] }),
+  };
+}
+
+async function grantWhileListed(): Promise<{
+  deps: AndroidBillingDeps;
+  store: MemoryBillingStore;
+  play: FakePlay;
+  granted: Awaited<ReturnType<typeof processAndroidPurchaseToken>>;
+}> {
+  const play = new FakePlay(activeSub(), paidOrder(ORDER1, "249"));
+  const { deps, store } = await primedDeps(play);
+  deps.enforceRestrictedTesters = true;
+  deps.restrictedTesterEnv = restrictedTesterEnv([UID]);
+  const granted = await processAndroidPurchaseToken(deps, {
+    purchaseToken: TOKEN,
+    callerUid: UID,
+    source: "androidValidation",
+    eventSource: "callable",
+  });
+  assert.equal(granted.to?.entitlementActive, true);
+  assert.equal(granted.to?.billingStatus, "active");
+  play.sub.acknowledgementState = "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED";
+  return { deps, store, play, granted };
+}
+
 async function main() {
   // A. catalog mapping — 9 Android combinations + fail-closed cases
   {
@@ -2799,6 +2829,258 @@ async function main() {
       assert.equal(cb.store.docs.has(financialLedgerPath(sanitizeDocId(`android:chargeback:${ORDER1}`))), true);
       assert.equal(cb.store.docs.has(financialLedgerPath(sanitizeDocId(`android:refund:${ORDER1}`))), false);
       assert.equal(cb.taxCalls.filter((c) => c.eventType === "refund").length, 0);
+    }
+  }
+
+  // Restricted testers: new grants stay fail-closed; already-owned lifecycle does not
+  {
+    // empty allowlist denies first grant
+    {
+      const play = new FakePlay(activeSub(), paidOrder(ORDER1, "249"));
+      const { deps, store } = await primedDeps(play);
+      deps.enforceRestrictedTesters = true;
+      deps.restrictedTesterEnv = restrictedTesterEnv([]);
+      await assert.rejects(
+        processAndroidPurchaseToken(deps, {
+          purchaseToken: TOKEN,
+          callerUid: UID,
+          source: "androidValidation",
+          eventSource: "callable",
+        }),
+        isCause("play_billing_tester_not_allowlisted")
+      );
+      assert.equal(store.docs.has(`users/${UID}/subscription/status`), false);
+    }
+
+    // grant while listed → entitlement active
+    const listed = await grantWhileListed();
+    assert.equal(listed.granted.to?.entitlementActive, true);
+
+    // RTDN type 4 new grant still denied when not listed
+    {
+      const rtdnPlay = new FakePlay(activeSub(), paidOrder(ORDER2, "249"));
+      const rtdnPrimed = await primedDeps(rtdnPlay);
+      rtdnPrimed.deps.enforceRestrictedTesters = true;
+      rtdnPrimed.deps.restrictedTesterEnv = restrictedTesterEnv([]);
+      await assert.rejects(
+        handleAndroidRtdn(
+          rtdnPrimed.deps,
+          rtdnBody(
+            { subscriptionNotification: { notificationType: 4, purchaseToken: TOKEN } },
+            "restricted-deny"
+          )
+        ),
+        isCause("play_billing_tester_not_allowlisted")
+      );
+      assert.equal(rtdnPrimed.store.docs.has(`users/${UID}/subscription/status`), false);
+    }
+
+    // remove from allowlist → new purchase/grant DENIED; existing entitlement NOT cleared
+    {
+      const { deps, store, play } = await grantWhileListed();
+      deps.restrictedTesterEnv = restrictedTesterEnv([]);
+      play.subsByToken.set(
+        TOKEN2,
+        activeSub({
+          lineItems: [
+            {
+              productId: "vyd_professional",
+              expiryTime: rfc(FUTURE),
+              latestSuccessfulOrderId: ORDER2,
+              autoRenewingPlan: { autoRenewEnabled: true },
+              offerDetails: { basePlanId: "monthly" },
+            },
+          ],
+        })
+      );
+      play.orders.set(ORDER2, paidOrder(ORDER2, "249"));
+      await assert.rejects(
+        processAndroidPurchaseToken(deps, {
+          purchaseToken: TOKEN2,
+          callerUid: UID,
+          source: "androidValidation",
+          eventSource: "callable",
+        }),
+        isCause("play_billing_tester_not_allowlisted")
+      );
+      const status = store.docs.get(`users/${UID}/subscription/status`) as SubscriptionStatusDoc;
+      const company = store.docs.get(companyBillingPath(UID)) as CompanyBillingDoc;
+      assert.equal(status.entitlementActive, true);
+      assert.equal(status.billingStatus, "active");
+      assert.equal(company.credentialFingerprint, credentialFingerprint(TOKEN));
+
+      const restored = await processAndroidPurchaseToken(deps, {
+        purchaseToken: TOKEN,
+        callerUid: UID,
+        source: "androidValidation",
+        eventSource: "callable",
+      });
+      assert.equal(restored.to?.entitlementActive, true);
+      assert.equal(restored.to?.billingStatus, "active");
+      assert.notEqual(restored.resultSummary, "play_billing_tester_not_allowlisted");
+
+      const callableRestore = await handleValidateAndActivateAndroid(deps, {
+        uid: UID,
+        purchaseToken: TOKEN,
+      });
+      assert.equal(callableRestore.to?.entitlementActive, true);
+
+      const ownedType4 = await handleAndroidRtdn(
+        deps,
+        rtdnBody(
+          { subscriptionNotification: { notificationType: 4, purchaseToken: TOKEN } },
+          "restricted-owned-type4"
+        )
+      );
+      assert.equal(ownedType4.billing?.to?.entitlementActive, true);
+      assert.notEqual(ownedType4.billing?.resultSummary, "play_billing_tester_not_allowlisted");
+    }
+
+    // after removal: expire updates entitlement (not allowlist reject)
+    {
+      const { deps, store, play } = await grantWhileListed();
+      deps.restrictedTesterEnv = restrictedTesterEnv([OTHER]);
+      play.sub.subscriptionState = "SUBSCRIPTION_STATE_EXPIRED";
+      const expired = await processAndroidPurchaseToken(deps, {
+        purchaseToken: TOKEN,
+        source: "rtdn",
+        eventSource: "webhook",
+        eventTimeMillis: NOW + 1000,
+      });
+      assert.notEqual(expired.resultSummary, "play_billing_tester_not_allowlisted");
+      assert.equal(expired.to?.billingStatus, "expired");
+      assert.equal(expired.to?.entitlementActive, false);
+      const status = store.docs.get(`users/${UID}/subscription/status`) as SubscriptionStatusDoc;
+      assert.equal(status.billingStatus, "expired");
+      assert.equal(status.entitlementActive, false);
+    }
+
+    // after removal: voided refund/revocation updates live status via reconcileFetchedSubscription
+    {
+      const { deps, store, play } = await grantWhileListed();
+      deps.restrictedTesterEnv = restrictedTesterEnv([]);
+      play.sub.subscriptionState = "SUBSCRIPTION_STATE_EXPIRED";
+      play.orders.set(ORDER1, refundedOrder(play.orders.get(ORDER1)!, rfc(NOW + 1000)));
+      const revoked = await processAndroidVoidedPurchase(deps, {
+        purchaseToken: TOKEN,
+        orderId: ORDER1,
+        productType: 1,
+        refundType: 1,
+        source: "rtdn",
+        eventTimeMillis: NOW + 1000,
+      });
+      assert.notEqual(
+        revoked.resultSummary,
+        "play_billing_tester_not_allowlisted",
+        "already-owned refund reconcile must not stop on tester admission"
+      );
+      assert.equal(revoked.reconciliationRequired, false);
+      assert.equal(revoked.to?.billingStatus, "expired");
+      assert.equal(revoked.to?.entitlementActive, false);
+      assert.equal(revoked.financialEventWritten, true);
+      const status = store.docs.get(`users/${UID}/subscription/status`) as SubscriptionStatusDoc;
+      assert.equal(status.billingStatus, "expired");
+      assert.equal(status.entitlementActive, false);
+
+      const dup = await processAndroidVoidedPurchase(deps, {
+        purchaseToken: TOKEN,
+        orderId: ORDER1,
+        productType: 1,
+        refundType: 1,
+        source: "rtdn",
+        eventTimeMillis: NOW + 1000,
+      });
+      assert.equal(dup.alreadyProcessed, true);
+      assert.notEqual(dup.resultSummary, "play_billing_tester_not_allowlisted");
+      assert.equal(dup.to?.billingStatus, "expired");
+
+      const outOfOrder = await processAndroidVoidedPurchase(deps, {
+        purchaseToken: TOKEN,
+        orderId: ORDER1,
+        productType: 1,
+        refundType: 1,
+        source: "rtdn",
+        eventTimeMillis: NOW,
+      });
+      assert.equal(outOfOrder.alreadyProcessed, true);
+      assert.notEqual(outOfOrder.resultSummary, "play_billing_tester_not_allowlisted");
+      assert.equal(
+        [...store.docs.keys()].filter((k) => k.startsWith("_billingEventLedger/")).length,
+        2
+      );
+    }
+
+    // failed Play verification / unqueryable does NOT clear valid paid entitlement
+    {
+      const { deps, store, play } = await grantWhileListed();
+      deps.restrictedTesterEnv = restrictedTesterEnv([]);
+      play.unqueryableTokens.add(TOKEN);
+      await assert.rejects(
+        processAndroidPurchaseToken(deps, {
+          purchaseToken: TOKEN,
+          callerUid: UID,
+          source: "androidValidation",
+          eventSource: "callable",
+        }),
+        isCause("play_api_not_found")
+      );
+      const stillActive = store.docs.get(`users/${UID}/subscription/status`) as SubscriptionStatusDoc;
+      assert.equal(stillActive.entitlementActive, true);
+      assert.equal(stillActive.billingStatus, "active");
+
+      play.orders.set(ORDER1, refundedOrder(play.orders.get(ORDER1)!, rfc(NOW + 8000)));
+      const unqueryableVoid = await processAndroidVoidedPurchase(deps, {
+        purchaseToken: TOKEN,
+        orderId: ORDER1,
+        productType: 1,
+        refundType: 1,
+        source: "rtdn",
+        eventTimeMillis: NOW + 8000,
+      });
+      assert.equal(unqueryableVoid.financialEventWritten, true);
+      assert.equal(unqueryableVoid.reconciliationRequired, true);
+      assert.equal(unqueryableVoid.resultSummary, "play_subscription_unqueryable");
+      assert.notEqual(unqueryableVoid.resultSummary, "play_billing_tester_not_allowlisted");
+      const afterVoid = store.docs.get(`users/${UID}/subscription/status`) as SubscriptionStatusDoc;
+      assert.equal(afterVoid.entitlementActive, true);
+      assert.equal(afterVoid.billingStatus, "active");
+    }
+
+    // different uid cannot receive the token (owner mismatch still fails)
+    {
+      const { deps, store, play } = await grantWhileListed();
+      deps.restrictedTesterEnv = restrictedTesterEnv([OTHER]);
+      await handlePrepareAndroidBillingAccount(store, OTHER, NOW);
+      await assert.rejects(
+        processAndroidPurchaseToken(deps, {
+          purchaseToken: TOKEN,
+          callerUid: OTHER,
+          source: "androidValidation",
+          eventSource: "callable",
+        }),
+        isCause("play_account_owner_mismatch")
+      );
+      assert.equal(store.docs.has(`users/${OTHER}/subscription/status`), false);
+      const alice = store.docs.get(`users/${UID}/subscription/status`) as SubscriptionStatusDoc;
+      assert.equal(alice.entitlementActive, true);
+
+      play.sub.externalAccountIdentifiers = {
+        obfuscatedExternalAccountId: obfuscatedAccountIdForUid(OTHER),
+      };
+      await assert.rejects(
+        processAndroidPurchaseToken(deps, {
+          purchaseToken: TOKEN,
+          callerUid: OTHER,
+          source: "androidValidation",
+          eventSource: "callable",
+        }),
+        isCause("play_credential_index_collision")
+      );
+      assert.equal(
+        (store.docs.get(`users/${UID}/subscription/status`) as SubscriptionStatusDoc).entitlementActive,
+        true
+      );
+      assert.equal(store.docs.has(`users/${OTHER}/subscription/status`), false);
     }
   }
 

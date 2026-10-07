@@ -1,0 +1,150 @@
+{
+  "exported_at": "2026-10-05T18:44:41.053Z",
+  "method": "read-only Google APIs via Firebase CLI access token (never printed); no deploy, no env write",
+  "this_assignment_deployed": false,
+  "cli_user": "support.vyd@specialsoftwares.com",
+  "project": {
+    "httpStatus": 200,
+    "projectId": "vyaamikk-diary",
+    "projectNumber": "982505811909",
+    "matchesExpected": true
+  },
+  "bucket": {
+    "httpStatus": 200,
+    "name": "vyaamikk-diary.firebasestorage.app",
+    "projectNumber": "982505811909",
+    "belongsToProject": true
+  },
+  "runtime": {
+    "probeFunction": "mintClientAuthToken",
+    "serviceAccount": "982505811909-compute@developer.gserviceaccount.com",
+    "projectIamHttp": 200,
+    "firestoreDbIamHttp": 501,
+    "bucketIamHttp": 200,
+    "projectRoles": [
+      "roles/editor"
+    ],
+    "firestoreDatabaseRoles": [],
+    "bucketRoles": [],
+    "hasStorageObjectsDelete": true
+  },
+  "unrelatedEndpointCount": 39,
+  "unrelatedIds": [
+    "androidRtdn",
+    "appStoreServerNotificationsV2",
+    "changeVerifiedEmail",
+    "checkMobileQuarantine",
+    "claimMobile",
+    "completeAccountDeletion",
+    "completeAccountReactivation",
+    "completeAccountRecovery",
+    "confirmVerifiedMobileContactChange",
+    "ensureAccountDeletionJob",
+    "generateGstr1WorkingPapers",
+    "getInvoiceDownloadUrl",
+    "handleWasNotMeToken",
+    "handleWasNotMeTokenHttp",
+    "markGstr1Filed",
+    "mintClientAuthToken",
+    "openManualRecoveryCase",
+    "preflightVerifiedMobileContactChange",
+    "prepareAndroidBillingAccount",
+    "prepareIOSBillingAccount",
+    "rebindQuarantinedMobileCallable",
+    "registerNewDeviceSecurityEvent",
+    "resendEmailVerification",
+    "resolveManualRecoveryCase",
+    "resolveOrCreateUserByPhone",
+    "retireIdentity",
+    "retryNewDeviceSecurityEmail",
+    "retryReconciliationWorkItem",
+    "reviewSubscriptionTaxCompliance",
+    "scheduledBillingReconciliation",
+    "scheduledDeletionCleanup",
+    "startAccountReactivation",
+    "startAccountRecovery",
+    "startEmailVerification",
+    "updateBillingDetails",
+    "validateAndActivateAndroid",
+    "validateAndActivateIOS",
+    "verifyAndBindEmail",
+    "verifyGstinManual"
+  ],
+  "allGrinAbsent": true,
+  "cloud_firestore": {
+    "httpStatus": 200,
+    "release": "projects/vyaamikk-diary/releases/cloud.firestore",
+    "rulesetName": "projects/vyaamikk-diary/rulesets/a19b4a83-8b3e-4cf5-b8b8-e8d26e9704f9",
+    "createTime": "2026-06-05T17:54:06.077829Z",
+    "updateTime": "2026-09-21T09:05:33.054484Z",
+    "sourceFileName": "docs/release/rules-compat/proposed/firestore.rules",
+    "bytes": 15313,
+    "sha256": "b13d52559efd144bfbdd86daf426fd5ce81abceead4c87979cb9cee2d1a25e2c",
+    "matchesApprovedBaseline": true
+  },
+  "firebase_storage": {
+    "httpStatus": 200,
+    "release": "projects/vyaamikk-diary/releases/firebase.storage/vyaamikk-diary.firebasestorage.app",
+    "rulesetName": "projects/vyaamikk-diary/rulesets/a2a0ddf7-9746-4dd2-bd48-29c9abc0e41f",
+    "createTime": "2026-07-23T21:49:47.992820Z",
+    "updateTime": "2026-07-23T21:51:17.651270Z",
+    "sourceFileName": "storage.rules",
+    "bytes": 1133,
+    "sha256": "1a912051ba923a0e4ae29fd36b1741bcf0f5879cd53e6d4bd386c9d5a3b717d5",
+    "matchesApprovedBaseline": true
+  },
+  "grin": {
+    "allAbsent": true,
+    "endpoints": {
+      "grinRegisterGoodsReceipt": {
+        "exists": false,
+        "gateOn": false,
+        "sourceOrigin": "absent",
+        "otherUserKeyCount": 0,
+        "secretBindingCount": 0
+      },
+      "grinReconcileCommand": {
+        "exists": false,
+        "gateOn": false,
+        "sourceOrigin": "absent",
+        "otherUserKeyCount": 0,
+        "secretBindingCount": 0
+      },
+      "grinMutateGoodsReceipt": {
+        "exists": false,
+        "gateOn": false,
+        "sourceOrigin": "absent",
+        "otherUserKeyCount": 0,
+        "secretBindingCount": 0
+      },
+      "grinReadGoodsReceipt": {
+        "exists": false,
+        "gateOn": false,
+        "sourceOrigin": "absent",
+        "otherUserKeyCount": 0,
+        "secretBindingCount": 0
+      },
+      "grinReserveEvidence": {
+        "exists": false,
+        "gateOn": false,
+        "sourceOrigin": "absent",
+        "otherUserKeyCount": 0,
+        "secretBindingCount": 0
+      },
+      "grinBeginEvidenceUpload": {
+        "exists": false,
+        "gateOn": false,
+        "sourceOrigin": "absent",
+        "otherUserKeyCount": 0,
+        "secretBindingCount": 0
+      },
+      "grinUploadEvidence": {
+        "exists": false,
+        "gateOn": false,
+        "sourceOrigin": "absent",
+        "otherUserKeyCount": 0,
+        "secretBindingCount": 0
+      }
+    }
+  }
+}

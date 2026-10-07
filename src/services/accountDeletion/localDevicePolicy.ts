@@ -5,8 +5,9 @@
  * that is offline or uninstalled.
  *
  * Policy (see LOCAL_DEVICE_DELETION_DECISION.md):
- * - During 15-day grace: retain local data for reactivation.
+ * - During 45-day cancellation window: retain local data for reactivation.
  * - After final deletion detection: purge user-scoped local data for that uid.
+ *   The window is not a freeze-only hold.
  */
 
 import type { UserProfile } from "@/domain/types";

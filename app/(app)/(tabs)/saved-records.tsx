@@ -25,6 +25,7 @@ import {
   loadSavedRecordsData,
   type SavedRecordsData,
 } from "@/services/savedRecords/savedRecordsService";
+import { shouldShowGrinRecordsHubEntry } from "@/services/savedRecords/grinHubEntry";
 
 type MciName = ComponentProps<typeof MaterialCommunityIcons>["name"];
 
@@ -140,6 +141,19 @@ export default function SavedRecordsTab() {
         preview: d?.purchaseOrderLatestTitle ?? null,
         onPress: () => router.push("/(app)/purchase-order"),
       },
+      ...(shouldShowGrinRecordsHubEntry()
+        ? [
+            {
+              key: "grin",
+              labelKey: "savedRecords.catGrin",
+              icon: "clipboard-check-outline" as MciName,
+              accentKey: "work" as const,
+              count: 0,
+              preview: null,
+              onPress: () => router.push("/(app)/grin"),
+            },
+          ]
+        : []),
       {
         key: "customer_credit",
         labelKey: "savedRecords.catCustomerCredit",

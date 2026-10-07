@@ -20,6 +20,7 @@ import type {
   PurchaseFlowResult,
 } from "@/billing/iap/iapTypes";
 import { ALL_CANONICAL_SKUS } from "@/billing/iap/iapCatalog";
+import { __setSubscriptionPurchaseEntryEnabledForTests } from "@/billing/iap/purchaseEntryGate";
 import {
   canDispatchPurchase,
   canDispatchTrial,
@@ -35,6 +36,7 @@ import { syncSessionOwnership } from "@/sync/syncSessionOwnership";
 
 import { mapUpgradeSheetModel } from "./mapUpgradeSheetModel";
 import {
+  notifyManualUpgrade,
   notifyOrdinaryQuotaUpsell,
   registerQuotaUpsellPresenter,
 } from "./notifyOrdinaryQuotaUpsell";
@@ -183,6 +185,23 @@ async function run(): Promise<void> {
     assert.equal(letterhead.ok, false);
     assert.equal(background.ok, false);
     assert.equal(runtime.snapshot().visible, false);
+  }
+
+  {
+    __setQuotaUpsellEnabledForTests(false);
+    const gated = notifyOrdinaryQuotaUpsell(
+      quotaReq({ session: sessionA1, clientRecordId: "diary_gate_off" })
+    );
+    assert.equal(gated.ok, false);
+    assert.equal(runtime.snapshot().visible, false);
+    __setQuotaUpsellEnabledForTests(true);
+
+    __setSubscriptionPurchaseEntryEnabledForTests(false);
+    const closedManual = notifyManualUpgrade(sessionA1);
+    assert.equal(closedManual.ok, false);
+    assert.equal(closedManual.ok === false && closedManual.reason, "purchase_entry_closed");
+    assert.equal(runtime.snapshot().visible, false);
+    __setSubscriptionPurchaseEntryEnabledForTests(null);
   }
 
   {
@@ -509,6 +528,7 @@ async function run(): Promise<void> {
   runtime.dispose();
   registerQuotaUpsellPresenter(null);
   __setQuotaUpsellEnabledForTests(null);
+  __setSubscriptionPurchaseEntryEnabledForTests(null);
   syncSessionOwnership.resetForTests();
   console.log("quotaUpsellHost.lifecycle.test.ts: ok");
 }

@@ -1,24 +1,26 @@
 /**
- * Letterhead setup: pick template image + adjust writable area + optional
- * signature/stamp assets and reusable letter defaults, then save.
+ * Letterhead setup: pick/scan template + writing area + signature/stamp + save.
  *
- * Everything is stored on the user's `LetterheadConfig` (base64 data URIs for
- * images) — user-scoped, never shared. No Vyaamikk branding is added here or
- * to the generated PDF; this screen only prepares the document base.
+ * Editor state / save completions are bound to SyncSessionToken via
+ * createLetterheadSetupEditorRuntime (uid + generation). Uploads use media REST.
  */
 
-import React, { useCallback, useEffect, useState } from "react";
-import { Image, InteractionManager, Platform, StyleSheet, Text, View } from "react-native";
-import { useRouter } from "expo-router";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Image, InteractionManager, Platform, StyleSheet, View } from "react-native";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 
-import { Banner,
+import {
+  Banner,
   Button,
   Card,
   Header,
   PermissionRationaleModal,
   Screen,
-  TextField, LocaleUiText } from "@/components/ui";
+  TextField,
+  LocaleUiText,
+} from "@/components/ui";
+import { WritingAreaControls } from "@/components/letterhead/WritingAreaControls";
 import { useAuth } from "@/state/auth";
 import {
   analyzeTemplateImage,
@@ -26,22 +28,38 @@ import {
   getLetterheadRepository,
   LetterheadAssetError,
   pickLetterheadAsset,
-  type LetterheadConfig,
-  type LetterheadMargins,
   type TemplateWarningKey,
 } from "@/services/letterhead";
+import {
+  assertCandidateOwner,
+  beginLetterheadCapture,
+  LetterheadCandidateError,
+  persistLetterheadCandidateFromAsset,
+  persistLetterheadCandidateFromLocalFile,
+  readCandidateDataUri,
+  retireLetterheadCandidate,
+} from "@/services/letterhead/letterheadCandidateImage";
+import {
+  getDocumentScannerCapability,
+  scanLetterheadDocument,
+} from "@/services/letterhead/documentScanner";
+import { ImportedLetterheadImage } from "@/components/letterhead/ImportedLetterheadImage";
+import {
+  createLetterheadSetupEditorRuntime,
+  type LetterheadSetupEditorSnapshot,
+} from "@/services/letterhead/letterheadSetupEditorRuntime";
+import {
+  captureAdmissionToken,
+  mayIssueRemoteWork,
+  syncSessionOwnership,
+} from "@/sync/syncSessionOwnership";
 import { useT } from "@/i18n";
-import { radius, spacing, typography, useThemedStyles } from "@/theme";
-import { AppError, userFacingMessage } from "@/domain/errors";
-
-interface PickedImage {
-  dataUri: string;
-  width: number;
-  height: number;
-  approxBytes: number;
-}
+import { spacing, typography, useThemedStyles } from "@/theme";
+import { userFacingMessage } from "@/domain/errors";
+import { getActiveBackend } from "@/config/env";
 
 type PickTarget = "template" | "signature" | "stamp";
+type TemplateEntry = "scan" | "gallery";
 
 function waitForPickerPresentation(): Promise<void> {
   const delayMs = Platform.OS === "ios" ? 450 : 200;
@@ -50,58 +68,85 @@ function waitForPickerPresentation(): Promise<void> {
   });
 }
 
+const EMPTY_SNAP: LetterheadSetupEditorSnapshot = {
+  ownerKey: "signed_out#0",
+  existing: null,
+  candidate: null,
+  margins: { ...DEFAULT_LETTERHEAD_MARGINS },
+  signatureUri: null,
+  stampUri: null,
+  defaultName: "",
+  defaultTitle: "",
+  defaultClose: "",
+  templateWarnings: [],
+  error: null,
+  saving: false,
+  loading: false,
+};
+
 export default function LetterheadSetupScreen() {
   const t = useT();
   const router = useRouter();
+  const { entry } = useLocalSearchParams<{ entry?: string }>();
+  const scannerOk = getDocumentScannerCapability().canScan;
+  const preferredEntry: TemplateEntry =
+    entry === "scan" && scannerOk ? "scan" : "gallery";
+  const isGalleryFallback = preferredEntry === "gallery";
   const { user } = useAuth();
 
-  const [existing, setExisting] = useState<LetterheadConfig | null>(null);
-  const [picked, setPicked] = useState<PickedImage | null>(null);
-  const [margins, setMargins] = useState<LetterheadMargins>(DEFAULT_LETTERHEAD_MARGINS);
-  const [signatureUri, setSignatureUri] = useState<string | null>(null);
-  const [stampUri, setStampUri] = useState<string | null>(null);
-  const [defaultName, setDefaultName] = useState("");
-  const [defaultTitle, setDefaultTitle] = useState("");
-  const [defaultClose, setDefaultClose] = useState("");
-  const [templateWarnings, setTemplateWarnings] = useState<TemplateWarningKey[]>([]);
-  const [saving, setSaving] = useState(false);
+  const mountedRef = useRef(true);
+  const pickGuard = useRef(false);
   const [picking, setPicking] = useState(false);
   const [permissionBusy, setPermissionBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [showPermissionRationale, setShowPermissionRationale] = useState(false);
   const [pendingTarget, setPendingTarget] = useState<PickTarget>("template");
+  const [pickError, setPickError] = useState<string | null>(null);
+  const [snap, setSnap] = useState<LetterheadSetupEditorSnapshot>(EMPTY_SNAP);
+
+  const runtime = useMemo(
+    () =>
+      createLetterheadSetupEditorRuntime({
+        get: (uid) => getLetterheadRepository().get(uid),
+        save: (uid, patch, session) => getLetterheadRepository().save(uid, patch, session),
+        readCandidateDataUri,
+        useLocalFileForSave: getActiveBackend() !== "local-mock",
+        retireCandidate: (c) => void retireLetterheadCandidate(c),
+        liveSession: () => syncSessionOwnership.capture(),
+      }),
+    []
+  );
+
+  useEffect(() => {
+    mountedRef.current = true;
+    const unsub = runtime.subscribe(() => {
+      if (mountedRef.current) setSnap(runtime.snapshot());
+    });
+    setSnap(runtime.snapshot());
+    return () => {
+      mountedRef.current = false;
+      unsub();
+      runtime.dispose();
+    };
+  }, [runtime]);
+
+  useEffect(() => {
+    if (!user?.uid) {
+      runtime.setOwner(null);
+      return;
+    }
+    const session = captureAdmissionToken();
+    if (!session || !mayIssueRemoteWork(session, user.uid)) {
+      runtime.setOwner(null);
+      return;
+    }
+    runtime.setOwner(session);
+  }, [user?.uid, runtime]);
 
   const styles = useThemedStyles((colors) =>
     StyleSheet.create({
       lead: { ...typography.body, color: colors.textMuted, marginBottom: spacing.lg },
       banner: { marginBottom: spacing.md },
       card: { gap: spacing.md, padding: spacing.md },
-      imageFrame: {
-        width: "100%",
-        aspectRatio: 210 / 297,
-        borderRadius: radius.md,
-        overflow: "hidden",
-        backgroundColor: colors.surfaceMuted,
-        position: "relative",
-      },
-      imageFramePlaceholder: {
-        alignItems: "center",
-        justifyContent: "center",
-        borderWidth: 1,
-        borderColor: colors.divider,
-        borderStyle: "dashed",
-      },
-      image: { width: "100%", height: "100%" },
-      placeholderText: { ...typography.titleLg, color: colors.textSubtle, letterSpacing: 2 },
-      writableOverlay: {
-        position: "absolute",
-        borderWidth: 2,
-        borderColor: colors.primary,
-        borderStyle: "dashed",
-        backgroundColor: colors.primaryLight,
-        opacity: 0.5,
-        borderRadius: 4,
-      },
       sectionHeading: {
         ...typography.captionStrong,
         color: colors.textMuted,
@@ -110,17 +155,11 @@ export default function LetterheadSetupScreen() {
         marginTop: spacing.lg,
         marginBottom: spacing.sm,
       },
-      marginRow: { flexDirection: "row", gap: spacing.md },
-      marginField: { flex: 1 },
-      assetRow: {
-        flexDirection: "row",
-        alignItems: "center",
-        gap: spacing.md,
-      },
+      assetRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
       assetThumb: {
         width: 64,
         height: 40,
-        borderRadius: radius.sm,
+        borderRadius: 6,
         backgroundColor: colors.surfaceMuted,
         borderWidth: StyleSheet.hairlineWidth,
         borderColor: colors.divider,
@@ -129,33 +168,26 @@ export default function LetterheadSetupScreen() {
       assetLabel: { ...typography.captionStrong, color: colors.text, marginBottom: spacing.xs },
       assetHint: { ...typography.caption, color: colors.textSubtle, marginTop: spacing.xs },
       cta: { marginTop: spacing.lg },
+      retry: { marginTop: spacing.sm },
     })
   );
 
-  // Preload an existing config so "Replace" preserves margins/assets/defaults.
-  useEffect(() => {
-    if (!user) return;
-    let cancelled = false;
-    void getLetterheadRepository()
-      .get(user.uid)
-      .then((c) => {
-        if (cancelled || !c) return;
-        setExisting(c);
-        setMargins(c.margins ?? DEFAULT_LETTERHEAD_MARGINS);
-        setSignatureUri(c.signatureDataUri ?? null);
-        setStampUri(c.stampDataUri ?? null);
-        setDefaultName(c.defaultSenderName ?? "");
-        setDefaultTitle(c.defaultSenderTitle ?? "");
-        setDefaultClose(c.defaultComplimentaryClose ?? "");
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [user]);
+  const applyCandidate = useCallback(
+    (next: Parameters<typeof runtime.setCandidate>[0], warnings: TemplateWarningKey[]) => {
+      if (!mountedRef.current) {
+        void retireLetterheadCandidate(next);
+        return;
+      }
+      runtime.setCandidate(next, warnings);
+    },
+    [runtime]
+  );
 
-  const captureTemplate = useCallback((): Promise<boolean> => {
+  const captureTemplateFromGallery = useCallback((): Promise<boolean> => {
     return (async () => {
+      if (!user?.uid) throw new LetterheadCandidateError("wrong_owner");
+      const ctx = beginLetterheadCapture(user.uid);
+
       const pending = await ImagePicker.getPendingResultAsync();
       let asset: ImagePicker.ImagePickerAsset | null = null;
       if (pending && "assets" in pending && pending.assets?.[0]) {
@@ -165,187 +197,247 @@ export default function LetterheadSetupScreen() {
           mediaTypes: ["images"],
           allowsEditing: false,
           quality: 1,
-          base64: true,
+          base64: false,
           exif: false,
         });
         if (result.canceled || !result.assets?.[0]) return false;
         asset = result.assets[0];
       }
-      if (!asset?.base64) throw new Error("IMAGE_READ_FAILED");
-      const mime =
-        asset.mimeType ??
-        (asset.fileName?.toLowerCase().endsWith(".jpg") ||
-        asset.fileName?.toLowerCase().endsWith(".jpeg")
-          ? "image/jpeg"
-          : "image/png");
-      const next: PickedImage = {
-        dataUri: `data:${mime};base64,${asset.base64}`,
-        width: asset.width ?? 0,
-        height: asset.height ?? 0,
-        approxBytes: Math.ceil((asset.base64.length * 3) / 4),
-      };
-      setPicked(next);
-      setTemplateWarnings(analyzeTemplateImage(next).warnings);
+
+      const next = await persistLetterheadCandidateFromAsset(ctx, asset);
+      if (!mountedRef.current || !mayIssueRemoteWork(ctx.session, user.uid)) {
+        await retireLetterheadCandidate(next);
+        return false;
+      }
+      applyCandidate(
+        next,
+        analyzeTemplateImage({
+          width: next.width,
+          height: next.height,
+          approxBytes: next.approxBytes,
+        }).warnings
+      );
       return true;
     })();
-  }, []);
+  }, [user?.uid, applyCandidate]);
+
+  const captureTemplateFromScanner = useCallback((): Promise<boolean> => {
+    return (async () => {
+      if (!user?.uid) throw new LetterheadCandidateError("wrong_owner");
+      const ctx = beginLetterheadCapture(user.uid);
+      const scanned = await scanLetterheadDocument({
+        pageLimit: 1,
+        galleryImportAllowed: true,
+      });
+      if (scanned.status === "canceled") return false;
+      if (scanned.status === "unavailable") {
+        if (mountedRef.current) setPickError(t("letterhead.entryScannerUnavailable"));
+        return captureTemplateFromGallery();
+      }
+      if (scanned.status !== "success") {
+        throw new LetterheadCandidateError("read_failed");
+      }
+      const next = await persistLetterheadCandidateFromLocalFile(ctx, scanned.localUri, {
+        mimeType: "image/jpeg",
+      });
+      if (!mountedRef.current || !mayIssueRemoteWork(ctx.session, user.uid)) {
+        await retireLetterheadCandidate(next);
+        return false;
+      }
+      applyCandidate(
+        next,
+        analyzeTemplateImage({
+          width: next.width,
+          height: next.height,
+          approxBytes: next.approxBytes,
+        }).warnings
+      );
+      return true;
+    })();
+  }, [user?.uid, applyCandidate, captureTemplateFromGallery, t]);
+
+  const captureTemplate = useCallback((): Promise<boolean> => {
+    if (preferredEntry === "scan") return captureTemplateFromScanner();
+    return captureTemplateFromGallery();
+  }, [preferredEntry, captureTemplateFromScanner, captureTemplateFromGallery]);
 
   const captureAsset = useCallback(
     async (kind: "signature" | "stamp"): Promise<boolean> => {
+      if (!user?.uid) return false;
+      const session = captureAdmissionToken();
+      if (!session || !mayIssueRemoteWork(session, user.uid)) return false;
       const asset = await pickLetterheadAsset();
       if (!asset) return false;
-      if (kind === "signature") setSignatureUri(asset.dataUri);
-      else setStampUri(asset.dataUri);
+      if (!mountedRef.current) return false;
+      if (!mayIssueRemoteWork(session, user.uid)) return false;
+      if (kind === "signature") runtime.setSignatureUri(asset.dataUri);
+      else runtime.setStampUri(asset.dataUri);
       return true;
     },
-    []
+    [user?.uid, runtime]
   );
 
   const runPick = useCallback(
     async (target: PickTarget) => {
-      if (target === "template") {
-        await captureTemplate();
-      } else {
-        await captureAsset(target);
-      }
+      if (target === "template") await captureTemplate();
+      else await captureAsset(target);
     },
     [captureTemplate, captureAsset]
   );
 
   const startPick = useCallback(
     async (target: PickTarget) => {
-      if (picking || permissionBusy) return;
-      setError(null);
+      if (pickGuard.current || picking || permissionBusy) return;
+      pickGuard.current = true;
+      setPickError(null);
+      runtime.setError(null);
       setPendingTarget(target);
 
-      if (Platform.OS === "android") {
-        const current = await ImagePicker.getMediaLibraryPermissionsAsync();
-        if (!current.granted) {
-          if (current.canAskAgain === false) {
-            setError(t("letterhead.setupPermissionDenied"));
+      const skipGalleryPermission =
+        target === "template" && preferredEntry === "scan" && scannerOk;
+
+      try {
+        if (Platform.OS === "android" && !skipGalleryPermission) {
+          const current = await ImagePicker.getMediaLibraryPermissionsAsync();
+          if (!current.granted) {
+            if (current.canAskAgain === false) {
+              setPickError(t("letterhead.setupPermissionDenied"));
+              return;
+            }
+            setShowPermissionRationale(true);
             return;
           }
-          setShowPermissionRationale(true);
-          return;
         }
-      }
 
-      setPicking(true);
-      try {
+        setPicking(true);
         await runPick(target);
       } catch (e) {
-        setError(mapPickError(e, t));
+        if (mountedRef.current) setPickError(mapPickError(e, t));
       } finally {
         setPicking(false);
+        pickGuard.current = false;
       }
     },
-    [picking, permissionBusy, runPick, t]
+    [picking, permissionBusy, runPick, preferredEntry, scannerOk, t, runtime]
   );
 
   const onRationaleAllow = useCallback(async () => {
-    if (permissionBusy) return;
+    if (permissionBusy || pickGuard.current) return;
     setPermissionBusy(true);
-    setError(null);
+    setPickError(null);
     try {
       const r = await ImagePicker.requestMediaLibraryPermissionsAsync();
       setShowPermissionRationale(false);
       if (!r.granted) {
-        setError(t("letterhead.setupPermissionDenied"));
+        setPickError(t("letterhead.setupPermissionDenied"));
         return;
       }
       await waitForPickerPresentation();
+      pickGuard.current = true;
       setPicking(true);
       await runPick(pendingTarget);
     } catch (e) {
-      setError(mapPickError(e, t));
+      if (mountedRef.current) setPickError(mapPickError(e, t));
     } finally {
       setPicking(false);
       setPermissionBusy(false);
+      pickGuard.current = false;
     }
   }, [permissionBusy, runPick, pendingTarget, t]);
 
-  const updateMargin = (key: keyof LetterheadMargins) => (raw: string) => {
-    const cleaned = raw.replace(/[^0-9]/g, "").slice(0, 2);
-    const n = Math.max(0, Math.min(80, parseInt(cleaned || "0", 10)));
-    setMargins((m) => ({ ...m, [key]: n }));
-  };
-
-  const templateUri = picked?.dataUri ?? existing?.imageDataUri ?? null;
+  const templateUri = snap.candidate?.localUri ?? snap.existing?.imageDataUri ?? null;
+  const displayError =
+    pickError ??
+    (snap.error === "need_image"
+      ? t("letterhead.setupNeedImage")
+      : snap.error === "load_failed"
+        ? t("letterhead.setupLoadFailed")
+        : snap.error === "session_retired"
+          ? t("letterhead.setupSaveFailedUnchanged")
+          : snap.error
+            ? t("letterhead.setupSaveFailedUnchanged")
+            : null);
 
   const onSave = async () => {
-    if (!user) return;
-    setError(null);
+    if (!user || snap.saving) return;
+    setPickError(null);
     if (!templateUri) {
-      setError(t("letterhead.setupNeedImage"));
+      runtime.setError("need_image");
       return;
     }
-    setSaving(true);
-    try {
-      await getLetterheadRepository().save(user.uid, {
-        imageDataUri: templateUri,
-        imageWidth: picked?.width ?? existing?.imageWidth ?? 0,
-        imageHeight: picked?.height ?? existing?.imageHeight ?? 0,
-        margins,
-        signatureDataUri: signatureUri,
-        stampDataUri: stampUri,
-        defaultSenderName: defaultName.trim() || null,
-        defaultSenderTitle: defaultTitle.trim() || null,
-        defaultComplimentaryClose: defaultClose.trim() || null,
-        repeatTemplateAllPages: true,
-      });
-      router.replace("/(app)/letterhead");
-    } catch (e) {
-      if (e instanceof AppError && e.code === "save_failed") {
-        setError(t("letterhead.setupImageTooLarge"));
-      } else {
-        setError(userFacingMessage(e));
+    if (snap.candidate) {
+      try {
+        assertCandidateOwner(snap.candidate, user.uid);
+      } catch (e) {
+        const session = captureAdmissionToken();
+        if (session) runtime.clearRetiredOwnerFields(session);
+        setPickError(t("letterhead.setupSaveFailedUnchanged"));
+        return;
       }
-    } finally {
-      setSaving(false);
+    }
+    const result = await runtime.save();
+    if (!mountedRef.current) return;
+    if (result.navigate) {
+      router.replace("/(app)/letterhead");
     }
   };
 
-  const busy = picking || permissionBusy || saving;
+  const busy = picking || permissionBusy || snap.saving;
 
   return (
     <Screen scroll form>
       <Header title={t("letterhead.setupTitle")} showBack backFrom="letterhead" />
       <LocaleUiText style={styles.lead}>{t("letterhead.setupIntro")}</LocaleUiText>
 
-      {error ? (
+      {isGalleryFallback ? (
         <View style={styles.banner}>
-          <Banner tone="danger" message={error} />
+          <Banner tone="info" message={t("letterhead.setupGalleryFallback")} />
         </View>
       ) : null}
 
-      {templateWarnings.map((w) => (
+      {displayError ? (
+        <View style={styles.banner}>
+          <Banner tone="danger" message={displayError} />
+          {snap.error === "load_failed" && !pickError ? (
+            <Button
+              label={t("common.retry")}
+              onPress={() => void runtime.load()}
+              disabled={snap.loading || busy}
+              style={styles.retry}
+            />
+          ) : null}
+        </View>
+      ) : null}
+
+      {snap.templateWarnings.map((w) => (
         <View key={w} style={styles.banner}>
           <Banner tone="warning" message={t(w)} />
         </View>
       ))}
 
       <Card style={styles.card}>
-        {templateUri ? (
-          <View style={styles.imageFrame}>
-            <Image source={{ uri: templateUri }} style={styles.image} resizeMode="contain" />
-            <View
-              pointerEvents="none"
-              style={[
-                styles.writableOverlay,
-                {
-                  top: `${margins.topPct}%`,
-                  bottom: `${margins.bottomPct}%`,
-                  left: `${margins.leftPct}%`,
-                  right: `${margins.rightPct}%`,
-                },
-              ]}
-            />
-          </View>
-        ) : (
-          <View style={[styles.imageFrame, styles.imageFramePlaceholder]}>
-            <Text style={styles.placeholderText}>A4</Text>
-          </View>
-        )}
+        <WritingAreaControls
+          margins={snap.margins}
+          onChange={(m) => runtime.setMargins(m)}
+          background={
+            templateUri ? (
+              <ImportedLetterheadImage
+                uri={templateUri}
+                width={snap.candidate?.width ?? snap.existing?.imageWidth}
+                height={snap.candidate?.height ?? snap.existing?.imageHeight}
+              />
+            ) : undefined
+          }
+          labels={{
+            section: t("letterhead.setupAdjust"),
+            top: t("letterhead.setupTopMargin"),
+            bottom: t("letterhead.setupBottomMargin"),
+            left: t("letterhead.setupLeftMargin"),
+            right: t("letterhead.setupRightMargin"),
+            decrease: t("letterhead.setupDecrease"),
+            increase: t("letterhead.setupIncrease"),
+          }}
+        />
         <Button
           label={templateUri ? t("letterhead.setupReplace") : t("letterhead.setupPick")}
           variant="secondary"
@@ -353,70 +445,44 @@ export default function LetterheadSetupScreen() {
           loading={picking && pendingTarget === "template"}
           disabled={busy}
         />
+        {preferredEntry === "scan" && scannerOk ? (
+          <LocaleUiText style={styles.assetHint}>{t("letterhead.entryScanBody")}</LocaleUiText>
+        ) : (
+          <LocaleUiText style={styles.assetHint}>
+            {t("letterhead.incompleteGalleryAppearance")}
+          </LocaleUiText>
+        )}
       </Card>
 
-      <LocaleUiText style={styles.sectionHeading}>{t("letterhead.setupAdjust")}</LocaleUiText>
-      <View style={styles.marginRow}>
-        <TextField
-          label={t("letterhead.setupTopMargin")}
-          keyboardType="number-pad"
-          value={String(margins.topPct)}
-          onChangeText={updateMargin("topPct")}
-          maxLength={2}
-          containerStyle={styles.marginField}
-        />
-        <TextField
-          label={t("letterhead.setupBottomMargin")}
-          keyboardType="number-pad"
-          value={String(margins.bottomPct)}
-          onChangeText={updateMargin("bottomPct")}
-          maxLength={2}
-          containerStyle={styles.marginField}
-        />
-      </View>
-      <View style={styles.marginRow}>
-        <TextField
-          label={t("letterhead.setupLeftMargin")}
-          keyboardType="number-pad"
-          value={String(margins.leftPct)}
-          onChangeText={updateMargin("leftPct")}
-          maxLength={2}
-          containerStyle={styles.marginField}
-        />
-        <TextField
-          label={t("letterhead.setupRightMargin")}
-          keyboardType="number-pad"
-          value={String(margins.rightPct)}
-          onChangeText={updateMargin("rightPct")}
-          maxLength={2}
-          containerStyle={styles.marginField}
-        />
-      </View>
-
-      {/* --- Optional signature / stamp --- */}
       <LocaleUiText style={styles.sectionHeading}>{t("letterhead.assetsSection")}</LocaleUiText>
       <Card style={styles.card}>
         <View>
           <LocaleUiText style={styles.assetLabel}>{t("letterhead.assetSignature")}</LocaleUiText>
           <View style={styles.assetRow}>
-            {signatureUri ? (
-              <Image source={{ uri: signatureUri }} style={styles.assetThumb} resizeMode="contain" />
+            {snap.signatureUri ? (
+              <Image
+                source={{ uri: snap.signatureUri }}
+                style={styles.assetThumb}
+                resizeMode="contain"
+              />
             ) : null}
             <View style={styles.assetBtns}>
               <Button
-                label={signatureUri ? t("letterhead.assetReplace") : t("letterhead.assetAdd")}
+                label={
+                  snap.signatureUri ? t("letterhead.assetReplace") : t("letterhead.assetAdd")
+                }
                 variant="secondary"
                 size="md"
                 onPress={() => void startPick("signature")}
                 loading={picking && pendingTarget === "signature"}
                 disabled={busy}
               />
-              {signatureUri ? (
+              {snap.signatureUri ? (
                 <Button
                   label={t("letterhead.assetRemove")}
                   variant="ghost"
                   size="md"
-                  onPress={() => setSignatureUri(null)}
+                  onPress={() => runtime.setSignatureUri(null)}
                   disabled={busy}
                 />
               ) : null}
@@ -427,24 +493,28 @@ export default function LetterheadSetupScreen() {
         <View>
           <LocaleUiText style={styles.assetLabel}>{t("letterhead.assetStamp")}</LocaleUiText>
           <View style={styles.assetRow}>
-            {stampUri ? (
-              <Image source={{ uri: stampUri }} style={styles.assetThumb} resizeMode="contain" />
+            {snap.stampUri ? (
+              <Image
+                source={{ uri: snap.stampUri }}
+                style={styles.assetThumb}
+                resizeMode="contain"
+              />
             ) : null}
             <View style={styles.assetBtns}>
               <Button
-                label={stampUri ? t("letterhead.assetReplace") : t("letterhead.assetAdd")}
+                label={snap.stampUri ? t("letterhead.assetReplace") : t("letterhead.assetAdd")}
                 variant="secondary"
                 size="md"
                 onPress={() => void startPick("stamp")}
                 loading={picking && pendingTarget === "stamp"}
                 disabled={busy}
               />
-              {stampUri ? (
+              {snap.stampUri ? (
                 <Button
                   label={t("letterhead.assetRemove")}
                   variant="ghost"
                   size="md"
-                  onPress={() => setStampUri(null)}
+                  onPress={() => runtime.setStampUri(null)}
                   disabled={busy}
                 />
               ) : null}
@@ -454,35 +524,34 @@ export default function LetterheadSetupScreen() {
         <LocaleUiText style={styles.assetHint}>{t("letterhead.assetHint")}</LocaleUiText>
       </Card>
 
-      {/* --- Reusable letter defaults --- */}
       <LocaleUiText style={styles.sectionHeading}>{t("letterhead.sectionClosing")}</LocaleUiText>
       <TextField
         label={t("letterhead.fieldName")}
-        value={defaultName}
-        onChangeText={setDefaultName}
+        value={snap.defaultName}
+        onChangeText={(v) => runtime.setDefaultName(v)}
         placeholder={t("letterhead.fieldNamePlaceholder")}
         maxLength={80}
       />
       <TextField
         label={t("letterhead.fieldDesignation")}
-        value={defaultTitle}
-        onChangeText={setDefaultTitle}
+        value={snap.defaultTitle}
+        onChangeText={(v) => runtime.setDefaultTitle(v)}
         placeholder={t("letterhead.fieldDesignationPlaceholder")}
         maxLength={80}
       />
       <TextField
         label={t("letterhead.fieldClosing")}
-        value={defaultClose}
-        onChangeText={setDefaultClose}
+        value={snap.defaultClose}
+        onChangeText={(v) => runtime.setDefaultClose(v)}
         placeholder={t("letterhead.fieldClosingPlaceholder")}
         maxLength={80}
       />
 
       <View style={styles.cta}>
         <Button
-          label={saving ? t("letterhead.setupSaving") : t("letterhead.setupSave")}
-          onPress={onSave}
-          loading={saving}
+          label={snap.saving ? t("letterhead.setupSaving") : t("letterhead.setupSave")}
+          onPress={() => void onSave()}
+          loading={snap.saving}
           disabled={!templateUri || picking || permissionBusy}
         />
       </View>
@@ -509,7 +578,17 @@ function mapPickError(e: unknown, t: (k: string) => string): string {
       ? t("letterhead.assetTooLarge")
       : t("letterhead.assetReadFailed");
   }
+  if (e instanceof LetterheadCandidateError) {
+    if (e.code === "too_large") return t("letterhead.setupImageTooLarge");
+    if (e.code === "wrong_owner") return t("letterhead.setupSaveFailedUnchanged");
+    if (e.code === "unsupported_format") return t("letterhead.entryCouldNotOpenPhoto");
+    return t("letterhead.setupImageReadFailed");
+  }
   if (e instanceof Error && e.message === "IMAGE_READ_FAILED") {
+    return t("letterhead.setupImageReadFailed");
+  }
+  const raw = e instanceof Error ? e.message : "";
+  if (/Creating blobs from|ArrayBufferView/i.test(raw)) {
     return t("letterhead.setupImageReadFailed");
   }
   return userFacingMessage(e);
