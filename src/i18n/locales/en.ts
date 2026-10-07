@@ -1682,26 +1682,60 @@ const en = {
   letterhead: {
     addAction: "+ Letterhead",
     addActionSubtitle: "Create a document on your A4 letterhead",
-    gateTitle: "Letterhead",
+    gateTitle: "Your letterhead",
+    gateBenefit:
+      "Create professional letters using your own business letterhead.",
     gateMissingTitle: "No letterhead yet",
     gateMissingMessage:
-      "Attach an A4 letterhead image to start creating professional documents.",
+      "Scan a blank sheet of your printed letterhead, or create one with your business logo.",
     gateSetup: "Set up letterhead",
     gateCreate: "Create letterhead document",
     gateReplace: "Replace letterhead",
+    gateEdit: "Edit letterhead",
     gateRemove: "Remove letterhead",
     gateRemoveConfirm: "Remove your saved letterhead?",
     gateRemoveConfirmBody:
       "You can attach a new one any time. Documents you've already shared are unaffected.",
 
+    entryScanTitle: "Scan or upload a letterhead",
+    entryScanBody: "Use a blank sheet of your existing letterhead.",
+    entryLogoTitle: "Create with my business logo",
+    entryLogoBody: "Choose a layout using your logo and business details.",
+    entryScannerUnavailable:
+      "Scanner is unavailable on this device. You can still choose a photo from your gallery.",
+    entryCouldNotOpenPhoto: "Could not open this photo.",
+
+    genLayoutSection: "Logo placement",
+    genAppearanceSection: "Appearance",
+    genDetailsSection: "Business details",
+    genAlignLeft: "Left",
+    genAlignCenter: "Centre",
+    genAlignRight: "Right",
+    genAppearanceOriginal: "Original",
+    genAppearanceColor: "Colour",
+    genAppearanceGrayscale: "Grayscale",
+    genAppearanceMono: "Black & white",
+    genFieldAddress: "Address",
+    genFieldContact: "Contact",
+    genFieldGstin: "GSTIN",
+    genRefreshProfile: "Refresh details from profile",
+    genRetryLogo: "Retry logo",
+    setupDecrease: "Decrease",
+    setupIncrease: "Increase",
+    setupGalleryFallback: "Choose a photo from your gallery (not an automatic scan).",
+    incompleteGalleryAppearance: "Colour adjustments for gallery photos are not available yet. Use the scanner filters when scanning, or the logo letterhead path.",
+
     helperBase:
-      "Your uploaded letterhead remains the document base. Vyaamikk Diary only places your matter inside the safe writing area.",
+      "Your letterhead remains the document base. Matter is placed only inside the writing area you set.",
 
     setupTitle: "Set up letterhead",
     setupIntro:
-      "Pick a portrait A4 image of your printed letterhead, then mark the blank area where text should go.",
+      "Use a blank portrait page of your letterhead. Mark the writing area after the preview appears.",
     setupPick: "Choose letterhead image",
     setupReplace: "Choose a different image",
+    setupSaveFailedUnchanged:
+      "Could not save; your current letterhead is unchanged.",
+    setupLoadFailed: "Could not load your letterhead. Try again.",
     setupAdjust: "Writable area",
     setupTopMargin: "Top margin (%)",
     setupBottomMargin: "Bottom margin (%)",

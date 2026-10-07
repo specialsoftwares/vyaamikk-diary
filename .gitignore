@@ -112,3 +112,6 @@ assets/*.heic
 
 # Local EAS download folder (never commit)
 builds/
+
+# Letterhead PDF freshness gate output (do not commit)
+docs/release/packets/letterhead/pdf-fixtures/pdf-fresh-*/
