@@ -324,3 +324,7 @@ Helper `PINNED_APP_SHA` set to application **`540e07a`**. TOOLING ops-guard **34
 
 `REVIEW_PIN_540e07a.md` (team `626cfa9` on `team/grin-t5-review-pin-540e07a`). SOURCE+TOOLING **PASS**. Ops-guard **34/34**. Not A3 execute. **P8 FAIL**. Leftover P3-FAIL stay dirty. Do not mark backend Done.
 
+## Customer UX + dependency closeout (unsent, 2026-10-07)
+
+Source HEAD **`a31bcf29830bc3c591d09f1c3c073edd48428b14`** on PR #31 (`ef6da69` UX/locales; `a31bcf2` deps). Preserves **`06bb0dc`** NARROW CI fix (GHA **`37579049948`** / **`112654332416`**). Installed Internal remains **`540e07a` / vc23** — new source does not update that binary or Functions. GRIN creation under + New Record → Material Movement when admitted; basic goods-received preserved; customer copy in five locales; arrival date/time readable. Critical advisories patched via targeted overrides; renderer `extract-zip@2.0.1` remains high (no fixed release). Canonical CI run **`37583310319`** on `a31bcf2` — record when complete. D1 continues when device available. Do not mark device / payment / public Done from source tests.
+

@@ -12,12 +12,29 @@ TOOLING (ops-guard suite; not application CI).
 
 ---
 
+## Current state (authoritative — 2026-10-07 addendum)
+
+| Item | Current value |
+|---|---|
+| Repo / branch / PR | `specialsoftwares/vyaamikk-diary` `integration/grin-g1-g5-source` draft **#31** |
+| **Installed Internal application (unchanged)** | **`540e07aa07f376716484adb879ce66cb9fb170ce`** / **vc23** Internal Testing. New source does **not** update that binary or deployed Functions. Do **not** reuse vc23 build/CI evidence for the new tree. |
+| **Source HEAD (UX + deps)** | **`a31bcf29830bc3c591d09f1c3c073edd48428b14`** — `ef6da69` customer UX/copy; `a31bcf2` targeted dep overrides. Ancestor **`06bb0dc`** NARROW CI fix **preserved** (GHA **`37579049948`** / job **`112654332416`**, 161/161, `ci:verify` PASS). `read_export=NARROW` remains authorized receipt read + local manifest — **not** production PDF/export acceptance. |
+| **Canonical CI on new source** | GHA run **`37583310319`** on head **`a31bcf2`** — record conclusion when complete. Do not cite `37579049948` for `a31bcf2`. |
+| Customer UX | + New Record → Material Movement → **Goods receipt & inspection (GRIN)** when admitted; basic goods-received preserved; Saved Records remains the find path. Developer fixture banners removed from production notices. Benefit copy + 5 locales. Readable arrival date/time; ISO storage unchanged. |
+| Dependency closeout | Criticals cleared (shell-quote, websocket-driver, Functions proxy-addr/busboy/grpc/form-data). Renderer **`extract-zip@2.0.1`** remains high (no fixed release). Expo/RN major “fixes” **not** started. Evidence: `analysis/deps-security-closeout/TRIAGE.md`. |
+| Device D1 | Continue OnePlus 12R upgrade over installed vc23 when owner available. **No** uninstall / clear / OTP retry loops. |
+| HOLDs | No new EAS / Play upload / Functions deploy / billing / purge / main / public from this assignment. |
+
+---
+
 ## Current state (authoritative — 2026-10-06)
 
 Single table. Later team reports under this file are **historical evidence**.
 If they still say “unapplied pin”, “unpushed”, or “canonical CI pending”
 for `520f9f9` / `0d7aa17`, those lines are **superseded** for that SHA.
 Do not rewrite those files as if they were re-run today.
+**2026-10-07 addendum above** records source successor `a31bcf2` without changing
+installed Internal **`540e07a` / vc23**.
 
 | Item | Current value |
 |---|---|
