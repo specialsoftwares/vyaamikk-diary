@@ -4,13 +4,11 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 
 import { Header, Screen, LocaleUiText } from "@/components/ui";
+import { MATERIAL_MOVEMENT_GRIN_OPTION } from "@/domain/composerOptions";
 import {
-  MATERIAL_MOVEMENT_GRIN_OPTION,
-  MATERIAL_MOVEMENT_SUB_OPTIONS,
-  entryTypeForMovementKind,
-} from "@/domain/composerOptions";
-import { materialMovementDestinations } from "@/domain/materialMovementDestinations";
-import type { MaterialMovementKind } from "@/domain/materialMovement";
+  materialMovementDestinations,
+  type MaterialMovementDestination,
+} from "@/domain/materialMovementDestinations";
 import { isGoodsEvidenceEnabled } from "@/goodsEvidence/featureFlag";
 import { useT } from "@/i18n";
 import { useSmartBack, requestComposerPickerReturn } from "@/navigation";
@@ -28,7 +26,6 @@ export default function MaterialMovementPickerScreen() {
     () => materialMovementDestinations({ goodsEvidenceEnabled: isGoodsEvidenceEnabled() }),
     []
   );
-  const showGrin = destinations.some((d) => d.kind === "grin_create");
 
   const styles = useThemedStyles((c) =>
     StyleSheet.create({
@@ -52,13 +49,21 @@ export default function MaterialMovementPickerScreen() {
     }
   }, [router, performBack]);
 
-  const onPickComposer = useCallback(
-    (kind: MaterialMovementKind) => {
-      const type = entryTypeForMovementKind(kind);
+  const onPick = useCallback(
+    (dest: MaterialMovementDestination) => {
+      if (dest.kind === "grin_create") {
+        // Admission is enforced on the GRIN create screen — never bypass here.
+        router.push("/(app)/grin/create");
+        return;
+      }
+      if (dest.kind === "grin_return_select") {
+        router.push("/(app)/grin/return-select");
+        return;
+      }
       router.push({
         pathname: "/(app)/composer/[type]",
         params: {
-          type,
+          type: dest.entryType,
           from: "movement",
           pickerReturn: "material_movement",
         },
@@ -67,60 +72,91 @@ export default function MaterialMovementPickerScreen() {
     [router]
   );
 
-  const onPickGrin = useCallback(() => {
-    // Admission is enforced on the GRIN create screen — never bypass here.
-    router.push("/(app)/grin/create");
-  }, [router]);
-
   return (
     <Screen padded>
       <Header title={t("materialMovement.pickerTitle")} showBack onBackPress={navigateBack} />
       <LocaleUiText style={styles.intro}>{t("materialMovement.pickerQuestion")}</LocaleUiText>
       <View style={styles.list}>
-        {MATERIAL_MOVEMENT_SUB_OPTIONS.map((opt) => (
-          <MovementOptionRow
-            key={opt.kind}
-            kind={opt.kind}
-            label={t(`composer.options.${opt.labelKey}`)}
-            subtitle={t(`composer.options.${opt.subtitleKey}`)}
-            onPress={() => onPickComposer(opt.kind)}
-          />
-        ))}
-        {showGrin ? (
-          <MovementOptionRow
-            kind="grin"
-            label={t(`composer.options.${MATERIAL_MOVEMENT_GRIN_OPTION.labelKey}`)}
-            subtitle={t(`composer.options.${MATERIAL_MOVEMENT_GRIN_OPTION.subtitleKey}`)}
-            onPress={onPickGrin}
-          />
-        ) : null}
+        {destinations.map((dest) => {
+          const meta = destinationPresentation(dest, t);
+          return (
+            <MovementOptionRow
+              key={meta.key}
+              rowKind={meta.rowKind}
+              label={meta.label}
+              subtitle={meta.subtitle}
+              onPress={() => onPick(dest)}
+            />
+          );
+        })}
       </View>
     </Screen>
   );
 }
 
+function destinationPresentation(
+  dest: MaterialMovementDestination,
+  t: (key: string) => string
+): {
+  key: string;
+  rowKind: "sent_transport" | "received" | "return" | "grin";
+  label: string;
+  subtitle: string;
+} {
+  if (dest.kind === "grin_create") {
+    return {
+      key: "grin_create",
+      rowKind: "grin",
+      label: t(`composer.options.${MATERIAL_MOVEMENT_GRIN_OPTION.labelKey}`),
+      subtitle: t(`composer.options.${MATERIAL_MOVEMENT_GRIN_OPTION.subtitleKey}`),
+    };
+  }
+  if (dest.kind === "grin_return_select") {
+    return {
+      key: "grin_return_select",
+      rowKind: "return",
+      label: t("composer.options.movementReturn"),
+      subtitle: t("composer.options.movementReturnGrinSub"),
+    };
+  }
+  const labelKey =
+    dest.movementKind === "sent_transport"
+      ? "movementSentTransport"
+      : dest.movementKind === "received"
+        ? "movementReceived"
+        : "movementReturn";
+  const subtitleKey =
+    dest.movementKind === "sent_transport"
+      ? "movementSentTransportSub"
+      : dest.movementKind === "received"
+        ? "movementReceivedSub"
+        : "movementReturnSub";
+  return {
+    key: dest.movementKind,
+    rowKind: dest.movementKind,
+    label: t(`composer.options.${labelKey}`),
+    subtitle: t(`composer.options.${subtitleKey}`),
+  };
+}
+
 function MovementOptionRow({
-  kind,
+  rowKind,
   label,
   subtitle,
   onPress,
 }: {
-  kind: MaterialMovementKind | "grin";
+  rowKind: "sent_transport" | "received" | "return" | "grin";
   label: string;
   subtitle: string;
   onPress: () => void;
 }) {
   const accent = useCategoryAccent(
     accentKeyForComposerPickerKey(
-      kind === "sent_transport"
+      rowKind === "sent_transport"
         ? "material_dispatched"
-        : kind === "received"
+        : rowKind === "received" || rowKind === "grin"
           ? "material_received"
-          : kind === "return"
-            ? "material_return"
-            : kind === "grin"
-              ? "material_received"
-              : "material_dispatched"
+          : "material_return"
     )
   );
   const { resolvedMode } = useTheme();
@@ -150,11 +186,11 @@ function MovementOptionRow({
   );
 
   const icon =
-    kind === "sent_transport"
+    rowKind === "sent_transport"
       ? "truck-delivery-outline"
-      : kind === "received"
+      : rowKind === "received"
         ? "package-down"
-        : kind === "grin"
+        : rowKind === "grin"
           ? "clipboard-check-outline"
           : "swap-horizontal";
 

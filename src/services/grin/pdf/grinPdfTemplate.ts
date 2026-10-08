@@ -121,7 +121,14 @@ export function buildGrinReceiptHtml(input: {
     <table class="meta">
       ${row(labels.number, number)}
       ${row(labels.registrationTime, grin.serverRegisteredAtUtc ?? "—")}
-      ${row(labels.reportedArrival, `${grin.reportedArrivalAt} (${grin.reportedArrivalTimeZone})`)}
+      ${row(
+        labels.reportedArrival,
+        grin.reportedArrivalPrecision === "unknown"
+          ? "not recorded"
+          : grin.reportedArrivalPrecision === "date"
+            ? `${grin.reportedArrivalAt} (${grin.reportedArrivalTimeZone}, date only)`
+            : `${grin.reportedArrivalAt} (${grin.reportedArrivalTimeZone})`
+      )}
       ${row(labels.supplier, supplierName)}
       ${row(labels.gstin, gstin)}
       ${row(labels.invoice, invoice)}

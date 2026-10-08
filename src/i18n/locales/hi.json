@@ -575,6 +575,7 @@
       "movementReceivedSub": "क्या आया उसका त्वरित नोट — बिना GRIN नंबर या पूर्ण निरीक्षण।",
       "movementReturn": "वापसी / प्रतिस्थापन",
       "movementReturnSub": "वापस भेजा या बदला गया माल दर्ज करें।",
+      "movementReturnGrinSub": "अपने खाते से माल प्राप्ति चुनें, फिर पंक्तियाँ और मात्रा चुनें।",
       "materialReceived": "प्राप्ति",
       "materialReceivedSub": "आने वाला स्टॉक या कच्चा माल",
       "paymentRequest": "भुगतान अनुरोध",
@@ -582,7 +583,7 @@
       "freightDetails": "फ्रेट विवरण",
       "freightDetailsSub": "ट्रांसपोर्टर डिस्पैच जानकारी",
       "movementGrin": "माल प्राप्ति और निरीक्षण",
-      "movementGrinSub": "क्या आया दर्ज करें, कमी या क्षति नोट करें, और दस्तावेज़ एक साथ रखें ताकि फॉलो-अप आसान हो।"
+      "movementGrinSub": "प्राप्त माल, निरीक्षण परिणाम और सहायक दस्तावेज़ एक साथ दर्ज करें।"
     },
     "types": {
       "legacy": "पुरानी एंट्री",
@@ -2769,7 +2770,7 @@
     "notFound": "यह माल रसीद नहीं मिली।",
     "detailTitle": "माल रसीद",
     "createTitle": "माल प्राप्ति और निरीक्षण",
-    "createIntro": "क्या आया दर्ज करें, कमी या क्षति नोट करें, और दस्तावेज़ एक साथ रखें ताकि फॉलो-अप आसान हो।",
+    "createIntro": "प्राप्त माल, निरीक्षण परिणाम और सहायक दस्तावेज़ एक साथ दर्ज करें।",
     "saveAction": "सेव करें",
     "errRequired": "आपूर्तिकर्ता का नाम और सामग्री का विवरण दर्ज करें।",
     "errSave": "यह माल रसीद सेव नहीं हो सकी। फिर कोशिश करें।",
@@ -2901,7 +2902,8 @@
       "custody": "कस्टडी",
       "changeArrival": "बदलें",
       "arrivalStoredHint": "आपके स्थानीय दिनांक/समय में दिखाया जाता है। सटीक टाइमस्टैम्प रिकॉर्ड में रहता है।",
-      "arrivalPickerUnavailable": "इस स्क्रीन पर दिनांक/समय चुनना उपलब्ध नहीं है। संग्रहीत आगमन समय नहीं बदला।"
+      "arrivalPickerUnavailable": "इस स्क्रीन पर दिनांक/समय चुनना उपलब्ध नहीं है। संग्रहीत आगमन समय नहीं बदला।",
+      "capturedAt": "सर्वर पंजीकरण समय"
     },
     "action": {
       "inspect": "निरीक्षण",
@@ -2952,7 +2954,8 @@
     "capture": {
       "online": "ऑनलाइन",
       "offline": "ऑफलाइन",
-      "lateEntry": "देर से प्रविष्टि"
+      "lateEntry": "देर से प्रविष्टि",
+      "unknown": "Not recorded"
     },
     "shortage": {
       "shortage": "कमी",
@@ -3067,6 +3070,53 @@
       "acknowledgement": "स्वीकृति",
       "remarks": "टिप्पणी",
       "originalUnchanged": "मूल जारी नोट:"
+    },
+    "receivedOnOptional": "प्राप्ति तिथि (वैकल्पिक)",
+    "receivedOnHint": "केवल तिथि — सटीक आगमन समय नहीं। अज्ञात हो तो खाली छोड़ें।",
+    "advancedDetails": "अधिक विवरण (वैकल्पिक)",
+    "returnSelectTitle": "माल प्राप्ति चुनें",
+    "returnSelectIntro": "आपूर्तिकर्ता, संख्या या इनवॉइस से अपनी प्राप्तियाँ खोजें। अन्य खाते नहीं दिखते।",
+    "returnSelectSearch": "प्राप्तियाँ खोजें",
+    "returnSelectEmpty": "इस खाते में कोई मेल खाती प्राप्ति नहीं।",
+    "returnSelectLoading": "प्राप्तियाँ लोड हो रही हैं…",
+    "returnSelectUnavailable": "अभी प्राप्तियाँ सूचीबद्ध नहीं हो सकतीं। फिर कोशिश करें।",
+    "returnLineSelect": "वापसी के लिए पंक्तियाँ चुनें",
+    "returnOriginalQty": "मूल रूप से प्राप्त",
+    "returnAlreadyReturned": "पहले से वापस / लंबित",
+    "returnAvailable": "वापसी के लिए उपलब्ध",
+    "returnBatchNotRecorded": "बैच/लॉट दर्ज नहीं",
+    "returnReplacementNote": "वापसी दर्ज करने से प्रतिस्थापन स्टॉक नहीं बनता। वास्तविक आगमन नई माल प्राप्ति के रूप में दर्ज करें।",
+    "returnNoLines": "इस प्राप्ति में वापसी योग्य पंक्तियाँ नहीं हैं।",
+    "returnPickLineQty": "वापसी की मात्रा",
+    "errInvalidArrivalDate": "Enter a valid calendar date (YYYY-MM-DD), or leave blank.",
+    "errCreateInFlight": "Create is already in progress.",
+    "errReturnInFlight": "Return submit is already in progress.",
+    "errReturnPartial": "Some return lines could not be queued. Confirmed and queued lines were kept — retry only unresolved lines.",
+    "returnQueuedNotConfirmed": "Return commands were queued locally. Sync confirmation is still pending — queueing is not server success.",
+    "returnReceiptSummary": "Selected receipt",
+    "returnReceiptId": "Receipt",
+    "returnConfirmedReturned": "Confirmed returned",
+    "returnPendingReturn": "Pending return (queued)",
+    "returnNonePending": "None pending",
+    "returnBatchLot": "Batch / lot",
+    "arrival": {
+      "notRecorded": "Arrival not recorded"
+    },
+    "returnStatus": {
+      "pendingSubmit": "Not submitted yet",
+      "queued": "Queued locally (not confirmed)",
+      "awaitingConfirmation": "Waiting for confirmation",
+      "confirmed": "Confirmed",
+      "failed": "Failed",
+      "conflicted": "Version conflict",
+      "versionConflict": "Stopped — external version conflict"
+    },
+    "returnIneligible": {
+      "unconfirmed": "This receipt is not confirmed yet — returns require a confirmed receipt.",
+      "voided": "This receipt is voided and cannot be returned.",
+      "incomplete": "This receipt projection is incomplete.",
+      "refused_at_gate": "Refused-at-gate receipts are not eligible for return.",
+      "no_lines": "This receipt has no lines to return."
     }
   },
   "materialMovement": {

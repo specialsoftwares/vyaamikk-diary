@@ -14,9 +14,12 @@ export function draftFromFormDefaults(): RegisterGoodsReceiptBody {
     receiptId: mintReceiptId(),
     series: "MAIN",
     capturedAtClientUtc: now,
+    // Capture clock is retained as a required field placeholder; precision marks
+    // arrival as not recorded (do not present this as a claimed arrival time).
     reportedArrivalAt: now,
     reportedArrivalTimeZone: "Asia/Kolkata",
-    captureProvenance: "offline",
+    reportedArrivalPrecision: "unknown",
+    captureProvenance: "unknown",
     buyer: {
       legalName: "",
       gstin: { kind: "not_supplied" },

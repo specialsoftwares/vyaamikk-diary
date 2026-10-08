@@ -64,6 +64,9 @@ export function snapshotFromQueued(input: {
     capturedAtClientUtc: body.capturedAtClientUtc,
     reportedArrivalAt: body.reportedArrivalAt,
     reportedArrivalTimeZone: body.reportedArrivalTimeZone,
+    ...(body.reportedArrivalPrecision != null
+      ? { reportedArrivalPrecision: body.reportedArrivalPrecision }
+      : {}),
     serverRegisteredAtUtc: input.serverRegisteredAtUtc,
     originalSnapshotHash: null,
   };

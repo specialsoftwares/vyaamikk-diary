@@ -12,11 +12,44 @@ TOOLING (ops-guard suite; not application CI).
 
 ---
 
-## Current state (authoritative — 2026-10-07 B2 vc24 Internal)
+## Current state (authoritative — 2026-10-08 PR #33 functional corrections)
 
 | Item | Current value |
 |---|---|
-| Repo / branch / PR | `specialsoftwares/vyaamikk-diary` `integration/grin-g1-g5-source` draft **#31** |
+| Repo / branch / PR | `specialsoftwares/vyaamikk-diary` · integration base **`integration/grin-g1-g5-source`** · application branch **`feature/unified-material-movement-aso`** · open PR **#33** (**do not merge** until corrections green) |
+| **Candidate SHA** | Tip **`77ae4a9`** (register) · CI-tested application **`cb854f71e8ca1873fcddd231317bfd9a137729f1`** (packaging fix on **`3d19d7f`**) |
+| **Reviewed application base** | **`56837f17fb7d4354120282841fbcd6faf71c1bf5`** (prior combined-tree CI **`37699830269`**) · prior docs head **`c708649`** |
+| **Included source** | Letterhead repair preserved + MM corrections: durable multi-line return sequence (queue≠confirm; confirmed.eventVersion refresh; stable commandIds; partial retry); sync create/return flight; truthful arrival precision + `CaptureProvenance.unknown`; return eligibility/summary; client-flag≠backend-admission claims |
+| **Letterhead merge parents** | `1f302b9` + `b274fe8` → merge **`1be1daedc67f4ef59f579a92c1b7262d1af5904c`** |
+| **Letterhead CI-tested SHA** | **`eccc783`** · GHA **`37693886315`** / verify **`113040537404`** SUCCESS (branch only — not combined-tree proof) |
+| **Combined-tree CI** | GHA **`37739285157` SUCCESS** / verify **`113186002492`** on tip **`cb854f7`** (workflow_dispatch). Prior SUCCESS **`37699830269`** covers review base **`56837f1`** only. |
+| **Backend compatibility dependency** | Source+packaged Functions accept `captureProvenance: "unknown"` and optional `reportedArrivalPrecision` (`unknown`\|`date`\|`instant`; date stores YYYY-MM-DD). **Not deployed.** Existing live backend will reject `unknown` provenance until Functions are redeployed. Do not claim live backend already supports it. |
+| **Device pending** | Native Expo upload, ML Kit scanner, expo-print; MM create/return TalkBack; multi-line return confirmation UX on device; Play upgrade path |
+| **Play / EAS artifact (unchanged)** | Installed/uploaded Internal remains **`7c938f8` / vc24** · EAS **`c931da3d-…`** — **this source candidate is not that AAB** |
+| HOLDs | No main merge, PR **#33** merge, billing, purge, Functions deploy, EAS/OTA, Play writes, website publish from this instruction. |
+
+### PR #33 correction evidence (local)
+
+| Finding | Before | After / proof |
+|---|---|---|
+| 1 Multi-line returns | Sync loop froze one `expectedVersion`; “ok” meant queued | `dispatchReturnSequence` + `grinReturnPlan`; confirm-between-lines via drain; `f2-multiline-return-sequence.sqliteHost.test.ts` |
+| 2 Partial retry / duplicates | Retry re-queued L1; React busy only | Stable `commandId`s; sync `grinMutationFlight`; flight mount + interop partial retry asserts write counts |
+| 3 Arrival / provenance | Noon IST fiction; invalid dates; offline default | Calendar validation; `reportedArrivalPrecision`; `captureProvenance: unknown`; Functions copies updated (**deploy pending**) |
+| 4 Return summary / eligibility | Combined pendingOrReturned; auto-reselect; empty+error | Separated confirmed/pending/available; eligibility API; selection retention; localized statuses |
+| 5 Claims / coverage | Flag≡admission wording | Destinations comments/tests; mounted+joined coverage; letterhead tests preserved |
+
+## Prior (authoritative — 2026-10-08 source candidate after Letterhead merge)
+
+| Item | Current value |
+|---|---|
+| Combined-tree CI on review base | GHA **`37699830269` SUCCESS** / verify **`113060362670`** on **`56837f1`** · docs **`c708649`** |
+| Backend note (superseded for unknown/precision) | ArrivalObservation / unknown provenance were deferred; now implemented in source with deploy dependency above. |
+
+## Prior pin (authoritative — 2026-10-07 B2 vc24 Internal) — artifact identity only
+
+| Item | Current value |
+|---|---|
+| Repo / branch / PR | `specialsoftwares/vyaamikk-diary` `integration/grin-g1-g5-source` draft **#31** (historical pin context) |
 | **Play Internal Active** | **`7c938f8` / vc24** — release **24 (1.0.0)** Available to internal testers · Released **7 Oct 20:30** · Not reviewed. GRIN Functions previously deployed/enabled — this upload did **not** redeploy them. |
 | **B1 application SHA** | **`7c938f836891411752e6fa6af8879ddfe275ab60`** — vc24 + renderer CI `PUPPETEER_SKIP_DOWNLOAD` for separate Node 22 container. Parent `13da527`. NARROW preserved. |
 | **Matching CI (application)** | GHA **`37616692491` SUCCESS** / job **`112776635103`** on **`7c938f8`**. `test:all` 161/161; `ci:verify PASS`; CI log shows `PUPPETEER_SKIP_DOWNLOAD=true`. |
