@@ -17,12 +17,12 @@ TOOLING (ops-guard suite; not application CI).
 | Item | Current value |
 |---|---|
 | Repo / branch / PR | `specialsoftwares/vyaamikk-diary` · integration base **`integration/grin-g1-g5-source`** · application branch **`feature/unified-material-movement-aso`** · open PR **#33** (**do not merge** until corrections green) |
-| **Candidate SHA** | **`3d19d7ffaffbdbd729b4496f5fc90db14a9cec55`** (docs tip follows) |
+| **Candidate SHA** | **`cb854f71e8ca1873fcddd231317bfd9a137729f1`** (includes packaging fix on **`3d19d7f`**) |
 | **Reviewed application base** | **`56837f17fb7d4354120282841fbcd6faf71c1bf5`** (prior combined-tree CI **`37699830269`**) · prior docs head **`c708649`** |
 | **Included source** | Letterhead repair preserved + MM corrections: durable multi-line return sequence (queue≠confirm; confirmed.eventVersion refresh; stable commandIds; partial retry); sync create/return flight; truthful arrival precision + `CaptureProvenance.unknown`; return eligibility/summary; client-flag≠backend-admission claims |
 | **Letterhead merge parents** | `1f302b9` + `b274fe8` → merge **`1be1daedc67f4ef59f579a92c1b7262d1af5904c`** |
 | **Letterhead CI-tested SHA** | **`eccc783`** · GHA **`37693886315`** / verify **`113040537404`** SUCCESS (branch only — not combined-tree proof) |
-| **Combined-tree CI** | **PENDING** on **`3d19d7f`** (local `test:grin-product` + `test:grin-interop` + `test:letterhead-repair` PASS). Prior SUCCESS GHA **`37699830269`** covers **`56837f1`** only. |
+| **Combined-tree CI** | GHA **`37739285157` SUCCESS** / verify **`113186002492`** on tip **`cb854f7`** (workflow_dispatch). Prior SUCCESS **`37699830269`** covers review base **`56837f1`** only. |
 | **Backend compatibility dependency** | Source+packaged Functions accept `captureProvenance: "unknown"` and optional `reportedArrivalPrecision` (`unknown`\|`date`\|`instant`; date stores YYYY-MM-DD). **Not deployed.** Existing live backend will reject `unknown` provenance until Functions are redeployed. Do not claim live backend already supports it. |
 | **Device pending** | Native Expo upload, ML Kit scanner, expo-print; MM create/return TalkBack; multi-line return confirmation UX on device; Play upgrade path |
 | **Play / EAS artifact (unchanged)** | Installed/uploaded Internal remains **`7c938f8` / vc24** · EAS **`c931da3d-…`** — **this source candidate is not that AAB** |
