@@ -12,19 +12,38 @@ TOOLING (ops-guard suite; not application CI).
 
 ---
 
-## Current state (authoritative — 2026-10-08 source candidate after Letterhead merge)
+## Current state (authoritative — 2026-10-08 PR #33 functional corrections)
 
 | Item | Current value |
 |---|---|
-| Repo / branch / PR | `specialsoftwares/vyaamikk-diary` · integration HEAD **`1be1dae`** (merged PR **#32**) · application branch **`feature/unified-material-movement-aso`** (this candidate) |
-| **Included source** | Letterhead repair (ownership, dirty-load, single-flight, MIME, contain, fresh-PDF) + unified MM entry + lean GRIN create + owner-scoped return select/multi-line return + ASO/UX docs |
+| Repo / branch / PR | `specialsoftwares/vyaamikk-diary` · integration base **`integration/grin-g1-g5-source`** · application branch **`feature/unified-material-movement-aso`** · open PR **#33** (**do not merge** until corrections green) |
+| **Candidate SHA** | **`3d19d7ffaffbdbd729b4496f5fc90db14a9cec55`** (docs tip follows) |
+| **Reviewed application base** | **`56837f17fb7d4354120282841fbcd6faf71c1bf5`** (prior combined-tree CI **`37699830269`**) · prior docs head **`c708649`** |
+| **Included source** | Letterhead repair preserved + MM corrections: durable multi-line return sequence (queue≠confirm; confirmed.eventVersion refresh; stable commandIds; partial retry); sync create/return flight; truthful arrival precision + `CaptureProvenance.unknown`; return eligibility/summary; client-flag≠backend-admission claims |
 | **Letterhead merge parents** | `1f302b9` + `b274fe8` → merge **`1be1daedc67f4ef59f579a92c1b7262d1af5904c`** |
 | **Letterhead CI-tested SHA** | **`eccc783`** · GHA **`37693886315`** / verify **`113040537404`** SUCCESS (branch only — not combined-tree proof) |
-| **Combined-tree CI** | GHA **`37699830269` SUCCESS** / verify **`113060362670`** on tip **`56837f17fb7d4354120282841fbcd6faf71c1bf5`** (workflow_dispatch). PR **#33**. |
-| **Backend compatibility** | No live Functions/Rules/IAM/config changes in this task. New Firestore indexes not required for owner-scoped local list search. `CaptureProvenance.unknown` / ArrivalObservation schema **deferred**. |
-| **Device pending** | Native Expo upload, ML Kit scanner, expo-print; MM create/return TalkBack; Play upgrade path |
+| **Combined-tree CI** | **PENDING** on **`3d19d7f`** (local `test:grin-product` + `test:grin-interop` + `test:letterhead-repair` PASS). Prior SUCCESS GHA **`37699830269`** covers **`56837f1`** only. |
+| **Backend compatibility dependency** | Source+packaged Functions accept `captureProvenance: "unknown"` and optional `reportedArrivalPrecision` (`unknown`\|`date`\|`instant`; date stores YYYY-MM-DD). **Not deployed.** Existing live backend will reject `unknown` provenance until Functions are redeployed. Do not claim live backend already supports it. |
+| **Device pending** | Native Expo upload, ML Kit scanner, expo-print; MM create/return TalkBack; multi-line return confirmation UX on device; Play upgrade path |
 | **Play / EAS artifact (unchanged)** | Installed/uploaded Internal remains **`7c938f8` / vc24** · EAS **`c931da3d-…`** — **this source candidate is not that AAB** |
-| HOLDs | No main merge, billing, purge, Functions deploy, EAS/OTA, Play writes, website publish from this instruction. |
+| HOLDs | No main merge, PR **#33** merge, billing, purge, Functions deploy, EAS/OTA, Play writes, website publish from this instruction. |
+
+### PR #33 correction evidence (local)
+
+| Finding | Before | After / proof |
+|---|---|---|
+| 1 Multi-line returns | Sync loop froze one `expectedVersion`; “ok” meant queued | `dispatchReturnSequence` + `grinReturnPlan`; confirm-between-lines via drain; `f2-multiline-return-sequence.sqliteHost.test.ts` |
+| 2 Partial retry / duplicates | Retry re-queued L1; React busy only | Stable `commandId`s; sync `grinMutationFlight`; flight mount + interop partial retry asserts write counts |
+| 3 Arrival / provenance | Noon IST fiction; invalid dates; offline default | Calendar validation; `reportedArrivalPrecision`; `captureProvenance: unknown`; Functions copies updated (**deploy pending**) |
+| 4 Return summary / eligibility | Combined pendingOrReturned; auto-reselect; empty+error | Separated confirmed/pending/available; eligibility API; selection retention; localized statuses |
+| 5 Claims / coverage | Flag≡admission wording | Destinations comments/tests; mounted+joined coverage; letterhead tests preserved |
+
+## Prior (authoritative — 2026-10-08 source candidate after Letterhead merge)
+
+| Item | Current value |
+|---|---|
+| Combined-tree CI on review base | GHA **`37699830269` SUCCESS** / verify **`113060362670`** on **`56837f1`** · docs **`c708649`** |
+| Backend note (superseded for unknown/precision) | ArrivalObservation / unknown provenance were deferred; now implemented in source with deploy dependency above. |
 
 ## Prior pin (authoritative — 2026-10-07 B2 vc24 Internal) — artifact identity only
 
