@@ -2886,7 +2886,7 @@
     "returnSelectUnavailable": "Receipts cannot be listed right now. Try again.",
     "returnLineSelect": "Select lines to return",
     "returnOriginalQty": "Originally received",
-    "returnAlreadyReturned": "Already returned / pending",
+    "returnAlreadyReturned": "Already returned / pending (legacy)",
     "returnAvailable": "Available to return",
     "returnBatchNotRecorded": "Batch/lot not recorded",
     "returnReplacementNote": "Registering a return does not create replacement stock. Record actual replacement arrival as a new goods receipt when goods arrive.",
@@ -3023,7 +3023,8 @@
       "custody": "Custody",
       "changeArrival": "Change",
       "arrivalStoredHint": "Shown in your local date and time. The exact timestamp is stored for records.",
-      "arrivalPickerUnavailable": "Date and time picking is not available on this screen. The stored arrival time is unchanged."
+      "arrivalPickerUnavailable": "Date and time picking is not available on this screen. The stored arrival time is unchanged.",
+      "capturedAt": "Capture time (device)"
     },
     "action": {
       "inspect": "Inspection",
@@ -3074,7 +3075,8 @@
     "capture": {
       "online": "Online",
       "offline": "Offline",
-      "lateEntry": "Late entry"
+      "lateEntry": "Late entry",
+      "unknown": "Not recorded"
     },
     "shortage": {
       "shortage": "Shortage",
@@ -3189,6 +3191,36 @@
       "acknowledgement": "Acknowledgement",
       "remarks": "Remarks",
       "originalUnchanged": "Original issued note:"
+    },
+    "errInvalidArrivalDate": "Enter a valid calendar date (YYYY-MM-DD), or leave blank.",
+    "errCreateInFlight": "Create is already in progress.",
+    "errReturnInFlight": "Return submit is already in progress.",
+    "errReturnPartial": "Some return lines could not be queued. Confirmed and queued lines were kept — retry only unresolved lines.",
+    "returnQueuedNotConfirmed": "Return commands were queued locally. Sync confirmation is still pending — queueing is not server success.",
+    "returnReceiptSummary": "Selected receipt",
+    "returnReceiptId": "Receipt",
+    "returnConfirmedReturned": "Confirmed returned",
+    "returnPendingReturn": "Pending return (queued)",
+    "returnNonePending": "None pending",
+    "returnBatchLot": "Batch / lot",
+    "arrival": {
+      "notRecorded": "Arrival not recorded"
+    },
+    "returnStatus": {
+      "pendingSubmit": "Not submitted yet",
+      "queued": "Queued locally (not confirmed)",
+      "awaitingConfirmation": "Waiting for confirmation",
+      "confirmed": "Confirmed",
+      "failed": "Failed",
+      "conflicted": "Version conflict",
+      "versionConflict": "Stopped — external version conflict"
+    },
+    "returnIneligible": {
+      "unconfirmed": "This receipt is not confirmed yet — returns require a confirmed receipt.",
+      "voided": "This receipt is voided and cannot be returned.",
+      "incomplete": "This receipt projection is incomplete.",
+      "refused_at_gate": "Refused-at-gate receipts are not eligible for return.",
+      "no_lines": "This receipt has no lines to return."
     }
   }
 }

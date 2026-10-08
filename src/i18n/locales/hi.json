@@ -2902,7 +2902,8 @@
       "custody": "कस्टडी",
       "changeArrival": "बदलें",
       "arrivalStoredHint": "आपके स्थानीय दिनांक/समय में दिखाया जाता है। सटीक टाइमस्टैम्प रिकॉर्ड में रहता है।",
-      "arrivalPickerUnavailable": "इस स्क्रीन पर दिनांक/समय चुनना उपलब्ध नहीं है। संग्रहीत आगमन समय नहीं बदला।"
+      "arrivalPickerUnavailable": "इस स्क्रीन पर दिनांक/समय चुनना उपलब्ध नहीं है। संग्रहीत आगमन समय नहीं बदला।",
+      "capturedAt": "सर्वर पंजीकरण समय"
     },
     "action": {
       "inspect": "निरीक्षण",
@@ -2953,7 +2954,8 @@
     "capture": {
       "online": "ऑनलाइन",
       "offline": "ऑफलाइन",
-      "lateEntry": "देर से प्रविष्टि"
+      "lateEntry": "देर से प्रविष्टि",
+      "unknown": "Not recorded"
     },
     "shortage": {
       "shortage": "कमी",
@@ -3085,7 +3087,37 @@
     "returnBatchNotRecorded": "बैच/लॉट दर्ज नहीं",
     "returnReplacementNote": "वापसी दर्ज करने से प्रतिस्थापन स्टॉक नहीं बनता। वास्तविक आगमन नई माल प्राप्ति के रूप में दर्ज करें।",
     "returnNoLines": "इस प्राप्ति में वापसी योग्य पंक्तियाँ नहीं हैं।",
-    "returnPickLineQty": "वापसी की मात्रा"
+    "returnPickLineQty": "वापसी की मात्रा",
+    "errInvalidArrivalDate": "Enter a valid calendar date (YYYY-MM-DD), or leave blank.",
+    "errCreateInFlight": "Create is already in progress.",
+    "errReturnInFlight": "Return submit is already in progress.",
+    "errReturnPartial": "Some return lines could not be queued. Confirmed and queued lines were kept — retry only unresolved lines.",
+    "returnQueuedNotConfirmed": "Return commands were queued locally. Sync confirmation is still pending — queueing is not server success.",
+    "returnReceiptSummary": "Selected receipt",
+    "returnReceiptId": "Receipt",
+    "returnConfirmedReturned": "Confirmed returned",
+    "returnPendingReturn": "Pending return (queued)",
+    "returnNonePending": "None pending",
+    "returnBatchLot": "Batch / lot",
+    "arrival": {
+      "notRecorded": "Arrival not recorded"
+    },
+    "returnStatus": {
+      "pendingSubmit": "Not submitted yet",
+      "queued": "Queued locally (not confirmed)",
+      "awaitingConfirmation": "Waiting for confirmation",
+      "confirmed": "Confirmed",
+      "failed": "Failed",
+      "conflicted": "Version conflict",
+      "versionConflict": "Stopped — external version conflict"
+    },
+    "returnIneligible": {
+      "unconfirmed": "This receipt is not confirmed yet — returns require a confirmed receipt.",
+      "voided": "This receipt is voided and cannot be returned.",
+      "incomplete": "This receipt projection is incomplete.",
+      "refused_at_gate": "Refused-at-gate receipts are not eligible for return.",
+      "no_lines": "This receipt has no lines to return."
+    }
   },
   "materialMovement": {
     "pickerQuestion": "आवाजाही का प्रकार चुनें। माल प्राप्ति और निरीक्षण (GRIN) बेसिक प्राप्ति नोट से अलग है।"

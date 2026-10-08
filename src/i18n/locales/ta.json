@@ -2747,7 +2747,8 @@
       "custody": "காவல்",
       "changeArrival": "மாற்று",
       "arrivalStoredHint": "உங்கள் உள்ளூர் தேதி/நேரத்தில் காட்டப்படும். சரியான நேரமுத்திரை பதிவில் இருக்கும்.",
-      "arrivalPickerUnavailable": "இந்தத் திரையில் தேதி/நேரத் தேர்வு கிடைக்கவில்லை. சேமிக்கப்பட்ட வருகை நேரம் மாறவில்லை."
+      "arrivalPickerUnavailable": "இந்தத் திரையில் தேதி/நேரத் தேர்வு கிடைக்கவில்லை. சேமிக்கப்பட்ட வருகை நேரம் மாறவில்லை.",
+      "capturedAt": "சேவையகப் பதிவு நேரம்"
     },
     "action": {
       "inspect": "ஆய்வு",
@@ -2798,7 +2799,8 @@
     "capture": {
       "online": "ஆன்லைன்",
       "offline": "ஆஃப்லைன்",
-      "lateEntry": "தாமதப் பதிவு"
+      "lateEntry": "தாமதப் பதிவு",
+      "unknown": "Not recorded"
     },
     "shortage": {
       "shortage": "குறைவு",
@@ -2930,6 +2932,36 @@
     "returnBatchNotRecorded": "தொகுதி பதிவு செய்யப்படவில்லை",
     "returnReplacementNote": "திருப்புதல் பதிவு மாற்றுப் பங்கு உருவாக்காது. உண்மையான வருகையை புதிய ரசீதாகப் பதிவு செய்யவும்.",
     "returnNoLines": "இந்த ரசீதில் திருப்பக்கூடிய வரிசைகள் இல்லை.",
-    "returnPickLineQty": "திருப்ப அளவு"
+    "returnPickLineQty": "திருப்ப அளவு",
+    "errInvalidArrivalDate": "Enter a valid calendar date (YYYY-MM-DD), or leave blank.",
+    "errCreateInFlight": "Create is already in progress.",
+    "errReturnInFlight": "Return submit is already in progress.",
+    "errReturnPartial": "Some return lines could not be queued. Confirmed and queued lines were kept — retry only unresolved lines.",
+    "returnQueuedNotConfirmed": "Return commands were queued locally. Sync confirmation is still pending — queueing is not server success.",
+    "returnReceiptSummary": "Selected receipt",
+    "returnReceiptId": "Receipt",
+    "returnConfirmedReturned": "Confirmed returned",
+    "returnPendingReturn": "Pending return (queued)",
+    "returnNonePending": "None pending",
+    "returnBatchLot": "Batch / lot",
+    "arrival": {
+      "notRecorded": "Arrival not recorded"
+    },
+    "returnStatus": {
+      "pendingSubmit": "Not submitted yet",
+      "queued": "Queued locally (not confirmed)",
+      "awaitingConfirmation": "Waiting for confirmation",
+      "confirmed": "Confirmed",
+      "failed": "Failed",
+      "conflicted": "Version conflict",
+      "versionConflict": "Stopped — external version conflict"
+    },
+    "returnIneligible": {
+      "unconfirmed": "This receipt is not confirmed yet — returns require a confirmed receipt.",
+      "voided": "This receipt is voided and cannot be returned.",
+      "incomplete": "This receipt projection is incomplete.",
+      "refused_at_gate": "Refused-at-gate receipts are not eligible for return.",
+      "no_lines": "This receipt has no lines to return."
+    }
   }
 }

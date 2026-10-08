@@ -105,6 +105,8 @@ export function captureLabel(value: CaptureProvenance | null, t: TFn): string {
       return t("grin.capture.offline");
     case "late_entry":
       return t("grin.capture.lateEntry");
+    case "unknown":
+      return t("grin.capture.unknown");
   }
 }
 

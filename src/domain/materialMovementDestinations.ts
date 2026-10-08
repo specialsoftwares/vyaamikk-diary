@@ -32,12 +32,16 @@ export type MaterialMovementDestination =
 /**
  * Destinations shown under + New Record → Material Movement.
  *
- * When goods-evidence is admitted: one receiving entry (GRIN create). Basic
+ * Client feature flags (`goodsEvidenceEnabled`) control menu visibility only.
+ * They are not backend admission — a flagged-on client can still be denied by
+ * server entitlement / Functions gates.
+ *
+ * When the client flag is on: one receiving entry (GRIN create). Basic
  * `material_received` is omitted from *new* entry choices so it does not compete
  * with GRIN. Historical basic records remain readable via diary/Saved Records.
- * Return uses GRIN receipt selection when admitted; otherwise the legacy composer.
+ * Return uses GRIN receipt selection when the flag is on; otherwise the legacy composer.
  *
- * When not admitted: legacy composer destinations only (including basic received).
+ * When the client flag is off: legacy composer destinations only (including basic received).
  * Never silently fall back from a GRIN menu item to basic `material_received`.
  */
 export function materialMovementDestinations(options: {
@@ -55,7 +59,7 @@ export function materialMovementDestinations(options: {
   const out: MaterialMovementDestination[] = [];
   for (const opt of MATERIAL_MOVEMENT_SUB_OPTIONS) {
     if (opt.kind === "received") {
-      // Unified receiving → admitted GRIN create (not basic composer).
+      // Unified receiving → GRIN create route (client flag on; not backend admission).
       out.push({
         kind: "grin_create",
         id: MATERIAL_MOVEMENT_GRIN_OPTION.id,

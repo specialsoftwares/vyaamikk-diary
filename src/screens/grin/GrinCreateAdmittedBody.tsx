@@ -4,8 +4,16 @@ import { quantity } from "@/goodsEvidence/quantities";
 import { classifyShortageOrExcess } from "@/goodsEvidence/quantities";
 import type { AcknowledgementOutcome, CustodyState } from "@/goodsEvidence/types";
 import type { EwbLink } from "@/goodsEvidence/ewb";
-import { draftFromFormDefaults, presentText } from "@/services/grin/repository";
-import { reportedArrivalFromOptionalDate } from "@/services/grin/repository/grinReceiptSearch";
+import {
+  acquireGrinMutationFlight,
+  draftFromFormDefaults,
+  GRIN_APPLICATION_LEDGER_ID,
+  grinCreateFlightKey,
+  markGrinMutationFlightCompleted,
+  presentText,
+  releaseGrinMutationFlight,
+} from "@/services/grin/repository";
+import { parseOptionalArrivalDate } from "@/services/grin/repository/grinReceiptSearch";
 import type { GrinDispatchSession } from "@/services/grin/outbox/types";
 import { spacing } from "@/theme/spacing";
 
@@ -103,19 +111,31 @@ export function GrinCreateAdmittedBody({ session }: { session: GrinDispatchSessi
       setError(t("grin.errRequired"));
       return;
     }
-    if (busy) return;
+    const arrivalParsed = parseOptionalArrivalDate(receivedOn);
+    if (!arrivalParsed.ok) {
+      setError(t("grin.errInvalidArrivalDate"));
+      return;
+    }
+    const flightKey = grinCreateFlightKey(session.ownerUid, GRIN_APPLICATION_LEDGER_ID);
+    const flightOwner = acquireGrinMutationFlight(flightKey);
+    if (!flightOwner) {
+      setError(t("grin.errCreateInFlight"));
+      return;
+    }
     setBusy(true);
     setError(null);
+    let completed = false;
     try {
       const draft = draftFromFormDefaults();
-      // System-derived capture provenance from defaults (offline). UI no longer solicits
-      // online/offline/late_entry — CaptureProvenance.unknown remains a deferred schema decision.
-      const dateArrival = reportedArrivalFromOptionalDate(receivedOn);
-      if (dateArrival) {
-        draft.reportedArrivalAt = dateArrival;
+      // captureProvenance defaults to unknown — not labeled offline.
+      // Capture time stays distinct from reported arrival via reportedArrivalPrecision.
+      if (arrivalParsed.kind === "date") {
+        draft.reportedArrivalAt = arrivalParsed.localDate;
         draft.reportedArrivalTimeZone = "Asia/Kolkata";
+        draft.reportedArrivalPrecision = "date";
+      } else {
+        draft.reportedArrivalPrecision = "unknown";
       }
-      // else: leave draft defaults (capture clock) — not a user-claimed historical arrival.
       draft.custody = custody;
       draft.buyer = {
         legalName: buyerName.trim() || t("grin.optional.notSupplied"),
@@ -216,19 +236,21 @@ export function GrinCreateAdmittedBody({ session }: { session: GrinDispatchSessi
         explanation: { kind: "not_supplied" },
       };
       const saved = originRepo(origin).createQueued(draft);
+      completed = true;
+      markGrinMutationFlightCompleted(flightKey, flightOwner);
       router.replace({ pathname: "/(app)/grin/[receiptId]", params: { receiptId: saved.receiptId } });
     } catch (caught) {
       const mapped = grinMutationErrorMessage(caught, t, "grin.errSave");
       if (mapped.retired) maskRetired();
       setError(mapped.message);
     } finally {
+      if (!completed) releaseGrinMutationFlight(flightKey, flightOwner);
       setBusy(false);
     }
   }, [
     ack,
     ackStatement,
     bin,
-    busy,
     buyerGstin,
     buyerName,
     challan,
@@ -258,6 +280,7 @@ export function GrinCreateAdmittedBody({ session }: { session: GrinDispatchSessi
     receivingEmployee,
     remarks,
     router,
+    session.ownerUid,
     supplierGstin,
     supplierName,
     supplierReg,

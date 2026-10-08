@@ -43,7 +43,7 @@ try {
   assert.equal(
     on.some((d) => d.kind === "composer" && d.entryType === "material_received"),
     false,
-    "basic goods-received must not compete as a new-entry choice when GRIN is admitted"
+    "basic goods-received must not compete as a new-entry choice when the client GRIN flag is on"
   );
   assert.ok(on.some((d) => d.kind === "grin_return_select"));
   assert.equal(on.filter((d) => d.kind === "composer").length, 1); // sent_transport only
@@ -70,6 +70,7 @@ try {
     false
   );
 
+  // Flags on + store admit: menu visible. This is NOT backend admission proof.
   process.env.EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED = "1";
   process.env.EXPO_PUBLIC_GOODS_EVIDENCE_STORE_RUNTIME_ADMIT = "1";
   assert.equal(isGoodsEvidenceEnabled(), true);
@@ -77,8 +78,20 @@ try {
     materialMovementDestinations({ goodsEvidenceEnabled: isGoodsEvidenceEnabled() }).some(
       (d) => d.kind === "grin_create"
     ),
-    true
+    true,
+    "client flag on shows GRIN menu — not a claim that Functions admitted the owner"
   );
+
+  // Flags on but destinations helper still honors the boolean it is given —
+  // callers can pass false when backend entitlement is known denied.
+  assert.equal(
+    materialMovementDestinations({ goodsEvidenceEnabled: false }).some((d) => d.kind === "grin_create"),
+    false,
+    "menu visibility follows the boolean; backend denial must clear or withhold it separately"
+  );
+
+  // Legacy basic received preserved for deep links when flag off.
+  assert.equal(legacyBasicReceivedComposerDestination().entryType, "material_received");
 
   console.log("materialMovementDestinations.test.ts: ok");
 } finally {

@@ -23,6 +23,7 @@ import { Banner, Button, FormSection, Header, Screen, TextField, View, StyleShee
 /**
  * Owner-scoped receipt picker for Return / Replacement.
  * Lists only the current origin repository (UID + ledger + generation).
+ * Local search filter is not eligibility — each row is checked before navigate.
  */
 export function GrinReturnSelectAdmittedBody({
   session,
@@ -36,6 +37,7 @@ export function GrinReturnSelectAdmittedBody({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<GrinApplicationListItem[]>([]);
+  const [selectError, setSelectError] = useState<string | null>(null);
 
   const styles = useGrinThemedStyles((c) =>
     StyleSheet.create({
@@ -81,6 +83,27 @@ export function GrinReturnSelectAdmittedBody({
     [items, query]
   );
 
+  const onSelect = useCallback(
+    (hit: GrinReceiptSearchHit) => {
+      setSelectError(null);
+      try {
+        const eligibility = originRepo(origin).returnEligibility(hit.receiptId);
+        if (!eligibility.ok) {
+          setSelectError(t(`grin.returnIneligible.${eligibility.reason}`));
+          return;
+        }
+        router.push({
+          pathname: "/(app)/grin/[receiptId]/return",
+          params: { receiptId: hit.receiptId },
+        });
+      } catch (caught) {
+        const mapped = grinMutationErrorMessage(caught, t, "grin.returnSelectUnavailable");
+        setSelectError(mapped.message);
+      }
+    },
+    [origin, router, t]
+  );
+
   return (
     <Screen scroll>
       <View style={styles.wrap}>
@@ -88,6 +111,7 @@ export function GrinReturnSelectAdmittedBody({
         <GrinFixtureNotices />
         <Banner tone="info" message={t("grin.returnReplacementNote")} />
         {error ? <Banner tone="danger" message={error} /> : null}
+        {selectError ? <Banner tone="danger" message={selectError} /> : null}
         <TextField
           label={t("grin.returnSelectSearch")}
           value={query}
@@ -95,33 +119,30 @@ export function GrinReturnSelectAdmittedBody({
           accessibilityLabel={t("grin.returnSelectSearch")}
         />
         {loading ? <Text style={styles.sub}>{t("grin.returnSelectLoading")}</Text> : null}
-        {!loading && filtered.length === 0 ? (
+        {!loading && !error && filtered.length === 0 ? (
           <Text style={styles.sub}>{t("grin.returnSelectEmpty")}</Text>
         ) : null}
-        <FormSection title={t("grin.returnSelectTitle")}>
-          {filtered.map((hit) => (
-            <View key={hit.receiptId} style={styles.row}>
-              <Text style={styles.title}>
-                {hit.displayNumber ?? t("grin.pdf.pendingNumber")}
-              </Text>
-              <Text style={styles.sub}>
-                {[hit.supplierName, hit.reportedArrivalAt?.slice(0, 10), hit.receiptId]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </Text>
-              <Button
-                label={t("common.next")}
-                onPress={() =>
-                  router.push({
-                    pathname: "/(app)/grin/[receiptId]/return",
-                    params: { receiptId: hit.receiptId },
-                  })
-                }
-                variant="secondary"
-              />
-            </View>
-          ))}
-        </FormSection>
+        {!loading && !error ? (
+          <FormSection title={t("grin.returnSelectTitle")}>
+            {filtered.map((hit) => (
+              <View key={hit.receiptId} style={styles.row}>
+                <Text style={styles.title}>
+                  {hit.displayNumber ?? t("grin.pdf.pendingNumber")}
+                </Text>
+                <Text style={styles.sub}>
+                  {[hit.supplierName, hit.reportedArrivalAt?.slice(0, 10), hit.receiptId]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </Text>
+                <Button
+                  label={t("common.next")}
+                  onPress={() => onSelect(hit)}
+                  variant="secondary"
+                />
+              </View>
+            ))}
+          </FormSection>
+        ) : null}
         <Button label={t("common.retry")} onPress={load} disabled={loading} />
       </View>
     </Screen>
