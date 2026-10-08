@@ -17,7 +17,7 @@ TOOLING (ops-guard suite; not application CI).
 | Item | Current value |
 |---|---|
 | Repo / branch / PR | `specialsoftwares/vyaamikk-diary` · integration base **`integration/grin-g1-g5-source`** · application branch **`feature/unified-material-movement-aso`** · open PR **#33** (**do not merge** until corrections green) |
-| **Candidate SHA** | **`cb854f71e8ca1873fcddd231317bfd9a137729f1`** (includes packaging fix on **`3d19d7f`**) |
+| **Candidate SHA** | Tip **`77ae4a9`** (register) · CI-tested application **`cb854f71e8ca1873fcddd231317bfd9a137729f1`** (packaging fix on **`3d19d7f`**) |
 | **Reviewed application base** | **`56837f17fb7d4354120282841fbcd6faf71c1bf5`** (prior combined-tree CI **`37699830269`**) · prior docs head **`c708649`** |
 | **Included source** | Letterhead repair preserved + MM corrections: durable multi-line return sequence (queue≠confirm; confirmed.eventVersion refresh; stable commandIds; partial retry); sync create/return flight; truthful arrival precision + `CaptureProvenance.unknown`; return eligibility/summary; client-flag≠backend-admission claims |
 | **Letterhead merge parents** | `1f302b9` + `b274fe8` → merge **`1be1daedc67f4ef59f579a92c1b7262d1af5904c`** |
