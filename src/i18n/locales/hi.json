@@ -3120,7 +3120,11 @@
     },
     "returnQuantityLocked": "A submitted return quantity cannot be changed. Wait until that line is confirmed, then start a new return for a different quantity.",
     "returnIntentOpen": "A return is already in progress for this receipt. Resume it instead of starting another.",
-    "returnResuming": "Resuming the saved return. Reason, quantities and per-line progress were restored."
+    "returnResuming": "Resuming the saved return. Reason, quantities and per-line progress were restored.",
+    "returnCompleted": "यह वापसी पुष्टि हो गई है। इसके लिए सेव बंद है। दूसरी दर्ज करने के लिए नई वापसी शुरू करें।",
+    "returnStartNew": "नई वापसी शुरू करें",
+    "createCompleted": "यह रसीद सेव हो गई है। इसके लिए सेव बंद है। दूसरी दर्ज करने के लिए नई रसीद शुरू करें।",
+    "createStartNew": "नई रसीद शुरू करें"
   },
   "materialMovement": {
     "pickerQuestion": "आवाजाही का प्रकार चुनें। माल प्राप्ति और निरीक्षण (GRIN) बेसिक प्राप्ति नोट से अलग है।"

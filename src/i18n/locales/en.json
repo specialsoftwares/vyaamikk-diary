@@ -3224,6 +3224,10 @@
     },
     "returnQuantityLocked": "A submitted return quantity cannot be changed. Wait until that line is confirmed, then start a new return for a different quantity.",
     "returnIntentOpen": "A return is already in progress for this receipt. Resume it instead of starting another.",
-    "returnResuming": "Resuming the saved return. Reason, quantities and per-line progress were restored."
+    "returnResuming": "Resuming the saved return. Reason, quantities and per-line progress were restored.",
+    "returnCompleted": "This return is confirmed. Save is closed for it. Start a new return to record another.",
+    "returnStartNew": "Start new return",
+    "createCompleted": "This receipt was saved. Save is closed for it. Start a new receipt to enter another.",
+    "createStartNew": "Start new receipt"
   }
 }

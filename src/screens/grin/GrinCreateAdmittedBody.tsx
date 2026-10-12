@@ -1,7 +1,6 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 
-import { quantity } from "@/goodsEvidence/quantities";
-import { classifyShortageOrExcess } from "@/goodsEvidence/quantities";
+import { classifyShortageOrExcess, quantity } from "@/goodsEvidence/quantities";
 import type { AcknowledgementOutcome, CustodyState } from "@/goodsEvidence/types";
 import type { EwbLink } from "@/goodsEvidence/ewb";
 import {
@@ -35,8 +34,27 @@ import { Banner, Button, FormSection, Header, Screen, SelectField, TextField, Vi
  * Does not solicit capture method, timezone, GRIN number, or online/offline UI.
  * System audit fields come from draftFromFormDefaults (capture time / offline default).
  * Optional "Received on" is date-precision only — never midnight-as-exact-arrival fiction.
+ *
+ * Completed-form rule: one mounted form submits at most one receipt. The
+ * submission intent is minted when the form mounts and is never re-armed while
+ * the filled form stays mounted (router.replace may be delayed or fail). A new
+ * intent only comes from a fresh mount or the explicit "new receipt" reset,
+ * which remounts an empty form via `key`.
  */
 export function GrinCreateAdmittedBody({ session }: { session: GrinDispatchSession }): React.ReactElement {
+  const origin = useFrozenGrinOrigin(session);
+  const [formEpoch, setFormEpoch] = useState(0);
+  const startNew = useCallback(() => setFormEpoch((epoch) => epoch + 1), []);
+  return <GrinCreateForm key={formEpoch} session={origin} onStartNew={startNew} />;
+}
+
+function GrinCreateForm({
+  session,
+  onStartNew,
+}: {
+  session: GrinDispatchSession;
+  onStartNew: () => void;
+}): React.ReactElement {
   const origin = useFrozenGrinOrigin(session);
   const t = useGrinT();
   const router = useGrinRouter();
@@ -48,7 +66,11 @@ export function GrinCreateAdmittedBody({ session }: { session: GrinDispatchSessi
 
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [createIntentId, setCreateIntentId] = useState(() => mintSubmissionIntentId());
+  /** One intent per mounted form. Never re-minted while this form is mounted. */
+  const [createIntentId] = useState(() => mintSubmissionIntentId());
+  /** Ref flips synchronously so a stale or same-tick callback cannot resubmit. */
+  const submittedRef = useRef(false);
+  const [submitted, setSubmitted] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [buyerName, setBuyerName] = useState("");
   const [buyerGstin, setBuyerGstin] = useState("");
@@ -109,6 +131,8 @@ export function GrinCreateAdmittedBody({ session }: { session: GrinDispatchSessi
   );
 
   const onSave = useCallback(() => {
+    // A completed form never submits again from this mount.
+    if (submittedRef.current) return;
     if (!supplierName.trim() || !material.trim()) {
       setError(t("grin.errRequired"));
       return;
@@ -244,8 +268,9 @@ export function GrinCreateAdmittedBody({ session }: { session: GrinDispatchSessi
       };
       const saved = originRepo(origin).createQueued(draft);
       completed = true;
+      submittedRef.current = true;
       markGrinMutationFlightCompleted(flightKey, flightOwner);
-      queueMicrotask(() => setCreateIntentId(mintSubmissionIntentId()));
+      setSubmitted(true);
       router.replace({ pathname: "/(app)/grin/[receiptId]", params: { receiptId: saved.receiptId } });
     } catch (caught) {
       const mapped = grinMutationErrorMessage(caught, t, "grin.errSave");
@@ -308,6 +333,12 @@ export function GrinCreateAdmittedBody({ session }: { session: GrinDispatchSessi
         <Header title={t("grin.createTitle")} subtitle={t("grin.createIntro")} showBack />
         <GrinFixtureNotices />
         {error ? <Banner tone="danger" message={error} /> : null}
+        {submitted ? (
+          <>
+            <Banner tone="success" message={t("grin.createCompleted")} />
+            <Button label={t("grin.createStartNew")} onPress={onStartNew} variant="secondary" />
+          </>
+        ) : null}
 
         <FormSection title={t("grin.section.supplier")}>
           <TextField label={t("grin.field.buyerName")} value={buyerName} onChangeText={setBuyerName} accessibilityLabel={t("grin.field.buyerName")} />
@@ -449,7 +480,7 @@ export function GrinCreateAdmittedBody({ session }: { session: GrinDispatchSessi
           </>
         ) : null}
 
-        <Button label={t("grin.saveAction")} onPress={onSave} loading={busy} disabled={busy} />
+        <Button label={t("grin.saveAction")} onPress={onSave} loading={busy} disabled={busy || submitted} />
       </View>
     </Screen>
   );

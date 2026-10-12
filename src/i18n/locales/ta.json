@@ -2965,6 +2965,10 @@
     },
     "returnQuantityLocked": "A submitted return quantity cannot be changed. Wait until that line is confirmed, then start a new return for a different quantity.",
     "returnIntentOpen": "A return is already in progress for this receipt. Resume it instead of starting another.",
-    "returnResuming": "Resuming the saved return. Reason, quantities and per-line progress were restored."
+    "returnResuming": "Resuming the saved return. Reason, quantities and per-line progress were restored.",
+    "returnCompleted": "இந்தத் திருப்புதல் உறுதிசெய்யப்பட்டது. இதற்கான சேமிப்பு மூடப்பட்டது. மற்றொன்றைப் பதிவு செய்ய புதிய திருப்புதலைத் தொடங்கவும்.",
+    "returnStartNew": "புதிய திருப்புதலைத் தொடங்கு",
+    "createCompleted": "இந்த ரசீது சேமிக்கப்பட்டது. இதற்கான சேமிப்பு மூடப்பட்டது. மற்றொன்றை உள்ளிட புதிய ரசீதைத் தொடங்கவும்.",
+    "createStartNew": "புதிய ரசீதைத் தொடங்கு"
   }
 }

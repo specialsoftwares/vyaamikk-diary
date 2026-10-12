@@ -2965,6 +2965,10 @@
     },
     "returnQuantityLocked": "A submitted return quantity cannot be changed. Wait until that line is confirmed, then start a new return for a different quantity.",
     "returnIntentOpen": "A return is already in progress for this receipt. Resume it instead of starting another.",
-    "returnResuming": "Resuming the saved return. Reason, quantities and per-line progress were restored."
+    "returnResuming": "Resuming the saved return. Reason, quantities and per-line progress were restored.",
+    "returnCompleted": "ఈ రిటర్న్ నిర్ధారించబడింది. దీనికి సేవ్ మూసివేయబడింది. మరొకటి నమోదు చేయడానికి కొత్త రిటర్న్ ప్రారంభించండి.",
+    "returnStartNew": "కొత్త రిటర్న్ ప్రారంభించండి",
+    "createCompleted": "ఈ రసీదు సేవ్ అయ్యింది. దీనికి సేవ్ మూసివేయబడింది. మరొకటి నమోదు చేయడానికి కొత్త రసీదు ప్రారంభించండి.",
+    "createStartNew": "కొత్త రసీదు ప్రారంభించండి"
   }
 }

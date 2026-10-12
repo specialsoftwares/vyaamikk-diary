@@ -52,6 +52,12 @@ function returnLineStatusLabel(status: string, t: (key: string) => string): stri
  * Submits via durable per-line dispatchReturn sequence: queue ≠ confirm.
  * Each dependent line uses a fresh confirmed.eventVersion after prior confirm.
  * Client balances are display-only — server admits quantities.
+ *
+ * Completed-form rule: once the plan for the current intent (resumed or just
+ * saved) is fully confirmed the screen enters a completed state. Save is a
+ * no-op for that intent, per-line confirmed statuses stay visible, and only
+ * the explicit "Start new return" action clears the form and mints a new
+ * intent. A fresh mount with no saved plan also starts with a new intent.
  */
 export function GrinReturnAdmittedBody({ session }: { session: GrinDispatchSession }): React.ReactElement {
   const origin = useFrozenGrinOrigin(session);
@@ -67,10 +73,19 @@ export function GrinReturnAdmittedBody({ session }: { session: GrinDispatchSessi
   const [plan, setPlan] = useState<GrinReturnPlan | null>(null);
   const [returnIntentId, setReturnIntentId] = useState(() => mintSubmissionIntentId());
   const [resuming, setResuming] = useState(false);
+  /** Ref flips synchronously so a stale or same-tick Save cannot resubmit a completed intent. */
+  const completedRef = useRef(false);
+  const [completed, setCompleted] = useState(false);
   const [eligibilityOk, setEligibilityOk] = useState(true);
   const [eligibilityReason, setEligibilityReason] = useState<string | null>(null);
   const didAutoSelect = useRef(false);
   const userClearedSelection = useRef(false);
+
+  const markCompleted = useCallback(() => {
+    completedRef.current = true;
+    setCompleted(true);
+    setResuming(false);
+  }, []);
 
   const styles = useGrinThemedStyles((c) =>
     StyleSheet.create({
@@ -114,6 +129,8 @@ export function GrinReturnAdmittedBody({ session }: { session: GrinDispatchSessi
       const existingPlan = repo.getReturnPlan(receiptId);
       if (existingPlan) {
         setPlan(existingPlan);
+        completedRef.current = false;
+        setCompleted(false);
         setResuming(true);
         setReturnIntentId(existingPlan.intentId);
         setReason(existingPlan.reason);
@@ -127,10 +144,9 @@ export function GrinReturnAdmittedBody({ session }: { session: GrinDispatchSessi
           setPlan(continued);
           const resumedDone =
             continued.lines.length > 0 && continued.lines.every((line) => line.status === "confirmed");
-          if (resumedDone) {
-            setResuming(false);
-            queueMicrotask(() => setReturnIntentId(mintSubmissionIntentId()));
-          }
+          // A completed resume stays completed. No new intent while reason and
+          // quantities are still populated — only the explicit new-return action mints one.
+          if (resumedDone) markCompleted();
         }).catch((caught) => {
           const mapped = grinMutationErrorMessage(caught, t, "grin.errReturn");
           if (mapped.retired) {
@@ -150,7 +166,7 @@ export function GrinReturnAdmittedBody({ session }: { session: GrinDispatchSessi
       setRecord(null);
       setConfirmed(null);
     }
-  }, [maskRetired, origin, receiptId, t]);
+  }, [markCompleted, maskRetired, origin, receiptId, t]);
 
   useGrinFocusEffect(
     useCallback(() => {
@@ -205,7 +221,23 @@ export function GrinReturnAdmittedBody({ session }: { session: GrinDispatchSessi
       ? record.effective.supplier.registration.gstin
       : null;
 
+  /** Explicit new transaction: clear selection/reason/plan display and mint a new intent. */
+  const startNewReturn = useCallback(() => {
+    completedRef.current = false;
+    setCompleted(false);
+    setResuming(false);
+    setPlan(null);
+    setSelected({});
+    setReason("");
+    setError(null);
+    didAutoSelect.current = false;
+    userClearedSelection.current = false;
+    setReturnIntentId(mintSubmissionIntentId());
+  }, []);
+
   const onSave = useCallback(() => {
+    // A completed intent never submits again; only startNewReturn re-arms Save.
+    if (completedRef.current) return;
     if (!receiptId || !record) return;
     if (!reason.trim()) {
       setError(t("grin.errReturnReason"));
@@ -259,8 +291,9 @@ export function GrinReturnAdmittedBody({ session }: { session: GrinDispatchSessi
             line.status === "pending_submit"
         );
         if (allConfirmed) {
-          queueMicrotask(() => setReturnIntentId(mintSubmissionIntentId()));
-          setResuming(false);
+          // Completed: keep statuses visible, disable Save for this intent. If
+          // router.back() is delayed, a second press must not create another return.
+          markCompleted();
           router.back();
           return;
         }
@@ -292,7 +325,7 @@ export function GrinReturnAdmittedBody({ session }: { session: GrinDispatchSessi
         setBusy(false);
       }
     })();
-  }, [maskRetired, origin, reason, receiptId, record, returnIntentId, router, selected, t]);
+  }, [markCompleted, maskRetired, origin, reason, receiptId, record, returnIntentId, router, selected, t]);
 
   const lineStatusById = useMemo(() => {
     const map: Record<string, string> = {};
@@ -309,6 +342,12 @@ export function GrinReturnAdmittedBody({ session }: { session: GrinDispatchSessi
         <Banner tone="info" message={t("grin.returnReplacementNote")} />
         {error ? <Banner tone="danger" message={error} /> : null}
         {resuming ? <Banner tone="info" message={t("grin.returnResuming")} /> : null}
+        {completed ? (
+          <>
+            <Banner tone="success" message={t("grin.returnCompleted")} />
+            <Button label={t("grin.returnStartNew")} onPress={startNewReturn} variant="secondary" />
+          </>
+        ) : null}
         {record ? (
           <FormSection title={t("grin.returnReceiptSummary")}>
             <GrinFieldRow
@@ -400,7 +439,7 @@ export function GrinReturnAdmittedBody({ session }: { session: GrinDispatchSessi
           label={t("common.save")}
           onPress={onSave}
           loading={busy}
-          disabled={busy || !eligibilityOk}
+          disabled={busy || !eligibilityOk || completed}
         />
       </View>
     </Screen>
