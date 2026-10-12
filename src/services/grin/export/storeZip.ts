@@ -57,7 +57,75 @@ function concat(parts: Uint8Array[]): Uint8Array {
 
 export type ZipEntry = { name: string; bytes: Uint8Array };
 
+export const MAX_ZIP_ENTRY_NAME_BYTES = 255;
+/** ZIP32 limits (no ZIP64 support in this STORE writer). */
+export const MAX_ZIP32_ENTRIES = 0xffff;
+export const MAX_ZIP32_ENTRY_BYTES = 0xffffffff;
+
+export type ZipEntryNameRejection =
+  | "empty"
+  | "too_long"
+  | "absolute"
+  | "backslash"
+  | "control_char"
+  | "dot_segment"
+  | "empty_segment"
+  | "drive_or_scheme";
+
+/**
+ * Archive entry names must be plain relative paths an extractor cannot turn
+ * into traversal or absolute writes: no `..`/`.` segments, no leading `/`,
+ * no backslashes, no control characters, no `C:` / `scheme:` prefixes.
+ */
+export function zipEntryNameRejection(name: string): ZipEntryNameRejection | null {
+  if (name.length === 0) return "empty";
+  if (new TextEncoder().encode(name).byteLength > MAX_ZIP_ENTRY_NAME_BYTES) return "too_long";
+  if (name.startsWith("/")) return "absolute";
+  if (name.includes("\\")) return "backslash";
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(name)) return "control_char";
+  const segments = name.split("/");
+  if (segments[0]!.includes(":")) return "drive_or_scheme";
+  for (const segment of segments) {
+    if (segment === "") return "empty_segment";
+    if (segment === "." || segment === "..") return "dot_segment";
+  }
+  return null;
+}
+
+export function isSafeZipEntryName(name: string): boolean {
+  return zipEntryNameRejection(name) === null;
+}
+
+export class ZipEntryError extends Error {
+  constructor(
+    public readonly code: "unsafe_entry_name" | "duplicate_entry_name" | "zip32_limit",
+    public readonly entryName: string | null = null
+  ) {
+    super(code);
+    this.name = "ZipEntryError";
+  }
+}
+
+/**
+ * Validate every entry before any bytes are laid out. Duplicate detection is
+ * case-insensitive because the archive may be extracted on a case-insensitive
+ * filesystem where two entries would silently overwrite each other.
+ */
+export function assertZipEntries(entries: readonly ZipEntry[]): void {
+  if (entries.length > MAX_ZIP32_ENTRIES) throw new ZipEntryError("zip32_limit");
+  const seen = new Set<string>();
+  for (const entry of entries) {
+    if (!isSafeZipEntryName(entry.name)) throw new ZipEntryError("unsafe_entry_name", entry.name);
+    if (entry.bytes.byteLength > MAX_ZIP32_ENTRY_BYTES) throw new ZipEntryError("zip32_limit", entry.name);
+    const key = entry.name.toLowerCase();
+    if (seen.has(key)) throw new ZipEntryError("duplicate_entry_name", entry.name);
+    seen.add(key);
+  }
+}
+
 export function buildStoreZip(entries: ZipEntry[], nowMs = 0): Uint8Array {
+  assertZipEntries(entries);
   const { time, date } = dosDateTime(nowMs);
   const locals: Uint8Array[] = [];
   const centrals: Uint8Array[] = [];

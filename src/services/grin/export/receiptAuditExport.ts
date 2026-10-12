@@ -27,6 +27,16 @@ export type GrinOriginalDownloadInput = {
   originalDurable?: boolean;
 };
 
+/**
+ * Where `sha256` came from. Only `verified_bytes` means the supplied bytes were
+ * hashed here and matched the trusted descriptor; the other two are passthrough.
+ */
+export type GrinOriginalSha256Source =
+  | "verified_bytes"
+  | "server_actual"
+  | "claimed_unverified"
+  | "computed_unbound";
+
 export type GrinOriginalDownloadResult = {
   evidenceId: string;
   kind: "original";
@@ -42,6 +52,21 @@ export type GrinOriginalDownloadResult = {
   byteSize?: number;
   mime?: string | null;
   sha256?: string | null;
+  sha256Source?: GrinOriginalSha256Source | null;
+};
+
+/** Synchronous SHA-256 hex over supplied bytes (injected; no node:crypto import here). */
+export type GrinBytesSha256Hex = (bytes: Uint8Array) => string;
+
+export type GrinOriginalDownloadOptions = {
+  sessionLive: boolean;
+  maxBytes?: number;
+  /**
+   * When provided, supplied bytes are hashed and compared with the trusted
+   * descriptor (`actualSha256`, else `claimedSha256`). A mismatch is `corrupt`.
+   * Without it, no hash is verified and `sha256Source` says so.
+   */
+  sha256Hex?: GrinBytesSha256Hex;
 };
 
 export type GrinReceiptAuditExport = {
@@ -67,7 +92,13 @@ export type GrinOptionalZipResult =
     }
   | {
       ok: false;
-      reason: "no_bundleable_originals" | "too_large" | "session_retired" | "corrupt";
+      reason:
+        | "no_bundleable_originals"
+        | "too_large"
+        | "session_retired"
+        | "corrupt"
+        | "unsafe_entry_name"
+        | "duplicate_entry_name";
       missingOriginals: string[];
       corruptOriginals: string[];
     };
@@ -76,9 +107,13 @@ function isOriginalRole(role: string): boolean {
   return role === "original";
 }
 
+function isSha256HexLike(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{64}$/i.test(value);
+}
+
 export function downloadGrinOriginal(
   input: GrinOriginalDownloadInput,
-  options: { sessionLive: boolean; maxBytes?: number } = { sessionLive: true }
+  options: GrinOriginalDownloadOptions = { sessionLive: true }
 ): GrinOriginalDownloadResult {
   if (!options.sessionLive) {
     return { evidenceId: input.evidenceId, kind: "original", ok: false, reason: "session_retired" };
@@ -102,7 +137,24 @@ export function downloadGrinOriginal(
   if (typeof input.byteSize === "number" && input.byteSize !== bytes.byteLength) {
     return { evidenceId: input.evidenceId, kind: "original", ok: false, reason: "corrupt" };
   }
-  const trusted = input.actualSha256 ?? input.claimedSha256 ?? null;
+  const serverActual = isSha256HexLike(input.actualSha256) ? input.actualSha256.toLowerCase() : null;
+  const claimed = isSha256HexLike(input.claimedSha256) ? input.claimedSha256.toLowerCase() : null;
+  const expected = serverActual ?? claimed;
+  let sha256: string | null = expected;
+  let sha256Source: GrinOriginalSha256Source | null = serverActual
+    ? "server_actual"
+    : claimed
+      ? "claimed_unverified"
+      : null;
+  if (options.sha256Hex) {
+    const computed = options.sha256Hex(bytes).toLowerCase();
+    if (expected != null && computed !== expected) {
+      // Supplied bytes do not match the descriptor they claim to be — never bundle them.
+      return { evidenceId: input.evidenceId, kind: "original", ok: false, reason: "corrupt" };
+    }
+    sha256 = computed;
+    sha256Source = expected != null ? "verified_bytes" : "computed_unbound";
+  }
   return {
     evidenceId: input.evidenceId,
     kind: "original",
@@ -110,7 +162,8 @@ export function downloadGrinOriginal(
     bytes,
     byteSize: bytes.byteLength,
     mime: input.mime ?? null,
-    sha256: trusted,
+    sha256,
+    sha256Source,
   };
 }
 
