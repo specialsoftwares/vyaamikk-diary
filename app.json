@@ -23,7 +23,7 @@
     "android": {
       "softwareKeyboardLayoutMode": "resize",
       "package": "com.specialsoftwares.vyaamikkdiary",
-      "versionCode": 24,
+      "versionCode": 25,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "backgroundColor": "#1E1B4B",
