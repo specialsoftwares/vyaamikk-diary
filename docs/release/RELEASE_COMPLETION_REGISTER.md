@@ -12,6 +12,20 @@ TOOLING (ops-guard suite; not application CI).
 
 ---
 
+## Work board — 2026-10-12 parallel execution (PR #33 completed-form + security synthesis)
+
+Coordinator: this session, worktree `grin-combined` (`feature/unified-material-movement-aso`). Only the coordinator integrates into the candidate and edits `package.json`, lockfiles, `app.json`, `eas.json`, plugins, workflows and this register. Base for all agent worktrees: **`a528de015f05fc7e3f2ea777a6a5a3c8434abc7d`** (application source `a67e716`; CI `38232385275` on `4aea1b3`).
+
+| Assignment / agent | Worktree · branch | Owned files | Finding → reproduction → correction | Dependencies / evidence | Integration |
+|---|---|---|---|---|---|
+| A1 PR #33 completed-form | `sec-a1-pr33-form` · `fix/pr33-completed-form` | `src/screens/grin/**`, `src/services/grin/repository/**`, `tools/grin-interop/**`, `grin.*` locale keys | Completed create re-arms a new intent on the same mount (microtask) → duplicate on delayed navigation; resumed return that completes re-arms intent with form still populated → silent new return. Correction: completed-form state until fresh mount / explicit new-return action | Mounted MOUNTED_INERT + SQLITE_HOST regressions; `test:grin-product`, `test:grin-interop`; emulator test if CLI available | PENDING — gate: A5 focused review before any A2–A4 change touching submission/session lands |
+| A2 files / uploads / documents | `sec-a2-files` · `security/files-uploads-documents` | `src/services/letterhead/**`, `storage/**`, `pdf/**`, `share/**`, `src/utils/share.ts`, `src/services/grin/export/**`, renderer | S04/S10/G04/G07/G08 applicability; download-URL exposure model; archive-name/byte integrity; HTML escaping; renderer interception | Host fixture tests; artifact inspection read-only from sibling worktrees; `test:letterhead-repair` | PENDING |
+| A3 session / logging / SDK | `sec-a3-session-logging` · `security/session-logging-sdk` | `src/utils/logger.ts`, `safeDiagnostics.ts`, `src/services/telemetry/**`, `src/services/appCheck/**`, auth flows | S06/S07/G01/G03; sentinel leak test; consent clearing; async ownership; EXPO_PUBLIC inventory; JS vs native App Check map | Host sentinel tests; no enforcement / policy / live changes | PENDING |
+| A4 deps / Android / links | `sec-a4-deps-android` · `security/deps-android-links` | `src/utils/externalHttpsUrl.ts`, `safeUrl.ts`, link handling (+tests); plugins only on reproduced defect | S05/S03/G02/G05; `npm audit` read-only per package; boundary split (app / Functions / tooling / CI / dev); manifest, exported components, intent filters | Proposed lockfile/config diffs routed to coordinator; artifact evidence from sibling worktrees or EVIDENCE_PENDING | PENDING |
+| A5 independent QA | `sec-a5-qa` · `qa/pr33-security-review` | `tools/qa/**` only (no production edits) | Phase 1: reproduce completed-form defects on `a528de0`; verify a67e716 claims via production paths. Phase 2: review A1 fix, then A2–A4 | Labels SOURCE / INJECTED / SQLITE_HOST / EMULATOR / NOT RUN | PENDING |
+
+Integration rule: small dependency-ordered batches onto the candidate; affected suites rerun on the integrated tree; canonical `ci:verify` on the final application candidate. Separate green worktrees are not proof of the combined tree.
+
 ## Current state (authoritative — 2026-10-12 PR #33 final functional corrections)
 
 | Item | Current value |
