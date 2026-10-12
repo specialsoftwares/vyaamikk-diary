@@ -21,7 +21,7 @@ Closed against CI-tested source `c8cdbc55933864e474cef4593bc522ca8570af7a`. Docs
 | A1 GRIN form / return | **Completed and integrated.** Completed-form lock, existing-command retry, account-switch unmount, and confirmed-balance refresh are in `c8cdbc5`. Device TalkBack and a live multi-line return remain **device/live pending**. |
 | A2 files / uploads / documents | **Completed and integrated** for PDF escaping, ZIP names/hashes, and renderer JavaScript. Letterhead gallery, scanner, and Print on a phone are **device pending**. Storage-object retention after record deletion was a policy choice, not a code fix. |
 | A3 session / logging / SDK | **Completed and integrated** for clearing the Crashlytics user id on opt-out. App Check stays uninitialized on purpose. Live App Check enforcement is **not applicable** until a separate decision. |
-| A4 dependencies / Android | **Source recorded, not fully closed.** PreviewActivity removal is registered for the next build only. The installed AAB is still `7c938f8` / vc24, so the merged manifest is **device/artifact pending**. Functions `qs` 6.15.2 is attacker-reachable (pre-auth query parsing). That lockfile refresh is **completed but not integrated**. It is not treated as harmless. |
+| A4 dependencies / Android | **Functions query-parser refresh is integrated** on `53cfe41` (express 4.22.3, body-parser 1.20.8, qs 6.16.0, side-channel 1.1.1). Canonical CI **`38294284394` SUCCESS** / verify **`114961527836`**. Other advisories were not refreshed and are not called harmless. PreviewActivity removal is still source-only until the next AAB. Installed Internal remains `7c938f8` / vc24. |
 | A5 QA | **Not an independent QA pass.** Coordinator review only. |
 
 Historical assignment table (unchanged as the record of who owned what):
@@ -40,7 +40,22 @@ Coordinator: this session, worktree `grin-combined` (`feature/unified-material-m
 
 Integration rule: small dependency-ordered batches onto the candidate; affected suites rerun on the integrated tree; canonical `ci:verify` on the final application candidate. Separate green worktrees are not proof of the combined tree.
 
-## Current state (authoritative — 2026-10-12 PR #33 UI lifecycle)
+## Current state (authoritative — 2026-10-13 executable packet)
+
+Executable steps, hashes, rollback limits, and the owner payment list are in
+`docs/release/packets/EXECUTABLE_INTERNAL_RELEASE_2026-10-13.md`.
+
+| Item | Current value |
+|---|---|
+| **Dependency source** | **`53cfe412d7c62aaf6b5bfe379f6cc39cfeeed631`**. Lockfile sha256 `f5ebda2224b089915161f89192516011d4d9f03d200308f2c553c59adb11228d`. Prepared Functions tree content sha256 `9d1f7a7b057814618b5f376995897affd162160dfb57de9c72e08c46f5481be2`. Platform archive **PENDING** (no deploy). |
+| **Canonical CI** | Run **`38294284394` SUCCESS**, verify **`114961527836`** (20m15s), on **`53cfe41`**. Prior SUCCESS **`38269047797`** / verify **`114878446537`** remains on **`c8cdbc5`** only. |
+| **Merge operation, not performed** | PR **#33** head into **`integration/grin-g1-g5-source`** (`1be1daed`). Not `main`. Not `c8cdbc5` alone. The head at this writing is `53cfe41`; a later docs commit on the same pull request is included only if it is the head at approval time. |
+| **Live Functions inspect** | **NOT RUN** today. Firebase credentials need `firebase login --reauth`. Do not treat the seven functions as absent. |
+| **Rollback** | `540e07a` is not a compatible rollback after clients that send `unknown` provenance are installed. Safe disablement is PATCH `GRIN_GOODS_EVIDENCE_FUNCTIONS=false` on the seven names. Do not delete queued commands or originals. |
+| **versionCode** | Source and uploaded Internal remain **24**. Next code **PENDING** a fresh Play inventory. |
+| **Billing** | Next Internal build stays billing-off. Console catalog, license testers, RTDN, and the purchase flow were **NOT RUN**. |
+
+## Prior current state (2026-10-12 PR #33 UI lifecycle)
 
 | Item | Current value |
 |---|---|
