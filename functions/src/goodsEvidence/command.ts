@@ -10,6 +10,7 @@ import type {
   AcknowledgementState,
   BuyerIdentitySnapshot,
   CaptureProvenance,
+  ReportedArrivalPrecision,
   CommercialLinks,
   CustodyState,
   OptionalText,
@@ -89,6 +90,8 @@ export interface RegisterGoodsReceiptBody {
   capturedAtClientUtc: string;
   reportedArrivalAt: string;
   reportedArrivalTimeZone: string;
+  /** Optional; absent = legacy opaque timestamp. New clients should set explicitly. */
+  reportedArrivalPrecision?: ReportedArrivalPrecision;
   captureProvenance: CaptureProvenance;
   buyer: BuyerIdentitySnapshot;
   supplier: SupplierSnapshot;

@@ -51,7 +51,24 @@ import type {
   GrinLocalHistoryItem,
   GrinQcInput,
   GrinReturnInput,
+  GrinReturnSequenceInput,
 } from "./types";
+import {
+  acquireGrinMutationFlight,
+  grinReturnFlightKey,
+  markGrinMutationFlightCompleted,
+  releaseGrinMutationFlight,
+} from "./grinMutationFlight";
+import {
+  allReturnLinesConfirmed,
+  clearReturnPlan,
+  loadReturnPlan,
+  saveReturnPlan,
+  upsertReturnPlan,
+  type GrinReturnLineStatus,
+  type GrinReturnPlan,
+} from "./grinReturnPlan";
+import { returnEligibilityForRecord } from "./grinReceiptSearch";
 
 type CommandRowLite = {
   command_id: string;
@@ -226,7 +243,284 @@ export class GrinApplicationRepository {
       receiptId: body.receiptId,
       commandType: "dispatchReturn",
       body,
+      commandId: input.commandId,
     });
+  }
+
+  /**
+   * Durable multi-line return against the existing per-line API.
+   * Synchronous queue success is local queueing evidence, not server confirmation.
+   * Each subsequent line reads a fresh confirmed.eventVersion after prior confirm.
+   */
+  async dispatchReturnSequence(input: GrinReturnSequenceInput): Promise<GrinReturnPlan> {
+    this.assertLive("write");
+    const receiptId = input.receiptId.trim();
+    if (!input.reason.trim()) throw new Error("return_reason_required");
+    if (!input.intentId.trim()) throw new Error("return_intent_required");
+    if (!input.lines.length) throw new Error("return_lines_required");
+
+    const flightKey = grinReturnFlightKey(
+      this.ownerUid,
+      this.ledgerId,
+      receiptId,
+      input.intentId.trim(),
+      this.session.dispatchGeneration
+    );
+    const flightOwner = acquireGrinMutationFlight(flightKey);
+    if (!flightOwner) {
+      throw new Error("return_flight_in_progress");
+    }
+
+    let completedAll = false;
+    try {
+      const eligibility = returnEligibilityForRecord(
+        this.get(receiptId),
+        this.readConfirmedProjection(receiptId)
+      );
+      if (!eligibility.ok) {
+        throw new Error(`return_ineligible:${eligibility.reason}`);
+      }
+
+      const existing = loadReturnPlan(this.db, this.ownerUid, this.ledgerId, receiptId);
+      const sameIntent = existing != null && existing.intentId === input.intentId.trim();
+      if (existing && !sameIntent) {
+        const uncertain = existing.lines.some(
+          (line) => line.status !== "confirmed"
+        );
+        if (uncertain) throw new Error("return_intent_open");
+      }
+      const picks = input.lines.map((line) => ({
+        lineId: line.lineId,
+        returnQty: cloneSnapshot(line.returnQty),
+      }));
+      let plan = upsertReturnPlan({
+        existing: sameIntent ? existing : null,
+        intentId: input.intentId.trim(),
+        ownerUid: this.ownerUid,
+        ledgerId: this.ledgerId,
+        receiptId,
+        reason: input.reason,
+        picks,
+      });
+      saveReturnPlan(this.db, plan);
+      plan = await this.advanceReturnPlan(plan);
+      if (allReturnLinesConfirmed(plan)) {
+        completedAll = true;
+        markGrinMutationFlightCompleted(flightKey, flightOwner);
+        clearReturnPlan(this.db, this.ownerUid, this.ledgerId, receiptId);
+      }
+      return plan;
+    } catch (caught) {
+      releaseGrinMutationFlight(flightKey, flightOwner);
+      throw caught;
+    } finally {
+      if (!completedAll) {
+        releaseGrinMutationFlight(flightKey, flightOwner);
+      }
+    }
+  }
+
+  /**
+   * Resume a persisted return after reopen / confirmation without a new user intent.
+   * Uses the outbox dispatch lifecycle. No-ops when nothing is unfinished.
+   */
+  async continueReturnPlan(receiptId: string): Promise<GrinReturnPlan | null> {
+    this.assertLive("write");
+    const existing = loadReturnPlan(this.db, this.ownerUid, this.ledgerId, receiptId.trim());
+    if (!existing) return null;
+    const flightKey = grinReturnFlightKey(
+      this.ownerUid,
+      this.ledgerId,
+      receiptId.trim(),
+      existing.intentId,
+      this.session.dispatchGeneration
+    );
+    const flightOwner = acquireGrinMutationFlight(flightKey);
+    if (!flightOwner) return this.reconcileReturnPlanStatuses(existing);
+    let completedAll = false;
+    try {
+      const plan = await this.advanceReturnPlan(existing);
+      if (allReturnLinesConfirmed(plan)) {
+        completedAll = true;
+        markGrinMutationFlightCompleted(flightKey, flightOwner);
+        clearReturnPlan(this.db, this.ownerUid, this.ledgerId, receiptId.trim());
+      }
+      return plan;
+    } catch (caught) {
+      releaseGrinMutationFlight(flightKey, flightOwner);
+      throw caught;
+    } finally {
+      if (!completedAll) releaseGrinMutationFlight(flightKey, flightOwner);
+    }
+  }
+
+  /**
+   * Production confirmation step. Reads the server-confirmed version via outbox
+   * dispatch — never increments a version locally and never rewrites a frozen digest.
+   */
+  private async driveReturnConfirmation(): Promise<void> {
+    this.assertLive("write");
+    await this.outbox.dispatchDue(this.session, `grin-return-${this.session.dispatchGeneration}`);
+  }
+
+  /**
+   * Advance the plan line by line.
+   *
+   * A line whose commandId already has an outbox row is NEVER rebuilt or
+   * re-queued through dispatchReturn: a rebuilt body would carry a new
+   * clientObservedAtUtc (and possibly a different expectedVersion), i.e. a new
+   * digest, which the outbox rightly refuses (digest conflict). Persisted rows
+   * are driven only through outbox.dispatchDue, which retries failed_retryable
+   * rows itself. dispatchReturn is called only for a line with no row yet.
+   */
+  private async advanceReturnPlan(plan: GrinReturnPlan): Promise<GrinReturnPlan> {
+    let current = plan;
+    for (let i = 0; i < current.lines.length; i += 1) {
+      this.assertLive("write");
+      current = this.reconcileReturnPlanStatuses(current);
+      saveReturnPlan(this.db, current);
+      const line = current.lines[i]!;
+      if (line.status === "confirmed") continue;
+      if (line.status === "conflicted" || line.status === "stopped_version_conflict") break;
+
+      const row = this.readReturnCommandRow(line.commandId);
+      if (row) {
+        if (row.local_state === "failed_permanent") {
+          // Terminal for this line; later lines must not submit against it.
+          break;
+        }
+        // queued / dispatching / attachment_pending / failed_retryable: one
+        // production dispatch pass, then re-read. No local loop — the outbox
+        // owns leases and backoff.
+        await this.driveReturnConfirmation();
+        this.assertLive("write");
+        current = this.reconcileReturnPlanStatuses(current);
+        saveReturnPlan(this.db, current);
+        const after = current.lines[i]!;
+        if (after.status === "confirmed") continue;
+        if (after.status === "conflicted" || after.status === "stopped_version_conflict") break;
+        if (after.status === "failed") break; // still failed_retryable / now failed_permanent, lastError from row
+        after.status = "awaiting_confirmation"; // lease held elsewhere or offline
+        saveReturnPlan(this.db, current);
+        break;
+      }
+
+      // No row: the command was never persisted (queue failure before the
+      // outbox write). Submit it once under its planned commandId.
+      if (line.status !== "pending_submit") {
+        line.status = "pending_submit";
+        line.lastError = null;
+        line.lastErrorCode = null;
+      }
+      const priorBlocking = current.lines.slice(0, i).some(
+        (prior) =>
+          prior.status !== "confirmed" &&
+          prior.status !== "conflicted" &&
+          prior.status !== "stopped_version_conflict"
+      );
+      if (priorBlocking) break;
+      try {
+        this.dispatchReturn({
+          receiptId: current.receiptId,
+          reason: current.reason,
+          lineId: line.lineId,
+          returnQty: line.returnQty,
+          commandId: line.commandId,
+        });
+        line.status = "queued";
+        line.lastError = null;
+        saveReturnPlan(this.db, current);
+      } catch (caught) {
+        const message = caught instanceof Error ? caught.message : "return_queue_failed";
+        if (message === GRIN_SESSION_RETIRED || message === "owner_mismatch") throw caught;
+        if (message === GRIN_NO_CONFIRMED_VERSION || /version/i.test(message)) {
+          line.status = "stopped_version_conflict";
+          line.lastError = message;
+          saveReturnPlan(this.db, current);
+          break;
+        }
+        line.status = "failed";
+        line.lastError = message;
+        saveReturnPlan(this.db, current);
+        break;
+      }
+      await this.driveReturnConfirmation();
+      this.assertLive("write");
+      current = this.reconcileReturnPlanStatuses(current);
+      saveReturnPlan(this.db, current);
+      const after = current.lines[i]!;
+      if (after.status === "confirmed") continue;
+      if (after.status === "conflicted" || after.status === "stopped_version_conflict") break;
+      if (after.status === "failed") break; // server answered retryable/permanent; row keeps the code
+      after.status = "awaiting_confirmation";
+      saveReturnPlan(this.db, current);
+      break;
+    }
+    current = this.reconcileReturnPlanStatuses(current);
+    saveReturnPlan(this.db, current);
+    return current;
+  }
+
+  getReturnPlan(receiptId: string): GrinReturnPlan | null {
+    this.assertLive("read");
+    const plan = loadReturnPlan(this.db, this.ownerUid, this.ledgerId, receiptId.trim());
+    if (!plan) return null;
+    return this.reconcileReturnPlanStatuses(plan);
+  }
+
+  /** Confirmed projection for display/eligibility — null when unconfirmed. */
+  confirmedProjection(receiptId: string): GrinConfirmedProjection | null {
+    this.assertLive("read");
+    return this.readConfirmedProjection(receiptId.trim());
+  }
+
+  returnEligibility(receiptId: string): ReturnType<typeof returnEligibilityForRecord> {
+    this.assertLive("read");
+    return returnEligibilityForRecord(this.get(receiptId), this.readConfirmedProjection(receiptId));
+  }
+
+  private readReturnCommandRow(commandId: string): { local_state: string; last_error_code: string | null } | null {
+    return (
+      this.db.getFirstSync<{ local_state: string; last_error_code: string | null }>(
+        `SELECT local_state, last_error_code FROM grin_outbox_commands
+          WHERE owner_uid = ? AND ledger_id = ? AND command_id = ?`,
+        [this.ownerUid, this.ledgerId, commandId]
+      ) ?? null
+    );
+  }
+
+  /**
+   * Plan line status follows the persisted outbox row. `lastError` carries the
+   * failure class (`failed_retryable` vs `failed_permanent`), `lastErrorCode`
+   * the row's error code, so the screen can distinguish retryable from permanent.
+   */
+  private reconcileReturnPlanStatuses(plan: GrinReturnPlan): GrinReturnPlan {
+    const nextLines = plan.lines.map((line) => {
+      let status: GrinReturnLineStatus = line.status;
+      let lastError = line.lastError;
+      let lastErrorCode = line.lastErrorCode ?? null;
+      const row = this.readReturnCommandRow(line.commandId);
+      if (row?.local_state === "issued") {
+        status = "confirmed";
+        lastError = null;
+        lastErrorCode = null;
+      } else if (row?.local_state === "conflicted") {
+        status = "conflicted";
+        lastErrorCode = row.last_error_code;
+      } else if (row?.local_state === "failed_permanent" || row?.local_state === "failed_retryable") {
+        status = "failed";
+        lastError = row.local_state;
+        lastErrorCode = row.last_error_code;
+      } else if (
+        row?.local_state === "queued" ||
+        row?.local_state === "dispatching" ||
+        row?.local_state === "attachment_pending"
+      ) {
+        status = status === "awaiting_confirmation" ? "awaiting_confirmation" : "queued";
+      }
+      return { ...line, status, lastError, lastErrorCode };
+    });
+    return { ...plan, lines: nextLines, updatedAtUtc: new Date().toISOString() };
   }
 
   recordEwbObservation(input: GrinEwbObservationInput): GrinApplicationRecord {

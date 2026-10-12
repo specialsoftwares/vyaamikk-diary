@@ -811,6 +811,21 @@ async function testHtmlEmailDownloadRenderer(): Promise<void> {
   assert.doesNotMatch(html, /you are entitled to ITC/i);
   assert.doesNotMatch(html, /eligible for input tax credit automatically/i);
 
+  // Buyer-supplied text (legal name / address lines) is user input that reaches
+  // the Chromium renderer; it must arrive HTML-escaped (synthetic fixture).
+  const hostile = '<img src=x onerror="alert(1)">Corp "quoted" & <b>bold</b>';
+  const hostileHtml = buildSubscriptionTaxDocumentHtml({
+    ...inv,
+    buyer: {
+      ...inv.buyer,
+      legalName: hostile,
+      addressLines: [hostile, ...(inv.buyer.addressLines ?? [])],
+    },
+  });
+  assert.doesNotMatch(hostileHtml, /<img src=x/);
+  assert.doesNotMatch(hostileHtml, /<b>bold<\/b>/);
+  assert.match(hostileHtml, /&lt;img src=x onerror=&quot;alert\(1\)&quot;&gt;Corp &quot;quoted&quot; &amp; &lt;b&gt;bold&lt;\/b&gt;/);
+
   assert.equal(authoritativeVerifiedEmail({ emailStatus: "pending", normalizedEmail: "a@b.c" }), null);
   const skip = await sendInvoiceEmail({
     provider: fakeEmail(),

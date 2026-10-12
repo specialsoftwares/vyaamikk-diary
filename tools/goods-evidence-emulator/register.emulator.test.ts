@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import { freezeCommand } from "../../src/goodsEvidence/command";
 import { sampleRegisterBody } from "../../src/goodsEvidence/testFixtures";
+import { registerBodyError } from "../../functions/src/goodsEvidence/validate";
 import { financialYearTokenForIstInstant } from "../../src/goodsEvidence/time";
 import { GoodsEvidenceRegisterAdapter, isRetryable } from "./adapter";
 import {
@@ -422,6 +423,54 @@ async function main(): Promise<void> {
       assert.equal(crossRec.code, "forbidden");
       assert.equal(crossMissing.code, "forbidden");
     }
+  }
+
+  // Old clients omit reportedArrivalPrecision. New clients send unknown + date.
+  // Both must commit. 540e07a rejects the new payload; this source must not.
+  {
+    const oldProvenances = ["online", "offline", "late_entry"] as const;
+    for (const provenance of oldProvenances) {
+      const oldBody = sampleRegisterBody({
+        receiptId: `receipt_old_${provenance}`,
+        captureProvenance: provenance,
+      });
+      delete (oldBody as { reportedArrivalPrecision?: unknown }).reportedArrivalPrecision;
+      assert.equal(registerBodyError(oldBody), null);
+    }
+    await seedOwner(db, "owner_old_client", "ledger_old_client");
+    const oldAdapter = new GoodsEvidenceRegisterAdapter(fs, fixedClock(NOW));
+    const oldBody = sampleRegisterBody({
+      receiptId: "receipt_old_client",
+      captureProvenance: "late_entry",
+    });
+    delete (oldBody as { reportedArrivalPrecision?: unknown }).reportedArrivalPrecision;
+    const oldResult = await oldAdapter.register(
+      { uid: "owner_old_client" },
+      envelope("command_old_client", oldBody, "owner_old_client", "ledger_old_client")
+    );
+    assert.equal(oldResult.ok, true);
+    const oldSnap = await db.doc(receiptPath("owner_old_client", "ledger_old_client", "receipt_old_client")).get();
+    assert.equal(oldSnap.get("original.captureProvenance"), "late_entry");
+    assert.equal(oldSnap.get("original.reportedArrivalPrecision"), undefined);
+
+    const newBody = sampleRegisterBody({
+      receiptId: "receipt_new_client",
+      captureProvenance: "unknown",
+      reportedArrivalAt: "2026-09-28",
+      reportedArrivalPrecision: "date",
+    });
+    assert.equal(registerBodyError(newBody), null);
+    await seedOwner(db, "owner_new_client", "ledger_new_client");
+    const newAdapter = new GoodsEvidenceRegisterAdapter(fs, fixedClock(NOW));
+    const newResult = await newAdapter.register(
+      { uid: "owner_new_client" },
+      envelope("command_new_client", newBody, "owner_new_client", "ledger_new_client")
+    );
+    assert.equal(newResult.ok, true);
+    const newSnap = await db.doc(receiptPath("owner_new_client", "ledger_new_client", "receipt_new_client")).get();
+    assert.equal(newSnap.get("original.captureProvenance"), "unknown");
+    assert.equal(newSnap.get("original.reportedArrivalPrecision"), "date");
+    assert.equal(newSnap.get("original.reportedArrivalAt"), "2026-09-28");
   }
 
   console.log("tools/goods-evidence-emulator/register.emulator.test.ts: ok");

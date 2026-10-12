@@ -1,4 +1,4 @@
-import { escapeHtml } from "@/utils/escapeHtml";
+import { escapeHtml, escapeHtmlAttr } from "@/utils/escapeHtml";
 import type { UserPdfBranding } from "./userPdfBranding";
 import { formatPdfDate, formatPdfDateTime } from "./pdfDate";
 
@@ -59,7 +59,7 @@ export function pdfIssuerBlock(input: PdfIssuerInput): string {
   const { branding, issuerLabel = "Issued by", showUeid = false } = input;
   const logo =
     branding.includeLogo && branding.logoDataUri
-      ? `<img class="pdf-issuer-logo" src="${branding.logoDataUri}" alt=""/>`
+      ? `<img class="pdf-issuer-logo" src="${escapeHtmlAttr(branding.logoDataUri)}" alt=""/>`
       : "";
 
   const name = branding.displayName?.trim() || null;

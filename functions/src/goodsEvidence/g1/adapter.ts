@@ -746,6 +746,9 @@ export class GoodsEvidenceRegisterAdapter {
       capturedAtClientUtc: body.capturedAtClientUtc,
       reportedArrivalAt: body.reportedArrivalAt,
       reportedArrivalTimeZone: body.reportedArrivalTimeZone,
+      ...(body.reportedArrivalPrecision != null
+        ? { reportedArrivalPrecision: body.reportedArrivalPrecision }
+        : {}),
       serverRegisteredAtUtc,
       originalSnapshotHash: null,
     };

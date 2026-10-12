@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 
 import type { GrinDispatchSession } from "@/services/grin/outbox/types";
 import { requireOriginGrinApplicationRepository } from "@/services/grin/repository";
@@ -60,4 +60,39 @@ export function useFrozenGrinOrigin(session: GrinDispatchSession): GrinDispatchS
 
 export function originRepo(origin: GrinDispatchSession) {
   return requireOriginGrinApplicationRepository(origin);
+}
+
+/**
+ * Mount and origin fences for callbacks that outlive a screen.
+ * `isMounted` is false after unmount, so a retired form cannot paint or
+ * navigate the screen that replaced it. `isOriginCurrent` rechecks the
+ * frozen uid and dispatch generation against the live session.
+ */
+export function useGrinScreenLifetime(origin: GrinDispatchSession): {
+  isMounted: () => boolean;
+  isOriginCurrent: () => boolean;
+} {
+  const alive = useRef(true);
+  const originRef = useRef(origin);
+  originRef.current = origin;
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+  return useMemo(
+    () => ({
+      isMounted: () => alive.current,
+      isOriginCurrent: () => {
+        try {
+          originRepo(originRef.current);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+    }),
+    []
+  );
 }

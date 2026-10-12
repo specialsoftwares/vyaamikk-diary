@@ -6,6 +6,7 @@ import {
   outwardHasItemPayload,
   outwardMovementPdfTitle,
 } from "@/utils/businessEntry/outwardMovement";
+import { escapeHtml } from "@/utils/escapeHtml";
 import { formatPostalLocationLine } from "@/utils/location/postalDisplay";
 import { parseIndianPostalFromStored } from "@/utils/location/postalForm";
 import { formatPdfDate } from "./pdfDate";
@@ -138,7 +139,8 @@ function buildOutwardMovementBody(p: Record<string, unknown>, entryDate: number,
 
   return (
     pdfKeyFactsBlock("Key details", keyFacts) +
-    (route ? `<div class="pdf-route-line">${route}</div>` : "") +
+    // Route is user-typed location text (legacy dispatchLocation/destination) — escape it.
+    (route ? `<div class="pdf-route-line">${escapeHtml(route)}</div>` : "") +
     pdfSection("Movement", movementRows) +
     pdfSection("Goods", itemRows) +
     pdfSection("Transport", transportRows)

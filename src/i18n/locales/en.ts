@@ -817,12 +817,17 @@ const en = {
       materialMovementSub: "Dispatch, receipt, transport and freight records",
       movementSentTransport: "Goods sent / transport update",
       movementSentTransportSub: "Dispatch, LR/GR, vehicle, freight and delivery details",
-      movementReceived: "Goods received",
-      movementReceivedSub: "Incoming stock or raw material",
+      movementReceived: "Goods received (basic)",
+      movementReceivedSub: "Quick note of what arrived — without a GRIN number or full inspection.",
       movementReturn: "Return / replacement",
-      movementReturnSub: "Goods sent back or replaced",
+      movementReturnSub: "Record goods sent back or replaced.",
+      movementReturnGrinSub:
+        "Select a goods receipt from your account, then choose lines and quantities.",
       paymentRequest: "Payment request",
       paymentRequestSub: "Pending invoice dues",
+      movementGrin: "Goods receipt & inspection",
+      movementGrinSub:
+        "Record received goods, inspection results and supporting documents together.",
     },
     types: {
       legacy: "Earlier entry",

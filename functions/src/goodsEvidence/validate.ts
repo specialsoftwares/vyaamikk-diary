@@ -46,7 +46,13 @@ const ORIGINAL_DISPOSITIONS = new Set<CustodyState>([
 ]);
 
 const QC_STATUSES = new Set<QcStatus>(["accepted", "hold", "partial", "rejected"]);
-const CAPTURE_PROVENANCES = new Set<CaptureProvenance>(["online", "offline", "late_entry"]);
+const CAPTURE_PROVENANCES = new Set<CaptureProvenance>([
+  "online",
+  "offline",
+  "late_entry",
+  "unknown",
+]);
+const ARRIVAL_PRECISIONS = new Set(["unknown", "date", "instant"]);
 const SHORTAGE = new Set(["shortage", "excess", "none", "unknown"]);
 
 export function isAmendableGrinField(key: string): key is AmendableGrinField {
@@ -310,6 +316,40 @@ function captureProvenanceError(value: unknown): string | null {
   return null;
 }
 
+function isValidCalendarYmd(raw: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+  if (!m) return false;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return false;
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d;
+}
+
+function arrivalPrecisionError(body: Record<string, unknown>): string | null {
+  if (!("reportedArrivalPrecision" in body) || body.reportedArrivalPrecision == null) {
+    return null; // legacy dual-read
+  }
+  if (
+    typeof body.reportedArrivalPrecision !== "string" ||
+    !ARRIVAL_PRECISIONS.has(body.reportedArrivalPrecision)
+  ) {
+    return "reportedArrivalPrecision is invalid";
+  }
+  const arrival =
+    typeof body.reportedArrivalAt === "string" ? body.reportedArrivalAt.trim() : "";
+  if (!arrival) return "reportedArrivalAt is required";
+  if (body.reportedArrivalPrecision === "date" && !isValidCalendarYmd(arrival)) {
+    return "reportedArrivalAt date is invalid";
+  }
+  if (body.reportedArrivalPrecision === "instant") {
+    const ms = Date.parse(arrival);
+    if (!Number.isFinite(ms)) return "reportedArrivalAt instant is invalid";
+  }
+  return null;
+}
+
 function originalDispositionError(value: unknown): string | null {
   if (typeof value !== "string" || !ORIGINAL_DISPOSITIONS.has(value as CustodyState)) {
     return "original receipt disposition is invalid";
@@ -404,7 +444,11 @@ export function registerBodyError(body: unknown): string | null {
   if (typeof body.clientObservedAtUtc !== "string" || !body.clientObservedAtUtc.trim()) {
     return "clientObservedAtUtc is required";
   }
-  return captureProvenanceError(body.captureProvenance) ?? domainFieldsError(body as unknown as RegisterGoodsReceiptBody);
+  return (
+    captureProvenanceError(body.captureProvenance) ??
+    arrivalPrecisionError(body) ??
+    domainFieldsError(body as unknown as RegisterGoodsReceiptBody)
+  );
 }
 
 export function effectiveRecordError(grin: ImmutableGrin): string | null {

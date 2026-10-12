@@ -52,6 +52,12 @@ export function setCrashReportingEnabled(enabled: boolean): void {
     const client = getCrashlytics();
     if (!client) return;
     void client.setCrashlyticsCollectionEnabled(enabled).catch(() => {});
+    // Opt-out must also drop the pseudonymous user id (uid prefix) so a
+    // later re-enable or native restart cannot resend it. The consent
+    // toggle and decline paths call only this function, not clearUser().
+    if (!enabled) {
+      void Promise.resolve(client.setUserId("")).catch(() => {});
+    }
   } catch {
     // Never throw from the crash reporter.
   }

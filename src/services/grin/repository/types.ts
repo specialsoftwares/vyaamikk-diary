@@ -166,6 +166,16 @@ export type GrinReturnInput = {
   reason: string;
   lineId: string;
   returnQty: Quantity;
+  /** Stable identity for retries — never rewrite a frozen command's digest. */
+  commandId?: string;
+};
+
+export type GrinReturnSequenceInput = {
+  receiptId: string;
+  reason: string;
+  /** One user submission. A later return against the same receipt uses a new id. */
+  intentId: string;
+  lines: Array<{ lineId: string; returnQty: Quantity }>;
 };
 
 export type GrinEwbObservationInput = {

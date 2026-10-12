@@ -167,9 +167,16 @@ function GrinDetailAdmittedBody({ session }: { session: GrinDispatchSession }): 
             <GrinFieldRow label={t("grin.field.registrationTime")} value={grin.serverRegisteredAtUtc ?? t("grin.pdf.pendingNumber")} />
             <GrinFieldRow
               label={t("grin.field.reportedArrival")}
-              value={`${grin.reportedArrivalAt} (${grin.reportedArrivalTimeZone})`}
+              value={
+                grin.reportedArrivalPrecision === "unknown"
+                  ? t("grin.arrival.notRecorded")
+                  : grin.reportedArrivalPrecision === "date"
+                    ? `${grin.reportedArrivalAt} (${grin.reportedArrivalTimeZone}, date only)`
+                    : `${grin.reportedArrivalAt} (${grin.reportedArrivalTimeZone})`
+              }
             />
             <GrinFieldRow label={t("grin.field.capture")} value={captureLabel(grin.captureProvenance, t)} />
+            <GrinFieldRow label={t("grin.field.capturedAt")} value={grin.capturedAtClientUtc} />
           </FormSection>
 
           <FormSection title={t("grin.section.supplier")}>

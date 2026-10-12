@@ -1,0 +1,1 @@
+2026-10-12T13:35Z npm audit --json (read-only) at root, functions/, services/subscription-invoice-renderer/ on a528de015f05fc7e3f2ea777a6a5a3c8434abc7d; node v20.19.4 npm 10.8.2

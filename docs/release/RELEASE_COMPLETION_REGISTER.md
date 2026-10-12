@@ -12,11 +12,137 @@ TOOLING (ops-guard suite; not application CI).
 
 ---
 
-## Current state (authoritative — 2026-10-07 B2 vc24 Internal)
+## Work board — CLOSED 2026-10-13 (no further security or architecture review)
+
+Closed against CI-tested source `c8cdbc55933864e474cef4593bc522ca8570af7a`. Docs tip `da4b004` only records that run. Agent 5 stopped at its model limit. The coordinator ran the flipped QA tests. That is coordinator review, not an independent QA pass.
+
+| Stream | Disposition |
+|---|---|
+| A1 GRIN form / return | **Completed and integrated.** Completed-form lock, existing-command retry, account-switch unmount, and confirmed-balance refresh are in `c8cdbc5`. Device TalkBack and a live multi-line return remain **device/live pending**. |
+| A2 files / uploads / documents | **Completed and integrated** for PDF escaping, ZIP names/hashes, and renderer JavaScript. Letterhead gallery, scanner, and Print on a phone are **device pending**. Storage-object retention after record deletion was a policy choice, not a code fix. |
+| A3 session / logging / SDK | **Completed and integrated** for clearing the Crashlytics user id on opt-out. App Check stays uninitialized on purpose. Live App Check enforcement is **not applicable** until a separate decision. |
+| A4 dependencies / Android | **Functions query-parser refresh is integrated** on `53cfe41` (express 4.22.3, body-parser 1.20.8, qs 6.16.0, side-channel 1.1.1). Canonical CI **`38294284394` SUCCESS** / verify **`114961527836`**. Other advisories were not refreshed and are not called harmless. PreviewActivity removal is still source-only until the next AAB. Installed Internal remains `7c938f8` / vc24. |
+| A5 QA | **Not an independent QA pass.** Coordinator review only. |
+
+Historical assignment table (unchanged as the record of who owned what):
+
+## Work board — 2026-10-12 parallel execution (historical)
+
+Coordinator: this session, worktree `grin-combined` (`feature/unified-material-movement-aso`). Only the coordinator integrates into the candidate and edits `package.json`, lockfiles, `app.json`, `eas.json`, plugins, workflows and this register. Base for all agent worktrees: **`a528de015f05fc7e3f2ea777a6a5a3c8434abc7d`** (application source `a67e716`; CI `38232385275` on `4aea1b3`).
+
+| Assignment / agent | Worktree · branch | Owned files | Finding → reproduction → correction | Dependencies / evidence | Integration |
+|---|---|---|---|---|---|
+| A1 PR #33 completed-form | `sec-a1-pr33-form` · `fix/pr33-completed-form` | `src/screens/grin/**`, `src/services/grin/repository/**`, `tools/grin-interop/**`, `grin.*` locale keys | Completed create/return stayed closed until an explicit new intent (`07acd92`, `8c3c8a8`). Remaining gaps closed on this candidate: account switch must hide the previous form, and a new return must reload the confirmed balance | Joined host test `grinUiLifecycle.mount.test.ts` (SQLITE_HOST + INJECTED + MOUNTED_INERT). Completed-form, retry, lost-response, multi-line, and owner-isolation regressions rerun locally | INTEGRATED. Coordinator review only. Not an A5 sign-off |
+| A2 files / uploads / documents | `sec-a2-files` · `security/files-uploads-documents` | `src/services/letterhead/**`, `storage/**`, `pdf/**`, `share/**`, `src/utils/share.ts`, `src/services/grin/export/**`, renderer | PDF escaping, ZIP entry names and supplied-byte hash, renderer JS disabled. Not reopened | Host fixture tests already on `4bf36e6` | INTEGRATED. No new reproduction |
+| A3 session / logging / SDK | `sec-a3-session-logging` · `security/session-logging-sdk` | `src/utils/logger.ts`, `safeDiagnostics.ts`, `src/services/telemetry/**`, `src/services/appCheck/**`, auth flows | Crashlytics user id cleared on opt-out. App Check stays uninitialized. Not reopened | Sentinel privacy test on `4bf36e6` | INTEGRATED. No new reproduction |
+| A4 deps / Android / links | `sec-a4-deps-android` · `security/deps-android-links` | plugins, advisory triage | PreviewActivity removal plugin is registered for the next build (CONFIG_PLUGIN_SOURCE). Lockfile refreshes were not applied. Not reopened | `test:android-manifest-hardening` on `4bf36e6`. Installed Internal AAB is still `7c938f8` / vc24 | INTEGRATED as source. Merged-manifest proof waits for the next AAB |
+| A5 independent QA | `sec-a5-qa` · `qa/pr33-security-review` | `tools/qa/**` only | Agent 5 stopped at its model limit while reviewing. That is not an independent QA pass. The coordinator ran the flipped completed-form and retry-wedge tests and wired them into `test:grin-interop` | Those tests passed again on this candidate with the UI lifecycle corrections | NOT A QA PASS |
+
+Integration rule: small dependency-ordered batches onto the candidate; affected suites rerun on the integrated tree; canonical `ci:verify` on the final application candidate. Separate green worktrees are not proof of the combined tree.
+
+## Current state (authoritative — 2026-10-13 executable packet)
+
+Executable steps, hashes, rollback limits, and the owner payment list are in
+`docs/release/packets/EXECUTABLE_INTERNAL_RELEASE_2026-10-13.md`.
 
 | Item | Current value |
 |---|---|
-| Repo / branch / PR | `specialsoftwares/vyaamikk-diary` `integration/grin-g1-g5-source` draft **#31** |
+| **Dependency source** | **`53cfe412d7c62aaf6b5bfe379f6cc39cfeeed631`**. Lockfile sha256 `f5ebda2224b089915161f89192516011d4d9f03d200308f2c553c59adb11228d`. Prepared Functions tree content sha256 `9d1f7a7b057814618b5f376995897affd162160dfb57de9c72e08c46f5481be2`. Platform archive **PENDING** (no deploy). |
+| **Canonical CI** | Run **`38294284394` SUCCESS**, verify **`114961527836`** (20m15s), on **`53cfe41`**. Prior SUCCESS **`38269047797`** / verify **`114878446537`** remains on **`c8cdbc5`** only. |
+| **Merge operation, not performed** | PR **#33** head into **`integration/grin-g1-g5-source`** (`1be1daed`). Not `main`. Not `c8cdbc5` alone. The head at this writing is `53cfe41`; a later docs commit on the same pull request is included only if it is the head at approval time. |
+| **Live Functions inspect** | **NOT RUN** today. Firebase credentials need `firebase login --reauth`. Do not treat the seven functions as absent. |
+| **Rollback** | `540e07a` is not a compatible rollback after clients that send `unknown` provenance are installed. Safe disablement is PATCH `GRIN_GOODS_EVIDENCE_FUNCTIONS=false` on the seven names. Do not delete queued commands or originals. |
+| **versionCode** | Source and uploaded Internal remain **24**. Next code **PENDING** a fresh Play inventory. |
+| **Billing** | Next Internal build stays billing-off. Console catalog, license testers, RTDN, and the purchase flow were **NOT RUN**. |
+
+## Prior current state (2026-10-12 PR #33 UI lifecycle)
+
+| Item | Current value |
+|---|---|
+| Repo / branch / PR | `specialsoftwares/vyaamikk-diary` · integration base **`integration/grin-g1-g5-source`** · application branch **`feature/unified-material-movement-aso`** · open PR **#33** (**do not merge**) |
+| **Reviewed checkpoint** | **`4bf36e61a29a84e01257f82f1930ddd00b4e53c0`**. GHA **`38260379247` SUCCESS** / verify **`114849062990`**. That run is the parent of the UI lifecycle corrections. Prior SUCCESS **`38232385275`** / verify **`114754746890`** remains on **`4aea1b3`** (application `a67e716`) only. |
+| **Reviewer** | Coordinator. Agent 5 stopped at its model limit and did **not** complete an independent QA pass. |
+| **Account switch** | `GrinAdmissionGate` passes `user.uid` into `GrinAdmittedSessionHost`. The host renders no admitted child while the live token and the sqlite session disagree, so create and return bodies unmount on A→B, on logout, and on the next login. A joined test shows the previous supplier, GSTIN, invoice, material, reason and quantities are not displayed. Old Save, Start new, and completion callbacks do not write, rearm, or navigate. |
+| **New return** | After confirmation, Start new return rechecks the frozen uid and session generation, reloads the record, confirmed projection and eligibility, and mints a new intent only when that projection already contains the confirmed return quantities. Otherwise Save stays closed and a retry is offered. Quantities and the displayed version come from the reloaded projection. |
+| **Local proof (not CI)** | `grinUiLifecycle.mount.test.ts` plus the completed-form flight test, the three `tools/qa` regressions, `f2-multiline-return-sequence`, `f2-multiline-return-transient-retry`, and `grinLocaleKeys` (324 keys × 5). Boundaries: **SQLITE_HOST**, **INJECTED_PORT**, **MOUNTED_INERT**. **NATIVE_DEVICE** not claimed. **FIRESTORE_EMULATOR** not re-run for this correction. |
+| **Candidate SHA** | CI-tested tip **`c8cdbc55933864e474cef4593bc522ca8570af7a`** (UI lifecycle **`340dfee`** plus the `mutate` type narrowing). A later docs commit only records this run id. |
+| **Combined-tree CI** | GHA **`38269047797` SUCCESS** / verify **`114878446537`** on **`c8cdbc5`**. Parent **`38260379247` SUCCESS** / verify **`114849062990`** on **`4bf36e6`**. GHA **`38268460136`** / verify **`114876528044`** FAILED on **`340dfee`** (`tsc` on optional `server.mutate`) and is not the candidate. |
+| **Security** | Accepted file, telemetry, and Android-plugin corrections stay as integrated on `4bf36e6`. Not reopened. Lockfile refresh, FileProvider merged-manifest proof, App Check enforcement, and Storage object retention remain out of scope. |
+| **Backend compatibility dependency** | Unchanged and **not deployed.** Live Functions will reject `captureProvenance: "unknown"` until redeployed. |
+| **Device pending** | Native Expo upload, ML Kit scanner, expo-print; MM create/return TalkBack; multi-line return confirmation on device; Play upgrade path. Host reopen is not process-death proof. The PreviewActivity plugin is source-only until the next AAB is dumped. |
+| **Play / EAS artifact (unchanged)** | Installed/uploaded Internal remains **`7c938f8` / vc24** · EAS **`c931da3d-…`** — **this source candidate is not that AAB** |
+| HOLDs | No main merge, PR **#33** merge, billing, purge, Functions deploy, EAS/OTA, Play writes, website publish. |
+
+### UI lifecycle evidence (local, on top of `4bf36e6`)
+
+| Finding | Before | After |
+|---|---|---|
+| Account switch | Zero writes were proved. The completed-form early return skipped the session check, so a body that stayed mounted kept private fields on screen. | `GrinAdmittedSessionHost` renders no admitted child while the live token and sqlite session disagree, so the production create and return bodies unmount. Joined test: completed create A→B, completed resumed return A→B, logout then a new generation, and a return response that arrives after the switch. Previous supplier, GSTIN, invoice, material, reason and quantities are absent. Old Save, Start new, and completion callbacks add no commands and do not navigate. `grinUiLifecycle.mount.test.ts` |
+| New return balance | Start new return cleared the form without reloading the confirmed projection, so the next return could still show the pre-return available quantity. | Start new return reloads the authorized record, projection and eligibility. Receive 10, confirm a return of 4, stay mounted, start another return: display 6 remaining, empty reason and quantity, confirmed version 2. The second return uses a new command id. A projection that does not yet contain the return keeps Save closed and offers a retry. |
+
+## Prior (authoritative — 2026-10-12 PR #33 final functional corrections)
+
+| Item | Current value |
+|---|---|
+| Repo / branch / PR | `specialsoftwares/vyaamikk-diary` · integration base **`integration/grin-g1-g5-source`** · application branch **`feature/unified-material-movement-aso`** · open PR **#33** (**do not merge**) |
+| **Candidate SHA** | CI-tested tip **`4aea1b30e1400b84bc2830dc891d46c5528506f2`** (register on application **`a67e7169e1238e0d68e699a7a99c809e2caafc29`**). Parent docs tip **`238712e`**. A later docs commit only records the run id and does not change application source. Prior CI-tested application **`cb854f71e8ca1873fcddd231317bfd9a137729f1`** remains the reviewed base for arrival/provenance, eligibility, quota, ownership, and letterhead. |
+| **Submission lock** | Duplicate prevention is one submission intent plus owner, ledger, and session generation. A completed intent stays completed. The next receipt or return mints a new intent after the current turn (`queueMicrotask`), not on every rerender. |
+| **Multi-line return** | `dispatchReturnSequence` calls `outbox.dispatchDue` between lines. No test-supplied drain. The next line uses the confirmed `eventVersion`. Versions are never invented locally. `continueReturnPlan` resumes a saved plan after reopen. |
+| **Interrupted return** | Reopen restores reason, selected quantities, and per-line status. A quantity edit does not replace a submitted `commandId`. Unfinished lines omitted from a new pick stay in the plan. A different intent while a plan is uncertain throws `return_intent_open`. |
+| **Local proof (not CI)** | `npm run test:grin-product` and `npm run test:grin-interop` passed on `a67e716`. Boundaries: **SQLITE_HOST**, **INJECTED_PORT**, **MOUNTED_INERT**. **NATIVE_DEVICE** not claimed. |
+| **Emulator proof (local)** | `f2-multiline-return.firestoreEmulator.test.ts` via `GoodsEvidenceRegisterAdapter` + SQLite/outbox + production `dispatchReturnSequence` (lost response reconciled, then the second line, then a later intent). Label **FIRESTORE_EMULATOR** + **SQLITE_HOST**. Hooked into `test:goods-evidence-g1-emulator`. Not **NATIVE_DEVICE**. |
+| **Combined-tree CI** | GHA **`38232385275` SUCCESS** / verify **`114754746890`** on **`4aea1b30e1400b84bc2830dc891d46c5528506f2`** (workflow_dispatch). Application **`a67e716`**. Prior SUCCESS **`37739285157`** / verify **`113186002492`** remains on **`cb854f7`** only. |
+| **Backend compatibility dependency** | Unchanged and **not deployed.** Packaged Functions accept `captureProvenance: "unknown"` and optional `reportedArrivalPrecision`. Live Functions will reject `unknown` provenance until redeployed. |
+| **Device pending** | Native Expo upload, ML Kit scanner, expo-print; MM create/return TalkBack; multi-line return confirmation on device; Play upgrade path. Host reopen is not process-death proof. |
+| **Play / EAS artifact (unchanged)** | Installed/uploaded Internal remains **`7c938f8` / vc24** · EAS **`c931da3d-…`** — **this source candidate is not that AAB** |
+| HOLDs | No main merge, PR **#33** merge, billing, purge, Functions deploy, EAS/OTA, Play writes, website publish. |
+
+### PR #33 final correction evidence (local, `a67e716`)
+
+| Finding | Proof |
+|---|---|
+| 1 Submission-lock lifecycle | Mounted create: immediate double-submit writes one command; the next intent writes a second; the completed callback does not; an old callback after account change writes nothing. `grinReturnCreate.flight.mount.test.ts` |
+| 2 Production multi-line confirmation | One `dispatchReturnSequence` confirms two lines through the repository's own `dispatchDue`. SQLite/INJECTED: `f2-multiline-return-sequence.sqliteHost.test.ts`. Firestore emulator adapter: `f2-multiline-return.firestoreEmulator.test.ts` |
+| 3 Interrupted return | Reopen restores reason and quantities on the mounted return screen. Resume keeps `commandId`s. Quantity edit sets `quantity_edit_blocked` and keeps the frozen quantity. Omitted unfinished lines remain. Lost response reconciles to `issued` and the next line continues. A later intent can return against the same receipt. |
+
+## Prior (authoritative — 2026-10-08 PR #33 functional corrections)
+
+| Item | Current value |
+|---|---|
+| Repo / branch / PR | `specialsoftwares/vyaamikk-diary` · integration base **`integration/grin-g1-g5-source`** · application branch **`feature/unified-material-movement-aso`** · open PR **#33** |
+| **Candidate SHA** | Tip **`77ae4a9`** (register) · CI-tested application **`cb854f71e8ca1873fcddd231317bfd9a137729f1`** (packaging fix on **`3d19d7f`**) · docs clarification **`238712e`** |
+| **Reviewed application base** | **`56837f17fb7d4354120282841fbcd6faf71c1bf5`** (prior combined-tree CI **`37699830269`**) · prior docs head **`c708649`** |
+| **Included source** | Letterhead repair preserved + MM corrections: durable multi-line return sequence (queue≠confirm; confirmed.eventVersion refresh; stable commandIds; partial retry); sync create/return flight; truthful arrival precision + `CaptureProvenance.unknown`; return eligibility/summary; client-flag≠backend-admission claims |
+| **Letterhead merge parents** | `1f302b9` + `b274fe8` → merge **`1be1daedc67f4ef59f579a92c1b7262d1af5904c`** |
+| **Letterhead CI-tested SHA** | **`eccc783`** · GHA **`37693886315`** / verify **`113040537404`** SUCCESS (branch only — not combined-tree proof) |
+| **Combined-tree CI** | GHA **`37739285157` SUCCESS** / verify **`113186002492`** on tip **`cb854f7`** (workflow_dispatch). Prior SUCCESS **`37699830269`** covers review base **`56837f1`** only. |
+| **Backend compatibility dependency** | Source+packaged Functions accept `captureProvenance: "unknown"` and optional `reportedArrivalPrecision` (`unknown`\|`date`\|`instant`; date stores YYYY-MM-DD). **Not deployed.** Existing live backend will reject `unknown` provenance until Functions are redeployed. Do not claim live backend already supports it. |
+| **Device pending** | Native Expo upload, ML Kit scanner, expo-print; MM create/return TalkBack; multi-line return confirmation UX on device; Play upgrade path |
+| **Play / EAS artifact (unchanged)** | Installed/uploaded Internal remains **`7c938f8` / vc24** · EAS **`c931da3d-…`** — **this source candidate is not that AAB** |
+| HOLDs | No main merge, PR **#33** merge, billing, purge, Functions deploy, EAS/OTA, Play writes, website publish from this instruction. |
+
+### PR #33 correction evidence (local)
+
+| Finding | Before | After / proof |
+|---|---|---|
+| 1 Multi-line returns | Sync loop froze one `expectedVersion`; “ok” meant queued | `dispatchReturnSequence` + `grinReturnPlan`; confirm-between-lines via drain; `f2-multiline-return-sequence.sqliteHost.test.ts` |
+| 2 Partial retry / duplicates | Retry re-queued L1; React busy only | Stable `commandId`s; sync `grinMutationFlight`; flight mount + interop partial retry asserts write counts |
+| 3 Arrival / provenance | Noon IST fiction; invalid dates; offline default | Calendar validation; `reportedArrivalPrecision`; `captureProvenance: unknown`; Functions copies updated (**deploy pending**) |
+| 4 Return summary / eligibility | Combined pendingOrReturned; auto-reselect; empty+error | Separated confirmed/pending/available; eligibility API; selection retention; localized statuses |
+| 5 Claims / coverage | Flag≡admission wording | Destinations comments/tests; mounted+joined coverage; letterhead tests preserved |
+
+## Prior (authoritative — 2026-10-08 source candidate after Letterhead merge)
+
+| Item | Current value |
+|---|---|
+| Combined-tree CI on review base | GHA **`37699830269` SUCCESS** / verify **`113060362670`** on **`56837f1`** · docs **`c708649`** |
+| Backend note (superseded for unknown/precision) | ArrivalObservation / unknown provenance were deferred; now implemented in source with deploy dependency above. |
+
+## Prior pin (authoritative — 2026-10-07 B2 vc24 Internal) — artifact identity only
+
+| Item | Current value |
+|---|---|
+| Repo / branch / PR | `specialsoftwares/vyaamikk-diary` `integration/grin-g1-g5-source` draft **#31** (historical pin context) |
 | **Play Internal Active** | **`7c938f8` / vc24** — release **24 (1.0.0)** Available to internal testers · Released **7 Oct 20:30** · Not reviewed. GRIN Functions previously deployed/enabled — this upload did **not** redeploy them. |
 | **B1 application SHA** | **`7c938f836891411752e6fa6af8879ddfe275ab60`** — vc24 + renderer CI `PUPPETEER_SKIP_DOWNLOAD` for separate Node 22 container. Parent `13da527`. NARROW preserved. |
 | **Matching CI (application)** | GHA **`37616692491` SUCCESS** / job **`112776635103`** on **`7c938f8`**. `test:all` 161/161; `ci:verify PASS`; CI log shows `PUPPETEER_SKIP_DOWNLOAD=true`. |

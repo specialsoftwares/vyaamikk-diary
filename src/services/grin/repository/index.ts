@@ -62,4 +62,20 @@ export type {
   GrinLocalHistoryItem,
   GrinQcInput,
   GrinReturnInput,
+  GrinReturnSequenceInput,
 } from "./types";
+export type {
+  GrinReturnLineIntent,
+  GrinReturnLineStatus,
+  GrinReturnPlan,
+} from "./grinReturnPlan";
+export {
+  acquireGrinMutationFlight,
+  grinCreateFlightKey,
+  grinMutationFlightState,
+  grinReturnFlightKey,
+  markGrinMutationFlightCompleted,
+  mintSubmissionIntentId,
+  releaseGrinMutationFlight,
+  resetGrinMutationFlightForTests,
+} from "./grinMutationFlight";
