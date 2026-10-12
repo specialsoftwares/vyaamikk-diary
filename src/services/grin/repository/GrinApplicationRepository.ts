@@ -363,6 +363,16 @@ export class GrinApplicationRepository {
     await this.outbox.dispatchDue(this.session, `grin-return-${this.session.dispatchGeneration}`);
   }
 
+  /**
+   * Advance the plan line by line.
+   *
+   * A line whose commandId already has an outbox row is NEVER rebuilt or
+   * re-queued through dispatchReturn: a rebuilt body would carry a new
+   * clientObservedAtUtc (and possibly a different expectedVersion), i.e. a new
+   * digest, which the outbox rightly refuses (digest conflict). Persisted rows
+   * are driven only through outbox.dispatchDue, which retries failed_retryable
+   * rows itself. dispatchReturn is called only for a line with no row yet.
+   */
   private async advanceReturnPlan(plan: GrinReturnPlan): Promise<GrinReturnPlan> {
     let current = plan;
     for (let i = 0; i < current.lines.length; i += 1) {
@@ -372,7 +382,16 @@ export class GrinApplicationRepository {
       const line = current.lines[i]!;
       if (line.status === "confirmed") continue;
       if (line.status === "conflicted" || line.status === "stopped_version_conflict") break;
-      if (line.status === "queued" || line.status === "awaiting_confirmation") {
+
+      const row = this.readReturnCommandRow(line.commandId);
+      if (row) {
+        if (row.local_state === "failed_permanent") {
+          // Terminal for this line; later lines must not submit against it.
+          break;
+        }
+        // queued / dispatching / attachment_pending / failed_retryable: one
+        // production dispatch pass, then re-read. No local loop — the outbox
+        // owns leases and backoff.
         await this.driveReturnConfirmation();
         this.assertLive("write");
         current = this.reconcileReturnPlanStatuses(current);
@@ -380,15 +399,19 @@ export class GrinApplicationRepository {
         const after = current.lines[i]!;
         if (after.status === "confirmed") continue;
         if (after.status === "conflicted" || after.status === "stopped_version_conflict") break;
-        after.status = "awaiting_confirmation";
+        if (after.status === "failed") break; // still failed_retryable / now failed_permanent, lastError from row
+        after.status = "awaiting_confirmation"; // lease held elsewhere or offline
         saveReturnPlan(this.db, current);
         break;
       }
-      if (line.status === "failed") {
+
+      // No row: the command was never persisted (queue failure before the
+      // outbox write). Submit it once under its planned commandId.
+      if (line.status !== "pending_submit") {
         line.status = "pending_submit";
         line.lastError = null;
+        line.lastErrorCode = null;
       }
-      if (line.status !== "pending_submit") continue;
       const priorBlocking = current.lines.slice(0, i).some(
         (prior) =>
           prior.status !== "confirmed" &&
@@ -428,6 +451,7 @@ export class GrinApplicationRepository {
       const after = current.lines[i]!;
       if (after.status === "confirmed") continue;
       if (after.status === "conflicted" || after.status === "stopped_version_conflict") break;
+      if (after.status === "failed") break; // server answered retryable/permanent; row keeps the code
       after.status = "awaiting_confirmation";
       saveReturnPlan(this.db, current);
       break;
@@ -455,23 +479,38 @@ export class GrinApplicationRepository {
     return returnEligibilityForRecord(this.get(receiptId), this.readConfirmedProjection(receiptId));
   }
 
+  private readReturnCommandRow(commandId: string): { local_state: string; last_error_code: string | null } | null {
+    return (
+      this.db.getFirstSync<{ local_state: string; last_error_code: string | null }>(
+        `SELECT local_state, last_error_code FROM grin_outbox_commands
+          WHERE owner_uid = ? AND ledger_id = ? AND command_id = ?`,
+        [this.ownerUid, this.ledgerId, commandId]
+      ) ?? null
+    );
+  }
+
+  /**
+   * Plan line status follows the persisted outbox row. `lastError` carries the
+   * failure class (`failed_retryable` vs `failed_permanent`), `lastErrorCode`
+   * the row's error code, so the screen can distinguish retryable from permanent.
+   */
   private reconcileReturnPlanStatuses(plan: GrinReturnPlan): GrinReturnPlan {
     const nextLines = plan.lines.map((line) => {
       let status: GrinReturnLineStatus = line.status;
       let lastError = line.lastError;
-      const row = this.db.getFirstSync<{ local_state: string }>(
-        `SELECT local_state FROM grin_outbox_commands
-          WHERE owner_uid = ? AND ledger_id = ? AND command_id = ?`,
-        [this.ownerUid, this.ledgerId, line.commandId]
-      );
+      let lastErrorCode = line.lastErrorCode ?? null;
+      const row = this.readReturnCommandRow(line.commandId);
       if (row?.local_state === "issued") {
         status = "confirmed";
         lastError = null;
+        lastErrorCode = null;
       } else if (row?.local_state === "conflicted") {
         status = "conflicted";
+        lastErrorCode = row.last_error_code;
       } else if (row?.local_state === "failed_permanent" || row?.local_state === "failed_retryable") {
         status = "failed";
         lastError = row.local_state;
+        lastErrorCode = row.last_error_code;
       } else if (
         row?.local_state === "queued" ||
         row?.local_state === "dispatching" ||
@@ -479,7 +518,7 @@ export class GrinApplicationRepository {
       ) {
         status = status === "awaiting_confirmation" ? "awaiting_confirmation" : "queued";
       }
-      return { ...line, status, lastError };
+      return { ...line, status, lastError, lastErrorCode };
     });
     return { ...plan, lines: nextLines, updatedAtUtc: new Date().toISOString() };
   }

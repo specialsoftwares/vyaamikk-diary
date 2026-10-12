@@ -56,6 +56,9 @@ type DisabledMap = Map<string, boolean>;
 const RETURN_RECEIPT = "grcp_flight_ret";
 const OWNER = "owner_flight";
 
+/** Swappable router.replace so one scenario can model a navigation failure. */
+let routerReplaceImpl: () => void = () => undefined;
+
 function passthrough(tag: string) {
   return function Surface(props: Record<string, unknown> & { children?: React.ReactNode }) {
     return React.createElement(tag, { "data-surface": tag }, props.children);
@@ -122,7 +125,7 @@ function installInertSurfaces(
       // or failing, so the completed form stays mounted.
       back: () => undefined,
       push: () => undefined,
-      replace: () => undefined,
+      replace: () => routerReplaceImpl(),
     }),
     useLocalSearchParams: <T extends Record<string, string | undefined>>() =>
       ({ receiptId: RETURN_RECEIPT }) as unknown as T,
@@ -224,6 +227,9 @@ async function main(): Promise<void> {
     const createSave = presses.get("grin.saveAction");
     assert.ok(createSave);
     assert.equal(registers(), 0);
+    routerReplaceImpl = () => {
+      throw new Error("navigation_failed");
+    };
 
     // Immediate double-press before rerender.
     await act(() => {
@@ -231,6 +237,9 @@ async function main(): Promise<void> {
       createSave();
     });
     assert.equal(registers(), 1, "sync flight must block immediate duplicate create");
+    assert.equal(banners.includes("grin.errSave"), false, "a queued receipt must not be reported as a save failure when navigation throws");
+    assert.equal(banners.includes("grin.createCompleted"), true, "navigation failure still leaves the form completed");
+    routerReplaceImpl = () => undefined;
 
     // Rerender + microtask on the SAME mount: the re-created Save callback must not submit.
     await act(async () => {

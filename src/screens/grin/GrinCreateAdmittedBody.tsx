@@ -271,7 +271,12 @@ function GrinCreateForm({
       submittedRef.current = true;
       markGrinMutationFlightCompleted(flightKey, flightOwner);
       setSubmitted(true);
-      router.replace({ pathname: "/(app)/grin/[receiptId]", params: { receiptId: saved.receiptId } });
+      try {
+        router.replace({ pathname: "/(app)/grin/[receiptId]", params: { receiptId: saved.receiptId } });
+      } catch {
+        // The receipt IS queued. A navigation failure must not read as a save
+        // failure: stay in the completed state (banner + "Start new receipt").
+      }
     } catch (caught) {
       const mapped = grinMutationErrorMessage(caught, t, "grin.errSave");
       if (mapped.retired) maskRetired();

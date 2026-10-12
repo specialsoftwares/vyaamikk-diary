@@ -28,7 +28,14 @@ export type GrinReturnLineIntent = {
   returnQty: Quantity;
   commandId: string;
   status: GrinReturnLineStatus;
+  /**
+   * Failure class or local error. For a persisted outbox row this is the row's
+   * local_state (`failed_retryable` vs `failed_permanent`) so the screen can tell
+   * retryable from permanent; `quantity_edit_blocked` for a blocked edit.
+   */
   lastError: string | null;
+  /** Server/outbox error code from the outbox row (e.g. `unavailable`), when known. */
+  lastErrorCode?: string | null;
 };
 
 export type GrinReturnPlan = {
