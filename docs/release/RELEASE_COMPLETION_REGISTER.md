@@ -12,12 +12,37 @@ TOOLING (ops-guard suite; not application CI).
 
 ---
 
-## Current state (authoritative — 2026-10-08 PR #33 functional corrections)
+## Current state (authoritative — 2026-10-12 PR #33 final functional corrections)
 
 | Item | Current value |
 |---|---|
-| Repo / branch / PR | `specialsoftwares/vyaamikk-diary` · integration base **`integration/grin-g1-g5-source`** · application branch **`feature/unified-material-movement-aso`** · open PR **#33** (**do not merge** until corrections green) |
-| **Candidate SHA** | Tip **`77ae4a9`** (register) · CI-tested application **`cb854f71e8ca1873fcddd231317bfd9a137729f1`** (packaging fix on **`3d19d7f`**) |
+| Repo / branch / PR | `specialsoftwares/vyaamikk-diary` · integration base **`integration/grin-g1-g5-source`** · application branch **`feature/unified-material-movement-aso`** · open PR **#33** (**do not merge**) |
+| **Candidate SHA** | Application **`a67e7169e1238e0d68e699a7a99c809e2caafc29`** on parent docs tip **`238712e`**. This register commit is the CI candidate; it does not change application source. Prior CI-tested application **`cb854f71e8ca1873fcddd231317bfd9a137729f1`** remains the reviewed base for arrival/provenance, eligibility, quota, ownership, and letterhead. |
+| **Submission lock** | Duplicate prevention is one submission intent plus owner, ledger, and session generation. A completed intent stays completed. The next receipt or return mints a new intent after the current turn (`queueMicrotask`), not on every rerender. |
+| **Multi-line return** | `dispatchReturnSequence` calls `outbox.dispatchDue` between lines. No test-supplied drain. The next line uses the confirmed `eventVersion`. Versions are never invented locally. `continueReturnPlan` resumes a saved plan after reopen. |
+| **Interrupted return** | Reopen restores reason, selected quantities, and per-line status. A quantity edit does not replace a submitted `commandId`. Unfinished lines omitted from a new pick stay in the plan. A different intent while a plan is uncertain throws `return_intent_open`. |
+| **Local proof (not CI)** | `npm run test:grin-product` and `npm run test:grin-interop` passed on `a67e716`. Boundaries: **SQLITE_HOST**, **INJECTED_PORT**, **MOUNTED_INERT**. **NATIVE_DEVICE** not claimed. |
+| **Emulator proof (local)** | `f2-multiline-return.firestoreEmulator.test.ts` via `GoodsEvidenceRegisterAdapter` + SQLite/outbox + production `dispatchReturnSequence` (lost response reconciled, then the second line, then a later intent). Label **FIRESTORE_EMULATOR** + **SQLITE_HOST**. Hooked into `test:goods-evidence-g1-emulator`. Not **NATIVE_DEVICE**. |
+| **Combined-tree CI** | Not yet recorded for `a67e716`. Prior SUCCESS **`37739285157`** / verify **`113186002492`** remains on **`cb854f7`** only. |
+| **Backend compatibility dependency** | Unchanged and **not deployed.** Packaged Functions accept `captureProvenance: "unknown"` and optional `reportedArrivalPrecision`. Live Functions will reject `unknown` provenance until redeployed. |
+| **Device pending** | Native Expo upload, ML Kit scanner, expo-print; MM create/return TalkBack; multi-line return confirmation on device; Play upgrade path. Host reopen is not process-death proof. |
+| **Play / EAS artifact (unchanged)** | Installed/uploaded Internal remains **`7c938f8` / vc24** · EAS **`c931da3d-…`** — **this source candidate is not that AAB** |
+| HOLDs | No main merge, PR **#33** merge, billing, purge, Functions deploy, EAS/OTA, Play writes, website publish. |
+
+### PR #33 final correction evidence (local, `a67e716`)
+
+| Finding | Proof |
+|---|---|
+| 1 Submission-lock lifecycle | Mounted create: immediate double-submit writes one command; the next intent writes a second; the completed callback does not; an old callback after account change writes nothing. `grinReturnCreate.flight.mount.test.ts` |
+| 2 Production multi-line confirmation | One `dispatchReturnSequence` confirms two lines through the repository's own `dispatchDue`. SQLite/INJECTED: `f2-multiline-return-sequence.sqliteHost.test.ts`. Firestore emulator adapter: `f2-multiline-return.firestoreEmulator.test.ts` |
+| 3 Interrupted return | Reopen restores reason and quantities on the mounted return screen. Resume keeps `commandId`s. Quantity edit sets `quantity_edit_blocked` and keeps the frozen quantity. Omitted unfinished lines remain. Lost response reconciles to `issued` and the next line continues. A later intent can return against the same receipt. |
+
+## Prior (authoritative — 2026-10-08 PR #33 functional corrections)
+
+| Item | Current value |
+|---|---|
+| Repo / branch / PR | `specialsoftwares/vyaamikk-diary` · integration base **`integration/grin-g1-g5-source`** · application branch **`feature/unified-material-movement-aso`** · open PR **#33** |
+| **Candidate SHA** | Tip **`77ae4a9`** (register) · CI-tested application **`cb854f71e8ca1873fcddd231317bfd9a137729f1`** (packaging fix on **`3d19d7f`**) · docs clarification **`238712e`** |
 | **Reviewed application base** | **`56837f17fb7d4354120282841fbcd6faf71c1bf5`** (prior combined-tree CI **`37699830269`**) · prior docs head **`c708649`** |
 | **Included source** | Letterhead repair preserved + MM corrections: durable multi-line return sequence (queue≠confirm; confirmed.eventVersion refresh; stable commandIds; partial retry); sync create/return flight; truthful arrival precision + `CaptureProvenance.unknown`; return eligibility/summary; client-flag≠backend-admission claims |
 | **Letterhead merge parents** | `1f302b9` + `b274fe8` → merge **`1be1daedc67f4ef59f579a92c1b7262d1af5904c`** |
