@@ -229,11 +229,12 @@ async function main(): Promise<void> {
     clock: interopClock(Date.UTC(2026, 9, 12, 8, 0, 0)),
   });
   assert.equal(server.portKind, "INJECTED");
+  if (typeof server.mutate !== "function") throw new Error("injected_mutate_missing");
 
   let failCode: string | null = null;
   let holdDispatch: Promise<void> | null = null;
   const originalMutate = server.mutate.bind(server);
-  server.mutate = (async (input) => {
+  server.mutate = async (input) => {
     if (input.envelope.type === "dispatchReturn") {
       if (failCode) {
         const code = failCode;
@@ -247,7 +248,7 @@ async function main(): Promise<void> {
       }
     }
     return originalMutate(input);
-  }) as typeof server.mutate;
+  };
 
   resetGrinMutationFlightForTests();
   setGrinApplicationDbFactoryForTests(() => db);
