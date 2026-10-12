@@ -12,7 +12,21 @@ TOOLING (ops-guard suite; not application CI).
 
 ---
 
-## Work board — 2026-10-12 parallel execution (PR #33 completed-form + security synthesis)
+## Work board — CLOSED 2026-10-13 (no further security or architecture review)
+
+Closed against CI-tested source `c8cdbc55933864e474cef4593bc522ca8570af7a`. Docs tip `da4b004` only records that run. Agent 5 stopped at its model limit. The coordinator ran the flipped QA tests. That is coordinator review, not an independent QA pass.
+
+| Stream | Disposition |
+|---|---|
+| A1 GRIN form / return | **Completed and integrated.** Completed-form lock, existing-command retry, account-switch unmount, and confirmed-balance refresh are in `c8cdbc5`. Device TalkBack and a live multi-line return remain **device/live pending**. |
+| A2 files / uploads / documents | **Completed and integrated** for PDF escaping, ZIP names/hashes, and renderer JavaScript. Letterhead gallery, scanner, and Print on a phone are **device pending**. Storage-object retention after record deletion was a policy choice, not a code fix. |
+| A3 session / logging / SDK | **Completed and integrated** for clearing the Crashlytics user id on opt-out. App Check stays uninitialized on purpose. Live App Check enforcement is **not applicable** until a separate decision. |
+| A4 dependencies / Android | **Source recorded, not fully closed.** PreviewActivity removal is registered for the next build only. The installed AAB is still `7c938f8` / vc24, so the merged manifest is **device/artifact pending**. Functions `qs` 6.15.2 is attacker-reachable (pre-auth query parsing). That lockfile refresh is **completed but not integrated**. It is not treated as harmless. |
+| A5 QA | **Not an independent QA pass.** Coordinator review only. |
+
+Historical assignment table (unchanged as the record of who owned what):
+
+## Work board — 2026-10-12 parallel execution (historical)
 
 Coordinator: this session, worktree `grin-combined` (`feature/unified-material-movement-aso`). Only the coordinator integrates into the candidate and edits `package.json`, lockfiles, `app.json`, `eas.json`, plugins, workflows and this register. Base for all agent worktrees: **`a528de015f05fc7e3f2ea777a6a5a3c8434abc7d`** (application source `a67e716`; CI `38232385275` on `4aea1b3`).
 
