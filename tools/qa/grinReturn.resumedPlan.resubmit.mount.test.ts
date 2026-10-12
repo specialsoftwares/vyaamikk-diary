@@ -346,11 +346,12 @@ async function main(): Promise<void> {
     // Screen state after the resumed plan completed:
     assert.equal(h.banners.includes("grin.returnResuming"), false, "resuming banner gone");
     assert.equal(h.texts.filter((s) => s === "grin.returnStatus.confirmed").length, 2, "both lines show confirmed");
-    assert.equal(h.values.get("grin.field.reason"), "damaged on arrival", "form STILL populated");
-    assert.equal(h.values.get("grin.returnQty"), "5", "form STILL populated");
-    assert.equal(h.values.get("grin.returnPickLineQty"), "3", "form STILL populated");
-    assert.equal(h.buttonDisabled.get("common.save"), false, "Save is enabled on the completed form");
-    assert.equal(h.backCalls, 0, "screen did not navigate away after the resumed plan completed");
+    assert.equal(h.values.get("grin.field.reason"), "damaged on arrival", "completed form keeps the restored reason visible");
+    assert.equal(h.values.get("grin.returnQty"), "5", "completed form keeps the restored quantity visible");
+    assert.equal(h.values.get("grin.returnPickLineQty"), "3", "completed form keeps the restored quantity visible");
+    assert.equal(h.buttonDisabled.get("common.save"), true, "Save is disabled once the resumed plan is confirmed");
+    assert.equal(h.banners.includes("grin.returnCompleted"), true, "completed banner replaces the resuming banner");
+    assert.equal(h.backCalls, 0, "a resumed completion does not navigate by itself");
 
     // --- Step 4: user taps Save on the populated, already-confirmed form.
     h.banners.length = 0;
@@ -367,24 +368,15 @@ async function main(): Promise<void> {
     const returnEvents = (confirmed?.events ?? []).filter((e) => e.type === "return_dispatched");
     console.log(`SERVER eventVersion=${confirmed?.eventVersion} return_dispatched_events=${returnEvents.length}`);
 
-    assert.equal(
-      rowsAfterSave.length,
-      4,
-      "REPRODUCED: Save after a resumed-and-confirmed plan queued a second return for every line"
-    );
-    assert.equal(rowsAfterSave.every((r) => r.local_state === "issued"), true, "the duplicate return was confirmed too");
-    assert.deepEqual(
-      rowsAfterSave.map(rowQty),
-      ["line_1=5 bags", "line_2=3 bags", "line_1=5 bags", "line_2=3 bags"],
-      "duplicate return carries identical quantities"
-    );
-    assert.equal(returnEvents.length, 4, "server now holds four return_dispatched events for one user intent");
-    assert.equal(confirmed?.eventVersion, 5);
-    assert.equal(h.banners.some((b) => b.startsWith("grin.err") || b === "grin.returnIntentOpen"), false, "no error shown");
-    assert.equal(h.backCalls, 1, "screen silently navigated back as if a new return had been intended");
+    assert.equal(rowsAfterSave.length, 2, "Save on a completed resumed plan must not queue a second return");
+    assert.equal(rowsAfterSave.every((r) => r.local_state === "issued"), true);
+    assert.deepEqual(rowsAfterSave.map(rowQty), ["line_1=5 bags", "line_2=3 bags"]);
+    assert.equal(returnEvents.length, 2, "the server still has one return event per line");
+    assert.equal(confirmed?.eventVersion, 3);
+    assert.equal(h.backCalls, 0, "the completed Save must not navigate as a new return");
 
     console.log(
-      "grinReturn.resumedPlan.resubmit.mount.test.ts: DEFECT (b) REPRODUCED (MOUNTED_INERT+SQLITE_HOST+INJECTED)"
+      "grinReturn.resumedPlan.resubmit.mount.test.ts: resumed completion stays closed (MOUNTED_INERT+SQLITE_HOST+INJECTED)"
     );
   } finally {
     if (root) {

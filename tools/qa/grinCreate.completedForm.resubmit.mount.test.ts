@@ -217,21 +217,19 @@ async function main(): Promise<void> {
     });
     assert.equal(h.values.get("grin.field.supplierName"), "QA Supplier A5", "form not cleared after create");
     assert.equal(h.values.get("grin.field.material"), "Cotton bales", "form not cleared after create");
-    assert.equal(h.values.get("grin.field.receivedQty"), "40", "form not cleared after create");
-    assert.equal(h.buttonDisabled.get("grin.saveAction"), false, "Save is enabled again after create");
+    assert.equal(h.values.get("grin.field.receivedQty"), "40", "completed form keeps the submitted content visible");
+    assert.equal(h.buttonDisabled.get("grin.saveAction"), true, "Save is disabled on the completed form");
+    assert.equal(h.banners.includes("grin.createCompleted"), true, "completed banner is shown");
     const save2 = h.presses.get("grin.saveAction");
     assert.ok(save2);
-    assert.notEqual(save2, save1, "rerender produced a new onSave closure (new intent id)");
 
-    // Sanity: the ORIGINAL closure (completed intent) is still blocked by the flight.
+    // The original closure and the rerendered Save must both refuse.
     await act(async () => {
       save1();
       await Promise.resolve();
     });
-    assert.equal(registerRows(db).length, 1, "stale completed-intent callback must not resubmit");
-    assert.equal(h.banners.includes("grin.errCreateInFlight"), true, "stale callback surfaces in-flight error");
+    assert.equal(registerRows(db).length, 1, "stale completed callback must not resubmit");
 
-    // --- Tap 2: second tap on the same filled form while still mounted.
     h.banners.length = 0;
     await act(async () => {
       save2();
@@ -239,22 +237,9 @@ async function main(): Promise<void> {
     });
     const afterSecond = registerRows(db);
     console.log(`AFTER_TAP2 register_rows=${afterSecond.length} replace_calls=${h.replaceCalls.length}`);
-    for (const row of afterSecond) {
-      console.log(`  row command_id=${row.command_id} receipt_id=${row.receipt_id} state=${row.local_state}`);
-    }
-
-    // Defect assertion: production wrote TWO durable register commands with identical content.
-    assert.equal(afterSecond.length, 2, "REPRODUCED: second Save on the still-mounted completed form queued a duplicate receipt");
-    assert.notEqual(afterSecond[0]!.receipt_id, afterSecond[1]!.receipt_id, "duplicates have different receipt ids");
-    assert.notEqual(afterSecond[0]!.command_id, afterSecond[1]!.command_id);
-    assert.equal(
-      contentFingerprint(afterSecond[0]!),
-      contentFingerprint(afterSecond[1]!),
-      "duplicate receipt has identical supplier/lines/remarks content"
-    );
-    assert.equal(h.replaceCalls.length, 2, "both saves navigated — user is sent to the second receipt");
-    assert.equal(h.banners.length, 0, "no error or warning was shown for the duplicate");
-    console.log(`DUPLICATE_CONTENT_FINGERPRINT=${contentFingerprint(afterSecond[1]!)}`);
+    assert.equal(afterSecond.length, 1, "second Save on the still-mounted completed form must not queue another receipt");
+    assert.equal(h.replaceCalls.length, 1, "the second Save must not navigate again");
+    assert.equal(h.banners.includes("grin.errSave"), false, "a queued receipt must not be reported as a save failure");
 
     // --- Positive claim that any fix must preserve: a FRESH mount creates a new receipt.
     await act(async () => {
@@ -282,9 +267,8 @@ async function main(): Promise<void> {
       await Promise.resolve();
     });
     const afterFresh = registerRows(db);
-    assert.equal(afterFresh.length, 3, "fresh mount + immediate double-tap creates exactly one receipt B");
-    assert.notEqual(contentFingerprint(afterFresh[2]!), contentFingerprint(afterFresh[0]!));
-    assert.equal(h.banners.includes("grin.errCreateInFlight"), true, "second tap of the double-tap was refused");
+    assert.equal(afterFresh.length, 2, "fresh mount + immediate double-tap creates exactly one more receipt");
+    assert.notEqual(contentFingerprint(afterFresh[1]!), contentFingerprint(afterFresh[0]!));
     console.log(`AFTER_FRESH_MOUNT_DOUBLE_TAP register_rows=${afterFresh.length}`);
 
     // Claim (c7) with durable rows: after an account change the old mounted callback cannot submit.
@@ -301,12 +285,10 @@ async function main(): Promise<void> {
       await Promise.resolve();
     });
     const totalAfter = db.getFirstSync<{ n: number }>(`SELECT COUNT(*) AS n FROM grin_outbox_commands`)!.n;
-    assert.equal(totalAfter, totalBefore, "owner switch: stale callback wrote nothing for any owner");
-    assert.equal(h.banners.includes("grin.errSessionRetired"), true, "owner switch: retired error surfaced");
-    assert.equal(h.values.get("grin.field.supplierName"), "", "owner switch: retired form masked");
+    assert.equal(totalAfter, totalBefore, "owner switch: a completed callback wrote nothing for any owner");
     console.log(`OWNER_SWITCH total_rows_before=${totalBefore} after=${totalAfter}`);
 
-    console.log("grinCreate.completedForm.resubmit.mount.test.ts: DEFECT (a) REPRODUCED (MOUNTED_INERT+SQLITE_HOST)");
+    console.log("grinCreate.completedForm.resubmit.mount.test.ts: completed form stays closed (MOUNTED_INERT+SQLITE_HOST)");
   } finally {
     if (root) {
       const r = root;

@@ -136,32 +136,26 @@ async function main(): Promise<void> {
     console.log(`AFTER_RETRY rows=${JSON.stringify(rowsAfterRetry.map((c) => [c.commandId, c.localState]))}`);
     console.log(`SERVER eventVersion=${confirmed?.eventVersion} return_dispatched_events=${returnEvents}`);
 
-    // Observed production behaviour on this base (the wedge):
+    assert.deepEqual(thrown, [], "retry must not throw illegal_outbox_transition");
     assert.deepEqual(
-      thrown,
+      retry.lines.map((l) => [l.lineId, l.status]),
       [
-        "illegal_outbox_transition:failed_retryable->conflicted",
-        "illegal_outbox_transition:failed_retryable->conflicted",
-      ],
-      "both retries re-queue the same commandId with a new digest and hit the illegal transition"
+        ["line_1", "confirmed"],
+        ["line_2", "confirmed"],
+      ]
     );
-    assert.equal(retry.lines[0]!.status, "failed", "Save-again leaves line_1 failed");
-    assert.equal(retry.lines[1]!.status, "pending_submit", "line_2 never submitted");
-    assert.equal(resumed?.lines[0]!.status, "failed", "continueReturnPlan leaves line_1 failed");
-    assert.equal(rowsAfterRetry.length, 1, "no new command minted (identity preserved) ...");
+    assert.equal(retry.lines[0]!.commandId, cmdL1, "line_1 keeps its command id");
+    assert.equal(resumed, null, "the confirmed plan is cleared, so continue has nothing to resume");
+    assert.equal(rowsAfterRetry.length, 2, "line_2 is queued once; line_1 is not re-queued");
     assert.equal(rowsAfterRetry[0]!.commandId, cmdL1);
-    assert.equal(rowsAfterRetry[0]!.localState, "failed_retryable", "... but the row is never redispatched");
-    assert.equal(returnEvents, 0, "server never received the return although it is healthy");
-    assert.ok(loadReturnPlan(db, OWNER, LEDGER, RECEIPT), "plan stays open");
-
-    // Control: the outbox itself CAN retry a failed_retryable row when asked directly.
-    const direct = await box.dispatchDue(session, "qa_control_direct_drain");
-    assert.equal(direct.results.some((r) => r.commandId === cmdL1 && r.localState === "issued"), true,
-      "control: a plain dispatchDue confirms the failed_retryable row — the wedge is in advanceReturnPlan, not the outbox");
-    console.log("CONTROL direct dispatchDue confirmed line_1");
+    assert.equal(rowsAfterRetry[0]!.digest, rowsAfterFirst[0]!.digest, "the frozen digest is not rewritten");
+    assert.equal(rowsAfterRetry.every((row) => row.localState === "issued"), true);
+    assert.equal(returnEvents, 2);
+    assert.equal(confirmed?.eventVersion, 3);
+    assert.equal(loadReturnPlan(db, OWNER, LEDGER, RECEIPT), null, "a fully confirmed plan is cleared");
 
     console.log(
-      "grinReturn.transientFailure.retryWedge.sqliteHost.test.ts: FINDING REPRODUCED (SQLITE_HOST+INJECTED)"
+      "grinReturn.transientFailure.retryWedge.sqliteHost.test.ts: retry confirms both lines (SQLITE_HOST+INJECTED)"
     );
   } finally {
     db?.close();
