@@ -389,7 +389,7 @@ export function buildCustomerCreditHtml(options: BuildCustomerCreditHtmlOptions)
       : null;
 
   const photoBlock = customerPhotoDataUri
-    ? `<img class="cust-photo" src="${customerPhotoDataUri}" alt="" />`
+    ? `<img class="cust-photo" src="${esc(customerPhotoDataUri)}" alt="" />`
     : "";
 
   const customerBlock = `<div class="party party-cust">
@@ -654,7 +654,7 @@ export function buildCustomerCreditHtml(options: BuildCustomerCreditHtmlOptions)
       ? `<div class="modified">${esc(labels.modifiedOn)}: ${esc(fmtDate(record.lastEditedAt, formatLocale))}</div>`
       : "";
 
-  const logoBlock = logoDataUri ? `<img class="logo" src="${logoDataUri}" alt="" />` : "";
+  const logoBlock = logoDataUri ? `<img class="logo" src="${esc(logoDataUri)}" alt="" />` : "";
 
   return `<!DOCTYPE html>
 <html lang="${esc(locale)}">
