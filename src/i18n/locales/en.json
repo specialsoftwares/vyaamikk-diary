@@ -3228,6 +3228,9 @@
     "returnCompleted": "This return is confirmed. Save is closed for it. Start a new return to record another.",
     "returnStartNew": "Start new return",
     "createCompleted": "This receipt was saved. Save is closed for it. Start a new receipt to enter another.",
-    "createStartNew": "Start new receipt"
+    "createStartNew": "Start new receipt",
+    "returnAvailabilityUnavailable": "The confirmed balance is not available yet. Save stays closed until it reloads.",
+    "returnAvailabilityRetry": "Retry confirmed balance",
+    "returnConfirmedVersion": "Confirmed version"
   }
 }

@@ -2969,6 +2969,9 @@
     "returnCompleted": "આ વળતર પુષ્ટિ થયું છે. તેના માટે સેવ બંધ છે. બીજું નોંધવા માટે નવું વળતર શરૂ કરો.",
     "returnStartNew": "નવું વળતર શરૂ કરો",
     "createCompleted": "આ રસીદ સેવ થઈ છે. તેના માટે સેવ બંધ છે. બીજી દાખલ કરવા માટે નવી રસીદ શરૂ કરો.",
-    "createStartNew": "નવી રસીદ શરૂ કરો"
+    "createStartNew": "નવી રસીદ શરૂ કરો",
+    "returnAvailabilityUnavailable": "પુષ્ટિ થયેલ બાકી હજુ ઉપલબ્ધ નથી. તે ફરી લોડ થાય ત્યાં સુધી સેવ બંધ રહેશે.",
+    "returnAvailabilityRetry": "પુષ્ટિ થયેલ બાકી ફરી જુઓ",
+    "returnConfirmedVersion": "પુષ્ટિ આવૃત્તિ"
   }
 }

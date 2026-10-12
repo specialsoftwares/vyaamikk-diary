@@ -4,6 +4,7 @@ import { quantity } from "@/goodsEvidence/quantities";
 import type { GrinConfirmedProjection } from "@/goodsEvidence/ports";
 import type { GrinApplicationRecord } from "@/services/grin/repository";
 import {
+  confirmedProjectionCoversReturns,
   formatReportedArrivalDisplay,
   returnableLinesFromRecord,
 } from "@/services/grin/repository/grinReceiptSearch";
@@ -21,6 +22,7 @@ import {
   useGrinFocusEffect,
   useGrinLocalSearchParams,
   useGrinRouter,
+  useGrinScreenLifetime,
   useGrinT,
   useGrinThemedStyles,
 } from "./grinScreenHooks";
@@ -56,11 +58,13 @@ function returnLineStatusLabel(status: string, t: (key: string) => string): stri
  * Completed-form rule: once the plan for the current intent (resumed or just
  * saved) is fully confirmed the screen enters a completed state. Save is a
  * no-op for that intent, per-line confirmed statuses stay visible, and only
- * the explicit "Start new return" action clears the form and mints a new
- * intent. A fresh mount with no saved plan also starts with a new intent.
+ * the explicit "Start new return" action reloads the confirmed projection,
+ * clears the form, and mints a new intent. A fresh mount with no saved plan
+ * also starts with a new intent.
  */
 export function GrinReturnAdmittedBody({ session }: { session: GrinDispatchSession }): React.ReactElement {
   const origin = useFrozenGrinOrigin(session);
+  const life = useGrinScreenLifetime(origin);
   const t = useGrinT();
   const router = useGrinRouter();
   const { receiptId } = useGrinLocalSearchParams<{ receiptId: string }>();
@@ -72,6 +76,8 @@ export function GrinReturnAdmittedBody({ session }: { session: GrinDispatchSessi
   const [busy, setBusy] = useState(false);
   const [plan, setPlan] = useState<GrinReturnPlan | null>(null);
   const [returnIntentId, setReturnIntentId] = useState(() => mintSubmissionIntentId());
+  const activeIntentRef = useRef(returnIntentId);
+  const [availabilityBlocked, setAvailabilityBlocked] = useState(false);
   const [resuming, setResuming] = useState(false);
   /** Ref flips synchronously so a stale or same-tick Save cannot resubmit a completed intent. */
   const completedRef = useRef(false);
@@ -132,6 +138,7 @@ export function GrinReturnAdmittedBody({ session }: { session: GrinDispatchSessi
         completedRef.current = false;
         setCompleted(false);
         setResuming(true);
+        activeIntentRef.current = existingPlan.intentId;
         setReturnIntentId(existingPlan.intentId);
         setReason(existingPlan.reason);
         setSelected(
@@ -140,6 +147,12 @@ export function GrinReturnAdmittedBody({ session }: { session: GrinDispatchSessi
         didAutoSelect.current = true;
         userClearedSelection.current = true;
         void repo.continueReturnPlan(receiptId).then((continued) => {
+          if (!life.isMounted()) return;
+          if (!life.isOriginCurrent()) {
+            maskRetired();
+            setError(t("grin.errSessionRetired"));
+            return;
+          }
           if (!continued) return;
           setPlan(continued);
           const resumedDone =
@@ -148,8 +161,9 @@ export function GrinReturnAdmittedBody({ session }: { session: GrinDispatchSessi
           // quantities are still populated — only the explicit new-return action mints one.
           if (resumedDone) markCompleted();
         }).catch((caught) => {
+          if (!life.isMounted()) return;
           const mapped = grinMutationErrorMessage(caught, t, "grin.errReturn");
-          if (mapped.retired) {
+          if (mapped.retired || !life.isOriginCurrent()) {
             maskRetired();
             setError(t("grin.errSessionRetired"));
             return;
@@ -166,7 +180,7 @@ export function GrinReturnAdmittedBody({ session }: { session: GrinDispatchSessi
       setRecord(null);
       setConfirmed(null);
     }
-  }, [markCompleted, maskRetired, origin, receiptId, t]);
+  }, [life, markCompleted, maskRetired, origin, receiptId, t]);
 
   useGrinFocusEffect(
     useCallback(() => {
@@ -221,21 +235,76 @@ export function GrinReturnAdmittedBody({ session }: { session: GrinDispatchSessi
       ? record.effective.supplier.registration.gstin
       : null;
 
-  /** Explicit new transaction: clear selection/reason/plan display and mint a new intent. */
+  /**
+   * Explicit new return. Rechecks the frozen origin, reloads the receipt,
+   * confirmed projection and eligibility, and mints a new intent only when
+   * that projection already contains the quantities just confirmed.
+   * A missing projection leaves Save closed and offers a retry.
+   */
   const startNewReturn = useCallback(() => {
-    completedRef.current = false;
-    setCompleted(false);
-    setResuming(false);
-    setPlan(null);
-    setSelected({});
-    setReason("");
-    setError(null);
-    didAutoSelect.current = false;
-    userClearedSelection.current = false;
-    setReturnIntentId(mintSubmissionIntentId());
-  }, []);
+    if (!life.isMounted()) return;
+    if (!life.isOriginCurrent()) {
+      maskRetired();
+      setError(t("grin.errSessionRetired"));
+      return;
+    }
+    if (!receiptId) {
+      setAvailabilityBlocked(true);
+      setEligibilityOk(false);
+      setError(t("grin.returnAvailabilityUnavailable"));
+      return;
+    }
+    try {
+      const repo = originRepo(origin);
+      const loaded = repo.get(receiptId);
+      const projection = repo.confirmedProjection(receiptId);
+      const confirmedLines = (plan?.lines ?? []).filter((line) => line.status === "confirmed");
+      const covered = confirmedProjectionCoversReturns(projection, confirmedLines);
+      if (!loaded || !projection || !covered) {
+        setAvailabilityBlocked(true);
+        setEligibilityOk(false);
+        setError(t("grin.returnAvailabilityUnavailable"));
+        return;
+      }
+      const eligibility = repo.returnEligibility(receiptId);
+      const nextIntent = mintSubmissionIntentId();
+      activeIntentRef.current = nextIntent;
+      completedRef.current = false;
+      setAvailabilityBlocked(false);
+      setRecord(loaded);
+      setConfirmed(projection);
+      setEligibilityOk(eligibility.ok);
+      setEligibilityReason(eligibility.ok ? null : eligibility.reason);
+      setCompleted(false);
+      setResuming(false);
+      setPlan(null);
+      setSelected({});
+      setReason("");
+      setError(null);
+      didAutoSelect.current = false;
+      userClearedSelection.current = false;
+      setReturnIntentId(nextIntent);
+    } catch (caught) {
+      const mapped = grinMutationErrorMessage(caught, t, "grin.returnAvailabilityUnavailable");
+      if (mapped.retired) {
+        maskRetired();
+        setError(t("grin.errSessionRetired"));
+        return;
+      }
+      setAvailabilityBlocked(true);
+      setEligibilityOk(false);
+      setError(t("grin.returnAvailabilityUnavailable"));
+    }
+  }, [life, maskRetired, origin, plan, receiptId, t]);
 
   const onSave = useCallback(() => {
+    if (!life.isMounted()) return;
+    if (returnIntentId !== activeIntentRef.current) return;
+    if (!life.isOriginCurrent()) {
+      maskRetired();
+      setError(t("grin.errSessionRetired"));
+      return;
+    }
     // A completed intent never submits again; only startNewReturn re-arms Save.
     if (completedRef.current) return;
     if (!receiptId || !record) return;
@@ -264,7 +333,10 @@ export function GrinReturnAdmittedBody({ session }: { session: GrinDispatchSessi
 
     setBusy(true);
     setError(null);
+    const intentAtPress = returnIntentId;
     void (async () => {
+      const stillThisScreen = () =>
+        life.isMounted() && intentAtPress === activeIntentRef.current && life.isOriginCurrent();
       try {
         const nextPlan = await originRepo(origin).dispatchReturnSequence({
           receiptId,
@@ -275,6 +347,12 @@ export function GrinReturnAdmittedBody({ session }: { session: GrinDispatchSessi
             return { lineId, returnQty: quantity(qtyRaw.trim(), line.unit) };
           }),
         });
+        if (!life.isMounted() || intentAtPress !== activeIntentRef.current) return;
+        if (!life.isOriginCurrent()) {
+          maskRetired();
+          setError(t("grin.errSessionRetired"));
+          return;
+        }
         setPlan(nextPlan);
         const qtyBlocked = nextPlan.lines.some((line) => line.lastError === "quantity_edit_blocked");
         const anyFailed = nextPlan.lines.some(
@@ -293,10 +371,12 @@ export function GrinReturnAdmittedBody({ session }: { session: GrinDispatchSessi
         if (allConfirmed) {
           // Completed: keep statuses visible, disable Save for this intent. If
           // router.back() is delayed, a second press must not create another return.
+          if (!stillThisScreen()) return;
           markCompleted();
           router.back();
           return;
         }
+        if (!stillThisScreen()) return;
         setResuming(true);
         if (qtyBlocked) {
           setError(t("grin.returnQuantityLocked"));
@@ -306,8 +386,9 @@ export function GrinReturnAdmittedBody({ session }: { session: GrinDispatchSessi
           setError(t("grin.returnQueuedNotConfirmed"));
         }
       } catch (caught) {
+        if (!life.isMounted() || intentAtPress !== activeIntentRef.current) return;
         const mapped = grinMutationErrorMessage(caught, t, "grin.errReturn");
-        if (mapped.retired) {
+        if (mapped.retired || !life.isOriginCurrent()) {
           maskRetired();
           setError(t("grin.errSessionRetired"));
           return;
@@ -322,10 +403,10 @@ export function GrinReturnAdmittedBody({ session }: { session: GrinDispatchSessi
         }
         setError(mapped.message);
       } finally {
-        setBusy(false);
+        if (life.isMounted() && intentAtPress === activeIntentRef.current) setBusy(false);
       }
     })();
-  }, [markCompleted, maskRetired, origin, reason, receiptId, record, returnIntentId, router, selected, t]);
+  }, [life, markCompleted, maskRetired, origin, reason, receiptId, record, returnIntentId, router, selected, t]);
 
   const lineStatusById = useMemo(() => {
     const map: Record<string, string> = {};
@@ -342,11 +423,12 @@ export function GrinReturnAdmittedBody({ session }: { session: GrinDispatchSessi
         <Banner tone="info" message={t("grin.returnReplacementNote")} />
         {error ? <Banner tone="danger" message={error} /> : null}
         {resuming ? <Banner tone="info" message={t("grin.returnResuming")} /> : null}
-        {completed ? (
-          <>
-            <Banner tone="success" message={t("grin.returnCompleted")} />
-            <Button label={t("grin.returnStartNew")} onPress={startNewReturn} variant="secondary" />
-          </>
+        {completed ? <Banner tone="success" message={t("grin.returnCompleted")} /> : null}
+        {completed && !availabilityBlocked ? (
+          <Button label={t("grin.returnStartNew")} onPress={startNewReturn} variant="secondary" />
+        ) : null}
+        {availabilityBlocked ? (
+          <Button label={t("grin.returnAvailabilityRetry")} onPress={startNewReturn} variant="secondary" />
         ) : null}
         {record ? (
           <FormSection title={t("grin.returnReceiptSummary")}>
@@ -366,6 +448,12 @@ export function GrinReturnAdmittedBody({ session }: { session: GrinDispatchSessi
               label={t("grin.field.reportedArrival")}
               value={formatReportedArrivalDisplay(record.effective, t("grin.arrival.notRecorded"))}
             />
+            {confirmed ? (
+              <GrinFieldRow
+                label={t("grin.returnConfirmedVersion")}
+                value={String(confirmed.eventVersion)}
+              />
+            ) : null}
             {!eligibilityOk && eligibilityReason ? (
               <Banner tone="danger" message={t(`grin.returnIneligible.${eligibilityReason}`)} />
             ) : null}
@@ -439,7 +527,7 @@ export function GrinReturnAdmittedBody({ session }: { session: GrinDispatchSessi
           label={t("common.save")}
           onPress={onSave}
           loading={busy}
-          disabled={busy || !eligibilityOk || completed}
+          disabled={busy || !eligibilityOk || completed || availabilityBlocked}
         />
       </View>
     </Screen>

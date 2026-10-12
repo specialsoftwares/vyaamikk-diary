@@ -24,6 +24,7 @@ import {
   originRepo,
   useFrozenGrinOrigin,
   useGrinRouter,
+  useGrinScreenLifetime,
   useGrinT,
   useGrinThemedStyles,
 } from "./grinScreenHooks";
@@ -43,8 +44,12 @@ import { Banner, Button, FormSection, Header, Screen, SelectField, TextField, Vi
  */
 export function GrinCreateAdmittedBody({ session }: { session: GrinDispatchSession }): React.ReactElement {
   const origin = useFrozenGrinOrigin(session);
+  const life = useGrinScreenLifetime(origin);
   const [formEpoch, setFormEpoch] = useState(0);
-  const startNew = useCallback(() => setFormEpoch((epoch) => epoch + 1), []);
+  const startNew = useCallback(() => {
+    if (!life.isMounted() || !life.isOriginCurrent()) return;
+    setFormEpoch((epoch) => epoch + 1);
+  }, [life]);
   return <GrinCreateForm key={formEpoch} session={origin} onStartNew={startNew} />;
 }
 
@@ -56,6 +61,7 @@ function GrinCreateForm({
   onStartNew: () => void;
 }): React.ReactElement {
   const origin = useFrozenGrinOrigin(session);
+  const life = useGrinScreenLifetime(origin);
   const t = useGrinT();
   const router = useGrinRouter();
   const styles = useGrinThemedStyles(() =>
@@ -131,6 +137,12 @@ function GrinCreateForm({
   );
 
   const onSave = useCallback(() => {
+    if (!life.isMounted()) return;
+    if (!life.isOriginCurrent()) {
+      maskRetired();
+      setError(t("grin.errSessionRetired"));
+      return;
+    }
     // A completed form never submits again from this mount.
     if (submittedRef.current) return;
     if (!supplierName.trim() || !material.trim()) {
@@ -271,6 +283,7 @@ function GrinCreateForm({
       submittedRef.current = true;
       markGrinMutationFlightCompleted(flightKey, flightOwner);
       setSubmitted(true);
+      if (!life.isMounted() || !life.isOriginCurrent()) return;
       try {
         router.replace({ pathname: "/(app)/grin/[receiptId]", params: { receiptId: saved.receiptId } });
       } catch {
@@ -304,6 +317,7 @@ function GrinCreateForm({
     invoiceNumber,
     invoiceQty,
     invoiceValue,
+    life,
     lr,
     maskRetired,
     material,

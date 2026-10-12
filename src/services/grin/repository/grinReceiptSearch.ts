@@ -101,6 +101,26 @@ export type GrinReturnableLineView = {
   batchLotLabel: "not_recorded";
 };
 
+/**
+ * True when every confirmed return quantity is already present in the
+ * server projection's return events. A null projection, or a projection that
+ * has not yet recorded those quantities, is not a confirmed balance.
+ * Does not invent an event version and does not read plan status as quantity.
+ */
+export function confirmedProjectionCoversReturns(
+  confirmed: GrinConfirmedProjection | null,
+  lines: readonly { lineId: string; returnQty: Quantity }[]
+): boolean {
+  if (!confirmed) return false;
+  if (!Number.isInteger(confirmed.eventVersion) || confirmed.eventVersion < 1) return false;
+  for (const line of lines) {
+    const summed = sumReturnQtyFromEvents(confirmed, line.lineId, line.returnQty.unit);
+    if (!summed) return false;
+    if (compareDecimal(summed.value, line.returnQty.value) < 0) return false;
+  }
+  return true;
+}
+
 function sumReturnQtyFromEvents(
   confirmed: GrinConfirmedProjection | null,
   lineId: string,

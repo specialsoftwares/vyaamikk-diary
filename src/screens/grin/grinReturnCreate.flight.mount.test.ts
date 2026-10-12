@@ -494,13 +494,72 @@ async function main(): Promise<void> {
     assert.equal(values.get("grin.field.reason"), "saved damage", "completed form keeps its content visible");
     assert.equal(values.get("grin.returnQty"), "4");
 
-    // Explicit new return: clears the form, mints a new intent.
+    // The seeded projection has no return events. Starting another return must
+    // not treat the completed plan as a confirmed balance.
     const returnStartNew = presses.get("grin.returnStartNew");
     assert.ok(returnStartNew, "completed return must offer an explicit new-return action");
     banners.length = 0;
-    values.clear();
     await act(() => {
       returnStartNew();
+    });
+    assert.equal(values.get("grin.field.reason"), "saved damage", "a stale projection must not clear the completed form");
+    assert.equal(disabled.get("common.save"), true, "Save stays closed when the confirmed balance cannot be reloaded");
+    assert.equal(banners.includes("grin.returnAvailabilityUnavailable"), true);
+    assert.equal(
+      countCommands(db!, OWNER, "dispatchReturn", RETURN_RECEIPT),
+      returnRowsSeeded,
+      "a refused new-return must not write a command"
+    );
+
+    // Once the projection actually contains those return quantities, the explicit
+    // action reloads it, clears the form, and mints a new intent.
+    outbox.persistConfirmedProjection(session, {
+      receiptId: RETURN_RECEIPT,
+      eventVersion: 2,
+      headHash: "d".repeat(64),
+      original: returnRecord.effective,
+      events: [
+        {
+          schemaVersion: 1,
+          eventId: "evt_line_1",
+          receiptId: RETURN_RECEIPT,
+          streamSequence: 2,
+          type: "return_dispatched",
+          actorUid: OWNER,
+          serverAcceptedAtUtc: now,
+          clientObservedAtUtc: now,
+          reason: "saved damage",
+          expectedPreviousVersion: 1,
+          typedChanges: { lineId: "line_1", returnQty: { value: "4", unit: "bags" } },
+          previousHash: null,
+          eventHash: "b".repeat(64),
+          firestoreCommitTime: null,
+        },
+        {
+          schemaVersion: 1,
+          eventId: "evt_line_2",
+          receiptId: RETURN_RECEIPT,
+          streamSequence: 3,
+          type: "return_dispatched",
+          actorUid: OWNER,
+          serverAcceptedAtUtc: now,
+          clientObservedAtUtc: now,
+          reason: "saved damage",
+          expectedPreviousVersion: 2,
+          typedChanges: { lineId: "line_2", returnQty: { value: "2", unit: "bags" } },
+          previousHash: null,
+          eventHash: "c".repeat(64),
+          firestoreCommitTime: null,
+        },
+      ] as never,
+      effective: returnRecord.effective,
+    });
+    const returnRetry = presses.get("grin.returnAvailabilityRetry");
+    assert.ok(returnRetry, "an unavailable confirmed balance must offer a retry");
+    banners.length = 0;
+    values.clear();
+    await act(() => {
+      returnRetry();
     });
     assert.equal(values.get("grin.field.reason"), "", "new return must clear reason");
     assert.equal(values.get("grin.returnQty") ?? "", "", "new return must clear primary quantity");
@@ -539,7 +598,7 @@ async function main(): Promise<void> {
       [OWNER, RETURN_RECEIPT]
     );
     assert.ok(newReturnRow);
-    assert.match(newReturnRow.frozen_payload_json, /"expectedVersion":1/, "expectedVersion is the confirmed version");
+    assert.match(newReturnRow.frozen_payload_json, /"expectedVersion":2/, "expectedVersion is the reloaded confirmed version");
 
     // A stale callback still bound to the completed intent cannot submit it again:
     // the completed flight entry rejects it before any plan or command is touched.
