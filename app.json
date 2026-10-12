@@ -59,6 +59,7 @@
         }
       ],
       "./plugins/withAndroidLocaleConfigs.js",
+      "./plugins/withAndroidReleaseManifestHardening.js",
       "expo-iap",
       [
         "expo-router",

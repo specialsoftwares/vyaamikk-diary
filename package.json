@@ -28,6 +28,7 @@
     "typecheck:goods-evidence-g1": "tsc --noEmit -p tools/goods-evidence-emulator/tsconfig.json",
     "typecheck:goods-evidence-g2": "tsc --noEmit -p tools/goods-evidence-storage/tsconfig.json",
     "test:all": "node scripts/ci/run-all-tests.mjs",
+    "test:android-manifest-hardening": "npx --yes tsx plugins/withAndroidReleaseManifestHardening.test.ts",
     "ci:verify": "npm run typecheck && npm run typecheck:goods-evidence-g1 && npm run typecheck:goods-evidence-g2 && npm run lint:eslint && npm run test:all && npm --prefix functions run build && npm run test:firestore-rules && npm run test:live-rules-compat && npm run test:live-rules-grin-merged && npm run test:storage-rules && npm run test:letterhead-storage-emulator && npm run test:letterhead-media-rest-emulator && npm run test:resolve-or-create-phone-emulator && npm run test:billing-transaction-emulator && npm run test:billing-gst-compliance-emulator && npm run test:billing-google-play-emulator && npm run test:billing-apple-emulator && npm run test:billing-maintenance-emulator && npm run test:goods-evidence-g1-emulator && npm run test:goods-evidence-g1-functions-emulator && npm run test:goods-evidence-g2-emulator && npm run check:firebase-client && npx expo config --type public > /dev/null && npm run test:invoice-renderer-build && npm run test:invoice-renderer-docker && echo 'ci:verify PASS'",
     "test:inr": "npx --yes tsx src/utils/money/inr.test.ts",
     "test:cash-date": "npx --yes tsx src/utils/businessEntry/cashPaidDate.test.ts",
