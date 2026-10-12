@@ -173,13 +173,9 @@ export type GrinReturnInput = {
 export type GrinReturnSequenceInput = {
   receiptId: string;
   reason: string;
+  /** One user submission. A later return against the same receipt uses a new id. */
+  intentId: string;
   lines: Array<{ lineId: string; returnQty: Quantity }>;
-  /**
-   * Optional outbox drain (tests / app worker). Required to confirm between
-   * dependent lines in one call. Without drain, stops after queueing one line
-   * until confirmation is observed on a later resume.
-   */
-  drain?: () => Promise<void>;
 };
 
 export type GrinEwbObservationInput = {

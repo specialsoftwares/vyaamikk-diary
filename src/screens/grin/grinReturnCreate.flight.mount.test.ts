@@ -17,6 +17,8 @@ import { sampleLine, sampleRegisterBody } from "@/goodsEvidence/testFixtures";
 import { quantity } from "@/goodsEvidence/quantities";
 import { openHostSqlite, SQLITE_HOST, type HostSqlite } from "@/services/grin/outbox/hostSqlite";
 import { SQLITE_HOST_NOT_NATIVE_DEVICE } from "@/services/grin/outbox/types";
+import { GRIN_APPLICATION_LEDGER_ID } from "@/services/grin/repository/labels";
+import { saveReturnPlan } from "@/services/grin/repository/grinReturnPlan";
 import {
   getGrinApplicationRepository,
   resetGrinApplicationRepositoryForTests,
@@ -24,6 +26,7 @@ import {
   setGrinApplicationDbFactoryForTests,
   setGrinEvidencePortFactoryForTests,
   setGrinServerPortFactoryForTests,
+  retireGrinOwnerSession,
   startGrinOwnerSession,
 } from "@/services/grin/repository";
 import { createUninjectedGrinEvidencePort, createUninjectedGrinServerPort } from "@/services/grin/repository/uninjectedServer";
@@ -36,6 +39,7 @@ import { installGrinSurfaces, type GrinSurfaces } from "./grinSurfaces";
 
 type FieldMap = Map<string, (value: string) => void>;
 type PressMap = Map<string, () => void>;
+type ValueMap = Map<string, string>;
 
 function passthrough(tag: string) {
   return function Surface(props: Record<string, unknown> & { children?: React.ReactNode }) {
@@ -43,12 +47,18 @@ function passthrough(tag: string) {
   };
 }
 
-function installInertSurfaces(fields: FieldMap, presses: PressMap): void {
+function installInertSurfaces(
+  fields: FieldMap,
+  presses: PressMap,
+  values: ValueMap,
+  banners: string[]
+): void {
   const TextField = (props: Record<string, unknown>) => {
     const key = String(props.accessibilityLabel ?? props.label ?? "");
     if (typeof props.onChangeText === "function") {
       fields.set(key, props.onChangeText as (value: string) => void);
     }
+    values.set(key, String(props.value ?? ""));
     return React.createElement("input", { "data-field": key });
   };
   const Button = (props: Record<string, unknown>) => {
@@ -58,10 +68,14 @@ function installInertSurfaces(fields: FieldMap, presses: PressMap): void {
     }
     return React.createElement("button", { "data-press": key }, key);
   };
+  const Banner = (props: Record<string, unknown>) => {
+    banners.push(String(props.message ?? ""));
+    return React.createElement("div", { "data-banner": String(props.message ?? "") });
+  };
   const surfaces: GrinSurfaces = {
     Screen: passthrough("section"),
     Header: passthrough("header"),
-    Banner: passthrough("div"),
+    Banner,
     Button,
     FormSection: passthrough("fieldset"),
     TextField,
@@ -121,7 +135,9 @@ async function main(): Promise<void> {
 
     const fields: FieldMap = new Map();
     const presses: PressMap = new Map();
-    installInertSurfaces(fields, presses);
+    const values: ValueMap = new Map();
+    const banners: string[] = [];
+    installInertSurfaces(fields, presses, values, banners);
     const container = createMountContainer();
     root = createRoot(container);
 
@@ -142,9 +158,23 @@ async function main(): Promise<void> {
     }) as typeof repo.createQueued;
 
     // Immediate double-press before rerender.
-    createSave();
-    createSave();
+    await act(() => {
+      createSave();
+      createSave();
+    });
     assert.equal(createCalls, 1, "sync flight must block immediate duplicate create");
+
+    const createSaveB = presses.get("grin.saveAction");
+    assert.ok(createSaveB);
+    assert.notEqual(createSaveB, createSave);
+    await act(() => {
+      createSaveB();
+    });
+    assert.equal(createCalls, 2, "a later receipt intent must create a second command");
+    await act(() => {
+      createSave();
+    });
+    assert.equal(createCalls, 2, "the completed first callback must not duplicate");
 
     // Return rapid submit against an unconfirmed receipt — flight still binds.
     resetGrinMutationFlightForTests();
@@ -194,6 +224,69 @@ async function main(): Promise<void> {
         ["grcp_flight_ret", "dispatchReturn"]
       );
     assert.equal(returnCmds.length, 0, "ineligible unconfirmed return must not write dispatchReturn commands");
+
+    const now = new Date().toISOString();
+    saveReturnPlan(db!, {
+      planId: "grp_restore_screen",
+      intentId: "gint_restore_screen",
+      ownerUid: "owner_flight",
+      ledgerId: GRIN_APPLICATION_LEDGER_ID,
+      receiptId: "grcp_flight_ret",
+      reason: "saved damage",
+      lines: [
+        {
+          lineId: "line_1",
+          returnQty: quantity("4", "bags"),
+          commandId: "gcmd_restore_line_1",
+          status: "awaiting_confirmation",
+          lastError: null,
+        },
+        {
+          lineId: "line_2",
+          returnQty: quantity("2", "bags"),
+          commandId: "gcmd_restore_line_2",
+          status: "pending_submit",
+          lastError: null,
+        },
+      ],
+      createdAtUtc: now,
+      updatedAtUtc: now,
+    });
+    fields.clear();
+    presses.clear();
+    values.clear();
+    banners.length = 0;
+    await act(async () => {
+      root!.unmount();
+    });
+    root = createRoot(container);
+    await act(async () => {
+      root!.render(React.createElement(GrinReturnAdmittedBody, { session }));
+    });
+    assert.equal(values.get("grin.field.reason"), "saved damage");
+    assert.equal(values.get("grin.returnQty"), "4");
+    assert.equal(values.get("grin.returnPickLineQty"), "2");
+    assert.equal(banners.includes("grin.returnResuming"), true);
+
+    const commandsBeforeSwitch = db!.getAllSync<{ command_id: string }>(
+      `SELECT command_id FROM grin_outbox_commands WHERE owner_uid = ?`,
+      ["owner_flight"]
+    ).length;
+    await act(() => {
+      retireGrinOwnerSession();
+      startGrinOwnerSession("owner_flight_b");
+      resetGrinMutationFlightForTests();
+      createSaveB();
+    });
+    const commandsAfterSwitch = db!.getAllSync<{ command_id: string }>(
+      `SELECT command_id FROM grin_outbox_commands WHERE owner_uid = ?`,
+      ["owner_flight"]
+    ).length;
+    assert.equal(
+      commandsAfterSwitch,
+      commandsBeforeSwitch,
+      "an old callback after account change must not submit"
+    );
 
     console.log("grinReturnCreate.flight.mount.test.ts: ok");
   } finally {

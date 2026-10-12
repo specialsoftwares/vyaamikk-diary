@@ -1,9 +1,8 @@
 /**
- * Synchronous owner/attempt-bound flight for GRIN create/return handlers.
- * React busy-state alone cannot stop immediate re-entry before a rerender.
- *
- * Completed intents stay locked so navigation / confirmation cannot admit the
- * same finished submit again. Failed attempts release so unresolved work can retry.
+ * Synchronous submission-intent flight.
+ * Duplicate prevention is bound to one intent id + owner + session generation.
+ * A completed intent stays completed so a stale callback cannot submit it again.
+ * A new receipt or a later return uses a new intent id. Rerender does not reset locks.
  */
 
 export type GrinMutationFlightOwner = symbol;
@@ -17,15 +16,36 @@ type FlightEntry = {
 
 const flights = new Map<string, FlightEntry>();
 
-export function grinCreateFlightKey(ownerUid: string, ledgerId: string): string {
-  return `grin:create:${ownerUid}:${ledgerId}`;
+const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-";
+
+export function mintSubmissionIntentId(): string {
+  let out = "gint_";
+  for (let i = 0; i < 16; i += 1) {
+    out += ALPHABET[Math.floor(Math.random() * ALPHABET.length)]!;
+  }
+  return out;
 }
 
-export function grinReturnFlightKey(ownerUid: string, ledgerId: string, receiptId: string): string {
-  return `grin:return:${ownerUid}:${ledgerId}:${receiptId.trim()}`;
+export function grinCreateFlightKey(
+  ownerUid: string,
+  ledgerId: string,
+  intentId: string,
+  sessionGeneration: number
+): string {
+  return `grin:create:${ownerUid}:${ledgerId}:${sessionGeneration}:${intentId}`;
 }
 
-/** Acquire only from idle. Returns null when in-flight or completed. */
+export function grinReturnFlightKey(
+  ownerUid: string,
+  ledgerId: string,
+  receiptId: string,
+  intentId: string,
+  sessionGeneration: number
+): string {
+  return `grin:return:${ownerUid}:${ledgerId}:${receiptId.trim()}:${sessionGeneration}:${intentId}`;
+}
+
+/** Acquire only from idle. Returns null when this intent is in-flight or already completed. */
 export function acquireGrinMutationFlight(key: string): GrinMutationFlightOwner | null {
   if (!key) return null;
   const existing = flights.get(key);
@@ -41,7 +61,7 @@ export function markGrinMutationFlightCompleted(key: string, owner: GrinMutation
   entry.state = "completed";
 }
 
-/** Release only the owning attempt. Completed stays completed unless reset. */
+/** Release only an in-flight attempt owned by this caller. Completed intents stay completed. */
 export function releaseGrinMutationFlight(key: string, owner: GrinMutationFlightOwner): void {
   const entry = flights.get(key);
   if (!entry || entry.owner !== owner) return;
@@ -49,7 +69,6 @@ export function releaseGrinMutationFlight(key: string, owner: GrinMutationFlight
   flights.delete(key);
 }
 
-/** Test / reopen helper: clear completed so a new intent may start. */
 export function resetGrinMutationFlightForTests(key?: string): void {
   if (key) flights.delete(key);
   else flights.clear();

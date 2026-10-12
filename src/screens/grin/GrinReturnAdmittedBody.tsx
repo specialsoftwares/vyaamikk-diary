@@ -7,6 +7,7 @@ import {
   formatReportedArrivalDisplay,
   returnableLinesFromRecord,
 } from "@/services/grin/repository/grinReceiptSearch";
+import { mintSubmissionIntentId } from "@/services/grin/repository/grinMutationFlight";
 import type { GrinReturnPlan } from "@/services/grin/repository/grinReturnPlan";
 import type { GrinDispatchSession } from "@/services/grin/outbox/types";
 import { spacing } from "@/theme/spacing";
@@ -64,6 +65,8 @@ export function GrinReturnAdmittedBody({ session }: { session: GrinDispatchSessi
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [plan, setPlan] = useState<GrinReturnPlan | null>(null);
+  const [returnIntentId, setReturnIntentId] = useState(() => mintSubmissionIntentId());
+  const [resuming, setResuming] = useState(false);
   const [eligibilityOk, setEligibilityOk] = useState(true);
   const [eligibilityReason, setEligibilityReason] = useState<string | null>(null);
   const didAutoSelect = useRef(false);
@@ -109,7 +112,35 @@ export function GrinReturnAdmittedBody({ session }: { session: GrinDispatchSessi
       setEligibilityOk(eligibility.ok);
       setEligibilityReason(eligibility.ok ? null : eligibility.reason);
       const existingPlan = repo.getReturnPlan(receiptId);
-      if (existingPlan) setPlan(existingPlan);
+      if (existingPlan) {
+        setPlan(existingPlan);
+        setResuming(true);
+        setReturnIntentId(existingPlan.intentId);
+        setReason(existingPlan.reason);
+        setSelected(
+          Object.fromEntries(existingPlan.lines.map((line) => [line.lineId, line.returnQty.value]))
+        );
+        didAutoSelect.current = true;
+        userClearedSelection.current = true;
+        void repo.continueReturnPlan(receiptId).then((continued) => {
+          if (!continued) return;
+          setPlan(continued);
+          const resumedDone =
+            continued.lines.length > 0 && continued.lines.every((line) => line.status === "confirmed");
+          if (resumedDone) {
+            setResuming(false);
+            queueMicrotask(() => setReturnIntentId(mintSubmissionIntentId()));
+          }
+        }).catch((caught) => {
+          const mapped = grinMutationErrorMessage(caught, t, "grin.errReturn");
+          if (mapped.retired) {
+            maskRetired();
+            setError(t("grin.errSessionRetired"));
+            return;
+          }
+          setError(mapped.message);
+        });
+      }
     } catch (caught) {
       if (grinMutationErrorMessage(caught, t, "grin.errReturn").retired) {
         maskRetired();
@@ -206,19 +237,21 @@ export function GrinReturnAdmittedBody({ session }: { session: GrinDispatchSessi
         const nextPlan = await originRepo(origin).dispatchReturnSequence({
           receiptId,
           reason,
+          intentId: returnIntentId,
           lines: picks.map(([lineId, qtyRaw]) => {
             const line = record.effective.lines.find((l) => l.lineId === lineId)!;
             return { lineId, returnQty: quantity(qtyRaw.trim(), line.unit) };
           }),
         });
         setPlan(nextPlan);
+        const qtyBlocked = nextPlan.lines.some((line) => line.lastError === "quantity_edit_blocked");
         const anyFailed = nextPlan.lines.some(
           (line) =>
             line.status === "failed" ||
             line.status === "conflicted" ||
             line.status === "stopped_version_conflict"
         );
-        const allConfirmed = nextPlan.lines.every((line) => line.status === "confirmed");
+        const allConfirmed = nextPlan.lines.length > 0 && nextPlan.lines.every((line) => line.status === "confirmed");
         const anyPending = nextPlan.lines.some(
           (line) =>
             line.status === "queued" ||
@@ -226,10 +259,15 @@ export function GrinReturnAdmittedBody({ session }: { session: GrinDispatchSessi
             line.status === "pending_submit"
         );
         if (allConfirmed) {
+          queueMicrotask(() => setReturnIntentId(mintSubmissionIntentId()));
+          setResuming(false);
           router.back();
           return;
         }
-        if (anyFailed) {
+        setResuming(true);
+        if (qtyBlocked) {
+          setError(t("grin.returnQuantityLocked"));
+        } else if (anyFailed) {
           setError(t("grin.errReturnPartial"));
         } else if (anyPending) {
           setError(t("grin.returnQueuedNotConfirmed"));
@@ -245,12 +283,16 @@ export function GrinReturnAdmittedBody({ session }: { session: GrinDispatchSessi
           setError(t("grin.errReturnInFlight"));
           return;
         }
+        if (caught instanceof Error && caught.message === "return_intent_open") {
+          setError(t("grin.returnIntentOpen"));
+          return;
+        }
         setError(mapped.message);
       } finally {
         setBusy(false);
       }
     })();
-  }, [maskRetired, origin, reason, receiptId, record, router, selected, t]);
+  }, [maskRetired, origin, reason, receiptId, record, returnIntentId, router, selected, t]);
 
   const lineStatusById = useMemo(() => {
     const map: Record<string, string> = {};
@@ -266,6 +308,7 @@ export function GrinReturnAdmittedBody({ session }: { session: GrinDispatchSessi
         <Banner tone="info" message={t("grin.returnUnitHint")} />
         <Banner tone="info" message={t("grin.returnReplacementNote")} />
         {error ? <Banner tone="danger" message={error} /> : null}
+        {resuming ? <Banner tone="info" message={t("grin.returnResuming")} /> : null}
         {record ? (
           <FormSection title={t("grin.returnReceiptSummary")}>
             <GrinFieldRow

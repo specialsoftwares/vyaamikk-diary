@@ -75,6 +75,7 @@ export {
   grinMutationFlightState,
   grinReturnFlightKey,
   markGrinMutationFlightCompleted,
+  mintSubmissionIntentId,
   releaseGrinMutationFlight,
   resetGrinMutationFlightForTests,
 } from "./grinMutationFlight";

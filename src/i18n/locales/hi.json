@@ -3117,7 +3117,10 @@
       "incomplete": "This receipt projection is incomplete.",
       "refused_at_gate": "Refused-at-gate receipts are not eligible for return.",
       "no_lines": "This receipt has no lines to return."
-    }
+    },
+    "returnQuantityLocked": "A submitted return quantity cannot be changed. Wait until that line is confirmed, then start a new return for a different quantity.",
+    "returnIntentOpen": "A return is already in progress for this receipt. Resume it instead of starting another.",
+    "returnResuming": "Resuming the saved return. Reason, quantities and per-line progress were restored."
   },
   "materialMovement": {
     "pickerQuestion": "आवाजाही का प्रकार चुनें। माल प्राप्ति और निरीक्षण (GRIN) बेसिक प्राप्ति नोट से अलग है।"

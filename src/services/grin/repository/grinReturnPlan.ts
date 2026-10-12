@@ -33,6 +33,8 @@ export type GrinReturnLineIntent = {
 
 export type GrinReturnPlan = {
   planId: string;
+  /** Submission intent. A later independent return uses a different id. */
+  intentId: string;
   ownerUid: string;
   ledgerId: string;
   receiptId: string;
@@ -135,8 +137,27 @@ export function clearReturnPlan(
  * already queued/confirmed with the same quantity. Does not mint a second
  * command for successfully queued work merely because another line failed.
  */
+const SUBMITTED_STATUSES = new Set<GrinReturnLineStatus>([
+  "queued",
+  "confirmed",
+  "awaiting_confirmation",
+  "conflicted",
+  "failed",
+  "stopped_version_conflict",
+]);
+
+function sameQty(prev: GrinReturnLineIntent, pick: GrinReturnLinePick): boolean {
+  return prev.returnQty.value === pick.returnQty.value && prev.returnQty.unit === pick.returnQty.unit;
+}
+
+/**
+ * Merge picks into an existing plan.
+ * Submitted command identities are never replaced because a quantity was edited.
+ * Unfinished lines omitted from the new pick list are kept.
+ */
 export function upsertReturnPlan(input: {
   existing: GrinReturnPlan | null;
+  intentId: string;
   ownerUid: string;
   ledgerId: string;
   receiptId: string;
@@ -145,61 +166,71 @@ export function upsertReturnPlan(input: {
   nowUtc?: string;
 }): GrinReturnPlan {
   const nowUtc = input.nowUtc ?? new Date().toISOString();
-  const existingByLine = new Map(
-    (input.existing?.lines ?? []).map((line) => [line.lineId, line] as const)
-  );
-  const lines: GrinReturnLineIntent[] = input.picks.map((pick) => {
+  const existingLines = input.existing?.lines ?? [];
+  const existingByLine = new Map(existingLines.map((line) => [line.lineId, line] as const));
+  const seen = new Set<string>();
+  const lines: GrinReturnLineIntent[] = [];
+
+  for (const pick of input.picks) {
+    seen.add(pick.lineId);
     const prev = existingByLine.get(pick.lineId);
-    const sameQty =
-      prev &&
-      prev.returnQty.value === pick.returnQty.value &&
-      prev.returnQty.unit === pick.returnQty.unit;
-    if (
-      prev &&
-      sameQty &&
-      (prev.status === "queued" ||
-        prev.status === "confirmed" ||
-        prev.status === "awaiting_confirmation" ||
-        prev.status === "conflicted" ||
-        prev.status === "pending_submit" ||
-        prev.status === "failed" ||
-        prev.status === "stopped_version_conflict")
-    ) {
-      // Keep identity. Failed/pending_submit may retry the same commandId.
-      const retryable =
-        prev.status === "failed" ||
-        prev.status === "pending_submit" ||
-        prev.status === "stopped_version_conflict";
-      return {
-        ...prev,
+    if (!prev) {
+      lines.push({
+        lineId: pick.lineId,
         returnQty: pick.returnQty,
-        status:
-          prev.status === "confirmed" ||
-          prev.status === "queued" ||
-          prev.status === "awaiting_confirmation" ||
-          prev.status === "conflicted"
-            ? prev.status
-            : retryable
-              ? "pending_submit"
-              : prev.status,
-        lastError: retryable ? null : prev.lastError,
-      };
+        commandId: mintCommandId(),
+        status: "pending_submit",
+        lastError: null,
+      });
+      continue;
     }
-    return {
-      lineId: pick.lineId,
-      returnQty: pick.returnQty,
-      commandId: prev && sameQty ? prev.commandId : mintCommandId(),
-      status: "pending_submit",
-      lastError: null,
-    };
-  });
+    if (SUBMITTED_STATUSES.has(prev.status) && !sameQty(prev, pick)) {
+      lines.push({
+        ...prev,
+        lastError: "quantity_edit_blocked",
+      });
+      continue;
+    }
+    const retryable =
+      prev.status === "failed" ||
+      prev.status === "pending_submit" ||
+      prev.status === "stopped_version_conflict";
+    lines.push({
+      ...prev,
+      returnQty: SUBMITTED_STATUSES.has(prev.status) ? prev.returnQty : pick.returnQty,
+      commandId: prev.commandId,
+      status:
+        prev.status === "confirmed" ||
+        prev.status === "queued" ||
+        prev.status === "awaiting_confirmation" ||
+        prev.status === "conflicted"
+          ? prev.status
+          : retryable
+            ? "pending_submit"
+            : prev.status,
+      lastError:
+        prev.status === "queued" ||
+        prev.status === "awaiting_confirmation" ||
+        prev.status === "confirmed" ||
+        prev.status === "conflicted"
+          ? prev.lastError
+          : null,
+    });
+  }
+
+  for (const prev of existingLines) {
+    if (seen.has(prev.lineId)) continue;
+    if (prev.status === "confirmed") continue;
+    lines.push(prev);
+  }
 
   return {
     planId: input.existing?.planId ?? `grp_${mintCommandId().slice(5)}`,
+    intentId: input.existing?.intentId ?? input.intentId,
     ownerUid: input.ownerUid,
     ledgerId: input.ledgerId,
     receiptId: input.receiptId.trim(),
-    reason: input.reason.trim(),
+    reason: input.existing?.reason?.trim() ? input.existing.reason : input.reason.trim(),
     lines,
     createdAtUtc: input.existing?.createdAtUtc ?? nowUtc,
     updatedAtUtc: nowUtc,

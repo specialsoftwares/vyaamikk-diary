@@ -10,6 +10,7 @@ import {
   GRIN_APPLICATION_LEDGER_ID,
   grinCreateFlightKey,
   markGrinMutationFlightCompleted,
+  mintSubmissionIntentId,
   presentText,
   releaseGrinMutationFlight,
 } from "@/services/grin/repository";
@@ -47,6 +48,7 @@ export function GrinCreateAdmittedBody({ session }: { session: GrinDispatchSessi
 
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [createIntentId, setCreateIntentId] = useState(() => mintSubmissionIntentId());
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [buyerName, setBuyerName] = useState("");
   const [buyerGstin, setBuyerGstin] = useState("");
@@ -116,7 +118,12 @@ export function GrinCreateAdmittedBody({ session }: { session: GrinDispatchSessi
       setError(t("grin.errInvalidArrivalDate"));
       return;
     }
-    const flightKey = grinCreateFlightKey(session.ownerUid, GRIN_APPLICATION_LEDGER_ID);
+    const flightKey = grinCreateFlightKey(
+      session.ownerUid,
+      GRIN_APPLICATION_LEDGER_ID,
+      createIntentId,
+      session.dispatchGeneration
+    );
     const flightOwner = acquireGrinMutationFlight(flightKey);
     if (!flightOwner) {
       setError(t("grin.errCreateInFlight"));
@@ -238,6 +245,7 @@ export function GrinCreateAdmittedBody({ session }: { session: GrinDispatchSessi
       const saved = originRepo(origin).createQueued(draft);
       completed = true;
       markGrinMutationFlightCompleted(flightKey, flightOwner);
+      queueMicrotask(() => setCreateIntentId(mintSubmissionIntentId()));
       router.replace({ pathname: "/(app)/grin/[receiptId]", params: { receiptId: saved.receiptId } });
     } catch (caught) {
       const mapped = grinMutationErrorMessage(caught, t, "grin.errSave");
@@ -255,6 +263,7 @@ export function GrinCreateAdmittedBody({ session }: { session: GrinDispatchSessi
     buyerName,
     challan,
     custody,
+    createIntentId,
     damage,
     ewbGenerator,
     ewbKind,
@@ -280,6 +289,7 @@ export function GrinCreateAdmittedBody({ session }: { session: GrinDispatchSessi
     receivingEmployee,
     remarks,
     router,
+    session.dispatchGeneration,
     session.ownerUid,
     supplierGstin,
     supplierName,

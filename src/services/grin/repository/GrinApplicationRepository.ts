@@ -256,9 +256,16 @@ export class GrinApplicationRepository {
     this.assertLive("write");
     const receiptId = input.receiptId.trim();
     if (!input.reason.trim()) throw new Error("return_reason_required");
+    if (!input.intentId.trim()) throw new Error("return_intent_required");
     if (!input.lines.length) throw new Error("return_lines_required");
 
-    const flightKey = grinReturnFlightKey(this.ownerUid, this.ledgerId, receiptId);
+    const flightKey = grinReturnFlightKey(
+      this.ownerUid,
+      this.ledgerId,
+      receiptId,
+      input.intentId.trim(),
+      this.session.dispatchGeneration
+    );
     const flightOwner = acquireGrinMutationFlight(flightKey);
     if (!flightOwner) {
       throw new Error("return_flight_in_progress");
@@ -275,104 +282,28 @@ export class GrinApplicationRepository {
       }
 
       const existing = loadReturnPlan(this.db, this.ownerUid, this.ledgerId, receiptId);
+      const sameIntent = existing != null && existing.intentId === input.intentId.trim();
+      if (existing && !sameIntent) {
+        const uncertain = existing.lines.some(
+          (line) => line.status !== "confirmed"
+        );
+        if (uncertain) throw new Error("return_intent_open");
+      }
+      const picks = input.lines.map((line) => ({
+        lineId: line.lineId,
+        returnQty: cloneSnapshot(line.returnQty),
+      }));
       let plan = upsertReturnPlan({
-        existing,
+        existing: sameIntent ? existing : null,
+        intentId: input.intentId.trim(),
         ownerUid: this.ownerUid,
         ledgerId: this.ledgerId,
         receiptId,
         reason: input.reason,
-        picks: input.lines.map((line) => ({
-          lineId: line.lineId,
-          returnQty: cloneSnapshot(line.returnQty),
-        })),
+        picks,
       });
       saveReturnPlan(this.db, plan);
-
-      for (let i = 0; i < plan.lines.length; i += 1) {
-        this.assertLive("write");
-        plan = this.reconcileReturnPlanStatuses(plan);
-        saveReturnPlan(this.db, plan);
-        const line = plan.lines[i]!;
-        if (line.status === "confirmed") continue;
-        if (line.status === "conflicted" || line.status === "stopped_version_conflict") {
-          break;
-        }
-        if (line.status === "queued" || line.status === "awaiting_confirmation") {
-          if (input.drain) {
-            await input.drain();
-            this.assertLive("write");
-            plan = this.reconcileReturnPlanStatuses(plan);
-            saveReturnPlan(this.db, plan);
-            const after = plan.lines[i]!;
-            if (after.status === "confirmed") continue;
-            if (after.status === "conflicted" || after.status === "stopped_version_conflict") break;
-            after.status = "awaiting_confirmation";
-            saveReturnPlan(this.db, plan);
-            break;
-          }
-          line.status = "awaiting_confirmation";
-          saveReturnPlan(this.db, plan);
-          break;
-        }
-        if (line.status === "failed") {
-          line.status = "pending_submit";
-          line.lastError = null;
-        }
-        if (line.status !== "pending_submit") continue;
-
-        const priorBlocking = plan.lines.slice(0, i).some(
-          (prior) =>
-            prior.status !== "confirmed" &&
-            prior.status !== "conflicted" &&
-            prior.status !== "stopped_version_conflict"
-        );
-        if (priorBlocking) break;
-
-        try {
-          this.dispatchReturn({
-            receiptId,
-            reason: plan.reason,
-            lineId: line.lineId,
-            returnQty: line.returnQty,
-            commandId: line.commandId,
-          });
-          line.status = "queued";
-          line.lastError = null;
-          saveReturnPlan(this.db, plan);
-        } catch (caught) {
-          const message = caught instanceof Error ? caught.message : "return_queue_failed";
-          if (message === GRIN_SESSION_RETIRED || message === "owner_mismatch") throw caught;
-          if (message === GRIN_NO_CONFIRMED_VERSION || /version/i.test(message)) {
-            line.status = "stopped_version_conflict";
-            line.lastError = message;
-            saveReturnPlan(this.db, plan);
-            break;
-          }
-          line.status = "failed";
-          line.lastError = message;
-          saveReturnPlan(this.db, plan);
-          break;
-        }
-
-        if (input.drain) {
-          await input.drain();
-          this.assertLive("write");
-          plan = this.reconcileReturnPlanStatuses(plan);
-          saveReturnPlan(this.db, plan);
-          const after = plan.lines[i]!;
-          if (after.status === "confirmed") continue;
-          if (after.status === "conflicted" || after.status === "stopped_version_conflict") break;
-          after.status = "awaiting_confirmation";
-          saveReturnPlan(this.db, plan);
-          break;
-        }
-        line.status = "awaiting_confirmation";
-        saveReturnPlan(this.db, plan);
-        break;
-      }
-
-      plan = this.reconcileReturnPlanStatuses(plan);
-      saveReturnPlan(this.db, plan);
+      plan = await this.advanceReturnPlan(plan);
       if (allReturnLinesConfirmed(plan)) {
         completedAll = true;
         markGrinMutationFlightCompleted(flightKey, flightOwner);
@@ -387,6 +318,123 @@ export class GrinApplicationRepository {
         releaseGrinMutationFlight(flightKey, flightOwner);
       }
     }
+  }
+
+  /**
+   * Resume a persisted return after reopen / confirmation without a new user intent.
+   * Uses the outbox dispatch lifecycle. No-ops when nothing is unfinished.
+   */
+  async continueReturnPlan(receiptId: string): Promise<GrinReturnPlan | null> {
+    this.assertLive("write");
+    const existing = loadReturnPlan(this.db, this.ownerUid, this.ledgerId, receiptId.trim());
+    if (!existing) return null;
+    const flightKey = grinReturnFlightKey(
+      this.ownerUid,
+      this.ledgerId,
+      receiptId.trim(),
+      existing.intentId,
+      this.session.dispatchGeneration
+    );
+    const flightOwner = acquireGrinMutationFlight(flightKey);
+    if (!flightOwner) return this.reconcileReturnPlanStatuses(existing);
+    let completedAll = false;
+    try {
+      const plan = await this.advanceReturnPlan(existing);
+      if (allReturnLinesConfirmed(plan)) {
+        completedAll = true;
+        markGrinMutationFlightCompleted(flightKey, flightOwner);
+        clearReturnPlan(this.db, this.ownerUid, this.ledgerId, receiptId.trim());
+      }
+      return plan;
+    } catch (caught) {
+      releaseGrinMutationFlight(flightKey, flightOwner);
+      throw caught;
+    } finally {
+      if (!completedAll) releaseGrinMutationFlight(flightKey, flightOwner);
+    }
+  }
+
+  /**
+   * Production confirmation step. Reads the server-confirmed version via outbox
+   * dispatch — never increments a version locally and never rewrites a frozen digest.
+   */
+  private async driveReturnConfirmation(): Promise<void> {
+    this.assertLive("write");
+    await this.outbox.dispatchDue(this.session, `grin-return-${this.session.dispatchGeneration}`);
+  }
+
+  private async advanceReturnPlan(plan: GrinReturnPlan): Promise<GrinReturnPlan> {
+    let current = plan;
+    for (let i = 0; i < current.lines.length; i += 1) {
+      this.assertLive("write");
+      current = this.reconcileReturnPlanStatuses(current);
+      saveReturnPlan(this.db, current);
+      const line = current.lines[i]!;
+      if (line.status === "confirmed") continue;
+      if (line.status === "conflicted" || line.status === "stopped_version_conflict") break;
+      if (line.status === "queued" || line.status === "awaiting_confirmation") {
+        await this.driveReturnConfirmation();
+        this.assertLive("write");
+        current = this.reconcileReturnPlanStatuses(current);
+        saveReturnPlan(this.db, current);
+        const after = current.lines[i]!;
+        if (after.status === "confirmed") continue;
+        if (after.status === "conflicted" || after.status === "stopped_version_conflict") break;
+        after.status = "awaiting_confirmation";
+        saveReturnPlan(this.db, current);
+        break;
+      }
+      if (line.status === "failed") {
+        line.status = "pending_submit";
+        line.lastError = null;
+      }
+      if (line.status !== "pending_submit") continue;
+      const priorBlocking = current.lines.slice(0, i).some(
+        (prior) =>
+          prior.status !== "confirmed" &&
+          prior.status !== "conflicted" &&
+          prior.status !== "stopped_version_conflict"
+      );
+      if (priorBlocking) break;
+      try {
+        this.dispatchReturn({
+          receiptId: current.receiptId,
+          reason: current.reason,
+          lineId: line.lineId,
+          returnQty: line.returnQty,
+          commandId: line.commandId,
+        });
+        line.status = "queued";
+        line.lastError = null;
+        saveReturnPlan(this.db, current);
+      } catch (caught) {
+        const message = caught instanceof Error ? caught.message : "return_queue_failed";
+        if (message === GRIN_SESSION_RETIRED || message === "owner_mismatch") throw caught;
+        if (message === GRIN_NO_CONFIRMED_VERSION || /version/i.test(message)) {
+          line.status = "stopped_version_conflict";
+          line.lastError = message;
+          saveReturnPlan(this.db, current);
+          break;
+        }
+        line.status = "failed";
+        line.lastError = message;
+        saveReturnPlan(this.db, current);
+        break;
+      }
+      await this.driveReturnConfirmation();
+      this.assertLive("write");
+      current = this.reconcileReturnPlanStatuses(current);
+      saveReturnPlan(this.db, current);
+      const after = current.lines[i]!;
+      if (after.status === "confirmed") continue;
+      if (after.status === "conflicted" || after.status === "stopped_version_conflict") break;
+      after.status = "awaiting_confirmation";
+      saveReturnPlan(this.db, current);
+      break;
+    }
+    current = this.reconcileReturnPlanStatuses(current);
+    saveReturnPlan(this.db, current);
+    return current;
   }
 
   getReturnPlan(receiptId: string): GrinReturnPlan | null {

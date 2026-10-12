@@ -102,18 +102,14 @@ async function main(): Promise<void> {
     assert.equal(afterReg.effective.lines.length, 2);
     const originalJson = JSON.stringify(afterReg.original);
 
-    const drain = async () => {
-      await box.dispatchDue(session, "worker_ml_drain");
-    };
-
     const plan = await repo.dispatchReturnSequence({
       receiptId: RECEIPT,
       reason: "two-line surplus return",
+      intentId: "gint_two_line",
       lines: [
         { lineId: "line_1", returnQty: quantity("5", "bags") },
         { lineId: "line_2", returnQty: quantity("3", "bags") },
       ],
-      drain,
     });
     assert.equal(plan.lines.length, 2);
     assert.equal(plan.lines[0]?.status, "confirmed");
@@ -128,6 +124,17 @@ async function main(): Promise<void> {
     assert.equal(JSON.stringify(afterBoth.original), originalJson);
     const returns = afterBoth.events.filter((e) => e.type === "return_dispatched");
     assert.equal(returns.length, 2);
+
+    const later = await repo.dispatchReturnSequence({
+      receiptId: RECEIPT,
+      reason: "later independent return",
+      intentId: "gint_later_return",
+      lines: [{ lineId: "line_1", returnQty: quantity("1", "bags") }],
+    });
+    assert.equal(later.lines[0]?.status, "confirmed");
+    assert.notEqual(later.lines[0]?.commandId, cmd1);
+    assert.equal(box.getConfirmedProjection(OWNER, LEDGER, RECEIPT)?.eventVersion, 4);
+    assert.equal(JSON.stringify(box.getConfirmedProjection(OWNER, LEDGER, RECEIPT)?.original), originalJson);
     assert.equal(
       returns.some((e) => e.typedChanges.lineId === "line_1" && (e.typedChanges.returnQty as { value: string }).value === "5"),
       true
@@ -136,6 +143,51 @@ async function main(): Promise<void> {
       returns.some((e) => e.typedChanges.lineId === "line_2" && (e.typedChanges.returnQty as { value: string }).value === "3"),
       true
     );
+
+    // Lost response: mutate commits, then the response is dropped. Production
+    // dispatch reconciles and continues the next line. No test drain.
+    const RECEIPT_LOST = "grcp_f2_mlret_lost";
+    repo.createQueued(
+      sampleRegisterBody({
+        receiptId: RECEIPT_LOST,
+        lines: [
+          sampleLine({ lineId: "line_1", physicallyReceived: quantity("12", "bags") }),
+          sampleLine({ lineId: "line_2", physicallyReceived: quantity("8", "bags") }),
+        ],
+      })
+    );
+    await box.dispatchDue(session, "worker_ml_reg_lost");
+    const originalMutate = server.mutate.bind(server);
+    let droppedLostResponse = false;
+    server.mutate = (async (input) => {
+      const result = await originalMutate(input);
+      if (!droppedLostResponse && input.envelope.type === "dispatchReturn") {
+        droppedLostResponse = true;
+        const err = new Error("lost_server_response");
+        (err as { code?: string }).code = "network_ambiguous";
+        throw err;
+      }
+      return result;
+    }) as typeof server.mutate;
+    const lost = await repo.dispatchReturnSequence({
+      receiptId: RECEIPT_LOST,
+      reason: "lost response",
+      intentId: "gint_lost",
+      lines: [
+        { lineId: "line_1", returnQty: quantity("2", "bags") },
+        { lineId: "line_2", returnQty: quantity("1", "bags") },
+      ],
+    });
+    server.mutate = originalMutate;
+    assert.equal(droppedLostResponse, true);
+    assert.equal(lost.lines[0]?.status, "confirmed");
+    assert.equal(lost.lines[1]?.status, "confirmed");
+    assert.notEqual(lost.lines[0]?.commandId, lost.lines[1]?.commandId);
+    const lostCmds = box.listCommandsForReceipt(OWNER, LEDGER, RECEIPT_LOST).filter(
+      (c) => c.commandType === "dispatchReturn"
+    );
+    assert.equal(lostCmds.length, 2);
+    assert.equal(lostCmds.filter((c) => c.localState === "issued").length, 2);
 
     // Partial retry: L1 queues, L2 fails to queue (no confirmed version forced), then retry.
     const RECEIPT2 = "grcp_f2_mlret_partial";
@@ -165,11 +217,11 @@ async function main(): Promise<void> {
     const partial = await repo.dispatchReturnSequence({
       receiptId: RECEIPT2,
       reason: "partial retry",
+      intentId: "gint_partial",
       lines: [
         { lineId: "line_1", returnQty: quantity("2", "bags") },
         { lineId: "line_2", returnQty: quantity("1", "bags") },
       ],
-      drain,
     });
     assert.equal(partial.lines[0]?.status, "confirmed");
     assert.equal(partial.lines[1]?.status, "failed");
@@ -185,11 +237,11 @@ async function main(): Promise<void> {
     const retried = await repo.dispatchReturnSequence({
       receiptId: RECEIPT2,
       reason: "partial retry",
+      intentId: "gint_partial",
       lines: [
         { lineId: "line_1", returnQty: quantity("2", "bags") },
         { lineId: "line_2", returnQty: quantity("1", "bags") },
       ],
-      drain,
     });
     assert.equal(retried.lines[0]?.commandId, stableL1, "must not mint another command for confirmed L1");
     assert.equal(retried.lines[1]?.commandId, stableL2, "must preserve L2 identity on retry");
@@ -211,30 +263,36 @@ async function main(): Promise<void> {
       })
     );
     await box.dispatchDue(session, "worker_ml_reg3");
-    let releaseDrain: (() => void) | null = null;
-    const blockedDrain = new Promise<void>((resolve) => {
-      releaseDrain = resolve;
+    let releaseGate: (() => void) | null = null;
+    const gate = new Promise<void>((resolve) => {
+      releaseGate = resolve;
     });
+    const originalDue = box.dispatchDue.bind(box);
+    let holdNext = true;
+    box.dispatchDue = (async (sess, worker, limit) => {
+      if (holdNext) {
+        holdNext = false;
+        await gate;
+      }
+      return originalDue(sess, worker, limit);
+    }) as typeof box.dispatchDue;
     const first = repo.dispatchReturnSequence({
       receiptId: RECEIPT3,
       reason: "flight",
+      intentId: "gint_flight",
       lines: [{ lineId: "line_1", returnQty: quantity("1", "bags") }],
-      drain: async () => {
-        await blockedDrain;
-        await box.dispatchDue(session, "worker_ml_flight");
-      },
     });
     await assert.rejects(
       () =>
         repo.dispatchReturnSequence({
           receiptId: RECEIPT3,
           reason: "flight",
+          intentId: "gint_flight",
           lines: [{ lineId: "line_1", returnQty: quantity("1", "bags") }],
-          drain,
         }),
       /return_flight_in_progress/
     );
-    releaseDrain!();
+    releaseGate!();
     const firstPlan = await first;
     assert.equal(firstPlan.lines[0]?.status, "confirmed");
 
@@ -254,8 +312,8 @@ async function main(): Promise<void> {
         repo.dispatchReturnSequence({
           receiptId: RECEIPT4,
           reason: "retired",
+          intentId: "gint_retired",
           lines: [{ lineId: "line_1", returnQty: quantity("1", "bags") }],
-          drain,
         }),
       (err: unknown) => err instanceof Error && /session_retired|owner_mismatch/.test(err.message)
     );
@@ -278,35 +336,54 @@ async function main(): Promise<void> {
       })
     );
     await box.dispatchDue(session, "worker_ml_reg5");
+    const origDue = box.dispatchDue.bind(box);
+    let skipConfirmations = 1;
+    box.dispatchDue = (async (sess, worker, limit) => {
+      if (skipConfirmations > 0) {
+        skipConfirmations -= 1;
+        return { processed: 0, results: [] };
+      }
+      return origDue(sess, worker, limit);
+    }) as typeof box.dispatchDue;
     const pendingPlan = await repo.dispatchReturnSequence({
       receiptId: RECEIPT5,
       reason: "reopen pending",
+      intentId: "gint_reopen",
       lines: [
         { lineId: "line_1", returnQty: quantity("1", "bags") },
         { lineId: "line_2", returnQty: quantity("1", "bags") },
       ],
-      // no drain — stops after queueing L1
     });
     assert.equal(pendingPlan.lines[0]?.status, "awaiting_confirmation");
     assert.equal(pendingPlan.lines[1]?.status, "pending_submit");
     const pendingCmd = pendingPlan.lines[0]!.commandId;
+    const pendingCmd2 = pendingPlan.lines[1]!.commandId;
+
+    skipConfirmations = 5;
+    const edited = await repo.dispatchReturnSequence({
+      receiptId: RECEIPT5,
+      reason: "reopen pending",
+      intentId: "gint_reopen",
+      lines: [{ lineId: "line_1", returnQty: quantity("9", "bags") }],
+    });
+    assert.equal(edited.lines[0]?.commandId, pendingCmd, "quantity edit must not replace a submitted command");
+    assert.equal(edited.lines[0]?.returnQty.value, "1");
+    assert.equal(edited.lines[0]?.lastError, "quantity_edit_blocked");
+    assert.equal(
+      edited.lines.find((line) => line.lineId === "line_2")?.commandId,
+      pendingCmd2,
+      "an omitted unfinished line must stay in the plan"
+    );
+    assert.equal(edited.lines.find((line) => line.lineId === "line_2")?.status, "pending_submit");
 
     db.close();
     db = openHostSqlite(dbPath);
     box = new GrinOutbox({ db, server });
     session = box.beginOwnerSession(OWNER);
     repo = repoFor(box, db, session);
-    const resumed = await repo.dispatchReturnSequence({
-      receiptId: RECEIPT5,
-      reason: "reopen pending",
-      lines: [
-        { lineId: "line_1", returnQty: quantity("1", "bags") },
-        { lineId: "line_2", returnQty: quantity("1", "bags") },
-      ],
-      drain: async () => {
-        await box.dispatchDue(session, "worker_ml_reopen");
-      },
-    });
+    const resumed = await repo.continueReturnPlan(RECEIPT5);
+    assert.ok(resumed);
+    assert.equal(resumed.intentId, "gint_reopen");
     assert.equal(resumed.lines[0]?.commandId, pendingCmd);
     assert.equal(resumed.lines[0]?.status, "confirmed");
     assert.equal(resumed.lines[1]?.status, "confirmed");
