@@ -20,6 +20,13 @@ Play App Signing SHA-1, copied from the App signing key control: `D2:23:F0:A5:EF
 
 `GOOGLE_MAPS_ANDROID_API_KEY` is not in the EAS production environment, and `eas secret:list` is empty. Google Cloud credentials could not be opened (passkey, too many failed attempts). The Firebase web key was not narrowed. No Maps credential was created or restricted, and Maps billing was not enabled. This build keeps the existing resolver: without that secret, `MapView` stays unmounted.
 
+| Item | Value |
+|---|---|
+| **Build commit** | `630655c49c12dd70d6862885b72f384d44509f99`. CI **`38427649492` SUCCESS** / verify **`115401157113`**. |
+| **EAS** | `e154edd3-2e95-47bf-8945-ff4b56521ade` FINISHED. Profile `internal-grin`. No auto-submit. versionName `1.0.0`, versionCode **26**. Purchase entry and quota upsell `0`. |
+| **AAB SHA-256** | `bf9885fc2086b6841fcd3a0731c0766de272288e5959b6eccbb9b6cc6cba7ac9`. Upload certificate SHA-256 matches the established upload key. Manifest has no Maps API key. Updates `ENABLED=false`. |
+| **Internal upload** | Not completed. versionCode 26 was still absent. Draft release 14 is open. Do not rebuild. |
+
 ## Work board — CLOSED 2026-10-13 (no further security or architecture review)
 
 Closed against CI-tested source `c8cdbc55933864e474cef4593bc522ca8570af7a`. Docs tip `da4b004` only records that run. Agent 5 stopped at its model limit. The coordinator ran the flipped QA tests. That is coordinator review, not an independent QA pass.
