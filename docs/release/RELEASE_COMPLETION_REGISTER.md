@@ -18,6 +18,8 @@ PR #34 is merged into `integration/grin-g1-g5-source`. Integration HEAD is `1792
 
 Source `app.json` still says versionCode 26 because that was the previous integration tip. versionCode 26 was built as the Letterhead-containing AAB `630655c` and was not the removal. Do not upload that AAB as this candidate. The next Play versionCode is not selected until a fresh bundle inventory returns. A billing-enabled Internal build has not been started.
 
+Play new-purchase admission is now separate from already-owned lifecycle in source `e494f278` (integration merge `eb4c05d`). `PLAY_BILLING_ENABLED` still defaults off and still blocks a first bind. RTDN, reconciliation, refunds, and entitlement correction for a token the account already owns are no longer stopped by that flag. This is not deployed. A new-grant notification while admission is closed returns HTTP 503 and is not treated as delivered.
+
 vc26 was last seen with Internal draft 14 empty and version 25 (1.0.0) as the previous release. That Play page is being read again; until that read finishes, the earlier observation is historical, not a fresh inventory.
 
 Maps unavailable in vc26; missing-key fallback test only. The Cloud passkey was not retried, and Maps credentials were not changed.
