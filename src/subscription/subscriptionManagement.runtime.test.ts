@@ -4,8 +4,10 @@
  */
 import assert from "node:assert/strict";
 
-import { interpretPurchaseAdmission } from "@/billing/iap/purchaseAdmission";
-import type { PurchaseAdmissionRead } from "@/billing/iap/purchaseAdmission";
+import {
+  interpretPurchaseAdmission,
+  type PurchaseAdmissionRead,
+} from "@/billing/iap/purchaseAdmission";
 import { __setSubscriptionPurchaseEntryEnabledForTests } from "@/billing/iap/purchaseEntryGate";
 import { emptyBillingDetails, type BillingDetailsRead } from "@/subscription/billingDetailsReader";
 import {
@@ -583,7 +585,7 @@ async function main() {
   }
 
   {
-    const pending: Array<(value: PurchaseAdmissionRead) => void> = [];
+    const pending: ((value: PurchaseAdmissionRead) => void)[] = [];
     let upgrades = 0;
     const runtime = createSubscriptionManagementRuntime({
       readUsage: async () => ({ kind: "missing" }),
