@@ -38,25 +38,6 @@ export {
   type TemplateWarningKey,
 } from "./letterheadTemplateService";
 export {
-  LetterheadAssetError,
-  MAX_ASSET_BYTES,
-  hasMediaLibraryPermission,
-  pickLetterheadAsset,
-  type LetterheadAssetKind,
-  type PickedLetterheadAsset,
-} from "./letterheadAssetService";
-export {
-  LetterheadCandidateError,
-  MAX_TEMPLATE_COMPRESSED_BYTES,
-  MAX_TEMPLATE_LONG_EDGE_PX,
-  assertCandidateOwner,
-  persistLetterheadCandidateFromAsset,
-  persistLetterheadCandidateFromLocalFile,
-  readCandidateDataUri,
-  retireLetterheadCandidate,
-  type LetterheadCandidateImage,
-} from "./letterheadCandidateImage";
-export {
   DEFAULT_GENERATED_LAYOUT,
   isLetterheadGeneratedLayout,
   validateWritingMargins,
@@ -74,12 +55,6 @@ export {
   pdfAlignClass,
   SUPPORTED_APPEARANCES,
 } from "./letterheadVisualSpec";
-export {
-  getDocumentScanner,
-  getDocumentScannerCapability,
-  scanLetterheadDocument,
-  setDocumentScannerForTests,
-} from "./documentScanner";
 export {
   LETTERHEAD_DRAFT_KIND,
   LETTERHEAD_DRAFT_SCOPE,

@@ -14,9 +14,9 @@
       "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Vyaamikk Diary can attach optional location footprints to records you save while the app is open, so you can view them on Calendar & Maps. Location is not collected in the background.",
-        "NSPhotoLibraryUsageDescription": "Vyaamikk Diary needs access to your photo library so you can attach an official letterhead image for letterhead PDFs.",
+        "NSPhotoLibraryUsageDescription": "Vyaamikk Diary needs access to your photo library so you can choose a profile logo, cash-paid receipt photo, or customer photo.",
         "NSPhotoLibraryAddUsageDescription": "Vyaamikk Diary can save exported PDFs to your photo library if you choose to.",
-        "NSCameraUsageDescription": "Vyaamikk Diary uses the camera only when you choose to attach a letterhead image, cash-paid receipt photo, or customer photo to your own business records.",
+        "NSCameraUsageDescription": "Vyaamikk Diary uses the camera only when you choose to attach a cash-paid receipt photo or customer photo to your own business records.",
         "ITSAppUsesNonExemptEncryption": false
       }
     },
@@ -98,8 +98,8 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Vyaamikk Diary needs access to your photo library so you can attach an official letterhead image for letterhead PDFs.",
-          "cameraPermission": "Vyaamikk Diary uses the camera only when you choose to attach a letterhead image, cash-paid receipt photo, or customer photo to your own business records.",
+          "photosPermission": "Vyaamikk Diary needs access to your photo library so you can choose a profile logo, cash-paid receipt photo, or customer photo.",
+          "cameraPermission": "Vyaamikk Diary uses the camera only when you choose to attach a cash-paid receipt photo or customer photo to your own business records.",
           "microphonePermission": false
         }
       ],

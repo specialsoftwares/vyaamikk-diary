@@ -76,28 +76,11 @@ test("never produces layout taller/wider than the frame", () => {
   }
 });
 
-test("setup and LetterheadPreview share page art; complete page still uses contain", () => {
-  const root = path.join(import.meta.dirname, "../../..");
+test("retired setup does not mount letterhead page art", () => {
   const setup = fs.readFileSync(
-    path.join(root, "app/(app)/letterhead/setup.tsx"),
+    path.join(import.meta.dirname, "../../../app/(app)/letterhead/setup.tsx"),
     "utf8"
   );
-  const preview = fs.readFileSync(
-    path.join(root, "src/components/letterhead/LetterheadPreview.tsx"),
-    "utf8"
-  );
-  const art = fs.readFileSync(
-    path.join(root, "src/components/letterhead/LetterheadPageArt.tsx"),
-    "utf8"
-  );
-  const component = fs.readFileSync(
-    path.join(root, "src/components/letterhead/ImportedLetterheadImage.tsx"),
-    "utf8"
-  );
-  assert.match(setup, /LetterheadPageArt/);
-  assert.match(preview, /LetterheadPageArt/);
-  assert.match(art, /ImportedLetterheadImage/);
-  assert.match(art, /headerBandHeightPct/);
-  assert.match(component, /computeImportedContainLayout/);
-  assert.doesNotMatch(component, /width:\s*["']100%["']/);
+  assert.doesNotMatch(setup, /LetterheadPageArt|ImportedLetterheadImage/);
+  assert.match(setup, /letterhead\/history/);
 });

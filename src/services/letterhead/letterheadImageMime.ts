@@ -1,6 +1,6 @@
 /**
- * Magic-byte admission for letterhead template images.
- * Picker MIME alone is never sufficient.
+ * Magic-byte admission for letterhead images already stored.
+ * The template picker has been removed. Picker MIME alone is never sufficient.
  */
 
 /** Staging + final paths to delete after copy/move/decode/ownership failure. */

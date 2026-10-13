@@ -12,6 +12,16 @@ TOOLING (ops-guard suite; not application CI).
 
 ---
 
+## Letterhead removed from the active product — source only
+
+Owner decision: Letterhead creation, template management, scanning, editing, preview, and new Letterhead PDF generation are removed from the next source candidate. Existing letters, drafts, PDFs, images, and quota accounting stay. Live Rules, Functions, billing, purge, and retention policy were not changed. Older installed clients can still use Letterhead; this client does not disable them.
+
+vc26 was rechecked on the open Internal prepare page (draft id 14) after the manual upload attempt. The draft still has no app bundle. Release name and notes are empty. Version 25 (1.0.0) remains the previous release and is not included. versionCode 26 is not on the Internal track. The AAB built from `630655c` still contains Letterhead and is not this removal. Do not rebuild or upload it as the removed-feature version.
+
+Maps unavailable in vc26; missing-key fallback test only. The Cloud passkey was not retried, and Maps credentials were not changed.
+
+Inventory and the compatibility boundary: `docs/release/LETTERHEAD_REMOVAL.md`.
+
 ## Internal release in progress — 2026-10-13
 
 Play bundle explorer, 12 versions, read before this commit: **25 Active**; 24, 23, 22, 20, 19, 17, 16, 15, 14, 13, 10 Inactive. Absent: 11, 12, 18, 21, and every code above 25. Next in-place code is **26**.

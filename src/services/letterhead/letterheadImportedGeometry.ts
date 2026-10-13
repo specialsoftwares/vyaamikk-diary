@@ -1,6 +1,7 @@
 /**
- * Pure contain geometry for imported letterhead preview frames.
- * scale = min(frameW/imgW, frameH/imgH); top-aligned; horizontally centred.
+ * Pure contain geometry for a stored complete-page letterhead image.
+ * The preview screen is gone. This stays so an old image is never stretched
+ * if a reader has to measure it. scale = min(frameW/imgW, frameH/imgH).
  */
 
 import { LETTERHEAD_A4_ASPECT } from "./letterheadVisualSpec";

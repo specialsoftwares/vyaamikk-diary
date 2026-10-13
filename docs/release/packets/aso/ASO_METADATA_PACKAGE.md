@@ -1,5 +1,7 @@
 # Vyaamikk Diary — ASO metadata package (source preparation)
 
+**2026-10-13:** Letterhead is removed from the active product. Do not submit the letterhead lines below as the current listing. Historical copy is kept so this packet is not rewritten.
+
 Date: 2026-10-08 · **Not published.** No Play Console writes from this packet.
 
 Product only: **Vyaamikk Diary** (business records / documents). Not Samadhaan, not job matching, not labour onboarding, not GST filing, not guaranteed ITC.

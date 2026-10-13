@@ -7,8 +7,6 @@ export interface ComposerOption {
   /** i18n key under composer.options.* */
   labelKey: string;
   subtitleKey: string;
-  /** Routes into letterhead module instead of generic composer form. */
-  routesToLetterhead?: boolean;
 }
 
 /** Sub-types under Work & team (+ New record drill-down). */
@@ -20,12 +18,6 @@ export interface WorkTeamSubOption {
 
 /** Business-purpose composer options — no generic "Other". */
 export const COMPOSER_OPTIONS: ComposerOption[] = [
-  {
-    type: "letterhead_matter",
-    labelKey: "letterheadMatter",
-    subtitleKey: "letterheadMatterSub",
-    routesToLetterhead: true,
-  },
   {
     type: "business_cash_given",
     labelKey: "cashGiven",

@@ -1,3 +1,8 @@
+/**
+ * Compatibility write for a letterhead save that was already started.
+ * No screen calls this. Older installed clients can still create letters.
+ * Do not use it to start a new letter from this version.
+ */
 import { AppError } from "@/domain/errors";
 import type { UserProfile } from "@/domain/types";
 import type { EntryLocation } from "@/domain/businessEntry";

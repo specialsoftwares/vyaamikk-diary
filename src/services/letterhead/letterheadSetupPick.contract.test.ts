@@ -1,7 +1,6 @@
 /**
- * Source contract: letterhead setup / asset pick must not request
- * ImagePicker `base64: true` for the template path (avoids huge bridge
- * payloads). Storage must not use uploadString (see userStorage contract).
+ * Letterhead template picking is no longer a product path.
+ * Shared attachment upload still refuses uploadString and huge base64 payloads.
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -12,24 +11,19 @@ import test from "node:test";
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "../../..");
 
-test("setup.tsx template pick uses base64: false and candidate file persist", () => {
-  const setup = readFileSync(join(root, "app/(app)/letterhead/setup.tsx"), "utf8");
-  assert.match(setup, /base64:\s*false/);
-  assert.match(setup, /persistLetterheadCandidateFromAsset/);
-  assert.doesNotMatch(setup, /base64:\s*true/);
+test("retired letterhead screens do not pick or scan a template", () => {
+  for (const rel of [
+    "app/(app)/letterhead/setup.tsx",
+    "app/(app)/letterhead/generate.tsx",
+    "app/(app)/letterhead/index.tsx",
+  ]) {
+    const src = readFileSync(join(root, rel), "utf8");
+    assert.match(src, /Redirect href="\/\(app\)\/letterhead\/history"/);
+    assert.doesNotMatch(src, /ImagePicker|launchDocumentScanner|base64:\s*true|persistLetterheadCandidate/);
+  }
 });
 
-test("letterheadAssetService does not request picker base64", () => {
-  const asset = readFileSync(join(here, "letterheadAssetService.ts"), "utf8");
-  assert.match(asset, /base64:\s*false/);
-  assert.match(asset, /FileSystem\.readAsStringAsync/);
-});
-
-test("LetterheadPreview uses contain not stretch", () => {
-  const preview = readFileSync(
-    join(root, "src/components/letterhead/LetterheadPreview.tsx"),
-    "utf8"
-  );
-  assert.match(preview, /resizeMode="contain"/);
-  assert.doesNotMatch(preview, /resizeMode="stretch"/);
+test("shared storage upload does not use uploadString", () => {
+  const storage = readFileSync(join(root, "src/services/storage/userStorage.ts"), "utf8");
+  assert.doesNotMatch(storage, /uploadString\(/);
 });

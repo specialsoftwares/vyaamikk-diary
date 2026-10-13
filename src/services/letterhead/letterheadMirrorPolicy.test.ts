@@ -35,9 +35,9 @@ const docsFirebaseSrc = fs.readFileSync(docsFirebasePath, "utf8");
 const atomicBillableSrc = fs.readFileSync(atomicBillablePath, "utf8");
 const createSrc = fs.readFileSync(createPath, "utf8");
 
-assert.match(createSrc, /title:\s*""/);
-assert.match(createSrc, /if \(!values\.subject\?\.trim\(\)\)/);
-assert.match(createSrc, /const title = docInput\.title \|\| docInput\.subject/);
+assert.match(createSrc, /draftPayloadToLetterheadInput/);
+assert.doesNotMatch(createSrc, /saveLetterheadCreateWithPdf/);
+assert.doesNotMatch(createSrc, /if \(!values\.subject\?\.trim\(\)\)/);
 assert.doesNotMatch(createSrc, /if \(!values\.title\?\.trim\(\)\)/);
 
 assert.equal(LETTERHEAD_MIRROR_POLICY_STATUS, "adopted");

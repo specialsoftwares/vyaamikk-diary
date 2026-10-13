@@ -1,5 +1,7 @@
 /**
- * Geometric header crop. The suggestion uses the photo's aspect ratio.
+ * Geometric header crop retained for historical PDF fixtures.
+ * The editor that applied this crop has been removed.
+ * The suggestion uses the photo's aspect ratio.
  * It does not inspect pixels and does not claim to find a printed header.
  */
 

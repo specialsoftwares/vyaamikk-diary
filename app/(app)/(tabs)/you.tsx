@@ -234,7 +234,7 @@ export default function YouTab() {
         | "purchase_order"
         | "customer_credit"
         | "material_movement",
-      routesToLetterhead?: boolean,
+      _routesToLetterhead?: boolean,
       routesToProfessionalPack?: boolean,
       routesToPurchaseOrder?: boolean,
       routesToCustomerCredit?: boolean
@@ -260,13 +260,6 @@ export default function YouTab() {
         // bypassed the whole taxonomy; do not route to /form from here.
         router.push({
           pathname: "/(app)/professional-pack",
-          params: { fromPicker: "1" },
-        });
-        return;
-      }
-      if (routesToLetterhead) {
-        router.push({
-          pathname: "/(app)/letterhead",
           params: { fromPicker: "1" },
         });
         return;

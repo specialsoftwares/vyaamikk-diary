@@ -1,5 +1,9 @@
 # Next internal build — versionCode 26 selected
 
+**Later source, not this packet:** Letterhead removal is a new candidate after `209cb69`. The versionCode 26 AAB from `630655c` still contains Letterhead. Do not rebuild or upload that AAB as the removed-feature version. The next versionCode is unread until the next Play inventory.
+
+
+
 Play bundle explorer on 2026-10-13 listed 12 versions. Highest uploaded is 25 (Active). 26 was not present. This commit sets versionCode 26. It does not merge to main, enable billing, run purge, or open a public track. The live Maps credential was not changed.
 
 ## Source

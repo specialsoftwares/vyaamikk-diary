@@ -178,7 +178,7 @@ export function ComposerPickerSheet({
         key: opt.type,
         labelKey: opt.labelKey,
         subtitleKey: opt.subtitleKey,
-        onPress: () => onPickRef.current(opt.type, opt.routesToLetterhead),
+        onPress: () => onPickRef.current(opt.type),
       };
     }
     for (const opt of WORK_TEAM_SUB_OPTIONS) {
@@ -205,7 +205,7 @@ export function ComposerPickerSheet({
       },
       { titleKey: "composer.groups.materialMovement", keys: ["material_movement"] },
       { titleKey: "composer.groups.workTeam", keys: ["work_team"] },
-      { titleKey: "composer.groups.documents", keys: ["letterhead_matter", "professional_pack"] },
+      { titleKey: "composer.groups.documents", keys: ["professional_pack"] },
     ],
     []
   );

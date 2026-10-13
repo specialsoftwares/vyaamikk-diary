@@ -1,5 +1,7 @@
 # Website + Android App Links — handoff (not deployed)
 
+**2026-10-13:** Do not add `/features/letterhead-pdf` as a current product page. Letterhead creation is removed. Saved letters remain private account data.
+
 Date: 2026-10-08 · Mobile tree: `feature/unified-material-movement-aso`
 
 **Authoritative origin:** `https://vyaamikk.specialsoftwares.com`  
