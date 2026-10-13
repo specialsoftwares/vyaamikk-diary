@@ -12,11 +12,13 @@ TOOLING (ops-guard suite; not application CI).
 
 ---
 
-## Letterhead removed from the active product — source only
+## Letterhead removal is the integration head — source only
 
-Owner decision: Letterhead creation, template management, scanning, editing, preview, and new Letterhead PDF generation are removed from the next source candidate. Existing letters, drafts, PDFs, images, and quota accounting stay. Live Rules, Functions, billing, purge, and retention policy were not changed. Older installed clients can still use Letterhead; this client does not disable them.
+PR #34 is merged into `integration/grin-g1-g5-source`. Integration HEAD is `1792d79a7a3b58cae5913e6d46ccef4902bfcb37`. CI on that exact source is run `38458982309` / verify `115508928348`, success. Letterhead creation, scanning, cropping, and new PDF generation stay removed. Saved letters and drafts stay readable, bound to the current session. Live Rules, Functions, billing, purge, and retention were not changed by that merge.
 
-vc26 was rechecked on the open Internal prepare page (draft id 14) after the manual upload attempt. The draft still has no app bundle. Release name and notes are empty. Version 25 (1.0.0) remains the previous release and is not included. versionCode 26 is not on the Internal track. The AAB built from `630655c` still contains Letterhead and is not this removal. Do not rebuild or upload it as the removed-feature version.
+Source `app.json` still says versionCode 26 because that was the previous integration tip. versionCode 26 was built as the Letterhead-containing AAB `630655c` and was not the removal. Do not upload that AAB as this candidate. The next Play versionCode is not selected until a fresh bundle inventory returns. A billing-enabled Internal build has not been started.
+
+vc26 was last seen with Internal draft 14 empty and version 25 (1.0.0) as the previous release. That Play page is being read again; until that read finishes, the earlier observation is historical, not a fresh inventory.
 
 Maps unavailable in vc26; missing-key fallback test only. The Cloud passkey was not retried, and Maps credentials were not changed.
 
