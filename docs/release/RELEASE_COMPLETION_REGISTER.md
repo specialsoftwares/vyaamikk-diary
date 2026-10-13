@@ -12,6 +12,14 @@ TOOLING (ops-guard suite; not application CI).
 
 ---
 
+## Internal release in progress — 2026-10-13
+
+Play bundle explorer, 12 versions, read before this commit: **25 Active**; 24, 23, 22, 20, 19, 17, 16, 15, 14, 13, 10 Inactive. Absent: 11, 12, 18, 21, and every code above 25. Next in-place code is **26**.
+
+Play App Signing SHA-1, copied from the App signing key control: `D2:23:F0:A5:EF:FD:8E:2E:42:17:52:D3:5A:D7:A0:0E:19:F8:2E:59`. That matches the previously unmatched Firebase SHA-1 `d223f0a5…`. The upload certificate was not used.
+
+`GOOGLE_MAPS_ANDROID_API_KEY` is not in the EAS production environment, and `eas secret:list` is empty. Google Cloud credentials could not be opened (passkey, too many failed attempts). The Firebase web key was not narrowed. No Maps credential was created or restricted, and Maps billing was not enabled. This build keeps the existing resolver: without that secret, `MapView` stays unmounted.
+
 ## Work board — CLOSED 2026-10-13 (no further security or architecture review)
 
 Closed against CI-tested source `c8cdbc55933864e474cef4593bc522ca8570af7a`. Docs tip `da4b004` only records that run. Agent 5 stopped at its model limit. The coordinator ran the flipped QA tests. That is coordinator review, not an independent QA pass.

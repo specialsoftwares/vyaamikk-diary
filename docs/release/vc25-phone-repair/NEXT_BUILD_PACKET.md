@@ -1,6 +1,6 @@
-# Next internal build — not started
+# Next internal build — versionCode 26 selected
 
-This packet describes the source correction after `3be660d600001a170537bc93175d7e2672a08046`. It does not authorize an AAB, a Play upload, a main merge, billing, purge, or a public track. It does not change the live Maps credential.
+Play bundle explorer on 2026-10-13 listed 12 versions. Highest uploaded is 25 (Active). 26 was not present. This commit sets versionCode 26. It does not merge to main, enable billing, run purge, or open a public track. The live Maps credential was not changed.
 
 ## Source
 
