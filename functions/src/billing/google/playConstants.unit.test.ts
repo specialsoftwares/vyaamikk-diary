@@ -16,6 +16,7 @@ import {
   assertPlayBillingTesterAllowed,
   assertPlayBillingTesterAllowedIfEnforced,
   isPlayBillingEnabled,
+  playPurchaseAllowedForAuthUid,
   isPlayBillingTesterAllowed,
   playBillingTesterUidAllowlist,
 } from "./playConstants";
@@ -172,6 +173,43 @@ const enabledButEmptyAllowlist = {
 } as NodeJS.ProcessEnv;
 assert.equal(isPlayBillingEnabled(enabledButEmptyAllowlist), true);
 assert.equal(isPlayBillingTesterAllowed("any-uid", enabledButEmptyAllowlist), false);
+assert.equal(playPurchaseAllowedForAuthUid("uid-a", {}), false);
+assert.equal(
+  playPurchaseAllowedForAuthUid("uid-a", {
+    PLAY_BILLING_ENABLED: "true",
+    PLAY_BILLING_TESTER_UIDS: "uid-a",
+  }),
+  true
+);
+assert.equal(
+  playPurchaseAllowedForAuthUid("uid-b", {
+    PLAY_BILLING_ENABLED: "true",
+    PLAY_BILLING_TESTER_UIDS: "uid-a",
+  }),
+  false
+);
+assert.equal(
+  playPurchaseAllowedForAuthUid("uid-a", {
+    PLAY_BILLING_ENABLED: "false",
+    PLAY_BILLING_TESTER_UIDS: "uid-a",
+  }),
+  false
+);
+assert.equal(
+  playPurchaseAllowedForAuthUid("", {
+    PLAY_BILLING_ENABLED: "true",
+    PLAY_BILLING_TESTER_UIDS: "uid-a",
+  }),
+  false
+);
+assert.throws(
+  () =>
+    playPurchaseAllowedForAuthUid("uid-a", {
+      PLAY_BILLING_ENABLED: "true",
+      PLAY_BILLING_TESTER_UIDS: "tester@example.com",
+    }),
+  isCause("play_billing_tester_allowlist_email_not_uid")
+);
 
 const prepareSrc = readFileSync(
   resolve(__dirname, "../callables/prepareAndroidBillingAccount.ts"),
@@ -255,6 +293,17 @@ assert.ok(
   "new-grant admission and tester checks stay behind already-owned token ownership"
 );
 assert.equal(adapterSrc.includes("processAndroidVoidedPurchase"), true);
+
+const admissionSrc = readFileSync(
+  resolve(__dirname, "../callables/getPlayPurchaseAdmission.ts"),
+  "utf8"
+);
+assert.match(admissionSrc, /playPurchaseAllowedForAuthUid/);
+assert.match(admissionSrc, /purchaseAllowed/);
+assert.match(admissionSrc, /asia-south1/);
+assert.match(admissionSrc, /request\.auth\?\.uid/);
+assert.doesNotMatch(admissionSrc, /PLAY_BILLING_TESTER_UIDS|testerUids|allowlist/);
+assert.equal(admissionSrc.includes("PLAY_BILLING_ENABLED=true"), false);
 
 assert.equal(prepareSrc.includes("PLAY_BILLING_ENABLED=true"), false);
 assert.equal(validateSrc.includes("PLAY_BILLING_ENABLED=true"), false);

@@ -23,6 +23,7 @@ import type { QuotaUsageRead } from "@/subscription/quotaUsageReader";
 import { billingDetailsInvoiceReady } from "@/subscription/subscriptionManagementPresentation";
 import {
   sessionFlushKey,
+  syncSessionOwnership,
   type SyncSessionToken,
 } from "@/sync/syncSessionOwnership";
 
@@ -49,6 +50,15 @@ export type LiveManagementSession = {
   session: SyncSessionToken | null;
 };
 
+/** Process session at the call. A copy taken during render cannot admit a purchase after that token retires. */
+export function readSubscriptionManagementSession(authUid: string | null): LiveManagementSession {
+  const session = syncSessionOwnership.capture();
+  if (!authUid || !session || authUid !== session.uid || !syncSessionOwnership.isCurrent(session)) {
+    return { authUid, session: null };
+  }
+  return { authUid, session };
+}
+
 export type ManagementRuntimeDeps = {
   readUsage: (uid: string) => Promise<QuotaUsageRead>;
   readHistory: (uid: string) => Promise<BillingHistoryRead>;
@@ -64,7 +74,7 @@ export type ManagementRuntimeDeps = {
   isPurchaseEntryEnabled?: () => boolean;
   /** Authenticated server read. Absent reader stays closed and does not purchase. */
   readPurchaseAdmission?: () => Promise<PurchaseAdmissionRead>;
-  /** Authoritative live session; defaults to the last setOwner token. */
+  /** Process session read at the check. Defaults to the last setOwner token. */
   liveSession?: () => LiveManagementSession;
 };
 

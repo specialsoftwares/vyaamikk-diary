@@ -40,8 +40,11 @@ import {
   managementPlanNameKey,
   managementQuotaView,
 } from "@/subscription/subscriptionManagementPresentation";
-import { createSubscriptionManagementRuntime, maskManagementSnapshot } from "@/subscription/subscriptionManagementRuntime";
-import { syncSessionOwnership } from "@/sync/syncSessionOwnership";
+import {
+  createSubscriptionManagementRuntime,
+  maskManagementSnapshot,
+  readSubscriptionManagementSession,
+} from "@/subscription/subscriptionManagementRuntime";
 import { spacing, typography, useThemedStyles } from "@/theme";
 
 function formatDate(ms: number): string {
@@ -58,17 +61,13 @@ export function SubscriptionManagementScreen() {
   const subscription = useSubscription();
   const iap = useIap();
   const uid = user?.uid ?? null;
-  const session = syncSessionOwnership.capture();
-  const liveSession =
-    uid && session && uid === session.uid
-      ? { uid: session.uid, generation: session.generation }
-      : null;
-  const live = { authUid: uid, session: liveSession };
+  const authUidRef = React.useRef(uid);
+  authUidRef.current = uid;
+  const live = readSubscriptionManagementSession(uid);
+  const liveSession = live.session;
 
   const iapRef = React.useRef(iap);
   iapRef.current = iap;
-  const liveRef = React.useRef(live);
-  liveRef.current = live;
 
   const [runtime] = useState(() =>
     createSubscriptionManagementRuntime({
@@ -80,7 +79,7 @@ export function SubscriptionManagementScreen() {
       openUrl: (url) => Linking.openURL(url),
       presentUpgrade: notifyManualUpgrade,
       readPurchaseAdmission: readPlayPurchaseAdmission,
-      liveSession: () => liveRef.current,
+      liveSession: () => readSubscriptionManagementSession(authUidRef.current),
     })
   );
   const [, setTick] = useState(0);

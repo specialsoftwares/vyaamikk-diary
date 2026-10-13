@@ -14,13 +14,15 @@ TOOLING (ops-guard suite; not application CI).
 
 ## Letterhead removal is the integration head — source only
 
-PR #34 is merged into `integration/grin-g1-g5-source`. Integration HEAD is `1792d79a7a3b58cae5913e6d46ccef4902bfcb37`. CI on that exact source is run `38458982309` / verify `115508928348`, success. Letterhead creation, scanning, cropping, and new PDF generation stay removed. Saved letters and drafts stay readable, bound to the current session. Live Rules, Functions, billing, purge, and retention were not changed by that merge.
+PR #34 is merged into `integration/grin-g1-g5-source`. The Letterhead application source is `1792d79a7a3b58cae5913e6d46ccef4902bfcb37`. CI on that exact source is run `38458982309` / verify `115508928348`, success. Letterhead creation, scanning, cropping, and new PDF generation stay removed. Saved letters and drafts stay readable, bound to the current session. Live Rules, Functions, billing, purge, and retention were not changed by that merge.
 
 Play Internal testing was read again on 14 Oct 2026. The track is Active. Latest release is **26 (1.0.0)**, one version code, released 13 Oct 22:59, available to internal testers, not reviewed. Version 25 was replaced at that time. Visible history below 26 is 25, 24, 23, 22, 20, 19, 17, 15, 14, 13. No version code above 26 was on that page. Production is Inactive and has no release. The next unused code for a new binary is **27**. Source `app.json` still says 26. That code is the Letterhead-containing AAB from `630655c` and is the build now on Internal. Do not upload it again as the removal. A billing-enabled build has not been started.
 
 The subscription catalog and one-time products pages had no products. Play prices for `vyd_starter`, `vyd_professional`, and `vyd_business` are UNKNOWN. License testing has no email list selected and the license response is RESPOND_NORMALLY, so a purchase now would not be a free license test. No purchase was attempted. BillDesk KYC is in progress and stopped at an OTP screen. The OTP was not generated and the APK-URL question was not emailed.
 
 Play new-purchase admission is now separate from already-owned lifecycle in source `e494f278` (integration merge `eb4c05d`). `PLAY_BILLING_ENABLED` still defaults off and still blocks a first bind. RTDN, reconciliation, refunds, and entitlement correction for a token the account already owns are no longer stopped by that flag. This is not deployed. A new-grant notification while admission is closed returns HTTP 503 and is not treated as delivered.
+
+The closed purchase entry now asks `getPlayPurchaseAdmission` and opens a sheet only for `{ purchaseAllowed: true }` on the current process session. The purchase-entry and quota-upsell flags stay 0. The callable returns that boolean only, is not deployed, and is false while Play billing is off or the UID list is empty. A missing callable stays closed. Canonical CI has not yet been recorded for this combined source.
 
 The earlier note that versionCode 26 was absent and that draft 14 was the open upload is historical. The 14 Oct read above replaces it.
 

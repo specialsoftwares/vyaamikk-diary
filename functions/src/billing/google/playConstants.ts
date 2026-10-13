@@ -162,6 +162,21 @@ export function assertPlayBillingTesterAllowed(
 }
 
 /**
+ * UX admission for opening a Play purchase sheet.
+ * True only when new Play admission is enabled and this auth uid is on the
+ * allowlist. Empty, absent, or disabled admission is false. Does not return
+ * the allowlist. A malformed allowlist still throws. This does not grant a plan.
+ */
+export function playPurchaseAllowedForAuthUid(
+  uid: string | null | undefined,
+  env: NodeJS.ProcessEnv = process.env
+): boolean {
+  if (typeof uid !== "string" || uid.length === 0) return false;
+  if (!isPlayBillingEnabled(env)) return false;
+  return isPlayBillingTesterAllowed(uid, env);
+}
+
+/**
  * Production adapters set enforce=true so RTDN/reconciliation cannot make
  * NEW grants. Callers skip this when the uid already owns this token.
  */

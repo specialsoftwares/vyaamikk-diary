@@ -180,6 +180,8 @@ assert.equal(isKnownGstStateCode("MH"), false);
   assert.match(screen, /bindPresentUpgrade\(liveSession\)/);
   assert.match(screen, /purchaseEntryOn \?/);
   assert.match(screen, /billing\.management\.purchaseEntryClosed/);
+  assert.match(screen, /readSubscriptionManagementSession/);
+  assert.doesNotMatch(screen, /liveRef/);
   assert.match(screen, /readPlayPurchaseAdmission/);
   assert.match(screen, /purchaseAdmissionChecking/);
   assert.match(screen, /serverAdmitted \?/);

@@ -68,6 +68,7 @@ export { reviewSubscriptionTaxCompliance } from "./billing/callables/reviewTaxCo
 
 /** VYD-32 Google Play billing: exported for build, production-disabled (fail-closed). */
 export { prepareAndroidBillingAccount } from "./billing/callables/prepareAndroidBillingAccount";
+export { getPlayPurchaseAdmission } from "./billing/callables/getPlayPurchaseAdmission";
 export { validateAndActivateAndroid } from "./billing/callables/validateAndActivateAndroid";
 export { androidRtdn } from "./billing/callables/androidRtdn";
 export { scheduledBillingReconciliation } from "./billing/scheduled/billingReconciliation";

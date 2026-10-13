@@ -8,10 +8,14 @@ import { interpretPurchaseAdmission } from "@/billing/iap/purchaseAdmission";
 import type { PurchaseAdmissionRead } from "@/billing/iap/purchaseAdmission";
 import { __setSubscriptionPurchaseEntryEnabledForTests } from "@/billing/iap/purchaseEntryGate";
 import { emptyBillingDetails, type BillingDetailsRead } from "@/subscription/billingDetailsReader";
-import { createSubscriptionManagementRuntime, maskManagementSnapshot } from "@/subscription/subscriptionManagementRuntime";
+import {
+  createSubscriptionManagementRuntime,
+  maskManagementSnapshot,
+  readSubscriptionManagementSession,
+} from "@/subscription/subscriptionManagementRuntime";
 import type { QuotaUsageRead } from "@/subscription/quotaUsageReader";
 import type { BillingHistoryRead } from "@/subscription/billingHistoryReader";
-import type { SyncSessionToken } from "@/sync/syncSessionOwnership";
+import { syncSessionOwnership, type SyncSessionToken } from "@/sync/syncSessionOwnership";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -642,6 +646,44 @@ async function main() {
     assert.equal(runtime.snapshot().purchaseAdmission, "closed");
     assert.equal(upgrades, 1);
     runtime.dispose();
+  }
+
+  {
+    syncSessionOwnership.resetForTests();
+    const admitted = syncSessionOwnership.beginSession("user-a");
+    let upgrades = 0;
+    const runtime = createSubscriptionManagementRuntime({
+      readUsage: async () => ({ kind: "missing" }),
+      readHistory: async () => ({ kind: "ok", rows: [] }),
+      readDetails: async () => ({ kind: "missing" }),
+      saveDetails: async () => ({ kind: "saved" }),
+      restore: async () => ({ kind: "restored" }),
+      openUrl: async () => true,
+      presentUpgrade: () => {
+        upgrades += 1;
+        return { ok: true, visible: true, clientRecordId: null };
+      },
+      isPurchaseEntryEnabled: () => false,
+      readPurchaseAdmission: async () => interpretPurchaseAdmission({ purchaseAllowed: true }),
+      liveSession: () => readSubscriptionManagementSession("user-a"),
+    });
+    runtime.setOwner({ uid: admitted.uid, generation: admitted.generation });
+    await flush();
+    assert.equal(runtime.snapshot().purchaseAdmission, "allowed");
+    assert.equal(runtime.presentUpgrade(admitted).ok, true);
+    assert.equal(upgrades, 1);
+    syncSessionOwnership.endSession();
+    assert.equal(runtime.presentUpgrade(admitted).ok, false);
+    assert.equal(upgrades, 1);
+    const returned = syncSessionOwnership.beginSession("user-a");
+    runtime.setOwner({ uid: returned.uid, generation: returned.generation });
+    await flush();
+    assert.equal(runtime.snapshot().purchaseAdmission, "allowed");
+    syncSessionOwnership.beginSession("user-a");
+    assert.equal(runtime.presentUpgrade(returned).ok, false);
+    assert.equal(upgrades, 1);
+    runtime.dispose();
+    syncSessionOwnership.resetForTests();
   }
 
   __setSubscriptionPurchaseEntryEnabledForTests(null);
