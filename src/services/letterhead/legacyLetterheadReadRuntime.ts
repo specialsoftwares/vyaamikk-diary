@@ -16,6 +16,7 @@ import type { LetterheadDocument, LetterheadDocumentInput } from "./types";
 import type { FormDraftRecord } from "@/repositories/formDraftsRepository";
 import {
   sessionFlushKey,
+  syncSessionOwnership,
   type SyncSessionToken,
 } from "@/sync/syncSessionOwnership";
 
@@ -64,6 +65,15 @@ export type LegacyListSnapshot = {
 export type LegacyRowAdmission = {
   ownerKey: string;
   recordId: string;
+  admitted: SyncSessionToken;
+};
+
+export type LegacySharePress = {
+  shareSeq: number;
+  ownerKey: string;
+  recordKey: string;
+  pdfUri: string;
+  admitted: SyncSessionToken;
 };
 
 type ReaderDeps = {
@@ -107,11 +117,26 @@ export function emptyLegacyList(ownerKey = "signed_out#0"): LegacyListSnapshot {
 
 export function maskLegacyReader(
   snapshot: LegacyReaderSnapshot,
-  live: LegacyLiveSession
+  live: LegacyLiveSession,
+  requested?: LegacyReaderTarget
 ): LegacyReaderSnapshot {
   const key = legacyOwnerKey(live);
-  if (snapshot.ownerKey === key) return snapshot;
-  return emptyLegacyReader(key);
+  const requestedKey = requested ? recordKeyOf(requested) : null;
+  if (snapshot.ownerKey !== key || (requestedKey !== null && snapshot.recordKey !== requestedKey)) {
+    return {
+      ...emptyLegacyReader(key),
+      recordKey: requestedKey ?? "",
+      phase: key !== "signed_out#0" && requestedKey ? "loading" : "idle",
+    };
+  }
+  return snapshot;
+}
+
+function sessionAdmits(admitted: SyncSessionToken, live: LegacyLiveSession): boolean {
+  if (!syncSessionOwnership.isCurrent(admitted)) return false;
+  if (!live.authUid || !live.session) return false;
+  if (live.authUid !== admitted.uid || live.session.uid !== admitted.uid) return false;
+  return live.session.generation === admitted.generation;
 }
 
 export function maskLegacyList(
@@ -134,6 +159,7 @@ export function createLegacyLetterheadReaderRuntime(deps: ReaderDeps) {
   let target: LegacyReaderTarget = {};
   let loadSeq = 0;
   let shareSeq = 0;
+  let disposed = false;
   let published = emptyLegacyReader();
   const listeners = new Set<() => void>();
 
@@ -146,10 +172,8 @@ export function createLegacyLetterheadReaderRuntime(deps: ReaderDeps) {
   }
 
   function liveMatches(admitted: SyncSessionToken): boolean {
-    const live = readLive();
-    if (!live.authUid || !live.session) return false;
-    if (live.authUid !== live.session.uid) return false;
-    return admitted.uid === live.session.uid && admitted.generation === live.session.generation;
+    if (disposed) return false;
+    return sessionAdmits(admitted, readLive());
   }
 
   function loadCurrent(op: number, admitted: SyncSessionToken, key: string): boolean {
@@ -165,6 +189,7 @@ export function createLegacyLetterheadReaderRuntime(deps: ReaderDeps) {
   }
 
   function applyIdentity(next: SyncSessionToken | null, nextTarget: LegacyReaderTarget): void {
+    disposed = false;
     loadSeq += 1;
     shareSeq += 1;
     owner = next;
@@ -272,14 +297,9 @@ export function createLegacyLetterheadReaderRuntime(deps: ReaderDeps) {
     }
   }
 
-  function shareStillCurrent(admission: {
-    shareSeq: number;
-    ownerKey: string;
-    recordKey: string;
-    pdfUri: string;
-    admitted: SyncSessionToken;
-  }): boolean {
+  function shareStillCurrent(admission: LegacySharePress): boolean {
     return (
+      !disposed &&
       admission.shareSeq === shareSeq &&
       published.ownerKey === admission.ownerKey &&
       published.recordKey === admission.recordKey &&
@@ -288,6 +308,20 @@ export function createLegacyLetterheadReaderRuntime(deps: ReaderDeps) {
       liveMatches(admission.admitted) &&
       legacyOwnerKey(readLive()) === admission.ownerKey
     );
+  }
+
+  function captureSharePress(): LegacySharePress | null {
+    const admitted = owner;
+    const view = published.view;
+    if (!admitted || !liveMatches(admitted)) return null;
+    if (!view || view.kind !== "letter" || view.pdfState !== "present" || !view.pdfUri) return null;
+    return {
+      shareSeq,
+      ownerKey: published.ownerKey,
+      recordKey: published.recordKey,
+      pdfUri: view.pdfUri,
+      admitted: { uid: admitted.uid, generation: admitted.generation },
+    };
   }
 
   return {
@@ -304,20 +338,19 @@ export function createLegacyLetterheadReaderRuntime(deps: ReaderDeps) {
     reload(): void {
       applyIdentity(owner, target);
     },
-    async shareLoadedPdf(): Promise<"shared" | "cancelled" | "refused" | "missing"> {
-      const admitted = owner;
-      const view = published.view;
-      if (!admitted || !liveMatches(admitted)) return "refused";
-      if (!view || view.kind !== "letter" || view.pdfState !== "present" || !view.pdfUri) {
-        return "refused";
-      }
-      const admission = {
-        shareSeq,
-        ownerKey: published.ownerKey,
-        recordKey: published.recordKey,
-        pdfUri: view.pdfUri,
-        admitted: { uid: admitted.uid, generation: admitted.generation },
-      };
+    dispose(): void {
+      disposed = true;
+      loadSeq += 1;
+      shareSeq += 1;
+    },
+    admitShare(): LegacySharePress | null {
+      return captureSharePress();
+    },
+    async shareLoadedPdf(
+      press?: LegacySharePress | null
+    ): Promise<"shared" | "cancelled" | "refused" | "missing"> {
+      const admission = press === undefined ? captureSharePress() : press;
+      if (!admission || !shareStillCurrent(admission)) return "refused";
       published = { ...published, sharing: true };
       emit();
       let exists = false;
@@ -366,6 +399,7 @@ export function createLegacyLetterheadReaderRuntime(deps: ReaderDeps) {
 export function createLegacyLetterheadListRuntime(deps: ListDeps) {
   let owner: SyncSessionToken | null = null;
   let loadSeq = 0;
+  let disposed = false;
   let published = emptyLegacyList();
   const listeners = new Set<() => void>();
 
@@ -378,10 +412,8 @@ export function createLegacyLetterheadListRuntime(deps: ListDeps) {
   }
 
   function liveMatches(admitted: SyncSessionToken): boolean {
-    const live = readLive();
-    if (!live.authUid || !live.session) return false;
-    if (live.authUid !== live.session.uid) return false;
-    return admitted.uid === live.session.uid && admitted.generation === live.session.generation;
+    if (disposed) return false;
+    return sessionAdmits(admitted, readLive());
   }
 
   function loadCurrent(op: number, admitted: SyncSessionToken): boolean {
@@ -433,6 +465,7 @@ export function createLegacyLetterheadListRuntime(deps: ListDeps) {
   }
 
   function applyOwner(next: SyncSessionToken | null): void {
+    disposed = false;
     loadSeq += 1;
     owner = next;
     const ownerKey = next ? sessionFlushKey(next.uid, next) : "signed_out#0";
@@ -457,18 +490,29 @@ export function createLegacyLetterheadListRuntime(deps: ListDeps) {
     reload(): void {
       applyOwner(owner);
     },
-    openRow(recordId: string): boolean {
-      if (!rowVisible(recordId)) return false;
-      deps.navigate(recordId);
+    dispose(): void {
+      disposed = true;
+      loadSeq += 1;
+    },
+    openRow(press: LegacyRowAdmission): boolean {
+      if (!syncSessionOwnership.isCurrent(press.admitted)) return false;
+      if (published.ownerKey !== press.ownerKey) return false;
+      if (!rowVisible(press.recordId)) return false;
+      deps.navigate(press.recordId);
       return true;
     },
     admitRowDelete(recordId: string): LegacyRowAdmission | null {
       if (!owner || !rowVisible(recordId)) return null;
-      return { ownerKey: sessionFlushKey(owner.uid, owner), recordId };
+      return {
+        ownerKey: sessionFlushKey(owner.uid, owner),
+        recordId,
+        admitted: { uid: owner.uid, generation: owner.generation },
+      };
     },
     rowDeleteStillCurrent(admission: LegacyRowAdmission): boolean {
-      if (!owner || !liveMatches(owner)) return false;
-      if (sessionFlushKey(owner.uid, owner) !== admission.ownerKey) return false;
+      if (!syncSessionOwnership.isCurrent(admission.admitted)) return false;
+      if (!liveMatches(admission.admitted)) return false;
+      if (published.ownerKey !== admission.ownerKey) return false;
       if (published.phase === "loading") return true;
       return published.rows.some((row) => row.id === admission.recordId);
     },

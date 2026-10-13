@@ -21,11 +21,12 @@ import { useAuth } from "@/state/auth";
 import { useT } from "@/i18n";
 import { spacing, typography, useThemedStyles } from "@/theme";
 import { getLetterheadDocumentRepository } from "@/services/letterhead/documentRepository";
+import { createLegacyLetterheadListRuntime } from "@/services/letterhead/legacyLetterheadReadRuntime";
 import {
-  createLegacyLetterheadListRuntime,
-  maskLegacyList,
-  type LegacyLiveSession,
-} from "@/services/letterhead/legacyLetterheadReadRuntime";
+  bindLegacyListFrame,
+  bindLegacyListRow,
+  readLegacyScreenSession,
+} from "@/services/letterhead/legacyLetterheadScreenSession";
 import { userFacingMessage } from "@/domain/errors";
 import { syncSessionOwnership } from "@/sync/syncSessionOwnership";
 import { formatShortDate } from "@/utils/date";
@@ -36,13 +37,8 @@ export default function LegacyLetterheadHistoryScreen() {
   const { user } = useAuth();
   const uid = user?.uid ?? null;
   const session = syncSessionOwnership.capture();
-  const liveSession =
-    uid && session && uid === session.uid
-      ? { uid: session.uid, generation: session.generation }
-      : null;
-  const live: LegacyLiveSession = { authUid: uid, session: liveSession };
-  const liveRef = useRef(live);
-  liveRef.current = live;
+  const authUidRef = useRef(uid);
+  authUidRef.current = uid;
   const routerRef = useRef(router);
   routerRef.current = router;
 
@@ -56,18 +52,19 @@ export default function LegacyLetterheadHistoryScreen() {
           params: { documentId },
         });
       },
-      liveSession: () => liveRef.current,
+      liveSession: () => readLegacyScreenSession(authUidRef.current),
     })
   );
   const [, setTick] = useState(0);
-  const snap = maskLegacyList(runtime.snapshot(), live);
+  const snap = bindLegacyListFrame(runtime, uid).snap;
   const { requestDelete, isDeleting } = useRecordDelete(uid);
 
   useEffect(() => runtime.subscribe(() => setTick((n) => n + 1)), [runtime]);
 
   useEffect(() => {
-    runtime.setOwner(liveSession);
-  }, [runtime, liveSession?.uid, liveSession?.generation]); // eslint-disable-line react-hooks/exhaustive-deps -- session identity is uid + generation
+    runtime.setOwner(readLegacyScreenSession(uid).session);
+    return () => runtime.dispose();
+  }, [runtime, uid, session?.generation]);
 
   const styles = useThemedStyles((colors) =>
     StyleSheet.create({
@@ -108,6 +105,7 @@ export default function LegacyLetterheadHistoryScreen() {
               title: item.title,
               confirmTier: "record" as const,
             };
+            const row = bindLegacyListRow(runtime, item.id);
             return (
               <SwipeToDeleteRow
                 rowKey={`lh-${item.id}`}
@@ -115,19 +113,18 @@ export default function LegacyLetterheadHistoryScreen() {
                 entityType="letterhead_document"
                 title={item.title}
                 onDeletePress={() => {
-                  const admission = runtime.admitRowDelete(item.id);
-                  if (!admission) return;
+                  if (!row.deleteStillCurrent()) return;
                   requestDelete(
                     req,
                     () => {
-                      if (runtime.rowDeleteStillCurrent(admission)) runtime.reload();
+                      if (row.deleteStillCurrent()) runtime.reload();
                     },
-                    { confirmAdmit: () => runtime.rowDeleteStillCurrent(admission) }
+                    { confirmAdmit: () => row.deleteStillCurrent() }
                   );
                 }}
                 deleteInProgress={isDeleting(req)}
               >
-                <Card onPress={() => runtime.openRow(item.id)}>
+                <Card onPress={() => row.open()}>
                   <View>
                     <LocaleUiText style={styles.title}>{item.title || item.subject}</LocaleUiText>
                     <LocaleUiText style={styles.meta}>{formatShortDate(item.dateMs)}</LocaleUiText>

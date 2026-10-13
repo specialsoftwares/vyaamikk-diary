@@ -43,9 +43,11 @@ No live Rules change, Functions deploy, data purge, billing change, EAS build, o
 
 ## Read ownership
 
-The production reader and saved-letter list publish through one session runtime. A request records the UID, session generation, and record id before its first await. A retired success, error, or file check is ignored. Share checks that identity again after the file-existence await and again after the share call returns. A sheet the operating system has already opened is not revoked.
+The production reader and saved-letter list publish through one session runtime. A request records the UID, session generation, and record id before its first await. Each later check reads `syncSessionOwnership.capture()` and `isCurrent` and reconciles that token with the authenticated UID. A session copied during the last React render cannot authorize another account's letter. The original admission is kept: a newer login does not adopt the old operation. A retired success, error, or file check is ignored. Share checks that identity again after the file-existence await and again after the share call returns. A sheet the operating system has already opened is not revoked.
 
-The regression defers the repository and the file check. It is not a mounted React tree and not a phone. Same-owner reads, a present PDF, a missing PDF, and a cancelled share stay covered.
+The reader mask also takes the document or draft id on screen. A route change hides the previous letter before the identity effect runs. Share, row open, and delete confirm close over the identity that rendered them, so a later record in the runtime is not what an old callback acts on. Leaving the screen invalidates a file check that has not reached the share call.
+
+The regression drives that screen adapter with a deferred file check. It is not a mounted device and not a phone. Same-owner reads, a present PDF, a missing PDF, and a cancelled share stay covered.
 
 ## Routes
 

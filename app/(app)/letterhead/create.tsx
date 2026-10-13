@@ -25,11 +25,11 @@ import { spacing, typography, useThemedStyles } from "@/theme";
 import { formDraftsRepository } from "@/repositories/formDraftsRepository";
 import { getLetterheadDocumentRepository } from "@/services/letterhead/documentRepository";
 import { legacyLetterFields, legacyReaderParams } from "@/services/letterhead/legacyLetterhead";
+import { createLegacyLetterheadReaderRuntime } from "@/services/letterhead/legacyLetterheadReadRuntime";
 import {
-  createLegacyLetterheadReaderRuntime,
-  maskLegacyReader,
-  type LegacyLiveSession,
-} from "@/services/letterhead/legacyLetterheadReadRuntime";
+  bindLegacyReaderFrame,
+  readLegacyScreenSession,
+} from "@/services/letterhead/legacyLetterheadScreenSession";
 import { pdfService } from "@/services/pdf/pdfService";
 import { isShareSheetCancellation } from "@/services/pdf/shareCancellation";
 import { userFacingMessage } from "@/domain/errors";
@@ -64,13 +64,8 @@ function LegacyLetterheadBody({
   const { user } = useAuth();
   const uid = user?.uid ?? null;
   const session = syncSessionOwnership.capture();
-  const liveSession =
-    uid && session && uid === session.uid
-      ? { uid: session.uid, generation: session.generation }
-      : null;
-  const live: LegacyLiveSession = { authUid: uid, session: liveSession };
-  const liveRef = useRef(live);
-  liveRef.current = live;
+  const authUidRef = useRef(uid);
+  authUidRef.current = uid;
   const unavailable = t("letterhead.legacyUnavailable");
 
   const [runtime] = useState(() =>
@@ -91,17 +86,20 @@ function LegacyLetterheadBody({
       isShareCancelled: isShareSheetCancellation,
       mapError: (error) => userFacingMessage(error),
       unavailableMessage: unavailable,
-      liveSession: () => liveRef.current,
+      liveSession: () => readLegacyScreenSession(authUidRef.current),
     })
   );
   const [, setTick] = useState(0);
-  const snap = maskLegacyReader(runtime.snapshot(), live);
+  const frame = bindLegacyReaderFrame(runtime, uid, { documentId, draftId });
+  const snap = frame.snap;
 
   useEffect(() => runtime.subscribe(() => setTick((n) => n + 1)), [runtime]);
 
   useEffect(() => {
-    runtime.setIdentity(liveSession, { documentId, draftId });
-  }, [runtime, liveSession?.uid, liveSession?.generation, documentId, draftId]); // eslint-disable-line react-hooks/exhaustive-deps -- session identity is uid + generation
+    const live = readLegacyScreenSession(uid);
+    runtime.setIdentity(live.session, { documentId, draftId });
+    return () => runtime.dispose();
+  }, [runtime, uid, session?.generation, documentId, draftId]);
 
   const styles = useThemedStyles((colors) =>
     StyleSheet.create({
@@ -113,7 +111,7 @@ function LegacyLetterheadBody({
     })
   );
 
-  const view = snap.phase === "ready" ? snap.view : null;
+  const view = frame.view;
   const title =
     view?.kind === "draft" ? t("letterhead.legacyDraftTitle") : t("letterhead.legacyTitle");
 
@@ -155,7 +153,7 @@ function LegacyLetterheadBody({
           {view.kind === "letter" && view.pdfState === "present" ? (
             <Button
               label={t("letterhead.legacySharePdf")}
-              onPress={() => void runtime.shareLoadedPdf()}
+              onPress={() => void frame.share()}
               loading={snap.sharing}
             />
           ) : null}

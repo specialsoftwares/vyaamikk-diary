@@ -9,7 +9,7 @@ import path from "node:path";
 import test from "node:test";
 
 import type { FormDraftRecord } from "@/repositories/formDraftsRepository";
-import type { SyncSessionToken } from "@/sync/syncSessionOwnership";
+import { syncSessionOwnership, type SyncSessionToken } from "@/sync/syncSessionOwnership";
 import { isShareSheetCancellation } from "@/services/pdf/shareCancellation";
 
 import {
@@ -33,8 +33,20 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+const minted = new Map<string, SyncSessionToken>();
+
+test.beforeEach(() => {
+  minted.clear();
+  syncSessionOwnership.resetForTests();
+});
+
 function token(uid: string, generation: number): SyncSessionToken {
-  return { uid, generation };
+  const key = `${uid}#${generation}`;
+  const hit = minted.get(key);
+  if (hit) return hit;
+  const next = syncSessionOwnership.beginSession(uid);
+  minted.set(key, next);
+  return next;
 }
 
 function liveFor(session: SyncSessionToken | null): LegacyLiveSession {
@@ -361,25 +373,26 @@ test("list hides A's rows from B and from A's next generation", async () => {
   lists[0]!.resolve([letter("a-row", "a", "A-LIST-SECRET", null)]);
   await flush();
   assert.equal(maskLegacyList(runtime.snapshot(), live).rows.length, 0);
-  assert.equal(runtime.openRow("a-row"), false);
+  assert.equal(runtime.admitRowDelete("a-row"), null);
   lists[1]!.resolve([letter("b-row", "b", "B-LIST", null)]);
   await flush();
   const shown = maskLegacyList(runtime.snapshot(), live);
   assert.deepEqual(shown.rows.map((row) => row.body), ["B-LIST"]);
   assert.equal(JSON.stringify(shown).includes("A-LIST-SECRET"), false);
-  assert.equal(runtime.openRow("b-row"), true);
-  assert.deepEqual(opened, ["b-row"]);
   const keep = runtime.admitRowDelete("b-row");
   assert.ok(keep);
+  assert.equal(runtime.openRow(keep!), true);
+  assert.deepEqual(opened, ["b-row"]);
   assert.equal(runtime.rowDeleteStillCurrent(keep!), true);
   runtime.reload();
   assert.equal(runtime.rowDeleteStillCurrent(keep!), true);
   live = liveFor(null);
+  syncSessionOwnership.endSession();
   runtime.setOwner(null);
   lists[2]!.resolve([letter("b-row", "b", "STALE-AFTER-LOGOUT", null)]);
   await flush();
   assert.equal(runtime.rowDeleteStillCurrent(keep!), false);
-  assert.equal(runtime.openRow("b-row"), false);
+  assert.equal(runtime.openRow(keep!), false);
   assert.equal(JSON.stringify(maskLegacyList(runtime.snapshot(), live)).includes("STALE-AFTER-LOGOUT"), false);
   live = liveFor(token("a", 3));
   runtime.setOwner(token("a", 3));
@@ -394,14 +407,17 @@ test("list hides A's rows from B and from A's next generation", async () => {
 test("production screens publish through the session runtime", () => {
   const create = fs.readFileSync(path.join(root, "app/(app)/letterhead/create.tsx"), "utf8");
   const history = fs.readFileSync(path.join(root, "app/(app)/letterhead/history.tsx"), "utf8");
-  assert.match(create, /createLegacyLetterheadReaderRuntime/);
-  assert.match(create, /maskLegacyReader/);
-  assert.match(create, /shareLoadedPdf/);
-  assert.match(create, /onPress=\{\(\) => void runtime\.shareLoadedPdf\(\)\}/);
-  assert.match(history, /createLegacyLetterheadListRuntime/);
-  assert.match(history, /maskLegacyList/);
-  assert.match(history, /openRow\(item\.id\)/);
-  assert.match(history, /confirmAdmit: \(\) => runtime\.rowDeleteStillCurrent\(admission\)/);
+  assert.match(create, /readLegacyScreenSession/);
+  assert.match(create, /bindLegacyReaderFrame/);
+  assert.match(create, /onPress=\{\(\) => void frame\.share\(\)\}/);
+  assert.match(create, /return \(\) => runtime\.dispose\(\)/);
+  assert.doesNotMatch(create, /liveRef/);
+  assert.match(history, /readLegacyScreenSession/);
+  assert.match(history, /bindLegacyListRow/);
+  assert.match(history, /onPress=\{\(\) => row\.open\(\)\}/);
+  assert.match(history, /confirmAdmit: \(\) => row\.deleteStillCurrent\(\)/);
+  assert.match(history, /return \(\) => runtime\.dispose\(\)/);
+  assert.doesNotMatch(history, /liveRef/);
   assert.doesNotMatch(history, /buildLetterheadHtml|saveLetterheadCreateWithPdf/);
   const hook = fs.readFileSync(path.join(root, "src/hooks/useRecordDelete.ts"), "utf8");
   assert.match(hook, /if \(options\?\.confirmAdmit && !options\.confirmAdmit\(\)\) return/);

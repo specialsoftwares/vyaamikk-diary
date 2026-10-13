@@ -96,9 +96,9 @@ assert.doesNotMatch(tabBar, /BackHandler/);
 assert.doesNotMatch(tabBar, /hardwareBackPress/);
 assert.match(layout, /initialRouteName="you"/);
 assert.match(layout, /backBehavior="history"/);
-assert.match(createScreen, /createLegacyLetterheadReaderRuntime/);
+assert.match(createScreen, /readLegacyScreenSession/);
+assert.match(createScreen, /bindLegacyReaderFrame/);
 assert.match(createScreen, /isShareSheetCancellation/);
-assert.match(createScreen, /shareLoadedPdf/);
 assert.doesNotMatch(createScreen, /saveLetterheadCreateWithPdf|buildLetterheadHtml/);
 
 console.log("tabHistoryBack.test.ts: ok");
