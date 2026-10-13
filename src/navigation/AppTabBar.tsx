@@ -1,15 +1,11 @@
-import React, { useEffect } from "react";
-import { BackHandler, Pressable, StyleSheet, Text, View } from "react-native";
+import React from "react";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 
 import { resolveYouTabIconConcept } from "@/components/you/YouTabIcon";
 import { useTabBarMetrics } from "@/layout/tabBar";
-import {
-  previousTabRouteName,
-  selectedTabRouteName,
-  type TabRouteState,
-} from "@/navigation/tabRouteSelection";
+import { selectedTabRouteName } from "@/navigation/tabRouteSelection";
 import { typography, useTheme } from "@/theme";
 
 const YOU_TAB_ICON_NAME = {
@@ -29,24 +25,13 @@ const ICONS = {
 } as const;
 
 /**
- * Highlight follows `state.index`. A press that does not change the route
- * cannot leave a different screen looking selected.
+ * Highlight follows `state.index`. Hardware Back is the tab router's
+ * `backBehavior="history"` so it pops history instead of navigating again.
  */
 export function AppTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const { colors } = useTheme();
   const metrics = useTabBarMetrics();
   const selected = selectedTabRouteName(state);
-
-  useEffect(() => {
-    const sub = BackHandler.addEventListener("hardwareBackPress", () => {
-      if (!navigation.isFocused()) return false;
-      const target = previousTabRouteName(navigation.getState() as TabRouteState);
-      if (!target) return false;
-      navigation.navigate(target);
-      return true;
-    });
-    return () => sub.remove();
-  }, [navigation]);
 
   return (
     <View

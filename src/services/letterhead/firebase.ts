@@ -24,6 +24,10 @@ import {
 } from "@/sync/syncSessionOwnership";
 
 import { resolveLetterheadImageSource } from "./letterheadImageResolver";
+import {
+  describeLetterheadSaveFailure,
+  recordLetterheadSaveDiagnostic,
+} from "./letterheadSaveDiagnostics";
 import { validateWritingMargins } from "./letterheadGeneratedLayout";
 import type { LetterheadConfig, LetterheadRepository } from "./types";
 
@@ -220,7 +224,14 @@ export const firebaseLetterheadRepository: LetterheadRepository = {
     }
 
     assertDispatchedSession(session, userId);
-    await setDoc(configDocRef(userId), firestorePayload, { merge: false });
+    try {
+      await setDoc(configDocRef(userId), firestorePayload, { merge: false });
+      recordLetterheadSaveDiagnostic("firestore", "ok", "written");
+    } catch (e) {
+      const code = describeLetterheadSaveFailure(e, "firestore");
+      recordLetterheadSaveDiagnostic("firestore", "failed", code);
+      throw new Error(code);
+    }
     assertDispatchedSession(session, userId);
     log.info("letterhead saved (firebase)");
 

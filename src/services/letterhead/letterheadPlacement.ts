@@ -1,7 +1,7 @@
 /**
  * Two letterhead placements.
- * Header/logo fits the whole image across the top of a white A4 page.
- * It does not crop pixels and does not claim to detect a printed header.
+ * Header/logo places an already cropped header image across the top of a
+ * white A4 page. The crop itself is chosen before save.
  * Complete letterhead fits the whole image on A4 with contain (no stretch).
  */
 
@@ -25,11 +25,17 @@ export function suggestLetterheadPlacement(
   return "complete_page";
 }
 
-/** Height of a width-fitted image as a percentage of the A4 page. Capped. */
+/** Height of a width-fitted header image as a percentage of the A4 page. Capped. */
 export function headerBandHeightPct(width: number, height: number): number {
   if (!(width > 0) || !(height > 0)) return HEADER_BAND_MIN_PCT;
   const fitted = ((A4_WIDTH_IN / (width / height)) / A4_HEIGHT_IN) * 100;
   return Math.min(HEADER_BAND_MAX_PCT, Math.max(HEADER_BAND_MIN_PCT, fitted));
+}
+
+/** Same band, in millimetres, for the production PDF image box. */
+export function headerImageHeightMm(width: number, height: number): number {
+  const inches = (headerBandHeightPct(width, height) / 100) * A4_HEIGHT_IN;
+  return Math.round(inches * 25.4 * 10) / 10;
 }
 
 export function writingMarginsForHeader(width: number, height: number): LetterheadMargins {

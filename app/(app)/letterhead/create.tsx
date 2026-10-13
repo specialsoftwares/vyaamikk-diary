@@ -41,13 +41,13 @@ import { spacing, typography, useTheme, useThemedStyles } from "@/theme";
 import { userFacingMessage } from "@/domain/errors";
 import { LETTERHEAD_NAV_FIELD_ORDER } from "@/utils/formFieldNavigation/fieldNavOrders";
 import {
-  draftPayloadToLetterheadInput,
   getLetterheadDocumentRepository,
   getLetterheadRepository,
   isLetterheadDraftMeaningful,
   LETTERHEAD_DRAFT_KIND,
   LETTERHEAD_DRAFT_SCOPE,
   letterheadInputToDraftPayload,
+  resolveDraftLetterhead,
   type LetterheadConfig,
   type LetterheadDocument,
   type LetterheadDocumentInput,
@@ -86,7 +86,7 @@ export default function LetterheadCreateScreen() {
 
   const [config, setConfig] = useState<LetterheadConfig | null>(null);
   const [previewConfig, setPreviewConfig] = useState<LetterheadConfig | null>(null);
-  const [historicalUnavailable, setHistoricalUnavailable] = useState(false);
+  const [templateGap, setTemplateGap] = useState<null | "document" | "draft">(null);
   const [showLetterOptions, setShowLetterOptions] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -104,6 +104,7 @@ export default function LetterheadCreateScreen() {
   const finishedRef = useRef(false);
   const saveLockRef = useRef(false);
   const draftFlightRef = useRef(false);
+  const draftTemplateRef = useRef<LetterheadConfig | null>(null);
   const clientRecordIdRef = useRef(
     editDocIdParam ? String(editDocIdParam) : generateClientRecordId("lhd")
   );
@@ -197,8 +198,9 @@ export default function LetterheadCreateScreen() {
       }
       setConfig(c);
       if (!editDocIdParam) {
-        setHistoricalUnavailable(false);
+        setTemplateGap(null);
         setPreviewConfig(c);
+        draftTemplateRef.current = c;
       }
 
       // Edit an existing saved document — load its frozen input verbatim.
@@ -210,8 +212,15 @@ export default function LetterheadCreateScreen() {
         if (existing) {
           editDocRef.current = existing;
           const resolved = resolveHistoricalLetterhead(existing, c);
-          setHistoricalUnavailable(resolved.kind === "unavailable");
-          setPreviewConfig(resolved.kind === "unavailable" ? null : resolved.config);
+          if (resolved.kind === "unavailable") {
+            setTemplateGap("document");
+            setPreviewConfig(null);
+            draftTemplateRef.current = null;
+          } else {
+            setTemplateGap(null);
+            setPreviewConfig(resolved.config);
+            draftTemplateRef.current = resolved.config;
+          }
           reset(applyDefaults({ ...existing.input }, resolved.kind === "unavailable" ? c : resolved.config, user));
           return;
         }
@@ -223,10 +232,18 @@ export default function LetterheadCreateScreen() {
       if (draftIdParam) {
         const draft = await formDraftsRepository.getById(user.uid, String(draftIdParam));
         if (draft && draft.status === "active") {
-          reset(applyDefaults(draftPayloadToLetterheadInput(draft.payload), c, user));
+          const resumed = resolveDraftLetterhead(draft.payload, c);
+          draftTemplateRef.current = resumed.preview;
+          setPreviewConfig(resumed.preview);
+          setTemplateGap(resumed.gap);
+          reset(applyDefaults(resumed.input, resumed.preview ?? c, user));
           activeDraftIdRef.current = draft.id;
           restored = true;
-          setNotice(t("letterhead.draftResumed"));
+          setNotice(
+            resumed.gap
+              ? t("letterhead.draftTemplateUnavailable")
+              : t("letterhead.draftResumed")
+          );
         }
       }
       if (!restored) {
@@ -236,7 +253,12 @@ export default function LetterheadCreateScreen() {
           scopeKey: LETTERHEAD_DRAFT_SCOPE,
         });
         if (recovery?.payload) {
-          reset(applyDefaults(draftPayloadToLetterheadInput(recovery.payload), c, user));
+          const resumed = resolveDraftLetterhead(recovery.payload, c);
+          draftTemplateRef.current = resumed.preview;
+          setPreviewConfig(resumed.preview);
+          setTemplateGap(resumed.gap);
+          reset(applyDefaults(resumed.input, resumed.preview ?? c, user));
+          if (resumed.gap) setNotice(t("letterhead.draftTemplateUnavailable"));
         } else {
           // Apply config-derived defaults to the empty form.
           reset(
@@ -290,7 +312,7 @@ export default function LetterheadCreateScreen() {
             userId: user.uid,
             draftKind: LETTERHEAD_DRAFT_KIND,
             scopeKey: LETTERHEAD_DRAFT_SCOPE,
-            payload: letterheadInputToDraftPayload(input),
+            payload: letterheadInputToDraftPayload(input, draftTemplateRef.current),
           })
           .catch(() => {});
       }, 800);
@@ -329,7 +351,7 @@ export default function LetterheadCreateScreen() {
         scopeKey: LETTERHEAD_DRAFT_SCOPE,
         draftId: activeDraftIdRef.current,
         title,
-        payload: letterheadInputToDraftPayload(values),
+        payload: letterheadInputToDraftPayload(values, draftTemplateRef.current),
       });
       activeDraftIdRef.current = saved.id;
       await formDraftsRepository.clearRecovery({
@@ -349,18 +371,24 @@ export default function LetterheadCreateScreen() {
   }, [user, getValues, t, revealStatus]);
 
   const onSubmit = handleSubmit(async (values) => {
-    const renderConfig = isEditing ? previewConfig : config;
+    if (templateGap) {
+      setSubmitError(
+        t(
+          templateGap === "draft"
+            ? "letterhead.draftTemplateUnavailable"
+            : "letterhead.historicalTemplateUnavailable"
+        )
+      );
+      revealStatus();
+      return;
+    }
+    const renderConfig = previewConfig ?? config;
     if (!renderConfig || !user) {
       setSubmitError(t("letterhead.setupLoadFailed"));
       revealStatus();
       return;
     }
     if (finishedRef.current || saveLockRef.current) return;
-    if (historicalUnavailable) {
-      setSubmitError(t("letterhead.historicalTemplateUnavailable"));
-      revealStatus();
-      return;
-    }
     if (!letterheadReadyToRender(renderConfig)) {
       setSubmitError(t("letterhead.setupNeedImage"));
       revealStatus();
@@ -587,9 +615,16 @@ export default function LetterheadCreateScreen() {
             })
           : t("letterhead.senderMissing")}
       </LocaleUiText>
-      {historicalUnavailable ? (
+      {templateGap ? (
         <View style={styles.banner}>
-          <Banner tone="warning" message={t("letterhead.historicalTemplateUnavailable")} />
+          <Banner
+            tone="warning"
+            message={t(
+              templateGap === "draft"
+                ? "letterhead.draftTemplateUnavailable"
+                : "letterhead.historicalTemplateUnavailable"
+            )}
+          />
         </View>
       ) : null}
       <View style={styles.actions}>
@@ -952,7 +987,7 @@ export default function LetterheadCreateScreen() {
       ) : null}
 
       {/* --- Preview / generate --- */}
-      {showPreview && (previewConfig ?? config) ? (
+      {showPreview && !templateGap && (previewConfig ?? config) ? (
         <View style={styles.sectionGap}>
           <FormSection title={t("letterhead.previewTitle")}>
             <LetterheadPreview config={(previewConfig ?? config)!} input={getValues()} />

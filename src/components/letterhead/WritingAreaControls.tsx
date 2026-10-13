@@ -7,8 +7,7 @@ import React from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 
 import { LocaleUiText, TextField } from "@/components/ui";
-import type { LetterheadMargins } from "@/services/letterhead";
-import { validateWritingMargins } from "@/services/letterhead";
+import { validateWritingMargins, type LetterheadMargins } from "@/services/letterhead";
 import { LETTERHEAD_A4_ASPECT } from "@/services/letterhead/letterheadVisualSpec";
 import { radius, spacing, typography, useThemedStyles } from "@/theme";
 
@@ -56,7 +55,7 @@ export function WritingAreaControls({
         aspectRatio: LETTERHEAD_A4_ASPECT,
         borderRadius: radius.md,
         overflow: "hidden",
-        backgroundColor: colors.surfaceMuted,
+        backgroundColor: "#FFFFFF",
         position: "relative",
         borderWidth: StyleSheet.hairlineWidth,
         borderColor: colors.divider,

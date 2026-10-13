@@ -15,6 +15,7 @@ import {
   type LetterheadSetupEditorRuntime,
 } from "./letterheadSetupEditorRuntime";
 import { createMemoryLetterheadRepository } from "./memoryLetterheadRepository";
+import { writingMarginsForHeader } from "./letterheadPlacement";
 import { DEFAULT_LETTERHEAD_MARGINS } from "./types";
 import type { LetterheadConfig } from "./types";
 import type { LetterheadCandidateImage } from "./letterheadCandidateImage";
@@ -644,6 +645,146 @@ async function main() {
     assert.equal(runtime.snapshot().ownerKey, `bob#${sessionB.generation}`);
     assert.equal(runtime.snapshot().existing?.defaultSenderName, "Bob Saved");
     assert.equal(runtime.snapshot().saving, false);
+    runtime.dispose();
+  }
+
+  {
+    syncSessionOwnership.resetForTests();
+    const session = syncSessionOwnership.beginSession("alice");
+    let savedPlacement: string | null = null;
+    const runtime = createLetterheadSetupEditorRuntime({
+      get: async () =>
+        fakeConfig({
+          userId: "alice",
+          placement: "complete_page",
+          defaultSenderName: "Saved",
+        }),
+      save: async (_uid, patch) => {
+        savedPlacement = patch.placement;
+        return fakeConfig({
+          userId: "alice",
+          ...patch,
+          placement: patch.placement,
+        });
+      },
+      useLocalFileForSave: true,
+      liveSession: () => syncSessionOwnership.capture(),
+    });
+    runtime.setOwner(session);
+    await flush();
+    assert.equal(runtime.snapshot().placement, "complete_page");
+    runtime.setDefaultName("Edited sender");
+    assert.equal(runtime.snapshot().placement, "complete_page");
+    runtime.setCandidate(candidate("alice", session.generation));
+    assert.equal((await runtime.save()).navigate, true);
+    assert.equal(savedPlacement, "complete_page");
+    runtime.dispose();
+  }
+
+  {
+    syncSessionOwnership.resetForTests();
+    const getHold = deferred<LetterheadConfig | null>();
+    const session = syncSessionOwnership.beginSession("alice");
+    const runtime = createLetterheadSetupEditorRuntime({
+      get: async () => getHold.promise,
+      save: async () => {
+        throw new Error("save_not_expected");
+      },
+      liveSession: () => syncSessionOwnership.capture(),
+    });
+    runtime.setOwner(session);
+    await flush();
+    runtime.setPlacement("header_logo", writingMarginsForHeader(800, 200));
+    getHold.resolve(
+      fakeConfig({
+        userId: "alice",
+        placement: "complete_page",
+        margins: { topPct: 19, bottomPct: 11, leftPct: 12, rightPct: 12 },
+        defaultSenderName: "Saved",
+      })
+    );
+    await flush();
+    assert.equal(runtime.snapshot().placement, "header_logo");
+    assert.equal(runtime.snapshot().existing?.placement, "complete_page");
+    assert.ok(runtime.snapshot().margins.topPct > 19);
+    runtime.dispose();
+  }
+
+  {
+    syncSessionOwnership.resetForTests();
+    const getHold = deferred<LetterheadConfig | null>();
+    const session = syncSessionOwnership.beginSession("alice");
+    const runtime = createLetterheadSetupEditorRuntime({
+      get: async () => getHold.promise,
+      save: async () => {
+        throw new Error("save_not_expected");
+      },
+      liveSession: () => syncSessionOwnership.capture(),
+    });
+    runtime.setOwner(session);
+    await flush();
+    runtime.setDefaultName("Newer name");
+    getHold.resolve(
+      fakeConfig({
+        userId: "alice",
+        placement: "header_logo",
+        margins: writingMarginsForHeader(800, 200),
+        defaultSenderName: "Saved",
+      })
+    );
+    await flush();
+    assert.equal(runtime.snapshot().placement, "header_logo");
+    assert.equal(runtime.snapshot().defaultName, "Newer name");
+    assert.equal(runtime.snapshot().margins.topPct, writingMarginsForHeader(800, 200).topPct);
+    runtime.dispose();
+  }
+
+  {
+    syncSessionOwnership.resetForTests();
+    const session = syncSessionOwnership.beginSession("alice");
+    const runtime = createLetterheadSetupEditorRuntime({
+      get: async () =>
+        fakeConfig({
+          userId: "alice",
+          placement: "complete_page",
+        }),
+      save: async () => {
+        throw new Error("save_not_expected");
+      },
+      liveSession: () => syncSessionOwnership.capture(),
+    });
+    runtime.setOwner(session);
+    await flush();
+    runtime.setMargins({ topPct: 30, bottomPct: 10, leftPct: 12, rightPct: 12 });
+    runtime.setPlacement("header_logo", writingMarginsForHeader(1600, 280));
+    assert.equal(runtime.snapshot().placement, "header_logo");
+    assert.equal(runtime.snapshot().margins.topPct, 30);
+    runtime.setPlacement("complete_page", { ...DEFAULT_LETTERHEAD_MARGINS });
+    assert.equal(runtime.snapshot().placement, "complete_page");
+    assert.equal(runtime.snapshot().margins.topPct, 30);
+    runtime.dispose();
+  }
+
+  {
+    syncSessionOwnership.resetForTests();
+    const session = syncSessionOwnership.beginSession("alice");
+    const runtime = createLetterheadSetupEditorRuntime({
+      get: async () =>
+        fakeConfig({
+          userId: "alice",
+          placement: "header_logo",
+          margins: writingMarginsForHeader(800, 200),
+        }),
+      save: async () => {
+        throw new Error("save_not_expected");
+      },
+      liveSession: () => syncSessionOwnership.capture(),
+    });
+    runtime.setOwner(session);
+    await flush();
+    runtime.setPlacement("complete_page", { ...DEFAULT_LETTERHEAD_MARGINS });
+    assert.equal(runtime.snapshot().placement, "complete_page");
+    assert.equal(runtime.snapshot().margins.topPct, DEFAULT_LETTERHEAD_MARGINS.topPct);
     runtime.dispose();
   }
 

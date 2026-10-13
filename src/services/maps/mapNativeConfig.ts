@@ -1,17 +1,18 @@
 /**
  * Android MapView crashes the process when the manifest has no
- * com.google.android.geo.API_KEY. Do not mount the native view in that case.
- * The key value is never logged.
+ * com.google.android.geo.API_KEY. Do not mount the native view unless the
+ * build recorded that the key was supplied. The key itself is not read here.
  */
 
-export function androidGoogleMapsApiKeyConfigured(apiKey: string | null | undefined): boolean {
-  return typeof apiKey === "string" && apiKey.trim().length > 0;
+export function readAndroidMapsConfigured(extra: unknown): boolean {
+  if (!extra || typeof extra !== "object") return false;
+  return (extra as { androidGoogleMapsConfigured?: unknown }).androidGoogleMapsConfigured === true;
 }
 
 export function mayMountNativeMapView(input: {
   platform: string;
-  androidApiKey: string | null | undefined;
+  androidMapsConfigured: boolean;
 }): boolean {
   if (input.platform !== "android") return true;
-  return androidGoogleMapsApiKeyConfigured(input.androidApiKey);
+  return input.androidMapsConfigured === true;
 }

@@ -30,11 +30,7 @@ import {
   pickLetterheadAsset,
   type TemplateWarningKey,
 } from "@/services/letterhead";
-import {
-  suggestLetterheadPlacement,
-  writingMarginsForHeader,
-  type LetterheadPlacement,
-} from "@/services/letterhead/letterheadPlacement";
+import { writingMarginsForHeader } from "@/services/letterhead/letterheadPlacement";
 import { letterheadSetupFailureMessage } from "@/services/letterhead/letterheadSetupSaveError";
 import {
   assertCandidateOwner,
@@ -44,12 +40,19 @@ import {
   persistLetterheadCandidateFromLocalFile,
   readCandidateDataUri,
   retireLetterheadCandidate,
+  type LetterheadCandidateImage,
 } from "@/services/letterhead/letterheadCandidateImage";
 import {
   getDocumentScannerCapability,
   scanLetterheadDocument,
 } from "@/services/letterhead/documentScanner";
-import { ImportedLetterheadImage } from "@/components/letterhead/ImportedLetterheadImage";
+import { LetterheadPageArt } from "@/components/letterhead/LetterheadPageArt";
+import { cropLetterheadWorkingCopy } from "@/services/letterhead/letterheadHeaderCropFile";
+import {
+  adjustHeaderCrop,
+  suggestHeaderCrop,
+  type HeaderCrop,
+} from "@/services/letterhead/letterheadHeaderCrop";
 import {
   createLetterheadSetupEditorRuntime,
   type LetterheadSetupEditorSnapshot,
@@ -78,6 +81,7 @@ const EMPTY_SNAP: LetterheadSetupEditorSnapshot = {
   ownerKey: "signed_out#0",
   existing: null,
   candidate: null,
+  placement: "complete_page",
   margins: { ...DEFAULT_LETTERHEAD_MARGINS },
   signatureUri: null,
   stampUri: null,
@@ -108,20 +112,19 @@ export default function LetterheadSetupScreen() {
   const [pendingTarget, setPendingTarget] = useState<PickTarget>("template");
   const [pickError, setPickError] = useState<string | null>(null);
   const [snap, setSnap] = useState<LetterheadSetupEditorSnapshot>(EMPTY_SNAP);
-  const [placement, setPlacement] = useState<LetterheadPlacement>("header_logo");
   const [showLayout, setShowLayout] = useState(false);
-  const placementRef = useRef<LetterheadPlacement>("header_logo");
+  const [pendingCrop, setPendingCrop] = useState<{
+    source: LetterheadCandidateImage;
+    crop: HeaderCrop;
+    warnings: TemplateWarningKey[];
+  } | null>(null);
+  const uncroppedSourceRef = useRef<LetterheadCandidateImage | null>(null);
 
   const runtime = useMemo(
     () =>
       createLetterheadSetupEditorRuntime({
         get: (uid) => getLetterheadRepository().get(uid),
-        save: (uid, patch, session) =>
-          getLetterheadRepository().save(
-            uid,
-            { ...patch, placement: placementRef.current },
-            session
-          ),
+        save: (uid, patch, session) => getLetterheadRepository().save(uid, patch, session),
         readCandidateDataUri,
         useLocalFileForSave: getActiveBackend() !== "local-mock",
         retireCandidate: (c) => void retireLetterheadCandidate(c),
@@ -139,6 +142,11 @@ export default function LetterheadSetupScreen() {
     return () => {
       mountedRef.current = false;
       unsub();
+      const extra = uncroppedSourceRef.current;
+      uncroppedSourceRef.current = null;
+      if (extra && extra.localUri !== runtime.snapshot().candidate?.localUri) {
+        void retireLetterheadCandidate(extra);
+      }
       runtime.dispose();
     };
   }, [runtime]);
@@ -181,35 +189,91 @@ export default function LetterheadSetupScreen() {
       assetBtns: { flex: 1, flexDirection: "row", gap: spacing.sm, flexWrap: "wrap" },
       assetLabel: { ...typography.captionStrong, color: colors.text, marginBottom: spacing.xs },
       assetHint: { ...typography.caption, color: colors.textSubtle, marginTop: spacing.xs },
+      cropFrame: {
+        height: 72,
+        overflow: "hidden",
+        backgroundColor: "#FFFFFF",
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: colors.divider,
+        borderRadius: 6,
+        marginBottom: spacing.sm,
+      },
       cta: { marginTop: spacing.lg },
       retry: { marginTop: spacing.sm },
     })
   );
 
-  const applyPlacement = useCallback(
-    (next: LetterheadPlacement, width: number, height: number) => {
-      placementRef.current = next;
-      setPlacement(next);
-      if (next === "header_logo" && width > 0 && height > 0) {
-        runtime.setMargins(writingMarginsForHeader(width, height));
+  const stageCrop = useCallback((next: LetterheadCandidateImage | null, warnings: TemplateWarningKey[]) => {
+    if (!next) return;
+    if (!mountedRef.current) {
+      void retireLetterheadCandidate(next);
+      return;
+    }
+    setPendingCrop((current) => {
+      if (current && current.source.localUri !== next.localUri) {
+        void retireLetterheadCandidate(current.source);
       }
-    },
-    [runtime]
-  );
+      return {
+        source: next,
+        crop: suggestHeaderCrop(next.width, next.height),
+        warnings,
+      };
+    });
+  }, []);
 
-  const applyCandidate = useCallback(
-    (next: Parameters<typeof runtime.setCandidate>[0], warnings: TemplateWarningKey[]) => {
+  const cancelCrop = useCallback(() => {
+    setPendingCrop((current) => {
+      if (current) void retireLetterheadCandidate(current.source);
+      return null;
+    });
+  }, []);
+
+  const acceptCrop = useCallback(async () => {
+    const pending = pendingCrop;
+    if (!pending || !mountedRef.current) return;
+    try {
+      const cropped = await cropLetterheadWorkingCopy(pending.source, pending.crop);
       if (!mountedRef.current) {
-        void retireLetterheadCandidate(next);
+        if (cropped.localUri !== pending.source.localUri) {
+          void retireLetterheadCandidate(cropped);
+        }
+        void retireLetterheadCandidate(pending.source);
         return;
       }
-      runtime.setCandidate(next, warnings);
-      if (next && next.width > 0 && next.height > 0) {
-        applyPlacement(suggestLetterheadPlacement(next.width, next.height), next.width, next.height);
+      if (cropped.localUri !== pending.source.localUri) {
+        uncroppedSourceRef.current = pending.source;
+      } else {
+        uncroppedSourceRef.current = null;
       }
-    },
-    [runtime, applyPlacement]
-  );
+      runtime.setCandidate(cropped, pending.warnings);
+      runtime.setPlacement(
+        "header_logo",
+        writingMarginsForHeader(cropped.width, cropped.height)
+      );
+      setPendingCrop(null);
+    } catch (e) {
+      if (!mountedRef.current) return;
+      setPickError(
+        letterheadSetupFailureMessage({
+          error: e instanceof Error ? e.message : "letterhead_stage:crop:crop_failed",
+          needImage: t("letterhead.setupNeedImage"),
+          loadFailed: t("letterhead.setupLoadFailed"),
+          unchanged: t("letterhead.setupSaveFailedUnchanged"),
+        }) ?? t("letterhead.cropFailed")
+      );
+    }
+  }, [pendingCrop, runtime, t]);
+
+  const useCompleteLetterhead = useCallback(() => {
+    const source = pendingCrop?.source ?? uncroppedSourceRef.current;
+    const warnings = pendingCrop?.warnings ?? runtime.snapshot().templateWarnings;
+    if (source && runtime.snapshot().candidate?.localUri !== source.localUri) {
+      runtime.setCandidate(source, warnings);
+    }
+    uncroppedSourceRef.current = null;
+    setPendingCrop(null);
+    runtime.setPlacement("complete_page", { ...DEFAULT_LETTERHEAD_MARGINS });
+  }, [pendingCrop, runtime]);
 
   const captureTemplateFromGallery = useCallback((): Promise<boolean> => {
     return (async () => {
@@ -237,7 +301,7 @@ export default function LetterheadSetupScreen() {
         await retireLetterheadCandidate(next);
         return false;
       }
-      applyCandidate(
+      stageCrop(
         next,
         analyzeTemplateImage({
           width: next.width,
@@ -247,7 +311,7 @@ export default function LetterheadSetupScreen() {
       );
       return true;
     })();
-  }, [user?.uid, applyCandidate]);
+  }, [user?.uid, stageCrop]);
 
   const captureTemplateFromScanner = useCallback((): Promise<boolean> => {
     return (async () => {
@@ -272,7 +336,7 @@ export default function LetterheadSetupScreen() {
         await retireLetterheadCandidate(next);
         return false;
       }
-      applyCandidate(
+      stageCrop(
         next,
         analyzeTemplateImage({
           width: next.width,
@@ -282,7 +346,7 @@ export default function LetterheadSetupScreen() {
       );
       return true;
     })();
-  }, [user?.uid, applyCandidate, captureTemplateFromGallery, t]);
+  }, [user?.uid, stageCrop, captureTemplateFromGallery, t]);
 
   const captureTemplate = useCallback((): Promise<boolean> => {
     if (preferredEntry === "scan") return captureTemplateFromScanner();
@@ -393,7 +457,7 @@ export default function LetterheadSetupScreen() {
     if (snap.candidate) {
       try {
         assertCandidateOwner(snap.candidate, user.uid);
-      } catch (e) {
+      } catch {
         const session = captureAdmissionToken();
         if (session) runtime.clearRetiredOwnerFields(session);
         setPickError(t("letterhead.setupSaveFailedUnchanged"));
@@ -403,6 +467,11 @@ export default function LetterheadSetupScreen() {
     const result = await runtime.save();
     if (!mountedRef.current) return;
     if (result.navigate) {
+      const extra = uncroppedSourceRef.current;
+      uncroppedSourceRef.current = null;
+      if (extra && extra.localUri !== snap.candidate?.localUri) {
+        void retireLetterheadCandidate(extra);
+      }
       router.replace("/(app)/letterhead");
     }
   };
@@ -440,32 +509,135 @@ export default function LetterheadSetupScreen() {
         </View>
       ))}
 
-      {templateUri ? (
+      {pendingCrop ? (
+        <View style={styles.banner}>
+          <LocaleUiText style={styles.assetHint}>{t("letterhead.cropSuggestion")}</LocaleUiText>
+          <View style={styles.cropFrame}>
+            <Image
+              source={{ uri: pendingCrop.source.localUri }}
+              style={{
+                width: "100%",
+                height: `${100 / Math.max(pendingCrop.crop.height, 0.08)}%`,
+                transform: [
+                  {
+                    translateY:
+                      -(pendingCrop.crop.originY / Math.max(pendingCrop.crop.height, 0.08)) * 72,
+                  },
+                ],
+              }}
+              resizeMode="cover"
+            />
+          </View>
+          <View style={styles.assetBtns}>
+            <Button
+              label={t("letterhead.cropUp")}
+              variant="secondary"
+              onPress={() =>
+                setPendingCrop((current) =>
+                  current
+                    ? {
+                        ...current,
+                        crop: adjustHeaderCrop(current.source.width, current.source.height, current.crop, {
+                          originY: -0.02,
+                        }),
+                      }
+                    : current
+                )
+              }
+              disabled={busy}
+            />
+            <Button
+              label={t("letterhead.cropDown")}
+              variant="secondary"
+              onPress={() =>
+                setPendingCrop((current) =>
+                  current
+                    ? {
+                        ...current,
+                        crop: adjustHeaderCrop(current.source.width, current.source.height, current.crop, {
+                          originY: 0.02,
+                        }),
+                      }
+                    : current
+                )
+              }
+              disabled={busy}
+            />
+            <Button
+              label={t("letterhead.cropTaller")}
+              variant="secondary"
+              onPress={() =>
+                setPendingCrop((current) =>
+                  current
+                    ? {
+                        ...current,
+                        crop: adjustHeaderCrop(current.source.width, current.source.height, current.crop, {
+                          height: 0.02,
+                        }),
+                      }
+                    : current
+                )
+              }
+              disabled={busy}
+            />
+            <Button
+              label={t("letterhead.cropShorter")}
+              variant="secondary"
+              onPress={() =>
+                setPendingCrop((current) =>
+                  current
+                    ? {
+                        ...current,
+                        crop: adjustHeaderCrop(current.source.width, current.source.height, current.crop, {
+                          height: -0.02,
+                        }),
+                      }
+                    : current
+                )
+              }
+              disabled={busy}
+            />
+          </View>
+          <Button label={t("letterhead.cropAccept")} onPress={() => void acceptCrop()} disabled={busy} />
+          <Button
+            label={t("letterhead.placementComplete")}
+            variant="secondary"
+            onPress={useCompleteLetterhead}
+            disabled={busy}
+            style={styles.retry}
+          />
+          <Button
+            label={t("letterhead.cropCancel")}
+            variant="ghost"
+            onPress={cancelCrop}
+            disabled={busy}
+          />
+        </View>
+      ) : null}
+
+      {templateUri && !pendingCrop ? (
         <View style={styles.banner}>
           <Button
             label={t("letterhead.placementHeader")}
-            variant={placement === "header_logo" ? "primary" : "secondary"}
-            onPress={() =>
-              applyPlacement(
-                "header_logo",
-                snap.candidate?.width ?? snap.existing?.imageWidth ?? 0,
-                snap.candidate?.height ?? snap.existing?.imageHeight ?? 0
-              )
-            }
+            variant={snap.placement === "header_logo" ? "primary" : "secondary"}
+            onPress={() => {
+              if (snap.candidate) {
+                stageCrop(snap.candidate, snap.templateWarnings);
+              } else {
+                setPickError(t("letterhead.cropNeedsPhoto"));
+              }
+            }}
             disabled={busy}
           />
           <Button
             label={t("letterhead.placementComplete")}
-            variant={placement === "complete_page" ? "primary" : "secondary"}
-            onPress={() => {
-              placementRef.current = "complete_page";
-              setPlacement("complete_page");
-            }}
+            variant={snap.placement === "complete_page" ? "primary" : "secondary"}
+            onPress={useCompleteLetterhead}
             disabled={busy}
             style={styles.retry}
           />
           <LocaleUiText style={styles.assetHint}>
-            {placement === "header_logo"
+            {snap.placement === "header_logo"
               ? t("letterhead.placementHeaderLimit")
               : t("letterhead.placementCompleteLimit")}
           </LocaleUiText>
@@ -485,10 +657,11 @@ export default function LetterheadSetupScreen() {
           onChange={(m) => runtime.setMargins(m)}
           background={
             templateUri ? (
-              <ImportedLetterheadImage
+              <LetterheadPageArt
                 uri={templateUri}
                 width={snap.candidate?.width ?? snap.existing?.imageWidth}
                 height={snap.candidate?.height ?? snap.existing?.imageHeight}
+                placement={snap.placement}
               />
             ) : undefined
           }

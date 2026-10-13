@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 
 import en from "@/i18n/locales/en.json";
-import { previousTabRouteName, selectedTabRouteName } from "@/navigation/tabRouteSelection";
-import { mayMountNativeMapView } from "@/services/maps/mapNativeConfig";
+import { selectedTabRouteName } from "@/navigation/tabRouteSelection";
+import { mayMountNativeMapView, readAndroidMapsConfigured } from "@/services/maps/mapNativeConfig";
 import {
   headerBandHeightPct,
+  headerImageHeightMm,
   suggestLetterheadPlacement,
   writingMarginsForHeader,
 } from "@/services/letterhead/letterheadPlacement";
@@ -52,15 +53,11 @@ const tabs = {
 };
 
 assert.equal(selectedTabRouteName(tabs), "settings");
-assert.equal(previousTabRouteName(tabs), "you");
-assert.equal(
-  previousTabRouteName({ ...tabs, index: 0, history: [{ type: "route", key: "calendar" }] }),
-  null
-);
-
-assert.equal(mayMountNativeMapView({ platform: "android", androidApiKey: "" }), false);
-assert.equal(mayMountNativeMapView({ platform: "android", androidApiKey: "present" }), true);
-assert.equal(mayMountNativeMapView({ platform: "ios", androidApiKey: null }), true);
+assert.equal(readAndroidMapsConfigured({ googleMaps: { apiKey: "not-read" } }), false);
+assert.equal(readAndroidMapsConfigured({ androidGoogleMapsConfigured: true }), true);
+assert.equal(mayMountNativeMapView({ platform: "android", androidMapsConfigured: false }), false);
+assert.equal(mayMountNativeMapView({ platform: "android", androidMapsConfigured: true }), true);
+assert.equal(mayMountNativeMapView({ platform: "ios", androidMapsConfigured: false }), true);
 
 assert.equal(suggestLetterheadPlacement(1600, 280), "header_logo");
 assert.equal(suggestLetterheadPlacement(1240, 1754), "complete_page");
@@ -71,13 +68,14 @@ assert.ok(margins.topPct > band);
 assert.ok(margins.topPct + margins.bottomPct <= 80);
 
 const specific = letterheadSetupFailureMessage({
-  error: "Local file missing or size unknown for Storage upload.",
+  error: "letterhead_stage:upload:local_file_missing",
   needImage: "need",
   loadFailed: "load",
   unchanged: UNCHANGED,
 });
-assert.match(specific ?? "", /Local file missing/);
+assert.match(specific ?? "", /not available to upload/);
 assert.match(specific ?? "", /unchanged/);
+assert.doesNotMatch(specific ?? "", /file:\/\//);
 assert.equal(
   letterheadSetupFailureMessage({
     error: "session_retired",
@@ -139,6 +137,10 @@ const headerHtml = composeLetterheadHtml({
 });
 assert.match(headerHtml.html, /class="letterhead-header"/);
 assert.doesNotMatch(headerHtml.html, /class="letterhead-bg"/);
+assert.match(
+  headerHtml.html,
+  new RegExp(`height:\\s*${headerImageHeightMm(templateA.imageWidth, templateA.imageHeight)}mm`)
+);
 const pageHtml = composeLetterheadHtml({
   config: { ...templateB, placement: "complete_page" },
   doc: {

@@ -13,7 +13,7 @@ Screenshots were used privately and are not in this repository.
 - Reproduction: after letterhead and other use, Settings content stayed on screen while You and Saved Records became highlighted. Android Back did not leave Settings. Relaunch restored navigation.
 - Observed: tab highlight and the rendered screen disagreed.
 - Cause (verified from the navigator): the installed bar is a native bottom navigation whose selection can move without the JS scene. That matches a dropped fragment transaction after an image picker or share sheet returns.
-- Correction: JS tabs. The highlight is `state.index`. Android Back returns to the previous tab, then the start tab. Stack screens above the tabs keep their own Back.
+- Correction: JS tabs. The highlight is `state.index`. Android Back is the tab router's `backBehavior="history"`, which pops the visited tabs. The start route is You. Route zero is Calendar, and it is not the empty-history fallback. When history is empty, the router does not handle Back, so the system can leave the app. The tab bar does not call `navigate` on hardware Back. Stack screens above the tabs, including letterhead after a failed save or a cancelled share, pop on their own Back.
 - Not claimed: a host test does not prove the phone freeze is gone. That needs the next install.
 
 ## Map
@@ -21,24 +21,24 @@ Screenshots were used privately and are not in this repository.
 - Entry: Calendar & Maps → Map → `DeferredCalendarMapsMapPanel` → `MapView` (`react-native-maps`, `PROVIDER_DEFAULT`).
 - Reproduction: tapping Map closes the app immediately.
 - Artifact: the vc25 manifest has no `com.google.android.geo.API_KEY`. On Android, creating `MapView` without that key crashes the process.
-- Correction: do not mount `MapView` unless that key is present. Empty markers, denied location, and PIN lookup failure already stay in JS. Location is not requested by the map; `showsUserLocation` stays false.
-- Required for a working map, not for avoiding the crash: set EAS secret `GOOGLE_MAPS_ANDROID_API_KEY` (restricted to this package) before the next Android build. `app.config.js` copies it into `android.config.googleMaps.apiKey`. No key is stored in the repo.
-- Not claimed: the installed vc25 binary still crashes. The guard is in the next bundle.
+- Correction: do not mount `MapView` unless `extra.androidGoogleMapsConfigured` is true. That boolean and `android.config.googleMaps.apiKey` are set by the same resolver from `GOOGLE_MAPS_ANDROID_API_KEY`. Runtime code does not read the key. `Constants.expoConfig` does not include `android.config`, so the earlier key read could not see a real manifest key. Empty markers, denied location, and PIN lookup failure already stay in JS. Location is not requested by the map; `showsUserLocation` stays false.
+- Required for tiles, not for avoiding the crash: set EAS secret `GOOGLE_MAPS_ANDROID_API_KEY` before the next Android build, restricted to package `com.specialsoftwares.vyaamikkdiary`. No key is stored in the repo. Restrictions are not weakened. Without the secret the flag stays false and `MapView` is not mounted.
+- Not claimed: a helper test does not prove map tiles. The installed vc25 binary still has no key and still crashes. The guard is in the next bundle.
 
 ## Letterhead save
 
 - Entry: `app/(app)/letterhead/setup.tsx` → `createLetterheadSetupEditorRuntime.save` → `firebaseLetterheadRepository.save`.
 - Reproduction: a gallery image previewed, then Save letterhead showed “Could not save; your current letterhead is unchanged.” The image was not A4 and was large.
 - Cause (verified): every save error except “need image” and “load failed” was replaced with that one sentence, so the upload failure was hidden. The saved template is not replaced when save throws.
-- Cause (hypothesis): the hidden error is the Storage upload (`Local file missing` or an HTTP rejection). The screenshot does not include the underlying message.
-- Correction: show the specific failure and state that the current template is unchanged. Two placements: header/logo (default; whole image fitted at the top of a white A4 page, no pixel crop, writing area starts below it) and complete letterhead (contain on A4, no stretch). Layout margins stay optional.
+- Cause (hypothesis, not a device trace): the hidden error may be the Storage upload. The screenshot does not include the underlying message. No phone was attached while this correction was made (`adb devices` listed none), so the native gallery save is still unverified. The save path now records a privacy-safe stage code (`pick`, `copy`, `sniff`, `crop`, `upload`, `firestore`) and does not put file paths in the message.
+- Correction: header placement crops a working copy. The suggestion is the photo's shape, not a reading of the print. Accept and cancel are both available. Cancel leaves the source and the saved template. Complete letterhead stays a separate action and does not crop. Setup preview, letter preview, and the production PDF use the same header band. A saved complete-page template stays complete-page when the sender is edited, including when the saved config arrives after that edit. Deliberate margin edits are kept when the mode changes; an untouched mode change gets that mode's writing margin.
 
 ## Draft and PDF
 
 - Entry: `app/(app)/letterhead/create.tsx` `onSaveDraft` and `onSubmit`.
 - Reproduction: Save draft and Generate & share PDF looked like they did nothing. A logo letter had reached preview. Saved Records showed a Drafts count.
 - Cause (verified): success and failure banners render at the top of a long form, off screen from the buttons. Generate returned early when a logo template had no page image. Share errors were discarded. Edit rebound `templateRefUpdatedAt` to the live template.
-- Correction: status sits with the buttons and the form scrolls to it. Logo templates can generate. Share cancellation keeps the saved letter. Retry uses the existing idempotent create. Drafts still go through `formDraftsRepository`.
+- Correction: status sits with the buttons and the form scrolls to it. Logo templates can generate. Share cancellation keeps the saved letter and does not create another record. Retry uses the existing idempotent create. Saved drafts and recovery snapshots store the template snapshot used for that letter. Reopening after the active template is replaced still previews and exports the original snapshot. A new letter uses the active template. A draft saved before snapshots existed says the original design cannot be recovered and does not borrow the new template. Another account cannot read the snapshot.
 
 ## One active template
 
@@ -55,10 +55,14 @@ Screenshots were used privately and are not in this repository.
 
 ## Native checks still pending
 
-- Open Map on a phone with the next build (crash gone; tiles only if the maps key is in that build).
-- Import a non-A4 header, save it, write a letter.
-- Save and reopen a draft.
-- Generate, share, and cancel share.
-- Replace the template and reopen the older letter.
-- Switch every tab and use Android Back.
+No device was attached for this correction. None of the following is accepted from host tests.
+
+- Open Map on a phone with the next build (crash gone; tiles only if the maps secret is in that build).
+- Choose a photo, accept or adjust the header crop, save the template, and confirm the previous template remains if save fails.
+- Write a letter, save a draft, see it in Records, reopen it, and generate or share a PDF.
+- Cancel share and retry without a duplicate record.
+- Replace the active template and confirm the older draft and letter still use the original.
+- Switch every tab and use Android Back, including return from letterhead after a failed save or cancelled share.
 - Large text and TalkBack.
+
+The next build is not started. See `NEXT_BUILD_PACKET.md`.

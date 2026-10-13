@@ -10,6 +10,12 @@ import { createRequire } from "node:module";
 
 import { composeLetterheadHtml } from "./letterheadPdfHtml";
 import type { LetterheadConfig } from "@/services/letterhead";
+import { marginsToInches } from "@/services/letterhead/letterheadLayoutConfig";
+import {
+  headerImageHeightMm,
+  writingMarginsForHeader,
+} from "@/services/letterhead/letterheadPlacement";
+import { suggestHeaderCrop, headerCropPixels } from "@/services/letterhead/letterheadHeaderCrop";
 
 const outDir = path.join(
   import.meta.dirname,
@@ -100,6 +106,63 @@ writeCase("imported-tall", {
 const A4ISH_PAGE =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAwAAAAQCAYAAAAiYZ4HAAAAE0lEQVQ4T2NkYGD4z0ABYBxVMAoGAATIAQH0q7e0AAAAAElFTkSuQmCC";
 
+const wideHeaderMargins = writingMarginsForHeader(1600, 280);
+const wideHeader = writeCase("header-wide", {
+  userId: "u1",
+  sourceType: "imported_image",
+  imageDataUri: WIDE_PAGE,
+  imageWidth: 1600,
+  imageHeight: 280,
+  placement: "header_logo",
+  margins: wideHeaderMargins,
+  createdAt: 1,
+  updatedAt: 1,
+});
+assert.match(
+  wideHeader.html,
+  new RegExp(`height:\\s*${headerImageHeightMm(1600, 280)}mm`)
+);
+const wideInch = marginsToInches(wideHeaderMargins);
+assert.match(wideHeader.html, new RegExp(`margin:\\s*${wideInch.top}in`));
+
+const tallSource = { width: 1200, height: 2000 };
+const tallCrop = suggestHeaderCrop(tallSource.width, tallSource.height);
+const tallPx = headerCropPixels(tallSource.width, tallSource.height, tallCrop);
+const tallMargins = writingMarginsForHeader(tallPx.width, tallPx.height);
+const tallHeader = writeCase("header-tall-crop", {
+  userId: "u1",
+  sourceType: "imported_image",
+  imageDataUri: TALL_PAGE,
+  imageWidth: tallPx.width,
+  imageHeight: tallPx.height,
+  placement: "header_logo",
+  margins: tallMargins,
+  createdAt: 1,
+  updatedAt: 1,
+});
+assert.ok(tallPx.height < tallSource.height, "tall photo is cropped before render");
+assert.match(
+  tallHeader.html,
+  new RegExp(`height:\\s*${headerImageHeightMm(tallPx.width, tallPx.height)}mm`)
+);
+const tallInch = marginsToInches(tallMargins);
+assert.ok(
+  tallInch.top * 25.4 + 0.2 >= headerImageHeightMm(tallPx.width, tallPx.height),
+  "writing margin starts at or below the header image"
+);
+
+writeCase("imported-complete-reopen", {
+  userId: "u1",
+  sourceType: "imported_image",
+  imageDataUri: A4ISH_PAGE,
+  imageWidth: 595,
+  imageHeight: 842,
+  placement: "complete_page",
+  margins: { topPct: 19, bottomPct: 11, leftPct: 12, rightPct: 12 },
+  createdAt: 1,
+  updatedAt: 1,
+});
+
 writeCase("imported-a4ish", {
   userId: "u1",
   sourceType: "imported_image",
@@ -172,6 +235,9 @@ const REQUIRED_PDF_NAMES = [
   "imported-contain-top",
   "imported-tall",
   "imported-a4ish",
+  "imported-complete-reopen",
+  "header-wide",
+  "header-tall-crop",
   "generated-left",
   "generated-center",
   "generated-right",
@@ -183,6 +249,12 @@ fs.mkdirSync(freshPdfDir, { recursive: true });
 
 /** Inspect production HTML for clipping / stacking / header placement. */
 function inspectHtmlGeometry(name: string, html: string): void {
+  if (name.startsWith("header-")) {
+    assert.match(html, /class="letterhead-header"/, `${name}: header image`);
+    assert.match(html, /height:\s*[0-9.]+mm/, `${name}: explicit header height`);
+    assert.doesNotMatch(html, /class="letterhead-bg"/, `${name}: not a full-page image`);
+    assert.doesNotMatch(html, /max-height:\s*42%/, `${name}: not a fitted whole photo`);
+  }
   if (name.startsWith("imported-")) {
     assert.match(html, /object-fit:\s*contain/, `${name}: contain`);
     assert.match(html, /object-position:\s*top center/, `${name}: top centre`);

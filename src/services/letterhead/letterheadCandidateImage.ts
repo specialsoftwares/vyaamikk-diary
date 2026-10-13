@@ -22,6 +22,7 @@ import {
   ownedCandidateTempUris,
   sniffImageMimeFromBase64Head,
 } from "./letterheadImageMime";
+import { recordLetterheadSaveDiagnostic } from "./letterheadSaveDiagnostics";
 
 export { ownedCandidateTempUris } from "./letterheadImageMime";
 
@@ -158,8 +159,10 @@ async function persistCopiedCandidate(
 
   try {
     await FileSystem.copyAsync({ from: sourceUri, to: staging });
-  } catch (e) {
-    log.warn("copy candidate failed", e);
+    recordLetterheadSaveDiagnostic("copy", "ok", "copied");
+  } catch {
+    log.warn("copy candidate failed", { stage: "copy", code: "read_failed" });
+    recordLetterheadSaveDiagnostic("copy", "failed", "read_failed");
     await cleanupOwnedTemps();
     throw new LetterheadCandidateError("read_failed");
   }
@@ -170,9 +173,11 @@ async function persistCopiedCandidate(
     // Magic bytes only — picker MIME is never an admission ticket.
     const mime = await sniffImageMime(staging);
     if (!mime) {
+      recordLetterheadSaveDiagnostic("sniff", "failed", "unsupported_format");
       await cleanupOwnedTemps();
       throw new LetterheadCandidateError("unsupported_format");
     }
+    recordLetterheadSaveDiagnostic("sniff", "ok", "image");
 
     const dest = `${dir}/tpl-${fileGeneration}.${extFromMime(mime)}`;
     if (dest !== staging) {

@@ -7,13 +7,8 @@ import { useT } from "@/i18n";
 import type { CalendarMapRecord } from "@/services/calendarMaps";
 import type { MapMarkerBuildStats } from "@/services/calendarMaps/mapMarkerRecords";
 import type { MapLocationCluster } from "@/services/calendarMaps/mapClustering";
-import { mayMountNativeMapView } from "@/services/maps/mapNativeConfig";
+import { mayMountNativeMapView, readAndroidMapsConfigured } from "@/services/maps/mapNativeConfig";
 import { spacing, typography, useThemeColors } from "@/theme";
-
-function configuredAndroidMapsKey(): string | null {
-  const key = Constants.expoConfig?.android?.config?.googleMaps?.apiKey;
-  return typeof key === "string" ? key : null;
-}
 
 export interface DeferredCalendarMapsMapPanelProps {
   clusters: MapLocationCluster[];
@@ -34,7 +29,7 @@ export function DeferredCalendarMapsMapPanel(props: DeferredCalendarMapsMapPanel
   const colors = useThemeColors();
   const canMount = mayMountNativeMapView({
     platform: Platform.OS,
-    androidApiKey: configuredAndroidMapsKey(),
+    androidMapsConfigured: readAndroidMapsConfigured(Constants.expoConfig?.extra),
   });
   const [Panel, setPanel] = useState<React.ComponentType<DeferredCalendarMapsMapPanelProps> | null>(
     null

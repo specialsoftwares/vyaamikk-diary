@@ -86,6 +86,7 @@ export {
   draftPayloadToLetterheadInput,
   isLetterheadDraftMeaningful,
   letterheadInputToDraftPayload,
+  resolveDraftLetterhead,
 } from "./letterheadDraftMapper";
 
 /**

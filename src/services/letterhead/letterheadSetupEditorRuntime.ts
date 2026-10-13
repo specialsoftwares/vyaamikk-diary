@@ -7,9 +7,10 @@
  *
  * Load policy: mark the editor dirty on user edits. A delayed or retried get()
  * must not overwrite dirty fields (candidate / margins / signature / stamp /
- * sender). The saved-template baseline (`existing`) is still updated when the
- * owner is live. Load failures surface `load_failed` so the screen can retry
- * via `load()`.
+ * sender / placement). Placement and margins restore from the saved template
+ * unless the user has changed that field. The saved-template baseline
+ * (`existing`) is still updated when the owner is live. Load failures surface
+ * `load_failed` so the screen can retry via `load()`.
  *
  * Save policy: synchronous single-flight guard before the first await, bound to
  * an owner/attempt token so an older save's finally cannot unlock a newer owner.
@@ -24,14 +25,20 @@ import {
 } from "@/sync/syncSessionOwnership";
 
 import type { LetterheadCandidateImage } from "./letterheadCandidateImage";
+import type { LetterheadPlacement } from "./letterheadPlacement";
+import { describeLetterheadSaveFailure } from "./letterheadSaveDiagnostics";
 import type { TemplateWarningKey } from "./letterheadTemplateService";
-import { DEFAULT_LETTERHEAD_MARGINS } from "./types";
-import type { LetterheadConfig, LetterheadMargins } from "./types";
+import {
+  DEFAULT_LETTERHEAD_MARGINS,
+  type LetterheadConfig,
+  type LetterheadMargins,
+} from "./types";
 
 export type LetterheadSetupEditorSnapshot = {
   ownerKey: string;
   existing: LetterheadConfig | null;
   candidate: LetterheadCandidateImage | null;
+  placement: LetterheadPlacement;
   margins: LetterheadMargins;
   signatureUri: string | null;
   stampUri: string | null;
@@ -51,6 +58,7 @@ export type LetterheadSetupSavePatch = {
   imageWidth: number;
   imageHeight: number;
   margins: LetterheadMargins;
+  placement: LetterheadPlacement;
   signatureDataUri: string | null;
   stampDataUri: string | null;
   defaultSenderName: string | null;
@@ -84,6 +92,7 @@ function emptySnapshot(ownerKey: string): LetterheadSetupEditorSnapshot {
     ownerKey,
     existing: null,
     candidate: null,
+    placement: "complete_page",
     margins: { ...DEFAULT_LETTERHEAD_MARGINS },
     signatureUri: null,
     stampUri: null,
@@ -123,6 +132,13 @@ export function createLetterheadSetupEditorRuntime(ports: LetterheadSetupEditorP
   let saveSeq = 0;
   /** True after any user edit for the current owner; cleared on setOwner. */
   let editorDirty = false;
+  /** True after the user chooses a placement. A late load must not replace it. */
+  let placementTouched = false;
+  /**
+   * `loaded` margins may be replaced by a late get(). `mode` margins came from
+   * a placement change. `user` margins were edited and are kept.
+   */
+  let marginsSource: "loaded" | "mode" | "user" = "loaded";
   let saveAttempt = 0;
   let saveFlight: SaveFlight | null = null;
   let published = emptySnapshot("signed_out#0");
@@ -134,6 +150,10 @@ export function createLetterheadSetupEditorRuntime(ports: LetterheadSetupEditorP
 
   function live(): SyncSessionToken | null {
     return ports.liveSession ? ports.liveSession() : owner;
+  }
+
+  function savedPlacement(config: LetterheadConfig): LetterheadPlacement {
+    return config.placement === "header_logo" ? "header_logo" : "complete_page";
   }
 
   function stillOwns(opOwner: SyncSessionToken | null): boolean {
@@ -196,14 +216,22 @@ export function createLetterheadSetupEditorRuntime(ports: LetterheadSetupEditorP
           loading: false,
           existing: config,
           error: null,
+          placement: placementTouched ? published.placement : savedPlacement(config),
+          margins:
+            marginsSource === "loaded"
+              ? (config.margins ?? { ...DEFAULT_LETTERHEAD_MARGINS })
+              : published.margins,
         });
         return;
       }
 
+      placementTouched = false;
+      marginsSource = "loaded";
       setPublished({
         ...published,
         loading: false,
         existing: config,
+        placement: savedPlacement(config),
         margins: config.margins ?? { ...DEFAULT_LETTERHEAD_MARGINS },
         signatureUri: config.signatureDataUri ?? null,
         stampUri: config.stampDataUri ?? null,
@@ -233,6 +261,8 @@ export function createLetterheadSetupEditorRuntime(ports: LetterheadSetupEditorP
     setOwner(session: SyncSessionToken | null): void {
       owner = session;
       editorDirty = false;
+      placementTouched = false;
+      marginsSource = "loaded";
       const key = ownerKeyOf(session);
       const prevCandidate = published.candidate;
       setPublished(emptySnapshot(key));
@@ -267,7 +297,19 @@ export function createLetterheadSetupEditorRuntime(ports: LetterheadSetupEditorP
     setMargins(margins: LetterheadMargins): void {
       if (!stillOwns(owner)) return;
       bumpEdit();
+      marginsSource = "user";
       setPublished({ ...published, margins });
+    },
+
+    setPlacement(next: LetterheadPlacement, suggested?: LetterheadMargins): void {
+      if (!stillOwns(owner)) return;
+      bumpEdit();
+      placementTouched = true;
+      const fallback =
+        next === "complete_page" ? { ...DEFAULT_LETTERHEAD_MARGINS } : published.margins;
+      const margins = marginsSource === "user" ? published.margins : (suggested ?? fallback);
+      if (marginsSource !== "user") marginsSource = "mode";
+      setPublished({ ...published, placement: next, margins });
     },
 
     setSignatureUri(uri: string | null): void {
@@ -357,6 +399,7 @@ export function createLetterheadSetupEditorRuntime(ports: LetterheadSetupEditorP
             imageWidth: snap.candidate?.width ?? snap.existing?.imageWidth ?? 0,
             imageHeight: snap.candidate?.height ?? snap.existing?.imageHeight ?? 0,
             margins: snap.margins,
+            placement: snap.placement,
             signatureDataUri: snap.signatureUri,
             stampDataUri: snap.stampUri,
             defaultSenderName: snap.defaultName.trim() || null,
@@ -373,6 +416,8 @@ export function createLetterheadSetupEditorRuntime(ports: LetterheadSetupEditorP
 
         const done = published.candidate;
         editorDirty = false;
+        placementTouched = false;
+        marginsSource = "loaded";
         setPublished({
           ...published,
           saving: false,
@@ -404,7 +449,7 @@ export function createLetterheadSetupEditorRuntime(ports: LetterheadSetupEditorP
           setPublished({
             ...published,
             saving: false,
-            error: e instanceof Error ? e.message : "save_failed",
+            error: describeLetterheadSaveFailure(e, "upload"),
           });
         }
         return { navigate: false };

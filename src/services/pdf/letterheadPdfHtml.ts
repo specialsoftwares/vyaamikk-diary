@@ -9,6 +9,7 @@ import type {
   LetterheadGeneratedLayout,
 } from "@/services/letterhead";
 import { marginsToInches } from "@/services/letterhead/letterheadLayoutConfig";
+import { headerImageHeightMm } from "@/services/letterhead/letterheadPlacement";
 import { escapeHtml, escapeHtmlAttr } from "@/utils/escapeHtml";
 
 export interface LetterheadPdfLabels {
@@ -54,6 +55,10 @@ export function composeLetterheadHtml(
   }
 
   const inch = marginsToInches(config.margins);
+  const headerMm =
+    config.placement === "header_logo"
+      ? headerImageHeightMm(config.imageWidth, config.imageHeight)
+      : 0;
   const generatedHeaderHtml = isGenerated
     ? buildGeneratedHeaderHtml(config.generatedLayout!)
     : "";
@@ -167,11 +172,11 @@ export function composeLetterheadHtml(
     top: 0;
     left: 0;
     width: 210mm;
-    height: auto;
-    max-height: 42%;
+    height: ${headerMm}mm;
     z-index: 0;
     object-fit: contain;
     object-position: top center;
+    background: #ffffff;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }

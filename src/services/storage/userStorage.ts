@@ -15,9 +15,12 @@ import { deleteObject, getDownloadURL, ref } from "firebase/storage";
 
 import { env, isFirebaseConfigured } from "@/config/env";
 import { FirebaseNotConfiguredError, getFirebaseStorage } from "@/config/firebase";
-import { createLogger } from "@/utils/logger";
-
+import {
+  describeLetterheadSaveFailure,
+  recordLetterheadSaveDiagnostic,
+} from "@/services/letterhead/letterheadSaveDiagnostics";
 import type { SyncSessionToken } from "@/sync/syncSessionOwnership";
+import { createLogger } from "@/utils/logger";
 
 import { uploadLocalFileViaMediaApi } from "./userStorageUpload";
 
@@ -201,27 +204,42 @@ export async function uploadLetterheadImage(
   }
   const ownership: StorageUploadSession = { userId, session };
 
-  const parsed = parseDataUri(trimmed);
-  if (parsed) {
-    const ext = extFromMime(parsed.mime);
-    const safeName = sanitizeStorageFileName(
-      fileName ?? `letterhead-${Date.now()}.${ext}`
-    );
-    const storagePath = getUserStoragePath(userId, "letterhead", safeName);
-    return uploadBase64ToPath(storagePath, parsed.base64, parsed.mime, ownership);
+  try {
+    const parsed = parseDataUri(trimmed);
+    let uploaded: StorageUploadResult;
+    if (parsed) {
+      const ext = extFromMime(parsed.mime);
+      const safeName = sanitizeStorageFileName(
+        fileName ?? `letterhead-${Date.now()}.${ext}`
+      );
+      const storagePath = getUserStoragePath(userId, "letterhead", safeName);
+      uploaded = await uploadBase64ToPath(storagePath, parsed.base64, parsed.mime, ownership);
+    } else if (isLocalFileUri(trimmed)) {
+      const mime = inferContentType(fileName ?? trimmed, "image/jpeg");
+      const ext = extFromMime(mime);
+      const safeName = sanitizeStorageFileName(
+        fileName ?? `letterhead-${Date.now()}.${ext}`
+      );
+      const storagePath = getUserStoragePath(userId, "letterhead", safeName);
+      uploaded = await uploadLocalFileToPath(storagePath, trimmed, mime, ownership);
+    } else {
+      throw new Error("Letterhead image must be a local file URI or base64 data URI.");
+    }
+    recordLetterheadSaveDiagnostic("upload", "ok", "uploaded");
+    return uploaded;
+  } catch (e) {
+    const ownership =
+      e instanceof Error &&
+      (e.name === "StorageUploadOwnershipError" ||
+        (e as { failureCode?: string }).failureCode === "session_retired");
+    if (ownership) {
+      recordLetterheadSaveDiagnostic("upload", "failed", "session_retired");
+      throw e;
+    }
+    const code = describeLetterheadSaveFailure(e, "upload");
+    recordLetterheadSaveDiagnostic("upload", "failed", code);
+    throw new Error(code);
   }
-
-  if (isLocalFileUri(trimmed)) {
-    const mime = inferContentType(fileName ?? trimmed, "image/jpeg");
-    const ext = extFromMime(mime);
-    const safeName = sanitizeStorageFileName(
-      fileName ?? `letterhead-${Date.now()}.${ext}`
-    );
-    const storagePath = getUserStoragePath(userId, "letterhead", safeName);
-    return uploadLocalFileToPath(storagePath, trimmed, mime, ownership);
-  }
-
-  throw new Error("Letterhead image must be a local file URI or base64 data URI.");
 }
 
 export async function uploadRecordAttachment(

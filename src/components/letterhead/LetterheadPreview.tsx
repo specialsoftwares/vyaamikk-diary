@@ -7,7 +7,7 @@ import React, { memo, useMemo } from "react";
 import { Image, StyleSheet, Text, View } from "react-native";
 
 import { LocaleUiText } from "@/components/ui/LocaleUiText";
-import { ImportedLetterheadImage } from "@/components/letterhead/ImportedLetterheadImage";
+import { LetterheadPageArt } from "@/components/letterhead/LetterheadPageArt";
 import type { LetterheadConfig, LetterheadDocumentInput } from "@/services/letterhead";
 import {
   generatedHeaderFlex,
@@ -143,10 +143,11 @@ export const LetterheadPreview = memo(function LetterheadPreview({
             </View>
           </View>
         ) : config.imageDataUri ? (
-          <ImportedLetterheadImage
+          <LetterheadPageArt
             uri={config.imageDataUri}
             width={config.imageWidth}
             height={config.imageHeight}
+            placement={config.placement}
           />
         ) : null}
         <View pointerEvents="none" style={[styles.writable, writableStyle]}>

@@ -10,8 +10,10 @@ import { useThemeColors } from "@/theme";
 
 /**
  * Four tabs. The highlighted tab is the navigator's selected route.
- * Android Back returns to the previous tab, then the start tab, and only
- * then leaves the app. Stack screens above the tabs keep their own Back.
+ * `backBehavior="history"` pops visited tabs. With history empty, Back is
+ * not handled here, so the system can leave the app from the start tab
+ * (`you`), not from route zero (Calendar). Stack screens above the tabs
+ * keep their own Back.
  */
 export default function TabsLayout() {
   const t = useT();

@@ -17,7 +17,7 @@ import { useT } from "@/i18n";
 import { mapMarkerColorForEntryType } from "@/theme/categoryAccentResolver";
 import { radius, spacing, typography, useThemedStyles } from "@/theme";
 import { useTabBarMetrics } from "@/layout/tabBar";
-import { mayMountNativeMapView } from "@/services/maps/mapNativeConfig";
+import { mayMountNativeMapView, readAndroidMapsConfigured } from "@/services/maps/mapNativeConfig";
 
 interface CalendarMapsMapPanelProps {
   clusters: MapLocationCluster[];
@@ -285,10 +285,9 @@ export function CalendarMapsMapPanel({
   }, [mapBusy, hasMarkers, markersRefreshing, styles, t]);
 
   const activeIsPin = activeCluster?.footprintSource === "pin_approximate";
-  const mapsKey = Constants.expoConfig?.android?.config?.googleMaps?.apiKey;
   const canMountMap = mayMountNativeMapView({
     platform: Platform.OS,
-    androidApiKey: typeof mapsKey === "string" ? mapsKey : null,
+    androidMapsConfigured: readAndroidMapsConfigured(Constants.expoConfig?.extra),
   });
 
   return (
