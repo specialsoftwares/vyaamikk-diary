@@ -142,13 +142,14 @@ assert.ok(
 // ---------------------------------------------------------------------------
 
 const tabsLayout = readFileSync(join(root, "app/(app)/(tabs)/_layout.tsx"), "utf8");
-assert.match(tabsLayout, /labelVisibilityMode="labeled"/);
-assert.match(tabsLayout, /backgroundColor=\{colors\.surface\}/);
-assert.match(tabsLayout, /tintColor=\{colors\.primary\}/);
-assert.match(
-  tabsLayout,
-  /iconColor=\{\{ default: colors\.textMuted, selected: colors\.primary \}\}/
-);
+const tabBar = readFileSync(join(root, "src/navigation/AppTabBar.tsx"), "utf8");
+assert.match(tabsLayout, /backBehavior="history"/);
+assert.match(tabsLayout, /<AppTabBar/);
+assert.match(tabBar, /selectedTabRouteName\(state\)/);
+assert.match(tabBar, /backgroundColor: colors\.surface/);
+assert.match(tabBar, /focused \? colors\.primary : colors\.textMuted/);
+assert.doesNotMatch(tabsLayout, /unstable-native-tabs/);
+assert.doesNotMatch(tabBar, /allowFontScaling=\{false\}/);
 assert.doesNotMatch(
   tabsLayout,
   /#4338CA/i,

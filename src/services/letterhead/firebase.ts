@@ -51,6 +51,7 @@ function mapConfigFromFirestore(
   return {
     userId,
     sourceType: data.sourceType ?? "imported_image",
+    placement: data.placement === "header_logo" ? "header_logo" : data.placement === "complete_page" ? "complete_page" : null,
     generatedLayout: data.generatedLayout ?? null,
     imageWidth: Number(data.imageWidth ?? 0),
     imageHeight: Number(data.imageHeight ?? 0),

@@ -162,6 +162,19 @@ export function composeLetterheadHtml(
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
+  .letterhead-header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 210mm;
+    height: auto;
+    max-height: 42%;
+    z-index: 0;
+    object-fit: contain;
+    object-position: top center;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
   .generated-header {
     position: fixed;
     top: 0;
@@ -213,7 +226,9 @@ export function composeLetterheadHtml(
   ${
     isGenerated
       ? generatedHeaderHtml
-      : `<img class="letterhead-bg" src="${attrEsc(templateSrc!)}" alt="" />`
+      : config.placement === "header_logo"
+        ? `<img class="letterhead-header" src="${attrEsc(templateSrc!)}" alt="" />`
+        : `<img class="letterhead-bg" src="${attrEsc(templateSrc!)}" alt="" />`
   }
   <div class="content">
     ${titleBlock}

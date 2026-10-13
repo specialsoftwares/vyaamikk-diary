@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
+import Constants from "expo-constants";
 import MapView, { PROVIDER_DEFAULT, type MarkerPressEvent } from "react-native-maps";
 
 import { CalendarMapRecordRow } from "@/components/calendarMaps/CalendarMapRecordRow";
@@ -16,6 +17,7 @@ import { useT } from "@/i18n";
 import { mapMarkerColorForEntryType } from "@/theme/categoryAccentResolver";
 import { radius, spacing, typography, useThemedStyles } from "@/theme";
 import { useTabBarMetrics } from "@/layout/tabBar";
+import { mayMountNativeMapView } from "@/services/maps/mapNativeConfig";
 
 interface CalendarMapsMapPanelProps {
   clusters: MapLocationCluster[];
@@ -283,6 +285,11 @@ export function CalendarMapsMapPanel({
   }, [mapBusy, hasMarkers, markersRefreshing, styles, t]);
 
   const activeIsPin = activeCluster?.footprintSource === "pin_approximate";
+  const mapsKey = Constants.expoConfig?.android?.config?.googleMaps?.apiKey;
+  const canMountMap = mayMountNativeMapView({
+    platform: Platform.OS,
+    androidApiKey: typeof mapsKey === "string" ? mapsKey : null,
+  });
 
   return (
     <View style={styles.root} pointerEvents="box-none">
@@ -291,6 +298,7 @@ export function CalendarMapsMapPanel({
         pointerEvents={mapTouchEnabled ? "auto" : "none"}
         collapsable={false}
       >
+        {canMountMap ? (
         <MapView
           ref={mapRef}
           style={styles.mapInner}
@@ -316,6 +324,14 @@ export function CalendarMapsMapPanel({
             />
           ))}
         </MapView>
+        ) : (
+          <View style={styles.centerOverlay}>
+            <View style={styles.overlayCard}>
+              <LocaleUiText style={styles.overlayTitle}>{t("calendarMaps.map.unavailableConfig")}</LocaleUiText>
+              <LocaleUiText style={styles.overlayBody}>{t("calendarMaps.map.noMarkersOverlayMessage")}</LocaleUiText>
+            </View>
+          </View>
+        )}
 
         <View style={styles.topOverlay} pointerEvents="box-none">
           <View style={styles.infoChip}>

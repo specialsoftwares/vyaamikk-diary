@@ -796,7 +796,7 @@ const hi: Translations = {
   },
 
   calendarMaps: {
-    tabLabel: "कैलेंडर",
+    tabLabel: "VyaaFlow",
     screenTitle: "कैलेंडर और मैप",
     screenSubtitle: "तारीख और स्थान के अनुसार रिकॉर्ड देखें",
     screenLead:
@@ -996,7 +996,7 @@ const hi: Translations = {
 
   settings: {
     title: "सेटिंग्स और जानकारी",
-    tabLabel: "सेटिंग्स और जानकारी",
+    tabLabel: "सेटिंग्स",
     heroKicker: "कमांड केंद्र",
     heroSubtitle: "खाता, पहचान, सांविधिक तिथियाँ और ऐप प्राथमिकताएँ",
     sectionInsights: "आपका व्यवसाय",
@@ -1799,7 +1799,7 @@ const hi: Translations = {
   },
 
   savedRecords: {
-    tabLabel: "सहेजे रिकॉर्ड",
+    tabLabel: "रिकॉर्ड",
     title: "सहेजे रिकॉर्ड",
     subtitle: "आपने जो भी बनाया — प्रकार अनुसार व्यवस्थित।",
     loadError: "आपके सहेजे रिकॉर्ड लोड नहीं हो पाए।",

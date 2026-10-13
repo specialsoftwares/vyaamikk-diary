@@ -347,7 +347,7 @@
       "clusterCount": "આ સ્થાન પર {{count}} રેકોર્ડ",
       "tapMarkerHint": "રેકોર્ડ વિગતો માટે માર્કરને ટેપ કરો. "
     },
-    "tabLabel": "કેલેન્ડર",
+    "tabLabel": "VyaaFlow",
     "screenTitle": "કેલેન્ડર અને નકશા",
     "screenSubtitle": "તારીખ અને સ્થાન ફૂટપ્રિન્ટ્સ દ્વારા રેકોર્ડની સમીક્ષા કરો",
     "modeCalendar": "કેલેન્ડર",
@@ -796,7 +796,7 @@
     "businessInsightsItem": "Business Data & Insights",
     "businessInsightsSubtitle": "Customers, routes, distance and patterns from your records",
     "title": "સેટિંગ્સ અને માહિતી",
-    "tabLabel": "સેટિંગ્સ અને માહિતી",
+    "tabLabel": "સેટિંગ્સ",
     "heroKicker": "કમાન્ડ સેન્ટર",
     "sectionPreferences": "એપ્લિકેશન પસંદગીઓ",
     "sectionAccountApp": "એકાઉન્ટ અને એપ્લિકેશન",
@@ -1345,7 +1345,7 @@
     }
   },
   "savedRecords": {
-    "tabLabel": "Saved Records",
+    "tabLabel": "Records",
     "title": "Saved Records",
     "subtitle": "Everything you've created — organised by type.",
     "loadError": "Couldn't load your saved records.",

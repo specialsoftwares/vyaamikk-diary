@@ -19,7 +19,7 @@ import { FormFocusProvider } from "@/components/inputSafety/FormFocusManager";
 import { ValidationFocusProvider } from "@/components/inputSafety/ValidationFocusManager";
 import { useKeyboardInset } from "@/hooks/useKeyboardInset";
 import { tabBarFooterClearance, useTabBarMetrics } from "@/layout/tabBar";
-import { spacing, useThemeColors, useThemedStyles } from "@/theme";
+import { spacing, useTheme, useThemeColors, useThemedStyles } from "@/theme";
 
 /** Extra space below last field so Save / suggestions stay above keyboard. */
 const FORM_KEYBOARD_EXTRA_PADDING = spacing.xl + spacing.lg;
@@ -74,6 +74,8 @@ export function Screen({
   const insets = useSafeAreaInsets();
   const tabBar = useTabBarMetrics();
   const colors = useThemeColors();
+  const { resolvedMode } = useTheme();
+  const statusBarStyle = resolvedMode === "dark" ? "light-content" : "dark-content";
   const isFormScreen = form || keyboardAvoiding;
   const keyboardHeight = useKeyboardInset(isFormScreen && scroll);
   const useIosScrollKeyboardInsets =
@@ -182,7 +184,11 @@ export function Screen({
         ]}
         edges={["top", "left", "right"]}
       >
-        <StatusBar barStyle={Platform.OS === "ios" ? "default" : "default"} translucent />
+        <StatusBar
+          barStyle={statusBarStyle}
+          backgroundColor={colors.background}
+          translucent
+        />
         <KeyboardAvoidingView
           style={styles.flex}
           behavior={Platform.OS === "ios" ? "padding" : "padding"}
@@ -233,7 +239,11 @@ export function Screen({
       ]}
       edges={["top", "left", "right"]}
     >
-      <StatusBar barStyle={Platform.OS === "ios" ? "default" : "default"} translucent />
+      <StatusBar
+        barStyle={statusBarStyle}
+        backgroundColor={colors.background}
+        translucent
+      />
       {dismissKeyboardOnTap ? (
         <Pressable style={styles.flex} onPress={Keyboard.dismiss} accessible={false}>
           {inner}

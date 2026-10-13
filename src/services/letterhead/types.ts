@@ -15,6 +15,8 @@ import type {
   LetterheadGeneratedLayout,
   LetterheadSourceType,
 } from "./letterheadGeneratedLayout";
+import type { LetterheadPlacement } from "./letterheadPlacement";
+import type { LetterheadTemplateSnapshot } from "./letterheadTemplateSnapshot";
 
 export type { LetterheadGeneratedLayout, LetterheadSourceType } from "./letterheadGeneratedLayout";
 
@@ -36,6 +38,12 @@ export interface LetterheadConfig {
    * treated as `imported_image`.
    */
   sourceType?: LetterheadSourceType | null;
+  /**
+   * `header_logo` places the image at the top of a white A4 page.
+   * `complete_page` fits the whole image on A4 without stretching.
+   * Missing on older templates means complete page.
+   */
+  placement?: LetterheadPlacement | null;
   /** Present when `sourceType === "generated_layout"`. */
   generatedLayout?: LetterheadGeneratedLayout | null;
   /** Original image dimensions in pixels — useful for preview-time aspect. */
@@ -139,11 +147,10 @@ export interface LetterheadRepository {
  *     letterhead, old records still point at the timestamp that was
  *     active when they were created. We don't persist the template image
  *     bytes per-document — that would balloon storage.
- *   • Re-generating a PDF for an old letter currently resolves the *live*
- *     LetterheadConfig (not a frozen template snapshot). Shared PDFs that
- *     were already exported remain unchanged on disk; in-app regenerate
- *     can diverge from the historical template. Isolating true per-letter
- *     snapshots is a separate change — not altered in letterhead-repair.
+ *   • `templateSnapshot` freezes the design used for this document.
+ *     Replacing the active template does not change it. Documents saved
+ *     before snapshots existed stay without one; they are not assigned a
+ *     guessed original.
  *   • `pdfUri` is best-effort. Generated PDFs are short-lived OS temp
  *     files; on next regenerate the URI is refreshed. UI should
  *     gracefully handle a missing/invalid URI by regenerating from the
@@ -168,6 +175,8 @@ export interface LetterheadDocument {
   input: LetterheadDocumentInput;
   /** Updated timestamp of the letterhead config at the time of generation. */
   templateRefUpdatedAt: number | null;
+  /** Immutable design used for this document. Absent on older records. */
+  templateSnapshot?: LetterheadTemplateSnapshot | null;
   /** Best-effort URI of the most recently generated PDF for this doc. */
   pdfUri: string | null;
   /** True when the user explicitly saved (vs. just shared once). */

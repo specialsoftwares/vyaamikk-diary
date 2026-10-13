@@ -58,6 +58,12 @@ import { pdfService } from "@/services/pdf/pdfService";
 import { englishPdfT } from "@/i18n/englishPdfT";
 import { buildLetterheadHtml } from "@/services/pdf/letterheadPdfService";
 import { saveLetterheadCreateWithPdf } from "@/services/letterhead/saveWithPdf";
+import {
+  freezeLetterheadTemplateSnapshot,
+  letterheadReadyToRender,
+  resolveHistoricalLetterhead,
+} from "@/services/letterhead/letterheadTemplateSnapshot";
+import { isShareSheetCancellation } from "@/services/pdf/shareCancellation";
 import { dayKey, formatShortDate, todayStartMs } from "@/utils/date";
 import { useSmartBack } from "@/navigation";
 import { SaveStillInProgressError } from "@/services/records/saveLockTypes";
@@ -79,6 +85,9 @@ export default function LetterheadCreateScreen() {
   const isEditing = Boolean(editDocIdParam);
 
   const [config, setConfig] = useState<LetterheadConfig | null>(null);
+  const [previewConfig, setPreviewConfig] = useState<LetterheadConfig | null>(null);
+  const [historicalUnavailable, setHistoricalUnavailable] = useState(false);
+  const [showLetterOptions, setShowLetterOptions] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -94,6 +103,7 @@ export default function LetterheadCreateScreen() {
   const editDocRef = useRef<LetterheadDocument | null>(null);
   const finishedRef = useRef(false);
   const saveLockRef = useRef(false);
+  const draftFlightRef = useRef(false);
   const clientRecordIdRef = useRef(
     editDocIdParam ? String(editDocIdParam) : generateClientRecordId("lhd")
   );
@@ -162,6 +172,8 @@ export default function LetterheadCreateScreen() {
   useFormFieldNavigation(LETTERHEAD_NAV_FIELD_ORDER);
 
   const date = watch("date");
+  const senderNameWatch = watch("name");
+  const senderTitleWatch = watch("designation");
   const body = watch("body");
   const salutation = watch("salutation");
   const closing = watch("closing");
@@ -184,6 +196,10 @@ export default function LetterheadCreateScreen() {
         return;
       }
       setConfig(c);
+      if (!editDocIdParam) {
+        setHistoricalUnavailable(false);
+        setPreviewConfig(c);
+      }
 
       // Edit an existing saved document — load its frozen input verbatim.
       if (editDocIdParam) {
@@ -193,7 +209,10 @@ export default function LetterheadCreateScreen() {
         );
         if (existing) {
           editDocRef.current = existing;
-          reset(applyDefaults({ ...existing.input }, c, user));
+          const resolved = resolveHistoricalLetterhead(existing, c);
+          setHistoricalUnavailable(resolved.kind === "unavailable");
+          setPreviewConfig(resolved.kind === "unavailable" ? null : resolved.config);
+          reset(applyDefaults({ ...existing.input }, resolved.kind === "unavailable" ? c : resolved.config, user));
           return;
         }
         // Doc vanished — fall through to a fresh form.
@@ -282,13 +301,21 @@ export default function LetterheadCreateScreen() {
     };
   }, [user, loading, isEditing, watch]);
 
+  const revealStatus = useCallback(() => {
+    requestAnimationFrame(() => {
+      scrollRef.current?.scrollToEnd({ animated: true });
+    });
+  }, []);
+
   const onSaveDraft = useCallback(async () => {
-    if (!user) return;
+    if (!user || draftFlightRef.current) return;
     const values = getValues();
     if (!isLetterheadDraftMeaningful(values)) {
       setSubmitError(t("letterhead.subjectRequired"));
+      revealStatus();
       return;
     }
+    draftFlightRef.current = true;
     setSavingDraft(true);
     setSubmitError(null);
     try {
@@ -311,31 +338,49 @@ export default function LetterheadCreateScreen() {
         scopeKey: LETTERHEAD_DRAFT_SCOPE,
       });
       setNotice(t("letterhead.draftSaved"));
+      revealStatus();
     } catch (e) {
       setSubmitError(userFacingMessage(e));
+      revealStatus();
     } finally {
+      draftFlightRef.current = false;
       setSavingDraft(false);
     }
-  }, [user, getValues, t]);
+  }, [user, getValues, t, revealStatus]);
 
   const onSubmit = handleSubmit(async (values) => {
-    if (!config || !user) return;
-    if (finishedRef.current || submitting) return;
-    if (!config.imageDataUri?.trim()) {
-      router.replace("/(app)/letterhead/setup");
+    const renderConfig = isEditing ? previewConfig : config;
+    if (!renderConfig || !user) {
+      setSubmitError(t("letterhead.setupLoadFailed"));
+      revealStatus();
+      return;
+    }
+    if (finishedRef.current || saveLockRef.current) return;
+    if (historicalUnavailable) {
+      setSubmitError(t("letterhead.historicalTemplateUnavailable"));
+      revealStatus();
+      return;
+    }
+    if (!letterheadReadyToRender(renderConfig)) {
+      setSubmitError(t("letterhead.setupNeedImage"));
+      revealStatus();
       return;
     }
     if (!values.subject?.trim()) {
       setSubmitError(t("letterhead.subjectRequired"));
+      revealStatus();
       return;
     }
     if (!values.body?.trim()) {
       setSubmitError(t("letterhead.bodyRequired"));
+      revealStatus();
       return;
     }
-    const senderName = values.name?.trim() || config.defaultSenderName?.trim() || "";
+    const senderName = values.name?.trim() || renderConfig.defaultSenderName?.trim() || "";
     if (!senderName) {
-      setSubmitError(t("letterhead.nameRequired"));
+      setShowLetterOptions(true);
+      setSubmitError(t("letterhead.senderMissing"));
+      revealStatus();
       return;
     }
     setSubmitError(null);
@@ -348,7 +393,7 @@ export default function LetterheadCreateScreen() {
 
       if (!isEditing && idempotencyRef.current) {
         const { html, warnings } = await buildLetterheadHtml({
-          config,
+          config: renderConfig,
           doc: docInput,
           locale: lang === "hi" ? "hi-IN" : "en-IN",
           labels: {
@@ -363,12 +408,13 @@ export default function LetterheadCreateScreen() {
         }
         const { pdfUri } = await saveLetterheadCreateWithPdf(user.uid, {
           user,
-          config,
+          config: renderConfig,
           docInput,
           title,
           createPayload: {
             ueid: user.ueid,
-            templateRefUpdatedAt: config.updatedAt,
+            templateRefUpdatedAt: renderConfig.updatedAt,
+            templateSnapshot: freezeLetterheadTemplateSnapshot(renderConfig),
             pdfUri: null,
             saved: true,
           },
@@ -382,7 +428,6 @@ export default function LetterheadCreateScreen() {
           { userId: user.uid, ueid: user.ueid },
           docInput as unknown as Record<string, unknown>
         );
-        finishedRef.current = true;
         try {
           await formDraftsRepository.clearRecovery({
             userId: user.uid,
@@ -395,17 +440,29 @@ export default function LetterheadCreateScreen() {
         } catch {
           // non-fatal
         }
-        router.replace("/(app)/letterhead/history");
         if (pdfUri) {
-          void pdfService
-            .share({ uri: pdfUri, fileName: title })
-            .catch(() => undefined);
+          try {
+            await pdfService.share({ uri: pdfUri, fileName: title });
+          } catch (shareError) {
+            if (isShareSheetCancellation(shareError)) {
+              setNotice(t("letterhead.shareCancelledSaved"));
+              revealStatus();
+              return;
+            }
+            setSubmitError(
+              userFacingMessage(shareError) || t("letterhead.createGenerateFailed")
+            );
+            revealStatus();
+            return;
+          }
         }
+        finishedRef.current = true;
+        router.replace("/(app)/letterhead/history");
         return;
       }
 
       const { html, warnings } = await buildLetterheadHtml({
-        config,
+        config: renderConfig,
         doc: docInput,
         locale: lang === "hi" ? "hi-IN" : "en-IN",
         labels: {
@@ -435,7 +492,6 @@ export default function LetterheadCreateScreen() {
             title,
             input: docInput,
             pdfUri: pdf.uri,
-            templateRefUpdatedAt: config.updatedAt,
             version: nextVersion,
             lastEditedAt: now,
             editHistory: history,
@@ -444,20 +500,35 @@ export default function LetterheadCreateScreen() {
             { userId: user.uid, ueid: user.ueid },
             docInput as unknown as Record<string, unknown>
           );
-        } catch {
-          // Non-fatal — PDF regenerated; metadata update failed.
+        } catch (updateError) {
+          setSubmitError(userFacingMessage(updateError) || t("letterhead.createGenerateFailed"));
+          revealStatus();
+          return;
+        }
+        try {
+          await pdfService.share(pdf);
+        } catch (shareError) {
+          if (isShareSheetCancellation(shareError)) {
+            setNotice(t("letterhead.shareCancelledSaved"));
+            revealStatus();
+            return;
+          }
+          setSubmitError(userFacingMessage(shareError) || t("letterhead.createGenerateFailed"));
+          revealStatus();
+          return;
         }
         finishedRef.current = true;
         router.replace("/(app)/letterhead/history");
-        void pdfService.share(pdf).catch(() => undefined);
         return;
       }
     } catch (e) {
       if (e instanceof SaveStillInProgressError) {
         setSubmitError(t("letterhead.errSaveInProgress"));
+        revealStatus();
         return;
       }
       setSubmitError(userFacingMessage(e) || t("letterhead.createGenerateFailed"));
+      revealStatus();
     } finally {
       setSubmitting(false);
       if (!finishedRef.current) {
@@ -509,6 +580,30 @@ export default function LetterheadCreateScreen() {
       />
       <LocaleUiText style={styles.lead}>{t("letterhead.createIntro")}</LocaleUiText>
       <LocaleUiText style={styles.helper}>{t("letterhead.helperBase")}</LocaleUiText>
+      <LocaleUiText style={styles.helper}>
+        {senderNameWatch?.trim()
+          ? t("letterhead.senderLine", {
+              name: [senderNameWatch.trim(), senderTitleWatch?.trim()].filter(Boolean).join(", "),
+            })
+          : t("letterhead.senderMissing")}
+      </LocaleUiText>
+      {historicalUnavailable ? (
+        <View style={styles.banner}>
+          <Banner tone="warning" message={t("letterhead.historicalTemplateUnavailable")} />
+        </View>
+      ) : null}
+      <View style={styles.actions}>
+        <Button
+          label={t("letterhead.changeLetterhead")}
+          variant="ghost"
+          onPress={() => router.push("/(app)/letterhead")}
+        />
+        <Button
+          label={t("letterhead.letterOptions")}
+          variant="secondary"
+          onPress={() => setShowLetterOptions((open) => !open)}
+        />
+      </View>
 
       {isEditing && editDocRef.current ? (
         <View style={styles.banner}>
@@ -540,7 +635,8 @@ export default function LetterheadCreateScreen() {
         </View>
       ) : null}
 
-      {/* --- Letter details --- */}
+      {/* --- Optional letter details --- */}
+      {showLetterOptions ? (
       <FormSection title={t("letterhead.sectionLetter")} style={styles.sectionGap}>
         <Controller
           control={control}
@@ -595,6 +691,7 @@ export default function LetterheadCreateScreen() {
           )}
         />
       </FormSection>
+      ) : null}
 
       {/* --- Recipient details (all optional) --- */}
       <FormSection title={t("letterhead.sectionRecipient")} style={styles.sectionGap}>
@@ -615,6 +712,8 @@ export default function LetterheadCreateScreen() {
             </KeyboardAwareField>
           )}
         />
+        {showLetterOptions ? (
+        <>
         <Controller
           control={control}
           name="recipientDesignation"
@@ -665,6 +764,8 @@ export default function LetterheadCreateScreen() {
             </KeyboardAwareField>
           )}
         />
+        </>
+        ) : null}
       </FormSection>
 
       {/* --- Subject & matter --- */}
@@ -687,6 +788,7 @@ export default function LetterheadCreateScreen() {
           )}
         />
 
+        {showLetterOptions ? (
         <View>
           <LocaleUiText style={styles.chipLabel}>{t("letterhead.fieldSalutation")}</LocaleUiText>
           <IndigoChoiceChipRow style={{ marginBottom: spacing.sm }}>
@@ -715,6 +817,7 @@ export default function LetterheadCreateScreen() {
             )}
           />
         </View>
+        ) : null}
 
         <Controller
           control={control}
@@ -736,6 +839,7 @@ export default function LetterheadCreateScreen() {
       </FormSection>
 
       {/* --- Closing & signature --- */}
+      {showLetterOptions ? (
       <FormSection title={t("letterhead.sectionClosing")} style={styles.sectionGap}>
         <View>
           <LocaleUiText style={styles.chipLabel}>{t("letterhead.fieldClosing")}</LocaleUiText>
@@ -845,13 +949,25 @@ export default function LetterheadCreateScreen() {
           ) : null}
         </View>
       </FormSection>
+      ) : null}
 
       {/* --- Preview / generate --- */}
-      {showPreview && config ? (
+      {showPreview && (previewConfig ?? config) ? (
         <View style={styles.sectionGap}>
           <FormSection title={t("letterhead.previewTitle")}>
-            <LetterheadPreview config={config} input={getValues()} />
+            <LetterheadPreview config={(previewConfig ?? config)!} input={getValues()} />
           </FormSection>
+        </View>
+      ) : null}
+
+      {submitError ? (
+        <View style={styles.banner}>
+          <Banner tone="danger" message={submitError} />
+        </View>
+      ) : null}
+      {notice ? (
+        <View style={styles.banner}>
+          <Banner tone="info" message={notice} />
         </View>
       ) : null}
 

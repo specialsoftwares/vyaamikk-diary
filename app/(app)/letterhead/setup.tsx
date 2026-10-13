@@ -31,6 +31,12 @@ import {
   type TemplateWarningKey,
 } from "@/services/letterhead";
 import {
+  suggestLetterheadPlacement,
+  writingMarginsForHeader,
+  type LetterheadPlacement,
+} from "@/services/letterhead/letterheadPlacement";
+import { letterheadSetupFailureMessage } from "@/services/letterhead/letterheadSetupSaveError";
+import {
   assertCandidateOwner,
   beginLetterheadCapture,
   LetterheadCandidateError,
@@ -102,12 +108,20 @@ export default function LetterheadSetupScreen() {
   const [pendingTarget, setPendingTarget] = useState<PickTarget>("template");
   const [pickError, setPickError] = useState<string | null>(null);
   const [snap, setSnap] = useState<LetterheadSetupEditorSnapshot>(EMPTY_SNAP);
+  const [placement, setPlacement] = useState<LetterheadPlacement>("header_logo");
+  const [showLayout, setShowLayout] = useState(false);
+  const placementRef = useRef<LetterheadPlacement>("header_logo");
 
   const runtime = useMemo(
     () =>
       createLetterheadSetupEditorRuntime({
         get: (uid) => getLetterheadRepository().get(uid),
-        save: (uid, patch, session) => getLetterheadRepository().save(uid, patch, session),
+        save: (uid, patch, session) =>
+          getLetterheadRepository().save(
+            uid,
+            { ...patch, placement: placementRef.current },
+            session
+          ),
         readCandidateDataUri,
         useLocalFileForSave: getActiveBackend() !== "local-mock",
         retireCandidate: (c) => void retireLetterheadCandidate(c),
@@ -172,6 +186,17 @@ export default function LetterheadSetupScreen() {
     })
   );
 
+  const applyPlacement = useCallback(
+    (next: LetterheadPlacement, width: number, height: number) => {
+      placementRef.current = next;
+      setPlacement(next);
+      if (next === "header_logo" && width > 0 && height > 0) {
+        runtime.setMargins(writingMarginsForHeader(width, height));
+      }
+    },
+    [runtime]
+  );
+
   const applyCandidate = useCallback(
     (next: Parameters<typeof runtime.setCandidate>[0], warnings: TemplateWarningKey[]) => {
       if (!mountedRef.current) {
@@ -179,8 +204,11 @@ export default function LetterheadSetupScreen() {
         return;
       }
       runtime.setCandidate(next, warnings);
+      if (next && next.width > 0 && next.height > 0) {
+        applyPlacement(suggestLetterheadPlacement(next.width, next.height), next.width, next.height);
+      }
     },
-    [runtime]
+    [runtime, applyPlacement]
   );
 
   const captureTemplateFromGallery = useCallback((): Promise<boolean> => {
@@ -348,15 +376,12 @@ export default function LetterheadSetupScreen() {
   const templateUri = snap.candidate?.localUri ?? snap.existing?.imageDataUri ?? null;
   const displayError =
     pickError ??
-    (snap.error === "need_image"
-      ? t("letterhead.setupNeedImage")
-      : snap.error === "load_failed"
-        ? t("letterhead.setupLoadFailed")
-        : snap.error === "session_retired"
-          ? t("letterhead.setupSaveFailedUnchanged")
-          : snap.error
-            ? t("letterhead.setupSaveFailedUnchanged")
-            : null);
+    letterheadSetupFailureMessage({
+      error: snap.error,
+      needImage: t("letterhead.setupNeedImage"),
+      loadFailed: t("letterhead.setupLoadFailed"),
+      unchanged: t("letterhead.setupSaveFailedUnchanged"),
+    });
 
   const onSave = async () => {
     if (!user || snap.saving) return;
@@ -415,7 +440,46 @@ export default function LetterheadSetupScreen() {
         </View>
       ))}
 
+      {templateUri ? (
+        <View style={styles.banner}>
+          <Button
+            label={t("letterhead.placementHeader")}
+            variant={placement === "header_logo" ? "primary" : "secondary"}
+            onPress={() =>
+              applyPlacement(
+                "header_logo",
+                snap.candidate?.width ?? snap.existing?.imageWidth ?? 0,
+                snap.candidate?.height ?? snap.existing?.imageHeight ?? 0
+              )
+            }
+            disabled={busy}
+          />
+          <Button
+            label={t("letterhead.placementComplete")}
+            variant={placement === "complete_page" ? "primary" : "secondary"}
+            onPress={() => {
+              placementRef.current = "complete_page";
+              setPlacement("complete_page");
+            }}
+            disabled={busy}
+            style={styles.retry}
+          />
+          <LocaleUiText style={styles.assetHint}>
+            {placement === "header_logo"
+              ? t("letterhead.placementHeaderLimit")
+              : t("letterhead.placementCompleteLimit")}
+          </LocaleUiText>
+          <Button
+            label={t("letterhead.layoutSettings")}
+            variant="ghost"
+            onPress={() => setShowLayout((open) => !open)}
+            disabled={busy}
+          />
+        </View>
+      ) : null}
+
       <Card style={styles.card}>
+        {showLayout ? (
         <WritingAreaControls
           margins={snap.margins}
           onChange={(m) => runtime.setMargins(m)}
@@ -438,6 +502,7 @@ export default function LetterheadSetupScreen() {
             increase: t("letterhead.setupIncrease"),
           }}
         />
+        ) : null}
         <Button
           label={templateUri ? t("letterhead.setupReplace") : t("letterhead.setupPick")}
           variant="secondary"

@@ -4,9 +4,8 @@
  * Lists every LetterheadDocument record this user has saved, sorted
  * newest first. Tapping a row opens a small detail sheet (inline) that
  * lets the user:
- *   • Regenerate + share the PDF from the saved input (uses the CURRENT
- *     letterhead config — if the template was replaced after this doc
- *     was created, we warn the user inline).
+ *   • Regenerate + share the PDF from the saved input and its saved design.
+ *     Letters without a stored design are not redrawn on a newer template.
  *   • Delete the saved record.
  *
  * No screen-local data — everything goes through
@@ -50,6 +49,11 @@ import {
 import { pdfService } from "@/services/pdf/pdfService";
 import { englishPdfT } from "@/i18n/englishPdfT";
 import { buildLetterheadHtml } from "@/services/pdf/letterheadPdfService";
+import {
+  letterheadReadyToRender,
+  resolveHistoricalLetterhead,
+} from "@/services/letterhead/letterheadTemplateSnapshot";
+import { isShareSheetCancellation } from "@/services/pdf/shareCancellation";
 import { userFacingMessage } from "@/domain/errors";
 import { dayKey, formatShortDate } from "@/utils/date";
 
@@ -144,12 +148,13 @@ export default function LetterheadHistoryScreen() {
   );
 
   const onRegenerate = useCallback(async (item: LetterheadDocument) => {
-    if (!user || !config) {
+    if (!user) {
       setActionError(t("letterhead.gateMissingMessage"));
       return;
     }
-    if (!config.imageDataUri?.trim()) {
-      router.replace("/(app)/letterhead/setup");
+    const resolved = resolveHistoricalLetterhead(item, config);
+    if (resolved.kind === "unavailable" || !letterheadReadyToRender(resolved.config)) {
+      setActionError(t("letterhead.historicalTemplateUnavailable"));
       return;
     }
     setActionError(null);
@@ -157,7 +162,7 @@ export default function LetterheadHistoryScreen() {
     shareRecovery.markPending();
     try {
       const { html } = await buildLetterheadHtml({
-        config,
+        config: resolved.config,
         doc: item.input,
         locale: lang === "hi" ? "hi-IN" : "en-IN",
         labels: {
@@ -180,8 +185,10 @@ export default function LetterheadHistoryScreen() {
       }
       try {
         await pdfService.share(pdf);
-      } catch {
-        // share dismissed
+      } catch (shareError) {
+        if (!isShareSheetCancellation(shareError)) {
+          setActionError(userFacingMessage(shareError) || t("letterhead.createGenerateFailed"));
+        }
       }
     } catch (e) {
       setActionError(userFacingMessage(e) || t("letterhead.createGenerateFailed"));
@@ -189,7 +196,7 @@ export default function LetterheadHistoryScreen() {
       shareRecovery.clearPending();
       setBusyId(null);
     }
-  }, [user, config, lang, t, router, shareRecovery]);
+  }, [user, config, lang, t, shareRecovery]);
 
   const onEdit = useCallback(
     (item: LetterheadDocument) => {
@@ -335,10 +342,8 @@ function LetterheadHistoryRow({
   onDelete: (item: LetterheadDocument) => void;
 }) {
   const t = useT();
-  const templateChanged =
-    config != null &&
-    item.templateRefUpdatedAt != null &&
-    config.updatedAt !== item.templateRefUpdatedAt;
+  const historical = resolveHistoricalLetterhead(item, config);
+  const templateChanged = historical.kind === "unavailable";
   const version = item.version ?? 1;
   const createdAt = item.firstGeneratedAt ?? item.createdAt;
   return (
@@ -364,7 +369,7 @@ function LetterheadHistoryRow({
             : t("letterhead.historyCreatedMeta", { created: formatShortDate(createdAt) })}
         </Text>
         {templateChanged ? (
-          <LocaleUiText style={styles.templateWarn}>{t("letterhead.historyTemplateChanged")}</LocaleUiText>
+          <LocaleUiText style={styles.templateWarn}>{t("letterhead.historicalTemplateUnavailable")}</LocaleUiText>
         ) : null}
         <View style={styles.rowActions}>
           <Button

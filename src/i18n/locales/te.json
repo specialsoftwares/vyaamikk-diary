@@ -347,7 +347,7 @@
       "clusterCount": "ఈ స్థలంలో {{count}} రికార్డులు",
       "tapMarkerHint": "రికార్డ్ వివరాల కోసం మార్కర్‌ను నొక్కండి. "
     },
-    "tabLabel": "క్యాలెండర్",
+    "tabLabel": "VyaaFlow",
     "screenTitle": "క్యాలెండర్ & మ్యాప్స్",
     "screenSubtitle": "తేదీ మరియు స్థాన పాదముద్రల వారీగా రికార్డులను సమీక్షించండి",
     "modeCalendar": "క్యాలెండర్",
@@ -796,7 +796,7 @@
     "businessInsightsItem": "Business Data & Insights",
     "businessInsightsSubtitle": "Customers, routes, distance and patterns from your records",
     "title": "సెట్టింగ్‌లు & సమాచారం",
-    "tabLabel": "సెట్టింగ్‌లు & సమాచారం",
+    "tabLabel": "సెట్టింగ్‌లు",
     "heroKicker": "కమాండ్ సెంటర్",
     "sectionPreferences": "యాప్ ప్రాధాన్యతలు",
     "sectionAccountApp": "ఖాతా & యాప్",
@@ -1345,7 +1345,7 @@
     }
   },
   "savedRecords": {
-    "tabLabel": "Saved Records",
+    "tabLabel": "Records",
     "title": "Saved Records",
     "subtitle": "Everything you've created — organised by type.",
     "loadError": "Couldn't load your saved records.",

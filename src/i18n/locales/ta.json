@@ -347,7 +347,7 @@
       "clusterCount": "இந்த இடத்தில் {{count}} பதிவுகள்",
       "tapMarkerHint": "பதிவு விவரங்களுக்கு மார்க்கரைத் தட்டவும். "
     },
-    "tabLabel": "நாட்காட்டி",
+    "tabLabel": "VyaaFlow",
     "screenTitle": "நாட்காட்டி & வரைபடங்கள்",
     "screenSubtitle": "தேதி மற்றும் இருப்பிட தடயங்களின்படி பதிவுகளை மதிப்பாய்வு செய்யவும்",
     "modeCalendar": "நாட்காட்டி",
@@ -796,7 +796,7 @@
     "businessInsightsItem": "Business Data & Insights",
     "businessInsightsSubtitle": "Customers, routes, distance and patterns from your records",
     "title": "அமைப்புகள் & தகவல்",
-    "tabLabel": "அமைப்புகள் & தகவல்",
+    "tabLabel": "அமைப்புகள்",
     "heroKicker": "கட்டளை மையம்",
     "sectionPreferences": "பயன்பாட்டு விருப்பத்தேர்வுகள்",
     "sectionAccountApp": "கணக்கு & ஆப்",
@@ -1345,7 +1345,7 @@
     }
   },
   "savedRecords": {
-    "tabLabel": "Saved Records",
+    "tabLabel": "Records",
     "title": "Saved Records",
     "subtitle": "Everything you've created — organised by type.",
     "loadError": "Couldn't load your saved records.",

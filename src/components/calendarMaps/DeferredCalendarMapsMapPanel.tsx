@@ -1,10 +1,19 @@
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, StyleSheet, View } from "react-native";
+import { ActivityIndicator, Platform, StyleSheet, View } from "react-native";
+import Constants from "expo-constants";
 
+import { LocaleUiText } from "@/components/ui";
+import { useT } from "@/i18n";
 import type { CalendarMapRecord } from "@/services/calendarMaps";
 import type { MapMarkerBuildStats } from "@/services/calendarMaps/mapMarkerRecords";
 import type { MapLocationCluster } from "@/services/calendarMaps/mapClustering";
-import { spacing } from "@/theme";
+import { mayMountNativeMapView } from "@/services/maps/mapNativeConfig";
+import { spacing, typography, useThemeColors } from "@/theme";
+
+function configuredAndroidMapsKey(): string | null {
+  const key = Constants.expoConfig?.android?.config?.googleMaps?.apiKey;
+  return typeof key === "string" ? key : null;
+}
 
 export interface DeferredCalendarMapsMapPanelProps {
   clusters: MapLocationCluster[];
@@ -21,11 +30,18 @@ export interface DeferredCalendarMapsMapPanelProps {
  * maps module out of the initial Expo Go download graph.
  */
 export function DeferredCalendarMapsMapPanel(props: DeferredCalendarMapsMapPanelProps) {
+  const t = useT();
+  const colors = useThemeColors();
+  const canMount = mayMountNativeMapView({
+    platform: Platform.OS,
+    androidApiKey: configuredAndroidMapsKey(),
+  });
   const [Panel, setPanel] = useState<React.ComponentType<DeferredCalendarMapsMapPanelProps> | null>(
     null
   );
 
   useEffect(() => {
+    if (!canMount) return;
     let cancelled = false;
     void import("@/components/calendarMaps/CalendarMapsMapPanel").then((mod) => {
       if (!cancelled) setPanel(() => mod.CalendarMapsMapPanel);
@@ -33,7 +49,17 @@ export function DeferredCalendarMapsMapPanel(props: DeferredCalendarMapsMapPanel
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [canMount]);
+
+  if (!canMount) {
+    return (
+      <View style={styles.placeholder}>
+        <LocaleUiText style={[styles.message, { color: colors.text }]}>
+          {t("calendarMaps.map.unavailableConfig")}
+        </LocaleUiText>
+      </View>
+    );
+  }
 
   if (!Panel) {
     return (
@@ -53,5 +79,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingVertical: spacing.xl,
+    paddingHorizontal: spacing.lg,
+  },
+  message: {
+    ...typography.body,
+    textAlign: "center",
   },
 });

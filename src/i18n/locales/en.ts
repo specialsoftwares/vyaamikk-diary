@@ -475,7 +475,7 @@ const en = {
   },
 
   calendarMaps: {
-    tabLabel: "Calendar & Maps",
+    tabLabel: "VyaaFlow",
     screenTitle: "Calendar & Maps",
     screenSubtitle: "Review records by date and location footprints",
     screenLead:
@@ -536,6 +536,8 @@ const en = {
         "Optional GPS on a record places an exact pin. Freight/dispatch From and To PIN codes can show approximate postal areas.",
       noMarkersOverlayMessage:
         "Mapped records appear here when location footprints are enabled on save, or when freight/dispatch includes From/To PIN codes (approximate areas).",
+      unavailableConfig:
+        "Map cannot open on this install because the Android maps key is not configured. Your records stay on this device. PIN and record maps will appear after a build that includes the key.",
       openRecord: "Open record",
       atLocation: "Delivery / dispatch reference",
       clusterCount: "{{count}} records at this place",
@@ -860,7 +862,7 @@ const en = {
       generic: "Entry — {{date}}",
     },
     summary: {
-      cash: "₹{{amount}} to {{name}}",
+      cash: "{{amount}} to {{name}}",
       paymentRequest: "{{party}} · ₹{{pending}} pending · {{invoice}}",
       freight: "{{bill}} → {{destination}}",
     },
@@ -1053,7 +1055,7 @@ const en = {
 
   settings: {
     title: "Settings & Info",
-    tabLabel: "Settings & Info",
+    tabLabel: "Settings",
     heroKicker: "Command centre",
     heroSubtitle: "Account, identity, statutory dates and app preferences",
     sectionStatutory: "Statutory information",
@@ -1762,13 +1764,27 @@ const en = {
     setupPickAgainHint: "Tap Choose letterhead again to open your photos.",
 
     warnLandscape:
-      "This looks like a landscape image. A4 letterheads are portrait — it may be stretched to fit.",
+      "This image is wider than it is tall. Header or logo places it at the top of a white A4 page without stretching.",
     warnAspect:
-      "This image isn't quite A4 proportioned and may be stretched slightly to fill the page.",
+      "This image is not A4-shaped. Header or logo places it at the top. Complete letterhead fits the whole image without stretching or clipping.",
     warnLowRes:
       "This image is low resolution and may look soft when printed. A wider image prints sharper.",
     warnTooLarge:
       "This image is large and may be slow to save. A smaller version is recommended.",
+    placementHeader: "Use header or logo",
+    placementComplete: "Use complete letterhead",
+    placementHeaderLimit:
+      "The suggestion fits the whole image across the top of a blank A4 page. It does not detect printed borders. Adjust the writing area if text would overlap the image.",
+    placementCompleteLimit:
+      "The whole image is fitted on A4 without stretching or clipping. White space remains if the photo is not already A4.",
+    layoutSettings: "Layout settings",
+    changeLetterhead: "Change letterhead",
+    letterOptions: "Reference, place and signature",
+    senderLine: "Today · {{name}}",
+    senderMissing: "Add your name in letter options before sharing. Nothing has been invented.",
+    shareCancelledSaved: "Letter saved. Sharing was cancelled.",
+    historicalTemplateUnavailable:
+      "This letter was saved before its design was kept with the document. The original letterhead cannot be reconstructed, so it is not replaced with the current template.",
 
     assetsSection: "Signature & stamp (optional)",
     assetSignature: "Signature image",
@@ -1921,7 +1937,7 @@ const en = {
   },
 
   savedRecords: {
-    tabLabel: "Saved Records",
+    tabLabel: "Records",
     title: "Saved Records",
     subtitle: "Everything you've created — organised by type.",
     loadError: "Couldn't load your saved records.",
