@@ -16,11 +16,13 @@ TOOLING (ops-guard suite; not application CI).
 
 PR #34 is merged into `integration/grin-g1-g5-source`. Integration HEAD is `1792d79a7a3b58cae5913e6d46ccef4902bfcb37`. CI on that exact source is run `38458982309` / verify `115508928348`, success. Letterhead creation, scanning, cropping, and new PDF generation stay removed. Saved letters and drafts stay readable, bound to the current session. Live Rules, Functions, billing, purge, and retention were not changed by that merge.
 
-Source `app.json` still says versionCode 26 because that was the previous integration tip. versionCode 26 was built as the Letterhead-containing AAB `630655c` and was not the removal. Do not upload that AAB as this candidate. The next Play versionCode is not selected until a fresh bundle inventory returns. A billing-enabled Internal build has not been started.
+Play Internal testing was read again on 14 Oct 2026. The track is Active. Latest release is **26 (1.0.0)**, one version code, released 13 Oct 22:59, available to internal testers, not reviewed. Version 25 was replaced at that time. Visible history below 26 is 25, 24, 23, 22, 20, 19, 17, 15, 14, 13. No version code above 26 was on that page. Production is Inactive and has no release. The next unused code for a new binary is **27**. Source `app.json` still says 26. That code is the Letterhead-containing AAB from `630655c` and is the build now on Internal. Do not upload it again as the removal. A billing-enabled build has not been started.
+
+The subscription catalog and one-time products pages had no products. Play prices for `vyd_starter`, `vyd_professional`, and `vyd_business` are UNKNOWN. License testing has no email list selected and the license response is RESPOND_NORMALLY, so a purchase now would not be a free license test. No purchase was attempted. BillDesk KYC is in progress and stopped at an OTP screen. The OTP was not generated and the APK-URL question was not emailed.
 
 Play new-purchase admission is now separate from already-owned lifecycle in source `e494f278` (integration merge `eb4c05d`). `PLAY_BILLING_ENABLED` still defaults off and still blocks a first bind. RTDN, reconciliation, refunds, and entitlement correction for a token the account already owns are no longer stopped by that flag. This is not deployed. A new-grant notification while admission is closed returns HTTP 503 and is not treated as delivered.
 
-vc26 was last seen with Internal draft 14 empty and version 25 (1.0.0) as the previous release. That Play page is being read again; until that read finishes, the earlier observation is historical, not a fresh inventory.
+The earlier note that versionCode 26 was absent and that draft 14 was the open upload is historical. The 14 Oct read above replaces it.
 
 Maps unavailable in vc26; missing-key fallback test only. The Cloud passkey was not retried, and Maps credentials were not changed.
 
