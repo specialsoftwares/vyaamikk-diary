@@ -24,6 +24,8 @@ Play Console users: one account and no service account. `982505811909-compute@de
 
 `GET` `https://asia-south1-vyaamikk-diary.cloudfunctions.net/androidRtdn` returned `405 Method Not Allowed`. KMS, encrypt/decrypt, and `BILLING_DIAG_UID_SECRET` were not read: Cloud Console stopped on the existing passkey block, the Firebase CLI login is expired, and `gcloud` has no account. Encryption was not bypassed. Admission stays off.
 
+Canonical CI for this Android candidate is run `38479840244` / verify `115579459419`, success, on `ff408343a5da573bfcebe32ba6a03d07a45d22f9` (versionCode 27, purchase-entry `0`). That run is not a purchase or a deployment.
+
 The subscription catalog and one-time products pages had no products. Play prices for `vyd_starter`, `vyd_professional`, and `vyd_business` are UNKNOWN. License testing has no email list selected and the license response is RESPOND_NORMALLY, so a purchase now would not be a free license test. No purchase was attempted. BillDesk KYC is in progress and stopped at an OTP screen. The OTP was not generated and the APK-URL question was not emailed.
 
 Play new-purchase admission is now separate from already-owned lifecycle in source `e494f278` (integration merge `eb4c05d`). `PLAY_BILLING_ENABLED` still defaults off and still blocks a first bind. RTDN, reconciliation, refunds, and entitlement correction for a token the account already owns are no longer stopped by that flag. This is not deployed. A new-grant notification while admission is closed returns HTTP 503 and is not treated as delivered.
