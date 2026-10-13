@@ -11,6 +11,8 @@ import { resolve } from "node:path";
 import { handleValidateAndActivateAndroid } from "../callables/validateAndActivateAndroid";
 import { handlePrepareAndroidBillingAccount } from "../callables/prepareAndroidBillingAccount";
 import { handleAndroidRtdnHttp } from "../callables/androidRtdn";
+import { rtdnHttpStatusForError } from "./billingHttps";
+import { createAndroidStoreRevalidator } from "../reconciliationStoreRevalidate";
 import { InMemoryCredentialCipher, credentialFingerprint } from "../crypto";
 import { diagnosticUidHmac } from "../diagnosticUid";
 import { BillingError } from "../errors";
@@ -803,7 +805,6 @@ async function main() {
       body: pubsub,
       deps,
       oidcVerifier: verifier,
-      playBillingEnabled: true,
       oidcExpected: expected,
     });
     assert.equal(http.status, 200);
@@ -1957,7 +1958,6 @@ async function main() {
       },
       deps,
       oidcVerifier: verifier,
-      playBillingEnabled: true,
       oidcExpected: expected,
     });
     assert.equal(http.status, 200);
@@ -3082,6 +3082,252 @@ async function main() {
       );
       assert.equal(store.docs.has(`users/${OTHER}/subscription/status`), false);
     }
+  }
+
+  // Closing PLAY_BILLING_ENABLED must not freeze already-owned lifecycle.
+  // New token grants stay denied. Grace, hold, cancel, expiry, and refund
+  // stay distinct. Delist plus a closed admission flag still corrects the owner.
+  {
+    const expected = {
+      audience: "https://asia-south1-demo.cloudfunctions.net/androidRtdn",
+      serviceAccountEmail: "rtdn-push@demo.iam.gserviceaccount.com",
+    };
+    const verifier: OidcTokenVerifier = {
+      async verifyIdToken() {
+        return {
+          iss: "https://accounts.google.com",
+          aud: expected.audience,
+          email: expected.serviceAccountEmail,
+          email_verified: true,
+        };
+      },
+    };
+    const play = new FakePlay(activeSub(), paidOrder(ORDER1, "249"));
+    const { deps, store, cipher, taxCalls } = await primedDeps(play);
+    deps.enforceRestrictedTesters = true;
+    deps.restrictedTesterEnv = restrictedTesterEnv([UID]);
+    deps.enforcePlayBillingAdmission = true;
+    deps.playBillingEnv = { PLAY_BILLING_ENABLED: "true" };
+    const granted = await processAndroidPurchaseToken(deps, {
+      purchaseToken: TOKEN,
+      callerUid: UID,
+      source: "androidValidation",
+      eventSource: "callable",
+    });
+    assert.equal(granted.to?.entitlementActive, true);
+    assert.equal(granted.to?.billingStatus, "active");
+    play.sub.acknowledgementState = "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED";
+    const purchaseLedger = financialLedgerPath(sanitizeDocId(`android:purchase:${ORDER1}`));
+    assert.equal(store.docs.has(purchaseLedger), true);
+
+    deps.playBillingEnv = { PLAY_BILLING_ENABLED: "false" };
+    deps.restrictedTesterEnv = restrictedTesterEnv([]);
+
+    async function pushOwned(
+      messageId: string,
+      payload: Record<string, unknown>,
+      eventTime: number = NOW
+    ) {
+      return handleAndroidRtdnHttp({
+        authorizationHeader: "Bearer good",
+        body: rtdnBody(payload, messageId, eventTime),
+        deps,
+        oidcVerifier: verifier,
+        oidcExpected: expected,
+      });
+    }
+
+    play.sub.subscriptionState = "SUBSCRIPTION_STATE_IN_GRACE_PERIOD";
+    play.sub.etag = "etag-grace-admission-closed";
+    const httpGrace = await pushOwned("admission-closed-grace", {
+      subscriptionNotification: { notificationType: 6, purchaseToken: TOKEN },
+    });
+    assert.equal(httpGrace.status, 200);
+    assert.equal(httpGrace.body.action, "subscription_reconciled");
+    const grace = store.docs.get(subscriptionStatusPath(UID)) as SubscriptionStatusDoc;
+    assert.equal(grace.billingStatus, "grace");
+    assert.equal(grace.entitlementActive, true);
+
+    play.sub.subscriptionState = "SUBSCRIPTION_STATE_ON_HOLD";
+    play.sub.etag = "etag-hold-admission-closed";
+    const httpHold = await pushOwned("admission-closed-hold", {
+      subscriptionNotification: { notificationType: 5, purchaseToken: TOKEN },
+    });
+    assert.equal(httpHold.status, 200);
+    const hold = store.docs.get(subscriptionStatusPath(UID)) as SubscriptionStatusDoc;
+    assert.equal(hold.billingStatus, "onHold");
+    assert.equal(hold.entitlementActive, false);
+
+    play.sub.subscriptionState = "SUBSCRIPTION_STATE_CANCELED";
+    play.sub.etag = "etag-cancel-admission-closed";
+    play.sub.canceledStateContext = {
+      userInitiatedCancellation: { cancelTime: rfc(NOW) },
+    };
+    const httpCancel = await pushOwned("admission-closed-cancel", {
+      subscriptionNotification: { notificationType: 3, purchaseToken: TOKEN },
+    });
+    assert.equal(httpCancel.status, 200);
+    const cancelled = store.docs.get(subscriptionStatusPath(UID)) as SubscriptionStatusDoc;
+    assert.equal(cancelled.billingStatus, "cancelled");
+    assert.equal(cancelled.entitlementActive, true);
+    const historyAfterCancel = historyDocs(store).length;
+    const httpCancelDup = await pushOwned("admission-closed-cancel-dup", {
+      subscriptionNotification: { notificationType: 3, purchaseToken: TOKEN },
+    });
+    assert.equal(httpCancelDup.status, 200);
+    assert.equal(historyDocs(store).length, historyAfterCancel);
+    assert.equal(
+      (store.docs.get(subscriptionStatusPath(UID)) as SubscriptionStatusDoc).billingStatus,
+      "cancelled"
+    );
+
+    play.sub.subscriptionState = "SUBSCRIPTION_STATE_EXPIRED";
+    play.sub.etag = "etag-expire-admission-closed";
+    const httpExpire = await pushOwned("admission-closed-expire", {
+      subscriptionNotification: { notificationType: 13, purchaseToken: TOKEN },
+    });
+    assert.equal(httpExpire.status, 200);
+    const expired = store.docs.get(subscriptionStatusPath(UID)) as SubscriptionStatusDoc;
+    assert.equal(expired.billingStatus, "expired");
+    assert.equal(expired.entitlementActive, false);
+    assert.equal(
+      [...store.docs.keys()].filter((k) => k.startsWith("_billingEventLedger/")).length,
+      1,
+      "lifecycle notifications must not add a second purchase grant"
+    );
+
+    const restored = await handleValidateAndActivateAndroid(deps, {
+      uid: UID,
+      purchaseToken: TOKEN,
+    });
+    assert.equal(restored.to?.billingStatus, "expired");
+    assert.equal(restored.to?.entitlementActive, false);
+    assert.notEqual(restored.resultSummary, "play_billing_disabled");
+    assert.notEqual(restored.resultSummary, "play_billing_tester_not_allowlisted");
+
+    play.orders.set(ORDER1, refundedOrder(play.orders.get(ORDER1)!, rfc(NOW + 1000)));
+    const httpRefund = await pushOwned(
+      "admission-closed-void",
+      {
+        voidedPurchaseNotification: {
+          purchaseToken: TOKEN,
+          orderId: ORDER1,
+          productType: 1,
+          refundType: 1,
+        },
+      },
+      NOW + 1000
+    );
+    assert.equal(httpRefund.status, 200);
+    assert.equal(httpRefund.body.action, "voided_subscription");
+    assert.equal(store.docs.has(purchaseLedger), true);
+    const refundLedger = financialLedgerPath(sanitizeDocId(`android:refund:${ORDER1}`));
+    assert.equal(store.docs.has(refundLedger), true);
+    const httpRefundDup = await pushOwned(
+      "admission-closed-void-late",
+      {
+        voidedPurchaseNotification: {
+          purchaseToken: TOKEN,
+          orderId: ORDER1,
+          productType: 1,
+          refundType: 1,
+        },
+      },
+      NOW
+    );
+    assert.equal(httpRefundDup.status, 200);
+    assert.equal(
+      [...store.docs.keys()].filter((k) => k.startsWith("_billingEventLedger/")).length,
+      2
+    );
+    assert.equal(
+      taxCalls.filter((c) => c.eventType === "refund" && c.financialEventWritten).length,
+      1
+    );
+    const company = store.docs.get(companyBillingPath(UID)) as CompanyBillingDoc;
+    assert.equal(company.credentialFingerprint, credentialFingerprint(TOKEN));
+    assert.equal(store.docs.has(companyBillingPath(UID)), true);
+
+    const revalidated = await createAndroidStoreRevalidator(deps, cipher)({
+      platform: "android",
+      uid: UID,
+      financialEventId: `android:purchase:${ORDER1}`,
+      credentialFingerprint: credentialFingerprint(TOKEN),
+      reason: "owned_lifecycle",
+    });
+    assert.equal(revalidated.kind, "verified");
+    assert.notEqual(revalidated.resultSummary, "play_billing_disabled");
+    const afterRevalidate = store.docs.get(subscriptionStatusPath(UID)) as SubscriptionStatusDoc;
+    assert.equal(afterRevalidate.billingStatus, "expired");
+    assert.equal(afterRevalidate.entitlementActive, false);
+
+    const keysBeforeSwitch = [...store.docs.keys()].sort();
+    play.subsByToken.set(
+      TOKEN2,
+      activeSub({
+        etag: "etag-switch-denied",
+        lineItems: [
+          {
+            productId: "vyd_professional",
+            expiryTime: rfc(FUTURE),
+            latestSuccessfulOrderId: ORDER2,
+            autoRenewingPlan: { autoRenewEnabled: true },
+            offerDetails: { basePlanId: "monthly" },
+          },
+        ],
+      })
+    );
+    play.orders.set(ORDER2, paidOrder(ORDER2, "249"));
+    await assert.rejects(
+      processAndroidPurchaseToken(deps, {
+        purchaseToken: TOKEN2,
+        callerUid: UID,
+        source: "androidValidation",
+        eventSource: "callable",
+      }),
+      isCause("play_billing_disabled")
+    );
+    assert.deepEqual([...store.docs.keys()].sort(), keysBeforeSwitch);
+    assert.equal(
+      (store.docs.get(companyBillingPath(UID)) as CompanyBillingDoc).credentialFingerprint,
+      credentialFingerprint(TOKEN)
+    );
+    assert.equal(store.docs.has(purchaseLedger), true);
+    assert.equal(store.docs.has(refundLedger), true);
+  }
+
+  // Listed tester still cannot take a new grant while admission is closed.
+  {
+    const play = new FakePlay(activeSub(), paidOrder(ORDER1, "249"));
+    const { deps, store } = await primedDeps(play);
+    deps.enforcePlayBillingAdmission = true;
+    deps.enforceRestrictedTesters = true;
+    deps.playBillingEnv = { PLAY_BILLING_ENABLED: "false" };
+    deps.restrictedTesterEnv = {
+      PLAY_BILLING_ENABLED: "true",
+      PLAY_BILLING_TESTER_UIDS: JSON.stringify({ uids: [UID] }),
+    };
+    await assert.rejects(
+      processAndroidPurchaseToken(deps, {
+        purchaseToken: TOKEN,
+        callerUid: UID,
+        source: "androidValidation",
+        eventSource: "callable",
+      }),
+      isCause("play_billing_disabled")
+    );
+    await assert.rejects(
+      handleAndroidRtdn(deps, rtdnBody(
+        { subscriptionNotification: { notificationType: 4, purchaseToken: TOKEN } },
+        "admission-closed-new-rtdn"
+      )),
+      (err: unknown) => {
+        assert.equal(isCause("play_billing_disabled")(err), true);
+        assert.equal(rtdnHttpStatusForError(err), 503);
+        return true;
+      }
+    );
+    assert.equal(store.docs.has(subscriptionStatusPath(UID)), false);
   }
 
   // Source-level: adapter never logs tokens

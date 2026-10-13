@@ -47,6 +47,7 @@ import type {
   VyaamikkPlan,
 } from "../types";
 import {
+  assertPlayBillingNewGrantAllowedIfEnforced,
   assertPlayBillingTesterAllowedIfEnforced,
   CANONICAL_PLAY_PACKAGE_NAME,
 } from "./playConstants";
@@ -109,6 +110,14 @@ export interface AndroidBillingDeps {
    */
   enforceRestrictedTesters?: boolean;
   restrictedTesterEnv?: NodeJS.ProcessEnv;
+  /**
+   * Production wrappers set true. PLAY_BILLING_ENABLED must be exactly
+   * "true" for a NEW grant. Already-owned same-uid token lifecycle skips
+   * this check, so closing admission does not stop RTDN, reconciliation,
+   * refund, or entitlement correction. Unit tests omit this.
+   */
+  enforcePlayBillingAdmission?: boolean;
+  playBillingEnv?: NodeJS.ProcessEnv;
 }
 
 export interface AndroidBillingResult {
@@ -830,6 +839,10 @@ async function reconcileFetchedSubscription(
   const fp = credentialFingerprint(input.purchaseToken);
   const company = await readCompany(deps.store, uid);
   if (!alreadyOwnsSameUidPurchaseToken(company, uid, fp)) {
+    assertPlayBillingNewGrantAllowedIfEnforced(
+      deps.enforcePlayBillingAdmission,
+      deps.playBillingEnv ?? process.env
+    );
     assertPlayBillingTesterAllowedIfEnforced(
       uid,
       deps.enforceRestrictedTesters,

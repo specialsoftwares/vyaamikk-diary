@@ -16,7 +16,6 @@ import { FirestoreBillingStore } from "../firestoreBillingStore";
 import { GoogleCloudKmsKeyClient } from "../google/kmsAdcClient";
 import {
   billingKmsKeyNameFromEnv,
-  isPlayBillingEnabled,
   playPackageNameFromEnv,
 } from "../google/playConstants";
 import {
@@ -115,24 +114,24 @@ export const scheduledBillingReconciliation = onSchedule(
     const nowMs = () => Date.now();
     const invocationId = newReconciliationInvocationId(process.env.K_REVISION);
 
-    let android: StoreRevalidator = configurationDisabled("play_billing_disabled");
-    if (isPlayBillingEnabled()) {
-      const androidDeps = {
-        store,
-        play: new PlayApiClient({
-          getAccessToken: getAndroidPublisherAccessTokenFromAdc,
-          packageName: playPackageNameFromEnv(),
-        }),
-        cipher: createProductionCredentialCipher({
-          kms: new GoogleCloudKmsKeyClient(),
-          keyName: billingKmsKeyNameFromEnv(),
-        }),
-        diagnosticUidFor,
-        nowMs,
-        enforceRestrictedTesters: true,
-      };
-      android = createAndroidStoreRevalidator(androidDeps, androidDeps.cipher);
-    }
+    // New Play admission is enforced inside the adapter. Closing
+    // PLAY_BILLING_ENABLED must not replace this revalidator.
+    const androidDeps = {
+      store,
+      play: new PlayApiClient({
+        getAccessToken: getAndroidPublisherAccessTokenFromAdc,
+        packageName: playPackageNameFromEnv(),
+      }),
+      cipher: createProductionCredentialCipher({
+        kms: new GoogleCloudKmsKeyClient(),
+        keyName: billingKmsKeyNameFromEnv(),
+      }),
+      diagnosticUidFor,
+      nowMs,
+      enforceRestrictedTesters: true,
+      enforcePlayBillingAdmission: true,
+    };
+    const android = createAndroidStoreRevalidator(androidDeps, androidDeps.cipher);
 
     let ios: StoreRevalidator = configurationDisabled("appstore_billing_disabled");
     if (isAppStoreBillingEnabled()) {
