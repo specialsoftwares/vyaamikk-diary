@@ -4,6 +4,8 @@
  */
 import assert from "node:assert/strict";
 
+import { interpretPurchaseAdmission } from "@/billing/iap/purchaseAdmission";
+import type { PurchaseAdmissionRead } from "@/billing/iap/purchaseAdmission";
 import { __setSubscriptionPurchaseEntryEnabledForTests } from "@/billing/iap/purchaseEntryGate";
 import { emptyBillingDetails, type BillingDetailsRead } from "@/subscription/billingDetailsReader";
 import { createSubscriptionManagementRuntime, maskManagementSnapshot } from "@/subscription/subscriptionManagementRuntime";
@@ -573,6 +575,72 @@ async function main() {
     holder.generation = 2;
     staleChange(sampleDraft("recaptured"));
     assert.equal(runtime.snapshot().draft.billingRecipientName, "");
+    runtime.dispose();
+  }
+
+  {
+    const pending: Array<(value: PurchaseAdmissionRead) => void> = [];
+    let upgrades = 0;
+    const runtime = createSubscriptionManagementRuntime({
+      readUsage: async () => ({ kind: "missing" }),
+      readHistory: async () => ({ kind: "ok", rows: [] }),
+      readDetails: async () => ({ kind: "missing" }),
+      saveDetails: async () => ({ kind: "saved" }),
+      restore: async () => ({ kind: "restored" }),
+      openUrl: async () => true,
+      presentUpgrade: () => {
+        upgrades += 1;
+        return { ok: true, visible: true, clientRecordId: null };
+      },
+      isPurchaseEntryEnabled: () => false,
+      readPurchaseAdmission: () =>
+        new Promise((resolve) => {
+          pending.push(resolve);
+        }),
+    });
+    runtime.setOwner(token("user-a", 1));
+    assert.equal(runtime.snapshot().purchaseAdmission, "loading");
+    assert.equal(runtime.presentUpgrade(token("user-a", 1)).ok, false);
+    assert.equal(upgrades, 0);
+    runtime.setOwner(token("user-b", 2));
+    assert.equal(runtime.snapshot().purchaseAdmission, "loading");
+    const allowed = interpretPurchaseAdmission({ purchaseAllowed: true });
+    assert.equal(allowed.status, "allowed");
+    pending[0](allowed);
+    await flush();
+    assert.notEqual(runtime.snapshot().purchaseAdmission, "allowed");
+    assert.equal(runtime.presentUpgrade(token("user-b", 2)).ok, false);
+    assert.equal(upgrades, 0);
+    pending[1](interpretPurchaseAdmission({}));
+    await flush();
+    assert.equal(runtime.snapshot().purchaseAdmission, "closed");
+    assert.equal(upgrades, 0);
+    runtime.refreshPurchaseAdmission(token("user-b", 2));
+    assert.equal(runtime.snapshot().purchaseAdmission, "loading");
+    const forged = {
+      status: "allowed" as const,
+      token: { purchaseAllowed: true as const },
+    };
+    pending[pending.length - 1](forged as PurchaseAdmissionRead);
+    await flush();
+    assert.equal(runtime.snapshot().purchaseAdmission, "closed");
+    assert.equal(upgrades, 0);
+    runtime.refreshPurchaseAdmission(token("user-b", 2));
+    if (allowed.status === "allowed") pending[pending.length - 1](allowed);
+    await flush();
+    assert.equal(runtime.snapshot().purchaseAdmission, "allowed");
+    assert.equal(runtime.presentUpgrade(token("user-b", 2)).ok, true);
+    assert.equal(upgrades, 1);
+    runtime.setOwner(null);
+    assert.equal(runtime.snapshot().purchaseAdmission, "closed");
+    const lateIndex = pending.length;
+    runtime.setOwner(token("user-c", 3));
+    runtime.setOwner(null);
+    assert.equal(runtime.snapshot().purchaseAdmission, "closed");
+    if (allowed.status === "allowed") pending[lateIndex](allowed);
+    await flush();
+    assert.equal(runtime.snapshot().purchaseAdmission, "closed");
+    assert.equal(upgrades, 1);
     runtime.dispose();
   }
 

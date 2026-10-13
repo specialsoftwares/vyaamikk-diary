@@ -41,6 +41,12 @@ function isInstallmentOffer(offer: AndroidSubscriptionOfferLike): boolean {
   );
 }
 
+function standardPhase(offer: AndroidSubscriptionOfferLike) {
+  const phases = offer.pricingPhasesAndroid?.pricingPhaseList;
+  if (!phases || phases.length !== 1) return null;
+  return phases[0];
+}
+
 function rejectUnsupported(
   offer: AndroidSubscriptionOfferLike
 ): AndroidOfferSelection | null {
@@ -50,7 +56,9 @@ function rejectUnsupported(
   if (isTrialOrPromoOffer(offer)) {
     return { ok: false, reason: "trial_or_promo" };
   }
-  if (!nonempty(offer.displayPrice)) {
+  const phase = standardPhase(offer);
+  // Play ProductDetails.PricingPhase.getFormattedPrice(), not a parallel label.
+  if (!phase || !nonempty(phase.formattedPrice)) {
     return { ok: false, reason: "unsupported" };
   }
   return null;
@@ -98,12 +106,17 @@ export function selectStandardAndroidOffer(args: {
   const rejected = rejectUnsupported(candidate);
   if (rejected) return rejected;
 
+  const phase = standardPhase(candidate);
+  if (!phase || !nonempty(phase.formattedPrice)) {
+    return { ok: false, reason: "unsupported" };
+  }
+
   return {
     ok: true,
     offer: {
       offerToken: candidate.offerTokenAndroid,
-      displayPrice: candidate.displayPrice,
-      currency: candidate.currency ?? candidate.pricingPhasesAndroid?.pricingPhaseList[0]?.priceCurrencyCode ?? "",
+      displayPrice: phase.formattedPrice,
+      currency: phase.priceCurrencyCode || candidate.currency || "",
       basePlanId: candidate.basePlanIdAndroid ?? args.expectedBasePlanId,
     },
   };

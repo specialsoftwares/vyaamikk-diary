@@ -14,6 +14,12 @@ import { canonicalFunctionsRegion } from "@/services/auth/authFlowErrorPresentat
 import { AppError } from "@/domain/errors";
 
 import { isUuidAppAccountToken } from "./iapAccountBinding";
+import {
+  PLAY_PURCHASE_ADMISSION_CALLABLE,
+  interpretPurchaseAdmission,
+  purchaseAdmissionFromCallFailure,
+  type PurchaseAdmissionRead,
+} from "./purchaseAdmission";
 import type {
   AndroidValidationResult,
   CanonicalSku,
@@ -120,6 +126,26 @@ export async function validateAndActivateIOSClient(input: {
     billingStatus: data.billingStatus ?? null,
     entitlementActive: data.entitlementActive === true,
   };
+}
+
+/**
+ * Read whether this signed-in user may open a purchase.
+ * Sends no uid. A missing callable stays closed. Transport failure is
+ * unavailable. Any payload other than purchaseAllowed: true stays closed.
+ */
+export async function readPlayPurchaseAdmission(): Promise<PurchaseAdmissionRead> {
+  try {
+    const callable = httpsCallable<Record<string, never>, unknown>(
+      callables(),
+      PLAY_PURCHASE_ADMISSION_CALLABLE
+    );
+    const result = await callable({});
+    return interpretPurchaseAdmission(result.data);
+  } catch (e: unknown) {
+    const code =
+      e && typeof e === "object" && "code" in e ? String((e as { code: string }).code) : "";
+    return purchaseAdmissionFromCallFailure(code);
+  }
 }
 
 export function createFirebaseIapBackend(): IapBackend {

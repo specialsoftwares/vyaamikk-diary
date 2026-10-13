@@ -53,6 +53,8 @@ function purchaseCtaLabel(t: TranslateFn, kind: UpgradeCtaKind): string {
       return t("billing.upgrade.purchaseUnavailable");
     case "pending":
       return t("billing.upgrade.purchasePending");
+    case "verifying":
+      return t("billing.upgrade.purchaseVerifying");
     case "loading":
       return t("billing.upgrade.purchaseLoading");
   }
@@ -82,6 +84,8 @@ export interface UpgradeSheetProps {
   purchaseState: UpgradeOperationState;
   restoreState: UpgradeOperationState;
   errorMessage: string | null;
+  /** Accessible phase text. A store sheet result is not verified success. */
+  statusNotice?: string | null;
   /**
    * Recoverable purchase/restore failure may keep Continue enabled so the
    * user can retry without using Restore. Default false preserves the
@@ -118,6 +122,7 @@ export function UpgradeSheet({
   purchaseState,
   restoreState,
   errorMessage,
+  statusNotice = null,
   errorRetryEnabled = false,
   selectedSku,
   selectedPeriod,
@@ -311,6 +316,14 @@ export function UpgradeSheet({
         <LocaleUiText style={styles.storeNote}>{t("billing.upgrade.storePriceNote")}</LocaleUiText>
         {trialEligible ? (
           <LocaleUiText style={styles.storeNote}>{t("billing.upgrade.trialNote")}</LocaleUiText>
+        ) : null}
+
+        {statusNotice ? (
+          <View accessibilityLiveRegion="polite">
+            <LocaleUiText accessibilityRole="text" style={styles.stateText}>
+              {statusNotice}
+            </LocaleUiText>
+          </View>
         ) : null}
 
         {errorMessage ? (

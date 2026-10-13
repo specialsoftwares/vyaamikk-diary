@@ -20,6 +20,7 @@ import type {
   PurchaseFlowResult,
 } from "@/billing/iap/iapTypes";
 import { ALL_CANONICAL_SKUS } from "@/billing/iap/iapCatalog";
+import { interpretPurchaseAdmission } from "@/billing/iap/purchaseAdmission";
 import { __setSubscriptionPurchaseEntryEnabledForTests } from "@/billing/iap/purchaseEntryGate";
 import {
   canDispatchPurchase,
@@ -197,10 +198,27 @@ async function run(): Promise<void> {
     __setQuotaUpsellEnabledForTests(true);
 
     __setSubscriptionPurchaseEntryEnabledForTests(false);
+    const purchasesBeforeAdmission = purchaseCalls.length;
     const closedManual = notifyManualUpgrade(sessionA1);
     assert.equal(closedManual.ok, false);
     assert.equal(closedManual.ok === false && closedManual.reason, "purchase_entry_closed");
     assert.equal(runtime.snapshot().visible, false);
+    const forged = notifyManualUpgrade(sessionA1, { purchaseAllowed: true } as never);
+    assert.equal(forged.ok, false);
+    assert.equal(interpretPurchaseAdmission({}).status, "closed");
+    assert.equal(interpretPurchaseAdmission({ testerUids: [] }).status, "closed");
+    assert.equal(interpretPurchaseAdmission({ purchaseAllowed: false }).status, "closed");
+    const admitted = interpretPurchaseAdmission({ purchaseAllowed: true });
+    assert.equal(admitted.status, "allowed");
+    if (admitted.status === "allowed") {
+      const opened = notifyManualUpgrade(sessionA1, admitted.token);
+      assert.equal(opened.ok, true);
+      assert.equal(runtime.snapshot().visible, true);
+      assert.equal(purchaseCalls.length, purchasesBeforeAdmission);
+      runtime.dismiss();
+    }
+    assert.equal(runtime.snapshot().visible, false);
+    assert.equal(purchaseCalls.length, purchasesBeforeAdmission);
     __setSubscriptionPurchaseEntryEnabledForTests(null);
   }
 
