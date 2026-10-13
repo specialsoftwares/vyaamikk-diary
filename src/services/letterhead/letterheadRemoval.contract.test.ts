@@ -101,5 +101,7 @@ test("exclusive scanner and crop packages are gone", () => {
   assert.doesNotMatch(pkg, /expo-image-manipulator/);
   const create = fs.readFileSync(path.join(root, "app/(app)/letterhead/create.tsx"), "utf8");
   assert.doesNotMatch(create, /buildLetterheadHtml|saveLetterheadCreateWithPdf/);
-  assert.match(create, /classifyStoredPdf/);
+  assert.match(create, /createLegacyLetterheadReaderRuntime/);
+  assert.match(create, /shareLoadedPdf/);
+  assert.match(create, /onPress=\{\(\) => void runtime\.shareLoadedPdf\(\)\}/);
 });

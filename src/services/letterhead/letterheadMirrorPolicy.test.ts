@@ -28,14 +28,17 @@ const lhAtomicPath = path.join(import.meta.dirname, "atomicCreate.ts");
 const docsFirebasePath = path.join(import.meta.dirname, "documents-firebase.ts");
 const atomicBillablePath = path.join(import.meta.dirname, "../../billing/optionC/atomicBillableCreate.ts");
 const createPath = path.join(import.meta.dirname, "../../../app/(app)/letterhead/create.tsx");
+const readerRuntimePath = path.join(import.meta.dirname, "legacyLetterheadReadRuntime.ts");
 const saveSrc = fs.readFileSync(savePath, "utf8");
 const diarySrc = fs.readFileSync(diaryAtomicPath, "utf8");
 const lhSrc = fs.readFileSync(lhAtomicPath, "utf8");
 const docsFirebaseSrc = fs.readFileSync(docsFirebasePath, "utf8");
 const atomicBillableSrc = fs.readFileSync(atomicBillablePath, "utf8");
 const createSrc = fs.readFileSync(createPath, "utf8");
+const readerRuntimeSrc = fs.readFileSync(readerRuntimePath, "utf8");
 
-assert.match(createSrc, /draftPayloadToLetterheadInput/);
+assert.match(createSrc, /createLegacyLetterheadReaderRuntime/);
+assert.match(readerRuntimeSrc, /draftPayloadToLetterheadInput/);
 assert.doesNotMatch(createSrc, /saveLetterheadCreateWithPdf/);
 assert.doesNotMatch(createSrc, /if \(!values\.subject\?\.trim\(\)\)/);
 assert.doesNotMatch(createSrc, /if \(!values\.title\?\.trim\(\)\)/);

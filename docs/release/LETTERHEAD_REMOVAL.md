@@ -30,6 +30,7 @@ No live Rules change, Functions deploy, data purge, billing change, EAS build, o
 
 - `LetterheadDocument` and draft payload parsing. Discriminator `letterhead` / `letterhead_matter` stays.
 - Owner-scoped list and read. A saved letter opens a text view. A draft opens the same way and is not discarded or reclassified.
+- The reader and list publish only for the UID, session generation, and record id that started the request. A later account, a new login of the same account, or a different letter id masks the previous text immediately. A late file check, error, or share callback cannot paint or share the previous account's PDF. An operating-system share sheet that has already opened is not revoked. Row open and delete confirm use the same check. A delete that still belongs to the current row still proceeds.
 - Share is offered only when the stored PDF file is still on the device. A missing PDF is described as missing. Nothing new is generated, and the current logo is not substituted.
 - `saveWithPdf`, the Firestore repository write, mirror policy, and quota exemption stay in source so an already-started save and the rules tests still describe the old write. No screen calls them.
 - Account-deletion and Storage path inventories still include Letterhead objects.
@@ -39,6 +40,12 @@ No live Rules change, Functions deploy, data purge, billing change, EAS build, o
 **D. Historical evidence**
 
 - Earlier release notes, incident write-ups, and PDF fixture packets stay. Current ASO and the website handoff are marked so Letterhead is not submitted as a current claim.
+
+## Read ownership
+
+The production reader and saved-letter list publish through one session runtime. A request records the UID, session generation, and record id before its first await. A retired success, error, or file check is ignored. Share checks that identity again after the file-existence await and again after the share call returns. A sheet the operating system has already opened is not revoked.
+
+The regression defers the repository and the file check. It is not a mounted React tree and not a phone. Same-owner reads, a present PDF, a missing PDF, and a cancelled share stay covered.
 
 ## Routes
 

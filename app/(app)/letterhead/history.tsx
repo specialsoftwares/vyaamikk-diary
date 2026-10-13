@@ -1,10 +1,10 @@
 /**
  * Saved letters from before Letterhead creation was removed.
- * Lists owner records only. Does not create, edit, or generate a PDF.
+ * The list, row open, and delete confirm stay bound to the current session.
  */
-import React, { useCallback, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { FlatList, StyleSheet, View } from "react-native";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useRouter } from "expo-router";
 
 import { SwipeToDeleteRow } from "@/components/records/SwipeToDeleteRow";
 import { useRecordDelete } from "@/hooks/useRecordDelete";
@@ -21,18 +21,53 @@ import { useAuth } from "@/state/auth";
 import { useT } from "@/i18n";
 import { spacing, typography, useThemedStyles } from "@/theme";
 import { getLetterheadDocumentRepository } from "@/services/letterhead/documentRepository";
-import type { LetterheadDocument } from "@/services/letterhead/types";
+import {
+  createLegacyLetterheadListRuntime,
+  maskLegacyList,
+  type LegacyLiveSession,
+} from "@/services/letterhead/legacyLetterheadReadRuntime";
 import { userFacingMessage } from "@/domain/errors";
+import { syncSessionOwnership } from "@/sync/syncSessionOwnership";
 import { formatShortDate } from "@/utils/date";
 
 export default function LegacyLetterheadHistoryScreen() {
   const t = useT();
   const router = useRouter();
   const { user } = useAuth();
-  const [docs, setDocs] = useState<LetterheadDocument[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const { requestDelete, isDeleting } = useRecordDelete(user?.uid ?? null);
+  const uid = user?.uid ?? null;
+  const session = syncSessionOwnership.capture();
+  const liveSession =
+    uid && session && uid === session.uid
+      ? { uid: session.uid, generation: session.generation }
+      : null;
+  const live: LegacyLiveSession = { authUid: uid, session: liveSession };
+  const liveRef = useRef(live);
+  liveRef.current = live;
+  const routerRef = useRef(router);
+  routerRef.current = router;
+
+  const [runtime] = useState(() =>
+    createLegacyLetterheadListRuntime({
+      list: (ownerId) => getLetterheadDocumentRepository().list(ownerId),
+      mapError: (error) => userFacingMessage(error),
+      navigate: (documentId) => {
+        routerRef.current.push({
+          pathname: "/(app)/letterhead/create",
+          params: { documentId },
+        });
+      },
+      liveSession: () => liveRef.current,
+    })
+  );
+  const [, setTick] = useState(0);
+  const snap = maskLegacyList(runtime.snapshot(), live);
+  const { requestDelete, isDeleting } = useRecordDelete(uid);
+
+  useEffect(() => runtime.subscribe(() => setTick((n) => n + 1)), [runtime]);
+
+  useEffect(() => {
+    runtime.setOwner(liveSession);
+  }, [runtime, liveSession?.uid, liveSession?.generation]); // eslint-disable-line react-hooks/exhaustive-deps -- session identity is uid + generation
 
   const styles = useThemedStyles((colors) =>
     StyleSheet.create({
@@ -44,35 +79,19 @@ export default function LegacyLetterheadHistoryScreen() {
     })
   );
 
-  const load = useCallback(async () => {
-    if (!user) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const list = await getLetterheadDocumentRepository().list(user.uid);
-      setDocs(list);
-    } catch (e) {
-      setError(userFacingMessage(e));
-    } finally {
-      setLoading(false);
-    }
-  }, [user]);
-
-  useFocusEffect(
-    useCallback(() => {
-      void load();
-    }, [load])
-  );
-
   return (
     <Screen>
       <Header title={t("letterhead.legacyListTitle")} showBack backFrom="letterhead" />
       <LocaleUiText style={styles.lead}>{t("letterhead.legacyListLead")}</LocaleUiText>
-      {loading ? <Loader fullscreen message={t("common.loading")} /> : null}
-      {!loading && error ? <ErrorState message={error} onRetry={() => void load()} /> : null}
-      {!loading && !error ? (
+      {snap.phase !== "ready" && snap.phase !== "error" ? (
+        <Loader fullscreen message={t("common.loading")} />
+      ) : null}
+      {snap.phase === "error" && snap.error ? (
+        <ErrorState message={snap.error} onRetry={() => runtime.reload()} />
+      ) : null}
+      {snap.phase === "ready" ? (
         <FlatList
-          data={docs}
+          data={snap.rows}
           keyExtractor={(item) => item.id}
           style={styles.list}
           contentContainerStyle={styles.listContent}
@@ -95,20 +114,23 @@ export default function LegacyLetterheadHistoryScreen() {
                 recordId={item.id}
                 entityType="letterhead_document"
                 title={item.title}
-                onDeletePress={() => requestDelete(req, () => load())}
+                onDeletePress={() => {
+                  const admission = runtime.admitRowDelete(item.id);
+                  if (!admission) return;
+                  requestDelete(
+                    req,
+                    () => {
+                      if (runtime.rowDeleteStillCurrent(admission)) runtime.reload();
+                    },
+                    { confirmAdmit: () => runtime.rowDeleteStillCurrent(admission) }
+                  );
+                }}
                 deleteInProgress={isDeleting(req)}
               >
-                <Card
-                  onPress={() =>
-                    router.push({
-                      pathname: "/(app)/letterhead/create",
-                      params: { documentId: item.id },
-                    })
-                  }
-                >
+                <Card onPress={() => runtime.openRow(item.id)}>
                   <View>
-                    <LocaleUiText style={styles.title}>{item.title || item.input.subject}</LocaleUiText>
-                    <LocaleUiText style={styles.meta}>{formatShortDate(item.input.date)}</LocaleUiText>
+                    <LocaleUiText style={styles.title}>{item.title || item.subject}</LocaleUiText>
+                    <LocaleUiText style={styles.meta}>{formatShortDate(item.dateMs)}</LocaleUiText>
                   </View>
                 </Card>
               </SwipeToDeleteRow>
