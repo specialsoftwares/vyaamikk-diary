@@ -4,11 +4,12 @@
  * Client may send purchaseToken and an optional canonical SKU hint.
  * Never accepts uid/plan/price/expiry/entitlement/order amount as authority.
  *
- * Production export is fail-closed while PLAY_BILLING_ENABLED is not true.
- * After enablement, the adapter's tester allowlist denies NEW grants
+ * Production deps set enforcePlayBillingAdmission. A new grant requires
+ * PLAY_BILLING_ENABLED and the tester allowlist inside the adapter
  * (empty/absent PLAY_BILLING_TESTER_UIDS denies first bind). Already-owned
- * same-uid restore/reconcile is not blocked by delist. This callable does
- * not enable billing. Core handler is fully testable through injected deps.
+ * same-uid restore/reconcile is not blocked by closing admission or by
+ * delist. This callable does not enable billing. Core handler is fully
+ * testable through injected deps.
  */
 
 import { HttpsError, onCall } from "firebase-functions/v2/https";
@@ -26,7 +27,6 @@ import {
 } from "../google/androidSubscriptionAdapter";
 import {
   billingKmsKeyNameFromEnv,
-  isPlayBillingEnabled,
   playPackageNameFromEnv,
 } from "../google/playConstants";
 import {
@@ -76,6 +76,7 @@ function productionDeps(): AndroidBillingDeps {
     diagnosticUidFor: (uid) => diagnosticUidHmac(secret, uid),
     nowMs: () => Date.now(),
     enforceRestrictedTesters: true,
+    enforcePlayBillingAdmission: true,
   };
 }
 
@@ -84,12 +85,6 @@ export const validateAndActivateAndroid = onCall(
   async (request) => {
     if (!request.auth?.uid) {
       throw new HttpsError("unauthenticated", "Sign in required.");
-    }
-    if (!isPlayBillingEnabled()) {
-      throw new HttpsError(
-        "failed-precondition",
-        "Play billing is not production-enabled."
-      );
     }
     try {
       const data = (request.data ?? {}) as Record<string, unknown>;

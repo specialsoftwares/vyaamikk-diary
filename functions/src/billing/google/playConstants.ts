@@ -1,18 +1,18 @@
 /**
  * Canonical Google Play package + production-enablement gates (VYD-32).
  *
- * PLAY_BILLING_ENABLED defaults OFF. Production callables/RTDN stay
- * fail-closed until a later owner-authorized enablement. This file does not
- * create Play Console products, IAM, or Pub/Sub.
+ * PLAY_BILLING_ENABLED defaults OFF. It closes NEW purchase admission
+ * (prepareAndroidBillingAccount, and first bind / new token grants inside
+ * the adapter). It does not stop already-owned same-uid token lifecycle:
+ * RTDN, reconciliation, refunds, or entitlement correction. This file does
+ * not create Play Console products, IAM, or Pub/Sub.
  *
  * Restricted tester activation: Internal-track membership and hiding the
- * purchase button are not backend restrictions. If PLAY_BILLING_ENABLED
- * were true, prepare/validate callables would otherwise serve every
- * authenticated caller. PLAY_BILLING_TESTER_UIDS is a fail-closed UID
- * allowlist used only after that enablement check. Empty/absent list
- * denies NEW grants. Already-owned same-uid token lifecycle is not gated
- * by allowlist membership. This module does not enable billing and does
- * not invent tester emails or UIDs.
+ * purchase button are not backend restrictions. PLAY_BILLING_TESTER_UIDS is
+ * a fail-closed UID allowlist used only for NEW grants after admission is
+ * open. Empty/absent list denies NEW grants. Already-owned same-uid token
+ * lifecycle is not gated by allowlist membership. This module does not
+ * enable billing and does not invent tester emails or UIDs.
  *
  * Owner supplies Firebase Auth UIDs privately. Do not commit them.
  * Input format (same env/secret name):
@@ -126,8 +126,28 @@ export function isPlayBillingTesterAllowed(
 }
 
 /**
- * Fail-closed UID allowlist. Call only after isPlayBillingEnabled() is true.
- * Empty/absent PLAY_BILLING_TESTER_UIDS denies every caller.
+ * New Play purchase admission. Production adapters set enforce=true and
+ * call this only when the uid does not already own the token.
+ * PLAY_BILLING_ENABLED other than exact "true" denies the new grant.
+ * Retryable so an RTDN for a not-yet-admitted purchase is not acked.
+ */
+export function assertPlayBillingNewGrantAllowedIfEnforced(
+  enforce: boolean | undefined,
+  env: NodeJS.ProcessEnv = process.env
+): void {
+  if (!enforce) return;
+  if (isPlayBillingEnabled(env)) return;
+  throw new BillingError({
+    clientCode: "temporary_unavailable",
+    causeCode: "play_billing_disabled",
+    retryable: true,
+  });
+}
+
+/**
+ * Fail-closed UID allowlist. prepareAndroidBillingAccount calls this only
+ * after isPlayBillingEnabled() is true. Empty/absent PLAY_BILLING_TESTER_UIDS
+ * denies every caller. Already-owned lifecycle must not call this.
  */
 export function assertPlayBillingTesterAllowed(
   uid: string,

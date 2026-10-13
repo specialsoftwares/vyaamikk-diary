@@ -12,6 +12,7 @@ import { resolve } from "node:path";
 
 import { BillingError } from "../errors";
 import {
+  assertPlayBillingNewGrantAllowedIfEnforced,
   assertPlayBillingTesterAllowed,
   assertPlayBillingTesterAllowedIfEnforced,
   isPlayBillingEnabled,
@@ -142,6 +143,30 @@ assert.throws(
   isCause("play_billing_tester_not_allowlisted")
 );
 
+assert.doesNotThrow(() => assertPlayBillingNewGrantAllowedIfEnforced(false, {}));
+assert.doesNotThrow(() => assertPlayBillingNewGrantAllowedIfEnforced(undefined, {}));
+assert.doesNotThrow(() =>
+  assertPlayBillingNewGrantAllowedIfEnforced(true, { PLAY_BILLING_ENABLED: "true" })
+);
+assert.throws(
+  () => assertPlayBillingNewGrantAllowedIfEnforced(true, {}),
+  (err: unknown) => {
+    assert.equal(isCause("play_billing_disabled")(err), true);
+    assert.equal(err instanceof BillingError && err.retryable, true);
+    return true;
+  }
+);
+assert.throws(
+  () =>
+    assertPlayBillingNewGrantAllowedIfEnforced(true, { PLAY_BILLING_ENABLED: "false" }),
+  isCause("play_billing_disabled")
+);
+assert.throws(
+  () =>
+    assertPlayBillingNewGrantAllowedIfEnforced(true, { PLAY_BILLING_ENABLED: "TRUE" }),
+  isCause("play_billing_disabled")
+);
+
 const enabledButEmptyAllowlist = {
   PLAY_BILLING_ENABLED: "true",
 } as NodeJS.ProcessEnv;
@@ -179,8 +204,11 @@ for (const [name, src] of [
   );
 }
 
-const validateEnabledIdx = validateSrc.indexOf("isPlayBillingEnabled()");
-assert.ok(validateEnabledIdx >= 0, "validateAndActivateAndroid must check PLAY_BILLING_ENABLED");
+assert.equal(
+  validateSrc.includes("if (!isPlayBillingEnabled())"),
+  false,
+  "validateAndActivateAndroid must not blanket-close already-owned restore"
+);
 assert.equal(
   validateSrc.includes("assertPlayBillingTesterAllowed(request.auth.uid)"),
   false,
@@ -188,10 +216,44 @@ assert.equal(
 );
 
 assert.ok(validateSrc.includes("enforceRestrictedTesters: true"));
+assert.ok(validateSrc.includes("enforcePlayBillingAdmission: true"));
 assert.ok(rtdnSrc.includes("enforceRestrictedTesters: true"));
+assert.ok(rtdnSrc.includes("enforcePlayBillingAdmission: true"));
+assert.equal(
+  rtdnSrc.includes('causeCode: "play_billing_disabled"'),
+  false,
+  "androidRtdn must not reject the whole push when new admission is closed"
+);
 assert.ok(reconSrc.includes("enforceRestrictedTesters: true"));
+assert.ok(reconSrc.includes("enforcePlayBillingAdmission: true"));
+assert.equal(
+  reconSrc.includes('configurationDisabled("play_billing_disabled")'),
+  false,
+  "scheduled reconciliation must keep revalidating already-owned Play purchases"
+);
+assert.equal(
+  reconSrc.includes("isPlayBillingEnabled()"),
+  false,
+  "PLAY_BILLING_ENABLED must not choose the android revalidator"
+);
 assert.ok(adapterSrc.includes("assertPlayBillingTesterAllowedIfEnforced"));
+assert.ok(adapterSrc.includes("assertPlayBillingNewGrantAllowedIfEnforced"));
 assert.ok(adapterSrc.includes("alreadyOwnsSameUidPurchaseToken"));
+const ownsIdx = adapterSrc.indexOf(
+  "if (!alreadyOwnsSameUidPurchaseToken(company, uid, fp))"
+);
+const admissionIdx = adapterSrc.indexOf(
+  "assertPlayBillingNewGrantAllowedIfEnforced",
+  Math.max(ownsIdx, 0)
+);
+const testerIdx = adapterSrc.indexOf(
+  "assertPlayBillingTesterAllowedIfEnforced",
+  Math.max(ownsIdx, 0)
+);
+assert.ok(
+  ownsIdx >= 0 && admissionIdx > ownsIdx && testerIdx > admissionIdx,
+  "new-grant admission and tester checks stay behind already-owned token ownership"
+);
 assert.equal(adapterSrc.includes("processAndroidVoidedPurchase"), true);
 
 assert.equal(prepareSrc.includes("PLAY_BILLING_ENABLED=true"), false);
