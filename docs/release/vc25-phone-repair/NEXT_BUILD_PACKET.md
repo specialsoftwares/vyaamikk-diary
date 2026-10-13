@@ -1,6 +1,6 @@
 # Next internal build — not started
 
-This packet describes the source correction after `79aaedfaed852e94eee910cf8ce454a8b97d76e1`. It does not authorize an AAB, a Play upload, a main merge, billing, purge, or a public track. It does not change the live Maps credential.
+This packet describes the source correction after `3be660d600001a170537bc93175d7e2672a08046`. It does not authorize an AAB, a Play upload, a main merge, billing, purge, or a public track. It does not change the live Maps credential.
 
 ## Source
 
@@ -31,7 +31,7 @@ Concrete action, not performed by this packet:
 ## Letterhead
 
 - `expo-image-manipulator` `~14.0.8` is the on-device crop of a working copy. It is not a new data recipient. No remote OCR or AI was added.
-- Cancel keeps the image the editor already owns. Disposable crop files are removed only when nothing active still uses them. A late crop is ignored after cancel, replacement, complete letterhead, owner change, or unmount. Issued native work is not cancelled.
+- Cancel keeps the image the editor already owns. Disposable crop files are removed only when nothing active still uses them. A late crop is ignored after cancel, replacement, complete letterhead, owner change, or unmount. Issued native work is not cancelled. The retained original follows the currently accepted image. Choosing complete letterhead on a replacement, then choosing it again, keeps that replacement.
 - The native gallery save is unverified. No phone was attached.
 
 ## Still device-pending

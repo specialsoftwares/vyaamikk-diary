@@ -89,8 +89,8 @@ function harness() {
     showError: (code) => {
       errors.push(code);
     },
-    applyAcceptedHeader: (next, warnings) => {
-      runtime.setCandidate(next, warnings);
+    applyAcceptedHeader: (next, warnings, retain) => {
+      runtime.setCandidate(next, warnings, retain);
       runtime.setPlacement("header_logo", writingMarginsForHeader(next.width, next.height));
     },
     applyCompletePage: (source, warnings) => {
@@ -454,6 +454,98 @@ async function main(): Promise<void> {
     await flush();
     assert.equal(h.retired.includes(HISTORICAL_LETTER), false);
     assertUntouched(h.runtime, editor.localUri, ["letterhead.warnLandscape"], "complete_page");
+    h.runtime.dispose();
+  }
+
+  // Cropped A → complete B → complete again remains B (not retained original A).
+  {
+    syncSessionOwnership.resetForTests();
+    const session = syncSessionOwnership.beginSession("alice");
+    const h = harness();
+    h.crop.bindOwner({ uid: session.uid, generation: session.generation });
+    h.runtime.setOwner(session);
+    await flush();
+    const photoA = image("alice", session.generation, "file:///photo-a.jpg");
+    h.crop.stage(photoA, ["letterhead.warnLandscape"], "disposable");
+    h.crop.accept();
+    const cropA = croppedFrom(photoA, "file:///photo-a-crop.jpg");
+    h.holds[0].resolve(cropA);
+    await flush();
+    assert.equal(h.runtime.snapshot().candidate?.localUri, cropA.localUri);
+    const photoB = image("alice", session.generation, "file:///photo-b.jpg");
+    h.crop.stage(photoB, ["letterhead.warnTooLarge"], "disposable");
+    h.crop.useComplete();
+    assert.equal(h.pending(), null);
+    assertUntouched(h.runtime, photoB.localUri, ["letterhead.warnTooLarge"], "complete_page");
+    assert.equal(h.retired.includes(photoA.localUri), true);
+    assert.equal(h.retired.includes(cropA.localUri), true);
+    h.crop.useComplete();
+    assertUntouched(h.runtime, photoB.localUri, ["letterhead.warnTooLarge"], "complete_page");
+    assert.equal(h.retired.includes(photoB.localUri), false);
+    assertProtected(h.retired);
+    h.runtime.dispose();
+  }
+
+  // Cropped A → cropped B → complete restores B's original.
+  {
+    syncSessionOwnership.resetForTests();
+    const session = syncSessionOwnership.beginSession("alice");
+    const h = harness();
+    h.crop.bindOwner({ uid: session.uid, generation: session.generation });
+    h.runtime.setOwner(session);
+    await flush();
+    const photoA = image("alice", session.generation, "file:///photo-a.jpg");
+    h.crop.stage(photoA, ["letterhead.warnLandscape"], "disposable");
+    h.crop.accept();
+    const cropA = croppedFrom(photoA, "file:///photo-a-crop.jpg");
+    h.holds[0].resolve(cropA);
+    await flush();
+    const photoB = image("alice", session.generation, "file:///photo-b.jpg");
+    h.crop.stage(photoB, ["letterhead.warnTooLarge"], "disposable");
+    h.crop.accept();
+    const cropB = croppedFrom(photoB, "file:///photo-b-crop.jpg");
+    h.holds[1].resolve(cropB);
+    await flush();
+    assert.equal(h.runtime.snapshot().candidate?.localUri, cropB.localUri);
+    assert.equal(h.retired.includes(photoA.localUri), true);
+    assert.equal(h.retired.includes(cropA.localUri), true);
+    assert.equal(h.retired.includes(photoB.localUri), false);
+    h.crop.useComplete();
+    assertUntouched(h.runtime, photoB.localUri, ["letterhead.warnTooLarge"], "complete_page");
+    assert.equal(h.retired.includes(cropB.localUri), true);
+    assert.equal(h.retired.includes(photoB.localUri), false);
+    assertProtected(h.retired);
+    h.runtime.dispose();
+  }
+
+  // Cropped A → stage B → cancel preserves A and its complete-image option.
+  {
+    syncSessionOwnership.resetForTests();
+    const session = syncSessionOwnership.beginSession("alice");
+    const h = harness();
+    h.crop.bindOwner({ uid: session.uid, generation: session.generation });
+    h.runtime.setOwner(session);
+    await flush();
+    const photoA = image("alice", session.generation, "file:///photo-a.jpg");
+    h.crop.stage(photoA, ["letterhead.warnLandscape"], "disposable");
+    h.crop.accept();
+    const cropA = croppedFrom(photoA, "file:///photo-a-crop.jpg");
+    h.holds[0].resolve(cropA);
+    await flush();
+    const photoB = image("alice", session.generation, "file:///photo-b.jpg");
+    h.crop.stage(photoB, ["letterhead.warnTooLarge"], "disposable");
+    h.crop.cancel();
+    assert.equal(h.pending(), null);
+    assert.equal(h.runtime.snapshot().candidate?.localUri, cropA.localUri);
+    assert.equal(h.runtime.snapshot().placement, "header_logo");
+    assert.equal(h.retired.includes(photoB.localUri), true);
+    assert.equal(h.retired.includes(photoA.localUri), false);
+    assert.equal(h.retired.includes(cropA.localUri), false);
+    h.crop.useComplete();
+    assertUntouched(h.runtime, photoA.localUri, ["letterhead.warnLandscape"], "complete_page");
+    assert.equal(h.retired.includes(cropA.localUri), true);
+    assert.equal(h.retired.includes(photoA.localUri), false);
+    assertProtected(h.retired);
     h.runtime.dispose();
   }
 

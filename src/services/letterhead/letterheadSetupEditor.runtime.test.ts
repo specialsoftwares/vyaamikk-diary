@@ -838,6 +838,46 @@ async function main() {
     runtime.dispose();
   }
 
+  // A replacement write retires the previous candidate; retainUri keeps the crop original.
+  {
+    syncSessionOwnership.resetForTests();
+    const retired: string[] = [];
+    const session = syncSessionOwnership.beginSession("alice");
+    const runtime = createLetterheadSetupEditorRuntime({
+      get: async () => null,
+      save: async () => {
+        throw new Error("save_not_expected");
+      },
+      retireCandidate: (c) => {
+        if (c) retired.push(c.localUri);
+      },
+      liveSession: () => syncSessionOwnership.capture(),
+    });
+    runtime.setOwner(session);
+    await flush();
+    const photoA = candidate("alice", session.generation);
+    photoA.localUri = "file:///photo-a.jpg";
+    runtime.setCandidate(photoA, ["letterhead.warnLandscape"]);
+    const cropA = candidate("alice", session.generation);
+    cropA.localUri = "file:///photo-a-crop.jpg";
+    cropA.fileGeneration = "f1-crop";
+    runtime.setCandidate(cropA, ["letterhead.warnLandscape"], { retainUri: photoA.localUri });
+    assert.equal(runtime.snapshot().candidate?.localUri, cropA.localUri);
+    assert.equal(retired.includes(photoA.localUri), false);
+
+    const photoB = candidate("alice", session.generation);
+    photoB.localUri = "file:///photo-b.jpg";
+    runtime.setCandidate(photoB, ["letterhead.warnTooLarge"]);
+    assert.equal(runtime.snapshot().candidate?.localUri, photoB.localUri);
+    assert.deepEqual(runtime.snapshot().templateWarnings, ["letterhead.warnTooLarge"]);
+    assert.equal(retired.includes(cropA.localUri), true);
+    assert.equal(retired.includes(photoB.localUri), false);
+    runtime.setCandidate(photoB, ["letterhead.warnTooLarge"]);
+    assert.equal(runtime.snapshot().candidate?.localUri, photoB.localUri);
+    assert.equal(retired.includes(photoB.localUri), false);
+    runtime.dispose();
+  }
+
   console.log("letterheadSetupEditor.runtime.test.ts: ok");
 }
 

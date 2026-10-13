@@ -286,7 +286,8 @@ export function createLetterheadSetupEditorRuntime(ports: LetterheadSetupEditorP
 
     setCandidate(
       next: LetterheadCandidateImage | null,
-      warnings: TemplateWarningKey[] = []
+      warnings: TemplateWarningKey[] = [],
+      retain?: { retainUri?: string }
     ): void {
       if (!stillOwns(owner)) {
         retireIncoming(next);
@@ -307,7 +308,11 @@ export function createLetterheadSetupEditorRuntime(ports: LetterheadSetupEditorP
         candidate: next,
         templateWarnings: warnings,
       });
-      if (prev && prev.localUri !== next?.localUri) {
+      if (
+        prev &&
+        prev.localUri !== next?.localUri &&
+        prev.localUri !== retain?.retainUri
+      ) {
         void retireCandidateQuietly(prev);
       }
     },

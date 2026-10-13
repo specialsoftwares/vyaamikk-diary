@@ -165,8 +165,8 @@ export default function LetterheadSetupScreen() {
           setPendingCrop(view);
         },
         showError: (code) => reportCropErrorRef.current(code),
-        applyAcceptedHeader: (cropped, warnings) => {
-          runtime.setCandidate(cropped, warnings);
+        applyAcceptedHeader: (cropped, warnings, retain) => {
+          runtime.setCandidate(cropped, warnings, retain);
           runtime.setPlacement(
             "header_logo",
             writingMarginsForHeader(cropped.width, cropped.height)

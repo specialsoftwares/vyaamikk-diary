@@ -49,7 +49,8 @@ export type LetterheadCropSessionPorts = {
   showError: (code: string) => void;
   applyAcceptedHeader: (
     cropped: LetterheadCandidateImage,
-    warnings: TemplateWarningKey[]
+    warnings: TemplateWarningKey[],
+    retain?: { retainUri?: string }
   ) => void;
   applyCompletePage: (
     source: LetterheadCandidateImage | null,
@@ -82,7 +83,16 @@ export function createLetterheadCropController(ports: LetterheadCropSessionPorts
   let seq = 0;
   let pending: CropOp | null = null;
   let runningId: number | null = null;
-  let keptOriginal: LetterheadCandidateImage | null = null;
+  /**
+   * Uncropped source of the currently accepted design. Bound to `acceptedUri`
+   * (the crop now in the editor, or the complete photo once restored).
+   * Staging a replacement does not clear this; committing one does.
+   */
+  let kept: {
+    original: LetterheadCandidateImage;
+    acceptedUri: string;
+    warnings: TemplateWarningKey[];
+  } | null = null;
   let bound: LetterheadCropOwner | null = null;
   let alive = true;
   /** Operations whose native crop has been issued and has not settled. */
@@ -92,7 +102,7 @@ export function createLetterheadCropController(ports: LetterheadCropSessionPorts
     if (ports.editorCandidate()?.localUri === uri) return true;
     if (ports.protectedUris().has(uri)) return true;
     if (pending && pending.status !== "dead" && pending.source.localUri === uri) return true;
-    if (keptOriginal?.localUri === uri) return true;
+    if (kept?.original.localUri === uri) return true;
     for (const op of issued.values()) {
       if (op.source.localUri === uri) return true;
     }
@@ -141,6 +151,45 @@ export function createLetterheadCropController(ports: LetterheadCropSessionPorts
     if (clearingThis) ports.showPending(null);
     if (cropped && cropped.localUri !== op.source.localUri) retireIfAbandoned(cropped);
     if (op.role === "disposable") retireIfAbandoned(op.source);
+  }
+
+  function supersedeKept(next: {
+    original: LetterheadCandidateImage;
+    acceptedUri: string;
+    warnings: TemplateWarningKey[];
+  }): void {
+    const previous = kept;
+    kept = next;
+    if (previous && previous.original.localUri !== next.original.localUri) {
+      retireIfAbandoned(previous.original);
+    }
+  }
+
+  function rememberAccepted(op: CropOp, cropped: LetterheadCandidateImage): void {
+    if (kept && kept.acceptedUri === op.source.localUri) {
+      kept = { ...kept, acceptedUri: cropped.localUri };
+      return;
+    }
+    supersedeKept({
+      original: op.source,
+      acceptedUri: cropped.localUri,
+      warnings: op.warnings,
+    });
+  }
+
+  function restoreOrStay(warnings: TemplateWarningKey[]): void {
+    const editor = ports.editorCandidate();
+    if (
+      kept &&
+      editor &&
+      kept.acceptedUri === editor.localUri &&
+      kept.original.localUri !== editor.localUri
+    ) {
+      ports.applyCompletePage(kept.original, kept.warnings);
+      kept = { ...kept, acceptedUri: kept.original.localUri };
+      return;
+    }
+    ports.applyCompletePage(editor, warnings);
   }
 
   function stage(
@@ -228,10 +277,8 @@ export function createLetterheadCropController(ports: LetterheadCropSessionPorts
         pending = null;
         op.status = "dead";
         ports.showPending(null);
-        if (op.role === "disposable" && cropped.localUri !== source.localUri) {
-          keptOriginal = source;
-        }
-        ports.applyAcceptedHeader(cropped, op.warnings);
+        rememberAccepted(op, cropped);
+        ports.applyAcceptedHeader(cropped, op.warnings, { retainUri: source.localUri });
       } catch (e) {
         if (!isCurrent(op)) {
           discard(op, null);
@@ -249,17 +296,27 @@ export function createLetterheadCropController(ports: LetterheadCropSessionPorts
 
   function useComplete(): void {
     const op = pending;
-    const source = op?.source ?? keptOriginal;
-    const warnings = op?.warnings ?? [];
     if (op) {
       const wasRunning = runningId === op.operationId;
       op.status = "dead";
       pending = null;
       if (wasRunning) runningId = null;
+      ports.showPending(null);
+      const editor = ports.editorCandidate();
+      if (op.role === "borrowed" || editor?.localUri === op.source.localUri) {
+        restoreOrStay(op.warnings);
+        return;
+      }
+      supersedeKept({
+        original: op.source,
+        acceptedUri: op.source.localUri,
+        warnings: op.warnings,
+      });
+      ports.applyCompletePage(op.source, op.warnings);
+      return;
     }
     ports.showPending(null);
-    if (source && keptOriginal?.localUri === source.localUri) keptOriginal = null;
-    ports.applyCompletePage(source, warnings);
+    restoreOrStay(kept?.warnings ?? []);
   }
 
   function adjust(delta: { originX?: number; originY?: number; width?: number; height?: number }): void {
@@ -283,9 +340,9 @@ export function createLetterheadCropController(ports: LetterheadCropSessionPorts
       if (!wasRunning && op.role === "disposable") retireIfAbandoned(op.source);
     }
     ports.showPending(null);
-    const extra = keptOriginal;
-    keptOriginal = null;
-    retireIfAbandoned(extra);
+    const extra = kept;
+    kept = null;
+    retireIfAbandoned(extra?.original);
   }
 
   function unmount(): void {
@@ -298,15 +355,15 @@ export function createLetterheadCropController(ports: LetterheadCropSessionPorts
       if (wasRunning) runningId = null;
       if (!wasRunning && op.role === "disposable") retireIfAbandoned(op.source);
     }
-    const extra = keptOriginal;
-    keptOriginal = null;
-    retireIfAbandoned(extra);
+    const extra = kept;
+    kept = null;
+    retireIfAbandoned(extra?.original);
   }
 
   function releaseAbandonedOriginal(): void {
-    const extra = keptOriginal;
-    keptOriginal = null;
-    retireIfAbandoned(extra);
+    const extra = kept;
+    kept = null;
+    retireIfAbandoned(extra?.original);
   }
 
   return {
