@@ -16,6 +16,9 @@
  * an owner/attempt token so an older save's finally cannot unlock a newer owner.
  *
  * Does not claim already-issued remote writes can be cancelled.
+ * `setCandidate` also rejects an incoming file whose uid or session generation
+ * is not the live owner, without changing the current candidate. Save still
+ * checks ownership before it writes.
  */
 
 import {
@@ -160,6 +163,13 @@ export function createLetterheadSetupEditorRuntime(ports: LetterheadSetupEditorP
     return isLiveOwner(opOwner, live()) && ownerKeyOf(opOwner) === published.ownerKey;
   }
 
+  /** Drop a rejected file unless it is the image the editor still shows. */
+  function retireIncoming(next: LetterheadCandidateImage | null | undefined): void {
+    if (!next) return;
+    if (next.localUri === published.candidate?.localUri) return;
+    void retireCandidateQuietly(next);
+  }
+
   function setPublished(next: LetterheadSetupEditorSnapshot): void {
     published = next;
     emit();
@@ -279,7 +289,15 @@ export function createLetterheadSetupEditorRuntime(ports: LetterheadSetupEditorP
       warnings: TemplateWarningKey[] = []
     ): void {
       if (!stillOwns(owner)) {
-        void retireCandidateQuietly(next);
+        retireIncoming(next);
+        return;
+      }
+      if (
+        next &&
+        owner &&
+        (next.ownerUid !== owner.uid || next.sessionGeneration !== owner.generation)
+      ) {
+        retireIncoming(next);
         return;
       }
       bumpEdit();

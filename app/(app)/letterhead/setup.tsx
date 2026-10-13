@@ -28,7 +28,6 @@ import {
   getLetterheadRepository,
   LetterheadAssetError,
   pickLetterheadAsset,
-  type TemplateWarningKey,
 } from "@/services/letterhead";
 import { writingMarginsForHeader } from "@/services/letterhead/letterheadPlacement";
 import { letterheadSetupFailureMessage } from "@/services/letterhead/letterheadSetupSaveError";
@@ -40,7 +39,6 @@ import {
   persistLetterheadCandidateFromLocalFile,
   readCandidateDataUri,
   retireLetterheadCandidate,
-  type LetterheadCandidateImage,
 } from "@/services/letterhead/letterheadCandidateImage";
 import {
   getDocumentScannerCapability,
@@ -49,10 +47,9 @@ import {
 import { LetterheadPageArt } from "@/components/letterhead/LetterheadPageArt";
 import { cropLetterheadWorkingCopy } from "@/services/letterhead/letterheadHeaderCropFile";
 import {
-  adjustHeaderCrop,
-  suggestHeaderCrop,
-  type HeaderCrop,
-} from "@/services/letterhead/letterheadHeaderCrop";
+  createLetterheadCropController,
+  type LetterheadCropPendingView,
+} from "@/services/letterhead/letterheadCropSession";
 import {
   createLetterheadSetupEditorRuntime,
   type LetterheadSetupEditorSnapshot,
@@ -113,12 +110,8 @@ export default function LetterheadSetupScreen() {
   const [pickError, setPickError] = useState<string | null>(null);
   const [snap, setSnap] = useState<LetterheadSetupEditorSnapshot>(EMPTY_SNAP);
   const [showLayout, setShowLayout] = useState(false);
-  const [pendingCrop, setPendingCrop] = useState<{
-    source: LetterheadCandidateImage;
-    crop: HeaderCrop;
-    warnings: TemplateWarningKey[];
-  } | null>(null);
-  const uncroppedSourceRef = useRef<LetterheadCandidateImage | null>(null);
+  const [pendingCrop, setPendingCrop] = useState<LetterheadCropPendingView | null>(null);
+  const reportCropErrorRef = useRef<(code: string) => void>(() => {});
 
   const runtime = useMemo(
     () =>
@@ -133,6 +126,63 @@ export default function LetterheadSetupScreen() {
     []
   );
 
+  reportCropErrorRef.current = (code: string) => {
+    if (!mountedRef.current) return;
+    setPickError(
+      letterheadSetupFailureMessage({
+        error: code,
+        needImage: t("letterhead.setupNeedImage"),
+        loadFailed: t("letterhead.setupLoadFailed"),
+        unchanged: t("letterhead.setupSaveFailedUnchanged"),
+      }) ?? t("letterhead.cropFailed")
+    );
+  };
+
+  const crop = useMemo(
+    () =>
+      createLetterheadCropController({
+        liveOwner: () => {
+          const session = syncSessionOwnership.capture();
+          return session ? { uid: session.uid, generation: session.generation } : null;
+        },
+        editorCandidate: () => runtime.snapshot().candidate,
+        protectedUris: () => {
+          const uris = new Set<string>();
+          const existing = runtime.snapshot().existing?.imageDataUri;
+          if (
+            existing &&
+            (existing.startsWith("file:") ||
+              existing.startsWith("/") ||
+              existing.startsWith("content:"))
+          ) {
+            uris.add(existing);
+          }
+          return uris;
+        },
+        cropWorkingCopy: cropLetterheadWorkingCopy,
+        showPending: (view) => {
+          if (!mountedRef.current) return;
+          setPendingCrop(view);
+        },
+        showError: (code) => reportCropErrorRef.current(code),
+        applyAcceptedHeader: (cropped, warnings) => {
+          runtime.setCandidate(cropped, warnings);
+          runtime.setPlacement(
+            "header_logo",
+            writingMarginsForHeader(cropped.width, cropped.height)
+          );
+        },
+        applyCompletePage: (source, warnings) => {
+          if (source && runtime.snapshot().candidate?.localUri !== source.localUri) {
+            runtime.setCandidate(source, warnings);
+          }
+          runtime.setPlacement("complete_page", { ...DEFAULT_LETTERHEAD_MARGINS });
+        },
+        retireFile: (file) => void retireLetterheadCandidate(file),
+      }),
+    [runtime]
+  );
+
   useEffect(() => {
     mountedRef.current = true;
     const unsub = runtime.subscribe(() => {
@@ -142,27 +192,26 @@ export default function LetterheadSetupScreen() {
     return () => {
       mountedRef.current = false;
       unsub();
-      const extra = uncroppedSourceRef.current;
-      uncroppedSourceRef.current = null;
-      if (extra && extra.localUri !== runtime.snapshot().candidate?.localUri) {
-        void retireLetterheadCandidate(extra);
-      }
+      crop.unmount();
       runtime.dispose();
     };
-  }, [runtime]);
+  }, [runtime, crop]);
 
   useEffect(() => {
     if (!user?.uid) {
+      crop.bindOwner(null);
       runtime.setOwner(null);
       return;
     }
     const session = captureAdmissionToken();
     if (!session || !mayIssueRemoteWork(session, user.uid)) {
+      crop.bindOwner(null);
       runtime.setOwner(null);
       return;
     }
+    crop.bindOwner({ uid: session.uid, generation: session.generation });
     runtime.setOwner(session);
-  }, [user?.uid, runtime]);
+  }, [user?.uid, runtime, crop]);
 
   const styles = useThemedStyles((colors) =>
     StyleSheet.create({
@@ -203,78 +252,6 @@ export default function LetterheadSetupScreen() {
     })
   );
 
-  const stageCrop = useCallback((next: LetterheadCandidateImage | null, warnings: TemplateWarningKey[]) => {
-    if (!next) return;
-    if (!mountedRef.current) {
-      void retireLetterheadCandidate(next);
-      return;
-    }
-    setPendingCrop((current) => {
-      if (current && current.source.localUri !== next.localUri) {
-        void retireLetterheadCandidate(current.source);
-      }
-      return {
-        source: next,
-        crop: suggestHeaderCrop(next.width, next.height),
-        warnings,
-      };
-    });
-  }, []);
-
-  const cancelCrop = useCallback(() => {
-    setPendingCrop((current) => {
-      if (current) void retireLetterheadCandidate(current.source);
-      return null;
-    });
-  }, []);
-
-  const acceptCrop = useCallback(async () => {
-    const pending = pendingCrop;
-    if (!pending || !mountedRef.current) return;
-    try {
-      const cropped = await cropLetterheadWorkingCopy(pending.source, pending.crop);
-      if (!mountedRef.current) {
-        if (cropped.localUri !== pending.source.localUri) {
-          void retireLetterheadCandidate(cropped);
-        }
-        void retireLetterheadCandidate(pending.source);
-        return;
-      }
-      if (cropped.localUri !== pending.source.localUri) {
-        uncroppedSourceRef.current = pending.source;
-      } else {
-        uncroppedSourceRef.current = null;
-      }
-      runtime.setCandidate(cropped, pending.warnings);
-      runtime.setPlacement(
-        "header_logo",
-        writingMarginsForHeader(cropped.width, cropped.height)
-      );
-      setPendingCrop(null);
-    } catch (e) {
-      if (!mountedRef.current) return;
-      setPickError(
-        letterheadSetupFailureMessage({
-          error: e instanceof Error ? e.message : "letterhead_stage:crop:crop_failed",
-          needImage: t("letterhead.setupNeedImage"),
-          loadFailed: t("letterhead.setupLoadFailed"),
-          unchanged: t("letterhead.setupSaveFailedUnchanged"),
-        }) ?? t("letterhead.cropFailed")
-      );
-    }
-  }, [pendingCrop, runtime, t]);
-
-  const useCompleteLetterhead = useCallback(() => {
-    const source = pendingCrop?.source ?? uncroppedSourceRef.current;
-    const warnings = pendingCrop?.warnings ?? runtime.snapshot().templateWarnings;
-    if (source && runtime.snapshot().candidate?.localUri !== source.localUri) {
-      runtime.setCandidate(source, warnings);
-    }
-    uncroppedSourceRef.current = null;
-    setPendingCrop(null);
-    runtime.setPlacement("complete_page", { ...DEFAULT_LETTERHEAD_MARGINS });
-  }, [pendingCrop, runtime]);
-
   const captureTemplateFromGallery = useCallback((): Promise<boolean> => {
     return (async () => {
       if (!user?.uid) throw new LetterheadCandidateError("wrong_owner");
@@ -301,17 +278,18 @@ export default function LetterheadSetupScreen() {
         await retireLetterheadCandidate(next);
         return false;
       }
-      stageCrop(
+      crop.stage(
         next,
         analyzeTemplateImage({
           width: next.width,
           height: next.height,
           approxBytes: next.approxBytes,
-        }).warnings
+        }).warnings,
+        "disposable"
       );
       return true;
     })();
-  }, [user?.uid, stageCrop]);
+  }, [user?.uid, crop]);
 
   const captureTemplateFromScanner = useCallback((): Promise<boolean> => {
     return (async () => {
@@ -336,17 +314,18 @@ export default function LetterheadSetupScreen() {
         await retireLetterheadCandidate(next);
         return false;
       }
-      stageCrop(
+      crop.stage(
         next,
         analyzeTemplateImage({
           width: next.width,
           height: next.height,
           approxBytes: next.approxBytes,
-        }).warnings
+        }).warnings,
+        "disposable"
       );
       return true;
     })();
-  }, [user?.uid, stageCrop, captureTemplateFromGallery, t]);
+  }, [user?.uid, crop, captureTemplateFromGallery, t]);
 
   const captureTemplate = useCallback((): Promise<boolean> => {
     if (preferredEntry === "scan") return captureTemplateFromScanner();
@@ -467,11 +446,7 @@ export default function LetterheadSetupScreen() {
     const result = await runtime.save();
     if (!mountedRef.current) return;
     if (result.navigate) {
-      const extra = uncroppedSourceRef.current;
-      uncroppedSourceRef.current = null;
-      if (extra && extra.localUri !== snap.candidate?.localUri) {
-        void retireLetterheadCandidate(extra);
-      }
+      crop.releaseAbandonedOriginal();
       router.replace("/(app)/letterhead");
     }
   };
@@ -532,84 +507,40 @@ export default function LetterheadSetupScreen() {
             <Button
               label={t("letterhead.cropUp")}
               variant="secondary"
-              onPress={() =>
-                setPendingCrop((current) =>
-                  current
-                    ? {
-                        ...current,
-                        crop: adjustHeaderCrop(current.source.width, current.source.height, current.crop, {
-                          originY: -0.02,
-                        }),
-                      }
-                    : current
-                )
-              }
+              onPress={() => crop.adjust({ originY: -0.02 })}
               disabled={busy}
             />
             <Button
               label={t("letterhead.cropDown")}
               variant="secondary"
-              onPress={() =>
-                setPendingCrop((current) =>
-                  current
-                    ? {
-                        ...current,
-                        crop: adjustHeaderCrop(current.source.width, current.source.height, current.crop, {
-                          originY: 0.02,
-                        }),
-                      }
-                    : current
-                )
-              }
+              onPress={() => crop.adjust({ originY: 0.02 })}
               disabled={busy}
             />
             <Button
               label={t("letterhead.cropTaller")}
               variant="secondary"
-              onPress={() =>
-                setPendingCrop((current) =>
-                  current
-                    ? {
-                        ...current,
-                        crop: adjustHeaderCrop(current.source.width, current.source.height, current.crop, {
-                          height: 0.02,
-                        }),
-                      }
-                    : current
-                )
-              }
+              onPress={() => crop.adjust({ height: 0.02 })}
               disabled={busy}
             />
             <Button
               label={t("letterhead.cropShorter")}
               variant="secondary"
-              onPress={() =>
-                setPendingCrop((current) =>
-                  current
-                    ? {
-                        ...current,
-                        crop: adjustHeaderCrop(current.source.width, current.source.height, current.crop, {
-                          height: -0.02,
-                        }),
-                      }
-                    : current
-                )
-              }
+              onPress={() => crop.adjust({ height: -0.02 })}
               disabled={busy}
             />
           </View>
-          <Button label={t("letterhead.cropAccept")} onPress={() => void acceptCrop()} disabled={busy} />
+          <Button label={t("letterhead.cropAccept")} onPress={() => crop.accept()} disabled={busy} />
           <Button
             label={t("letterhead.placementComplete")}
             variant="secondary"
-            onPress={useCompleteLetterhead}
+            onPress={() => crop.useComplete()}
             disabled={busy}
             style={styles.retry}
           />
           <Button
             label={t("letterhead.cropCancel")}
             variant="ghost"
-            onPress={cancelCrop}
+            onPress={() => crop.cancel()}
             disabled={busy}
           />
         </View>
@@ -622,7 +553,7 @@ export default function LetterheadSetupScreen() {
             variant={snap.placement === "header_logo" ? "primary" : "secondary"}
             onPress={() => {
               if (snap.candidate) {
-                stageCrop(snap.candidate, snap.templateWarnings);
+                crop.stage(snap.candidate, snap.templateWarnings, "borrowed");
               } else {
                 setPickError(t("letterhead.cropNeedsPhoto"));
               }
@@ -632,7 +563,7 @@ export default function LetterheadSetupScreen() {
           <Button
             label={t("letterhead.placementComplete")}
             variant={snap.placement === "complete_page" ? "primary" : "secondary"}
-            onPress={useCompleteLetterhead}
+            onPress={() => crop.useComplete()}
             disabled={busy}
             style={styles.retry}
           />

@@ -788,6 +788,56 @@ async function main() {
     runtime.dispose();
   }
 
+  // Incoming candidate ownership is checked at setCandidate, not only at save.
+  {
+    syncSessionOwnership.resetForTests();
+    const retired: string[] = [];
+    const session = syncSessionOwnership.beginSession("alice");
+    const runtime = createLetterheadSetupEditorRuntime({
+      get: async () => null,
+      save: async () => {
+        throw new Error("save_not_expected");
+      },
+      retireCandidate: (c) => {
+        if (c) retired.push(c.localUri);
+      },
+      liveSession: () => syncSessionOwnership.capture(),
+    });
+    runtime.setOwner(session);
+    await flush();
+    const current = candidate("alice", session.generation);
+    current.localUri = "file:///editor-alice.jpg";
+    runtime.setCandidate(current, ["letterhead.warnLandscape"]);
+    runtime.setPlacement("complete_page", { ...DEFAULT_LETTERHEAD_MARGINS });
+    const warnings = runtime.snapshot().templateWarnings;
+    const placement = runtime.snapshot().placement;
+    const margins = runtime.snapshot().margins.topPct;
+
+    const foreign = candidate("bob", session.generation);
+    foreign.localUri = "file:///bob-crop.jpg";
+    runtime.setCandidate(foreign, ["letterhead.warnTooLarge"]);
+    assert.equal(runtime.snapshot().candidate?.localUri, "file:///editor-alice.jpg");
+    assert.deepEqual(runtime.snapshot().templateWarnings, warnings);
+    assert.equal(runtime.snapshot().placement, placement);
+    assert.equal(runtime.snapshot().margins.topPct, margins);
+    assert.ok(retired.includes("file:///bob-crop.jpg"));
+
+    const staleGen = candidate("alice", session.generation + 9);
+    staleGen.localUri = "file:///stale-gen.jpg";
+    runtime.setCandidate(staleGen, []);
+    assert.equal(runtime.snapshot().candidate?.localUri, "file:///editor-alice.jpg");
+    assert.deepEqual(runtime.snapshot().templateWarnings, warnings);
+    assert.equal(retired.includes("file:///stale-gen.jpg"), true);
+    assert.equal(retired.includes("file:///editor-alice.jpg"), false);
+
+    const sameFile = { ...current, sessionGeneration: session.generation + 3 };
+    runtime.setCandidate(sameFile, ["letterhead.warnTooLarge"]);
+    assert.equal(runtime.snapshot().candidate?.localUri, "file:///editor-alice.jpg");
+    assert.deepEqual(runtime.snapshot().templateWarnings, warnings);
+    assert.equal(retired.includes("file:///editor-alice.jpg"), false);
+    runtime.dispose();
+  }
+
   console.log("letterheadSetupEditor.runtime.test.ts: ok");
 }
 

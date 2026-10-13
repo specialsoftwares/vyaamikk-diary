@@ -22,7 +22,7 @@ Screenshots were used privately and are not in this repository.
 - Reproduction: tapping Map closes the app immediately.
 - Artifact: the vc25 manifest has no `com.google.android.geo.API_KEY`. On Android, creating `MapView` without that key crashes the process.
 - Correction: do not mount `MapView` unless `extra.androidGoogleMapsConfigured` is true. That boolean and `android.config.googleMaps.apiKey` are set by the same resolver from `GOOGLE_MAPS_ANDROID_API_KEY`. Runtime code does not read the key. `Constants.expoConfig` does not include `android.config`, so the earlier key read could not see a real manifest key. Empty markers, denied location, and PIN lookup failure already stay in JS. Location is not requested by the map; `showsUserLocation` stays false.
-- Required for tiles, not for avoiding the crash: set EAS secret `GOOGLE_MAPS_ANDROID_API_KEY` before the next Android build, restricted to package `com.specialsoftwares.vyaamikkdiary`. No key is stored in the repo. Restrictions are not weakened. Without the secret the flag stays false and `MapView` is not mounted.
+- Required for tiles, not for avoiding the crash: the EAS secret name is `GOOGLE_MAPS_ANDROID_API_KEY`. Play-installed Android is package `com.specialsoftwares.vyaamikkdiary` plus the Play App Signing SHA-1, and the key is restricted to Maps SDK for Android. Do not substitute the upload certificate or its SHA-256. The 2026-10-01 Play App signing read did not store that SHA-1 (it was behind a copy control). Copy it from Play Console → App integrity → App signing key certificate before anyone changes the live credential. This correction does not change that credential. No key is stored in the repo. Without the secret the flag stays false and `MapView` is not mounted. The boolean and the manifest key still come from one resolver.
 - Not claimed: a helper test does not prove map tiles. The installed vc25 binary still has no key and still crashes. The guard is in the next bundle.
 
 ## Letterhead save
@@ -31,7 +31,14 @@ Screenshots were used privately and are not in this repository.
 - Reproduction: a gallery image previewed, then Save letterhead showed “Could not save; your current letterhead is unchanged.” The image was not A4 and was large.
 - Cause (verified): every save error except “need image” and “load failed” was replaced with that one sentence, so the upload failure was hidden. The saved template is not replaced when save throws.
 - Cause (hypothesis, not a device trace): the hidden error may be the Storage upload. The screenshot does not include the underlying message. No phone was attached while this correction was made (`adb devices` listed none), so the native gallery save is still unverified. The save path now records a privacy-safe stage code (`pick`, `copy`, `sniff`, `crop`, `upload`, `firestore`) and does not put file paths in the message.
-- Correction: header placement crops a working copy. The suggestion is the photo's shape, not a reading of the print. Accept and cancel are both available. Cancel leaves the source and the saved template. Complete letterhead stays a separate action and does not crop. Setup preview, letter preview, and the production PDF use the same header band. A saved complete-page template stays complete-page when the sender is edited, including when the saved config arrives after that edit. Deliberate margin edits are kept when the mode changes; an untouched mode change gets that mode's writing margin.
+- Correction: header placement crops a working copy. The suggestion is the photo's shape, not a reading of the print. Accept and cancel are both available. Complete letterhead stays a separate action and does not crop. Setup preview, letter preview, and the production PDF use the same header band. A saved complete-page template stays complete-page when the sender is edited, including when the saved config arrives after that edit. Deliberate margin edits are kept when the mode changes; an untouched mode change gets that mode's writing margin.
+
+## Crop lifecycle
+
+- Entry: `app/(app)/letterhead/setup.tsx` through `createLetterheadCropController`, and `setCandidate` on the setup editor runtime.
+- Before: Use header on the editor's own file, then Cancel, deleted that file. Accept waited on the native crop with no operation id, so Cancel, another image, complete letterhead, or an owner change could still apply the late result. Two Accept presses both started a crop. `setCandidate` checked that the runtime owner was live, and did not check the incoming file's uid and session generation.
+- Correction: a file the editor already owns is borrowed. A new gallery or scanner file, and a manipulator output, are disposable. Cancel of a borrowed file leaves it. A disposable file is deleted only when no editor, pending crop, or issued crop still uses it. Saved-template and historical-letter URIs are not deleted. Each accept captures uid, session generation, and an operation id, and takes a single-flight guard before the first await. Cancel, replacement, complete letterhead, owner change, and unmount mark that operation dead and clear the pending image immediately. A late result is discarded and cleaned up. It does not change the current candidate, placement, warnings, or error. `setCandidate` also rejects a file whose uid or generation is not the live owner, without changing the current candidate, and the save path still calls `assertCandidateOwner`. Issued native work is not cancelled.
+- Host proof: `letterheadCropSession.test.ts` drives that controller with deferred crop results. Cancellation keeps the current candidate. Two Accept presses start one crop. A newer image or complete letterhead survives the old completion. After A→B and A→logout→A, including completion after the switch, the retired owner cannot display or apply the crop. Geometry-only tests do not cover this.
 
 ## Draft and PDF
 
@@ -55,10 +62,10 @@ Screenshots were used privately and are not in this repository.
 
 ## Native checks still pending
 
-No device was attached for this correction. None of the following is accepted from host tests.
+No device was attached for this correction. Host tests are not phone proof. Native gallery upload, actual map tiles, the document scanner, and Print stay device-pending. None of the following is accepted from host tests.
 
-- Open Map on a phone with the next build (crash gone; tiles only if the maps secret is in that build).
-- Choose a photo, accept or adjust the header crop, save the template, and confirm the previous template remains if save fails.
+- Open Map on a phone with the next build (crash gone; tiles only if the maps secret is in that build and restricted as in `NEXT_BUILD_PACKET.md`).
+- Choose a photo, accept or adjust the header crop, save the template, and confirm the previous template remains if save fails. Gallery upload itself is still unverified.
 - Write a letter, save a draft, see it in Records, reopen it, and generate or share a PDF.
 - Cancel share and retry without a duplicate record.
 - Replace the active template and confirm the older draft and letter still use the original.
