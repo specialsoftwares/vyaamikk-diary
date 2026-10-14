@@ -12,6 +12,18 @@ TOOLING (ops-guard suite; not application CI).
 
 ---
 
+## Business Insights candidate — 15 Oct 2026
+
+Application source `4176c74cc4480d2afee7c87cc56f3391bbe22ffd` on `integration/grin-g1-g5-source`. It keeps the accepted dashboard correction `a2a49f94bc157c566d7dc7d962b0148ed84a56b1` (CI run `38625795637` / verify `116064495127`). Canonical CI for this source is workflow_dispatch run `38647967468` / verify job `116139460943`, success, head SHA matched. This paragraph is a later register note and is not that source commit. Coordinator checks on this tree are not independent QA.
+
+The settings name is Business Insights. Hindi is व्यावसायिक अंतर्दृष्टि, Tamil வணிக நுண்ணறிவு, Telugu వ్యాపార అంతర్దృష్టులు, Gujarati વ્યવસાય અંતર્દૃષ્ટિ. The sentences inside each figure come from those locale catalogs. Diary amounts are stored as rupees; the diary amount field is defined as INR. A value that is not a usable rupee amount is left out and is not labelled as another currency. A goods-receipt invoice with a blank or missing currency code is not added as INR. Each row shows its period, its counting rule, and a link to the contributing records. Empty and unread rows say the figure was left out. The freshness note says when the device is offline, when on-device diary rows are still unsynced, or when the server diary list could not be read. Unsynced diary rows already on the device are included. Figures reload when the screen is revisited and when sync state changes. The existing scan caps stay. A different account or session drops the previous result. Coverage is in `docs/release/packets/BUSINESS_INSIGHTS_COVERAGE.md`.
+
+The same source also carries VyaaFlow (business dates and Business PINs, with Detect my PIN only after confirmation, and no new GPS footprint on save) and profile appearance, language, and the device-local previous visit.
+
+Owner-phone You-dashboard acceptance on vc27 remains FAIL. The disposable-emulator fixture pass belongs to `a2a49f94` only. This SHA was not installed on an emulator or on the owner's phone. Map tiles are unverified because the Maps SDK for Android key is still absent. No EAS build and no Play upload of this SHA.
+
+Billing is unchanged. The last Publisher diagnostic is HTTP 401 `permissionDenied`, domain `androidpublisher`, for `982505811909-compute@developer.gserviceaccount.com`. That probe was not repeated. KMS PASS stays. `PLAY_BILLING_ENABLED` stays unset. Catalog products are not created. The Play Console RTDN checkbox stays off. Purchase admission stays closed. This is not a public release. versionCode 28 was not allocated.
+
 ## Option A — Internal phone validation and BillDesk APK — 14 Oct 2026
 
 This section replaces the earlier reads that versionCode 26 was the latest Internal release and that no licence-testing list was selected. It is a record of the artifacts. It is not a new application candidate, a purchase, or a public rollout.
