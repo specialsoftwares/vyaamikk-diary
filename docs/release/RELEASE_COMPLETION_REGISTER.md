@@ -12,6 +12,41 @@ TOOLING (ops-guard suite; not application CI).
 
 ---
 
+## Option A — Internal phone validation and BillDesk APK — 14 Oct 2026
+
+This section replaces the earlier reads that versionCode 26 was the latest Internal release and that no licence-testing list was selected. It is a record of the artifacts. It is not a new application candidate, a purchase, or a public rollout.
+
+Play bundle explorer, read before the upload: 13 versions. Highest was versionCode 26 (1.0.0), Active. A search for 27 returned no results. EAS Android history also stopped at 26. `app.json` already had versionCode 27, so the code was not bumped.
+
+Application corrections stay `6499d207c795bce492fec20b44a18e07bef6fd0f`. Canonical CI for that SHA remains run `38583297726` / verify `115918562795`, success. The build commit is `3df543e42482d3f516cac7b58da77000bde9e213`, which only adds the same-source APK profile, the Internal submit track, and the isolation asserts. Its canonical CI is run `38588432103` / verify `115936580435`, success, head SHA matched. No EAS build started before that run succeeded.
+
+| | Internal Play AAB | BillDesk APK |
+|---|---|---|
+| Profile | `internal-grin` | `internal-grin-apk` |
+| Distribution | store | internal |
+| Artifact | app bundle | APK |
+| Environment | production | production |
+| Purchase entry | `0` | `0` |
+| Quota upsell | `0` | `0` |
+| GRIN flags | both `1` | both `1` |
+| EAS build | `47e9f38b-e9f3-4e30-8b2b-3412c06e4b3c` | `0a903e8c-6fb1-4550-95af-1c7b60e95f35` |
+| Git commit | `3df543e42482d3f516cac7b58da77000bde9e213` | same |
+| Package | `com.specialsoftwares.vyaamikkdiary` | same |
+| Version | 1.0.0 / **27** | 1.0.0 / **27** |
+| SHA-256 | `cd4fd569e1f754653b23602e115164463d2ba5d96c2b09cc02eaf3284f972585` | `f6eccf44d5afb02e4ebe6a61f7f35b4aacf40203562837d93a3bd4bfd1500602` |
+
+`preview` was not used. It is a different environment and does not set the GRIN flags. `production` stays an app bundle with GRIN off. `eas submit` has no Play service-account key, so the AAB was published from the Play Console Internal release, not from `eas submit`. The submit profile `internal-grin` remains track `internal` / `completed` and was not executed.
+
+Both files are signed by the upload certificate on the App signing page (SHA-1 `20:F8:15:0E…`, SHA-256 `E6:88:FA:0B…`). That certificate is not the Play App Signing certificate (`D2:23:F0:A5…`). The APK cannot update a Play-installed copy in place. The OnePlus update is the Internal Play release only. Do not uninstall it and do not clear its data. Do not sideload this APK over that install.
+
+The APK HTTPS link was fetched twice, both times HTTP 200, 123114624 bytes, and the same SHA-256. It expires 2026-10-28. The link is `https://expo.dev/artifacts/eas/H04QkJy2Pdyd9aDFitfMw3qu9a6io6wv7wB00s3knlU.apk`.
+
+Internal testing is Active. Latest release is **27 (1.0.0)**, one version code, available to internal testers, released 14 Oct 22:05, not reviewed. Version 26 is the previous release and was not included in this release. Tester membership was not edited: the Owner list stays selected (3 users) and Known Testers stays unselected. Save on that tab was disabled. Production is Inactive and has no release.
+
+Licence testing, read and not changed: the Known Testers email list is selected (4 users), the Owner list is not, and the licence response is RESPOND_NORMALLY. That is separate from Internal tester membership. No purchase was started.
+
+Play Console real-time notifications stay off. The topic field is empty, the content choice is “Subscriptions and voided purchases only,” and Save is disabled. A new-grant RTDN while `PLAY_BILLING_ENABLED` is not exact `true` is rejected in the handler as retryable `play_billing_disabled`, and `rtdnHttpStatusForError` maps that to HTTP 503 so Play does not treat it as delivered. Already-owned lifecycle is not stopped by that flag. This is not a Play frontend outage. Do not enable the checkbox, and do not turn payment admission on. KMS PASS was not repeated. Catalog products were not created.
+
 ## Letterhead removal is the integration head — source only
 
 PR #34 is merged into `integration/grin-g1-g5-source`. The Letterhead application source is `1792d79a7a3b58cae5913e6d46ccef4902bfcb37`. CI on that exact source is run `38458982309` / verify `115508928348`, success. Letterhead creation, scanning, cropping, and new PDF generation stay removed. Saved letters and drafts stay readable, bound to the current session. Live Rules, Functions, billing, purge, and retention were not changed by that merge.
