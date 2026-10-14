@@ -1,6 +1,10 @@
 /**
  * Fail-closed reconciliation flags. Enabling a client flag is not backend
  * completion. Defaults are closed.
+ *
+ * Deploying scheduledBillingReconciliation does not run a cycle. The
+ * scheduler stays idle unless BILLING_RECONCILIATION_ENABLED is exactly
+ * "true".
  */
 
 export function isBillingReconciliationEnabled(

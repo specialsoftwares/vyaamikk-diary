@@ -19,6 +19,7 @@ import { diagnosticUidHmac } from "../diagnosticUid";
 import { BILLING_CLIENT_MESSAGES, BillingError } from "../errors";
 import { FirestoreBillingStore } from "../firestoreBillingStore";
 import { assnHttpStatusForError } from "../google/billingHttps";
+import { BILLING_DIAG_RUNTIME_SECRETS } from "../secrets";
 
 export async function handleAppStoreServerNotificationsV2Http(opts: {
   body: unknown;
@@ -62,7 +63,7 @@ function productionDeps(): IosBillingDeps {
 }
 
 export const appStoreServerNotificationsV2 = onRequest(
-  { region: "asia-south1" },
+  { region: "asia-south1", secrets: BILLING_DIAG_RUNTIME_SECRETS },
   async (req, res) => {
     if (req.method !== "POST") {
       res.status(405).send("Method Not Allowed");

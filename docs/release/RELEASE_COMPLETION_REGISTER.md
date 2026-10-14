@@ -24,7 +24,17 @@ Play Console users: one account and no service account. `982505811909-compute@de
 
 `GET` `https://asia-south1-vyaamikk-diary.cloudfunctions.net/androidRtdn` returned `405 Method Not Allowed`. KMS, encrypt/decrypt, and `BILLING_DIAG_UID_SECRET` were not read: Cloud Console stopped on the existing passkey block, the Firebase CLI login is expired, and `gcloud` has no account. Encryption was not bypassed. Admission stays off.
 
-Canonical CI for this Android candidate is run `38479840244` / verify `115579459419`, success, on `ff408343a5da573bfcebe32ba6a03d07a45d22f9` (versionCode 27, purchase-entry `0`). That run is not a purchase or a deployment.
+Canonical CI for the versionCode 27 client checkpoint is run `38479840244` / verify `115579459419`, success, on `ff408343a5da573bfcebe32ba6a03d07a45d22f9` (purchase-entry `0`). That run is not a purchase or a deployment. Functions source after that commit is a new candidate and needs its own CI.
+
+`BILLING_DIAG_UID_SECRET` is declared with `defineSecret` and listed in `secrets: BILLING_DIAG_RUNTIME_SECRETS` on the five functions that read it: `validateAndActivateAndroid`, `androidRtdn`, `scheduledBillingReconciliation`, `validateAndActivateIOS`, and `appStoreServerNotificationsV2`. Functions that do not read it are not bound. A Secret Manager secret or an IAM grant does not inject the value. The live binding is unverified until those functions are deployed from the CI commit and a secret version exists.
+
+`scheduledBillingReconciliation` declares `BILLING_RECONCILIATION_ENABLED` with default `false`. Deploying the scheduler does not run a cycle. The handler returns unless the value is exactly `true`. `firestore.indexes.json` contains the scheduler composites `_billingReconciliationQueue` `status`+`nextAttemptAt`, `status`+`leaseExpiresAt`, and `_billingEventLedger` `monthKey`+`__name__`. Company scan orders by document id. Live index READY state and a completed live cycle are not verified.
+
+`androidRtdn` declares Cloud Run invoker `play-rtdn-push@vyaamikk-diary.iam.gserviceaccount.com` and the same email plus audience `https://asia-south1-vyaamikk-diary.cloudfunctions.net/androidRtdn` as parameters. The live GET that returned 405 shows the currently deployed URL is reachable. It does not show that a notification was accepted. The push service account is not created by this source change.
+
+Before any owned purchase, an unused draft, an unused secret binding, and an unused RTDN subscription can be removed. After any purchase, keep KMS decrypt, this secret binding, and already-owned RTDN and reconciliation. Stop new admission by leaving `PLAY_BILLING_ENABLED` unset and the UID allowlist empty.
+
+License-tester selection stays before purchase admission. No tester list is selected. No device test instrument has been confirmed. No purchase is started. Catalog creation, base-plan activation, function deploy, Internal upload, and `PLAY_BILLING_ENABLED=true` are not part of this source change.
 
 The subscription catalog and one-time products pages had no products. Play prices for `vyd_starter`, `vyd_professional`, and `vyd_business` are UNKNOWN. License testing has no email list selected and the license response is RESPOND_NORMALLY, so a purchase now would not be a free license test. No purchase was attempted. BillDesk KYC is in progress and stopped at an OTP screen. The OTP was not generated and the APK-URL question was not emailed.
 

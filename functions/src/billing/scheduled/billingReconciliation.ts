@@ -1,9 +1,11 @@
 /**
- * Scheduled billing reconciliation. Fail-closed unless
- * BILLING_RECONCILIATION_ENABLED=true. Not a public HTTP worker.
+ * Scheduled billing reconciliation. Not a public HTTP worker.
+ * Deploying this function does not run a cycle. The handler returns
+ * immediately unless BILLING_RECONCILIATION_ENABLED is exactly "true".
  */
 
 import { onSchedule } from "firebase-functions/v2/scheduler";
+import { defineString } from "firebase-functions/params";
 import { FieldPath, getFirestore, type Firestore, type QueryDocumentSnapshot } from "firebase-admin/firestore";
 
 import { createAppleSignedDataVerifier } from "../apple/appleVerifier";
@@ -30,7 +32,7 @@ import {
   runBillingReconciliationTick,
   type StoreRevalidator,
 } from "../reconciliationConsumer";
-import { isBillingReconciliationEnabled } from "../reconciliationFlags";
+import { BILLING_DIAG_RUNTIME_SECRETS } from "../secrets";
 import {
   createAndroidStoreRevalidator,
   createIosStoreRevalidator,
@@ -45,6 +47,11 @@ import {
   runStaleCompanyMaintenance,
 } from "../reconciliationMaintenance";
 import type { BillingEventLedgerDoc } from "../types";
+
+/** Deploying this scheduler does not enable a cycle. Exact "true" is required. */
+const billingReconciliationEnabled = defineString("BILLING_RECONCILIATION_ENABLED", {
+  default: "false",
+});
 
 function configurationDisabled(code: string): StoreRevalidator {
   return async () => ({ kind: "configuration_disabled", resultSummary: code });
@@ -102,9 +109,10 @@ export const scheduledBillingReconciliation = onSchedule(
     region: "asia-south1",
     schedule: "every 5 minutes",
     timeoutSeconds: 120,
+    secrets: BILLING_DIAG_RUNTIME_SECRETS,
   },
   async () => {
-    if (!isBillingReconciliationEnabled()) {
+    if (billingReconciliationEnabled.value() !== "true") {
       return;
     }
     const db = getFirestore();

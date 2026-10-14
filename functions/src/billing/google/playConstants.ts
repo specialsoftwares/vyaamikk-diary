@@ -4,8 +4,11 @@
  * PLAY_BILLING_ENABLED defaults OFF. It closes NEW purchase admission
  * (prepareAndroidBillingAccount, and first bind / new token grants inside
  * the adapter). It does not stop already-owned same-uid token lifecycle:
- * RTDN, reconciliation, refunds, or entitlement correction. This file does
- * not create Play Console products, IAM, or Pub/Sub.
+ * RTDN, reconciliation, refunds, or entitlement correction. After any
+ * owned purchase, keep KMS decrypt, the diagnostic-secret binding, and
+ * those lifecycle handlers. Unset this flag or empty the UID allowlist to
+ * stop new admission. Removing those bindings is pre-purchase cleanup only.
+ * This file does not create Play Console products, IAM, or Pub/Sub.
  *
  * Restricted tester activation: Internal-track membership and hiding the
  * purchase button are not backend restrictions. PLAY_BILLING_TESTER_UIDS is
@@ -26,6 +29,14 @@
 import { BillingError } from "../errors";
 
 export const CANONICAL_PLAY_PACKAGE_NAME = "com.specialsoftwares.vyaamikkdiary";
+
+/** Push identity for Play RTDN. Cloud Run invoker and the OIDC email must match. */
+export const PLAY_RTDN_PUSH_SERVICE_ACCOUNT_EMAIL =
+  "play-rtdn-push@vyaamikk-diary.iam.gserviceaccount.com";
+
+/** Audience for the deployed androidRtdn URL. A GET 405 does not accept a notification. */
+export const PLAY_RTDN_PUSH_AUDIENCE_URL =
+  "https://asia-south1-vyaamikk-diary.cloudfunctions.net/androidRtdn";
 
 export const ANDROID_PUBLISHER_SCOPE = "https://www.googleapis.com/auth/androidpublisher";
 

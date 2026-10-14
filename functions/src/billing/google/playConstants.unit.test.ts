@@ -16,6 +16,8 @@ import {
   assertPlayBillingTesterAllowed,
   assertPlayBillingTesterAllowedIfEnforced,
   isPlayBillingEnabled,
+  PLAY_RTDN_PUSH_AUDIENCE_URL,
+  PLAY_RTDN_PUSH_SERVICE_ACCOUNT_EMAIL,
   playPurchaseAllowedForAuthUid,
   isPlayBillingTesterAllowed,
   playBillingTesterUidAllowlist,
@@ -308,5 +310,97 @@ assert.equal(admissionSrc.includes("PLAY_BILLING_ENABLED=true"), false);
 assert.equal(prepareSrc.includes("PLAY_BILLING_ENABLED=true"), false);
 assert.equal(validateSrc.includes("PLAY_BILLING_ENABLED=true"), false);
 assert.equal(rtdnSrc.includes("PLAY_BILLING_ENABLED=true"), false);
+
+const iosValidateSrc = readFileSync(
+  resolve(__dirname, "../callables/validateAndActivateIOS.ts"),
+  "utf8"
+);
+const assnSrc = readFileSync(
+  resolve(__dirname, "../callables/appStoreServerNotificationsV2.ts"),
+  "utf8"
+);
+const retrySrc = readFileSync(
+  resolve(__dirname, "../callables/retryReconciliationWorkItem.ts"),
+  "utf8"
+);
+const secretsSrc = readFileSync(resolve(__dirname, "../secrets.ts"), "utf8");
+assert.match(secretsSrc, /defineSecret\("BILLING_DIAG_UID_SECRET"\)/);
+assert.match(secretsSrc, /BILLING_DIAG_RUNTIME_SECRETS/);
+
+for (const [name, src] of [
+  ["validateAndActivateAndroid", validateSrc],
+  ["androidRtdn", rtdnSrc],
+  ["scheduledBillingReconciliation", reconSrc],
+  ["validateAndActivateIOS", iosValidateSrc],
+  ["appStoreServerNotificationsV2", assnSrc],
+] as const) {
+  assert.match(src, /process\.env\.BILLING_DIAG_UID_SECRET/, `${name} reads the diagnostic secret`);
+  assert.match(
+    src,
+    /secrets:\s*BILLING_DIAG_RUNTIME_SECRETS/,
+    `${name} must bind BILLING_DIAG_UID_SECRET`
+  );
+}
+
+for (const [name, src] of [
+  ["prepareAndroidBillingAccount", prepareSrc],
+  ["retryReconciliationWorkItem", retrySrc],
+  ["getPlayPurchaseAdmission", admissionSrc],
+] as const) {
+  assert.equal(src.includes("BILLING_DIAG_UID_SECRET"), false, `${name} does not consume the secret`);
+  assert.equal(
+    src.includes("BILLING_DIAG_RUNTIME_SECRETS"),
+    false,
+    `${name} must not bind an unused secret`
+  );
+}
+
+assert.match(reconSrc, /defineString\("BILLING_RECONCILIATION_ENABLED"/);
+assert.match(reconSrc, /default:\s*"false"/);
+assert.match(reconSrc, /billingReconciliationEnabled\.value\(\)\s*!==\s*"true"/);
+assert.equal(reconSrc.includes('BILLING_RECONCILIATION_ENABLED=true'), false);
+assert.equal(reconSrc.includes('default: "true"'), false);
+
+assert.equal(
+  PLAY_RTDN_PUSH_SERVICE_ACCOUNT_EMAIL,
+  "play-rtdn-push@vyaamikk-diary.iam.gserviceaccount.com"
+);
+assert.equal(
+  PLAY_RTDN_PUSH_AUDIENCE_URL,
+  "https://asia-south1-vyaamikk-diary.cloudfunctions.net/androidRtdn"
+);
+assert.match(rtdnSrc, /invoker:\s*PLAY_RTDN_PUSH_SERVICE_ACCOUNT_EMAIL/);
+assert.match(rtdnSrc, /playRtdnPushAudience\.value\(\)/);
+assert.match(rtdnSrc, /playRtdnPushServiceAccount\.value\(\)/);
+assert.match(rtdnSrc, /defineString\("PLAY_RTDN_PUSH_AUDIENCE"/);
+assert.match(rtdnSrc, /defineString\("PLAY_RTDN_PUSH_SERVICE_ACCOUNT"/);
+
+const indexes = JSON.parse(
+  readFileSync(resolve(__dirname, "../../../../firestore.indexes.json"), "utf8")
+) as {
+  indexes: Array<{ collectionGroup: string; fields: Array<{ fieldPath: string }> }>;
+};
+function hasComposite(collectionGroup: string, fieldPaths: string[]): boolean {
+  return indexes.indexes.some(
+    (index) =>
+      index.collectionGroup === collectionGroup &&
+      JSON.stringify(index.fields.map((field) => field.fieldPath)) === JSON.stringify(fieldPaths)
+  );
+}
+assert.equal(
+  hasComposite("_billingReconciliationQueue", ["status", "nextAttemptAt"]),
+  true,
+  "pending/failed_retryable queue scan needs status + nextAttemptAt"
+);
+assert.equal(
+  hasComposite("_billingReconciliationQueue", ["status", "leaseExpiresAt"]),
+  true,
+  "leased queue scan needs status + leaseExpiresAt"
+);
+assert.equal(
+  hasComposite("_billingEventLedger", ["monthKey", "__name__"]),
+  true,
+  "month report orders document id after monthKey"
+);
 
 console.log("playConstants.unit.test.ts: ok");
