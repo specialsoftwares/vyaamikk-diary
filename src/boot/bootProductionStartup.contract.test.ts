@@ -70,7 +70,7 @@ assert.doesNotMatch(bootScreen, /logoCircle/);
 assert.doesNotMatch(bootScreen, /VyaamikkIntroSplash/);
 assert.match(bootScreen, /BRAND_SURFACE/);
 assert.match(bootGate, /onExitComplete\(\), 400/);
-assert.match(bootView, /bootMayUnlockWithoutAnimation/);
+assert.match(bootGate, /bootMayUnlockWithoutAnimation/);
 assert.match(bootView, /finishBootNavigation/);
 assert.match(bootstrap, /STARTUP_DEADLINE/);
 assert.match(bootstrap, /startupRetryMayStart/);

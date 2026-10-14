@@ -5,6 +5,7 @@ import { BarlowCondensed_700Bold } from "@expo-google-fonts/barlow-condensed";
 
 import {
   bootFontsMayBlockProgress,
+  bootMayUnlockWithoutAnimation,
   bootOverlayShouldMount,
 } from "@/boot/bootCompletion";
 import {
@@ -97,10 +98,21 @@ export function BootAnimationGate({
 
   useEffect(() => {
     if (!canEnterApp) return;
+    if (
+      !bootMayUnlockWithoutAnimation({
+        bootReady,
+        destinationPending: routeResolved,
+        routeFailed: bootError,
+      })
+    ) {
+      return;
+    }
     // A cancelled exit animation must not leave the logo up after boot is ready.
+    // Navigation still happens through onExitComplete, which refuses a destination
+    // if database readiness has already been lost.
     const timer = setTimeout(() => onExitComplete(), 400);
     return () => clearTimeout(timer);
-  }, [canEnterApp, onExitComplete]);
+  }, [bootError, bootReady, canEnterApp, onExitComplete, routeResolved]);
 
   useEffect(() => {
     if (!visible) {
