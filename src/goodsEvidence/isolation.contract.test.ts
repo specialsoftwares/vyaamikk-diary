@@ -115,5 +115,13 @@ assert.equal(internalGrin.env?.EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED, "1");
 assert.equal(internalGrin.env?.EXPO_PUBLIC_GOODS_EVIDENCE_STORE_RUNTIME_ADMIT, "1");
 assert.equal(internalGrin.env?.EXPO_PUBLIC_SUBSCRIPTION_PURCHASE_ENTRY_ENABLED, "0");
 assert.equal(internalGrin.env?.EXPO_PUBLIC_QUOTA_UPSELL_ENABLED, "0");
+const internalGrinApk = eas.build["internal-grin-apk"];
+assert.ok(internalGrinApk, "internal-grin-apk profile required for the BillDesk sideload");
+assert.equal(internalGrinApk.android?.buildType, "apk");
+assert.equal(internalGrinApk.env?.EXPO_PUBLIC_APP_MODE, "production");
+assert.equal(internalGrinApk.env?.EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED, "1");
+assert.equal(internalGrinApk.env?.EXPO_PUBLIC_GOODS_EVIDENCE_STORE_RUNTIME_ADMIT, "1");
+assert.equal(internalGrinApk.env?.EXPO_PUBLIC_SUBSCRIPTION_PURCHASE_ENTRY_ENABLED, "0");
+assert.equal(internalGrinApk.env?.EXPO_PUBLIC_QUOTA_UPSELL_ENABLED, "0");
 
 console.log("goodsEvidence/isolation.contract.test.ts: ok");
