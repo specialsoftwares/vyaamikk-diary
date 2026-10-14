@@ -47,6 +47,12 @@ Licence testing, read and not changed: the Known Testers email list is selected 
 
 Play Console real-time notifications stay off. The topic field is empty, the content choice is “Subscriptions and voided purchases only,” and Save is disabled. A new-grant RTDN while `PLAY_BILLING_ENABLED` is not exact `true` is rejected in the handler as retryable `play_billing_disabled`, and `rtdnHttpStatusForError` maps that to HTTP 503 so Play does not treat it as delivered. Already-owned lifecycle is not stopped by that flag. This is not a Play frontend outage. Do not enable the checkbox, and do not turn payment admission on. KMS PASS was not repeated. Catalog products were not created.
 
+You dashboard native acceptance on vc27 is **FAIL**. The owner’s phone, after the Internal update from `3df543e`, still shows New record covering At a glance. The earlier host contract is not closure.
+
+The correction stops subtracting the tab bar a second time. Installed `@react-navigation/bottom-tabs` 7.16.2 puts the scene in a `flex: 1` container and the tab bar as the next column sibling (`BottomTabView.js`). `absoluteFill` applies only inside that container. `SafeAreaProviderCompat` is `flex: 1`. App tabs do not set `position: "absolute"` on the bar. Screenshot gap arithmetic remains supporting evidence only. The three At a glance tiles stay one row, so the last tile shares that row’s vertical span. At font scales 1, 1.15, and 1.3 the row still fits the scroll viewport above the in-flow New record footer on 640, 800, and 900 dp windows, for 24 dp and 48 dp bottom insets, including when the row starts 4000 dp down the content. That check is a host contract.
+
+Emulator `Vyaamikk_Pixel_API35` booted as `emulator-5554` at 1080×2400. The installed `com.specialsoftwares.vyaamikkdiary` is versionCode 7, debuggable, last updated 2026-08-07. It is not vc27 and it is not this correction. No prebuild, `expo run:android`, EAS build, or Play upload was started. Rendered bounds of the correction stay **DEVICE_PENDING**.
+
 ## Letterhead removal is the integration head — source only
 
 PR #34 is merged into `integration/grin-g1-g5-source`. The Letterhead application source is `1792d79a7a3b58cae5913e6d46ccef4902bfcb37`. CI on that exact source is run `38458982309` / verify `115508928348`, success. Letterhead creation, scanning, cropping, and new PDF generation stay removed. Saved letters and drafts stay readable, bound to the current session. Live Rules, Functions, billing, purge, and retention were not changed by that merge.

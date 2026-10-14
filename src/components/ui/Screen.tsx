@@ -1,4 +1,4 @@
-import React, { useContext, useMemo, useRef, type RefObject } from "react";
+import React, { useMemo, useRef, type RefObject } from "react";
 import {
   Keyboard,
   KeyboardAvoidingView,
@@ -12,7 +12,6 @@ import {
   type StyleProp,
   type ViewStyle,
 } from "react-native";
-import { BottomTabBarHeightContext } from "@react-navigation/bottom-tabs";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { KeyboardFormScrollProvider } from "@/components/forms/KeyboardFormScrollContext";
@@ -34,8 +33,9 @@ interface ScreenProps {
   dismissKeyboardOnTap?: boolean;
   topInsetOverride?: number;
   /**
-   * Reserve space for the floating glass tab bar so the last row stays
-   * reachable while scroll content passes underneath.
+   * Tab screen. The navigator already ends this scene above the bar.
+   * Without a footer, scroll content keeps contentPaddingBottom.
+   * With a footer, this only selects the gap under the in-flow control.
    */
   tabBarInset?: boolean;
   /** Extra bottom padding inside scroll/content (e.g. floating action button). */
@@ -74,15 +74,6 @@ export function Screen({
 }: ScreenProps) {
   const insets = useSafeAreaInsets();
   const tabBar = useTabBarMetrics();
-  const measuredTabBarHeight = useContext(BottomTabBarHeightContext);
-  // The JS tab bar overlays the absolute-fill scene. Lift a footer once by the
-  // measured bar height. Do not also pad the footer by that height.
-  const tabOverlay =
-    footer && tabBarInset
-      ? measuredTabBarHeight && measuredTabBarHeight > 0
-        ? measuredTabBarHeight
-        : tabBar.height
-      : 0;
   const colors = useThemeColors();
   const { resolvedMode } = useTheme();
   const statusBarStyle = resolvedMode === "dark" ? "light-content" : "dark-content";
@@ -98,7 +89,7 @@ export function Screen({
   const styles = useThemedStyles((colors) =>
     StyleSheet.create({
       safe: { flex: 1, backgroundColor: colors.background },
-      flex: { flex: 1 },
+      flex: { flex: 1, minHeight: 0 },
       padded: { padding: spacing.lg },
       footerBar: {
         borderTopWidth: 1,
@@ -191,7 +182,6 @@ export function Screen({
         style={[
           styles.safe,
           topInsetOverride !== undefined ? { paddingTop: topInsetOverride } : null,
-          tabOverlay > 0 ? { marginBottom: tabOverlay } : null,
         ]}
         edges={["top", "left", "right"]}
       >
@@ -212,9 +202,13 @@ export function Screen({
               <View
                 style={[
                   styles.footerBar,
-                  tabOverlay > 0
-                    ? { paddingBottom: spacing.sm }
-                    : { paddingBottom: insets.bottom + spacing.sm },
+                  {
+                    // The tab navigator already ends this scene at the top of
+                    // the bar. Padding here is only the gap under the control.
+                    paddingBottom: tabBarInset
+                      ? spacing.sm
+                      : insets.bottom + spacing.sm,
+                  },
                 ]}
               >
                 {footer}

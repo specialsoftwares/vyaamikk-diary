@@ -74,3 +74,112 @@ export function computeTabBarMetrics(
 export function tabBarFooterClearance(metrics: TabBarMetrics): number {
   return metrics.height + spacing.md;
 }
+
+/**
+ * Frames for a tab scene whose footer is a column sibling of the scroll view.
+ *
+ * React Navigation 7 lays the scene out in a flex column above the tab bar.
+ * `absoluteFill` applies only inside that already-shortened container. Subtracting
+ * the bar height again (`subtractTabBarAgain`) is the vc27 You-dashboard defect:
+ * it leaves a dead band under the footer and parks the next content row in the
+ * footer's band.
+ */
+export function dashboardChromeFrames(input: {
+  windowHeight: number;
+  tabBarHeight: number;
+  topInset: number;
+  footerHeight: number;
+  subtractTabBarAgain: boolean;
+}): {
+  sceneHeight: number;
+  scrollHeight: number;
+  footerTop: number;
+  deadBand: number;
+} {
+  const sceneHeight = input.windowHeight - input.tabBarHeight;
+  const deadBand = input.subtractTabBarAgain ? input.tabBarHeight : 0;
+  const columnHeight = sceneHeight - input.topInset - deadBand;
+  const scrollHeight = columnHeight - input.footerHeight;
+  return {
+    sceneHeight,
+    scrollHeight,
+    footerTop: input.topInset + scrollHeight,
+    deadBand,
+  };
+}
+
+/** DashboardStatTile text block. minHeight is the floor at font scale 1. */
+const GLANCE_TILE_MIN_HEIGHT = 108;
+const GLANCE_TILE_PAD_V = spacing.md + 4;
+const GLANCE_TILE_GAP = 6;
+const GLANCE_VALUE_LINE = 28;
+const GLANCE_LABEL_LINE = 14;
+const GLANCE_LABEL_LINES = 3;
+
+/** PremiumActionButton size lg, bodyStrong label. */
+const NEW_RECORD_MIN_HEIGHT = 52;
+const NEW_RECORD_PAD_V = 14 * 2;
+const NEW_RECORD_LABEL_LINE = 22;
+
+export function glanceStatRowHeight(fontScale: number): number {
+  const text =
+    GLANCE_TILE_PAD_V * 2 +
+    GLANCE_TILE_GAP +
+    GLANCE_VALUE_LINE * fontScale +
+    GLANCE_LABEL_LINES * GLANCE_LABEL_LINE * fontScale;
+  return Math.max(GLANCE_TILE_MIN_HEIGHT, text);
+}
+
+export function newRecordFooterHeight(fontScale: number): number {
+  const button = Math.max(
+    NEW_RECORD_MIN_HEIGHT,
+    NEW_RECORD_PAD_V + NEW_RECORD_LABEL_LINE * fontScale
+  );
+  return spacing.md + button + spacing.sm;
+}
+
+/**
+ * Scroll the At a glance row so its bottom sits on the scroll viewport's
+ * bottom edge. The footer is the next column sibling, so a row that fits
+ * in the viewport is fully above the footer and its press target is clear.
+ */
+export function glanceRowAfterScroll(input: {
+  windowHeight: number;
+  tabBarHeight: number;
+  topInset: number;
+  fontScale: number;
+  contentBeforeRow: number;
+}): {
+  viewport: number;
+  rowHeight: number;
+  rowTop: number;
+  rowBottom: number;
+  footerTop: number;
+  fullyAboveFooter: boolean;
+} {
+  const footerHeight = newRecordFooterHeight(input.fontScale);
+  const frames = dashboardChromeFrames({
+    windowHeight: input.windowHeight,
+    tabBarHeight: input.tabBarHeight,
+    topInset: input.topInset,
+    footerHeight,
+    subtractTabBarAgain: false,
+  });
+  const rowHeight = glanceStatRowHeight(input.fontScale);
+  const rowBottomInContent = input.contentBeforeRow + rowHeight;
+  const offset = Math.max(0, rowBottomInContent - frames.scrollHeight);
+  const rowTop = input.contentBeforeRow - offset;
+  const rowBottom = rowBottomInContent - offset;
+  const epsilon = 0.05;
+  return {
+    viewport: frames.scrollHeight,
+    rowHeight,
+    rowTop,
+    rowBottom,
+    footerTop: frames.footerTop,
+    fullyAboveFooter:
+      rowTop >= -epsilon &&
+      rowBottom <= frames.scrollHeight + epsilon &&
+      rowHeight <= frames.scrollHeight + epsilon,
+  };
+}
