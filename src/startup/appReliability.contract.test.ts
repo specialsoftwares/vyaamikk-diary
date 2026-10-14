@@ -51,7 +51,7 @@ assert.doesNotMatch(deferred, /minHeight:\s*280/);
 assert.match(calendar, /mapMarkerWorkAllowed/);
 assert.match(calendar, /onBackToCalendar/);
 assert.match(en, /Map is unavailable in this version\./);
-assert.match(en, /You can still view your records in Calendar\./);
+assert.match(en, /Saved From and To PINs stay in the list\./);
 assert.doesNotMatch(en, /Android maps key is not configured/);
 assert.doesNotMatch(en, /Your records stay on this device/);
 assert.doesNotMatch(you, /allowFontScaling=\{false\}/);

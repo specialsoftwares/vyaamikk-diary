@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import { useRouter } from "expo-router";
 
+import { ExplainableInsightList } from "@/components/insights/ExplainableInsightList";
 import { FySelector } from "@/components/insights/FySelector";
 import { InsightsCategoryRow } from "@/components/insights/InsightsCategoryRow";
 import { InsightsOverviewTiles } from "@/components/insights/InsightsOverviewTiles";
@@ -48,10 +49,14 @@ export default function BusinessInsightsScreen() {
       params: { fy: String(selectedFy) },
     });
 
-  const cashLabel = useMemo(
-    () => (data ? fmtMoney(data.cashPaid.fyTotal) : "—"),
-    [data]
-  );
+  const cashLabel = useMemo(() => {
+    const cash = data?.insights.find((insight) => insight.id === "cash_paid");
+    return cash?.valueLabel ?? "—";
+  }, [data]);
+  const openBalanceLabel = useMemo(() => {
+    const balance = data?.insights.find((insight) => insight.id === "shop_balance_open");
+    return balance?.valueLabel ?? (data ? fmtMoney(data.creditPendingBalance) : "—");
+  }, [data]);
 
   return (
     <Screen scroll>
@@ -137,10 +142,17 @@ export default function BusinessInsightsScreen() {
                 active: data.creditActiveCount,
                 closed: data.creditClosedCount,
               })}
-              value={fmtMoney(data.creditPendingBalance)}
+              value={openBalanceLabel}
               onPress={() => nav("/(app)/settings/business-insights/customers")}
             />
           </SettingsNavGroup>
+
+          <LocaleUiText style={styles.section}>{t("businessInsights.howCounted")}</LocaleUiText>
+          <ExplainableInsightList
+            insights={data.insights}
+            freshnessSummary={data.freshnessSummary}
+            freshnessPhrases={data.freshnessPhrases}
+          />
 
           {data.archivedRecaps.length > 0 ? (
             <>

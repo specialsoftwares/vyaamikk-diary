@@ -24,7 +24,6 @@ export async function resolvePinCentroid(pinCode: string): Promise<PinCentroid |
     const lookup = await getSharedIndiaPincodeOfflineLookup();
     const res = lookup.getByPincode(pin, { limit: 80 });
     if (!res.success || !res.data?.data?.length) {
-      centroidCache.set(pin, null);
       return null;
     }
     const withCoords = res.data.data.filter(
@@ -35,7 +34,6 @@ export async function resolvePinCentroid(pinCode: string): Promise<PinCentroid |
         Number.isFinite(o.longitude)
     );
     if (!withCoords.length) {
-      centroidCache.set(pin, null);
       return null;
     }
     let latSum = 0;
@@ -56,7 +54,6 @@ export async function resolvePinCentroid(pinCode: string): Promise<PinCentroid |
     centroidCache.set(pin, centroid);
     return centroid;
   } catch {
-    centroidCache.set(pin, null);
     return null;
   }
 }

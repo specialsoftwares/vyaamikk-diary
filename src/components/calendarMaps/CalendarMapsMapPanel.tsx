@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { useRouter } from "expo-router";
+import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import Constants from "expo-constants";
 import MapView, { PROVIDER_DEFAULT, type MarkerPressEvent } from "react-native-maps";
 
@@ -9,17 +8,17 @@ import { FreightDispatchMapIntelView } from "@/components/calendarMaps/FreightDi
 import { MapClusterMarker } from "@/components/calendarMaps/MapClusterMarker";
 import { MapLocationClusterSheet } from "@/components/calendarMaps/MapLocationClusterSheet";
 import { Button, LocaleUiText } from "@/components/ui";
+import { useVyaaflowCopy } from "@/content/vyaaflow/useVyaaflowCopy";
 import type { CalendarMapRecord } from "@/services/calendarMaps";
 import { clusterDispatchLocationLabel } from "@/services/calendarMaps/freightDispatchMapIntel";
 import {
   isPlottableCoordinate,
   type MapLocationCluster,
 } from "@/services/calendarMaps/mapClustering";
-import type { MapMarkerBuildStats } from "@/services/calendarMaps/mapMarkerRecords";
+import type { MapMarkerBuildStats, BusinessPinGroupView } from "@/services/calendarMaps/mapMarkerRecords";
 import { useT } from "@/i18n";
 import { mapMarkerColorForEntryType } from "@/theme/categoryAccentResolver";
 import { radius, spacing, typography, useThemedStyles } from "@/theme";
-import { useTabBarMetrics } from "@/layout/tabBar";
 import { mayMountNativeMapView, readAndroidMapsConfigured } from "@/services/maps/mapNativeConfig";
 
 interface CalendarMapsMapPanelProps {
@@ -27,8 +26,7 @@ interface CalendarMapsMapPanelProps {
   loading: boolean;
   markersLoading: boolean;
   mapStats: MapMarkerBuildStats;
-  locationPermission: "granted" | "denied" | "undetermined";
-  onRefreshPermission: () => void;
+  pinGroups: readonly BusinessPinGroupView[];
   onOpenRecord: (record: CalendarMapRecord) => void;
   onBackToCalendar?: () => void;
 }
@@ -53,14 +51,11 @@ export function CalendarMapsMapPanel({
   loading,
   markersLoading,
   mapStats,
-  locationPermission,
-  onRefreshPermission,
   onOpenRecord,
   onBackToCalendar,
 }: CalendarMapsMapPanelProps) {
   const t = useT();
-  const router = useRouter();
-  const tabBar = useTabBarMetrics();
+  const vyaaflowCopy = useVyaaflowCopy();
   const mapRef = useRef<MapView | null>(null);
   const [activeCluster, setActiveCluster] = useState<MapLocationCluster | null>(null);
 
@@ -103,7 +98,7 @@ export function CalendarMapsMapPanel({
       },
       mapBlock: {
         flex: 1,
-        minHeight: 400,
+        minHeight: 0,
         marginHorizontal: spacing.lg,
         borderRadius: radius.lg,
         overflow: "hidden",
@@ -300,13 +295,13 @@ export function CalendarMapsMapPanel({
         <View style={styles.centerOverlay} pointerEvents="box-none">
           <View style={styles.overlayCard}>
             <LocaleUiText style={styles.overlayTitle}>{t("calendarMaps.map.noMarkersTitle")}</LocaleUiText>
-            <LocaleUiText style={styles.overlayBody}>{t("calendarMaps.map.noMarkersOverlayMessage")}</LocaleUiText>
+            <LocaleUiText style={styles.overlayBody}>{vyaaflowCopy.pinList.mapEmpty}</LocaleUiText>
           </View>
         </View>
       );
     }
     return null;
-  }, [mapBusy, hasMarkers, markersRefreshing, styles, t]);
+  }, [mapBusy, hasMarkers, markersRefreshing, styles, t, vyaaflowCopy]);
 
   const activeIsPin = activeCluster?.footprintSource === "pin_approximate";
   const canMountMap = mayMountNativeMapView({
@@ -362,7 +357,7 @@ export function CalendarMapsMapPanel({
 
         <View style={styles.topOverlay} pointerEvents="box-none">
           <View style={styles.infoChip}>
-            <LocaleUiText style={styles.infoChipText}>{t("calendarMaps.map.legendFootnote")}</LocaleUiText>
+            <LocaleUiText style={styles.infoChipText}>{vyaaflowCopy.pinList.mapNote}</LocaleUiText>
           </View>
           {(mapStats.hasGps || mapStats.hasPin) && hasMarkers ? (
             <View style={styles.legendRow}>
@@ -379,17 +374,6 @@ export function CalendarMapsMapPanel({
                 </View>
               ) : null}
             </View>
-          ) : null}
-          {locationPermission !== "granted" ? (
-            <Pressable
-              style={styles.permBanner}
-              onPress={() => router.push("/(app)/settings/location-footprints")}
-              accessibilityRole="button"
-            >
-              <LocaleUiText style={styles.permBannerText}>
-                {t("locationFootprints.map.accessOff")}
-              </LocaleUiText>
-            </Pressable>
           ) : null}
         </View>
 

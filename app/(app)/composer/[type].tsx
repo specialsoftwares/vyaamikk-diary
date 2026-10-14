@@ -51,7 +51,7 @@ import {
   isDraftPayloadMeaningful,
 } from "@/services/drafts";
 import { ingestComposerForm } from "@/services/masterData";
-import { resolveEntryLocationWithFootprint } from "@/services/location/locationFootprintCapture";
+import { resolveEntryLocationWithFootprint, preserveAlreadySavedLocation } from "@/services/location/locationFootprintCapture";
 import { notifySearchIndexChanged } from "@/services/search";
 import { freightDefaultsFromDispatch } from "@/utils/businessEntry/freightFromDispatch";
 import { formValuesFromEntry } from "@/utils/businessEntry/formValuesFromEntry";
@@ -123,6 +123,7 @@ export default function ComposerScreen() {
   });
   const [existingCashPhotoUri, setExistingCashPhotoUri] = useState<string | null>(null);
   const saveLockRef = useRef(false);
+  const savedLocationRef = useRef<BusinessEntry["location"]>(null);
   const clientRecordIdRef = useRef<string | null>(null);
   const idempotencyRef = useRef<SaveIdempotencyContext | null>(null);
   const draftSaveLockRef = useRef(false);
@@ -342,6 +343,7 @@ export default function ComposerScreen() {
 
     const load = async () => {
       setLoading(true);
+      savedLocationRef.current = null;
       try {
         if (draftIdParam) {
           const draft = await formDraftsRepository.getById(
@@ -361,7 +363,8 @@ export default function ComposerScreen() {
                 user.uid,
                 draft.entryId
               );
-              if (existing && existing.entryType === entryType) {
+              if (!cancelled && existing && existing.entryType === entryType) {
+                savedLocationRef.current = existing.location ?? null;
                 setEditMeta({
                   recordCreatedAtMs: existing.createdAt,
                   datePolicyOptions: datePolicyOptionsFromEntry(existing),
@@ -379,6 +382,7 @@ export default function ComposerScreen() {
             return;
           }
           const base = formValuesFromEntry(existing);
+          if (!cancelled) savedLocationRef.current = existing.location ?? null;
           editingAttachmentsRef.current = existing.attachments ?? [];
           const cashPhoto = cashPaidPhotoAttachment(existing.attachments);
           setExistingCashPhotoUri(cashPhoto?.uri ?? null);
@@ -530,10 +534,11 @@ export default function ComposerScreen() {
             ? resolveOutwardSaveEntryType(values)
             : entryType;
         const parts = formValuesToEntryParts(saveEntryType, values, user.ueid);
-        const { location, footprintFailed } = await resolveEntryLocationWithFootprint(
+        const { location: capturedLocation, footprintFailed } = await resolveEntryLocationWithFootprint(
           user.uid,
           parts.location
         );
+        const location = preserveAlreadySavedLocation(savedLocationRef.current, capturedLocation);
         const title =
           (typeof values.title === "string" && values.title.trim()) ||
           parts.title ||

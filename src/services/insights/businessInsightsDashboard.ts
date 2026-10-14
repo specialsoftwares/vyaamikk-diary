@@ -1,5 +1,8 @@
 import { computeCreditSummary, isReceivable, type CustomerCreditRecord } from "@/domain/customerCredit";
 import type { PartyInsightMeta, PinInsightMeta, FyRecapSnapshot } from "@/domain/businessInsight";
+import type { ExplainableInsight } from "@/services/insights/insightCoverage";
+import type { InsightPhrase } from "@/services/insights/insightPhrases";
+import { loadOwnerInsightCoverage } from "@/services/insights/loadOwnerInsightCoverage";
 import type { MovementDistanceRecord } from "@/domain/movementInsight";
 import { countUserDiaryRecords } from "@/services/dashboard/diaryRecordCounts";
 import { getCustomerCreditRepository } from "@/services/customerCredit";
@@ -90,6 +93,9 @@ export interface BusinessInsightsDashboard {
   purchaseOrderCount: number;
   archivedRecaps: FyRecapSnapshot[];
   currentRecap: FyRecapSnapshot | null;
+  insights: ExplainableInsight[];
+  freshnessSummary: string;
+  freshnessPhrases: InsightPhrase[];
 }
 
 function locationFromParty(meta: PartyInsightMeta): string | null {
@@ -244,7 +250,8 @@ export async function loadBusinessInsightsDashboard(
   userId: string,
   ueid: string,
   pdfsGeneratedCount: number,
-  selectedFy?: number
+  selectedFy?: number,
+  options?: { offline?: boolean }
 ): Promise<BusinessInsightsDashboard> {
   const fy = selectedFy ?? getCurrentFinancialYear();
   const { startMs, endMs } = getFinancialYearRange(fy);
@@ -265,6 +272,7 @@ export async function loadBusinessInsightsDashboard(
     poList,
     letterheadDocs,
     dbFys,
+    coverage,
   ] = await Promise.all([
     Promise.resolve(listInsightsByKind(userId, "party", fy, 80)),
     Promise.resolve(listInsightsByKind(userId, "pin", fy, 80)),
@@ -281,6 +289,7 @@ export async function loadBusinessInsightsDashboard(
       .catch(() => []),
     getLetterheadDocumentRepository().list(userId).catch(() => []),
     Promise.resolve(listDistinctFinancialYears(userId)),
+    loadOwnerInsightCoverage(userId, fy, Date.now(), { offline: options?.offline === true }),
   ]);
 
   const recordsInFy = await countUserDiaryRecords(userId, { fyStartYear: fy });
@@ -343,7 +352,7 @@ export async function loadBusinessInsightsDashboard(
       )
     ),
     customers: mapCustomers(creditRecords, fy),
-    cashPaid: aggregateCash(userId, fy),
+    cashPaid: coverage.cashPaid,
     distance: {
       weekKm,
       monthKm,
@@ -358,6 +367,9 @@ export async function loadBusinessInsightsDashboard(
     purchaseOrderCount: poInFy,
     archivedRecaps,
     currentRecap: null,
+    insights: coverage.insights,
+    freshnessSummary: coverage.freshnessSummary,
+    freshnessPhrases: coverage.freshnessPhrases,
   };
 }
 

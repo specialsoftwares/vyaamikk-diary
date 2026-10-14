@@ -202,6 +202,14 @@
     "lastLogin": "Last login: {{when}}",
     "firstLogin": "Welcome — this is your first sign-in with this number.",
     "identityCard": {
+      "previousVisit": {
+        "label": "Previous visit",
+        "first": "First visit",
+        "unavailable": "Not available",
+        "a11yPrevious": "Previous visit, {{when}}",
+        "a11yFirst": "First visit. No earlier visit is recorded on this device.",
+        "a11yUnavailable": "Previous visit is not available."
+      },
       "flipA11y": "Business identity card",
       "flipHint": "Double tap to flip the card",
       "tapToFlip": "Tap card",
@@ -276,7 +284,7 @@
     "needsAttention": "Needs attention",
     "needsAttentionSub": "Upcoming follow-ups and due items.",
     "allRecords": "All records",
-    "calendarMapsLink": "Calendar & Maps",
+    "calendarMapsLink": "VyaaFlow",
     "viewAllAttention": "View all ({{count}})",
     "viewAllDocuments": "All records ({{count}})",
     "viewAllDocumentsShort": "All records",
@@ -441,11 +449,48 @@
   },
   "calendarMaps": {
     "tabLabel": "VyaaFlow",
-    "screenTitle": "Calendar & Maps",
-    "screenSubtitle": "Review records by date and location footprints",
-    "screenLead": "Select a date for categorized records, or open Map for GPS footprints and approximate PIN areas from freight/dispatch — not live tracking.",
-    "modeCalendar": "Calendar",
-    "modeMap": "Map",
+    "vyaaflow": {
+      "screenTitle": "VyaaFlow",
+      "intro": "Dates, dues and freight PIN areas for this business.",
+      "showDetails": "Show details",
+      "hideDetails": "Hide details",
+      "calendarSection": "Important Business Dates",
+      "mapSection": "Business PINs",
+      "paragraphs": {
+        "businessDates": "Vyaamikk Diary keeps your business dates in one place. Records, dues, follow-ups and reminders appear in Important Business Dates, helping you review what happened and what is coming up.",
+        "statutory": "Statutory reminders show standard GST, income-tax, TDS/TCS and LLP due dates for reference. They are informational only. Check applicability and the final date on the official portal or with your CA, CS or tax professional.",
+        "businessPins": "Business PINs organises freight and dispatch records by their From and To PIN codes. Locations represent approximate postal areas, not live tracking."
+      },
+      "detectMyPin": {
+        "action": "Detect my PIN",
+        "reason": "This uses your location once to suggest a PIN for this field. You can correct it. Coordinates are not saved.",
+        "continue": "Continue",
+        "notNow": "Not now",
+        "working": "Checking this device's location…",
+        "confirmLead": "Use this PIN for this field only?",
+        "approximateNote": "The location reading is approximate. Check the PIN before you use it.",
+        "usePin": "Use this PIN",
+        "typeInstead": "I'll type it",
+        "denied": "Location permission was not granted. You can type the PIN.",
+        "unavailable": "Couldn't suggest a PIN from this location. You can type it.",
+        "keptManual": "Kept the PIN you typed."
+      },
+      "pinList": {
+        "empty": "Freight and dispatch records with From and To PINs will show here. A map is optional.",
+        "approximate": "Approximate postal area",
+        "from": "From",
+        "to": "To",
+        "unplotted": "PIN saved. Map position is unavailable.",
+        "invalid": "This PIN can't be placed. The record stays in the list.",
+        "mapNote": "Markers show approximate postal areas for saved From and To PINs. They are not roads, routes, or proof of delivery.",
+        "mapEmpty": "No approximate postal areas are on the map yet. Saved From and To PINs stay in the list."
+      }
+    },
+    "screenTitle": "VyaaFlow",
+    "screenSubtitle": "Important business dates and approximate PIN areas",
+    "screenLead": "Dates, dues and freight PIN areas for this business.",
+    "modeCalendar": "Important Business Dates",
+    "modeMap": "Business PINs",
     "loadError": "Couldn't load calendar records.",
     "dayEmptyTitle": "No records on this date",
     "dayEmptyMessage": "Create a new business record, reminder, payment request, freight detail or work note when required.",
@@ -458,7 +503,7 @@
       "reminders": "GST / email / purchase reminders",
       "letterhead": "Letterhead / documents",
       "proPacks": "Professional packs",
-      "statutory": "Statutory information"
+      "statutory": "Statutory reminders"
     },
     "permission": {
       "title": "Add location to records?",
@@ -480,7 +525,7 @@
       "legendFootnote": "GPS footprints are captured when enabled. PIN markers are approximate postal areas.",
       "privacyChip": "GPS footprints are captured when enabled. PIN markers are approximate postal areas.",
       "legendGps": "GPS footprint",
-      "legendPin": "Approximate PIN",
+      "legendPin": "Approximate postal area",
       "pinApproximateBadge": "Approximate PIN location",
       "pinApproximateAt": "{{place}}",
       "permissionBanner": "Location permission is optional. PIN-based markers still appear from freight/dispatch PIN codes.",
@@ -493,8 +538,8 @@
       "noMarkersMessage": "Optional GPS on a record places an exact pin. Freight/dispatch From and To PIN codes can show approximate postal areas.",
       "noMarkersOverlayMessage": "Mapped records appear here when location footprints are enabled on save, or when freight/dispatch includes From/To PIN codes (approximate areas).",
       "unavailableTitle": "Map is unavailable in this version.",
-      "unavailableBody": "You can still view your records in Calendar.",
-      "backToCalendar": "Back to Calendar",
+      "unavailableBody": "Saved From and To PINs stay in the list.",
+      "backToCalendar": "Back to Important Business Dates",
       "unavailableConfig": "Map is unavailable in this version.",
       "openRecord": "Open record",
       "atLocation": "Delivery / dispatch reference",
@@ -1031,7 +1076,7 @@
     "appearanceLight": "Light",
     "appearanceDark": "Dark",
     "sectionInsights": "Your business",
-    "businessInsightsItem": "Business Data & Insights",
+    "businessInsightsItem": "Business Insights",
     "businessInsightsSubtitle": "Customers, routes, distance and patterns from your records",
     "profileSection": "Profile",
     "profileIdentityItem": "Profile & Business Identity",
@@ -2083,7 +2128,189 @@
     }
   },
   "businessInsights": {
-    "title": "Business Data & Insights",
+    "figures": {
+      "freshness": "Calculated on this device for your account when Business Insights opens. Not calculated at app startup or when a record is saved. Records that are not on this device yet are missing. This is not a certified account, profit, or tax report.",
+      "freshnessDiary": "Diary figures use the newest {{count}} diary records.",
+      "freshnessOrders": "Purchase orders stopped at {{count}} records.",
+      "freshnessCredit": "Shop credit stopped at {{count}} records.",
+      "freshnessBriefs": "Professional briefs stopped at {{count}} records.",
+      "freshnessDrafts": "Open drafts stopped at {{count}} drafts.",
+      "freshnessReceipts": "Goods-receipt quantities and invoice values use the first {{count}} readable receipts.",
+      "none": "None",
+      "notRead": "Not read",
+      "openNow": "Open now",
+      "recordOne": "1 record",
+      "records": "{{count}} records",
+      "letterOne": "1 letter",
+      "letters": {
+        "title": "Saved letters",
+        "how": "Counts letterhead documents you saved in this financial year. There is no amount on a letter, so this is activity only. Diary letterhead notes are not added again.",
+        "unsaved": "{{count}} letters were shared but not saved, so they are not included.",
+        "empty": "No saved letters in this financial year.",
+        "unread": "Saved letters could not be read."
+      },
+      "draftOne": "1 draft",
+      "drafts": {
+        "title": "Open drafts",
+        "how": "Counts unfinished drafts still open on this device. Their contents are not read and are not added to any money or quantity total, so saving the final record does not count the same amount twice.",
+        "empty": "No open drafts. Unfinished work is not part of the totals above.",
+        "unread": "Open drafts could not be read. Unfinished drafts are never added to money or quantities."
+      },
+      "receipts": "{{count}} receipts",
+      "briefsNoAmount": "{{count}} briefs, no amount",
+      "boxes": "{{count}} boxes",
+      "cashPaid": {
+        "title": "Cash paid",
+        "how": "Adds the amount on each saved Cash Given record in this financial year. Cash Given amounts are stored as rupees. The diary amount field is defined as INR and is entered in ₹. A value that is not a usable rupee amount is left out, not labelled as another currency. Each record is counted once. Settlement status is not a second payment. Deleted records are excluded.",
+        "unreadable": "{{count}} records had no usable rupee amount and were left out.",
+        "empty": "No Cash Given records in this financial year.",
+        "unread": "Cash Given records could not be read, so cash paid is left out. This is not zero."
+      },
+      "paymentRequested": {
+        "title": "Payment requested",
+        "how": "Adds the pending amount written on active payment requests in this financial year. Payment-request amounts are stored as rupees. This is the amount you asked for. It is not money collected and it is not added to cash paid. Settled and archived requests are not added.",
+        "settled": "{{count}} settled or archived requests were left out of the amount.",
+        "empty": "No open payment requests in this financial year.",
+        "unread": "Payment requests could not be read. Nothing here is money collected."
+      },
+      "freightPaid": {
+        "title": "Freight paid",
+        "how": "Adds freight amounts marked paid. Freight amounts are stored as rupees. To pay, to be billed, and other freight types are not added. When a freight record points at a dispatch, only the freight record is used. This is not proof of delivery.",
+        "unpaid": "{{count}} freight amounts were not paid and were left out.",
+        "empty": "No freight marked paid in this financial year.",
+        "unread": "Freight records could not be read, so freight paid is left out. This is not zero."
+      },
+      "transport": {
+        "title": "Weight and boxes",
+        "how": "Adds weight only within the same weight unit, and counts boxes separately. Material quantity is not included here. A dispatch linked from a freight record is skipped so the same load is not counted twice.",
+        "missingUnit": "{{count}} weights had no unit and were left out.",
+        "empty": "No weight or box counts in this financial year.",
+        "unread": "Dispatch and freight records could not be read."
+      },
+      "materialSent": {
+        "title": "Material sent",
+        "how": "Adds quantity only when the unit is the same. Different units stay separate. An expected delivery date is not treated as delivered. This is not money.",
+        "missingUnit": "{{count}} quantities had no unit and were left out.",
+        "empty": "Nothing to add for material sent in this financial year.",
+        "unread": "Material sent could not be read."
+      },
+      "materialReceived": {
+        "title": "Material received (diary)",
+        "how": "Adds quantity only when the unit is the same. Different units stay separate. These diary receipts are not added to goods-receipt quantities, and a follow-up flag is not a payment. This is not money.",
+        "missingUnit": "{{count}} quantities had no unit and were left out.",
+        "empty": "Nothing to add for material received (diary) in this financial year.",
+        "unread": "Material received (diary) could not be read."
+      },
+      "materialReturned": {
+        "title": "Material returned",
+        "how": "Adds quantity only when the unit is the same. Different units stay separate. Returns are not subtracted from goods sent, because the records are not linked. This is not money.",
+        "missingUnit": "{{count}} quantities had no unit and were left out.",
+        "empty": "Nothing to add for material returned in this financial year.",
+        "unread": "Material returned could not be read."
+      },
+      "shopCollected": {
+        "title": "Shop money collected",
+        "how": "Adds payments whose paid date is in this financial year. Shop amounts are stored as rupees. A cash sale with no payment rows uses the sale amount once, because the record is marked paid at sale. Other sales add a down payment in the sale's financial year, and do not add the sale total. Finance-company amounts are not included. A closure amount is not added separately from the payment list. Cancelled and deleted records are excluded. This is not profit.",
+        "empty": "No shop payments recorded in this financial year.",
+        "unread": "Shop credit records could not be read, so this figure is left out. This is not zero."
+      },
+      "shopBalance": {
+        "title": "Shop balance still open",
+        "how": "For receivable shop records whose sale date is in this financial year, this is the saved payable amount minus recorded payments. Amounts are stored as rupees. It is what is still open now, not a separate overdue charge. Fully paid, cancelled, written off, deleted, and external finance without shop follow-up are not included. This balance is not added to payment requests or purchase orders.",
+        "overdue": "{{count}} instalments are past the due date on the saved schedule. That count is not added as extra money.",
+        "noOverdue": "No extra overdue amount is inferred.",
+        "empty": "No open shop balance on records sold in this financial year.",
+        "unread": "Shop credit records could not be read, so this figure is left out. This is not zero."
+      },
+      "purchaseOrders": {
+        "title": "Purchase orders placed",
+        "how": "Adds the saved purchase-order total, including GST only when the order itself says tax applies. The total is INR. Item units are not added together. Cancelled orders are not included. Deleted orders are not included. This is the order you placed. It is not money paid, not goods received, and not added to supplier invoice values.",
+        "cancelled": "{{count}} cancelled orders were left out.",
+        "empty": "No active purchase orders in this financial year.",
+        "unread": "Purchase orders could not be read, so order value is left out. This is not zero and it is not money paid."
+      },
+      "goodsOnHand": {
+        "title": "Goods still recorded on receipts",
+        "how": "Uses the quantity physically received on each confirmed goods receipt, minus returns that are already confirmed, and only within the same unit. Pending returns, package counts, and weights are not added. Refused, voided, and not-yet-confirmed receipts are not included. Diary material received is not added.",
+        "outside": "{{count}} confirmed receipts are outside this financial year.",
+        "undated": "{{count}} receipts had no usable arrival date and were left out.",
+        "skipped": "{{count}} lines had a unit that could not be combined and were left out.",
+        "emptySome": "Confirmed receipts in this financial year have nothing still on hand after confirmed returns.",
+        "emptyNone": "No confirmed goods receipts with a usable arrival date in this financial year.",
+        "unread": "Goods receipts were not open for this account on this device, so quantities and invoice values are left out. This is not zero."
+      },
+      "goodsInvoice": {
+        "title": "Supplier invoice value on receipts",
+        "how": "Adds the supplier invoice value written on confirmed goods receipts in this financial year. Only INR amounts are added. Other currencies are not converted. An invoice with no currency code is not treated as INR.",
+        "foreign": "Not added: {{list}}.",
+        "blank": "{{count}} invoices had no currency code and were not added.",
+        "rest": "This is not money you collected, and it is not added to purchase-order totals even when a receipt names an order. Confirmed returns do not reduce this figure, because the receipt does not store a credit note. A document and its later payment are not both treated as collected money.",
+        "empty": "No INR supplier invoice value on confirmed receipts in this financial year.",
+        "unread": "Goods receipts were not open for this account on this device, so quantities and invoice values are left out. This is not zero."
+      },
+      "goodsExcluded": {
+        "title": "Goods receipts not counted",
+        "how": "Counts receipts that are still uploading, incomplete, refused at the gate, voided, skipped by the read limit, or missing a usable arrival date. They are not given a quantity or an invoice value.",
+        "empty": "Every readable goods receipt on this device was either counted or dated outside this financial year.",
+        "unread": "Goods receipts were not open for this account on this device, so quantities and invoice values are left out. This is not zero."
+      },
+      "briefs": {
+        "title": "Amounts written on professional briefs",
+        "how": "Adds rupee amounts saved on brief fields that are amount fields. The brief amount fields are defined as INR. These amounts are not added to cash paid, shop collections, purchase orders, or invoices.",
+        "noAmount": "{{count}} briefs have no amount field and are counted only as activity.",
+        "unreadable": "{{count}} amount fields could not be read and were left out.",
+        "empty": "No professional briefs in this financial year.",
+        "unread": "Professional briefs could not be read. Brief amounts are not assumed to be zero, and they are not added to cash or collections."
+      },
+      "work": {
+        "title": "Work updates",
+        "how": "Counts saved work updates. The quantity note is free text without a unit, so it is not added. Deleted records are excluded.",
+        "empty": "No work updates in this financial year.",
+        "unread": "Work updates could not be read."
+      },
+      "staff": {
+        "title": "Staff notes",
+        "how": "Counts saved records in this financial year. No money or quantity total is calculated from these records. Deleted records are excluded.",
+        "empty": "No staff notes in this financial year.",
+        "unread": "Staff notes could not be read."
+      },
+      "letterNotes": {
+        "title": "Letterhead notes in the diary",
+        "how": "Counts saved records in this financial year. No money or quantity total is calculated from these records. Deleted records are excluded.",
+        "empty": "No letterhead notes in the diary for this financial year.",
+        "unread": "Letterhead notes in the diary could not be read."
+      },
+      "purchaseReminders": {
+        "title": "Purchase reminders",
+        "how": "Counts saved purchase reminders. The estimate is free text, not a currency amount, so it is not added to purchase orders or cash. Deleted records are excluded.",
+        "empty": "No purchase reminders in this financial year. Estimates are not added as money.",
+        "unread": "Purchase reminders could not be read."
+      },
+      "emailReminders": {
+        "title": "Email reminders",
+        "how": "Counts saved records in this financial year. No money or quantity total is calculated from these records. Deleted records are excluded.",
+        "empty": "No email reminders in this financial year.",
+        "unread": "Email reminders could not be read."
+      },
+      "gstReminders": {
+        "title": "GST return reminders",
+        "how": "Counts saved reminders. No tax amount is stored, so nothing is added as tax due. Deleted records are excluded.",
+        "empty": "No GST return reminders in this financial year. This is not a tax liability.",
+        "unread": "GST return reminders could not be read."
+      },
+      "legacy": {
+        "title": "Older diary notes",
+        "how": "Counts saved older notes. Legacy quantity is free text, so it is not added. Deleted records are excluded.",
+        "empty": "No older diary notes in this financial year.",
+        "unread": "Older diary notes could not be read."
+      },
+      "letterCount": "{{count}} letters",
+      "draftCount": "{{count}} drafts",
+      "freshnessPending": "{{count}} diary records on this device are not synced yet. They are included in these figures. Another device will not show them until sync finishes.",
+      "freshnessOffline": "This device is offline. Records that are not already on this device are missing, so these figures can be incomplete.",
+      "freshnessServerUnread": "Diary records on the server could not be read. These figures use what is already on this device, so they can be incomplete."
+    },
+    "title": "Business Insights",
     "intro": "Private summaries from your own records — never shared with other users.",
     "loadError": "Couldn't load business insights.",
     "cardRecords": "Records created",
@@ -2098,6 +2325,8 @@
     "sectionPeople": "People & parties",
     "sectionPlaces": "Places & movement",
     "sectionMoney": "Money & shop credit",
+    "howCounted": "How these figures are counted",
+    "viewSource": "View source records",
     "sectionArchives": "Archives",
     "sectionRoutes": "Top routes",
     "sectionLocations": "Frequent locations",

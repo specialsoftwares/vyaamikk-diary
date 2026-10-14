@@ -1,7 +1,9 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import type { Control, UseFormGetValues, UseFormSetValue } from "react-hook-form";
 import { Controller } from "react-hook-form";
+
+import { DetectMyPinAction } from "@/components/composer/DetectMyPinAction";
 
 import type { ComposerFieldBindings } from "@/components/composer/BusinessComposerForm";
 import { TextField, LocaleUiText } from "@/components/ui";
@@ -46,6 +48,7 @@ export function PostalLocationSection({
     getValues,
   });
 
+  const fieldRevisionRef = useRef(0);
   const [manualMode, setManualMode] = useState(() => {
     const pinVal = String(getValues(pinField) ?? "")
       .replace(/\D/g, "")
@@ -90,7 +93,10 @@ export function PostalLocationSection({
           navFieldKey={pin.pinField}
           label={pinLabel}
           value={value == null ? "" : String(value)}
-          onChangeText={(text) => onChange(text.replace(/\D/g, "").slice(0, 6))}
+          onChangeText={(text) => {
+            fieldRevisionRef.current += 1;
+            onChange(text.replace(/\D/g, "").slice(0, 6));
+          }}
           keyboardType="number-pad"
           maxLength={6}
           containerStyle={{ marginBottom: spacing.xs }}
@@ -180,11 +186,22 @@ export function PostalLocationSection({
     );
   }
 
+  const pinWithDetect = (
+    <DetectMyPinAction
+      fieldKey={pin.pinField}
+      scopeId={prefix}
+      fieldRevisionRef={fieldRevisionRef}
+      onApplyPin={pin.acceptExternalPin}
+    >
+      {pinInput}
+    </DetectMyPinAction>
+  );
+
   if (variant === "full") {
     return (
       <View style={styles.wrap}>
         <Text style={styles.section}>{pinLabel}</Text>
-        {pinInput}
+        {pinWithDetect}
         {statusEl}
         {localityChips}
         {fields.wrap(
@@ -253,7 +270,7 @@ export function PostalLocationSection({
 
   return (
     <View style={styles.wrap}>
-      {pinInput}
+      {pinWithDetect}
       {statusEl}
       {localityChips}
       {manualLink}

@@ -222,6 +222,14 @@ const hi: Translations = {
     lastLogin: "अंतिम लॉगिन: {{when}}",
     firstLogin: "स्वागत है — यह इस नंबर से आपका पहला साइन-इन है।",
     identityCard: {
+      previousVisit: {
+        label: "पिछली विज़िट",
+        first: "पहली विज़िट",
+        unavailable: "उपलब्ध नहीं",
+        a11yPrevious: "पिछली विज़िट, {{when}}",
+        a11yFirst: "पहली विज़िट। इस डिवाइस पर पहले की कोई विज़िट दर्ज नहीं है।",
+        a11yUnavailable: "पिछली विज़िट उपलब्ध नहीं है।",
+      },
       flipA11y: "व्यावसायिक पहचान कार्ड",
       flipHint: "कार्ड पलटने के लिए दो बार टैप करें",
       tapToFlip: "कार्ड टैप करें",
@@ -297,7 +305,7 @@ const hi: Translations = {
     needsAttention: "ध्यान दें",
     needsAttentionSub: "आगामी फॉलो-अप और देय आइटम।",
     allRecords: "सभी रिकॉर्ड",
-    calendarMapsLink: "कैलेंडर और मैप",
+    calendarMapsLink: "VyaaFlow",
     viewAllAttention: "सभी देखें ({{count}})",
     viewAllDocuments: "सभी रिकॉर्ड ({{count}})",
     viewAllDocumentsShort: "सभी रिकॉर्ड",
@@ -797,12 +805,11 @@ const hi: Translations = {
 
   calendarMaps: {
     tabLabel: "VyaaFlow",
-    screenTitle: "कैलेंडर और मैप",
-    screenSubtitle: "तारीख और स्थान के अनुसार रिकॉर्ड देखें",
-    screenLead:
-      "तारीख चुनकर रिकॉर्ड देखें, या मैप पर GPS और फ्रेट/प्रेषण PIN के अनुमानित क्षेत्र — लाइव ट्रैकिंग नहीं।",
-    modeCalendar: "कैलेंडर",
-    modeMap: "मैप",
+    screenTitle: "VyaaFlow",
+    screenSubtitle: "महत्वपूर्ण व्यावसायिक तिथियाँ और अनुमानित पिन क्षेत्र",
+    screenLead: "इस व्यवसाय की तारीखें, बकाया और माल-ढुलाई के पिन क्षेत्र।",
+    modeCalendar: "महत्वपूर्ण व्यावसायिक तिथियाँ",
+    modeMap: "बिज़नेस पिन",
     dayEmptyTitle: "इस तारीख पर कोई रिकॉर्ड नहीं",
     dayEmptyMessage:
       "ज़रूरत हो तो नया व्यापार रिकॉर्ड, रिमाइंडर, भुगतान अनुरोध, फ्रेट विवरण या कार्य नोट बनाएँ।",
@@ -1000,7 +1007,7 @@ const hi: Translations = {
     heroKicker: "कमांड केंद्र",
     heroSubtitle: "खाता, पहचान, सांविधिक तिथियाँ और ऐप प्राथमिकताएँ",
     sectionInsights: "आपका व्यवसाय",
-    businessInsightsItem: "व्यावसायिक डेटा और अंतर्दृष्टि",
+    businessInsightsItem: "व्यावसायिक अंतर्दृष्टि",
     businessInsightsSubtitle: "ग्राहक, मार्ग, दूरी और आपके रिकॉर्ड से पैटर्न",
     sectionStatutory: "सांविधिक जानकारी",
     statutoryItem: "सांविधिक जानकारी",
@@ -2144,7 +2151,7 @@ const hi: Translations = {
   },
 
   businessInsights: {
-    title: "व्यावसायिक डेटा और अंतर्दृष्टि",
+    title: "व्यावसायिक अंतर्दृष्टि",
     intro: "आपके रिकॉर्ड से निजी सारांश — अन्य उपयोगकर्ताओं के साथ साझा नहीं।",
     cardRecords: "बनाए गए रिकॉर्ड",
     cardDeletedRecords: "हटाए गए रिकॉर्ड (वित्तीय वर्ष)",
@@ -2158,6 +2165,8 @@ const hi: Translations = {
     sectionPeople: "लोग और पार्टियाँ",
     sectionPlaces: "स्थान और आवागमन",
     sectionMoney: "धन और दुकान उधार",
+    howCounted: "ये आँकड़े कैसे गिने गए",
+    viewSource: "स्रोत रिकॉर्ड देखें",
     sectionArchives: "संग्रह",
     sectionRoutes: "शीर्ष मार्ग",
     sectionLocations: "अक्सर उपयोग स्थान",

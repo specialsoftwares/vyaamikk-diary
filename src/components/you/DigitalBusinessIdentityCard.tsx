@@ -23,8 +23,11 @@ import Animated, {
 } from "react-native-reanimated";
 import { useFocusEffect, useRouter } from "expo-router";
 
+import { PreviousVisitMark } from "@/components/profile/PreviousVisitMark";
 import { ProfileAvatar } from "@/components/profile/ProfileAvatar";
+import { usePreviousVisit } from "@/components/profile/usePreviousVisit";
 import { DashboardGreetingHeroSurface } from "@/components/you/DashboardGreetingHeroSurface";
+import { previousVisitAccessibilityText } from "@/content/profile/previousVisitCopy";
 import type { UserProfile } from "@/domain/types";
 import { useIdentityCardTrustStats } from "@/hooks/useIdentityCardTrustStats";
 import { useStuckBusyRecovery } from "@/hooks/useStuckBusyRecovery";
@@ -33,10 +36,10 @@ import {
   createFlipLockController,
   type FlipLockController,
 } from "./identityCardFlipController";
-import { useT } from "@/i18n";
+import { useI18n } from "@/i18n";
 import { executivePressFeedback } from "@/theme/executiveLayer";
 import { radius, spacing, typography, useTheme, useThemedStyles } from "@/theme";
-import { getGreetingPeriod, greetingPeriodFallbackKey } from "@/utils/greeting";
+import { formatDisplayTimestamp, getGreetingPeriod, greetingPeriodFallbackKey } from "@/utils/greeting";
 import { buildBusinessIdentityShareMessage } from "@/utils/profile/buildBusinessIdentityShareMessage";
 import { formatGreetingName } from "@/utils/profile/formatGreetingName";
 
@@ -105,7 +108,8 @@ export function DigitalBusinessIdentityCard({
   rightSlot,
   savedPdfTotal = 0,
 }: DigitalBusinessIdentityCardProps) {
-  const t = useT();
+  const { t, lang } = useI18n();
+  const previousVisit = usePreviousVisit(user?.uid);
   const router = useRouter();
   const { resolvedMode } = useTheme();
   const isDark = resolvedMode === "dark";
@@ -283,7 +287,7 @@ export function DigitalBusinessIdentityCard({
         color: c.textSubtle,
         lineHeight: 15,
       },
-      topActions: { flexShrink: 0 },
+      topActions: { flexShrink: 0, alignItems: "flex-end", maxWidth: "46%", gap: 2 },
       bodyRow: {
         flexDirection: "row",
         alignItems: "center",
@@ -532,7 +536,12 @@ export function DigitalBusinessIdentityCard({
             </Text>
           ) : null}
         </View>
-        {rightSlot ? <View style={styles.topActions}>{rightSlot}</View> : null}
+        {previousVisit || rightSlot ? (
+          <View style={styles.topActions}>
+            {previousVisit ? <PreviousVisitMark snapshot={previousVisit} /> : null}
+            {rightSlot}
+          </View>
+        ) : null}
       </View>
       <View style={styles.bodyRow}>
         <Pressable
@@ -617,7 +626,17 @@ export function DigitalBusinessIdentityCard({
     <Pressable
       onPress={toggleFlip}
       accessibilityRole="button"
-      accessibilityLabel={t("you.identityCard.flipA11y")}
+      accessibilityLabel={
+        previousVisit
+          ? `${t("you.identityCard.flipA11y")}. ${previousVisitAccessibilityText(
+              lang,
+              previousVisit.kind,
+              previousVisit.kind === "previous" && previousVisit.previousVisitAt != null
+                ? formatDisplayTimestamp(previousVisit.previousVisitAt)
+                : undefined
+            )}`
+          : t("you.identityCard.flipA11y")
+      }
       accessibilityHint={t("you.identityCard.flipHint")}
       style={styles.pressable}
       disabled={sharing}

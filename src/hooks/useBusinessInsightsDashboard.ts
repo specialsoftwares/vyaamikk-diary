@@ -18,6 +18,8 @@ import { getLetterheadDocumentRepository } from "@/services/letterhead";
 import { getProfessionalPackRepository } from "@/services/professionalPack";
 import { dedupeDiaryEntries } from "@/services/dashboard/diaryRecordCounts";
 import { dedupeProfessionalPacks } from "@/services/professionalPack/dedupe";
+import { maskedInsightData } from "@/services/insights/insightAccountGuard";
+import { useSync } from "@/state/sync";
 import { createLogger } from "@/utils/logger";
 import { useT } from "@/i18n";
 
@@ -29,22 +31,27 @@ export function useBusinessInsightsDashboard(
   selectedFy?: number
 ) {
   const t = useT();
-  const [data, setData] = useState<BusinessInsightsDashboard | null>(null);
+  const { status, pendingCount } = useSync();
+  const offline = status === "offline";
+  const [snapshot, setSnapshot] = useState<{ userId: string; data: BusinessInsightsDashboard } | null>(null);
+  const [failure, setFailure] = useState<{ userId: string; message: string } | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
+  const data = maskedInsightData(snapshot?.userId, userId, ueid, snapshot?.data ?? null);
+  const error = failure && userId && ueid && failure.userId === userId ? failure.message : null;
 
   const load = useCallback(async () => {
     if (!userId || !ueid) {
-      setData(null);
-      setError(null);
+      setSnapshot(null);
+      setFailure(null);
       setLoading(false);
       return;
     }
 
+    const requestUserId = userId;
     const requestId = ++requestIdRef.current;
     setLoading(true);
-    setError(null);
+    setFailure(null);
 
     try {
       const [entries, letterheadDocs, proPacks, draftsCount] = await Promise.all([
@@ -70,22 +77,23 @@ export function useBusinessInsightsDashboard(
         userId,
         ueid,
         dash.savedPdfTotal,
-        selectedFy
+        selectedFy,
+        { offline }
       );
       if (requestId !== requestIdRef.current) return;
-      setData(next);
-      scheduleInsightRebuild(userId, ueid);
-    } catch (e) {
+      setSnapshot({ userId: requestUserId, data: next });
+      scheduleInsightRebuild(requestUserId, ueid);
+    } catch {
       if (requestId !== requestIdRef.current) return;
-      log.warn("dashboard load failed", e);
-      setData(null);
-      setError(t("businessInsights.loadError"));
+      log.warn("dashboard load failed");
+      setSnapshot(null);
+      setFailure({ userId: requestUserId, message: t("businessInsights.loadError") });
     } finally {
       if (requestId === requestIdRef.current) {
         setLoading(false);
       }
     }
-  }, [userId, ueid, selectedFy, t]);
+  }, [userId, ueid, selectedFy, t, offline]);
 
   useFocusEffect(
     useCallback(() => {
@@ -93,5 +101,19 @@ export function useBusinessInsightsDashboard(
     }, [load])
   );
 
-  return { data, loading, error, reload: load };
+  const syncStamp = `${status}:${pendingCount}:${userId ?? ""}`;
+  const seenSync = useRef<string | null>(null);
+  useEffect(() => {
+    if (seenSync.current === null) {
+      seenSync.current = syncStamp;
+      return;
+    }
+    if (seenSync.current === syncStamp) return;
+    seenSync.current = syncStamp;
+    if (!userId || !ueid) return;
+    void load();
+  }, [syncStamp, userId, ueid, load]);
+
+  const pendingOtherAccount = Boolean(userId && ueid) && snapshot?.userId !== userId && !error;
+  return { data, loading: loading || pendingOtherAccount, error, reload: load };
 }

@@ -31,7 +31,10 @@ export interface MapLocationCluster {
 
 function bucketKey(record: CalendarMapRecord): string {
   const loc = record.location!;
-  return `${loc.source}:${loc.latitude.toFixed(CLUSTER_DECIMALS)},${loc.longitude.toFixed(CLUSTER_DECIMALS)}`;
+  if (loc.source === "pin_approximate" && loc.pinCode) {
+    return `pin:${loc.postalSide ?? "unspecified"}:${loc.pinCode}`;
+  }
+  return `gps:${loc.latitude.toFixed(CLUSTER_DECIMALS)},${loc.longitude.toFixed(CLUSTER_DECIMALS)}`;
 }
 
 export function buildMapLocationClusters(markers: CalendarMapRecord[]): MapLocationCluster[] {

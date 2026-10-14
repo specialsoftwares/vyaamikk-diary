@@ -106,7 +106,7 @@ export const MapLocationClusterSheet = memo(function MapLocationClusterSheet({
   return (
     <View style={styles.sheet}>
       <View style={styles.headerRow}>
-        <Text style={styles.title} numberOfLines={2}>
+        <Text style={styles.title}>
           {locationLabel}
         </Text>
         <Pressable onPress={onClose} hitSlop={8}>

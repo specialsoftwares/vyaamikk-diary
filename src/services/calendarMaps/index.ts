@@ -9,6 +9,9 @@ export {
   buildGpsMapMarkersSync,
   buildMapMarkerRecordsAsync,
   buildPinMapMarkersAsync,
+  buildBusinessPinGroupsSync,
+  plotBusinessPinGroups,
+  type BusinessPinGroupView,
   type MapMarkerBuildStats,
 } from "./mapMarkerRecords";
 export { buildMapLocationClusters } from "./mapClustering";

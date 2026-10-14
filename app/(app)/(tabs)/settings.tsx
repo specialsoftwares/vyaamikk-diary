@@ -12,6 +12,7 @@ import {
 import { CrashReportsPreferenceRow } from "@/components/settings/CrashReportsPreferenceRow";
 import { Screen, SkeletonLoadingPanel, SkeletonSettingsSection, LocaleUiText } from "@/components/ui";
 import { isBillingUxPreviewEnabled } from "@/components/billing/billingUxPreviewGate";
+import { BUSINESS_INSIGHTS_HREF } from "@/content/insights/entry";
 import { getAuthEntryHref } from "@/config/authWrapper";
 import { useAuth } from "@/state/auth";
 import { useT } from "@/i18n";
@@ -100,12 +101,8 @@ export default function SettingsTab() {
   );
   const onDelete = useCallback(() => router.push("/(app)/settings/delete"), [router]);
   const onPdfPrivacy = useCallback(() => router.push("/(app)/settings/pdf-privacy"), [router]);
-  const onLocationAccess = useCallback(
-    () => router.push("/(app)/settings/location-footprints"),
-    [router]
-  );
   const onBusinessInsights = useCallback(
-    () => router.push("/(app)/settings/business-insights"),
+    () => router.push(BUSINESS_INSIGHTS_HREF),
     [router]
   );
   const onDevReset = useCallback(() => router.push("/(app)/settings/dev-reset"), [router]);
@@ -148,11 +145,7 @@ export default function SettingsTab() {
       />
 
       <LocaleUiText style={styles.sectionLabel}>{t("settings.sectionAccountApp")}</LocaleUiText>
-      <SettingsAccountAppPanel
-        user={user}
-        sessionLastActive={session?.lastActiveAt}
-        onLocationAccessPress={onLocationAccess}
-      />
+      <SettingsAccountAppPanel user={user} sessionLastActive={session?.lastActiveAt} />
       <SettingsNavCard
         icon="account-remove-outline"
         title={t("settings.deleteAccountAndData")}

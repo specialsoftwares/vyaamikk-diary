@@ -18,6 +18,7 @@ import { z } from "zod";
 import { IdentityPreviewCard } from "@/components/profile/IdentityPreviewCard";
 import { ProfileIdentityHeroCard } from "@/components/profile/ProfileIdentityHeroCard";
 import { ProfilePolicyGuidanceCard } from "@/components/profile/ProfilePolicyGuidanceCard";
+import { SettingsAppPreferencesPanel } from "@/components/settings/SettingsAppPreferencesPanel";
 import { ProfileYourDetailsEditPanel } from "@/components/profile/ProfileYourDetailsEditPanel";
 import { ProfileYourDetailsViewCard } from "@/components/profile/ProfileYourDetailsViewCard";
 import { Banner,
@@ -124,6 +125,7 @@ export default function BusinessIdentityScreen() {
         textTransform: "uppercase",
         letterSpacing: 0.5,
       },
+      prefsHeading: { marginTop: spacing.lg },
       logoBlock: { marginBottom: spacing.lg, gap: spacing.sm },
       logoActions: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
       hint: { ...typography.caption, color: c.textMuted, lineHeight: 18 },
@@ -543,6 +545,11 @@ export default function BusinessIdentityScreen() {
       />
 
       <ProfileIdentityHeroCard user={user} memberSinceMs={memberSinceMs} />
+
+      <LocaleUiText style={[styles.sectionTitle, styles.prefsHeading]}>
+        {t("settings.sectionPreferences")}
+      </LocaleUiText>
+      <SettingsAppPreferencesPanel />
 
       {error ? <Text style={styles.err}>{error}</Text> : null}
 

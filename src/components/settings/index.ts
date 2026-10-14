@@ -1,4 +1,5 @@
 export { SettingsAccountAppPanel } from "./SettingsAccountAppPanel";
+export { SettingsAppPreferencesPanel } from "./SettingsAppPreferencesPanel";
 export { LanguageSelector } from "./LanguageSelector";
 export { SettingsInfoHero } from "./SettingsInfoHero";
 export { SettingsInfoTabIcon } from "./SettingsInfoTabIcon";

@@ -52,7 +52,9 @@ export const CalendarMapsModeSwitch = memo(function CalendarMapsModeSwitch({
       },
       chip: {
         flex: 1,
-        paddingVertical: spacing.sm + 2,
+        minHeight: 44,
+        paddingVertical: spacing.sm,
+        paddingHorizontal: spacing.sm,
         borderRadius: radius.pill,
         alignItems: "center",
         justifyContent: "center",
@@ -67,8 +69,21 @@ export const CalendarMapsModeSwitch = memo(function CalendarMapsModeSwitch({
         shadowRadius: 6,
         elevation: 2,
       },
-      text: { ...typography.captionStrong, color: c.textMuted, letterSpacing: 0.2 },
-      textOn: { ...typography.captionStrong, color: c.primaryDark },
+      text: {
+        flexShrink: 1,
+        fontFamily: typography.captionStrong.fontFamily,
+        fontSize: typography.captionStrong.fontSize,
+        fontWeight: typography.captionStrong.fontWeight,
+        color: c.textMuted,
+        textAlign: "center",
+      },
+      textOn: {
+        fontFamily: typography.captionStrong.fontFamily,
+        fontSize: typography.captionStrong.fontSize,
+        fontWeight: typography.captionStrong.fontWeight,
+        color: c.primaryDark,
+        textAlign: "center",
+      },
     })
   );
 

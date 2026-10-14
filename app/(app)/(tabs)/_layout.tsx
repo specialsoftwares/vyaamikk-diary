@@ -1,7 +1,6 @@
 import React from "react";
 import { Tabs } from "expo-router";
 
-import { DeferredLocationFootprintConsentHost } from "@/components/location/DeferredLocationFootprintConsentHost";
 import { DeferredStatutoryPromptHost } from "@/components/statutory/DeferredStatutoryPromptHost";
 import { TelemetryConsentHost } from "@/components/telemetry/TelemetryConsentHost";
 import { AppTabBar } from "@/navigation/AppTabBar";
@@ -36,7 +35,6 @@ export default function TabsLayout() {
         <Tabs.Screen name="settings" options={{ title: t("settings.tabLabel") }} />
       </Tabs>
       <DeferredStatutoryPromptHost />
-      <DeferredLocationFootprintConsentHost />
       <TelemetryConsentHost />
     </>
   );

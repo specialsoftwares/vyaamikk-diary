@@ -4,7 +4,6 @@ import {
   SectionList,
   ScrollView,
   StyleSheet,
-  Text,
   View,
 } from "react-native";
 import Constants from "expo-constants";
@@ -12,6 +11,7 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { Calendar, type DateData } from "react-native-calendars";
 
 import { CalendarMapRecordRow } from "@/components/calendarMaps/CalendarMapRecordRow";
+import { VyaaFlowIntro } from "@/components/calendarMaps/VyaaFlowIntro";
 import { SwipeToDeleteRow } from "@/components/records/SwipeToDeleteRow";
 import { useRecordDelete } from "@/hooks/useRecordDelete";
 import { userDeleteFromCalendarRecord } from "@/services/records/deleteTargets";
@@ -24,6 +24,7 @@ import { DeferredCalendarMapsMapPanel } from "@/components/calendarMaps/Deferred
 import { SignatureHeroSurface } from "@/components/signature";
 import { EmptyState, ErrorState, Header, LastRefreshedHint, Screen, SkeletonList, SkeletonLoadingPanel, LocaleUiText } from "@/components/ui";
 import { useCalendarMapsData } from "@/hooks/useCalendarMapsData";
+import { useVyaaflowCopy } from "@/content/vyaaflow/useVyaaflowCopy";
 import { useAppRefresh } from "@/hooks/useAppRefresh";
 import { useAuth } from "@/state/auth";
 import { useT } from "@/i18n";
@@ -49,6 +50,7 @@ import { useTabBarMetrics } from "@/layout/tabBar";
 
 export default function CalendarMapsTab() {
   const t = useT();
+  const vyaaflowCopy = useVyaaflowCopy();
   const router = useRouter();
   const { user } = useAuth();
   const colors = useThemeColors();
@@ -82,10 +84,10 @@ export default function CalendarMapsTab() {
     marked,
     dayView,
     mapClusters,
-    locationPermission,
-    refreshPermission,
+    pinGroups,
   } = useCalendarMapsData(user?.uid ?? null, selectedDate, {
     mapActive: mapMarkerWorkAllowed({ mode, nativeMapMayMount }),
+    pinListActive: mode === "map",
   });
 
   const { refreshNote, onRefresh, refreshControl } = useAppRefresh({
@@ -112,12 +114,6 @@ export default function CalendarMapsTab() {
         paddingTop: spacing.md,
         paddingBottom: spacing.md,
       },
-      lead: {
-        ...typography.body,
-        color: c.textMuted,
-        marginTop: spacing.sm,
-        lineHeight: 22,
-      },
       calendarCard: {
         marginHorizontal: spacing.lg,
         marginBottom: spacing.lg,
@@ -142,9 +138,10 @@ export default function CalendarMapsTab() {
         marginBottom: spacing.md,
       },
       sectionHeader: {
-        ...typography.titleLg,
+        fontFamily: typography.titleLg.fontFamily,
+        fontSize: typography.titleLg.fontSize,
+        fontWeight: typography.titleLg.fontWeight,
         color: c.text,
-        lineHeight: 30,
         paddingHorizontal: spacing.lg,
         marginTop: spacing.xl,
         marginBottom: spacing.md,
@@ -311,11 +308,11 @@ export default function CalendarMapsTab() {
         renderSectionHeader={({ section: { title } }) => {
           const isFirst = sections[0]?.title === title;
           return (
-            <Text
+            <LocaleUiText
               style={[styles.sectionHeader, isFirst && styles.sectionHeaderFirst]}
             >
               {title}
-            </Text>
+            </LocaleUiText>
           );
         }}
         renderItem={({ item }) => {
@@ -377,11 +374,8 @@ export default function CalendarMapsTab() {
         <View style={styles.headerWrap}>
           <SignatureHeroSurface variant="identity" style={{ marginBottom: spacing.sm }} padded={false}>
             <View style={{ padding: spacing.lg, paddingBottom: spacing.md }}>
-              <Header
-                title={t("calendarMaps.screenTitle")}
-                subtitle={t("calendarMaps.screenSubtitle")}
-              />
-              <LocaleUiText style={styles.lead}>{t("calendarMaps.screenLead")}</LocaleUiText>
+              <Header title={vyaaflowCopy.screenTitle} subtitle={vyaaflowCopy.intro} />
+              <VyaaFlowIntro />
               <LastRefreshedHint message={refreshNote} />
             </View>
           </SignatureHeroSurface>
@@ -391,8 +385,8 @@ export default function CalendarMapsTab() {
           <CalendarMapsModeSwitch
             mode={mode}
             onChange={setMode}
-            calendarLabel={t("calendarMaps.modeCalendar")}
-            mapLabel={t("calendarMaps.modeMap")}
+            calendarLabel={vyaaflowCopy.calendarSection}
+            mapLabel={vyaaflowCopy.mapSection}
           />
         </View>
 
@@ -406,8 +400,7 @@ export default function CalendarMapsTab() {
                 loading={loading}
                 markersLoading={markersLoading}
                 mapStats={mapStats}
-                locationPermission={locationPermission}
-                onRefreshPermission={() => void refreshPermission()}
+                pinGroups={pinGroups}
                 onOpenRecord={openRecord}
                 onBackToCalendar={() => setMode("calendar")}
               />

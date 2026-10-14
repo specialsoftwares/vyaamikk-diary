@@ -19,6 +19,7 @@ export { shouldWarmIndiaPincodeOnCalendarTabMount } from "./pincodeWarmPolicy";
 let lookupPromise: ReturnType<typeof getIndiaPincode> | null = null;
 let lookupReady = false;
 let deferredWarmScheduled = false;
+let deferredReady: Promise<void> | null = null;
 
 /** True once a load has been started (in flight or complete). */
 export function isIndiaPincodeLookupStarted(): boolean {
@@ -39,6 +40,7 @@ export function resetIndiaPincodeOfflineLookupForTests(): void {
   lookupPromise = null;
   lookupReady = false;
   deferredWarmScheduled = false;
+  deferredReady = null;
 }
 
 /** Start loading the offline PIN DB (idempotent). Call only on demand. */
@@ -51,14 +53,27 @@ export function warmIndiaPincodeOfflineLookup(): void {
  * Never call from Calendar-only / post-login tab mount.
  * Never await this from the interactive PIN path.
  */
-export function scheduleDeferredIndiaPincodeWarm(delayMs = 4000): void {
-  if (deferredWarmScheduled || lookupPromise) return;
+export function scheduleDeferredIndiaPincodeWarm(delayMs = 4000): Promise<void> {
+  if (lookupReady) return Promise.resolve();
+  if (lookupPromise) {
+    return lookupPromise.then(
+      () => undefined,
+      () => undefined
+    );
+  }
+  if (deferredReady) return deferredReady;
   deferredWarmScheduled = true;
-  InteractionManager.runAfterInteractions(() => {
-    setTimeout(() => {
-      warmIndiaPincodeOfflineLookup();
-    }, delayMs);
+  deferredReady = new Promise((resolve) => {
+    InteractionManager.runAfterInteractions(() => {
+      setTimeout(() => {
+        void getSharedIndiaPincodeOfflineLookup().then(
+          () => resolve(),
+          () => resolve()
+        );
+      }, delayMs);
+    });
   });
+  return deferredReady;
 }
 
 /** Await the shared offline lookup (deduped across resolver + map coords). */

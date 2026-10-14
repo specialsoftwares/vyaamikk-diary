@@ -199,6 +199,17 @@ export function useIndianPincodeField({
 
   const pinDisplay = normalizeIndianPinInput(String(pinRaw ?? ""));
 
+  const acceptExternalPin = useCallback(
+    (pin: string) => {
+      const digits = pin.replace(/\D/g, "");
+      if (digits.length !== 6 || !isValidIndianPincode(digits)) return;
+      userEditedRef.current = false;
+      lastResolvedPin.current = null;
+      setValue(pinField, digits, { shouldDirty: true });
+    },
+    [pinField, setValue]
+  );
+
   return {
     pinField,
     localityField,
@@ -211,6 +222,7 @@ export function useIndianPincodeField({
     pinDisplay,
     selectLocality,
     onPlaceOrLocalityEdited,
+    acceptExternalPin,
     isPinInvalid: pinDisplay.length === 6 && !isValidIndianPincode(pinDisplay),
   };
 }

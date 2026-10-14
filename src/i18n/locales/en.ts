@@ -230,6 +230,14 @@ const en = {
     lastLogin: "Last login: {{when}}",
     firstLogin: "Welcome — this is your first sign-in with this number.",
     identityCard: {
+      previousVisit: {
+        label: "Previous visit",
+        first: "First visit",
+        unavailable: "Not available",
+        a11yPrevious: "Previous visit, {{when}}",
+        a11yFirst: "First visit. No earlier visit is recorded on this device.",
+        a11yUnavailable: "Previous visit is not available.",
+      },
       flipA11y: "Business identity card",
       flipHint: "Double tap to flip the card",
       tapToFlip: "Tap card",
@@ -306,7 +314,7 @@ const en = {
     needsAttention: "Needs attention",
     needsAttentionSub: "Upcoming follow-ups and due items.",
     allRecords: "All records",
-    calendarMapsLink: "Calendar & Maps",
+    calendarMapsLink: "VyaaFlow",
     viewAllAttention: "View all ({{count}})",
     viewAllDocuments: "All records ({{count}})",
     viewAllDocumentsShort: "All records",
@@ -476,12 +484,11 @@ const en = {
 
   calendarMaps: {
     tabLabel: "VyaaFlow",
-    screenTitle: "Calendar & Maps",
-    screenSubtitle: "Review records by date and location footprints",
-    screenLead:
-      "Select a date for categorized records, or open Map for GPS footprints and approximate PIN areas from freight/dispatch — not live tracking.",
-    modeCalendar: "Calendar",
-    modeMap: "Map",
+    screenTitle: "VyaaFlow",
+    screenSubtitle: "Important business dates and approximate PIN areas",
+    screenLead: "Dates, dues and freight PIN areas for this business.",
+    modeCalendar: "Important Business Dates",
+    modeMap: "Business PINs",
     loadError: "Couldn't load calendar records.",
     dayEmptyTitle: "No records on this date",
     dayEmptyMessage:
@@ -495,7 +502,7 @@ const en = {
       reminders: "GST / email / purchase reminders",
       letterhead: "Letterhead / documents",
       proPacks: "Professional packs",
-      statutory: "Statutory information",
+      statutory: "Statutory reminders",
     },
     permission: {
       title: "Add location to records?",
@@ -519,7 +526,7 @@ const en = {
       privacyChip:
         "GPS footprints are captured when enabled. PIN markers are approximate postal areas.",
       legendGps: "GPS footprint",
-      legendPin: "Approximate PIN",
+      legendPin: "Approximate postal area",
       pinApproximateBadge: "Approximate PIN location",
       pinApproximateAt: "{{place}}",
       permissionBanner:
@@ -537,8 +544,8 @@ const en = {
       noMarkersOverlayMessage:
         "Mapped records appear here when location footprints are enabled on save, or when freight/dispatch includes From/To PIN codes (approximate areas).",
       unavailableTitle: "Map is unavailable in this version.",
-      unavailableBody: "You can still view your records in Calendar.",
-      backToCalendar: "Back to Calendar",
+      unavailableBody: "Saved From and To PINs stay in the list.",
+      backToCalendar: "Back to Important Business Dates",
       unavailableConfig: "Map is unavailable in this version.",
       openRecord: "Open record",
       atLocation: "Delivery / dispatch reference",
@@ -1102,7 +1109,7 @@ const en = {
     appearanceLight: "Light",
     appearanceDark: "Dark",
     sectionInsights: "Your business",
-    businessInsightsItem: "Business Data & Insights",
+    businessInsightsItem: "Business Insights",
     businessInsightsSubtitle: "Customers, routes, distance and patterns from your records",
     profileSection: "Profile",
     profileIdentityItem: "Profile & Business Identity",
@@ -2327,7 +2334,7 @@ const en = {
   },
 
   businessInsights: {
-    title: "Business Data & Insights",
+    title: "Business Insights",
     intro: "Private summaries from your own records — never shared with other users.",
     loadError: "Couldn't load business insights.",
     cardRecords: "Records created",
@@ -2342,6 +2349,8 @@ const en = {
     sectionPeople: "People & parties",
     sectionPlaces: "Places & movement",
     sectionMoney: "Money & shop credit",
+    howCounted: "How these figures are counted",
+    viewSource: "View source records",
     sectionArchives: "Archives",
     sectionRoutes: "Top routes",
     sectionLocations: "Frequent locations",

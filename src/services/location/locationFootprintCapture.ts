@@ -1,12 +1,4 @@
 import type { BusinessEntry } from "@/domain/businessEntry";
-import { geoPointToRecordGps } from "@/utils/location/entryLocation";
-
-import {
-  loadLocationFootprintPreferences,
-  saveLocationFootprintPreferences,
-  syncLocationFootprintPermissionStatus,
-} from "./locationFootprintPreferences";
-import { permissionSnapshotFromStatus } from "./locationRecordService";
 
 export interface ResolveEntryLocationResult {
   location: BusinessEntry["location"];
@@ -15,49 +7,36 @@ export interface ResolveEntryLocationResult {
 }
 
 /**
- * Foreground-only GPS footprint at save time when user has enabled footprints
- * and OS permission is granted. Never blocks save on failure.
+ * New record saves do not read the device location.
+ * `manualLocation` is returned as the caller passed it, including any
+ * coordinates already stored on that object. This does not change the
+ * Location Access setting.
  */
 export async function resolveEntryLocationWithFootprint(
-  userId: string,
+  _userId: string,
   manualLocation: BusinessEntry["location"]
 ): Promise<ResolveEntryLocationResult> {
-  const prefs = await loadLocationFootprintPreferences(userId);
-  if (!prefs.locationFootprintsEnabled) {
-    return { location: manualLocation, footprintAttached: false, footprintFailed: false };
-  }
+  return {
+    location: manualLocation,
+    footprintAttached: false,
+    footprintFailed: false,
+  };
+}
 
-  const osStatus = await syncLocationFootprintPermissionStatus(userId);
-  if (osStatus !== "granted") {
-    return { location: manualLocation, footprintAttached: false, footprintFailed: false };
-  }
+type EntryLocation = BusinessEntry["location"];
 
-  try {
-    const { locationService } = await import("@/services/location");
-    const point = await locationService.getCurrent();
-    const label = manualLocation?.name?.trim() || null;
-    const gps = geoPointToRecordGps(point, {
-      addressLabel: label,
-      source: "device",
-      permissionSnapshot: permissionSnapshotFromStatus("granted"),
-    });
-    await saveLocationFootprintPreferences(userId, {
-      lastLocationCaptureAt: Date.now(),
-    });
-    return {
-      location: {
-        name: label,
-        geo: point,
-        gps,
-      },
-      footprintAttached: true,
-      footprintFailed: false,
-    };
-  } catch {
-    return {
-      location: manualLocation,
-      footprintAttached: false,
-      footprintFailed: true,
-    };
+/** Keep coordinates already stored on a record when a later save does not capture a new fix. */
+export function preserveAlreadySavedLocation(
+  saved: EntryLocation | null | undefined,
+  next: EntryLocation
+): EntryLocation {
+  if (!saved?.geo && !saved?.gps) return next;
+  if (!next) {
+    return { name: saved.name, geo: saved.geo, gps: saved.gps ?? null };
   }
+  return {
+    name: next.name ?? saved.name,
+    geo: saved.geo,
+    gps: saved.gps ?? null,
+  };
 }

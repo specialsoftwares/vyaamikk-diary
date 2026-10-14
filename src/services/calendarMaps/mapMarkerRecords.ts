@@ -5,12 +5,25 @@
 
 import type { BusinessEntry, BusinessEntryType } from "@/domain/businessEntry";
 import type { IndianPostalLocation } from "@/domain/indianPostal";
+import { INDIAN_PIN_REGEX, normalizeIndianPinInput } from "@/domain/indianPincodeInput";
 import { buildEntrySnippet, resolveEntryTitle } from "@/services/dashboard/atAGlanceItemBuilder";
 import { resolvePinCentroid } from "@/services/location/pincodeMapCoords";
+import {
+  isIndiaPincodeOfflineLookupReady,
+  scheduleDeferredIndiaPincodeWarm,
+} from "@/services/location/pincodeOfflineLookup";
 import { buildPostalDisplayLabel } from "@/utils/location/postalDisplay";
 import { dayKey } from "@/utils/date";
 import { entryHasGpsFootprint, entryMapCoordinates } from "@/utils/location/entryLocation";
 import { entryTypeLabelKey } from "@/utils/businessEntry/display";
+import {
+  applyPinCentroids,
+  groupFreightPinRows,
+  lookupPinCentroidsBounded,
+  PIN_LOOKUP_CONCURRENCY,
+  type BusinessPinGroup,
+  type FreightPinRow,
+} from "./businessPinGroups";
 
 import {
   buildFreightDispatchMapIntel,
@@ -115,35 +128,13 @@ function entryToBaseMapRecord(
   };
 }
 
-function postalAddressLabel(
-  postal: IndianPostalLocation,
-  side: "from" | "to",
-  t: TFn
-): string {
+function postalAreaLabel(postal: IndianPostalLocation): string {
   const area = buildPostalDisplayLabel(postal);
-  const place = postal.placeName?.trim();
-  const pin = postal.pinCode;
-  const parts = [place, area, pin].filter(Boolean);
-  const line = parts.join(", ");
-  const prefix = side === "from" ? t("postal.routeFrom") : t("postal.routeTo");
-  return `${prefix} ${line}`;
+  const pin = normalizeIndianPinInput(postal.pinCode) || postal.pinCode.trim();
+  return [area, pin].filter(Boolean).join(" · ");
 }
 
-function pinMapPoint(
-  centroid: { latitude: number; longitude: number; pinCode: string },
-  postal: IndianPostalLocation,
-  side: "from" | "to",
-  t: TFn
-): CalendarMapMapPoint {
-  return {
-    latitude: centroid.latitude,
-    longitude: centroid.longitude,
-    source: "pin_approximate",
-    pinCode: centroid.pinCode,
-    postalSide: side,
-    addressLabel: postalAddressLabel(postal, side, t),
-  };
-}
+export type BusinessPinGroupView = BusinessPinGroup<CalendarMapRecord>;
 
 function freightDispatchPostalPairs(
   entry: BusinessEntry
@@ -161,44 +152,114 @@ function freightDispatchPostalPairs(
   ];
 }
 
-function pinMarkersForEntry(
-  entry: BusinessEntry,
+function pinRecordFor(
   base: CalendarMapRecord,
-  t: TFn,
-  centroidByPin: Map<string, Awaited<ReturnType<typeof resolvePinCentroid>>>
-): CalendarMapRecord[] {
-  const out: CalendarMapRecord[] = [];
-  for (const { side, postal } of freightDispatchPostalPairs(entry)) {
-    if (!postal?.pinCode) continue;
-    const centroid = centroidByPin.get(postal.pinCode);
-    if (!centroid) continue;
-    out.push({
+  side: "from" | "to",
+  pinCode: string,
+  areaLabel: string,
+  centroid: { latitude: number; longitude: number } | null
+): CalendarMapRecord {
+  if (!centroid) {
+    return {
       ...base,
       id: `${base.id}-pin-${side}`,
-      location: pinMapPoint(centroid, postal, side, t),
-      mapFootprintSource: "pin_approximate",
-    });
+      location: null,
+      mapFootprintSource: null,
+    };
   }
-  return out;
+  const location: CalendarMapMapPoint = {
+    latitude: centroid.latitude,
+    longitude: centroid.longitude,
+    source: "pin_approximate",
+    pinCode,
+    postalSide: side,
+    addressLabel: areaLabel,
+  };
+  return {
+    ...base,
+    id: `${base.id}-pin-${side}`,
+    location,
+    mapFootprintSource: "pin_approximate",
+  };
 }
 
-async function preloadPinCentroids(entries: BusinessEntry[]): Promise<Map<string, Awaited<ReturnType<typeof resolvePinCentroid>>>> {
-  const pins = new Set<string>();
-  for (const entry of entries) {
+/** Freight and dispatch From/To rows, including PINs that cannot be plotted. */
+export function buildBusinessPinGroupsSync(
+  data: CalendarMapsSourceData,
+  t: TFn
+): BusinessPinGroupView[] {
+  const packed: { row: FreightPinRow; record: CalendarMapRecord }[] = [];
+  for (const entry of data.entries) {
     if (entry.deletedAt) continue;
-    for (const { postal } of freightDispatchPostalPairs(entry)) {
-      const pin = postal?.pinCode?.trim();
-      if (pin) pins.add(pin);
+    const pairs = freightDispatchPostalPairs(entry).filter((pair) => pair.postal?.pinCode?.trim());
+    if (!pairs.length) continue;
+    const base = entryToBaseMapRecord(entry, t, dayKey(entry.entryDate), entry.entryDate);
+    for (const { side, postal } of pairs) {
+      if (!postal?.pinCode?.trim()) continue;
+      const digits = postal.pinCode.replace(/\D/g, "");
+      const valid = INDIAN_PIN_REGEX.test(digits);
+      const pinCode = valid ? digits : postal.pinCode.trim();
+      const areaLabel = postalAreaLabel(postal);
+      const record = pinRecordFor(base, side, pinCode, areaLabel, null);
+      packed.push({
+        row: {
+          entryId: entry.id,
+          recordKey: record.id,
+          pinCode,
+          side,
+          valid,
+          areaLabel,
+        },
+        record,
+      });
     }
   }
-  const centroidByPin = new Map<string, Awaited<ReturnType<typeof resolvePinCentroid>>>();
-  if (!pins.size) return centroidByPin;
-  await Promise.all(
-    [...pins].map(async (pin) => {
-      centroidByPin.set(pin, await resolvePinCentroid(pin));
-    })
+  return groupFreightPinRows(packed);
+}
+
+export async function plotBusinessPinGroups(
+  groups: readonly BusinessPinGroupView[],
+  options?: {
+    resolveCentroid?: (pin: string) => Promise<{ latitude: number; longitude: number } | null>;
+    whenDbReady?: () => Promise<void>;
+    isDbReady?: () => boolean;
+    concurrency?: number;
+  }
+): Promise<{ groups: BusinessPinGroupView[]; markers: CalendarMapRecord[] }> {
+  const whenDbReady = options?.whenDbReady ?? (() => scheduleDeferredIndiaPincodeWarm(500));
+  const isDbReady = options?.isDbReady ?? isIndiaPincodeOfflineLookupReady;
+  const resolveCentroid = options?.resolveCentroid ?? resolvePinCentroid;
+  if (groups.some((group) => group.valid)) {
+    await whenDbReady();
+  }
+  if (!isDbReady()) {
+    return { groups: groups.map((group) => ({ ...group, records: [...group.records] })), markers: [] };
+  }
+  const centroids = await lookupPinCentroidsBounded(
+    groups.filter((group) => group.valid).map((group) => group.pinCode),
+    resolveCentroid,
+    options?.concurrency ?? PIN_LOOKUP_CONCURRENCY
   );
-  return centroidByPin;
+  const plotted = applyPinCentroids(groups, centroids).map((group) => {
+    if (group.latitude == null || group.longitude == null) return group;
+    return {
+      ...group,
+      records: group.records.map((record) => ({
+        ...record,
+        location: {
+          latitude: group.latitude as number,
+          longitude: group.longitude as number,
+          source: "pin_approximate" as const,
+          pinCode: group.pinCode,
+          postalSide: group.side,
+          addressLabel: group.areaLabel,
+        },
+        mapFootprintSource: "pin_approximate" as const,
+      })),
+    };
+  });
+  const markers = plotted.flatMap((group) => group.records.filter((record) => record.location));
+  return { groups: plotted, markers };
 }
 
 export interface MapMarkerBuildStats {
@@ -255,20 +316,17 @@ export function buildGpsMapMarkersSync(
   return { markers: out, stats: markerStats(out) };
 }
 
-/** PIN approximate markers — awaits offline pincode DB; run only when Map mode is active. */
+/** PIN markers when the offline DB is already ready. Does not cold-start it. */
 export async function buildPinMapMarkersAsync(
   data: CalendarMapsSourceData,
   t: TFn
-): Promise<{ markers: CalendarMapRecord[]; stats: MapMarkerBuildStats }> {
-  const centroidByPin = await preloadPinCentroids(data.entries);
-  const out: CalendarMapRecord[] = [];
-  for (const entry of data.entries) {
-    if (entry.deletedAt) continue;
-    const dk = dayKey(entry.entryDate);
-    const base = entryToBaseMapRecord(entry, t, dk, entry.entryDate);
-    out.push(...pinMarkersForEntry(entry, base, t, centroidByPin));
-  }
-  return { markers: out, stats: markerStats(out) };
+): Promise<{ markers: CalendarMapRecord[]; groups: BusinessPinGroupView[]; stats: MapMarkerBuildStats }> {
+  const groups = buildBusinessPinGroupsSync(data, t);
+  const plotted = await plotBusinessPinGroups(groups, {
+    whenDbReady: async () => undefined,
+    isDbReady: isIndiaPincodeOfflineLookupReady,
+  });
+  return { markers: plotted.markers, groups: plotted.groups, stats: markerStats(plotted.markers) };
 }
 
 /** Build GPS + PIN approximate markers (deleted entries excluded). */
