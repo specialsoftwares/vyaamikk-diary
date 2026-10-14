@@ -96,6 +96,13 @@ export function BootAnimationGate({
   }, [brandMinElapsed, canEnterApp, onHoldTimeout]);
 
   useEffect(() => {
+    if (!canEnterApp) return;
+    // A cancelled exit animation must not leave the logo up after boot is ready.
+    const timer = setTimeout(() => onExitComplete(), 400);
+    return () => clearTimeout(timer);
+  }, [canEnterApp, onExitComplete]);
+
+  useEffect(() => {
     if (!visible) {
       fontReleasedRef.current = false;
       return;

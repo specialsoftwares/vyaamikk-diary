@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import Constants from "expo-constants";
@@ -11,7 +11,10 @@ import { MapLocationClusterSheet } from "@/components/calendarMaps/MapLocationCl
 import { Button, LocaleUiText } from "@/components/ui";
 import type { CalendarMapRecord } from "@/services/calendarMaps";
 import { clusterDispatchLocationLabel } from "@/services/calendarMaps/freightDispatchMapIntel";
-import type { MapLocationCluster } from "@/services/calendarMaps/mapClustering";
+import {
+  isPlottableCoordinate,
+  type MapLocationCluster,
+} from "@/services/calendarMaps/mapClustering";
 import type { MapMarkerBuildStats } from "@/services/calendarMaps/mapMarkerRecords";
 import { useT } from "@/i18n";
 import { mapMarkerColorForEntryType } from "@/theme/categoryAccentResolver";
@@ -27,6 +30,7 @@ interface CalendarMapsMapPanelProps {
   locationPermission: "granted" | "denied" | "undetermined";
   onRefreshPermission: () => void;
   onOpenRecord: (record: CalendarMapRecord) => void;
+  onBackToCalendar?: () => void;
 }
 
 const PIN_MARKER_COLOR = "#D97706";
@@ -52,6 +56,7 @@ export function CalendarMapsMapPanel({
   locationPermission,
   onRefreshPermission,
   onOpenRecord,
+  onBackToCalendar,
 }: CalendarMapsMapPanelProps) {
   const t = useT();
   const router = useRouter();
@@ -59,23 +64,42 @@ export function CalendarMapsMapPanel({
   const mapRef = useRef<MapView | null>(null);
   const [activeCluster, setActiveCluster] = useState<MapLocationCluster | null>(null);
 
-  const hasMarkers = clusters.length > 0;
+  const plottableClusters = useMemo(
+    () => clusters.filter((cluster) => isPlottableCoordinate(cluster.latitude, cluster.longitude)),
+    [clusters]
+  );
+  const hasMarkers = plottableClusters.length > 0;
   /** Only initial source fetch blocks the map; marker build uses a corner spinner. */
   const mapBusy = loading;
   const markersRefreshing = markersLoading && !hasMarkers;
 
-  const mapTouchEnabled = !markersLoading;
+  useEffect(() => {
+    return () => setActiveCluster(null);
+  }, []);
+
+  useEffect(() => {
+    if (!activeCluster) return;
+    if (!plottableClusters.some((cluster) => cluster.id === activeCluster.id)) {
+      setActiveCluster(null);
+    }
+  }, [activeCluster, plottableClusters]);
 
   const clusterById = useMemo(() => {
     const map = new Map<string, MapLocationCluster>();
-    for (const c of clusters) map.set(c.id, c);
+    for (const c of plottableClusters) map.set(c.id, c);
     return map;
-  }, [clusters]);
+  }, [plottableClusters]);
 
   const styles = useThemedStyles((c) =>
     StyleSheet.create({
       root: {
         flex: 1,
+      },
+      unavailable: {
+        alignSelf: "stretch",
+        gap: spacing.sm,
+        paddingHorizontal: spacing.lg,
+        paddingVertical: spacing.md,
       },
       mapBlock: {
         flex: 1,
@@ -214,18 +238,18 @@ export function CalendarMapsMapPanel({
 
   const initialRegion = useMemo(() => {
     if (!hasMarkers) return INDIA_REGION;
-    const c0 = clusters[0];
+    const c0 = plottableClusters[0];
     return {
       latitude: c0.latitude,
       longitude: c0.longitude,
       latitudeDelta: 0.35,
       longitudeDelta: 0.35,
     };
-  }, [clusters, hasMarkers]);
+  }, [plottableClusters, hasMarkers]);
 
   const onMapReady = useCallback(() => {
-    if (!mapRef.current || clusters.length < 2) return;
-    const coords = clusters.map((c) => ({
+    if (!mapRef.current || plottableClusters.length < 2) return;
+    const coords = plottableClusters.map((c) => ({
       latitude: c.latitude,
       longitude: c.longitude,
     }));
@@ -233,7 +257,7 @@ export function CalendarMapsMapPanel({
       edgePadding: { top: 100, bottom: 200, left: 40, right: 40 },
       animated: false,
     });
-  }, [clusters]);
+  }, [plottableClusters]);
 
   const typeLabel = useCallback(
     (record: CalendarMapRecord) => t(record.categoryLabelKey),
@@ -290,14 +314,26 @@ export function CalendarMapsMapPanel({
     androidMapsConfigured: readAndroidMapsConfigured(Constants.expoConfig?.extra),
   });
 
+  if (!canMountMap) {
+    return (
+      <View style={styles.unavailable}>
+        <LocaleUiText style={styles.overlayTitle}>{t("calendarMaps.map.unavailableTitle")}</LocaleUiText>
+        <LocaleUiText style={styles.overlayBody}>{t("calendarMaps.map.unavailableBody")}</LocaleUiText>
+        {onBackToCalendar ? (
+          <Button
+            label={t("calendarMaps.map.backToCalendar")}
+            onPress={onBackToCalendar}
+            variant="secondary"
+            size="md"
+          />
+        ) : null}
+      </View>
+    );
+  }
+
   return (
     <View style={styles.root} pointerEvents="box-none">
-      <View
-        style={styles.mapBlock}
-        pointerEvents={mapTouchEnabled ? "auto" : "none"}
-        collapsable={false}
-      >
-        {canMountMap ? (
+      <View style={styles.mapBlock} collapsable={false}>
         <MapView
           ref={mapRef}
           style={styles.mapInner}
@@ -314,7 +350,7 @@ export function CalendarMapsMapPanel({
             right: spacing.xs,
           }}
         >
-          {clusters.map((cluster) => (
+          {plottableClusters.map((cluster) => (
             <MapClusterMarker
               key={cluster.id}
               cluster={cluster}
@@ -323,14 +359,6 @@ export function CalendarMapsMapPanel({
             />
           ))}
         </MapView>
-        ) : (
-          <View style={styles.centerOverlay}>
-            <View style={styles.overlayCard}>
-              <LocaleUiText style={styles.overlayTitle}>{t("calendarMaps.map.unavailableConfig")}</LocaleUiText>
-              <LocaleUiText style={styles.overlayBody}>{t("calendarMaps.map.noMarkersOverlayMessage")}</LocaleUiText>
-            </View>
-          </View>
-        )}
 
         <View style={styles.topOverlay} pointerEvents="box-none">
           <View style={styles.infoChip}>

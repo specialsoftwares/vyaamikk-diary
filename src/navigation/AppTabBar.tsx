@@ -1,7 +1,10 @@
-import React from "react";
+import React, { useContext } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
-import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
+import {
+  BottomTabBarHeightCallbackContext,
+  type BottomTabBarProps,
+} from "@react-navigation/bottom-tabs";
 
 import { resolveYouTabIconConcept } from "@/components/you/YouTabIcon";
 import { useTabBarMetrics } from "@/layout/tabBar";
@@ -32,9 +35,14 @@ export function AppTabBar({ state, descriptors, navigation }: BottomTabBarProps)
   const { colors } = useTheme();
   const metrics = useTabBarMetrics();
   const selected = selectedTabRouteName(state);
+  const reportTabBarHeight = useContext(BottomTabBarHeightCallbackContext);
 
   return (
     <View
+      onLayout={(event) => {
+        const height = event.nativeEvent.layout.height;
+        if (height > 0) reportTabBarHeight?.(height);
+      }}
       style={[
         styles.bar,
         {

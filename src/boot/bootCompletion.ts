@@ -94,6 +94,18 @@ export function computeRouteResolved(args: {
   return args.destinationReady && args.sequenceHoldDone && !args.routeFailed;
 }
 
+/**
+ * Navigation unlock once boot and a real destination are ready.
+ * The exit animation is cosmetic and must not be the only way in.
+ */
+export function bootMayUnlockWithoutAnimation(args: {
+  bootReady: boolean;
+  destinationPending: boolean;
+  routeFailed: boolean;
+}): boolean {
+  return args.bootReady && args.destinationPending && !args.routeFailed;
+}
+
 export function sequenceHoldDurationMs(reducedMotion: boolean): number {
   return reducedMotion ? BOOT_REDUCED_MOTION_MS : BOOT_ANIMATION_MS;
 }

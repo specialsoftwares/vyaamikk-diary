@@ -16,3 +16,11 @@ export function mayMountNativeMapView(input: {
   if (input.platform !== "android") return true;
   return input.androidMapsConfigured === true;
 }
+
+/** Marker lookups and native map commands run only when a map can actually mount. */
+export function mapMarkerWorkAllowed(input: {
+  mode: "calendar" | "map";
+  nativeMapMayMount: boolean;
+}): boolean {
+  return input.mode === "map" && input.nativeMapMayMount;
+}

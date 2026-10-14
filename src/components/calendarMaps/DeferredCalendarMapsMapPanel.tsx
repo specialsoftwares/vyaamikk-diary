@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Platform, StyleSheet, View } from "react-native";
 import Constants from "expo-constants";
 
-import { LocaleUiText } from "@/components/ui";
+import { Button, LocaleUiText } from "@/components/ui";
 import { useT } from "@/i18n";
 import type { CalendarMapRecord } from "@/services/calendarMaps";
 import type { MapMarkerBuildStats } from "@/services/calendarMaps/mapMarkerRecords";
@@ -18,6 +18,7 @@ export interface DeferredCalendarMapsMapPanelProps {
   locationPermission: "granted" | "denied" | "undetermined";
   onRefreshPermission: () => void;
   onOpenRecord: (record: CalendarMapRecord) => void;
+  onBackToCalendar?: () => void;
 }
 
 /**
@@ -48,10 +49,21 @@ export function DeferredCalendarMapsMapPanel(props: DeferredCalendarMapsMapPanel
 
   if (!canMount) {
     return (
-      <View style={styles.placeholder}>
-        <LocaleUiText style={[styles.message, { color: colors.text }]}>
-          {t("calendarMaps.map.unavailableConfig")}
+      <View style={styles.unavailable}>
+        <LocaleUiText style={[styles.title, { color: colors.text }]}>
+          {t("calendarMaps.map.unavailableTitle")}
         </LocaleUiText>
+        <LocaleUiText style={[styles.message, { color: colors.textMuted }]}>
+          {t("calendarMaps.map.unavailableBody")}
+        </LocaleUiText>
+        {props.onBackToCalendar ? (
+          <Button
+            label={t("calendarMaps.map.backToCalendar")}
+            onPress={props.onBackToCalendar}
+            variant="secondary"
+            size="md"
+          />
+        ) : null}
       </View>
     );
   }
@@ -70,14 +82,21 @@ export function DeferredCalendarMapsMapPanel(props: DeferredCalendarMapsMapPanel
 const styles = StyleSheet.create({
   placeholder: {
     flex: 1,
-    minHeight: 280,
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: spacing.xl,
+    paddingVertical: spacing.lg,
     paddingHorizontal: spacing.lg,
+  },
+  unavailable: {
+    alignSelf: "stretch",
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+  },
+  title: {
+    ...typography.bodyStrong,
   },
   message: {
     ...typography.body,
-    textAlign: "center",
   },
 });

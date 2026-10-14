@@ -158,12 +158,18 @@ assert.doesNotMatch(
 assert.doesNotMatch(tabsLayout, /TAB_ACTIVE_TINT/);
 
 const screen = readFileSync(join(root, "src/components/ui/Screen.tsx"), "utf8");
-assert.match(screen, /tabBarFooterClearance\(tabBar\)/);
+const you = readFileSync(join(root, "app/(app)/(tabs)/you.tsx"), "utf8");
+assert.match(screen, /BottomTabBarHeightContext/);
+assert.match(screen, /marginBottom: tabOverlay/);
+assert.match(screen, /paddingBottom: spacing\.sm/);
 assert.doesNotMatch(
   screen,
-  /tabBar\.height \+ spacing\.md/,
-  "footer clearance must come from tabBarFooterClearance, not inline math"
+  /tabBarFooterClearance\(tabBar\)/,
+  "an in-flow footer must not repeat the tab bar height as internal padding"
 );
+assert.doesNotMatch(screen, /tabBar\.height \+ spacing\.md/);
+assert.doesNotMatch(you, /allowFontScaling=\{false\}/);
+assert.match(tabBar, /BottomTabBarHeightCallbackContext/);
 
 const tabBarAdapter = readFileSync(join(root, "src/layout/tabBar.ts"), "utf8");
 assert.match(tabBarAdapter, /useSafeAreaInsets\(\)/);

@@ -7,6 +7,7 @@ import {
   Text,
   View,
 } from "react-native";
+import Constants from "expo-constants";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Calendar, type DateData } from "react-native-calendars";
 
@@ -28,6 +29,11 @@ import { useAuth } from "@/state/auth";
 import { useT } from "@/i18n";
 import type { CalendarMapRecord, CalendarMarkedDots } from "@/services/calendarMaps";
 import { navigateToCalendarMapRecord } from "@/services/calendarMaps/calendarMapsRouting";
+import {
+  mapMarkerWorkAllowed,
+  mayMountNativeMapView,
+  readAndroidMapsConfigured,
+} from "@/services/maps/mapNativeConfig";
 import { dayKey, formatEntryDate } from "@/utils/date";
 import {
   radius,
@@ -51,6 +57,10 @@ export default function CalendarMapsTab() {
   const [mode, setMode] = useState<CalendarMapsMode>("calendar");
   const [mapEverOpened, setMapEverOpened] = useState(false);
   const [selectedDate, setSelectedDate] = useState(() => dayKey(Date.now()));
+  const nativeMapMayMount = mayMountNativeMapView({
+    platform: Platform.OS,
+    androidMapsConfigured: readAndroidMapsConfigured(Constants.expoConfig?.extra),
+  });
 
   useEffect(() => {
     if (mode === "map") setMapEverOpened(true);
@@ -75,7 +85,7 @@ export default function CalendarMapsTab() {
     locationPermission,
     refreshPermission,
   } = useCalendarMapsData(user?.uid ?? null, selectedDate, {
-    mapActive: mode === "map",
+    mapActive: mapMarkerWorkAllowed({ mode, nativeMapMayMount }),
   });
 
   const { refreshNote, onRefresh, refreshControl } = useAppRefresh({
@@ -399,6 +409,7 @@ export default function CalendarMapsTab() {
                 locationPermission={locationPermission}
                 onRefreshPermission={() => void refreshPermission()}
                 onOpenRecord={openRecord}
+                onBackToCalendar={() => setMode("calendar")}
               />
             ) : null
           }

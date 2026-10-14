@@ -46,6 +46,21 @@ Before any owned purchase, an unused draft, an unused secret binding, and an unu
 
 License-tester selection stays before purchase admission. No tester list is selected. No device test instrument has been confirmed. No purchase is started. Catalog creation, base-plan activation, function deploy, Internal upload, and `PLAY_BILLING_ENABLED=true` are not part of this source change.
 
+## App reliability candidate — 14 Oct 2026
+
+No phone was attached (`adb devices` empty), so the installed version was not re-read. The last Play Internal read remains versionCode 26 (1.0.0). This pass did not build or upload. Functions runtime remains the `09d01e60` deploy. KMS PASS is unchanged and was not repeated. Publisher HTTP 401 `permissionDenied` / `androidpublisher` is unchanged and was not repeated. The token response still has no recorded `scope` field.
+
+| Issue | Workstream | Evidence | Next action | Dependency | Status |
+|---|---|---|---|---|---|
+| Startup stuck on the logo | App startup | SOURCE. Exit animation was the only unlock after the hold timer cleared. A 12s reveal now shows recovery without cancelling the in-flight coordinator, and a resolved destination navigates without waiting for that animation. | Cold launch on a phone | Owner build choice | Corrected in source |
+| Map freeze and missing-key fallback | Calendar / Map | SOURCE. The missing-key branch does not import `MapView`. Marker work does not start unless a native map may mount. Customer copy and Back to Calendar are in the fallback. No overlapping text was found in that mounted tree. | Phone: missing-key interaction, then tiles only if a key is later configured | Maps configuration unchanged | Corrected in source |
+| You footer over At a glance | Dashboard layout | SOURCE. The footer repeated the overlaying tab-bar height as internal padding. It now lifts once by the measured bar height. | Phone at normal and large font | None | Corrected in source |
+| Publisher denial | Billing | LIVE BACKEND, retained. HTTP 401, `permissionDenied`, domain `androidpublisher`. Metadata `scope` was not returned. | Do not repeat that probe | A different check needs its own approval | Unresolved |
+| Catalog, licence testers, Play RTDN | Billing | Last Play read: no products, no tester list, RTDN topic field empty. Source prices match the nine established SKUs. GRIN is not a separate product. | Owner decision before any Play catalog or tester change | Publisher access still denied | Not started |
+| Purchase entry | Billing client | `EXPO_PUBLIC_SUBSCRIPTION_PURCHASE_ENTRY_ENABLED` is `0` on preview, production, and internal-grin. `PLAY_BILLING_ENABLED` is absent. Empty allowlist denies new admission. | Keep closed until a restricted-billing build is chosen | Build choice | Closed |
+
+Local checks for this source pass: `tsc --noEmit`, i18n key consistency, boot completion, boot production startup, tab-bar metrics, and the app-reliability contract. Those are SOURCE / EXTRACTED_RUNTIME, not a native-device or Play-purchase result. Canonical CI is the next gate after this commit is pushed. No EAS build was started.
+
 The subscription catalog and one-time products pages had no products. Play prices for `vyd_starter`, `vyd_professional`, and `vyd_business` are UNKNOWN. License testing has no email list selected and the license response is RESPOND_NORMALLY, so a purchase now would not be a free license test. No purchase was attempted. BillDesk KYC is in progress and stopped at an OTP screen. The OTP was not generated and the APK-URL question was not emailed.
 
 Play new-purchase admission is now separate from already-owned lifecycle in source `e494f278` (integration merge `eb4c05d`). `PLAY_BILLING_ENABLED` still defaults off and still blocks a first bind. RTDN, reconciliation, refunds, and entitlement correction for a token the account already owns are no longer stopped by that flag. This is not deployed. A new-grant notification while admission is closed returns HTTP 503 and is not treated as delivered.

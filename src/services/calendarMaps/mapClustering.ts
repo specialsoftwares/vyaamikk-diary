@@ -8,6 +8,17 @@ import type { CalendarMapRecord } from "./calendarMapsTypes";
 /** ~11 m precision at equator — groups same-building footprints. */
 const CLUSTER_DECIMALS = 4;
 
+export function isPlottableCoordinate(latitude: number, longitude: number): boolean {
+  return (
+    Number.isFinite(latitude) &&
+    Number.isFinite(longitude) &&
+    latitude >= -90 &&
+    latitude <= 90 &&
+    longitude >= -180 &&
+    longitude <= 180
+  );
+}
+
 export interface MapLocationCluster {
   id: string;
   latitude: number;

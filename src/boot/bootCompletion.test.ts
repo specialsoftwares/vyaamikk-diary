@@ -12,6 +12,7 @@ import type { UserProfile } from "@/domain/types";
 
 import {
   bootOwnerFromAuth,
+  bootMayUnlockWithoutAnimation,
   computeBootReady,
   computeRouteResolved,
   createBootCompletionMachine,
@@ -610,6 +611,33 @@ async function main() {
     h.hold();
     h.exit();
     assert.equal(h.navigated.length, 1, "exit and hold share completers; route once");
+  }
+
+  {
+    const h = harness();
+    const owner = { kind: "signed_in" as const, uid: "A", generation: 1 };
+    h.machine.observeOwner(owner);
+    await h.machine.resolveForOwner(owner, input("A", true), async () => dashboard());
+    assert.equal(
+      bootMayUnlockWithoutAnimation({
+        bootReady: true,
+        destinationPending: h.machine.hasPendingDestination(),
+        routeFailed: false,
+      }),
+      true
+    );
+    assert.equal(
+      bootMayUnlockWithoutAnimation({
+        bootReady: true,
+        destinationPending: false,
+        routeFailed: false,
+      }),
+      false
+    );
+    h.apply(h.machine.tryComplete());
+    assert.equal(h.navigated.length, 1, "a resolved destination navigates without the exit animation");
+    h.exit();
+    assert.equal(h.navigated.length, 1, "a late animation callback must not navigate again");
   }
 }
 

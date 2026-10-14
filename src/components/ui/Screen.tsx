@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, type RefObject } from "react";
+import React, { useContext, useMemo, useRef, type RefObject } from "react";
 import {
   Keyboard,
   KeyboardAvoidingView,
@@ -12,13 +12,14 @@ import {
   type StyleProp,
   type ViewStyle,
 } from "react-native";
+import { BottomTabBarHeightContext } from "@react-navigation/bottom-tabs";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { KeyboardFormScrollProvider } from "@/components/forms/KeyboardFormScrollContext";
 import { FormFocusProvider } from "@/components/inputSafety/FormFocusManager";
 import { ValidationFocusProvider } from "@/components/inputSafety/ValidationFocusManager";
 import { useKeyboardInset } from "@/hooks/useKeyboardInset";
-import { tabBarFooterClearance, useTabBarMetrics } from "@/layout/tabBar";
+import { useTabBarMetrics } from "@/layout/tabBar";
 import { spacing, useTheme, useThemeColors, useThemedStyles } from "@/theme";
 
 /** Extra space below last field so Save / suggestions stay above keyboard. */
@@ -73,6 +74,15 @@ export function Screen({
 }: ScreenProps) {
   const insets = useSafeAreaInsets();
   const tabBar = useTabBarMetrics();
+  const measuredTabBarHeight = useContext(BottomTabBarHeightContext);
+  // The JS tab bar overlays the absolute-fill scene. Lift a footer once by the
+  // measured bar height. Do not also pad the footer by that height.
+  const tabOverlay =
+    footer && tabBarInset
+      ? measuredTabBarHeight && measuredTabBarHeight > 0
+        ? measuredTabBarHeight
+        : tabBar.height
+      : 0;
   const colors = useThemeColors();
   const { resolvedMode } = useTheme();
   const statusBarStyle = resolvedMode === "dark" ? "light-content" : "dark-content";
@@ -181,6 +191,7 @@ export function Screen({
         style={[
           styles.safe,
           topInsetOverride !== undefined ? { paddingTop: topInsetOverride } : null,
+          tabOverlay > 0 ? { marginBottom: tabOverlay } : null,
         ]}
         edges={["top", "left", "right"]}
       >
@@ -201,11 +212,8 @@ export function Screen({
               <View
                 style={[
                   styles.footerBar,
-                  // Native tab bar clips content at its top edge on Android and
-                  // overlays it on iOS — clearance must derive from the shared
-                  // metrics model, never a per-screen constant (VYD-23).
-                  tabBarInset
-                    ? { paddingBottom: tabBarFooterClearance(tabBar) }
+                  tabOverlay > 0
+                    ? { paddingBottom: spacing.sm }
                     : { paddingBottom: insets.bottom + spacing.sm },
                 ]}
               >

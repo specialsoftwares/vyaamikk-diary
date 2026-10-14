@@ -117,6 +117,7 @@ export function DigitalBusinessIdentityCard({
   const [isBack, setIsBack] = useState(false);
   const [stageHeight, setStageHeight] = useState(STAGE_FALLBACK_HEIGHT);
   const shareLockRef = useRef(false);
+  const flipBusyRef = useRef(false);
   const shareLockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const measuredHeights = useRef({ front: 0, back: 0 });
   const flipProgress = useSharedValue(0);
@@ -205,11 +206,18 @@ export function DigitalBusinessIdentityCard({
   }, [flipLock]);
 
   const syncStageHeight = useCallback(() => {
-    const next = Math.max(measuredHeights.current.front, measuredHeights.current.back);
+    const front = measuredHeights.current.front;
+    const back = measuredHeights.current.back;
+    const visible = isBack ? back : front;
+    const next = flipBusyRef.current ? Math.max(front, back) : visible;
     if (next > 0) {
       setStageHeight(next);
     }
-  }, []);
+  }, [isBack]);
+
+  useEffect(() => {
+    syncStageHeight();
+  }, [syncStageHeight]);
 
   const onFrontLayout = useCallback(
     (event: LayoutChangeEvent) => {
@@ -373,17 +381,21 @@ export function DigitalBusinessIdentityCard({
 
   const settleFlip = useCallback(
     (target: number, finished: boolean) => {
-      if (!flipLock.release()) return;
-      if (finished) {
-        setIsBack(target >= 0.5);
-        return;
+      flipBusyRef.current = false;
+      const released = flipLock.release();
+      let showingBack = target >= 0.5;
+      if (!finished) {
+        const progress = flipProgressRef.current;
+        const settled = progress.value >= 0.5 ? 1 : 0;
+        progress.value = settled;
+        showingBack = settled === 1;
       }
-      // Interrupted/cancelled: restore a stable transform on the nearest side
-      // so neither face is stuck mid-rotation intercepting touches.
-      const progress = flipProgressRef.current;
-      const settled = progress.value >= 0.5 ? 1 : 0;
-      progress.value = settled;
-      setIsBack(settled === 1);
+      const next = showingBack
+        ? measuredHeights.current.back
+        : measuredHeights.current.front;
+      if (next > 0) setStageHeight(next);
+      if (!released) return;
+      setIsBack(showingBack);
     },
     [flipLock]
   );
@@ -392,7 +404,11 @@ export function DigitalBusinessIdentityCard({
     if (sharing || shareLockRef.current) return;
     if (!flipLock.acquire()) return;
     const next = flipProgress.value < 0.5 ? 1 : 0;
+    flipBusyRef.current = true;
+    const both = Math.max(measuredHeights.current.front, measuredHeights.current.back);
+    if (both > 0) setStageHeight(both);
     if (reduceMotion) {
+      flipBusyRef.current = false;
       flipProgress.value = next;
       setIsBack(next >= 0.5);
       flipLock.release();
@@ -511,7 +527,7 @@ export function DigitalBusinessIdentityCard({
             </Text>
           ) : null}
           {designation ? (
-            <Text style={styles.designationLine} numberOfLines={1}>
+            <Text style={styles.designationLine}>
               {designation}
             </Text>
           ) : null}

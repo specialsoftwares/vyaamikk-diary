@@ -11,6 +11,7 @@ import type { Href } from "expo-router";
 import type { BootAnimationGateProps } from "@/boot/BootAnimationGate";
 import type { BootDraftContinuationSheetProps } from "@/boot/BootDraftContinuationSheet";
 import {
+  bootMayUnlockWithoutAnimation,
   bootOwnerFromAuth,
   computeBootReady,
   computeRouteResolved,
@@ -228,6 +229,21 @@ export function BootScreenView({ ports }: { ports: BootScreenViewPorts }) {
       cancelled = true;
     };
   }, [phase, ports.dbStatus, renderedOwner, ports.justCreated, applyAction, resolveEpoch]);
+
+  useEffect(() => {
+    if (
+      !bootMayUnlockWithoutAnimation({
+        bootReady,
+        destinationPending: destinationReady,
+        routeFailed,
+      })
+    ) {
+      return;
+    }
+    return schedule(() => {
+      applyAction(machineRef.current!.tryComplete());
+    }, 0);
+  }, [applyAction, bootReady, destinationReady, routeFailed, schedule]);
 
   const gateCompleters = useMemo(
     () => createBootGateCompleters(machineRef.current!),
