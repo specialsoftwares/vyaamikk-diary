@@ -53,6 +53,8 @@ The correction stops subtracting the tab bar a second time. Installed `@react-na
 
 Emulator `Vyaamikk_Pixel_API35` booted as `emulator-5554` at 1080×2400. The installed `com.specialsoftwares.vyaamikkdiary` is versionCode 7, debuggable, last updated 2026-08-07. It is not vc27 and it is not this correction. No prebuild, `expo run:android`, EAS build, or Play upload was started. Rendered bounds of the correction stay **DEVICE_PENDING**.
 
+Canonical CI for the correction `a2a49f94bc157c566d7dc7d962b0148ed84a56b1` is run `38625795637` / verify `116064495127`, success, head SHA matched. That run is not a device pass, a rebuild, or an upload. This sentence is a later register note and is not the correction.
+
 ## Letterhead removal is the integration head — source only
 
 PR #34 is merged into `integration/grin-g1-g5-source`. The Letterhead application source is `1792d79a7a3b58cae5913e6d46ccef4902bfcb37`. CI on that exact source is run `38458982309` / verify `115508928348`, success. Letterhead creation, scanning, cropping, and new PDF generation stay removed. Saved letters and drafts stay readable, bound to the current session. Live Rules, Functions, billing, purge, and retention were not changed by that merge.
