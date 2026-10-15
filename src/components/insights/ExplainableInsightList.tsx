@@ -1,41 +1,106 @@
-import React from "react";
-import { StyleSheet, Text, View } from "react-native";
+import React, { useState } from "react";
+import { StyleSheet, View } from "react-native";
 import { useRouter } from "expo-router";
 
+import { LocaleUiText } from "@/components/ui/LocaleUiText";
 import { LuxuryPressable } from "@/components/ui/LuxuryPressable";
 import { useT } from "@/i18n";
+import { insightCaveatPhrases, insightRowScanLimitPhrases } from "@/services/insights/insightCategories";
 import type { ExplainableInsight, InsightSourceLink } from "@/services/insights/insightCoverage";
 import { translateInsightPhrases, type InsightPhrase } from "@/services/insights/insightPhrases";
-import { spacing, typography, useThemedStyles } from "@/theme";
+import { executiveCardDepth, radius, spacing, typography, useTheme, useThemedStyles } from "@/theme";
 
-export function ExplainableInsightList({
-  insights,
-  freshnessSummary,
-  freshnessPhrases,
+function sentence(
+  phrases: InsightPhrase[] | undefined,
+  fallback: string,
+  t: (key: string, vars?: Record<string, string | number>) => string,
+  joiner = " "
+) {
+  return phrases && phrases.length > 0 ? translateInsightPhrases(phrases, t, joiner) : fallback;
+}
+
+function InsightFigureRow({
+  insight,
+  divided,
+  onOpenSource,
 }: {
-  insights: ExplainableInsight[];
-  freshnessSummary: string;
-  freshnessPhrases?: InsightPhrase[];
+  insight: ExplainableInsight;
+  divided: boolean;
+  onOpenSource: (source: InsightSourceLink) => void;
 }) {
-  const router = useRouter();
   const t = useT();
+  const [open, setOpen] = useState(false);
   const styles = useThemedStyles((c) =>
     StyleSheet.create({
-      intro: { ...typography.caption, color: c.textMuted, lineHeight: 18, marginBottom: spacing.sm },
       card: {
         paddingVertical: spacing.md,
         paddingHorizontal: spacing.md,
-        gap: 4,
-        borderTopWidth: StyleSheet.hairlineWidth,
+        gap: spacing.xs,
+        borderTopWidth: divided ? StyleSheet.hairlineWidth : 0,
         borderTopColor: c.divider,
       },
-      titleRow: { flexDirection: "row", alignItems: "flex-start", gap: spacing.sm },
-      title: { ...typography.bodyStrong, color: c.text, flex: 1 },
-      value: { ...typography.bodyStrong, color: c.primaryDark, textAlign: "right", maxWidth: "46%" },
-      meta: { ...typography.caption, color: c.textMuted, lineHeight: 18 },
-      link: { ...typography.captionStrong, color: c.primaryDark, marginTop: 2 },
+      title: { ...typography.bodyStrong, color: c.text },
+      value: { ...typography.bodyStrong, color: c.primaryDark },
+      meta: { ...typography.caption, color: c.textMuted },
+      hit: { paddingVertical: spacing.sm },
+      link: { ...typography.captionStrong, color: c.primaryDark },
     })
   );
+
+  const title = sentence(insight.titlePhrases, insight.title, t);
+  const value = sentence(insight.valuePhrases, insight.valueLabel, t, " · ");
+  const period = sentence(insight.periodPhrases, insight.periodLabel, t);
+  const how = sentence(insight.howPhrases, insight.howCalculated, t);
+  const empty = sentence(insight.emptyPhrases, insight.emptyState, t);
+  const status = insight.unavailable || insight.empty ? empty : "";
+  const caveat = sentence(insightCaveatPhrases(insight), "", t);
+  const scan = sentence(insightRowScanLimitPhrases(insight), "", t);
+  const showHow = Boolean(how) && how !== status;
+
+  return (
+    <View style={styles.card}>
+      <LocaleUiText style={styles.title}>{title}</LocaleUiText>
+      <LocaleUiText style={styles.value}>{value}</LocaleUiText>
+      <LocaleUiText style={styles.meta}>{period}</LocaleUiText>
+      {status ? <LocaleUiText style={styles.meta}>{status}</LocaleUiText> : null}
+      {caveat ? <LocaleUiText style={styles.meta}>{caveat}</LocaleUiText> : null}
+      {scan ? <LocaleUiText style={styles.meta}>{scan}</LocaleUiText> : null}
+      {showHow ? (
+        <LuxuryPressable
+          onPress={() => setOpen((current) => !current)}
+          accessibilityRole="button"
+          accessibilityState={{ expanded: open }}
+          style={styles.hit}
+        >
+          <LocaleUiText style={styles.link}>{t("businessInsights.howCounted")}</LocaleUiText>
+        </LuxuryPressable>
+      ) : null}
+      {open && showHow ? <LocaleUiText style={styles.meta}>{how}</LocaleUiText> : null}
+      <LuxuryPressable
+        onPress={() => onOpenSource(insight.source)}
+        accessibilityRole="button"
+        style={styles.hit}
+      >
+        <LocaleUiText style={styles.link}>{t("businessInsights.viewSource")}</LocaleUiText>
+      </LuxuryPressable>
+    </View>
+  );
+}
+
+export function ExplainableInsightList({ insights }: { insights: ExplainableInsight[] }) {
+  const router = useRouter();
+  const { resolvedMode } = useTheme();
+  const styles = useThemedStyles((c) =>
+    StyleSheet.create({
+      group: {
+        ...executiveCardDepth(resolvedMode === "dark", c, 2),
+        borderRadius: radius.lg,
+        overflow: "hidden",
+      },
+    })
+  );
+
+  if (insights.length === 0) return null;
 
   const open = (source: InsightSourceLink) => {
     router.push({
@@ -44,36 +109,16 @@ export function ExplainableInsightList({
     });
   };
 
-  const sentence = (phrases: InsightPhrase[] | undefined, fallback: string) =>
-    phrases && phrases.length > 0 ? translateInsightPhrases(phrases, t) : fallback;
-  const figure = (phrases: InsightPhrase[] | undefined, fallback: string) =>
-    phrases && phrases.length > 0 ? translateInsightPhrases(phrases, t, " · ") : fallback;
-
   return (
-    <View>
-      <Text style={styles.intro}>{sentence(freshnessPhrases, freshnessSummary)}</Text>
-      {insights.map((insight) => {
-        const how = sentence(insight.howPhrases, insight.howCalculated);
-        const empty = sentence(insight.emptyPhrases, insight.emptyState);
-        return (
-          <LuxuryPressable
-            key={insight.id}
-            tactile
-            onPress={() => open(insight.source)}
-            style={styles.card}
-          >
-            <View style={styles.titleRow}>
-              <Text style={styles.title}>{sentence(insight.titlePhrases, insight.title)}</Text>
-              <Text style={styles.value}>{figure(insight.valuePhrases, insight.valueLabel)}</Text>
-            </View>
-            <Text style={styles.meta}>{sentence(insight.periodPhrases, insight.periodLabel)}</Text>
-            <Text style={styles.meta}>{how}</Text>
-            {insight.empty && empty !== how ? <Text style={styles.meta}>{empty}</Text> : null}
-            <Text style={styles.meta}>{sentence(insight.freshnessPhrases, insight.freshnessNote)}</Text>
-            <Text style={styles.link}>{t("businessInsights.viewSource")}</Text>
-          </LuxuryPressable>
-        );
-      })}
+    <View style={styles.group}>
+      {insights.map((insight, index) => (
+        <InsightFigureRow
+          key={insight.id}
+          insight={insight}
+          divided={index > 0}
+          onOpenSource={open}
+        />
+      ))}
     </View>
   );
 }

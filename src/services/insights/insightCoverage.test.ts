@@ -652,8 +652,18 @@ function diary(partial: Partial<DiaryCoverageFact> & Pick<DiaryCoverageFact, "id
   assert.match(cashRow.amountOrUnitFields, /stored as rupees/);
   assert.equal(/treated as INR/.test(cashRow.amountOrUnitFields), false);
   assert.ok(settings.includes("BUSINESS_INSIGHTS_HREF"));
-  assert.ok(screen.includes("ExplainableInsightList"));
+  assert.equal(screen.includes("ExplainableInsightList"), false);
+  assert.equal(screen.includes("businessInsights.distanceFy"), false);
+  assert.equal(screen.includes("businessInsights.pinsTitle"), false);
+  assert.ok(screen.includes("FySelector"));
+  assert.ok(screen.includes("InsightsOverviewTiles"));
   assert.equal(screen.includes("Screen"), true);
+  const categoryScreen = fs.readFileSync(
+    path.join(process.cwd(), "app/(app)/settings/business-insights/category/[category].tsx"),
+    "utf8"
+  );
+  assert.ok(categoryScreen.includes("ExplainableInsightList"));
+  assert.ok(categoryScreen.includes("router.back()"));
 }
 
 console.log("insightCoverage.test.ts: ok");
