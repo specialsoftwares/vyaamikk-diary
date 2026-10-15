@@ -12,6 +12,10 @@ TOOLING (ops-guard suite; not application CI).
 
 ---
 
+## Internal versionCode 28 — 15 Oct 2026
+
+Play bundle explorer, read before this freeze: 14 bundles. Highest uploaded version code is 27 (1.0.0). A search for 28 returned no bundle. `app.json` versionCode is now 28, version name stays 1.0.0. The `internal-grin` profile keeps purchase-entry and quota-upsell at `0`. The Maps key remains the existing EAS production secret and is not in git. This commit freezes that build. It is not the upload and not a public rollout. Restricted billing stays the one approved Firebase UID and the Starter monthly plan.
+
 ## Business Insights candidate — 15 Oct 2026
 
 Application source `4176c74cc4480d2afee7c87cc56f3391bbe22ffd` on `integration/grin-g1-g5-source`. It keeps the accepted dashboard correction `a2a49f94bc157c566d7dc7d962b0148ed84a56b1` (CI run `38625795637` / verify `116064495127`). Canonical CI for this source is workflow_dispatch run `38647967468` / verify job `116139460943`, success, head SHA matched. This paragraph is a later register note and is not that source commit. Coordinator checks on this tree are not independent QA.
