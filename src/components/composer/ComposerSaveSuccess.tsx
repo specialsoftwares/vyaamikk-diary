@@ -12,6 +12,14 @@ import { useI18n, useT } from "@/i18n";
 import { pdfService } from "@/services/pdf/pdfService";
 import { buildPdfFileName, buildPdfFileNameForBusinessEntry } from "@/services/pdf/pdfFileNames";
 import { regenerateEntryPdf } from "@/services/diary/regenerateEntryPdf";
+import { shouldDisplayRemoteSynced, type ComposerSaveStatus } from "@/services/diary/composerSaveStatus";
+import { documentRevisionForCashEntry, documentRevisionKey } from "@/services/attachments/cashVoucherRevision";
+import { ReceiptPhotoUnavailableError } from "@/services/attachments/cashVoucherPhotoPlan";
+import {
+  canShareDocumentRevision,
+  isPdfRenderInFlight,
+  pdfRevisionReadyKey,
+} from "@/services/pdf/pdfRevisionGate";
 import { accentKeyForEntryType } from "@/theme/categoryAccentResolver";
 import { shareBusinessEntryText } from "@/services/share/shareTextService";
 import { isShareUserCancelled } from "@/utils/shareDismissed";
@@ -22,6 +30,8 @@ interface ComposerSaveSuccessProps {
   onAddAnother: () => void;
   cloudAccepted?: boolean;
   syncFailureKind?: string;
+  saveStatus?: ComposerSaveStatus;
+  photoRecovery?: { reason: string; actions: Array<"retry" | "generate_without_photo"> } | null;
 }
 
 export function ComposerSaveSuccess({
@@ -30,6 +40,8 @@ export function ComposerSaveSuccess({
   onAddAnother,
   cloudAccepted = true,
   syncFailureKind,
+  saveStatus,
+  photoRecovery,
 }: ComposerSaveSuccessProps) {
   const t = useT();
   const { lang } = useI18n();
@@ -39,6 +51,7 @@ export function ComposerSaveSuccess({
   const [entry, setEntry] = useState(entryProp);
   const [exporting, setExporting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [offerWithoutPhoto, setOfferWithoutPhoto] = useState(Boolean(photoRecovery));
 
   useEffect(() => {
     setEntry(entryProp);
@@ -109,17 +122,63 @@ export function ComposerSaveSuccess({
     }
   }, [entry, lang, t, freightLabels, feedback]);
 
+  const cashShareReady = useCallback(
+    (candidate: BusinessEntry) => {
+      if (candidate.entryType !== "business_cash_given") return Boolean(candidate.pdfUri);
+      const expected = documentRevisionKey(documentRevisionForCashEntry(candidate));
+      return canShareDocumentRevision({
+        pdfUri: candidate.pdfUri,
+        readyKey: pdfRevisionReadyKey(candidate.id),
+        expectedKey: expected,
+      });
+    },
+    []
+  );
+
+  const shareReadyPdf = useCallback(
+    async (candidate: BusinessEntry) => {
+      if (!user || !candidate.pdfUri) return;
+      if (candidate.entryType === "business_cash_given" && !cashShareReady(candidate)) return;
+      const fileName = buildPdfFileName(
+        buildPdfFileNameForBusinessEntry(candidate, { businessName: user.businessName })
+      );
+      await pdfService.share({ uri: candidate.pdfUri, fileName });
+    },
+    [cashShareReady, user]
+  );
+
   const onPdf = useCallback(async () => {
     if (!user) return;
     setActionError(null);
     shareRecovery.markPending();
     setExporting(true);
     try {
+      if (entry.entryType === "business_cash_given") {
+        if (isPdfRenderInFlight(entry.id) && !cashShareReady(entry)) {
+          setActionError(t("composer.cashPaidPdfNotReady"));
+          return;
+        }
+        if (cashShareReady(entry)) {
+          await shareReadyPdf(entry);
+          return;
+        }
+        const updated = await regenerateEntryPdf(user.uid, entry, {
+          user,
+          locale,
+          uiLang: lang,
+          t,
+          fileNameHint: t("pdf.entryFileNameHint", { date: "{{date}}" }),
+        });
+        setEntry(updated);
+        if (!cashShareReady(updated)) {
+          setActionError(t("composer.cashPaidPdfNotReady"));
+          return;
+        }
+        await shareReadyPdf(updated);
+        return;
+      }
       if (entry.pdfUri) {
-        const fileName = buildPdfFileName(
-          buildPdfFileNameForBusinessEntry(entry, { businessName: user.businessName })
-        );
-        await pdfService.share({ uri: entry.pdfUri, fileName });
+        await shareReadyPdf(entry);
         return;
       }
       const updated = await regenerateEntryPdf(user.uid, entry, {
@@ -130,12 +189,47 @@ export function ComposerSaveSuccess({
         fileNameHint: t("pdf.entryFileNameHint", { date: "{{date}}" }),
       });
       setEntry(updated);
-      if (updated.pdfUri) {
-        const fileName = buildPdfFileName(
-          buildPdfFileNameForBusinessEntry(updated, { businessName: user.businessName })
-        );
-        await pdfService.share({ uri: updated.pdfUri, fileName });
+      if (updated.pdfUri) await shareReadyPdf(updated);
+    } catch (e) {
+      if (e instanceof ReceiptPhotoUnavailableError) {
+        setOfferWithoutPhoto(true);
+        setActionError(t("composer.cashPaidPdfPhotoUnavailable"));
+        return;
       }
+      if (!isShareUserCancelled(e)) {
+        const msg = userFacingMessage(e) || t("pdf.entryExportFailed");
+        setActionError(msg);
+        feedback.showError(msg, t("composer.saveSuccess.exportFailedTitle"));
+      }
+    } finally {
+      shareRecovery.clearPending();
+      setExporting(false);
+    }
+  }, [entry, user, locale, t, feedback, shareRecovery, lang, cashShareReady, shareReadyPdf]);
+
+  const onPdfWithoutPhoto = useCallback(async () => {
+    if (!user || entry.entryType !== "business_cash_given") return;
+    setActionError(null);
+    shareRecovery.markPending();
+    setExporting(true);
+    try {
+      const updated = await regenerateEntryPdf(user.uid, entry, {
+        user,
+        locale,
+        uiLang: lang,
+        t,
+        fileNameHint: t("pdf.entryFileNameHint", { date: "{{date}}" }),
+        allowWithoutPhoto: true,
+      });
+      setEntry(updated);
+      if (!updated.pdfUri) {
+        setActionError(t("composer.cashPaidPdfNotReady"));
+        return;
+      }
+      const fileName = buildPdfFileName(
+        buildPdfFileNameForBusinessEntry(updated, { businessName: user.businessName })
+      );
+      await pdfService.share({ uri: updated.pdfUri, fileName });
     } catch (e) {
       if (!isShareUserCancelled(e)) {
         const msg = userFacingMessage(e) || t("pdf.entryExportFailed");
@@ -146,11 +240,16 @@ export function ComposerSaveSuccess({
       shareRecovery.clearPending();
       setExporting(false);
     }
-  }, [entry, user, locale, t, feedback, shareRecovery]);
+  }, [entry, user, locale, lang, t, feedback, shareRecovery]);
 
-  const pdfLabel = entry.pdfUri
-    ? t("composer.saveSuccess.viewPdf")
-    : t("composer.saveSuccess.generatePdf");
+  const synced = shouldDisplayRemoteSynced(cloudAccepted);
+  const statusLabel = saveStatus ? t(`composer.saveStatus.${saveStatus}`) : null;
+  const pdfLabel =
+    entry.entryType === "business_cash_given" && !cashShareReady(entry)
+      ? t("composer.saveSuccess.generatePdf")
+      : entry.pdfUri
+        ? t("composer.saveSuccess.viewPdf")
+        : t("composer.saveSuccess.generatePdf");
 
   const localWarning =
     !cloudAccepted
@@ -169,8 +268,8 @@ export function ComposerSaveSuccess({
 
   return (
     <PremiumSuccessPrompt
-      title={cloudAccepted ? t("composer.saveSuccess.title") : t("sync.savedLocallyTitle")}
-      subtitle={entry.title}
+      title={synced ? t("composer.saveSuccess.title") : t("sync.savedLocallyTitle")}
+      subtitle={statusLabel ? `${statusLabel} — ${entry.title}` : entry.title}
       warning={localWarning}
       accentKey={accentKeyForEntryType(entry.entryType)}
       trustMessages={[
@@ -191,6 +290,15 @@ export function ComposerSaveSuccess({
         disabled={exporting}
         onPress={() => void onPdf()}
       />
+      {offerWithoutPhoto ? (
+        <PremiumActionButton
+          label={t("composer.cashPaidPdfWithoutPhoto")}
+          variant="secondary"
+          loading={exporting}
+          disabled={exporting}
+          onPress={() => void onPdfWithoutPhoto()}
+        />
+      ) : null}
       <PremiumActionButton
         label={t("common.shareText")}
         variant="glass"

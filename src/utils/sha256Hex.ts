@@ -42,11 +42,9 @@ function gamma1(x: number): number {
   return rotr(17, x) ^ rotr(19, x) ^ (x >>> 10);
 }
 
-/** UTF-8 bytes → SHA-256 hex (lowercase). */
-export function sha256Hex(message: string): string {
-  const utf8 = unescape(encodeURIComponent(message));
+function sha256HexFromBytes(bytesIn: ArrayLike<number>): string {
   const bytes: number[] = [];
-  for (let i = 0; i < utf8.length; i++) bytes.push(utf8.charCodeAt(i) & 0xff);
+  for (let i = 0; i < bytesIn.length; i++) bytes.push(bytesIn[i]! & 0xff);
 
   const bitLen = bytes.length * 8;
   bytes.push(0x80);
@@ -113,4 +111,17 @@ export function sha256Hex(message: string): string {
   return [h0, h1, h2, h3, h4, h5, h6, h7]
     .map((n) => n.toString(16).padStart(8, "0"))
     .join("");
+}
+
+/** UTF-8 bytes → SHA-256 hex (lowercase). */
+export function sha256Hex(message: string): string {
+  const utf8 = unescape(encodeURIComponent(message));
+  const bytes: number[] = [];
+  for (let i = 0; i < utf8.length; i++) bytes.push(utf8.charCodeAt(i) & 0xff);
+  return sha256HexFromBytes(bytes);
+}
+
+/** Raw bytes → SHA-256 hex (lowercase). Does not UTF-8-reinterpret the input. */
+export function sha256HexBytes(data: Uint8Array): string {
+  return sha256HexFromBytes(data);
 }
