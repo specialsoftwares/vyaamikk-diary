@@ -71,10 +71,6 @@ export const LANDING_VALUE_PROFESSIONAL = [
     body: "Prepare structured briefs for CA, tax, compliance and legal review.",
   },
   {
-    title: "Letterhead Documents",
-    body: "Write on your own uploaded letterhead without platform branding.",
-  },
-  {
     title: "Work & Team Notes",
     body: "Capture staff notes, work updates and follow-ups without clutter.",
   },
