@@ -5,9 +5,11 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import crypto from "node:crypto";
+import net from "node:net";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import Module, { createRequire } from "node:module";
-import { deflateSync, inflateSync } from "node:zlib";
+import { deflateSync } from "node:zlib";
 import path from "node:path";
 
 import type { BusinessEntry } from "@/domain/businessEntry";
@@ -151,72 +153,81 @@ function brandingFor(legal: UserPdfBranding["legal"]): UserPdfBranding {
   };
 }
 
-function paeth(a: number, b: number, c: number): number {
-  const p = a + b - c;
-  const pa = Math.abs(p - a);
-  const pb = Math.abs(p - b);
-  const pc = Math.abs(p - c);
-  if (pa <= pb && pa <= pc) return a;
-  if (pb <= pc) return b;
-  return c;
-}
-
-function decodePng(buf: Buffer): { w: number; h: number; rgba: Buffer } {
-  let offset = 8;
-  let width = 0;
-  let height = 0;
-  let color = 0;
-  const idats: Buffer[] = [];
-  while (offset + 8 <= buf.length) {
-    const len = buf.readUInt32BE(offset);
-    const type = buf.subarray(offset + 4, offset + 8).toString("ascii");
-    const data = buf.subarray(offset + 8, offset + 8 + len);
-    if (type === "IHDR") {
-      width = data.readUInt32BE(0);
-      height = data.readUInt32BE(4);
-      color = data[9] ?? 0;
-    } else if (type === "IDAT") idats.push(Buffer.from(data));
-    else if (type === "IEND") break;
-    offset += 12 + len;
-  }
-  const channels = color === 6 ? 4 : 3;
-  const inflated = inflateSync(Buffer.concat(idats));
-  const stride = width * channels;
-  const rows: Buffer[] = [];
-  let src = 0;
-  for (let y = 0; y < height; y += 1) {
-    const filter = inflated[src] ?? 0;
-    src += 1;
-    const row = Buffer.alloc(stride);
-    const raw = inflated.subarray(src, src + stride);
-    src += stride;
-    const prev = rows[y - 1];
-    for (let i = 0; i < stride; i += 1) {
-      const left = i >= channels ? row[i - channels] ?? 0 : 0;
-      const up = prev?.[i] ?? 0;
-      const ul = i >= channels ? prev?.[i - channels] ?? 0 : 0;
-      const value = raw[i] ?? 0;
-      if (filter === 1) row[i] = (value + left) & 255;
-      else if (filter === 2) row[i] = (value + up) & 255;
-      else if (filter === 3) row[i] = (value + Math.floor((left + up) / 2)) & 255;
-      else if (filter === 4) row[i] = (value + paeth(left, up, ul)) & 255;
-      else row[i] = value;
-    }
-    rows.push(row);
-  }
-  const rgba = Buffer.alloc(width * height * 4);
-  for (let y = 0; y < height; y += 1) {
-    const row = rows[y]!;
-    for (let x = 0; x < width; x += 1) {
-      const s = x * channels;
-      const d = (y * width + x) * 4;
-      rgba[d] = row[s] ?? 0;
-      rgba[d + 1] = row[s + 1] ?? 0;
-      rgba[d + 2] = row[s + 2] ?? 0;
-      rgba[d + 3] = channels === 4 ? row[s + 3] ?? 255 : 255;
-    }
-  }
-  return { w: width, h: height, rgba };
+function openCdp(wsUrl: string): Promise<{
+  send: (method: string, params?: object) => Promise<{ result?: { value?: unknown }; data?: string }>;
+  close: () => void;
+}> {
+  const url = new URL(wsUrl);
+  const key = crypto.randomBytes(16).toString("base64");
+  return new Promise((resolve, reject) => {
+    const socket = net.connect({ host: url.hostname, port: Number(url.port) });
+    let buffered = Buffer.alloc(0);
+    const pending = new Map<number, (value: { result?: { value?: unknown }; data?: string }) => void>();
+    let nextId = 0;
+    let opened = false;
+    const send = (method: string, params?: object) => {
+      const id = ++nextId;
+      const payload = Buffer.from(JSON.stringify({ id, method, params }));
+      const mask = crypto.randomBytes(4);
+      const masked = Buffer.alloc(payload.length);
+      for (let i = 0; i < payload.length; i += 1) masked[i] = payload[i]! ^ mask[i % 4]!;
+      let header: Buffer;
+      if (payload.length < 126) header = Buffer.from([0x81, 0x80 | payload.length]);
+      else {
+        header = Buffer.alloc(4);
+        header[0] = 0x81;
+        header[1] = 0x80 | 126;
+        header.writeUInt16BE(payload.length, 2);
+      }
+      socket.write(Buffer.concat([header, mask, masked]));
+      return new Promise<{ result?: { value?: unknown }; data?: string }>((done) => pending.set(id, done));
+    };
+    const takeFrame = () => {
+      if (buffered.length < 2) return;
+      let length = buffered[1]! & 127;
+      let start = 2;
+      if (length === 126) {
+        if (buffered.length < 4) return;
+        length = buffered.readUInt16BE(2);
+        start = 4;
+      } else if (length === 127) {
+        if (buffered.length < 10) return;
+        length = Number(buffered.readBigUInt64BE(2));
+        start = 10;
+      }
+      if (buffered.length < start + length) return;
+      const payload = buffered.subarray(start, start + length);
+      buffered = buffered.subarray(start + length);
+      const message = JSON.parse(payload.toString("utf8")) as {
+        id?: number;
+        result?: { result?: { value?: unknown }; data?: string };
+      };
+      if (message.id != null) {
+        const result = message.result ?? {};
+        pending.get(message.id)?.({ result: result.result, data: result.data });
+      }
+      takeFrame();
+    };
+    socket.on("data", (chunk: Buffer | string) => {
+      const bytes = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+      if (!opened) {
+        buffered = Buffer.concat([buffered, bytes]);
+        const headerEnd = buffered.indexOf("\r\n\r\n");
+        if (headerEnd < 0) return;
+        opened = true;
+        buffered = buffered.subarray(headerEnd + 4);
+        resolve({ send, close: () => socket.end() });
+        takeFrame();
+        return;
+      }
+      buffered = Buffer.concat([buffered, bytes]);
+      takeFrame();
+    });
+    socket.on("error", reject);
+    socket.write(
+      `GET ${url.pathname} HTTP/1.1\r\nHost: ${url.host}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ${key}\r\nSec-WebSocket-Version: 13\r\n\r\n`
+    );
+  });
 }
 
 function chromeBin(): string | null {
@@ -236,64 +247,104 @@ function chromeBin(): string | null {
   return bin || null;
 }
 
-function inspectWithChrome(name: string, html: string, expect: { r: number; g: number; b: number }) {
+async function inspectWithChrome(name: string, html: string, expect: { r: number; g: number; b: number }) {
   const bin = chromeBin();
   assert.ok(bin, `${name}: Chrome/Chromium is required when puppeteer is not installed`);
   const htmlPath = path.join(OUT, `${name}.html`);
   const pngPath = path.join(OUT, `${name}.png`);
   const pdfPath = path.join(OUT, `${name}.pdf`);
   writeFileSync(htmlPath, html);
-  const shot = spawnSync(bin, [
+  const port = 9400 + (name.length % 50);
+  const chrome = spawnSync(bin, ["--version"], { encoding: "utf8" });
+  assert.equal(chrome.status, 0, `${name} chrome did not start`);
+  const { spawn } = await import("node:child_process");
+  const child = spawn(bin, [
     "--headless=new",
     "--disable-gpu",
     "--no-sandbox",
     "--hide-scrollbars",
-    "--force-device-scale-factor=1",
-    "--window-size=1280,2200",
-    `--screenshot=${pngPath}`,
-    `file://${htmlPath}`,
-  ], { encoding: "utf8", timeout: 60_000 });
-  assert.equal(shot.status, 0, `${name} screenshot failed`);
-  const image = decodePng(readFileSync(pngPath));
-  let minX = image.w;
-  let minY = image.h;
-  let maxX = 0;
-  let maxY = 0;
-  let blue = 0;
-  const near = (actual: number, expected: number) => Math.abs(actual - expected) < 70;
-  for (let y = 0; y < image.h; y += 1) {
-    for (let x = 0; x < image.w; x += 1) {
-      const i = (y * image.w + x) * 4;
-      const r = image.rgba[i] ?? 0;
-      const g = image.rgba[i + 1] ?? 0;
-      const b = image.rgba[i + 2] ?? 0;
-      if (near(r, expect.r) && near(g, expect.g) && near(b, expect.b)) {
-        if (x < minX) minX = x;
-        if (y < minY) minY = y;
-        if (x > maxX) maxX = x;
-        if (y > maxY) maxY = y;
+    `--remote-debugging-port=${port}`,
+    "about:blank",
+  ], { stdio: "ignore" });
+  try {
+    let pageWs = "";
+    for (let attempt = 0; attempt < 40 && !pageWs; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      try {
+        await fetch(`http://127.0.0.1:${port}/json/new?${encodeURIComponent(`file://${htmlPath}`)}`, { method: "PUT" });
+        const pages = (await fetch(`http://127.0.0.1:${port}/json/list`).then((res) => res.json())) as {
+          type?: string;
+          webSocketDebuggerUrl?: string;
+          url?: string;
+        }[];
+        pageWs =
+          pages.find((page) => page.type === "page" && page.url?.startsWith("file:"))?.webSocketDebuggerUrl ??
+          pages.find((page) => page.type === "page")?.webSocketDebuggerUrl ??
+          "";
+      } catch {
+        pageWs = "";
       }
-      if (b > 180 && r < 80 && g < 80) blue += 1;
     }
+    assert.ok(pageWs, `${name} debugger did not open`);
+    const cdp = await openCdp(pageWs);
+    const send = cdp.send.bind(cdp);
+    await send("Page.enable");
+    await send("Page.navigate", { url: `file://${htmlPath}` });
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await send("Runtime.enable");
+    const evaluated = await send("Runtime.evaluate", {
+      awaitPromise: true,
+      returnByValue: true,
+      expression: `(() => {
+        const img = document.querySelector("img");
+        if (!img) return null;
+        const ready = img.complete && img.naturalWidth > 0 ? Promise.resolve() : new Promise((resolve) => { img.onload = () => resolve(null); img.onerror = () => resolve(null); });
+        return ready.then(() => {
+          const canvas = document.createElement("canvas");
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) return null;
+          ctx.drawImage(img, 0, 0);
+          const mark = ctx.getImageData(2, 2, 1, 1).data;
+          const field = ctx.getImageData(img.naturalWidth - 2, img.naturalHeight - 2, 1, 1).data;
+          const box = img.getBoundingClientRect();
+          return { mark: [mark[0], mark[1], mark[2]], field: [field[0], field[1], field[2]], natural: { w: img.naturalWidth, h: img.naturalHeight }, box: { w: box.width, h: box.height } };
+        });
+      })()`,
+    });
+    const sample = evaluated.result?.value as {
+      mark: number[];
+      field: number[];
+      natural: { w: number; h: number };
+      box: { w: number; h: number };
+    } | null;
+    assert.ok(sample, `${name} image did not decode`);
+    assert.equal(sample.mark[2]! > 200 && sample.mark[0]! < 40, true, `${name} marker pixel`);
+    const near = (actual: number, expectedColor: number) => Math.abs(actual - expectedColor) < 60;
+    assert.equal(
+      near(sample.field[0] ?? 0, expect.r) && near(sample.field[1] ?? 0, expect.g) && near(sample.field[2] ?? 0, expect.b),
+      true,
+      `${name} field pixel`
+    );
+    assert.ok(Math.abs(sample.box.w / sample.box.h - sample.natural.w / sample.natural.h) < 0.08, `${name} rendered image is clipped`);
+    assert.ok(sample.box.h > 80, `${name} rendered image is too small`);
+    const printed = await send("Page.printToPDF", {
+      printBackground: true,
+      paperWidth: 8.27,
+      paperHeight: 11.69,
+    });
+    const pdfBytes = Buffer.from(printed.data ?? "", "base64");
+    assert.equal(pdfBytes.subarray(0, 4).toString("ascii"), "%PDF");
+    assert.ok(pdfBytes.byteLength > 2000, `${name} PDF too small`);
+    writeFileSync(pdfPath, pdfBytes);
+    const shot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: true });
+    writeFileSync(pngPath, Buffer.from(shot.data ?? "", "base64"));
+    cdp.close();
+    return { pdfBytes: pdfBytes.byteLength, box: sample.box };
+  } finally {
+    child.kill();
   }
-  const boxW = maxX - minX + 1;
-  const boxH = maxY - minY + 1;
-  assert.ok(boxH > 80, `${name} rendered image is too small`);
-  assert.ok(Math.abs(boxW / boxH - 280 / 180) < 0.2, `${name} rendered image is clipped`);
-  assert.ok(blue > 10, `${name} corner marker is missing`);
-  const printed = spawnSync(bin, [
-    "--headless=new",
-    "--disable-gpu",
-    "--no-sandbox",
-    "--no-pdf-header-footer",
-    `--print-to-pdf=${pdfPath}`,
-    `file://${htmlPath}`,
-  ], { encoding: "utf8", timeout: 60_000 });
-  assert.equal(printed.status, 0, `${name} PDF failed`);
-  const pdfBytes = readFileSync(pdfPath);
-  assert.equal(pdfBytes.subarray(0, 4).toString("ascii"), "%PDF");
-  assert.ok(pdfBytes.byteLength > 2000, `${name} PDF too small`);
-  return { pdfBytes: pdfBytes.byteLength, box: { w: boxW, h: boxH } };
 }
 
 async function inspect(name: string, html: string, expect: { r: number; g: number; b: number }) {
