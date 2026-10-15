@@ -1063,7 +1063,7 @@ const en = {
     title: "Settings & Info",
     tabLabel: "Settings",
     heroKicker: "Command centre",
-    heroSubtitle: "Account, identity, statutory dates and app preferences",
+    heroSubtitle: "Account, identity, billing and app preferences",
     sectionStatutory: "Statutory information",
     statutoryItem: "Statutory Information",
     statutorySubtitle: "GST, tax, TDS and LLP due-date information",

@@ -124,6 +124,73 @@ function testInstallmentRejected() {
   if (!selected.ok) assert.equal(selected.reason, "installment");
 }
 
+function testOpenIapBasePlanLabelDoesNotHideThePaidPrice() {
+  const selected = selectStandardAndroidOffer({
+    offers: [
+      standardOffer("monthly", {
+        type: "introductory",
+        paymentMode: "pay-as-you-go",
+      }),
+    ],
+    expectedBasePlanId: "monthly",
+  });
+  assert.equal(selected.ok, true);
+  if (selected.ok) {
+    assert.equal(selected.offer.basePlanId, "monthly");
+    assert.equal(selected.offer.displayPrice, "₹store-monthly");
+    assert.equal(selected.offer.offerToken, "token-monthly");
+  }
+  const catalog = mapStoreProductsToCatalog({
+    platform: "android",
+    products: [
+      {
+        id: "vyd_starter",
+        type: "subs",
+        platform: "android",
+        displayPrice: "IGNORE",
+        currency: "INR",
+        subscriptionOffers: [
+          standardOffer("monthly", {
+            type: "introductory",
+            paymentMode: "pay-as-you-go",
+          }),
+        ],
+      },
+    ],
+  });
+  const starter = catalog.find((row) => row.canonicalSku === "vyd_starter_monthly");
+  assert.ok(starter);
+  assert.equal(starter?.available, true);
+  assert.equal(starter?.displayPrice, "₹store-monthly");
+  assert.equal(starter?.unavailableReason, null);
+}
+
+function testIntroductoryZeroPriceStillRejected() {
+  const selected = selectStandardAndroidOffer({
+    offers: [
+      standardOffer("monthly", {
+        type: "introductory",
+        paymentMode: "free-trial",
+        pricingPhasesAndroid: {
+          pricingPhaseList: [
+            {
+              billingCycleCount: 0,
+              billingPeriod: "P1M",
+              formattedPrice: "₹0",
+              priceAmountMicros: "0",
+              priceCurrencyCode: "INR",
+              recurrenceMode: 1,
+            },
+          ],
+        },
+      }),
+    ],
+    expectedBasePlanId: "monthly",
+  });
+  assert.equal(selected.ok, false);
+  if (!selected.ok) assert.equal(selected.reason, "trial_or_promo");
+}
+
 function testMissingOffers() {
   const selected = selectStandardAndroidOffer({
     offers: [],
@@ -227,6 +294,8 @@ function main() {
   testMissingOfferTokenFails();
   testTrialPhaseRejected();
   testInstallmentRejected();
+  testOpenIapBasePlanLabelDoesNotHideThePaidPrice();
+  testIntroductoryZeroPriceStillRejected();
   testMissingOffers();
   testStoreLocalizedCatalogPrice();
   testSuccessfulPriceUsesProductDetailsFormattedPrice();

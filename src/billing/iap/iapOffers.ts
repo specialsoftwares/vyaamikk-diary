@@ -20,7 +20,12 @@ function nonempty(value: string | null | undefined): value is string {
 }
 
 function isTrialOrPromoOffer(offer: AndroidSubscriptionOfferLike): boolean {
-  if (offer.type === "introductory" || offer.type === "promotional") return true;
+  // OpenIAP 3.5.1 sets type "introductory" for every Play base plan whose
+  // offerId is null, including the standard paid price. The phase checks
+  // below decide whether that row is a trial. A real promotional offer keeps
+  // its own offer id and is excluded before this runs; this still rejects a
+  // promotional label that was copied onto the base-plan id.
+  if (offer.type === "promotional") return true;
   if (offer.paymentMode === "free-trial") return true;
   const phases = offer.pricingPhasesAndroid?.pricingPhaseList ?? [];
   if (phases.length === 0) return true;
