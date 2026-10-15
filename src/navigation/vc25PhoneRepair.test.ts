@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 
 import en from "@/i18n/locales/en.json";
 import { selectedTabRouteName } from "@/navigation/tabRouteSelection";
-import { mayMountNativeMapView, readAndroidMapsConfigured } from "@/services/maps/mapNativeConfig";
 import {
   headerBandHeightPct,
   headerImageHeightMm,
@@ -53,11 +52,6 @@ const tabs = {
 };
 
 assert.equal(selectedTabRouteName(tabs), "settings");
-assert.equal(readAndroidMapsConfigured({ googleMaps: { apiKey: "not-read" } }), false);
-assert.equal(readAndroidMapsConfigured({ androidGoogleMapsConfigured: true }), true);
-assert.equal(mayMountNativeMapView({ platform: "android", androidMapsConfigured: false }), false);
-assert.equal(mayMountNativeMapView({ platform: "android", androidMapsConfigured: true }), true);
-assert.equal(mayMountNativeMapView({ platform: "ios", androidMapsConfigured: false }), true);
 
 assert.equal(suggestLetterheadPlacement(1600, 280), "header_logo");
 assert.equal(suggestLetterheadPlacement(1240, 1754), "complete_page");

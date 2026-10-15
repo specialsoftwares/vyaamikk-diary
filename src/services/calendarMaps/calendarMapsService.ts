@@ -334,6 +334,3 @@ export function buildCalendarDayView(
   const totalCount = sections.reduce((n, s) => n + s.data.length, 0);
   return { dateKey, sections, totalCount, isEmpty: totalCount === 0 };
 }
-
-/** @deprecated Use `buildMapMarkerRecordsAsync` for GPS + PIN approximate markers. */
-export { buildMapMarkerRecordsAsync } from "./mapMarkerRecords";
