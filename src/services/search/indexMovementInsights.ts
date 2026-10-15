@@ -7,22 +7,18 @@ import { categoryLabelKey, iconForCategory } from "./indexDocuments";
 
 export function indexMovementRecord(
   movement: MovementDistanceRecord,
-  t: (k: string, vars?: Record<string, string | number>) => string
+  _t: (k: string, vars?: Record<string, string | number>) => string
 ): IndexedSearchItem {
   const route = movement.routeLabel ?? `${movement.fromPin} → ${movement.toPin}`;
-  const dist =
-    movement.approxDistanceKm != null
-      ? t("businessInsights.routeKm", { km: movement.approxDistanceKm })
-      : "";
   const searchableText = normalizeSearchText(
-    [route, movement.fromPin, movement.toPin, movement.fromLabel, movement.toLabel, dist]
+    [route, movement.fromPin, movement.toPin, movement.fromLabel, movement.toLabel]
       .filter(Boolean)
       .join(" ")
   );
   const snippet =
     movement.fromLabel && movement.toLabel
       ? `${movement.fromLabel} · ${movement.toLabel}`
-      : dist || route;
+      : route;
   return {
     searchableText,
     result: {

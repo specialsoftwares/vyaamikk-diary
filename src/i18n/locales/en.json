@@ -288,7 +288,6 @@
     "viewAllAttention": "View all ({{count}})",
     "viewAllDocuments": "All records ({{count}})",
     "viewAllDocumentsShort": "All records",
-    "letterheadHistoryLink": "Letterhead history",
     "pickerTitle": "New record",
     "pickerSubtitle": "Select a record type.",
     "pickerHeadline": "Select the record you want to enter"
@@ -445,21 +444,19 @@
     "noneTitle": "No entries for this date",
     "noneMessage": "Add an entry to start filling your calendar.",
     "monthHeader": "{{month}} {{year}}",
-    "viewOnMap": "View on map"
+    "viewOnMap": "Open the record"
   },
   "calendarMaps": {
     "tabLabel": "VyaaFlow",
     "vyaaflow": {
       "screenTitle": "VyaaFlow",
-      "intro": "Dates, dues and freight PIN areas for this business.",
+      "intro": "Business records, dues, follow-ups and reminders.",
       "showDetails": "Show details",
       "hideDetails": "Hide details",
       "calendarSection": "Important Business Dates",
-      "mapSection": "Business PINs",
       "paragraphs": {
         "businessDates": "Vyaamikk Diary keeps your business dates in one place. Records, dues, follow-ups and reminders appear in Important Business Dates, helping you review what happened and what is coming up.",
-        "statutory": "Statutory reminders show standard GST, income-tax, TDS/TCS and LLP due dates for reference. They are informational only. Check applicability and the final date on the official portal or with your CA, CS or tax professional.",
-        "businessPins": "Business PINs organises freight and dispatch records by their From and To PIN codes. Locations represent approximate postal areas, not live tracking."
+        "statutory": "Statutory reminders show standard GST, income-tax, TDS/TCS and LLP due dates for reference. They are informational only. Check applicability and the final date on the official portal or with your CA, CS or tax professional."
       },
       "detectMyPin": {
         "action": "Detect my PIN",
@@ -475,22 +472,21 @@
         "unavailable": "Couldn't suggest a PIN from this location. You can type it.",
         "keptManual": "Kept the PIN you typed."
       },
-      "pinList": {
-        "empty": "Freight and dispatch records with From and To PINs will show here. A map is optional.",
-        "approximate": "Approximate postal area",
-        "from": "From",
-        "to": "To",
-        "unplotted": "PIN saved. Map position is unavailable.",
-        "invalid": "This PIN can't be placed. The record stays in the list.",
-        "mapNote": "Markers show approximate postal areas for saved From and To PINs. They are not roads, routes, or proof of delivery.",
-        "mapEmpty": "No approximate postal areas are on the map yet. Saved From and To PINs stay in the list."
+      "introCompact": "Business records, dues, follow-ups and reminders.",
+      "filters": {
+        "all": "All",
+        "myBusiness": "My business",
+        "statutory": "Statutory"
+      },
+      "statutoryReference": {
+        "title": "Statutory reference"
       }
     },
     "screenTitle": "VyaaFlow",
-    "screenSubtitle": "Important business dates and approximate PIN areas",
-    "screenLead": "Dates, dues and freight PIN areas for this business.",
+    "screenSubtitle": "Business dates and statutory reminders",
+    "screenLead": "Business records, dues, follow-ups and reminders.",
     "modeCalendar": "Important Business Dates",
-    "modeMap": "Business PINs",
+    "modeMap": "VyaaFlow",
     "loadError": "Couldn't load calendar records.",
     "dayEmptyTitle": "No records on this date",
     "dayEmptyMessage": "Create a new business record, reminder, payment request, freight detail or work note when required.",
@@ -501,7 +497,7 @@
       "staff": "Staff",
       "work": "Work",
       "reminders": "GST / email / purchase reminders",
-      "letterhead": "Letterhead / documents",
+      "letterhead": "Saved letters",
       "proPacks": "Professional packs",
       "statutory": "Statutory reminders"
     },
@@ -794,8 +790,6 @@
       "purchaseOrderSub": "Issue an official PO with a fixed serial number.",
       "customerCredit": "Dukaan",
       "customerCreditSub": "Track customer credit, EMI, and shop sales.",
-      "letterheadMatter": "Letterhead",
-      "letterheadMatterSub": "Write an A4 letter on your saved letterhead.",
       "workAndTeam": "Work & Team Notes",
       "workAndTeamSub": "Staff notes, daily updates, and follow-ups.",
       "workUpdate": "Work update",
@@ -1077,7 +1071,7 @@
     "appearanceDark": "Dark",
     "sectionInsights": "Your business",
     "businessInsightsItem": "Business Insights",
-    "businessInsightsSubtitle": "Customers, routes, distance and patterns from your records",
+    "businessInsightsSubtitle": "Money, goods, customers and records for the selected year",
     "profileSection": "Profile",
     "profileIdentityItem": "Profile & Business Identity",
     "profileIdentitySubtitle": "Vyaamikk ID, business details, logo and PDF branding",
@@ -3017,8 +3011,7 @@
       "freePlanName": "Free",
       "entitlementInactive": "No paid entitlement",
       "entitlementUnlimited": "Unlimited records this month",
-      "entitlementLimit": "Up to {{limit}} records this month",
-      "letterheadIncluded": "Letterhead is free for every account for 12 months from signup. No paid plan is required, and it does not use your ordinary monthly record allowance. Access stays free under the current policy, with no automatic charge at the anniversary."
+      "entitlementLimit": "Up to {{limit}} records this month"
     },
     "education": {
       "title": "Why keep records in Vyaamikk Diary",
@@ -3519,5 +3512,18 @@
     "returnAvailabilityUnavailable": "The confirmed balance is not available yet. Save stays closed until it reloads.",
     "returnAvailabilityRetry": "Retry confirmed balance",
     "returnConfirmedVersion": "Confirmed version"
+  },
+  "insights": {
+    "categories": {
+      "moneyDues": "Money & Dues",
+      "moneyDuesHint": "Cash, requests, dues, orders, invoices, and brief amounts. These stay separate figures.",
+      "goodsMovement": "Goods & Movement",
+      "goodsMovementHint": "Receipt, dispatch, and return quantities and status.",
+      "customersParties": "Customers & Parties",
+      "customersPartiesHint": "Parties and shop customers from your records.",
+      "workRecords": "Work & Records",
+      "workRecordsHint": "Work notes, letters, reminders, and open drafts.",
+      "unknown": "This category is not available."
+    }
   }
 }

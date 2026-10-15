@@ -4,7 +4,6 @@ import { useRouter } from "expo-router";
 import Constants from "expo-constants";
 
 import {
-  SettingsAccountAppPanel,
   SettingsInfoHero,
   SettingsNavCard,
   SettingsNavGroup,
@@ -21,7 +20,7 @@ import { spacing, typography, useThemedStyles } from "@/theme";
 export default function SettingsTab() {
   const t = useT();
   const router = useRouter();
-  const { user, session, signOut, status } = useAuth();
+  const { signOut, status } = useAuth();
   const [signingOut, setSigningOut] = useState(false);
 
   const styles = useThemedStyles((colors) =>
@@ -90,10 +89,6 @@ export default function SettingsTab() {
     [router]
   );
   const onLegalHub = useCallback(() => router.push("/(app)/settings/legal"), [router]);
-  const onStatutory = useCallback(
-    () => router.push({ pathname: "/statutory", params: { from: "settings" } }),
-    [router]
-  );
   const onAbout = useCallback(() => router.push("/(app)/settings/about"), [router]);
   const onDisclaimer = useCallback(
     () => router.push("/(app)/settings/disclaimer"),
@@ -145,7 +140,6 @@ export default function SettingsTab() {
       />
 
       <LocaleUiText style={styles.sectionLabel}>{t("settings.sectionAccountApp")}</LocaleUiText>
-      <SettingsAccountAppPanel user={user} sessionLastActive={session?.lastActiveAt} />
       <SettingsNavCard
         icon="account-remove-outline"
         title={t("settings.deleteAccountAndData")}
@@ -160,15 +154,6 @@ export default function SettingsTab() {
         title={t("settings.businessInsightsItem")}
         subtitle={t("settings.businessInsightsSubtitle")}
         onPress={onBusinessInsights}
-      />
-
-      <LocaleUiText style={styles.sectionLabel}>{t("settings.sectionStatutory")}</LocaleUiText>
-      <SettingsNavCard
-        icon="file-document-outline"
-        title={t("settings.statutoryItem")}
-        subtitle={t("settings.statutorySubtitle")}
-        onPress={onStatutory}
-        accent="statutory"
       />
 
       <LocaleUiText style={styles.sectionLabel}>{t("settings.sectionPrivacy")}</LocaleUiText>

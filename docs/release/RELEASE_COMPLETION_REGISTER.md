@@ -12,6 +12,22 @@ TOOLING (ops-guard suite; not application CI).
 
 ---
 
+## Product simplification candidate — source only, 15 Oct 2026
+
+This section is the integrated correction after the released Internal binary. It is not installed, not an EAS build, and not a Play upload. `app.json` still says versionCode 28 because that code is the released binary. Do not build or upload this source as versionCode 28. Recheck Play bundle explorer before assigning the next code. The existing Internal upload authorization covered `1ca361ca8c61e1b9b8e8182f22b4e38128556ee0` only.
+
+Letterhead is no longer offered on the landing page, the new-record picker, or the subscription screens. No replacement plan benefit was added. Saved letters, drafts, PDF share, ownership checks, and deletion stay. `/(app)/letterhead`, `setup`, and `generate` still redirect to history. `/(app)/letterhead/create` without a saved id redirects to history; with an id it stays the reader. Stored type names such as `letterhead_matter` are unchanged. The calendar section for those rows is labelled “Saved letters.”
+
+Business PINs, the map panel, marker clustering, and `react-native-maps` are removed. `app.config.js` does not read `GOOGLE_MAPS_ANDROID_API_KEY` and does not write a Maps key into the manifest or `extra`. The live Maps key was not revoked, because versionCode 28 still uses it. `expo-location` stays for the explicit Detect my PIN action on record forms. Manual From and To PIN fields stay. `/(app)/map` and Business Insights `pins` redirect to VyaaFlow. The distance screen redirects to Goods & Movement. Approximate kilometres are no longer shown on the year recap, search snippets, or the You identity card. The distance helper remains in the calculation code and is not a migration. Historic coordinates are not rewritten.
+
+VyaaFlow keeps the calendar, the day agenda, and filters for all records, this business, and statutory reminders. Statutory reference opens the existing `/statutory` library. Settings no longer has a Statutory Information row or Last Active. Previous visit stays on the You card. Subscription, account deletion, privacy, and sign-out stay in Settings.
+
+Business Insights overview keeps the year selector, one freshness line, summary cards, and four categories: Money & Dues, Goods & Movement, Customers & Parties, and Work & Records. Each figure’s explanation and record link open from its category. Customers & Parties has no engine id and opens the existing party and shop-customer lists.
+
+The upgrade sheet’s “Plans are unavailable” and “Purchases are not available in this build” lines are the store-catalog boundary. Server admission already opens the sheet while purchase-entry stays `0`. Those lines appear when Play Billing has no ready priced Starter monthly row. The wording was not changed. Restricted admission, session rechecks, restore, pending purchases, and server verification stay.
+
+Canonical CI for this source is not recorded in this paragraph. Coordinator checks are not independent QA. Native screenshots, a generated Android artifact, and Play-installed acceptance are not done. Maps infrastructure retirement is pending.
+
 ## Internal versionCode 28 — 15 Oct 2026
 
 Play bundle explorer, read before this freeze: 14 bundles. Highest uploaded version code is 27 (1.0.0). A search for 28 returned no bundle. `app.json` versionCode is now 28, version name stays 1.0.0. The `internal-grin` profile keeps purchase-entry and quota-upsell at `0`. The Maps key remains the existing EAS production secret and is not in git. This commit freezes that build. It is not the upload and not a public rollout. Restricted billing stays the one approved Firebase UID and the Starter monthly plan.

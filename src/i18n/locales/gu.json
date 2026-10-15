@@ -163,7 +163,6 @@
     "viewAllAttention": "બધા જુઓ ({{count}})",
     "viewAllDocuments": "બધા રેકોર્ડ્સ ({{count}})",
     "viewAllDocumentsShort": "બધા રેકોર્ડ",
-    "letterheadHistoryLink": "લેટરહેડ ઇતિહાસ",
     "pickerTitle": "નવો રેકોર્ડ",
     "pickerSubtitle": "રેકોર્ડ પ્રકાર પસંદ કરો.",
     "pickerHeadline": "તમે દાખલ કરવા માંગો છો તે રેકોર્ડ પસંદ કરો"
@@ -312,15 +311,13 @@
   "calendarMaps": {
     "vyaaflow": {
       "screenTitle": "VyaaFlow",
-      "intro": "આ વ્યવસાયની તારીખો, બાકી રકમ અને નૂરના પિન વિસ્તારો.",
+      "intro": "વ્યવસાય રેકોર્ડ, બાકી, ફોલો-અપ અને રિમાઇન્ડર.",
       "showDetails": "વિગતો બતાવો",
       "hideDetails": "વિગતો છુપાવો",
       "calendarSection": "મહત્વની વ્યવસાય તારીખો",
-      "mapSection": "બિઝનેસ પિન",
       "paragraphs": {
         "businessDates": "Vyaamikk Diary તમારી વ્યવસાય તારીખો એક જગ્યાએ રાખે છે. રેકોર્ડ, બાકી રકમ, ફોલો-અપ અને રિમાઇન્ડર મહત્વની વ્યવસાય તારીખોમાં દેખાય છે, જેથી તમે જોઈ શકો કે શું થયું અને આગળ શું આવનાર છે.",
-        "statutory": "વૈધાનિક રિમાઇન્ડર સંદર્ભ માટે માનક GST, આવકવેરા, TDS/TCS અને LLPની નિયત તારીખો બતાવે છે. આ ફક્ત માહિતી માટે છે. લાગુ પડતું હોવું અને અંતિમ તારીખ અધિકૃત પોર્ટલ પર અથવા તમારા CA, CS કે કર વ્યાવસાયિક પાસે ચકાસો.",
-        "businessPins": "બિઝનેસ પિન નૂર અને ડિસ્પેચ રેકોર્ડને તેમના From અને To પિન કોડ પ્રમાણે ગોઠવે છે. સ્થાન અંદાજિત ટપાલ વિસ્તારો છે, લાઇવ ટ્રેકિંગ નહીં."
+        "statutory": "વૈધાનિક રિમાઇન્ડર સંદર્ભ માટે માનક GST, આવકવેરા, TDS/TCS અને LLPની નિયત તારીખો બતાવે છે. આ ફક્ત માહિતી માટે છે. લાગુ પડતું હોવું અને અંતિમ તારીખ અધિકૃત પોર્ટલ પર અથવા તમારા CA, CS કે કર વ્યાવસાયિક પાસે ચકાસો."
       },
       "detectMyPin": {
         "action": "મારો પિન શોધો",
@@ -336,18 +333,17 @@
         "unavailable": "આ સ્થાનથી પિન સૂચવી શકાયો નહીં. તમે લખી શકો છો.",
         "keptManual": "તમે લખેલો પિન રાખ્યો."
       },
-      "pinList": {
-        "empty": "From અને To પિનવાળા નૂર અને ડિસ્પેચ રેકોર્ડ અહીં દેખાશે. નકશો વૈકલ્પિક છે.",
-        "approximate": "અંદાજિત ટપાલ વિસ્તાર",
-        "from": "From",
-        "to": "To",
-        "unplotted": "પિન સચવાયો. નકશા પર સ્થાન ઉપલબ્ધ નથી.",
-        "invalid": "આ પિન નકશા પર મૂકી શકાતો નથી. રેકોર્ડ યાદીમાં રહે છે.",
-        "mapNote": "માર્કર સચવાયેલા From અને To પિનના અંદાજિત ટપાલ વિસ્તાર બતાવે છે. આ રસ્તા, માર્ગ કે ડિલિવરીનો પુરાવો નથી.",
-        "mapEmpty": "નકશા પર હજુ કોઈ અંદાજિત ટપાલ વિસ્તાર નથી. સચવાયેલા From અને To પિન યાદીમાં રહે છે."
+      "introCompact": "વ્યવસાય રેકોર્ડ, બાકી, ફોલો-અપ અને રિમાઇન્ડર.",
+      "filters": {
+        "all": "બધું",
+        "myBusiness": "મારો વ્યવસાય",
+        "statutory": "વૈધાનિક"
+      },
+      "statutoryReference": {
+        "title": "વૈધાનિક સંદર્ભ"
       }
     },
-    "screenLead": "Select a date for categorized records, or open Map for GPS footprints and approximate PIN areas from freight/dispatch — not live tracking.",
+    "screenLead": "વ્યવસાય રેકોર્ડ, બાકી, ફોલો-અપ અને રિમાઇન્ડર.",
     "dayEmptyMessage": "Create a new business record, reminder, payment request, freight detail or work note when required.",
     "sections": {
       "freight": "Freight / dispatch",
@@ -357,7 +353,7 @@
       "materials": "સામગ્રી",
       "staff": "સ્ટાફ",
       "work": "કામ",
-      "letterhead": "લેટરહેડ / દસ્તાવેજો",
+      "letterhead": "સાચવેલા પત્રો",
       "proPacks": "વ્યવસાયિક પેક"
     },
     "permission": {
@@ -394,9 +390,9 @@
     },
     "tabLabel": "VyaaFlow",
     "screenTitle": "કેલેન્ડર અને નકશા",
-    "screenSubtitle": "તારીખ અને સ્થાન ફૂટપ્રિન્ટ્સ દ્વારા રેકોર્ડની સમીક્ષા કરો",
+    "screenSubtitle": "વ્યવસાય તારીખો અને વૈધાનિક રિમાઇન્ડર",
     "modeCalendar": "કેલેન્ડર",
-    "modeMap": "નકશો",
+    "modeMap": "VyaaFlow",
     "dayEmptyTitle": "આ તારીખે કોઈ રેકોર્ડ નથી",
     "location": {
       "sectionTitle": "GPS સ્થાન (વૈકલ્પિક)",
@@ -560,8 +556,6 @@
       "professionalPack": "વ્યાવસાયિક બ્રીફ",
       "professionalPackSub": "તમારા CA, CS અથવા વકીલની સમીક્ષા માટે હકીકતો એકત્ર કરો.",
       "customerCredit": "દુકાન",
-      "letterheadMatter": "લેટરહેડ",
-      "letterheadMatterSub": "સેવ કરેલા લેટરહેડ પર A4 પત્ર લખો.",
       "workAndTeam": "કામ અને ટીમ નોંધો",
       "workAndTeamSub": "સ્ટાફ નોંધો, દૈનિક અપડેટ અને ફોલો-અપ.",
       "workUpdate": "કામ અપડેટ",
@@ -839,7 +833,7 @@
     "statutorySubtitle": "GST, tax, TDS and LLP due-date information",
     "sectionInsights": "Your business",
     "businessInsightsItem": "વ્યવસાય અંતર્દૃષ્ટિ",
-    "businessInsightsSubtitle": "Customers, routes, distance and patterns from your records",
+    "businessInsightsSubtitle": "પસંદ કરેલા વર્ષના પૈસા, માલ, ગ્રાહકો અને રેકોર્ડ.",
     "title": "સેટિંગ્સ અને માહિતી",
     "tabLabel": "સેટિંગ્સ",
     "heroKicker": "કમાન્ડ સેન્ટર",
@@ -2534,7 +2528,7 @@
     "noneTitle": "આ તારીખ માટે કોઈ એન્ટ્રી નથી",
     "noneMessage": "તમારું કેલેન્ડર ભરવાનું શરૂ કરવા માટે એક એન્ટ્રી ઉમેરો.",
     "monthHeader": "{{મહિનો}} {{વર્ષ}}",
-    "viewOnMap": "નકશા પર જુઓ"
+    "viewOnMap": "રેકોર્ડ ખોલો"
   },
   "profile": {
     "title": "પ્રોફાઇલ",
@@ -3202,5 +3196,18 @@
     "returnAvailabilityUnavailable": "પુષ્ટિ થયેલ બાકી હજુ ઉપલબ્ધ નથી. તે ફરી લોડ થાય ત્યાં સુધી સેવ બંધ રહેશે.",
     "returnAvailabilityRetry": "પુષ્ટિ થયેલ બાકી ફરી જુઓ",
     "returnConfirmedVersion": "પુષ્ટિ આવૃત્તિ"
+  },
+  "insights": {
+    "categories": {
+      "moneyDues": "પૈસા અને બાકી",
+      "moneyDuesHint": "રોકડ, વિનંતી, બાકી, ઓર્ડર, ઇન્વૉઇસ અને બ્રીફની રકમ. આ અલગ આંકડા રહે છે.",
+      "goodsMovement": "માલ અને હિલચાલ",
+      "goodsMovementHint": "રસીદ, ડિસ્પેચ અને પરતની સંખ્યા અને સ્થિતિ.",
+      "customersParties": "ગ્રાહકો અને પક્ષ",
+      "customersPartiesHint": "તમારા રેકોર્ડના પક્ષ અને દુકાનના ગ્રાહકો.",
+      "workRecords": "કામ અને રેકોર્ડ",
+      "workRecordsHint": "કામની નોંધ, પત્ર, રિમાઇન્ડર અને ખુલ્લા ડ્રાફ્ટ.",
+      "unknown": "આ શ્રેણી ઉપલબ્ધ નથી."
+    }
   }
 }

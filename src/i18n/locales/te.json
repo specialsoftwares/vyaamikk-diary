@@ -163,7 +163,6 @@
     "viewAllAttention": "అన్నింటినీ వీక్షించండి ({{count}})",
     "viewAllDocuments": "అన్ని రికార్డులు ({{count}})",
     "viewAllDocumentsShort": "అన్ని రికార్డులు",
-    "letterheadHistoryLink": "లెటర్ హెడ్ చరిత్ర",
     "pickerTitle": "కొత్త రికార్డు",
     "pickerSubtitle": "రికార్డ్ రకాన్ని ఎంచుకోండి.",
     "pickerHeadline": "మీరు నమోదు చేయాలనుకుంటున్న రికార్డును ఎంచుకోండి"
@@ -312,15 +311,13 @@
   "calendarMaps": {
     "vyaaflow": {
       "screenTitle": "VyaaFlow",
-      "intro": "ఈ వ్యాపారం యొక్క తేదీలు, బకాయిలు మరియు సరుకు PIN ప్రాంతాలు.",
+      "intro": "వ్యాపార రికార్డులు, బాకీలు, ఫాలో-అప్‌లు మరియు రిమైండర్లు.",
       "showDetails": "వివరాలు చూపు",
       "hideDetails": "వివరాలు దాచు",
       "calendarSection": "ముఖ్యమైన వ్యాపార తేదీలు",
-      "mapSection": "వ్యాపార PINలు",
       "paragraphs": {
         "businessDates": "Vyaamikk Diary మీ వ్యాపార తేదీలను ఒకే చోట ఉంచుతుంది. రికార్డులు, బకాయిలు, ఫాలో-అప్‌లు మరియు రిమైండర్లు ముఖ్యమైన వ్యాపార తేదీలలో కనిపిస్తాయి. ఏమి జరిగింది, తర్వాత ఏమి రాబోతోంది అని చూడటానికి ఇది సహాయపడుతుంది.",
-        "statutory": "చట్టబద్ధ రిమైండర్లు సూచన కోసం ప్రామాణిక GST, ఆదాయపు పన్ను, TDS/TCS మరియు LLP గడువు తేదీలను చూపుతాయి. ఇవి సమాచారం మాత్రమే. వర్తింపు మరియు తుది తేదీని అధికారిక పోర్టల్‌లో లేదా మీ CA, CS లేదా పన్ను నిపుణుడితో తనిఖీ చేయండి.",
-        "businessPins": "వ్యాపార PINలు సరుకు మరియు డిస్పాచ్ రికార్డులను వాటి From మరియు To PIN కోడ్‌ల ప్రకారం అమర్చుతాయి. స్థానాలు సుమారు తపాలా ప్రాంతాలు, ప్రత్యక్ష ట్రాకింగ్ కాదు."
+        "statutory": "చట్టబద్ధ రిమైండర్లు సూచన కోసం ప్రామాణిక GST, ఆదాయపు పన్ను, TDS/TCS మరియు LLP గడువు తేదీలను చూపుతాయి. ఇవి సమాచారం మాత్రమే. వర్తింపు మరియు తుది తేదీని అధికారిక పోర్టల్‌లో లేదా మీ CA, CS లేదా పన్ను నిపుణుడితో తనిఖీ చేయండి."
       },
       "detectMyPin": {
         "action": "నా PINను కనుగొను",
@@ -336,18 +333,17 @@
         "unavailable": "ఈ స్థానం నుండి PIN సూచించలేకపోయాం. మీరు టైప్ చేయవచ్చు.",
         "keptManual": "మీరు టైప్ చేసిన PIN అలాగే ఉంచబడింది."
       },
-      "pinList": {
-        "empty": "From మరియు To PIN ఉన్న సరుకు మరియు డిస్పాచ్ రికార్డులు ఇక్కడ కనిపిస్తాయి. మ్యాప్ ఐచ్ఛికం.",
-        "approximate": "సుమారు తపాలా ప్రాంతం",
-        "from": "From",
-        "to": "To",
-        "unplotted": "PIN సేవ్ అయింది. మ్యాప్ స్థానం అందుబాటులో లేదు.",
-        "invalid": "ఈ PINను మ్యాప్‌పై ఉంచలేం. రికార్డు జాబితాలో ఉంటుంది.",
-        "mapNote": "గుర్తులు సేవ్ చేసిన From మరియు To PINల సుమారు తపాలా ప్రాంతాలను చూపుతాయి. ఇవి రోడ్లు, మార్గాలు లేదా డెలివరీ రుజువు కాదు.",
-        "mapEmpty": "మ్యాప్‌పై ఇంకా సుమారు తపాలా ప్రాంతాలు లేవు. సేవ్ చేసిన From మరియు To PINలు జాబితాలో ఉంటాయి."
+      "introCompact": "వ్యాపార రికార్డులు, బాకీలు, ఫాలో-అప్‌లు మరియు రిమైండర్లు.",
+      "filters": {
+        "all": "అన్నీ",
+        "myBusiness": "నా వ్యాపారం",
+        "statutory": "చట్టపరమైన"
+      },
+      "statutoryReference": {
+        "title": "చట్టపరమైన సూచన"
       }
     },
-    "screenLead": "Select a date for categorized records, or open Map for GPS footprints and approximate PIN areas from freight/dispatch — not live tracking.",
+    "screenLead": "వ్యాపార రికార్డులు, బాకీలు, ఫాలో-అప్‌లు మరియు రిమైండర్లు.",
     "dayEmptyMessage": "Create a new business record, reminder, payment request, freight detail or work note when required.",
     "sections": {
       "freight": "Freight / dispatch",
@@ -357,7 +353,7 @@
       "materials": "మెటీరియల్",
       "staff": "సిబ్బంది",
       "work": "పని",
-      "letterhead": "లెటర్ హెడ్ / పత్రాలు",
+      "letterhead": "సేవ్ చేసిన ఉత్తరాలు",
       "proPacks": "వృత్తిపరమైన ప్యాక్‌లు"
     },
     "permission": {
@@ -394,9 +390,9 @@
     },
     "tabLabel": "VyaaFlow",
     "screenTitle": "క్యాలెండర్ & మ్యాప్స్",
-    "screenSubtitle": "తేదీ మరియు స్థాన పాదముద్రల వారీగా రికార్డులను సమీక్షించండి",
+    "screenSubtitle": "వ్యాపార తేదీలు మరియు చట్టపరమైన రిమైండర్లు",
     "modeCalendar": "క్యాలెండర్",
-    "modeMap": "మ్యాప్",
+    "modeMap": "VyaaFlow",
     "dayEmptyTitle": "ఈ తేదీన రికార్డులు లేవు",
     "location": {
       "sectionTitle": "GPS స్థానం (ఐచ్ఛికం)",
@@ -560,8 +556,6 @@
       "professionalPack": "వృత్తి సారాంశం",
       "professionalPackSub": "మీ CA, CS లేదా న్యాయవాది సమీక్ష కోసం వాస్తవాలు సేకరించండి.",
       "customerCredit": "దుకాణం",
-      "letterheadMatter": "లెటర్‌హెడ్",
-      "letterheadMatterSub": "సేవ్ చేసిన లెటర్‌హెడ్‌పై A4 లేఖ రాయండి.",
       "workAndTeam": "పని & జట్టు నోట్స్",
       "workAndTeamSub": "సిబ్బంది నోట్స్, రోజువారీ అప్‌డేట్లు మరియు ఫాలో-అప్‌లు.",
       "workUpdate": "పని అప్‌డేట్",
@@ -839,7 +833,7 @@
     "statutorySubtitle": "GST, tax, TDS and LLP due-date information",
     "sectionInsights": "Your business",
     "businessInsightsItem": "వ్యాపార అంతర్దృష్టులు",
-    "businessInsightsSubtitle": "Customers, routes, distance and patterns from your records",
+    "businessInsightsSubtitle": "ఎంచుకున్న సంవత్సరపు డబ్బు, సరుకు, కస్టమర్లు మరియు రికార్డులు.",
     "title": "సెట్టింగ్‌లు & సమాచారం",
     "tabLabel": "సెట్టింగ్‌లు",
     "heroKicker": "కమాండ్ సెంటర్",
@@ -2534,7 +2528,7 @@
     "noneTitle": "ఈ తేదీకి ఎంట్రీలు లేవు",
     "noneMessage": "మీ క్యాలెండర్ నింపడం ప్రారంభించడానికి ఒక ఎంట్రీని జోడించండి.",
     "monthHeader": "{{నెల}} {{సంవత్సరం}}",
-    "viewOnMap": "మ్యాప్‌లో వీక్షించండి"
+    "viewOnMap": "రికార్డు తెరవండి"
   },
   "profile": {
     "title": "ప్రొఫైల్",
@@ -3202,5 +3196,18 @@
     "returnAvailabilityUnavailable": "నిర్ధారించిన నిల్వ ఇంకా అందుబాటులో లేదు. అది మళ్లీ లోడ్ అయ్యే వరకు సేవ్ మూసి ఉంటుంది.",
     "returnAvailabilityRetry": "నిర్ధారించిన నిల్వను మళ్లీ చూడండి",
     "returnConfirmedVersion": "నిర్ధారణ వెర్షన్"
+  },
+  "insights": {
+    "categories": {
+      "moneyDues": "డబ్బు మరియు బాకీ",
+      "moneyDuesHint": "నగదు, అభ్యర్థనలు, బాకీ, ఆర్డర్లు, ఇన్‌వాయిస్‌లు మరియు బ్రీఫ్ మొత్తాలు. ఇవి వేరువేరు సంఖ్యలుగా ఉంటాయి.",
+      "goodsMovement": "సరుకు మరియు కదలిక",
+      "goodsMovementHint": "రసీదు, డిస్పాచ్ మరియు తిరిగి వచ్చిన పరిమాణాలు మరియు స్థితి.",
+      "customersParties": "కస్టమర్లు మరియు పార్టీలు",
+      "customersPartiesHint": "మీ రికార్డుల పార్టీలు మరియు షాపు కస్టమర్లు.",
+      "workRecords": "పని మరియు రికార్డులు",
+      "workRecordsHint": "పని నోట్స్, ఉత్తరాలు, రిమైండర్లు మరియు తెరిచి ఉన్న డ్రాఫ్ట్‌లు.",
+      "unknown": "ఈ వర్గం అందుబాటులో లేదు."
+    }
   }
 }

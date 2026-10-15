@@ -1,19 +1,52 @@
 import { useT } from "@/i18n";
 
+import { vyaaflowCopy, vyaaflowPendingLocaleKeys } from "./copy";
+
+function readPending(
+  t: (key: string) => string,
+  key: string,
+  english: string
+): string {
+  const value = t(key);
+  return value && value !== key ? value : english;
+}
+
 /** Visible VyaaFlow strings for the active language. English falls back from the catalog. */
 export function useVyaaflowCopy() {
   const t = useT();
   return {
     screenTitle: t("calendarMaps.vyaaflow.screenTitle"),
-    intro: t("calendarMaps.vyaaflow.intro"),
+    intro: readPending(
+      t,
+      vyaaflowPendingLocaleKeys.introCompact,
+      vyaaflowCopy.introCompact
+    ),
     showDetails: t("calendarMaps.vyaaflow.showDetails"),
     hideDetails: t("calendarMaps.vyaaflow.hideDetails"),
     calendarSection: t("calendarMaps.vyaaflow.calendarSection"),
-    mapSection: t("calendarMaps.vyaaflow.mapSection"),
+    filters: {
+      all: readPending(t, vyaaflowPendingLocaleKeys.filterAll, vyaaflowCopy.filters.all),
+      myBusiness: readPending(
+        t,
+        vyaaflowPendingLocaleKeys.filterMyBusiness,
+        vyaaflowCopy.filters.myBusiness
+      ),
+      statutory: readPending(
+        t,
+        vyaaflowPendingLocaleKeys.filterStatutory,
+        vyaaflowCopy.filters.statutory
+      ),
+    },
+    statutoryReferenceTitle: readPending(
+      t,
+      vyaaflowPendingLocaleKeys.statutoryReferenceTitle,
+      vyaaflowCopy.statutoryReference.title
+    ),
+    statutoryReferenceSubtitle: t("statutory.tabSubtitle"),
+    disclaimer: t("calendarMaps.vyaaflow.paragraphs.statutory"),
     paragraphs: {
       businessDates: t("calendarMaps.vyaaflow.paragraphs.businessDates"),
       statutory: t("calendarMaps.vyaaflow.paragraphs.statutory"),
-      businessPins: t("calendarMaps.vyaaflow.paragraphs.businessPins"),
     },
     detectMyPin: {
       action: t("calendarMaps.vyaaflow.detectMyPin.action"),
@@ -28,16 +61,6 @@ export function useVyaaflowCopy() {
       denied: t("calendarMaps.vyaaflow.detectMyPin.denied"),
       unavailable: t("calendarMaps.vyaaflow.detectMyPin.unavailable"),
       keptManual: t("calendarMaps.vyaaflow.detectMyPin.keptManual"),
-    },
-    pinList: {
-      empty: t("calendarMaps.vyaaflow.pinList.empty"),
-      approximate: t("calendarMaps.vyaaflow.pinList.approximate"),
-      from: t("calendarMaps.vyaaflow.pinList.from"),
-      to: t("calendarMaps.vyaaflow.pinList.to"),
-      unplotted: t("calendarMaps.vyaaflow.pinList.unplotted"),
-      invalid: t("calendarMaps.vyaaflow.pinList.invalid"),
-      mapNote: t("calendarMaps.vyaaflow.pinList.mapNote"),
-      mapEmpty: t("calendarMaps.vyaaflow.pinList.mapEmpty"),
     },
   };
 }

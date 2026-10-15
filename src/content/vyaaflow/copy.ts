@@ -1,21 +1,37 @@
 /**
- * English VyaaFlow copy. Runtime labels use `calendarMaps.vyaaflow` in the
- * locale catalogs. This object stays the English source those catalogs match.
+ * English VyaaFlow copy. Existing catalog keys stay aligned with
+ * `calendarMaps.vyaaflow`. Pending keys below are the compact screen copy
+ * the coordinator still needs to add. The screen reads `introCompact`, not
+ * the legacy freight `intro` sentence.
  */
+export const vyaaflowPendingLocaleKeys = {
+  introCompact: "calendarMaps.vyaaflow.introCompact",
+  filterAll: "calendarMaps.vyaaflow.filters.all",
+  filterMyBusiness: "calendarMaps.vyaaflow.filters.myBusiness",
+  filterStatutory: "calendarMaps.vyaaflow.filters.statutory",
+  statutoryReferenceTitle: "calendarMaps.vyaaflow.statutoryReference.title",
+} as const;
+
 export const vyaaflowCopy = {
   screenTitle: "VyaaFlow",
-  intro: "Dates, dues and freight PIN areas for this business.",
+  intro: "Business records, dues, follow-ups and reminders.",
+  introCompact: "Business records, dues, follow-ups and reminders.",
   showDetails: "Show details",
   hideDetails: "Hide details",
   calendarSection: "Important Business Dates",
-  mapSection: "Business PINs",
+  filters: {
+    all: "All",
+    myBusiness: "My business",
+    statutory: "Statutory",
+  },
+  statutoryReference: {
+    title: "Statutory reference",
+  },
   paragraphs: {
     businessDates:
       "Vyaamikk Diary keeps your business dates in one place. Records, dues, follow-ups and reminders appear in Important Business Dates, helping you review what happened and what is coming up.",
     statutory:
       "Statutory reminders show standard GST, income-tax, TDS/TCS and LLP due dates for reference. They are informational only. Check applicability and the final date on the official portal or with your CA, CS or tax professional.",
-    businessPins:
-      "Business PINs organises freight and dispatch records by their From and To PIN codes. Locations represent approximate postal areas, not live tracking.",
   },
   detectMyPin: {
     action: "Detect my PIN",
@@ -31,18 +47,6 @@ export const vyaaflowCopy = {
     denied: "Location permission was not granted. You can type the PIN.",
     unavailable: "Couldn't suggest a PIN from this location. You can type it.",
     keptManual: "Kept the PIN you typed.",
-  },
-  pinList: {
-    empty: "Freight and dispatch records with From and To PINs will show here. A map is optional.",
-    approximate: "Approximate postal area",
-    from: "From",
-    to: "To",
-    unplotted: "PIN saved. Map position is unavailable.",
-    invalid: "This PIN can't be placed. The record stays in the list.",
-    mapNote:
-      "Markers show approximate postal areas for saved From and To PINs. They are not roads, routes, or proof of delivery.",
-    mapEmpty:
-      "No approximate postal areas are on the map yet. Saved From and To PINs stay in the list.",
   },
 } as const;
 

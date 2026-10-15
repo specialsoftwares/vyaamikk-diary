@@ -1,26 +1,25 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
   Platform,
+  Pressable,
   SectionList,
   ScrollView,
   StyleSheet,
   View,
 } from "react-native";
-import Constants from "expo-constants";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { Calendar, type DateData } from "react-native-calendars";
 
 import { CalendarMapRecordRow } from "@/components/calendarMaps/CalendarMapRecordRow";
 import { VyaaFlowIntro } from "@/components/calendarMaps/VyaaFlowIntro";
+import {
+  filterVyaaflowAgendaSections,
+  vyaaflowVisibleMode,
+  type VyaaflowAgendaFilter,
+} from "@/components/calendarMaps/vyaaflowAgenda";
 import { SwipeToDeleteRow } from "@/components/records/SwipeToDeleteRow";
 import { useRecordDelete } from "@/hooks/useRecordDelete";
 import { userDeleteFromCalendarRecord } from "@/services/records/deleteTargets";
-import { CalendarMapsModeTransition } from "@/components/calendarMaps/CalendarMapsModeTransition";
-import {
-  CalendarMapsModeSwitch,
-  type CalendarMapsMode,
-} from "@/components/calendarMaps/CalendarMapsModeSwitch";
-import { DeferredCalendarMapsMapPanel } from "@/components/calendarMaps/DeferredCalendarMapsMapPanel";
 import { SignatureHeroSurface } from "@/components/signature";
 import { EmptyState, ErrorState, Header, LastRefreshedHint, Screen, SkeletonList, SkeletonLoadingPanel, LocaleUiText } from "@/components/ui";
 import { useCalendarMapsData } from "@/hooks/useCalendarMapsData";
@@ -30,11 +29,6 @@ import { useAuth } from "@/state/auth";
 import { useT } from "@/i18n";
 import type { CalendarMapRecord, CalendarMarkedDots } from "@/services/calendarMaps";
 import { navigateToCalendarMapRecord } from "@/services/calendarMaps/calendarMapsRouting";
-import {
-  mapMarkerWorkAllowed,
-  mayMountNativeMapView,
-  readAndroidMapsConfigured,
-} from "@/services/maps/mapNativeConfig";
 import { dayKey, formatEntryDate } from "@/utils/date";
 import {
   radius,
@@ -48,49 +42,32 @@ import {
 import { calendarMarkerDotColors } from "@/theme/categoryAccentResolver";
 import { useTabBarMetrics } from "@/layout/tabBar";
 
+const AGENDA_FILTERS: VyaaflowAgendaFilter[] = ["all", "business", "statutory"];
+
 export default function CalendarMapsTab() {
   const t = useT();
   const vyaaflowCopy = useVyaaflowCopy();
   const router = useRouter();
+  const { mode: requestedMode } = useLocalSearchParams<{ mode?: string | string[] }>();
+  const visibleMode = vyaaflowVisibleMode(requestedMode);
   const { user } = useAuth();
   const colors = useThemeColors();
   const { resolvedMode } = useTheme();
   const tabBar = useTabBarMetrics();
-  const [mode, setMode] = useState<CalendarMapsMode>("calendar");
-  const [mapEverOpened, setMapEverOpened] = useState(false);
   const [selectedDate, setSelectedDate] = useState(() => dayKey(Date.now()));
-  const nativeMapMayMount = mayMountNativeMapView({
-    platform: Platform.OS,
-    androidMapsConfigured: readAndroidMapsConfigured(Constants.expoConfig?.extra),
-  });
-
-  useEffect(() => {
-    if (mode === "map") setMapEverOpened(true);
-  }, [mode]);
-
-  // PIN offline DB must NOT warm on Calendar/tab mount — NativeTabs keeps all
-  // tab screens alive (freezeContents=false), and the ~multi-second JS parse
-  // freezes every non-tab Pressable after login. Warm only when Map is opened
-  // (see useCalendarMapsData mapActive) or a form resolves a PIN.
+  const [agendaFilter, setAgendaFilter] = useState<VyaaflowAgendaFilter>("all");
 
   const {
     loading,
     refreshing,
-    markersLoading,
-    mapStats,
     error,
     reload,
     refresh,
     marked,
     dayView,
-    mapClusters,
-    pinGroups,
-  } = useCalendarMapsData(user?.uid ?? null, selectedDate, {
-    mapActive: mapMarkerWorkAllowed({ mode, nativeMapMayMount }),
-    pinListActive: mode === "map",
-  });
+  } = useCalendarMapsData(user?.uid ?? null, selectedDate);
 
-  const { refreshNote, onRefresh, refreshControl } = useAppRefresh({
+  const { refreshNote, refreshControl } = useAppRefresh({
     onReload: refresh,
     externalRefreshing: refreshing,
   });
@@ -105,10 +82,6 @@ export default function CalendarMapsTab() {
   const styles = useThemedStyles((c) =>
     StyleSheet.create({
       root: { flex: 1 },
-      modeSwitchWrap: {
-        zIndex: 10,
-        elevation: 10,
-      },
       headerWrap: {
         paddingHorizontal: spacing.lg,
         paddingTop: spacing.md,
@@ -126,11 +99,35 @@ export default function CalendarMapsTab() {
         flexWrap: "wrap",
         gap: spacing.lg,
         paddingHorizontal: spacing.lg,
-        marginBottom: spacing.lg,
+        marginBottom: spacing.md,
       },
       legendItem: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
       legendDot: { width: 8, height: 8, borderRadius: 4 },
       legendText: { ...typography.caption, color: c.textMuted },
+      filterRow: {
+        flexDirection: "row",
+        flexWrap: "wrap",
+        gap: spacing.sm,
+        paddingHorizontal: spacing.lg,
+        marginBottom: spacing.lg,
+      },
+      filterChip: {
+        minHeight: 44,
+        paddingVertical: spacing.sm,
+        paddingHorizontal: spacing.md,
+        borderRadius: radius.pill,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: c.divider,
+        backgroundColor: c.surfaceMuted,
+        alignItems: "center",
+        justifyContent: "center",
+      },
+      filterChipOn: {
+        borderColor: c.primary,
+        backgroundColor: c.primaryLight,
+      },
+      filterText: { ...typography.captionStrong, color: c.textMuted },
+      filterTextOn: { color: c.primaryDark },
       dateTitle: {
         ...typography.titleSm,
         color: c.text,
@@ -156,12 +153,6 @@ export default function CalendarMapsTab() {
         paddingTop: spacing.md,
         paddingBottom: spacing.xl,
         gap: spacing.lg,
-      },
-      errorText: {
-        ...typography.body,
-        color: c.danger,
-        paddingHorizontal: spacing.lg,
-        marginBottom: spacing.md,
       },
     })
   );
@@ -197,13 +188,27 @@ export default function CalendarMapsTab() {
     [router]
   );
 
+  const openStatutoryReference = useCallback(() => {
+    router.push({ pathname: "/statutory", params: { from: "calendar" } });
+  }, [router]);
+
+  const filterLabel = useCallback(
+    (filter: VyaaflowAgendaFilter) => {
+      if (filter === "business") return vyaaflowCopy.filters.myBusiness;
+      if (filter === "statutory") return vyaaflowCopy.filters.statutory;
+      return vyaaflowCopy.filters.all;
+    },
+    [vyaaflowCopy.filters]
+  );
+
   const sections = useMemo(
     () =>
-      dayView.sections.map((s) => ({
+      filterVyaaflowAgendaSections(dayView.sections, agendaFilter).map((s) => ({
         title: t(`calendarMaps.sections.${s.categoryKey}`),
+        categoryKey: s.categoryKey,
         data: s.data,
       })),
-    [dayView.sections, t]
+    [dayView.sections, agendaFilter, t]
   );
 
   const calendarListHeader = useMemo(
@@ -248,6 +253,27 @@ export default function CalendarMapsTab() {
           </View>
         </View>
 
+        <View style={styles.filterRow} accessibilityRole="radiogroup">
+          {AGENDA_FILTERS.map((filter) => {
+            const selected = agendaFilter === filter;
+            const label = filterLabel(filter);
+            return (
+              <Pressable
+                key={filter}
+                onPress={() => setAgendaFilter(filter)}
+                accessibilityRole="radio"
+                accessibilityState={{ selected }}
+                accessibilityLabel={label}
+                style={[styles.filterChip, selected && styles.filterChipOn]}
+              >
+                <LocaleUiText style={[styles.filterText, selected && styles.filterTextOn]}>
+                  {label}
+                </LocaleUiText>
+              </Pressable>
+            );
+          })}
+        </View>
+
         <LocaleUiText style={styles.dateTitle}>
           {t("calendar.entriesOn", { date: selectedDateLabel })}
         </LocaleUiText>
@@ -276,11 +302,14 @@ export default function CalendarMapsTab() {
       error,
       loading,
       dayView.isEmpty,
+      reload,
+      agendaFilter,
+      filterLabel,
     ]
   );
 
   const calendarBody = useMemo(() => {
-    if (!loading && dayView.isEmpty) {
+    if (!loading && sections.length === 0) {
       return (
         <ScrollView
           showsVerticalScrollIndicator={false}
@@ -291,7 +320,11 @@ export default function CalendarMapsTab() {
           <View style={styles.emptyBlock}>
             <EmptyState
               title={t("calendarMaps.dayEmptyTitle")}
-              message={t("calendarMaps.dayEmptyMessage")}
+              message={
+                agendaFilter === "statutory"
+                  ? t("statutory.calendar.markerSubtitle")
+                  : t("calendarMaps.dayEmptyMessage")
+              }
             />
           </View>
         </ScrollView>
@@ -332,7 +365,7 @@ export default function CalendarMapsTab() {
                   recordId={deleteReq.recordId}
                   entityType={deleteReq.entityType}
                   title={deleteReq.title}
-                    onDeletePress={() => requestDelete(deleteReq, () => void refresh())}
+                  onDeletePress={() => requestDelete(deleteReq, () => void refresh())}
                   deleteInProgress={isDeleting(deleteReq)}
                 >
                   {row}
@@ -354,7 +387,6 @@ export default function CalendarMapsTab() {
     );
   }, [
     loading,
-    dayView.isEmpty,
     sections,
     calendarListHeader,
     styles,
@@ -364,49 +396,24 @@ export default function CalendarMapsTab() {
     requestDelete,
     refresh,
     refreshControl,
-    refreshNote,
     isDeleting,
+    agendaFilter,
   ]);
 
   return (
     <Screen padded={false} dismissKeyboardOnTap={false} tabBarInset>
-      <View style={styles.root}>
+      <View key={visibleMode} style={styles.root}>
         <View style={styles.headerWrap}>
           <SignatureHeroSurface variant="identity" style={{ marginBottom: spacing.sm }} padded={false}>
             <View style={{ padding: spacing.lg, paddingBottom: spacing.md }}>
               <Header title={vyaaflowCopy.screenTitle} subtitle={vyaaflowCopy.intro} />
-              <VyaaFlowIntro />
+              <VyaaFlowIntro onOpenStatutoryReference={openStatutoryReference} />
               <LastRefreshedHint message={refreshNote} />
             </View>
           </SignatureHeroSurface>
         </View>
 
-        <View style={styles.modeSwitchWrap}>
-          <CalendarMapsModeSwitch
-            mode={mode}
-            onChange={setMode}
-            calendarLabel={vyaaflowCopy.calendarSection}
-            mapLabel={vyaaflowCopy.mapSection}
-          />
-        </View>
-
-        <CalendarMapsModeTransition
-          mode={mode}
-          calendar={calendarBody}
-          map={
-            mapEverOpened ? (
-              <DeferredCalendarMapsMapPanel
-                clusters={mapClusters}
-                loading={loading}
-                markersLoading={markersLoading}
-                mapStats={mapStats}
-                pinGroups={pinGroups}
-                onOpenRecord={openRecord}
-                onBackToCalendar={() => setMode("calendar")}
-              />
-            ) : null
-          }
-        />
+        {calendarBody}
       </View>
     </Screen>
   );

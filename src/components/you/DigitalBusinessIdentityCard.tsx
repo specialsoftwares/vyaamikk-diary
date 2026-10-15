@@ -503,18 +503,11 @@ export function DigitalBusinessIdentityCard({
     },
   ];
 
-  const distanceLabel =
-    trustStats.approxDistanceKm > 0
-      ? t("you.identityCard.counterDistanceApprox", { km: trustStats.approxDistanceKm })
-      : t("you.identityCard.counterDistanceZero");
-
-  // Back: motivational live counters (4–6 max).
   const counters: Array<{ value: string | number; label: string }> = [
     { value: trustStats.recordsCount, label: t("you.identityCard.counterRecords") },
     { value: savedPdfTotal, label: t("you.identityCard.counterPdfs") },
     { value: trustStats.creditRecordsCount, label: t("you.identityCard.counterCredit") },
     { value: trustStats.activeEmiCount, label: t("you.identityCard.counterActiveEmi") },
-    { value: distanceLabel, label: t("you.identityCard.counterDistance") },
     { value: trustStats.activeDraftsCount, label: t("you.identityCard.counterDrafts") },
   ];
 
