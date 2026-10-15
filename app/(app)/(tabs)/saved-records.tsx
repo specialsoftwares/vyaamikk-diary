@@ -4,6 +4,8 @@ import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import { useFocusEffect, useRouter } from "expo-router";
 import type { ComponentProps } from "react";
 
+import { PartyLedgerList } from "@/components/partyLedger/PartyLedgerList";
+import { RecordsPartySwitch } from "@/components/partyLedger/RecordsPartySwitch";
 import { Banner, LastRefreshedHint, Screen, SmartHeadline, LocaleUiText } from "@/components/ui";
 import { GlobalSearchBar } from "@/components/search/GlobalSearchBar";
 import { useAuth } from "@/state/auth";
@@ -48,12 +50,14 @@ export default function SavedRecordsTab() {
 
   const [data, setData] = useState<SavedRecordsData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pane, setPane] = useState<"records" | "partyLedger">("records");
 
   const isDark = resolvedMode === "dark";
 
   const styles = useThemedStyles((c) =>
     StyleSheet.create({
       dashboard: { gap: DASHBOARD_SECTION_GAP },
+      ledgerPane: { flex: 1, gap: spacing.sm },
       topCluster: { gap: spacing.md },
       searchWrap: { marginTop: spacing.sm },
       divider: {
@@ -266,10 +270,32 @@ export default function SavedRecordsTab() {
     ];
   }, [data, router, goType, t]);
 
+  const partySwitch = (
+    <RecordsPartySwitch
+      pane={pane}
+      onChange={setPane}
+      recordsLabel={t("partyLedger.switchRecords")}
+      ledgerLabel={t("partyLedger.switchLedger")}
+      accessibilityLabel={t("partyLedger.switchA11y")}
+    />
+  );
+
+  if (pane === "partyLedger") {
+    return (
+      <Screen padded tabBarInset dismissKeyboardOnTap={false}>
+        <View style={styles.ledgerPane}>
+          {partySwitch}
+          <PartyLedgerList ownerUid={userId} />
+        </View>
+      </Screen>
+    );
+  }
+
   return (
     <Screen scroll padded tabBarInset refreshing={refreshing} onRefresh={onRefresh}>
       <View style={styles.dashboard}>
         <View style={styles.topCluster}>
+          {partySwitch}
           <SmartHeadline
             title={t("savedRecords.title")}
             subtitle={t("savedRecords.subtitle")}
