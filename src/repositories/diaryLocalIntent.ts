@@ -10,6 +10,7 @@ import { enqueueSync } from "@/repositories/syncQueueRepository";
 import type { BusinessEntry } from "@/domain/businessEntry";
 import type { CreateBusinessEntryInput, UpdateBusinessEntryInput } from "@/services/diary/types";
 import { mergeBusinessEntryUpdate } from "@/services/diary/mergeEntryUpdate";
+import { queueRecordFollowUpsSync } from "@/services/diary/recordFollowUps";
 import { entryToCreateInput, entryToUpdateInput } from "@/sync/diarySyncIntent";
 
 export type DiaryLocalPersistResult = {
@@ -82,6 +83,7 @@ export function persistDiaryCreateIntent(
       },
       { replacePayload: true }
     );
+    queueRecordFollowUpsSync(entry, nextRevision);
   });
   return queueId;
 }
@@ -178,6 +180,7 @@ export function persistDiaryUpdateIntent(
           },
       { replacePayload: true }
     );
+    queueRecordFollowUpsSync(entry, nextRevision);
     result = {
       queueId,
       entry,

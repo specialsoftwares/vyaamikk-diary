@@ -139,7 +139,11 @@ export async function prepareReceiptPhoto(input: {
     if (!prepared || prepared === "mismatch") {
       return { status: "unavailable", reason: prepared === "mismatch" ? "decode_failed" : "missing_local" };
     }
-    if (prepared.status === "unavailable") return prepared;
+    if (prepared.status !== "ready") {
+      return prepared.status === "unavailable"
+        ? prepared
+        : { status: "unavailable", reason: "decode_failed" };
+    }
     const ext = prepared.mime === "image/png" ? "png" : "jpg";
     const finalPath = `${cacheDir}/${prepared.contentHash}.${ext}`;
     const info = await deps.info(finalPath);

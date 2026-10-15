@@ -470,7 +470,8 @@ function permutations<T>(items: readonly T[]): T[][] {
   assert.match(plan.rollback, /No live data is migrated/);
   assert.match(PARTY_LEDGER_CLIENT_DENY_RULE, /partyLedgerProjections/);
   assert.match(PARTY_LEDGER_CLIENT_DENY_RULE, /partyLedgerBuckets/);
-  assert.match(PARTY_LEDGER_CLIENT_DENY_RULE, /allow read, write: if false;/);
+  assert.match(PARTY_LEDGER_CLIENT_DENY_RULE, /allow read: if isOwner\(uid\);/);
+  assert.match(PARTY_LEDGER_CLIENT_DENY_RULE, /allow write: if false;/);
   assert.deepEqual(
     plan.steps.map((step) => step.purpose),
     [

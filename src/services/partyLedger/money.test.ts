@@ -21,10 +21,9 @@ function minor(raw: unknown): string {
   assert.equal(minor("2,000.50"), "200050");
   assert.equal(minor("₹2,000"), "200000");
   assert.equal(minor(2500), "250000");
-  assert.equal(parseInrDecimal("10.005").ok, false);
-  if (!parseInrDecimal("10.005").ok) {
-    assert.equal(parseInrDecimal("10.005").reason, "fractional_paise");
-  }
+  const fractional = parseInrDecimal("10.005");
+  assert.equal(fractional.ok, false);
+  if (!fractional.ok) assert.equal(fractional.reason, "fractional_paise");
   assert.equal(parseInrDecimal(-1).ok, false);
   assert.equal(parseInrDecimal("").ok, false);
   assert.equal(parseInrDecimal(Number.NaN).ok, false);

@@ -16,6 +16,7 @@ import {
   migrateToV7,
   migrateToV8,
   migrateToV9,
+  ensureRecordFollowUpsTable,
   tableExists,
   tableHasColumn,
 } from "./migrate";
@@ -137,6 +138,7 @@ export function applyPendingLocalMigrations(database: LocalMigrationDb): number 
   if (DB_VERSION >= 10 && !grinV10TablesPresent(database)) {
     throw new Error("grin_v10_tables_missing");
   }
+  ensureRecordFollowUpsTable(database);
 
   database.runSync("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", [
     "schema_version",

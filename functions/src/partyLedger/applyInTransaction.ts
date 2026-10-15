@@ -9,16 +9,17 @@
  *   users/{uid}/partyLedgerProjections/{sourceKey}
  *   users/{uid}/partyLedgerBuckets/{bucketId}
  *
- * Client writes must be denied. This change does not edit firestore.rules.
- * Existing matches do not grant these paths, so clients are already denied.
- * Install the following only in a reviewed rules deploy. Firestore ORs allow
- * rules, so this deny must be the only match for these paths:
+ * Executable owner-read / client-write-deny rules live in firestore.rules.
+ * Firestore ORs allow rules, so those matches are the only ones for the paths.
+ * They are not deployed by this mission.
  *
  *   match /users/{uid}/partyLedgerProjections/{projectionId} {
- *     allow read, write: if false;
+ *     allow read: if isOwner(uid);
+ *     allow write: if false;
  *   }
  *   match /users/{uid}/partyLedgerBuckets/{bucketId} {
- *     allow read, write: if false;
+ *     allow read: if isOwner(uid);
+ *     allow write: if false;
  *   }
  */
 
@@ -27,10 +28,12 @@ export const PARTY_LEDGER_BUCKETS_COLLECTION = "users/{uid}/partyLedgerBuckets";
 
 export const PARTY_LEDGER_CLIENT_DENY_RULE = `
 match /users/{uid}/partyLedgerProjections/{projectionId} {
-  allow read, write: if false;
+  allow read: if isOwner(uid);
+  allow write: if false;
 }
 match /users/{uid}/partyLedgerBuckets/{bucketId} {
-  allow read, write: if false;
+  allow read: if isOwner(uid);
+  allow write: if false;
 }
 `.trim();
 

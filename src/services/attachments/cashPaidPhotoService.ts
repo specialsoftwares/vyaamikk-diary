@@ -111,7 +111,13 @@ async function acceptPickedFile(sourceUri: string): Promise<PickedCashPaidPhoto>
     const bytes = await readFileBytes(working);
     const inspected = inspectReceiptBytes(bytes);
     if (!inspected.ok) {
-      throw new CashPaidPhotoError(inspected.reason === "too_large" ? "too_large" : inspected.reason);
+      const reason =
+        inspected.reason === "too_large"
+          ? "too_large"
+          : inspected.reason === "unsupported"
+            ? "unsupported"
+            : "read_failed";
+      throw new CashPaidPhotoError(reason);
     }
     const ext = extForMime(inspected.mime);
     const named = working.replace(/\.img$/, `.${ext}`);
