@@ -4,9 +4,10 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import Module, { createRequire } from "node:module";
-import { deflateSync } from "node:zlib";
+import { deflateSync, inflateSync } from "node:zlib";
 import path from "node:path";
 
 import type { BusinessEntry } from "@/domain/businessEntry";
@@ -150,12 +151,155 @@ function brandingFor(legal: UserPdfBranding["legal"]): UserPdfBranding {
   };
 }
 
+function paeth(a: number, b: number, c: number): number {
+  const p = a + b - c;
+  const pa = Math.abs(p - a);
+  const pb = Math.abs(p - b);
+  const pc = Math.abs(p - c);
+  if (pa <= pb && pa <= pc) return a;
+  if (pb <= pc) return b;
+  return c;
+}
+
+function decodePng(buf: Buffer): { w: number; h: number; rgba: Buffer } {
+  let offset = 8;
+  let width = 0;
+  let height = 0;
+  let color = 0;
+  const idats: Buffer[] = [];
+  while (offset + 8 <= buf.length) {
+    const len = buf.readUInt32BE(offset);
+    const type = buf.subarray(offset + 4, offset + 8).toString("ascii");
+    const data = buf.subarray(offset + 8, offset + 8 + len);
+    if (type === "IHDR") {
+      width = data.readUInt32BE(0);
+      height = data.readUInt32BE(4);
+      color = data[9] ?? 0;
+    } else if (type === "IDAT") idats.push(Buffer.from(data));
+    else if (type === "IEND") break;
+    offset += 12 + len;
+  }
+  const channels = color === 6 ? 4 : 3;
+  const inflated = inflateSync(Buffer.concat(idats));
+  const stride = width * channels;
+  const rows: Buffer[] = [];
+  let src = 0;
+  for (let y = 0; y < height; y += 1) {
+    const filter = inflated[src] ?? 0;
+    src += 1;
+    const row = Buffer.alloc(stride);
+    const raw = inflated.subarray(src, src + stride);
+    src += stride;
+    const prev = rows[y - 1];
+    for (let i = 0; i < stride; i += 1) {
+      const left = i >= channels ? row[i - channels] ?? 0 : 0;
+      const up = prev?.[i] ?? 0;
+      const ul = i >= channels ? prev?.[i - channels] ?? 0 : 0;
+      const value = raw[i] ?? 0;
+      if (filter === 1) row[i] = (value + left) & 255;
+      else if (filter === 2) row[i] = (value + up) & 255;
+      else if (filter === 3) row[i] = (value + Math.floor((left + up) / 2)) & 255;
+      else if (filter === 4) row[i] = (value + paeth(left, up, ul)) & 255;
+      else row[i] = value;
+    }
+    rows.push(row);
+  }
+  const rgba = Buffer.alloc(width * height * 4);
+  for (let y = 0; y < height; y += 1) {
+    const row = rows[y]!;
+    for (let x = 0; x < width; x += 1) {
+      const s = x * channels;
+      const d = (y * width + x) * 4;
+      rgba[d] = row[s] ?? 0;
+      rgba[d + 1] = row[s + 1] ?? 0;
+      rgba[d + 2] = row[s + 2] ?? 0;
+      rgba[d + 3] = channels === 4 ? row[s + 3] ?? 255 : 255;
+    }
+  }
+  return { w: width, h: height, rgba };
+}
+
+function chromeBin(): string | null {
+  const listed = [
+    process.env.CHROME_BIN,
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/usr/bin/google-chrome",
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+  ].filter((item): item is string => Boolean(item));
+  const found = listed.find((item) => existsSync(item));
+  if (found) return found;
+  const which = spawnSync("bash", ["-lc", "command -v chromium || command -v chromium-browser || command -v google-chrome || true"], {
+    encoding: "utf8",
+  });
+  const bin = which.stdout.trim();
+  return bin || null;
+}
+
+function inspectWithChrome(name: string, html: string, expect: { r: number; g: number; b: number }) {
+  const bin = chromeBin();
+  assert.ok(bin, `${name}: Chrome/Chromium is required when puppeteer is not installed`);
+  const htmlPath = path.join(OUT, `${name}.html`);
+  const pngPath = path.join(OUT, `${name}.png`);
+  const pdfPath = path.join(OUT, `${name}.pdf`);
+  writeFileSync(htmlPath, html);
+  const shot = spawnSync(bin, [
+    "--headless=new",
+    "--disable-gpu",
+    "--no-sandbox",
+    "--hide-scrollbars",
+    "--force-device-scale-factor=1",
+    "--window-size=1280,2200",
+    `--screenshot=${pngPath}`,
+    `file://${htmlPath}`,
+  ], { encoding: "utf8", timeout: 60_000 });
+  assert.equal(shot.status, 0, `${name} screenshot failed`);
+  const image = decodePng(readFileSync(pngPath));
+  let minX = image.w;
+  let minY = image.h;
+  let maxX = 0;
+  let maxY = 0;
+  let blue = 0;
+  const near = (actual: number, expected: number) => Math.abs(actual - expected) < 70;
+  for (let y = 0; y < image.h; y += 1) {
+    for (let x = 0; x < image.w; x += 1) {
+      const i = (y * image.w + x) * 4;
+      const r = image.rgba[i] ?? 0;
+      const g = image.rgba[i + 1] ?? 0;
+      const b = image.rgba[i + 2] ?? 0;
+      if (near(r, expect.r) && near(g, expect.g) && near(b, expect.b)) {
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+      }
+      if (b > 180 && r < 80 && g < 80) blue += 1;
+    }
+  }
+  const boxW = maxX - minX + 1;
+  const boxH = maxY - minY + 1;
+  assert.ok(boxH > 80, `${name} rendered image is too small`);
+  assert.ok(Math.abs(boxW / boxH - 280 / 180) < 0.2, `${name} rendered image is clipped`);
+  assert.ok(blue > 10, `${name} corner marker is missing`);
+  const printed = spawnSync(bin, [
+    "--headless=new",
+    "--disable-gpu",
+    "--no-sandbox",
+    "--no-pdf-header-footer",
+    `--print-to-pdf=${pdfPath}`,
+    `file://${htmlPath}`,
+  ], { encoding: "utf8", timeout: 60_000 });
+  assert.equal(printed.status, 0, `${name} PDF failed`);
+  const pdfBytes = readFileSync(pdfPath);
+  assert.equal(pdfBytes.subarray(0, 4).toString("ascii"), "%PDF");
+  assert.ok(pdfBytes.byteLength > 2000, `${name} PDF too small`);
+  return { pdfBytes: pdfBytes.byteLength, box: { w: boxW, h: boxH } };
+}
+
 async function inspect(name: string, html: string, expect: { r: number; g: number; b: number }) {
+  if (process.env.VYD_PDF_CHROME === "1") return inspectWithChrome(name, html, expect);
   const require = createRequire(import.meta.url);
-  const puppeteer = require(path.join(
-    import.meta.dirname,
-    "../../../services/subscription-invoice-renderer/node_modules/puppeteer"
-  )) as {
+  let puppeteer: {
     launch: (opts?: object) => Promise<{
       newPage: () => Promise<{
         setContent: (html: string, opts?: object) => Promise<void>;
@@ -167,6 +311,14 @@ async function inspect(name: string, html: string, expect: { r: number; g: numbe
       close: () => Promise<void>;
     }>;
   };
+  try {
+    puppeteer = require(path.join(
+      import.meta.dirname,
+      "../../../services/subscription-invoice-renderer/node_modules/puppeteer"
+    ));
+  } catch {
+    return inspectWithChrome(name, html, expect);
+  }
   const browser = await puppeteer.launch({ headless: true, args: ["--no-sandbox", "--disable-setuid-sandbox"] });
   try {
     const page = await browser.newPage();
