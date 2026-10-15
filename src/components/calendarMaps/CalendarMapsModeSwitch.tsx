@@ -26,14 +26,12 @@ interface CalendarMapsModeSwitchProps {
   mode: CalendarMapsMode;
   onChange: (mode: CalendarMapsMode) => void;
   calendarLabel: string;
-  mapLabel: string;
 }
 
 export const CalendarMapsModeSwitch = memo(function CalendarMapsModeSwitch({
   mode,
   onChange,
   calendarLabel,
-  mapLabel,
 }: CalendarMapsModeSwitchProps) {
   const { colors, resolvedMode } = useTheme();
   const isDark = resolvedMode === "dark";
@@ -109,18 +107,6 @@ export const CalendarMapsModeSwitch = memo(function CalendarMapsModeSwitch({
         accessibilityState={{ selected: mode === "calendar" }}
       >
         <Text style={[styles.text, mode === "calendar" && styles.textOn]}>{calendarLabel}</Text>
-      </Pressable>
-      <Pressable
-        style={({ pressed }) => [
-          styles.chip,
-          mode === "map" && styles.chipOn,
-          executivePressFeedback(pressed),
-        ]}
-        onPress={() => select("map")}
-        accessibilityRole="tab"
-        accessibilityState={{ selected: mode === "map" }}
-      >
-        <Text style={[styles.text, mode === "map" && styles.textOn]}>{mapLabel}</Text>
       </Pressable>
     </View>
   );

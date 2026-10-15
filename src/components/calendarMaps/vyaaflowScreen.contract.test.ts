@@ -12,6 +12,8 @@ function read(path: string): string {
 const deferred = read("src/components/calendarMaps/DeferredCalendarMapsMapPanel.tsx");
 const mapPanel = read("src/components/calendarMaps/CalendarMapsMapPanel.tsx");
 const hook = read("src/hooks/useCalendarMapsData.ts");
+const calendar = read("app/(app)/(tabs)/calendar.tsx");
+const modeSwitch = read("src/components/calendarMaps/CalendarMapsModeSwitch.tsx");
 const markers = read("src/services/calendarMaps/mapMarkerRecords.ts");
 const postal = read("src/components/composer/PostalLocationSection.tsx");
 const pinHook = read("src/hooks/useIndianPincodeField.ts");
@@ -36,9 +38,34 @@ assert.match(mapPanel, /vyaaflowCopy\.pinList\.mapNote/);
 
 assert.match(hook, /sourceUserRef/);
 assert.match(hook, /userIdRef\.current !== owner/);
-assert.match(hook, /pinListActive/);
-assert.match(hook, /buildBusinessPinGroupsSync/);
+assert.match(hook, /buildStatutoryTabViewModel/);
+assert.match(hook, /mergeStatutoryCalendarMarkers/);
+assert.match(hook, /buildCalendarDayView/);
+assert.doesNotMatch(hook, /pinListActive/);
+assert.doesNotMatch(hook, /buildBusinessPinGroupsSync/);
+assert.doesNotMatch(hook, /buildGpsMapMarkersSync/);
+assert.doesNotMatch(hook, /buildMapLocationClusters/);
+assert.doesNotMatch(hook, /scheduleDeferredIndiaPincodeWarm/);
+assert.doesNotMatch(hook, /mapActive/);
 assert.doesNotMatch(hook, /locationService/);
+
+assert.doesNotMatch(calendar, /DeferredCalendarMapsMapPanel/);
+assert.doesNotMatch(calendar, /CalendarMapsMapPanel/);
+assert.doesNotMatch(calendar, /CalendarMapsModeSwitch/);
+assert.doesNotMatch(calendar, /CalendarMapsModeTransition/);
+assert.doesNotMatch(calendar, /mapEverOpened/);
+assert.doesNotMatch(calendar, /mayMountNativeMapView/);
+assert.doesNotMatch(calendar, /readAndroidMapsConfigured/);
+assert.doesNotMatch(calendar, /mapMarkerWorkAllowed/);
+assert.doesNotMatch(calendar, /Business PINs/);
+assert.doesNotMatch(calendar, /pinListActive/);
+assert.match(calendar, /navigateToCalendarMapRecord/);
+assert.match(calendar, /vyaaflowVisibleMode/);
+assert.match(calendar, /filterVyaaflowAgendaSections/);
+assert.match(calendar, /pathname: "\/statutory"/);
+assert.doesNotMatch(calendar, /overdue/i);
+assert.doesNotMatch(modeSwitch, /select\("map"\)/);
+assert.doesNotMatch(modeSwitch, /mapLabel/);
 
 assert.match(markers, /if \(!isDbReady\(\)\)/);
 assert.match(markers, /group\.valid/);

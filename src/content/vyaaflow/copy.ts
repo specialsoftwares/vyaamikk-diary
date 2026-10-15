@@ -1,14 +1,34 @@
 /**
- * English VyaaFlow copy. Runtime labels use `calendarMaps.vyaaflow` in the
- * locale catalogs. This object stays the English source those catalogs match.
+ * English VyaaFlow copy. Existing catalog keys stay aligned with
+ * `calendarMaps.vyaaflow`. Pending keys below are the compact screen copy
+ * the coordinator still needs to add. The screen reads `introCompact`, not
+ * the legacy freight `intro` sentence.
  */
+export const vyaaflowPendingLocaleKeys = {
+  introCompact: "calendarMaps.vyaaflow.introCompact",
+  filterAll: "calendarMaps.vyaaflow.filters.all",
+  filterMyBusiness: "calendarMaps.vyaaflow.filters.myBusiness",
+  filterStatutory: "calendarMaps.vyaaflow.filters.statutory",
+  statutoryReferenceTitle: "calendarMaps.vyaaflow.statutoryReference.title",
+} as const;
+
 export const vyaaflowCopy = {
   screenTitle: "VyaaFlow",
+  /** Legacy catalog sentence. The screen shows `introCompact`. */
   intro: "Dates, dues and freight PIN areas for this business.",
+  introCompact: "Business records, dues, follow-ups and reminders.",
   showDetails: "Show details",
   hideDetails: "Hide details",
   calendarSection: "Important Business Dates",
   mapSection: "Business PINs",
+  filters: {
+    all: "All",
+    myBusiness: "My business",
+    statutory: "Statutory",
+  },
+  statutoryReference: {
+    title: "Statutory reference",
+  },
   paragraphs: {
     businessDates:
       "Vyaamikk Diary keeps your business dates in one place. Records, dues, follow-ups and reminders appear in Important Business Dates, helping you review what happened and what is coming up.",

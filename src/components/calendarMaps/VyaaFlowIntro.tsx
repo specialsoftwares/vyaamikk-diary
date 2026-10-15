@@ -1,64 +1,77 @@
-import React, { useState } from "react";
+import React from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 
 import { LocaleUiText } from "@/components/ui";
 import { useVyaaflowCopy } from "@/content/vyaaflow/useVyaaflowCopy";
 import { spacing, typography, useThemedStyles } from "@/theme";
 
-/** Concise intro lives on the page header. This control opens the approved detail. */
-export function VyaaFlowIntro() {
+interface VyaaFlowIntroProps {
+  onOpenStatutoryReference: () => void;
+}
+
+/** Compact supporting note and the statutory reference library entry. */
+export function VyaaFlowIntro({ onOpenStatutoryReference }: VyaaFlowIntroProps) {
   const copy = useVyaaflowCopy();
-  const paragraphs = [
-    copy.paragraphs.businessDates,
-    copy.paragraphs.statutory,
-    copy.paragraphs.businessPins,
-  ];
-  const [open, setOpen] = useState(false);
   const styles = useThemedStyles((c) =>
     StyleSheet.create({
-      toggle: {
-        alignSelf: "flex-start",
-        minHeight: 44,
-        justifyContent: "center",
-        marginTop: spacing.sm,
+      wrap: { marginTop: spacing.sm, gap: spacing.md },
+      paragraph: {
+        fontFamily: typography.caption.fontFamily,
+        fontSize: typography.caption.fontSize,
+        fontWeight: typography.caption.fontWeight,
+        color: c.textMuted,
+        lineHeight: 20,
       },
-      toggleText: {
+      reference: {
+        minHeight: 44,
+        paddingVertical: spacing.sm,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: spacing.sm,
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderTopColor: c.divider,
+      },
+      referenceCopy: { flex: 1, gap: 2 },
+      referenceTitle: {
         fontFamily: typography.bodyStrong.fontFamily,
         fontSize: typography.bodyStrong.fontSize,
         fontWeight: typography.bodyStrong.fontWeight,
         color: c.primary,
       },
-      details: { marginTop: spacing.sm, gap: spacing.md },
-      paragraph: {
-        fontFamily: typography.body.fontFamily,
-        fontSize: typography.body.fontSize,
-        fontWeight: typography.body.fontWeight,
+      referenceSubtitle: {
+        fontFamily: typography.caption.fontFamily,
+        fontSize: typography.caption.fontSize,
+        fontWeight: typography.caption.fontWeight,
         color: c.textMuted,
+      },
+      chevron: {
+        fontFamily: typography.titleSm.fontFamily,
+        fontSize: typography.titleSm.fontSize,
+        fontWeight: typography.titleSm.fontWeight,
+        color: c.textSubtle,
       },
     })
   );
 
   return (
-    <View>
+    <View style={styles.wrap}>
+      <LocaleUiText style={styles.paragraph}>{copy.disclaimer}</LocaleUiText>
       <Pressable
-        onPress={() => setOpen((value) => !value)}
+        onPress={onOpenStatutoryReference}
         accessibilityRole="button"
-        accessibilityState={{ expanded: open }}
-        style={styles.toggle}
+        accessibilityLabel={copy.statutoryReferenceTitle}
+        style={styles.reference}
       >
-        <LocaleUiText style={styles.toggleText}>
-          {open ? copy.hideDetails : copy.showDetails}
-        </LocaleUiText>
-      </Pressable>
-      {open ? (
-        <View style={styles.details}>
-          {paragraphs.map((paragraph) => (
-            <LocaleUiText key={paragraph} style={styles.paragraph}>
-              {paragraph}
-            </LocaleUiText>
-          ))}
+        <View style={styles.referenceCopy}>
+          <LocaleUiText style={styles.referenceTitle}>
+            {copy.statutoryReferenceTitle}
+          </LocaleUiText>
+          <LocaleUiText style={styles.referenceSubtitle}>
+            {copy.statutoryReferenceSubtitle}
+          </LocaleUiText>
         </View>
-      ) : null}
+        <LocaleUiText style={styles.chevron}>›</LocaleUiText>
+      </Pressable>
     </View>
   );
 }
