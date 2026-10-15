@@ -26,7 +26,11 @@ Business Insights overview keeps the year selector, one freshness line, summary 
 
 The upgrade sheet’s “Plans are unavailable” and “Purchases are not available in this build” lines are the store-catalog boundary. Server admission already opens the sheet while purchase-entry stays `0`. Those lines appear when Play Billing has no ready priced Starter monthly row. The wording was not changed. Restricted admission, session rechecks, restore, pending purchases, and server verification stay.
 
-Canonical CI for this source is not recorded in this paragraph. Coordinator checks are not independent QA. Native screenshots, a generated Android artifact, and Play-installed acceptance are not done. Maps infrastructure retirement is pending.
+Application source is `d64309dd650079b21a9661723f9a2d0ac4ecc97d`. Canonical CI is workflow_dispatch run `38730168856` / verify job `116405713916`, success, head SHA matched. This paragraph is a later register note and is not that source commit.
+
+Independent acceptance on that SHA passed the Letterhead, map-removal, VyaaFlow, Insights, and purchase-entry source checks. Eight product tests passed. A disposable emulator (`Vyaamikk_Layout_Disposable`, debuggable versionCode 27 shell, not a build of this SHA) showed VyaaFlow, Settings, the new-record picker, and the Insights shell. The upgrade sheet did not open on that session. Populated insight figures did not load. A generated AAB or APK of this SHA was not inspected. Play-installed acceptance is not done.
+
+Goods sent / transport still requires a valid From PIN and a valid To PIN before save. That rule is `refineRequiredPin` in `src/utils/businessEntry/validation.ts`, present before this candidate. Detect my PIN stays a separate button on the same fields. The Settings hero still says “statutory dates” even though the Statutory Information row is gone. Maps infrastructure retirement is pending.
 
 ## Internal versionCode 28 — 15 Oct 2026
 
