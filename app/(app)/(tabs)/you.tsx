@@ -234,7 +234,6 @@ export default function YouTab() {
         | "purchase_order"
         | "customer_credit"
         | "material_movement",
-      _routesToLetterhead?: boolean,
       routesToProfessionalPack?: boolean,
       routesToPurchaseOrder?: boolean,
       routesToCustomerCredit?: boolean

@@ -218,7 +218,6 @@ export function SubscriptionManagementScreen() {
             {quota.kind === "capped" && quota.warnAt80 ? (
               <LocaleUiText style={styles.muted}>{t("billing.management.quotaWarn80")}</LocaleUiText>
             ) : null}
-            <LocaleUiText style={styles.muted}>{t("billing.upgrade.letterheadIncluded")}</LocaleUiText>
           </>
         )}
         {subscription.error ? <LocaleUiText style={styles.error}>{subscription.error}</LocaleUiText> : null}
