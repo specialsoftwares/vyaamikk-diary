@@ -19,6 +19,7 @@ import { FormFocusProvider } from "@/components/inputSafety/FormFocusManager";
 import { ValidationFocusProvider } from "@/components/inputSafety/ValidationFocusManager";
 import { useKeyboardInset } from "@/hooks/useKeyboardInset";
 import { useTabBarMetrics } from "@/layout/tabBar";
+import { screenBottomPadding } from "@/layout/tabBarMetrics";
 import { spacing, useTheme, useThemeColors, useThemedStyles } from "@/theme";
 
 /** Extra space below last field so Save / suggestions stay above keyboard. */
@@ -38,6 +39,13 @@ interface ScreenProps {
    * With a footer, this only selects the gap under the in-flow control.
    */
   tabBarInset?: boolean;
+  /**
+   * The child is the only vertical scroll owner. When set on a non-scrolling
+   * screen with no footer, wrapper paddingBottom is 0. Do not also reserve
+   * the tab bar or the safe-area fallback — that band is already outside
+   * this scene. End spacing belongs on the child scroller.
+   */
+  childScrollOwner?: boolean;
   /** Extra bottom padding inside scroll/content (e.g. floating action button). */
   extraBottomPadding?: number;
   /** Pinned bar below scroll content (e.g. primary action) — not overlaid on the list. */
@@ -64,6 +72,7 @@ export function Screen({
   dismissKeyboardOnTap = true,
   topInsetOverride,
   tabBarInset = false,
+  childScrollOwner = false,
   extraBottomPadding = 0,
   footer,
   form = false,
@@ -103,23 +112,26 @@ export function Screen({
   );
 
   const bottomPadding = useMemo(() => {
-    if (footer) {
-      return spacing.md + extraBottomPadding;
-    }
-    const base = tabBarInset
-      ? tabBar.contentPaddingBottom
-      : insets.bottom + spacing.xl;
-    let total = base + extraBottomPadding;
+    let formExtraPadding = 0;
     if (isFormScreen) {
-      if (useAndroidKeyboardPadding) {
-        total += keyboardHeight + FORM_KEYBOARD_EXTRA_PADDING;
-      } else {
-        total += FORM_KEYBOARD_EXTRA_PADDING;
-      }
+      formExtraPadding = useAndroidKeyboardPadding
+        ? keyboardHeight + FORM_KEYBOARD_EXTRA_PADDING
+        : FORM_KEYBOARD_EXTRA_PADDING;
     }
-    return total;
+    return screenBottomPadding({
+      hasFooter: Boolean(footer),
+      scroll,
+      childScrollOwner,
+      tabBarInset,
+      contentPaddingBottom: tabBar.contentPaddingBottom,
+      bottomInset: insets.bottom,
+      extraBottomPadding,
+      formExtraPadding,
+    });
   }, [
     footer,
+    scroll,
+    childScrollOwner,
     tabBarInset,
     tabBar.contentPaddingBottom,
     insets.bottom,

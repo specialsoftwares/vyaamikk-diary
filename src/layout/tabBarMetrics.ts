@@ -67,6 +67,58 @@ export function computeTabBarMetrics(
   };
 }
 
+export interface ScreenBottomPaddingInput {
+  hasFooter: boolean;
+  /** Screen's own ScrollView is the vertical scroll owner. */
+  scroll: boolean;
+  /**
+   * A child list is the only vertical scroll owner. The non-scroll wrapper
+   * must not reserve the tab bar a second time.
+   */
+  childScrollOwner: boolean;
+  tabBarInset: boolean;
+  /** `TabBarMetrics.contentPaddingBottom` for tab screens. */
+  contentPaddingBottom: number;
+  bottomInset: number;
+  extraBottomPadding: number;
+  /**
+   * Keyboard/form addition already resolved by Screen. Still applied when a
+   * child owns scroll, so form screens do not lose keyboard padding. It is
+   * 0 for non-form screens, which is the VyaaFlow wrapper.
+   */
+  formExtraPadding: number;
+}
+
+/**
+ * Bottom padding for `Screen`.
+ *
+ * React Navigation lays the tab scene in a flex column above the JS tab bar.
+ * Subtracting the bar again on a non-scrolling wrapper is the VyaaFlow dead
+ * band. When `childScrollOwner` is set, there is no footer, and Screen is not
+ * itself scrolling, the wrapper does not add `contentPaddingBottom` or the
+ * safe-area fallback — padding is 0 unless a keyboard/form extra is already
+ * in play. End spacing then belongs on the child list
+ * (`childScrollListEndGap`). A footer still uses only the small in-flow gap.
+ * Default tab screens keep `contentPaddingBottom`.
+ */
+export function screenBottomPadding(input: ScreenBottomPaddingInput): number {
+  if (input.hasFooter) {
+    return spacing.md + input.extraBottomPadding;
+  }
+  if (input.childScrollOwner && !input.scroll) {
+    return input.formExtraPadding;
+  }
+  const base = input.tabBarInset
+    ? input.contentPaddingBottom
+    : input.bottomInset + spacing.xl;
+  return base + input.extraBottomPadding + input.formExtraPadding;
+}
+
+/** Content gap under the last row when the child list owns vertical scroll. */
+export function childScrollListEndGap(): number {
+  return spacing.lg;
+}
+
 /**
  * Clearance below a bottom-pinned footer (e.g. the You tab "+ New record"
  * CTA) so the control clears the native bar with a spacing-token gap.

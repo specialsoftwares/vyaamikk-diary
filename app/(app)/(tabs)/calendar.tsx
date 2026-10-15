@@ -40,7 +40,7 @@ import {
   executiveCardDepth,
 } from "@/theme";
 import { calendarMarkerDotColors } from "@/theme/categoryAccentResolver";
-import { useTabBarMetrics } from "@/layout/tabBar";
+import { childScrollListEndGap } from "@/layout/tabBarMetrics";
 
 const AGENDA_FILTERS: VyaaflowAgendaFilter[] = ["all", "business", "statutory"];
 
@@ -53,7 +53,6 @@ export default function CalendarMapsTab() {
   const { user } = useAuth();
   const colors = useThemeColors();
   const { resolvedMode } = useTheme();
-  const tabBar = useTabBarMetrics();
   const [selectedDate, setSelectedDate] = useState(() => dayKey(Date.now()));
   const [agendaFilter, setAgendaFilter] = useState<VyaaflowAgendaFilter>("all");
 
@@ -81,7 +80,9 @@ export default function CalendarMapsTab() {
 
   const styles = useThemedStyles((c) =>
     StyleSheet.create({
-      root: { flex: 1 },
+      root: { flex: 1, minHeight: 0 },
+      agendaList: { flex: 1, minHeight: 0 },
+      agendaContent: { paddingBottom: childScrollListEndGap() },
       headerWrap: {
         paddingHorizontal: spacing.lg,
         paddingTop: spacing.md,
@@ -147,7 +148,6 @@ export default function CalendarMapsTab() {
         marginTop: spacing.md,
       },
       rowGap: { marginBottom: spacing.md, paddingHorizontal: spacing.lg },
-      listFooter: { height: spacing.md },
       emptyBlock: {
         paddingHorizontal: spacing.lg,
         paddingTop: spacing.md,
@@ -312,8 +312,9 @@ export default function CalendarMapsTab() {
     if (!loading && sections.length === 0) {
       return (
         <ScrollView
+          style={styles.agendaList}
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingBottom: tabBar.contentPaddingBottom }}
+          contentContainerStyle={styles.agendaContent}
           refreshControl={refreshControl}
         >
           {calendarListHeader}
@@ -333,10 +334,10 @@ export default function CalendarMapsTab() {
 
     return (
       <SectionList
+        style={styles.agendaList}
         sections={sections}
         keyExtractor={(item) => item.id}
         ListHeaderComponent={calendarListHeader}
-        ListFooterComponent={<View style={styles.listFooter} />}
         refreshControl={refreshControl}
         renderSectionHeader={({ section: { title } }) => {
           const isFirst = sections[0]?.title === title;
@@ -381,7 +382,7 @@ export default function CalendarMapsTab() {
         maxToRenderPerBatch={8}
         windowSize={7}
         removeClippedSubviews={Platform.OS === "android"}
-        contentContainerStyle={{ paddingBottom: tabBar.contentPaddingBottom }}
+        contentContainerStyle={styles.agendaContent}
         showsVerticalScrollIndicator={false}
       />
     );
@@ -390,7 +391,6 @@ export default function CalendarMapsTab() {
     sections,
     calendarListHeader,
     styles,
-    tabBar.contentPaddingBottom,
     t,
     openRecord,
     requestDelete,
@@ -401,7 +401,7 @@ export default function CalendarMapsTab() {
   ]);
 
   return (
-    <Screen padded={false} dismissKeyboardOnTap={false} tabBarInset>
+    <Screen padded={false} dismissKeyboardOnTap={false} tabBarInset childScrollOwner>
       <View key={visibleMode} style={styles.root}>
         <View style={styles.headerWrap}>
           <SignatureHeroSurface variant="identity" style={{ marginBottom: spacing.sm }} padded={false}>
