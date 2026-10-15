@@ -1,65 +1,77 @@
 /**
  * Optional receipt / proof photo for Cash Paid records.
- * Device-local, user-scoped, compressed — never synced as raw camera originals.
+ * Device-local, user-scoped, bounded — never kept as base64 in React state.
  */
 
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
 
 import type { AttachmentRef } from "@/domain/businessEntry";
-import { createLogger } from "@/utils/logger";
 
-const log = createLogger("cashPaid/photo");
+import { captureCashPhotoOwner, type SessionUidReader } from "./cashPhotoOwner";
+import {
+  CASH_PAID_ATTACHMENT_ID,
+  CashPaidPhotoError,
+  type PickedCashPaidPhoto,
+  cashPaidPhotoAttachment,
+  isOwnerScopedPhotoUri,
+} from "./cashPaidPhotoRef";
+import { MAX_CASH_PAID_PHOTO_BYTES } from "./cashPaidPhotoLimits";
+import { decodeBase64, inspectReceiptBytes } from "./receiptPhotoBytes";
 
-export const MAX_CASH_PAID_PHOTO_BYTES = 320_000;
-export const CASH_PAID_ATTACHMENT_ID = "cash_paid_receipt";
+export {
+  CASH_PAID_ATTACHMENT_ID,
+  CashPaidPhotoError,
+  cashPaidPhotoAttachment,
+  isOwnerScopedPhotoUri,
+  MAX_CASH_PAID_PHOTO_BYTES,
+};
+export type { PickedCashPaidPhoto };
 
 export type CashPaidPhotoSource = "camera" | "library";
 
-export interface PickedCashPaidPhoto {
-  uri: string;
-  base64: string;
-  mimeType: string;
-  approxBytes: number;
+function photosDir(uid: string): string {
+  return `${FileSystem.documentDirectory ?? ""}cash-paid-photos/${uid}`;
 }
 
-export class CashPaidPhotoError extends Error {
-  constructor(public readonly code: "permission" | "too_large" | "read_failed") {
-    super(code);
-    this.name = "CashPaidPhotoError";
+function extForMime(mime: PickedCashPaidPhoto["mimeType"]): string {
+  return mime === "image/png" ? "png" : "jpg";
+}
+
+async function ensureDir(dir: string): Promise<void> {
+  const info = await FileSystem.getInfoAsync(dir);
+  if (!info.exists) await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+}
+
+async function deleteIfExists(uri: string): Promise<void> {
+  try {
+    const info = await FileSystem.getInfoAsync(uri);
+    if (info.exists) await FileSystem.deleteAsync(uri, { idempotent: true });
+  } catch {
+    // Best-effort. Do not log paths or file bytes.
   }
 }
 
-function inferMime(asset: ImagePicker.ImagePickerAsset): string {
-  if (asset.mimeType) return asset.mimeType;
-  const name = asset.fileName?.toLowerCase() ?? "";
-  if (name.endsWith(".png")) return "image/png";
-  return "image/jpeg";
+async function readFileBytes(uri: string): Promise<Uint8Array> {
+  const b64 = await FileSystem.readAsStringAsync(uri, {
+    encoding: FileSystem.EncodingType.Base64,
+  });
+  return decodeBase64(b64);
 }
 
-function toPicked(asset: ImagePicker.ImagePickerAsset): PickedCashPaidPhoto {
-  if (!asset.base64) throw new CashPaidPhotoError("read_failed");
-  const approxBytes = Math.ceil((asset.base64.length * 3) / 4);
-  if (approxBytes > MAX_CASH_PAID_PHOTO_BYTES) {
-    throw new CashPaidPhotoError("too_large");
-  }
-  return {
-    uri: asset.uri,
-    base64: asset.base64,
-    mimeType: inferMime(asset),
-    approxBytes,
-  };
-}
-
+/**
+ * Copy the picker file off the interaction cache, then accept it only when
+ * the bytes are a JPEG or PNG within MAX_CASH_PAID_PHOTO_BYTES.
+ * Cancellation returns null. Oversized files throw too_large — they are not dropped.
+ */
 export async function pickCashPaidPhoto(
   source: CashPaidPhotoSource
 ): Promise<PickedCashPaidPhoto | null> {
   const pickerOpts = {
     mediaTypes: ["images"] as ImagePicker.MediaType[],
-    allowsEditing: true,
-    aspect: [4, 3] as [number, number],
+    allowsEditing: false,
     quality: 0.5,
-    base64: true,
+    base64: false,
     exif: false,
   };
 
@@ -71,72 +83,140 @@ export async function pickCashPaidPhoto(
       cameraType: ImagePicker.CameraType.back,
     });
     if (result.canceled || !result.assets?.[0]) return null;
-    return toPicked(result.assets[0]);
+    return acceptPickedFile(result.assets[0].uri);
   }
 
   const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
   if (!perm.granted) throw new CashPaidPhotoError("permission");
   const result = await ImagePicker.launchImageLibraryAsync(pickerOpts);
   if (result.canceled || !result.assets?.[0]) return null;
-  return toPicked(result.assets[0]);
+  return acceptPickedFile(result.assets[0].uri);
 }
 
-function photosDir(uid: string): string {
-  return `${FileSystem.documentDirectory ?? ""}cash-paid-photos/${uid}`;
-}
-
-function photoPath(uid: string, entryId: string, ext: string): string {
-  return `${photosDir(uid)}/${entryId}.${ext}`;
-}
-
-function extFromMime(mime: string): string {
-  return mime.includes("png") ? "png" : "jpg";
-}
-
-async function ensureDir(uid: string): Promise<void> {
-  const dir = photosDir(uid);
-  const info = await FileSystem.getInfoAsync(dir);
-  if (!info.exists) await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
-}
-
-async function deleteIfExists(uri: string): Promise<void> {
+async function acceptPickedFile(sourceUri: string): Promise<PickedCashPaidPhoto> {
+  const root = FileSystem.cacheDirectory ?? FileSystem.documentDirectory;
+  if (!root || !sourceUri) throw new CashPaidPhotoError("read_failed");
+  const dir = `${root}cash-paid-working/`;
+  await ensureDir(dir);
+  const working = `${dir}${Date.now()}-${Math.random().toString(36).slice(2, 8)}.img`;
   try {
-    const info = await FileSystem.getInfoAsync(uri);
-    if (info.exists) await FileSystem.deleteAsync(uri, { idempotent: true });
+    await FileSystem.copyAsync({ from: sourceUri, to: working });
+    const info = await FileSystem.getInfoAsync(working);
+    if (!info.exists || !("size" in info) || info.size <= 0) {
+      throw new CashPaidPhotoError("read_failed");
+    }
+    if (info.size > MAX_CASH_PAID_PHOTO_BYTES) {
+      throw new CashPaidPhotoError("too_large");
+    }
+    const bytes = await readFileBytes(working);
+    const inspected = inspectReceiptBytes(bytes);
+    if (!inspected.ok) {
+      throw new CashPaidPhotoError(inspected.reason === "too_large" ? "too_large" : inspected.reason);
+    }
+    const ext = extForMime(inspected.mime);
+    const named = working.replace(/\.img$/, `.${ext}`);
+    if (named !== working) {
+      await FileSystem.moveAsync({ from: working, to: named });
+    }
+    return {
+      uri: named,
+      mimeType: inspected.mime,
+      byteSize: inspected.byteSize,
+      contentHash: inspected.contentHash,
+      width: inspected.width,
+      height: inspected.height,
+    };
   } catch (e) {
-    log.warn("delete photo", e);
+    await deleteIfExists(working);
+    if (e instanceof CashPaidPhotoError) throw e;
+    throw new CashPaidPhotoError("read_failed");
   }
 }
 
+/**
+ * Write a staging file, then rename onto the owner path.
+ * Does not delete the previous receipt. The caller retires that file only
+ * after the new AttachmentRef is stored on the local record.
+ */
 export async function persistCashPaidPhoto(
   uid: string,
   entryId: string,
-  picked: PickedCashPaidPhoto
+  picked: PickedCashPaidPhoto,
+  options?: { readSessionUid?: SessionUidReader }
 ): Promise<AttachmentRef> {
-  await ensureDir(uid);
-  const ext = extFromMime(picked.mimeType);
-  const dest = photoPath(uid, entryId, ext);
-  await deleteIfExists(dest);
-  await FileSystem.writeAsStringAsync(dest, picked.base64, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
+  const owner = captureCashPhotoOwner(uid, options?.readSessionUid);
+  const dir = photosDir(uid);
+  await ensureDir(dir);
+  owner.assertStillOwner();
+
+  const ext = extForMime(picked.mimeType);
+  const finalPath = `${dir}/${entryId}.${picked.contentHash}.${ext}`;
+  const staging = `${dir}/${entryId}.${picked.contentHash}.staging-${Date.now()}.${ext}`;
+  let createdFinal = false;
+  try {
+    await FileSystem.copyAsync({ from: picked.uri, to: staging });
+    owner.assertStillOwner();
+    const existing = await FileSystem.getInfoAsync(finalPath);
+    if (!existing.exists) {
+      await FileSystem.moveAsync({ from: staging, to: finalPath });
+      createdFinal = true;
+    } else {
+      await deleteIfExists(staging);
+    }
+    owner.assertStillOwner();
+  } catch (e) {
+    await deleteIfExists(staging);
+    if (createdFinal) await deleteIfExists(finalPath);
+    if (e instanceof CashPaidPhotoError) throw e;
+    throw new CashPaidPhotoError("read_failed");
+  }
+
+  const info = await FileSystem.getInfoAsync(finalPath);
+  owner.assertStillOwner();
+  const fileMtimeMs =
+    info.exists && "modificationTime" in info && typeof info.modificationTime === "number"
+      ? Math.round(info.modificationTime * 1000)
+      : null;
+
   return {
     id: CASH_PAID_ATTACHMENT_ID,
-    uri: dest,
+    uri: finalPath,
     mimeType: picked.mimeType,
-    name: null,
+    name: `receipt.${ext}`,
+    contentHash: picked.contentHash,
+    byteSize: picked.byteSize,
+    fileMtimeMs,
+    revision: picked.contentHash,
   };
 }
 
-export async function removeCashPaidPhotoFile(
-  attachments: AttachmentRef[] | null | undefined
+/**
+ * Delete a previous receipt only when it belongs to this owner and is not
+ * the file the new reference points at. Call after the new reference is durable.
+ */
+export async function retireOwnedCashPaidFile(
+  uid: string,
+  previousUri: string | null | undefined,
+  nextUri: string | null | undefined,
+  options?: { readSessionUid?: SessionUidReader }
 ): Promise<void> {
-  const ref = attachments?.find((a) => a.id === CASH_PAID_ATTACHMENT_ID);
-  if (ref?.uri) await deleteIfExists(ref.uri);
+  if (!previousUri || previousUri === nextUri) return;
+  const owner = captureCashPhotoOwner(uid, options?.readSessionUid);
+  owner.assertStillOwner();
+  if (!isOwnerScopedPhotoUri(uid, previousUri)) return;
+  if (!previousUri.includes(`/cash-paid-photos/${uid}/`)) return;
+  await deleteIfExists(previousUri);
 }
 
-export function cashPaidPhotoAttachment(
-  attachments: AttachmentRef[] | null | undefined
-): AttachmentRef | null {
-  return attachments?.find((a) => a.id === CASH_PAID_ATTACHMENT_ID) ?? null;
+export async function removeCashPaidPhotoFile(
+  attachments: AttachmentRef[] | null | undefined,
+  options?: { uid?: string; readSessionUid?: SessionUidReader }
+): Promise<void> {
+  const ref = cashPaidPhotoAttachment(attachments);
+  if (!ref?.uri) return;
+  if (options?.uid) {
+    await retireOwnedCashPaidFile(options.uid, ref.uri, null, options);
+    return;
+  }
+  await deleteIfExists(ref.uri);
 }

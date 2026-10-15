@@ -6,13 +6,15 @@
 import type { AttachmentRef, BusinessCashGivenPayload } from "@/domain/businessEntry";
 import { getActiveBackend } from "@/config/env";
 import {
+  getUserStoragePath,
   isUserStorageAvailable,
-  uploadRecordAttachmentBase64,
+  uploadLocalFileToPath,
 } from "@/services/storage/userStorage";
+import { captureAdmissionToken, mayIssueRemoteWork } from "@/sync/syncSessionOwnership";
 import { createLogger } from "@/utils/logger";
 
-import type { PickedCashPaidPhoto } from "./cashPaidPhotoService";
-import { CASH_PAID_ATTACHMENT_ID } from "./cashPaidPhotoService";
+import type { PickedCashPaidPhoto } from "./cashPaidPhotoRef";
+import { CASH_PAID_ATTACHMENT_ID } from "./cashPaidPhotoRef";
 
 const log = createLogger("cashPaid/photoStorage");
 
@@ -34,7 +36,9 @@ export async function uploadCashPaidPhotoToStorage(input: {
   >;
 }> {
   const capturedAt = Date.now();
-  const fileName = `cash-paid-${input.recordId}-${capturedAt}.jpg`;
+  const ext = input.picked.mimeType === "image/png" ? "png" : "jpg";
+  const fileName = `cash-paid-${input.recordId}-${capturedAt}.${ext}`;
+  const session = captureAdmissionToken();
 
   if (!isFirebaseBackend() || !isUserStorageAvailable()) {
     return {
@@ -47,14 +51,28 @@ export async function uploadCashPaidPhotoToStorage(input: {
     };
   }
 
+  if (!mayIssueRemoteWork(session, input.userId)) {
+    return {
+      attachment: input.localAttachment,
+      payloadPatch: {
+        photoAttachmentStoragePath: null,
+        photoAttachmentDownloadUrl: null,
+        photoAttachmentCapturedAt: capturedAt,
+      },
+    };
+  }
+
   try {
-    const uploaded = await uploadRecordAttachmentBase64(
-      input.userId,
-      input.recordId,
-      input.picked.base64,
+    const storagePath = getUserStoragePath(input.userId, "attachments", input.recordId, fileName);
+    const uploaded = await uploadLocalFileToPath(
+      storagePath,
+      input.picked.uri,
       input.picked.mimeType,
-      fileName
+      { userId: input.userId, session }
     );
+    if (!mayIssueRemoteWork(session, input.userId)) {
+      throw new Error("owner_changed");
+    }
 
     return {
       attachment: {
@@ -70,8 +88,11 @@ export async function uploadCashPaidPhotoToStorage(input: {
       },
     };
   } catch (e) {
-    log.warn("cash paid photo upload failed", e);
-    throw e;
+    log.warn("cash paid photo upload failed");
+    if (e instanceof Error && e.message === "owner_changed") {
+      throw e;
+    }
+    throw new Error("upload_failed");
   }
 }
 

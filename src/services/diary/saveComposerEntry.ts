@@ -28,6 +28,13 @@ import {
   runBestEffortSecondary,
 } from "@/services/records/saveLifecycleRunner";
 import { SAVE_STEP, SaveRetryableError, SaveStillInProgressError, hasCompletedStep } from "@/services/records/saveLockTypes";
+import {
+  ReceiptPhotoUnavailableError,
+} from "@/services/attachments/cashVoucherPhotoPlan";
+import { documentRevisionForCashEntry } from "@/services/attachments/cashVoucherRevision";
+import { deriveComposerSaveStatus, type ComposerSaveStatus } from "@/services/diary/composerSaveStatus";
+import { monotonicNow, type SaveStageTimer } from "@/services/diary/saveStageTiming";
+import { beginPdfRender, endPdfRender, markPdfRevisionReady } from "@/services/pdf/pdfRevisionGate";
 import type { SaveIdempotencyContext } from "@/services/records/saveIdempotency";
 import { releaseProcessSaveLock } from "@/services/records/saveIdempotency";
 import {
@@ -61,6 +68,10 @@ export interface SaveComposerEntryOptions {
   };
   idempotency?: SaveIdempotencyContext;
   route?: string;
+  /** Fired once the local row and sync intent are durable, before upload, PDF, and search. */
+  onLocalDurable?: (entry: BusinessEntry) => void;
+  onSaveStatus?: (status: ComposerSaveStatus) => void;
+  stageTimer?: SaveStageTimer;
 }
 
 export interface SaveComposerEntryResult {
@@ -69,6 +80,11 @@ export interface SaveComposerEntryResult {
   failedSecondarySteps?: string[];
   cloudAccepted: boolean;
   syncFailureKind?: string;
+  saveStatus?: ComposerSaveStatus;
+  photoRecovery?: {
+    reason: ReceiptPhotoUnavailableError["reason"];
+    actions: ReceiptPhotoUnavailableError["recovery"];
+  } | null;
 }
 
 export { composerSecondaryWriteReachedCloud, presentComposerWriteAcceptance } from "./composerSaveSteps";
@@ -169,7 +185,8 @@ export async function saveComposerEntry(
           pdfFailed,
           failedSecondarySteps,
           true,
-          session
+          session,
+          false
         );
       }
 
@@ -189,7 +206,8 @@ export async function saveComposerEntry(
             pdfFailed,
             failedSecondarySteps,
             true,
-            session
+            session,
+            false
           );
         }
       }
@@ -230,6 +248,8 @@ export async function saveComposerEntry(
       },
     };
 
+    const localStarted = monotonicNow();
+    let remoteStarted = localStarted;
     const created = await createEntryWithReminder(
       userId,
       input,
@@ -237,8 +257,19 @@ export async function saveComposerEntry(
         title: options.labels.reminderNotificationTitle.replace("{{title}}", input.title),
         body: entryListSummary(draftForNotify, options.t),
       },
-      { session }
+      {
+        session,
+        onLocalDurable: (localEntry) => {
+          options.stageTimer?.record("local_commit", monotonicNow() - localStarted);
+          remoteStarted = monotonicNow();
+          options.onLocalDurable?.(localEntry);
+          options.onSaveStatus?.(
+            mayIssueRemoteWork(session, userId) ? "waiting_sync" : "local_saved"
+          );
+        },
+      }
     );
+    options.stageTimer?.record("remote_ack", monotonicNow() - remoteStarted);
     const entry = created.entry;
     const cloudAccepted = created.remoteAccepted;
     if (cloudAccepted && created.reminderRemoteAccepted === false) {
@@ -307,7 +338,8 @@ export async function saveComposerEntry(
       pdfFailed,
       failedSecondarySteps,
       cloudAccepted,
-      session
+      session,
+      true
     );
     return {
       ...finished,
@@ -370,6 +402,12 @@ async function generateComposerPdfFile(
   const { buildBusinessEntryPdfHtml, businessEntryPdfLabels } = await import(
     "@/services/pdf/businessEntryPdfTemplate"
   );
+  const receiptPhoto =
+    entry.entryType === "business_cash_given"
+      ? await (
+          await import("@/services/attachments/prepareReceiptPhoto")
+        ).prepareReceiptPhoto({ uid: entry.userId, entry })
+      : null;
   const html = buildBusinessEntryPdfHtml({
     entry,
     user: options.user,
@@ -391,6 +429,7 @@ async function generateComposerPdfFile(
       historyChanges: options.labels.pdfHistoryChanges,
     },
     extraCss,
+    receiptPhoto,
   });
   const { pdfService } = await import("@/services/pdf/pdfService");
   return pdfService.generate({ html, fileNameHint, fileName });
@@ -409,9 +448,16 @@ async function finishComposerSavePipeline(
   pdfFailed: boolean,
   failedSecondarySteps: string[],
   cloudAccepted = true,
-  session: SyncSessionToken | null = null
+  session: SyncSessionToken | null = null,
+  localAlreadyAcked = false
 ): Promise<SaveComposerEntryResult> {
   let withPdf = withRetainedPdfUri(userId, entry);
+  let photoRecovery: SaveComposerEntryResult["photoRecovery"] = null;
+  let generatedThisPass = false;
+  if (!localAlreadyAcked) {
+    options.onLocalDurable?.(withPdf);
+    options.onSaveStatus?.(cloudAccepted ? "local_saved" : "waiting_sync");
+  }
   const retainedUri = retainedComposerPdfUri(userId, withPdf);
   const uriStillNeeded = shouldRunStep(completedSteps, SAVE_STEP.PDF_URI_SAVED, {
     pdfUri: retainedUri,
@@ -421,6 +467,9 @@ async function finishComposerSavePipeline(
     (uriStillNeeded && !retainedUri);
 
   if (generateNeeded || uriStillNeeded) {
+    options.onSaveStatus?.("preparing_pdf");
+    const pdfStarted = monotonicNow();
+    const renderSlot = beginPdfRender(entry.id);
     logLifecyclePhase("pdf_start", {
       phase: "pdf_start",
       recordKind: "business_entry",
@@ -444,7 +493,11 @@ async function finishComposerSavePipeline(
             alwaysRun: alreadyGenerated,
             issuesRemoteWork: false,
           },
-          () => generateComposerPdfFile(withPdf, options)
+          async () => {
+            const file = await generateComposerPdfFile(withPdf, options);
+            generatedThisPass = true;
+            return file;
+          }
         );
         completedSteps = pdfStep.completedSteps;
         generatedUri =
@@ -479,8 +532,11 @@ async function finishComposerSavePipeline(
         userId,
         remoteId: withPdf.id,
       });
-    } catch {
+    } catch (e) {
       pdfFailed = true;
+      if (e instanceof ReceiptPhotoUnavailableError) {
+        photoRecovery = { reason: e.reason, actions: e.recovery };
+      }
       if (uriStillNeeded) failedSecondarySteps.push("pdf_uri_saved");
       logLifecyclePhase("pdf_generation_failed", {
         phase: "error",
@@ -488,6 +544,9 @@ async function finishComposerSavePipeline(
         userId,
         remoteId: entry.id,
       });
+    } finally {
+      if (renderSlot) endPdfRender(entry.id);
+      options.stageTimer?.record("pdf_render", monotonicNow() - pdfStarted);
     }
   }
 
@@ -568,5 +627,27 @@ async function finishComposerSavePipeline(
     clientRecordId: input.clientRecordId,
   });
 
-  return { entry: withPdf, pdfFailed, failedSecondarySteps, cloudAccepted };
+  if (withPdf.entryType === "business_cash_given" && withPdf.pdfUri) {
+    const revision = documentRevisionForCashEntry(withPdf);
+    if (generatedThisPass || revision.attachmentRevision === "none") {
+      markPdfRevisionReady(withPdf.id, revision);
+    }
+  }
+
+  const saveStatus = deriveComposerSaveStatus({
+    localDurable: true,
+    remoteAccepted: cloudAccepted,
+    photo: "local",
+    pdf: pdfFailed ? "failed" : withPdf.pdfUri ? "ready" : "pending",
+  });
+  options.onSaveStatus?.(saveStatus);
+
+  return {
+    entry: withPdf,
+    pdfFailed,
+    failedSecondarySteps,
+    cloudAccepted,
+    saveStatus,
+    photoRecovery,
+  };
 }

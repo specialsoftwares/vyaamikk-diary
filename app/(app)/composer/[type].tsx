@@ -17,18 +17,29 @@ import { DraftSavedSuccess } from "@/components/drafts/DraftSavedSuccess";
 import { DraftUnsavedSheet } from "@/components/drafts/DraftUnsavedSheet";
 import { Header, Loader, Screen, LocaleUiText } from "@/components/ui";
 import { composerOptionForType, isComposerEntryType } from "@/domain/composerOptions";
-import type { AttachmentRef, BusinessEntry, BusinessEntryType } from "@/domain/businessEntry";
+import type {
+  AttachmentRef,
+  BusinessCashGivenPayload,
+  BusinessEntry,
+  BusinessEntryType,
+} from "@/domain/businessEntry";
 import type { CashPaidPhotoFieldState } from "@/components/composer/CashPaidPhotoField";
 import {
   CASH_PAID_ATTACHMENT_ID,
+  CashPaidPhotoError,
+  type PickedCashPaidPhoto,
+} from "@/services/attachments/cashPaidPhotoRef";
+import {
   cashPaidPhotoAttachment,
-  persistCashPaidPhoto,
-  removeCashPaidPhotoFile,
+  retireOwnedCashPaidFile,
 } from "@/services/attachments/cashPaidPhotoService";
 import {
-  clearCashPaidPhotoStorageFields,
-  uploadCashPaidPhotoToStorage,
-} from "@/services/attachments/cashPaidPhotoStorage";
+  placeCashPhotoForRecord,
+  placeCashPhotoOnCreateInput,
+} from "@/services/attachments/cashPaidSaveOrder";
+import { uploadCashPaidPhotoToStorage } from "@/services/attachments/cashPaidPhotoStorage";
+import type { ComposerSaveStatus } from "@/services/diary/composerSaveStatus";
+import { createSaveStageTimer, monotonicNow } from "@/services/diary/saveStageTiming";
 import { userFacingMessage } from "@/domain/errors";
 import { useAppFeedback } from "@/feedback/AppFeedback";
 import { useAuth } from "@/state/auth";
@@ -42,8 +53,9 @@ import { getDiaryRepository } from "@/services/diary";
 import { updateEntryLocalFirst } from "@/services/diary/localFirst";
 import { presentComposerWriteAcceptance } from "@/services/diary/composerSaveSteps";
 import { saveComposerEntry } from "@/services/diary/saveComposerEntry";
+import type { CreateBusinessEntryInput } from "@/services/diary/types";
 import { notifyOrdinaryQuotaUpsell } from "@/billing/quotaUpsell";
-import { captureAdmissionToken } from "@/sync/syncSessionOwnership";
+import { captureAdmissionToken, syncSessionOwnership } from "@/sync/syncSessionOwnership";
 import { logSaveDiagnostic } from "@/services/records/saveDiagnostics";
 import { lifecycleUiResetDiagnostics } from "@/services/records/saveLifecycleRunner";
 import {
@@ -109,6 +121,8 @@ export default function ComposerScreen() {
     mode: "created" | "updated";
     cloudAccepted?: boolean;
     syncFailureKind?: string;
+    saveStatus?: ComposerSaveStatus;
+    photoRecovery?: { reason: string; actions: Array<"retry" | "generate_without_photo"> } | null;
   } | null>(null);
   const [draftSaveResult, setDraftSaveResult] = useState<FormDraftRecord | null>(null);
   const [unsavedSheetVisible, setUnsavedSheetVisible] = useState(false);
@@ -123,6 +137,8 @@ export default function ComposerScreen() {
   });
   const [existingCashPhotoUri, setExistingCashPhotoUri] = useState<string | null>(null);
   const saveLockRef = useRef(false);
+  const localAckedRef = useRef(false);
+  const aliveRef = useRef(true);
   const savedLocationRef = useRef<BusinessEntry["location"]>(null);
   const clientRecordIdRef = useRef<string | null>(null);
   const idempotencyRef = useRef<SaveIdempotencyContext | null>(null);
@@ -454,75 +470,111 @@ export default function ComposerScreen() {
     });
   }, [user, editingId, entryType]);
 
-  const resolveCashPaidAttachments = useCallback(
-    async (
-      uid: string,
-      entryId: string,
-      baseAttachments: AttachmentRef[],
-      photoState: CashPaidPhotoFieldState,
-      basePayload: import("@/domain/businessEntry").BusinessCashGivenPayload
-    ): Promise<{
-      attachments: AttachmentRef[];
-      payload: import("@/domain/businessEntry").BusinessCashGivenPayload;
-      photoUploadFailed: boolean;
-    }> => {
-      if (!photoState.picked && !photoState.removeExisting) {
-        return { attachments: baseAttachments, payload: basePayload, photoUploadFailed: false };
-      }
-      let attachments = [...baseAttachments];
-      let payload = { ...basePayload };
-      let photoUploadFailed = false;
-
-      if (photoState.removeExisting) {
-        await removeCashPaidPhotoFile(attachments);
-        attachments = attachments.filter((a) => a.id !== CASH_PAID_ATTACHMENT_ID);
-        payload = { ...payload, ...clearCashPaidPhotoStorageFields() };
-      }
-
-      if (photoState.picked) {
-        await removeCashPaidPhotoFile(attachments);
-        const localRef = await persistCashPaidPhoto(uid, entryId, photoState.picked);
-        try {
-          const uploaded = await uploadCashPaidPhotoToStorage({
-            userId: uid,
-            recordId: entryId,
-            picked: photoState.picked,
-            localAttachment: localRef,
-          });
-          attachments = [
-            ...attachments.filter((a) => a.id !== CASH_PAID_ATTACHMENT_ID),
-            uploaded.attachment,
-          ];
-          payload = { ...payload, ...uploaded.payloadPatch };
-        } catch {
-          attachments = [
-            ...attachments.filter((a) => a.id !== CASH_PAID_ATTACHMENT_ID),
-            localRef,
-          ];
-          photoUploadFailed = true;
-        }
-      }
-
-      return { attachments, payload, photoUploadFailed };
-    },
-    []
-  );
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+    };
+  }, []);
 
   const onSubmit = useCallback(
     async (values: Record<string, unknown>) => {
       if (!user || !entryType) return;
       if (saving || saveLockRef.current) return;
       saveLockRef.current = true;
+      localAckedRef.current = false;
+
+      const stageTimer = createSaveStageTimer();
+      const tapAt = monotonicNow();
+      stageTimer.record("tap", 0);
+      const readSessionUid = () => syncSessionOwnership.current()?.uid ?? null;
 
       setSaving(true);
       setError(null);
       let succeeded = false;
       const saveSession = captureAdmissionToken();
+      const ownerUid = user.uid;
+
+      const ackLocal = (entry: BusinessEntry, mode: "created" | "updated") => {
+        if (localAckedRef.current) return;
+        localAckedRef.current = true;
+        dirtyRef.current = false;
+        setFormDirty(false);
+        setSaving(false);
+        setSaveResult({
+          entry,
+          pdfFailed: false,
+          mode,
+          cloudAccepted: false,
+          saveStatus: "local_saved",
+          photoRecovery: null,
+        });
+        if (activeDraftId) {
+          void formDraftsRepository.markConverted(ownerUid, activeDraftId);
+        }
+        void clearRecovery();
+      };
+
+      const followUpUpload = (
+        recordId: string,
+        picked: PickedCashPaidPhoto,
+        localAttachment: AttachmentRef,
+        payload: BusinessCashGivenPayload,
+        baseAttachments: AttachmentRef[]
+      ) => {
+        const uploadStarted = monotonicNow();
+        void (async () => {
+          if (aliveRef.current) {
+            setSaveResult((prev) => (prev ? { ...prev, saveStatus: "syncing_photo" } : prev));
+          }
+          try {
+            const live = readSessionUid();
+            if (live && live !== ownerUid) return;
+            const uploaded = await uploadCashPaidPhotoToStorage({
+              userId: ownerUid,
+              recordId,
+              picked,
+              localAttachment,
+            });
+            const after = readSessionUid();
+            if (after && after !== ownerUid) return;
+            const write = await updateEntryLocalFirst(
+              ownerUid,
+              {
+                id: recordId,
+                attachments: [
+                  ...baseAttachments.filter((a) => a.id !== CASH_PAID_ATTACHMENT_ID),
+                  uploaded.attachment,
+                ],
+                payload: { ...payload, ...uploaded.payloadPatch },
+              },
+              { session: saveSession }
+            );
+            if (!aliveRef.current) return;
+            setSaveResult((prev) => {
+              if (!prev) return prev;
+              const pdfReady = Boolean(write.entry.pdfUri) && !prev.pdfFailed;
+              return {
+                ...prev,
+                entry: write.entry,
+                saveStatus: prev.pdfFailed ? "needs_attention" : pdfReady ? "ready" : "waiting_sync",
+              };
+            });
+          } catch {
+            if (!aliveRef.current) return;
+            setSaveResult((prev) => (prev ? { ...prev, saveStatus: "needs_attention" } : prev));
+            feedback.showWarning(t("composer.cashPaidPhotoUploadFailed"));
+          } finally {
+            stageTimer.record("upload", monotonicNow() - uploadStarted);
+          }
+        })();
+      };
+
       try {
         logSaveDiagnostic({
           phase: "start",
           recordKind: "business_entry",
-          userId: user.uid,
+          userId: ownerUid,
           route: "/(app)/composer/[type]",
           clientRecordId: clientRecordIdRef.current ?? undefined,
           idempotencyKey: idempotencyRef.current?.idempotencyKey,
@@ -535,7 +587,7 @@ export default function ComposerScreen() {
             : entryType;
         const parts = formValuesToEntryParts(saveEntryType, values, user.ueid);
         const { location: capturedLocation, footprintFailed } = await resolveEntryLocationWithFootprint(
-          user.uid,
+          ownerUid,
           parts.location
         );
         const location = preserveAlreadySavedLocation(savedLocationRef.current, capturedLocation);
@@ -543,41 +595,64 @@ export default function ComposerScreen() {
           (typeof values.title === "string" && values.title.trim()) ||
           parts.title ||
           autoEntryTitle(saveEntryType, parts.entryDate, parts.payload, t);
+        const validatedAt = monotonicNow();
+        stageTimer.record("validation", validatedAt - tapAt);
 
         if (editingId) {
-          let cashPayload = parts.payload as import("@/domain/businessEntry").BusinessCashGivenPayload;
+          let cashPayload = parts.payload as BusinessCashGivenPayload;
           let attachments = editingAttachmentsRef.current;
-          let photoUploadFailed = false;
-          if (saveEntryType === "business_cash_given") {
-            const resolved = await resolveCashPaidAttachments(
-              user.uid,
-              editingId,
-              editingAttachmentsRef.current,
-              cashPaidPhotoState,
-              cashPayload
-            );
-            attachments = resolved.attachments;
-            cashPayload = resolved.payload;
-            photoUploadFailed = resolved.photoUploadFailed;
+          let previousUri: string | null = null;
+          let nextUri: string | null = null;
+          const picked = cashPaidPhotoState.picked;
+          if (
+            saveEntryType === "business_cash_given" &&
+            (picked || cashPaidPhotoState.removeExisting)
+          ) {
+            const placed = await placeCashPhotoForRecord({
+              uid: ownerUid,
+              entryId: editingId,
+              picked,
+              removeExisting: cashPaidPhotoState.removeExisting,
+              baseAttachments: editingAttachmentsRef.current,
+              payload: cashPayload,
+              readSessionUid,
+            });
+            attachments = placed.attachments;
+            cashPayload = placed.payload;
+            previousUri = placed.previousUri;
+            nextUri = placed.nextUri;
           }
-          const write = await updateEntryLocalFirst(user.uid, {
-            id: editingId,
-            title,
-            entryDate: parts.entryDate,
-            notes: parts.notes,
-            reminder: parts.reminder,
-            location,
-            payload: saveEntryType === "business_cash_given" ? cashPayload : parts.payload,
-            attachments,
-          });
+          stageTimer.record("media_ready", monotonicNow() - validatedAt);
+          const localStarted = monotonicNow();
+          const write = await updateEntryLocalFirst(
+            ownerUid,
+            {
+              id: editingId,
+              title,
+              entryDate: parts.entryDate,
+              notes: parts.notes,
+              reminder: parts.reminder,
+              location,
+              payload: saveEntryType === "business_cash_given" ? cashPayload : parts.payload,
+              attachments,
+            },
+            {
+              session: saveSession,
+              onLocalDurable: (durable) => {
+                stageTimer.record("local_commit", monotonicNow() - localStarted);
+                ackLocal(durable, "updated");
+                if (previousUri && previousUri !== nextUri) {
+                  void retireOwnedCashPaidFile(ownerUid, previousUri, nextUri, { readSessionUid });
+                }
+              },
+            }
+          );
+          stageTimer.record("remote_ack", monotonicNow() - localStarted);
           const updated = write.entry;
           const presented = presentComposerWriteAcceptance(write);
           editingAttachmentsRef.current = updated.attachments ?? [];
-          if (photoUploadFailed) {
-            feedback.showWarning(t("composer.cashPaidPhotoUploadFailed"));
-          }
           if (activeDraftId) {
-            await formDraftsRepository.markConverted(user.uid, activeDraftId);
+            await formDraftsRepository.markConverted(ownerUid, activeDraftId);
           }
           await clearRecovery();
           notifySearchIndexChanged();
@@ -589,9 +664,23 @@ export default function ComposerScreen() {
             mode: "updated",
             cloudAccepted: presented.cloudAccepted,
             syncFailureKind: presented.syncFailureKind,
+            saveStatus: presented.cloudAccepted ? "local_saved" : "waiting_sync",
           });
+          if (picked) {
+            const localRef =
+              (updated.attachments ?? []).find((a) => a.id === CASH_PAID_ATTACHMENT_ID) ?? null;
+            if (localRef) {
+              followUpUpload(
+                editingId,
+                picked,
+                localRef,
+                updated.payload as BusinessCashGivenPayload,
+                updated.attachments ?? []
+              );
+            }
+          }
           void ingestComposerForm(
-            { userId: user.uid, ueid: user.ueid },
+            { userId: ownerUid, ueid: user.ueid },
             entryType,
             values
           ).catch(() => undefined);
@@ -626,84 +715,99 @@ export default function ComposerScreen() {
         if (!clientRecordIdRef.current) {
           clientRecordIdRef.current = generateClientRecordId("entry");
         }
-        let { entry, pdfFailed, failedSecondarySteps, cloudAccepted, syncFailureKind } = await saveComposerEntry(
-          user.uid,
-          {
-            clientRecordId: clientRecordIdRef.current,
-            ueid: user.ueid,
-            entryType: saveEntryType,
-            title,
-            entryDate: parts.entryDate,
-            notes: parts.notes,
-            reminder: parts.reminder,
-            location,
-            payload: parts.payload,
-            source: "composer",
-          },
-          {
-            user,
-            locale: "en-IN",
-            uiLang: lang,
-            t,
-            labels: {
-              pdfProfileTitle: t("pdf.userProfileTitle"),
-              pdfUeid: t("pdf.entryUeid"),
-              pdfUserName: t("pdf.entryUserName"),
-              pdfBusiness: t("pdf.entryBusiness"),
-              pdfEntryDate: t("pdf.entryEntryDate"),
-              pdfNotes: t("pdf.entryNotesSection"),
-              pdfReminder: t("pdf.entryReminderSection"),
-              pdfDetailsSection: t("pdf.entryDetailsSection"),
-              pdfHistorySectionTitle: t("pdf.documentHistoryTitle"),
-              pdfHistoryFirstGenerated: t("pdf.historyFirstGenerated"),
-              pdfHistoryLastEdited: t("pdf.historyLastEdited"),
-              pdfHistoryVersion: t("pdf.historyVersion"),
-              pdfHistoryChanges: t("pdf.historyChanges"),
-              reminderNotificationTitle: t("diary.reminder.notificationTitle", {
-                title: "{{title}}",
-              }),
-              fileNameHint: t("pdf.entryFileNameHint", { date: "{{date}}" }),
-            },
-            idempotency: idempotencyRef.current ?? undefined,
-            route: "/(app)/composer/[type]",
-          }
-        );
-        if (
-          saveEntryType === "business_cash_given" &&
-          (cashPaidPhotoState.picked || cashPaidPhotoState.removeExisting)
-        ) {
-          const cashPayload = entry.payload as import("@/domain/businessEntry").BusinessCashGivenPayload;
-          const resolved = await resolveCashPaidAttachments(
-            user.uid,
-            entry.id,
-            entry.attachments ?? [],
-            cashPaidPhotoState,
-            cashPayload
-          );
-          const attachWrite = await updateEntryLocalFirst(user.uid, {
-            id: entry.id,
-            attachments: resolved.attachments,
-            payload: resolved.payload,
+        let createInput: CreateBusinessEntryInput = {
+          clientRecordId: clientRecordIdRef.current,
+          ueid: user.ueid,
+          entryType: saveEntryType,
+          title,
+          entryDate: parts.entryDate,
+          notes: parts.notes,
+          reminder: parts.reminder,
+          location,
+          payload: parts.payload,
+          source: "composer",
+        };
+        const picked = saveEntryType === "business_cash_given" ? cashPaidPhotoState.picked : null;
+        if (picked) {
+          createInput = await placeCashPhotoOnCreateInput({
+            uid: ownerUid,
+            entryId: clientRecordIdRef.current,
+            picked,
+            input: createInput,
+            readSessionUid,
           });
-          entry = attachWrite.entry;
-          if (!attachWrite.remoteAccepted) {
-            failedSecondarySteps = [...(failedSecondarySteps ?? []), "attachments"];
-          }
-          if (resolved.photoUploadFailed) {
-            feedback.showWarning(t("composer.cashPaidPhotoUploadFailed"));
-          }
         }
+        stageTimer.record("media_ready", monotonicNow() - validatedAt);
+        const saved = await saveComposerEntry(ownerUid, createInput, {
+          user,
+          locale: "en-IN",
+          uiLang: lang,
+          t,
+          labels: {
+            pdfProfileTitle: t("pdf.userProfileTitle"),
+            pdfUeid: t("pdf.entryUeid"),
+            pdfUserName: t("pdf.entryUserName"),
+            pdfBusiness: t("pdf.entryBusiness"),
+            pdfEntryDate: t("pdf.entryEntryDate"),
+            pdfNotes: t("pdf.entryNotesSection"),
+            pdfReminder: t("pdf.entryReminderSection"),
+            pdfDetailsSection: t("pdf.entryDetailsSection"),
+            pdfHistorySectionTitle: t("pdf.documentHistoryTitle"),
+            pdfHistoryFirstGenerated: t("pdf.historyFirstGenerated"),
+            pdfHistoryLastEdited: t("pdf.historyLastEdited"),
+            pdfHistoryVersion: t("pdf.historyVersion"),
+            pdfHistoryChanges: t("pdf.historyChanges"),
+            reminderNotificationTitle: t("diary.reminder.notificationTitle", {
+              title: "{{title}}",
+            }),
+            fileNameHint: t("pdf.entryFileNameHint", { date: "{{date}}" }),
+          },
+          idempotency: idempotencyRef.current ?? undefined,
+          route: "/(app)/composer/[type]",
+          stageTimer,
+          onLocalDurable: (durable) => {
+            ackLocal(durable, "created");
+          },
+          onSaveStatus: (saveStatus) => {
+            if (!aliveRef.current) return;
+            setSaveResult((prev) => (prev ? { ...prev, saveStatus } : prev));
+          },
+        });
+        const { entry, pdfFailed, failedSecondarySteps, cloudAccepted, syncFailureKind } = saved;
         if (activeDraftId) {
-          await formDraftsRepository.markConverted(user.uid, activeDraftId);
+          await formDraftsRepository.markConverted(ownerUid, activeDraftId);
         }
         await clearRecovery();
         notifySearchIndexChanged();
         dirtyRef.current = false;
         setFormDirty(false);
-        setSaveResult({ entry, pdfFailed, mode: "created", cloudAccepted, syncFailureKind });
+        setSaveResult({
+          entry,
+          pdfFailed,
+          mode: "created",
+          cloudAccepted,
+          syncFailureKind,
+          saveStatus: saved.saveStatus,
+          photoRecovery: saved.photoRecovery ?? null,
+        });
+        if (picked) {
+          const localRef =
+            (entry.attachments ?? []).find((a) => a.id === CASH_PAID_ATTACHMENT_ID) ??
+            createInput.attachments?.find((a) => a.id === CASH_PAID_ATTACHMENT_ID) ??
+            null;
+          if (localRef) {
+            followUpUpload(
+              entry.id,
+              picked,
+              localRef,
+              entry.payload as BusinessCashGivenPayload,
+              entry.attachments ?? createInput.attachments ?? []
+            );
+          }
+        }
         succeeded = true;
         void ingestComposerForm(
-          { userId: user.uid, ueid: user.ueid },
+          { userId: ownerUid, ueid: user.ueid },
           saveEntryType,
           values
         ).catch(() => undefined);
@@ -740,17 +844,28 @@ export default function ComposerScreen() {
         logSaveDiagnostic({
           phase: "complete",
           recordKind: "business_entry",
-          userId: user.uid,
+          userId: ownerUid,
           remoteId: entry.id,
           message: "navigation_after_save",
         });
       } catch (e) {
+        if (localAckedRef.current) {
+          setSaveResult((prev) =>
+            prev ? { ...prev, saveStatus: "needs_attention", pdfFailed: true } : prev
+          );
+          return;
+        }
         if (e instanceof SaveStillInProgressError) {
           setError(t("composer.saveInProgress"));
           feedback.showWarning(t("composer.saveInProgress"));
           return;
         }
-        const msg = userFacingMessage(e);
+        const msg =
+          e instanceof CashPaidPhotoError && e.code === "owner_changed"
+            ? t("composer.cashPaidPhotoOwnerChanged")
+            : e instanceof CashPaidPhotoError && e.code === "too_large"
+              ? t("composer.cashPaidPhotoTooLarge")
+              : userFacingMessage(e);
         setError(msg);
         feedback.showError(msg);
       } finally {
@@ -770,7 +885,6 @@ export default function ComposerScreen() {
       clearRecovery,
       activeDraftId,
       cashPaidPhotoState,
-      resolveCashPaidAttachments,
     ]
   );
 
@@ -877,6 +991,8 @@ export default function ComposerScreen() {
           pdfFailed={saveResult.pdfFailed}
           cloudAccepted={saveResult.cloudAccepted}
           syncFailureKind={saveResult.syncFailureKind}
+          saveStatus={saveResult.saveStatus}
+          photoRecovery={saveResult.photoRecovery}
           onAddAnother={onAddAnother}
         />
       </Screen>
