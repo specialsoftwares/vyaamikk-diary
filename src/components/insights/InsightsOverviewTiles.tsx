@@ -1,6 +1,7 @@
 import React from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 
+import { LocaleUiText } from "@/components/ui/LocaleUiText";
 import { useT } from "@/i18n";
 import { executiveCardDepth, spacing, typography, useTheme, useThemedStyles } from "@/theme";
 
@@ -13,6 +14,7 @@ function Tile({ label, value }: { label: string; value: string }) {
         ...executiveCardDepth(isDark, c, 2),
         flexBasis: "48%",
         flexGrow: 1,
+        flexShrink: 1,
         padding: spacing.md + 2,
         gap: 4,
       },
@@ -22,10 +24,8 @@ function Tile({ label, value }: { label: string; value: string }) {
   );
   return (
     <View style={styles.tile}>
-      <Text style={styles.value} numberOfLines={2}>
-        {value}
-      </Text>
-      <Text style={styles.label}>{label}</Text>
+      <LocaleUiText style={styles.value}>{value}</LocaleUiText>
+      <LocaleUiText style={styles.label}>{label}</LocaleUiText>
     </View>
   );
 }
@@ -34,14 +34,14 @@ interface InsightsOverviewTilesProps {
   records: string;
   pdfs: string;
   cashPaid: string;
-  distanceFy: string;
+  openBalance: string;
 }
 
 export function InsightsOverviewTiles({
   records,
   pdfs,
   cashPaid,
-  distanceFy,
+  openBalance,
 }: InsightsOverviewTilesProps) {
   const t = useT();
   const styles = useThemedStyles(() =>
@@ -54,7 +54,7 @@ export function InsightsOverviewTiles({
       <Tile label={t("businessInsights.cardRecords")} value={records} />
       <Tile label={t("businessInsights.cardPdfs")} value={pdfs} />
       <Tile label={t("businessInsights.cashPaidFy")} value={cashPaid} />
-      <Tile label={t("businessInsights.distanceFy")} value={distanceFy} />
+      <Tile label={t("businessInsights.cardPendingBalance")} value={openBalance} />
     </View>
   );
 }
