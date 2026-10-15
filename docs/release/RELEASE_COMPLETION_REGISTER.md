@@ -12,6 +12,33 @@ DEVICE_PENDING / TOOLING (ops-guard suite; not application CI).
 
 ---
 
+## VyaaFlow, cash voucher, and party ledger — frozen, 16 Oct 2026
+
+Application source is `7f853aeac1e74cc0aa23161a6b001e316e05edc5`. Canonical CI is workflow_dispatch run `38798251247`, verify job `116640250952`, success, head SHA matched. This paragraph is a later register note and is not that source commit. Runs `38793093634` and `38795572555` failed on earlier commits of the same branch and do not cover this SHA. Run `38737635731` covers only the earlier simplification commit `3c2361e`.
+
+The integration branch already contained the four tracks before this closeout. Layout is `e673228`. The party-ledger projector is `8e83dc8`, merged as `19be30f`. The explorer is `17beadf`, merged as `2eda852`. The cash voucher is `4e05c03`, merged as `ef543ec`. Locale lines are `0d94a4a`. The worktree `team/vl-a3-ledger` still points at `8e83dc8` because that commit was merged; it was not left uncommitted. This closeout adds the durable follow-up, the ledger transaction, and the rendered-page proof in `679f412`, `ae8325b`, and `7f853ae`. `CURSOR_CONTEXT_EXTRACTION.md` stayed untracked. The dirty main workspace was not reset.
+
+HOST_CHROMIUM. Fresh pages were rendered from the production generic cash-record HTML and the dedicated cash-payment voucher HTML. The fixture is a 280×180 image with a blue corner and a red field, then the same shape in green for the replacement. The decoded page pixels kept the blue corner and the field colour. The laid-out box was 280×180 on the generic page and 282×182 on the voucher, matching the image ratio, so the picture was not cropped. The first document contains the red image. The regenerated document contains the green image and not the red one. A missing local file returns unavailable, with retry and generate-without-photo, and does not emit HTML. Three host renders: p50 1006 ms, p95 1381 ms. Android expo-print was not run. That gate stays DEVICE_PENDING.
+
+SQLITE_HOST. Twenty-one creates on the production local-first path, in Node memory SQLite, not on a phone. Local acknowledgement p50 0.21 ms, p95 0.75 ms. The photo, PDF, and ledger rows were already in SQLite when local success was signalled. After the database was reopened, resume continued the same voucher ids, did not create another voucher, and did not add another create outcome. An older photo revision could not mark the newer row done. A different session could not resume or apply the first owner's job. Remote acknowledgement and Cloud Storage upload were not measured on this host. Those two stages stay DEVICE_PENDING. The percentile helper test on the numbers 1 through 5 is not this measurement.
+
+FIRESTORE_EMULATOR. Accepted create, replay, conflicting command, stale epoch, edit, and delete ran through the admin transaction and `applyAcceptedSource`. Two different records applied together. A path owner that does not match the source is denied before a write. Owner read of a projection bucket succeeded. Client create and update of projections and buckets were denied. An ordinary diary entry create still succeeded. The checkpoint document records the last applied source. `PARTY_LEDGER_SERVER_PROJECTION_ENABLED` stays false. `functions/src/index.ts` does not export the trigger, so a functions deploy does not register it. No composite index is required for these document reads. The backfill plan is written and was not executed. This is not deployed behaviour and not a live balance.
+
+SQLITE_HOST. The party list was loaded through `loadLocalPartyLedger` from the local diary repository. A name-only party stayed provisional. The screen copy still says the figures are counted on this device and are not a certified ledger. Business Insights source does not import the party ledger. Populated list and detail on a device, including search, large text, Back, and account retirement, were not exercised. No Android device was connected. That UI stays DEVICE_PENDING.
+
+SOURCE. VyaaFlow's agenda list owns its end spacing and does not reserve the tab bar a second time. The You footer path is unchanged. Native measurement of a long agenda and an empty date was not run. No Android device was connected. That measurement stays DEVICE_PENDING.
+
+### Next Internal packet — not authorized to build or upload
+
+- Frozen candidate: `7f853aeac1e74cc0aa23161a6b001e316e05edc5`. Canonical CI: run `38798251247`, verify job `116640250952`.
+- Recheck Play bundle explorer before assigning a versionCode. Do not reuse 28. Do not assume 29.
+- The upload authorization for `1ca361ca8c61e1b9b8e8182f22b4e38128556ee0` does not cover this SHA.
+- Profile `internal-grin`. Purchase-entry `0`. Quota-upsell `0`. Restricted billing stays one admitted Firebase UID and Starter monthly.
+- Do not revoke the live Maps key until a replacement Internal build that does not embed it is the acceptance build.
+- Do not deploy Functions, Rules, or indexes. Do not run the party-ledger backfill. The server projection flag stays off.
+- Android expo-print, device save timings, and the populated VyaaFlow and party-ledger screens remain DEVICE_PENDING.
+- No public rollout, no EAS build, and no Play upload in this closeout.
+
 ## Product simplification candidate — frozen, 15 Oct 2026
 
 This section is the integrated correction after the released Internal binary. It is not an EAS build and not a Play upload. A local debug APK was installed only on the disposable emulator, as recorded below. `app.json` still says versionCode 28 because that code is the released binary. Do not upload this source as versionCode 28. Recheck Play bundle explorer before assigning the next code. The existing Internal upload authorization covered `1ca361ca8c61e1b9b8e8182f22b4e38128556ee0` only.
@@ -38,7 +65,7 @@ Local native debug, not EAS and not Play. `android/` was deleted and generated a
 
 Goods sent / transport still requires a valid From PIN and a valid To PIN before save. That rule is `refineRequiredPin` in `src/utils/businessEntry/validation.ts`, present before this candidate. Detect my PIN stays a separate button on the same fields.
 
-### Next Internal packet — not authorized to build or upload
+### Previous next Internal packet — superseded by the 16 Oct voucher and ledger candidate
 
 - Frozen candidate: `3c2361e66f624733524724d287bd0ee4593e6554`. Canonical CI: run `38737635731`, verify job `116430897101`.
 - Recheck Play bundle explorer before assigning a versionCode. Do not reuse 28. Do not upload the local debug APK.
