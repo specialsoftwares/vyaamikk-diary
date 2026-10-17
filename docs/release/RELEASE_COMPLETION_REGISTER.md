@@ -2,7 +2,7 @@
 
 ## Five-issue closeout — 17 Oct 2026
 
-Parent latency candidate `fe7c2ffb01547f883244e9d20b6192db86db55d4` stays unchanged. The earlier five-issue application commit `eef594fd600dff2e1f7eab463730de688aed9d43` stays in history. Its canonical CI run `39026317234`, verify job `117377892404`, remains the proof for that SHA only. This closeout is a later commit on `correction/five-issue-release`. The versionCode 29 freeze `5746c94` and its AAB are unchanged. No EAS build, Play upload, website publication, billing change, or server-ledger rollout is authorized.
+Parent latency candidate `fe7c2ffb01547f883244e9d20b6192db86db55d4` stays unchanged. The earlier five-issue application commit `eef594fd600dff2e1f7eab463730de688aed9d43` stays in history. Its canonical CI run `39026317234`, verify job `117377892404`, remains the proof for that SHA only. The closeout application SHA is `308f77ede61508fb86fabdb15e7087a825417c15` on `correction/five-issue-release`. Canonical CI run `39041260970`, verify job `117421069048`, success, head exactly that SHA. https://github.com/specialsoftwares/vyaamikk-diary/actions/runs/39041260970 This paragraph is the register note for that run. It is not a new application commit and it does not replace that CI result. The versionCode 29 freeze `5746c94` and its AAB are unchanged. No EAS build, Play upload, website publication, billing change, or server-ledger rollout is authorized.
 
 SOURCE. The You Upcoming tile and the Upcoming detail use the same eligibility rules for diary entries, professional packs, and customer-credit rows. A future receivable credit counts in both. An overdue credit stays in the overdue detail section and is not in the tile total. A cancelled or non-receivable credit is excluded from both. Rows are not dropped to force the numbers to match.
 
@@ -26,7 +26,7 @@ Not performed, and not labeled as a finished device check: phone animation frame
 
 ### Next Internal packet — not authorized
 
-Recheck Play before choosing a versionCode. The last inventory read, 16 Oct 2026, showed bundle 28 Active and 29 absent. Do not reuse 28 or 29. Do not assume 30. Do not build this SHA until that inventory is read again. Purchase entry and quota stay off. Server ledger projection stays off. Do not deploy Functions, Rules, or indexes. The canonical CI run for this closeout commit is recorded after `workflow_dispatch` on this SHA.
+Recheck Play before choosing a versionCode. The last inventory read, 16 Oct 2026, showed bundle 28 Active and 29 absent. Do not reuse 28 or 29. Do not assume 30. Do not build this SHA until that inventory is read again. Purchase entry and quota stay off. Server ledger projection stays off. Do not deploy Functions, Rules, or indexes. Do not build `308f77ede61508fb86fabdb15e7087a825417c15`. Its canonical CI is run `39041260970`, verify job `117421069048`.
 
 ## Five-issue correction — 17 Oct 2026
 
