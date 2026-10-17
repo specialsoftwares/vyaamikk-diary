@@ -28,6 +28,8 @@ import {
   type ProfilePatch,
 } from "@/services/auth";
 import { sessionStore, forceClearAllSessions, type AuthSession } from "@/services/session";
+import { retireJsAuthBridge, runLocalDeviceSignOut } from "@/services/auth/authSessionFence";
+import { retireNativeCallableAuthReady } from "@/services/auth/nativeCallableAuthGate";
 import { toAppError } from "@/domain/errors";
 import { clearMasterDataSessionCache } from "@/services/masterData";
 import { createLogger } from "@/utils/logger";
@@ -371,33 +373,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = useCallback(async () => {
     bootAttemptRef.current += 1;
     const uid = state.session?.user.uid;
-    try {
-      const { retireNativeCallableAuthReady } = await import(
-        "@/services/auth/nativeCallableAuthGate"
-      );
-      retireNativeCallableAuthReady();
-    } catch {
-      // Sign-out still proceeds if the native gate is unavailable.
-    }
-    try {
-      await getAuthService().signOut();
-    } catch (e) {
-      log.warn("auth signOut error", e);
-    }
-    if (uid) {
-      await clearAuthWrapperProgress(uid);
-      clearTransientPendingEmailState(uid);
-      clearLocalMockPendingEmailForUid(uid);
-    }
-    clearSessionLastActiveTouch(uid);
-    endFirstActionFreezeSession();
-    await forceClearAllSessions();
-    clearMasterDataSessionCache();
-    setState({
-      status: "signed_out",
-      session: null,
-      user: null,
-      justCreated: false,
+    await runLocalDeviceSignOut({
+      maskPrivateUi: () => {
+        setState({
+          status: "signed_out",
+          session: null,
+          user: null,
+          justCreated: false,
+        });
+      },
+      retireCloudAdmission: () => {
+        retireNativeCallableAuthReady();
+        retireJsAuthBridge();
+      },
+      cleanAuthSdks: async () => {
+        try {
+          await getAuthService().signOut();
+        } catch (e) {
+          log.warn("auth signOut error", e);
+        }
+      },
+      clearLocalProfileCache: async () => {
+        if (uid) {
+          await clearAuthWrapperProgress(uid);
+          clearTransientPendingEmailState(uid);
+          clearLocalMockPendingEmailForUid(uid);
+        }
+        clearSessionLastActiveTouch(uid);
+        endFirstActionFreezeSession();
+        await forceClearAllSessions();
+        clearMasterDataSessionCache();
+      },
     });
   }, [state.session?.user.uid]);
 

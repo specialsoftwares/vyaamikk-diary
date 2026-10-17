@@ -12,7 +12,28 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     function isSignedIn() {
-      return request.auth != null;
+      return request.auth != null && sessionNotRevoked();
+    }
+
+    // Phone auth_time is the native sign-in. Custom tokens must carry the
+    // server-stamped vydOriginAuthTime. Missing custom claims stay at 0 so a
+    // pre-revocation token redeemed later is not admitted. Equal seconds deny.
+    // No authSecurity document means no logout-all cutoff yet.
+    function sessionOriginSeconds() {
+      return request.auth.token.firebase.sign_in_provider == 'phone'
+        ? int(request.auth.token.auth_time)
+        : (
+            request.auth.token.firebase.sign_in_provider == 'custom'
+            && request.auth.token.keys().hasAll(['vydOriginAuthTime'])
+              ? int(request.auth.token.vydOriginAuthTime)
+              : 0
+          );
+    }
+
+    function sessionNotRevoked() {
+      return !exists(/databases/$(database)/documents/authSecurity/$(request.auth.uid))
+        || sessionOriginSeconds()
+          > int(get(/databases/$(database)/documents/authSecurity/$(request.auth.uid)).data.get('revokedBeforeAuthTimeSeconds', 0));
     }
 
     function isOwner(uid) {
@@ -940,6 +961,11 @@ service cloud.firestore {
     match /globalStats/paperSaved {
       allow read: if true;
       allow write: if false;
+    }
+
+    // Server-owned logout-all cutoff. Rules read it with get(); clients cannot.
+    match /authSecurity/{uid} {
+      allow read, write: if false;
     }
   }
 }

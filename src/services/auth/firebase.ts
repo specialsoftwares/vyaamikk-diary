@@ -67,6 +67,8 @@ import {
   signOutNativePhoneAuth,
   startNativePhoneOtp,
 } from "./nativePhoneAuth";
+import { cleanBothAuthSdks, retireJsAuthBridge } from "./authSessionFence";
+import { retireNativeCallableAuthReady } from "./nativeCallableAuthGate";
 
 import type {
   AuthService,
@@ -420,11 +422,20 @@ export const firebaseAuthService: AuthService = {
 
   async signOut(): Promise<void> {
     const uid = getFirebaseAuth().currentUser?.uid ?? null;
-    try {
-      await getFirebaseAuth().signOut();
-      await signOutNativePhoneAuth();
-    } catch (e) {
-      log.warn("signOut failed", e);
+    const retired = retireJsAuthBridge();
+    retireNativeCallableAuthReady();
+    const result = await cleanBothAuthSdks(retired, {
+      signOutJs: () => getFirebaseAuth().signOut(),
+      signOutNative: async () => {
+        const cleared = await signOutNativePhoneAuth();
+        if (!cleared) throw new Error("native sign-out incomplete");
+      },
+    });
+    if (!result.skippedBecauseNewerSession && (!result.jsCleared || !result.nativeCleared)) {
+      log.warn("signOut partial", {
+        jsCleared: result.jsCleared,
+        nativeCleared: result.nativeCleared,
+      });
     }
     if (uid) {
       const { clearTransientPendingEmailState } = await import("./pendingEmailVerification");

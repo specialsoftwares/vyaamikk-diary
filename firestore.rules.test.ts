@@ -380,6 +380,70 @@ async function main() {
       )
     );
     check("legacy profile safe root merge without status materialized", true);
+
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "authSecurity", "alice"), {
+        revokedBeforeAuthTimeSeconds: 1_500,
+        revocationState: "complete",
+        operationId: "11111111-1111-1111-1111-111111111111",
+      });
+    });
+
+    const phoneAfter = testEnv
+      .authenticatedContext("alice", {
+        auth_time: 1_501,
+        firebase: { sign_in_provider: "phone" },
+      })
+      .firestore();
+    await assertSucceeds(getDoc(doc(phoneAfter, "users", "alice")));
+    check("EMULATOR phone auth after cutoff can read profile", true);
+
+    const phoneEqual = testEnv
+      .authenticatedContext("alice", {
+        auth_time: 1_500,
+        firebase: { sign_in_provider: "phone" },
+      })
+      .firestore();
+    await assertFails(getDoc(doc(phoneEqual, "users", "alice")));
+    check("EMULATOR phone auth at the cutoff second is denied", true);
+
+    const redeemedLater = testEnv
+      .authenticatedContext("alice", {
+        auth_time: 2_000,
+        firebase: { sign_in_provider: "custom" },
+        vydOriginAuthTime: 1_000,
+      })
+      .firestore();
+    await assertFails(getDoc(doc(redeemedLater, "users", "alice")));
+    check("EMULATOR custom token redeemed after cutoff keeps the older origin", true);
+
+    const freshOrigin = testEnv
+      .authenticatedContext("alice", {
+        auth_time: 2_000,
+        firebase: { sign_in_provider: "custom" },
+        vydOriginAuthTime: 1_501,
+      })
+      .firestore();
+    await assertSucceeds(getDoc(doc(freshOrigin, "users", "alice")));
+    check("EMULATOR custom token with a later origin is admitted", true);
+
+    const legacyCustom = testEnv
+      .authenticatedContext("alice", {
+        auth_time: 2_000,
+        firebase: { sign_in_provider: "custom" },
+      })
+      .firestore();
+    await assertFails(getDoc(doc(legacyCustom, "users", "alice")));
+    check("EMULATOR legacy custom token without origin claim is denied after cutoff", true);
+
+    await assertFails(
+      setDoc(doc(phoneAfter, "authSecurity", "alice"), {
+        revokedBeforeAuthTimeSeconds: 0,
+        revocationState: "complete",
+        operationId: "22222222-2222-2222-2222-222222222222",
+      })
+    );
+    check("EMULATOR client cannot write the cutoff", true);
   } finally {
     await testEnv.cleanup();
   }

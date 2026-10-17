@@ -59,6 +59,16 @@ function isNativePlatform(): boolean {
 }
 
 /**
+ * JS Firebase credential store. This is not the SecureStore profile cache in
+ * src/services/session.ts. In-memory Auth would drop cloud access on a cold
+ * start until a new bridge, including while offline. A SecureStore persistence
+ * adapter is not used: SecureStore items are size-limited and async, and the
+ * Auth persistence API reads synchronously. Raw tokens are not copied into
+ * the profile cache, SQLite, or logs.
+ */
+export const JS_AUTH_CREDENTIAL_PERSISTENCE = "async-storage" as const;
+
+/**
  * React Native persistence for the JS SDK auth session.
  *
  * Third-party typing boundary: `getReactNativePersistence` exists at runtime

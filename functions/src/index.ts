@@ -14,6 +14,7 @@ export {
 } from "./identity/resolveOrCreateUserByPhone";
 
 export { mintClientAuthToken } from "./identity/mintClientAuthToken";
+export { logoutAllDevices } from "./identity/logoutAllDevices";
 
 export {
   checkMobileQuarantine,

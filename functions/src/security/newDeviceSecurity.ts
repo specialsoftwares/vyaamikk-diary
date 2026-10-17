@@ -352,6 +352,7 @@ export const registerNewDeviceSecurityEvent = onCall(
       batch.set(
         sessionsCollection(uid).doc(sid),
         {
+          // Device-session metadata only. This does not revoke Firebase refresh tokens.
           status: "revoked",
           revokedAt: now,
           pendingSecurityNotification: false,
@@ -542,6 +543,7 @@ async function handleWasNotMeCore(rawToken: string): Promise<{
     }
 
     tx.update(sessionRef, {
+      // Device-session metadata only. This does not revoke Firebase refresh tokens.
       status: "revoked",
       revokedAt: now,
       pendingSecurityNotification: false,

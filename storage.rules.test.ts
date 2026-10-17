@@ -14,10 +14,12 @@ import {
   initializeTestEnvironment,
   type RulesTestEnvironment,
 } from "@firebase/rules-unit-testing";
+import { doc, setDoc } from "firebase/firestore";
 import { getBytes, ref, uploadBytes } from "firebase/storage";
 
 const PROJECT_ID = "vyaamikk-diary-storage-rules-test";
 const RULES_PATH = resolve(process.cwd(), "storage.rules");
+const FIRESTORE_RULES_PATH = resolve(process.cwd(), "firestore.rules");
 
 let failures = 0;
 
@@ -33,8 +35,10 @@ function check(name: string, ok: boolean, detail?: string) {
 async function main() {
   console.log("storage.rules emulator tests");
   const rules = readFileSync(RULES_PATH, "utf8");
+  const firestoreRules = readFileSync(FIRESTORE_RULES_PATH, "utf8");
   const testEnv: RulesTestEnvironment = await initializeTestEnvironment({
     projectId: PROJECT_ID,
+    firestore: { rules: firestoreRules },
     storage: { rules },
   });
 
@@ -81,6 +85,31 @@ async function main() {
 
     await assertFails(getBytes(ref(mallory, "users/alice/letterhead/logo.png")));
     check("cross-user letterhead read denied", true);
+
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "authSecurity", "alice"), {
+        revokedBeforeAuthTimeSeconds: 1_500,
+        revocationState: "complete",
+        operationId: "11111111-1111-1111-1111-111111111111",
+      });
+    });
+    const revoked = testEnv
+      .authenticatedContext("alice", {
+        auth_time: 2_000,
+        firebase: { sign_in_provider: "custom" },
+        vydOriginAuthTime: 1_000,
+      })
+      .storage();
+    const refreshed = testEnv
+      .authenticatedContext("alice", {
+        auth_time: 1_501,
+        firebase: { sign_in_provider: "phone" },
+      })
+      .storage();
+    await assertFails(getBytes(ref(revoked, "users/alice/letterhead/logo.png")));
+    check("EMULATOR storage denies a pre-revocation custom token", true);
+    await assertSucceeds(getBytes(ref(refreshed, "users/alice/letterhead/logo.png")));
+    check("EMULATOR storage allows phone auth after the cutoff", true);
   } finally {
     await testEnv.cleanup();
   }

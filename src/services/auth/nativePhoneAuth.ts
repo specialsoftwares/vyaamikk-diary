@@ -618,16 +618,20 @@ export async function confirmNativePhoneOtp(
 }
 
 /** Sign out native Firebase Auth (best-effort). */
-export async function signOutNativePhoneAuth(): Promise<void> {
+export async function signOutNativePhoneAuth(): Promise<boolean> {
   const mod = tryNativeAuthModule();
-  if (!mod) return;
+  if (!mod) return false;
   try {
     await mod.default().signOut();
   } catch (e) {
     log.warn("native signOut failed", e);
+    pendingByVerificationId.clear();
+    await clearNativePhoneAuthSession();
+    return false;
   }
   pendingByVerificationId.clear();
   await clearNativePhoneAuthSession();
+  return true;
 }
 
 /** Test helper — clears in-memory confirmation cache (not SecureStore). */
