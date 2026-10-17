@@ -79,10 +79,6 @@ export default function FyRecapScreen() {
               <Text style={styles.row}>
                 {t("businessInsights.cashPaidTitle")}: ₹{snap.totalCashPaid}
               </Text>
-              <Text style={styles.row}>
-                {t("businessInsights.distanceFy")}:{" "}
-                {t("businessInsights.routeKm", { km: snap.approxDistanceKm })}
-              </Text>
               <LocaleUiText style={styles.section}>{t("businessInsights.sectionPeople")}</LocaleUiText>
               {snap.topParties.map((p) => (
                 <Text key={p.name} style={styles.row}>

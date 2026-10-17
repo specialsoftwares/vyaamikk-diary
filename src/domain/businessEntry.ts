@@ -36,6 +36,16 @@ export interface AttachmentRef {
   storagePath?: string | null;
   downloadUrl?: string | null;
   downloadUrlUpdatedAt?: number | null;
+  /** SHA-256 of the file bytes. Never a data URI. */
+  contentHash?: string | null;
+  byteSize?: number | null;
+  /** File mtime in milliseconds, when the platform reports one. */
+  fileMtimeMs?: number | null;
+  /**
+   * Revision the PDF must match. Content hash when bytes were hashed,
+   * otherwise `byteSize:mtime`.
+   */
+  revision?: string | null;
 }
 
 /** Optional cash note counts for Full Legal Record PDF. */

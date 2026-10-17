@@ -43,7 +43,11 @@ export function useRecordDelete(userId: string | null) {
   }, []);
 
   const requestDelete = useCallback(
-    (request: UserDeleteRequest, onSuccess?: () => void | Promise<void>) => {
+    (
+      request: UserDeleteRequest,
+      onSuccess?: () => void | Promise<void>,
+      options?: { confirmAdmit?: () => boolean }
+    ) => {
       if (!userId) return;
       const key = pendingKey(request);
       if (pendingRef.current.has(key)) return;
@@ -57,6 +61,7 @@ export function useRecordDelete(userId: string | null) {
           text: t("common.delete"),
           style: "destructive",
           onPress: () => {
+            if (options?.confirmAdmit && !options.confirmAdmit()) return;
             void (async () => {
               pendingRef.current.add(key);
               bump((n) => n + 1);

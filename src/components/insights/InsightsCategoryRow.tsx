@@ -3,6 +3,7 @@ import { StyleSheet, Text, View } from "react-native";
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import type { ComponentProps } from "react";
 
+import { LocaleUiText } from "@/components/ui/LocaleUiText";
 import { LuxuryPressable } from "@/components/ui/LuxuryPressable";
 import { spacing, typography, useTheme, useThemedStyles } from "@/theme";
 
@@ -13,6 +14,7 @@ interface InsightsCategoryRowProps {
   title: string;
   subtitle?: string;
   value?: string;
+  actionLabel?: string;
   onPress?: () => void;
 }
 
@@ -21,6 +23,7 @@ export function InsightsCategoryRow({
   title,
   subtitle,
   value,
+  actionLabel,
   onPress,
 }: InsightsCategoryRowProps) {
   const { colors } = useTheme();
@@ -41,10 +44,11 @@ export function InsightsCategoryRow({
         alignItems: "center",
         justifyContent: "center",
       },
-      copy: { flex: 1, gap: 2 },
+      copy: { flex: 1, flexShrink: 1, gap: 2 },
       title: { ...typography.bodyStrong, color: c.text },
-      subtitle: { ...typography.caption, color: c.textMuted, lineHeight: 18 },
-      value: { ...typography.captionStrong, color: c.primaryDark },
+      subtitle: { ...typography.caption, color: c.textMuted },
+      action: { ...typography.captionStrong, color: c.primaryDark },
+      value: { ...typography.captionStrong, color: c.primaryDark, flexShrink: 1, textAlign: "right" },
       chevron: { ...typography.titleSm, color: c.textSubtle },
     })
   );
@@ -60,10 +64,11 @@ export function InsightsCategoryRow({
         <MaterialCommunityIcons name={icon} size={20} color={colors.primaryDark} />
       </View>
       <View style={styles.copy}>
-        <Text style={styles.title}>{title}</Text>
-        {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
+        <LocaleUiText style={styles.title}>{title}</LocaleUiText>
+        {subtitle ? <LocaleUiText style={styles.subtitle}>{subtitle}</LocaleUiText> : null}
+        {actionLabel ? <LocaleUiText style={styles.action}>{actionLabel}</LocaleUiText> : null}
       </View>
-      {value ? <Text style={styles.value}>{value}</Text> : null}
+      {value ? <LocaleUiText style={styles.value}>{value}</LocaleUiText> : null}
       {onPress ? <Text style={styles.chevron}>›</Text> : null}
     </LuxuryPressable>
   );

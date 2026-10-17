@@ -124,6 +124,73 @@ function testInstallmentRejected() {
   if (!selected.ok) assert.equal(selected.reason, "installment");
 }
 
+function testOpenIapBasePlanLabelDoesNotHideThePaidPrice() {
+  const selected = selectStandardAndroidOffer({
+    offers: [
+      standardOffer("monthly", {
+        type: "introductory",
+        paymentMode: "pay-as-you-go",
+      }),
+    ],
+    expectedBasePlanId: "monthly",
+  });
+  assert.equal(selected.ok, true);
+  if (selected.ok) {
+    assert.equal(selected.offer.basePlanId, "monthly");
+    assert.equal(selected.offer.displayPrice, "₹store-monthly");
+    assert.equal(selected.offer.offerToken, "token-monthly");
+  }
+  const catalog = mapStoreProductsToCatalog({
+    platform: "android",
+    products: [
+      {
+        id: "vyd_starter",
+        type: "subs",
+        platform: "android",
+        displayPrice: "IGNORE",
+        currency: "INR",
+        subscriptionOffers: [
+          standardOffer("monthly", {
+            type: "introductory",
+            paymentMode: "pay-as-you-go",
+          }),
+        ],
+      },
+    ],
+  });
+  const starter = catalog.find((row) => row.canonicalSku === "vyd_starter_monthly");
+  assert.ok(starter);
+  assert.equal(starter?.available, true);
+  assert.equal(starter?.displayPrice, "₹store-monthly");
+  assert.equal(starter?.unavailableReason, null);
+}
+
+function testIntroductoryZeroPriceStillRejected() {
+  const selected = selectStandardAndroidOffer({
+    offers: [
+      standardOffer("monthly", {
+        type: "introductory",
+        paymentMode: "free-trial",
+        pricingPhasesAndroid: {
+          pricingPhaseList: [
+            {
+              billingCycleCount: 0,
+              billingPeriod: "P1M",
+              formattedPrice: "₹0",
+              priceAmountMicros: "0",
+              priceCurrencyCode: "INR",
+              recurrenceMode: 1,
+            },
+          ],
+        },
+      }),
+    ],
+    expectedBasePlanId: "monthly",
+  });
+  assert.equal(selected.ok, false);
+  if (!selected.ok) assert.equal(selected.reason, "trial_or_promo");
+}
+
 function testMissingOffers() {
   const selected = selectStandardAndroidOffer({
     offers: [],
@@ -156,6 +223,61 @@ function testStoreLocalizedCatalogPrice() {
   assert.notEqual(yearly?.displayPrice, "₹1999");
 }
 
+function testSuccessfulPriceUsesProductDetailsFormattedPrice() {
+  const selected = selectStandardAndroidOffer({
+    offers: [
+      standardOffer("monthly", {
+        displayPrice: "₹WRONG-LABEL",
+        currency: "USD",
+        pricingPhasesAndroid: {
+          pricingPhaseList: [
+            {
+              billingCycleCount: 0,
+              billingPeriod: "P1M",
+              formattedPrice: "₹1,499",
+              priceAmountMicros: "1499000000",
+              priceCurrencyCode: "INR",
+              recurrenceMode: 1,
+            },
+          ],
+        },
+      }),
+    ],
+    expectedBasePlanId: "monthly",
+  });
+  assert.equal(selected.ok, true);
+  if (selected.ok) {
+    assert.equal(selected.offer.displayPrice, "₹1,499");
+    assert.equal(selected.offer.currency, "INR");
+    assert.notEqual(selected.offer.displayPrice, "₹WRONG-LABEL");
+  }
+}
+
+function testMissingFormattedPriceIsNotASuccessfulCatalogPrice() {
+  const selected = selectStandardAndroidOffer({
+    offers: [
+      standardOffer("monthly", {
+        displayPrice: "₹99",
+        pricingPhasesAndroid: {
+          pricingPhaseList: [
+            {
+              billingCycleCount: 0,
+              billingPeriod: "P1M",
+              formattedPrice: "",
+              priceAmountMicros: "99000000",
+              priceCurrencyCode: "INR",
+              recurrenceMode: 1,
+            },
+          ],
+        },
+      }),
+    ],
+    expectedBasePlanId: "monthly",
+  });
+  assert.equal(selected.ok, false);
+  if (!selected.ok) assert.equal(selected.reason, "unsupported");
+}
+
 function testUnavailableWhenStoreEmpty() {
   const catalog = mapStoreProductsToCatalog({ platform: "android", products: [] });
   assert.equal(catalog.length, 9);
@@ -172,8 +294,12 @@ function main() {
   testMissingOfferTokenFails();
   testTrialPhaseRejected();
   testInstallmentRejected();
+  testOpenIapBasePlanLabelDoesNotHideThePaidPrice();
+  testIntroductoryZeroPriceStillRejected();
   testMissingOffers();
   testStoreLocalizedCatalogPrice();
+  testSuccessfulPriceUsesProductDetailsFormattedPrice();
+  testMissingFormattedPriceIsNotASuccessfulCatalogPrice();
   testUnavailableWhenStoreEmpty();
   console.log("iapOffers.test.ts: ok");
 }

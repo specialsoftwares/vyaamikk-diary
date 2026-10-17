@@ -1,3 +1,4 @@
+import { parseLetterheadTemplateSnapshot } from "./letterheadTemplateSnapshot";
 import type { LetterheadDocument, LetterheadDocumentInput } from "./types";
 
 function optStr(v: unknown): string | undefined {
@@ -41,6 +42,7 @@ export function parseLetterheadDocument(
     },
     templateRefUpdatedAt:
       raw.templateRefUpdatedAt == null ? null : Number(raw.templateRefUpdatedAt),
+    templateSnapshot: parseLetterheadTemplateSnapshot(raw.templateSnapshot),
     pdfUri: typeof raw.pdfUri === "string" ? raw.pdfUri : null,
     saved: Boolean(raw.saved ?? true),
     firstGeneratedAt: raw.firstGeneratedAt == null ? undefined : Number(raw.firstGeneratedAt),

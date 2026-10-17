@@ -9,8 +9,10 @@ import { AppState, Linking, Platform, StyleSheet, View } from "react-native";
 
 import { useIap } from "@/billing/iap";
 import { saveBillingDetailsClient } from "@/billing/iap/billingDetailsClient";
+import { readPlayPurchaseAdmission } from "@/billing/iap/iapBackend";
 import { storeSubscriptionsManageUrl } from "@/billing/iap/playSubscriptionsUrl";
 import { isSubscriptionPurchaseEntryEnabled } from "@/billing/iap/purchaseEntryGate";
+import { purchaseStatusNotice } from "@/billing/quotaUpsell/mapUpgradeSheetModel";
 import { notifyManualUpgrade } from "@/billing/quotaUpsell";
 import {
   Card,
@@ -38,8 +40,11 @@ import {
   managementPlanNameKey,
   managementQuotaView,
 } from "@/subscription/subscriptionManagementPresentation";
-import { createSubscriptionManagementRuntime, maskManagementSnapshot } from "@/subscription/subscriptionManagementRuntime";
-import { syncSessionOwnership } from "@/sync/syncSessionOwnership";
+import {
+  createSubscriptionManagementRuntime,
+  maskManagementSnapshot,
+  readSubscriptionManagementSession,
+} from "@/subscription/subscriptionManagementRuntime";
 import { spacing, typography, useThemedStyles } from "@/theme";
 
 function formatDate(ms: number): string {
@@ -56,17 +61,13 @@ export function SubscriptionManagementScreen() {
   const subscription = useSubscription();
   const iap = useIap();
   const uid = user?.uid ?? null;
-  const session = syncSessionOwnership.capture();
-  const liveSession =
-    uid && session && uid === session.uid
-      ? { uid: session.uid, generation: session.generation }
-      : null;
-  const live = { authUid: uid, session: liveSession };
+  const authUidRef = React.useRef(uid);
+  authUidRef.current = uid;
+  const live = readSubscriptionManagementSession(uid);
+  const liveSession = live.session;
 
   const iapRef = React.useRef(iap);
   iapRef.current = iap;
-  const liveRef = React.useRef(live);
-  liveRef.current = live;
 
   const [runtime] = useState(() =>
     createSubscriptionManagementRuntime({
@@ -77,7 +78,8 @@ export function SubscriptionManagementScreen() {
       restore: () => iapRef.current.restorePurchases(),
       openUrl: (url) => Linking.openURL(url),
       presentUpgrade: notifyManualUpgrade,
-      liveSession: () => liveRef.current,
+      readPurchaseAdmission: readPlayPurchaseAdmission,
+      liveSession: () => readSubscriptionManagementSession(authUidRef.current),
     })
   );
   const [, setTick] = useState(0);
@@ -153,6 +155,8 @@ export function SubscriptionManagementScreen() {
   const storeBusy = iap.purchaseInFlight || iap.pending != null || published.restoring;
   const platform = subscription.status.platform ?? (Platform.OS === "ios" ? "ios" : "android");
   const purchaseEntryOn = isSubscriptionPurchaseEntryEnabled();
+  const serverAdmitted = published.purchaseAdmission === "allowed";
+  const storeStatus = purchaseStatusNotice(t, iap);
   const barRatio =
     quota.kind === "capped" && quota.used != null && quota.limit > 0
       ? Math.min(1, quota.used / quota.limit)
@@ -214,24 +218,57 @@ export function SubscriptionManagementScreen() {
             {quota.kind === "capped" && quota.warnAt80 ? (
               <LocaleUiText style={styles.muted}>{t("billing.management.quotaWarn80")}</LocaleUiText>
             ) : null}
-            <LocaleUiText style={styles.muted}>{t("billing.upgrade.letterheadIncluded")}</LocaleUiText>
           </>
         )}
         {subscription.error ? <LocaleUiText style={styles.error}>{subscription.error}</LocaleUiText> : null}
-        <PremiumActionButton
-          label={t("billing.management.upgradeCta")}
-          onPress={() => {
-            const result = runtime.bindPresentUpgrade(liveSession)();
-            if (!result.ok && result.reason !== "purchase_entry_closed") {
-              /* runtime already recorded upgradeError */
-            }
-          }}
-          disabled={storeBusy || !purchaseEntryOn}
-          accessibilityLabel={t("billing.management.upgradeCta")}
-        />
-        {upgradeErrorCopy ? <LocaleUiText style={styles.error}>{upgradeErrorCopy}</LocaleUiText> : null}
-        {!purchaseEntryOn ? (
-          <LocaleUiText style={styles.muted}>{t("billing.management.purchaseEntryClosed")}</LocaleUiText>
+        {storeStatus ? (
+          <LocaleUiText accessibilityLiveRegion="polite" style={styles.muted}>
+            {storeStatus}
+          </LocaleUiText>
+        ) : null}
+        {purchaseEntryOn ? (
+          <PremiumActionButton
+            label={t("billing.management.upgradeCta")}
+            onPress={() => {
+              runtime.bindPresentUpgrade(liveSession)();
+            }}
+            disabled={storeBusy}
+            accessibilityLabel={t("billing.management.upgradeCta")}
+          />
+        ) : serverAdmitted ? (
+          <PremiumActionButton
+            label={t("billing.management.upgradeCta")}
+            onPress={() => {
+              runtime.bindPresentUpgrade(liveSession)();
+            }}
+            disabled={storeBusy}
+            accessibilityLabel={t("billing.management.upgradeCta")}
+          />
+        ) : published.purchaseAdmission === "loading" ? (
+          <LocaleUiText accessibilityLiveRegion="polite" style={styles.muted}>
+            {t("billing.management.purchaseAdmissionChecking")}
+          </LocaleUiText>
+        ) : published.purchaseAdmission === "unavailable" ? (
+          <>
+            <LocaleUiText accessibilityLiveRegion="assertive" accessibilityRole="alert" style={styles.error}>
+              {t("billing.management.purchaseAdmissionUnavailable")}
+            </LocaleUiText>
+            <PremiumActionButton
+              variant="secondary"
+              label={t("billing.management.purchaseAdmissionRetry")}
+              onPress={() => {
+                runtime.bindRefreshPurchaseAdmission(liveSession)();
+              }}
+              accessibilityLabel={t("billing.management.purchaseAdmissionRetry")}
+            />
+          </>
+        ) : (
+          <LocaleUiText accessibilityLiveRegion="polite" style={styles.muted}>
+            {t("billing.management.purchaseEntryClosed")}
+          </LocaleUiText>
+        )}
+        {(purchaseEntryOn || serverAdmitted) && upgradeErrorCopy ? (
+          <LocaleUiText accessibilityLiveRegion="assertive" style={styles.error}>{upgradeErrorCopy}</LocaleUiText>
         ) : null}
         <PremiumActionButton
           variant="secondary"

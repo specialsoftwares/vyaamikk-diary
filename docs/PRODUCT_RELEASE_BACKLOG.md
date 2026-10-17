@@ -62,7 +62,11 @@ Stable IDs use format `VYD-RL-NNN`. **Never renumber** existing IDs. Search for 
 
 # CURRENT PUBLIC RELEASE
 
-_No deferred-feature register items here yet. Core product work for the first public launch is tracked by existing freeze / readiness docs; this section is for features that are explicitly approved into the release currently being prepared via promotion from other buckets._
+Owner direction 2026-10-01: the intended feature-complete release includes a completed Goods Receipt & GST Evidence Ledger (GRIN). Encrypted PDF backup remains **out of this release** (unlisted backlog; do not implement here).
+
+GRIN is **not** complete from G1. Implementation proceeds by reviewed slices (`docs/release/GRIN_IMPLEMENTATION_REGISTER.md`). Only G1 (emulator register/reconcile persistence) is authorized in the current assignment. Core candidate `6e3dbba` / PR #29 stays frozen; the core-only Internal build packet is **deferred** until GRIN is integrated and separately authorized to build.
+
+_Do not treat website lookup (VYD-RL-001) or R8 (VYD-RL-002) as promoted._
 
 ---
 

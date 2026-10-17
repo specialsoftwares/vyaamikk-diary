@@ -165,6 +165,29 @@ assert.equal(
     trialActionAvailable: false,
     selectedPlanId: "starter",
     purchaseAvailable: true,
+    purchaseState: "verifying",
+    catalogState: "ready",
+  }).kind,
+  "verifying"
+);
+assert.equal(
+  resolveUpgradeCta({
+    trialEligible: false,
+    trialActionAvailable: false,
+    selectedPlanId: "starter",
+    purchaseAvailable: true,
+    purchaseState: "verifying",
+    catalogState: "ready",
+  }).enabled,
+  false
+);
+
+assert.equal(
+  resolveUpgradeCta({
+    trialEligible: false,
+    trialActionAvailable: false,
+    selectedPlanId: "starter",
+    purchaseAvailable: true,
     purchaseState: "idle",
     catalogState: "loading",
   }).kind,

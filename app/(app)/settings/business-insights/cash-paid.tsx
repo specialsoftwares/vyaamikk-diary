@@ -6,6 +6,7 @@ import { Header, Loader, Screen, LocaleUiText, ErrorState } from "@/components/u
 import { useBusinessInsightsDashboard } from "@/hooks/useBusinessInsightsDashboard";
 import { useAuth } from "@/state/auth";
 import { useT } from "@/i18n";
+import { translateInsightPhrases } from "@/services/insights/insightPhrases";
 import { getCurrentFinancialYear } from "@/utils/financialYear";
 import { formatAmount } from "@/utils/formatters/formatAmount";
 import { spacing, typography, useThemedStyles } from "@/theme";
@@ -34,6 +35,7 @@ export default function InsightsCashPaidScreen() {
   );
 
   const cash = data?.cashPaid;
+  const cashInsight = data?.insights.find((insight) => insight.id === "cash_paid");
 
   return (
     <Screen scroll>
@@ -42,8 +44,12 @@ export default function InsightsCashPaidScreen() {
         <Loader message={t("common.loading")} />
       ) : error ? (
         <ErrorState message={error} onRetry={() => void reload()} retryLabel={t("common.retry")} />
-      ) : !cash ? (
+      ) : !cash || !cashInsight ? (
         <Loader message={t("common.loading")} />
+      ) : cashInsight.unavailable ? (
+        <Text style={styles.note}>
+          {translateInsightPhrases(cashInsight.emptyPhrases, t) || cashInsight.emptyState}
+        </Text>
       ) : (
         <>
           <Text style={styles.lead}>{fmtMoney(cash.fyTotal)}</Text>
@@ -57,6 +63,17 @@ export default function InsightsCashPaidScreen() {
               <Text style={styles.count}>{r.count}</Text>
             </View>
           ))}
+          {cashInsight.empty ? (
+            <Text style={styles.note}>
+              {translateInsightPhrases(cashInsight.emptyPhrases, t) || cashInsight.emptyState}
+            </Text>
+          ) : null}
+          <Text style={styles.note}>
+            {translateInsightPhrases(cashInsight.howPhrases, t) || cashInsight.howCalculated}
+          </Text>
+          <Text style={styles.note}>
+            {translateInsightPhrases(cashInsight.freshnessPhrases, t) || cashInsight.freshnessNote}
+          </Text>
           <LocaleUiText style={styles.note}>{t("businessInsights.cashPaidDisclaimer")}</LocaleUiText>
         </>
       )}

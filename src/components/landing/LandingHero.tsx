@@ -8,6 +8,7 @@ import { LANDING_HERO } from "@/components/landing/landingCopy";
 import { LANDING_COLORS, LANDING_LAYOUT, landingTypography } from "@/components/landing/landingTokens";
 import { useLandingFadeIn } from "@/components/landing/useLandingMotion";
 import { getAuthEntryHref } from "@/config/authWrapper";
+import { openPublicLinkOrExplain } from "@/config/publicLinks";
 import { spacing } from "@/theme";
 
 export function LandingHero() {
@@ -34,7 +35,7 @@ export function LandingHero() {
             <LandingButton
               label={LANDING_HERO.secondaryCta}
               variant="ghost"
-              onPress={() => router.push({ pathname: "/legal/[doc]", params: { doc: "privacy" } })}
+              onPress={() => void openPublicLinkOrExplain("privacy")}
               style={styles.cta}
             />
           </View>

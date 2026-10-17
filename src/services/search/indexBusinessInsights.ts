@@ -85,9 +85,7 @@ export function indexFyRecapSnapshot(snap: FyRecapSnapshot): IndexedSearchItem {
       categoryLabelKey: categoryLabelKey("fy_recap"),
       title: `${fyLabel} Summary`,
       snippet:
-        snap.status === "ready"
-          ? `${snap.recordsCreated} records · Approx. ${snap.approxDistanceKm} km`
-          : "Preparing recap",
+        snap.status === "ready" ? `${snap.recordsCreated} records` : "Preparing recap",
       dateMs: snap.preparedAt ?? Date.now(),
       iconName: iconForCategory("fy_recap"),
       target: {

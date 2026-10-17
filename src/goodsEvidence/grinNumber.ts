@@ -1,0 +1,36 @@
+import { DEFAULT_GRIN_SERIES, GRIN_SERIAL_PAD } from "./constants";
+
+const GRIN_NUMBER_RE = /^GRIN\/([A-Z][A-Z0-9]{0,15})\/(FY\d{4}-\d{2})\/(\d{6})$/;
+
+export function formatGrinNumber(input: {
+  series?: string;
+  fyToken: string;
+  serial: number;
+}): string {
+  const series = (input.series ?? DEFAULT_GRIN_SERIES).trim().toUpperCase();
+  if (!/^[A-Z][A-Z0-9]{0,15}$/.test(series)) {
+    throw new Error("goodsEvidence: invalid GRIN series");
+  }
+  if (!/^FY\d{4}-\d{2}$/.test(input.fyToken)) {
+    throw new Error("goodsEvidence: invalid FY token");
+  }
+  const serial = Math.floor(input.serial);
+  if (!Number.isInteger(serial) || serial < 1 || serial > 999999) {
+    throw new Error("goodsEvidence: GRIN serial out of range");
+  }
+  return `GRIN/${series}/${input.fyToken}/${String(serial).padStart(GRIN_SERIAL_PAD, "0")}`;
+}
+
+export function parseGrinNumber(value: string): {
+  series: string;
+  fyToken: string;
+  serial: number;
+} | null {
+  const m = GRIN_NUMBER_RE.exec(value.trim());
+  if (!m) return null;
+  return { series: m[1]!, fyToken: m[2]!, serial: Number(m[3]) };
+}
+
+export function isIssuedGrinNumber(value: unknown): value is string {
+  return typeof value === "string" && parseGrinNumber(value) != null;
+}

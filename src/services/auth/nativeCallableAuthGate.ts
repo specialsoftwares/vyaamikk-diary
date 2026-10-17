@@ -2,18 +2,37 @@
  * Ensures @react-native-firebase/auth is ready before authenticated callables.
  *
  * Phone OTP may return a UserCredential while Functions still observes a brief
- * window without an attachable ID token. Force-refresh the token on the same
- * native [DEFAULT] app before httpsCallable.
+ * window without an attachable ID token. The gate reads the SDK-cached token
+ * first. A forced refresh runs only for an explicit invalidation, or once when
+ * that cached read is empty or hits a recoverable token error.
  *
  * Never logs tokens, OTPs, phones, or verification IDs.
  */
 
 import { AppError } from "@/domain/errors";
 import { createLogger } from "@/utils/logger";
+import { beginPerfAttempt, recordPerfSpan } from "./authFlowPerf";
+import { readNativeIdToken } from "./idTokenRefresh";
 
 const log = createLogger("auth/nativeCallableAuthGate");
 
 const READY_TIMEOUT_MS = 8_000;
+
+type ReadyOptions = { forceRefresh?: boolean };
+
+let authReadyGeneration = 0;
+let inflightReady: {
+  uid: string;
+  generation: number;
+  force: boolean;
+  promise: Promise<NativeCallableAuthReadySnapshot>;
+} | null = null;
+
+/** Drops an in-flight readiness promise after sign-out or session replacement. */
+export function retireNativeCallableAuthReady(): void {
+  authReadyGeneration += 1;
+  inflightReady = null;
+}
 
 export interface NativeCallableAuthReadySnapshot {
   uidPresent: boolean;
@@ -36,7 +55,16 @@ type NativeAuth = {
   onAuthStateChanged: (listener: (user: NativeUser | null) => void) => () => void;
 };
 
+let nativeAuthOverride: (() => NativeAuth) | null | undefined;
+
+/** Test-only auth port. Pass undefined to restore the production lookup. */
+export function __setNativeAuthForTests(auth: (() => NativeAuth) | null | undefined): void {
+  nativeAuthOverride = auth;
+  retireNativeCallableAuthReady();
+}
+
 function tryNativeAuth(): (() => NativeAuth) | null {
+  if (nativeAuthOverride !== undefined) return nativeAuthOverride;
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { Platform } = require("react-native") as { Platform: { OS: string } };
@@ -52,6 +80,21 @@ function tryNativeAuth(): (() => NativeAuth) | null {
   } catch {
     return null;
   }
+}
+
+function retiredAuthReady(): AppError {
+  return new AppError(
+    "auth_failed",
+    "Your sign-in was not ready yet. Please try again.",
+    undefined,
+    {
+      authPhase: "post_auth",
+      failureDomain: "auth",
+      diagnosticCode: "ID_TOKEN_READY_RETIRED",
+      firebaseUserPresent: false,
+      idTokenReady: false,
+    }
+  );
 }
 
 function uidSuffix(uid: string): string {
@@ -90,7 +133,9 @@ async function waitForCurrentUser(authFn: () => NativeAuth, timeoutMs: number): 
 /**
  * Barrier before identity callables. Does not inject tokens into callable data.
  */
-export async function ensureNativeAuthReadyForCallables(): Promise<NativeCallableAuthReadySnapshot> {
+export async function ensureNativeAuthReadyForCallables(
+  options?: ReadyOptions
+): Promise<NativeCallableAuthReadySnapshot> {
   const authFn = tryNativeAuth();
   if (!authFn) {
     throw new AppError(
@@ -135,24 +180,81 @@ export async function ensureNativeAuthReadyForCallables(): Promise<NativeCallabl
     );
   }
 
-  let idTokenReady = false;
+  const force = options?.forceRefresh === true;
+  const generation = authReadyGeneration;
+  if (
+    inflightReady &&
+    inflightReady.uid === user.uid &&
+    inflightReady.generation === generation &&
+    inflightReady.force === force
+  ) {
+    return inflightReady.promise;
+  }
+
+  const promise = finishNativeAuthReady({
+    user,
+    authFn,
+    authAppName,
+    authProjectId,
+    force,
+    generation,
+  });
+  inflightReady = { uid: user.uid, generation, force, promise };
+  const release = () => {
+    if (inflightReady?.promise === promise) inflightReady = null;
+  };
+  void promise.then(release, release);
+  return promise;
+}
+
+async function finishNativeAuthReady(input: {
+  user: NativeUser;
+  authFn: () => NativeAuth;
+  authAppName: string;
+  authProjectId: string;
+  force: boolean;
+  generation: number;
+}): Promise<NativeCallableAuthReadySnapshot> {
+  const { user, authFn, authAppName, authProjectId, force, generation } = input;
+  const started = globalThis.performance?.now?.() ?? Date.now();
+  const attempt = beginPerfAttempt("token_gate");
+  if (generation !== authReadyGeneration) {
+    throw retiredAuthReady();
+  }
+
+  let forced = force;
   try {
-    const token = await user.getIdToken(true);
-    idTokenReady = typeof token === "string" && token.length > 20;
+    const read = await readNativeIdToken(user, { explicitInvalidation: force });
+    forced = read.forced;
+    if (read.token.length <= 20) {
+      throw new Error("id_token_empty");
+    }
   } catch (e) {
-    log.warn("getIdToken failed", {
-      phase: "ID_TOKEN_REQUEST_SUCCESS",
-      idTokenReady: false,
-      uidSuffix: uidSuffix(user.uid),
+    const empty = e instanceof Error && e.message === "id_token_empty";
+    recordPerfSpan({
+      ...attempt,
+      stage: forced ? "token_forced" : "token_cached",
+      runtime: "native",
+      durationMs: (globalThis.performance?.now?.() ?? Date.now()) - started,
+      outcome: generation === authReadyGeneration ? "error" : "retired",
     });
+    if (!empty) {
+      log.warn("getIdToken failed", {
+        phase: "ID_TOKEN_REQUEST_SUCCESS",
+        idTokenReady: false,
+        uidSuffix: uidSuffix(user.uid),
+      });
+    }
     throw new AppError(
       "auth_failed",
-      "Your sign-in was verified, but we could not refresh the session token. Please try again.",
-      e,
+      empty
+        ? "Your sign-in was verified, but the session token was empty. Please try again."
+        : "Your sign-in was verified, but we could not refresh the session token. Please try again.",
+      empty ? undefined : e,
       {
         authPhase: "post_auth",
         failureDomain: "auth",
-        diagnosticCode: "ID_TOKEN_REFRESH_FAILED",
+        diagnosticCode: empty ? "ID_TOKEN_EMPTY" : "ID_TOKEN_REFRESH_FAILED",
         firebaseUserPresent: true,
         idTokenReady: false,
         authAppName,
@@ -162,24 +264,24 @@ export async function ensureNativeAuthReadyForCallables(): Promise<NativeCallabl
     );
   }
 
-  if (!idTokenReady) {
-    throw new AppError(
-      "auth_failed",
-      "Your sign-in was verified, but the session token was empty. Please try again.",
-      undefined,
-      {
-        authPhase: "post_auth",
-        failureDomain: "auth",
-        diagnosticCode: "ID_TOKEN_EMPTY",
-        firebaseUserPresent: true,
-        idTokenReady: false,
-        authAppName,
-        authProjectIdPresent: Boolean(authProjectId),
-        uidSuffix: uidSuffix(user.uid),
-      }
-    );
+  if (generation !== authReadyGeneration || authFn().currentUser?.uid !== user.uid) {
+    recordPerfSpan({
+      ...attempt,
+      stage: forced ? "token_forced" : "token_cached",
+      runtime: "native",
+      durationMs: (globalThis.performance?.now?.() ?? Date.now()) - started,
+      outcome: "retired",
+    });
+    throw retiredAuthReady();
   }
 
+  recordPerfSpan({
+    ...attempt,
+    stage: forced ? "token_forced" : "token_cached",
+    runtime: "native",
+    durationMs: (globalThis.performance?.now?.() ?? Date.now()) - started,
+    outcome: "ok",
+  });
   const snap: NativeCallableAuthReadySnapshot = {
     uidPresent: true,
     uidSuffix: uidSuffix(user.uid),

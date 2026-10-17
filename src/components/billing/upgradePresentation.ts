@@ -46,6 +46,7 @@ export type UpgradeCtaKind =
   | "subscribe"
   | "unavailable"
   | "pending"
+  | "verifying"
   | "loading"
   | "trialUnavailable";
 
@@ -178,6 +179,14 @@ export function resolveUpgradeCta(input: {
       dispatch: "none",
     };
   }
+  if (input.purchaseState === "verifying") {
+    return {
+      kind: "verifying",
+      enabled: false,
+      labelKey: "billing.upgrade.purchaseVerifying",
+      dispatch: "none",
+    };
+  }
   if (input.purchaseState === "pending") {
     return {
       kind: "pending",
@@ -275,13 +284,19 @@ export function canDispatchRestore(input: {
   restoreState: UpgradeOperationState;
 }): boolean {
   if (!input.restoreAvailable) return false;
-  if (input.restoreState === "loading" || input.restoreState === "pending") return false;
+  if (
+    input.restoreState === "loading" ||
+    input.restoreState === "pending" ||
+    input.restoreState === "verifying"
+  ) {
+    return false;
+  }
   if (input.restoreState === "unavailable") return false;
   return true;
 }
 
 export function isBillingOperationBusy(state: UpgradeOperationState): boolean {
-  return state === "loading" || state === "pending";
+  return state === "loading" || state === "pending" || state === "verifying";
 }
 
 /** Either in-flight billing action locks purchase/trial and restore. */

@@ -3,6 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AppError } from "@/domain/errors";
 import type { ProfessionalServicePack } from "@/domain/professionalPack";
 import { shortId } from "@/utils/id";
+import { publishDomainChange } from "@/services/dataChanges/domainChanges";
 import { notificationsService } from "@/services/notifications";
 import { createLogger } from "@/utils/logger";
 
@@ -96,6 +97,7 @@ export const mockProfessionalPackRepository: ProfessionalPackRepository = {
     const all = await loadAll(userId);
     all.unshift(pack);
     await saveAll(userId, all);
+    publishDomainChange(userId, "professionalPack", { effect: "upsert", recordId: pack.id });
     log.info("pack created");
     return pack;
   },
@@ -138,6 +140,7 @@ export const mockProfessionalPackRepository: ProfessionalPackRepository = {
     };
     all[idx] = next;
     await saveAll(userId, all);
+    publishDomainChange(userId, "professionalPack", { effect: "upsert", recordId: next.id });
     return next;
   },
 

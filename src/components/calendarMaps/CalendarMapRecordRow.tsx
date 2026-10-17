@@ -2,13 +2,9 @@ import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import React, { memo } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
-import { FreightDispatchMapIntelView } from "@/components/calendarMaps/FreightDispatchMapIntelView";
 import { CategoryAccentChip } from "@/components/ui/CategoryAccentChip";
 import type { CalendarMapRecord } from "@/services/calendarMaps";
-import {
-  freightDispatchCalendarSnippet,
-  freightDispatchClusterEntryMeta,
-} from "@/services/calendarMaps/freightDispatchMapIntel";
+import { freightDispatchCalendarSnippet } from "@/services/calendarMaps/freightDispatchMapIntel";
 import { formatShortDate } from "@/utils/date";
 import { radius, spacing, typography, useThemedStyles } from "@/theme";
 import {
@@ -21,15 +17,12 @@ interface CalendarMapRecordRowProps {
   record: CalendarMapRecord;
   typeLabel: string;
   onPress: () => void;
-  /** Map cluster sheet: route is in header; show bill/LR/vehicle only. */
-  clusterMode?: boolean;
 }
 
 export const CalendarMapRecordRow = memo(function CalendarMapRecordRow({
   record,
   typeLabel,
   onPress,
-  clusterMode = false,
 }: CalendarMapRecordRowProps) {
   const accentKey =
     record.entityType === "statutory_info"
@@ -68,11 +61,7 @@ export const CalendarMapRecordRow = memo(function CalendarMapRecordRow({
   );
 
   const dispatchIntel = record.dispatchIntel;
-  const dispatchSnippet = dispatchIntel
-    ? clusterMode
-      ? freightDispatchClusterEntryMeta(dispatchIntel)
-      : freightDispatchCalendarSnippet(dispatchIntel)
-    : "";
+  const dispatchSnippet = dispatchIntel ? freightDispatchCalendarSnippet(dispatchIntel) : "";
   const locationLine =
     !dispatchIntel && record.manualLocationLabel?.trim()
       ? record.manualLocationLabel.trim()
@@ -84,7 +73,6 @@ export const CalendarMapRecordRow = memo(function CalendarMapRecordRow({
       style={({ pressed }) => [
         styles.row,
         { borderLeftColor: accent.main },
-        clusterMode && { paddingVertical: spacing.sm },
         pressed && styles.rowPressed,
       ]}
       accessibilityRole="button"
@@ -101,12 +89,8 @@ export const CalendarMapRecordRow = memo(function CalendarMapRecordRow({
         <Text style={styles.title} numberOfLines={1}>
           {record.title}
         </Text>
-        {dispatchIntel && dispatchSnippet ? (
-          <FreightDispatchMapIntelView
-            intel={dispatchIntel}
-            variant={clusterMode ? "cluster" : "calendar"}
-            snippet={clusterMode ? undefined : dispatchSnippet}
-          />
+        {dispatchSnippet ? (
+          <Text style={styles.snippet}>{dispatchSnippet}</Text>
         ) : record.subtitle ? (
           <Text style={styles.snippet} numberOfLines={2}>
             {record.subtitle}

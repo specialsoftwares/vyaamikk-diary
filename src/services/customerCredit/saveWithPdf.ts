@@ -14,6 +14,7 @@ import { attachRecordIdToPersistentLock } from "@/services/records/persistentSav
 import { SAVE_STEP, SaveStillInProgressError, hasCompletedStep } from "@/services/records/saveLockTypes";
 import type { SaveIdempotencyContext, ProcessSaveLockOwner } from "@/services/records/saveIdempotency";
 import { releaseProcessSaveLock } from "@/services/records/saveIdempotency";
+import { publishDomainChange } from "@/services/dataChanges/domainChanges";
 import { dayKey } from "@/utils/date";
 
 import { getCustomerCreditRepository } from "./index";
@@ -357,6 +358,7 @@ export async function saveCustomerCreditWithPdf(
       clientRecordId: params.create?.clientRecordId,
       message: "save_complete",
     });
+    publishDomainChange(userId, "customerCredit", { effect: "upsert", recordId: saved.id });
     return saved;
   } catch (e) {
     if (e instanceof SaveStillInProgressError) throw e;

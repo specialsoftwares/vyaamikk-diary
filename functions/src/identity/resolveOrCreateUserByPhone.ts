@@ -28,7 +28,8 @@ const PHONE_INDEX = "phoneIndex";
 const UEID_INDEX = "ueidIndex";
 const RETIRED_PHONES = "retiredPhones";
 
-const DELETION_GRACE_MS = 15 * 24 * 60 * 60 * 1000;
+/** Must match identityLifecycle.ts / finalPurge.ts (45-day cancellation window). */
+const DELETION_GRACE_MS = 45 * 24 * 60 * 60 * 1000;
 
 function uidSuffix(uid: string): string {
   return uid.length >= 6 ? uid.slice(-6) : "??????";

@@ -20,7 +20,12 @@ function nonempty(value: string | null | undefined): value is string {
 }
 
 function isTrialOrPromoOffer(offer: AndroidSubscriptionOfferLike): boolean {
-  if (offer.type === "introductory" || offer.type === "promotional") return true;
+  // OpenIAP 3.5.1 sets type "introductory" for every Play base plan whose
+  // offerId is null, including the standard paid price. The phase checks
+  // below decide whether that row is a trial. A real promotional offer keeps
+  // its own offer id and is excluded before this runs; this still rejects a
+  // promotional label that was copied onto the base-plan id.
+  if (offer.type === "promotional") return true;
   if (offer.paymentMode === "free-trial") return true;
   const phases = offer.pricingPhasesAndroid?.pricingPhaseList ?? [];
   if (phases.length === 0) return true;
@@ -41,6 +46,12 @@ function isInstallmentOffer(offer: AndroidSubscriptionOfferLike): boolean {
   );
 }
 
+function standardPhase(offer: AndroidSubscriptionOfferLike) {
+  const phases = offer.pricingPhasesAndroid?.pricingPhaseList;
+  if (!phases || phases.length !== 1) return null;
+  return phases[0];
+}
+
 function rejectUnsupported(
   offer: AndroidSubscriptionOfferLike
 ): AndroidOfferSelection | null {
@@ -50,7 +61,9 @@ function rejectUnsupported(
   if (isTrialOrPromoOffer(offer)) {
     return { ok: false, reason: "trial_or_promo" };
   }
-  if (!nonempty(offer.displayPrice)) {
+  const phase = standardPhase(offer);
+  // Play ProductDetails.PricingPhase.getFormattedPrice(), not a parallel label.
+  if (!phase || !nonempty(phase.formattedPrice)) {
     return { ok: false, reason: "unsupported" };
   }
   return null;
@@ -98,12 +111,17 @@ export function selectStandardAndroidOffer(args: {
   const rejected = rejectUnsupported(candidate);
   if (rejected) return rejected;
 
+  const phase = standardPhase(candidate);
+  if (!phase || !nonempty(phase.formattedPrice)) {
+    return { ok: false, reason: "unsupported" };
+  }
+
   return {
     ok: true,
     offer: {
       offerToken: candidate.offerTokenAndroid,
-      displayPrice: candidate.displayPrice,
-      currency: candidate.currency ?? candidate.pricingPhasesAndroid?.pricingPhaseList[0]?.priceCurrencyCode ?? "",
+      displayPrice: phase.formattedPrice,
+      currency: phase.priceCurrencyCode || candidate.currency || "",
       basePlanId: candidate.basePlanIdAndroid ?? args.expectedBasePlanId,
     },
   };

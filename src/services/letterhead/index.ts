@@ -38,19 +38,30 @@ export {
   type TemplateWarningKey,
 } from "./letterheadTemplateService";
 export {
-  LetterheadAssetError,
-  MAX_ASSET_BYTES,
-  hasMediaLibraryPermission,
-  pickLetterheadAsset,
-  type LetterheadAssetKind,
-  type PickedLetterheadAsset,
-} from "./letterheadAssetService";
+  DEFAULT_GENERATED_LAYOUT,
+  isLetterheadGeneratedLayout,
+  validateWritingMargins,
+  type LetterheadAppearance,
+  type LetterheadGeneratedLayout,
+  type LetterheadLogoAlign,
+  type LetterheadSourceType,
+} from "./letterheadGeneratedLayout";
+export {
+  APPEARANCE_CSS_FILTER,
+  generatedHeaderFlex,
+  IMPORTED_PAGE_FIT,
+  IMPORTED_PAGE_POSITION,
+  LETTERHEAD_A4_ASPECT,
+  pdfAlignClass,
+  SUPPORTED_APPEARANCES,
+} from "./letterheadVisualSpec";
 export {
   LETTERHEAD_DRAFT_KIND,
   LETTERHEAD_DRAFT_SCOPE,
   draftPayloadToLetterheadInput,
   isLetterheadDraftMeaningful,
   letterheadInputToDraftPayload,
+  resolveDraftLetterhead,
 } from "./letterheadDraftMapper";
 
 /**

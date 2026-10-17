@@ -46,7 +46,11 @@ import type {
   SubscriptionStatusDoc,
   VyaamikkPlan,
 } from "../types";
-import { CANONICAL_PLAY_PACKAGE_NAME } from "./playConstants";
+import {
+  assertPlayBillingNewGrantAllowedIfEnforced,
+  assertPlayBillingTesterAllowedIfEnforced,
+  CANONICAL_PLAY_PACKAGE_NAME,
+} from "./playConstants";
 import { googlePaidOrderTotalToPaise } from "./playMoney";
 import {
   playLifecycleIdempotencyKey,
@@ -96,6 +100,24 @@ export interface AndroidBillingDeps {
   nowMs: () => number;
   postCommitTaxHandoff?: PostCommitTaxHandoff;
   packageName?: string;
+  /**
+   * Production wrappers set true. Empty PLAY_BILLING_TESTER_UIDS then denies
+   * NEW grants (first activatePaid / new token bind / RTDN purchase with no
+   * matching owned credential). Already-owned same-uid token lifecycle
+   * (expire, cancel, grace, on-hold, restore, refund/revocation reconcile)
+   * skips the allowlist. Unit tests omit this so catalog/state matrices stay
+   * independent of the allowlist.
+   */
+  enforceRestrictedTesters?: boolean;
+  restrictedTesterEnv?: NodeJS.ProcessEnv;
+  /**
+   * Production wrappers set true. PLAY_BILLING_ENABLED must be exactly
+   * "true" for a NEW grant. Already-owned same-uid token lifecycle skips
+   * this check, so closing admission does not stop RTDN, reconciliation,
+   * refund, or entitlement correction. Unit tests omit this.
+   */
+  enforcePlayBillingAdmission?: boolean;
+  playBillingEnv?: NodeJS.ProcessEnv;
 }
 
 export interface AndroidBillingResult {
@@ -217,6 +239,21 @@ async function readCompany(
     if (!snap.exists) return null;
     return snap.data() as unknown as CompanyBillingDoc;
   });
+}
+
+/** Same-uid token already bound on company billing — lifecycle, not a new grant. */
+function alreadyOwnsSameUidPurchaseToken(
+  company: CompanyBillingDoc | null,
+  uid: string,
+  tokenFingerprint: string
+): boolean {
+  return (
+    company != null &&
+    company.uid === uid &&
+    typeof company.credentialFingerprint === "string" &&
+    company.credentialFingerprint.length > 0 &&
+    company.credentialFingerprint === tokenFingerprint
+  );
 }
 
 async function readStatus(
@@ -799,6 +836,19 @@ async function reconcileFetchedSubscription(
     assertOwnerMatchesCaller(owner.uid, input.callerUid);
   }
   const uid = owner.uid;
+  const fp = credentialFingerprint(input.purchaseToken);
+  const company = await readCompany(deps.store, uid);
+  if (!alreadyOwnsSameUidPurchaseToken(company, uid, fp)) {
+    assertPlayBillingNewGrantAllowedIfEnforced(
+      deps.enforcePlayBillingAdmission,
+      deps.playBillingEnv ?? process.env
+    );
+    assertPlayBillingTesterAllowedIfEnforced(
+      uid,
+      deps.enforceRestrictedTesters,
+      deps.restrictedTesterEnv ?? process.env
+    );
+  }
   const diagnosticUid = deps.diagnosticUidFor(uid);
 
   const linkedRaw = input.sub.linkedPurchaseToken;
@@ -807,8 +857,6 @@ async function reconcileFetchedSubscription(
       ? credentialFingerprint(linkedRaw)
       : null;
 
-  const fp = credentialFingerprint(input.purchaseToken);
-  const company = await readCompany(deps.store, uid);
   if (company?.invalidatedCredentialFingerprints?.includes(fp)) {
     throw new BillingError({
       clientCode: "verification_failed",

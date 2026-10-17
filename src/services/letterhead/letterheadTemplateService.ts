@@ -3,8 +3,8 @@
  *
  * Pure helpers (no I/O) that decide whether an uploaded image is a sensible
  * A4 letterhead base and surface a human-readable warning key when it is not.
- * The image itself is already a base64 data URI by the time it reaches here
- * (see `setup.tsx` / `letterheadAssetService`).
+ * Retained so stored template metadata still validates. No screen uploads a
+ * new template.
  */
 
 import { A4_ASPECT_RATIO } from "./letterheadLayoutConfig";

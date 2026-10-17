@@ -27,7 +27,10 @@ export function navigateToSearchResult(
       router.push({ pathname: "/(app)/diary/[id]", params: { id: target.entryId, from: "search" } });
       break;
     case "letterhead_document":
-      router.push("/(app)/letterhead/history");
+      router.push({
+        pathname: "/(app)/letterhead/create",
+        params: { documentId: target.documentId },
+      });
       break;
     case "professional_pack":
       router.push({
@@ -64,7 +67,10 @@ export function navigateToSearchResult(
           params: { id: target.parentId },
         });
       } else {
-        router.push("/(app)/letterhead/history");
+        router.push({
+          pathname: "/(app)/letterhead/create",
+          params: { documentId: target.parentId },
+        });
       }
       break;
     default:

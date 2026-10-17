@@ -21,6 +21,7 @@ import {
   setDoc,
 } from "firebase/firestore";
 
+import { publishDomainChange } from "@/services/dataChanges/domainChanges";
 import { AppError } from "@/domain/errors";
 import { getFirebaseDb } from "@/config/firebase";
 import {
@@ -323,17 +324,20 @@ export const firebaseCustomerCreditRepository: CustomerCreditRepository = {
     const existing = fromDoc(snap.id, snap.data() as Record<string, unknown>, userId);
     const next = applyUpdate(existing, input, Date.now());
     await setDoc(ref, toCloud(next), { merge: true });
+    publishDomainChange(userId, "customerCredit", { effect: "upsert", recordId: next.id });
     return next;
   },
 
   async addPayment(userId, recordId, payment) {
-    return addCustomerCreditPaymentOnDb(
+    const next = await addCustomerCreditPaymentOnDb(
       getFirebaseDb(),
       userId,
       recordId,
       payment,
       (id, data) => fromDoc(id, data, userId)
     );
+    publishDomainChange(userId, "customerCredit", { effect: "upsert", recordId });
+    return next;
   },
 
   async removePayment(userId, recordId, paymentId) {
@@ -343,6 +347,7 @@ export const firebaseCustomerCreditRepository: CustomerCreditRepository = {
     const existing = fromDoc(snap.id, snap.data() as Record<string, unknown>, userId);
     const next = removePaymentFrom(existing, paymentId, Date.now());
     await setDoc(ref, toCloud(next), { merge: true });
+    publishDomainChange(userId, "customerCredit", { effect: "upsert", recordId });
     return next;
   },
 
@@ -353,16 +358,19 @@ export const firebaseCustomerCreditRepository: CustomerCreditRepository = {
     const existing = fromDoc(snap.id, snap.data() as Record<string, unknown>, userId);
     const next = applyStatus(existing, status, Date.now());
     await setDoc(ref, toCloud(next), { merge: true });
+    publishDomainChange(userId, "customerCredit", { effect: "upsert", recordId });
     return next;
   },
 
   async closeFullyPaid(userId, input: CloseFullyPaidInput) {
-    return closeCustomerCreditFullyPaidOnDb(
+    const next = await closeCustomerCreditFullyPaidOnDb(
       getFirebaseDb(),
       userId,
       input,
       (id, data) => fromDoc(id, data, userId)
     );
+    publishDomainChange(userId, "customerCredit", { effect: "upsert", recordId: input.recordId });
+    return next;
   },
 
   async setReminder(userId, recordId, reminder) {
@@ -383,6 +391,7 @@ export const firebaseCustomerCreditRepository: CustomerCreditRepository = {
   async remove(userId, id) {
     try {
       await deleteDoc(recordDocRef(userId, id));
+      publishDomainChange(userId, "customerCredit", { effect: "delete", recordId: id });
       log.info("credit record removed (firebase)");
     } catch (e) {
       log.warn("credit remove failed", e);

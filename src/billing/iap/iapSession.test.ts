@@ -525,6 +525,22 @@ async function testInitConnectionFalseDoesNotConnectOrRecover() {
   assert.equal(h.calls.getAvailable, 0);
 }
 
+async function testFailedConnectionCatalogIsUnavailableNotEndlessLoading() {
+  const h = createHarness({
+    platform: "android",
+    initConnection: async () => false,
+  });
+  await h.session.setAuth({ status: "signed_in", uid: "uid-a" });
+  const catalog = await h.session.loadCatalog();
+  assert.equal(catalog.length, 9);
+  assert.equal(
+    catalog.every((row) => row.available === false && row.displayPrice == null),
+    true
+  );
+  assert.equal(h.calls.requestPurchase.length, 0);
+  assert.equal(h.session.getView().connected, false);
+}
+
 async function testStaleAInitDoesNotOrphanConnection() {
   let resolveA = (_value: boolean) => {};
   let firstInit = true;
@@ -2451,6 +2467,7 @@ async function main() {
     ["testStaleAPurchaseDoesNotLaunchSheetAfterB", testStaleAPurchaseDoesNotLaunchSheetAfterB],
     ["testColdStartBCanPurchaseAfterOrphanedA", testColdStartBCanPurchaseAfterOrphanedA],
     ["testInitConnectionFalseDoesNotConnectOrRecover", testInitConnectionFalseDoesNotConnectOrRecover],
+    ["testFailedConnectionCatalogIsUnavailableNotEndlessLoading", testFailedConnectionCatalogIsUnavailableNotEndlessLoading],
     ["testStaleAInitDoesNotOrphanConnection", testStaleAInitDoesNotOrphanConnection],
     ["testStaleAInitDoesNotTearDownB", testStaleAInitDoesNotTearDownB],
     ["testBoundedReconnectDoesNotAutoLaunchPurchase", testBoundedReconnectDoesNotAutoLaunchPurchase],

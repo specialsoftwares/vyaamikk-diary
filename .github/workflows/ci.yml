@@ -79,5 +79,15 @@ jobs:
       - name: Install dependencies (functions, locked)
         run: npm --prefix functions ci
 
+      # Letterhead PDF freshness gate needs a real Chromium (committed pdf/ does not count).
+      - name: Install Chromium for letterhead PDF fixtures
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y chromium-browser || sudo apt-get install -y chromium
+          CHROME_BIN="$(command -v chromium-browser || command -v chromium || command -v google-chrome || true)"
+          echo "LETTERHEAD_CHROME_BIN=${CHROME_BIN}" >> "$GITHUB_ENV"
+          test -n "$CHROME_BIN"
+          "$CHROME_BIN" --version
+
       - name: CI verify (canonical repository gate)
         run: npm run ci:verify

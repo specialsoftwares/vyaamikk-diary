@@ -1,38 +1,27 @@
 import React from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet } from "react-native";
 
-import { Card, Header, Screen, LocaleUiText } from "@/components/ui";
+import { Header, Screen, LocaleUiText } from "@/components/ui";
+import { openPublicLinkOrExplain } from "@/config/publicLinks";
 import { useT } from "@/i18n";
 import { spacing, typography, useThemedStyles } from "@/theme";
-
-const SECTION_KEYS = [
-  "legal.disclaimerIntro",
-  "legal.productUtility",
-  "legal.disclaimerUserContent",
-  "legal.disclaimerNoVerify",
-  "legal.disclaimerNotParty",
-  "legal.counselReview",
-] as const;
 
 export default function DisclaimerScreen() {
   const t = useT();
   const styles = useThemedStyles((colors) =>
     StyleSheet.create({
       body: { ...typography.body, color: colors.textMuted, lineHeight: 22 },
-      block: { marginBottom: spacing.md },
+      link: { ...typography.bodyStrong, color: colors.primary, marginTop: spacing.md },
     })
   );
 
   return (
     <Screen scroll>
       <Header title={t("legal.disclaimerTitle")} showBack backFrom="settings" />
-      <Card>
-        {SECTION_KEYS.map((key) => (
-          <View key={key} style={styles.block}>
-            <LocaleUiText style={styles.body}>{t(key)}</LocaleUiText>
-          </View>
-        ))}
-      </Card>
+      <LocaleUiText style={styles.body}>{t("settings.legalCombinedSubtitle")}</LocaleUiText>
+      <Pressable accessibilityRole="link" onPress={() => void openPublicLinkOrExplain("terms")}>
+        <LocaleUiText style={styles.link}>{t("legal.linkTerms")}</LocaleUiText>
+      </Pressable>
     </Screen>
   );
 }

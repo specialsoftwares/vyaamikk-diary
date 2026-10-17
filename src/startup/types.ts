@@ -27,6 +27,7 @@ export type StartupErrorCode =
   | "LOCAL_DB_OPEN_FAILED"
   | "LOCAL_DB_MIGRATE_FAILED"
   | "PROVIDER_TREE_INVALID"
+  | "STARTUP_DEADLINE"
   | "UNCAUGHT_JS_ERROR"
   | "UNKNOWN";
 

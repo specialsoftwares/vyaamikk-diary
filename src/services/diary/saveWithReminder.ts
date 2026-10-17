@@ -6,6 +6,7 @@ import {
   createEntryLocalFirst,
   updateEntryLocalFirst,
   type LocalFirstCreateResult,
+  type LocalFirstWriteOptions,
 } from "./localFirst";
 import { readLocalEntryRecordSync } from "@/repositories/localEntriesRepository";
 import {
@@ -54,11 +55,14 @@ export async function createEntryWithReminder(
   userId: string,
   input: CreateBusinessEntryInput,
   reminderLabels: { title: string; body: string },
-  options?: { session?: SyncSessionToken | null }
+  options?: LocalFirstWriteOptions
 ): Promise<LocalFirstCreateResult> {
   const session =
     options && "session" in options ? options.session ?? null : captureAdmissionToken();
-  const created = await createEntryLocalFirst(userId, input, { session });
+  const created = await createEntryLocalFirst(userId, input, {
+    session,
+    onLocalDurable: options?.onLocalDurable,
+  });
   const entry = created.entry;
   if (!entry.reminder || entry.reminder.notificationId) return created;
 

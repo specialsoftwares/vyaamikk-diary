@@ -16,6 +16,7 @@ import { LandingButton } from "@/components/landing/LandingButton";
 import { LANDING_NAV } from "@/components/landing/landingCopy";
 import { LANDING_COLORS, LANDING_LAYOUT, landingTypography } from "@/components/landing/landingTokens";
 import { getAuthEntryHref } from "@/config/authWrapper";
+import { openPublicLinkOrExplain } from "@/config/publicLinks";
 import { radius, spacing } from "@/theme";
 
 export type LandingSectionKey = "platform" | "security" | "workflows" | "compliance" | "contact";
@@ -48,10 +49,9 @@ export function LandingNavBar({ onNavigateSection }: LandingNavBarProps) {
   }, []);
 
   const goAuth = useCallback(() => router.push(getAuthEntryHref()), [router]);
-  const goLegal = useCallback(
-    () => router.push({ pathname: "/legal/[doc]", params: { doc: "privacy" } }),
-    [router]
-  );
+  const goLegal = useCallback(() => {
+    void openPublicLinkOrExplain("privacy");
+  }, []);
 
   const navItem = (key: LandingSectionKey, label: string) => (
     <Pressable

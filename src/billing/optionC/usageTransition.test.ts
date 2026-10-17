@@ -111,4 +111,23 @@ assert.equal(diaryInc.lastRecordCollection, "entries");
 assert.equal(diaryInc.lastRecordId, "en-1");
 assert.equal(diaryInc.recordsThisMonth, 5);
 
+const grinInc = nextUsageWrite({
+  existing: valid,
+  monthKey: "2026-09",
+  cap: 25,
+  collection: "goodsEvidenceReceipts",
+  recordId: "receipt_1",
+  updatedAt: 1,
+});
+assert.equal(grinInc.lastRecordCollection, "goodsEvidenceReceipts");
+assert.equal(grinInc.recordsThisMonth, 5);
+
+const historicalLetterhead = readUsageSnapshot({
+  monthKey: "2026-09",
+  recordsThisMonth: 3,
+  lastRecordCollection: "letterheadDocs",
+  lastRecordId: "lh-1",
+});
+assert.equal(historicalLetterhead?.lastRecordCollection, "letterheadDocs");
+
 console.log("usageTransition.test.ts: ok");

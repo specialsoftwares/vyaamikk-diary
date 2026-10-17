@@ -3,14 +3,18 @@
  * non-PII Google Play obfuscatedAccountId (VYD-32, consumed later by VYD-35).
  *
  * Production export is fail-closed while PLAY_BILLING_ENABLED is not true.
- * Core handler is fully testable with an injected store.
+ * After enablement, PLAY_BILLING_TESTER_UIDS is a fail-closed UID allowlist
+ * (empty/absent denies all). This callable does not enable billing.
  */
 
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 
 import { BillingError } from "../errors";
 import { throwHttpsFromBilling } from "../google/billingHttps";
-import { isPlayBillingEnabled } from "../google/playConstants";
+import {
+  assertPlayBillingTesterAllowed,
+  isPlayBillingEnabled,
+} from "../google/playConstants";
 import { ensurePlayAccountIndex } from "../google/playOwnership";
 import type { BillingStore } from "../store";
 import { FirestoreBillingStore } from "../firestoreBillingStore";
@@ -40,6 +44,7 @@ export const prepareAndroidBillingAccount = onCall(
       );
     }
     try {
+      assertPlayBillingTesterAllowed(request.auth.uid);
       const store = new FirestoreBillingStore(getFirestore());
       return await handlePrepareAndroidBillingAccount(store, request.auth.uid, Date.now());
     } catch (err) {

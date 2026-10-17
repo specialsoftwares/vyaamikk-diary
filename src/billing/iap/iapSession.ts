@@ -718,7 +718,10 @@ export function createIapSession(deps: IapSessionDeps) {
       const ok = await ensureConnected(forGen, forUid);
       if (!isCurrentOperation(forGen, forUid)) return [];
       if (!ok) {
-        catalog = [];
+        catalog = mapStoreProductsToCatalog({
+          platform: storePlatform,
+          products: [],
+        });
         emit();
         return catalog;
       }

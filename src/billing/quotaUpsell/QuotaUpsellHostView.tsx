@@ -41,6 +41,7 @@ export type QuotaUpsellSheetSurfaceProps = {
   purchaseState: UpgradeOperationState;
   restoreState: UpgradeOperationState;
   errorMessage: string | null;
+  statusNotice?: string | null;
   errorRetryEnabled?: boolean;
   selectedSku: string | null;
   selectedPeriod: UpgradeCatalogPeriod;
@@ -178,6 +179,7 @@ export function QuotaUpsellHostView({
         purchaseState: model.purchaseState,
         restoreState: model.restoreState,
         errorMessage: model.errorMessage,
+        statusNotice: model.statusNotice,
         errorRetryEnabled: model.errorRetryEnabled,
         selectedSku,
         selectedPeriod,

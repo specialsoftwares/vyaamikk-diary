@@ -3,6 +3,10 @@
 
 FROM node:22-bookworm-slim AS builder
 WORKDIR /app
+# Builder only compiles TypeScript — do not download/extract Chromium here.
+# Without this, `npm ci` runs puppeteer's install script → extract-zip on the
+# browser archive (GHSA-jmr9-qjv8-65gv / GHSA-7pqw-9j4j-h8q3 still unfixed).
+ENV PUPPETEER_SKIP_DOWNLOAD=true
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY tsconfig.json ./
@@ -15,6 +19,7 @@ ENV PORT=8080
 ENV npm_config_engine_strict=true
 WORKDIR /app
 COPY package.json package-lock.json ./
+# Runtime image already provides Chromium; skip download/extract on npm ci.
 ENV PUPPETEER_SKIP_DOWNLOAD=true
 USER root
 RUN npm ci --omit=dev

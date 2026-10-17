@@ -18,8 +18,9 @@ import { KeyboardFormScrollProvider } from "@/components/forms/KeyboardFormScrol
 import { FormFocusProvider } from "@/components/inputSafety/FormFocusManager";
 import { ValidationFocusProvider } from "@/components/inputSafety/ValidationFocusManager";
 import { useKeyboardInset } from "@/hooks/useKeyboardInset";
-import { tabBarFooterClearance, useTabBarMetrics } from "@/layout/tabBar";
-import { spacing, useThemeColors, useThemedStyles } from "@/theme";
+import { useTabBarMetrics } from "@/layout/tabBar";
+import { screenBottomPadding } from "@/layout/tabBarMetrics";
+import { spacing, useTheme, useThemeColors, useThemedStyles } from "@/theme";
 
 /** Extra space below last field so Save / suggestions stay above keyboard. */
 const FORM_KEYBOARD_EXTRA_PADDING = spacing.xl + spacing.lg;
@@ -33,10 +34,18 @@ interface ScreenProps {
   dismissKeyboardOnTap?: boolean;
   topInsetOverride?: number;
   /**
-   * Reserve space for the floating glass tab bar so the last row stays
-   * reachable while scroll content passes underneath.
+   * Tab screen. The navigator already ends this scene above the bar.
+   * Without a footer, scroll content keeps contentPaddingBottom.
+   * With a footer, this only selects the gap under the in-flow control.
    */
   tabBarInset?: boolean;
+  /**
+   * The child is the only vertical scroll owner. When set on a non-scrolling
+   * screen with no footer, wrapper paddingBottom is 0. Do not also reserve
+   * the tab bar or the safe-area fallback — that band is already outside
+   * this scene. End spacing belongs on the child scroller.
+   */
+  childScrollOwner?: boolean;
   /** Extra bottom padding inside scroll/content (e.g. floating action button). */
   extraBottomPadding?: number;
   /** Pinned bar below scroll content (e.g. primary action) — not overlaid on the list. */
@@ -63,6 +72,7 @@ export function Screen({
   dismissKeyboardOnTap = true,
   topInsetOverride,
   tabBarInset = false,
+  childScrollOwner = false,
   extraBottomPadding = 0,
   footer,
   form = false,
@@ -74,6 +84,8 @@ export function Screen({
   const insets = useSafeAreaInsets();
   const tabBar = useTabBarMetrics();
   const colors = useThemeColors();
+  const { resolvedMode } = useTheme();
+  const statusBarStyle = resolvedMode === "dark" ? "light-content" : "dark-content";
   const isFormScreen = form || keyboardAvoiding;
   const keyboardHeight = useKeyboardInset(isFormScreen && scroll);
   const useIosScrollKeyboardInsets =
@@ -86,7 +98,7 @@ export function Screen({
   const styles = useThemedStyles((colors) =>
     StyleSheet.create({
       safe: { flex: 1, backgroundColor: colors.background },
-      flex: { flex: 1 },
+      flex: { flex: 1, minHeight: 0 },
       padded: { padding: spacing.lg },
       footerBar: {
         borderTopWidth: 1,
@@ -100,23 +112,26 @@ export function Screen({
   );
 
   const bottomPadding = useMemo(() => {
-    if (footer) {
-      return spacing.md + extraBottomPadding;
-    }
-    const base = tabBarInset
-      ? tabBar.contentPaddingBottom
-      : insets.bottom + spacing.xl;
-    let total = base + extraBottomPadding;
+    let formExtraPadding = 0;
     if (isFormScreen) {
-      if (useAndroidKeyboardPadding) {
-        total += keyboardHeight + FORM_KEYBOARD_EXTRA_PADDING;
-      } else {
-        total += FORM_KEYBOARD_EXTRA_PADDING;
-      }
+      formExtraPadding = useAndroidKeyboardPadding
+        ? keyboardHeight + FORM_KEYBOARD_EXTRA_PADDING
+        : FORM_KEYBOARD_EXTRA_PADDING;
     }
-    return total;
+    return screenBottomPadding({
+      hasFooter: Boolean(footer),
+      scroll,
+      childScrollOwner,
+      tabBarInset,
+      contentPaddingBottom: tabBar.contentPaddingBottom,
+      bottomInset: insets.bottom,
+      extraBottomPadding,
+      formExtraPadding,
+    });
   }, [
     footer,
+    scroll,
+    childScrollOwner,
     tabBarInset,
     tabBar.contentPaddingBottom,
     insets.bottom,
@@ -182,7 +197,11 @@ export function Screen({
         ]}
         edges={["top", "left", "right"]}
       >
-        <StatusBar barStyle={Platform.OS === "ios" ? "default" : "default"} translucent />
+        <StatusBar
+          barStyle={statusBarStyle}
+          backgroundColor={colors.background}
+          translucent
+        />
         <KeyboardAvoidingView
           style={styles.flex}
           behavior={Platform.OS === "ios" ? "padding" : "padding"}
@@ -195,12 +214,13 @@ export function Screen({
               <View
                 style={[
                   styles.footerBar,
-                  // Native tab bar clips content at its top edge on Android and
-                  // overlays it on iOS — clearance must derive from the shared
-                  // metrics model, never a per-screen constant (VYD-23).
-                  tabBarInset
-                    ? { paddingBottom: tabBarFooterClearance(tabBar) }
-                    : { paddingBottom: insets.bottom + spacing.sm },
+                  {
+                    // The tab navigator already ends this scene at the top of
+                    // the bar. Padding here is only the gap under the control.
+                    paddingBottom: tabBarInset
+                      ? spacing.sm
+                      : insets.bottom + spacing.sm,
+                  },
                 ]}
               >
                 {footer}
@@ -233,7 +253,11 @@ export function Screen({
       ]}
       edges={["top", "left", "right"]}
     >
-      <StatusBar barStyle={Platform.OS === "ios" ? "default" : "default"} translucent />
+      <StatusBar
+        barStyle={statusBarStyle}
+        backgroundColor={colors.background}
+        translucent
+      />
       {dismissKeyboardOnTap ? (
         <Pressable style={styles.flex} onPress={Keyboard.dismiss} accessible={false}>
           {inner}

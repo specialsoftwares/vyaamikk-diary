@@ -36,7 +36,7 @@ export function DashboardStatTile({
         paddingHorizontal: spacing.sm + 2,
         alignItems: "center",
         justifyContent: "center",
-        minHeight: 84,
+        minHeight: 108,
         gap: 6,
         borderTopWidth: 3,
       },
@@ -48,9 +48,9 @@ export function DashboardStatTile({
         ...typography.micro,
         color: c.textMuted,
         textAlign: "center",
-        letterSpacing: 0.4,
+        letterSpacing: 0.2,
         fontWeight: "600",
-        textTransform: "uppercase",
+        flexShrink: 1,
       },
     })
   );
@@ -67,7 +67,7 @@ export function DashboardStatTile({
       accessibilityLabel={accessibilityLabel}
     >
       <Text style={[styles.value, { color: accent.main }]}>{value}</Text>
-      <Text style={styles.label} numberOfLines={2}>
+      <Text style={styles.label} numberOfLines={3}>
         {label}
       </Text>
     </Pressable>

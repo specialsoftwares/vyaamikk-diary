@@ -17,7 +17,10 @@ export function navigateToAtAGlanceItem(router: Router, item: AtAGlanceItem): vo
       });
       break;
     case "letterhead_document":
-      router.push("/(app)/letterhead/history");
+      router.push({
+        pathname: "/(app)/letterhead/create",
+        params: { documentId: item.target.documentId },
+      });
       break;
     case "customer_credit":
       router.push({

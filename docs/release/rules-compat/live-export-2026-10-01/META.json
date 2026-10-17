@@ -1,0 +1,33 @@
+{
+  "cli_user": "support.vyd@specialsoftwares.com",
+  "project": "vyaamikk-diary",
+  "projectNumber": "982505811909",
+  "exported_at": "2026-10-01T14:04:00.000Z",
+  "method": "GET firebaserules.googleapis.com/v1/projects/vyaamikk-diary/releases then rulesets/{id} (read-only; existing Firebase CLI token; no deploy)",
+  "this_assignment_deployed": false,
+  "cloud.firestore": {
+    "release": "projects/vyaamikk-diary/releases/cloud.firestore",
+    "rulesetName": "projects/vyaamikk-diary/rulesets/a19b4a83-8b3e-4cf5-b8b8-e8d26e9704f9",
+    "createTime": "2026-06-05T17:54:06.077829Z",
+    "updateTime": "2026-09-21T09:05:33.054484Z",
+    "sourceFileName": "docs/release/rules-compat/proposed/firestore.rules",
+    "bytes": 15313,
+    "sha256": "b13d52559efd144bfbdd86daf426fd5ce81abceead4c87979cb9cee2d1a25e2c",
+    "matchesProposedCompatPatch": true,
+    "matches2026_09_19Baseline": false
+  },
+  "firebase.storage": {
+    "release": "projects/vyaamikk-diary/releases/firebase.storage/vyaamikk-diary.firebasestorage.app",
+    "rulesetName": "projects/vyaamikk-diary/rulesets/a2a0ddf7-9746-4dd2-bd48-29c9abc0e41f",
+    "createTime": "2026-07-23T21:49:47.992820Z",
+    "updateTime": "2026-07-23T21:51:17.651270Z",
+    "sourceFileName": "storage.rules",
+    "bytes": 1133,
+    "sha256": "1a912051ba923a0e4ae29fd36b1741bcf0f5879cd53e6d4bd386c9d5a3b717d5",
+    "matches2026_09_19Baseline": true
+  },
+  "repoRootFirestoreRulesSha256": "233b05b7b810b484171257f4dafe78fd0fdea5762ed6848cf8b49cd327fd58cc",
+  "repoRootFirestoreRulesDeployed": false,
+  "emulatorReRunThisExport": false,
+  "emulatorNote": "Live Firestore source bytes equal docs/release/rules-compat/proposed/firestore.rules. Prior LIVE_RULES_COMPAT emulator PASS (2026-09-19) already used that hashed file. No second emulator run this assignment."
+}

@@ -6,7 +6,9 @@ export type QuotaLinkedRecordCollection =
   | "purchaseOrders"
   | "customerCreditRecords"
   | "professionalPacks"
-  | "entries";
+  | "entries"
+  /** Admin GRIN first-issuance only. Not a client-writable top-level collection. */
+  | "goodsEvidenceReceipts";
 
 /** Historical usage docs may still name letterheadDocs. New writes must not. */
 export type BillableRecordCollection = QuotaLinkedRecordCollection | "letterheadDocs";

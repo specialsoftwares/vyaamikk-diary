@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 
+import { __setSubscriptionPurchaseEntryEnabledForTests } from "@/billing/iap/purchaseEntryGate";
 import { AppError } from "@/domain/errors";
 import { syncSessionOwnership } from "@/sync/syncSessionOwnership";
 
 import { __setQuotaUpsellEnabledForTests } from "./quotaUpsellGate";
 import { decideQuotaUpsellEligibility } from "./quotaUpsellDecision";
 import {
+  notifyManualUpgrade,
   notifyOrdinaryQuotaUpsell,
+  registerManualUpgradePresenter,
   registerQuotaUpsellPresenter,
 } from "./notifyOrdinaryQuotaUpsell";
 import type { QuotaUpsellRequest } from "./quotaUpsellTypes";
@@ -124,7 +127,34 @@ assert.equal(presented, 0);
 assert.equal(notifyOrdinaryQuotaUpsell(req({ session: syncSessionOwnership.capture() })).ok, true);
 assert.equal(presented, 1);
 
+__setQuotaUpsellEnabledForTests(false);
+assert.equal(
+  notifyOrdinaryQuotaUpsell(req({ session: syncSessionOwnership.capture() })).ok,
+  false,
+  "flag-off ordinary quota must not open the host"
+);
+assert.equal(presented, 1, "gate_off must not increment the presenter");
+__setQuotaUpsellEnabledForTests(true);
+
+let manualPresented = 0;
+registerManualUpgradePresenter(() => {
+  manualPresented += 1;
+  return { ok: true, visible: true, clientRecordId: null };
+});
+__setSubscriptionPurchaseEntryEnabledForTests(false);
+const closedManual = notifyManualUpgrade(syncSessionOwnership.capture());
+assert.equal(closedManual.ok, false);
+assert.equal(closedManual.ok === false && closedManual.reason, "purchase_entry_closed");
+assert.equal(closedManual.visible, false);
+assert.equal(manualPresented, 0, "flag-off Settings entry must not dispatch purchase");
+__setSubscriptionPurchaseEntryEnabledForTests(true);
+assert.equal(notifyManualUpgrade(syncSessionOwnership.capture()).ok, true);
+assert.equal(manualPresented, 1);
+__setSubscriptionPurchaseEntryEnabledForTests(false);
+registerManualUpgradePresenter(null);
+
 registerQuotaUpsellPresenter(null);
 __setQuotaUpsellEnabledForTests(null);
+__setSubscriptionPurchaseEntryEnabledForTests(null);
 syncSessionOwnership.resetForTests();
 console.log("quotaUpsellDecision.test.ts: ok");

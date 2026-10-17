@@ -1,9 +1,12 @@
 import React, { Component, type ErrorInfo, type ReactNode } from "react";
 
-import { recordError } from "@/services/telemetry/crashReporter";
 import type { StartupDiagnostics } from "./types";
 import { buildDiagnostics } from "./diagnostics";
 import { StartupFailureScreen } from "./StartupFailureScreen";
+import {
+  reportUncaughtRenderError,
+  uncaughtRenderDiagnosticInput,
+} from "./uncaughtRenderReport";
 
 interface Props {
   children: ReactNode;
@@ -21,21 +24,14 @@ interface State {
 export class RootErrorBoundary extends Component<Props, State> {
   state: State = { diagnostics: null };
 
-  static getDerivedStateFromError(error: Error): State {
+  static getDerivedStateFromError(_error: Error): State {
     return {
-      diagnostics: buildDiagnostics({
-        failedStage: "ROUTER_READY",
-        errorCode: "UNCAUGHT_JS_ERROR",
-        message: error?.message || "Render error",
-        checkpoints: ["BOOT", "ROUTER_READY"],
-      }),
+      diagnostics: buildDiagnostics(uncaughtRenderDiagnosticInput()),
     };
   }
 
-  componentDidCatch(error: Error, info: ErrorInfo): void {
-    // Keep console evidence for release debugging without showing secrets.
-    console.error("[RootErrorBoundary]", error?.message, info?.componentStack);
-    recordError(error, "ErrorBoundary");
+  componentDidCatch(error: Error, _info: ErrorInfo): void {
+    reportUncaughtRenderError(error);
   }
 
   private retry = (): void => {

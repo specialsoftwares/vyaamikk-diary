@@ -19,30 +19,31 @@ export {
  * `Linking.openURL` call — unbound breaks RN `_validateURL`.
  */
 
-let inFlight: Promise<boolean> | null = null;
+let inFlight: { url: string; promise: Promise<boolean> } | null = null;
 
 export async function openSafeExternalUrl(url: unknown): Promise<boolean> {
   const normalized = normalizeOpenableHttpsUrl(url);
   if (!normalized) return false;
 
-  if (inFlight) {
-    return inFlight;
+  if (inFlight?.url === normalized) {
+    return inFlight.promise;
   }
 
-  const task = (async () => {
+  const previous = inFlight?.promise ?? Promise.resolve(true);
+  const task = previous.catch(() => false).then(async () => {
     try {
       await Linking.openURL(normalized);
       return true;
     } catch {
       return false;
     }
-  })();
+  });
 
-  inFlight = task;
+  inFlight = { url: normalized, promise: task };
   try {
     return await task;
   } finally {
-    if (inFlight === task) inFlight = null;
+    if (inFlight?.promise === task) inFlight = null;
   }
 }
 

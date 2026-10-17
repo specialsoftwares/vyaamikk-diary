@@ -13,8 +13,12 @@
  *   PRODUCTION ENABLEMENT (VYD-33 go-live gate).
  *
  * Prices are EXPECTED COMMERCIAL CONFIG in integer paise for tests/marketing
- * copy only. The purchase UI must always display store-localized pricing;
- * entitlement logic never depends on these numbers.
+ * copy only. SOURCE expected — not live Play / App Store authority. This
+ * catalog is NOT RUN on Play. The purchase UI must always display
+ * store-localized pricing; entitlement logic never depends on these numbers.
+ *
+ * GRIN (goods receipt) is included in existing Starter / Professional /
+ * Business. There is no separate GRIN SKU. Do not invent prices.
  *
  * Pure configuration + lookup helpers. Nothing here performs I/O and no store
  * products are created by this file (W-1: do NOT create store products in
@@ -91,6 +95,9 @@ export const SUBSCRIPTION_CATALOG: Readonly<Record<CanonicalSku, CatalogEntry>> 
 };
 
 export const ALL_CANONICAL_SKUS = Object.keys(SUBSCRIPTION_CATALOG) as CanonicalSku[];
+
+/** GRIN is bundled into the nine diary SKUs. There is no tenth GRIN product. */
+export const GRIN_INCLUDED_IN_EXISTING_PLANS = true as const;
 
 export function getCatalogEntry(sku: CanonicalSku): CatalogEntry {
   return SUBSCRIPTION_CATALOG[sku];

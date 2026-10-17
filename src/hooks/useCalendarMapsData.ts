@@ -1,68 +1,61 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { InteractionManager } from "react-native";
+import { addMonths, endOfMonth, startOfMonth } from "date-fns";
 
 import { toAppError, userFacingMessage } from "@/domain/errors";
 import { useT } from "@/i18n";
 import {
   buildCalendarDayView,
-  buildGpsMapMarkersSync,
   buildMarkedDatesForMonth,
-  buildPinMapMarkersAsync,
   loadCalendarMapsSourceData,
   mergeStatutoryCalendarMarkers,
   type CalendarMapsSourceData,
-  type MapMarkerBuildStats,
 } from "@/services/calendarMaps";
-import { buildStatutoryTabViewModel, statutoryMarkersByDate } from "@/services/statutory";
-import { buildMapLocationClusters } from "@/services/calendarMaps/mapClustering";
-import { locationService } from "@/services/location";
-import { scheduleDeferredIndiaPincodeWarm } from "@/services/location/pincodeOfflineLookup";
-
-const EMPTY_STATS: MapMarkerBuildStats = { hasGps: false, hasPin: false, total: 0 };
-
-export interface UseCalendarMapsDataOptions {
-  /** When false, skip map marker build (Calendar mode) — keeps tab responsive. */
-  mapActive?: boolean;
-}
+import { buildStatutoryCalendarView, statutoryMarkersByDate } from "@/services/statutory";
+import {
+  currentDomainRevision,
+  subscribeDomainChanges,
+} from "@/services/dataChanges/domainChanges";
+import { localEntriesRepository } from "@/repositories/localEntriesRepository";
+import { projectDiaryEntries, sessionStillOwns } from "@/state/diaryListLoad";
+import { syncSessionOwnership } from "@/sync/syncSessionOwnership";
 
 export function useCalendarMapsData(
   userId: string | null,
   selectedDateKey: string,
-  options: UseCalendarMapsDataOptions = {}
+  visibleMonthKey: string = selectedDateKey
 ) {
-  const { mapActive = false } = options;
   const t = useT();
   const [source, setSource] = useState<CalendarMapsSourceData | null>(null);
   const [loading, setLoading] = useState(Boolean(userId));
   const [refreshing, setRefreshing] = useState(false);
-  const [markersLoading, setMarkersLoading] = useState(false);
-  const [mapMarkers, setMapMarkers] = useState<import("@/services/calendarMaps").CalendarMapRecord[]>(
-    []
-  );
-  const [mapStats, setMapStats] = useState<MapMarkerBuildStats>(EMPTY_STATS);
-  const [statutoryCalendar, setStatutoryCalendar] = useState<
-    import("@/services/statutory").StatutoryTabViewModel | null
-  >(null);
   const [error, setError] = useState<string | null>(null);
-  const [locationPermission, setLocationPermission] = useState<
-    "granted" | "denied" | "undetermined"
-  >("undetermined");
   const hasLoadedOnceRef = useRef(false);
-  const pinWarmStartedRef = useRef(false);
-
-  const refreshPermission = useCallback(async () => {
-    const status = await locationService.getPermissionStatus();
-    setLocationPermission(status === "granted" ? "granted" : status === "denied" ? "denied" : "undetermined");
-  }, []);
+  const loadGenRef = useRef(0);
+  const inFlightRef = useRef(false);
+  const dirtyRef = useRef(false);
+  const reloadRef = useRef<(mode: "mount" | "refresh") => Promise<void>>(async () => undefined);
+  const userIdRef = useRef(userId);
+  const sourceUserRef = useRef<string | null>(null);
+  const removedRef = useRef(new Set<string>());
+  const live = syncSessionOwnership.capture();
+  const fenceKey = live ? `${live.uid}#${live.generation}` : `open:${userId ?? ""}`;
+  const fenceRef = useRef(fenceKey);
+  userIdRef.current = userId;
+  if (fenceRef.current !== fenceKey) {
+    fenceRef.current = fenceKey;
+    sourceUserRef.current = null;
+    removedRef.current = new Set();
+    if (source) setSource(null);
+  }
 
   const reload = useCallback(
     async (mode: "mount" | "refresh" = "mount") => {
-      if (!userId) {
+      const generation = ++loadGenRef.current;
+      const owner = userId;
+      if (!owner) {
         hasLoadedOnceRef.current = false;
+        sourceUserRef.current = null;
         setSource(null);
-        setStatutoryCalendar(null);
-        setMapMarkers([]);
-        setMapStats(EMPTY_STATS);
         setLoading(false);
         setRefreshing(false);
         return;
@@ -73,28 +66,41 @@ export function useCalendarMapsData(
         setLoading(true);
       }
       setError(null);
+      inFlightRef.current = true;
+      const admitted = syncSessionOwnership.capture();
+      const sessionGeneration = admitted && admitted.uid === owner ? admitted.generation : null;
+      const revisionAtStart = currentDomainRevision();
       try {
-        const [data, statutory] = await Promise.all([
-          loadCalendarMapsSourceData(userId),
-          buildStatutoryTabViewModel(userId, t),
-        ]);
+        const businessResult = await loadCalendarMapsSourceData(owner);
+        if (generation !== loadGenRef.current || userIdRef.current !== owner) return;
+        if (!sessionStillOwns(owner, sessionGeneration)) return;
         hasLoadedOnceRef.current = true;
-        setSource(data);
-        setStatutoryCalendar(statutory);
-        await refreshPermission();
+        sourceUserRef.current = owner;
+        setSource(businessResult.data);
+        setError(
+          businessResult.failedSources.length > 0 ? "Some records unavailable" : null
+        );
+        if (currentDomainRevision() !== revisionAtStart) dirtyRef.current = true;
       } catch (e) {
+        if (generation !== loadGenRef.current || userIdRef.current !== owner) return;
+        if (!sessionStillOwns(owner, sessionGeneration)) return;
         setError(userFacingMessage(toAppError(e)));
-        setSource(null);
-        setStatutoryCalendar(null);
-        setMapMarkers([]);
-        setMapStats(EMPTY_STATS);
       } finally {
-        setLoading(false);
-        setRefreshing(false);
+        inFlightRef.current = false;
+        if (generation === loadGenRef.current) {
+          setLoading(false);
+          setRefreshing(false);
+          if (dirtyRef.current && userIdRef.current === owner) {
+            dirtyRef.current = false;
+            void reloadRef.current("refresh");
+          }
+        }
       }
     },
-    [userId, refreshPermission, t]
+    [userId]
   );
+
+  reloadRef.current = reload;
 
   const refresh = useCallback(() => reload("refresh"), [reload]);
 
@@ -102,96 +108,74 @@ export function useCalendarMapsData(
     void reload("mount");
   }, [reload]);
 
-  /** Start PIN DB warm when user opens Map (deferred — never on Calendar-only / tab mount). */
   useEffect(() => {
-    if (!mapActive || !userId || pinWarmStartedRef.current) return;
-    pinWarmStartedRef.current = true;
-    scheduleDeferredIndiaPincodeWarm(500);
-  }, [mapActive, userId]);
-
-  useEffect(() => {
-    if (!source || !mapActive) {
-      if (!mapActive) {
-        setMapMarkers([]);
-        setMapStats(EMPTY_STATS);
-        setMarkersLoading(false);
-      }
-      return;
-    }
-
-    let cancelled = false;
-    const gps = buildGpsMapMarkersSync(source, t);
-    setMapMarkers(gps.markers);
-    setMapStats(gps.stats);
-    setMarkersLoading(true);
-
-    const runPinPhase = () => {
-      if (cancelled) return;
-      void buildPinMapMarkersAsync(source, t)
-        .then((pin: Awaited<ReturnType<typeof buildPinMapMarkersAsync>>) => {
-          if (cancelled) return;
-          setMapMarkers([...gps.markers, ...pin.markers]);
-          setMapStats({
-            hasGps: gps.stats.hasGps || pin.stats.hasGps,
-            hasPin: pin.stats.hasPin,
-            total: gps.stats.total + pin.stats.total,
+    if (!userId) return;
+    return subscribeDomainChanges((change) => {
+      if (change.ownerUid !== userId) return;
+      if (change.source === "diary") {
+        if (change.effect === "delete" && change.recordId) {
+          removedRef.current.add(change.recordId);
+        }
+        if (change.effect === "upsert" && change.recordId) {
+          removedRef.current.delete(change.recordId);
+        }
+        const admitted = syncSessionOwnership.capture();
+        const sessionGeneration = admitted && admitted.uid === userId ? admitted.generation : null;
+        void localEntriesRepository.listUnsyncedRecords(userId).then((local) => {
+          if (userIdRef.current !== userId || !sessionStillOwns(userId, sessionGeneration)) return;
+          setSource((current) => {
+            if (!current || sourceUserRef.current !== userId) return current;
+            const projected = projectDiaryEntries(current.entries, local, removedRef.current, {});
+            return { ...current, entries: projected.entries };
           });
-        })
-        .catch(() => {
-          if (!cancelled) {
-            setMapMarkers(gps.markers);
-            setMapStats(gps.stats);
-          }
-        })
-        .finally(() => {
-          if (!cancelled) setMarkersLoading(false);
         });
-    };
+        return;
+      }
+      if (inFlightRef.current) {
+        dirtyRef.current = true;
+        return;
+      }
+      void reloadRef.current("refresh");
+    });
+  }, [reload, userId]);
 
-    const task = InteractionManager.runAfterInteractions(runPinPhase);
-    return () => {
-      cancelled = true;
-      task.cancel();
-    };
-  }, [source, t, mapActive]);
+  const statutoryCalendar = useMemo(() => {
+    const [year, month] = visibleMonthKey.split("-").map((part) => Number(part));
+    const anchor =
+      Number.isFinite(year) && Number.isFinite(month)
+        ? new Date(year, month - 1, 1, 12)
+        : new Date();
+    return buildStatutoryCalendarView(t, anchor, {
+      minMs: startOfMonth(addMonths(anchor, -1)).getTime(),
+      maxMs: endOfMonth(addMonths(anchor, 1)).getTime(),
+    });
+  }, [t, visibleMonthKey]);
 
   const marked = useMemo(() => {
-    if (!source) return {};
+    if (!source || sourceUserRef.current !== userId) return {};
     const base = buildMarkedDatesForMonth(source);
-    if (!statutoryCalendar) return base;
     return mergeStatutoryCalendarMarkers(
       base,
       Object.keys(statutoryMarkersByDate(statutoryCalendar))
     );
-  }, [source, statutoryCalendar]);
+  }, [source, statutoryCalendar, userId]);
 
   const dayView = useMemo(() => {
-    if (!source) {
+    if (!source || sourceUserRef.current !== userId) {
       return { dateKey: selectedDateKey, sections: [], totalCount: 0, isEmpty: true };
     }
     const statutoryDay = statutoryCalendar?.calendarByDate[selectedDateKey] ?? [];
     return buildCalendarDayView(source, selectedDateKey, t, statutoryDay);
-  }, [source, selectedDateKey, t, statutoryCalendar]);
-
-  const mapClusters = useMemo(
-    () => buildMapLocationClusters(mapMarkers),
-    [mapMarkers]
-  );
+  }, [source, selectedDateKey, t, statutoryCalendar, userId]);
 
   return {
     source,
     loading,
     refreshing,
-    markersLoading,
     error,
     reload,
     refresh,
     marked,
     dayView,
-    mapMarkers,
-    mapClusters,
-    mapStats,
-    locationPermission,
-    refreshPermission,
   };
 }

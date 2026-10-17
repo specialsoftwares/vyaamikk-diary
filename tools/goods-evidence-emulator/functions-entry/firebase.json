@@ -1,0 +1,49 @@
+{
+  "firestore": {
+    "rules": "firestore.rules"
+  },
+  "storage": {
+    "rules": "storage.rules"
+  },
+  "functions": [
+    {
+      "source": ".",
+      "codebase": "grin-t1-isolated",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "*.local"
+      ]
+    }
+  ],
+  "emulators": {
+    "functions": {
+      "port": 5002,
+      "host": "127.0.0.1"
+    },
+    "firestore": {
+      "port": 8090,
+      "host": "127.0.0.1"
+    },
+    "storage": {
+      "port": 9201,
+      "host": "127.0.0.1",
+      "rules": "storage.rules"
+    },
+    "auth": {
+      "port": 9100,
+      "host": "127.0.0.1"
+    },
+    "hub": {
+      "port": 4410
+    },
+    "ui": {
+      "enabled": false,
+      "port": 4010
+    },
+    "logging": {
+      "port": 4510
+    }
+  }
+}

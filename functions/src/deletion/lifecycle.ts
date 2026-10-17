@@ -122,6 +122,10 @@ const SCHEDULER_MAX_PAGES = 25;
  * Periodic sweep:
  * 1) Promote awaiting_grace jobs whose grace elapsed → ready
  * 2) Run purge for ready / expired-lease jobs (paginated; no permanent starvation)
+ *
+ * GRIN cleanup rides runFinalAccountPurge and the account-purge flag (default
+ * false). Do not add a second GRIN cron. Flag-false: this job must not purge
+ * customer GRIN. Flag-true remains an UNAPPROVED live grant.
  */
 export const scheduledDeletionCleanup = onSchedule(
   { schedule: "every 24 hours", region: "asia-south1" },

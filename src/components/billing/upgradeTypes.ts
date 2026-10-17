@@ -23,7 +23,7 @@ export type UpgradeCatalogPeriod = (typeof UPGRADE_PERIODS)[number];
 
 export type UpgradeOfferStatus = "ready" | "loading" | "unavailable";
 export type UpgradeCatalogState = "loading" | "ready" | "unavailable";
-export type UpgradeOperationState = "idle" | "loading" | "pending" | "unavailable";
+export type UpgradeOperationState = "idle" | "loading" | "pending" | "verifying" | "unavailable";
 
 export interface UpgradePlanOffer {
   planId: UpgradePlanId;

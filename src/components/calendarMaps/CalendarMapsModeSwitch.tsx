@@ -26,14 +26,12 @@ interface CalendarMapsModeSwitchProps {
   mode: CalendarMapsMode;
   onChange: (mode: CalendarMapsMode) => void;
   calendarLabel: string;
-  mapLabel: string;
 }
 
 export const CalendarMapsModeSwitch = memo(function CalendarMapsModeSwitch({
   mode,
   onChange,
   calendarLabel,
-  mapLabel,
 }: CalendarMapsModeSwitchProps) {
   const { colors, resolvedMode } = useTheme();
   const isDark = resolvedMode === "dark";
@@ -52,7 +50,9 @@ export const CalendarMapsModeSwitch = memo(function CalendarMapsModeSwitch({
       },
       chip: {
         flex: 1,
-        paddingVertical: spacing.sm + 2,
+        minHeight: 44,
+        paddingVertical: spacing.sm,
+        paddingHorizontal: spacing.sm,
         borderRadius: radius.pill,
         alignItems: "center",
         justifyContent: "center",
@@ -67,8 +67,21 @@ export const CalendarMapsModeSwitch = memo(function CalendarMapsModeSwitch({
         shadowRadius: 6,
         elevation: 2,
       },
-      text: { ...typography.captionStrong, color: c.textMuted, letterSpacing: 0.2 },
-      textOn: { ...typography.captionStrong, color: c.primaryDark },
+      text: {
+        flexShrink: 1,
+        fontFamily: typography.captionStrong.fontFamily,
+        fontSize: typography.captionStrong.fontSize,
+        fontWeight: typography.captionStrong.fontWeight,
+        color: c.textMuted,
+        textAlign: "center",
+      },
+      textOn: {
+        fontFamily: typography.captionStrong.fontFamily,
+        fontSize: typography.captionStrong.fontSize,
+        fontWeight: typography.captionStrong.fontWeight,
+        color: c.primaryDark,
+        textAlign: "center",
+      },
     })
   );
 
@@ -94,18 +107,6 @@ export const CalendarMapsModeSwitch = memo(function CalendarMapsModeSwitch({
         accessibilityState={{ selected: mode === "calendar" }}
       >
         <Text style={[styles.text, mode === "calendar" && styles.textOn]}>{calendarLabel}</Text>
-      </Pressable>
-      <Pressable
-        style={({ pressed }) => [
-          styles.chip,
-          mode === "map" && styles.chipOn,
-          executivePressFeedback(pressed),
-        ]}
-        onPress={() => select("map")}
-        accessibilityRole="tab"
-        accessibilityState={{ selected: mode === "map" }}
-      >
-        <Text style={[styles.text, mode === "map" && styles.textOn]}>{mapLabel}</Text>
       </Pressable>
     </View>
   );

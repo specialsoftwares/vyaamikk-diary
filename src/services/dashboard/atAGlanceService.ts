@@ -3,7 +3,14 @@
  * UI screens render sections from this service only (no screen-local filtering).
  */
 
-import { startOfDay } from "date-fns";
+import { addDays } from "date-fns";
+
+import { lastSevenDayBounds } from "./youDashboardSummary";
+import {
+  classifyCreditUpcoming,
+  classifyDiaryUpcoming,
+  classifyPackUpcoming,
+} from "./upcomingEligibility";
 
 import type { BusinessEntry } from "@/domain/businessEntry";
 import type { ProfessionalServicePack } from "@/domain/professionalPack";
@@ -28,8 +35,6 @@ import type {
   AtAGlanceViewModel,
 } from "./atAGlanceTypes";
 
-const ONE_DAY = 86_400_000;
-const LIST_LIMIT = 1200;
 /** Max rows per section on At-a-Glance detail screens. */
 export const AT_A_GLANCE_SECTION_PREVIEW_CAP = 5;
 
@@ -53,15 +58,16 @@ export function getAtAGlanceBounds(now = Date.now()): AtAGlanceBounds {
 }
 
 function computeAtAGlanceBounds(now = Date.now()): AtAGlanceBounds {
-  const todayStart = startOfDay(new Date(now)).getTime();
+  const { todayStart, startMs, endMs } = lastSevenDayBounds(now);
+  const tomorrowStart = endMs;
   return {
     now,
     todayStart,
-    todayEnd: todayStart + ONE_DAY,
-    tomorrowStart: todayStart + ONE_DAY,
-    tomorrowEnd: todayStart + 2 * ONE_DAY,
-    weekStart: todayStart - 6 * ONE_DAY,
-    upcomingWeekEnd: todayStart + 7 * ONE_DAY,
+    todayEnd: endMs,
+    tomorrowStart,
+    tomorrowEnd: addDays(new Date(tomorrowStart), 1).getTime(),
+    weekStart: startMs,
+    upcomingWeekEnd: addDays(new Date(todayStart), 7).getTime(),
   };
 }
 
@@ -124,40 +130,6 @@ function collectEntryDates(entry: BusinessEntry): number[] {
     dates.push(entry.documentHistory.lastGeneratedAt);
   }
   return dates.filter((d) => Number.isFinite(d) && d > 0);
-}
-
-function entryIsPending(entry: BusinessEntry): boolean {
-  if (entry.status === "archived") return false;
-  if (entry.status === "settled") {
-    return Boolean(entry.reminder && entry.reminder.at > Date.now());
-  }
-  if (entry.entryType === "business_cash_given") {
-    const p = entry.payload as { settlementStatus?: string };
-    if (p.settlementStatus === "settled" && !entry.reminder) return false;
-  }
-  return true;
-}
-
-function primaryUpcomingDate(entry: BusinessEntry, b: AtAGlanceBounds): number | null {
-  if (!entryIsPending(entry)) return null;
-  const dates = actionableDates(entry);
-  if (dates.length === 0) return null;
-  const future = dates.filter((d) => d >= b.todayStart);
-  if (future.length) return Math.min(...future);
-  const overdue = dates.filter((d) => d < b.todayStart);
-  if (overdue.length) return Math.min(...overdue);
-  return null;
-}
-
-function packUpcomingDate(pack: ProfessionalServicePack, b: AtAGlanceBounds): number | null {
-  const dates = [pack.dueDate, pack.reminder?.at, pack.matterDate].filter(
-    (d): d is number => d != null && Number.isFinite(d) && d > 0
-  );
-  if (!dates.length) return null;
-  const future = dates.filter((d) => d >= b.todayStart);
-  if (future.length) return Math.min(...future);
-  const overdue = dates.filter((d) => d < b.todayStart);
-  return overdue.length ? Math.min(...overdue) : null;
 }
 
 function pushSection(
@@ -480,12 +452,10 @@ function buildUpcomingView(data: AtAGlanceSourceData, t: TFn, b: AtAGlanceBounds
 
   for (const entry of data.entries) {
     if (entry.deletedAt) continue;
-    const dateMs = primaryUpcomingDate(entry, b);
-    if (dateMs == null) continue;
-    if (dateMs < b.todayStart && !entryIsPending(entry)) continue;
-    if (dateMs >= b.todayStart && entry.status === "settled" && !entry.reminder) continue;
-    const chip =
-      dateMs < b.todayStart ? "atAGlance.chip.overdue" : undefined;
+    const classified = classifyDiaryUpcoming(entry, b.now);
+    if (classified.kind === "excluded" || classified.dateMs == null) continue;
+    const dateMs = classified.dateMs;
+    const chip = classified.kind === "overdue" ? "atAGlance.chip.overdue" : undefined;
     add(
       diaryEntryToItem(entry, t, dateMs, {
         urgency: urgencyFor(dateMs, b),
@@ -496,15 +466,16 @@ function buildUpcomingView(data: AtAGlanceSourceData, t: TFn, b: AtAGlanceBounds
   }
 
   for (const pack of data.packs) {
-    const dateMs = packUpcomingDate(pack, b);
-    if (dateMs == null) continue;
-    add(packToItem(pack, t, dateMs), dateMs);
+    const classified = classifyPackUpcoming(pack, b.now);
+    if (classified.kind === "excluded" || classified.dateMs == null) continue;
+    add(packToItem(pack, t, classified.dateMs), classified.dateMs);
   }
 
   for (const record of data.creditRecords) {
-    const dateMs = primaryDueDate(record, b.now);
-    if (dateMs == null) continue;
-    const chip = dateMs < b.todayStart ? "atAGlance.chip.overdue" : undefined;
+    const classified = classifyCreditUpcoming(record, b.now);
+    if (classified.kind === "excluded" || classified.dateMs == null) continue;
+    const dateMs = classified.dateMs;
+    const chip = classified.kind === "overdue" ? "atAGlance.chip.overdue" : undefined;
     add(creditToItem(record, t, dateMs, { statusChipKey: chip }), dateMs);
   }
 
@@ -513,15 +484,18 @@ function buildUpcomingView(data: AtAGlanceSourceData, t: TFn, b: AtAGlanceBounds
     pushSection(sections, u, sortByDateAsc(byUrgency[u]));
   }
 
-  const totalItems = sections.reduce((n, s) => n + s.data.length, 0);
+  const totalItems = URGENCY_ORDER.filter((urgency) => urgency !== "overdue").reduce(
+    (n, urgency) => n + byUrgency[urgency].length,
+    0
+  );
   return { view: "upcoming", sections, totalItems, isEmpty: totalItems === 0 };
 }
 
 export async function loadAtAGlanceSourceData(userId: string): Promise<AtAGlanceSourceData> {
   const [entries, letterheadDocs, packs, creditRecords] = await Promise.all([
-    getDiaryRepository().list(userId, { includeDeleted: false, limit: LIST_LIMIT }),
+    getDiaryRepository().list(userId, { includeDeleted: false }),
     getLetterheadDocumentRepository().list(userId),
-    getProfessionalPackRepository().list(userId, { includeDeleted: false, limit: 500 }),
+    getProfessionalPackRepository().list(userId, { includeDeleted: false }),
     getCustomerCreditRepository()
       .list(userId, { limit: 500 })
       .catch(() => []),
