@@ -8,7 +8,11 @@ Play bundle explorer, read before this freeze: 16 versions. Highest is versionCo
 
 India base plans were verified and the eight drafts were activated. All nine are Active: Starter ₹99 / ₹249 / ₹799, Professional ₹249 / ₹649 / ₹1,999, Business ₹499 / ₹1,299 / ₹3,999. No trial or promotional offer was added. RTDN topic `projects/vyaamikk-diary/topics/play-rtdn-vyaamikk-diary` is present in Monetisation setup. Cloud credentials need a fresh sign-in before the server allowlist can be updated, so tester admission is not written yet. Five unique Internal email-list addresses were compared with Firebase Auth. Two have Auth users. Three do not. Those addresses are not recorded here.
 
-The accepted application `308f77ede61508fb86fabdb15e7087a825417c15` is an ancestor of this branch. Canonical CI for this version commit is recorded after `workflow_dispatch`. No public rollout, main merge, data purge, or server-ledger activation.
+The accepted application `308f77ede61508fb86fabdb15e7087a825417c15` is an ancestor of this branch. Canonical CI run `39045766641`, verify job `117434058721`, success, head exactly `edcb3cbf07473f8fa80fdabab90e1a54e9fc0d40`. https://github.com/specialsoftwares/vyaamikk-diary/actions/runs/39045766641 This paragraph records that run. It is not the release commit. The store artifact was built from that SHA.
+
+EAS Android build `ef31e4a2-64b7-42af-afab-25b1ee71fe1e`, profile `internal-grin`, store distribution, production environment, upload keystore `Build Credentials 0KyVXiWXf1`. versionName 1.0.0, versionCode 30, package `com.specialsoftwares.vyaamikkdiary`, not debuggable. AAB SHA-256 `f3f69a6c9fbd5f94ecb16507f346ff6037a1e42ae320b09e52be6acc36911623`. `eas submit` has no Play service-account key, and the console file input cannot be set from this session. The Internal prepare page is open and does not include version 29. The AAB is at `~/Downloads/vyaamikk-internal-vc30.aab`. It is not on the track yet.
+
+Server admission is unchanged. `gcloud` and `firebase` need a fresh sign-in before `PLAY_BILLING_TESTER_UIDS` can be written. Billing was not enabled without that allowlist. KMS was not provisioned again. No phone was attached, so the Play update and both purchase paths were not run. Licence-tester membership was not changed. The July 2026 Privacy and Terms pages are what the browser opens. The newer draft in this repository is still unpublished. No public rollout, main merge, data purge, or server-ledger activation.
 
 
 
