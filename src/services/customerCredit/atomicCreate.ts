@@ -9,6 +9,7 @@ import {
   type AtomicCreateHooks,
 } from "@/billing/optionC/atomicBillableCreate";
 
+import { publishDomainChange } from "@/services/dataChanges/domainChanges";
 import { stableRecordId } from "@/services/records/stableRecordId";
 
 import { buildNewRecord } from "./shared";
@@ -49,6 +50,7 @@ export async function createCustomerCreditAtomic(
     },
     hooks,
   });
+  publishDomainChange(userId, "customerCredit", { effect: "upsert", recordId: result.record.id });
   return result.record;
 }
 

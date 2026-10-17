@@ -30,6 +30,16 @@ export function monotonicNow(): number {
   return Date.now();
 }
 
+/** Successful remote acknowledgement only. Pending, failed, and local-only saves stay unmarked. */
+export function recordRemoteAckIfAccepted(
+  remoteAccepted: boolean,
+  durationMs: number,
+  sinks: Array<{ record: (stage: SaveStage, durationMs: number) => void } | null | undefined>
+): void {
+  if (remoteAccepted !== true) return;
+  for (const sink of sinks) sink?.record("remote_ack", durationMs);
+}
+
 export function noteSaveStageDuration(stage: SaveStage, durationMs: number): void {
   if (!Number.isFinite(durationMs) || durationMs < 0) return;
   const list = retained.get(stage) ?? [];

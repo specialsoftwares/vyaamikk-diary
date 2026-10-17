@@ -1,5 +1,33 @@
 # Release completion register — Internal GRIN / billing / public candidate
 
+## Five-issue closeout — 17 Oct 2026
+
+Parent latency candidate `fe7c2ffb01547f883244e9d20b6192db86db55d4` stays unchanged. The earlier five-issue application commit `eef594fd600dff2e1f7eab463730de688aed9d43` stays in history. Its canonical CI run `39026317234`, verify job `117377892404`, remains the proof for that SHA only. This closeout is a later commit on `correction/five-issue-release`. The versionCode 29 freeze `5746c94` and its AAB are unchanged. No EAS build, Play upload, website publication, billing change, or server-ledger rollout is authorized.
+
+SOURCE. The You Upcoming tile and the Upcoming detail use the same eligibility rules for diary entries, professional packs, and customer-credit rows. A future receivable credit counts in both. An overdue credit stays in the overdue detail section and is not in the tile total. A cancelled or non-receivable credit is excluded from both. Rows are not dropped to force the numbers to match.
+
+SOURCE. The diary list publishes the durable local overlay before the remote list returns. A diary create, edit, or delete refreshes that overlay and does not request the cloud history again. Pending local rows still replace the remote row with the same id. A permanent delete hides that id until a later remote list no longer contains it. A later upsert of the same id clears that hide. The product delete is permanent; there is no separate restore action.
+
+SOURCE. Diary, calendar, You credit and pack loads, and the insights dashboard drop a result unless the uid, session generation, and, for the diary list, the query identity are still current. An account change clears the previous rows before the next paint. Calendar diary changes apply the local overlay. They do not start a new full diary cloud read.
+
+SOURCE. Create, edit, and delete publish for diary, professional-pack, and customer-credit mutations those screens count. A remote diary create or update publishes only when the acknowledgement applied. A remote diary delete publishes after the remote delete is accepted.
+
+SOURCE. Crash-report consent in the bridge, the first-run host, and the settings switch goes through the diagnostics preference. A newer opt-out, including one whose save failed, closes reporting before a delayed stored-true read can apply. Rapid choices are serialized. The native collection default in `firebase.json` stays off. No telemetry provider was added. The preference does not send an account id. Native pending-report deletion was not exercised.
+
+SOURCE. Callable auth cleanup no longer attaches a detached `finally` to a rejected token read. A handled token failure does not leave an unhandled cleanup rejection. Save timing records `remote_ack` only when the remote create was accepted. Local acknowledgement still happens before that, and pending or failed saves do not take the remote-ack mark.
+
+HOST. Injected clocks cover midnight and the Upcoming day boundary. The mounted-controller proofs for local-before-remote, edit, delete, restore-as-later-upsert, and A→B / logout / stale query are Node tests of the production list and session functions, not a phone. Chrome rendered the production work-note HTML to a PDF page and a screenshot. The page footer reads “Created using Vyaamikk Diary.” The word “certified” is not on that page. Android Print was not run.
+
+SOURCE, not a device. Fixture calendar targets open `/(app)/diary/[id]` and `/(app)/professional-pack/[id]` with `fixture-payment` and `fixture-pack`. The hero card still animates toward the destination height in source. Its frame timing was not measured on a phone. That measurement is unperformed device work, not a missing source wire.
+
+LEGAL, UNPUBLISHED. `docs/legal/PRIVACY_POLICY.md` and `docs/legal/PUBLICATION_HANDOFF.md` are the ready-to-publish Privacy draft and the Privacy/Terms crosswalk. Consent versions stay `1.0.0`. The live website was not changed and has not been checked, so this register does not say the public pages contain the new text.
+
+Not performed, and not labeled as a finished device check: phone animation frames, native Crashlytics pending-report behavior, console receipt, website publication, emulator UI, and a Play install. No Android device was connected for this closeout.
+
+### Next Internal packet — not authorized
+
+Recheck Play before choosing a versionCode. The last inventory read, 16 Oct 2026, showed bundle 28 Active and 29 absent. Do not reuse 28 or 29. Do not assume 30. Do not build this SHA until that inventory is read again. Purchase entry and quota stay off. Server ledger projection stays off. Do not deploy Functions, Rules, or indexes. The canonical CI run for this closeout commit is recorded after `workflow_dispatch` on this SHA.
+
 ## Five-issue correction — 17 Oct 2026
 
 Parent latency candidate `fe7c2ffb01547f883244e9d20b6192db86db55d4` stays unchanged. Application candidate `eef594fd600dff2e1f7eab463730de688aed9d43` on `correction/five-issue-release`. Canonical CI run `39026317234`, verify job `117377892404`, success, head `eef594fd600dff2e1f7eab463730de688aed9d43`. It is not the versionCode 29 freeze `5746c94` and it is not an installed binary. No EAS build or Play upload is authorized.
@@ -11,6 +39,8 @@ Parent latency candidate `fe7c2ffb01547f883244e9d20b6192db86db55d4` stays unchan
 | Official-portal check for statutory dates | Kept in VyaaFlow copy. |
 | Camera, location, deletion, and crash-report consent | Kept. |
 | Historic PDFs | Not rewritten. |
+
+This paragraph records `eef594f` only. The closeout section above is the later status.
 
 SOURCE. Calendar markers and the tapped day use the same date roles. A due date is a follow-up marker, not an ordinary entry marker. The visible month is independent of the selected day. Statutory calendar dates are generated for the visible window without writing reminder rows. Diary and pack loads are not sliced at 1,200, 500, 80, or 25 after the repository returns. A failed source does not clear the sources that succeeded. A durable diary commit and a successful professional-pack create publish an owner-scoped change. Last 7 days is `[start of today−6, start of tomorrow)` and excludes future records. Upcoming counts future actionable dates; overdue stays a separate detail section and is not part of that total. The route name stays `this-week`. The hero height animates toward the destination face. Settings groups are Profile & Business Identity, Business, Account & Security, Support & Diagnostics, and Legal & Policies. Privacy, Terms, the legacy legal route, and the disclaimer route use the public HTTPS opener. A failed crash-report preference write does not turn reporting back on. Crash reports do not receive an account-id prefix. Website publication of the legal pages is not verified. Phone frame timing, populated agenda navigation on a device, native Crashlytics pending-report deletion, and console receipt stay DEVICE_PENDING / NATIVE_DEVICE / LIVE_PENDING.
 

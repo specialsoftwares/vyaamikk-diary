@@ -33,7 +33,12 @@ import {
 } from "@/services/attachments/cashVoucherPhotoPlan";
 import { documentRevisionForCashEntry } from "@/services/attachments/cashVoucherRevision";
 import { deriveComposerSaveStatus, type ComposerSaveStatus } from "@/services/diary/composerSaveStatus";
-import { beginSaveAttempt, monotonicNow, type SaveStageTimer } from "@/services/diary/saveStageTiming";
+import {
+  beginSaveAttempt,
+  monotonicNow,
+  recordRemoteAckIfAccepted,
+  type SaveStageTimer,
+} from "@/services/diary/saveStageTiming";
 import { beginPdfRender, endPdfRender, markPdfRevisionReady } from "@/services/pdf/pdfRevisionGate";
 import {
   releaseProcessSaveLock,
@@ -280,10 +285,9 @@ export async function saveComposerEntry(
       }
     );
     const remoteMs = monotonicNow() - remoteStarted;
-    options.stageTimer?.record("remote_ack", remoteMs);
-    options.saveAttempt?.record("remote_ack", remoteMs);
     const entry = created.entry;
     const cloudAccepted = created.remoteAccepted;
+    recordRemoteAckIfAccepted(cloudAccepted, remoteMs, [options.stageTimer, options.saveAttempt]);
     if (cloudAccepted && created.reminderRemoteAccepted === false) {
       failedSecondarySteps.push("reminder_attached");
     }

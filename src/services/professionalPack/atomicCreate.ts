@@ -82,6 +82,9 @@ export async function createProfessionalPackAtomic(
     },
     hooks,
   });
-  publishDomainChange(userId, "professionalPack");
+  publishDomainChange(userId, "professionalPack", {
+    effect: "upsert",
+    recordId: result.record.id,
+  });
   return result.record;
 }

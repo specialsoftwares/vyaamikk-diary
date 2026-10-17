@@ -12,10 +12,14 @@ export type DomainSource =
   | "legacyLetter"
   | "statutory";
 
+export type DomainEffect = "upsert" | "delete";
+
 export type DomainChange = Readonly<{
   ownerUid: string;
   source: DomainSource;
   revision: number;
+  recordId?: string;
+  effect?: DomainEffect;
 }>;
 
 type Listener = (change: DomainChange) => void;
@@ -23,13 +27,23 @@ type Listener = (change: DomainChange) => void;
 let revision = 0;
 const listeners = new Set<Listener>();
 
-export function publishDomainChange(ownerUid: string, source: DomainSource): DomainChange {
+export function publishDomainChange(
+  ownerUid: string,
+  source: DomainSource,
+  detail?: { recordId?: string; effect?: DomainEffect }
+): DomainChange {
   const uid = ownerUid.trim();
   if (!uid) {
     throw new Error("domain change requires an owner");
   }
   revision += 1;
-  const change: DomainChange = { ownerUid: uid, source, revision };
+  const change: DomainChange = {
+    ownerUid: uid,
+    source,
+    revision,
+    recordId: detail?.recordId,
+    effect: detail?.effect,
+  };
   for (const listener of listeners) {
     try {
       listener(change);

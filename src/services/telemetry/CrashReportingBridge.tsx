@@ -2,12 +2,12 @@ import React, { useEffect } from "react";
 
 import { useAuth } from "@/state/auth";
 
-import { clearUser, setCrashReportingEnabled } from "./crashReporter";
-import { readTelemetryConsent } from "./telemetryConsent";
+import { runCrashReportingBridge } from "./diagnosticsPreference";
 
 /**
  * Applies stored crash-report consent after auth is available.
  * Missing consent stays off. Never enables collection by default.
+ * A newer opt-out, including one whose save failed, wins over this read.
  */
 export function CrashReportingBridge() {
   const { status, user } = useAuth();
@@ -15,13 +15,9 @@ export function CrashReportingBridge() {
 
   useEffect(() => {
     let cancelled = false;
-    void (async () => {
-      const consent = await readTelemetryConsent();
+    void runCrashReportingBridge().then(() => {
       if (cancelled) return;
-      const enabled = consent === true;
-      setCrashReportingEnabled(enabled);
-      clearUser();
-    })();
+    });
     return () => {
       cancelled = true;
     };

@@ -14,7 +14,9 @@ import { getProfessionalPackRepository } from "@/services/professionalPack";
 import { dedupeDiaryEntries } from "@/services/dashboard/diaryRecordCounts";
 import { dedupeProfessionalPacks } from "@/services/professionalPack/dedupe";
 import { maskedInsightData } from "@/services/insights/insightAccountGuard";
+import { sessionStillOwns } from "@/state/diaryListLoad";
 import { useSync } from "@/state/sync";
+import { syncSessionOwnership } from "@/sync/syncSessionOwnership";
 import { createLogger } from "@/utils/logger";
 import { useT } from "@/i18n";
 
@@ -44,6 +46,8 @@ export function useBusinessInsightsDashboard(
     }
 
     const requestUserId = userId;
+    const admitted = syncSessionOwnership.capture();
+    const sessionGeneration = admitted && admitted.uid === userId ? admitted.generation : null;
     const requestId = ++requestIdRef.current;
     setLoading(true);
     setFailure(null);
@@ -75,10 +79,12 @@ export function useBusinessInsightsDashboard(
         { offline }
       );
       if (requestId !== requestIdRef.current) return;
+      if (!sessionStillOwns(requestUserId, sessionGeneration)) return;
       setSnapshot({ userId: requestUserId, data: next });
       scheduleInsightRebuild(requestUserId, ueid);
     } catch {
       if (requestId !== requestIdRef.current) return;
+      if (!sessionStillOwns(requestUserId, sessionGeneration)) return;
       log.warn("dashboard load failed");
       setSnapshot(null);
       setFailure({ userId: requestUserId, message: t("businessInsights.loadError") });

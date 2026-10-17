@@ -7,6 +7,8 @@ import type { ProfessionalServicePack } from "@/domain/professionalPack";
 import type { LetterheadDocument } from "@/services/letterhead";
 import { addDays, startOfDay } from "date-fns";
 
+import type { CustomerCreditRecord } from "@/domain/customerCredit";
+import { countUpcomingRecords } from "@/services/dashboard/upcomingEligibility";
 import { entryListSummary, entryTypeLabelKey } from "@/utils/businessEntry/display";
 import { formatEntryDate } from "@/utils/date";
 import { matterLabelKey, statusLabelKey } from "@/utils/professionalPack/display";
@@ -121,47 +123,32 @@ export function lastSevenDayBounds(nowMs = Date.now()): { startMs: number; endMs
   };
 }
 
-function futureStamp(entry: BusinessEntry): number[] {
-  const payload = entry.payload as unknown as Record<string, unknown>;
-  const dates = entry.reminder ? [entry.reminder.at] : [];
-  for (const key of ["dueDate", "requiredByDate", "expectedDeliveryDate", "expectedSettlementDate"]) {
-    const value = Number(payload[key]);
-    if (Number.isFinite(value) && value > 0) dates.push(value);
-  }
-  return dates;
-}
-
-function futureActionableEntry(entry: BusinessEntry, nowMs: number): boolean {
-  return futureStamp(entry).some((value) => value > nowMs);
-}
-
-function futureActionablePack(pack: ProfessionalServicePack, nowMs: number): boolean {
-  const dates = [pack.dueDate, pack.reminder?.at].filter((value): value is number => value != null);
-  return dates.some((value) => value > nowMs);
-}
-
 function buildYouDashboardSummaryCore(
   entries: BusinessEntry[],
   letterheadDocs: LetterheadDocument[],
   proPacks: ProfessionalServicePack[],
   t: TFn,
-  nowMs = Date.now()
+  nowMs = Date.now(),
+  credits: CustomerCreditRecord[] = []
 ): YouDashboardSummary {
   const { todayStart, startMs, endMs } = lastSevenDayBounds(nowMs);
   let todayCount = 0;
   let weekCount = 0;
-  let upcomingCount = 0;
 
   for (const e of entries) {
     if (e.entryDate >= todayStart && e.entryDate < endMs) todayCount++;
     if (e.entryDate >= startMs && e.entryDate < endMs) weekCount++;
-    if (futureActionableEntry(e, nowMs)) upcomingCount++;
   }
   for (const p of proPacks) {
     if (p.matterDate >= todayStart && p.matterDate < endMs) todayCount++;
     if (p.matterDate >= startMs && p.matterDate < endMs) weekCount++;
-    if (futureActionablePack(p, nowMs)) upcomingCount++;
   }
+  const upcomingCount = countUpcomingRecords({
+    entries,
+    packs: proPacks,
+    credits,
+    nowMs,
+  }).upcoming;
 
   const recent = entries.slice(0, YOU_RECENT_CAP);
 
@@ -253,9 +240,10 @@ export function buildYouDashboardSummary(
   letterheadDocs: LetterheadDocument[],
   proPacks: ProfessionalServicePack[],
   t: TFn,
-  nowMs = Date.now()
+  nowMs = Date.now(),
+  credits: CustomerCreditRecord[] = []
 ): YouDashboardSummary {
-  return buildYouDashboardSummaryCore(entries, letterheadDocs, proPacks, t, nowMs);
+  return buildYouDashboardSummaryCore(entries, letterheadDocs, proPacks, t, nowMs, credits);
 }
 
 /** Summary + visibility flags for the You dashboard command centre. */
@@ -265,9 +253,17 @@ export function buildYouDashboardViewModel(
   proPacks: ProfessionalServicePack[],
   activeDraftCount: number,
   t: TFn,
-  nowMs = Date.now()
+  nowMs = Date.now(),
+  credits: CustomerCreditRecord[] = []
 ): YouDashboardViewModel {
-  const summary = buildYouDashboardSummaryCore(entries, letterheadDocs, proPacks, t, nowMs);
+  const summary = buildYouDashboardSummaryCore(
+    entries,
+    letterheadDocs,
+    proPacks,
+    t,
+    nowMs,
+    credits
+  );
   return {
     ...summary,
     visibility: deriveYouDashboardVisibility(

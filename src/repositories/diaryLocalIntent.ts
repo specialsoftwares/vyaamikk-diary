@@ -86,7 +86,7 @@ export function persistDiaryCreateIntent(
     );
     queueRecordFollowUpsSync(entry, nextRevision);
   });
-  publishDomainChange(entry.userId, "diary");
+  publishDomainChange(entry.userId, "diary", { effect: "upsert", recordId: entry.id });
   return queueId;
 }
 
@@ -193,6 +193,6 @@ export function persistDiaryUpdateIntent(
     };
   });
   if (!result) throw new AppError("unknown", "Failed to persist diary update");
-  publishDomainChange(userId, "diary");
+  publishDomainChange(userId, "diary", { effect: "upsert", recordId: patch.id });
   return result;
 }

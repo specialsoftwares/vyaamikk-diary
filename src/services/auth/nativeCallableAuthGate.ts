@@ -55,7 +55,16 @@ type NativeAuth = {
   onAuthStateChanged: (listener: (user: NativeUser | null) => void) => () => void;
 };
 
+let nativeAuthOverride: (() => NativeAuth) | null | undefined;
+
+/** Test-only auth port. Pass undefined to restore the production lookup. */
+export function __setNativeAuthForTests(auth: (() => NativeAuth) | null | undefined): void {
+  nativeAuthOverride = auth;
+  retireNativeCallableAuthReady();
+}
+
 function tryNativeAuth(): (() => NativeAuth) | null {
+  if (nativeAuthOverride !== undefined) return nativeAuthOverride;
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { Platform } = require("react-native") as { Platform: { OS: string } };
@@ -191,9 +200,10 @@ export async function ensureNativeAuthReadyForCallables(
     generation,
   });
   inflightReady = { uid: user.uid, generation, force, promise };
-  void promise.finally(() => {
+  const release = () => {
     if (inflightReady?.promise === promise) inflightReady = null;
-  });
+  };
+  void promise.then(release, release);
   return promise;
 }
 

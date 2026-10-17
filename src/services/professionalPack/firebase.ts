@@ -13,6 +13,7 @@ import { AppError } from "@/domain/errors";
 import type { ProfessionalServicePack } from "@/domain/professionalPack";
 import type { EntryReminder } from "@/domain/types";
 import { getFirebaseDb } from "@/config/firebase";
+import { publishDomainChange } from "@/services/dataChanges/domainChanges";
 import { notificationsService } from "@/services/notifications";
 
 import { packToCloudStorage } from "@/services/pdf/pdfCloudSync";
@@ -104,6 +105,7 @@ export const firebaseProfessionalPackRepository: ProfessionalPackRepository = {
     const patch = packToCloudStorage(next);
     patch.reminder = reminderJson(next.reminder);
     await setDoc(ref, patch, { merge: true });
+    publishDomainChange(userId, "professionalPack", { effect: "upsert", recordId: next.id });
     return next;
   },
 
