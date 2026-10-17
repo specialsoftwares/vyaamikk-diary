@@ -95,7 +95,7 @@ assert.match(offline, /not a SQLite outbox/);
 
 const appJson = readFileSync(join(repoRoot, "app.json"), "utf8");
 assert.doesNotMatch(appJson, /GOODS_EVIDENCE/);
-assert.match(appJson, /"versionCode":\s*29/);
+assert.match(appJson, /"versionCode":\s*30/);
 const eas = JSON.parse(readFileSync(join(repoRoot, "eas.json"), "utf8")) as {
   build: Record<string, { env?: Record<string, string>; android?: { buildType?: string } }>;
 };
@@ -113,7 +113,7 @@ assert.equal(internalGrin.android?.buildType, "app-bundle");
 assert.equal(internalGrin.env?.EXPO_PUBLIC_APP_MODE, "production");
 assert.equal(internalGrin.env?.EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED, "1");
 assert.equal(internalGrin.env?.EXPO_PUBLIC_GOODS_EVIDENCE_STORE_RUNTIME_ADMIT, "1");
-assert.equal(internalGrin.env?.EXPO_PUBLIC_SUBSCRIPTION_PURCHASE_ENTRY_ENABLED, "0");
+assert.equal(internalGrin.env?.EXPO_PUBLIC_SUBSCRIPTION_PURCHASE_ENTRY_ENABLED, "1");
 assert.equal(internalGrin.env?.EXPO_PUBLIC_QUOTA_UPSELL_ENABLED, "0");
 const internalGrinApk = eas.build["internal-grin-apk"];
 assert.ok(internalGrinApk, "internal-grin-apk profile required for the BillDesk sideload");
