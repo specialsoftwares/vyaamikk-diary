@@ -372,6 +372,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     bootAttemptRef.current += 1;
     const uid = state.session?.user.uid;
     try {
+      const { retireNativeCallableAuthReady } = await import(
+        "@/services/auth/nativeCallableAuthGate"
+      );
+      retireNativeCallableAuthReady();
+    } catch {
+      // Sign-out still proceeds if the native gate is unavailable.
+    }
+    try {
       await getAuthService().signOut();
     } catch (e) {
       log.warn("auth signOut error", e);

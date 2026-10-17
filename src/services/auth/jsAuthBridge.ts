@@ -21,6 +21,7 @@ import { signInWithCustomToken } from "firebase/auth";
 import { getActiveBackend } from "@/config/env";
 import { getFirebaseAuth } from "@/config/firebase";
 import { createLogger } from "@/utils/logger";
+import { beginPerfAttempt, recordPerfSpan } from "./authFlowPerf";
 
 const log = createLogger("auth/jsAuthBridge");
 
@@ -82,11 +83,31 @@ async function establishJsAuthSession(): Promise<boolean> {
   }
 
   const auth = getFirebaseAuth();
-  if (auth.currentUser?.uid === nativeUid) return true;
+  const reuseStarted = globalThis.performance?.now?.() ?? Date.now();
+  if (auth.currentUser?.uid === nativeUid) {
+    const attempt = beginPerfAttempt("js_bridge");
+    recordPerfSpan({
+      ...attempt,
+      stage: "bridge_reuse",
+      runtime: "js",
+      durationMs: (globalThis.performance?.now?.() ?? Date.now()) - reuseStarted,
+      outcome: "ok",
+    });
+    return true;
+  }
 
+  const attempt = beginPerfAttempt("js_bridge");
+  const started = globalThis.performance?.now?.() ?? Date.now();
   const { callMintClientAuthToken } = await import("./identityCallable");
   const { token } = await callMintClientAuthToken();
   const cred = await signInWithCustomToken(auth, token);
+  recordPerfSpan({
+    ...attempt,
+    stage: "bridge_mint",
+    runtime: "js",
+    durationMs: (globalThis.performance?.now?.() ?? Date.now()) - started,
+    outcome: cred.user.uid === nativeUid ? "ok" : "error",
+  });
   if (cred.user.uid !== nativeUid) {
     log.error("ensureJsAuthSession: uid mismatch after custom-token sign-in", {
       ...getJsAuthBridgeSnapshot(),

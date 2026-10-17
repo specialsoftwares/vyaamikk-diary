@@ -33,10 +33,12 @@ import {
 } from "@/services/attachments/cashVoucherPhotoPlan";
 import { documentRevisionForCashEntry } from "@/services/attachments/cashVoucherRevision";
 import { deriveComposerSaveStatus, type ComposerSaveStatus } from "@/services/diary/composerSaveStatus";
-import { monotonicNow, type SaveStageTimer } from "@/services/diary/saveStageTiming";
+import { beginSaveAttempt, monotonicNow, type SaveStageTimer } from "@/services/diary/saveStageTiming";
 import { beginPdfRender, endPdfRender, markPdfRevisionReady } from "@/services/pdf/pdfRevisionGate";
-import type { SaveIdempotencyContext } from "@/services/records/saveIdempotency";
-import { releaseProcessSaveLock } from "@/services/records/saveIdempotency";
+import {
+  releaseProcessSaveLock,
+  type SaveIdempotencyContext,
+} from "@/services/records/saveIdempotency";
 import {
   captureAdmissionToken,
   mayIssueRemoteWork,
@@ -72,6 +74,8 @@ export interface SaveComposerEntryOptions {
   onLocalDurable?: (entry: BusinessEntry) => void;
   onSaveStatus?: (status: ComposerSaveStatus) => void;
   stageTimer?: SaveStageTimer;
+  /** Attempt-scoped clocks. Isolated from other saves. */
+  saveAttempt?: SaveStageTimer;
 }
 
 export interface SaveComposerEntryResult {
@@ -136,6 +140,10 @@ export async function saveComposerEntry(
   let completedSteps: string[] = [];
   let pdfFailed = false;
   const failedSecondarySteps: string[] = [];
+
+  if (!options.saveAttempt) {
+    options = { ...options, saveAttempt: beginSaveAttempt() };
+  }
 
   logLifecyclePhase(`record_save_start:${input.entryType}`, {
     phase: "start",
@@ -260,7 +268,9 @@ export async function saveComposerEntry(
       {
         session,
         onLocalDurable: (localEntry) => {
-          options.stageTimer?.record("local_commit", monotonicNow() - localStarted);
+          const localMs = monotonicNow() - localStarted;
+          options.stageTimer?.record("local_commit", localMs);
+          options.saveAttempt?.record("local_commit", localMs);
           remoteStarted = monotonicNow();
           options.onLocalDurable?.(localEntry);
           options.onSaveStatus?.(
@@ -269,7 +279,9 @@ export async function saveComposerEntry(
         },
       }
     );
-    options.stageTimer?.record("remote_ack", monotonicNow() - remoteStarted);
+    const remoteMs = monotonicNow() - remoteStarted;
+    options.stageTimer?.record("remote_ack", remoteMs);
+    options.saveAttempt?.record("remote_ack", remoteMs);
     const entry = created.entry;
     const cloudAccepted = created.remoteAccepted;
     if (cloudAccepted && created.reminderRemoteAccepted === false) {
@@ -546,7 +558,9 @@ async function finishComposerSavePipeline(
       });
     } finally {
       if (renderSlot) endPdfRender(entry.id);
-      options.stageTimer?.record("pdf_render", monotonicNow() - pdfStarted);
+      const pdfMs = monotonicNow() - pdfStarted;
+      options.stageTimer?.record("pdf_render", pdfMs);
+      options.saveAttempt?.record("pdf_render", pdfMs);
     }
   }
 

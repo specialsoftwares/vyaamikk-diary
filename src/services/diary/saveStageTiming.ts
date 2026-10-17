@@ -44,6 +44,47 @@ export function stageDurations(stage: SaveStage): number[] {
 
 export function resetSaveStageTimingsForTests(): void {
   retained.clear();
+  isolatedAttempts.length = 0;
+  saveAttemptSerial = 0;
+}
+
+interface IsolatedSaveAttempt {
+  operationId: string;
+  attempt: number;
+  samples: SaveStageSample[];
+}
+
+let saveAttemptSerial = 0;
+const isolatedAttempts: IsolatedSaveAttempt[] = [];
+
+function randomOperationId(): string {
+  const cryptoApi = globalThis.crypto;
+  if (cryptoApi && typeof cryptoApi.randomUUID === "function") return cryptoApi.randomUUID();
+  return `save_${Math.random().toString(36).slice(2, 12)}`;
+}
+
+/**
+ * One save attempt. Samples stay on this object so a retry cannot
+ * overwrite the previous attempt's marks. Does not write the shared histogram.
+ */
+export function beginSaveAttempt(): SaveStageTimer & { operationId: string; attempt: number } {
+  saveAttemptSerial += 1;
+  const operationId = randomOperationId();
+  const attempt = saveAttemptSerial;
+  const samples: SaveStageSample[] = [];
+  isolatedAttempts.push({ operationId, attempt, samples });
+  if (isolatedAttempts.length > 32) isolatedAttempts.shift();
+  return {
+    operationId,
+    attempt,
+    record(stage, durationMs) {
+      if (!Number.isFinite(durationMs) || durationMs < 0) return;
+      samples.push({ stage, durationMs });
+    },
+    samples() {
+      return samples.map((sample) => ({ ...sample }));
+    },
+  };
 }
 
 export interface SaveStageTimer {

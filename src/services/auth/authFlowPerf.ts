@@ -63,4 +63,104 @@ export function authPerfSummary(
 
 export function __resetAuthPerfForTests(): void {
   marks.clear();
+  spans.length = 0;
+  attemptSerial = 0;
+  perfExportConsent = false;
+}
+
+export type PerfOutcome = "ok" | "error" | "cancelled" | "retired" | "timeout" | "unavailable";
+
+export type PerfOperation =
+  | "phone_send"
+  | "phone_verify"
+  | "email_send"
+  | "email_verify"
+  | "record_save"
+  | "pdf_generate"
+  | "navigation"
+  | "token_gate"
+  | "js_bridge";
+
+/** User-visible clocks. Missing spans stay absent; they are not zero. */
+export type PerfClock =
+  | "ui_feedback"
+  | "local_durable"
+  | "remote_acceptance"
+  | "derived_ready"
+  | "delivery"
+  | "token_cached"
+  | "token_forced"
+  | "bridge_reuse"
+  | "bridge_mint";
+
+export interface PerfSpan {
+  operationId: string;
+  attempt: number;
+  operation: PerfOperation;
+  stage: PerfClock | AuthPerfPhase;
+  runtime: "js" | "native" | "server";
+  durationMs: number;
+  outcome: PerfOutcome;
+}
+
+const MAX_SPANS = 64;
+const spans: PerfSpan[] = [];
+let attemptSerial = 0;
+let perfExportConsent = false;
+
+function randomOperationId(): string {
+  const cryptoApi = globalThis.crypto;
+  if (cryptoApi && typeof cryptoApi.randomUUID === "function") return cryptoApi.randomUUID();
+  return `op_${Math.random().toString(36).slice(2, 12)}`;
+}
+
+/** Consent gates export only. Recording stays local and non-blocking. */
+export function setPerfTelemetryConsent(enabled: boolean): void {
+  perfExportConsent = enabled;
+}
+
+export function perfTelemetryExportAllowed(): boolean {
+  return perfExportConsent;
+}
+
+export function beginPerfAttempt(operation: PerfOperation): {
+  operationId: string;
+  attempt: number;
+  operation: PerfOperation;
+} {
+  attemptSerial += 1;
+  return { operationId: randomOperationId(), attempt: attemptSerial, operation };
+}
+
+export function recordPerfSpan(
+  span: Omit<PerfSpan, "durationMs"> & { durationMs: number }
+): void {
+  if (!Number.isFinite(span.durationMs) || span.durationMs < 0) return;
+  spans.push({
+    operationId: span.operationId,
+    attempt: span.attempt,
+    operation: span.operation,
+    stage: span.stage,
+    runtime: span.runtime,
+    durationMs: Math.round(span.durationMs),
+    outcome: span.outcome,
+  });
+  if (spans.length > MAX_SPANS) spans.shift();
+  if (!perfExportConsent) return;
+  try {
+    log.warn("auth_flow_perf span", {
+      kind: span.outcome === "ok" ? "verified" : "failed",
+      ms: Math.round(span.durationMs),
+    });
+  } catch {
+    // Telemetry must not block auth.
+  }
+}
+
+export function perfSpans(): PerfSpan[] {
+  return spans.map((span) => ({ ...span }));
+}
+
+export function perfSpansForAttempt(operationId: string): PerfSpan[] {
+  return spans.filter((span) => span.operationId === operationId).map((span) => ({ ...span }));
 }

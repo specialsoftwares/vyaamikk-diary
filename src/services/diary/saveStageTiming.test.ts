@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 
-import { p50, p95, percentile } from "@/services/diary/saveStageTiming";
+import {
+  beginSaveAttempt,
+  p50,
+  p95,
+  percentile,
+  resetSaveStageTimingsForTests,
+} from "@/services/diary/saveStageTiming";
 import {
   deriveComposerSaveStatus,
   shouldDisplayRemoteSynced,
@@ -47,6 +53,16 @@ function main(): void {
     }),
     "needs_attention"
   );
+
+  resetSaveStageTimingsForTests();
+  const a = beginSaveAttempt();
+  const b = beginSaveAttempt();
+  a.record("local_commit", 11);
+  b.record("local_commit", 80);
+  assert.equal(a.samples().length, 1);
+  assert.equal(a.samples()[0]?.durationMs, 11);
+  assert.equal(b.samples()[0]?.durationMs, 80);
+  assert.notEqual(a.operationId, b.operationId);
 
   console.log("saveStageTiming.test.ts ok");
 }
