@@ -5,6 +5,7 @@ export {
   statutoryItemsToMapRecords,
   loadCalendarMapsSourceData,
 } from "./calendarMapsService";
+export type { CalendarMapsLoadResult, CalendarSourceName } from "./calendarMapsService";
 export type {
   CalendarDayViewModel,
   CalendarMapCategoryKey,

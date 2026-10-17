@@ -96,7 +96,7 @@ export const TERMS_OF_USE_SECTIONS: LegalSection[] = [
     title: "Feature-specific terms",
     paragraphs: [
       "PDFs and purchase orders are user-generated documents. Dukaan/customer credit is record-keeping only, not lending.",
-      "Business insights and statutory prompts are informational only, not professional advice.",
+      "Business insights, party totals counted on this device, and statutory prompts are not a certified ledger, profit statement, or tax report, and they are not professional advice. Check statutory dates on the official portal or with your adviser.",
     ],
   },
   {

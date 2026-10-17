@@ -117,9 +117,18 @@ export function DigitalBusinessIdentityCard({
 
   const [period, setPeriod] = useState(() => getGreetingPeriod());
   const [reduceMotion, setReduceMotion] = useState(false);
+  const reduceMotionRef = useRef(false);
+  reduceMotionRef.current = reduceMotion;
   const [sharing, setSharing] = useState(false);
   const [isBack, setIsBack] = useState(false);
-  const [stageHeight, setStageHeight] = useState(STAGE_FALLBACK_HEIGHT);
+  const stageHeightSv = useSharedValue(STAGE_FALLBACK_HEIGHT);
+  const applyStageHeight = useCallback((next: number, animate: boolean) => {
+    if (next <= 0) return;
+    stageHeightSv.value =
+      animate && !reduceMotionRef.current
+        ? withTiming(next, { duration: FLIP_MS, easing: FLIP_EASING })
+        : next;
+  }, [stageHeightSv]);
   const shareLockRef = useRef(false);
   const flipBusyRef = useRef(false);
   const shareLockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -213,11 +222,8 @@ export function DigitalBusinessIdentityCard({
     const front = measuredHeights.current.front;
     const back = measuredHeights.current.back;
     const visible = isBack ? back : front;
-    const next = flipBusyRef.current ? Math.max(front, back) : visible;
-    if (next > 0) {
-      setStageHeight(next);
-    }
-  }, [isBack]);
+    if (visible > 0) applyStageHeight(visible, flipBusyRef.current);
+  }, [applyStageHeight, isBack]);
 
   useEffect(() => {
     syncStageHeight();
@@ -397,11 +403,11 @@ export function DigitalBusinessIdentityCard({
       const next = showingBack
         ? measuredHeights.current.back
         : measuredHeights.current.front;
-      if (next > 0) setStageHeight(next);
+      if (next > 0) applyStageHeight(next, false);
       if (!released) return;
       setIsBack(showingBack);
     },
-    [flipLock]
+    [applyStageHeight, flipLock]
   );
 
   const toggleFlip = useCallback(() => {
@@ -409,8 +415,9 @@ export function DigitalBusinessIdentityCard({
     if (!flipLock.acquire()) return;
     const next = flipProgress.value < 0.5 ? 1 : 0;
     flipBusyRef.current = true;
-    const both = Math.max(measuredHeights.current.front, measuredHeights.current.back);
-    if (both > 0) setStageHeight(both);
+    const dest =
+      next >= 0.5 ? measuredHeights.current.back : measuredHeights.current.front;
+    if (dest > 0) applyStageHeight(dest, !reduceMotion);
     if (reduceMotion) {
       flipBusyRef.current = false;
       flipProgress.value = next;
@@ -425,7 +432,7 @@ export function DigitalBusinessIdentityCard({
         runOnJS(settleFlip)(next, finished === true);
       }
     );
-  }, [flipProgress, reduceMotion, sharing, flipLock, settleFlip]);
+  }, [applyStageHeight, flipProgress, reduceMotion, sharing, flipLock, settleFlip]);
 
   const frontFaceStyle = useAnimatedStyle(() => {
     const rotateY = interpolate(flipProgress.value, [0, 1], [0, 180]);
@@ -442,6 +449,10 @@ export function DigitalBusinessIdentityCard({
       opacity: interpolate(flipProgress.value, [0, 0.48, 0.52, 1], [0, 0, 1, 1]),
     };
   });
+
+  const stageStyle = useAnimatedStyle(() => ({
+    height: stageHeightSv.value,
+  }));
 
   const onShare = useCallback(async () => {
     if (!user || sharing) return;
@@ -640,7 +651,7 @@ export function DigitalBusinessIdentityCard({
           <View onLayout={onBackLayout}>{backFace}</View>
         </View>
 
-        <View style={[styles.stage, { height: stageHeight }]}>
+        <Animated.View style={[styles.stage, stageStyle]}>
           <Animated.View
             style={[styles.faceLayer, frontFaceStyle]}
             pointerEvents={isBack ? "none" : "auto"}
@@ -654,7 +665,7 @@ export function DigitalBusinessIdentityCard({
           >
             {backFace}
           </Animated.View>
-        </View>
+        </Animated.View>
       </DashboardGreetingHeroSurface>
     </Pressable>
   );

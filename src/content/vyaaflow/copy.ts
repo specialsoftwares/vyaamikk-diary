@@ -31,7 +31,7 @@ export const vyaaflowCopy = {
     businessDates:
       "Vyaamikk Diary keeps your business dates in one place. Records, dues, follow-ups and reminders appear in Important Business Dates, helping you review what happened and what is coming up.",
     statutory:
-      "Statutory reminders show standard GST, income-tax, TDS/TCS and LLP due dates for reference. They are informational only. Check applicability and the final date on the official portal or with your CA, CS or tax professional.",
+      "Statutory reminders show standard GST, income-tax, TDS/TCS and LLP due dates. Check applicability and the final date on the official portal or with your CA, CS or tax professional.",
   },
   detectMyPin: {
     action: "Detect my PIN",

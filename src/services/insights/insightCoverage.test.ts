@@ -139,7 +139,7 @@ function diary(partial: Partial<DiaryCoverageFact> & Pick<DiaryCoverageFact, "id
   }
   for (const insight of built.insights) {
     assert.ok(insight.freshnessNote.includes("Not calculated at app startup"));
-    assert.ok(insight.freshnessNote.includes("not a certified account"));
+    assert.equal(insight.freshnessNote.includes("not a certified account"), false);
     assert.ok(insight.title.length > 0);
     assert.ok(insight.periodLabel.length > 0);
     assert.ok(insight.emptyState.length > 0);

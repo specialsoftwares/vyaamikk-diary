@@ -19,12 +19,7 @@ import { useSubscription } from "@/subscription";
 import { readOwnerQuotaUsage } from "@/subscription/quotaUsageReader";
 import { youDashboardQuotaWarning } from "@/subscription/youDashboardQuotaWarning";
 import { syncSessionOwnership } from "@/sync/syncSessionOwnership";
-import {
-  buildYouDashboardViewModel,
-  YOU_DASHBOARD_ENTRY_LIMIT,
-  YOU_LETTERHEAD_SCAN_CAP,
-  YOU_PRO_PACK_SCAN_LIMIT,
-} from "@/services/dashboard";
+import { buildYouDashboardViewModel } from "@/services/dashboard";
 import { formDraftsRepository } from "@/repositories/formDraftsRepository";
 import { executiveCardDepth, spacing, typography, useTheme, useThemedStyles, DASHBOARD_SECTION_GAP } from "@/theme";
 import { formatEntryDate } from "@/utils/date";
@@ -90,7 +85,7 @@ export default function YouTab() {
   );
 
   const userId = user?.uid ?? null;
-  const listOptions = useMemo(() => ({ limit: YOU_DASHBOARD_ENTRY_LIMIT }), []);
+  const listOptions = useMemo(() => ({}), []);
   const { entries, error, refresh } = useDiaryList(userId, listOptions);
   const { requestDelete, isDeleting } = useRecordDelete(userId);
   const [letterheadDocs, setLetterheadDocs] = useState<LetterheadDocument[]>([]);
@@ -159,8 +154,7 @@ export default function YouTab() {
       const list = await getLetterheadDocumentRepository().list(userId);
       const withPdf = list
         .filter((d) => d.pdfUri || d.saved)
-        .sort((a, b) => b.updatedAt - a.updatedAt)
-        .slice(0, YOU_LETTERHEAD_SCAN_CAP);
+        .sort((a, b) => b.updatedAt - a.updatedAt);
       setLetterheadDocs(withPdf);
     } catch {
       // non-fatal
@@ -171,7 +165,7 @@ export default function YouTab() {
     if (!userId) return;
     try {
       const list = await getProfessionalPackRepository().list(userId, {
-        limit: YOU_PRO_PACK_SCAN_LIMIT,
+        includeDeleted: false,
       });
       setProPacks(list);
     } catch {

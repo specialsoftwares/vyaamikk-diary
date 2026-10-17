@@ -1,5 +1,26 @@
 # Release completion register — Internal GRIN / billing / public candidate
 
+## Five-issue correction — 17 Oct 2026
+
+Parent latency candidate `fe7c2ffb01547f883244e9d20b6192db86db55d4` stays unchanged. This correction is the next commit on `correction/five-issue-release`. It is not the versionCode 29 freeze `5746c94` and it is not an installed binary. No EAS build or Play upload is authorized.
+
+| Content class | Decision |
+| --- | --- |
+| Generic non-certification on party ledger, Insights freshness, cash subtitle, statutory tab | Removed from those UI strings. The substance is in Terms (`src/content/legal/documents.ts`). |
+| Device-counted status | Kept as a short factual line. |
+| Official-portal check for statutory dates | Kept in VyaaFlow copy. |
+| Camera, location, deletion, and crash-report consent | Kept. |
+| Historic PDFs | Not rewritten. |
+
+SOURCE. Calendar markers and the tapped day use the same date roles. A due date is a follow-up marker, not an ordinary entry marker. The visible month is independent of the selected day. Statutory calendar dates are generated for the visible window without writing reminder rows. Diary and pack loads are not sliced at 1,200, 500, 80, or 25 after the repository returns. A failed source does not clear the sources that succeeded. A durable diary commit and a successful professional-pack create publish an owner-scoped change. Last 7 days is `[start of today−6, start of tomorrow)` and excludes future records. Upcoming counts future actionable dates; overdue stays a separate detail section and is not part of that total. The route name stays `this-week`. The hero height animates toward the destination face. Settings groups are Profile & Business Identity, Business, Account & Security, Support & Diagnostics, and Legal & Policies. Privacy, Terms, the legacy legal route, and the disclaimer route use the public HTTPS opener. A failed crash-report preference write does not turn reporting back on. Crash reports do not receive an account-id prefix. Website publication of the legal pages is not verified. Phone frame timing, populated agenda navigation on a device, native Crashlytics pending-report deletion, and console receipt stay DEVICE_PENDING / NATIVE_DEVICE / LIVE_PENDING.
+
+### Next Internal packet — not authorized
+
+Recheck Play before choosing a versionCode. Do not reuse 28 or 29. Do not build this SHA until that inventory is read again. Purchase entry and quota stay off. Server ledger projection stays off. Do not deploy Functions, Rules, or indexes.
+
+---
+
+
 Coordinator register. Not authorization. Not a “bug-free” promise.
 Target public availability **18 October 2026** is a delivery date, not a gate
 bypass and not a Play-approval promise.

@@ -29,9 +29,15 @@ const HORIZON_MONTHS = 8;
 /** Include recent past due dates still in the active filing cycle. */
 const PAST_DUE_LOOKBACK_MONTHS = 2;
 
-function filterDueHorizon(out: GeneratedStatutoryDue[], reference: Date): GeneratedStatutoryDue[] {
-  const minMs = startOfMonth(addMonths(reference, -PAST_DUE_LOOKBACK_MONTHS)).getTime();
-  const maxMs = endOfMonth(addMonths(reference, HORIZON_MONTHS)).getTime();
+export type StatutoryDueWindow = Readonly<{ minMs: number; maxMs: number }>;
+
+function filterDueHorizon(
+  out: GeneratedStatutoryDue[],
+  reference: Date,
+  window?: StatutoryDueWindow
+): GeneratedStatutoryDue[] {
+  const minMs = window?.minMs ?? startOfMonth(addMonths(reference, -PAST_DUE_LOOKBACK_MONTHS)).getTime();
+  const maxMs = window?.maxMs ?? endOfMonth(addMonths(reference, HORIZON_MONTHS)).getTime();
   return out.filter((d) => d.dueDateMs >= minMs && d.dueDateMs <= maxMs);
 }
 
@@ -71,13 +77,26 @@ export function generateMonthlyDueOccurrences(
   templateId: string,
   dueDayOfMonth: number,
   reference: Date,
-  periodVariant: CompliancePeriodVariant = "monthly"
+  periodVariant: CompliancePeriodVariant = "monthly",
+  window?: StatutoryDueWindow
 ): GeneratedStatutoryDue[] {
   const out: GeneratedStatutoryDue[] = [];
   const refMonth = startOfMonth(reference);
-  const horizonEnd = endOfMonth(addMonths(reference, HORIZON_MONTHS));
+  const horizonEnd = window
+    ? endOfMonth(new Date(window.maxMs))
+    : endOfMonth(addMonths(reference, HORIZON_MONTHS));
+  const first = window ? startOfMonth(new Date(window.minMs)) : addMonths(refMonth, -1);
+  const lastOffset = Math.max(
+    HORIZON_MONTHS + 1,
+    (horizonEnd.getFullYear() - refMonth.getFullYear()) * 12 +
+      (horizonEnd.getMonth() - refMonth.getMonth()) +
+      1
+  );
+  const firstOffset = window
+    ? (first.getFullYear() - refMonth.getFullYear()) * 12 + (first.getMonth() - refMonth.getMonth())
+    : -1;
 
-  for (let offset = -1; offset <= HORIZON_MONTHS + 1; offset++) {
+  for (let offset = firstOffset; offset <= lastOffset; offset++) {
     const dueMonth = addMonths(refMonth, offset);
     if (dueMonth > horizonEnd) break;
 
@@ -92,16 +111,32 @@ export function generateMonthlyDueOccurrences(
       periodLabel
     );
   }
-  return filterDueHorizon(out, reference);
+  return filterDueHorizon(out, reference, window);
 }
 
 /** TDS deposit: preceding month deductions; March → due 30 April. */
-function generateTdsMonthlyDeposits(templateId: string, reference: Date): GeneratedStatutoryDue[] {
+function generateTdsMonthlyDeposits(
+  templateId: string,
+  reference: Date,
+  window?: StatutoryDueWindow
+): GeneratedStatutoryDue[] {
   const out: GeneratedStatutoryDue[] = [];
   const refMonth = startOfMonth(reference);
-  const horizonEnd = endOfMonth(addMonths(reference, HORIZON_MONTHS));
+  const horizonEnd = window
+    ? endOfMonth(new Date(window.maxMs))
+    : endOfMonth(addMonths(reference, HORIZON_MONTHS));
 
-  for (let offset = -1; offset <= HORIZON_MONTHS + 1; offset++) {
+  const first = window ? startOfMonth(new Date(window.minMs)) : addMonths(refMonth, -1);
+  const firstOffset = window
+    ? (first.getFullYear() - refMonth.getFullYear()) * 12 + (first.getMonth() - refMonth.getMonth())
+    : -1;
+  const lastOffset = window
+    ? (horizonEnd.getFullYear() - refMonth.getFullYear()) * 12 +
+      (horizonEnd.getMonth() - refMonth.getMonth()) +
+      1
+    : HORIZON_MONTHS + 1;
+
+  for (let offset = firstOffset; offset <= lastOffset; offset++) {
     const dueMonth = addMonths(refMonth, offset);
     if (dueMonth > horizonEnd) break;
     const periodMonth = addMonths(dueMonth, -1);
@@ -121,12 +156,13 @@ function generateTdsMonthlyDeposits(templateId: string, reference: Date): Genera
       );
     }
   }
-  return filterDueHorizon(out, reference);
+  return filterDueHorizon(out, reference, window);
 }
 
 function generateForTemplate(
   template: StatutoryInfoTemplate,
-  ref: Date
+  ref: Date,
+  window?: StatutoryDueWindow
 ): GeneratedStatutoryDue[] {
   if (!template.promptEnabled || template.dueRule.kind === "reference_only") {
     return [];
@@ -139,10 +175,10 @@ function generateForTemplate(
 
   switch (rule.kind) {
     case "monthly_day_next_month":
-      return generateMonthlyDueOccurrences(template.id, rule.day ?? 11, ref, "monthly");
+      return generateMonthlyDueOccurrences(template.id, rule.day ?? 11, ref, "monthly", window);
 
     case "qrmp_pmt06_monthly":
-      return generateMonthlyDueOccurrences(template.id, rule.day ?? 25, ref, "qrmp_pmt06");
+      return generateMonthlyDueOccurrences(template.id, rule.day ?? 25, ref, "qrmp_pmt06", window);
 
     case "quarterly_day_after_quarter": {
       const day = rule.day ?? 13;
@@ -201,7 +237,7 @@ function generateForTemplate(
       break;
     }
     case "tds_monthly_deposit":
-      return generateTdsMonthlyDeposits(template.id, ref);
+      return generateTdsMonthlyDeposits(template.id, ref, window);
 
     case "tds_quarterly_return": {
       const day = rule.day ?? 31;
@@ -227,13 +263,16 @@ function generateForTemplate(
       break;
   }
 
-  return filterDueHorizon(out, ref);
+  return filterDueHorizon(out, ref, window);
 }
 
-export function generateAllStatutoryDues(reference: Date = new Date()): GeneratedStatutoryDue[] {
+export function generateAllStatutoryDues(
+  reference: Date = new Date(),
+  window?: StatutoryDueWindow
+): GeneratedStatutoryDue[] {
   const all: GeneratedStatutoryDue[] = [];
   for (const t of getEnabledStatutoryTemplates()) {
-    all.push(...generateForTemplate(t, reference));
+    all.push(...generateForTemplate(t, reference, window));
   }
   const byKey = new Map<string, GeneratedStatutoryDue>();
   for (const d of all) {

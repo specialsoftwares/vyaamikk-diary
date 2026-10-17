@@ -3,7 +3,9 @@
  * UI screens render sections from this service only (no screen-local filtering).
  */
 
-import { startOfDay } from "date-fns";
+import { addDays } from "date-fns";
+
+import { lastSevenDayBounds } from "./youDashboardSummary";
 
 import type { BusinessEntry } from "@/domain/businessEntry";
 import type { ProfessionalServicePack } from "@/domain/professionalPack";
@@ -28,8 +30,6 @@ import type {
   AtAGlanceViewModel,
 } from "./atAGlanceTypes";
 
-const ONE_DAY = 86_400_000;
-const LIST_LIMIT = 1200;
 /** Max rows per section on At-a-Glance detail screens. */
 export const AT_A_GLANCE_SECTION_PREVIEW_CAP = 5;
 
@@ -53,15 +53,16 @@ export function getAtAGlanceBounds(now = Date.now()): AtAGlanceBounds {
 }
 
 function computeAtAGlanceBounds(now = Date.now()): AtAGlanceBounds {
-  const todayStart = startOfDay(new Date(now)).getTime();
+  const { todayStart, startMs, endMs } = lastSevenDayBounds(now);
+  const tomorrowStart = endMs;
   return {
     now,
     todayStart,
-    todayEnd: todayStart + ONE_DAY,
-    tomorrowStart: todayStart + ONE_DAY,
-    tomorrowEnd: todayStart + 2 * ONE_DAY,
-    weekStart: todayStart - 6 * ONE_DAY,
-    upcomingWeekEnd: todayStart + 7 * ONE_DAY,
+    todayEnd: endMs,
+    tomorrowStart,
+    tomorrowEnd: addDays(new Date(tomorrowStart), 1).getTime(),
+    weekStart: startMs,
+    upcomingWeekEnd: addDays(new Date(todayStart), 7).getTime(),
   };
 }
 
@@ -513,15 +514,18 @@ function buildUpcomingView(data: AtAGlanceSourceData, t: TFn, b: AtAGlanceBounds
     pushSection(sections, u, sortByDateAsc(byUrgency[u]));
   }
 
-  const totalItems = sections.reduce((n, s) => n + s.data.length, 0);
+  const totalItems = URGENCY_ORDER.filter((urgency) => urgency !== "overdue").reduce(
+    (n, urgency) => n + byUrgency[urgency].length,
+    0
+  );
   return { view: "upcoming", sections, totalItems, isEmpty: totalItems === 0 };
 }
 
 export async function loadAtAGlanceSourceData(userId: string): Promise<AtAGlanceSourceData> {
   const [entries, letterheadDocs, packs, creditRecords] = await Promise.all([
-    getDiaryRepository().list(userId, { includeDeleted: false, limit: LIST_LIMIT }),
+    getDiaryRepository().list(userId, { includeDeleted: false }),
     getLetterheadDocumentRepository().list(userId),
-    getProfessionalPackRepository().list(userId, { includeDeleted: false, limit: 500 }),
+    getProfessionalPackRepository().list(userId, { includeDeleted: false }),
     getCustomerCreditRepository()
       .list(userId, { limit: 500 })
       .catch(() => []),

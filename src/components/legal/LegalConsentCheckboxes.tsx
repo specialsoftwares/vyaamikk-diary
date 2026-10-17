@@ -1,8 +1,8 @@
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { useRouter } from "expo-router";
 
 import type { LegalDocumentId } from "@/config/legal";
+import { openPublicLinkOrExplain } from "@/config/publicLinks";
 import { AUTH_CONSENT_JOINER } from "@/components/legal/authConsentLine";
 import { useT } from "@/i18n";
 import { spacing, typography, useThemedStyles } from "@/theme";
@@ -27,7 +27,6 @@ export function LegalConsentCheckboxes({
   onOpenDocument,
 }: LegalConsentCheckboxesProps) {
   const t = useT();
-  const router = useRouter();
   const isAuth = variant === "auth" || variant === "authCompact";
   const compact = variant === "authCompact";
 
@@ -89,7 +88,7 @@ export function LegalConsentCheckboxes({
       onOpenDocument(doc);
       return;
     }
-    router.push({ pathname: "/legal/[doc]", params: { doc } });
+    void openPublicLinkOrExplain(doc === "privacy" ? "privacy" : "terms");
   };
 
   const Row = ({
@@ -101,18 +100,19 @@ export function LegalConsentCheckboxes({
     onToggle: () => void;
     children: React.ReactNode;
   }) => (
-    <Pressable
-      style={[styles.row, compact && { minHeight: 44 }]}
-      onPress={onToggle}
-      hitSlop={compact ? { top: 6, bottom: 6, left: 6, right: 6 } : undefined}
-      accessibilityRole="checkbox"
-      accessibilityState={{ checked }}
-    >
-      <View style={[styles.box, checked ? styles.boxChecked : null]}>
-        {checked ? <Text style={styles.tick}>✓</Text> : null}
-      </View>
+    <View style={[styles.row, compact && { minHeight: 44 }]}>
+      <Pressable
+        onPress={onToggle}
+        hitSlop={compact ? { top: 6, bottom: 6, left: 6, right: 6 } : undefined}
+        accessibilityRole="checkbox"
+        accessibilityState={{ checked }}
+      >
+        <View style={[styles.box, checked ? styles.boxChecked : null]}>
+          {checked ? <Text style={styles.tick}>✓</Text> : null}
+        </View>
+      </Pressable>
       <Text style={styles.label}>{children}</Text>
-    </Pressable>
+    </View>
   );
 
   if (compact) {

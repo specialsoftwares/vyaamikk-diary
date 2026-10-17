@@ -12,6 +12,7 @@ import {
   type DiarySyncBadge,
 } from "@/services/diary/mergeLocalUnsynced";
 import { entrySearchBlob } from "@/utils/businessEntry/display";
+import { subscribeDomainChanges } from "@/services/dataChanges/domainChanges";
 
 interface DiaryListState {
   entries: BusinessEntry[];
@@ -150,6 +151,14 @@ export function useDiaryList(
   useEffect(() => {
     void fetchOnce("mount");
   }, [fetchOnce]);
+
+  useEffect(() => {
+    if (!userId) return;
+    return subscribeDomainChanges((change) => {
+      if (change.ownerUid !== userId || change.source !== "diary") return;
+      void fetchOnce("refresh");
+    });
+  }, [fetchOnce, userId]);
 
   const refresh = useCallback(() => fetchOnce("refresh"), [fetchOnce]);
   const reload = useCallback(() => fetchOnce("refresh"), [fetchOnce]);

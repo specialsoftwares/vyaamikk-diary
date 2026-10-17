@@ -14,7 +14,7 @@ assert.equal(
 );
 assert.equal(
   vyaaflowCopy.paragraphs.statutory,
-  "Statutory reminders show standard GST, income-tax, TDS/TCS and LLP due dates for reference. They are informational only. Check applicability and the final date on the official portal or with your CA, CS or tax professional."
+  "Statutory reminders show standard GST, income-tax, TDS/TCS and LLP due dates. Check applicability and the final date on the official portal or with your CA, CS or tax professional."
 );
 assert.equal(vyaaflowCopy.screenTitle, "VyaaFlow");
 assert.equal(vyaaflowCopy.calendarSection, "Important Business Dates");
@@ -53,9 +53,13 @@ const calendarService = readFileSync(
   "utf8"
 );
 assert.match(calendarService, /statutoryItemsToMapRecords/);
-assert.match(calendarService, /e\.reminder/);
-assert.match(calendarService, /dueDate/);
 assert.match(calendarService, /categoryKey: "statutory"/);
+const occurrenceMarks = readFileSync(
+  join(root, "src/services/calendarMaps/calendarOccurrenceMarks.ts"),
+  "utf8"
+);
+assert.match(occurrenceMarks, /e\.reminder/);
+assert.match(occurrenceMarks, /dueDate/);
 
 const calendarScreen = readFileSync(join(root, "app/(app)/(tabs)/calendar.tsx"), "utf8");
 const introScreen = readFileSync(

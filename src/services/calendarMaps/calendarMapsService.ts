@@ -22,6 +22,7 @@ import {
 } from "@/utils/location/entryLocation";
 import { entryTypeLabelKey } from "@/utils/businessEntry/display";
 import { dayKey } from "@/utils/date";
+import { buildOccurrenceMarks, entryCalendarDates } from "./calendarOccurrenceMarks";
 
 import type {
   CalendarDayViewModel,
@@ -32,7 +33,12 @@ import type {
   CalendarMarkedDots,
 } from "./calendarMapsTypes";
 
-const LIST_LIMIT = 1200;
+export type CalendarSourceName = "diary" | "legacyLetter" | "professionalPack";
+
+export interface CalendarMapsLoadResult {
+  data: CalendarMapsSourceData;
+  failedSources: CalendarSourceName[];
+}
 
 type TFn = (k: string, vars?: Record<string, string | number>) => string;
 
@@ -90,24 +96,6 @@ function categoryForEntry(type: BusinessEntryType): CalendarMapCategoryKey {
     default:
       return "work";
   }
-}
-
-function entryCalendarDates(entry: BusinessEntry): number[] {
-  const p = entry.payload as unknown as Record<string, unknown>;
-  const dates = [entry.entryDate];
-  if (entry.reminder?.at) dates.push(entry.reminder.at);
-  if (entry.entryType === "payment_request" && p.dueDate) dates.push(Number(p.dueDate));
-  if (entry.entryType === "reminder_gst_return" && p.dueDate) dates.push(Number(p.dueDate));
-  if (entry.entryType === "reminder_purchase" && p.requiredByDate) {
-    dates.push(Number(p.requiredByDate));
-  }
-  if (entry.entryType === "material_dispatched" && p.expectedDeliveryDate) {
-    dates.push(Number(p.expectedDeliveryDate));
-  }
-  if (entry.entryType === "business_cash_given" && p.expectedSettlementDate) {
-    dates.push(Number(p.expectedSettlementDate));
-  }
-  return dates.filter((d) => Number.isFinite(d) && d > 0);
 }
 
 function entryToMapRecord(entry: BusinessEntry, t: TFn, dateKey: string, sortMs: number): CalendarMapRecord {
@@ -240,46 +228,50 @@ export function statutoryItemsToMapRecords(
   }));
 }
 
-export async function loadCalendarMapsSourceData(userId: string): Promise<CalendarMapsSourceData> {
+async function readSource<T>(
+  source: CalendarSourceName,
+  read: () => Promise<T>
+): Promise<{ source: CalendarSourceName; value: T | null; failed: boolean }> {
+  try {
+    return { source, value: await read(), failed: false };
+  } catch {
+    return { source, value: null, failed: true };
+  }
+}
+
+/**
+ * Each repository is read on its own. A legacy-letter failure does not drop
+ * diary or pack rows. Diary and pack lists are not sliced after the
+ * repository returns: the previous 1,200 and 500 caps hid older due dates
+ * that the repository had already loaded.
+ */
+export async function loadCalendarMapsSourceData(userId: string): Promise<CalendarMapsLoadResult> {
   const [entries, letterheadDocs, packs] = await Promise.all([
-    getDiaryRepository().list(userId, { includeDeleted: false, limit: LIST_LIMIT }),
-    getLetterheadDocumentRepository().list(userId),
-    getProfessionalPackRepository().list(userId, { includeDeleted: false, limit: 500 }),
+    readSource("diary", () =>
+      getDiaryRepository().list(userId, { includeDeleted: false })
+    ),
+    readSource("legacyLetter", () => getLetterheadDocumentRepository().list(userId)),
+    readSource("professionalPack", () =>
+      getProfessionalPackRepository().list(userId, { includeDeleted: false })
+    ),
   ]);
+  const failedSources = [entries, letterheadDocs, packs]
+    .filter((row) => row.failed)
+    .map((row) => row.source);
   return {
-    entries: entries.filter((e) => !e.deletedAt),
-    packs: packs.filter((p) => !p.deletedAt),
-    letterheadDocs,
+    failedSources,
+    data: {
+      entries: (entries.value ?? []).filter((e) => !e.deletedAt),
+      packs: (packs.value ?? []).filter((p) => !p.deletedAt),
+      letterheadDocs: letterheadDocs.value ?? [],
+    },
   };
 }
 
 export function buildMarkedDatesForMonth(
   data: CalendarMapsSourceData
 ): Record<string, CalendarMarkedDots> {
-  const out: Record<string, CalendarMarkedDots> = {};
-
-  const mark = (key: string, field: keyof CalendarMarkedDots) => {
-    const prev = out[key] ?? { entry: false, followUp: false, pack: false, statutory: false };
-    out[key] = { ...prev, [field]: true };
-  };
-
-  for (const e of data.entries) {
-    mark(dayKey(e.entryDate), "entry");
-    if (e.reminder) mark(dayKey(e.reminder.at), "followUp");
-    for (const d of entryCalendarDates(e)) {
-      if (d !== e.entryDate && e.reminder?.at !== d) {
-        mark(dayKey(d), "entry");
-      }
-    }
-  }
-  for (const p of data.packs) {
-    const due = p.dueDate ?? p.reminder?.at ?? p.matterDate;
-    if (due) mark(dayKey(due), "pack");
-  }
-  for (const doc of data.letterheadDocs) {
-    mark(dayKey(doc.input.date), "entry");
-  }
-  return out;
+  return buildOccurrenceMarks(data);
 }
 
 export function buildCalendarDayView(

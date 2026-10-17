@@ -5,11 +5,11 @@
 import type { BusinessEntry } from "@/domain/businessEntry";
 import type { ProfessionalServicePack } from "@/domain/professionalPack";
 import type { LetterheadDocument } from "@/services/letterhead";
-import { entryListSummary, entryTypeLabelKey } from "@/utils/businessEntry/display";
-import { formatEntryDate, todayStartMs } from "@/utils/date";
-import { matterLabelKey, statusLabelKey } from "@/utils/professionalPack/display";
+import { addDays, startOfDay } from "date-fns";
 
-const ONE_DAY = 86_400_000;
+import { entryListSummary, entryTypeLabelKey } from "@/utils/businessEntry/display";
+import { formatEntryDate } from "@/utils/date";
+import { matterLabelKey, statusLabelKey } from "@/utils/professionalPack/display";
 
 export const YOU_DASHBOARD_ENTRY_LIMIT = 80;
 export const YOU_LETTERHEAD_SCAN_CAP = 30;
@@ -111,28 +111,56 @@ function deriveYouDashboardVisibility(
   };
 }
 
+/** Inclusive local range [start of today−6 calendar days, start of tomorrow). */
+export function lastSevenDayBounds(nowMs = Date.now()): { startMs: number; endMs: number; todayStart: number } {
+  const todayStart = startOfDay(new Date(nowMs)).getTime();
+  return {
+    todayStart,
+    startMs: addDays(new Date(todayStart), -6).getTime(),
+    endMs: addDays(new Date(todayStart), 1).getTime(),
+  };
+}
+
+function futureStamp(entry: BusinessEntry): number[] {
+  const payload = entry.payload as unknown as Record<string, unknown>;
+  const dates = entry.reminder ? [entry.reminder.at] : [];
+  for (const key of ["dueDate", "requiredByDate", "expectedDeliveryDate", "expectedSettlementDate"]) {
+    const value = Number(payload[key]);
+    if (Number.isFinite(value) && value > 0) dates.push(value);
+  }
+  return dates;
+}
+
+function futureActionableEntry(entry: BusinessEntry, nowMs: number): boolean {
+  return futureStamp(entry).some((value) => value > nowMs);
+}
+
+function futureActionablePack(pack: ProfessionalServicePack, nowMs: number): boolean {
+  const dates = [pack.dueDate, pack.reminder?.at].filter((value): value is number => value != null);
+  return dates.some((value) => value > nowMs);
+}
+
 function buildYouDashboardSummaryCore(
   entries: BusinessEntry[],
   letterheadDocs: LetterheadDocument[],
   proPacks: ProfessionalServicePack[],
-  t: TFn
+  t: TFn,
+  nowMs = Date.now()
 ): YouDashboardSummary {
-  const today = todayStartMs();
-  const weekStart = today - 6 * ONE_DAY;
-  const now = Date.now();
+  const { todayStart, startMs, endMs } = lastSevenDayBounds(nowMs);
   let todayCount = 0;
   let weekCount = 0;
   let upcomingCount = 0;
 
   for (const e of entries) {
-    if (e.entryDate >= today && e.entryDate < today + ONE_DAY) todayCount++;
-    if (e.entryDate >= weekStart) weekCount++;
-    if (e.reminder && e.reminder.at > now) upcomingCount++;
+    if (e.entryDate >= todayStart && e.entryDate < endMs) todayCount++;
+    if (e.entryDate >= startMs && e.entryDate < endMs) weekCount++;
+    if (futureActionableEntry(e, nowMs)) upcomingCount++;
   }
   for (const p of proPacks) {
-    if (p.matterDate >= today && p.matterDate < today + ONE_DAY) todayCount++;
-    if (p.matterDate >= weekStart) weekCount++;
-    if (p.reminder && p.reminder.at > now) upcomingCount++;
+    if (p.matterDate >= todayStart && p.matterDate < endMs) todayCount++;
+    if (p.matterDate >= startMs && p.matterDate < endMs) weekCount++;
+    if (futureActionablePack(p, nowMs)) upcomingCount++;
   }
 
   const recent = entries.slice(0, YOU_RECENT_CAP);
@@ -154,13 +182,13 @@ function buildYouDashboardSummaryCore(
 
   const attentionAll: YouAttentionItem[] = [];
   for (const e of entries) {
-    if (e.reminder && e.reminder.at > now) {
+    if (e.reminder && e.reminder.at > nowMs) {
       attentionAll.push({ kind: "entry", at: e.reminder.at, entry: e });
     }
   }
   for (const p of proPacks) {
     const at = p.reminder?.at ?? p.dueDate;
-    if (at && at > now) attentionAll.push({ kind: "pack", at, pack: p });
+    if (at && at > nowMs) attentionAll.push({ kind: "pack", at, pack: p });
   }
   attentionAll.sort((a, b) => a.at - b.at);
 
@@ -224,9 +252,10 @@ export function buildYouDashboardSummary(
   entries: BusinessEntry[],
   letterheadDocs: LetterheadDocument[],
   proPacks: ProfessionalServicePack[],
-  t: TFn
+  t: TFn,
+  nowMs = Date.now()
 ): YouDashboardSummary {
-  return buildYouDashboardSummaryCore(entries, letterheadDocs, proPacks, t);
+  return buildYouDashboardSummaryCore(entries, letterheadDocs, proPacks, t, nowMs);
 }
 
 /** Summary + visibility flags for the You dashboard command centre. */
@@ -235,9 +264,10 @@ export function buildYouDashboardViewModel(
   letterheadDocs: LetterheadDocument[],
   proPacks: ProfessionalServicePack[],
   activeDraftCount: number,
-  t: TFn
+  t: TFn,
+  nowMs = Date.now()
 ): YouDashboardViewModel {
-  const summary = buildYouDashboardSummaryCore(entries, letterheadDocs, proPacks, t);
+  const summary = buildYouDashboardSummaryCore(entries, letterheadDocs, proPacks, t, nowMs);
   return {
     ...summary,
     visibility: deriveYouDashboardVisibility(

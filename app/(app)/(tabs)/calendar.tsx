@@ -54,6 +54,7 @@ export default function CalendarMapsTab() {
   const colors = useThemeColors();
   const { resolvedMode } = useTheme();
   const [selectedDate, setSelectedDate] = useState(() => dayKey(Date.now()));
+  const [visibleMonth, setVisibleMonth] = useState(selectedDate);
   const [agendaFilter, setAgendaFilter] = useState<VyaaflowAgendaFilter>("all");
 
   const {
@@ -64,7 +65,7 @@ export default function CalendarMapsTab() {
     refresh,
     marked,
     dayView,
-  } = useCalendarMapsData(user?.uid ?? null, selectedDate);
+  } = useCalendarMapsData(user?.uid ?? null, selectedDate, visibleMonth);
 
   const { refreshNote, refreshControl } = useAppRefresh({
     onReload: refresh,
@@ -216,7 +217,8 @@ export default function CalendarMapsTab() {
       <View>
         <View style={styles.calendarCard}>
           <Calendar
-            current={selectedDate}
+            current={visibleMonth}
+            onMonthChange={(month: DateData) => setVisibleMonth(month.dateString)}
             onDayPress={(d: DateData) => setSelectedDate(d.dateString)}
             markingType="multi-dot"
             markedDates={markedDates}

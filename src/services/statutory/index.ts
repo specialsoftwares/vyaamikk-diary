@@ -4,6 +4,7 @@ export {
   getStatutoryTemplate,
 } from "./statutoryInfoRegistry";
 export {
+  buildStatutoryCalendarView,
   buildStatutoryTabViewModel,
   dismissStatutoryPrompt,
   getStatutoryPromptCardsForToday,

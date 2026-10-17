@@ -11,6 +11,8 @@ import {
 import { stableRecordId } from "@/services/records/stableRecordId";
 import { normaliseProfessionalPack, packToStorage } from "./normalize";
 
+import { publishDomainChange } from "@/services/dataChanges/domainChanges";
+
 import type { CreateProfessionalPackInput } from "./types";
 
 function reminderJson(r: EntryReminder | null) {
@@ -80,5 +82,6 @@ export async function createProfessionalPackAtomic(
     },
     hooks,
   });
+  publishDomainChange(userId, "professionalPack");
   return result.record;
 }

@@ -269,7 +269,7 @@ function driveLogger(): void {
     setCrashReportingEnabled(true);
     assert.equal(collectionEnabled, true);
     setUserId(UID_A);
-    assert.equal(userId, UID_A.slice(0, 8), "only an 8-char uid prefix is set");
+    assert.equal(userId, "", "app-supplied account ids are not sent");
     assert.notEqual(userId, UID_A);
     recordError(hostileError(), `ErrorBoundary ${OTP}`);
     recordError(hostileError(), "startup");
@@ -297,7 +297,7 @@ function driveLogger(): void {
     // Logout / account switch path.
     setCrashReportingEnabled(true);
     setUserId(UID_B);
-    assert.equal(userId, UID_B.slice(0, 8));
+    assert.equal(userId, "");
     clearUser();
     assert.equal(userId, "", "clearUser resets identity");
     setCrashReportingEnabled(false);

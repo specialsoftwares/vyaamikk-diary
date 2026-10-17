@@ -175,6 +175,7 @@
     "test:auth-production-presentation": "npx --yes tsx src/services/auth/authProductionPresentation.test.ts",
     "test:auth-perf-checkpoint": "npx --yes tsx src/auth-v2/authPerformanceCheckpoint.contract.test.ts",
     "test:auth-flow-perf": "npx --yes tsx src/services/auth/authFlowPerf.test.ts && npx --yes tsx src/services/auth/idTokenRefresh.test.ts && npx --yes tsx functions/src/email/challengeTiming.test.ts",
+    "test:five-issue-correction": "npx --yes tsx src/services/dataChanges/domainChanges.test.ts && npx --yes tsx src/services/calendarMaps/calendarMarkers.correction.test.ts && npx --yes tsx src/services/dashboard/lastSevenDays.correction.test.ts && npx --yes tsx src/services/statutory/statutoryWindow.correction.test.ts && npx --yes tsx src/services/telemetry/diagnosticsPreference.test.ts && npx --yes tsx src/components/settings/settingsPresentation.contract.test.ts",
     "test:phone-send-persistence-safeguard": "npx --yes tsx src/services/auth/phoneSendPersistenceSafeguard.test.ts",
     "test:onboarding-wizard": "npx --yes tsx src/auth/onboardingWizard.test.ts",
     "test:wizard-nav-race": "npx --yes tsx src/auth/wizardNavigationController.race.test.ts",

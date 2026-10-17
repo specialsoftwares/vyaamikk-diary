@@ -13,6 +13,7 @@ import { Screen, SkeletonLoadingPanel, SkeletonSettingsSection, LocaleUiText } f
 import { isBillingUxPreviewEnabled } from "@/components/billing/billingUxPreviewGate";
 import { BUSINESS_INSIGHTS_HREF } from "@/content/insights/entry";
 import { getAuthEntryHref } from "@/config/authWrapper";
+import { openPublicLinkOrExplain } from "@/config/publicLinks";
 import { useAuth } from "@/state/auth";
 import { useT } from "@/i18n";
 import { spacing, typography, useThemedStyles } from "@/theme";
@@ -30,8 +31,8 @@ export default function SettingsTab() {
         color: colors.textMuted,
         marginBottom: spacing.sm,
         marginTop: spacing.md,
-        textTransform: "uppercase",
-        letterSpacing: 0.6,
+        textTransform: "none",
+        letterSpacing: 0.2,
       },
       sectionFirst: { marginTop: 0 },
       sectionGap: { height: spacing.sm },
@@ -88,12 +89,16 @@ export default function SettingsTab() {
     () => router.push("/(app)/settings/identity"),
     [router]
   );
-  const onLegalHub = useCallback(() => router.push("/(app)/settings/legal"), [router]);
+  const onPrivacy = useCallback(() => {
+    void openPublicLinkOrExplain("privacy");
+  }, []);
+  const onTerms = useCallback(() => {
+    void openPublicLinkOrExplain("terms");
+  }, []);
   const onAbout = useCallback(() => router.push("/(app)/settings/about"), [router]);
-  const onDisclaimer = useCallback(
-    () => router.push("/(app)/settings/disclaimer"),
-    [router]
-  );
+  const onSupport = useCallback(() => {
+    void openPublicLinkOrExplain("support");
+  }, []);
   const onDelete = useCallback(() => router.push("/(app)/settings/delete"), [router]);
   const onPdfPrivacy = useCallback(() => router.push("/(app)/settings/pdf-privacy"), [router]);
   const onBusinessInsights = useCallback(
@@ -132,52 +137,85 @@ export default function SettingsTab() {
         subtitle={t("settings.profileIdentitySubtitle")}
         onPress={onProfileIdentity}
       />
-      <SettingsNavCard
-        icon="credit-card-outline"
-        title={t("settings.subscriptionItem")}
-        subtitle={t("settings.subscriptionSubtitle")}
-        onPress={onSubscription}
-      />
-
-      <LocaleUiText style={styles.sectionLabel}>{t("settings.sectionAccountApp")}</LocaleUiText>
-      <SettingsNavCard
-        icon="account-remove-outline"
-        title={t("settings.deleteAccountAndData")}
-        subtitle={t("settings.deleteAccountSubtitle")}
-        onPress={onDelete}
-        accent="danger"
-      />
 
       <LocaleUiText style={styles.sectionLabel}>{t("settings.sectionInsights")}</LocaleUiText>
-      <SettingsNavCard
-        icon="chart-timeline-variant-shimmer"
-        title={t("settings.businessInsightsItem")}
-        subtitle={t("settings.businessInsightsSubtitle")}
-        onPress={onBusinessInsights}
-      />
+      <SettingsNavGroup>
+        <SettingsNavCard
+          icon="chart-timeline-variant-shimmer"
+          title={t("settings.businessInsightsItem")}
+          subtitle={t("settings.businessInsightsSubtitle")}
+          onPress={onBusinessInsights}
+          embedded
+        />
+        <SettingsNavCard
+          icon="credit-card-outline"
+          title={t("settings.subscriptionItem")}
+          subtitle={t("settings.subscriptionSubtitle")}
+          onPress={onSubscription}
+          embedded
+        />
+      </SettingsNavGroup>
+
+      <LocaleUiText style={styles.sectionLabel}>{t("settings.sectionAccountApp")}</LocaleUiText>
+      <SettingsNavGroup>
+        <SettingsNavCard
+          icon="logout"
+          title={signingOut ? t("settings.signingOut") : t("settings.logout")}
+          onPress={signingOut ? undefined : confirmSignOut}
+          embedded
+        />
+        <SettingsNavCard
+          icon="account-remove-outline"
+          title={t("settings.deleteAccountAndData")}
+          subtitle={t("settings.deleteAccountSubtitle")}
+          onPress={onDelete}
+          accent="danger"
+          embedded
+        />
+      </SettingsNavGroup>
+
+      <LocaleUiText style={styles.sectionLabel}>{t("settings.sectionAbout")}</LocaleUiText>
+      <SettingsNavGroup>
+        <SettingsNavCard
+          icon="help-circle-outline"
+          title={t("settings.supportItem")}
+          subtitle={t("settings.supportSubtitle")}
+          onPress={onSupport}
+          embedded
+        />
+        <CrashReportsPreferenceRow />
+        <SettingsNavCard
+          icon="information-outline"
+          title={t("settings.about")}
+          subtitle={t("settings.aboutSubtitle")}
+          onPress={onAbout}
+          embedded
+        />
+      </SettingsNavGroup>
 
       <LocaleUiText style={styles.sectionLabel}>{t("settings.sectionPrivacy")}</LocaleUiText>
       <SettingsNavGroup>
+        <SettingsNavCard
+          icon="shield-check-outline"
+          title={t("legal.linkPrivacy")}
+          subtitle={t("settings.legalCombinedSubtitle")}
+          onPress={onPrivacy}
+          external
+          embedded
+        />
+        <SettingsNavCard
+          icon="file-document-outline"
+          title={t("legal.linkTerms")}
+          onPress={onTerms}
+          external
+          embedded
+        />
         <SettingsNavCard
           icon="shield-lock-outline"
           title={t("settings.pdfPrivacy")}
           onPress={onPdfPrivacy}
           embedded
         />
-        <SettingsNavCard
-          icon="file-document-outline"
-          title={t("legal.linkDisclaimer")}
-          onPress={onDisclaimer}
-          embedded
-        />
-        <SettingsNavCard
-          icon="shield-check-outline"
-          title={t("settings.legalCombined")}
-          subtitle={t("settings.legalCombinedSubtitle")}
-          onPress={onLegalHub}
-          embedded
-        />
-        <CrashReportsPreferenceRow />
       </SettingsNavGroup>
 
       {__DEV__ ? (
@@ -201,25 +239,7 @@ export default function SettingsTab() {
         </>
       ) : null}
 
-      <LocaleUiText style={styles.sectionLabel}>{t("settings.sectionAbout")}</LocaleUiText>
-      <SettingsNavGroup>
-        <SettingsNavCard
-          icon="information-outline"
-          title={t("settings.about")}
-          subtitle={t("settings.aboutSubtitle")}
-          onPress={onAbout}
-          embedded
-        />
-      </SettingsNavGroup>
       <LocaleUiText style={styles.aboutBlurb}>{t("settings.aboutFooterLine")}</LocaleUiText>
-
-      <View style={styles.sectionGap} />
-      <SettingsNavCard
-        icon="logout"
-        title={signingOut ? t("settings.signingOut") : t("settings.logout")}
-        onPress={signingOut ? undefined : confirmSignOut}
-        accent="danger"
-      />
 
       <View style={styles.footer}>
         <LocaleUiText style={styles.footerText}>{t("app.name")}</LocaleUiText>

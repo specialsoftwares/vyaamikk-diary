@@ -1,7 +1,5 @@
 import React from "react";
 import { Pressable, StyleSheet } from "react-native";
-import { useRouter } from "expo-router";
-
 import { SettingsNavCard, SettingsNavGroup } from "@/components/settings";
 import { Header, Screen, LocaleUiText } from "@/components/ui";
 import { openPublicLinkOrExplain } from "@/config/publicLinks";
@@ -10,7 +8,6 @@ import { spacing, typography, useThemedStyles } from "@/theme";
 
 export default function LegalHubScreen() {
   const t = useT();
-  const router = useRouter();
   const styles = useThemedStyles((c) =>
     StyleSheet.create({
       intro: { ...typography.body, color: c.textMuted, marginBottom: spacing.md, lineHeight: 22 },
@@ -26,13 +23,13 @@ export default function LegalHubScreen() {
         <SettingsNavCard
           icon="shield-check-outline"
           title={t("settings.privacy")}
-          onPress={() => router.push({ pathname: "/legal/[doc]", params: { doc: "privacy" } })}
+          onPress={() => void openPublicLinkOrExplain("privacy")}
           embedded
         />
         <SettingsNavCard
           icon="file-document-outline"
           title={t("settings.terms")}
-          onPress={() => router.push({ pathname: "/legal/[doc]", params: { doc: "terms" } })}
+          onPress={() => void openPublicLinkOrExplain("terms")}
           embedded
         />
       </SettingsNavGroup>

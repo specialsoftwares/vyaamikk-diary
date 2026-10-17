@@ -12,6 +12,7 @@ import type { CreateBusinessEntryInput, UpdateBusinessEntryInput } from "@/servi
 import { mergeBusinessEntryUpdate } from "@/services/diary/mergeEntryUpdate";
 import { queueRecordFollowUpsSync } from "@/services/diary/recordFollowUps";
 import { entryToCreateInput, entryToUpdateInput } from "@/sync/diarySyncIntent";
+import { publishDomainChange } from "@/services/dataChanges/domainChanges";
 
 export type DiaryLocalPersistResult = {
   queueId: string;
@@ -85,6 +86,7 @@ export function persistDiaryCreateIntent(
     );
     queueRecordFollowUpsSync(entry, nextRevision);
   });
+  publishDomainChange(entry.userId, "diary");
   return queueId;
 }
 
@@ -191,5 +193,6 @@ export function persistDiaryUpdateIntent(
     };
   });
   if (!result) throw new AppError("unknown", "Failed to persist diary update");
+  publishDomainChange(userId, "diary");
   return result;
 }

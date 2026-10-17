@@ -77,16 +77,10 @@ export function recordError(error: Error, context?: string): void {
   }
 }
 
-export function setUserId(uid: string): void {
+export function setUserId(_uid: string): void {
   if (!_enabled) return;
-  try {
-    const client = getCrashlytics();
-    if (!client) return;
-    // Store only a truncated UID — never the full UID in crash reports.
-    void Promise.resolve(client.setUserId(uid.slice(0, 8))).catch(() => {});
-  } catch {
-    // Never throw from the crash reporter.
-  }
+  // Account identifiers are not diagnostic user ids, including a prefix.
+  clearUser();
 }
 
 export function log(message: string): void {

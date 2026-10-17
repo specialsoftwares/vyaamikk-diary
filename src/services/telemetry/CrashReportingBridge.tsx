@@ -2,7 +2,7 @@ import React, { useEffect } from "react";
 
 import { useAuth } from "@/state/auth";
 
-import { clearUser, setCrashReportingEnabled, setUserId } from "./crashReporter";
+import { clearUser, setCrashReportingEnabled } from "./crashReporter";
 import { readTelemetryConsent } from "./telemetryConsent";
 
 /**
@@ -20,8 +20,7 @@ export function CrashReportingBridge() {
       if (cancelled) return;
       const enabled = consent === true;
       setCrashReportingEnabled(enabled);
-      if (enabled && uid) setUserId(uid);
-      else clearUser();
+      clearUser();
     })();
     return () => {
       cancelled = true;

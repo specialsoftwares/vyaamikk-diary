@@ -6,12 +6,7 @@ import {
   type BusinessInsightsDashboard,
 } from "@/services/insights/businessInsightsDashboard";
 import { scheduleInsightRebuild } from "@/services/insights/insightSync";
-import {
-  buildYouDashboardViewModel,
-  YOU_DASHBOARD_ENTRY_LIMIT,
-  YOU_LETTERHEAD_SCAN_CAP,
-  YOU_PRO_PACK_SCAN_LIMIT,
-} from "@/services/dashboard";
+import { buildYouDashboardViewModel } from "@/services/dashboard";
 import { getDiaryRepository } from "@/services/diary";
 import { formDraftsRepository } from "@/repositories/formDraftsRepository";
 import { getLetterheadDocumentRepository } from "@/services/letterhead";
@@ -56,7 +51,7 @@ export function useBusinessInsightsDashboard(
     try {
       const [entries, letterheadDocs, proPacks, draftsCount] = await Promise.all([
         getDiaryRepository()
-          .list(userId, { includeDeleted: false, limit: YOU_DASHBOARD_ENTRY_LIMIT })
+          .list(userId, { includeDeleted: false })
           .then(dedupeDiaryEntries),
         getLetterheadDocumentRepository()
           .list(userId)
@@ -64,10 +59,9 @@ export function useBusinessInsightsDashboard(
             d
               .filter((doc) => doc.pdfUri || doc.saved)
               .sort((a, b) => b.updatedAt - a.updatedAt)
-              .slice(0, YOU_LETTERHEAD_SCAN_CAP)
           ),
         getProfessionalPackRepository()
-          .list(userId, { limit: YOU_PRO_PACK_SCAN_LIMIT })
+          .list(userId, { includeDeleted: false })
           .then(dedupeProfessionalPacks)
           .catch(() => []),
         formDraftsRepository.countActiveUserDrafts(userId),
