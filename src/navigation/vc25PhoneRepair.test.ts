@@ -162,7 +162,7 @@ assert.doesNotMatch(line, /₹₹/);
 assert.equal((en as { calendarMaps: { tabLabel: string } }).calendarMaps.tabLabel, "VyaaFlow");
 assert.equal((en as { savedRecords: { tabLabel: string } }).savedRecords.tabLabel, "Records");
 assert.equal((en as { settings: { tabLabel: string } }).settings.tabLabel, "Settings");
-assert.equal((en as { you: { statsThisWeek: string } }).you.statsThisWeek, "This week");
+assert.equal((en as { you: { statsThisWeek: string } }).you.statsThisWeek, "Last 7 days");
 
 assert.equal(isShareSheetCancellation(new Error("User cancelled the share sheet")), true);
 assert.equal(isShareSheetCancellation(new Error("Storage upload failed")), false);

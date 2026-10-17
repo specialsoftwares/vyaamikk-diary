@@ -34,7 +34,8 @@ assert.doesNotMatch(recordRow, /react-native-maps/);
 
 assert.match(hook, /sourceUserRef/);
 assert.match(hook, /userIdRef\.current !== owner/);
-assert.match(hook, /buildStatutoryTabViewModel/);
+assert.match(hook, /buildStatutoryCalendarView/);
+assert.doesNotMatch(hook, /buildStatutoryTabViewModel/);
 assert.match(hook, /mergeStatutoryCalendarMarkers/);
 assert.match(hook, /buildCalendarDayView/);
 assert.doesNotMatch(hook, /pinListActive/);
