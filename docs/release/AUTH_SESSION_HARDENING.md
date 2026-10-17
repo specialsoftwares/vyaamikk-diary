@@ -25,7 +25,7 @@ RTDN (`functions/src/billing/callables/androidRtdn.ts`) stays on OIDC. `schedule
 
 1. Deploy `mintClientAuthToken` and `logoutAllDevices` first. Until a cutoff document exists, current clients keep working. New mints carry `vydOriginAuthTime`.
 2. Ship a client that uses the fenced sign-out. Local sign-out stays offline and does not call `logoutAllDevices`.
-3. Deploy `firestore.rules` and `storage.rules` together. Missing `authSecurity/{uid}` still allows access, so this does not lock out sessions that have never used logout-all.
+3. Deploy `firestore.rules` and `storage.rules` together. Missing `authSecurity/{uid}` still allows access, so this does not lock out sessions that have never used logout-all. Each signed-in rule evaluation adds an `exists` and, when that document is present, a `get` on `authSecurity/{uid}`. Letterhead create stays within the 20-access cap (static estimate 3, mirror create 4).
 4. Enable the logout-all control only after that client is the one users have. A custom token without `vydOriginAuthTime` is denied once a cutoff exists. Phone sign-in after the cutoff is admitted.
 
 `userSessions/{uid}/sessions/{sessionId}` stays device metadata. Do not treat its `status` as Firebase revocation.
