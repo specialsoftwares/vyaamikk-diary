@@ -405,6 +405,23 @@ export interface MintClientAuthTokenResponse {
  * (Firestore/Storage) can sign in as the same user. Must be called over
  * the native functions SDK so request.auth carries the native session.
  */
+export async function callLogoutAllDevices(
+  operationId: string
+): Promise<{ status: "complete" }> {
+  const data = await callFunction<{ operationId: string }, { status?: string }>("logoutAllDevices", {
+    operationId,
+  });
+  if (data?.status !== "complete") {
+    throw new AppError("unknown", "Sign-out of every device did not finish.", undefined, {
+      authPhase: "post_auth",
+      failureDomain: "functions",
+      callableName: "logoutAllDevices",
+      functionsErrorCode: "functions/unknown",
+    });
+  }
+  return { status: "complete" };
+}
+
 export async function callMintClientAuthToken(): Promise<MintClientAuthTokenResponse> {
   const data = await callFunction<Record<string, never>, MintClientAuthTokenResponse>(
     "mintClientAuthToken",

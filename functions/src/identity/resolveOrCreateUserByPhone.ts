@@ -15,6 +15,7 @@ import {
   phoneAuthBindingSafeMeta,
   resolveAuthoritativePhoneAuthIdentity,
 } from "./phoneAuthClaimBinding";
+import { assertAdmittedCallableUser } from "./admitCallableUser";
 import {
   applyLoginTimestamps,
   freshProfileShell,
@@ -144,6 +145,7 @@ function rethrowAsHttps(err: unknown, attemptId: string, authUid: string): never
 export const resolveOrCreateUserByPhone = onCall(
   { region: "asia-south1" },
   async (request) => {
+    await assertAdmittedCallableUser(request);
     const attemptId = correlationId();
 
     // ——— PHONE-CLAIM BINDING (before any identity mutation) ———

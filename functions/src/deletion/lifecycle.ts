@@ -6,6 +6,7 @@ import {
   DELETION_JOBS,
   type DeletionJobDoc,
 } from "./deletionJob";
+import { assertAdmittedCallableUser } from "../identity/admitCallableUser";
 import {
   DELETION_GRACE_MS,
   cancelDeletionJob,
@@ -22,6 +23,7 @@ const USERS = "users";
 export const ensureAccountDeletionJob = onCall(
   { region: "asia-south1" },
   async (request) => {
+    await assertAdmittedCallableUser(request);
     const authUid = request.auth?.uid;
     if (!authUid) throw new HttpsError("unauthenticated", "Sign in first.");
 
@@ -56,6 +58,7 @@ export const ensureAccountDeletionJob = onCall(
  * Kept for compatibility; requires pending/deleted eligibility via job bootstrap.
  */
 export const retireIdentity = onCall({ region: "asia-south1" }, async (request) => {
+  await assertAdmittedCallableUser(request);
   const authUid = request.auth?.uid;
   if (!authUid) throw new HttpsError("unauthenticated", "Sign in first.");
 
@@ -77,6 +80,7 @@ export const retireIdentity = onCall({ region: "asia-south1" }, async (request) 
 export const completeAccountDeletion = onCall(
   { region: "asia-south1" },
   async (request) => {
+    await assertAdmittedCallableUser(request);
     const authUid = request.auth?.uid;
     if (!authUid) throw new HttpsError("unauthenticated", "Sign in first.");
 

@@ -1,8 +1,8 @@
 # AUTH DEVICE SESSION MODEL
 
-## Single active device (intent)
+## Multiple phones
 
-Only one physical device should hold the active authorized session. A successful login on a different install should revoke older sessions before completing new-device security notification.
+A normal login on another phone does not revoke older Firebase sessions or their session metadata. Signing out every device is the confirmed `logoutAllDevices` action. The “This wasn’t me” link records a report and does not sign a device out.
 
 ## Implementation today
 
@@ -11,7 +11,7 @@ Only one physical device should hold the active authorized session. A successful
 | `deviceInstallationId` (SecureStore) | Present |
 | `trustedDevices/{id}` registry | Present (record/touch) |
 | Account-wide token revoke on recovery | Present (`revokeRefreshTokens`) |
-| Immediate revoke of prior devices on new login | PARTIAL — needs callable orchestration |
+| Immediate revoke of prior devices on new login | Not done. A new login leaves older sessions in place. |
 | New-device security email + 10s gate | EXTERNALLY BLOCKED (provider + functions) |
 | Signed “This wasn’t me” | EXTERNALLY BLOCKED |
 | Same-phone reinstall recognition | Best-effort via installation id |
@@ -24,4 +24,4 @@ Best-effort same-physical-device recognition **cannot be guaranteed** after rein
 
 - Full offline mutations: ≤24h after last successful online validation.
 - After 24h: read-only existing local records.
-- Always block offline: mobile/email change, recovery, deletion, export, bulk share, security settings, logout (requires network).
+- Always block offline: mobile/email change, recovery, deletion, export, bulk share, security settings. Signing out this device still works offline. Signing out every device needs a network to revoke other phones.

@@ -3,12 +3,14 @@ import { getApps, initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
 
+import { assertAdmittedCallableUser } from "./admitCallableUser";
 import {
   AUTH_SECURITY_COLLECTION,
   bearerFromAuthorizationHeader,
   classifyVerifyFailure,
   continuePendingLogoutAll,
   performLogoutAll,
+  type AuthSecurityTransaction,
   type LogoutRecord,
   type VerifiedCredential,
 } from "./sessionSecurityPolicy";
@@ -33,11 +35,34 @@ function asRecord(data: Record<string, unknown> | undefined): LogoutRecord | nul
   const operationId = data.operationId;
   if (typeof cutoff !== "number" || (state !== "pending" && state !== "complete")) return null;
   if (typeof operationId !== "string" || !operationId) return null;
+  const startedAt = data.startedAtSeconds;
   return {
     revokedBeforeAuthTimeSeconds: cutoff,
     revocationState: state,
     operationId,
+    startedAtSeconds: typeof startedAt === "number" && Number.isFinite(startedAt) ? startedAt : 0,
   };
+}
+
+function authSecurityTransact<T>(uid: string, fn: AuthSecurityTransaction<T>): Promise<T> {
+  const ref = getFirestore().collection(AUTH_SECURITY_COLLECTION).doc(uid);
+  return getFirestore().runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const current = asRecord(snap.data() as Record<string, unknown> | undefined);
+    const result = fn(current);
+    if (result.next) {
+      const same =
+        current &&
+        current.revokedBeforeAuthTimeSeconds === result.next.revokedBeforeAuthTimeSeconds &&
+        current.revocationState === result.next.revocationState &&
+        current.operationId === result.next.operationId &&
+        current.startedAtSeconds === result.next.startedAtSeconds;
+      if (!same) {
+        tx.set(ref, { ...result.next, updatedAt: Date.now() });
+      }
+    }
+    return result.value;
+  });
 }
 
 /**
@@ -51,6 +76,7 @@ export const logoutAllDevices = onCall({ region: "asia-south1" }, async (request
   if (!OPERATION_ID.test(operationId)) {
     throw new HttpsError("invalid-argument", "A logout operation id is required.");
   }
+  await assertAdmittedCallableUser(request);
   const bearer = bearerFromAuthorizationHeader(request.rawRequest?.headers?.authorization);
   if (!bearer) {
     throw new HttpsError("unauthenticated", "Sign in with phone OTP first.");
@@ -72,18 +98,10 @@ export const logoutAllDevices = onCall({ region: "asia-south1" }, async (request
     throw new HttpsError("unauthenticated", "Phone sign-in is no longer valid.");
   }
 
-  const db = getFirestore();
-  const ref = db.collection(AUTH_SECURITY_COLLECTION).doc(verified.uid);
   const result = await performLogoutAll(
     { verified, operationId, nowSeconds: Math.floor(Date.now() / 1000) },
     {
-      read: async () => asRecord((await ref.get()).data() as Record<string, unknown> | undefined),
-      write: async (record) => {
-        await ref.set(
-          { ...record, updatedAt: Date.now() },
-          { merge: true }
-        );
-      },
+      transact: (fn) => authSecurityTransact(verified.uid, fn),
       revokeRefreshTokens: (uid) => getAuth().revokeRefreshTokens(uid),
     }
   );
@@ -97,7 +115,18 @@ export const logoutAllDevices = onCall({ region: "asia-south1" }, async (request
   if (result.status === "pending") {
     throw new HttpsError(
       "failed-precondition",
-      "Session revocation is incomplete. Sign-in on this phone was recent, but other devices may still refresh until retry succeeds.",
+      "Session revocation is incomplete. Other devices may still refresh until retry succeeds.",
+      {
+        partial: true,
+        revocationState: "pending",
+        revokedBeforeAuthTimeSeconds: result.revokedBeforeAuthTimeSeconds,
+      }
+    );
+  }
+  if (result.status === "superseded") {
+    throw new HttpsError(
+      "aborted",
+      "A newer sign-out of every device is already recorded. This request did not mark it complete.",
       {
         partial: true,
         revocationState: "pending",
@@ -111,12 +140,8 @@ export const logoutAllDevices = onCall({ region: "asia-south1" }, async (request
 /** Server-side retry for a pending cutoff. Not a client callable. */
 export async function continuePendingLogoutAllForUid(uid: string): Promise<"complete" | "idle" | "pending"> {
   ensureAdminApp();
-  const ref = getFirestore().collection(AUTH_SECURITY_COLLECTION).doc(uid);
   return continuePendingLogoutAll({
-    read: async () => asRecord((await ref.get()).data() as Record<string, unknown> | undefined),
-    write: async (record) => {
-      await ref.set({ ...record, updatedAt: Date.now() }, { merge: true });
-    },
+    transact: (fn) => authSecurityTransact(uid, fn),
     revokeRefreshTokens: () => getAuth().revokeRefreshTokens(uid),
   });
 }

@@ -44,6 +44,7 @@ import { isUpdateBillingDetailsEnabled } from "../reconciliationFlags";
 import type { BillingStore } from "../store";
 import type { GstinVerificationStatus, SubscriptionBillingDetailsDoc } from "../types";
 import { isKnownGstStateCode, isValidGstinFormat, normalizeGstin } from "../tax/gstin";
+import { assertAdmittedCallableUser } from "../../identity/admitCallableUser";
 
 export interface UpdateBillingDetailsInput {
   gstin?: string | null;
@@ -183,6 +184,7 @@ export async function handleUpdateBillingDetails(
 }
 
 export const updateBillingDetails = onCall({ region: "asia-south1" }, async (request) => {
+  await assertAdmittedCallableUser(request);
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "Sign in required.");
   }

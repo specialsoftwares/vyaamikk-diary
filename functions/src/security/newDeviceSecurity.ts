@@ -1,18 +1,23 @@
 /**
  * New-device security login flow (server-authoritative).
  *
- * On OTP success for an unrecognized device:
- *  - emit idempotent security-login event
- *  - revoke older sessions immediately
- *  - hold new session in pendingSecurityNotification until email accepted
- *  - email provider max wait 10s; failures keep new session blocked + allow retry
- *  - “This wasn’t me” token: event-bound, 1h, single-use, hashed storage
+ * On OTP success for another phone:
+ *  - record the new session and an idempotent security-login event
+ *  - leave older sessions unchanged, including their metadata
+ *  - hold the new session in pendingSecurityNotification until email accepted
+ *  - email provider max wait 10s; failures keep the new session blocked + allow retry
+ *  - “This wasn’t me” records a report. It does not revoke Firebase sessions.
+ *  - signing out every device is logoutAllDevices after an explicit confirmation
  */
 
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { HttpsError, onCall, onRequest } from "firebase-functions/v2/https";
 
 import { getAdminDb } from "../admin";
+import { assertAdmittedCallableUser } from "../identity/admitCallableUser";
+
+export const WAS_NOT_ME_REPORT_MESSAGE =
+  "The report was saved. This link did not sign any device out. Signing out every device is a separate confirmed action.";
 
 export const SECURITY_EMAIL_MAX_WAIT_MS = 10_000;
 export const WAS_NOT_ME_TOKEN_TTL_MS = 60 * 60 * 1000;
@@ -127,16 +132,11 @@ export function parseAndVerifyWasNotMeSignedToken(
   return { ok: true, eventId, uid, sessionId, issuedAt };
 }
 
-export type WasNotMeValidationReason =
-  | "expired"
-  | "reused"
-  | "wrong_event"
-  | "tampered"
-  | "already_revoked";
+export type WasNotMeValidationReason = "expired" | "reused" | "wrong_event" | "tampered";
 
 export type WasNotMeValidation =
   | { ok: true }
-  | { ok: false; reason: WasNotMeValidationReason; securedConfirmation?: boolean };
+  | { ok: false; reason: WasNotMeValidationReason };
 
 export function validateWasNotMeToken(input: {
   now: number;
@@ -145,7 +145,6 @@ export function validateWasNotMeToken(input: {
     | { ok: true; eventId: string; uid: string; sessionId: string; issuedAt: number }
     | { ok: false; reason: "tampered" };
   tokenRecord: WasNotMeTokenRecord | null;
-  sessionStatus: SessionSecurityStatus | null;
 }): WasNotMeValidation {
   if (!input.parsed.ok) return { ok: false, reason: "tampered" };
   if (input.parsed.eventId !== input.expectedEventId) {
@@ -154,9 +153,6 @@ export function validateWasNotMeToken(input: {
   if (!input.tokenRecord) return { ok: false, reason: "tampered" };
   if (input.tokenRecord.eventId !== input.expectedEventId) {
     return { ok: false, reason: "wrong_event" };
-  }
-  if (input.sessionStatus === "revoked") {
-    return { ok: false, reason: "already_revoked", securedConfirmation: true };
   }
   if (input.tokenRecord.consumedAt != null) {
     return { ok: false, reason: "reused" };
@@ -185,9 +181,7 @@ export function planNewDeviceLogin(input: {
   newSession: UserSessionDoc;
   event: NewDeviceSecurityEventDoc;
 } {
-  const revokeSessionIds = input.existingSessions
-    .filter((s) => s.sessionId !== input.newSessionId && s.status !== "revoked")
-    .map((s) => s.sessionId);
+  const revokeSessionIds: string[] = [];
 
   const newSession: UserSessionDoc = {
     sessionId: input.newSessionId,
@@ -209,7 +203,7 @@ export function planNewDeviceLogin(input: {
     emailState: "pending",
     emailAttempts: 0,
     lastEmailAttemptAt: null,
-    revokedOlderSessionIds: revokeSessionIds,
+    revokedOlderSessionIds: [],
     wasNotMeConsumedAt: null,
     securedConfirmedAt: null,
   };
@@ -310,6 +304,7 @@ function sessionsCollection(uid: string) {
 export const registerNewDeviceSecurityEvent = onCall(
   { region: "asia-south1" },
   async (request) => {
+    await assertAdmittedCallableUser(request);
     const uid = request.auth?.uid;
     if (!uid) throw new HttpsError("unauthenticated", "Sign in first.");
 
@@ -348,18 +343,6 @@ export const registerNewDeviceSecurityEvent = onCall(
     });
 
     const batch = db.batch();
-    for (const sid of planned.revokeSessionIds) {
-      batch.set(
-        sessionsCollection(uid).doc(sid),
-        {
-          // Device-session metadata only. This does not revoke Firebase refresh tokens.
-          status: "revoked",
-          revokedAt: now,
-          pendingSecurityNotification: false,
-        },
-        { merge: true }
-      );
-    }
     batch.set(sessionsCollection(uid).doc(newSessionId), planned.newSession);
     batch.set(eventRef, planned.event);
     await batch.commit();
@@ -426,6 +409,7 @@ export const registerNewDeviceSecurityEvent = onCall(
 );
 
 export const retryNewDeviceSecurityEmail = onCall({ region: "asia-south1" }, async (request) => {
+  await assertAdmittedCallableUser(request);
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError("unauthenticated", "Sign in first.");
   const eventId = String(request.data?.eventId ?? "").trim();
@@ -505,7 +489,7 @@ export const retryNewDeviceSecurityEmail = onCall({ region: "asia-south1" }, asy
 
 async function handleWasNotMeCore(rawToken: string): Promise<{
   ok: boolean;
-  securedConfirmation?: boolean;
+  signedOut?: false;
   reason?: WasNotMeValidationReason;
 }> {
   const secret = resolveWasNotMeSecret();
@@ -516,48 +500,31 @@ async function handleWasNotMeCore(rawToken: string): Promise<{
   const tokenHash = hashWasNotMeToken(rawToken);
   const tokenRef = db.collection(WAS_NOT_ME_TOKENS).doc(tokenHash);
   const eventRef = db.collection(NEW_DEVICE_SECURITY_EVENTS).doc(parsed.eventId);
-  const sessionRef = sessionsCollection(parsed.uid).doc(parsed.sessionId);
 
   return db.runTransaction(async (tx) => {
-    const [tokenSnap, eventSnap, sessionSnap] = await Promise.all([
-      tx.get(tokenRef),
-      tx.get(eventRef),
-      tx.get(sessionRef),
-    ]);
+    const [tokenSnap, eventSnap] = await Promise.all([tx.get(tokenRef), tx.get(eventRef)]);
     const tokenRecord = tokenSnap.exists ? (tokenSnap.data() as WasNotMeTokenRecord) : null;
-    const session = sessionSnap.exists ? (sessionSnap.data() as UserSessionDoc) : null;
     const now = Date.now();
     const validation = validateWasNotMeToken({
       now,
       expectedEventId: parsed.eventId,
       parsed,
       tokenRecord,
-      sessionStatus: session?.status ?? null,
     });
 
     if (!validation.ok) {
-      if (validation.reason === "already_revoked") {
-        return { ok: true, securedConfirmation: true };
-      }
       return { ok: false, reason: validation.reason };
     }
 
-    tx.update(sessionRef, {
-      // Device-session metadata only. This does not revoke Firebase refresh tokens.
-      status: "revoked",
-      revokedAt: now,
-      pendingSecurityNotification: false,
-    });
     if (tokenSnap.exists) {
       tx.update(tokenRef, { consumedAt: now });
     }
     if (eventSnap.exists) {
       tx.update(eventRef, {
         wasNotMeConsumedAt: now,
-        securedConfirmedAt: now,
       });
     }
-    return { ok: true, securedConfirmation: true };
+    return { ok: true, signedOut: false as const };
   });
 }
 
@@ -577,10 +544,13 @@ export const handleWasNotMeToken = onCall({ region: "asia-south1" }, async (requ
   if (!result.ok && result.reason === "wrong_event") {
     throw new HttpsError("failed-precondition", "This security link does not match the event.");
   }
+  if (!result.ok) {
+    throw new HttpsError("failed-precondition", "This security link could not be recorded.");
+  }
   return {
     ok: true,
-    securedConfirmation: true as const,
-    message: "Your account sessions were secured. The unrecognized device was signed out.",
+    signedOut: false as const,
+    message: WAS_NOT_ME_REPORT_MESSAGE,
   };
 });
 
@@ -593,11 +563,11 @@ export const handleWasNotMeTokenHttp = onRequest({ region: "asia-south1" }, asyn
   }
   try {
     const result = await handleWasNotMeCore(raw);
-    if (result.securedConfirmation) {
+    if (result.ok) {
       res.status(200).json({
         ok: true,
-        securedConfirmation: true,
-        message: "Your account is secured. The unrecognized sign-in was blocked.",
+        signedOut: false,
+        message: WAS_NOT_ME_REPORT_MESSAGE,
       });
       return;
     }

@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 
 import { getAdminDb } from "../admin";
 import { cancelDeletionJob } from "../deletion/finalPurge";
+import { assertAdmittedCallableUser } from "../identity/admitCallableUser";
 import {
   applyLoginTimestamps,
   normalizePhoneE164,
@@ -69,6 +70,7 @@ function assertEmailVerifiedForReactivation(profile: UserProfileDoc, reactivatio
  * Sends email verification to the registered business email.
  */
 export const startAccountReactivation = onCall({ region: "asia-south1" }, async (request) => {
+  await assertAdmittedCallableUser(request);
   const authUid = request.auth?.uid;
   if (!authUid) throw new HttpsError("unauthenticated", "Sign in first.");
 
@@ -131,6 +133,7 @@ export const startAccountReactivation = onCall({ region: "asia-south1" }, async 
  * Restores account to active and clears deletion + reactivation fields.
  */
 export const completeAccountReactivation = onCall({ region: "asia-south1" }, async (request) => {
+  await assertAdmittedCallableUser(request);
   const authUid = request.auth?.uid;
   if (!authUid) throw new HttpsError("unauthenticated", "Sign in first.");
 

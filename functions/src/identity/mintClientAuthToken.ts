@@ -3,6 +3,7 @@ import { logger } from "firebase-functions";
 import { getAuth } from "firebase-admin/auth";
 import { getApps, initializeApp } from "firebase-admin/app";
 
+import { assertAdmittedCallableUser } from "./admitCallableUser";
 import {
   bearerFromAuthorizationHeader,
   classifyVerifyFailure,
@@ -28,6 +29,7 @@ function ensureAdminApp(): void {
  * before createCustomToken. The origin auth time is server-stamped.
  */
 export const mintClientAuthToken = onCall({ region: "asia-south1" }, async (request) => {
+  await assertAdmittedCallableUser(request);
   const bearer = bearerFromAuthorizationHeader(request.rawRequest?.headers?.authorization);
   if (!bearer) {
     throw new HttpsError("unauthenticated", "Sign in with phone OTP first.");

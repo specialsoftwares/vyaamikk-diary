@@ -12,6 +12,7 @@ import { onCall, type CallableRequest } from "firebase-functions/v2/https";
 
 import { GrinAdminConfigError } from "./productionAdminConfig";
 import type { ComposedGrinCallables } from "./composed";
+import { assertAdmittedCallableUser } from "../identity/admitCallableUser";
 
 export const PRODUCTION_GRIN_CALLABLE_NAMES = [
   "grinRegisterGoodsReceipt",
@@ -84,6 +85,7 @@ export async function runProductionGrinCallable(
 
 function wrapGrin(method: GrinMethod, loadComposed?: ProductionGrinLoadComposed) {
   return onCall({ region: "asia-south1" }, async (request: CallableRequest) => {
+    await assertAdmittedCallableUser(request);
     const payload = { auth: authFromCallable(request), data: request.data };
     if (loadComposed) return runProductionGrinCallable(method, payload, loadComposed);
     return runProductionGrinCallable(method, payload);

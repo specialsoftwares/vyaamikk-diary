@@ -23,6 +23,7 @@ import {
   sha256MobileHash,
 } from "../identity/mobileQuarantine";
 import { normalizePhoneE164 } from "../identity/shared";
+import { assertAdmittedCallableUser } from "../identity/admitCallableUser";
 
 const RECOVERY_SESSIONS = "accountRecoverySessions";
 const SUPPORT_CASES = "manualRecoveryCases";
@@ -119,6 +120,7 @@ function buildRecoveryQuestions(
 }
 
 export const startAccountRecovery = onCall(emailOtpCallOpts, async (request) => {
+  await assertAdmittedCallableUser(request);
   const uid = requireUid(request);
   const db = getAdminDb();
   const userRef = db.collection(USERS).doc(uid);
@@ -186,6 +188,7 @@ export const startAccountRecovery = onCall(emailOtpCallOpts, async (request) => 
 });
 
 export const completeAccountRecovery = onCall(emailOtpCallOpts, async (request) => {
+  await assertAdmittedCallableUser(request);
   const uid = requireUid(request);
   const sessionId = String(request.data?.sessionId ?? "");
   const emailCode = String(request.data?.emailCode ?? "");
@@ -380,6 +383,7 @@ export const completeAccountRecovery = onCall(emailOtpCallOpts, async (request) 
 });
 
 export const openManualRecoveryCase = onCall({ region: "asia-south1" }, async (request) => {
+  await assertAdmittedCallableUser(request);
   const uid = requireUid(request);
   const caseId = randomBytes(8).toString("hex");
   await getAdminDb()
@@ -399,6 +403,7 @@ export const openManualRecoveryCase = onCall({ region: "asia-south1" }, async (r
 
 /** Admin/support-only — requires callable auth + support claim (documented; enforce via IAM). */
 export const resolveManualRecoveryCase = onCall(emailOtpCallOpts, async (request) => {
+  await assertAdmittedCallableUser(request);
   const reviewerUid = requireUid(request);
   const supportClaim = request.auth?.token?.support === true;
   if (!supportClaim && process.env.FUNCTIONS_EMULATOR !== "true") {

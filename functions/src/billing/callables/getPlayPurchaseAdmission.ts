@@ -10,6 +10,7 @@ import { HttpsError, onCall } from "firebase-functions/v2/https";
 
 import { throwHttpsFromBilling } from "../google/billingHttps";
 import { playPurchaseAllowedForAuthUid } from "../google/playConstants";
+import { assertAdmittedCallableUser } from "../../identity/admitCallableUser";
 
 export function handleGetPlayPurchaseAdmission(
   uid: string | undefined
@@ -20,6 +21,7 @@ export function handleGetPlayPurchaseAdmission(
 export const getPlayPurchaseAdmission = onCall(
   { region: "asia-south1" },
   async (request) => {
+    await assertAdmittedCallableUser(request);
     if (!request.auth?.uid) {
       throw new HttpsError("unauthenticated", "Sign in required.");
     }

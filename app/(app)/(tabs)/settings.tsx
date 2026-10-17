@@ -15,13 +15,22 @@ import { BUSINESS_INSIGHTS_HREF } from "@/content/insights/entry";
 import { getAuthEntryHref } from "@/config/authWrapper";
 import { openPublicLinkOrExplain } from "@/config/publicLinks";
 import { useAuth } from "@/state/auth";
+import { useIsOnline } from "@/state/network";
 import { useT } from "@/i18n";
+import { callLogoutAllDevices } from "@/services/auth/identityCallable";
+import {
+  classifyLogoutAllCallableFailure,
+  newLogoutOperationId,
+  runConfirmedLogoutAll,
+  type ConfirmedLogoutAllResult,
+} from "@/services/auth/logoutAllDevices";
 import { spacing, typography, useThemedStyles } from "@/theme";
 
 export default function SettingsTab() {
   const t = useT();
   const router = useRouter();
   const { signOut, status } = useAuth();
+  const online = useIsOnline();
   const [signingOut, setSigningOut] = useState(false);
 
   const styles = useThemedStyles((colors) =>
@@ -77,6 +86,62 @@ export default function SettingsTab() {
           try {
             await signOut();
             router.replace(getAuthEntryHref());
+          } finally {
+            setSigningOut(false);
+          }
+        },
+      },
+    ]);
+  };
+
+  const logoutAllMessage = (result: ConfirmedLogoutAllResult): string => {
+    switch (result.kind) {
+      case "complete":
+        return t("settings.logoutAllComplete");
+      case "pending":
+        return t("settings.logoutAllPending");
+      case "offline":
+        return t("settings.logoutAllOffline");
+      case "not_recent":
+        return t("settings.logoutAllNotRecent");
+      case "sign_in_invalid":
+        return t("settings.logoutAllSignInInvalid");
+      case "account_blocked":
+        return t("settings.logoutAllAccountBlocked");
+      case "superseded":
+        return t("settings.logoutAllSuperseded");
+      case "unavailable":
+        return t("settings.logoutAllUnavailable");
+      case "not_confirmed":
+        return t("settings.logoutAllUnavailable");
+    }
+  };
+
+  const confirmLogoutAll = () => {
+    Alert.alert(t("settings.logoutAllPrompt"), t("settings.logoutAllBody"), [
+      { text: t("common.cancel"), style: "cancel" },
+      {
+        text: t("settings.logoutAllConfirm"),
+        style: "destructive",
+        onPress: async () => {
+          setSigningOut(true);
+          try {
+            const result = await runConfirmedLogoutAll({
+              confirmed: true,
+              online,
+              operationId: newLogoutOperationId(),
+              call: async (operationId) => {
+                try {
+                  await callLogoutAllDevices(operationId);
+                  return { status: "complete" as const };
+                } catch (error) {
+                  return { status: classifyLogoutAllCallableFailure(error) };
+                }
+              },
+              clearThisDevice: () => signOut(),
+            });
+            router.replace(getAuthEntryHref());
+            Alert.alert(t("settings.logoutAllPrompt"), logoutAllMessage(result));
           } finally {
             setSigningOut(false);
           }
@@ -161,7 +226,16 @@ export default function SettingsTab() {
         <SettingsNavCard
           icon="logout"
           title={signingOut ? t("settings.signingOut") : t("settings.logout")}
+          subtitle={t("settings.signOutBody")}
           onPress={signingOut ? undefined : confirmSignOut}
+          embedded
+        />
+        <SettingsNavCard
+          icon="cellphone-off"
+          title={signingOut ? t("settings.signingOut") : t("settings.logoutAll")}
+          subtitle={t("settings.logoutAllBody")}
+          onPress={signingOut ? undefined : confirmLogoutAll}
+          accent="danger"
           embedded
         />
         <SettingsNavCard

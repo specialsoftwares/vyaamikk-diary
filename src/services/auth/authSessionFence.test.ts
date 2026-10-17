@@ -11,7 +11,13 @@ import {
   runLocalDeviceSignOut,
 } from "./authSessionFence";
 import { bridgeNativeSession } from "./jsAuthBridge";
-import { requestLogoutAllDevices } from "./logoutAllDevices";
+import { AppError } from "@/domain/errors";
+import {
+  classifyLogoutAllCallableFailure,
+  newLogoutOperationId,
+  requestLogoutAllDevices,
+  runConfirmedLogoutAll,
+} from "./logoutAllDevices";
 
 let failures = 0;
 
@@ -228,6 +234,109 @@ async function main() {
     },
   });
   check("offline logout-all is unavailable and does not claim success", offline.remote === "unavailable");
+
+  const operationId = newLogoutOperationId();
+  check(
+    "logout operation id is a uuid",
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(operationId)
+  );
+  let unconfirmedCalls = 0;
+  let unconfirmedClears = 0;
+  const unconfirmed = await runConfirmedLogoutAll({
+    confirmed: false,
+    online: true,
+    operationId,
+    call: async () => {
+      unconfirmedCalls += 1;
+      return { status: "complete" };
+    },
+    clearThisDevice: async () => {
+      unconfirmedClears += 1;
+    },
+  });
+  check(
+    "unconfirmed logout-all does not call or clear this device",
+    unconfirmed.kind === "not_confirmed" && unconfirmedCalls === 0 && unconfirmedClears === 0
+  );
+
+  let offlineCalls = 0;
+  let offlineClears = 0;
+  const offlineConfirmed = await runConfirmedLogoutAll({
+    confirmed: true,
+    online: false,
+    operationId,
+    call: async () => {
+      offlineCalls += 1;
+      return { status: "complete" };
+    },
+    clearThisDevice: async () => {
+      offlineClears += 1;
+    },
+  });
+  check(
+    "offline confirmation clears only this device",
+    offlineConfirmed.kind === "offline" && offlineCalls === 0 && offlineClears === 1
+  );
+
+  const cases: { status: "complete" | "pending" | "superseded" | "not_recent"; kind: string }[] = [
+    { status: "complete", kind: "complete" },
+    { status: "pending", kind: "pending" },
+    { status: "superseded", kind: "superseded" },
+    { status: "not_recent", kind: "not_recent" },
+  ];
+  for (const item of cases) {
+    let clears = 0;
+    const result = await runConfirmedLogoutAll({
+      confirmed: true,
+      online: true,
+      operationId,
+      call: async () => ({ status: item.status }),
+      clearThisDevice: async () => {
+        clears += 1;
+      },
+    });
+    check(`confirmed ${item.status} clears this device`, result.kind === item.kind && clears === 1);
+  }
+
+  let throwClears = 0;
+  const thrown = await runConfirmedLogoutAll({
+    confirmed: true,
+    online: true,
+    operationId,
+    call: async () => {
+      throw new Error("network");
+    },
+    clearThisDevice: async () => {
+      throwClears += 1;
+    },
+  });
+  check(
+    "a failed remote call still clears this device without claiming completion",
+    thrown.kind === "unavailable" && throwClears === 1
+  );
+  check(
+    "recent-auth and pending callable codes stay distinct",
+    classifyLogoutAllCallableFailure(
+      new AppError("permission_denied", "Recent phone sign-in is required to revoke every device.", undefined, {
+        functionsErrorCode: "functions/permission-denied",
+      })
+    ) === "not_recent" &&
+      classifyLogoutAllCallableFailure(
+        new AppError("permission_denied", "Session revocation is incomplete.", undefined, {
+          functionsErrorCode: "functions/failed-precondition",
+        })
+      ) === "pending" &&
+      classifyLogoutAllCallableFailure(
+        new AppError("unknown", "A newer sign-out of every device is already recorded.", undefined, {
+          functionsErrorCode: "functions/aborted",
+        })
+      ) === "superseded" &&
+      classifyLogoutAllCallableFailure(
+        new AppError("auth_failed", "Sign-in is no longer valid.", undefined, {
+          functionsErrorCode: "functions/unauthenticated",
+        })
+      ) === "sign_in_invalid"
+  );
 
   if (failures > 0) {
     console.error(`${failures} failure(s)`);

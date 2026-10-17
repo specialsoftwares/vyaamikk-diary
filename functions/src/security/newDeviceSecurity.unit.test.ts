@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import {
   SECURITY_EMAIL_MAX_WAIT_MS,
+  WAS_NOT_ME_REPORT_MESSAGE,
   WAS_NOT_ME_TOKEN_TTL_MS,
   applyEmailProviderOutcome,
   createAcceptingSecurityEmailProvider,
@@ -54,7 +55,6 @@ function testTokenValid() {
     expectedEventId: EVENT_ID,
     parsed,
     tokenRecord: tokenRecord(raw),
-    sessionStatus: "pendingSecurityNotification",
   });
   assert.equal(v.ok, true);
 }
@@ -67,7 +67,6 @@ function testTokenExpired() {
     expectedEventId: EVENT_ID,
     parsed,
     tokenRecord: tokenRecord(raw),
-    sessionStatus: "pendingSecurityNotification",
   });
   assert.equal(v.ok, false);
   if (!v.ok) assert.equal(v.reason, "expired");
@@ -81,7 +80,6 @@ function testTokenReused() {
     expectedEventId: EVENT_ID,
     parsed,
     tokenRecord: tokenRecord(raw, { consumedAt: NOW + 500 }),
-    sessionStatus: "pendingSecurityNotification",
   });
   assert.equal(v.ok, false);
   if (!v.ok) assert.equal(v.reason, "reused");
@@ -95,7 +93,6 @@ function testWrongEvent() {
     expectedEventId: "other_event",
     parsed,
     tokenRecord: tokenRecord(raw),
-    sessionStatus: "pendingSecurityNotification",
   });
   assert.equal(v.ok, false);
   if (!v.ok) assert.equal(v.reason, "wrong_event");
@@ -110,13 +107,12 @@ function testTampered() {
     expectedEventId: EVENT_ID,
     parsed,
     tokenRecord: null,
-    sessionStatus: "pendingSecurityNotification",
   });
   assert.equal(v.ok, false);
   if (!v.ok) assert.equal(v.reason, "tampered");
 }
 
-function testAlreadyRevoked() {
+function testReportDoesNotClaimSignOut() {
   const raw = mint();
   const parsed = parseAndVerifyWasNotMeSignedToken(SECRET, raw);
   const v = validateWasNotMeToken({
@@ -124,13 +120,10 @@ function testAlreadyRevoked() {
     expectedEventId: EVENT_ID,
     parsed,
     tokenRecord: tokenRecord(raw),
-    sessionStatus: "revoked",
   });
-  assert.equal(v.ok, false);
-  if (!v.ok) {
-    assert.equal(v.reason, "already_revoked");
-    assert.equal(v.securedConfirmation, true);
-  }
+  assert.equal(v.ok, true);
+  assert.equal(WAS_NOT_ME_REPORT_MESSAGE.includes("did not sign any device out"), true);
+  assert.equal(WAS_NOT_ME_REPORT_MESSAGE.includes("was signed out"), false);
 }
 
 function testPlanRevokesOlder() {
@@ -163,7 +156,8 @@ function testPlanRevokesOlder() {
     now: NOW,
     eventId: EVENT_ID,
   });
-  assert.deepEqual(planned.revokeSessionIds, ["old1"]);
+  assert.deepEqual(planned.revokeSessionIds, []);
+  assert.deepEqual(planned.event.revokedOlderSessionIds, []);
   assert.equal(planned.newSession.status, "pendingSecurityNotification");
   assert.equal(planned.newSession.pendingSecurityNotification, true);
 }
@@ -236,7 +230,7 @@ testTokenExpired();
 testTokenReused();
 testWrongEvent();
 testTampered();
-testAlreadyRevoked();
+testReportDoesNotClaimSignOut();
 testPlanRevokesOlder();
 
 testProviderAcceptedRejectedTimeout()

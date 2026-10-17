@@ -38,6 +38,7 @@ import type { BillingStore } from "../store";
 import { assertAdminAuthorized, type AdminAuthContext } from "../tax/adminAuth";
 import { markGstr1FiledExact } from "../tax/gstr1WorkingPapers";
 import { reportSourceFromBillingStore, type TaxComplianceReportSource } from "../tax/taxComplianceReportSource";
+import { assertAdmittedCallableUser } from "../../identity/admitCallableUser";
 
 export async function applyMarkGstr1Filed(
   store: BillingStore,
@@ -63,6 +64,7 @@ export async function applyMarkGstr1Filed(
 }
 
 export const markGstr1Filed = onCall({ region: "asia-south1" }, async (request) => {
+  await assertAdmittedCallableUser(request);
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "Sign in required.");
   }

@@ -17,7 +17,26 @@ export type LogoutRecord = {
   revokedBeforeAuthTimeSeconds: number;
   revocationState: "pending" | "complete";
   operationId: string;
+  /** Server seconds when this operation became the current one. */
+  startedAtSeconds: number;
 };
+
+export function decideCallableAdmission(input: {
+  verified: VerifiedCredential | null;
+  originClaim: number | null;
+  cutoff: number | null;
+}): { admit: true; originSeconds: number } | { admit: false; reason: "unverified" | "cutoff" } {
+  if (!input.verified?.uid) return { admit: false, reason: "unverified" };
+  const originSeconds = originAuthSeconds({
+    signInProvider: input.verified.signInProvider,
+    authTimeSeconds: input.verified.authTimeSeconds,
+    originClaim: input.originClaim,
+  });
+  if (!sessionAdmitted({ cutoff: input.cutoff, originSeconds })) {
+    return { admit: false, reason: "cutoff" };
+  }
+  return { admit: true, originSeconds };
+}
 
 export function bearerFromAuthorizationHeader(
   header: string | string[] | undefined
@@ -101,35 +120,50 @@ export function nextCutoff(existing: number | null, nowSeconds: number): number 
   return Math.max(existing, now);
 }
 
-export function applyLogoutAllWrite(
+export type BeginLogoutOutcome =
+  | { action: "revoke"; record: LogoutRecord }
+  | { action: "already_complete"; record: LogoutRecord }
+  | { action: "leave"; record: LogoutRecord };
+
+/**
+ * A different operation may replace the current one only when its server
+ * time is strictly newer. Same-second and older requests leave the record.
+ */
+export function beginLogoutOperation(
   existing: LogoutRecord | null,
   input: { operationId: string; nowSeconds: number }
-): { record: LogoutRecord; shouldRevoke: boolean } {
-  if (
-    existing &&
-    existing.operationId === input.operationId &&
-    existing.revocationState === "complete"
-  ) {
-    return { record: existing, shouldRevoke: false };
+): { next: LogoutRecord | null; outcome: BeginLogoutOutcome } {
+  const now = Math.floor(input.nowSeconds);
+  if (existing && existing.operationId === input.operationId) {
+    if (existing.revocationState === "complete") {
+      return { next: null, outcome: { action: "already_complete", record: existing } };
+    }
+    return { next: null, outcome: { action: "revoke", record: existing } };
   }
-  if (
-    existing &&
-    existing.operationId === input.operationId &&
-    existing.revocationState === "pending"
-  ) {
-    return { record: existing, shouldRevoke: true };
+  if (existing && now <= existing.startedAtSeconds) {
+    return { next: null, outcome: { action: "leave", record: existing } };
   }
-  return {
-    record: {
-      revokedBeforeAuthTimeSeconds: nextCutoff(
-        existing?.revokedBeforeAuthTimeSeconds ?? null,
-        input.nowSeconds
-      ),
-      revocationState: "pending",
-      operationId: input.operationId,
-    },
-    shouldRevoke: true,
+  const next: LogoutRecord = {
+    revokedBeforeAuthTimeSeconds: nextCutoff(existing?.revokedBeforeAuthTimeSeconds ?? null, now),
+    revocationState: "pending",
+    operationId: input.operationId,
+    startedAtSeconds: now,
   };
+  return { next, outcome: { action: "revoke", record: next } };
+}
+
+export function completeLogoutOperation(
+  existing: LogoutRecord | null,
+  input: { operationId: string; completedCutoff: number }
+): { next: LogoutRecord | null; record: LogoutRecord | null; completed: boolean } {
+  if (!existing || existing.operationId !== input.operationId) {
+    return { next: null, record: existing, completed: false };
+  }
+  if (existing.revocationState === "complete") {
+    return { next: null, record: existing, completed: true };
+  }
+  const next = markLogoutComplete(existing, input.completedCutoff);
+  return { next, record: next, completed: true };
 }
 
 export function markLogoutComplete(existing: LogoutRecord, completedCutoff: number): LogoutRecord {
@@ -140,19 +174,32 @@ export function markLogoutComplete(existing: LogoutRecord, completedCutoff: numb
     ),
     revocationState: "complete",
     operationId: existing.operationId,
+    startedAtSeconds: existing.startedAtSeconds,
   };
 }
 
 export type LogoutAllResult =
-  | { ok: true; status: "complete"; revokedBeforeAuthTimeSeconds: number }
+  | { ok: true; status: "complete"; revokedBeforeAuthTimeSeconds: number; operationId: string }
   | {
       ok: false;
       status: "pending";
       partial: true;
       reason: "revoke_failed";
       revokedBeforeAuthTimeSeconds: number;
+      operationId: string;
+    }
+  | {
+      ok: false;
+      status: "superseded";
+      reason: "newer_operation";
+      revokedBeforeAuthTimeSeconds: number;
+      operationId: string;
     }
   | { ok: false; status: "rejected"; reason: string };
+
+export type AuthSecurityTransaction<T> = (
+  current: LogoutRecord | null
+) => { next: LogoutRecord | null; value: T };
 
 export async function performLogoutAll(
   input: {
@@ -161,8 +208,7 @@ export async function performLogoutAll(
     nowSeconds: number;
   },
   ports: {
-    read: () => Promise<LogoutRecord | null>;
-    write: (record: LogoutRecord) => Promise<void>;
+    transact: <T>(fn: AuthSecurityTransaction<T>) => Promise<T>;
     revokeRefreshTokens: (uid: string) => Promise<void>;
   }
 ): Promise<LogoutAllResult> {
@@ -171,24 +217,28 @@ export async function performLogoutAll(
     nowSeconds: input.nowSeconds,
   });
   if (!admission.ok) return { ok: false, status: "rejected", reason: admission.reason };
-  const existing = await ports.read();
-  const plan = applyLogoutAllWrite(existing, {
-    operationId: input.operationId,
-    nowSeconds: input.nowSeconds,
+  const begun = await ports.transact((current) => {
+    const step = beginLogoutOperation(current, {
+      operationId: input.operationId,
+      nowSeconds: input.nowSeconds,
+    });
+    return { next: step.next, value: step.outcome };
   });
-  if (
-    !existing ||
-    existing.revokedBeforeAuthTimeSeconds !== plan.record.revokedBeforeAuthTimeSeconds ||
-    existing.revocationState !== plan.record.revocationState ||
-    existing.operationId !== plan.record.operationId
-  ) {
-    await ports.write(plan.record);
+  if (begun.action === "leave") {
+    return {
+      ok: false,
+      status: "superseded",
+      reason: "newer_operation",
+      revokedBeforeAuthTimeSeconds: begun.record.revokedBeforeAuthTimeSeconds,
+      operationId: begun.record.operationId,
+    };
   }
-  if (!plan.shouldRevoke) {
+  if (begun.action === "already_complete") {
     return {
       ok: true,
       status: "complete",
-      revokedBeforeAuthTimeSeconds: plan.record.revokedBeforeAuthTimeSeconds,
+      revokedBeforeAuthTimeSeconds: begun.record.revokedBeforeAuthTimeSeconds,
+      operationId: begun.record.operationId,
     };
   }
   try {
@@ -199,37 +249,59 @@ export async function performLogoutAll(
       status: "pending",
       partial: true,
       reason: "revoke_failed",
-      revokedBeforeAuthTimeSeconds: plan.record.revokedBeforeAuthTimeSeconds,
+      revokedBeforeAuthTimeSeconds: begun.record.revokedBeforeAuthTimeSeconds,
+      operationId: begun.record.operationId,
     };
   }
-  const after = (await ports.read()) ?? plan.record;
-  const complete = markLogoutComplete(after, plan.record.revokedBeforeAuthTimeSeconds);
-  await ports.write(complete);
+  const finished = await ports.transact((current) => {
+    const step = completeLogoutOperation(current, {
+      operationId: input.operationId,
+      completedCutoff: begun.record.revokedBeforeAuthTimeSeconds,
+    });
+    return { next: step.next, value: step };
+  });
+  if (!finished.completed || !finished.record) {
+    return {
+      ok: false,
+      status: "superseded",
+      reason: "newer_operation",
+      revokedBeforeAuthTimeSeconds:
+        finished.record?.revokedBeforeAuthTimeSeconds ??
+        begun.record.revokedBeforeAuthTimeSeconds,
+      operationId: finished.record?.operationId ?? begun.record.operationId,
+    };
+  }
   return {
     ok: true,
     status: "complete",
-    revokedBeforeAuthTimeSeconds: complete.revokedBeforeAuthTimeSeconds,
+    revokedBeforeAuthTimeSeconds: finished.record.revokedBeforeAuthTimeSeconds,
+    operationId: finished.record.operationId,
   };
 }
 
 /**
  * Trusted server continuation for a pending cutoff. It does not accept a
- * user token and cannot lower the stored cutoff.
+ * user token. Revocation stays outside the transaction. A newer operation
+ * is left pending rather than marked complete.
  */
 export async function continuePendingLogoutAll(ports: {
-  read: () => Promise<LogoutRecord | null>;
-  write: (record: LogoutRecord) => Promise<void>;
+  transact: <T>(fn: AuthSecurityTransaction<T>) => Promise<T>;
   revokeRefreshTokens: () => Promise<void>;
 }): Promise<"complete" | "idle" | "pending"> {
-  const existing = await ports.read();
-  if (!existing) return "idle";
-  if (existing.revocationState === "complete") return "complete";
+  const captured = await ports.transact((current) => ({ next: null, value: current }));
+  if (!captured) return "idle";
+  if (captured.revocationState === "complete") return "complete";
   try {
     await ports.revokeRefreshTokens();
   } catch {
     return "pending";
   }
-  const after = (await ports.read()) ?? existing;
-  await ports.write(markLogoutComplete(after, existing.revokedBeforeAuthTimeSeconds));
-  return "complete";
+  const completed = await ports.transact((current) => {
+    const step = completeLogoutOperation(current, {
+      operationId: captured.operationId,
+      completedCutoff: captured.revokedBeforeAuthTimeSeconds,
+    });
+    return { next: step.next, value: step.completed };
+  });
+  return completed ? "complete" : "pending";
 }
