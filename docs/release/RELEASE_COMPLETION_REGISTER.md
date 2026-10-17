@@ -2,7 +2,7 @@
 
 ## Five-issue correction — 17 Oct 2026
 
-Parent latency candidate `fe7c2ffb01547f883244e9d20b6192db86db55d4` stays unchanged. This correction is the next commit on `correction/five-issue-release`. It is not the versionCode 29 freeze `5746c94` and it is not an installed binary. No EAS build or Play upload is authorized.
+Parent latency candidate `fe7c2ffb01547f883244e9d20b6192db86db55d4` stays unchanged. Application candidate `eef594fd600dff2e1f7eab463730de688aed9d43` on `correction/five-issue-release`. Canonical CI run `39026317234`, verify job `117377892404`, success, head `eef594fd600dff2e1f7eab463730de688aed9d43`. It is not the versionCode 29 freeze `5746c94` and it is not an installed binary. No EAS build or Play upload is authorized.
 
 | Content class | Decision |
 | --- | --- |
