@@ -27,7 +27,8 @@ function source(path: string): string {
 function main() {
   console.log("js auth persistence (SOURCE)");
   const firebase = source("src/config/firebase.ts");
-  const session = source("src/services/session.ts");
+  const session = source("src/services/session.ts") + source("src/services/sessionPersistence.ts");
+  const persistence = source("src/services/sessionPersistence.ts");
   const signOut = source("src/state/auth.tsx") + source("src/services/auth/firebase.ts");
   const authPackage = JSON.parse(source("node_modules/@firebase/auth/package.json")) as {
     version?: string;
@@ -53,7 +54,11 @@ function main() {
       firebase.includes("does not migrate the credential store") &&
       !firebase.includes("reads synchronously")
   );
-  check("profile cache key is not a credential store", session.includes('const KEY = "vyd_session_v2"'));
+  check(
+    "profile cache key is not a credential store",
+    persistence.includes('export const SESSION_KEY = "vyd_session_v2"') &&
+      persistence.includes('export const LEGACY_SESSION_KEY = "vyd_session_v1"')
+  );
   check(
     "profile cache does not store raw tokens",
     !session.includes("idToken") && !session.includes("refreshToken")
@@ -64,7 +69,10 @@ function main() {
   );
   check(
     "profile clear removes only the session keys",
-    session.includes("removeItem(KEY)") && session.includes("removeItem(LEGACY_KEY)")
+    persistence.includes("deleteItem(SESSION_KEY)") &&
+      persistence.includes("deleteItem(LEGACY_SESSION_KEY)") &&
+      !persistence.includes("AsyncStorage.clear") &&
+      !persistence.includes("removeItem(")
   );
   check(
     "cached token reads are not forced",
