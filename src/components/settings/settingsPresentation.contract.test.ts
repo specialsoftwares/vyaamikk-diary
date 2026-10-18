@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { LOGOUT_ALL_CONTROL_ENABLED } from "../../services/auth/logoutAllDevices";
+
 const root = join(__dirname);
 const navCard = readFileSync(join(root, "SettingsNavCard.tsx"), "utf8");
 const prefRow = readFileSync(join(root, "SettingsPreferenceRow.tsx"), "utf8");
@@ -60,20 +62,15 @@ assert.equal(settingsTab.includes("onStatutory"), false);
 assert.ok(settingsTab.includes("getAuthEntryHref()"));
 assert.ok(settingsTab.includes('t("settings.logout")'));
 assert.ok(settingsTab.includes('t("settings.signOutPrompt")'));
-assert.ok(settingsTab.includes("confirmLogoutAll"));
-assert.ok(settingsTab.includes("runConfirmedLogoutAll"));
-assert.ok(settingsTab.includes("callLogoutAllDevices"));
-assert.ok(settingsTab.includes("useIsOnline"));
-assert.ok(settingsTab.includes('t("settings.logoutAllConfirm")'));
-assert.ok(settingsTab.includes('t("settings.logoutAllComplete")'));
-assert.ok(settingsTab.includes('t("settings.logoutAllPending")'));
-assert.ok(settingsTab.includes('t("settings.logoutAllNotRecent")'));
+assert.equal(LOGOUT_ALL_CONTROL_ENABLED, false);
+assert.ok(settingsTab.includes("LOGOUT_ALL_CONTROL_ENABLED"));
+assert.ok(settingsTab.includes("orchestrateConfirmedLogoutAll"));
 const localSignOut = settingsTab.slice(
   settingsTab.indexOf("const confirmSignOut"),
   settingsTab.indexOf("const logoutAllMessage")
 );
 assert.equal(localSignOut.includes("callLogoutAllDevices"), false);
-assert.equal(localSignOut.includes("runConfirmedLogoutAll"), false);
+assert.equal(localSignOut.includes("orchestrateConfirmedLogoutAll"), false);
 
 assert.equal(accountPanel.includes("lastActiveLabel"), false);
 assert.equal(accountPanel.includes("sessionLastActive"), false);

@@ -10,7 +10,7 @@ Source and prior emulator evidence. Do not deploy Functions, Rules, indexes, IAM
 - User-authenticated callables that reach the Admin SDK call `assertAdmittedCallableUser` before that work. A missing `request.auth` still follows the callable's own unauthenticated path. A present session must verify and sit strictly after `revokedBeforeAuthTimeSeconds`. `claimMobile` is the `resolveOrCreateUserByPhone` alias, so that handler covers it.
 - Logout-all updates are monotonic. A different operation replaces the current one only when its server second is greater than `startedAtSeconds`. The same operation id retries without lowering the cutoff. Completion updates only that operation id and never lowers the cutoff or changes the operation id. An older request or continuation that loses the race returns superseded or pending and does not mark the newer operation complete.
 - A normal login on another phone does not revoke older sessions or their metadata. The “This wasn’t me” link records a report. Its response says the link did not sign any device out.
-- Settings keeps a this-device sign-out that does not call `logoutAllDevices`. A second control asks for confirmation, then calls `logoutAllDevices` with the native callable transport. Offline, pending, not-recent, invalid, blocked, superseded, and unavailable outcomes clear this device and say that other devices were not confirmed revoked. Only a `complete` result says refresh tokens were revoked.
+- Settings keeps a this-device sign-out that does not call `logoutAllDevices`. The sign-out-every-device control is present in source and is not rendered: `LOGOUT_ALL_CONTROL_ENABLED` stays false until the protected callables and both cutoff rules are deployed and validated. When that control is confirmed, the client captures the live uid and auth generation, and local sign-out, profile-cache cleanup, navigation, alerts, and busy-state updates run only if that identity is still current. A server operation can finish for the original account when that local completion is discarded. An unmounted screen does not navigate or alert. Only a `complete` result says refresh tokens were revoked.
 - Firestore and Storage rules admit a session only when no cutoff exists, or when the origin second is strictly greater than `revokedBeforeAuthTimeSeconds`. Admin `verifyIdToken(..., true)` rejects `auth_time * 1000 < tokensValidAfterTime` and allows an equal millisecond (`firebase-admin` 13.10.0 `base-auth.js`). The rules deny that same second so a rollback cannot treat it as still valid.
 - JS Auth stays on AsyncStorage via `getReactNativePersistence`. Installed `@firebase/auth` 1.13.2 implements that store with async `getItem` / `setItem` and `JSON.stringify`. The JS refresh and access token JSON remains in AsyncStorage, which is plaintext and can be included in device backups. SecureStore was not adopted: its item size limit can reject the Auth user blob, and that migration was not tested. The SecureStore profile cache still holds no raw token. `auth.signOut()` removes the Firebase persistence entry. Logout does not call `AsyncStorage.clear`.
 
@@ -31,7 +31,7 @@ Excluded:
 
 | Check | Label |
 | --- | --- |
-| Fence, mint policy, transactional logout-all including concurrent requests and continuation retry, callable inventory, new-device unit tests, persistence rationale against `@firebase/auth` 1.13.2, confirmed logout-all client decisions | SOURCE |
+| Fence, mint policy, transactional logout-all including concurrent requests and continuation retry, callable inventory, new-device unit tests, persistence rationale against `@firebase/auth` 1.13.2, logout-all completion bound to uid and generation (A→B, re-login, unmount, same-session outcomes) | SOURCE |
 | Rules unit tests and letterhead static access estimates on `ee54f0e`. Rules files were not changed after that | EMULATOR, prior run |
 | Injected verifier failures | SOURCE, not revocation |
 | Controlled live Firebase Auth revocation | not run |
@@ -39,10 +39,9 @@ Excluded:
 
 ## Rollout
 
-1. Deploy the functions in this packet, including `mintClientAuthToken` and `logoutAllDevices`, before the rules. Until a cutoff document exists, current clients keep working. New mints carry `vydOriginAuthTime`.
-2. Ship the client with the fenced this-device sign-out and the separate confirmed sign-out of every device. This-device sign-out stays offline and does not call `logoutAllDevices`.
-3. Deploy `firestore.rules` and `storage.rules` together. Missing `authSecurity/{uid}` still allows access, so this does not lock out sessions that have never used logout-all. Each signed-in rule evaluation adds an `exists` and, when that document is present, a `get` on `authSecurity/{uid}`. Letterhead create stays within the 20-access cap (static estimate 3, mirror create 4).
-4. The logout-all control is in Settings on this client. A custom token without `vydOriginAuthTime` is denied once a cutoff exists. Phone sign-in after the cutoff is admitted.
+1. Deploy the protected callables in this packet, including `mintClientAuthToken` and `logoutAllDevices`. Do not enable `LOGOUT_ALL_CONTROL_ENABLED` in this step. Until a cutoff document exists, current clients keep working. New mints carry `vydOriginAuthTime`. This-device sign-out does not call `logoutAllDevices`.
+2. Deploy `firestore.rules` and `storage.rules` together, then validate cutoff enforcement on both. Missing `authSecurity/{uid}` still allows access, so this does not lock out sessions that have never used logout-all. Each signed-in rule evaluation adds an `exists` and, when that document is present, a `get` on `authSecurity/{uid}`. Letterhead create stays within the 20-access cap (static estimate 3, mirror create 4). A custom token without `vydOriginAuthTime` is denied once a cutoff exists. Phone sign-in after the cutoff is admitted.
+3. Enable the logout-all control only after those callables and both rules are deployed and the cutoff validation has passed. Shipping the enabled control before Rules enforcement leaves an access window for Admin SDK calls and for clients that have not yet been denied by Rules.
 
 `userSessions/{uid}/sessions/{sessionId}` stays device metadata. Do not treat its `status` as Firebase revocation.
 

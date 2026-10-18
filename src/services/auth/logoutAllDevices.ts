@@ -1,10 +1,20 @@
+import { AppError } from "@/domain/errors";
+
 /**
  * Confirmed logout-all. Local sign-out does not call this and stays available
  * offline. An unavailable network or a failed remote call is not reported as
- * remote success. This device is cleared only after the user confirms.
+ * remote success.
+ *
+ * The Settings control stays off until the protected callables and both
+ * cutoff-enforcing Rules are deployed and validated. Enabling it earlier
+ * leaves an access window between revocation and Rules enforcement.
  */
+export const LOGOUT_ALL_CONTROL_ENABLED: boolean = false;
 
-import { AppError } from "@/domain/errors";
+export type LogoutAllIdentity = {
+  uid: string;
+  generation: number;
+};
 
 export type LogoutAllRemoteStatus =
   | "complete"
@@ -70,6 +80,14 @@ export function classifyLogoutAllCallableFailure(error: unknown): Exclude<Logout
   return "unavailable";
 }
 
+export type LogoutAllRemoteOutcome = "offline" | LogoutAllRemoteStatus;
+
+export type LogoutAllOrchestrationResult = {
+  /** What the server did, including when local UI completion is discarded. */
+  remote: "not_confirmed" | "not_sent" | LogoutAllRemoteOutcome;
+  localCompletion: "applied" | "device_only" | "discarded";
+};
+
 /**
  * Confirmation is required before any remote call or local cleanup.
  * Offline confirmation clears only this device. A complete remote result is
@@ -105,4 +123,69 @@ export async function runConfirmedLogoutAll(input: {
   }
   await input.clearThisDevice();
   return { kind: status, clearedThisDevice: true };
+}
+
+/**
+ * Production logout-all completion. The identity is the uid and auth
+ * generation captured when the user confirms. The remote call may finish
+ * for that account after the local session has changed. Local sign-out,
+ * profile-cache cleanup, navigation, alerts, and busy-state updates run
+ * only while that same identity is still current. An unmounted screen
+ * still clears the current device, and does not navigate or alert.
+ */
+export async function orchestrateConfirmedLogoutAll(input: {
+  confirmed: boolean;
+  online: boolean;
+  operationId: string;
+  identity: LogoutAllIdentity;
+  sessionStillCurrent: () => boolean;
+  uiAttached: () => boolean;
+  call: (operationId: string, identity: LogoutAllIdentity) => Promise<{ status: LogoutAllRemoteStatus }>;
+  signOutThisDevice: () => Promise<void>;
+  clearProfileCache: () => Promise<void>;
+  navigateToSignedOut: () => void;
+  presentOutcome: (remote: LogoutAllRemoteOutcome) => void;
+  setBusy: (busy: boolean) => void;
+}): Promise<LogoutAllOrchestrationResult> {
+  if (!input.confirmed) return { remote: "not_confirmed", localCompletion: "discarded" };
+  if (!input.identity.uid || !input.sessionStillCurrent()) {
+    return { remote: "not_sent", localCompletion: "discarded" };
+  }
+  if (input.uiAttached()) input.setBusy(true);
+
+  let remote: LogoutAllRemoteOutcome;
+  if (!input.online) {
+    remote = "offline";
+  } else {
+    try {
+      if (!input.sessionStillCurrent()) {
+        return { remote: "not_sent", localCompletion: "discarded" };
+      }
+      const result = await input.call(input.operationId, input.identity);
+      remote =
+        result.status === "complete" ||
+        result.status === "pending" ||
+        result.status === "superseded" ||
+        result.status === "not_recent" ||
+        result.status === "sign_in_invalid" ||
+        result.status === "account_blocked"
+          ? result.status
+          : "unavailable";
+    } catch {
+      remote = "unavailable";
+    }
+  }
+
+  if (!input.sessionStillCurrent()) {
+    return { remote, localCompletion: "discarded" };
+  }
+  await input.signOutThisDevice();
+  await input.clearProfileCache();
+  if (!input.uiAttached()) {
+    return { remote, localCompletion: "device_only" };
+  }
+  input.setBusy(false);
+  input.presentOutcome(remote);
+  input.navigateToSignedOut();
+  return { remote, localCompletion: "applied" };
 }

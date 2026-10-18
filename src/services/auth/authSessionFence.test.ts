@@ -7,6 +7,7 @@ import {
   __resetAuthSessionFenceForTests,
   cleanBothAuthSdks,
   currentAuthMutationGeneration,
+  noteNativeAuthIdentity,
   retireJsAuthBridge,
   runLocalDeviceSignOut,
 } from "./authSessionFence";
@@ -14,9 +15,13 @@ import { bridgeNativeSession } from "./jsAuthBridge";
 import { AppError } from "@/domain/errors";
 import {
   classifyLogoutAllCallableFailure,
+  LOGOUT_ALL_CONTROL_ENABLED,
   newLogoutOperationId,
+  orchestrateConfirmedLogoutAll,
   requestLogoutAllDevices,
   runConfirmedLogoutAll,
+  type LogoutAllIdentity,
+  type LogoutAllRemoteOutcome,
 } from "./logoutAllDevices";
 
 let failures = 0;
@@ -314,6 +319,241 @@ async function main() {
     "a failed remote call still clears this device without claiming completion",
     thrown.kind === "unavailable" && throwClears === 1
   );
+  check("logout-all control stays hidden until rules are validated", LOGOUT_ALL_CONTROL_ENABLED === false);
+
+  type SideEffects = {
+    signOuts: number;
+    profileClears: number;
+    navigations: number;
+    outcomes: LogoutAllRemoteOutcome[];
+    busy: boolean[];
+    calls: number;
+    bound: LogoutAllIdentity | null;
+  };
+
+  async function runProductionLogout(input: {
+    online: boolean;
+    liveUid: () => string;
+    uiAttached: () => boolean;
+    call: (operationId: string, identity: LogoutAllIdentity) => Promise<{ status: "complete" | "pending" | "unavailable" }>;
+    identity?: LogoutAllIdentity;
+  }): Promise<{ result: Awaited<ReturnType<typeof orchestrateConfirmedLogoutAll>>; effects: SideEffects }> {
+    const effects: SideEffects = {
+      signOuts: 0,
+      profileClears: 0,
+      navigations: 0,
+      outcomes: [],
+      busy: [],
+      calls: 0,
+      bound: null,
+    };
+    const identity = input.identity ?? {
+      uid: input.liveUid(),
+      generation: currentAuthMutationGeneration(),
+    };
+    const result = await orchestrateConfirmedLogoutAll({
+      confirmed: true,
+      online: input.online,
+      operationId,
+      identity,
+      sessionStillCurrent: () =>
+        input.liveUid() === identity.uid && currentAuthMutationGeneration() === identity.generation,
+      uiAttached: input.uiAttached,
+      call: async (id, bound) => {
+        effects.calls += 1;
+        effects.bound = bound;
+        return input.call(id, bound);
+      },
+      signOutThisDevice: async () => {
+        effects.signOuts += 1;
+      },
+      clearProfileCache: async () => {
+        effects.profileClears += 1;
+      },
+      navigateToSignedOut: () => {
+        effects.navigations += 1;
+      },
+      presentOutcome: (remote) => {
+        effects.outcomes.push(remote);
+      },
+      setBusy: (busy) => {
+        effects.busy.push(busy);
+      },
+    });
+    return { result, effects };
+  }
+
+  __resetAuthSessionFenceForTests();
+  {
+    noteNativeAuthIdentity("uid-a");
+    const identity = { uid: "uid-a", generation: currentAuthMutationGeneration() };
+    let liveUid = "uid-a";
+    const entered = deferred<void>();
+    const release = deferred<{ status: "complete" }>();
+    const pending = runProductionLogout({
+      online: true,
+      liveUid: () => liveUid,
+      uiAttached: () => true,
+      identity,
+      call: async () => {
+        entered.resolve();
+        return release.promise;
+      },
+    });
+    await entered.promise;
+    liveUid = "uid-b";
+    noteNativeAuthIdentity("uid-b");
+    release.resolve({ status: "complete" });
+    const { result, effects } = await pending;
+    check(
+      "A to B while logout-all waits keeps the remote result and does not clear B",
+      result.remote === "complete" &&
+        result.localCompletion === "discarded" &&
+        effects.calls === 1 &&
+        effects.bound?.uid === "uid-a" &&
+        effects.bound.generation === identity.generation &&
+        effects.signOuts === 0 &&
+        effects.profileClears === 0 &&
+        effects.navigations === 0 &&
+        effects.outcomes.length === 0 &&
+        effects.busy.includes(false) === false
+    );
+  }
+
+  __resetAuthSessionFenceForTests();
+  {
+    noteNativeAuthIdentity("uid-a");
+    const identity = { uid: "uid-a", generation: currentAuthMutationGeneration() };
+    let liveUid = "uid-a";
+    const entered = deferred<void>();
+    const release = deferred<{ status: "complete" }>();
+    const pending = runProductionLogout({
+      online: true,
+      liveUid: () => liveUid,
+      uiAttached: () => true,
+      identity,
+      call: async () => {
+        entered.resolve();
+        return release.promise;
+      },
+    });
+    await entered.promise;
+    retireJsAuthBridge();
+    liveUid = "uid-a";
+    noteNativeAuthIdentity("uid-a");
+    release.resolve({ status: "complete" });
+    const { result, effects } = await pending;
+    check(
+      "A logout then A on a new generation does not clear the new login",
+      result.remote === "complete" &&
+        result.localCompletion === "discarded" &&
+        currentAuthMutationGeneration() !== identity.generation &&
+        effects.signOuts === 0 &&
+        effects.profileClears === 0 &&
+        effects.navigations === 0 &&
+        effects.outcomes.length === 0
+    );
+  }
+
+  __resetAuthSessionFenceForTests();
+  {
+    const identity = { uid: "uid-a", generation: currentAuthMutationGeneration() };
+    let attached = true;
+    const entered = deferred<void>();
+    const release = deferred<{ status: "pending" }>();
+    const pending = runProductionLogout({
+      online: true,
+      liveUid: () => "uid-a",
+      uiAttached: () => attached,
+      identity,
+      call: async () => {
+        entered.resolve();
+        return release.promise;
+      },
+    });
+    await entered.promise;
+    attached = false;
+    release.resolve({ status: "pending" });
+    const { result, effects } = await pending;
+    check(
+      "completion after unmount clears the current device and does not navigate or alert",
+      result.remote === "pending" &&
+        result.localCompletion === "device_only" &&
+        effects.signOuts === 1 &&
+        effects.profileClears === 1 &&
+        effects.navigations === 0 &&
+        effects.outcomes.length === 0 &&
+        effects.busy.includes(false) === false
+    );
+  }
+
+  __resetAuthSessionFenceForTests();
+  {
+    const finished = await runProductionLogout({
+      online: true,
+      liveUid: () => "uid-a",
+      uiAttached: () => true,
+      call: async () => ({ status: "complete" }),
+    });
+    check(
+      "same-session complete signs out, clears the profile cache, alerts, and navigates",
+      finished.result.remote === "complete" &&
+        finished.result.localCompletion === "applied" &&
+        finished.effects.signOuts === 1 &&
+        finished.effects.profileClears === 1 &&
+        finished.effects.navigations === 1 &&
+        finished.effects.outcomes[0] === "complete" &&
+        finished.effects.busy[0] === true &&
+        finished.effects.busy.at(-1) === false
+    );
+    const pendingSame = await runProductionLogout({
+      online: true,
+      liveUid: () => "uid-a",
+      uiAttached: () => true,
+      call: async () => ({ status: "pending" }),
+    });
+    check(
+      "same-session pending does not claim remote completion",
+      pendingSame.result.remote === "pending" &&
+        pendingSame.effects.outcomes[0] === "pending" &&
+        pendingSame.effects.signOuts === 1 &&
+        pendingSame.effects.navigations === 1
+    );
+    const failed = await runProductionLogout({
+      online: true,
+      liveUid: () => "uid-a",
+      uiAttached: () => true,
+      call: async () => {
+        throw new Error("network");
+      },
+    });
+    check(
+      "same-session failure still clears this device and reports failure",
+      failed.result.remote === "unavailable" &&
+        failed.effects.outcomes[0] === "unavailable" &&
+        failed.effects.signOuts === 1 &&
+        failed.effects.profileClears === 1 &&
+        failed.effects.navigations === 1
+    );
+    const offlineSame = await runProductionLogout({
+      online: false,
+      liveUid: () => "uid-a",
+      uiAttached: () => true,
+      call: async () => {
+        throw new Error("must not be called offline");
+      },
+    });
+    check(
+      "same-session offline clears only this device and does not call",
+      offlineSame.result.remote === "offline" &&
+        offlineSame.effects.calls === 0 &&
+        offlineSame.effects.outcomes[0] === "offline" &&
+        offlineSame.effects.signOuts === 1 &&
+        offlineSame.effects.profileClears === 1 &&
+        offlineSame.effects.navigations === 1
+    );
+  }
+
   check(
     "recent-auth and pending callable codes stay distinct",
     classifyLogoutAllCallableFailure(
