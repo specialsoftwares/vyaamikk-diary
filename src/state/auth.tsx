@@ -27,7 +27,12 @@ import {
   type OtpChallenge,
   type ProfilePatch,
 } from "@/services/auth";
-import { sessionStore, forceClearAllSessions, type AuthSession } from "@/services/session";
+import {
+  clearSessionForRetirement,
+  forceClearAllSessions,
+  sessionStore,
+  type AuthSession,
+} from "@/services/session";
 import {
   clearPersistedProfileIfOwned,
   retireJsAuthBridge,
@@ -410,7 +415,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             endFirstActionFreezeSession();
             clearMasterDataSessionCache();
           },
-          removePersistedProfile: () => forceClearAllSessions(),
+          removePersistedProfile: () => clearSessionForRetirement(ownedGeneration).then(() => undefined),
         }).then(() => undefined),
     });
   }, [state.session?.user.uid]);

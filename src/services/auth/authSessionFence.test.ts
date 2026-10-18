@@ -15,6 +15,13 @@ import {
 import { bridgeNativeSession } from "./jsAuthBridge";
 import { AppError } from "@/domain/errors";
 import {
+  __setSessionStorageForTests,
+  clearSessionForRetirement,
+  SESSION_KEY,
+  sessionStore,
+  type AuthSession,
+} from "@/services/sessionPersistence";
+import {
   classifyLogoutAllCallableFailure,
   LOGOUT_ALL_CONTROL_ENABLED,
   newLogoutOperationId,
@@ -691,6 +698,159 @@ async function main() {
         navigations === 1 &&
         outcomes[0] === "complete"
     );
+  }
+
+  function persistedSession(uid: string): AuthSession {
+    return {
+      user: {
+        uid,
+        ueid: "VYD-TEST",
+        phoneE164: "+919800000000",
+        displayName: uid,
+        salutation: null,
+        businessName: null,
+        workType: null,
+        designation: null,
+        businessEmail: null,
+      } as AuthSession["user"],
+      signedInAt: 10,
+      lastActiveAt: 10,
+    };
+  }
+
+  function deferredStorage() {
+    const values = new Map<string, string>();
+    const keyEntered = deferred<void>();
+    const keyRelease = deferred<void>();
+    let sessionKeyDeletes = 0;
+    __setSessionStorageForTests({
+      getItem: async (key) => values.get(key) ?? null,
+      setItem: async (key, value) => {
+        values.set(key, value);
+      },
+      deleteItem: async (key) => {
+        if (key === SESSION_KEY) {
+          sessionKeyDeletes += 1;
+          if (sessionKeyDeletes === 1) {
+            keyEntered.resolve();
+            await keyRelease.promise;
+          }
+        }
+        values.delete(key);
+      },
+    });
+    return { keyEntered, keyRelease, sessionKeyDeletes: () => sessionKeyDeletes };
+  }
+
+  async function signOutThroughSessionStore() {
+    return runLocalDeviceSignOut({
+      maskPrivateUi: () => undefined,
+      retireCloudAdmission: () => {
+        retireJsAuthBridge();
+      },
+      cleanAuthSdks: async (ownedGeneration) => {
+        await cleanBothAuthSdks(ownedGeneration, {
+          signOutJs: async () => undefined,
+          signOutNative: async () => undefined,
+        });
+      },
+      clearLocalProfileCache: (ownedGeneration) =>
+        clearPersistedProfileIfOwned(ownedGeneration, {
+          prepare: async () => undefined,
+          removePersistedProfile: () => clearSessionForRetirement(ownedGeneration).then(() => undefined),
+        }).then(() => undefined),
+    });
+  }
+
+  __resetAuthSessionFenceForTests();
+  {
+    const storage = deferredStorage();
+    noteNativeAuthIdentity("uid-a");
+    await sessionStore.save(persistedSession("uid-a"));
+    const confirmed = { uid: "uid-a", generation: currentAuthMutationGeneration() };
+    let navigations = 0;
+    const outcomes: LogoutAllRemoteOutcome[] = [];
+    const pending = orchestrateConfirmedLogoutAll({
+      confirmed: true,
+      online: true,
+      operationId,
+      identity: confirmed,
+      sessionStillCurrent: () => currentAuthMutationGeneration() === confirmed.generation,
+      uiAttached: () => true,
+      call: async () => ({ status: "complete" }),
+      signOutThisDevice: () => signOutThroughSessionStore(),
+      navigateToSignedOut: () => {
+        navigations += 1;
+      },
+      presentOutcome: (remote) => {
+        outcomes.push(remote);
+      },
+      setBusy: () => undefined,
+    });
+    await storage.keyEntered.promise;
+    const saving = sessionStore.save(persistedSession("uid-b"));
+    noteNativeAuthIdentity("uid-b");
+    storage.keyRelease.resolve();
+    const result = await pending;
+    await saving;
+    const loaded = await sessionStore.load();
+    check(
+      "a login during session-key deletion keeps the newer session on the next load",
+      result.remote === "complete" &&
+        result.localCompletion === "discarded" &&
+        loaded?.user.uid === "uid-b" &&
+        storage.sessionKeyDeletes() === 1 &&
+        navigations === 0 &&
+        outcomes.length === 0
+    );
+    __setSessionStorageForTests(null);
+  }
+
+  __resetAuthSessionFenceForTests();
+  {
+    const values = new Map<string, string>();
+    __setSessionStorageForTests({
+      getItem: async (key) => values.get(key) ?? null,
+      setItem: async (key, value) => {
+        values.set(key, value);
+      },
+      deleteItem: async (key) => {
+        values.delete(key);
+      },
+    });
+    noteNativeAuthIdentity("uid-a");
+    await sessionStore.save(persistedSession("uid-a"));
+    const confirmed = { uid: "uid-a", generation: currentAuthMutationGeneration() };
+    let navigations = 0;
+    const outcomes: LogoutAllRemoteOutcome[] = [];
+    const result = await orchestrateConfirmedLogoutAll({
+      confirmed: true,
+      online: true,
+      operationId,
+      identity: confirmed,
+      sessionStillCurrent: () => currentAuthMutationGeneration() === confirmed.generation,
+      uiAttached: () => true,
+      call: async () => ({ status: "complete" }),
+      signOutThisDevice: () => signOutThroughSessionStore(),
+      navigateToSignedOut: () => {
+        navigations += 1;
+      },
+      presentOutcome: (remote) => {
+        outcomes.push(remote);
+      },
+      setBusy: () => undefined,
+    });
+    const loaded = await sessionStore.load();
+    check(
+      "same-session logout removes the persisted session and still completes",
+      result.localCompletion === "applied" &&
+        result.remote === "complete" &&
+        loaded === null &&
+        navigations === 1 &&
+        outcomes[0] === "complete" &&
+        currentAuthMutationGeneration() !== confirmed.generation
+    );
+    __setSessionStorageForTests(null);
   }
 
   check(
