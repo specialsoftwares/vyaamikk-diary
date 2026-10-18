@@ -1,4 +1,5 @@
 import { AppError } from "@/domain/errors";
+import type { LocalSignOutResult } from "./authSessionFence";
 
 /**
  * Confirmed logout-all. Local sign-out does not call this and stays available
@@ -126,12 +127,13 @@ export async function runConfirmedLogoutAll(input: {
 }
 
 /**
- * Production logout-all completion. The identity is the uid and auth
- * generation captured when the user confirms. The remote call may finish
- * for that account after the local session has changed. Local sign-out,
- * profile-cache cleanup, navigation, alerts, and busy-state updates run
- * only while that same identity is still current. An unmounted screen
- * still clears the current device, and does not navigate or alert.
+ * Production logout-all completion. Confirmation captures the uid and
+ * pre-logout generation. Local sign-out then retires that generation and
+ * owns the retirement through SDK and profile-cache awaits. Navigation,
+ * alerts, and busy-state completion run only when that retirement is still
+ * current afterwards. The logout's own generation bump is not a newer login.
+ * An unmounted screen does not navigate or alert. Profile-cache clearing
+ * belongs to local sign-out, not a second step here.
  */
 export async function orchestrateConfirmedLogoutAll(input: {
   confirmed: boolean;
@@ -141,8 +143,7 @@ export async function orchestrateConfirmedLogoutAll(input: {
   sessionStillCurrent: () => boolean;
   uiAttached: () => boolean;
   call: (operationId: string, identity: LogoutAllIdentity) => Promise<{ status: LogoutAllRemoteStatus }>;
-  signOutThisDevice: () => Promise<void>;
-  clearProfileCache: () => Promise<void>;
+  signOutThisDevice: () => Promise<LocalSignOutResult | void>;
   navigateToSignedOut: () => void;
   presentOutcome: (remote: LogoutAllRemoteOutcome) => void;
   setBusy: (busy: boolean) => void;
@@ -179,8 +180,10 @@ export async function orchestrateConfirmedLogoutAll(input: {
   if (!input.sessionStillCurrent()) {
     return { remote, localCompletion: "discarded" };
   }
-  await input.signOutThisDevice();
-  await input.clearProfileCache();
+  const local = await input.signOutThisDevice();
+  if (local?.superseded) {
+    return { remote, localCompletion: "discarded" };
+  }
   if (!input.uiAttached()) {
     return { remote, localCompletion: "device_only" };
   }

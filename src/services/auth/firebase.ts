@@ -67,7 +67,7 @@ import {
   signOutNativePhoneAuth,
   startNativePhoneOtp,
 } from "./nativePhoneAuth";
-import { cleanBothAuthSdks, retireJsAuthBridge } from "./authSessionFence";
+import { cleanBothAuthSdks, currentAuthMutationGeneration } from "./authSessionFence";
 import { retireNativeCallableAuthReady } from "./nativeCallableAuthGate";
 
 import type {
@@ -422,7 +422,9 @@ export const firebaseAuthService: AuthService = {
 
   async signOut(): Promise<void> {
     const uid = getFirebaseAuth().currentUser?.uid ?? null;
-    const retired = retireJsAuthBridge();
+    // Local sign-out already retired this generation. A second bump would
+    // look like a newer login and skip the profile clear that still owns it.
+    const retired = currentAuthMutationGeneration();
     retireNativeCallableAuthReady();
     const result = await cleanBothAuthSdks(retired, {
       signOutJs: () => getFirebaseAuth().signOut(),

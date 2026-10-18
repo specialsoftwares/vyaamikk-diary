@@ -28,7 +28,12 @@ import {
   type ProfilePatch,
 } from "@/services/auth";
 import { sessionStore, forceClearAllSessions, type AuthSession } from "@/services/session";
-import { retireJsAuthBridge, runLocalDeviceSignOut } from "@/services/auth/authSessionFence";
+import {
+  clearPersistedProfileIfOwned,
+  retireJsAuthBridge,
+  runLocalDeviceSignOut,
+  type LocalSignOutResult,
+} from "@/services/auth/authSessionFence";
 import { retireNativeCallableAuthReady } from "@/services/auth/nativeCallableAuthGate";
 import { toAppError } from "@/domain/errors";
 import { clearMasterDataSessionCache } from "@/services/masterData";
@@ -166,7 +171,7 @@ interface AuthApi extends AuthState {
   hardDevSignOut(): Promise<void>;
   startOtp(phoneE164: PhoneE164): Promise<OtpChallenge>;
   confirmOtp(challenge: OtpChallenge, code: string): Promise<UserProfile>;
-  signOut(): Promise<void>;
+  signOut(): Promise<LocalSignOutResult>;
   requestAccountDeletion(): Promise<import("@/domain/accountDeletion").AccountDeletionResult>;
   cancelAccountDeletion(phoneE164: PhoneE164): Promise<UserProfile>;
   /** Save session after production account reactivation (post email verify). */
@@ -373,7 +378,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = useCallback(async () => {
     bootAttemptRef.current += 1;
     const uid = state.session?.user.uid;
-    await runLocalDeviceSignOut({
+    return runLocalDeviceSignOut({
       maskPrivateUi: () => {
         setState({
           status: "signed_out",
@@ -393,17 +398,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           log.warn("auth signOut error", e);
         }
       },
-      clearLocalProfileCache: async () => {
-        if (uid) {
-          await clearAuthWrapperProgress(uid);
-          clearTransientPendingEmailState(uid);
-          clearLocalMockPendingEmailForUid(uid);
-        }
-        clearSessionLastActiveTouch(uid);
-        endFirstActionFreezeSession();
-        await forceClearAllSessions();
-        clearMasterDataSessionCache();
-      },
+      clearLocalProfileCache: (ownedGeneration) =>
+        clearPersistedProfileIfOwned(ownedGeneration, {
+          prepare: async () => {
+            if (uid) {
+              await clearAuthWrapperProgress(uid);
+              clearTransientPendingEmailState(uid);
+              clearLocalMockPendingEmailForUid(uid);
+            }
+            clearSessionLastActiveTouch(uid);
+            endFirstActionFreezeSession();
+            clearMasterDataSessionCache();
+          },
+          removePersistedProfile: () => forceClearAllSessions(),
+        }).then(() => undefined),
     });
   }, [state.session?.user.uid]);
 

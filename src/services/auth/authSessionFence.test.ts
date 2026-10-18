@@ -6,6 +6,7 @@
 import {
   __resetAuthSessionFenceForTests,
   cleanBothAuthSdks,
+  clearPersistedProfileIfOwned,
   currentAuthMutationGeneration,
   noteNativeAuthIdentity,
   retireJsAuthBridge,
@@ -323,7 +324,6 @@ async function main() {
 
   type SideEffects = {
     signOuts: number;
-    profileClears: number;
     navigations: number;
     outcomes: LogoutAllRemoteOutcome[];
     busy: boolean[];
@@ -340,7 +340,6 @@ async function main() {
   }): Promise<{ result: Awaited<ReturnType<typeof orchestrateConfirmedLogoutAll>>; effects: SideEffects }> {
     const effects: SideEffects = {
       signOuts: 0,
-      profileClears: 0,
       navigations: 0,
       outcomes: [],
       busy: [],
@@ -366,9 +365,6 @@ async function main() {
       },
       signOutThisDevice: async () => {
         effects.signOuts += 1;
-      },
-      clearProfileCache: async () => {
-        effects.profileClears += 1;
       },
       navigateToSignedOut: () => {
         effects.navigations += 1;
@@ -413,7 +409,6 @@ async function main() {
         effects.bound?.uid === "uid-a" &&
         effects.bound.generation === identity.generation &&
         effects.signOuts === 0 &&
-        effects.profileClears === 0 &&
         effects.navigations === 0 &&
         effects.outcomes.length === 0 &&
         effects.busy.includes(false) === false
@@ -449,7 +444,6 @@ async function main() {
         result.localCompletion === "discarded" &&
         currentAuthMutationGeneration() !== identity.generation &&
         effects.signOuts === 0 &&
-        effects.profileClears === 0 &&
         effects.navigations === 0 &&
         effects.outcomes.length === 0
     );
@@ -480,7 +474,6 @@ async function main() {
       result.remote === "pending" &&
         result.localCompletion === "device_only" &&
         effects.signOuts === 1 &&
-        effects.profileClears === 1 &&
         effects.navigations === 0 &&
         effects.outcomes.length === 0 &&
         effects.busy.includes(false) === false
@@ -496,11 +489,10 @@ async function main() {
       call: async () => ({ status: "complete" }),
     });
     check(
-      "same-session complete signs out, clears the profile cache, alerts, and navigates",
+      "same-session complete signs out, alerts, and navigates",
       finished.result.remote === "complete" &&
         finished.result.localCompletion === "applied" &&
         finished.effects.signOuts === 1 &&
-        finished.effects.profileClears === 1 &&
         finished.effects.navigations === 1 &&
         finished.effects.outcomes[0] === "complete" &&
         finished.effects.busy[0] === true &&
@@ -532,7 +524,6 @@ async function main() {
       failed.result.remote === "unavailable" &&
         failed.effects.outcomes[0] === "unavailable" &&
         failed.effects.signOuts === 1 &&
-        failed.effects.profileClears === 1 &&
         failed.effects.navigations === 1
     );
     const offlineSame = await runProductionLogout({
@@ -549,8 +540,156 @@ async function main() {
         offlineSame.effects.calls === 0 &&
         offlineSame.effects.outcomes[0] === "offline" &&
         offlineSame.effects.signOuts === 1 &&
-        offlineSame.effects.profileClears === 1 &&
         offlineSame.effects.navigations === 1
+    );
+  }
+
+  async function productionLocalSignOut(profile: { uid: string | null }, gates: {
+    sdk?: { entered: ReturnType<typeof deferred<void>>; release: ReturnType<typeof deferred<void>> };
+    cache?: { entered: ReturnType<typeof deferred<void>>; release: ReturnType<typeof deferred<void>> };
+  }) {
+    return runLocalDeviceSignOut({
+      maskPrivateUi: () => undefined,
+      retireCloudAdmission: () => {
+        retireJsAuthBridge();
+      },
+      cleanAuthSdks: async (ownedGeneration) => {
+        await cleanBothAuthSdks(ownedGeneration, {
+          signOutJs: async () => {
+            if (!gates.sdk) return;
+            gates.sdk.entered.resolve();
+            await gates.sdk.release.promise;
+          },
+          signOutNative: async () => undefined,
+        });
+      },
+      clearLocalProfileCache: (ownedGeneration) =>
+        clearPersistedProfileIfOwned(ownedGeneration, {
+          prepare: async () => {
+            if (!gates.cache) return;
+            gates.cache.entered.resolve();
+            await gates.cache.release.promise;
+          },
+          removePersistedProfile: async () => {
+            profile.uid = null;
+          },
+        }).then(() => undefined),
+    });
+  }
+
+  __resetAuthSessionFenceForTests();
+  {
+    noteNativeAuthIdentity("uid-a");
+    const confirmed = { uid: "uid-a", generation: currentAuthMutationGeneration() };
+    const profile = { uid: "uid-a" as string | null };
+    const sdk = { entered: deferred<void>(), release: deferred<void>() };
+    let navigations = 0;
+    const outcomes: LogoutAllRemoteOutcome[] = [];
+    const pending = orchestrateConfirmedLogoutAll({
+      confirmed: true,
+      online: true,
+      operationId,
+      identity: confirmed,
+      sessionStillCurrent: () =>
+        profile.uid === confirmed.uid && currentAuthMutationGeneration() === confirmed.generation,
+      uiAttached: () => true,
+      call: async () => ({ status: "complete" }),
+      signOutThisDevice: () => productionLocalSignOut(profile, { sdk }),
+      navigateToSignedOut: () => {
+        navigations += 1;
+      },
+      presentOutcome: (remote) => {
+        outcomes.push(remote);
+      },
+      setBusy: () => undefined,
+    });
+    await sdk.entered.promise;
+    profile.uid = "uid-b";
+    noteNativeAuthIdentity("uid-b");
+    sdk.release.resolve();
+    const result = await pending;
+    check(
+      "a login during SDK cleanup keeps the newer persisted profile and does not alert",
+      result.remote === "complete" &&
+        result.localCompletion === "discarded" &&
+        profile.uid === "uid-b" &&
+        navigations === 0 &&
+        outcomes.length === 0
+    );
+  }
+
+  __resetAuthSessionFenceForTests();
+  {
+    noteNativeAuthIdentity("uid-a");
+    const confirmed = { uid: "uid-a", generation: currentAuthMutationGeneration() };
+    const profile = { uid: "uid-a" as string | null };
+    const cache = { entered: deferred<void>(), release: deferred<void>() };
+    let navigations = 0;
+    const outcomes: LogoutAllRemoteOutcome[] = [];
+    const pending = orchestrateConfirmedLogoutAll({
+      confirmed: true,
+      online: true,
+      operationId,
+      identity: confirmed,
+      sessionStillCurrent: () => currentAuthMutationGeneration() === confirmed.generation,
+      uiAttached: () => true,
+      call: async () => ({ status: "complete" }),
+      signOutThisDevice: () => productionLocalSignOut(profile, { cache }),
+      navigateToSignedOut: () => {
+        navigations += 1;
+      },
+      presentOutcome: (remote) => {
+        outcomes.push(remote);
+      },
+      setBusy: () => undefined,
+    });
+    await cache.entered.promise;
+    profile.uid = "uid-b";
+    noteNativeAuthIdentity("uid-b");
+    cache.release.resolve();
+    const result = await pending;
+    check(
+      "a login during profile-cache cleanup keeps the newer persisted profile and does not alert",
+      result.remote === "complete" &&
+        result.localCompletion === "discarded" &&
+        profile.uid === "uid-b" &&
+        navigations === 0 &&
+        outcomes.length === 0
+    );
+  }
+
+  __resetAuthSessionFenceForTests();
+  {
+    noteNativeAuthIdentity("uid-a");
+    const confirmed = { uid: "uid-a", generation: currentAuthMutationGeneration() };
+    const profile = { uid: "uid-a" as string | null };
+    let navigations = 0;
+    const outcomes: LogoutAllRemoteOutcome[] = [];
+    const result = await orchestrateConfirmedLogoutAll({
+      confirmed: true,
+      online: true,
+      operationId,
+      identity: confirmed,
+      sessionStillCurrent: () => currentAuthMutationGeneration() === confirmed.generation,
+      uiAttached: () => true,
+      call: async () => ({ status: "complete" }),
+      signOutThisDevice: () => productionLocalSignOut(profile, {}),
+      navigateToSignedOut: () => {
+        navigations += 1;
+      },
+      presentOutcome: (remote) => {
+        outcomes.push(remote);
+      },
+      setBusy: () => undefined,
+    });
+    check(
+      "the logout retirement still completes UI after its own generation bump",
+      result.remote === "complete" &&
+        result.localCompletion === "applied" &&
+        currentAuthMutationGeneration() !== confirmed.generation &&
+        profile.uid === null &&
+        navigations === 1 &&
+        outcomes[0] === "complete"
     );
   }
 

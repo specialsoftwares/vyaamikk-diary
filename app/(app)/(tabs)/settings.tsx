@@ -26,7 +26,6 @@ import {
   orchestrateConfirmedLogoutAll,
   type LogoutAllRemoteOutcome,
 } from "@/services/auth/logoutAllDevices";
-import { forceClearAllSessions } from "@/services/session";
 import { spacing, typography, useThemedStyles } from "@/theme";
 
 export default function SettingsTab() {
@@ -168,7 +167,6 @@ export default function SettingsTab() {
               }
             },
             signOutThisDevice: () => signOut(),
-            clearProfileCache: () => forceClearAllSessions(),
             navigateToSignedOut: () => router.replace(getAuthEntryHref()),
             presentOutcome: (remote) => {
               Alert.alert(t("settings.logoutAllPrompt"), logoutAllMessage(remote));

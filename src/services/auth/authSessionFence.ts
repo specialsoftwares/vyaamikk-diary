@@ -11,6 +11,13 @@ export type AuthSdkCleanupResult = {
   skippedBecauseNewerSession: boolean;
 };
 
+export type LocalSignOutResult = {
+  /** Generation returned by this logout's retirement, not the pre-logout value. */
+  ownedGeneration: number;
+  superseded: boolean;
+  profileCleared: boolean;
+};
+
 let generation = 0;
 let tail: Promise<void> = Promise.resolve();
 let bridgeTargetUid: string | null = null;
@@ -31,10 +38,21 @@ export function retireJsAuthBridge(): number {
  * mint for the previous uid cannot publish into the new one.
  */
 export function noteNativeAuthIdentity(nativeUid: string | null): void {
-  if (bridgeTargetUid && nativeUid && nativeUid !== bridgeTargetUid) {
-    generation += 1;
+  if (!nativeUid) return;
+  if (bridgeTargetUid === nativeUid) return;
+  // The first identity on a fresh fence is not a replacement. After
+  // retireJsAuthBridge clears the target, the next login claims a new
+  // generation so an in-flight logout can see it.
+  if (bridgeTargetUid === null && generation === 0) {
+    bridgeTargetUid = nativeUid;
+    return;
   }
-  if (nativeUid) bridgeTargetUid = nativeUid;
+  generation += 1;
+  bridgeTargetUid = nativeUid;
+}
+
+export function authRetirementOwns(ownedGeneration: number): boolean {
+  return generation === ownedGeneration;
 }
 
 export function enqueueAuthMutation<T>(work: () => Promise<T>): Promise<T> {
@@ -71,6 +89,13 @@ export async function cleanBothAuthSdks(
         () => false
       ),
     ]);
+    if (generation !== retiredGeneration) {
+      return {
+        jsCleared: false,
+        nativeCleared: false,
+        skippedBecauseNewerSession: true,
+      };
+    }
     return {
       jsCleared: jsResult,
       nativeCleared: nativeResult,
@@ -80,19 +105,43 @@ export async function cleanBothAuthSdks(
 }
 
 /**
+ * Profile-cache delete for one retirement. prepare is the awaited cache
+ * work. The persisted session is removed only if this retirement still
+ * owns the generation after that await.
+ */
+export async function clearPersistedProfileIfOwned(
+  ownedGeneration: number,
+  steps: {
+    prepare: () => Promise<void>;
+    removePersistedProfile: () => Promise<void>;
+  }
+): Promise<boolean> {
+  await steps.prepare();
+  if (!authRetirementOwns(ownedGeneration)) return false;
+  await steps.removePersistedProfile();
+  return authRetirementOwns(ownedGeneration);
+}
+
+/**
  * Masks private UI and retires admission before either SDK cleanup await.
  * The profile-cache step must not wipe drafts or owner outbox rows.
  */
 export async function runLocalDeviceSignOut(steps: {
   maskPrivateUi: () => void;
   retireCloudAdmission: () => void;
-  cleanAuthSdks: () => Promise<unknown>;
-  clearLocalProfileCache: () => Promise<void>;
-}): Promise<void> {
+  cleanAuthSdks: (ownedGeneration: number) => Promise<unknown>;
+  clearLocalProfileCache: (ownedGeneration: number) => Promise<void>;
+}): Promise<LocalSignOutResult> {
   steps.maskPrivateUi();
   steps.retireCloudAdmission();
-  await steps.cleanAuthSdks();
-  await steps.clearLocalProfileCache();
+  const ownedGeneration = generation;
+  await steps.cleanAuthSdks(ownedGeneration);
+  if (!authRetirementOwns(ownedGeneration)) {
+    return { ownedGeneration, superseded: true, profileCleared: false };
+  }
+  await steps.clearLocalProfileCache(ownedGeneration);
+  const superseded = !authRetirementOwns(ownedGeneration);
+  return { ownedGeneration, superseded, profileCleared: !superseded };
 }
 
 export function __resetAuthSessionFenceForTests(): void {
