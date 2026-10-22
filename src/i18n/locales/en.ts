@@ -1310,7 +1310,16 @@ const en = {
     reactivateEmailBody:
       "Enter the verification code sent to {{email}} to reactivate your account.",
     reactivateEmailHint:
-      "In development, use code 000000 when the email provider is not configured.",
+      "Enter the six-digit code from that email. It expires in five minutes. Do not share it.",
+    emailCodeHint: "Enter the six-digit code from your email. Do not share it.",
+    reactivateResend: "Resend code",
+    reactivateResendIn: "Resend in {{seconds}}s",
+    reactivateOffline: "Reconnect to the internet before reactivating this account.",
+    reactivateSendFailed: "The email could not be sent. Try again when you are online.",
+    reactivateExpired: "That code has expired. Request a new one.",
+    reactivateAttempts: "Too many attempts. Wait and request a new code.",
+    reactivateUnavailable: "This account cannot be reactivated from the app. Contact support.",
+    reactivateLatestCode: "That code is no longer valid. Use the latest email.",
     verifyAndReactivate: "Verify & reactivate account",
     backToLogin: "Back to login",
     cancelSuccessTitle: "Deletion cancelled",

@@ -252,7 +252,7 @@ Screenshots: **state labels only**.
 | D2 | Clean install | Empty local DB; same launch/sign-in. Label `PLAY_INSTALLED` or `NATIVE_DEVICE` | NOT RUN — D2 unnamed; no hardware attached |
 | D3 | Force-stop; reboot; open | Splash completes; main tabs; legal date `2026-07-27`; no token printed | NOT RUN |
 | D4 | Sign-in phone OTP | Session bound to that uid (hash uid in shared logs) | NOT RUN |
-| D5 | Reviewer login `+91 9000000000` / `654321` **only if** live test-phone fixture verified | Reaches tabs; **no founder email** | NOT RUN |
+| D5 | Reviewer login `[PLAY_REVIEW_PHONE]` / `[PLAY_REVIEW_CODE]` **only if** live test-phone fixture verified | Reaches tabs; **no founder email** | NOT RUN |
 | D6 | Email / profile onboarding if shown | Completes; consents recorded | NOT RUN |
 | D7 | Ordinary diary create/edit/save | Persists; no GRIN-induced loss | NOT RUN |
 | D8 | PDF export of a diary record | PDF generates; ITC/GST claims unchanged (app does not assert live 2B/EWB) | NOT RUN |

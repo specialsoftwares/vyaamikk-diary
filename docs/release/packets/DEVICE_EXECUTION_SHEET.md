@@ -74,7 +74,7 @@ Live GRIN seven **ABSENT**. Useful GRIN rows need later backend.
 | D2 | Clean install (device still unnamed) | Same launch/sign-in; empty local DB | PLAY_INSTALLED or NATIVE_DEVICE | NOT RUN |
 | D3 | Force-stop; reboot; open app | Splash completes; main tabs; legal date `2026-07-27`; no token printed | same | NOT RUN |
 | D4 | Sign-in phone OTP | Session bound to that uid | same | NOT RUN |
-| D5 | Reviewer login `+91 9000000000` / `654321` **only if** live test-phone fixture verified | Reaches tabs; **no founder email** | same | NOT RUN |
+| D5 | Reviewer login `[PLAY_REVIEW_PHONE]` / `[PLAY_REVIEW_CODE]` **only if** live test-phone fixture verified | Reaches tabs; **no founder email** | same | NOT RUN |
 | D6 | Email / profile onboarding if shown | Completes; consents recorded | same | NOT RUN |
 | D7 | Ordinary diary create/edit/save | Persists; no GRIN-induced loss | same | NOT RUN |
 | D8 | PDF export of a diary record | PDF generates; ITC/GST claims unchanged (app does not assert live 2B/EWB) | same | NOT RUN |

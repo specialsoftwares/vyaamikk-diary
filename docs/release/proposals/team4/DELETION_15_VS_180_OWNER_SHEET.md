@@ -251,7 +251,7 @@ solely from that 202.
 - Listing screenshots: dashboard assets `safeForPublic: false` (demo names).
   Do not upload those to Play.
 - Reviewer onboarding: owner/tester finishes **email + profile before
-  review**. Reviewer uses `+91 9000000000` / OTP `654321` only if the live
+  review**. Reviewer uses `[PLAY_REVIEW_PHONE]` / OTP `[PLAY_REVIEW_CODE]` only if the live
   fixture is verified. No founder inbox in Play instructions.
   `docs/PLAY_REVIEW_SETUP.md`. **No `520f9f9` AAB** to complete that
   onboarding on the intended binary.

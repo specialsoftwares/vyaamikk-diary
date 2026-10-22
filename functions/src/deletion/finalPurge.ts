@@ -29,6 +29,7 @@ import {
   DELETION_JOBS,
   MAX_ATTEMPTS_BEFORE_MANUAL,
   accountPurgeMayComplete,
+  automaticRestorationAllowed,
   canAcquireLease,
   classifyProviderError,
   initialDeletionJob,
@@ -112,7 +113,8 @@ export async function cancelDeletionJob(uid: string, reason = "reactivated"): Pr
     const snap = await tx.get(ref);
     if (!snap.exists) return;
     const job = snap.data() as DeletionJobDoc;
-    if (job.status === "completed") return;
+    if (job.status === "completed" || job.status === "cancelled") return;
+    if (!automaticRestorationAllowed(job, now)) return;
     tx.update(ref, {
       status: "cancelled",
       generation: FieldValue.increment(1),

@@ -22,7 +22,7 @@ Tick only after the named device run. Use synthetic data.
 ## C-01 Cold start and auth
 
 1. Force-stop; reboot phone; open app.
-2. Sign in with phone OTP (reviewer path: `+91 9000000000` / `654321` only if
+2. Sign in with phone OTP (reviewer path: `[PLAY_REVIEW_PHONE]` / `[PLAY_REVIEW_CODE]` only if
    the live Firebase test-phone fixture is verified).
 3. Complete onboarding if shown (name, business, consents).
 4. Pass: main tabs reachable; legal date in-app still `2026-07-27`; no token

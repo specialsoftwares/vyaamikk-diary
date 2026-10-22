@@ -21,8 +21,8 @@ approval (`APPROVAL_C_RESTRICTED_BILLING.md` is restricted-billing only).
 
 Firebase Console → Authentication → Sign-in method → Phone → Phone numbers for testing:
 
-- Phone number: +91 9000000000
-- Verification code: 654321
+- Phone number: [PLAY_REVIEW_PHONE]
+- Verification code: [PLAY_REVIEW_CODE]
 
 This is the configured Firebase fictional/test-phone fixture for review. It is not a
 confidential production credential and is not, by itself, proof of secure isolation.
@@ -33,9 +33,9 @@ Owner verification of the live Firebase project is still required.
 Using a production Android build on a real device (not Expo Go):
 
 1. Open Vyaamikk Diary.
-2. Enter phone number: +91 9000000000
+2. Enter phone number: [PLAY_REVIEW_PHONE]
 3. Tap Send OTP.
-4. Enter code: 654321.
+4. Enter code: [PLAY_REVIEW_CODE].
 5. Complete email verification and business profile setup as the owner/tester (not as Play reviewer copy).
 6. Confirm You / Calendar / Settings are reachable with a **fresh** sign-in using only the test phone and OTP.
 7. Do not leave email or profile steps for the Play reviewer. Do not use a founder inbox.
@@ -71,7 +71,7 @@ revocation from this document.
 
 **Username / email address or phone number:**
 
-`+91 9000000000`
+`[PLAY_REVIEW_PHONE]`
 
 **Password:**
 
@@ -83,9 +83,9 @@ This app uses phone OTP authentication. No password exists.
 
 SIGN-IN STEPS:
 
-1. Enter phone number: +91 9000000000
+1. Enter phone number: [PLAY_REVIEW_PHONE]
 2. Tap "Send OTP"
-3. When prompted for the verification code, enter: 654321
+3. When prompted for the verification code, enter: [PLAY_REVIEW_CODE]
 4. The review account is pre-configured (email verified, profile complete). Continue into the main app (You / Calendar / Settings). Do not create a new profile or use a founder email inbox.
 
 No SMS is sent when the Firebase test-phone fixture is configured.
@@ -95,10 +95,10 @@ check only if the reviewer can actually use paid/premium content on the **intend
 
 ## Security properties
 
-- +91 9000000000 is the configured Firebase fictional/test-phone fixture; owner must verify it in the live project
+- [PLAY_REVIEW_PHONE] is the configured Firebase fictional/test-phone fixture; owner must verify it in the live project
 - Firebase test numbers are per-project configuration, not a substitute for Firestore UID isolation
 - Firestore rules isolate data per UID independently of this fixture
-- Code 654321 is not the local-mock OTP
+- Code [PLAY_REVIEW_CODE] is not the local-mock OTP
 - Removing the test-phone configuration stops **new** sign-in with that fixture. It does not terminate already-issued sessions.
 
 ## Session disable (owner action, not performed here)

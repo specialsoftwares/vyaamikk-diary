@@ -96,6 +96,24 @@ export function isLeaseActive(job: DeletionJobDoc, now: number): boolean {
   return Boolean(job.leaseUntil && job.leaseUntil > now && job.status === "leased");
 }
 
+/** Soft-delete recovery may cancel only before grace ends and before purge work starts. */
+export function automaticRestorationAllowed(job: DeletionJobDoc, now: number): boolean {
+  if (job.graceExpiresAt <= now) return false;
+  if (
+    job.status === "completed" ||
+    job.status === "needs_manual_review" ||
+    job.status === "ready" ||
+    job.status === "leased"
+  ) {
+    return false;
+  }
+  if (isLeaseActive(job, now)) return false;
+  for (const phase of Object.values(job.phases)) {
+    if (phase !== "pending") return false;
+  }
+  return job.status === "awaiting_grace" || job.status === "cancelled";
+}
+
 export function canAcquireLease(job: DeletionJobDoc, now: number): boolean {
   if (job.status === "completed" || job.status === "cancelled") return false;
   if (job.status === "needs_manual_review") return false;

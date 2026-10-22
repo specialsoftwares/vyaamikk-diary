@@ -27,6 +27,14 @@ Excluded:
 
 `retryReconciliationWorkItem` and `resolveManualRecoveryCase` still require the caller's own session to pass the cutoff. An admin or support claim does not bypass it. `getDownloadURL` bearer file URLs are a separate capability and are not revoked by logout.
 
+## Reactivation email OTP
+
+The pending-deletion screen always rendered the English string that told the user to use a development code. `startAccountReactivation` wrote a pending document and did not call Resend, so no email was sent. Verification then called the ordinary bind-email callable, which does not read that document.
+
+Eligible reactivation now reserves a challenge on the existing email-OTP collection, sends through the existing Resend adapter, and stores only an HMAC digest bound to purpose, uid, challenge id, deletion generation, and verified-email version. The code is valid for five minutes. Sends are at least 60 seconds apart, at most 3 per account per 15 minutes, with 5 guesses per challenge and 10 per account per 30 minutes. A leased or in-progress purge, an expired grace window, or a missing verified email does not restore the account. `LOGOUT_ALL_CONTROL_ENABLED` is unchanged. Reviewer phone authentication is unchanged.
+
+Installed clients that still call `verifyAndBindEmail` after start will not accept this challenge. Ship the function update and the app update together. Do not deploy from this note until that rollout is authorized. Real inbox delivery was not run.
+
 ## Evidence labels
 
 | Check | Label |
@@ -34,6 +42,11 @@ Excluded:
 | Fence, mint policy, transactional logout-all, callable inventory, new-device unit tests, persistence rationale against `@firebase/auth` 1.13.2, logout-all completion bound to the confirming identity, local sign-out ownership, and `sessionStore` save/load across a deferred session-key delete | SOURCE |
 | Rules unit tests and letterhead static access estimates on `ee54f0e`. Rules files were not changed after that | EMULATOR, prior run |
 | Injected verifier failures | SOURCE, not revocation |
+| Reactivation OTP reserve, provider rejection, expiry, guess budgets, resend invalidation, purge race, parallel consume | SOURCE |
+| Reactivation against the Firestore emulator | not run in this pass; transactional logic covered by the in-memory transaction double |
+| Real reactivation email in an inbox | not run |
+| Owner phone reactivation | not run |
+| Mounted reactivation screen on a device or browser | not run |
 | Controlled live Firebase Auth revocation | not run |
 | Two-device or owner-phone enforcement | not run |
 

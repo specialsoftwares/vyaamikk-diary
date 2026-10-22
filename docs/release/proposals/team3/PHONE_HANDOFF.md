@@ -330,7 +330,7 @@ serials, IMEIs, or Android IDs.
 | D1 | Play-install **over vc22** (not sideload labelled PLAY_INSTALLED) | Play shows new versionCode; cold start; existing diary/PO/credit/letterhead/PDF still open; SQLite v10 migrates | NOT RUN |
 | D3 | Force-stop; reboot; open | Splash completes; main tabs; legal date `2026-07-27`; no token printed | NOT RUN |
 | D4 | Phone OTP on the tester's own number | Session bound to that uid; **no OTP in git**; hash uid in shared logs | NOT RUN |
-| D5 | Reviewer `+91 9000000000` / `654321` **only if** live fixture verified | Reaches tabs; **no founder email**. Else `fixture_unverified` | NOT RUN |
+| D5 | Reviewer `[PLAY_REVIEW_PHONE]` / `[PLAY_REVIEW_CODE]` **only if** live fixture verified | Reaches tabs; **no founder email**. Else `fixture_unverified` | NOT RUN |
 | D6 | Email / profile onboarding if shown | Completes; consents recorded | NOT RUN |
 | D7 | Ordinary diary create/edit/save | Persists after force-stop; GRIN flags must not drop the record | NOT RUN |
 | D8 | PDF export of that record | PDF generates; no live GSTR-2B / E-Way Bill claim; no customer GSTIN in screenshots | NOT RUN |

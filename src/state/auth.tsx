@@ -35,6 +35,7 @@ import {
 } from "@/services/session";
 import {
   clearPersistedProfileIfOwned,
+  currentAuthMutationGeneration,
   retireJsAuthBridge,
   runLocalDeviceSignOut,
   type LocalSignOutResult,
@@ -476,11 +477,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const finishReactivation = useCallback(
     async (profile: UserProfile) => {
+      const ownedGeneration = currentAuthMutationGeneration();
       if (getActiveBackend() === "firebase-production") {
-        void import("@/services/auth/jsAuthBridge").then((m) =>
-          m.ensureJsAuthSession()
-        );
+        const bridge = await import("@/services/auth/jsAuthBridge");
+        await bridge.ensureJsAuthSession();
       }
+      if (currentAuthMutationGeneration() !== ownedGeneration) return profile;
+      if (state.user && state.user.uid !== profile.uid) return profile;
       const session = await saveSession(profile);
       setState({
         status: "signed_in",
@@ -493,7 +496,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       );
       return profile;
     },
-    [saveSession]
+    [saveSession, state.user]
   );
 
   const acknowledgeUEID = useCallback(() => {

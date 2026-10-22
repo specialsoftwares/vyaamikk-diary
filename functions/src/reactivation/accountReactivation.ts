@@ -1,192 +1,224 @@
-import { HttpsError, onCall } from "firebase-functions/v2/https";
-import { randomBytes } from "node:crypto";
+import { HttpsError, onCall, type CallableRequest } from "firebase-functions/v2/https";
 
 import { getAdminDb } from "../admin";
-import { cancelDeletionJob } from "../deletion/finalPurge";
 import { assertAdmittedCallableUser } from "../identity/admitCallableUser";
+import type { UserProfileDoc } from "../identity/shared";
+import { EMAIL_OTP_RUNTIME_SECRETS } from "../email/secrets";
+import { resolveEmailProvider } from "../email/provider";
 import {
-  applyLoginTimestamps,
-  normalizePhoneE164,
-  type UserProfileDoc,
-} from "../identity/shared";
+  publishReactivationDelivery,
+  readReactivationHmacSecret,
+  reactivationEmailCopy,
+  reserveReactivationSend,
+  verifyReactivationCode,
+  type ReactivationDb,
+  type ReactivationFailure,
+  type ReactivationMailer,
+  type ReactivationTx,
+} from "./reactivationOtp";
 
-const USERS = "users";
-const PHONE_INDEX = "phoneIndex";
-const PENDING_COLLECTION = "pendingEmailVerifications";
+const callOpts = { region: "asia-south1" as const, secrets: EMAIL_OTP_RUNTIME_SECRETS };
 
-const REACTIVATION_PHONE_TTL_MS = 10 * 60 * 1000;
-const PENDING_TTL_MS = 20 * 60 * 1000;
-
-function normalizeEmail(raw: string): string {
-  return raw.trim().toLowerCase();
+export function adminReactivationDb(): ReactivationDb {
+  const db = getAdminDb();
+  return {
+    async runTransaction(fn) {
+      return db.runTransaction(async (tx) => {
+        const ops: Array<() => void> = [];
+        const adapter: ReactivationTx = {
+          async get(collection, id) {
+            const snap = await tx.get(db.collection(collection).doc(id));
+            return snap.exists ? ({ ...(snap.data() as Record<string, unknown>) }) : null;
+          },
+          set(collection, id, data) {
+            ops.push(() => {
+              tx.set(db.collection(collection).doc(id), data);
+            });
+          },
+          update(collection, id, data) {
+            ops.push(() => {
+              tx.update(db.collection(collection).doc(id), data);
+            });
+          },
+        };
+        const result = await fn(adapter);
+        for (const op of ops) op();
+        return result;
+      });
+    },
+  };
 }
 
-function hashEmail(normalized: string): string {
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < normalized.length; i += 1) {
-    hash ^= normalized.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193);
+export function productionReactivationMailer(): ReactivationMailer {
+  const resolved = resolveEmailProvider();
+  if (resolved.mode === "unavailable") {
+    return { async send() { return "rejected"; } };
   }
-  return (hash >>> 0).toString(16).padStart(8, "0");
+  return {
+    async send(input) {
+      try {
+        const result = await resolved.provider.send({
+          to: input.to,
+          subject: input.subject,
+          textBody: input.text,
+          idempotencyKey: input.idempotencyKey,
+        });
+        return result.delivered ? "accepted" : "rejected";
+      } catch {
+        return "ambiguous";
+      }
+    },
+  };
 }
 
-function maskEmail(email: string): string {
-  const v = email.trim();
-  const at = v.indexOf("@");
-  if (at <= 0) return "***";
-  const local = v.slice(0, at);
-  const domain = v.slice(at + 1);
-  const maskedLocal = local.length <= 2 ? `${local[0] ?? "*"}***` : `${local.slice(0, 2)}***`;
-  const dot = domain.indexOf(".");
-  const maskedDomain =
-    dot > 0 ? `${domain.slice(0, 1)}***${domain.slice(dot)}` : `${domain.slice(0, 2)}***`;
-  return `${maskedLocal}@${maskedDomain}`;
-}
-
-function assertFreshPhoneVerification(profile: UserProfileDoc, now: number): number {
-  const verifiedAt = profile.reactivationPhoneVerifiedAt ?? 0;
-  if (!verifiedAt || now - verifiedAt > REACTIVATION_PHONE_TTL_MS) {
-    throw new HttpsError(
+function httpsFor(failure: ReactivationFailure, retryAfterSeconds?: number): HttpsError {
+  const retry = retryAfterSeconds ?? null;
+  if (failure === "cooldown" || failure === "rate_limited" || failure === "attempts_exhausted") {
+    return new HttpsError("resource-exhausted", "Please wait and try again.", {
+      code: failure,
+      retryAfterSeconds: retry,
+    });
+  }
+  if (failure === "provider_unavailable") {
+    return new HttpsError("failed-precondition", "Could not send the reactivation email. Try again later.", {
+      code: failure,
+      retryAfterSeconds: retry,
+    });
+  }
+  if (failure === "no_verified_email") {
+    return new HttpsError(
       "failed-precondition",
-      "Phone verification expired. Sign in with OTP again."
+      "This account has no verified email. Contact support to recover it.",
+      { code: failure }
     );
   }
-  return verifiedAt;
+  if (failure === "phone_proof_expired") {
+    return new HttpsError("failed-precondition", "Phone verification expired. Sign in with OTP again.", {
+      code: failure,
+    });
+  }
+  if (failure === "expired") {
+    return new HttpsError("deadline-exceeded", "That code has expired. Request a new one.", { code: failure });
+  }
+  if (failure === "superseded") {
+    return new HttpsError("aborted", "That code is no longer valid. Use the latest email.", { code: failure });
+  }
+  if (failure === "purge_underway" || failure === "ineligible") {
+    return new HttpsError("failed-precondition", "This account cannot be reactivated automatically.", {
+      code: failure,
+    });
+  }
+  return new HttpsError("invalid-argument", "Incorrect code. Please try again.", { code: "invalid" });
 }
 
-function assertEmailVerifiedForReactivation(profile: UserProfileDoc, reactivationRequestedAt: number): void {
-  const emailVerifiedAt = profile.emailVerifiedAt ?? 0;
-  const reactivationEmailVerifiedAt = profile.reactivationEmailVerifiedAt ?? 0;
-  const emailOk =
-    profile.emailStatus === "verified" &&
-    (emailVerifiedAt >= reactivationRequestedAt || reactivationEmailVerifiedAt >= reactivationRequestedAt);
-  if (!emailOk) {
-    throw new HttpsError("failed-precondition", "Business email verification required.");
-  }
+function callerIp(request: CallableRequest): string | null {
+  const raw = request.rawRequest as { ip?: string } | undefined;
+  const ip = typeof raw?.ip === "string" ? raw.ip.trim() : "";
+  if (!ip || ip.length > 64) return null;
+  return ip;
 }
 
-/**
- * Start account reactivation after OTP sign-in on a pending-deletion account.
- * Sends email verification to the registered business email.
- */
-export const startAccountReactivation = onCall({ region: "asia-south1" }, async (request) => {
-  await assertAdmittedCallableUser(request);
-  const authUid = request.auth?.uid;
-  if (!authUid) throw new HttpsError("unauthenticated", "Sign in first.");
-
-  const db = getAdminDb();
-  const userRef = db.collection(USERS).doc(authUid);
-  const userSnap = await userRef.get();
-  if (!userSnap.exists) throw new HttpsError("not-found", "User not found.");
-
-  const profile = userSnap.data() as UserProfileDoc;
-  if (profile.status !== "pending_deletion") {
-    throw new HttpsError("failed-precondition", "Account is not pending deletion.");
-  }
-
-  const phone = normalizePhoneE164(String(profile.phoneE164 ?? ""));
-  const phoneSnap = await db.collection(PHONE_INDEX).doc(phone).get();
-  if (!phoneSnap.exists || (phoneSnap.data() as { uid: string }).uid !== authUid) {
-    throw new HttpsError("failed-precondition", "Mobile number does not match this account.");
-  }
-
-  const now = Date.now();
-  const phoneVerifiedAt = assertFreshPhoneVerification(profile, now);
-
-  const businessEmail = profile.businessEmail?.trim();
-  if (!businessEmail) {
-    throw new HttpsError("failed-precondition", "No registered business email on this account.");
-  }
-
-  const normalized = normalizeEmail(businessEmail);
-  const emailHash = hashEmail(normalized);
-  const verificationId = randomBytes(16).toString("hex");
-
-  await db.runTransaction(async (tx) => {
-    tx.update(userRef, {
-      reactivationRequestedAt: now,
-      reactivationPhoneVerifiedAt: phoneVerifiedAt,
-      updatedAt: now,
-    });
-    tx.set(db.collection(PENDING_COLLECTION).doc(verificationId), {
-      verificationId,
-      userId: authUid,
-      normalizedEmail: normalized,
-      emailHash,
-      createdAt: now,
-      expiresAt: now + PENDING_TTL_MS,
-      status: "pending",
-      purpose: "reactivation",
-      devCode: process.env.FUNCTIONS_EMULATOR === "true" ? "000000" : null,
-    });
+export async function performStartAccountReactivation(input: {
+  db: ReactivationDb;
+  mailer: ReactivationMailer;
+  uid: string;
+  now: number;
+  ip: string | null;
+  env?: NodeJS.ProcessEnv;
+}): Promise<{
+  verificationId: string;
+  maskedEmail: string;
+  requiresEmailVerification: true;
+  expiresAt: number;
+  resendAvailableAt: number;
+}> {
+  const secret = readReactivationHmacSecret(input.env);
+  const reserved = await reserveReactivationSend({
+    db: input.db,
+    uid: input.uid,
+    now: input.now,
+    secret,
+    ip: input.ip,
   });
-
+  if (!reserved.ok) throw httpsFor(reserved.failure, reserved.retryAfterSeconds);
+  const copy = reactivationEmailCopy(reserved.code);
+  let outcome: "accepted" | "rejected" | "ambiguous" = "rejected";
+  try {
+    outcome = await input.mailer.send({
+      to: reserved.to,
+      subject: copy.subject,
+      text: copy.text,
+      idempotencyKey: reserved.operationId,
+    });
+  } catch {
+    outcome = "ambiguous";
+  }
+  await publishReactivationDelivery({
+    db: input.db,
+    uid: input.uid,
+    challengeId: reserved.challengeId,
+    operationId: reserved.operationId,
+    outcome,
+    now: input.now,
+  });
+  if (outcome !== "accepted") throw httpsFor("provider_unavailable");
   return {
-    verificationId,
-    maskedEmail: maskEmail(businessEmail),
-    requiresEmailVerification: true as const,
+    verificationId: reserved.challengeId,
+    maskedEmail: reserved.maskedEmail,
+    requiresEmailVerification: true,
+    expiresAt: reserved.expiresAt,
+    resendAvailableAt: reserved.resendAvailableAt,
   };
+}
+
+export async function performCompleteAccountReactivation(input: {
+  db: ReactivationDb;
+  uid: string;
+  challengeId: string;
+  code: string;
+  now: number;
+  env?: NodeJS.ProcessEnv;
+}): Promise<{ profile: UserProfileDoc; isNewUser: false }> {
+  const secret = readReactivationHmacSecret(input.env);
+  const verified = await verifyReactivationCode({
+    db: input.db,
+    uid: input.uid,
+    challengeId: input.challengeId,
+    code: input.code,
+    now: input.now,
+    secret,
+  });
+  if (!verified.ok) throw httpsFor(verified.failure, verified.retryAfterSeconds);
+  return { profile: verified.profile as unknown as UserProfileDoc, isNewUser: false };
+}
+
+export const startAccountReactivation = onCall(callOpts, async (request) => {
+  await assertAdmittedCallableUser(request);
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in first.");
+  return performStartAccountReactivation({
+    db: adminReactivationDb(),
+    mailer: productionReactivationMailer(),
+    uid,
+    now: Date.now(),
+    ip: callerIp(request),
+  });
 });
 
-/**
- * Complete reactivation after registered business email is verified.
- * Restores account to active and clears deletion + reactivation fields.
- */
-export const completeAccountReactivation = onCall({ region: "asia-south1" }, async (request) => {
+export const completeAccountReactivation = onCall(callOpts, async (request) => {
   await assertAdmittedCallableUser(request);
-  const authUid = request.auth?.uid;
-  if (!authUid) throw new HttpsError("unauthenticated", "Sign in first.");
-
-  const db = getAdminDb();
-  const userRef = db.collection(USERS).doc(authUid);
-  const now = Date.now();
-
-  const result = await db.runTransaction(async (tx) => {
-    const userSnap = await tx.get(userRef);
-    if (!userSnap.exists) throw new HttpsError("not-found", "User not found.");
-
-    const profile = userSnap.data() as UserProfileDoc;
-    if (profile.status !== "pending_deletion") {
-      throw new HttpsError("failed-precondition", "Account is not pending deletion.");
-    }
-
-    const reactivationRequestedAt = profile.reactivationRequestedAt ?? 0;
-    if (!reactivationRequestedAt) {
-      throw new HttpsError("failed-precondition", "Reactivation not started.");
-    }
-
-    assertFreshPhoneVerification(profile, now);
-    assertEmailVerifiedForReactivation(profile, reactivationRequestedAt);
-
-    const loggedIn = applyLoginTimestamps(profile, now);
-    tx.update(userRef, {
-      status: "active",
-      deletionRequestedAt: null,
-      deletionScheduledFor: null,
-      deletionCompletedAt: null,
-      reactivationRequestedAt: null,
-      reactivationPhoneVerifiedAt: null,
-      reactivationEmailVerifiedAt: now,
-      lastLoginAt: loggedIn.lastLoginAt,
-      previousLoginAt: loggedIn.previousLoginAt,
-      lastActiveAt: loggedIn.lastActiveAt,
-      updatedAt: now,
-    });
-
-    return {
-      ...loggedIn,
-      status: "active" as const,
-      deletionRequestedAt: null,
-      deletionScheduledFor: null,
-      deletionCompletedAt: null,
-      reactivationRequestedAt: null,
-      reactivationPhoneVerifiedAt: null,
-      reactivationEmailVerifiedAt: now,
-    };
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in first.");
+  const challengeId = request.data?.challengeId ?? request.data?.verificationId;
+  const code = request.data?.code;
+  if (typeof challengeId !== "string" || typeof code !== "string") {
+    throw httpsFor("invalid");
+  }
+  return performCompleteAccountReactivation({
+    db: adminReactivationDb(),
+    uid,
+    challengeId,
+    code,
+    now: Date.now(),
   });
-
-  // Cancel durable purge job so a leased/scheduled worker cannot continue.
-  await cancelDeletionJob(authUid, "reactivated");
-
-  return { profile: result, isNewUser: false as const };
 });

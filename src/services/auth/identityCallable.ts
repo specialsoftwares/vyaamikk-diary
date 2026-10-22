@@ -243,6 +243,8 @@ async function callFunction<TRequest, TResponse>(
         : "Identity service unavailable.";
     const details = extractCallableDetails(e);
     const serverCode = typeof details?.code === "string" ? details.code : null;
+    const reactivationCallable =
+      name === "startAccountReactivation" || name === "completeAccountReactivation";
     const baseDetails = {
       authPhase: "post_auth" as const,
       failureDomain: "functions" as const,
@@ -256,6 +258,7 @@ async function callFunction<TRequest, TResponse>(
       functionsAppName: functionsAppName || null,
       sameFirebaseApp,
       uidSuffix: authSnap?.uidSuffix ?? null,
+      ...(reactivationCallable && serverCode ? { code: serverCode } : {}),
     };
 
     if (serverCode === "EMAIL_OTP_COOLDOWN" || code === "functions/resource-exhausted") {
@@ -529,6 +532,8 @@ export interface StartAccountReactivationResponse {
   verificationId: string;
   maskedEmail: string;
   requiresEmailVerification: true;
+  expiresAt: number;
+  resendAvailableAt: number;
 }
 
 export async function callStartAccountReactivation(): Promise<StartAccountReactivationResponse> {
@@ -543,11 +548,14 @@ export interface CompleteAccountReactivationResponse {
   isNewUser: false;
 }
 
-export async function callCompleteAccountReactivation(): Promise<AuthResult> {
+export async function callCompleteAccountReactivation(
+  challengeId: string,
+  code: string
+): Promise<AuthResult> {
   const data = await callFunction<
-    Record<string, never>,
+    { challengeId: string; code: string },
     CompleteAccountReactivationResponse
-  >("completeAccountReactivation", {});
+  >("completeAccountReactivation", { challengeId, code });
   const uid = String(data.profile.uid ?? "");
   if (!uid) {
     throw new AppError("unknown", "Reactivation returned an invalid profile.", undefined, {

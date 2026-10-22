@@ -2685,7 +2685,17 @@
     "backToLogin": "લૉગિન પર પાછા જાઓ",
     "cancelSuccessTitle": "કાઢી નાખવાનું રદ કર્યું",
     "cancelSuccessBody": "તમારું એકાઉન્ટ ફરીથી સક્રિય છે. ",
-    "dateUnknown": "નિર્ધારિત તારીખ"
+    "dateUnknown": "નિર્ધારિત તારીખ",
+    "reactivateEmailHint": "તે ઈમેલનો છ અંકનો કોડ દાખલ કરો. તે પાંચ મિનિટમાં સમાપ્ત થાય છે. તે શેર ન કરો.",
+    "emailCodeHint": "તમારા ઈમેલનો છ અંકનો કોડ દાખલ કરો. તે શેર ન કરો.",
+    "reactivateResend": "કોડ ફરી મોકલો",
+    "reactivateResendIn": "{{seconds}} સેકન્ડમાં ફરી મોકલો",
+    "reactivateOffline": "ખાતું ફરી ચાલુ કરતા પહેલાં ઇન્ટરનેટથી જોડાઓ.",
+    "reactivateSendFailed": "ઈમેલ મોકલી શકાયો નહીં. ઑનલાઇન થઈને ફરી પ્રયત્ન કરો.",
+    "reactivateExpired": "આ કોડ સમાપ્ત થયો. નવો કોડ માંગો.",
+    "reactivateAttempts": "ખૂબ પ્રયત્નો. રાહ જુઓ અને નવો કોડ માંગો.",
+    "reactivateUnavailable": "આ ખાતું એપમાંથી ફરી ચાલુ થઈ શકતું નથી. સહાયનો સંપર્ક કરો.",
+    "reactivateLatestCode": "આ કોડ હવે માન્ય નથી. નવીનતમ ઈમેલનો કોડ દાખલ કરો."
   },
   "profilePolicy": {
     "limitReached": "એકાઉન્ટની સલામતી અને દુરુપયોગ અટકાવવા માટે, આ વિગત હવે એપમાંથી બદલી શકાશે નહીં. ",
