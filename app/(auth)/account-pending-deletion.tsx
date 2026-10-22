@@ -5,7 +5,10 @@ import { format } from "date-fns";
 
 import { OnboardingStepShell } from "@/components/onboarding/OnboardingStepShell";
 import { Banner, Button, Screen, LocaleUiText } from "@/components/ui";
-import { DELETION_GRACE_DAYS } from "@/domain/identityLifecycle";
+import {
+  DELETION_GRACE_DAYS,
+  DELETION_V2_REACTIVATION_DAYS,
+} from "@/domain/identityLifecycle";
 import { AppError, userFacingMessage } from "@/domain/errors";
 import { getAuthEntryHref } from "@/config/authWrapper";
 import { getActiveBackend } from "@/config/env";
@@ -33,6 +36,7 @@ export default function AccountPendingDeletionScreen() {
   const params = useLocalSearchParams<{
     phoneE164?: string;
     deletionScheduledFor?: string;
+    deletionPolicyVersion?: string;
     maskedEmail?: string;
   }>();
   const [step, setStep] = useState<ScreenStep>("info");
@@ -48,6 +52,10 @@ export default function AccountPendingDeletionScreen() {
 
   const phoneE164 = String(params.phoneE164 ?? "");
   const scheduledMs = Number(params.deletionScheduledFor ?? 0);
+  const deletionDays =
+    Number(params.deletionPolicyVersion ?? 0) >= 2
+      ? DELETION_V2_REACTIVATION_DAYS
+      : DELETION_GRACE_DAYS;
   const scheduledLabel =
     scheduledMs > 0 ? format(scheduledMs, "d MMM yyyy") : t("pendingDeletion.dateUnknown");
   const useReactivationFlow =
@@ -260,7 +268,7 @@ export default function AccountPendingDeletionScreen() {
         title={t("pendingDeletion.title")}
         body={t("pendingDeletion.body", {
           phone: phoneE164 ? maskMobile(phoneE164) : "—",
-          days: DELETION_GRACE_DAYS,
+          days: deletionDays,
           date: scheduledLabel,
         })}
         footer={

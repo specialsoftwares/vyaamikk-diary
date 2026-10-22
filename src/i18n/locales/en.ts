@@ -1282,7 +1282,7 @@ const en = {
     confirmButton: "Delete my account",
     confirmPrompt: "Delete your account permanently?",
     confirmPromptBody:
-      "Your account enters a {{days}}-day deletion period. You are signed out now. You can cancel before the scheduled date by signing in with the same mobile number.",
+      "Your account enters a {{days}}-day deletion period. You can cancel until two days before that period ends. Those two days are reserved for processing and retries. You are signed out now. You can cancel before the scheduled date by signing in with the same mobile number.",
     resultGraceTitle: "Deletion scheduled",
     result_grace:
       "Account deletion is in progress. Sign in with the same number before the deadline to cancel, or wait until deletion completes to register fresh.",
@@ -1298,7 +1298,7 @@ const en = {
     step: "Account status",
     title: "Account deletion is in progress",
     body:
-      "Mobile {{phone}} has a pending deletion. It will be final on {{date}} ({{days}}-day period). You cannot use the app until you cancel deletion or wait for it to complete.",
+      "Mobile {{phone}} has a pending deletion. You can reactivate until {{date}} ({{days}}-day period). Eligible app-controlled data is erased after that cutoff. You cannot use the app until you cancel deletion or wait for it to complete.",
     footnote:
       "After deletion completes, the same number can register again with a new Vyaamikk ID. Old records will not return. PDFs already shared outside the app cannot be recalled.",
     reactivateFootnote:

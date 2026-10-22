@@ -4,6 +4,9 @@
  */
 export const CALLABLE_SESSION_COVERAGE = {
   mintClientAuthToken: "enforced",
+  recordAgeAssessment: "enforced",
+  sealOwnerContent: "enforced",
+  openOwnerContent: "enforced",
   logoutAllDevices: "enforced",
   resolveOrCreateUserByPhone: "enforced",
   checkMobileQuarantine: "enforced",

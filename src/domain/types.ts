@@ -126,9 +126,18 @@ export interface UserProfile {
     mobileReviewChangeCount?: number;
   identityChangeHistory?: IdentityChangeHistoryEntry[];
   deletionRequestedAt?: number | null;
-  /** Epoch ms when pending deletion becomes final (request + grace period). */
+  /** Epoch ms when reactivation closes. Legacy rows use the old 45-day deadline. */
   deletionScheduledFor?: number | null;
   deletionCompletedAt?: number | null;
+  /** 2 = 15-day new-request policy. Missing means the legacy window. */
+  deletionPolicyVersion?: number | null;
+  reactivationCutoff?: number | null;
+  erasureDeadline?: number | null;
+  /** Server-written. Missing means the account has not been assessed. */
+  ageEligibility?: "eligible" | "ineligible" | "unassessed" | null;
+  agePolicyVersion?: string | null;
+  ageAssessedAt?: number | null;
+  ageMethod?: "self_declared_dob" | null;
   /** True once account deletion has retired this UEID (must not restore old data). */
   retiredUeid?: boolean;
   /** Settings edits to business / profession name after onboarding (max 2). */

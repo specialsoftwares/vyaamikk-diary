@@ -1,5 +1,19 @@
 # AUDIT EVIDENCE INDEX
 
+## 22 October 2026 first-run checkpoint
+
+| Item | Evidence |
+|---|---|
+| Candidate | `security/firebase-session-hardening` at `06d3fcd42b2eaae1c057e1bf7461a088e208bfff`, worktree clean. Reactivation commit is the HEAD. Parent session commit `03b974d` is contained. |
+| Isolated other checkout | `/Users/shivamsaurav/Vyaamikk Diary` is `draft/goods-evidence-domain-contract` at `55f2df1` with unrelated dirty files. Not edited. |
+| Live project | Intended project id `vyaamikk-diary`. At 2026-10-22T12:00:01Z, `gcloud` showed an active account marker but Firestore, Storage, and Functions list calls asked for an account selection. `firebase projects:list` returned expired credentials. No interactive login was started. All deployed identities are `LIVE_PENDING`. |
+| Parallel agents | Explore agents did not return findings. This checkpoint is from direct reads of `06d3fcd`. |
+| Product changes | None. No encryption, grace edit, migration, purge enablement, deploy, or build. |
+
+The July index below remains historical (`f1019b6`).
+
+# AUDIT EVIDENCE INDEX (July historical)
+
 **Repository tip audited:** `f1019b6`  
 **Protected runtime/website commits accounted for:** `900c46e`, `0b12fb4`, `bfc2968`, `4a1a529`, `4d04786`, `c54c8c9`, `a9e0e23`, `f1019b6`  
 **Unstaged left untouched:** `src/i18n/i18n.ts`, `src/i18n/validateLocales.ts`, `.expo-export-audit/`, local `.env`

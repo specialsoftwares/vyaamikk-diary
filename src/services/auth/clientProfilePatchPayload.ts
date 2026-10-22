@@ -64,6 +64,13 @@ export const SERVER_OWNED_PROFILE_PATCH_KEYS = [
   "mobileChangeCount",
   "mobileReviewChangeCount",
   "emailReviewChangeCount",
+  "ageEligibility",
+  "agePolicyVersion",
+  "ageAssessedAt",
+  "ageMethod",
+  "deletionPolicyVersion",
+  "reactivationCutoff",
+  "erasureDeadline",
 ] as const;
 
 /**

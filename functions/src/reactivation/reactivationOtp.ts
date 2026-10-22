@@ -427,8 +427,12 @@ export async function verifyReactivationCode(input: {
     const nextProfile: Record<string, unknown> = {
       ...profileRaw,
       status: "active",
+      deletionRequestedAt: null,
       deletionScheduledFor: null,
       deletionCompletedAt: null,
+      deletionPolicyVersion: null,
+      reactivationCutoff: null,
+      erasureDeadline: null,
       reactivationRequestedAt: null,
       reactivationPhoneVerifiedAt: null,
       reactivationEmailVerifiedAt: input.now,
@@ -439,8 +443,12 @@ export async function verifyReactivationCode(input: {
     };
     tx.update(REACTIVATION_USERS, input.uid, {
       status: "active",
+      deletionRequestedAt: null,
       deletionScheduledFor: null,
       deletionCompletedAt: null,
+      deletionPolicyVersion: null,
+      reactivationCutoff: null,
+      erasureDeadline: null,
       reactivationRequestedAt: null,
       reactivationPhoneVerifiedAt: null,
       reactivationEmailVerifiedAt: input.now,

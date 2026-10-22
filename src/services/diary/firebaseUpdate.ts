@@ -38,6 +38,10 @@ export type DiaryUpdateDbDeps = {
   setDoc?: typeof setDoc;
   /** Test seam for fake transactions. Production uses `doc(db, ...)`. */
   docRef?: DocumentReference;
+  /** Production-only. Opens a sealed existing row before the edit is merged. */
+  openExisting?: (entry: BusinessEntry, raw: Record<string, unknown>) => Promise<BusinessEntry>;
+  /** Production-only. Returns the cloud document, with business fields sealed. */
+  protectCloud?: (entry: BusinessEntry) => Promise<Record<string, unknown>>;
 };
 
 function cloudPatch(next: BusinessEntry): Record<string, unknown> {
@@ -57,6 +61,36 @@ export async function updateDiaryEntryOnDb(
   const txFn = deps.runTransaction ?? runTransaction;
   const getDocFn = deps.getDoc ?? getDoc;
   const setDocFn = deps.setDoc ?? setDoc;
+
+  if (deps.protectCloud) {
+    const snap = await getDocFn(ref);
+    if (!snap.exists()) throw new AppError("not_found", "Entry not found.");
+    const raw = snap.data() as Record<string, unknown>;
+    let existing = entryFromFirestoreDoc(snap.id, raw);
+    if (!existing) throw new AppError("save_failed", "Entry could not be read.");
+    if (deps.openExisting) existing = await deps.openExisting(existing, raw);
+    if (expectedUpdatedAt != null && existing.updatedAt !== expectedUpdatedAt) {
+      throw new AppError("save_failed", "Entry changed remotely.", undefined, { remoteChanged: true });
+    }
+    const next = buildDiaryUpdateRecord(existing, edit);
+    const cancelId = reminderCancelIdAfterUpdate(existing, edit);
+    const patch = await deps.protectCloud(next);
+    if (expectedUpdatedAt != null) {
+      await txFn(db, async (tx: Transaction) => {
+        const fresh = await tx.get(ref);
+        if (!fresh.exists()) throw new AppError("not_found", "Entry not found.");
+        const current = entryFromFirestoreDoc(fresh.id, fresh.data() as Record<string, unknown>);
+        if (!current || current.updatedAt !== expectedUpdatedAt) {
+          throw new AppError("save_failed", "Entry changed remotely.", undefined, { remoteChanged: true });
+        }
+        tx.set(ref, patch, { merge: true });
+      });
+    } else {
+      await setDocFn(ref, patch, { merge: true });
+    }
+    await runAfterDiaryUpdateCommit(cancelId, deps.cancelNotification);
+    return next;
+  }
 
   if (expectedUpdatedAt != null) {
     const committed = await txFn(db, async (tx: Transaction) => {

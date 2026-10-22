@@ -11,9 +11,12 @@
  */
 
 import * as FileSystem from "expo-file-system/legacy";
-import { deleteObject, getDownloadURL, ref } from "firebase/storage";
+import { deleteObject, getDownloadURL, getMetadata, ref } from "firebase/storage";
 
-import { env, isFirebaseConfigured } from "@/config/env";
+import { env, getActiveBackend, isFirebaseConfigured } from "@/config/env";
+import { CONTENT_SEAL_MEDIA_TYPE, shouldSealProductionWrites } from "@/constants/contentSeal";
+import { PDF_CLOUD_BACKUP_ENABLED } from "@/constants/pdfPrivacy";
+import { isDiaryContentSeal } from "@/services/privacy/diarySealDocument";
 import { FirebaseNotConfiguredError, getFirebaseStorage } from "@/config/firebase";
 import {
   describeLetterheadSaveFailure,
@@ -148,6 +151,42 @@ export async function uploadLocalFileToPath(
   ownership?: StorageUploadSession
 ): Promise<StorageUploadResult> {
   if (!isUserStorageAvailable()) throw new FirebaseNotConfiguredError();
+  if (!PDF_CLOUD_BACKUP_ENABLED && storagePath.includes("/pdfs/")) {
+    throw new Error("pdf_cloud_backup_disabled");
+  }
+  if (shouldSealProductionWrites(getActiveBackend())) {
+    const base64 = await FileSystem.readAsStringAsync(localUri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    const { sealAttachmentBase64 } = await import("@/services/privacy/ownerContentApi");
+    const envelope = await sealAttachmentBase64({
+      storagePath,
+      revision: Date.now(),
+      base64,
+    });
+    const cacheRoot = FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? "";
+    if (!cacheRoot) throw new Error("No writable cache directory for protected upload.");
+    const tmp = `${cacheRoot}sealed-upload-${Date.now()}.json`;
+    await FileSystem.writeAsStringAsync(tmp, envelope, {
+      encoding: FileSystem.EncodingType.UTF8,
+    });
+    try {
+      const verified = await uploadLocalFileViaMediaApi({
+        storagePath,
+        localUri: tmp,
+        contentType: CONTENT_SEAL_MEDIA_TYPE,
+        userId: ownership?.userId,
+        session: ownership?.session,
+      });
+      return {
+        storagePath: verified.storagePath,
+        localBytes: verified.localBytes,
+        remoteBytes: verified.remoteBytes,
+      };
+    } finally {
+      await deleteTempQuietly(tmp);
+    }
+  }
   const verified = await uploadLocalFileViaMediaApi({
     storagePath,
     localUri,
@@ -280,6 +319,34 @@ export async function uploadRecordAttachmentBase64(
   );
   const storagePath = getUserStoragePath(userId, "attachments", recordId, safeName);
   return uploadBase64ToPath(storagePath, base64, contentType, { userId, session });
+}
+
+export async function readProtectedLocalUri(
+  storagePath: string
+): Promise<{ kind: "opened"; uri: string } | { kind: "legacy" } | { kind: "unavailable" }> {
+  if (!isUserStorageAvailable()) return { kind: "unavailable" };
+  try {
+    const storageRef = storageRefForPath(storagePath);
+    const meta = await getMetadata(storageRef);
+    if (meta.contentType !== CONTENT_SEAL_MEDIA_TYPE) return { kind: "legacy" };
+    const url = await getDownloadURL(storageRef);
+    const response = await fetch(url);
+    if (!response.ok) return { kind: "unavailable" };
+    const text = await response.text();
+    const parsed: unknown = JSON.parse(text);
+    if (!isDiaryContentSeal(parsed)) return { kind: "unavailable" };
+    const { openAttachmentSeal } = await import("@/services/privacy/ownerContentApi");
+    const base64 = await openAttachmentSeal(parsed);
+    const cacheRoot = FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? "";
+    if (!cacheRoot) return { kind: "unavailable" };
+    const dest = `${cacheRoot}opened-object-${Date.now()}.bin`;
+    await FileSystem.writeAsStringAsync(dest, base64, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    return { kind: "opened", uri: dest };
+  } catch {
+    return { kind: "unavailable" };
+  }
 }
 
 export async function getDownloadUrlForPath(storagePath: string): Promise<string | null> {

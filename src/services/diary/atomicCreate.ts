@@ -108,7 +108,8 @@ export async function createEntryAtomicDetailed(
   input: CreateBusinessEntryInput,
   hooks?: AtomicCreateHooks,
   nowMs = Date.now(),
-  recordId = stableRecordId(input.clientRecordId, "en")
+  recordId = stableRecordId(input.clientRecordId, "en"),
+  cloudPayload?: (record: BusinessEntry) => Record<string, unknown>
 ) {
   if (!userId) throw new AppError("permission_denied", "Not signed in.");
   const monthKey = istMonthKeyForMillis(nowMs);
@@ -148,7 +149,7 @@ export async function createEntryAtomicDetailed(
         );
       }
       const record = buildNewDiaryEntry(userId, recordId, input, nowMs);
-      return { record, payload: diaryEntryToCloudPayload(record) };
+      return { record, payload: cloudPayload ? cloudPayload(record) : diaryEntryToCloudPayload(record) };
     },
     hooks: {
       ...hooks,

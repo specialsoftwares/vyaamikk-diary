@@ -50,6 +50,12 @@ export interface DeletionJobDoc {
   phases: DeletionJobPhases;
   completedAt: number | null;
   updatedAt: number;
+  /** 1 = legacy 45-day window. 2 = 15-day new-request policy. Missing means legacy. */
+  deletionPolicyVersion?: number;
+  reactivationCutoff?: number | null;
+  erasureDeadline?: number | null;
+  /** Crashlytics and mail-provider tails are not per-user deletable. */
+  processorDeletion?: "not_applicable" | "incomplete" | "failed";
 }
 
 export const EMPTY_PHASES: DeletionJobPhases = {
@@ -68,8 +74,12 @@ export function initialDeletionJob(input: {
   graceExpiresAt: number;
   generation?: number;
   now?: number;
+  deletionPolicyVersion?: number;
+  reactivationCutoff?: number | null;
+  erasureDeadline?: number | null;
 }): DeletionJobDoc {
   const now = input.now ?? Date.now();
+  const version = input.deletionPolicyVersion ?? 1;
   return {
     uid: input.uid,
     generation: input.generation ?? 1,
@@ -84,6 +94,10 @@ export function initialDeletionJob(input: {
     phases: { ...EMPTY_PHASES },
     completedAt: null,
     updatedAt: now,
+    deletionPolicyVersion: version,
+    reactivationCutoff: input.reactivationCutoff ?? input.graceExpiresAt,
+    erasureDeadline: input.erasureDeadline ?? null,
+    processorDeletion: version >= 2 ? "incomplete" : "not_applicable",
   };
 }
 

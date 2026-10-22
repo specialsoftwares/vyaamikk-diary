@@ -3,7 +3,10 @@ import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 
 import { getActiveBackend } from "@/config/env";
-import { DELETION_GRACE_DAYS } from "@/domain/identityLifecycle";
+import {
+  DELETION_GRACE_DAYS,
+  DELETION_V2_ERASURE_DAYS,
+} from "@/domain/identityLifecycle";
 import { openPublicLinkOrExplain } from "@/config/publicLinks";
 import { getAuthEntryHref } from "@/config/authWrapper";
 import { Banner, Button, Card, Header, Screen, TextField, LocaleUiText } from "@/components/ui";
@@ -76,7 +79,7 @@ export default function DeleteAccountScreen() {
     if (!canSubmit) return;
     Alert.alert(
       t("deleteAccount.confirmPrompt"),
-      t("deleteAccount.confirmPromptBody", { days: DELETION_GRACE_DAYS }),
+      t("deleteAccount.confirmPromptBody", { days: DELETION_V2_ERASURE_DAYS }),
       [
         { text: t("common.cancel"), style: "cancel" },
         {
@@ -142,6 +145,9 @@ export default function DeleteAccountScreen() {
           <Bullet>{t("deleteAccount.happensList5")}</Bullet>
           <Bullet>{t("deleteAccount.happensList6")}</Bullet>
         </View>
+        <LocaleUiText style={styles.body}>
+          {`Requests already waiting keep the deadline stored on the account. The previous window was ${DELETION_GRACE_DAYS} days.`}
+        </LocaleUiText>
       </Card>
 
       <View style={styles.confirmBlock}>

@@ -625,3 +625,58 @@ export async function callConfirmVerifiedMobileContactChange(args: {
     phoneE164: data.phoneE164 ?? data.profile.phoneE164,
   });
 }
+
+type OwnerContentSeal = {
+  v: 1;
+  alg: "AES-256-GCM";
+  uid: string;
+  collection: string;
+  recordId: string;
+  revision: number;
+  purpose: string;
+  nonce: string;
+  ciphertext: string;
+  tag: string;
+};
+
+/**
+ * Seal and open callables. The arguments are not written to logs.
+ * plaintextBase64 is the protected body, not a log field.
+ */
+export async function callSealOwnerContent(args: {
+  collection: "entries" | "attachments";
+  recordId: string;
+  revision: number;
+  purpose: "diary" | "attachment";
+  plaintextBase64: string;
+}): Promise<OwnerContentSeal> {
+  const data = await callFunction<typeof args, { seal: OwnerContentSeal }>("sealOwnerContent", args);
+  return data.seal;
+}
+
+export async function callOpenOwnerContent(args: {
+  collection: "entries" | "attachments";
+  recordId: string;
+  revision: number;
+  purpose: "diary" | "attachment";
+  seal: OwnerContentSeal;
+}): Promise<{ plaintextBase64: string }> {
+  return callFunction<typeof args, { plaintextBase64: string }>("openOwnerContent", args);
+}
+
+export async function callRecordAgeAssessment(dateOfBirth: string): Promise<{
+  ageEligibility: "eligible" | "ineligible";
+  agePolicyVersion: string;
+  ageAssessedAt: number;
+  ageMethod: "self_declared_dob";
+}> {
+  return callFunction<
+    { dateOfBirth: string },
+    {
+      ageEligibility: "eligible" | "ineligible";
+      agePolicyVersion: string;
+      ageAssessedAt: number;
+      ageMethod: "self_declared_dob";
+    }
+  >("recordAgeAssessment", { dateOfBirth });
+}

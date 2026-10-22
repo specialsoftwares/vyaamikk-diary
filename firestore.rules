@@ -48,8 +48,16 @@ service cloud.firestore {
       return userData(uid).get('status', 'active');
     }
 
+    function deletionJobAllowsActivity(uid) {
+      let path = /databases/$(database)/documents/deletionJobs/$(uid);
+      return !exists(path) || get(path).data.get('status', '') != 'completed';
+    }
+
     function isActiveUser(uid) {
-      return isOwner(uid) && userStatus(uid) == 'active';
+      return isOwner(uid)
+        && userStatus(uid) == 'active'
+        && userData(uid).get('ageEligibility', '') != 'ineligible'
+        && deletionJobAllowsActivity(uid);
     }
 
     function identityLockedFieldsUnchanged() {
@@ -127,10 +135,24 @@ service cloud.firestore {
           'deletionRequestedAt',
           'deletionScheduledFor',
           'deletionCompletedAt',
+          'deletionPolicyVersion',
+          'reactivationCutoff',
+          'erasureDeadline',
           'retiredUeid',
           'mobileHash',
           'updatedAt',
-        ]);
+        ])
+        && (
+          !request.resource.data.keys().hasAny(['deletionPolicyVersion', 'erasureDeadline', 'reactivationCutoff'])
+          || (
+            request.resource.data.deletionPolicyVersion == 2
+            && request.resource.data.reactivationCutoff is int
+            && request.resource.data.erasureDeadline is int
+            && request.resource.data.deletionScheduledFor == request.resource.data.reactivationCutoff
+            && request.resource.data.erasureDeadline == request.resource.data.deletionRequestedAt + (15 * 24 * 60 * 60 * 1000)
+            && request.resource.data.reactivationCutoff == request.resource.data.deletionRequestedAt + (13 * 24 * 60 * 60 * 1000)
+          )
+        );
     }
 
     function serialCounterId(counterId) {
@@ -225,6 +247,20 @@ service cloud.firestore {
       return request.resource.data.title is string
         && request.resource.data.title.size() > 0
         && request.resource.data.title.size() <= 120;
+    }
+
+    function validDiarySeal(entryId) {
+      return request.resource.data.contentSeal is map
+        && request.resource.data.contentSeal.v == 1
+        && request.resource.data.contentSeal.uid == request.auth.uid
+        && request.resource.data.contentSeal.recordId == entryId
+        && request.resource.data.contentSeal.revision == request.resource.data.updatedAt
+        && request.resource.data.title == 'sealed';
+    }
+
+    function diaryContentAccepted(entryId) {
+      return (entryTitleValid() && !request.resource.data.keys().hasAny(['contentSeal']))
+        || validDiarySeal(entryId);
     }
 
     // ---- Subscription & billing helpers ---------------------------------
@@ -597,7 +633,7 @@ service cloud.firestore {
         allow read: if isOwner(uid);
         allow create: if isActiveUser(uid)
                       && request.resource.data.userId == uid
-                      && entryTitleValid()
+                      && diaryContentAccepted(entryId)
                       && (
                         isValidatedLetterheadMirrorCreate(uid, entryId)
                         || (
@@ -610,7 +646,7 @@ service cloud.firestore {
                       );
         allow update: if isActiveUser(uid)
                       && request.resource.data.userId == uid
-                      && entryTitleValid()
+                      && diaryContentAccepted(entryId)
                       && letterheadMirrorLinkagePreserved();
         allow delete: if isActiveUser(uid);
       }

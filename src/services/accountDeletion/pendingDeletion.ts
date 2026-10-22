@@ -1,5 +1,5 @@
 import type { UserProfile } from "@/domain/types";
-import { computeDeletionScheduledFor } from "@/domain/identityLifecycle";
+import { newDeletionSchedule } from "@/domain/identityLifecycle";
 import { hashMobileE164, normalizePhoneE164 } from "@/utils/mobileHash";
 
 /** Fields written when the user requests deletion (grace period — not final yet). */
@@ -12,15 +12,18 @@ export function pendingDeletionPatch(
   | "deletionRequestedAt"
   | "deletionScheduledFor"
   | "deletionCompletedAt"
+  | "deletionPolicyVersion"
+  | "reactivationCutoff"
+  | "erasureDeadline"
   | "retiredUeid"
   | "mobileHash"
   | "updatedAt"
 > {
   const phone = normalizePhoneE164(profile.phoneE164);
+  const schedule = newDeletionSchedule(now);
   return {
     status: "pending_deletion",
-    deletionRequestedAt: now,
-    deletionScheduledFor: computeDeletionScheduledFor(now),
+    ...schedule,
     deletionCompletedAt: null,
     retiredUeid: false,
     mobileHash: profile.mobileHash ?? hashMobileE164(phone),

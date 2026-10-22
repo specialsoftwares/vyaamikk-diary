@@ -13,6 +13,7 @@ import {
   ensureDeletionJobDoc,
   runFinalAccountPurge,
 } from "./finalPurge";
+import { reapplyCompletedDeletionManifest } from "./restoreSuppression";
 
 const USERS = "users";
 
@@ -42,6 +43,9 @@ export const ensureAccountDeletionJob = onCall(
       uid: authUid,
       requestedAt,
       graceExpiresAt,
+      deletionPolicyVersion: Number(user.deletionPolicyVersion ?? 1),
+      reactivationCutoff: Number(user.reactivationCutoff ?? 0) || graceExpiresAt,
+      erasureDeadline: Number(user.erasureDeadline ?? 0) || null,
     });
 
     return {
@@ -106,6 +110,9 @@ export const completeAccountDeletion = onCall(
         uid: authUid,
         requestedAt: Number(user.deletionRequestedAt ?? Date.now()),
         graceExpiresAt: scheduled,
+        deletionPolicyVersion: Number(user.deletionPolicyVersion ?? 1),
+        reactivationCutoff: Number(user.reactivationCutoff ?? 0) || scheduled,
+        erasureDeadline: Number(user.erasureDeadline ?? 0) || null,
       });
     } else if (status !== "deleted") {
       throw new HttpsError("failed-precondition", "Account is not pending deletion.");
@@ -170,6 +177,9 @@ export const scheduledDeletionCleanup = onSchedule(
           uid: doc.id,
           requestedAt: Number(data.deletionRequestedAt ?? now),
           graceExpiresAt: scheduled,
+          deletionPolicyVersion: Number(data.deletionPolicyVersion ?? 1),
+          reactivationCutoff: Number(data.reactivationCutoff ?? 0) || scheduled,
+          erasureDeadline: Number(data.erasureDeadline ?? 0) || null,
         });
         await runFinalAccountPurge(doc.id);
       }
@@ -206,6 +216,8 @@ export const scheduledDeletionCleanup = onSchedule(
         await runFinalAccountPurge(doc.id);
       }
     }
+
+    await reapplyCompletedDeletionManifest(db, now);
   }
 );
 

@@ -38,6 +38,7 @@ import {
 import { purgeUserSubcollectionsFully } from "./firestorePurge";
 import { purgeAllUserOwnedStorage } from "./storagePurge";
 import { INCLUDE_GRIN_IN_ACCOUNT_PURGE, purgeGrinEvidenceIfEnabled } from "./grinCleanup";
+import { preservedGraceExpiresAt } from "./deletionPolicy";
 
 const USERS = "users";
 const PHONE_INDEX = "phoneIndex";
@@ -55,6 +56,9 @@ export async function ensureDeletionJobDoc(input: {
   uid: string;
   requestedAt: number;
   graceExpiresAt: number;
+  deletionPolicyVersion?: number;
+  reactivationCutoff?: number | null;
+  erasureDeadline?: number | null;
 }): Promise<DeletionJobDoc> {
   const db = getAdminDb();
   const ref = db.collection(DELETION_JOBS).doc(input.uid);
@@ -90,8 +94,15 @@ export async function ensureDeletionJobDoc(input: {
     // Refresh grace timestamps if still awaiting / ready.
     const merged: DeletionJobDoc = {
       ...existing,
-      requestedAt: input.requestedAt,
-      graceExpiresAt: input.graceExpiresAt,
+      requestedAt: existing.requestedAt,
+      graceExpiresAt: preservedGraceExpiresAt(
+        existing.deletionPolicyVersion,
+        existing.graceExpiresAt,
+        input.graceExpiresAt
+      ),
+      deletionPolicyVersion: existing.deletionPolicyVersion ?? input.deletionPolicyVersion ?? 1,
+      erasureDeadline: existing.erasureDeadline ?? input.erasureDeadline ?? null,
+      reactivationCutoff: existing.reactivationCutoff ?? input.reactivationCutoff ?? null,
       status:
         existing.status === "leased" || existing.status === "needs_manual_review"
           ? existing.status
@@ -398,6 +409,8 @@ export async function runFinalAccountPurge(uid: string): Promise<FinalPurgeResul
     // Skipped while INCLUDE_GRIN_IN_ACCOUNT_PURGE is false (current production).
     // After an owner live grant + flag flip, in-flight jobs that already
     // finished diary storage/firestore still purge GRIN before indexes/Auth.
+    const grinRequired =
+      INCLUDE_GRIN_IN_ACCOUNT_PURGE || Number(job.deletionPolicyVersion) >= 2;
     let grinCompleted = !INCLUDE_GRIN_IN_ACCOUNT_PURGE;
     if (INCLUDE_GRIN_IN_ACCOUNT_PURGE) {
       await assertStillPendingOrDeletedStub(uid, generation);
@@ -405,6 +418,19 @@ export async function runFinalAccountPurge(uid: string): Promise<FinalPurgeResul
         uid,
         bucket: getAdminBucket() as unknown as import("./storagePurge").StorageBucketLike,
         db: adminGrinFirestoreAdapter(),
+      });
+      grinCompleted = grin.completed;
+      if (!grin.completed) {
+        throw new Error(grin.detail);
+      }
+    }
+    if (Number(job.deletionPolicyVersion) >= 2 && !INCLUDE_GRIN_IN_ACCOUNT_PURGE) {
+      await assertStillPendingOrDeletedStub(uid, generation);
+      const grin = await purgeGrinEvidenceIfEnabled({
+        uid,
+        bucket: getAdminBucket() as unknown as import("./storagePurge").StorageBucketLike,
+        db: adminGrinFirestoreAdapter(),
+        force: true,
       });
       grinCompleted = grin.completed;
       if (!grin.completed) {
@@ -445,24 +471,33 @@ export async function runFinalAccountPurge(uid: string): Promise<FinalPurgeResul
     if (
       !accountPurgeMayComplete({
         phases,
-        includeGrinInAccountPurge: INCLUDE_GRIN_IN_ACCOUNT_PURGE,
+        includeGrinInAccountPurge: grinRequired,
         grinCompleted,
       })
     ) {
       throw new Error("phases_incomplete");
     }
 
+    const finishedAt = Date.now();
+    const late =
+      typeof job.erasureDeadline === "number" && finishedAt > job.erasureDeadline;
+    const processorDeletion = Number(job.deletionPolicyVersion) >= 2 ? "incomplete" : "not_applicable";
     await patchJob(uid, {
-      status: "completed",
+      status: late ? "needs_manual_review" : "completed",
       phases,
       leaseOwner: null,
       leaseUntil: null,
-      completedAt: Date.now(),
-      lastErrorCategory: null,
-      lastErrorCode: null,
+      completedAt: late ? null : finishedAt,
+      lastErrorCategory: late ? "permanent" : null,
+      lastErrorCode: late ? "erasure_deadline_exceeded" : null,
+      processorDeletion,
     });
 
-    return { ok: true, detail: "completed", phases };
+    return {
+      ok: !late,
+      detail: late ? "erasure_deadline_exceeded" : "completed",
+      phases,
+    };
   } catch (e) {
     const { category, code } = classifyProviderError(e);
     const attempts = job.attempts;

@@ -243,6 +243,74 @@ async function main() {
     );
     check("active user entry create allowed", true);
 
+    await seedUser("mina", { ageEligibility: "ineligible" });
+    await assertFails(
+      setDoc(doc(authedDb("mina"), "users", "mina", "entries", "e-age"), {
+        userId: "mina",
+        title: "Blocked for age",
+      })
+    );
+    check("ineligible account cannot create an entry", true);
+
+    await seedUser("purged");
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "deletionJobs", "purged"), { status: "completed" });
+    });
+    await assertFails(
+      setDoc(doc(authedDb("purged"), "users", "purged", "entries", "e-restored"), {
+        userId: "purged",
+        title: "Restored entry",
+      })
+    );
+    check("completed erasure job blocks a restored write", true);
+
+    const sealedAt = 1_700_000_000_000;
+    await seedUser("sealer");
+    await assertSucceeds(
+      setDoc(doc(authedDb("sealer"), "users", "sealer", "entries", "e-seal"), {
+        userId: "sealer",
+        title: "sealed",
+        updatedAt: sealedAt,
+        contentSeal: { v: 1, uid: "sealer", recordId: "e-seal", revision: sealedAt },
+      })
+    );
+    check("owner seal with matching revision is allowed", true);
+    await assertFails(
+      setDoc(doc(authedDb("sealer"), "users", "sealer", "entries", "e-swap"), {
+        userId: "sealer",
+        title: "sealed",
+        updatedAt: sealedAt,
+        contentSeal: { v: 1, uid: "mina", recordId: "e-swap", revision: sealedAt },
+      })
+    );
+    check("cross-owner seal is denied", true);
+
+    const requestedAt = 1_700_000_000_000;
+    const dayMs = 24 * 60 * 60 * 1000;
+    await seedUser("frank");
+    await assertSucceeds(
+      updateDoc(doc(authedDb("frank"), "users", "frank"), {
+        status: "pending_deletion",
+        deletionRequestedAt: requestedAt,
+        deletionScheduledFor: requestedAt + 13 * dayMs,
+        deletionCompletedAt: null,
+        deletionPolicyVersion: 2,
+        reactivationCutoff: requestedAt + 13 * dayMs,
+        erasureDeadline: requestedAt + 15 * dayMs,
+        retiredUeid: false,
+        mobileHash: "abc12345",
+        updatedAt: requestedAt,
+      })
+    );
+    check("version 2 deletion request is allowed", true);
+    await assertFails(
+      updateDoc(doc(authedDb("carol"), "users", "carol"), {
+        ageEligibility: "eligible",
+        updatedAt: requestedAt,
+      })
+    );
+    check("client cannot write its own age eligibility", true);
+
     // --- Reverse-index denial ---
     await assertFails(
       setDoc(doc(authedDb("carol"), "phoneIndex", "+919999999999"), { uid: "carol" })

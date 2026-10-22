@@ -5,6 +5,19 @@
     "tagline": "All your business needs, in one place.",
     "supportLine": "We support your business."
   },
+  "ageGate": {
+    "title": "Confirm you are 18 or older",
+    "body": "Enter your date of birth. We use the date only to decide eligibility on the current date in India, and we do not keep the date afterwards.",
+    "notVerified": "This is your own declaration. It is not an identity-document check.",
+    "dateLabel": "Date of birth",
+    "continue": "Continue",
+    "invalid": "Enter a real date as YYYY-MM-DD. Future dates are not accepted.",
+    "ineligible": "This account can be used from the 18th birthday. You can sign out, read the privacy notice, or delete the account.",
+    "signOut": "Sign out",
+    "deleteAccount": "Delete account",
+    "support": "Privacy and support",
+    "supportBody": "Account deletion and the privacy notice stay available before you continue."
+  },
   "brand": {
     "designedBy": "Designed and developed by SPECIAL SOFTWARES.",
     "legallyOperated": "Legally operated by Ananya Engineered Industrial Components & Pay Systems LLP."
@@ -1218,7 +1231,7 @@
     "confirmWord": "DELETE",
     "confirmButton": "Delete my account",
     "confirmPrompt": "Delete your account permanently?",
-    "confirmPromptBody": "Your account enters a {{days}}-day deletion period. You are signed out now. You can cancel before the scheduled date by signing in with the same mobile number.",
+    "confirmPromptBody": "Your account enters a {{days}}-day deletion period. You can cancel until two days before that period ends. Those two days are reserved for processing and retries. You are signed out now. You can cancel before the scheduled date by signing in with the same mobile number.",
     "resultGraceTitle": "Deletion scheduled",
     "result_grace": "Account deletion is in progress. Sign in with the same number before the deadline to cancel, or wait until deletion completes to register fresh.",
     "resultPartialTitle": "Deleted on this device",
@@ -1229,7 +1242,7 @@
   "pendingDeletion": {
     "step": "Account status",
     "title": "Account deletion is in progress",
-    "body": "Mobile {{phone}} has a pending deletion. It will be final on {{date}} ({{days}}-day period). You cannot use the app until you cancel deletion or wait for it to complete.",
+    "body": "Mobile {{phone}} has a pending deletion. You can reactivate until {{date}} ({{days}}-day period). Eligible app-controlled data is erased after that cutoff. You cannot use the app until you cancel deletion or wait for it to complete.",
     "footnote": "After deletion completes, the same number can register again with a new Vyaamikk ID. Old records will not return. PDFs already shared outside the app cannot be recalled.",
     "reactivateFootnote": "To keep this account, verify your registered business email. Your Vyaamikk ID and records will be preserved.",
     "cancelDeletion": "Cancel deletion & keep my account",
