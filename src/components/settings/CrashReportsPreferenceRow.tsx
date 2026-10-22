@@ -2,8 +2,8 @@ import React, { useCallback, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { useFocusEffect } from "expo-router";
 
+import { chooseCrashDiagnostics } from "@/services/consent/purposeConsent";
 import {
-  applyDiagnosticsChoice,
   currentDiagnosticsPreference,
   loadDiagnosticsPreference,
   type DiagnosticsPreference,
@@ -44,7 +44,7 @@ export function CrashReportsPreferenceRow() {
 
   const onPress = useCallback(async () => {
     const next = pref.desired !== "on";
-    setPref(await applyDiagnosticsChoice(next));
+    setPref(await chooseCrashDiagnostics(next));
   }, [pref.desired]);
 
   const enabled = pref.desired === "on" && pref.persisted;

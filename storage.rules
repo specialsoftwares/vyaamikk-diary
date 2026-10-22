@@ -26,23 +26,44 @@ service firebase.storage {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    function ageEligible(userId) {
+      let userPath = /databases/(default)/documents/users/$(userId);
+      return firestore.exists(userPath)
+        && firestore.get(userPath).data.get('ageEligibility', '') == 'eligible'
+        && firestore.get(userPath).data.get('status', 'active') == 'active';
+    }
+
+    function deletionAllowsStorage(userId) {
+      let jobPath = /databases/(default)/documents/deletionJobs/$(userId);
+      return !firestore.exists(jobPath)
+        || firestore.get(jobPath).data.get('status', '') != 'completed';
+    }
+
+    function canWriteOwnedObject(userId) {
+      return isOwner(userId) && ageEligible(userId) && deletionAllowsStorage(userId);
+    }
+
+    function imageOrEnvelope(maxBytes) {
+      return request.resource.size < maxBytes
+        && (
+          request.resource.contentType.matches('image/.*')
+          || request.resource.contentType == 'application/vnd.vyaamikk.content-seal+json'
+        );
+    }
+
     match /users/{userId}/letterhead/{fileName} {
       allow read: if isOwner(userId);
-      allow write: if isOwner(userId)
-                   && request.resource.size < 10 * 1024 * 1024
-                   && request.resource.contentType.matches('image/.*');
+      allow write: if canWriteOwnedObject(userId) && imageOrEnvelope(10 * 1024 * 1024);
     }
 
     match /users/{userId}/attachments/{recordId}/{fileName} {
       allow read: if isOwner(userId);
-      allow write: if isOwner(userId)
-                   && request.resource.size < 10 * 1024 * 1024
-                   && request.resource.contentType.matches('image/.*');
+      allow write: if canWriteOwnedObject(userId) && imageOrEnvelope(10 * 1024 * 1024);
     }
 
     match /users/{userId}/pdfs/{recordId}/{fileName} {
       allow read: if isOwner(userId);
-      allow write: if isOwner(userId)
+      allow write: if canWriteOwnedObject(userId)
                    && request.resource.size < 15 * 1024 * 1024
                    && request.resource.contentType == 'application/pdf';
     }

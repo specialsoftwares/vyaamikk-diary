@@ -214,6 +214,33 @@ async function main() {
     (e: unknown) => e instanceof AppError && e.details?.reason === "letterhead_mirror_conversion_denied"
   );
 
+  let sealedWrites = 0;
+  const sealedTx = {
+    get: async () => ({
+      exists: () => true,
+      id: "en_upd_1",
+      data: () => ({ ...cloud, contentSeal: { v: 1 }, title: "sealed" }),
+    }),
+    set: () => {
+      sealedWrites += 1;
+    },
+  };
+  await assert.rejects(
+    () =>
+      updateDiaryEntryOnDb(
+        fakeDb,
+        "u1",
+        { id: "en_upd_1", title: "edited while paused", expectedUpdatedAt: 10 },
+        {
+          cancelNotification: async () => undefined,
+          runTransaction: async (_db, cb) => cb(sealedTx as unknown as Transaction),
+          docRef: { path: "users/u1/entries/en_upd_1" } as never,
+        }
+      ),
+    (error: unknown) => error instanceof AppError && error.details?.reason === "sealed_edit_held"
+  );
+  assert.equal(sealedWrites, 0);
+
   console.log("diary.firebaseUpdate.test.ts: ok (fake transaction boundary)");
 }
 

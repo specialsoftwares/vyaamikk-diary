@@ -110,6 +110,65 @@ async function main() {
     check("EMULATOR storage denies a pre-revocation custom token", true);
     await assertSucceeds(getBytes(ref(refreshed, "users/alice/letterhead/logo.png")));
     check("EMULATOR storage allows phone auth after the cutoff", true);
+
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", "alice"), {
+        uid: "alice",
+        status: "active",
+        ageEligibility: "eligible",
+      });
+      await setDoc(doc(ctx.firestore(), "users", "young"), {
+        uid: "young",
+        status: "active",
+        ageEligibility: "unassessed",
+      });
+      await setDoc(doc(ctx.firestore(), "users", "minor"), {
+        uid: "minor",
+        status: "active",
+        ageEligibility: "ineligible",
+      });
+    });
+    const eligible = testEnv
+      .authenticatedContext("alice", {
+        auth_time: 2_000,
+        firebase: { sign_in_provider: "phone" },
+      })
+      .storage();
+    const unassessed = testEnv.authenticatedContext("young").storage();
+    const ineligible = testEnv.authenticatedContext("minor").storage();
+    const sealType = "application/vnd.vyaamikk.content-seal+json";
+    await assertSucceeds(
+      uploadBytes(ref(eligible, "users/alice/attachments/rec1/receipt.bin"), Buffer.from("{\"v\":1}"), {
+        contentType: sealType,
+      })
+    );
+    check("eligible owner can write an attachment envelope", true);
+    await assertSucceeds(
+      uploadBytes(ref(eligible, "users/alice/attachments/rec1/legacy.jpg"), Buffer.from("jpg"), {
+        contentType: "image/jpeg",
+      })
+    );
+    check("eligible owner can still write a legacy image", true);
+    await assertSucceeds(getBytes(ref(eligible, "users/alice/letterhead/logo.png")));
+    check("legacy image read stays available", true);
+    await assertFails(
+      uploadBytes(ref(unassessed, "users/young/attachments/rec1/receipt.bin"), Buffer.from("{\"v\":1}"), {
+        contentType: sealType,
+      })
+    );
+    check("unassessed account cannot write storage", true);
+    await assertFails(
+      uploadBytes(ref(ineligible, "users/minor/attachments/rec1/receipt.bin"), Buffer.from("{\"v\":1}"), {
+        contentType: sealType,
+      })
+    );
+    check("ineligible account cannot write storage", true);
+    await assertFails(
+      uploadBytes(ref(eligible, "users/alice/pdfs/rec1/sealed.bin"), Buffer.from("{\"v\":1}"), {
+        contentType: sealType,
+      })
+    );
+    check("envelope content type is denied on the pdf path", true);
   } finally {
     await testEnv.cleanup();
   }

@@ -56,7 +56,7 @@ service cloud.firestore {
     function isActiveUser(uid) {
       return isOwner(uid)
         && userStatus(uid) == 'active'
-        && userData(uid).get('ageEligibility', '') != 'ineligible'
+        && userData(uid).get('ageEligibility', '') == 'eligible'
         && deletionJobAllowsActivity(uid);
     }
 
@@ -79,6 +79,10 @@ service cloud.firestore {
         && request.resource.data.get('createdAt', 0) == resource.data.get('createdAt', 0)
         && request.resource.data.get('retiredUeid', false) == resource.data.get('retiredUeid', false)
         && request.resource.data.get('deletedAt', null) == resource.data.get('deletedAt', null)
+        && request.resource.data.get('ageEligibility', '') == resource.data.get('ageEligibility', '')
+        && request.resource.data.get('agePolicyVersion', '') == resource.data.get('agePolicyVersion', '')
+        && request.resource.data.get('ageAssessedAt', 0) == resource.data.get('ageAssessedAt', 0)
+        && request.resource.data.get('ageMethod', '') == resource.data.get('ageMethod', '')
         && identityLockedFieldsUnchanged();
     }
 
@@ -117,42 +121,47 @@ service cloud.firestore {
         'gstinVerificationState',
         'issuerIdentitySnapshotId',
         'onboardingProfileVersion',
+        'contentSeal',
       ]);
+    }
+
+    function profileSealAccepted() {
+      return !request.resource.data.keys().hasAny(['contentSeal'])
+        || (
+          request.resource.data.contentSeal is map
+          && request.resource.data.contentSeal.v == 1
+          && request.resource.data.contentSeal.uid == request.auth.uid
+          && request.resource.data.contentSeal.recordId == request.auth.uid
+          && request.resource.data.contentSeal.revision == request.resource.data.updatedAt
+          && request.resource.data.get('displayName', null) == null
+          && request.resource.data.get('businessName', null) == null
+          && request.resource.data.get('gstin', null) == null
+          && request.resource.data.get('pinCode', null) == null
+        );
     }
 
     function clientDeletionRequestAllowed() {
       return resource.data.get('status', 'active') == 'active'
         && request.resource.data.get('status', 'active') == 'pending_deletion'
-        && request.resource.data.get('deletionRequestedAt', 0) is int
-        && request.resource.data.get('deletionScheduledFor', 0) is int
         && request.resource.data.get('deletionCompletedAt', null) == null
         && request.resource.data.get('retiredUeid', false) == false
         && request.resource.data.get('ueid', '') == resource.data.get('ueid', '')
         && request.resource.data.get('phoneE164', '') == resource.data.get('phoneE164', '')
         && request.resource.data.get('emailHash', null) == resource.data.get('emailHash', null)
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'status',
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
           'deletionRequestedAt',
           'deletionScheduledFor',
-          'deletionCompletedAt',
           'deletionPolicyVersion',
           'reactivationCutoff',
           'erasureDeadline',
+        ])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status',
+          'deletionCompletedAt',
           'retiredUeid',
           'mobileHash',
           'updatedAt',
-        ])
-        && (
-          !request.resource.data.keys().hasAny(['deletionPolicyVersion', 'erasureDeadline', 'reactivationCutoff'])
-          || (
-            request.resource.data.deletionPolicyVersion == 2
-            && request.resource.data.reactivationCutoff is int
-            && request.resource.data.erasureDeadline is int
-            && request.resource.data.deletionScheduledFor == request.resource.data.reactivationCutoff
-            && request.resource.data.erasureDeadline == request.resource.data.deletionRequestedAt + (15 * 24 * 60 * 60 * 1000)
-            && request.resource.data.reactivationCutoff == request.resource.data.deletionRequestedAt + (13 * 24 * 60 * 60 * 1000)
-          )
-        );
+        ]);
     }
 
     function serialCounterId(counterId) {
@@ -247,6 +256,14 @@ service cloud.firestore {
       return request.resource.data.title is string
         && request.resource.data.title.size() > 0
         && request.resource.data.title.size() <= 120;
+    }
+
+    function validOwnerSeal(recordId) {
+      return request.resource.data.contentSeal is map
+        && request.resource.data.contentSeal.v == 1
+        && request.resource.data.contentSeal.uid == request.auth.uid
+        && request.resource.data.contentSeal.recordId == recordId
+        && request.resource.data.contentSeal.revision == request.resource.data.updatedAt;
     }
 
     function validDiarySeal(entryId) {
@@ -622,9 +639,13 @@ service cloud.firestore {
       allow create: if false;
       allow update: if isOwner(uid)
                     && request.resource.data.get('uid', uid) == uid
-                    && (
+                      && (
                       clientDeletionRequestAllowed()
-                      || (protectedIdentityFieldsUnchanged() && clientProfilePatchAllowed())
+                      || (
+                        protectedIdentityFieldsUnchanged()
+                        && clientProfilePatchAllowed()
+                        && profileSealAccepted()
+                      )
                     );
       allow delete: if false;
 
@@ -675,18 +696,30 @@ service cloud.firestore {
         allow read: if isOwner(uid);
         allow create: if isActiveUser(uid)
                       && request.resource.data.userId == uid
-                      && request.resource.data.title is string
-                      && request.resource.data.title.size() > 0
-                      && request.resource.data.title.size() <= 200
+                      && (
+                        (
+                          request.resource.data.title is string
+                          && request.resource.data.title.size() > 0
+                          && request.resource.data.title.size() <= 200
+                          && !request.resource.data.keys().hasAny(['contentSeal'])
+                        )
+                        || (validOwnerSeal(packId) && request.resource.data.title == 'sealed')
+                      )
                       && (
                         !quotaEnforcementOn(uid)
                         || usageConsumedForRecord(uid, 'professionalPacks', packId)
                       );
         allow update: if isActiveUser(uid)
                       && request.resource.data.userId == uid
-                      && request.resource.data.title is string
-                      && request.resource.data.title.size() > 0
-                      && request.resource.data.title.size() <= 200;
+                      && (
+                        (
+                          request.resource.data.title is string
+                          && request.resource.data.title.size() > 0
+                          && request.resource.data.title.size() <= 200
+                          && !request.resource.data.keys().hasAny(['contentSeal'])
+                        )
+                        || (validOwnerSeal(packId) && request.resource.data.title == 'sealed')
+                      );
         allow delete: if isActiveUser(uid);
       }
 
@@ -701,7 +734,15 @@ service cloud.firestore {
                       && letterheadPdfUriAbsentOrNull(request.resource.data);
         allow update: if isActiveUser(uid)
                       && request.resource.data.userId == uid
-                      && letterheadParentUpdateAllowed();
+                      && (
+                        letterheadParentUpdateAllowed()
+                        || (
+                          validOwnerSeal(docId)
+                          && request.resource.data.userId == resource.data.userId
+                          && request.resource.data.title == 'sealed'
+                          && request.resource.data.get('pdfUri', null) == null
+                        )
+                      );
         allow delete: if isActiveUser(uid);
       }
 
@@ -774,6 +815,11 @@ service cloud.firestore {
       }
 
       // ---- Trusted devices (non-authoritative client registry) ----------
+      match /processingPurposes/{purposeId} {
+        allow read: if isOwner(uid);
+        allow write: if false;
+      }
+
       match /trustedDevices/{deviceId} {
         allow read: if isOwner(uid);
         allow create: if isActiveUser(uid)

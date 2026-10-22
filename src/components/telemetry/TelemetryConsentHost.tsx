@@ -2,10 +2,8 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import { TelemetryConsentModal } from "@/components/TelemetryConsentModal";
 import { useAuth } from "@/state/auth";
-import {
-  applyDiagnosticsChoice,
-  loadDiagnosticsPreference,
-} from "@/services/telemetry/diagnosticsPreference";
+import { chooseCrashDiagnostics } from "@/services/consent/purposeConsent";
+import { loadDiagnosticsPreference } from "@/services/telemetry/diagnosticsPreference";
 
 /**
  * One-time crash-report consent. Mounted only on the main tab shell, so auth,
@@ -37,7 +35,7 @@ export function TelemetryConsentHost() {
   const choose = useCallback(async (enabled: boolean) => {
     choiceEpoch.current += 1;
     setVisible(false);
-    await applyDiagnosticsChoice(enabled);
+    await chooseCrashDiagnostics(enabled);
   }, []);
 
   return (

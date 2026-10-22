@@ -23,6 +23,11 @@ import {
 import { AppError } from "@/domain/errors";
 import { getFirebaseDb } from "@/config/firebase";
 import {
+  openBusinessCloud,
+  protectBusinessCloud,
+  settleCreatedBusinessCloud,
+} from "@/services/privacy/businessCloudSeal";
+import {
   computePurchaseOrderTotal,
   formatPoNumber,
   type PurchaseOrder,
@@ -135,22 +140,50 @@ function toCloud(po: PurchaseOrder): Record<string, unknown> {
   return { ...rest, pdfUri: null };
 }
 
+async function materializePo(id: string, raw: Record<string, unknown>, userId: string) {
+  return openBusinessCloud("purchaseOrders", fromDoc(id, raw, userId), raw);
+}
+
+async function commitPo(userId: string, next: PurchaseOrder, existingRaw: Record<string, unknown> | null) {
+  const cloud = await protectBusinessCloud({
+    collection: "purchaseOrders",
+    userId,
+    recordId: next.id,
+    revision: next.updatedAt,
+    plain: toCloud(next),
+    existingRaw,
+  });
+  await setDoc(poDocRef(userId, next.id), cloud, { merge: true });
+}
+
 export const firebasePurchaseOrderRepository: PurchaseOrderRepository = {
   async allocateSerial(userId) {
     return allocatePurchaseOrderSerialOnDb(getFirebaseDb(), userId);
   },
 
   async create(userId, input) {
-    return createPurchaseOrderAtomic(getFirebaseDb(), userId, input, (id, data) =>
+    const record = await createPurchaseOrderAtomic(getFirebaseDb(), userId, input, (id, data) =>
       fromDoc(id, data, userId)
     );
+    return settleCreatedBusinessCloud({
+      collection: "purchaseOrders",
+      userId,
+      record,
+      readRaw: async () => {
+        const snap = await getDoc(poDocRef(userId, record.id));
+        return snap.exists() ? (snap.data() as Record<string, unknown>) : null;
+      },
+      writeCloud: async (cloud) => {
+        await setDoc(poDocRef(userId, record.id), cloud, { merge: true });
+      },
+    });
   },
 
   async update(userId, input) {
     const ref = poDocRef(userId, input.id);
     const snap = await getDoc(ref);
     if (!snap.exists()) throw new AppError("not_found", "Purchase order not found.");
-    const existing = fromDoc(snap.id, snap.data() as Record<string, unknown>, userId);
+    const existing = await materializePo(snap.id, snap.data() as Record<string, unknown>, userId);
     const now = Date.now();
     const items = input.items ?? existing.items;
     const next: PurchaseOrder = {
@@ -233,7 +266,7 @@ export const firebasePurchaseOrderRepository: PurchaseOrderRepository = {
       ],
       updatedAt: now,
     };
-    await setDoc(ref, toCloud(next), { merge: true });
+    await commitPo(userId, next, snap.data() as Record<string, unknown>);
     return next;
   },
 
@@ -241,7 +274,7 @@ export const firebasePurchaseOrderRepository: PurchaseOrderRepository = {
     const ref = poDocRef(userId, id);
     const snap = await getDoc(ref);
     if (!snap.exists()) throw new AppError("not_found", "Purchase order not found.");
-    const existing = fromDoc(snap.id, snap.data() as Record<string, unknown>, userId);
+    const existing = await materializePo(snap.id, snap.data() as Record<string, unknown>, userId);
     const now = Date.now();
     const next: PurchaseOrder = {
       ...existing,
@@ -254,7 +287,7 @@ export const firebasePurchaseOrderRepository: PurchaseOrderRepository = {
       ],
       updatedAt: now,
     };
-    await setDoc(ref, toCloud(next), { merge: true });
+    await commitPo(userId, next, snap.data() as Record<string, unknown>);
     return next;
   },
 
@@ -272,14 +305,14 @@ export const firebasePurchaseOrderRepository: PurchaseOrderRepository = {
     if (!userId || !id) return null;
     const snap = await getDoc(poDocRef(userId, id));
     if (!snap.exists()) return null;
-    return fromDoc(snap.id, snap.data() as Record<string, unknown>, userId);
+    return materializePo(snap.id, snap.data() as Record<string, unknown>, userId);
   },
 
   async list(userId, options = {}) {
     if (!userId) return [];
     const snap = await getDocs(query(userCollection(userId), orderBy("serial", "desc")));
-    let out = snap.docs.map((d) =>
-      fromDoc(d.id, d.data() as Record<string, unknown>, userId)
+    let out = await Promise.all(
+      snap.docs.map((d) => materializePo(d.id, d.data() as Record<string, unknown>, userId))
     );
     if (!options.includeDeleted) out = out.filter((p) => !p.deletedAt);
     if (options.search?.trim()) {

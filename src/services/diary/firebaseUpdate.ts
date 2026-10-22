@@ -50,6 +50,17 @@ function cloudPatch(next: BusinessEntry): Record<string, unknown> {
   return patch;
 }
 
+function holdSealedPlaintextEdit(raw: Record<string, unknown>): void {
+  if (raw.contentSeal && typeof raw.contentSeal === "object") {
+    throw new AppError(
+      "save_failed",
+      "This edit is held while new protection is paused.",
+      undefined,
+      { reason: "sealed_edit_held" }
+    );
+  }
+}
+
 export async function updateDiaryEntryOnDb(
   db: Firestore,
   userId: string,
@@ -102,6 +113,7 @@ export async function updateDiaryEntryOnDb(
       }
       const next = buildDiaryUpdateRecord(existing, edit);
       const cancelId = reminderCancelIdAfterUpdate(existing, edit);
+      holdSealedPlaintextEdit(snap.data() as Record<string, unknown>);
       tx.set(ref, cloudPatch(next), { merge: true });
       return { next, cancelId };
     });
@@ -111,7 +123,9 @@ export async function updateDiaryEntryOnDb(
 
   const snap = await getDocFn(ref);
   if (!snap.exists()) throw new AppError("not_found", "Entry not found.");
-  const existing = entryFromFirestoreDoc(snap.id, snap.data() as Record<string, unknown>)!;
+  const raw = snap.data() as Record<string, unknown>;
+  holdSealedPlaintextEdit(raw);
+  const existing = entryFromFirestoreDoc(snap.id, raw)!;
   const next = buildDiaryUpdateRecord(existing, edit);
   const cancelId = reminderCancelIdAfterUpdate(existing, edit);
   const patch = cloudPatch(next);

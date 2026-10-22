@@ -25,6 +25,11 @@ import {
 import { AppError } from "@/domain/errors";
 import { getFirebaseDb } from "@/config/firebase";
 import { letterheadDocToCloudStorage } from "@/services/pdf/pdfCloudSync";
+import {
+  openBusinessCloud,
+  protectBusinessCloud,
+  settleCreatedBusinessCloud,
+} from "@/services/privacy/businessCloudSeal";
 import { stableRecordId } from "@/services/records/stableRecordId";
 import { assertDispatchedSession, type SyncSessionToken } from "@/sync/syncSessionOwnership";
 import { createLogger } from "@/utils/logger";
@@ -88,7 +93,12 @@ export async function updateLetterheadDocumentOnDb(
   const snap = await getDocFn(ref);
   if (deps.afterInternalRead) await deps.afterInternalRead();
   if (!snap.exists()) throw new AppError("not_found", "Letterhead document not found.");
-  const existing = fromDoc(snap.id, snap.data() as Record<string, unknown>, userId);
+  const raw = snap.data() as Record<string, unknown>;
+  const existing = await openBusinessCloud(
+    "letterheadDocs",
+    fromDoc(snap.id, raw, userId),
+    raw
+  );
   const next: LetterheadDocument = {
     ...existing,
     ...patch,
@@ -101,7 +111,15 @@ export async function updateLetterheadDocumentOnDb(
     });
   }
   assertDispatchedSession(session, userId);
-  await setDocFn(ref, letterheadDocToCloudStorage(next), { merge: true });
+  const cloud = await protectBusinessCloud({
+    collection: "letterheadDocs",
+    userId,
+    recordId: id,
+    revision: next.updatedAt,
+    plain: letterheadDocToCloudStorage(next),
+    existingRaw: raw,
+  });
+  await setDocFn(ref, cloud, { merge: true });
   return next;
 }
 
@@ -110,7 +128,11 @@ export const firebaseLetterheadDocumentRepository: LetterheadDocumentRepository 
     if (!userId) return [];
     const q = query(userDocsCollection(userId), orderBy("createdAt", "desc"));
     const snap = await getDocs(q);
-    return snap.docs.map((d) => fromDoc(d.id, d.data() as Record<string, unknown>, userId));
+    return Promise.all(
+      snap.docs.map((d) =>
+        openBusinessCloud("letterheadDocs", fromDoc(d.id, d.data() as Record<string, unknown>, userId), d.data() as Record<string, unknown>)
+      )
+    );
   },
 
   async get(userId, id) {
@@ -118,7 +140,8 @@ export const firebaseLetterheadDocumentRepository: LetterheadDocumentRepository 
     const ref = doc(getFirebaseDb(), "users", userId, COLLECTION, id);
     const snap = await getDoc(ref);
     if (!snap.exists()) return null;
-    return fromDoc(snap.id, snap.data() as Record<string, unknown>, userId);
+    const raw = snap.data() as Record<string, unknown>;
+    return openBusinessCloud("letterheadDocs", fromDoc(snap.id, raw, userId), raw);
   },
 
   async create(userId, record, session) {
@@ -134,7 +157,18 @@ export const firebaseLetterheadDocumentRepository: LetterheadDocumentRepository 
       id
     );
     log.info("doc created (firebase)");
-    return created;
+    return settleCreatedBusinessCloud({
+      collection: "letterheadDocs",
+      userId,
+      record: created,
+      readRaw: async () => {
+        const snap = await getDoc(doc(getFirebaseDb(), "users", userId, COLLECTION, created.id));
+        return snap.exists() ? (snap.data() as Record<string, unknown>) : null;
+      },
+      writeCloud: async (cloud) => {
+        await setDoc(doc(getFirebaseDb(), "users", userId, COLLECTION, created.id), cloud, { merge: true });
+      },
+    });
   },
 
   async update(userId, id, patch, session) {

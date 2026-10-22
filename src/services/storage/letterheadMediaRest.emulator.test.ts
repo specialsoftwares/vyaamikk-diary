@@ -29,6 +29,7 @@ import {
   type RulesTestEnvironment,
 } from "@firebase/rules-unit-testing";
 import { createMockUserToken } from "@firebase/util";
+import { doc, setDoc } from "firebase/firestore";
 import { getBytes, getMetadata, ref } from "firebase/storage";
 
 import {
@@ -39,6 +40,7 @@ import {
 
 const PROJECT_ID = "vyaamikk-diary-storage-rules-test";
 const RULES_PATH = resolve(process.cwd(), "storage.rules");
+const FIRESTORE_RULES_PATH = resolve(process.cwd(), "firestore.rules");
 
 /**
  * Same mock JWT the Firebase JS SDK attaches via `useEmulator({ mockUserToken })`.
@@ -135,8 +137,10 @@ async function main() {
   assert.match(probeUrl, /uploadType=media/);
 
   const rules = readFileSync(RULES_PATH, "utf8");
+  const firestoreRules = readFileSync(FIRESTORE_RULES_PATH, "utf8");
   const testEnv: RulesTestEnvironment = await initializeTestEnvironment({
     projectId: PROJECT_ID,
+    firestore: { rules: firestoreRules },
     storage: { rules },
   });
 
@@ -147,6 +151,13 @@ async function main() {
   const localUri = `file://${fixturePath}`;
 
   try {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", "alice"), {
+        uid: "alice",
+        status: "active",
+        ageEligibility: "eligible",
+      });
+    });
     const aliceStorage = testEnv.authenticatedContext("alice").storage();
     const malloryStorage = testEnv.authenticatedContext("mallory").storage();
     const anonStorage = testEnv.unauthenticatedContext().storage();

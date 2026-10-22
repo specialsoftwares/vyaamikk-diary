@@ -15,7 +15,7 @@ import {
 import type { BusinessEntry } from "@/domain/businessEntry";
 import { getActiveBackend } from "@/config/env";
 import { getFirebaseDb } from "@/config/firebase";
-import { shouldSealProductionWrites } from "@/constants/contentSeal";
+import { shouldCreateContentSeals, shouldOpenContentSeals } from "@/constants/contentSeal";
 import { entrySearchBlob } from "@/utils/businessEntry/display";
 import { notificationsService } from "@/services/notifications";
 import { stableRecordId } from "@/services/records/stableRecordId";
@@ -41,7 +41,11 @@ function entriesCollection(userId: string) {
 }
 
 function productionSeals(): boolean {
-  return shouldSealProductionWrites(getActiveBackend());
+  return shouldCreateContentSeals(getActiveBackend());
+}
+
+function productionOpens(): boolean {
+  return shouldOpenContentSeals(getActiveBackend());
 }
 
 async function materializeDiary(
@@ -51,7 +55,7 @@ async function materializeDiary(
 ): Promise<BusinessEntry | null> {
   const entry = entryFromFirestoreDoc(id, data);
   if (!entry) return null;
-  if (!isDiaryContentSeal(data.contentSeal)) return entry;
+  if (!isDiaryContentSeal(data.contentSeal) || !productionOpens()) return entry;
   return openSealedDiaryEntry(userId, entry, data.contentSeal);
 }
 
@@ -104,14 +108,19 @@ export const firebaseDiaryRepository: DiaryRepository = {
       recordId,
       cloudPayload
     );
+    if (result.outcome === "existing") {
+      const opened = await this.getByIdIncludingDeleted!(userId, result.record.id);
+      if (opened) return { record: opened, outcome: "existing" };
+    }
     return { record: result.record, outcome: result.outcome };
   },
 
   async update(userId, input) {
     const seal = productionSeals();
+    const open = productionOpens();
     return updateDiaryEntryOnDb(getFirebaseDb(), userId, input, {
       cancelNotification: (id) => notificationsService.cancel(id),
-      openExisting: seal
+      openExisting: open
         ? async (entry, raw) =>
             isDiaryContentSeal(raw.contentSeal)
               ? openSealedDiaryEntry(userId, entry, raw.contentSeal)

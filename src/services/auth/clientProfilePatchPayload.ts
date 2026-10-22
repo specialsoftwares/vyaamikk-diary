@@ -38,6 +38,7 @@ export const CLIENT_PROFILE_PATCH_ALLOWLIST = [
   "gstinVerificationState",
   "issuerIdentitySnapshotId",
   "onboardingProfileVersion",
+  "contentSeal",
 ] as const;
 
 export type ClientAllowlistedPatchKey = (typeof CLIENT_PROFILE_PATCH_ALLOWLIST)[number];

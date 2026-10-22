@@ -41,6 +41,7 @@ import {
   stripServerOwnedProfilePatchKeys,
 } from "./clientProfilePatchPayload";
 import { profileDocumentMergeFields } from "./profileFirestorePayload";
+import { openBusinessCloud, protectBusinessCloud } from "@/services/privacy/businessCloudSeal";
 import {
   finalizeDeletionIfDue,
   isActiveAccount,
@@ -473,7 +474,12 @@ export const firebaseAuthService: AuthService = {
     try {
       const snap = await getDoc(ref);
       if (!snap.exists()) throw new AppError("not_found", "User profile not found.");
-      const existing = normaliseUserProfile(uid, snap.data() as Record<string, unknown>);
+      const rawProfile = snap.data() as Record<string, unknown>;
+      const existing = await openBusinessCloud(
+        "users",
+        normaliseUserProfile(uid, rawProfile) as unknown as Record<string, unknown>,
+        rawProfile
+      ) as unknown as ReturnType<typeof normaliseUserProfile>;
 
       const safePatch = production
         ? stripServerOwnedProfilePatchKeys(patch, { production: true })
@@ -492,7 +498,16 @@ export const firebaseAuthService: AuthService = {
       if (production) {
         const write = buildClientProfileFirestoreWrite(existing, next, { production: true });
         if (write) {
-          await setDoc(ref, write, { merge: true });
+          const sealed = await protectBusinessCloud({
+            collection: "users",
+            userId: uid,
+            recordId: uid,
+            revision: Number(next.updatedAt),
+            plain: write,
+            sensitiveSource: next as unknown as Record<string, unknown>,
+            existingRaw: rawProfile,
+          });
+          await setDoc(ref, sealed, { merge: true });
         }
       } else {
         await setDoc(ref, profileDocumentMergeFields(next), { merge: true });

@@ -7,6 +7,7 @@ export const CALLABLE_SESSION_COVERAGE = {
   recordAgeAssessment: "enforced",
   sealOwnerContent: "enforced",
   openOwnerContent: "enforced",
+  recordProcessingPurpose: "enforced",
   logoutAllDevices: "enforced",
   resolveOrCreateUserByPhone: "enforced",
   checkMobileQuarantine: "enforced",

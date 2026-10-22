@@ -4,7 +4,11 @@ import { resolve } from "path";
 
 import type { BusinessEntry } from "@/domain/businessEntry";
 import { emptyDocumentHistory } from "@/domain/documentHistory";
-import { shouldSealProductionWrites } from "@/constants/contentSeal";
+import {
+  shouldCreateContentSeals,
+  shouldOpenContentSeals,
+  shouldSealProductionWrites,
+} from "@/constants/contentSeal";
 import { PDF_CLOUD_BACKUP_ENABLED } from "@/constants/pdfPrivacy";
 import {
   consentAppliesToAccount,
@@ -64,6 +68,9 @@ assert.throws(
 );
 assert.equal(PDF_CLOUD_BACKUP_ENABLED, false);
 assert.equal(shouldSealProductionWrites("firebase-production"), true);
+assert.equal(shouldOpenContentSeals("firebase-production"), true);
+assert.equal(shouldCreateContentSeals("firebase-production", false), false);
+assert.equal(shouldOpenContentSeals("firebase-shared-dev"), false);
 assert.equal(shouldSealProductionWrites("firebase-production", false), false);
 assert.equal(shouldSealProductionWrites("firebase-shared-dev"), false);
 
@@ -83,11 +90,13 @@ const storage = readFileSync(resolve(root, "src/services/storage/userStorage.ts"
 const consent = readFileSync(resolve(root, "src/services/consent/purposeConsent.ts"), "utf8");
 assert.match(diary, /sealDiaryCloudPayload/);
 assert.match(diary, /openSealedDiaryEntry/);
+assert.match(diary, /result.outcome === "existing"/);
+assert.match(diary, /getByIdIncludingDeleted/);
 assert.match(storage, /sealAttachmentBase64/);
 assert.match(storage, /readProtectedLocalUri/);
 assert.match(storage, /getDownloadURL/);
 assert.match(storage, /pdf_cloud_backup_disabled/);
-assert.match(consent, /writeTelemetryConsent\(false\)/);
+assert.match(consent, /applyDiagnosticsChoice\(false\)/);
 assert.doesNotMatch(consent, /requestAccountDeletion/);
 
 console.log("diarySealDocument.test.ts: ok");

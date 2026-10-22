@@ -17,6 +17,11 @@ import { publishDomainChange } from "@/services/dataChanges/domainChanges";
 import { notificationsService } from "@/services/notifications";
 
 import { packToCloudStorage } from "@/services/pdf/pdfCloudSync";
+import {
+  openBusinessCloud,
+  protectBusinessCloud,
+  settleCreatedBusinessCloud,
+} from "@/services/privacy/businessCloudSeal";
 import { dedupeProfessionalPacks } from "./dedupe";
 import { createProfessionalPackAtomic, packFromFirestoreDoc } from "./atomicCreate";
 import type {
@@ -24,6 +29,12 @@ import type {
   ProfessionalPackRepository,
   UpdateProfessionalPackInput,
 } from "./types";
+
+async function materializePack(id: string, raw: Record<string, unknown>) {
+  const pack = packFromFirestoreDoc(id, raw);
+  if (!pack) return null;
+  return openBusinessCloud("professionalPacks", pack, raw);
+}
 
 function col(userId: string) {
   return collection(getFirebaseDb(), "users", userId, "professionalPacks");
@@ -61,17 +72,28 @@ function applyFilters(
 
 export const firebaseProfessionalPackRepository: ProfessionalPackRepository = {
   async create(userId, input) {
-    return createProfessionalPackAtomic(getFirebaseDb(), userId, input);
+    const record = await createProfessionalPackAtomic(getFirebaseDb(), userId, input);
+    return settleCreatedBusinessCloud({
+      collection: "professionalPacks",
+      userId,
+      record,
+      readRaw: async () => {
+        const snap = await getDoc(doc(getFirebaseDb(), "users", userId, "professionalPacks", record.id));
+        return snap.exists() ? (snap.data() as Record<string, unknown>) : null;
+      },
+      writeCloud: async (cloud) => {
+        await setDoc(doc(getFirebaseDb(), "users", userId, "professionalPacks", record.id), cloud, {
+          merge: true,
+        });
+      },
+    });
   },
 
   async update(userId, input) {
     const ref = doc(getFirebaseDb(), "users", userId, "professionalPacks", input.id);
     const snap = await getDoc(ref);
     if (!snap.exists()) throw new AppError("not_found", "Pack not found.");
-    const existing = packFromFirestoreDoc(
-      snap.id,
-      snap.data() as Record<string, unknown>
-    )!;
+    const existing = (await materializePack(snap.id, snap.data() as Record<string, unknown>))!;
 
     if (input.reminder !== undefined && existing.reminder?.notificationId) {
       const willChange =
@@ -104,7 +126,15 @@ export const firebaseProfessionalPackRepository: ProfessionalPackRepository = {
     };
     const patch = packToCloudStorage(next);
     patch.reminder = reminderJson(next.reminder);
-    await setDoc(ref, patch, { merge: true });
+    const cloud = await protectBusinessCloud({
+      collection: "professionalPacks",
+      userId,
+      recordId: next.id,
+      revision: next.updatedAt,
+      plain: patch,
+      existingRaw: snap.data() as Record<string, unknown>,
+    });
+    await setDoc(ref, cloud, { merge: true });
     publishDomainChange(userId, "professionalPack", { effect: "upsert", recordId: next.id });
     return next;
   },
@@ -113,7 +143,7 @@ export const firebaseProfessionalPackRepository: ProfessionalPackRepository = {
     const ref = doc(getFirebaseDb(), "users", userId, "professionalPacks", id);
     const snap = await getDoc(ref);
     if (!snap.exists()) return;
-    const existing = packFromFirestoreDoc(snap.id, snap.data() as Record<string, unknown>);
+    const existing = await materializePack(snap.id, snap.data() as Record<string, unknown>);
     if (existing?.reminder?.notificationId) {
       await notificationsService.cancel(existing.reminder.notificationId);
     }
@@ -128,14 +158,14 @@ export const firebaseProfessionalPackRepository: ProfessionalPackRepository = {
     const ref = doc(getFirebaseDb(), "users", userId, "professionalPacks", id);
     const snap = await getDoc(ref);
     if (!snap.exists()) return null;
-    return packFromFirestoreDoc(snap.id, snap.data() as Record<string, unknown>);
+    return materializePack(snap.id, snap.data() as Record<string, unknown>);
   },
 
   async getById(userId, id) {
     const ref = doc(getFirebaseDb(), "users", userId, "professionalPacks", id);
     const snap = await getDoc(ref);
     if (!snap.exists()) return null;
-    const pack = packFromFirestoreDoc(snap.id, snap.data() as Record<string, unknown>);
+    const pack = await materializePack(snap.id, snap.data() as Record<string, unknown>);
     if (!pack || pack.deletedAt) return null;
     return pack;
   },
@@ -143,10 +173,11 @@ export const firebaseProfessionalPackRepository: ProfessionalPackRepository = {
   async list(userId, options = {}) {
     const q = query(col(userId), orderBy("updatedAt", "desc"));
     const snap = await getDocs(q);
+    const opened = await Promise.all(
+      snap.docs.map((d) => materializePack(d.id, d.data() as Record<string, unknown>))
+    );
     const items = dedupeProfessionalPacks(
-      snap.docs
-        .map((d) => packFromFirestoreDoc(d.id, d.data() as Record<string, unknown>))
-        .filter((x): x is ProfessionalServicePack => x !== null)
+      opened.filter((x): x is ProfessionalServicePack => x !== null)
     );
     return applyFilters(items, options);
   },

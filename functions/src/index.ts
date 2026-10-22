@@ -16,6 +16,7 @@ export {
 export { mintClientAuthToken } from "./identity/mintClientAuthToken";
 export { recordAgeAssessment } from "./identity/recordAgeAssessment";
 export { openOwnerContent, sealOwnerContent } from "./privacy/ownerContent";
+export { recordProcessingPurpose } from "./privacy/processingPurpose";
 export { logoutAllDevices } from "./identity/logoutAllDevices";
 
 export {

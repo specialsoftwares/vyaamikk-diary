@@ -195,7 +195,9 @@ The 15-day figure is the owner’s operational target. It is not labeled as a DP
 
 ## 7. Preserved boundaries
 
-Session fencing, serialized session cleanup, origin revocation, production reactivation email OTP, Play reviewer sign-in, `PDF_CLOUD_BACKUP_ENABLED = false`, billing behavior, the billing KMS key, and the logout-all control (`false`) stay. Local diary SQLite remains the on-device record. Cloud credit, purchase-order, pack, and letterhead document bodies are not sealed by this change. That gap is recorded in the deployment note. No live deploy, key creation, migration, or purge was run.
+Session fencing, serialized session cleanup, origin revocation, production reactivation email OTP, Play reviewer sign-in, `PDF_CLOUD_BACKUP_ENABLED = false`, billing behavior, the billing KMS key, and the logout-all control (`false`) stay. Local diary SQLite remains the on-device record. Letterhead creation is not restored. No production backfill, live deploy, key creation, migration, or purge was run.
+
+Operational fields that stay readable are recorded in `PRIVACY_DEPLOYMENT_SEQUENCE.md`: ids, phone, status, age result, deletion state, quota, serials, dates, and amounts. The sealed body is the names, addresses, letter text, pack notes, and the listed profile fields.
 
 ## 8. Files changed for the approved implementation
 
@@ -206,4 +208,5 @@ Session fencing, serialized session cleanup, origin revocation, production react
 | Consent | `src/domain/processingPurpose.ts`, `src/services/consent/purposeConsent.ts`, `src/domain/legalConsent.ts` |
 | Deletion | `src/domain/identityLifecycle.ts`, `functions/src/deletion/deletionPolicy.ts`, `functions/src/deletion/deletionJob.ts`, `functions/src/deletion/finalPurge.ts`, `functions/src/deletion/lifecycle.ts`, `functions/src/deletion/restoreSuppression.ts`, `src/services/accountDeletion/pendingDeletion.ts` |
 | Shared contracts | `firestore.rules`, `functions/src/index.ts`, `functions/src/identity/callableSessionCoverage.ts`, `src/domain/types.ts`, `src/services/auth/normalizeProfile.ts`, `src/content/legal/documents.ts`, locale copy, `package.json` |
-| Proof and rollout notes | `src/domain/ageEligibility.test.ts`, `functions/src/privacy/contentEncryption.unit.test.ts`, `functions/src/deletion/deletionPolicy.unit.test.ts`, `src/services/privacy/diarySealDocument.test.ts`, `firestore.rules.test.ts`, `PRIVACY_DEPLOYMENT_SEQUENCE.md` |
+| Proof and rollout notes | `src/domain/ageEligibility.test.ts`, `functions/src/privacy/contentEncryption.unit.test.ts`, `functions/src/deletion/deletionPolicy.unit.test.ts`, `functions/src/deletion/restoreSuppression.unit.test.ts`, `functions/src/identity/businessAdmission.unit.test.ts`, `src/services/privacy/diarySealDocument.test.ts`, `src/services/attachments/cashReceiptEnvelope.emulator.test.ts`, `firestore.rules.test.ts`, `storage.rules`, `storage.rules.test.ts`, `src/services/partyLedger/partyLedger.rules.emulator.test.ts`, `PRIVACY_DEPLOYMENT_SEQUENCE.md` |
+| Gap closeout | `src/services/privacy/businessCloudSeal.ts`, `functions/src/privacy/processingPurpose.ts`, `functions/src/identity/businessAdmission.ts`, `src/services/customerCredit/firebase.ts`, `src/services/purchaseOrder/firebase.ts`, `src/services/professionalPack/firebase.ts`, `src/services/letterhead/documents-firebase.ts`, `src/services/attachments/prepareReceiptPhoto.ts`, `src/services/consent/purposeConsent.ts` |

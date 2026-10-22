@@ -38,6 +38,7 @@ import {
 import { purgeUserSubcollectionsFully } from "./firestorePurge";
 import { purgeAllUserOwnedStorage } from "./storagePurge";
 import { INCLUDE_GRIN_IN_ACCOUNT_PURGE, purgeGrinEvidenceIfEnabled } from "./grinCleanup";
+import { deletionJobInputFromUser, deletionStampFromJobInput } from "./deletionPolicy";
 import { preservedGraceExpiresAt } from "./deletionPolicy";
 
 const USERS = "users";
@@ -321,7 +322,7 @@ export async function listGrinCollectionPaged(path: string): Promise<
   return docs;
 }
 
-function adminGrinFirestoreAdapter(): import("./grinCleanup").GrinFirestoreLike {
+export function adminGrinFirestoreAdapter(): import("./grinCleanup").GrinFirestoreLike {
   return {
     listCollection: (path) => listGrinCollectionPaged(path),
     async listSubcollections(docPath: string) {
@@ -361,10 +362,18 @@ export async function runFinalAccountPurge(uid: string): Promise<FinalPurgeResul
       if (String(user.status) !== "pending_deletion" && String(user.status) !== "deleted") {
         return { ok: false, detail: "no_job_wrong_status" };
       }
-      const requestedAt = Number(user.deletionRequestedAt ?? now);
-      const graceExpiresAt =
-        Number(user.deletionScheduledFor ?? 0) || requestedAt + DELETION_GRACE_MS;
-      await ensureDeletionJobDoc({ uid, requestedAt, graceExpiresAt });
+      const accepted = deletionJobInputFromUser(user, now);
+      if (accepted.stamp) {
+        await userSnap.ref.set(deletionStampFromJobInput(accepted, now), { merge: true });
+      }
+      await ensureDeletionJobDoc({
+        uid,
+        requestedAt: accepted.requestedAt,
+        graceExpiresAt: accepted.graceExpiresAt,
+        deletionPolicyVersion: accepted.deletionPolicyVersion,
+        reactivationCutoff: accepted.reactivationCutoff,
+        erasureDeadline: accepted.erasureDeadline,
+      });
       return runFinalAccountPurge(uid);
     }
     return { ok: false, detail: acquired.reason };

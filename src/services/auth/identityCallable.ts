@@ -518,6 +518,10 @@ export interface EnsureDeletionJobResponse {
   generation: number;
   graceExpiresAt: number;
   status: string;
+  deletionRequestedAt?: number;
+  deletionPolicyVersion?: number;
+  reactivationCutoff?: number | null;
+  erasureDeadline?: number | null;
 }
 
 /** Create/refresh server-owned deletionJobs/{uid} after pending_deletion is set. */
@@ -644,10 +648,24 @@ type OwnerContentSeal = {
  * plaintextBase64 is the protected body, not a log field.
  */
 export async function callSealOwnerContent(args: {
-  collection: "entries" | "attachments";
+  collection:
+    | "entries"
+    | "attachments"
+    | "customerCreditRecords"
+    | "purchaseOrders"
+    | "professionalPacks"
+    | "letterheadDocs"
+    | "users";
   recordId: string;
   revision: number;
-  purpose: "diary" | "attachment";
+  purpose:
+    | "diary"
+    | "attachment"
+    | "customer_credit"
+    | "purchase_order"
+    | "professional_pack"
+    | "letterhead_document"
+    | "profile";
   plaintextBase64: string;
 }): Promise<OwnerContentSeal> {
   const data = await callFunction<typeof args, { seal: OwnerContentSeal }>("sealOwnerContent", args);
@@ -655,10 +673,24 @@ export async function callSealOwnerContent(args: {
 }
 
 export async function callOpenOwnerContent(args: {
-  collection: "entries" | "attachments";
+  collection:
+    | "entries"
+    | "attachments"
+    | "customerCreditRecords"
+    | "purchaseOrders"
+    | "professionalPacks"
+    | "letterheadDocs"
+    | "users";
   recordId: string;
   revision: number;
-  purpose: "diary" | "attachment";
+  purpose:
+    | "diary"
+    | "attachment"
+    | "customer_credit"
+    | "purchase_order"
+    | "professional_pack"
+    | "letterhead_document"
+    | "profile";
   seal: OwnerContentSeal;
 }): Promise<{ plaintextBase64: string }> {
   return callFunction<typeof args, { plaintextBase64: string }>("openOwnerContent", args);
@@ -679,4 +711,16 @@ export async function callRecordAgeAssessment(dateOfBirth: string): Promise<{
       ageMethod: "self_declared_dob";
     }
   >("recordAgeAssessment", { dateOfBirth });
+}
+
+export async function callRecordProcessingPurpose(args: {
+  purpose: "crash_diagnostics" | "service_operation";
+  decision: "grant" | "withdraw";
+  noticeVersion: string;
+  policyVersion: string;
+}): Promise<{ ok: true; receivedAt: number; purpose: string; decision: string }> {
+  return callFunction<typeof args, { ok: true; receivedAt: number; purpose: string; decision: string }>(
+    "recordProcessingPurpose",
+    args
+  );
 }

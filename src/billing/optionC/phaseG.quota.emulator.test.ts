@@ -76,6 +76,7 @@ async function seedUser(uid: string, patch: Record<string, unknown> = {}): Promi
       ueid: "VYD-2026-BILL01",
       phoneE164: "+919999999999",
       status: "active",
+      ageEligibility: "eligible",
       createdAt: 1_700_000_000_000,
       updatedAt: 1_700_000_000_000,
       displayName: "Phase G User",

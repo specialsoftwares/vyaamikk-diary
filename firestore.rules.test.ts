@@ -39,6 +39,7 @@ async function seedUser(
       ueid: "VYD-2026-TEST01",
       phoneE164: "+919999999999",
       status: "active",
+      ageEligibility: "eligible",
       createdAt: 1_700_000_000_000,
       updatedAt: 1_700_000_000_000,
       displayName: "Test User",
@@ -214,8 +215,6 @@ async function main() {
     await assertSucceeds(
       updateDoc(doc(authedDb("alice"), "users", "alice"), {
         status: "pending_deletion",
-        deletionRequestedAt: Date.now(),
-        deletionScheduledFor: Date.now() + 86_400_000,
         deletionCompletedAt: null,
         retiredUeid: false,
         mobileHash: "abc12345",
@@ -242,6 +241,15 @@ async function main() {
       })
     );
     check("active user entry create allowed", true);
+
+    await seedUser("unassessed", { ageEligibility: "unassessed" });
+    await assertFails(
+      setDoc(doc(authedDb("unassessed"), "users", "unassessed", "entries", "e-open"), {
+        userId: "unassessed",
+        title: "Blocked before assessment",
+      })
+    );
+    check("unassessed account cannot create an entry", true);
 
     await seedUser("mina", { ageEligibility: "ineligible" });
     await assertFails(
@@ -288,7 +296,7 @@ async function main() {
     const requestedAt = 1_700_000_000_000;
     const dayMs = 24 * 60 * 60 * 1000;
     await seedUser("frank");
-    await assertSucceeds(
+    await assertFails(
       updateDoc(doc(authedDb("frank"), "users", "frank"), {
         status: "pending_deletion",
         deletionRequestedAt: requestedAt,
@@ -302,10 +310,10 @@ async function main() {
         updatedAt: requestedAt,
       })
     );
-    check("version 2 deletion request is allowed", true);
+    check("client cannot choose the deletion clock", true);
     await assertFails(
       updateDoc(doc(authedDb("carol"), "users", "carol"), {
-        ageEligibility: "eligible",
+        ageEligibility: "ineligible",
         updatedAt: requestedAt,
       })
     );
@@ -432,13 +440,13 @@ async function main() {
         updatedAt: 1_600_000_000_000,
       });
     });
-    await assertSucceeds(
+    await assertFails(
       setDoc(doc(authedDb("legacy"), "users", "legacy", "entries", "legacy-e1"), {
         userId: "legacy",
         title: "Legacy entry",
       })
     );
-    check("legacy profile without status can write business data", true);
+    check("unassessed legacy profile cannot create business data", true);
 
     await assertSucceeds(
       setDoc(

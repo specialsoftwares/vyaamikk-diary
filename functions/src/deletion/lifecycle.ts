@@ -13,6 +13,7 @@ import {
   ensureDeletionJobDoc,
   runFinalAccountPurge,
 } from "./finalPurge";
+import { deletionJobInputFromUser, deletionStampFromJobInput } from "./deletionPolicy";
 import { reapplyCompletedDeletionManifest } from "./restoreSuppression";
 
 const USERS = "users";
@@ -35,17 +36,17 @@ export const ensureAccountDeletionJob = onCall(
     if (String(user.status) !== "pending_deletion") {
       throw new HttpsError("failed-precondition", "Account is not pending deletion.");
     }
-    const requestedAt = Number(user.deletionRequestedAt ?? Date.now());
-    const graceExpiresAt =
-      Number(user.deletionScheduledFor ?? 0) || requestedAt + DELETION_GRACE_MS;
-
+    const accepted = deletionJobInputFromUser(user, Date.now());
+    if (accepted.stamp) {
+      await userSnap.ref.set(deletionStampFromJobInput(accepted, Date.now()), { merge: true });
+    }
     const job = await ensureDeletionJobDoc({
       uid: authUid,
-      requestedAt,
-      graceExpiresAt,
-      deletionPolicyVersion: Number(user.deletionPolicyVersion ?? 1),
-      reactivationCutoff: Number(user.reactivationCutoff ?? 0) || graceExpiresAt,
-      erasureDeadline: Number(user.erasureDeadline ?? 0) || null,
+      requestedAt: accepted.requestedAt,
+      graceExpiresAt: accepted.graceExpiresAt,
+      deletionPolicyVersion: accepted.deletionPolicyVersion,
+      reactivationCutoff: accepted.reactivationCutoff,
+      erasureDeadline: accepted.erasureDeadline,
     });
 
     return {
@@ -53,6 +54,10 @@ export const ensureAccountDeletionJob = onCall(
       generation: job.generation,
       graceExpiresAt: job.graceExpiresAt,
       status: job.status,
+      deletionRequestedAt: accepted.requestedAt,
+      deletionPolicyVersion: job.deletionPolicyVersion ?? accepted.deletionPolicyVersion,
+      reactivationCutoff: job.reactivationCutoff ?? accepted.reactivationCutoff,
+      erasureDeadline: job.erasureDeadline ?? accepted.erasureDeadline,
     };
   }
 );
@@ -100,19 +105,20 @@ export const completeAccountDeletion = onCall(
     const user = userSnap.data() as Record<string, unknown>;
     const status = String(user.status ?? "active");
     if (status === "pending_deletion") {
-      const scheduled =
-        Number(user.deletionScheduledFor ?? 0) ||
-        Number(user.deletionRequestedAt ?? 0) + DELETION_GRACE_MS;
-      if (scheduled > Date.now()) {
+      const accepted = deletionJobInputFromUser(user, Date.now());
+      if (accepted.graceExpiresAt > Date.now()) {
         throw new HttpsError("failed-precondition", "Deletion grace period has not elapsed.");
+      }
+      if (accepted.stamp) {
+        await userRef.set(deletionStampFromJobInput(accepted, Date.now()), { merge: true });
       }
       await ensureDeletionJobDoc({
         uid: authUid,
-        requestedAt: Number(user.deletionRequestedAt ?? Date.now()),
-        graceExpiresAt: scheduled,
-        deletionPolicyVersion: Number(user.deletionPolicyVersion ?? 1),
-        reactivationCutoff: Number(user.reactivationCutoff ?? 0) || scheduled,
-        erasureDeadline: Number(user.erasureDeadline ?? 0) || null,
+        requestedAt: accepted.requestedAt,
+        graceExpiresAt: accepted.graceExpiresAt,
+        deletionPolicyVersion: accepted.deletionPolicyVersion,
+        reactivationCutoff: accepted.reactivationCutoff,
+        erasureDeadline: accepted.erasureDeadline,
       });
     } else if (status !== "deleted") {
       throw new HttpsError("failed-precondition", "Account is not pending deletion.");
@@ -169,18 +175,19 @@ export const scheduledDeletionCleanup = onSchedule(
       if (snap.empty) break;
       for (const doc of snap.docs) {
         const data = doc.data();
-        const scheduled =
-          Number(data.deletionScheduledFor ?? 0) ||
-          Number(data.deletionRequestedAt ?? 0) + DELETION_GRACE_MS;
-        if (scheduled > now) continue;
+        const accepted = deletionJobInputFromUser(data, now);
+        if (accepted.stamp) {
+          await doc.ref.set(deletionStampFromJobInput(accepted, now), { merge: true });
+        }
         await ensureDeletionJobDoc({
           uid: doc.id,
-          requestedAt: Number(data.deletionRequestedAt ?? now),
-          graceExpiresAt: scheduled,
-          deletionPolicyVersion: Number(data.deletionPolicyVersion ?? 1),
-          reactivationCutoff: Number(data.reactivationCutoff ?? 0) || scheduled,
-          erasureDeadline: Number(data.erasureDeadline ?? 0) || null,
+          requestedAt: accepted.requestedAt,
+          graceExpiresAt: accepted.graceExpiresAt,
+          deletionPolicyVersion: accepted.deletionPolicyVersion,
+          reactivationCutoff: accepted.reactivationCutoff,
+          erasureDeadline: accepted.erasureDeadline,
         });
+        if (accepted.graceExpiresAt > now) continue;
         await runFinalAccountPurge(doc.id);
       }
       if (snap.size < SCHEDULER_PAGE) break;

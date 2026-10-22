@@ -6,11 +6,28 @@
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 
 import { assertAdmittedCallableUser } from "../identity/admitCallableUser";
+import { assertBusinessAgeAdmitted } from "../identity/businessAdmission";
 import { loadContentKey, openContent, sealContent, type ContentSeal } from "./contentEncryption";
 import { contentDataKey } from "./secrets";
 
-const COLLECTIONS = new Set(["entries", "attachments"]);
-const PURPOSES = new Set(["diary", "attachment"]);
+const COLLECTIONS = new Set([
+  "entries",
+  "attachments",
+  "customerCreditRecords",
+  "purchaseOrders",
+  "professionalPacks",
+  "letterheadDocs",
+  "users",
+]);
+const PURPOSES = new Set([
+  "diary",
+  "attachment",
+  "customer_credit",
+  "purchase_order",
+  "professional_pack",
+  "letterhead_document",
+  "profile",
+]);
 const MAX_PLAINTEXT_BYTES = 7_000_000;
 
 function asRecord(data: unknown): Record<string, unknown> {
@@ -42,6 +59,7 @@ export const sealOwnerContent = onCall(
     await assertAdmittedCallableUser(request);
     const uid = request.auth?.uid;
     if (!uid) throw new HttpsError("unauthenticated", "Sign in first.");
+    await assertBusinessAgeAdmitted(uid);
     const data = asRecord(request.data);
     const binding = requireBinding(data, uid);
     const plaintextBase64 = String(data.plaintextBase64 ?? "");
@@ -71,6 +89,7 @@ export const openOwnerContent = onCall(
     await assertAdmittedCallableUser(request);
     const uid = request.auth?.uid;
     if (!uid) throw new HttpsError("unauthenticated", "Sign in first.");
+    await assertBusinessAgeAdmitted(uid);
     const data = asRecord(request.data);
     const binding = requireBinding(data, uid);
     const seal = data.seal as ContentSeal | undefined;

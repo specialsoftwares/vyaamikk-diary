@@ -17,6 +17,82 @@ export const DELETION_V2_REACTIVATION_MS = DELETION_V2_REACTIVATION_DAYS * DAY_M
 /** Legacy missing deadline. This is the 45-day policy then in force, not 15 days and not "now". */
 export const LEGACY_MISSING_DEADLINE_MS = 45 * DAY_MS;
 
+/**
+ * Deadlines already stored on the user are preserved.
+ * A new request with no stored deadline is stamped from serverNow.
+ * A client clock on the request is not an argument.
+ */
+export function deletionJobInputFromUser(
+  user: Record<string, unknown>,
+  serverNow: number
+): {
+  requestedAt: number;
+  graceExpiresAt: number;
+  deletionPolicyVersion: number;
+  reactivationCutoff: number;
+  erasureDeadline: number | null;
+  stamp: boolean;
+} {
+  const version = Number(user.deletionPolicyVersion ?? 0);
+  const requestedAt = Number(user.deletionRequestedAt ?? 0);
+  const scheduled = Number(user.deletionScheduledFor ?? 0);
+  const cutoff = Number(user.reactivationCutoff ?? 0);
+  const erasure = Number(user.erasureDeadline ?? 0);
+  if (version >= DELETION_POLICY_VERSION_V2 && requestedAt > 0 && cutoff > 0 && erasure > 0) {
+    return {
+      requestedAt,
+      graceExpiresAt: scheduled || cutoff,
+      deletionPolicyVersion: DELETION_POLICY_VERSION_V2,
+      reactivationCutoff: cutoff,
+      erasureDeadline: erasure,
+      stamp: false,
+    };
+  }
+  if (scheduled > 0) {
+    const req = requestedAt > 0 ? requestedAt : serverNow;
+    const legacy = legacyErasureDeadline({
+      deletionPolicyVersion: version >= DELETION_POLICY_VERSION_V2 ? version : 1,
+      deletionRequestedAt: req,
+      deletionScheduledFor: scheduled,
+      erasureDeadline: erasure > 0 ? erasure : null,
+    });
+    return {
+      requestedAt: req,
+      graceExpiresAt: scheduled,
+      deletionPolicyVersion: version >= DELETION_POLICY_VERSION_V2 ? version : 1,
+      reactivationCutoff: cutoff > 0 ? cutoff : scheduled,
+      erasureDeadline: erasure > 0 ? erasure : legacy,
+      stamp: false,
+    };
+  }
+  const schedule = newDeletionSchedule(serverNow);
+  return {
+    requestedAt: schedule.deletionRequestedAt,
+    graceExpiresAt: schedule.reactivationCutoff,
+    deletionPolicyVersion: schedule.deletionPolicyVersion,
+    reactivationCutoff: schedule.reactivationCutoff,
+    erasureDeadline: schedule.erasureDeadline,
+    stamp: true,
+  };
+}
+
+export function deletionStampFromJobInput(input: {
+  requestedAt: number;
+  graceExpiresAt: number;
+  deletionPolicyVersion: number;
+  reactivationCutoff: number;
+  erasureDeadline: number | null;
+}, now: number): Record<string, unknown> {
+  return {
+    deletionPolicyVersion: input.deletionPolicyVersion,
+    deletionRequestedAt: input.requestedAt,
+    deletionScheduledFor: input.graceExpiresAt,
+    reactivationCutoff: input.reactivationCutoff,
+    erasureDeadline: input.erasureDeadline,
+    updatedAt: now,
+  };
+}
+
 export function newDeletionSchedule(requestedAt: number): {
   deletionPolicyVersion: 2;
   deletionRequestedAt: number;

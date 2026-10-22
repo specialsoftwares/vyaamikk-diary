@@ -30,6 +30,7 @@ async function main(): Promise<void> {
         ueid: "VYD-2026-TEST01",
         phoneE164: "+919999999999",
         status: "active",
+        ageEligibility: "eligible",
         createdAt: 1,
         updatedAt: 1,
       });

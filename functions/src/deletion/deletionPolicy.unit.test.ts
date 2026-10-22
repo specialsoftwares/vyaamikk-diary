@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import { automaticRestorationAllowed, initialDeletionJob } from "./deletionJob";
 import {
+  deletionJobInputFromUser,
   DELETION_V2_ERASURE_MS,
   DELETION_V2_PROCESSING_ALLOWANCE_MS,
   DELETION_V2_REACTIVATION_MS,
@@ -65,5 +66,39 @@ assert.equal(restoredSnapshotMustBeSuppressed("u1", { uid: "u1", generation: 3 }
 assert.equal(restoredSnapshotMustBeSuppressed("u2", { uid: "u1", generation: 3 }), false);
 assert.equal(claimsFullErasure({ status: "completed", processorDeletion: "incomplete" }), false);
 assert.equal(claimsFullErasure({ status: "needs_manual_review", processorDeletion: "failed" }), false);
+
+const serverNow = 5_000_000_000_000;
+const forgedClock = deletionJobInputFromUser(
+  { status: "pending_deletion", deletionRequestedAt: 1, erasureDeadline: 2 },
+  serverNow
+);
+assert.equal(forgedClock.stamp, true);
+assert.equal(forgedClock.requestedAt, serverNow);
+assert.equal(forgedClock.deletionPolicyVersion, 2);
+assert.equal(forgedClock.reactivationCutoff - serverNow, DELETION_V2_REACTIVATION_MS);
+assert.equal(forgedClock.erasureDeadline, serverNow + DELETION_V2_ERASURE_MS);
+
+const stored = deletionJobInputFromUser(
+  { deletionRequestedAt: requestedAt, deletionScheduledFor: storedLegacy },
+  serverNow
+);
+assert.equal(stored.stamp, false);
+assert.equal(stored.graceExpiresAt, storedLegacy);
+assert.equal(stored.deletionPolicyVersion, 1);
+assert.notEqual(stored.erasureDeadline, requestedAt + DELETION_V2_ERASURE_MS);
+
+const kept = deletionJobInputFromUser(
+  {
+    deletionPolicyVersion: 2,
+    deletionRequestedAt: requestedAt,
+    deletionScheduledFor: schedule.reactivationCutoff,
+    reactivationCutoff: schedule.reactivationCutoff,
+    erasureDeadline: schedule.erasureDeadline,
+  },
+  serverNow
+);
+assert.equal(kept.stamp, false);
+assert.equal(kept.requestedAt, requestedAt);
+assert.equal(kept.erasureDeadline, schedule.erasureDeadline);
 
 console.log("deletionPolicy.unit.test.ts: ok");

@@ -26,15 +26,25 @@ export async function addCustomerCreditPaymentOnDb(
   recordId: string,
   payment: AddCreditPaymentInput,
   parseExisting: (id: string, data: Record<string, unknown>) => CustomerCreditRecord,
-  nowMs = Date.now()
+  nowMs = Date.now(),
+  options?: {
+    restoreRaw?: (raw: Record<string, unknown>) => Promise<Record<string, unknown>>;
+    protectCloud?: (
+      record: CustomerCreditRecord,
+      raw: Record<string, unknown>
+    ) => Promise<Record<string, unknown>>;
+  }
 ): Promise<CustomerCreditRecord> {
   if (!userId) throw new AppError("permission_denied", "Not signed in.");
   const ref = recordRef(db, userId, recordId);
   const snap = await getDoc(ref);
   if (!snap.exists()) throw new AppError("not_found", "Record not found.");
-  const existing = parseExisting(snap.id, snap.data() as Record<string, unknown>);
+  const stored = snap.data() as Record<string, unknown>;
+  const raw = options?.restoreRaw ? await options.restoreRaw(stored) : stored;
+  const existing = parseExisting(snap.id, raw);
   const next = appendPayment(existing, payment, nowMs);
-  await setDoc(ref, toCloud(next), { merge: true });
+  const cloud = options?.protectCloud ? await options.protectCloud(next, stored) : toCloud(next);
+  await setDoc(ref, cloud, { merge: true });
   return next;
 }
 
@@ -44,13 +54,22 @@ export async function closeCustomerCreditFullyPaidOnDb(
   userId: string,
   input: CloseFullyPaidInput,
   parseExisting: (id: string, data: Record<string, unknown>) => CustomerCreditRecord,
-  nowMs = Date.now()
+  nowMs = Date.now(),
+  options?: {
+    restoreRaw?: (raw: Record<string, unknown>) => Promise<Record<string, unknown>>;
+    protectCloud?: (
+      record: CustomerCreditRecord,
+      raw: Record<string, unknown>
+    ) => Promise<Record<string, unknown>>;
+  }
 ): Promise<CustomerCreditRecord> {
   if (!userId) throw new AppError("permission_denied", "Not signed in.");
   const ref = recordRef(db, userId, input.recordId);
   const snap = await getDoc(ref);
   if (!snap.exists()) throw new AppError("not_found", "Record not found.");
-  const existing = parseExisting(snap.id, snap.data() as Record<string, unknown>);
+  const stored = snap.data() as Record<string, unknown>;
+  const raw = options?.restoreRaw ? await options.restoreRaw(stored) : stored;
+  const existing = parseExisting(snap.id, raw);
   const next = applyFullClosure(
     existing,
     input.closure,
@@ -60,6 +79,7 @@ export async function closeCustomerCreditFullyPaidOnDb(
     },
     nowMs
   );
-  await setDoc(ref, toCloud(next), { merge: true });
+  const cloud = options?.protectCloud ? await options.protectCloud(next, stored) : toCloud(next);
+  await setDoc(ref, cloud, { merge: true });
   return next;
 }

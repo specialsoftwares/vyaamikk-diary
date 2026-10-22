@@ -104,6 +104,7 @@ async function seedUser(uid: string): Promise<void> {
       ueid: "VYD-2026-BILL01",
       phoneE164: "+919999999999",
       status: "active",
+      ageEligibility: "eligible",
       createdAt: Date.UTC(2024, 8, 18),
       updatedAt: Date.UTC(2024, 8, 18),
       displayName: "Dispatch user",
