@@ -242,9 +242,11 @@ async function main() {
     const mirrorGets =
       countAccessCalls(rules, "isActiveUser") + countAccessCalls(rules, "isValidatedLetterheadMirrorCreate");
     // isActiveUser reads the user profile once, authSecurity exists+get,
-    // and deletionJobs exists+get so a restored account cannot write after erasure.
-    check("static source estimate: letterhead CREATE document reads", letterheadGets === 5, `got ${letterheadGets}`);
-    check("static source estimate: mirror CREATE document reads", mirrorGets === 6, `got ${mirrorGets}`);
+    // and deletionJobs exists+get. restoreClaimAllows adds restoreControl
+    // exists+get+get. Tokens without authorityWatermark do not execute those
+    // three reads. The static count includes them. Quota slots are unchanged.
+    check("static source estimate: letterhead CREATE document reads", letterheadGets === 8, `got ${letterheadGets}`);
+    check("static source estimate: mirror CREATE document reads", mirrorGets === 9, `got ${mirrorGets}`);
     check("static source estimate: letterhead CREATE under Rules 20-access cap", letterheadGets <= 20);
     check("static source estimate: mirror CREATE under Rules 20-access cap", mirrorGets <= 20);
     check("countAccessCalls is a static source estimate, not a runtime measurement", true);
