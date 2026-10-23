@@ -2,7 +2,7 @@
 
 **Decision: HOLD. The seven-stage program is not fully implemented or accepted.**
 
-This report belongs to the commit containing it on `security/seven-stage-acceptance`, based on `fe330a04a6455d25513143b0763c2085c01134b8` (`security/firebase-session-hardening`). Read the draft PR head for the exact candidate SHA. The earlier green run 39836244298 tested only the base; it is not evidence for this correction. Source was changed in an isolated branch. No production deployment, data migration, native build, account purge, key/IAM change, billing activation or store operation occurred.
+Source/test candidate: `890bd95ec914ccb63f1725fd0b329f33977e7d83` on local branch `security/seven-stage-acceptance`, based on `fe330a04a6455d25513143b0763c2085c01134b8` (`security/firebase-session-hardening`). A later documentation-only commit records the handoff. No remote branch or PR was created: direct Git push lacked credentials, and the GitHub connection returned HTTP 403 with repository permissions `pull: true, push: false`. The earlier green run 39836244298 tested only the base; it is not evidence for this correction. Source was changed in an isolated branch. No production deployment, data migration, native build, account purge, key/IAM change, billing activation or store operation occurred.
 
 ## What this correction changes
 
@@ -35,7 +35,7 @@ Passed locally:
 - Fourteen package suites: `test:privacy-acceptance-races`, `test:content-encryption`, `test:diary-seal`, `test:age-eligibility`, `test:business-admission`, `test:account-deletion-unit`, `test:deletion-policy-v2`, `test:grin-t2-cleanup`, `test:legal-consent`, `test:auth-session-security`, `test:safe-diagnostics`, `test:reactivation-email`, `test:i18n`, `test:option-c-quota-unit`.
 - Firestore emulator: `firestore.rules.test.ts`, `firestore.rules.billing.test.ts`, `src/billing/optionC/phaseG.quota.emulator.test.ts`, `src/services/letterhead/letterheadQuota.emulator.test.ts`, `src/services/diary/diary.firebaseUpdate.emulator.test.ts`.
 
-The final encrypted credit edit/closure scenario also passed: payments and payer details round-trip through ciphertext, failed protection leaves the stored record unchanged, and edits add no quota. Canonical Actions status must be checked on the final PR head; it is not yet a PASS in this report. Do not infer a PASS from scheduling a test. Tests exercise synthetic owners; no customer payload or credentials are in this report.
+The final encrypted credit edit/closure scenario also passed: payments and payer details round-trip through ciphertext, failed protection leaves the stored record unchanged, and edits add no quota. Canonical Actions on the final head is BLOCKED by repository write access and has not run for this candidate. Do not infer a PASS from scheduling a test. Tests exercise synthetic owners; no customer payload or credentials are in this report.
 
 ## Compatibility, resources and rollback
 
