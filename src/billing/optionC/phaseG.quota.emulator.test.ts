@@ -1194,14 +1194,15 @@ async function main() {
     // CC payment-shaped update (non-billable)
     const creditEditedAt = cr1.updatedAt + 1;
     {
-      const batch = writeBatch(authedDb("g-cc"));
-      batch.update(doc(authedDb("g-cc"), "users", "g-cc", "customerCreditRecords", "cr_on_1"), {
+      const creditDb = authedDb("g-cc");
+      const batch = writeBatch(creditDb);
+      batch.update(doc(creditDb, "users", "g-cc", "customerCreditRecords", "cr_on_1"), {
         userId: "g-cc",
         remarks: "payment appended locally in test",
         updatedAt: creditEditedAt,
         mutationBaseRevision: cr1.updatedAt,
       });
-      batch.set(doc(authedDb("g-cc"), "users", "g-cc", "customerCreditRecords", "cr_on_1", "opRevision", "current"), {
+      batch.set(doc(creditDb, "users", "g-cc", "customerCreditRecords", "cr_on_1", "opRevision", "current"), {
         base: cr1.updatedAt,
         revision: creditEditedAt,
       });
@@ -1214,8 +1215,9 @@ async function main() {
 
     const closedAt = creditEditedAt + 1;
     {
-      const batch = writeBatch(authedDb("g-cc"));
-      batch.update(doc(authedDb("g-cc"), "users", "g-cc", "customerCreditRecords", "cr_on_1"), {
+      const creditDb = authedDb("g-cc");
+      const batch = writeBatch(creditDb);
+      batch.update(doc(creditDb, "users", "g-cc", "customerCreditRecords", "cr_on_1"), {
         userId: "g-cc",
         status: "fully_paid",
         closedAt,
@@ -1232,7 +1234,7 @@ async function main() {
           closedAt,
         },
       });
-      batch.set(doc(authedDb("g-cc"), "users", "g-cc", "customerCreditRecords", "cr_on_1", "opRevision", "current"), {
+      batch.set(doc(creditDb, "users", "g-cc", "customerCreditRecords", "cr_on_1", "opRevision", "current"), {
         base: creditEditedAt,
         revision: closedAt,
       });
