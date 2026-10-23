@@ -2,13 +2,15 @@
 
 **Decision: HOLD. PR #35 stays a draft. Public release stays HOLD.**
 
-Current branch: `review/seven-stage-acceptance`. Base: `fe330a04a6455d25513143b0763c2085c01134b8` (`security/firebase-session-hardening`). The authoritative candidate is the head that contains this status. Earlier text below is historical and does not override this section.
+Current branch: `review/seven-stage-acceptance`. Base: `fe330a04a6455d25513143b0763c2085c01134b8` (`security/firebase-session-hardening`). Product head: `863477b6aa1569e264ba40150c3ed5f6cc2e8569`. Earlier text below is historical and does not override this section.
+
+Canonical CI is pull_request run `40028913601`, job `120671968214`. Checkout merge `566305bc68a0963bacddb1414e2bf76b8ac3d1d9`, parents `fe330a04a6455d25513143b0763c2085c01134b8` and `863477b6aa1569e264ba40150c3ed5f6cc2e8569`. Node v20.20.2, Java Temurin 21.0.12. `test:all` 178/178. `ci:verify` PASS. The credit log printed the amount, deletion, session, quota, and direct-write checks. The orphan log printed that the missing-parent descendant was deleted. This paragraph records that run. It is not a new product change.
 
 Credit repository retries remain. A generation change during the transaction read does not stage a write. A change after the server commit is not recalled; the caller does not publish that result into the new session. Direct credit updates must advance the small `opRevision/current` gate in the same batch. The emulator rejects that `getAfter` check when the write is inside the read transaction, so the read stays in the transaction and the write is the batch. The first gate's base must equal the stored `updatedAt`. Later bases must equal the gate's current revision, and the new revision must equal the written `updatedAt`. Rules still do not compare the sealed body. A direct update without that gate is denied. Letterhead creation, scanning, cropping and new PDF generation stay retired.
 
 Missing-parent descendants are listed with one bounded `showMissing` page, not an unbounded `listDocuments()` call. The emulator owner token is used only when `FIRESTORE_EMULATOR_HOST` is set. A depth overrun or an unknown collection becomes `needs_manual_review` instead of a completed purge. Storage and GRIN page walks renew the deletion lease. Restore admission fails closed when the outside authority is configured and missing, stale, or lists the uid. With that authority unset, an erasure manifest or a closed local fence still denies; that unconfigured state is not a finished live restore gate. No second database is provisioned. Version 2 writes stay off. `CONTENT_DATA_KEYS` is not bound as a deploy secret. The migration helper is count-only unless `CONTENT_KEY_MIGRATION_ENABLED=true`, which is unset.
 
-Canonical CI for the previous head remains run `40016386544` (merge `cd362fb4cf899e1063523e4b777a542a42a5a3c4`). Do not reuse it, or run `40009577949`, for this head. The run id for this head is recorded after that run completes.
+Do not cite run `40016386544`, run `40009577949`, run `40024881636`, or run `40027034074` for head `863477b`.
 
 ## Historical handoff — 23 October 2026
 
