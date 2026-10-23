@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { initializeTestEnvironment, type RulesTestEnvironment } from "@firebase/rules-unit-testing";
-import { doc, getDoc, setDoc, type Firestore } from "firebase/firestore";
+import { deleteDoc, doc, getDoc, setDoc, type Firestore } from "firebase/firestore";
 
 import { retireJsAuthBridge } from "@/services/auth/authSessionFence";
 import { openContent, sealContent } from "../../../functions/src/privacy/contentEncryption";
@@ -40,12 +40,23 @@ function gate(parties: number, onFull?: () => Promise<void>) {
   return async function wait() {
     arrived += 1;
     if (arrived >= parties) {
-      if (onFull) await onFull();
-      release();
+      try {
+        if (onFull) await onFull();
+      } finally {
+        release();
+      }
     } else {
       await opened;
     }
   };
+}
+
+function withTimeout<T>(work: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(label)), ms);
+  });
+  return Promise.race([work, timeout]).finally(() => clearTimeout(timer));
 }
 
 async function main() {
@@ -223,10 +234,11 @@ async function main() {
   const deleteReads = { n: 0 };
   let deleted = false;
   const deleteWait = gate(2, async () => {
-    await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      const { deleteDoc } = await import("firebase/firestore");
-      await deleteDoc(doc(ctx.firestore(), "users", uid, "customerCreditRecords", "cr_delete"));
-    });
+    // Yield so both client reads have left the emulator before the admin delete.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await withTimeout(testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await deleteDoc(doc(ctx.firestore() as unknown as Firestore, "users", uid, "customerCreditRecords", "cr_delete"));
+    }), 8000, "delete during preparation timed out");
     deleted = true;
   });
   const deleteOptions = codec("cr_delete", deleteReads, deleteWait);
@@ -242,7 +254,11 @@ async function main() {
   await testEnv.withSecurityRulesDisabled(async (ctx) => {
     afterDelete = await getDoc(doc(ctx.firestore(), "users", uid, "customerCreditRecords", "cr_delete"));
   });
-  check("deletion during preparation is not recreated", deleted && outcomes.every((outcome) => outcome.status === "rejected") && afterDelete != null && !afterDelete.exists());
+  check(
+    "deletion during preparation is not recreated",
+    deleted && outcomes.every((outcome) => outcome.status === "rejected") && afterDelete != null && !afterDelete.exists(),
+    `deleted=${deleted} outcomes=${outcomes.map((outcome) => outcome.status === "rejected" ? String(outcome.reason) : outcome.status).join(" | ")} exists=${String(afterDelete?.exists())}`
+  );
 
   const sessionBase = await seed("cr_session", at);
   let flipped = false;
