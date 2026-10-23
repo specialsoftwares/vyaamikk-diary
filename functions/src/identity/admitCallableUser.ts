@@ -74,5 +74,7 @@ export async function assertAdmittedCallableUser(
   if (!decision.admit) {
     throw new HttpsError("unauthenticated", "Sign-in is no longer valid.");
   }
+  const { assertRestoreTrafficClosed } = await import("../deletion/restoreGate");
+  await assertRestoreTrafficClosed(verified.uid);
   return verified;
 }

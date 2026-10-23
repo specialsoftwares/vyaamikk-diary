@@ -22,7 +22,7 @@ export type PurposeQueueState = {
   localGrant: boolean;
   hasChoice: boolean;
   pending: PurposeMutation | null;
-  sync: "unknown" | "pending" | "synced" | "conflict" | "storage_error";
+  sync: "unknown" | "pending" | "synced" | "conflict" | "storage_error" | "listener_unavailable";
 };
 export type PurposeQueuePorts = {
   load(uid: string): Promise<PurposeQueueState | null>;
@@ -33,7 +33,9 @@ export type PurposeQueuePorts = {
   operationId(): string;
   observeRemote?(
     uid: string,
-    onRemote: (remote: PurposeServerState) => void
+    generation: number,
+    onRemote: (remote: PurposeServerState) => void,
+    onHealth: (health: "listening" | "failed") => void
   ): () => void;
 };
 
@@ -48,6 +50,7 @@ export function createPurposeConsentQueue(ports: PurposeQueuePorts) {
   const states = new Map<string, PurposeQueueState>();
   const listeners = new Set<() => void>();
   let stopObserve: (() => void) | null = null;
+  let observedGeneration = -1;
   const initial = (uid: string): PurposeQueueState => ({ uid, revision: 0, localGrant: false, hasChoice: false, pending: null, sync: "unknown" });
   const notify = () => listeners.forEach((listener) => listener());
   function publish(state: PurposeQueueState) { states.set(state.uid, state); notify(); }
@@ -109,25 +112,29 @@ export function createPurposeConsentQueue(ports: PurposeQueuePorts) {
   }
   return {
     bind(uid: string | null) {
-      if (activeUid === uid) return;
+      const generation = ports.generation();
+      if (activeUid === uid && observedGeneration === generation) return;
       stopObserve?.();
       stopObserve = null;
       activeUid = uid;
+      observedGeneration = generation;
       choiceEpoch += 1;
       // Synchronous call enters the existing immediate native opt-out gate.
       void ports.applyLocal(false);
       if (uid && ports.observeRemote) {
-        const generation = ports.generation();
-        stopObserve = ports.observeRemote(uid, (remote) => {
+        stopObserve = ports.observeRemote(uid, generation, (remote) => {
           if (activeUid !== uid || ports.generation() !== generation) return;
           if (remote.decision !== "withdraw") return;
+          const known = states.get(uid)?.revision ?? 0;
+          if (remote.revision < known) return;
+          // Stop collection before persistence. A blocked save must not delay the stop.
+          void ports.applyLocal(false);
           choiceEpoch += 1;
           const epoch = choiceEpoch;
           void enqueue(async () => {
             if (!owns(uid, generation, epoch)) return;
-            await ports.applyLocal(false);
-            if (!owns(uid, generation, epoch)) return;
             const state = await load(uid);
+            if (remote.revision < state.revision) return;
             await persist({
               ...state,
               localGrant: false,
@@ -137,6 +144,11 @@ export function createPurposeConsentQueue(ports: PurposeQueuePorts) {
               sync: "synced",
             });
           });
+        }, (health) => {
+          if (activeUid !== uid || ports.generation() !== generation || health !== "failed") return;
+          void ports.applyLocal(false);
+          const state = states.get(uid);
+          if (state) publish({ ...state, localGrant: false, sync: "listener_unavailable" });
         });
       }
       notify();

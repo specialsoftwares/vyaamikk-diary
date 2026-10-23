@@ -3,7 +3,7 @@
  * A retry must re-read and reseal; it must not write a payload prepared earlier.
  */
 
-import { runTransaction, type DocumentReference, type Firestore } from "firebase/firestore";
+import { getDoc, runTransaction, writeBatch, type DocumentReference, type Firestore } from "firebase/firestore";
 
 import { AppError } from "@/domain/errors";
 
@@ -21,6 +21,20 @@ export function nextContentRevision(previous: number, now: number): number {
   return Math.max(clock, base + 1);
 }
 
+function sessionChanged(submitted: boolean): never {
+  throw new AppError("permission_denied", "Sign in again.", undefined, {
+    reason: "session_changed",
+    // True only after the transaction has already committed. A later logout
+    // cannot recall that server write; the caller must not publish it.
+    submitted,
+  });
+}
+
+/** Production uses the Firestore SDK. Tests replace the runner, not the checks. */
+export const revisionCommitRuntime = {
+  runTransaction,
+};
+
 export async function commitExpectedRevision(input: {
   db: Firestore;
   ref: DocumentReference;
@@ -30,23 +44,36 @@ export async function commitExpectedRevision(input: {
   currentGeneration: () => number;
   revisionRef?: DocumentReference;
 }): Promise<void> {
-  if (input.currentGeneration() !== input.generationAtStart) {
-    throw new AppError("permission_denied", "Sign in again.", undefined, { reason: "session_changed" });
-  }
-  await runTransaction(input.db, async (tx) => {
-    if (input.currentGeneration() !== input.generationAtStart) {
-      throw new AppError("permission_denied", "Sign in again.", undefined, { reason: "session_changed" });
-    }
+  const owned = () => input.currentGeneration() === input.generationAtStart;
+  if (!owned()) sessionChanged(false);
+  await revisionCommitRuntime.runTransaction(input.db, async (tx) => {
+    // Every callback attempt, including a transaction retry, rechecks ownership.
+    if (!owned()) sessionChanged(false);
     const fresh = await tx.get(input.ref);
+    if (!owned()) sessionChanged(false);
     if (!fresh.exists()) throw new AppError("not_found", "Record not found.");
     const current = Number(fresh.data()?.updatedAt);
     if (current !== input.expectedRevision) throw new RevisionConflict();
-    tx.set(input.ref, input.cloud, { merge: true });
-    if (input.revisionRef) {
-      tx.set(input.revisionRef, {
-        base: String(input.expectedRevision),
-        next: String(input.cloud.updatedAt),
-      });
-    }
+    if (!owned()) sessionChanged(false);
+    // Rules can verify the sibling gate on a batch. The emulator rejects that
+    // same getAfter check when the write is inside the read transaction.
+    if (!input.revisionRef) tx.set(input.ref, input.cloud, { merge: true });
   });
+  if (!owned()) sessionChanged(input.revisionRef == null);
+  if (input.revisionRef) {
+    const next = Number(input.cloud.updatedAt);
+    const batch = writeBatch(input.db);
+    batch.update(input.ref, input.cloud);
+    batch.set(input.revisionRef, { base: input.expectedRevision, revision: next });
+    try {
+      await batch.commit();
+    } catch (error) {
+      if (!owned()) sessionChanged(false);
+      const after = await getDoc(input.ref);
+      if (!after.exists()) throw new AppError("not_found", "Record not found.");
+      if (Number(after.data()?.updatedAt) !== input.expectedRevision) throw new RevisionConflict();
+      throw error;
+    }
+  }
+  if (!owned()) sessionChanged(true);
 }

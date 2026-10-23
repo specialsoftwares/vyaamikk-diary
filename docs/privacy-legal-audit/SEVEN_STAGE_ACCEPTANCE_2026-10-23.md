@@ -1,8 +1,20 @@
-# Seven-stage security acceptance — 23 October 2026
+# Seven-stage security acceptance — current status 24 October 2026
 
-**Decision: HOLD. The seven-stage program is not fully implemented or accepted.**
+**Decision: HOLD. PR #35 stays a draft. Public release stays HOLD.**
 
-Source/test candidate: `890bd95ec914ccb63f1725fd0b329f33977e7d83` on local branch `security/seven-stage-acceptance`, based on `fe330a04a6455d25513143b0763c2085c01134b8` (`security/firebase-session-hardening`). A later documentation-only commit records the handoff. No remote branch or PR was created: direct Git push lacked credentials, and the GitHub connection returned HTTP 403 with repository permissions `pull: true, push: false`. The earlier green run 39836244298 tested only the base; it is not evidence for this correction. Source was changed in an isolated branch. No production deployment, data migration, native build, account purge, key/IAM change, billing activation or store operation occurred.
+Current branch: `review/seven-stage-acceptance`. Base: `fe330a04a6455d25513143b0763c2085c01134b8` (`security/firebase-session-hardening`). The authoritative candidate is the head that contains this status. Earlier text below is historical and does not override this section.
+
+Credit repository retries remain. A generation change during the transaction read does not stage a write. A change after the server commit is not recalled; the caller does not publish that result into the new session. Direct credit updates must advance the small `opRevision/current` gate in the same batch. The emulator rejects that `getAfter` check when the write is inside the read transaction, so the read stays in the transaction and the write is the batch. The first gate's base must equal the stored `updatedAt`. Later bases must equal the gate's current revision, and the new revision must equal the written `updatedAt`. Rules still do not compare the sealed body. A direct update without that gate is denied. Letterhead creation, scanning, cropping and new PDF generation stay retired.
+
+Missing-parent descendants are listed with one bounded `showMissing` page, not an unbounded `listDocuments()` call. The emulator owner token is used only when `FIRESTORE_EMULATOR_HOST` is set. A depth overrun or an unknown collection becomes `needs_manual_review` instead of a completed purge. Storage and GRIN page walks renew the deletion lease. Restore admission fails closed when the outside authority is configured and missing, stale, or lists the uid. With that authority unset, an erasure manifest or a closed local fence still denies; that unconfigured state is not a finished live restore gate. No second database is provisioned. Version 2 writes stay off. `CONTENT_DATA_KEYS` is not bound as a deploy secret. The migration helper is count-only unless `CONTENT_KEY_MIGRATION_ENABLED=true`, which is unset.
+
+Canonical CI for the previous head remains run `40016386544` (merge `cd362fb4cf899e1063523e4b777a542a42a5a3c4`). Do not reuse it, or run `40009577949`, for this head. The run id for this head is recorded after that run completes.
+
+## Historical handoff — 23 October 2026
+
+**Decision at that date: HOLD. The seven-stage program was not fully implemented or accepted.**
+
+Source/test candidate then: `890bd95ec914ccb63f1725fd0b329f33977e7d83` on local branch `security/seven-stage-acceptance`, based on `fe330a04a6455d25513143b0763c2085c01134b8` (`security/firebase-session-hardening`). A later documentation-only commit records the handoff. No remote branch or PR was created at that time: direct Git push lacked credentials, and the GitHub connection returned HTTP 403 with repository permissions `pull: true, push: false`. The earlier green run 39836244298 tested only the base; it is not evidence for this correction. Source was changed in an isolated branch. No production deployment, data migration, native build, account purge, key/IAM change, billing activation or store operation occurred.
 
 ## What this correction changes
 

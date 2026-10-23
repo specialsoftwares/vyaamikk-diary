@@ -59,7 +59,7 @@ export async function purgePrefixPaged(
   bucket: StorageBucketLike,
   uid: string,
   prefix: string,
-  opts?: { maxPages?: number; pageSize?: number }
+  opts?: { maxPages?: number; pageSize?: number; onPage?: () => Promise<void> }
 ): Promise<{ deleted: number; pages: number; exhausted: boolean }> {
   assertObjectOwnedByUser(uid, `${prefix}x`); // prefix must be under user root
   if (!prefix.startsWith(`users/${uid.trim()}/`)) {
@@ -74,6 +74,7 @@ export async function purgePrefixPaged(
 
   while (pages < maxPages) {
     pages += 1;
+    if (opts?.onPage) await opts.onPage();
     const [files, nextQuery, apiResponse] = await bucket.getFiles({
       prefix,
       maxResults: pageSize,
@@ -148,14 +149,15 @@ export async function countOwnedFilesUnderPrefix(
  */
 export async function purgeAllUserOwnedStorage(
   bucket: StorageBucketLike,
-  uid: string
+  uid: string,
+  onPage?: () => Promise<void>
 ): Promise<StoragePurgeResult> {
   let deleted = 0;
   let pages = 0;
 
   for (let pass = 0; pass < VERIFY_PASSES; pass += 1) {
     for (const prefix of allUserOwnedStoragePrefixes(uid)) {
-      const result = await purgePrefixPaged(bucket, uid, prefix);
+      const result = await purgePrefixPaged(bucket, uid, prefix, { onPage });
       deleted += result.deleted;
       pages += result.pages;
       if (!result.exhausted) return { deleted, pages, verifiedEmpty: false };

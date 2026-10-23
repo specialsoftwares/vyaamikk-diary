@@ -8,9 +8,10 @@ import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { assertAdmittedCallableUser } from "../identity/admitCallableUser";
 import { assertBusinessAgeAdmitted } from "../identity/businessAdmission";
 import {
+  assertContentBinding,
   loadContentKey,
   loadNamedContentKey,
-  openContent,
+  openStoredContent,
   sealContent,
   sealContentV2,
   type ContentSeal,
@@ -18,24 +19,6 @@ import {
 import { contentDataKey } from "./secrets";
 import { assertRestoreTrafficClosed } from "../deletion/restoreGate";
 
-const COLLECTIONS = new Set([
-  "entries",
-  "attachments",
-  "customerCreditRecords",
-  "purchaseOrders",
-  "professionalPacks",
-  "letterheadDocs",
-  "users",
-]);
-const PURPOSES = new Set([
-  "diary",
-  "attachment",
-  "customer_credit",
-  "purchase_order",
-  "professional_pack",
-  "letterhead_document",
-  "profile",
-]);
 const MAX_PLAINTEXT_BYTES = 7_000_000;
 
 function asRecord(data: unknown): Record<string, unknown> {
@@ -52,7 +35,12 @@ function requireBinding(data: Record<string, unknown>, uid: string): {
   const recordId = String(data.recordId ?? "");
   const purpose = String(data.purpose ?? "");
   const revision = Number(data.revision);
-  if (!COLLECTIONS.has(collection) || !PURPOSES.has(purpose) || !recordId || !Number.isFinite(revision)) {
+  if (!recordId || data.revision == null) {
+    throw new HttpsError("invalid-argument", "Content binding is not valid.");
+  }
+  try {
+    assertContentBinding({ collection, purpose, revision, keyId: typeof data.keyId === "string" ? data.keyId : undefined });
+  } catch {
     throw new HttpsError("invalid-argument", "Content binding is not valid.");
   }
   if (data.uid != null && String(data.uid) !== uid) {
@@ -81,12 +69,6 @@ export const sealOwnerContent = onCall(
     if (plaintext.length === 0 || plaintext.length > MAX_PLAINTEXT_BYTES) {
       throw new HttpsError("invalid-argument", "Content could not be protected.");
     }
-    let key: Buffer;
-    try {
-      key = loadContentKey();
-    } catch {
-      throw new HttpsError("failed-precondition", "Content protection is unavailable.");
-    }
     const activeKeyId = process.env.CONTENT_DATA_KEY_ID?.trim();
     let seal: ContentSeal;
     if (activeKeyId) {
@@ -94,6 +76,12 @@ export const sealOwnerContent = onCall(
       if (!activeKey) throw new HttpsError("failed-precondition", "Content protection is unavailable.");
       seal = sealContentV2({ key: activeKey, keyId: activeKeyId, uid, plaintext, ...binding });
     } else {
+      let key: Buffer;
+      try {
+        key = loadContentKey();
+      } catch {
+        throw new HttpsError("failed-precondition", "Content protection is unavailable.");
+      }
       seal = sealContent({ key, uid, plaintext, ...binding });
     }
     return { seal };
@@ -114,24 +102,12 @@ export const openOwnerContent = onCall(
     if (!seal || typeof seal !== "object") {
       throw new HttpsError("invalid-argument", "Content could not be opened.");
     }
-    let key: Buffer;
     try {
-      key = loadContentKey();
-    } catch {
-      throw new HttpsError("failed-precondition", "Content protection is unavailable.");
-    }
-    try {
-      const plaintext = openContent({
-        key,
-        uid,
-        seal,
-        ...binding,
-        resolveKey: (keyId) => loadNamedContentKey(keyId),
-      });
+      const plaintext = openStoredContent({ uid, seal, ...binding });
       return { plaintextBase64: plaintext.toString("base64") };
     } catch (error) {
       const code = error instanceof Error ? error.message : "";
-      if (code === "content_key_unavailable") {
+      if (code === "content_key_unavailable" || code === "unknown_key") {
         throw new HttpsError("failed-precondition", "Content protection is unavailable.");
       }
       throw new HttpsError("permission-denied", "Content could not be opened.");

@@ -1,92 +1,80 @@
 import assert from "node:assert/strict";
 
-import { purgeUserSubcollectionsFully } from "./firestorePurge";
+import { purgeUserSubcollectionsFully, type PurgePorts } from "./firestorePurge";
 
-type Node = { id: string; parent: Node[]; cols: Map<string, Node[]> };
+type Mem = {
+  docs: Map<string, Set<string>>;
+  children: Map<string, string[]>;
+};
 
-function column(nodes: Node[]) {
+function ports(mem: Mem): PurgePorts {
   return {
-    limit(n: number) {
-      return {
-        async get() {
-          const page = nodes.slice(0, n);
-          return {
-            empty: page.length === 0,
-            size: page.length,
-            docs: page.map((node) => ({
-              ref: Object.assign(node, {
-                listCollections: async () => [...node.cols.values()].map((children) => column(children)),
-              }),
-            })),
-          };
-        },
-      };
+    async listPage(parentPath, collectionId) {
+      const ids = [...(mem.docs.get(`${parentPath}/${collectionId}`) ?? new Set<string>())];
+      return { ids };
+    },
+    async childCollections(path) {
+      return mem.children.get(path) ?? [];
+    },
+    async rootCollections() {
+      return ["entries", "subscription"];
+    },
+    async deleteDocs(paths) {
+      for (const path of paths) {
+        const slash = path.lastIndexOf("/");
+        const col = path.slice(0, slash);
+        const id = path.slice(slash + 1);
+        mem.docs.get(col)?.delete(id);
+      }
     },
   };
-}
-
-function database(entries: Node[]) {
-  return {
-    collection() {
-      return {
-        doc() {
-          return { collection: () => column(entries) };
-        },
-      };
-    },
-    batch() {
-      const doomed: Node[] = [];
-      return {
-        delete(ref: unknown) {
-          doomed.push(ref as Node);
-        },
-        async commit() {
-          for (const node of doomed) {
-            const index = node.parent.indexOf(node);
-            if (index >= 0) node.parent.splice(index, 1);
-          }
-        },
-      };
-    },
-  };
-}
-
-function node(id: string, parent: Node[], child?: Node[]): Node {
-  const cols = new Map<string, Node[]>();
-  if (child) cols.set("nested", child);
-  const created: Node = { id, parent, cols };
-  parent.push(created);
-  return created;
 }
 
 async function main() {
-  const entries: Node[] = [];
-  const notes: Node[] = [];
-  node("note", notes);
-  node("entry", entries, notes);
+  const mem: Mem = { docs: new Map(), children: new Map() };
+  mem.docs.set("users/owner/entries", new Set(["missing-parent"]));
+  mem.children.set("users/owner/entries/missing-parent", ["notes"]);
+  mem.docs.set("users/owner/entries/missing-parent/notes", new Set(["private-note"]));
   const renewals: number[] = [];
-  const purged = await purgeUserSubcollectionsFully(database(entries) as never, "owner", {
+  const purged = await purgeUserSubcollectionsFully({} as never, "owner", {
+    ports: ports(mem),
     onBatch: async () => {
-      renewals.push(renewals.length + 1);
+      renewals.push(1);
     },
   });
-  assert.equal(entries.length, 0);
-  assert.equal(notes.length, 0);
   assert.equal(purged.exhausted, true);
-  assert.ok(purged.deleted >= 2);
+  assert.equal(purged.hold, undefined);
+  assert.equal(mem.docs.get("users/owner/entries/missing-parent/notes")?.size ?? 0, 0);
+  assert.equal(mem.docs.get("users/owner/entries")?.size ?? 0, 0);
   assert.ok(renewals.length >= 2);
 
-  const deep: Node[] = [];
-  let parent = deep;
-  for (let level = 0; level < 6; level += 1) {
-    const next: Node[] = [];
-    node(`level-${level}`, parent, level === 5 ? undefined : next);
-    parent = next;
+  const deep: Mem = { docs: new Map(), children: new Map() };
+  let parent = "users/owner";
+  let collection = "entries";
+  deep.docs.set(`${parent}/${collection}`, new Set(["n0"]));
+  for (let level = 0; level < 5; level += 1) {
+    const docPath = `${parent}/${collection}/n${level}`;
+    const next = `c${level}`;
+    deep.children.set(docPath, [next]);
+    deep.docs.set(`${docPath}/${next}`, new Set([`n${level + 1}`]));
+    parent = docPath;
+    collection = next;
   }
-  const blocked = await purgeUserSubcollectionsFully(database(deep) as never, "owner");
+  const blocked = await purgeUserSubcollectionsFully({} as never, "owner", { ports: ports(deep) });
   assert.equal(blocked.exhausted, false);
-  assert.ok(deep.length > 0);
-  console.log("firestorePurge: nested delete, lease renewal and depth hold passed");
+  assert.equal(blocked.hold, "depth_exceeded");
+  assert.ok([...deep.docs.values()].some((ids) => ids.size > 0));
+
+  await assert.rejects(
+    () => purgeUserSubcollectionsFully({} as never, "owner", {
+      ports: ports(mem),
+      beforePage: async () => {
+        throw new Error("lease_lost");
+      },
+    }),
+    /lease_lost/
+  );
+  console.log("firestorePurge: missing parent, depth hold and lease stop passed");
 }
 
 main().catch((error) => {

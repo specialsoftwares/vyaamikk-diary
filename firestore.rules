@@ -36,8 +36,21 @@ service cloud.firestore {
           > int(get(/databases/$(database)/documents/authSecurity/$(request.auth.uid)).data.get('revokedBeforeAuthTimeSeconds', 0));
     }
 
+    function restoreClaimAllows() {
+      return request.auth.token.get('erased', false) != true
+        && (
+          !request.auth.token.keys().hasAny(['authorityWatermark'])
+          || (
+            exists(/databases/$(database)/documents/restoreControl/current)
+            && get(/databases/$(database)/documents/restoreControl/current).data.closed == false
+            && get(/databases/$(database)/documents/restoreControl/current).data.watermark
+              == request.auth.token.authorityWatermark
+          )
+        );
+    }
+
     function isOwner(uid) {
-      return isSignedIn() && request.auth.uid == uid;
+      return isSignedIn() && request.auth.uid == uid && restoreClaimAllows();
     }
 
     function userData(uid) {
@@ -129,7 +142,15 @@ service cloud.firestore {
       return !request.resource.data.keys().hasAny(['contentSeal'])
         || (
           request.resource.data.contentSeal is map
-          && request.resource.data.contentSeal.v == 1
+          && (
+            request.resource.data.contentSeal.v == 1
+            || (
+              request.resource.data.contentSeal.v == 2
+              && request.resource.data.contentSeal.keyId is string
+              && request.resource.data.contentSeal.keyId.size() > 0
+              && request.resource.data.contentSeal.keyId.size() <= 64
+            )
+          )
           && request.resource.data.contentSeal.uid == request.auth.uid
           && request.resource.data.contentSeal.recordId == request.auth.uid
           && request.resource.data.contentSeal.revision == request.resource.data.updatedAt
@@ -256,6 +277,19 @@ service cloud.firestore {
       return request.resource.data.title is string
         && request.resource.data.title.size() > 0
         && request.resource.data.title.size() <= 120;
+    }
+
+    function creditOpAdvanced(uid, recordId) {
+      let gate = /databases/$(database)/documents/users/$(uid)/customerCreditRecords/$(recordId)/opRevision/current;
+      return existsAfter(gate)
+        && getAfter(gate).data.revision is int
+        && getAfter(gate).data.base is int
+        && getAfter(gate).data.revision > getAfter(gate).data.base
+        && getAfter(gate).data.revision == request.resource.data.updatedAt
+        && (
+          (!exists(gate) && getAfter(gate).data.base == resource.data.updatedAt)
+          || (exists(gate) && getAfter(gate).data.base == get(gate).data.revision)
+        );
     }
 
     function acceptedSealVersion() {
@@ -825,14 +859,32 @@ service cloud.firestore {
                         || usageConsumedForRecord(uid, 'customerCreditRecords', recordId)
                       );
         allow update: if isActiveUser(uid)
-                      && request.resource.data.userId == uid;
+                      && request.resource.data.userId == uid
+                      && (
+                        creditOpAdvanced(uid, recordId)
+                        || request.resource.data.diff(resource.data).affectedKeys()
+                          .hasOnly(['completedSteps', 'completedStepsUpdatedAt'])
+                      );
         allow delete: if isActiveUser(uid);
 
-        // Written in the same transaction as a sealed credit update.
-        // Comparing that sealed document inside this rule exceeds the rules
-        // evaluator, so the repository transaction is what retries the fresh read.
-        match /revisionCheck/{checkId} {
-          allow read, write: if isOwner(uid);
+        // Small integer gate. A direct credit update that does not advance it
+        // is denied. The sealed body is not compared here.
+        match /opRevision/{docId} {
+          allow read: if isOwner(uid);
+          allow create: if isActiveUser(uid)
+                        && docId == 'current'
+                        && request.resource.data.keys().hasOnly(['base', 'revision'])
+                        && request.resource.data.base is int
+                        && request.resource.data.revision is int
+                        && request.resource.data.revision > request.resource.data.base;
+          allow update: if isActiveUser(uid)
+                        && docId == 'current'
+                        && request.resource.data.keys().hasOnly(['base', 'revision'])
+                        && request.resource.data.base is int
+                        && request.resource.data.revision is int
+                        && request.resource.data.revision > request.resource.data.base
+                        && request.resource.data.base == resource.data.revision;
+          allow delete: if false;
         }
       }
 
@@ -1031,6 +1083,16 @@ service cloud.firestore {
 
     // ---- Account deletion ledger (Admin / Functions only) ---------------
     match /deletionJobs/{uid} {
+      allow read, write: if false;
+    }
+
+    // Outside a user restore snapshot these are still admin-only. Clients
+    // cannot delete an erasure manifest to reopen an account.
+    match /erasureManifests/{uid} {
+      allow read, write: if false;
+    }
+
+    match /restoreControl/{docId} {
       allow read, write: if false;
     }
 

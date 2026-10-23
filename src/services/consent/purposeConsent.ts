@@ -21,7 +21,7 @@ const queue = createPurposeConsentQueue({
     return callRecordProcessingPurpose(input);
   },
   generation: currentAuthMutationGeneration,
-  observeRemote(uid, onRemote) {
+  observeRemote(uid, _generation, onRemote, onHealth) {
     let unsubscribe = () => {};
     let cancelled = false;
     void (async () => {
@@ -42,10 +42,11 @@ const queue = createPurposeConsentQueue({
               receivedAt: typeof data.receivedAt === "number" ? data.receivedAt : null,
             });
           },
-          () => undefined
+          () => onHealth("failed")
         );
+        onHealth("listening");
       } catch {
-        // Foreground and network reconciliation remains if the listener cannot start.
+        onHealth("failed");
       }
     })();
     return () => {

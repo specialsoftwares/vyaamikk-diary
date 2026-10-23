@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { deletedProfileStub, ownsDeletionLease, walkDeletionPages } from './deletionSafety';
-import { restoreTrafficDecision } from './restoreGate';
+import { decideRestoreTraffic } from './restoreAuthority';
 import { initialDeletionJob, canAcquireLease } from './deletionJob';
 async function main() {
   const job = { ...initialDeletionJob({ uid: 'a', requestedAt: 0, graceExpiresAt: 0 }), status: 'leased' as const, leaseOwner: 'worker-a', leaseUntil: 100 };
@@ -18,8 +18,13 @@ async function main() {
     visit: async row => { seen.push(row.id); }, checkpoint: async next => { cursor = next; } });
   await run(); await run(); await run();
   assert.equal(new Set(seen).size, 81); assert.equal(cursor, null);
-  assert.equal(restoreTrafficDecision(false), 'allow');
-  assert.equal(restoreTrafficDecision(true), 'deny');
+  const authority = { watermark: 2, erasedUids: ['erased'], withdrawnPurposes: { live: ['crash_diagnostics'] } };
+  assert.equal(decideRestoreTraffic({ authority: null, localWatermark: 2, uid: 'live' }), 'deny');
+  assert.equal(decideRestoreTraffic({ authority, localWatermark: 1, uid: 'live' }), 'deny');
+  assert.equal(decideRestoreTraffic({ authority, localWatermark: null, uid: 'live' }), 'deny');
+  assert.equal(decideRestoreTraffic({ authority, localWatermark: 2, uid: 'erased' }), 'deny');
+  assert.equal(decideRestoreTraffic({ authority, localWatermark: 2, uid: 'live', purpose: 'crash_diagnostics' }), 'deny');
+  assert.equal(decideRestoreTraffic({ authority, localWatermark: 2, uid: 'live' }), 'allow');
   console.log('deletionSafety: cursor, lease, backoff and minimal-stub tests passed');
 }
 main().catch(e => { console.error(e); process.exitCode = 1; });

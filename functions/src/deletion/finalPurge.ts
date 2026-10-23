@@ -391,6 +391,9 @@ export async function runFinalAccountPurge(uid: string): Promise<FinalPurgeResul
 
   const { generation, job, leaseOwner } = acquired;
   const phases = { ...job.phases };
+  const renewLease = async () => {
+    await patchJob(uid, generation, leaseOwner, { phases });
+  };
 
   try {
     const identity = await assertStillPendingOrDeletedStub(uid, generation, leaseOwner);
@@ -402,7 +405,8 @@ export async function runFinalAccountPurge(uid: string): Promise<FinalPurgeResul
       await assertStillPendingOrDeletedStub(uid, generation, leaseOwner);
       const storageResult = await purgeAllUserOwnedStorage(
         getAdminBucket() as unknown as import("./storagePurge").StorageBucketLike,
-        uid
+        uid,
+        renewLease
       );
       if (!storageResult.verifiedEmpty) {
         throw new Error("storage_verify_not_empty");
@@ -417,11 +421,18 @@ export async function runFinalAccountPurge(uid: string): Promise<FinalPurgeResul
       await patchJob(uid, generation, leaseOwner, { phases });
       await assertStillPendingOrDeletedStub(uid, generation, leaseOwner);
       const fs = await purgeUserSubcollectionsFully(getAdminDb(), uid, {
+        cursor: job.firestoreCursor ?? null,
+        beforePage: async (cursor) => {
+          await patchJob(uid, generation, leaseOwner, { phases, firestoreCursor: cursor });
+        },
         onBatch: async () => {
           await patchJob(uid, generation, leaseOwner, { phases });
         },
       });
+      if (fs.hold === "depth_exceeded") throw new Error("firestore_depth_exceeded");
+      if (fs.hold === "unknown_collection") throw new Error("firestore_unknown_collection");
       if (!fs.exhausted) {
+        if (fs.cursor) await patchJob(uid, generation, leaseOwner, { phases, firestoreCursor: fs.cursor });
         throw new Error("firestore_purge_incomplete");
       }
       phases.firestore = "done";
@@ -441,6 +452,7 @@ export async function runFinalAccountPurge(uid: string): Promise<FinalPurgeResul
         uid,
         bucket: getAdminBucket() as unknown as import("./storagePurge").StorageBucketLike,
         db: adminGrinFirestoreAdapter(),
+        onPage: renewLease,
       });
       grinCompleted = grin.completed;
       if (!grin.completed) {
@@ -454,6 +466,7 @@ export async function runFinalAccountPurge(uid: string): Promise<FinalPurgeResul
         bucket: getAdminBucket() as unknown as import("./storagePurge").StorageBucketLike,
         db: adminGrinFirestoreAdapter(),
         force: true,
+        onPage: renewLease,
       });
       grinCompleted = grin.completed;
       if (!grin.completed) {

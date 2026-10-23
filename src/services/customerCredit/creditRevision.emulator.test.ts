@@ -5,8 +5,8 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { initializeTestEnvironment, type RulesTestEnvironment } from "@firebase/rules-unit-testing";
-import { deleteDoc, doc, getDoc, setDoc, type Firestore } from "firebase/firestore";
+import { assertFails, initializeTestEnvironment, type RulesTestEnvironment } from "@firebase/rules-unit-testing";
+import { deleteDoc, doc, getDoc, setDoc, updateDoc, type Firestore } from "firebase/firestore";
 
 import { retireJsAuthBridge } from "@/services/auth/authSessionFence";
 import { openContent, sealContent } from "../../../functions/src/privacy/contentEncryption";
@@ -169,8 +169,14 @@ async function main() {
     }, parse(raceBase), sameNow, options),
   ]);
   const raceIds = await paymentsOf("cr_race", raceBase);
+  const raceSnap = await getDoc(doc(db(), "users", uid, "customerCreditRecords", "cr_race"));
+  const raceRaw = await codec("cr_race", { n: 0 }).restoreRaw(raceSnap.data() as Record<string, unknown>);
+  const raceStored = parse(raceBase)("cr_race", raceRaw);
+  const raceAmounts = new Map(raceStored.payments.map((payment) => [payment.id, payment.amount]));
   check("concurrent payments both remain", raceIds.includes("pay_a") && raceIds.includes("pay_b") && raceIds.length === 2, raceIds.join(","));
   check("same millisecond does not reuse one revision", first.updatedAt !== second.updatedAt);
+  check("confirmed payment amounts stay on the record", raceAmounts.get("pay_a") === 1000 && raceAmounts.get("pay_b") === 2000);
+  check("sale amount is not rewritten to absorb the race", raceStored.saleAmount === 10000);
 
   const again = await addCustomerCreditPaymentOnDb(db(), uid, "cr_race", {
     amount: 1000, paidDate: sameNow, mode: "cash", clientPaymentId: "pay_a",
@@ -283,6 +289,20 @@ async function main() {
 
   const usage = await getDoc(doc(db(), "users", uid, "subscription", "usageCurrent"));
   check("payment and closure edits do not charge a creation slot", usage.data()?.recordsThisMonth === 4);
+
+  await seed("cr_stale", at);
+  let directDenied = false;
+  try {
+    await assertFails(updateDoc(doc(db(), "users", uid, "customerCreditRecords", "cr_stale"), {
+      userId: uid,
+      customerName: "Direct overwrite",
+      updatedAt: at + 9,
+    }));
+    directDenied = true;
+  } catch (error) {
+    console.error(error);
+  }
+  check("stale direct credit write is denied", directDenied);
 
   await testEnv.cleanup();
   if (failures > 0) {

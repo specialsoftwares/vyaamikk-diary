@@ -72,6 +72,8 @@ async function main() {
   assert.equal(enabled, false);
   assert.equal(ordered.state('a')?.revision, 2);
   const watchedListener = { current: null as ((event: PurposeServerState) => void) | null };
+  const watchedHealth = { current: null as ((health: 'listening' | 'failed') => void) | null };
+  let watchedGeneration = -1;
   let watchedRemote: PurposeState = { revision: 0, decision: null, receivedAt: null };
   const watched = createPurposeConsentQueue({
     ...ports,
@@ -81,8 +83,10 @@ async function main() {
       if (transition.apply) watchedRemote = transition.state;
       return { ok: true as const, ...watchedRemote, conflict: transition.conflict };
     },
-    observeRemote: (_uid, onRemote) => {
+    observeRemote: (_uid, observedGeneration, onRemote, onHealth) => {
+      watchedGeneration = observedGeneration;
       watchedListener.current = onRemote;
+      watchedHealth.current = onHealth;
       return () => { watchedListener.current = null; };
     },
   });
@@ -99,6 +103,17 @@ async function main() {
   staleWithdraw?.({ ok: true, revision: 9, decision: 'withdraw', receivedAt: 9 });
   for (let i = 0; i < 8; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(enabled, true, 'a withdrawal from the previous generation does not apply');
+  watched.bind('watched');
+  assert.equal(watchedGeneration, generation, 'same uid and a new generation establishes a current watcher');
+  await watched.choose('watched', true);
+  assert.equal(enabled, true);
+  const acknowledged = watched.state('watched')?.revision ?? 0;
+  watchedListener.current?.({ ok: true, revision: acknowledged - 1, decision: 'withdraw', receivedAt: 1 });
+  assert.equal(enabled, true, 'an older withdrawal snapshot does not rewrite the newer choice');
+  assert.equal(watched.state('watched')?.revision, acknowledged);
+  watchedHealth.current?.('failed');
+  assert.equal(enabled, false);
+  assert.equal(watched.state('watched')?.sync, 'listener_unavailable');
   console.log('purposeConsentQueue: ordering, offline, storage, replay and session tests passed');
 }
 main().catch(e => { console.error(e); process.exitCode = 1; });

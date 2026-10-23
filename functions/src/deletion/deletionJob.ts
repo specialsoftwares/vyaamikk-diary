@@ -57,6 +57,8 @@ export interface DeletionJobDoc {
   erasureDeadline?: number | null;
   /** Crashlytics and mail-provider tails are not per-user deletable. */
   processorDeletion?: "not_applicable" | "incomplete" | "failed";
+  /** Page to reread after an interrupted Firestore purge. Not a content cursor. */
+  firestoreCursor?: { parentPath: string; collectionId: string; pageToken: string } | null;
 }
 
 export const EMPTY_PHASES: DeletionJobPhases = {
@@ -156,6 +158,8 @@ export function classifyProviderError(err: unknown): {
   const msg = err instanceof Error ? err.message : String(err);
   const lower = msg.toLowerCase();
   if (
+    lower.includes("firestore_depth_exceeded") ||
+    lower.includes("firestore_unknown_collection") ||
     lower.includes("storage_path_not_owned") ||
     lower.includes("permanent") ||
     lower.includes("invalid-argument") ||

@@ -1193,22 +1193,29 @@ async function main() {
 
     // CC payment-shaped update (non-billable)
     const creditEditedAt = cr1.updatedAt + 1;
-    await assertSucceeds(
-      updateDoc(doc(authedDb("g-cc"), "users", "g-cc", "customerCreditRecords", "cr_on_1"), {
+    {
+      const batch = writeBatch(authedDb("g-cc"));
+      batch.update(doc(authedDb("g-cc"), "users", "g-cc", "customerCreditRecords", "cr_on_1"), {
         userId: "g-cc",
         remarks: "payment appended locally in test",
         updatedAt: creditEditedAt,
         mutationBaseRevision: cr1.updatedAt,
-      })
-    );
+      });
+      batch.set(doc(authedDb("g-cc"), "users", "g-cc", "customerCreditRecords", "cr_on_1", "opRevision", "current"), {
+        base: cr1.updatedAt,
+        revision: creditEditedAt,
+      });
+      await assertSucceeds(batch.commit());
+    }
     check(
       "I CC update/payment-shaped write is a Rules property, not repository addPayment",
       (await usageCount("g-cc")) === 1
     );
 
     const closedAt = creditEditedAt + 1;
-    await assertSucceeds(
-      updateDoc(doc(authedDb("g-cc"), "users", "g-cc", "customerCreditRecords", "cr_on_1"), {
+    {
+      const batch = writeBatch(authedDb("g-cc"));
+      batch.update(doc(authedDb("g-cc"), "users", "g-cc", "customerCreditRecords", "cr_on_1"), {
         userId: "g-cc",
         status: "fully_paid",
         closedAt,
@@ -1224,8 +1231,13 @@ async function main() {
           adjustment: "none",
           closedAt,
         },
-      })
-    );
+      });
+      batch.set(doc(authedDb("g-cc"), "users", "g-cc", "customerCreditRecords", "cr_on_1", "opRevision", "current"), {
+        base: creditEditedAt,
+        revision: closedAt,
+      });
+      await assertSucceeds(batch.commit());
+    }
     check("I CC full-closure-shaped update does not consume", (await usageCount("g-cc")) === 1);
 
     const payRec = await createCustomerCreditAtomic(

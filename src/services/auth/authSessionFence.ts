@@ -21,16 +21,29 @@ export type LocalSignOutResult = {
 let generation = 0;
 let tail: Promise<void> = Promise.resolve();
 let bridgeTargetUid: string | null = null;
+const generationListeners = new Set<() => void>();
 
 export function currentAuthMutationGeneration(): number {
   return generation;
 }
 
+export function subscribeAuthMutationGeneration(listener: () => void): () => void {
+  generationListeners.add(listener);
+  return () => {
+    generationListeners.delete(listener);
+  };
+}
+
+function bumpGeneration(): number {
+  generation += 1;
+  generationListeners.forEach((listener) => listener());
+  return generation;
+}
+
 /** Drops private cloud admission for every attempt already in progress. */
 export function retireJsAuthBridge(): number {
-  generation += 1;
   bridgeTargetUid = null;
-  return generation;
+  return bumpGeneration();
 }
 
 /**
@@ -47,8 +60,8 @@ export function noteNativeAuthIdentity(nativeUid: string | null): void {
     bridgeTargetUid = nativeUid;
     return;
   }
-  generation += 1;
   bridgeTargetUid = nativeUid;
+  bumpGeneration();
 }
 
 export function authRetirementOwns(ownedGeneration: number): boolean {

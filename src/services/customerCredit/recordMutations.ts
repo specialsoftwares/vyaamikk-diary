@@ -65,7 +65,7 @@ export async function mutateCustomerCreditOnDb(
       await commitExpectedRevision({
         db,
         ref,
-        revisionRef: doc(db, "users", userId, "customerCreditRecords", recordId, "revisionCheck", "current"),
+        revisionRef: doc(db, "users", userId, "customerCreditRecords", recordId, "opRevision", "current"),
         expectedRevision,
         cloud,
         generationAtStart: generation,

@@ -4,9 +4,12 @@ import { readFileSync } from "fs";
 import { resolve } from "path";
 
 import {
+  assertContentBinding,
   classifyStoredRecord,
   loadContentKey,
+  migrateContentKeyBatch,
   openContent,
+  openStoredContent,
   planContentKeyMigration,
   sealContent,
   sealContentV2,
@@ -86,6 +89,39 @@ assert.throws(() => openContent({
 assert.deepEqual(lookedUp, ["k-b"]);
 assert.throws(() => openContent({ ...bind(), key, seal: { ...sealed, v: 9 as 1 } }), /unsupported_seal/);
 const plan = planContentKeyMigration([{ contentSeal: null }, { contentSeal: sealed }, { contentSeal: v2 }, { contentSeal: { v: 9 } }]);
-assert.deepEqual(plan, { counts: { plaintext: 1, v1: 1, v2: 1, unknown: 1 }, writes: 0 });
+assert.deepEqual(plan, { mode: "count-only", counts: { plaintext: 1, v1: 1, v2: 1, unknown: 1 }, writes: 0 });
+assert.throws(() => assertContentBinding({ collection: "entries", purpose: "attachment", revision: 1 }), /binding_rejected/);
+assert.throws(() => assertContentBinding({ collection: "entries", purpose: "diary", revision: 1.5 }), /binding_rejected/);
+const named = Buffer.from("b".repeat(32));
+const v2Only = sealContentV2({ ...bind(), key: named, keyId: "named-key", plaintext: Buffer.from(title) });
+assert.equal(openStoredContent({
+  env: { CONTENT_DATA_KEYS: JSON.stringify({ "named-key": named.toString("base64") }) },
+  ...bind(),
+  seal: v2Only,
+}).toString(), title);
+assert.throws(() => migrateContentKeyBatch({
+  rows: [{ id: "a", updatedAt: 1, contentSeal: sealed }],
+  toKeyId: "named-key",
+  resolveKey: () => named,
+  dryRun: false,
+}), /migration_disabled/);
+const dry = migrateContentKeyBatch({
+  rows: [{ id: "a", updatedAt: 1, contentSeal: sealed }, { id: "b", updatedAt: 2, contentSeal: v2Only }],
+  toKeyId: "named-key",
+  resolveKey: (id) => (id === "named-key" ? named : null),
+  dryRun: true,
+});
+assert.equal(dry.written, 0);
+assert.equal(dry.skipped, 1);
+process.env.CONTENT_KEY_MIGRATION_ENABLED = "true";
+const applied = migrateContentKeyBatch({
+  rows: [{ id: "a", updatedAt: 1, contentSeal: sealed }],
+  toKeyId: "named-key",
+  resolveKey: (id) => (id === "named-key" ? named : id === "legacy" ? key : null),
+  dryRun: false,
+  writer: () => "ok",
+});
+delete process.env.CONTENT_KEY_MIGRATION_ENABLED;
+assert.equal(applied.written, 1);
 
 console.log("contentEncryption.unit.test.ts: ok");

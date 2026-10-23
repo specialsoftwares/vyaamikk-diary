@@ -59,6 +59,38 @@ export function loadContentKey(env: NodeJS.ProcessEnv = process.env): Buffer {
   return key;
 }
 
+export const COLLECTION_PURPOSE = {
+  entries: "diary",
+  attachments: "attachment",
+  customerCreditRecords: "customer_credit",
+  purchaseOrders: "purchase_order",
+  professionalPacks: "professional_pack",
+  letterheadDocs: "letterhead_document",
+  users: "profile",
+} as const;
+
+/** Copies this engine does not rewrite. v2 writes stay off until authorised. */
+export const CONTENT_MIGRATION_UNCOVERED = [
+  "grin_evidence",
+  "party_ledger_projections",
+  "local_caches_and_outboxes",
+  "storage_object_names",
+  "exports",
+] as const;
+
+export function assertContentBinding(input: {
+  collection: string;
+  purpose: string;
+  revision: number;
+  keyId?: string;
+}): void {
+  const expected = COLLECTION_PURPOSE[input.collection as keyof typeof COLLECTION_PURPOSE];
+  const keyOk = input.keyId == null || /^[A-Za-z0-9._-]{1,64}$/.test(input.keyId);
+  if (expected !== input.purpose || !Number.isSafeInteger(input.revision) || input.revision < 0 || !keyOk) {
+    throw new Error("binding_rejected");
+  }
+}
+
 function aad(input: {
   uid: string;
   collection: string;
@@ -67,10 +99,21 @@ function aad(input: {
   purpose: string;
   keyId?: string;
 }): Buffer {
-  const parts = [input.uid, input.collection, input.recordId, String(input.revision), input.purpose];
-  // Version 1 stays the original five-part binding. Version 2 adds the key id.
-  if (input.keyId) parts.push(input.keyId);
-  return Buffer.from(parts.join("|"), "utf8");
+  if (!input.keyId) {
+    return Buffer.from(
+      [input.uid, input.collection, input.recordId, String(input.revision), input.purpose].join("|"),
+      "utf8"
+    );
+  }
+  // Length-prefixed so a delimiter inside a field cannot alias another binding.
+  return Buffer.concat(
+    [input.uid, input.collection, input.recordId, String(input.revision), input.purpose, input.keyId].map((part) => {
+      const bytes = Buffer.from(part, "utf8");
+      const length = Buffer.alloc(4);
+      length.writeUInt32BE(bytes.length);
+      return Buffer.concat([length, bytes]);
+    })
+  );
 }
 
 export function sealContentV2(input: {
@@ -112,7 +155,7 @@ export function sealContentV2(input: {
   };
 }
 
-/** Counts records only. It does not write, rotate, or contact a live key service. */
+/** Count-only. It does not write, rotate, or contact a live key service. */
 export function planContentKeyMigration(rows: { contentSeal?: { v?: unknown; keyId?: unknown } | null }[]) {
   const counts = { plaintext: 0, v1: 0, v2: 0, unknown: 0 };
   for (const row of rows) {
@@ -122,7 +165,114 @@ export function planContentKeyMigration(rows: { contentSeal?: { v?: unknown; key
     else if (seal.v === 2 && typeof seal.keyId === "string" && seal.keyId.length > 0) counts.v2 += 1;
     else counts.unknown += 1;
   }
-  return { counts, writes: 0 };
+  return { mode: "count-only" as const, counts, writes: 0 };
+}
+
+export type MigrationRow = { id: string; updatedAt: number; contentSeal: ContentSeal | null };
+
+/**
+ * Bounded dry-run unless CONTENT_KEY_MIGRATION_ENABLED=true and dryRun is false.
+ * Live migration stays off. Already-migrated rows are skipped.
+ */
+export function migrateContentKeyBatch(input: {
+  rows: MigrationRow[];
+  toKeyId: string;
+  resolveKey: (keyId: string) => Buffer | null;
+  dryRun: boolean;
+  writer?: (row: MigrationRow, seal: ContentSeal) => "ok" | "conflict";
+}): { written: number; skipped: number; quarantined: string[]; conflicts: string[]; nextCursor: string | null } {
+  if (!input.dryRun && process.env.CONTENT_KEY_MIGRATION_ENABLED !== "true") {
+    throw new Error("migration_disabled");
+  }
+  const rows = input.rows.slice(0, 50);
+  const quarantined: string[] = [];
+  const conflicts: string[] = [];
+  let written = 0;
+  let skipped = 0;
+  const toKey = input.resolveKey(input.toKeyId);
+  for (const row of rows) {
+    const seal = row.contentSeal;
+    if (!seal) {
+      skipped += 1;
+      continue;
+    }
+    if (seal.v === 2 && seal.keyId === input.toKeyId) {
+      skipped += 1;
+      continue;
+    }
+    const sourceKey = seal.v === 2 ? input.resolveKey(seal.keyId ?? "") : input.resolveKey("legacy");
+    if (!toKey || !sourceKey || (seal.v !== 1 && seal.v !== 2)) {
+      quarantined.push(row.id);
+      continue;
+    }
+    let plaintext: Buffer;
+    try {
+      plaintext = openContent({
+        key: sourceKey,
+        uid: seal.uid,
+        collection: seal.collection,
+        recordId: seal.recordId,
+        revision: seal.revision,
+        purpose: seal.purpose,
+        seal,
+        resolveKey: input.resolveKey,
+      });
+    } catch {
+      quarantined.push(row.id);
+      continue;
+    }
+    if (input.dryRun) continue;
+    const next = sealContentV2({
+      key: toKey,
+      keyId: input.toKeyId,
+      uid: seal.uid,
+      collection: seal.collection,
+      recordId: seal.recordId,
+      revision: seal.revision,
+      purpose: seal.purpose,
+      plaintext,
+    });
+    const outcome = input.writer?.(row, next) ?? "ok";
+    if (outcome === "conflict") conflicts.push(row.id);
+    else written += 1;
+  }
+  return {
+    written: input.dryRun ? 0 : written,
+    skipped,
+    quarantined,
+    conflicts,
+    nextCursor: input.rows.length > 50 ? rows[rows.length - 1]?.id ?? null : null,
+  };
+}
+
+/** Opens v2 with only its named key. A v1 seal still requires the legacy key. */
+export function openStoredContent(input: {
+  env?: NodeJS.ProcessEnv;
+  uid: string;
+  collection: string;
+  recordId: string;
+  revision: number;
+  purpose: string;
+  seal: ContentSeal;
+}): Buffer {
+  assertContentBinding({
+    collection: input.collection,
+    purpose: input.purpose,
+    revision: input.revision,
+    keyId: input.seal.v === 2 ? input.seal.keyId : undefined,
+  });
+  const env = input.env ?? process.env;
+  if (input.seal.v === 2) {
+    const keyId = input.seal.keyId ?? "";
+    const key = loadNamedContentKey(keyId, env);
+    if (!key) throw new Error("unknown_key");
+    return openContent({
+      ...input,
+      key,
+      resolveKey: (id) => (id === keyId ? loadNamedContentKey(id, env) : null),
+    });
+  }
+  return openContent({ ...input, key: loadContentKey(env) });
 }
 
 export function sealContent(input: {
