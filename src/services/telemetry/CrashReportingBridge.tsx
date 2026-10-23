@@ -1,27 +1,23 @@
 import React, { useEffect } from "react";
-
+import { AppState } from "react-native";
+import NetInfo from "@react-native-community/netinfo";
 import { useAuth } from "@/state/auth";
+import { bindPurposeConsentAccount, reconcilePurposeConsent } from "@/services/consent/purposeConsent";
+import { clearUser } from "./crashReporter";
 
-import { runCrashReportingBridge } from "./diagnosticsPreference";
-
-/**
- * Applies stored crash-report consent after auth is available.
- * Missing consent stays off. Never enables collection by default.
- * A newer opt-out, including one whose save failed, wins over this read.
- */
+/** Optional reporting stays off until this device's owner receipt is reconciled. */
 export function CrashReportingBridge() {
   const { status, user } = useAuth();
-  const uid = status === "signed_in" ? user?.uid : undefined;
-
+  const uid = status === "signed_in" ? user?.uid ?? null : null;
   useEffect(() => {
-    let cancelled = false;
-    void runCrashReportingBridge().then(() => {
-      if (cancelled) return;
-    });
-    return () => {
-      cancelled = true;
-    };
+    bindPurposeConsentAccount(uid);
+    clearUser();
+    if (!uid) return;
+    const reconcile = () => { void reconcilePurposeConsent(uid); };
+    reconcile();
+    const app = AppState.addEventListener("change", state => { if (state === "active") reconcile(); });
+    const network = NetInfo.addEventListener(state => { if (state.isConnected) reconcile(); });
+    return () => { app.remove(); network(); bindPurposeConsentAccount(null); };
   }, [uid]);
-
   return null;
 }

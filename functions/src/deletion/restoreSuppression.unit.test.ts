@@ -54,6 +54,17 @@ async function run(pageSize: number, maxPages: number, count = 41) {
 }
 
 async function main() {
+let orphanPurges = 0;
+await suppressCompletedRestorations({ now: 1, pageSize: 40, maxPages: 1,
+  readCursor: async () => null, writeCursor: async () => {},
+  listCompleted: async () => [{ id: "orphan", policyVersion: 2 }],
+  readUserStatus: async () => null, markDeleted: async () => {},
+  purgeFirestore: async () => { orphanPurges++; return { exhausted: true }; },
+  purgeStorage: async () => { orphanPurges++; return { verifiedEmpty: true }; },
+  purgeGrin: async (_uid, policy) => { assert.equal(policy, 2); orphanPurges++; return { completed: true }; },
+  noteIncomplete: async () => { throw new Error("unexpected"); },
+});
+assert.equal(orphanPurges, 3, "missing parent still requires all owned-data purges");
 const first = await run(40, 1);
 assert.equal(first.result.processed, 40);
 assert.equal(first.storage.length, 40);

@@ -1,59 +1,46 @@
-/**
- * Purpose withdrawal stops the optional processing it names.
- * It does not delete the account or required service records.
- */
+/** Purpose choices use the existing local gate plus an owner-scoped durable receipt outbox. */
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { CRASH_DIAGNOSTICS_PURPOSE, REQUIRED_PROCESSING_PURPOSE, consentAppliesToAccount, withdrawalEffect } from "@/domain/processingPurpose";
+import { currentAuthMutationGeneration } from "@/services/auth/authSessionFence";
+import { applyDiagnosticsChoice, currentDiagnosticsPreference, type DiagnosticsPreference } from "@/services/telemetry/diagnosticsPreference";
+import { createPurposeConsentQueue, type PurposeQueueState } from "./purposeConsentQueue";
+export { PROCESSING_NOTICE_VERSION, PROCESSING_POLICY_VERSION } from "./purposeConsentQueue";
 
-import {
-  CRASH_DIAGNOSTICS_PURPOSE,
-  REQUIRED_PROCESSING_PURPOSE,
-  consentAppliesToAccount,
-  withdrawalEffect,
-} from "@/domain/processingPurpose";
-import {
-  applyDiagnosticsChoice,
-  type DiagnosticsPreference,
-} from "@/services/telemetry/diagnosticsPreference";
-
-export const PROCESSING_NOTICE_VERSION = "privacy-notice-2026-10";
-export const PROCESSING_POLICY_VERSION = "processing-purpose-2026-10";
-
-async function recordPurpose(purpose: "crash_diagnostics", decision: "grant" | "withdraw"): Promise<void> {
-  try {
+const key = (uid: string) => `vyd_purpose_receipt_v1:${uid}`;
+const queue = createPurposeConsentQueue({
+  async load(uid) {
+    const raw = await AsyncStorage.getItem(key(uid));
+    if (!raw) return null;
+    const state = JSON.parse(raw) as PurposeQueueState;
+    if (state.uid !== uid || !Number.isSafeInteger(state.revision) || state.revision < 0 || typeof state.localGrant !== "boolean") throw new Error("invalid_purpose_state");
+    return state;
+  },
+  save: (state) => AsyncStorage.setItem(key(state.uid), JSON.stringify(state)),
+  async send(input) {
     const { callRecordProcessingPurpose } = await import("@/services/auth/identityCallable");
-    await callRecordProcessingPurpose({
-      purpose,
-      decision,
-      noticeVersion: PROCESSING_NOTICE_VERSION,
-      policyVersion: PROCESSING_POLICY_VERSION,
-    });
-  } catch {
-    // The local diagnostics gate has already moved. A missed receipt is retried
-    // on the next choice and does not turn reporting back on.
-  }
+    return callRecordProcessingPurpose(input);
+  },
+  generation: currentAuthMutationGeneration,
+  applyLocal: applyDiagnosticsChoice,
+  // Idempotency identifier, not a credential or cryptographic key.
+  operationId: () => `purpose_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}_${Math.random().toString(36).slice(2)}`,
+});
+export const bindPurposeConsentAccount = queue.bind;
+export const currentPurposeConsentState = queue.state;
+export const subscribePurposeConsent = queue.subscribe;
+export async function reconcilePurposeConsent(uid: string): Promise<void> {
+  try { await queue.reconcile(uid); } catch { await applyDiagnosticsChoice(false); }
 }
-
-export async function chooseCrashDiagnostics(enabled: boolean): Promise<DiagnosticsPreference> {
-  const pref = await applyDiagnosticsChoice(enabled);
-  if (!enabled || pref.persisted) {
-    await recordPurpose(CRASH_DIAGNOSTICS_PURPOSE, enabled ? "grant" : "withdraw");
-  }
-  return pref;
+export async function chooseCrashDiagnostics(enabled: boolean, uid: string): Promise<DiagnosticsPreference> {
+  try { await queue.choose(uid, enabled); } catch { await applyDiagnosticsChoice(false); }
+  return currentDiagnosticsPreference();
 }
-
-export async function withdrawProcessingPurpose(purpose: string): Promise<{
-  stopsPurposeProcessing: boolean;
-  deletesAccount: boolean;
-}> {
+export async function withdrawProcessingPurpose(purpose: string, uid: string): Promise<{ stopsPurposeProcessing: boolean; deletesAccount: boolean }> {
   const effect = withdrawalEffect(purpose);
-  if (purpose === CRASH_DIAGNOSTICS_PURPOSE && effect.stopsPurposeProcessing) {
-    await applyDiagnosticsChoice(false);
-    await recordPurpose(CRASH_DIAGNOSTICS_PURPOSE, "withdraw");
-  }
+  if (purpose === CRASH_DIAGNOSTICS_PURPOSE) await chooseCrashDiagnostics(false, uid);
   return effect;
 }
-
 export function requiredProcessingIsNotOptional(): boolean {
   return withdrawalEffect(REQUIRED_PROCESSING_PURPOSE).stopsPurposeProcessing === false;
 }
-
 export { consentAppliesToAccount };

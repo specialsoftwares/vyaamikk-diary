@@ -21,6 +21,7 @@ import {
   openBusinessCloud,
   protectBusinessCloud,
   settleCreatedBusinessCloud,
+  prepareBusinessCreate,
 } from "@/services/privacy/businessCloudSeal";
 import { dedupeProfessionalPacks } from "./dedupe";
 import { createProfessionalPackAtomic, packFromFirestoreDoc } from "./atomicCreate";
@@ -72,7 +73,9 @@ function applyFilters(
 
 export const firebaseProfessionalPackRepository: ProfessionalPackRepository = {
   async create(userId, input) {
-    const record = await createProfessionalPackAtomic(getFirebaseDb(), userId, input);
+    const record = await createProfessionalPackAtomic(getFirebaseDb(), userId, input, {
+      prepareCloudPayload: prepareBusinessCreate("professionalPacks", userId),
+    });
     return settleCreatedBusinessCloud({
       collection: "professionalPacks",
       userId,

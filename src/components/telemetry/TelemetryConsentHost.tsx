@@ -2,13 +2,11 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import { TelemetryConsentModal } from "@/components/TelemetryConsentModal";
 import { useAuth } from "@/state/auth";
-import { chooseCrashDiagnostics } from "@/services/consent/purposeConsent";
-import { loadDiagnosticsPreference } from "@/services/telemetry/diagnosticsPreference";
+import { chooseCrashDiagnostics, currentPurposeConsentState, reconcilePurposeConsent } from "@/services/consent/purposeConsent";
 
 /**
  * One-time crash-report consent. Mounted only on the main tab shell, so auth,
- * onboarding, and boot never see it. An existing AsyncStorage answer hides it
- * forever.
+ * onboarding, and boot never see it. The choice belongs to the current account.
  */
 export function TelemetryConsentHost() {
   const { status, user } = useAuth();
@@ -17,15 +15,16 @@ export function TelemetryConsentHost() {
   const onboardingComplete = Boolean(user?.profileCompletedAt);
 
   useEffect(() => {
+    setVisible(false);
     if (status !== "signed_in" || !onboardingComplete) {
       setVisible(false);
       return;
     }
     let cancelled = false;
     const epoch = choiceEpoch.current;
-    void loadDiagnosticsPreference().then((pref) => {
+    void reconcilePurposeConsent(user!.uid).then(() => {
       if (cancelled || choiceEpoch.current !== epoch) return;
-      if (pref.desired === "unknown") setVisible(true);
+      if (!currentPurposeConsentState(user!.uid)?.hasChoice) setVisible(true);
     });
     return () => {
       cancelled = true;
@@ -35,8 +34,8 @@ export function TelemetryConsentHost() {
   const choose = useCallback(async (enabled: boolean) => {
     choiceEpoch.current += 1;
     setVisible(false);
-    await chooseCrashDiagnostics(enabled);
-  }, []);
+    if (user) await chooseCrashDiagnostics(enabled, user.uid);
+  }, [user?.uid]);
 
   return (
     <TelemetryConsentModal

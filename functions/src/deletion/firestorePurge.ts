@@ -1,5 +1,5 @@
 /**
- * Recursive Firestore subcollection purge with continuation until empty.
+ * Bounded purge of explicitly owned subcollections. Nested data is never silently orphaned.
  */
 
 import type { Firestore } from "firebase-admin/firestore";
@@ -14,20 +14,25 @@ export const USER_SUBCOLLECTIONS = [
   "counters",
   "_saveLocks",
   "trustedDevices",
+  "partyLedgerProjections",
+  "partyLedgerBuckets",
+  "partyLedgerCommands",
+  "partyLedgerCheckpoints",
+  "processingPurposes",
+  "processingPurposeEvents",
 ] as const;
 
 const BATCH = 400;
-const MAX_LOOPS_PER_SUB = 100;
+const MAX_BATCHES_PER_ATTEMPT = 10;
 
 export async function purgeUserSubcollectionsFully(
   db: Firestore,
   uid: string
 ): Promise<{ deleted: number; exhausted: boolean }> {
   let deleted = 0;
+  let batches = 0;
   for (const sub of USER_SUBCOLLECTIONS) {
-    let loops = 0;
-    while (loops < MAX_LOOPS_PER_SUB) {
-      loops += 1;
+    while (batches < MAX_BATCHES_PER_ATTEMPT) {
       const snap = await db
         .collection("users")
         .doc(uid)
@@ -35,6 +40,14 @@ export async function purgeUserSubcollectionsFully(
         .limit(BATCH)
         .get();
       if (snap.empty) break;
+      // Parent deletion is not recursive. Refuse completion for unexpected
+      // nested data until its retention scope has been explicitly inventoried.
+      for (const row of snap.docs) {
+        if ((await row.ref.listCollections()).length > 0) {
+          throw new Error("unmapped_nested_user_data");
+        }
+      }
+      batches += 1;
       const batch = db.batch();
       snap.docs.forEach((d) => batch.delete(d.ref));
       await batch.commit();

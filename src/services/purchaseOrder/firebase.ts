@@ -26,6 +26,7 @@ import {
   openBusinessCloud,
   protectBusinessCloud,
   settleCreatedBusinessCloud,
+  prepareBusinessCreate,
 } from "@/services/privacy/businessCloudSeal";
 import {
   computePurchaseOrderTotal,
@@ -163,7 +164,8 @@ export const firebasePurchaseOrderRepository: PurchaseOrderRepository = {
 
   async create(userId, input) {
     const record = await createPurchaseOrderAtomic(getFirebaseDb(), userId, input, (id, data) =>
-      fromDoc(id, data, userId)
+      fromDoc(id, data, userId),
+      { prepareCloudPayload: prepareBusinessCreate("purchaseOrders", userId) }
     );
     return settleCreatedBusinessCloud({
       collection: "purchaseOrders",

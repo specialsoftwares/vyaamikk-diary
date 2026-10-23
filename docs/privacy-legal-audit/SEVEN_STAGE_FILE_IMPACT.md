@@ -1,5 +1,7 @@
 # Seven-stage file impact
 
+> **23 October 2026 correction: HOLD.** See [current acceptance report](SEVEN_STAGE_ACCEPTANCE_2026-10-23.md). The inventory and checkpoints below are historical; earlier CI does not certify the new candidate.
+
 **Audit checkpoint:** `security/firebase-session-hardening` `06d3fcd42b2eaae1c057e1bf7461a088e208bfff`.  
 **Implementation:** owner-approved Option A encryption, self-declared 18+ gate, and 15-day deletion for new requests only. The historical inventory below this banner is the pre-implementation map. The file list at the end of this document is the implementation map and is updated with the files actually changed.  
 **Not a deployment identity.** Live Firebase metadata remains `LIVE_PENDING`. Source and emulator results are not live KMS, IAM, or production validation.

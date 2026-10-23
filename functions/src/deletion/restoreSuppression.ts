@@ -8,6 +8,7 @@ import { FieldPath, type Firestore } from "firebase-admin/firestore";
 
 import { DELETION_JOBS } from "./deletionJob";
 import { purgeUserSubcollectionsFully } from "./firestorePurge";
+import { deletedProfileStub } from "./deletionSafety";
 
 const USERS = "users";
 const CHECKPOINT = "deletionMaintenance";
@@ -45,8 +46,7 @@ export async function suppressCompletedRestorations(input: {
       processed += 1;
       cursor = row.id;
       const status = await input.readUserStatus(row.id);
-      if (status == null) continue;
-      if (status === "active") {
+      if (status !== "deleted") {
         await input.markDeleted(row.id);
         suppressed += 1;
       }
@@ -70,12 +70,12 @@ export async function suppressCompletedRestorations(input: {
   return { suppressed, processed, incomplete };
 }
 
-export async function reapplyCompletedDeletionManifest(db: Firestore, now: number): Promise<number> {
+export async function reapplyCompletedDeletionManifest(db: Firestore, now: number, source = "erasureManifests"): Promise<number> {
   const { getAdminBucket } = await import("../admin");
   const { purgeAllUserOwnedStorage } = await import("./storagePurge");
   const { purgeGrinEvidenceIfEnabled } = await import("./grinCleanup");
   const bucket = getAdminBucket();
-  const checkpoint = db.collection(CHECKPOINT).doc(CHECKPOINT_ID);
+  const checkpoint = db.collection(CHECKPOINT).doc(`${CHECKPOINT_ID}_${source}`);
   const result = await suppressCompletedRestorations({
     now,
     pageSize: PAGE,
@@ -89,11 +89,9 @@ export async function reapplyCompletedDeletionManifest(db: Firestore, now: numbe
       await checkpoint.set({ cursor, updatedAt: now }, { merge: true });
     },
     async listCompleted(afterId, limit) {
-      let query = db
-        .collection(DELETION_JOBS)
-        .where("status", "==", "completed")
-        .orderBy(FieldPath.documentId())
-        .limit(limit);
+      let query = source === DELETION_JOBS
+        ? db.collection(DELETION_JOBS).where("status", "==", "completed").orderBy(FieldPath.documentId()).limit(limit)
+        : db.collection(source).orderBy(FieldPath.documentId()).limit(limit);
       if (afterId) query = query.startAfter(afterId);
       const snap = await query.get();
       return snap.docs.map((job) => ({
@@ -107,7 +105,7 @@ export async function reapplyCompletedDeletionManifest(db: Firestore, now: numbe
       return String(user.data()?.status ?? "");
     },
     async markDeleted(uid) {
-      await db.collection(USERS).doc(uid).set({ status: "deleted", updatedAt: now }, { merge: true });
+      await db.collection(USERS).doc(uid).set(deletedProfileStub(uid, now));
     },
     async purgeFirestore(uid) {
       return purgeUserSubcollectionsFully(db, uid);
@@ -116,13 +114,13 @@ export async function reapplyCompletedDeletionManifest(db: Firestore, now: numbe
       const purged = await purgeAllUserOwnedStorage(bucket, uid);
       return { verifiedEmpty: purged.verifiedEmpty };
     },
-    async purgeGrin(uid) {
+    async purgeGrin(uid, policyVersion) {
       const { adminGrinFirestoreAdapter } = await import("./finalPurge");
       const purged = await purgeGrinEvidenceIfEnabled({
         uid,
         bucket,
         db: adminGrinFirestoreAdapter(),
-        force: true,
+        force: policyVersion >= 2,
       });
       return { completed: purged.completed };
     },
@@ -133,5 +131,5 @@ export async function reapplyCompletedDeletionManifest(db: Firestore, now: numbe
       );
     },
   });
-  return result.suppressed;
+  return result.suppressed + (source === DELETION_JOBS ? 0 : await reapplyCompletedDeletionManifest(db, now, DELETION_JOBS));
 }

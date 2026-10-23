@@ -19,6 +19,7 @@ export type StorageBucketLike = {
     prefix: string;
     maxResults: number;
     pageToken?: string;
+    autoPaginate?: false;
   }) => Promise<
     | [StorageFileLike[], unknown?, { pageToken?: string }?]
     | [StorageFileLike[], unknown?, unknown?]
@@ -73,9 +74,10 @@ export async function purgePrefixPaged(
 
   while (pages < maxPages) {
     pages += 1;
-    const [files, , apiResponse] = await bucket.getFiles({
+    const [files, nextQuery, apiResponse] = await bucket.getFiles({
       prefix,
       maxResults: pageSize,
+      autoPaginate: false,
       pageToken,
     });
 
@@ -87,7 +89,8 @@ export async function purgePrefixPaged(
       }
     }
 
-    const token =
+    const token = (nextQuery && typeof nextQuery === "object" && "pageToken" in nextQuery)
+      ? String((nextQuery as { pageToken?: string }).pageToken ?? "") :
       apiResponse &&
       typeof apiResponse === "object" &&
       apiResponse !== null &&
@@ -118,15 +121,17 @@ export async function countOwnedFilesUnderPrefix(
   do {
     guard += 1;
     if (guard > 200) break;
-    const [files, , apiResponse] = await bucket.getFiles({
+    const [files, nextQuery, apiResponse] = await bucket.getFiles({
       prefix,
       maxResults: pageSize,
+      autoPaginate: false,
       pageToken,
     });
     for (const f of files) {
       if (isObjectOwnedByUser(uid, f.name)) count += 1;
     }
-    const token =
+    const token = (nextQuery && typeof nextQuery === "object" && "pageToken" in nextQuery)
+      ? String((nextQuery as { pageToken?: string }).pageToken ?? "") :
       apiResponse &&
       typeof apiResponse === "object" &&
       apiResponse !== null &&
@@ -150,13 +155,10 @@ export async function purgeAllUserOwnedStorage(
 
   for (let pass = 0; pass < VERIFY_PASSES; pass += 1) {
     for (const prefix of allUserOwnedStoragePrefixes(uid)) {
-      // Loop until prefix exhausted (multiple max-page chunks).
-      for (;;) {
-        const result = await purgePrefixPaged(bucket, uid, prefix);
-        deleted += result.deleted;
-        pages += result.pages;
-        if (result.exhausted) break;
-      }
+      const result = await purgePrefixPaged(bucket, uid, prefix);
+      deleted += result.deleted;
+      pages += result.pages;
+      if (!result.exhausted) return { deleted, pages, verifiedEmpty: false };
     }
   }
 

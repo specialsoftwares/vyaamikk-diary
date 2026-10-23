@@ -28,6 +28,8 @@ import { deleteAuthUserIdempotent } from "./authDelete";
 import {
   DELETION_JOBS,
   MAX_ATTEMPTS_BEFORE_MANUAL,
+  LEASE_MS,
+  nextBackoffMs,
   accountPurgeMayComplete,
   automaticRestorationAllowed,
   canAcquireLease,
@@ -40,6 +42,8 @@ import { purgeAllUserOwnedStorage } from "./storagePurge";
 import { INCLUDE_GRIN_IN_ACCOUNT_PURGE, purgeGrinEvidenceIfEnabled } from "./grinCleanup";
 import { deletionJobInputFromUser, deletionStampFromJobInput } from "./deletionPolicy";
 import { preservedGraceExpiresAt } from "./deletionPolicy";
+
+import { ownsDeletionLease, deletedProfileStub } from "./deletionSafety";
 
 const USERS = "users";
 const PHONE_INDEX = "phoneIndex";
@@ -74,14 +78,8 @@ export async function ensureDeletionJobDoc(input: {
     }
     const existing = snap.data() as DeletionJobDoc;
     if (existing.status === "completed") {
-      // New deletion request after prior completion — new generation.
-      const job = initialDeletionJob({
-        ...input,
-        generation: existing.generation + 1,
-        now,
-      });
-      tx.set(ref, job);
-      return job;
+      // A retired uid cannot start a new deletion generation or erase its evidence.
+      return existing;
     }
     if (existing.status === "cancelled") {
       const job = initialDeletionJob({
@@ -178,7 +176,8 @@ async function acquireLease(uid: string, now: number): Promise<AcquireResult> {
 
 async function assertStillPendingOrDeletedStub(
   uid: string,
-  generation: number
+  generation: number,
+  leaseOwner: string
 ): Promise<{ phone: string; ueid: string; emailHash: string | null }> {
   const db = getAdminDb();
   const userSnap = await db.collection(USERS).doc(uid).get();
@@ -187,6 +186,7 @@ async function assertStillPendingOrDeletedStub(
   if (!job || job.generation !== generation) {
     throw new Error("cancelled_generation_mismatch");
   }
+  if (!ownsDeletionLease(job, generation, leaseOwner, Date.now())) throw new Error("lease_lost");
   if (job.status === "cancelled") {
     throw new Error("cancelled");
   }
@@ -220,6 +220,8 @@ async function assertStillPendingOrDeletedStub(
 
 async function retireIndexesAndMarkDeleted(
   uid: string,
+  generation: number,
+  leaseOwner: string,
   phone: string,
   ueid: string,
   emailHash: string | null
@@ -229,25 +231,18 @@ async function retireIndexesAndMarkDeleted(
   const now = Date.now();
 
   await db.runTransaction(async (tx) => {
-    const userSnap = await tx.get(userRef);
+    const [userSnap, jobSnap] = await Promise.all([
+      tx.get(userRef), tx.get(db.collection(DELETION_JOBS).doc(uid)),
+    ]);
+    if (!ownsDeletionLease(jobSnap.data() as DeletionJobDoc | undefined, generation, leaseOwner, Date.now())) {
+      throw new Error("lease_lost");
+    }
     if (userSnap.exists) {
       const user = userSnap.data() as Record<string, unknown>;
       if (String(user.status) === "active") {
         throw new Error("reactivated");
       }
-      tx.update(userRef, {
-        status: "deleted",
-        deletedAt: now,
-        deletionCompletedAt: now,
-        retiredUeid: true,
-        displayName: null,
-        businessName: null,
-        businessEmail: null,
-        normalizedEmail: null,
-        emailHash: null,
-        profileLogo: null,
-        updatedAt: now,
-      });
+      tx.set(userRef, deletedProfileStub(uid, now));
       const p = phone || normalizePhoneE164(String(user.phoneE164 ?? ""));
       const u = ueid || String(user.ueid ?? "");
       const eh =
@@ -289,11 +284,25 @@ async function retireIndexesAndMarkDeleted(
   });
 }
 
-async function patchJob(uid: string, patch: Record<string, unknown>): Promise<void> {
-  await getAdminDb()
-    .collection(DELETION_JOBS)
-    .doc(uid)
-    .set({ ...patch, updatedAt: Date.now() }, { merge: true });
+async function patchJob(uid: string, generation: number, leaseOwner: string, patch: Record<string, unknown>): Promise<void> {
+  const db = getAdminDb();
+  const ref = db.collection(DELETION_JOBS).doc(uid);
+  await db.runTransaction(async tx => {
+    const snapshot = await tx.get(ref);
+    const now = Date.now();
+    if (!ownsDeletionLease(snapshot.data() as DeletionJobDoc | undefined, generation, leaseOwner, now)) {
+      throw new Error("lease_lost");
+    }
+    tx.set(ref, { leaseUntil: now + LEASE_MS, ...patch, updatedAt: now }, { merge: true });
+    if (patch.status === "completed") {
+      const job = snapshot.data() as DeletionJobDoc;
+      tx.set(db.collection("erasureManifests").doc(uid), {
+        uid, generation, operationallyErasedAt: patch.completedAt,
+        deletionPolicyVersion: job.deletionPolicyVersion ?? 1,
+        processorDeletion: patch.processorDeletion,
+      });
+    }
+  });
 }
 
 const GRIN_FIRESTORE_LIST_PAGE = 400;
@@ -379,17 +388,17 @@ export async function runFinalAccountPurge(uid: string): Promise<FinalPurgeResul
     return { ok: false, detail: acquired.reason };
   }
 
-  const { generation, job } = acquired;
+  const { generation, job, leaseOwner } = acquired;
   const phases = { ...job.phases };
 
   try {
-    const identity = await assertStillPendingOrDeletedStub(uid, generation);
+    const identity = await assertStillPendingOrDeletedStub(uid, generation, leaseOwner);
 
     // Phase: Storage
     if (phases.storage !== "done") {
       phases.storage = "in_progress";
-      await patchJob(uid, { phases });
-      await assertStillPendingOrDeletedStub(uid, generation);
+      await patchJob(uid, generation, leaseOwner, { phases });
+      await assertStillPendingOrDeletedStub(uid, generation, leaseOwner);
       const storageResult = await purgeAllUserOwnedStorage(
         getAdminBucket() as unknown as import("./storagePurge").StorageBucketLike,
         uid
@@ -398,20 +407,20 @@ export async function runFinalAccountPurge(uid: string): Promise<FinalPurgeResul
         throw new Error("storage_verify_not_empty");
       }
       phases.storage = "done";
-      await patchJob(uid, { phases });
+      await patchJob(uid, generation, leaseOwner, { phases });
     }
 
     // Phase: Firestore subcollections (diary USER_SUBCOLLECTIONS only).
     if (phases.firestore !== "done") {
       phases.firestore = "in_progress";
-      await patchJob(uid, { phases });
-      await assertStillPendingOrDeletedStub(uid, generation);
+      await patchJob(uid, generation, leaseOwner, { phases });
+      await assertStillPendingOrDeletedStub(uid, generation, leaseOwner);
       const fs = await purgeUserSubcollectionsFully(getAdminDb(), uid);
       if (!fs.exhausted) {
         throw new Error("firestore_purge_incomplete");
       }
       phases.firestore = "done";
-      await patchJob(uid, { phases });
+      await patchJob(uid, generation, leaseOwner, { phases });
     }
 
     // P8 GRIN gate: independent of diary phase-done flags.
@@ -422,7 +431,7 @@ export async function runFinalAccountPurge(uid: string): Promise<FinalPurgeResul
       INCLUDE_GRIN_IN_ACCOUNT_PURGE || Number(job.deletionPolicyVersion) >= 2;
     let grinCompleted = !INCLUDE_GRIN_IN_ACCOUNT_PURGE;
     if (INCLUDE_GRIN_IN_ACCOUNT_PURGE) {
-      await assertStillPendingOrDeletedStub(uid, generation);
+      await assertStillPendingOrDeletedStub(uid, generation, leaseOwner);
       const grin = await purgeGrinEvidenceIfEnabled({
         uid,
         bucket: getAdminBucket() as unknown as import("./storagePurge").StorageBucketLike,
@@ -434,7 +443,7 @@ export async function runFinalAccountPurge(uid: string): Promise<FinalPurgeResul
       }
     }
     if (Number(job.deletionPolicyVersion) >= 2 && !INCLUDE_GRIN_IN_ACCOUNT_PURGE) {
-      await assertStillPendingOrDeletedStub(uid, generation);
+      await assertStillPendingOrDeletedStub(uid, generation, leaseOwner);
       const grin = await purgeGrinEvidenceIfEnabled({
         uid,
         bucket: getAdminBucket() as unknown as import("./storagePurge").StorageBucketLike,
@@ -450,31 +459,33 @@ export async function runFinalAccountPurge(uid: string): Promise<FinalPurgeResul
     // Phase: indexes + mark deleted
     if (phases.indexes !== "done") {
       phases.indexes = "in_progress";
-      await patchJob(uid, { phases });
-      await assertStillPendingOrDeletedStub(uid, generation);
+      await patchJob(uid, generation, leaseOwner, { phases });
+      await assertStillPendingOrDeletedStub(uid, generation, leaseOwner);
       await retireIndexesAndMarkDeleted(
         uid,
+        generation,
+        leaseOwner,
         identity.phone,
         identity.ueid,
         identity.emailHash
       );
       phases.indexes = "done";
-      await patchJob(uid, { phases });
+      await patchJob(uid, generation, leaseOwner, { phases });
     }
 
     // Phase: Auth (last)
     if (phases.auth !== "done") {
       phases.auth = "in_progress";
-      await patchJob(uid, { phases });
+      await patchJob(uid, generation, leaseOwner, { phases });
       // Generation check only — user may already be deleted stub.
       const jobSnap = await getAdminDb().collection(DELETION_JOBS).doc(uid).get();
       const latest = jobSnap.data() as DeletionJobDoc;
-      if (latest.generation !== generation || latest.status === "cancelled") {
+      if (!ownsDeletionLease(latest, generation, leaseOwner, Date.now())) {
         throw new Error("cancelled_generation_mismatch");
       }
       await deleteAuthUserIdempotent(getAdminAuth(), uid);
       phases.auth = "done";
-      await patchJob(uid, { phases });
+      await patchJob(uid, generation, leaseOwner, { phases });
     }
 
     if (
@@ -491,12 +502,13 @@ export async function runFinalAccountPurge(uid: string): Promise<FinalPurgeResul
     const late =
       typeof job.erasureDeadline === "number" && finishedAt > job.erasureDeadline;
     const processorDeletion = Number(job.deletionPolicyVersion) >= 2 ? "incomplete" : "not_applicable";
-    await patchJob(uid, {
-      status: late ? "needs_manual_review" : "completed",
+    await patchJob(uid, generation, leaseOwner, {
+      status: "completed",
+      deadlineExceeded: late,
       phases,
       leaseOwner: null,
       leaseUntil: null,
-      completedAt: late ? null : finishedAt,
+      completedAt: finishedAt,
       lastErrorCategory: late ? "permanent" : null,
       lastErrorCode: late ? "erasure_deadline_exceeded" : null,
       processorDeletion,
@@ -508,6 +520,7 @@ export async function runFinalAccountPurge(uid: string): Promise<FinalPurgeResul
       phases,
     };
   } catch (e) {
+    if (e instanceof Error && e.message === "lease_lost") return { ok: false, detail: "lease_lost" };
     const { category, code } = classifyProviderError(e);
     const attempts = job.attempts;
     const status =
@@ -517,14 +530,17 @@ export async function runFinalAccountPurge(uid: string): Promise<FinalPurgeResul
           ? "needs_manual_review"
           : "ready";
 
-    await patchJob(uid, {
+    try { await patchJob(uid, generation, leaseOwner, {
+      nextAttemptAt: Date.now() + nextBackoffMs(attempts),
       status,
       phases,
       leaseOwner: null,
       leaseUntil: null,
       lastErrorCategory: category,
       lastErrorCode: code,
-    });
+    }); } catch (patchError) {
+      if (!(patchError instanceof Error) || patchError.message !== "lease_lost") throw patchError;
+    }
 
     return { ok: false, detail: code, phases };
   }

@@ -44,6 +44,7 @@ export interface DeletionJobDoc {
   leaseOwner: string | null;
   leaseUntil: number | null;
   attempts: number;
+  nextAttemptAt?: number;
   lastErrorCategory: DeletionErrorCategory;
   /** Privacy-safe short code, never PII. */
   lastErrorCode: string | null;
@@ -129,6 +130,8 @@ export function automaticRestorationAllowed(job: DeletionJobDoc, now: number): b
 }
 
 export function canAcquireLease(job: DeletionJobDoc, now: number): boolean {
+  if (job.graceExpiresAt > now) return false;
+  if (typeof job.nextAttemptAt === "number" && job.nextAttemptAt > now) return false;
   if (job.status === "completed" || job.status === "cancelled") return false;
   if (job.status === "needs_manual_review") return false;
   if (job.status === "awaiting_grace" && job.graceExpiresAt > now) return false;

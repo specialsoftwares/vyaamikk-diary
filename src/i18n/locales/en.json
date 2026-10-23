@@ -1074,6 +1074,8 @@
     "crashReportsOn": "On",
     "crashReportsOff": "Off",
     "crashReportsSaveFailed": "This choice could not be saved. Crash reports stay off for this session.",
+    "crashReportsPending": "Waiting to sync your choice. Crash reporting stays off until confirmed.",
+    "crashReportsConflict": "Your choice changed on another device. Crash reporting is off; choose again to enable it.",
     "aboutSubtitle": "Tagline, SPECIAL SOFTWARES and app details",
     "aboutFooterLine": "Designed and developed by SPECIAL SOFTWARES",
     "legalCombined": "Terms of Use & Privacy Policy",

@@ -730,7 +730,12 @@ service cloud.firestore {
         allow read: if isOwner(uid);
         allow create: if isActiveUser(uid)
                       && request.resource.data.userId == uid
-                      && isSupportedLetterheadParentShape(request.resource.data)
+                      && (isSupportedLetterheadParentShape(request.resource.data)
+                          || (validOwnerSeal(docId)
+                              && request.resource.data.contentSeal.collection == 'letterheadDocs'
+                              && request.resource.data.contentSeal.purpose == 'letterhead_document'
+                              && request.resource.data.title == 'sealed'
+                              && request.resource.data.input == null))
                       && letterheadPdfUriAbsentOrNull(request.resource.data);
         allow update: if isActiveUser(uid)
                       && request.resource.data.userId == uid

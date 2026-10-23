@@ -713,14 +713,11 @@ export async function callRecordAgeAssessment(dateOfBirth: string): Promise<{
   >("recordAgeAssessment", { dateOfBirth });
 }
 
-export async function callRecordProcessingPurpose(args: {
-  purpose: "crash_diagnostics" | "service_operation";
-  decision: "grant" | "withdraw";
-  noticeVersion: string;
-  policyVersion: string;
-}): Promise<{ ok: true; receivedAt: number; purpose: string; decision: string }> {
-  return callFunction<typeof args, { ok: true; receivedAt: number; purpose: string; decision: string }>(
-    "recordProcessingPurpose",
-    args
+export async function callRecordProcessingPurpose(args:
+  import("@/services/consent/purposeConsentQueue").PurposeMutation |
+  { uid: string; purpose: "crash_diagnostics"; action: "read" }
+): Promise<import("@/services/consent/purposeConsentQueue").PurposeServerState> {
+  return callFunction<typeof args, import("@/services/consent/purposeConsentQueue").PurposeServerState>(
+    "recordProcessingPurpose", args
   );
 }

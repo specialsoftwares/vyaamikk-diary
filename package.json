@@ -203,6 +203,7 @@
     "test:deletion-policy-v2": "npx --yes tsx functions/src/deletion/deletionPolicy.unit.test.ts && npx --yes tsx functions/src/deletion/restoreSuppression.unit.test.ts",
     "test:business-admission": "npx --yes tsx functions/src/identity/businessAdmission.unit.test.ts",
     "test:cash-receipt-envelope-emulator": "firebase emulators:exec --only firestore,storage --project vyaamikk-diary-storage-rules-test \"npx --yes tsx src/services/attachments/cashReceiptEnvelope.emulator.test.ts\"",
+    "test:privacy-acceptance-races": "npx --yes tsx src/services/auth/ageAssessmentResponse.test.ts && npx --yes tsx src/services/consent/purposeConsentQueue.test.ts && npx --yes tsx functions/src/deletion/deletionSafety.unit.test.ts && npx --yes tsx src/services/privacy/businessCloudSeal.test.ts",
     "test:age-eligibility": "npx --yes tsx src/domain/ageEligibility.test.ts",
     "test:content-encryption": "npx --yes tsx functions/src/privacy/contentEncryption.unit.test.ts",
     "test:diary-seal": "npx --yes tsx src/services/privacy/diarySealDocument.test.ts",

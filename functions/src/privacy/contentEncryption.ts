@@ -28,7 +28,7 @@ export function loadContentKey(env: NodeJS.ProcessEnv = process.env): Buffer {
     throw new Error("content_key_unavailable");
   }
   const key = Buffer.from(raw, "base64");
-  if (key.length !== 32) {
+  if (key.length !== 32 || key.toString("base64") !== raw) {
     throw new Error("content_key_unavailable");
   }
   return key;
@@ -96,7 +96,18 @@ export function openContent(input: {
   if (input.seal.purpose !== input.purpose) throw new Error("wrong_purpose");
   if (input.seal.v !== 1 || input.seal.alg !== CONTENT_SEAL_ALG) throw new Error("unsupported_seal");
   try {
-    const decipher = createDecipheriv("aes-256-gcm", input.key, Buffer.from(input.seal.nonce, "base64"));
+    const decode = (value: string, length?: number) => {
+      if (typeof value !== "string") throw new Error("invalid_encoding");
+      const bytes = Buffer.from(value, "base64");
+      if (bytes.toString("base64") !== value || (length != null && bytes.length !== length)) {
+        throw new Error("invalid_encoding");
+      }
+      return bytes;
+    };
+    const nonce = decode(input.seal.nonce, 12);
+    const tag = decode(input.seal.tag, 16);
+    const ciphertext = decode(input.seal.ciphertext);
+    const decipher = createDecipheriv("aes-256-gcm", input.key, nonce, { authTagLength: 16 });
     decipher.setAAD(
       aad({
         uid: input.uid,
@@ -106,9 +117,9 @@ export function openContent(input: {
         purpose: input.purpose,
       })
     );
-    decipher.setAuthTag(Buffer.from(input.seal.tag, "base64"));
+    decipher.setAuthTag(tag);
     return Buffer.concat([
-      decipher.update(Buffer.from(input.seal.ciphertext, "base64")),
+      decipher.update(ciphertext),
       decipher.final(),
     ]);
   } catch {

@@ -1,4 +1,4 @@
-import { doc, runTransaction, type Firestore, type Transaction } from "firebase/firestore";
+import { doc, getDocFromServer, runTransaction, type Firestore, type Transaction } from "firebase/firestore";
 
 import { AppError } from "@/domain/errors";
 import {
@@ -36,6 +36,8 @@ export interface AtomicCreateReadSnapshot {
 }
 
 export interface AtomicCreateHooks {
+  /** Prepare protection once, before the transaction; the returned transform is synchronous. */
+  prepareCloudPayload?: (payload: Record<string, unknown>) => Promise<(payload: Record<string, unknown>) => Record<string, unknown>>;
   /**
    * Test-only barrier: invoked after all transaction reads and before writes.
    * Must not perform Firestore writes, network I/O, or mutate save locks.
@@ -137,6 +139,17 @@ export async function runAtomicBillableCreate<T>(
   } = params;
 
   try {
+    let cloudPayload = (payload: Record<string, unknown>) => payload;
+    if (hooks?.prepareCloudPayload) {
+      // Replays must work without a new seal or quota increment, including when
+      // new encryption is paused. The transaction repeats this existence check.
+      const existing = await getDocFromServer(recordRef(db, userId, collection, recordId));
+      if (existing.exists()) {
+        return { outcome: "existing", record: parseExisting(existing.id, existing.data()), serial: null };
+      }
+      // Serial is operational metadata, never part of the protected body.
+      cloudPayload = await hooks.prepareCloudPayload(buildNew(serialCounter ? 1 : null).payload);
+    }
     return await runTransaction(db, async (tx) => {
       const recRef = recordRef(db, userId, collection, recordId);
       const recSnap = await tx.get(recRef);
@@ -222,7 +235,7 @@ export async function runAtomicBillableCreate<T>(
       }
 
       const built = buildNew(serial);
-      tx.set(recRef, built.payload);
+      tx.set(recRef, cloudPayload(built.payload));
 
       if (consumesQuota && enforcementOn) {
         if (collection === "letterheadDocs") {

@@ -1,5 +1,7 @@
 # AUDIT EVIDENCE INDEX
 
+> **23 October 2026 correction: HOLD.** See [current acceptance report](SEVEN_STAGE_ACCEPTANCE_2026-10-23.md). The inventory and checkpoints below are historical; earlier CI does not certify the new candidate.
+
 ## 22 October 2026 first-run checkpoint
 
 | Item | Evidence |

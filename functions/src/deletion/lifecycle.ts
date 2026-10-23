@@ -1,4 +1,6 @@
 import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { FieldPath, type Query, type QueryDocumentSnapshot } from "firebase-admin/firestore";
+import { walkDeletionPages } from "./deletionSafety";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 
 import { getAdminDb } from "../admin";
@@ -150,79 +152,50 @@ export const scheduledDeletionCleanup = onSchedule(
     const db = getAdminDb();
     const now = Date.now();
 
-    // Promote grace-elapsed jobs (paged).
-    for (let page = 0; page < SCHEDULER_MAX_PAGES; page += 1) {
-      const snap = await db
-        .collection(DELETION_JOBS)
-        .where("status", "==", "awaiting_grace")
-        .where("graceExpiresAt", "<=", now)
-        .limit(SCHEDULER_PAGE)
-        .get();
-      if (snap.empty) break;
-      for (const doc of snap.docs) {
-        await doc.ref.set({ status: "ready", updatedAt: now }, { merge: true });
-      }
-      if (snap.size < SCHEDULER_PAGE) break;
+    async function sweep(name: string, query: Query, visit: (row: QueryDocumentSnapshot) => Promise<void>) {
+      const checkpoint = db.collection("deletionMaintenance").doc(name);
+      const cursor = (await checkpoint.get()).data()?.cursor;
+      await walkDeletionPages({
+        cursor: typeof cursor === "string" ? cursor : null,
+        pageSize: SCHEDULER_PAGE, maxPages: SCHEDULER_MAX_PAGES,
+        async list(after, limit) {
+          let q = query.orderBy(FieldPath.documentId()).limit(limit);
+          if (after) q = q.startAfter(after);
+          return (await q.get()).docs;
+        },
+        visit,
+        checkpoint: async cursor => { await checkpoint.set({ cursor, updatedAt: now }); },
+      });
     }
-
-    // Also bootstrap jobs from users still pending without a job (legacy).
-    for (let page = 0; page < SCHEDULER_MAX_PAGES; page += 1) {
-      const snap = await db
-        .collection(USERS)
-        .where("status", "==", "pending_deletion")
-        .limit(SCHEDULER_PAGE)
-        .get();
-      if (snap.empty) break;
-      for (const doc of snap.docs) {
-        const data = doc.data();
-        const accepted = deletionJobInputFromUser(data, now);
-        if (accepted.stamp) {
-          await doc.ref.set(deletionStampFromJobInput(accepted, now), { merge: true });
+    await sweep("promote", db.collection(DELETION_JOBS).where("status", "==", "awaiting_grace"), async row => {
+      await db.runTransaction(async tx => {
+        const fresh = await tx.get(row.ref);
+        const job = fresh.data() as DeletionJobDoc;
+        if (job?.status === "awaiting_grace" && job.graceExpiresAt <= now) {
+          tx.update(row.ref, { status: "ready", updatedAt: now });
         }
-        await ensureDeletionJobDoc({
-          uid: doc.id,
-          requestedAt: accepted.requestedAt,
-          graceExpiresAt: accepted.graceExpiresAt,
-          deletionPolicyVersion: accepted.deletionPolicyVersion,
-          reactivationCutoff: accepted.reactivationCutoff,
-          erasureDeadline: accepted.erasureDeadline,
-        });
-        if (accepted.graceExpiresAt > now) continue;
-        await runFinalAccountPurge(doc.id);
-      }
-      if (snap.size < SCHEDULER_PAGE) break;
-    }
-
-    // Process ready jobs.
-    for (let page = 0; page < SCHEDULER_MAX_PAGES; page += 1) {
-      const snap = await db
-        .collection(DELETION_JOBS)
-        .where("status", "==", "ready")
-        .limit(SCHEDULER_PAGE)
-        .get();
-      if (snap.empty) break;
-      for (const doc of snap.docs) {
-        await runFinalAccountPurge(doc.id);
-      }
-      if (snap.size < SCHEDULER_PAGE) break;
-    }
-
-    // Reclaim expired leases.
-    const leased = await db
-      .collection(DELETION_JOBS)
-      .where("status", "==", "leased")
-      .limit(SCHEDULER_PAGE)
-      .get();
-    for (const doc of leased.docs) {
-      const job = doc.data() as DeletionJobDoc;
-      if (job.leaseUntil && job.leaseUntil <= now) {
-        await doc.ref.set(
-          { status: "ready", leaseOwner: null, leaseUntil: null, updatedAt: now },
-          { merge: true }
-        );
-        await runFinalAccountPurge(doc.id);
-      }
-    }
+      });
+    });
+    await sweep("bootstrap", db.collection(USERS).where("status", "==", "pending_deletion"), async row => {
+      const accepted = await db.runTransaction(async tx => {
+        const fresh = await tx.get(row.ref);
+        if (fresh.data()?.status !== "pending_deletion") return null;
+        const input = deletionJobInputFromUser(fresh.data()!, now);
+        if (input.stamp) tx.set(row.ref, deletionStampFromJobInput(input, now), { merge: true });
+        return input;
+      });
+      if (!accepted) return;
+      await ensureDeletionJobDoc({ uid: row.id, ...accepted });
+      if (accepted.graceExpiresAt <= now) await runFinalAccountPurge(row.id);
+    });
+    await sweep("ready", db.collection(DELETION_JOBS).where("status", "==", "ready"), async row => {
+      await runFinalAccountPurge(row.id);
+    });
+    await sweep("expiredLeases", db.collection(DELETION_JOBS).where("status", "==", "leased"), async row => {
+      // acquireLease owns the transactional compare-and-swap; never clear a lease
+      // from an old query snapshot while its owner may have renewed it.
+      if (Number(row.data().leaseUntil) <= now) await runFinalAccountPurge(row.id);
+    });
 
     await reapplyCompletedDeletionManifest(db, now);
   }

@@ -28,6 +28,7 @@ import {
   openBusinessCloud,
   protectBusinessCloud,
   settleCreatedBusinessCloud,
+  prepareBusinessCreate,
 } from "@/services/privacy/businessCloudSeal";
 import {
   CREDIT_PAYMENT_MODES,
@@ -311,12 +312,12 @@ function toCloud(record: CustomerCreditRecord): Record<string, unknown> {
   return { ...rest, pdfUri: null, customerPhoto: null, closure: closureCloud };
 }
 
-function creditCloudOptions(userId: string) {
+function creditCloudOptions(userId: string, recordId: string) {
   return {
     restoreRaw: async (raw: Record<string, unknown>) => {
       const opened = await openBusinessCloud(
         "customerCreditRecords",
-        fromDoc("restore", raw, userId),
+        fromDoc(recordId, raw, userId),
         raw
       );
       return { ...raw, ...opened };
@@ -364,7 +365,8 @@ export const firebaseCustomerCreditRepository: CustomerCreditRepository = {
 
   async create(userId, input: CreateCustomerCreditInput) {
     const record = await createCustomerCreditAtomic(getFirebaseDb(), userId, input, (id, data) =>
-      fromDoc(id, data, userId)
+      fromDoc(id, data, userId),
+      { prepareCloudPayload: prepareBusinessCreate("customerCreditRecords", userId) }
     );
     return settleCreatedBusinessCloud({
       collection: "customerCreditRecords",
@@ -399,7 +401,7 @@ export const firebaseCustomerCreditRepository: CustomerCreditRepository = {
       payment,
       (id, data) => fromDoc(id, data, userId),
       Date.now(),
-      creditCloudOptions(userId)
+      creditCloudOptions(userId, recordId)
     );
     publishDomainChange(userId, "customerCredit", { effect: "upsert", recordId });
     return next;
@@ -434,7 +436,7 @@ export const firebaseCustomerCreditRepository: CustomerCreditRepository = {
       input,
       (id, data) => fromDoc(id, data, userId),
       Date.now(),
-      creditCloudOptions(userId)
+      creditCloudOptions(userId, input.recordId)
     );
     publishDomainChange(userId, "customerCredit", { effect: "upsert", recordId: input.recordId });
     return next;

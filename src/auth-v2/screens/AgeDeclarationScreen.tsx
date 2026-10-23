@@ -1,9 +1,11 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { PRIVACY_POLICY_SECTIONS } from "@/content/legal/documents";
 import { assessSelfDeclaredDob } from "@/domain/ageEligibility";
 import { callRecordAgeAssessment } from "@/services/auth/identityCallable";
+import { currentAuthMutationGeneration } from "@/services/auth/authSessionFence";
+import { applyCurrentAgeAssessment } from "@/services/auth/ageAssessmentResponse";
 import { useAuth } from "@/state/auth";
 import { useT } from "@/i18n";
 
@@ -22,30 +24,50 @@ export function AgeDeclarationScreen({
   const [message, setMessage] = useState<string | null>(null);
   const [supportOpen, setSupportOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const flight = useRef(false);
+  const mounted = useRef(true);
+  const currentUser = useRef(user);
+  currentUser.current = user;
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   const support = PRIVACY_POLICY_SECTIONS.find((section) => section.title === "Retention & deletion");
 
   async function submit() {
-    if (!user || busy) return;
+    if (!user || flight.current) return;
     const local = assessSelfDeclaredDob({ dateOfBirth: dateOfBirth.trim(), nowMs: Date.now() });
     if (!local.ok) {
       setMessage(t("ageGate.invalid"));
       return;
     }
+    const uid = user.uid;
+    const generation = currentAuthMutationGeneration();
+    const owns = () => mounted.current && currentUser.current?.uid === uid &&
+      currentAuthMutationGeneration() === generation;
+    flight.current = true;
     setBusy(true);
     try {
-      const result = await callRecordAgeAssessment(dateOfBirth.trim());
-      const next = { ...user, ...result };
-      await applyServerProfile(next);
+      const result = await applyCurrentAgeAssessment({
+        generation,
+        isCurrent: owns,
+        request: () => callRecordAgeAssessment(dateOfBirth.trim()),
+        apply: (assessment, ownedGeneration) => applyServerProfile(
+          { ...currentUser.current!, ...assessment }, ownedGeneration
+        ),
+      });
+      if (!result || !owns()) return;
       if (result.ageEligibility === "eligible") {
-        onEligible(Boolean(user.profileCompletedAt));
+        onEligible(Boolean(currentUser.current?.profileCompletedAt));
         return;
       }
       setMessage(t("ageGate.ineligible"));
     } catch {
-      setMessage(t("ageGate.invalid"));
+      if (owns()) setMessage(t("ageGate.invalid"));
     } finally {
-      setBusy(false);
+      flight.current = false;
+      if (mounted.current) setBusy(false);
     }
   }
 
@@ -64,7 +86,7 @@ export function AgeDeclarationScreen({
         style={styles.input}
       />
       {message ? <Text style={styles.message}>{message}</Text> : null}
-      <Pressable onPress={() => void submit()} style={styles.primary}>
+      <Pressable disabled={busy} accessibilityState={{ disabled: busy, busy }} onPress={() => void submit()} style={styles.primary}>
         <Text style={styles.primaryText}>{t("ageGate.continue")}</Text>
       </Pressable>
       <Pressable onPress={() => setSupportOpen((open) => !open)}>
