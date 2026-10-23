@@ -631,7 +631,8 @@ export async function callConfirmVerifiedMobileContactChange(args: {
 }
 
 type OwnerContentSeal = {
-  v: 1;
+  v: 1 | 2;
+  keyId?: string;
   alg: "AES-256-GCM";
   uid: string;
   collection: string;

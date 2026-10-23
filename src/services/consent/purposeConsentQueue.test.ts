@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createPurposeConsentQueue, type PurposeQueueState, type PurposeMutation } from './purposeConsentQueue';
+import { createPurposeConsentQueue, type PurposeQueueState, type PurposeMutation, type PurposeServerState } from './purposeConsentQueue';
 import { purposeTransition, type PurposeState } from '../../../functions/src/privacy/processingPurposeState';
 function deferred<T>() { let resolve!: (v: T) => void; const promise = new Promise<T>(r => resolve = r); return { promise, resolve }; }
 async function main() {
@@ -71,7 +71,7 @@ async function main() {
   await oldRead;
   assert.equal(enabled, false);
   assert.equal(ordered.state('a')?.revision, 2);
-  let remoteListener: ((remote: { ok: true; revision: number; decision: 'withdraw'; receivedAt: number }) => void) | null = null;
+  const watchedListener = { current: null as ((event: PurposeServerState) => void) | null };
   let watchedRemote: PurposeState = { revision: 0, decision: null, receivedAt: null };
   const watched = createPurposeConsentQueue({
     ...ports,
@@ -82,17 +82,17 @@ async function main() {
       return { ok: true as const, ...watchedRemote, conflict: transition.conflict };
     },
     observeRemote: (_uid, onRemote) => {
-      remoteListener = onRemote as typeof remoteListener;
-      return () => { remoteListener = null; };
+      watchedListener.current = onRemote;
+      return () => { watchedListener.current = null; };
     },
   });
   watched.bind('watched');
   await watched.choose('watched', true);
   assert.equal(enabled, true);
-  remoteListener?.({ ok: true, revision: 8, decision: 'withdraw', receivedAt: 8 });
+  watchedListener.current?.({ ok: true, revision: 8, decision: 'withdraw', receivedAt: 8 });
   for (let i = 0; i < 8; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(enabled, false, 'another device withdrawal stops this device');
-  const staleWithdraw = remoteListener;
+  const staleWithdraw = watchedListener.current;
   watchedRemote = { revision: 8, decision: 'withdraw', receivedAt: 8 };
   generation += 1;
   await watched.choose('watched', true);

@@ -71,7 +71,6 @@ async function main() {
         products: [{ productName: "Phone", brandModel: "A1", serialImei: null, saleAmount: 10000, invoiceNumber: null }],
         saleAmount: 10000,
         schedule: [],
-        payments: [],
       },
       at,
       recordId
@@ -239,10 +238,11 @@ async function main() {
       amount: 20, paidDate: at, mode: "cash", clientPaymentId: "pay_gone_2",
     }, parse(deleteBase), at + 40, deleteOptions),
   ]);
-  const afterDelete = await testEnv.withSecurityRulesDisabled(async (ctx) =>
-    getDoc(doc(ctx.firestore(), "users", uid, "customerCreditRecords", "cr_delete"))
-  );
-  check("deletion during preparation is not recreated", deleted && outcomes.every((outcome) => outcome.status === "rejected") && !afterDelete.exists());
+  let afterDelete: Awaited<ReturnType<typeof getDoc>> | undefined;
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    afterDelete = await getDoc(doc(ctx.firestore(), "users", uid, "customerCreditRecords", "cr_delete"));
+  });
+  check("deletion during preparation is not recreated", deleted && outcomes.every((outcome) => outcome.status === "rejected") && afterDelete != null && !afterDelete.exists());
 
   const sessionBase = await seed("cr_session", at);
   let flipped = false;
