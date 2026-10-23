@@ -213,6 +213,25 @@ export function isSupportedLetterheadParentData(data: Record<string, unknown> | 
   return isSupportedLetterheadParentInput(data.input);
 }
 
+/** Rules-shaped sealed parent. A matching envelope is not proof of the ciphertext. */
+export function isSealedLetterheadParentData(
+  data: Record<string, unknown> | undefined | null,
+  parentId: string
+): boolean {
+  if (!data || data.title !== "sealed" || data.input != null || data.pdfUri != null) return false;
+  if (typeof data.userId !== "string" || data.userId.trim().length === 0) return false;
+  const seal = data.contentSeal;
+  if (!seal || typeof seal !== "object") return false;
+  const stored = seal as Record<string, unknown>;
+  return stored.v === 1
+    && stored.alg === "AES-256-GCM"
+    && stored.uid === data.userId
+    && stored.collection === "letterheadDocs"
+    && stored.purpose === "letterhead_document"
+    && stored.recordId === parentId
+    && stored.revision === data.updatedAt;
+}
+
 function isAbsentOrNull(value: unknown): boolean {
   return value == null;
 }

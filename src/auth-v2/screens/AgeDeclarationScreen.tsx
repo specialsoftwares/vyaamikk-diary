@@ -59,9 +59,11 @@ export function AgeDeclarationScreen({
       });
       if (!result || !owns()) return;
       if (result.ageEligibility === "eligible") {
+        setDateOfBirth("");
         onEligible(Boolean(currentUser.current?.profileCompletedAt));
         return;
       }
+      setDateOfBirth("");
       setMessage(t("ageGate.ineligible"));
     } catch {
       if (owns()) setMessage(t("ageGate.invalid"));
@@ -95,10 +97,10 @@ export function AgeDeclarationScreen({
       {supportOpen ? (
         <Text style={styles.body}>{support?.paragraphs.join("\n\n") ?? t("ageGate.supportBody")}</Text>
       ) : null}
-      <Pressable onPress={() => void signOut()}>
+      <Pressable onPress={() => { setDateOfBirth(""); void signOut(); }}>
         <Text style={styles.link}>{t("ageGate.signOut")}</Text>
       </Pressable>
-      <Pressable onPress={() => void requestAccountDeletion()}>
+      <Pressable onPress={() => { setDateOfBirth(""); void requestAccountDeletion(); }}>
         <Text style={styles.link}>{t("ageGate.deleteAccount")}</Text>
       </Pressable>
     </View>

@@ -12,6 +12,7 @@ import { stableRecordId } from "@/services/records/stableRecordId";
 import { createInitialDocumentHistory } from "@/services/documentHistory/core";
 import {
   isLegitimateExistingLetterheadMirror,
+  isSealedLetterheadParentData,
   isSupportedLetterheadParentData,
   isValidatedLetterheadMirrorInput,
   letterheadParentIdFromPayload,
@@ -181,7 +182,8 @@ async function assertSameUserLetterheadParent(
       reason: "letterhead_parent_user_mismatch",
     });
   }
-  if (!isSupportedLetterheadParentData(parentSnap.data() as Record<string, unknown>)) {
+  const parent = parentSnap.data() as Record<string, unknown>;
+  if (!isSupportedLetterheadParentData(parent) && !isSealedLetterheadParentData(parent, parentId)) {
     throw new AppError("permission_denied", "Letterhead diary link is not valid.", undefined, {
       reason: "letterhead_parent_shape_invalid",
     });

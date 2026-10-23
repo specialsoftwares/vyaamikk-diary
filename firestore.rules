@@ -438,6 +438,24 @@ service cloud.firestore {
              && letterheadParentInputSupported(parent.input);
     }
 
+    // A sealed parent has no letter input. The envelope shape is not proof of
+    // the ciphertext; mirror payload validation and the quota exemption stay.
+    function isSealedLetterheadParent(parent, parentId) {
+      return parent.keys().hasAll(['userId', 'title', 'contentSeal'])
+             && parent.userId is string
+             && parent.title == 'sealed'
+             && parent.get('input', null) == null
+             && parent.get('pdfUri', null) == null
+             && parent.contentSeal is map
+             && parent.contentSeal.v == 1
+             && parent.contentSeal.alg == 'AES-256-GCM'
+             && parent.contentSeal.uid == request.auth.uid
+             && parent.contentSeal.collection == 'letterheadDocs'
+             && parent.contentSeal.purpose == 'letterhead_document'
+             && parent.contentSeal.recordId == parentId
+             && parent.contentSeal.revision == parent.get('updatedAt', 0);
+    }
+
     function letterheadPdfUriAbsentOrNull(data) {
       return data.get('pdfUri', null) == null;
     }
@@ -535,7 +553,7 @@ service cloud.firestore {
              && parentId.size() > 0
              && parentId.size() <= 200
              && entryId == parentId + ':matter'
-             && isSupportedLetterheadParentShape(parent)
+             && (isSupportedLetterheadParentShape(parent) || isSealedLetterheadParent(parent, parentId))
              && parent.userId == uid;
     }
 
@@ -548,7 +566,7 @@ service cloud.firestore {
              && parentId is string
              && parentId.size() > 0
              && entryId == parentId + ':matter'
-             && isSupportedLetterheadParentShape(parent)
+             && (isSupportedLetterheadParentShape(parent) || isSealedLetterheadParent(parent, parentId))
              && parent.userId == uid;
     }
 
@@ -731,11 +749,7 @@ service cloud.firestore {
         allow create: if isActiveUser(uid)
                       && request.resource.data.userId == uid
                       && (isSupportedLetterheadParentShape(request.resource.data)
-                          || (validOwnerSeal(docId)
-                              && request.resource.data.contentSeal.collection == 'letterheadDocs'
-                              && request.resource.data.contentSeal.purpose == 'letterhead_document'
-                              && request.resource.data.title == 'sealed'
-                              && request.resource.data.input == null))
+                          || isSealedLetterheadParent(request.resource.data, docId))
                       && letterheadPdfUriAbsentOrNull(request.resource.data);
         allow update: if isActiveUser(uid)
                       && request.resource.data.userId == uid

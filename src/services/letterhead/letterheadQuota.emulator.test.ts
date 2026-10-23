@@ -462,6 +462,57 @@ async function main() {
     );
     check("skeletal letterheadDocs CREATE denied at Rules", true);
 
+    const sealedAt = Date.UTC(2026, 9, 23);
+    const sealedParent = {
+      userId: "alice",
+      title: "sealed",
+      input: null,
+      pdfUri: null,
+      createdAt: sealedAt,
+      updatedAt: sealedAt,
+      contentSeal: {
+        v: 1,
+        alg: "AES-256-GCM",
+        uid: "alice",
+        collection: "letterheadDocs",
+        purpose: "letterhead_document",
+        recordId: "lh_sealed_parent",
+        revision: sealedAt,
+        nonce: "bm9uY2Vub25jZW5vbmNl",
+        ciphertext: "YQ==",
+        tag: "dGFnMTIzNDU2Nzg5MDEy",
+      },
+    };
+    await assertSucceeds(
+      setDoc(doc(authedDb("alice"), "users", "alice", "letterheadDocs", "lh_sealed_parent"), sealedParent)
+    );
+    await assertFails(
+      setDoc(doc(authedDb("alice"), "users", "alice", "letterheadDocs", "lh_sealed_plain"), {
+        ...sealedParent,
+        input: { subject: "kept in plaintext" },
+      })
+    );
+    const usageBeforeSealedMirror = await usageCount("alice");
+    const sealedMirror = await createEntryAtomic(authedDb("alice"), "alice", mirrorInput("lh_sealed_parent"));
+    check("sealed letterhead parent can mint its mirror", sealedMirror.id === "lh_sealed_parent:matter");
+    check(
+      "sealed letterhead mirror does not consume ordinary quota",
+      (await usageCount("alice")) === usageBeforeSealedMirror
+    );
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", "alice", "letterheadDocs", "lh_wrong_seal"), {
+        ...sealedParent,
+        contentSeal: { ...sealedParent.contentSeal, collection: "entries", recordId: "lh_wrong_seal" },
+      });
+    });
+    let wrongSealKind: string | null = null;
+    try {
+      await createEntryAtomic(authedDb("alice"), "alice", mirrorInput("lh_wrong_seal"));
+    } catch (e) {
+      wrongSealKind = classifyAtomicCreateError(e);
+    }
+    check("wrong-collection envelope cannot mint a letterhead mirror", wrongSealKind === "permission_denied");
+
     const shapeParent = await createLetterheadDocumentAtomic(
       authedDb("alice"),
       "alice",
