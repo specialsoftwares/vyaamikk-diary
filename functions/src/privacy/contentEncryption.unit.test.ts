@@ -7,7 +7,9 @@ import {
   classifyStoredRecord,
   loadContentKey,
   openContent,
+  planContentKeyMigration,
   sealContent,
+  sealContentV2,
   type ContentSeal,
 } from "./contentEncryption";
 
@@ -65,5 +67,25 @@ const callable = readFileSync(resolve(__dirname, "ownerContent.ts"), "utf8");
 assert.doesNotMatch(source, /console\./);
 assert.doesNotMatch(callable, /console\./);
 assert.doesNotMatch(callable, /plaintextBase64\}/);
+
+const keyA = randomBytes(32);
+const keyB = randomBytes(32);
+const v2 = sealContentV2({ ...bind(), key: keyA, keyId: "k-a", plaintext: Buffer.from(title) });
+assert.equal(v2.v, 2);
+assert.equal(openContent({ ...bind(), key: keyB, seal: v2, resolveKey: (id) => (id === "k-a" ? keyA : null) }).toString(), title);
+let lookedUp: string[] = [];
+assert.throws(() => openContent({
+  ...bind(),
+  key: keyA,
+  seal: { ...v2, keyId: "k-b" },
+  resolveKey: (id) => {
+    lookedUp.push(id);
+    return id === "k-b" ? keyB : keyA;
+  },
+}), /content_tampered|unknown_key/);
+assert.deepEqual(lookedUp, ["k-b"]);
+assert.throws(() => openContent({ ...bind(), key, seal: { ...sealed, v: 9 as 1 } }), /unsupported_seal/);
+const plan = planContentKeyMigration([{ contentSeal: null }, { contentSeal: sealed }, { contentSeal: v2 }, { contentSeal: { v: 9 } }]);
+assert.deepEqual(plan, { counts: { plaintext: 1, v1: 1, v2: 1, unknown: 1 }, writes: 0 });
 
 console.log("contentEncryption.unit.test.ts: ok");

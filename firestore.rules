@@ -258,9 +258,19 @@ service cloud.firestore {
         && request.resource.data.title.size() <= 120;
     }
 
+    function acceptedSealVersion() {
+      return request.resource.data.contentSeal.v == 1
+        || (
+          request.resource.data.contentSeal.v == 2
+          && request.resource.data.contentSeal.keyId is string
+          && request.resource.data.contentSeal.keyId.size() > 0
+          && request.resource.data.contentSeal.keyId.size() <= 64
+        );
+    }
+
     function validOwnerSeal(recordId) {
       return request.resource.data.contentSeal is map
-        && request.resource.data.contentSeal.v == 1
+        && acceptedSealVersion()
         && request.resource.data.contentSeal.uid == request.auth.uid
         && request.resource.data.contentSeal.recordId == recordId
         && request.resource.data.contentSeal.revision == request.resource.data.updatedAt;
@@ -268,7 +278,7 @@ service cloud.firestore {
 
     function validDiarySeal(entryId) {
       return request.resource.data.contentSeal is map
-        && request.resource.data.contentSeal.v == 1
+        && acceptedSealVersion()
         && request.resource.data.contentSeal.uid == request.auth.uid
         && request.resource.data.contentSeal.recordId == entryId
         && request.resource.data.contentSeal.revision == request.resource.data.updatedAt
@@ -447,7 +457,11 @@ service cloud.firestore {
              && parent.get('input', null) == null
              && parent.get('pdfUri', null) == null
              && parent.contentSeal is map
-             && parent.contentSeal.v == 1
+             && (parent.contentSeal.v == 1
+            || (parent.contentSeal.v == 2
+                && parent.contentSeal.keyId is string
+                && parent.contentSeal.keyId.size() > 0
+                && parent.contentSeal.keyId.size() <= 64))
              && parent.contentSeal.alg == 'AES-256-GCM'
              && parent.contentSeal.uid == request.auth.uid
              && parent.contentSeal.collection == 'letterheadDocs'
@@ -517,6 +531,10 @@ service cloud.firestore {
              && after.get('letterheadDocumentId', '')
                   == before.get('letterheadDocumentId', '')
              && (
+               !request.resource.data.keys().hasAny(['contentSeal'])
+               || letterheadSealedMirrorPayload(after)
+             )
+             && (
                !affected.hasAny(['body'])
                || (after.body is string && after.body.size() > 0)
              )
@@ -535,6 +553,32 @@ service cloud.firestore {
              && letterheadMirrorPayloadSupported(request.resource.data.get('payload', {}));
     }
 
+    // Protected mirror: the letter body stays in the diary envelope.
+    // The only readable payload field is the parent linkage.
+    function letterheadSealedMirrorPayload(payload) {
+      return payload is map
+             && payload.keys().hasOnly(['letterheadDocumentId'])
+             && payload.letterheadDocumentId is string
+             && payload.letterheadDocumentId.size() > 0
+             && payload.letterheadDocumentId.size() <= 200;
+    }
+
+    function letterheadSealedMirrorCreateShape(entryId) {
+      return validDiarySeal(entryId)
+             && request.resource.data.contentSeal.collection == 'entries'
+             && request.resource.data.contentSeal.purpose == 'diary'
+             && request.resource.data.get('notes', null) == null
+             && request.resource.data.get('reminder', null) == null
+             && request.resource.data.get('attachments', []).size() == 0
+             && letterheadSealedMirrorPayload(request.resource.data.payload);
+    }
+
+    function letterheadMirrorShapeAccepted(entryId) {
+      return request.resource.data.keys().hasAny(['contentSeal'])
+             ? letterheadSealedMirrorCreateShape(entryId)
+             : letterheadMirrorCreateShape();
+    }
+
     function letterheadMirrorParentId() {
       return request.resource.data.get('payload', {}).get('letterheadDocumentId', '');
     }
@@ -548,7 +592,7 @@ service cloud.firestore {
       return request.resource.data.entryType == 'letterhead_matter'
              && request.resource.data.get('source', '') == 'letterhead'
              && request.resource.data.userId == uid
-             && letterheadMirrorCreateShape()
+             && letterheadMirrorShapeAccepted(entryId)
              && parentId is string
              && parentId.size() > 0
              && parentId.size() <= 200
@@ -783,6 +827,13 @@ service cloud.firestore {
         allow update: if isActiveUser(uid)
                       && request.resource.data.userId == uid;
         allow delete: if isActiveUser(uid);
+
+        // Written in the same transaction as a sealed credit update.
+        // Comparing that sealed document inside this rule exceeds the rules
+        // evaluator, so the repository transaction is what retries the fresh read.
+        match /revisionCheck/{checkId} {
+          allow read, write: if isOwner(uid);
+        }
       }
 
       // ---- Purchase orders ----------------------------------------------

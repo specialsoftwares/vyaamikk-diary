@@ -306,6 +306,7 @@ async function patchJob(uid: string, generation: number, leaseOwner: string, pat
 }
 
 const GRIN_FIRESTORE_LIST_PAGE = 400;
+const GRIN_LIST_MAX_PAGES = 25;
 
 /**
  * Production GRIN adapter. Pages until a short page — a single limit(400)
@@ -317,18 +318,18 @@ export async function listGrinCollectionPaged(path: string): Promise<
   const col = getAdminDb().collection(path);
   const docs: { id: string; ref: { path: string } }[] = [];
   let last: QueryDocumentSnapshot | undefined;
-  for (;;) {
+  for (let page = 0; page < GRIN_LIST_MAX_PAGES; page += 1) {
     let q: Query = col.limit(GRIN_FIRESTORE_LIST_PAGE);
     if (last) q = q.startAfter(last);
     const snap = await q.get();
-    if (snap.empty) break;
+    if (snap.empty) return docs;
     for (const d of snap.docs) {
       docs.push({ id: d.id, ref: { path: d.ref.path } });
     }
     last = snap.docs[snap.docs.length - 1];
-    if (snap.size < GRIN_FIRESTORE_LIST_PAGE) break;
+    if (snap.size < GRIN_FIRESTORE_LIST_PAGE) return docs;
   }
-  return docs;
+  throw new Error("grin_list_incomplete");
 }
 
 export function adminGrinFirestoreAdapter(): import("./grinCleanup").GrinFirestoreLike {
@@ -415,7 +416,11 @@ export async function runFinalAccountPurge(uid: string): Promise<FinalPurgeResul
       phases.firestore = "in_progress";
       await patchJob(uid, generation, leaseOwner, { phases });
       await assertStillPendingOrDeletedStub(uid, generation, leaseOwner);
-      const fs = await purgeUserSubcollectionsFully(getAdminDb(), uid);
+      const fs = await purgeUserSubcollectionsFully(getAdminDb(), uid, {
+        onBatch: async () => {
+          await patchJob(uid, generation, leaseOwner, { phases });
+        },
+      });
       if (!fs.exhausted) {
         throw new Error("firestore_purge_incomplete");
       }

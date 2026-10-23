@@ -223,7 +223,9 @@ export function isSealedLetterheadParentData(
   const seal = data.contentSeal;
   if (!seal || typeof seal !== "object") return false;
   const stored = seal as Record<string, unknown>;
-  return stored.v === 1
+  const versionOk = stored.v === 1
+    || (stored.v === 2 && typeof stored.keyId === "string" && (stored.keyId as string).length > 0);
+  return versionOk
     && stored.alg === "AES-256-GCM"
     && stored.uid === data.userId
     && stored.collection === "letterheadDocs"

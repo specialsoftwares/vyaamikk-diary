@@ -31,6 +31,10 @@ export type PurposeQueuePorts = {
   generation(): number;
   applyLocal(enabled: boolean): Promise<unknown>;
   operationId(): string;
+  observeRemote?(
+    uid: string,
+    onRemote: (remote: PurposeServerState) => void
+  ): () => void;
 };
 
 export const PROCESSING_NOTICE_VERSION = "privacy-notice-2026-10";
@@ -43,6 +47,7 @@ export function createPurposeConsentQueue(ports: PurposeQueuePorts) {
   let tail: Promise<unknown> = Promise.resolve();
   const states = new Map<string, PurposeQueueState>();
   const listeners = new Set<() => void>();
+  let stopObserve: (() => void) | null = null;
   const initial = (uid: string): PurposeQueueState => ({ uid, revision: 0, localGrant: false, hasChoice: false, pending: null, sync: "unknown" });
   const notify = () => listeners.forEach((listener) => listener());
   function publish(state: PurposeQueueState) { states.set(state.uid, state); notify(); }
@@ -105,10 +110,35 @@ export function createPurposeConsentQueue(ports: PurposeQueuePorts) {
   return {
     bind(uid: string | null) {
       if (activeUid === uid) return;
+      stopObserve?.();
+      stopObserve = null;
       activeUid = uid;
       choiceEpoch += 1;
       // Synchronous call enters the existing immediate native opt-out gate.
       void ports.applyLocal(false);
+      if (uid && ports.observeRemote) {
+        const generation = ports.generation();
+        stopObserve = ports.observeRemote(uid, (remote) => {
+          if (activeUid !== uid || ports.generation() !== generation) return;
+          if (remote.decision !== "withdraw") return;
+          choiceEpoch += 1;
+          const epoch = choiceEpoch;
+          void enqueue(async () => {
+            if (!owns(uid, generation, epoch)) return;
+            await ports.applyLocal(false);
+            if (!owns(uid, generation, epoch)) return;
+            const state = await load(uid);
+            await persist({
+              ...state,
+              localGrant: false,
+              hasChoice: true,
+              pending: null,
+              revision: remote.revision,
+              sync: "synced",
+            });
+          });
+        });
+      }
       notify();
     },
     state(uid: string | null) { return uid ? states.get(uid) ?? initial(uid) : null; },

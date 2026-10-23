@@ -21,6 +21,38 @@ const queue = createPurposeConsentQueue({
     return callRecordProcessingPurpose(input);
   },
   generation: currentAuthMutationGeneration,
+  observeRemote(uid, onRemote) {
+    let unsubscribe = () => {};
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { getFirebaseDb } = await import("@/config/firebase");
+        const { doc, onSnapshot } = await import("firebase/firestore");
+        if (cancelled) return;
+        const ref = doc(getFirebaseDb(), "users", uid, "processingPurposes", "crash_diagnostics");
+        unsubscribe = onSnapshot(
+          ref,
+          (snap) => {
+            const data = snap.data();
+            if (data?.decision !== "withdraw") return;
+            onRemote({
+              ok: true,
+              revision: Number(data.revision) || 0,
+              decision: "withdraw",
+              receivedAt: typeof data.receivedAt === "number" ? data.receivedAt : null,
+            });
+          },
+          () => undefined
+        );
+      } catch {
+        // Foreground and network reconciliation remains if the listener cannot start.
+      }
+    })();
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  },
   applyLocal: applyDiagnosticsChoice,
   // Idempotency identifier, not a credential or cryptographic key.
   operationId: () => `purpose_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}_${Math.random().toString(36).slice(2)}`,

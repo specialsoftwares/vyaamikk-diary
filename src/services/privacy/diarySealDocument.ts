@@ -7,7 +7,8 @@ import type { BusinessEntry } from "@/domain/businessEntry";
 import { emptyDocumentHistory } from "@/domain/documentHistory";
 
 export type DiaryContentSeal = {
-  v: 1;
+  v: 1 | 2;
+  keyId?: string;
   alg: "AES-256-GCM";
   uid: string;
   collection: string;
@@ -23,7 +24,7 @@ export function isDiaryContentSeal(value: unknown): value is DiaryContentSeal {
   if (!value || typeof value !== "object") return false;
   const seal = value as Partial<DiaryContentSeal>;
   return (
-    seal.v === 1 &&
+    (seal.v === 1 || (seal.v === 2 && typeof seal.keyId === "string" && seal.keyId.length > 0)) &&
     seal.alg === "AES-256-GCM" &&
     typeof seal.uid === "string" &&
     typeof seal.recordId === "string" &&
@@ -43,6 +44,17 @@ export function diaryPlaintextForSeal(record: BusinessEntry): string {
     payload: record.payload,
     documentHistory: record.documentHistory,
   });
+}
+
+/** Parent id stays readable. The letter body is only inside the envelope. */
+function letterheadMirrorLinkage(record: BusinessEntry): { letterheadDocumentId: string } | null {
+  if (record.entryType !== "letterhead_matter") return null;
+  const payload = record.payload as { letterheadDocumentId?: unknown } | null;
+  const letterheadDocumentId = payload?.letterheadDocumentId;
+  if (typeof letterheadDocumentId !== "string" || letterheadDocumentId.trim().length === 0) {
+    throw new Error("letterhead_link_missing");
+  }
+  return { letterheadDocumentId };
 }
 
 export function sealedDiaryCloudPayload(
@@ -68,7 +80,7 @@ export function sealedDiaryCloudPayload(
     reminder: null,
     location: null,
     attachments: [],
-    payload: null,
+    payload: letterheadMirrorLinkage(record),
     documentHistory: emptyDocumentHistory(),
     pdfUri: null,
     contentSeal: seal,

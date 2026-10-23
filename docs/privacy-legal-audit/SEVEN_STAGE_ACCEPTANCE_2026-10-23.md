@@ -51,15 +51,21 @@ Expected cost delta is additional reads and callables for encrypted creation/con
 
 ## Independent integration review
 
-The bundle was verified against `fe330a04` and imported as `review/seven-stage-acceptance` without changing the dirty goods-evidence checkout. File hashes in the handoff manifest matched the imported tree. The CI edit only adds `security/firebase-session-hardening` to `pull_request` branches. Push to `main` and `workflow_dispatch` are unchanged. That filter does not run until it is on the default branch, so this candidate still needs `workflow_dispatch`.
+The bundle was verified against `fe330a04` and imported as `review/seven-stage-acceptance` without changing the dirty goods-evidence checkout. File hashes in the handoff manifest matched the imported tree. The CI edit only adds `security/firebase-session-hardening` to `pull_request` branches. Push to `main` and `workflow_dispatch` are unchanged.
+
+Canonical CI for head `6cd265f176f1a8e41c892eee6cba63e1942705d4` already ran. Run `39984058597` was a successful `pull_request` run, attempt 1, job `120518527428` (`verify`). The checkout was `refs/remotes/pull/35/merge` at `d154c7c2aaa14f2e232d91cb902c1e3e22f7f2fb`, with parents `fe330a04a6455d25513143b0763c2085c01134b8` and `6cd265f176f1a8e41c892eee6cba63e1942705d4`. Logs recorded `test:all` 177/177 and `ci:verify` PASS on Node 20 and Java 21. That run does not cover commits after `6cd265f`. An earlier draft of this section said the pull-request filter could not run until it reached the default branch and that this candidate still needed `workflow_dispatch`. Those statements were wrong for run `39984058597`.
 
 The imported correction was re-run here, not accepted from the coordinator log: `test:privacy-acceptance-races`, `test:content-encryption`, `test:diary-seal`, `test:age-eligibility`, `test:business-admission`, and `test:deletion-policy-v2` passed. Host Node was the local toolchain, not Actions Node 20.
 
-A sealed letterhead parent previously could not mint its diary mirror, because mirror validation still required plaintext letter input. Rules and the diary parent check now accept a sealed parent (`title == "sealed"`, `input == null`, owner-bound envelope) or the existing plaintext parent. A wrong-collection envelope cannot mint a mirror. A sealed parent with plaintext `input` is rejected. The mirror payload and the zero-quota exemption are unchanged. `letterheadQuota.emulator.test.ts` passed, including those cases, and the static read budget stayed 5 and 6. Rules still cannot prove the ciphertext is authentic; that remains the server open.
+A sealed letterhead parent previously could not mint its diary mirror, because mirror validation still required plaintext letter input. Rules and the diary parent check now accept a sealed parent (`title == "sealed"`, `input == null`, owner-bound envelope) or the existing plaintext parent. A wrong-collection envelope cannot mint a mirror. A sealed parent with plaintext `input` is rejected.
+
+The production diary writer seals the mirror as well. The stored mirror keeps only `payload.letterheadDocumentId`. The letter body is inside the diary envelope. A mirror that also stores the body is denied. Quota exemption still requires the real parent and the deterministic id. `letterheadQuota.emulator.test.ts` passed both the older plaintext mirror and this encrypted parent-plus-mirror case. The static read budget stayed 5 and 6. Rules still cannot prove the ciphertext is authentic. Letterhead creation screens remain redirects to the saved-letter list. The create route stays read-only.
+
+Customer Credit payment, closure, and edit writes now commit with the revision they read. Encryption stays outside the transaction. A conflict re-reads, decrypts, and reseals. The same payment id is not added twice. `creditRevision.emulator.test.ts` ran two clients against the emulator: both payments remained, a closure kept the newer payment, an edit and a closure both survived, a delete during preparation was not recreated, and a session generation change did not commit. Same-millisecond writes received different revisions. Purchase-order, professional-pack, and sealed diary updates use the same retry. A rules expression that compares the sealed credit document fails evaluation, so old direct writes are not yet rejected by Rules. The repository transaction is the executed guard.
 
 The age screen clears the typed date after a decision, sign-out, or a deletion request. The date is still not stored.
 
-Overall decision remains **HOLD**. This review is not independent third-party acceptance, not canonical CI, and not a public-release decision.
+Overall decision remains **HOLD**. Run `39984058597` is canonical CI for `6cd265f` only. This review is not independent third-party acceptance and not a public-release decision. PR #35 stays a draft.
 
 ## Plain-language brief
 

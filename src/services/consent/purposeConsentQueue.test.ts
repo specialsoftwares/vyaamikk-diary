@@ -71,6 +71,34 @@ async function main() {
   await oldRead;
   assert.equal(enabled, false);
   assert.equal(ordered.state('a')?.revision, 2);
+  let remoteListener: ((remote: { ok: true; revision: number; decision: 'withdraw'; receivedAt: number }) => void) | null = null;
+  let watchedRemote: PurposeState = { revision: 0, decision: null, receivedAt: null };
+  const watched = createPurposeConsentQueue({
+    ...ports,
+    send: async (input) => {
+      if ('action' in input) return { ok: true as const, ...watchedRemote };
+      const transition = purposeTransition(watchedRemote, { ...input, alreadyReceived: false }, 10);
+      if (transition.apply) watchedRemote = transition.state;
+      return { ok: true as const, ...watchedRemote, conflict: transition.conflict };
+    },
+    observeRemote: (_uid, onRemote) => {
+      remoteListener = onRemote as typeof remoteListener;
+      return () => { remoteListener = null; };
+    },
+  });
+  watched.bind('watched');
+  await watched.choose('watched', true);
+  assert.equal(enabled, true);
+  remoteListener?.({ ok: true, revision: 8, decision: 'withdraw', receivedAt: 8 });
+  for (let i = 0; i < 8; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(enabled, false, 'another device withdrawal stops this device');
+  const staleWithdraw = remoteListener;
+  watchedRemote = { revision: 8, decision: 'withdraw', receivedAt: 8 };
+  generation += 1;
+  await watched.choose('watched', true);
+  staleWithdraw?.({ ok: true, revision: 9, decision: 'withdraw', receivedAt: 9 });
+  for (let i = 0; i < 8; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(enabled, true, 'a withdrawal from the previous generation does not apply');
   console.log('purposeConsentQueue: ordering, offline, storage, replay and session tests passed');
 }
 main().catch(e => { console.error(e); process.exitCode = 1; });

@@ -7,8 +7,16 @@ import { HttpsError, onCall } from "firebase-functions/v2/https";
 
 import { assertAdmittedCallableUser } from "../identity/admitCallableUser";
 import { assertBusinessAgeAdmitted } from "../identity/businessAdmission";
-import { loadContentKey, openContent, sealContent, type ContentSeal } from "./contentEncryption";
+import {
+  loadContentKey,
+  loadNamedContentKey,
+  openContent,
+  sealContent,
+  sealContentV2,
+  type ContentSeal,
+} from "./contentEncryption";
 import { contentDataKey } from "./secrets";
+import { assertRestoreTrafficClosed } from "../deletion/restoreGate";
 
 const COLLECTIONS = new Set([
   "entries",
@@ -60,6 +68,7 @@ export const sealOwnerContent = onCall(
     const uid = request.auth?.uid;
     if (!uid) throw new HttpsError("unauthenticated", "Sign in first.");
     await assertBusinessAgeAdmitted(uid);
+    await assertRestoreTrafficClosed(uid);
     const data = asRecord(request.data);
     const binding = requireBinding(data, uid);
     const plaintextBase64 = String(data.plaintextBase64 ?? "");
@@ -78,7 +87,15 @@ export const sealOwnerContent = onCall(
     } catch {
       throw new HttpsError("failed-precondition", "Content protection is unavailable.");
     }
-    const seal = sealContent({ key, uid, plaintext, ...binding });
+    const activeKeyId = process.env.CONTENT_DATA_KEY_ID?.trim();
+    let seal: ContentSeal;
+    if (activeKeyId) {
+      const activeKey = loadNamedContentKey(activeKeyId);
+      if (!activeKey) throw new HttpsError("failed-precondition", "Content protection is unavailable.");
+      seal = sealContentV2({ key: activeKey, keyId: activeKeyId, uid, plaintext, ...binding });
+    } else {
+      seal = sealContent({ key, uid, plaintext, ...binding });
+    }
     return { seal };
   }
 );
@@ -90,6 +107,7 @@ export const openOwnerContent = onCall(
     const uid = request.auth?.uid;
     if (!uid) throw new HttpsError("unauthenticated", "Sign in first.");
     await assertBusinessAgeAdmitted(uid);
+    await assertRestoreTrafficClosed(uid);
     const data = asRecord(request.data);
     const binding = requireBinding(data, uid);
     const seal = data.seal as ContentSeal | undefined;
@@ -103,7 +121,13 @@ export const openOwnerContent = onCall(
       throw new HttpsError("failed-precondition", "Content protection is unavailable.");
     }
     try {
-      const plaintext = openContent({ key, uid, seal, ...binding });
+      const plaintext = openContent({
+        key,
+        uid,
+        seal,
+        ...binding,
+        resolveKey: (keyId) => loadNamedContentKey(keyId),
+      });
       return { plaintextBase64: plaintext.toString("base64") };
     } catch (error) {
       const code = error instanceof Error ? error.message : "";

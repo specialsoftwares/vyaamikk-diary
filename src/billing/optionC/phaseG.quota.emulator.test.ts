@@ -556,7 +556,8 @@ async function main() {
     await assertSucceeds(
       updateDoc(doc(authedDb("g-po"), "users", "g-po", "purchaseOrders", "po_on_1"), {
         vendorName: "Edited Vendor",
-        updatedAt: Date.now(),
+        updatedAt: po1.updatedAt + 1,
+        mutationBaseRevision: po1.updatedAt,
       })
     );
     check("I PO edit does not require usage", (await usageCount("g-po")) === 1);
@@ -1184,17 +1185,20 @@ async function main() {
     await assertSucceeds(
       updateDoc(doc(authedDb("g-pk"), "users", "g-pk", "professionalPacks", "pk_on_1"), {
         title: "Edited pack",
-        updatedAt: Date.now(),
+        updatedAt: pk1.updatedAt + 1,
+        mutationBaseRevision: pk1.updatedAt,
       })
     );
     check("I pack edit does not consume quota", (await usageCount("g-pk")) === 501);
 
     // CC payment-shaped update (non-billable)
+    const creditEditedAt = cr1.updatedAt + 1;
     await assertSucceeds(
       updateDoc(doc(authedDb("g-cc"), "users", "g-cc", "customerCreditRecords", "cr_on_1"), {
         userId: "g-cc",
         remarks: "payment appended locally in test",
-        updatedAt: Date.now(),
+        updatedAt: creditEditedAt,
+        mutationBaseRevision: cr1.updatedAt,
       })
     );
     check(
@@ -1202,12 +1206,14 @@ async function main() {
       (await usageCount("g-cc")) === 1
     );
 
-    const closedAt = Date.now();
+    const closedAt = creditEditedAt + 1;
     await assertSucceeds(
       updateDoc(doc(authedDb("g-cc"), "users", "g-cc", "customerCreditRecords", "cr_on_1"), {
         userId: "g-cc",
         status: "fully_paid",
         closedAt,
+        updatedAt: closedAt,
+        mutationBaseRevision: creditEditedAt,
         closure: {
           finalPaymentDate: closedAt,
           finalPaymentAmount: 10000,
@@ -1218,7 +1224,6 @@ async function main() {
           adjustment: "none",
           closedAt,
         },
-        updatedAt: closedAt,
       })
     );
     check("I CC full-closure-shaped update does not consume", (await usageCount("g-cc")) === 1);

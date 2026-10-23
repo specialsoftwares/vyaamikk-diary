@@ -14,6 +14,12 @@ import {
 import { doc, getDoc, setDoc, updateDoc, writeBatch, type Firestore } from "firebase/firestore";
 
 import { createEntryAtomic, createEntryAtomicDetailed } from "@/services/diary/atomicCreate";
+import { openContent, sealContent } from "../../../functions/src/privacy/contentEncryption";
+import {
+  cloudPayloadLeaksPlaintext,
+  diaryPlaintextForSeal,
+  sealedDiaryCloudPayload,
+} from "@/services/privacy/diarySealDocument";
 import { createLetterheadDocumentAtomic } from "@/services/letterhead/atomicCreate";
 import { letterheadMirrorRecordId } from "@/services/letterhead/letterheadMirrorPolicy";
 import { classifyAtomicCreateError } from "@/billing/optionC/classifyCreateError";
@@ -512,6 +518,94 @@ async function main() {
       wrongSealKind = classifyAtomicCreateError(e);
     }
     check("wrong-collection envelope cannot mint a letterhead mirror", wrongSealKind === "permission_denied");
+
+    const letterBody = "PRIVATE-LETTER-BODY-88421";
+    const encParentId = "lh_enc_parent";
+    const encAt = Date.UTC(2026, 9, 23, 2);
+    const encKey = Buffer.alloc(32, 11);
+    const parentSeal = sealContent({
+      key: encKey,
+      uid: "alice",
+      collection: "letterheadDocs",
+      recordId: encParentId,
+      revision: encAt,
+      purpose: "letterhead_document",
+      plaintext: Buffer.from(JSON.stringify({ input: { body: letterBody, subject: "Private subject" } })),
+    });
+    await assertSucceeds(
+      setDoc(doc(authedDb("alice"), "users", "alice", "letterheadDocs", encParentId), {
+        userId: "alice",
+        title: "sealed",
+        input: null,
+        pdfUri: null,
+        createdAt: encAt,
+        updatedAt: encAt,
+        contentSeal: parentSeal,
+      })
+    );
+    const usageBeforeEncryptedMirror = await usageCount("alice");
+    const encryptedMirror = await createEntryAtomicDetailed(
+      authedDb("alice"),
+      "alice",
+      {
+        ...mirrorInput(encParentId),
+        payload: { ...mirrorInput(encParentId).payload, body: letterBody, subject: "Private subject" },
+      },
+      undefined,
+      encAt + 1000,
+      `${encParentId}:matter`,
+      (record) => {
+        const seal = sealContent({
+          key: encKey,
+          uid: record.userId,
+          collection: "entries",
+          recordId: record.id,
+          revision: record.updatedAt,
+          purpose: "diary",
+          plaintext: Buffer.from(diaryPlaintextForSeal(record)),
+        });
+        return sealedDiaryCloudPayload(record, seal);
+      }
+    );
+    const storedMirror = await getDoc(
+      doc(authedDb("alice"), "users", "alice", "entries", encryptedMirror.record.id)
+    );
+    const storedData = storedMirror.data() as Record<string, unknown>;
+    const storedPayload = storedData.payload as { letterheadDocumentId?: string; body?: string };
+    check("encrypted diary mirror keeps only the parent linkage", storedPayload?.letterheadDocumentId === encParentId && storedPayload.body == null);
+    check("encrypted diary mirror does not store the letter body", !cloudPayloadLeaksPlaintext(storedData, letterBody));
+    check(
+      "encrypted letterhead mirror does not consume ordinary quota",
+      (await usageCount("alice")) === usageBeforeEncryptedMirror
+    );
+    const openedMirror = openContent({
+      key: encKey,
+      uid: "alice",
+      collection: "entries",
+      recordId: encryptedMirror.record.id,
+      revision: Number(storedData.updatedAt),
+      purpose: "diary",
+      seal: storedData.contentSeal as never,
+    }).toString("utf8");
+    const secondClientParent = await getDoc(
+      doc(testEnv.authenticatedContext("alice").firestore(), "users", "alice", "letterheadDocs", encParentId)
+    );
+    const openedParent = openContent({
+      key: encKey,
+      uid: "alice",
+      collection: "letterheadDocs",
+      recordId: encParentId,
+      revision: encAt,
+      purpose: "letterhead_document",
+      seal: secondClientParent.data()?.contentSeal,
+    }).toString("utf8");
+    check("second client opens the encrypted letter and its diary mirror", openedMirror.includes(letterBody) && openedParent.includes(letterBody));
+    await assertFails(
+      updateDoc(doc(authedDb("alice"), "users", "alice", "entries", encryptedMirror.record.id), {
+        payload: { letterheadDocumentId: encParentId, body: letterBody },
+      })
+    );
+    check("sealed mirror that also stores the letter body is denied", true);
 
     const shapeParent = await createLetterheadDocumentAtomic(
       authedDb("alice"),

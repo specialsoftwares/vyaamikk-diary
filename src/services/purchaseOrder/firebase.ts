@@ -21,6 +21,12 @@ import {
 } from "firebase/firestore";
 
 import { AppError } from "@/domain/errors";
+import { currentAuthMutationGeneration } from "@/services/auth/authSessionFence";
+import {
+  commitExpectedRevision,
+  nextContentRevision,
+  RevisionConflict,
+} from "@/services/privacy/expectedRevisionCommit";
 import { getFirebaseDb } from "@/config/firebase";
 import {
   openBusinessCloud,
@@ -145,7 +151,12 @@ async function materializePo(id: string, raw: Record<string, unknown>, userId: s
   return openBusinessCloud("purchaseOrders", fromDoc(id, raw, userId), raw);
 }
 
-async function commitPo(userId: string, next: PurchaseOrder, existingRaw: Record<string, unknown> | null) {
+async function commitPo(
+  userId: string,
+  next: PurchaseOrder,
+  existingRaw: Record<string, unknown> | null,
+  generationAtStart: number
+) {
   const cloud = await protectBusinessCloud({
     collection: "purchaseOrders",
     userId,
@@ -154,7 +165,14 @@ async function commitPo(userId: string, next: PurchaseOrder, existingRaw: Record
     plain: toCloud(next),
     existingRaw,
   });
-  await setDoc(poDocRef(userId, next.id), cloud, { merge: true });
+  await commitExpectedRevision({
+    db: getFirebaseDb(),
+    ref: poDocRef(userId, next.id),
+    expectedRevision: Number(existingRaw?.updatedAt),
+    cloud,
+    generationAtStart,
+    currentGeneration: currentAuthMutationGeneration,
+  });
 }
 
 export const firebasePurchaseOrderRepository: PurchaseOrderRepository = {
@@ -183,10 +201,12 @@ export const firebasePurchaseOrderRepository: PurchaseOrderRepository = {
 
   async update(userId, input) {
     const ref = poDocRef(userId, input.id);
+    const generationAtStart = currentAuthMutationGeneration();
+    for (let attempt = 0; attempt < 5; attempt += 1) {
     const snap = await getDoc(ref);
     if (!snap.exists()) throw new AppError("not_found", "Purchase order not found.");
     const existing = await materializePo(snap.id, snap.data() as Record<string, unknown>, userId);
-    const now = Date.now();
+    const now = nextContentRevision(existing.updatedAt, Date.now());
     const items = input.items ?? existing.items;
     const next: PurchaseOrder = {
       ...existing,
@@ -268,16 +288,26 @@ export const firebasePurchaseOrderRepository: PurchaseOrderRepository = {
       ],
       updatedAt: now,
     };
-    await commitPo(userId, next, snap.data() as Record<string, unknown>);
-    return next;
+    try {
+      await commitPo(userId, next, snap.data() as Record<string, unknown>, generationAtStart);
+      return next;
+    } catch (error) {
+      if (!(error instanceof RevisionConflict)) throw error;
+    }
+    }
+    throw new AppError("save_failed", "This purchase order changed on another device. Try again.", undefined, {
+      reason: "revision_conflict",
+    });
   },
 
   async cancel(userId, id) {
     const ref = poDocRef(userId, id);
+    const generationAtStart = currentAuthMutationGeneration();
+    for (let attempt = 0; attempt < 5; attempt += 1) {
     const snap = await getDoc(ref);
     if (!snap.exists()) throw new AppError("not_found", "Purchase order not found.");
     const existing = await materializePo(snap.id, snap.data() as Record<string, unknown>, userId);
-    const now = Date.now();
+    const now = nextContentRevision(existing.updatedAt, Date.now());
     const next: PurchaseOrder = {
       ...existing,
       status: "cancelled",
@@ -289,8 +319,16 @@ export const firebasePurchaseOrderRepository: PurchaseOrderRepository = {
       ],
       updatedAt: now,
     };
-    await commitPo(userId, next, snap.data() as Record<string, unknown>);
-    return next;
+    try {
+      await commitPo(userId, next, snap.data() as Record<string, unknown>, generationAtStart);
+      return next;
+    } catch (error) {
+      if (!(error instanceof RevisionConflict)) throw error;
+    }
+    }
+    throw new AppError("save_failed", "This purchase order changed on another device. Try again.", undefined, {
+      reason: "revision_conflict",
+    });
   },
 
   async remove(userId, id) {

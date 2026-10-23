@@ -10,6 +10,12 @@ import {
 } from "firebase/firestore";
 
 import { AppError } from "@/domain/errors";
+import { currentAuthMutationGeneration } from "@/services/auth/authSessionFence";
+import {
+  commitExpectedRevision,
+  nextContentRevision,
+  RevisionConflict,
+} from "@/services/privacy/expectedRevisionCommit";
 import type { ProfessionalServicePack } from "@/domain/professionalPack";
 import type { EntryReminder } from "@/domain/types";
 import { getFirebaseDb } from "@/config/firebase";
@@ -94,6 +100,8 @@ export const firebaseProfessionalPackRepository: ProfessionalPackRepository = {
 
   async update(userId, input) {
     const ref = doc(getFirebaseDb(), "users", userId, "professionalPacks", input.id);
+    const generationAtStart = currentAuthMutationGeneration();
+    for (let attempt = 0; attempt < 5; attempt += 1) {
     const snap = await getDoc(ref);
     if (!snap.exists()) throw new AppError("not_found", "Pack not found.");
     const existing = (await materializePack(snap.id, snap.data() as Record<string, unknown>))!;
@@ -125,21 +133,36 @@ export const firebaseProfessionalPackRepository: ProfessionalPackRepository = {
           : input.professionalContact?.trim() || null,
       notes: input.notes === undefined ? existing.notes : input.notes?.trim() || null,
       pdfUri: input.pdfUri === undefined ? existing.pdfUri : input.pdfUri,
-      updatedAt: Date.now(),
+      updatedAt: nextContentRevision(existing.updatedAt, Date.now()),
     };
     const patch = packToCloudStorage(next);
     patch.reminder = reminderJson(next.reminder);
-    const cloud = await protectBusinessCloud({
-      collection: "professionalPacks",
-      userId,
-      recordId: next.id,
-      revision: next.updatedAt,
-      plain: patch,
-      existingRaw: snap.data() as Record<string, unknown>,
+    try {
+      const cloud = await protectBusinessCloud({
+        collection: "professionalPacks",
+        userId,
+        recordId: next.id,
+        revision: next.updatedAt,
+        plain: patch,
+        existingRaw: snap.data() as Record<string, unknown>,
+      });
+      await commitExpectedRevision({
+        db: getFirebaseDb(),
+        ref,
+        expectedRevision: Number((snap.data() as { updatedAt?: number }).updatedAt),
+        cloud,
+        generationAtStart,
+        currentGeneration: currentAuthMutationGeneration,
+      });
+      publishDomainChange(userId, "professionalPack", { effect: "upsert", recordId: next.id });
+      return next;
+    } catch (error) {
+      if (!(error instanceof RevisionConflict)) throw error;
+    }
+    }
+    throw new AppError("save_failed", "This pack changed on another device. Try again.", undefined, {
+      reason: "revision_conflict",
     });
-    await setDoc(ref, cloud, { merge: true });
-    publishDomainChange(userId, "professionalPack", { effect: "upsert", recordId: next.id });
-    return next;
   },
 
   async hardDelete(userId, id) {

@@ -15,6 +15,12 @@ import {
 } from "firebase/firestore";
 
 import { AppError } from "@/domain/errors";
+import { currentAuthMutationGeneration } from "@/services/auth/authSessionFence";
+import {
+  commitExpectedRevision,
+  nextContentRevision,
+  RevisionConflict,
+} from "@/services/privacy/expectedRevisionCommit";
 import type { BusinessEntry } from "@/domain/businessEntry";
 import type { EntryReminder } from "@/domain/types";
 import { entryFromFirestoreDoc } from "./atomicCreate";
@@ -74,33 +80,42 @@ export async function updateDiaryEntryOnDb(
   const setDocFn = deps.setDoc ?? setDoc;
 
   if (deps.protectCloud) {
-    const snap = await getDocFn(ref);
-    if (!snap.exists()) throw new AppError("not_found", "Entry not found.");
-    const raw = snap.data() as Record<string, unknown>;
-    let existing = entryFromFirestoreDoc(snap.id, raw);
-    if (!existing) throw new AppError("save_failed", "Entry could not be read.");
-    if (deps.openExisting) existing = await deps.openExisting(existing, raw);
-    if (expectedUpdatedAt != null && existing.updatedAt !== expectedUpdatedAt) {
-      throw new AppError("save_failed", "Entry changed remotely.", undefined, { remoteChanged: true });
-    }
-    const next = buildDiaryUpdateRecord(existing, edit);
-    const cancelId = reminderCancelIdAfterUpdate(existing, edit);
-    const patch = await deps.protectCloud(next);
-    if (expectedUpdatedAt != null) {
-      await txFn(db, async (tx: Transaction) => {
-        const fresh = await tx.get(ref);
-        if (!fresh.exists()) throw new AppError("not_found", "Entry not found.");
-        const current = entryFromFirestoreDoc(fresh.id, fresh.data() as Record<string, unknown>);
-        if (!current || current.updatedAt !== expectedUpdatedAt) {
+    const generationAtStart = currentAuthMutationGeneration();
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const snap = await getDocFn(ref);
+      if (!snap.exists()) throw new AppError("not_found", "Entry not found.");
+      const raw = snap.data() as Record<string, unknown>;
+      let existing = entryFromFirestoreDoc(snap.id, raw);
+      if (!existing) throw new AppError("save_failed", "Entry could not be read.");
+      if (deps.openExisting) existing = await deps.openExisting(existing, raw);
+      if (expectedUpdatedAt != null && existing.updatedAt !== expectedUpdatedAt) {
+        throw new AppError("save_failed", "Entry changed remotely.", undefined, { remoteChanged: true });
+      }
+      const next = buildDiaryUpdateRecord(existing, edit);
+      const stamped = { ...next, updatedAt: nextContentRevision(existing.updatedAt, next.updatedAt) };
+      const cancelId = reminderCancelIdAfterUpdate(existing, edit);
+      const patch = await deps.protectCloud(stamped);
+      try {
+        await commitExpectedRevision({
+          db,
+          ref,
+          expectedRevision: Number(raw.updatedAt),
+          cloud: patch,
+          generationAtStart,
+          currentGeneration: currentAuthMutationGeneration,
+        });
+        await runAfterDiaryUpdateCommit(cancelId, deps.cancelNotification);
+        return stamped;
+      } catch (error) {
+        if (!(error instanceof RevisionConflict)) throw error;
+        if (expectedUpdatedAt != null) {
           throw new AppError("save_failed", "Entry changed remotely.", undefined, { remoteChanged: true });
         }
-        tx.set(ref, patch, { merge: true });
-      });
-    } else {
-      await setDocFn(ref, patch, { merge: true });
+      }
     }
-    await runAfterDiaryUpdateCommit(cancelId, deps.cancelNotification);
-    return next;
+    throw new AppError("save_failed", "This entry changed on another device. Try again.", undefined, {
+      reason: "revision_conflict",
+    });
   }
 
   if (expectedUpdatedAt != null) {
