@@ -168,29 +168,74 @@ export function planContentKeyMigration(rows: { contentSeal?: { v?: unknown; key
   return { mode: "count-only" as const, counts, writes: 0 };
 }
 
-export type MigrationRow = { id: string; updatedAt: number; contentSeal: ContentSeal | null };
+export type MigrationPersistResult = "persisted" | "conflict" | "rejected" | "unknown";
+
+export type MigrationRow = {
+  id: string;
+  updatedAt: number;
+  contentSeal: ContentSeal | null;
+  /** Document path. Ownership is this path, not the fields inside the seal. */
+  path?: string;
+};
+
+export type MigrationBatchResult = {
+  written: number;
+  skipped: number;
+  quarantined: string[];
+  conflicts: string[];
+  rejected: string[];
+  unknown: string[];
+  /** Inclusive. The next batch starts at this id, including a conflict or unconfirmed row. */
+  nextCursor: string | null;
+  stopped: null | "conflict" | "rejected" | "unknown" | "writer_threw";
+};
+
+/** users/{uid}/{collection}/{recordId}. The path is the source of ownership. */
+export function sealMatchesSourcePath(row: MigrationRow): boolean {
+  const seal = row.contentSeal;
+  if (!seal || !row.path) return false;
+  const parts = row.path.split("/");
+  if (parts.length !== 4 || parts[0] !== "users") return false;
+  const [, uid, collection, recordId] = parts;
+  if (!uid || !collection || !recordId) return false;
+  return seal.uid === uid && seal.collection === collection && seal.recordId === recordId && seal.revision === row.updatedAt;
+}
 
 /**
- * Bounded dry-run unless CONTENT_KEY_MIGRATION_ENABLED=true and dryRun is false.
- * Live migration stays off. Already-migrated rows are skipped.
+ * nextCursor is inclusive: a later batch must include that row.
+ * A missing persistence adapter cannot count a write.
  */
-export function migrateContentKeyBatch(input: {
+export async function migrateContentKeyBatch(input: {
   rows: MigrationRow[];
   toKeyId: string;
   resolveKey: (keyId: string) => Buffer | null;
   dryRun: boolean;
-  writer?: (row: MigrationRow, seal: ContentSeal) => "ok" | "conflict";
-}): { written: number; skipped: number; quarantined: string[]; conflicts: string[]; nextCursor: string | null } {
+  writer?: (row: MigrationRow, seal: ContentSeal) => Promise<MigrationPersistResult> | MigrationPersistResult;
+}): Promise<MigrationBatchResult> {
   if (!input.dryRun && process.env.CONTENT_KEY_MIGRATION_ENABLED !== "true") {
     throw new Error("migration_disabled");
   }
+  if (!input.dryRun && !input.writer) throw new Error("migration_writer_required");
   const rows = input.rows.slice(0, 50);
   const quarantined: string[] = [];
   const conflicts: string[] = [];
+  const rejected: string[] = [];
+  const unknown: string[] = [];
   let written = 0;
   let skipped = 0;
   const toKey = input.resolveKey(input.toKeyId);
-  for (const row of rows) {
+  const finish = (stopped: MigrationBatchResult["stopped"], nextCursor: string | null): MigrationBatchResult => ({
+    written: input.dryRun ? 0 : written,
+    skipped,
+    quarantined,
+    conflicts,
+    rejected,
+    unknown,
+    nextCursor,
+    stopped,
+  });
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index];
     const seal = row.contentSeal;
     if (!seal) {
       skipped += 1;
@@ -198,6 +243,10 @@ export function migrateContentKeyBatch(input: {
     }
     if (seal.v === 2 && seal.keyId === input.toKeyId) {
       skipped += 1;
+      continue;
+    }
+    if (!input.dryRun && !sealMatchesSourcePath(row)) {
+      quarantined.push(row.id);
       continue;
     }
     const sourceKey = seal.v === 2 ? input.resolveKey(seal.keyId ?? "") : input.resolveKey("legacy");
@@ -232,26 +281,111 @@ export function migrateContentKeyBatch(input: {
       purpose: seal.purpose,
       plaintext,
     });
-    const outcome = input.writer?.(row, next) ?? "ok";
-    if (outcome === "conflict") {
-      conflicts.push(row.id);
-      return {
-        written,
-        skipped,
-        quarantined,
-        conflicts,
-        nextCursor: row.id,
-      };
+    let outcome: MigrationPersistResult;
+    try {
+      outcome = await input.writer!(row, next);
+    } catch {
+      return finish("writer_threw", row.id);
     }
-    written += 1;
+    if (outcome === "persisted") {
+      written += 1;
+      continue;
+    }
+    if (outcome === "conflict") conflicts.push(row.id);
+    else if (outcome === "rejected") rejected.push(row.id);
+    else unknown.push(row.id);
+    return finish(outcome === "conflict" ? "conflict" : outcome === "rejected" ? "rejected" : "unknown", row.id);
   }
+  const nextCursor = input.rows.length > rows.length ? input.rows[rows.length]?.id ?? null : null;
+  return finish(null, nextCursor);
+}
+
+export type MigrationLease = {
+  runId: string;
+  revision: number;
+  cursor: string | null;
+  toKeyId: string;
+  leaseUntil: number;
+  conflicts: string[];
+};
+
+export type MigrationCheckpointStore = {
+  read(): Promise<MigrationLease | null>;
+  compareAndSet(expectedRevision: number | null, next: MigrationLease): Promise<"stored" | "conflict">;
+};
+
+export function createMemoryMigrationCheckpointStore(): MigrationCheckpointStore {
+  let current: MigrationLease | null = null;
   return {
-    written: input.dryRun ? 0 : written,
-    skipped,
-    quarantined,
-    conflicts,
-    nextCursor: input.rows.length > 50 ? rows[rows.length - 1]?.id ?? null : null,
+    async read() {
+      return current ? { ...current, conflicts: [...current.conflicts] } : null;
+    },
+    async compareAndSet(expectedRevision, next) {
+      const revision = current?.revision ?? null;
+      if (revision !== expectedRevision) return "conflict";
+      current = { ...next, conflicts: [...next.conflicts] };
+      return "stored";
+    },
   };
+}
+
+/** Rows at and after the cursor. A missing cursor id is not treated as already done. */
+export function rowsFromInclusiveCursor<T extends { id: string }>(rows: T[], cursor: string | null): T[] {
+  if (!cursor) return rows;
+  const index = rows.findIndex((row) => row.id === cursor);
+  if (index < 0) return [];
+  return rows.slice(index);
+}
+
+export async function runOwnedMigration(input: {
+  store: MigrationCheckpointStore;
+  runId: string;
+  now: number;
+  leaseMs: number;
+  rows: MigrationRow[];
+  toKeyId: string;
+  ring?: readonly string[];
+  resolveKey: (keyId: string) => Buffer | null;
+  writer: (row: MigrationRow, seal: ContentSeal) => Promise<MigrationPersistResult> | MigrationPersistResult;
+}): Promise<
+  | { status: "owned_by_other" | "claim_conflict" | "cursor_not_in_page" | "checkpoint_conflict" | "key_not_in_ring"; cursor: string | null }
+  | { status: "stored"; cursor: string | null; batch: MigrationBatchResult }
+> {
+  if (input.ring && !input.ring.includes(input.toKeyId)) return { status: "key_not_in_ring", cursor: null };
+  const existing = await input.store.read();
+  if (existing && existing.leaseUntil > input.now && existing.runId !== input.runId) {
+    return { status: "owned_by_other", cursor: existing.cursor };
+  }
+  const expected = existing?.revision ?? null;
+  const claimed: MigrationLease = {
+    runId: input.runId,
+    revision: (existing?.revision ?? 0) + 1,
+    cursor: existing?.cursor ?? null,
+    toKeyId: input.toKeyId,
+    leaseUntil: input.now + input.leaseMs,
+    conflicts: existing?.conflicts ?? [],
+  };
+  if ((await input.store.compareAndSet(expected, claimed)) !== "stored") {
+    return { status: "claim_conflict", cursor: existing?.cursor ?? null };
+  }
+  const page = rowsFromInclusiveCursor(input.rows, claimed.cursor);
+  if (claimed.cursor && page.length === 0) return { status: "cursor_not_in_page", cursor: claimed.cursor };
+  const batch = await migrateContentKeyBatch({
+    rows: page,
+    toKeyId: input.toKeyId,
+    resolveKey: input.resolveKey,
+    dryRun: false,
+    writer: input.writer,
+  });
+  const saved = await input.store.compareAndSet(claimed.revision, {
+    ...claimed,
+    revision: claimed.revision + 1,
+    cursor: batch.nextCursor,
+    conflicts: [...claimed.conflicts, ...batch.conflicts],
+    leaseUntil: input.now + input.leaseMs,
+  });
+  if (saved !== "stored") return { status: "checkpoint_conflict", cursor: claimed.cursor };
+  return { status: "stored", cursor: batch.nextCursor, batch };
 }
 
 export type KeyMigrationCheckpoint = {
@@ -273,22 +407,49 @@ export function resumeKeyMigrationCheckpoint(
   };
 }
 
+export type BackupObservation = {
+  keyId: string;
+  source: "backup_inventory";
+  scope: string;
+  observedAt: number;
+  copies: number;
+};
+
+export const BACKUP_OBSERVATION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
 /**
- * A key stays in the ring until active rows, uncovered copies, and backup
- * uncertainty are gone. This does not delete a key.
+ * Retirement becomes ready only from a fresh backup inventory of this key.
+ * A caller-supplied "no copies" flag is not evidence. This does not delete a key.
  */
 export function keyRetirementAllowed(input: {
   keyId: string;
   ring: readonly string[];
   activeUses: number;
-  backupCopiesUnknown: boolean;
   uncovered: readonly string[];
-}): { allowed: false; reason: string } {
+  observation?: BackupObservation | null;
+  now?: number;
+}): { allowed: boolean; reason: string } {
   if (!input.ring.includes(input.keyId)) return { allowed: false, reason: "key_not_in_ring" };
   if (input.activeUses > 0) return { allowed: false, reason: "active_records_remain" };
   if (input.uncovered.length > 0) return { allowed: false, reason: "uncovered_copies" };
-  if (input.backupCopiesUnknown) return { allowed: false, reason: "backup_copies_unknown" };
-  return { allowed: false, reason: "retirement_not_authorised" };
+  const observation = input.observation ?? null;
+  if (!observation) return { allowed: false, reason: "backup_observation_missing" };
+  if (observation.source !== "backup_inventory" || observation.keyId !== input.keyId || observation.scope !== `key-ring:${input.keyId}`) {
+    return { allowed: false, reason: "backup_observation_unproven" };
+  }
+  const now = input.now ?? Date.now();
+  if (!Number.isSafeInteger(observation.observedAt) || observation.observedAt > now || now - observation.observedAt > BACKUP_OBSERVATION_MAX_AGE_MS) {
+    return { allowed: false, reason: "backup_observation_stale" };
+  }
+  if (observation.copies !== 0) return { allowed: false, reason: "backup_copies_remain" };
+  return { allowed: true, reason: "ready_pending_disabled_execution" };
+}
+
+/** The decision can be ready. Deleting the key stays off until an executor is bound. */
+export function executeKeyRetirement(input: Parameters<typeof keyRetirementAllowed>[0]): { deleted: false; reason: string } {
+  const decision = keyRetirementAllowed(input);
+  if (!decision.allowed) return { deleted: false, reason: decision.reason };
+  return { deleted: false, reason: "retirement_executor_not_bound" };
 }
 
 /** Opens v2 with only its named key. A v1 seal still requires the legacy key. */

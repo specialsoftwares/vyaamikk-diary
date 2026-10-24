@@ -10,13 +10,20 @@ import {
   migrateContentKeyBatch,
   openContent,
   openStoredContent,
+  executeKeyRetirement,
   keyRetirementAllowed,
   planContentKeyMigration,
   resumeKeyMigrationCheckpoint,
+  rowsFromInclusiveCursor,
+  runOwnedMigration,
+  sealMatchesSourcePath,
+  createMemoryMigrationCheckpointStore,
   sealContent,
   sealContentV2,
+  CONTENT_MIGRATION_UNCOVERED,
   type ContentSeal,
 } from "./contentEncryption";
+import { boundaryFor } from "./privateFieldCoverage";
 
 const key = randomBytes(32);
 const title = "Warehouse gate replacement";
@@ -101,73 +108,217 @@ assert.equal(openStoredContent({
   ...bind(),
   seal: v2Only,
 }).toString(), title);
-assert.throws(() => migrateContentKeyBatch({
-  rows: [{ id: "a", updatedAt: 1, contentSeal: sealed }],
-  toKeyId: "named-key",
-  resolveKey: () => named,
-  dryRun: false,
-}), /migration_disabled/);
-const dry = migrateContentKeyBatch({
-  rows: [{ id: "a", updatedAt: 1, contentSeal: sealed }, { id: "b", updatedAt: 2, contentSeal: v2Only }],
-  toKeyId: "named-key",
-  resolveKey: (id) => (id === "named-key" ? named : null),
-  dryRun: true,
-});
-assert.equal(dry.written, 0);
-assert.equal(dry.skipped, 1);
-process.env.CONTENT_KEY_MIGRATION_ENABLED = "true";
-const applied = migrateContentKeyBatch({
-  rows: [{ id: "a", updatedAt: 1, contentSeal: sealed }],
-  toKeyId: "named-key",
-  resolveKey: (id) => (id === "named-key" ? named : id === "legacy" ? key : null),
-  dryRun: false,
-  writer: () => "ok",
-});
-delete process.env.CONTENT_KEY_MIGRATION_ENABLED;
-assert.equal(applied.written, 1);
-process.env.CONTENT_KEY_MIGRATION_ENABLED = "true";
-const previous = { cursor: null, toKeyId: "named-key", conflicts: [] as string[] };
-const conflicted = migrateContentKeyBatch({
-  rows: [
-    { id: "a", updatedAt: 1, contentSeal: sealed },
-    { id: "b", updatedAt: 2, contentSeal: sealed },
-  ],
-  toKeyId: "named-key",
-  resolveKey: (id) => (id === "named-key" ? named : id === "legacy" ? key : null),
-  dryRun: false,
-  writer: (row) => (row.id === "a" ? "conflict" : "ok"),
-});
-delete process.env.CONTENT_KEY_MIGRATION_ENABLED;
-assert.deepEqual(conflicted.conflicts, ["a"]);
-assert.equal(conflicted.written, 0);
-assert.equal(conflicted.nextCursor, "a");
-const resumed = resumeKeyMigrationCheckpoint(previous, conflicted);
-assert.equal(resumed.cursor, "a");
-let interrupted = previous;
-try {
-  migrateContentKeyBatch({
-    rows: [{ id: "a", updatedAt: 1, contentSeal: sealed }],
+assert.equal(boundaryFor("exports").boundary, "user_requested_export");
+assert.equal(boundaryFor("storage_object_names").boundary, "routing_metadata");
+assert.equal(boundaryFor("party_ledger_projections").boundary, "owner_rules");
+assert.equal(CONTENT_MIGRATION_UNCOVERED.includes("party_ledger_projections"), true);
+assert.equal(boundaryFor("grin_evidence").privateFields.includes("image bytes"), true);
+const owned = { id: "a", updatedAt: sealed.revision, contentSeal: sealed, path: "users/owner-a/entries/rec-1" };
+const ownedB = { ...owned, id: "b" };
+const keys = (id: string) => (id === "named-key" ? named : id === "legacy" ? key : null);
+
+void (async () => {
+  await assert.rejects(() => migrateContentKeyBatch({
+    rows: [owned],
     toKeyId: "named-key",
     resolveKey: () => named,
     dryRun: false,
+  }), /migration_disabled/);
+  const dry = await migrateContentKeyBatch({
+    rows: [owned, { id: "b", updatedAt: 2, contentSeal: v2Only }],
+    toKeyId: "named-key",
+    resolveKey: (id) => (id === "named-key" ? named : null),
+    dryRun: true,
   });
-} catch {
-  interrupted = resumeKeyMigrationCheckpoint(previous, null);
-}
-assert.equal(interrupted.cursor, null);
-assert.equal(keyRetirementAllowed({
-  keyId: "legacy",
-  ring: ["legacy", "named-key"],
-  activeUses: 0,
-  backupCopiesUnknown: false,
-  uncovered: [],
-}).reason, "retirement_not_authorised");
-assert.equal(keyRetirementAllowed({
-  keyId: "legacy",
-  ring: ["legacy"],
-  activeUses: 1,
-  backupCopiesUnknown: false,
-  uncovered: ["exports"],
-}).reason, "active_records_remain");
-
-console.log("contentEncryption.unit.test.ts: ok");
+  assert.equal(dry.written, 0);
+  assert.equal(dry.skipped, 1);
+  process.env.CONTENT_KEY_MIGRATION_ENABLED = "true";
+  await assert.rejects(() => migrateContentKeyBatch({
+    rows: [owned],
+    toKeyId: "named-key",
+    resolveKey: keys,
+    dryRun: false,
+  }), /migration_writer_required/);
+  const persisted: string[] = [];
+  const applied = await migrateContentKeyBatch({
+    rows: [owned],
+    toKeyId: "named-key",
+    resolveKey: keys,
+    dryRun: false,
+    writer: async (row) => {
+      persisted.push(row.id);
+      return "persisted";
+    },
+  });
+  assert.equal(applied.written, 1);
+  assert.deepEqual(persisted, ["a"]);
+  const rejected = await migrateContentKeyBatch({
+    rows: [owned],
+    toKeyId: "named-key",
+    resolveKey: keys,
+    dryRun: false,
+    writer: async () => "rejected",
+  });
+  assert.equal(rejected.written, 0);
+  assert.equal(rejected.nextCursor, "a");
+  assert.equal(rejected.stopped, "rejected");
+  const lost = await migrateContentKeyBatch({
+    rows: [owned, ownedB],
+    toKeyId: "named-key",
+    resolveKey: keys,
+    dryRun: false,
+    writer: async (row) => (row.id === "a" ? "persisted" : "unknown"),
+  });
+  assert.equal(lost.written, 1);
+  assert.deepEqual(lost.unknown, ["b"]);
+  assert.equal(lost.nextCursor, "b");
+  const thrown = await migrateContentKeyBatch({
+    rows: [owned, ownedB],
+    toKeyId: "named-key",
+    resolveKey: keys,
+    dryRun: false,
+    writer: async (row) => {
+      if (row.id === "b") throw new Error("adapter down");
+      return "persisted";
+    },
+  });
+  assert.equal(thrown.written, 1);
+  assert.equal(thrown.stopped, "writer_threw");
+  assert.equal(thrown.nextCursor, "b");
+  const previous = { cursor: null, toKeyId: "named-key", conflicts: [] as string[] };
+  const conflicted = await migrateContentKeyBatch({
+    rows: [owned, ownedB],
+    toKeyId: "named-key",
+    resolveKey: keys,
+    dryRun: false,
+    writer: (row) => (row.id === "a" ? "conflict" : "persisted"),
+  });
+  assert.deepEqual(conflicted.conflicts, ["a"]);
+  assert.equal(conflicted.written, 0);
+  assert.equal(conflicted.nextCursor, "a");
+  const resumed = resumeKeyMigrationCheckpoint(previous, conflicted);
+  assert.equal(resumed.cursor, "a");
+  assert.deepEqual(rowsFromInclusiveCursor([owned, ownedB], "a").map((row) => row.id), ["a", "b"]);
+  assert.equal(sealMatchesSourcePath({ ...owned, path: "users/other/entries/rec-1" }), false);
+  const store = createMemoryMigrationCheckpointStore();
+  const first = await runOwnedMigration({
+    store,
+    runId: "run-1",
+    now: 1_000,
+    leaseMs: 500,
+    rows: [owned, ownedB],
+    toKeyId: "named-key",
+    resolveKey: keys,
+    writer: async (row) => (row.id === "b" ? "unknown" : "persisted"),
+  });
+  assert.equal(first.status, "stored");
+  if (first.status === "stored") assert.equal(first.cursor, "b");
+  const blocked = await runOwnedMigration({
+    store,
+    runId: "run-2",
+    now: 1_100,
+    leaseMs: 500,
+    rows: [owned, ownedB],
+    toKeyId: "named-key",
+    resolveKey: keys,
+    writer: async () => "persisted",
+  });
+  assert.equal(blocked.status, "owned_by_other");
+  const replay = await runOwnedMigration({
+    store,
+    runId: "run-1",
+    now: 2_000,
+    leaseMs: 500,
+    rows: [owned, ownedB],
+    toKeyId: "named-key",
+    resolveKey: keys,
+    writer: async (row) => {
+      assert.equal(row.id, "b");
+      return "persisted";
+    },
+  });
+  assert.equal(replay.status, "stored");
+  if (replay.status === "stored") {
+    assert.equal(replay.batch.written, 1);
+    assert.equal(replay.cursor, null);
+  }
+  const unbound = await runOwnedMigration({
+    store: createMemoryMigrationCheckpointStore(),
+    runId: "run-3",
+    now: 3_000,
+    leaseMs: 500,
+    rows: [owned],
+    toKeyId: "named-key",
+    ring: ["legacy"],
+    resolveKey: keys,
+    writer: async () => "persisted",
+  });
+  assert.equal(unbound.status, "key_not_in_ring");
+  const mismatched = await migrateContentKeyBatch({
+    rows: [{ ...owned, path: "users/owner-b/entries/rec-1" }],
+    toKeyId: "named-key",
+    resolveKey: keys,
+    dryRun: false,
+    writer: async () => "persisted",
+  });
+  assert.equal(mismatched.written, 0);
+  assert.deepEqual(mismatched.quarantined, ["a"]);
+  delete process.env.CONTENT_KEY_MIGRATION_ENABLED;
+  let interrupted = previous;
+  try {
+    await migrateContentKeyBatch({
+      rows: [owned],
+      toKeyId: "named-key",
+      resolveKey: () => named,
+      dryRun: false,
+    });
+  } catch {
+    interrupted = resumeKeyMigrationCheckpoint(previous, null);
+  }
+  assert.equal(interrupted.cursor, null);
+  assert.equal(keyRetirementAllowed({
+    keyId: "legacy",
+    ring: ["legacy", "named-key"],
+    activeUses: 0,
+    uncovered: [],
+  }).reason, "backup_observation_missing");
+  assert.equal(keyRetirementAllowed({
+    keyId: "legacy",
+    ring: ["legacy"],
+    activeUses: 1,
+    uncovered: ["exports"],
+  }).reason, "active_records_remain");
+  const ready = keyRetirementAllowed({
+    keyId: "legacy",
+    ring: ["legacy"],
+    activeUses: 0,
+    uncovered: [],
+    now: 10_000,
+    observation: {
+      keyId: "legacy",
+      source: "backup_inventory",
+      scope: "key-ring:legacy",
+      observedAt: 9_000,
+      copies: 0,
+    },
+  });
+  assert.equal(ready.allowed, true);
+  assert.equal(executeKeyRetirement({
+    keyId: "legacy",
+    ring: ["legacy"],
+    activeUses: 0,
+    uncovered: [],
+    now: 10_000,
+    observation: {
+      keyId: "legacy",
+      source: "backup_inventory",
+      scope: "key-ring:legacy",
+      observedAt: 9_000,
+      copies: 0,
+    },
+  }).reason, "retirement_executor_not_bound");
+  console.log("contentEncryption.unit.test.ts: ok");
+})().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
