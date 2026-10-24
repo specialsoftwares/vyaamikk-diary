@@ -21,18 +21,32 @@ export function nextContentRevision(previous: number, now: number): number {
   return Math.max(clock, base + 1);
 }
 
-function sessionChanged(submitted: boolean): never {
+/** not_issued: the SDK commit was not called. unknown: it was called and the outcome was not confirmed. confirmed: the SDK commit resolved. */
+export type RevisionCommitOutcome = "not_issued" | "unknown" | "confirmed";
+
+function sessionChanged(outcome: RevisionCommitOutcome): never {
   throw new AppError("permission_denied", "Sign in again.", undefined, {
     reason: "session_changed",
-    // True only after the transaction has already committed. A later logout
-    // cannot recall that server write; the caller must not publish it.
-    submitted,
+    // False only when the write was never handed to the SDK. Unknown means
+    // the acknowledgment was lost after the commit was issued; logout cannot
+    // recall it, and the caller must not publish it or replay it as new.
+    submitted: outcome !== "not_issued",
+    outcome,
   });
 }
 
-/** Production uses the Firestore SDK. Tests replace the runner, not the checks. */
+function isDefiniteRejection(error: unknown): boolean {
+  const code = typeof error === "object" && error != null && "code" in error
+    ? String((error as { code?: unknown }).code)
+    : "";
+  return code === "permission-denied" || code === "invalid-argument" || code === "failed-precondition" || code === "already-exists";
+}
+
+/** Production uses the Firestore SDK. Tests replace the runners, not the checks. */
 export const revisionCommitRuntime = {
   runTransaction,
+  writeBatch,
+  getDoc,
 };
 
 export async function commitExpectedRevision(input: {
@@ -45,35 +59,47 @@ export async function commitExpectedRevision(input: {
   revisionRef?: DocumentReference;
 }): Promise<void> {
   const owned = () => input.currentGeneration() === input.generationAtStart;
-  if (!owned()) sessionChanged(false);
-  await revisionCommitRuntime.runTransaction(input.db, async (tx) => {
-    // Every callback attempt, including a transaction retry, rechecks ownership.
-    if (!owned()) sessionChanged(false);
-    const fresh = await tx.get(input.ref);
-    if (!owned()) sessionChanged(false);
-    if (!fresh.exists()) throw new AppError("not_found", "Record not found.");
-    const current = Number(fresh.data()?.updatedAt);
-    if (current !== input.expectedRevision) throw new RevisionConflict();
-    if (!owned()) sessionChanged(false);
-    // Rules can verify the sibling gate on a batch. The emulator rejects that
-    // same getAfter check when the write is inside the read transaction.
-    if (!input.revisionRef) tx.set(input.ref, input.cloud, { merge: true });
-  });
-  if (!owned()) sessionChanged(input.revisionRef == null);
+  if (!owned()) sessionChanged("not_issued");
+  let writeIssued = false;
+  try {
+    await revisionCommitRuntime.runTransaction(input.db, async (tx) => {
+      // Every callback attempt, including a transaction retry, rechecks ownership.
+      if (!owned()) sessionChanged("not_issued");
+      const fresh = await tx.get(input.ref);
+      if (!owned()) sessionChanged("not_issued");
+      if (!fresh.exists()) throw new AppError("not_found", "Record not found.");
+      const current = Number(fresh.data()?.updatedAt);
+      if (current !== input.expectedRevision) throw new RevisionConflict();
+      if (!owned()) sessionChanged("not_issued");
+      // Rules can verify the sibling gate on a batch. The emulator rejects that
+      // same getAfter check when the write is inside the read transaction.
+      if (!input.revisionRef) {
+        writeIssued = true;
+        tx.set(input.ref, input.cloud, { merge: true });
+      }
+    });
+  } catch (error) {
+    if (error instanceof AppError || error instanceof RevisionConflict) throw error;
+    if (isDefiniteRejection(error)) throw error;
+    if (!owned()) sessionChanged(writeIssued ? "unknown" : "not_issued");
+    throw error;
+  }
+  if (!owned()) sessionChanged(writeIssued ? "confirmed" : "not_issued");
   if (input.revisionRef) {
     const next = Number(input.cloud.updatedAt);
-    const batch = writeBatch(input.db);
+    const batch = revisionCommitRuntime.writeBatch(input.db);
     batch.update(input.ref, input.cloud);
     batch.set(input.revisionRef, { base: input.expectedRevision, revision: next });
+    writeIssued = true;
     try {
       await batch.commit();
     } catch (error) {
-      if (!owned()) sessionChanged(false);
-      const after = await getDoc(input.ref);
+      if (!owned() && !isDefiniteRejection(error)) sessionChanged("unknown");
+      const after = await revisionCommitRuntime.getDoc(input.ref);
       if (!after.exists()) throw new AppError("not_found", "Record not found.");
       if (Number(after.data()?.updatedAt) !== input.expectedRevision) throw new RevisionConflict();
       throw error;
     }
   }
-  if (!owned()) sessionChanged(true);
+  if (!owned()) sessionChanged("confirmed");
 }

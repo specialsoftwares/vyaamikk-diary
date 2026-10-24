@@ -9,6 +9,8 @@ import { AppError } from "@/domain/errors";
 import { RevisionConflict, commitExpectedRevision, revisionCommitRuntime } from "./expectedRevisionCommit";
 
 const original = revisionCommitRuntime.runTransaction;
+const originalBatch = revisionCommitRuntime.writeBatch;
+const originalGet = revisionCommitRuntime.getDoc;
 
 function sessionReason(error: unknown): string | undefined {
   return error instanceof AppError ? String(error.details?.reason) : undefined;
@@ -116,6 +118,76 @@ async function main() {
   assert.equal(staged, true);
   assert.equal(sessionReason(acknowledged), "session_changed");
   assert.equal((acknowledged as AppError).details?.submitted, true);
+  assert.equal((acknowledged as AppError).details?.outcome, "confirmed");
+
+  generation = 0;
+  staged = false;
+  let accepted = false;
+  revisionCommitRuntime.runTransaction = async (_db, work) => {
+    await work({
+      get: async () => ({ exists: () => true, data: () => ({ updatedAt: 10 }) }),
+      set: () => {
+        staged = true;
+      },
+    } as never);
+  };
+  revisionCommitRuntime.writeBatch = (() => ({
+    update: () => {
+      staged = true;
+    },
+    set: () => undefined,
+    commit: async () => {
+      accepted = true;
+      generation = 1;
+      throw new Error("acknowledgment_lost_after_acceptance");
+    },
+  })) as never;
+  let lostAck: unknown;
+  try {
+    await commitExpectedRevision({
+      db: {} as never,
+      ref: {} as never,
+      revisionRef: {} as never,
+      expectedRevision: 10,
+      cloud: { updatedAt: 11 },
+      generationAtStart: 0,
+      currentGeneration: () => generation,
+    });
+  } catch (error) {
+    lostAck = error;
+  }
+  assert.equal(accepted, true);
+  assert.equal(staged, true);
+  assert.equal(sessionReason(lostAck), "session_changed");
+  assert.equal((lostAck as AppError).details?.outcome, "unknown");
+  assert.equal((lostAck as AppError).details?.submitted, true);
+
+  generation = 0;
+  accepted = false;
+  revisionCommitRuntime.getDoc = (async () => ({ exists: () => true, data: () => ({ updatedAt: 10 }) })) as never;
+  revisionCommitRuntime.writeBatch = (() => ({
+    update: () => undefined,
+    set: () => undefined,
+    commit: async () => {
+      throw Object.assign(new Error("denied"), { code: "permission-denied" });
+    },
+  })) as never;
+  let rejected: unknown;
+  try {
+    await commitExpectedRevision({
+      db: {} as never,
+      ref: {} as never,
+      revisionRef: {} as never,
+      expectedRevision: 10,
+      cloud: { updatedAt: 11 },
+      generationAtStart: 0,
+      currentGeneration: () => generation,
+    });
+  } catch (error) {
+    rejected = error;
+  }
+  assert.equal(sessionReason(rejected), undefined);
+  assert.equal((rejected as { code?: string }).code, "permission-denied");
   console.log("expectedRevisionCommit: generation changes during read, retry and acknowledgment stay unpublished");
 }
 
@@ -124,4 +196,6 @@ main().catch((error) => {
   process.exitCode = 1;
 }).finally(() => {
   revisionCommitRuntime.runTransaction = original;
+  revisionCommitRuntime.writeBatch = originalBatch;
+  revisionCommitRuntime.getDoc = originalGet;
 });
