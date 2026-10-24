@@ -42,6 +42,7 @@ import { purgeAllUserOwnedStorage } from "./storagePurge";
 import { INCLUDE_GRIN_IN_ACCOUNT_PURGE, purgeGrinEvidenceIfEnabled } from "./grinCleanup";
 import { deletionJobInputFromUser, deletionStampFromJobInput } from "./deletionPolicy";
 import { preservedGraceExpiresAt } from "./deletionPolicy";
+import { projectRestoreAuthority, unionWithdrawnPurposes } from "./restoreAuthority";
 
 import { ownsDeletionLease, deletedProfileStub } from "./deletionSafety";
 
@@ -71,27 +72,28 @@ export async function ensureDeletionJobDoc(input: {
 
   return db.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
+    if (snap.exists && (snap.data() as DeletionJobDoc).status === "completed") {
+      return snap.data() as DeletionJobDoc;
+    }
+    const purposeSnap = await tx.get(db.collection(USERS).doc(input.uid).collection("processingPurposes"));
+    const found = purposeSnap.docs.filter((doc) => doc.get("decision") === "withdraw").map((doc) => doc.id);
     if (!snap.exists) {
-      const job = initialDeletionJob({ ...input, now });
+      const job = withWithdrawnPurposes(initialDeletionJob({ ...input, now }), found);
       tx.set(ref, job);
       return job;
     }
     const existing = snap.data() as DeletionJobDoc;
-    if (existing.status === "completed") {
-      // A retired uid cannot start a new deletion generation or erase its evidence.
-      return existing;
-    }
     if (existing.status === "cancelled") {
-      const job = initialDeletionJob({
+      const job = withWithdrawnPurposes(initialDeletionJob({
         ...input,
         generation: existing.generation + 1,
         now,
-      });
+      }), found);
       tx.set(ref, job);
       return job;
     }
     // Refresh grace timestamps if still awaiting / ready.
-    const merged: DeletionJobDoc = {
+    const merged: DeletionJobDoc = withWithdrawnPurposes({
       ...existing,
       requestedAt: existing.requestedAt,
       graceExpiresAt: preservedGraceExpiresAt(
@@ -109,9 +111,28 @@ export async function ensureDeletionJobDoc(input: {
             ? "ready"
             : "awaiting_grace",
       updatedAt: now,
-    };
+    }, unionWithdrawnPurposes(existing.withdrawnPurposes, found));
     tx.set(ref, merged, { merge: true });
     return merged;
+  });
+}
+
+function withWithdrawnPurposes(job: DeletionJobDoc, purposes: readonly string[]): DeletionJobDoc {
+  const withdrawnPurposes = unionWithdrawnPurposes(job.withdrawnPurposes, purposes);
+  return withdrawnPurposes.length > 0 ? { ...job, withdrawnPurposes } : job;
+}
+
+/** Remembers a withdrawal on an open deletion job. A missing job is not an error. */
+export async function noteWithdrawnPurposeOnDeletionJob(uid: string, purpose: string): Promise<void> {
+  const db = getAdminDb();
+  const ref = db.collection(DELETION_JOBS).doc(uid);
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) return;
+    const job = snap.data() as DeletionJobDoc;
+    if (job.status === "completed" || job.status === "cancelled") return;
+    const withdrawnPurposes = unionWithdrawnPurposes(job.withdrawnPurposes, [purpose]);
+    tx.set(ref, { withdrawnPurposes, updatedAt: Date.now() }, { merge: true });
   });
 }
 
@@ -419,6 +440,12 @@ export async function runFinalAccountPurge(uid: string): Promise<FinalPurgeResul
     if (phases.firestore !== "done") {
       phases.firestore = "in_progress";
       await patchJob(uid, generation, leaseOwner, { phases });
+      const purposeSnap = await getAdminDb().collection(USERS).doc(uid).collection("processingPurposes").get();
+      const found = purposeSnap.docs.filter((doc) => doc.get("decision") === "withdraw").map((doc) => doc.id);
+      const remembered = unionWithdrawnPurposes(job.withdrawnPurposes, found);
+      if (remembered.length > 0) {
+        await patchJob(uid, generation, leaseOwner, { phases, withdrawnPurposes: remembered });
+      }
       await assertStillPendingOrDeletedStub(uid, generation, leaseOwner);
       const fs = await purgeUserSubcollectionsFully(getAdminDb(), uid, {
         cursor: job.firestoreCursor ?? null,
@@ -431,6 +458,7 @@ export async function runFinalAccountPurge(uid: string): Promise<FinalPurgeResul
       });
       if (fs.hold === "depth_exceeded") throw new Error("firestore_depth_exceeded");
       if (fs.hold === "unknown_collection") throw new Error("firestore_unknown_collection");
+      if (fs.hold === "cursor_unowned") throw new Error("firestore_cursor_unowned");
       if (!fs.exhausted) {
         if (fs.cursor) await patchJob(uid, generation, leaseOwner, { phases, firestoreCursor: fs.cursor });
         throw new Error("firestore_purge_incomplete");
@@ -520,6 +548,11 @@ export async function runFinalAccountPurge(uid: string): Promise<FinalPurgeResul
     const late =
       typeof job.erasureDeadline === "number" && finishedAt > job.erasureDeadline;
     const processorDeletion = Number(job.deletionPolicyVersion) >= 2 ? "incomplete" : "not_applicable";
+    const latest = (await getAdminDb().collection(DELETION_JOBS).doc(uid).get()).data() as DeletionJobDoc | undefined;
+    await projectRestoreAuthority(uid, {
+      erase: true,
+      withdrawPurposes: latest?.withdrawnPurposes ?? [],
+    });
     await patchJob(uid, generation, leaseOwner, {
       status: "completed",
       deadlineExceeded: late,

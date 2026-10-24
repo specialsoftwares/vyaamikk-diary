@@ -8,6 +8,7 @@ import { HttpsError, onCall } from "firebase-functions/v2/https";
 
 import { assertAdmittedCallableUser } from "../identity/admitCallableUser";
 import { getAdminDb } from "../admin";
+import { projectRestoreAuthority } from "../deletion/restoreAuthority";
 import { purposeTransition, type PurposeState } from "./processingPurposeState";
 
 export const PROCESSING_NOTICE_VERSION = "privacy-notice-2026-10";
@@ -84,6 +85,27 @@ export const recordProcessingPurpose = onCall({ region: "asia-south1" }, async (
   const receipt = processingPurposeReceipt({ uid, purpose, decision: String(data.decision ?? ""),
     noticeVersion: PROCESSING_NOTICE_VERSION, policyVersion: PROCESSING_POLICY_VERSION }, Date.now());
   const eventRef = db.collection("users").doc(uid).collection("processingPurposeEvents").doc(data.operationId);
+  if (receipt.decision === "withdraw") {
+    const existingEvent = await eventRef.get();
+    if (existingEvent.exists && (existingEvent.data()?.purpose !== purpose || existingEvent.data()?.decision !== receipt.decision)) {
+      throw new HttpsError("invalid-argument", "Purpose operation was already used.");
+    }
+    try {
+      await projectRestoreAuthority(uid, { withdrawPurposes: [purpose] });
+    } catch (error) {
+      const code = error instanceof Error ? error.message : "";
+      if (
+        code === "restore_authority_unprovisioned" ||
+        code === "restore_authority_projection_failed" ||
+        code === "restore_authority_write_failed"
+      ) {
+        throw new HttpsError("failed-precondition", code);
+      }
+      throw error;
+    }
+    const { noteWithdrawnPurposeOnDeletionJob } = await import("../deletion/finalPurge");
+    await noteWithdrawnPurposeOnDeletionJob(uid, purpose);
+  }
   return db.runTransaction(async tx => {
     const [snapshot, event, user] = await Promise.all([
       tx.get(ref), tx.get(eventRef), tx.get(db.collection("users").doc(uid)),

@@ -36,17 +36,36 @@ service cloud.firestore {
           > int(get(/databases/$(database)/documents/authSecurity/$(request.auth.uid)).data.get('revokedBeforeAuthTimeSeconds', 0));
     }
 
+    // Phone ID tokens and mintClientAuthToken do not carry authorityWatermark.
+    // A closed fence therefore applies to every token. Required mode is the
+    // admin document restoreControl/mode, not the age of a token. While that
+    // document is absent, a missing claim stays compatible unless the fence
+    // is closed.
+    function restoreClosed() {
+      let fence = /databases/$(database)/documents/restoreControl/current;
+      return exists(fence) && get(fence).data.get('closed', false) == true;
+    }
+
+    function restoreModeAllows() {
+      let mode = /databases/$(database)/documents/restoreControl/mode;
+      let fence = /databases/$(database)/documents/restoreControl/current;
+      let required = exists(mode) && get(mode).data.get('required', false) == true;
+      let fenceData = exists(fence) ? get(fence).data : null;
+      return !required || (
+        fenceData != null
+        && fenceData.get('closed', false) == false
+        && fenceData.get('reconciled', false) == true
+        && fenceData.get('watermark', 0) is int
+        && fenceData.get('watermark', 0) > 0
+        && request.auth.token.keys().hasAny(['authorityWatermark'])
+        && fenceData.get('watermark', 0) == request.auth.token.authorityWatermark
+      );
+    }
+
     function restoreClaimAllows() {
       return request.auth.token.get('erased', false) != true
-        && (
-          !request.auth.token.keys().hasAny(['authorityWatermark'])
-          || (
-            exists(/databases/$(database)/documents/restoreControl/current)
-            && get(/databases/$(database)/documents/restoreControl/current).data.closed == false
-            && get(/databases/$(database)/documents/restoreControl/current).data.watermark
-              == request.auth.token.authorityWatermark
-          )
-        );
+        && !restoreClosed()
+        && restoreModeAllows();
     }
 
     function isOwner(uid) {

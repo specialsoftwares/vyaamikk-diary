@@ -21,18 +21,36 @@ export async function restoreTrafficDecisionForUid(uid: string, purpose?: string
   const db = getAdminDb();
   let localWatermark: number | null = null;
   let closed = false;
+  let reconciled = false;
   try {
     const fence = await db.doc("restoreControl/current").get();
     if (fence.exists) {
       const data = fence.data() ?? {};
       closed = data.closed === true;
+      reconciled = data.reconciled === true;
       localWatermark = Number.isSafeInteger(data.watermark) ? Number(data.watermark) : null;
     }
   } catch {
     return "deny";
   }
   if (closed) return "deny";
+  let required = false;
+  try {
+    const mode = await db.doc("restoreControl/mode").get();
+    required = mode.exists && mode.data()?.required === true;
+  } catch {
+    return "deny";
+  }
   const authority = await readConfiguredRestoreAuthority();
+  if (required) {
+    if (!reconciled || localWatermark == null || !authority.configured) return "deny";
+    return decideRestoreTraffic({
+      authority: authority.snapshot,
+      localWatermark,
+      uid,
+      purpose,
+    });
+  }
   if (authority.configured) {
     return decideRestoreTraffic({
       authority: authority.snapshot,

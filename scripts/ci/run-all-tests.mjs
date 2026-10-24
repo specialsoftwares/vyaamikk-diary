@@ -26,6 +26,7 @@ const EXCLUDE = new Set([
   "test:cash-receipt-envelope-emulator", // storage emulator receipt recovery — separate ci:verify stage
   "test:credit-revision-emulator", // firestore emulator credit races — separate ci:verify stage
   "test:orphan-purge-emulator", // firestore emulator missing-parent purge — separate ci:verify stage
+  "test:restore-fence-emulator", // firestore emulator restore fence — separate ci:verify stage
   "test:resolve-or-create-phone-emulator", // emulator suite — separate ci:verify stage
   "test:billing-transaction-emulator", // emulator suite — separate ci:verify stage
   "test:billing-gst-compliance-emulator", // emulator suite — separate ci:verify stage

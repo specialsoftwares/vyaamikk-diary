@@ -59,6 +59,8 @@ export interface DeletionJobDoc {
   processorDeletion?: "not_applicable" | "incomplete" | "failed";
   /** Page to reread after an interrupted Firestore purge. Not a content cursor. */
   firestoreCursor?: { parentPath: string; collectionId: string; pageToken: string } | null;
+  /** Purpose withdrawals copied before the user subcollections are removed. */
+  withdrawnPurposes?: string[];
 }
 
 export const EMPTY_PHASES: DeletionJobPhases = {
@@ -160,6 +162,9 @@ export function classifyProviderError(err: unknown): {
   if (
     lower.includes("firestore_depth_exceeded") ||
     lower.includes("firestore_unknown_collection") ||
+    lower.includes("firestore_cursor_unowned") ||
+    lower.includes("restore_authority_unprovisioned") ||
+    lower.includes("restore_authority_projection_failed") ||
     lower.includes("storage_path_not_owned") ||
     lower.includes("permanent") ||
     lower.includes("invalid-argument") ||

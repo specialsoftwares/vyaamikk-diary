@@ -169,6 +169,23 @@ async function main() {
       })
     );
     check("envelope content type is denied on the pdf path", true);
+
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "restoreControl", "current"), { closed: true, watermark: 7 });
+    });
+    const unmarked = testEnv.authenticatedContext("alice", {
+      auth_time: 2_000,
+      firebase: { sign_in_provider: "phone" },
+    }).storage();
+    const marked = testEnv.authenticatedContext("alice", {
+      auth_time: 2_000,
+      firebase: { sign_in_provider: "phone" },
+      authorityWatermark: 7,
+    }).storage();
+    await assertFails(getBytes(ref(unmarked, "users/alice/letterhead/logo.png")));
+    check("closed restore fence denies a storage read without a watermark", true);
+    await assertFails(getBytes(ref(marked, "users/alice/letterhead/logo.png")));
+    check("closed restore fence denies a storage read with a matching watermark", true);
   } finally {
     await testEnv.cleanup();
   }

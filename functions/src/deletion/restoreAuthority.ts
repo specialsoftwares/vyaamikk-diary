@@ -26,6 +26,45 @@ export function decideRestoreTraffic(input: {
   return "allow";
 }
 
+/** A malformed security snapshot is null. It must not become an empty allow-list. */
+export function parseRestoreAuthoritySnapshot(data: unknown): RestoreAuthoritySnapshot | null {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return null;
+  const record = data as Record<string, unknown>;
+  const watermark = record.watermark;
+  if (!Number.isSafeInteger(watermark) || Number(watermark) < 1) return null;
+  if (!Array.isArray(record.erasedUids) || record.erasedUids.some((uid) => typeof uid !== "string" || uid.length === 0)) {
+    return null;
+  }
+  if (!record.withdrawnPurposes || typeof record.withdrawnPurposes !== "object" || Array.isArray(record.withdrawnPurposes)) {
+    return null;
+  }
+  const withdrawnPurposes: Record<string, readonly string[]> = {};
+  for (const [uid, purposes] of Object.entries(record.withdrawnPurposes)) {
+    if (!Array.isArray(purposes) || purposes.some((purpose) => typeof purpose !== "string" || purpose.length === 0)) {
+      return null;
+    }
+    withdrawnPurposes[uid] = purposes;
+  }
+  return {
+    watermark: Number(watermark),
+    erasedUids: record.erasedUids,
+    withdrawnPurposes,
+  };
+}
+
+/**
+ * The default database is the one a restore would replace. It cannot be the
+ * outside authority, even if an operator sets the environment to it.
+ */
+export function outsideRestoreAuthorityDatabaseId(id: string | null | undefined): string | null {
+  const trimmed = id?.trim() ?? "";
+  if (!/^[A-Za-z][A-Za-z0-9_-]{0,62}$/.test(trimmed)) return null;
+  if (trimmed === "default") return null;
+  const primary = process.env.FIRESTORE_DATABASE_ID?.trim() || "";
+  if (primary && trimmed === primary) return null;
+  return trimmed;
+}
+
 export type RestoreAuthoritySource = {
   configured: boolean;
   read(): Promise<RestoreAuthoritySnapshot | null>;
@@ -37,10 +76,124 @@ export function setRestoreAuthoritySourceForTests(source: RestoreAuthoritySource
   sourceForTests = source;
 }
 
-/** Live named database. Unset means the authority infrastructure is not deployed. */
+/** Live named database. Unset, default, or the primary database is not an outside authority. */
 export function restoreAuthorityDatabaseId(): string | null {
-  const id = process.env.RESTORE_AUTHORITY_DATABASE_ID?.trim();
-  return id ? id : null;
+  return outsideRestoreAuthorityDatabaseId(process.env.RESTORE_AUTHORITY_DATABASE_ID);
+}
+
+/** A set but invalid database id is configured and unusable, so admission denies. */
+export function restoreAuthorityConfiguration(): { configured: boolean; databaseId: string | null } {
+  const raw = process.env.RESTORE_AUTHORITY_DATABASE_ID?.trim() ?? "";
+  if (!raw) return { configured: false, databaseId: null };
+  return { configured: true, databaseId: outsideRestoreAuthorityDatabaseId(raw) };
+}
+
+/** Purpose names copied onto a deletion job. Empty or unsafe names are dropped. */
+export function unionWithdrawnPurposes(
+  existing: readonly string[] | undefined,
+  incoming: readonly string[]
+): string[] {
+  const merged: string[] = [];
+  const seen = new Set<string>();
+  for (const purpose of [...(existing ?? []), ...incoming]) {
+    if (typeof purpose !== "string" || purpose.length === 0 || purpose.includes("/") || seen.has(purpose)) continue;
+    seen.add(purpose);
+    merged.push(purpose);
+  }
+  return merged;
+}
+
+/**
+ * Appends an erasure or withdrawal to a snapshot that was already valid.
+ * The watermark stays put. Existing uids and purposes are kept.
+ */
+export function mergeRestoreAuthorityProjection(
+  existing: RestoreAuthoritySnapshot,
+  uid: string,
+  projection: { erase?: boolean; withdrawPurposes?: readonly string[] }
+): RestoreAuthoritySnapshot {
+  if (!uid || uid.includes("/") || uid.includes("..")) throw new Error("restore_authority_projection_failed");
+  const erasedUids = [...existing.erasedUids];
+  if (projection.erase && !erasedUids.includes(uid)) erasedUids.push(uid);
+  const withdrawnPurposes: Record<string, readonly string[]> = {};
+  for (const [key, purposes] of Object.entries(existing.withdrawnPurposes)) {
+    withdrawnPurposes[key] = [...purposes];
+  }
+  const purposes = unionWithdrawnPurposes(withdrawnPurposes[uid], projection.withdrawPurposes ?? []);
+  if (purposes.length > 0) withdrawnPurposes[uid] = purposes;
+  const parsed = parseRestoreAuthoritySnapshot({ watermark: existing.watermark, erasedUids, withdrawnPurposes });
+  if (!parsed || parsed.erasedUids.length < existing.erasedUids.length) {
+    throw new Error("restore_authority_projection_failed");
+  }
+  return parsed;
+}
+
+export type RestoreAuthorityStore = {
+  read(): Promise<unknown | null>;
+  write(snapshot: RestoreAuthoritySnapshot): Promise<void>;
+};
+
+let storeForTests: RestoreAuthorityStore | null = null;
+
+export function setRestoreAuthorityStoreForTests(store: RestoreAuthorityStore | null): void {
+  storeForTests = store;
+}
+
+/**
+ * Durable write to the independent authority. Unset configuration skips.
+ * A configured but invalid database, a missing seed document, or a malformed
+ * snapshot throws and does not replace the document with an empty allow-list.
+ * This does not create the database.
+ */
+export async function projectRestoreAuthority(
+  uid: string,
+  projection: { erase?: boolean; withdrawPurposes?: readonly string[] }
+): Promise<"skipped" | "projected"> {
+  if (!projection.erase && !(projection.withdrawPurposes && projection.withdrawPurposes.length > 0)) {
+    throw new Error("restore_authority_projection_failed");
+  }
+  if (storeForTests) return writeProjection(uid, projection, storeForTests);
+  const configuration = restoreAuthorityConfiguration();
+  if (!configuration.configured) return "skipped";
+  if (!configuration.databaseId) throw new Error("restore_authority_unprovisioned");
+  const databaseId = configuration.databaseId;
+  const { getApp } = await import("firebase-admin/app");
+  const { getFirestore } = await import("firebase-admin/firestore");
+  const ref = getFirestore(getApp(), databaseId).doc("authority/restore");
+  return writeProjection(uid, projection, {
+    async read() {
+      const snap = await ref.get();
+      return snap.exists ? (snap.data() ?? null) : null;
+    },
+    async write(snapshot) {
+      await ref.set(snapshot);
+    },
+  });
+}
+
+async function writeProjection(
+  uid: string,
+  projection: { erase?: boolean; withdrawPurposes?: readonly string[] },
+  store: RestoreAuthorityStore
+): Promise<"projected"> {
+  let raw: unknown | null;
+  try {
+    raw = await store.read();
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("restore_authority_")) throw error;
+    throw new Error("restore_authority_write_failed");
+  }
+  if (raw == null) throw new Error("restore_authority_unprovisioned");
+  const existing = parseRestoreAuthoritySnapshot(raw);
+  if (!existing) throw new Error("restore_authority_projection_failed");
+  const next = mergeRestoreAuthorityProjection(existing, uid, projection);
+  try {
+    await store.write(next);
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("restore_authority_")) throw error;
+    throw new Error("restore_authority_write_failed");
+  }
+  return "projected";
 }
 
 export async function readConfiguredRestoreAuthority(): Promise<{
@@ -50,21 +203,16 @@ export async function readConfiguredRestoreAuthority(): Promise<{
   if (sourceForTests) {
     return { configured: sourceForTests.configured, snapshot: await sourceForTests.read() };
   }
-  const databaseId = restoreAuthorityDatabaseId();
-  if (!databaseId) return { configured: false, snapshot: null };
+  const configuration = restoreAuthorityConfiguration();
+  if (!configuration.configured) return { configured: false, snapshot: null };
+  const databaseId = configuration.databaseId;
+  if (!databaseId) return { configured: true, snapshot: null };
   try {
     const { getApp } = await import("firebase-admin/app");
     const { getFirestore } = await import("firebase-admin/firestore");
     const snap = await getFirestore(getApp(), databaseId).doc("authority/restore").get();
     if (!snap.exists) return { configured: true, snapshot: null };
-    const data = snap.data() ?? {};
-    const watermark = Number(data.watermark);
-    const erasedUids = Array.isArray(data.erasedUids) ? data.erasedUids.filter((uid) => typeof uid === "string") : [];
-    const withdrawnPurposes = data.withdrawnPurposes && typeof data.withdrawnPurposes === "object"
-      ? data.withdrawnPurposes as Record<string, readonly string[]>
-      : {};
-    if (!Number.isSafeInteger(watermark)) return { configured: true, snapshot: null };
-    return { configured: true, snapshot: { watermark, erasedUids, withdrawnPurposes } };
+    return { configured: true, snapshot: parseRestoreAuthoritySnapshot(snap.data()) };
   } catch {
     return { configured: true, snapshot: null };
   }

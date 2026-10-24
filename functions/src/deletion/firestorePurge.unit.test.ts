@@ -65,6 +65,15 @@ async function main() {
   assert.equal(blocked.hold, "depth_exceeded");
   assert.ok([...deep.docs.values()].some((ids) => ids.size > 0));
 
+  mem.docs.set("users/owner/entries", new Set(["kept"]));
+  const foreign = await purgeUserSubcollectionsFully({} as never, "owner", {
+    ports: ports(mem),
+    cursor: { parentPath: "users/other/entries/stolen", collectionId: "notes", pageToken: "" },
+  });
+  assert.equal(foreign.hold, "cursor_unowned");
+  assert.equal(foreign.deleted, 0);
+  assert.equal(mem.docs.get("users/owner/entries")?.has("kept"), true);
+
   await assert.rejects(
     () => purgeUserSubcollectionsFully({} as never, "owner", {
       ports: ports(mem),

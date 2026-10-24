@@ -28,6 +28,27 @@ async function main() {
     assert.equal(result.exhausted, true);
     assert.equal(result.hold, undefined);
     console.log("orphan purge: missing-parent descendant is deleted and the result is not a false completion");
+
+    const competeUid = "synthetic-compete-owner";
+    const notes = db.collection(`users/${competeUid}/entries/missing-parent/notes`);
+    const batch = db.batch();
+    for (let i = 0; i < 101; i += 1) batch.set(notes.doc(`n${i}`), { i });
+    await batch.commit();
+    await assert.rejects(
+      () => purgeUserSubcollectionsFully(db, competeUid, {
+        beforePage: async (cursor) => {
+          if (cursor?.pageToken) throw new Error("lease_lost");
+        },
+      }),
+      /lease_lost/
+    );
+    const afterLoss = await notes.get();
+    assert.ok(afterLoss.size > 0, "the worker that lost the lease must leave the rest");
+    assert.ok(afterLoss.size < 101, "the first page is still deleted before the lease is lost");
+    const finished = await purgeUserSubcollectionsFully(db, competeUid);
+    assert.equal(finished.exhausted, true);
+    assert.equal((await notes.get()).size, 0);
+    console.log("orphan purge: a lost lease does not complete the walk; the next owner finishes it");
   } finally {
     await child.delete().catch(() => undefined);
     await deleteApp(app);

@@ -39,7 +39,7 @@ const PAGE = 100;
 const MAX_BATCHES_PER_ATTEMPT = 10;
 const MAX_NESTED_DEPTH = 4;
 
-export type PurgeHold = "depth_exceeded" | "unknown_collection";
+export type PurgeHold = "depth_exceeded" | "unknown_collection" | "cursor_unowned";
 
 export type FirestorePurgeCursor = {
   parentPath: string;
@@ -191,6 +191,18 @@ async function purgeCollection(
   }
 }
 
+function cursorOwnedByUser(uid: string, cursor: FirestorePurgeCursor): boolean {
+  const userPath = `users/${uid}`;
+  const parent = cursor.parentPath;
+  if (parent !== userPath && !parent.startsWith(`${userPath}/`)) return false;
+  if (parent.includes("..") || parent.includes("//")) return false;
+  const collectionId = cursor.collectionId;
+  if (!collectionId || collectionId.includes("/") || collectionId === "." || collectionId === "..") return false;
+  if (parent === userPath) return true;
+  const rest = parent.slice(userPath.length + 1).split("/");
+  return rest.length % 2 === 0 && rest.every((part) => part.length > 0 && part !== "." && part !== "..");
+}
+
 export async function purgeUserSubcollectionsFully(
   db: Firestore,
   uid: string,
@@ -212,6 +224,9 @@ export async function purgeUserSubcollectionsFully(
     onBatch: options?.onBatch,
   };
   const userPath = `users/${uid}`;
+  if (options?.cursor && !cursorOwnedByUser(uid, options.cursor)) {
+    return { deleted: 0, exhausted: false, hold: "cursor_unowned", holdDetail: "cursor_outside_user" };
+  }
   if (options?.cursor && options.cursor.parentPath !== userPath) {
     const depth = options.cursor.parentPath.split("/").length / 2;
     const nested = await purgeCollection(
