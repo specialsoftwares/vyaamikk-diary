@@ -110,7 +110,7 @@ async function main() {
     ...base,
     hold: "depth_exceeded",
     path: "users/owner/entries/item/notes/deep/more",
-    log: log({ revision: 1, scope: "users/owner", observedAt: 5_000, remainingPaths: ["users/owner/entries/a", "users/owner/entries/b"] }),
+    log: log({ revision: 1, scope: "users/owner", observedAt: 5_000, remainingPaths: ["users/owner/entries/a", "users/owner/entries/b"], status: "complete", clockSource: "server" }),
     claimedRevision: 1,
     claimedRemaining: 0,
   })).reason, "leftover_count_mismatch");
@@ -118,7 +118,7 @@ async function main() {
     ...base,
     hold: "depth_exceeded",
     path: "users/owner/entries/item/notes/deep/more",
-    log: log({ revision: 2, scope: "users/owner", observedAt: 5_000, remainingPaths: ["users/owner/entries/a", "users/owner/entries/b"] }),
+    log: log({ revision: 2, scope: "users/owner", observedAt: 5_000, remainingPaths: ["users/owner/entries/a", "users/owner/entries/b"], status: "complete", clockSource: "server" }),
     claimedRevision: 2,
     claimedRemaining: 2,
     providerEvidence: "provider-deleted",
@@ -127,7 +127,7 @@ async function main() {
     ...base,
     hold: "unknown_collection",
     path: "users/owner/customDeep",
-    log: log({ revision: 3, scope: "users/owner", observedAt: 5_000, remainingPaths: [] }),
+    log: log({ revision: 3, scope: "users/owner", observedAt: 5_000, remainingPaths: [], status: "complete", clockSource: "server" }),
     claimedRevision: 3,
     claimedRemaining: 0,
     backupEvidence: "backup-export",
@@ -136,8 +136,16 @@ async function main() {
     ...base,
     hold: "depth_exceeded",
     path: "users/owner/entries/item/notes/deep",
-    log: log({ revision: 4, scope: "users/owner", observedAt: 5_000, remainingPaths: [] }),
+    log: log({ revision: 4, scope: "users/owner", observedAt: 5_000, remainingPaths: [], status: "partial", clockSource: "caller" }),
     claimedRevision: 4,
+    claimedRemaining: 0,
+  })).reason, "inventory_scan_incomplete");
+  assert.equal((await reviewUnknownPurgeHold({
+    ...base,
+    hold: "depth_exceeded",
+    path: "users/owner/entries/item/notes/deep",
+    log: log({ revision: 5, scope: "users/owner", observedAt: 5_000, remainingPaths: [], status: "complete", clockSource: "server", uid: "owner", jobId: "job-1" }),
+    claimedRevision: 5,
     claimedRemaining: 0,
   })).reason, "ready_for_operator_review");
 

@@ -9,26 +9,35 @@ export type LocalRestoreDocs = {
   mode: { required: boolean } | null;
 };
 
+export type HoldPhase = "closed" | "workers_released" | "traffic_released";
+
 export type OutsideHolds = {
   traffic: "closed" | "open";
   workers: "stopped" | "running";
+  phase: HoldPhase;
+  revision: number;
 };
 
 export type RestoreHoldStore = {
   readDocs(): Promise<LocalRestoreDocs>;
   readHolds(): Promise<OutsideHolds>;
-  writeHolds(next: OutsideHolds): Promise<void>;
+  writeHolds(next: OutsideHolds, expectedRevision: number): Promise<"stored" | "conflict">;
 };
 
 export function createMemoryRestoreHoldStore(initial: {
   docs: LocalRestoreDocs;
-  holds: OutsideHolds;
+  holds: Partial<OutsideHolds> & Pick<OutsideHolds, "traffic" | "workers">;
 }): RestoreHoldStore & {
   snapshot(): Promise<{ docs: LocalRestoreDocs; holds: OutsideHolds }>;
   replaceDocs(next: LocalRestoreDocs): void;
 } {
   let docs = initial.docs;
-  let holds = initial.holds;
+  let holds: OutsideHolds = {
+    traffic: initial.holds.traffic,
+    workers: initial.holds.workers,
+    phase: initial.holds.phase ?? "closed",
+    revision: initial.holds.revision ?? 0,
+  };
   return {
     async readDocs() {
       return docs;
@@ -36,8 +45,10 @@ export function createMemoryRestoreHoldStore(initial: {
     async readHolds() {
       return holds;
     },
-    async writeHolds(next) {
+    async writeHolds(next, expectedRevision) {
+      if (holds.revision !== expectedRevision) return "conflict";
       holds = next;
+      return "stored";
     },
     async snapshot() {
       return { docs, holds };
@@ -48,27 +59,59 @@ export function createMemoryRestoreHoldStore(initial: {
   };
 }
 
+function fenceAligned(docs: LocalRestoreDocs, authorityWatermark: number): boolean {
+  return Boolean(
+    docs.fence &&
+      docs.mode &&
+      !docs.fence.closed &&
+      docs.fence.reconciled &&
+      docs.fence.watermark === authorityWatermark &&
+      Number.isSafeInteger(authorityWatermark) &&
+      authorityWatermark >= 1
+  );
+}
+
 /**
- * Opens the outside holds only when both local documents exist, the fence is
- * open and reconciled, and its watermark is the current authority watermark.
- * A restored snapshot that omitted the documents cannot release the holds.
+ * One stage of the release. Workers are released first. Traffic stays closed
+ * until a later call re-reads the fence and the authority watermark.
+ * A missing restore-control document does not write the holds open.
  */
 export async function releaseRestoreHolds(
   store: RestoreHoldStore,
   authorityWatermark: number
-): Promise<{ released: boolean; reason: string }> {
+): Promise<{ released: boolean; reason: string; phase: HoldPhase }> {
   const docs = await store.readDocs();
+  const holds = await store.readHolds();
   if (!docs.fence || !docs.mode) {
-    return { released: false, reason: "restored_primary_missing_restore_control" };
+    return { released: false, reason: "restored_primary_missing_restore_control", phase: holds.phase };
   }
-  if (docs.fence.closed || !docs.fence.reconciled || docs.fence.watermark !== authorityWatermark) {
-    return { released: false, reason: "fence_not_reconciled" };
+  if (!fenceAligned(docs, authorityWatermark)) {
+    if (holds.phase !== "closed" || holds.workers !== "stopped" || holds.traffic !== "closed") {
+      const rolled = await store.writeHolds(
+        { traffic: "closed", workers: "stopped", phase: "closed", revision: holds.revision + 1 },
+        holds.revision
+      );
+      if (rolled !== "stored") return { released: false, reason: "release_conflict", phase: holds.phase };
+    }
+    return { released: false, reason: "fence_not_reconciled", phase: "closed" };
   }
-  if (!Number.isSafeInteger(authorityWatermark) || authorityWatermark < 1) {
-    return { released: false, reason: "authority_watermark_missing" };
+  if (holds.phase === "traffic_released" && holds.traffic === "open" && holds.workers === "running") {
+    return { released: true, reason: "traffic_released", phase: "traffic_released" };
   }
-  await store.writeHolds({ traffic: "open", workers: "running" });
-  return { released: true, reason: "reconciled" };
+  if (holds.phase === "closed") {
+    const wrote = await store.writeHolds(
+      { traffic: "closed", workers: "running", phase: "workers_released", revision: holds.revision + 1 },
+      holds.revision
+    );
+    if (wrote !== "stored") return { released: false, reason: "release_conflict", phase: holds.phase };
+    return { released: false, reason: "workers_released", phase: "workers_released" };
+  }
+  const wrote = await store.writeHolds(
+    { traffic: "open", workers: "running", phase: "traffic_released", revision: holds.revision + 1 },
+    holds.revision
+  );
+  if (wrote !== "stored") return { released: false, reason: "release_conflict", phase: holds.phase };
+  return { released: true, reason: "traffic_released", phase: "traffic_released" };
 }
 
 export type ActivationStep =

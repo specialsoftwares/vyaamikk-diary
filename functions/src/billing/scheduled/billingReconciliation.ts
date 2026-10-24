@@ -24,7 +24,7 @@ import {
   getAndroidPublisherAccessTokenFromAdc,
   PlayApiClient,
 } from "../google/playApiClient";
-import { erasedBillingUidsFromEnv, excludeErasedBillingUids, privilegedWorkerMayRead } from "../../deletion/privilegedWorkerGuard";
+import { erasedBillingUidsFromEnv, excludeErasedBillingUids, privilegedWorkerHold, readDurableWorkerHold } from "../../deletion/privilegedWorkerGuard";
 import { billingLog } from "../log";
 import { istMonthKeyForMillis } from "../istMonthKey";
 import {
@@ -114,7 +114,7 @@ export const scheduledBillingReconciliation = onSchedule(
     secrets: BILLING_DIAG_RUNTIME_SECRETS,
   },
   async () => {
-    if (!privilegedWorkerMayRead("billing")) return;
+    if ((await privilegedWorkerHold(process.env, () => readDurableWorkerHold())) === "stopped") return;
     if (billingReconciliationEnabled.value() !== "true") {
       return;
     }

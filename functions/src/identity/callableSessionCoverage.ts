@@ -4,6 +4,7 @@
  */
 export const CALLABLE_SESSION_COVERAGE = {
   mintClientAuthToken: "enforced",
+  readRestoreAuthorityWatermark: "enforced",
   recordAgeAssessment: "enforced",
   sealOwnerContent: "enforced",
   openOwnerContent: "enforced",

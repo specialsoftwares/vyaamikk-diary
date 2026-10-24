@@ -87,7 +87,8 @@ export async function listDocumentIdsPage(
   db: Firestore,
   parentPath: string,
   collectionId: string,
-  pageToken?: string
+  pageToken?: string,
+  pageSize = PAGE
 ): Promise<PurgePage> {
   const projectId = projectIdOf(db);
   const databaseId = (db as { databaseId?: string }).databaseId || "(default)";
@@ -95,7 +96,7 @@ export async function listDocumentIdsPage(
   const url = new URL(
     `${host ? `http://${host}` : "https://firestore.googleapis.com"}/v1/projects/${projectId}/databases/${databaseId}/documents/${parentPath}/${collectionId}`
   );
-  url.searchParams.set("pageSize", String(PAGE));
+  url.searchParams.set("pageSize", String(pageSize));
   url.searchParams.set("showMissing", "true");
   if (pageToken) url.searchParams.set("pageToken", pageToken);
   const headers: Record<string, string> = {};
@@ -271,6 +272,10 @@ export type LeftoverInventoryRecord = {
   scope: string;
   observedAt: number;
   remainingPaths: readonly string[];
+  status?: "partial" | "complete";
+  clockSource?: "server" | "caller";
+  jobId?: string;
+  uid?: string;
 };
 
 /**
@@ -299,6 +304,12 @@ export async function reviewUnknownPurgeHold(input: {
   const record = await input.log.read(input.claimedRevision);
   if (!record || record.scope !== input.expectedScope) {
     return { completion: "blocked", reason: record ? "leftover_scope_rejected" : "leftover_provenance_rejected" };
+  }
+  if (record.status !== "complete" || record.clockSource !== "server") {
+    return { completion: "blocked", reason: "inventory_scan_incomplete" };
+  }
+  if (record.uid && record.scope !== `users/${record.uid}`) {
+    return { completion: "blocked", reason: "leftover_scope_rejected" };
   }
   if (!Number.isSafeInteger(record.observedAt) || record.observedAt > input.now || input.now - record.observedAt > input.maxAgeMs) {
     return { completion: "blocked", reason: "leftover_observation_stale" };

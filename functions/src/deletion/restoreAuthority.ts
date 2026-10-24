@@ -1,3 +1,5 @@
+import type { Firestore } from "firebase-admin/firestore";
+
 /**
  * Restore admission. The authority snapshot is not the database being restored.
  * A missing, stale, or unreachable authority keeps traffic closed.
@@ -289,6 +291,52 @@ async function writeProjection(
     }
   }
   throw new Error("restore_authority_write_failed");
+}
+
+export type PublishedAuthorityState =
+  | { state: "unconfigured" }
+  | { state: "current"; watermark: number }
+  | { state: "unavailable"; reason: "missing" | "malformed" | "unreadable" }
+  | { state: "closed" };
+
+/**
+ * A missing or malformed authority document is not an empty erasure list.
+ * Before protection is active, a missing document stays unconfigured.
+ */
+export function classifyPublishedAuthority(input: {
+  protectionActive: boolean;
+  configured: boolean;
+  exists: boolean;
+  raw: unknown;
+  fenceClosed: boolean;
+}): PublishedAuthorityState {
+  if (input.fenceClosed) return { state: "closed" };
+  if (!input.exists) {
+    return input.protectionActive || input.configured
+      ? { state: "unavailable", reason: "missing" }
+      : { state: "unconfigured" };
+  }
+  const parsed = parseRestoreAuthoritySnapshot(input.raw);
+  if (!parsed) return { state: "unavailable", reason: "malformed" };
+  return { state: "current", watermark: parsed.watermark };
+}
+
+export async function readPublishedAuthorityDocument(
+  db: Firestore,
+  input: { protectionActive: boolean; configured: boolean; fenceClosed: boolean }
+): Promise<PublishedAuthorityState> {
+  try {
+    const snap = await db.doc("authority/restore").get();
+    return classifyPublishedAuthority({
+      protectionActive: input.protectionActive,
+      configured: input.configured,
+      exists: snap.exists,
+      raw: snap.data() ?? null,
+      fenceClosed: input.fenceClosed,
+    });
+  } catch {
+    return { state: "unavailable", reason: "unreadable" };
+  }
 }
 
 export async function readConfiguredRestoreAuthority(): Promise<{

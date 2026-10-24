@@ -13,6 +13,7 @@ import {
   runLocalDeviceSignOut,
 } from "./authSessionFence";
 import { bridgeNativeSession, claimMatchesAuthorityWatermark } from "./jsAuthBridge";
+import { decidePublishedAdmission } from "./publishedAuthority";
 import { AppError } from "@/domain/errors";
 import {
   __setSessionStorageForTests,
@@ -964,6 +965,28 @@ async function main() {
       denied = error instanceof Error && error.message === "restore_fence_closed";
     }
     check("a closed fence is not retried", denied && mints === 1);
+    const published = { state: "current" as const, watermark: 2 };
+    check(
+      "startup and a stale positive claim mint once against the published watermark",
+      decidePublishedAdmission({ sessionUid: "uid-a", claimUid: "uid-a", claim: undefined, published, attempts: 0 }) === "mint_once" &&
+        decidePublishedAdmission({ sessionUid: "uid-a", claimUid: "uid-a", claim: 1, published, attempts: 0 }) === "mint_once" &&
+        decidePublishedAdmission({ sessionUid: "uid-a", claimUid: "uid-a", claim: 2, published, attempts: 1 }) === "fresh"
+    );
+    check(
+      "a still-stale claim and an authority failure stop",
+      decidePublishedAdmission({ sessionUid: "uid-a", claimUid: "uid-a", claim: 1, published, attempts: 1 }) === "stop" &&
+        decidePublishedAdmission({ sessionUid: "uid-a", claimUid: "uid-a", claim: 1, published: { state: "unavailable", reason: "malformed" }, attempts: 0 }) === "stop" &&
+        decidePublishedAdmission({ sessionUid: "uid-a", claimUid: "uid-a", claim: 2, published: { state: "closed" }, attempts: 0 }) === "stop"
+    );
+    check(
+      "an account switch does not reuse the previous claim",
+      decidePublishedAdmission({ sessionUid: "uid-b", claimUid: "uid-a", claim: 2, published, attempts: 0 }) === "mint_once" &&
+        decidePublishedAdmission({ sessionUid: "uid-b", claimUid: "uid-a", claim: 2, published, attempts: 1 }) === "stop"
+    );
+    check(
+      "unset protection stays unconfigured rather than an empty erasure list",
+      decidePublishedAdmission({ sessionUid: "uid-a", claimUid: "uid-a", claim: null, published: { state: "unconfigured" }, attempts: 0 }) === "unconfigured"
+    );
   }
 
   if (failures > 0) {

@@ -425,6 +425,23 @@ export async function callLogoutAllDevices(
   return { status: "complete" };
 }
 
+export async function callReadRestoreAuthorityWatermark(): Promise<
+  { state: "unconfigured" } | { state: "current"; watermark: number }
+> {
+  const data = await callFunction<Record<string, never>, { state?: string; watermark?: number }>(
+    "readRestoreAuthorityWatermark",
+    {}
+  );
+  if (data?.state === "current" && Number.isSafeInteger(data.watermark)) {
+    return { state: "current", watermark: Number(data.watermark) };
+  }
+  if (data?.state === "unconfigured") return { state: "unconfigured" };
+  throw new AppError("unknown", "Restore authority watermark was not published.", undefined, {
+    authPhase: "post_auth",
+    callableName: "readRestoreAuthorityWatermark",
+  });
+}
+
 export async function callMintClientAuthToken(): Promise<MintClientAuthTokenResponse> {
   const data = await callFunction<Record<string, never>, MintClientAuthTokenResponse>(
     "mintClientAuthToken",

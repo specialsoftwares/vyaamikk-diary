@@ -145,17 +145,6 @@ export function claimMatchesAuthorityWatermark(claim: unknown, authorityWatermar
   return claim === authorityWatermark;
 }
 
-let publishedAuthorityWatermark: number | null = null;
-
-/** Unset until an operator publishes the current authority watermark. The refresh flag stays off until then. */
-export function readPublishedAuthorityWatermark(): number | null {
-  return publishedAuthorityWatermark;
-}
-
-export function __setPublishedAuthorityWatermarkForTests(value: number | null): void {
-  publishedAuthorityWatermark = value;
-}
-
 async function establishJsAuthSession(): Promise<boolean> {
   const nativeUid = getNativeAuthUid();
   if (!nativeUid) {
@@ -177,12 +166,28 @@ async function establishJsAuthSession(): Promise<boolean> {
     },
     admissionCurrent: async () => {
       if (process.env.EXPO_PUBLIC_RESTORE_ADMISSION_REFRESH !== "true") return true;
-      const authority = readPublishedAuthorityWatermark();
-      if (authority == null) return false;
       const user = auth.currentUser;
       if (!user) return false;
       const token = await user.getIdTokenResult(false);
-      return claimMatchesAuthorityWatermark(token.claims.authorityWatermark, authority);
+      const { callReadRestoreAuthorityWatermark } = await import("./identityCallable");
+      const { decidePublishedAdmission } = await import("./publishedAuthority");
+      let published: Awaited<ReturnType<typeof callReadRestoreAuthorityWatermark>> | { state: "closed" } | { state: "unavailable"; reason: string };
+      try {
+        published = await callReadRestoreAuthorityWatermark();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "";
+        published = message.includes("restore_fence_closed")
+          ? { state: "closed" }
+          : { state: "unavailable", reason: "unreadable" };
+      }
+      const decision = decidePublishedAdmission({
+        sessionUid: user.uid,
+        claimUid: user.uid,
+        claim: token.claims.authorityWatermark,
+        published,
+        attempts: 0,
+      });
+      return decision === "fresh" || decision === "unconfigured";
     },
     signIn: async (token) => {
       const cred = await signInWithCustomToken(auth, token);

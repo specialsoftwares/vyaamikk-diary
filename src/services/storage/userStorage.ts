@@ -18,6 +18,7 @@ import { CONTENT_SEAL_MEDIA_TYPE, shouldSealProductionWrites } from "@/constants
 import { PDF_CLOUD_BACKUP_ENABLED } from "@/constants/pdfPrivacy";
 import { isDiaryContentSeal } from "@/services/privacy/diarySealDocument";
 import { FirebaseNotConfiguredError, getFirebaseStorage } from "@/config/firebase";
+import { objectNameEmbedsPrivateContent } from "@/services/storage/userOwnedStoragePaths";
 import {
   describeLetterheadSaveFailure,
   recordLetterheadSaveDiagnostic,
@@ -62,6 +63,10 @@ export function getUserStoragePath(
   fileName?: string
 ): string {
   const safeUserId = userId.trim();
+  const candidates = [recordIdOrFileName, fileName ?? ""];
+  if (candidates.some((name) => objectNameEmbedsPrivateContent(name))) {
+    throw new Error("storage_name_embeds_private_content");
+  }
   if (category === "letterhead") {
     return `users/${safeUserId}/letterhead/${sanitizeStorageFileName(recordIdOrFileName)}`;
   }

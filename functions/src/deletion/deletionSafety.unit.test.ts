@@ -131,8 +131,26 @@ async function main() {
     fence: { closed: false, reconciled: true, watermark: 2 },
     mode: { required: false },
   });
-  assert.equal((await releaseRestoreHolds(restored, 2)).released, true);
-  assert.deepEqual((await restored.snapshot()).holds, { traffic: 'open', workers: 'running' });
+  const workers = await releaseRestoreHolds(restored, 2);
+  assert.equal(workers.released, false);
+  assert.equal(workers.reason, 'workers_released');
+  assert.deepEqual((await restored.snapshot()).holds, { traffic: 'closed', workers: 'running', phase: 'workers_released', revision: 1 });
+  restored.replaceDocs({
+    fence: { closed: true, reconciled: true, watermark: 2 },
+    mode: { required: false },
+  });
+  const rolled = await releaseRestoreHolds(restored, 2);
+  assert.equal(rolled.reason, 'fence_not_reconciled');
+  assert.equal((await restored.snapshot()).holds.workers, 'stopped');
+  restored.replaceDocs({
+    fence: { closed: false, reconciled: true, watermark: 2 },
+    mode: { required: false },
+  });
+  assert.equal((await releaseRestoreHolds(restored, 2)).reason, 'workers_released');
+  const traffic = await releaseRestoreHolds(restored, 2);
+  assert.equal(traffic.released, true);
+  assert.equal((await restored.snapshot()).holds.traffic, 'open');
+  assert.equal((await restored.snapshot()).holds.phase, 'traffic_released');
   assert.equal(nextInitialActivation([]), 'confirm_authority');
   assert.equal(mintAllowed('initial', [], true), false);
   assert.equal(mintAllowed('initial', ['confirm_authority', 'write_open_reconciled_fence'], false), true);

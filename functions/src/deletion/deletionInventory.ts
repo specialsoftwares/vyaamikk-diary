@@ -29,6 +29,10 @@ export type InventoryRecord = {
   scope: string;
   observedAt: number;
   remainingPaths: string[];
+  status: "partial" | "complete";
+  clockSource: "server";
+  jobId: string;
+  uid: string;
 };
 
 export type InventoryLog = {
@@ -100,11 +104,15 @@ export async function readDeletionInventory(input: {
   knownCollections: readonly string[];
   maxDepth: number;
   log: InventoryLog;
-}): Promise<{ revision: number; holds: { path: string; reason: "unknown_collection" | "depth_exceeded" | "missing_parent" }[] }> {
+  jobId?: string;
+  maxPages?: number;
+}): Promise<{ revision: number; holds: { path: string; reason: "unknown_collection" | "depth_exceeded" | "missing_parent" }[]; status: "partial" | "complete" }> {
   const userPath = `users/${input.uid}`;
   const known = new Set(input.knownCollections);
   const remaining = new Set<string>();
   const holds: { path: string; reason: "unknown_collection" | "depth_exceeded" | "missing_parent" }[] = [];
+  let pages = 0;
+  let partial = false;
   const visit = async (parent: string, collection: string, depth: number): Promise<void> => {
     const collectionPath = `${parent}/${collection}`;
     if (!known.has(collection) && parent === userPath) {
@@ -119,6 +127,11 @@ export async function readDeletionInventory(input: {
     }
     let token: string | undefined;
     for (;;) {
+      if (input.maxPages != null && pages >= input.maxPages) {
+        partial = true;
+        return;
+      }
+      pages += 1;
       const page = await input.inventory.listPage(parent, collection, token);
       for (const id of page.ids) {
         const path = `${collectionPath}/${id}`;
@@ -134,13 +147,18 @@ export async function readDeletionInventory(input: {
   const roots = await input.inventory.childCollections(userPath);
   for (const name of roots) await visit(userPath, name, 1);
   const paths = [...remaining].sort();
+  const status = partial ? "partial" : "complete";
   const revision = await input.log.commit({
     revision: input.revision,
     scope: userPath,
     observedAt: input.now,
     remainingPaths: paths,
+    status,
+    clockSource: "server",
+    jobId: input.jobId ?? input.uid,
+    uid: input.uid,
   });
-  return { revision, holds };
+  return { revision, holds, status };
 }
 
 export async function resumeHeldResolution(input: {
@@ -181,4 +199,53 @@ export async function resumeHeldResolution(input: {
   if (input.providerEvidence || input.backupEvidence) return blocked("provider_or_backup_evidence_is_not_a_purge_result", nextCursor, ids);
   if (page) return blocked("resolution_incomplete", nextCursor, ids);
   return blocked("ready_for_operator_review");
+}
+
+/**
+ * Operator workflow. A finished scan can wait for an operator. It does not
+ * delete, and a partial scan cannot certify that nothing remains.
+ */
+export async function runHeldResolutionWorkflow(input: {
+  uid: string;
+  job: DeletionJobDoc;
+  worker: string;
+  now: number;
+  inventory: ReadOnlyInventory;
+  log: InventoryLog;
+  knownCollections: readonly string[];
+  maxDepth: number;
+  maxPages?: number;
+  providerEvidence: string | null;
+  backupEvidence: string | null;
+  revision: number;
+}): Promise<
+  | { status: "blocked"; reason: string }
+  | { status: "continue"; reason: "scan_partial" }
+  | { status: "awaiting_operator"; remaining: number; revision: number }
+> {
+  if (!ownsDeletionLease(input.job, input.job.generation, input.worker, input.now)) {
+    return { status: "blocked", reason: "lease_lost" };
+  }
+  const walked = await readDeletionInventory({
+    uid: input.uid,
+    now: input.now,
+    revision: input.revision,
+    inventory: input.inventory,
+    knownCollections: input.knownCollections,
+    maxDepth: input.maxDepth,
+    log: input.log,
+    jobId: `${input.uid}:${input.job.generation}`,
+    maxPages: input.maxPages,
+  });
+  if (walked.status !== "complete") return { status: "continue", reason: "scan_partial" };
+  const record = await input.log.read(walked.revision);
+  if (!record || record.status !== "complete" || record.clockSource !== "server" || record.uid !== input.uid) {
+    return { status: "blocked", reason: "inventory_scan_incomplete" };
+  }
+  if (record.scope !== `users/${input.uid}`) return { status: "blocked", reason: "leftover_scope_rejected" };
+  if (input.providerEvidence || input.backupEvidence) {
+    return { status: "blocked", reason: "provider_or_backup_evidence_is_not_a_purge_result" };
+  }
+  if (record.remainingPaths.length > 0) return { status: "blocked", reason: "leftovers_remain" };
+  return { status: "awaiting_operator", remaining: record.remainingPaths.length, revision: record.revision };
 }

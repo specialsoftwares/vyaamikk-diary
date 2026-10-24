@@ -23,6 +23,7 @@ import {
   CONTENT_MIGRATION_UNCOVERED,
   type ContentSeal,
 } from "./contentEncryption";
+import { coverageEvidence, deletionDeadlinePopulations } from "./coverageRequirements";
 import { boundaryFor } from "./privateFieldCoverage";
 
 const key = randomBytes(32);
@@ -113,6 +114,17 @@ assert.equal(boundaryFor("storage_object_names").boundary, "routing_metadata");
 assert.equal(boundaryFor("party_ledger_projections").boundary, "owner_rules");
 assert.equal(CONTENT_MIGRATION_UNCOVERED.includes("party_ledger_projections"), true);
 assert.equal(boundaryFor("grin_evidence").privateFields.includes("image bytes"), true);
+const coverage = coverageEvidence();
+assert.equal(coverage.grin.encryption, false);
+assert.equal(coverage.grin.implemented, "owner_rules");
+assert.equal(coverage.partyLedger.encryption, false);
+assert.equal(coverage.partyLedger.deletion, "purged_with_the_account");
+assert.equal(coverage.localQueue.logoutCleanupProven, false);
+assert.notEqual(boundaryFor("exports").boundary, "content_seal");
+const clocks = deletionDeadlinePopulations();
+assert.equal(clocks.legacyGraceMs, 45 * 24 * 60 * 60 * 1000);
+assert.equal(clocks.newRequestErasureDays, 15);
+assert.equal(clocks.sameValue, false);
 const owned = { id: "a", updatedAt: sealed.revision, contentSeal: sealed, path: "users/owner-a/entries/rec-1" };
 const ownedB = { ...owned, id: "b" };
 const keys = (id: string) => (id === "named-key" ? named : id === "legacy" ? key : null);

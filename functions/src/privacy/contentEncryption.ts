@@ -307,6 +307,11 @@ export type MigrationLease = {
   toKeyId: string;
   leaseUntil: number;
   conflicts: string[];
+  /** Bumped on every claim. A writer must present this value before each document write. */
+  fence: number;
+  scopeId: string;
+  quarantined: string[];
+  unresolved: string[];
 };
 
 export type MigrationCheckpointStore = {
@@ -337,6 +342,14 @@ export function rowsFromInclusiveCursor<T extends { id: string }>(rows: T[], cur
   return rows.slice(index);
 }
 
+export function migrationMayComplete(input: {
+  cursor: string | null;
+  quarantined: readonly string[];
+  unresolved: readonly string[];
+}): boolean {
+  return input.cursor == null && input.quarantined.length === 0 && input.unresolved.length === 0;
+}
+
 export async function runOwnedMigration(input: {
   store: MigrationCheckpointStore;
   runId: string;
@@ -344,15 +357,20 @@ export async function runOwnedMigration(input: {
   leaseMs: number;
   rows: MigrationRow[];
   toKeyId: string;
+  scopeId?: string;
   ring?: readonly string[];
   resolveKey: (keyId: string) => Buffer | null;
   writer: (row: MigrationRow, seal: ContentSeal) => Promise<MigrationPersistResult> | MigrationPersistResult;
 }): Promise<
-  | { status: "owned_by_other" | "claim_conflict" | "cursor_not_in_page" | "checkpoint_conflict" | "key_not_in_ring"; cursor: string | null }
-  | { status: "stored"; cursor: string | null; batch: MigrationBatchResult }
+  | { status: "owned_by_other" | "claim_conflict" | "cursor_not_in_page" | "checkpoint_conflict" | "key_not_in_ring" | "scope_mismatch"; cursor: string | null }
+  | { status: "stored"; cursor: string | null; batch: MigrationBatchResult; complete: boolean }
 > {
   if (input.ring && !input.ring.includes(input.toKeyId)) return { status: "key_not_in_ring", cursor: null };
   const existing = await input.store.read();
+  const scopeId = input.scopeId ?? existing?.scopeId ?? "unscoped";
+  if (existing && (existing.toKeyId !== input.toKeyId || existing.scopeId !== scopeId)) {
+    return { status: "scope_mismatch", cursor: null };
+  }
   if (existing && existing.leaseUntil > input.now && existing.runId !== input.runId) {
     return { status: "owned_by_other", cursor: existing.cursor };
   }
@@ -364,6 +382,10 @@ export async function runOwnedMigration(input: {
     toKeyId: input.toKeyId,
     leaseUntil: input.now + input.leaseMs,
     conflicts: existing?.conflicts ?? [],
+    fence: (existing?.fence ?? 0) + 1,
+    scopeId,
+    quarantined: existing?.quarantined ?? [],
+    unresolved: existing?.unresolved ?? [],
   };
   if ((await input.store.compareAndSet(expected, claimed)) !== "stored") {
     return { status: "claim_conflict", cursor: existing?.cursor ?? null };
@@ -377,15 +399,30 @@ export async function runOwnedMigration(input: {
     dryRun: false,
     writer: input.writer,
   });
+  const pageIds = new Set(page.map((row) => row.id));
+  const quarantined = [...claimed.quarantined.filter((id) => !pageIds.has(id)), ...batch.quarantined];
+  const unresolved = [
+    ...claimed.unresolved.filter((id) => !pageIds.has(id)),
+    ...batch.unknown,
+    ...batch.rejected,
+    ...batch.conflicts,
+  ];
   const saved = await input.store.compareAndSet(claimed.revision, {
     ...claimed,
     revision: claimed.revision + 1,
     cursor: batch.nextCursor,
     conflicts: [...claimed.conflicts, ...batch.conflicts],
+    quarantined,
+    unresolved,
     leaseUntil: input.now + input.leaseMs,
   });
   if (saved !== "stored") return { status: "checkpoint_conflict", cursor: claimed.cursor };
-  return { status: "stored", cursor: batch.nextCursor, batch };
+  return {
+    status: "stored",
+    cursor: batch.nextCursor,
+    batch,
+    complete: migrationMayComplete({ cursor: batch.nextCursor, quarantined, unresolved }),
+  };
 }
 
 export type KeyMigrationCheckpoint = {

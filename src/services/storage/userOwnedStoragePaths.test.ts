@@ -4,6 +4,7 @@ import {
   allUserOwnedStoragePrefixes,
   describeUserStorageInventory,
   isObjectOwnedByUser,
+  objectNameEmbedsPrivateContent,
   userStorageRootPrefix,
 } from "./userOwnedStoragePaths";
 
@@ -30,9 +31,17 @@ function testOwnership() {
   assert.equal(isObjectOwnedByUser(uid, "other/u1/letterhead/a.png"), false);
 }
 
+function testPrivateNames() {
+  assert.equal(objectNameEmbedsPrivateContent("a.png"), false);
+  assert.equal(objectNameEmbedsPrivateContent("rec-1"), false);
+  assert.equal(objectNameEmbedsPrivateContent("priya@example.com.pdf"), true);
+  assert.equal(objectNameEmbedsPrivateContent("scan-+919876543210.jpg"), true);
+}
+
 function main() {
   testPrefixes();
   testOwnership();
+  testPrivateNames();
   console.log("userOwnedStoragePaths.test.ts: ok");
 }
 

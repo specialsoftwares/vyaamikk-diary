@@ -14,6 +14,42 @@ export function privilegedWorkerMayRead(worker: PrivilegedWorker, env: NodeJS.Pr
   return workerHoldFromEnv(env) === "running";
 }
 
+export function protectionActive(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.RESTORE_PROTECTION_ACTIVE === "true";
+}
+
+/**
+ * The env kill switch wins. Once protection is active, a missing or stopped
+ * durable hold does not mean the worker may read. Unset protection keeps the
+ * current sweep running and does not invent an erasure list.
+ */
+export async function privilegedWorkerHold(
+  env: NodeJS.ProcessEnv = process.env,
+  readHold?: () => Promise<{ workers: "stopped" | "running" } | null>
+): Promise<"stopped" | "running"> {
+  if (workerHoldFromEnv(env) === "stopped") return "stopped";
+  if (!protectionActive(env)) return "running";
+  if (!readHold) return "stopped";
+  const hold = await readHold();
+  return hold?.workers === "running" ? "running" : "stopped";
+}
+
+export async function readDurableWorkerHold(env: NodeJS.ProcessEnv = process.env): Promise<{
+  workers: "stopped" | "running";
+  traffic: "closed" | "open";
+} | null> {
+  const databaseId = env.RESTORE_HOLD_DATABASE_ID?.trim() ?? "";
+  if (!databaseId) return null;
+  const { getApp } = await import("firebase-admin/app");
+  const { getFirestore } = await import("firebase-admin/firestore");
+  const snap = await getFirestore(getApp(), databaseId).doc("_restoreHolds/current").get();
+  if (!snap.exists) return null;
+  const workers = snap.get("workers");
+  const traffic = snap.get("traffic");
+  if ((workers !== "running" && workers !== "stopped") || (traffic !== "open" && traffic !== "closed")) return null;
+  return { workers, traffic };
+}
+
 /**
  * What each exception can do while ordinary client traffic is closed.
  * None of these recreate diary, credit, purchase-order, or pack documents.

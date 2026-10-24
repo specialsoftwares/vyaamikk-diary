@@ -12,11 +12,16 @@ This packet describes a later read. It is not permission to run one, and this ch
 
 ## Permission
 
-- `datastore.entities.get` and `datastore.entities.list` on that database, limited to `users/{uid}`.
-- No `datastore.entities.delete`.
-- No `datastore.entities.create` or `datastore.entities.update`.
-- No `datastore.databases.export`.
+Firestore IAM does not enforce a document path. `datastore.entities.get` and `datastore.entities.list` apply to the database. A condition on `users/{uid}` is not something this IAM role can promise, and this packet does not claim one.
+
+The restriction that can actually be granted is:
+
+- A service account with `datastore.entities.get` and `datastore.entities.list` on the database.
+- No `datastore.entities.delete`, no create, no update, and no `datastore.databases.export`.
+- The inventory function, not the IAM role, queries only `users/{job.uid}` for the job it was given.
 - No Storage delete and no KMS change.
+
+Security rules can limit a client to `users/{uid}`. They are not a substitute for the service account's database-wide list permission.
 
 ## What stays separate
 

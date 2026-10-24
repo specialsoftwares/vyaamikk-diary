@@ -14,7 +14,7 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypt
 import { HttpsError, onCall, onRequest } from "firebase-functions/v2/https";
 
 import { getAdminDb } from "../admin";
-import { privilegedWorkerMayRead, workerWritesBusinessData } from "../deletion/privilegedWorkerGuard";
+import { privilegedWorkerHold, readDurableWorkerHold, workerWritesBusinessData } from "../deletion/privilegedWorkerGuard";
 import { assertAdmittedCallableUser } from "../identity/admitCallableUser";
 
 export const WAS_NOT_ME_REPORT_MESSAGE =
@@ -493,7 +493,9 @@ async function handleWasNotMeCore(rawToken: string): Promise<{
   signedOut?: false;
   reason?: WasNotMeValidationReason;
 }> {
-  if (!privilegedWorkerMayRead("was_not_me")) return { ok: false, reason: "restore_hold" };
+  if ((await privilegedWorkerHold(process.env, () => readDurableWorkerHold())) === "stopped") {
+    return { ok: false, reason: "restore_hold" };
+  }
   if (workerWritesBusinessData([WAS_NOT_ME_TOKENS, NEW_DEVICE_SECURITY_EVENTS])) {
     return { ok: false, reason: "restore_hold" };
   }

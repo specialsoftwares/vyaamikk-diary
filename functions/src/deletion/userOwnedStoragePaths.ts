@@ -38,6 +38,13 @@ export function allUserOwnedStoragePrefixes(uid: string): string[] {
  * True only when `objectPath` is strictly under `users/{uid}/...`
  * (prevents cross-user deletes and root/bucket wipes).
  */
+/** An email or international phone is private content and cannot be an object name. */
+export function objectNameEmbedsPrivateContent(name: string): boolean {
+  if (/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(name)) return true;
+  if (/\+\d{8,}/.test(name)) return true;
+  return false;
+}
+
 export function isObjectOwnedByUser(uid: string, objectPath: string): boolean {
   const root = userStorageRootPrefix(uid);
   const path = objectPath.trim().replace(/^\/+/, "");

@@ -72,6 +72,11 @@ export async function restoreTrafficDecisionForUid(uid: string, purpose?: string
     return "deny";
   }
   if (closed) return "deny";
+  if (process.env.RESTORE_PROTECTION_ACTIVE === "true") {
+    const { readDurableWorkerHold } = await import("./privilegedWorkerGuard");
+    const hold = await readDurableWorkerHold();
+    if (!hold || hold.traffic !== "open") return "deny";
+  }
   let required = false;
   try {
     const mode = await db.doc("restoreControl/mode").get();
