@@ -6,7 +6,45 @@
  * production state and is not a completed restore gate.
  */
 
-import { decideRestoreTraffic, readConfiguredRestoreAuthority } from "./restoreAuthority";
+import { decideRestoreAdmission, decideRestoreTraffic, readConfiguredRestoreAuthority } from "./restoreAuthority";
+
+/** Server admission for a custom token. Skip leaves the caller's other claims unchanged. */
+export async function restoreAdmissionForUid(uid: string, purpose?: string): Promise<ReturnType<typeof decideRestoreAdmission>> {
+  const { getAdminDb } = await import("../admin");
+  const db = getAdminDb();
+  let closed = false;
+  let required = false;
+  let reconciled = false;
+  let localWatermark: number | null = null;
+  try {
+    const [fence, mode] = await Promise.all([
+      db.doc("restoreControl/current").get(),
+      db.doc("restoreControl/mode").get(),
+    ]);
+    closed = fence.exists && fence.data()?.closed === true;
+    reconciled = fence.exists && fence.data()?.reconciled === true;
+    localWatermark = fence.exists && Number.isSafeInteger(fence.data()?.watermark) ? Number(fence.data()?.watermark) : null;
+    required = mode.exists && mode.data()?.required === true;
+  } catch {
+    return { status: "unavailable" };
+  }
+  let authority: Awaited<ReturnType<typeof readConfiguredRestoreAuthority>>;
+  try {
+    authority = await readConfiguredRestoreAuthority();
+  } catch {
+    return { status: "unavailable" };
+  }
+  return decideRestoreAdmission({
+    configured: authority.configured,
+    authority: authority.snapshot,
+    closed,
+    required,
+    reconciled,
+    localWatermark,
+    uid,
+    purpose,
+  });
+}
 
 export async function assertRestoreTrafficClosed(uid: string, purpose?: string): Promise<void> {
   const decision = await restoreTrafficDecisionForUid(uid, purpose);

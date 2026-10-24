@@ -11,6 +11,36 @@ export type RestoreAuthoritySnapshot = {
   withdrawnPurposes: Readonly<Record<string, readonly string[]>>;
 };
 
+/**
+ * Claim decision for a custom token. The client does not supply the watermark.
+ * Required mode stays inactive until this returns admit, so current phone tokens
+ * keep working. An unavailable authority does not become an unmarked token.
+ */
+export function decideRestoreAdmission(input: {
+  configured: boolean;
+  authority: RestoreAuthoritySnapshot | null;
+  closed: boolean;
+  required: boolean;
+  reconciled: boolean;
+  localWatermark: number | null;
+  uid: string;
+  purpose?: string;
+}): { status: "skip" | "admit" | "deny" | "unavailable"; authorityWatermark?: number } {
+  if (input.closed) return { status: "deny" };
+  if (!input.required) return { status: "skip" };
+  if (!input.configured || !input.authority || !input.reconciled || input.localWatermark == null) {
+    return { status: "unavailable" };
+  }
+  const traffic = decideRestoreTraffic({
+    authority: input.authority,
+    localWatermark: input.localWatermark,
+    uid: input.uid,
+    purpose: input.purpose,
+  });
+  if (traffic === "deny") return { status: "deny" };
+  return { status: "admit", authorityWatermark: input.localWatermark };
+}
+
 export function decideRestoreTraffic(input: {
   authority: RestoreAuthoritySnapshot | null;
   localWatermark: number | null;
@@ -131,7 +161,19 @@ export function mergeRestoreAuthorityProjection(
 export type RestoreAuthorityStore = {
   read(): Promise<unknown | null>;
   write(snapshot: RestoreAuthoritySnapshot): Promise<void>;
+  /** Returns conflict when expected is no longer the stored snapshot. */
+  compareAndSet?(expected: unknown, snapshot: RestoreAuthoritySnapshot): Promise<"stored" | "conflict">;
 };
+
+function canonicalAuthority(data: unknown): string | null {
+  const parsed = parseRestoreAuthoritySnapshot(data);
+  if (!parsed) return null;
+  const erased = [...parsed.erasedUids].sort().join(",");
+  const purposes = Object.keys(parsed.withdrawnPurposes).sort().map((uid) => {
+    return `${uid}:${[...parsed.withdrawnPurposes[uid]].sort().join(",")}`;
+  }).join(";");
+  return `${parsed.watermark}|${erased}|${purposes}`;
+}
 
 let storeForTests: RestoreAuthorityStore | null = null;
 
@@ -168,6 +210,20 @@ export async function projectRestoreAuthority(
     async write(snapshot) {
       await ref.set(snapshot);
     },
+    async compareAndSet(expected, snapshot) {
+      let stored = false;
+      await getFirestore(getApp(), databaseId).runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        const current = snap.exists ? (snap.data() ?? null) : null;
+        if (canonicalAuthority(current) !== canonicalAuthority(expected)) {
+          stored = false;
+          return;
+        }
+        tx.set(ref, snapshot);
+        stored = true;
+      });
+      return stored ? "stored" : "conflict";
+    },
   });
 }
 
@@ -176,24 +232,31 @@ async function writeProjection(
   projection: { erase?: boolean; withdrawPurposes?: readonly string[] },
   store: RestoreAuthorityStore
 ): Promise<"projected"> {
-  let raw: unknown | null;
-  try {
-    raw = await store.read();
-  } catch (error) {
-    if (error instanceof Error && error.message.startsWith("restore_authority_")) throw error;
-    throw new Error("restore_authority_write_failed");
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    let raw: unknown | null;
+    try {
+      raw = await store.read();
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("restore_authority_")) throw error;
+      throw new Error("restore_authority_write_failed");
+    }
+    if (raw == null) throw new Error("restore_authority_unprovisioned");
+    const existing = parseRestoreAuthoritySnapshot(raw);
+    if (!existing) throw new Error("restore_authority_projection_failed");
+    const next = mergeRestoreAuthorityProjection(existing, uid, projection);
+    try {
+      if (!store.compareAndSet) {
+        await store.write(next);
+        return "projected";
+      }
+      const outcome = await store.compareAndSet(raw, next);
+      if (outcome === "stored") return "projected";
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("restore_authority_")) throw error;
+      throw new Error("restore_authority_write_failed");
+    }
   }
-  if (raw == null) throw new Error("restore_authority_unprovisioned");
-  const existing = parseRestoreAuthoritySnapshot(raw);
-  if (!existing) throw new Error("restore_authority_projection_failed");
-  const next = mergeRestoreAuthorityProjection(existing, uid, projection);
-  try {
-    await store.write(next);
-  } catch (error) {
-    if (error instanceof Error && error.message.startsWith("restore_authority_")) throw error;
-    throw new Error("restore_authority_write_failed");
-  }
-  return "projected";
+  throw new Error("restore_authority_write_failed");
 }
 
 export async function readConfiguredRestoreAuthority(): Promise<{

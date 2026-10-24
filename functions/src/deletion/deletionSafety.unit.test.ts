@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { deletedProfileStub, ownsDeletionLease, walkDeletionPages } from './deletionSafety';
-import { decideRestoreTraffic, mergeRestoreAuthorityProjection, outsideRestoreAuthorityDatabaseId, parseRestoreAuthoritySnapshot, projectRestoreAuthority, setRestoreAuthorityStoreForTests } from './restoreAuthority';
+import { decideRestoreAdmission, decideRestoreTraffic, mergeRestoreAuthorityProjection, outsideRestoreAuthorityDatabaseId, parseRestoreAuthoritySnapshot, projectRestoreAuthority, setRestoreAuthorityStoreForTests } from './restoreAuthority';
 import { classifyProviderError, initialDeletionJob, canAcquireLease } from './deletionJob';
 async function main() {
   const job = { ...initialDeletionJob({ uid: 'a', requestedAt: 0, graceExpiresAt: 0 }), status: 'leased' as const, leaseOwner: 'worker-a', leaseUntil: 100 };
@@ -61,7 +61,37 @@ async function main() {
   assert.equal(decideRestoreTraffic({ authority: stored, localWatermark: 4, uid: 'other', purpose: 'crash_diagnostics' }), 'deny');
   const idempotent = mergeRestoreAuthorityProjection(stored, 'new-user', { erase: true, withdrawPurposes: ['crash_diagnostics'] });
   assert.deepEqual(idempotent.erasedUids, ['old', 'new-user']);
+  let liveAuthority = { watermark: 4, erasedUids: ['old'], withdrawnPurposes: { old: ['crash_diagnostics'] } as Record<string, string[]> };
+  let conflicts = 0;
+  setRestoreAuthorityStoreForTests({
+    read: async () => structuredClone(liveAuthority),
+    write: async () => { throw new Error('unconditional write is not used'); },
+    compareAndSet: async (expected, snapshot) => {
+      const expectedIds = (expected as { erasedUids: string[] }).erasedUids.join(',');
+      const currentIds = liveAuthority.erasedUids.join(',');
+      if (expectedIds !== currentIds) return 'conflict';
+      if (conflicts === 0 && snapshot.erasedUids.includes('erasure-a')) {
+        conflicts += 1;
+        liveAuthority = { ...liveAuthority, erasedUids: ['old', 'erasure-b'], withdrawnPurposes: { ...liveAuthority.withdrawnPurposes, 'erasure-b': ['crash_diagnostics'] } };
+        return 'conflict';
+      }
+      liveAuthority = snapshot as typeof liveAuthority;
+      return 'stored';
+    },
+  });
+  assert.equal(await projectRestoreAuthority('erasure-a', { erase: true }), 'projected');
+  assert.deepEqual(liveAuthority.erasedUids.sort(), ['erasure-a', 'erasure-b', 'old']);
+  assert.deepEqual(liveAuthority.withdrawnPurposes['erasure-b'], ['crash_diagnostics']);
   setRestoreAuthorityStoreForTests(null);
+  const admitted = { configured: true, authority, closed: false, required: true, reconciled: true, localWatermark: 2, uid: 'live' };
+  assert.equal(decideRestoreAdmission(admitted).status, 'admit');
+  assert.equal(decideRestoreAdmission(admitted).authorityWatermark, 2);
+  assert.equal(decideRestoreAdmission({ ...admitted, uid: 'erased' }).status, 'deny');
+  assert.equal(decideRestoreAdmission({ ...admitted, purpose: 'crash_diagnostics' }).status, 'deny');
+  assert.equal(decideRestoreAdmission({ ...admitted, required: false }).status, 'skip');
+  assert.equal(decideRestoreAdmission({ ...admitted, closed: true, required: false }).status, 'deny');
+  assert.equal(decideRestoreAdmission({ ...admitted, authority: null }).status, 'unavailable');
+  assert.equal(decideRestoreAdmission({ ...admitted, reconciled: false }).status, 'unavailable');
   assert.equal(classifyProviderError(new Error('restore_authority_unprovisioned')).category, 'permanent');
   assert.equal(classifyProviderError(new Error('restore_authority_projection_failed')).category, 'permanent');
   assert.equal(classifyProviderError(new Error('restore_authority_write_failed')).category, 'transient');
