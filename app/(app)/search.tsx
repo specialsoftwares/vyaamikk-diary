@@ -63,9 +63,10 @@ export default function GlobalSearchScreen() {
     useCallback(() => {
       invalidateGlobalSearchIndex();
       void reloadIndex();
-      void getRecentSearches().then(setRecentQueries);
+      if (user?.uid) void getRecentSearches(user.uid).then(setRecentQueries);
+      else setRecentQueries([]);
       if (typeof q === "string" && q.trim()) setQuery(q.trim());
-    }, [reloadIndex, q, setQuery])
+    }, [reloadIndex, q, setQuery, user?.uid])
   );
 
   const filterLabel = useCallback(

@@ -15,23 +15,29 @@ export function coverageEvidence() {
       requirement: "Receipt bodies and image bytes need application-level encryption before they count as sealed.",
       implemented: boundaryFor("grin_evidence").boundary,
       encryption: false,
-      deletion: INCLUDE_GRIN_IN_ACCOUNT_PURGE ? "included" : "retained_while_flag_false",
-      exception: "Encryption is not implemented. Owner rules are access control. Leaving the purge flag false is not a decision that the bytes are sealed.",
+      releaseReachable: false,
+      deletion: INCLUDE_GRIN_IN_ACCOUNT_PURGE
+        ? "flag_purges_legacy_and_new"
+        : "legacy_jobs_retain_copies_version_2_jobs_already_purge",
+      retainedCopies: "users/{uid} GRIN collections and users/{uid}/grinEvidence/ remain until a deletion job removes them",
     },
     partyLedger: {
       requirement: "Projection totals need application-level encryption before they count as sealed.",
       implemented: boundaryFor("party_ledger_projections").boundary,
       encryption: false,
+      storedPlaintextProjection: false,
+      clientRead: "denied",
+      releaseReadPath: "recomputed_on_device",
       deletion: (USER_SUBCOLLECTIONS as readonly string[]).includes("partyLedgerProjections") ? "purged_with_the_account" : "missing_from_purge",
-      exception: "Owner rules stop other users reading the totals. They do not encrypt the totals.",
     },
     localQueue: {
       requirement: "A queued plaintext payload needs encryption, or proof that logout removes it.",
       implemented: boundaryFor("local_caches_and_outboxes").boundary,
       encryption: false,
       logoutCleanupProven: false,
-      deletion: "not_a_cloud_collection",
-      exception: "Device-local storage is a location. It is not evidence of encryption or of logout cleanup.",
+      logoutRetainsUnsynced: true,
+      accountIsolated: true,
+      deletion: "owner_rows_removed_on_account_deletion",
     },
   } as const;
 }

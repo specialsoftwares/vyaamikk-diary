@@ -8,7 +8,9 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { initializeTestEnvironment, type RulesTestEnvironment } from "@firebase/rules-unit-testing";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { deleteDoc, doc, getDoc, setDoc } from "firebase/firestore";
+
+import { activateFirestoreRestoreRules, RESTORE_INTERVAL_CONTROL } from "./activatedRestoreRules";
 
 async function canRead(env: RulesTestEnvironment, uid: string, claims?: Record<string, unknown>): Promise<boolean> {
   const db = env.authenticatedContext(uid, {
@@ -64,6 +66,45 @@ async function main() {
     assert.equal(await canRead(env, uid, { authorityWatermark: 8 }), false, "required mode denies a stale watermark");
     assert.equal(await canRead(env, uid, { authorityWatermark: 7 }), true, "a reconciled fence admits the matching watermark");
     assert.equal(await canRead(env, uid, { authorityWatermark: 7, erased: true }), false, "an erased claim stays denied");
+
+    const activated = await initializeTestEnvironment({
+      projectId: "demo-vyaamikk-restore-activated",
+      firestore: { rules: activateFirestoreRestoreRules(readFileSync(resolve(process.cwd(), "firestore.rules"), "utf8")) },
+    });
+    try {
+      await activated.withSecurityRulesDisabled(async (ctx) => {
+        const db = ctx.firestore();
+        await setDoc(doc(db, "users", uid), { uid, status: "active", ageEligibility: "eligible", updatedAt: 10 });
+        await setDoc(doc(db, "users", uid, "entries", "legacy-entry"), {
+          userId: uid,
+          title: "synthetic restored private text",
+          updatedAt: 10,
+        });
+      });
+      const duringGap = await canRead(activated, uid, { authorityWatermark: 7 });
+      assert.equal(duringGap, false, RESTORE_INTERVAL_CONTROL);
+      await activated.withSecurityRulesDisabled(async (ctx) => {
+        await setDoc(doc(ctx.firestore(), "restoreControl", "current"), {
+          closed: false,
+          reconciled: true,
+          watermark: 7,
+        });
+        await setDoc(doc(ctx.firestore(), "restoreControl", "mode"), { required: true });
+      });
+      assert.equal(await canRead(activated, uid, { authorityWatermark: 7 }), true, "the rewritten fence admits the same client");
+      await activated.withSecurityRulesDisabled(async (ctx) => {
+        const db = ctx.firestore();
+        await deleteDoc(doc(db, "restoreControl", "current"));
+        await deleteDoc(doc(db, "restoreControl", "mode"));
+      });
+      assert.equal(
+        await canRead(activated, uid, { authorityWatermark: 7 }),
+        false,
+        "deleting the control documents does not bypass the activated rules"
+      );
+    } finally {
+      await activated.cleanup();
+    }
     console.log("restore fence: closed and required modes deny unmarked tokens until reconciliation");
   } finally {
     await env.cleanup();

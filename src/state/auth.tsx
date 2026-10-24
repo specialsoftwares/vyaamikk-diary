@@ -40,6 +40,7 @@ import {
   runLocalDeviceSignOut,
   type LocalSignOutResult,
 } from "@/services/auth/authSessionFence";
+import { retainLocalAccountOnLogout } from "@/services/accountDeletion/localAccountBoundary";
 import { retireNativeCallableAuthReady } from "@/services/auth/nativeCallableAuthGate";
 import { toAppError } from "@/domain/errors";
 import { clearMasterDataSessionCache } from "@/services/masterData";
@@ -421,6 +422,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             clearSessionLastActiveTouch(uid);
             endFirstActionFreezeSession();
             clearMasterDataSessionCache();
+            retainLocalAccountOnLogout(uid);
           },
           removePersistedProfile: () => clearSessionForRetirement(ownedGeneration).then(() => undefined),
         }).then(() => undefined),
