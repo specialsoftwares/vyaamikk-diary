@@ -14,6 +14,7 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypt
 import { HttpsError, onCall, onRequest } from "firebase-functions/v2/https";
 
 import { getAdminDb } from "../admin";
+import { privilegedWorkerMayRead, workerWritesBusinessData } from "../deletion/privilegedWorkerGuard";
 import { assertAdmittedCallableUser } from "../identity/admitCallableUser";
 
 export const WAS_NOT_ME_REPORT_MESSAGE =
@@ -132,7 +133,7 @@ export function parseAndVerifyWasNotMeSignedToken(
   return { ok: true, eventId, uid, sessionId, issuedAt };
 }
 
-export type WasNotMeValidationReason = "expired" | "reused" | "wrong_event" | "tampered";
+export type WasNotMeValidationReason = "expired" | "reused" | "wrong_event" | "tampered" | "restore_hold";
 
 export type WasNotMeValidation =
   | { ok: true }
@@ -492,6 +493,10 @@ async function handleWasNotMeCore(rawToken: string): Promise<{
   signedOut?: false;
   reason?: WasNotMeValidationReason;
 }> {
+  if (!privilegedWorkerMayRead("was_not_me")) return { ok: false, reason: "restore_hold" };
+  if (workerWritesBusinessData([WAS_NOT_ME_TOKENS, NEW_DEVICE_SECURITY_EVENTS])) {
+    return { ok: false, reason: "restore_hold" };
+  }
   const secret = resolveWasNotMeSecret();
   const parsed = parseAndVerifyWasNotMeSignedToken(secret, rawToken);
   if (!parsed.ok) return { ok: false, reason: "tampered" };

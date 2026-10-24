@@ -134,8 +134,26 @@ export async function bridgeNativeSession(ports: JsAuthBridgePorts): Promise<boo
       }
       return false;
     }
+    if (ports.admissionCurrent && !(await ports.admissionCurrent())) return false;
     return true;
   });
+}
+
+/** A positive claim is current only when it equals the authority watermark. */
+export function claimMatchesAuthorityWatermark(claim: unknown, authorityWatermark: number | null): boolean {
+  if (authorityWatermark == null || !Number.isSafeInteger(authorityWatermark) || authorityWatermark < 1) return false;
+  return claim === authorityWatermark;
+}
+
+let publishedAuthorityWatermark: number | null = null;
+
+/** Unset until an operator publishes the current authority watermark. The refresh flag stays off until then. */
+export function readPublishedAuthorityWatermark(): number | null {
+  return publishedAuthorityWatermark;
+}
+
+export function __setPublishedAuthorityWatermarkForTests(value: number | null): void {
+  publishedAuthorityWatermark = value;
 }
 
 async function establishJsAuthSession(): Promise<boolean> {
@@ -159,11 +177,12 @@ async function establishJsAuthSession(): Promise<boolean> {
     },
     admissionCurrent: async () => {
       if (process.env.EXPO_PUBLIC_RESTORE_ADMISSION_REFRESH !== "true") return true;
+      const authority = readPublishedAuthorityWatermark();
+      if (authority == null) return false;
       const user = auth.currentUser;
       if (!user) return false;
-      const token = await user.getIdTokenResult();
-      const watermark = token.claims.authorityWatermark;
-      return typeof watermark === "number" && Number.isSafeInteger(watermark) && watermark >= 1;
+      const token = await user.getIdTokenResult(false);
+      return claimMatchesAuthorityWatermark(token.claims.authorityWatermark, authority);
     },
     signIn: async (token) => {
       const cred = await signInWithCustomToken(auth, token);

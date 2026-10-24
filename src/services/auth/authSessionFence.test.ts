@@ -12,7 +12,7 @@ import {
   retireJsAuthBridge,
   runLocalDeviceSignOut,
 } from "./authSessionFence";
-import { bridgeNativeSession } from "./jsAuthBridge";
+import { bridgeNativeSession, claimMatchesAuthorityWatermark } from "./jsAuthBridge";
 import { AppError } from "@/domain/errors";
 import {
   __setSessionStorageForTests,
@@ -912,6 +912,58 @@ async function main() {
       signOutJs: async () => undefined,
     });
     check("a current admitted token is not minted again", reused && mints === 1);
+  }
+
+  __resetAuthSessionFenceForTests();
+  {
+    check("a positive watermark is not fresh against a newer authority", claimMatchesAuthorityWatermark(1, 2) === false && claimMatchesAuthorityWatermark(2, 2) && claimMatchesAuthorityWatermark(1, null) === false);
+    let claim = 1;
+    let mints = 0;
+    const refreshed = await bridgeNativeSession({
+      getNativeUid: () => "uid-a",
+      getJsUid: () => "uid-a",
+      admissionCurrent: async () => claimMatchesAuthorityWatermark(claim, 2),
+      mint: async () => {
+        mints += 1;
+        claim = 2;
+        return "fresh-token";
+      },
+      signIn: async () => "uid-a",
+      signOutJs: async () => undefined,
+    });
+    check("an obsolete positive watermark is refreshed once", refreshed && mints === 1 && claim === 2);
+    claim = 1;
+    mints = 0;
+    const stuck = await bridgeNativeSession({
+      getNativeUid: () => "uid-a",
+      getJsUid: () => "uid-a",
+      admissionCurrent: async () => claimMatchesAuthorityWatermark(claim, 2),
+      mint: async () => {
+        mints += 1;
+        return "still-old";
+      },
+      signIn: async () => "uid-a",
+      signOutJs: async () => undefined,
+    });
+    check("a still-obsolete token is not minted again", stuck === false && mints === 1);
+    mints = 0;
+    let denied = false;
+    try {
+      await bridgeNativeSession({
+        getNativeUid: () => "uid-a",
+        getJsUid: () => "uid-a",
+        admissionCurrent: async () => false,
+        mint: async () => {
+          mints += 1;
+          throw new Error("restore_fence_closed");
+        },
+        signIn: async () => "uid-a",
+        signOutJs: async () => undefined,
+      });
+    } catch (error) {
+      denied = error instanceof Error && error.message === "restore_fence_closed";
+    }
+    check("a closed fence is not retried", denied && mints === 1);
   }
 
   if (failures > 0) {

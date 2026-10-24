@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { deletedProfileStub, ownsDeletionLease, walkDeletionPages } from './deletionSafety';
 import { claimsForAdmission, decideRestoreAdmission, decideRestoreTraffic, mergeRestoreAuthorityProjection, outsideRestoreAuthorityDatabaseId, parseRestoreAuthoritySnapshot, projectRestoreAuthority, restoreServiceCanReopen, setRestoreAuthorityStoreForTests } from './restoreAuthority';
+import { createMemoryRestoreHoldStore, mintAllowed, nextDisasterRecovery, nextInitialActivation, releaseRestoreHolds } from './restoreControlPlane';
+import { erasedBillingUidsFromEnv, excludeErasedBillingUids, privilegedWorkerMayRead, workerHoldFromEnv, workerWritesBusinessData } from './privilegedWorkerGuard';
 import { classifyProviderError, initialDeletionJob, canAcquireLease } from './deletionJob';
 async function main() {
   const job = { ...initialDeletionJob({ uid: 'a', requestedAt: 0, graceExpiresAt: 0 }), status: 'leased' as const, leaseOwner: 'worker-a', leaseUntil: 100 };
@@ -113,6 +115,45 @@ async function main() {
   assert.equal(classifyProviderError(new Error('restore_authority_unprovisioned')).category, 'permanent');
   assert.equal(classifyProviderError(new Error('restore_authority_projection_failed')).category, 'permanent');
   assert.equal(classifyProviderError(new Error('restore_authority_write_failed')).category, 'transient');
+  const restored = createMemoryRestoreHoldStore({
+    docs: { fence: null, mode: null },
+    holds: { traffic: 'closed', workers: 'stopped' },
+  });
+  assert.equal((await releaseRestoreHolds(restored, 2)).reason, 'restored_primary_missing_restore_control');
+  assert.equal((await restored.snapshot()).holds.traffic, 'closed');
+  restored.replaceDocs({
+    fence: { closed: true, reconciled: false, watermark: 1 },
+    mode: { required: false },
+  });
+  assert.equal((await releaseRestoreHolds(restored, 2)).reason, 'fence_not_reconciled');
+  assert.equal((await restored.snapshot()).holds.workers, 'stopped');
+  restored.replaceDocs({
+    fence: { closed: false, reconciled: true, watermark: 2 },
+    mode: { required: false },
+  });
+  assert.equal((await releaseRestoreHolds(restored, 2)).released, true);
+  assert.deepEqual((await restored.snapshot()).holds, { traffic: 'open', workers: 'running' });
+  assert.equal(nextInitialActivation([]), 'confirm_authority');
+  assert.equal(mintAllowed('initial', [], true), false);
+  assert.equal(mintAllowed('initial', ['confirm_authority', 'write_open_reconciled_fence'], false), true);
+  assert.equal(nextInitialActivation(['confirm_authority']).includes('write_closed_fence'), false);
+  const recovery = ['keep_holds_closed', 'confirm_authority', 'write_closed_fence'] as const;
+  assert.equal(nextDisasterRecovery(recovery), 'rewrite_open_fence');
+  assert.equal(mintAllowed('recovery', recovery, true), false);
+  assert.equal(mintAllowed('recovery', [...recovery, 'rewrite_open_fence'], false), true);
+  assert.equal(nextDisasterRecovery([...recovery, 'rewrite_open_fence', 'issue_admitted_tokens']), 'release_worker_hold');
+  const previousHold = process.env.RESTORE_WORKER_HOLD;
+  delete process.env.RESTORE_WORKER_HOLD;
+  assert.equal(workerHoldFromEnv(), 'running');
+  assert.equal(privilegedWorkerMayRead('deletion'), true);
+  process.env.RESTORE_WORKER_HOLD = 'stopped';
+  assert.equal(privilegedWorkerMayRead('billing'), false);
+  assert.equal(privilegedWorkerMayRead('was_not_me'), false);
+  if (previousHold === undefined) delete process.env.RESTORE_WORKER_HOLD;
+  else process.env.RESTORE_WORKER_HOLD = previousHold;
+  assert.deepEqual(excludeErasedBillingUids(['live', 'erased'], erasedBillingUidsFromEnv({ RESTORE_ERASED_UIDS: '["erased"]' } as NodeJS.ProcessEnv)), ['live']);
+  assert.equal(workerWritesBusinessData(['wasNotMeTokens', 'newDeviceSecurityEvents']), false);
+  assert.equal(workerWritesBusinessData(['entries']), true);
   console.log('deletionSafety: cursor, lease, backoff and minimal-stub tests passed');
 }
 main().catch(e => { console.error(e); process.exitCode = 1; });

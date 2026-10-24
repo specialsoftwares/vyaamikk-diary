@@ -16,6 +16,7 @@ import {
   runFinalAccountPurge,
 } from "./finalPurge";
 import { deletionJobInputFromUser, deletionStampFromJobInput } from "./deletionPolicy";
+import { privilegedWorkerMayRead } from "./privilegedWorkerGuard";
 import { reapplyCompletedDeletionManifest } from "./restoreSuppression";
 
 const USERS = "users";
@@ -149,6 +150,7 @@ const SCHEDULER_MAX_PAGES = 25;
 export const scheduledDeletionCleanup = onSchedule(
   { schedule: "every 24 hours", region: "asia-south1" },
   async () => {
+    if (!privilegedWorkerMayRead("deletion")) return;
     const db = getAdminDb();
     const now = Date.now();
 
