@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { deletedProfileStub, ownsDeletionLease, walkDeletionPages } from './deletionSafety';
-import { claimsForAdmission, decideRestoreAdmission, decideRestoreTraffic, mergeRestoreAuthorityProjection, outsideRestoreAuthorityDatabaseId, parseRestoreAuthoritySnapshot, projectRestoreAuthority, restoreServiceCanReopen, setRestoreAuthorityStoreForTests } from './restoreAuthority';
-import { createMemoryRestoreHoldStore, mintAllowed, nextDisasterRecovery, nextInitialActivation, releaseRestoreHolds } from './restoreControlPlane';
+import { claimsForAdmission, decideRestoreAdmission, decideRestoreTraffic, mergeRestoreAuthorityProjection, outsideRestoreAuthorityDatabaseId, parseRestoreAuthoritySnapshot, projectRestoreAuthority, proveAuthorityReconciled, restoreServiceCanReopen, setRestoreAuthorityStoreForTests } from './restoreAuthority';
+import { activationStopBehaviour, createMemoryRestoreHoldStore, mintAllowed, nextDisasterRecovery, nextInitialActivation, releaseRestoreHolds } from './restoreControlPlane';
 import { erasedBillingUidsFromEnv, excludeErasedBillingUids, privilegedWorkerMayRead, workerHoldFromEnv, workerWritesBusinessData } from './privilegedWorkerGuard';
 import { classifyProviderError, initialDeletionJob, canAcquireLease } from './deletionJob';
 async function main() {
@@ -164,6 +164,23 @@ async function main() {
   assert.equal(mintAllowed('recovery', recovery, true), false);
   assert.equal(mintAllowed('recovery', [...recovery, 'rewrite_open_fence'], false), true);
   assert.equal(nextDisasterRecovery([...recovery, 'rewrite_open_fence', 'issue_admitted_tokens']), 'release_worker_hold');
+  const seeded = { watermark: 4, erasedUids: ['erased-owner'], withdrawnPurposes: { 'withdrawn-owner': ['crash_diagnostics'] } };
+  const watermarkOnly = proveAuthorityReconciled(seeded, { watermark: 4 });
+  assert.equal(watermarkOnly.ok, false);
+  if (watermarkOnly.ok) throw new Error('watermark-only reopen must be refused');
+  assert.equal(watermarkOnly.reason, 'lists_not_presented');
+  const emptyLists = proveAuthorityReconciled(seeded, { watermark: 4, erasedUids: [], withdrawnPurposes: {} });
+  assert.equal(emptyLists.ok, false);
+  if (emptyLists.ok) throw new Error('empty lists are not this authority');
+  assert.equal(emptyLists.reason, 'erasure_not_reconciled');
+  assert.equal(proveAuthorityReconciled(seeded, {
+    watermark: 4,
+    erasedUids: ['erased-owner'],
+    withdrawnPurposes: { 'withdrawn-owner': ['crash_diagnostics'] },
+  }).ok, true);
+  assert.equal(activationStopBehaviour(2).workersProtected, false);
+  assert.equal(activationStopBehaviour(2).safeAction, 'stop_workers_before_treating_phase_2_as_complete');
+  assert.equal(activationStopBehaviour(4).safeAction, 'reopen_only_after_erasure_proof');
   const previousHold = process.env.RESTORE_WORKER_HOLD;
   delete process.env.RESTORE_WORKER_HOLD;
   assert.equal(workerHoldFromEnv(), 'running');

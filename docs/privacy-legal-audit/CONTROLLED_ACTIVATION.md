@@ -110,12 +110,29 @@ Rollback: write `restoreControl/current.closed=true`, set the outside holds clos
 
 Rollback of the refresh behaviour is a new build, described in the build-time section. It is not an instant server switch.
 
+## If activation stops between phases
+
+Stopping is not a rollback to the previous phase's client behaviour.
+
+- After phase 0, stay there. Workers keep their current behaviour. Do not seed the authority.
+- After phase 1, pre-activation rules still admit an unmarked session, and workers are not protected. Do not deploy the activated rules until the minted claim has been observed. That pause is safe for clients who have not yet refreshed.
+- After phase 2, client rules already deny an unmarked or stale token. Workers and callables are still unprotected because `RESTORE_PROTECTION_ACTIVE` is unset. Do not describe that pause as complete. Before treating it as the release state, either finish phase 3 or set `RESTORE_WORKER_HOLD=stopped`. Setting `required` false does not close that gap.
+- After phase 3, rollback is a closed primary fence and closed outside holds. It is not a change to required mode.
+- After phase 4 starts, a missing fence stays denied. Reopen only through the erasure proof below.
+
+## Erasure proof before reopen
+
+`rewriteOpenReconciledFence` reads the outside authority. It writes an open reconciled fence only when the proposal presents the same watermark, the same erased account ids, and the same withdrawn purposes. A proposal that carries only the watermark is refused, and the fence document is left unchanged. An empty erasure list matches only an authority whose erasure list is empty, and only when that list is presented.
+
+Copying `restoreControl/current` out of a restored snapshot does not supply this proof.
+
 ## Required mode
 
-- Under the pre-activation rules, `restoreControl/mode` `{ required: true }` is optional and is not what the activated files enforce.
-- The activated files require the matching claim whether or not that document exists. They also deny a missing fence. Do not weaken either check.
+- Under the pre-activation rules, `restoreControl/mode` `{ required: true }` is an optional extra deny. It is not what the activated files enforce.
+- Activated `restoreClaimAllows` reads the fence and `authorityWatermark`. It does not read `restoreControl/mode`.
+- Setting `{ required: false }`, or deleting the mode document, does not admit an unmarked token and does not admit a stale watermark. It is not an access-restoring rollback.
 
-Rollback: set `required` false. Do not delete the fence.
+Rollback after the activated rules are deployed: write `restoreControl/current.closed=true`, keep the outside holds closed, and leave the activated rules in place. Do not delete erased account ids.
 
 ## Controlled migration and deletion inventory
 
@@ -166,7 +183,44 @@ Cloud recovery and local-only recovery are different. Diary records that reached
 
 ## Signed Android acceptance
 
-Not started. It needs a release build on a device after the source gate is green. An emulator rules test is not that pass. The manifest notes above are the versionCode 24 artifact, not this pass.
+Not started. The profile below is source only. Do not run it until the approval sheet in this section is signed. An emulator rules test and the versionCode 24 artifact do not certify the binary this profile would produce.
+
+### Build identity
+
+- Profile: `acceptance-android` in `eas.json`. Internal APK. `autoIncrement` is false. EAS environment is `preview`, not `production`.
+- Package: `com.specialsoftwares.vyaamikkdiary`. Source `versionCode` is 30. The device sheet records the versionCode from the built APK. A mismatch with that APK fails the pass. VersionCode 24 evidence cannot be reused.
+- `EXPO_PUBLIC_APP_MODE=production`. `EXPO_PUBLIC_RESTORE_ADMISSION_REFRESH=true`. GRIN store-admit and purchase-entry flags are absent, so they stay off. The refresh value is fixed when this APK is built.
+- Backend: an isolated Firebase project supplied as that build's client config. Do not bake the production `google-services.json` into this APK, and do not point the refresh-enabled binary at production.
+
+### Backend prerequisites before install
+
+Phase 1 on the isolated project only. Named authority database seeded with a watermark, the erasure list, and withdrawn purposes. `RESTORE_AUTHORITY_DATABASE_ID` set to that id. Primary fence open, reconciled, and equal to that watermark. Mode absent or `{ required: false }`. Activated rules not deployed. `RESTORE_HOLD_DATABASE_ID` unset. `RESTORE_PROTECTION_ACTIVE` unset. `RESTORE_WORKER_HOLD` unset. `INCLUDE_GRIN_IN_ACCOUNT_PURGE` remains false.
+
+### Approval to build or change the isolated project
+
+Cost is one EAS Android build on the Expo account and the isolated project's own Firebase usage. Production quotas are not the target. Recovery if the APK was aimed at the wrong project: uninstall it and do not deploy activated rules there. Recovery if the isolated fence was opened in error: set `restoreControl/current.closed=true` and leave the activated rules undeployed. This packet does not authorise the build, the install, or those cloud writes.
+
+### Device pass and fail
+
+Each row fails closed: a missing capture, a crash, or a row that only matches the versionCode 24 artifact is a fail.
+
+| Case | Pass | Fail |
+|---|---|---|
+| Manifest and backup | `aapt` or bundletool dump of this APK shows `allowBackup`, `fullBackupContent`, and `dataExtractionRules`. The sheet quotes those values and the SecureStore exclude. | The sheet cites versionCode 24, or the dump is absent. |
+| Secure store | The account key is written by the production adapter. A missing module reports `secure_store_unavailable` and does not write ordinary storage. | The key appears in an ordinary preferences dump. |
+| Legacy key upgrade | An existing `vyd_local_data_key_v1_` value is copied, read back, then removed. A mismatch keeps both copies and reports `key_conflict`. | The legacy value is deleted before the read-back matches. |
+| Process death | After the process is killed, pending offline diary writes are still in the local queue and sync after restart. | The pending queue is empty or the sealed rows will not open. |
+| Logout | Logout keeps the key and unsynchronised rows. The next account does not read them. | Logout deletes the key or shows the previous account's rows. |
+| Account deletion | Deletion removes that account's key, local diary rows, and local GRIN rows. Another account's rows remain. | A second account loses rows, or the deleted account's key remains usable. |
+| Missing key | The app reports the failure and leaves the sealed rows on disk. It does not mint a replacement key. | The rows are deleted or a new key is written over them. |
+| Replacement phone | A new install signs in and reads diary records that had reached Firestore. | Synced records are missing, or the test treats that as local-key recovery. |
+| Unsynchronised records | The sheet lists local-only rows that do not return on the new phone. | The sheet claims those rows were recovered from the cloud. |
+| Consent withdrawal | Withdrawing crash-diagnostics consent stops new diagnostic sends. Buffered events already gated off are not flushed after the withdrawal. | A post-withdrawal capture contains a new diagnostic send. |
+| Core flows | Create a record, record a payment, attach a photo, then go offline, edit, kill the process, and confirm the edit syncs. | Any of those steps loses the saved payload. |
+
+## Acceptance record addition
+
+The activation rehearsal is an isolated Firestore emulator run of the production adapters. It is not cloud acceptance and not a device pass. Content-key migration, key destruction, and production inventory stay out of this initial-release gate.
 
 ## Acceptance record
 
@@ -178,7 +232,7 @@ Not started. It needs a release build on a device after the source gate is green
 | Party-ledger client denial and on-device recompute | Source/integration verified. The server projector remains unregistered. |
 | Opaque new object names and legacy path reads | Source/integration verified |
 | Local account isolation, logout retention, deletion, stale worker, sealed recent searches | Source/integration verified on host SQLite. Native-device process death is awaiting physical-device verification. |
-| Activation sequence and the rules artifacts | Source/integration verified. Pre-activation rules admit an unmarked token while the fence is open and required mode is off. The artifacts deny that token, deny a stale claim, admit a matching claim, and deny the restored gap. Production still serves the pre-activation rules. Awaiting controlled cloud verification before that deploy. |
+| Activation sequence and the rules artifacts | Isolated emulator rehearsal of the production adapters. Phase 1 admits an existing session, a new login, and a recovery mint. A stale fence watermark is denied. Activated rules deny an unmarked token and a stale claim, including when required mode is false. Workers stay unprotected until phase 3. A watermark-only reopen is refused. This is not cloud acceptance. Production still serves the pre-activation rules. |
 | Production local key store | Source/integration verified against an injected secure store. iOS uses `AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY`. Android backup exclusion is the versionCode 24 SecureStore XML, not that constant. Physical-device verification is still pending. |
 | Retained local payloads | Source/integration verified on host SQLite for diary payloads, drafts, the sync queue, active-route params, master-data values, and insight display metadata. Logout retains them. A missing key does not delete them and does not mint a replacement. |
 | Insight join keys | Source/integration verified on host SQLite. Party and PIN equality keys and link ids are account-bound tokens. Readable labels stay in the sealed display and metadata. Interrupted migration keeps the remaining plaintext rows and a later run finishes them. |

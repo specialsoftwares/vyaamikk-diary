@@ -103,6 +103,11 @@ async function main() {
           watermark: 7,
         });
       });
+      await activated.withSecurityRulesDisabled(async (ctx) => {
+        await setDoc(doc(ctx.firestore(), "restoreControl", "mode"), { required: false });
+      });
+      assert.equal(await canRead(activated, uid), false, "setting required false does not admit an unmarked token");
+      assert.equal(await canRead(activated, uid, { authorityWatermark: 8 }), false, "setting required false does not admit a stale claim");
       assert.equal(await canRead(activated, uid), false, "activated rules deny an unmarked phone token while required mode is absent");
       assert.equal(
         await canRead(activated, uid, { firebase: { sign_in_provider: "custom" }, vydOriginAuthTime: 100 }),

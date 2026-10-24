@@ -8,6 +8,7 @@
 import { FieldValue, type Firestore } from "firebase-admin/firestore";
 
 import type { LocalRestoreDocs, OutsideHolds, RestoreHoldStore } from "./restoreControlPlane";
+import { proveAuthorityReconciled, type RestoreAuthoritySnapshot } from "./restoreAuthority";
 import { listDocumentIdsPage } from "./firestorePurge";
 import type { InventoryLog, InventoryRecord, ReadOnlyInventory } from "./deletionInventory";
 
@@ -67,6 +68,26 @@ export function createFirestoreRestoreHoldStore(primary: Firestore, holds: Fires
       }
     },
   };
+}
+
+/**
+ * Writes an open reconciled fence only after the proposal matches the outside
+ * authority's watermark, erased accounts, and withdrawn purposes. A watermark
+ * without those lists does not write.
+ */
+export async function rewriteOpenReconciledFence(
+  primary: Firestore,
+  authority: RestoreAuthoritySnapshot | null,
+  proposed: { watermark: number; erasedUids?: readonly string[]; withdrawnPurposes?: Readonly<Record<string, readonly string[]>> }
+): Promise<"rewritten" | "refused"> {
+  const proof = proveAuthorityReconciled(authority, proposed);
+  if (!proof.ok) return "refused";
+  await primary.doc("restoreControl/current").set({
+    closed: false,
+    reconciled: true,
+    watermark: proof.snapshot.watermark,
+  });
+  return "rewritten";
 }
 
 /** Rules enforce this document. An outside "closed" value does nothing until it is written here. */

@@ -11,7 +11,23 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+declare global {
+  const __DEV__: boolean;
+}
+
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
+
+/**
+ * Node's public Module type does not include the loader hook this diagnostic
+ * uses to substitute Crashlytics. The hook stays; only the type is local.
+ * This file is typechecked by analysis/grin-slice2-closeout/tsconfig.json
+ * because tsx executes the `.ts` import specifiers below. The Expo app
+ * tsconfig rejects those specifiers, so the app check excludes this file
+ * and ci:verify runs the dedicated check. The script is not dropped.
+ */
+type NodeModuleLoader = {
+  _load: (request: string, parent: unknown, isMain: boolean) => unknown;
+};
 
 const crashSink: Array<{ kind: string; payload: unknown }> = [];
 
@@ -41,8 +57,9 @@ const nativeCrashlytics = {
   },
 };
 
-const load = Module._load.bind(Module);
-Module._load = function (request: string, parent: unknown, isMain: boolean) {
+const moduleLoader = Module as unknown as NodeModuleLoader;
+const load = moduleLoader._load.bind(Module);
+moduleLoader._load = function (request: string, parent: unknown, isMain: boolean) {
   if (request === "@react-native-firebase/crashlytics") {
     return { default: () => nativeCrashlytics };
   }
