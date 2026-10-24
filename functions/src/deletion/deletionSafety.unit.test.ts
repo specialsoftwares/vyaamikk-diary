@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { deletedProfileStub, ownsDeletionLease, walkDeletionPages } from './deletionSafety';
-import { decideRestoreAdmission, decideRestoreTraffic, mergeRestoreAuthorityProjection, outsideRestoreAuthorityDatabaseId, parseRestoreAuthoritySnapshot, projectRestoreAuthority, setRestoreAuthorityStoreForTests } from './restoreAuthority';
+import { claimsForAdmission, decideRestoreAdmission, decideRestoreTraffic, mergeRestoreAuthorityProjection, outsideRestoreAuthorityDatabaseId, parseRestoreAuthoritySnapshot, projectRestoreAuthority, restoreServiceCanReopen, setRestoreAuthorityStoreForTests } from './restoreAuthority';
 import { classifyProviderError, initialDeletionJob, canAcquireLease } from './deletionJob';
 async function main() {
   const job = { ...initialDeletionJob({ uid: 'a', requestedAt: 0, graceExpiresAt: 0 }), status: 'leased' as const, leaseOwner: 'worker-a', leaseUntil: 100 };
@@ -88,10 +88,28 @@ async function main() {
   assert.equal(decideRestoreAdmission(admitted).authorityWatermark, 2);
   assert.equal(decideRestoreAdmission({ ...admitted, uid: 'erased' }).status, 'deny');
   assert.equal(decideRestoreAdmission({ ...admitted, purpose: 'crash_diagnostics' }).status, 'deny');
-  assert.equal(decideRestoreAdmission({ ...admitted, required: false }).status, 'skip');
+  assert.equal(decideRestoreAdmission({ ...admitted, required: false }).status, 'admit');
+  assert.equal(decideRestoreAdmission({ ...admitted, required: false }).authorityWatermark, 2);
+  assert.equal(decideRestoreAdmission({ ...admitted, configured: false, required: false }).status, 'skip');
+  assert.equal(decideRestoreAdmission({ ...admitted, required: false, reconciled: false }).status, 'skip');
+  assert.equal(decideRestoreAdmission({ ...admitted, required: false, authority: null }).status, 'unavailable');
+  assert.equal(decideRestoreAdmission({ ...admitted, localWatermark: 1 }).status, 'deny');
   assert.equal(decideRestoreAdmission({ ...admitted, closed: true, required: false }).status, 'deny');
   assert.equal(decideRestoreAdmission({ ...admitted, authority: null }).status, 'unavailable');
   assert.equal(decideRestoreAdmission({ ...admitted, reconciled: false }).status, 'unavailable');
+  const phoneClaims = claimsForAdmission({ vydOriginAuthTime: 100 }, { status: 'admit', authorityWatermark: 2 });
+  assert.equal(phoneClaims.vydOriginAuthTime, 100);
+  assert.equal(phoneClaims.authorityWatermark, 2);
+  const recoveryClaims = claimsForAdmission({ recoveryDeviceId: 'device-1', recoverySession: true }, { status: 'skip' });
+  assert.equal(recoveryClaims.recoveryDeviceId, 'device-1');
+  assert.equal(recoveryClaims.recoverySession, true);
+  assert.equal('authorityWatermark' in recoveryClaims, false);
+  assert.deepEqual(restoreServiceCanReopen({
+    localFencePresent: false, localModePresent: false, externalTrafficClosed: true, workersStopped: true,
+  }), { open: false, reason: 'restored_primary_missing_restore_control' });
+  assert.deepEqual(restoreServiceCanReopen({
+    localFencePresent: true, localModePresent: true, externalTrafficClosed: true, workersStopped: false,
+  }), { open: false, reason: 'external_hold' });
   assert.equal(classifyProviderError(new Error('restore_authority_unprovisioned')).category, 'permanent');
   assert.equal(classifyProviderError(new Error('restore_authority_projection_failed')).category, 'permanent');
   assert.equal(classifyProviderError(new Error('restore_authority_write_failed')).category, 'transient');

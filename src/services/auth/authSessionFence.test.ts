@@ -877,6 +877,43 @@ async function main() {
       ) === "sign_in_invalid"
   );
 
+  __resetAuthSessionFenceForTests();
+  {
+    let mints = 0;
+    let jsUid: string | null = "uid-a";
+    let watermark: number | null = null;
+    const refreshed = await bridgeNativeSession({
+      getNativeUid: () => "uid-a",
+      getJsUid: () => jsUid,
+      admissionCurrent: async () => watermark != null && watermark >= 1,
+      mint: async () => {
+        mints += 1;
+        watermark = 2;
+        return "fresh-token";
+      },
+      signIn: async () => {
+        jsUid = "uid-a";
+        return "uid-a";
+      },
+      signOutJs: async () => {
+        jsUid = null;
+      },
+    });
+    check("same uid with a stale watermark mints a replacement token", refreshed && mints === 1 && watermark === 2);
+    const reused = await bridgeNativeSession({
+      getNativeUid: () => "uid-a",
+      getJsUid: () => "uid-a",
+      admissionCurrent: async () => true,
+      mint: async () => {
+        mints += 1;
+        return "unused";
+      },
+      signIn: async () => "uid-a",
+      signOutJs: async () => undefined,
+    });
+    check("a current admitted token is not minted again", reused && mints === 1);
+  }
+
   if (failures > 0) {
     console.error(`${failures} failure(s)`);
     process.exit(1);

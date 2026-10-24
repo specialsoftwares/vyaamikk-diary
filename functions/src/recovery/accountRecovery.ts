@@ -366,11 +366,14 @@ export const completeAccountRecovery = onCall(emailOtpCallOpts, async (request) 
   if (admission.status === "unavailable") {
     throw new HttpsError("unavailable", "Restore admission is temporarily unavailable. Try again when the connection returns.");
   }
-  const customToken = await getAdminAuth().createCustomToken(uid, {
-    recoveryDeviceId: result.recoveryDeviceId,
-    recoverySession: true,
-    ...(admission.status === "admit" ? { authorityWatermark: admission.authorityWatermark } : {}),
-  });
+  const { claimsForAdmission } = await import("../deletion/restoreAuthority");
+  const customToken = await getAdminAuth().createCustomToken(
+    uid,
+    claimsForAdmission(
+      { recoveryDeviceId: result.recoveryDeviceId, recoverySession: true },
+      admission
+    )
+  );
 
   const { provider } = resolveEmailProvider();
   await provider.send({

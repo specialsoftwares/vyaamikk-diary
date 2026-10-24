@@ -27,10 +27,14 @@ export function decideRestoreAdmission(input: {
   purpose?: string;
 }): { status: "skip" | "admit" | "deny" | "unavailable"; authorityWatermark?: number } {
   if (input.closed) return { status: "deny" };
-  if (!input.required) return { status: "skip" };
-  if (!input.configured || !input.authority || !input.reconciled || input.localWatermark == null) {
+  // Required mode is not the trigger for the claim. A configured, open,
+  // reconciled fence admits before required mode so existing custom tokens
+  // can carry the watermark. An unconfigured authority still skips.
+  if (!input.configured && !input.required) return { status: "skip" };
+  if (!input.configured || !input.authority || input.localWatermark == null) {
     return { status: "unavailable" };
   }
+  if (!input.reconciled) return input.required ? { status: "unavailable" } : { status: "skip" };
   const traffic = decideRestoreTraffic({
     authority: input.authority,
     localWatermark: input.localWatermark,
@@ -39,6 +43,34 @@ export function decideRestoreAdmission(input: {
   });
   if (traffic === "deny") return { status: "deny" };
   return { status: "admit", authorityWatermark: input.localWatermark };
+}
+
+export function claimsForAdmission(
+  base: Record<string, string | number | boolean>,
+  admission: { status: string; authorityWatermark?: number }
+): Record<string, string | number | boolean> {
+  if (admission.status !== "admit" || !Number.isSafeInteger(admission.authorityWatermark)) return { ...base };
+  return { ...base, authorityWatermark: admission.authorityWatermark as number };
+}
+
+/**
+ * A restored primary that lacks either restore-control document cannot reopen
+ * service. The external traffic and worker holds stay closed until an operator
+ * rewrites both documents. This function does not open anything.
+ */
+export function restoreServiceCanReopen(input: {
+  localFencePresent: boolean;
+  localModePresent: boolean;
+  externalTrafficClosed: boolean;
+  workersStopped: boolean;
+}): { open: false; reason: string } | { open: true } {
+  if (!input.localFencePresent || !input.localModePresent) {
+    return { open: false, reason: "restored_primary_missing_restore_control" };
+  }
+  if (input.externalTrafficClosed || input.workersStopped) {
+    return { open: false, reason: "external_hold" };
+  }
+  return { open: true };
 }
 
 export function decideRestoreTraffic(input: {

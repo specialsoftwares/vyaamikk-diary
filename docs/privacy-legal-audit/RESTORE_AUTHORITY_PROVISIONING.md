@@ -33,17 +33,41 @@ A restored primary snapshot can omit `restoreControl/current` and `restoreContro
 
 ## Admission
 
-- `decideRestoreAdmission` returns `skip` while `restoreControl/mode.required` is not true, except a closed fence, which denies.
-- `admit` copies the reconciled local watermark into `authorityWatermark`. The client does not choose it.
+- A closed fence denies every token.
+- While the authority database is unset and required mode is off, admission is `skip`. That is the current production state.
+- Once the authority is configured, a missing snapshot does not mint an unmarked token (`unavailable`).
+- An open fence that is not reconciled still `skip`s when required mode is off, so sign-in is not blocked before reconciliation. Required mode makes that state `unavailable`.
+- A configured, open, reconciled fence whose watermark matches the authority `admit`s even while required mode is off. The claim is `authorityWatermark`. A mismatched watermark is `deny`.
 - `mintClientAuthToken` keeps `vydOriginAuthTime` and adds the watermark only on `admit`.
 - Recovery tokens keep `recoveryDeviceId` and `recoverySession`, with the same watermark rule.
-- Phone ID tokens are minted by Firebase Auth, not by these functions. They do not receive `authorityWatermark`. Required mode must stay off until those sessions are replaced by an admitted custom token.
+- Phone ID tokens are minted by Firebase Auth and do not receive the claim. The supported transition is the existing JS bridge: native phone session, then `mintClientAuthToken`, then `signInWithCustomToken`.
+- Existing JS sessions are reused until `EXPO_PUBLIC_RESTORE_ADMISSION_REFRESH=true`. That flag is off. When it is on, a token without a positive `authorityWatermark` is minted again. Turn the flag on only after the server is issuing claims, and turn required mode on only after those sessions have been observed.
 - `deny` and `unavailable` fail the mint or recovery call. They do not issue an unmarked token.
+
+## Paths that read or recreate protected data
+
+- Callable handlers covered by `callableSessionCoverage` call `assertAdmittedCallableUser` before reading or writing user data. Schedulers do not call that helper.
+- `scheduledDeletionCleanup` and `scheduledBillingReconciliation` are Admin SDK workers. They are the privileged erasure and billing paths that may run while ordinary client traffic is closed. They are not a way for a client to reopen service.
+- `handleWasNotMeTokenHttp` is the HTTP exception that does not use the callable helper. It must not recreate protected diary data.
+- Client Firestore and Storage rules remain the read gate for ordinary traffic. A closed fence denies them. Required mode denies a token whose watermark does not match.
+
+## A restored primary cannot reopen itself
+
+`restoreServiceCanReopen` stays closed when `restoreControl/current` or `restoreControl/mode` is absent. It also stays closed while the external traffic hold or the worker hold is closed. Opening requires both local documents and an explicit release of both holds. Restoring a primary snapshot does not release those holds and does not recreate the outside `authority/restore` document.
+
+Recovery if the holds are closed and the local documents are missing:
+
+1. Keep client traffic and the two schedulers stopped.
+2. Confirm `authority/restore` still has every erased uid and withdrawn purpose. Do not copy it from the restored primary.
+3. Write `restoreControl/current` with `closed: true` before any client traffic.
+4. Rewrite that fence with `closed: false`, `reconciled: true`, and the same watermark as the outside snapshot only after the comparison is recorded.
+5. Release the worker hold, then the traffic hold. Required mode stays off until admitted custom tokens are observed.
 
 ## Open, reconcile, and roll back
 
 1. Confirm `authority/restore` still contains every erased uid and withdrawn purpose. Do not replace it from the restored primary.
 2. Write `restoreControl/current` with `closed: true` before any client traffic.
-3. Set `restoreControl/mode` to `{required: true}` only after phone and recovery sessions are proven to receive an admitted token.
-4. Reconcile by writing a new watermark into the outside snapshot and the same watermark into the local fence with `closed: false` and `reconciled: true`.
-5. Rollback of a bad open is a new closed fence. It does not delete erased uids. Old tokens, including ones with the previous watermark, fail the closed fence.
+3. Issue admitted custom tokens while required mode is still off. Enable `EXPO_PUBLIC_RESTORE_ADMISSION_REFRESH` so existing phone sessions mint again.
+4. Set `restoreControl/mode` to `{required: true}` only after those sessions are proven to carry the current watermark.
+5. Reconcile by writing a new watermark into the outside snapshot and the same watermark into the local fence with `closed: false` and `reconciled: true`.
+6. Rollback of a bad open is a new closed fence. It does not delete erased uids. Old tokens, including ones with the previous watermark, fail the closed fence.

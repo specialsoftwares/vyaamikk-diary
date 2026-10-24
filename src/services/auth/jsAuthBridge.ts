@@ -82,6 +82,8 @@ export type JsAuthBridgePorts = {
   mint: () => Promise<string>;
   signIn: (token: string) => Promise<string>;
   signOutJs: () => Promise<void>;
+  /** When the JS uid already matches, false forces a fresh custom token. */
+  admissionCurrent?: () => Promise<boolean>;
 };
 
 /**
@@ -97,7 +99,16 @@ export async function bridgeNativeSession(ports: JsAuthBridgePorts): Promise<boo
     const generationAtStart = currentAuthMutationGeneration();
     if (!nativeUid || currentAuthMutationGeneration() !== generationAtStart) return false;
 
-    if (ports.getJsUid() === nativeUid) return true;
+    if (ports.getJsUid() === nativeUid) {
+      const fresh = ports.admissionCurrent ? await ports.admissionCurrent() : true;
+      if (
+        currentAuthMutationGeneration() !== generationAtStart ||
+        ports.getNativeUid() !== nativeUid
+      ) {
+        return false;
+      }
+      if (fresh) return true;
+    }
 
     const token = await ports.mint();
     if (
@@ -145,6 +156,14 @@ async function establishJsAuthSession(): Promise<boolean> {
       const { callMintClientAuthToken } = await import("./identityCallable");
       const { token } = await callMintClientAuthToken();
       return token;
+    },
+    admissionCurrent: async () => {
+      if (process.env.EXPO_PUBLIC_RESTORE_ADMISSION_REFRESH !== "true") return true;
+      const user = auth.currentUser;
+      if (!user) return false;
+      const token = await user.getIdTokenResult();
+      const watermark = token.claims.authorityWatermark;
+      return typeof watermark === "number" && Number.isSafeInteger(watermark) && watermark >= 1;
     },
     signIn: async (token) => {
       const cred = await signInWithCustomToken(auth, token);

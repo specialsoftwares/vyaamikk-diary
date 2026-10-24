@@ -71,10 +71,14 @@ export const mintClientAuthToken = onCall({ region: "asia-south1" }, async (requ
     throw new HttpsError("unavailable", "Restore admission is temporarily unavailable. Try again when the connection returns.");
   }
   try {
-    const token = await getAuth().createCustomToken(decision.uid, {
-      [ORIGIN_AUTH_TIME_CLAIM]: decision.originAuthTimeSeconds,
-      ...(admission.status === "admit" ? { authorityWatermark: admission.authorityWatermark } : {}),
-    });
+    const { claimsForAdmission } = await import("../deletion/restoreAuthority");
+    const token = await getAuth().createCustomToken(
+      decision.uid,
+      claimsForAdmission(
+        { [ORIGIN_AUTH_TIME_CLAIM]: decision.originAuthTimeSeconds },
+        admission
+      )
+    );
     return { token };
   } catch (e) {
     const message = e instanceof Error ? e.message : "token mint failed";
