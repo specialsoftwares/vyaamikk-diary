@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { purgeUserSubcollectionsFully, type PurgePorts } from "./firestorePurge";
+import { purgeUserSubcollectionsFully, reviewUnknownPurgeHold, type PurgePorts } from "./firestorePurge";
 
 type Mem = {
   docs: Map<string, Set<string>>;
@@ -83,6 +83,38 @@ async function main() {
     }),
     /lease_lost/
   );
+  assert.equal(reviewUnknownPurgeHold({
+    hold: "unknown_collection",
+    path: "users/owner/customDeep/item/notes",
+    walkerDeleted: 3,
+    independentRemaining: null,
+    providerEvidence: null,
+    backupEvidence: null,
+  }).reason, "independent_leftover_check_missing");
+  assert.equal(reviewUnknownPurgeHold({
+    hold: "depth_exceeded",
+    path: "users/owner/entries/item/notes/deep/more",
+    walkerDeleted: 3,
+    independentRemaining: 2,
+    providerEvidence: "provider-deleted",
+    backupEvidence: null,
+  }).reason, "leftovers_remain");
+  assert.equal(reviewUnknownPurgeHold({
+    hold: "unknown_collection",
+    path: "users/owner/customDeep",
+    walkerDeleted: 3,
+    independentRemaining: 0,
+    providerEvidence: null,
+    backupEvidence: "backup-export",
+  }).reason, "provider_or_backup_evidence_is_not_a_purge_result");
+  assert.equal(reviewUnknownPurgeHold({
+    hold: "depth_exceeded",
+    path: "users/owner/entries/item/notes/deep",
+    walkerDeleted: 3,
+    independentRemaining: 0,
+    providerEvidence: null,
+    backupEvidence: null,
+  }).reason, "ready_for_operator_review");
   console.log("firestorePurge: missing parent, depth hold and lease stop passed");
 }
 

@@ -73,7 +73,7 @@ async function main() {
   assert.equal(enabled, false);
   assert.equal(ordered.state('a')?.revision, 2);
   const watchedListener = { current: null as ((event: PurposeServerState) => void) | null };
-  const watchedHealth = { current: null as ((health: 'listening' | 'failed') => void) | null };
+  const watchedHealth = { current: null as ((health: 'listening' | 'server' | 'failed') => void) | null };
   let watchedGeneration = -1;
   let watchedRemote: PurposeState = { revision: 0, decision: null, receivedAt: null };
   const watched = createPurposeConsentQueue({
@@ -94,6 +94,9 @@ async function main() {
   watched.bind('watched');
   watchedHealth.current?.('listening');
   await watched.choose('watched', true);
+  assert.equal(enabled, false, 'subscription acceptance is not server consent');
+  watchedHealth.current?.('server');
+  await watched.choose('watched', true);
   assert.equal(enabled, true);
   watchedListener.current?.({ ok: true, revision: 8, decision: 'withdraw', receivedAt: 8 });
   for (let i = 0; i < 8; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
@@ -102,13 +105,13 @@ async function main() {
   watchedRemote = { revision: 8, decision: 'withdraw', receivedAt: 8 };
   generation += 1;
   watched.bind('watched');
-  watchedHealth.current?.('listening');
+  watchedHealth.current?.('server');
   await watched.choose('watched', true);
   staleWithdraw?.({ ok: true, revision: 9, decision: 'withdraw', receivedAt: 9 });
   for (let i = 0; i < 8; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(enabled, true, 'a withdrawal from the previous generation does not apply');
   watched.bind('watched');
-  watchedHealth.current?.('listening');
+  watchedHealth.current?.('server');
   assert.equal(watchedGeneration, generation, 'same uid and a new generation establishes a current watcher');
   await watched.choose('watched', true);
   assert.equal(enabled, true);
@@ -122,7 +125,7 @@ async function main() {
 
   const grantEntered = deferred<void>();
   const grantReceipt = deferred<PurposeServerState>();
-  let failedHealth: ((health: 'listening' | 'failed') => void) | undefined;
+  let failedHealth: ((health: 'listening' | 'server' | 'failed') => void) | undefined;
   const failing = createPurposeConsentQueue({
     ...ports,
     send: async () => { grantEntered.resolve(); return grantReceipt.promise; },
@@ -132,7 +135,7 @@ async function main() {
     },
   });
   failing.bind('failed-owner');
-  failedHealth?.('listening');
+  failedHealth?.('server');
   const pendingGrant = failing.choose('failed-owner', true);
   await grantEntered.promise;
   failedHealth?.('failed');
@@ -144,6 +147,7 @@ async function main() {
   failedHealth?.('listening');
   await failing.reconcile('failed-owner');
   assert.equal(enabled, false, 'reconnect does not restore a grant that the failure invalidated');
+  failedHealth?.('server');
   await failing.choose('failed-owner', true);
   assert.equal(enabled, true, 'a new local choice after a healthy watcher can enable');
   assert.equal(withdrawalFromPurposeSnapshot({ decision: 'withdraw', revision: 4, receivedAt: 4 }, true), null);
@@ -153,7 +157,7 @@ async function main() {
 
   let coldGrants = 0;
   let coldWithdrawals = 0;
-  let coldHealth: ((health: 'listening' | 'failed') => void) | undefined;
+  let coldHealth: ((health: 'listening' | 'server' | 'failed') => void) | undefined;
   const cold = createPurposeConsentQueue({
     ...ports,
     load: async () => null,
@@ -186,7 +190,7 @@ async function main() {
 
   const switchEntered = deferred<void>();
   const switchReceipt = deferred<PurposeServerState>();
-  let switchHealth: ((health: 'listening' | 'failed') => void) | undefined;
+  let switchHealth: ((health: 'listening' | 'server' | 'failed') => void) | undefined;
   const switching = createPurposeConsentQueue({
     ...ports,
     send: async () => { switchEntered.resolve(); return switchReceipt.promise; },
@@ -196,7 +200,7 @@ async function main() {
     },
   });
   switching.bind('left');
-  switchHealth?.('listening');
+  switchHealth?.('server');
   const pendingSwitch = switching.choose('left', true);
   await switchEntered.promise;
   switching.bind('right');
@@ -207,6 +211,27 @@ async function main() {
   assert.equal(switching.state('right')?.localGrant, false);
   switching.bind(null);
   assert.equal(enabled, false);
+
+  let cachedSends = 0;
+  const cached = createPurposeConsentQueue({
+    ...ports,
+    load: async () => ({
+      uid: 'cached', revision: 4, localGrant: true, hasChoice: true, pending: null, sync: 'synced',
+    }),
+    send: async () => {
+      cachedSends += 1;
+      return { ok: true, revision: 4, decision: 'grant', receivedAt: 4 };
+    },
+    observeRemote: (_uid, _generation, _onRemote, onHealth) => {
+      onHealth('listening');
+      return () => {};
+    },
+  });
+  cached.bind('cached');
+  await cached.reconcile('cached');
+  assert.equal(enabled, false, 'a cached grant stays off until a server snapshot is known');
+  assert.equal(cachedSends, 0);
+  assert.equal(cached.state('cached')?.localGrant, false);
   console.log('purposeConsentQueue: ordering, offline, storage, replay and session tests passed');
 }
-main().catch(e => { console.error(e); process.exitCode = 1; });
+main().catch((e) => { console.error(e); process.exitCode = 1; });

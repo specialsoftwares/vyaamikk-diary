@@ -91,6 +91,14 @@ The age screen clears the typed date after a decision, sign-out, or a deletion r
 
 Overall decision remains **HOLD**. Run `40013964197` is canonical CI for `2559af5`. Run `39984058597` remains the record for `6cd265f` only. This review is not independent third-party acceptance and not a public-release decision. PR #35 stays a draft.
 
+## Installed Android tests still pending
+
+These are not executed. An injected JavaScript adapter is not evidence for them.
+
+- Native diagnostics buffering: confirm a grant is not delivered to the native collector before the server snapshot is known, and that a listener failure clears a buffer that was already queued.
+- Replacement-phone recovery: sign in on a second device with the supported recovery flow and confirm the new custom token carries `authorityWatermark` while `recoveryDeviceId` and `recoverySession` remain. The source device is absent.
+- Account switching: start a diagnostics grant on account A, switch to account B before the receipt, and confirm B does not collect under A's grant.
+
 ## Plain-language brief
 
 This correction removes a write window that could briefly save private business details before encrypting them, prevents old responses from changing a new login or reviving crash-report consent, and strengthens deletion worker ownership. Those are tested improvements. They do not establish that every copy is encrypted or erased, that the company cannot decrypt data, or that all seven stages have passed. The remaining source, live-service and phone checks above are release blockers.

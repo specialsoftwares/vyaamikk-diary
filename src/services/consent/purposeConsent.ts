@@ -47,8 +47,9 @@ const queue = createPurposeConsentQueue({
         unsubscribe = onSnapshot(
           ref,
           (snap) => {
-            // A cached snapshot is not current authority. Subscription
-            // establishment is reported separately as listening.
+            // Subscription acceptance is not a server snapshot. A cached
+            // document does not make consent authoritative.
+            if (snap.metadata.fromCache !== true) onHealth("server");
             const remote = withdrawalFromPurposeSnapshot(snap.data(), snap.metadata.fromCache);
             if (remote) onRemote(remote);
           },

@@ -35,7 +35,7 @@ export type PurposeQueuePorts = {
     uid: string,
     generation: number,
     onRemote: (remote: PurposeServerState) => void,
-    onHealth: (health: "listening" | "failed") => void
+    onHealth: (health: "listening" | "server" | "failed") => void
   ): () => void;
 };
 
@@ -169,7 +169,8 @@ export function createPurposeConsentQueue(ports: PurposeQueuePorts) {
           });
         }, (health) => {
           if (activeUid !== uid || ports.generation() !== generation) return;
-          if (health === "listening") {
+          if (health === "listening") return;
+          if (health === "server") {
             authorityHealthy = true;
             return;
           }

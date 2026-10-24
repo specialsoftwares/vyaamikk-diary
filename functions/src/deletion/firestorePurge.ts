@@ -265,3 +265,26 @@ export async function purgeUserSubcollectionsFully(
   }
   return { deleted: state.deleted, exhausted: true };
 }
+
+/**
+ * Unknown and deep leftovers are not a completed purge. Provider and backup
+ * evidence cannot stand in for an independent leftover count. A zero count
+ * is ready for a separate operator review; this function never marks the job complete.
+ */
+export function reviewUnknownPurgeHold(input: {
+  hold: PurgeHold;
+  path: string;
+  walkerDeleted: number;
+  independentRemaining: number | null;
+  providerEvidence: string | null;
+  backupEvidence: string | null;
+}): { completion: "blocked"; reason: string } {
+  if (!input.path || input.walkerDeleted < 0) return { completion: "blocked", reason: "resolution_incomplete" };
+  if (input.hold === "cursor_unowned") return { completion: "blocked", reason: "cursor_not_owned" };
+  if (input.independentRemaining == null) return { completion: "blocked", reason: "independent_leftover_check_missing" };
+  if (input.independentRemaining > 0) return { completion: "blocked", reason: "leftovers_remain" };
+  if (input.providerEvidence || input.backupEvidence) {
+    return { completion: "blocked", reason: "provider_or_backup_evidence_is_not_a_purge_result" };
+  }
+  return { completion: "blocked", reason: "ready_for_operator_review" };
+}

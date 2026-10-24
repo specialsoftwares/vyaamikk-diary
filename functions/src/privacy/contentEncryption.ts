@@ -233,8 +233,17 @@ export function migrateContentKeyBatch(input: {
       plaintext,
     });
     const outcome = input.writer?.(row, next) ?? "ok";
-    if (outcome === "conflict") conflicts.push(row.id);
-    else written += 1;
+    if (outcome === "conflict") {
+      conflicts.push(row.id);
+      return {
+        written,
+        skipped,
+        quarantined,
+        conflicts,
+        nextCursor: row.id,
+      };
+    }
+    written += 1;
   }
   return {
     written: input.dryRun ? 0 : written,
@@ -243,6 +252,43 @@ export function migrateContentKeyBatch(input: {
     conflicts,
     nextCursor: input.rows.length > 50 ? rows[rows.length - 1]?.id ?? null : null,
   };
+}
+
+export type KeyMigrationCheckpoint = {
+  cursor: string | null;
+  toKeyId: string;
+  conflicts: string[];
+};
+
+/** Keep the previous cursor when a batch throws. A conflict cursor retries that row. */
+export function resumeKeyMigrationCheckpoint(
+  previous: KeyMigrationCheckpoint,
+  batch: { conflicts: string[]; nextCursor: string | null } | null
+): KeyMigrationCheckpoint {
+  if (!batch) return { ...previous, conflicts: [...previous.conflicts] };
+  return {
+    cursor: batch.conflicts.length > 0 ? batch.conflicts[0] : batch.nextCursor,
+    toKeyId: previous.toKeyId,
+    conflicts: [...previous.conflicts, ...batch.conflicts],
+  };
+}
+
+/**
+ * A key stays in the ring until active rows, uncovered copies, and backup
+ * uncertainty are gone. This does not delete a key.
+ */
+export function keyRetirementAllowed(input: {
+  keyId: string;
+  ring: readonly string[];
+  activeUses: number;
+  backupCopiesUnknown: boolean;
+  uncovered: readonly string[];
+}): { allowed: false; reason: string } {
+  if (!input.ring.includes(input.keyId)) return { allowed: false, reason: "key_not_in_ring" };
+  if (input.activeUses > 0) return { allowed: false, reason: "active_records_remain" };
+  if (input.uncovered.length > 0) return { allowed: false, reason: "uncovered_copies" };
+  if (input.backupCopiesUnknown) return { allowed: false, reason: "backup_copies_unknown" };
+  return { allowed: false, reason: "retirement_not_authorised" };
 }
 
 /** Opens v2 with only its named key. A v1 seal still requires the legacy key. */

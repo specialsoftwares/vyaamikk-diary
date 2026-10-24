@@ -10,7 +10,9 @@ import {
   migrateContentKeyBatch,
   openContent,
   openStoredContent,
+  keyRetirementAllowed,
   planContentKeyMigration,
+  resumeKeyMigrationCheckpoint,
   sealContent,
   sealContentV2,
   type ContentSeal,
@@ -123,5 +125,49 @@ const applied = migrateContentKeyBatch({
 });
 delete process.env.CONTENT_KEY_MIGRATION_ENABLED;
 assert.equal(applied.written, 1);
+process.env.CONTENT_KEY_MIGRATION_ENABLED = "true";
+const previous = { cursor: null, toKeyId: "named-key", conflicts: [] as string[] };
+const conflicted = migrateContentKeyBatch({
+  rows: [
+    { id: "a", updatedAt: 1, contentSeal: sealed },
+    { id: "b", updatedAt: 2, contentSeal: sealed },
+  ],
+  toKeyId: "named-key",
+  resolveKey: (id) => (id === "named-key" ? named : id === "legacy" ? key : null),
+  dryRun: false,
+  writer: (row) => (row.id === "a" ? "conflict" : "ok"),
+});
+delete process.env.CONTENT_KEY_MIGRATION_ENABLED;
+assert.deepEqual(conflicted.conflicts, ["a"]);
+assert.equal(conflicted.written, 0);
+assert.equal(conflicted.nextCursor, "a");
+const resumed = resumeKeyMigrationCheckpoint(previous, conflicted);
+assert.equal(resumed.cursor, "a");
+let interrupted = previous;
+try {
+  migrateContentKeyBatch({
+    rows: [{ id: "a", updatedAt: 1, contentSeal: sealed }],
+    toKeyId: "named-key",
+    resolveKey: () => named,
+    dryRun: false,
+  });
+} catch {
+  interrupted = resumeKeyMigrationCheckpoint(previous, null);
+}
+assert.equal(interrupted.cursor, null);
+assert.equal(keyRetirementAllowed({
+  keyId: "legacy",
+  ring: ["legacy", "named-key"],
+  activeUses: 0,
+  backupCopiesUnknown: false,
+  uncovered: [],
+}).reason, "retirement_not_authorised");
+assert.equal(keyRetirementAllowed({
+  keyId: "legacy",
+  ring: ["legacy"],
+  activeUses: 1,
+  backupCopiesUnknown: false,
+  uncovered: ["exports"],
+}).reason, "active_records_remain");
 
 console.log("contentEncryption.unit.test.ts: ok");
