@@ -67,6 +67,23 @@ try {
 }
 
 const SESSION_REVALIDATION_MS = 6_000;
+const SESSION_RESTORE_DEADLINE_MS = 8_000;
+
+function raceDeadline<T>(work: Promise<T>, ms: number): Promise<T | "deadline"> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve("deadline"), ms);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve("deadline");
+      }
+    );
+  });
+}
 
 async function revalidateSessionProfile(
   user: UserProfile,
@@ -173,6 +190,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     user: null,
     justCreated: false,
   });
+  const bootAttemptRef = useRef(0);
 
   // Boot — local DB first, then restore session from SecureStore (no network wait).
   useEffect(() => {
@@ -183,10 +201,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     let cancelled = false;
-    (async () => {
+    const attempt = ++bootAttemptRef.current;
+    const bootStillCurrent = () => !cancelled && attempt === bootAttemptRef.current;
+    const restore = (async () => {
       try {
         const session = await sessionStore.load();
-        if (cancelled) return;
+        if (!bootStillCurrent()) return;
         if (session) {
           let user = session.user;
           const backend = getActiveBackend();
@@ -197,6 +217,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
           if (unverified) {
             log.warn("session revalidation unverified — using cached session for boot");
+            if (!bootStillCurrent()) return;
             setState({
               status: "signed_in",
               session,
@@ -216,6 +237,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               liveMissingOrDeleted: !live || isLoginBlockedAccount(live),
             });
             await forceClearAllSessions();
+            if (!bootStillCurrent()) return;
             setState((s) => ({ ...s, status: "signed_out" }));
             return;
           }
@@ -223,6 +245,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (__DEV__ && live.uid !== user.uid) {
             log.warn("dev session uid mismatch — clearing stale SecureStore session");
             await forceClearAllSessions();
+            if (!bootStillCurrent()) return;
             setState((s) => ({ ...s, status: "signed_out" }));
             return;
           }
@@ -232,6 +255,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             await sessionStore.save({ ...session, user });
           }
 
+          if (!bootStillCurrent()) return;
           setState({
             status: "signed_in",
             session: { ...session, user },
@@ -243,15 +267,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (backend === "firebase-production") {
             void import("@/services/auth/reconcilePendingMobileContactChange")
               .then(async (m) => {
-                if (cancelled) return;
+                if (!bootStillCurrent()) return;
                 const next = await m.reconcilePendingMobileContactChange(user);
-                if (!next || cancelled) return;
+                if (!next || !bootStillCurrent()) return;
                 const nextSession = {
                   ...session,
                   user: next,
                 };
                 await sessionStore.save(nextSession);
-                if (cancelled) return;
+                if (!bootStillCurrent()) return;
                 setState({
                   status: "signed_in",
                   session: nextSession,
@@ -264,11 +288,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               });
           }
         } else {
+          if (!bootStillCurrent()) return;
           setState((s) => ({ ...s, status: "signed_out" }));
         }
       } catch (e) {
         log.error("boot failed", e);
+        if (!bootStillCurrent()) return;
         setState((s) => ({ ...s, status: "signed_out" }));
+      }
+    })();
+    void (async () => {
+      const raced = await raceDeadline(restore, SESSION_RESTORE_DEADLINE_MS);
+            if (!bootStillCurrent()) return;
+      if (raced === "deadline") {
+        log.warn("session_restore_deadline");
+        setState((current) =>
+          current.status === "loading"
+            ? { status: "signed_out", session: null, user: null, justCreated: false }
+            : current
+        );
       }
     })();
     return () => {
@@ -296,6 +334,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const startOtp = useCallback(async (phoneE164: PhoneE164) => {
+    bootAttemptRef.current += 1;
     try {
       return await getAuthService().startOtp(phoneE164);
     } catch (e) {
@@ -305,6 +344,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const confirmOtp = useCallback(
     async (challenge: OtpChallenge, code: string) => {
+      bootAttemptRef.current += 1;
       try {
         const { profile, isNewUser } = await getAuthService().confirmOtp(challenge, code);
         if (state.user?.uid && state.user.uid !== profile.uid) {
@@ -329,7 +369,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const signOut = useCallback(async () => {
+    bootAttemptRef.current += 1;
     const uid = state.session?.user.uid;
+    try {
+      const { retireNativeCallableAuthReady } = await import(
+        "@/services/auth/nativeCallableAuthGate"
+      );
+      retireNativeCallableAuthReady();
+    } catch {
+      // Sign-out still proceeds if the native gate is unavailable.
+    }
     try {
       await getAuthService().signOut();
     } catch (e) {

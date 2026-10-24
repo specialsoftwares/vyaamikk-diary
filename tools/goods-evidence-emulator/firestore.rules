@@ -1,0 +1,64 @@
+rules_version = '2';
+
+/**
+ * Isolated G1 emulator Rules proposal. Not live Rules. Do not deploy.
+ * Admin SDK bypasses these rules; the adapter still authorizes callers.
+ */
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function userData(uid) {
+      return get(/databases/$(database)/documents/users/$(uid)).data;
+    }
+
+    function isActiveOwner(uid) {
+      return isOwner(uid) && userData(uid).get('status', 'active') == 'active';
+    }
+
+    match /users/{uid}/goodsEvidenceAdmission/{docId} {
+      allow read, write: if false;
+    }
+
+    match /users/{uid} {
+      allow read: if isOwner(uid);
+      allow write: if false;
+    }
+
+    match /users/{uid}/goodsEvidenceLedgers/{ledgerId} {
+      allow read: if isActiveOwner(uid);
+      allow create, update, delete: if false;
+
+      match /commands/{commandId} {
+        allow read: if isActiveOwner(uid);
+        allow create, update, delete: if false;
+      }
+
+      match /serials/{fyToken} {
+        allow read: if isActiveOwner(uid);
+        allow create, update, delete: if false;
+      }
+
+      match /receipts/{receiptId} {
+        allow read: if isActiveOwner(uid);
+        allow create, update, delete: if false;
+
+        match /events/{eventId} {
+          allow read: if isActiveOwner(uid);
+          allow create, update, delete: if false;
+        }
+      }
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

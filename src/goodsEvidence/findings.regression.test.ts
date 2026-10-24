@@ -355,6 +355,7 @@ function testLedger(): InMemoryGoodsLedger {
     platform: "android",
   });
   process.env.EXPO_PUBLIC_APP_MODE = "production";
+  delete process.env.EXPO_PUBLIC_GOODS_EVIDENCE_STORE_RUNTIME_ADMIT;
   process.env.EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED = "1";
   assert.equal(isGoodsEvidenceEnabled(), false, "store runtime cannot be overridden");
   const productionLedger = new InMemoryGoodsLedger(
@@ -570,6 +571,25 @@ function testLedger(): InMemoryGoodsLedger {
   );
   assert.equal(duplicateLines.ok, false);
   assert.equal(store.getOriginal("dup_lines"), undefined);
+}
+
+{
+  const store = testLedger();
+  const protoLine = store.register(
+    freezeCommand({
+      commandId: "proto_line",
+      type: "registerGoodsReceipt",
+      ownerUid: "owner_1",
+      ledgerId: "ledger_1",
+      body: sampleRegisterBody({
+        receiptId: "proto_line",
+        lines: [sampleLine({ lineId: "__proto__" })],
+      }),
+    })
+  );
+  assert.equal(protoLine.ok, false);
+  assert.equal(store.getOriginal("proto_line"), undefined);
+  assert.equal(store.getLineLedger("proto_line", "__proto__"), undefined);
 }
 
 {

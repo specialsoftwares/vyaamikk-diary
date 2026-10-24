@@ -46,6 +46,7 @@ export type MappedUpgradeSheetModel = {
   restoreAvailable: boolean;
   purchaseState: UpgradeOperationState;
   restoreState: UpgradeOperationState;
+  statusNotice: string | null;
   errorMessage: string | null;
   errorRetryEnabled: boolean;
   defaultSku: string | null;
@@ -101,17 +102,34 @@ function operationStateFromIap(
   hostState: UpgradeOperationState,
   purchaseLane: boolean
 ): UpgradeOperationState {
-  if (hostState === "loading" || hostState === "pending" || hostState === "unavailable") {
-    return hostState;
-  }
+  if (hostState === "unavailable") return "unavailable";
   if (!iap.available) return "unavailable";
   if (purchaseLane) {
-    if (iap.pending && (iap.pending.stage === "store_pending" || iap.pending.stage === "verifying")) {
-      return "pending";
-    }
-    if (iap.purchaseInFlight) return "loading";
+    const stage = iap.pending?.stage;
+    if (stage === "verifying" || stage === "verified_unfinished_ios") return "verifying";
+    if (stage === "store_pending") return "pending";
+    if (hostState === "loading" || iap.purchaseInFlight) return "loading";
+    if (hostState === "pending") return "pending";
+    return "idle";
+  }
+  if (hostState === "loading" || hostState === "pending" || hostState === "verifying") {
+    return hostState;
   }
   return "idle";
+}
+
+export function purchaseStatusNotice(
+  t: TranslateFn,
+  iap: Pick<QuotaUpsellCatalogSource, "pending" | "lastResult" | "purchaseInFlight">
+): string | null {
+  const stage = iap.pending?.stage;
+  if (stage === "verifying" || stage === "verified_unfinished_ios") {
+    return t("billing.upgrade.purchaseVerifying");
+  }
+  if (stage === "store_pending") return t("billing.upgrade.purchasePendingPayment");
+  if (iap.purchaseInFlight) return t("billing.upgrade.purchaseLoading");
+  if (iap.lastResult?.kind === "verified") return t("billing.upgrade.purchaseVerified");
+  return null;
 }
 
 export function mapUpgradeSheetModel(input: {
@@ -144,6 +162,7 @@ export function mapUpgradeSheetModel(input: {
     restoreAvailable,
     purchaseState,
     restoreState,
+    statusNotice: purchaseStatusNotice(input.t, input.iap),
     errorMessage: input.hostErrorMessage,
     errorRetryEnabled: Boolean(input.hostErrorMessage) && input.errorRecoverable === true,
     defaultSku: defaultReady?.sku ?? null,

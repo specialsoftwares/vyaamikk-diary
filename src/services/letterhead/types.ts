@@ -11,6 +11,14 @@
  */
 
 import type { SyncSessionToken } from "@/sync/syncSessionOwnership";
+import type {
+  LetterheadGeneratedLayout,
+  LetterheadSourceType,
+} from "./letterheadGeneratedLayout";
+import type { LetterheadPlacement } from "./letterheadPlacement";
+import type { LetterheadTemplateSnapshot } from "./letterheadTemplateSnapshot";
+
+export type { LetterheadGeneratedLayout, LetterheadSourceType } from "./letterheadGeneratedLayout";
 
 export interface LetterheadMargins {
   /** % of page height from the top of A4 where content starts. */
@@ -25,12 +33,26 @@ export interface LetterheadMargins {
 
 export interface LetterheadConfig {
   userId: string;
+  /**
+   * How this template was produced. Legacy configs without the field are
+   * treated as `imported_image`.
+   */
+  sourceType?: LetterheadSourceType | null;
+  /**
+   * `header_logo` places the image at the top of a white A4 page.
+   * `complete_page` fits the whole image on A4 without stretching.
+   * Missing on older templates means complete page.
+   */
+  placement?: LetterheadPlacement | null;
+  /** Present when `sourceType === "generated_layout"`. */
+  generatedLayout?: LetterheadGeneratedLayout | null;
   /** Original image dimensions in pixels — useful for preview-time aspect. */
   imageWidth: number;
   imageHeight: number;
   /**
    * Legacy inline base64 (e.g. `data:image/png;base64,...`). Superseded by
    * `letterheadImageStoragePath` when migrated to Firebase Storage.
+   * Also holds download URLs after Storage upload, or local file URIs during save.
    */
   imageDataUri?: string | null;
   /** Canonical Firebase Storage object path for the template image. */
@@ -103,9 +125,15 @@ export interface LetterheadDocumentInput {
 
 export interface LetterheadRepository {
   get(userId: string): Promise<LetterheadConfig | null>;
+  /**
+   * Persist letterhead config. Pass the initiating `SyncSessionToken` so
+   * upload/Firestore writes recheck ownership after each await. Explicit
+   * `null` fails closed; `undefined` skips the check (legacy callers).
+   */
   save(
     userId: string,
-    patch: Omit<LetterheadConfig, "userId" | "createdAt" | "updatedAt">
+    patch: Omit<LetterheadConfig, "userId" | "createdAt" | "updatedAt">,
+    session?: SyncSessionToken | null
   ): Promise<LetterheadConfig>;
   remove(userId: string): Promise<void>;
 }
@@ -119,6 +147,10 @@ export interface LetterheadRepository {
  *     letterhead, old records still point at the timestamp that was
  *     active when they were created. We don't persist the template image
  *     bytes per-document — that would balloon storage.
+ *   • `templateSnapshot` freezes the design used for this document.
+ *     Replacing the active template does not change it. Documents saved
+ *     before snapshots existed stay without one; they are not assigned a
+ *     guessed original.
  *   • `pdfUri` is best-effort. Generated PDFs are short-lived OS temp
  *     files; on next regenerate the URI is refreshed. UI should
  *     gracefully handle a missing/invalid URI by regenerating from the
@@ -143,6 +175,8 @@ export interface LetterheadDocument {
   input: LetterheadDocumentInput;
   /** Updated timestamp of the letterhead config at the time of generation. */
   templateRefUpdatedAt: number | null;
+  /** Immutable design used for this document. Absent on older records. */
+  templateSnapshot?: LetterheadTemplateSnapshot | null;
   /** Best-effort URI of the most recently generated PDF for this doc. */
   pdfUri: string | null;
   /** True when the user explicitly saved (vs. just shared once). */

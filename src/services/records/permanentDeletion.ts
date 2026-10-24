@@ -9,6 +9,7 @@ import { localEntriesRepository } from "@/repositories/localEntriesRepository";
 import { syncQueueRepository } from "@/repositories/syncQueueRepository";
 import { removeCustomerPhotoFile } from "@/services/customerCredit/customerPhotoService";
 import { getCustomerCreditRepository } from "@/services/customerCredit";
+import { publishDomainChange } from "@/services/dataChanges/domainChanges";
 import { getDiaryRepository } from "@/services/diary";
 import {
   removeInsightsForCustomerCredit,
@@ -132,6 +133,7 @@ async function deleteDiaryEntryPermanently(
   await deleteInsightsForRecord(userId, "diary_entry", entryId);
   await clearSyncQueueForEntity(userId, entryId);
   await localEntriesRepository.removeById(userId, entryId);
+  publishDomainChange(userId, "diary", { effect: "delete", recordId: entryId });
 
   const repo = getDiaryRepository();
   const isLocalOnly = entryId.startsWith("local_");
@@ -197,6 +199,10 @@ async function deleteProfessionalPackPermanently(
   }
 
   await getProfessionalPackRepository().hardDelete(req.userId, req.recordId);
+  publishDomainChange(req.userId, "professionalPack", {
+    effect: "delete",
+    recordId: req.recordId,
+  });
   await deleteSearchEntriesForRecord();
   return { syncPending: usesFirebaseBackend() };
 }
@@ -230,6 +236,10 @@ async function deleteCustomerCreditPermanently(
 
   await deleteInsightsForRecord(req.userId, "customer_credit", req.recordId);
   await getCustomerCreditRepository().remove(req.userId, req.recordId);
+  publishDomainChange(req.userId, "customerCredit", {
+    effect: "delete",
+    recordId: req.recordId,
+  });
   await deleteSearchEntriesForRecord();
   return { syncPending: usesFirebaseBackend() };
 }

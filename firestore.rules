@@ -594,6 +594,25 @@ service cloud.firestore {
         allow delete: if isActiveUser(uid);
       }
 
+      // Party ledger projections are server-written. The owner may read them.
+      // Client creates, updates, and deletes are denied. There is no other match.
+      match /partyLedgerProjections/{projectionId} {
+        allow read: if isOwner(uid);
+        allow write: if false;
+      }
+      match /partyLedgerBuckets/{bucketId} {
+        allow read: if isOwner(uid);
+        allow write: if false;
+      }
+      match /partyLedgerCommands/{commandId} {
+        allow read: if isOwner(uid);
+        allow write: if false;
+      }
+      match /partyLedgerCheckpoints/{checkpointId} {
+        allow read: if isOwner(uid);
+        allow write: if false;
+      }
+
       // ---- Professional service packs -----------------------------------
       match /professionalPacks/{packId} {
         allow read: if isOwner(uid);

@@ -270,7 +270,7 @@ export function buildPurchaseOrderHtml(options: BuildPurchaseOrderHtmlOptions): 
 
   const logoBlock =
     logoDataUri && !cancelled
-      ? `<img class="logo" src="${logoDataUri}" alt="" />`
+      ? `<img class="logo" src="${esc(logoDataUri)}" alt="" />`
       : "";
 
   return `<!DOCTYPE html>

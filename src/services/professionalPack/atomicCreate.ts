@@ -11,6 +11,8 @@ import {
 import { stableRecordId } from "@/services/records/stableRecordId";
 import { normaliseProfessionalPack, packToStorage } from "./normalize";
 
+import { publishDomainChange } from "@/services/dataChanges/domainChanges";
+
 import type { CreateProfessionalPackInput } from "./types";
 
 function reminderJson(r: EntryReminder | null) {
@@ -79,6 +81,10 @@ export async function createProfessionalPackAtomic(
       return { record: pack, payload: stored };
     },
     hooks,
+  });
+  publishDomainChange(userId, "professionalPack", {
+    effect: "upsert",
+    recordId: result.record.id,
   });
   return result.record;
 }

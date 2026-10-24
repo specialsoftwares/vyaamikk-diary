@@ -11,6 +11,7 @@
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
+import { publishDomainChange } from "@/services/dataChanges/domainChanges";
 import { AppError } from "@/domain/errors";
 import type { CustomerCreditRecord } from "@/domain/customerCredit";
 import { createLogger } from "@/utils/logger";
@@ -105,6 +106,7 @@ export const mockCustomerCreditRepository: CustomerCreditRepository = {
     const record = buildNewRecord(userId, serial, input, Date.now(), recordId);
     all.unshift(record);
     await persist(userId, all);
+    publishDomainChange(userId, "customerCredit", { effect: "upsert", recordId: record.id });
     log.info("credit record created");
     return record;
   },
@@ -116,6 +118,7 @@ export const mockCustomerCreditRepository: CustomerCreditRepository = {
     const next = applyUpdate(all[idx], input, Date.now());
     all[idx] = next;
     await persist(userId, all);
+    publishDomainChange(userId, "customerCredit", { effect: "upsert", recordId: next.id });
     return next;
   },
 
@@ -126,6 +129,7 @@ export const mockCustomerCreditRepository: CustomerCreditRepository = {
     const next = appendPayment(all[idx], payment, Date.now());
     all[idx] = next;
     await persist(userId, all);
+    publishDomainChange(userId, "customerCredit", { effect: "upsert", recordId });
     return next;
   },
 
@@ -136,6 +140,7 @@ export const mockCustomerCreditRepository: CustomerCreditRepository = {
     const next = removePaymentFrom(all[idx], paymentId, Date.now());
     all[idx] = next;
     await persist(userId, all);
+    publishDomainChange(userId, "customerCredit", { effect: "upsert", recordId });
     return next;
   },
 
@@ -146,6 +151,7 @@ export const mockCustomerCreditRepository: CustomerCreditRepository = {
     const next = applyStatus(all[idx], status, Date.now());
     all[idx] = next;
     await persist(userId, all);
+    publishDomainChange(userId, "customerCredit", { effect: "upsert", recordId });
     return next;
   },
 
@@ -164,6 +170,7 @@ export const mockCustomerCreditRepository: CustomerCreditRepository = {
     );
     all[idx] = next;
     await persist(userId, all);
+    publishDomainChange(userId, "customerCredit", { effect: "upsert", recordId: input.recordId });
     return next;
   },
 
@@ -188,6 +195,7 @@ export const mockCustomerCreditRepository: CustomerCreditRepository = {
       userId,
       all.filter((r) => r.id !== id)
     );
+    publishDomainChange(userId, "customerCredit", { effect: "delete", recordId: id });
     log.info("credit record removed");
   },
 

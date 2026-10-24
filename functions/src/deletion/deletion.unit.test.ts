@@ -6,8 +6,10 @@ import {
   initialDeletionJob,
   shouldPromoteToReady,
   allPhasesDone,
+  accountPurgeMayComplete,
   EMPTY_PHASES,
 } from "./deletionJob";
+import { DELETION_GRACE_MS } from "./finalPurge";
 import {
   deleteOwnedFile,
   purgePrefixPaged,
@@ -16,6 +18,26 @@ import {
 } from "./storagePurge";
 import { deleteAuthUserIdempotent } from "./authDelete";
 import { isObjectOwnedByUser } from "./userOwnedStoragePaths";
+
+function testGraceDeadlineAndCancel() {
+  assert.equal(DELETION_GRACE_MS, 45 * 24 * 60 * 60 * 1000);
+  const requestedAt = 1_700_000_000_000;
+  const nowInsideGrace = requestedAt + DELETION_GRACE_MS - 1;
+  const nowPastGrace = requestedAt + DELETION_GRACE_MS + 1;
+  const pending = initialDeletionJob({
+    uid: "u1",
+    requestedAt,
+    graceExpiresAt: requestedAt + DELETION_GRACE_MS,
+    now: requestedAt,
+  });
+  assert.equal(shouldPromoteToReady(pending, nowInsideGrace), false, "inside 45-day window");
+  assert.equal(shouldPromoteToReady(pending, nowPastGrace), true, "after 45-day deadline");
+  assert.equal(
+    canAcquireLease({ ...pending, status: "cancelled" }, nowPastGrace),
+    false,
+    "cancelled job must not be leased after deadline"
+  );
+}
 
 function testJobLease() {
   const now = 1_000_000;
@@ -49,6 +71,50 @@ function testPhases() {
       firestore: "done",
       indexes: "done",
       auth: "done",
+    }),
+    true
+  );
+}
+
+function testAccountPurgeMayComplete() {
+  const done = {
+    storage: "done" as const,
+    firestore: "done" as const,
+    indexes: "done" as const,
+    auth: "done" as const,
+  };
+  assert.equal(
+    accountPurgeMayComplete({
+      phases: EMPTY_PHASES,
+      includeGrinInAccountPurge: false,
+      grinCompleted: true,
+    }),
+    false,
+    "diary phases incomplete must not complete"
+  );
+  assert.equal(
+    accountPurgeMayComplete({
+      phases: done,
+      includeGrinInAccountPurge: false,
+      grinCompleted: false,
+    }),
+    true,
+    "flag-false production may complete with GRIN trees still present"
+  );
+  assert.equal(
+    accountPurgeMayComplete({
+      phases: done,
+      includeGrinInAccountPurge: true,
+      grinCompleted: false,
+    }),
+    false,
+    "flag-true interruption must not mark completed"
+  );
+  assert.equal(
+    accountPurgeMayComplete({
+      phases: done,
+      includeGrinInAccountPurge: true,
+      grinCompleted: true,
     }),
     true
   );
@@ -138,8 +204,10 @@ async function testAuthIdempotent() {
 }
 
 async function main() {
+  testGraceDeadlineAndCancel();
   testJobLease();
   testPhases();
+  testAccountPurgeMayComplete();
   testClassify();
   await testStoragePurgePagination();
   await testAlreadyMissing();

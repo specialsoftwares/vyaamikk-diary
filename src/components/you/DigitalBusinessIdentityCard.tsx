@@ -23,8 +23,11 @@ import Animated, {
 } from "react-native-reanimated";
 import { useFocusEffect, useRouter } from "expo-router";
 
+import { PreviousVisitMark } from "@/components/profile/PreviousVisitMark";
 import { ProfileAvatar } from "@/components/profile/ProfileAvatar";
+import { usePreviousVisit } from "@/components/profile/usePreviousVisit";
 import { DashboardGreetingHeroSurface } from "@/components/you/DashboardGreetingHeroSurface";
+import { previousVisitAccessibilityText } from "@/content/profile/previousVisitCopy";
 import type { UserProfile } from "@/domain/types";
 import { useIdentityCardTrustStats } from "@/hooks/useIdentityCardTrustStats";
 import { useStuckBusyRecovery } from "@/hooks/useStuckBusyRecovery";
@@ -33,10 +36,10 @@ import {
   createFlipLockController,
   type FlipLockController,
 } from "./identityCardFlipController";
-import { useT } from "@/i18n";
+import { useI18n } from "@/i18n";
 import { executivePressFeedback } from "@/theme/executiveLayer";
 import { radius, spacing, typography, useTheme, useThemedStyles } from "@/theme";
-import { getGreetingPeriod, greetingPeriodFallbackKey } from "@/utils/greeting";
+import { formatDisplayTimestamp, getGreetingPeriod, greetingPeriodFallbackKey } from "@/utils/greeting";
 import { buildBusinessIdentityShareMessage } from "@/utils/profile/buildBusinessIdentityShareMessage";
 import { formatGreetingName } from "@/utils/profile/formatGreetingName";
 
@@ -105,7 +108,8 @@ export function DigitalBusinessIdentityCard({
   rightSlot,
   savedPdfTotal = 0,
 }: DigitalBusinessIdentityCardProps) {
-  const t = useT();
+  const { t, lang } = useI18n();
+  const previousVisit = usePreviousVisit(user?.uid);
   const router = useRouter();
   const { resolvedMode } = useTheme();
   const isDark = resolvedMode === "dark";
@@ -113,10 +117,20 @@ export function DigitalBusinessIdentityCard({
 
   const [period, setPeriod] = useState(() => getGreetingPeriod());
   const [reduceMotion, setReduceMotion] = useState(false);
+  const reduceMotionRef = useRef(false);
+  reduceMotionRef.current = reduceMotion;
   const [sharing, setSharing] = useState(false);
   const [isBack, setIsBack] = useState(false);
-  const [stageHeight, setStageHeight] = useState(STAGE_FALLBACK_HEIGHT);
+  const stageHeightSv = useSharedValue(STAGE_FALLBACK_HEIGHT);
+  const applyStageHeight = useCallback((next: number, animate: boolean) => {
+    if (next <= 0) return;
+    stageHeightSv.value =
+      animate && !reduceMotionRef.current
+        ? withTiming(next, { duration: FLIP_MS, easing: FLIP_EASING })
+        : next;
+  }, [stageHeightSv]);
   const shareLockRef = useRef(false);
+  const flipBusyRef = useRef(false);
   const shareLockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const measuredHeights = useRef({ front: 0, back: 0 });
   const flipProgress = useSharedValue(0);
@@ -205,11 +219,15 @@ export function DigitalBusinessIdentityCard({
   }, [flipLock]);
 
   const syncStageHeight = useCallback(() => {
-    const next = Math.max(measuredHeights.current.front, measuredHeights.current.back);
-    if (next > 0) {
-      setStageHeight(next);
-    }
-  }, []);
+    const front = measuredHeights.current.front;
+    const back = measuredHeights.current.back;
+    const visible = isBack ? back : front;
+    if (visible > 0) applyStageHeight(visible, flipBusyRef.current);
+  }, [applyStageHeight, isBack]);
+
+  useEffect(() => {
+    syncStageHeight();
+  }, [syncStageHeight]);
 
   const onFrontLayout = useCallback(
     (event: LayoutChangeEvent) => {
@@ -275,7 +293,7 @@ export function DigitalBusinessIdentityCard({
         color: c.textSubtle,
         lineHeight: 15,
       },
-      topActions: { flexShrink: 0 },
+      topActions: { flexShrink: 0, alignItems: "flex-end", maxWidth: "46%", gap: 2 },
       bodyRow: {
         flexDirection: "row",
         alignItems: "center",
@@ -373,26 +391,35 @@ export function DigitalBusinessIdentityCard({
 
   const settleFlip = useCallback(
     (target: number, finished: boolean) => {
-      if (!flipLock.release()) return;
-      if (finished) {
-        setIsBack(target >= 0.5);
-        return;
+      flipBusyRef.current = false;
+      const released = flipLock.release();
+      let showingBack = target >= 0.5;
+      if (!finished) {
+        const progress = flipProgressRef.current;
+        const settled = progress.value >= 0.5 ? 1 : 0;
+        progress.value = settled;
+        showingBack = settled === 1;
       }
-      // Interrupted/cancelled: restore a stable transform on the nearest side
-      // so neither face is stuck mid-rotation intercepting touches.
-      const progress = flipProgressRef.current;
-      const settled = progress.value >= 0.5 ? 1 : 0;
-      progress.value = settled;
-      setIsBack(settled === 1);
+      const next = showingBack
+        ? measuredHeights.current.back
+        : measuredHeights.current.front;
+      if (next > 0) applyStageHeight(next, false);
+      if (!released) return;
+      setIsBack(showingBack);
     },
-    [flipLock]
+    [applyStageHeight, flipLock]
   );
 
   const toggleFlip = useCallback(() => {
     if (sharing || shareLockRef.current) return;
     if (!flipLock.acquire()) return;
     const next = flipProgress.value < 0.5 ? 1 : 0;
+    flipBusyRef.current = true;
+    const dest =
+      next >= 0.5 ? measuredHeights.current.back : measuredHeights.current.front;
+    if (dest > 0) applyStageHeight(dest, !reduceMotion);
     if (reduceMotion) {
+      flipBusyRef.current = false;
       flipProgress.value = next;
       setIsBack(next >= 0.5);
       flipLock.release();
@@ -405,7 +432,7 @@ export function DigitalBusinessIdentityCard({
         runOnJS(settleFlip)(next, finished === true);
       }
     );
-  }, [flipProgress, reduceMotion, sharing, flipLock, settleFlip]);
+  }, [applyStageHeight, flipProgress, reduceMotion, sharing, flipLock, settleFlip]);
 
   const frontFaceStyle = useAnimatedStyle(() => {
     const rotateY = interpolate(flipProgress.value, [0, 1], [0, 180]);
@@ -422,6 +449,10 @@ export function DigitalBusinessIdentityCard({
       opacity: interpolate(flipProgress.value, [0, 0.48, 0.52, 1], [0, 0, 1, 1]),
     };
   });
+
+  const stageStyle = useAnimatedStyle(() => ({
+    height: stageHeightSv.value,
+  }));
 
   const onShare = useCallback(async () => {
     if (!user || sharing) return;
@@ -483,18 +514,11 @@ export function DigitalBusinessIdentityCard({
     },
   ];
 
-  const distanceLabel =
-    trustStats.approxDistanceKm > 0
-      ? t("you.identityCard.counterDistanceApprox", { km: trustStats.approxDistanceKm })
-      : t("you.identityCard.counterDistanceZero");
-
-  // Back: motivational live counters (4–6 max).
   const counters: Array<{ value: string | number; label: string }> = [
     { value: trustStats.recordsCount, label: t("you.identityCard.counterRecords") },
     { value: savedPdfTotal, label: t("you.identityCard.counterPdfs") },
     { value: trustStats.creditRecordsCount, label: t("you.identityCard.counterCredit") },
     { value: trustStats.activeEmiCount, label: t("you.identityCard.counterActiveEmi") },
-    { value: distanceLabel, label: t("you.identityCard.counterDistance") },
     { value: trustStats.activeDraftsCount, label: t("you.identityCard.counterDrafts") },
   ];
 
@@ -511,12 +535,17 @@ export function DigitalBusinessIdentityCard({
             </Text>
           ) : null}
           {designation ? (
-            <Text style={styles.designationLine} numberOfLines={1}>
+            <Text style={styles.designationLine}>
               {designation}
             </Text>
           ) : null}
         </View>
-        {rightSlot ? <View style={styles.topActions}>{rightSlot}</View> : null}
+        {previousVisit || rightSlot ? (
+          <View style={styles.topActions}>
+            {previousVisit ? <PreviousVisitMark snapshot={previousVisit} /> : null}
+            {rightSlot}
+          </View>
+        ) : null}
       </View>
       <View style={styles.bodyRow}>
         <Pressable
@@ -601,7 +630,17 @@ export function DigitalBusinessIdentityCard({
     <Pressable
       onPress={toggleFlip}
       accessibilityRole="button"
-      accessibilityLabel={t("you.identityCard.flipA11y")}
+      accessibilityLabel={
+        previousVisit
+          ? `${t("you.identityCard.flipA11y")}. ${previousVisitAccessibilityText(
+              lang,
+              previousVisit.kind,
+              previousVisit.kind === "previous" && previousVisit.previousVisitAt != null
+                ? formatDisplayTimestamp(previousVisit.previousVisitAt)
+                : undefined
+            )}`
+          : t("you.identityCard.flipA11y")
+      }
       accessibilityHint={t("you.identityCard.flipHint")}
       style={styles.pressable}
       disabled={sharing}
@@ -612,7 +651,7 @@ export function DigitalBusinessIdentityCard({
           <View onLayout={onBackLayout}>{backFace}</View>
         </View>
 
-        <View style={[styles.stage, { height: stageHeight }]}>
+        <Animated.View style={[styles.stage, stageStyle]}>
           <Animated.View
             style={[styles.faceLayer, frontFaceStyle]}
             pointerEvents={isBack ? "none" : "auto"}
@@ -626,7 +665,7 @@ export function DigitalBusinessIdentityCard({
           >
             {backFace}
           </Animated.View>
-        </View>
+        </Animated.View>
       </DashboardGreetingHeroSurface>
     </Pressable>
   );

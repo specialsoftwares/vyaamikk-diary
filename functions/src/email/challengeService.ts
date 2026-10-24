@@ -18,6 +18,7 @@ import {
 } from "./otpPolicy";
 import { digestEmailOtp, generateEmailOtpCode, verifyEmailOtpDigest } from "./otpCrypto";
 import { resolveEmailProvider } from "./provider";
+import { timeEmailChallengeSpan } from "./challengeTiming";
 import {
   assertReviewContactEditAllowed,
   nextReviewContactEditCount,
@@ -318,7 +319,7 @@ export async function createOrRotateEmailChallenge(input: {
     }
   }
 
-  const issued = await db.runTransaction(async (tx) => {
+  const issued = await timeEmailChallengeSpan("challenge_db", () => db.runTransaction(async (tx) => {
     const userSnapTx = await tx.get(userRef);
     if (!userSnapTx.exists) throwEmailOtpError("FORBIDDEN", "permission-denied");
     const userTx = userSnapTx.data() as Record<string, unknown>;
@@ -404,16 +405,21 @@ export async function createOrRotateEmailChallenge(input: {
     }
 
     return { challengeId, code, nextVersion, expiresAt, resendAvailableAt };
-  });
+  }));
 
   const { challengeId, code, nextVersion, expiresAt, resendAvailableAt } = issued;
 
-  const sendResult = await provider.send({
-    to: normalized,
-    subject: "Your Vyaamikk Diary verification code",
-    textBody: `Your verification code is ${code}. It expires in 15 minutes. If you did not request this, ignore this email.`,
-    idempotencyKey: `email-otp:${challengeId}:v${nextVersion}`,
-  });
+  const sendResult = await timeEmailChallengeSpan(
+    "provider_request",
+    () =>
+      provider.send({
+        to: normalized,
+        subject: "Your Vyaamikk Diary verification code",
+        textBody: `Your verification code is ${code}. It expires in 15 minutes. If you did not request this, ignore this email.`,
+        idempotencyKey: `email-otp:${challengeId}:v${nextVersion}`,
+      }),
+    (result) => (result.delivered ? "ok" : "error")
+  );
 
   if (!sendResult.delivered && mode === "production") {
     try {
@@ -463,7 +469,7 @@ export async function verifyEmailChallengeAndBind(input: {
   const pendingRef = db.collection(PENDING_COLLECTION).doc(input.challengeId);
   const userRef = db.collection(USERS).doc(input.uid);
 
-  const profile = await db.runTransaction(async (tx) => {
+  const profile = await timeEmailChallengeSpan("verify_db", () => db.runTransaction(async (tx) => {
     const pendingSnap = await tx.get(pendingRef);
     if (!pendingSnap.exists) throwEmailOtpError("EMAIL_OTP_EXPIRED", "not-found");
     const pending = pendingSnap.data() as ChallengeDoc;
@@ -625,7 +631,7 @@ export async function verifyEmailChallengeAndBind(input: {
     });
 
     return { uid: input.uid, ...updated };
-  });
+  }));
 
   await writeSecurityEvent(db, input.uid, {
     type: "email_verified_bound",

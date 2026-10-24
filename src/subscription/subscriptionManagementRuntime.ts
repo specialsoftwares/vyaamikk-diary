@@ -5,6 +5,11 @@
  */
 
 import type { BillingDetailsSaveResult, UpdateBillingDetailsPayload } from "@/billing/iap/billingDetailsClient";
+import {
+  isPlayPurchaseAdmissionToken,
+  type PlayPurchaseAdmissionToken,
+  type PurchaseAdmissionRead,
+} from "@/billing/iap/purchaseAdmission";
 import { isSubscriptionPurchaseEntryEnabled } from "@/billing/iap/purchaseEntryGate";
 import type { QuotaUpsellPresentResult } from "@/billing/quotaUpsell/quotaUpsellController";
 import {
@@ -18,6 +23,7 @@ import type { QuotaUsageRead } from "@/subscription/quotaUsageReader";
 import { billingDetailsInvoiceReady } from "@/subscription/subscriptionManagementPresentation";
 import {
   sessionFlushKey,
+  syncSessionOwnership,
   type SyncSessionToken,
 } from "@/sync/syncSessionOwnership";
 
@@ -34,6 +40,7 @@ export type ManagementPublished = {
   restoring: boolean;
   manageError: string | null;
   upgradeError: string | null;
+  purchaseAdmission: "idle" | "loading" | "allowed" | "closed" | "unavailable";
   invoiceReady: boolean;
   draftDirty: boolean;
 };
@@ -43,6 +50,15 @@ export type LiveManagementSession = {
   session: SyncSessionToken | null;
 };
 
+/** Process session at the call. A copy taken during render cannot admit a purchase after that token retires. */
+export function readSubscriptionManagementSession(authUid: string | null): LiveManagementSession {
+  const session = syncSessionOwnership.capture();
+  if (!authUid || !session || authUid !== session.uid || !syncSessionOwnership.isCurrent(session)) {
+    return { authUid, session: null };
+  }
+  return { authUid, session };
+}
+
 export type ManagementRuntimeDeps = {
   readUsage: (uid: string) => Promise<QuotaUsageRead>;
   readHistory: (uid: string) => Promise<BillingHistoryRead>;
@@ -50,10 +66,15 @@ export type ManagementRuntimeDeps = {
   saveDetails: (payload: UpdateBillingDetailsPayload) => Promise<BillingDetailsSaveResult>;
   restore: () => Promise<{ kind: string; message?: string }>;
   openUrl: (url: string) => Promise<boolean>;
-  presentUpgrade: (session: SyncSessionToken | null) => QuotaUpsellPresentResult;
+  presentUpgrade: (
+    session: SyncSessionToken | null,
+    admission?: PlayPurchaseAdmissionToken | null
+  ) => QuotaUpsellPresentResult;
   nowMs?: () => number;
   isPurchaseEntryEnabled?: () => boolean;
-  /** Authoritative live session; defaults to the last setOwner token. */
+  /** Authenticated server read. Absent reader stays closed and does not purchase. */
+  readPurchaseAdmission?: () => Promise<PurchaseAdmissionRead>;
+  /** Process session read at the check. Defaults to the last setOwner token. */
   liveSession?: () => LiveManagementSession;
 };
 
@@ -73,6 +94,7 @@ export function emptyPublished(ownerKey: string): ManagementPublished {
     restoring: false,
     manageError: null,
     upgradeError: null,
+    purchaseAdmission: "closed",
     invoiceReady: false,
     draftDirty: false,
   };
@@ -96,9 +118,10 @@ export function maskManagementSnapshot(
       usage: { kind: "unavailable", code: "signed_out" },
       history: { kind: "unavailable", code: "signed_out" },
       detailsKind: "unavailable",
+      purchaseAdmission: "closed",
     };
   }
-  return emptyPublished(key);
+  return { ...emptyPublished(key), purchaseAdmission: "loading" };
 }
 
 export function createSubscriptionManagementRuntime(deps: ManagementRuntimeDeps) {
@@ -107,6 +130,8 @@ export function createSubscriptionManagementRuntime(deps: ManagementRuntimeDeps)
   let saveSeq = 0;
   let restoreSeq = 0;
   let manageSeq = 0;
+  let admissionSeq = 0;
+  let admissionToken: PlayPurchaseAdmissionToken | null = null;
   let draftRev = 0;
   let published = emptyPublished("signed_out#0");
   const listeners = new Set<() => void>();
@@ -137,11 +162,17 @@ export function createSubscriptionManagementRuntime(deps: ManagementRuntimeDeps)
     return true;
   }
 
+  function entryEnabled(): boolean {
+    return (deps.isPurchaseEntryEnabled ?? isSubscriptionPurchaseEntryEnabled)();
+  }
+
   function retireAndReset(next: SyncSessionToken | null): void {
     loadSeq += 1;
     saveSeq += 1;
     restoreSeq += 1;
     manageSeq += 1;
+    admissionSeq += 1;
+    admissionToken = null;
     draftRev = 0;
     owner = next;
     published = emptyPublished(ownerKeyOf(next));
@@ -151,7 +182,41 @@ export function createSubscriptionManagementRuntime(deps: ManagementRuntimeDeps)
         usage: { kind: "unavailable", code: "signed_out" },
         history: { kind: "unavailable", code: "signed_out" },
         detailsKind: "unavailable",
+        purchaseAdmission: "closed",
       };
+    } else if (!entryEnabled()) {
+      published = { ...published, purchaseAdmission: "loading" };
+    } else {
+      published = { ...published, purchaseAdmission: "idle" };
+    }
+    emit();
+  }
+
+  async function settleAdmission(admitted: SyncSessionToken, op: number): Promise<void> {
+    if (entryEnabled()) return;
+    if (!deps.readPurchaseAdmission) {
+      if (op !== admissionSeq || !isLiveAuthority(admitted)) return;
+      admissionToken = null;
+      published = { ...published, purchaseAdmission: "closed" };
+      emit();
+      return;
+    }
+    let outcome: PurchaseAdmissionRead;
+    try {
+      outcome = await deps.readPurchaseAdmission();
+    } catch {
+      outcome = { status: "unavailable" };
+    }
+    if (op !== admissionSeq || !isLiveAuthority(admitted)) return;
+    if (outcome.status === "allowed" && isPlayPurchaseAdmissionToken(outcome.token)) {
+      admissionToken = outcome.token;
+      published = { ...published, purchaseAdmission: "allowed" };
+    } else if (outcome.status === "unavailable") {
+      admissionToken = null;
+      published = { ...published, purchaseAdmission: "unavailable" };
+    } else {
+      admissionToken = null;
+      published = { ...published, purchaseAdmission: "closed" };
     }
     emit();
   }
@@ -173,6 +238,10 @@ export function createSubscriptionManagementRuntime(deps: ManagementRuntimeDeps)
       emit();
     }
     void load(admitted, op);
+    if (!entryEnabled()) {
+      admissionSeq += 1;
+      void settleAdmission(admitted, admissionSeq);
+    }
   }
 
   async function load(admitted: SyncSessionToken, op: number): Promise<void> {
@@ -273,15 +342,25 @@ export function createSubscriptionManagementRuntime(deps: ManagementRuntimeDeps)
     if (!origin || !isLiveAuthority(origin)) {
       return { ok: false, reason: "session_stale", visible: false, clientRecordId: null };
     }
-    const enabled = (deps.isPurchaseEntryEnabled ?? isSubscriptionPurchaseEntryEnabled)();
-    if (!enabled) {
+    const enabled = entryEnabled();
+    if (!enabled && !isPlayPurchaseAdmissionToken(admissionToken)) {
       published = { ...published, upgradeError: "purchase_entry_closed" };
       emit();
       return { ok: false, reason: "purchase_entry_closed", visible: false, clientRecordId: null };
     }
     published = { ...published, upgradeError: null };
     emit();
-    return deps.presentUpgrade(origin);
+    return deps.presentUpgrade(origin, enabled ? null : admissionToken);
+  }
+
+  function refreshPurchaseAdmission(origin: SyncSessionToken | null): void {
+    if (!origin || !isLiveAuthority(origin)) return;
+    if (entryEnabled()) return;
+    admissionSeq += 1;
+    admissionToken = null;
+    published = { ...published, purchaseAdmission: "loading", upgradeError: null };
+    emit();
+    void settleAdmission(origin, admissionSeq);
   }
 
   async function restore(origin: SyncSessionToken | null): Promise<void> {
@@ -347,12 +426,14 @@ export function createSubscriptionManagementRuntime(deps: ManagementRuntimeDeps)
       if (next) {
         const op = loadSeq;
         void load(next, op);
+        if (!entryEnabled()) void settleAdmission(next, admissionSeq);
       }
     },
     reload,
     setDraft,
     saveDetails,
     presentUpgrade,
+    refreshPurchaseAdmission,
     restore,
     manage,
     bindSetDraft(origin: SyncSessionToken | null) {
@@ -374,6 +455,10 @@ export function createSubscriptionManagementRuntime(deps: ManagementRuntimeDeps)
     bindPresentUpgrade(origin: SyncSessionToken | null) {
       const captured = copyOrigin(origin);
       return () => presentUpgrade(captured);
+    },
+    bindRefreshPurchaseAdmission(origin: SyncSessionToken | null) {
+      const captured = copyOrigin(origin);
+      return () => refreshPurchaseAdmission(captured);
     },
     dispose(): void {
       retireAndReset(null);

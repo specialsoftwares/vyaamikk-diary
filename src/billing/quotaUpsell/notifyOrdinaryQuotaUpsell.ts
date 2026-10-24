@@ -1,4 +1,8 @@
 import { isSubscriptionPurchaseEntryEnabled } from "@/billing/iap/purchaseEntryGate";
+import {
+  isPlayPurchaseAdmissionToken,
+  type PlayPurchaseAdmissionToken,
+} from "@/billing/iap/purchaseAdmission";
 import type { SyncSessionToken } from "@/sync/syncSessionOwnership";
 
 import { decideQuotaUpsellEligibility } from "./quotaUpsellDecision";
@@ -6,7 +10,10 @@ import type { QuotaUpsellPresentResult } from "./quotaUpsellController";
 import type { QuotaUpsellRequest } from "./quotaUpsellTypes";
 
 type Presenter = (request: QuotaUpsellRequest) => QuotaUpsellPresentResult;
-type ManualPresenter = (session: SyncSessionToken | null) => QuotaUpsellPresentResult;
+type ManualPresenter = (
+  session: SyncSessionToken | null,
+  admission?: PlayPurchaseAdmissionToken | null
+) => QuotaUpsellPresentResult;
 
 let presenter: Presenter | null = null;
 let manualPresenter: ManualPresenter | null = null;
@@ -43,12 +50,15 @@ export function notifyOrdinaryQuotaUpsell(request: QuotaUpsellRequest): QuotaUps
  * Settings / management entry. Independent of the quota upsell gate and
  * does not invent a record id. Reuses the same UpgradeSheet host.
  */
-export function notifyManualUpgrade(session: SyncSessionToken | null): QuotaUpsellPresentResult {
-  if (!isSubscriptionPurchaseEntryEnabled()) {
+export function notifyManualUpgrade(
+  session: SyncSessionToken | null,
+  admission?: PlayPurchaseAdmissionToken | null
+): QuotaUpsellPresentResult {
+  if (!isSubscriptionPurchaseEntryEnabled() && !isPlayPurchaseAdmissionToken(admission)) {
     return { ok: false, reason: "purchase_entry_closed", visible: false, clientRecordId: null };
   }
   if (!manualPresenter) {
     return { ok: false, reason: "no_host", visible: false, clientRecordId: null };
   }
-  return manualPresenter(session);
+  return manualPresenter(session, admission);
 }

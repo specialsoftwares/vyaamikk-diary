@@ -45,6 +45,23 @@ export interface LocalFirstCreateResult extends LocalFirstWriteResult {
   reminderFailureKind?: ReturnType<typeof classifyAtomicCreateError>;
 }
 
+export interface LocalFirstWriteOptions {
+  session?: SyncSessionToken | null;
+  /** Fires after the local row and sync intent commit, before any network call. */
+  onLocalDurable?: (entry: BusinessEntry) => void;
+}
+
+function notifyLocalDurable(
+  options: LocalFirstWriteOptions | undefined,
+  entry: BusinessEntry
+): void {
+  try {
+    options?.onLocalDurable?.(entry);
+  } catch {
+    // UI observers must not roll back a durable local record.
+  }
+}
+
 function currentLocal(userId: string, id: string, fallback: BusinessEntry): BusinessEntry {
   return readLocalEntryRecordSync(userId, id)?.entry ?? fallback;
 }
@@ -66,7 +83,7 @@ async function notifySearch(): Promise<void> {
 export async function createEntryLocalFirst(
   userId: string,
   input: CreateBusinessEntryInput,
-  options?: { session?: SyncSessionToken | null }
+  options?: LocalFirstWriteOptions
 ): Promise<LocalFirstCreateResult> {
   const session =
     options && "session" in options ? options.session ?? null : captureAdmissionToken();
@@ -104,6 +121,8 @@ export async function createEntryLocalFirst(
   });
 
   const queueId = persistDiaryCreateIntent(localEntry, createInput);
+  const durable = currentLocal(userId, recordId, localEntry);
+  notifyLocalDurable(options, durable);
   const sent = captureSentDiaryOp({
     userId,
     recordId,
@@ -190,7 +209,7 @@ export async function createEntryLocalFirst(
 export async function updateEntryLocalFirst(
   userId: string,
   input: UpdateBusinessEntryInput,
-  options?: { session?: SyncSessionToken | null }
+  options?: LocalFirstWriteOptions
 ): Promise<LocalFirstWriteResult> {
   const session =
     options && "session" in options ? options.session ?? null : captureAdmissionToken();
@@ -206,6 +225,7 @@ export async function updateEntryLocalFirst(
   }
 
   const persisted = persistDiaryUpdateIntent(userId, input, fallback);
+  notifyLocalDurable(options, persisted.entry);
   const pendingCreate = persisted.pendingOp === "create" && !persisted.remoteConfirmed;
   if (pendingCreate) {
     return { entry: persisted.entry, remoteAccepted: false };

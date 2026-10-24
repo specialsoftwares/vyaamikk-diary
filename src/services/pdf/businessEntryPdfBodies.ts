@@ -1,11 +1,12 @@
 import type { BusinessEntry, BusinessEntryType, PaymentRequestPayload } from "@/domain/businessEntry";
-import { cashPaidPhotoAttachment } from "@/services/attachments/cashPaidPhotoService";
+import type { PreparedReceiptPhoto } from "@/services/attachments/preparedReceiptPhoto";
 import { formatPaymentPeriodLine } from "@/utils/businessEntry/paymentPeriod";
 import { paymentBankDetailsHasContent } from "@/utils/businessEntry/paymentBankDetails";
 import {
   outwardHasItemPayload,
   outwardMovementPdfTitle,
 } from "@/utils/businessEntry/outwardMovement";
+import { escapeHtml } from "@/utils/escapeHtml";
 import { formatPostalLocationLine } from "@/utils/location/postalDisplay";
 import { parseIndianPostalFromStored } from "@/utils/location/postalForm";
 import { formatPdfDate } from "./pdfDate";
@@ -23,6 +24,17 @@ function formatPdfPostalLine(rawPostal: unknown, legacy: string | null | undefin
   if (loc) return formatPostalLocationLine(loc);
   const leg = legacy?.trim();
   return leg || null;
+}
+
+/** Inline CSS so the PDF image keeps its aspect ratio and is not cropped to 4:3. */
+export const RECEIPT_PHOTO_IMG_STYLE =
+  "object-fit:contain;max-width:100%;height:auto;page-break-inside:avoid;";
+
+export function receiptPhotoEmbedHtml(photo: PreparedReceiptPhoto | null | undefined): string {
+  if (!photo || photo.status !== "ready") return "";
+  return `<div class="receipt-photo" style="page-break-inside:avoid;margin-top:8pt;">
+    <img alt="" src="${escapeHtml(photo.dataUri)}" style="${RECEIPT_PHOTO_IMG_STYLE}"/>
+  </div>`;
 }
 
 function strVal(v: unknown): string | null {
@@ -138,7 +150,8 @@ function buildOutwardMovementBody(p: Record<string, unknown>, entryDate: number,
 
   return (
     pdfKeyFactsBlock("Key details", keyFacts) +
-    (route ? `<div class="pdf-route-line">${route}</div>` : "") +
+    // Route is user-typed location text (legacy dispatchLocation/destination) — escape it.
+    (route ? `<div class="pdf-route-line">${escapeHtml(route)}</div>` : "") +
     pdfSection("Movement", movementRows) +
     pdfSection("Goods", itemRows) +
     pdfSection("Transport", transportRows)
@@ -153,7 +166,8 @@ export function buildBusinessEntryBody(
     detailsSection: string;
     entryDate: string;
   },
-  locale: "en-IN" | "hi-IN"
+  locale: "en-IN" | "hi-IN",
+  receiptPhoto?: PreparedReceiptPhoto | null
 ): string {
   const p = entry.payload as unknown as Record<string, unknown>;
 
@@ -216,9 +230,9 @@ export function buildBusinessEntryBody(
         { label: "Mode", value: "Cash" },
         { label: "Recorded on", value: formatPdfDate(entry.createdAt, locale) },
       ];
-      const photoRef = cashPaidPhotoAttachment(entry.attachments);
-      const photoBlock = photoRef
-        ? pdfSection("Attachment", pdfKvRow("Receipt / proof", "Photo attachment available"))
+      const photoHtml = receiptPhotoEmbedHtml(receiptPhoto);
+      const photoBlock = photoHtml
+        ? `<div class="pdf-section"><div class="pdf-section-label">Receipt / proof</div>${photoHtml}</div>`
         : "";
       return (
         pdfKeyFactsBlock("Key details", keyFacts) +

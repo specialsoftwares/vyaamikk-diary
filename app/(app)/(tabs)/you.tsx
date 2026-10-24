@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useFocusEffect, useNavigation, useRouter } from "expo-router";
 
@@ -19,12 +19,7 @@ import { useSubscription } from "@/subscription";
 import { readOwnerQuotaUsage } from "@/subscription/quotaUsageReader";
 import { youDashboardQuotaWarning } from "@/subscription/youDashboardQuotaWarning";
 import { syncSessionOwnership } from "@/sync/syncSessionOwnership";
-import {
-  buildYouDashboardViewModel,
-  YOU_DASHBOARD_ENTRY_LIMIT,
-  YOU_LETTERHEAD_SCAN_CAP,
-  YOU_PRO_PACK_SCAN_LIMIT,
-} from "@/services/dashboard";
+import { buildYouDashboardViewModel } from "@/services/dashboard";
 import { formDraftsRepository } from "@/repositories/formDraftsRepository";
 import { executiveCardDepth, spacing, typography, useTheme, useThemedStyles, DASHBOARD_SECTION_GAP } from "@/theme";
 import { formatEntryDate } from "@/utils/date";
@@ -35,7 +30,11 @@ import type { BusinessEntryType } from "@/domain/businessEntry";
 import { getLetterheadDocumentRepository } from "@/services/letterhead/documentRepository";
 import type { LetterheadDocument } from "@/services/letterhead/types";
 import type { ProfessionalServicePack } from "@/domain/professionalPack";
+import type { CustomerCreditRecord } from "@/domain/customerCredit";
 import { getProfessionalPackRepository } from "@/services/professionalPack";
+import { getCustomerCreditRepository } from "@/services/customerCredit";
+import { subscribeDomainChanges } from "@/services/dataChanges/domainChanges";
+import { sessionStillOwns } from "@/state/diaryListLoad";
 import { useAppRefresh } from "@/hooks/useAppRefresh";
 
 export default function YouTab() {
@@ -90,12 +89,23 @@ export default function YouTab() {
   );
 
   const userId = user?.uid ?? null;
-  const listOptions = useMemo(() => ({ limit: YOU_DASHBOARD_ENTRY_LIMIT }), []);
+  const listOptions = useMemo(() => ({}), []);
   const { entries, error, refresh } = useDiaryList(userId, listOptions);
   const { requestDelete, isDeleting } = useRecordDelete(userId);
   const [letterheadDocs, setLetterheadDocs] = useState<LetterheadDocument[]>([]);
   const [proPacks, setProPacks] = useState<ProfessionalServicePack[]>([]);
+  const [credits, setCredits] = useState<CustomerCreditRecord[]>([]);
   const [activeDraftCount, setActiveDraftCount] = useState(0);
+  const ownerRef = useRef(userId);
+  if (ownerRef.current !== userId) {
+    ownerRef.current = userId;
+    if (letterheadDocs.length || proPacks.length || credits.length || activeDraftCount) {
+      setLetterheadDocs([]);
+      setProPacks([]);
+      setCredits([]);
+      setActiveDraftCount(0);
+    }
+  }
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerWorkTeamExpanded, setPickerWorkTeamExpanded] = useState(false);
   const [quotaWarn80, setQuotaWarn80] = useState(false);
@@ -153,41 +163,68 @@ export default function YouTab() {
     return () => parent?.setOptions({ gestureEnabled: true });
   }, [pickerOpen, navigation]);
 
+  const admittedGeneration = useCallback(() => {
+    const admitted = syncSessionOwnership.capture();
+    return admitted && admitted.uid === userId ? admitted.generation : null;
+  }, [userId]);
+
   const fetchLetterheadDocs = useCallback(async () => {
     if (!userId) return;
+    const generation = admittedGeneration();
     try {
       const list = await getLetterheadDocumentRepository().list(userId);
+      if (!sessionStillOwns(userId, generation)) return;
       const withPdf = list
         .filter((d) => d.pdfUri || d.saved)
-        .sort((a, b) => b.updatedAt - a.updatedAt)
-        .slice(0, YOU_LETTERHEAD_SCAN_CAP);
+        .sort((a, b) => b.updatedAt - a.updatedAt);
       setLetterheadDocs(withPdf);
     } catch {
       // non-fatal
     }
-  }, [userId]);
+  }, [userId, admittedGeneration]);
 
   const loadProPacks = useCallback(async () => {
     if (!userId) return;
+    const generation = admittedGeneration();
     try {
       const list = await getProfessionalPackRepository().list(userId, {
-        limit: YOU_PRO_PACK_SCAN_LIMIT,
+        includeDeleted: false,
       });
+      if (!sessionStillOwns(userId, generation)) return;
       setProPacks(list);
     } catch {
+      if (!sessionStillOwns(userId, generation)) return;
       setProPacks([]);
     }
-  }, [userId]);
+  }, [userId, admittedGeneration]);
+
+  const loadCredits = useCallback(async () => {
+    if (!userId) return;
+    const generation = admittedGeneration();
+    try {
+      const list = await getCustomerCreditRepository().list(userId, {
+        includeDeleted: false,
+      });
+      if (!sessionStillOwns(userId, generation)) return;
+      setCredits(list);
+    } catch {
+      if (!sessionStillOwns(userId, generation)) return;
+      setCredits([]);
+    }
+  }, [userId, admittedGeneration]);
 
   const fetchDraftCount = useCallback(async () => {
     if (!userId) return;
+    const generation = admittedGeneration();
     try {
       const count = await formDraftsRepository.countActiveUserDrafts(userId);
+      if (!sessionStillOwns(userId, generation)) return;
       setActiveDraftCount(count);
     } catch {
+      if (!sessionStillOwns(userId, generation)) return;
       setActiveDraftCount(0);
     }
-  }, [userId]);
+  }, [userId, admittedGeneration]);
 
   const refreshDashboard = useCallback(async () => {
     if (!userId) return;
@@ -195,9 +232,10 @@ export default function YouTab() {
       refresh(),
       fetchLetterheadDocs(),
       loadProPacks(),
+      loadCredits(),
       fetchDraftCount(),
     ]);
-  }, [userId, refresh, fetchLetterheadDocs, loadProPacks, fetchDraftCount]);
+  }, [userId, refresh, fetchLetterheadDocs, loadProPacks, loadCredits, fetchDraftCount]);
 
   const { refreshing: pullRefreshing, refreshNote, onRefresh } = useAppRefresh({
     onReload: refreshDashboard,
@@ -209,13 +247,32 @@ export default function YouTab() {
       void refresh();
       void fetchLetterheadDocs();
       void loadProPacks();
+      void loadCredits();
       void fetchDraftCount();
-    }, [userId, refresh, fetchLetterheadDocs, loadProPacks, fetchDraftCount])
+    }, [userId, refresh, fetchLetterheadDocs, loadProPacks, loadCredits, fetchDraftCount])
   );
 
+  useEffect(() => {
+    if (!userId) return;
+    return subscribeDomainChanges((change) => {
+      if (change.ownerUid !== userId) return;
+      if (change.source === "customerCredit") void loadCredits();
+      if (change.source === "professionalPack") void loadProPacks();
+    });
+  }, [userId, loadCredits, loadProPacks]);
+
   const dashboard = useMemo(
-    () => buildYouDashboardViewModel(entries, letterheadDocs, proPacks, activeDraftCount, t),
-    [entries, letterheadDocs, proPacks, activeDraftCount, t]
+    () =>
+      buildYouDashboardViewModel(
+        entries,
+        letterheadDocs,
+        proPacks,
+        activeDraftCount,
+        t,
+        Date.now(),
+        credits
+      ),
+    [entries, letterheadDocs, proPacks, activeDraftCount, t, credits]
   );
   const { visibility } = dashboard;
 
@@ -234,7 +291,6 @@ export default function YouTab() {
         | "purchase_order"
         | "customer_credit"
         | "material_movement",
-      routesToLetterhead?: boolean,
       routesToProfessionalPack?: boolean,
       routesToPurchaseOrder?: boolean,
       routesToCustomerCredit?: boolean
@@ -260,13 +316,6 @@ export default function YouTab() {
         // bypassed the whole taxonomy; do not route to /form from here.
         router.push({
           pathname: "/(app)/professional-pack",
-          params: { fromPicker: "1" },
-        });
-        return;
-      }
-      if (routesToLetterhead) {
-        router.push({
-          pathname: "/(app)/letterhead",
           params: { fromPicker: "1" },
         });
         return;

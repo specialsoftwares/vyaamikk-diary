@@ -145,3 +145,19 @@ export function allPhasesDone(phases: DeletionJobPhases): boolean {
     phases.auth === "done"
   );
 }
+
+/**
+ * Job may be marked completed only when diary phases are done AND, when the
+ * GRIN account-purge flag is on, GRIN purge itself reported completed.
+ * Flag-false production must not wait for GRIN trees (they are omitted).
+ * Never treat diary-storage-done as GRIN-done.
+ */
+export function accountPurgeMayComplete(input: {
+  phases: DeletionJobPhases;
+  includeGrinInAccountPurge: boolean;
+  grinCompleted: boolean;
+}): boolean {
+  if (!allPhasesDone(input.phases)) return false;
+  if (input.includeGrinInAccountPurge && !input.grinCompleted) return false;
+  return true;
+}

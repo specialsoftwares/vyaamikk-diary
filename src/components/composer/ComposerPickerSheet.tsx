@@ -40,7 +40,6 @@ interface ComposerPickerSheetProps {
       | "purchase_order"
       | "customer_credit"
       | "material_movement",
-    routesToLetterhead?: boolean,
     routesToProfessionalPack?: boolean,
     routesToPurchaseOrder?: boolean,
     routesToCustomerCredit?: boolean
@@ -146,19 +145,19 @@ export function ComposerPickerSheet({
         key: "professional_pack",
         labelKey: COMPOSER_PICKER_PRO_PACK.labelKey,
         subtitleKey: COMPOSER_PICKER_PRO_PACK.subtitleKey,
-        onPress: () => onPickRef.current("professional_pack", false, true),
+        onPress: () => onPickRef.current("professional_pack", true),
       },
       purchase_order: {
         key: "purchase_order",
         labelKey: COMPOSER_PICKER_PURCHASE_ORDER.labelKey,
         subtitleKey: COMPOSER_PICKER_PURCHASE_ORDER.subtitleKey,
-        onPress: () => onPickRef.current("purchase_order", false, false, true),
+        onPress: () => onPickRef.current("purchase_order", false, true),
       },
       customer_credit: {
         key: "customer_credit",
         labelKey: COMPOSER_PICKER_CUSTOMER_CREDIT.labelKey,
         subtitleKey: COMPOSER_PICKER_CUSTOMER_CREDIT.subtitleKey,
-        onPress: () => onPickRef.current("customer_credit", false, false, false, true),
+        onPress: () => onPickRef.current("customer_credit", false, false, true),
       },
       work_team: {
         key: "work_team",
@@ -178,7 +177,7 @@ export function ComposerPickerSheet({
         key: opt.type,
         labelKey: opt.labelKey,
         subtitleKey: opt.subtitleKey,
-        onPress: () => onPickRef.current(opt.type, opt.routesToLetterhead),
+        onPress: () => onPickRef.current(opt.type),
       };
     }
     for (const opt of WORK_TEAM_SUB_OPTIONS) {
@@ -205,7 +204,7 @@ export function ComposerPickerSheet({
       },
       { titleKey: "composer.groups.materialMovement", keys: ["material_movement"] },
       { titleKey: "composer.groups.workTeam", keys: ["work_team"] },
-      { titleKey: "composer.groups.documents", keys: ["letterhead_matter", "professional_pack"] },
+      { titleKey: "composer.groups.documents", keys: ["professional_pack"] },
     ],
     []
   );

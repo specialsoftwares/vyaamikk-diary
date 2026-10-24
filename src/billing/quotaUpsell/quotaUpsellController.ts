@@ -79,7 +79,7 @@ export interface QuotaUpsellController {
 }
 
 function isBusy(state: UpgradeOperationState): boolean {
-  return state === "loading" || state === "pending";
+  return state === "loading" || state === "pending" || state === "verifying";
 }
 
 function durablePending(iap: QuotaUpsellIapSlice): boolean {

@@ -8,6 +8,10 @@
 
 import type { CanonicalSku, IapView, PurchaseFlowResult } from "@/billing/iap/iapTypes";
 import { isSubscriptionPurchaseEntryEnabled } from "@/billing/iap/purchaseEntryGate";
+import {
+  isPlayPurchaseAdmissionToken,
+  type PlayPurchaseAdmissionToken,
+} from "@/billing/iap/purchaseAdmission";
 
 import {
   createQuotaUpsellController,
@@ -36,7 +40,10 @@ export type QuotaUpsellHostRuntime = {
   reconcile(): void;
   snapshot(): QuotaUpsellSnapshot;
   present(request: QuotaUpsellRequest): QuotaUpsellPresentResult;
-  presentManual(session: SyncSessionToken | null): QuotaUpsellPresentResult;
+  presentManual(
+    session: SyncSessionToken | null,
+    admission?: PlayPurchaseAdmissionToken | null
+  ): QuotaUpsellPresentResult;
   dismiss(): void;
   purchase(sku: string): Promise<QuotaUpsellActionResult>;
   restore(): Promise<QuotaUpsellActionResult>;
@@ -81,9 +88,12 @@ export function createQuotaUpsellHostRuntime(
     return result;
   }
 
-  function presentManual(session: SyncSessionToken | null): QuotaUpsellPresentResult {
+  function presentManual(
+    session: SyncSessionToken | null,
+    admission?: PlayPurchaseAdmissionToken | null
+  ): QuotaUpsellPresentResult {
     controller.sync(deps.getIap());
-    if (!isSubscriptionPurchaseEntryEnabled()) {
+    if (!isSubscriptionPurchaseEntryEnabled() && !isPlayPurchaseAdmissionToken(admission)) {
       emit();
       return {
         ok: false,

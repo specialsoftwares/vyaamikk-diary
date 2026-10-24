@@ -12,6 +12,7 @@ import {
   getCatalogEntry,
   subscriptionDescriptionForSku,
   SUBSCRIPTION_CATALOG,
+  GRIN_INCLUDED_IN_EXISTING_PLANS,
 } from "./products";
 import { PLAN_MONTHLY_RECORD_LIMITS, UNLIMITED_RECORDS } from "./types";
 
@@ -83,6 +84,13 @@ assert.equal(PLAN_MONTHLY_RECORD_LIMITS.free, 25);
 assert.equal(PLAN_MONTHLY_RECORD_LIMITS.starter, 100);
 assert.equal(PLAN_MONTHLY_RECORD_LIMITS.professional, UNLIMITED_RECORDS);
 assert.equal(PLAN_MONTHLY_RECORD_LIMITS.business, UNLIMITED_RECORDS);
+
+assert.equal(GRIN_INCLUDED_IN_EXISTING_PLANS, true);
+assert.equal(
+  ALL_CANONICAL_SKUS.some((sku) => sku.includes("grin")),
+  false,
+  "no separate GRIN SKU"
+);
 
 assert.equal(
   subscriptionDescriptionForSku("vyd_professional_yearly"),

@@ -21,12 +21,17 @@ const EXCLUDE = new Set([
   "test:firestore-rules", // emulator suite — separate ci:verify stage
   "test:live-rules-compat", // live-export compatibility emulator — separate ci:verify stage
   "test:storage-rules", // storage emulator suite — separate ci:verify stage
+  "test:letterhead-storage-emulator", // letterhead Storage rules emulator — separate ci:verify stage
+  "test:letterhead-media-rest-emulator", // media-REST joined emulator — separate ci:verify stage
   "test:resolve-or-create-phone-emulator", // emulator suite — separate ci:verify stage
   "test:billing-transaction-emulator", // emulator suite — separate ci:verify stage
   "test:billing-gst-compliance-emulator", // emulator suite — separate ci:verify stage
   "test:billing-google-play-emulator", // emulator suite — separate ci:verify stage
   "test:billing-apple-emulator", // emulator suite — separate ci:verify stage
   "test:billing-maintenance-emulator", // emulator suite — separate ci:verify stage
+  "test:goods-evidence-g1-emulator", // G1 Firestore emulator — separate ci:verify stage
+  "test:goods-evidence-g1-functions-emulator", // isolated Functions+Firestore+Storage+Auth — separate ci:verify stage
+  "test:goods-evidence-g2-emulator", // G2 Firestore+Storage emulator — separate ci:verify stage
   "test:invoice-renderer", // requires services/subscription-invoice-renderer node_modules
   "test:invoice-renderer-build", // npm ci + tsc; run by ci:verify
   "test:invoice-renderer-docker", // docker build; run by ci:verify

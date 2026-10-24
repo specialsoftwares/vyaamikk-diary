@@ -10,6 +10,12 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { AppError } from "@/domain/errors";
 import { createLogger } from "@/utils/logger";
 
+import {
+  assertDispatchedSession,
+  type SyncSessionToken,
+} from "@/sync/syncSessionOwnership";
+
+import { validateWritingMargins } from "./letterheadGeneratedLayout";
 import type { LetterheadConfig, LetterheadRepository } from "./types";
 
 const log = createLogger("letterhead/mock");
@@ -26,24 +32,34 @@ export const mockLetterheadRepository: LetterheadRepository = {
     if (!raw) return null;
     try {
       const parsed = JSON.parse(raw) as LetterheadConfig;
-      if (!parsed.imageDataUri) return null;
+      const hasGenerated =
+        parsed.sourceType === "generated_layout" && Boolean(parsed.generatedLayout);
+      if (!parsed.imageDataUri && !hasGenerated) return null;
       return parsed;
     } catch {
       return null;
     }
   },
 
-  async save(userId, patch) {
+  async save(userId, patch, session?: SyncSessionToken | null) {
     if (!userId) throw new AppError("permission_denied", "Not signed in.");
+    assertDispatchedSession(session, userId);
+    const marginsCheck = validateWritingMargins(patch.margins);
+    if (!marginsCheck.ok) {
+      throw new AppError("save_failed", "Writing area margins are invalid.");
+    }
     const now = Date.now();
     const existing = await this.get(userId);
+    assertDispatchedSession(session, userId);
     const next: LetterheadConfig = {
       ...patch,
       userId,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     };
+    assertDispatchedSession(session, userId);
     await AsyncStorage.setItem(keyFor(userId), JSON.stringify(next));
+    assertDispatchedSession(session, userId);
     log.info("letterhead saved (mock)");
     return next;
   },

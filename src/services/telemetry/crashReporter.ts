@@ -52,6 +52,12 @@ export function setCrashReportingEnabled(enabled: boolean): void {
     const client = getCrashlytics();
     if (!client) return;
     void client.setCrashlyticsCollectionEnabled(enabled).catch(() => {});
+    // Opt-out must also drop the pseudonymous user id (uid prefix) so a
+    // later re-enable or native restart cannot resend it. The consent
+    // toggle and decline paths call only this function, not clearUser().
+    if (!enabled) {
+      void Promise.resolve(client.setUserId("")).catch(() => {});
+    }
   } catch {
     // Never throw from the crash reporter.
   }
@@ -71,16 +77,10 @@ export function recordError(error: Error, context?: string): void {
   }
 }
 
-export function setUserId(uid: string): void {
+export function setUserId(_uid: string): void {
   if (!_enabled) return;
-  try {
-    const client = getCrashlytics();
-    if (!client) return;
-    // Store only a truncated UID — never the full UID in crash reports.
-    void Promise.resolve(client.setUserId(uid.slice(0, 8))).catch(() => {});
-  } catch {
-    // Never throw from the crash reporter.
-  }
+  // Account identifiers are not diagnostic user ids, including a prefix.
+  clearUser();
 }
 
 export function log(message: string): void {

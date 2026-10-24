@@ -10,7 +10,9 @@ import { enqueueSync } from "@/repositories/syncQueueRepository";
 import type { BusinessEntry } from "@/domain/businessEntry";
 import type { CreateBusinessEntryInput, UpdateBusinessEntryInput } from "@/services/diary/types";
 import { mergeBusinessEntryUpdate } from "@/services/diary/mergeEntryUpdate";
+import { queueRecordFollowUpsSync } from "@/services/diary/recordFollowUps";
 import { entryToCreateInput, entryToUpdateInput } from "@/sync/diarySyncIntent";
+import { publishDomainChange } from "@/services/dataChanges/domainChanges";
 
 export type DiaryLocalPersistResult = {
   queueId: string;
@@ -82,7 +84,9 @@ export function persistDiaryCreateIntent(
       },
       { replacePayload: true }
     );
+    queueRecordFollowUpsSync(entry, nextRevision);
   });
+  publishDomainChange(entry.userId, "diary", { effect: "upsert", recordId: entry.id });
   return queueId;
 }
 
@@ -178,6 +182,7 @@ export function persistDiaryUpdateIntent(
           },
       { replacePayload: true }
     );
+    queueRecordFollowUpsSync(entry, nextRevision);
     result = {
       queueId,
       entry,
@@ -188,5 +193,6 @@ export function persistDiaryUpdateIntent(
     };
   });
   if (!result) throw new AppError("unknown", "Failed to persist diary update");
+  publishDomainChange(userId, "diary", { effect: "upsert", recordId: patch.id });
   return result;
 }

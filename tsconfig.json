@@ -19,6 +19,11 @@
     "node_modules",
     "functions",
     "tools/onboarding-ux-harness",
+    "tools/goods-evidence-emulator",
+    "tools/goods-evidence-storage",
+    "tools/grin-interop",
+    "tools/grin-acceptance",
+    "docs/release/proposals",
     "services"
   ]
 }

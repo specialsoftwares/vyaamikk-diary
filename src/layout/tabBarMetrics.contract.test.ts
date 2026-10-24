@@ -13,13 +13,18 @@
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 
 import {
   ANDROID_M3_NAV_BAR_CONTENT_HEIGHT,
   IOS_UITABBAR_CONTENT_HEIGHT,
   TAB_BAR_MIN_BOTTOM_PADDING,
   computeTabBarMetrics,
+  dashboardChromeFrames,
+  glanceRowAfterScroll,
+  glanceStatRowHeight,
+  newRecordFooterHeight,
   tabBarContentHeightFor,
   tabBarFooterClearance,
 } from "@/layout/tabBarMetrics";
@@ -142,13 +147,14 @@ assert.ok(
 // ---------------------------------------------------------------------------
 
 const tabsLayout = readFileSync(join(root, "app/(app)/(tabs)/_layout.tsx"), "utf8");
-assert.match(tabsLayout, /labelVisibilityMode="labeled"/);
-assert.match(tabsLayout, /backgroundColor=\{colors\.surface\}/);
-assert.match(tabsLayout, /tintColor=\{colors\.primary\}/);
-assert.match(
-  tabsLayout,
-  /iconColor=\{\{ default: colors\.textMuted, selected: colors\.primary \}\}/
-);
+const tabBar = readFileSync(join(root, "src/navigation/AppTabBar.tsx"), "utf8");
+assert.match(tabsLayout, /backBehavior="history"/);
+assert.match(tabsLayout, /<AppTabBar/);
+assert.match(tabBar, /selectedTabRouteName\(state\)/);
+assert.match(tabBar, /backgroundColor: colors\.surface/);
+assert.match(tabBar, /focused \? colors\.primary : colors\.textMuted/);
+assert.doesNotMatch(tabsLayout, /unstable-native-tabs/);
+assert.doesNotMatch(tabBar, /allowFontScaling=\{false\}/);
 assert.doesNotMatch(
   tabsLayout,
   /#4338CA/i,
@@ -157,12 +163,26 @@ assert.doesNotMatch(
 assert.doesNotMatch(tabsLayout, /TAB_ACTIVE_TINT/);
 
 const screen = readFileSync(join(root, "src/components/ui/Screen.tsx"), "utf8");
-assert.match(screen, /tabBarFooterClearance\(tabBar\)/);
+const you = readFileSync(join(root, "app/(app)/(tabs)/you.tsx"), "utf8");
 assert.doesNotMatch(
   screen,
-  /tabBar\.height \+ spacing\.md/,
-  "footer clearance must come from tabBarFooterClearance, not inline math"
+  /BottomTabBarHeightContext/,
+  "the tab scene is already above the bar; do not inset the footer by the bar height"
 );
+assert.doesNotMatch(screen, /marginBottom:\s*tabOverlay/);
+assert.match(screen, /minHeight:\s*0/);
+assert.match(screen, /paddingBottom:\s*tabBarInset\s*\?\s*spacing\.sm/);
+assert.doesNotMatch(screen, /position:\s*["']absolute["']/);
+assert.doesNotMatch(
+  screen,
+  /tabBarFooterClearance\(tabBar\)/,
+  "an in-flow footer must not repeat the tab bar height as internal padding"
+);
+assert.doesNotMatch(screen, /tabBar\.height \+ spacing\.md/);
+assert.match(you, /tabBarInset/);
+assert.match(you, /footer=\{addBar\}/);
+assert.doesNotMatch(you, /allowFontScaling=\{false\}/);
+assert.match(tabBar, /BottomTabBarHeightCallbackContext/);
 
 const tabBarAdapter = readFileSync(join(root, "src/layout/tabBar.ts"), "utf8");
 assert.match(tabBarAdapter, /useSafeAreaInsets\(\)/);
@@ -172,5 +192,128 @@ assert.doesNotMatch(
   /=\s*56\b/,
   "the JS-tabs era 56dp constant must not return"
 );
+
+// ---------------------------------------------------------------------------
+// 4. Installed navigator hierarchy. The tab bar is a column sibling after a
+//    flex:1 screen container. absoluteFill is only inside that container.
+// ---------------------------------------------------------------------------
+
+const require = createRequire(import.meta.url);
+const bottomTabsRoot = join(
+  dirname(require.resolve("@react-navigation/bottom-tabs/package.json")),
+  "lib/module/views/BottomTabView.js"
+);
+const bottomTabView = readFileSync(bottomTabsRoot, "utf8");
+const safeAreaCompat = readFileSync(
+  join(bottomTabsRoot, "../../../../../elements/lib/module/SafeAreaProviderCompat.js"),
+  "utf8"
+);
+assert.match(safeAreaCompat, /container:\s*\{\s*flex:\s*1\s*\}/);
+assert.match(
+  bottomTabView,
+  /flexDirection: tabBarPosition === 'left' \|\| tabBarPosition === 'right' \? 'row' : 'column'/
+);
+assert.match(bottomTabView, /screens:\s*\{\s*flex:\s*1,\s*overflow:\s*'hidden'\s*\}/);
+const screensContainerAt = bottomTabView.indexOf("style: styles.screens");
+const sceneFillAt = bottomTabView.indexOf("StyleSheet.absoluteFill");
+const bottomBarSiblingAt = bottomTabView.indexOf(
+  "tabBarPosition === 'bottom' || tabBarPosition === 'right' ? tabBarElement : null"
+);
+assert.ok(screensContainerAt > 0 && sceneFillAt > screensContainerAt);
+assert.ok(bottomBarSiblingAt > sceneFillAt);
+assert.doesNotMatch(tabsLayout, /position:\s*["']absolute["']/);
+assert.doesNotMatch(tabBar, /position:\s*["']absolute["']/);
+assert.match(tabsLayout, /tabBar=\{\(props\) => <AppTabBar/);
+const scrollAt = screen.indexOf("<ScrollView");
+const footerSiblingAt = screen.indexOf("{footer ? (");
+assert.ok(scrollAt > 0 && footerSiblingAt > scrollAt);
+
+// Style tokens the scroll/tap math must keep matching.
+const tile = readFileSync(join(root, "src/components/you/DashboardStatTile.tsx"), "utf8");
+const action = readFileSync(join(root, "src/components/ui/PremiumActionButton.tsx"), "utf8");
+const type = readFileSync(join(root, "src/theme/typography.ts"), "utf8");
+assert.match(tile, /minHeight:\s*108/);
+assert.match(tile, /numberOfLines=\{3\}/);
+assert.match(tile, /paddingVertical:\s*spacing\.md \+ 4/);
+assert.match(you, /flexDirection:\s*"row"/);
+assert.equal(you.split("<DashboardStatTile").length - 1, 3);
+assert.match(type, /titleLg: base\(\{ fontSize: 22, lineHeight: 28/);
+assert.match(type, /micro: base\(\{ fontSize: 11, lineHeight: 14/);
+assert.match(type, /bodyStrong: base\(\{ fontSize: 15, lineHeight: 22/);
+assert.match(action, /paddingVertical: 14/);
+assert.match(action, /minHeight: 52/);
+assert.match(action, /\.\.\.typography\.bodyStrong/);
+
+assert.equal(glanceStatRowHeight(1), 108);
+assert.ok(glanceStatRowHeight(1.3) > 108);
+assert.ok(newRecordFooterHeight(1.3) >= newRecordFooterHeight(1));
+
+for (const fontScale of [1, 1.15, 1.3]) {
+  for (const windowHeight of [640, 800, 900]) {
+    for (const bottomInset of [24, 48]) {
+      const bar = computeTabBarMetrics(bottomInset, "android");
+      for (const contentBeforeRow of [0, 400, 4000]) {
+        const placed = glanceRowAfterScroll({
+          windowHeight,
+          tabBarHeight: bar.height,
+          topInset: 24,
+          fontScale,
+          contentBeforeRow,
+        });
+        assert.equal(
+          placed.fullyAboveFooter,
+          true,
+          `font ${fontScale} window ${windowHeight} inset ${bottomInset} before ${contentBeforeRow}`
+        );
+        assert.ok(placed.rowBottom <= placed.viewport + 0.05);
+        assert.ok(Math.abs(placed.footerTop - (24 + placed.viewport)) < 0.05);
+      }
+    }
+  }
+}
+
+// vc27 device screenshot (465x1024) is supporting evidence for the dead band.
+// It is not a native layout pass. The purple New record control is the
+// 52dp button; the white band under it, before the tab icons, is the bar
+// height subtracted a second time plus the footer's 8dp padding.
+const screenshotPx = { height: 1024, buttonTop: 692, buttonBottom: 756, tabIconsTop: 932 };
+const buttonPx = screenshotPx.buttonBottom - screenshotPx.buttonTop + 1;
+const gapPx = screenshotPx.tabIconsTop - screenshotPx.buttonBottom - 1;
+const dpPerPx = 52 / buttonPx;
+const gapDp = gapPx * dpPerPx;
+const threeButtonBar = computeTabBarMetrics(48, "android");
+assert.equal(threeButtonBar.height, 128);
+assert.ok(
+  Math.abs(gapDp - (threeButtonBar.height + spacing.sm)) < 8,
+  `screenshot dead band ${gapDp.toFixed(1)}dp must match a second ${threeButtonBar.height}dp bar plus footer padding`
+);
+
+const STAT_TILE_MIN_HEIGHT = 108;
+const topInset = 31 * dpPerPx;
+const footerHeight = (buttonPx * dpPerPx) + spacing.md + spacing.sm;
+const windowHeight = screenshotPx.height * dpPerPx;
+const broken = dashboardChromeFrames({
+  windowHeight,
+  tabBarHeight: threeButtonBar.height,
+  topInset,
+  footerHeight,
+  subtractTabBarAgain: true,
+});
+const fixed = dashboardChromeFrames({
+  windowHeight,
+  tabBarHeight: threeButtonBar.height,
+  topInset,
+  footerHeight,
+  subtractTabBarAgain: false,
+});
+assert.equal(broken.deadBand, threeButtonBar.height);
+assert.equal(fixed.deadBand, 0);
+assert.equal(fixed.scrollHeight - broken.scrollHeight, threeButtonBar.height);
+assert.ok(
+  fixed.scrollHeight - broken.scrollHeight >= STAT_TILE_MIN_HEIGHT,
+  "recovering the dead band must reveal the At a glance tile row"
+);
+assert.ok(fixed.footerTop > broken.footerTop);
+assert.ok(fixed.footerTop + footerHeight <= windowHeight - threeButtonBar.height + 0.5);
 
 console.log("tabBarMetrics.contract.test.ts: ok");

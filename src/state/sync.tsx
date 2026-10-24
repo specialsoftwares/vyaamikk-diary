@@ -30,6 +30,7 @@ import {
 } from "@/sync/syncUiPublication";
 import { localEntriesRepository } from "@/repositories/localEntriesRepository";
 import { getActiveBackend } from "@/config/env";
+import { resumePendingFollowUps } from "@/services/diary/recordFollowUps";
 import { runLetterheadStorageMigrationForUser } from "@/services/letterhead/letterheadStorageMigration";
 import { markFirstActionFreeze } from "@/diagnostics/firstActionFreezeDiag";
 import { useAuth } from "@/state/auth";
@@ -245,6 +246,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       void refreshPending();
       void pullFromCloud();
       void flush();
+      void resumePendingFollowUps(user.uid);
       // Policy inside migration skips local-mock; still gate here so we never
       // even schedule Firebase work when the active backend is local-mock.
       if (getActiveBackend() !== "local-mock") {

@@ -4,6 +4,7 @@ import type {
   CreateBusinessEntryInput,
   UpdateBusinessEntryInput,
 } from "@/services/diary/types";
+import { publishDomainChange } from "@/services/dataChanges/domainChanges";
 import { getDiaryRepository } from "@/services/diary";
 import {
   localEntriesRepository,
@@ -311,8 +312,12 @@ async function processQueue(
       }
       const value = dispatched.value;
       if (value.kind === "create" || value.kind === "update") {
+        if (value.ack.applied) {
+          publishDomainChange(userId, "diary", { effect: "upsert", recordId: item.entityId });
+        }
         if (value.ack.latestSynced) synced += 1;
       } else if (value.kind === "delete") {
+        publishDomainChange(userId, "diary", { effect: "delete", recordId: item.entityId });
         synced += 1;
       }
     } catch (e) {

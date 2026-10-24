@@ -1,3 +1,5 @@
+import { DELETION_GRACE_DAYS } from "@/domain/identityLifecycle";
+
 export interface LegalSection {
   title: string;
   paragraphs: string[];
@@ -19,7 +21,7 @@ export const PRIVACY_POLICY_SECTIONS: LegalSection[] = [
       "Profile: name (required for account), optional business name, field of work, designation, email, logo, language.",
       "Business records: diary entries, purchase orders, customer credit/Dukaan records, letterhead matters, professional packs, drafts, and derived insights.",
       "Location: optional foreground GPS footprints when you enable Location Access; Indian PIN codes you enter; no background location in the current app.",
-      "Photos: images you choose for letterhead, cash-paid attachments, or customer photos (where enabled).",
+      "Photos: images you choose for cash-paid attachments or customer photos, and letterhead images already saved in earlier versions.",
       "PDFs: generated on your device; file bytes are not automatically uploaded in the current version.",
       "Device/session: secure session storage, language preference, sync queue, reminder notification IDs.",
     ],
@@ -43,7 +45,7 @@ export const PRIVACY_POLICY_SECTIONS: LegalSection[] = [
   {
     title: "Retention & deletion",
     paragraphs: [
-      "Active data is retained while your account is active. Account deletion starts a 15-day grace period before final erasure steps.",
+      `Active data is retained while your account is active. Account deletion starts a ${DELETION_GRACE_DAYS}-day cancellation window before final erasure of app-controlled account data. This window is not a freeze-only hold.`,
       "Delete your account in Settings → Delete Account & Data, or request deletion at our web page.",
       "Exported or shared PDFs outside the app cannot be withdrawn or deleted by us.",
     ],
@@ -86,7 +88,7 @@ export const TERMS_OF_USE_SECTIONS: LegalSection[] = [
   {
     title: "Your responsibilities",
     paragraphs: [
-      "You are solely responsible for the accuracy, legality, and use of records, PDFs, purchase orders, credit notes, and letterhead content you create.",
+      "You are solely responsible for the accuracy, legality, and use of records, PDFs, purchase orders, credit notes, and letterhead content saved in your account.",
       "You retain ownership of your content and grant us a limited license to host and process it solely to provide the service.",
     ],
   },
@@ -94,7 +96,7 @@ export const TERMS_OF_USE_SECTIONS: LegalSection[] = [
     title: "Feature-specific terms",
     paragraphs: [
       "PDFs and purchase orders are user-generated documents. Dukaan/customer credit is record-keeping only, not lending.",
-      "Business insights and statutory prompts are informational only, not professional advice.",
+      "Business insights, party totals counted on this device, and statutory prompts are not a certified ledger, profit statement, or tax report, and they are not professional advice. Check statutory dates on the official portal or with your adviser.",
     ],
   },
   {

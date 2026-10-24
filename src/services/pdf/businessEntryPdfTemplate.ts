@@ -1,6 +1,11 @@
 import type { BusinessEntry } from "@/domain/businessEntry";
 import type { UserProfile } from "@/domain/types";
 import type { Lang } from "@/i18n/types";
+import type { PreparedReceiptPhoto } from "@/services/attachments/preparedReceiptPhoto";
+import {
+  ReceiptPhotoUnavailableError,
+  planCashVoucherPhoto,
+} from "@/services/attachments/cashVoucherPhotoPlan";
 import { pdfLabel } from "@/services/pdf/pdfLabels";
 import { pdfDocumentHistoryHtml } from "@/services/documentHistory";
 import {
@@ -81,8 +86,20 @@ export function buildBusinessEntryPdfHtml(input: {
   /** Data formatting locale — always en-IN for amounts/dates in PDF body. */
   locale?: "en-IN" | "hi-IN";
   extraCss?: string;
+  /** Short-lived render input. Omit when the entry has no receipt photo. */
+  receiptPhoto?: PreparedReceiptPhoto | null;
+  /** Explicit recovery: emit a valid voucher with the photo left out. */
+  allowCashPhotoOmission?: boolean;
 }): string {
   const { entry, labels, branding, extraCss } = input;
+  let receiptPhoto = input.receiptPhoto ?? null;
+  if (entry.entryType === "business_cash_given") {
+    const plan = planCashVoucherPhoto(entry, receiptPhoto, input.allowCashPhotoOmission === true);
+    if (plan.status === "unavailable") {
+      throw new ReceiptPhotoUnavailableError(plan.reason);
+    }
+    receiptPhoto = plan.photo.status === "none" ? null : plan.photo;
+  }
   const locale = "en-IN";
   const legal = labels.legal ?? defaultPdfLegalFooterLabels();
   const generatedAtMs = Date.now();
@@ -126,7 +143,8 @@ export function buildBusinessEntryPdfHtml(input: {
       detailsSection: labels.detailsSection,
       entryDate: labels.entryDate,
     },
-    locale
+    locale,
+    receiptPhoto
   );
 
   const notesBlock =

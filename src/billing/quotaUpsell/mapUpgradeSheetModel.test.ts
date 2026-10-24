@@ -132,6 +132,107 @@ const readyCatalog: CanonicalSkuAvailability[] = ALL_CANONICAL_SKUS.map((sku) =>
     hostErrorMessage: null,
   });
   assert.equal(pending.purchaseState, "pending");
+  assert.equal(pending.statusNotice, "billing.upgrade.purchasePendingPayment");
+  assert.notEqual(pending.statusNotice, "billing.upgrade.purchaseVerified");
+}
+
+{
+  const verifying = mapUpgradeSheetModel({
+    t,
+    iap: iapView({
+      catalog: readyCatalog,
+      purchaseInFlight: true,
+      lastResult: { kind: "sheet_launched" },
+      pending: {
+        version: 1,
+        uid: "uid-a",
+        platform: "android",
+        canonicalSku: "vyd_starter_monthly",
+        productId: "vyd_starter",
+        stage: "verifying",
+        initiatedAt: 1,
+        updatedAt: 1,
+      },
+    }),
+    subscription: {
+      status: DEFAULT_CLIENT_SUBSCRIPTION,
+      plan: "free",
+      features: featuresForPlan("free"),
+    },
+    hostPurchaseState: "idle",
+    hostRestoreState: "idle",
+    hostErrorMessage: null,
+  });
+  assert.equal(verifying.purchaseState, "verifying");
+  assert.equal(verifying.statusNotice, "billing.upgrade.purchaseVerifying");
+  assert.notEqual(verifying.statusNotice, "billing.upgrade.purchaseVerified");
+}
+
+{
+  const sheetOnly = mapUpgradeSheetModel({
+    t,
+    iap: iapView({
+      catalog: readyCatalog,
+      purchaseInFlight: true,
+      lastResult: { kind: "sheet_launched" },
+    }),
+    subscription: {
+      status: DEFAULT_CLIENT_SUBSCRIPTION,
+      plan: "free",
+      features: featuresForPlan("free"),
+    },
+    hostPurchaseState: "loading",
+    hostRestoreState: "idle",
+    hostErrorMessage: null,
+  });
+  assert.equal(sheetOnly.purchaseState, "loading");
+  assert.equal(sheetOnly.statusNotice, "billing.upgrade.purchaseLoading");
+  assert.notEqual(sheetOnly.statusNotice, "billing.upgrade.purchaseVerified");
+}
+
+{
+  const verified = mapUpgradeSheetModel({
+    t,
+    iap: iapView({
+      catalog: readyCatalog,
+      lastResult: { kind: "verified" },
+    }),
+    subscription: {
+      status: DEFAULT_CLIENT_SUBSCRIPTION,
+      plan: "free",
+      features: featuresForPlan("free"),
+    },
+    hostPurchaseState: "idle",
+    hostRestoreState: "idle",
+    hostErrorMessage: null,
+  });
+  assert.equal(verified.purchaseState, "idle");
+  assert.equal(verified.statusNotice, "billing.upgrade.purchaseVerified");
+  assert.equal(verified.purchaseAvailable, true);
+}
+
+{
+  const failedCatalog = mapUpgradeSheetModel({
+    t,
+    iap: iapView({
+      connected: false,
+      catalog: readyCatalog.map((row) => ({
+        ...row,
+        available: false,
+        displayPrice: null,
+      })),
+    }),
+    subscription: {
+      status: DEFAULT_CLIENT_SUBSCRIPTION,
+      plan: "free",
+      features: featuresForPlan("free"),
+    },
+    hostPurchaseState: "idle",
+    hostRestoreState: "idle",
+    hostErrorMessage: null,
+  });
+  assert.equal(failedCatalog.catalogState, "unavailable");
+  assert.notEqual(failedCatalog.catalogState, "loading");
 }
 
 {

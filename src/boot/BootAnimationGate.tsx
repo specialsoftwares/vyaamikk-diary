@@ -1,8 +1,13 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { useFonts, Barlow_300Light } from "@expo-google-fonts/barlow";
 import { BarlowCondensed_700Bold } from "@expo-google-fonts/barlow-condensed";
 
+import {
+  bootFontsMayBlockProgress,
+  bootMayUnlockWithoutAnimation,
+  bootOverlayShouldMount,
+} from "@/boot/bootCompletion";
 import {
   BOOT_BRAND_MIN_MS,
   BOOT_REDUCED_MOTION_MS,
@@ -20,7 +25,7 @@ const BOOT_HOLD_TIMEOUT_MS = 12_000;
 /** Delay before showing calm hold copy while boot finishes. */
 const BOOT_HOLD_MESSAGE_DELAY_MS = 4_000;
 
-interface BootAnimationGateProps {
+export interface BootAnimationGateProps {
   visible: boolean;
   bootReady: boolean;
   routeResolved: boolean;
@@ -28,6 +33,8 @@ interface BootAnimationGateProps {
   onBlackMidpoint: () => void;
   onExitComplete: () => void;
   onHoldTimeout: () => void;
+  /** Test override only. Production uses useFonts. */
+  fontsLoaded?: boolean;
 }
 
 /**
@@ -43,14 +50,18 @@ export function BootAnimationGate({
   onBlackMidpoint,
   onExitComplete,
   onHoldTimeout,
+  fontsLoaded: fontsLoadedOverride,
 }: BootAnimationGateProps) {
   const reducedMotion = useBootReducedMotion();
-  const [fontsLoaded] = useFonts({
+  const [hookFontsLoaded] = useFonts({
     Barlow_300Light,
     BarlowCondensed_700Bold,
   });
+  const fontsLoaded =
+    typeof fontsLoadedOverride === "boolean" ? fontsLoadedOverride : hookFontsLoaded;
   const [brandMinElapsed, setBrandMinElapsed] = useState(false);
   const [showHoldMessage, setShowHoldMessage] = useState(false);
+  const fontReleasedRef = useRef(false);
 
   const canEnterApp = canReleaseBootToApp({
     brandMinElapsed,
@@ -71,12 +82,6 @@ export function BootAnimationGate({
   }, [visible, reducedMotion]);
 
   useEffect(() => {
-    if (bootError && visible) {
-      onHoldTimeout();
-    }
-  }, [bootError, onHoldTimeout, visible]);
-
-  useEffect(() => {
     if (!brandMinElapsed || canEnterApp) {
       setShowHoldMessage(false);
       return;
@@ -91,9 +96,45 @@ export function BootAnimationGate({
     return () => clearTimeout(timer);
   }, [brandMinElapsed, canEnterApp, onHoldTimeout]);
 
-  if (!visible) return null;
+  useEffect(() => {
+    if (!canEnterApp) return;
+    if (
+      !bootMayUnlockWithoutAnimation({
+        bootReady,
+        destinationPending: routeResolved,
+        routeFailed: bootError,
+      })
+    ) {
+      return;
+    }
+    // A cancelled exit animation must not leave the logo up after boot is ready.
+    // Navigation still happens through onExitComplete, which refuses a destination
+    // if database readiness has already been lost.
+    const timer = setTimeout(() => onExitComplete(), 400);
+    return () => clearTimeout(timer);
+  }, [bootError, bootReady, canEnterApp, onExitComplete, routeResolved]);
 
-  if (!fontsLoaded) {
+  useEffect(() => {
+    if (!visible) {
+      fontReleasedRef.current = false;
+      return;
+    }
+    if (!bootOverlayShouldMount({ visible, bootError })) return;
+    if (canEnterApp && !fontsLoaded && !fontReleasedRef.current) {
+      fontReleasedRef.current = true;
+      onExitComplete();
+    }
+  }, [visible, bootError, canEnterApp, fontsLoaded, onExitComplete]);
+
+  if (!bootOverlayShouldMount({ visible, bootError })) return null;
+
+  if (
+    bootFontsMayBlockProgress({
+      fontsLoaded,
+      canEnterApp,
+      bootError,
+    })
+  ) {
     return <View style={styles.fontHold} />;
   }
 

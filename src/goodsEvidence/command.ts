@@ -4,10 +4,12 @@ import { canonicalJson } from "./canonical";
 import { cloneSnapshot } from "./snapshot";
 import type { Quantity } from "./quantities";
 import type { EwbLink } from "./ewb";
+import type { VerifiedEvidenceResult } from "./ports";
 import type {
   AcknowledgementState,
   BuyerIdentitySnapshot,
   CaptureProvenance,
+  ReportedArrivalPrecision,
   CommercialLinks,
   CustodyState,
   OptionalText,
@@ -23,7 +25,21 @@ export type GoodsCommandType =
   | "recordQc"
   | "dispatchReturn"
   | "correctReturnDispatch"
-  | "voidWithReason";
+  | "voidWithReason"
+  | "recordEwbObservation"
+  | "linkVerifiedEvidence";
+
+export const MUTATION_COMMAND_TYPES = [
+  "amendFields",
+  "recordQc",
+  "dispatchReturn",
+  "correctReturnDispatch",
+  "voidWithReason",
+  "recordEwbObservation",
+  "linkVerifiedEvidence",
+] as const;
+
+export type MutationCommandType = (typeof MUTATION_COMMAND_TYPES)[number];
 
 export interface CommandEnvelope<TBody> {
   commandId: string;
@@ -73,6 +89,8 @@ export interface RegisterGoodsReceiptBody {
   capturedAtClientUtc: string;
   reportedArrivalAt: string;
   reportedArrivalTimeZone: string;
+  /** Optional; absent = legacy opaque timestamp. New clients should set explicitly. */
+  reportedArrivalPrecision?: ReportedArrivalPrecision;
   captureProvenance: CaptureProvenance;
   buyer: BuyerIdentitySnapshot;
   supplier: SupplierSnapshot;
@@ -132,4 +150,24 @@ export interface VoidWithReasonBody {
   reason: string;
   linkedReceiptId: string | null;
   clientObservedAtUtc: string;
+}
+
+export type EwbObservationChannel = "portal" | "movement" | "qc" | "replacement";
+
+export interface RecordEwbObservationBody {
+  receiptId: string;
+  expectedVersion: number;
+  reason: string;
+  clientObservedAtUtc: string;
+  channel: EwbObservationChannel;
+  observation: unknown;
+}
+
+export interface LinkVerifiedEvidenceBody {
+  receiptId: string;
+  expectedVersion: number;
+  reason: string;
+  clientObservedAtUtc: string;
+  /** Team 2 verified result. Adapter persists a link event; it does not hash bytes. */
+  verified: VerifiedEvidenceResult;
 }

@@ -20,6 +20,7 @@ import {
   daysUntilDue,
   generateAllStatutoryDues,
   occurrenceId,
+  type StatutoryDueWindow,
   reminderOffsetForToday,
   snoozeUntilLaterToday,
 } from "./statutoryDeadlineEngine";
@@ -323,6 +324,51 @@ export async function buildStatutoryTabViewModel(
     upcoming,
     dismissed,
     reference: referenceOnly,
+    calendarByDate,
+  };
+}
+
+/**
+ * Calendar dates for the requested window. This does not write reminder rows.
+ * Dismissal changes notification state elsewhere and does not remove the due date.
+ */
+export function buildStatutoryCalendarView(
+  t: TFn,
+  reference: Date = new Date(),
+  window?: StatutoryDueWindow
+): StatutoryTabViewModel {
+  const dues = generateAllStatutoryDues(reference, window);
+  const calendarByDate: Record<string, StatutoryTabItem[]> = {};
+  for (const due of dues) {
+    const template = getStatutoryTemplate(due.templateId);
+    if (!template) continue;
+    const daysLeft = daysUntilDue(due.dueDateMs, reference);
+    const item: StatutoryTabItem = {
+      occurrenceId: `${due.templateId}:${due.dueDateKey}`,
+      templateId: due.templateId,
+      category: template.category,
+      title: translateTemplate(t, due.templateId, "title", template),
+      applicability: translateTemplate(t, due.templateId, "applicability", template),
+      body: translateTemplate(t, due.templateId, "body", template),
+      caution: translateTemplate(t, due.templateId, "caution", template),
+      penaltyNotes: [],
+      dueDateMs: due.dueDateMs,
+      daysLeft,
+      urgency: urgencyGroup(daysLeft),
+      status: "pending",
+      periodLabel: due.periodLabel,
+      periodLine: formatStatutoryPeriodLine(due.periodLabel, t),
+      dueLine: formatStatutoryDueLine(due.dueDateMs, formatEntryDate, t),
+    };
+    const key = due.dueDateKey;
+    calendarByDate[key] = calendarByDate[key] ?? [];
+    calendarByDate[key].push(item);
+  }
+  return {
+    disclaimer: t(STATUTORY_DISCLAIMER_KEY),
+    upcoming: { "1": [], "3": [], "5": [], "7": [], later: [] },
+    dismissed: [],
+    reference: [],
     calendarByDate,
   };
 }

@@ -7,8 +7,6 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
-import { useRouter } from "expo-router";
-
 import { LANDING_FOOTER } from "@/components/landing/landingCopy";
 import { LANDING_COLORS, LANDING_LAYOUT, landingTypography } from "@/components/landing/landingTokens";
 import type { LandingSectionKey } from "@/components/landing/LandingNavBar";
@@ -23,12 +21,11 @@ interface LandingFooterProps {
 }
 
 export function LandingFooter({ onNavigateSection }: LandingFooterProps) {
-  const router = useRouter();
   const { width } = useWindowDimensions();
   const isWide = width >= LANDING_LAYOUT.breakpointTablet;
 
   const openDoc = (doc: "privacy" | "terms") => {
-    router.push({ pathname: "/legal/[doc]", params: { doc } });
+    void openPublicLinkOrExplain(doc);
   };
 
   const openDeletion = () => {

@@ -11,12 +11,15 @@ import type {
 import type { UserProfile } from "@/domain/types";
 import type { Lang } from "@/i18n/types";
 import { buildPdfFileName, type PdfFileNameInput } from "@/services/pdf/pdfFileNames";
-import { cashPaidPhotoAttachment } from "@/services/attachments/cashPaidPhotoService";
+import type { PreparedReceiptPhoto } from "@/services/attachments/preparedReceiptPhoto";
+import type { DocumentRevision } from "@/services/attachments/preparedReceiptPhoto";
+import { planCashVoucherPhoto } from "@/services/attachments/cashVoucherPhotoPlan";
+import { documentRevisionForCashEntry } from "@/services/attachments/cashVoucherRevision";
+import { receiptPhotoEmbedHtml } from "@/services/pdf/businessEntryPdfBodies";
 import { amountInWordsForVoucher } from "@/services/pdf/amountInWords";
 import { pdfIssuerBlock } from "@/services/pdf/pdfComponents";
 import { buildPdfHtmlDocument } from "@/services/pdf/pdfDocumentShell";
 import { formatPdfDate, formatPdfDateTime } from "@/services/pdf/pdfDate";
-import { gujaratiPdfBodyFontCss, gujaratiPdfFontFaceCss } from "@/services/pdf/pdfGujaratiFont";
 import {
   pdfLegalFooterHtml,
   pdfLegalLabelsFromT,
@@ -24,7 +27,6 @@ import {
 } from "@/services/pdf/pdfLegalFooter";
 import { getPdfLabels, pdfLabel } from "@/services/pdf/pdfLabels";
 import { pdfKvRow, pdfSection } from "@/services/pdf/pdfSections";
-import { getUserPdfBranding } from "@/services/pdf/userPdfBranding";
 import { escapeHtml } from "@/utils/escapeHtml";
 import { formatAmount } from "@/utils/formatters/formatAmount";
 import { dayKey } from "@/utils/date";
@@ -43,12 +45,25 @@ export interface GenerateCashPaidVoucherPdfInput {
   mode: CashPaidPdfMode;
   t: (key: string, vars?: Record<string, string | number>) => string;
   uiLang?: Lang;
+  /** When set, the renderer does not fetch. Tests and callers pass this. */
+  preparedPhoto?: PreparedReceiptPhoto;
+  /** Explicit recovery chosen by the caller. Default false. */
+  allowWithoutPhoto?: boolean;
 }
 
-export interface GenerateCashPaidVoucherPdfResult {
-  html: string;
-  fileName: PdfFileNameInput;
-}
+export type GenerateCashPaidVoucherPdfResult =
+  | {
+      status: "ready";
+      html: string;
+      fileName: PdfFileNameInput;
+      documentRevision: DocumentRevision;
+      photoOmitted: boolean;
+    }
+  | {
+      status: "unavailable";
+      reason: Extract<PreparedReceiptPhoto, { status: "unavailable" }>["reason"];
+      recovery: Array<"retry" | "generate_without_photo">;
+    };
 
 function strVal(v: unknown): string | null {
   if (v == null) return null;
@@ -67,36 +82,6 @@ function formatMobileForPdf(mobile: string | null | undefined): string | null {
     return `+91 ${digits.slice(0, 2)} ${digits.slice(2, 6)} ${digits.slice(6)}`;
   }
   return raw;
-}
-
-async function resolvePhotoSrc(
-  entry: BusinessEntry,
-  payload: BusinessCashGivenPayload
-): Promise<string | null> {
-  if (payload.photoAttachmentDownloadUrl?.trim()) {
-    return payload.photoAttachmentDownloadUrl.trim();
-  }
-
-  const attachment = cashPaidPhotoAttachment(entry.attachments);
-  if (attachment?.downloadUrl?.trim()) {
-    return attachment.downloadUrl.trim();
-  }
-  if (attachment?.uri?.trim()) {
-    return attachment.uri.trim();
-  }
-
-  const storagePath =
-    payload.photoAttachmentStoragePath?.trim() || attachment?.storagePath?.trim() || null;
-  if (storagePath) {
-    try {
-      const { getDownloadUrlForPath } = await import("@/services/storage/userStorage");
-      return await getDownloadUrlForPath(storagePath);
-    } catch {
-      return null;
-    }
-  }
-
-  return null;
 }
 
 function signatureBlock(label: string, nameHint: string | null): string {
@@ -160,9 +145,14 @@ const CPV_EXTRA_CSS = `
     margin-top: 8pt;
     text-align: center;
   }
+  .cpv-photo {
+    page-break-inside: avoid;
+  }
   .cpv-photo img {
+    object-fit: contain;
     max-width: 100%;
-    max-height: 180pt;
+    height: auto;
+    page-break-inside: avoid;
     border: 1pt solid #e6e8f0;
     border-radius: 4pt;
   }
@@ -225,14 +215,31 @@ export async function generateCashPaidVoucherPdf(
   const locale = "en-IN";
   const generatedAtMs = Date.now();
   const legal: PdfLegalFooterLabels = pdfLegalLabelsFromT(t);
+  const prepared =
+    input.preparedPhoto ??
+    (await (
+      await import("@/services/attachments/prepareReceiptPhoto")
+    ).prepareReceiptPhoto({
+      uid: entry.userId,
+      entry,
+    }));
+  const plan = planCashVoucherPhoto(entry, prepared, input.allowWithoutPhoto === true);
+  if (plan.status === "unavailable") {
+    return { status: "unavailable", reason: plan.reason, recovery: plan.recovery };
+  }
+
+  const { getUserPdfBranding } = await import("@/services/pdf/userPdfBranding");
   const branding = await getUserPdfBranding(user, { t });
   const paymentDateMs = payload.paymentDate ?? entry.entryDate;
   const cpvSerial = payload.cashPaidVoucherSerial?.trim() || "—";
   const receiverMobile = formatMobileForPdf(payload.receiverMobile ?? payload.contactMobile);
-  const photoSrc = await resolvePhotoSrc(entry, payload);
+  const photoHtml = receiptPhotoEmbedHtml(plan.photo.status === "ready" ? plan.photo : null);
 
   let extraCss = CPV_EXTRA_CSS;
   if (uiLang === "gu") {
+    const { gujaratiPdfFontFaceCss, gujaratiPdfBodyFontCss } = await import(
+      "@/services/pdf/pdfGujaratiFont"
+    );
     const fontFace = await gujaratiPdfFontFaceCss();
     extraCss = `${fontFace}${gujaratiPdfBodyFontCss()}${CPV_EXTRA_CSS}`;
   }
@@ -256,10 +263,10 @@ export async function generateCashPaidVoucherPdf(
     pdfKvRow(labels.siteRef, strVal(payload.siteRef)) +
     pdfKvRow(labels.remarks, strVal(payload.remarks));
 
-  const photoBlock = photoSrc
+  const photoBlock = photoHtml
     ? `<div class="cpv-photo">
         <div class="pdf-section-label">${escapeHtml(labels.photoEvidence)}</div>
-        <img src="${escapeHtml(photoSrc)}" alt=""/>
+        ${photoHtml}
       </div>`
     : "";
 
@@ -316,5 +323,11 @@ export async function generateCashPaidVoucherPdf(
     date: dayKey(paymentDateMs),
   };
 
-  return { html, fileName };
+  return {
+    status: "ready",
+    html,
+    fileName,
+    documentRevision: documentRevisionForCashEntry(entry),
+    photoOmitted: plan.photoOmitted,
+  };
 }

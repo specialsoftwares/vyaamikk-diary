@@ -7,7 +7,7 @@ import type { BusinessEntry } from "@/domain/businessEntry";
 import { Banner } from "@/components/ui";
 import { userFacingMessage } from "@/domain/errors";
 import { getDiaryRepository } from "@/services/diary";
-import { resolveEntryLocationWithFootprint } from "@/services/location/locationFootprintCapture";
+import { preserveAlreadySavedLocation, resolveEntryLocationWithFootprint } from "@/services/location/locationFootprintCapture";
 import { notificationsService } from "@/services/notifications";
 import { useAuth } from "@/state/auth";
 import type { EntryFormValues } from "@/utils/validation";
@@ -90,7 +90,8 @@ export default function EditEntryScreen() {
       const manualLoc = values.locationName?.trim()
         ? { name: values.locationName.trim(), geo: null, gps: null }
         : null;
-      const { location } = await resolveEntryLocationWithFootprint(user.uid, manualLoc);
+      const captured = await resolveEntryLocationWithFootprint(user.uid, manualLoc);
+      const location = preserveAlreadySavedLocation(entry.location, captured.location);
 
       await repo.update(user.uid, {
         id: entry.id,

@@ -11,14 +11,21 @@
 
 import { todayStartMs } from "@/utils/date";
 
-import type { LetterheadDocumentInput } from "./types";
+import {
+  configFromLetterheadSnapshot,
+  freezeLetterheadTemplateSnapshot,
+  parseLetterheadTemplateSnapshot,
+} from "./letterheadTemplateSnapshot";
+import type { LetterheadConfig, LetterheadDocumentInput } from "./types";
 
 export const LETTERHEAD_DRAFT_KIND = "letterhead" as const;
 export const LETTERHEAD_DRAFT_SCOPE = "letterhead_matter" as const;
 
 export function letterheadInputToDraftPayload(
-  input: LetterheadDocumentInput
+  input: LetterheadDocumentInput,
+  template: LetterheadConfig | null
 ): Record<string, unknown> {
+  const snapshot = template ? freezeLetterheadTemplateSnapshot(template) : null;
   return {
     title: input.title ?? "",
     date: input.date ?? todayStartMs(),
@@ -36,7 +43,36 @@ export function letterheadInputToDraftPayload(
     place: input.place ?? "",
     useSignature: Boolean(input.useSignature),
     useStamp: Boolean(input.useStamp),
+    templateSnapshot: snapshot,
+    templateAvailability: snapshot ? "snapshot" : "unavailable",
   };
+}
+
+export type ResolvedDraftLetterhead = {
+  input: LetterheadDocumentInput;
+  /** Null when the original template was not stored. Do not substitute the live template. */
+  preview: LetterheadConfig | null;
+  gap: null | "draft";
+};
+
+export function resolveDraftLetterhead(
+  payload: Record<string, unknown>,
+  live: LetterheadConfig
+): ResolvedDraftLetterhead {
+  const input = draftPayloadToLetterheadInput(payload);
+  const raw = payload.templateSnapshot;
+  const availability = payload.templateAvailability;
+  if (availability === "snapshot" && raw) {
+    const snapshot = parseLetterheadTemplateSnapshot(raw);
+    if (snapshot) {
+      return {
+        input,
+        preview: configFromLetterheadSnapshot(live.userId, snapshot),
+        gap: null,
+      };
+    }
+  }
+  return { input, preview: null, gap: "draft" };
 }
 
 function str(payload: Record<string, unknown>, key: string): string {

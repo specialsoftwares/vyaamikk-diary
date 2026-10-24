@@ -1,0 +1,41 @@
+/**
+ * G2 storage logging: fixed event names and allowlisted primitives only.
+ * No request bodies, filenames, hashes, PDF bytes, or download URLs.
+ */
+
+export type G2LogEvent =
+  | "grin_g2_denied"
+  | "grin_g2_reserved"
+  | "grin_g2_state"
+  | "grin_g2_verified"
+  | "grin_g2_linked"
+  | "grin_g2_orphan";
+
+const ALLOWED_META = new Set(["code", "replayed", "state"]);
+
+export function sanitizeG2Meta(meta: Record<string, unknown> | undefined): Record<string, string | number | boolean> {
+  const out: Record<string, string | number | boolean> = {};
+  if (!meta) return out;
+  for (const key of ALLOWED_META) {
+    const value = meta[key];
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
+export function formatG2Log(event: G2LogEvent, meta?: Record<string, unknown>): string {
+  return JSON.stringify({ event, ...sanitizeG2Meta(meta) });
+}
+
+export function logG2(event: G2LogEvent, meta?: Record<string, unknown>): void {
+  try {
+    const line = formatG2Log(event, meta);
+    if (process.env.GRIN_G2_LOG === "1") {
+      console.log(line);
+    }
+  } catch {
+    // Logging must not change the storage result.
+  }
+}

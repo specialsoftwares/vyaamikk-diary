@@ -110,7 +110,14 @@ export type QuotaLinkedRecordCollection =
   | "entries"
   | "purchaseOrders"
   | "customerCreditRecords"
-  | "professionalPacks";
+  | "professionalPacks"
+  /**
+   * Admin G1 first issuance writes this label onto usageCurrent.
+   * Not a client-writable `users/{uid}/goodsEvidenceReceipts/{id}` collection —
+   * receipts live under goodsEvidenceLedgers. Do not add this token to
+   * firestore.rules `quotaLinkedCollection` (wrong path).
+   */
+  | "goodsEvidenceReceipts";
 
 /**
  * `letterheadDocs` remains on this union only because historical

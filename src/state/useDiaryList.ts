@@ -2,21 +2,22 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { toAppError, userFacingMessage } from "@/domain/errors";
 import type { BusinessEntry, BusinessEntryType } from "@/domain/businessEntry";
-import {
-  getDiaryRepository,
-  type ListDiaryEntriesOptions,
-} from "@/services/diary";
+import { getDiaryRepository } from "@/services/diary";
 import { localEntriesRepository } from "@/repositories/localEntriesRepository";
+import type { DiarySyncBadge } from "@/services/diary/mergeLocalUnsynced";
+import { subscribeDomainChanges } from "@/services/dataChanges/domainChanges";
+import { syncSessionOwnership } from "@/sync/syncSessionOwnership";
+
 import {
-  mergeRemoteWithLocalUnsynced,
-  type DiarySyncBadge,
-} from "@/services/diary/mergeLocalUnsynced";
-import { entrySearchBlob } from "@/utils/businessEntry/display";
+  diaryQueryKey,
+  refreshDiaryList,
+  sessionStillOwns,
+  type DiaryListQuery,
+} from "./diaryListLoad";
 
 interface DiaryListState {
   entries: BusinessEntry[];
   badgeById: Record<string, DiarySyncBadge>;
-  /** True only until the first fetch for this hook instance completes. */
   initialLoading: boolean;
   refreshing: boolean;
   error: string | null;
@@ -29,24 +30,13 @@ interface UseDiaryListResult extends DiaryListState {
   reload: () => Promise<void>;
 }
 
-function applyClientFilters(
-  entries: BusinessEntry[],
-  options: ListDiaryEntriesOptions
-): BusinessEntry[] {
-  let out = entries;
-  if (!options.includeDeleted) out = out.filter((e) => !e.deletedAt);
-  if (options.entryType) out = out.filter((e) => e.entryType === options.entryType);
-  if (options.upcomingOnly) {
-    const now = Date.now();
-    out = out.filter((e) => e.reminder && e.reminder.at > now);
-  }
-  if (options.search) {
-    const needle = options.search.trim().toLowerCase();
-    if (needle) out = out.filter((e) => entrySearchBlob(e).includes(needle));
-  }
-  if (options.limit) out = out.slice(0, options.limit);
-  return out;
-}
+const emptyState = (userId: string | null): DiaryListState => ({
+  entries: [],
+  badgeById: {},
+  initialLoading: Boolean(userId),
+  refreshing: false,
+  error: null,
+});
 
 export function useDiaryList(
   userId: string | null,
@@ -59,100 +49,122 @@ export function useDiaryList(
 ): UseDiaryListResult {
   const hasLoadedOnceRef = useRef(false);
   const userIdRef = useRef(userId);
+  const remoteRef = useRef<BusinessEntry[]>([]);
+  const removedRef = useRef(new Set<string>());
+  const loadGenRef = useRef(0);
+  const queryRef = useRef<DiaryListQuery>(options);
+  queryRef.current = options;
+  const queryKey = diaryQueryKey(options);
+  const queryKeyRef = useRef(queryKey);
+  queryKeyRef.current = queryKey;
 
-  const [state, setState] = useState<DiaryListState>({
-    entries: [],
-    badgeById: {},
-    initialLoading: Boolean(userId),
-    refreshing: false,
-    error: null,
-  });
+  const [state, setState] = useState<DiaryListState>(() => emptyState(userId));
 
-  useEffect(() => {
-    if (userIdRef.current === userId) return;
+  const live = syncSessionOwnership.capture();
+  const fenceKey = live ? `${live.uid}#${live.generation}` : `open:${userId ?? ""}`;
+  const fenceRef = useRef(fenceKey);
+  if (fenceRef.current !== fenceKey || userIdRef.current !== userId) {
+    fenceRef.current = fenceKey;
     userIdRef.current = userId;
     hasLoadedOnceRef.current = false;
-    setState({
-      entries: [],
-      badgeById: {},
-      initialLoading: Boolean(userId),
-      refreshing: false,
-      error: null,
-    });
-  }, [userId]);
+    remoteRef.current = [];
+    removedRef.current = new Set();
+    if (state.entries.length > 0 || state.error || state.initialLoading !== Boolean(userId)) {
+      setState(emptyState(userId));
+    }
+  }
 
-  const fetchOnce = useCallback(
-    async (mode: "mount" | "refresh") => {
-      if (!userId) {
+  const run = useCallback(
+    async (includeRemote: boolean) => {
+      const generation = ++loadGenRef.current;
+      const owner = userIdRef.current;
+      if (!owner) {
         hasLoadedOnceRef.current = false;
-        setState({
-          entries: [],
-          badgeById: {},
-          initialLoading: false,
-          refreshing: false,
-          error: null,
-        });
+        remoteRef.current = [];
+        setState(emptyState(null));
         return;
       }
-
-      const showInitial = mode === "mount" && !hasLoadedOnceRef.current;
-      setState((s) => ({
-        ...s,
-        initialLoading: showInitial,
-        refreshing: mode === "refresh" && hasLoadedOnceRef.current,
+      const admitted = syncSessionOwnership.capture();
+      const sessionGeneration = admitted && admitted.uid === owner ? admitted.generation : null;
+      const keyAtStart = queryKeyRef.current;
+      setState((current) => ({
+        ...current,
+        initialLoading: !hasLoadedOnceRef.current,
+        refreshing: includeRemote && hasLoadedOnceRef.current,
         error: null,
       }));
-
-      const repoOpts: ListDiaryEntriesOptions = {
-        search: options.search,
-        entryType: options.entryType ?? null,
-        upcomingOnly: options.upcomingOnly,
-        limit: options.limit,
-      };
-
-      let remote: BusinessEntry[] = [];
-      let cloudError: unknown = null;
       try {
-        remote = await getDiaryRepository().list(userId, {
-          ...repoOpts,
-          limit: undefined,
+        const result = await refreshDiaryList({
+          userId: owner,
+          query: { ...queryRef.current },
+          generation: sessionGeneration,
+          removedIds: removedRef.current,
+          previousRemote: remoteRef.current,
+          includeRemote,
+          readLocal: (id) => localEntriesRepository.listUnsyncedRecords(id),
+          readRemote: (id) =>
+            getDiaryRepository().list(id, {
+              search: queryRef.current.search,
+              entryType: queryRef.current.entryType ?? null,
+              upcomingOnly: queryRef.current.upcomingOnly,
+            }),
+          stillCurrent: () =>
+            generation === loadGenRef.current &&
+            userIdRef.current === owner &&
+            queryKeyRef.current === keyAtStart &&
+            sessionStillOwns(owner, sessionGeneration),
+          onPublish: (published) => {
+            if (generation !== loadGenRef.current || userIdRef.current !== owner) return;
+            if (queryKeyRef.current !== keyAtStart) return;
+            if (!sessionStillOwns(owner, sessionGeneration)) return;
+            hasLoadedOnceRef.current = true;
+            setState({
+              entries: published.entries,
+              badgeById: published.badgeById,
+              initialLoading: false,
+              refreshing: false,
+              error: null,
+            });
+          },
         });
-      } catch (e) {
-        cloudError = e;
-      }
-
-      try {
-        const localUnsynced = await localEntriesRepository.listUnsyncedRecords(userId);
-        const merged = mergeRemoteWithLocalUnsynced(remote, localUnsynced);
-        const entries = applyClientFilters(merged.entries, repoOpts);
+        if (!result.stale && includeRemote) remoteRef.current = result.remote;
+      } catch (error) {
+        if (generation !== loadGenRef.current || userIdRef.current !== owner) return;
+        if (!sessionStillOwns(owner, sessionGeneration)) return;
         hasLoadedOnceRef.current = true;
-        setState({
-          entries,
-          badgeById: merged.badgeById,
+        setState((current) => ({
+          ...current,
           initialLoading: false,
           refreshing: false,
-          error: entries.length === 0 && cloudError ? userFacingMessage(toAppError(cloudError)) : null,
-        });
-      } catch (e) {
-        hasLoadedOnceRef.current = true;
-        setState({
-          entries: [],
-          badgeById: {},
-          initialLoading: false,
-          refreshing: false,
-          error: userFacingMessage(toAppError(e)),
-        });
+          error:
+            current.entries.length === 0 ? userFacingMessage(toAppError(error)) : current.error,
+        }));
       }
     },
-    [userId, options.search, options.entryType, options.upcomingOnly, options.limit]
+    []
   );
 
   useEffect(() => {
-    void fetchOnce("mount");
-  }, [fetchOnce]);
+    void run(true);
+  }, [run, userId, queryKey]);
 
-  const refresh = useCallback(() => fetchOnce("refresh"), [fetchOnce]);
-  const reload = useCallback(() => fetchOnce("refresh"), [fetchOnce]);
+  useEffect(() => {
+    if (!userId) return;
+    return subscribeDomainChanges((change) => {
+      if (change.ownerUid !== userId || change.source !== "diary") return;
+      if (change.effect === "delete" && change.recordId) {
+        removedRef.current.add(change.recordId);
+        remoteRef.current = remoteRef.current.filter((entry) => entry.id !== change.recordId);
+      }
+      if (change.effect === "upsert" && change.recordId) {
+        removedRef.current.delete(change.recordId);
+      }
+      void run(false);
+    });
+  }, [run, userId]);
+
+  const refresh = useCallback(() => run(true), [run]);
+  const reload = useCallback(() => run(true), [run]);
 
   return {
     ...state,

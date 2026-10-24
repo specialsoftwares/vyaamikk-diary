@@ -12,6 +12,27 @@ import {
 } from "@/services/pdf/cashPaidPdfService";
 import { buildPdfFileName } from "@/services/pdf/pdfFileNames";
 import { pdfService } from "@/services/pdf/pdfService";
+import { markPdfRevisionReady } from "@/services/pdf/pdfRevisionGate";
+
+function askPhotoRecovery(
+  t: (key: string, vars?: Record<string, string | number>) => string
+): Promise<"retry" | "without_photo" | "cancel"> {
+  return new Promise((resolve) => {
+    Alert.alert(
+      t("composer.cashPaidPdfPhotoUnavailable"),
+      t("composer.cashPaidPdfNotReady"),
+      [
+        { text: t("composer.cashPaidPdfRetry"), onPress: () => resolve("retry") },
+        {
+          text: t("composer.cashPaidPdfWithoutPhoto"),
+          onPress: () => resolve("without_photo"),
+        },
+        { text: t("common.cancel"), style: "cancel", onPress: () => resolve("cancel") },
+      ],
+      { cancelable: true, onDismiss: () => resolve("cancel") }
+    );
+  });
+}
 
 function pickCashPaidPdfMode(): Promise<CashPaidPdfMode | null> {
   return new Promise((resolve) => {
@@ -77,19 +98,33 @@ export async function exportCashPaidPdf(
     workingEntry = { ...entry, payload: nextPayload };
   }
 
-  const { html, fileName } = await generateCashPaidVoucherPdf({
-    entry: workingEntry,
-    user: options.user,
-    mode,
-    t: options.t,
-    uiLang: options.uiLang,
-  });
+  let allowWithoutPhoto = false;
+  let rendered: Awaited<ReturnType<typeof generateCashPaidVoucherPdf>> | null = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    rendered = await generateCashPaidVoucherPdf({
+      entry: workingEntry,
+      user: options.user,
+      mode,
+      t: options.t,
+      uiLang: options.uiLang,
+      allowWithoutPhoto,
+    });
+    if (rendered.status === "ready") break;
+    const choice = await askPhotoRecovery(options.t);
+    if (choice === "cancel") return entry;
+    allowWithoutPhoto = choice === "without_photo";
+  }
+  if (!rendered || rendered.status !== "ready") return entry;
 
+  const { html, fileName } = rendered;
   const pdf = await pdfService.generate({
     html,
     fileNameHint: buildPdfFileName(fileName).replace(/\.pdf$/, ""),
     fileName,
   });
+  if (!rendered.photoOmitted) {
+    markPdfRevisionReady(workingEntry.id, rendered.documentRevision);
+  }
   const withPdf = mergeEntryPdfGeneration(workingEntry, pdf.uri);
   const saved = await getDiaryRepository().update(userId, {
     id: entry.id,

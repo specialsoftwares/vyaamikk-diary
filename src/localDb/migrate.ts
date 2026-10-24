@@ -188,6 +188,22 @@ export function migrateToV8(db: Db): void {
   }
 }
 
+/** Additive follow-up queue. Does not bump DB_VERSION. */
+export function ensureRecordFollowUpsTable(db: Db): void {
+  db.execSync(`
+    CREATE TABLE IF NOT EXISTS record_followups (
+      id TEXT PRIMARY KEY NOT NULL,
+      user_id TEXT NOT NULL,
+      record_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      source_revision INTEGER NOT NULL,
+      attachment_revision TEXT NOT NULL,
+      status TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    )
+  `);
+}
+
 export function migrateToV9(db: Db): void {
   if (!tableHasColumn(db, "entries_local", "origin_revision")) {
     db.execSync(`ALTER TABLE entries_local ADD COLUMN origin_revision INTEGER NOT NULL DEFAULT 0`);

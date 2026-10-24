@@ -1,8 +1,7 @@
 import React from "react";
 import { LocaleUiText } from "@/components/ui/LocaleUiText";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { useRouter } from "expo-router";
-
+import { openPublicLinkOrExplain } from "@/config/publicLinks";
 import { useT } from "@/i18n";
 import { radius, spacing, typography, useThemedStyles } from "@/theme";
 
@@ -10,7 +9,6 @@ interface ProfilePolicyGuidanceCardProps {}
 
 export function ProfilePolicyGuidanceCard(_props: ProfilePolicyGuidanceCardProps) {
   const t = useT();
-  const router = useRouter();
   const styles = useThemedStyles((c) =>
     StyleSheet.create({
       card: {
@@ -30,7 +28,7 @@ export function ProfilePolicyGuidanceCard(_props: ProfilePolicyGuidanceCardProps
   );
 
   const openPrivacy = () => {
-    router.push({ pathname: "/legal/[doc]", params: { doc: "privacy" } });
+    void openPublicLinkOrExplain("privacy");
   };
 
   return (
@@ -43,7 +41,7 @@ export function ProfilePolicyGuidanceCard(_props: ProfilePolicyGuidanceCardProps
       <LocaleUiText style={styles.bullet}>• {t("profilePolicy.fieldOfWorkRecommendation")}</LocaleUiText>
       <View style={styles.links}>
         <Pressable
-          onPress={() => router.push({ pathname: "/legal/[doc]", params: { doc: "terms" } })}
+          onPress={() => void openPublicLinkOrExplain("terms")}
           accessibilityRole="link"
         >
           <LocaleUiText style={styles.link}>{t("legal.linkTerms")}</LocaleUiText>
