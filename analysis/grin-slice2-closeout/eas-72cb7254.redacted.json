@@ -1,0 +1,30 @@
+{
+  "id": "72cb7254-0be9-4f92-a514-dbfab2b1150d",
+  "status": "FINISHED",
+  "platform": "ANDROID",
+  "distribution": "STORE",
+  "buildProfile": "production",
+  "sdkVersion": "54.0.0",
+  "appVersion": "1.0.0",
+  "appBuildVersion": "22",
+  "appIdentifier": "com.specialsoftwares.vyaamikkdiary",
+  "gitCommitHash": "0da2f58970f23c7ce6cbefae6efffd49c731f44b",
+  "gitCommitMessage": "fix(legal): set policy effective date to 27 July 2026",
+  "message": "versionCode 22 — R8 minify and resource shrinking",
+  "fingerprint": {
+    "id": "01a0cd67-5810-728d-bc50-b9897bda16c4",
+    "hash": "4b3882e7447e522a1476b46142b980a15e996548"
+  },
+  "artifactIdentity": {
+    "applicationArchivePath": "expo.dev/artifacts/eas/BwNnDnKOfPL56ButCthA-pB606kOzM2UV7Fg-2stHsU.aab",
+    "contentHash": "NOT_IN_EAS_CLI_JSON"
+  },
+  "isGitWorkingTreeDirty": "ABSENT_FROM_eas_build_view_json",
+  "lockfile": "ABSENT_FROM_eas_build_view_json",
+  "bundledClientFlags": "ABSENT_FROM_eas_build_view_json",
+  "createdAt": "2026-09-23T08:34:57.096Z",
+  "completedAt": "2026-09-23T08:52:07.074Z",
+  "app": { "slug": "vyaamikk-diary", "owner": "vydspecial2026" },
+  "initiatingActorDisplayName": "vydspecial2026",
+  "note": "logFiles URLs omitted (credential-bearing). AAB not downloaded this task."
+}
