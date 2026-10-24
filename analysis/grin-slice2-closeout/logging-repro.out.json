@@ -1,0 +1,120 @@
+{
+  "executor": "Cursor ran this experiment against worktree source via tsx. Independent reviewer must re-run logging-repro.ts to reproduce.",
+  "sourceFiles": [
+    "src/utils/logger.ts",
+    "src/services/telemetry/crashReporter.ts",
+    "src/startup/RootErrorBoundary.tsx (extracted componentDidCatch only)"
+  ],
+  "envIsProduction": true,
+  "rows": [
+    {
+      "id": "L1_email_in_message",
+      "observed": true,
+      "detail": "console.error retained synthetic email=true"
+    },
+    {
+      "id": "L1_email_key",
+      "observed": true,
+      "detail": "structured email key is not in SENSITIVE_KEY"
+    },
+    {
+      "id": "L1_phone_masked",
+      "observed": true,
+      "detail": "phone masking blob=[\"[security-repro]\",\"save failed for alice.reviewer@example.invalid\",{\"email\":\"alice.reviewer@example.invalid\",\"phone\":\"+91***10\"}]"
+    },
+    {
+      "id": "L2_nested_email",
+      "observed": true,
+      "detail": "nested email retained=true"
+    },
+    {
+      "id": "L2_token_redacted",
+      "observed": true,
+      "detail": "token key redacted"
+    },
+    {
+      "id": "L2_document_key",
+      "observed": true,
+      "detail": "non-sensitive key document retained"
+    },
+    {
+      "id": "L3_url_query",
+      "observed": true,
+      "detail": "URL query on non-sensitive key href is not stripped"
+    },
+    {
+      "id": "L4_cyclic",
+      "observed": true,
+      "detail": "cyclic payload did not throw (depth cap)"
+    },
+    {
+      "id": "L5_html_key",
+      "observed": true,
+      "detail": "html key redacted"
+    },
+    {
+      "id": "L6_pdf_data",
+      "observed": true,
+      "detail": "PDF-like DATA string redacted by looksLikePdfHtml"
+    },
+    {
+      "id": "L6_pdf_message",
+      "observed": true,
+      "detail": "PDF-like content in the message argument is not sanitized"
+    },
+    {
+      "id": "L7_oversized",
+      "observed": false,
+      "detail": "non-html strings are not size-capped by logger sanitize (pdfSafeLog caps at 4000)"
+    },
+    {
+      "id": "L8_error_object_email",
+      "observed": true,
+      "detail": "enumerable Error.customData.email retained=true; Error.message enumerable=false"
+    },
+    {
+      "id": "C0_disabled",
+      "observed": true,
+      "detail": "disabled sink size=0"
+    },
+    {
+      "id": "C1_enabled_count",
+      "observed": true,
+      "detail": "recordError count=1"
+    },
+    {
+      "id": "C1_original_error",
+      "observed": true,
+      "detail": "enabled Crashlytics received original Error.message with synthetic email"
+    },
+    {
+      "id": "C2_wrapped",
+      "observed": true,
+      "detail": "wrapped Error.message forwarded; cause object is not walked by recordError"
+    },
+    {
+      "id": "B1_console_email",
+      "observed": true,
+      "detail": "extracted componentDidCatch console kept email=true"
+    },
+    {
+      "id": "B2_prefix",
+      "observed": true,
+      "detail": "used actual source console prefix"
+    },
+    {
+      "id": "B3_forwards_error",
+      "observed": true,
+      "detail": "ErrorBoundary path forwarded the original Error to recordError after consent"
+    }
+  ],
+  "crashSinkKinds": [
+    "setCrashlyticsCollectionEnabled",
+    "log",
+    "recordError",
+    "log",
+    "recordError",
+    "log",
+    "recordError"
+  ]
+}

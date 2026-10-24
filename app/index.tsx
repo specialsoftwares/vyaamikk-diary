@@ -3,6 +3,7 @@ import { StyleSheet, View } from "react-native";
 import { useRouter, type Href } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 
+import { BootAnimationGate } from "@/boot/BootAnimationGate";
 import { BootDraftContinuationSheet } from "@/boot/BootDraftContinuationSheet";
 import { markBootNavigationSettled } from "@/boot/bootGate";
 import {
@@ -11,7 +12,12 @@ import {
   type BootDestination,
 } from "@/boot/resolveBootRoute";
 import { getAuthEntryHref } from "@/config/authWrapper";
-import { BRAND_SURFACE } from "@/config/brandMotion";
+import {
+  BOOT_ANIMATION_MS,
+  BOOT_REDUCED_MOTION_MS,
+  BRAND_SURFACE,
+} from "@/config/brandMotion";
+import { useBootReducedMotion } from "@/components/boot/VyaamikkBootAnimation";
 import { LocalDbErrorScreen } from "@/components/sync/LocalDbErrorScreen";
 import { activeRouteRepository } from "@/repositories/activeRouteRepository";
 import { snoozeBootDraftPrompt } from "@/services/drafts/draftBootSnooze";
@@ -21,20 +27,28 @@ import { useLocalDb } from "@/state/localDb";
 type BootPhase = "preparing" | "routing";
 
 /**
- * Boot: local DB → auth onboarding gates → route / optional draft continuation.
- * Native splash stays up until the destination is applied. No construction-grid
- * choreography and no artificial brand-minimum delay.
+ * Boot: ledger open animation, then local DB → auth gates → route.
+ * Native splash hides as soon as this view is up so the launcher mark
+ * cannot cover the animation. Routing rules are unchanged.
  */
 export default function BootScreen() {
   const { status, justCreated, user } = useAuth();
   const { status: dbStatus, error: dbError } = useLocalDb();
   const router = useRouter();
+  const reducedMotion = useBootReducedMotion();
   const [phase, setPhase] = useState<BootPhase>("preparing");
   const [continuation, setContinuation] =
     useState<BootComposerDraftContinuation | null>(null);
   const [sheetVisible, setSheetVisible] = useState(false);
+  const [destinationReady, setDestinationReady] = useState(false);
+  const [sequenceHoldDone, setSequenceHoldDone] = useState(false);
+  const [animationVisible, setAnimationVisible] = useState(true);
   const routingStartedRef = useRef(false);
+  const navigatedRef = useRef(false);
   const pendingDestinationRef = useRef<BootDestination | null>(null);
+
+  const bootReady = dbStatus === "ready" && status !== "loading";
+  const routeResolved = destinationReady && sequenceHoldDone;
 
   const finishBootNavigation = useCallback(
     (href: Href) => {
@@ -58,7 +72,10 @@ export default function BootScreen() {
     [finishBootNavigation]
   );
 
-  const releaseBootToApp = useCallback(() => {
+  const completeBoot = useCallback(() => {
+    if (navigatedRef.current) return;
+    navigatedRef.current = true;
+    setAnimationVisible(false);
     const dest = pendingDestinationRef.current;
     if (dest) {
       applyDestination(dest);
@@ -72,10 +89,14 @@ export default function BootScreen() {
   }, [applyDestination, finishBootNavigation, status, user]);
 
   useEffect(() => {
-    if (dbStatus === "failed") {
-      void SplashScreen.hideAsync().catch(() => {});
-    }
-  }, [dbStatus]);
+    void SplashScreen.hideAsync().catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const ms = reducedMotion ? BOOT_REDUCED_MOTION_MS : BOOT_ANIMATION_MS;
+    const timer = setTimeout(() => setSequenceHoldDone(true), ms);
+    return () => clearTimeout(timer);
+  }, [reducedMotion]);
 
   useEffect(() => {
     if (dbStatus !== "ready") return;
@@ -100,22 +121,22 @@ export default function BootScreen() {
       if (cancelled) return;
 
       pendingDestinationRef.current = destination;
-      applyDestination(destination);
+      setDestinationReady(true);
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [phase, dbStatus, status, justCreated, user, applyDestination]);
+  }, [phase, dbStatus, status, justCreated, user]);
 
-  /** Failsafe if route resolution never settles — not an aesthetic delay. */
+  /** Failsafe if the gate never finishes — not an aesthetic delay. */
   useEffect(() => {
     if (phase !== "routing" || sheetVisible) return;
     const timer = setTimeout(() => {
-      releaseBootToApp();
+      completeBoot();
     }, 12_000);
     return () => clearTimeout(timer);
-  }, [phase, sheetVisible, releaseBootToApp]);
+  }, [phase, sheetVisible, completeBoot]);
 
   const handleContinueDraft = useCallback(() => {
     if (!continuation) return;
@@ -145,6 +166,15 @@ export default function BootScreen() {
   return (
     <>
       <View style={styles.hold} />
+      <BootAnimationGate
+        visible={animationVisible}
+        bootReady={bootReady}
+        routeResolved={routeResolved}
+        bootError={false}
+        onBlackMidpoint={() => undefined}
+        onExitComplete={completeBoot}
+        onHoldTimeout={completeBoot}
+      />
       <BootDraftContinuationSheet
         visible={sheetVisible}
         continuation={continuation}
