@@ -8,7 +8,11 @@ import { resolve } from "node:path";
 import { assertFails, initializeTestEnvironment, type RulesTestEnvironment } from "@firebase/rules-unit-testing";
 import { deleteDoc, doc, getDoc, setDoc, updateDoc, type Firestore } from "firebase/firestore";
 
-import { retireJsAuthBridge } from "@/services/auth/authSessionFence";
+import { noteNativeAuthIdentity, retireJsAuthBridge } from "@/services/auth/authSessionFence";
+import { AppError } from "@/domain/errors";
+import { resetDomainChangesForTests, subscribeDomainChanges } from "@/services/dataChanges/domainChanges";
+import { publishAfterCreditCommit } from "./publishAfterCreditCommit";
+import { issuedSessionError, RevisionUnknown, revisionCommitRuntime } from "@/services/privacy/expectedRevisionCommit";
 import { openContent, sealContent } from "../../../functions/src/privacy/contentEncryption";
 import { sealedBusinessCloud } from "@/services/privacy/businessCloudSeal";
 import { buildNewRecord } from "./shared";
@@ -17,7 +21,6 @@ import {
   closeCustomerCreditFullyPaidOnDb,
   mutateCustomerCreditOnDb,
 } from "./recordMutations";
-import { revisionCommitRuntime } from "@/services/privacy/expectedRevisionCommit";
 import type { CustomerCreditRecord } from "@/domain/customerCredit";
 
 const PROJECT_ID = "vyaamikk-diary-credit-revision-test";
@@ -314,6 +317,127 @@ async function main() {
   } finally {
     revisionCommitRuntime.writeBatch = originalBatch;
   }
+
+  function lostBatch() {
+    const original = revisionCommitRuntime.writeBatch;
+    let lost = 0;
+    revisionCommitRuntime.writeBatch = ((firestore: Firestore) => {
+      const batch = original(firestore);
+      const commit = batch.commit.bind(batch);
+      batch.commit = async () => {
+        lost += 1;
+        await commit();
+        if (lost === 1) throw new Error("ack_lost");
+      };
+      return batch;
+    }) as typeof original;
+    return {
+      lost: () => lost,
+      restore: () => {
+        revisionCommitRuntime.writeBatch = original;
+      },
+    };
+  }
+
+  const ownerBase = await seed("cr_owner", at);
+  const ownerBatch = lostBatch();
+  resetDomainChangesForTests();
+  let published = 0;
+  const stopPublish = subscribeDomainChanges(() => {
+    published += 1;
+  });
+  let ownerError: unknown;
+  try {
+    await publishAfterCreditCommit(uid, "cr_owner", () => addCustomerCreditPaymentOnDb(db(), uid, "cr_owner", {
+      amount: 10, paidDate: at, mode: "cash", clientPaymentId: "pay_owner",
+    }, parse(ownerBase), at + 70, {
+      ...codec("cr_owner", { n: 0 }),
+      restoreRaw: async (raw) => {
+        const opened = await codec("cr_owner", { n: 0 }).restoreRaw(raw);
+        const seal = raw.contentSeal as { revision?: number } | undefined;
+        if (seal) {
+          retireJsAuthBridge();
+          noteNativeAuthIdentity(uid);
+        }
+        return opened;
+      },
+    }));
+  } catch (error) {
+    ownerError = error;
+  }
+  ownerBatch.restore();
+  const ownerIds = await paymentsOf("cr_owner", ownerBase);
+  stopPublish();
+  check(
+    "generation change during reconciliation decryption does not return the old owner record",
+    ownerIds.length === 1 &&
+      published === 0 &&
+      (ownerError as AppError).details?.reason === "session_changed" &&
+      (ownerError as AppError).details?.outcome === "unknown" &&
+      (ownerError as AppError).details?.submitted === true,
+    `ids=${ownerIds.join(",")} published=${published} error=${String(ownerError)}`
+  );
+
+  const readBase = await seed("cr_read", at);
+  const readBatch = lostBatch();
+  const originalGet = revisionCommitRuntime.getDoc;
+  let reconcileReads = 0;
+  revisionCommitRuntime.getDoc = (async (ref: never) => {
+    const snap = await originalGet(ref);
+    reconcileReads += 1;
+    if (reconcileReads === 2) {
+      retireJsAuthBridge();
+      noteNativeAuthIdentity(uid);
+    }
+    return snap;
+  }) as typeof originalGet;
+  let readError: unknown;
+  try {
+    await addCustomerCreditPaymentOnDb(db(), uid, "cr_read", {
+      amount: 10, paidDate: at, mode: "cash", clientPaymentId: "pay_read",
+    }, parse(readBase), at + 80, codec("cr_read", { n: 0 }));
+  } catch (error) {
+    readError = error;
+  } finally {
+    revisionCommitRuntime.getDoc = originalGet;
+    readBatch.restore();
+  }
+  const readIds = await paymentsOf("cr_read", readBase);
+  check(
+    "generation change during the reconciliation read does not return the old owner record",
+    readIds.length === 1 &&
+      (readError as AppError).details?.reason === "session_changed" &&
+      (readError as AppError).details?.outcome === "unknown" &&
+      (readError as AppError).details?.submitted === true,
+    `ids=${readIds.join(",")} reads=${reconcileReads} error=${String(readError)}`
+  );
+
+  const swallowedBase = await seed("cr_swallow", at);
+  const swallowedBatch = lostBatch();
+  let swallowed: unknown;
+  try {
+    await addCustomerCreditPaymentOnDb(db(), uid, "cr_swallow", {
+      amount: 10, paidDate: at, mode: "cash", clientPaymentId: "pay_swallow",
+    }, parse(swallowedBase), at + 90, {
+      ...codec("cr_swallow", { n: 0 }),
+      restoreRaw: async (raw) => {
+        if (raw.contentSeal) throw issuedSessionError("unknown");
+        return raw;
+      },
+    });
+  } catch (error) {
+    swallowed = error;
+  } finally {
+    swallowedBatch.restore();
+  }
+  check(
+    "a session error during reconciliation is not an unavailable read",
+    swallowed instanceof AppError &&
+      !(swallowed instanceof RevisionUnknown) &&
+      swallowed.details?.reason === "session_changed" &&
+      swallowed.details?.outcome === "unknown",
+    String(swallowed)
+  );
 
   const usage = await getDoc(doc(db(), "users", uid, "subscription", "usageCurrent"));
   check("payment and closure edits do not charge a creation slot", usage.data()?.recordsThisMonth === 4);

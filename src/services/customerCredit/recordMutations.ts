@@ -8,6 +8,7 @@ import {
   decideIssuedRetry,
   nextContentRevision,
   RevisionConflict,
+  issuedSessionError,
   RevisionUnknown,
   revisionCommitRuntime,
   revisionRejectionCode,
@@ -48,6 +49,7 @@ export async function mutateCustomerCreditOnDb(
   const ref = recordRef(db, userId, recordId);
   const readGeneration = options?.currentGeneration ?? currentAuthMutationGeneration;
   const generation = readGeneration();
+  let lastIssued: unknown = null;
   for (let attempt = 0; attempt < RETRIES; attempt += 1) {
     if (readGeneration() !== generation) {
       throw new AppError("permission_denied", "Sign in again.", undefined, { reason: "session_changed" });
@@ -77,14 +79,21 @@ export async function mutateCustomerCreditOnDb(
       });
       return stamped;
     } catch (error) {
-      if (error instanceof RevisionConflict) continue;
+      if (error instanceof RevisionConflict) {
+        lastIssued = null;
+        continue;
+      }
+      if (error instanceof AppError) throw error;
       const kind = error instanceof RevisionUnknown ? "unknown" : revisionRejectionCode(error) ? "rejected" : null;
       if (!kind) throw error;
+      const stillOwned = () => readGeneration() === generation;
+      if (!stillOwned()) throw issuedSessionError(kind);
       let read: "unavailable" | "cached" | "deleted" | "present" | "absent" = "unavailable";
       let revisionMoved = false;
       let currentRecord: CustomerCreditRecord | null = null;
       try {
         const after = await revisionCommitRuntime.getDoc(ref);
+        if (!stillOwned()) throw issuedSessionError(kind);
         if (after.metadata?.fromCache === true) {
           read = "cached";
         } else if (!after.exists()) {
@@ -93,6 +102,7 @@ export async function mutateCustomerCreditOnDb(
           const afterStored = after.data() as Record<string, unknown>;
           revisionMoved = Number(afterStored.updatedAt) !== expectedRevision;
           const afterRaw = options?.restoreRaw ? await options.restoreRaw(afterStored) : afterStored;
+          if (!stillOwned()) throw issuedSessionError(kind);
           const afterExisting = parseExisting(after.id, afterRaw);
           const again = mutate(afterExisting, nowMs);
           if (again === afterExisting) {
@@ -102,16 +112,26 @@ export async function mutateCustomerCreditOnDb(
             read = "absent";
           }
         }
-      } catch {
+      } catch (reconcileError) {
+        if (reconcileError instanceof AppError) throw reconcileError;
         read = "unavailable";
       }
+      if (!stillOwned()) throw issuedSessionError(kind);
       const decision = decideIssuedRetry({ kind, read, revisionMoved });
-      if (decision === "return_current" && currentRecord) return currentRecord;
-      if (decision === "retry_same") continue;
+      if (decision === "return_current" && currentRecord) {
+        if (!stillOwned()) throw issuedSessionError(kind);
+        return currentRecord;
+      }
+      if (decision === "retry_same") {
+        if (!stillOwned()) throw issuedSessionError(kind);
+        lastIssued = error;
+        continue;
+      }
       if (decision === "missing") throw new AppError("not_found", "Record not found.");
       throw error;
     }
   }
+  if (lastIssued) throw lastIssued;
   throw new AppError(
     "save_failed",
     "This record changed on another device. Try again.",

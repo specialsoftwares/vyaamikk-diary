@@ -65,6 +65,59 @@ export function decideIssuedRetry(input: {
   return input.revisionMoved ? "retry_same" : "reject";
 }
 
+export type IssuedInspection<T> =
+  | { state: "cached" | "deleted" | "unavailable" }
+  | { state: "server"; revisionMoved: boolean; operationPresent: boolean; current: T };
+
+/**
+ * Re-read after an issued write. A session change keeps the issued outcome and
+ * does not return the record. A failed read stays unavailable unless it is
+ * itself a session error.
+ */
+export async function settleIssuedWrite<T>(input: {
+  error: unknown;
+  generationAtStart: number;
+  currentGeneration: () => number;
+  inspect: () => Promise<IssuedInspection<T>>;
+}): Promise<{ action: "return"; current: T } | { action: "retry" } | { action: "missing" }> {
+  if (input.error instanceof AppError) throw input.error;
+  const kind = input.error instanceof RevisionUnknown
+    ? "unknown"
+    : revisionRejectionCode(input.error)
+      ? "rejected"
+      : null;
+  if (!kind) throw input.error;
+  const owned = () => input.currentGeneration() === input.generationAtStart;
+  if (!owned()) throw issuedSessionError(kind);
+  let inspection: IssuedInspection<T>;
+  try {
+    inspection = await input.inspect();
+    if (!owned()) throw issuedSessionError(kind);
+  } catch (inspectError) {
+    if (inspectError instanceof AppError) throw inspectError;
+    inspection = { state: "unavailable" };
+  }
+  if (!owned()) throw issuedSessionError(kind);
+  const read = inspection.state === "server"
+    ? inspection.operationPresent ? "present" : "absent"
+    : inspection.state;
+  const decision = decideIssuedRetry({
+    kind,
+    read,
+    revisionMoved: inspection.state === "server" ? inspection.revisionMoved : false,
+  });
+  if (decision === "return_current" && inspection.state === "server") {
+    if (!owned()) throw issuedSessionError(kind);
+    return { action: "return", current: inspection.current };
+  }
+  if (decision === "retry_same") {
+    if (!owned()) throw issuedSessionError(kind);
+    return { action: "retry" };
+  }
+  if (decision === "missing") return { action: "missing" };
+  throw input.error;
+}
+
 function sessionChanged(outcome: RevisionCommitOutcome): never {
   throw new AppError("permission_denied", "Sign in again.", undefined, {
     reason: "session_changed",
@@ -76,11 +129,28 @@ function sessionChanged(outcome: RevisionCommitOutcome): never {
   });
 }
 
+/** A session change after the SDK commit was issued. The record must not be published. */
+export function issuedSessionError(kind: "unknown" | "rejected"): AppError {
+  return new AppError("permission_denied", "Sign in again.", undefined, {
+    reason: "session_changed",
+    submitted: kind === "unknown",
+    outcome: kind,
+  });
+}
+
 function isDefiniteRejection(error: unknown): boolean {
   const code = typeof error === "object" && error != null && "code" in error
     ? String((error as { code?: unknown }).code)
     : "";
   return code === "permission-denied" || code === "invalid-argument" || code === "failed-precondition" || code === "already-exists";
+}
+
+/** The server reported that this transaction attempt did not commit. */
+function isConfirmedAbort(error: unknown): boolean {
+  const code = typeof error === "object" && error != null && "code" in error
+    ? String((error as { code?: unknown }).code)
+    : "";
+  return code === "aborted";
 }
 
 /** Production uses the Firestore SDK. Tests replace the runners, not the checks. */
@@ -101,31 +171,40 @@ export async function commitExpectedRevision(input: {
 }): Promise<void> {
   const owned = () => input.currentGeneration() === input.generationAtStart;
   if (!owned()) sessionChanged("not_issued");
-  // True only after the transaction callback returns with a staged write.
-  // tx.set itself is not server acceptance. A later callback attempt resets it.
-  let transactionWriteReturned = false;
+  // Counts callbacks that returned after tx.set. A later callback does not
+  // clear it: that earlier attempt may still be unresolved. A first-attempt
+  // conflict, before any callback returns, stays a conflict. Code `aborted`
+  // is a confirmed abort and is not an unknown commit.
+  let returnedWriteAttempts = 0;
   try {
     await revisionCommitRuntime.runTransaction(input.db, async (tx) => {
-      transactionWriteReturned = false;
-      // Every callback attempt, including a transaction retry, rechecks ownership.
-      if (!owned()) sessionChanged("not_issued");
+      const earlierAttemptUnresolved = returnedWriteAttempts > 0;
+      if (!owned()) sessionChanged(earlierAttemptUnresolved ? "unknown" : "not_issued");
       const fresh = await tx.get(input.ref);
-      if (!owned()) sessionChanged("not_issued");
+      if (!owned()) sessionChanged(earlierAttemptUnresolved ? "unknown" : "not_issued");
       if (!fresh.exists()) throw new AppError("not_found", "Record not found.");
       const current = Number(fresh.data()?.updatedAt);
-      if (current !== input.expectedRevision) throw new RevisionConflict();
-      if (!owned()) sessionChanged("not_issued");
+      if (current !== input.expectedRevision) {
+        if (earlierAttemptUnresolved) throw new RevisionUnknown(new RevisionConflict());
+        throw new RevisionConflict();
+      }
+      if (!owned()) sessionChanged(earlierAttemptUnresolved ? "unknown" : "not_issued");
       // Rules can verify the sibling gate on a batch. The emulator rejects that
       // same getAfter check when the write is inside the read transaction.
       if (!input.revisionRef) {
         tx.set(input.ref, input.cloud, { merge: true });
-        transactionWriteReturned = true;
+        returnedWriteAttempts += 1;
       }
     });
   } catch (error) {
+    if (error instanceof RevisionUnknown) {
+      if (!owned()) sessionChanged("unknown");
+      throw error;
+    }
+    if (isConfirmedAbort(error)) throw new RevisionConflict();
     if (error instanceof AppError || error instanceof RevisionConflict) throw error;
     if (isDefiniteRejection(error)) throw error;
-    if (transactionWriteReturned) {
+    if (returnedWriteAttempts > 0) {
       if (!owned()) sessionChanged("unknown");
       throw new RevisionUnknown(error);
     }

@@ -272,6 +272,83 @@ async function main() {
   assert.equal((stageFailed as Error).message, "stage_failed");
   assert.ok(!(stageFailed instanceof RevisionUnknown));
 
+  revisionCommitRuntime.runTransaction = async (_db, work) => {
+    await work({
+      get: async () => ({ exists: () => true, data: () => ({ updatedAt: 99 }) }),
+      set: () => {
+        throw new Error("must_not_stage");
+      },
+    } as never);
+  };
+  let firstConflict: unknown;
+  try {
+    await commitExpectedRevision({
+      db: {} as never,
+      ref: {} as never,
+      expectedRevision: 10,
+      cloud: { updatedAt: 11 },
+      generationAtStart: 0,
+      currentGeneration: () => 0,
+    });
+  } catch (error) {
+    firstConflict = error;
+  }
+  assert.ok(firstConflict instanceof RevisionConflict);
+  assert.ok(!(firstConflict instanceof RevisionUnknown));
+
+  revisionCommitRuntime.runTransaction = async (_db, work) => {
+    let attempt = 0;
+    const run = async () => {
+      attempt += 1;
+      await work({
+        get: async () => ({
+          exists: () => true,
+          data: () => ({ updatedAt: attempt === 1 ? 10 : 11 }),
+        }),
+        set: () => undefined,
+      } as never);
+    };
+    await run();
+    await run();
+  };
+  let secondAttempt: unknown;
+  try {
+    await commitExpectedRevision({
+      db: {} as never,
+      ref: {} as never,
+      expectedRevision: 10,
+      cloud: { updatedAt: 11 },
+      generationAtStart: 0,
+      currentGeneration: () => 0,
+    });
+  } catch (error) {
+    secondAttempt = error;
+  }
+  assert.ok(secondAttempt instanceof RevisionUnknown, "a later callback does not clear an unresolved earlier attempt");
+
+  revisionCommitRuntime.runTransaction = async (_db, work) => {
+    await work({
+      get: async () => ({ exists: () => true, data: () => ({ updatedAt: 10 }) }),
+      set: () => undefined,
+    } as never);
+    throw Object.assign(new Error("aborted"), { code: "aborted" });
+  };
+  let confirmedAbort: unknown;
+  try {
+    await commitExpectedRevision({
+      db: {} as never,
+      ref: {} as never,
+      expectedRevision: 10,
+      cloud: { updatedAt: 11 },
+      generationAtStart: 0,
+      currentGeneration: () => 0,
+    });
+  } catch (error) {
+    confirmedAbort = error;
+  }
+  assert.ok(confirmedAbort instanceof RevisionConflict);
+  assert.ok(!(confirmedAbort instanceof RevisionUnknown));
+
   assert.equal(decideIssuedRetry({ kind: "unknown", read: "present", revisionMoved: true }), "return_current");
   assert.equal(decideIssuedRetry({ kind: "unknown", read: "absent", revisionMoved: true }), "retry_same");
   assert.equal(decideIssuedRetry({ kind: "unknown", read: "cached", revisionMoved: true }), "unknown");

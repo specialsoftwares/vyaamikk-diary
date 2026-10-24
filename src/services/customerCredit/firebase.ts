@@ -22,6 +22,7 @@ import {
 } from "firebase/firestore";
 
 import { publishDomainChange } from "@/services/dataChanges/domainChanges";
+import { publishAfterCreditCommit } from "./publishAfterCreditCommit";
 import { AppError } from "@/domain/errors";
 import { getFirebaseDb } from "@/config/firebase";
 import {
@@ -368,72 +369,72 @@ export const firebaseCustomerCreditRepository: CustomerCreditRepository = {
   },
 
   async update(userId, input: UpdateCustomerCreditInput) {
-    const next = await mutateCustomerCreditOnDb(
-      getFirebaseDb(),
-      userId,
-      input.id,
-      (existing, now) => applyUpdate(existing, input, now),
-      (id, data) => fromDoc(id, data, userId),
-      Date.now(),
-      creditCloudOptions(userId, input.id)
+    return publishAfterCreditCommit(userId, input.id, () =>
+      mutateCustomerCreditOnDb(
+        getFirebaseDb(),
+        userId,
+        input.id,
+        (existing, now) => applyUpdate(existing, input, now),
+        (id, data) => fromDoc(id, data, userId),
+        Date.now(),
+        creditCloudOptions(userId, input.id)
+      )
     );
-    publishDomainChange(userId, "customerCredit", { effect: "upsert", recordId: next.id });
-    return next;
   },
 
   async addPayment(userId, recordId, payment) {
-    const next = await addCustomerCreditPaymentOnDb(
-      getFirebaseDb(),
-      userId,
-      recordId,
-      payment,
-      (id, data) => fromDoc(id, data, userId),
-      Date.now(),
-      creditCloudOptions(userId, recordId)
+    return publishAfterCreditCommit(userId, recordId, () =>
+      addCustomerCreditPaymentOnDb(
+        getFirebaseDb(),
+        userId,
+        recordId,
+        payment,
+        (id, data) => fromDoc(id, data, userId),
+        Date.now(),
+        creditCloudOptions(userId, recordId)
+      )
     );
-    publishDomainChange(userId, "customerCredit", { effect: "upsert", recordId });
-    return next;
   },
 
   async removePayment(userId, recordId, paymentId) {
-    const next = await mutateCustomerCreditOnDb(
-      getFirebaseDb(),
-      userId,
-      recordId,
-      (existing, now) => removePaymentFrom(existing, paymentId, now),
-      (id, data) => fromDoc(id, data, userId),
-      Date.now(),
-      creditCloudOptions(userId, recordId)
+    return publishAfterCreditCommit(userId, recordId, () =>
+      mutateCustomerCreditOnDb(
+        getFirebaseDb(),
+        userId,
+        recordId,
+        (existing, now) => removePaymentFrom(existing, paymentId, now),
+        (id, data) => fromDoc(id, data, userId),
+        Date.now(),
+        creditCloudOptions(userId, recordId)
+      )
     );
-    publishDomainChange(userId, "customerCredit", { effect: "upsert", recordId });
-    return next;
   },
 
   async setStatus(userId, recordId, status) {
-    const next = await mutateCustomerCreditOnDb(
-      getFirebaseDb(),
-      userId,
-      recordId,
-      (existing, now) => applyStatus(existing, status, now),
-      (id, data) => fromDoc(id, data, userId),
-      Date.now(),
-      creditCloudOptions(userId, recordId)
+    return publishAfterCreditCommit(userId, recordId, () =>
+      mutateCustomerCreditOnDb(
+        getFirebaseDb(),
+        userId,
+        recordId,
+        (existing, now) => applyStatus(existing, status, now),
+        (id, data) => fromDoc(id, data, userId),
+        Date.now(),
+        creditCloudOptions(userId, recordId)
+      )
     );
-    publishDomainChange(userId, "customerCredit", { effect: "upsert", recordId });
-    return next;
   },
 
   async closeFullyPaid(userId, input: CloseFullyPaidInput) {
-    const next = await closeCustomerCreditFullyPaidOnDb(
-      getFirebaseDb(),
-      userId,
-      input,
-      (id, data) => fromDoc(id, data, userId),
-      Date.now(),
-      creditCloudOptions(userId, input.recordId)
+    return publishAfterCreditCommit(userId, input.recordId, () =>
+      closeCustomerCreditFullyPaidOnDb(
+        getFirebaseDb(),
+        userId,
+        input,
+        (id, data) => fromDoc(id, data, userId),
+        Date.now(),
+        creditCloudOptions(userId, input.recordId)
+      )
     );
-    publishDomainChange(userId, "customerCredit", { effect: "upsert", recordId: input.recordId });
-    return next;
   },
 
   async setReminder(userId, recordId, reminder) {

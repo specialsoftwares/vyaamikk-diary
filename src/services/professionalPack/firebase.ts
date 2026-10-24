@@ -9,33 +9,19 @@ import {
   setDoc,
 } from "firebase/firestore";
 
-import { AppError } from "@/domain/errors";
-import { currentAuthMutationGeneration } from "@/services/auth/authSessionFence";
-import {
-  commitExpectedRevision,
-  nextContentRevision,
-  RevisionConflict,
-} from "@/services/privacy/expectedRevisionCommit";
 import type { ProfessionalServicePack } from "@/domain/professionalPack";
-import type { EntryReminder } from "@/domain/types";
 import { getFirebaseDb } from "@/config/firebase";
-import { publishDomainChange } from "@/services/dataChanges/domainChanges";
 import { notificationsService } from "@/services/notifications";
 
-import { packToCloudStorage } from "@/services/pdf/pdfCloudSync";
 import {
   openBusinessCloud,
-  protectBusinessCloud,
   settleCreatedBusinessCloud,
   prepareBusinessCreate,
 } from "@/services/privacy/businessCloudSeal";
+import { updateProfessionalPackOnDb } from "./revisionUpdate";
 import { dedupeProfessionalPacks } from "./dedupe";
 import { createProfessionalPackAtomic, packFromFirestoreDoc } from "./atomicCreate";
-import type {
-  ListProfessionalPacksOptions,
-  ProfessionalPackRepository,
-  UpdateProfessionalPackInput,
-} from "./types";
+import type { ListProfessionalPacksOptions, ProfessionalPackRepository } from "./types";
 
 async function materializePack(id: string, raw: Record<string, unknown>) {
   const pack = packFromFirestoreDoc(id, raw);
@@ -45,11 +31,6 @@ async function materializePack(id: string, raw: Record<string, unknown>) {
 
 function col(userId: string) {
   return collection(getFirebaseDb(), "users", userId, "professionalPacks");
-}
-
-function reminderJson(r: EntryReminder | null) {
-  if (!r) return null;
-  return { at: r.at, note: r.note, notificationId: r.notificationId };
 }
 
 function applyFilters(
@@ -99,69 +80,8 @@ export const firebaseProfessionalPackRepository: ProfessionalPackRepository = {
   },
 
   async update(userId, input) {
-    const ref = doc(getFirebaseDb(), "users", userId, "professionalPacks", input.id);
-    const generationAtStart = currentAuthMutationGeneration();
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-    const snap = await getDoc(ref);
-    if (!snap.exists()) throw new AppError("not_found", "Pack not found.");
-    const existing = (await materializePack(snap.id, snap.data() as Record<string, unknown>))!;
-
-    if (input.reminder !== undefined && existing.reminder?.notificationId) {
-      const willChange =
-        input.reminder === null ||
-        input.reminder.notificationId !== existing.reminder?.notificationId;
-      if (willChange) await notificationsService.cancel(existing.reminder.notificationId);
-    }
-
-    const next: ProfessionalServicePack = {
-      ...existing,
-      title: input.title?.trim() ?? existing.title,
-      facts: input.facts ?? existing.facts,
-      linkedEntryIds: input.linkedEntryIds ?? existing.linkedEntryIds,
-      attachments: input.attachments ?? existing.attachments,
-      matterDate: input.matterDate ?? existing.matterDate,
-      dueDate: input.dueDate === undefined ? existing.dueDate : input.dueDate,
-      reminder: input.reminder === undefined ? existing.reminder : input.reminder,
-      status: input.status ?? existing.status,
-      professionalName:
-        input.professionalName === undefined
-          ? existing.professionalName
-          : input.professionalName?.trim() || null,
-      professionalContact:
-        input.professionalContact === undefined
-          ? existing.professionalContact
-          : input.professionalContact?.trim() || null,
-      notes: input.notes === undefined ? existing.notes : input.notes?.trim() || null,
-      pdfUri: input.pdfUri === undefined ? existing.pdfUri : input.pdfUri,
-      updatedAt: nextContentRevision(existing.updatedAt, Date.now()),
-    };
-    const patch = packToCloudStorage(next);
-    patch.reminder = reminderJson(next.reminder);
-    try {
-      const cloud = await protectBusinessCloud({
-        collection: "professionalPacks",
-        userId,
-        recordId: next.id,
-        revision: next.updatedAt,
-        plain: patch,
-        existingRaw: snap.data() as Record<string, unknown>,
-      });
-      await commitExpectedRevision({
-        db: getFirebaseDb(),
-        ref,
-        expectedRevision: Number((snap.data() as { updatedAt?: number }).updatedAt),
-        cloud,
-        generationAtStart,
-        currentGeneration: currentAuthMutationGeneration,
-      });
-      publishDomainChange(userId, "professionalPack", { effect: "upsert", recordId: next.id });
-      return next;
-    } catch (error) {
-      if (!(error instanceof RevisionConflict)) throw error;
-    }
-    }
-    throw new AppError("save_failed", "This pack changed on another device. Try again.", undefined, {
-      reason: "revision_conflict",
+    return updateProfessionalPackOnDb(getFirebaseDb(), userId, input, {
+      cancelNotification: (id) => notificationsService.cancel(id),
     });
   },
 

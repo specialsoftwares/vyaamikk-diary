@@ -201,7 +201,7 @@
     "test:local-deletion-policy": "npx --yes tsx src/services/accountDeletion/localDevicePolicy.test.ts",
     "test:account-deletion-unit": "npx --yes tsx functions/src/deletion/deletion.unit.test.ts",
     "test:deletion-policy-v2": "npx --yes tsx functions/src/deletion/deletionPolicy.unit.test.ts && npx --yes tsx functions/src/deletion/restoreSuppression.unit.test.ts && npx --yes tsx functions/src/deletion/firestorePurge.unit.test.ts",
-    "test:expected-revision-boundary": "npx --yes tsx src/services/privacy/expectedRevisionCommit.boundary.test.ts",
+    "test:expected-revision-boundary": "npx --yes tsx src/services/privacy/expectedRevisionCommit.boundary.test.ts && npx --yes tsx src/services/privacy/issuedRevisionCallers.test.ts",
     "test:orphan-purge-emulator": "firebase emulators:exec --only firestore --project demo-vyaamikk-orphan-purge \"npx --yes tsx functions/src/deletion/orphanPurge.emulator.test.ts\"",
     "test:restore-fence-emulator": "firebase emulators:exec --only firestore --project demo-vyaamikk-restore-review \"npx --yes tsx src/services/privacy/restoreFence.emulator.test.ts\"",
     "test:business-admission": "npx --yes tsx functions/src/identity/businessAdmission.unit.test.ts",
