@@ -92,6 +92,10 @@ async function main() {
   assert.equal(decideRestoreAdmission({ ...admitted, purpose: 'crash_diagnostics' }).status, 'deny');
   assert.equal(decideRestoreAdmission({ ...admitted, required: false }).status, 'admit');
   assert.equal(decideRestoreAdmission({ ...admitted, required: false }).authorityWatermark, 2);
+  const prepared = claimsForAdmission({ vydOriginAuthTime: 50 }, decideRestoreAdmission({ ...admitted, required: false }));
+  assert.equal(prepared.authorityWatermark, 2);
+  assert.equal('authorityWatermark' in { vydOriginAuthTime: 50 }, false);
+  assert.equal(decideRestoreAdmission({ ...admitted, required: false, localWatermark: null }).status, 'unavailable');
   assert.equal(decideRestoreAdmission({ ...admitted, configured: false, required: false }).status, 'skip');
   assert.equal(decideRestoreAdmission({ ...admitted, required: false, reconciled: false }).status, 'skip');
   assert.equal(decideRestoreAdmission({ ...admitted, required: false, authority: null }).status, 'unavailable');

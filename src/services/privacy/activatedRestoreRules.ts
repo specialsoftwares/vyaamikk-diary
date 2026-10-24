@@ -3,8 +3,10 @@
  * A snapshot can delete restoreControl documents. It does not replace the
  * deployed rules text. Pre-activation rules stay in firestore.rules and
  * storage.rules so a project that has never written those documents still
- * admits current clients. These transforms are what activation deploys after
- * an open reconciled fence exists.
+ * admits current clients. The files in rules/activated are the bytes to
+ * deploy, and only after legitimate sessions already carry authorityWatermark.
+ * Deploying them earlier denies phone and custom tokens that do not have the
+ * claim. A missing fence stays denied. Required mode is not a substitute.
  */
 
 const ACTIVATED_FIRESTORE_CLAIM = `function restoreClaimAllows() {

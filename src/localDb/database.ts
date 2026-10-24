@@ -1,3 +1,4 @@
+import { allowUnsealedLocalPayloadForTests } from "@/services/accountDeletion/localPayload";
 import { DB_NAME } from "./schema";
 
 type LocalSqlDb = {
@@ -38,5 +39,6 @@ export function closeLocalDatabaseForTests(): void {
 
 /** Node/CI seam — in-memory SQL stand-in. Not used on device. */
 export function setLocalDatabaseForTests(database: LocalSqlDb): void {
+  allowUnsealedLocalPayloadForTests();
   db = database;
 }

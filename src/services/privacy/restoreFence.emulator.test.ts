@@ -11,6 +11,7 @@ import { initializeTestEnvironment, type RulesTestEnvironment } from "@firebase/
 import { deleteDoc, doc, getDoc, setDoc } from "firebase/firestore";
 
 import { activateFirestoreRestoreRules, RESTORE_INTERVAL_CONTROL } from "./activatedRestoreRules";
+import { ACTIVATED_FIRESTORE_RULES } from "./activationSequence";
 
 async function canRead(env: RulesTestEnvironment, uid: string, claims?: Record<string, unknown>): Promise<boolean> {
   const db = env.authenticatedContext(uid, {
@@ -43,6 +44,15 @@ async function main() {
       });
     });
     assert.equal(await canRead(env, uid), true, "compatibility mode allows a token without a watermark");
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "restoreControl", "current"), { closed: false, reconciled: true, watermark: 7 });
+    });
+    assert.equal(await canRead(env, uid), true, "preparation keeps an unmarked phone token while required mode is absent");
+    assert.equal(
+      await canRead(env, uid, { firebase: { sign_in_provider: "custom" }, vydOriginAuthTime: 100 }),
+      true,
+      "preparation keeps an unmarked custom token while required mode is absent"
+    );
 
     await env.withSecurityRulesDisabled(async (ctx) => {
       await setDoc(doc(ctx.firestore(), "restoreControl", "current"), { closed: true, watermark: 7 });
@@ -67,9 +77,12 @@ async function main() {
     assert.equal(await canRead(env, uid, { authorityWatermark: 7 }), true, "a reconciled fence admits the matching watermark");
     assert.equal(await canRead(env, uid, { authorityWatermark: 7, erased: true }), false, "an erased claim stays denied");
 
+    const preActivation = readFileSync(resolve(process.cwd(), "firestore.rules"), "utf8");
+    const artifact = readFileSync(resolve(process.cwd(), ACTIVATED_FIRESTORE_RULES), "utf8");
+    assert.equal(artifact, activateFirestoreRestoreRules(preActivation));
     const activated = await initializeTestEnvironment({
       projectId: "demo-vyaamikk-restore-activated",
-      firestore: { rules: activateFirestoreRestoreRules(readFileSync(resolve(process.cwd(), "firestore.rules"), "utf8")) },
+      firestore: { rules: artifact },
     });
     try {
       await activated.withSecurityRulesDisabled(async (ctx) => {
@@ -83,6 +96,21 @@ async function main() {
       });
       const duringGap = await canRead(activated, uid, { authorityWatermark: 7 });
       assert.equal(duringGap, false, RESTORE_INTERVAL_CONTROL);
+      await activated.withSecurityRulesDisabled(async (ctx) => {
+        await setDoc(doc(ctx.firestore(), "restoreControl", "current"), {
+          closed: false,
+          reconciled: true,
+          watermark: 7,
+        });
+      });
+      assert.equal(await canRead(activated, uid), false, "activated rules deny an unmarked phone token while required mode is absent");
+      assert.equal(
+        await canRead(activated, uid, { firebase: { sign_in_provider: "custom" }, vydOriginAuthTime: 100 }),
+        false,
+        "activated rules deny an unmarked custom token while required mode is absent"
+      );
+      assert.equal(await canRead(activated, uid, { authorityWatermark: 8 }), false, "activated rules deny a stale claim");
+      assert.equal(await canRead(activated, uid, { authorityWatermark: 7 }), true, "a prepared session reads under the activated rules");
       await activated.withSecurityRulesDisabled(async (ctx) => {
         await setDoc(doc(ctx.firestore(), "restoreControl", "current"), {
           closed: false,

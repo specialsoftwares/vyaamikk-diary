@@ -1,4 +1,5 @@
 import { getLocalDatabase } from "@/localDb/database";
+import { LocalPayloadUnavailable, openOwnedPayload, sealOwnedPayload } from "@/services/accountDeletion/localPayload";
 import { shortId } from "@/utils/id";
 
 export type SyncOp = "create" | "update" | "delete";
@@ -30,6 +31,17 @@ type QueueRow = {
   revision?: number | null;
 };
 
+function readQueuePayload(userId: string, stored: string | null): unknown {
+  if (!stored) return null;
+  const opened = openOwnedPayload(userId, stored);
+  if (opened.state !== "ready") throw new LocalPayloadUnavailable(opened.reason);
+  return JSON.parse(opened.value) as unknown;
+}
+
+function storedQueuePayload(userId: string, payload: unknown): string | null {
+  return payload == null ? null : sealOwnedPayload(userId, JSON.stringify(payload));
+}
+
 function parseQueueRow(r: QueueRow): SyncQueueItem {
   return {
     id: r.id,
@@ -37,7 +49,7 @@ function parseQueueRow(r: QueueRow): SyncQueueItem {
     op: r.op as SyncOp,
     entity: r.entity as SyncEntity,
     entityId: r.entity_id,
-    payload: r.payload_json ? JSON.parse(r.payload_json) : null,
+    payload: readQueuePayload(r.user_id, r.payload_json),
     createdAt: r.created_at,
     attempts: r.attempts,
     lastError: r.last_error,
@@ -68,7 +80,7 @@ export function enqueueSync(
     if (options?.replacePayload) {
       db.runSync(
         `UPDATE sync_queue SET payload_json = ?, revision = ?, last_error = NULL WHERE id = ?`,
-        [item.payload == null ? null : JSON.stringify(item.payload), revision, dup.id]
+        [storedQueuePayload(item.userId, item.payload), revision, dup.id]
       );
     }
     return dup.id;
@@ -84,7 +96,7 @@ export function enqueueSync(
       item.op,
       item.entity,
       item.entityId,
-      item.payload == null ? null : JSON.stringify(item.payload),
+      storedQueuePayload(item.userId, item.payload),
       Date.now(),
       revision,
     ]

@@ -171,6 +171,23 @@ async function main() {
     check("envelope content type is denied on the pdf path", true);
 
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "restoreControl", "current"), {
+        closed: false,
+        reconciled: true,
+        watermark: 7,
+      });
+    });
+    await assertSucceeds(getBytes(ref(eligible, "users/alice/letterhead/logo.png")));
+    check("preparation allows an unmarked phone token while required mode is absent", true);
+    const unmarkedCustom = testEnv.authenticatedContext("alice", {
+      auth_time: 2_000,
+      firebase: { sign_in_provider: "custom" },
+      vydOriginAuthTime: 2_000,
+    }).storage();
+    await assertSucceeds(getBytes(ref(unmarkedCustom, "users/alice/letterhead/logo.png")));
+    check("preparation allows an unmarked custom token while required mode is absent", true);
+
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
       await setDoc(doc(ctx.firestore(), "restoreControl", "current"), { closed: true, watermark: 7 });
     });
     const unmarked = testEnv.authenticatedContext("alice", {

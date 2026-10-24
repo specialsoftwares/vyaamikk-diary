@@ -1,4 +1,11 @@
 import { getLocalDatabase } from "@/localDb/database";
+import {
+  LocalPayloadUnavailable,
+  localPayloadSealRequired,
+  lookupToken,
+  openOwnedPayload,
+  sealOwnedPayload,
+} from "@/services/accountDeletion/localPayload";
 import { shortId } from "@/utils/id";
 
 import { categoryForFieldKey, queryKeysForFieldKey } from "./fieldKeys";
@@ -40,12 +47,41 @@ function assertScope(scope: MasterDataUserScope): void {
   }
 }
 
+function openField(userId: string, stored: string): string {
+  const opened = openOwnedPayload(userId, stored);
+  if (opened.state !== "ready") throw new LocalPayloadUnavailable(opened.reason);
+  return opened.value;
+}
+
+function logicalMaster(row: Row): { value: string; normalized: string; display: string } {
+  if (!row.value.startsWith("vyd1:")) {
+    return { value: row.value, normalized: row.normalized_value, display: row.display_value };
+  }
+  return JSON.parse(openField(row.user_id, row.value)) as { value: string; normalized: string; display: string };
+}
+
+function storedMaster(userId: string, raw: string, normalized: string, display: string): {
+  value: string;
+  normalized: string;
+  display: string;
+} {
+  if (!localPayloadSealRequired()) return { value: raw, normalized, display };
+  return {
+    value: sealOwnedPayload(userId, JSON.stringify({ value: raw, normalized, display })),
+    normalized: lookupToken(userId, normalized),
+    display: sealOwnedPayload(userId, display),
+  };
+}
+
 function rowToSuggestion(row: Row): MasterDataSuggestion {
+  const logical = logicalMaster(row);
   let metadata: Record<string, string> | null = null;
   if (row.metadata_json) {
     try {
-      metadata = JSON.parse(row.metadata_json) as Record<string, string>;
-    } catch {
+      const rawMeta = row.metadata_json.startsWith("vyd1:") ? openField(row.user_id, row.metadata_json) : row.metadata_json;
+      metadata = JSON.parse(rawMeta) as Record<string, string>;
+    } catch (error) {
+      if (error instanceof LocalPayloadUnavailable) throw error;
       metadata = null;
     }
   }
@@ -54,9 +90,9 @@ function rowToSuggestion(row: Row): MasterDataSuggestion {
     userId: row.user_id,
     ueid: row.ueid,
     fieldKey: row.field_key as MasterFieldKey,
-    value: row.value,
-    normalizedValue: row.normalized_value,
-    displayValue: row.display_value,
+    value: logical.value,
+    normalizedValue: logical.normalized,
+    displayValue: logical.display,
     category: row.category as MasterDataSuggestion["category"],
     sourceRecordType: row.source_record_type,
     sourceField: row.source_field,
@@ -102,36 +138,47 @@ export const masterDataRepository = {
     const placeholders = keys.map(() => "?").join(", ");
 
     const db = getLocalDatabase();
-    const rows = db.getAllSync<Row>(
-      `SELECT * FROM master_data_suggestions
-       WHERE user_id = ?
-         AND field_key IN (${placeholders})
-         AND hidden_at IS NULL
-         AND normalized_value LIKE ? ESCAPE '\\'
-       ORDER BY
-         CASE WHEN normalized_value = ? THEN 0
-              WHEN normalized_value LIKE ? ESCAPE '\\' THEN 1
-              ELSE 2 END,
-         usage_count DESC,
-         last_used_at DESC
-       LIMIT ?`,
-      [
-        input.scope.userId,
-        ...keys,
-        `${escapeLike(normalizedPrefix)}%`,
-        normalizedPrefix,
-        `${escapeLike(normalizedPrefix)}%`,
-        limit,
-      ]
-    );
+    const rows = localPayloadSealRequired()
+      ? db.getAllSync<Row>(
+          `SELECT * FROM master_data_suggestions
+           WHERE user_id = ?
+             AND field_key IN (${placeholders})
+             AND hidden_at IS NULL
+           ORDER BY usage_count DESC, last_used_at DESC`,
+          [input.scope.userId, ...keys]
+        )
+      : db.getAllSync<Row>(
+          `SELECT * FROM master_data_suggestions
+           WHERE user_id = ?
+             AND field_key IN (${placeholders})
+             AND hidden_at IS NULL
+             AND normalized_value LIKE ? ESCAPE '\\'
+           ORDER BY
+             CASE WHEN normalized_value = ? THEN 0
+                  WHEN normalized_value LIKE ? ESCAPE '\\' THEN 1
+                  ELSE 2 END,
+             usage_count DESC,
+             last_used_at DESC
+           LIMIT ?`,
+          [
+            input.scope.userId,
+            ...keys,
+            `${escapeLike(normalizedPrefix)}%`,
+            normalizedPrefix,
+            `${escapeLike(normalizedPrefix)}%`,
+            limit,
+          ]
+        );
 
     const seen = new Set<string>();
     const out: MasterDataSuggestion[] = [];
     for (const row of rows) {
-      const key = `${row.field_key}:${row.normalized_value}`;
+      const suggestion = rowToSuggestion(row);
+      if (localPayloadSealRequired() && !suggestion.normalizedValue.startsWith(normalizedPrefix)) continue;
+      const key = `${suggestion.fieldKey}:${suggestion.normalizedValue}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      out.push(rowToSuggestion(row));
+      out.push(suggestion);
       if (out.length >= limit) break;
     }
     return out;
@@ -149,10 +196,11 @@ export const masterDataRepository = {
     const display = displayMasterValue(fieldKey, raw);
 
     const db = getLocalDatabase();
+    const stored = storedMaster(input.scope.userId, raw, normalized, display);
     const existing = db.getFirstSync<Row>(
       `SELECT * FROM master_data_suggestions
-       WHERE user_id = ? AND field_key = ? AND normalized_value = ?`,
-      [input.scope.userId, fieldKey, normalized]
+       WHERE user_id = ? AND field_key = ? AND normalized_value IN (?, ?)`,
+      [input.scope.userId, fieldKey, stored.normalized, normalized]
     );
 
     if (isJunkMasterValue(raw)) {
@@ -164,6 +212,7 @@ export const masterDataRepository = {
       db.runSync(
         `UPDATE master_data_suggestions SET
           value = ?,
+          normalized_value = ?,
           display_value = ?,
           usage_count = usage_count + 1,
           last_used_at = ?,
@@ -174,8 +223,9 @@ export const masterDataRepository = {
           ueid = ?
          WHERE id = ? AND user_id = ?`,
         [
-          raw,
-          display,
+          stored.value,
+          stored.normalized,
+          stored.display,
           now,
           now,
           input.sourceRecordType ?? null,
@@ -200,9 +250,9 @@ export const masterDataRepository = {
         input.scope.userId,
         input.scope.ueid,
         fieldKey,
-        raw,
-        normalized,
-        display,
+        stored.value,
+        stored.normalized,
+        stored.display,
         categoryForFieldKey(fieldKey),
         input.sourceRecordType ?? null,
         input.sourceField ?? null,
@@ -256,8 +306,8 @@ export const masterDataRepository = {
     const db = getLocalDatabase();
     const existing = db.getFirstSync<Row>(
       `SELECT * FROM master_data_suggestions
-       WHERE user_id = ? AND field_key = ? AND normalized_value = ?`,
-      [scope.userId, fieldKey, normalizedValue]
+       WHERE user_id = ? AND field_key = ? AND normalized_value IN (?, ?)`,
+      [scope.userId, fieldKey, localPayloadSealRequired() ? lookupToken(scope.userId, normalizedValue) : normalizedValue, normalizedValue]
     );
     if (!existing) return;
 

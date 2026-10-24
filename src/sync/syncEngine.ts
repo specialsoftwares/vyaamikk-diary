@@ -5,6 +5,7 @@ import type {
   UpdateBusinessEntryInput,
 } from "@/services/diary/types";
 import { publishDomainChange } from "@/services/dataChanges/domainChanges";
+import { openOwnedPayload, LocalPayloadUnavailable } from "@/services/accountDeletion/localPayload";
 import { getDiaryRepository } from "@/services/diary";
 import {
   localEntriesRepository,
@@ -128,8 +129,11 @@ async function purgeSupersededLocalPlaceholders(userId: string): Promise<void> {
   const synced: BusinessEntry[] = [];
   for (const row of syncedRows) {
     try {
-      synced.push(JSON.parse(row.payload_json) as BusinessEntry);
-    } catch {
+      const opened = openOwnedPayload(userId, row.payload_json);
+      if (opened.state !== "ready") throw new LocalPayloadUnavailable(opened.reason);
+      synced.push(JSON.parse(opened.value) as BusinessEntry);
+    } catch (error) {
+      if (error instanceof LocalPayloadUnavailable) throw error;
       // skip corrupt row
     }
   }
@@ -199,7 +203,13 @@ async function processQueue(
   if (!stillOwnsFlush(owner, userId)) return { synced: 0, failed: 0 };
   let synced = 0;
   let failed = 0;
-  const queue = await syncQueueRepository.listForUser(userId);
+  let queue: Awaited<ReturnType<typeof syncQueueRepository.listForUser>>;
+  try {
+    queue = await syncQueueRepository.listForUser(userId);
+  } catch (error) {
+    if (error instanceof LocalPayloadUnavailable) return { synced: 0, failed: 1 };
+    throw error;
+  }
   if (queueAdmissionHook) await queueAdmissionHook();
   if (!stillOwnsFlush(owner, userId)) return { synced: 0, failed: 0 };
   const repo = getDiaryRepository();
@@ -207,12 +217,33 @@ async function processQueue(
   for (const listed of queue) {
     if (!stillOwnsFlush(owner, userId)) break;
     if (sessionSyncGate.isLocked() && stillOwnsFlush(owner, userId)) break;
-    const item = (await syncQueueRepository.getById(listed.id)) ?? listed;
+    let item: Awaited<ReturnType<typeof syncQueueRepository.getById>>;
+    try {
+      item = (await syncQueueRepository.getById(listed.id)) ?? listed;
+    } catch (error) {
+      if (error instanceof LocalPayloadUnavailable) {
+        failed += 1;
+        await syncQueueRepository.markAttempt(listed.id, error.reason);
+        continue;
+      }
+      throw error;
+    }
+    if (!item) continue;
     if (!stillOwnsFlush(owner, userId)) break;
     if (item.userId !== userId) continue;
-    const localRecord = item.entity === "entry"
-      ? await localEntriesRepository.getRecord(userId, item.entityId)
-      : null;
+    let localRecord: LocalEntryRecord | null = null;
+    try {
+      localRecord = item.entity === "entry"
+        ? await localEntriesRepository.getRecord(userId, item.entityId)
+        : null;
+    } catch (error) {
+      if (error instanceof LocalPayloadUnavailable) {
+        failed += 1;
+        await syncQueueRepository.markAttempt(item.id, error.reason);
+        continue;
+      }
+      throw error;
+    }
     if (!stillOwnsFlush(owner, userId)) break;
     if (localRecord && !localRecord.meta.autoRetry) {
       continue;
@@ -321,6 +352,11 @@ async function processQueue(
         synced += 1;
       }
     } catch (e) {
+      if (e instanceof LocalPayloadUnavailable) {
+        failed += 1;
+        await syncQueueRepository.markAttempt(item.id, e.reason);
+        continue;
+      }
       if (!isRemoteNotIssued(e)) {
         failed += 1;
         const msg = e instanceof Error ? e.message : String(e);
