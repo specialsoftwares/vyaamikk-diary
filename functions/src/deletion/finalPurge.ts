@@ -2,9 +2,11 @@
  * Final account purge orchestrator.
  *
  * THREE DISTINCT DELETION-WINDOW FACTS (do not collapse):
- * 1. Implemented: DELETION_GRACE_MS = 45 days (this file). SUPERSEDES 15.
- *    Not 180. After the cancellation window, non-GRIN account data is
- *    actually deleted on this path (Play: freeze ≠ delete).
+ * 1. Implemented legacy window: DELETION_GRACE_MS = 45 days (this file).
+ *    A new version-2 request uses the separate 15-day erasure deadline in
+ *    deletionPolicy.ts. These are different populations. Not 180. After the
+ *    cancellation window, non-GRIN account data is actually deleted on this
+ *    path (Play: freeze ≠ delete).
  * 2. Owner-requested 180-day hold — SUPERSEDED for this clock; not implemented.
  * 3. Public/Play-certified listing copy: still UNRESOLVED. Do not advertise.
  *

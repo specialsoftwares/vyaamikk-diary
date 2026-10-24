@@ -373,6 +373,23 @@ async function main(): Promise<void> {
     assert.equal(record?.clockSource, "server");
     assert.ok(record?.remainingPaths.some((path) => path.endsWith("/ghost")));
     assert.ok(record?.remainingPaths.some((path) => path.includes("customDeep") || path.includes("/extra")));
+    await primary.doc("users/empty-owner").set({ status: "active" });
+    const empty = await runHeldResolutionWorkflow({
+      uid: "empty-owner",
+      job: { ...job, uid: "empty-owner" },
+      worker: "worker-a",
+      now: 1,
+      inventory: createFirestoreInventory(primary, 20),
+      log: createFirestoreInventoryLog(primary, { jobId: "empty-owner:1", uid: "empty-owner" }),
+      knownCollections: ["entries", "notes", "more", "extra"],
+      maxDepth: 3,
+      providerEvidence: null,
+      backupEvidence: null,
+      revision: 1,
+    });
+    assert.equal(empty.status, "awaiting_operator");
+    if (empty.status === "awaiting_operator") assert.equal(empty.remaining, 0);
+    assert.equal(await primary.doc("users/empty-owner").get().then((snap) => snap.exists), true);
     console.log("production adapters: firestore migration, restore holds and inventory passed");
   } finally {
     if (previousMigration === undefined) delete process.env.CONTENT_KEY_MIGRATION_ENABLED;
