@@ -7,6 +7,7 @@ import type { BusinessEntry } from "@/domain/businessEntry";
 import type { CustomerCreditRecord } from "@/domain/customerCredit";
 import type { ProfessionalServicePack } from "@/domain/professionalPack";
 import type { PurchaseOrder } from "@/domain/purchaseOrder";
+import { isGoodsEvidenceBlockedByStoreRuntime } from "@/goodsEvidence/featureFlag";
 import { formDraftsRepository } from "@/repositories/formDraftsRepository";
 import { localEntriesRepository } from "@/repositories/localEntriesRepository";
 import { getCustomerCreditRepository } from "@/services/customerCredit";
@@ -253,6 +254,7 @@ async function readDrafts(ownerUid: string): Promise<LocalLedgerRecord[]> {
 }
 
 async function readGoodsReceipts(ownerUid: string): Promise<LocalLedgerRecord[]> {
+  if (isGoodsEvidenceBlockedByStoreRuntime()) return [];
   const session = getLiveGrinDispatchSession();
   if (!session || session.ownerUid !== ownerUid) return [];
   const repo = getGrinApplicationRepository(session.ownerUid, session.dispatchGeneration);

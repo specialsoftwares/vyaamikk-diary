@@ -1,6 +1,9 @@
 /**
  * Production key store. Native builds use expo-secure-store.
  * Web and a failed native module are unavailable. They do not receive the key.
+ * `AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY` is the iOS keychain accessibility.
+ * It is not Android backup policy. Android backup is the manifest
+ * `allowBackup` value plus the SecureStore backup XML.
  * Physical-device execution of this adapter is still pending.
  */
 

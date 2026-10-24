@@ -36,7 +36,7 @@ export const PRIVATE_FIELD_BOUNDARIES: readonly FieldBoundary[] = [
     privateFields: ["queued plaintext payload"],
     readableFields: ["queue key"],
     boundary: "device_local",
-    handling: "Pending rows stay on the device under the account that queued them. Diary payloads, draft bodies, and queue bodies are sealed with that account's key. Ordinary logout retains the rows and the key. Account deletion removes that account's rows and key. A later account's queue query does not return the previous account's rows.",
+    handling: "Pending rows stay on the device under the account that queued them. Diary payloads, draft bodies, queue bodies, and insight labels are sealed with that account's key. Insight join keys and link ids are account-bound tokens. Ordinary logout retains the rows and the key. Account deletion removes that account's rows and key, including that account's local GRIN rows. A later account's queue query does not return the previous account's rows.",
   },
   {
     copy: "storage_object_names",

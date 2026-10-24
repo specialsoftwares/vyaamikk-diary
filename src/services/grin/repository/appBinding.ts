@@ -26,6 +26,7 @@
  */
 
 import { getLocalDatabase } from "@/localDb/database";
+import { isGoodsEvidenceBlockedByStoreRuntime } from "@/goodsEvidence/featureFlag";
 import { GrinOutbox } from "@/services/grin/outbox/outbox";
 import type { GrinEvidenceUploadPort, GrinServerCommandPort } from "@/services/grin/outbox/ports";
 import type { GrinDispatchSession, GrinLocalOriginalHasher } from "@/services/grin/outbox/types";
@@ -179,6 +180,14 @@ export function advanceGrinLiveToken(ownerUid: string | null): GrinDispatchSessi
  * Must run only after `advanceGrinLiveToken` has already flipped the token.
  */
 export function persistGrinOwnerSession(): GrinDispatchSession | null {
+  if (isGoodsEvidenceBlockedByStoreRuntime()) {
+    endSqliteBinding(live);
+    endSqliteBinding(pendingSqliteRetire);
+    live = null;
+    liveToken = null;
+    pendingSqliteRetire = null;
+    return null;
+  }
   const retiring = pendingSqliteRetire;
   pendingSqliteRetire = null;
   if (retiring && (!liveToken || retiring.ownerUid !== liveToken.ownerUid)) {
@@ -239,6 +248,20 @@ export function persistGrinOwnerSession(): GrinDispatchSession | null {
 }
 
 /**
+ * The intended store build cannot open local GRIN tables.
+ * `storeBlocked` is the Play/standalone runtime without the internal admit flag.
+ * `enabled` is the separate public module flag. Either one closed denies access.
+ * Development tests are not that runtime, so they can still begin a session.
+ */
+export function productionGrinLocalAccess(input: {
+  storeBlocked: boolean;
+  enabled: boolean;
+}): "denied" | "open" {
+  if (input.storeBlocked || !input.enabled) return "denied";
+  return "open";
+}
+
+/**
  * Explicit session lifecycle owner. The only production caller of
  * `outbox.beginOwnerSession` besides persistGrinOwnerSession.
  * Account change and logout retire the previous binding first.
@@ -247,6 +270,9 @@ export function persistGrinOwnerSession(): GrinDispatchSession | null {
 export function startGrinOwnerSession(ownerUid: string): GrinDispatchSession {
   const uid = ownerUid.trim();
   if (!uid) throw new Error("missing_owner_uid");
+  if (isGoodsEvidenceBlockedByStoreRuntime()) {
+    throw new Error("grin_store_runtime_blocked");
+  }
   advanceGrinLiveToken(uid);
   const session = persistGrinOwnerSession();
   if (!session) throw new Error("missing_owner_uid");

@@ -26,6 +26,13 @@ export const DISASTER_RECOVERY_ORDER = [
   "Matching claims can read again. A stale claim stays denied until mintClientAuthToken runs against the rewritten fence.",
 ] as const;
 
+/**
+ * Metro inlines EXPO_PUBLIC_* when the binary is built.
+ * An already installed build does not observe a later change on the server.
+ */
+export const RESTORE_REFRESH_REACHES_BUILD =
+  "EXPO_PUBLIC_RESTORE_ADMISSION_REFRESH is fixed into the binary at build time. Changing it requires a new build. It is not a server flag.";
+
 export function contradictoryActivationDeniesUnmarkedToken(): true {
   return true;
 }

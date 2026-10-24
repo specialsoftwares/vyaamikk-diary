@@ -25,10 +25,18 @@ export function setDiaryRepositoryForTests(repo: DiaryRepository | null): void {
  * therefore sync across devices. Otherwise we use the per-device
  * AsyncStorage mock and entries stay device-local.
  */
+export type DiaryRepositoryKind = "firebase" | "mock";
+
+/** Production and shared-dev never select the AsyncStorage mock. */
+export function diaryRepositoryKind(backend: ReturnType<typeof getActiveBackend>): DiaryRepositoryKind {
+  if (backend === "firebase-production" || backend === "firebase-shared-dev") return "firebase";
+  return "mock";
+}
+
 export function getDiaryRepository(): DiaryRepository {
   if (testOverride) return testOverride;
   const backend = getActiveBackend();
-  if (backend === "firebase-production" || backend === "firebase-shared-dev") {
+  if (diaryRepositoryKind(backend) === "firebase") {
     if (!cachedFirebaseDiary) {
       cachedFirebaseDiary =
         require("./firebase").firebaseDiaryRepository as DiaryRepository;

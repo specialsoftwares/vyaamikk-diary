@@ -17,6 +17,8 @@ import {
   migrateOwnedPayloads,
   unbindLocalDataKey,
 } from "@/services/accountDeletion/localPayload";
+import { migrateInsightJoinKeys } from "@/services/insights/businessInsightRepository";
+import { sealRetainedMockDiary } from "@/services/diary/mockDiarySeal";
 
 const SEARCH_PREFIX = "vyd_search_recent_v1_";
 
@@ -32,10 +34,17 @@ export async function prepareLocalAccountKey(uid: string): Promise<LocalKeyResul
   bindLocalDataKey(uid, resolved.key);
   if (isLocalDatabaseReady()) {
     try {
-      migrateOwnedPayloads(getLocalDatabase(), uid);
+      const db = getLocalDatabase();
+      migrateOwnedPayloads(db, uid);
+      migrateInsightJoinKeys(db, uid);
     } catch {
       return { state: "unavailable", reason: "migration_incomplete" };
     }
+  }
+  try {
+    await sealRetainedMockDiary(AsyncStorage, uid);
+  } catch {
+    return { state: "unavailable", reason: "migration_incomplete" };
   }
   return resolved;
 }

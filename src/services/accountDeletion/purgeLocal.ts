@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-import { deleteLocalOwnerRows } from "@/services/accountDeletion/localAccountBoundary";
+import { deleteGrinLocalOwnerRows, deleteLocalOwnerRows } from "@/services/accountDeletion/localAccountBoundary";
 import { getLocalDatabase } from "@/localDb/database";
 import type { ProfileLogoRef } from "@/domain/types";
 import { getDiaryRepository } from "@/services/diary";
@@ -63,6 +63,7 @@ function purgeSqliteUserData(userId: string): void {
   try {
     const db = getLocalDatabase();
     deleteLocalOwnerRows(db, userId);
+    deleteGrinLocalOwnerRows(db, userId);
     db.runSync("DELETE FROM master_data_suggestions WHERE user_id = ?", [userId]);
   } catch (e) {
     log.warn("sqlite purge skipped", e);
