@@ -1,0 +1,28 @@
+*** BEGIN PROPOSED PATCH — NOT APPLIED ***
+Keep PLAY_BILLING_ENABLED unset/false. Do not enable billing.
+
+Problem: eas.json production and preview already bundle
+  EXPO_PUBLIC_SUBSCRIPTION_PURCHASE_ENTRY_ENABLED=1
+  EXPO_PUBLIC_QUOTA_UPSELL_ENABLED=1
+so the Upgrade sheet can be visible. Tapping purchase still calls
+prepareAndroidBillingAccount / prepareIOSBillingAccount, which fail-closed
+when PLAY_BILLING_ENABLED / APPSTORE_BILLING_ENABLED are not "true".
+iapSession then returns kind:"failed" and does not call requestPurchase.
+Users can see an unavailable purchase experience.
+
+Proposed public-release behavior (config only):
+  eas.json build.production.env and build.preview.env:
+    remove or set to "" (not "1"):
+      EXPO_PUBLIC_SUBSCRIPTION_PURCHASE_ENTRY_ENABLED
+      EXPO_PUBLIC_QUOTA_UPSELL_ENABLED
+  Leave PLAY_BILLING_ENABLED and APPSTORE_BILLING_ENABLED false.
+
+Effect:
+  UI visibility: quota upsell and Settings upgrade closed (gate_off /
+  purchase_entry_closed).
+  Store-request dispatch: still unreachable while prepare fails, and now
+  also unreached from those entry points.
+  Charge / server verify / entitlement: unchanged (already fail-closed).
+
+Do not change IAP session retry logic or entitlement writes.
+*** END PROPOSED PATCH — NOT APPLIED ***

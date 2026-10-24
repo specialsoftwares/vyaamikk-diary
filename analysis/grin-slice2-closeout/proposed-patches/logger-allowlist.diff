@@ -1,0 +1,53 @@
+*** BEGIN PROPOSED PATCH — NOT APPLIED ***
+Files: src/utils/logger.ts, src/services/telemetry/crashReporter.ts,
+       src/startup/RootErrorBoundary.tsx
+Do not apply until reviewed. Do not forward the original Error object.
+
+--- src/utils/logger.ts
+Replace SENSITIVE_KEY deny-list + unsanitized message strings with:
+
+1. Fixed event codes (callers pass a short token, never interpolated PII).
+2. Allowlisted metadata keys only (attemptId, code, callableName, functionsRegion,
+   firebaseAuthCode, androidActivity, e164Length, e164Prefix, phoneSuffix,
+   nativeUidPresent, jsUidPresent, uidsMatch, uidSuffix, errorCode, stage, kind).
+3. classifyError(err): { name, code, class } where class is
+   unauthenticated | permission | unavailable | invalid | unknown.
+   Message text is dropped or replaced with redactStartupMessage, max 120 chars.
+4. boundSerialize(value, { maxDepth: 4, maxBytes: 2048, seen }): cycle-safe.
+5. Phone masking retained for the explicit phoneSuffix / phone keys if those
+   remain on the allowlist.
+6. pdfSafeLog remains in front of PDF/save logs; do not weaken those paths.
+
+Call-site follow-ups (same patch set, still not applied):
+- identityCallable: keep `callable ${name} failed` only if `name` is a
+  literal callable identifier (already is). Stop passing Error objects.
+- state/auth `log.error("boot failed", e)` → event code BOOT_FAILED + classifyError.
+- nativePhoneAuth: keep suffix-only fields; do not add email/phoneE164 keys.
+- jsAuthBridge: snapshot already uses suffixes; keep allowlisted.
+
+--- src/services/telemetry/crashReporter.ts
+recordError(error, context):
+  if (!_enabled) return;  // consent unchanged
+  const safe = new Error(classifyError(error).class);
+  safe.name = error.name === "Error" ? "AppError" : String(error.name).slice(0, 64);
+  // Do NOT assign safe.cause = error, do NOT pass error.stack unmodified
+  // if it can contain URLs/tokens. Use a truncated frame list without
+  // query strings, or omit stack in v1 of this patch.
+  client.log(String(context || "app").slice(0, 64));
+  client.recordError(safe);
+
+--- src/startup/RootErrorBoundary.tsx
+componentDidCatch(error, info):
+  console.error("[RootErrorBoundary]", redactStartupMessage(error?.message || ""));
+  recordError(error, "ErrorBoundary"); // uses classified clone above
+
+getDerivedStateFromError already uses buildDiagnostics → redactStartupMessage
+for the on-screen path. Leave StartupFailureScreen / retry intact.
+
+Regression (proposed test, isolated, synthetic @example.invalid):
+  Re-run analysis/grin-slice2-closeout/logging-repro.ts after the patch.
+  Expect OBSERVED email/phone/token/query markers absent from console and
+  Crashlytics sink. Phone mask and PDF html redaction still present.
+  Disabled crashReporter still forwards nothing.
+  Enabled crashReporter receives classified Error only (no original message).
+*** END PROPOSED PATCH — NOT APPLIED ***

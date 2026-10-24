@@ -1,0 +1,27 @@
+/**
+ * Snapshot copies so callers cannot mutate stored originals, events, or ledgers.
+ */
+
+export function cloneSnapshot<T>(value: T): T {
+  return structuredClone(value);
+}
+
+function freezeDeep(value: unknown): void {
+  if (value === null || typeof value !== "object") return;
+  if (Object.isFrozen(value)) return;
+  Object.freeze(value);
+  if (Array.isArray(value)) {
+    for (const item of value) freezeDeep(item);
+    return;
+  }
+  for (const key of Object.keys(value as object)) {
+    freezeDeep((value as Record<string, unknown>)[key]);
+  }
+}
+
+/** Cloned then frozen. Mutations throw in strict mode; the store is unaffected. */
+export function freezeSnapshot<T>(value: T): T {
+  const cloned = cloneSnapshot(value);
+  freezeDeep(cloned);
+  return cloned;
+}

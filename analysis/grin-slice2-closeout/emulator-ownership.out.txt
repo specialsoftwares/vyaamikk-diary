@@ -1,0 +1,54 @@
+Command (this assignment):
+  unset GOOGLE_APPLICATION_CREDENTIALS GCLOUD_PROJECT FIREBASE_TOKEN
+  firebase emulators:exec --only firestore --project vyaamikk-diary-rules-test \
+    "npx --yes tsx firestore.rules.test.ts && npx --yes tsx src/services/records/coordinationOwnership.emulator.test.ts"
+
+Preconditions checked:
+  GOOGLE_APPLICATION_CREDENTIALS empty
+  GCLOUD_PROJECT empty
+  FIREBASE_TOKEN empty
+  FIRESTORE_EMULATOR_HOST unset before exec (set by emulators:exec)
+  Project id: vyaamikk-diary-rules-test (rules-unit-testing) and vyaamikk-diary-coord-own-test (coordination suite)
+  Synthetic uids: alice, bob, carol, merge-safe, email-guard
+  No SMS/email/store calls
+
+Result: Script exited successfully (code 0)
+
+firestore.rules.test.ts:
+  ok - unauthenticated read users denied
+  ok - own profile read allowed
+  ok - cross-user profile read denied
+  ok - client profile create denied
+  ok - protected status update denied
+  ok - protected ueid update denied
+  ok - safe profile patch allowed
+  ok - production-shaped setDoc merge safe patch allowed
+  ok - consent and last-active merge patch allowed
+  ok - client emailHash change denied
+  ok - client emailVerifiedAt change denied
+  ok - client emailStatus verified self-assert denied
+  ok - client emailLinkedAt change denied
+  ok - legacy client email enrichment payload denied
+  ok - deletion request patch allowed
+  ok - deletion-pending entry create denied
+  ok - active user entry create allowed
+  ok - phoneIndex client write denied
+  ok - counter monotonic increment allowed
+  ok - counter rollback denied
+  ok - cash paid FY rollover allowed
+  ok - save lock in_flight -> done allowed
+  ok - save lock missing-doc get allowed for owner (transactional acquire)
+  ok - save lock cross-UID read denied
+  ok - invalid save-lock create status denied
+  ok - trusted device ueid tamper denied
+  ok - legacy profile without status can write business data
+  ok - legacy profile safe root merge without status materialized
+  all firestore.rules tests passed
+
+coordinationOwnership.emulator.test.ts: ok (Firestore emulator)
+
+Not executed this assignment:
+  functions/src/identity/resolveOrCreateUserByPhone.emulator.test.ts (Admin SDK, demo-vyaamikk)
+  liveRulesCompat, letterhead, diary.firebaseUpdate, billing emulators
+  deployed callable token validation
+  production Firebase
