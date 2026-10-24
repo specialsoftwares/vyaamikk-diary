@@ -191,7 +191,7 @@ async function purgeCollection(
   }
 }
 
-function cursorOwnedByUser(uid: string, cursor: FirestorePurgeCursor): boolean {
+export function cursorOwnedByUser(uid: string, cursor: FirestorePurgeCursor): boolean {
   const userPath = `users/${uid}`;
   const parent = cursor.parentPath;
   if (parent !== userPath && !parent.startsWith(`${userPath}/`)) return false;
@@ -266,23 +266,47 @@ export async function purgeUserSubcollectionsFully(
   return { deleted: state.deleted, exhausted: true };
 }
 
+export type LeftoverInventoryRecord = {
+  revision: number;
+  scope: string;
+  observedAt: number;
+  remainingPaths: readonly string[];
+};
+
 /**
- * Unknown and deep leftovers are not a completed purge. Provider and backup
- * evidence cannot stand in for an independent leftover count. A zero count
- * is ready for a separate operator review; this function never marks the job complete.
+ * Unknown and deep leftovers are not a completed purge. The remaining count
+ * has to be the inventory record for this scope. A caller-supplied zero is
+ * not that record. Provider and backup evidence stay separate.
  */
-export function reviewUnknownPurgeHold(input: {
+export async function reviewUnknownPurgeHold(input: {
   hold: PurgeHold;
   path: string;
   walkerDeleted: number;
-  independentRemaining: number | null;
+  log: { read(revision: number): Promise<LeftoverInventoryRecord | null> };
+  claimedRevision: number | null;
+  claimedRemaining: number | null;
+  expectedScope: string;
+  now: number;
+  maxAgeMs: number;
   providerEvidence: string | null;
   backupEvidence: string | null;
-}): { completion: "blocked"; reason: string } {
+}): Promise<{ completion: "blocked"; reason: string }> {
   if (!input.path || input.walkerDeleted < 0) return { completion: "blocked", reason: "resolution_incomplete" };
   if (input.hold === "cursor_unowned") return { completion: "blocked", reason: "cursor_not_owned" };
-  if (input.independentRemaining == null) return { completion: "blocked", reason: "independent_leftover_check_missing" };
-  if (input.independentRemaining > 0) return { completion: "blocked", reason: "leftovers_remain" };
+  if (input.claimedRevision == null || input.claimedRemaining == null) {
+    return { completion: "blocked", reason: "independent_leftover_check_missing" };
+  }
+  const record = await input.log.read(input.claimedRevision);
+  if (!record || record.scope !== input.expectedScope) {
+    return { completion: "blocked", reason: record ? "leftover_scope_rejected" : "leftover_provenance_rejected" };
+  }
+  if (!Number.isSafeInteger(record.observedAt) || record.observedAt > input.now || input.now - record.observedAt > input.maxAgeMs) {
+    return { completion: "blocked", reason: "leftover_observation_stale" };
+  }
+  if (input.claimedRemaining !== record.remainingPaths.length) {
+    return { completion: "blocked", reason: "leftover_count_mismatch" };
+  }
+  if (record.remainingPaths.length > 0) return { completion: "blocked", reason: "leftovers_remain" };
   if (input.providerEvidence || input.backupEvidence) {
     return { completion: "blocked", reason: "provider_or_backup_evidence_is_not_a_purge_result" };
   }
