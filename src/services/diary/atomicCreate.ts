@@ -12,6 +12,7 @@ import { stableRecordId } from "@/services/records/stableRecordId";
 import { createInitialDocumentHistory } from "@/services/documentHistory/core";
 import {
   isLegitimateExistingLetterheadMirror,
+  isSealedLetterheadParentData,
   isSupportedLetterheadParentData,
   isValidatedLetterheadMirrorInput,
   letterheadParentIdFromPayload,
@@ -108,7 +109,8 @@ export async function createEntryAtomicDetailed(
   input: CreateBusinessEntryInput,
   hooks?: AtomicCreateHooks,
   nowMs = Date.now(),
-  recordId = stableRecordId(input.clientRecordId, "en")
+  recordId = stableRecordId(input.clientRecordId, "en"),
+  cloudPayload?: (record: BusinessEntry) => Record<string, unknown>
 ) {
   if (!userId) throw new AppError("permission_denied", "Not signed in.");
   const monthKey = istMonthKeyForMillis(nowMs);
@@ -148,7 +150,7 @@ export async function createEntryAtomicDetailed(
         );
       }
       const record = buildNewDiaryEntry(userId, recordId, input, nowMs);
-      return { record, payload: diaryEntryToCloudPayload(record) };
+      return { record, payload: cloudPayload ? cloudPayload(record) : diaryEntryToCloudPayload(record) };
     },
     hooks: {
       ...hooks,
@@ -180,7 +182,8 @@ async function assertSameUserLetterheadParent(
       reason: "letterhead_parent_user_mismatch",
     });
   }
-  if (!isSupportedLetterheadParentData(parentSnap.data() as Record<string, unknown>)) {
+  const parent = parentSnap.data() as Record<string, unknown>;
+  if (!isSupportedLetterheadParentData(parent) && !isSealedLetterheadParentData(parent, parentId)) {
     throw new AppError("permission_denied", "Letterhead diary link is not valid.", undefined, {
       reason: "letterhead_parent_shape_invalid",
     });

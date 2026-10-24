@@ -1,5 +1,7 @@
 # LEGAL SOURCE AND COMMENCEMENT MATRIX
 
+**22 October 2026.** This commencement table was not re-fetched from the Gazette in this checkpoint. It remains counsel issue-spotting. Core fiduciary duties are recorded here as scheduled around 13 May 2027, not as currently effective. A 15-day erasure figure is not taken from this matrix.
+
 **Purpose:** Issue-spotting for Indian privacy law and Google Play user-data rules.  
 **Not a legal opinion. Not legal advice. Counsel must independently verify.**
 

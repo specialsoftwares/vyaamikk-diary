@@ -1,5 +1,7 @@
 # DATA FLOW AND STORAGE REGISTER
 
+**22 October 2026 checkpoint.** Flows below were written against `f1019b6`. The `06d3fcd` map (plaintext Firestore/SQLite, local PDFs, reactivation digest, 45-day grace) is in `SEVEN_STAGE_FILE_IMPACT.md`. HTTPS is not treated as encryption of stored fields.
+
 **Tip:** `f1019b6` · **Read-only audit** · Not a legal opinion.
 
 ---

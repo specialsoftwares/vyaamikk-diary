@@ -8,13 +8,13 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  REVIEW_PHONE,
   parseUidArg,
   runReviewAccountCli,
   verifyReviewAccount,
   type ReviewVerifyPort,
 } from "./setup-play-review-account";
 
+const SYNTHETIC_PHONE = "+919800000099";
 const PROJECT = "vyaamikk-diary-test";
 const REVIEW_UID = "SYNTHETIC_REVIEW_UID";
 const OTHER_UID = "SYNTHETIC_OTHER_UID";
@@ -40,7 +40,7 @@ function profile(overrides: Record<string, unknown> = {}) {
   return {
     name: NAME,
     businessName: BUSINESS,
-    phoneE164: REVIEW_PHONE,
+    phoneE164: SYNTHETIC_PHONE,
     ueid: UEID,
     status: "active",
     ...overrides,
@@ -100,12 +100,13 @@ async function main() {
 
 {
   const injected = port({
-    authByPhone: { uid: REVIEW_UID, disabled: false, phoneNumber: REVIEW_PHONE },
+    authByPhone: { uid: REVIEW_UID, disabled: false, phoneNumber: SYNTHETIC_PHONE },
     docs: { [REVIEW_UID]: { exists: true, data: profile() } },
   });
   const out = await verifyReviewAccount({
     port: injected,
     expectedProjectId: PROJECT,
+    phoneE164: SYNTHETIC_PHONE,
   });
   assert.equal(out.ok, true);
   assert.equal(out.result, "partial_profile_ok");
@@ -122,10 +123,11 @@ async function main() {
   const out = await verifyReviewAccount({
     port: port({
       projectId: "other-project",
-      authByPhone: { uid: REVIEW_UID, disabled: false, phoneNumber: REVIEW_PHONE },
+      authByPhone: { uid: REVIEW_UID, disabled: false, phoneNumber: SYNTHETIC_PHONE },
       docs: { [REVIEW_UID]: { exists: true, data: profile() } },
     }),
     expectedProjectId: PROJECT,
+    phoneE164: SYNTHETIC_PHONE,
   });
   assert.equal(out.ok, false);
   assert.equal(out.result, "project_mismatch");
@@ -135,7 +137,7 @@ async function main() {
 {
   const out = await verifyReviewAccount({
     port: port({
-      authByPhone: { uid: REVIEW_UID, disabled: false, phoneNumber: REVIEW_PHONE },
+      authByPhone: { uid: REVIEW_UID, disabled: false, phoneNumber: SYNTHETIC_PHONE },
       authByUid: {
         [OTHER_UID]: {
           uid: OTHER_UID,
@@ -151,6 +153,7 @@ async function main() {
       },
     }),
     expectedProjectId: PROJECT,
+    phoneE164: SYNTHETIC_PHONE,
     uidArg: OTHER_UID,
   });
   assert.equal(out.ok, false);
@@ -161,9 +164,10 @@ async function main() {
 {
   const out = await verifyReviewAccount({
     port: port({
-      authByPhone: { uid: REVIEW_UID, disabled: true, phoneNumber: REVIEW_PHONE },
+      authByPhone: { uid: REVIEW_UID, disabled: true, phoneNumber: SYNTHETIC_PHONE },
     }),
     expectedProjectId: PROJECT,
+    phoneE164: SYNTHETIC_PHONE,
   });
   assert.equal(out.result, "account_disabled");
 }
@@ -172,6 +176,7 @@ async function main() {
   const out = await verifyReviewAccount({
     port: port({}),
     expectedProjectId: PROJECT,
+    phoneE164: SYNTHETIC_PHONE,
   });
   assert.equal(out.result, "auth_user_missing");
 }
@@ -182,6 +187,7 @@ async function main() {
   const out = await verifyReviewAccount({
     port: port({ authByPhone: err }),
     expectedProjectId: PROJECT,
+    phoneE164: SYNTHETIC_PHONE,
   });
   assert.equal(out.result, "sdk_unavailable");
   assert.doesNotMatch(blob(out.lines), /SYNTHETIC_SDK_STACK/);
@@ -190,10 +196,11 @@ async function main() {
 {
   const out = await verifyReviewAccount({
     port: port({
-      authByPhone: { uid: REVIEW_UID, disabled: false, phoneNumber: REVIEW_PHONE },
+      authByPhone: { uid: REVIEW_UID, disabled: false, phoneNumber: SYNTHETIC_PHONE },
       docs: { [REVIEW_UID]: { exists: true, data: profile({ ueid: "" }) } },
     }),
     expectedProjectId: PROJECT,
+    phoneE164: SYNTHETIC_PHONE,
   });
   assert.equal(out.ok, false);
   assert.equal(out.result, "profile_incomplete");
@@ -217,10 +224,11 @@ async function main() {
 {
   const out = await verifyReviewAccount({
     port: port({
-      authByPhone: { uid: REVIEW_UID, disabled: false, phoneNumber: REVIEW_PHONE },
+      authByPhone: { uid: REVIEW_UID, disabled: false, phoneNumber: SYNTHETIC_PHONE },
       docs: { [REVIEW_UID]: { exists: false } },
     }),
     expectedProjectId: PROJECT,
+    phoneE164: SYNTHETIC_PHONE,
   });
   assert.equal(out.result, "profile_incomplete");
   assertNoSecrets(blob(out.lines));
@@ -229,7 +237,7 @@ async function main() {
 {
   const out = await verifyReviewAccount({
     port: port({
-      authByPhone: { uid: REVIEW_UID, disabled: false, phoneNumber: REVIEW_PHONE },
+      authByPhone: { uid: REVIEW_UID, disabled: false, phoneNumber: SYNTHETIC_PHONE },
       docs: {
         [REVIEW_UID]: {
           exists: true,
@@ -238,6 +246,7 @@ async function main() {
       },
     }),
     expectedProjectId: PROJECT,
+    phoneE164: SYNTHETIC_PHONE,
   });
   assert.equal(out.result, "identity_mismatch");
   assertNoSecrets(blob(out.lines));
@@ -260,7 +269,7 @@ async function main() {
 
 {
   const injected = port({
-    authByPhone: { uid: REVIEW_UID, disabled: false, phoneNumber: REVIEW_PHONE },
+    authByPhone: { uid: REVIEW_UID, disabled: false, phoneNumber: SYNTHETIC_PHONE },
     authByUid: {
       [OTHER_UID]: {
         uid: OTHER_UID,
@@ -325,6 +334,7 @@ async function main() {
     env: {
       GOOGLE_APPLICATION_CREDENTIALS: "/secrets/never-print.json",
       EXPO_PUBLIC_FIREBASE_PROJECT_ID: PROJECT,
+      PLAY_REVIEW_PHONE: SYNTHETIC_PHONE,
     },
     argv: ["--uid", OTHER_UID],
     loadAdmin: () => ({ admin, getApps: () => [] }),

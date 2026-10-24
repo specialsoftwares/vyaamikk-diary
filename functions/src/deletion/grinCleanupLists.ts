@@ -3,7 +3,8 @@
  *
  * THREE DISTINCT FACTS (do not collapse):
  * 1. Implemented grace: functions/src/deletion/finalPurge.ts
- *    DELETION_GRACE_MS = 45 days (SUPERSEDES 15; not 180). After this
+ *    DELETION_GRACE_MS = 45 days for a legacy request. A new version-2
+ *    request uses the separate 15-day erasure deadline. Not 180. After this
  *    cancellation window, non-GRIN data is actually deleted (Play: freeze
  *    ≠ delete). GRIN omitted until INCLUDE_GRIN_IN_ACCOUNT_PURGE.
  * 2. Owner-requested 180-day hold: SUPERSEDED for this clock; not implemented.

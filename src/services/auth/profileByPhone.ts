@@ -4,6 +4,7 @@ import { getFirebaseDb } from "@/config/firebase";
 import type { PhoneE164 } from "@/domain/types";
 import type { UserProfile } from "@/domain/types";
 import { normaliseUserProfile } from "@/services/auth/normalizeProfile";
+import { openBusinessCloud } from "@/services/privacy/businessCloudSeal";
 import { normalizePhoneE164 } from "@/utils/mobileHash";
 
 const USERS = "users";
@@ -20,7 +21,12 @@ export async function loadProfileByPhoneFirestore(
   const { uid } = phoneSnap.data() as { uid: string };
   const userSnap = await getDoc(doc(db, USERS, uid));
   if (!userSnap.exists()) return null;
-  return normaliseUserProfile(uid, userSnap.data() as Record<string, unknown>);
+  const raw = userSnap.data() as Record<string, unknown>;
+  return (await openBusinessCloud(
+    "users",
+    normaliseUserProfile(uid, raw) as unknown as Record<string, unknown>,
+    raw
+  )) as unknown as UserProfile;
 }
 
 /**
@@ -37,5 +43,10 @@ export async function loadProfileByUidFirestore(
   const db = getFirebaseDb();
   const userSnap = await getDoc(doc(db, USERS, uid));
   if (!userSnap.exists()) return null;
-  return normaliseUserProfile(uid, userSnap.data() as Record<string, unknown>);
+  const raw = userSnap.data() as Record<string, unknown>;
+  return (await openBusinessCloud(
+    "users",
+    normaliseUserProfile(uid, raw) as unknown as Record<string, unknown>,
+    raw
+  )) as unknown as UserProfile;
 }

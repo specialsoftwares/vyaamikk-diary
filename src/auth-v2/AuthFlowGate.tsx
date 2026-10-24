@@ -89,6 +89,7 @@ import {
   phoneAuthDiagnosticId,
 } from "@/services/auth/nativePhoneAuthErrors";
 import * as Clipboard from "expo-clipboard";
+import { profileNeedsAgeGate } from "@/domain/ageEligibility";
 import { useAuth } from "@/state/auth";
 import { useT } from "@/i18n";
 import {
@@ -391,6 +392,10 @@ export function AuthFlowGate() {
       if (!opts?.userInitiated && isReviewIntentActive()) {
         return;
       }
+      if (user && profileNeedsAgeGate(user)) {
+        router.replace("/(auth)/age-declaration");
+        return;
+      }
       if (user) {
         markContinuingWizardStep("businessIdentity", user.uid, {
           phoneE164: user.phoneE164,
@@ -506,6 +511,11 @@ export function AuthFlowGate() {
 
         // Fully past email+profile gates → leave auth wrapper (boot continues).
         if (hasAuthoritativeVerifiedEmail(user) && user.profileCompletedAt && !reviewRequested) {
+          if (profileNeedsAgeGate(user)) {
+            router.replace("/(auth)/age-declaration");
+            if (!cancelled) setHydrated(true);
+            return;
+          }
           clearWizardNavigationSession();
           if (!cancelled) handoffToApp();
           return;
@@ -970,6 +980,7 @@ export function AuthFlowGate() {
           params: {
             phoneE164: String(e.details?.phoneE164 ?? challenge.phoneE164),
             deletionScheduledFor: String(e.details?.deletionScheduledFor ?? ""),
+            deletionPolicyVersion: String(e.details?.deletionPolicyVersion ?? ""),
             maskedEmail: String(e.details?.maskedEmail ?? ""),
           },
         });

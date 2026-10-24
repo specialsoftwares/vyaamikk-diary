@@ -11,6 +11,7 @@ import { throwHttpsFromBilling } from "../google/billingHttps";
 import { operatorRequeueReconciliationWorkItem } from "../reconciliationQueue";
 import { isBillingReconciliationOperatorEnabled } from "../reconciliationFlags";
 import { assertAdminAuthorized, type AdminAuthContext } from "../tax/adminAuth";
+import { assertAdmittedCallableUser } from "../../identity/admitCallableUser";
 
 export async function handleRetryReconciliationWorkItem(
   store: FirestoreBillingStore,
@@ -27,6 +28,7 @@ export async function handleRetryReconciliationWorkItem(
 }
 
 export const retryReconciliationWorkItem = onCall({ region: "asia-south1" }, async (request) => {
+  await assertAdmittedCallableUser(request);
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "Sign in required.");
   }

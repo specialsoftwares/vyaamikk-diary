@@ -559,7 +559,7 @@ export default function BusinessIdentityScreen() {
             {t("pendingDeletion.reactivateEmailTitle")}
           </LocaleUiText>
           <LocaleUiText style={styles.emailVerifyHint}>
-            {t("pendingDeletion.reactivateEmailHint")}
+            {t("pendingDeletion.emailCodeHint")}
           </LocaleUiText>
           <TextInput
             style={styles.emailCodeInput}

@@ -20,6 +20,62 @@ export function allUserOwnedStoragePrefixes(uid: string): string[] {
   return USER_STORAGE_CATEGORIES.map((c) => userStorageCategoryPrefix(uid, c));
 }
 
+const OPAQUE_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz";
+
+/** 24 characters from the application random source. No caller text is mixed in. */
+export function opaqueStorageId(random: () => number = Math.random): string {
+  let id = "";
+  for (let i = 0; i < 24; i += 1) {
+    id += OPAQUE_ALPHABET[Math.floor(random() * OPAQUE_ALPHABET.length)];
+  }
+  return id;
+}
+
+export function opaqueStorageObjectName(id: string, extension: string): string {
+  if (!/^[0-9a-z]{24}$/.test(id)) throw new Error("storage_object_id_invalid");
+  const ext = extension.toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (!ext || ext.length > 8) throw new Error("storage_object_extension_invalid");
+  return `${id}.${ext}`;
+}
+
+export function isOpaqueStorageObjectName(name: string): boolean {
+  return /^[0-9a-z]{24}\.[a-z0-9]{1,8}$/.test(name);
+}
+
+/**
+ * New object path. `displayName` is returned for the record and is not placed
+ * in the path. An existing object is opened by the path already stored on it.
+ */
+export function allocateOpaqueUserStoragePath(input: {
+  userId: string;
+  category: UserStorageCategory;
+  recordId?: string;
+  displayName?: string | null;
+  extension: string;
+  random?: () => number;
+}): { storagePath: string; objectName: string; displayName: string } {
+  const userId = input.userId.trim();
+  const recordId = input.recordId?.trim() ?? "";
+  if (!userId) throw new Error("uid required for storage root");
+  if (input.category !== "letterhead" && !recordId) throw new Error("record id required");
+  if (objectNameEmbedsPrivateContent(userId) || objectNameEmbedsPrivateContent(recordId)) {
+    throw new Error("storage_name_embeds_private_content");
+  }
+  const objectName = opaqueStorageObjectName(opaqueStorageId(input.random), input.extension);
+  const storagePath = input.category === "letterhead"
+    ? `${userStorageCategoryPrefix(userId, "letterhead")}${objectName}`
+    : `${userStorageCategoryPrefix(userId, input.category)}${recordId}/${objectName}`;
+  const displayName = input.displayName?.trim() || objectName;
+  return { storagePath, objectName, displayName };
+}
+
+/** An email or international phone is private content and cannot be an object name. */
+export function objectNameEmbedsPrivateContent(name: string): boolean {
+  if (/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(name)) return true;
+  if (/\+\d{8,}/.test(name)) return true;
+  return false;
+}
+
 export function isObjectOwnedByUser(uid: string, objectPath: string): boolean {
   const root = userStorageRootPrefix(uid);
   const path = objectPath.trim().replace(/^\/+/, "");

@@ -1,0 +1,121 @@
+import React, { useEffect, useRef, useState } from "react";
+import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+
+import { PRIVACY_POLICY_SECTIONS } from "@/content/legal/documents";
+import { assessSelfDeclaredDob } from "@/domain/ageEligibility";
+import { callRecordAgeAssessment } from "@/services/auth/identityCallable";
+import { currentAuthMutationGeneration } from "@/services/auth/authSessionFence";
+import { applyCurrentAgeAssessment } from "@/services/auth/ageAssessmentResponse";
+import { useAuth } from "@/state/auth";
+import { useT } from "@/i18n";
+
+/**
+ * Self-declared date of birth. The server decides eligibility and does not keep the date.
+ * Sign-out, support text, and account deletion stay available before the gate is passed.
+ */
+export function AgeDeclarationScreen({
+  onEligible,
+}: {
+  onEligible: (profileCompleted: boolean) => void;
+}) {
+  const t = useT();
+  const { user, signOut, requestAccountDeletion, applyServerProfile } = useAuth();
+  const [dateOfBirth, setDateOfBirth] = useState("");
+  const [message, setMessage] = useState<string | null>(null);
+  const [supportOpen, setSupportOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const flight = useRef(false);
+  const mounted = useRef(true);
+  const currentUser = useRef(user);
+  currentUser.current = user;
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+
+  const support = PRIVACY_POLICY_SECTIONS.find((section) => section.title === "Retention & deletion");
+
+  async function submit() {
+    if (!user || flight.current) return;
+    const local = assessSelfDeclaredDob({ dateOfBirth: dateOfBirth.trim(), nowMs: Date.now() });
+    if (!local.ok) {
+      setMessage(t("ageGate.invalid"));
+      return;
+    }
+    const uid = user.uid;
+    const generation = currentAuthMutationGeneration();
+    const owns = () => mounted.current && currentUser.current?.uid === uid &&
+      currentAuthMutationGeneration() === generation;
+    flight.current = true;
+    setBusy(true);
+    try {
+      const result = await applyCurrentAgeAssessment({
+        generation,
+        isCurrent: owns,
+        request: () => callRecordAgeAssessment(dateOfBirth.trim()),
+        apply: (assessment, ownedGeneration) => applyServerProfile(
+          { ...currentUser.current!, ...assessment }, ownedGeneration
+        ),
+      });
+      if (!result || !owns()) return;
+      if (result.ageEligibility === "eligible") {
+        setDateOfBirth("");
+        onEligible(Boolean(currentUser.current?.profileCompletedAt));
+        return;
+      }
+      setDateOfBirth("");
+      setMessage(t("ageGate.ineligible"));
+    } catch {
+      if (owns()) setMessage(t("ageGate.invalid"));
+    } finally {
+      flight.current = false;
+      if (mounted.current) setBusy(false);
+    }
+  }
+
+  return (
+    <View style={styles.screen}>
+      <Text style={styles.title}>{t("ageGate.title")}</Text>
+      <Text style={styles.body}>{t("ageGate.body")}</Text>
+      <Text style={styles.note}>{t("ageGate.notVerified")}</Text>
+      <Text style={styles.label}>{t("ageGate.dateLabel")}</Text>
+      <TextInput
+        value={dateOfBirth}
+        onChangeText={setDateOfBirth}
+        autoCapitalize="none"
+        autoCorrect={false}
+        placeholder="YYYY-MM-DD"
+        style={styles.input}
+      />
+      {message ? <Text style={styles.message}>{message}</Text> : null}
+      <Pressable disabled={busy} accessibilityState={{ disabled: busy, busy }} onPress={() => void submit()} style={styles.primary}>
+        <Text style={styles.primaryText}>{t("ageGate.continue")}</Text>
+      </Pressable>
+      <Pressable onPress={() => setSupportOpen((open) => !open)}>
+        <Text style={styles.link}>{t("ageGate.support")}</Text>
+      </Pressable>
+      {supportOpen ? (
+        <Text style={styles.body}>{support?.paragraphs.join("\n\n") ?? t("ageGate.supportBody")}</Text>
+      ) : null}
+      <Pressable onPress={() => { setDateOfBirth(""); void signOut(); }}>
+        <Text style={styles.link}>{t("ageGate.signOut")}</Text>
+      </Pressable>
+      <Pressable onPress={() => { setDateOfBirth(""); void requestAccountDeletion(); }}>
+        <Text style={styles.link}>{t("ageGate.deleteAccount")}</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: { flex: 1, padding: 24, justifyContent: "center" },
+  title: { fontSize: 22, fontWeight: "600", marginBottom: 12 },
+  body: { fontSize: 16, marginBottom: 12 },
+  note: { fontSize: 14, marginBottom: 16 },
+  label: { fontSize: 14, marginBottom: 8 },
+  input: { borderWidth: 1, borderRadius: 8, padding: 12, marginBottom: 12 },
+  message: { marginBottom: 12 },
+  primary: { padding: 14, borderRadius: 8, marginBottom: 16 },
+  primaryText: { textAlign: "center", fontWeight: "600" },
+  link: { paddingVertical: 10 },
+});

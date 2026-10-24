@@ -1,4 +1,9 @@
-import { DELETION_GRACE_DAYS } from "@/domain/identityLifecycle";
+import {
+  DELETION_GRACE_DAYS,
+  DELETION_V2_ERASURE_DAYS,
+  DELETION_V2_PROCESSING_ALLOWANCE_DAYS,
+  DELETION_V2_REACTIVATION_DAYS,
+} from "@/domain/identityLifecycle";
 
 export interface LegalSection {
   title: string;
@@ -19,6 +24,7 @@ export const PRIVACY_POLICY_SECTIONS: LegalSection[] = [
     paragraphs: [
       "Account: mobile number, authentication identifiers, Vyaamikk ID (UEID).",
       "Profile: name (required for account), optional business name, field of work, designation, email, logo, language.",
+      "Eligibility: a self-declared date of birth used only to decide whether the account is 18 or older. The date is not stored after the server records the result, the policy version, and the time. This is not an identity-document check and it is not independently verified. Aadhaar is not collected.",
       "Business records: diary entries, purchase orders, customer credit/Dukaan records, letterhead matters, professional packs, drafts, and derived insights.",
       "Location: optional foreground GPS footprints when you enable Location Access; Indian PIN codes you enter; no background location in the current app.",
       "Photos: images you choose for cash-paid attachments or customer photos, and letterhead images already saved in earlier versions.",
@@ -30,6 +36,8 @@ export const PRIVACY_POLICY_SECTIONS: LegalSection[] = [
     title: "How we use information",
     paragraphs: [
       "We use data only to provide the service, secure accounts, schedule local reminders you create, sync cloud data when enabled, and comply with law.",
+      "Running the account, storing the records you create, and securing sign-in are required to provide the service. They are not optional consent choices. Crash diagnostics are optional. Turning them off stops that processing and does not delete the account.",
+      "Business record text and original attachment bytes written by the current production app are stored as ciphertext. Firebase Auth identifiers and operational routing fields stay readable. The signed-in owner can open that ciphertext through the server after the existing session checks. This is not end-to-end encryption, and it is not a claim that the operator is technically incapable of decrypting.",
       "We do not use your data for advertising or cross-app tracking in the current app build.",
     ],
   },
@@ -45,9 +53,11 @@ export const PRIVACY_POLICY_SECTIONS: LegalSection[] = [
   {
     title: "Retention & deletion",
     paragraphs: [
-      `Active data is retained while your account is active. Account deletion starts a ${DELETION_GRACE_DAYS}-day cancellation window before final erasure of app-controlled account data. This window is not a freeze-only hold.`,
+      `Active data is retained while your account is active. Requests already pending keep their original ${DELETION_GRACE_DAYS}-day cancellation window before final erasure of app-controlled account data. This window is not a freeze-only hold.`,
+      `New deletion requests are completed for eligible app-controlled data within ${DELETION_V2_ERASURE_DAYS} days of the server-accepted request. You can reactivate for ${DELETION_V2_REACTIVATION_DAYS} days. The remaining ${DELETION_V2_PROCESSING_ALLOWANCE_DAYS} days are reserved for processing and retries.`,
       "Delete your account in Settings → Delete Account & Data, or request deletion at our web page.",
       "Exported or shared PDFs outside the app cannot be withdrawn or deleted by us.",
+      "These periods do not make every provider backup, legally retained billing record, or PDF you already exported disappear. Firebase Authentication backups can remain for up to about 180 days. Crash diagnostics, where you allowed them, follow the provider’s own retention. Billing and tax records stay for their own legal period. A restored backup is suppressed for an account whose erasure job has completed, but that suppression is not a promise that a provider backup never existed.",
     ],
   },
   {

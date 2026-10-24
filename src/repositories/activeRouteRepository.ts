@@ -1,4 +1,5 @@
 import { getLocalDatabase } from "@/localDb/database";
+import { LocalPayloadUnavailable, openOwnedPayload, sealOwnedPayload } from "@/services/accountDeletion/localPayload";
 
 export interface ActiveRouteRecord {
   userId: string;
@@ -13,7 +14,7 @@ export const activeRouteRepository = {
     db.runSync(
       `INSERT OR REPLACE INTO active_route (user_id, href, params_json, updated_at)
        VALUES (?, ?, ?, ?)`,
-      [userId, href, JSON.stringify(params ?? {}), Date.now()]
+      [userId, href, sealOwnedPayload(userId, JSON.stringify(params ?? {})), Date.now()]
     );
   },
 
@@ -28,8 +29,11 @@ export const activeRouteRepository = {
     if (!row) return null;
     let params: Record<string, string> = {};
     try {
-      params = JSON.parse(row.params_json ?? "{}") as Record<string, string>;
-    } catch {
+      const opened = openOwnedPayload(row.user_id, row.params_json ?? "{}");
+      if (opened.state !== "ready") throw new LocalPayloadUnavailable(opened.reason);
+      params = JSON.parse(opened.value || "{}") as Record<string, string>;
+    } catch (error) {
+      if (error instanceof LocalPayloadUnavailable) throw error;
       params = {};
     }
     return {

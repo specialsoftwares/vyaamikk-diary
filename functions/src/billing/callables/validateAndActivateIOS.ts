@@ -24,6 +24,7 @@ import { FirestoreBillingStore } from "../firestoreBillingStore";
 import { throwHttpsFromBilling } from "../google/billingHttps";
 import { consumeBillingRateLimit } from "../rateLimit";
 import { BILLING_DIAG_RUNTIME_SECRETS } from "../secrets";
+import { assertAdmittedCallableUser } from "../../identity/admitCallableUser";
 
 export async function handleValidateAndActivateIOS(
   deps: IosBillingDeps,
@@ -73,6 +74,7 @@ function productionDeps(): IosBillingDeps {
 export const validateAndActivateIOS = onCall(
   { region: "asia-south1", secrets: BILLING_DIAG_RUNTIME_SECRETS },
   async (request) => {
+    await assertAdmittedCallableUser(request);
     if (!request.auth?.uid) {
       throw new HttpsError("unauthenticated", "Sign in required.");
     }

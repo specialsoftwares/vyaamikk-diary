@@ -54,6 +54,11 @@ export default function CompleteProfileScreen() {
       return;
     }
 
+    if (user.ageEligibility !== "eligible" && !reviewEditTarget) {
+      router.replace("/(auth)/age-declaration");
+      return;
+    }
+
     // Targeted Review edit owns its own Back/Save → Review contract.
     if (reviewEditTarget) return;
 

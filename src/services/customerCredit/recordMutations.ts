@@ -1,9 +1,23 @@
-import { doc, getDoc, setDoc, type Firestore } from "firebase/firestore";
+import { doc, type Firestore } from "firebase/firestore";
 
 import { AppError } from "@/domain/errors";
 import type { CustomerCreditRecord } from "@/domain/customerCredit";
+import { currentAuthMutationGeneration } from "@/services/auth/authSessionFence";
+import {
+  commitExpectedRevision,
+  decideIssuedRetry,
+  nextContentRevision,
+  RevisionConflict,
+  issuedSessionError,
+  RevisionUnknown,
+  revisionCommitRuntime,
+  revisionRejectionCode,
+} from "@/services/privacy/expectedRevisionCommit";
+
 import { appendPayment, applyFullClosure } from "./shared";
 import type { AddCreditPaymentInput, CloseFullyPaidInput } from "./types";
+
+const RETRIES = 5;
 
 function toCloud(record: CustomerCreditRecord): Record<string, unknown> {
   const { pdfUri: _pdf, customerPhoto: _photo, closure, ...rest } = record;
@@ -15,10 +29,121 @@ function recordRef(db: Firestore, userId: string, recordId: string) {
   return doc(db, "users", userId, "customerCreditRecords", recordId);
 }
 
+export async function mutateCustomerCreditOnDb(
+  db: Firestore,
+  userId: string,
+  recordId: string,
+  mutate: (existing: CustomerCreditRecord, now: number) => CustomerCreditRecord,
+  parseExisting: (id: string, data: Record<string, unknown>) => CustomerCreditRecord,
+  nowMs = Date.now(),
+  options?: {
+    restoreRaw?: (raw: Record<string, unknown>) => Promise<Record<string, unknown>>;
+    protectCloud?: (
+      record: CustomerCreditRecord,
+      raw: Record<string, unknown>
+    ) => Promise<Record<string, unknown>>;
+    currentGeneration?: () => number;
+  }
+): Promise<CustomerCreditRecord> {
+  if (!userId) throw new AppError("permission_denied", "Not signed in.");
+  const ref = recordRef(db, userId, recordId);
+  const readGeneration = options?.currentGeneration ?? currentAuthMutationGeneration;
+  const generation = readGeneration();
+  let lastIssued: unknown = null;
+  for (let attempt = 0; attempt < RETRIES; attempt += 1) {
+    if (readGeneration() !== generation) {
+      throw new AppError("permission_denied", "Sign in again.", undefined, { reason: "session_changed" });
+    }
+    const snap = await revisionCommitRuntime.getDoc(ref);
+    if (!snap.exists()) throw new AppError("not_found", "Record not found.");
+    const stored = snap.data() as Record<string, unknown>;
+    const expectedRevision = Number(stored.updatedAt);
+    const raw = options?.restoreRaw ? await options.restoreRaw(stored) : stored;
+    if (readGeneration() !== generation) {
+      throw new AppError("permission_denied", "Sign in again.", undefined, { reason: "session_changed" });
+    }
+    const existing = parseExisting(snap.id, raw);
+    const changed = mutate(existing, nowMs);
+    if (changed === existing) return existing;
+    const stamped = { ...changed, updatedAt: nextContentRevision(existing.updatedAt, nowMs) };
+    const cloud = options?.protectCloud ? await options.protectCloud(stamped, stored) : toCloud(stamped);
+    try {
+      await commitExpectedRevision({
+        db,
+        ref,
+        revisionRef: doc(db, "users", userId, "customerCreditRecords", recordId, "opRevision", "current"),
+        expectedRevision,
+        cloud,
+        generationAtStart: generation,
+        currentGeneration: readGeneration,
+      });
+      return stamped;
+    } catch (error) {
+      if (error instanceof RevisionConflict) {
+        lastIssued = null;
+        continue;
+      }
+      if (error instanceof AppError) throw error;
+      const kind = error instanceof RevisionUnknown ? "unknown" : revisionRejectionCode(error) ? "rejected" : null;
+      if (!kind) throw error;
+      const stillOwned = () => readGeneration() === generation;
+      if (!stillOwned()) throw issuedSessionError(kind);
+      let read: "unavailable" | "cached" | "deleted" | "present" | "absent" = "unavailable";
+      let revisionMoved = false;
+      let currentRecord: CustomerCreditRecord | null = null;
+      try {
+        const after = await revisionCommitRuntime.getDoc(ref);
+        if (!stillOwned()) throw issuedSessionError(kind);
+        if (after.metadata?.fromCache === true) {
+          read = "cached";
+        } else if (!after.exists()) {
+          read = "deleted";
+        } else {
+          const afterStored = after.data() as Record<string, unknown>;
+          revisionMoved = Number(afterStored.updatedAt) !== expectedRevision;
+          const afterRaw = options?.restoreRaw ? await options.restoreRaw(afterStored) : afterStored;
+          if (!stillOwned()) throw issuedSessionError(kind);
+          const afterExisting = parseExisting(after.id, afterRaw);
+          const again = mutate(afterExisting, nowMs);
+          if (again === afterExisting) {
+            read = "present";
+            currentRecord = afterExisting;
+          } else {
+            read = "absent";
+          }
+        }
+      } catch (reconcileError) {
+        if (reconcileError instanceof AppError) throw reconcileError;
+        read = "unavailable";
+      }
+      if (!stillOwned()) throw issuedSessionError(kind);
+      const decision = decideIssuedRetry({ kind, read, revisionMoved });
+      if (decision === "return_current" && currentRecord) {
+        if (!stillOwned()) throw issuedSessionError(kind);
+        return currentRecord;
+      }
+      if (decision === "retry_same") {
+        if (!stillOwned()) throw issuedSessionError(kind);
+        lastIssued = error;
+        continue;
+      }
+      if (decision === "missing") throw new AppError("not_found", "Record not found.");
+      throw error;
+    }
+  }
+  if (lastIssued) throw lastIssued;
+  throw new AppError(
+    "save_failed",
+    "This record changed on another device. Try again.",
+    undefined,
+    { reason: "revision_conflict" }
+  );
+}
+
 /**
  * Firestore payment append used by the production Customer Credit repository.
- * Parameterised with `db` so emulator tests can exercise the same write path
- * without loading the React Native firebase app singleton.
+ * Encryption, when supplied, runs outside the commit. A lost acknowledgement
+ * retries the same payment id against a fresh read.
  */
 export async function addCustomerCreditPaymentOnDb(
   db: Firestore,
@@ -26,16 +151,25 @@ export async function addCustomerCreditPaymentOnDb(
   recordId: string,
   payment: AddCreditPaymentInput,
   parseExisting: (id: string, data: Record<string, unknown>) => CustomerCreditRecord,
-  nowMs = Date.now()
+  nowMs = Date.now(),
+  options?: {
+    restoreRaw?: (raw: Record<string, unknown>) => Promise<Record<string, unknown>>;
+    protectCloud?: (
+      record: CustomerCreditRecord,
+      raw: Record<string, unknown>
+    ) => Promise<Record<string, unknown>>;
+    currentGeneration?: () => number;
+  }
 ): Promise<CustomerCreditRecord> {
-  if (!userId) throw new AppError("permission_denied", "Not signed in.");
-  const ref = recordRef(db, userId, recordId);
-  const snap = await getDoc(ref);
-  if (!snap.exists()) throw new AppError("not_found", "Record not found.");
-  const existing = parseExisting(snap.id, snap.data() as Record<string, unknown>);
-  const next = appendPayment(existing, payment, nowMs);
-  await setDoc(ref, toCloud(next), { merge: true });
-  return next;
+  return mutateCustomerCreditOnDb(
+    db,
+    userId,
+    recordId,
+    (existing, now) => appendPayment(existing, payment, now),
+    parseExisting,
+    nowMs,
+    options
+  );
 }
 
 /** Firestore full-closure write used by the production Customer Credit repository. */
@@ -44,22 +178,32 @@ export async function closeCustomerCreditFullyPaidOnDb(
   userId: string,
   input: CloseFullyPaidInput,
   parseExisting: (id: string, data: Record<string, unknown>) => CustomerCreditRecord,
-  nowMs = Date.now()
+  nowMs = Date.now(),
+  options?: {
+    restoreRaw?: (raw: Record<string, unknown>) => Promise<Record<string, unknown>>;
+    protectCloud?: (
+      record: CustomerCreditRecord,
+      raw: Record<string, unknown>
+    ) => Promise<Record<string, unknown>>;
+    currentGeneration?: () => number;
+  }
 ): Promise<CustomerCreditRecord> {
-  if (!userId) throw new AppError("permission_denied", "Not signed in.");
-  const ref = recordRef(db, userId, input.recordId);
-  const snap = await getDoc(ref);
-  if (!snap.exists()) throw new AppError("not_found", "Record not found.");
-  const existing = parseExisting(snap.id, snap.data() as Record<string, unknown>);
-  const next = applyFullClosure(
-    existing,
-    input.closure,
-    {
-      appendPayment: input.appendFinalPayment !== false,
-      clientPaymentId: input.clientMutationId,
-    },
-    nowMs
+  return mutateCustomerCreditOnDb(
+    db,
+    userId,
+    input.recordId,
+    (existing, now) =>
+      applyFullClosure(
+        existing,
+        input.closure,
+        {
+          appendPayment: input.appendFinalPayment !== false,
+          clientPaymentId: input.clientMutationId,
+        },
+        now
+      ),
+    parseExisting,
+    nowMs,
+    options
   );
-  await setDoc(ref, toCloud(next), { merge: true });
-  return next;
 }

@@ -41,7 +41,7 @@ Owner/tester must complete **email verification and profile setup on a productio
 
 **Name:** Test Account for Play Review  
 
-**Username / phone:** `+91 9000000000`  
+**Username / phone:** `[PLAY_REVIEW_PHONE]`  
 
 **Password:** leave **blank** (phone OTP; no password).
 
@@ -54,9 +54,9 @@ The review account is pre-configured. Email verification and business
 profile setup are already complete. You should reach the main app
 (You / Calendar / Settings) after sign-in.
 
-1. Enter phone number +91 9000000000
+1. Enter phone number [PLAY_REVIEW_PHONE]
 2. Tap Send OTP
-3. Enter verification code 654321
+3. Enter verification code [PLAY_REVIEW_CODE]
 4. Continue into the main app. Do not create a new profile. Do not
    use a personal or founder email inbox.
 

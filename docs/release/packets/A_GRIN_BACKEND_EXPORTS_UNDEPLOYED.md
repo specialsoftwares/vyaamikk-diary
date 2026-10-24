@@ -284,7 +284,7 @@ No pending-deletion replay exception.
   `{ ownerUid: uid, status: "active" }` for those testers.
 - Changing `EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED` does not grant these writes.
 
-Play reviewer phone fixture (`+91 9000000000`) is **not** GRIN admission unless
+Play reviewer phone fixture (`[PLAY_REVIEW_PHONE]`) is **not** GRIN admission unless
 that Auth uid is explicitly seeded.
 
 ## 7. Service identities and permission matrix

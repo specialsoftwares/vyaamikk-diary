@@ -1,5 +1,7 @@
 # Vyaamikk Diary — Firebase Storage Security Model
 
+**22 October 2026 checkpoint (`06d3fcd`).** Rules and path code exist in the repo. Bucket versioning, soft-delete, and IAM were not readable (`LIVE_PENDING`). Google default AES-256 does not stop an authorized database reader from seeing plaintext. App-generated PDF cloud backup stays off (`PDF_CLOUD_BACKUP_ENABLED = false`). Original photos can still be uploaded.
+
 ## 1. Purpose
 
 User-owned binary content (letterhead templates, Cash Paid receipt photos, future PDF backups) is stored in **Firebase Storage** under strict per-user paths. Firestore holds metadata and **`storagePath`** as the canonical reference — not long-lived public URLs.

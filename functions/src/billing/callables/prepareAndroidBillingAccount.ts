@@ -19,6 +19,7 @@ import { ensurePlayAccountIndex } from "../google/playOwnership";
 import type { BillingStore } from "../store";
 import { FirestoreBillingStore } from "../firestoreBillingStore";
 import { getFirestore } from "firebase-admin/firestore";
+import { assertAdmittedCallableUser } from "../../identity/admitCallableUser";
 
 export async function handlePrepareAndroidBillingAccount(
   store: BillingStore,
@@ -34,6 +35,7 @@ export async function handlePrepareAndroidBillingAccount(
 export const prepareAndroidBillingAccount = onCall(
   { region: "asia-south1" },
   async (request) => {
+    await assertAdmittedCallableUser(request);
     if (!request.auth?.uid) {
       throw new HttpsError("unauthenticated", "Sign in required.");
     }

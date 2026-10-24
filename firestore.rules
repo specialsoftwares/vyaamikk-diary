@@ -12,11 +12,64 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     function isSignedIn() {
-      return request.auth != null;
+      return request.auth != null && sessionNotRevoked();
+    }
+
+    // Phone auth_time is the native sign-in. Custom tokens must carry the
+    // server-stamped vydOriginAuthTime. Missing custom claims stay at 0 so a
+    // pre-revocation token redeemed later is not admitted. Equal seconds deny.
+    // No authSecurity document means no logout-all cutoff yet.
+    function sessionOriginSeconds() {
+      return request.auth.token.firebase.sign_in_provider == 'phone'
+        ? int(request.auth.token.auth_time)
+        : (
+            request.auth.token.firebase.sign_in_provider == 'custom'
+            && request.auth.token.keys().hasAll(['vydOriginAuthTime'])
+              ? int(request.auth.token.vydOriginAuthTime)
+              : 0
+          );
+    }
+
+    function sessionNotRevoked() {
+      return !exists(/databases/$(database)/documents/authSecurity/$(request.auth.uid))
+        || sessionOriginSeconds()
+          > int(get(/databases/$(database)/documents/authSecurity/$(request.auth.uid)).data.get('revokedBeforeAuthTimeSeconds', 0));
+    }
+
+    // Phone ID tokens and mintClientAuthToken do not carry authorityWatermark.
+    // A closed fence therefore applies to every token. Required mode is the
+    // admin document restoreControl/mode, not the age of a token. While that
+    // document is absent, a missing claim stays compatible unless the fence
+    // is closed.
+    function restoreClosed() {
+      let fence = /databases/$(database)/documents/restoreControl/current;
+      return exists(fence) && get(fence).data.get('closed', false) == true;
+    }
+
+    function restoreModeAllows() {
+      let mode = /databases/$(database)/documents/restoreControl/mode;
+      let fence = /databases/$(database)/documents/restoreControl/current;
+      let required = exists(mode) && get(mode).data.get('required', false) == true;
+      let fenceData = exists(fence) ? get(fence).data : null;
+      return !required || (
+        fenceData != null
+        && fenceData.get('closed', false) == false
+        && fenceData.get('reconciled', false) == true
+        && fenceData.get('watermark', 0) is int
+        && fenceData.get('watermark', 0) > 0
+        && request.auth.token.keys().hasAny(['authorityWatermark'])
+        && fenceData.get('watermark', 0) == request.auth.token.authorityWatermark
+      );
+    }
+
+    function restoreClaimAllows() {
+      return request.auth.token.get('erased', false) != true
+        && !restoreClosed()
+        && restoreModeAllows();
     }
 
     function isOwner(uid) {
-      return isSignedIn() && request.auth.uid == uid;
+      return isSignedIn() && request.auth.uid == uid && restoreClaimAllows();
     }
 
     function userData(uid) {
@@ -27,8 +80,16 @@ service cloud.firestore {
       return userData(uid).get('status', 'active');
     }
 
+    function deletionJobAllowsActivity(uid) {
+      let path = /databases/$(database)/documents/deletionJobs/$(uid);
+      return !exists(path) || get(path).data.get('status', '') != 'completed';
+    }
+
     function isActiveUser(uid) {
-      return isOwner(uid) && userStatus(uid) == 'active';
+      return isOwner(uid)
+        && userStatus(uid) == 'active'
+        && userData(uid).get('ageEligibility', '') == 'eligible'
+        && deletionJobAllowsActivity(uid);
     }
 
     function identityLockedFieldsUnchanged() {
@@ -50,6 +111,10 @@ service cloud.firestore {
         && request.resource.data.get('createdAt', 0) == resource.data.get('createdAt', 0)
         && request.resource.data.get('retiredUeid', false) == resource.data.get('retiredUeid', false)
         && request.resource.data.get('deletedAt', null) == resource.data.get('deletedAt', null)
+        && request.resource.data.get('ageEligibility', '') == resource.data.get('ageEligibility', '')
+        && request.resource.data.get('agePolicyVersion', '') == resource.data.get('agePolicyVersion', '')
+        && request.resource.data.get('ageAssessedAt', 0) == resource.data.get('ageAssessedAt', 0)
+        && request.resource.data.get('ageMethod', '') == resource.data.get('ageMethod', '')
         && identityLockedFieldsUnchanged();
     }
 
@@ -88,23 +153,50 @@ service cloud.firestore {
         'gstinVerificationState',
         'issuerIdentitySnapshotId',
         'onboardingProfileVersion',
+        'contentSeal',
       ]);
+    }
+
+    function profileSealAccepted() {
+      return !request.resource.data.keys().hasAny(['contentSeal'])
+        || (
+          request.resource.data.contentSeal is map
+          && (
+            request.resource.data.contentSeal.v == 1
+            || (
+              request.resource.data.contentSeal.v == 2
+              && request.resource.data.contentSeal.keyId is string
+              && request.resource.data.contentSeal.keyId.size() > 0
+              && request.resource.data.contentSeal.keyId.size() <= 64
+            )
+          )
+          && request.resource.data.contentSeal.uid == request.auth.uid
+          && request.resource.data.contentSeal.recordId == request.auth.uid
+          && request.resource.data.contentSeal.revision == request.resource.data.updatedAt
+          && request.resource.data.get('displayName', null) == null
+          && request.resource.data.get('businessName', null) == null
+          && request.resource.data.get('gstin', null) == null
+          && request.resource.data.get('pinCode', null) == null
+        );
     }
 
     function clientDeletionRequestAllowed() {
       return resource.data.get('status', 'active') == 'active'
         && request.resource.data.get('status', 'active') == 'pending_deletion'
-        && request.resource.data.get('deletionRequestedAt', 0) is int
-        && request.resource.data.get('deletionScheduledFor', 0) is int
         && request.resource.data.get('deletionCompletedAt', null) == null
         && request.resource.data.get('retiredUeid', false) == false
         && request.resource.data.get('ueid', '') == resource.data.get('ueid', '')
         && request.resource.data.get('phoneE164', '') == resource.data.get('phoneE164', '')
         && request.resource.data.get('emailHash', null) == resource.data.get('emailHash', null)
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'status',
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny([
           'deletionRequestedAt',
           'deletionScheduledFor',
+          'deletionPolicyVersion',
+          'reactivationCutoff',
+          'erasureDeadline',
+        ])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status',
           'deletionCompletedAt',
           'retiredUeid',
           'mobileHash',
@@ -204,6 +296,51 @@ service cloud.firestore {
       return request.resource.data.title is string
         && request.resource.data.title.size() > 0
         && request.resource.data.title.size() <= 120;
+    }
+
+    function creditOpAdvanced(uid, recordId) {
+      let gate = /databases/$(database)/documents/users/$(uid)/customerCreditRecords/$(recordId)/opRevision/current;
+      return existsAfter(gate)
+        && getAfter(gate).data.revision is int
+        && getAfter(gate).data.base is int
+        && getAfter(gate).data.revision > getAfter(gate).data.base
+        && getAfter(gate).data.revision == request.resource.data.updatedAt
+        && (
+          (!exists(gate) && getAfter(gate).data.base == resource.data.updatedAt)
+          || (exists(gate) && getAfter(gate).data.base == get(gate).data.revision)
+        );
+    }
+
+    function acceptedSealVersion() {
+      return request.resource.data.contentSeal.v == 1
+        || (
+          request.resource.data.contentSeal.v == 2
+          && request.resource.data.contentSeal.keyId is string
+          && request.resource.data.contentSeal.keyId.size() > 0
+          && request.resource.data.contentSeal.keyId.size() <= 64
+        );
+    }
+
+    function validOwnerSeal(recordId) {
+      return request.resource.data.contentSeal is map
+        && acceptedSealVersion()
+        && request.resource.data.contentSeal.uid == request.auth.uid
+        && request.resource.data.contentSeal.recordId == recordId
+        && request.resource.data.contentSeal.revision == request.resource.data.updatedAt;
+    }
+
+    function validDiarySeal(entryId) {
+      return request.resource.data.contentSeal is map
+        && acceptedSealVersion()
+        && request.resource.data.contentSeal.uid == request.auth.uid
+        && request.resource.data.contentSeal.recordId == entryId
+        && request.resource.data.contentSeal.revision == request.resource.data.updatedAt
+        && request.resource.data.title == 'sealed';
+    }
+
+    function diaryContentAccepted(entryId) {
+      return (entryTitleValid() && !request.resource.data.keys().hasAny(['contentSeal']))
+        || validDiarySeal(entryId);
     }
 
     // ---- Subscription & billing helpers ---------------------------------
@@ -364,6 +501,28 @@ service cloud.firestore {
              && letterheadParentInputSupported(parent.input);
     }
 
+    // A sealed parent has no letter input. The envelope shape is not proof of
+    // the ciphertext; mirror payload validation and the quota exemption stay.
+    function isSealedLetterheadParent(parent, parentId) {
+      return parent.keys().hasAll(['userId', 'title', 'contentSeal'])
+             && parent.userId is string
+             && parent.title == 'sealed'
+             && parent.get('input', null) == null
+             && parent.get('pdfUri', null) == null
+             && parent.contentSeal is map
+             && (parent.contentSeal.v == 1
+            || (parent.contentSeal.v == 2
+                && parent.contentSeal.keyId is string
+                && parent.contentSeal.keyId.size() > 0
+                && parent.contentSeal.keyId.size() <= 64))
+             && parent.contentSeal.alg == 'AES-256-GCM'
+             && parent.contentSeal.uid == request.auth.uid
+             && parent.contentSeal.collection == 'letterheadDocs'
+             && parent.contentSeal.purpose == 'letterhead_document'
+             && parent.contentSeal.recordId == parentId
+             && parent.contentSeal.revision == parent.get('updatedAt', 0);
+    }
+
     function letterheadPdfUriAbsentOrNull(data) {
       return data.get('pdfUri', null) == null;
     }
@@ -425,6 +584,10 @@ service cloud.firestore {
              && after.get('letterheadDocumentId', '')
                   == before.get('letterheadDocumentId', '')
              && (
+               !request.resource.data.keys().hasAny(['contentSeal'])
+               || letterheadSealedMirrorPayload(after)
+             )
+             && (
                !affected.hasAny(['body'])
                || (after.body is string && after.body.size() > 0)
              )
@@ -443,6 +606,32 @@ service cloud.firestore {
              && letterheadMirrorPayloadSupported(request.resource.data.get('payload', {}));
     }
 
+    // Protected mirror: the letter body stays in the diary envelope.
+    // The only readable payload field is the parent linkage.
+    function letterheadSealedMirrorPayload(payload) {
+      return payload is map
+             && payload.keys().hasOnly(['letterheadDocumentId'])
+             && payload.letterheadDocumentId is string
+             && payload.letterheadDocumentId.size() > 0
+             && payload.letterheadDocumentId.size() <= 200;
+    }
+
+    function letterheadSealedMirrorCreateShape(entryId) {
+      return validDiarySeal(entryId)
+             && request.resource.data.contentSeal.collection == 'entries'
+             && request.resource.data.contentSeal.purpose == 'diary'
+             && request.resource.data.get('notes', null) == null
+             && request.resource.data.get('reminder', null) == null
+             && request.resource.data.get('attachments', []).size() == 0
+             && letterheadSealedMirrorPayload(request.resource.data.payload);
+    }
+
+    function letterheadMirrorShapeAccepted(entryId) {
+      return request.resource.data.keys().hasAny(['contentSeal'])
+             ? letterheadSealedMirrorCreateShape(entryId)
+             : letterheadMirrorCreateShape();
+    }
+
     function letterheadMirrorParentId() {
       return request.resource.data.get('payload', {}).get('letterheadDocumentId', '');
     }
@@ -456,12 +645,12 @@ service cloud.firestore {
       return request.resource.data.entryType == 'letterhead_matter'
              && request.resource.data.get('source', '') == 'letterhead'
              && request.resource.data.userId == uid
-             && letterheadMirrorCreateShape()
+             && letterheadMirrorShapeAccepted(entryId)
              && parentId is string
              && parentId.size() > 0
              && parentId.size() <= 200
              && entryId == parentId + ':matter'
-             && isSupportedLetterheadParentShape(parent)
+             && (isSupportedLetterheadParentShape(parent) || isSealedLetterheadParent(parent, parentId))
              && parent.userId == uid;
     }
 
@@ -474,7 +663,7 @@ service cloud.firestore {
              && parentId is string
              && parentId.size() > 0
              && entryId == parentId + ':matter'
-             && isSupportedLetterheadParentShape(parent)
+             && (isSupportedLetterheadParentShape(parent) || isSealedLetterheadParent(parent, parentId))
              && parent.userId == uid;
     }
 
@@ -565,9 +754,13 @@ service cloud.firestore {
       allow create: if false;
       allow update: if isOwner(uid)
                     && request.resource.data.get('uid', uid) == uid
-                    && (
+                      && (
                       clientDeletionRequestAllowed()
-                      || (protectedIdentityFieldsUnchanged() && clientProfilePatchAllowed())
+                      || (
+                        protectedIdentityFieldsUnchanged()
+                        && clientProfilePatchAllowed()
+                        && profileSealAccepted()
+                      )
                     );
       allow delete: if false;
 
@@ -576,7 +769,7 @@ service cloud.firestore {
         allow read: if isOwner(uid);
         allow create: if isActiveUser(uid)
                       && request.resource.data.userId == uid
-                      && entryTitleValid()
+                      && diaryContentAccepted(entryId)
                       && (
                         isValidatedLetterheadMirrorCreate(uid, entryId)
                         || (
@@ -589,28 +782,25 @@ service cloud.firestore {
                       );
         allow update: if isActiveUser(uid)
                       && request.resource.data.userId == uid
-                      && entryTitleValid()
+                      && diaryContentAccepted(entryId)
                       && letterheadMirrorLinkagePreserved();
         allow delete: if isActiveUser(uid);
       }
 
-      // Party ledger projections are server-written. The owner may read them.
-      // Client creates, updates, and deletes are denied. There is no other match.
+      // Party-ledger figures are recomputed on the device from the source
+      // records. These collections are not a client-readable projection.
+      // Admin deletion can still remove them. There is no other match.
       match /partyLedgerProjections/{projectionId} {
-        allow read: if isOwner(uid);
-        allow write: if false;
+        allow read, write: if false;
       }
       match /partyLedgerBuckets/{bucketId} {
-        allow read: if isOwner(uid);
-        allow write: if false;
+        allow read, write: if false;
       }
       match /partyLedgerCommands/{commandId} {
-        allow read: if isOwner(uid);
-        allow write: if false;
+        allow read, write: if false;
       }
       match /partyLedgerCheckpoints/{checkpointId} {
-        allow read: if isOwner(uid);
-        allow write: if false;
+        allow read, write: if false;
       }
 
       // ---- Professional service packs -----------------------------------
@@ -618,18 +808,30 @@ service cloud.firestore {
         allow read: if isOwner(uid);
         allow create: if isActiveUser(uid)
                       && request.resource.data.userId == uid
-                      && request.resource.data.title is string
-                      && request.resource.data.title.size() > 0
-                      && request.resource.data.title.size() <= 200
+                      && (
+                        (
+                          request.resource.data.title is string
+                          && request.resource.data.title.size() > 0
+                          && request.resource.data.title.size() <= 200
+                          && !request.resource.data.keys().hasAny(['contentSeal'])
+                        )
+                        || (validOwnerSeal(packId) && request.resource.data.title == 'sealed')
+                      )
                       && (
                         !quotaEnforcementOn(uid)
                         || usageConsumedForRecord(uid, 'professionalPacks', packId)
                       );
         allow update: if isActiveUser(uid)
                       && request.resource.data.userId == uid
-                      && request.resource.data.title is string
-                      && request.resource.data.title.size() > 0
-                      && request.resource.data.title.size() <= 200;
+                      && (
+                        (
+                          request.resource.data.title is string
+                          && request.resource.data.title.size() > 0
+                          && request.resource.data.title.size() <= 200
+                          && !request.resource.data.keys().hasAny(['contentSeal'])
+                        )
+                        || (validOwnerSeal(packId) && request.resource.data.title == 'sealed')
+                      );
         allow delete: if isActiveUser(uid);
       }
 
@@ -640,11 +842,20 @@ service cloud.firestore {
         allow read: if isOwner(uid);
         allow create: if isActiveUser(uid)
                       && request.resource.data.userId == uid
-                      && isSupportedLetterheadParentShape(request.resource.data)
+                      && (isSupportedLetterheadParentShape(request.resource.data)
+                          || isSealedLetterheadParent(request.resource.data, docId))
                       && letterheadPdfUriAbsentOrNull(request.resource.data);
         allow update: if isActiveUser(uid)
                       && request.resource.data.userId == uid
-                      && letterheadParentUpdateAllowed();
+                      && (
+                        letterheadParentUpdateAllowed()
+                        || (
+                          validOwnerSeal(docId)
+                          && request.resource.data.userId == resource.data.userId
+                          && request.resource.data.title == 'sealed'
+                          && request.resource.data.get('pdfUri', null) == null
+                        )
+                      );
         allow delete: if isActiveUser(uid);
       }
 
@@ -664,8 +875,33 @@ service cloud.firestore {
                         || usageConsumedForRecord(uid, 'customerCreditRecords', recordId)
                       );
         allow update: if isActiveUser(uid)
-                      && request.resource.data.userId == uid;
+                      && request.resource.data.userId == uid
+                      && (
+                        creditOpAdvanced(uid, recordId)
+                        || request.resource.data.diff(resource.data).affectedKeys()
+                          .hasOnly(['completedSteps', 'completedStepsUpdatedAt'])
+                      );
         allow delete: if isActiveUser(uid);
+
+        // Small integer gate. A direct credit update that does not advance it
+        // is denied. The sealed body is not compared here.
+        match /opRevision/{docId} {
+          allow read: if isOwner(uid);
+          allow create: if isActiveUser(uid)
+                        && docId == 'current'
+                        && request.resource.data.keys().hasOnly(['base', 'revision'])
+                        && request.resource.data.base is int
+                        && request.resource.data.revision is int
+                        && request.resource.data.revision > request.resource.data.base;
+          allow update: if isActiveUser(uid)
+                        && docId == 'current'
+                        && request.resource.data.keys().hasOnly(['base', 'revision'])
+                        && request.resource.data.base is int
+                        && request.resource.data.revision is int
+                        && request.resource.data.revision > request.resource.data.base
+                        && request.resource.data.base == resource.data.revision;
+          allow delete: if false;
+        }
       }
 
       // ---- Purchase orders ----------------------------------------------
@@ -717,6 +953,11 @@ service cloud.firestore {
       }
 
       // ---- Trusted devices (non-authoritative client registry) ----------
+      match /processingPurposes/{purposeId} {
+        allow read: if isOwner(uid);
+        allow write: if false;
+      }
+
       match /trustedDevices/{deviceId} {
         allow read: if isOwner(uid);
         allow create: if isActiveUser(uid)
@@ -861,6 +1102,16 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Outside a user restore snapshot these are still admin-only. Clients
+    // cannot delete an erasure manifest to reopen an account.
+    match /erasureManifests/{uid} {
+      allow read, write: if false;
+    }
+
+    match /restoreControl/{docId} {
+      allow read, write: if false;
+    }
+
     // ---- Billing backend collections (Admin / Functions only) -----------
     // Zero client access. No "admin user" client exceptions exist on
     // purpose: the Admin SDK bypasses Rules, so nothing legitimate is ever
@@ -940,6 +1191,11 @@ service cloud.firestore {
     match /globalStats/paperSaved {
       allow read: if true;
       allow write: if false;
+    }
+
+    // Server-owned logout-all cutoff. Rules read it with get(); clients cannot.
+    match /authSecurity/{uid} {
+      allow read, write: if false;
     }
   }
 }

@@ -11,10 +11,14 @@
  */
 
 import * as FileSystem from "expo-file-system/legacy";
-import { deleteObject, getDownloadURL, ref } from "firebase/storage";
+import { deleteObject, getDownloadURL, getMetadata, ref } from "firebase/storage";
 
-import { env, isFirebaseConfigured } from "@/config/env";
+import { env, getActiveBackend, isFirebaseConfigured } from "@/config/env";
+import { CONTENT_SEAL_MEDIA_TYPE, shouldSealProductionWrites } from "@/constants/contentSeal";
+import { PDF_CLOUD_BACKUP_ENABLED } from "@/constants/pdfPrivacy";
+import { isDiaryContentSeal } from "@/services/privacy/diarySealDocument";
 import { FirebaseNotConfiguredError, getFirebaseStorage } from "@/config/firebase";
+import { allocateOpaqueUserStoragePath, objectNameEmbedsPrivateContent } from "@/services/storage/userOwnedStoragePaths";
 import {
   describeLetterheadSaveFailure,
   recordLetterheadSaveDiagnostic,
@@ -32,6 +36,9 @@ export type UserStorageCategory = "letterhead" | "attachments" | "pdfs";
 
 export interface StorageUploadResult {
   storagePath: string;
+  objectName?: string;
+  /** Kept for the owning record. It is not part of the object name. */
+  displayName?: string;
   downloadUrl?: string;
   localBytes?: number;
   remoteBytes?: number;
@@ -59,6 +66,10 @@ export function getUserStoragePath(
   fileName?: string
 ): string {
   const safeUserId = userId.trim();
+  const candidates = [recordIdOrFileName, fileName ?? ""];
+  if (candidates.some((name) => objectNameEmbedsPrivateContent(name))) {
+    throw new Error("storage_name_embeds_private_content");
+  }
   if (category === "letterhead") {
     return `users/${safeUserId}/letterhead/${sanitizeStorageFileName(recordIdOrFileName)}`;
   }
@@ -148,6 +159,42 @@ export async function uploadLocalFileToPath(
   ownership?: StorageUploadSession
 ): Promise<StorageUploadResult> {
   if (!isUserStorageAvailable()) throw new FirebaseNotConfiguredError();
+  if (!PDF_CLOUD_BACKUP_ENABLED && storagePath.includes("/pdfs/")) {
+    throw new Error("pdf_cloud_backup_disabled");
+  }
+  if (shouldSealProductionWrites(getActiveBackend())) {
+    const base64 = await FileSystem.readAsStringAsync(localUri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    const { sealAttachmentBase64 } = await import("@/services/privacy/ownerContentApi");
+    const envelope = await sealAttachmentBase64({
+      storagePath,
+      revision: Date.now(),
+      base64,
+    });
+    const cacheRoot = FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? "";
+    if (!cacheRoot) throw new Error("No writable cache directory for protected upload.");
+    const tmp = `${cacheRoot}sealed-upload-${Date.now()}.json`;
+    await FileSystem.writeAsStringAsync(tmp, envelope, {
+      encoding: FileSystem.EncodingType.UTF8,
+    });
+    try {
+      const verified = await uploadLocalFileViaMediaApi({
+        storagePath,
+        localUri: tmp,
+        contentType: CONTENT_SEAL_MEDIA_TYPE,
+        userId: ownership?.userId,
+        session: ownership?.session,
+      });
+      return {
+        storagePath: verified.storagePath,
+        localBytes: verified.localBytes,
+        remoteBytes: verified.remoteBytes,
+      };
+    } finally {
+      await deleteTempQuietly(tmp);
+    }
+  }
   const verified = await uploadLocalFileViaMediaApi({
     storagePath,
     localUri,
@@ -209,19 +256,31 @@ export async function uploadLetterheadImage(
     let uploaded: StorageUploadResult;
     if (parsed) {
       const ext = extFromMime(parsed.mime);
-      const safeName = sanitizeStorageFileName(
-        fileName ?? `letterhead-${Date.now()}.${ext}`
-      );
-      const storagePath = getUserStoragePath(userId, "letterhead", safeName);
-      uploaded = await uploadBase64ToPath(storagePath, parsed.base64, parsed.mime, ownership);
+      const allocated = allocateOpaqueUserStoragePath({
+        userId,
+        category: "letterhead",
+        displayName: fileName,
+        extension: ext,
+      });
+      uploaded = {
+        ...(await uploadBase64ToPath(allocated.storagePath, parsed.base64, parsed.mime, ownership)),
+        objectName: allocated.objectName,
+        displayName: allocated.displayName,
+      };
     } else if (isLocalFileUri(trimmed)) {
       const mime = inferContentType(fileName ?? trimmed, "image/jpeg");
       const ext = extFromMime(mime);
-      const safeName = sanitizeStorageFileName(
-        fileName ?? `letterhead-${Date.now()}.${ext}`
-      );
-      const storagePath = getUserStoragePath(userId, "letterhead", safeName);
-      uploaded = await uploadLocalFileToPath(storagePath, trimmed, mime, ownership);
+      const allocated = allocateOpaqueUserStoragePath({
+        userId,
+        category: "letterhead",
+        displayName: fileName,
+        extension: ext,
+      });
+      uploaded = {
+        ...(await uploadLocalFileToPath(allocated.storagePath, trimmed, mime, ownership)),
+        objectName: allocated.objectName,
+        displayName: allocated.displayName,
+      };
     } else {
       throw new Error("Letterhead image must be a local file URI or base64 data URI.");
     }
@@ -255,14 +314,18 @@ export async function uploadRecordAttachment(
     throw new Error("Attachment must be a base64 data URI.");
   }
   const ext = extFromMime(parsed.mime);
-  const safeName = sanitizeStorageFileName(
-    fileName ?? `attachment-${Date.now()}.${ext}`
-  );
-  const storagePath = getUserStoragePath(userId, "attachments", recordId, safeName);
-  return uploadBase64ToPath(storagePath, parsed.base64, parsed.mime, {
+  const allocated = allocateOpaqueUserStoragePath({
+    userId,
+    category: "attachments",
+    recordId,
+    displayName: fileName,
+    extension: ext,
+  });
+  const uploaded = await uploadBase64ToPath(allocated.storagePath, parsed.base64, parsed.mime, {
     userId,
     session,
   });
+  return { ...uploaded, objectName: allocated.objectName, displayName: allocated.displayName };
 }
 
 export async function uploadRecordAttachmentBase64(
@@ -275,11 +338,43 @@ export async function uploadRecordAttachmentBase64(
 ): Promise<StorageUploadResult> {
   if (!isUserStorageAvailable()) throw new FirebaseNotConfiguredError();
   const ext = extFromMime(contentType);
-  const safeName = sanitizeStorageFileName(
-    fileName ?? `attachment-${Date.now()}.${ext}`
-  );
-  const storagePath = getUserStoragePath(userId, "attachments", recordId, safeName);
-  return uploadBase64ToPath(storagePath, base64, contentType, { userId, session });
+  const allocated = allocateOpaqueUserStoragePath({
+    userId,
+    category: "attachments",
+    recordId,
+    displayName: fileName,
+    extension: ext,
+  });
+  const uploaded = await uploadBase64ToPath(allocated.storagePath, base64, contentType, { userId, session });
+  return { ...uploaded, objectName: allocated.objectName, displayName: allocated.displayName };
+}
+
+export async function readProtectedLocalUri(
+  storagePath: string
+): Promise<{ kind: "opened"; uri: string } | { kind: "legacy" } | { kind: "unavailable" }> {
+  if (!isUserStorageAvailable()) return { kind: "unavailable" };
+  try {
+    const storageRef = storageRefForPath(storagePath);
+    const meta = await getMetadata(storageRef);
+    if (meta.contentType !== CONTENT_SEAL_MEDIA_TYPE) return { kind: "legacy" };
+    const url = await getDownloadURL(storageRef);
+    const response = await fetch(url);
+    if (!response.ok) return { kind: "unavailable" };
+    const text = await response.text();
+    const parsed: unknown = JSON.parse(text);
+    if (!isDiaryContentSeal(parsed)) return { kind: "unavailable" };
+    const { openAttachmentSeal } = await import("@/services/privacy/ownerContentApi");
+    const base64 = await openAttachmentSeal(parsed);
+    const cacheRoot = FileSystem.cacheDirectory ?? FileSystem.documentDirectory ?? "";
+    if (!cacheRoot) return { kind: "unavailable" };
+    const dest = `${cacheRoot}opened-object-${Date.now()}.bin`;
+    await FileSystem.writeAsStringAsync(dest, base64, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    return { kind: "opened", uri: dest };
+  } catch {
+    return { kind: "unavailable" };
+  }
 }
 
 export async function getDownloadUrlForPath(storagePath: string): Promise<string | null> {

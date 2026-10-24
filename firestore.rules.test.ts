@@ -39,6 +39,7 @@ async function seedUser(
       ueid: "VYD-2026-TEST01",
       phoneE164: "+919999999999",
       status: "active",
+      ageEligibility: "eligible",
       createdAt: 1_700_000_000_000,
       updatedAt: 1_700_000_000_000,
       displayName: "Test User",
@@ -214,8 +215,6 @@ async function main() {
     await assertSucceeds(
       updateDoc(doc(authedDb("alice"), "users", "alice"), {
         status: "pending_deletion",
-        deletionRequestedAt: Date.now(),
-        deletionScheduledFor: Date.now() + 86_400_000,
         deletionCompletedAt: null,
         retiredUeid: false,
         mobileHash: "abc12345",
@@ -242,6 +241,83 @@ async function main() {
       })
     );
     check("active user entry create allowed", true);
+
+    await seedUser("unassessed", { ageEligibility: "unassessed" });
+    await assertFails(
+      setDoc(doc(authedDb("unassessed"), "users", "unassessed", "entries", "e-open"), {
+        userId: "unassessed",
+        title: "Blocked before assessment",
+      })
+    );
+    check("unassessed account cannot create an entry", true);
+
+    await seedUser("mina", { ageEligibility: "ineligible" });
+    await assertFails(
+      setDoc(doc(authedDb("mina"), "users", "mina", "entries", "e-age"), {
+        userId: "mina",
+        title: "Blocked for age",
+      })
+    );
+    check("ineligible account cannot create an entry", true);
+
+    await seedUser("purged");
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "deletionJobs", "purged"), { status: "completed" });
+    });
+    await assertFails(
+      setDoc(doc(authedDb("purged"), "users", "purged", "entries", "e-restored"), {
+        userId: "purged",
+        title: "Restored entry",
+      })
+    );
+    check("completed erasure job blocks a restored write", true);
+
+    const sealedAt = 1_700_000_000_000;
+    await seedUser("sealer");
+    await assertSucceeds(
+      setDoc(doc(authedDb("sealer"), "users", "sealer", "entries", "e-seal"), {
+        userId: "sealer",
+        title: "sealed",
+        updatedAt: sealedAt,
+        contentSeal: { v: 1, uid: "sealer", recordId: "e-seal", revision: sealedAt },
+      })
+    );
+    check("owner seal with matching revision is allowed", true);
+    await assertFails(
+      setDoc(doc(authedDb("sealer"), "users", "sealer", "entries", "e-swap"), {
+        userId: "sealer",
+        title: "sealed",
+        updatedAt: sealedAt,
+        contentSeal: { v: 1, uid: "mina", recordId: "e-swap", revision: sealedAt },
+      })
+    );
+    check("cross-owner seal is denied", true);
+
+    const requestedAt = 1_700_000_000_000;
+    const dayMs = 24 * 60 * 60 * 1000;
+    await seedUser("frank");
+    await assertFails(
+      updateDoc(doc(authedDb("frank"), "users", "frank"), {
+        status: "pending_deletion",
+        deletionRequestedAt: requestedAt,
+        deletionScheduledFor: requestedAt + 13 * dayMs,
+        deletionCompletedAt: null,
+        deletionPolicyVersion: 2,
+        reactivationCutoff: requestedAt + 13 * dayMs,
+        erasureDeadline: requestedAt + 15 * dayMs,
+        retiredUeid: false,
+        mobileHash: "abc12345",
+        updatedAt: requestedAt,
+      })
+    );
+    check("client cannot choose the deletion clock", true);
+    await assertFails(
+      updateDoc(doc(authedDb("carol"), "users", "carol"), {
+        ageEligibility: "ineligible",
+        updatedAt: requestedAt,
+      })
+    );
+    check("client cannot write its own age eligibility", true);
 
     // --- Reverse-index denial ---
     await assertFails(
@@ -364,13 +440,13 @@ async function main() {
         updatedAt: 1_600_000_000_000,
       });
     });
-    await assertSucceeds(
+    await assertFails(
       setDoc(doc(authedDb("legacy"), "users", "legacy", "entries", "legacy-e1"), {
         userId: "legacy",
         title: "Legacy entry",
       })
     );
-    check("legacy profile without status can write business data", true);
+    check("unassessed legacy profile cannot create business data", true);
 
     await assertSucceeds(
       setDoc(
@@ -380,6 +456,70 @@ async function main() {
       )
     );
     check("legacy profile safe root merge without status materialized", true);
+
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "authSecurity", "alice"), {
+        revokedBeforeAuthTimeSeconds: 1_500,
+        revocationState: "complete",
+        operationId: "11111111-1111-1111-1111-111111111111",
+      });
+    });
+
+    const phoneAfter = testEnv
+      .authenticatedContext("alice", {
+        auth_time: 1_501,
+        firebase: { sign_in_provider: "phone" },
+      })
+      .firestore();
+    await assertSucceeds(getDoc(doc(phoneAfter, "users", "alice")));
+    check("EMULATOR phone auth after cutoff can read profile", true);
+
+    const phoneEqual = testEnv
+      .authenticatedContext("alice", {
+        auth_time: 1_500,
+        firebase: { sign_in_provider: "phone" },
+      })
+      .firestore();
+    await assertFails(getDoc(doc(phoneEqual, "users", "alice")));
+    check("EMULATOR phone auth at the cutoff second is denied", true);
+
+    const redeemedLater = testEnv
+      .authenticatedContext("alice", {
+        auth_time: 2_000,
+        firebase: { sign_in_provider: "custom" },
+        vydOriginAuthTime: 1_000,
+      })
+      .firestore();
+    await assertFails(getDoc(doc(redeemedLater, "users", "alice")));
+    check("EMULATOR custom token redeemed after cutoff keeps the older origin", true);
+
+    const freshOrigin = testEnv
+      .authenticatedContext("alice", {
+        auth_time: 2_000,
+        firebase: { sign_in_provider: "custom" },
+        vydOriginAuthTime: 1_501,
+      })
+      .firestore();
+    await assertSucceeds(getDoc(doc(freshOrigin, "users", "alice")));
+    check("EMULATOR custom token with a later origin is admitted", true);
+
+    const legacyCustom = testEnv
+      .authenticatedContext("alice", {
+        auth_time: 2_000,
+        firebase: { sign_in_provider: "custom" },
+      })
+      .firestore();
+    await assertFails(getDoc(doc(legacyCustom, "users", "alice")));
+    check("EMULATOR legacy custom token without origin claim is denied after cutoff", true);
+
+    await assertFails(
+      setDoc(doc(phoneAfter, "authSecurity", "alice"), {
+        revokedBeforeAuthTimeSeconds: 0,
+        revocationState: "complete",
+        operationId: "22222222-2222-2222-2222-222222222222",
+      })
+    );
+    check("EMULATOR client cannot write the cutoff", true);
   } finally {
     await testEnv.cleanup();
   }

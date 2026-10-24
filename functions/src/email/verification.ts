@@ -8,6 +8,7 @@ import {
 } from "./challengeService";
 import { EMAIL_OTP_USER_MESSAGES } from "./otpPolicy";
 import { EMAIL_OTP_RUNTIME_SECRETS } from "./secrets";
+import { assertAdmittedCallableUser } from "../identity/admitCallableUser";
 import {
   completeEmailChangeTransaction,
   startEmailChangeNewEmailChallenge,
@@ -35,6 +36,7 @@ const emailOtpCallOpts = {
  * local emulator / Expo Go development remain usable (documented).
  */
 export const startEmailVerification = onCall(emailOtpCallOpts, async (request) => {
+  await assertAdmittedCallableUser(request);
   const uid = requireAuthUid(request);
   const rawEmail = request.data?.email;
   const idempotencyKey =
@@ -51,6 +53,7 @@ export const startEmailVerification = onCall(emailOtpCallOpts, async (request) =
 });
 
 export const resendEmailVerification = onCall(emailOtpCallOpts, async (request) => {
+  await assertAdmittedCallableUser(request);
   const uid = requireAuthUid(request);
   const challengeId = request.data?.challengeId ?? request.data?.verificationId;
   if (typeof challengeId !== "string") {
@@ -60,6 +63,7 @@ export const resendEmailVerification = onCall(emailOtpCallOpts, async (request) 
 });
 
 export const verifyAndBindEmail = onCall(emailOtpCallOpts, async (request) => {
+  await assertAdmittedCallableUser(request);
   const uid = requireAuthUid(request);
   const challengeId = request.data?.challengeId ?? request.data?.verificationId;
   const code = request.data?.code;
@@ -83,6 +87,7 @@ export const verifyAndBindEmail = onCall(emailOtpCallOpts, async (request) => {
  * that must not block deploying the three core beta email callables above.
  */
 export const changeVerifiedEmail = onCall(emailOtpCallOpts, async (request) => {
+  await assertAdmittedCallableUser(request);
   const uid = requireAuthUid(request);
   const stage = request.data?.stage;
   if (stage === "require_mobile_otp") {

@@ -59,7 +59,15 @@ export async function markAccountPendingDeletion(
   } else if (backend === "firebase-production" || backend === "firebase-shared-dev") {
     next = await markPendingFirestore(profile);
     try {
-      await callEnsureAccountDeletionJob();
+      const accepted = await callEnsureAccountDeletionJob();
+      next = {
+        ...next,
+        deletionRequestedAt: accepted.deletionRequestedAt ?? next.deletionRequestedAt,
+        deletionScheduledFor: accepted.graceExpiresAt,
+        deletionPolicyVersion: accepted.deletionPolicyVersion ?? next.deletionPolicyVersion,
+        reactivationCutoff: accepted.reactivationCutoff ?? next.reactivationCutoff,
+        erasureDeadline: accepted.erasureDeadline ?? next.erasureDeadline,
+      };
     } catch (e) {
       // Ledger is also bootstrapped by the scheduled worker; do not fail the
       // user-facing pending request if the ensure callable is briefly down.

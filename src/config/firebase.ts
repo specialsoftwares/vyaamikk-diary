@@ -59,6 +59,20 @@ function isNativePlatform(): boolean {
 }
 
 /**
+ * JS Firebase credential store. This is not the SecureStore profile cache in
+ * src/services/session.ts. Installed @firebase/auth getReactNativePersistence
+ * is asynchronous: _get awaits storage.getItem and JSON.parse, and _set
+ * returns storage.setItem(key, JSON.stringify(value)). Listeners are not
+ * supported. The JS refresh and access token JSON therefore remains in
+ * AsyncStorage, which is plaintext and can be included in device backups.
+ * SecureStore's item size limit can reject that Auth user blob, so this
+ * build does not migrate the credential store. Logout removes the Firebase
+ * persistence entry through auth.signOut() and does not wipe AsyncStorage.
+ * The profile cache still holds no raw token.
+ */
+export const JS_AUTH_CREDENTIAL_PERSISTENCE = "async-storage" as const;
+
+/**
  * React Native persistence for the JS SDK auth session.
  *
  * Third-party typing boundary: `getReactNativePersistence` exists at runtime

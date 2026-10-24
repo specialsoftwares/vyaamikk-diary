@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import Constants from "expo-constants";
@@ -15,14 +15,34 @@ import { BUSINESS_INSIGHTS_HREF } from "@/content/insights/entry";
 import { getAuthEntryHref } from "@/config/authWrapper";
 import { openPublicLinkOrExplain } from "@/config/publicLinks";
 import { useAuth } from "@/state/auth";
+import { useIsOnline } from "@/state/network";
 import { useT } from "@/i18n";
+import { callLogoutAllDevices } from "@/services/auth/identityCallable";
+import { currentAuthMutationGeneration } from "@/services/auth/authSessionFence";
+import {
+  classifyLogoutAllCallableFailure,
+  LOGOUT_ALL_CONTROL_ENABLED,
+  newLogoutOperationId,
+  orchestrateConfirmedLogoutAll,
+  type LogoutAllRemoteOutcome,
+} from "@/services/auth/logoutAllDevices";
 import { spacing, typography, useThemedStyles } from "@/theme";
 
 export default function SettingsTab() {
   const t = useT();
   const router = useRouter();
-  const { signOut, status } = useAuth();
+  const { signOut, status, user } = useAuth();
+  const online = useIsOnline();
   const [signingOut, setSigningOut] = useState(false);
+  const liveUid = useRef<string | null>(user?.uid ?? null);
+  liveUid.current = user?.uid ?? null;
+  const uiAttached = useRef(true);
+  useEffect(() => {
+    uiAttached.current = true;
+    return () => {
+      uiAttached.current = false;
+    };
+  }, []);
 
   const styles = useThemedStyles((colors) =>
     StyleSheet.create({
@@ -80,6 +100,79 @@ export default function SettingsTab() {
           } finally {
             setSigningOut(false);
           }
+        },
+      },
+    ]);
+  };
+
+  const logoutAllMessage = (remote: LogoutAllRemoteOutcome): string => {
+    switch (remote) {
+      case "complete":
+        return t("settings.logoutAllComplete");
+      case "pending":
+        return t("settings.logoutAllPending");
+      case "offline":
+        return t("settings.logoutAllOffline");
+      case "not_recent":
+        return t("settings.logoutAllNotRecent");
+      case "sign_in_invalid":
+        return t("settings.logoutAllSignInInvalid");
+      case "account_blocked":
+        return t("settings.logoutAllAccountBlocked");
+      case "superseded":
+        return t("settings.logoutAllSuperseded");
+      case "unavailable":
+        return t("settings.logoutAllUnavailable");
+    }
+  };
+
+  const confirmLogoutAll = () => {
+    const identity = {
+      uid: liveUid.current ?? "",
+      generation: currentAuthMutationGeneration(),
+    };
+    if (!identity.uid) return;
+    Alert.alert(t("settings.logoutAllPrompt"), t("settings.logoutAllBody"), [
+      { text: t("common.cancel"), style: "cancel" },
+      {
+        text: t("settings.logoutAllConfirm"),
+        style: "destructive",
+        onPress: () => {
+          const confirmedIdentity = {
+            uid: liveUid.current ?? "",
+            generation: currentAuthMutationGeneration(),
+          };
+          if (!confirmedIdentity.uid) return;
+          void orchestrateConfirmedLogoutAll({
+            confirmed: true,
+            online,
+            operationId: newLogoutOperationId(),
+            identity: confirmedIdentity,
+            sessionStillCurrent: () =>
+              liveUid.current === confirmedIdentity.uid &&
+              currentAuthMutationGeneration() === confirmedIdentity.generation,
+            uiAttached: () => uiAttached.current,
+            call: async (operationId, bound) => {
+              if (
+                liveUid.current !== bound.uid ||
+                currentAuthMutationGeneration() !== bound.generation
+              ) {
+                return { status: "unavailable" as const };
+              }
+              try {
+                await callLogoutAllDevices(operationId);
+                return { status: "complete" as const };
+              } catch (error) {
+                return { status: classifyLogoutAllCallableFailure(error) };
+              }
+            },
+            signOutThisDevice: () => signOut(),
+            navigateToSignedOut: () => router.replace(getAuthEntryHref()),
+            presentOutcome: (remote) => {
+              Alert.alert(t("settings.logoutAllPrompt"), logoutAllMessage(remote));
+            },
+            setBusy: setSigningOut,
+          });
         },
       },
     ]);
@@ -161,9 +254,20 @@ export default function SettingsTab() {
         <SettingsNavCard
           icon="logout"
           title={signingOut ? t("settings.signingOut") : t("settings.logout")}
+          subtitle={t("settings.signOutBody")}
           onPress={signingOut ? undefined : confirmSignOut}
           embedded
         />
+        {LOGOUT_ALL_CONTROL_ENABLED ? (
+          <SettingsNavCard
+            icon="cellphone-off"
+            title={signingOut ? t("settings.signingOut") : t("settings.logoutAll")}
+            subtitle={t("settings.logoutAllBody")}
+            onPress={signingOut ? undefined : confirmLogoutAll}
+            accent="danger"
+            embedded
+          />
+        ) : null}
         <SettingsNavCard
           icon="account-remove-outline"
           title={t("settings.deleteAccountAndData")}

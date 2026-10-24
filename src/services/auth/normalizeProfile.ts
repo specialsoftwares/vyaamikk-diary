@@ -35,7 +35,7 @@ export function normaliseUserProfile(
   uid: string,
   raw: Record<string, unknown>
 ): UserProfile {
-  return {
+  const profile: UserProfile = {
     uid,
     ueid: String(raw.ueid ?? ""),
     phoneE164: String(raw.phoneE164 ?? ""),
@@ -171,6 +171,22 @@ export function normaliseUserProfile(
         ? null
         : Number(raw.onboardingProfileVersion),
   };
+  if (
+    raw.ageEligibility === "eligible" ||
+    raw.ageEligibility === "ineligible" ||
+    raw.ageEligibility === "unassessed"
+  ) {
+    profile.ageEligibility = raw.ageEligibility;
+  }
+  if (typeof raw.agePolicyVersion === "string") profile.agePolicyVersion = raw.agePolicyVersion;
+  if (typeof raw.ageAssessedAt === "number") profile.ageAssessedAt = raw.ageAssessedAt;
+  if (raw.ageMethod === "self_declared_dob") profile.ageMethod = raw.ageMethod;
+  if (typeof raw.deletionPolicyVersion === "number") {
+    profile.deletionPolicyVersion = raw.deletionPolicyVersion;
+  }
+  if (typeof raw.reactivationCutoff === "number") profile.reactivationCutoff = raw.reactivationCutoff;
+  if (typeof raw.erasureDeadline === "number") profile.erasureDeadline = raw.erasureDeadline;
+  return profile;
 }
 
 /** Merge profile patch from settings / identity screen. Skips `updatedAt` when nothing changes. */

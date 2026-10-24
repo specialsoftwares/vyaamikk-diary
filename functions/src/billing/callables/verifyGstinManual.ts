@@ -40,6 +40,7 @@ import type { BillingStore } from "../store";
 import type { SubscriptionBillingDetailsDoc } from "../types";
 import { assertAdminAuthorized, type AdminAuthContext } from "../tax/adminAuth";
 import { gstStateCodeFromGstin, isValidGstinFormat, normalizeGstin } from "../tax/gstin";
+import { assertAdmittedCallableUser } from "../../identity/admitCallableUser";
 
 export async function applyVerifyGstinManual(
   store: BillingStore,
@@ -116,6 +117,7 @@ export async function applyVerifyGstinManual(
 }
 
 export const verifyGstinManual = onCall({ region: "asia-south1" }, async (request) => {
+  await assertAdmittedCallableUser(request);
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "Sign in required.");
   }

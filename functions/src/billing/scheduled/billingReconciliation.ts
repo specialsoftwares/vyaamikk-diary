@@ -24,6 +24,7 @@ import {
   getAndroidPublisherAccessTokenFromAdc,
   PlayApiClient,
 } from "../google/playApiClient";
+import { erasedBillingUidsFromEnv, excludeErasedBillingUids, privilegedWorkerHold, readDurableWorkerHold } from "../../deletion/privilegedWorkerGuard";
 import { billingLog } from "../log";
 import { istMonthKeyForMillis } from "../istMonthKey";
 import {
@@ -60,7 +61,7 @@ function configurationDisabled(code: string): StoreRevalidator {
 function firestoreDueScanner(db: Firestore) {
   return {
     async listCandidateIds(tickNow: number, limit: number) {
-      return collectDueReconciliationIds({
+      const ids = await collectDueReconciliationIds({
         nowMs: tickNow,
         limit,
         pageSize: 40,
@@ -100,6 +101,7 @@ function firestoreDueScanner(db: Firestore) {
           return rows;
         },
       });
+      return excludeErasedBillingUids(ids, erasedBillingUidsFromEnv());
     },
   };
 }
@@ -112,6 +114,7 @@ export const scheduledBillingReconciliation = onSchedule(
     secrets: BILLING_DIAG_RUNTIME_SECRETS,
   },
   async () => {
+    if ((await privilegedWorkerHold(process.env, () => readDurableWorkerHold())) === "stopped") return;
     if (billingReconciliationEnabled.value() !== "true") {
       return;
     }
