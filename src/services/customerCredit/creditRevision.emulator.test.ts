@@ -17,6 +17,7 @@ import {
   closeCustomerCreditFullyPaidOnDb,
   mutateCustomerCreditOnDb,
 } from "./recordMutations";
+import { revisionCommitRuntime } from "@/services/privacy/expectedRevisionCommit";
 import type { CustomerCreditRecord } from "@/domain/customerCredit";
 
 const PROJECT_ID = "vyaamikk-diary-credit-revision-test";
@@ -286,6 +287,33 @@ async function main() {
     "uid generation change does not commit the prepared payment",
     flipped && !sessionSnap.data()?.contentSeal && (sessionError as { details?: { reason?: string } })?.details?.reason === "session_changed"
   );
+
+  const ackBase = await seed("cr_ack", at);
+  const originalBatch = revisionCommitRuntime.writeBatch;
+  let lostCommits = 0;
+  revisionCommitRuntime.writeBatch = ((firestore: Firestore) => {
+    const batch = originalBatch(firestore);
+    const commit = batch.commit.bind(batch);
+    batch.commit = async () => {
+      lostCommits += 1;
+      await commit();
+      if (lostCommits === 1) throw new Error("ack_lost");
+    };
+    return batch;
+  }) as typeof originalBatch;
+  try {
+    await addCustomerCreditPaymentOnDb(db(), uid, "cr_ack", {
+      amount: 15, paidDate: at, mode: "cash", clientPaymentId: "pay_ack",
+    }, parse(ackBase), at + 60, codec("cr_ack", { n: 0 }));
+    const ackIds = await paymentsOf("cr_ack", ackBase);
+    check(
+      "lost acknowledgment in the same session keeps one payment",
+      ackIds.length === 1 && lostCommits === 1,
+      `ids=${ackIds.join(",")} commits=${lostCommits}`
+    );
+  } finally {
+    revisionCommitRuntime.writeBatch = originalBatch;
+  }
 
   const usage = await getDoc(doc(db(), "users", uid, "subscription", "usageCurrent"));
   check("payment and closure edits do not charge a creation slot", usage.data()?.recordsThisMonth === 4);

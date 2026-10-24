@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 
 import { AppError } from "@/domain/errors";
-import { RevisionConflict, commitExpectedRevision, revisionCommitRuntime } from "./expectedRevisionCommit";
+import { RevisionConflict, RevisionUnknown, commitExpectedRevision, decideIssuedRetry, revisionCommitRuntime } from "./expectedRevisionCommit";
 
 const original = revisionCommitRuntime.runTransaction;
 const originalBatch = revisionCommitRuntime.writeBatch;
@@ -164,7 +164,11 @@ async function main() {
 
   generation = 0;
   accepted = false;
-  revisionCommitRuntime.getDoc = (async () => ({ exists: () => true, data: () => ({ updatedAt: 10 }) })) as never;
+  let reconciliationReads = 0;
+  revisionCommitRuntime.getDoc = (async () => {
+    reconciliationReads += 1;
+    throw new Error("reconciliation_unavailable");
+  }) as never;
   revisionCommitRuntime.writeBatch = (() => ({
     update: () => undefined,
     set: () => undefined,
@@ -186,8 +190,97 @@ async function main() {
   } catch (error) {
     rejected = error;
   }
+  assert.equal(reconciliationReads, 0, "a definite rejection is not replaced by a reconciliation read");
   assert.equal(sessionReason(rejected), undefined);
   assert.equal((rejected as { code?: string }).code, "permission-denied");
+
+  revisionCommitRuntime.getDoc = (async () => {
+    throw new Error("cached_or_competing_read");
+  }) as never;
+  revisionCommitRuntime.writeBatch = (() => ({
+    update: () => undefined,
+    set: () => undefined,
+    commit: async () => {
+      throw new Error("acknowledgment_lost_same_session");
+    },
+  })) as never;
+  let sameSession: unknown;
+  try {
+    await commitExpectedRevision({
+      db: {} as never,
+      ref: {} as never,
+      revisionRef: {} as never,
+      expectedRevision: 10,
+      cloud: { updatedAt: 11, clientPaymentId: "pay_same" },
+      generationAtStart: 0,
+      currentGeneration: () => generation,
+    });
+  } catch (error) {
+    sameSession = error;
+  }
+  assert.ok(sameSession instanceof RevisionUnknown);
+  assert.equal((sameSession as RevisionUnknown).outcome, "unknown");
+  assert.ok(!(sameSession instanceof RevisionConflict));
+
+  let transactionStaged = false;
+  revisionCommitRuntime.runTransaction = async (_db, work) => {
+    await work({
+      get: async () => ({ exists: () => true, data: () => ({ updatedAt: 10 }) }),
+      set: () => {
+        transactionStaged = true;
+      },
+    } as never);
+    throw new Error("transaction_commit_lost");
+  };
+  let transactionLost: unknown;
+  try {
+    await commitExpectedRevision({
+      db: {} as never,
+      ref: {} as never,
+      expectedRevision: 10,
+      cloud: { updatedAt: 11 },
+      generationAtStart: 0,
+      currentGeneration: () => generation,
+    });
+  } catch (error) {
+    transactionLost = error;
+  }
+  assert.equal(transactionStaged, true);
+  assert.ok(transactionLost instanceof RevisionUnknown, "a returned transaction whose commit ack is lost stays unknown");
+
+  revisionCommitRuntime.runTransaction = async (_db, work) => {
+    await work({
+      get: async () => ({ exists: () => true, data: () => ({ updatedAt: 10 }) }),
+      set: () => {
+        throw new Error("stage_failed");
+      },
+    } as never);
+  };
+  let stageFailed: unknown;
+  try {
+    await commitExpectedRevision({
+      db: {} as never,
+      ref: {} as never,
+      expectedRevision: 10,
+      cloud: { updatedAt: 11 },
+      generationAtStart: 0,
+      currentGeneration: () => generation,
+    });
+  } catch (error) {
+    stageFailed = error;
+  }
+  assert.equal((stageFailed as Error).message, "stage_failed");
+  assert.ok(!(stageFailed instanceof RevisionUnknown));
+
+  assert.equal(decideIssuedRetry({ kind: "unknown", read: "present", revisionMoved: true }), "return_current");
+  assert.equal(decideIssuedRetry({ kind: "unknown", read: "absent", revisionMoved: true }), "retry_same");
+  assert.equal(decideIssuedRetry({ kind: "unknown", read: "cached", revisionMoved: true }), "unknown");
+  assert.equal(decideIssuedRetry({ kind: "unknown", read: "unavailable", revisionMoved: false }), "unknown");
+  assert.equal(decideIssuedRetry({ kind: "rejected", read: "deleted", revisionMoved: true }), "missing");
+  assert.equal(decideIssuedRetry({ kind: "rejected", read: "absent", revisionMoved: true }), "retry_same");
+  assert.equal(decideIssuedRetry({ kind: "rejected", read: "absent", revisionMoved: false }), "reject");
+  assert.equal(decideIssuedRetry({ kind: "rejected", read: "unavailable", revisionMoved: true }), "reject");
+
   console.log("expectedRevisionCommit: generation changes during read, retry and acknowledgment stay unpublished");
 }
 

@@ -1,12 +1,16 @@
-import { doc, getDoc, type Firestore } from "firebase/firestore";
+import { doc, type Firestore } from "firebase/firestore";
 
 import { AppError } from "@/domain/errors";
 import type { CustomerCreditRecord } from "@/domain/customerCredit";
 import { currentAuthMutationGeneration } from "@/services/auth/authSessionFence";
 import {
   commitExpectedRevision,
+  decideIssuedRetry,
   nextContentRevision,
   RevisionConflict,
+  RevisionUnknown,
+  revisionCommitRuntime,
+  revisionRejectionCode,
 } from "@/services/privacy/expectedRevisionCommit";
 
 import { appendPayment, applyFullClosure } from "./shared";
@@ -48,7 +52,7 @@ export async function mutateCustomerCreditOnDb(
     if (readGeneration() !== generation) {
       throw new AppError("permission_denied", "Sign in again.", undefined, { reason: "session_changed" });
     }
-    const snap = await getDoc(ref);
+    const snap = await revisionCommitRuntime.getDoc(ref);
     if (!snap.exists()) throw new AppError("not_found", "Record not found.");
     const stored = snap.data() as Record<string, unknown>;
     const expectedRevision = Number(stored.updatedAt);
@@ -74,6 +78,37 @@ export async function mutateCustomerCreditOnDb(
       return stamped;
     } catch (error) {
       if (error instanceof RevisionConflict) continue;
+      const kind = error instanceof RevisionUnknown ? "unknown" : revisionRejectionCode(error) ? "rejected" : null;
+      if (!kind) throw error;
+      let read: "unavailable" | "cached" | "deleted" | "present" | "absent" = "unavailable";
+      let revisionMoved = false;
+      let currentRecord: CustomerCreditRecord | null = null;
+      try {
+        const after = await revisionCommitRuntime.getDoc(ref);
+        if (after.metadata?.fromCache === true) {
+          read = "cached";
+        } else if (!after.exists()) {
+          read = "deleted";
+        } else {
+          const afterStored = after.data() as Record<string, unknown>;
+          revisionMoved = Number(afterStored.updatedAt) !== expectedRevision;
+          const afterRaw = options?.restoreRaw ? await options.restoreRaw(afterStored) : afterStored;
+          const afterExisting = parseExisting(after.id, afterRaw);
+          const again = mutate(afterExisting, nowMs);
+          if (again === afterExisting) {
+            read = "present";
+            currentRecord = afterExisting;
+          } else {
+            read = "absent";
+          }
+        }
+      } catch {
+        read = "unavailable";
+      }
+      const decision = decideIssuedRetry({ kind, read, revisionMoved });
+      if (decision === "return_current" && currentRecord) return currentRecord;
+      if (decision === "retry_same") continue;
+      if (decision === "missing") throw new AppError("not_found", "Record not found.");
       throw error;
     }
   }
