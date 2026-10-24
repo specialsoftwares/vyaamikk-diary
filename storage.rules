@@ -22,8 +22,35 @@ service firebase.storage {
       return request.auth != null && sessionNotRevoked();
     }
 
+    function restoreClosed() {
+      let fence = /databases/(default)/documents/restoreControl/current;
+      return firestore.exists(fence) && firestore.get(fence).data.get('closed', false) == true;
+    }
+
+    function restoreModeAllows() {
+      let mode = /databases/(default)/documents/restoreControl/mode;
+      let fence = /databases/(default)/documents/restoreControl/current;
+      let required = firestore.exists(mode) && firestore.get(mode).data.get('required', false) == true;
+      let fenceData = firestore.exists(fence) ? firestore.get(fence).data : null;
+      return !required || (
+        fenceData != null
+        && fenceData.get('closed', false) == false
+        && fenceData.get('reconciled', false) == true
+        && fenceData.get('watermark', 0) is int
+        && fenceData.get('watermark', 0) > 0
+        && request.auth.token.keys().hasAny(['authorityWatermark'])
+        && fenceData.get('watermark', 0) == request.auth.token.authorityWatermark
+      );
+    }
+
+    function restoreClaimAllows() {
+      return request.auth.token.get('erased', false) != true
+        && !restoreClosed()
+        && restoreModeAllows();
+    }
+
     function isOwner(userId) {
-      return isSignedIn() && request.auth.uid == userId;
+      return isSignedIn() && request.auth.uid == userId && restoreClaimAllows();
     }
 
     function ageEligible(userId) {

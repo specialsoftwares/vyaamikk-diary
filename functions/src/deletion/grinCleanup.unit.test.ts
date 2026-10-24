@@ -1,7 +1,7 @@
 /**
  * INJECTED — GRIN cleanup lists, flag off by default, behavioral purge when force:true.
  * Not an operational deletion service. Does not change scheduledDeletionCleanup.
- * DELETION_GRACE_MS is 45 days (SUPERSEDES 15; not 180). INCLUDE_GRIN_IN_ACCOUNT_PURGE stays false.
+ * DELETION_GRACE_MS stays 45 days for the legacy window. The 15-day value is the separate version-2 deadline. Not 180. INCLUDE_GRIN_IN_ACCOUNT_PURGE stays false.
  * P8 public deletion remains FAIL until owner live grant. Packet is not authorization.
  */
 import assert from "node:assert/strict";

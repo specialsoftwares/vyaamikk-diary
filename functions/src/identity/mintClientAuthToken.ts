@@ -62,10 +62,23 @@ export const mintClientAuthToken = onCall({ region: "asia-south1" }, async (requ
     );
   }
 
+  const { restoreAdmissionForUid } = await import("../deletion/restoreGate");
+  const admission = await restoreAdmissionForUid(decision.uid);
+  if (admission.status === "deny") {
+    throw new HttpsError("failed-precondition", "restore_not_admitted");
+  }
+  if (admission.status === "unavailable") {
+    throw new HttpsError("unavailable", "Restore admission is temporarily unavailable. Try again when the connection returns.");
+  }
   try {
-    const token = await getAuth().createCustomToken(decision.uid, {
-      [ORIGIN_AUTH_TIME_CLAIM]: decision.originAuthTimeSeconds,
-    });
+    const { claimsForAdmission } = await import("../deletion/restoreAuthority");
+    const token = await getAuth().createCustomToken(
+      decision.uid,
+      claimsForAdmission(
+        { [ORIGIN_AUTH_TIME_CLAIM]: decision.originAuthTimeSeconds },
+        admission
+      )
+    );
     return { token };
   } catch (e) {
     const message = e instanceof Error ? e.message : "token mint failed";

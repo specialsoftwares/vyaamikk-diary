@@ -15,6 +15,13 @@ import {
 } from "firebase/firestore";
 
 import { AppError } from "@/domain/errors";
+import { currentAuthMutationGeneration } from "@/services/auth/authSessionFence";
+import {
+  commitExpectedRevision,
+  nextContentRevision,
+  RevisionConflict,
+  settleIssuedWrite,
+} from "@/services/privacy/expectedRevisionCommit";
 import type { BusinessEntry } from "@/domain/businessEntry";
 import type { EntryReminder } from "@/domain/types";
 import { entryFromFirestoreDoc } from "./atomicCreate";
@@ -50,6 +57,19 @@ function cloudPatch(next: BusinessEntry): Record<string, unknown> {
   return patch;
 }
 
+function diaryOperationPresent(existing: BusinessEntry, edit: UpdateBusinessEntryInput): boolean {
+  if (edit.title !== undefined && existing.title !== edit.title) return false;
+  if (edit.entryDate !== undefined && existing.entryDate !== edit.entryDate) return false;
+  if (edit.notes !== undefined && (existing.notes ?? null) !== (edit.notes ?? null)) return false;
+  if (edit.status !== undefined && existing.status !== edit.status) return false;
+  if (edit.pdfUri !== undefined && (existing.pdfUri ?? null) !== (edit.pdfUri ?? null)) return false;
+  if (edit.reminder !== undefined && JSON.stringify(existing.reminder ?? null) !== JSON.stringify(edit.reminder)) return false;
+  if (edit.location !== undefined && JSON.stringify(existing.location ?? null) !== JSON.stringify(edit.location)) return false;
+  if (edit.attachments !== undefined && JSON.stringify(existing.attachments ?? []) !== JSON.stringify(edit.attachments)) return false;
+  if (edit.payload !== undefined && JSON.stringify(existing.payload) !== JSON.stringify(edit.payload)) return false;
+  return true;
+}
+
 function holdSealedPlaintextEdit(raw: Record<string, unknown>): void {
   if (raw.contentSeal && typeof raw.contentSeal === "object") {
     throw new AppError(
@@ -74,33 +94,77 @@ export async function updateDiaryEntryOnDb(
   const setDocFn = deps.setDoc ?? setDoc;
 
   if (deps.protectCloud) {
-    const snap = await getDocFn(ref);
-    if (!snap.exists()) throw new AppError("not_found", "Entry not found.");
-    const raw = snap.data() as Record<string, unknown>;
-    let existing = entryFromFirestoreDoc(snap.id, raw);
-    if (!existing) throw new AppError("save_failed", "Entry could not be read.");
-    if (deps.openExisting) existing = await deps.openExisting(existing, raw);
-    if (expectedUpdatedAt != null && existing.updatedAt !== expectedUpdatedAt) {
-      throw new AppError("save_failed", "Entry changed remotely.", undefined, { remoteChanged: true });
-    }
-    const next = buildDiaryUpdateRecord(existing, edit);
-    const cancelId = reminderCancelIdAfterUpdate(existing, edit);
-    const patch = await deps.protectCloud(next);
-    if (expectedUpdatedAt != null) {
-      await txFn(db, async (tx: Transaction) => {
-        const fresh = await tx.get(ref);
-        if (!fresh.exists()) throw new AppError("not_found", "Entry not found.");
-        const current = entryFromFirestoreDoc(fresh.id, fresh.data() as Record<string, unknown>);
-        if (!current || current.updatedAt !== expectedUpdatedAt) {
-          throw new AppError("save_failed", "Entry changed remotely.", undefined, { remoteChanged: true });
+    const generationAtStart = currentAuthMutationGeneration();
+    let lastIssued: unknown = null;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      if (currentAuthMutationGeneration() !== generationAtStart) {
+        throw new AppError("permission_denied", "Sign in again.", undefined, { reason: "session_changed" });
+      }
+      const snap = await getDocFn(ref);
+      if (!snap.exists()) throw new AppError("not_found", "Entry not found.");
+      const raw = snap.data() as Record<string, unknown>;
+      let existing = entryFromFirestoreDoc(snap.id, raw);
+      if (!existing) throw new AppError("save_failed", "Entry could not be read.");
+      if (deps.openExisting) existing = await deps.openExisting(existing, raw);
+      if (expectedUpdatedAt != null && existing.updatedAt !== expectedUpdatedAt) {
+        throw new AppError("save_failed", "Entry changed remotely.", undefined, { remoteChanged: true });
+      }
+      const next = buildDiaryUpdateRecord(existing, edit);
+      const stamped = { ...next, updatedAt: nextContentRevision(existing.updatedAt, next.updatedAt) };
+      const cancelId = reminderCancelIdAfterUpdate(existing, edit);
+      const patch = await deps.protectCloud(stamped);
+      try {
+        await commitExpectedRevision({
+          db,
+          ref,
+          expectedRevision: Number(raw.updatedAt),
+          cloud: patch,
+          generationAtStart,
+          currentGeneration: currentAuthMutationGeneration,
+        });
+        await runAfterDiaryUpdateCommit(cancelId, deps.cancelNotification);
+        return stamped;
+      } catch (error) {
+        if (error instanceof RevisionConflict) {
+          if (expectedUpdatedAt != null) {
+            throw new AppError("save_failed", "Entry changed remotely.", undefined, { remoteChanged: true });
+          }
+          lastIssued = null;
+          continue;
         }
-        tx.set(ref, patch, { merge: true });
-      });
-    } else {
-      await setDocFn(ref, patch, { merge: true });
+        const settled = await settleIssuedWrite({
+          error,
+          generationAtStart,
+          currentGeneration: currentAuthMutationGeneration,
+          inspect: async () => {
+            const again = await getDocFn(ref);
+            if (again.metadata?.fromCache === true) return { state: "cached" };
+            if (!again.exists()) return { state: "deleted" };
+            const againRaw = again.data() as Record<string, unknown>;
+            let opened = entryFromFirestoreDoc(again.id, againRaw);
+            if (!opened) return { state: "unavailable" };
+            if (deps.openExisting) opened = await deps.openExisting(opened, againRaw);
+            if (!opened) return { state: "unavailable" };
+            return {
+              state: "server",
+              revisionMoved: Number(againRaw.updatedAt) !== Number(raw.updatedAt),
+              operationPresent: diaryOperationPresent(opened, input),
+              current: opened,
+            };
+          },
+        });
+        if (settled.action === "missing") throw new AppError("not_found", "Entry not found.");
+        if (settled.action === "return" && settled.current) {
+          await runAfterDiaryUpdateCommit(cancelId, deps.cancelNotification);
+          return settled.current;
+        }
+        lastIssued = error;
+      }
     }
-    await runAfterDiaryUpdateCommit(cancelId, deps.cancelNotification);
-    return next;
+    if (lastIssued) throw lastIssued;
+    throw new AppError("save_failed", "This entry changed on another device. Try again.", undefined, {
+      reason: "revision_conflict",
+    });
   }
 
   if (expectedUpdatedAt != null) {

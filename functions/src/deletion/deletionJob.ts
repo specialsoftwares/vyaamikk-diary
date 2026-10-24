@@ -44,6 +44,7 @@ export interface DeletionJobDoc {
   leaseOwner: string | null;
   leaseUntil: number | null;
   attempts: number;
+  nextAttemptAt?: number;
   lastErrorCategory: DeletionErrorCategory;
   /** Privacy-safe short code, never PII. */
   lastErrorCode: string | null;
@@ -56,6 +57,10 @@ export interface DeletionJobDoc {
   erasureDeadline?: number | null;
   /** Crashlytics and mail-provider tails are not per-user deletable. */
   processorDeletion?: "not_applicable" | "incomplete" | "failed";
+  /** Page to reread after an interrupted Firestore purge. Not a content cursor. */
+  firestoreCursor?: { parentPath: string; collectionId: string; pageToken: string } | null;
+  /** Purpose withdrawals copied before the user subcollections are removed. */
+  withdrawnPurposes?: string[];
 }
 
 export const EMPTY_PHASES: DeletionJobPhases = {
@@ -129,6 +134,8 @@ export function automaticRestorationAllowed(job: DeletionJobDoc, now: number): b
 }
 
 export function canAcquireLease(job: DeletionJobDoc, now: number): boolean {
+  if (job.graceExpiresAt > now) return false;
+  if (typeof job.nextAttemptAt === "number" && job.nextAttemptAt > now) return false;
   if (job.status === "completed" || job.status === "cancelled") return false;
   if (job.status === "needs_manual_review") return false;
   if (job.status === "awaiting_grace" && job.graceExpiresAt > now) return false;
@@ -153,6 +160,11 @@ export function classifyProviderError(err: unknown): {
   const msg = err instanceof Error ? err.message : String(err);
   const lower = msg.toLowerCase();
   if (
+    lower.includes("firestore_depth_exceeded") ||
+    lower.includes("firestore_unknown_collection") ||
+    lower.includes("firestore_cursor_unowned") ||
+    lower.includes("restore_authority_unprovisioned") ||
+    lower.includes("restore_authority_projection_failed") ||
     lower.includes("storage_path_not_owned") ||
     lower.includes("permanent") ||
     lower.includes("invalid-argument") ||

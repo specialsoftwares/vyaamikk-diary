@@ -14,6 +14,7 @@ import {
   isLegacyLetterheadMirrorForParent,
   isSupportedLetterheadMirrorPayload,
   isSupportedLetterheadMirrorPayloadPatch,
+  isSealedLetterheadParentData,
   isSupportedLetterheadParentData,
   isSupportedLetterheadParentInput,
   isValidatedLetterheadMirrorInput,
@@ -274,6 +275,44 @@ assert.equal(
 assert.equal(
   isSupportedLetterheadParentData({ userId: "uid", title: "Parent", input: validParentInput }),
   true
+);
+const sealedAt = 1_700_000_000_000;
+assert.equal(
+  isSealedLetterheadParentData({
+    userId: "uid",
+    title: "sealed",
+    input: null,
+    pdfUri: null,
+    updatedAt: sealedAt,
+    contentSeal: {
+      v: 1,
+      alg: "AES-256-GCM",
+      uid: "uid",
+      collection: "letterheadDocs",
+      purpose: "letterhead_document",
+      recordId: "lh_1",
+      revision: sealedAt,
+    },
+  }, "lh_1"),
+  true
+);
+assert.equal(
+  isSealedLetterheadParentData({
+    userId: "uid",
+    title: "sealed",
+    input: validParentInput,
+    updatedAt: sealedAt,
+    contentSeal: {
+      v: 1,
+      alg: "AES-256-GCM",
+      uid: "uid",
+      collection: "letterheadDocs",
+      purpose: "letterhead_document",
+      recordId: "lh_1",
+      revision: sealedAt,
+    },
+  }, "lh_1"),
+  false
 );
 assert.equal(
   isSupportedLetterheadMirrorPayload({

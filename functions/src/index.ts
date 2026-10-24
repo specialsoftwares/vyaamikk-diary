@@ -14,6 +14,7 @@ export {
 } from "./identity/resolveOrCreateUserByPhone";
 
 export { mintClientAuthToken } from "./identity/mintClientAuthToken";
+export { readRestoreAuthorityWatermark } from "./deletion/restoreWatermarkCallable";
 export { recordAgeAssessment } from "./identity/recordAgeAssessment";
 export { openOwnerContent, sealOwnerContent } from "./privacy/ownerContent";
 export { recordProcessingPurpose } from "./privacy/processingPurpose";

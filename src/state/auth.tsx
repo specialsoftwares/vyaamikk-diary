@@ -40,6 +40,8 @@ import {
   runLocalDeviceSignOut,
   type LocalSignOutResult,
 } from "@/services/auth/authSessionFence";
+import { retainLocalAccountOnLogout } from "@/services/accountDeletion/localAccountBoundary";
+import { prepareLocalAccountKey } from "@/services/accountDeletion/localKeyLifecycle";
 import { retireNativeCallableAuthReady } from "@/services/auth/nativeCallableAuthGate";
 import { toAppError } from "@/domain/errors";
 import { clearMasterDataSessionCache } from "@/services/masterData";
@@ -188,7 +190,7 @@ interface AuthApi extends AuthState {
     opts?: { user?: UserProfile }
   ): Promise<UserProfile>;
   /** Refresh session from a server-returned profile (email bind, reactivation). */
-  applyServerProfile(profile: UserProfile): Promise<UserProfile>;
+  applyServerProfile(profile: UserProfile, ownedGeneration?: number): Promise<UserProfile>;
   /** Persist usage heartbeat (`lastActiveAt` only — never login fields). */
   touchLastActive(): Promise<void>;
 }
@@ -221,6 +223,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const session = await sessionStore.load();
         if (!bootStillCurrent()) return;
         if (session) {
+          await prepareLocalAccountKey(session.user.uid);
           let user = session.user;
           const backend = getActiveBackend();
           const { profile: live, unverified } = await revalidateSessionProfile(
@@ -328,7 +331,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [dbStatus]);
 
   const saveSession = useCallback(
-    async (user: UserProfile, opts?: { preserveSignedInAt?: boolean }) => {
+    async (user: UserProfile, opts?: { preserveSignedInAt?: boolean; isCurrent?: () => boolean }) => {
       const now = Date.now();
       const signedInAt = opts?.preserveSignedInAt
         ? (state.session?.signedInAt ?? user.lastLoginAt ?? now)
@@ -340,7 +343,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signedInAt,
         lastActiveAt,
       };
-      await sessionStore.save(session);
+      if (opts?.isCurrent) {
+        if (!(await sessionStore.saveIfCurrent(session, opts.isCurrent))) {
+          throw new Error("session_changed");
+        }
+      } else {
+        await sessionStore.save(session);
+      }
+      await prepareLocalAccountKey(user.uid);
       return session;
     },
     [state.session?.signedInAt, state.session?.lastActiveAt]
@@ -415,6 +425,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             clearSessionLastActiveTouch(uid);
             endFirstActionFreezeSession();
             clearMasterDataSessionCache();
+            retainLocalAccountOnLogout(uid);
           },
           removePersistedProfile: () => clearSessionForRetirement(ownedGeneration).then(() => undefined),
         }).then(() => undefined),
@@ -528,8 +539,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const applyServerProfile = useCallback(
-    async (profile: UserProfile): Promise<UserProfile> => {
-      const session = await saveSession(profile, { preserveSignedInAt: true });
+    async (profile: UserProfile, ownedGeneration?: number): Promise<UserProfile> => {
+      const isCurrent = ownedGeneration == null ? undefined : () =>
+        currentAuthMutationGeneration() === ownedGeneration &&
+        statusRef.current === "signed_in" && sessionRef.current?.user.uid === profile.uid;
+      const session = await saveSession(profile, { preserveSignedInAt: true, isCurrent });
+      if (isCurrent && !isCurrent()) throw new Error("session_changed");
       setState((s) => ({
         ...s,
         status: "signed_in",
