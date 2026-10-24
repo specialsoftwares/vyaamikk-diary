@@ -51,6 +51,9 @@ export function createPurposeConsentQueue(ports: PurposeQueuePorts) {
   const listeners = new Set<() => void>();
   let stopObserve: (() => void) | null = null;
   let observedGeneration = -1;
+  // Listening means the subscription was accepted. It is not a server snapshot.
+  // A failed watcher invalidates enabling work already in flight.
+  let authorityHealthy = ports.observeRemote == null;
   const initial = (uid: string): PurposeQueueState => ({ uid, revision: 0, localGrant: false, hasChoice: false, pending: null, sync: "unknown" });
   const notify = () => listeners.forEach((listener) => listener());
   function publish(state: PurposeQueueState) { states.set(state.uid, state); notify(); }
@@ -80,6 +83,14 @@ export function createPurposeConsentQueue(ports: PurposeQueuePorts) {
     const current = () => owns(uid, generation, epoch) && sequence === requestSequence;
     let state = await load(uid);
     if (!current()) return;
+    if (ports.observeRemote && (!authorityHealthy || observedGeneration !== generation)) {
+      await ports.applyLocal(false);
+      if (!current()) return;
+      if (state.pending?.decision !== "withdraw") {
+        await persist({ ...state, localGrant: false, pending: null, sync: "listener_unavailable" });
+        return;
+      }
+    }
     // Never transmit a grant whose affirmative choice could not be persisted.
     // A withdrawal still attempts the server stop even if local storage failed.
     if (state.sync === "storage_error" && state.pending?.decision !== "withdraw") return;
@@ -91,6 +102,10 @@ export function createPurposeConsentQueue(ports: PurposeQueuePorts) {
       return;
     }
     if (!current()) return;
+    if (ports.observeRemote && (!authorityHealthy || observedGeneration !== generation)) {
+      await ports.applyLocal(false);
+      return;
+    }
     const pending = state.pending;
     state = {
       ...state,
@@ -105,9 +120,16 @@ export function createPurposeConsentQueue(ports: PurposeQueuePorts) {
       if (current()) saved = await persist(state);
     });
     if (!saved || !current()) return;
+    if (ports.observeRemote && (!authorityHealthy || observedGeneration !== generation)) {
+      await ports.applyLocal(false);
+      return;
+    }
     // Only this device's affirmative choice permits collection. Another phone's grant does not.
-    if (state.localGrant && (!pending || pending.decision === "grant")) await ports.applyLocal(true);
-    else await ports.applyLocal(false);
+    const latest = states.get(uid);
+    if (latest?.localGrant && (!pending || pending.decision === "grant")) {
+      await ports.applyLocal(true);
+      if (!current() || (ports.observeRemote && !authorityHealthy)) await ports.applyLocal(false);
+    } else await ports.applyLocal(false);
     notify();
   }
   return {
@@ -122,6 +144,7 @@ export function createPurposeConsentQueue(ports: PurposeQueuePorts) {
       // Synchronous call enters the existing immediate native opt-out gate.
       void ports.applyLocal(false);
       if (uid && ports.observeRemote) {
+        authorityHealthy = false;
         stopObserve = ports.observeRemote(uid, generation, (remote) => {
           if (activeUid !== uid || ports.generation() !== generation) return;
           if (remote.decision !== "withdraw") return;
@@ -145,10 +168,23 @@ export function createPurposeConsentQueue(ports: PurposeQueuePorts) {
             });
           });
         }, (health) => {
-          if (activeUid !== uid || ports.generation() !== generation || health !== "failed") return;
+          if (activeUid !== uid || ports.generation() !== generation) return;
+          if (health === "listening") {
+            authorityHealthy = true;
+            return;
+          }
+          authorityHealthy = false;
+          choiceEpoch += 1;
           void ports.applyLocal(false);
           const state = states.get(uid);
-          if (state) publish({ ...state, localGrant: false, sync: "listener_unavailable" });
+          if (state) {
+            void persist({
+              ...state,
+              localGrant: false,
+              pending: state.pending?.decision === "withdraw" ? state.pending : null,
+              sync: "listener_unavailable",
+            });
+          }
         });
       }
       notify();

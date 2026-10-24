@@ -6,6 +6,20 @@ import { applyDiagnosticsChoice, currentDiagnosticsPreference, type DiagnosticsP
 import { createPurposeConsentQueue, type PurposeQueueState } from "./purposeConsentQueue";
 export { PROCESSING_NOTICE_VERSION, PROCESSING_POLICY_VERSION } from "./purposeConsentQueue";
 
+/** Cached Firestore snapshots are not a fresh withdrawal. */
+export function withdrawalFromPurposeSnapshot(
+  data: { decision?: unknown; revision?: unknown; receivedAt?: unknown } | undefined,
+  fromCache: boolean
+): { ok: true; revision: number; decision: "withdraw"; receivedAt: number | null } | null {
+  if (fromCache || data?.decision !== "withdraw") return null;
+  return {
+    ok: true,
+    revision: Number(data.revision) || 0,
+    decision: "withdraw",
+    receivedAt: typeof data.receivedAt === "number" ? data.receivedAt : null,
+  };
+}
+
 const key = (uid: string) => `vyd_purpose_receipt_v1:${uid}`;
 const queue = createPurposeConsentQueue({
   async load(uid) {
@@ -33,14 +47,10 @@ const queue = createPurposeConsentQueue({
         unsubscribe = onSnapshot(
           ref,
           (snap) => {
-            const data = snap.data();
-            if (data?.decision !== "withdraw") return;
-            onRemote({
-              ok: true,
-              revision: Number(data.revision) || 0,
-              decision: "withdraw",
-              receivedAt: typeof data.receivedAt === "number" ? data.receivedAt : null,
-            });
+            // A cached snapshot is not current authority. Subscription
+            // establishment is reported separately as listening.
+            const remote = withdrawalFromPurposeSnapshot(snap.data(), snap.metadata.fromCache);
+            if (remote) onRemote(remote);
           },
           () => onHealth("failed")
         );

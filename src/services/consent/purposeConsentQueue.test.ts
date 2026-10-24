@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createPurposeConsentQueue, type PurposeQueueState, type PurposeMutation, type PurposeServerState } from './purposeConsentQueue';
+import { withdrawalFromPurposeSnapshot } from './purposeConsent';
 import { purposeTransition, type PurposeState } from '../../../functions/src/privacy/processingPurposeState';
 function deferred<T>() { let resolve!: (v: T) => void; const promise = new Promise<T>(r => resolve = r); return { promise, resolve }; }
 async function main() {
@@ -91,6 +92,7 @@ async function main() {
     },
   });
   watched.bind('watched');
+  watchedHealth.current?.('listening');
   await watched.choose('watched', true);
   assert.equal(enabled, true);
   watchedListener.current?.({ ok: true, revision: 8, decision: 'withdraw', receivedAt: 8 });
@@ -99,11 +101,14 @@ async function main() {
   const staleWithdraw = watchedListener.current;
   watchedRemote = { revision: 8, decision: 'withdraw', receivedAt: 8 };
   generation += 1;
+  watched.bind('watched');
+  watchedHealth.current?.('listening');
   await watched.choose('watched', true);
   staleWithdraw?.({ ok: true, revision: 9, decision: 'withdraw', receivedAt: 9 });
   for (let i = 0; i < 8; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(enabled, true, 'a withdrawal from the previous generation does not apply');
   watched.bind('watched');
+  watchedHealth.current?.('listening');
   assert.equal(watchedGeneration, generation, 'same uid and a new generation establishes a current watcher');
   await watched.choose('watched', true);
   assert.equal(enabled, true);
@@ -114,6 +119,94 @@ async function main() {
   watchedHealth.current?.('failed');
   assert.equal(enabled, false);
   assert.equal(watched.state('watched')?.sync, 'listener_unavailable');
+
+  const grantEntered = deferred<void>();
+  const grantReceipt = deferred<PurposeServerState>();
+  let failedHealth: ((health: 'listening' | 'failed') => void) | undefined;
+  const failing = createPurposeConsentQueue({
+    ...ports,
+    send: async () => { grantEntered.resolve(); return grantReceipt.promise; },
+    observeRemote: (_uid, _generation, _onRemote, onHealth) => {
+      failedHealth = onHealth;
+      return () => {};
+    },
+  });
+  failing.bind('failed-owner');
+  failedHealth?.('listening');
+  const pendingGrant = failing.choose('failed-owner', true);
+  await grantEntered.promise;
+  failedHealth?.('failed');
+  assert.equal(enabled, false);
+  grantReceipt.resolve({ ok: true, revision: 1, decision: 'grant', receivedAt: 1 });
+  await pendingGrant;
+  assert.equal(enabled, false, 'a grant receipt after listener failure does not re-enable diagnostics');
+  assert.equal(failing.state('failed-owner')?.sync, 'listener_unavailable');
+  failedHealth?.('listening');
+  await failing.reconcile('failed-owner');
+  assert.equal(enabled, false, 'reconnect does not restore a grant that the failure invalidated');
+  await failing.choose('failed-owner', true);
+  assert.equal(enabled, true, 'a new local choice after a healthy watcher can enable');
+  assert.equal(withdrawalFromPurposeSnapshot({ decision: 'withdraw', revision: 4, receivedAt: 4 }, true), null);
+  assert.deepEqual(withdrawalFromPurposeSnapshot({ decision: 'withdraw', revision: 4, receivedAt: 4 }, false), {
+    ok: true, revision: 4, decision: 'withdraw', receivedAt: 4,
+  });
+
+  let coldGrants = 0;
+  let coldWithdrawals = 0;
+  let coldHealth: ((health: 'listening' | 'failed') => void) | undefined;
+  const cold = createPurposeConsentQueue({
+    ...ports,
+    load: async () => null,
+    send: async (input) => {
+      if (!('action' in input)) {
+        if (input.decision === 'grant') coldGrants += 1;
+        if (input.decision === 'withdraw') coldWithdrawals += 1;
+      }
+      return { ok: true, revision: 1, decision: 'action' in input ? null : input.decision, receivedAt: 1 };
+    },
+    observeRemote: (_uid, _generation, _onRemote, onHealth) => {
+      coldHealth = onHealth;
+      onHealth('failed');
+      return () => {};
+    },
+  });
+  cold.bind('cold');
+  await cold.choose('cold', true);
+  assert.equal(enabled, false);
+  assert.equal(coldGrants, 0, 'a grant is not sent when the watcher fails before any cached state');
+  assert.equal(cold.state('cold')?.sync, 'listener_unavailable');
+  assert.equal(cold.state('cold')?.localGrant, false);
+  await cold.choose('cold', false);
+  assert.equal(coldWithdrawals, 1, 'a withdrawal is still sent while the watcher is failed');
+  assert.equal(enabled, false);
+  coldHealth?.('listening');
+  await cold.reconcile('cold');
+  assert.equal(enabled, false, 'reconnect without a new grant stays off');
+  assert.equal(coldGrants, 0);
+
+  const switchEntered = deferred<void>();
+  const switchReceipt = deferred<PurposeServerState>();
+  let switchHealth: ((health: 'listening' | 'failed') => void) | undefined;
+  const switching = createPurposeConsentQueue({
+    ...ports,
+    send: async () => { switchEntered.resolve(); return switchReceipt.promise; },
+    observeRemote: (_uid, _generation, _onRemote, onHealth) => {
+      switchHealth = onHealth;
+      return () => {};
+    },
+  });
+  switching.bind('left');
+  switchHealth?.('listening');
+  const pendingSwitch = switching.choose('left', true);
+  await switchEntered.promise;
+  switching.bind('right');
+  switchHealth?.('listening');
+  switchReceipt.resolve({ ok: true, revision: 1, decision: 'grant', receivedAt: 1 });
+  await pendingSwitch;
+  assert.equal(enabled, false, 'an account switch does not publish the previous grant');
+  assert.equal(switching.state('right')?.localGrant, false);
+  switching.bind(null);
+  assert.equal(enabled, false);
   console.log('purposeConsentQueue: ordering, offline, storage, replay and session tests passed');
 }
 main().catch(e => { console.error(e); process.exitCode = 1; });
