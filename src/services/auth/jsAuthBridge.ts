@@ -82,6 +82,8 @@ export type JsAuthBridgePorts = {
   mint: () => Promise<string>;
   signIn: (token: string) => Promise<string>;
   signOutJs: () => Promise<void>;
+  /** When the JS uid already matches, false forces a fresh custom token. */
+  admissionCurrent?: () => Promise<boolean>;
 };
 
 /**
@@ -97,7 +99,16 @@ export async function bridgeNativeSession(ports: JsAuthBridgePorts): Promise<boo
     const generationAtStart = currentAuthMutationGeneration();
     if (!nativeUid || currentAuthMutationGeneration() !== generationAtStart) return false;
 
-    if (ports.getJsUid() === nativeUid) return true;
+    if (ports.getJsUid() === nativeUid) {
+      const fresh = ports.admissionCurrent ? await ports.admissionCurrent() : true;
+      if (
+        currentAuthMutationGeneration() !== generationAtStart ||
+        ports.getNativeUid() !== nativeUid
+      ) {
+        return false;
+      }
+      if (fresh) return true;
+    }
 
     const token = await ports.mint();
     if (
@@ -123,8 +134,15 @@ export async function bridgeNativeSession(ports: JsAuthBridgePorts): Promise<boo
       }
       return false;
     }
+    if (ports.admissionCurrent && !(await ports.admissionCurrent())) return false;
     return true;
   });
+}
+
+/** A positive claim is current only when it equals the authority watermark. */
+export function claimMatchesAuthorityWatermark(claim: unknown, authorityWatermark: number | null): boolean {
+  if (authorityWatermark == null || !Number.isSafeInteger(authorityWatermark) || authorityWatermark < 1) return false;
+  return claim === authorityWatermark;
 }
 
 async function establishJsAuthSession(): Promise<boolean> {
@@ -145,6 +163,31 @@ async function establishJsAuthSession(): Promise<boolean> {
       const { callMintClientAuthToken } = await import("./identityCallable");
       const { token } = await callMintClientAuthToken();
       return token;
+    },
+    admissionCurrent: async () => {
+      if (process.env.EXPO_PUBLIC_RESTORE_ADMISSION_REFRESH !== "true") return true;
+      const user = auth.currentUser;
+      if (!user) return false;
+      const token = await user.getIdTokenResult(false);
+      const { callReadRestoreAuthorityWatermark } = await import("./identityCallable");
+      const { decidePublishedAdmission } = await import("./publishedAuthority");
+      let published: Awaited<ReturnType<typeof callReadRestoreAuthorityWatermark>> | { state: "closed" } | { state: "unavailable"; reason: string };
+      try {
+        published = await callReadRestoreAuthorityWatermark();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "";
+        published = message.includes("restore_fence_closed")
+          ? { state: "closed" }
+          : { state: "unavailable", reason: "unreadable" };
+      }
+      const decision = decidePublishedAdmission({
+        sessionUid: user.uid,
+        claimUid: user.uid,
+        claim: token.claims.authorityWatermark,
+        published,
+        attempts: 0,
+      });
+      return decision === "fresh" || decision === "unconfigured";
     },
     signIn: async (token) => {
       const cred = await signInWithCustomToken(auth, token);

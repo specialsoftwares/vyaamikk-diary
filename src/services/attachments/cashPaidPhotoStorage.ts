@@ -5,8 +5,8 @@
 
 import type { AttachmentRef, BusinessCashGivenPayload } from "@/domain/businessEntry";
 import { getActiveBackend } from "@/config/env";
+import { allocateOpaqueUserStoragePath } from "@/services/storage/userOwnedStoragePaths";
 import {
-  getUserStoragePath,
   isUserStorageAvailable,
   uploadLocalFileToPath,
 } from "@/services/storage/userStorage";
@@ -63,7 +63,14 @@ export async function uploadCashPaidPhotoToStorage(input: {
   }
 
   try {
-    const storagePath = getUserStoragePath(input.userId, "attachments", input.recordId, fileName);
+    const allocated = allocateOpaqueUserStoragePath({
+      userId: input.userId,
+      category: "attachments",
+      recordId: input.recordId,
+      displayName: fileName,
+      extension: ext,
+    });
+    const storagePath = allocated.storagePath;
     const uploaded = await uploadLocalFileToPath(
       storagePath,
       input.picked.uri,

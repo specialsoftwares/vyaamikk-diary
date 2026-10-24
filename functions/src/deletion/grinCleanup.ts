@@ -60,13 +60,14 @@ function isRetryableError(error: unknown): boolean {
 
 export async function purgeGrinStoragePrefix(
   bucket: StorageBucketLike,
-  uid: string
+  uid: string,
+  onPage?: () => Promise<void>
 ): Promise<{ deleted: number; exhausted: boolean }> {
   let deleted = 0;
   let exhausted = true;
   for (const prefix of allGrinStoragePrefixes(uid)) {
     for (;;) {
-      const page = await purgePrefixPaged(bucket, uid, prefix);
+      const page = await purgePrefixPaged(bucket, uid, prefix, { onPage });
       deleted += page.deleted;
       if (page.exhausted) break;
     }
@@ -78,12 +79,13 @@ export async function purgeGrinStoragePrefix(
 
 export async function purgeGrinFirestoreTrees(
   db: GrinFirestoreLike,
-  uid: string
+  uid: string,
+  onPage?: () => Promise<void>
 ): Promise<{ deleted: number; exhausted: boolean }> {
   let deleted = 0;
   const roots = allGrinFirestoreCollectionIds().map((col) => `users/${uid}/${col}`);
   for (const root of roots) {
-    deleted += await deleteCollectionRecursive(db, root);
+    deleted += await deleteCollectionRecursive(db, root, onPage);
   }
   const leftover = await countGrinFirestoreDocs(db, uid);
   if (leftover > 0) return { deleted, exhausted: false };
@@ -101,13 +103,18 @@ function uniqueSubs(discovered: string[]): string[] {
   return ordered;
 }
 
-async function deleteCollectionRecursive(db: GrinFirestoreLike, collectionPath: string): Promise<number> {
+async function deleteCollectionRecursive(
+  db: GrinFirestoreLike,
+  collectionPath: string,
+  onPage?: () => Promise<void>
+): Promise<number> {
   let deleted = 0;
+  if (onPage) await onPage();
   const docs = await db.listCollection(collectionPath);
   for (const doc of docs) {
     const discovered = await db.listSubcollections(doc.ref.path);
     for (const sub of uniqueSubs(discovered)) {
-      deleted += await deleteCollectionRecursive(db, `${doc.ref.path}/${sub}`);
+      deleted += await deleteCollectionRecursive(db, `${doc.ref.path}/${sub}`, onPage);
     }
     await db.delete(doc.ref.path);
     deleted += 1;
@@ -147,6 +154,7 @@ export async function purgeGrinEvidenceIfEnabled(params: {
   bucket: StorageBucketLike;
   db: GrinFirestoreLike;
   force?: boolean;
+  onPage?: () => Promise<void>;
 }): Promise<GrinCleanupReport> {
   if (!INCLUDE_GRIN_IN_ACCOUNT_PURGE && params.force !== true) {
     return idle("grin_purge_disabled");
@@ -156,7 +164,7 @@ export async function purgeGrinEvidenceIfEnabled(params: {
   let firestoreDeleted = 0;
   let firestoreExhausted = false;
   try {
-    const storage = await purgeGrinStoragePrefix(params.bucket, params.uid);
+    const storage = await purgeGrinStoragePrefix(params.bucket, params.uid, params.onPage);
     storageDeleted = storage.deleted;
     storageExhausted = storage.exhausted;
     if (!storage.exhausted) {
@@ -172,7 +180,7 @@ export async function purgeGrinEvidenceIfEnabled(params: {
         firestoreExhausted: false,
       };
     }
-    const fs = await purgeGrinFirestoreTrees(params.db, params.uid);
+    const fs = await purgeGrinFirestoreTrees(params.db, params.uid, params.onPage);
     firestoreDeleted = fs.deleted;
     firestoreExhausted = fs.exhausted;
     if (!fs.exhausted) {

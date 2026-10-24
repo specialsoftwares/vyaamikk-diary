@@ -29,6 +29,7 @@ import {
   openBusinessCloud,
   protectBusinessCloud,
   settleCreatedBusinessCloud,
+  prepareBusinessCreate,
 } from "@/services/privacy/businessCloudSeal";
 import { stableRecordId } from "@/services/records/stableRecordId";
 import { assertDispatchedSession, type SyncSessionToken } from "@/sync/syncSessionOwnership";
@@ -152,7 +153,7 @@ export const firebaseLetterheadDocumentRepository: LetterheadDocumentRepository 
       getFirebaseDb(),
       userId,
       record,
-      session === undefined ? undefined : { session },
+      { ...(session === undefined ? {} : { session }), prepareCloudPayload: prepareBusinessCreate("letterheadDocs", userId) },
       nowMs,
       id
     );

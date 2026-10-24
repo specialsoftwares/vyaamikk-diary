@@ -1,5 +1,7 @@
 /**
- * Recursive Firestore subcollection purge with continuation until empty.
+ * Bounded purge of explicitly owned subcollections.
+ * Missing intermediate parents are listed with showMissing, one page at a time.
+ * The public listDocuments() helper is not used: it auto-paginates the whole collection.
  */
 
 import type { Firestore } from "firebase-admin/firestore";
@@ -14,39 +16,310 @@ export const USER_SUBCOLLECTIONS = [
   "counters",
   "_saveLocks",
   "trustedDevices",
+  "partyLedgerProjections",
+  "partyLedgerBuckets",
+  "partyLedgerCommands",
+  "partyLedgerCheckpoints",
+  "processingPurposes",
+  "processingPurposeEvents",
 ] as const;
 
-const BATCH = 400;
-const MAX_LOOPS_PER_SUB = 100;
+/** Left in place. GRIN remains on its own flag; billing status is not diary content. */
+export const RETAINED_USER_SUBCOLLECTIONS = [
+  "subscription",
+  "goodsEvidenceAdmission",
+  "goodsEvidenceLedgers",
+  "goodsEvidenceUploadControl",
+  "goodsEvidenceStorage",
+  "grinEvidenceObjectKeys",
+  "grinEvidenceDerivativeKeys",
+] as const;
+
+const PAGE = 100;
+const MAX_BATCHES_PER_ATTEMPT = 10;
+const MAX_NESTED_DEPTH = 4;
+
+export type PurgeHold = "depth_exceeded" | "unknown_collection" | "cursor_unowned";
+
+export type FirestorePurgeCursor = {
+  parentPath: string;
+  collectionId: string;
+  pageToken: string;
+};
+
+export type PurgePage = { ids: string[]; nextPageToken?: string };
+
+export type PurgePorts = {
+  listPage(parentPath: string, collectionId: string, pageToken?: string): Promise<PurgePage>;
+  childCollections(path: string): Promise<string[]>;
+  rootCollections(uid: string): Promise<string[]>;
+  deleteDocs(paths: string[]): Promise<void>;
+};
+
+export type PurgeResult = {
+  deleted: number;
+  exhausted: boolean;
+  hold?: PurgeHold;
+  holdDetail?: string;
+  cursor?: FirestorePurgeCursor;
+};
+
+type Walk = {
+  deleted: number;
+  batches: number;
+  maxBatches: number;
+  ports: PurgePorts;
+  beforePage?: (cursor: FirestorePurgeCursor | null) => Promise<void>;
+  onBatch?: () => Promise<void>;
+};
+
+const PURGE = new Set<string>(USER_SUBCOLLECTIONS);
+const RETAIN = new Set<string>(RETAINED_USER_SUBCOLLECTIONS);
+
+function projectIdOf(db: Firestore): string {
+  const id = (db as { projectId?: string }).projectId;
+  if (!id) throw new Error("firestore_project_unavailable");
+  return id;
+}
+
+/** One ListDocuments page, including documents that exist only as parents. */
+export async function listDocumentIdsPage(
+  db: Firestore,
+  parentPath: string,
+  collectionId: string,
+  pageToken?: string,
+  pageSize = PAGE
+): Promise<PurgePage> {
+  const projectId = projectIdOf(db);
+  const databaseId = (db as { databaseId?: string }).databaseId || "(default)";
+  const host = process.env.FIRESTORE_EMULATOR_HOST;
+  const url = new URL(
+    `${host ? `http://${host}` : "https://firestore.googleapis.com"}/v1/projects/${projectId}/databases/${databaseId}/documents/${parentPath}/${collectionId}`
+  );
+  url.searchParams.set("pageSize", String(pageSize));
+  url.searchParams.set("showMissing", "true");
+  if (pageToken) url.searchParams.set("pageToken", pageToken);
+  const headers: Record<string, string> = {};
+  if (host) {
+    // The emulator enforces Rules on the REST list. This token is the
+    // emulator owner and is never sent to production.
+    headers.Authorization = "Bearer owner";
+  } else {
+    const { GoogleAuth } = await import("google-auth-library");
+    const token = await new GoogleAuth({
+      scopes: ["https://www.googleapis.com/auth/datastore"],
+    }).getAccessToken();
+    if (!token) throw new Error("firestore_list_unauthorised");
+    headers.Authorization = `Bearer ${token}`;
+  }
+  const response = await fetch(url, { headers });
+  if (!response.ok) throw new Error(`firestore_list_failed_${response.status}`);
+  const body = (await response.json()) as {
+    documents?: { name?: string }[];
+    nextPageToken?: string;
+  };
+  const prefix = `/documents/${parentPath}/${collectionId}/`;
+  const ids = (body.documents ?? []).map((document) => {
+    const name = document.name ?? "";
+    const at = name.lastIndexOf(prefix);
+    return at >= 0 ? name.slice(at + prefix.length) : name.split("/").pop() ?? "";
+  }).filter((id) => id.length > 0 && !id.includes("/"));
+  return { ids, nextPageToken: body.nextPageToken || undefined };
+}
+
+export function adminPurgePorts(db: Firestore): PurgePorts {
+  return {
+    listPage: (parentPath, collectionId, pageToken) =>
+      listDocumentIdsPage(db, parentPath, collectionId, pageToken),
+    async childCollections(path) {
+      const cols = await db.doc(path).listCollections();
+      return cols.map((col) => col.id);
+    },
+    async rootCollections(uid) {
+      const cols = await db.doc(`users/${uid}`).listCollections();
+      return cols.map((col) => col.id);
+    },
+    async deleteDocs(paths) {
+      if (paths.length === 0) return;
+      const batch = db.batch();
+      for (const path of paths) batch.delete(db.doc(path));
+      await batch.commit();
+    },
+  };
+}
+
+async function purgeCollection(
+  parentPath: string,
+  collectionId: string,
+  depth: number,
+  state: Walk,
+  resume?: FirestorePurgeCursor
+): Promise<PurgeResult> {
+  if (depth > MAX_NESTED_DEPTH) {
+    return { deleted: state.deleted, exhausted: false, hold: "depth_exceeded", holdDetail: `${parentPath}/${collectionId}` };
+  }
+  let pageToken = resume?.parentPath === parentPath && resume.collectionId === collectionId
+    ? resume.pageToken
+    : undefined;
+  for (;;) {
+    if (state.batches >= state.maxBatches) {
+      return {
+        deleted: state.deleted,
+        exhausted: false,
+        cursor: { parentPath, collectionId, pageToken: pageToken ?? "" },
+      };
+    }
+    const cursor = pageToken ? { parentPath, collectionId, pageToken } : null;
+    if (state.beforePage) await state.beforePage(cursor);
+    const page = await state.ports.listPage(parentPath, collectionId, pageToken);
+    if (page.ids.length === 0 && !page.nextPageToken) {
+      return { deleted: state.deleted, exhausted: true };
+    }
+    for (const id of page.ids) {
+      const path = `${parentPath}/${collectionId}/${id}`;
+      const children = await state.ports.childCollections(path);
+      for (const child of children) {
+        const nested = await purgeCollection(path, child, depth + 1, state);
+        if (!nested.exhausted || nested.hold) return nested;
+      }
+    }
+    await state.ports.deleteDocs(page.ids.map((id) => `${parentPath}/${collectionId}/${id}`));
+    state.deleted += page.ids.length;
+    state.batches += 1;
+    if (state.onBatch) await state.onBatch();
+    if (!page.nextPageToken) return { deleted: state.deleted, exhausted: true };
+    pageToken = page.nextPageToken;
+  }
+}
+
+export function cursorOwnedByUser(uid: string, cursor: FirestorePurgeCursor): boolean {
+  const userPath = `users/${uid}`;
+  const parent = cursor.parentPath;
+  if (parent !== userPath && !parent.startsWith(`${userPath}/`)) return false;
+  if (parent.includes("..") || parent.includes("//")) return false;
+  const collectionId = cursor.collectionId;
+  if (!collectionId || collectionId.includes("/") || collectionId === "." || collectionId === "..") return false;
+  if (parent === userPath) return true;
+  const rest = parent.slice(userPath.length + 1).split("/");
+  return rest.length % 2 === 0 && rest.every((part) => part.length > 0 && part !== "." && part !== "..");
+}
 
 export async function purgeUserSubcollectionsFully(
   db: Firestore,
-  uid: string
-): Promise<{ deleted: number; exhausted: boolean }> {
-  let deleted = 0;
+  uid: string,
+  options?: {
+    onBatch?: () => Promise<void>;
+    beforePage?: (cursor: FirestorePurgeCursor | null) => Promise<void>;
+    ports?: PurgePorts;
+    cursor?: FirestorePurgeCursor | null;
+    maxBatches?: number;
+  }
+): Promise<PurgeResult> {
+  const ports = options?.ports ?? adminPurgePorts(db);
+  const state: Walk = {
+    deleted: 0,
+    batches: 0,
+    maxBatches: options?.maxBatches ?? MAX_BATCHES_PER_ATTEMPT,
+    ports,
+    beforePage: options?.beforePage,
+    onBatch: options?.onBatch,
+  };
+  const userPath = `users/${uid}`;
+  if (options?.cursor && !cursorOwnedByUser(uid, options.cursor)) {
+    return { deleted: 0, exhausted: false, hold: "cursor_unowned", holdDetail: "cursor_outside_user" };
+  }
+  if (options?.cursor && options.cursor.parentPath !== userPath) {
+    const depth = options.cursor.parentPath.split("/").length / 2;
+    const nested = await purgeCollection(
+      options.cursor.parentPath,
+      options.cursor.collectionId,
+      depth,
+      state,
+      options.cursor
+    );
+    if (!nested.exhausted || nested.hold) return nested;
+  }
+  let resumeTop = options?.cursor?.parentPath === userPath;
   for (const sub of USER_SUBCOLLECTIONS) {
-    let loops = 0;
-    while (loops < MAX_LOOPS_PER_SUB) {
-      loops += 1;
-      const snap = await db
-        .collection("users")
-        .doc(uid)
-        .collection(sub)
-        .limit(BATCH)
-        .get();
-      if (snap.empty) break;
-      const batch = db.batch();
-      snap.docs.forEach((d) => batch.delete(d.ref));
-      await batch.commit();
-      deleted += snap.size;
-      if (snap.size < BATCH) break;
-    }
+    if (resumeTop && options?.cursor?.collectionId !== sub) continue;
+    const result = await purgeCollection(
+      userPath,
+      sub,
+      1,
+      state,
+      resumeTop ? options?.cursor ?? undefined : undefined
+    );
+    resumeTop = false;
+    if (!result.exhausted || result.hold) return result;
+  }
+  const roots = await ports.rootCollections(uid);
+  if (roots.length > 50) {
+    return { deleted: state.deleted, exhausted: false, hold: "unknown_collection", holdDetail: "too_many_collections" };
+  }
+  for (const name of roots) {
+    if (PURGE.has(name) || RETAIN.has(name)) continue;
+    return { deleted: state.deleted, exhausted: false, hold: "unknown_collection", holdDetail: name };
   }
   for (const sub of USER_SUBCOLLECTIONS) {
-    const snap = await db.collection("users").doc(uid).collection(sub).limit(1).get();
-    if (!snap.empty) {
-      return { deleted, exhausted: false };
-    }
+    const page = await ports.listPage(userPath, sub);
+    if (page.ids.length > 0) return { deleted: state.deleted, exhausted: false };
   }
-  return { deleted, exhausted: true };
+  return { deleted: state.deleted, exhausted: true };
+}
+
+export type LeftoverInventoryRecord = {
+  revision: number;
+  scope: string;
+  observedAt: number;
+  remainingPaths: readonly string[];
+  status?: "partial" | "complete";
+  clockSource?: "server" | "caller";
+  jobId?: string;
+  uid?: string;
+};
+
+/**
+ * Unknown and deep leftovers are not a completed purge. The remaining count
+ * has to be the inventory record for this scope. A caller-supplied zero is
+ * not that record. Provider and backup evidence stay separate.
+ */
+export async function reviewUnknownPurgeHold(input: {
+  hold: PurgeHold;
+  path: string;
+  walkerDeleted: number;
+  log: { read(revision: number): Promise<LeftoverInventoryRecord | null> };
+  claimedRevision: number | null;
+  claimedRemaining: number | null;
+  expectedScope: string;
+  now: number;
+  maxAgeMs: number;
+  providerEvidence: string | null;
+  backupEvidence: string | null;
+}): Promise<{ completion: "blocked"; reason: string }> {
+  if (!input.path || input.walkerDeleted < 0) return { completion: "blocked", reason: "resolution_incomplete" };
+  if (input.hold === "cursor_unowned") return { completion: "blocked", reason: "cursor_not_owned" };
+  if (input.claimedRevision == null || input.claimedRemaining == null) {
+    return { completion: "blocked", reason: "independent_leftover_check_missing" };
+  }
+  const record = await input.log.read(input.claimedRevision);
+  if (!record || record.scope !== input.expectedScope) {
+    return { completion: "blocked", reason: record ? "leftover_scope_rejected" : "leftover_provenance_rejected" };
+  }
+  if (record.status !== "complete" || record.clockSource !== "server") {
+    return { completion: "blocked", reason: "inventory_scan_incomplete" };
+  }
+  if (record.uid && record.scope !== `users/${record.uid}`) {
+    return { completion: "blocked", reason: "leftover_scope_rejected" };
+  }
+  if (!Number.isSafeInteger(record.observedAt) || record.observedAt > input.now || input.now - record.observedAt > input.maxAgeMs) {
+    return { completion: "blocked", reason: "leftover_observation_stale" };
+  }
+  if (input.claimedRemaining !== record.remainingPaths.length) {
+    return { completion: "blocked", reason: "leftover_count_mismatch" };
+  }
+  if (record.remainingPaths.length > 0) return { completion: "blocked", reason: "leftovers_remain" };
+  if (input.providerEvidence || input.backupEvidence) {
+    return { completion: "blocked", reason: "provider_or_backup_evidence_is_not_a_purge_result" };
+  }
+  return { completion: "blocked", reason: "ready_for_operator_review" };
 }

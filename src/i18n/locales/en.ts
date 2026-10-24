@@ -432,6 +432,7 @@ const en = {
     emptyTitle: "No matching records",
     emptyMessage: "Try invoice or LR numbers, party names, amounts, GST period, or Hindi keywords.",
     recentQueries: "Recent searches",
+    recentUnavailable: "Saved searches on this device could not be opened. They were not deleted.",
     recentRecords: "Recent records",
     indexError: "Could not load search index. Pull to refresh or try again.",
     filters: {

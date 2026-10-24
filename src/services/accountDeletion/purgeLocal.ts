@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
+import { deleteLocalOwnerRows } from "@/services/accountDeletion/localAccountBoundary";
 import { getLocalDatabase } from "@/localDb/database";
 import type { ProfileLogoRef } from "@/domain/types";
 import { getDiaryRepository } from "@/services/diary";
@@ -61,10 +62,7 @@ async function cancelScheduledReminders(userId: string): Promise<void> {
 function purgeSqliteUserData(userId: string): void {
   try {
     const db = getLocalDatabase();
-    db.runSync("DELETE FROM form_drafts WHERE user_id = ?", [userId]);
-    db.runSync("DELETE FROM entries_local WHERE user_id = ?", [userId]);
-    db.runSync("DELETE FROM sync_queue WHERE user_id = ?", [userId]);
-    db.runSync("DELETE FROM active_route WHERE user_id = ?", [userId]);
+    deleteLocalOwnerRows(db, userId);
     db.runSync("DELETE FROM master_data_suggestions WHERE user_id = ?", [userId]);
   } catch (e) {
     log.warn("sqlite purge skipped", e);
@@ -117,7 +115,7 @@ export async function purgeLocalAccountData(input: {
   await clearLocationFootprintPreferences(userId);
   await removeAsyncStorageKeysForUser(userId);
   await clearPendingPurchaseIfUid(AsyncStorage, userId);
-  await clearRecentSearches();
+  await clearRecentSearches(userId);
 
   log.info("purge local done", { userId });
 }

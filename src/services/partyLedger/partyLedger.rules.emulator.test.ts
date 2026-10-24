@@ -1,5 +1,5 @@
 /**
- * FIRESTORE_EMULATOR. Owner read, client write denied.
+ * FIRESTORE_EMULATOR. Client read and write of stored totals are denied.
  * Does not deploy rules.
  */
 
@@ -43,9 +43,8 @@ async function main(): Promise<void> {
 
     const owner = testEnv.authenticatedContext("owner-a").firestore();
     const other = testEnv.authenticatedContext("owner-b").firestore();
-    const bucket = doc(owner, "users", "owner-a", "partyLedgerBuckets", "bucket-1");
-    const read = await getDoc(bucket);
-    if (!read.exists()) throw new Error("owner read failed");
+    await assertFails(getDoc(doc(owner, "users", "owner-a", "partyLedgerBuckets", "bucket-1")));
+    await assertFails(getDoc(doc(owner, "users", "owner-a", "partyLedgerProjections", "proj-missing")));
 
     await assertFails(
       setDoc(doc(owner, "users", "owner-a", "partyLedgerBuckets", "bucket-1"), {

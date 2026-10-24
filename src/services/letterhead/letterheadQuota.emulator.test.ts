@@ -14,6 +14,12 @@ import {
 import { doc, getDoc, setDoc, updateDoc, writeBatch, type Firestore } from "firebase/firestore";
 
 import { createEntryAtomic, createEntryAtomicDetailed } from "@/services/diary/atomicCreate";
+import { openContent, sealContent } from "../../../functions/src/privacy/contentEncryption";
+import {
+  cloudPayloadLeaksPlaintext,
+  diaryPlaintextForSeal,
+  sealedDiaryCloudPayload,
+} from "@/services/privacy/diarySealDocument";
 import { createLetterheadDocumentAtomic } from "@/services/letterhead/atomicCreate";
 import { letterheadMirrorRecordId } from "@/services/letterhead/letterheadMirrorPolicy";
 import { classifyAtomicCreateError } from "@/billing/optionC/classifyCreateError";
@@ -235,10 +241,12 @@ async function main() {
     const letterheadGets = countAccessCalls(rules, "isActiveUser");
     const mirrorGets =
       countAccessCalls(rules, "isActiveUser") + countAccessCalls(rules, "isValidatedLetterheadMirrorCreate");
-    // isActiveUser reads the user profile once, authSecurity exists+get,
-    // and deletionJobs exists+get so a restored account cannot write after erasure.
-    check("static source estimate: letterhead CREATE document reads", letterheadGets === 5, `got ${letterheadGets}`);
-    check("static source estimate: mirror CREATE document reads", mirrorGets === 6, `got ${mirrorGets}`);
+    // isActiveUser reads the user once, authSecurity exists+get, and
+    // deletionJobs exists+get. The restore fence adds a closed-fence read
+    // and the required-mode reads. The static count includes reads that
+    // short-circuit while restore mode is off. Quota slots are unchanged.
+    check("static source estimate: letterhead CREATE document reads", letterheadGets === 11, `got ${letterheadGets}`);
+    check("static source estimate: mirror CREATE document reads", mirrorGets === 12, `got ${mirrorGets}`);
     check("static source estimate: letterhead CREATE under Rules 20-access cap", letterheadGets <= 20);
     check("static source estimate: mirror CREATE under Rules 20-access cap", mirrorGets <= 20);
     check("countAccessCalls is a static source estimate, not a runtime measurement", true);
@@ -461,6 +469,145 @@ async function main() {
       })
     );
     check("skeletal letterheadDocs CREATE denied at Rules", true);
+
+    const sealedAt = Date.UTC(2026, 9, 23);
+    const sealedParent = {
+      userId: "alice",
+      title: "sealed",
+      input: null,
+      pdfUri: null,
+      createdAt: sealedAt,
+      updatedAt: sealedAt,
+      contentSeal: {
+        v: 1,
+        alg: "AES-256-GCM",
+        uid: "alice",
+        collection: "letterheadDocs",
+        purpose: "letterhead_document",
+        recordId: "lh_sealed_parent",
+        revision: sealedAt,
+        nonce: "bm9uY2Vub25jZW5vbmNl",
+        ciphertext: "YQ==",
+        tag: "dGFnMTIzNDU2Nzg5MDEy",
+      },
+    };
+    await assertSucceeds(
+      setDoc(doc(authedDb("alice"), "users", "alice", "letterheadDocs", "lh_sealed_parent"), sealedParent)
+    );
+    await assertFails(
+      setDoc(doc(authedDb("alice"), "users", "alice", "letterheadDocs", "lh_sealed_plain"), {
+        ...sealedParent,
+        input: { subject: "kept in plaintext" },
+      })
+    );
+    const usageBeforeSealedMirror = await usageCount("alice");
+    const sealedMirror = await createEntryAtomic(authedDb("alice"), "alice", mirrorInput("lh_sealed_parent"));
+    check("sealed letterhead parent can mint its mirror", sealedMirror.id === "lh_sealed_parent:matter");
+    check(
+      "sealed letterhead mirror does not consume ordinary quota",
+      (await usageCount("alice")) === usageBeforeSealedMirror
+    );
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", "alice", "letterheadDocs", "lh_wrong_seal"), {
+        ...sealedParent,
+        contentSeal: { ...sealedParent.contentSeal, collection: "entries", recordId: "lh_wrong_seal" },
+      });
+    });
+    let wrongSealKind: string | null = null;
+    try {
+      await createEntryAtomic(authedDb("alice"), "alice", mirrorInput("lh_wrong_seal"));
+    } catch (e) {
+      wrongSealKind = classifyAtomicCreateError(e);
+    }
+    check("wrong-collection envelope cannot mint a letterhead mirror", wrongSealKind === "permission_denied");
+
+    const letterBody = "PRIVATE-LETTER-BODY-88421";
+    const encParentId = "lh_enc_parent";
+    const encAt = Date.UTC(2026, 9, 23, 2);
+    const encKey = Buffer.alloc(32, 11);
+    const parentSeal = sealContent({
+      key: encKey,
+      uid: "alice",
+      collection: "letterheadDocs",
+      recordId: encParentId,
+      revision: encAt,
+      purpose: "letterhead_document",
+      plaintext: Buffer.from(JSON.stringify({ input: { body: letterBody, subject: "Private subject" } })),
+    });
+    await assertSucceeds(
+      setDoc(doc(authedDb("alice"), "users", "alice", "letterheadDocs", encParentId), {
+        userId: "alice",
+        title: "sealed",
+        input: null,
+        pdfUri: null,
+        createdAt: encAt,
+        updatedAt: encAt,
+        contentSeal: parentSeal,
+      })
+    );
+    const usageBeforeEncryptedMirror = await usageCount("alice");
+    const encryptedMirror = await createEntryAtomicDetailed(
+      authedDb("alice"),
+      "alice",
+      {
+        ...mirrorInput(encParentId),
+        payload: { ...mirrorInput(encParentId).payload, body: letterBody, subject: "Private subject" },
+      },
+      undefined,
+      encAt + 1000,
+      `${encParentId}:matter`,
+      (record) => {
+        const seal = sealContent({
+          key: encKey,
+          uid: record.userId,
+          collection: "entries",
+          recordId: record.id,
+          revision: record.updatedAt,
+          purpose: "diary",
+          plaintext: Buffer.from(diaryPlaintextForSeal(record)),
+        });
+        return sealedDiaryCloudPayload(record, seal);
+      }
+    );
+    const storedMirror = await getDoc(
+      doc(authedDb("alice"), "users", "alice", "entries", encryptedMirror.record.id)
+    );
+    const storedData = storedMirror.data() as Record<string, unknown>;
+    const storedPayload = storedData.payload as { letterheadDocumentId?: string; body?: string };
+    check("encrypted diary mirror keeps only the parent linkage", storedPayload?.letterheadDocumentId === encParentId && storedPayload.body == null);
+    check("encrypted diary mirror does not store the letter body", !cloudPayloadLeaksPlaintext(storedData, letterBody));
+    check(
+      "encrypted letterhead mirror does not consume ordinary quota",
+      (await usageCount("alice")) === usageBeforeEncryptedMirror
+    );
+    const openedMirror = openContent({
+      key: encKey,
+      uid: "alice",
+      collection: "entries",
+      recordId: encryptedMirror.record.id,
+      revision: Number(storedData.updatedAt),
+      purpose: "diary",
+      seal: storedData.contentSeal as never,
+    }).toString("utf8");
+    const secondClientParent = await getDoc(
+      doc(testEnv.authenticatedContext("alice").firestore(), "users", "alice", "letterheadDocs", encParentId)
+    );
+    const openedParent = openContent({
+      key: encKey,
+      uid: "alice",
+      collection: "letterheadDocs",
+      recordId: encParentId,
+      revision: encAt,
+      purpose: "letterhead_document",
+      seal: secondClientParent.data()?.contentSeal,
+    }).toString("utf8");
+    check("second client opens the encrypted letter and its diary mirror", openedMirror.includes(letterBody) && openedParent.includes(letterBody));
+    await assertFails(
+      updateDoc(doc(authedDb("alice"), "users", "alice", "entries", encryptedMirror.record.id), {
+        payload: { letterheadDocumentId: encParentId, body: letterBody },
+      })
+    );
+    check("sealed mirror that also stores the letter body is denied", true);
 
     const shapeParent = await createLetterheadDocumentAtomic(
       authedDb("alice"),

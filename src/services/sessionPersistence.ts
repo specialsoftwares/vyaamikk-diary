@@ -121,6 +121,18 @@ export const sessionStore = {
   async save(session: AuthSession): Promise<void> {
     await enqueuePersist(() => storage().setItem(SESSION_KEY, JSON.stringify(session)));
   },
+  /** A profile response must still own the session when its queued write runs. */
+  async saveIfCurrent(session: AuthSession, isCurrent: () => boolean): Promise<boolean> {
+    return enqueuePersist(async () => {
+      if (!isCurrent()) return false;
+      await storage().setItem(SESSION_KEY, JSON.stringify(session));
+      if (isCurrent()) return true;
+      // This callback still owns the persistence queue. Any newer login save
+      // runs after this cleanup, so it cannot be erased by the stale response.
+      await storage().deleteItem(SESSION_KEY);
+      return false;
+    });
+  },
   async clear(): Promise<void> {
     await enqueuePersist(async () => {
       await storage().deleteItem(SESSION_KEY);

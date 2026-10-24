@@ -1,6 +1,7 @@
 import type { BusinessEntry } from "@/domain/businessEntry";
 import { AppError } from "@/domain/errors";
 import { getLocalDatabase } from "@/localDb/database";
+import { sealOwnedPayload } from "@/services/accountDeletion/localPayload";
 import {
   readLocalEntryRecordSync,
   writeLocalEntryRowSync,
@@ -110,7 +111,7 @@ function convertCreateQueueToUpdate(
   expectedUpdatedAt?: number
 ): void {
   const payload = entryToUpdateInput(entry, expectedUpdatedAt);
-  const encoded = JSON.stringify(payload);
+  const encoded = sealOwnedPayload(userId, JSON.stringify(payload));
   const db = getLocalDatabase();
   db.runSync(
     `UPDATE sync_queue SET op = ?, payload_json = ?, revision = ?, last_error = NULL

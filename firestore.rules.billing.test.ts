@@ -566,6 +566,7 @@ async function main() {
         userId: "quota-free",
         vendorName: "Edited Vendor",
         updatedAt: Date.now(),
+        mutationBaseRevision: 0,
       })
     );
     check("case 5: record edit allowed without usage consumption", true);

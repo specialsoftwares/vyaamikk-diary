@@ -425,6 +425,23 @@ export async function callLogoutAllDevices(
   return { status: "complete" };
 }
 
+export async function callReadRestoreAuthorityWatermark(): Promise<
+  { state: "unconfigured" } | { state: "current"; watermark: number }
+> {
+  const data = await callFunction<Record<string, never>, { state?: string; watermark?: number }>(
+    "readRestoreAuthorityWatermark",
+    {}
+  );
+  if (data?.state === "current" && Number.isSafeInteger(data.watermark)) {
+    return { state: "current", watermark: Number(data.watermark) };
+  }
+  if (data?.state === "unconfigured") return { state: "unconfigured" };
+  throw new AppError("unknown", "Restore authority watermark was not published.", undefined, {
+    authPhase: "post_auth",
+    callableName: "readRestoreAuthorityWatermark",
+  });
+}
+
 export async function callMintClientAuthToken(): Promise<MintClientAuthTokenResponse> {
   const data = await callFunction<Record<string, never>, MintClientAuthTokenResponse>(
     "mintClientAuthToken",
@@ -631,7 +648,8 @@ export async function callConfirmVerifiedMobileContactChange(args: {
 }
 
 type OwnerContentSeal = {
-  v: 1;
+  v: 1 | 2;
+  keyId?: string;
   alg: "AES-256-GCM";
   uid: string;
   collection: string;
@@ -713,14 +731,11 @@ export async function callRecordAgeAssessment(dateOfBirth: string): Promise<{
   >("recordAgeAssessment", { dateOfBirth });
 }
 
-export async function callRecordProcessingPurpose(args: {
-  purpose: "crash_diagnostics" | "service_operation";
-  decision: "grant" | "withdraw";
-  noticeVersion: string;
-  policyVersion: string;
-}): Promise<{ ok: true; receivedAt: number; purpose: string; decision: string }> {
-  return callFunction<typeof args, { ok: true; receivedAt: number; purpose: string; decision: string }>(
-    "recordProcessingPurpose",
-    args
+export async function callRecordProcessingPurpose(args:
+  import("@/services/consent/purposeConsentQueue").PurposeMutation |
+  { uid: string; purpose: "crash_diagnostics"; action: "read" }
+): Promise<import("@/services/consent/purposeConsentQueue").PurposeServerState> {
+  return callFunction<typeof args, import("@/services/consent/purposeConsentQueue").PurposeServerState>(
+    "recordProcessingPurpose", args
   );
 }

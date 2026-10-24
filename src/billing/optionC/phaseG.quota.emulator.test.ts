@@ -8,6 +8,10 @@
  * zero ordinary quota (Round 15). Ordinary diary remains Option-C linked.
  */
 
+import assert from "node:assert/strict";
+import { sealContent, openContent } from "../../../functions/src/privacy/contentEncryption";
+import { assertBusinessSealBinding, sealedBusinessCloud, BUSINESS_SENSITIVE_FIELDS, type BusinessSealCollection } from "@/services/privacy/businessCloudSeal";
+import { isDiaryContentSeal } from "@/services/privacy/diarySealDocument";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -355,6 +359,78 @@ async function main() {
   })();
 
   try {
+    // Protection failure must occur before any record/quota/counter mutation.
+    const sealedUid = "sealed-create-owner";
+    await seedUser(sealedUid);
+    await seedStatus(sealedUid, { quotaEnforcementEnabled: true, plan: "free", entitlementActive: true });
+    const sealedDb = authedDb(sealedUid);
+    const families: { collection: BusinessSealCollection; id: string; purpose: string; create: (hooks: AtomicCreateHooks) => Promise<unknown> }[] = [
+      { collection: "purchaseOrders", id: "sealed-po", purpose: "purchase_order", create: hooks => createPurchaseOrderAtomic(sealedDb, sealedUid, poInput("sealed-po"), parsePo, hooks) },
+      { collection: "customerCreditRecords", id: "sealed-credit", purpose: "customer_credit", create: hooks => createCustomerCreditAtomic(sealedDb, sealedUid, creditInput("sealed-credit"), parseCredit, hooks) },
+      { collection: "professionalPacks", id: "sealed-pack", purpose: "professional_pack", create: hooks => createProfessionalPackAtomic(sealedDb, sealedUid, packInput("sealed-pack"), hooks) },
+      { collection: "letterheadDocs", id: "sealed-letter", purpose: "letterhead_document", create: hooks => createLetterheadDocumentAtomic(sealedDb, sealedUid, lhInput("sealed-letter"), hooks) },
+    ];
+    const key = Buffer.alloc(32, 17);
+    for (const family of families) {
+      await assert.rejects(family.create({ prepareCloudPayload: async () => { throw new Error("key_unavailable"); } }));
+      assert.equal((await getDoc(doc(sealedDb, "users", sealedUid, family.collection, family.id))).exists(), false);
+      let seals = 0;
+      await family.create({ prepareCloudPayload: async plain => {
+        seals++;
+        const body = Object.fromEntries(BUSINESS_SENSITIVE_FIELDS[family.collection].filter(k => k in plain).map(k => [k, plain[k]]));
+        const seal = sealContent({ key, uid: sealedUid, collection: family.collection, recordId: String(plain.id), revision: Number(plain.updatedAt), purpose: family.purpose, plaintext: Buffer.from(JSON.stringify(body)) });
+        return actual => sealedBusinessCloud({ collection: family.collection, plain: actual, seal });
+      } });
+      const raw = (await getDoc(doc(sealedDb, "users", sealedUid, family.collection, family.id))).data()!;
+      for (const field of BUSINESS_SENSITIVE_FIELDS[family.collection]) {
+        assert.equal(raw[field], field === "title" ? "sealed" : null);
+      }
+      assert.ok(openContent({ key, uid: sealedUid, collection: family.collection, recordId: family.id,
+        revision: raw.updatedAt, purpose: family.purpose, seal: raw.contentSeal }).length > 0);
+      await family.create({ prepareCloudPayload: async () => { throw new Error("replay_must_not_seal"); } });
+      assert.equal(seals, 1);
+    }
+    assert.equal(await usageCount(sealedUid), 3, "letterhead remains quota-free; replays add nothing");
+    check("privacy: all four atomic creates store only prepared envelopes; failed seals and retries do not charge", true);
+    const creditRef = doc(sealedDb, "users", sealedUid, "customerCreditRecords", "sealed-credit");
+    const creditOptions = {
+      async restoreRaw(raw: Record<string, unknown>) {
+        assert.ok(isDiaryContentSeal(raw.contentSeal));
+        assertBusinessSealBinding("customerCreditRecords", parseCredit("sealed-credit", raw), raw.contentSeal);
+        return { ...raw, ...JSON.parse(openContent({ key, ...raw.contentSeal, seal: raw.contentSeal }).toString()) };
+      },
+      async protectCloud(record: CustomerCreditRecord) {
+        const plain = { ...record, pdfUri: null, customerPhoto: null,
+          closure: record.closure ? { ...record.closure, paymentProofUri: null } : null };
+        const body = Object.fromEntries(BUSINESS_SENSITIVE_FIELDS.customerCreditRecords
+          .filter(field => field in plain).map(field => [field, plain[field]]));
+        const seal = sealContent({ key, uid: sealedUid, collection: "customerCreditRecords", recordId: record.id,
+          revision: record.updatedAt, purpose: "customer_credit", plaintext: Buffer.from(JSON.stringify(body)) });
+        return sealedBusinessCloud({ collection: "customerCreditRecords", plain, seal });
+      },
+    };
+    const sealedPaid = await addCustomerCreditPaymentOnDb(sealedDb, sealedUid, "sealed-credit",
+      { amount: 100, paidDate: Date.now(), mode: "cash", reference: "private-payment-reference" },
+      parseCredit, Date.now(), creditOptions);
+    assert.equal(sealedPaid.payments.at(-1)?.reference, "private-payment-reference");
+    const beforeFailedEdit = (await getDoc(creditRef)).data();
+    await assert.rejects(addCustomerCreditPaymentOnDb(sealedDb, sealedUid, "sealed-credit",
+      { amount: 50, paidDate: Date.now(), mode: "cash" }, parseCredit, Date.now(),
+      { ...creditOptions, protectCloud: async () => { throw new Error("protection_unavailable"); } }));
+    assert.deepEqual((await getDoc(creditRef)).data(), beforeFailedEdit);
+    await closeCustomerCreditFullyPaidOnDb(sealedDb, sealedUid, {
+      recordId: "sealed-credit", appendFinalPayment: false,
+      closure: { finalPaymentDate: Date.now(), finalPaymentAmount: 0, paymentMode: "cash", paidBy: "family",
+        payerName: "private-payer", recordedBy: "private-recorder", balanceAtClosure: 0, adjustment: "exact", closedAt: Date.now() },
+    }, parseCredit, Date.now(), creditOptions);
+    const closedRaw = (await getDoc(creditRef)).data()!;
+    assert.equal(closedRaw.payments, null);
+    assert.equal(closedRaw.closure, null);
+    assert.equal(JSON.stringify(closedRaw).includes("private-payer"), false);
+    assert.equal((await creditOptions.restoreRaw(closedRaw)).closure.payerName, "private-payer");
+    assert.equal(await usageCount(sealedUid), 3);
+    check("privacy: sealed credit payments/closure round-trip; failed edit leaves ciphertext and quota unchanged", true);
+
     // A. Flag off — create works without usage; standalone usage denied.
     await seedUser("flag-off-g");
     await seedStatus("flag-off-g", { quotaEnforcementEnabled: false });
@@ -480,7 +556,8 @@ async function main() {
     await assertSucceeds(
       updateDoc(doc(authedDb("g-po"), "users", "g-po", "purchaseOrders", "po_on_1"), {
         vendorName: "Edited Vendor",
-        updatedAt: Date.now(),
+        updatedAt: po1.updatedAt + 1,
+        mutationBaseRevision: po1.updatedAt,
       })
     );
     check("I PO edit does not require usage", (await usageCount("g-po")) === 1);
@@ -1108,30 +1185,44 @@ async function main() {
     await assertSucceeds(
       updateDoc(doc(authedDb("g-pk"), "users", "g-pk", "professionalPacks", "pk_on_1"), {
         title: "Edited pack",
-        updatedAt: Date.now(),
+        updatedAt: pk1.updatedAt + 1,
+        mutationBaseRevision: pk1.updatedAt,
       })
     );
     check("I pack edit does not consume quota", (await usageCount("g-pk")) === 501);
 
     // CC payment-shaped update (non-billable)
-    await assertSucceeds(
-      updateDoc(doc(authedDb("g-cc"), "users", "g-cc", "customerCreditRecords", "cr_on_1"), {
+    const creditEditedAt = cr1.updatedAt + 1;
+    {
+      const creditDb = authedDb("g-cc");
+      const batch = writeBatch(creditDb);
+      batch.update(doc(creditDb, "users", "g-cc", "customerCreditRecords", "cr_on_1"), {
         userId: "g-cc",
         remarks: "payment appended locally in test",
-        updatedAt: Date.now(),
-      })
-    );
+        updatedAt: creditEditedAt,
+        mutationBaseRevision: cr1.updatedAt,
+      });
+      batch.set(doc(creditDb, "users", "g-cc", "customerCreditRecords", "cr_on_1", "opRevision", "current"), {
+        base: cr1.updatedAt,
+        revision: creditEditedAt,
+      });
+      await assertSucceeds(batch.commit());
+    }
     check(
       "I CC update/payment-shaped write is a Rules property, not repository addPayment",
       (await usageCount("g-cc")) === 1
     );
 
-    const closedAt = Date.now();
-    await assertSucceeds(
-      updateDoc(doc(authedDb("g-cc"), "users", "g-cc", "customerCreditRecords", "cr_on_1"), {
+    const closedAt = creditEditedAt + 1;
+    {
+      const creditDb = authedDb("g-cc");
+      const batch = writeBatch(creditDb);
+      batch.update(doc(creditDb, "users", "g-cc", "customerCreditRecords", "cr_on_1"), {
         userId: "g-cc",
         status: "fully_paid",
         closedAt,
+        updatedAt: closedAt,
+        mutationBaseRevision: creditEditedAt,
         closure: {
           finalPaymentDate: closedAt,
           finalPaymentAmount: 10000,
@@ -1142,9 +1233,13 @@ async function main() {
           adjustment: "none",
           closedAt,
         },
-        updatedAt: closedAt,
-      })
-    );
+      });
+      batch.set(doc(creditDb, "users", "g-cc", "customerCreditRecords", "cr_on_1", "opRevision", "current"), {
+        base: creditEditedAt,
+        revision: closedAt,
+      });
+      await assertSucceeds(batch.commit());
+    }
     check("I CC full-closure-shaped update does not consume", (await usageCount("g-cc")) === 1);
 
     const payRec = await createCustomerCreditAtomic(

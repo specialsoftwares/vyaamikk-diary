@@ -1,4 +1,5 @@
 import { getLocalDatabase } from "@/localDb/database";
+import { LocalPayloadUnavailable, openOwnedPayload, sealOwnedPayload } from "@/services/accountDeletion/localPayload";
 import type {
   BusinessInsightKind,
   BusinessInsightLink,
@@ -27,13 +28,26 @@ interface DbInsightRow {
   updated_at: number;
 }
 
+function openInsightText(userId: string, stored: string): string {
+  const opened = openOwnedPayload(userId, stored);
+  if (opened.state !== "ready") throw new LocalPayloadUnavailable(opened.reason);
+  return opened.value;
+}
+
 function mapRow(row: DbInsightRow): BusinessInsightRow {
   let metadata: BusinessInsightRow["metadata"] = {};
   try {
-    metadata = JSON.parse(row.metadata_json) as BusinessInsightRow["metadata"];
-  } catch {
+    const raw = row.metadata_json.startsWith("vyd1:")
+      ? openInsightText(row.user_id, row.metadata_json)
+      : row.metadata_json;
+    metadata = JSON.parse(raw) as BusinessInsightRow["metadata"];
+  } catch (error) {
+    if (error instanceof LocalPayloadUnavailable) throw error;
     metadata = {};
   }
+  const displayLabel = row.display_label.startsWith("vyd1:")
+    ? openInsightText(row.user_id, row.display_label)
+    : row.display_label;
   return {
     id: row.id,
     userId: row.user_id,
@@ -41,7 +55,7 @@ function mapRow(row: DbInsightRow): BusinessInsightRow {
     kind: row.insight_kind as BusinessInsightKind,
     financialYear: row.financial_year,
     normalizedKey: row.normalized_key,
-    displayLabel: row.display_label,
+    displayLabel,
     metadata,
     recordCount: row.record_count,
     lastUsedAt: row.last_used_at,
@@ -88,7 +102,7 @@ export async function upsertInsightLink(input: {
         input.sourceRecordType,
         input.sourceRecordId,
         input.recordDateMs,
-        JSON.stringify(input.metadata),
+        sealOwnedPayload(input.userId, JSON.stringify(input.metadata)),
       ]
     );
 
@@ -113,15 +127,18 @@ export async function upsertInsightLink(input: {
     const lastUsedAt = lastRow?.m ?? input.recordDateMs;
 
     if (existing) {
-      const prevMeta = JSON.parse(existing.metadata_json) as Record<string, unknown>;
+      const prevRaw = existing.metadata_json.startsWith("vyd1:")
+        ? openInsightText(input.userId, existing.metadata_json)
+        : existing.metadata_json;
+      const prevMeta = JSON.parse(prevRaw) as Record<string, unknown>;
       const merged = mergeInsightMetadata(input.kind, prevMeta, input.metadata);
       db.runSync(
         `UPDATE business_insights SET
           display_label = ?, metadata_json = ?, record_count = ?, last_used_at = ?, updated_at = ?
          WHERE id = ?`,
         [
-          input.displayLabel,
-          JSON.stringify(merged),
+          sealOwnedPayload(input.userId, input.displayLabel),
+          sealOwnedPayload(input.userId, JSON.stringify(merged)),
           recordCount,
           lastUsedAt,
           now,
@@ -140,8 +157,8 @@ export async function upsertInsightLink(input: {
           input.kind,
           input.financialYear,
           input.normalizedKey,
-          input.displayLabel,
-          JSON.stringify(input.metadata),
+          sealOwnedPayload(input.userId, input.displayLabel),
+          sealOwnedPayload(input.userId, JSON.stringify(input.metadata)),
           recordCount,
           lastUsedAt,
           now,
