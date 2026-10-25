@@ -194,11 +194,13 @@ Not started. The profile below is source only. Do not run it until the approval 
 
 ### Backend prerequisites before install
 
-Phase 1 on the isolated project only. Named authority database seeded with a watermark, the erasure list, and withdrawn purposes. `RESTORE_AUTHORITY_DATABASE_ID` set to that id. Primary fence open, reconciled, and equal to that watermark. Mode absent or `{ required: false }`. Activated rules not deployed. `RESTORE_HOLD_DATABASE_ID` unset. `RESTORE_PROTECTION_ACTIVE` unset. `RESTORE_WORKER_HOLD` unset. `INCLUDE_GRIN_IN_ACCOUNT_PURGE` remains false.
+Phase 1 on the isolated project only. Selecting an authority database id is not the same as provisioning it. After it exists, seed `authority/restore` and set `RESTORE_AUTHORITY_DATABASE_ID` to that id. Primary fence open, reconciled, and equal to that watermark. Mode absent or `{ required: false }`. Activated rules not deployed. The hold database is a Scope B input, not a Scope A prerequisite. `RESTORE_HOLD_DATABASE_ID`, `RESTORE_PROTECTION_ACTIVE`, and `RESTORE_WORKER_HOLD` stay unset in Scope A. `INCLUDE_GRIN_IN_ACCOUNT_PURGE` remains false. The full request is `ACCEPTANCE_APPROVAL_SHEET.md`.
 
 ### Approval to build or change the isolated project
 
-Cost is one EAS Android build on the Expo account and the isolated project's own Firebase usage. Production quotas are not the target. Recovery if the APK was aimed at the wrong project: uninstall it and do not deploy activated rules there. Recovery if the isolated fence was opened in error: set `restoreControl/current.closed=true` and leave the activated rules undeployed. This packet does not authorise the build, the install, or those cloud writes.
+The executable request is `docs/privacy-legal-audit/ACCEPTANCE_APPROVAL_SHEET.md`. Scope A is the phase-1 isolated project and one `acceptance-android` APK. The hold database belongs to Scope B. This packet does not authorise the build, the install, or those cloud writes.
+
+Every cloud write names the approved isolated project and aborts on a mismatch. Do not close a fence on any other project from this packet. If production was changed accidentally, stop further writes, record the exact change, and escalate for an authorised incident response. An accidental install does not by itself prove local records are gone. While that is being established, do not uninstall, clear storage, or reinstall. Preserve any surviving local data.
 
 ### Device pass and fail
 
