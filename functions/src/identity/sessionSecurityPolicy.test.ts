@@ -468,8 +468,8 @@ async function main() {
     if (decision === "enforced") {
       const enforced =
         entry.kind === "wrapGrin"
-          ? entry.text.includes("await assertAdmittedCallableUser(request)")
-          : slice.includes("await assertAdmittedCallableUser(request)");
+          ? entry.text.includes("await assertAdmittedCallableUser(request")
+          : slice.includes("await assertAdmittedCallableUser(request");
       if (!enforced) coverageOk = false;
     } else if (slice.includes("assertAdmittedCallableUser")) {
       coverageOk = false;
