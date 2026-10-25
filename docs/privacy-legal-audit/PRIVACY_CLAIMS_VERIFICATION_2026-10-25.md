@@ -45,7 +45,7 @@ Dirty checkouts were listed and left untouched. The only dirty trees were `VYD-4
 | Application content seal | `functions/src/privacy/contentEncryption.ts`, `src/constants/contentSeal.ts` | Merged | AES-256-GCM, 32-byte key, 12-byte nonce, 16-byte tag, server secret `CONTENT_DATA_KEY`. `CONTENT_SEAL_WRITES_ENABLED = true` in source | Live secret, IAM, and deployed functions unverified. Historical plaintext is not migrated. GRIN, projections, caches, object names, and exports are listed as uncovered | `functions/src/privacy/contentEncryption.unit.test.ts`, `src/services/privacy/diarySealDocument.test.ts` | Do not call this end-to-end encryption. Do not claim every stored byte is sealed |
 | Age gate | `src/domain/ageEligibility.ts`, `src/auth-v2/screens/AgeDeclarationScreen.tsx` | Merged via the privacy integration (PR #36, then `main`) | Self-declared date of birth, 18 completed years, Asia/Kolkata. Full date is not the retained field | Device admission not accepted. Existing accounts stay unassessed until they pass | `src/domain/ageEligibility.test.ts` | Keep the in-app sentence. Do not describe it as identity verification |
 | Optional crash diagnostics | `src/domain/processingPurpose.ts`, `src/services/consent/purposeConsentQueue.ts`, `src/services/telemetry/diagnosticsPreference.ts` | Merged | Required `service_operation` is not a checkbox. `crash_diagnostics` is optional. Missing stored choice stays off. Withdrawal wins over a stale grant | Provider retention and a physical device were not checked | `src/services/consent/purposeConsentQueue.test.ts`, telemetry privacy tests | Disclose diagnostics as optional and off until chosen |
-| Legal-consent retry | `consentPatchForProfile` in `src/services/consent/legalConsentService.ts` | On `main`, the AsyncStorage copy is cleared before `updateProfile` returns. The retain-until-success behaviour is **implemented on an unmerged branch**, draft PR #40 | See the PR #40 note below. This audit does not copy that fix | Device checks in that PR are still open. GitHub has no review comment on it | PR #40’s own tests, on that branch only | Review PR #40. Do not re-implement it here |
+| Legal-consent retry | `consentPatchForProfile` on `main`. PR #40 adds `clearPendingConsentIfUnchanged` | On `main`, the AsyncStorage copy is cleared before `updateProfile` returns. PR #40 is an **unmerged implementation with passing CI, unresolved external source-review findings, and pending device acceptance** | The three findings below are not fixed here | GitHub has no review comment. That absence is not the finding list | PR #40 tests do not close findings 1–3 | Keep the fixes on PR #40. Resolve a finding only with its corrective commit and regression, or a reproducible rebuttal |
 | Firestore and Storage ownership | `firestore.rules`, `storage.rules` | Merged source | Owner uid checks plus restore-fence checks exist in source | Deployed rules unverified | Rules suites are part of `ci:verify` on run 40184077103. Emulator success is not a production rules release | Do not treat CI as a live rules deploy |
 | Account deletion pipeline | `functions/src/deletion/finalPurge.ts`, `lifecycle.ts` | Merged source | Phased purge, Auth last, unknown or too-deep collections become a hold rather than a completed purge | Scheduler deploy, bucket soft-delete, PITR, and Auth backups unverified | Deletion unit tests in tree. No production purge was run | Call a finished job “app-controlled data removed by the job,” not “irrecoverable” |
 | GRIN inside deletion | `INCLUDE_GRIN_IN_ACCOUNT_PURGE = false` in `functions/src/deletion/grinCleanupLists.ts`. Version-2 jobs call the purge with `force: true` | Merged source, split behaviour | Legacy jobs skip GRIN while the flag is false. New version-2 jobs do not | Production may still be running an older function. This audit did not read deployed source | `functions/src/deletion/grinCleanup.unit.test.ts` | Do not say “GRIN is never deleted” and do not say “the flag blocks every job” |
@@ -61,11 +61,19 @@ Dirty checkouts were listed and left untouched. The only dirty trees were `VYD-4
 
 ### PR #40, latest state, not duplicated
 
-Draft PR #40, `feature/phone-otp-email-transition`, remains open and unmerged. Head `cf3758d988b64ddaef370c6975fa34d65ecc3b03`. GitHub reported it mergeable. Pull-request CI [40188263559](https://github.com/specialsoftwares/vyaamikk-diary/actions/runs/40188263559) completed success. As of this correction, GitHub shows no review submission, no inline comment, and no issue comment on that PR. There is therefore no GitHub review finding to quote.
+Classification: **unmerged implementation with passing CI, unresolved external source-review findings, and pending device acceptance.**
 
-What remains open is the PR’s own unchecked device list: the overlay ending after identity resolution, typing email while the bridge and consent write finish, a consent-only update not calling `sealOwnerContent`, and a failed bridge still blocking the consent Firestore write and leaving the pending copy. Those are not accepted by CI.
+Draft PR #40, `feature/phone-otp-email-transition`, remains open and unmerged. Head `cf3758d988b64ddaef370c6975fa34d65ecc3b03`. GitHub reported it mergeable. Pull-request CI [40188263559](https://github.com/specialsoftwares/vyaamikk-diary/actions/runs/40188263559) completed success. GitHub shows no review submission and no review comment on that PR. The absence of GitHub comments does not mean the source has no outstanding findings.
 
-On `main`, `consentPatchForProfile` still removes the AsyncStorage grant before `updateProfile` returns. PR #40 is the existing fix for that. This audit does not copy it. PR #40 also does not identify the deployed deletion Functions or the local-key device pass.
+The findings below were supplied by the owner in this conversation. They are external review findings against `cf3758d`. This audit does not re-run them, implement them, or copy them onto this branch. A finding stays open until PR #40 links a corrective commit and its regression evidence, or documents a reproducible rebuttal.
+
+1. `clearPendingConsentIfUnchanged` in `src/services/consent/legalConsentService.ts` performs separate read, comparison, and removal operations. An isolated reproduction using the actual function with injected storage showed that a newer choice saved after the captured read could be removed by the older acknowledgement.
+2. The initiating session generation is checked around the profile service call but is not carried through to a check immediately before `setDoc` inside `firebaseAuthService.updateProfile` (`src/services/auth/firebase.ts`). Source inspection identified a stale-write risk during asynchronous preparation, including same-UID session replacement. This finding needs a focused regression and correction or an evidence-based rebuttal.
+3. The transition tests partly use test-local state and source-text assertions. Production-path navigation ordering and the actual authenticated consent-retry entry point still need stronger evidence.
+
+Device acceptance is also still open: the overlay ending after identity resolution, typing email while the bridge and consent write finish, a consent-only update not calling `sealOwnerContent`, and a failed bridge still blocking the consent Firestore write. Those device checks are additional. They are not the only remaining work.
+
+On `main`, `consentPatchForProfile` still removes the AsyncStorage grant before `updateProfile` returns. PR #40 is where that change, and the three findings, stay. This audit does not copy them.
 
 ## What was read
 
@@ -108,10 +116,10 @@ On `main`, `consentPatchForProfile` still removes the AsyncStorage grant before 
 
 1. Proposed wording: “The privacy and terms acceptance for the current version is required before the account continues. A crash-diagnostics choice belongs to that account. A withdrawal replaces an older grant. A choice for one account is not applied to another.”
 2. On `main`, `consentPatchForProfile` loads the pending legal grant and then calls `clearPendingConsent()` before returning the patch. `continueAfterPhoneProfile` awaits `updateProfile` before `setStep("email")` (`src/auth-v2/AuthFlowGate.tsx`). Commit `ba317f5`. Purpose-consent ownership is `consentAppliesToAccount` in `src/domain/processingPurpose.ts`.
-3. Purpose-queue tests cover withdrawal, replay, and account switch. The legal-consent clear-before-write is the current `main` source. The retry-after-failure behaviour is on unmerged PR #40, CI 40188263559.
+3. Purpose-queue tests cover withdrawal, replay, and account switch. The legal-consent clear-before-write is the current `main` source. PR #40’s retry path is unmerged and has the unresolved external findings recorded above. Its CI pass does not close them.
 4. Neither path’s production write was observed.
 5. A failed `updateProfile` after the clear, on a device, was not reproduced in this audit.
-6. Purpose consent: **supported** in source. Legal-consent retry after a failed cloud write: **contradicted** on `main`, because the local copy is removed first. The correction is **implemented on an unmerged branch** and is not imported here.
+6. Purpose consent: **supported** in source. Legal-consent retry after a failed cloud write: **contradicted** on `main`, because the local copy is removed first. PR #40 is the unmerged place for that correction. It is not a closed fix: the external findings above are unresolved, and device acceptance is still pending.
 
 ### P5. Firestore and Storage ownership
 
@@ -154,7 +162,7 @@ Status for a public encryption sentence: **conditional**. Server seal and local 
 3. `functions/src/deletion/deletionPolicy.unit.test.ts` checks both deadlines and that a stored legacy deadline is not rewritten to 15 days. `src/content/legal/deletionGraceCopy.unit.test.ts` checks the in-app policy interpolates `DELETION_GRACE_DAYS`.
 4. The deletion Functions and the client build serving users were not identified. CI on `ba317f5` does not deploy them.
 5. A production job document, the deployed source, and a device on the serving build.
-6. **Conditional.** The clocks are source behaviour only. They are not a finding that the live 15-day promise is currently false. Do not replace that promise because `main` changed. Calling either date “completed erasure” is **contradicted** by the scheduler. The pending screen’s “erased after that cutoff” is a source-copy ambiguity against the 15-day deadline in the same tree. It is not, by itself, the live behaviour. `docs/legal/PRIVACY_POLICY.md` and `public-site/privacy.html` are unpublished repo texts and are not the serving policy.
+6. **Conditional.** The clocks are source behaviour only. They are not a finding that the live 15-day promise is currently false. Do not replace that promise because `main` changed. Calling either date “completed erasure” is **contradicted** by the scheduler. The pending screen’s “erased after that cutoff” is a confirmed source wording defect against the 15-day deadline in the same tree. It is not, by itself, the live behaviour. A separately authorised source correction can be prepared and tested before the serving client is identified. Changing the live promise still waits for that identification. `docs/legal/PRIVACY_POLICY.md` and `public-site/privacy.html` are unpublished repo texts and are not the serving policy.
 
 ### P9. Local cleanup
 
@@ -288,8 +296,8 @@ Nothing in this list is authorised by this PR. Pending-deletion wording is one s
 
 ### Product-code defects
 
-- On `main`, `consentPatchForProfile` clears the local legal-consent copy before `updateProfile` returns. The fix is draft PR #40 at `cf3758d`. Review that PR. Do not write the fix again here. Its device checks are still open, and GitHub has no review comment on it.
-- In this source, the confirm dialog uses the 15-day erasure constant and the pending screen uses the 13-day reactivation constant inside a phrase that can be read as erasure at the cutoff. That is a source inconsistency. Change it only after the serving client is identified, and keep stored legacy deadlines intact. Do not treat that string as the only code change.
+- On `main`, `consentPatchForProfile` clears the local legal-consent copy before `updateProfile` returns. The related work stays on draft PR #40 at `cf3758d`. Do not write it again here. That PR is an unmerged implementation with passing CI, unresolved external source-review findings, and pending device acceptance. The three findings in the PR #40 section are not closed by the lack of GitHub comments.
+- In this source, the confirm dialog uses the 15-day erasure constant and the pending screen uses the 13-day reactivation constant inside a phrase that can be read as erasure at the cutoff. That is a confirmed source wording defect. Identifying the serving client is required before a live promise is changed. It does not block preparing and testing a separately authorised correction of this source string. Keep stored legacy deadlines intact. This string is not the only remaining work.
 - No local-encryption defect is opened here. The account-bound seal is present. Whole-database encryption is a different claim and is absent. Android backup exclusion of the device key is unverified, not yet a confirmed defect.
 - Do not change deletion constants, the GRIN flag, billing flags, letterhead creation, or restore admission in order to make a page easier to write.
 
@@ -311,3 +319,5 @@ Nothing in this list is authorised by this PR. Pending-deletion wording is one s
 ## Acceptance still open
 
 Isolated cloud acceptance, a physical device, and provider evidence remain pending on the acceptance sheet. This document does not sign Scope A or Scope B. It does not authorise a build, an install, a cloud write, a deployment, a merge, a provider message, or a store submission.
+
+PR #41 and PR #40 both stay unmerged. Public submission stays HOLD. Letterhead creation stays retired. No further audit expansion is part of this correction. The PR #40 findings are recorded only. They are not resolved.
