@@ -532,7 +532,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           (sessionRef.current == null || sessionRef.current.user.uid === current.uid));
       try {
         if (!stillOwned()) throw new Error("session_changed");
-        const next = await getAuthService().updateProfile(current.uid, patch);
+        const next = await getAuthService().updateProfile(current.uid, patch, {
+          uid: current.uid,
+          generation: owned ?? currentAuthMutationGeneration(),
+        });
         if (!stillOwned()) throw new Error("session_changed");
         const session = await saveSession(next, {
           preserveSignedInAt: true,
