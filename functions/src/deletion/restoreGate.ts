@@ -7,23 +7,61 @@
  */
 
 import { decideRestoreAdmission, decideRestoreTraffic, readConfiguredRestoreAuthority } from "./restoreAuthority";
+import {
+  rememberInvocationValue,
+  type InvocationRestoreReads,
+  type RestoreFenceRead,
+} from "./restoreInvocationCache";
+
+export type { InvocationRestoreReads } from "./restoreInvocationCache";
+
+async function readRestoreFence(
+  db: {
+    doc(path: string): {
+      get(): Promise<{ exists: boolean; data(): Record<string, unknown> | undefined }>;
+    };
+  },
+  scope?: InvocationRestoreReads
+): Promise<RestoreFenceRead> {
+  const load = async (): Promise<RestoreFenceRead> => {
+    try {
+      const fence = await db.doc("restoreControl/current").get();
+      if (!fence.exists) return { ok: true, closed: false, reconciled: false, localWatermark: null };
+      const data = fence.data() ?? {};
+      return {
+        ok: true,
+        closed: data.closed === true,
+        reconciled: data.reconciled === true,
+        localWatermark: Number.isSafeInteger(data.watermark) ? Number(data.watermark) : null,
+      };
+    } catch {
+      return { ok: false };
+    }
+  };
+  if (!scope) return load();
+  if (!scope.fence) scope.fence = {};
+  return rememberInvocationValue(scope.fence, load);
+}
 
 /** Server admission for a custom token. Skip leaves the caller's other claims unchanged. */
-export async function restoreAdmissionForUid(uid: string, purpose?: string): Promise<ReturnType<typeof decideRestoreAdmission>> {
+export async function restoreAdmissionForUid(
+  uid: string,
+  purpose?: string,
+  scope?: InvocationRestoreReads
+): Promise<ReturnType<typeof decideRestoreAdmission>> {
   const { getAdminDb } = await import("../admin");
   const db = getAdminDb();
   let closed = false;
   let required = false;
   let reconciled = false;
   let localWatermark: number | null = null;
+  const fence = await readRestoreFence(db, scope);
+  if (!fence.ok) return { status: "unavailable" };
+  closed = fence.closed;
+  reconciled = fence.reconciled;
+  localWatermark = fence.localWatermark;
   try {
-    const [fence, mode] = await Promise.all([
-      db.doc("restoreControl/current").get(),
-      db.doc("restoreControl/mode").get(),
-    ]);
-    closed = fence.exists && fence.data()?.closed === true;
-    reconciled = fence.exists && fence.data()?.reconciled === true;
-    localWatermark = fence.exists && Number.isSafeInteger(fence.data()?.watermark) ? Number(fence.data()?.watermark) : null;
+    const mode = await db.doc("restoreControl/mode").get();
     required = mode.exists && mode.data()?.required === true;
   } catch {
     return { status: "unavailable" };
@@ -46,31 +84,30 @@ export async function restoreAdmissionForUid(uid: string, purpose?: string): Pro
   });
 }
 
-export async function assertRestoreTrafficClosed(uid: string, purpose?: string): Promise<void> {
-  const decision = await restoreTrafficDecisionForUid(uid, purpose);
+export async function assertRestoreTrafficClosed(
+  uid: string,
+  purpose?: string,
+  scope?: InvocationRestoreReads
+): Promise<void> {
+  const decision = await restoreTrafficDecisionForUid(uid, purpose, scope);
   if (decision === "deny") {
     const { HttpsError } = await import("firebase-functions/v2/https");
     throw new HttpsError("failed-precondition", "restore_not_closed");
   }
 }
 
-export async function restoreTrafficDecisionForUid(uid: string, purpose?: string): Promise<"allow" | "deny"> {
+export async function restoreTrafficDecisionForUid(
+  uid: string,
+  purpose?: string,
+  scope?: InvocationRestoreReads
+): Promise<"allow" | "deny"> {
   const { getAdminDb } = await import("../admin");
   const db = getAdminDb();
-  let localWatermark: number | null = null;
-  let closed = false;
-  let reconciled = false;
-  try {
-    const fence = await db.doc("restoreControl/current").get();
-    if (fence.exists) {
-      const data = fence.data() ?? {};
-      closed = data.closed === true;
-      reconciled = data.reconciled === true;
-      localWatermark = Number.isSafeInteger(data.watermark) ? Number(data.watermark) : null;
-    }
-  } catch {
-    return "deny";
-  }
+  const fence = await readRestoreFence(db, scope);
+  if (!fence.ok) return "deny";
+  const localWatermark = fence.localWatermark;
+  const closed = fence.closed;
+  const reconciled = fence.reconciled;
   if (closed) return "deny";
   if (process.env.RESTORE_PROTECTION_ACTIVE === "true") {
     const { readDurableWorkerHold } = await import("./privilegedWorkerGuard");

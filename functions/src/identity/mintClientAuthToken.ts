@@ -4,20 +4,11 @@ import { getAuth } from "firebase-admin/auth";
 import { getApps, initializeApp } from "firebase-admin/app";
 
 import { assertAdmittedCallableUser } from "./admitCallableUser";
+import type { InvocationRestoreReads } from "../deletion/restoreInvocationCache";
 import {
-  bearerFromAuthorizationHeader,
-  classifyVerifyFailure,
   decideMintAdmission,
   ORIGIN_AUTH_TIME_CLAIM,
-  type VerifiedCredential,
 } from "./sessionSecurityPolicy";
-
-function errorCode(error: unknown): string {
-  if (error && typeof error === "object" && "code" in error) {
-    return String((error as { code: unknown }).code);
-  }
-  return "";
-}
 
 function ensureAdminApp(): void {
   if (getApps().length === 0) initializeApp();
@@ -29,27 +20,14 @@ function ensureAdminApp(): void {
  * before createCustomToken. The origin auth time is server-stamped.
  */
 export const mintClientAuthToken = onCall({ region: "asia-south1" }, async (request) => {
-  await assertAdmittedCallableUser(request);
-  const bearer = bearerFromAuthorizationHeader(request.rawRequest?.headers?.authorization);
-  if (!bearer) {
+  const restoreReads: InvocationRestoreReads = {};
+  // Revocation and the cutoff are checked once inside assertAdmittedCallableUser.
+  // This handler reuses that verified credential.
+  const verified = await assertAdmittedCallableUser(request, restoreReads);
+  if (!verified) {
     throw new HttpsError("unauthenticated", "Sign in with phone OTP first.");
   }
   ensureAdminApp();
-  let verified: VerifiedCredential;
-  try {
-    const decoded = await getAuth().verifyIdToken(bearer, true);
-    verified = {
-      uid: decoded.uid,
-      signInProvider: decoded.firebase?.sign_in_provider ?? "",
-      authTimeSeconds: decoded.auth_time,
-    };
-  } catch (error) {
-    const kind = classifyVerifyFailure(errorCode(error));
-    if (kind === "disabled") {
-      throw new HttpsError("permission-denied", "This account cannot mint a client session.");
-    }
-    throw new HttpsError("unauthenticated", "Phone sign-in is no longer valid.");
-  }
 
   const decision = decideMintAdmission({
     verified,
@@ -63,7 +41,7 @@ export const mintClientAuthToken = onCall({ region: "asia-south1" }, async (requ
   }
 
   const { restoreAdmissionForUid } = await import("../deletion/restoreGate");
-  const admission = await restoreAdmissionForUid(decision.uid);
+  const admission = await restoreAdmissionForUid(decision.uid, undefined, restoreReads);
   if (admission.status === "deny") {
     throw new HttpsError("failed-precondition", "restore_not_admitted");
   }

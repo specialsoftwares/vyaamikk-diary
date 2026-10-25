@@ -11,6 +11,7 @@ import {
   decideCallableAdmission,
   type VerifiedCredential,
 } from "./sessionSecurityPolicy";
+import type { InvocationRestoreReads } from "../deletion/restoreInvocationCache";
 
 function errorCode(error: unknown): string {
   if (error && typeof error === "object" && "code" in error) {
@@ -36,7 +37,8 @@ function cutoffFromData(data: Record<string, unknown> | undefined, exists: boole
  * or the cutoff is rejected before Admin reads or writes.
  */
 export async function assertAdmittedCallableUser(
-  request: Pick<CallableRequest, "auth" | "rawRequest">
+  request: Pick<CallableRequest, "auth" | "rawRequest">,
+  restoreReads?: InvocationRestoreReads
 ): Promise<VerifiedCredential | null> {
   if (!request.auth?.uid) return null;
   const bearer = bearerFromAuthorizationHeader(request.rawRequest?.headers?.authorization);
@@ -75,6 +77,6 @@ export async function assertAdmittedCallableUser(
     throw new HttpsError("unauthenticated", "Sign-in is no longer valid.");
   }
   const { assertRestoreTrafficClosed } = await import("../deletion/restoreGate");
-  await assertRestoreTrafficClosed(verified.uid);
+  await assertRestoreTrafficClosed(verified.uid, undefined, restoreReads);
   return verified;
 }
