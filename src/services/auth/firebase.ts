@@ -75,7 +75,7 @@ import {
 } from "./nativePhoneAuth";
 import { cleanBothAuthSdks, currentAuthMutationGeneration } from "./authSessionFence";
 import { getNativeAuthUid } from "./jsAuthBridge";
-import { issueProfileDocumentIfOwned } from "./profileWriteOwnership";
+import { authoritativeProfileWriteUid, issueProfileDocumentIfOwned } from "./profileWriteOwnership";
 import { retireNativeCallableAuthReady } from "./nativeCallableAuthGate";
 
 import type {
@@ -91,6 +91,23 @@ const log = createLogger("auth/firebase");
 const USERS_COLLECTION = "users";
 const PHONE_INDEX_COLLECTION = "phoneIndex";
 const UEID_INDEX_COLLECTION = "ueidIndex";
+
+function readRuntimePlatform(): string | null {
+  try {
+    const { Platform } = require("react-native") as { Platform: { OS: string } };
+    return Platform.OS || null;
+  } catch {
+    return null;
+  }
+}
+
+function readJsAuthUid(): string | null {
+  try {
+    return getFirebaseAuth().currentUser?.uid ?? null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Resolves (or creates, atomically) the user profile for a given phone number.
@@ -490,7 +507,11 @@ export const firebaseAuthService: AuthService = {
         claim: ownedClaim,
         readLive: () => ({
           generation: currentAuthMutationGeneration(),
-          uid: getNativeAuthUid(),
+          uid: authoritativeProfileWriteUid({
+            platform: readRuntimePlatform(),
+            nativeUid: getNativeAuthUid(),
+            jsUid: readJsAuthUid(),
+          }),
         }),
         prepare: async () => {
           if (production) {

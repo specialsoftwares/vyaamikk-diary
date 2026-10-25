@@ -2,6 +2,7 @@
  * The profile document is issued only while the session that started the
  * write still owns it. Preparation may await the bridge, the profile read,
  * and sealing; the ownership check is the last step before setDoc.
+ * A missing or unreadable UID is not ownership.
  */
 
 import type { ProfileWriteClaim } from "@/services/auth/types";
@@ -15,9 +16,24 @@ export function profileWriteStillOwned(
   claim: ProfileWriteClaim,
   live: ProfileWriteLive
 ): boolean {
-  if (live.generation !== claim.generation) return false;
-  if (live.uid != null && live.uid !== claim.uid) return false;
-  return true;
+  if (!claim.uid || !live.uid) return false;
+  if (live.uid !== claim.uid) return false;
+  return live.generation === claim.generation;
+}
+
+/**
+ * Native builds trust the native phone-auth UID. Web trusts the JS Auth UID.
+ * Neither source may be replaced by null.
+ */
+export function authoritativeProfileWriteUid(input: {
+  platform: string | null;
+  nativeUid: string | null;
+  jsUid: string | null;
+}): string | null {
+  if (!input.platform) return null;
+  const source = input.platform === "web" ? input.jsUid : input.nativeUid;
+  if (!source) return null;
+  return source;
 }
 
 export async function issueProfileDocumentIfOwned(input: {

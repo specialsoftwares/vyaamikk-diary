@@ -1,10 +1,15 @@
 /**
- * Same-UID replacement and account switching during preparation must not
- * issue the Firestore write. A missing live uid is not an account switch.
+ * Same-UID replacement, account switching, and a disappeared identity during
+ * preparation must not issue the Firestore write. A matching live UID and
+ * generation still issues it.
  */
 import assert from "node:assert/strict";
 
-import { issueProfileDocumentIfOwned, type ProfileWriteLive } from "@/services/auth/profileWriteOwnership";
+import {
+  authoritativeProfileWriteUid,
+  issueProfileDocumentIfOwned,
+  type ProfileWriteLive,
+} from "@/services/auth/profileWriteOwnership";
 
 function deferred() {
   let resolve: () => void = () => undefined;
@@ -50,8 +55,11 @@ async function main() {
   await expectUnissued((live) => {
     live.current = { uid: "uid-b", generation: 9 };
   });
+  await expectUnissued((live) => {
+    live.current = { uid: null, generation: 4 };
+  });
 
-  const live: ProfileWriteLive = { uid: null, generation: 4 };
+  const live: ProfileWriteLive = { uid: "uid-a", generation: 4 };
   let writes = 0;
   await issueProfileDocumentIfOwned({
     claim,
@@ -62,6 +70,19 @@ async function main() {
     },
   });
   assert.equal(writes, 1);
+
+  assert.equal(
+    authoritativeProfileWriteUid({ platform: "ios", nativeUid: null, jsUid: "uid-js" }),
+    null
+  );
+  assert.equal(
+    authoritativeProfileWriteUid({ platform: "web", nativeUid: null, jsUid: "uid-js" }),
+    "uid-js"
+  );
+  assert.equal(
+    authoritativeProfileWriteUid({ platform: null, nativeUid: "uid-a", jsUid: "uid-js" }),
+    null
+  );
 
   console.log("profileWriteOwnership.test.ts: ok");
 }
