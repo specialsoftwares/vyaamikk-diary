@@ -52,11 +52,20 @@ export function coverageEvidence() {
         "business_insights.metadata_json",
         "recent_searches",
       ],
-      unresolvedOwnerDecision: [
-        "business_insights.normalized_key and insight link ids still contain the party or PIN key",
-        "GRIN local tables stay plaintext while the store release cannot open that module",
-        "The AsyncStorage mock diary is not the firebase-production repository",
-      ],
+      insightJoinKeys: "account_bound_hmac",
+      grinLocal: {
+        storeRuntimeCanOpen: false,
+        bodiesEncrypted: false,
+        logoutRetains: true,
+        accountDeletionRemovesOwnerRows: true,
+      },
+      mockDiary: {
+        productionRepository: "firebase",
+        silentFallback: false,
+        retainedCopiesSealed: true,
+        accountDeletionRemovesKeys: true,
+      },
+      unresolvedOwnerDecision: [] as string[],
       deletion: "owner_rows_removed_on_account_deletion",
     },
   } as const;

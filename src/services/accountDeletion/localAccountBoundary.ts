@@ -31,6 +31,27 @@ export function deleteLocalOwnerRows(db: LocalSql, uid: string): void {
   }
 }
 
+const GRIN_OWNER_TABLES = [
+  "grin_local_receipts",
+  "grin_outbox_commands",
+  "grin_owner_runtime",
+  "grin_local_evidence_files",
+] as const;
+
+/**
+ * Account deletion only. Removes one owner's excluded GRIN rows.
+ * A missing table is left alone. Logout does not call this.
+ */
+export function deleteGrinLocalOwnerRows(db: LocalSql, uid: string): void {
+  for (const table of GRIN_OWNER_TABLES) {
+    try {
+      db.runSync(`DELETE FROM ${table} WHERE owner_uid = ?`, [uid]);
+    } catch {
+      // The excluded module's tables are absent on this database.
+    }
+  }
+}
+
 export function retainLocalAccountOnLogout(uid: string | null | undefined): "retained" {
   resetLetterheadSaveDiagnostic();
   void uid;

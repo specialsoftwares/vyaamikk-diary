@@ -5,6 +5,7 @@
  * Failures omit that source instead of pretending the total is zero.
  */
 
+import { isGoodsEvidenceBlockedByStoreRuntime } from "@/goodsEvidence/featureFlag";
 import { formDraftsRepository } from "@/repositories/formDraftsRepository";
 import { localEntriesRepository } from "@/repositories/localEntriesRepository";
 import type { BusinessEntry } from "@/domain/businessEntry";
@@ -198,6 +199,7 @@ async function readGrin(userId: string): Promise<{
   hitCap: boolean;
 }> {
   try {
+    if (isGoodsEvidenceBlockedByStoreRuntime()) return unavailable();
     const binding = await import("@/services/grin/repository/appBinding");
     const session = binding.getLiveGrinDispatchSession();
     if (!session || !grinSessionMatchesAccount(session.ownerUid, userId)) {

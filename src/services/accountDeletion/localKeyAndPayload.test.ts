@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 
 import { installMemoryLocalDatabase, reopenMemoryLocalDatabaseFrom, uninstallMemoryLocalDatabase } from "@/localDb/testHarness";
-import { migrateToV3, migrateToV5 } from "@/localDb/migrate";
+import { migrateToV3, migrateToV5, migrateToV6 } from "@/localDb/migrate";
 import { getLocalDatabase } from "@/localDb/database";
 import {
   LocalKeyUnavailable,
@@ -27,6 +27,11 @@ import { writeLocalEntryRowSync, readLocalEntryRecordSync } from "@/repositories
 import { enqueueSync, readSyncQueueItemSync } from "@/repositories/syncQueueRepository";
 import { formDraftsRepository } from "@/repositories/formDraftsRepository";
 import { masterDataRepository, setMasterDataSessionUser } from "@/services/masterData/masterDataRepository";
+import {
+  listInsightsByKind,
+  migrateInsightJoinKeys,
+  upsertInsightLink,
+} from "@/services/insights/businessInsightRepository";
 import { mayIssueRemoteWork, syncSessionOwnership } from "@/sync/syncSessionOwnership";
 import type { BusinessEntry } from "@/domain/businessEntry";
 
@@ -183,6 +188,97 @@ const found = await masterDataRepository.query({
   prefix: "Pri",
 });
 assert.equal(found[0]?.value, "Priya Stores");
+
+migrateToV6(db);
+db.runSync(
+  `INSERT INTO business_insights
+    (id, user_id, ueid, insight_kind, financial_year, normalized_key, display_label, metadata_json, record_count, last_used_at, created_at, updated_at)
+   VALUES ('bi-plain', 'owner-a', 'VYD-1', 'party', 2026, 'priya stores', 'Priya Stores', '{}', 1, 5, 5, 5)`
+);
+db.runSync(
+  `INSERT INTO business_insight_links
+    (id, user_id, insight_kind, normalized_key, financial_year, source_record_type, source_record_id, record_date_ms, metadata_json)
+   VALUES ('link-plain', 'owner-a', 'party', 'priya stores', 2026, 'diary_entry', 'src-1', 5, '{}')`
+);
+const migratedInsights = migrateInsightJoinKeys(db, "owner-a");
+assert.equal(migratedInsights.migrated >= 2, true);
+const storedKey = db.getFirstSync<{ normalized_key: string; display_label: string }>(
+  "SELECT normalized_key, display_label FROM business_insights WHERE id = ?",
+  ["bi-plain"]
+);
+assert.equal(storedKey?.normalized_key.startsWith("vydh1."), true);
+assert.equal(storedKey?.normalized_key.includes("priya"), false);
+assert.equal(storedKey?.display_label.startsWith("vyd1:"), true);
+const storedLink = db.getFirstSync<{ id: string; normalized_key: string }>(
+  "SELECT id, normalized_key FROM business_insight_links WHERE user_id = ? AND source_record_id = ?",
+  ["owner-a", "src-1"]
+);
+assert.equal(storedLink?.id.startsWith("vydh1."), true);
+assert.equal(storedLink?.normalized_key, storedKey?.normalized_key);
+const listed = listInsightsByKind("owner-a", "party", 2026);
+assert.equal(listed[0]?.displayLabel, "Priya Stores");
+assert.equal(listed[0]?.normalizedKey.includes("priya"), false);
+
+db.runSync(
+  `INSERT INTO business_insight_links
+    (id, user_id, insight_kind, normalized_key, financial_year, source_record_type, source_record_id, record_date_ms, metadata_json)
+   VALUES ('plain-link', 'owner-a', 'party', 'other party', 2026, 'diary_entry', 'src-2', 6, '{}')`
+);
+assert.throws(() => migrateInsightJoinKeys({
+  runSync(sql, params) {
+    if ((params ?? []).includes("plain-link")) throw new Error("interrupted");
+    db.runSync(sql, params);
+  },
+  getAllSync: (sql, params) => db.getAllSync(sql, params),
+  getFirstSync: (sql, params) => db.getFirstSync(sql, params),
+}, "owner-a"));
+const keptPlain = db.getFirstSync<{ normalized_key: string }>(
+  "SELECT normalized_key FROM business_insight_links WHERE id = ?",
+  ["plain-link"]
+);
+assert.equal(keptPlain?.normalized_key, "other party");
+migrateInsightJoinKeys(db, "owner-a");
+const finishedLink = db.getFirstSync<{ normalized_key: string }>(
+  "SELECT normalized_key FROM business_insight_links WHERE source_record_id = ?",
+  ["src-2"]
+);
+assert.equal(finishedLink?.normalized_key.startsWith("vydh1."), true);
+assert.equal(finishedLink?.normalized_key.includes("other"), false);
+const again = migrateInsightJoinKeys(db, "owner-a");
+assert.equal(again.migrated, 0);
+assert.equal(listInsightsByKind("owner-a", "party", 2026).length, 1);
+
+await upsertInsightLink({
+  userId: "owner-a",
+  ueid: "VYD-1",
+  kind: "party",
+  normalizedKey: "priya stores",
+  financialYear: 2026,
+  displayLabel: "Priya Stores",
+  metadata: { partyName: "Priya Stores", pin: null, locality: null, state: null, sources: ["diary"] },
+  sourceRecordType: "diary_entry",
+  sourceRecordId: "src-3",
+  recordDateMs: 7,
+});
+const deduped = db.getAllSync<{ id: string }>(
+  "SELECT id FROM business_insights WHERE user_id = ? AND insight_kind = 'party' AND financial_year = 2026",
+  ["owner-a"]
+);
+assert.equal(deduped.length, 1);
+assert.equal(listInsightsByKind("owner-a", "party", 2026)[0]?.recordCount, 2);
+
+unbindLocalDataKey("owner-a");
+db.runSync(
+  `INSERT INTO business_insight_links
+    (id, user_id, insight_kind, normalized_key, financial_year, source_record_type, source_record_id, record_date_ms, metadata_json)
+   VALUES ('left-plain', 'owner-a', 'pin', '560001', 2026, 'diary_entry', 'src-4', 8, '{}')`
+);
+assert.throws(() => migrateInsightJoinKeys(db, "owner-a"));
+assert.equal(
+  db.getFirstSync<{ normalized_key: string }>("SELECT normalized_key FROM business_insight_links WHERE id = ?", ["left-plain"])?.normalized_key,
+  "560001"
+);
+bindLocalDataKey("owner-a", moved.key);
 
 assert.equal(retainLocalAccountOnLogout("owner-a"), "retained");
 assert.equal(readLocalEntryRecordSync("owner-a", "note-1")?.entry.title, "priya warehouse");
