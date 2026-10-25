@@ -9,10 +9,12 @@ import type { ProfilePatch } from "@/services/auth/types";
 import {
   CONSENT_RECONCILE_SOURCE,
   consentPatchFromPending,
-  pendingConsentChoicesEqual,
 } from "@/services/consent/pendingConsentReconcile";
-
-const PENDING_KEY = "vyd_pending_legal_consent_v1";
+import {
+  clearPendingConsentValue,
+  loadPendingConsentValue,
+  savePendingConsentValue,
+} from "@/services/consent/pendingConsentKey";
 
 function appVersion(): string {
   return Constants.expoConfig?.version ?? "1.0.0";
@@ -45,21 +47,15 @@ export async function savePendingConsent(phoneE164: PhoneE164, sourceScreen: str
     phoneE164,
     record: buildConsentRecord({ sourceScreen, phoneE164 }),
   };
-  await AsyncStorage.setItem(PENDING_KEY, JSON.stringify(pending));
+  await savePendingConsentValue(AsyncStorage, JSON.stringify(pending));
 }
 
 export async function loadPendingConsent(): Promise<PendingLegalConsent | null> {
-  const raw = await AsyncStorage.getItem(PENDING_KEY);
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as PendingLegalConsent;
-  } catch {
-    return null;
-  }
+  return loadPendingConsentValue(AsyncStorage);
 }
 
 export async function clearPendingConsent(): Promise<void> {
-  await AsyncStorage.removeItem(PENDING_KEY);
+  await clearPendingConsentValue(AsyncStorage);
 }
 
 /** Merge pending consent into a profile patch after identity creation. */
@@ -81,9 +77,6 @@ export async function consentPatchForProfile(
 export async function clearPendingConsentIfUnchanged(
   snapshot: PendingLegalConsent | null
 ): Promise<boolean> {
-  if (!snapshot) return false;
-  const current = await loadPendingConsent();
-  if (!pendingConsentChoicesEqual(current, snapshot)) return false;
-  await clearPendingConsent();
-  return true;
+  const { clearPendingConsentIfUnchanged: clearStored } = await import("./pendingConsentKey");
+  return clearStored(AsyncStorage, snapshot);
 }
