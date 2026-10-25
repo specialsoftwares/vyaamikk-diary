@@ -15,6 +15,24 @@ export function generateEmailOtpCode(): string {
   return n.toString().padStart(EMAIL_OTP_LENGTH, "0");
 }
 
+/** Length-prefixed HMAC so field boundaries cannot be shifted by the code or ids. */
+export function digestBoundOtp(secret: string, parts: readonly string[]): string {
+  const payload = parts.map((part) => `${Buffer.byteLength(part, "utf8")}:${part}`).join("|");
+  return createHmac("sha256", secret).update(payload, "utf8").digest("hex");
+}
+
+export function verifyBoundOtpDigest(
+  secret: string,
+  parts: readonly string[],
+  expectedDigest: string
+): boolean {
+  const actual = digestBoundOtp(secret, parts);
+  const a = Buffer.from(actual, "utf8");
+  const b = Buffer.from(expectedDigest, "utf8");
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
 export function digestEmailOtp(
   secret: string,
   code: string,

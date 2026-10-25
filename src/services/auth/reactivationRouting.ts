@@ -38,6 +38,7 @@ export function deletionPendingToAppError(data: DeletionPendingResponse): AppErr
     {
       phoneE164,
       deletionScheduledFor: data.deletionScheduledFor,
+      deletionPolicyVersion: Number(data.profile.deletionPolicyVersion ?? 0) || null,
       maskedEmail: data.maskedEmail ?? "",
       requiresReactivation: true,
       requiresEmailVerification: data.requiresEmailVerification,

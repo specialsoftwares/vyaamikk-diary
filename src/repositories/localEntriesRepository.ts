@@ -1,5 +1,6 @@
 import type { BusinessEntry } from "@/domain/businessEntry";
 import { getLocalDatabase } from "@/localDb/database";
+import { LocalPayloadUnavailable, openOwnedPayload, sealOwnedPayload } from "@/services/accountDeletion/localPayload";
 import { shortId } from "@/utils/id";
 
 export type LocalSyncStatus = "pending" | "synced" | "conflict" | "error";
@@ -58,16 +59,18 @@ function parseSyncStatus(raw: unknown): LocalSyncStatus {
   return "pending";
 }
 
-function parseOriginEntry(raw: string | null | undefined): BusinessEntry | null {
+function parseOriginEntry(userId: string, raw: string | null | undefined): BusinessEntry | null {
   if (!raw) return null;
+  const opened = openOwnedPayload(userId, raw);
+  if (opened.state !== "ready") throw new LocalPayloadUnavailable(opened.reason);
   try {
-    return JSON.parse(raw) as BusinessEntry;
+    return JSON.parse(opened.value) as BusinessEntry;
   } catch {
     return null;
   }
 }
 
-function parseRow(row: {
+function parseRow(userId: string, row: {
   payload_json: string;
   sync_status?: string;
   pending_op?: string | null;
@@ -84,7 +87,9 @@ function parseRow(row: {
   dispatch_generation?: number | null;
 }): LocalEntryRecord | null {
   try {
-    const entry = JSON.parse(row.payload_json) as BusinessEntry;
+    const opened = openOwnedPayload(userId, row.payload_json);
+    if (opened.state !== "ready") throw new LocalPayloadUnavailable(opened.reason);
+    const entry = JSON.parse(opened.value) as BusinessEntry;
     return {
       entry,
       meta: {
@@ -102,11 +107,12 @@ function parseRow(row: {
         ackedRevision: Number(row.acked_revision ?? 0),
         originRevision: Number(row.origin_revision ?? 0),
         originOp: parsePendingOp(row.origin_op),
-        originEntry: parseOriginEntry(row.origin_payload_json),
+        originEntry: parseOriginEntry(userId, row.origin_payload_json),
         dispatchGeneration: Number(row.dispatch_generation ?? 0),
       },
     };
-  } catch {
+  } catch (error) {
+    if (error instanceof LocalPayloadUnavailable) throw error;
     return null;
   }
 }
@@ -136,7 +142,7 @@ export function readLocalEntryRecordSync(userId: string, id: string): LocalEntry
     [userId, id]
   );
   if (!row) return null;
-  return parseRow(row);
+  return parseRow(userId, row);
 }
 
 export function writeLocalEntryRowSync(
@@ -225,7 +231,7 @@ export function writeLocalEntryRowSync(
     [
       entry.id,
       entry.userId,
-      JSON.stringify(entry),
+      sealOwnedPayload(entry.userId, JSON.stringify(entry)),
       options.syncStatus,
       entry.updatedAt ?? Date.now(),
       remoteUpdatedAt,
@@ -237,7 +243,7 @@ export function writeLocalEntryRowSync(
       localRevision,
       ackedRevision,
       originRevision,
-      originEntry ? JSON.stringify(originEntry) : null,
+      originEntry ? sealOwnedPayload(entry.userId, JSON.stringify(originEntry)) : null,
       originOp,
       dispatchGeneration,
     ]
@@ -339,7 +345,7 @@ export const localEntriesRepository = {
     );
     const out: LocalEntryRecord[] = [];
     for (const row of rows) {
-      const parsed = parseRow(row);
+      const parsed = parseRow(userId, row);
       if (parsed) out.push(parsed);
     }
     return out;
@@ -445,12 +451,16 @@ export const localEntriesRepository = {
    */
   async countMapPinsForUser(userId: string): Promise<number> {
     const db = getLocalDatabase();
-    const row = db.getFirstSync<{ c: number }>(
-      `SELECT COUNT(*) as c FROM entries_local
-       WHERE user_id = ?
-         AND (payload_json LIKE '%"gps":{%' OR payload_json LIKE '%"geo":{%')`,
+    const rows = db.getAllSync<{ payload_json: string }>(
+      `SELECT payload_json FROM entries_local WHERE user_id = ?`,
       [userId]
     );
-    return row?.c ?? 0;
+    let count = 0;
+    for (const row of rows) {
+      const opened = openOwnedPayload(userId, row.payload_json);
+      if (opened.state !== "ready") throw new LocalPayloadUnavailable(opened.reason);
+      if (/"gps"\s*:\s*\{/.test(opened.value) || /"geo"\s*:\s*\{/.test(opened.value)) count += 1;
+    }
+    return count;
   },
 };

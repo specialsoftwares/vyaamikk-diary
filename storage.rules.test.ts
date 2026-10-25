@@ -14,10 +14,12 @@ import {
   initializeTestEnvironment,
   type RulesTestEnvironment,
 } from "@firebase/rules-unit-testing";
+import { doc, setDoc } from "firebase/firestore";
 import { getBytes, ref, uploadBytes } from "firebase/storage";
 
 const PROJECT_ID = "vyaamikk-diary-storage-rules-test";
 const RULES_PATH = resolve(process.cwd(), "storage.rules");
+const FIRESTORE_RULES_PATH = resolve(process.cwd(), "firestore.rules");
 
 let failures = 0;
 
@@ -33,8 +35,10 @@ function check(name: string, ok: boolean, detail?: string) {
 async function main() {
   console.log("storage.rules emulator tests");
   const rules = readFileSync(RULES_PATH, "utf8");
+  const firestoreRules = readFileSync(FIRESTORE_RULES_PATH, "utf8");
   const testEnv: RulesTestEnvironment = await initializeTestEnvironment({
     projectId: PROJECT_ID,
+    firestore: { rules: firestoreRules },
     storage: { rules },
   });
 
@@ -81,6 +85,124 @@ async function main() {
 
     await assertFails(getBytes(ref(mallory, "users/alice/letterhead/logo.png")));
     check("cross-user letterhead read denied", true);
+
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "authSecurity", "alice"), {
+        revokedBeforeAuthTimeSeconds: 1_500,
+        revocationState: "complete",
+        operationId: "11111111-1111-1111-1111-111111111111",
+      });
+    });
+    const revoked = testEnv
+      .authenticatedContext("alice", {
+        auth_time: 2_000,
+        firebase: { sign_in_provider: "custom" },
+        vydOriginAuthTime: 1_000,
+      })
+      .storage();
+    const refreshed = testEnv
+      .authenticatedContext("alice", {
+        auth_time: 1_501,
+        firebase: { sign_in_provider: "phone" },
+      })
+      .storage();
+    await assertFails(getBytes(ref(revoked, "users/alice/letterhead/logo.png")));
+    check("EMULATOR storage denies a pre-revocation custom token", true);
+    await assertSucceeds(getBytes(ref(refreshed, "users/alice/letterhead/logo.png")));
+    check("EMULATOR storage allows phone auth after the cutoff", true);
+
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", "alice"), {
+        uid: "alice",
+        status: "active",
+        ageEligibility: "eligible",
+      });
+      await setDoc(doc(ctx.firestore(), "users", "young"), {
+        uid: "young",
+        status: "active",
+        ageEligibility: "unassessed",
+      });
+      await setDoc(doc(ctx.firestore(), "users", "minor"), {
+        uid: "minor",
+        status: "active",
+        ageEligibility: "ineligible",
+      });
+    });
+    const eligible = testEnv
+      .authenticatedContext("alice", {
+        auth_time: 2_000,
+        firebase: { sign_in_provider: "phone" },
+      })
+      .storage();
+    const unassessed = testEnv.authenticatedContext("young").storage();
+    const ineligible = testEnv.authenticatedContext("minor").storage();
+    const sealType = "application/vnd.vyaamikk.content-seal+json";
+    await assertSucceeds(
+      uploadBytes(ref(eligible, "users/alice/attachments/rec1/receipt.bin"), Buffer.from("{\"v\":1}"), {
+        contentType: sealType,
+      })
+    );
+    check("eligible owner can write an attachment envelope", true);
+    await assertSucceeds(
+      uploadBytes(ref(eligible, "users/alice/attachments/rec1/legacy.jpg"), Buffer.from("jpg"), {
+        contentType: "image/jpeg",
+      })
+    );
+    check("eligible owner can still write a legacy image", true);
+    await assertSucceeds(getBytes(ref(eligible, "users/alice/letterhead/logo.png")));
+    check("legacy image read stays available", true);
+    await assertFails(
+      uploadBytes(ref(unassessed, "users/young/attachments/rec1/receipt.bin"), Buffer.from("{\"v\":1}"), {
+        contentType: sealType,
+      })
+    );
+    check("unassessed account cannot write storage", true);
+    await assertFails(
+      uploadBytes(ref(ineligible, "users/minor/attachments/rec1/receipt.bin"), Buffer.from("{\"v\":1}"), {
+        contentType: sealType,
+      })
+    );
+    check("ineligible account cannot write storage", true);
+    await assertFails(
+      uploadBytes(ref(eligible, "users/alice/pdfs/rec1/sealed.bin"), Buffer.from("{\"v\":1}"), {
+        contentType: sealType,
+      })
+    );
+    check("envelope content type is denied on the pdf path", true);
+
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "restoreControl", "current"), {
+        closed: false,
+        reconciled: true,
+        watermark: 7,
+      });
+    });
+    await assertSucceeds(getBytes(ref(eligible, "users/alice/letterhead/logo.png")));
+    check("preparation allows an unmarked phone token while required mode is absent", true);
+    const unmarkedCustom = testEnv.authenticatedContext("alice", {
+      auth_time: 2_000,
+      firebase: { sign_in_provider: "custom" },
+      vydOriginAuthTime: 2_000,
+    }).storage();
+    await assertSucceeds(getBytes(ref(unmarkedCustom, "users/alice/letterhead/logo.png")));
+    check("preparation allows an unmarked custom token while required mode is absent", true);
+
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "restoreControl", "current"), { closed: true, watermark: 7 });
+    });
+    const unmarked = testEnv.authenticatedContext("alice", {
+      auth_time: 2_000,
+      firebase: { sign_in_provider: "phone" },
+    }).storage();
+    const marked = testEnv.authenticatedContext("alice", {
+      auth_time: 2_000,
+      firebase: { sign_in_provider: "phone" },
+      authorityWatermark: 7,
+    }).storage();
+    await assertFails(getBytes(ref(unmarked, "users/alice/letterhead/logo.png")));
+    check("closed restore fence denies a storage read without a watermark", true);
+    await assertFails(getBytes(ref(marked, "users/alice/letterhead/logo.png")));
+    check("closed restore fence denies a storage read with a matching watermark", true);
   } finally {
     await testEnv.cleanup();
   }

@@ -1,13 +1,13 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { useFocusEffect } from "expo-router";
 
+import { chooseCrashDiagnostics, currentPurposeConsentState, subscribePurposeConsent, reconcilePurposeConsent } from "@/services/consent/purposeConsent";
 import {
-  applyDiagnosticsChoice,
   currentDiagnosticsPreference,
-  loadDiagnosticsPreference,
   type DiagnosticsPreference,
 } from "@/services/telemetry/diagnosticsPreference";
+import { useAuth } from "@/state/auth";
 import { useT } from "@/i18n";
 import { spacing, typography, useThemedStyles } from "@/theme";
 
@@ -16,6 +16,12 @@ import { LocaleUiText } from "@/components/ui";
 
 export function CrashReportsPreferenceRow() {
   const t = useT();
+  const { user } = useAuth();
+  const [receipt, setReceipt] = useState(currentPurposeConsentState(user?.uid ?? null));
+  useEffect(() => subscribePurposeConsent(() => {
+    setReceipt(currentPurposeConsentState(user?.uid ?? null));
+    setPref(currentDiagnosticsPreference());
+  }), [user?.uid]);
   const [pref, setPref] = useState<DiagnosticsPreference>(currentDiagnosticsPreference());
   const styles = useThemedStyles((colors) =>
     StyleSheet.create({
@@ -33,8 +39,10 @@ export function CrashReportsPreferenceRow() {
   );
 
   const reload = useCallback(async () => {
-    setPref(await loadDiagnosticsPreference());
-  }, []);
+    if (user) await reconcilePurposeConsent(user.uid);
+    setReceipt(currentPurposeConsentState(user?.uid ?? null));
+    setPref(currentDiagnosticsPreference());
+  }, [user?.uid]);
 
   useFocusEffect(
     useCallback(() => {
@@ -43,9 +51,10 @@ export function CrashReportsPreferenceRow() {
   );
 
   const onPress = useCallback(async () => {
-    const next = pref.desired !== "on";
-    setPref(await applyDiagnosticsChoice(next));
-  }, [pref.desired]);
+    if (!user) return;
+    const next = !receipt?.localGrant;
+    setPref(await chooseCrashDiagnostics(next, user.uid));
+  }, [receipt?.localGrant, user?.uid]);
 
   const enabled = pref.desired === "on" && pref.persisted;
   const value = enabled ? t("settings.crashReportsOn") : t("settings.crashReportsOff");
@@ -61,7 +70,13 @@ export function CrashReportsPreferenceRow() {
         accessibilityLabel={`${t("settings.crashReportsTitle")}, ${value}`}
       />
       <LocaleUiText style={styles.note}>{t("settings.crashReportsBody")}</LocaleUiText>
-      {pref.error ? (
+      {receipt?.sync === "pending" || receipt?.sync === "unknown" ? (
+        <LocaleUiText style={styles.note}>{t("settings.crashReportsPending")}</LocaleUiText>
+      ) : null}
+      {receipt?.sync === "conflict" ? (
+        <LocaleUiText style={styles.note}>{t("settings.crashReportsConflict")}</LocaleUiText>
+      ) : null}
+      {pref.error || receipt?.sync === "storage_error" ? (
         <LocaleUiText style={styles.note}>{t("settings.crashReportsSaveFailed")}</LocaleUiText>
       ) : null}
     </View>

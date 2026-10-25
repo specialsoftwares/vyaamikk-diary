@@ -11,6 +11,7 @@ import type { Transaction } from "firebase-admin/firestore";
 
 import { getAdminDb } from "../admin";
 import { normalizePhoneE164 } from "./shared";
+import { assertAdmittedCallableUser } from "./admitCallableUser";
 
 export const MOBILE_QUARANTINE_MS = 21 * 24 * 60 * 60 * 1000;
 
@@ -478,6 +479,7 @@ export function rebindQuarantinedMobilePure(
 // ---------------------------------------------------------------------------
 
 export const checkMobileQuarantine = onCall({ region: "asia-south1" }, async (request) => {
+  await assertAdmittedCallableUser(request);
   const raw = request.data?.phoneE164 ?? request.data?.mobileHash;
   if (typeof raw !== "string" || !raw.trim()) {
     throw new HttpsError("invalid-argument", "phoneE164 or mobileHash is required.");
@@ -509,6 +511,7 @@ export const checkMobileQuarantine = onCall({ region: "asia-south1" }, async (re
 export const rebindQuarantinedMobileCallable = onCall(
   { region: "asia-south1" },
   async (request) => {
+    await assertAdmittedCallableUser(request);
     const authUid = request.auth?.uid;
     if (!authUid) {
       throw new HttpsError("unauthenticated", "Sign in first.");

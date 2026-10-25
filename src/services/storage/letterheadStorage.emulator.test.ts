@@ -19,12 +19,14 @@ import {
   initializeTestEnvironment,
   type RulesTestEnvironment,
 } from "@firebase/rules-unit-testing";
+import { doc, setDoc } from "firebase/firestore";
 import { getBytes, ref, uploadBytes } from "firebase/storage";
 
 import { buildMediaUploadUrl } from "./userStorageUploadCore";
 
 const PROJECT_ID = "vyaamikk-diary-storage-rules-test";
 const RULES_PATH = resolve(process.cwd(), "storage.rules");
+const FIRESTORE_RULES_PATH = resolve(process.cwd(), "firestore.rules");
 
 async function main() {
   // Guard: helper must not emit production host when emulator env is set.
@@ -37,8 +39,10 @@ async function main() {
   assert.doesNotMatch(mediaUrl, /firebasestorage\.googleapis\.com/);
 
   const rules = readFileSync(RULES_PATH, "utf8");
+  const firestoreRules = readFileSync(FIRESTORE_RULES_PATH, "utf8");
   const testEnv: RulesTestEnvironment = await initializeTestEnvironment({
     projectId: PROJECT_ID,
+    firestore: { rules: firestoreRules },
     storage: { rules },
   });
 
@@ -46,6 +50,13 @@ async function main() {
   const attachFixture = Buffer.from("attachment-fixture-bytes-v1");
 
   try {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), "users", "alice"), {
+        uid: "alice",
+        status: "active",
+        ageEligibility: "eligible",
+      });
+    });
     const alice = testEnv.authenticatedContext("alice").storage();
     const mallory = testEnv.authenticatedContext("mallory").storage();
     const anon = testEnv.unauthenticatedContext().storage();

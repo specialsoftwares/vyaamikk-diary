@@ -26,7 +26,7 @@ import {
   type GlobalSearchFilter,
   type GlobalSearchResult,
 } from "@/services/search";
-import { getRecentSearches } from "@/services/search/recentSearches";
+import { readRecentSearches } from "@/services/search/recentSearches";
 import { radius, spacing, typography, useTheme, useThemedStyles } from "@/theme";
 
 type Section = { title: string; data: GlobalSearchResult[] };
@@ -58,14 +58,28 @@ export default function GlobalSearchScreen() {
   const { requestDelete, isDeleting } = useRecordDelete(user?.uid ?? null);
 
   const [recentQueries, setRecentQueries] = useState<string[]>([]);
+  const [recentFailure, setRecentFailure] = useState<string | null>(null);
 
   useFocusEffect(
     useCallback(() => {
       invalidateGlobalSearchIndex();
       void reloadIndex();
-      void getRecentSearches().then(setRecentQueries);
+      if (user?.uid) {
+        void readRecentSearches(user.uid).then((read) => {
+          if (read.state === "ready") {
+            setRecentQueries(read.queries);
+            setRecentFailure(null);
+          } else {
+            setRecentQueries([]);
+            setRecentFailure(read.reason);
+          }
+        });
+      } else {
+        setRecentQueries([]);
+        setRecentFailure(null);
+      }
       if (typeof q === "string" && q.trim()) setQuery(q.trim());
-    }, [reloadIndex, q, setQuery])
+    }, [reloadIndex, q, setQuery, user?.uid])
   );
 
   const filterLabel = useCallback(
@@ -162,6 +176,9 @@ export default function GlobalSearchScreen() {
       <View style={styles.filterWrap}>
         <SearchFilterChips value={filter} onChange={setFilter} label={filterLabel} />
       </View>
+      {showRecent && recentFailure ? (
+        <LocaleUiText style={styles.recentLabel}>{t("globalSearch.recentUnavailable")}</LocaleUiText>
+      ) : null}
       {showRecent && recentQueries.length > 0 ? (
         <View style={{ marginBottom: spacing.sm }}>
           <LocaleUiText style={styles.recentLabel}>{t("globalSearch.recentQueries")}</LocaleUiText>

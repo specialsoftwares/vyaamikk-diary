@@ -35,6 +35,7 @@ import {
 } from "../google/playApiClient";
 import { consumeBillingRateLimit } from "../rateLimit";
 import { BILLING_DIAG_RUNTIME_SECRETS } from "../secrets";
+import { assertAdmittedCallableUser } from "../../identity/admitCallableUser";
 
 export async function handleValidateAndActivateAndroid(
   deps: AndroidBillingDeps,
@@ -84,6 +85,7 @@ function productionDeps(): AndroidBillingDeps {
 export const validateAndActivateAndroid = onCall(
   { region: "asia-south1", secrets: BILLING_DIAG_RUNTIME_SECRETS },
   async (request) => {
+    await assertAdmittedCallableUser(request);
     if (!request.auth?.uid) {
       throw new HttpsError("unauthenticated", "Sign in required.");
     }

@@ -11,7 +11,15 @@
  * Passing is not proof the reviewer can reach the dashboard.
  */
 
-export const REVIEW_PHONE = "+919000000000";
+export function reviewPhoneFromEnv(
+  env: Record<string, string | undefined> = process.env
+): string {
+  const phone = env.PLAY_REVIEW_PHONE?.trim() ?? "";
+  if (!/^\+[1-9]\d{7,14}$/.test(phone)) {
+    throw new Error("PLAY_REVIEW_PHONE is required and must be E.164. There is no default.");
+  }
+  return phone;
+}
 
 export type ReviewAuthUser = {
   uid: string;
@@ -71,8 +79,10 @@ export function parseUidArg(argv: string[]):
 export async function verifyReviewAccount(args: {
   port: ReviewVerifyPort;
   expectedProjectId: string;
+  phoneE164: string;
   uidArg?: string;
 }): Promise<ReviewVerifyOutcome> {
+  const reviewPhone = args.phoneE164.trim();
   const lines: string[] = [];
   const expected = args.expectedProjectId.trim();
   if (!expected) {
@@ -89,7 +99,7 @@ export async function verifyReviewAccount(args: {
 
   let phoneUser: ReviewAuthUser;
   try {
-    phoneUser = await args.port.getUserByPhoneNumber(REVIEW_PHONE);
+    phoneUser = await args.port.getUserByPhoneNumber(reviewPhone);
   } catch (error) {
     const code =
       error && typeof error === "object" && "code" in error
@@ -110,7 +120,7 @@ export async function verifyReviewAccount(args: {
     emit(lines, "result:account_disabled");
     return { ok: false, exitCode: 1, result: "account_disabled", lines };
   }
-  if (phoneUser.phoneNumber !== REVIEW_PHONE) {
+  if (phoneUser.phoneNumber !== reviewPhone) {
     emit(lines, "check:auth FAIL");
     emit(lines, "result:identity_mismatch");
     return { ok: false, exitCode: 1, result: "identity_mismatch", lines };
@@ -136,7 +146,7 @@ export async function verifyReviewAccount(args: {
       emit(lines, "result:sdk_unavailable");
       return { ok: false, exitCode: 1, result: "sdk_unavailable", lines };
     }
-    if (byUid.uid !== phoneUser.uid || byUid.phoneNumber !== REVIEW_PHONE) {
+    if (byUid.uid !== phoneUser.uid || byUid.phoneNumber !== reviewPhone) {
       emit(lines, "check:uid FAIL");
       emit(lines, "result:identity_mismatch");
       return { ok: false, exitCode: 1, result: "identity_mismatch", lines };
@@ -165,7 +175,7 @@ export async function verifyReviewAccount(args: {
   }
 
   const data = doc.data;
-  if (data.phoneE164 !== REVIEW_PHONE) {
+  if (data.phoneE164 !== reviewPhone) {
     emit(lines, "check:profile:phoneE164 FAIL");
     emit(lines, "result:identity_mismatch");
     return { ok: false, exitCode: 1, result: "identity_mismatch", lines };
@@ -253,6 +263,13 @@ export async function runReviewAccountCli(args: {
     logError("result:config_missing");
     return 1;
   }
+  let reviewPhone = "";
+  try {
+    reviewPhone = reviewPhoneFromEnv(args.env);
+  } catch {
+    logError("result:config_missing");
+    return 1;
+  }
 
   let port: ReviewVerifyPort;
   try {
@@ -279,6 +296,7 @@ export async function runReviewAccountCli(args: {
   const outcome = await verifyReviewAccount({
     port,
     expectedProjectId,
+    phoneE164: reviewPhone,
     uidArg: parsed.uid,
   });
   for (const line of outcome.lines) {

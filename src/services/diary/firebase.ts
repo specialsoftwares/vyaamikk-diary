@@ -13,13 +13,19 @@ import {
 } from "firebase/firestore";
 
 import type { BusinessEntry } from "@/domain/businessEntry";
+import { getActiveBackend } from "@/config/env";
 import { getFirebaseDb } from "@/config/firebase";
+import { shouldCreateContentSeals, shouldOpenContentSeals } from "@/constants/contentSeal";
 import { entrySearchBlob } from "@/utils/businessEntry/display";
 import { notificationsService } from "@/services/notifications";
+import { stableRecordId } from "@/services/records/stableRecordId";
+import { isDiaryContentSeal } from "@/services/privacy/diarySealDocument";
+import { openSealedDiaryEntry, sealDiaryCloudPayload } from "@/services/privacy/ownerContentApi";
 import type { SyncSessionToken } from "@/sync/syncSessionOwnership";
 
 import { dedupeDiaryEntries } from "@/services/dashboard/diaryRecordCounts";
 import {
+  buildNewDiaryEntry,
   createEntryAtomicDetailed,
   entryFromFirestoreDoc,
 } from "./atomicCreate";
@@ -32,6 +38,25 @@ import type {
 
 function entriesCollection(userId: string) {
   return collection(getFirebaseDb(), "users", userId, "entries");
+}
+
+function productionSeals(): boolean {
+  return shouldCreateContentSeals(getActiveBackend());
+}
+
+function productionOpens(): boolean {
+  return shouldOpenContentSeals(getActiveBackend());
+}
+
+async function materializeDiary(
+  userId: string,
+  id: string,
+  data: Record<string, unknown>
+): Promise<BusinessEntry | null> {
+  const entry = entryFromFirestoreDoc(id, data);
+  if (!entry) return null;
+  if (!isDiaryContentSeal(data.contentSeal) || !productionOpens()) return entry;
+  return openSealedDiaryEntry(userId, entry, data.contentSeal);
 }
 
 function applyFilters(
@@ -61,18 +86,47 @@ export const firebaseDiaryRepository: DiaryRepository = {
   },
 
   async createWithOutcome(userId, input, session?: SyncSessionToken | null): Promise<DiaryCreateResult> {
+    const nowMs = Date.now();
+    const recordId = stableRecordId(input.clientRecordId, "en");
+    let cloudPayload: ((record: BusinessEntry) => Record<string, unknown>) | undefined;
+    if (productionSeals()) {
+      const draft = buildNewDiaryEntry(userId, recordId, input, nowMs);
+      const sealed = await sealDiaryCloudPayload(draft);
+      cloudPayload = (record) => {
+        if (record.id !== draft.id || record.updatedAt !== draft.updatedAt) {
+          throw new Error("seal_revision_mismatch");
+        }
+        return sealed;
+      };
+    }
     const result = await createEntryAtomicDetailed(
       getFirebaseDb(),
       userId,
       input,
-      session === undefined ? undefined : { session }
+      session === undefined ? undefined : { session },
+      nowMs,
+      recordId,
+      cloudPayload
     );
+    if (result.outcome === "existing") {
+      const opened = await this.getByIdIncludingDeleted!(userId, result.record.id);
+      if (opened) return { record: opened, outcome: "existing" };
+    }
     return { record: result.record, outcome: result.outcome };
   },
 
   async update(userId, input) {
+    const seal = productionSeals();
+    const open = productionOpens();
     return updateDiaryEntryOnDb(getFirebaseDb(), userId, input, {
       cancelNotification: (id) => notificationsService.cancel(id),
+      openExisting: open
+        ? async (entry, raw) =>
+            isDiaryContentSeal(raw.contentSeal)
+              ? openSealedDiaryEntry(userId, entry, raw.contentSeal)
+              : entry
+        : undefined,
+      protectCloud: seal ? sealDiaryCloudPayload : undefined,
     });
   },
 
@@ -80,7 +134,7 @@ export const firebaseDiaryRepository: DiaryRepository = {
     const ref = doc(getFirebaseDb(), "users", userId, "entries", id);
     const snap = await getDoc(ref);
     if (!snap.exists()) return;
-    const existing = entryFromFirestoreDoc(snap.id, snap.data() as Record<string, unknown>);
+    const existing = await materializeDiary(userId, snap.id, snap.data() as Record<string, unknown>);
     if (existing?.reminder?.notificationId) {
       await notificationsService.cancel(existing.reminder.notificationId);
     }
@@ -101,17 +155,16 @@ export const firebaseDiaryRepository: DiaryRepository = {
     const ref = doc(getFirebaseDb(), "users", userId, "entries", id);
     const snap = await getDoc(ref);
     if (!snap.exists()) return null;
-    return entryFromFirestoreDoc(snap.id, snap.data() as Record<string, unknown>);
+    return materializeDiary(userId, snap.id, snap.data() as Record<string, unknown>);
   },
 
   async list(userId, options = {}) {
     const q = query(entriesCollection(userId), orderBy("entryDate", "desc"));
     const snap = await getDocs(q);
-    const entries = dedupeDiaryEntries(
-      snap.docs
-        .map((d) => entryFromFirestoreDoc(d.id, d.data() as Record<string, unknown>))
-        .filter((x): x is BusinessEntry => x !== null)
+    const opened = await Promise.all(
+      snap.docs.map((d) => materializeDiary(userId, d.id, d.data() as Record<string, unknown>))
     );
+    const entries = dedupeDiaryEntries(opened.filter((x): x is BusinessEntry => x !== null));
     return applyFilters(entries, options);
   },
 };

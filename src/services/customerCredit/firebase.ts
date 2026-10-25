@@ -22,8 +22,15 @@ import {
 } from "firebase/firestore";
 
 import { publishDomainChange } from "@/services/dataChanges/domainChanges";
+import { publishAfterCreditCommit } from "./publishAfterCreditCommit";
 import { AppError } from "@/domain/errors";
 import { getFirebaseDb } from "@/config/firebase";
+import {
+  openBusinessCloud,
+  protectBusinessCloud,
+  settleCreatedBusinessCloud,
+  prepareBusinessCreate,
+} from "@/services/privacy/businessCloudSeal";
 import {
   CREDIT_PAYMENT_MODES,
   CUSTOMER_DOCUMENT_TYPES,
@@ -52,6 +59,7 @@ import {
 import {
   addCustomerCreditPaymentOnDb,
   closeCustomerCreditFullyPaidOnDb,
+  mutateCustomerCreditOnDb,
 } from "./recordMutations";
 
 import { applyStatus, applyUpdate, removePaymentFrom } from "./shared";
@@ -306,85 +314,143 @@ function toCloud(record: CustomerCreditRecord): Record<string, unknown> {
   return { ...rest, pdfUri: null, customerPhoto: null, closure: closureCloud };
 }
 
+function creditCloudOptions(userId: string, recordId: string) {
+  return {
+    restoreRaw: async (raw: Record<string, unknown>) => {
+      const opened = await openBusinessCloud(
+        "customerCreditRecords",
+        fromDoc(recordId, raw, userId),
+        raw
+      );
+      return { ...raw, ...opened };
+    },
+    protectCloud: async (record: CustomerCreditRecord, raw: Record<string, unknown>) =>
+      protectBusinessCloud({
+        collection: "customerCreditRecords",
+        userId,
+        recordId: record.id,
+        revision: record.updatedAt,
+        plain: toCloud(record),
+        existingRaw: raw,
+      }),
+  };
+}
+
+async function materializeCredit(
+  id: string,
+  raw: Record<string, unknown>,
+  userId: string
+): Promise<CustomerCreditRecord> {
+  return openBusinessCloud("customerCreditRecords", fromDoc(id, raw, userId), raw);
+}
+
 export const firebaseCustomerCreditRepository: CustomerCreditRepository = {
   async allocateSerial(userId) {
     return allocateCustomerCreditSerialOnDb(getFirebaseDb(), userId);
   },
 
   async create(userId, input: CreateCustomerCreditInput) {
-    return createCustomerCreditAtomic(getFirebaseDb(), userId, input, (id, data) =>
-      fromDoc(id, data, userId)
+    const record = await createCustomerCreditAtomic(getFirebaseDb(), userId, input, (id, data) =>
+      fromDoc(id, data, userId),
+      { prepareCloudPayload: prepareBusinessCreate("customerCreditRecords", userId) }
     );
+    return settleCreatedBusinessCloud({
+      collection: "customerCreditRecords",
+      userId,
+      record,
+      readRaw: async () => {
+        const snap = await getDoc(recordDocRef(userId, record.id));
+        return snap.exists() ? (snap.data() as Record<string, unknown>) : null;
+      },
+      writeCloud: async (cloud) => {
+        await setDoc(recordDocRef(userId, record.id), cloud, { merge: true });
+      },
+    });
   },
 
   async update(userId, input: UpdateCustomerCreditInput) {
-    const ref = recordDocRef(userId, input.id);
-    const snap = await getDoc(ref);
-    if (!snap.exists()) throw new AppError("not_found", "Record not found.");
-    const existing = fromDoc(snap.id, snap.data() as Record<string, unknown>, userId);
-    const next = applyUpdate(existing, input, Date.now());
-    await setDoc(ref, toCloud(next), { merge: true });
-    publishDomainChange(userId, "customerCredit", { effect: "upsert", recordId: next.id });
-    return next;
+    return publishAfterCreditCommit(userId, input.id, () =>
+      mutateCustomerCreditOnDb(
+        getFirebaseDb(),
+        userId,
+        input.id,
+        (existing, now) => applyUpdate(existing, input, now),
+        (id, data) => fromDoc(id, data, userId),
+        Date.now(),
+        creditCloudOptions(userId, input.id)
+      )
+    );
   },
 
   async addPayment(userId, recordId, payment) {
-    const next = await addCustomerCreditPaymentOnDb(
-      getFirebaseDb(),
-      userId,
-      recordId,
-      payment,
-      (id, data) => fromDoc(id, data, userId)
+    return publishAfterCreditCommit(userId, recordId, () =>
+      addCustomerCreditPaymentOnDb(
+        getFirebaseDb(),
+        userId,
+        recordId,
+        payment,
+        (id, data) => fromDoc(id, data, userId),
+        Date.now(),
+        creditCloudOptions(userId, recordId)
+      )
     );
-    publishDomainChange(userId, "customerCredit", { effect: "upsert", recordId });
-    return next;
   },
 
   async removePayment(userId, recordId, paymentId) {
-    const ref = recordDocRef(userId, recordId);
-    const snap = await getDoc(ref);
-    if (!snap.exists()) throw new AppError("not_found", "Record not found.");
-    const existing = fromDoc(snap.id, snap.data() as Record<string, unknown>, userId);
-    const next = removePaymentFrom(existing, paymentId, Date.now());
-    await setDoc(ref, toCloud(next), { merge: true });
-    publishDomainChange(userId, "customerCredit", { effect: "upsert", recordId });
-    return next;
+    return publishAfterCreditCommit(userId, recordId, () =>
+      mutateCustomerCreditOnDb(
+        getFirebaseDb(),
+        userId,
+        recordId,
+        (existing, now) => removePaymentFrom(existing, paymentId, now),
+        (id, data) => fromDoc(id, data, userId),
+        Date.now(),
+        creditCloudOptions(userId, recordId)
+      )
+    );
   },
 
   async setStatus(userId, recordId, status) {
-    const ref = recordDocRef(userId, recordId);
-    const snap = await getDoc(ref);
-    if (!snap.exists()) throw new AppError("not_found", "Record not found.");
-    const existing = fromDoc(snap.id, snap.data() as Record<string, unknown>, userId);
-    const next = applyStatus(existing, status, Date.now());
-    await setDoc(ref, toCloud(next), { merge: true });
-    publishDomainChange(userId, "customerCredit", { effect: "upsert", recordId });
-    return next;
+    return publishAfterCreditCommit(userId, recordId, () =>
+      mutateCustomerCreditOnDb(
+        getFirebaseDb(),
+        userId,
+        recordId,
+        (existing, now) => applyStatus(existing, status, now),
+        (id, data) => fromDoc(id, data, userId),
+        Date.now(),
+        creditCloudOptions(userId, recordId)
+      )
+    );
   },
 
   async closeFullyPaid(userId, input: CloseFullyPaidInput) {
-    const next = await closeCustomerCreditFullyPaidOnDb(
-      getFirebaseDb(),
-      userId,
-      input,
-      (id, data) => fromDoc(id, data, userId)
+    return publishAfterCreditCommit(userId, input.recordId, () =>
+      closeCustomerCreditFullyPaidOnDb(
+        getFirebaseDb(),
+        userId,
+        input,
+        (id, data) => fromDoc(id, data, userId),
+        Date.now(),
+        creditCloudOptions(userId, input.recordId)
+      )
     );
-    publishDomainChange(userId, "customerCredit", { effect: "upsert", recordId: input.recordId });
-    return next;
   },
 
   async setReminder(userId, recordId, reminder) {
-    const ref = recordDocRef(userId, recordId);
-    const snap = await getDoc(ref);
-    if (!snap.exists()) throw new AppError("not_found", "Record not found.");
-    const existing = fromDoc(snap.id, snap.data() as Record<string, unknown>, userId);
-    const next: CustomerCreditRecord = {
-      ...existing,
-      reminderAt: reminder.reminderAt,
-      reminderNotificationId: reminder.reminderNotificationId,
-      updatedAt: Date.now(),
-    };
-    await setDoc(ref, toCloud(next), { merge: true });
+    const next = await mutateCustomerCreditOnDb(
+      getFirebaseDb(),
+      userId,
+      recordId,
+      (existing) => ({
+        ...existing,
+        reminderAt: reminder.reminderAt,
+        reminderNotificationId: reminder.reminderNotificationId,
+      }),
+      (id, data) => fromDoc(id, data, userId),
+      Date.now(),
+      creditCloudOptions(userId, recordId)
+    );
     return next;
   },
 
@@ -403,14 +469,14 @@ export const firebaseCustomerCreditRepository: CustomerCreditRepository = {
     if (!userId || !id) return null;
     const snap = await getDoc(recordDocRef(userId, id));
     if (!snap.exists()) return null;
-    return fromDoc(snap.id, snap.data() as Record<string, unknown>, userId);
+    return materializeCredit(snap.id, snap.data() as Record<string, unknown>, userId);
   },
 
   async list(userId, options: ListCustomerCreditOptions = {}) {
     if (!userId) return [];
     const snap = await getDocs(query(userCollection(userId), orderBy("serial", "desc")));
-    let out = snap.docs.map((d) =>
-      fromDoc(d.id, d.data() as Record<string, unknown>, userId)
+    let out = await Promise.all(
+      snap.docs.map((d) => materializeCredit(d.id, d.data() as Record<string, unknown>, userId))
     );
     if (!options.includeDeleted) out = out.filter((r) => !r.deletedAt);
     if (options.search?.trim()) {

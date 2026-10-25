@@ -5,20 +5,25 @@ import { format } from "date-fns";
 
 import { OnboardingStepShell } from "@/components/onboarding/OnboardingStepShell";
 import { Banner, Button, Screen, LocaleUiText } from "@/components/ui";
-import { DELETION_GRACE_DAYS } from "@/domain/identityLifecycle";
-import { userFacingMessage } from "@/domain/errors";
+import {
+  DELETION_GRACE_DAYS,
+  DELETION_V2_REACTIVATION_DAYS,
+} from "@/domain/identityLifecycle";
+import { AppError, userFacingMessage } from "@/domain/errors";
 import { getAuthEntryHref } from "@/config/authWrapper";
 import { getActiveBackend } from "@/config/env";
 import { useAuth } from "@/state/auth";
 import { useT } from "@/i18n";
 import { spacing, typography, useThemedStyles } from "@/theme";
 import { maskMobile } from "@/utils/phone";
+import { currentAuthMutationGeneration } from "@/services/auth/authSessionFence";
 import {
   callCompleteAccountReactivation,
   callStartAccountReactivation,
-  callVerifyAndBindEmail,
   useIdentityCallables,
 } from "@/services/auth/identityCallable";
+import { useAuthoritativeResendCountdown } from "@/hooks/useAuthoritativeResendCountdown";
+import { useIsOnline } from "@/state/network";
 
 const EMAIL_CODE_LENGTH = 6;
 
@@ -31,6 +36,7 @@ export default function AccountPendingDeletionScreen() {
   const params = useLocalSearchParams<{
     phoneE164?: string;
     deletionScheduledFor?: string;
+    deletionPolicyVersion?: string;
     maskedEmail?: string;
   }>();
   const [step, setStep] = useState<ScreenStep>("info");
@@ -39,10 +45,17 @@ export default function AccountPendingDeletionScreen() {
   const [verificationId, setVerificationId] = useState<string | null>(null);
   const [maskedEmail, setMaskedEmail] = useState(String(params.maskedEmail ?? ""));
   const [emailCode, setEmailCode] = useState("");
+  const [resendAvailableAt, setResendAvailableAt] = useState<number | null>(null);
   const codeInputRef = useRef<TextInput>(null);
+  const online = useIsOnline();
+  const resend = useAuthoritativeResendCountdown(resendAvailableAt);
 
   const phoneE164 = String(params.phoneE164 ?? "");
   const scheduledMs = Number(params.deletionScheduledFor ?? 0);
+  const deletionDays =
+    Number(params.deletionPolicyVersion ?? 0) >= 2
+      ? DELETION_V2_REACTIVATION_DAYS
+      : DELETION_GRACE_DAYS;
   const scheduledLabel =
     scheduledMs > 0 ? format(scheduledMs, "d MMM yyyy") : t("pendingDeletion.dateUnknown");
   const useReactivationFlow =
@@ -112,39 +125,71 @@ export default function AccountPendingDeletionScreen() {
     }
   };
 
+  const reactivationMessage = (error: unknown): string => {
+    const code = error instanceof AppError ? String(error.details?.code ?? "") : "";
+    if (code === "expired") return t("pendingDeletion.reactivateExpired");
+    if (code === "attempts_exhausted" || code === "rate_limited" || code === "cooldown") {
+      return t("pendingDeletion.reactivateAttempts");
+    }
+    if (code === "superseded") return t("pendingDeletion.reactivateLatestCode");
+    if (code === "provider_unavailable") return t("pendingDeletion.reactivateSendFailed");
+    if (code === "no_verified_email" || code === "purge_underway" || code === "ineligible") {
+      return t("pendingDeletion.reactivateUnavailable");
+    }
+    return userFacingMessage(error);
+  };
+
   const onStartReactivation = async () => {
+    if (!online) {
+      setError(t("pendingDeletion.reactivateOffline"));
+      return;
+    }
+    const generation = currentAuthMutationGeneration();
     setBusy(true);
     setError(null);
     try {
       const result = await callStartAccountReactivation();
+      if (currentAuthMutationGeneration() !== generation) return;
       setVerificationId(result.verificationId);
       setMaskedEmail(result.maskedEmail);
+      setResendAvailableAt(result.resendAvailableAt);
+      setEmailCode("");
       setStep("email_verify");
       setTimeout(() => codeInputRef.current?.focus(), 280);
     } catch (e) {
-      setError(userFacingMessage(e));
+      if (currentAuthMutationGeneration() !== generation) return;
+      setError(reactivationMessage(e));
     } finally {
-      setBusy(false);
+      if (currentAuthMutationGeneration() === generation) setBusy(false);
     }
   };
 
   const onVerifyEmailAndReactivate = async () => {
+    if (!online) {
+      setError(t("pendingDeletion.reactivateOffline"));
+      return;
+    }
     if (!verificationId || emailCode.length !== EMAIL_CODE_LENGTH) return;
+    const generation = currentAuthMutationGeneration();
+    const submitted = emailCode;
     setBusy(true);
     setError(null);
     try {
-      await callVerifyAndBindEmail(verificationId, emailCode);
-      const { profile } = await callCompleteAccountReactivation();
+      const { profile } = await callCompleteAccountReactivation(verificationId, submitted);
+      if (currentAuthMutationGeneration() !== generation) return;
       await finishReactivation(profile);
+      if (currentAuthMutationGeneration() !== generation) return;
+      setEmailCode("");
       Alert.alert(
         t("pendingDeletion.reactivateSuccessTitle"),
         t("pendingDeletion.reactivateSuccessBody"),
         [{ text: t("common.ok"), onPress: () => router.replace("/") }]
       );
     } catch (e) {
-      setError(userFacingMessage(e));
+      if (currentAuthMutationGeneration() !== generation) return;
+      setError(reactivationMessage(e));
     } finally {
-      setBusy(false);
+      if (currentAuthMutationGeneration() === generation) setBusy(false);
     }
   };
 
@@ -173,6 +218,8 @@ export default function AccountPendingDeletionScreen() {
                 textContentType="oneTimeCode"
                 placeholder={t("otp.codePlaceholder")}
                 editable={!busy}
+                allowFontScaling
+                maxFontSizeMultiplier={2}
                 returnKeyType="done"
                 onSubmitEditing={() => {
                   if (emailVerifyComplete) void onVerifyEmailAndReactivate();
@@ -185,9 +232,22 @@ export default function AccountPendingDeletionScreen() {
                 disabled={!emailVerifyComplete}
               />
               <Button
+                label={
+                  resend.canResend
+                    ? t("pendingDeletion.reactivateResend")
+                    : t("pendingDeletion.reactivateResendIn", { seconds: resend.remainingSeconds })
+                }
+                variant="ghost"
+                onPress={() => void onStartReactivation()}
+                disabled={busy || !resend.canResend || !online}
+              />
+              <Button
                 label={t("pendingDeletion.backToLogin")}
                 variant="ghost"
-                onPress={() => void onBackToLogin()}
+                onPress={() => {
+                  setEmailCode("");
+                  void onBackToLogin();
+                }}
                 disabled={busy}
               />
             </View>
@@ -208,7 +268,7 @@ export default function AccountPendingDeletionScreen() {
         title={t("pendingDeletion.title")}
         body={t("pendingDeletion.body", {
           phone: phoneE164 ? maskMobile(phoneE164) : "—",
-          days: DELETION_GRACE_DAYS,
+          days: deletionDays,
           date: scheduledLabel,
         })}
         footer={

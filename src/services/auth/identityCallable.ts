@@ -243,6 +243,8 @@ async function callFunction<TRequest, TResponse>(
         : "Identity service unavailable.";
     const details = extractCallableDetails(e);
     const serverCode = typeof details?.code === "string" ? details.code : null;
+    const reactivationCallable =
+      name === "startAccountReactivation" || name === "completeAccountReactivation";
     const baseDetails = {
       authPhase: "post_auth" as const,
       failureDomain: "functions" as const,
@@ -256,6 +258,7 @@ async function callFunction<TRequest, TResponse>(
       functionsAppName: functionsAppName || null,
       sameFirebaseApp,
       uidSuffix: authSnap?.uidSuffix ?? null,
+      ...(reactivationCallable && serverCode ? { code: serverCode } : {}),
     };
 
     if (serverCode === "EMAIL_OTP_COOLDOWN" || code === "functions/resource-exhausted") {
@@ -405,6 +408,40 @@ export interface MintClientAuthTokenResponse {
  * (Firestore/Storage) can sign in as the same user. Must be called over
  * the native functions SDK so request.auth carries the native session.
  */
+export async function callLogoutAllDevices(
+  operationId: string
+): Promise<{ status: "complete" }> {
+  const data = await callFunction<{ operationId: string }, { status?: string }>("logoutAllDevices", {
+    operationId,
+  });
+  if (data?.status !== "complete") {
+    throw new AppError("unknown", "Sign-out of every device did not finish.", undefined, {
+      authPhase: "post_auth",
+      failureDomain: "functions",
+      callableName: "logoutAllDevices",
+      functionsErrorCode: "functions/unknown",
+    });
+  }
+  return { status: "complete" };
+}
+
+export async function callReadRestoreAuthorityWatermark(): Promise<
+  { state: "unconfigured" } | { state: "current"; watermark: number }
+> {
+  const data = await callFunction<Record<string, never>, { state?: string; watermark?: number }>(
+    "readRestoreAuthorityWatermark",
+    {}
+  );
+  if (data?.state === "current" && Number.isSafeInteger(data.watermark)) {
+    return { state: "current", watermark: Number(data.watermark) };
+  }
+  if (data?.state === "unconfigured") return { state: "unconfigured" };
+  throw new AppError("unknown", "Restore authority watermark was not published.", undefined, {
+    authPhase: "post_auth",
+    callableName: "readRestoreAuthorityWatermark",
+  });
+}
+
 export async function callMintClientAuthToken(): Promise<MintClientAuthTokenResponse> {
   const data = await callFunction<Record<string, never>, MintClientAuthTokenResponse>(
     "mintClientAuthToken",
@@ -498,6 +535,10 @@ export interface EnsureDeletionJobResponse {
   generation: number;
   graceExpiresAt: number;
   status: string;
+  deletionRequestedAt?: number;
+  deletionPolicyVersion?: number;
+  reactivationCutoff?: number | null;
+  erasureDeadline?: number | null;
 }
 
 /** Create/refresh server-owned deletionJobs/{uid} after pending_deletion is set. */
@@ -512,6 +553,8 @@ export interface StartAccountReactivationResponse {
   verificationId: string;
   maskedEmail: string;
   requiresEmailVerification: true;
+  expiresAt: number;
+  resendAvailableAt: number;
 }
 
 export async function callStartAccountReactivation(): Promise<StartAccountReactivationResponse> {
@@ -526,11 +569,14 @@ export interface CompleteAccountReactivationResponse {
   isNewUser: false;
 }
 
-export async function callCompleteAccountReactivation(): Promise<AuthResult> {
+export async function callCompleteAccountReactivation(
+  challengeId: string,
+  code: string
+): Promise<AuthResult> {
   const data = await callFunction<
-    Record<string, never>,
+    { challengeId: string; code: string },
     CompleteAccountReactivationResponse
-  >("completeAccountReactivation", {});
+  >("completeAccountReactivation", { challengeId, code });
   const uid = String(data.profile.uid ?? "");
   if (!uid) {
     throw new AppError("unknown", "Reactivation returned an invalid profile.", undefined, {
@@ -599,4 +645,97 @@ export async function callConfirmVerifiedMobileContactChange(args: {
     ueid: data.ueid ?? data.profile.ueid,
     phoneE164: data.phoneE164 ?? data.profile.phoneE164,
   });
+}
+
+type OwnerContentSeal = {
+  v: 1 | 2;
+  keyId?: string;
+  alg: "AES-256-GCM";
+  uid: string;
+  collection: string;
+  recordId: string;
+  revision: number;
+  purpose: string;
+  nonce: string;
+  ciphertext: string;
+  tag: string;
+};
+
+/**
+ * Seal and open callables. The arguments are not written to logs.
+ * plaintextBase64 is the protected body, not a log field.
+ */
+export async function callSealOwnerContent(args: {
+  collection:
+    | "entries"
+    | "attachments"
+    | "customerCreditRecords"
+    | "purchaseOrders"
+    | "professionalPacks"
+    | "letterheadDocs"
+    | "users";
+  recordId: string;
+  revision: number;
+  purpose:
+    | "diary"
+    | "attachment"
+    | "customer_credit"
+    | "purchase_order"
+    | "professional_pack"
+    | "letterhead_document"
+    | "profile";
+  plaintextBase64: string;
+}): Promise<OwnerContentSeal> {
+  const data = await callFunction<typeof args, { seal: OwnerContentSeal }>("sealOwnerContent", args);
+  return data.seal;
+}
+
+export async function callOpenOwnerContent(args: {
+  collection:
+    | "entries"
+    | "attachments"
+    | "customerCreditRecords"
+    | "purchaseOrders"
+    | "professionalPacks"
+    | "letterheadDocs"
+    | "users";
+  recordId: string;
+  revision: number;
+  purpose:
+    | "diary"
+    | "attachment"
+    | "customer_credit"
+    | "purchase_order"
+    | "professional_pack"
+    | "letterhead_document"
+    | "profile";
+  seal: OwnerContentSeal;
+}): Promise<{ plaintextBase64: string }> {
+  return callFunction<typeof args, { plaintextBase64: string }>("openOwnerContent", args);
+}
+
+export async function callRecordAgeAssessment(dateOfBirth: string): Promise<{
+  ageEligibility: "eligible" | "ineligible";
+  agePolicyVersion: string;
+  ageAssessedAt: number;
+  ageMethod: "self_declared_dob";
+}> {
+  return callFunction<
+    { dateOfBirth: string },
+    {
+      ageEligibility: "eligible" | "ineligible";
+      agePolicyVersion: string;
+      ageAssessedAt: number;
+      ageMethod: "self_declared_dob";
+    }
+  >("recordAgeAssessment", { dateOfBirth });
+}
+
+export async function callRecordProcessingPurpose(args:
+  import("@/services/consent/purposeConsentQueue").PurposeMutation |
+  { uid: string; purpose: "crash_diagnostics"; action: "read" }
+): Promise<import("@/services/consent/purposeConsentQueue").PurposeServerState> {
+  return callFunction<typeof args, import("@/services/consent/purposeConsentQueue").PurposeServerState>(
+    "recordProcessingPurpose", args
+  );
 }

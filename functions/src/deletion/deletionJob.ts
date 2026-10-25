@@ -44,12 +44,23 @@ export interface DeletionJobDoc {
   leaseOwner: string | null;
   leaseUntil: number | null;
   attempts: number;
+  nextAttemptAt?: number;
   lastErrorCategory: DeletionErrorCategory;
   /** Privacy-safe short code, never PII. */
   lastErrorCode: string | null;
   phases: DeletionJobPhases;
   completedAt: number | null;
   updatedAt: number;
+  /** 1 = legacy 45-day window. 2 = 15-day new-request policy. Missing means legacy. */
+  deletionPolicyVersion?: number;
+  reactivationCutoff?: number | null;
+  erasureDeadline?: number | null;
+  /** Crashlytics and mail-provider tails are not per-user deletable. */
+  processorDeletion?: "not_applicable" | "incomplete" | "failed";
+  /** Page to reread after an interrupted Firestore purge. Not a content cursor. */
+  firestoreCursor?: { parentPath: string; collectionId: string; pageToken: string } | null;
+  /** Purpose withdrawals copied before the user subcollections are removed. */
+  withdrawnPurposes?: string[];
 }
 
 export const EMPTY_PHASES: DeletionJobPhases = {
@@ -68,8 +79,12 @@ export function initialDeletionJob(input: {
   graceExpiresAt: number;
   generation?: number;
   now?: number;
+  deletionPolicyVersion?: number;
+  reactivationCutoff?: number | null;
+  erasureDeadline?: number | null;
 }): DeletionJobDoc {
   const now = input.now ?? Date.now();
+  const version = input.deletionPolicyVersion ?? 1;
   return {
     uid: input.uid,
     generation: input.generation ?? 1,
@@ -84,6 +99,10 @@ export function initialDeletionJob(input: {
     phases: { ...EMPTY_PHASES },
     completedAt: null,
     updatedAt: now,
+    deletionPolicyVersion: version,
+    reactivationCutoff: input.reactivationCutoff ?? input.graceExpiresAt,
+    erasureDeadline: input.erasureDeadline ?? null,
+    processorDeletion: version >= 2 ? "incomplete" : "not_applicable",
   };
 }
 
@@ -96,7 +115,27 @@ export function isLeaseActive(job: DeletionJobDoc, now: number): boolean {
   return Boolean(job.leaseUntil && job.leaseUntil > now && job.status === "leased");
 }
 
+/** Soft-delete recovery may cancel only before grace ends and before purge work starts. */
+export function automaticRestorationAllowed(job: DeletionJobDoc, now: number): boolean {
+  if (job.graceExpiresAt <= now) return false;
+  if (
+    job.status === "completed" ||
+    job.status === "needs_manual_review" ||
+    job.status === "ready" ||
+    job.status === "leased"
+  ) {
+    return false;
+  }
+  if (isLeaseActive(job, now)) return false;
+  for (const phase of Object.values(job.phases)) {
+    if (phase !== "pending") return false;
+  }
+  return job.status === "awaiting_grace" || job.status === "cancelled";
+}
+
 export function canAcquireLease(job: DeletionJobDoc, now: number): boolean {
+  if (job.graceExpiresAt > now) return false;
+  if (typeof job.nextAttemptAt === "number" && job.nextAttemptAt > now) return false;
   if (job.status === "completed" || job.status === "cancelled") return false;
   if (job.status === "needs_manual_review") return false;
   if (job.status === "awaiting_grace" && job.graceExpiresAt > now) return false;
@@ -121,6 +160,11 @@ export function classifyProviderError(err: unknown): {
   const msg = err instanceof Error ? err.message : String(err);
   const lower = msg.toLowerCase();
   if (
+    lower.includes("firestore_depth_exceeded") ||
+    lower.includes("firestore_unknown_collection") ||
+    lower.includes("firestore_cursor_unowned") ||
+    lower.includes("restore_authority_unprovisioned") ||
+    lower.includes("restore_authority_projection_failed") ||
     lower.includes("storage_path_not_owned") ||
     lower.includes("permanent") ||
     lower.includes("invalid-argument") ||

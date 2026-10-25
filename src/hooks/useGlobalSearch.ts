@@ -76,9 +76,9 @@ export function useGlobalSearch(userId: string | null) {
 
   const commitSearch = useCallback(async () => {
     if (isQuerySearchable(debouncedQuery)) {
-      await pushRecentSearch(debouncedQuery);
+      if (userId) await pushRecentSearch(userId, debouncedQuery);
     }
-  }, [debouncedQuery]);
+  }, [debouncedQuery, userId]);
 
   return {
     query,

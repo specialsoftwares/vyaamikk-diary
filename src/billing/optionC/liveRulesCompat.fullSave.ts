@@ -2,7 +2,7 @@
  * LIVE_RULES_COMPAT production save callers. Injected PDF/effects; real
  * Firestore atomic CREATE, coordinator, and completed steps.
  */
-import { doc, getDoc, setDoc, type Firestore } from "firebase/firestore";
+import { doc, getDoc, setDoc, writeBatch, type Firestore } from "firebase/firestore";
 
 import { DEFAULT_PDF_BRANDING, type UserProfile } from "@/domain/types";
 import { createEntryAtomicDetailed, entryFromFirestoreDoc } from "@/services/diary/atomicCreate";
@@ -190,7 +190,15 @@ export async function installCompatSaveSeams(input: {
       if (!snap.exists()) unused();
       const existing = input.parseCredit(snap.id, snap.data() as Record<string, unknown>);
       const next = { ...existing, pdfUri: updateInput.pdfUri ?? existing.pdfUri };
-      await setDoc(ref, { pdfUri: next.pdfUri }, { merge: true });
+      const previous = Number(snap.data()?.updatedAt ?? 0);
+      const nextRevision = previous + 1;
+      const batch = writeBatch(input.db);
+      batch.set(ref, { pdfUri: next.pdfUri, updatedAt: nextRevision }, { merge: true });
+      batch.set(doc(input.db, "users", userId, "customerCreditRecords", updateInput.id, "opRevision", "current"), {
+        base: previous,
+        revision: nextRevision,
+      });
+      await batch.commit();
       return next;
     },
     addPayment: async () => unused(),

@@ -11,6 +11,9 @@ export interface LegalConsentRecord {
   appVersion: string;
   platform: string;
   sourceScreen: string;
+  /** Optional purpose receipt. Required service processing is not a checkbox. */
+  purposeId?: "service_operation" | "crash_diagnostics";
+  required?: boolean;
 }
 
 export interface PendingLegalConsent {

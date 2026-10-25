@@ -82,9 +82,9 @@ Storage GiB: **1 / 3 / 10 selected. Do not advertise.**
 Keep:
 
 - Restricted: YES
-- Phone: `+91 9000000000`
+- Phone: `[PLAY_REVIEW_PHONE]`
 - Password: blank
-- OTP: `654321` if the live test-phone fixture is present
+- OTP: `[PLAY_REVIEW_CODE]` if the live test-phone fixture is present
 - No reviewer email inbox
 
 Add **only if** the submitted AAB is `internal-grin` **and** GRIN is actually

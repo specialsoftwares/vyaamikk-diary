@@ -14,6 +14,7 @@ import { BillingError } from "../errors";
 import { throwHttpsFromBilling } from "../google/billingHttps";
 import { FirestoreBillingStore } from "../firestoreBillingStore";
 import type { BillingStore } from "../store";
+import { assertAdmittedCallableUser } from "../../identity/admitCallableUser";
 
 export async function handlePrepareIOSBillingAccount(
   store: BillingStore,
@@ -29,6 +30,7 @@ export async function handlePrepareIOSBillingAccount(
 export const prepareIOSBillingAccount = onCall(
   { region: "asia-south1" },
   async (request) => {
+    await assertAdmittedCallableUser(request);
     if (!request.auth?.uid) {
       throw new HttpsError("unauthenticated", "Sign in required.");
     }

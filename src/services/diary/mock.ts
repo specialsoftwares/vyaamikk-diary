@@ -11,6 +11,7 @@ import { entrySearchBlob } from "@/utils/businessEntry/display";
 import { notificationsService } from "@/services/notifications";
 
 import { createInitialDocumentHistory } from "@/services/documentHistory";
+import { mockDiaryPayloadState } from "@/services/diary/mockDiarySeal";
 import { entryToStorage, normaliseBusinessEntry } from "./normalize";
 import type {
   CreateBusinessEntryInput,
@@ -31,12 +32,15 @@ async function loadAll(userId: string): Promise<BusinessEntry[]> {
   let raw = await AsyncStorage.getItem(keyFor(userId));
   if (!raw) {
     const legacy = await AsyncStorage.getItem(`${KEY_PREFIX_V1}${userId}`);
-    if (legacy) {
+    if (legacy && mockDiaryPayloadState(legacy) === "json") {
       await AsyncStorage.setItem(keyFor(userId), legacy);
       raw = legacy;
+    } else if (legacy && mockDiaryPayloadState(legacy) === "sealed") {
+      throw new Error("mock_diary_sealed");
     }
   }
   if (!raw) return [];
+  if (mockDiaryPayloadState(raw) === "sealed") throw new Error("mock_diary_sealed");
   try {
     const arr = JSON.parse(raw);
     if (!Array.isArray(arr)) return [];

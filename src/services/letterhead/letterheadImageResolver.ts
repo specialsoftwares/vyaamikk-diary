@@ -1,5 +1,7 @@
 import type { LetterheadConfig } from "./types";
-import { getDownloadUrlForPath } from "@/services/storage/userStorage";
+import { getActiveBackend } from "@/config/env";
+import { shouldOpenContentSeals } from "@/constants/contentSeal";
+import { getDownloadUrlForPath, readProtectedLocalUri } from "@/services/storage/userStorage";
 
 export type LetterheadImageSourceKind = "storage" | "base64" | null;
 
@@ -21,6 +23,11 @@ export async function resolveLetterheadImageSource(
   config: LetterheadImageFields
 ): Promise<ResolvedLetterheadImage> {
   const storagePath = config.letterheadImageStoragePath?.trim();
+  if (storagePath && shouldOpenContentSeals(getActiveBackend())) {
+    const opened = await readProtectedLocalUri(storagePath);
+    if (opened.kind === "opened") return { uri: opened.uri, source: "storage" };
+    if (opened.kind === "unavailable") return { uri: null, source: "storage" };
+  }
   if (storagePath) {
     const cached = config.letterheadImageDownloadUrl?.trim();
     if (cached) {

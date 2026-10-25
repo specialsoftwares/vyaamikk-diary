@@ -1,26 +1,20 @@
 import type { UserProfile } from "@/domain/types";
-import { computeDeletionScheduledFor } from "@/domain/identityLifecycle";
 import { hashMobileE164, normalizePhoneE164 } from "@/utils/mobileHash";
 
-/** Fields written when the user requests deletion (grace period — not final yet). */
+/**
+ * Client deletion request. Policy version and deadlines are server-stamped.
+ * The device clock is not the acceptance time.
+ */
 export function pendingDeletionPatch(
   profile: UserProfile,
   now = Date.now()
 ): Pick<
   UserProfile,
-  | "status"
-  | "deletionRequestedAt"
-  | "deletionScheduledFor"
-  | "deletionCompletedAt"
-  | "retiredUeid"
-  | "mobileHash"
-  | "updatedAt"
+  "status" | "deletionCompletedAt" | "retiredUeid" | "mobileHash" | "updatedAt"
 > {
   const phone = normalizePhoneE164(profile.phoneE164);
   return {
     status: "pending_deletion",
-    deletionRequestedAt: now,
-    deletionScheduledFor: computeDeletionScheduledFor(now),
     deletionCompletedAt: null,
     retiredUeid: false,
     mobileHash: profile.mobileHash ?? hashMobileE164(phone),

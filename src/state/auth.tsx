@@ -27,7 +27,22 @@ import {
   type OtpChallenge,
   type ProfilePatch,
 } from "@/services/auth";
-import { sessionStore, forceClearAllSessions, type AuthSession } from "@/services/session";
+import {
+  clearSessionForRetirement,
+  forceClearAllSessions,
+  sessionStore,
+  type AuthSession,
+} from "@/services/session";
+import {
+  clearPersistedProfileIfOwned,
+  currentAuthMutationGeneration,
+  retireJsAuthBridge,
+  runLocalDeviceSignOut,
+  type LocalSignOutResult,
+} from "@/services/auth/authSessionFence";
+import { retainLocalAccountOnLogout } from "@/services/accountDeletion/localAccountBoundary";
+import { prepareLocalAccountKey } from "@/services/accountDeletion/localKeyLifecycle";
+import { retireNativeCallableAuthReady } from "@/services/auth/nativeCallableAuthGate";
 import { toAppError } from "@/domain/errors";
 import { clearMasterDataSessionCache } from "@/services/masterData";
 import { createLogger } from "@/utils/logger";
@@ -164,7 +179,7 @@ interface AuthApi extends AuthState {
   hardDevSignOut(): Promise<void>;
   startOtp(phoneE164: PhoneE164): Promise<OtpChallenge>;
   confirmOtp(challenge: OtpChallenge, code: string): Promise<UserProfile>;
-  signOut(): Promise<void>;
+  signOut(): Promise<LocalSignOutResult>;
   requestAccountDeletion(): Promise<import("@/domain/accountDeletion").AccountDeletionResult>;
   cancelAccountDeletion(phoneE164: PhoneE164): Promise<UserProfile>;
   /** Save session after production account reactivation (post email verify). */
@@ -175,7 +190,7 @@ interface AuthApi extends AuthState {
     opts?: { user?: UserProfile }
   ): Promise<UserProfile>;
   /** Refresh session from a server-returned profile (email bind, reactivation). */
-  applyServerProfile(profile: UserProfile): Promise<UserProfile>;
+  applyServerProfile(profile: UserProfile, ownedGeneration?: number): Promise<UserProfile>;
   /** Persist usage heartbeat (`lastActiveAt` only — never login fields). */
   touchLastActive(): Promise<void>;
 }
@@ -208,6 +223,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const session = await sessionStore.load();
         if (!bootStillCurrent()) return;
         if (session) {
+          await prepareLocalAccountKey(session.user.uid);
           let user = session.user;
           const backend = getActiveBackend();
           const { profile: live, unverified } = await revalidateSessionProfile(
@@ -315,7 +331,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [dbStatus]);
 
   const saveSession = useCallback(
-    async (user: UserProfile, opts?: { preserveSignedInAt?: boolean }) => {
+    async (user: UserProfile, opts?: { preserveSignedInAt?: boolean; isCurrent?: () => boolean }) => {
       const now = Date.now();
       const signedInAt = opts?.preserveSignedInAt
         ? (state.session?.signedInAt ?? user.lastLoginAt ?? now)
@@ -327,7 +343,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signedInAt,
         lastActiveAt,
       };
-      await sessionStore.save(session);
+      if (opts?.isCurrent) {
+        if (!(await sessionStore.saveIfCurrent(session, opts.isCurrent))) {
+          throw new Error("session_changed");
+        }
+      } else {
+        await sessionStore.save(session);
+      }
+      await prepareLocalAccountKey(user.uid);
       return session;
     },
     [state.session?.signedInAt, state.session?.lastActiveAt]
@@ -371,33 +394,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signOut = useCallback(async () => {
     bootAttemptRef.current += 1;
     const uid = state.session?.user.uid;
-    try {
-      const { retireNativeCallableAuthReady } = await import(
-        "@/services/auth/nativeCallableAuthGate"
-      );
-      retireNativeCallableAuthReady();
-    } catch {
-      // Sign-out still proceeds if the native gate is unavailable.
-    }
-    try {
-      await getAuthService().signOut();
-    } catch (e) {
-      log.warn("auth signOut error", e);
-    }
-    if (uid) {
-      await clearAuthWrapperProgress(uid);
-      clearTransientPendingEmailState(uid);
-      clearLocalMockPendingEmailForUid(uid);
-    }
-    clearSessionLastActiveTouch(uid);
-    endFirstActionFreezeSession();
-    await forceClearAllSessions();
-    clearMasterDataSessionCache();
-    setState({
-      status: "signed_out",
-      session: null,
-      user: null,
-      justCreated: false,
+    return runLocalDeviceSignOut({
+      maskPrivateUi: () => {
+        setState({
+          status: "signed_out",
+          session: null,
+          user: null,
+          justCreated: false,
+        });
+      },
+      retireCloudAdmission: () => {
+        retireNativeCallableAuthReady();
+        retireJsAuthBridge();
+      },
+      cleanAuthSdks: async () => {
+        try {
+          await getAuthService().signOut();
+        } catch (e) {
+          log.warn("auth signOut error", e);
+        }
+      },
+      clearLocalProfileCache: (ownedGeneration) =>
+        clearPersistedProfileIfOwned(ownedGeneration, {
+          prepare: async () => {
+            if (uid) {
+              await clearAuthWrapperProgress(uid);
+              clearTransientPendingEmailState(uid);
+              clearLocalMockPendingEmailForUid(uid);
+            }
+            clearSessionLastActiveTouch(uid);
+            endFirstActionFreezeSession();
+            clearMasterDataSessionCache();
+            retainLocalAccountOnLogout(uid);
+          },
+          removePersistedProfile: () => clearSessionForRetirement(ownedGeneration).then(() => undefined),
+        }).then(() => undefined),
     });
   }, [state.session?.user.uid]);
 
@@ -457,11 +488,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const finishReactivation = useCallback(
     async (profile: UserProfile) => {
+      const ownedGeneration = currentAuthMutationGeneration();
       if (getActiveBackend() === "firebase-production") {
-        void import("@/services/auth/jsAuthBridge").then((m) =>
-          m.ensureJsAuthSession()
-        );
+        const bridge = await import("@/services/auth/jsAuthBridge");
+        await bridge.ensureJsAuthSession();
       }
+      if (currentAuthMutationGeneration() !== ownedGeneration) return profile;
+      if (state.user && state.user.uid !== profile.uid) return profile;
       const session = await saveSession(profile);
       setState({
         status: "signed_in",
@@ -474,7 +507,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       );
       return profile;
     },
-    [saveSession]
+    [saveSession, state.user]
   );
 
   const acknowledgeUEID = useCallback(() => {
@@ -506,8 +539,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const applyServerProfile = useCallback(
-    async (profile: UserProfile): Promise<UserProfile> => {
-      const session = await saveSession(profile, { preserveSignedInAt: true });
+    async (profile: UserProfile, ownedGeneration?: number): Promise<UserProfile> => {
+      const isCurrent = ownedGeneration == null ? undefined : () =>
+        currentAuthMutationGeneration() === ownedGeneration &&
+        statusRef.current === "signed_in" && sessionRef.current?.user.uid === profile.uid;
+      const session = await saveSession(profile, { preserveSignedInAt: true, isCurrent });
+      if (isCurrent && !isCurrent()) throw new Error("session_changed");
       setState((s) => ({
         ...s,
         status: "signed_in",

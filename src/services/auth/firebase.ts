@@ -41,6 +41,7 @@ import {
   stripServerOwnedProfilePatchKeys,
 } from "./clientProfilePatchPayload";
 import { profileDocumentMergeFields } from "./profileFirestorePayload";
+import { openBusinessCloud, protectBusinessCloud } from "@/services/privacy/businessCloudSeal";
 import {
   finalizeDeletionIfDue,
   isActiveAccount,
@@ -67,6 +68,8 @@ import {
   signOutNativePhoneAuth,
   startNativePhoneOtp,
 } from "./nativePhoneAuth";
+import { cleanBothAuthSdks, currentAuthMutationGeneration } from "./authSessionFence";
+import { retireNativeCallableAuthReady } from "./nativeCallableAuthGate";
 
 import type {
   AuthService,
@@ -420,11 +423,22 @@ export const firebaseAuthService: AuthService = {
 
   async signOut(): Promise<void> {
     const uid = getFirebaseAuth().currentUser?.uid ?? null;
-    try {
-      await getFirebaseAuth().signOut();
-      await signOutNativePhoneAuth();
-    } catch (e) {
-      log.warn("signOut failed", e);
+    // Local sign-out already retired this generation. A second bump would
+    // look like a newer login and skip the profile clear that still owns it.
+    const retired = currentAuthMutationGeneration();
+    retireNativeCallableAuthReady();
+    const result = await cleanBothAuthSdks(retired, {
+      signOutJs: () => getFirebaseAuth().signOut(),
+      signOutNative: async () => {
+        const cleared = await signOutNativePhoneAuth();
+        if (!cleared) throw new Error("native sign-out incomplete");
+      },
+    });
+    if (!result.skippedBecauseNewerSession && (!result.jsCleared || !result.nativeCleared)) {
+      log.warn("signOut partial", {
+        jsCleared: result.jsCleared,
+        nativeCleared: result.nativeCleared,
+      });
     }
     if (uid) {
       const { clearTransientPendingEmailState } = await import("./pendingEmailVerification");
@@ -460,7 +474,12 @@ export const firebaseAuthService: AuthService = {
     try {
       const snap = await getDoc(ref);
       if (!snap.exists()) throw new AppError("not_found", "User profile not found.");
-      const existing = normaliseUserProfile(uid, snap.data() as Record<string, unknown>);
+      const rawProfile = snap.data() as Record<string, unknown>;
+      const existing = await openBusinessCloud(
+        "users",
+        normaliseUserProfile(uid, rawProfile) as unknown as Record<string, unknown>,
+        rawProfile
+      ) as unknown as ReturnType<typeof normaliseUserProfile>;
 
       const safePatch = production
         ? stripServerOwnedProfilePatchKeys(patch, { production: true })
@@ -479,7 +498,16 @@ export const firebaseAuthService: AuthService = {
       if (production) {
         const write = buildClientProfileFirestoreWrite(existing, next, { production: true });
         if (write) {
-          await setDoc(ref, write, { merge: true });
+          const sealed = await protectBusinessCloud({
+            collection: "users",
+            userId: uid,
+            recordId: uid,
+            revision: Number(next.updatedAt),
+            plain: write,
+            sensitiveSource: next as unknown as Record<string, unknown>,
+            existingRaw: rawProfile,
+          });
+          await setDoc(ref, sealed, { merge: true });
         }
       } else {
         await setDoc(ref, profileDocumentMergeFields(next), { merge: true });

@@ -38,6 +38,7 @@ export const CLIENT_PROFILE_PATCH_ALLOWLIST = [
   "gstinVerificationState",
   "issuerIdentitySnapshotId",
   "onboardingProfileVersion",
+  "contentSeal",
 ] as const;
 
 export type ClientAllowlistedPatchKey = (typeof CLIENT_PROFILE_PATCH_ALLOWLIST)[number];
@@ -64,6 +65,13 @@ export const SERVER_OWNED_PROFILE_PATCH_KEYS = [
   "mobileChangeCount",
   "mobileReviewChangeCount",
   "emailReviewChangeCount",
+  "ageEligibility",
+  "agePolicyVersion",
+  "ageAssessedAt",
+  "ageMethod",
+  "deletionPolicyVersion",
+  "reactivationCutoff",
+  "erasureDeadline",
 ] as const;
 
 /**

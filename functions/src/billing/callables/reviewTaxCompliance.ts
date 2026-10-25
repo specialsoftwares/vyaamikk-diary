@@ -37,6 +37,7 @@ import { HttpsError, onCall } from "firebase-functions/v2/https";
 import type { BillingStore } from "../store";
 import type { SubscriptionTaxComplianceDoc } from "../types";
 import type { AdminAuthContext } from "../tax/adminAuth";
+import { assertAdmittedCallableUser } from "../../identity/admitCallableUser";
 import {
   applyReviewTaxCompliance,
   type ReviewTaxComplianceInput,
@@ -52,6 +53,7 @@ export async function applyReviewSubscriptionTaxCompliance(
 export const reviewSubscriptionTaxCompliance = onCall(
   { region: "asia-south1" },
   async (request) => {
+    await assertAdmittedCallableUser(request);
     void request;
     if (!request.auth?.uid) {
       throw new HttpsError("unauthenticated", "Sign in required.");

@@ -1,31 +1,96 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
+    function sessionOriginSeconds() {
+      return request.auth.token.firebase.sign_in_provider == 'phone'
+        ? int(request.auth.token.auth_time)
+        : (
+            request.auth.token.firebase.sign_in_provider == 'custom'
+            && request.auth.token.keys().hasAll(['vydOriginAuthTime'])
+              ? int(request.auth.token.vydOriginAuthTime)
+              : 0
+          );
+    }
+
+    function sessionNotRevoked() {
+      return !firestore.exists(/databases/(default)/documents/authSecurity/$(request.auth.uid))
+        || sessionOriginSeconds()
+          > int(firestore.get(/databases/(default)/documents/authSecurity/$(request.auth.uid)).data.get('revokedBeforeAuthTimeSeconds', 0));
+    }
+
     function isSignedIn() {
-      return request.auth != null;
+      return request.auth != null && sessionNotRevoked();
+    }
+
+    function restoreClosed() {
+      let fence = /databases/(default)/documents/restoreControl/current;
+      return firestore.exists(fence) && firestore.get(fence).data.get('closed', false) == true;
+    }
+
+    function restoreModeAllows() {
+      let mode = /databases/(default)/documents/restoreControl/mode;
+      let fence = /databases/(default)/documents/restoreControl/current;
+      let required = firestore.exists(mode) && firestore.get(mode).data.get('required', false) == true;
+      let fenceData = firestore.exists(fence) ? firestore.get(fence).data : null;
+      return !required || (
+        fenceData != null
+        && fenceData.get('closed', false) == false
+        && fenceData.get('reconciled', false) == true
+        && fenceData.get('watermark', 0) is int
+        && fenceData.get('watermark', 0) > 0
+        && request.auth.token.keys().hasAny(['authorityWatermark'])
+        && fenceData.get('watermark', 0) == request.auth.token.authorityWatermark
+      );
+    }
+
+    function restoreClaimAllows() {
+      return request.auth.token.get('erased', false) != true
+        && !restoreClosed()
+        && restoreModeAllows();
     }
 
     function isOwner(userId) {
-      return isSignedIn() && request.auth.uid == userId;
+      return isSignedIn() && request.auth.uid == userId && restoreClaimAllows();
+    }
+
+    function ageEligible(userId) {
+      let userPath = /databases/(default)/documents/users/$(userId);
+      return firestore.exists(userPath)
+        && firestore.get(userPath).data.get('ageEligibility', '') == 'eligible'
+        && firestore.get(userPath).data.get('status', 'active') == 'active';
+    }
+
+    function deletionAllowsStorage(userId) {
+      let jobPath = /databases/(default)/documents/deletionJobs/$(userId);
+      return !firestore.exists(jobPath)
+        || firestore.get(jobPath).data.get('status', '') != 'completed';
+    }
+
+    function canWriteOwnedObject(userId) {
+      return isOwner(userId) && ageEligible(userId) && deletionAllowsStorage(userId);
+    }
+
+    function imageOrEnvelope(maxBytes) {
+      return request.resource.size < maxBytes
+        && (
+          request.resource.contentType.matches('image/.*')
+          || request.resource.contentType == 'application/vnd.vyaamikk.content-seal+json'
+        );
     }
 
     match /users/{userId}/letterhead/{fileName} {
       allow read: if isOwner(userId);
-      allow write: if isOwner(userId)
-                   && request.resource.size < 10 * 1024 * 1024
-                   && request.resource.contentType.matches('image/.*');
+      allow write: if canWriteOwnedObject(userId) && imageOrEnvelope(10 * 1024 * 1024);
     }
 
     match /users/{userId}/attachments/{recordId}/{fileName} {
       allow read: if isOwner(userId);
-      allow write: if isOwner(userId)
-                   && request.resource.size < 10 * 1024 * 1024
-                   && request.resource.contentType.matches('image/.*');
+      allow write: if canWriteOwnedObject(userId) && imageOrEnvelope(10 * 1024 * 1024);
     }
 
     match /users/{userId}/pdfs/{recordId}/{fileName} {
       allow read: if isOwner(userId);
-      allow write: if isOwner(userId)
+      allow write: if canWriteOwnedObject(userId)
                    && request.resource.size < 15 * 1024 * 1024
                    && request.resource.contentType == 'application/pdf';
     }

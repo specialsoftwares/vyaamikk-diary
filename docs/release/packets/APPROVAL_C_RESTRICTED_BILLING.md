@@ -123,7 +123,7 @@ testing track (distribution only), Play Billing Lab.
 Canonical: `docs/PLAY_REVIEW_SETUP.md`.
 
 - Restricted: YES
-- Phone `+91 9000000000` / OTP `654321` only if live test-phone fixture
+- Phone `[PLAY_REVIEW_PHONE]` / OTP `[PLAY_REVIEW_CODE]` only if live test-phone fixture
   verified
 - Owner pre-completes **email + profile**
 - **No founder email OTP/password** in Play instructions

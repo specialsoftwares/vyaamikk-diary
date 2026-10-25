@@ -1,4 +1,5 @@
 import { getLocalDatabase } from "@/localDb/database";
+import { LocalPayloadUnavailable, openOwnedPayload, sealOwnedPayload } from "@/services/accountDeletion/localPayload";
 import { shortId } from "@/utils/id";
 
 export type FormDraftKind =
@@ -36,11 +37,18 @@ type DraftRow = {
   updated_at: number;
 };
 
+function openText(userId: string, stored: string): string {
+  const opened = openOwnedPayload(userId, stored);
+  if (opened.state !== "ready") throw new LocalPayloadUnavailable(opened.reason);
+  return opened.value;
+}
+
 function rowToDraft(row: DraftRow): FormDraftRecord {
   let payload: Record<string, unknown> = {};
   try {
-    payload = JSON.parse(row.payload_json) as Record<string, unknown>;
-  } catch {
+    payload = JSON.parse(openText(row.user_id, row.payload_json)) as Record<string, unknown>;
+  } catch (error) {
+    if (error instanceof LocalPayloadUnavailable) throw error;
     payload = {};
   }
   const status = row.status === "converted" || row.status === "discarded" ? row.status : "active";
@@ -51,7 +59,7 @@ function rowToDraft(row: DraftRow): FormDraftRecord {
     draftKind: row.draft_kind as FormDraftKind,
     scopeKey: row.scope_key,
     entryId: row.entry_id,
-    title: row.title?.trim() || "",
+    title: row.title ? openText(row.user_id, row.title).trim() : "",
     status,
     source,
     payload,
@@ -97,7 +105,7 @@ export const formDraftsRepository = {
       [input.userId, input.draftKind, input.scopeKey, entryId ?? ""]
     );
     const id = existing?.id ?? shortId("draft");
-    const payloadJson = JSON.stringify(input.payload);
+    const payloadJson = sealOwnedPayload(input.userId, JSON.stringify(input.payload));
     db.runSync(
       `INSERT OR REPLACE INTO form_drafts
        (id, user_id, draft_kind, scope_key, entry_id, title, status, source, payload_json, updated_at)
@@ -158,7 +166,7 @@ export const formDraftsRepository = {
       if (!existing) id = null;
     }
     if (!id) id = shortId("draft");
-    const payloadJson = JSON.stringify(input.payload);
+    const payloadJson = sealOwnedPayload(input.userId, JSON.stringify(input.payload));
     db.runSync(
       `INSERT OR REPLACE INTO form_drafts
        (id, user_id, draft_kind, scope_key, entry_id, title, status, source, payload_json, updated_at)
@@ -169,7 +177,7 @@ export const formDraftsRepository = {
         input.draftKind,
         input.scopeKey,
         entryId,
-        input.title.trim(),
+        sealOwnedPayload(input.userId, input.title.trim()),
         payloadJson,
         updatedAt,
       ]
@@ -196,7 +204,7 @@ export const formDraftsRepository = {
     const db = getLocalDatabase();
     db.runSync(
       `UPDATE form_drafts SET title = ?, updated_at = ? WHERE user_id = ? AND id = ? AND source = 'user'`,
-      [title.trim(), Date.now(), userId, draftId]
+      [sealOwnedPayload(userId, title.trim()), Date.now(), userId, draftId]
     );
   },
 

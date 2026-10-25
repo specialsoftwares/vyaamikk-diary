@@ -12,7 +12,7 @@ export function indexPartyInsight(row: BusinessInsightRow): IndexedSearchItem {
   return {
     searchableText,
     result: {
-      id: `party-insight:${row.financialYear}:${row.normalizedKey}`,
+      id: `party-insight:${row.id}`,
       kind: "business_insight",
       category: "party_insight",
       categoryLabelKey: categoryLabelKey("party_insight"),
@@ -42,7 +42,7 @@ export function indexPinInsight(row: BusinessInsightRow): IndexedSearchItem {
   return {
     searchableText,
     result: {
-      id: `pin-insight:${row.financialYear}:${row.normalizedKey}`,
+      id: `pin-insight:${row.id}`,
       kind: "business_insight",
       category: "pin_insight",
       categoryLabelKey: categoryLabelKey("pin_insight"),

@@ -432,6 +432,7 @@ const en = {
     emptyTitle: "No matching records",
     emptyMessage: "Try invoice or LR numbers, party names, amounts, GST period, or Hindi keywords.",
     recentQueries: "Recent searches",
+    recentUnavailable: "Saved searches on this device could not be opened. They were not deleted.",
     recentRecords: "Recent records",
     indexError: "Could not load search index. Pull to refresh or try again.",
     filters: {
@@ -1117,6 +1118,18 @@ const en = {
     signingOut: "Signing out…",
     signOutPrompt: "Sign out?",
     signOutBody: "You can sign back in any time with your mobile number.",
+    logoutAll: "Sign out every device",
+    logoutAllPrompt: "Sign out every device?",
+    logoutAllBody: "This signs out this phone and revokes refresh tokens for your other phones. Signing out only this device does not do that.",
+    logoutAllConfirm: "Sign out every device",
+    logoutAllComplete: "This device was signed out. Refresh tokens for other devices were revoked.",
+    logoutAllPending: "This device was signed out. Other devices may still refresh until sign-out finishes.",
+    logoutAllOffline: "This device was signed out. Other devices were not signed out because this phone is offline.",
+    logoutAllNotRecent: "This device was signed out. Other devices were not revoked because this sign-in is not recent enough. Sign in again with your phone number, then try once more.",
+    logoutAllSignInInvalid: "This device was signed out. Other devices were not revoked because this sign-in is no longer valid.",
+    logoutAllAccountBlocked: "This device was signed out. Other devices were not revoked because this account cannot revoke sessions.",
+    logoutAllSuperseded: "This device was signed out. A newer sign-out of every device is already recorded, and this request did not mark it complete.",
+    logoutAllUnavailable: "This device was signed out. Other devices were not confirmed signed out.",
     personalisation: "Personalisation",
     language: "Language",
     languageHint: "Select the language for the app interface.",
@@ -1270,7 +1283,7 @@ const en = {
     confirmButton: "Delete my account",
     confirmPrompt: "Delete your account permanently?",
     confirmPromptBody:
-      "Your account enters a {{days}}-day deletion period. You are signed out now. You can cancel before the scheduled date by signing in with the same mobile number.",
+      "Your account enters a {{days}}-day deletion period. You can cancel until two days before that period ends. Those two days are reserved for processing and retries. You are signed out now. You can cancel before the scheduled date by signing in with the same mobile number.",
     resultGraceTitle: "Deletion scheduled",
     result_grace:
       "Account deletion is in progress. Sign in with the same number before the deadline to cancel, or wait until deletion completes to register fresh.",
@@ -1286,7 +1299,7 @@ const en = {
     step: "Account status",
     title: "Account deletion is in progress",
     body:
-      "Mobile {{phone}} has a pending deletion. It will be final on {{date}} ({{days}}-day period). You cannot use the app until you cancel deletion or wait for it to complete.",
+      "Mobile {{phone}} has a pending deletion. You can reactivate until {{date}} ({{days}}-day period). Eligible app-controlled data is erased after that cutoff. You cannot use the app until you cancel deletion or wait for it to complete.",
     footnote:
       "After deletion completes, the same number can register again with a new Vyaamikk ID. Old records will not return. PDFs already shared outside the app cannot be recalled.",
     reactivateFootnote:
@@ -1298,7 +1311,16 @@ const en = {
     reactivateEmailBody:
       "Enter the verification code sent to {{email}} to reactivate your account.",
     reactivateEmailHint:
-      "In development, use code 000000 when the email provider is not configured.",
+      "Enter the six-digit code from that email. It expires in five minutes. Do not share it.",
+    emailCodeHint: "Enter the six-digit code from your email. Do not share it.",
+    reactivateResend: "Resend code",
+    reactivateResendIn: "Resend in {{seconds}}s",
+    reactivateOffline: "Reconnect to the internet before reactivating this account.",
+    reactivateSendFailed: "The email could not be sent. Try again when you are online.",
+    reactivateExpired: "That code has expired. Request a new one.",
+    reactivateAttempts: "Too many attempts. Wait and request a new code.",
+    reactivateUnavailable: "This account cannot be reactivated from the app. Contact support.",
+    reactivateLatestCode: "That code is no longer valid. Use the latest email.",
     verifyAndReactivate: "Verify & reactivate account",
     backToLogin: "Back to login",
     cancelSuccessTitle: "Deletion cancelled",

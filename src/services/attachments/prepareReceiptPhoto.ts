@@ -17,6 +17,7 @@ import {
 } from "./cashPaidPhotoRef";
 import type { PreparedReceiptPhoto } from "./preparedReceiptPhoto";
 import { decodeBase64, inspectReceiptBytes, type ReceiptByteReject } from "./receiptPhotoBytes";
+import type { DiaryContentSeal } from "@/services/privacy/diarySealDocument";
 
 type DownloadOutcome = "ok" | "offline" | "access_denied" | "missing";
 
@@ -28,6 +29,8 @@ export interface PrepareReceiptPhotoDeps {
   remove(uri: string): Promise<void>;
   cacheDir(uid: string): string;
   downloadOwned(storagePath: string, destUri: string): Promise<DownloadOutcome>;
+  openSeal?(seal: DiaryContentSeal): Promise<string>;
+  writeBase64?(uri: string, base64: string): Promise<void>;
 }
 
 function storagePathFor(entry: BusinessEntry, attachment: AttachmentRef | null): string | null {
@@ -134,6 +137,7 @@ export async function prepareReceiptPhoto(input: {
     if (downloaded === "missing") return { status: "unavailable", reason: "missing_local" };
     if (downloaded !== "ok") return { status: "unavailable", reason: "offline" };
     staged = true;
+    await openEnvelopeBeforeValidation(deps, staging, owner);
     const prepared = await readValidated(deps, staging, expectedHash);
     owner.assertStillOwner();
     if (!prepared || prepared === "mismatch") {
@@ -170,6 +174,45 @@ export async function prepareReceiptPhoto(input: {
   }
 }
 
+function parseEnvelope(bytes: Uint8Array): DiaryContentSeal | null {
+  try {
+    const parsed = JSON.parse(new TextDecoder().decode(bytes)) as DiaryContentSeal;
+    if (parsed?.v === 1 && parsed.alg === "AES-256-GCM" && parsed.ciphertext && parsed.recordId) {
+      return parsed;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+async function openEnvelopeBeforeValidation(
+  deps: PrepareReceiptPhotoDeps,
+  staging: string,
+  owner: { assertStillOwner(): void }
+): Promise<void> {
+  let bytes: Uint8Array;
+  try {
+    bytes = decodeBase64(await deps.readBase64(staging));
+  } catch {
+    return;
+  }
+  const seal = parseEnvelope(bytes);
+  if (!seal) return;
+  owner.assertStillOwner();
+  const imageBase64 = deps.openSeal
+    ? await deps.openSeal(seal)
+    : await defaultOpenSeal(seal);
+  owner.assertStillOwner();
+  if (!deps.writeBase64) throw new Error("offline");
+  await deps.writeBase64(staging, imageBase64);
+}
+
+async function defaultOpenSeal(seal: DiaryContentSeal): Promise<string> {
+  const { openAttachmentSeal } = await import("@/services/privacy/ownerContentApi");
+  return openAttachmentSeal(seal);
+}
+
 function defaultPrepareDeps(
   uid: string,
   assertStillOwner: () => void
@@ -203,6 +246,9 @@ function defaultPrepareDeps(
     },
     async remove(uri: string) {
       await FileSystem.deleteAsync(uri, { idempotent: true });
+    },
+    async writeBase64(uri: string, base64: string) {
+      await FileSystem.writeAsStringAsync(uri, base64, { encoding: FileSystem.EncodingType.Base64 });
     },
     async downloadOwned(storagePath: string, destUri: string) {
       if (!isObjectOwnedByUser(uid, storagePath)) return "access_denied";

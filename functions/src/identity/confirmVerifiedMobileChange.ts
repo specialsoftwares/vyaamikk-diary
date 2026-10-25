@@ -33,6 +33,7 @@ import {
   shouldQuarantineReleasedMobile,
 } from "./reviewContactEditPolicy";
 import { normalizePhoneE164 } from "./shared";
+import { assertAdmittedCallableUser } from "./admitCallableUser";
 
 const USERS = "users";
 const PHONE_INDEX = "phoneIndex";
@@ -340,6 +341,7 @@ export async function confirmVerifiedMobileContactChangeTx(
 export const preflightVerifiedMobileContactChange = onCall(
   { region: "asia-south1" },
   async (request) => {
+    await assertAdmittedCallableUser(request);
     const auth = request.auth;
     const authUid = auth?.uid;
     if (!authUid || !auth) {
@@ -374,6 +376,7 @@ export const preflightVerifiedMobileContactChange = onCall(
 export const confirmVerifiedMobileContactChange = onCall(
   { region: "asia-south1" },
   async (request) => {
+    await assertAdmittedCallableUser(request);
     const auth = request.auth;
     const authUid = auth?.uid;
     if (!authUid || !auth) {

@@ -1,5 +1,7 @@
 # RETENTION AND DELETION MATRIX
 
+**22 October 2026 checkpoint.** At `06d3fcd` the implemented cancellation window is **45 days** (`src/domain/identityLifecycle.ts` `DELETION_GRACE_DAYS` and `functions/src/deletion/finalPurge.ts` `DELETION_GRACE_MS`). Rows below that still say 15 days describe the July `f1019b6` tree and are superseded for the constant. A proposed 15-day erasure SLA is not implemented. Provider backup tails were not read live. See `SEVEN_STAGE_FILE_IMPACT.md`.
+
 **Tip:** `f1019b6` · Distinguishes **implemented behaviour** from **proposed business decisions**.
 
 ---

@@ -39,6 +39,7 @@ import { subscriptionInvoicePath } from "../paths";
 import type { BillingStore } from "../store";
 import type { SubscriptionInvoiceDoc } from "../types";
 import type { InvoiceObjectStorage } from "../tax/taxDocumentOrchestrator";
+import { assertAdmittedCallableUser } from "../../identity/admitCallableUser";
 
 const SIGNED_URL_TTL_MS = 15 * 60 * 1000;
 
@@ -77,6 +78,7 @@ export async function createInvoiceDownloadUrl(
 }
 
 export const getInvoiceDownloadUrl = onCall({ region: "asia-south1" }, async (request) => {
+  await assertAdmittedCallableUser(request);
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "Sign in required.");
   }

@@ -50,6 +50,7 @@ import {
 } from "../tax/taxComplianceReportSource";
 import { gstr1ReportStoragePath } from "../paths";
 import { assertGstrMonth } from "../tax/taxPeriod";
+import { assertAdmittedCallableUser } from "../../identity/admitCallableUser";
 
 export async function generateGstr1WorkingPapersCore(input: {
   month: string;
@@ -102,6 +103,7 @@ export async function generateGstr1WorkingPapersCore(input: {
 }
 
 export const generateGstr1WorkingPapers = onCall({ region: "asia-south1" }, async (request) => {
+  await assertAdmittedCallableUser(request);
   if (!request.auth?.uid) {
     throw new HttpsError("unauthenticated", "Sign in required.");
   }
