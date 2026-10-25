@@ -8,7 +8,8 @@ import type { PhoneE164, UEID, UserProfile } from "@/domain/types";
 import type { ProfilePatch } from "@/services/auth/types";
 import {
   CONSENT_RECONCILE_SOURCE,
-  resolvePendingConsentForVerifiedProfile,
+  consentPatchFromPending,
+  pendingConsentChoicesEqual,
 } from "@/services/consent/pendingConsentReconcile";
 
 const PENDING_KEY = "vyd_pending_legal_consent_v1";
@@ -61,35 +62,28 @@ export async function clearPendingConsent(): Promise<void> {
   await AsyncStorage.removeItem(PENDING_KEY);
 }
 
-/** Merge pending consent into profile patch after successful OTP / identity creation. */
+/** Merge pending consent into a profile patch after identity creation. */
 export async function consentPatchForProfile(
   profile: UserProfile
 ): Promise<ProfilePatch | null> {
-  const stored = await loadPendingConsent();
-  const hasCurrentConsentVersion = (profile.legalConsents ?? []).some(
-    (c) => c.consentVersion === legal.consentVersion
-  );
-  const pending = resolvePendingConsentForVerifiedProfile({
-    pending: stored,
-    verifiedPhoneE164: profile.phoneE164,
-    hasCurrentConsentVersion,
-    rebuildRecord: buildConsentRecord({
+  return consentPatchFromPending(
+    profile,
+    await loadPendingConsent(),
+    legal.consentVersion,
+    buildConsentRecord({
       sourceScreen: CONSENT_RECONCILE_SOURCE,
       phoneE164: profile.phoneE164,
-    }),
-  });
-  if (!pending) return null;
+    })
+  );
+}
 
-  const record: LegalConsentRecord = {
-    ...pending.record,
-    userId: profile.uid,
-    ueid: profile.ueid,
-    acceptedAt: pending.record.acceptedAt,
-  };
-
-  const existing = profile.legalConsents ?? [];
-  const next = [...existing.filter((c) => c.consentVersion !== record.consentVersion), record];
-
+/** Remove the stored grant only when it is still the choice that was written. */
+export async function clearPendingConsentIfUnchanged(
+  snapshot: PendingLegalConsent | null
+): Promise<boolean> {
+  if (!snapshot) return false;
+  const current = await loadPendingConsent();
+  if (!pendingConsentChoicesEqual(current, snapshot)) return false;
   await clearPendingConsent();
-  return { legalConsents: next };
+  return true;
 }

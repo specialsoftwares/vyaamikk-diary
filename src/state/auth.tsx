@@ -187,7 +187,7 @@ interface AuthApi extends AuthState {
   acknowledgeUEID(): void;
   updateProfile(
     patch: ProfilePatch,
-    opts?: { user?: UserProfile }
+    opts?: { user?: UserProfile; ownedGeneration?: number }
   ): Promise<UserProfile>;
   /** Refresh session from a server-returned profile (email bind, reactivation). */
   applyServerProfile(profile: UserProfile, ownedGeneration?: number): Promise<UserProfile>;
@@ -517,19 +517,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const updateProfile = useCallback(
     async (
       patch: ProfilePatch,
-      opts?: { /** Authoritative user when React session state has not committed yet. */ user?: UserProfile }
+      opts?: {
+        /** Authoritative user when React session state has not committed yet. */
+        user?: UserProfile;
+        ownedGeneration?: number;
+      }
     ): Promise<UserProfile> => {
       const current = opts?.user ?? state.session?.user;
       if (!current) throw toAppError(new Error("Not signed in."));
+      const owned = opts?.ownedGeneration;
+      const stillOwned = () =>
+        owned == null ||
+        (currentAuthMutationGeneration() === owned &&
+          (sessionRef.current == null || sessionRef.current.user.uid === current.uid));
       try {
+        if (!stillOwned()) throw new Error("session_changed");
         const next = await getAuthService().updateProfile(current.uid, patch);
-        const session = await saveSession(next, { preserveSignedInAt: true });
-        setState((s) => ({
-          ...s,
-          status: "signed_in",
-          session,
-          user: session.user,
-        }));
+        if (!stillOwned()) throw new Error("session_changed");
+        const session = await saveSession(next, {
+          preserveSignedInAt: true,
+          isCurrent: owned == null ? undefined : stillOwned,
+        });
+        if (!stillOwned()) throw new Error("session_changed");
+        setState((s) => {
+          if (owned != null && currentAuthMutationGeneration() !== owned) return s;
+          if (s.session && s.session.user.uid !== current.uid) return s;
+          return {
+            ...s,
+            status: "signed_in",
+            session,
+            user: session.user,
+          };
+        });
         return session.user;
       } catch (e) {
         throw toAppError(e);

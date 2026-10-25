@@ -92,10 +92,9 @@ import * as Clipboard from "expo-clipboard";
 import { profileNeedsAgeGate } from "@/domain/ageEligibility";
 import { useAuth } from "@/state/auth";
 import { useT } from "@/i18n";
-import {
-  consentPatchForProfile,
-  savePendingConsent,
-} from "@/services/consent/legalConsentService";
+import { savePendingConsent } from "@/services/consent/legalConsentService";
+import { persistDeferredPhoneConsent } from "@/services/consent/deferredConsentPersist";
+import { currentAuthMutationGeneration } from "@/services/auth/authSessionFence";
 import {
   completeBusinessEmailBind,
   resendBusinessEmailVerification,
@@ -867,12 +866,20 @@ export function AuthFlowGate() {
       // CRITICAL: do NOT clear `challenge` before leaving step "otp". Clearing first
       // leaves step==="otp" && !challenge across await gaps → false sessionExpired
       // fallthrough (Stage-8 clean-room / first_time_create).
-      await applyServerProfile(profile);
-      const consentPatch = await consentPatchForProfile(profile);
-      let nextProfile = profile;
-      if (consentPatch) {
-        nextProfile = await updateProfile(consentPatch, { user: profile });
-      }
+      const ownedGeneration = currentAuthMutationGeneration();
+      await applyServerProfile(profile, ownedGeneration);
+      if (currentAuthMutationGeneration() !== ownedGeneration) return;
+      const nextProfile = profile;
+      void persistDeferredPhoneConsent({
+        profile,
+        generationAtStart: ownedGeneration,
+        sessionUid: () => getNativeAuthUid(),
+        updateProfile: (patch) => updateProfile(patch, { user: profile, ownedGeneration }),
+      }).catch((error: unknown) => {
+        authFlowLog.warn("deferred consent persist rejected", {
+          name: error instanceof Error ? error.name : "Error",
+        });
+      });
 
       setPhoneChallengeProven(true);
 

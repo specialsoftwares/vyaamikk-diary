@@ -124,6 +124,10 @@ const MESSAGE_EVENTS = new Map<string, MessageMapping>([
     "trusted device record failed",
     { event: "device_trusted_record_failed", summary: "trusted device record failed" },
   ],
+  [
+    "deferred consent persist failed",
+    { event: "deferred_consent_persist_failed", summary: "deferred consent persist failed" },
+  ],
 ]);
 
 const CALLABLE_FAILED_RE = /^callable ([A-Za-z][A-Za-z0-9_]{1,63}) failed$/;

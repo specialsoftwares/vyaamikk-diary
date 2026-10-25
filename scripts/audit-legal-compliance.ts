@@ -65,7 +65,7 @@ ok("Onboarding consent checkboxes gate phone continue");
 if (!authGate.includes("savePendingConsent")) {
   fail("AuthFlowGate does not log pending consent before OTP send");
 }
-if (!authGate.includes("consentPatchForProfile")) {
+if (!authGate.includes("persistDeferredPhoneConsent")) {
   fail("AuthFlowGate does not attach consent after OTP");
 }
 ok("Consent logged at OTP send and attached after verify");

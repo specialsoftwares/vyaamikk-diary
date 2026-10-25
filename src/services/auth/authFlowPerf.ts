@@ -101,6 +101,8 @@ export interface PerfSpan {
   runtime: "js" | "native" | "server";
   durationMs: number;
   outcome: PerfOutcome;
+  /** `ordering` marks a sequence. It is not a measured device duration. */
+  evidence?: "ordering" | "measured";
 }
 
 const MAX_SPANS = 64;
@@ -144,6 +146,7 @@ export function recordPerfSpan(
     runtime: span.runtime,
     durationMs: Math.round(span.durationMs),
     outcome: span.outcome,
+    ...(span.evidence ? { evidence: span.evidence } : {}),
   });
   if (spans.length > MAX_SPANS) spans.shift();
   if (!perfExportConsent) return;

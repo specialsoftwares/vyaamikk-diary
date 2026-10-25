@@ -41,7 +41,12 @@ import {
   stripServerOwnedProfilePatchKeys,
 } from "./clientProfilePatchPayload";
 import { profileDocumentMergeFields } from "./profileFirestorePayload";
-import { openBusinessCloud, protectBusinessCloud } from "@/services/privacy/businessCloudSeal";
+import {
+  openBusinessCloud,
+  protectBusinessCloud,
+  userProfileWriteNeedsSeal,
+  BUSINESS_SENSITIVE_FIELDS,
+} from "@/services/privacy/businessCloudSeal";
 import {
   finalizeDeletionIfDue,
   isActiveAccount,
@@ -375,14 +380,21 @@ export const firebaseAuthService: AuthService = {
     if (useIdentityCallables()) {
       try {
         const { authPerfMark } = await import("./authFlowPerf");
+        const { beginSharedJsAuthSession } = await import("./jsAuthBridge");
+        const { afterPhoneIdentityResolved } = await import("./phoneOtpEmailTransition");
         authPerfMark("V5_resolver_begin");
-        const result = await callResolveOrCreateUserByPhone(phone);
-        authPerfMark("V6_resolver_ok");
-        // Bridge MUST succeed before AuthProvider marks signed_in / Email mounts.
-        // Otherwise users/{uid} reads are denied (request.auth null) and surface
-        // as "Missing or insufficient permissions."
-        const { requireJsAuthSessionForFirestore } = await import("./jsAuthBridge");
-        await requireJsAuthSessionForFirestore("post_phone_identity");
+        // Identity is enough to show email. The JS bridge starts after the
+        // account transaction and is shared with the deferred consent write.
+        // Email verification keeps using the native phone token. A failed
+        // bridge stays a failure for Firestore work.
+        const result = await afterPhoneIdentityResolved({
+          resolveAccount: async () => {
+            const resolved = await callResolveOrCreateUserByPhone(phone);
+            authPerfMark("V6_resolver_ok");
+            return resolved;
+          },
+          beginBridge: () => beginSharedJsAuthSession(),
+        });
         // Boundary: after identity is known. Clear only transient pending-email
         // cache when this UID is still in unverified email onboarding.
         // Server pendingEmailVerifications are replaced on the next
@@ -498,16 +510,33 @@ export const firebaseAuthService: AuthService = {
       if (production) {
         const write = buildClientProfileFirestoreWrite(existing, next, { production: true });
         if (write) {
-          const sealed = await protectBusinessCloud({
-            collection: "users",
-            userId: uid,
-            recordId: uid,
-            revision: Number(next.updatedAt),
-            plain: write,
-            sensitiveSource: next as unknown as Record<string, unknown>,
-            existingRaw: rawProfile,
-          });
-          await setDoc(ref, sealed, { merge: true });
+          const needsSeal = userProfileWriteNeedsSeal(
+            existing as unknown as Record<string, unknown>,
+            next as unknown as Record<string, unknown>
+          );
+          let payload: Record<string, unknown> = write;
+          if (needsSeal) {
+            payload = await protectBusinessCloud({
+              collection: "users",
+              userId: uid,
+              recordId: uid,
+              revision: Number(next.updatedAt),
+              plain: write,
+              sensitiveSource: next as unknown as Record<string, unknown>,
+              existingRaw: rawProfile,
+            });
+          } else {
+            for (const key of BUSINESS_SENSITIVE_FIELDS.users) {
+              if (write[key] != null) {
+                throw new AppError(
+                  "save_failed",
+                  "This profile change could not be protected."
+                );
+              }
+            }
+            delete payload.contentSeal;
+          }
+          await setDoc(ref, payload, { merge: true });
         }
       } else {
         await setDoc(ref, profileDocumentMergeFields(next), { merge: true });
