@@ -96,6 +96,7 @@ import { savePendingConsent } from "@/services/consent/legalConsentService";
 import { persistDeferredPhoneConsent } from "@/services/consent/deferredConsentPersist";
 import {
   continueAfterPhoneProfileTransition,
+  phoneProfileOwnershipHeld,
   retryAuthenticatedAccountSetup,
 } from "@/auth-v2/phoneProfileContinuation";
 import { currentAuthMutationGeneration } from "@/services/auth/authSessionFence";
@@ -864,15 +865,30 @@ export function AuthFlowGate() {
   };
 
   const continueAfterPhoneProfile = useCallback(
-    async (profile: import("@/domain/types").UserProfile) => {
+    async (
+      profile: import("@/domain/types").UserProfile,
+      ownership?: { uid: string; generation: number }
+    ) => {
       authPerfMark("V7_session_reconcile_begin");
       // Authoritative profile from confirm — do not wait for React session commit.
       // CRITICAL: do NOT clear `challenge` before leaving step "otp". Clearing first
       // leaves step==="otp" && !challenge across await gaps → false sessionExpired
       // fallthrough (Stage-8 clean-room / first_time_create).
-      const ownedGeneration = currentAuthMutationGeneration();
-      await applyServerProfile(profile, ownedGeneration);
+      // Retry passes the ownership captured before resolution. A later generation
+      // must not legitimise that earlier profile.
+      const ownedGeneration = ownership?.generation ?? currentAuthMutationGeneration();
+      const liveOwnership = () => ({
+        uid: getNativeAuthUid(),
+        generation: currentAuthMutationGeneration(),
+      });
+      if (ownership && !phoneProfileOwnershipHeld(ownership, liveOwnership(), profile.uid)) return;
+      await applyServerProfile(
+        profile,
+        ownedGeneration,
+        ownership ? () => getNativeAuthUid() : undefined
+      );
       if (currentAuthMutationGeneration() !== ownedGeneration) return;
+      if (ownership && !phoneProfileOwnershipHeld(ownership, liveOwnership(), profile.uid)) return;
       const nextProfile = profile;
       const route =
         hasAuthoritativeVerifiedEmail(nextProfile) && nextProfile.profileCompletedAt
@@ -1031,7 +1047,10 @@ export function AuthFlowGate() {
     await retryAuthenticatedAccountSetup({
       phoneE164,
       inFlight: mobileVerifyInFlightRef.current,
-      nativeUid: getNativeAuthUid(),
+      readLive: () => ({
+        uid: getNativeAuthUid(),
+        generation: currentAuthMutationGeneration(),
+      }),
       begin: () => {
         mobileVerifyInFlightRef.current = true;
         clearFlowError();
@@ -1051,8 +1070,9 @@ export function AuthFlowGate() {
         // Same readiness barrier as confirmOtp — never continue on a soft bridge miss.
         await requireJsAuthSessionForFirestore("retry_account_setup");
       },
-      applyServerProfile: (next) => applyServerProfile(next),
-      continueAfterProfile: (next) => continueAfterPhoneProfile(next),
+      applyServerProfile: (next, ownership) =>
+        applyServerProfile(next, ownership.generation, () => getNativeAuthUid()),
+      continueAfterProfile: (next, ownership) => continueAfterPhoneProfile(next, ownership),
       onInactiveSession: () => {
         applyFlowError(
           new AppError(

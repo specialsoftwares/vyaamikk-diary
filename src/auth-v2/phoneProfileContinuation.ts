@@ -6,6 +6,23 @@
  */
 
 import type { UserProfile } from "@/domain/types";
+import {
+  profileWriteStillOwned,
+  type ProfileWriteLive,
+} from "@/services/auth/profileWriteOwnership";
+
+export type PhoneProfileOwnership = {
+  uid: string;
+  generation: number;
+};
+
+export function phoneProfileOwnershipHeld(
+  ownership: PhoneProfileOwnership,
+  live: ProfileWriteLive,
+  profileUid: string
+): boolean {
+  return profileWriteStillOwned(ownership, live) && profileUid === ownership.uid;
+}
 
 export type PhoneProfileRoute = "app" | "business" | "email";
 
@@ -50,28 +67,39 @@ export type AuthenticatedRetryResult = "skipped" | "needs_otp" | "continued" | "
 export async function retryAuthenticatedAccountSetup(input: {
   phoneE164: string | null;
   inFlight: boolean;
-  nativeUid: string | null;
+  readLive: () => ProfileWriteLive;
   begin: () => void;
   end: () => void;
   resolveAccount: (phoneE164: string) => Promise<{ profile: UserProfile }>;
   requireBridge: () => Promise<unknown>;
-  applyServerProfile: (profile: UserProfile) => Promise<unknown>;
-  continueAfterProfile: (profile: UserProfile) => Promise<unknown>;
+  applyServerProfile: (profile: UserProfile, ownership: PhoneProfileOwnership) => Promise<unknown>;
+  continueAfterProfile: (profile: UserProfile, ownership: PhoneProfileOwnership) => Promise<unknown>;
   onInactiveSession: () => void;
   onFailure: (error: unknown) => void;
 }): Promise<AuthenticatedRetryResult> {
   if (!input.phoneE164) return "skipped";
   if (input.inFlight) return "skipped";
-  if (!input.nativeUid) {
+  const opening = input.readLive();
+  if (!opening.uid) {
     input.onInactiveSession();
     return "needs_otp";
   }
+  const ownership: PhoneProfileOwnership = {
+    uid: opening.uid,
+    generation: opening.generation,
+  };
   input.begin();
   try {
     const result = await input.resolveAccount(input.phoneE164);
+    if (!phoneProfileOwnershipHeld(ownership, input.readLive(), result.profile.uid)) {
+      throw new Error("session_changed");
+    }
     await input.requireBridge();
-    await input.applyServerProfile(result.profile);
-    await input.continueAfterProfile(result.profile);
+    if (!phoneProfileOwnershipHeld(ownership, input.readLive(), result.profile.uid)) {
+      throw new Error("session_changed");
+    }
+    await input.applyServerProfile(result.profile, ownership);
+    await input.continueAfterProfile(result.profile, ownership);
     return "continued";
   } catch (error) {
     input.onFailure(error);

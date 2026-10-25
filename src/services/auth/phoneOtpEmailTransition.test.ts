@@ -396,7 +396,7 @@ async function main() {
   const inactive = await retryAuthenticatedAccountSetup({
     phoneE164: profile.phoneE164,
     inFlight: false,
-    nativeUid: null,
+    readLive: () => ({ uid: null, generation: 4 }),
     begin: () => {
       throw new Error("should_not_begin");
     },
@@ -418,23 +418,29 @@ async function main() {
   assert.equal(inactive, "needs_otp");
   assert.equal(resolveCalls, 0);
 
+  const opening = { uid: profile.uid, generation: 4 };
   const retryBridge = deferred<void>();
   let retriedProfile = false;
+  let continuedGeneration = -1;
   const accountRetry = retryAuthenticatedAccountSetup({
     phoneE164: profile.phoneE164,
     inFlight: false,
-    nativeUid: profile.uid,
+    readLive: () => opening,
     begin: () => undefined,
     end: () => undefined,
     resolveAccount: async () => ({ profile }),
     requireBridge: () => retryBridge.promise,
-    applyServerProfile: async () => undefined,
-    continueAfterProfile: async (next) => {
+    applyServerProfile: async (_next, ownership) => {
+      assert.equal(ownership.generation, 4);
+      assert.equal(ownership.uid, profile.uid);
+    },
+    continueAfterProfile: async (next, ownership) => {
       retriedProfile = true;
+      continuedGeneration = ownership.generation;
       const written = await persistDeferredPhoneConsent({
         profile: next,
-        generationAtStart: 4,
-        currentGeneration: () => 4,
+        generationAtStart: ownership.generation,
+        currentGeneration: () => ownership.generation,
         sessionUid: () => next.uid,
         loadPending: () => loadPendingConsentValue(consentStorage),
         rebuildRecord: retained.record,
@@ -455,7 +461,100 @@ async function main() {
   retryBridge.resolve();
   assert.equal(await accountRetry, "continued");
   assert.equal(retriedProfile, true);
+  assert.equal(continuedGeneration, 4);
   assert.equal(await loadPendingConsentValue(consentStorage), null);
+
+  async function expectStaleRetry(during: "resolve" | "bridge", nextLive: { uid: string | null; generation: number }) {
+    await savePendingConsentValue(consentStorage, JSON.stringify(retained));
+    const live: { uid: string | null; generation: number } = { uid: profile.uid, generation: 4 };
+    const gate = deferred<void>();
+    let published = 0;
+    let navigated = 0;
+    let cleared = false;
+    const pendingRetry = retryAuthenticatedAccountSetup({
+      phoneE164: profile.phoneE164,
+      inFlight: false,
+      readLive: () => live,
+      begin: () => undefined,
+      end: () => undefined,
+      resolveAccount: async () => {
+        if (during === "resolve") {
+          live.uid = nextLive.uid;
+          live.generation = nextLive.generation;
+          await gate.promise;
+        }
+        return { profile };
+      },
+      requireBridge: async () => {
+        if (during === "bridge") {
+          live.uid = nextLive.uid;
+          live.generation = nextLive.generation;
+          await gate.promise;
+        }
+      },
+      applyServerProfile: async () => {
+        published += 1;
+      },
+      continueAfterProfile: async (next, ownership) => {
+        navigated += 1;
+        await persistDeferredPhoneConsent({
+          profile: next,
+          generationAtStart: ownership.generation,
+          currentGeneration: () => live.generation,
+          sessionUid: () => live.uid,
+          loadPending: () => loadPendingConsentValue(consentStorage),
+          rebuildRecord: retained.record,
+          updateProfile: async () => undefined,
+          clearIfUnchanged: async (snapshot) => {
+            cleared = true;
+            return clearPendingConsentIfUnchanged(consentStorage, snapshot);
+          },
+        });
+      },
+      onInactiveSession: () => {
+        throw new Error("should_stay_active");
+      },
+      onFailure: () => undefined,
+    });
+    gate.resolve();
+    assert.equal(await pendingRetry, "failed");
+    assert.equal(published, 0);
+    assert.equal(navigated, 0);
+    assert.equal(cleared, false);
+    assert.equal((await loadPendingConsentValue(consentStorage))?.record.acceptedAt, 12);
+  }
+
+  await expectStaleRetry("resolve", { uid: "uid-b", generation: 5 });
+  await expectStaleRetry("bridge", { uid: "uid-b", generation: 5 });
+  await expectStaleRetry("resolve", { uid: null, generation: 5 });
+  await expectStaleRetry("bridge", { uid: null, generation: 5 });
+  await expectStaleRetry("resolve", { uid: profile.uid, generation: 5 });
+  await expectStaleRetry("bridge", { uid: profile.uid, generation: 5 });
+
+  await savePendingConsentValue(consentStorage, JSON.stringify(retained));
+  let foreignPublished = 0;
+  const foreignProfile = await retryAuthenticatedAccountSetup({
+    phoneE164: profile.phoneE164,
+    inFlight: false,
+    readLive: () => ({ uid: profile.uid, generation: 4 }),
+    begin: () => undefined,
+    end: () => undefined,
+    resolveAccount: async () => ({ profile: { ...profile, uid: "uid-b" } }),
+    requireBridge: async () => undefined,
+    applyServerProfile: async () => {
+      foreignPublished += 1;
+    },
+    continueAfterProfile: async () => {
+      foreignPublished += 1;
+    },
+    onInactiveSession: () => {
+      throw new Error("should_stay_active");
+    },
+    onFailure: () => undefined,
+  });
+  assert.equal(foreignProfile, "failed");
+  assert.equal(foreignPublished, 0);
+  assert.equal((await loadPendingConsentValue(consentStorage))?.record.acceptedAt, 12);
 
   console.log("phoneOtpEmailTransition.test.ts: ok");
 }
