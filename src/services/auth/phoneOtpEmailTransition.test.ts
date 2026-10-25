@@ -13,6 +13,16 @@ import {
   pendingConsentChoicesEqual,
 } from "@/services/consent/pendingConsentReconcile";
 import { persistDeferredPhoneConsent } from "@/services/consent/deferredConsentPersist";
+import {
+  clearPendingConsentIfUnchanged,
+  loadPendingConsentValue,
+  savePendingConsentValue,
+  type PendingConsentStorage,
+} from "@/services/consent/pendingConsentKey";
+import {
+  continueAfterPhoneProfileTransition,
+  retryAuthenticatedAccountSetup,
+} from "@/auth-v2/phoneProfileContinuation";
 
 const LEGAL_CONSENT_VERSION = "1.0.0";
 import { userProfileWriteNeedsSeal } from "@/services/privacy/businessCloudSeal";
@@ -60,7 +70,10 @@ async function main() {
   __resetAuthPerfForTests();
   const bridge = deferred<boolean>();
   let bridgeStarted = false;
-  const emailShown = { value: false };
+  let bridgeSettled = false;
+  void bridge.promise.then(() => {
+    bridgeSettled = true;
+  });
   const account = afterPhoneIdentityResolved({
     resolveAccount: async () => profile,
     beginBridge: () => {
@@ -71,29 +84,59 @@ async function main() {
   const resolved = await account;
   assert.equal(resolved, profile);
   assert.equal(bridgeStarted, true);
-  assert.equal(emailShown.value, false);
   const ordering = perfSpans().filter((span) => span.evidence === "ordering");
   assert.equal(ordering.length, 1);
   assert.equal(ordering[0]?.durationMs, 0);
-  assert.equal(bridge.promise, bridge.promise);
-  let showedWhilePending = false;
-  const consent = deferred<"written">();
-  const release = (async () => {
-    showedWhilePending = true;
-    emailShown.value = true;
-    return "email" as const;
-  })();
-  void consent.promise;
-  assert.equal(await release, "email");
-  assert.equal(showedWhilePending, true);
+  assert.equal(bridgeSettled, false);
+
+  const consentWrite = deferred<void>();
   let consentSettled = false;
-  void consent.promise.then(() => {
-    consentSettled = true;
+  let emailStep = false;
+  let acknowledged: (() => void) | null = null;
+  const storedForTransition = pending(10);
+  await continueAfterPhoneProfileTransition({
+    route: "email",
+    startDeferredConsent: () =>
+      persistDeferredPhoneConsent({
+        profile,
+        generationAtStart: 4,
+        currentGeneration: () => 4,
+        sessionUid: () => profile.uid,
+        loadPending: async () => storedForTransition,
+        rebuildRecord: storedForTransition.record,
+        updateProfile: () =>
+          consentWrite.promise.then(() => {
+            consentSettled = true;
+          }),
+        clearIfUnchanged: async () => false,
+      }),
+    onDeferredConsentRejected: () => undefined,
+    markPhoneProven: () => undefined,
+    markEmailComplete: async () => undefined,
+    markEmailPending: async () => undefined,
+    prepareEmailScreen: () => undefined,
+    scheduleAfterAcknowledgement: (navigate) => {
+      acknowledged = navigate;
+    },
+    navigateToApp: () => undefined,
+    navigateToBusiness: () => undefined,
+    navigateToEmail: () => {
+      emailStep = true;
+    },
   });
-  assert.equal(emailShown.value, true);
+  assert.equal(emailStep, false);
+  assert.ok(acknowledged);
+  acknowledged();
+  assert.equal(emailStep, true);
+  assert.equal(bridgeSettled, false);
   assert.equal(consentSettled, false);
-  consent.resolve("written");
+  consentWrite.resolve();
   bridge.resolve(true);
+  await consentWrite.promise;
+  await bridge.promise;
+  for (let i = 0; i < 10; i += 1) await Promise.resolve();
+  assert.equal(bridgeSettled, true);
+  assert.equal(consentSettled, true);
 
   let bridgeCalls = 0;
   await assert.rejects(
@@ -284,14 +327,6 @@ async function main() {
     true
   );
 
-  const gateSrc = readFileSync(join(root, "auth-v2/AuthFlowGate.tsx"), "utf8");
-  const start = gateSrc.indexOf("const continueAfterPhoneProfile");
-  const fnEnd = gateSrc.indexOf("const handleVerifyOtp", start);
-  const window = gateSrc.slice(start, fnEnd);
-  assert.equal(window.includes("await updateProfile"), false);
-  assert.ok(window.indexOf("persistDeferredPhoneConsent") < window.indexOf('setStep("email")'));
-  assert.equal(/await persistDeferredPhoneConsent\(/.test(window), false);
-
   const firebase = readFileSync(join(root, "services/auth/firebase.ts"), "utf8");
   const confirmStart = firebase.indexOf("async confirmOtp");
   const confirmEnd = firebase.indexOf("async signOut", confirmStart);
@@ -327,6 +362,100 @@ async function main() {
   assert.match(mint, /restoreAdmissionForUid\(decision\.uid, undefined, restoreReads\)/);
   const admit = readFileSync(join(root, "../functions/src/identity/admitCallableUser.ts"), "utf8");
   assert.match(admit, /verifyIdToken\(bearer, true\)/);
+
+  let storedConsent: string | null = null;
+  const consentStorage: PendingConsentStorage = {
+    async getItem() {
+      return storedConsent;
+    },
+    async setItem(_key, value) {
+      storedConsent = value;
+    },
+    async removeItem() {
+      storedConsent = null;
+    },
+  };
+  const retained = pending(12);
+  await savePendingConsentValue(consentStorage, JSON.stringify(retained));
+  const failedWrite = await persistDeferredPhoneConsent({
+    profile,
+    generationAtStart: 4,
+    currentGeneration: () => 4,
+    sessionUid: () => profile.uid,
+    loadPending: () => loadPendingConsentValue(consentStorage),
+    rebuildRecord: retained.record,
+    updateProfile: async () => {
+      throw new Error("bridge_failed");
+    },
+    clearIfUnchanged: (snapshot) => clearPendingConsentIfUnchanged(consentStorage, snapshot),
+  });
+  assert.equal(failedWrite, "failed");
+  assert.equal((await loadPendingConsentValue(consentStorage))?.record.acceptedAt, 12);
+
+  let resolveCalls = 0;
+  const inactive = await retryAuthenticatedAccountSetup({
+    phoneE164: profile.phoneE164,
+    inFlight: false,
+    nativeUid: null,
+    begin: () => {
+      throw new Error("should_not_begin");
+    },
+    end: () => undefined,
+    resolveAccount: async () => {
+      resolveCalls += 1;
+      return { profile };
+    },
+    requireBridge: async () => {
+      throw new Error("should_not_bridge");
+    },
+    applyServerProfile: async () => undefined,
+    continueAfterProfile: async () => undefined,
+    onInactiveSession: () => undefined,
+    onFailure: () => {
+      throw new Error("should_not_fail");
+    },
+  });
+  assert.equal(inactive, "needs_otp");
+  assert.equal(resolveCalls, 0);
+
+  const retryBridge = deferred<void>();
+  let retriedProfile = false;
+  const accountRetry = retryAuthenticatedAccountSetup({
+    phoneE164: profile.phoneE164,
+    inFlight: false,
+    nativeUid: profile.uid,
+    begin: () => undefined,
+    end: () => undefined,
+    resolveAccount: async () => ({ profile }),
+    requireBridge: () => retryBridge.promise,
+    applyServerProfile: async () => undefined,
+    continueAfterProfile: async (next) => {
+      retriedProfile = true;
+      const written = await persistDeferredPhoneConsent({
+        profile: next,
+        generationAtStart: 4,
+        currentGeneration: () => 4,
+        sessionUid: () => next.uid,
+        loadPending: () => loadPendingConsentValue(consentStorage),
+        rebuildRecord: retained.record,
+        updateProfile: async () => undefined,
+        clearIfUnchanged: (snapshot) => clearPendingConsentIfUnchanged(consentStorage, snapshot),
+      });
+      assert.equal(written, "written");
+    },
+    onInactiveSession: () => {
+      throw new Error("should_stay_active");
+    },
+    onFailure: (error) => {
+      throw error;
+    },
+  });
+  await Promise.resolve();
+  assert.equal(retriedProfile, false);
+  retryBridge.resolve();
+  assert.equal(await accountRetry, "continued");
+  assert.equal(retriedProfile, true);
+  assert.equal(await loadPendingConsentValue(consentStorage), null);
 
   console.log("phoneOtpEmailTransition.test.ts: ok");
 }
