@@ -293,6 +293,47 @@ async function writeProjection(
   throw new Error("restore_authority_write_failed");
 }
 
+export type ReopenProposal = {
+  watermark: number;
+  erasedUids: readonly string[];
+  withdrawnPurposes: Readonly<Record<string, readonly string[]>>;
+};
+
+function sameMembers(left: readonly string[], right: readonly string[]): boolean {
+  if (left.length !== right.length) return false;
+  const seen = new Set(right);
+  return left.every((item) => seen.has(item));
+}
+
+/**
+ * Reopening requires the outside authority's erasure list and withdrawn
+ * purposes, not only its watermark. Omitting either list is a refusal even
+ * when the stored lists are empty.
+ */
+export function proveAuthorityReconciled(
+  authority: RestoreAuthoritySnapshot | null,
+  proposed: { watermark: number; erasedUids?: readonly string[]; withdrawnPurposes?: ReopenProposal["withdrawnPurposes"] }
+): { ok: true; snapshot: RestoreAuthoritySnapshot } | {
+  ok: false;
+  reason: "authority_missing" | "lists_not_presented" | "watermark_mismatch" | "erasure_not_reconciled" | "purpose_not_reconciled";
+} {
+  if (!authority) return { ok: false, reason: "authority_missing" };
+  if (!proposed.erasedUids || !proposed.withdrawnPurposes) return { ok: false, reason: "lists_not_presented" };
+  if (proposed.watermark !== authority.watermark) return { ok: false, reason: "watermark_mismatch" };
+  if (!sameMembers(proposed.erasedUids, authority.erasedUids)) {
+    return { ok: false, reason: "erasure_not_reconciled" };
+  }
+  const proposedUids = Object.keys(proposed.withdrawnPurposes);
+  const authorityUids = Object.keys(authority.withdrawnPurposes);
+  if (!sameMembers(proposedUids, authorityUids)) return { ok: false, reason: "purpose_not_reconciled" };
+  for (const uid of authorityUids) {
+    const proposedPurposes = proposed.withdrawnPurposes[uid] ?? [];
+    const authorityPurposes = authority.withdrawnPurposes[uid] ?? [];
+    if (!sameMembers(proposedPurposes, authorityPurposes)) return { ok: false, reason: "purpose_not_reconciled" };
+  }
+  return { ok: true, snapshot: authority };
+}
+
 export type PublishedAuthorityState =
   | { state: "unconfigured" }
   | { state: "current"; watermark: number }

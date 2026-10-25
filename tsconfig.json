@@ -24,6 +24,7 @@
     "tools/grin-interop",
     "tools/grin-acceptance",
     "docs/release/proposals",
-    "services"
+    "services",
+    "analysis/grin-slice2-closeout/logging-repro.ts"
   ]
 }

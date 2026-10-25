@@ -72,6 +72,20 @@
         "EXPO_PUBLIC_APP_MODE": "production"
       }
     },
+    "acceptance-android": {
+      "distribution": "internal",
+      "environment": "preview",
+      "autoIncrement": false,
+      "env": {
+        "EXPO_PUBLIC_APP_MODE": "production",
+        "EXPO_PUBLIC_RESTORE_ADMISSION_REFRESH": "true",
+        "EXPO_PUBLIC_SUBSCRIPTION_PURCHASE_ENTRY_ENABLED": "0",
+        "EXPO_PUBLIC_QUOTA_UPSELL_ENABLED": "0"
+      },
+      "android": {
+        "buildType": "apk"
+      }
+    },
     "development-production-otp": {
       "developmentClient": true,
       "distribution": "internal",

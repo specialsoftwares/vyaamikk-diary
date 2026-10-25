@@ -160,6 +160,41 @@ export function nextDisasterRecovery(done: readonly ActivationStep[]): Activatio
   return RECOVERY.find((step) => !done.includes(step)) ?? "complete";
 }
 
+export type ActivationStopPhase = 0 | 1 | 2 | 3 | 4;
+
+/**
+ * What remains safe when an operator stops before the next phase.
+ * Phase 2 does not protect workers. required:false is not a rollback.
+ */
+export function activationStopBehaviour(phase: ActivationStopPhase): {
+  phase: ActivationStopPhase;
+  clientRules: "pre_activation" | "activated";
+  workersProtected: boolean;
+  safeAction:
+    | "remain"
+    | "do_not_deploy_activated_rules_yet"
+    | "stop_workers_before_treating_phase_2_as_complete"
+    | "close_fence_and_holds"
+    | "reopen_only_after_erasure_proof";
+} {
+  if (phase === 0) return { phase, clientRules: "pre_activation", workersProtected: false, safeAction: "remain" };
+  if (phase === 1) {
+    return { phase, clientRules: "pre_activation", workersProtected: false, safeAction: "do_not_deploy_activated_rules_yet" };
+  }
+  if (phase === 2) {
+    return {
+      phase,
+      clientRules: "activated",
+      workersProtected: false,
+      safeAction: "stop_workers_before_treating_phase_2_as_complete",
+    };
+  }
+  if (phase === 3) {
+    return { phase, clientRules: "activated", workersProtected: true, safeAction: "close_fence_and_holds" };
+  }
+  return { phase, clientRules: "activated", workersProtected: true, safeAction: "reopen_only_after_erasure_proof" };
+}
+
 export function mintAllowed(sequence: "initial" | "recovery", done: readonly ActivationStep[], fenceClosed: boolean): boolean {
   if (fenceClosed) return false;
   if (sequence === "initial") return done.includes("write_open_reconciled_fence");
