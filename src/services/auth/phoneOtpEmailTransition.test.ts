@@ -92,7 +92,7 @@ async function main() {
   const consentWrite = deferred<void>();
   let consentSettled = false;
   let emailStep = false;
-  let acknowledged: (() => void) | null = null;
+  const scheduledAcknowledgements: Array<() => void> = [];
   const storedForTransition = pending(10);
   await continueAfterPhoneProfileTransition({
     route: "email",
@@ -116,7 +116,7 @@ async function main() {
     markEmailPending: async () => undefined,
     prepareEmailScreen: () => undefined,
     scheduleAfterAcknowledgement: (navigate) => {
-      acknowledged = navigate;
+      scheduledAcknowledgements.push(navigate);
     },
     navigateToApp: () => undefined,
     navigateToBusiness: () => undefined,
@@ -125,8 +125,8 @@ async function main() {
     },
   });
   assert.equal(emailStep, false);
-  assert.ok(acknowledged);
-  acknowledged();
+  assert.equal(scheduledAcknowledgements.length, 1);
+  scheduledAcknowledgements[0]!();
   assert.equal(emailStep, true);
   assert.equal(bridgeSettled, false);
   assert.equal(consentSettled, false);
