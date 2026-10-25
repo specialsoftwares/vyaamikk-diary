@@ -109,6 +109,26 @@ function pickSensitive(collection: BusinessSealCollection, record: Record<string
   return out;
 }
 
+function jsonEqual(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (left == null && right == null) return true;
+  if (typeof left !== "object" || typeof right !== "object" || left == null || right == null) {
+    return false;
+  }
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+/** True when the profile write changes a field that must stay inside the content seal. */
+export function userProfileWriteNeedsSeal(
+  existing: Record<string, unknown>,
+  next: Record<string, unknown>
+): boolean {
+  for (const key of BUSINESS_SENSITIVE_FIELDS.users) {
+    if (!jsonEqual(existing[key], next[key])) return true;
+  }
+  return false;
+}
+
 export function sealedBusinessCloud(input: {
   collection: BusinessSealCollection;
   plain: Record<string, unknown>;

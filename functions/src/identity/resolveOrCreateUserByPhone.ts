@@ -143,6 +143,10 @@ function rethrowAsHttps(err: unknown, attemptId: string, authUid: string): never
 }
 
 export const resolveOrCreateUserByPhone = onCall(
+  // minInstances stays unset. One warm gcf_gen1 instance is inside maxInstances: 3,
+  // so it does not raise the deploy-time CPU ceiling. It would reserve about
+  // 0.17 vCPU and 256MiB continuously, roughly $12 per month in asia-south1,
+  // and is not activated here.
   { region: "asia-south1" },
   async (request) => {
     await assertAdmittedCallableUser(request);

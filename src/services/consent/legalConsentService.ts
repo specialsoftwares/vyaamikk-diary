@@ -8,10 +8,13 @@ import type { PhoneE164, UEID, UserProfile } from "@/domain/types";
 import type { ProfilePatch } from "@/services/auth/types";
 import {
   CONSENT_RECONCILE_SOURCE,
-  resolvePendingConsentForVerifiedProfile,
+  consentPatchFromPending,
 } from "@/services/consent/pendingConsentReconcile";
-
-const PENDING_KEY = "vyd_pending_legal_consent_v1";
+import {
+  clearPendingConsentValue,
+  loadPendingConsentValue,
+  savePendingConsentValue,
+} from "@/services/consent/pendingConsentKey";
 
 function appVersion(): string {
   return Constants.expoConfig?.version ?? "1.0.0";
@@ -44,52 +47,36 @@ export async function savePendingConsent(phoneE164: PhoneE164, sourceScreen: str
     phoneE164,
     record: buildConsentRecord({ sourceScreen, phoneE164 }),
   };
-  await AsyncStorage.setItem(PENDING_KEY, JSON.stringify(pending));
+  await savePendingConsentValue(AsyncStorage, JSON.stringify(pending));
 }
 
 export async function loadPendingConsent(): Promise<PendingLegalConsent | null> {
-  const raw = await AsyncStorage.getItem(PENDING_KEY);
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as PendingLegalConsent;
-  } catch {
-    return null;
-  }
+  return loadPendingConsentValue(AsyncStorage);
 }
 
 export async function clearPendingConsent(): Promise<void> {
-  await AsyncStorage.removeItem(PENDING_KEY);
+  await clearPendingConsentValue(AsyncStorage);
 }
 
-/** Merge pending consent into profile patch after successful OTP / identity creation. */
+/** Merge pending consent into a profile patch after identity creation. */
 export async function consentPatchForProfile(
   profile: UserProfile
 ): Promise<ProfilePatch | null> {
-  const stored = await loadPendingConsent();
-  const hasCurrentConsentVersion = (profile.legalConsents ?? []).some(
-    (c) => c.consentVersion === legal.consentVersion
-  );
-  const pending = resolvePendingConsentForVerifiedProfile({
-    pending: stored,
-    verifiedPhoneE164: profile.phoneE164,
-    hasCurrentConsentVersion,
-    rebuildRecord: buildConsentRecord({
+  return consentPatchFromPending(
+    profile,
+    await loadPendingConsent(),
+    legal.consentVersion,
+    buildConsentRecord({
       sourceScreen: CONSENT_RECONCILE_SOURCE,
       phoneE164: profile.phoneE164,
-    }),
-  });
-  if (!pending) return null;
+    })
+  );
+}
 
-  const record: LegalConsentRecord = {
-    ...pending.record,
-    userId: profile.uid,
-    ueid: profile.ueid,
-    acceptedAt: pending.record.acceptedAt,
-  };
-
-  const existing = profile.legalConsents ?? [];
-  const next = [...existing.filter((c) => c.consentVersion !== record.consentVersion), record];
-
-  await clearPendingConsent();
-  return { legalConsents: next };
+/** Remove the stored grant only when it is still the choice that was written. */
+export async function clearPendingConsentIfUnchanged(
+  snapshot: PendingLegalConsent | null
+): Promise<boolean> {
+  const { clearPendingConsentIfUnchanged: clearStored } = await import("./pendingConsentKey");
+  return clearStored(AsyncStorage, snapshot);
 }

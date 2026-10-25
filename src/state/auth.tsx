@@ -187,10 +187,14 @@ interface AuthApi extends AuthState {
   acknowledgeUEID(): void;
   updateProfile(
     patch: ProfilePatch,
-    opts?: { user?: UserProfile }
+    opts?: { user?: UserProfile; ownedGeneration?: number }
   ): Promise<UserProfile>;
   /** Refresh session from a server-returned profile (email bind, reactivation). */
-  applyServerProfile(profile: UserProfile, ownedGeneration?: number): Promise<UserProfile>;
+  applyServerProfile(
+    profile: UserProfile,
+    ownedGeneration?: number,
+    readLiveUid?: () => string | null
+  ): Promise<UserProfile>;
   /** Persist usage heartbeat (`lastActiveAt` only — never login fields). */
   touchLastActive(): Promise<void>;
 }
@@ -517,19 +521,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const updateProfile = useCallback(
     async (
       patch: ProfilePatch,
-      opts?: { /** Authoritative user when React session state has not committed yet. */ user?: UserProfile }
+      opts?: {
+        /** Authoritative user when React session state has not committed yet. */
+        user?: UserProfile;
+        ownedGeneration?: number;
+      }
     ): Promise<UserProfile> => {
       const current = opts?.user ?? state.session?.user;
       if (!current) throw toAppError(new Error("Not signed in."));
+      const owned = opts?.ownedGeneration;
+      const stillOwned = () =>
+        owned == null ||
+        (currentAuthMutationGeneration() === owned &&
+          (sessionRef.current == null || sessionRef.current.user.uid === current.uid));
       try {
-        const next = await getAuthService().updateProfile(current.uid, patch);
-        const session = await saveSession(next, { preserveSignedInAt: true });
-        setState((s) => ({
-          ...s,
-          status: "signed_in",
-          session,
-          user: session.user,
-        }));
+        if (!stillOwned()) throw new Error("session_changed");
+        const next = await getAuthService().updateProfile(current.uid, patch, {
+          uid: current.uid,
+          generation: owned ?? currentAuthMutationGeneration(),
+        });
+        if (!stillOwned()) throw new Error("session_changed");
+        const session = await saveSession(next, {
+          preserveSignedInAt: true,
+          isCurrent: owned == null ? undefined : stillOwned,
+        });
+        if (!stillOwned()) throw new Error("session_changed");
+        setState((s) => {
+          if (owned != null && currentAuthMutationGeneration() !== owned) return s;
+          if (s.session && s.session.user.uid !== current.uid) return s;
+          return {
+            ...s,
+            status: "signed_in",
+            session,
+            user: session.user,
+          };
+        });
         return session.user;
       } catch (e) {
         throw toAppError(e);
@@ -539,18 +565,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const applyServerProfile = useCallback(
-    async (profile: UserProfile, ownedGeneration?: number): Promise<UserProfile> => {
-      const isCurrent = ownedGeneration == null ? undefined : () =>
-        currentAuthMutationGeneration() === ownedGeneration &&
-        statusRef.current === "signed_in" && sessionRef.current?.user.uid === profile.uid;
+    async (
+      profile: UserProfile,
+      ownedGeneration?: number,
+      readLiveUid?: () => string | null
+    ): Promise<UserProfile> => {
+      const isCurrent = ownedGeneration == null ? undefined : () => {
+        if (currentAuthMutationGeneration() !== ownedGeneration) return false;
+        if (readLiveUid) {
+          const liveUid = readLiveUid();
+          if (!liveUid || liveUid !== profile.uid) return false;
+          const sessionUid = sessionRef.current?.user.uid ?? null;
+          if (sessionUid && sessionUid !== profile.uid) return false;
+          return true;
+        }
+        return statusRef.current === "signed_in" && sessionRef.current?.user.uid === profile.uid;
+      };
       const session = await saveSession(profile, { preserveSignedInAt: true, isCurrent });
       if (isCurrent && !isCurrent()) throw new Error("session_changed");
-      setState((s) => ({
-        ...s,
-        status: "signed_in",
-        session,
-        user: session.user,
-      }));
+      setState((s) => {
+        if (ownedGeneration != null && currentAuthMutationGeneration() !== ownedGeneration) return s;
+        if (s.session && s.session.user.uid !== profile.uid) return s;
+        if (readLiveUid) {
+          const liveUid = readLiveUid();
+          if (!liveUid || liveUid !== profile.uid) return s;
+        }
+        return {
+          ...s,
+          status: "signed_in",
+          session,
+          user: session.user,
+        };
+      });
       return session.user;
     },
     [saveSession]

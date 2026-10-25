@@ -1,4 +1,5 @@
 import type { LegalConsentRecord } from "@/domain/legalConsent";
+import { mergeLegalConsentGrants } from "@/services/consent/pendingConsentReconcile";
 import {
   DEFAULT_PDF_BRANDING,
   type EmailStatus,
@@ -364,7 +365,7 @@ export function applyProfilePatch(user: UserProfile, patch: ProfilePatch): UserP
     changed = true;
   }
   if (patch.legalConsents !== undefined) {
-    next.legalConsents = patch.legalConsents;
+    next.legalConsents = mergeLegalConsentGrants(user.legalConsents, patch.legalConsents);
     changed = true;
   }
   if (patch.accountKind !== undefined && patch.accountKind !== user.accountKind) {

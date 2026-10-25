@@ -22,6 +22,7 @@ const root = join(__dirname, "../..");
 const gateSrc = readFileSync(join(root, "auth-v2/AuthFlowGate.tsx"), "utf8");
 const nativeSrc = readFileSync(join(root, "services/auth/nativePhoneAuth.ts"), "utf8");
 const consentSrc = readFileSync(join(root, "services/consent/legalConsentService.ts"), "utf8");
+const reconcileSrc = readFileSync(join(root, "services/consent/pendingConsentReconcile.ts"), "utf8");
 
 assert.equal(maySkipAwaitBeforeOtpScreenPaint("pending_consent"), true);
 assert.equal(maySkipAwaitBeforeOtpScreenPaint("wrapper_challenge"), true);
@@ -47,8 +48,11 @@ const retryAfterPaint = gateSrc.includes(
 );
 assert.equal(retryAfterPaint, true);
 
-assert.match(consentSrc, /resolvePendingConsentForVerifiedProfile/);
-assert.match(consentSrc, /CONSENT_RECONCILE_SOURCE/);
+assert.match(reconcileSrc, /resolvePendingConsentForVerifiedProfile/);
+assert.match(reconcileSrc, /CONSENT_RECONCILE_SOURCE/);
+assert.match(consentSrc, /consentPatchFromPending/);
+assert.match(consentSrc, /clearPendingConsentIfUnchanged/);
+assert.equal(/await clearPendingConsent\(\)/.test(consentSrc.slice(0, consentSrc.indexOf("clearPendingConsentIfUnchanged"))), false);
 
 const record = (source: string, phone: string): LegalConsentRecord => ({
   consentVersion: "1.0.0",

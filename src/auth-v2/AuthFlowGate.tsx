@@ -92,10 +92,14 @@ import * as Clipboard from "expo-clipboard";
 import { profileNeedsAgeGate } from "@/domain/ageEligibility";
 import { useAuth } from "@/state/auth";
 import { useT } from "@/i18n";
+import { savePendingConsent } from "@/services/consent/legalConsentService";
+import { persistDeferredPhoneConsent } from "@/services/consent/deferredConsentPersist";
 import {
-  consentPatchForProfile,
-  savePendingConsent,
-} from "@/services/consent/legalConsentService";
+  continueAfterPhoneProfileTransition,
+  phoneProfileOwnershipHeld,
+  retryAuthenticatedAccountSetup,
+} from "@/auth-v2/phoneProfileContinuation";
+import { currentAuthMutationGeneration } from "@/services/auth/authSessionFence";
 import {
   completeBusinessEmailBind,
   resendBusinessEmailVerification,
@@ -861,75 +865,107 @@ export function AuthFlowGate() {
   };
 
   const continueAfterPhoneProfile = useCallback(
-    async (profile: import("@/domain/types").UserProfile) => {
+    async (
+      profile: import("@/domain/types").UserProfile,
+      ownership?: { uid: string; generation: number }
+    ) => {
       authPerfMark("V7_session_reconcile_begin");
       // Authoritative profile from confirm — do not wait for React session commit.
       // CRITICAL: do NOT clear `challenge` before leaving step "otp". Clearing first
       // leaves step==="otp" && !challenge across await gaps → false sessionExpired
       // fallthrough (Stage-8 clean-room / first_time_create).
-      await applyServerProfile(profile);
-      const consentPatch = await consentPatchForProfile(profile);
-      let nextProfile = profile;
-      if (consentPatch) {
-        nextProfile = await updateProfile(consentPatch, { user: profile });
-      }
-
-      setPhoneChallengeProven(true);
-
-      if (hasAuthoritativeVerifiedEmail(nextProfile) && nextProfile.profileCompletedAt) {
-        await markAuthWrapperEmailComplete(nextProfile.uid);
-        resolveVerificationSuccess("mobile", () => {
+      // Retry passes the ownership captured before resolution. A later generation
+      // must not legitimise that earlier profile.
+      const ownedGeneration = ownership?.generation ?? currentAuthMutationGeneration();
+      const liveOwnership = () => ({
+        uid: getNativeAuthUid(),
+        generation: currentAuthMutationGeneration(),
+      });
+      if (ownership && !phoneProfileOwnershipHeld(ownership, liveOwnership(), profile.uid)) return;
+      await applyServerProfile(
+        profile,
+        ownedGeneration,
+        ownership ? () => getNativeAuthUid() : undefined
+      );
+      if (currentAuthMutationGeneration() !== ownedGeneration) return;
+      if (ownership && !phoneProfileOwnershipHeld(ownership, liveOwnership(), profile.uid)) return;
+      const nextProfile = profile;
+      const route =
+        hasAuthoritativeVerifiedEmail(nextProfile) && nextProfile.profileCompletedAt
+          ? "app"
+          : hasAuthoritativeVerifiedEmail(nextProfile)
+            ? "business"
+            : "email";
+      await continueAfterPhoneProfileTransition({
+        route,
+        startDeferredConsent: () =>
+          persistDeferredPhoneConsent({
+            profile,
+            generationAtStart: ownedGeneration,
+            sessionUid: () => getNativeAuthUid(),
+            updateProfile: (patch) => updateProfile(patch, { user: profile, ownedGeneration }),
+          }),
+        onDeferredConsentRejected: (error: unknown) => {
+          authFlowLog.warn("deferred consent persist rejected", {
+            name: error instanceof Error ? error.name : "Error",
+          });
+        },
+        markPhoneProven: () => setPhoneChallengeProven(true),
+        markEmailComplete: () => markAuthWrapperEmailComplete(nextProfile.uid),
+        markEmailPending: () => markAuthWrapperEmailPending(nextProfile.uid),
+        prepareEmailScreen: () => {
+          setEmailDraft(nextProfile.businessEmail ?? "");
+          markContinuingWizardStep("emailEntry", nextProfile.uid, {
+            phoneE164: nextProfile.phoneE164,
+          });
+          clearFlowError();
+          setMobileOtpDigits("");
+          setOtpFormEpoch((n) => n + 1);
+          authPerfMark("V8_session_reconciled");
+        },
+        scheduleAfterAcknowledgement: (navigate) => {
+          resolveVerificationSuccess("mobile", navigate);
+        },
+        navigateToApp: () => {
           void (async () => {
             clearWizardNavigationSession();
             await clearAuthWrapperChallenge();
             setChallenge(null);
             handoffToApp();
           })();
-        });
-        return;
-      }
-
-      if (hasAuthoritativeVerifiedEmail(nextProfile)) {
-        await markAuthWrapperEmailComplete(nextProfile.uid);
-        resolveVerificationSuccess("mobile", () => {
+        },
+        navigateToBusiness: () => {
           void (async () => {
             goToBusinessIdentity({ userInitiated: true });
             await clearAuthWrapperChallenge();
             setChallenge(null);
           })();
-        });
-        return;
-      }
-
-      await markAuthWrapperEmailPending(nextProfile.uid);
-      setEmailDraft(nextProfile.businessEmail ?? "");
-      markContinuingWizardStep("emailEntry", nextProfile.uid, {
-        phoneE164: nextProfile.phoneE164,
-      });
-      clearFlowError();
-      setMobileOtpDigits("");
-      setOtpFormEpoch((n) => n + 1);
-      authPerfMark("V8_session_reconciled");
-      resolveVerificationSuccess("mobile", () => {
-        void (async () => {
-          authPerfMark("V9_email_nav_requested");
-          authPerfMark("V10_email_screen_requested");
-          onboardingMeasure("mobileVerifiedUI", "emailScreenVisible", "mobileVerifiedUI → emailScreenVisible");
-          authPerfSummary("otp_verify", [
-            ["V0_otp_complete", "V1_verifying_overlay", "overlay_ms"],
-            ["V2_firebase_confirm_begin", "V3_firebase_auth_ok", "firebase_confirm_ms"],
-            ["V5_resolver_begin", "V6_resolver_ok", "resolver_ms"],
-            ["V7_session_reconcile_begin", "V8_session_reconciled", "session_ms"],
-            ["V0_otp_complete", "V9_email_nav_requested", "otp_to_email_nav_ms"],
-          ]);
-          setStep("email");
-          await clearAuthWrapperChallenge();
-          setChallenge(null);
-          const { clearMobileOtpDigitSnapshot } = await import(
-            "@/services/auth/mobileOtpSecureDigits"
-          );
-          await clearMobileOtpDigitSnapshot();
-        })();
+        },
+        navigateToEmail: () => {
+          void (async () => {
+            authPerfMark("V9_email_nav_requested");
+            authPerfMark("V10_email_screen_requested");
+            onboardingMeasure(
+              "mobileVerifiedUI",
+              "emailScreenVisible",
+              "mobileVerifiedUI → emailScreenVisible"
+            );
+            authPerfSummary("otp_verify", [
+              ["V0_otp_complete", "V1_verifying_overlay", "overlay_ms"],
+              ["V2_firebase_confirm_begin", "V3_firebase_auth_ok", "firebase_confirm_ms"],
+              ["V5_resolver_begin", "V6_resolver_ok", "resolver_ms"],
+              ["V7_session_reconcile_begin", "V8_session_reconciled", "session_ms"],
+              ["V0_otp_complete", "V9_email_nav_requested", "otp_to_email_nav_ms"],
+            ]);
+            setStep("email");
+            await clearAuthWrapperChallenge();
+            setChallenge(null);
+            const { clearMobileOtpDigitSnapshot } = await import(
+              "@/services/auth/mobileOtpSecureDigits"
+            );
+            await clearMobileOtpDigitSnapshot();
+          })();
+        },
       });
     },
     [applyServerProfile, goToBusinessIdentity, handoffToApp, resolveVerificationSuccess, updateProfile]
@@ -1008,43 +1044,55 @@ export function AuthFlowGate() {
 
   /** Post-auth identity retry — reuses Firebase session; does not resend SMS. */
   const handleRetryAccountSetup = async () => {
-    if (!phoneE164) return;
-    if (mobileVerifyInFlightRef.current) return;
-    if (!getNativeAuthUid()) {
-      applyFlowError(
-        new AppError(
-          "auth_failed",
-          "Your phone sign-in is no longer active. Request a new verification code.",
-          undefined,
-          {
-            authPhase: "post_auth",
-            failureDomain: "auth",
-            diagnosticCode: "RETRY_REQUIRES_NEW_OTP",
-            firebaseUserPresent: false,
-          }
-        )
-      );
-      return;
-    }
-    mobileVerifyInFlightRef.current = true;
-    clearFlowError();
-    beginVerificationProcess("mobile");
-    setLoading(true);
-    try {
-      const { callResolveOrCreateUserByPhone } = await import("@/services/auth/identityCallable");
-      const { requireJsAuthSessionForFirestore } = await import("@/services/auth/jsAuthBridge");
-      const result = await callResolveOrCreateUserByPhone(phoneE164);
-      // Same readiness barrier as confirmOtp — never continue on a soft bridge miss.
-      await requireJsAuthSessionForFirestore("retry_account_setup");
-      await applyServerProfile(result.profile);
-      await continueAfterPhoneProfile(result.profile);
-    } catch (e) {
-      abortVerificationProcess();
-      applyFlowError(e, "phone_otp");
-    } finally {
-      setLoading(false);
-      mobileVerifyInFlightRef.current = false;
-    }
+    await retryAuthenticatedAccountSetup({
+      phoneE164,
+      inFlight: mobileVerifyInFlightRef.current,
+      readLive: () => ({
+        uid: getNativeAuthUid(),
+        generation: currentAuthMutationGeneration(),
+      }),
+      begin: () => {
+        mobileVerifyInFlightRef.current = true;
+        clearFlowError();
+        beginVerificationProcess("mobile");
+        setLoading(true);
+      },
+      end: () => {
+        setLoading(false);
+        mobileVerifyInFlightRef.current = false;
+      },
+      resolveAccount: async (phone) => {
+        const { callResolveOrCreateUserByPhone } = await import("@/services/auth/identityCallable");
+        return callResolveOrCreateUserByPhone(phone);
+      },
+      requireBridge: async () => {
+        const { requireJsAuthSessionForFirestore } = await import("@/services/auth/jsAuthBridge");
+        // Same readiness barrier as confirmOtp — never continue on a soft bridge miss.
+        await requireJsAuthSessionForFirestore("retry_account_setup");
+      },
+      applyServerProfile: (next, ownership) =>
+        applyServerProfile(next, ownership.generation, () => getNativeAuthUid()),
+      continueAfterProfile: (next, ownership) => continueAfterPhoneProfile(next, ownership),
+      onInactiveSession: () => {
+        applyFlowError(
+          new AppError(
+            "auth_failed",
+            "Your phone sign-in is no longer active. Request a new verification code.",
+            undefined,
+            {
+              authPhase: "post_auth",
+              failureDomain: "auth",
+              diagnosticCode: "RETRY_REQUIRES_NEW_OTP",
+              firebaseUserPresent: false,
+            }
+          )
+        );
+      },
+      onFailure: (error) => {
+        abortVerificationProcess();
+        applyFlowError(error, "phone_otp");
+      },
+    });
   };
 
   // Challenge-scoped post-send instant verification only — never complete on

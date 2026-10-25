@@ -98,6 +98,12 @@ export interface ProfilePatch {
   onboardingProfileVersion?: number | null;
 }
 
+/** Session that started a profile write. Checked again immediately before setDoc. */
+export type ProfileWriteClaim = {
+  uid: string;
+  generation: number;
+};
+
 export interface AuthService {
   startOtp(phoneE164: PhoneE164): Promise<OtpChallenge>;
   confirmOtp(challenge: OtpChallenge, code: string): Promise<AuthResult>;
@@ -111,12 +117,14 @@ export interface AuthService {
   /** Cancel in-progress deletion during the grace period. */
   cancelAccountDeletion(profile: UserProfile): Promise<UserProfile>;
 
-  /**
-   * Update profile metadata (name, business, work type, language, profile
-   * completion marker). Identity (uid, UEID, phoneE164) is NOT mutable here.
-   * Mobile change is support/admin-only — see `adminMobileChange.ts`.
-   */
-  updateProfile(uid: string, patch: ProfilePatch): Promise<UserProfile>;
+/**
+ * Update profile metadata (name, business, work type, language, profile
+ * completion marker). Identity (uid, UEID, phoneE164) is NOT mutable here.
+ * Mobile change is support/admin-only — see `adminMobileChange.ts`.
+ * `claim` is the session that started the write. The Firebase adapter checks
+ * it immediately before setDoc.
+ */
+  updateProfile(uid: string, patch: ProfilePatch, claim?: ProfileWriteClaim): Promise<UserProfile>;
 
   /**
    * @internal Support/admin-only — not exposed in consumer app UI.

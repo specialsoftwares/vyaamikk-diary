@@ -27,6 +27,7 @@ import {
   noteNativeAuthIdentity,
 } from "./authSessionFence";
 import { beginPerfAttempt, recordPerfSpan } from "./authFlowPerf";
+import { startSharedAuthBridge } from "./sharedAuthBridge";
 
 const log = createLogger("auth/jsAuthBridge");
 
@@ -210,25 +211,46 @@ async function establishJsAuthSession(): Promise<boolean> {
   return true;
 }
 
+async function establishScopedJsAuthSession(uid: string, generation: number): Promise<boolean> {
+  const established = await establishJsAuthSession();
+  if (!established) return false;
+  if (currentAuthMutationGeneration() !== generation) return false;
+  if (getNativeAuthUid() !== uid) return false;
+  return true;
+}
+
+/**
+ * Start or join the JS bridge for the current native identity.
+ * Callers that share a uid and generation share one mint. Never throws.
+ * A false result is a failed bridge, not Firestore readiness.
+ */
+export function beginSharedJsAuthSession(): Promise<boolean> {
+  if (getActiveBackend() !== "firebase-production") return Promise.resolve(true);
+  const uid = getNativeAuthUid();
+  if (!uid) return Promise.resolve(false);
+  noteNativeAuthIdentity(uid);
+  const generation = currentAuthMutationGeneration();
+  return startSharedAuthBridge({ uid, generation }, () =>
+    establishScopedJsAuthSession(uid, generation).catch((error: unknown) => {
+      const code =
+        error && typeof error === "object" && "code" in error
+          ? String((error as { code: string }).code)
+          : "unknown";
+      log.warn("ensureJsAuthSession failed", {
+        code,
+        ...getJsAuthBridgeSnapshot(),
+      });
+      return false;
+    })
+  );
+}
+
 /**
  * Ensure the JS SDK auth session matches the native production session.
  * No-op (true) outside firebase-production. Never throws.
  */
 export async function ensureJsAuthSession(): Promise<boolean> {
-  if (getActiveBackend() !== "firebase-production") return true;
-
-  try {
-    noteNativeAuthIdentity(getNativeAuthUid());
-    return await establishJsAuthSession();
-  } catch (e) {
-    const code =
-      e && typeof e === "object" && "code" in e ? String((e as { code: string }).code) : "unknown";
-    log.warn("ensureJsAuthSession failed", {
-      code,
-      ...getJsAuthBridgeSnapshot(),
-    });
-    return false;
-  }
+  return beginSharedJsAuthSession();
 }
 
 /**
@@ -237,7 +259,7 @@ export async function ensureJsAuthSession(): Promise<boolean> {
  */
 export async function requireJsAuthSessionForFirestore(phase: string): Promise<void> {
   if (getActiveBackend() !== "firebase-production") return;
-  const ok = await ensureJsAuthSession();
+  const ok = await beginSharedJsAuthSession();
   if (ok) return;
   const { AppError } = await import("@/domain/errors");
   const snap = getJsAuthBridgeSnapshot();
