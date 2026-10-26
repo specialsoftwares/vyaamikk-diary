@@ -19,12 +19,23 @@ export type LocalSignOutResult = {
 };
 
 let generation = 0;
+let sessionCommitEpoch = 0;
 let tail: Promise<void> = Promise.resolve();
 let bridgeTargetUid: string | null = null;
 const generationListeners = new Set<() => void>();
 
 export function currentAuthMutationGeneration(): number {
   return generation;
+}
+
+/** A new sign-in or sign-out. Same-UID replacement does not bump the bridge generation. */
+export function currentSessionCommitEpoch(): number {
+  return sessionCommitEpoch;
+}
+
+export function beginSessionCommit(): number {
+  sessionCommitEpoch += 1;
+  return sessionCommitEpoch;
 }
 
 export function subscribeAuthMutationGeneration(listener: () => void): () => void {
@@ -159,6 +170,7 @@ export async function runLocalDeviceSignOut(steps: {
 
 export function __resetAuthSessionFenceForTests(): void {
   generation = 0;
+  sessionCommitEpoch = 0;
   tail = Promise.resolve();
   bridgeTargetUid = null;
 }

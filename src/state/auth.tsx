@@ -19,7 +19,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { AppState, InteractionManager } from "react-native";
+import { AppState, InteractionManager, Platform } from "react-native";
 
 import type { PhoneE164, UserProfile } from "@/domain/types";
 import {
@@ -34,19 +34,48 @@ import {
   type AuthSession,
 } from "@/services/session";
 import {
+  beginSessionCommit,
   clearPersistedProfileIfOwned,
   currentAuthMutationGeneration,
+  currentSessionCommitEpoch,
   retireJsAuthBridge,
   runLocalDeviceSignOut,
   type LocalSignOutResult,
 } from "@/services/auth/authSessionFence";
 import { retainLocalAccountOnLogout } from "@/services/accountDeletion/localAccountBoundary";
-import { LocalKeyUnavailable } from "@/services/accountDeletion/localDataKey";
 import { prepareLocalAccountKey } from "@/services/accountDeletion/localKeyLifecycle";
 import {
   commitAfterLocalReadiness,
+  openRetainedSession,
   sessionChangedError,
+  sessionStillOwned,
+  type SessionClaim,
+  type SessionLive,
 } from "@/services/accountDeletion/sessionLocalReadiness";
+import { sessionPublicationLive } from "@/services/accountDeletion/sessionPublication";
+import { getNativeAuthUid } from "@/services/auth/nativePhoneAuth";
+
+function readPublicationLive(): SessionLive {
+  let jsUid: string | null = null;
+  if (Platform.OS === "web") {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { getFirebaseAuth } = require("@/config/firebase") as {
+        getFirebaseAuth: () => { currentUser?: { uid?: string | null } | null };
+      };
+      jsUid = getFirebaseAuth().currentUser?.uid ?? null;
+    } catch {
+      jsUid = null;
+    }
+  }
+  return sessionPublicationLive({
+    platform: Platform.OS,
+    nativeUid: getNativeAuthUid(),
+    jsUid,
+    generation: currentAuthMutationGeneration(),
+    epoch: currentSessionCommitEpoch(),
+  });
+}
 import { markAuthStage } from "@/services/auth/authStageTiming";
 import { retireNativeCallableAuthReady } from "@/services/auth/nativeCallableAuthGate";
 import { toAppError } from "@/domain/errors";
@@ -234,23 +263,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!bootStillCurrent()) return;
         if (session) {
           const keyStarted = globalThis.performance?.now?.() ?? Date.now();
-          let localKey: Awaited<ReturnType<typeof prepareLocalAccountKey>>;
-          try {
-            localKey = await prepareLocalAccountKey(session.user.uid);
-          } catch (error) {
-            if (error instanceof LocalKeyUnavailable) {
-              if (!bootStillCurrent()) return;
-              setState((s) => ({ ...s, status: "signed_out" }));
-              return;
-            }
-            throw error;
-          }
-          markAuthStage("LOCAL_KEY_READY", keyStarted);
-          if (localKey.state !== "ready") {
-            if (!bootStillCurrent()) return;
+          const decision = await openRetainedSession({
+            session,
+            prepare: (uid) => prepareLocalAccountKey(uid),
+            liveUid: getNativeAuthUid(),
+          });
+          if (!bootStillCurrent()) return;
+          if (decision.action !== "publish") {
             setState((s) => ({ ...s, status: "signed_out" }));
             return;
           }
+          markAuthStage("LOCAL_KEY_READY", keyStarted);
           let user = session.user;
           const backend = getActiveBackend();
           const { profile: live, unverified } = await revalidateSessionProfile(
@@ -358,7 +381,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [dbStatus]);
 
   const saveSession = useCallback(
-    async (user: UserProfile, opts?: { preserveSignedInAt?: boolean; isCurrent?: () => boolean }) => {
+    async (
+      user: UserProfile,
+      opts?: {
+        preserveSignedInAt?: boolean;
+        claim?: SessionClaim;
+        isCurrent?: () => boolean;
+      }
+    ) => {
       const now = Date.now();
       const signedInAt = opts?.preserveSignedInAt
         ? (state.session?.signedInAt ?? user.lastLoginAt ?? now)
@@ -370,17 +400,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signedInAt,
         lastActiveAt,
       };
+      const claim: SessionClaim = opts?.claim ?? {
+        uid: user.uid,
+        generation: currentAuthMutationGeneration(),
+        epoch: currentSessionCommitEpoch(),
+      };
+      if (claim.uid !== user.uid) throw sessionChangedError();
+      const owned = () =>
+        sessionStillOwned(claim, readPublicationLive()) && (opts?.isCurrent?.() ?? true);
       const keyStarted = globalThis.performance?.now?.() ?? Date.now();
       await commitAfterLocalReadiness({
-        isCurrent: opts?.isCurrent ?? (() => true),
+        claim,
+        readLive: () => {
+          const live = readPublicationLive();
+          if (opts?.isCurrent && !opts.isCurrent()) return { ...live, uid: null };
+          return live;
+        },
         prepare: () => prepareLocalAccountKey(user.uid),
         save: async () => {
-          if (opts?.isCurrent) {
-            if (!(await sessionStore.saveIfCurrent(session, opts.isCurrent))) {
-              throw sessionChangedError();
-            }
-          } else {
-            await sessionStore.save(session);
+          if (!(await sessionStore.saveIfCurrent(session, owned))) {
+            throw sessionChangedError();
           }
         },
       });
@@ -402,16 +441,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const confirmOtp = useCallback(
     async (challenge: OtpChallenge, code: string) => {
       bootAttemptRef.current += 1;
+      const epoch = beginSessionCommit();
       try {
         const { profile, isNewUser } = await getAuthService().confirmOtp(challenge, code);
-        const generation = currentAuthMutationGeneration();
+        const claim: SessionClaim = {
+          uid: profile.uid,
+          generation: currentAuthMutationGeneration(),
+          epoch,
+        };
         if (state.user?.uid && state.user.uid !== profile.uid) {
           clearMasterDataSessionCache();
         }
-        const session = await saveSession(profile, {
-          isCurrent: () => currentAuthMutationGeneration() === generation,
-        });
-        if (currentAuthMutationGeneration() !== generation) throw sessionChangedError();
+        if (!sessionStillOwned(claim, readPublicationLive())) throw sessionChangedError();
+        const session = await saveSession(profile, { claim });
+        if (!sessionStillOwned(claim, readPublicationLive())) throw sessionChangedError();
         setState({
           status: "signed_in",
           session,
@@ -431,6 +474,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = useCallback(async () => {
     bootAttemptRef.current += 1;
+    beginSessionCommit();
     const uid = state.session?.user.uid;
     return runLocalDeviceSignOut({
       maskPrivateUi: () => {
@@ -526,19 +570,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const finishReactivation = useCallback(
     async (profile: UserProfile) => {
-      const ownedGeneration = currentAuthMutationGeneration();
+      const epoch = beginSessionCommit();
       if (getActiveBackend() === "firebase-production") {
         const bridge = await import("@/services/auth/jsAuthBridge");
         await bridge.ensureJsAuthSession();
       }
-      if (currentAuthMutationGeneration() !== ownedGeneration) throw sessionChangedError();
-      if (state.user && state.user.uid !== profile.uid) throw sessionChangedError();
-      const session = await saveSession(profile, {
-        isCurrent: () =>
-          currentAuthMutationGeneration() === ownedGeneration &&
-          (state.user == null || state.user.uid === profile.uid),
-      });
-      if (currentAuthMutationGeneration() !== ownedGeneration) throw sessionChangedError();
+      const claim: SessionClaim = {
+        uid: profile.uid,
+        generation: currentAuthMutationGeneration(),
+        epoch,
+      };
+      if (!sessionStillOwned(claim, readPublicationLive())) throw sessionChangedError();
+      const session = await saveSession(profile, { claim });
+      if (!sessionStillOwned(claim, readPublicationLive())) throw sessionChangedError();
       setState({
         status: "signed_in",
         session,
@@ -550,7 +594,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       );
       return profile;
     },
-    [saveSession, state.user]
+    [saveSession]
   );
 
   const acknowledgeUEID = useCallback(() => {
@@ -582,6 +626,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!stillOwned()) throw new Error("session_changed");
         const session = await saveSession(next, {
           preserveSignedInAt: true,
+          claim: {
+            uid: current.uid,
+            generation: owned ?? currentAuthMutationGeneration(),
+            epoch: currentSessionCommitEpoch(),
+          },
           isCurrent: owned == null ? undefined : stillOwned,
         });
         if (!stillOwned()) throw new Error("session_changed");
@@ -620,7 +669,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
         return statusRef.current === "signed_in" && sessionRef.current?.user.uid === profile.uid;
       };
-      const session = await saveSession(profile, { preserveSignedInAt: true, isCurrent });
+      const claim: SessionClaim = {
+        uid: profile.uid,
+        generation: ownedGeneration ?? currentAuthMutationGeneration(),
+        epoch: currentSessionCommitEpoch(),
+      };
+      const session = await saveSession(profile, { preserveSignedInAt: true, claim, isCurrent });
       if (isCurrent && !isCurrent()) throw new Error("session_changed");
       setState((s) => {
         if (ownedGeneration != null && currentAuthMutationGeneration() !== ownedGeneration) return s;
