@@ -22,6 +22,10 @@ This folder is the E1 isolated Functions-emulator entrypoint. It re-exports
 
 - Emulator hosts above (`FIRESTORE_EMULATOR_HOST`, `FIREBASE_AUTH_EMULATOR_HOST`, `FIREBASE_STORAGE_EMULATOR_HOST`). Unset hosts fail the round-trip test; they are not counted as pass.
 - `GRIN_GOODS_EVIDENCE_FUNCTIONS=true` on the **emulator process only**.
+- `emulator-content-key.env` is a fixture `CONTENT_DATA_KEY` for this emulator
+  only. `build.mjs` copies it to gitignored `.secret.local`. It is not the
+  production key, and a missing key still rejects a new receipt, command, or
+  event write. Do not deploy this folder or copy the fixture into Secret Manager.
 - Explicit emulator Admin target: `GRIN_ADMIN_PROJECT=demo-vyaamikk-grin-t1` and
   `GRIN_ADMIN_STORAGE_BUCKET=demo-vyaamikk-grin-t1.appspot.com`. Missing those
   values must not select a production project, and production must not fall
