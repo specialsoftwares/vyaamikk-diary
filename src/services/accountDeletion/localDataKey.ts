@@ -7,6 +7,8 @@
 
 import { gcm } from "@noble/ciphers/aes";
 
+import { readNativeSecureRandom } from "@/services/accountDeletion/nativeSecureRandom";
+
 export type LocalKeyFailure =
   | "secure_store_unavailable"
   | "secure_store_module_unavailable"
@@ -270,29 +272,9 @@ export function localCipherWorksWithoutWebCrypto(): boolean {
 }
 
 function randomBytes(length: number): Uint8Array {
-  const bytes = new Uint8Array(length);
-  const random = globalThis.crypto?.getRandomValues;
-  if (typeof random === "function") {
-    random.call(globalThis.crypto, bytes);
-    return bytes;
-  }
-  const native = nativeRandomBytes(length);
-  if (native) {
-    bytes.set(native);
-    return bytes;
-  }
-  throw new LocalKeyUnavailable("secure_random_unavailable");
-}
-
-function nativeRandomBytes(length: number): Uint8Array | null {
-  try {
-    const crypto = require("expo-crypto") as { getRandomBytes?: (size: number) => Uint8Array };
-    if (typeof crypto.getRandomBytes !== "function") return null;
-    const generated = crypto.getRandomBytes(length);
-    return generated?.byteLength === length ? generated : null;
-  } catch {
-    return null;
-  }
+  const generated = readNativeSecureRandom(length);
+  if (!generated.ok) throw new LocalKeyUnavailable("secure_random_unavailable", generated.cause);
+  return generated.bytes;
 }
 
 function copyBytes(bytes: Uint8Array): Uint8Array {

@@ -3,6 +3,8 @@
  * Host SQLite is not a phone. The cipher test removes WebCrypto first.
  */
 import assert from "node:assert/strict";
+import Module from "node:module";
+import { randomFillSync } from "node:crypto";
 
 import { installMemoryLocalDatabase, reopenMemoryLocalDatabaseFrom, uninstallMemoryLocalDatabase } from "@/localDb/testHarness";
 import { migrateToV3, migrateToV5, migrateToV6 } from "@/localDb/migrate";
@@ -38,6 +40,19 @@ import { mayIssueRemoteWork, syncSessionOwnership } from "@/sync/syncSessionOwne
 import type { BusinessEntry } from "@/domain/businessEntry";
 
 async function main(): Promise<void> {
+const originalRequire = Module.prototype.require;
+Module.prototype.require = function (this: unknown, id: string) {
+  if (id === "expo-crypto") {
+    return {
+      getRandomValues(bytes: Uint8Array) {
+        randomFillSync(bytes);
+        return bytes;
+      },
+    };
+  }
+  return originalRequire.apply(this, [id]);
+} as typeof Module.prototype.require;
+try {
 assert.equal(localCipherWorksWithoutWebCrypto(), true);
 
 const legacy = new Map<string, string>();
@@ -345,23 +360,42 @@ assert.throws(
   (error: unknown) => error instanceof LocalKeyUnavailable && error.reason === "secure_store_read_failed"
 );
 
-const previousCrypto = globalThis.crypto;
-Object.defineProperty(globalThis, "crypto", { configurable: true, value: undefined });
+const hostRandom = globalThis.crypto.getRandomValues.bind(globalThis.crypto);
+let hostCalls = 0;
+globalThis.crypto.getRandomValues = ((bytes: Uint8Array) => {
+  hostCalls += 1;
+  return hostRandom(bytes);
+}) as typeof globalThis.crypto.getRandomValues;
+Module.prototype.require = function (this: unknown, id: string) {
+  if (id === "expo-crypto") {
+    return {
+      getRandomValues() {
+        throw new Error("native module missing");
+      },
+    };
+  }
+  return originalRequire.apply(this, [id]);
+} as typeof Module.prototype.require;
 try {
   await assert.rejects(resolveLocalDataKey(createMemoryLocalKeyStore(), "owner-rng"), (error: unknown) => {
     assert.ok(error instanceof LocalKeyUnavailable);
     assert.equal(error.reason, "secure_random_unavailable");
     const shown = toPublicError(error).message;
     assert.equal(shown.includes("secure_"), false);
+    assert.equal(shown.includes("native module"), false);
     assert.match(shown, /secure storage/i);
     return true;
   });
+  assert.equal(hostCalls, 0);
 } finally {
-  Object.defineProperty(globalThis, "crypto", { configurable: true, value: previousCrypto });
+  globalThis.crypto.getRandomValues = hostRandom;
 }
 
 uninstallMemoryLocalDatabase();
 console.log("local key and payload protection passed");
+} finally {
+  Module.prototype.require = originalRequire;
+}
 }
 
 main().catch((error) => {
