@@ -10,6 +10,7 @@
 import {
   createSecureLocalKeyStore,
   LOCAL_KEY_ACCESSIBILITY,
+  LocalKeyUnavailable,
   type LegacyKeyReader,
   type LocalKeyStore,
 } from "@/services/accountDeletion/localDataKey";
@@ -52,13 +53,13 @@ export function createProductionLocalKeyStore(legacy: LegacyKeyReader | null): L
     return createSecureLocalKeyStore({
       secure: {
         async getItem() {
-          throw new Error("secure_store_unavailable");
+          throw new LocalKeyUnavailable("secure_store_module_unavailable");
         },
         async setItem() {
-          throw new Error("secure_store_unavailable");
+          throw new LocalKeyUnavailable("secure_store_module_unavailable");
         },
         async deleteItem() {
-          throw new Error("secure_store_unavailable");
+          throw new LocalKeyUnavailable("secure_store_module_unavailable");
         },
       },
       legacy,

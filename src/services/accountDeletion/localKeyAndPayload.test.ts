@@ -7,6 +7,8 @@ import assert from "node:assert/strict";
 import { installMemoryLocalDatabase, reopenMemoryLocalDatabaseFrom, uninstallMemoryLocalDatabase } from "@/localDb/testHarness";
 import { migrateToV3, migrateToV5, migrateToV6 } from "@/localDb/migrate";
 import { getLocalDatabase } from "@/localDb/database";
+import { toPublicError } from "@/domain/publicErrors";
+import { requireReadyLocalKey } from "@/services/accountDeletion/sessionLocalReadiness";
 import {
   LocalKeyUnavailable,
   createMemoryLocalKeyStore,
@@ -113,7 +115,10 @@ const unavailable = await resolveLocalDataKey(
   "owner-e"
 );
 assert.equal(unavailable.state, "unavailable");
-if (unavailable.state === "unavailable") assert.equal(unavailable.reason, "secure_store_unavailable");
+if (unavailable.state === "unavailable") {
+  assert.equal(unavailable.reason, "secure_store_read_failed");
+  assert.equal((unavailable.cause as Error).message, "native missing");
+}
 assert.equal(ordinary.has("raw"), false);
 
 const memory = createMemoryLocalKeyStore();
@@ -334,6 +339,26 @@ unbindLocalDataKey("owner-a");
 await store.delete("owner-a");
 assert.equal(restarted.getFirstSync<{ id: string }>("SELECT id FROM entries_local WHERE user_id = ?", ["owner-a"]), null);
 assert.equal(secure.has("vyd.ldk.v1.owner-a"), false);
+
+assert.throws(
+  () => requireReadyLocalKey({ state: "unavailable", reason: "secure_store_read_failed" }),
+  (error: unknown) => error instanceof LocalKeyUnavailable && error.reason === "secure_store_read_failed"
+);
+
+const previousCrypto = globalThis.crypto;
+Object.defineProperty(globalThis, "crypto", { configurable: true, value: undefined });
+try {
+  await assert.rejects(resolveLocalDataKey(createMemoryLocalKeyStore(), "owner-rng"), (error: unknown) => {
+    assert.ok(error instanceof LocalKeyUnavailable);
+    assert.equal(error.reason, "secure_random_unavailable");
+    const shown = toPublicError(error).message;
+    assert.equal(shown.includes("secure_"), false);
+    assert.match(shown, /secure storage/i);
+    return true;
+  });
+} finally {
+  Object.defineProperty(globalThis, "crypto", { configurable: true, value: previousCrypto });
+}
 
 uninstallMemoryLocalDatabase();
 console.log("local key and payload protection passed");

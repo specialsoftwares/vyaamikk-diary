@@ -9,6 +9,11 @@ import { gcm } from "@noble/ciphers/aes";
 
 export type LocalKeyFailure =
   | "secure_store_unavailable"
+  | "secure_store_module_unavailable"
+  | "secure_store_read_failed"
+  | "secure_store_write_failed"
+  | "secure_store_readback_failed"
+  | "secure_random_unavailable"
   | "key_missing"
   | "key_corrupt"
   | "key_conflict"
@@ -16,17 +21,19 @@ export type LocalKeyFailure =
 
 export class LocalKeyUnavailable extends Error {
   readonly reason: LocalKeyFailure;
+  readonly cause: unknown;
 
-  constructor(reason: LocalKeyFailure) {
+  constructor(reason: LocalKeyFailure, cause?: unknown) {
     super(reason);
     this.name = "LocalKeyUnavailable";
     this.reason = reason;
+    this.cause = cause;
   }
 }
 
 export type LocalKeyResult =
   | { state: "ready"; key: Uint8Array }
-  | { state: "unavailable"; reason: LocalKeyFailure };
+  | { state: "unavailable"; reason: LocalKeyFailure; cause?: unknown };
 
 export type LocalKeyStore = {
   get(uid: string): Promise<Uint8Array | null>;
@@ -111,8 +118,9 @@ export function createSecureLocalKeyStore(input: {
       let raw: string | null;
       try {
         raw = await input.secure.getItem(secureKeyName(uid));
-      } catch {
-        throw new LocalKeyUnavailable("secure_store_unavailable");
+      } catch (error) {
+        if (error instanceof LocalKeyUnavailable) throw error;
+        throw new LocalKeyUnavailable("secure_store_read_failed", error);
       }
       if (raw == null) return null;
       const decoded = decodeKey(raw);
@@ -122,18 +130,25 @@ export function createSecureLocalKeyStore(input: {
     async set(uid: string, key: Uint8Array) {
       try {
         await input.secure.setItem(secureKeyName(uid), bytesToBase64(key), options);
-        const readBack = decodeKey(await input.secure.getItem(secureKeyName(uid)));
+        let readBack: Uint8Array | null;
+        try {
+          readBack = decodeKey(await input.secure.getItem(secureKeyName(uid)));
+        } catch (error) {
+          if (error instanceof LocalKeyUnavailable) throw error;
+          throw new LocalKeyUnavailable("secure_store_readback_failed", error);
+        }
         if (!readBack || !equalBytes(readBack, key)) throw new LocalKeyUnavailable("migration_incomplete");
       } catch (error) {
         if (error instanceof LocalKeyUnavailable) throw error;
-        throw new LocalKeyUnavailable("secure_store_unavailable");
+        throw new LocalKeyUnavailable("secure_store_write_failed", error);
       }
     },
     async delete(uid: string) {
       try {
         await input.secure.deleteItem(secureKeyName(uid));
-      } catch {
-        throw new LocalKeyUnavailable("secure_store_unavailable");
+      } catch (error) {
+        if (error instanceof LocalKeyUnavailable) throw error;
+        throw new LocalKeyUnavailable("secure_store_unavailable", error);
       }
       if (input.legacy) await input.legacy.removeItem(LEGACY_PREFIX + uid);
     },
@@ -170,8 +185,9 @@ async function resolveOnce(
     secure = await store.get(uid);
   } catch (error) {
     if (error instanceof LocalKeyUnavailable && error.reason === "key_corrupt") secureCorrupt = true;
-    else if (error instanceof LocalKeyUnavailable) return { state: "unavailable", reason: error.reason };
-    else return { state: "unavailable", reason: "secure_store_unavailable" };
+    else if (error instanceof LocalKeyUnavailable) {
+      return { state: "unavailable", reason: error.reason, cause: error.cause };
+    } else return { state: "unavailable", reason: "secure_store_read_failed", cause: error };
   }
   const legacyRaw = options?.legacy ? await options.legacy.getItem(LEGACY_PREFIX + uid) : null;
   const legacy = decodeKey(legacyRaw);
@@ -256,9 +272,27 @@ export function localCipherWorksWithoutWebCrypto(): boolean {
 function randomBytes(length: number): Uint8Array {
   const bytes = new Uint8Array(length);
   const random = globalThis.crypto?.getRandomValues;
-  if (typeof random !== "function") throw new LocalKeyUnavailable("secure_store_unavailable");
-  random.call(globalThis.crypto, bytes);
-  return bytes;
+  if (typeof random === "function") {
+    random.call(globalThis.crypto, bytes);
+    return bytes;
+  }
+  const native = nativeRandomBytes(length);
+  if (native) {
+    bytes.set(native);
+    return bytes;
+  }
+  throw new LocalKeyUnavailable("secure_random_unavailable");
+}
+
+function nativeRandomBytes(length: number): Uint8Array | null {
+  try {
+    const crypto = require("expo-crypto") as { getRandomBytes?: (size: number) => Uint8Array };
+    if (typeof crypto.getRandomBytes !== "function") return null;
+    const generated = crypto.getRandomBytes(length);
+    return generated?.byteLength === length ? generated : null;
+  } catch {
+    return null;
+  }
 }
 
 function copyBytes(bytes: Uint8Array): Uint8Array {

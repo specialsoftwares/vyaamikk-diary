@@ -41,7 +41,13 @@ import {
   type LocalSignOutResult,
 } from "@/services/auth/authSessionFence";
 import { retainLocalAccountOnLogout } from "@/services/accountDeletion/localAccountBoundary";
+import { LocalKeyUnavailable } from "@/services/accountDeletion/localDataKey";
 import { prepareLocalAccountKey } from "@/services/accountDeletion/localKeyLifecycle";
+import {
+  commitAfterLocalReadiness,
+  sessionChangedError,
+} from "@/services/accountDeletion/sessionLocalReadiness";
+import { markAuthStage } from "@/services/auth/authStageTiming";
 import { retireNativeCallableAuthReady } from "@/services/auth/nativeCallableAuthGate";
 import { toAppError } from "@/domain/errors";
 import { clearMasterDataSessionCache } from "@/services/masterData";
@@ -227,7 +233,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const session = await sessionStore.load();
         if (!bootStillCurrent()) return;
         if (session) {
-          await prepareLocalAccountKey(session.user.uid);
+          const keyStarted = globalThis.performance?.now?.() ?? Date.now();
+          let localKey: Awaited<ReturnType<typeof prepareLocalAccountKey>>;
+          try {
+            localKey = await prepareLocalAccountKey(session.user.uid);
+          } catch (error) {
+            if (error instanceof LocalKeyUnavailable) {
+              if (!bootStillCurrent()) return;
+              setState((s) => ({ ...s, status: "signed_out" }));
+              return;
+            }
+            throw error;
+          }
+          markAuthStage("LOCAL_KEY_READY", keyStarted);
+          if (localKey.state !== "ready") {
+            if (!bootStillCurrent()) return;
+            setState((s) => ({ ...s, status: "signed_out" }));
+            return;
+          }
           let user = session.user;
           const backend = getActiveBackend();
           const { profile: live, unverified } = await revalidateSessionProfile(
@@ -347,14 +370,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signedInAt,
         lastActiveAt,
       };
-      if (opts?.isCurrent) {
-        if (!(await sessionStore.saveIfCurrent(session, opts.isCurrent))) {
-          throw new Error("session_changed");
-        }
-      } else {
-        await sessionStore.save(session);
-      }
-      await prepareLocalAccountKey(user.uid);
+      const keyStarted = globalThis.performance?.now?.() ?? Date.now();
+      await commitAfterLocalReadiness({
+        isCurrent: opts?.isCurrent ?? (() => true),
+        prepare: () => prepareLocalAccountKey(user.uid),
+        save: async () => {
+          if (opts?.isCurrent) {
+            if (!(await sessionStore.saveIfCurrent(session, opts.isCurrent))) {
+              throw sessionChangedError();
+            }
+          } else {
+            await sessionStore.save(session);
+          }
+        },
+      });
+      markAuthStage("SESSION_PUBLISH", keyStarted);
       return session;
     },
     [state.session?.signedInAt, state.session?.lastActiveAt]
@@ -374,10 +404,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       bootAttemptRef.current += 1;
       try {
         const { profile, isNewUser } = await getAuthService().confirmOtp(challenge, code);
+        const generation = currentAuthMutationGeneration();
         if (state.user?.uid && state.user.uid !== profile.uid) {
           clearMasterDataSessionCache();
         }
-        const session = await saveSession(profile);
+        const session = await saveSession(profile, {
+          isCurrent: () => currentAuthMutationGeneration() === generation,
+        });
+        if (currentAuthMutationGeneration() !== generation) throw sessionChangedError();
         setState({
           status: "signed_in",
           session,
@@ -497,9 +531,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const bridge = await import("@/services/auth/jsAuthBridge");
         await bridge.ensureJsAuthSession();
       }
-      if (currentAuthMutationGeneration() !== ownedGeneration) return profile;
-      if (state.user && state.user.uid !== profile.uid) return profile;
-      const session = await saveSession(profile);
+      if (currentAuthMutationGeneration() !== ownedGeneration) throw sessionChangedError();
+      if (state.user && state.user.uid !== profile.uid) throw sessionChangedError();
+      const session = await saveSession(profile, {
+        isCurrent: () =>
+          currentAuthMutationGeneration() === ownedGeneration &&
+          (state.user == null || state.user.uid === profile.uid),
+      });
+      if (currentAuthMutationGeneration() !== ownedGeneration) throw sessionChangedError();
       setState({
         status: "signed_in",
         session,
