@@ -123,5 +123,14 @@ assert.equal(internalGrinApk.env?.EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED, "1");
 assert.equal(internalGrinApk.env?.EXPO_PUBLIC_GOODS_EVIDENCE_STORE_RUNTIME_ADMIT, "1");
 assert.equal(internalGrinApk.env?.EXPO_PUBLIC_SUBSCRIPTION_PURCHASE_ENTRY_ENABLED, "0");
 assert.equal(internalGrinApk.env?.EXPO_PUBLIC_QUOTA_UPSELL_ENABLED, "0");
+const authValidation = eas.build["internal-auth-validation"];
+assert.ok(authValidation, "internal-auth-validation profile required");
+assert.equal(authValidation.android?.buildType, "app-bundle");
+assert.equal(authValidation.env?.EXPO_PUBLIC_APP_MODE, "production");
+assert.equal(authValidation.env?.EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED, "0");
+assert.equal(authValidation.env?.EXPO_PUBLIC_GOODS_EVIDENCE_STORE_RUNTIME_ADMIT, "0");
+assert.equal(authValidation.env?.EXPO_PUBLIC_SUBSCRIPTION_PURCHASE_ENTRY_ENABLED, "0");
+assert.equal(authValidation.env?.EXPO_PUBLIC_QUOTA_UPSELL_ENABLED, "0");
+assert.equal(authValidation.env?.EXPO_PUBLIC_RESTORE_ADMISSION_REFRESH, undefined);
 
 console.log("goodsEvidence/isolation.contract.test.ts: ok");

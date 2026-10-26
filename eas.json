@@ -58,6 +58,20 @@
         "buildType": "apk"
       }
     },
+    "internal-auth-validation": {
+      "autoIncrement": false,
+      "environment": "production",
+      "env": {
+        "EXPO_PUBLIC_APP_MODE": "production",
+        "EXPO_PUBLIC_SUBSCRIPTION_PURCHASE_ENTRY_ENABLED": "0",
+        "EXPO_PUBLIC_QUOTA_UPSELL_ENABLED": "0",
+        "EXPO_PUBLIC_GOODS_EVIDENCE_ENABLED": "0",
+        "EXPO_PUBLIC_GOODS_EVIDENCE_STORE_RUNTIME_ADMIT": "0"
+      },
+      "android": {
+        "buildType": "app-bundle"
+      }
+    },
     "development": {
       "developmentClient": true,
       "distribution": "internal",
@@ -104,6 +118,12 @@
   "submit": {
     "production": {},
     "internal-grin": {
+      "android": {
+        "track": "internal",
+        "releaseStatus": "completed"
+      }
+    },
+    "internal-auth-validation": {
       "android": {
         "track": "internal",
         "releaseStatus": "completed"
