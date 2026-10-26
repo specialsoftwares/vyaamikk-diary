@@ -10,4 +10,4 @@ The installed app is Expo SDK 54 (`expo` in package.json). Do not upgrade the SD
 
 A pull request from `integration` to `main` promotes every commit on `integration`, not only the latest fix. Keep that pull request draft until the included work is accepted. Do not merge it, deploy Functions or rules, change activation flags, or start a public release unless that step is explicitly requested.
 
-Do not delete older branches to make the `integration` name available. `origin` has both `integration/release-privacy-candidate` and `archive/release-privacy-candidate` at `d3d40283af4b609aebaeb4b38b8578dc7d88e8cd`. The archive ref preserves that commit outside the `integration/` namespace. Git still cannot store a branch named `integration` until `integration/release-privacy-candidate` is retired by an explicit repository decision. Do not delete that old ref without that decision.
+`archive/release-privacy-candidate` preserves `d3d40283af4b609aebaeb4b38b8578dc7d88e8cd`. The ref `integration/release-privacy-candidate` was removed only after that archive matched. Keep the archive. Do not delete unrelated branches.
