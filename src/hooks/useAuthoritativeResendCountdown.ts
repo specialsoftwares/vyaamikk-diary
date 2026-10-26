@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { AppState, type AppStateStatus } from "react-native";
 
 import { remainingSecondsUntil } from "@/utils/otpCountdownFormat";
+import { resolveResendControl, type ResendPhase } from "@/hooks/resendControl";
 
 /** Shared tick helper for any authoritative future timestamp. */
 export function useAuthoritativeCountdown(targetAtMs: number | null): number {
@@ -45,10 +46,18 @@ export function useAuthoritativeCountdown(targetAtMs: number | null): number {
 export function useAuthoritativeResendCountdown(resendAvailableAt: number | null): {
   remainingSeconds: number;
   canResend: boolean;
+  phase: ResendPhase;
 } {
   const remainingSeconds = useAuthoritativeCountdown(resendAvailableAt);
+  const phase = resolveResendControl({
+    resendAvailableAt,
+    remainingSeconds,
+    online: true,
+    busy: false,
+  });
   return {
     remainingSeconds,
-    canResend: remainingSeconds <= 0 && resendAvailableAt != null,
+    canResend: phase === "ready",
+    phase,
   };
 }

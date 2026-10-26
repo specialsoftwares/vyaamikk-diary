@@ -14,7 +14,7 @@ import {
   type SafeMetaValue,
 } from "./safeDiagnostics";
 
-type Level = "debug" | "info" | "warn" | "error";
+type Level = "debug" | "info" | "warn" | "error" | "metric";
 type Sink = (...args: unknown[]) => void;
 
 function selectSink(level: Level): Sink {
@@ -66,5 +66,6 @@ export function createLogger(scope: string) {
     info: (m: string, d?: unknown) => emit("info", scope, m, d),
     warn: (m: string, d?: unknown) => emit("warn", scope, m, d),
     error: (m: string, d?: unknown) => emit("error", scope, m, d),
+    metric: (m: string, d?: unknown) => emit("metric", scope, m, d),
   };
 }

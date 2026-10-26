@@ -37,6 +37,7 @@ const ALLOWED_SCOPES = new Set([
   "auth/flowGate",
   "auth/identityCallable",
   "auth/jsAuthBridge",
+  "auth/localKey",
   "auth/localMockEmailOtp",
   "auth/mock",
   "auth/mockRegistry",
@@ -128,12 +129,15 @@ const MESSAGE_EVENTS = new Map<string, MessageMapping>([
     "deferred consent persist failed",
     { event: "deferred_consent_persist_failed", summary: "deferred consent persist failed" },
   ],
+  ["auth stage timed", { event: "auth_stage_timed", summary: "auth stage timed" }],
+  ["auth failure reported", { event: "auth_failure_reported", summary: "auth failure reported" }],
 ]);
 
 const CALLABLE_FAILED_RE = /^callable ([A-Za-z][A-Za-z0-9_]{1,63}) failed$/;
 
 const ALLOWED_CALLABLES = new Set([
   "completeAccountReactivation",
+  "startAccountReactivation",
   "confirmVerifiedMobileContactChange",
   "mintClientAuthToken",
   "prepareAndroidBillingAccount",
@@ -155,6 +159,11 @@ const STARTUP_STAGES = new Set([
   "AUTH_HYDRATED",
   "SYNC_READY",
   "ROUTER_READY",
+  "LOCAL_KEY_RANDOM",
+  "LOCAL_KEY_READ",
+  "LOCAL_KEY_WRITE",
+  "LOCAL_KEY_READY",
+  "SESSION_PUBLISH",
 ]);
 
 const STARTUP_ERROR_CODES = new Set([
@@ -196,6 +205,17 @@ const APP_ERROR_CODES = new Set([
   "quota_exhausted",
   "quota_state_invalid",
   "unknown",
+  "secure_store_unavailable",
+  "secure_store_module_unavailable",
+  "secure_store_read_failed",
+  "secure_store_write_failed",
+  "secure_store_readback_failed",
+  "secure_random_unavailable",
+  "key_missing",
+  "key_corrupt",
+  "key_conflict",
+  "migration_incomplete",
+  "session_changed",
 ]);
 
 const FIREBASE_AUTH_CODES = new Set([
@@ -240,7 +260,7 @@ const ERROR_CLASSES = new Set<SafeErrorClass>([
   "unknown",
 ]);
 
-const ERROR_NAMES = new Set(["AppError", "StartupError", "Error"]);
+const ERROR_NAMES = new Set(["AppError", "StartupError", "Error", "LocalKeyUnavailable"]);
 
 const ALLOWED_REGIONS = new Set(["asia-south1"]);
 

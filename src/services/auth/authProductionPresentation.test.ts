@@ -44,8 +44,9 @@ const panel = readFileSync(
   join(__dirname, "../../auth-v2/components/PhoneAuthErrorPanel.tsx"),
   "utf8"
 );
-assert.match(panel, /shouldShowAuthDiagnosticsInUi/);
-assert.match(panel, /Copy diagnostics/);
+assert.equal(panel.includes("Diagnostic:"), false);
+assert.equal(panel.includes("Copy diagnostics"), false);
+assert.equal(panel.includes("shouldShowAuthDiagnosticsInUi"), false);
 
 const gate = readFileSync(join(__dirname, "../../auth-v2/AuthFlowGate.tsx"), "utf8");
 assert.match(gate, /errorVisibleOnSurface/);

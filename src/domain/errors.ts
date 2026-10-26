@@ -2,6 +2,8 @@
  * Typed errors so screens can branch on cause without parsing English strings.
  */
 
+import { toPublicError } from "@/domain/publicErrors";
+
 export type AppErrorCode =
   | "network"
   | "invalid_phone"
@@ -51,56 +53,5 @@ export function toAppError(e: unknown, fallback: AppErrorCode = "unknown"): AppE
 }
 
 export function userFacingMessage(e: unknown): string {
-  if (e instanceof AppError) {
-    switch (e.code) {
-      case "network":
-        return "No internet connection. Please check your network and try again.";
-      case "invalid_phone":
-        return "Please enter a valid 10-digit mobile number.";
-      case "invalid_otp":
-        return e.message || "Incorrect OTP. Please try again.";
-      case "otp_expired":
-        return e.message || "OTP expired. Please request a new code.";
-      case "otp_send_failed":
-        return e.message || "Could not send the verification code. Try again.";
-      case "auth_failed":
-        return e.message || "Sign-in failed. Please try again.";
-      case "too_many_attempts":
-        return "Too many attempts. Please wait a few minutes and try again.";
-      case "auth_not_configured":
-        return "Login service is not configured for this build.";
-      case "session_expired":
-        return "Your session expired. Please log in again.";
-      case "not_found":
-        return e.message || "We couldn't find that entry.";
-      case "permission_denied":
-        return e.message || "You don't have permission to perform this action.";
-      case "account_pending_deletion":
-        return e.message;
-      case "email_already_linked":
-      case "email_pending_deletion":
-        return e.message;
-      case "email_otp_cooldown":
-        return e.message || "Resend is not available yet.";
-      case "save_failed":
-        return "Couldn't save right now. Please try again.";
-      case "delete_failed":
-        return "Couldn't delete right now. Please try again.";
-      case "offline_read_only":
-        return (
-          e.message ||
-          "You can view existing records, but creating, editing, deleting, PDF generation, sharing, and sync are unavailable until you reconnect and this device is re-validated."
-        );
-      case "quota_exhausted":
-        return (
-          e.message || "Monthly record limit reached. This save was not completed."
-        );
-      case "quota_state_invalid":
-        return e.message || "Couldn't save right now. Please try again.";
-      default:
-        return e.message || "Something went wrong.";
-    }
-  }
-  if (e instanceof Error) return e.message;
-  return "Something went wrong.";
+  return toPublicError(e).message;
 }
