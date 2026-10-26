@@ -78,22 +78,22 @@ export function grinCloudDocumentShouldSeal(path: string): boolean {
 }
 
 /**
- * Seals a GRIN body document when the content key is present.
- * A missing key leaves the document unchanged so a deploy without the secret
- * does not make existing plaintext unreadable. Already sealed documents are not wrapped again.
+ * Seals a new or updated GRIN body document.
+ * A missing or malformed key throws. It does not return the plaintext for persistence.
+ * Serials, quotas, and other non-body paths are unchanged.
+ * An already sealed document is persisted only after this key opens it.
  */
 export function sealGrinCloudDocument(
   path: string,
   data: Record<string, unknown>,
   env: NodeJS.ProcessEnv = process.env
 ): Record<string, unknown> {
-  if (!grinCloudDocumentShouldSeal(path) || data.grinDocumentSeal === 1) return data;
+  if (!grinCloudDocumentShouldSeal(path)) return data;
   const uid = path.split("/")[1];
-  if (!uid || !path.startsWith(`users/${uid}/`)) return data;
-  let key: Buffer;
-  try {
-    key = loadContentKey(env);
-  } catch {
+  if (!uid || !path.startsWith(`users/${uid}/`)) throw new Error("binding_rejected");
+  const key = loadContentKey(env);
+  if (data.grinDocumentSeal === 1) {
+    openGrinCloudDocument(path, data, env);
     return data;
   }
   const seal = sealContent({

@@ -118,14 +118,17 @@ assert.equal(boundaryFor("party_ledger_projections").boundary, "owner_rules");
 assert.equal(CONTENT_MIGRATION_UNCOVERED.includes("party_ledger_projections"), true);
 assert.equal(boundaryFor("grin_evidence").privateFields.includes("image bytes"), true);
 const coverage = coverageEvidence();
-assert.equal(coverage.grin.encryption, false);
-assert.equal(coverage.grin.implemented, "owner_rules");
+assert.equal(coverage.grin.encryption, true);
+assert.equal(coverage.grin.implemented, "content_seal");
+assert.equal(coverage.grin.fullFeatureProfile, "internal-grin");
+assert.equal(coverage.grin.purchaseEntry, "enabled");
+assert.equal(coverage.grin.quotaUpsell, "disabled");
 assert.equal(coverage.partyLedger.encryption, false);
 assert.equal(coverage.partyLedger.storedPlaintextProjection, false);
 assert.equal(coverage.partyLedger.clientRead, "denied");
 assert.equal(coverage.partyLedger.releaseReadPath, "recomputed_on_device");
 assert.equal(coverage.partyLedger.deletion, "purged_with_the_account");
-assert.equal(coverage.grin.releaseReachable, false);
+assert.equal(coverage.grin.releaseReachable, true);
 assert.equal(coverage.localQueue.encryption, true);
 assert.equal(coverage.localQueue.keyStore, "os_secure_store");
 assert.equal(coverage.localQueue.nativeDeviceVerified, false);
@@ -133,8 +136,8 @@ assert.equal(coverage.localQueue.sealedFields.includes("sync_queue.payload_json"
 assert.equal(coverage.localQueue.insightJoinKeys, "account_bound_hmac");
 assert.equal(coverage.localQueue.grinLocal.storeRuntimeCanOpen, false);
 assert.equal(coverage.localQueue.grinLocal.bodiesEncrypted, true);
-assert.equal(coverage.grin.receiptDocuments, "sealed_when_content_key_bound");
-assert.equal(coverage.grin.imageBytes, "hashed_stored_object");
+assert.equal(coverage.grin.receiptDocuments, "sealed_or_rejected");
+assert.equal(coverage.grin.imageBytes, "sealed_stream_original_hash_distinct");
 assert.equal(coverage.localQueue.sealedFields.includes("grin_local_receipts.payload_json"), true);
 assert.equal(coverage.localQueue.sealedFields.includes("grin_outbox_commands.frozen_payload_json"), true);
 assert.equal(coverage.localQueue.grinLocal.accountDeletionRemovesOwnerRows, true);
@@ -361,7 +364,11 @@ void (async () => {
   assert.equal(grinCloudDocumentShouldSeal(receiptPath), true);
   assert.equal(grinCloudDocumentShouldSeal(serialPath), false);
   assert.equal(sealGrinCloudDocument(serialPath, { nextSerial: 2 }, grinEnv).nextSerial, 2);
-  assert.deepEqual(sealGrinCloudDocument(receiptPath, receipt, {}), receipt);
+  assert.throws(() => sealGrinCloudDocument(receiptPath, receipt, {}), /content_key_unavailable/);
+  assert.throws(
+    () => sealGrinCloudDocument(receiptPath, receipt, { CONTENT_DATA_KEY: "%%%" }),
+    /content_key_unavailable/
+  );
   const sealedReceipt = sealGrinCloudDocument(receiptPath, receipt, grinEnv);
   assert.equal(sealedReceipt.grinDocumentSeal, 1);
   assert.equal(JSON.stringify(sealedReceipt).includes("cement"), false);

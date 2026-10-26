@@ -14,10 +14,14 @@ export function coverageEvidence() {
     grin: {
       requirement: "Receipt bodies and image bytes need application-level encryption before they count as sealed.",
       implemented: boundaryFor("grin_evidence").boundary,
-      encryption: false,
-      receiptDocuments: "sealed_when_content_key_bound",
-      imageBytes: "hashed_stored_object",
-      releaseReachable: false,
+      encryption: true,
+      receiptDocuments: "sealed_or_rejected",
+      imageBytes: "sealed_stream_original_hash_distinct",
+      fullFeatureProfile: "internal-grin",
+      grinAdmission: "enabled",
+      purchaseEntry: "enabled",
+      quotaUpsell: "disabled",
+      releaseReachable: true,
       deletion: INCLUDE_GRIN_IN_ACCOUNT_PURGE
         ? "flag_purges_legacy_and_new"
         : "legacy_jobs_retain_copies_version_2_jobs_already_purge",

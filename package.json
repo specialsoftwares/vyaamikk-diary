@@ -214,7 +214,7 @@
     "test:credit-revision-emulator": "firebase emulators:exec --only firestore --project vyaamikk-diary-credit-revision-test \"npx --yes tsx src/services/customerCredit/creditRevision.emulator.test.ts\"",
     "test:privacy-acceptance-races": "npx --yes tsx src/services/auth/ageAssessmentResponse.test.ts && npx --yes tsx src/services/consent/purposeConsentQueue.test.ts && npx --yes tsx functions/src/deletion/deletionSafety.unit.test.ts && npx --yes tsx src/services/privacy/businessCloudSeal.test.ts",
     "test:age-eligibility": "npx --yes tsx src/domain/ageEligibility.test.ts",
-    "test:content-encryption": "npx --yes tsx functions/src/privacy/contentEncryption.unit.test.ts",
+    "test:content-encryption": "npx --yes tsx functions/src/privacy/contentEncryption.unit.test.ts && npx --yes tsx functions/src/goodsEvidence/grinCloudWrite.productionAdapter.test.ts && npx --yes tsx functions/src/privacy/grinEvidenceBytes.productionAdapter.test.ts",
     "test:diary-seal": "npx --yes tsx src/services/privacy/diarySealDocument.test.ts",
     "test:reactivation-email": "npx --yes tsx functions/src/reactivation/reactivationOtp.unit.test.ts",
     "test:option-c-quota-unit": "npx --yes tsx src/billing/istMonthKey.test.ts && npx --yes tsx src/billing/istMonthKey.contract.test.ts && npx --yes tsx src/subscription/monthlyRecordCap.test.ts && npx --yes tsx src/billing/optionC/usageTransition.test.ts && npx --yes tsx src/billing/optionC/classifyCreateError.test.ts && npx --yes tsx src/services/customerCredit/recordIdentity.test.ts && npx --yes tsx src/billing/optionC/recoverAfterPermissionDenied.test.ts",

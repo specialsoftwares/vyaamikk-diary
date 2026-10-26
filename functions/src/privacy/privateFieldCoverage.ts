@@ -21,8 +21,8 @@ export const PRIVATE_FIELD_BOUNDARIES: readonly FieldBoundary[] = [
     copy: "grin_evidence",
     privateFields: ["receipt body", "goods description", "image bytes"],
     readableFields: ["ledger id", "receipt id", "storage object key"],
-    boundary: "owner_rules",
-    handling: "Receipt, command, and event documents are sealed with the server content key when that key is bound. Existing plaintext documents still open. Image bytes stay the hashed stored object: verification is bound to that object generation, and a 10–15MB original does not fit the content-seal callable. The object key is a storage path. GRIN purge stays off.",
+    boundary: "content_seal",
+    handling: "Receipt, command, and event documents are sealed with the server content key. A missing or malformed key rejects the mutation. Legacy plaintext documents still open. New image and PDF originals are sealed with AES-256-GCM in bounded chunks. The original-content hash is not the stored-ciphertext hash. An existing unsealed object stays readable and is not rewritten. GRIN purge stays off.",
   },
   {
     copy: "party_ledger_projections",
