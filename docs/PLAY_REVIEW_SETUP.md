@@ -9,11 +9,19 @@ This document is Play Console copy and developer checklist only.
 It does not create reviewer email inboxes, store inbox passwords, or prove that
 onboarding has been completed.
 
-**GRIN readiness is not billing readiness.** Intended Internal binaries keep
-purchase-entry `"0"`. Do not tell reviewers they can buy a plan. Do not check
-Play “full access including premium” unless paid surfaces are actually
-reachable on the installed binary. Public purchases stay off until a separate
-approval (`APPROVAL_C_RESTRICTED_BILLING.md` is restricted-billing only).
+**The full-feature internal candidate is the `internal-grin` profile.** It is an
+Android App Bundle in production app mode for `com.specialsoftwares.vyaamikkdiary`
+and Firebase project `vyaamikk-diary`. GRIN admission and subscription purchase
+entry are enabled. Quota upsell stays off. `internal-auth-validation` is a
+diagnostic build only: GRIN and purchase entry are off. Do not give that build
+to Play as the full app.
+
+Purchase entry does not grant a subscription. New Play grants stay limited to
+the server tester allowlist while `PLAY_BILLING_ENABLED` is on. A reviewer who
+is not that allowlisted account can open the purchase screen and must not
+receive an entitlement. Do not check Play “full access including premium”.
+Ordinary customers need a separate approval that removes the allowlist
+restriction. That approval is not part of this internal candidate.
 
 ## One-time developer setup (not performed by source assembly)
 
@@ -91,7 +99,7 @@ SIGN-IN STEPS:
 No SMS is sent when the Firebase test-phone fixture is configured.
 
 **Checkbox — "Sign-in details provide full access including premium or paid content":**
-check only if the reviewer can actually use paid/premium content on the **intended installed binary**. Purchase-entry flags alone are not enough. Do not check while purchases, live trial grant, and GRIN are closed or unreachable.
+leave unchecked. The `internal-grin` candidate shows purchase entry, and GRIN is available, but a subscription is delivered only to the server allowlist. The purchase button is not premium access.
 
 ## Security properties
 
