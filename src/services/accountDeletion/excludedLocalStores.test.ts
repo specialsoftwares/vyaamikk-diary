@@ -3,6 +3,7 @@
  * Host evidence. It does not open a Play-installed binary.
  */
 import assert from "node:assert/strict";
+import { randomFillSync } from "node:crypto";
 
 import { buildResolvedEnvironment } from "@/config/runtimeEnvironment";
 import { diaryRepositoryKind } from "@/services/diary";
@@ -13,8 +14,14 @@ import {
   retainLocalAccountOnLogout,
 } from "@/services/accountDeletion/localAccountBoundary";
 import { bindLocalDataKey, unbindLocalDataKey } from "@/services/accountDeletion/localPayload";
+import { __setNativeSecureRandomForTests } from "@/services/accountDeletion/nativeSecureRandom";
 
 async function main(): Promise<void> {
+__setNativeSecureRandomForTests((length) => {
+  const bytes = new Uint8Array(length);
+  randomFillSync(bytes);
+  return bytes;
+});
 const store = buildResolvedEnvironment({
   bundledAppModeRaw: "production",
   devBackendRaw: "shared-dev",
@@ -83,6 +90,7 @@ assert.equal(grin.has("r1"), true);
 deleteGrinLocalOwnerRows(db, "owner-a");
 assert.equal(grin.has("r1"), false);
 assert.equal(grin.has("r2"), true);
+__setNativeSecureRandomForTests(null);
 
 console.log("excluded local stores passed");
 }

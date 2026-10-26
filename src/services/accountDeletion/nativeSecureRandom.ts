@@ -17,9 +17,27 @@ type ExpoRandomModule = {
   getRandomValues?: (typedArray: Uint8Array) => Uint8Array;
 };
 
+let testRandom: ((length: number) => Uint8Array) | null = null;
+
+/** Host tests that are not proving the native module supply bytes here. */
+export function __setNativeSecureRandomForTests(next: ((length: number) => Uint8Array) | null): void {
+  testRandom = next;
+}
+
 export function readNativeSecureRandom(length: number): NativeRandomResult {
   if (!Number.isInteger(length) || length < 1 || length > 1024) {
     return { ok: false, cause: new Error("invalid random length") };
+  }
+  if (testRandom) {
+    try {
+      const bytes = testRandom(length);
+      if (!(bytes instanceof Uint8Array) || bytes.byteLength !== length) {
+        return { ok: false, cause: new Error("short random") };
+      }
+      return { ok: true, bytes: new Uint8Array(bytes) };
+    } catch (cause) {
+      return { ok: false, cause };
+    }
   }
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
