@@ -15,6 +15,7 @@ import {
 import { evaluateAllExceptionRules, type GrinExceptionBundle } from "@/goodsEvidence/exceptions";
 import type { GrinCommandType, GrinConfirmedProjection, OutboxLocalState } from "@/goodsEvidence/ports";
 import { cloneSnapshot } from "@/goodsEvidence/snapshot";
+import { readOwnedJson } from "@/services/accountDeletion/localPayload";
 import { peekQueuedCommand, type GrinOutbox } from "@/services/grin/outbox/outbox";
 import { mintCommandId, mintReceiptId } from "@/services/grin/outbox/ids";
 import type { GrinDispatchSession, GrinLocalEvidenceFile, GrinLocalReceiptView } from "@/services/grin/outbox/types";
@@ -880,7 +881,7 @@ export class GrinApplicationRepository {
     );
     if (row?.payload_json) {
       try {
-        return JSON.parse(row.payload_json) as unknown;
+        return readOwnedJson(view.ownerUid, row.payload_json);
       } catch {
         // Fall through to the queued register command if the stored snapshot is unreadable.
       }

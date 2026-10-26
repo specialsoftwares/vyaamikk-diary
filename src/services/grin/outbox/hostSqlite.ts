@@ -8,6 +8,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { allowUnsealedLocalPayloadForTests } from "@/services/accountDeletion/localPayload";
+
 import type { SqliteExecutionLabel } from "./types";
 
 export const SQLITE_HOST = "SQLITE_HOST" as const;
@@ -185,5 +187,7 @@ export class HostSqlite implements GrinSqlDb {
 }
 
 export function openHostSqlite(dbPath: string): HostSqlite {
+  // Host harness only. Device GRIN rows use the bound account key.
+  allowUnsealedLocalPayloadForTests();
   return new HostSqlite(dbPath);
 }

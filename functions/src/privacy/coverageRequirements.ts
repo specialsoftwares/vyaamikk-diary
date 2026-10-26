@@ -15,6 +15,8 @@ export function coverageEvidence() {
       requirement: "Receipt bodies and image bytes need application-level encryption before they count as sealed.",
       implemented: boundaryFor("grin_evidence").boundary,
       encryption: false,
+      receiptDocuments: "sealed_when_content_key_bound",
+      imageBytes: "hashed_stored_object",
       releaseReachable: false,
       deletion: INCLUDE_GRIN_IN_ACCOUNT_PURGE
         ? "flag_purges_legacy_and_new"
@@ -51,11 +53,16 @@ export function coverageEvidence() {
         "business_insights.display_label",
         "business_insights.metadata_json",
         "recent_searches",
+        "grin_local_receipts.payload_json",
+        "grin_local_receipts.confirmed_original_json",
+        "grin_local_receipts.confirmed_events_json",
+        "grin_local_receipts.confirmed_effective_json",
+        "grin_outbox_commands.frozen_payload_json",
       ],
       insightJoinKeys: "account_bound_hmac",
       grinLocal: {
         storeRuntimeCanOpen: false,
-        bodiesEncrypted: false,
+        bodiesEncrypted: true,
         logoutRetains: true,
         accountDeletionRemovesOwnerRows: true,
       },

@@ -14,6 +14,7 @@ import {
 } from "@/services/accountDeletion/localDataKey";
 import {
   bindLocalDataKey,
+  migrateGrinOwnedPayloads,
   migrateOwnedPayloads,
   unbindLocalDataKey,
 } from "@/services/accountDeletion/localPayload";
@@ -36,6 +37,7 @@ export async function prepareLocalAccountKey(uid: string): Promise<LocalKeyResul
     try {
       const db = getLocalDatabase();
       migrateOwnedPayloads(db, uid);
+      if (grinPayloadTablesPresent(db)) migrateGrinOwnedPayloads(db, uid);
       migrateInsightJoinKeys(db, uid);
     } catch {
       return { state: "unavailable", reason: "migration_incomplete" };
@@ -66,5 +68,23 @@ async function retainedCiphertext(uid: string): Promise<boolean> {
     );
     if (row?.value) return true;
   }
-  return false;
+  if (!grinPayloadTablesPresent(db)) return false;
+  const grin = db.getFirstSync<{ value: string | null }>(
+    `SELECT payload_json AS value FROM grin_local_receipts WHERE owner_uid = ? AND payload_json LIKE 'vyd1:%' LIMIT 1`,
+    [uid]
+  );
+  return Boolean(grin?.value);
+}
+
+function grinPayloadTablesPresent(db: {
+  getFirstSync<T>(sql: string, params?: unknown[]): T | null;
+}): boolean {
+  try {
+    const row = db.getFirstSync<{ name: string }>(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'grin_local_receipts'"
+    );
+    return Boolean(row?.name);
+  } catch {
+    return false;
+  }
 }

@@ -10,6 +10,9 @@ import {
   migrateContentKeyBatch,
   openContent,
   openStoredContent,
+  openGrinCloudDocument,
+  sealGrinCloudDocument,
+  grinCloudDocumentShouldSeal,
   executeKeyRetirement,
   keyRetirementAllowed,
   planContentKeyMigration,
@@ -129,7 +132,11 @@ assert.equal(coverage.localQueue.nativeDeviceVerified, false);
 assert.equal(coverage.localQueue.sealedFields.includes("sync_queue.payload_json"), true);
 assert.equal(coverage.localQueue.insightJoinKeys, "account_bound_hmac");
 assert.equal(coverage.localQueue.grinLocal.storeRuntimeCanOpen, false);
-assert.equal(coverage.localQueue.grinLocal.bodiesEncrypted, false);
+assert.equal(coverage.localQueue.grinLocal.bodiesEncrypted, true);
+assert.equal(coverage.grin.receiptDocuments, "sealed_when_content_key_bound");
+assert.equal(coverage.grin.imageBytes, "hashed_stored_object");
+assert.equal(coverage.localQueue.sealedFields.includes("grin_local_receipts.payload_json"), true);
+assert.equal(coverage.localQueue.sealedFields.includes("grin_outbox_commands.frozen_payload_json"), true);
 assert.equal(coverage.localQueue.grinLocal.accountDeletionRemovesOwnerRows, true);
 assert.equal(coverage.localQueue.mockDiary.productionRepository, "firebase");
 assert.equal(coverage.localQueue.mockDiary.silentFallback, false);
@@ -347,6 +354,22 @@ void (async () => {
       copies: 0,
     },
   }).reason, "retirement_executor_not_bound");
+  const grinEnv = { CONTENT_DATA_KEY: key.toString("base64") };
+  const receiptPath = "users/owner-a/goodsEvidenceLedgers/ledger-1/receipts/grcp_1";
+  const serialPath = "users/owner-a/goodsEvidenceLedgers/ledger-1/serials/2026";
+  const receipt = { original: { goods: "cement bags" }, effective: { goods: "cement bags" } };
+  assert.equal(grinCloudDocumentShouldSeal(receiptPath), true);
+  assert.equal(grinCloudDocumentShouldSeal(serialPath), false);
+  assert.equal(sealGrinCloudDocument(serialPath, { nextSerial: 2 }, grinEnv).nextSerial, 2);
+  assert.deepEqual(sealGrinCloudDocument(receiptPath, receipt, {}), receipt);
+  const sealedReceipt = sealGrinCloudDocument(receiptPath, receipt, grinEnv);
+  assert.equal(sealedReceipt.grinDocumentSeal, 1);
+  assert.equal(JSON.stringify(sealedReceipt).includes("cement"), false);
+  assert.deepEqual(openGrinCloudDocument(receiptPath, sealedReceipt, grinEnv), receipt);
+  assert.deepEqual(openGrinCloudDocument(receiptPath, receipt, grinEnv), receipt);
+  assert.throws(() => openGrinCloudDocument(receiptPath, sealedReceipt, {}), /content_key_unavailable/);
+  const other = "users/owner-b/goodsEvidenceLedgers/ledger-1/receipts/grcp_1";
+  assert.throws(() => openGrinCloudDocument(other, sealedReceipt, grinEnv), /wrong_owner|wrong_record/);
   console.log("contentEncryption.unit.test.ts: ok");
 })().catch((error) => {
   console.error(error);

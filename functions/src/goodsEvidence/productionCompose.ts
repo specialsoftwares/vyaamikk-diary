@@ -23,6 +23,7 @@ import { getApps, initializeApp, type App } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import { getStorage } from "firebase-admin/storage";
 
+import { openGrinCloudDocument, sealGrinCloudDocument } from "../privacy/contentEncryption";
 import { createComposedGrinCallables, type ComposedGrinCallables } from "./composed";
 import { HASH_CHUNK_BYTES, MAX_PDF_ORIGINAL_BYTES } from "./evidence";
 import { GoodsEvidenceRegisterAdapter } from "./g1/adapter";
@@ -71,7 +72,7 @@ export function liveGrinAdminRuntimePorts(): GrinAdminRuntimePorts {
   };
 }
 
-function wrapG1Firestore(db: AdminDb): G1Firestore {
+function wrapG1Firestore(db: AdminDb, env: NodeJS.ProcessEnv): G1Firestore {
   return {
     doc(path: string) {
       return { path };
@@ -83,11 +84,12 @@ function wrapG1Firestore(db: AdminDb): G1Firestore {
             const snap = await tx.get(db.doc(ref.path));
             return {
               exists: snap.exists,
-              data: () => snap.data() as Record<string, unknown> | undefined,
+              data: () => openGrinCloudDocument(ref.path, snap.data() as Record<string, unknown> | undefined, env),
             };
           },
           set(ref, data) {
-            tx.set(db.doc(ref.path), JSON.parse(JSON.stringify(data)) as Record<string, unknown>);
+            const plain = JSON.parse(JSON.stringify(data)) as Record<string, unknown>;
+            tx.set(db.doc(ref.path), sealGrinCloudDocument(ref.path, plain, env));
           },
           async list(collectionPath) {
             const querySnap = await tx.get(db.collection(collectionPath));
@@ -95,7 +97,7 @@ function wrapG1Firestore(db: AdminDb): G1Firestore {
               id: doc.id,
               path: doc.ref.path,
               exists: doc.exists,
-              data: () => doc.data() as Record<string, unknown> | undefined,
+              data: () => openGrinCloudDocument(doc.ref.path, doc.data() as Record<string, unknown> | undefined, env),
             }));
           },
         };
@@ -105,7 +107,7 @@ function wrapG1Firestore(db: AdminDb): G1Firestore {
   };
 }
 
-function wrapG2Firestore(db: AdminDb): G2Firestore {
+function wrapG2Firestore(db: AdminDb, env: NodeJS.ProcessEnv): G2Firestore {
   return {
     doc(path: string) {
       return { path };
@@ -117,11 +119,12 @@ function wrapG2Firestore(db: AdminDb): G2Firestore {
             const snap = await tx.get(db.doc(ref.path));
             return {
               exists: snap.exists,
-              data: () => snap.data() as Record<string, unknown> | undefined,
+              data: () => openGrinCloudDocument(ref.path, snap.data() as Record<string, unknown> | undefined, env),
             };
           },
           set(ref, data) {
-            tx.set(db.doc(ref.path), JSON.parse(JSON.stringify(data)) as Record<string, unknown>);
+            const plain = JSON.parse(JSON.stringify(data)) as Record<string, unknown>;
+            tx.set(db.doc(ref.path), sealGrinCloudDocument(ref.path, plain, env));
           },
         };
         return await fn(wrapped);
@@ -232,9 +235,9 @@ export function createProductionGrinCallables(
     // settings may only be applied once per process
   }
   const bucket = ports.getStorage(binding.app).bucket(binding.storageBucket);
-  const registerAdapter = new GoodsEvidenceRegisterAdapter(wrapG1Firestore(db), productionG1Clock());
+  const registerAdapter = new GoodsEvidenceRegisterAdapter(wrapG1Firestore(db, env), productionG1Clock());
   const storageAdapter = new GoodsEvidenceStorageAdapter(
-    wrapG2Firestore(db),
+    wrapG2Firestore(db, env),
     wrapAdminBlobStore(bucket),
     productionG2Clock()
   );
