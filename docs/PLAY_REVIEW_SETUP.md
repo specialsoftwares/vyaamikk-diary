@@ -12,7 +12,9 @@ onboarding has been completed.
 **The full-feature internal candidate is the `internal-grin` profile.** It is an
 Android App Bundle in production app mode for `com.specialsoftwares.vyaamikkdiary`
 and Firebase project `vyaamikk-diary`. GRIN admission and subscription purchase
-entry are enabled. Quota upsell stays off. `internal-auth-validation` is a
+entry are enabled. Quota upsell stays off. A new GRIN image or PDF is sealed
+when verification succeeds. An existing unsealed object stays readable and is
+not rewritten. `internal-auth-validation` is a
 diagnostic build only: GRIN and purchase entry are off. Do not give that build
 to Play as the full app.
 
