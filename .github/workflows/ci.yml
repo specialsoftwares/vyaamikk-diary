@@ -17,7 +17,7 @@ on:
   pull_request:
     branches: [main, security/firebase-session-hardening]
   push:
-    branches: [main]
+    branches: [main, integration]
   workflow_dispatch:
 
 permissions:
