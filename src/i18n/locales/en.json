@@ -1257,6 +1257,8 @@
     "emailCodeHint": "Enter the six-digit code from your email. Do not share it.",
     "reactivateResend": "Resend code",
     "reactivateResendIn": "Resend in {{seconds}}s",
+    "reactivateResendUnavailable": "Resend unavailable",
+    "reactivateResendOffline": "Reconnect to resend",
     "reactivateOffline": "Reconnect to the internet before reactivating this account.",
     "reactivateSendFailed": "The email could not be sent. Try again when you are online.",
     "reactivateExpired": "That code has expired. Request a new one.",
