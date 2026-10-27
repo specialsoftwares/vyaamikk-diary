@@ -7,8 +7,11 @@
 
 import { gcm } from "@noble/ciphers/aes";
 
+import { readNativeSecureRandom } from "./nativeSecureRandom";
+
 export type LocalKeyFailure =
   | "secure_store_unavailable"
+  | "secure_random_unavailable"
   | "key_missing"
   | "key_corrupt"
   | "key_conflict"
@@ -200,7 +203,13 @@ async function resolveOnce(
     return { state: "ready", key: legacy };
   }
   if (retained) return { state: "unavailable", reason: "key_missing" };
-  const created = randomBytes(32);
+  let created: Uint8Array;
+  try {
+    created = randomBytes(32);
+  } catch (error) {
+    const reason = error instanceof LocalKeyUnavailable ? error.reason : "secure_random_unavailable";
+    return { state: "unavailable", reason };
+  }
   try {
     await store.set(uid, created);
   } catch (error) {
@@ -254,10 +263,8 @@ export function localCipherWorksWithoutWebCrypto(): boolean {
 }
 
 function randomBytes(length: number): Uint8Array {
-  const bytes = new Uint8Array(length);
-  const random = globalThis.crypto?.getRandomValues;
-  if (typeof random !== "function") throw new LocalKeyUnavailable("secure_store_unavailable");
-  random.call(globalThis.crypto, bytes);
+  const bytes = readNativeSecureRandom(length);
+  if (!bytes) throw new LocalKeyUnavailable("secure_random_unavailable");
   return bytes;
 }
 

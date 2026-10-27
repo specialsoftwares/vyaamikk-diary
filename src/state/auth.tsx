@@ -42,6 +42,10 @@ import {
 } from "@/services/auth/authSessionFence";
 import { retainLocalAccountOnLogout } from "@/services/accountDeletion/localAccountBoundary";
 import { prepareLocalAccountKey } from "@/services/accountDeletion/localKeyLifecycle";
+import {
+  commitSessionAfterLocalReadiness,
+  retainedSessionMayPublish,
+} from "@/services/auth/sessionReadiness";
 import { retireNativeCallableAuthReady } from "@/services/auth/nativeCallableAuthGate";
 import { toAppError } from "@/domain/errors";
 import { clearMasterDataSessionCache } from "@/services/masterData";
@@ -223,7 +227,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const session = await sessionStore.load();
         if (!bootStillCurrent()) return;
         if (session) {
-          await prepareLocalAccountKey(session.user.uid);
+          const publish = await retainedSessionMayPublish({
+            userId: session.user.uid,
+            prepare: prepareLocalAccountKey,
+            stillCurrent: bootStillCurrent,
+          });
+          if (!bootStillCurrent()) return;
+          if (!publish) {
+            setState({
+              status: "signed_out",
+              session: null,
+              user: null,
+              justCreated: false,
+            });
+            return;
+          }
           let user = session.user;
           const backend = getActiveBackend();
           const { profile: live, unverified } = await revalidateSessionProfile(
@@ -343,14 +361,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signedInAt,
         lastActiveAt,
       };
-      if (opts?.isCurrent) {
-        if (!(await sessionStore.saveIfCurrent(session, opts.isCurrent))) {
-          throw new Error("session_changed");
-        }
-      } else {
-        await sessionStore.save(session);
-      }
-      await prepareLocalAccountKey(user.uid);
+      const attempt = bootAttemptRef.current;
+      const generation = currentAuthMutationGeneration();
+      await commitSessionAfterLocalReadiness({
+        userId: user.uid,
+        prepare: prepareLocalAccountKey,
+        stillCurrent: () =>
+          bootAttemptRef.current === attempt &&
+          currentAuthMutationGeneration() === generation &&
+          (opts?.isCurrent ? opts.isCurrent() : true),
+        save: async () => {
+          if (opts?.isCurrent) {
+            if (!(await sessionStore.saveIfCurrent(session, opts.isCurrent))) {
+              throw new Error("session_changed");
+            }
+            return;
+          }
+          await sessionStore.save(session);
+        },
+      });
       return session;
     },
     [state.session?.signedInAt, state.session?.lastActiveAt]

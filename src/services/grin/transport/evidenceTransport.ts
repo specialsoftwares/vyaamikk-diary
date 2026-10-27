@@ -372,7 +372,11 @@ async function defaultPutObject(input: EvidenceObjectPutInput): Promise<Evidence
   return { generation: String(meta.generation ?? "") };
 }
 
-/** Production-shaped JS client. Callables remain unexported / undeployed. */
+/**
+ * Production-shaped JS client.
+ * This upload does not attach evidence metadata and does not seal the object.
+ * That protection is a recorded scope gap, not a claim that this client matches it.
+ */
 export function createFirebaseJsGrinEvidenceTransport(): FirebaseGrinEvidenceTransport {
   return createFirebaseGrinEvidenceTransport({
     call: defaultCall,
