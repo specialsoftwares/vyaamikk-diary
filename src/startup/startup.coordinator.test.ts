@@ -94,6 +94,28 @@ function testFirebaseVarPresenceStatic() {
   assert.equal(typeof presence.EXPO_PUBLIC_FIREBASE_PROJECT_ID, "boolean");
 }
 
+function testRedaction() {
+  const synthetic = "AIzaSyntheticRedactionFixture";
+  assert.notEqual(synthetic.length, 39);
+  assert.doesNotMatch(synthetic, /^AIza[0-9A-Za-z_-]{35}$/);
+  const raw = [
+    `startup failed ${synthetic}`,
+    "owner@example.com",
+    "+919876543210",
+    "/Users/owner/diary",
+  ].join(" ");
+  const redacted = redactStartupMessage(raw);
+  assert.equal(redacted.includes(synthetic), false);
+  assert.equal(redacted.includes("AIza"), false);
+  assert.equal(redacted.includes("owner@example.com"), false);
+  assert.equal(redacted.includes("+919876543210"), false);
+  assert.equal(redacted.includes("/Users/owner"), false);
+  assert.equal(redacted.includes("[redacted]"), true);
+  assert.equal(redacted.includes("[redacted-email]"), true);
+  assert.equal(redacted.includes("[redacted-phone]"), true);
+  assert.equal(redactStartupMessage("missing firebase"), "missing firebase");
+}
+
 async function main() {
   testRedaction();
   testStartupErrorShape();

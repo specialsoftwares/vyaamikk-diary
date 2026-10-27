@@ -3,6 +3,7 @@
  * Host SQLite is not a phone. The cipher test removes WebCrypto first.
  */
 import assert from "node:assert/strict";
+import { webcrypto } from "node:crypto";
 
 import { installMemoryLocalDatabase, reopenMemoryLocalDatabaseFrom, uninstallMemoryLocalDatabase } from "@/localDb/testHarness";
 import { migrateToV3, migrateToV5, migrateToV6 } from "@/localDb/migrate";
@@ -34,6 +35,12 @@ import {
 } from "@/services/insights/businessInsightRepository";
 import { mayIssueRemoteWork, syncSessionOwnership } from "@/sync/syncSessionOwnership";
 import type { BusinessEntry } from "@/domain/businessEntry";
+import { __setNativeSecureRandomForTests } from "./nativeSecureRandom";
+
+__setNativeSecureRandomForTests((bytes) => {
+  webcrypto.getRandomValues(bytes as unknown as Uint8Array<ArrayBuffer>);
+  return bytes;
+});
 
 async function main(): Promise<void> {
 assert.equal(localCipherWorksWithoutWebCrypto(), true);
