@@ -1,6 +1,7 @@
 /**
- * A session is saved or restored only after the local account key is ready.
- * Failure clears the retained auth session and leaves encrypted rows in place.
+ * A session is published only after the local account key is ready and the
+ * attempt still owns it. A temporary failure leaves the retained session,
+ * the key, and encrypted rows where they are. The app stays signed out.
  */
 
 import {
@@ -11,9 +12,17 @@ import {
 export async function commitSessionAfterLocalReadiness(input: {
   userId: string;
   prepare: (userId: string) => Promise<LocalKeyResult>;
+  stillCurrent?: () => boolean;
   save: () => Promise<void>;
 }): Promise<void> {
-  const ready = await input.prepare(input.userId);
+  let ready: LocalKeyResult;
+  try {
+    ready = await input.prepare(input.userId);
+  } catch (error) {
+    if (input.stillCurrent && !input.stillCurrent()) throw new Error("session_changed");
+    throw error;
+  }
+  if (input.stillCurrent && !input.stillCurrent()) throw new Error("session_changed");
   if (ready.state !== "ready") throw new LocalKeyUnavailable(ready.reason);
   await input.save();
 }
@@ -21,17 +30,16 @@ export async function commitSessionAfterLocalReadiness(input: {
 export async function retainedSessionMayPublish(input: {
   userId: string;
   prepare: (userId: string) => Promise<LocalKeyResult>;
-  clearRetainedSession: () => Promise<void>;
+  stillCurrent: () => boolean;
 }): Promise<boolean> {
   let ready: LocalKeyResult;
   try {
     ready = await input.prepare(input.userId);
   } catch (error) {
-    await input.clearRetainedSession();
+    if (!input.stillCurrent()) return false;
     if (error instanceof LocalKeyUnavailable) return false;
     throw error;
   }
-  if (ready.state === "ready") return true;
-  await input.clearRetainedSession();
-  return false;
+  if (!input.stillCurrent()) return false;
+  return ready.state === "ready";
 }

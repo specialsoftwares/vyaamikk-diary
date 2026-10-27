@@ -230,7 +230,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const publish = await retainedSessionMayPublish({
             userId: session.user.uid,
             prepare: prepareLocalAccountKey,
-            clearRetainedSession: () => sessionStore.clear(),
+            stillCurrent: bootStillCurrent,
           });
           if (!bootStillCurrent()) return;
           if (!publish) {
@@ -361,9 +361,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signedInAt,
         lastActiveAt,
       };
+      const attempt = bootAttemptRef.current;
+      const generation = currentAuthMutationGeneration();
       await commitSessionAfterLocalReadiness({
         userId: user.uid,
         prepare: prepareLocalAccountKey,
+        stillCurrent: () =>
+          bootAttemptRef.current === attempt &&
+          currentAuthMutationGeneration() === generation &&
+          (opts?.isCurrent ? opts.isCurrent() : true),
         save: async () => {
           if (opts?.isCurrent) {
             if (!(await sessionStore.saveIfCurrent(session, opts.isCurrent))) {

@@ -38,6 +38,8 @@ function testProductionSource() {
   const bootAt = authSource.indexOf("const session = await sessionStore.load()");
   const bootBody = authSource.slice(bootAt, bootAt + 1800);
   assert.match(bootBody, /retainedSessionMayPublish/);
+  assert.match(bootBody, /stillCurrent: bootStillCurrent/);
+  assert.doesNotMatch(bootBody, /clearRetainedSession|sessionStore\.clear\(\)/);
   assert.equal(bootBody.indexOf("retainedSessionMayPublish") < bootBody.indexOf('status: "signed_in"'), true);
 }
 
@@ -83,16 +85,12 @@ async function testMissingRandomDoesNotMintOrPublish() {
   );
   assert.equal(saved, 0);
 
-  let cleared = 0;
   const publish = await retainedSessionMayPublish({
     userId: "owner-new",
     prepare: async () => missing,
-    clearRetainedSession: async () => {
-      cleared += 1;
-    },
+    stillCurrent: () => true,
   });
   assert.equal(publish, false);
-  assert.equal(cleared, 1);
 }
 
 async function testReadySessionPublishesAfterPrepare() {

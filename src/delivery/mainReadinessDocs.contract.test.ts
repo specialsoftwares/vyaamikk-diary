@@ -28,8 +28,9 @@ assert.doesNotMatch(review, /\[PLAY_REVIEW_PHONE\]\d/);
 assert.match(review, /\[PLAY_REVIEW_PHONE\]/);
 assert.match(review, /\[PLAY_REVIEW_CODE\]/);
 
-assert.match(keyPlan, /missing initial key/);
-assert.match(keyPlan, /not a lost historical key/);
+assert.match(keyPlan, /Initial provisioning stays conditional on this check/);
+assert.match(keyPlan, /does not claim that no historical ciphertext exists/);
+assert.match(keyPlan, /A missing secret or a missing Cloud Run service is not a zero count/);
 assert.match(keyPlan, /does not create a key/);
 assert.match(grinGap, /does not port it/);
 assert.match(grinGap, /vydEvidence: "pending"/);
