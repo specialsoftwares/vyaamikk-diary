@@ -11,3 +11,9 @@ The installed app is Expo SDK 54 (`expo` in package.json). Do not upgrade the SD
 A pull request from `integration` to `main` promotes every commit on `integration`, not only the latest fix. Keep that pull request draft until the included work is accepted. Do not merge it, deploy Functions or rules, change activation flags, or start a public release unless that step is explicitly requested.
 
 `archive/release-privacy-candidate` preserves `d3d40283af4b609aebaeb4b38b8578dc7d88e8cd`. The ref `integration/release-privacy-candidate` was removed only after that archive matched. Keep the archive. Do not delete unrelated branches.
+
+# Development branch name
+
+`integration` is the temporary name of the current development branch. `develop` is the agreed future name for that same branch. The remote rename is deferred.
+
+GitHub closes a pull request when its head branch is renamed. Draft PR #42 stays open on `integration` until it is resolved or the owner explicitly approves a replacement draft PR. See `docs/delivery/branch-transition.md`.
