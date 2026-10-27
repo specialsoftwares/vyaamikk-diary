@@ -203,10 +203,34 @@ function evidenceMarker(meta: { metadata?: { [key: string]: unknown } | null }):
   return String(meta.metadata?.vydEvidence ?? "");
 }
 
-async function* nodeChunks(stream: AsyncIterable<Uint8Array | Buffer>): AsyncGenerator<Uint8Array> {
-  for await (const piece of stream) {
-    yield piece instanceof Uint8Array ? piece : Uint8Array.from(piece);
-  }
+function readBound(stream: Readable): AsyncIterable<Uint8Array> {
+  let failed: Error | null = null;
+  let rejectError: ((error: Error) => void) | null = null;
+  const failedRead = new Promise<never>((_, reject) => {
+    rejectError = reject;
+  });
+  failedRead.catch(() => undefined);
+  stream.on("error", (error: Error) => {
+    failed = asError(error);
+    rejectError?.(failed);
+  });
+  return {
+    async *[Symbol.asyncIterator]() {
+      const iterator = stream[Symbol.asyncIterator]();
+      try {
+        while (!failed) {
+          const next = await Promise.race([iterator.next(), failedRead]);
+          if (failed) throw failed;
+          if (next.done) return;
+          const piece = next.value as Uint8Array | Buffer;
+          yield piece instanceof Uint8Array ? piece : Uint8Array.from(piece);
+        }
+        throw failed;
+      } finally {
+        if (typeof iterator.return === "function") await iterator.return();
+      }
+    },
+  };
 }
 
 function asError(error: unknown): Error {
@@ -223,20 +247,26 @@ function writeWithBackpressure(stream: Writable, chunk: Uint8Array): Promise<voi
   const buf = Buffer.from(chunk);
   return new Promise((resolve, reject) => {
     let settled = false;
+    let sawFinish = false;
     const onError = (error: Error) => settle(() => reject(asError(error)));
     const onDrain = () => settle(() => resolve());
-    const onClose = () => settle(() => reject(new Error("write_closed")));
+    const onFinish = () => {
+      sawFinish = true;
+      settle(() => resolve());
+    };
+    const onClose = () => {
+      if (!sawFinish) settle(() => reject(new Error("write_closed")));
+    };
     const settle = (action: () => void) => {
       if (settled) return;
       settled = true;
       stream.removeListener("error", onError);
       stream.removeListener("drain", onDrain);
+      stream.removeListener("finish", onFinish);
       stream.removeListener("close", onClose);
       action();
     };
     stream.on("error", onError);
-    stream.on("drain", onDrain);
-    stream.on("close", onClose);
     let accepted = false;
     try {
       accepted = stream.write(buf);
@@ -245,7 +275,13 @@ function writeWithBackpressure(stream: Writable, chunk: Uint8Array): Promise<voi
       return;
     }
     if (settled) return;
-    if (accepted) settle(() => resolve());
+    if (accepted) {
+      settle(() => resolve());
+      return;
+    }
+    stream.on("drain", onDrain);
+    stream.on("finish", onFinish);
+    stream.on("close", onClose);
   });
 }
 
@@ -269,6 +305,10 @@ function finishWrite(stream: Writable): Promise<void> {
       stream.removeListener("close", onClose);
       action();
     };
+    if (stream.writableFinished) {
+      resolve();
+      return;
+    }
     stream.on("error", onError);
     stream.on("finish", onFinish);
     stream.on("close", onClose);
@@ -283,26 +323,29 @@ function finishWrite(stream: Writable): Promise<void> {
 /** Replaces one pending generation with ciphertext. Each attempt owns its temp object. */
 async function sealPendingEvidence(
   bucket: AdminBucket,
-  file: ReturnType<AdminBucket["file"]>,
   path: string,
-  env: NodeJS.ProcessEnv
+  env: NodeJS.ProcessEnv,
+  expectedGeneration: string
 ): Promise<string> {
   const uid = path.split("/")[1] ?? "";
   const key = loadContentKey(env);
-  const [before] = await file.getMetadata();
-  if (before.generation == null || before.generation === "") throw new Error("generation_conflict");
-  const sourceGeneration = String(before.generation);
+  const [before] = await bucket.file(path).getMetadata();
+  if (before.generation == null || String(before.generation) !== expectedGeneration) {
+    throw new Error("generation_conflict");
+  }
+  const sourceGeneration = expectedGeneration;
   const attemptId = randomBytes(16).toString("hex");
   const tempPath = `${path}.vyd-seal.${sourceGeneration}.${attemptId}`;
   let sourceStream: Readable | null = null;
   let out: Writable | null = null;
   let writeError: Error | null = null;
   let tempGeneration: string | null = null;
+  let tempStarted = false;
   try {
     const reading = bucket.file(path, { generation: sourceGeneration }).createReadStream();
     sourceStream = reading;
-    reading.on("error", () => undefined);
     const temp = bucket.file(tempPath);
+    tempStarted = true;
     const writing = temp.createWriteStream({
       resumable: false,
       validation: false,
@@ -318,7 +361,7 @@ async function sealPendingEvidence(
       uid,
       storagePath: path,
       sourceGeneration,
-      plaintext: nodeChunks(reading),
+      plaintext: readBound(reading),
       write: async (chunk) => {
         if (writeError) throw writeError;
         await writeWithBackpressure(writing, chunk);
@@ -327,6 +370,10 @@ async function sealPendingEvidence(
     });
     await finishWrite(writing);
     if (writeError) throw writeError;
+    const sourceSize = Number(before.size);
+    if (!Number.isInteger(sourceSize) || sourceSize < 1 || hashes.originalByteLength !== sourceSize) {
+      throw new Error("content_tampered");
+    }
     const [created] = await temp.getMetadata();
     if (created.generation == null || created.generation === "") throw new Error("generation_conflict");
     tempGeneration = String(created.generation);
@@ -340,7 +387,7 @@ async function sealPendingEvidence(
     });
     if (writeError) throw writeError;
     await tempBound.copy(bucket.file(path), { preconditionOpts: { ifGenerationMatch: sourceGeneration } });
-    const [after] = await file.getMetadata();
+    const [after] = await bucket.file(path).getMetadata();
     if (String(after.generation) === sourceGeneration) throw new Error("generation_conflict");
     return String(after.generation);
   } catch (error) {
@@ -351,6 +398,8 @@ async function sealPendingEvidence(
     destroyQuiet(sourceStream);
     if (tempGeneration !== null) {
       await bucket.file(tempPath, { generation: tempGeneration }).delete({ ignoreNotFound: true }).catch(() => undefined);
+    } else if (tempStarted) {
+      await bucket.file(tempPath).delete({ ignoreNotFound: true }).catch(() => undefined);
     }
   }
 }
@@ -385,12 +434,11 @@ async function* evidencePlaintextChunks(
 ): AsyncGenerator<Uint8Array> {
   const uid = path.split("/")[1] ?? "";
   const stream = file.createReadStream();
-  stream.on("error", () => undefined);
   const generator = iterateEvidencePlaintext({
     key: contentKeyOrNull(env),
     uid,
     storagePath: path,
-    stored: nodeChunks(stream),
+    stored: readBound(stream),
   });
   try {
     let step = await generator.next();
@@ -423,12 +471,11 @@ async function ciphertextMatchesSourceGeneration(
   if (!key) return false;
   const uid = path.split("/")[1] ?? "";
   const stream = file.createReadStream();
-  stream.on("error", () => undefined);
   const generator = iterateEvidencePlaintext({
     key,
     uid,
     storagePath: path,
-    stored: nodeChunks(stream),
+    stored: readBound(stream),
   });
   try {
     let step = await generator.next();
@@ -474,6 +521,9 @@ export function wrapAdminBlobStore(bucket: AdminBucket, env: NodeJS.ProcessEnv):
       };
     },
     async open(path, generation) {
+      // Packaging asserts this exact parameter list. Recovery passes `{ sealPending: false }`
+      // so a pending marker on a different generation cannot start a seal.
+      const options = arguments[2] as { sealPending?: boolean } | undefined;
       const file = bucket.file(path);
       const [exists] = await file.exists();
       if (!exists) return null;
@@ -507,10 +557,17 @@ export function wrapAdminBlobStore(bucket: AdminBucket, env: NodeJS.ProcessEnv):
           ),
         };
       }
-      if (evidenceMarker(meta) === "pending" && (!generation || actualGeneration === String(generation))) {
-        actualGeneration = await sealPendingEvidence(bucket, file, path, env);
+      if (
+        options?.sealPending !== false &&
+        generation &&
+        evidenceMarker(meta) === "pending" &&
+        actualGeneration === String(generation)
+      ) {
+        actualGeneration = await sealPendingEvidence(bucket, path, env, actualGeneration);
         [meta] = await file.getMetadata();
         if (String(meta.generation) !== actualGeneration) return null;
+      } else if (options?.sealPending === false && evidenceMarker(meta) === "pending") {
+        return null;
       }
       const byteSize = Number(meta.size);
       if (!readableSize(byteSize)) return null;

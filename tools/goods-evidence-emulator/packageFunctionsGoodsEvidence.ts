@@ -94,6 +94,7 @@ export const KEEP = new Set([
   "productionCompose.ts",
   "productionAdminConfig.ts",
   "productionExports.ts",
+  "grinCloudWrite.productionAdapter.test.ts",
 ]);
 
 export function rewrite(src: string): string {

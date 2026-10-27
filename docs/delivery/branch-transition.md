@@ -19,12 +19,12 @@
 
 | Ref | SHA |
 |---|---|
-| `integration` (local and `origin/integration`) | `2cffebf913243b12703d73888e4770182cf4edd0` |
+| Last reviewed and last pushed `integration` head | `2cffebf913243b12703d73888e4770182cf4edd0` |
 | `origin/main` | `021630cdc5ed7d7a19db14da9b419b7215ea63b8` |
 
-No commits have been added to `integration` since that reviewed head. `integration` contains commits that are not in `main`. `main` has no commits that `integration` lacks.
+That table is the starting point. Commits after `2cffebf913243b12703d73888e4770182cf4edd0` correct GRIN seal ownership, recovery, and stream completion. They do not rename the branch. `integration` still contains commits that are not in `main`. `main` has no commits that `integration` lacks.
 
-PR #42 is open, draft, and not merged. Its base ref is `main` at `021630cdc5ed7d7a19db14da9b419b7215ea63b8`. Its head ref is `integration` at `2cffebf913243b12703d73888e4770182cf4edd0`. The title remains "Fix auth readiness and protect public error messages".
+PR #42 stays open, draft, and unmerged. Its base ref is `main`. Its head ref stays `integration`. GitHub updates that head only when `integration` is pushed. The title remains "Fix auth readiness and protect public error messages".
 
 GitHub closes a pull request when its head branch is renamed. PR #42 stays on `integration` until it is resolved or the owner explicitly approves a replacement draft PR.
 

@@ -67,7 +67,7 @@ export async function writeSealedEvidence(input: {
   sourceGeneration: string;
   plaintext: AsyncIterable<Uint8Array>;
   write: (chunk: Uint8Array) => void | Promise<void>;
-}): Promise<{ originalSha256: string; ciphertextSha256: string }> {
+}): Promise<{ originalSha256: string; ciphertextSha256: string; originalByteLength: number }> {
   requireKey(input.key);
   const generationBytes = Buffer.from(input.sourceGeneration, "utf8");
   if (generationBytes.length > 255) throw new Error("unsupported_seal");
@@ -76,6 +76,7 @@ export async function writeSealedEvidence(input: {
   cipher.setAAD(evidenceByteAad(input.uid, input.storagePath, input.sourceGeneration));
   const original = createHash("sha256");
   const stored = createHash("sha256");
+  let originalByteLength = 0;
   const header = Buffer.concat([
     GRIN_EVIDENCE_MAGIC,
     Buffer.from([VERSION, generationBytes.length]),
@@ -86,6 +87,7 @@ export async function writeSealedEvidence(input: {
   await input.write(header);
   for await (const chunk of input.plaintext) {
     if (chunk.byteLength === 0) continue;
+    originalByteLength += chunk.byteLength;
     original.update(chunk);
     const out = cipher.update(chunk);
     if (out.byteLength > 0) {
@@ -96,7 +98,11 @@ export async function writeSealedEvidence(input: {
   const final = Buffer.concat([cipher.final(), cipher.getAuthTag()]);
   stored.update(final);
   await input.write(final);
-  return { originalSha256: original.digest("hex"), ciphertextSha256: stored.digest("hex") };
+  return {
+    originalSha256: original.digest("hex"),
+    ciphertextSha256: stored.digest("hex"),
+    originalByteLength,
+  };
 }
 
 export async function* iterateEvidencePlaintext(input: {

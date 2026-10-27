@@ -1019,11 +1019,20 @@ export class GoodsEvidenceStorageAdapter {
     record: EvidenceRecord,
     next: "verified"
   ): Promise<G2LifecycleResult> {
-    const opened = await this.blobs.open(record.storagePath, record.generation);
+    let opened = await this.blobs.open(record.storagePath, record.generation);
+    if (!opened && record.generation && record.state === "orphan_pending_review") {
+      const restored = await this.blobs.stat(record.storagePath);
+      if (restored && restored.generation !== record.generation) {
+        opened = await this.blobs.open(record.storagePath, restored.generation, { sealPending: false });
+      }
+    }
     if (!opened) {
       if (record.generation) {
-        const stat = await this.blobs.stat(record.storagePath);
-        if (stat && stat.generation !== record.generation) {
+        const current = await this.blobs.stat(record.storagePath);
+        if (current && current.generation !== record.generation) {
+          if (record.state === "verified" || record.state === "linked") {
+            return this.rejectReplaced(record);
+          }
           return deny("integrity", GENERIC_DENY);
         }
       }
@@ -1047,7 +1056,14 @@ export class GoodsEvidenceStorageAdapter {
     const hashed = await verifyOriginalChunks(record.claimedSha256, opened.chunks, nodeChunkHasher());
     const after = await this.blobs.stat(record.storagePath);
     if (!after || after.generation !== opened.generation) {
-      return this.rejectReplaced(record);
+      if (record.state === "verified" || record.state === "linked") {
+        return this.rejectReplaced(record);
+      }
+      return deny("integrity", GENERIC_DENY);
+    }
+    const generationMoved = Boolean(record.generation) && opened.generation !== record.generation;
+    if ((!hashed.ok || hashed.byteSize !== record.claimedByteSize) && generationMoved && record.state !== "verified" && record.state !== "linked") {
+      return deny("integrity", GENERIC_DENY);
     }
     if (!hashed.ok || hashed.byteSize !== record.claimedByteSize) {
       return this.commitState(record, {
@@ -1065,6 +1081,9 @@ export class GoodsEvidenceStorageAdapter {
       generation: opened.generation,
     };
     if (!trustedHashMatchesClaim(claimOf(record), trusted)) {
+      if (generationMoved && record.state !== "verified" && record.state !== "linked") {
+        return deny("integrity", GENERIC_DENY);
+      }
       return this.commitState(record, {
         state: "rejected",
         actualSha256: trusted.sha256,
