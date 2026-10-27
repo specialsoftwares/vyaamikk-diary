@@ -30,11 +30,27 @@ export function readNativeSecureRandom(length: number): Uint8Array | null {
 }
 
 function fillFromExpoCrypto(bytes: Uint8Array): Uint8Array | null {
-  // Metro loads this native module. A static import would pull it into host tests.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const crypto = require("expo-crypto") as {
-    getRandomValues?: (target: Uint8Array) => Uint8Array;
-  };
-  if (typeof crypto.getRandomValues !== "function") return null;
-  return crypto.getRandomValues(bytes);
+  try {
+    // Metro loads this native module. A static import would pull it into host tests.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const crypto = require("expo-crypto") as {
+      getRandomValues?: (target: Uint8Array) => Uint8Array;
+    };
+    if (typeof crypto.getRandomValues !== "function") return hostCryptoOrClosed(bytes);
+    const filled = crypto.getRandomValues(bytes);
+    if (!(filled instanceof Uint8Array) || filled.length !== bytes.length) return null;
+    return filled;
+  } catch {
+    return hostCryptoOrClosed(bytes);
+  }
+}
+
+/** Node keeps a CSPRNG. React Native does not use this fallback. */
+function hostCryptoOrClosed(bytes: Uint8Array): Uint8Array | null {
+  const product = typeof navigator === "undefined" ? "" : navigator.product;
+  if (product === "ReactNative") return null;
+  const random = globalThis.crypto?.getRandomValues;
+  if (typeof random !== "function") return null;
+  random.call(globalThis.crypto, bytes);
+  return bytes;
 }

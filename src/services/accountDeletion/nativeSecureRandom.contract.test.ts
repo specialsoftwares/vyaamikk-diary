@@ -29,9 +29,9 @@ const authSource = fs.readFileSync(
 function testProductionSource() {
   assert.match(source, /require\("expo-crypto"\)/);
   assert.match(source, /getRandomValues/);
+  assert.match(source, /product === "ReactNative"/);
   assert.doesNotMatch(source, /getRandomBytes/);
   assert.doesNotMatch(source, /Math\.random/);
-  assert.doesNotMatch(source, /globalThis\.crypto/);
   const saveAt = authSource.indexOf("const saveSession");
   const saveBody = authSource.slice(saveAt, saveAt + 900);
   assert.match(saveBody, /commitSessionAfterLocalReadiness/);
@@ -118,7 +118,21 @@ async function testReadySessionPublishesAfterPrepare() {
   assert.equal(other?.length, 32);
   assert.notEqual(Buffer.from(bytes!).toString("hex"), Buffer.from(other!).toString("hex"));
   __setNativeSecureRandomForTests(null);
-  assert.equal(readNativeSecureRandom(32), null);
+  const host = readNativeSecureRandom(32);
+  assert.equal(host?.length, 32);
+  const previous = globalThis.navigator;
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: { product: "ReactNative" },
+  });
+  try {
+    assert.equal(readNativeSecureRandom(32), null);
+  } finally {
+    Object.defineProperty(globalThis, "navigator", {
+      configurable: true,
+      value: previous,
+    });
+  }
   assert.equal(readNativeSecureRandom(0), null);
 }
 
