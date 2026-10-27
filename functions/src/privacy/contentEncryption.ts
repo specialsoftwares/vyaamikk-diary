@@ -67,7 +67,67 @@ export const COLLECTION_PURPOSE = {
   professionalPacks: "professional_pack",
   letterheadDocs: "letterhead_document",
   users: "profile",
+  grinEvidence: "grin_evidence",
 } as const;
+
+const GRIN_BODY_PATH = /\/(?:receipts|commands|events)\/[^/]+$/;
+
+/** Receipt, command, and event documents. Serials, quotas, and evidence bytes stay outside. */
+export function grinCloudDocumentShouldSeal(path: string): boolean {
+  return GRIN_BODY_PATH.test(path);
+}
+
+/**
+ * Seals a new or updated GRIN body document.
+ * A missing or malformed key throws. It does not return the plaintext for persistence.
+ * Serials, quotas, and other non-body paths are unchanged.
+ * An already sealed document is persisted only after this key opens it.
+ */
+export function sealGrinCloudDocument(
+  path: string,
+  data: Record<string, unknown>,
+  env: NodeJS.ProcessEnv = process.env
+): Record<string, unknown> {
+  if (!grinCloudDocumentShouldSeal(path)) return data;
+  const uid = path.split("/")[1];
+  if (!uid || !path.startsWith(`users/${uid}/`)) throw new Error("binding_rejected");
+  const key = loadContentKey(env);
+  if (data.grinDocumentSeal === 1) {
+    openGrinCloudDocument(path, data, env);
+    return data;
+  }
+  const seal = sealContent({
+    key,
+    uid,
+    collection: "grinEvidence",
+    recordId: path,
+    revision: 1,
+    purpose: "grin_evidence",
+    plaintext: Buffer.from(JSON.stringify(data), "utf8"),
+  });
+  return { grinDocumentSeal: 1, contentSeal: seal };
+}
+
+/** Legacy documents pass through. A sealed document without its key fails closed. */
+export function openGrinCloudDocument(
+  path: string,
+  data: Record<string, unknown> | undefined,
+  env: NodeJS.ProcessEnv = process.env
+): Record<string, unknown> | undefined {
+  if (!data || data.grinDocumentSeal !== 1) return data;
+  const uid = path.split("/")[1];
+  if (!uid) throw new Error("binding_rejected");
+  const plaintext = openStoredContent({
+    env,
+    uid,
+    collection: "grinEvidence",
+    recordId: path,
+    revision: 1,
+    purpose: "grin_evidence",
+    seal: data.contentSeal as ContentSeal,
+  });
+  return JSON.parse(plaintext.toString("utf8")) as Record<string, unknown>;
+}
 
 /** Copies this engine does not rewrite. v2 writes stay off until authorised. */
 export const CONTENT_MIGRATION_UNCOVERED = [

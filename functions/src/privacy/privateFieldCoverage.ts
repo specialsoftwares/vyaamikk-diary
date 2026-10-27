@@ -21,8 +21,8 @@ export const PRIVATE_FIELD_BOUNDARIES: readonly FieldBoundary[] = [
     copy: "grin_evidence",
     privateFields: ["receipt body", "goods description", "image bytes"],
     readableFields: ["ledger id", "receipt id", "storage object key"],
-    boundary: "owner_rules",
-    handling: "Owner rules control who can read the image and receipt. That is access control, not application-level encryption. The object key is a storage path. GRIN purge stays off.",
+    boundary: "content_seal",
+    handling: "Receipt, command, and event documents are sealed with the server content key. A missing or malformed key rejects the mutation. Legacy plaintext documents still open. New image and PDF originals are sealed with AES-256-GCM in bounded chunks. The original-content hash is not the stored-ciphertext hash. An existing unsealed object stays readable and is not rewritten. GRIN purge stays off.",
   },
   {
     copy: "party_ledger_projections",
@@ -36,7 +36,7 @@ export const PRIVATE_FIELD_BOUNDARIES: readonly FieldBoundary[] = [
     privateFields: ["queued plaintext payload"],
     readableFields: ["queue key"],
     boundary: "device_local",
-    handling: "Pending rows stay on the device under the account that queued them. Diary payloads, draft bodies, queue bodies, and insight labels are sealed with that account's key. Insight join keys and link ids are account-bound tokens. Ordinary logout retains the rows and the key. Account deletion removes that account's rows and key, including that account's local GRIN rows. A later account's queue query does not return the previous account's rows.",
+    handling: "Pending rows stay on the device under the account that queued them. Diary payloads, draft bodies, queue bodies, insight labels, and GRIN receipt and command JSON are sealed with that account's key. Legacy GRIN plaintext still opens. Insight join keys and link ids are account-bound tokens. Ordinary logout retains the rows and the key. Account deletion removes that account's rows and key, including that account's local GRIN rows. A later account's queue query does not return the previous account's rows.",
   },
   {
     copy: "storage_object_names",

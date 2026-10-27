@@ -1,7 +1,7 @@
 /**
  * Bundle the isolated Functions-emulator entry (not functions/src/index.ts).
  */
-import { mkdirSync, existsSync, symlinkSync } from "node:fs";
+import { copyFileSync, mkdirSync, existsSync, symlinkSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = join(here, "../../..");
 mkdirSync(join(here, "lib"), { recursive: true });
+copyFileSync(join(here, "emulator-content-key.env"), join(here, ".secret.local"));
 
 const entryNm = join(here, "node_modules");
 const functionsNm = join(repo, "functions/node_modules");

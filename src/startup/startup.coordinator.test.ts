@@ -11,9 +11,14 @@ import { formatDiagnosticsPlainText, readFirebaseVarPresence } from "./diagnosti
 import { __setRuntimeSignalsForTests } from "@/config/env";
 
 function testRedaction() {
+  // Synthetic stand-in for the Google API key shape. It is not a configured
+  // credential. A live Google API key is 39 characters; this one is not.
+  const syntheticApiKey = "AIzaSyntheticRedactionFixture";
+  assert.notEqual(syntheticApiKey.length, 39);
   const msg = redactStartupMessage(
-    "fail AIzaSyB6z6vRYwjpNOfbuh4j4uKY48mYsF5sUPI user@example.com +919876543210 /Users/me/secret"
+    `fail ${syntheticApiKey} user@example.com +919876543210 /Users/me/secret`
   );
+  assert.ok(!msg.includes(syntheticApiKey));
   assert.ok(!msg.includes("AIza"));
   assert.ok(!msg.includes("user@"));
   assert.ok(!msg.includes("98765"));

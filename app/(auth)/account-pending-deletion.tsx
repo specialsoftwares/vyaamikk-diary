@@ -10,6 +10,9 @@ import {
   DELETION_V2_REACTIVATION_DAYS,
 } from "@/domain/identityLifecycle";
 import { AppError, userFacingMessage } from "@/domain/errors";
+import { toPublicError } from "@/domain/publicErrors";
+import { reportAuthFailure } from "@/services/auth/authStageTiming";
+import { resolveResendControl } from "@/hooks/resendControl";
 import { getAuthEntryHref } from "@/config/authWrapper";
 import { getActiveBackend } from "@/config/env";
 import { useAuth } from "@/state/auth";
@@ -49,6 +52,12 @@ export default function AccountPendingDeletionScreen() {
   const codeInputRef = useRef<TextInput>(null);
   const online = useIsOnline();
   const resend = useAuthoritativeResendCountdown(resendAvailableAt);
+  const resendPhase = resolveResendControl({
+    resendAvailableAt,
+    remainingSeconds: resend.remainingSeconds,
+    online,
+    busy,
+  });
 
   const phoneE164 = String(params.phoneE164 ?? "");
   const scheduledMs = Number(params.deletionScheduledFor ?? 0);
@@ -136,7 +145,8 @@ export default function AccountPendingDeletionScreen() {
     if (code === "no_verified_email" || code === "purge_underway" || code === "ineligible") {
       return t("pendingDeletion.reactivateUnavailable");
     }
-    return userFacingMessage(error);
+    reportAuthFailure(error, "SESSION_PUBLISH");
+    return toPublicError(error, "reactivation").message;
   };
 
   const onStartReactivation = async () => {
@@ -233,13 +243,17 @@ export default function AccountPendingDeletionScreen() {
               />
               <Button
                 label={
-                  resend.canResend
+                  resendPhase === "ready" || resendPhase === "sending"
                     ? t("pendingDeletion.reactivateResend")
-                    : t("pendingDeletion.reactivateResendIn", { seconds: resend.remainingSeconds })
+                    : resendPhase === "cooling"
+                      ? t("pendingDeletion.reactivateResendIn", { seconds: resend.remainingSeconds })
+                      : resendPhase === "offline"
+                        ? t("pendingDeletion.reactivateResendOffline")
+                        : t("pendingDeletion.reactivateResendUnavailable")
                 }
                 variant="ghost"
                 onPress={() => void onStartReactivation()}
-                disabled={busy || !resend.canResend || !online}
+                disabled={resendPhase !== "ready"}
               />
               <Button
                 label={t("pendingDeletion.backToLogin")}

@@ -17,7 +17,8 @@ on:
   pull_request:
     branches: [main, security/firebase-session-hardening]
   push:
-    branches: [main]
+    # `develop` is the deferred-rename push hook. Draft PR #42 still heads `integration`.
+    branches: [main, integration, develop]
   workflow_dispatch:
 
 permissions:

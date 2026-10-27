@@ -20,6 +20,7 @@ import {
   type Wave1OriginalCategory,
 } from "@/goodsEvidence/evidence";
 import { migrateToV10 } from "@/localDb/migrateGrin";
+import { readOwnedJson, storeOwnedJson } from "@/services/accountDeletion/localPayload";
 import { classifyRegisterResult, isNetworkAmbiguous, nextRetryState, type ClassifiedOutcome } from "./classify";
 import { confirmedProjectionJson, parseConfirmedProjection } from "./confirmedProjection";
 import { freezeAdmittedCommand } from "./freeze";
@@ -286,8 +287,8 @@ function parseState(raw: string): OutboxLocalState {
   throw new Error("corrupt_outbox_state");
 }
 
-function parseJson(raw: string): unknown {
-  return JSON.parse(raw) as unknown;
+function parseJson(ownerUid: string, raw: string): unknown {
+  return readOwnedJson(ownerUid, raw);
 }
 
 export type GrinOutboxDeps = {
@@ -462,7 +463,7 @@ export class GrinOutbox {
       if (existing) {
         this.db.runSync(
           `UPDATE grin_local_receipts SET payload_json = ?, updated_at = ? WHERE id = ? AND owner_uid = ? AND local_state = ?`,
-          [JSON.stringify(input.body), now, existing.id, session.ownerUid, "draft"]
+          [storeOwnedJson(session.ownerUid, input.body), now, existing.id, session.ownerUid, "draft"]
         );
         return;
       }
@@ -519,7 +520,7 @@ export class GrinOutbox {
             frozen.commandId,
             frozen.digest,
             "queued",
-            JSON.stringify(frozen.body),
+            storeOwnedJson(session.ownerUid, frozen.body),
             session.dispatchGeneration,
             now,
             existingReceipt.id,
@@ -711,9 +712,9 @@ export class GrinOutbox {
           receiptId: row.receipt_id,
           eventVersion: Number(row.confirmed_event_version),
           headHash: row.confirmed_head_hash,
-          original: JSON.parse(row.confirmed_original_json) as unknown,
-          events: JSON.parse(row.confirmed_events_json) as unknown,
-          effective: JSON.parse(row.confirmed_effective_json) as unknown,
+          original: parseJson(row.owner_uid, row.confirmed_original_json),
+          events: parseJson(row.owner_uid, row.confirmed_events_json),
+          effective: parseJson(row.owner_uid, row.confirmed_effective_json),
         },
         receiptId
       );
@@ -1064,7 +1065,7 @@ export class GrinOutbox {
       commandId: snapshot.command_id,
       type: "registerGoodsReceipt",
       ledgerId: snapshot.ledger_id,
-      body: parseJson(snapshot.frozen_payload_json),
+      body: parseJson(snapshot.owner_uid, snapshot.frozen_payload_json),
     };
     let result: GrinRegisterResult;
     let usedReconcile = false;
@@ -1119,7 +1120,7 @@ export class GrinOutbox {
       commandId: snapshot.command_id,
       type: commandType,
       ledgerId: snapshot.ledger_id,
-      body: parseJson(snapshot.frozen_payload_json),
+      body: parseJson(snapshot.owner_uid, snapshot.frozen_payload_json),
     };
     let result: GrinMutationResult;
     let usedReconcile = false;
@@ -1832,9 +1833,9 @@ export class GrinOutbox {
       [
         confirmed.eventVersion,
         confirmed.headHash,
-        json.original,
-        json.events,
-        json.effective,
+        storeOwnedJson(ownerUid, JSON.parse(json.original)),
+        storeOwnedJson(ownerUid, JSON.parse(json.events)),
+        storeOwnedJson(ownerUid, JSON.parse(json.effective)),
         now,
         ownerUid,
         ledgerId,
@@ -1872,9 +1873,9 @@ export class GrinOutbox {
           receiptId: row.receipt_id,
           eventVersion: Number(row.confirmed_event_version),
           headHash: row.confirmed_head_hash,
-          original: JSON.parse(row.confirmed_original_json) as unknown,
-          events: JSON.parse(row.confirmed_events_json) as unknown,
-          effective: JSON.parse(row.confirmed_effective_json) as unknown,
+          original: parseJson(row.owner_uid, row.confirmed_original_json),
+          events: parseJson(row.owner_uid, row.confirmed_events_json),
+          effective: parseJson(row.owner_uid, row.confirmed_effective_json),
         },
         row.receipt_id
       );
@@ -1904,7 +1905,7 @@ export class GrinOutbox {
       receiptId: row.receipt_id,
       commandType: row.command_type as GrinCommandType,
       digest: row.digest,
-      frozenPayload: parseJson(row.frozen_payload_json),
+      frozenPayload: parseJson(row.owner_uid, row.frozen_payload_json),
       localState: parseState(row.local_state),
       attemptCount: Number(row.attempt_count),
       maxAttempts: Number(row.max_attempts),
@@ -1973,7 +1974,7 @@ export class GrinOutbox {
         args.digest,
         args.localState,
         args.dispatchGeneration,
-        JSON.stringify(args.payload),
+        storeOwnedJson(args.ownerUid, args.payload),
         args.now,
         args.now,
       ]
@@ -2006,7 +2007,7 @@ export class GrinOutbox {
         args.receiptId,
         args.commandType,
         args.digest,
-        JSON.stringify(args.frozenPayload),
+        storeOwnedJson(args.ownerUid, args.frozenPayload),
         args.localState,
         this.maxAttempts,
         args.dispatchGeneration,
@@ -2175,7 +2176,7 @@ export function peekQueuedCommand(
     receiptId: row.receipt_id,
     commandType: row.command_type as GrinCommandType,
     digest: row.digest,
-    frozenPayload: parseJson(row.frozen_payload_json),
+    frozenPayload: parseJson(ownerUid, row.frozen_payload_json),
     localState: parseState(row.local_state),
     attemptCount: Number(row.attempt_count),
     maxAttempts: Number(row.max_attempts),

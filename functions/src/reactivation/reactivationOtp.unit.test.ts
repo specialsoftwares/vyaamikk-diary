@@ -109,6 +109,10 @@ function codeFrom(text: string): string {
   return match![1]!;
 }
 
+function failureCode(error: unknown): string | undefined {
+  return (error as { details?: { code?: string } }).details?.code;
+}
+
 async function start(db: MemoryDb, mailer: ReactivationMailer, now: number) {
   return performStartAccountReactivation({
     db,
@@ -128,6 +132,9 @@ async function testHappyPath(): Promise<void> {
   const started = await start(db, mailer, now);
   assert.equal(started.maskedEmail.includes("@"), true);
   assert.equal(JSON.stringify(started).includes(codeFrom(mailer.sent[0]!)), false);
+  const reserved = db.docs.get(`${REACTIVATION_USERS}/${UID}`);
+  assert.equal(reserved?.reactivationRequestedAt, now);
+  assert.ok(Number(reserved?.emailVerifiedAt) < now);
   const done = await performCompleteAccountReactivation({
     db,
     uid: UID,
@@ -176,7 +183,19 @@ async function testWrongExpiryAndBudgets(): Promise<void> {
   const mailer = capturingMailer();
   const started = await start(db, mailer, now);
   const right = codeFrom(mailer.sent[0]!);
-  for (let i = 0; i < 5; i += 1) {
+  await assert.rejects(
+    () =>
+      performCompleteAccountReactivation({
+        db,
+        uid: UID,
+        challengeId: started.verificationId,
+        code: "111111",
+        now: now + 1_000,
+        env: ENV,
+      }),
+    (error: unknown) => failureCode(error) === "invalid"
+  );
+  for (let i = 0; i < 4; i += 1) {
     await assert.rejects(() =>
       performCompleteAccountReactivation({
         db,
@@ -208,15 +227,17 @@ async function testWrongExpiryAndBudgets(): Promise<void> {
   seed(expiry, now);
   const expiryMail = capturingMailer();
   const expiring = await start(expiry, expiryMail, now);
-  await assert.rejects(() =>
-    performCompleteAccountReactivation({
-      db: expiry,
-      uid: UID,
-      challengeId: expiring.verificationId,
-      code: codeFrom(expiryMail.sent[0]!),
-      now: expiring.expiresAt,
-      env: ENV,
-    })
+  await assert.rejects(
+    () =>
+      performCompleteAccountReactivation({
+        db: expiry,
+        uid: UID,
+        challengeId: expiring.verificationId,
+        code: codeFrom(expiryMail.sent[0]!),
+        now: expiring.expiresAt,
+        env: ENV,
+      }),
+    (error: unknown) => failureCode(error) === "expired"
   );
   assert.equal(expiry.docs.get(`${REACTIVATION_USERS}/${UID}`)?.status, "pending_deletion");
 }
@@ -323,8 +344,11 @@ async function testSendLimitAndCrossResendGuesses(): Promise<void> {
 async function testIneligibleAndPurgeRace(): Promise<void> {
   const missingEmail = new MemoryDb();
   const now = 1_700_000_000_000;
-  seed(missingEmail, now, { emailStatus: null, businessEmail: null, normalizedEmail: null });
-  await assert.rejects(() => start(missingEmail, capturingMailer(), now));
+  seed(missingEmail, now, { emailStatus: null, businessEmail: null, normalizedEmail: null, emailVerifiedAt: null });
+  await assert.rejects(
+    () => start(missingEmail, capturingMailer(), now),
+    (error: unknown) => failureCode(error) === "no_verified_email"
+  );
 
   const leased = new MemoryDb();
   seed(leased, now);
@@ -333,7 +357,10 @@ async function testIneligibleAndPurgeRace(): Promise<void> {
     status: "leased",
     leaseUntil: now + 60_000,
   });
-  await assert.rejects(() => start(leased, capturingMailer(), now));
+  await assert.rejects(
+    () => start(leased, capturingMailer(), now),
+    (error: unknown) => failureCode(error) === "purge_underway"
+  );
 
   const generation = new MemoryDb();
   seed(generation, now);

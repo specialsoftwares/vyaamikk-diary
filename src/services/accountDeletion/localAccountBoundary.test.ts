@@ -3,6 +3,7 @@
  * Host restart is not native-device proof.
  */
 import assert from "node:assert/strict";
+import { randomFillSync } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 
@@ -10,6 +11,7 @@ import { MIGRATIONS_V1 } from "@/localDb/schema";
 import { execStatements } from "@/localDb/migrate";
 import { openHostSqlite } from "@/services/grin/outbox/hostSqlite";
 import { createMemoryLocalKeyStore } from "@/services/accountDeletion/localDataKey";
+import { __setNativeSecureRandomForTests } from "@/services/accountDeletion/nativeSecureRandom";
 import {
   deleteLocalOwnerRows,
   listOwnedIds,
@@ -68,6 +70,11 @@ assert.deepEqual(listOwnedIds(reopened, "entries_local", "owner-b"), ["b-row"]);
 reopened.close?.();
 
 async function searchCase(): Promise<void> {
+  __setNativeSecureRandomForTests((length) => {
+    const bytes = new Uint8Array(length);
+    randomFillSync(bytes);
+    return bytes;
+  });
   const storage = new Map<string, string>();
 const memory = {
   async getItem(key: string) {
@@ -93,6 +100,7 @@ await clearRecentSearches("owner-a", memory, keys);
 assert.deepEqual(await getRecentSearches("owner-a", memory, keys), []);
 assert.deepEqual(await getRecentSearches("owner-b", memory, keys), ["other party"]);
 syncSessionOwnership.resetForTests();
+  __setNativeSecureRandomForTests(null);
 }
 
 searchCase().then(() => {

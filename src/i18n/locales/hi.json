@@ -1200,6 +1200,8 @@
     "emailCodeHint": "अपने ईमेल का छह अंकों का कोड डालें। इसे साझा न करें।",
     "reactivateResend": "कोड फिर भेजें",
     "reactivateResendIn": "{{seconds}} सेकंड में फिर भेजें",
+    "reactivateResendUnavailable": "फिर भेजना उपलब्ध नहीं",
+    "reactivateResendOffline": "फिर भेजने के लिए इंटरनेट से जुड़ें",
     "reactivateOffline": "खाता फिर सक्रिय करने से पहले इंटरनेट से जुड़ें।",
     "reactivateSendFailed": "ईमेल नहीं भेजा जा सका। ऑनलाइन होकर फिर कोशिश करें।",
     "reactivateExpired": "यह कोड समाप्त हो गया। नया कोड माँगें।",

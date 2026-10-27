@@ -4,6 +4,7 @@
  */
 
 import { AppError, type AppErrorCode } from "@/domain/errors";
+import { toPublicError } from "@/domain/publicErrors";
 import { AUTH_USER_FACING_COPY } from "./authUserFacingCopy";
 
 /** Firebase Auth codes we explicitly surface in the beta UI. */
@@ -218,11 +219,7 @@ export function formatPhoneAuthDisplayMessage(error: unknown): string {
   if (!(error instanceof AppError)) {
     return mapPhoneAuthFailure(error, "send").userMessage;
   }
-  return userFacingMessageFromAppError(error);
-}
-
-function userFacingMessageFromAppError(error: AppError): string {
-  return error.message || "Could not send the verification code. Check the number and try again.";
+  return toPublicError(error, "phone").message;
 }
 
 export function formatPhoneAuthCopyDiagnostics(error: unknown): string {

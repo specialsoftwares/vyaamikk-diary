@@ -68,7 +68,9 @@ import {
   type AuthV2Step,
 } from "@/auth-v2/types";
 import { toE164FromDraft } from "@/auth-v2/phoneValidation";
-import { AppError, userFacingMessage } from "@/domain/errors";
+import { AppError } from "@/domain/errors";
+import { toPublicError } from "@/domain/publicErrors";
+import { reportAuthFailure } from "@/services/auth/authStageTiming";
 import {
   authFlowDiagnosticCode,
   authFlowErrorTitle,
@@ -346,12 +348,10 @@ export function AuthFlowGate() {
       appErr?.code === "invalid_phone" ||
       appErr?.code === "too_many_attempts" ||
       appErr?.code === "auth_not_configured";
-    const body =
-      phase === "post_auth"
-        ? userFacingMessage(e)
-        : isNativePhoneAuthFailure
-          ? formatPhoneAuthDisplayMessage(e)
-          : userFacingMessage(e);
+    const body = isNativePhoneAuthFailure
+      ? formatPhoneAuthDisplayMessage(e)
+      : toPublicError(e, phase === "post_auth" ? "account" : "phone").message;
+    reportAuthFailure(e, phase === "post_auth" ? "SESSION_PUBLISH" : "LOCAL_KEY_READY");
     authFlowLog.warn("auth_flow_error", {
       surface: nextSurface,
       phase,

@@ -71,6 +71,16 @@ export function openOwnedPayload(uid: string, stored: string | null): PayloadOpe
   return { state: "ready", value: clear, legacy: false };
 }
 
+export function storeOwnedJson(uid: string, value: unknown): string {
+  return sealOwnedPayload(uid, JSON.stringify(value));
+}
+
+export function readOwnedJson(uid: string, stored: string): unknown {
+  const opened = openOwnedPayload(uid, stored);
+  if (opened.state === "unavailable") throw new LocalPayloadUnavailable(opened.reason);
+  return JSON.parse(opened.value) as unknown;
+}
+
 export function lookupToken(uid: string, logical: string): string {
   if (!sealRequired) return logical;
   const key = bound.get(uid)?.key;
@@ -122,6 +132,44 @@ export function migrateOwnedPayloads(db: PayloadDb, uid: string): {
       if (!opened.legacy) continue;
       db.runSync(
         `UPDATE ${spec.table} SET ${spec.column} = ? WHERE ${spec.id} = ? AND user_id = ?`,
+        [sealOwnedPayload(uid, opened.value), row.id, uid]
+      );
+      sealed += 1;
+    }
+  }
+  return { sealed, unreadable };
+}
+
+const GRIN_PAYLOAD_COLUMNS = [
+  { table: "grin_local_receipts", column: "payload_json" },
+  { table: "grin_local_receipts", column: "confirmed_original_json" },
+  { table: "grin_local_receipts", column: "confirmed_events_json" },
+  { table: "grin_local_receipts", column: "confirmed_effective_json" },
+  { table: "grin_outbox_commands", column: "frozen_payload_json" },
+] as const;
+
+/** Seals leftover GRIN plaintext for one account. Legacy rows stay readable if this never runs. */
+export function migrateGrinOwnedPayloads(db: PayloadDb, uid: string): {
+  sealed: number;
+  unreadable: number;
+} {
+  let sealed = 0;
+  let unreadable = 0;
+  for (const spec of GRIN_PAYLOAD_COLUMNS) {
+    const rows = db.getAllSync<{ id: string; value: string | null }>(
+      `SELECT id AS id, ${spec.column} AS value FROM ${spec.table} WHERE owner_uid = ?`,
+      [uid]
+    );
+    for (const row of rows) {
+      if (row.value == null || row.value === "") continue;
+      const opened = openOwnedPayload(uid, row.value);
+      if (opened.state === "unavailable") {
+        unreadable += 1;
+        continue;
+      }
+      if (!opened.legacy) continue;
+      db.runSync(
+        `UPDATE ${spec.table} SET ${spec.column} = ? WHERE id = ? AND owner_uid = ?`,
         [sealOwnedPayload(uid, opened.value), row.id, uid]
       );
       sealed += 1;

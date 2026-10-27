@@ -5,6 +5,21 @@ Jira project: **Vyaamikk Diary â€“ Engineering** (key **VYD**). Board: Backlog â
 
 Note: the app's UEID format `VYD-2026-XXXXXX` is unrelated to Jira keys (`VYD-123`). In commits and branches, `VYD-<number>` always means the Jira issue.
 
+## Branches and environments
+
+| Name | Meaning |
+|---|---|
+| `integration` | Current development branch and head of draft PR #42 |
+| `develop` | Agreed future name for that same development branch |
+| `main` | Approved production-source branch |
+| `staging` | Intended isolated testing environment; not yet established |
+| `production` | Live infrastructure and data |
+| SIT | System Integration Testing |
+| UAT | User Acceptance Testing |
+| Release candidate | Exact source commit, configuration, and identified build awaiting acceptance |
+
+`integration` is the temporary name. `develop` is the agreed future name for that same development branch. The remote rename is deferred. GitHub closes a pull request when its head branch is renamed, so draft PR #42 stays open on `integration` until it is resolved or the owner explicitly approves a replacement draft PR. `develop` is not a remote branch yet. `staging` is not provisioned. Details and the ordered procedure are in `docs/delivery/branch-transition.md`.
+
 ## Traceability (required for significant changes)
 
 - Branch: `VYD-123-short-description`

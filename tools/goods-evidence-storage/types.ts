@@ -69,8 +69,13 @@ export type G2BlobStore = {
    * Open the bound object path. When `generation` is set, the stored
    * generation must match or the open returns null. Does not return file
    * bytes as base64.
+   * `sealPending: false` reads that generation and must not replace a pending object.
    */
-  open(path: string, generation?: string | null): Promise<G2BlobRead | null>;
+  open(
+    path: string,
+    generation?: string | null,
+    options?: { sealPending?: boolean }
+  ): Promise<G2BlobRead | null>;
 };
 
 export type AdmissionPolicy = {

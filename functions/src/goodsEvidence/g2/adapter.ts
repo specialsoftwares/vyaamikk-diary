@@ -484,13 +484,31 @@ export class GoodsEvidenceStorageAdapter {
     if (!ids.ok) return ids;
     const loaded = await this.loadAuthorized(ids.uid, ids.ledgerId, ids.evidenceId, ids.receiptId);
     if (!loaded.ok) return loaded;
-    if (loaded.record.state === "uploaded_unverified") {
-      const stat = await this.blobs.stat(loaded.record.storagePath);
-      if (stat && stat.generation === loaded.record.generation) {
-        return lifecycleOk(loaded.record, true);
+    const record = loaded.record;
+    if (
+      record.state === "uploaded_unverified" ||
+      record.state === "verified" ||
+      record.state === "linked"
+    ) {
+      const stat = await this.blobs.stat(record.storagePath);
+      if (stat && record.generation && stat.generation === record.generation) {
+        return lifecycleOk(record, true);
+      }
+      if (
+        record.state === "uploaded_unverified" &&
+        stat &&
+        record.generation &&
+        stat.generation !== record.generation
+      ) {
+        // The callable verifies next. A seal of this reservation authenticates there.
+        // An unrelated generation must not be committed from this method.
+        return lifecycleOk(record, false);
+      }
+      if (record.state === "verified" || record.state === "linked") {
+        return this.rejectReplaced(record);
       }
     }
-    if (loaded.record.state !== "uploading") {
+    if (record.state !== "uploading") {
       return deny("invalid", evidenceTransitionError(loaded.record.state, "uploaded_unverified") ?? GENERIC_DENY);
     }
     const stat = await this.blobs.stat(loaded.record.storagePath);
@@ -1019,8 +1037,23 @@ export class GoodsEvidenceStorageAdapter {
     record: EvidenceRecord,
     next: "verified"
   ): Promise<G2LifecycleResult> {
-    const opened = await this.blobs.open(record.storagePath);
+    let opened = await this.blobs.open(record.storagePath, record.generation);
+    if (!opened && record.generation && record.state === "orphan_pending_review") {
+      const restored = await this.blobs.stat(record.storagePath);
+      if (restored && restored.generation !== record.generation) {
+        opened = await this.blobs.open(record.storagePath, restored.generation, { sealPending: false });
+      }
+    }
     if (!opened) {
+      if (record.generation) {
+        const current = await this.blobs.stat(record.storagePath);
+        if (current && current.generation !== record.generation) {
+          if (record.state === "verified" || record.state === "linked") {
+            return this.rejectReplaced(record);
+          }
+          return deny("integrity", GENERIC_DENY);
+        }
+      }
       const to: EvidenceObjectState =
         record.state === "orphan_pending_review" ? "rejected" : "orphan_pending_review";
       if (!isPermittedEvidenceTransition(record.state, to)) {
@@ -1041,7 +1074,14 @@ export class GoodsEvidenceStorageAdapter {
     const hashed = await verifyOriginalChunks(record.claimedSha256, opened.chunks, nodeChunkHasher());
     const after = await this.blobs.stat(record.storagePath);
     if (!after || after.generation !== opened.generation) {
-      return this.rejectReplaced(record);
+      if (record.state === "verified" || record.state === "linked") {
+        return this.rejectReplaced(record);
+      }
+      return deny("integrity", GENERIC_DENY);
+    }
+    const generationMoved = Boolean(record.generation) && opened.generation !== record.generation;
+    if ((!hashed.ok || hashed.byteSize !== record.claimedByteSize) && generationMoved && record.state !== "verified" && record.state !== "linked") {
+      return deny("integrity", GENERIC_DENY);
     }
     if (!hashed.ok || hashed.byteSize !== record.claimedByteSize) {
       return this.commitState(record, {
@@ -1059,6 +1099,9 @@ export class GoodsEvidenceStorageAdapter {
       generation: opened.generation,
     };
     if (!trustedHashMatchesClaim(claimOf(record), trusted)) {
+      if (generationMoved && record.state !== "verified" && record.state !== "linked") {
+        return deny("integrity", GENERIC_DENY);
+      }
       return this.commitState(record, {
         state: "rejected",
         actualSha256: trusted.sha256,

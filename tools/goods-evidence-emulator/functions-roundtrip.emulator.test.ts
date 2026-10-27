@@ -11,6 +11,8 @@
  * - Emulator hosts from firebase emulators:exec (Firestore 8090, Functions 5002,
  *   Storage 9201, Auth 9100). Unset hosts fail this test.
  * - GRIN_GOODS_EVIDENCE_FUNCTIONS=true on the emulator process only.
+ * - functions-entry/emulator-content-key.env fixture CONTENT_DATA_KEY, copied to
+ *   .secret.local by build.mjs. Not the production key.
  * - Auth emulator custom token for the seeded uid.
  * - Admin seed of user/ledger/admission.
  * - SQLITE_HOST + HOST_FILESYSTEM retention chunks for the persist hasher.
@@ -177,6 +179,7 @@ async function main(): Promise<void> {
   const adminApp = functionsRequire("firebase-admin/app") as typeof import("firebase-admin/app");
   const adminAuth = functionsRequire("firebase-admin/auth") as typeof import("firebase-admin/auth");
   const adminFirestore = functionsRequire("firebase-admin/firestore") as typeof import("firebase-admin/firestore");
+  const adminStorage = functionsRequire("firebase-admin/storage") as typeof import("firebase-admin/storage");
 
   if (adminApp.getApps().length === 0) {
     adminApp.initializeApp({ projectId: PROJECT_ID, storageBucket: STORAGE_BUCKET });
@@ -339,6 +342,21 @@ async function main(): Promise<void> {
     true,
     "G1 pointer must be appended after stored-byte verify"
   );
+
+  const receiptSnap = await db.doc(`users/${OWNER}/goodsEvidenceLedgers/${LEDGER}/receipts/${RECEIPT}`).get();
+  const receiptRaw = JSON.stringify(receiptSnap.data() ?? {});
+  assert.equal(receiptSnap.get("grinDocumentSeal"), 1);
+  assert.equal(receiptRaw.includes("Sample Supplier"), false);
+  const storagePath = uploaded.storagePath;
+  if (!storagePath) throw new Error("sealed upload must name its object");
+  const object = adminStorage.getStorage().bucket(STORAGE_BUCKET).file(storagePath);
+  const [stored] = await object.download();
+  const [objectMeta] = await object.getMetadata();
+  assert.equal(stored.subarray(0, 4).toString("utf8"), "VYD1");
+  assert.equal(stored.equals(Buffer.from(pdf)), false);
+  assert.equal(objectMeta.metadata?.vydEvidence, "sealed");
+  assert.equal(objectMeta.metadata?.vydOriginalSha256, independent);
+  assert.notEqual(objectMeta.metadata?.vydCiphertextSha256, independent);
 
   const persistTmp = fs.mkdtempSync(join(tmpdir(), "grin-e1-persist-"));
   const persistDbPath = join(persistTmp, "grin-persist.sqlite");

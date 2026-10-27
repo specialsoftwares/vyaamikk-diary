@@ -364,7 +364,10 @@ async function defaultPutObject(input: EvidenceObjectPutInput): Promise<Evidence
   } else {
     throw new Error("missing local original");
   }
-  const task = uploadBytesResumable(objectRef, data, { contentType: input.contentType });
+  const task = uploadBytesResumable(objectRef, data, {
+    contentType: input.contentType,
+    customMetadata: { vydEvidence: "pending" },
+  });
   await new Promise<void>((resolve, reject) => {
     task.on("state_changed", undefined, reject, () => resolve());
   });
@@ -391,7 +394,10 @@ export async function putReservedObjectWithJsStorage(input: {
   contentType: string;
 }): Promise<EvidenceObjectPutResult> {
   const objectRef = ref(input.storage, input.storagePath);
-  const task = uploadBytesResumable(objectRef, input.bytes, { contentType: input.contentType });
+  const task = uploadBytesResumable(objectRef, input.bytes, {
+    contentType: input.contentType,
+    customMetadata: { vydEvidence: "pending" },
+  });
   await new Promise<void>((resolve, reject) => {
     task.on("state_changed", undefined, reject, () => resolve());
   });

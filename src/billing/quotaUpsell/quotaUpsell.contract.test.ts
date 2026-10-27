@@ -153,6 +153,12 @@ assert.match(settingsSrc, /settings\/subscription/);
   }
   assert.equal(eas.build.preview?.android?.buildType, "apk");
   assert.equal(eas.build.production?.android?.buildType, "app-bundle");
+  const authValidation = eas.build["internal-auth-validation"];
+  assert.equal(authValidation?.android?.buildType, "app-bundle");
+  assert.equal(authValidation?.autoIncrement, false);
+  assert.equal(authValidation?.env?.EXPO_PUBLIC_APP_MODE, "production");
+  assert.equal(authValidation?.env?.EXPO_PUBLIC_SUBSCRIPTION_PURCHASE_ENTRY_ENABLED, "0");
+  assert.equal(authValidation?.env?.EXPO_PUBLIC_QUOTA_UPSELL_ENABLED, "0");
 }
 
 {

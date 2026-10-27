@@ -10,6 +10,7 @@
  */
 import { onCall, type CallableRequest } from "firebase-functions/v2/https";
 
+import { contentDataKey } from "../privacy/secrets";
 import { GrinAdminConfigError } from "./productionAdminConfig";
 import type { ComposedGrinCallables } from "./composed";
 import { assertAdmittedCallableUser } from "../identity/admitCallableUser";
@@ -85,7 +86,7 @@ export async function runProductionGrinCallable(
 }
 
 function wrapGrin(method: GrinMethod, loadComposed?: ProductionGrinLoadComposed) {
-  return onCall({ region: "asia-south1" }, async (request: CallableRequest) => {
+  return onCall({ region: "asia-south1", secrets: [contentDataKey] }, async (request: CallableRequest) => {
     await assertAdmittedCallableUser(request);
     if (!request.auth?.uid) return CONFIG_DENIED;
     await assertBusinessAgeAdmitted(request.auth.uid);
