@@ -6,8 +6,9 @@ import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
 import { Readable, Writable } from "node:stream";
 
+import { createComposedGrinCallables } from "../../functions/src/goodsEvidence/composed";
 import { GoodsEvidenceStorageAdapter } from "../../functions/src/goodsEvidence/g2/adapter";
-import { evidenceObjectPath } from "../../functions/src/goodsEvidence/g2/paths";
+import { evidenceLinkPath, evidenceObjectPath, storageAccountingPath } from "../../functions/src/goodsEvidence/g2/paths";
 import { wrapAdminBlobStore } from "../../functions/src/goodsEvidence/productionCompose";
 import { FAKE_createInjectedFirestore, FAKE_seedOwner } from "./FAKE_injectedFirestore";
 import { testClock } from "./testSupport";
@@ -508,6 +509,226 @@ async function main(): Promise<void> {
     const stored = bucket.objects.get(reserved.storagePath);
     assert.equal(stored?.bytes.equals(image), true);
     assert.equal(stored?.bytes.subarray(0, 4).toString("utf8") === "VYD1", false);
+    assert.equal(bucket.copies.length, 0);
+  }
+
+  {
+    const db = FAKE_createInjectedFirestore();
+    FAKE_seedOwner(db, OWNER, LEDGER, RECEIPT);
+    const bucket = new ControlledBucket();
+    const blobs = wrapAdminBlobStore(bucket as never, env);
+    const adapter = new GoodsEvidenceStorageAdapter(db, blobs, testClock());
+    const composed = createComposedGrinCallables({
+      evidence: adapter,
+      env: { GRIN_GOODS_EVIDENCE_FUNCTIONS: "true" },
+    });
+    const evidenceId = "ev_callable_retry";
+    const reserved = await composed.reserveEvidence({
+      auth: { uid: OWNER },
+      data: {
+        evidenceId,
+        ledgerId: LEDGER,
+        receiptId: RECEIPT,
+        category: "invoice",
+        mime: "application/pdf",
+        claimedSha256: sha256(image),
+        claimedByteSize: image.length,
+      },
+    });
+    assert.equal(reserved.ok, true);
+    if (!reserved.ok) throw new Error("reserve");
+    const began = await composed.beginEvidenceUpload({
+      auth: { uid: OWNER },
+      data: { evidenceId, ledgerId: LEDGER, receiptId: RECEIPT },
+    });
+    assert.equal(began.ok, true);
+    const uploadedGeneration = bucket.put(reserved.storagePath, image, { vydEvidence: "pending" });
+    const completed = await adapter.completeUpload(
+      { uid: OWNER },
+      { evidenceId, ledgerId: LEDGER, receiptId: RECEIPT }
+    );
+    assert.equal(completed.ok, true);
+    if (!completed.ok) throw new Error("complete");
+    assert.equal(completed.state, "uploaded_unverified");
+    assert.equal(completed.generation, uploadedGeneration);
+    const sealed = await blobs.open(reserved.storagePath, uploadedGeneration);
+    assert.ok(sealed);
+    assert.notEqual(sealed.generation, uploadedGeneration);
+    assert.equal(recordState(db, evidenceId).state, "uploaded_unverified");
+    const stranger = await composed.uploadEvidence({
+      auth: { uid: "owner-b" },
+      data: { evidenceId, ledgerId: LEDGER, receiptId: RECEIPT },
+    });
+    assert.equal(stranger.ok, false);
+    assert.equal(stranger.originalDurable, false);
+    assert.equal(recordState(db, evidenceId).state, "uploaded_unverified");
+    const retried = await composed.uploadEvidence({
+      auth: { uid: OWNER },
+      data: { evidenceId, ledgerId: LEDGER, receiptId: RECEIPT },
+    });
+    assert.equal(retried.ok, true);
+    assert.equal(retried.originalDurable, true);
+    assert.equal(retried.evidenceId, evidenceId);
+    assert.equal(retried.actualSha256, sha256(image));
+    assert.equal(retried.generation, sealed.generation);
+    assert.equal(retried.sizeBytes, image.length);
+    assert.equal(recordState(db, evidenceId).state, "linked");
+    const linkPath = evidenceLinkPath(OWNER, LEDGER, RECEIPT, evidenceId);
+    const accountingPath = storageAccountingPath(OWNER);
+    const linkBefore = db.snapshot.get(linkPath);
+    const accountingBefore = db.snapshot.get(accountingPath);
+    const objectBefore = db.snapshot.get(evidenceObjectPath(OWNER, LEDGER, evidenceId));
+    assert.ok(linkBefore);
+    const lost = await composed.uploadEvidence({
+      auth: { uid: OWNER },
+      data: { evidenceId, ledgerId: LEDGER, receiptId: RECEIPT },
+    });
+    assert.equal(lost.ok, true);
+    assert.equal(lost.originalDurable, true);
+    assert.equal(lost.evidenceId, evidenceId);
+    assert.equal(lost.generation, retried.generation);
+    assert.equal(lost.actualSha256, retried.actualSha256);
+    assert.equal(lost.reservationId, retried.reservationId);
+    assert.equal(db.snapshot.get(linkPath), linkBefore);
+    assert.equal(db.snapshot.get(accountingPath), accountingBefore);
+    assert.equal(db.snapshot.get(evidenceObjectPath(OWNER, LEDGER, evidenceId)), objectBefore);
+    const opened = await blobs.open(reserved.storagePath, sealed.generation);
+    assert.ok(opened);
+    assert.equal((await plaintext(opened.chunks)).equals(image), true);
+    const replacement = pdf(0x44);
+    bucket.put(reserved.storagePath, replacement, {});
+    const retrieved = await adapter.retrieveOriginal(
+      { uid: OWNER },
+      { evidenceId, ledgerId: LEDGER, receiptId: RECEIPT }
+    );
+    assert.equal(retrieved.ok, false);
+    const downloaded = await adapter.downloadOriginal(
+      { uid: OWNER },
+      { evidenceId, ledgerId: LEDGER, receiptId: RECEIPT }
+    );
+    assert.equal(downloaded.ok, false);
+    const afterReplace = await composed.uploadEvidence({
+      auth: { uid: OWNER },
+      data: { evidenceId, ledgerId: LEDGER, receiptId: RECEIPT },
+    });
+    assert.equal(afterReplace.ok, false);
+    assert.equal(afterReplace.originalDurable, false);
+    assert.equal(recordState(db, evidenceId).state, "linked");
+    assert.equal(bucket.objects.get(reserved.storagePath)?.bytes.equals(replacement), true);
+  }
+
+  {
+    const db = FAKE_createInjectedFirestore();
+    FAKE_seedOwner(db, OWNER, LEDGER, RECEIPT);
+    const bucket = new ControlledBucket();
+    const blobs = wrapAdminBlobStore(bucket as never, env);
+    const adapter = new GoodsEvidenceStorageAdapter(db, blobs, testClock());
+    const composed = createComposedGrinCallables({
+      evidence: adapter,
+      env: { GRIN_GOODS_EVIDENCE_FUNCTIONS: "true" },
+    });
+    const evidenceId = "ev_callable_unrelated";
+    const reserved = await adapter.reserve({ uid: OWNER }, {
+      evidenceId,
+      ledgerId: LEDGER,
+      receiptId: RECEIPT,
+      category: "invoice",
+      mime: "application/pdf",
+      claimedSha256: sha256(image),
+      claimedByteSize: image.length,
+    });
+    assert.equal(reserved.ok, true);
+    if (!reserved.ok) throw new Error("reserve");
+    await adapter.beginUpload({ uid: OWNER }, { evidenceId, ledgerId: LEDGER });
+    bucket.put(reserved.storagePath, image, { vydEvidence: "pending" });
+    const completed = await adapter.completeUpload({ uid: OWNER }, { evidenceId, ledgerId: LEDGER });
+    assert.equal(completed.ok, true);
+    const unrelated = pdf(0x45);
+    bucket.put(reserved.storagePath, unrelated, { vydEvidence: "pending" });
+    const retried = await composed.uploadEvidence({
+      auth: { uid: OWNER },
+      data: { evidenceId, ledgerId: LEDGER, receiptId: RECEIPT },
+    });
+    assert.equal(retried.ok, false);
+    assert.equal(retried.originalDurable, false);
+    assert.equal(recordState(db, evidenceId).state, "uploaded_unverified");
+    assert.equal(bucket.objects.get(reserved.storagePath)?.bytes.equals(unrelated), true);
+    assert.equal(bucket.copies.length, 0);
+  }
+
+  {
+    const db = FAKE_createInjectedFirestore();
+    FAKE_seedOwner(db, OWNER, LEDGER, RECEIPT);
+    const bucket = new ControlledBucket();
+    const blobs = wrapAdminBlobStore(bucket as never, env);
+    const adapter = new GoodsEvidenceStorageAdapter(db, blobs, testClock());
+    const composed = createComposedGrinCallables({
+      evidence: adapter,
+      env: { GRIN_GOODS_EVIDENCE_FUNCTIONS: "true" },
+    });
+    const evidenceId = "ev_callable_tamper";
+    const reserved = await adapter.reserve({ uid: OWNER }, {
+      evidenceId,
+      ledgerId: LEDGER,
+      receiptId: RECEIPT,
+      category: "invoice",
+      mime: "application/pdf",
+      claimedSha256: sha256(image),
+      claimedByteSize: image.length,
+    });
+    assert.equal(reserved.ok, true);
+    if (!reserved.ok) throw new Error("reserve");
+    await adapter.beginUpload({ uid: OWNER }, { evidenceId, ledgerId: LEDGER });
+    const uploadedGeneration = bucket.put(reserved.storagePath, image, { vydEvidence: "pending" });
+    await adapter.completeUpload({ uid: OWNER }, { evidenceId, ledgerId: LEDGER });
+    const sealed = await blobs.open(reserved.storagePath, uploadedGeneration);
+    assert.ok(sealed);
+    const stored = bucket.objects.get(reserved.storagePath);
+    assert.ok(stored);
+    stored.bytes[stored.bytes.length - 1] ^= 0xff;
+    const retried = await composed.uploadEvidence({
+      auth: { uid: OWNER },
+      data: { evidenceId, ledgerId: LEDGER, receiptId: RECEIPT },
+    });
+    assert.equal(retried.ok, false);
+    assert.equal(retried.originalDurable, false);
+    assert.equal(recordState(db, evidenceId).state, "uploaded_unverified");
+  }
+
+  {
+    const db = FAKE_createInjectedFirestore();
+    FAKE_seedOwner(db, OWNER, LEDGER, RECEIPT);
+    const bucket = new ControlledBucket();
+    const blobs = wrapAdminBlobStore(bucket as never, {});
+    const adapter = new GoodsEvidenceStorageAdapter(db, blobs, testClock());
+    const composed = createComposedGrinCallables({
+      evidence: adapter,
+      env: { GRIN_GOODS_EVIDENCE_FUNCTIONS: "true" },
+    });
+    const evidenceId = "ev_callable_nokey";
+    const reserved = await adapter.reserve({ uid: OWNER }, {
+      evidenceId,
+      ledgerId: LEDGER,
+      receiptId: RECEIPT,
+      category: "invoice",
+      mime: "application/pdf",
+      claimedSha256: sha256(image),
+      claimedByteSize: image.length,
+    });
+    assert.equal(reserved.ok, true);
+    if (!reserved.ok) throw new Error("reserve");
+    await adapter.beginUpload({ uid: OWNER }, { evidenceId, ledgerId: LEDGER });
+    bucket.put(reserved.storagePath, image, { vydEvidence: "pending" });
+    await adapter.completeUpload({ uid: OWNER }, { evidenceId, ledgerId: LEDGER });
+    await assert.rejects(
+      composed.uploadEvidence({
+        auth: { uid: OWNER },
+        data: { evidenceId, ledgerId: LEDGER, receiptId: RECEIPT },
+      }),
+      /content_key_unavailable/
+    );
+    assert.equal(recordState(db, evidenceId).state, "uploaded_unverified");
+    assert.equal(bucket.objects.get(reserved.storagePath)?.bytes.equals(image), true);
     assert.equal(bucket.copies.length, 0);
   }
 
