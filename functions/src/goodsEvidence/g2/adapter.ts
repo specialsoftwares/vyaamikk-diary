@@ -1019,8 +1019,14 @@ export class GoodsEvidenceStorageAdapter {
     record: EvidenceRecord,
     next: "verified"
   ): Promise<G2LifecycleResult> {
-    const opened = await this.blobs.open(record.storagePath);
+    const opened = await this.blobs.open(record.storagePath, record.generation);
     if (!opened) {
+      if (record.generation) {
+        const stat = await this.blobs.stat(record.storagePath);
+        if (stat && stat.generation !== record.generation) {
+          return deny("integrity", GENERIC_DENY);
+        }
+      }
       const to: EvidenceObjectState =
         record.state === "orphan_pending_review" ? "rejected" : "orphan_pending_review";
       if (!isPermittedEvidenceTransition(record.state, to)) {

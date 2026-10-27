@@ -18,6 +18,7 @@
  * Do not import tools/, Expo, React, @/config, or localDb.
  */
 import { randomBytes, randomUUID } from "node:crypto";
+import type { Readable, Writable } from "node:stream";
 
 import { getApps, initializeApp, type App } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
@@ -208,20 +209,78 @@ async function* nodeChunks(stream: AsyncIterable<Uint8Array | Buffer>): AsyncGen
   }
 }
 
-function writeWithBackpressure(stream: { write: (chunk: Buffer) => boolean; once: (event: "drain", fn: () => void) => void }, chunk: Uint8Array): Promise<void> {
-  const buf = Buffer.from(chunk);
-  if (stream.write(buf)) return Promise.resolve();
-  return new Promise((resolve) => stream.once("drain", () => resolve()));
+function asError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
 }
 
-function finishWrite(stream: { end: (cb: () => void) => void; once: (event: "error", fn: (error: Error) => void) => void }): Promise<void> {
+function destroyQuiet(stream: Readable | Writable | null): void {
+  if (!stream) return;
+  stream.on("error", () => undefined);
+  stream.destroy();
+}
+
+function writeWithBackpressure(stream: Writable, chunk: Uint8Array): Promise<void> {
+  const buf = Buffer.from(chunk);
   return new Promise((resolve, reject) => {
-    stream.once("error", reject);
-    stream.end(() => resolve());
+    let settled = false;
+    const onError = (error: Error) => settle(() => reject(asError(error)));
+    const onDrain = () => settle(() => resolve());
+    const onClose = () => settle(() => reject(new Error("write_closed")));
+    const settle = (action: () => void) => {
+      if (settled) return;
+      settled = true;
+      stream.removeListener("error", onError);
+      stream.removeListener("drain", onDrain);
+      stream.removeListener("close", onClose);
+      action();
+    };
+    stream.on("error", onError);
+    stream.on("drain", onDrain);
+    stream.on("close", onClose);
+    let accepted = false;
+    try {
+      accepted = stream.write(buf);
+    } catch (error) {
+      settle(() => reject(asError(error)));
+      return;
+    }
+    if (settled) return;
+    if (accepted) settle(() => resolve());
   });
 }
 
-/** Replaces a pending plaintext upload with ciphertext. A failed copy leaves the pending object. */
+function finishWrite(stream: Writable): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let sawFinish = false;
+    const onError = (error: Error) => settle(() => reject(asError(error)));
+    const onFinish = () => {
+      sawFinish = true;
+      settle(() => resolve());
+    };
+    const onClose = () => {
+      if (!sawFinish) settle(() => reject(new Error("write_closed")));
+    };
+    const settle = (action: () => void) => {
+      if (settled) return;
+      settled = true;
+      stream.removeListener("error", onError);
+      stream.removeListener("finish", onFinish);
+      stream.removeListener("close", onClose);
+      action();
+    };
+    stream.on("error", onError);
+    stream.on("finish", onFinish);
+    stream.on("close", onClose);
+    try {
+      stream.end();
+    } catch (error) {
+      settle(() => reject(asError(error)));
+    }
+  });
+}
+
+/** Replaces one pending generation with ciphertext. Each attempt owns its temp object. */
 async function sealPendingEvidence(
   bucket: AdminBucket,
   file: ReturnType<AdminBucket["file"]>,
@@ -231,74 +290,159 @@ async function sealPendingEvidence(
   const uid = path.split("/")[1] ?? "";
   const key = loadContentKey(env);
   const [before] = await file.getMetadata();
-  const sourceGeneration = Number(before.generation);
-  const temp = bucket.file(`${path}.vyd-seal-tmp`);
-  const out = temp.createWriteStream({ resumable: false, metadata: { contentType: "application/octet-stream" } });
+  if (before.generation == null || before.generation === "") throw new Error("generation_conflict");
+  const sourceGeneration = String(before.generation);
+  const attemptId = randomBytes(16).toString("hex");
+  const tempPath = `${path}.vyd-seal.${sourceGeneration}.${attemptId}`;
+  let sourceStream: Readable | null = null;
+  let out: Writable | null = null;
+  let writeError: Error | null = null;
+  let tempGeneration: string | null = null;
   try {
+    const reading = bucket.file(path, { generation: sourceGeneration }).createReadStream();
+    sourceStream = reading;
+    reading.on("error", () => undefined);
+    const temp = bucket.file(tempPath);
+    const writing = temp.createWriteStream({
+      resumable: false,
+      validation: false,
+      metadata: { contentType: "application/octet-stream" },
+      preconditionOpts: { ifGenerationMatch: 0 },
+    });
+    out = writing;
+    writing.on("error", (error: Error) => {
+      writeError = asError(error);
+    });
     const hashes = await writeSealedEvidence({
       key,
       uid,
       storagePath: path,
-      plaintext: nodeChunks(file.createReadStream()),
-      write: (chunk) => writeWithBackpressure(out, chunk),
+      sourceGeneration,
+      plaintext: nodeChunks(reading),
+      write: async (chunk) => {
+        if (writeError) throw writeError;
+        await writeWithBackpressure(writing, chunk);
+        if (writeError) throw writeError;
+      },
     });
-    await finishWrite(out);
-    await temp.setMetadata({
+    await finishWrite(writing);
+    if (writeError) throw writeError;
+    const [created] = await temp.getMetadata();
+    if (created.generation == null || created.generation === "") throw new Error("generation_conflict");
+    tempGeneration = String(created.generation);
+    const tempBound = bucket.file(tempPath, { generation: tempGeneration });
+    await tempBound.setMetadata({
       metadata: {
         vydEvidence: "sealed",
         vydCiphertextSha256: hashes.ciphertextSha256,
         vydOriginalSha256: hashes.originalSha256,
       },
     });
-    await temp.copy(file, { preconditionOpts: { ifGenerationMatch: sourceGeneration } });
+    if (writeError) throw writeError;
+    await tempBound.copy(bucket.file(path), { preconditionOpts: { ifGenerationMatch: sourceGeneration } });
+    const [after] = await file.getMetadata();
+    if (String(after.generation) === sourceGeneration) throw new Error("generation_conflict");
+    return String(after.generation);
   } catch (error) {
-    await temp.delete({ ignoreNotFound: true }).catch(() => undefined);
+    destroyQuiet(out);
+    destroyQuiet(sourceStream);
     throw error;
-  }
-  await temp.delete({ ignoreNotFound: true }).catch(() => undefined);
-  const [after] = await file.getMetadata();
-  if (String(after.generation) === String(before.generation)) throw new Error("generation_conflict");
-  return String(after.generation);
-}
-
-async function* legacyPlaintextChunks(file: ReturnType<AdminBucket["file"]>): AsyncGenerator<Uint8Array> {
-  const stream = file.createReadStream();
-  try {
-    for await (const chunk of nodeChunks(stream)) {
-      for (let i = 0; i < chunk.byteLength; i += HASH_CHUNK_BYTES) {
-        yield chunk.subarray(i, Math.min(i + HASH_CHUNK_BYTES, chunk.byteLength));
-      }
-    }
   } finally {
-    const destroy = (stream as { destroy?: () => void }).destroy;
-    if (typeof destroy === "function") destroy.call(stream);
+    destroyQuiet(sourceStream);
+    if (tempGeneration !== null) {
+      await bucket.file(tempPath, { generation: tempGeneration }).delete({ ignoreNotFound: true }).catch(() => undefined);
+    }
   }
 }
 
-async function* sealedPlaintextChunks(
+async function closePlaintext(generator: AsyncGenerator<Uint8Array, {
+  kind: "legacy" | "sealed";
+  originalSha256: string;
+  ciphertextSha256: string | null;
+  sourceGeneration: string | null;
+}>): Promise<void> {
+  await generator.return({
+    kind: "legacy",
+    originalSha256: "",
+    ciphertextSha256: null,
+    sourceGeneration: null,
+  }).catch(() => undefined);
+}
+
+function contentKeyOrNull(env: NodeJS.ProcessEnv): Buffer | null {
+  try {
+    return loadContentKey(env);
+  } catch {
+    return null;
+  }
+}
+
+async function* evidencePlaintextChunks(
   file: ReturnType<AdminBucket["file"]>,
   path: string,
-  env: NodeJS.ProcessEnv
+  env: NodeJS.ProcessEnv,
+  requiredSourceGeneration?: string
 ): AsyncGenerator<Uint8Array> {
   const uid = path.split("/")[1] ?? "";
-  const key = loadContentKey(env);
+  const stream = file.createReadStream();
+  stream.on("error", () => undefined);
+  const generator = iterateEvidencePlaintext({
+    key: contentKeyOrNull(env),
+    uid,
+    storagePath: path,
+    stored: nodeChunks(stream),
+  });
+  try {
+    let step = await generator.next();
+    while (!step.done) {
+      const next = step.value;
+      for (let i = 0; i < next.byteLength; i += HASH_CHUNK_BYTES) {
+        yield next.subarray(i, Math.min(i + HASH_CHUNK_BYTES, next.byteLength));
+      }
+      step = await generator.next();
+    }
+    if (
+      requiredSourceGeneration !== undefined &&
+      (step.value.kind !== "sealed" || step.value.sourceGeneration !== requiredSourceGeneration)
+    ) {
+      throw new Error("content_tampered");
+    }
+  } finally {
+    await closePlaintext(generator);
+    destroyQuiet(stream);
+  }
+}
+
+async function ciphertextMatchesSourceGeneration(
+  file: ReturnType<AdminBucket["file"]>,
+  path: string,
+  env: NodeJS.ProcessEnv,
+  requestedGeneration: string
+): Promise<boolean> {
+  const key = contentKeyOrNull(env);
+  if (!key) return false;
+  const uid = path.split("/")[1] ?? "";
+  const stream = file.createReadStream();
+  stream.on("error", () => undefined);
   const generator = iterateEvidencePlaintext({
     key,
     uid,
     storagePath: path,
-    stored: nodeChunks(file.createReadStream()),
+    stored: nodeChunks(stream),
   });
-  let step = await generator.next();
-  while (!step.done) {
-    const next = step.value;
-    for (let i = 0; i < next.byteLength; i += HASH_CHUNK_BYTES) {
-      yield next.subarray(i, Math.min(i + HASH_CHUNK_BYTES, next.byteLength));
-    }
-    step = await generator.next();
+  try {
+    let step = await generator.next();
+    while (!step.done) step = await generator.next();
+    return step.value.kind === "sealed" && step.value.sourceGeneration === requestedGeneration;
+  } catch {
+    return false;
+  } finally {
+    await closePlaintext(generator);
+    destroyQuiet(stream);
   }
 }
 
-function wrapAdminBlobStore(bucket: AdminBucket, env: NodeJS.ProcessEnv): G2BlobStore {
+export function wrapAdminBlobStore(bucket: AdminBucket, env: NodeJS.ProcessEnv): G2BlobStore {
   return {
     async putIfAbsent(path, bytes, contentType) {
       const file = bucket.file(path);
@@ -335,21 +479,46 @@ function wrapAdminBlobStore(bucket: AdminBucket, env: NodeJS.ProcessEnv): G2Blob
       if (!exists) return null;
       let [meta] = await file.getMetadata();
       let actualGeneration = String(meta.generation);
-      if (generation && actualGeneration !== String(generation)) return null;
-      const marker = evidenceMarker(meta);
-      if (marker === "pending" && !generation) {
+      const storedLimit = MAX_PDF_ORIGINAL_BYTES + 64;
+      const readableSize = (size: number) => Number.isFinite(size) && size >= 1 && size <= storedLimit;
+      if (generation && actualGeneration !== String(generation)) {
+        const byteSize = Number(meta.size);
+        if (!readableSize(byteSize)) return null;
+        const authenticated = await ciphertextMatchesSourceGeneration(
+          bucket.file(path, { generation: actualGeneration }),
+          path,
+          env,
+          String(generation)
+        );
+        if (!authenticated) return null;
+        const [after] = await file.getMetadata();
+        const afterGeneration = String(after.generation);
+        const afterSize = Number(after.size);
+        if (afterGeneration !== actualGeneration || !readableSize(afterSize)) return null;
+        return {
+          generation: afterGeneration,
+          byteSize: afterSize,
+          contentType: String(after.contentType ?? ""),
+          chunks: evidencePlaintextChunks(
+            bucket.file(path, { generation: afterGeneration }),
+            path,
+            env,
+            String(generation)
+          ),
+        };
+      }
+      if (evidenceMarker(meta) === "pending" && (!generation || actualGeneration === String(generation))) {
         actualGeneration = await sealPendingEvidence(bucket, file, path, env);
         [meta] = await file.getMetadata();
+        if (String(meta.generation) !== actualGeneration) return null;
       }
       const byteSize = Number(meta.size);
-      const storedLimit = MAX_PDF_ORIGINAL_BYTES + 64;
-      if (!Number.isFinite(byteSize) || byteSize < 1 || byteSize > storedLimit) return null;
-      const sealed = evidenceMarker(meta) === "sealed";
+      if (!readableSize(byteSize)) return null;
       return {
         generation: actualGeneration,
         byteSize,
         contentType: String(meta.contentType ?? ""),
-        chunks: sealed ? sealedPlaintextChunks(file, path, env) : legacyPlaintextChunks(file),
+        chunks: evidencePlaintextChunks(bucket.file(path, { generation: actualGeneration }), path, env),
       };
     },
   };

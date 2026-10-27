@@ -26,11 +26,14 @@ async function collect(input: AsyncIterable<Uint8Array>): Promise<Buffer> {
 }
 
 async function main(): Promise<void> {
+  const bucket = createMemoryEvidenceBucket();
+  const uploaded = bucket.putPlaintext(path, image, true);
   let largestWrite = 0;
   const hashes = await writeSealedEvidence({
     key,
     uid: "owner-a",
     storagePath: path,
+    sourceGeneration: uploaded,
     plaintext: (async function* () {
       const payload = randomBytes(GRIN_EVIDENCE_CHUNK_BYTES + 100);
       yield payload.subarray(0, GRIN_EVIDENCE_CHUNK_BYTES);
@@ -43,8 +46,6 @@ async function main(): Promise<void> {
   assert.ok(largestWrite <= GRIN_EVIDENCE_CHUNK_BYTES + 32);
   assert.notEqual(hashes.originalSha256, hashes.ciphertextSha256);
 
-  const bucket = createMemoryEvidenceBucket();
-  const uploaded = bucket.putPlaintext(path, image, true);
   await assert.rejects(() => bucket.acceptPending(path, null, "owner-a"), /content_key_unavailable/);
   assert.equal(bucket.object(path)?.generation, uploaded);
   assert.equal(bucket.object(path)?.bytes.equals(image), true);
@@ -103,6 +104,7 @@ async function main(): Promise<void> {
     key,
     uid: "owner-a",
     storagePath: path,
+    sourceGeneration: pendingGen,
     plaintext: (async function* () { yield image; })(),
     write: () => { throw new Error("interrupted"); },
   }), /interrupted/);
