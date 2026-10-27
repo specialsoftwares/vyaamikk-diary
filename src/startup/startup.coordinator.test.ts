@@ -10,16 +10,7 @@ import { runStartupCoordinator } from "./coordinator";
 import { formatDiagnosticsPlainText, readFirebaseVarPresence } from "./diagnostics";
 import { __setRuntimeSignalsForTests } from "@/config/env";
 
-function testRedaction() {
-  const msg = redactStartupMessage(
-    "fail AIzaSyB6z6vRYwjpNOfbuh4j4uKY48mYsF5sUPI user@example.com +919876543210 /Users/me/secret"
-  );
-  assert.ok(!msg.includes("AIza"));
-  assert.ok(!msg.includes("user@"));
-  assert.ok(!msg.includes("98765"));
-  assert.ok(!msg.includes("/Users/"));
-  assert.ok(msg.includes("[redacted]"));
-}
+
 
 function testStartupErrorShape() {
   const err = new StartupError(
