@@ -40,7 +40,7 @@ import {
   runLocalDeviceSignOut,
   type LocalSignOutResult,
 } from "@/services/auth/authSessionFence";
-import { advanceProfileSessionEpoch, currentProfileSessionEpoch, captureProfileWriteOwnership, profileWriteStillOwned, assertProfileWriteOwnership, readLiveProfileUid, publishOwnedProfileSession, type ProfileWriteOwnership } from "@/services/auth/profileWriteOwnership";
+import { advanceProfileSessionEpoch, currentProfileSessionEpoch, captureProfileWriteOwnership, confirmFailureForOwnedEpoch, profileWriteStillOwned, assertProfileWriteOwnership, readLiveProfileUid, publishOwnedProfileSession, type ProfileWriteOwnership } from "@/services/auth/profileWriteOwnership";
 import { retainLocalAccountOnLogout } from "@/services/accountDeletion/localAccountBoundary";
 import { prepareLocalAccountKey } from "@/services/accountDeletion/localKeyLifecycle";
 import {
@@ -182,7 +182,7 @@ interface AuthState {
 interface AuthApi extends AuthState {
   /** DEV: force-clear SecureStore session + in-memory auth (after dev reset). */
   hardDevSignOut(): Promise<void>;
-  startOtp(phoneE164: PhoneE164): Promise<OtpChallenge>;
+  startOtp(phoneE164: PhoneE164, options?: { forceResend?: boolean }): Promise<OtpChallenge>;
   confirmOtp(challenge: OtpChallenge, code: string): Promise<UserProfile>;
   signOut(): Promise<LocalSignOutResult>;
   requestAccountDeletion(): Promise<import("@/domain/accountDeletion").AccountDeletionResult>;
@@ -386,11 +386,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [state.session?.signedInAt, state.session?.lastActiveAt]
   );
 
-  const startOtp = useCallback(async (phoneE164: PhoneE164) => {
+  const startOtp = useCallback(async (phoneE164: PhoneE164, options?: { forceResend?: boolean }) => {
     bootAttemptRef.current += 1;
     advanceProfileSessionEpoch();
     try {
-      return await getAuthService().startOtp(phoneE164);
+      return await getAuthService().startOtp(phoneE164, options);
     } catch (e) {
       throw toAppError(e);
     }
@@ -423,7 +423,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         });
         return profile;
       } catch (e) {
-        throw toAppError(e);
+        throw toAppError(
+          confirmFailureForOwnedEpoch({
+            ownedEpoch: epoch,
+            currentEpoch: currentProfileSessionEpoch(),
+            error: e,
+          })
+        );
       }
     },
     [saveSession]

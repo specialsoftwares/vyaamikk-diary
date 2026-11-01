@@ -45,6 +45,7 @@
     "test:pdf-file-names": "npx --yes tsx src/services/pdf/pdfFileNames.test.ts",
     "test:cash-paid-no-denomination": "npx --yes tsx src/services/pdf/cashPaidDenominationRemoval.test.ts",
     "test:reactivation-routing": "npx --yes tsx src/services/auth/reactivationRouting.test.ts",
+    "test:phone-verification-plan": "npx --yes tsx src/services/auth/phoneVerificationPlan.test.ts",
     "test:customer-credit": "npx --yes tsx src/domain/customerCredit.test.ts",
     "test:customer-credit-save": "npx --yes tsx src/services/customerCredit/saveLifecycle.test.ts",
     "test:haversine": "npx --yes tsx src/utils/geo/haversine.test.ts",

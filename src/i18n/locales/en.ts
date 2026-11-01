@@ -1299,7 +1299,7 @@ const en = {
     step: "Account status",
     title: "Account deletion is in progress",
     body:
-      "Mobile {{phone}} has a pending deletion. You can reactivate until {{date}} ({{days}}-day period). Eligible app-controlled data is erased after that cutoff. You cannot use the app until you cancel deletion or wait for it to complete.",
+      "Mobile {{phone}} has a pending deletion. You can reactivate until {{date}} ({{days}}-day period). After that reactivation cutoff, automatic reactivation closes and eligible app-controlled data can be erased. Completed erasure is separate, and old records do not return. You cannot use the app until reactivation succeeds.",
     footnote:
       "After deletion completes, the same number can register again with a new Vyaamikk ID. Old records will not return. PDFs already shared outside the app cannot be recalled.",
     reactivateFootnote:

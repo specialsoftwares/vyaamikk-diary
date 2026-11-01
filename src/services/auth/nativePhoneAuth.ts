@@ -285,7 +285,10 @@ export function isChallengeAutoVerified(challenge: OtpChallenge): boolean {
  * Start native phone verification.
  * OtpChallenge.verificationId is the Firebase verificationId (resumable).
  */
-export async function startNativePhoneOtp(phoneE164: PhoneE164): Promise<OtpChallenge> {
+export async function startNativePhoneOtp(
+  phoneE164: PhoneE164,
+  options?: { forceResend?: boolean }
+): Promise<OtpChallenge> {
   assertProductionNativeOtp();
   const mod = tryNativeAuthModule();
   if (!mod) {
@@ -338,7 +341,10 @@ export async function startNativePhoneOtp(phoneE164: PhoneE164): Promise<OtpChal
       e164Prefix: firebaseSendPhoneE164.slice(0, 3),
       androidActivity,
     });
-    confirmation = await mod.default().signInWithPhoneNumber(firebaseSendPhoneE164);
+    confirmation = await mod.default().signInWithPhoneNumber(
+      firebaseSendPhoneE164,
+      Boolean(options?.forceResend)
+    );
   } catch (e) {
     const mapped = phoneAuthFailureToAppError(e, "send", {
       phoneE164Sent: phone,

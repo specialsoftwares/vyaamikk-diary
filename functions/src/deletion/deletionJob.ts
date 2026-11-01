@@ -115,9 +115,16 @@ export function isLeaseActive(job: DeletionJobDoc, now: number): boolean {
   return Boolean(job.leaseUntil && job.leaseUntil > now && job.status === "leased");
 }
 
+/** Stored reactivation cutoff closes recovery even when graceExpiresAt is later. */
+export function restorationDeadlineMs(job: Pick<DeletionJobDoc, "graceExpiresAt" | "reactivationCutoff">): number {
+  const cutoff = Number(job.reactivationCutoff ?? 0);
+  if (cutoff > 0) return Math.min(job.graceExpiresAt, cutoff);
+  return job.graceExpiresAt;
+}
+
 /** Soft-delete recovery may cancel only before grace ends and before purge work starts. */
 export function automaticRestorationAllowed(job: DeletionJobDoc, now: number): boolean {
-  if (job.graceExpiresAt <= now) return false;
+  if (restorationDeadlineMs(job) <= now) return false;
   if (
     job.status === "completed" ||
     job.status === "needs_manual_review" ||

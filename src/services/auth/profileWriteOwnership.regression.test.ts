@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { updateProfileWithIo, type ProfileUpdateIo } from "./firebase";
 import { retireJsAuthBridge } from "./authSessionFence";
-import { advanceProfileSessionEpoch, readPlatformProfileUid, captureProfileWriteOwnership, publishOwnedProfileSession } from "./profileWriteOwnership";
+import { AppError } from "../../domain/errors";
+import { advanceProfileSessionEpoch, readPlatformProfileUid, captureProfileWriteOwnership, confirmFailureForOwnedEpoch, publishOwnedProfileSession } from "./profileWriteOwnership";
 
 async function run() {
   for (const replace of [retireJsAuthBridge, advanceProfileSessionEpoch]) {
@@ -74,6 +77,14 @@ async function run() {
   assert.equal(readPlatformProfileUid({ platform: () => "android", nativeUid: () => null, jsUid: () => "stale-js" }), null);
   assert.equal(readPlatformProfileUid({ platform: () => "web", nativeUid: () => "unused", jsUid: () => "web-owner" }), "web-owner");
   assert.equal(readPlatformProfileUid({ platform: () => { throw Error("unavailable"); }, nativeUid: () => "unused", jsUid: () => "stale-js" }), null);
+  const pending = new AppError("account_pending_deletion", "Account deletion is in progress.");
+  const replaced = confirmFailureForOwnedEpoch({ ownedEpoch: 4, currentEpoch: 5, error: pending });
+  assert.equal(replaced instanceof AppError && replaced.message, "session_changed");
+  assert.equal(confirmFailureForOwnedEpoch({ ownedEpoch: 4, currentEpoch: 4, error: pending }), pending);
+  const confirm = readFileSync(resolve(process.cwd(), "src/state/auth.tsx"), "utf8");
+  const confirmStart = confirm.indexOf("const confirmOtp = useCallback");
+  const confirmBody = confirm.slice(confirmStart, confirm.indexOf("const signOut = useCallback", confirmStart));
+  assert.match(confirmBody, /confirmFailureForOwnedEpoch\(/);
   console.log("profileWriteOwnership.regression.test.ts: ok");
 }
 void run().catch(error => { console.error(error); process.exitCode = 1; });

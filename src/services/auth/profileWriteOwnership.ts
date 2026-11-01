@@ -13,6 +13,21 @@ export type ProfileWriteOwnership = Readonly<{
   epoch: number;
 }>;
 
+/**
+ * A confirm that throws still belongs to the epoch it advanced. A later
+ * sign-out or same-UID replacement must not surface the original error.
+ */
+export function confirmFailureForOwnedEpoch(input: {
+  ownedEpoch: number;
+  currentEpoch: number;
+  error: unknown;
+}): unknown {
+  if (input.currentEpoch !== input.ownedEpoch) {
+    return new AppError("permission_denied", "session_changed");
+  }
+  return input.error;
+}
+
 export function captureProfileWriteOwnership(uid: string): ProfileWriteOwnership {
   return { uid, generation: currentAuthMutationGeneration(), epoch: sessionEpoch };
 }
