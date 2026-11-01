@@ -976,6 +976,7 @@ export function AuthFlowGate() {
     authPerfMark("V0_otp_complete");
     beginVerificationProcess("mobile");
     setLoading(true);
+    let continuationOwner: ProfileWriteOwnership | null = null;
     try {
       authPerfMark("V2_firebase_confirm_begin");
       const profile = await confirmOtp(challenge, code);
@@ -999,11 +1000,18 @@ export function AuthFlowGate() {
         );
       }
       clearFlowError();
-      const owner = captureProfileWriteOwnership(profile.uid);
-      verifiedPhoneProfileRef.current = { profile, owner };
-      await continueAfterPhoneProfile(profile, owner);
+      continuationOwner = captureProfileWriteOwnership(profile.uid);
+      verifiedPhoneProfileRef.current = { profile, owner: continuationOwner };
+      await continueAfterPhoneProfile(profile, continuationOwner);
     } catch (e) {
       if (!isCurrentPhoneChallenge(phoneOtpRef.current, generation)) return;
+      if (
+        continuationOwner &&
+        !profileWriteStillOwned(continuationOwner, readProductionAuthUid(continuationOwner.uid))
+      ) {
+        return;
+      }
+      if (!continuationOwner && e instanceof Error && e.message === "session_changed") return;
       if (e instanceof AppError && e.code === "account_pending_deletion") {
         abortVerificationProcess();
         router.replace({
@@ -1409,12 +1417,7 @@ export function AuthFlowGate() {
       // Route after success settle — never before authoritative bind.
       // Mount/boot suppress guard must still not wrap this continue (vc10).
       resolveVerificationSuccess("email", () => {
-        try {
-          assertProductionContinuationUid(emailOwner);
-        } catch (e) {
-          applyFlowError(e, "email_otp");
-          return;
-        }
+        if (!profileWriteStillOwned(emailOwner, readProductionAuthUid(emailOwner.uid))) return;
         const continuation = resolveSignedInOnboardingContinuation({
           hasVerifiedEmail: true,
           profileCompletedAt: profile.profileCompletedAt,
@@ -1430,11 +1433,12 @@ export function AuthFlowGate() {
         setEmailSendMachine(createEmailOtpSendMachine());
       });
     } catch (e) {
+      if (!profileWriteStillOwned(emailOwner, readProductionAuthUid(emailOwner.uid))) return;
       abortVerificationProcess();
       applyFlowError(e, "email_otp");
     } finally {
       emailVerifyInFlightRef.current = false;
-      setLoading(false);
+      if (profileWriteStillOwned(emailOwner, readProductionAuthUid(emailOwner.uid))) setLoading(false);
     }
   };
 

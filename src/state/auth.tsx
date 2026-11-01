@@ -402,12 +402,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const epoch = advanceProfileSessionEpoch();
       try {
         const { profile, isNewUser } = await getAuthService().confirmOtp(challenge, code);
+        if (currentProfileSessionEpoch() !== epoch) throw new Error("session_changed");
+        const owner = captureProfileWriteOwnership(profile.uid);
+        const liveUid = () => getActiveBackend() === "firebase-production" ? readLiveProfileUid() : profile.uid;
+        const isCurrent = () => profileWriteStillOwned(owner, liveUid());
+        if (!isCurrent()) throw new Error("session_changed");
         if (state.user?.uid && state.user.uid !== profile.uid) {
           clearMasterDataSessionCache();
         }
-        if (currentProfileSessionEpoch() !== epoch) throw new Error("session_changed");
-        const owner = captureProfileWriteOwnership(profile.uid);
-        const isCurrent = () => profileWriteStillOwned(owner, getActiveBackend() === "firebase-production" ? readLiveProfileUid() : profile.uid);
         const session = await saveSession(profile, { isCurrent });
         if (!isCurrent()) throw new Error("session_changed");
         setState({
@@ -416,9 +418,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           user: session.user,
           justCreated: isNewUser,
         });
-        void import("@/services/device/trustedDeviceRegistry").then((m) =>
-          m.recordTrustedDeviceLogin(profile)
-        );
+        void import("@/services/device/trustedDeviceRegistry").then((m) => {
+          if (isCurrent()) m.recordTrustedDeviceLogin(profile);
+        });
         return profile;
       } catch (e) {
         throw toAppError(e);
@@ -429,7 +431,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = useCallback(async () => {
     bootAttemptRef.current += 1;
-    advanceProfileSessionEpoch();
+    const epoch = advanceProfileSessionEpoch();
     const uid = state.session?.user.uid;
     return runLocalDeviceSignOut({
       maskPrivateUi: () => {
@@ -454,14 +456,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       clearLocalProfileCache: (ownedGeneration) =>
         clearPersistedProfileIfOwned(ownedGeneration, {
           prepare: async () => {
+            const stillThisSignOut = () =>
+              currentProfileSessionEpoch() === epoch &&
+              currentAuthMutationGeneration() === ownedGeneration;
             if (uid) {
-              await clearAuthWrapperProgress(uid);
-              clearTransientPendingEmailState(uid);
-              clearLocalMockPendingEmailForUid(uid);
+              await clearAuthWrapperProgress(uid, stillThisSignOut);
+              if (stillThisSignOut()) {
+                clearTransientPendingEmailState(uid);
+                clearLocalMockPendingEmailForUid(uid);
+              }
             }
-            clearSessionLastActiveTouch(uid);
-            endFirstActionFreezeSession();
-            clearMasterDataSessionCache();
+            if (stillThisSignOut()) {
+              clearSessionLastActiveTouch(uid);
+              endFirstActionFreezeSession();
+              clearMasterDataSessionCache();
+            }
             retainLocalAccountOnLogout(uid);
           },
           removePersistedProfile: () => clearSessionForRetirement(ownedGeneration).then(() => undefined),
@@ -612,6 +621,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const touchLastActive = useCallback(async () => {
     const current = sessionRef.current;
     if (!current || statusRef.current !== "signed_in") return;
+    const owner = captureProfileWriteOwnership(current.user.uid);
+    const liveUid = () =>
+      getActiveBackend() === "firebase-production" ? readLiveProfileUid() : current.user.uid;
+    const isCurrent = () =>
+      statusRef.current === "signed_in" &&
+      sessionRef.current?.user.uid === current.user.uid &&
+      profileWriteStillOwned(owner, liveUid());
+    if (!isCurrent()) return;
     const previousAt = current.user.lastActiveAt ?? current.lastActiveAt ?? 0;
     const claim = claimSessionLastActiveTouch({
       uid: current.user.uid,
@@ -626,16 +643,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const user: UserProfile = { ...current.user, lastActiveAt: now };
       const session: AuthSession = { ...current, lastActiveAt: now, user };
       await sessionStore.save(session);
+      // A failed sign-in advances the epoch before its own save. Do not delete
+      // the retained session here; only refuse publication and the cloud write.
+      if (!isCurrent()) return;
       sessionRef.current = session;
 
       setState((s) => {
-        if (s.status !== "signed_in") return s;
+        if (s.status !== "signed_in" || s.session?.user.uid !== owner.uid) return s;
         return { ...s, session, user: session.user };
       });
 
       try {
         void getAuthService()
-          .updateProfile(current.user.uid, { lastActiveAt: now })
+          .updateProfile(current.user.uid, { lastActiveAt: now }, owner)
           .catch((e) => log.warn("touchLastActive profile sync failed", e));
       } catch (e) {
         log.warn("touchLastActive profile sync failed", e);

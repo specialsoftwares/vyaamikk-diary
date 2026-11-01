@@ -150,12 +150,44 @@ Local correction verification on 1 Nov 2026:
   cleanup. It covers delayed marker/acknowledgement/cleanup/import and retained
   same-UID epoch ownership. It is included in the focused canonical script.
 
-The canonical gate must still pass on the published corrective SHA. The host
-runs Node 24.22.1. Its sandbox blocks the Unix IPC socket created by the `tsx` CLI
-(`listen EPERM /tmp/tsx-0/*.pipe`). `npm run ci:verify` was attempted and cannot
-be reported as passing. Direct `node --import .../tsx/dist/loader.mjs` execution
-runs the same test modules without that CLI socket; it is explicitly host-adapted
-verification, not canonical CI. No repository gate is bypassed or weakened.
+The host-adapted aggregate described above does not certify this correction.
+This workspace ran the repository's `npm run ci:verify` on Node v20.19.4 after
+the lead review below. The result is recorded at the end of this section.
+
+## Lead review of ef9c77f
+
+Imported `ef9c77f467c4fab8a279f6d68cb20d470fccce96` onto
+`fix/onboarding-consent-loading` by fast-forward from
+`092527efba87b6abdd029cbf8eba0fcaaa58b81e`. The patch file was not applied.
+Integration and PR #42 were not touched.
+
+Review found two concrete defects and they were fixed before publication:
+
+- Sign-out called `clearAuthWrapperProgress` after the SDK sign-out await
+  without an epoch check. A newer OTP started during that await could have its
+  challenge and email marker deleted. Cleanup now runs only while the sign-out
+  epoch and auth generation are still current.
+- A stored crash-report withdrawal did not retry `deleteUnsentReports` after
+  process restart. Startup still retains reports for a prior Allow while the
+  listener is uncertain. A stored withdrawal, an explicit withdrawal, and
+  account retirement request deletion. The result remains `deletion_requested`.
+
+OTP confirmation already re-checks ownership before `recordTrustedDeviceLogin`.
+Age is not an authorization flag. `assertBusinessAccountActive` replaced age
+admission on seal, open, and the seven GRIN callables. Owner, session, restore,
+active-account, and deletion checks remain. No secrets, billing allowlist, or
+GRIN admission flags changed.
+
+## Canonical results
+
+Local `npm run ci:verify` on this worktree, Node v20.19.4, ended
+`2026-11-01T12:53:19.213Z` after 598645 ms. Exit code 0. Exact line:
+`ci:verify PASS`. Docker was not available, so the invoice-renderer image
+build is left to GitHub Actions. This local run is the tree before the
+GitHub run id was written into this paragraph.
+
+GitHub Actions must pass on the published head. Runs on `092527e` do not
+certify this correction.
 
 The connected GitHub app rejected a Git object write with HTTP 403,
 `Resource not accessible by integration`. No corrective branch push or new

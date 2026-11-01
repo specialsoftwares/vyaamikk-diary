@@ -105,6 +105,10 @@ async function actualWrapperRejectsStaleClear() {
   assert.equal(JSON.parse(storage.get("vyd_auth_v2_challenge") ?? "null")?.verificationId, "new", "late acknowledgement must not remove newer persisted challenge");
   await exports.markAuthWrapperEmailComplete("user-a");
   assert.equal(JSON.parse(storage.get("vyd_auth_v2_challenge") ?? "null")?.verificationId, "new", "email marker must not clear unowned challenge");
+  await exports.markAuthWrapperEmailPending("user-a");
+  await exports.clearAuthWrapperProgress("user-a", () => false);
+  assert.equal(JSON.parse(storage.get("vyd_auth_v2_challenge") ?? "null")?.verificationId, "new", "a superseded sign-out must not delete a newer challenge");
+  assert.equal(storage.get("vyd_auth_v2_email_pending_user-a"), "1", "a superseded sign-out must not clear a newer email marker");
 }
 
 async function main() {

@@ -405,8 +405,24 @@ export function createPurposeConsentQueue(ports: PurposeQueuePorts) {
         const existing = states.get(uid);
         if (existing?.reportingEnabled) publish({ ...existing, reportingEnabled: false });
       }
-      // Startup pauses; retiring an account also requests cached-report cleanup.
-      void closeReporting(accountChanged);
+      // Startup pauses a prior Allow. A stored withdrawal retries unsent-report
+      // deletion. Account retirement does too. An uncertain Allow is retained.
+      const epochAtBind = choiceEpoch;
+      void (async () => {
+        let withdrawn = false;
+        if (uid) {
+          try {
+            const state = await load(uid);
+            withdrawn =
+              state.pending?.decision === "withdraw" ||
+              (state.hasChoice && !state.localGrant && state.pending?.decision !== "grant");
+          } catch {
+            withdrawn = false;
+          }
+        }
+        if (activeUid !== uid || ports.generation() !== generation || choiceEpoch !== epochAtBind) return;
+        await closeReporting(accountChanged || withdrawn);
+      })();
       if (uid && ports.observeRemote) {
         authorityHealthy = false;
         stopObserve = ports.observeRemote(uid, generation, (remote) => {

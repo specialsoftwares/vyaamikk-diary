@@ -76,9 +76,15 @@ export async function markAuthWrapperEmailComplete(uid: string, isCurrent: () =>
   // must not unconditionally delete a newer phone challenge.
 }
 
-export async function clearAuthWrapperProgress(uid?: string): Promise<void> {
-  await clearAuthWrapperChallenge();
+export async function clearAuthWrapperProgress(
+  uid?: string,
+  isCurrent: () => boolean = () => true
+): Promise<void> {
+  // A sign-out that loses the epoch must not delete a challenge saved by a newer OTP.
+  await clearAuthWrapperChallenge(undefined, isCurrent);
   if (uid) {
-    await changeProgress(() => AsyncStorage.removeItem(emailPendingKey(uid)));
+    await changeProgress(async () => {
+      if (isCurrent()) await AsyncStorage.removeItem(emailPendingKey(uid));
+    });
   }
 }

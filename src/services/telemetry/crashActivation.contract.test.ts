@@ -137,6 +137,36 @@ async function retainedReportsDuringConsentRecovery() {
   await queue.reconcile("fixture-owner");
   assert.equal(retained, 1, "startup must retain a previously consented unsent report while authority is pending");
   assert.equal(deletions, 0);
+  __resetCrashReportingForTests();
+  retained = 1;
+  deletions = 0;
+  const withdrawn: PurposeQueueState = {
+    ...stored, localGrant: false, hasChoice: true, pending: null, reportingEnabled: false,
+  };
+  __setCrashlyticsClientForTests({
+    setCrashlyticsCollectionEnabled: async () => {},
+    deleteUnsentReports: async () => { deletions++; retained = 0; },
+    recordError: () => {}, log: () => {}, setUserId: () => {},
+  });
+  const withdrawnQueue = createPurposeConsentQueue({
+    load: async () => withdrawn, save: async () => {}, generation: () => 1,
+    operationId: () => "fixture-stored-withdrawal",
+    applyLocal: setCrashReportingEnabled,
+    send: async () => ({ ok: true, revision: 2, decision: "withdraw", receivedAt: 2 }),
+    observeRemote: () => () => {},
+  });
+  withdrawnQueue.bind("fixture-owner");
+  await withdrawnQueue.reconcile("fixture-owner");
+  assert.equal(retained, 0, "a stored withdrawal retries unsent-report deletion on startup");
+  assert.ok(deletions > 0);
+  __resetCrashReportingForTests();
+  retained = 1;
+  deletions = 0;
+  __setCrashlyticsClientForTests({
+    setCrashlyticsCollectionEnabled: async () => {},
+    deleteUnsentReports: async () => { deletions++; retained = 0; },
+    recordError: () => {}, log: () => {}, setUserId: () => {},
+  });
   onHealth("failed");
   await queue.reconcile("fixture-owner");
   assert.equal(retained, 1, "temporary listener failure must pause without deleting retained reports");
