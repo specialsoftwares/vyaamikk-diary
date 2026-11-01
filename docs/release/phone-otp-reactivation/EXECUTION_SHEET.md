@@ -1,9 +1,113 @@
 # Phone OTP resend and pending-deletion reactivation
 
-Branch `fix/phone-otp-reactivation` from main `e49dd2e2808d4ad99aa1d3d7ee77c73870dcf73e`.
-Draft PR #48 stays draft. Integration and draft PR #42 were not changed.
-No live account, test-number configuration, key, flag, deploy, build, or Play
-upload was changed in this review.
+## Controlled internal release
+
+PR #48 was still `1bf8fd0` with required check `verify` passing. The only
+later commit on that branch is `901693c`, the production-path compatibility
+test. Its canonical run `41342322400`, job `124954770949`, printed
+`ci:verify PASS` at `2026-11-01T19:55:17Z`. PR #48 merged as
+`d98bffbefdb62e1aa28698cf53fd1ca48f3057e5`. Main CI run `41344226139`, job
+`124960487632`, printed `ci:verify PASS` at `2026-11-01T20:19:30Z`.
+
+Play and EAS were re-read before the version bump. Internal testing was still
+`1.0.0 (33)`, the bundle list still started at 33, and EAS Android builds
+still topped out at 33. versionCode 34 was unused. PR #49 changed only
+`app.json` and the isolation-contract check. Its run `41344289923`, job
+`124960682019`, printed `ci:verify PASS` at `2026-11-01T20:20:19Z`. The merge
+is `a3db411cc7bad477f82322a31c310376dec68149`. Main CI run `41346365017`, job
+`124966921395`, printed `ci:verify PASS` at `2026-11-01T20:39:54Z`.
+
+Integration remains `7dd9155` on `integration`. Draft PR #42 was not changed.
+The reported account, its deletion job, keys, billing access, Rules, and
+other functions were not changed. The bundle was not uploaded to Play.
+
+### Source tests
+
+`reactivationOtp.unit.test.ts` runs the serving resolver's deletion decision
+from `e6f09b6` (`resolveorcreateuserbyphone-00009-ket`) and then the new
+reactivation handlers. A stored legacy deadline is returned unchanged and is
+not rewritten. The resolver write sets `reactivationPhoneVerifiedAt` to the
+request time. The new start and complete calls succeed for that authenticated
+UID inside the phone-proof window and before the stored deadline. A different
+UID is rejected. A profile without that fresh proof is rejected. A phone
+token with no revocation cutoff is admitted; a cutoff at the same auth time
+is not. The client routes the resolver's `deletion_pending` response to
+reactivation with the stored date.
+
+When `deletionScheduledFor` is absent, the serving resolver's response
+fallback is 15 days and the new handler's fallback is the existing 45-day
+grace. The resolver does not write that 15-day value. That difference does
+not change a stored deadline, so the resolver was not added to the deploy.
+
+Host tests do not prove SMS delivery.
+
+### Deployment verification
+
+Immediately before deploy, both functions were still the 21 Sep 2026
+nodejs20 revisions at 100% traffic: `startaccountreactivation-00006-kec` and
+`completeaccountreactivation-00007-tik`, 256Mi, CPU 0.1666, concurrency 1,
+max instances 3, no email secrets. The resolver was
+`resolveorcreateuserbyphone-00009-ket`.
+
+Both functions were updated together from `a3db411`. Both updates succeeded.
+Re-read after deploy:
+
+| Function | Serving revision | Traffic | Runtime | Secrets |
+| --- | --- | --- | --- | --- |
+| startAccountReactivation | startaccountreactivation-00007-vih | 100% latest | nodejs22 | HMAC v1, provider key v4, from-address v2 |
+| completeAccountReactivation | completeaccountreactivation-00008-doh | 100% latest | nodejs22 | HMAC v1, provider key v4, from-address v2 |
+| resolveOrCreateUserByPhone | resolveorcreateuserbyphone-00009-ket | 100% latest | nodejs20 | none |
+
+Memory 256Mi, CPU 0.1666, concurrency 1, and max instances 3 are unchanged.
+No new secret versions were created. Rollback is the two September revision
+names above. The deploy also attached the existing plain environment keys
+`BILLING_RECONCILIATION_ENABLED` (still false), `GRIN_GOODS_EVIDENCE_FUNCTIONS`
+(still true), `PLAY_RTDN_PUSH_AUDIENCE`, and `PLAY_RTDN_PUSH_SERVICE_ACCOUNT`
+because the CLI loads that dotenv while resolving other functions' parameters.
+Those keys do not change reactivation behavior.
+
+### Artifact verification
+
+EAS build `d9db5252-b1b9-401c-9dd5-776f079efc69` finished from
+`a3db411cc7bad477f82322a31c310376dec68149`, profile `internal-grin`,
+SDK 54.0.0, version 1.0.0 / versionCode 34. Artifact
+`https://expo.dev/artifacts/eas/y1MOedxy8mIbObeZtxOEGbMtp6zSEL-fstqOIengu28.aab`,
+79,768,195 bytes, SHA-256
+`a93a81cd46030489eea319e3fdb989c972788d616aef4d139b6f6c608c94906e`.
+Local copy `/tmp/vyaamikk-a3db411-vc34.aab`.
+
+The manifest package is `com.specialsoftwares.vyaamikkdiary`, versionName
+1.0.0, versionCode 34. The upload certificate SHA-256 is
+`E6:88:FA:0B:A5:FA:3B:D3:05:85:11:4F:8C:21:43:E1:EF:DD:A1:AC:BF:DB:9D:AA:DC:42:DA:89:61:78:75:2A`
+and SHA-1 is
+`20:F8:15:0E:21:3C:9C:3F:84:FD:CA:C5:1E:9E:4D:CC:EE:A2:42:AD`.
+The packaged resources contain Firebase project `vyaamikk-diary` and the
+existing Android app id. This binary was not uploaded.
+
+### Signed-device acceptance
+
+Not done. One attempt each, on this binary, without changing the live
+deletion job and without repeating SMS sends:
+
+- Fresh login: one SMS, code accepted, the first send is not forced.
+- Resend only after the cooldown, once.
+- Pending deletion: OTP completion and account-setup retry both open
+  reactivation. A wrong, expired, or superseded email code leaves the
+  account `pending_deletion`.
+- Sign out or switch account during entry does not open reactivation for
+  the retired attempt.
+- An active account continues to its existing next step.
+
+The original missing SMS is still unresolved. During the owner's next normal
+login, capture whether the screen was restored before a send, whether
+`forceResend` was false or true, whether the result was `onCodeSent`, instant
+verification, or a Firebase error code, and whether the handset received one
+SMS. Redact the number, the code, tokens, and the UID.
+
+## Investigation record
+
+The notes below are the review that preceded this release. They are not the
+deployment or artifact evidence above.
 
 ## VersionCode 33
 
@@ -184,8 +288,8 @@ after the passing run.
 
 ## Release proposal
 
-Do not merge, deploy, build, or upload from this sheet. After the draft
-review is accepted:
+Executed by the controlled release at the top of this sheet. The steps below
+are the proposal as it stood before that release:
 
 1. Merge PR #48 through the normal pull-request path. Do not squash these
    commits onto another branch by hand.
