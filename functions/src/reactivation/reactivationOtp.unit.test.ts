@@ -14,6 +14,7 @@ import {
   REACTIVATION_PHONE_INDEX,
   REACTIVATION_SEND_GAP_MS,
   REACTIVATION_USERS,
+  reactivationWindowDeadline,
   type ReactivationDb,
   type ReactivationMailer,
   type ReactivationTx,
@@ -356,6 +357,47 @@ async function testIneligibleAndPurgeRace(): Promise<void> {
   assert.equal(generation.docs.get(`${REACTIVATION_USERS}/${UID}`)?.status, "pending_deletion");
 }
 
+async function testStoredCutoffClosesBeforeLaterSchedule(): Promise<void> {
+  const now = 1_700_000_000_000;
+  const closed = new MemoryDb();
+  seed(closed, now, {
+    reactivationCutoff: now - 1,
+    deletionScheduledFor: now + 20 * 24 * 60 * 60 * 1000,
+  });
+  closed.docs.set(`${REACTIVATION_JOBS}/${UID}`, {
+    ...closed.docs.get(`${REACTIVATION_JOBS}/${UID}`)!,
+    reactivationCutoff: now - 1,
+    graceExpiresAt: now + 20 * 24 * 60 * 60 * 1000,
+  });
+  await assert.rejects(() => start(closed, capturingMailer(), now));
+  assert.equal(closed.docs.get(`${REACTIVATION_USERS}/${UID}`)?.status, "pending_deletion");
+
+  const legacy = new MemoryDb();
+  const requestedAt = now - 10 * 24 * 60 * 60 * 1000;
+  seed(legacy, now, {
+    deletionRequestedAt: requestedAt,
+    deletionScheduledFor: requestedAt + 45 * 24 * 60 * 60 * 1000,
+  });
+  assert.equal(
+    reactivationWindowDeadline({
+      deletionRequestedAt: requestedAt,
+      deletionScheduledFor: requestedAt + 45 * 24 * 60 * 60 * 1000,
+    }),
+    requestedAt + 45 * 24 * 60 * 60 * 1000
+  );
+  const mailer = capturingMailer();
+  const started = await start(legacy, mailer, now);
+  const done = await performCompleteAccountReactivation({
+    db: legacy,
+    uid: UID,
+    challengeId: started.verificationId,
+    code: codeFrom(mailer.sent[0]!),
+    now: now + 1_000,
+    env: ENV,
+  });
+  assert.equal(done.profile.status, "active");
+}
+
 async function testParallelVerifyConsumesOnce(): Promise<void> {
   const db = new MemoryDb();
   const now = 1_700_000_000_000;
@@ -408,6 +450,7 @@ async function main(): Promise<void> {
   await testResendInvalidatesOldCode();
   await testSendLimitAndCrossResendGuesses();
   await testIneligibleAndPurgeRace();
+  await testStoredCutoffClosesBeforeLaterSchedule();
   await testParallelVerifyConsumesOnce();
   testReleaseReachability();
   console.log("reactivationOtp.unit.test.ts: ok");

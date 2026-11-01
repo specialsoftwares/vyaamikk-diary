@@ -97,8 +97,13 @@ export interface ProfilePatch {
   onboardingProfileVersion?: number | null;
 }
 
+export interface PhoneOtpStartOptions {
+  /** Explicit resend of the current phone attempt. Initial send leaves this false. */
+  forceResend?: boolean;
+}
+
 export interface AuthService {
-  startOtp(phoneE164: PhoneE164): Promise<OtpChallenge>;
+  startOtp(phoneE164: PhoneE164, options?: PhoneOtpStartOptions): Promise<OtpChallenge>;
   confirmOtp(challenge: OtpChallenge, code: string): Promise<AuthResult>;
   signOut(): Promise<void>;
   /**

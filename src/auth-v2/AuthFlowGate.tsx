@@ -62,6 +62,8 @@ import {
   resolveFreshPhoneSendTarget,
   resolveResendPhoneSendTarget,
 } from "@/services/auth/phoneSendProvenance";
+import { planPhoneVerification } from "@/services/auth/phoneVerificationPlan";
+import { routeAccountSetupFailure } from "@/services/auth/reactivationRouting";
 import {
   DEFAULT_AUTH_V2_COUNTRY_CODE,
   type AuthV2PhoneDraft,
@@ -1012,16 +1014,17 @@ export function AuthFlowGate() {
         return;
       }
       if (!continuationOwner && e instanceof Error && e.message === "session_changed") return;
-      if (e instanceof AppError && e.code === "account_pending_deletion") {
+      const pendingRoute = routeAccountSetupFailure({
+        error: e,
+        stillCurrent: true,
+        fallbackPhoneE164: String(challenge.phoneE164),
+      });
+      if (pendingRoute.kind === "stale") return;
+      if (pendingRoute.kind === "reactivation") {
         abortVerificationProcess();
         router.replace({
           pathname: "/(auth)/account-pending-deletion",
-          params: {
-            phoneE164: String(e.details?.phoneE164 ?? challenge.phoneE164),
-            deletionScheduledFor: String(e.details?.deletionScheduledFor ?? ""),
-            deletionPolicyVersion: String(e.details?.deletionPolicyVersion ?? ""),
-            maskedEmail: String(e.details?.maskedEmail ?? ""),
-          },
+          params: pendingRoute.params,
         });
         return;
       }
@@ -1095,7 +1098,22 @@ export function AuthFlowGate() {
       assertProductionContinuationUid(retryOwner);
       await continueAfterPhoneProfile(result.profile, retryOwner);
     } catch (e) {
-      if (!profileWriteStillOwned(retryOwner, readProductionAuthUid(retryOwner.uid))) return;
+      const stillCurrent = profileWriteStillOwned(retryOwner, readProductionAuthUid(retryOwner.uid));
+      if (!stillCurrent) return;
+      const pendingRoute = routeAccountSetupFailure({
+        error: e,
+        stillCurrent,
+        fallbackPhoneE164: phoneE164,
+      });
+      if (pendingRoute.kind === "stale") return;
+      if (pendingRoute.kind === "reactivation") {
+        abortVerificationProcess();
+        router.replace({
+          pathname: "/(auth)/account-pending-deletion",
+          params: pendingRoute.params,
+        });
+        return;
+      }
       abortVerificationProcess();
       applyFlowError(e, "phone_otp");
     } finally {
@@ -1146,8 +1164,22 @@ export function AuthFlowGate() {
       assertPhoneSendProvenance(provenance);
       const sendPhone = provenance.firebaseSendPhoneE164;
       setPhoneE164(sendPhone);
+      const resendPlan = planPhoneVerification({
+        intent: "explicit_resend",
+        now: Date.now(),
+        resendAvailableAt: mobileResendAvailableAt ?? challenge.resendAvailableAt ?? null,
+      });
+      if (resendPlan.action !== "send" || !resendPlan.forceResend) {
+        const held = failPhoneOtpSend(phoneOtpRef.current, generation);
+        if (held) phoneOtpRef.current = held;
+        if (resendPlan.action === "cooldown") {
+          setMobileResendAvailableAt(resendPlan.resendAvailableAt);
+          clearFlowError();
+        }
+        return;
+      }
 
-      const next = await startOtp(sendPhone);
+      const next = await startOtp(sendPhone, { forceResend: true });
       if (!isCurrentPhoneChallenge(phoneOtpRef.current, generation)) return;
       if (!phonesMatchE164(next.phoneE164, sendPhone)) {
         throw new AppError(

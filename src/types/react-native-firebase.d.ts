@@ -56,7 +56,7 @@ declare module "@react-native-firebase/auth" {
   export interface FirebaseAuthInstance {
     app?: { name?: string; options?: { projectId?: string } };
     settings: FirebaseAuthSettings;
-    signInWithPhoneNumber(phoneNumber: string): Promise<ConfirmationResult>;
+    signInWithPhoneNumber(phoneNumber: string, forceResend?: boolean): Promise<ConfirmationResult>;
     signInWithCredential(credential: AuthCredential): Promise<UserCredential>;
     verifyPhoneNumber(
       phoneNumber: string,

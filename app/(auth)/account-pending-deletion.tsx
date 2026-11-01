@@ -22,6 +22,7 @@ import {
   callStartAccountReactivation,
   useIdentityCallables,
 } from "@/services/auth/identityCallable";
+import { reactivationPublicMessageId } from "@/services/auth/reactivationRouting";
 import { useAuthoritativeResendCountdown } from "@/hooks/useAuthoritativeResendCountdown";
 import { useIsOnline } from "@/state/network";
 
@@ -127,15 +128,8 @@ export default function AccountPendingDeletionScreen() {
 
   const reactivationMessage = (error: unknown): string => {
     const code = error instanceof AppError ? String(error.details?.code ?? "") : "";
-    if (code === "expired") return t("pendingDeletion.reactivateExpired");
-    if (code === "attempts_exhausted" || code === "rate_limited" || code === "cooldown") {
-      return t("pendingDeletion.reactivateAttempts");
-    }
-    if (code === "superseded") return t("pendingDeletion.reactivateLatestCode");
-    if (code === "provider_unavailable") return t("pendingDeletion.reactivateSendFailed");
-    if (code === "no_verified_email" || code === "purge_underway" || code === "ineligible") {
-      return t("pendingDeletion.reactivateUnavailable");
-    }
+    const messageId = reactivationPublicMessageId(code);
+    if (messageId) return t(`pendingDeletion.${messageId}`);
     return userFacingMessage(error);
   };
 

@@ -472,8 +472,8 @@ export async function updateProfileWithIo(
 }
 
 export const firebaseAuthService: AuthService = {
-  async startOtp(phoneE164: PhoneE164): Promise<OtpChallenge> {
-    return startNativePhoneOtp(phoneE164);
+  async startOtp(phoneE164: PhoneE164, options?: { forceResend?: boolean }): Promise<OtpChallenge> {
+    return startNativePhoneOtp(phoneE164, options);
   },
 
   async confirmOtp(challenge: OtpChallenge, code: string): Promise<AuthResult> {
