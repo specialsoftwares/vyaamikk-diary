@@ -1024,7 +1024,12 @@ export function AuthFlowGate() {
         abortVerificationProcess();
         router.replace({
           pathname: "/(auth)/account-pending-deletion",
-          params: pendingRoute.params,
+          params: {
+            phoneE164: pendingRoute.params.phoneE164,
+            deletionScheduledFor: pendingRoute.params.deletionScheduledFor,
+            deletionPolicyVersion: pendingRoute.params.deletionPolicyVersion,
+            maskedEmail: pendingRoute.params.maskedEmail,
+          },
         });
         return;
       }
@@ -1110,7 +1115,12 @@ export function AuthFlowGate() {
         abortVerificationProcess();
         router.replace({
           pathname: "/(auth)/account-pending-deletion",
-          params: pendingRoute.params,
+          params: {
+            phoneE164: pendingRoute.params.phoneE164,
+            deletionScheduledFor: pendingRoute.params.deletionScheduledFor,
+            deletionPolicyVersion: pendingRoute.params.deletionPolicyVersion,
+            maskedEmail: pendingRoute.params.maskedEmail,
+          },
         });
         return;
       }
