@@ -183,11 +183,13 @@ GRIN admission flags changed.
 Local `npm run ci:verify` on this worktree, Node v20.19.4, ended
 `2026-11-01T12:53:19.213Z` after 598645 ms. Exit code 0. Exact line:
 `ci:verify PASS`. Docker was not available, so the invoice-renderer image
-build is left to GitHub Actions. This local run is the tree before the
-GitHub run id was written into this paragraph.
+build is left to GitHub Actions.
 
-GitHub Actions must pass on the published head. Runs on `092527e` do not
-certify this correction.
+GitHub Actions run `41308636786` on `1c1a014d9a64810be42afec48ce0364477549cbd`
+succeeded. Job `124854179489` printed `ci:verify PASS` at
+`2026-11-01T13:17:25.5776029Z`. Renderer runtime `v22.19.0`.
+Runs on `092527e` do not certify this correction. This paragraph is the only
+change after that run.
 
 The connected GitHub app rejected a Git object write with HTTP 403,
 `Resource not accessible by integration`. No corrective branch push or new
