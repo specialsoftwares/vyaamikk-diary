@@ -19,6 +19,12 @@ assert.equal(restored.action, "restore_without_send");
 const fresh = planPhoneVerification({ intent: "fresh", now, resendAvailableAt: now + 30_000 });
 assert.deepEqual(fresh, { action: "send", forceResend: false });
 
+const missingDeadline = planPhoneVerification({ intent: "explicit_resend", now });
+assert.equal(missingDeadline.action, "cooldown");
+if (missingDeadline.action === "cooldown") {
+  assert.equal(missingDeadline.resendAvailableAt, now + 30_000);
+}
+
 const early = planPhoneVerification({
   intent: "explicit_resend",
   now,
@@ -59,9 +65,13 @@ const gate = readFileSync(resolve(process.cwd(), "src/auth-v2/AuthFlowGate.tsx")
 const hydrateStart = gate.indexOf("const snap = await loadAuthWrapperChallenge");
 const hydrate = gate.slice(hydrateStart, gate.indexOf("if (!cancelled) setHydrated(true);", hydrateStart));
 assert.match(hydrate, /setChallenge\(/);
+assert.match(hydrate, /loadMobileOtpDigitSnapshot/);
 assert.equal(hydrate.includes("startOtp("), false);
 assert.equal(hydrate.includes("sendOtpForWrapper("), false);
 assert.match(gate, /intent: "explicit_resend"/);
 assert.match(gate, /forceResend: true/);
+const resendStart = gate.indexOf("const handleResend = async");
+const resendBody = gate.slice(resendStart, gate.indexOf("const next = await startOtp", resendStart));
+assert.ok(resendBody.indexOf("planPhoneVerification") < resendBody.indexOf("beginPhoneOtpSend"));
 
 console.log("phoneVerificationPlan.test.ts: ok");

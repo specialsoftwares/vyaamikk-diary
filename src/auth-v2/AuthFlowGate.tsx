@@ -604,13 +604,24 @@ export function AuthFlowGate() {
       }
 
       const snap = await loadAuthWrapperChallenge();
+      const digitSnap = snap
+        ? await import("@/services/auth/mobileOtpSecureDigits").then((m) => m.loadMobileOtpDigitSnapshot())
+        : null;
       if (snap && !cancelled) {
+        const restoredResendAt =
+          digitSnap &&
+          digitSnap.verificationId === snap.verificationId &&
+          phonesMatchE164(digitSnap.phoneE164, snap.phoneE164)
+            ? digitSnap.resendAvailableAt
+            : null;
         setPhoneE164(snap.phoneE164);
         setChallenge({
           verificationId: snap.verificationId,
           phoneE164: snap.phoneE164,
           devCodeHint: snap.devCodeHint,
+          resendAvailableAt: restoredResendAt ?? undefined,
         });
+        if (restoredResendAt != null) setMobileResendAvailableAt(restoredResendAt);
         setDevHint(snap.devCodeHint);
         setStep("otp");
         setPhoneDraft({
@@ -1160,35 +1171,32 @@ export function AuthFlowGate() {
 
   const handleResend = async () => {
     if (!challenge?.phoneE164) return;
+    const provenance = resolveResendPhoneSendTarget({
+      activeChallengePhoneE164: challenge.phoneE164,
+      statePhoneE164: phoneE164,
+    });
+    assertPhoneSendProvenance(provenance);
+    const sendPhone = provenance.firebaseSendPhoneE164;
+    const resendPlan = planPhoneVerification({
+      intent: "explicit_resend",
+      now: Date.now(),
+      resendAvailableAt: mobileResendAvailableAt ?? challenge.resendAvailableAt ?? null,
+    });
+    if (resendPlan.action !== "send" || !resendPlan.forceResend) {
+      if (resendPlan.action === "cooldown") {
+        setMobileResendAvailableAt(resendPlan.resendAvailableAt);
+        clearFlowError();
+      }
+      return;
+    }
     const started = beginPhoneOtpSend(phoneOtpRef.current);
     if (!started) return;
     phoneOtpRef.current = started;
     const generation = started.generation;
     autoVerifyHandledRef.current = null;
     setResending(true);
+    setPhoneE164(sendPhone);
     try {
-      const provenance = resolveResendPhoneSendTarget({
-        activeChallengePhoneE164: challenge.phoneE164,
-        statePhoneE164: phoneE164,
-      });
-      assertPhoneSendProvenance(provenance);
-      const sendPhone = provenance.firebaseSendPhoneE164;
-      setPhoneE164(sendPhone);
-      const resendPlan = planPhoneVerification({
-        intent: "explicit_resend",
-        now: Date.now(),
-        resendAvailableAt: mobileResendAvailableAt ?? challenge.resendAvailableAt ?? null,
-      });
-      if (resendPlan.action !== "send" || !resendPlan.forceResend) {
-        const held = failPhoneOtpSend(phoneOtpRef.current, generation);
-        if (held) phoneOtpRef.current = held;
-        if (resendPlan.action === "cooldown") {
-          setMobileResendAvailableAt(resendPlan.resendAvailableAt);
-          clearFlowError();
-        }
-        return;
-      }
-
       const next = await startOtp(sendPhone, { forceResend: true });
       if (!isCurrentPhoneChallenge(phoneOtpRef.current, generation)) return;
       if (!phonesMatchE164(next.phoneE164, sendPhone)) {

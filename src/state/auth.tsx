@@ -40,7 +40,7 @@ import {
   runLocalDeviceSignOut,
   type LocalSignOutResult,
 } from "@/services/auth/authSessionFence";
-import { advanceProfileSessionEpoch, currentProfileSessionEpoch, captureProfileWriteOwnership, profileWriteStillOwned, assertProfileWriteOwnership, readLiveProfileUid, publishOwnedProfileSession, type ProfileWriteOwnership } from "@/services/auth/profileWriteOwnership";
+import { advanceProfileSessionEpoch, currentProfileSessionEpoch, captureProfileWriteOwnership, confirmFailureForOwnedEpoch, profileWriteStillOwned, assertProfileWriteOwnership, readLiveProfileUid, publishOwnedProfileSession, type ProfileWriteOwnership } from "@/services/auth/profileWriteOwnership";
 import { retainLocalAccountOnLogout } from "@/services/accountDeletion/localAccountBoundary";
 import { prepareLocalAccountKey } from "@/services/accountDeletion/localKeyLifecycle";
 import {
@@ -423,7 +423,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         });
         return profile;
       } catch (e) {
-        throw toAppError(e);
+        throw toAppError(
+          confirmFailureForOwnedEpoch({
+            ownedEpoch: epoch,
+            currentEpoch: currentProfileSessionEpoch(),
+            error: e,
+          })
+        );
       }
     },
     [saveSession]

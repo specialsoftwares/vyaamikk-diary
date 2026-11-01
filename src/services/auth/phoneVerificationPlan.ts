@@ -5,6 +5,8 @@
  * forceResend is true and a force-resending token exists.
  */
 
+import { MOBILE_OTP_RESEND_COOLDOWN_MS } from "./mobileOtpConstants";
+
 export const ANDROID_PHONE_VERIFICATION_TIMEOUT_SECONDS = 60;
 
 export type PhoneVerificationIntent = "restore" | "fresh" | "explicit_resend";
@@ -22,7 +24,10 @@ export function planPhoneVerification(input: {
 }): PhoneVerificationPlan {
   if (input.intent === "restore") return { action: "restore_without_send" };
   if (input.intent === "fresh") return { action: "send", forceResend: false };
-  const until = Number(input.resendAvailableAt ?? 0);
+  const until = input.resendAvailableAt;
+  if (typeof until !== "number" || !Number.isFinite(until)) {
+    return { action: "cooldown", resendAvailableAt: input.now + MOBILE_OTP_RESEND_COOLDOWN_MS };
+  }
   if (until > input.now) return { action: "cooldown", resendAvailableAt: until };
   return { action: "send", forceResend: true };
 }
