@@ -241,3 +241,92 @@ Public rollout remains on hold.
 6. Offline/slow/retry/cached loading states and safe public errors on signed build.
 7. Owner isolation, restore closure, pending/completed deletion, and revoked
    session remain denied against the named deployed revisions and Rules release.
+
+## Continuation after main `adbe27a`
+
+The sections above record the PR #45 candidate. This section records what was
+verified after that candidate merged. It does not replace those earlier results.
+
+### Source verification
+
+PR #45 merged as `adbe27a3d356ce3f1ad6b47eadebb3870f93a816`. Main push CI run
+`41312198857`, job `124864722917`, printed `ci:verify PASS` at
+`2026-11-01T13:54:04.9162544Z`.
+
+Play internal testing was serving versionCode 32 (1.0.0), released 1 Nov 2026
+12:59. Release history on that track showed 32 down through 23. Production was
+inactive, open testing had no releases, and closed testing Alpha had no release.
+The highest finished EAS Android build was also 32. The app bundle explorer page
+did not return a bundle list, so an uploaded-but-unassigned bundle was not
+independently enumerated. VersionCode 33 was the next code after that inventory.
+
+PR #46, commit `f58c4624c43fb084b5ebb6e0b5d9ee7c0a1c1664`, changes only
+`app.json` versionCode and the isolation contract assertion. GitHub run
+`41315033021`, job `124873145602`, printed `ci:verify PASS` at
+`2026-11-01T14:31:44.0911238Z`. It merged as
+`b4126e421ea026248302d074d41401762b456950`. Main CI run `41316691630`, job
+`124878128085`, printed `ci:verify PASS` at `2026-11-01T14:55:40.9369145Z`.
+The invoice renderer used `node:22-bookworm-slim`.
+
+### Deployment verification
+
+Deployed from clean `adbe27a` on 2026-11-01, project `vyaamikk-diary`, region
+`asia-south1`. Only `sealOwnerContent`, `openOwnerContent`, and the seven GRIN
+callables. Re-read after the build, all ACTIVE, 100% on the latest revision,
+256Mi, CPU 0.1666, concurrency 1, max instances 3, runtime `nodejs22`.
+`BILLING_RECONCILIATION_ENABLED=false` and `GRIN_GOODS_EVIDENCE_FUNCTIONS=true`
+remain. Seal and open bind `CONTENT_DATA_KEY` version 1 only. GRIN functions
+have no secret. GRIN runtime moved from nodejs20 to nodejs22 because the source
+engines field is 22.
+
+| Function | Serving revision |
+| --- | --- |
+| sealOwnerContent | sealownercontent-00002-fey |
+| openOwnerContent | openownercontent-00002-ban |
+| grinRegisterGoodsReceipt | grinregistergoodsreceipt-00004-mux |
+| grinReconcileCommand | grinreconcilecommand-00004-dex |
+| grinMutateGoodsReceipt | grinmutategoodsreceipt-00004-fev |
+| grinReadGoodsReceipt | grinreadgoodsreceipt-00004-tuv |
+| grinReserveEvidence | grinreserveevidence-00004-yom |
+| grinBeginEvidenceUpload | grinbeginevidenceupload-00004-sep |
+| grinUploadEvidence | grinuploadevidence-00004-hew |
+
+Firestore and Storage Rules were not deployed. The serving releases are still
+ruleset `5ec37bc5-7407-437f-a567-3faaa6b0bbb7` (updated 2026-10-06T13:14:58Z)
+and `a2b0bccc-92b9-43fe-b60f-d0e401963fab` (updated 2026-10-06T13:15:23Z).
+`firebase.json` selects `firestore.rules` and `storage.rules`. Those files are
+not an age-only delta: deploying `storage.rules` would drop the live
+`grinEvidence` paths. Live Firestore rules already contain no `ageEligibility`
+check. Rollback for a later authorized rules deploy is those two ruleset ids.
+
+An unauthenticated call to `sealOwnerContent` returns HTTP 401 `Sign in first.`
+That is not functional acceptance. No designated test-account credential is
+present, so profile completion, first save/read, owner isolation, and
+session, restore, and deletion denials were not exercised with a signed-in
+caller.
+
+### Build completion
+
+Built `b4126e421ea026248302d074d41401762b456950` with profile `internal-grin`.
+EAS build `ca29e47e-3b72-4f71-8c15-07d97cfda2f8`, status finished, version
+1.0.0, versionCode 33, SDK 54.0.0, keystore `Build Credentials 0KyVXiWXf1`.
+Pre-install printed a 14-character redacted project id and
+`android_package=com.specialsoftwares.vyaamikkdiary`, then continued, so the
+identity check passed. The builder app config contains `"versionCode": 33`.
+
+Artifact `https://expo.dev/artifacts/eas/RHUlxOq_NEV1fzSNmch9eKcmvwbGYhGw17yOvUCcw6M.aab`,
+79,766,583 bytes, SHA-256
+`760e3d4e9cd558155251fcce1ba6eca03a6187d5bf05c36e2b012ba49a245251`.
+Manifest package `com.specialsoftwares.vyaamikkdiary`, versionCode 33,
+versionName 1.0.0. Upload certificate SHA-256
+`E6:88:FA:0B:A5:FA:3B:D3:05:85:11:4F:8C:21:43:E1:EF:DD:A1:AC:BF:DB:9D:AA:DC:42:DA:89:61:78:75:2A`,
+SHA-1 `20:F8:15:0E:21:3C:9C:3F:84:FD:CA:C5:1E:9E:4D:CC:EE:A2:42:AD`, matching
+the Play upload key re-read on 1 Nov 2026. Play app-signing SHA-256 remains
+`B9:C5:21:E3:B5:7E:AB:0C:3D:3D:C7:B8:5D:E9:1D:67:EF:9F:2A:BD:90:CC:69:50:C5:70:0B:4F:26:36:CE:92`.
+The bundle was not uploaded to Play.
+
+### Signed-device acceptance
+
+Pending. The checks above are source CI, deployment reads, and build
+inspection. They do not include a signed-in profile save or a device install
+of this versionCode 33 binary.
