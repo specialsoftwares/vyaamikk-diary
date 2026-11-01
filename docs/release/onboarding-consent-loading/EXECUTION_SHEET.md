@@ -2,6 +2,7 @@
 
 Source branch: `fix/onboarding-consent-loading`.
 Base: `5827ddb54faf777e900c563d16e8bb2df33dfc07` (`origin/main` on 1 Nov 2026). That commit is also the signed internal-grin artifact `722e4e4c-9d0a-402b-8099-4dc0e27b5de3`, versionName `1.0.0`, versionCode `32`. This branch does not change that artifact.
+Code head verified by GitHub run `41299395405`: `7babf9c30a3b745a565012674009151b5257828f`.
 
 Installed-device version was not read. Missing device evidence did not block the source fix.
 
@@ -83,7 +84,16 @@ Local canonical CI, same day, worktree `/Users/shivamsaurav/vyaamikk-onboarding-
 - Node: v20.19.4
 - The invoice-renderer Docker step printed `docker not available locally; GitHub Actions CI will run the renderer image build`. Every earlier local stage passed, including `test:all`.
 
-GitHub Actions is the check on the pull request into `main`. The run id is added after that check finishes. The committed head is the tree above plus this paragraph.
+GitHub Actions on head `7babf9c30a3b745a565012674009151b5257828f`:
+
+- Run: https://github.com/specialsoftwares/vyaamikk-diary/actions/runs/41299395405
+- Run id: `41299395405`
+- Job: `124827005967` (`verify`)
+- Conclusion: success
+- Exact line: `ci:verify PASS` at `2026-11-01T11:15:57.6709079Z`
+- Renderer runtime: `v22.19.0`
+
+The commit that records this paragraph is docs-only. Its pull-request check is separate from run `41299395405`.
 
 ## Deployment, build, and device acceptance
 
