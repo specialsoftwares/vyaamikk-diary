@@ -19,7 +19,17 @@ type CrashlyticsClient = {
   setUserId: (id: string) => Promise<unknown> | void;
 };
 
+/** Result of asking the native SDK to collect or stop. Never treats a missing module or a rejected call as success. */
+export type CrashActivationResult = Readonly<{
+  ok: boolean;
+  status: "enabled" | "disabled" | "unavailable" | "rejected";
+  /** This client has no unsent-report deletion API. Queued reports are not separately deletable. */
+  queuedReportsSeparatelyDeletable: false;
+  unsentReports: "not_applicable" | "not_separately_deletable";
+}>;
+
 let _enabled = false;
+let _activationEpoch = 0;
 let _testClient: CrashlyticsClient | null | undefined;
 
 function getCrashlytics(): CrashlyticsClient | null {
@@ -43,24 +53,66 @@ export function __setCrashlyticsClientForTests(client: CrashlyticsClient | null 
 /** Test-only. Restores disabled default and clears the injected port. */
 export function __resetCrashReportingForTests(): void {
   _enabled = false;
+  _activationEpoch += 1;
   _testClient = undefined;
 }
 
-export function setCrashReportingEnabled(enabled: boolean): void {
-  _enabled = enabled;
-  try {
-    const client = getCrashlytics();
-    if (!client) return;
-    void client.setCrashlyticsCollectionEnabled(enabled).catch(() => {});
-    // Opt-out must also drop the pseudonymous user id (uid prefix) so a
-    // later re-enable or native restart cannot resend it. The consent
-    // toggle and decline paths call only this function, not clearUser().
-    if (!enabled) {
-      void Promise.resolve(client.setUserId("")).catch(() => {});
-    }
-  } catch {
-    // Never throw from the crash reporter.
+function failedActivation(status: "unavailable" | "rejected"): CrashActivationResult {
+  return {
+    ok: false,
+    status,
+    queuedReportsSeparatelyDeletable: false,
+    unsentReports: "not_separately_deletable",
+  };
+}
+
+/**
+ * Enables or disables native collection and reports whether that call stuck.
+ * Automatic collection stays off until a successful enable result.
+ * Withdrawal disables collection. The installed client has no API to delete
+ * unsent reports, so those stay queued and are not separately deletable.
+ */
+export function setCrashReportingEnabled(enabled: boolean): Promise<CrashActivationResult> {
+  const epoch = ++_activationEpoch;
+  const stillCurrent = () => epoch === _activationEpoch;
+  const client = getCrashlytics();
+  if (!client) {
+    if (stillCurrent()) _enabled = false;
+    return Promise.resolve(failedActivation("unavailable"));
   }
+  let pending: Promise<unknown>;
+  try {
+    pending = Promise.resolve(client.setCrashlyticsCollectionEnabled(enabled));
+  } catch {
+    if (stillCurrent()) _enabled = false;
+    return Promise.resolve(failedActivation("rejected"));
+  }
+  // Opt-out drops the pseudonymous user id so a later enable cannot resend it.
+  // The consent toggle and decline paths call this function, not clearUser().
+  if (!enabled) {
+    try {
+      void Promise.resolve(client.setUserId("")).catch(() => undefined);
+    } catch {
+      // The collection flag is still the gate. Identity cleanup is best-effort.
+    }
+  }
+  // A present client applies the flag when the call is invoked so redaction
+  // tests can observe the same turn. Only this call may roll the gate back.
+  // An older rejection must not clear a newer allow, and an older success
+  // must not turn the gate on after a newer withdrawal.
+  if (stillCurrent()) _enabled = enabled;
+  return pending.then(
+    () => ({
+      ok: true,
+      status: enabled ? "enabled" : "disabled",
+      queuedReportsSeparatelyDeletable: false,
+      unsentReports: enabled ? "not_applicable" : "not_separately_deletable",
+    }),
+    () => {
+      if (stillCurrent()) _enabled = false;
+      return failedActivation("rejected");
+    }
+  );
 }
 
 export function recordError(error: Error, context?: string): void {

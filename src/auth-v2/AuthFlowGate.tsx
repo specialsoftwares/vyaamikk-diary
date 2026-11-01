@@ -89,11 +89,13 @@ import {
   phoneAuthDiagnosticId,
 } from "@/services/auth/nativePhoneAuthErrors";
 import * as Clipboard from "expo-clipboard";
-import { profileNeedsAgeGate } from "@/domain/ageEligibility";
+import { resolveSignedInOnboardingContinuation } from "@/domain/ageEligibility";
+import { getActiveBackend } from "@/config/env";
+import { getFirebaseAuth } from "@/config/firebase";
 import { useAuth } from "@/state/auth";
 import { useT } from "@/i18n";
 import {
-  consentPatchForProfile,
+  applyConsentPatchAfterPhoneVerify,
   savePendingConsent,
 } from "@/services/consent/legalConsentService";
 import {
@@ -181,6 +183,22 @@ function uiStepToWizard(step: AuthV2Step | "email_verify"): OnboardingWizardStep
   }
 }
 
+function readProductionAuthUid(initiatingUid: string): string | null {
+  if (getActiveBackend() !== "firebase-production") return initiatingUid;
+  try {
+    return getFirebaseAuth().currentUser?.uid ?? getNativeAuthUid();
+  } catch {
+    return getNativeAuthUid();
+  }
+}
+
+function assertProductionContinuationUid(initiatingUid: string): void {
+  const current = readProductionAuthUid(initiatingUid);
+  if (!current || current !== initiatingUid) {
+    throw new AppError("permission_denied", "session_changed");
+  }
+}
+
 /**
  * Premium Indigo auth wrapper — sole sign-in entry for the app.
  */
@@ -232,6 +250,7 @@ export function AuthFlowGate() {
   const emailResendInFlightRef = useRef(false);
   const emailSendInFlightRef = useRef(false);
   const mobileVerifyInFlightRef = useRef(false);
+  const verifiedPhoneProfileRef = useRef<import("@/domain/types").UserProfile | null>(null);
   const autoVerifyHandledRef = useRef<string | null>(null);
   const reviewingRef = useRef(false);
   const [emailSendMachine, setEmailSendMachine] = useState<EmailOtpSendMachine>(() =>
@@ -392,10 +411,6 @@ export function AuthFlowGate() {
       if (!opts?.userInitiated && isReviewIntentActive()) {
         return;
       }
-      if (user && profileNeedsAgeGate(user)) {
-        router.replace("/(auth)/age-declaration");
-        return;
-      }
       if (user) {
         markContinuingWizardStep("businessIdentity", user.uid, {
           phoneE164: user.phoneE164,
@@ -511,14 +526,16 @@ export function AuthFlowGate() {
 
         // Fully past email+profile gates → leave auth wrapper (boot continues).
         if (hasAuthoritativeVerifiedEmail(user) && user.profileCompletedAt && !reviewRequested) {
-          if (profileNeedsAgeGate(user)) {
-            router.replace("/(auth)/age-declaration");
-            if (!cancelled) setHydrated(true);
+          const continuation = resolveSignedInOnboardingContinuation({
+            hasVerifiedEmail: true,
+            profileCompletedAt: user.profileCompletedAt,
+            ageEligibility: user.ageEligibility,
+          });
+          if (continuation === "dashboard") {
+            clearWizardNavigationSession();
+            if (!cancelled) handoffToApp();
             return;
           }
-          clearWizardNavigationSession();
-          if (!cancelled) handoffToApp();
-          return;
         }
 
         // Deliberate review of an earlier auth step — never bounce forward.
@@ -868,18 +885,52 @@ export function AuthFlowGate() {
       // leaves step==="otp" && !challenge across await gaps → false sessionExpired
       // fallthrough (Stage-8 clean-room / first_time_create).
       await applyServerProfile(profile);
-      const consentPatch = await consentPatchForProfile(profile);
       let nextProfile = profile;
-      if (consentPatch) {
-        nextProfile = await updateProfile(consentPatch, { user: profile });
+      let destination: "email" | "profile" | "dashboard";
+      try {
+        // consentPatchForProfile runs inside this call and is acknowledged only after the write.
+        const continued = await applyConsentPatchAfterPhoneVerify({
+          profile,
+          initiatingUid: profile.uid,
+          readCurrentUid: () => readProductionAuthUid(profile.uid),
+          writeProfile: async (patch) => updateProfile(patch, { user: profile }),
+        });
+        nextProfile = continued.profile;
+        destination = continued.destination;
+      } catch (e) {
+        if (
+          e instanceof AppError &&
+          (e.code === "permission_denied" || e.message === "session_changed")
+        ) {
+          throw e;
+        }
+        throw new AppError(
+          "save_failed",
+          "Could not save your consent. You can retry without requesting a new code.",
+          e,
+          {
+            retryAccountSetup: true,
+            authPhase: "post_auth",
+            firebaseUserPresent: true,
+          }
+        );
       }
 
       setPhoneChallengeProven(true);
+      const publish = () => {
+        assertProductionContinuationUid(nextProfile.uid);
+      };
 
-      if (hasAuthoritativeVerifiedEmail(nextProfile) && nextProfile.profileCompletedAt) {
+      if (destination === "dashboard") {
         await markAuthWrapperEmailComplete(nextProfile.uid);
         resolveVerificationSuccess("mobile", () => {
           void (async () => {
+            try {
+              publish();
+            } catch (e) {
+              applyFlowError(e, "phone_otp");
+              return;
+            }
             clearWizardNavigationSession();
             await clearAuthWrapperChallenge();
             setChallenge(null);
@@ -889,10 +940,16 @@ export function AuthFlowGate() {
         return;
       }
 
-      if (hasAuthoritativeVerifiedEmail(nextProfile)) {
+      if (destination === "profile") {
         await markAuthWrapperEmailComplete(nextProfile.uid);
         resolveVerificationSuccess("mobile", () => {
           void (async () => {
+            try {
+              publish();
+            } catch (e) {
+              applyFlowError(e, "phone_otp");
+              return;
+            }
             goToBusinessIdentity({ userInitiated: true });
             await clearAuthWrapperChallenge();
             setChallenge(null);
@@ -912,6 +969,12 @@ export function AuthFlowGate() {
       authPerfMark("V8_session_reconciled");
       resolveVerificationSuccess("mobile", () => {
         void (async () => {
+          try {
+            publish();
+          } catch (e) {
+            applyFlowError(e, "phone_otp");
+            return;
+          }
           authPerfMark("V9_email_nav_requested");
           authPerfMark("V10_email_screen_requested");
           onboardingMeasure("mobileVerifiedUI", "emailScreenVisible", "mobileVerifiedUI → emailScreenVisible");
@@ -932,7 +995,7 @@ export function AuthFlowGate() {
         })();
       });
     },
-    [applyServerProfile, goToBusinessIdentity, handoffToApp, resolveVerificationSuccess, updateProfile]
+    [applyFlowError, applyServerProfile, goToBusinessIdentity, handoffToApp, resolveVerificationSuccess, updateProfile]
   );
 
   const handleVerifyOtp = async (code: string) => {
@@ -970,6 +1033,7 @@ export function AuthFlowGate() {
         );
       }
       clearFlowError();
+      verifiedPhoneProfileRef.current = profile;
       await continueAfterPhoneProfile(profile);
     } catch (e) {
       if (!isCurrentPhoneChallenge(phoneOtpRef.current, generation)) return;
@@ -1031,6 +1095,11 @@ export function AuthFlowGate() {
     beginVerificationProcess("mobile");
     setLoading(true);
     try {
+      const verified = verifiedPhoneProfileRef.current;
+      if (verified && getNativeAuthUid() === verified.uid) {
+        await continueAfterPhoneProfile(verified);
+        return;
+      }
       const { callResolveOrCreateUserByPhone } = await import("@/services/auth/identityCallable");
       const { requireJsAuthSessionForFirestore } = await import("@/services/auth/jsAuthBridge");
       const result = await callResolveOrCreateUserByPhone(phoneE164);
@@ -1353,7 +1422,22 @@ export function AuthFlowGate() {
       // Route after success settle — never before authoritative bind.
       // Mount/boot suppress guard must still not wrap this continue (vc10).
       resolveVerificationSuccess("email", () => {
-        goToBusinessIdentity({ userInitiated: true });
+        try {
+          assertProductionContinuationUid(profile.uid);
+        } catch (e) {
+          applyFlowError(e, "email_otp");
+          return;
+        }
+        const continuation = resolveSignedInOnboardingContinuation({
+          hasVerifiedEmail: true,
+          profileCompletedAt: profile.profileCompletedAt,
+          ageEligibility: profile.ageEligibility,
+        });
+        if (continuation === "dashboard") {
+          handoffToApp();
+        } else {
+          goToBusinessIdentity({ userInitiated: true });
+        }
         setEmailCode("");
         setEmailVerificationId(null);
         setEmailSendMachine(createEmailOtpSendMachine());

@@ -150,12 +150,65 @@ function assertNoSensitive(value: unknown): void {
   assert.equal(classified.class, "invalid");
   assert.equal(classified.code, "auth/invalid-email");
   assertNoSensitive(classified);
-  const safe = createSafeDiagnosticError(err, `ErrorBoundary ${EMAIL}`);
+  const safe = createSafeDiagnosticError(err, `ErrorBoundary ${EMAIL}`, "corr-test-01");
   assert.equal(safe.name, "SafeDiagnosticError");
   assert.equal(safe.message, "diagnostic:invalid");
+  assert.equal(safe.code, "auth/invalid-email");
+  assert.equal(safe.context, "app");
+  assert.equal(safe.correlationId, "corr-test-01");
+  assert.doesNotMatch(safe.message, /alice\.reviewer|WIDGET-BATCH|Firebase:|already in use/);
   assert.doesNotMatch(safe.stack ?? "", /alice\.reviewer|WIDGET-BATCH|customData/);
+  assert.match(safe.stack ?? "", /code=auth\/invalid-email/);
+  assert.match(safe.stack ?? "", /context=app/);
+  assert.match(safe.stack ?? "", /correlation=corr-test-01/);
   assert.equal(err.message.includes(EMAIL), true, "original Error is not mutated");
   assert.equal((err as { customData?: { email?: string } }).customData?.email, EMAIL);
+}
+
+{
+  const leaked = Object.assign(
+    new Error(
+      `Firebase: callable resolveOrCreateUserByPhone failed age_not_admitted ${EMAIL} /Users/shivamsaurav/secret/firestore/users/abc`
+    ),
+    { code: "auth/network-request-failed" }
+  );
+  leaked.stack = [
+    `Error: Firebase callable resolveOrCreateUserByPhone age_not_admitted ${EMAIL} /Users/shivamsaurav/secret/firestore/users/abc`,
+    "    at submit (/Users/shivamsaurav/proj/src/auth/session.ts:12:3)",
+    "    at leak (src/auth/leak.ts?email=alice.reviewer@example.invalid:1:1)",
+    "    at pkg (/Users/shivamsaurav/proj/node_modules/firebase/index.js:2:2)",
+    "    at hidden (/Users/shivamsaurav/secret/firestore/users/abc:1:1)",
+    "    at bearer (Bearer eyJhbGci.secret)",
+  ].join("\n");
+  const diag = createSafeDiagnosticError(leaked, "auth/nativePhone", "corr-stack-02");
+  const blob = `${diag.message}\n${diag.stack}`;
+  assert.equal(diag.message, "diagnostic:unavailable");
+  assert.equal(diag.code, "auth/network-request-failed");
+  assert.equal(diag.context, "auth/nativePhone");
+  assert.match(diag.stack ?? "", /src\/auth\/session\.ts/);
+  assert.doesNotMatch(blob, /node_modules/);
+  assert.doesNotMatch(blob, /age_not_admitted/);
+  assert.doesNotMatch(blob, /resolveOrCreateUserByPhone/);
+  assert.doesNotMatch(blob, /alice\.reviewer/);
+  assert.doesNotMatch(blob, /\/Users\//);
+  assert.doesNotMatch(blob, /firestore/);
+  assert.doesNotMatch(blob, /Bearer|eyJ|AIza/);
+  assert.doesNotMatch(diag.message, /Firebase|callable|already/);
+}
+
+{
+  const bare = new Error("age_not_admitted");
+  bare.stack = "Error: age_not_admitted\n    at call (node_modules/@firebase/functions/lib.js:1:1)";
+  const fallback = createSafeDiagnosticError(bare, `not-a-label ${EMAIL}`);
+  const blob = `${fallback.message}\n${fallback.stack}`;
+  assert.equal(fallback.message, "diagnostic:unknown");
+  assert.equal(fallback.code, "unknown");
+  assert.equal(fallback.context, "app");
+  assert.match(fallback.stack ?? "", /at unknown \(app\)/);
+  assert.doesNotMatch(blob, /age_not_admitted/);
+  assert.doesNotMatch(blob, /node_modules/);
+  assert.doesNotMatch(blob, /alice\.reviewer/);
+  assert.doesNotMatch(blob, /@firebase/);
 }
 
 {

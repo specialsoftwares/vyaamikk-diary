@@ -2,7 +2,18 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useFocusEffect, useNavigation, useRouter } from "expo-router";
 
-import { Banner, LastRefreshedHint, Screen, SmartHeadline } from "@/components/ui";
+import {
+  Banner,
+  ErrorState,
+  LastRefreshedHint,
+  Screen,
+  SkeletonCard,
+  SkeletonDashboardPreview,
+  SkeletonList,
+  SkeletonLoadingPanel,
+  SmartHeadline,
+  skeletonPanelMode,
+} from "@/components/ui";
 import { SyncStatusBanner } from "@/components/sync/SyncStatusBanner";
 import { ComposerPickerSheet } from "@/components/composer/ComposerPickerSheet";
 import { GlobalSearchBar } from "@/components/search/GlobalSearchBar";
@@ -36,6 +47,19 @@ import { getCustomerCreditRepository } from "@/services/customerCredit";
 import { subscribeDomainChanges } from "@/services/dataChanges/domainChanges";
 import { sessionStillOwns } from "@/state/diaryListLoad";
 import { useAppRefresh } from "@/hooks/useAppRefresh";
+
+function YouDashboardSkeleton() {
+  return (
+    <View style={{ gap: spacing.md }}>
+      <View style={{ flexDirection: "row", gap: spacing.sm }}>
+        <SkeletonCard lines={2} style={{ flex: 1 }} />
+        <SkeletonCard lines={2} style={{ flex: 1 }} />
+        <SkeletonCard lines={2} style={{ flex: 1 }} />
+      </View>
+      <SkeletonList count={3} Item={SkeletonDashboardPreview} />
+    </View>
+  );
+}
 
 export default function YouTab() {
   const t = useT();
@@ -90,7 +114,7 @@ export default function YouTab() {
 
   const userId = user?.uid ?? null;
   const listOptions = useMemo(() => ({}), []);
-  const { entries, error, refresh } = useDiaryList(userId, listOptions);
+  const { entries, error, refresh, loading, reload } = useDiaryList(userId, listOptions);
   const { requestDelete, isDeleting } = useRecordDelete(userId);
   const [letterheadDocs, setLetterheadDocs] = useState<LetterheadDocument[]>([]);
   const [proPacks, setProPacks] = useState<ProfessionalServicePack[]>([]);
@@ -275,6 +299,7 @@ export default function YouTab() {
     [entries, letterheadDocs, proPacks, activeDraftCount, t, credits]
   );
   const { visibility } = dashboard;
+  const diaryLoadMode = skeletonPanelMode(loading, false, entries.length > 0);
 
   const openEntry = useCallback(
     (id: string) => {
@@ -405,7 +430,7 @@ export default function YouTab() {
               <Banner tone="warning" message={t("common.offline")} />
             </View>
           ) : null}
-          {error ? (
+          {error && entries.length > 0 ? (
             <View style={[styles.banner, styles.topOfflineWrap]}>
               <Banner tone="danger" message={error} />
             </View>
@@ -424,6 +449,18 @@ export default function YouTab() {
           <LastRefreshedHint message={refreshNote} />
         </View>
 
+        {diaryLoadMode === "skeleton" ? (
+          <SkeletonLoadingPanel loading slowMessage={t("skeleton.stillLoading")}>
+            <YouDashboardSkeleton />
+          </SkeletonLoadingPanel>
+        ) : error && entries.length === 0 ? (
+          <ErrorState
+            message={error}
+            onRetry={() => void reload()}
+            retryLabel={t("common.retry")}
+          />
+        ) : (
+        <>
         <View>
           <SmartHeadline
             title={t("you.summary")}
@@ -528,6 +565,8 @@ export default function YouTab() {
             </View>
           </View>
         ) : null}
+        </>
+        )}
       </View>
       </Screen>
 

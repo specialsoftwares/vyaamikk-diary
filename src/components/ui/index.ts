@@ -38,6 +38,7 @@ export {
   SkeletonLine,
   SkeletonList,
   SkeletonLoadingPanel,
+  skeletonPanelMode,
   SkeletonSearchResult,
   SkeletonSettingsSection,
   SkeletonStatutoryCard,

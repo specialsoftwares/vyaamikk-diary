@@ -98,6 +98,33 @@ async function main(): Promise<void> {
   const reread = await loadDiagnosticsPreference();
   assert.equal(reread.desired, "off");
 
+  __setCrashlyticsClientForTests(null);
+  resetDiagnosticsPreferenceForTests();
+  const missingSdk = await applyDiagnosticsChoice(true);
+  assert.equal(missingSdk.persisted, true);
+  assert.equal(missingSdk.desired, "on");
+  assert.equal(missingSdk.nativeState, "unavailable");
+  assert.notEqual(missingSdk.nativeState, "next_launch");
+
+  __setCrashlyticsClientForTests({
+    setCrashlyticsCollectionEnabled: async () => {
+      throw new Error("native rejected");
+    },
+    log: () => undefined,
+    recordError: () => undefined,
+    setUserId: () => undefined,
+  });
+  resetDiagnosticsPreferenceForTests();
+  const rejectedSdk = await applyDiagnosticsChoice(true);
+  assert.equal(rejectedSdk.persisted, true);
+  assert.equal(rejectedSdk.desired, "on");
+  assert.equal(rejectedSdk.nativeState, "error");
+  assert.equal(rejectedSdk.error, "activation_failed");
+  const withdrawn = await applyDiagnosticsChoice(false);
+  assert.equal(withdrawn.desired, "off");
+  assert.equal(withdrawn.nativeState, "off");
+  assert.equal(withdrawn.unsentReports, "not_separately_deletable");
+
   storage.default.getItem = originalGet;
   storage.default.setItem = original;
   __resetCrashReportingForTests();

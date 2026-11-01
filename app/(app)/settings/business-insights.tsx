@@ -9,7 +9,16 @@ import { insightCategoryHint, insightCategoryTitle } from "@/components/insights
 import { InsightsCategoryRow } from "@/components/insights/InsightsCategoryRow";
 import { InsightsOverviewTiles } from "@/components/insights/InsightsOverviewTiles";
 import { SettingsNavGroup } from "@/components/settings/SettingsNavCard";
-import { Header, Loader, Screen, LocaleUiText, ErrorState } from "@/components/ui";
+import {
+  ErrorState,
+  Header,
+  Loader,
+  Screen,
+  SkeletonCard,
+  SkeletonList,
+  SkeletonLoadingPanel,
+  LocaleUiText,
+} from "@/components/ui";
 import { useBusinessInsightsDashboard } from "@/hooks/useBusinessInsightsDashboard";
 import { useAuth } from "@/state/auth";
 import { useT } from "@/i18n";
@@ -93,9 +102,17 @@ export default function BusinessInsightsScreen() {
         availableFys={data?.availableFys ?? [selectedFy]}
         onSelect={onSelectFy}
       />
-      {loading ? (
-        <Loader message={t("common.loading")} />
-      ) : error ? (
+      {loading && !data ? (
+        <SkeletonLoadingPanel loading slowMessage={t("skeleton.stillLoading")}>
+          <View style={{ gap: spacing.md }}>
+            <View style={{ flexDirection: "row", gap: spacing.sm }}>
+              <SkeletonCard lines={2} style={{ flex: 1 }} />
+              <SkeletonCard lines={2} style={{ flex: 1 }} />
+            </View>
+            <SkeletonList count={4} />
+          </View>
+        </SkeletonLoadingPanel>
+      ) : error && !data ? (
         <ErrorState message={error} onRetry={() => void reload()} retryLabel={t("common.retry")} />
       ) : !data ? (
         <Loader message={t("common.loading")} />

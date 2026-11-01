@@ -3,7 +3,7 @@
  * Never put tokens, OTPs, or credentials in messages.
  */
 
-import { AppError, type AppErrorCode } from "@/domain/errors";
+import { AppError, isUnsafePublicText, publicMessage, type AppErrorCode } from "@/domain/errors";
 import { AUTH_USER_FACING_COPY } from "./authUserFacingCopy";
 
 /** Firebase Auth codes we explicitly surface in the beta UI. */
@@ -210,19 +210,28 @@ export function phoneAuthDiagnosticId(error: unknown): string | null {
   return typeof code === "string" && code.startsWith("auth/") ? code : null;
 }
 
+function phoneAuthPhaseOf(error: AppError): PhoneAuthPhase {
+  const phase = error.details?.phoneAuthPhase ?? error.details?.authPhase;
+  return phase === "confirm" ? "confirm" : "send";
+}
+
 /**
  * Production on-screen failure text for OTP send/confirm.
- * Never includes Firebase codes, exception class, activity, or raw phone.
+ * Never includes Firebase codes, exception class, activity, raw phone, or backend text.
  */
 export function formatPhoneAuthDisplayMessage(error: unknown): string {
   if (!(error instanceof AppError)) {
     return mapPhoneAuthFailure(error, "send").userMessage;
   }
-  return userFacingMessageFromAppError(error);
-}
-
-function userFacingMessageFromAppError(error: AppError): string {
-  return error.message || "Could not send the verification code. Check the number and try again.";
+  const firebaseCode = error.details?.firebaseAuthCode;
+  if (typeof firebaseCode === "string" && firebaseCode.startsWith("auth/")) {
+    return mapPhoneAuthFailure({ code: firebaseCode, message: "" }, phoneAuthPhaseOf(error))
+      .userMessage;
+  }
+  if (!error.message.trim() || isUnsafePublicText(error.message)) {
+    return publicMessage(error);
+  }
+  return error.message;
 }
 
 export function formatPhoneAuthCopyDiagnostics(error: unknown): string {

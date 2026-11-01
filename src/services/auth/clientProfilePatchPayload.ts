@@ -173,6 +173,22 @@ export function buildClientProfileFirestoreWrite(
   return payload;
 }
 
+const CONSENT_ONLY_PATCH_KEYS = new Set(["legalConsents", "updatedAt"]);
+
+/**
+ * True only when the patch carries legal consent and no business or other
+ * profile fields. `updatedAt` may ride along; it is not a sensitive field.
+ */
+export function isConsentOnlyProfilePatch(patch: ProfilePatch): boolean {
+  let sawConsent = false;
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === undefined) continue;
+    if (key === "legalConsents") sawConsent = true;
+    if (!CONSENT_ONLY_PATCH_KEYS.has(key)) return false;
+  }
+  return sawConsent;
+}
+
 /** Shape of the legacy full-document merge (pre-remediation) for rules tests. */
 export function legacyProfileDocumentMergeFields(
   next: UserProfile

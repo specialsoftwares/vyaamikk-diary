@@ -1,4 +1,4 @@
-import { clearUser, setCrashReportingEnabled } from "@/services/telemetry/crashReporter";
+import { clearUser, setCrashReportingEnabled, type CrashActivationResult } from "@/services/telemetry/crashReporter";
 import { readTelemetryConsent, writeTelemetryConsent } from "@/services/telemetry/telemetryConsent";
 
 export type DiagnosticsPreference = Readonly<{
@@ -7,6 +7,8 @@ export type DiagnosticsPreference = Readonly<{
   nativeState: "off" | "on" | "next_launch" | "unavailable" | "error";
   revision: number;
   error: string | null;
+  /** Withdrawal can disable collection without a separate unsent-report delete API. */
+  unsentReports: "not_applicable" | "not_separately_deletable";
 }>;
 
 let revision = 0;
@@ -17,6 +19,7 @@ let latest: DiagnosticsPreference = {
   nativeState: "off",
   revision: 0,
   error: null,
+  unsentReports: "not_applicable",
 };
 
 export function currentDiagnosticsPreference(): DiagnosticsPreference {
@@ -41,6 +44,7 @@ export function resetDiagnosticsPreferenceForTests(): void {
     nativeState: "off",
     revision: 0,
     error: null,
+    unsentReports: "not_applicable",
   };
 }
 
@@ -53,14 +57,17 @@ export function loadDiagnosticsPreference(): Promise<DiagnosticsPreference> {
     if (seen !== revision) return latest;
     if (latest.revision > 0 && !latest.persisted) return latest;
     const enabled = stored === true;
-    if (enabled) setCrashReportingEnabled(true);
-    else setCrashReportingEnabled(false);
+    // The legacy on-device flag is not server acknowledgement. Keep collection
+    // off until the purpose-consent queue activates it for this session.
+    const closed = await setCrashReportingEnabled(false);
+    if (seen !== revision) return latest;
     latest = {
       desired: stored == null ? "unknown" : enabled ? "on" : "off",
       persisted: stored != null,
-      nativeState: enabled ? "on" : "off",
+      nativeState: "off",
       revision: seen,
       error: null,
+      unsentReports: closed.unsentReports,
     };
     return latest;
   });
@@ -73,35 +80,54 @@ export async function runCrashReportingBridge(): Promise<DiagnosticsPreference> 
   return pref;
 }
 
+function nativeFailure(activation: CrashActivationResult): DiagnosticsPreference["nativeState"] {
+  return activation.status === "unavailable" ? "unavailable" : "error";
+}
+
 /**
  * Opt-out closes the session gate before persistence. A failed write does not
- * turn reporting back on. Opt-in enables sends only after the choice is stored.
+ * turn reporting back on. Opt-in enables sends only after the choice is stored
+ * and the native SDK accepts collection. A missing or rejected SDK stays off.
  * Native collection changes can take effect on the next launch.
  */
 export function applyDiagnosticsChoice(enabled: boolean): Promise<DiagnosticsPreference> {
   const rev = ++revision;
-  if (!enabled) setCrashReportingEnabled(false);
+  if (!enabled) void setCrashReportingEnabled(false);
   return enqueue(async () => {
     try {
       await writeTelemetryConsent(enabled);
       if (rev !== revision) return latest;
-      if (enabled) setCrashReportingEnabled(true);
+      const activation = await setCrashReportingEnabled(enabled);
+      if (rev !== revision) return latest;
+      if (!activation.ok && enabled) {
+        latest = {
+          desired: "on",
+          persisted: true,
+          nativeState: nativeFailure(activation),
+          revision: rev,
+          error: activation.status === "unavailable" ? "unavailable" : "activation_failed",
+          unsentReports: activation.unsentReports,
+        };
+        return latest;
+      }
       latest = {
         desired: enabled ? "on" : "off",
         persisted: true,
         nativeState: enabled ? "next_launch" : "off",
         revision: rev,
         error: null,
+        unsentReports: activation.unsentReports,
       };
     } catch {
       if (rev !== revision) return latest;
-      setCrashReportingEnabled(false);
+      const closed = await setCrashReportingEnabled(false);
       latest = {
         desired: enabled ? "on" : "off",
         persisted: false,
         nativeState: "error",
         revision: rev,
         error: "save_failed",
+        unsentReports: closed.unsentReports,
       };
     }
     return latest;

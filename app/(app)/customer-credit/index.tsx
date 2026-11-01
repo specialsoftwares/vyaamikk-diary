@@ -18,8 +18,11 @@ import { Banner,
   ErrorState,
   Header,
   LastRefreshedHint,
-  Loader,
-  Screen, LocaleUiText } from "@/components/ui";
+  Screen,
+  SkeletonDashboardPreview,
+  SkeletonList,
+  SkeletonLoadingPanel,
+  LocaleUiText } from "@/components/ui";
 import { useAuth } from "@/state/auth";
 import { useAppRefresh } from "@/hooks/useAppRefresh";
 import { useT } from "@/i18n";
@@ -62,6 +65,15 @@ export default function CustomerCreditListScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const hasLoadedOnce = useRef(false);
+  const userId = user?.uid ?? null;
+  const ownerRef = useRef(userId);
+  if (ownerRef.current !== userId) {
+    ownerRef.current = userId;
+    hasLoadedOnce.current = false;
+    if (records.length > 0) setRecords([]);
+    if (error) setError(null);
+    if (userId && !loading) setLoading(true);
+  }
 
   const styles = useThemedStyles((c) =>
     StyleSheet.create({
@@ -92,16 +104,19 @@ export default function CustomerCreditListScreen() {
   const load = useCallback(
     async (mode: "mount" | "refresh" = "mount") => {
       if (!user) return;
+      const ownerId = user.uid;
       if (!hasLoadedOnce.current) setLoading(true);
       setError(null);
       try {
-        const list = await getCustomerCreditRepository().list(user.uid);
+        const list = await getCustomerCreditRepository().list(ownerId);
+        if (ownerRef.current !== ownerId) return;
         setRecords(list);
         hasLoadedOnce.current = true;
       } catch (e) {
+        if (ownerRef.current !== ownerId) return;
         setError(userFacingMessage(e));
       } finally {
-        setLoading(false);
+        if (ownerRef.current === ownerId) setLoading(false);
       }
     },
     [user]
@@ -199,7 +214,11 @@ export default function CustomerCreditListScreen() {
       </View>
 
       {loading && records.length === 0 ? (
-        <Loader fullscreen message={t("common.loading")} />
+        <View style={styles.listContent}>
+          <SkeletonLoadingPanel loading slowMessage={t("skeleton.stillLoading")}>
+            <SkeletonList count={6} Item={SkeletonDashboardPreview} />
+          </SkeletonLoadingPanel>
+        </View>
       ) : error && records.length === 0 ? (
         <ErrorState message={error} onRetry={() => void load("mount")} />
       ) : (

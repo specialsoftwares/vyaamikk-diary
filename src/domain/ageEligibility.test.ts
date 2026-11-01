@@ -80,10 +80,11 @@ for (const vector of vectors) {
 
 assert.deepEqual(observedBirthday(2024, 2, 29), { month: 2, day: 29 });
 assert.deepEqual(observedBirthday(2026, 2, 29), { month: 3, day: 1 });
-assert.equal(profileNeedsAgeGate(undefined), true);
-assert.equal(profileNeedsAgeGate({ ageEligibility: "unassessed" }), true);
-assert.equal(profileNeedsAgeGate({ ageEligibility: "ineligible" }), true);
+assert.equal(profileNeedsAgeGate(undefined), false);
+assert.equal(profileNeedsAgeGate({ ageEligibility: "unassessed" }), false);
+assert.equal(profileNeedsAgeGate({ ageEligibility: "ineligible" }), false);
 assert.equal(profileNeedsAgeGate({ ageEligibility: "eligible" }), false);
+assert.equal(profileNeedsAgeGate({ ageEligibility: null, demographicAgeRange: null }), false);
 
 const stored = normaliseUserProfile("uid-1", {
   uid: "uid-1",

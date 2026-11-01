@@ -11,12 +11,15 @@ interface TelemetryConsentModalProps {
   visible: boolean;
   onAllow: () => void;
   onDecline: () => void;
+  /** Honest outcome after a choice. Absent while the question is still unanswered. */
+  statusMessage?: string | null;
 }
 
 export function TelemetryConsentModal({
   visible,
   onAllow,
   onDecline,
+  statusMessage,
 }: TelemetryConsentModalProps) {
   const [fontsLoaded] = useFonts({
     Barlow_300Light,
@@ -38,6 +41,7 @@ export function TelemetryConsentModal({
             personal data, business records, financial information, or identifiable details are
             ever included. You can change this anytime in Settings.
           </Text>
+          {statusMessage ? <Text style={styles.status}>{statusMessage}</Text> : null}
           <Pressable
             accessibilityRole="button"
             onPress={onAllow}
@@ -92,6 +96,14 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "300",
     lineHeight: 21,
+    marginBottom: 22,
+  },
+  status: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "600",
+    lineHeight: 20,
+    marginTop: -10,
     marginBottom: 22,
   },
   primary: {

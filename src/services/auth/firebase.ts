@@ -38,15 +38,11 @@ import {
 import {
   buildClientProfileFirestoreWrite,
   findRejectedProductionPatchKeys,
+  isConsentOnlyProfilePatch,
   stripServerOwnedProfilePatchKeys,
 } from "./clientProfilePatchPayload";
 import { profileDocumentMergeFields } from "./profileFirestorePayload";
 import { openBusinessCloud, protectBusinessCloud } from "@/services/privacy/businessCloudSeal";
-import {
-  finalizeDeletionIfDue,
-  isActiveAccount,
-  isPendingDeletionAccount,
-} from "@/services/accountDeletion";
 import { recordRetiredPhone } from "@/services/accountDeletion/retiredIdentity";
 import { throwPendingDeletionLoginBlocked } from "@/services/auth/identityErrors";
 import {
@@ -105,6 +101,9 @@ async function resolveOrCreateUser(
   authUid: string,
   phoneE164: PhoneE164
 ): Promise<AuthResult> {
+  const { finalizeDeletionIfDue, isActiveAccount, isPendingDeletionAccount } = await import(
+    "@/services/accountDeletion"
+  );
   const phone = normalizePhoneE164(phoneE164);
   const existingByPhone = await loadProfileByPhoneFirestore(phone);
   if (existingByPhone) {
@@ -350,6 +349,125 @@ async function swapPhoneNumber(
   return profile;
 }
 
+export type ProfileUpdateIo = {
+  production: boolean;
+  readAuthUid: () => string | null;
+  getUserDoc: (uid: string) => Promise<{ exists: boolean; data: Record<string, unknown> | null }>;
+  mergeUserDoc: (uid: string, data: Record<string, unknown>) => Promise<void>;
+  openBusinessCloud: typeof openBusinessCloud;
+  protectBusinessCloud: typeof protectBusinessCloud;
+  requireJsAuthSession?: () => Promise<void>;
+};
+
+function refuseIfAuthUidChanged(requestedUid: string, currentUid: string | null): void {
+  if (currentUid !== requestedUid) {
+    throw new AppError("permission_denied", "session_changed");
+  }
+}
+
+function consentOnlyMerge(write: Record<string, unknown> | null): Record<string, unknown> | null {
+  if (!write || !("legalConsents" in write)) return null;
+  return {
+    legalConsents: write.legalConsents,
+    updatedAt: write.updatedAt,
+  };
+}
+
+/**
+ * Production profile write. Consent-only patches merge `legalConsents` and
+ * do not open or seal. Any other patch still seals in production.
+ */
+export async function updateProfileWithIo(
+  uid: string,
+  patch: ProfilePatch,
+  io: ProfileUpdateIo
+): Promise<UserProfile> {
+  if (io.production) {
+    await io.requireJsAuthSession?.();
+    const rejected = findRejectedProductionPatchKeys(patch);
+    if (rejected.length > 0) {
+      throw new AppError(
+        "permission_denied",
+        "This profile field must be updated through the server identity service."
+      );
+    }
+  }
+
+  const snap = await io.getUserDoc(uid);
+  if (!snap.exists || !snap.data) throw new AppError("not_found", "User profile not found.");
+  const rawProfile = snap.data;
+  const consentOnly = isConsentOnlyProfilePatch(patch);
+
+  let existing: ReturnType<typeof normaliseUserProfile>;
+  if (consentOnly) {
+    // Demographic age is not eligibility. This consent-only merge does not
+    // set ageEligibility and does not call openBusinessCloud or
+    // protectBusinessCloud. Sealed business writes still require the existing
+    // eligibility policy: sealOwnerContent rejects unless
+    // ageEligibility === "eligible" (age_not_admitted).
+    existing = normaliseUserProfile(uid, rawProfile);
+  } else {
+    existing = (await io.openBusinessCloud(
+      "users",
+      normaliseUserProfile(uid, rawProfile) as unknown as Record<string, unknown>,
+      rawProfile
+    )) as unknown as ReturnType<typeof normaliseUserProfile>;
+  }
+
+  const safePatch = io.production
+    ? stripServerOwnedProfilePatchKeys(patch, { production: true })
+    : patch;
+  const linkedPatch =
+    consentOnly || io.production
+      ? safePatch
+      : await enrichPatchWithEmailLink(
+          existing,
+          safePatch,
+          lookupFirestoreEmailIndex,
+          commitFirestoreEmailIndexOps
+        );
+  const next = applyProfilePatch(existing, linkedPatch);
+
+  // Re-read after the document read (and seal open) so a sign-out in that
+  // gap cannot seal or publish.
+  refuseIfAuthUidChanged(uid, io.readAuthUid());
+
+  if (io.production) {
+    const write = buildClientProfileFirestoreWrite(existing, next, { production: true });
+    if (consentOnly) {
+      const consentWrite = consentOnlyMerge(write);
+      if (consentWrite) {
+        refuseIfAuthUidChanged(uid, io.readAuthUid());
+        await io.mergeUserDoc(uid, consentWrite);
+      }
+    } else if (write) {
+      const sealed = await io.protectBusinessCloud({
+        collection: "users",
+        userId: uid,
+        recordId: uid,
+        revision: Number(next.updatedAt),
+        plain: write,
+        sensitiveSource: next as unknown as Record<string, unknown>,
+        existingRaw: rawProfile,
+      });
+      refuseIfAuthUidChanged(uid, io.readAuthUid());
+      await io.mergeUserDoc(uid, sealed);
+    }
+  } else if (consentOnly) {
+    const consentWrite = consentOnlyMerge(
+      buildClientProfileFirestoreWrite(existing, next, { production: false })
+    );
+    if (consentWrite) {
+      refuseIfAuthUidChanged(uid, io.readAuthUid());
+      await io.mergeUserDoc(uid, consentWrite);
+    }
+  } else {
+    refuseIfAuthUidChanged(uid, io.readAuthUid());
+    await io.mergeUserDoc(uid, profileDocumentMergeFields(next));
+  }
+  return next;
+}
+
 export const firebaseAuthService: AuthService = {
   async startOtp(phoneE164: PhoneE164): Promise<OtpChallenge> {
     return startNativePhoneOtp(phoneE164);
@@ -458,61 +576,36 @@ export const firebaseAuthService: AuthService = {
 
   async updateProfile(uid: string, patch: ProfilePatch): Promise<UserProfile> {
     const production = useIdentityCallables();
-    if (production) {
-      const { requireJsAuthSessionForFirestore } = await import("./jsAuthBridge");
-      await requireJsAuthSessionForFirestore("update_profile");
-      const rejected = findRejectedProductionPatchKeys(patch);
-      if (rejected.length > 0) {
-        throw new AppError(
-          "permission_denied",
-          "This profile field must be updated through the server identity service."
-        );
-      }
-    }
     const db = getFirebaseDb();
-    const ref = doc(db, USERS_COLLECTION, uid);
     try {
-      const snap = await getDoc(ref);
-      if (!snap.exists()) throw new AppError("not_found", "User profile not found.");
-      const rawProfile = snap.data() as Record<string, unknown>;
-      const existing = await openBusinessCloud(
-        "users",
-        normaliseUserProfile(uid, rawProfile) as unknown as Record<string, unknown>,
-        rawProfile
-      ) as unknown as ReturnType<typeof normaliseUserProfile>;
-
-      const safePatch = production
-        ? stripServerOwnedProfilePatchKeys(patch, { production: true })
-        : patch;
-
-      const linkedPatch = production
-        ? safePatch
-        : await enrichPatchWithEmailLink(
-            existing,
-            safePatch,
-            lookupFirestoreEmailIndex,
-            commitFirestoreEmailIndexOps
-          );
-
-      const next = applyProfilePatch(existing, linkedPatch);
-      if (production) {
-        const write = buildClientProfileFirestoreWrite(existing, next, { production: true });
-        if (write) {
-          const sealed = await protectBusinessCloud({
-            collection: "users",
-            userId: uid,
-            recordId: uid,
-            revision: Number(next.updatedAt),
-            plain: write,
-            sensitiveSource: next as unknown as Record<string, unknown>,
-            existingRaw: rawProfile,
-          });
-          await setDoc(ref, sealed, { merge: true });
-        }
-      } else {
-        await setDoc(ref, profileDocumentMergeFields(next), { merge: true });
-      }
-      return next;
+      return await updateProfileWithIo(uid, patch, {
+        production,
+        readAuthUid: () => {
+          try {
+            return getFirebaseAuth().currentUser?.uid ?? null;
+          } catch {
+            return null;
+          }
+        },
+        requireJsAuthSession: production
+          ? async () => {
+              const { requireJsAuthSessionForFirestore } = await import("./jsAuthBridge");
+              await requireJsAuthSessionForFirestore("update_profile");
+            }
+          : undefined,
+        getUserDoc: async (profileUid) => {
+          const snap = await getDoc(doc(db, USERS_COLLECTION, profileUid));
+          return {
+            exists: snap.exists(),
+            data: snap.exists() ? (snap.data() as Record<string, unknown>) : null,
+          };
+        },
+        mergeUserDoc: async (profileUid, data) => {
+          await setDoc(doc(db, USERS_COLLECTION, profileUid), data, { merge: true });
+        },
+        openBusinessCloud,
+        protectBusinessCloud,
+      });
     } catch (e) {
       if (e instanceof AppError) throw e;
       const code =
