@@ -102,9 +102,72 @@ export function assessSelfDeclaredDob(input: {
   };
 }
 
-/** Missing and ineligible profiles stay on the gate. Eligible profiles pass. */
+/** Optional profile-details demographic band. This is not a date of birth and not eligibility. */
+export const DEMOGRAPHIC_AGE_RANGES = [
+  "under_18",
+  "18_24",
+  "25_34",
+  "35_44",
+  "45_54",
+  "55_plus",
+  "prefer_not_to_say",
+] as const;
+
+export type DemographicAgeRange = (typeof DEMOGRAPHIC_AGE_RANGES)[number];
+
+export const DEMOGRAPHIC_AGE_RANGE_LABELS: Record<DemographicAgeRange, string> = {
+  under_18: "Under 18",
+  "18_24": "18–24",
+  "25_34": "25–34",
+  "35_44": "35–44",
+  "45_54": "45–54",
+  "55_plus": "55+",
+  prefer_not_to_say: "Prefer not to say",
+};
+
+export function parseDemographicAgeRange(value: unknown): DemographicAgeRange | null {
+  if (typeof value !== "string") return null;
+  return (DEMOGRAPHIC_AGE_RANGES as readonly string[]).includes(value)
+    ? (value as DemographicAgeRange)
+    : null;
+}
+
+export function demographicAgeStorageKey(uid: string): string {
+  return `vyd_demographic_age_range_v1:${uid}`;
+}
+
+export type SignedInOnboardingContinuation = "email" | "profile" | "dashboard";
+
+/**
+ * Next signed-in step after phone verification. Demographic age and sealed
+ * `ageEligibility` are not routes. Missing age continues; it does not open
+ * the legacy date-of-birth screen.
+ */
+export function resolveSignedInOnboardingContinuation(input: {
+  hasVerifiedEmail: boolean;
+  profileCompletedAt?: number | null;
+  ageEligibility?: string | null;
+  demographicAgeRange?: string | null;
+}): SignedInOnboardingContinuation {
+  void input.ageEligibility;
+  void input.demographicAgeRange;
+  if (input.hasVerifiedEmail && input.profileCompletedAt) return "dashboard";
+  if (input.hasVerifiedEmail) return "profile";
+  return "email";
+}
+
+/**
+ * Launch check. Demographic age is not an authentication gate, and a missing
+ * or unassessed sealed eligibility must not redirect to age declaration.
+ * Business authorization is based on the active account, ownership, session,
+ * restore fence, and deletion state; demographic age is not admission.
+ */
 export function profileNeedsAgeGate(
-  profile: { ageEligibility?: string | null } | null | undefined
+  profile: {
+    ageEligibility?: string | null;
+    demographicAgeRange?: string | null;
+  } | null | undefined
 ): boolean {
-  return profile?.ageEligibility !== "eligible";
+  void profile;
+  return false;
 }

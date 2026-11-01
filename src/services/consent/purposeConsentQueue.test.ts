@@ -95,9 +95,13 @@ async function main() {
   watchedHealth.current?.('listening');
   await watched.choose('watched', true);
   assert.equal(enabled, false, 'subscription acceptance is not server consent');
+  assert.equal(watched.state('watched')?.pending?.decision, 'grant');
+  assert.equal(watched.state('watched')?.localGrant, true);
+  assert.equal(watched.state('watched')?.hasChoice, true);
   watchedHealth.current?.('server');
-  await watched.choose('watched', true);
-  assert.equal(enabled, true);
+  for (let i = 0; i < 30 && !enabled; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(enabled, true, 'a preserved allow flushes once the watcher reaches the server');
+  assert.equal(watched.state('watched')?.pending ?? null, null);
   watchedListener.current?.({ ok: true, revision: 8, decision: 'withdraw', receivedAt: 8 });
   for (let i = 0; i < 8; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(enabled, false, 'another device withdrawal stops this device');
@@ -122,6 +126,7 @@ async function main() {
   watchedHealth.current?.('failed');
   assert.equal(enabled, false);
   assert.equal(watched.state('watched')?.sync, 'listener_unavailable');
+  assert.equal(watched.state('watched')?.localGrant, true, 'listener failure does not decline an allow');
 
   const grantEntered = deferred<void>();
   const grantReceipt = deferred<PurposeServerState>();
@@ -144,12 +149,15 @@ async function main() {
   await pendingGrant;
   assert.equal(enabled, false, 'a grant receipt after listener failure does not re-enable diagnostics');
   assert.equal(failing.state('failed-owner')?.sync, 'listener_unavailable');
+  assert.equal(failing.state('failed-owner')?.pending?.decision, 'grant');
+  assert.equal(failing.state('failed-owner')?.localGrant, true);
   failedHealth?.('listening');
   await failing.reconcile('failed-owner');
-  assert.equal(enabled, false, 'reconnect does not restore a grant that the failure invalidated');
+  assert.equal(enabled, false, 'listening is not a server snapshot');
+  assert.equal(failing.state('failed-owner')?.pending?.decision, 'grant');
   failedHealth?.('server');
-  await failing.choose('failed-owner', true);
-  assert.equal(enabled, true, 'a new local choice after a healthy watcher can enable');
+  for (let i = 0; i < 30 && !enabled; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(enabled, true, 'a preserved allow reconciles when the watcher reaches the server');
   assert.equal(withdrawalFromPurposeSnapshot({ decision: 'withdraw', revision: 4, receivedAt: 4 }, true), null);
   assert.deepEqual(withdrawalFromPurposeSnapshot({ decision: 'withdraw', revision: 4, receivedAt: 4 }, false), {
     ok: true, revision: 4, decision: 'withdraw', receivedAt: 4,
@@ -179,7 +187,9 @@ async function main() {
   assert.equal(enabled, false);
   assert.equal(coldGrants, 0, 'a grant is not sent when the watcher fails before any cached state');
   assert.equal(cold.state('cold')?.sync, 'listener_unavailable');
-  assert.equal(cold.state('cold')?.localGrant, false);
+  assert.equal(cold.state('cold')?.localGrant, true);
+  assert.equal(cold.state('cold')?.pending?.decision, 'grant');
+  assert.equal(cold.state('cold')?.hasChoice, true);
   await cold.choose('cold', false);
   assert.equal(coldWithdrawals, 1, 'a withdrawal is still sent while the watcher is failed');
   assert.equal(enabled, false);
@@ -231,7 +241,7 @@ async function main() {
   await cached.reconcile('cached');
   assert.equal(enabled, false, 'a cached grant stays off until a server snapshot is known');
   assert.equal(cachedSends, 0);
-  assert.equal(cached.state('cached')?.localGrant, false);
+  assert.equal(cached.state('cached')?.localGrant, true);
   console.log('purposeConsentQueue: ordering, offline, storage, replay and session tests passed');
 }
 main().catch((e) => { console.error(e); process.exitCode = 1; });

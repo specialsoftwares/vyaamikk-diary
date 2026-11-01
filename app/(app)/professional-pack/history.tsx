@@ -1,9 +1,19 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 
 import { SwipeToDeleteRow } from "@/components/records/SwipeToDeleteRow";
-import { EmptyState, Header, Screen, SmartHeadline, TextField, LocaleUiText } from "@/components/ui";
+import {
+  EmptyState,
+  Header,
+  Screen,
+  SkeletonDraftRow,
+  SkeletonList,
+  SkeletonLoadingPanel,
+  SmartHeadline,
+  TextField,
+  LocaleUiText,
+} from "@/components/ui";
 import { useRecordDelete } from "@/hooks/useRecordDelete";
 import type { ProfessionalServicePack } from "@/domain/professionalPack";
 import { useAuth } from "@/state/auth";
@@ -24,7 +34,16 @@ export default function ProfessionalPackHistoryScreen() {
   const [packs, setPacks] = useState<ProfessionalServicePack[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
-  const { requestDelete, isDeleting } = useRecordDelete(user?.uid ?? null);
+  const hasLoadedOnce = useRef(false);
+  const userId = user?.uid ?? null;
+  const ownerRef = useRef(userId);
+  if (ownerRef.current !== userId) {
+    ownerRef.current = userId;
+    hasLoadedOnce.current = false;
+    if (packs.length > 0) setPacks([]);
+    if (userId && !loading) setLoading(true);
+  }
+  const { requestDelete, isDeleting } = useRecordDelete(userId);
 
   const styles = useThemedStyles((c) =>
     StyleSheet.create({
@@ -42,18 +61,20 @@ export default function ProfessionalPackHistoryScreen() {
   );
 
   const load = useCallback(async () => {
-    if (!user) return;
-    setLoading(true);
+    if (!userId) return;
+    if (!hasLoadedOnce.current) setLoading(true);
     try {
-      const list = await getProfessionalPackRepository().list(user.uid, {
+      const list = await getProfessionalPackRepository().list(userId, {
         search,
         limit: 200,
       });
+      if (ownerRef.current !== userId) return;
       setPacks(list);
+      hasLoadedOnce.current = true;
     } finally {
-      setLoading(false);
+      if (ownerRef.current === userId) setLoading(false);
     }
-  }, [user, search]);
+  }, [userId, search]);
 
   useFocusEffect(
     useCallback(() => {
@@ -73,19 +94,24 @@ export default function ProfessionalPackHistoryScreen() {
           onChangeText={setSearch}
         />
       </View>
+      {loading && packs.length === 0 ? (
+        <View style={{ paddingHorizontal: spacing.lg }}>
+          <SkeletonLoadingPanel loading slowMessage={t("skeleton.stillLoading")}>
+            <SkeletonList count={6} Item={SkeletonDraftRow} gap={0} />
+          </SkeletonLoadingPanel>
+        </View>
+      ) : (
       <FlatList
         data={packs}
         keyExtractor={(p) => p.id}
         contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.xxxl }}
         ListEmptyComponent={
-          loading ? null : (
-            <EmptyState
-              title={t("proPack.historyEmptyTitle")}
-              message={t("proPack.historyEmptyMessage")}
-              actionLabel={t("proPack.title")}
-              onAction={() => router.push("/(app)/professional-pack")}
-            />
-          )
+          <EmptyState
+            title={t("proPack.historyEmptyTitle")}
+            message={t("proPack.historyEmptyMessage")}
+            actionLabel={t("proPack.title")}
+            onAction={() => router.push("/(app)/professional-pack")}
+          />
         }
         renderItem={({ item, index }) => {
           const req = {
@@ -132,6 +158,7 @@ export default function ProfessionalPackHistoryScreen() {
           );
         }}
       />
+      )}
     </Screen>
   );
 }

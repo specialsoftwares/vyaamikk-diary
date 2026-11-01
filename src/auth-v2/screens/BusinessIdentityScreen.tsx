@@ -1,3 +1,4 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -25,6 +26,13 @@ import {
 } from "@/auth-v2/onboardingJourney";
 import { onboardingMark, onboardingMeasure } from "@/auth-v2/onboardingPerfProbe";
 import { useAuthV2Theme } from "@/auth-v2/hooks/useAuthV2Theme";
+import {
+  DEMOGRAPHIC_AGE_RANGES,
+  DEMOGRAPHIC_AGE_RANGE_LABELS,
+  demographicAgeStorageKey,
+  parseDemographicAgeRange,
+  type DemographicAgeRange,
+} from "@/domain/ageEligibility";
 import { isOnboardingIdentityLocked } from "@/domain/profileUpdatePolicy";
 import { Banner } from "@/components/ui";
 import { userFacingMessage } from "@/domain/errors";
@@ -99,6 +107,7 @@ export function BusinessIdentityScreen({
   const mediaBusy = false;
   const [pinUi, setPinUi] = useState<PinLookupUiState>({ status: "idle" });
   const [identityPhase, setIdentityPhase] = useState<IdentityPhase>("details");
+  const [ageRange, setAgeRange] = useState<DemographicAgeRange | null>(null);
   const [ready, setReady] = useState(false);
 
   const draftRef = useRef<OnboardingProfileDraftV2 | null>(null);
@@ -149,7 +158,12 @@ export function BusinessIdentityScreen({
       ) {
         loaded = { ...loaded, businessName: user.businessName.trim() };
       }
+      const storedAge = parseDemographicAgeRange(
+        await AsyncStorage.getItem(demographicAgeStorageKey(user.uid))
+      );
+      if (cancelled) return;
       syncDraft(loaded);
+      setAgeRange(storedAge);
       if (loaded.confirmedLocation && loaded.confirmedLocation.pinCode === loaded.pinCode) {
         setPinUi({ status: "confirmed", location: loaded.confirmedLocation });
       } else if (loaded.pinCode.length === 6) {
@@ -653,6 +667,48 @@ export function BusinessIdentityScreen({
                 Enter a valid 15-character GSTIN, or leave blank.
               </Text>
             ) : null}
+            <View style={styles.sectionGap}>
+              <Text style={[styles.sectionLabel, { color: tokens.body }]}>
+                Age range (optional)
+              </Text>
+              <Text style={[styles.helper, { color: tokens.muted }]}>
+                Used only as a demographic band. Prefer not to say is fine, and skipping this does not block your diary.
+              </Text>
+              <View style={styles.ageRangeWrap}>
+                {DEMOGRAPHIC_AGE_RANGES.map((range) => {
+                  const selected = ageRange === range;
+                  return (
+                    <Pressable
+                      key={range}
+                      onPress={() => {
+                        setAgeRange(range);
+                        if (!user) return;
+                        void AsyncStorage.setItem(demographicAgeStorageKey(user.uid), range);
+                      }}
+                      style={[
+                        styles.ageChip,
+                        {
+                          backgroundColor: selected ? tokens.ctaActiveBg : tokens.cardBg,
+                          borderColor: tokens.cardBorder,
+                        },
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected }}
+                      accessibilityLabel={DEMOGRAPHIC_AGE_RANGE_LABELS[range]}
+                    >
+                      <Text
+                        style={{
+                          color: selected ? tokens.ctaActiveText : tokens.body,
+                          ...typography.caption,
+                        }}
+                      >
+                        {DEMOGRAPHIC_AGE_RANGE_LABELS[range]}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
           </>
         ) : (
           <>
@@ -804,6 +860,13 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.18)",
   },
   localityList: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs },
+  ageRangeWrap: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs },
+  ageChip: {
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
   localityChip: {
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,

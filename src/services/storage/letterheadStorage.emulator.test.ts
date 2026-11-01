@@ -54,7 +54,7 @@ async function main() {
       await setDoc(doc(ctx.firestore(), "users", "alice"), {
         uid: "alice",
         status: "active",
-        ageEligibility: "eligible",
+        ageEligibility: "unassessed", // Upload follows onboarding without an age gate.
       });
     });
     const alice = testEnv.authenticatedContext("alice").storage();

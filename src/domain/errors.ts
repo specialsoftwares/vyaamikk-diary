@@ -2,6 +2,25 @@
  * Typed errors so screens can branch on cause without parsing English strings.
  */
 
+import {
+  isUnsafePublicText,
+  PUBLIC_ERROR_COPY,
+  publicMessage,
+} from "./publicErrorCatalogue";
+
+export {
+  PUBLIC_ERROR_CATALOGUE,
+  PUBLIC_ERROR_COPY,
+  PUBLIC_ERROR_MESSAGE_IDS,
+  classifyPublicError,
+  isUnsafePublicText,
+  publicMessage,
+  publicMessageId,
+  type PublicErrorCode,
+  type PublicErrorEntry,
+  type PublicErrorMessageId,
+} from "./publicErrorCatalogue";
+
 export type AppErrorCode =
   | "network"
   | "invalid_phone"
@@ -23,6 +42,7 @@ export type AppErrorCode =
   | "offline_read_only"
   | "quota_exhausted"
   | "quota_state_invalid"
+  | "age_not_admitted"
   | "unknown";
 
 export class AppError extends Error {
@@ -50,6 +70,18 @@ export function toAppError(e: unknown, fallback: AppErrorCode = "unknown"): AppE
   return new AppError(fallback, "Something went wrong.", e);
 }
 
+/**
+ * Keep an app-authored sentence. Backend text, paths, and internal codes
+ * are replaced with catalogue copy and are never shown.
+ */
+function shown(error: AppError, emptyFallback: string | null): string {
+  const raw = error.message;
+  const value = raw.trim();
+  if (!value) return emptyFallback === null ? raw : emptyFallback;
+  if (isUnsafePublicText(value) || /^[a-z0-9_]+$/.test(value)) return publicMessage(error);
+  return raw;
+}
+
 export function userFacingMessage(e: unknown): string {
   if (e instanceof AppError) {
     switch (e.code) {
@@ -58,13 +90,13 @@ export function userFacingMessage(e: unknown): string {
       case "invalid_phone":
         return "Please enter a valid 10-digit mobile number.";
       case "invalid_otp":
-        return e.message || "Incorrect OTP. Please try again.";
+        return shown(e, "Incorrect OTP. Please try again.");
       case "otp_expired":
-        return e.message || "OTP expired. Please request a new code.";
+        return shown(e, "OTP expired. Please request a new code.");
       case "otp_send_failed":
-        return e.message || "Could not send the verification code. Try again.";
+        return shown(e, "Could not send the verification code. Try again.");
       case "auth_failed":
-        return e.message || "Sign-in failed. Please try again.";
+        return shown(e, "Sign-in failed. Please try again.");
       case "too_many_attempts":
         return "Too many attempts. Please wait a few minutes and try again.";
       case "auth_not_configured":
@@ -72,35 +104,39 @@ export function userFacingMessage(e: unknown): string {
       case "session_expired":
         return "Your session expired. Please log in again.";
       case "not_found":
-        return e.message || "We couldn't find that entry.";
+        return shown(e, "We couldn't find that entry.");
       case "permission_denied":
-        return e.message || "You don't have permission to perform this action.";
+        return shown(e, "You don't have permission to perform this action.");
       case "account_pending_deletion":
-        return e.message;
+        return shown(e, null);
       case "email_already_linked":
       case "email_pending_deletion":
-        return e.message;
+        return shown(e, null);
       case "email_otp_cooldown":
-        return e.message || "Resend is not available yet.";
+        return shown(e, "Resend is not available yet.");
       case "save_failed":
         return "Couldn't save right now. Please try again.";
       case "delete_failed":
         return "Couldn't delete right now. Please try again.";
       case "offline_read_only":
-        return (
-          e.message ||
+        return shown(
+          e,
           "You can view existing records, but creating, editing, deleting, PDF generation, sharing, and sync are unavailable until you reconnect and this device is re-validated."
         );
       case "quota_exhausted":
-        return (
-          e.message || "Monthly record limit reached. This save was not completed."
-        );
+        return shown(e, "Monthly record limit reached. This save was not completed.");
       case "quota_state_invalid":
-        return e.message || "Couldn't save right now. Please try again.";
+        return shown(e, "Couldn't save right now. Please try again.");
+      case "age_not_admitted":
+        return PUBLIC_ERROR_COPY.age_not_admitted;
       default:
-        return e.message || "Something went wrong.";
+        return shown(e, "Something went wrong.");
     }
   }
-  if (e instanceof Error) return e.message;
+  if (e instanceof Error) {
+    const value = e.message.trim();
+    if (!value || isUnsafePublicText(value)) return publicMessage(e);
+    return e.message;
+  }
   return "Something went wrong.";
 }

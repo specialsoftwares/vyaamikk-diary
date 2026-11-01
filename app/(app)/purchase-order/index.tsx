@@ -19,8 +19,11 @@ import { Banner,
   ErrorState,
   Header,
   LastRefreshedHint,
-  Loader,
-  Screen, LocaleUiText } from "@/components/ui";
+  Screen,
+  SkeletonDashboardPreview,
+  SkeletonList,
+  SkeletonLoadingPanel,
+  LocaleUiText } from "@/components/ui";
 import { useAuth } from "@/state/auth";
 import { useAppRefresh } from "@/hooks/useAppRefresh";
 import { useStuckBusyRecovery } from "@/hooks/useStuckBusyRecovery";
@@ -56,6 +59,15 @@ export default function PurchaseOrderListScreen() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const hasLoadedOnce = useRef(false);
+  const userId = user?.uid ?? null;
+  const ownerRef = useRef(userId);
+  if (ownerRef.current !== userId) {
+    ownerRef.current = userId;
+    hasLoadedOnce.current = false;
+    if (orders.length > 0) setOrders([]);
+    if (error) setError(null);
+    if (userId && !loading) setLoading(true);
+  }
   const feedback = useAppFeedback();
   // Recover `busyId` if the iOS share-sheet promise never settles.
   const shareRecovery = useStuckBusyRecovery(
@@ -90,16 +102,19 @@ export default function PurchaseOrderListScreen() {
   const load = useCallback(
     async (mode: "mount" | "refresh" = "mount") => {
       if (!user) return;
+      const ownerId = user.uid;
       if (!hasLoadedOnce.current) setLoading(true);
       setError(null);
       try {
-        const list = await getPurchaseOrderRepository().list(user.uid);
+        const list = await getPurchaseOrderRepository().list(ownerId);
+        if (ownerRef.current !== ownerId) return;
         setOrders(list);
         hasLoadedOnce.current = true;
       } catch (e) {
+        if (ownerRef.current !== ownerId) return;
         setError(userFacingMessage(e));
       } finally {
-        setLoading(false);
+        if (ownerRef.current === ownerId) setLoading(false);
       }
     },
     [user]
@@ -320,9 +335,9 @@ export default function PurchaseOrderListScreen() {
           showBack
           onBackPress={goBack}
         />
-        {actionError ? (
+        {actionError || (error && orders.length > 0) ? (
           <View style={styles.banner}>
-            <Banner tone="danger" message={actionError} />
+            <Banner tone="danger" message={actionError || error || ""} />
           </View>
         ) : null}
         <Button label={t("purchaseOrder.newAction")} onPress={goNew} style={styles.newBtn} />
@@ -330,8 +345,12 @@ export default function PurchaseOrderListScreen() {
       </View>
 
       {loading && orders.length === 0 ? (
-        <Loader fullscreen message={t("common.loading")} />
-      ) : error ? (
+        <View style={styles.listContent}>
+          <SkeletonLoadingPanel loading slowMessage={t("skeleton.stillLoading")}>
+            <SkeletonList count={6} Item={SkeletonDashboardPreview} />
+          </SkeletonLoadingPanel>
+        </View>
+      ) : error && orders.length === 0 ? (
         <ErrorState message={error} onRetry={() => void load("mount")} />
       ) : (
         <FlatList

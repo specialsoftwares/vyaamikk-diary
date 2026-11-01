@@ -2,11 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { useFocusEffect } from "expo-router";
 
-import { chooseCrashDiagnostics, currentPurposeConsentState, subscribePurposeConsent, reconcilePurposeConsent } from "@/services/consent/purposeConsent";
-import {
-  currentDiagnosticsPreference,
-  type DiagnosticsPreference,
-} from "@/services/telemetry/diagnosticsPreference";
+import { chooseCrashDiagnostics, currentPurposeConsentState, presentCrashConsent, subscribePurposeConsent, reconcilePurposeConsent } from "@/services/consent/purposeConsent";
 import { useAuth } from "@/state/auth";
 import { useT } from "@/i18n";
 import { spacing, typography, useThemedStyles } from "@/theme";
@@ -20,9 +16,7 @@ export function CrashReportsPreferenceRow() {
   const [receipt, setReceipt] = useState(currentPurposeConsentState(user?.uid ?? null));
   useEffect(() => subscribePurposeConsent(() => {
     setReceipt(currentPurposeConsentState(user?.uid ?? null));
-    setPref(currentDiagnosticsPreference());
   }), [user?.uid]);
-  const [pref, setPref] = useState<DiagnosticsPreference>(currentDiagnosticsPreference());
   const styles = useThemedStyles((colors) =>
     StyleSheet.create({
       inset: {
@@ -41,7 +35,6 @@ export function CrashReportsPreferenceRow() {
   const reload = useCallback(async () => {
     if (user) await reconcilePurposeConsent(user.uid);
     setReceipt(currentPurposeConsentState(user?.uid ?? null));
-    setPref(currentDiagnosticsPreference());
   }, [user?.uid]);
 
   useFocusEffect(
@@ -53,11 +46,13 @@ export function CrashReportsPreferenceRow() {
   const onPress = useCallback(async () => {
     if (!user) return;
     const next = !receipt?.localGrant;
-    setPref(await chooseCrashDiagnostics(next, user.uid));
-  }, [receipt?.localGrant, user?.uid]);
+    await chooseCrashDiagnostics(next, user.uid);
+    setReceipt(currentPurposeConsentState(user.uid));
+  }, [receipt?.localGrant, user]);
 
-  const enabled = pref.desired === "on" && pref.persisted;
-  const value = enabled ? t("settings.crashReportsOn") : t("settings.crashReportsOff");
+  const presentation = presentCrashConsent(receipt);
+  const value = t(presentation.valueKey);
+  const enabled = presentation.status === "on";
 
   return (
     <View style={styles.inset}>
@@ -65,19 +60,13 @@ export function CrashReportsPreferenceRow() {
         icon="bug-outline"
         label={t("settings.crashReportsTitle")}
         value={value}
-        valueTone={enabled ? "positive" : "muted"}
+        valueTone={enabled ? "positive" : presentation.status === "activation_failed" || presentation.status === "unavailable" ? "warning" : "muted"}
         onPress={() => void onPress()}
         accessibilityLabel={`${t("settings.crashReportsTitle")}, ${value}`}
       />
       <LocaleUiText style={styles.note}>{t("settings.crashReportsBody")}</LocaleUiText>
-      {receipt?.sync === "pending" || receipt?.sync === "unknown" ? (
-        <LocaleUiText style={styles.note}>{t("settings.crashReportsPending")}</LocaleUiText>
-      ) : null}
-      {receipt?.sync === "conflict" ? (
-        <LocaleUiText style={styles.note}>{t("settings.crashReportsConflict")}</LocaleUiText>
-      ) : null}
-      {pref.error || receipt?.sync === "storage_error" ? (
-        <LocaleUiText style={styles.note}>{t("settings.crashReportsSaveFailed")}</LocaleUiText>
+      {presentation.noteKey ? (
+        <LocaleUiText style={styles.note}>{t(presentation.noteKey)}</LocaleUiText>
       ) : null}
     </View>
   );
