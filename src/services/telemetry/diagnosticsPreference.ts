@@ -1,4 +1,4 @@
-import { clearUser, setCrashReportingEnabled, type CrashActivationResult } from "@/services/telemetry/crashReporter";
+import { clearUser, setCrashReportingEnabled, type UnsentReportState, type CrashStopOptions, type CrashActivationResult } from "@/services/telemetry/crashReporter";
 import { readTelemetryConsent, writeTelemetryConsent } from "@/services/telemetry/telemetryConsent";
 
 export type DiagnosticsPreference = Readonly<{
@@ -7,8 +7,8 @@ export type DiagnosticsPreference = Readonly<{
   nativeState: "off" | "on" | "next_launch" | "unavailable" | "error";
   revision: number;
   error: string | null;
-  /** Withdrawal can disable collection without a separate unsent-report delete API. */
-  unsentReports: "not_applicable" | "not_separately_deletable";
+  /** Native deletion requested is not a remote recall or deletion receipt. */
+  unsentReports: UnsentReportState;
 }>;
 
 let revision = 0;
@@ -64,9 +64,9 @@ export function loadDiagnosticsPreference(): Promise<DiagnosticsPreference> {
     latest = {
       desired: stored == null ? "unknown" : enabled ? "on" : "off",
       persisted: stored != null,
-      nativeState: "off",
+      nativeState: closed.ok ? "off" : nativeFailure(closed),
       revision: seen,
-      error: null,
+      error: closed.ok ? null : "activation_failed",
       unsentReports: closed.unsentReports,
     };
     return latest;
@@ -90,18 +90,20 @@ function nativeFailure(activation: CrashActivationResult): DiagnosticsPreference
  * and the native SDK accepts collection. A missing or rejected SDK stays off.
  * Native collection changes can take effect on the next launch.
  */
-export function applyDiagnosticsChoice(enabled: boolean): Promise<DiagnosticsPreference> {
+export function applyDiagnosticsChoice(
+  enabled: boolean, options: CrashStopOptions = { deleteUnsentReports: !enabled }
+): Promise<DiagnosticsPreference> {
   const rev = ++revision;
-  if (!enabled) void setCrashReportingEnabled(false);
+  if (!enabled) void setCrashReportingEnabled(false, options);
   return enqueue(async () => {
     try {
       await writeTelemetryConsent(enabled);
       if (rev !== revision) return latest;
-      const activation = await setCrashReportingEnabled(enabled);
+      const activation = await setCrashReportingEnabled(enabled, options);
       if (rev !== revision) return latest;
-      if (!activation.ok && enabled) {
+      if (!activation.ok) {
         latest = {
-          desired: "on",
+          desired: enabled ? "on" : "off",
           persisted: true,
           nativeState: nativeFailure(activation),
           revision: rev,
@@ -120,7 +122,7 @@ export function applyDiagnosticsChoice(enabled: boolean): Promise<DiagnosticsPre
       };
     } catch {
       if (rev !== revision) return latest;
-      const closed = await setCrashReportingEnabled(false);
+      const closed = await setCrashReportingEnabled(false, enabled ? {} : options);
       latest = {
         desired: enabled ? "on" : "off",
         persisted: false,

@@ -1,5 +1,4 @@
-import type { AccountDeletionResult } from "@/domain/accountDeletion";
-import type { AccountStatus } from "@/domain/accountDeletion";
+import type { AccountDeletionResult, AccountStatus } from "@/domain/accountDeletion";
 import type { ProfileChangeHistoryEntry } from "@/domain/profileUpdatePolicy";
 import type { ProfileSalutationId } from "@/domain/profileSalutation";
 import type { LegalConsentRecord } from "@/domain/legalConsent";
@@ -116,7 +115,7 @@ export interface AuthService {
    * completion marker). Identity (uid, UEID, phoneE164) is NOT mutable here.
    * Mobile change is support/admin-only — see `adminMobileChange.ts`.
    */
-  updateProfile(uid: string, patch: ProfilePatch): Promise<UserProfile>;
+  updateProfile(uid: string, patch: ProfilePatch, ownership?: import("./profileWriteOwnership").ProfileWriteOwnership): Promise<UserProfile>;
 
   /**
    * @internal Support/admin-only — not exposed in consumer app UI.

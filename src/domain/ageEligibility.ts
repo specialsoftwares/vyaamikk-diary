@@ -159,8 +159,8 @@ export function resolveSignedInOnboardingContinuation(input: {
 /**
  * Launch check. Demographic age is not an authentication gate, and a missing
  * or unassessed sealed eligibility must not redirect to age declaration.
- * Sealed business writes still require `ageEligibility === "eligible"`
- * (`age_not_admitted`) on the server.
+ * Business authorization is based on the active account, ownership, session,
+ * restore fence, and deletion state; demographic age is not admission.
  */
 export function profileNeedsAgeGate(
   profile: {

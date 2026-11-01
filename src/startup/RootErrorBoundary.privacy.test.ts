@@ -21,6 +21,7 @@ import {
   uncaughtRenderDiagnosticInput,
 } from "./uncaughtRenderReport";
 
+async function main(): Promise<void> {
 const EMAIL = "alice.reviewer@example.invalid";
 const DOC = "WIDGET-BATCH-Q7-LEDGER";
 
@@ -73,6 +74,7 @@ __setRuntimeSignalsForTests({
   const calls: { kind: string; payload: unknown }[] = [];
   __resetCrashReportingForTests();
   __setCrashlyticsClientForTests({
+    deleteUnsentReports: async () => {},
     setCrashlyticsCollectionEnabled: async () => {},
     log: (message) => calls.push({ kind: "log", payload: message }),
     recordError: (error) =>
@@ -89,7 +91,7 @@ __setRuntimeSignalsForTests({
   assert.equal(calls.length, 0, "disabled: no native log or recordError");
   assert.equal(original.message, frozen);
 
-  setCrashReportingEnabled(true);
+  await setCrashReportingEnabled(true);
   reportUncaughtRenderError(original);
   assert.equal(original.message, frozen, "original Error is not modified");
   assert.equal(original.stack?.includes("render failed"), true);
@@ -132,6 +134,7 @@ __setRuntimeSignalsForTests({
   const calls: { kind: string }[] = [];
   __resetCrashReportingForTests();
   __setCrashlyticsClientForTests({
+    deleteUnsentReports: async () => {},
     setCrashlyticsCollectionEnabled: async () => {},
     log: () => {
       calls.push({ kind: "log" });
@@ -141,7 +144,7 @@ __setRuntimeSignalsForTests({
     },
     setUserId: () => {},
   });
-  setCrashReportingEnabled(true);
+  await setCrashReportingEnabled(true);
   assert.doesNotThrow(() =>
     reportUncaughtRenderError(new Error(`sink ${EMAIL} ${DOC}`))
   );
@@ -155,3 +158,6 @@ __setRuntimeSignalsForTests({
 
 __setRuntimeSignalsForTests(null);
 console.log("RootErrorBoundary.privacy.test.ts: ok (EXECUTED_PRODUCTION_METHOD)");
+
+}
+main().catch((error) => { console.error(error); process.exitCode = 1; });

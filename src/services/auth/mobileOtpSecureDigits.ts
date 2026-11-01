@@ -8,6 +8,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Platform } from "react-native";
 
 import { MOBILE_OTP_TTL_MS } from "@/services/auth/mobileOtpConstants";
+import { createAuthChallengePersistence, type AuthChallengeIdentity } from "./authChallengePersistence";
 
 const KEY = "vyd_mobile_otp_digits_v1";
 const useSecure = Platform.OS === "ios" || Platform.OS === "android";
@@ -35,12 +36,14 @@ async function delRaw(): Promise<void> {
   if (useSecure) await SecureStore.deleteItemAsync(KEY);
   else await AsyncStorage.removeItem(KEY);
 }
+const persistence = createAuthChallengePersistence({ read: getRaw, write: setRaw, remove: delRaw });
 
 export async function saveMobileOtpDigitSnapshot(
-  snap: Omit<MobileOtpDigitSnapshot, "savedAt">
+  snap: Omit<MobileOtpDigitSnapshot, "savedAt">,
+  isCurrent: () => boolean = () => true
 ): Promise<void> {
   const payload: MobileOtpDigitSnapshot = { ...snap, savedAt: Date.now() };
-  await setRaw(JSON.stringify(payload));
+  await persistence.save(payload, isCurrent);
 }
 
 export async function loadMobileOtpDigitSnapshot(): Promise<MobileOtpDigitSnapshot | null> {
@@ -58,11 +61,11 @@ export async function loadMobileOtpDigitSnapshot(): Promise<MobileOtpDigitSnapsh
       return null;
     }
     if (parsed.expiresAt <= Date.now()) {
-      await clearMobileOtpDigitSnapshot();
+      await clearMobileOtpDigitSnapshot({ phoneE164: parsed.phoneE164, verificationId: parsed.verificationId });
       return null;
     }
     if (Date.now() - (parsed.savedAt ?? 0) > MOBILE_OTP_TTL_MS) {
-      await clearMobileOtpDigitSnapshot();
+      await clearMobileOtpDigitSnapshot({ phoneE164: parsed.phoneE164, verificationId: parsed.verificationId });
       return null;
     }
     return {
@@ -78,6 +81,9 @@ export async function loadMobileOtpDigitSnapshot(): Promise<MobileOtpDigitSnapsh
   }
 }
 
-export async function clearMobileOtpDigitSnapshot(): Promise<void> {
-  await delRaw();
+export async function clearMobileOtpDigitSnapshot(
+  expected?: AuthChallengeIdentity | null,
+  isCurrent: () => boolean = () => true
+): Promise<void> {
+  await persistence.clear(expected, isCurrent);
 }

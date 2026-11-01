@@ -16,7 +16,7 @@ import { useAuth } from "@/state/auth";
 import { useT } from "@/i18n";
 import { spacing, typography, useThemedStyles } from "@/theme";
 import { maskMobile } from "@/utils/phone";
-import { currentAuthMutationGeneration } from "@/services/auth/authSessionFence";
+import { captureProfileWriteOwnership, profileWriteStillOwned, readLiveProfileUid } from "@/services/auth/profileWriteOwnership";
 import {
   callCompleteAccountReactivation,
   callStartAccountReactivation,
@@ -144,23 +144,25 @@ export default function AccountPendingDeletionScreen() {
       setError(t("pendingDeletion.reactivateOffline"));
       return;
     }
-    const generation = currentAuthMutationGeneration();
+    const owner = captureProfileWriteOwnership(readLiveProfileUid() ?? "");
+    const isCurrent = () => profileWriteStillOwned(owner, readLiveProfileUid());
+    if (!isCurrent()) return;
     setBusy(true);
     setError(null);
     try {
       const result = await callStartAccountReactivation();
-      if (currentAuthMutationGeneration() !== generation) return;
+      if (!isCurrent()) return;
       setVerificationId(result.verificationId);
       setMaskedEmail(result.maskedEmail);
       setResendAvailableAt(result.resendAvailableAt);
       setEmailCode("");
       setStep("email_verify");
-      setTimeout(() => codeInputRef.current?.focus(), 280);
+      setTimeout(() => { if (isCurrent()) codeInputRef.current?.focus(); }, 280);
     } catch (e) {
-      if (currentAuthMutationGeneration() !== generation) return;
+      if (!isCurrent()) return;
       setError(reactivationMessage(e));
     } finally {
-      if (currentAuthMutationGeneration() === generation) setBusy(false);
+      if (isCurrent()) setBusy(false);
     }
   };
 
@@ -170,26 +172,28 @@ export default function AccountPendingDeletionScreen() {
       return;
     }
     if (!verificationId || emailCode.length !== EMAIL_CODE_LENGTH) return;
-    const generation = currentAuthMutationGeneration();
+    const owner = captureProfileWriteOwnership(readLiveProfileUid() ?? "");
+    const isCurrent = () => profileWriteStillOwned(owner, readLiveProfileUid());
+    if (!isCurrent()) return;
     const submitted = emailCode;
     setBusy(true);
     setError(null);
     try {
       const { profile } = await callCompleteAccountReactivation(verificationId, submitted);
-      if (currentAuthMutationGeneration() !== generation) return;
-      await finishReactivation(profile);
-      if (currentAuthMutationGeneration() !== generation) return;
+      if (!isCurrent()) return;
+      await finishReactivation(profile, owner);
+      if (!isCurrent()) return;
       setEmailCode("");
       Alert.alert(
         t("pendingDeletion.reactivateSuccessTitle"),
         t("pendingDeletion.reactivateSuccessBody"),
-        [{ text: t("common.ok"), onPress: () => router.replace("/") }]
+        [{ text: t("common.ok"), onPress: () => { if (isCurrent()) router.replace("/"); } }]
       );
     } catch (e) {
-      if (currentAuthMutationGeneration() !== generation) return;
+      if (!isCurrent()) return;
       setError(reactivationMessage(e));
     } finally {
-      if (currentAuthMutationGeneration() === generation) setBusy(false);
+      if (isCurrent()) setBusy(false);
     }
   };
 

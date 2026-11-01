@@ -137,11 +137,9 @@ async function main() {
     serializePendingConsentSave(PHONE, "newer-choice"),
   ]);
   assert.notEqual(older, newer);
-  const stale = Math.min(older, newer);
-  const current = Math.max(older, newer);
-  assert.equal(await acknowledgePendingConsentPersisted(stale), false);
+  assert.equal(await acknowledgePendingConsentPersisted(older), false);
   assert.ok(await loadPendingConsent());
-  assert.equal(await acknowledgePendingConsentPersisted(current), true);
+  assert.equal(await acknowledgePendingConsentPersisted(newer), true);
   assert.equal(await loadPendingConsent(), null);
 
   const profile = verifiedEmailUser();

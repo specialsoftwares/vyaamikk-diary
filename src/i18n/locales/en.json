@@ -1071,7 +1071,7 @@
     "supportItem": "Help",
     "supportSubtitle": "Contact support on the website",
     "crashReportsTitle": "Share crash reports",
-    "crashReportsBody": "Share technical crash reports to help fix reliability problems. A report can include the app version, a crash stack, and device details. It is not a copy of your diary. Reporting stays off until you allow it. Turning it off stops new reports immediately. A report already queued on this device may still be sent.",
+    "crashReportsBody": "Share technical crash reports to help fix reliability problems. A report can include the app version, a crash stack, and device details. It is not a copy of your diary. Reporting stays off until you allow it. Turning it off stops new app reports immediately and requests removal of unsent reports on this device. Reports already sent or in transit cannot be recalled.",
     "crashReportsOn": "On",
     "crashReportsOff": "Off",
     "crashReportsSaving": "Saving",

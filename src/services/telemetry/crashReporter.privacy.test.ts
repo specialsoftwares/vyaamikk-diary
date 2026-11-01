@@ -12,6 +12,7 @@ import {
   setCrashReportingEnabled,
 } from "./crashReporter";
 
+async function main(): Promise<void> {
 const EMAIL = "alice.reviewer@example.invalid";
 const DOC = "WIDGET-BATCH-Q7-LEDGER";
 
@@ -27,6 +28,7 @@ __resetCrashReportingForTests();
 {
   const calls: { kind: string; payload: unknown }[] = [];
   __setCrashlyticsClientForTests({
+    deleteUnsentReports: async () => {},
     setCrashlyticsCollectionEnabled: async () => {},
     log: (message) => {
       calls.push({ kind: "log", payload: message });
@@ -52,7 +54,7 @@ __resetCrashReportingForTests();
   assert.equal(original.message.includes(EMAIL), true);
   assert.equal(original.cause, cause);
 
-  setCrashReportingEnabled(true);
+  await setCrashReportingEnabled(true);
   recordError(original, "ErrorBoundary");
   log(`invoice ${DOC} ${EMAIL}`);
 
@@ -72,7 +74,7 @@ __resetCrashReportingForTests();
 {
   __resetCrashReportingForTests();
   __setCrashlyticsClientForTests(null);
-  setCrashReportingEnabled(true);
+  await setCrashReportingEnabled(true);
   assert.doesNotThrow(() =>
     recordError(new Error(`missing sdk ${EMAIL}`), "ErrorBoundary")
   );
@@ -81,6 +83,7 @@ __resetCrashReportingForTests();
 {
   __resetCrashReportingForTests();
   __setCrashlyticsClientForTests({
+    deleteUnsentReports: async () => {},
     setCrashlyticsCollectionEnabled: async () => {
       throw new Error(`native enable ${EMAIL}`);
     },
@@ -100,3 +103,6 @@ __resetCrashReportingForTests();
 
 __resetCrashReportingForTests();
 console.log("crashReporter.privacy.test.ts: ok (EXECUTED_PRODUCTION_METHOD)");
+
+}
+main().catch((error) => { console.error(error); process.exitCode = 1; });

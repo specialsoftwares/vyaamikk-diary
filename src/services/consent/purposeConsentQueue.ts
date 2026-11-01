@@ -42,7 +42,7 @@ export type PurposeQueuePorts = {
   save(state: PurposeQueueState): Promise<void>;
   send(input: PurposeMutation | { uid: string; purpose: "crash_diagnostics"; action: "read" }): Promise<PurposeServerState>;
   generation(): number;
-  applyLocal(enabled: boolean): Promise<unknown>;
+  applyLocal(enabled: boolean, options?: { deleteUnsentReports?: boolean }): Promise<unknown>;
   operationId(): string;
   observeRemote?(
     uid: string,
@@ -212,9 +212,9 @@ export function createPurposeConsentQueue(ports: PurposeQueuePorts) {
       return false;
     }
   }
-  async function closeReporting(): Promise<void> {
+  async function closeReporting(deleteUnsentReports = false): Promise<void> {
     try {
-      await ports.applyLocal(false);
+      await ports.applyLocal(false, { deleteUnsentReports });
     } catch {
       // Closing the gate is best-effort. The user's stored choice is separate.
     }
@@ -327,7 +327,7 @@ export function createPurposeConsentQueue(ports: PurposeQueuePorts) {
           return;
         }
       } else {
-        await closeReporting();
+        await closeReporting(remote.decision === "withdraw" || pending?.decision === "withdraw");
         if (!current()) return;
       }
       const knewChoice = state.hasChoice || pending != null || latest.hasChoice;
@@ -394,6 +394,7 @@ export function createPurposeConsentQueue(ports: PurposeQueuePorts) {
       if (activeUid === uid && observedGeneration === generation) return;
       stopObserve?.();
       stopObserve = null;
+      const accountChanged = activeUid != null && activeUid !== uid;
       activeUid = uid;
       observedGeneration = generation;
       choiceEpoch += 1;
@@ -404,8 +405,8 @@ export function createPurposeConsentQueue(ports: PurposeQueuePorts) {
         const existing = states.get(uid);
         if (existing?.reportingEnabled) publish({ ...existing, reportingEnabled: false });
       }
-      // Synchronous call enters the existing immediate native opt-out gate.
-      void closeReporting();
+      // Startup pauses; retiring an account also requests cached-report cleanup.
+      void closeReporting(accountChanged);
       if (uid && ports.observeRemote) {
         authorityHealthy = false;
         stopObserve = ports.observeRemote(uid, generation, (remote) => {
@@ -413,8 +414,8 @@ export function createPurposeConsentQueue(ports: PurposeQueuePorts) {
           if (remote.decision !== "withdraw") return;
           const known = states.get(uid)?.revision ?? 0;
           if (remote.revision < known) return;
-          // Stop collection before persistence. A blocked save must not delay the stop.
-          void closeReporting();
+          // An authoritative withdrawal stops collection and requests local cleanup.
+          void closeReporting(true);
           choiceEpoch += 1;
           healthEpoch += 1;
           const epoch = choiceEpoch;
@@ -473,7 +474,7 @@ export function createPurposeConsentQueue(ports: PurposeQueuePorts) {
       const generation = ports.generation();
       const epoch = ++choiceEpoch;
       // An opt-in also remains off until its authoritative receipt is acknowledged.
-      const stopped = closeReporting();
+      const stopped = closeReporting(!enabled);
       let ready = false;
       return enqueue(async () => {
         await stopped;
@@ -512,7 +513,8 @@ export function createPurposeConsentQueue(ports: PurposeQueuePorts) {
         if (!owns(uid, generation, epoch)) return;
         await closeReporting();
         if (!owns(uid, generation, epoch)) return;
-        await load(uid);
+        const state = await load(uid);
+        if (owns(uid, generation, epoch) && state.pending?.decision === "withdraw") await closeReporting(true);
       }).then(async () => {
         if (owns(uid, generation, epoch)) await flush(uid, generation, epoch);
       });

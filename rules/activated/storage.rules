@@ -60,10 +60,9 @@ service firebase.storage {
       return isSignedIn() && request.auth.uid == userId && restoreClaimAllows();
     }
 
-    function ageEligible(userId) {
+    function accountActive(userId) {
       let userPath = /databases/(default)/documents/users/$(userId);
       return firestore.exists(userPath)
-        && firestore.get(userPath).data.get('ageEligibility', '') == 'eligible'
         && firestore.get(userPath).data.get('status', 'active') == 'active';
     }
 
@@ -74,7 +73,7 @@ service firebase.storage {
     }
 
     function canWriteOwnedObject(userId) {
-      return isOwner(userId) && ageEligible(userId) && deletionAllowsStorage(userId);
+      return isOwner(userId) && accountActive(userId) && deletionAllowsStorage(userId);
     }
 
     function imageOrEnvelope(maxBytes) {

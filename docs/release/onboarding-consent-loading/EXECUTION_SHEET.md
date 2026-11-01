@@ -1,112 +1,209 @@
-# Onboarding, consent, errors, and loading
+# PR #45 corrective execution sheet
 
-Source branch: `fix/onboarding-consent-loading`.
-Base: `5827ddb54faf777e900c563d16e8bb2df33dfc07` (`origin/main` on 1 Nov 2026). That commit is also the signed internal-grin artifact `722e4e4c-9d0a-402b-8099-4dc0e27b5de3`, versionName `1.0.0`, versionCode `32`. This branch does not change that artifact.
-Code head verified by GitHub run `41299395405`: `7babf9c30a3b745a565012674009151b5257828f`.
+## Source and scope
 
-Installed-device version was not read. Missing device evidence did not block the source fix.
+Branch: `fix/onboarding-consent-loading`, correcting reviewed head
+`092527efba87b6abdd029cbf8eba0fcaaa58b81e`. The corrective commit containing
+this sheet is the candidate; identify it with `git rev-parse HEAD` before
+publication. PR #45 remains draft until its actual remote head is verified.
+Main base: `5827ddb54faf777e900c563d16e8bb2df33dfc07`.
+Integration `7dd9155561d3267e10e17f533a398195c6f19d0d` and PR #42 were not
+merged, cherry-picked, or copied. No other worktree was reset or overwritten.
 
-Serving functions last confirmed for content sealing, and not redeployed here:
+This correction resolves the age authorization mismatch as requested: age is
+optional demographic input, not business admission. It does not declare legal
+compliance, infer an adult status, or change historical age fields. The age band
+remains device-only; company demographic analytics are not implemented here.
 
-- `sealOwnerContent` revision `sealownercontent-00001-nol`
-- `openOwnerContent` revision `openownercontent-00001-zuz`
+## Corrections and regression evidence
 
-`recordProcessingPurpose` was not re-read. `gcloud` token refresh failed in this session. This change does not edit that function.
+### Consent acknowledgement
 
-Integration `7dd9155561d3267e10e17f533a398195c6f19d0d` and draft PR #42 were not merged, cherry-picked, or copied.
+A numeric counter could repeat after clearing/restarting storage, allowing an
+older acknowledgement to remove a newer choice. Each saved choice now has a
+persisted cryptographically random operation identity. Acknowledgement compares
+that identity, phone owner, and exact payload inside the same serialized queue
+as saves and clears. Legacy envelopes receive an identity inside that queue.
+Session ownership is checked again inside acknowledgement, not only before it.
 
-## 1. Onboarding and demographic age
+`pendingConsentAcknowledgement.test.ts` failed before the correction (`true !==
+false`) and passes afterward. It exercises the production persistence functions
+with injected storage, including clear/save/late acknowledgement, identical
+payload replacement, account replacement, legacy upgrade, and session loss
+during the acknowledgement read. A failed profile write retains the choice.
 
-Confirmed cause: after phone verification, the pending legal-consent patch went through `updateProfile`, which opened and sealed the profile. `sealOwnerContent` calls `assertBusinessAgeAdmitted`. An unassessed profile is rejected with `age_not_admitted`, and that token reached the screen. Launch also sent any profile that was not `ageEligibility === "eligible"` to `/(auth)/age-declaration`.
+### Session ownership and publication
 
-Correction: phone, then email, then profile details. Demographic age is an optional band on the profile step (`under_18`, `18_24`, `25_34`, `35_44`, `45_54`, `55_plus`, `prefer_not_to_say`). It is stored on the device only. It is not a date of birth, not written to `ageEligibility`, and not sent to crash reporting. `profileNeedsAgeGate` no longer redirects. A returning user with no band is not stopped at launch.
+Profile writes capture the initiating UID, auth generation, and sign-in epoch.
+A positive live UID match is required after asynchronous preparation and
+immediately before the Firestore write. Native uses native Auth only; a stale JS
+Auth user cannot replace a missing native UID. Web uses JS Auth. Platform read
+failure denies the write. A same-UID sign-in replaces the epoch without retiring
+a shared bridge.
 
-A patch that is only `legalConsents` merges those fields and does not call `openBusinessCloud` or `protectBusinessCloud`. Any other profile patch still seals. Pending consent stays until that write succeeds. Saves and acknowledgements are serialized, and an older acknowledgement cannot clear a newer choice. The write checks the current auth uid immediately before merging or sealing.
+The same ownership accompanies session persistence, state publication, phone
+continuation, authenticated retry, email completion, and reactivation. Delayed
+continuations must not navigate, acknowledge consent, or clear a replacement
+challenge. Session persistence continues to use the local-key readiness gate;
+transient key failures preserve retained sessions and encrypted rows.
 
-Regression: `npm run test:onboarding-consent-loading` calls `updateProfileWithIo` and `resolveSignedInOnboardingContinuation` with fakes. Local result recorded below.
+`profileWriteOwnership.regression.test.ts` reproduced a same-UID replacement
+calling the old production writer (missing expected rejection). The corrected
+writer rejects without issuing a write. It also exercises the shared production
+session-publication helper through bridge, key-preparation, and persistence
+replacement, plus successful publication and native identity-loss behavior.
+A write already submitted to Firestore cannot be recalled by a later local
+session change; subsequent local publication is denied.
 
-### Eligibility conflict, left unchanged
+### Crash consent and the locked SDK
 
-`functions/src/identity/businessAdmission.ts` `assertBusinessAgeAdmitted` still throws `age_not_admitted` unless `ageEligibility === "eligible"`. `sealOwnerContent`, `openOwnerContent`, and GRIN admission still call it. `firestore.rules` `isActiveUser` still requires `ageEligibility == 'eligible'` for diary, credit, purchase orders, and the other owner subcollections. The user profile update rule does not. Consent can be saved without that flag. Creating sealed business records still cannot.
+The locked `@react-native-firebase/crashlytics` version is **24.1.0**. Its installed
+`lib/namespaced.ts`, `lib/types/crashlytics.ts`, and Android
+`ReactNativeFirebaseCrashlyticsModule.java` expose `deleteUnsentReports`.
+The previous statement that this SDK cannot delete unsent reports was wrong.
 
-Proposed later resolution, not done in this change: decide whether business writes still need a separate 18+ admission. If they do, collect that admission explicitly and do not infer it from the demographic band. If they do not, remove the age check from `assertBusinessAgeAdmitted` and from `isActiveUser` while keeping owner, session, restore, and deletion checks. Do not mark a band as `eligible`.
+The JS reporting gate stays closed until the current native enable request
+succeeds. Failed or superseded activation cannot record errors. Native requests
+are ordered; withdrawal closes the JS gate immediately and requests native
+disable immediately, then repeats disable in order after earlier activation.
 
-No Functions or Rules deploy is required for the consent-only client path. A later eligibility change would be a separate deploy, with the previous `sealownercontent-00001-nol` and `openownercontent-00001-zuz` revisions as the rollback.
+Startup, reconciliation, and uncertain server snapshots **pause collection and
+retain previously consented cached reports**. Explicit withdrawal or account
+retirement requests `deleteUnsentReports` after disabling collection. Failed
+cleanup blocks later enable until cleanup is retried. The result records
+`deletion_requested`, not proof that native deletion finished. This SDK operation
+cannot recall reports already transmitted or reliably cancel an in-flight
+upload. No `sendUnsentReports` call is introduced. Native-device validation is
+still required; injected clients do not execute Android Crashlytics.
 
-## 2. Crash-report consent
+`crashActivation.contract.test.ts` reproduced reporting during pending activation
+before the fix (`1 !== 0`). It now covers rejected activation, withdrawal during
+activation, cleanup failure/retry, and missing SDK. Its production queue/adapter
+regression also reproduced deletion during ordinary startup (`0 !== 1`);
+startup/listener uncertainty now retain reports, while explicit withdrawal and
+account retirement request deletion. Related queue, preference, error-boundary,
+and diagnostic privacy tests pass.
 
-Confirmed cause: `purposeConsentQueue` treated a watcher that had not yet delivered a server snapshot as unhealthy, then deleted a pending Allow and left reporting off. Settings then showed Off.
+### Onboarding, profile completion, and first business save
 
-Correction: the user's Allow stays pending across a missing snapshot, a failed listener, and an app restart for that same account. Reporting stays off until the choice is stored, the server acknowledges the grant, and native activation succeeds. Withdrawal disables collection immediately and beats an in-flight grant. A newer choice, revision conflict, account change, or session replacement drops the stale grant. Settings and the prompt read the same queue. The row can show Saving, Waiting to sync, Activation failed, or Unavailable. Off is an explicit withdrawal or no choice.
+Phone OTP → email OTP → profile details remains the onboarding order. No standalone
+age gate or demographic-based eligibility assignment is introduced. Consent-only
+profile patches merge legal consent without opening or sealing the profile.
+Sensitive profile patches still seal.
 
-The installed Crashlytics client is disabled by default. Withdrawal calls `setCrashlyticsCollectionEnabled(false)`. That client has no API to delete unsent reports, so a report already queued on the device may still be sent. The settings sentence says that. It does not claim anonymity.
+`assertBusinessAccountActive` replaces age admission in seal/open and the shared
+seven-GRIN-callable wrapper. Firestore and Storage Rules, including activated
+rule templates, remove only the age predicate. Missing users, inactive accounts,
+owner mismatch, session admission, restore fencing, and deletion protections
+remain enforced. Existing legacy active-status interpretation is preserved.
 
-`recordProcessingPurpose` source was not changed. The defect was the client queue. No function deploy is required for this fix.
+Before correction, the original admission guard replayed through the extracted
+production seal handler rejected an active unassessed user's profile with
+`age_not_admitted`. `ownerContent.admission.test.ts` now invokes the same helpers
+as the deployed callables with real AES-GCM sealing/opening and injected auth/DB
+ports. Profile completion and first diary content work for missing, unassessed,
+historical ineligible, and eligible age values. Wrong owner/path, tamper, missing
+key, session rejection, restore rejection, and inactive/missing accounts deny.
 
-## 3. Public errors and diagnostics
+Full Firestore and Storage Rules emulator suites passed with new unassessed-user
+allows and preserved security denials. The production diary adapter and Storage
+SDK tests passed with an unassessed profile. Suites require isolated emulators:
+combining them in one run initially carried a closed restore fence into the next
+suite; isolated runs passed. Functions TypeScript build passed.
 
-Confirmed cause: `userFacingMessage` could show `error.message`, including `age_not_admitted`. `createSafeDiagnosticError` replaced every stack with one synthetic frame.
+### Public errors and loading retained
 
-Correction: recognised network, OTP, session, and `age_not_admitted` failures use fixed catalogue sentences. Unknown failures use "Something went wrong. Please try again." Identifier-only messages such as `session_changed` are not shown. Diagnostic errors keep a classified code, an allow-listed context, a correlation id, and sanitised `src/` or `app/` frames. `node_modules`, emails, tokens, and raw messages are dropped.
+Public failures use fixed catalogue messages; internal codes and backend stacks
+are not displayed. Diagnostics retain classified, sanitized context only.
+The prior skeleton correction remains: initial loading retains skeletons and a
+slow message; refresh retains existing rows. This pass does not expand loader
+coverage beyond the routes documented in the original PR.
 
-## 4. Loading
+## Verification and publication status
 
-Confirmed cause: `SkeletonLoadingPanel` removed the skeleton after about 6.5 seconds and left only the slow message. `app/(app)/(tabs)/you.tsx` ignored `useDiaryList`'s loading flag.
+Historical GitHub runs `41299395405` (7babf9c) and `41301167007` (092527e)
+succeeded, but **do not certify this corrective commit**. The earlier stopped
+local run was superseded by the historical passing run; neither certifies this
+correction.
 
-Correction: a slow initial load keeps the skeleton and adds the message. Refresh keeps rows. Account changes drop the previous account's rows where those screens were updated.
+Local correction verification on 1 Nov 2026:
 
-### Skeleton coverage
+- Root `tsc --noEmit`: pass. Functions `npm --prefix functions run build`: pass.
+- ESLint on changed client TypeScript files: zero errors (14 warnings).
+- Complete `test:onboarding-consent-loading`, `test:auth-session-security`, and
+  `test:main-android-readiness` scripts: pass with the direct loader.
+- Firestore Rules, Storage Rules, production diary adapter, and Storage SDK
+  emulator suites: pass in separate emulator sessions.
+- Independent review rechecked crash pause/deletion, reactivation publication,
+  continuation ownership, and serialized conditional challenge cleanup; no
+  remaining blocking finding was reported in those inspected paths.
+- An exploratory host-adapted aggregate initially passed 163/180 suites. It
+  exposed a stale session-security source contract after handler extraction;
+  the contract now follows and negatively tests actual admission delegation,
+  and the security suite passes. Ten other suites passed on recheck using the
+  current tsx loader (4.23.15) and disabling Node 24's global navigator to match
+  the Node 20 fake-DOM test environment. The six remaining aggregate failures
+  require missing local `.env`, Chrome, nested tsx CLI IPC, or CLI environment
+  setup. This is not a canonical aggregate pass.
+- `ownedPhoneContinuation.regression.test.ts` additionally fails on the original
+  production wrapper (`undefined !== 'new'`) and passes with queued conditional
+  cleanup. It covers delayed marker/acknowledgement/cleanup/import and retained
+  same-UID epoch ownership. It is included in the focused canonical script.
 
-Updated:
+The canonical gate must still pass on the published corrective SHA. The host
+runs Node 24.22.1. Its sandbox blocks the Unix IPC socket created by the `tsx` CLI
+(`listen EPERM /tmp/tsx-0/*.pipe`). `npm run ci:verify` was attempted and cannot
+be reported as passing. Direct `node --import .../tsx/dist/loader.mjs` execution
+runs the same test modules without that CLI socket; it is explicitly host-adapted
+verification, not canonical CI. No repository gate is bypassed or weakened.
 
-- Dashboard `you.tsx`
-- Diary work team and material movement
-- Customer credit list
-- Purchase order list
-- Professional pack history
-- Business insights dashboard, parties, customers, cash paid, category, and financial-year recap
+The connected GitHub app rejected a Git object write with HTTP 403,
+`Resource not accessible by integration`. No corrective branch push or new
+GitHub CI run is claimed. Main and the published PR remain unchanged unless a
+later authorized publisher records a successful update. A local commit/patch
+is the handoff; GitHub Actions must run on the actual corrective head.
 
-Already using a skeleton, left as they were: diary index, search, settings tab, calendar, at-a-glance, drafts, statutory information.
+## Deployment and build requirements
 
-Genuine exceptions: GRIN lists are synchronous local reads with no loading flag. Forms and record-detail screens keep their own submission or detail state. Letterhead history still uses its existing loader and was outside this pass.
+This is **no longer a client-only correction**. Before end-to-end acceptance,
+deploy from the accepted corrected source:
 
-## Verification
+- `sealOwnerContent`, `openOwnerContent`, using the existing content-key version.
+- The seven GRIN callables using the changed shared active-account guard:
+  `grinRegisterGoodsReceipt`, `grinReconcileCommand`, `grinMutateGoodsReceipt`,
+  `grinReadGoodsReceipt`, `grinReserveEvidence`, `grinBeginEvidenceUpload`,
+  `grinUploadEvidence`.
+- Firestore and Storage Rules from that same accepted source. Preserve the
+  appropriate activated/nonactivated configuration; do not toggle admission flags.
 
-Focused suite: `npm run test:onboarding-consent-loading` passed on 1 Nov 2026.
-It calls `updateProfileWithIo`, `applyConsentPatchAfterPhoneVerify`, `createPurposeConsentQueue`, `presentCrashConsent`, `applyDiagnosticsChoice`, `publicMessage`, `userFacingMessage`, `createSafeDiagnosticError`, and `skeletonPanelMode`.
+Re-read serving revisions, secret bindings, and Rules releases before deployment.
+Previously recorded seal/open revisions `sealownercontent-00001-nol` and
+`openownercontent-00001-zuz` are historical, not verified rollback targets.
+No deletion Functions, retention constants, keys, billing allowlist, Rules flags,
+or live data migration/purge are part of this correction. No deployment occurred
+in this workspace. `recordProcessingPurpose` was not changed or live-verified.
 
-Local canonical CI, same day, worktree `/Users/shivamsaurav/vyaamikk-onboarding-fix`, before this result paragraph was added:
+The user authorized a build if checks pass and continues to require a **main-only
+build**. After the corrected PR is accepted into main and the actual main commit
+passes canonical CI, build that clean main commit with `internal-grin`. Verify
+an unused versionCode against Play, the upload certificate, and the packaged
+Firebase identity first. VersionCode 32's existing artifact
+`722e4e4c-9d0a-402b-8099-4dc0e27b5de3` contains none of these corrections.
+No signed build or upload is claimed. An app build does not deploy backend fixes.
+Public rollout remains on hold.
 
-- Command: `npm run ci:verify`
-- Exit code: 0
-- Exact line: `ci:verify PASS`
-- Elapsed: 633419 ms, ended `2026-11-01T10:51:32.711Z`
-- Node: v20.19.4
-- The invoice-renderer Docker step printed `docker not available locally; GitHub Actions CI will run the renderer image build`. Every earlier local stage passed, including `test:all`.
+## Signed-device acceptance (pending)
 
-GitHub Actions on head `7babf9c30a3b745a565012674009151b5257828f`:
-
-- Run: https://github.com/specialsoftwares/vyaamikk-diary/actions/runs/41299395405
-- Run id: `41299395405`
-- Job: `124827005967` (`verify`)
-- Conclusion: success
-- Exact line: `ci:verify PASS` at `2026-11-01T11:15:57.6709079Z`
-- Renderer runtime: `v22.19.0`
-
-The commit that records this paragraph is docs-only. Its pull-request check is separate from run `41299395405`.
-
-## Deployment, build, and device acceptance
-
-These are separate from the source checks above.
-
-- Deployment: none in this change. Do not deploy Functions or Rules for this branch. Keys, retention, deletion schedules, billing access, and GRIN admission flags were not changed.
-- Native build: required after this branch is merged, from that merged commit. The versionCode 32 artifact of `5827ddb` does not contain these fixes. This task does not start a build and does not upload to Play.
-- Device acceptance, for a signed build of the eventual merged main commit, not yet run:
-  1. Fresh phone and email onboarding does not show an age gate.
-  2. Profile demographic entry is optional, including Prefer not to say. A returning user with no band is not gated.
-  3. Crash consent in Settings matches the choice immediately: Saving, Waiting to sync, On only after activation, or an honest failure.
-  4. After consent, a redacted test report is received. After withdrawal, new reporting is off. A report already queued may still arrive.
-  5. Slow network, offline, retry, and cached data match the loading states above.
-  6. Public screens do not show `age_not_admitted` or other backend codes.
-
-Sealed business saves by a user who has never been marked `ageEligibility: eligible` are still expected to fail until the eligibility conflict above is resolved. That is not a device pass for diary creation.
+1. Fresh phone/email verification, optional age band/Prefer not to say, profile
+   completion, first diary save/open/relaunch, and first attachment upload/open.
+2. Missing demographic band and historical age values never create an age gate.
+3. Account switch, sign-out, and same-UID replacement during each async stage
+   cannot publish an old session, navigate, or clear a newer challenge/consent.
+4. Crash Allow: pending until server acknowledgement and native activation;
+   restart/reconnect retains previously consented reports. Withdrawal stops new
+   reporting and requests cached-report deletion; no remote-recall claim.
+5. Controlled redacted report receipt only with acknowledged consent. No OTP,
+   token, phone, email, record content, or raw error message in telemetry.
+6. Offline/slow/retry/cached loading states and safe public errors on signed build.
+7. Owner isolation, restore closure, pending/completed deletion, and revoked
+   session remain denied against the named deployed revisions and Rules release.

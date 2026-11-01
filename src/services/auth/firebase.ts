@@ -41,15 +41,15 @@ import {
   isConsentOnlyProfilePatch,
   stripServerOwnedProfilePatchKeys,
 } from "./clientProfilePatchPayload";
+import { captureProfileWriteOwnership, assertProfileWriteOwnership, readLiveProfileUid, type ProfileWriteOwnership } from "./profileWriteOwnership";
 import { profileDocumentMergeFields } from "./profileFirestorePayload";
 import { openBusinessCloud, protectBusinessCloud } from "@/services/privacy/businessCloudSeal";
-import { recordRetiredPhone } from "@/services/accountDeletion/retiredIdentity";
+import { recordRetiredPhone, isPhoneRetiredFirestore } from "@/services/accountDeletion/retiredIdentity";
 import { throwPendingDeletionLoginBlocked } from "@/services/auth/identityErrors";
 import {
   assertNoStaleActiveAccountAtDerivedUid,
   throwDuplicateActiveMobile,
 } from "@/services/auth/mobileIdentity";
-import { isPhoneRetiredFirestore } from "@/services/accountDeletion/retiredIdentity";
 import { loadProfileByPhoneFirestore } from "@/services/auth/profileByPhone";
 import { hashMobileE164, normalizePhoneE164 } from "@/utils/mobileHash";
 import { generateUEID } from "@/utils/ueid";
@@ -57,7 +57,7 @@ import { getFirebaseAuth, getFirebaseDb } from "@/config/firebase";
 import { createLogger } from "@/utils/logger";
 import {
   callResolveOrCreateUserByPhone,
-  useIdentityCallables,
+  useIdentityCallables as identityCallablesEnabled,
 } from "./identityCallable";
 import {
   confirmNativePhoneOtp,
@@ -351,6 +351,7 @@ async function swapPhoneNumber(
 
 export type ProfileUpdateIo = {
   production: boolean;
+  ownership?: ProfileWriteOwnership;
   readAuthUid: () => string | null;
   getUserDoc: (uid: string) => Promise<{ exists: boolean; data: Record<string, unknown> | null }>;
   mergeUserDoc: (uid: string, data: Record<string, unknown>) => Promise<void>;
@@ -358,12 +359,6 @@ export type ProfileUpdateIo = {
   protectBusinessCloud: typeof protectBusinessCloud;
   requireJsAuthSession?: () => Promise<void>;
 };
-
-function refuseIfAuthUidChanged(requestedUid: string, currentUid: string | null): void {
-  if (currentUid !== requestedUid) {
-    throw new AppError("permission_denied", "session_changed");
-  }
-}
 
 function consentOnlyMerge(write: Record<string, unknown> | null): Record<string, unknown> | null {
   if (!write || !("legalConsents" in write)) return null;
@@ -382,8 +377,15 @@ export async function updateProfileWithIo(
   patch: ProfilePatch,
   io: ProfileUpdateIo
 ): Promise<UserProfile> {
+  const owner = io.ownership ?? captureProfileWriteOwnership(uid);
+  const assertCurrent = () => {
+    if (owner.uid !== uid) throw new AppError("permission_denied", "session_changed");
+    assertProfileWriteOwnership(owner, io.readAuthUid());
+  };
+  assertCurrent();
   if (io.production) {
     await io.requireJsAuthSession?.();
+    assertCurrent();
     const rejected = findRejectedProductionPatchKeys(patch);
     if (rejected.length > 0) {
       throw new AppError(
@@ -394,6 +396,7 @@ export async function updateProfileWithIo(
   }
 
   const snap = await io.getUserDoc(uid);
+  assertCurrent();
   if (!snap.exists || !snap.data) throw new AppError("not_found", "User profile not found.");
   const rawProfile = snap.data;
   const consentOnly = isConsentOnlyProfilePatch(patch);
@@ -402,9 +405,8 @@ export async function updateProfileWithIo(
   if (consentOnly) {
     // Demographic age is not eligibility. This consent-only merge does not
     // set ageEligibility and does not call openBusinessCloud or
-    // protectBusinessCloud. Sealed business writes still require the existing
-    // eligibility policy: sealOwnerContent rejects unless
-    // ageEligibility === "eligible" (age_not_admitted).
+    // protectBusinessCloud. Sensitive writes retain active-account, owner,
+    // session, restore, and deletion authorization on the server.
     existing = normaliseUserProfile(uid, rawProfile);
   } else {
     existing = (await io.openBusinessCloud(
@@ -430,14 +432,14 @@ export async function updateProfileWithIo(
 
   // Re-read after the document read (and seal open) so a sign-out in that
   // gap cannot seal or publish.
-  refuseIfAuthUidChanged(uid, io.readAuthUid());
+  assertCurrent();
 
   if (io.production) {
     const write = buildClientProfileFirestoreWrite(existing, next, { production: true });
     if (consentOnly) {
       const consentWrite = consentOnlyMerge(write);
       if (consentWrite) {
-        refuseIfAuthUidChanged(uid, io.readAuthUid());
+        assertCurrent();
         await io.mergeUserDoc(uid, consentWrite);
       }
     } else if (write) {
@@ -450,7 +452,7 @@ export async function updateProfileWithIo(
         sensitiveSource: next as unknown as Record<string, unknown>,
         existingRaw: rawProfile,
       });
-      refuseIfAuthUidChanged(uid, io.readAuthUid());
+      assertCurrent();
       await io.mergeUserDoc(uid, sealed);
     }
   } else if (consentOnly) {
@@ -458,13 +460,14 @@ export async function updateProfileWithIo(
       buildClientProfileFirestoreWrite(existing, next, { production: false })
     );
     if (consentWrite) {
-      refuseIfAuthUidChanged(uid, io.readAuthUid());
+      assertCurrent();
       await io.mergeUserDoc(uid, consentWrite);
     }
   } else {
-    refuseIfAuthUidChanged(uid, io.readAuthUid());
+    assertCurrent();
     await io.mergeUserDoc(uid, profileDocumentMergeFields(next));
   }
+  assertCurrent();
   return next;
 }
 
@@ -490,7 +493,7 @@ export const firebaseAuthService: AuthService = {
       // ignore
     }
     const phone = normalizePhoneE164(challenge.phoneE164);
-    if (useIdentityCallables()) {
+    if (identityCallablesEnabled()) {
       try {
         const { authPerfMark } = await import("./authFlowPerf");
         authPerfMark("V5_resolver_begin");
@@ -574,13 +577,15 @@ export const firebaseAuthService: AuthService = {
     return cancelAccountDeletion(profile);
   },
 
-  async updateProfile(uid: string, patch: ProfilePatch): Promise<UserProfile> {
-    const production = useIdentityCallables();
+  async updateProfile(uid: string, patch: ProfilePatch, ownership?: ProfileWriteOwnership): Promise<UserProfile> {
+    const production = identityCallablesEnabled();
     const db = getFirebaseDb();
     try {
       return await updateProfileWithIo(uid, patch, {
         production,
+        ownership: ownership ?? captureProfileWriteOwnership(uid),
         readAuthUid: () => {
+          if (production) return readLiveProfileUid();
           try {
             return getFirebaseAuth().currentUser?.uid ?? null;
           } catch {

@@ -5,6 +5,7 @@ import type { LegalConsentRecord, PendingLegalConsent } from "@/domain/legalCons
 import { resolveSignedInOnboardingContinuation } from "@/domain/ageEligibility";
 import type { PhoneE164, UEID, UserProfile } from "@/domain/types";
 import type { ProfilePatch } from "@/services/auth/types";
+import { readNativeSecureRandom } from "@/services/accountDeletion/nativeSecureRandom";
 import {
   CONSENT_RECONCILE_SOURCE,
   resolvePendingConsentForVerifiedProfile,
@@ -20,11 +21,40 @@ type ConsentKv = {
 
 type PendingConsentEnvelope = {
   generation: number;
+  operationId: string | null;
   pending: PendingLegalConsent;
 };
 
+/** A receipt is bound to the exact choice and its owner, not a reusable counter. */
+export type PendingConsentAcknowledgement = Readonly<{
+  operationId: string;
+  phoneE164: string;
+  choice: string;
+}>;
+
 let consentKv: ConsentKv | null = null;
 let pendingSaveQueue: Promise<void> = Promise.resolve();
+
+function serializePendingOperation<T>(work: () => Promise<T>): Promise<T> {
+  const run = pendingSaveQueue.then(work);
+  pendingSaveQueue = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+function newOperationId(): string {
+  const bytes = readNativeSecureRandom(16);
+  if (!bytes) throw new AppError("save_failed", "Consent choice could not be stored.");
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function acknowledgementFor(envelope: PendingConsentEnvelope): PendingConsentAcknowledgement {
+  if (!envelope.operationId) throw new Error("consent_operation_missing");
+  return Object.freeze({
+    operationId: envelope.operationId,
+    phoneE164: envelope.pending.phoneE164,
+    choice: JSON.stringify(envelope.pending),
+  });
+}
 
 function activeConsentKv(): ConsentKv {
   if (!consentKv) consentKv = defaultConsentStorage();
@@ -48,11 +78,17 @@ function parseEnvelope(raw: string | null): PendingConsentEnvelope | null {
       typeof parsed.pending.phoneE164 === "string" &&
       parsed.pending.record
     ) {
-      return { generation: parsed.generation, pending: parsed.pending };
+      return {
+        generation: parsed.generation,
+        operationId: typeof parsed.operationId === "string" && /^[a-f0-9]{32}$/.test(parsed.operationId)
+          ? parsed.operationId : null,
+        pending: parsed.pending,
+      };
     }
     if (parsed && typeof parsed.phoneE164 === "string" && parsed.record) {
       return {
         generation: 1,
+        operationId: null,
         pending: { phoneE164: parsed.phoneE164, record: parsed.record },
       };
     }
@@ -126,29 +162,25 @@ export async function savePendingConsent(phoneE164: PhoneE164, sourceScreen: str
 }
 
 /**
- * Write the next pending choice and return its generation. Saves are queued
- * so a later choice cannot share a generation with an earlier one.
+ * Write the next pending choice and return its unique acknowledgement token.
+ * The numeric generation remains readable for older envelopes, but is never
+ * sufficient authority to clear a choice after an acknowledgement or reset.
  */
 export function serializePendingConsentSave(
   phoneE164: PhoneE164,
   sourceScreen: string
-): Promise<number> {
-  const run = pendingSaveQueue.then(async () => {
+): Promise<PendingConsentAcknowledgement> {
+  return serializePendingOperation(async () => {
     const current = await readEnvelope();
     const generation = (current?.generation ?? 0) + 1;
     const pending: PendingLegalConsent = {
       phoneE164,
       record: buildConsentRecord({ sourceScreen, phoneE164 }),
     };
-    const envelope: PendingConsentEnvelope = { generation, pending };
+    const envelope: PendingConsentEnvelope = { generation, operationId: newOperationId(), pending };
     await activeConsentKv().setItem(PENDING_KEY, JSON.stringify(envelope));
-    return generation;
+    return acknowledgementFor(envelope);
   });
-  pendingSaveQueue = run.then(
-    () => undefined,
-    () => undefined
-  );
-  return run;
 }
 
 export async function loadPendingConsent(): Promise<PendingLegalConsent | null> {
@@ -161,39 +193,51 @@ export async function loadPendingConsentGeneration(): Promise<number | null> {
   return envelope?.generation ?? null;
 }
 
-/** Explicit local wipe. Profile-save acknowledgement must use the generation token. */
+/** Explicit local wipe shares the same queue as saves and acknowledgements. */
 export async function clearPendingConsent(): Promise<void> {
-  await activeConsentKv().removeItem(PENDING_KEY);
+  await serializePendingOperation(() => activeConsentKv().removeItem(PENDING_KEY));
 }
 
 /**
- * Drop the pending copy only when `generation` is still the latest choice.
- * An older acknowledgement leaves a newer pending consent in place.
+ * Drop only the exact owner/choice acknowledged by the successful profile write.
+ * A copied/stale numeric generation or an older receipt can never clear a choice.
  */
-export function acknowledgePendingConsentPersisted(generation: number): Promise<boolean> {
-  const run = pendingSaveQueue.then(async () => {
+export function acknowledgePendingConsentPersisted(
+  acknowledgement: PendingConsentAcknowledgement | null,
+  isCurrent: () => boolean = () => true
+): Promise<boolean> {
+  if (!acknowledgement) return Promise.resolve(false);
+  return serializePendingOperation(async () => {
+    if (!isCurrent()) return false;
     const current = await readEnvelope();
-    if (!current || current.generation !== generation) return false;
+    if (!current || current.operationId !== acknowledgement.operationId ||
+        current.pending.phoneE164 !== acknowledgement.phoneE164 ||
+        JSON.stringify(current.pending) !== acknowledgement.choice) return false;
+    if (!isCurrent()) return false;
     await activeConsentKv().removeItem(PENDING_KEY);
     return true;
   });
-  pendingSaveQueue = run.then(
-    () => undefined,
-    () => undefined
-  );
-  return run;
 }
 
 export type ConsentProfilePatch = {
   patch: ProfilePatch;
-  generation: number;
+  acknowledgement: PendingConsentAcknowledgement | null;
 };
 
 /** Merge pending consent into a profile patch. Does not clear the retry copy. */
 export async function consentPatchForProfile(
   profile: UserProfile
 ): Promise<ConsentProfilePatch | null> {
-  const envelope = await readEnvelope();
+  const envelope = await serializePendingOperation(async () => {
+    const stored = await readEnvelope();
+    // Give legacy persisted choices an identity before returning a receipt.
+    // This runs in the mutation queue so two readers cannot mint different IDs.
+    if (stored && !stored.operationId) {
+      stored.operationId = newOperationId();
+      await activeConsentKv().setItem(PENDING_KEY, JSON.stringify(stored));
+    }
+    return stored;
+  });
   const hasCurrentConsentVersion = (profile.legalConsents ?? []).some(
     (c) => c.consentVersion === legal.consentVersion
   );
@@ -221,7 +265,7 @@ export async function consentPatchForProfile(
 
   return {
     patch: { legalConsents: next },
-    generation: usedStored ? envelope.generation : 0,
+    acknowledgement: usedStored ? acknowledgementFor(envelope) : null,
   };
 }
 
@@ -239,19 +283,31 @@ export async function applyConsentPatchAfterPhoneVerify(input: {
   profile: UserProfile;
   initiatingUid: string;
   readCurrentUid: () => string | null;
+  isCurrent?: () => boolean;
   writeProfile: (patch: ProfilePatch) => Promise<UserProfile>;
   startOtp?: () => Promise<unknown>;
 }): Promise<PhoneConsentContinuation> {
-  assertContinuationUid(input.initiatingUid, input.readCurrentUid());
+  const assertCurrent = () => {
+    assertContinuationUid(input.initiatingUid, input.readCurrentUid());
+    if (input.profile.uid !== input.initiatingUid || input.isCurrent?.() === false) {
+      throw new AppError("permission_denied", "session_changed");
+    }
+  };
+  assertCurrent();
   const prepared = await consentPatchForProfile(input.profile);
+  assertCurrent();
   let profile = input.profile;
   if (prepared) {
-    assertContinuationUid(input.initiatingUid, input.readCurrentUid());
+    assertCurrent();
     profile = await input.writeProfile(prepared.patch);
-    assertContinuationUid(input.initiatingUid, input.readCurrentUid());
-    await acknowledgePendingConsentPersisted(prepared.generation);
+    assertCurrent();
+    assertContinuationUid(input.initiatingUid, profile.uid);
+    await acknowledgePendingConsentPersisted(prepared.acknowledgement, () => {
+      try { assertCurrent(); return true; } catch { return false; }
+    });
+    assertCurrent();
   }
-  assertContinuationUid(input.initiatingUid, input.readCurrentUid());
+  assertCurrent();
   return {
     profile,
     destination: resolveSignedInOnboardingContinuation({

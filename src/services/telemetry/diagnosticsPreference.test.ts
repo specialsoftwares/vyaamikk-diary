@@ -21,6 +21,7 @@ async function main(): Promise<void> {
   };
 
   __setCrashlyticsClientForTests({
+    deleteUnsentReports: async () => {},
     setCrashlyticsCollectionEnabled: async () => undefined,
     log: () => undefined,
     recordError: () => undefined,
@@ -49,6 +50,7 @@ async function main(): Promise<void> {
 
   const enabledCalls: boolean[] = [];
   __setCrashlyticsClientForTests({
+    deleteUnsentReports: async () => {},
     setCrashlyticsCollectionEnabled: async (enabled: boolean) => {
       enabledCalls.push(enabled);
     },
@@ -107,6 +109,7 @@ async function main(): Promise<void> {
   assert.notEqual(missingSdk.nativeState, "next_launch");
 
   __setCrashlyticsClientForTests({
+    deleteUnsentReports: async () => {},
     setCrashlyticsCollectionEnabled: async () => {
       throw new Error("native rejected");
     },
@@ -122,8 +125,8 @@ async function main(): Promise<void> {
   assert.equal(rejectedSdk.error, "activation_failed");
   const withdrawn = await applyDiagnosticsChoice(false);
   assert.equal(withdrawn.desired, "off");
-  assert.equal(withdrawn.nativeState, "off");
-  assert.equal(withdrawn.unsentReports, "not_separately_deletable");
+  assert.equal(withdrawn.nativeState, "error");
+  assert.equal(withdrawn.unsentReports, "error");
 
   storage.default.getItem = originalGet;
   storage.default.setItem = original;

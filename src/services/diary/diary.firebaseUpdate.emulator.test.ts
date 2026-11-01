@@ -49,7 +49,7 @@ async function main() {
         ueid: "VYD-2026-BILL01",
         phoneE164: "+919999999999",
         status: "active",
-        ageEligibility: "eligible",
+        ageEligibility: "unassessed", // First save must not need a demographic assessment.
         createdAt: 1_700_000_000_000,
         updatedAt: 1_700_000_000_000,
         displayName: "Update User",

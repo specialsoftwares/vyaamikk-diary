@@ -17,19 +17,24 @@ type CrashlyticsClient = {
   log: (message: string) => void;
   recordError: (error: Error) => void;
   setUserId: (id: string) => Promise<unknown> | void;
+  deleteUnsentReports?: () => Promise<void> | void;
 };
 
-/** Result of asking the native SDK to collect or stop. Never treats a missing module or a rejected call as success. */
+/** A deletion request is not proof of completed native deletion or remote recall. */
+export type UnsentReportState = "not_applicable" | "retained" | "deletion_requested" | "unavailable" | "error";
+export type CrashStopOptions = Readonly<{ deleteUnsentReports?: boolean }>;
 export type CrashActivationResult = Readonly<{
   ok: boolean;
-  status: "enabled" | "disabled" | "unavailable" | "rejected";
-  /** This client has no unsent-report deletion API. Queued reports are not separately deletable. */
-  queuedReportsSeparatelyDeletable: false;
-  unsentReports: "not_applicable" | "not_separately_deletable";
+  status: "enabled" | "disabled" | "unavailable" | "rejected" | "superseded";
+  queuedReportsSeparatelyDeletable: boolean;
+  unsentReports: UnsentReportState;
 }>;
 
 let _enabled = false;
 let _activationEpoch = 0;
+let _nativeQueue: Promise<void> = Promise.resolve();
+let _cleanupRequired = false;
+let _cleanupEpoch = 0;
 let _testClient: CrashlyticsClient | null | undefined;
 
 function getCrashlytics(): CrashlyticsClient | null {
@@ -54,65 +59,93 @@ export function __setCrashlyticsClientForTests(client: CrashlyticsClient | null 
 export function __resetCrashReportingForTests(): void {
   _enabled = false;
   _activationEpoch += 1;
+  _nativeQueue = Promise.resolve();
+  _cleanupRequired = false;
+  _cleanupEpoch = 0;
   _testClient = undefined;
 }
 
-function failedActivation(status: "unavailable" | "rejected"): CrashActivationResult {
+function result(
+  status: CrashActivationResult["status"],
+  unsentReports: UnsentReportState,
+  canDelete: boolean
+): CrashActivationResult {
   return {
-    ok: false,
+    ok: status === "enabled" || status === "disabled",
     status,
-    queuedReportsSeparatelyDeletable: false,
-    unsentReports: "not_separately_deletable",
+    queuedReportsSeparatelyDeletable: canDelete,
+    unsentReports,
   };
 }
 
 /**
- * Enables or disables native collection and reports whether that call stuck.
- * Automatic collection stays off until a successful enable result.
- * Withdrawal disables collection. The installed client has no API to delete
- * unsent reports, so those stay queued and are not separately deletable.
+ * Close the JS reporting gate synchronously, including when native calls throw.
+ * Native operations are ordered so an older enable cannot finish after the
+ * final disable. Pausing retains cached reports while authority is uncertain.
+ * Explicit withdrawal/account cleanup requests deletion. Disable runs immediately, without waiting
+ * for that older operation. The ordered disable then requests deletion of
+ * device-cached unsent reports before a subsequent enable can proceed.
+ * Already transmitted reports cannot be recalled by this API.
  */
-export function setCrashReportingEnabled(enabled: boolean): Promise<CrashActivationResult> {
+export function setCrashReportingEnabled(
+  enabled: boolean, options: CrashStopOptions = {}
+): Promise<CrashActivationResult> {
   const epoch = ++_activationEpoch;
   const stillCurrent = () => epoch === _activationEpoch;
+  _enabled = false;
+  if (!enabled && options.deleteUnsentReports) {
+    _cleanupRequired = true;
+    _cleanupEpoch += 1;
+  }
   const client = getCrashlytics();
-  if (!client) {
-    if (stillCurrent()) _enabled = false;
-    return Promise.resolve(failedActivation("unavailable"));
-  }
-  let pending: Promise<unknown>;
-  try {
-    pending = Promise.resolve(client.setCrashlyticsCollectionEnabled(enabled));
-  } catch {
-    if (stillCurrent()) _enabled = false;
-    return Promise.resolve(failedActivation("rejected"));
-  }
-  // Opt-out drops the pseudonymous user id so a later enable cannot resend it.
-  // The consent toggle and decline paths call this function, not clearUser().
+  if (!client) return Promise.resolve(result("unavailable", "unavailable", false));
+  const canDelete = typeof client.deleteUnsentReports === "function";
+  // Attach rejection handling in the same turn, including synchronous throws.
+  let immediateStop: Promise<boolean> | null = null;
   if (!enabled) {
     try {
-      void Promise.resolve(client.setUserId("")).catch(() => undefined);
+      immediateStop = Promise.resolve(client.setCrashlyticsCollectionEnabled(false)).then(
+        () => true, () => false
+      );
     } catch {
-      // The collection flag is still the gate. Identity cleanup is best-effort.
+      immediateStop = Promise.resolve(false);
     }
+    try { void Promise.resolve(client.setUserId("")).catch(() => undefined); } catch { /* best effort */ }
   }
-  // A present client applies the flag when the call is invoked so redaction
-  // tests can observe the same turn. Only this call may roll the gate back.
-  // An older rejection must not clear a newer allow, and an older success
-  // must not turn the gate on after a newer withdrawal.
-  if (stillCurrent()) _enabled = enabled;
-  return pending.then(
-    () => ({
-      ok: true,
-      status: enabled ? "enabled" : "disabled",
-      queuedReportsSeparatelyDeletable: false,
-      unsentReports: enabled ? "not_applicable" : "not_separately_deletable",
-    }),
-    () => {
+  const work = async (): Promise<CrashActivationResult> => {
+    if (enabled && !stillCurrent()) return result("superseded", "not_applicable", canDelete);
+    try {
+      if (immediateStop) await immediateStop;
+      // Retry required withdrawal cleanup before any later opt-in. A failed
+      // deletion must not let old cached reports leave on the next enable.
+      if (!enabled || _cleanupRequired) {
+        await client.setCrashlyticsCollectionEnabled(false);
+        if (!_cleanupRequired) {
+          return result(stillCurrent() ? "disabled" : "superseded", "retained", canDelete);
+        }
+        if (!canDelete) return result("unavailable", "unavailable", false);
+        try {
+          const cleanupEpoch = _cleanupEpoch;
+          await client.deleteUnsentReports!();
+          if (cleanupEpoch === _cleanupEpoch) _cleanupRequired = false;
+        } catch {
+          return result("rejected", "error", true);
+        }
+        if (!enabled) return result(stillCurrent() ? "disabled" : "superseded", "deletion_requested", true);
+      }
+      if (!stillCurrent()) return result("superseded", "not_applicable", canDelete);
+      await client.setCrashlyticsCollectionEnabled(true);
+      if (!stillCurrent()) return result("superseded", "not_applicable", canDelete);
+      _enabled = true;
+      return result("enabled", "not_applicable", canDelete);
+    } catch {
       if (stillCurrent()) _enabled = false;
-      return failedActivation("rejected");
+      return result("rejected", enabled ? "not_applicable" : "error", canDelete);
     }
-  );
+  };
+  const pending = _nativeQueue.then(work, work);
+  _nativeQueue = pending.then(() => undefined, () => undefined);
+  return pending;
 }
 
 export function recordError(error: Error, context?: string): void {
