@@ -91,8 +91,12 @@ Host tests do not prove SMS delivery or device acceptance.
 
 ## Canonical CI
 
-Not yet recorded for this head. GitHub Actions must print `ci:verify PASS` on
-the published head before merge.
+GitHub Actions run `41328839487` on `186fa092b0339c10c39fa7c1ef769967be33246e`
+succeeded. Job `124914435733` printed `ci:verify PASS` at
+`2026-11-01T17:19:07.9420511Z`. An earlier run `41328487206` on `ec80c33`
+failed typecheck because the route params interface was not a router input;
+`186fa09` passes those params as a plain object. This paragraph is the only
+change after the passing run.
 
 ## Deployment and build
 
