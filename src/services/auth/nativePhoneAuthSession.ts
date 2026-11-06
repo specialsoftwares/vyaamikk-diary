@@ -99,8 +99,10 @@ export async function loadNativePhoneAuthSession(): Promise<NativePhoneAuthPersi
     ) {
       return null;
     }
+    // An expired row is unusable, but this read must not delete the key.
+    // A newer save can land while this read is in flight; clearing here would
+    // remove that newer session. Sign-out and an explicit clear still remove it.
     if (parsed.expiresAt <= Date.now()) {
-      await clearNativePhoneAuthSession();
       return null;
     }
     return {
