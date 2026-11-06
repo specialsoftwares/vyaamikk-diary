@@ -15,11 +15,11 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import {
   clearAuthWrapperChallenge,
   clearAuthWrapperProgress,
-  loadAuthWrapperChallenge,
   markAuthWrapperEmailComplete,
   markAuthWrapperEmailPending,
   saveAuthWrapperChallenge,
 } from "@/auth-v2/authWrapperProgress";
+import { resumeSignedOutPhoneChallenge } from "@/auth-v2/signedOutChallengeResume";
 import {
   phoneFallbackMayClaimSessionExpired,
   resolveAuthFlowGateRenderBranch,
@@ -603,30 +603,25 @@ export function AuthFlowGate() {
         return;
       }
 
-      const snap = await loadAuthWrapperChallenge();
-      const digitSnap = snap
-        ? await import("@/services/auth/mobileOtpSecureDigits").then((m) => m.loadMobileOtpDigitSnapshot())
-        : null;
-      if (snap && !cancelled) {
-        const restoredResendAt =
-          digitSnap &&
-          digitSnap.verificationId === snap.verificationId &&
-          phonesMatchE164(digitSnap.phoneE164, snap.phoneE164)
-            ? digitSnap.resendAvailableAt
-            : null;
-        setPhoneE164(snap.phoneE164);
+      const launchGeneration = phoneOtpRef.current.generation;
+      const resumed = await resumeSignedOutPhoneChallenge({
+        isCurrent: () => !cancelled && phoneOtpRef.current.generation === launchGeneration,
+      });
+      if (cancelled) return;
+      if (resumed.action === "resume") {
+        setPhoneE164(resumed.phoneE164);
         setChallenge({
-          verificationId: snap.verificationId,
-          phoneE164: snap.phoneE164,
-          devCodeHint: snap.devCodeHint,
-          resendAvailableAt: restoredResendAt ?? undefined,
+          verificationId: resumed.verificationId,
+          phoneE164: resumed.phoneE164,
+          devCodeHint: resumed.devCodeHint,
+          resendAvailableAt: resumed.resendAvailableAt ?? undefined,
         });
-        if (restoredResendAt != null) setMobileResendAvailableAt(restoredResendAt);
-        setDevHint(snap.devCodeHint);
+        if (resumed.resendAvailableAt != null) setMobileResendAvailableAt(resumed.resendAvailableAt);
+        setDevHint(resumed.devCodeHint);
         setStep("otp");
         setPhoneDraft({
           countryCode: DEFAULT_AUTH_V2_COUNTRY_CODE,
-          localNumber: localDigitsFromE164(snap.phoneE164),
+          localNumber: localDigitsFromE164(resumed.phoneE164),
         });
       }
       if (!cancelled) setHydrated(true);
