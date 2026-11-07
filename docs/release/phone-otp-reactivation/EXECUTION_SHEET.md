@@ -190,7 +190,10 @@ deadline was created.
 
 ## Original SMS incident
 
-Still unresolved. Re-read on 2 Nov 2026: Cloud Logging returned no Identity
+Still unresolved. An owner report on 7 Nov 2026 that one phone OTP arrived
+during a later reactivation attempt does not close this incident. SMS
+delivery, reactivation completion, and session restoration stay separate
+results. Re-read on 2 Nov 2026: Cloud Logging returned no Identity
 Toolkit or phone-verification entries from 1 Nov 2026 through this review.
 No device log was available. The earlier account read still stands: a real
 phone user, SMS allowed to India, account not disabled, phone index matches,
@@ -328,3 +331,175 @@ live deletion job:
 
 The original missing SMS stays unresolved until the redacted capture above
 exists. Do not activate the reported account by hand.
+
+## Reactivation email verification stuck
+
+Separate from the SMS incident. The owner reports that the phone OTP arrived
+for the previously affected number, reactivation opened, and submitting the
+email code left Verify busy while Resend code and Back to login were
+disabled. The code on screen was six characters and began with zero. That
+code is not copied here.
+
+### What was read
+
+The handset was not attached. `adb devices` was empty, so the installed
+versionCode was not read. Do not treat versionCode 34, `a3db411`, or draft
+PR #51 as the running binary. App storage and the login session were not
+cleared.
+
+The photograph is `PHOTO-2026-11-07-12-46-14.jpg`. Its status bar shows 12:46
+and the file was saved at 12:46 in IST (UTC+5:30). That is the photograph
+time, not an attempt timestamp from a client or server log.
+
+`gcloud` for `support.vyd@specialsoftwares.com` could not refresh credentials
+without an interactive login. Serving revisions, secret bindings, the
+challenge, the profile, and the deletion job were not re-read on 7 Nov 2026
+and were not changed. The last recorded serving pair remains
+`startaccountreactivation-00007-vih` and
+`completeaccountreactivation-00008-doh`. No account was reactivated by hand,
+no challenge was deleted, and no secret was rotated.
+
+### Path
+
+The email screen sets `busy` before `completeAccountReactivation` and clears
+it in `finally` only while profile ownership is still current. Resend and
+Back were disabled by that flag. The code field is cleared only after local
+session publication, and the photograph still showed the code, so publication
+had not finished.
+
+Last completed stage visible on the device: the email code screen was open
+and the verify control was busy. First stalled stage: loading-state cleanup.
+Whether the callable left the device, the server committed, or local key
+preparation hung is unknown for this attempt. A stuck spinner does not show
+that the server failed.
+
+A six-character numeric string is what both the field and
+`verifyReactivationCode` require. `generateEmailOtpCode` already pads to six
+characters. Synthetic code `010203` completes through the production
+transaction. The same value coerced with `Number` is `10203`, fails the
+six-character check, and leaves the account `pending_deletion` and the
+deletion job generation unchanged. Leading zero is not the stuck-button cause.
+
+### Correction
+
+`createReactivationEmailVerification` bounds the wait. A timeout does not
+cancel the server transaction. After an unknown result, or after the server
+returned success and local session preparation failed, the next attempt reads
+the account first. An active account finishes the local session and does not
+call completion again. A retired attempt, including Back, sign-out, and an
+account switch, does not publish or navigate, and the busy flag is cleared.
+Duplicate taps make one completion call. Wrong, expired, and superseded codes
+stay definite failures. Logs use a random 16-hex attempt id and a classified
+outcome. Phone numbers, email addresses, codes, verification ids, tokens, and
+full UIDs are not logged.
+
+### Before and after
+
+The 6958334 handler, executed with injected ports and synthetic storage:
+
+- Sign-out while completion was in flight left `busy` true and did not navigate.
+- An unresolved completion was still busy after 50ms.
+- A thrown local-key failure cleared busy, then the retry called completion again.
+- Synthetic `010203` was passed through as a string.
+
+After the correction, `reactivationEmailVerification.test.ts` prints ok.
+The same ports cover a leading-zero success, wrong, expired, and superseded
+codes, a callable rejection, an unresolved request, server success with no
+response followed by an active account read, server success followed by local
+preparation failure and a retry that does not call completion again, a
+duplicate tap, sign-out during the call, and a late completion after Back.
+`reactivationOtp.unit.test.ts` prints ok, including the leading-zero
+transaction and the unchanged job generation on a second completion.
+`reactivationRouting.test.ts`, `safeDiagnostics.test.ts`, and
+`logger.privacy.test.ts` print ok.
+
+Changed files: `app/(auth)/account-pending-deletion.tsx`,
+`src/services/auth/reactivationEmailVerification.ts`,
+`src/services/auth/reactivationEmailVerification.test.ts`,
+`src/state/auth.tsx`, `src/utils/safeDiagnostics.ts`,
+`src/i18n/locales/en.json`, `src/i18n/locales/hi.json`,
+`src/i18n/locales/en.ts`, `src/i18n/locales/hi.ts`,
+`functions/src/reactivation/reactivationOtp.unit.test.ts`, and this sheet.
+The function source is unchanged.
+
+### What this does not close
+
+The correction does not need a function deployment. It is not fixed on a
+device until the signed versionCode 35 build below is installed and one
+reactivation reaches the account screen. SMS delivery for the earlier
+incident remains unresolved. Reactivation completion and session restoration
+for the 7 Nov attempt were not confirmed.
+
+versionCode 34 is already the internal-grin build `d9db5252` from `a3db411`.
+The verification binary uses versionCode 35 so it does not reuse that code.
+It is not a Play upload, a function deploy, or a merge.
+
+### VersionCode 35 artifact
+
+EAS build `31f93ac2-137f-4f45-aea2-027532941e3e` finished at
+`2026-11-07T09:34:40Z` from
+`2b1929d999b78275aa951015664c4da4a35bc052`, profile `internal-grin`,
+SDK 54.0.0, version 1.0.0 / versionCode 35. A later documentation commit is
+not the binary source. Artifact
+`https://expo.dev/artifacts/eas/dMDR3qi9tvpul0zcOCzsQeob_Ybk3AdCZMGGCWwO81E.aab`,
+79,774,390 bytes, SHA-256
+`98ff86b6bb4622f10428c6c1e899525188ac579852852111e24ac0fda9141234`.
+Local copy `/tmp/vyaamikk-2b1929d-vc35.aab`.
+
+The manifest package is `com.specialsoftwares.vyaamikkdiary`, versionName
+1.0.0, versionCode 35. The upload certificate matches the versionCode 34
+artifact: SHA-256
+`E6:88:FA:0B:A5:FA:3B:D3:05:85:11:4F:8C:21:43:E1:EF:DD:A1:AC:BF:DB:9D:AA:DC:42:DA:89:61:78:75:2A`
+and SHA-1
+`20:F8:15:0E:21:3C:9C:3F:84:FD:CA:C5:1E:9E:4D:CC:EE:A2:42:AD`.
+The local `google-services.json` was not part of the uploaded archive. The
+builder injected the existing EAS production file variable, the pre-install
+identity check passed for package `com.specialsoftwares.vyaamikkdiary`, and
+the packaged resources contain Firebase project `vyaamikk-diary` and one
+Android app id. Expo Doctor reported a non-blocking patch mismatch
+(`expo` 54.0.36 against the SDK's expected 54.0.37) and the build continued.
+This binary was not uploaded to Play and is not installed. Canonical CI on
+`2b1929d` printed `ci:verify PASS`:
+https://github.com/specialsoftwares/vyaamikk-diary/actions/runs/42357342940.
+
+## Combined phone authentication candidate
+
+On 7 Nov 2026 the handset was not attached, so the installed versionCode was
+not read. The owner reported updating to versionCode 35. The only finished
+EAS build with that code is `31f93ac2` from `2b1929d`. That source contains
+the reactivation verification correction and the older phone-send plan. It
+does not contain the saved-challenge resume correction.
+
+| Correction | In `2b1929d` / build `31f93ac2` | In this candidate |
+| --- | --- | --- |
+| Explicit resend uses `forceResend`, and a missing deadline does not send | Yes. `planPhoneVerification` from the phone-send readiness correction | Yes. Screen and handler both call `presentedPhoneResend` |
+| Reactivation email wait, reconciliation, and leading-zero code | Yes | Yes |
+| Resume OTP only when the phone, verification id, and unexpired native session match | No. Launch opens OTP from the wrapper alone | Yes |
+| An expired native-session read does not delete a newer session | No | Yes |
+| Restored challenge gets an in-memory generation and verification id | No. Generation stays 0, so verify does not continue, automatic verification does not match, and Change number returns | Yes |
+| One resend deadline for the countdown and the handler | No. A null deadline is tappable and then becomes a new 30-second cooldown with no message | Yes |
+| Restored OTP copy does not say that opening the app sent a new SMS | No. The screen says the code was sent | Yes |
+
+Before this candidate, with the production machine and the versionCode 35
+launch path: manual continuation, Change number, and automatic verification
+all failed while generation was 0; a 19-second deadline did not send and kept
+the same timestamp; after that timestamp the plan was one explicit resend;
+a missing deadline was tappable and the plan replaced it with a new cooldown.
+After the correction, `phoneAuthRestoreFlow.test.ts` prints ok for that
+19-second cooldown, the separate post-expiry send, the missing deadline,
+a valid resume, an expired or mismatched saved challenge, a newer in-memory
+challenge left in place, and automatic verification only when the restored
+phone matches. `signedOutChallengeResume.test.ts`,
+`phoneVerificationPlan.test.ts`, `phoneOtpChallengeMachine.test.ts`,
+`nativePhoneAuthSession.race.test.ts`, `reactivationEmailVerification.test.ts`,
+`reactivationRouting.test.ts`, `phoneSendProvenance.test.ts`, and
+`nativePhoneAuth.test.ts` also print ok.
+
+The phone-send readiness correction already on main was kept. Its plan and
+provenance tests pass, and the screen no longer has a second resend rule.
+No function source changed. versionCode stays 35. Build `31f93ac2` does not
+contain this candidate, so a later install needs a new versionCode. That
+build has not been started. Play upload and handset installation remain
+separate and are not done. The incident stays open until a signed build of
+this candidate completes phone verification, any required reactivation,
+account-screen entry, and relaunch.

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import {
+  adoptRestoredPhoneChallenge,
   beginPhoneOtpSend,
   beginPhoneOtpVerify,
   completePhoneOtpSend,
@@ -61,6 +62,31 @@ function testResendRetiresOld() {
   assert.equal(isCurrentPhoneChallenge(retired, 1), false);
 }
 
+function testRestoredChallengeOwnsGeneration() {
+  const idle = createPhoneOtpChallengeMachine();
+  assert.equal(isCurrentPhoneChallenge(idle, idle.generation), false);
+  assert.equal(idle.verificationId, null);
+  const adopted = adoptRestoredPhoneChallenge(idle, "challenge-a");
+  assert.equal(adopted.generation > 0, true);
+  assert.equal(adopted.verificationId, "challenge-a");
+  assert.equal(adopted.sendLocked, false);
+  assert.equal(isCurrentPhoneChallenge(adopted, adopted.generation), true);
+  const locked = beginPhoneOtpVerify(adopted, adopted.generation);
+  assert.ok(locked);
+  assert.equal(isCurrentPhoneChallenge(locked!, locked!.generation), true);
+  const again = adoptRestoredPhoneChallenge(adopted, "challenge-a");
+  assert.equal(again.generation, adopted.generation);
+  const inFlight = beginPhoneOtpSend(adopted);
+  assert.ok(inFlight);
+  const kept = adoptRestoredPhoneChallenge(inFlight!, "challenge-b");
+  assert.equal(kept.verificationId, null);
+  assert.equal(kept.generation, inFlight!.generation);
+  const retired = retirePhoneChallenge(adopted);
+  assert.equal(isCurrentPhoneChallenge(retired, adopted.generation), false);
+  assert.equal(retired.verificationId, null);
+}
+
+testRestoredChallengeOwnsGeneration();
 testSendStartsOncePerTap();
 testGenerationIncrementsAndStaleIgnored();
 testVerifyOnceAndStaleCallback();

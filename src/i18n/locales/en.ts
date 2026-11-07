@@ -133,6 +133,8 @@ const en = {
       verifying: "Verifying…",
       changeNumber: "Change mobile number",
       codeSentTo: "Code sent to {{phone}}",
+      restoredCode: "Enter the code already sent to {{phone}}. Opening the app did not send a new SMS.",
+      resendWait: "Wait for the timer before requesting another code.",
       retryAccountSetup: "Try again (no new SMS)",
       retryAccountSetupA11y: "Try account setup again",
       tryAgainIn: "Try again in {{time}}",
@@ -1321,6 +1323,10 @@ const en = {
     reactivateAttempts: "Too many attempts. Wait and request a new code.",
     reactivateUnavailable: "This account cannot be reactivated from the app. Contact support.",
     reactivateLatestCode: "That code is no longer valid. Use the latest email.",
+    reactivateUnknown:
+      "We could not confirm whether reactivation finished. Wait a moment, then try again without requesting another code.",
+    reactivateLocalFailed:
+      "The account may already be reactivated, but this device could not finish signing in. Try again without requesting a new code.",
     verifyAndReactivate: "Verify & reactivate account",
     backToLogin: "Back to login",
     cancelSuccessTitle: "Deletion cancelled",

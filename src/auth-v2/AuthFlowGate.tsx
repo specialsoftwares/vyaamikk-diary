@@ -15,11 +15,11 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import {
   clearAuthWrapperChallenge,
   clearAuthWrapperProgress,
-  loadAuthWrapperChallenge,
   markAuthWrapperEmailComplete,
   markAuthWrapperEmailPending,
   saveAuthWrapperChallenge,
 } from "@/auth-v2/authWrapperProgress";
+import { resumeSignedOutPhoneChallenge } from "@/auth-v2/signedOutChallengeResume";
 import {
   phoneFallbackMayClaimSessionExpired,
   resolveAuthFlowGateRenderBranch,
@@ -36,6 +36,7 @@ import { PhoneEntryScreen } from "@/auth-v2/screens/PhoneEntryScreen";
 import { onboardingMark, onboardingMeasure } from "@/auth-v2/onboardingPerfProbe";
 import { sendOtpForWrapper } from "@/auth-v2/services/authWrapperService";
 import {
+  adoptRestoredPhoneChallenge,
   beginPhoneOtpSend,
   beginPhoneOtpVerify,
   completePhoneOtpSend,
@@ -54,6 +55,7 @@ import {
   getNativeAuthUid,
   isChallengeAutoVerified,
   observePostSendAuthForChallenge,
+  restorePendingPhoneSessionForResume,
   subscribeNativeAuthState,
 } from "@/services/auth/nativePhoneAuth";
 import { phonesMatchE164 } from "@/services/auth/phoneChallengeAuthInvariant";
@@ -62,7 +64,11 @@ import {
   resolveFreshPhoneSendTarget,
   resolveResendPhoneSendTarget,
 } from "@/services/auth/phoneSendProvenance";
-import { planPhoneVerification } from "@/services/auth/phoneVerificationPlan";
+import {
+  presentedPhoneResend,
+  sharedPhoneResendDeadline,
+} from "@/services/auth/phoneVerificationPlan";
+import { formatDisplayPhone } from "@/utils/phone";
 import { routeAccountSetupFailure } from "@/services/auth/reactivationRouting";
 import {
   DEFAULT_AUTH_V2_COUNTRY_CODE,
@@ -231,6 +237,7 @@ export function AuthFlowGate() {
   const [emailExpiresAt, setEmailExpiresAt] = useState<number | null>(null);
   const [mobileExpiresAt, setMobileExpiresAt] = useState<number | null>(null);
   const [mobileResendAvailableAt, setMobileResendAvailableAt] = useState<number | null>(null);
+  const [phoneOtpRestored, setPhoneOtpRestored] = useState(false);
   const [mobileLockUntil, setMobileLockUntil] = useState<number | null>(null);
   const [mobileOtpDigits, setMobileOtpDigits] = useState("");
   const [verificationVisual, setVerificationVisual] = useState<null | {
@@ -603,31 +610,37 @@ export function AuthFlowGate() {
         return;
       }
 
-      const snap = await loadAuthWrapperChallenge();
-      const digitSnap = snap
-        ? await import("@/services/auth/mobileOtpSecureDigits").then((m) => m.loadMobileOtpDigitSnapshot())
-        : null;
-      if (snap && !cancelled) {
-        const restoredResendAt =
-          digitSnap &&
-          digitSnap.verificationId === snap.verificationId &&
-          phonesMatchE164(digitSnap.phoneE164, snap.phoneE164)
-            ? digitSnap.resendAvailableAt
-            : null;
-        setPhoneE164(snap.phoneE164);
-        setChallenge({
-          verificationId: snap.verificationId,
-          phoneE164: snap.phoneE164,
-          devCodeHint: snap.devCodeHint,
-          resendAvailableAt: restoredResendAt ?? undefined,
-        });
-        if (restoredResendAt != null) setMobileResendAvailableAt(restoredResendAt);
-        setDevHint(snap.devCodeHint);
-        setStep("otp");
-        setPhoneDraft({
-          countryCode: DEFAULT_AUTH_V2_COUNTRY_CODE,
-          localNumber: localDigitsFromE164(snap.phoneE164),
-        });
+      const launchGeneration = phoneOtpRef.current.generation;
+      const resumed = await resumeSignedOutPhoneChallenge({
+        isCurrent: () => !cancelled && phoneOtpRef.current.generation === launchGeneration,
+      });
+      if (!cancelled && phoneOtpRef.current.generation === launchGeneration && resumed.action === "resume") {
+        const adopted = adoptRestoredPhoneChallenge(phoneOtpRef.current, resumed.verificationId);
+        if (adopted.verificationId === resumed.verificationId && adopted.generation > 0) {
+          phoneOtpRef.current = adopted;
+          const ownedGeneration = adopted.generation;
+          await restorePendingPhoneSessionForResume(resumed.verificationId, resumed.phoneE164);
+          if (!cancelled && isCurrentPhoneChallenge(phoneOtpRef.current, ownedGeneration)) {
+            const deadline = sharedPhoneResendDeadline(resumed.resendAvailableAt, Date.now());
+            setPhoneE164(resumed.phoneE164);
+            setChallenge({
+              verificationId: resumed.verificationId,
+              phoneE164: resumed.phoneE164,
+              devCodeHint: resumed.devCodeHint,
+              resendAvailableAt: deadline,
+            });
+            setMobileResendAvailableAt(deadline);
+            setPhoneOtpRestored(true);
+            setDevHint(resumed.devCodeHint);
+            setStep("otp");
+            setPhoneDraft({
+              countryCode: DEFAULT_AUTH_V2_COUNTRY_CODE,
+              localNumber: localDigitsFromE164(resumed.phoneE164),
+            });
+          }
+        }
+      } else if (!cancelled) {
+        setPhoneOtpRestored(false);
       }
       if (!cancelled) setHydrated(true);
     })();
@@ -833,6 +846,7 @@ export function AuthFlowGate() {
       if (completed) phoneOtpRef.current = completed;
       authPerfMark("T3_firebase_challenge");
       clearFlowError();
+      setPhoneOtpRestored(false);
       setChallenge({ ...next, devCodeHint: null });
       setDevHint(null);
       setPhoneChallengeProven(false);
@@ -1177,15 +1191,16 @@ export function AuthFlowGate() {
     });
     assertPhoneSendProvenance(provenance);
     const sendPhone = provenance.firebaseSendPhoneE164;
-    const resendPlan = planPhoneVerification({
-      intent: "explicit_resend",
+    const storedDeadline = mobileResendAvailableAt ?? challenge.resendAvailableAt ?? null;
+    const resendDecision = presentedPhoneResend({
+      resendAvailableAt: storedDeadline,
       now: Date.now(),
-      resendAvailableAt: mobileResendAvailableAt ?? challenge.resendAvailableAt ?? null,
     });
-    if (resendPlan.action !== "send" || !resendPlan.forceResend) {
-      if (resendPlan.action === "cooldown") {
-        setMobileResendAvailableAt(resendPlan.resendAvailableAt);
-        clearFlowError();
+    if (!resendDecision.invoke || !resendDecision.forceResend) {
+      if (storedDeadline == null) {
+        const deadline = sharedPhoneResendDeadline(null, Date.now());
+        setMobileResendAvailableAt(deadline);
+        applyFlowError(new AppError("otp_send_failed", t("authV2.otp.resendWait")), "phone_otp");
       }
       return;
     }
@@ -1218,6 +1233,7 @@ export function AuthFlowGate() {
       );
       if (completed) phoneOtpRef.current = completed;
       clearFlowError();
+      setPhoneOtpRestored(false);
       setChallenge({ ...next, devCodeHint: null });
       setDevHint(null);
       setMobileOtpDigits("");
@@ -1517,6 +1533,7 @@ export function AuthFlowGate() {
     const isResetCurrent = () => phoneOtpRef.current.generation === resetGeneration;
     verifiedPhoneProfileRef.current = null;
     autoVerifyHandledRef.current = null;
+    setPhoneOtpRestored(false);
     setStep("phone");
     setChallenge(null);
     clearFlowError();
@@ -1610,6 +1627,11 @@ export function AuthFlowGate() {
         phoneE164={challenge.phoneE164}
         devCodeHint={null}
         resendAvailableAt={mobileResendAvailableAt ?? challenge.resendAvailableAt ?? null}
+        subtitle={
+          phoneOtpRestored
+            ? t("authV2.otp.restoredCode", { phone: formatDisplayPhone(challenge.phoneE164) })
+            : undefined
+        }
         lockUntil={mobileLockUntil}
         initialDigits={mobileOtpDigits}
         onDigitsChange={(digits) => {
