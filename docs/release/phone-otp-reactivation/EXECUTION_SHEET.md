@@ -429,3 +429,7 @@ deployment. It is not fixed on a device until that signed build completes
 reactivation and reaches the account screen. SMS delivery for the earlier
 incident remains unresolved. Reactivation completion and session restoration
 for the 7 Nov attempt were not confirmed.
+
+versionCode 34 is already the internal-grin build `d9db5252` from `a3db411`.
+The verification binary uses versionCode 35 so it does not reuse that code.
+It is not a Play upload, a function deploy, or a merge.
