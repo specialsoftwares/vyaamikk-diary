@@ -23,8 +23,15 @@ import {
   useIdentityCallables,
 } from "@/services/auth/identityCallable";
 import { reactivationPublicMessageId } from "@/services/auth/reactivationRouting";
+import {
+  createReactivationEmailVerification,
+  readAuthoritativeReactivationAccount,
+} from "@/services/auth/reactivationEmailVerification";
 import { useAuthoritativeResendCountdown } from "@/hooks/useAuthoritativeResendCountdown";
 import { useIsOnline } from "@/state/network";
+import { createLogger } from "@/utils/logger";
+
+const reactivationLog = createLogger("auth/reactivation");
 
 const EMAIL_CODE_LENGTH = 6;
 
@@ -48,6 +55,7 @@ export default function AccountPendingDeletionScreen() {
   const [emailCode, setEmailCode] = useState("");
   const [resendAvailableAt, setResendAvailableAt] = useState<number | null>(null);
   const codeInputRef = useRef<TextInput>(null);
+  const verificationRef = useRef(createReactivationEmailVerification());
   const online = useIsOnline();
   const resend = useAuthoritativeResendCountdown(resendAvailableAt);
 
@@ -161,33 +169,47 @@ export default function AccountPendingDeletionScreen() {
   };
 
   const onVerifyEmailAndReactivate = async () => {
-    if (!online) {
-      setError(t("pendingDeletion.reactivateOffline"));
-      return;
-    }
     if (!verificationId || emailCode.length !== EMAIL_CODE_LENGTH) return;
     const owner = captureProfileWriteOwnership(readLiveProfileUid() ?? "");
     const isCurrent = () => profileWriteStillOwned(owner, readLiveProfileUid());
-    if (!isCurrent()) return;
     const submitted = emailCode;
     setBusy(true);
     setError(null);
-    try {
-      const { profile } = await callCompleteAccountReactivation(verificationId, submitted);
-      if (!isCurrent()) return;
-      await finishReactivation(profile, owner);
-      if (!isCurrent()) return;
-      setEmailCode("");
+    const view = await verificationRef.current.submit({
+      code: submitted,
+      challengeId: verificationId,
+      online,
+      isCurrent,
+      complete: async (challengeId, code) => {
+        const { profile } = await callCompleteAccountReactivation(challengeId, code);
+        return profile;
+      },
+      finish: (profile, stillCurrent) => finishReactivation(profile, owner, stillCurrent),
+      readAccount: readAuthoritativeReactivationAccount,
+      messageFor: reactivationMessage,
+      offlineMessage: t("pendingDeletion.reactivateOffline"),
+      unknownMessage: t("pendingDeletion.reactivateUnknown"),
+      localFailureMessage: t("pendingDeletion.reactivateLocalFailed"),
+      record: (event) => {
+        reactivationLog.warn("reactivation verification", {
+          attemptId: event.attemptId,
+          kind: event.outcome,
+          reactivationStage: event.stage,
+          ms: event.elapsedMs,
+          callableName: "completeAccountReactivation",
+        });
+      },
+    });
+    if (!view.apply) return;
+    setBusy(view.busy);
+    setError(view.error);
+    if (view.clearCode) setEmailCode("");
+    if (view.navigate && isCurrent()) {
       Alert.alert(
         t("pendingDeletion.reactivateSuccessTitle"),
         t("pendingDeletion.reactivateSuccessBody"),
         [{ text: t("common.ok"), onPress: () => { if (isCurrent()) router.replace("/"); } }]
       );
-    } catch (e) {
-      if (!isCurrent()) return;
-      setError(reactivationMessage(e));
-    } finally {
-      if (isCurrent()) setBusy(false);
     }
   };
 
@@ -243,10 +265,11 @@ export default function AccountPendingDeletionScreen() {
                 label={t("pendingDeletion.backToLogin")}
                 variant="ghost"
                 onPress={() => {
+                  verificationRef.current.retire();
+                  setBusy(false);
                   setEmailCode("");
                   void onBackToLogin();
                 }}
-                disabled={busy}
               />
             </View>
           }

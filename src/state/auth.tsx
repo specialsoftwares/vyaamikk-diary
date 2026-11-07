@@ -188,7 +188,11 @@ interface AuthApi extends AuthState {
   requestAccountDeletion(): Promise<import("@/domain/accountDeletion").AccountDeletionResult>;
   cancelAccountDeletion(phoneE164: PhoneE164): Promise<UserProfile>;
   /** Save session after production account reactivation (post email verify). */
-  finishReactivation(profile: UserProfile, ownership?: ProfileWriteOwnership): Promise<UserProfile>;
+  finishReactivation(
+    profile: UserProfile,
+    ownership?: ProfileWriteOwnership,
+    stillCurrent?: () => boolean
+  ): Promise<UserProfile>;
   acknowledgeUEID(): void;
   updateProfile(
     patch: ProfilePatch,
@@ -539,9 +543,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const finishReactivation = useCallback(
-    async (profile: UserProfile, ownership?: ProfileWriteOwnership) => {
+    async (profile: UserProfile, ownership?: ProfileWriteOwnership, stillCurrent?: () => boolean) => {
       const owner = ownership ?? captureProfileWriteOwnership(profile.uid);
-      const liveUid = () => getActiveBackend() === "firebase-production" ? readLiveProfileUid() : profile.uid;
+      const liveUid = () => {
+        if (stillCurrent && !stillCurrent()) return null;
+        return getActiveBackend() === "firebase-production" ? readLiveProfileUid() : profile.uid;
+      };
       await publishOwnedProfileSession({
         profileUid: profile.uid,
         owner,

@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
 import { DELETION_GRACE_MS } from "../deletion/finalPurge";
+import { digestBoundOtp } from "../email/otpCrypto";
 import { EMPTY_PHASES } from "../deletion/deletionJob";
 import { resolveAuthoritativePhoneAuthIdentity } from "../identity/phoneAuthClaimBinding";
 import { decideCallableAdmission } from "../identity/sessionSecurityPolicy";
@@ -17,6 +18,7 @@ import {
   REACTIVATION_JOBS,
   REACTIVATION_LIMITS,
   REACTIVATION_PHONE_INDEX,
+  REACTIVATION_PURPOSE,
   REACTIVATION_SEND_GAP_MS,
   REACTIVATION_USERS,
   reactivationWindowDeadline,
@@ -699,6 +701,96 @@ function testReleaseReachability(): void {
   assert.match(limits, /REACTIVATION_PURPOSE = "account_reactivation"/);
 }
 
+async function testLeadingZeroCodeStaysSixCharacters(): Promise<void> {
+  const code = "010203";
+  const db = new MemoryDb();
+  const now = 1_700_000_000_000;
+  seed(db, now);
+  const challengeId = "challenge-leading-zero";
+  const emailVersion = now - 60_000;
+  const generation = 1;
+  db.docs.set(`${REACTIVATION_CHALLENGES}/${challengeId}`, {
+    challengeId,
+    userId: UID,
+    purpose: REACTIVATION_PURPOSE,
+    deletionGeneration: generation,
+    emailVersion,
+    otpDigest: digestBoundOtp(SECRET, [
+      REACTIVATION_PURPOSE,
+      UID,
+      challengeId,
+      String(generation),
+      String(emailVersion),
+      code,
+    ]),
+    expiresAt: now + 60_000,
+    deliveryState: "accepted",
+    status: "accepted",
+    incorrectAttempts: 0,
+  });
+  const done = await performCompleteAccountReactivation({
+    db,
+    uid: UID,
+    challengeId,
+    code,
+    now: now + 1_000,
+    env: ENV,
+  });
+  assert.equal(done.profile.status, "active");
+  assert.equal(String(Number(code)) === code, false);
+  const job = db.docs.get(`${REACTIVATION_JOBS}/${UID}`);
+  assert.equal(job?.status, "cancelled");
+  assert.equal(job?.generation, 2);
+  await assert.rejects(() =>
+    performCompleteAccountReactivation({
+      db,
+      uid: UID,
+      challengeId,
+      code,
+      now: now + 2_000,
+      env: ENV,
+    })
+  );
+  const after = db.docs.get(`${REACTIVATION_JOBS}/${UID}`);
+  assert.equal(after?.generation, 2);
+  assert.equal(after?.status, "cancelled");
+  assert.equal(db.docs.get(`${REACTIVATION_USERS}/${UID}`)?.status, "active");
+
+  const stripped = new MemoryDb();
+  seed(stripped, now);
+  stripped.docs.set(`${REACTIVATION_CHALLENGES}/challenge-stripped`, {
+    challengeId: "challenge-stripped",
+    userId: UID,
+    purpose: REACTIVATION_PURPOSE,
+    deletionGeneration: generation,
+    emailVersion,
+    otpDigest: digestBoundOtp(SECRET, [
+      REACTIVATION_PURPOSE,
+      UID,
+      "challenge-stripped",
+      String(generation),
+      String(emailVersion),
+      code,
+    ]),
+    expiresAt: now + 60_000,
+    deliveryState: "accepted",
+    status: "accepted",
+    incorrectAttempts: 0,
+  });
+  await assert.rejects(() =>
+    performCompleteAccountReactivation({
+      db: stripped,
+      uid: UID,
+      challengeId: "challenge-stripped",
+      code: String(Number(code)),
+      now: now + 1_000,
+      env: ENV,
+    })
+  );
+  assert.equal(stripped.docs.get(`${REACTIVATION_USERS}/${UID}`)?.status, "pending_deletion");
+  assert.equal(stripped.docs.get(`${REACTIVATION_JOBS}/${UID}`)?.generation, 1);
+}
+
 async function main(): Promise<void> {
   await testHappyPath();
   await testProviderRejectionDoesNotActivate();
@@ -709,6 +801,7 @@ async function main(): Promise<void> {
   await testStoredCutoffClosesBeforeLaterSchedule();
   await testDeployedResolverCompatibility();
   await testParallelVerifyConsumesOnce();
+  await testLeadingZeroCodeStaysSixCharacters();
   testReleaseReachability();
   console.log("reactivationOtp.unit.test.ts: ok");
 }
