@@ -424,12 +424,40 @@ The function source is unchanged.
 
 ### What this does not close
 
-This correction needs a new Android build. It does not need a function
-deployment. It is not fixed on a device until that signed build completes
-reactivation and reaches the account screen. SMS delivery for the earlier
+The correction does not need a function deployment. It is not fixed on a
+device until the signed versionCode 35 build below is installed and one
+reactivation reaches the account screen. SMS delivery for the earlier
 incident remains unresolved. Reactivation completion and session restoration
 for the 7 Nov attempt were not confirmed.
 
 versionCode 34 is already the internal-grin build `d9db5252` from `a3db411`.
 The verification binary uses versionCode 35 so it does not reuse that code.
 It is not a Play upload, a function deploy, or a merge.
+
+### VersionCode 35 artifact
+
+EAS build `31f93ac2-137f-4f45-aea2-027532941e3e` finished at
+`2026-11-07T09:34:40Z` from
+`2b1929d999b78275aa951015664c4da4a35bc052`, profile `internal-grin`,
+SDK 54.0.0, version 1.0.0 / versionCode 35. A later documentation commit is
+not the binary source. Artifact
+`https://expo.dev/artifacts/eas/dMDR3qi9tvpul0zcOCzsQeob_Ybk3AdCZMGGCWwO81E.aab`,
+79,774,390 bytes, SHA-256
+`98ff86b6bb4622f10428c6c1e899525188ac579852852111e24ac0fda9141234`.
+Local copy `/tmp/vyaamikk-2b1929d-vc35.aab`.
+
+The manifest package is `com.specialsoftwares.vyaamikkdiary`, versionName
+1.0.0, versionCode 35. The upload certificate matches the versionCode 34
+artifact: SHA-256
+`E6:88:FA:0B:A5:FA:3B:D3:05:85:11:4F:8C:21:43:E1:EF:DD:A1:AC:BF:DB:9D:AA:DC:42:DA:89:61:78:75:2A`
+and SHA-1
+`20:F8:15:0E:21:3C:9C:3F:84:FD:CA:C5:1E:9E:4D:CC:EE:A2:42:AD`.
+The local `google-services.json` was not part of the uploaded archive. The
+builder injected the existing EAS production file variable, the pre-install
+identity check passed for package `com.specialsoftwares.vyaamikkdiary`, and
+the packaged resources contain Firebase project `vyaamikk-diary` and one
+Android app id. Expo Doctor reported a non-blocking patch mismatch
+(`expo` 54.0.36 against the SDK's expected 54.0.37) and the build continued.
+This binary was not uploaded to Play and is not installed. Canonical CI on
+`2b1929d` printed `ci:verify PASS`:
+https://github.com/specialsoftwares/vyaamikk-diary/actions/runs/42357342940.
