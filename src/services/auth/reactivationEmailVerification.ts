@@ -54,7 +54,7 @@ type SubmitInput = {
   online: boolean;
   isCurrent: () => boolean;
   complete: (challengeId: string, code: string) => Promise<UserProfile>;
-  finish: (profile: UserProfile, stillCurrent: () => boolean) => Promise<void>;
+  finish: (profile: UserProfile, stillCurrent: () => boolean) => Promise<unknown>;
   readAccount: () => Promise<ReactivationAccountView>;
   messageFor: (error: unknown) => string;
   offlineMessage: string;
