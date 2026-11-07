@@ -417,6 +417,7 @@ Changed files: `app/(auth)/account-pending-deletion.tsx`,
 `src/services/auth/reactivationEmailVerification.ts`,
 `src/services/auth/reactivationEmailVerification.test.ts`,
 `src/state/auth.tsx`, `src/utils/safeDiagnostics.ts`,
+`src/i18n/locales/en.json`, `src/i18n/locales/hi.json`,
 `src/i18n/locales/en.ts`, `src/i18n/locales/hi.ts`,
 `functions/src/reactivation/reactivationOtp.unit.test.ts`, and this sheet.
 The function source is unchanged.
