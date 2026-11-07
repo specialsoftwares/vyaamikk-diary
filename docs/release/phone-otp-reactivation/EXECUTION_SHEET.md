@@ -190,7 +190,10 @@ deadline was created.
 
 ## Original SMS incident
 
-Still unresolved. Re-read on 2 Nov 2026: Cloud Logging returned no Identity
+Still unresolved. An owner report on 7 Nov 2026 that one phone OTP arrived
+during a later reactivation attempt does not close this incident. SMS
+delivery, reactivation completion, and session restoration stay separate
+results. Re-read on 2 Nov 2026: Cloud Logging returned no Identity
 Toolkit or phone-verification entries from 1 Nov 2026 through this review.
 No device log was available. The earlier account read still stands: a real
 phone user, SMS allowed to India, account not disabled, phone index matches,
@@ -328,3 +331,100 @@ live deletion job:
 
 The original missing SMS stays unresolved until the redacted capture above
 exists. Do not activate the reported account by hand.
+
+## Reactivation email verification stuck
+
+Separate from the SMS incident. The owner reports that the phone OTP arrived
+for the previously affected number, reactivation opened, and submitting the
+email code left Verify busy while Resend code and Back to login were
+disabled. The code on screen was six characters and began with zero. That
+code is not copied here.
+
+### What was read
+
+The handset was not attached. `adb devices` was empty, so the installed
+versionCode was not read. Do not treat versionCode 34, `a3db411`, or draft
+PR #51 as the running binary. App storage and the login session were not
+cleared.
+
+The photograph is `PHOTO-2026-11-07-12-46-14.jpg`. Its status bar shows 12:46
+and the file was saved at 12:46 in IST (UTC+5:30). That is the photograph
+time, not an attempt timestamp from a client or server log.
+
+`gcloud` for `support.vyd@specialsoftwares.com` could not refresh credentials
+without an interactive login. Serving revisions, secret bindings, the
+challenge, the profile, and the deletion job were not re-read on 7 Nov 2026
+and were not changed. The last recorded serving pair remains
+`startaccountreactivation-00007-vih` and
+`completeaccountreactivation-00008-doh`. No account was reactivated by hand,
+no challenge was deleted, and no secret was rotated.
+
+### Path
+
+The email screen sets `busy` before `completeAccountReactivation` and clears
+it in `finally` only while profile ownership is still current. Resend and
+Back were disabled by that flag. The code field is cleared only after local
+session publication, and the photograph still showed the code, so publication
+had not finished.
+
+Last completed stage visible on the device: the email code screen was open
+and the verify control was busy. First stalled stage: loading-state cleanup.
+Whether the callable left the device, the server committed, or local key
+preparation hung is unknown for this attempt. A stuck spinner does not show
+that the server failed.
+
+A six-character numeric string is what both the field and
+`verifyReactivationCode` require. `generateEmailOtpCode` already pads to six
+characters. Synthetic code `010203` completes through the production
+transaction. The same value coerced with `Number` is `10203`, fails the
+six-character check, and leaves the account `pending_deletion` and the
+deletion job generation unchanged. Leading zero is not the stuck-button cause.
+
+### Correction
+
+`createReactivationEmailVerification` bounds the wait. A timeout does not
+cancel the server transaction. After an unknown result, or after the server
+returned success and local session preparation failed, the next attempt reads
+the account first. An active account finishes the local session and does not
+call completion again. A retired attempt, including Back, sign-out, and an
+account switch, does not publish or navigate, and the busy flag is cleared.
+Duplicate taps make one completion call. Wrong, expired, and superseded codes
+stay definite failures. Logs use a random 16-hex attempt id and a classified
+outcome. Phone numbers, email addresses, codes, verification ids, tokens, and
+full UIDs are not logged.
+
+### Before and after
+
+The 6958334 handler, executed with injected ports and synthetic storage:
+
+- Sign-out while completion was in flight left `busy` true and did not navigate.
+- An unresolved completion was still busy after 50ms.
+- A thrown local-key failure cleared busy, then the retry called completion again.
+- Synthetic `010203` was passed through as a string.
+
+After the correction, `reactivationEmailVerification.test.ts` prints ok.
+The same ports cover a leading-zero success, wrong, expired, and superseded
+codes, a callable rejection, an unresolved request, server success with no
+response followed by an active account read, server success followed by local
+preparation failure and a retry that does not call completion again, a
+duplicate tap, sign-out during the call, and a late completion after Back.
+`reactivationOtp.unit.test.ts` prints ok, including the leading-zero
+transaction and the unchanged job generation on a second completion.
+`reactivationRouting.test.ts`, `safeDiagnostics.test.ts`, and
+`logger.privacy.test.ts` print ok.
+
+Changed files: `app/(auth)/account-pending-deletion.tsx`,
+`src/services/auth/reactivationEmailVerification.ts`,
+`src/services/auth/reactivationEmailVerification.test.ts`,
+`src/state/auth.tsx`, `src/utils/safeDiagnostics.ts`,
+`src/i18n/locales/en.ts`, `src/i18n/locales/hi.ts`,
+`functions/src/reactivation/reactivationOtp.unit.test.ts`, and this sheet.
+The function source is unchanged.
+
+### What this does not close
+
+This correction needs a new Android build. It does not need a function
+deployment. It is not fixed on a device until that signed build completes
+reactivation and reaches the account screen. SMS delivery for the earlier
+incident remains unresolved. Reactivation completion and session restoration
+for the 7 Nov attempt were not confirmed.
