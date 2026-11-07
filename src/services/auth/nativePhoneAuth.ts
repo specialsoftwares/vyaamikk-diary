@@ -640,6 +640,49 @@ export async function signOutNativePhoneAuth(): Promise<boolean> {
   return true;
 }
 
+/**
+ * Reattach a saved verification to memory after relaunch. Does not send,
+ * and does not replace a different challenge already held in memory.
+ */
+export async function restorePendingPhoneSessionForResume(
+  verificationId: string,
+  phoneE164: string
+): Promise<boolean> {
+  purgeExpiredSessions();
+  const phone = normalizePhoneE164(phoneE164);
+  for (const id of pendingByVerificationId.keys()) {
+    if (id !== verificationId) return false;
+  }
+  const existing = pendingByVerificationId.get(verificationId);
+  if (
+    existing &&
+    phonesMatchE164(existing.phoneE164, phone) &&
+    existing.expiresAt > Date.now()
+  ) {
+    return true;
+  }
+  const persisted = await loadNativePhoneAuthSession();
+  if (
+    !persisted ||
+    persisted.firebaseVerificationId !== verificationId ||
+    !phonesMatchE164(persisted.phoneE164, phone) ||
+    persisted.expiresAt <= Date.now()
+  ) {
+    return false;
+  }
+  pendingByVerificationId.set(verificationId, {
+    confirmation: null,
+    firebaseVerificationId: persisted.firebaseVerificationId,
+    phoneE164: persisted.phoneE164,
+    expiresAt: persisted.expiresAt,
+    attemptId: persisted.attemptId,
+    startedAtMs: persisted.savedAt,
+    preSendUid: null,
+    autoVerify: null,
+  });
+  return true;
+}
+
 /** Test helper — clears in-memory confirmation cache (not SecureStore). */
 export function __clearNativePhoneSessions(): void {
   pendingByVerificationId.clear();

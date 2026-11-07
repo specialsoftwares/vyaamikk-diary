@@ -130,6 +130,8 @@ const hi: Translations = {
       verifying: "सत्यापन हो रहा है…",
       changeNumber: "मोबाइल नंबर बदलें",
       codeSentTo: "कोड {{phone}} पर भेजा गया",
+      restoredCode: "पहले भेजा गया कोड {{phone}} पर दर्ज करें। ऐप खोलने से नया एसएमएस नहीं गया।",
+      resendWait: "नया कोड माँगने से पहले टाइमर का इंतज़ार करें।",
       retryAccountSetup: "फिर कोशिश करें (नया SMS नहीं)",
       retryAccountSetupA11y: "खाता सेटअप फिर से आज़माएँ",
       tryAgainIn: "{{time}} में फिर कोशिश करें",

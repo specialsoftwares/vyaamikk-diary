@@ -25,6 +25,7 @@ import {
 } from "@/hooks/useAuthoritativeResendCountdown";
 import { formatOtpCountdownMmSs } from "@/utils/otpCountdownFormat";
 import { MOBILE_OTP_LENGTH } from "@/services/auth/mobileOtpConstants";
+import { presentedPhoneResend } from "@/services/auth/phoneVerificationPlan";
 
 interface OtpVerificationScreenProps {
   phoneE164: string;
@@ -230,21 +231,30 @@ export function OtpVerificationScreen({
       />
 
       <View style={styles.resendRow}>
-        {resendRemaining > 0 ? (
+        {resendRemaining > 0 || resendAvailableAt == null ? (
           <LocaleUiText
             style={[styles.resendHint, { color: tokens.secondaryActionMuted }]}
-            accessibilityLabel={t("otp.resendCountdown", {
-              time: formatOtpCountdownMmSs(resendRemaining),
-            })}
+            accessibilityLabel={
+              resendAvailableAt == null
+                ? t("authV2.otp.resendWait")
+                : t("otp.resendCountdown", { time: formatOtpCountdownMmSs(resendRemaining) })
+            }
           >
-            {t("otp.resendCountdown", { time: formatOtpCountdownMmSs(resendRemaining) })}
+            {resendAvailableAt == null
+              ? t("authV2.otp.resendWait")
+              : t("otp.resendCountdown", { time: formatOtpCountdownMmSs(resendRemaining) })}
           </LocaleUiText>
         ) : (
           <AuthTertiaryTextAction
             label={resending ? t("otp.resending") : t("otp.resend")}
             onPress={() => {
-              if (!canResend && resendAvailableAt != null) return;
-              if (resending || loading) return;
+              const decision = presentedPhoneResend({
+                resendAvailableAt,
+                now: Date.now(),
+                resending,
+                loading,
+              });
+              if (!decision.invoke || !decision.forceResend) return;
               setDigits("");
               onResend();
             }}

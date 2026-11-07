@@ -204,7 +204,7 @@ async function run() {
   assert.match(confirm, /sendOtpForWrapper\(sendPhone\)/);
   assert.equal(confirm.includes("forceResend"), false);
   const resend = gate.slice(gate.indexOf("const handleResend"), gate.indexOf("const handleEmailContinue"));
-  assert.ok(resend.indexOf("planPhoneVerification") < resend.indexOf("beginPhoneOtpSend"));
+  assert.ok(resend.indexOf("presentedPhoneResend") < resend.indexOf("beginPhoneOtpSend"));
   assert.match(resend, /startOtp\(sendPhone, \{ forceResend: true \}\)/);
   const launchCall = gate.slice(gate.indexOf("resumeSignedOutPhoneChallenge("), gate.indexOf("if (!cancelled) setHydrated(true);", gate.indexOf("resumeSignedOutPhoneChallenge(")));
   assert.match(launchCall, /phoneOtpRef\.current\.generation/);

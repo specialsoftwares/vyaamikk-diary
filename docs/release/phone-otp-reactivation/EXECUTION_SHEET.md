@@ -461,3 +461,45 @@ Android app id. Expo Doctor reported a non-blocking patch mismatch
 This binary was not uploaded to Play and is not installed. Canonical CI on
 `2b1929d` printed `ci:verify PASS`:
 https://github.com/specialsoftwares/vyaamikk-diary/actions/runs/42357342940.
+
+## Combined phone authentication candidate
+
+On 7 Nov 2026 the handset was not attached, so the installed versionCode was
+not read. The owner reported updating to versionCode 35. The only finished
+EAS build with that code is `31f93ac2` from `2b1929d`. That source contains
+the reactivation verification correction and the older phone-send plan. It
+does not contain the saved-challenge resume correction.
+
+| Correction | In `2b1929d` / build `31f93ac2` | In this candidate |
+| --- | --- | --- |
+| Explicit resend uses `forceResend`, and a missing deadline does not send | Yes. `planPhoneVerification` from the phone-send readiness correction | Yes. Screen and handler both call `presentedPhoneResend` |
+| Reactivation email wait, reconciliation, and leading-zero code | Yes | Yes |
+| Resume OTP only when the phone, verification id, and unexpired native session match | No. Launch opens OTP from the wrapper alone | Yes |
+| An expired native-session read does not delete a newer session | No | Yes |
+| Restored challenge gets an in-memory generation and verification id | No. Generation stays 0, so verify does not continue, automatic verification does not match, and Change number returns | Yes |
+| One resend deadline for the countdown and the handler | No. A null deadline is tappable and then becomes a new 30-second cooldown with no message | Yes |
+| Restored OTP copy does not say that opening the app sent a new SMS | No. The screen says the code was sent | Yes |
+
+Before this candidate, with the production machine and the versionCode 35
+launch path: manual continuation, Change number, and automatic verification
+all failed while generation was 0; a 19-second deadline did not send and kept
+the same timestamp; after that timestamp the plan was one explicit resend;
+a missing deadline was tappable and the plan replaced it with a new cooldown.
+After the correction, `phoneAuthRestoreFlow.test.ts` prints ok for that
+19-second cooldown, the separate post-expiry send, the missing deadline,
+a valid resume, an expired or mismatched saved challenge, a newer in-memory
+challenge left in place, and automatic verification only when the restored
+phone matches. `signedOutChallengeResume.test.ts`,
+`phoneVerificationPlan.test.ts`, `phoneOtpChallengeMachine.test.ts`,
+`nativePhoneAuthSession.race.test.ts`, `reactivationEmailVerification.test.ts`,
+`reactivationRouting.test.ts`, `phoneSendProvenance.test.ts`, and
+`nativePhoneAuth.test.ts` also print ok.
+
+The phone-send readiness correction already on main was kept. Its plan and
+provenance tests pass, and the screen no longer has a second resend rule.
+No function source changed. versionCode stays 35. Build `31f93ac2` does not
+contain this candidate, so a later install needs a new versionCode. That
+build has not been started. Play upload and handset installation remain
+separate and are not done. The incident stays open until a signed build of
+this candidate completes phone verification, any required reactivation,
+account-screen entry, and relaunch.

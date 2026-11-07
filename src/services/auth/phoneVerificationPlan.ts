@@ -5,6 +5,8 @@
  * forceResend is true and a force-resending token exists.
  */
 
+import { remainingSecondsUntil } from "@/utils/otpCountdownFormat";
+
 import { MOBILE_OTP_RESEND_COOLDOWN_MS } from "./mobileOtpConstants";
 
 export const ANDROID_PHONE_VERIFICATION_TIMEOUT_SECONDS = 60;
@@ -30,4 +32,74 @@ export function planPhoneVerification(input: {
   }
   if (until > input.now) return { action: "cooldown", resendAvailableAt: until };
   return { action: "send", forceResend: true };
+}
+
+/** The timestamp both the OTP screen and the resend handler must use. */
+export function sharedPhoneResendDeadline(
+  stored: number | null | undefined,
+  now: number
+): number {
+  if (typeof stored === "number" && Number.isFinite(stored)) return stored;
+  return now + MOBILE_OTP_RESEND_COOLDOWN_MS;
+}
+
+export type PresentedPhoneResend = {
+  showCountdown: boolean;
+  remainingSeconds: number;
+  invoke: boolean;
+  forceResend: boolean;
+  resendAvailableAt: number | null;
+};
+
+/**
+ * One resend decision for the control and the handler.
+ * A missing deadline is not presented as a send, and a tap does not invent a new one.
+ */
+export function presentedPhoneResend(input: {
+  resendAvailableAt: number | null;
+  now: number;
+  resending?: boolean;
+  loading?: boolean;
+}): PresentedPhoneResend {
+  const until = input.resendAvailableAt;
+  if (typeof until !== "number" || !Number.isFinite(until)) {
+    return {
+      showCountdown: false,
+      remainingSeconds: 0,
+      invoke: false,
+      forceResend: false,
+      resendAvailableAt: null,
+    };
+  }
+  const remainingSeconds = remainingSecondsUntil(until, input.now);
+  if (input.resending || input.loading || remainingSeconds > 0) {
+    return {
+      showCountdown: remainingSeconds > 0,
+      remainingSeconds,
+      invoke: false,
+      forceResend: false,
+      resendAvailableAt: until,
+    };
+  }
+  const plan = planPhoneVerification({
+    intent: "explicit_resend",
+    now: input.now,
+    resendAvailableAt: until,
+  });
+  if (plan.action === "send" && plan.forceResend) {
+    return {
+      showCountdown: false,
+      remainingSeconds: 0,
+      invoke: true,
+      forceResend: true,
+      resendAvailableAt: until,
+    };
+  }
+  return {
+    showCountdown: true,
+    remainingSeconds,
+    invoke: false,
+    forceResend: false,
+    resendAvailableAt: until,
+  };
 }

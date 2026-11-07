@@ -48,6 +48,7 @@
     "test:reactivation-email-verify": "npx --yes tsx src/services/auth/reactivationEmailVerification.test.ts",
     "test:phone-verification-plan": "npx --yes tsx src/services/auth/phoneVerificationPlan.test.ts",
     "test:signed-out-challenge-resume": "npx --yes tsx src/auth-v2/signedOutChallengeResume.test.ts",
+    "test:phone-auth-restore": "npx --yes tsx src/auth-v2/phoneAuthRestoreFlow.test.ts",
     "test:customer-credit": "npx --yes tsx src/domain/customerCredit.test.ts",
     "test:customer-credit-save": "npx --yes tsx src/services/customerCredit/saveLifecycle.test.ts",
     "test:haversine": "npx --yes tsx src/utils/geo/haversine.test.ts",

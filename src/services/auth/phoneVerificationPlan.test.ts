@@ -68,10 +68,10 @@ assert.match(hydrate, /setStep\("otp"\)/);
 assert.match(hydrate, /phoneOtpRef\.current\.generation/);
 assert.equal(hydrate.includes("startOtp("), false);
 assert.equal(hydrate.includes("sendOtpForWrapper("), false);
-assert.match(gate, /intent: "explicit_resend"/);
 assert.match(gate, /forceResend: true/);
 const resendStart = gate.indexOf("const handleResend = async");
 const resendBody = gate.slice(resendStart, gate.indexOf("const next = await startOtp", resendStart));
-assert.ok(resendBody.indexOf("planPhoneVerification") < resendBody.indexOf("beginPhoneOtpSend"));
+assert.ok(resendBody.indexOf("presentedPhoneResend") < resendBody.indexOf("beginPhoneOtpSend"));
+assert.match(readFileSync(resolve(process.cwd(), "src/services/auth/phoneVerificationPlan.ts"), "utf8"), /intent: "explicit_resend"/);
 
 console.log("phoneVerificationPlan.test.ts: ok");
