@@ -528,3 +528,8 @@ success with local session preparation failure, and an old completion after
 a newer attempt. No Android build was produced for this correction. SMS
 delivery, the installed binary, and completion of reactivation on the
 affected account remain unknown. The incident is not fixed.
+
+Canonical CI on `057086f` passed:
+https://github.com/specialsoftwares/vyaamikk-diary/actions/runs/42691539123.
+`ci:verify` completed in the `verify` job. versionCode remains 35. Build
+`31f93ac2` from `2b1929d` does not contain `057086f`.
