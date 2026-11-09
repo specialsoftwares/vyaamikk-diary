@@ -172,6 +172,8 @@ export function normaliseUserProfile(
         ? null
         : Number(raw.onboardingProfileVersion),
   };
+  // Historical server assessment only. A demographic band or a skip is not
+  // copied onto ageEligibility, and a missing assessment does not block the profile.
   if (
     raw.ageEligibility === "eligible" ||
     raw.ageEligibility === "ineligible" ||
@@ -190,8 +192,21 @@ export function normaliseUserProfile(
   return profile;
 }
 
+/**
+ * A demographic band, skip, or missing age is not `ageEligibility: "eligible"`.
+ * Missing age does not block the profile. A stored historical assessment is
+ * not an authorization decision.
+ */
+export function ageEligibilityFromDemographicProfile(raw: Record<string, unknown>): null {
+  void raw.demographicAgeBand;
+  void raw.demographicAgeRange;
+  void raw.ageEligibility;
+  return null;
+}
+
 /** Merge profile patch from settings / identity screen. Skips `updatedAt` when nothing changes. */
 export function applyProfilePatch(user: UserProfile, patch: ProfilePatch): UserProfile {
+  // Demographic age is device-only. It is not applied and cannot set ageEligibility.
   const next: UserProfile = { ...user };
   let changed = false;
 

@@ -78,11 +78,27 @@ async function delRaw(): Promise<void> {
   else if (api.removeItem) await api.removeItem(KEY);
 }
 
+let writeTail: Promise<void> = Promise.resolve();
+
+function enqueueWrite(work: () => Promise<void>): Promise<void> {
+  const next = writeTail.then(work, work);
+  writeTail = next.then(
+    () => undefined,
+    () => undefined
+  );
+  return next;
+}
+
 export async function saveNativePhoneAuthSession(
-  snap: Omit<NativePhoneAuthPersistedSession, "savedAt">
+  snap: Omit<NativePhoneAuthPersistedSession, "savedAt">,
+  isCurrent: () => boolean = () => true
 ): Promise<void> {
   const payload: NativePhoneAuthPersistedSession = { ...snap, savedAt: Date.now() };
-  await setRaw(JSON.stringify(payload));
+  const raw = JSON.stringify(payload);
+  await enqueueWrite(async () => {
+    if (!isCurrent()) return;
+    await setRaw(raw);
+  });
 }
 
 export async function loadNativePhoneAuthSession(): Promise<NativePhoneAuthPersistedSession | null> {
@@ -99,8 +115,10 @@ export async function loadNativePhoneAuthSession(): Promise<NativePhoneAuthPersi
     ) {
       return null;
     }
+    // An expired row is unusable, but this read must not delete the key.
+    // A newer save can land while this read is in flight; clearing here would
+    // remove that newer session. Sign-out and an explicit clear still remove it.
     if (parsed.expiresAt <= Date.now()) {
-      await clearNativePhoneAuthSession();
       return null;
     }
     return {
@@ -115,6 +133,40 @@ export async function loadNativePhoneAuthSession(): Promise<NativePhoneAuthPersi
   }
 }
 
-export async function clearNativePhoneAuthSession(): Promise<void> {
-  await delRaw();
+export async function clearNativePhoneAuthSession(
+  isCurrent: () => boolean = () => true
+): Promise<void> {
+  await enqueueWrite(async () => {
+    if (!isCurrent()) return;
+    await delRaw();
+  });
+}
+
+/**
+ * Delete only when the stored row is still the attempt being cleaned up.
+ * A same-phone replacement with a new verification id or attempt id stays.
+ */
+export async function clearNativePhoneAuthSessionIfMatches(expected: {
+  firebaseVerificationId: string;
+  phoneE164: string;
+  attemptId: string;
+}): Promise<void> {
+  await enqueueWrite(async () => {
+    const raw = await getRaw();
+    if (!raw) return;
+    let parsed: Partial<NativePhoneAuthPersistedSession>;
+    try {
+      parsed = JSON.parse(raw) as Partial<NativePhoneAuthPersistedSession>;
+    } catch {
+      return;
+    }
+    if (
+      parsed.firebaseVerificationId !== expected.firebaseVerificationId ||
+      parsed.phoneE164 !== expected.phoneE164 ||
+      parsed.attemptId !== expected.attemptId
+    ) {
+      return;
+    }
+    await delRaw();
+  });
 }

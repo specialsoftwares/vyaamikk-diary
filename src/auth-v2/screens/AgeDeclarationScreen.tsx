@@ -11,6 +11,7 @@ import { useT } from "@/i18n";
 
 /**
  * Self-declared date of birth. The server decides eligibility and does not keep the date.
+ * Launch and the normal new-user path do not open this screen.
  * Sign-out, support text, and account deletion stay available before the gate is passed.
  */
 export function AgeDeclarationScreen({

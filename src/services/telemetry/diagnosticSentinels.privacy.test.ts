@@ -234,6 +234,7 @@ function driveLogger(): void {
   }
 }
 
+async function main(): Promise<void> {
 // ---------------------------------------------------------------------------
 // 3. Crash wrapper: sentinels never reach the injected Crashlytics port, the
 //    user id is a prefix only, and opt-out clears it.
@@ -266,7 +267,7 @@ function driveLogger(): void {
     assert.equal(calls.filter((c) => c.kind !== "setCollection").length, 0, "disabled reporter forwards nothing");
 
     // Enabled with consent.
-    setCrashReportingEnabled(true);
+    await setCrashReportingEnabled(true);
     assert.equal(collectionEnabled, true);
     setUserId(UID_A);
     assert.equal(userId, "", "app-supplied account ids are not sent");
@@ -290,17 +291,17 @@ function driveLogger(): void {
     assertNoSentinels(serialize(calls), "crashlytics port");
 
     // Opt-out (settings toggle / consent decline path calls only this).
-    setCrashReportingEnabled(false);
+    await setCrashReportingEnabled(false);
     assert.equal(collectionEnabled, false);
     assert.equal(userId, "", "opt-out clears the pseudonymous user id");
 
     // Logout / account switch path.
-    setCrashReportingEnabled(true);
+    await setCrashReportingEnabled(true);
     setUserId(UID_B);
     assert.equal(userId, "");
     clearUser();
     assert.equal(userId, "", "clearUser resets identity");
-    setCrashReportingEnabled(false);
+    await setCrashReportingEnabled(false);
     clearUser();
     assert.equal(userId, "", "clearUser works while disabled");
 
@@ -366,3 +367,9 @@ function driveLogger(): void {
 }
 
 console.log("diagnosticSentinels.privacy.test.ts: ok (EXECUTED_PRODUCTION_METHOD / INJECTED)");
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

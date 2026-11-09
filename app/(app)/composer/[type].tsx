@@ -40,9 +40,13 @@ import {
 import { uploadCashPaidPhotoToStorage } from "@/services/attachments/cashPaidPhotoStorage";
 import type { ComposerSaveStatus } from "@/services/diary/composerSaveStatus";
 import { createSaveStageTimer, monotonicNow } from "@/services/diary/saveStageTiming";
-import { userFacingMessage } from "@/domain/errors";
+import { AppError } from "@/domain/errors";
+import { presentPublicError, toPublicError } from "@/domain/publicErrors";
+import { SaveOutcomeLabel, SessionHoldNotice } from "@/components/screenState";
+import { sessionBlocksWrite } from "@/components/screenState/resolveScreenState";
 import { useAppFeedback } from "@/feedback/AppFeedback";
 import { useAuth } from "@/state/auth";
+import { useSync } from "@/state/sync";
 import { useI18n, useT } from "@/i18n";
 import { useFormAutosave } from "@/hooks/useFormAutosave";
 import {
@@ -89,6 +93,7 @@ export default function ComposerScreen() {
   const router = useRouter();
   const feedback = useAppFeedback();
   const { user } = useAuth();
+  const { status: syncStatus } = useSync();
   const {
     type: typeParam,
     linkedDispatchId: linkedDispatchParam,
@@ -105,6 +110,7 @@ export default function ComposerScreen() {
     from?: string;
   }>();
   const [error, setError] = useState<string | null>(null);
+  const [sessionHold, setSessionHold] = useState(false);
   const [saving, setSaving] = useState(false);
   const [draftSaving, setDraftSaving] = useState(false);
   const [loading, setLoading] = useState(
@@ -219,8 +225,11 @@ export default function ComposerScreen() {
       : undefined,
   });
 
+  const blocked = sessionBlocksWrite({ signedIn: Boolean(user), syncStatus });
+
   const persistUserDraft = useCallback(async (): Promise<FormDraftRecord> => {
-    if (!user || !entryType) throw new Error("Not signed in");
+    if (!user) throw new AppError("session_expired", "session");
+    if (!entryType) throw new AppError("unknown", "missing");
     if (!isDraftPayloadMeaningful(formValues)) {
       throw new Error(t("drafts.nothingToSave"));
     }
@@ -272,14 +281,21 @@ export default function ComposerScreen() {
       setDraftSaveResult(saved);
       feedback.showSuccess(t("drafts.savedTitle"));
     } catch (e) {
-      const msg = e instanceof Error ? e.message : userFacingMessage(e);
+      const quiet = t("drafts.nothingToSave");
+      if (e instanceof Error && e.message === quiet) {
+        setError(quiet);
+        feedback.showError(quiet);
+        return;
+      }
+      const msg = presentPublicError(e);
+      if (!user || toPublicError(e).action === "sign_in") setSessionHold(true);
       feedback.showError(msg);
       setError(msg);
     } finally {
       setDraftSaving(false);
       draftSaveLockRef.current = false;
     }
-  }, [persistUserDraft, feedback, t]);
+  }, [persistUserDraft, feedback, t, user]);
 
   const { performBack } = useSmartBack({
     from: fromParam ?? "you",
@@ -445,7 +461,7 @@ export default function ComposerScreen() {
           setSavedBaseline("");
         }
       } catch (e) {
-        if (!cancelled) setError(userFacingMessage(e));
+        if (!cancelled) setError(presentPublicError(e));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -479,7 +495,10 @@ export default function ComposerScreen() {
 
   const onSubmit = useCallback(
     async (values: Record<string, unknown>) => {
-      if (!user || !entryType) return;
+      if (!user || !entryType || blocked) {
+        if (!user || blocked) setSessionHold(true);
+        return;
+      }
       if (saving || saveLockRef.current) return;
       saveLockRef.current = true;
       localAckedRef.current = false;
@@ -865,7 +884,8 @@ export default function ComposerScreen() {
             ? t("composer.cashPaidPhotoOwnerChanged")
             : e instanceof CashPaidPhotoError && e.code === "too_large"
               ? t("composer.cashPaidPhotoTooLarge")
-              : userFacingMessage(e);
+              : presentPublicError(e);
+        if (toPublicError(e).action === "sign_in") setSessionHold(true);
         setError(msg);
         feedback.showError(msg);
       } finally {
@@ -885,6 +905,7 @@ export default function ComposerScreen() {
       clearRecovery,
       activeDraftId,
       cashPaidPhotoState,
+      blocked,
     ]
   );
 
@@ -969,6 +990,7 @@ export default function ComposerScreen() {
     return (
       <Screen scroll padded>
         <Header title={formTitle} showBack backFrom="you" onBackPress={navigateBack} />
+        <SaveOutcomeLabel confirmed={false} />
         <DraftSavedSuccess
           draft={draftSaveResult}
           onContinueEditing={() => {
@@ -986,6 +1008,7 @@ export default function ComposerScreen() {
     return (
       <Screen scroll padded>
         <Header title={formTitle} showBack backFrom="you" onBackPress={navigateBack} />
+        <SaveOutcomeLabel confirmed={saveResult.cloudAccepted === true} />
         <ComposerSaveSuccess
           entry={saveResult.entry}
           pdfFailed={saveResult.pdfFailed}
@@ -1014,6 +1037,7 @@ export default function ComposerScreen() {
         onBackPress={tryBack}
         rightSlot={saveDraftHeader}
       />
+      <SessionHoldNotice visible={sessionHold || blocked} />
       <LocaleUiText style={linkStyles.benefit}>{benefitCopy}</LocaleUiText>
       <BusinessComposerForm
         key={`${entryType}-${activeDraftId ?? "new"}-${editingId ?? ""}`}

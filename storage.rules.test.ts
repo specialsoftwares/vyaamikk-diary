@@ -115,7 +115,6 @@ async function main() {
       await setDoc(doc(ctx.firestore(), "users", "alice"), {
         uid: "alice",
         status: "active",
-        ageEligibility: "eligible",
       });
       await setDoc(doc(ctx.firestore(), "users", "young"), {
         uid: "young",
@@ -142,7 +141,7 @@ async function main() {
         contentType: sealType,
       })
     );
-    check("eligible owner can write an attachment envelope", true);
+    check("active owner without ageEligibility can write an attachment envelope", true);
     await assertSucceeds(
       uploadBytes(ref(eligible, "users/alice/attachments/rec1/legacy.jpg"), Buffer.from("jpg"), {
         contentType: "image/jpeg",
@@ -151,18 +150,45 @@ async function main() {
     check("eligible owner can still write a legacy image", true);
     await assertSucceeds(getBytes(ref(eligible, "users/alice/letterhead/logo.png")));
     check("legacy image read stays available", true);
-    await assertFails(
+    await assertSucceeds(
       uploadBytes(ref(unassessed, "users/young/attachments/rec1/receipt.bin"), Buffer.from("{\"v\":1}"), {
         contentType: sealType,
       })
     );
-    check("unassessed account cannot write storage", true);
-    await assertFails(
+    check("active unassessed account can write storage", true);
+    await assertSucceeds(
       uploadBytes(ref(ineligible, "users/minor/attachments/rec1/receipt.bin"), Buffer.from("{\"v\":1}"), {
         contentType: sealType,
       })
     );
-    check("ineligible account cannot write storage", true);
+    check("active account with historical ineligible assessment can write storage", true);
+    for (const [uid, status] of [
+      ["pending-owner", "pending_deletion"],
+      ["deleted-owner", "deleted"],
+      ["purged-owner", "active"],
+    ] as const) {
+      await testEnv.withSecurityRulesDisabled(async (ctx) => {
+        await setDoc(doc(ctx.firestore(), "users", uid), { uid, status });
+        if (uid === "purged-owner") {
+          await setDoc(doc(ctx.firestore(), "deletionJobs", uid), { status: "completed" });
+        }
+      });
+      await assertFails(
+        uploadBytes(
+          ref(testEnv.authenticatedContext(uid).storage(), `users/${uid}/attachments/first/object.bin`),
+          Buffer.from('{"v":1}'),
+          { contentType: sealType }
+        )
+      );
+    }
+    await assertFails(
+      uploadBytes(
+        ref(testEnv.authenticatedContext("missing-owner").storage(), "users/missing-owner/attachments/first/object.bin"),
+        Buffer.from('{"v":1}'),
+        { contentType: sealType }
+      )
+    );
+    check("missing, inactive, and erased accounts cannot write storage", true);
     await assertFails(
       uploadBytes(ref(eligible, "users/alice/pdfs/rec1/sealed.bin"), Buffer.from("{\"v\":1}"), {
         contentType: sealType,

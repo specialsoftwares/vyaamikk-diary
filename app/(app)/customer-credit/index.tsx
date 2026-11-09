@@ -15,16 +15,24 @@ import { Banner,
   Button,
   Card,
   EmptyState,
-  ErrorState,
   Header,
   LastRefreshedHint,
-  Loader,
   Screen, LocaleUiText } from "@/components/ui";
+import {
+  InitialListSkeleton,
+  OfflineDeviceNotice,
+  ScreenErrorPanel,
+  SlowNetworkStatus,
+  listPhase,
+  showsEmpty,
+  useOwnedSnapshot,
+} from "@/components/screenState";
+import { presentPublicError } from "@/domain/publicErrors";
 import { useAuth } from "@/state/auth";
+import { useSync } from "@/state/sync";
 import { useAppRefresh } from "@/hooks/useAppRefresh";
 import { useT } from "@/i18n";
 import { radius, spacing, typography, useThemedStyles } from "@/theme";
-import { userFacingMessage } from "@/domain/errors";
 import { formatShortDate } from "@/utils/date";
 import { formatAmount } from "@/utils/formatters/formatAmount";
 import { requestComposerPickerReturn } from "@/navigation";
@@ -55,6 +63,7 @@ export default function CustomerCreditListScreen() {
   const t = useT();
   const router = useRouter();
   const { user } = useAuth();
+  const { status: syncStatus } = useSync();
   const insets = useSafeAreaInsets();
   const { fromPicker } = useLocalSearchParams<{ fromPicker?: string }>();
 
@@ -99,7 +108,7 @@ export default function CustomerCreditListScreen() {
         setRecords(list);
         hasLoadedOnce.current = true;
       } catch (e) {
-        setError(userFacingMessage(e));
+        setError(presentPublicError(e));
       } finally {
         setLoading(false);
       }
@@ -107,7 +116,22 @@ export default function CustomerCreditListScreen() {
     [user]
   );
 
-  const { refreshNote, refreshControl } = useAppRefresh({ onReload: () => load("refresh") });
+  const { refreshing, refreshNote, refreshControl } = useAppRefresh({ onReload: () => load("refresh") });
+
+  const ownedRecords = useOwnedSnapshot({
+    signedInUid: user?.uid ?? null,
+    loading,
+    failed: Boolean(error),
+    value: records,
+  });
+  const rows = ownedRecords.accepted && ownedRecords.value ? ownedRecords.value : [];
+  const phase = listPhase({
+    loading,
+    failed: Boolean(error),
+    count: rows.length,
+    owned: ownedRecords.accepted,
+  });
+  const offline = syncStatus === "offline";
 
   useFocusEffect(
     useCallback(() => {
@@ -189,22 +213,27 @@ export default function CustomerCreditListScreen() {
           showBack
           onBackPress={goBack}
         />
-        {error ? (
+        {error && rows.length > 0 ? (
           <View style={styles.banner}>
             <Banner tone="danger" message={error} />
           </View>
         ) : null}
         <Button label={t("customerCredit.newAction")} onPress={goNew} style={styles.newBtn} />
         <LastRefreshedHint message={refreshNote} />
+        {offline && rows.length > 0 ? <OfflineDeviceNotice offline hasRows /> : null}
+        <SlowNetworkStatus active={refreshing && rows.length > 0} />
       </View>
 
-      {loading && records.length === 0 ? (
-        <Loader fullscreen message={t("common.loading")} />
-      ) : error && records.length === 0 ? (
-        <ErrorState message={error} onRetry={() => void load("mount")} />
-      ) : (
+      {phase === "loading" ? (
+        <InitialListSkeleton count={6} />
+      ) : phase === "error" ? (
+        <>
+          {offline ? <OfflineDeviceNotice offline hasRows={false} /> : null}
+          <ScreenErrorPanel error={error ?? "unknown"} onRetry={() => void load("mount")} />
+        </>
+      ) : phase === "hidden" ? null : (
         <FlatList
-          data={records}
+          data={rows}
           keyExtractor={(d) => d.id}
           renderItem={renderItem}
           refreshControl={refreshControl}
@@ -212,12 +241,14 @@ export default function CustomerCreditListScreen() {
           removeClippedSubviews={Platform.OS === "android"}
           contentContainerStyle={listPadding}
           ListEmptyComponent={
+            showsEmpty(phase) ? (
             <EmptyState
               title={t("customerCredit.emptyTitle")}
               message={t("customerCredit.emptyMessage")}
               actionLabel={t("customerCredit.newAction")}
               onAction={goNew}
             />
+            ) : null
           }
         />
       )}

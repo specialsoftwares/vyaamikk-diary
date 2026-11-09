@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Alert, Platform, StyleSheet, Text, TextInput, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { format } from "date-fns";
@@ -16,10 +16,22 @@ import { resolveResendControl } from "@/hooks/resendControl";
 import { getAuthEntryHref } from "@/config/authWrapper";
 import { getActiveBackend } from "@/config/env";
 import { useAuth } from "@/state/auth";
-import { useT } from "@/i18n";
+import { useI18n, useT } from "@/i18n";
+import { phoneAuthCopy } from "@/auth-v2/phoneAuthCopy";
+import { reactivationPublicMessageId } from "@/services/auth/reactivationRouting";
+import {
+  createReactivationEmailVerification,
+  readAuthoritativeReactivationAccount,
+} from "@/services/auth/reactivationEmailVerification";
+import { createLogger } from "@/utils/logger";
 import { spacing, typography, useThemedStyles } from "@/theme";
 import { maskMobile } from "@/utils/phone";
-import { currentAuthMutationGeneration } from "@/services/auth/authSessionFence";
+import {
+  currentAuthMutationGeneration,
+  currentSessionCommitEpoch,
+} from "@/services/auth/authSessionFence";
+import { getNativeAuthUid } from "@/services/auth/nativePhoneAuth";
+import { profileWriteStillOwned } from "@/services/auth/profileWriteOwnership";
 import {
   callCompleteAccountReactivation,
   callStartAccountReactivation,
@@ -28,12 +40,16 @@ import {
 import { useAuthoritativeResendCountdown } from "@/hooks/useAuthoritativeResendCountdown";
 import { useIsOnline } from "@/state/network";
 
+const reactivationLog = createLogger("auth/reactivation");
+
 const EMAIL_CODE_LENGTH = 6;
 
 type ScreenStep = "info" | "email_verify";
 
 export default function AccountPendingDeletionScreen() {
   const t = useT();
+  const { lang } = useI18n();
+  const copy = phoneAuthCopy(lang);
   const router = useRouter();
   const { cancelAccountDeletion, finishReactivation, signOut } = useAuth();
   const params = useLocalSearchParams<{
@@ -50,6 +66,7 @@ export default function AccountPendingDeletionScreen() {
   const [emailCode, setEmailCode] = useState("");
   const [resendAvailableAt, setResendAvailableAt] = useState<number | null>(null);
   const codeInputRef = useRef<TextInput>(null);
+  const verificationRef = useRef(createReactivationEmailVerification());
   const online = useIsOnline();
   const resend = useAuthoritativeResendCountdown(resendAvailableAt);
   const resendPhase = resolveResendControl({
@@ -58,6 +75,11 @@ export default function AccountPendingDeletionScreen() {
     online,
     busy,
   });
+
+  useEffect(() => {
+    const verification = verificationRef.current;
+    return () => verification.retire();
+  }, []);
 
   const phoneE164 = String(params.phoneE164 ?? "");
   const scheduledMs = Number(params.deletionScheduledFor ?? 0);
@@ -136,15 +158,8 @@ export default function AccountPendingDeletionScreen() {
 
   const reactivationMessage = (error: unknown): string => {
     const code = error instanceof AppError ? String(error.details?.code ?? "") : "";
-    if (code === "expired") return t("pendingDeletion.reactivateExpired");
-    if (code === "attempts_exhausted" || code === "rate_limited" || code === "cooldown") {
-      return t("pendingDeletion.reactivateAttempts");
-    }
-    if (code === "superseded") return t("pendingDeletion.reactivateLatestCode");
-    if (code === "provider_unavailable") return t("pendingDeletion.reactivateSendFailed");
-    if (code === "no_verified_email" || code === "purge_underway" || code === "ineligible") {
-      return t("pendingDeletion.reactivateUnavailable");
-    }
+    const messageId = reactivationPublicMessageId(code);
+    if (messageId) return t(`pendingDeletion.${messageId}`);
     reportAuthFailure(error, "SESSION_PUBLISH");
     return toPublicError(error, "reactivation").message;
   };
@@ -175,31 +190,61 @@ export default function AccountPendingDeletionScreen() {
   };
 
   const onVerifyEmailAndReactivate = async () => {
-    if (!online) {
-      setError(t("pendingDeletion.reactivateOffline"));
-      return;
-    }
     if (!verificationId || emailCode.length !== EMAIL_CODE_LENGTH) return;
     const generation = currentAuthMutationGeneration();
+    const epochAtStart = currentSessionCommitEpoch();
+    const uidAtStart = getNativeAuthUid();
+    const isCurrent = () => {
+      if (currentAuthMutationGeneration() !== generation) return false;
+      if (!uidAtStart) return true;
+      return profileWriteStillOwned(
+        { uid: uidAtStart, generation },
+        { uid: getNativeAuthUid(), generation: currentAuthMutationGeneration() }
+      );
+    };
     const submitted = emailCode;
     setBusy(true);
     setError(null);
-    try {
-      const { profile } = await callCompleteAccountReactivation(verificationId, submitted);
-      if (currentAuthMutationGeneration() !== generation) return;
-      await finishReactivation(profile);
-      if (currentAuthMutationGeneration() !== generation) return;
-      setEmailCode("");
+    const view = await verificationRef.current.submit({
+      code: submitted,
+      challengeId: verificationId,
+      online,
+      isCurrent,
+      complete: async (challengeId, code) => {
+        const { profile } = await callCompleteAccountReactivation(challengeId, code);
+        return profile;
+      },
+      finish: async (profile, stillCurrent) => {
+        if (!stillCurrent()) return;
+        if (currentSessionCommitEpoch() !== epochAtStart) {
+          throw new Error("session_changed");
+        }
+        await finishReactivation(profile);
+      },
+      readAccount: readAuthoritativeReactivationAccount,
+      messageFor: reactivationMessage,
+      offlineMessage: t("pendingDeletion.reactivateOffline"),
+      unknownMessage: copy.reactivateUnknown,
+      localFailureMessage: copy.reactivateLocalFailed,
+      record: (event) => {
+        reactivationLog.warn("reactivation verification", {
+          attemptId: event.attemptId,
+          kind: event.outcome,
+          ms: event.elapsedMs,
+          callableName: "completeAccountReactivation",
+        });
+      },
+    });
+    if (!view.apply || !isCurrent()) return;
+    setBusy(view.busy);
+    setError(view.error);
+    if (view.clearCode) setEmailCode("");
+    if (view.navigate && isCurrent()) {
       Alert.alert(
         t("pendingDeletion.reactivateSuccessTitle"),
         t("pendingDeletion.reactivateSuccessBody"),
-        [{ text: t("common.ok"), onPress: () => router.replace("/") }]
+        [{ text: t("common.ok"), onPress: () => { if (isCurrent()) router.replace("/"); } }]
       );
-    } catch (e) {
-      if (currentAuthMutationGeneration() !== generation) return;
-      setError(reactivationMessage(e));
-    } finally {
-      if (currentAuthMutationGeneration() === generation) setBusy(false);
     }
   };
 
@@ -259,10 +304,11 @@ export default function AccountPendingDeletionScreen() {
                 label={t("pendingDeletion.backToLogin")}
                 variant="ghost"
                 onPress={() => {
+                  verificationRef.current.retire();
+                  setBusy(false);
                   setEmailCode("");
                   void onBackToLogin();
                 }}
-                disabled={busy}
               />
             </View>
           }

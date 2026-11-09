@@ -22,6 +22,7 @@ async function main(): Promise<void> {
 
   __setCrashlyticsClientForTests({
     setCrashlyticsCollectionEnabled: async () => undefined,
+    deleteUnsentReports: async () => undefined,
     log: () => undefined,
     recordError: () => undefined,
     setUserId: () => undefined,
@@ -52,6 +53,7 @@ async function main(): Promise<void> {
     setCrashlyticsCollectionEnabled: async (enabled: boolean) => {
       enabledCalls.push(enabled);
     },
+    deleteUnsentReports: async () => undefined,
     log: () => undefined,
     recordError: () => undefined,
     setUserId: () => undefined,

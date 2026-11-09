@@ -34,6 +34,7 @@ import {
   type AuthSession,
 } from "@/services/session";
 import {
+  authRetirementOwns,
   beginSessionCommit,
   clearPersistedProfileIfOwned,
   currentAuthMutationGeneration,
@@ -212,7 +213,7 @@ interface AuthState {
 interface AuthApi extends AuthState {
   /** DEV: force-clear SecureStore session + in-memory auth (after dev reset). */
   hardDevSignOut(): Promise<void>;
-  startOtp(phoneE164: PhoneE164): Promise<OtpChallenge>;
+  startOtp(phoneE164: PhoneE164, options?: { forceResend?: boolean }): Promise<OtpChallenge>;
   confirmOtp(challenge: OtpChallenge, code: string): Promise<UserProfile>;
   signOut(): Promise<LocalSignOutResult>;
   requestAccountDeletion(): Promise<import("@/domain/accountDeletion").AccountDeletionResult>;
@@ -429,10 +430,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [state.session?.signedInAt, state.session?.lastActiveAt]
   );
 
-  const startOtp = useCallback(async (phoneE164: PhoneE164) => {
+  const startOtp = useCallback(async (phoneE164: PhoneE164, options?: { forceResend?: boolean }) => {
     bootAttemptRef.current += 1;
     try {
-      return await getAuthService().startOtp(phoneE164);
+      return await getAuthService().startOtp(phoneE164, options);
     } catch (e) {
       throw toAppError(e);
     }
@@ -455,11 +456,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!sessionStillOwned(claim, readPublicationLive())) throw sessionChangedError();
         const session = await saveSession(profile, { claim });
         if (!sessionStillOwned(claim, readPublicationLive())) throw sessionChangedError();
-        setState({
-          status: "signed_in",
-          session,
-          user: session.user,
-          justCreated: isNewUser,
+        setState((current) => {
+          if (!sessionStillOwned(claim, readPublicationLive())) return current;
+          if (current.session && current.session.user.uid === profile.uid && currentSessionCommitEpoch() !== claim.epoch) {
+            return current;
+          }
+          return {
+            status: "signed_in",
+            session,
+            user: session.user,
+            justCreated: isNewUser,
+          };
         });
         void import("@/services/device/trustedDeviceRegistry").then((m) =>
           m.recordTrustedDeviceLogin(profile)
@@ -474,7 +481,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = useCallback(async () => {
     bootAttemptRef.current += 1;
-    beginSessionCommit();
+    const signOutEpoch = beginSessionCommit();
     const uid = state.session?.user.uid;
     return runLocalDeviceSignOut({
       maskPrivateUi: () => {
@@ -499,17 +506,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       clearLocalProfileCache: (ownedGeneration) =>
         clearPersistedProfileIfOwned(ownedGeneration, {
           prepare: async () => {
+            const stillThisSignOut = () =>
+              currentSessionCommitEpoch() === signOutEpoch && authRetirementOwns(ownedGeneration);
+            if (!stillThisSignOut()) return;
             if (uid) {
-              await clearAuthWrapperProgress(uid);
+              await clearAuthWrapperProgress(uid, stillThisSignOut);
+              if (!stillThisSignOut()) return;
               clearTransientPendingEmailState(uid);
               clearLocalMockPendingEmailForUid(uid);
             }
+            if (!stillThisSignOut()) return;
             clearSessionLastActiveTouch(uid);
             endFirstActionFreezeSession();
             clearMasterDataSessionCache();
             retainLocalAccountOnLogout(uid);
           },
-          removePersistedProfile: () => clearSessionForRetirement(ownedGeneration).then(() => undefined),
+          removePersistedProfile: async () => {
+            if (currentSessionCommitEpoch() !== signOutEpoch || !authRetirementOwns(ownedGeneration)) return;
+            await clearSessionForRetirement(ownedGeneration);
+          },
         }).then(() => undefined),
     });
   }, [state.session?.user.uid]);
@@ -583,11 +598,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!sessionStillOwned(claim, readPublicationLive())) throw sessionChangedError();
       const session = await saveSession(profile, { claim });
       if (!sessionStillOwned(claim, readPublicationLive())) throw sessionChangedError();
-      setState({
-        status: "signed_in",
-        session,
-        user: session.user,
-        justCreated: false,
+      setState((current) => {
+        if (!sessionStillOwned(claim, readPublicationLive())) return current;
+        if (current.session && current.session.user.uid === profile.uid && currentSessionCommitEpoch() !== claim.epoch) {
+          return current;
+        }
+        return {
+          status: "signed_in",
+          session,
+          user: session.user,
+          justCreated: false,
+        };
       });
       void import("@/services/device/trustedDeviceRegistry").then((m) =>
         m.recordTrustedDeviceLogin(profile)
@@ -677,7 +698,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const session = await saveSession(profile, { preserveSignedInAt: true, claim, isCurrent });
       if (isCurrent && !isCurrent()) throw new Error("session_changed");
       setState((s) => {
+        if (isCurrent && !isCurrent()) return s;
         if (ownedGeneration != null && currentAuthMutationGeneration() !== ownedGeneration) return s;
+        if (currentSessionCommitEpoch() !== claim.epoch) return s;
         if (s.session && s.session.user.uid !== profile.uid) return s;
         if (readLiveUid) {
           const liveUid = readLiveUid();

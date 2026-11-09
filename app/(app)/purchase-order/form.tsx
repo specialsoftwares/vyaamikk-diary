@@ -24,7 +24,10 @@ import { useAuth } from "@/state/auth";
 import { useI18n, useT } from "@/i18n";
 import { formDateRowStyle, formFieldLabelStyle, formNestedCardStyle } from "@/theme/formLayer";
 import { spacing, typography, useTheme, useThemedStyles } from "@/theme";
-import { userFacingMessage } from "@/domain/errors";
+import { presentPublicError, toPublicError } from "@/domain/publicErrors";
+import { SessionHoldNotice } from "@/components/screenState";
+import { sessionBlocksWrite } from "@/components/screenState/resolveScreenState";
+import { useSync } from "@/state/sync";
 import { formatShortDate } from "@/utils/date";
 import { formatAmount } from "@/utils/formatters/formatAmount";
 import { requestComposerPickerReturn } from "@/navigation";
@@ -118,6 +121,7 @@ export default function PurchaseOrderFormScreen() {
   const { lang } = useI18n();
   const router = useRouter();
   const { user } = useAuth();
+  const { status: syncStatus } = useSync();
   const { id: editId, fromPicker } = useLocalSearchParams<{
     id?: string;
     fromPicker?: string;
@@ -178,6 +182,8 @@ export default function PurchaseOrderFormScreen() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [sessionHold, setSessionHold] = useState(false);
+  const [vendorFieldError, setVendorFieldError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const saveLockRef = useRef(false);
   const clientRecordIdRef = useRef(
@@ -330,7 +336,7 @@ export default function PurchaseOrderFormScreen() {
       setAuthorizedDesignation(user.designation || "");
       setUseLogo(hasLogo && user.pdfBranding?.includeProfileLogo !== false);
     } catch (e) {
-      setLoadError(userFacingMessage(e));
+      setLoadError(presentPublicError(e));
     } finally {
       setLoading(false);
     }
@@ -504,10 +510,18 @@ export default function PurchaseOrderFormScreen() {
   }, [fromPicker, router]);
 
   const onSubmit = useCallback(async () => {
-    if (!user) return;
+    const blocked = sessionBlocksWrite({ signedIn: Boolean(user), syncStatus });
+    if (!user || blocked) {
+      setSessionHold(true);
+      return;
+    }
     if (submitting || saveLockRef.current) return;
 
-    if (!vendorName.trim()) return setSubmitError(t("purchaseOrder.errVendor"));
+    if (!vendorName.trim()) {
+      setVendorFieldError(t("purchaseOrder.errVendor"));
+      return;
+    }
+    setVendorFieldError(null);
     if (!buyerName.trim()) return setSubmitError(t("purchaseOrder.errBuyer"));
     if (cleanItems.length === 0) return setSubmitError(t("purchaseOrder.errItems"));
     if (!isPoDateAllowed(poDate)) return setSubmitError(t("purchaseOrder.errDate"));
@@ -601,7 +615,8 @@ export default function PurchaseOrderFormScreen() {
         setSubmitError(t("purchaseOrder.errSaveInProgress"));
         return;
       }
-      setSubmitError(userFacingMessage(e) || t("purchaseOrder.errGenerate"));
+      setSubmitError(presentPublicError(e) || t("purchaseOrder.errGenerate"));
+      if (toPublicError(e).action === "sign_in") setSessionHold(true);
       if (!isEditing) {
         notifyOrdinaryQuotaUpsell({
           family: "purchase_order",
@@ -617,6 +632,7 @@ export default function PurchaseOrderFormScreen() {
     }
   }, [
     user,
+    syncStatus,
     submitting,
     vendorName,
     vendorGstin,
@@ -722,6 +738,9 @@ export default function PurchaseOrderFormScreen() {
         onBackPress={goBack}
       />
       <LocaleUiText style={styles.lead}>{t("purchaseOrder.formIntro")}</LocaleUiText>
+      <SessionHoldNotice
+        visible={sessionHold || sessionBlocksWrite({ signedIn: Boolean(user), syncStatus })}
+      />
 
       {isEditing && existing ? (
         <View style={styles.banner}>
@@ -873,9 +892,13 @@ export default function PurchaseOrderFormScreen() {
           label={t("purchaseOrder.fieldVendorName")}
           required
           value={vendorName}
-          onChangeText={setVendorName}
+          onChangeText={(value) => {
+            setVendorName(value);
+            if (value.trim()) setVendorFieldError(null);
+          }}
           placeholder={t("purchaseOrder.fieldVendorNamePlaceholder")}
           maxLength={120}
+          error={vendorFieldError}
         />
         <TextField
           navFieldKey="vendorGstin"

@@ -92,10 +92,10 @@ service cloud.firestore {
       return !exists(path) || get(path).data.get('status', '') != 'completed';
     }
 
+    // Active account: owner, status, and deletion fence. Age is not authorization.
     function isActiveUser(uid) {
       return isOwner(uid)
         && userStatus(uid) == 'active'
-        && userData(uid).get('ageEligibility', '') == 'eligible'
         && deletionJobAllowsActivity(uid);
     }
 

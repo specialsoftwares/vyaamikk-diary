@@ -39,7 +39,6 @@ async function seedUser(
       ueid: "VYD-2026-TEST01",
       phoneE164: "+919999999999",
       status: "active",
-      ageEligibility: "eligible",
       createdAt: 1_700_000_000_000,
       updatedAt: 1_700_000_000_000,
       displayName: "Test User",
@@ -243,22 +242,22 @@ async function main() {
     check("active user entry create allowed", true);
 
     await seedUser("unassessed", { ageEligibility: "unassessed" });
-    await assertFails(
+    await assertSucceeds(
       setDoc(doc(authedDb("unassessed"), "users", "unassessed", "entries", "e-open"), {
         userId: "unassessed",
-        title: "Blocked before assessment",
+        title: "First entry without assessment",
       })
     );
-    check("unassessed account cannot create an entry", true);
+    check("active unassessed account can create its first entry", true);
 
     await seedUser("mina", { ageEligibility: "ineligible" });
-    await assertFails(
+    await assertSucceeds(
       setDoc(doc(authedDb("mina"), "users", "mina", "entries", "e-age"), {
         userId: "mina",
-        title: "Blocked for age",
+        title: "Historical assessment is not authorization",
       })
     );
-    check("ineligible account cannot create an entry", true);
+    check("active account with historical ineligible assessment can create an entry", true);
 
     await seedUser("purged");
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
@@ -440,13 +439,13 @@ async function main() {
         updatedAt: 1_600_000_000_000,
       });
     });
-    await assertFails(
+    await assertSucceeds(
       setDoc(doc(authedDb("legacy"), "users", "legacy", "entries", "legacy-e1"), {
         userId: "legacy",
         title: "Legacy entry",
       })
     );
-    check("unassessed legacy profile cannot create business data", true);
+    check("legacy active profile can create business data without age assessment", true);
 
     await assertSucceeds(
       setDoc(

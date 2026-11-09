@@ -31,6 +31,7 @@ function assertClean(value: unknown): void {
   assert.doesNotMatch(blob, /in Fake/);
 }
 
+async function main(): Promise<void> {
 {
   const src = readFileSync(
     join(dirname(fileURLToPath(import.meta.url)), "RootErrorBoundary.tsx"),
@@ -89,7 +90,7 @@ __setRuntimeSignalsForTests({
   assert.equal(calls.length, 0, "disabled: no native log or recordError");
   assert.equal(original.message, frozen);
 
-  setCrashReportingEnabled(true);
+  await setCrashReportingEnabled(true);
   reportUncaughtRenderError(original);
   assert.equal(original.message, frozen, "original Error is not modified");
   assert.equal(original.stack?.includes("render failed"), true);
@@ -141,7 +142,7 @@ __setRuntimeSignalsForTests({
     },
     setUserId: () => {},
   });
-  setCrashReportingEnabled(true);
+  await setCrashReportingEnabled(true);
   assert.doesNotThrow(() =>
     reportUncaughtRenderError(new Error(`sink ${EMAIL} ${DOC}`))
   );
@@ -155,3 +156,9 @@ __setRuntimeSignalsForTests({
 
 __setRuntimeSignalsForTests(null);
 console.log("RootErrorBoundary.privacy.test.ts: ok (EXECUTED_PRODUCTION_METHOD)");
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

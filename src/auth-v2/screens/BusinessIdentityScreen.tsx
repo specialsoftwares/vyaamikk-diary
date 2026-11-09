@@ -1,3 +1,4 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -56,6 +57,14 @@ import {
   validateOnboardingDraftForCompletion,
   type OnboardingProfileDraftV2,
 } from "@/onboarding/profileIdentityModel";
+import { demographicAgeCopy } from "@/onboarding/demographicAgeCopy";
+import {
+  DEMOGRAPHIC_AGE_BANDS,
+  DEMOGRAPHIC_AGE_SKIPPED,
+  readDeviceDemographicAge,
+  writeDeviceDemographicAge,
+  type DemographicAgeSelection,
+} from "@/onboarding/demographicAge";
 import { evaluateGstinInput } from "@/onboarding/gstinVerificationState";
 import { normalizeGstin } from "@/utils/gst/gstin";
 import {
@@ -67,7 +76,7 @@ import {
 } from "@/onboarding/pinConfirmation";
 import { resolveIndianPincode } from "@/services/location/pincodeResolver";
 import { useAuth } from "@/state/auth";
-import { useT } from "@/i18n";
+import { useI18n } from "@/i18n";
 import { spacing, typography } from "@/theme";
 import { maskMobile } from "@/utils/phone";
 
@@ -89,7 +98,7 @@ const PIN_LOOKUP_DEBOUNCE_MS = 400;
 export function BusinessIdentityScreen({
   initialSection: _initialSection = null,
 }: BusinessIdentityScreenProps = {}) {
-  const t = useT();
+  const { t, lang } = useI18n();
   const router = useRouter();
   const { tokens } = useAuthV2Theme();
   const { user, signOut } = useAuth();
@@ -99,6 +108,7 @@ export function BusinessIdentityScreen({
   const mediaBusy = false;
   const [pinUi, setPinUi] = useState<PinLookupUiState>({ status: "idle" });
   const [identityPhase, setIdentityPhase] = useState<IdentityPhase>("details");
+  const [ageSelection, setAgeSelection] = useState<DemographicAgeSelection | null>(null);
   const [ready, setReady] = useState(false);
 
   const draftRef = useRef<OnboardingProfileDraftV2 | null>(null);
@@ -149,7 +159,10 @@ export function BusinessIdentityScreen({
       ) {
         loaded = { ...loaded, businessName: user.businessName.trim() };
       }
+      const storedAge = await readDeviceDemographicAge(user.uid, AsyncStorage).catch(() => null);
+      if (cancelled) return;
       syncDraft(loaded);
+      setAgeSelection(storedAge);
       if (loaded.confirmedLocation && loaded.confirmedLocation.pinCode === loaded.pinCode) {
         setPinUi({ status: "confirmed", location: loaded.confirmedLocation });
       } else if (loaded.pinCode.length === 6) {
@@ -267,6 +280,12 @@ export function BusinessIdentityScreen({
   }
 
   const accountKind = draft.accountKind;
+  const ageCopy = demographicAgeCopy(lang);
+  const onChooseAge = (next: DemographicAgeSelection) => {
+    // Device-only. Never written as ageEligibility and never required to continue.
+    setAgeSelection(next);
+    void writeDeviceDemographicAge(user.uid, next, AsyncStorage).catch(() => undefined);
+  };
 
   const patchDraft = (partial: Partial<OnboardingProfileDraftV2>) => {
     const next = { ...draftRef.current!, ...partial, updatedAt: Date.now() };
@@ -653,6 +672,68 @@ export function BusinessIdentityScreen({
                 Enter a valid 15-character GSTIN, or leave blank.
               </Text>
             ) : null}
+            <View style={styles.sectionGap}>
+              <Text style={[styles.sectionLabel, { color: tokens.body }]}>{ageCopy.title}</Text>
+              <Text style={[styles.helper, { color: tokens.muted }]}>{ageCopy.helper}</Text>
+              <View style={styles.ageRangeWrap}>
+                {DEMOGRAPHIC_AGE_BANDS.map((band) => {
+                  const selected = ageSelection === band;
+                  return (
+                    <Pressable
+                      key={band}
+                      onPress={() => onChooseAge(band)}
+                      style={[
+                        styles.ageChip,
+                        {
+                          backgroundColor: selected ? tokens.ctaActiveBg : tokens.cardBg,
+                          borderColor: tokens.cardBorder,
+                        },
+                      ]}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected }}
+                      accessibilityLabel={ageCopy.bands[band]}
+                    >
+                      <Text
+                        style={{
+                          color: selected ? tokens.ctaActiveText : tokens.body,
+                          ...typography.caption,
+                        }}
+                      >
+                        {ageCopy.bands[band]}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+                <Pressable
+                  onPress={() => onChooseAge(DEMOGRAPHIC_AGE_SKIPPED)}
+                  style={[
+                    styles.ageChip,
+                    {
+                      backgroundColor:
+                        ageSelection === DEMOGRAPHIC_AGE_SKIPPED
+                          ? tokens.ctaActiveBg
+                          : tokens.cardBg,
+                      borderColor: tokens.cardBorder,
+                    },
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: ageSelection === DEMOGRAPHIC_AGE_SKIPPED }}
+                  accessibilityLabel={ageCopy.skip}
+                >
+                  <Text
+                    style={{
+                      color:
+                        ageSelection === DEMOGRAPHIC_AGE_SKIPPED
+                          ? tokens.ctaActiveText
+                          : tokens.body,
+                      ...typography.caption,
+                    }}
+                  >
+                    {ageCopy.skip}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
           </>
         ) : (
           <>
@@ -804,6 +885,13 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.18)",
   },
   localityList: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs },
+  ageRangeWrap: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs },
+  ageChip: {
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
   localityChip: {
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,

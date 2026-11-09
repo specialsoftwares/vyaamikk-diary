@@ -9,16 +9,26 @@ import {
   LastRefreshedHint,
   Screen,
   EmptyState,
-  SkeletonDraftRow,
-  SkeletonList,
-  SkeletonLoadingPanel,
 } from "@/components/ui";
+import {
+  InitialListSkeleton,
+  OfflineDeviceNotice,
+  ScreenErrorPanel,
+  SlowNetworkStatus,
+  SCREEN_EXISTING_SLOW_MS,
+  listPhase,
+  showsEmpty,
+  useOwnedSnapshot,
+} from "@/components/screenState";
+import { presentPublicError } from "@/domain/publicErrors";
 import { useRecordDelete } from "@/hooks/useRecordDelete";
 import { useAppRefresh } from "@/hooks/useAppRefresh";
 import { formDraftsRepository, type FormDraftRecord } from "@/repositories/formDraftsRepository";
 import { buildDraftTitle } from "@/services/drafts/draftTitle";
 import { hrefForDraft } from "@/services/drafts/draftRoutes";
+import { SkeletonDraftRow } from "@/components/ui/skeleton/SkeletonPresets";
 import { useAuth } from "@/state/auth";
+import { useSync } from "@/state/sync";
 import { useT } from "@/i18n";
 import { spacing, typography, useThemedStyles } from "@/theme";
 import { useSmartBack } from "@/navigation";
@@ -29,8 +39,10 @@ export default function DraftsScreen() {
   const t = useT();
   const router = useRouter();
   const { user } = useAuth();
+  const { status: syncStatus } = useSync();
   const [drafts, setDrafts] = useState<FormDraftRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const hasLoadedOnceRef = useRef(false);
   const [filter, setFilter] = useState<FilterKey>("all");
@@ -65,7 +77,10 @@ export default function DraftsScreen() {
       try {
         const list = await formDraftsRepository.listActiveUserDrafts(user.uid);
         setDrafts(list);
+        setError(null);
         hasLoadedOnceRef.current = true;
+      } catch (e) {
+        setError(presentPublicError(e));
       } finally {
         setLoading(false);
         setRefreshing(false);
@@ -89,6 +104,21 @@ export default function DraftsScreen() {
     if (filter === "all") return drafts;
     return drafts.filter((d) => d.draftKind === filter);
   }, [drafts, filter]);
+
+  const ownedDrafts = useOwnedSnapshot({
+    signedInUid: user?.uid ?? null,
+    loading,
+    failed: Boolean(error),
+    value: filtered,
+  });
+  const rows = ownedDrafts.accepted && ownedDrafts.value ? ownedDrafts.value : [];
+  const phase = listPhase({
+    loading,
+    failed: Boolean(error),
+    count: rows.length,
+    owned: ownedDrafts.accepted,
+  });
+  const offline = syncStatus === "offline";
 
   const filterChips: { key: FilterKey; label: string }[] = [
     { key: "all", label: t("drafts.filterAll") },
@@ -120,20 +150,27 @@ export default function DraftsScreen() {
         ))}
       </View>
       <LastRefreshedHint message={refreshNote} />
-      {loading && drafts.length === 0 ? (
-        <SkeletonLoadingPanel loading slowMessage={t("skeleton.stillLoading")}>
-          <SkeletonList count={7} Item={SkeletonDraftRow} gap={0} />
-        </SkeletonLoadingPanel>
-      ) : filtered.length === 0 ? (
+      {offline && rows.length > 0 ? <OfflineDeviceNotice offline hasRows /> : null}
+      <SlowNetworkStatus active={refreshing && rows.length > 0} slowAfterMs={SCREEN_EXISTING_SLOW_MS} />
+      {phase === "loading" ? (
+        <InitialListSkeleton count={7} Item={SkeletonDraftRow} />
+      ) : phase === "error" ? (
+        <>
+          {offline ? <OfflineDeviceNotice offline hasRows={false} /> : null}
+          <ScreenErrorPanel error={error ?? "unknown"} onRetry={() => void load("mount")} />
+        </>
+      ) : showsEmpty(phase) ? (
         <EmptyState
           title={t("executive.inlineEmpty.noDrafts")}
           message={t("drafts.empty")}
           iconName="file-edit-outline"
           accentKey="work"
+          actionLabel={t("common.back")}
+          onAction={goBack}
         />
       ) : (
         <FlatList
-          data={filtered}
+          data={rows}
           keyExtractor={(item) => item.id}
           refreshControl={refreshControl}
           renderItem={({ item }) => {

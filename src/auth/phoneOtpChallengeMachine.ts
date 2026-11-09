@@ -19,6 +19,24 @@ export function createPhoneOtpChallengeMachine(): PhoneOtpChallengeMachine {
   };
 }
 
+/**
+ * Own a challenge restored from storage. This does not send an SMS.
+ * An in-flight send or verify keeps the newer generation.
+ */
+export function adoptRestoredPhoneChallenge(
+  machine: PhoneOtpChallengeMachine,
+  verificationId: string
+): PhoneOtpChallengeMachine {
+  if (!verificationId || machine.sendLocked || machine.verifyLocked) return machine;
+  if (machine.verificationId === verificationId && machine.generation > 0) return machine;
+  return {
+    generation: machine.generation + 1,
+    sendLocked: false,
+    verifyLocked: false,
+    verificationId,
+  };
+}
+
 export function beginPhoneOtpSend(
   machine: PhoneOtpChallengeMachine
 ): PhoneOtpChallengeMachine | null {

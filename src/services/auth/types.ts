@@ -105,7 +105,7 @@ export type ProfileWriteClaim = {
 };
 
 export interface AuthService {
-  startOtp(phoneE164: PhoneE164): Promise<OtpChallenge>;
+  startOtp(phoneE164: PhoneE164, options?: { forceResend?: boolean }): Promise<OtpChallenge>;
   confirmOtp(challenge: OtpChallenge, code: string): Promise<AuthResult>;
   signOut(): Promise<void>;
   /**

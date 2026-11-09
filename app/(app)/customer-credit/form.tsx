@@ -28,7 +28,10 @@ import { useAuth } from "@/state/auth";
 import { useI18n, useT } from "@/i18n";
 import { formDateRowStyle, formFieldLabelStyle, formNestedCardStyle } from "@/theme/formLayer";
 import { spacing, typography, useTheme, useThemeColors, useThemedStyles } from "@/theme";
-import { userFacingMessage } from "@/domain/errors";
+import { presentPublicError, toPublicError } from "@/domain/publicErrors";
+import { PermissionState, SessionHoldNotice } from "@/components/screenState";
+import { sessionBlocksWrite } from "@/components/screenState/resolveScreenState";
+import { useSync } from "@/state/sync";
 import { formatShortDate } from "@/utils/date";
 import { formatAmount } from "@/utils/formatters/formatAmount";
 import { requestComposerPickerReturn } from "@/navigation";
@@ -128,6 +131,7 @@ export default function CustomerCreditFormScreen() {
   const router = useRouter();
   const c = useThemeColors();
   const { user } = useAuth();
+  const { status: syncStatus } = useSync();
   const { id: editId, fromPicker } = useLocalSearchParams<{ id?: string; fromPicker?: string }>();
   const isEditing = Boolean(editId);
   const locale = lang === "hi" ? "hi-IN" : "en-IN";
@@ -192,6 +196,8 @@ export default function CustomerCreditFormScreen() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [sessionHold, setSessionHold] = useState(false);
+  const [photoBlock, setPhotoBlock] = useState<null | "camera" | "library">(null);
   const [submitting, setSubmitting] = useState(false);
   const saveLockRef = useRef(false);
   const clientRecordIdRef = useRef(
@@ -335,7 +341,7 @@ export default function CustomerCreditFormScreen() {
         }
       }
     } catch (e) {
-      setLoadError(userFacingMessage(e));
+      setLoadError(presentPublicError(e));
     } finally {
       setLoading(false);
     }
@@ -542,14 +548,18 @@ export default function CustomerCreditFormScreen() {
           setPhotoRemoved(false);
         }
       } catch (e) {
+        if (e instanceof CustomerPhotoError && e.code === "permission") {
+          setPhotoBlock(source);
+          return;
+        }
         if (e instanceof CustomerPhotoError) {
           const key =
             e.code === "too_large"
               ? "customerCredit.photoTooLarge"
-              : e.code === "permission"
-                ? "customerCredit.photoPermission"
-                : "customerCredit.photoFailed";
+              : "customerCredit.photoFailed";
           setSubmitError(t(key));
+        } else {
+          setSubmitError(presentPublicError(e));
         }
       }
     },
@@ -578,7 +588,11 @@ export default function CustomerCreditFormScreen() {
   }, [fromPicker, router]);
 
   const onSubmit = useCallback(async () => {
-    if (!user) return;
+    const blocked = sessionBlocksWrite({ signedIn: Boolean(user), syncStatus });
+    if (!user || blocked) {
+      setSessionHold(true);
+      return;
+    }
     if (submitting || saveLockRef.current) return;
 
     if (!customerName.trim()) return setSubmitError(t("customerCredit.errCustomerName"));
@@ -771,7 +785,8 @@ export default function CustomerCreditFormScreen() {
         setSubmitError(t("customerCredit.errSaveInProgress"));
         return;
       }
-      setSubmitError(userFacingMessage(e) || t("customerCredit.errGenerate"));
+      setSubmitError(presentPublicError(e) || t("customerCredit.errGenerate"));
+      if (toPublicError(e).action === "sign_in") setSessionHold(true);
       if (!isEditing) {
         notifyOrdinaryQuotaUpsell({
           family: "customer_credit",
@@ -793,6 +808,7 @@ export default function CustomerCreditFormScreen() {
     }
   }, [
     user,
+    syncStatus,
     submitting,
     customerName,
     customerMobile,
@@ -959,6 +975,7 @@ export default function CustomerCreditFormScreen() {
         showBack
         onBackPress={goBack}
       />
+      <SessionHoldNotice visible={sessionHold || sessionBlocksWrite({ signedIn: Boolean(user), syncStatus })} />
       <LocaleUiText style={styles.lead}>{t("customerCredit.formIntro")}</LocaleUiText>
 
       {isEditing && existing ? (
@@ -1162,6 +1179,17 @@ export default function CustomerCreditFormScreen() {
             ) : null}
           </View>
         </View>
+        {photoBlock ? (
+          <PermissionState
+            source={photoBlock}
+            onAlternative={() => {
+              const next = photoBlock === "camera" ? "library" : "camera";
+              setPhotoBlock(null);
+              void onPickPhoto(next);
+            }}
+            onDismiss={() => setPhotoBlock(null)}
+          />
+        ) : null}
         <LocaleUiText style={styles.consentNote}>{t("customerCredit.photoConsentNote")}</LocaleUiText>
       </FormSection>
 

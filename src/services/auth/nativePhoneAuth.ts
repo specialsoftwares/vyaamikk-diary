@@ -21,6 +21,7 @@ import { applyFirebasePhoneAuthTestingSettingsIfAllowed } from "./firebasePhoneA
 import { phoneAuthFailureToAppError } from "./nativePhoneAuthErrors";
 import {
   clearNativePhoneAuthSession,
+  clearNativePhoneAuthSessionIfMatches,
   loadNativePhoneAuthSession,
   saveNativePhoneAuthSession,
 } from "./nativePhoneAuthSession";
@@ -59,6 +60,7 @@ interface PendingSession {
 const pendingByVerificationId = new Map<string, PendingSession>();
 let sendInFlight = false;
 let confirmInFlightKey: string | null = null;
+let nativePhoneSendGeneration = 0;
 
 function purgeExpiredSessions(): void {
   const now = Date.now();
@@ -285,7 +287,10 @@ export function isChallengeAutoVerified(challenge: OtpChallenge): boolean {
  * Start native phone verification.
  * OtpChallenge.verificationId is the Firebase verificationId (resumable).
  */
-export async function startNativePhoneOtp(phoneE164: PhoneE164): Promise<OtpChallenge> {
+export async function startNativePhoneOtp(
+  phoneE164: PhoneE164,
+  options?: { forceResend?: boolean }
+): Promise<OtpChallenge> {
   assertProductionNativeOtp();
   const mod = tryNativeAuthModule();
   if (!mod) {
@@ -308,26 +313,29 @@ export async function startNativePhoneOtp(phoneE164: PhoneE164): Promise<OtpChal
     );
   }
 
-  purgeExpiredSessions();
-  // Fresh challenge must not inherit a prior native session as "verified".
-  // Capture preSendUid ONLY after this clear — successful fresh flow ⇒ null.
-  await clearStaleNativeAuthForFreshChallenge();
-  const preSend = snapshotNativeAuthState();
+  // The duplicate check above is synchronous. Take the lock before any await so a
+  // second tap cannot pass that check while this send is still preparing.
+  const sendGeneration = ++nativePhoneSendGeneration;
+  sendInFlight = true;
   const startedAtMs = Date.now();
   const androidActivity = probeAndroidAuthActivityState();
   const attemptId = `send_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-  log.info("startNativePhoneOtp", {
-    attemptId,
-    e164Length: phone.length,
-    e164Prefix: phone.slice(0, 3),
-    phoneSuffix: phoneSuffix(phone),
-    androidActivity,
-    preSendUserPresent: preSend.userPresent,
-  });
-
-  sendInFlight = true;
+  let preSend = snapshotNativeAuthState();
   let confirmation: NativeConfirmation;
   try {
+    purgeExpiredSessions();
+    // Fresh challenge must not inherit a prior native session as "verified".
+    // Capture preSendUid ONLY after this clear — successful fresh flow ⇒ null.
+    await clearStaleNativeAuthForFreshChallenge();
+    preSend = snapshotNativeAuthState();
+    log.info("startNativePhoneOtp", {
+      attemptId,
+      e164Length: phone.length,
+      e164Prefix: phone.slice(0, 3),
+      phoneSuffix: phoneSuffix(phone),
+      androidActivity,
+      preSendUserPresent: preSend.userPresent,
+    });
     applyOptionalFirebaseTestPhoneSettings(mod);
     // Call-boundary capture: the exact argument passed to RNFirebase (not reconstructed later).
     const firebaseSendPhoneE164 = phone;
@@ -338,7 +346,13 @@ export async function startNativePhoneOtp(phoneE164: PhoneE164): Promise<OtpChal
       e164Prefix: firebaseSendPhoneE164.slice(0, 3),
       androidActivity,
     });
-    confirmation = await mod.default().signInWithPhoneNumber(firebaseSendPhoneE164);
+    // A null Activity can return without settling this promise. The SDK's
+    // auto-retrieval window is not the authentication deadline; the attempt
+    // controller bounds the visible wait and drops a late result.
+    confirmation = await mod.default().signInWithPhoneNumber(
+      firebaseSendPhoneE164,
+      Boolean(options?.forceResend)
+    );
   } catch (e) {
     const mapped = phoneAuthFailureToAppError(e, "send", {
       phoneE164Sent: phone,
@@ -356,6 +370,15 @@ export async function startNativePhoneOtp(phoneE164: PhoneE164): Promise<OtpChal
     sendInFlight = false;
   }
 
+  if (sendGeneration !== nativePhoneSendGeneration) {
+    throw new AppError(
+      "otp_send_failed",
+      "This verification request is no longer current.",
+      undefined,
+      { attemptId, diagnosticCode: "PHONE_SEND_SUPERSEDED", authPhase: "send" }
+    );
+  }
+
   const firebaseVerificationId = confirmation.verificationId;
   if (!firebaseVerificationId || typeof firebaseVerificationId !== "string") {
     throw new AppError(
@@ -367,7 +390,15 @@ export async function startNativePhoneOtp(phoneE164: PhoneE164): Promise<OtpChal
   }
 
   const expiresAt = Date.now() + SESSION_TTL_MS;
-  // Atomically supersede any prior attempt (resend / retry).
+  if (sendGeneration !== nativePhoneSendGeneration) {
+    throw new AppError(
+      "otp_send_failed",
+      "This verification request is no longer current.",
+      undefined,
+      { attemptId, diagnosticCode: "PHONE_SEND_SUPERSEDED", authPhase: "send" }
+    );
+  }
+  // Atomically supersede any prior attempt (resend / retry) only while this send still owns it.
   pendingByVerificationId.clear();
   const row: PendingSession = {
     confirmation,
@@ -380,12 +411,24 @@ export async function startNativePhoneOtp(phoneE164: PhoneE164): Promise<OtpChal
     autoVerify: null,
   };
   pendingByVerificationId.set(firebaseVerificationId, row);
-  await saveNativePhoneAuthSession({
-    firebaseVerificationId,
-    phoneE164: phone,
-    expiresAt,
-    attemptId,
-  });
+  await saveNativePhoneAuthSession(
+    {
+      firebaseVerificationId,
+      phoneE164: phone,
+      expiresAt,
+      attemptId,
+    },
+    () => sendGeneration === nativePhoneSendGeneration
+  );
+  if (sendGeneration !== nativePhoneSendGeneration) {
+    pendingByVerificationId.delete(firebaseVerificationId);
+    throw new AppError(
+      "otp_send_failed",
+      "This verification request is no longer current.",
+      undefined,
+      { attemptId, diagnosticCode: "PHONE_SEND_SUPERSEDED", authPhase: "send" }
+    );
+  }
 
   // Instant verification may complete during signInWithPhoneNumber (post-send).
   observePostSendAuthForChallenge({
@@ -521,7 +564,11 @@ export async function confirmNativePhoneOtp(
   }
   if (row.expiresAt <= Date.now()) {
     pendingByVerificationId.delete(row.firebaseVerificationId);
-    await clearNativePhoneAuthSession();
+    await clearNativePhoneAuthSessionIfMatches({
+      firebaseVerificationId: row.firebaseVerificationId,
+      phoneE164: row.phoneE164,
+      attemptId: row.attemptId,
+    });
     throw new AppError(
       "otp_expired",
       "OTP expired. Please request a new code.",
@@ -594,7 +641,11 @@ export async function confirmNativePhoneOtp(
     }
 
     pendingByVerificationId.delete(row.firebaseVerificationId);
-    await clearNativePhoneAuthSession();
+    await clearNativePhoneAuthSessionIfMatches({
+      firebaseVerificationId: row.firebaseVerificationId,
+      phoneE164: row.phoneE164,
+      attemptId: row.attemptId,
+    });
     log.info("confirmNativePhoneOtp ok", {
       attemptId: row.attemptId,
       phoneSuffix: phoneSuffix(phone),
@@ -618,19 +669,69 @@ export async function confirmNativePhoneOtp(
 }
 
 /** Sign out native Firebase Auth (best-effort). */
-export async function signOutNativePhoneAuth(): Promise<boolean> {
+export async function signOutNativePhoneAuth(
+  isCurrent: () => boolean = () => true
+): Promise<boolean> {
+  if (!isCurrent()) return false;
   const mod = tryNativeAuthModule();
   if (!mod) return false;
   try {
+    if (!isCurrent()) return false;
     await mod.default().signOut();
   } catch (e) {
     log.warn("native signOut failed", e);
+    if (!isCurrent()) return false;
     pendingByVerificationId.clear();
-    await clearNativePhoneAuthSession();
+    await clearNativePhoneAuthSession(isCurrent);
     return false;
   }
+  if (!isCurrent()) return false;
   pendingByVerificationId.clear();
-  await clearNativePhoneAuthSession();
+  await clearNativePhoneAuthSession(isCurrent);
+  return isCurrent();
+}
+
+/**
+ * Reattach a saved verification to memory after relaunch. Does not send,
+ * and does not replace a different challenge already held in memory.
+ * Returns false when the saved row is missing, expired, or a different phone.
+ */
+export async function restorePendingPhoneSessionForResume(
+  verificationId: string,
+  phoneE164: string
+): Promise<boolean> {
+  purgeExpiredSessions();
+  const phone = normalizePhoneE164(phoneE164);
+  for (const id of pendingByVerificationId.keys()) {
+    if (id !== verificationId) return false;
+  }
+  const existing = pendingByVerificationId.get(verificationId);
+  if (
+    existing &&
+    phonesMatchE164(existing.phoneE164, phone) &&
+    existing.expiresAt > Date.now()
+  ) {
+    return true;
+  }
+  const persisted = await loadNativePhoneAuthSession();
+  if (
+    !persisted ||
+    persisted.firebaseVerificationId !== verificationId ||
+    !phonesMatchE164(persisted.phoneE164, phone) ||
+    persisted.expiresAt <= Date.now()
+  ) {
+    return false;
+  }
+  pendingByVerificationId.set(verificationId, {
+    confirmation: null,
+    firebaseVerificationId: persisted.firebaseVerificationId,
+    phoneE164: persisted.phoneE164,
+    expiresAt: persisted.expiresAt,
+    attemptId: persisted.attemptId,
+    startedAtMs: persisted.savedAt,
+    preSendUid: null,
+    autoVerify: null,
+  });
   return true;
 }
 
@@ -639,6 +740,7 @@ export function __clearNativePhoneSessions(): void {
   pendingByVerificationId.clear();
   sendInFlight = false;
   confirmInFlightKey = null;
+  nativePhoneSendGeneration = 0;
 }
 
 /** Test helper — inject a pending session for invariant unit coverage. */

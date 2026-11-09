@@ -93,6 +93,22 @@ function assertNoSensitive(value: unknown): void {
   assert.equal(meta!.op, "save");
   assert.equal(meta!.event, undefined);
   assert.equal(meta!.attemptId, undefined);
+  const redactedAttempt = sanitizeLogMetadata({
+    attemptId: "0123456789abcdef",
+    phoneAuthStage: "confirm",
+    reactivationStage: "account",
+    kind: "unknown",
+    ms: 20,
+    phoneE164: "+919800000001",
+    verificationId: "challenge-synthetic",
+  });
+  assert.equal(redactedAttempt?.attemptId, "0123456789abcdef");
+  assert.equal(redactedAttempt?.phoneAuthStage, "confirm");
+  assert.equal(redactedAttempt?.reactivationStage, "account");
+  assert.equal(redactedAttempt?.kind, "unknown");
+  assert.equal("phoneE164" in (redactedAttempt ?? {}), false);
+  assert.equal("verificationId" in (redactedAttempt ?? {}), false);
+  assert.equal(classifyLogMessage("phone auth operation").event, "phone_auth_operation");
   assert.equal(meta!.email, undefined);
   assert.equal(meta!.href, undefined);
   assert.equal(meta!.message, undefined);

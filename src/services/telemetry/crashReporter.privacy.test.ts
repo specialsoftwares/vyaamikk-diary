@@ -22,6 +22,7 @@ function assertClean(value: unknown): void {
   assert.doesNotMatch(blob, /SYNTHETIC_VALUE_Q7/);
 }
 
+async function main(): Promise<void> {
 __resetCrashReportingForTests();
 
 {
@@ -52,7 +53,7 @@ __resetCrashReportingForTests();
   assert.equal(original.message.includes(EMAIL), true);
   assert.equal(original.cause, cause);
 
-  setCrashReportingEnabled(true);
+  await setCrashReportingEnabled(true);
   recordError(original, "ErrorBoundary");
   log(`invoice ${DOC} ${EMAIL}`);
 
@@ -72,7 +73,7 @@ __resetCrashReportingForTests();
 {
   __resetCrashReportingForTests();
   __setCrashlyticsClientForTests(null);
-  setCrashReportingEnabled(true);
+  await setCrashReportingEnabled(true);
   assert.doesNotThrow(() =>
     recordError(new Error(`missing sdk ${EMAIL}`), "ErrorBoundary")
   );
@@ -94,9 +95,15 @@ __resetCrashReportingForTests();
       throw new Error("native uid");
     },
   });
-  assert.doesNotThrow(() => setCrashReportingEnabled(true));
+  await setCrashReportingEnabled(true);
   assert.doesNotThrow(() => recordError(new Error(`reject ${EMAIL}`), "ErrorBoundary"));
 }
 
 __resetCrashReportingForTests();
 console.log("crashReporter.privacy.test.ts: ok (EXECUTED_PRODUCTION_METHOD)");
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

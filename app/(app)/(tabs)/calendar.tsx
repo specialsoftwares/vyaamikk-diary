@@ -21,11 +21,21 @@ import { SwipeToDeleteRow } from "@/components/records/SwipeToDeleteRow";
 import { useRecordDelete } from "@/hooks/useRecordDelete";
 import { userDeleteFromCalendarRecord } from "@/services/records/deleteTargets";
 import { SignatureHeroSurface } from "@/components/signature";
-import { EmptyState, ErrorState, Header, LastRefreshedHint, Screen, SkeletonList, SkeletonLoadingPanel, LocaleUiText } from "@/components/ui";
+import { EmptyState, Header, LastRefreshedHint, Screen, SkeletonList, SkeletonLoadingPanel, LocaleUiText } from "@/components/ui";
+import {
+  OfflineDeviceNotice,
+  SCREEN_EXISTING_SLOW_MS,
+  ScreenErrorPanel,
+  SlowNetworkStatus,
+  showsEmpty,
+  listPhase,
+} from "@/components/screenState";
+import { displayStoredError } from "@/domain/publicErrors";
 import { useCalendarMapsData } from "@/hooks/useCalendarMapsData";
 import { useVyaaflowCopy } from "@/content/vyaaflow/useVyaaflowCopy";
 import { useAppRefresh } from "@/hooks/useAppRefresh";
 import { useAuth } from "@/state/auth";
+import { useSync } from "@/state/sync";
 import { useT } from "@/i18n";
 import type { CalendarMapRecord, CalendarMarkedDots } from "@/services/calendarMaps";
 import { navigateToCalendarMapRecord } from "@/services/calendarMaps/calendarMapsRouting";
@@ -51,6 +61,7 @@ export default function CalendarMapsTab() {
   const { mode: requestedMode } = useLocalSearchParams<{ mode?: string | string[] }>();
   const visibleMode = vyaaflowVisibleMode(requestedMode);
   const { user } = useAuth();
+  const { status: syncStatus } = useSync();
   const colors = useThemeColors();
   const { resolvedMode } = useTheme();
   const [selectedDate, setSelectedDate] = useState(() => dayKey(Date.now()));
@@ -212,6 +223,14 @@ export default function CalendarMapsTab() {
     [dayView.sections, agendaFilter, t]
   );
 
+  const offline = syncStatus === "offline";
+  const dayPhase = listPhase({
+    loading,
+    failed: Boolean(error) && sections.length === 0,
+    count: sections.length,
+    owned: Boolean(user?.uid),
+  });
+
   const calendarListHeader = useMemo(
     () => (
       <View>
@@ -281,12 +300,20 @@ export default function CalendarMapsTab() {
         </LocaleUiText>
 
         {error ? (
-          <ErrorState
-            message={t("calendarMaps.loadError")}
+          <ScreenErrorPanel
+            error={error}
+            message={displayStoredError(error, t("calendarMaps.loadError"))}
             onRetry={() => void reload("refresh")}
-            retryLabel={t("common.retry")}
           />
         ) : null}
+        {offline && sections.length > 0 ? <OfflineDeviceNotice offline hasRows /> : null}
+        {offline && Boolean(error) && sections.length === 0 ? (
+          <OfflineDeviceNotice offline hasRows={false} />
+        ) : null}
+        <SlowNetworkStatus
+          active={refreshing && sections.length > 0}
+          slowAfterMs={SCREEN_EXISTING_SLOW_MS}
+        />
         {loading && dayView.isEmpty ? (
           <SkeletonLoadingPanel loading slowMessage={t("skeleton.stillLoading")}>
             <SkeletonList count={4} />
@@ -307,11 +334,14 @@ export default function CalendarMapsTab() {
       reload,
       agendaFilter,
       filterLabel,
+      offline,
+      sections.length,
+      refreshing,
     ]
   );
 
   const calendarBody = useMemo(() => {
-    if (!loading && sections.length === 0) {
+    if (showsEmpty(dayPhase)) {
       return (
         <ScrollView
           style={styles.agendaList}
@@ -389,7 +419,7 @@ export default function CalendarMapsTab() {
       />
     );
   }, [
-    loading,
+    dayPhase,
     sections,
     calendarListHeader,
     styles,

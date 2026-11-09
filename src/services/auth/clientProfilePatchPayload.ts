@@ -75,6 +75,17 @@ export const SERVER_OWNED_PROFILE_PATCH_KEYS = [
 ] as const;
 
 /**
+ * Device-only demographic answers. They are stripped from client patches so a
+ * band cannot be uploaded or rewritten as `ageEligibility`. Stripping does not
+ * reject the rest of the patch, so profile save is not blocked on this field.
+ */
+const DEMOGRAPHIC_NON_UPLOAD_KEYS = [
+  "demographicAgeBand",
+  "demographicAgeRange",
+  "demographicAge",
+] as const;
+
+/**
  * Email identity fields bound server-side in production (`verifyAndBindEmail`).
  * Shared-dev and local-mock may still write these via the legacy merge path.
  */
@@ -115,6 +126,9 @@ export function stripServerOwnedProfilePatchKeys(
 ): ProfilePatch {
   const out: ProfilePatch = { ...patch };
   for (const key of SERVER_OWNED_PROFILE_PATCH_KEYS) {
+    delete (out as Record<string, unknown>)[key];
+  }
+  for (const key of DEMOGRAPHIC_NON_UPLOAD_KEYS) {
     delete (out as Record<string, unknown>)[key];
   }
   if (options?.production) {

@@ -1,6 +1,7 @@
 import React, { memo, useEffect, useRef } from "react";
 import { Animated, StyleSheet, type StyleProp, type ViewStyle } from "react-native";
 
+import { usePrefersReducedMotion } from "@/components/screenState/usePrefersReducedMotion";
 import { radius, useTheme, useThemeColors } from "@/theme";
 import { luxurySkeletonTint } from "@/theme/luxuryTokens";
 
@@ -23,8 +24,13 @@ export const SkeletonBase = memo(function SkeletonBase({
   const isDark = resolvedMode === "dark";
   const pulse = useRef(new Animated.Value(0.5)).current;
   const tint = luxurySkeletonTint(isDark, colors);
+  const reducedMotion = usePrefersReducedMotion();
 
   useEffect(() => {
+    if (reducedMotion) {
+      pulse.setValue(1);
+      return;
+    }
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(pulse, {
@@ -41,7 +47,7 @@ export const SkeletonBase = memo(function SkeletonBase({
     );
     loop.start();
     return () => loop.stop();
-  }, [pulse]);
+  }, [pulse, reducedMotion]);
 
   return (
     <Animated.View

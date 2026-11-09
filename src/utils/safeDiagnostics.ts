@@ -131,6 +131,7 @@ const MESSAGE_EVENTS = new Map<string, MessageMapping>([
   ],
   ["auth stage timed", { event: "auth_stage_timed", summary: "auth stage timed" }],
   ["auth failure reported", { event: "auth_failure_reported", summary: "auth failure reported" }],
+  ["phone auth operation", { event: "phone_auth_operation", summary: "phone auth operation" }],
 ]);
 
 const CALLABLE_FAILED_RE = /^callable ([A-Za-z][A-Za-z0-9_]{1,63}) failed$/;
@@ -249,6 +250,21 @@ const ALLOWED_KINDS = new Set([
   "cancelled",
   "verified",
   "already_in_flight",
+  "unknown",
+  "rejected",
+  "stale",
+  "local_failed",
+]);
+
+const PHONE_AUTH_STAGES = new Set(["send", "confirm", "account", "session", "cleanup"]);
+
+const REACTIVATION_STAGES = new Set([
+  "handler",
+  "account",
+  "callable",
+  "session",
+  "navigation",
+  "cleanup",
 ]);
 
 const ERROR_CLASSES = new Set<SafeErrorClass>([
@@ -276,6 +292,12 @@ const META_FIELDS = new Map<string, FieldSpec>([
   ],
   ["stage", (v) => asAllowedString(v, STARTUP_STAGES)],
   ["kind", (v) => asAllowedString(v, ALLOWED_KINDS)],
+  ["phoneAuthStage", (v) => asAllowedString(v, PHONE_AUTH_STAGES)],
+  ["reactivationStage", (v) => asAllowedString(v, REACTIVATION_STAGES)],
+  [
+    "attemptId",
+    (v) => (typeof v === "string" && /^[0-9a-f]{16}$/.test(v) ? v : undefined),
+  ],
   ["op", (v) => asAllowedString(v, ALLOWED_OPS)],
   ["callableName", (v) => asAllowedString(v, ALLOWED_CALLABLES)],
   ["functionsRegion", (v) => asAllowedString(v, ALLOWED_REGIONS)],
