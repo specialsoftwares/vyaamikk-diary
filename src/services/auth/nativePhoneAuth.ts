@@ -341,6 +341,9 @@ export async function startNativePhoneOtp(
       e164Prefix: firebaseSendPhoneE164.slice(0, 3),
       androidActivity,
     });
+    // A null Activity can return without settling this promise. The SDK's
+    // auto-retrieval window is not the authentication deadline; the attempt
+    // controller bounds the visible wait and drops a late result.
     confirmation = await mod.default().signInWithPhoneNumber(
       firebaseSendPhoneE164,
       Boolean(options?.forceResend)

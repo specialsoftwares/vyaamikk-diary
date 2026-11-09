@@ -129,6 +129,10 @@ const MESSAGE_EVENTS = new Map<string, MessageMapping>([
     "reactivation verification",
     { event: "reactivation_verification", summary: "reactivation verification" },
   ],
+  [
+    "phone auth operation",
+    { event: "phone_auth_operation", summary: "phone auth operation" },
+  ],
 ]);
 
 const CALLABLE_FAILED_RE = /^callable ([A-Za-z][A-Za-z0-9_]{1,63}) failed$/;
@@ -245,6 +249,8 @@ const REACTIVATION_STAGES = new Set([
   "cleanup",
 ]);
 
+const PHONE_AUTH_STAGES = new Set(["send", "confirm", "account", "session", "cleanup"]);
+
 const ERROR_CLASSES = new Set<SafeErrorClass>([
   "unauthenticated",
   "permission",
@@ -271,6 +277,7 @@ const META_FIELDS = new Map<string, FieldSpec>([
   ["stage", (v) => asAllowedString(v, STARTUP_STAGES)],
   ["kind", (v) => asAllowedString(v, ALLOWED_KINDS)],
   ["reactivationStage", (v) => asAllowedString(v, REACTIVATION_STAGES)],
+  ["phoneAuthStage", (v) => asAllowedString(v, PHONE_AUTH_STAGES)],
   [
     "attemptId",
     (v) => (typeof v === "string" && /^[0-9a-f]{16}$/.test(v) ? v : undefined),

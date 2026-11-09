@@ -52,7 +52,8 @@ assert.match(gate, /errorVisibleOnSurface/);
 assert.match(gate, /emailScreenError/);
 assert.equal(gate.includes("goBackFromEmail"), false);
 assert.match(gate, /Sign out and start again/);
-assert.match(gate, /onVerifyStart/);
+assert.match(gate, /submitPhoneVerification/);
+assert.match(gate, /onAccepted:/);
 assert.match(gate, /hidden_stay|emailBackPolicy/);
 
 if (prevMode == null) delete process.env.EXPO_PUBLIC_APP_MODE;

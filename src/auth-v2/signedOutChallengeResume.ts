@@ -14,6 +14,8 @@ export type SignedOutPhoneChallengeResume =
       verificationId: string;
       devCodeHint: string | null;
       resendAvailableAt: number | null;
+      /** Native-session expiry. Reopening must not move this timestamp. */
+      expiresAt: number;
     }
   | { action: "phone" }
   | { action: "stale" };
@@ -114,5 +116,6 @@ export async function resumeSignedOutPhoneChallenge(
     verificationId: wrapper.verificationId,
     devCodeHint: wrapper.devCodeHint ?? null,
     resendAvailableAt,
+    expiresAt: native.expiresAt,
   };
 }

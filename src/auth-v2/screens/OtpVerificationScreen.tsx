@@ -65,7 +65,6 @@ export function OtpVerificationScreen({
   phoneE164,
   resendAvailableAt = null,
   onVerify,
-  onVerifyStart,
   onResend,
   onChangeNumber,
   loading = false,
@@ -115,7 +114,6 @@ export function OtpVerificationScreen({
     verifyInFlightRef.current = true;
     onboardingMark("otpComplete");
     onboardingMark("verifyStarted");
-    onVerifyStart?.();
     try {
       onVerify(nextCode);
     } finally {

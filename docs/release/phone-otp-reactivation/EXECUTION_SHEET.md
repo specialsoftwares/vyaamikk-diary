@@ -503,3 +503,28 @@ build has not been started. Play upload and handset installation remain
 separate and are not done. The incident stays open until a signed build of
 this candidate completes phone verification, any required reactivation,
 account-screen entry, and relaunch.
+
+Canonical CI on the earlier combined head `33cf7d7` passed:
+https://github.com/specialsoftwares/vyaamikk-diary/actions/runs/42366142471.
+That head still started Verifying before the parent accepted the attempt,
+waited without a client bound on native confirmation, ignored a false native
+restore, and left Change number waiting on storage.
+
+The login controller now owns one attempt at a time. Visible bounds are
+45 seconds overall, 20 seconds for native send, native confirmation, account
+resolution, and local session preparation, and 3 seconds for storage cleanup.
+A JavaScript deadline does not cancel Firebase or a server transaction. An
+expired wait says the result could not be confirmed. It does not report a
+wrong code or a successful sign-in. A late result cannot publish, navigate,
+or clear a newer attempt. Change number and hardware Back retire the overlay
+before cleanup. A restored OTP screen opens only when native restore returns
+true and the original expiry is still ahead; reopening does not move that
+expiry. `phoneAuthOperation.test.ts` covers an invalid six-digit rejection,
+session change, a confirmation that never settles, a late result after
+timeout, Change number during verification and during stuck cleanup, a false
+restore, resend before and after expiry including a duplicate tap and a
+restart, account setup failure after phone authentication, reactivation
+success with local session preparation failure, and an old completion after
+a newer attempt. No Android build was produced for this correction. SMS
+delivery, the installed binary, and completion of reactivation on the
+affected account remain unknown. The incident is not fixed.

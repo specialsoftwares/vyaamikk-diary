@@ -239,8 +239,9 @@ async function run() {
   const gate = readFileSync(resolve(root, "src/auth-v2/AuthFlowGate.tsx"), "utf8");
   const launchStart = gate.indexOf("resumeSignedOutPhoneChallenge(");
   const launch = gate.slice(launchStart, gate.indexOf("if (!cancelled) setHydrated(true);", launchStart));
-  assert.ok(launch.indexOf("adoptRestoredPhoneChallenge") < launch.indexOf("restorePendingPhoneSessionForResume"));
-  assert.ok(launch.indexOf("restorePendingPhoneSessionForResume") < launch.indexOf("sharedPhoneResendDeadline"));
+  assert.ok(launch.indexOf("restorePendingPhoneSessionForResume") < launch.indexOf("openRestoredPhoneChallenge"));
+  assert.ok(launch.indexOf("openRestoredPhoneChallenge") < launch.indexOf("adoptRestoredPhoneChallenge"));
+  assert.ok(launch.indexOf("opened.openOtp") < launch.indexOf('setStep("otp")'));
   assert.ok(launch.indexOf("sharedPhoneResendDeadline") < launch.indexOf('setStep("otp")'));
   assert.equal(launch.includes("startOtp("), false);
   assert.equal(launch.includes("sendOtpForWrapper("), false);
