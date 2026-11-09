@@ -79,15 +79,51 @@ jobs:
       - name: Install dependencies (functions, locked)
         run: npm --prefix functions ci
 
-      # Letterhead PDF freshness gate needs a real Chromium (committed pdf/ does not count).
-      - name: Install Chromium for letterhead PDF fixtures
+      # Letterhead PDF freshness gate needs a real Chrome or Chromium.
+      # Prefer an executable already on the runner. apt/snap is only the fallback;
+      # a snap download of Chromium has exceeded the job limit before verify starts.
+      - name: Select Chrome for letterhead PDF fixtures
         run: |
-          sudo apt-get update
-          sudo apt-get install -y chromium-browser || sudo apt-get install -y chromium
-          CHROME_BIN="$(command -v chromium-browser || command -v chromium || command -v google-chrome || true)"
-          echo "LETTERHEAD_CHROME_BIN=${CHROME_BIN}" >> "$GITHUB_ENV"
+          set -euo pipefail
+          select_chrome() {
+            local candidate
+            for candidate in \
+              "${LETTERHEAD_CHROME_BIN:-}" \
+              google-chrome \
+              google-chrome-stable \
+              chromium \
+              chromium-browser
+            do
+              if [ -n "$candidate" ] && command -v "$candidate" >/dev/null 2>&1; then
+                command -v "$candidate"
+                return 0
+              fi
+            done
+            for candidate in \
+              /usr/bin/google-chrome \
+              /usr/bin/google-chrome-stable \
+              /usr/bin/chromium \
+              /usr/bin/chromium-browser \
+              /usr/lib/chromium/chromium
+            do
+              if [ -x "$candidate" ]; then
+                printf '%s\n' "$candidate"
+                return 0
+              fi
+            done
+            return 1
+          }
+          if ! CHROME_BIN="$(select_chrome)"; then
+            sudo apt-get update
+            sudo apt-get install -y chromium-browser || sudo apt-get install -y chromium
+            CHROME_BIN="$(select_chrome)"
+          fi
           test -n "$CHROME_BIN"
-          "$CHROME_BIN" --version
+          test -x "$CHROME_BIN"
+          version="$("$CHROME_BIN" --version)"
+          printf '%s\n' "$version"
+          printf '%s\n' "$version" | grep -Eiq 'chrom(e|ium)'
+          echo "LETTERHEAD_CHROME_BIN=${CHROME_BIN}" >> "$GITHUB_ENV"
 
       - name: CI verify (canonical repository gate)
         run: npm run ci:verify

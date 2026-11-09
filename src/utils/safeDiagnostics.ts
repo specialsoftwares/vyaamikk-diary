@@ -44,6 +44,7 @@ const ALLOWED_SCOPES = new Set([
   "auth/nativePhone",
   "auth/nativePhoneContactChange",
   "auth/perf",
+  "auth/reactivation",
   "auth/reconcilePendingMobile",
   "auth/shared-dev",
   "cashPaid/photo",
@@ -123,6 +124,14 @@ const MESSAGE_EVENTS = new Map<string, MessageMapping>([
   [
     "trusted device record failed",
     { event: "device_trusted_record_failed", summary: "trusted device record failed" },
+  ],
+  [
+    "reactivation verification",
+    { event: "reactivation_verification", summary: "reactivation verification" },
+  ],
+  [
+    "phone auth operation",
+    { event: "phone_auth_operation", summary: "phone auth operation" },
   ],
 ]);
 
@@ -225,7 +234,22 @@ const ALLOWED_KINDS = new Set([
   "cancelled",
   "verified",
   "already_in_flight",
+  "unknown",
+  "rejected",
+  "stale",
+  "local_failed",
 ]);
+
+const REACTIVATION_STAGES = new Set([
+  "handler",
+  "account",
+  "callable",
+  "session",
+  "navigation",
+  "cleanup",
+]);
+
+const PHONE_AUTH_STAGES = new Set(["send", "confirm", "account", "session", "cleanup"]);
 
 const ERROR_CLASSES = new Set<SafeErrorClass>([
   "unauthenticated",
@@ -252,6 +276,12 @@ const META_FIELDS = new Map<string, FieldSpec>([
   ],
   ["stage", (v) => asAllowedString(v, STARTUP_STAGES)],
   ["kind", (v) => asAllowedString(v, ALLOWED_KINDS)],
+  ["reactivationStage", (v) => asAllowedString(v, REACTIVATION_STAGES)],
+  ["phoneAuthStage", (v) => asAllowedString(v, PHONE_AUTH_STAGES)],
+  [
+    "attemptId",
+    (v) => (typeof v === "string" && /^[0-9a-f]{16}$/.test(v) ? v : undefined),
+  ],
   ["op", (v) => asAllowedString(v, ALLOWED_OPS)],
   ["callableName", (v) => asAllowedString(v, ALLOWED_CALLABLES)],
   ["functionsRegion", (v) => asAllowedString(v, ALLOWED_REGIONS)],

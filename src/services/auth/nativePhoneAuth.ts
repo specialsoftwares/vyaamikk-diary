@@ -341,6 +341,9 @@ export async function startNativePhoneOtp(
       e164Prefix: firebaseSendPhoneE164.slice(0, 3),
       androidActivity,
     });
+    // A null Activity can return without settling this promise. The SDK's
+    // auto-retrieval window is not the authentication deadline; the attempt
+    // controller bounds the visible wait and drops a late result.
     confirmation = await mod.default().signInWithPhoneNumber(
       firebaseSendPhoneE164,
       Boolean(options?.forceResend)
@@ -637,6 +640,49 @@ export async function signOutNativePhoneAuth(): Promise<boolean> {
   }
   pendingByVerificationId.clear();
   await clearNativePhoneAuthSession();
+  return true;
+}
+
+/**
+ * Reattach a saved verification to memory after relaunch. Does not send,
+ * and does not replace a different challenge already held in memory.
+ */
+export async function restorePendingPhoneSessionForResume(
+  verificationId: string,
+  phoneE164: string
+): Promise<boolean> {
+  purgeExpiredSessions();
+  const phone = normalizePhoneE164(phoneE164);
+  for (const id of pendingByVerificationId.keys()) {
+    if (id !== verificationId) return false;
+  }
+  const existing = pendingByVerificationId.get(verificationId);
+  if (
+    existing &&
+    phonesMatchE164(existing.phoneE164, phone) &&
+    existing.expiresAt > Date.now()
+  ) {
+    return true;
+  }
+  const persisted = await loadNativePhoneAuthSession();
+  if (
+    !persisted ||
+    persisted.firebaseVerificationId !== verificationId ||
+    !phonesMatchE164(persisted.phoneE164, phone) ||
+    persisted.expiresAt <= Date.now()
+  ) {
+    return false;
+  }
+  pendingByVerificationId.set(verificationId, {
+    confirmation: null,
+    firebaseVerificationId: persisted.firebaseVerificationId,
+    phoneE164: persisted.phoneE164,
+    expiresAt: persisted.expiresAt,
+    attemptId: persisted.attemptId,
+    startedAtMs: persisted.savedAt,
+    preSendUid: null,
+    autoVerify: null,
+  });
   return true;
 }
 

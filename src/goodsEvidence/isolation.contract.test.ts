@@ -95,7 +95,7 @@ assert.match(offline, /not a SQLite outbox/);
 
 const appJson = readFileSync(join(repoRoot, "app.json"), "utf8");
 assert.doesNotMatch(appJson, /GOODS_EVIDENCE/);
-assert.match(appJson, /"versionCode":\s*34/);
+assert.match(appJson, /"versionCode":\s*35/);
 const eas = JSON.parse(readFileSync(join(repoRoot, "eas.json"), "utf8")) as {
   build: Record<string, { env?: Record<string, string>; android?: { buildType?: string } }>;
 };
