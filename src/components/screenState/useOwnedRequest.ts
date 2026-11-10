@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { presentPublicError } from "@/domain/publicErrors";
 import { currentSessionCommitEpoch } from "@/services/auth/authSessionFence";
@@ -111,5 +111,9 @@ export function useRequestOwner(uid: string | null) {
     return generation.current === claim.generation;
   }, []);
 
-  return { capture, owns, ownsGeneration };
+  // Stable identity — screens that put `owner` in effect deps must not reload every render.
+  return useMemo(
+    () => ({ capture, owns, ownsGeneration }),
+    [capture, owns, ownsGeneration]
+  );
 }

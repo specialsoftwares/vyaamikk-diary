@@ -379,9 +379,13 @@ export default function ComposerScreen() {
     let cancelled = false;
     const claim = owner.capture();
     const current = () => !cancelled && owner.owns(claim);
+    const needsHydration = Boolean(draftIdParam || editingId);
 
     const load = async () => {
-      setLoading(true);
+      // New Cash paid / Payment request must open on the form, not a loading flash.
+      // Only draft/edit reopen waits on a bounded owner-scoped read.
+      if (needsHydration) setLoading(true);
+      else setLoading(false);
       savedLocationRef.current = null;
       try {
         if (draftIdParam) {
@@ -478,7 +482,17 @@ export default function ComposerScreen() {
     return () => {
       cancelled = true;
     };
-  }, [user, entryType, editingId, linkedDispatchId, draftIdParam, t, owner, sessionEpoch, loadNonce]);
+  }, [
+    user?.uid,
+    entryType,
+    editingId,
+    linkedDispatchId,
+    draftIdParam,
+    t,
+    owner,
+    sessionEpoch,
+    loadNonce,
+  ]);
 
   useEffect(() => {
     if (!user || editingId) return;

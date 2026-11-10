@@ -101,6 +101,10 @@ export function BootScreenView({ ports }: { ports: BootScreenViewPorts }) {
   const [animationVisible, setAnimationVisible] = useState(true);
   const [routeFailed, setRouteFailed] = useState(false);
   const [resolveEpoch, setResolveEpoch] = useState(0);
+  const sheetVisibleRef = useRef(sheetVisible);
+  const routeFailedRef = useRef(routeFailed);
+  sheetVisibleRef.current = sheetVisible;
+  routeFailedRef.current = routeFailed;
 
   const session = ports.captureSession();
   const sessionUid = session?.uid ?? null;
@@ -160,13 +164,16 @@ export function BootScreenView({ ports }: { ports: BootScreenViewPorts }) {
       return;
     }
     if (action.type === "hide_continuation") {
-      // Owner change retires continuation AND failure surfaces; restore resolving/boot.
+      // Owner change retires continuation AND failure surfaces. Only restore the
+      // boot gate when retiring an error/sheet — do not toggle `visible` false→true
+      // on a mid-boot generation bump (that rewinds brandMinElapsed / splash feel).
+      const restoreGate = sheetVisibleRef.current || routeFailedRef.current;
       setSheetVisible(false);
       setContinuation(null);
       setTicket(null);
       setDestinationReady(false);
       setRouteFailed(false);
-      setAnimationVisible(true);
+      if (restoreGate) setAnimationVisible(true);
       return;
     }
     if (action.type === "resolver_failed") {

@@ -1,6 +1,6 @@
 # Subscription lifetime VC36 — execution sheet
 
-Status: **IN PROGRESS — combined head proofs + walkthrough fixes landed; CI/AAB/versionCode next.** Public publication and integration→main remain HOLD. Forward-only live cutover remains HOLD pending owner decision on dry-run counts below.
+Status: **IN PROGRESS — proofs + walkthrough + lifetime rules shape landed; combined-head CI → versionCode 37 → CI → internal-grin AAB next.** Public publication and integration→main remain HOLD. Forward-only live cutover remains HOLD pending owner decision on dry-run counts below.
 
 Branch: `fix/subscription-lifetime-vc36` (worktree `/Users/shivamsaurav/vyaamikk-subscription-vc36`). Source baseline `c29bcd1`.
 
@@ -69,12 +69,15 @@ Mounted on You dashboard and creation screens: composer (incl. Cash paid / Payme
 ## Walkthrough fixes in this head
 
 - Auth: `session_changed` uses AppError code `session_changed` (not `session_expired`)
+- Splash: mid-boot owner/generation bumps no longer rewind the boot gate after splash release
+- Cash paid / Payment request: stable `useRequestOwner`; new opens skip hydration flash; edit/draft reopen stays bounded
 - Saved letter: scrollable reader + bottom inset so closing field is reachable
 - Search: no autofocus keyboard on empty library
 - Delete: destructive dialogs name the selection; drafts ack as “Draft deleted”
 - Dashboard pull: Android `progressViewOffset` to stop ~63px refresh jump
 - All records total counts every saved family
 - Composer loading stays form-shaped with meter (no dashboard list flash)
+- Rules: `usageCurrent` shape accepts lifetime fields required by atomic admission
 
 ## Forward-only dry-run (HOLD live)
 
