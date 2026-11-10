@@ -1,6 +1,8 @@
 # Subscription lifetime VC36 — execution sheet
 
-Status: **IN PROGRESS — contracts + shared writers landed (`e8d01bf`, `d3ffbda`); streams A–D implementing on this branch.** Public publication and integration→main remain HOLD.
+Status: **IN PROGRESS — contracts, shared writers, Streams A–C, and phone session_changed landed; remaining walkthrough defects + CI/AAB still open.** Public publication and integration→main remain HOLD.
+
+Branch commits since `c29bcd1`: `e8d01bf` → `d3ffbda` → `e6d3cac` → `e212a3a` (catalog) → `69ccbfd` (lifetime) → `ed6bbd9` (Insights) → `60b015a` (session_changed).
 
 ## Baseline
 
