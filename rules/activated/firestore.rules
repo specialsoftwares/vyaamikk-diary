@@ -697,6 +697,19 @@ service cloud.firestore {
              && key[4] == '-';
     }
 
+    function lifetimeUsageFieldsValid() {
+      let data = request.resource.data;
+      return (!data.keys().hasAny(['lifetimeAcceptedCount'])
+              || (data.lifetimeAcceptedCount is int
+                  && data.lifetimeAcceptedCount >= 0
+                  && data.lifetimeAcceptedCount <= 15))
+        && (!data.keys().hasAny(['freeMembershipIds'])
+              || (data.freeMembershipIds is list
+                  && data.freeMembershipIds.size() <= 15))
+        && (!data.keys().hasAny(['admissionReceipts'])
+              || data.admissionReceipts is map);
+    }
+
     function usageDocShapeValid() {
       return request.resource.data.keys().hasOnly([
           'monthKey',
@@ -704,6 +717,9 @@ service cloud.firestore {
           'lastRecordCollection',
           'lastRecordId',
           'updatedAt',
+          'lifetimeAcceptedCount',
+          'freeMembershipIds',
+          'admissionReceipts',
         ])
         && request.resource.data.monthKey is string
         && request.resource.data.recordsThisMonth is int
@@ -712,7 +728,8 @@ service cloud.firestore {
         && request.resource.data.lastRecordId is string
         && request.resource.data.lastRecordId.size() > 0
         && request.resource.data.lastRecordId.size() <= 200
-        && request.resource.data.updatedAt is int;
+        && request.resource.data.updatedAt is int
+        && lifetimeUsageFieldsValid();
     }
 
     // Linkage: the usage transition must point at a billable record that is
