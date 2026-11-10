@@ -1,25 +1,50 @@
 /**
- * Crash reporting service — wraps Firebase Crashlytics.
- * All methods are no-ops if Crashlytics is unavailable or user has not consented.
- * Collection stays off until setCrashReportingEnabled(true).
- *
- * Native recordError/log receive only safe diagnostic values. The original
- * application Error is never copied or mutated.
+ * Sanitized, account-scoped manual crash reporting. SDK automatic collection
+ * remains off, including before JS startup. Native recording opens only after
+ * durable choice and matching current server acknowledgement. Native dispatch
+ * is restricted to a queue with the same owner and consent revision.
+ * A withdrawal stops new application reports; an already authorized dispatch
+ * cannot be recalled. Public SDK delete/send calls are requests, not receipts.
  */
 
 import {
   classifyContext,
   createSafeDiagnosticError,
 } from "@/utils/safeDiagnostics";
+import {
+  __resetCrashSdkBridgeForTests,
+  getCrashSdkBridge,
+  requestUnsentReportDeletion,
+  setRuntimeSdkCollection,
+  writeAutoCollectionPreferenceFalse,
+  type PreferenceWriter,
+} from "@/services/telemetry/crashNativeCollection";
 
-type CrashlyticsClient = {
-  setCrashlyticsCollectionEnabled: (enabled: boolean) => Promise<unknown>;
+type CrashlyticsClient = PreferenceWriter & {
   log: (message: string) => void;
   recordError: (error: Error) => void;
   setUserId: (id: string) => Promise<unknown> | void;
 };
 
+/** A deletion request is not proof that native deletion finished, and it is not a remote recall. */
+export type UnsentReportState = "not_applicable" | "retained" | "deletion_requested" | "unavailable" | "error";
+export type CrashStopOptions = Readonly<{ deleteUnsentReports?: boolean; ownerUid?: string; consentRevision?: number }>;
+export type CrashActivationResult = Readonly<{
+  ok: boolean;
+  status: "enabled" | "disabled" | "unavailable" | "rejected" | "superseded";
+  queuedReportsSeparatelyDeletable: boolean;
+  unsentReports: UnsentReportState;
+  /** This attempt never writes the auto-collection preference true. */
+  preference: false;
+  /** Native session accepts sanitized reports; SDK automatic upload is still off. */
+  sessionReporting: boolean;
+}>;
+
 let _enabled = false;
+let _activationEpoch = 0;
+let _nativeQueue: Promise<void> = Promise.resolve();
+let _cleanupRequired = false;
+let _cleanupEpoch = 0;
 let _testClient: CrashlyticsClient | null | undefined;
 
 function getCrashlytics(): CrashlyticsClient | null {
@@ -40,38 +65,137 @@ export function __setCrashlyticsClientForTests(client: CrashlyticsClient | null 
   _testClient = client;
 }
 
+export { __setCrashSdkBridgeForTests } from "@/services/telemetry/crashNativeCollection";
+
 /** Test-only. Restores disabled default and clears the injected port. */
 export function __resetCrashReportingForTests(): void {
   _enabled = false;
+  _activationEpoch += 1;
+  _nativeQueue = Promise.resolve();
+  _cleanupRequired = false;
+  _cleanupEpoch = 0;
   _testClient = undefined;
+  __resetCrashSdkBridgeForTests();
 }
 
-export function setCrashReportingEnabled(enabled: boolean): void {
-  _enabled = enabled;
-  try {
-    const client = getCrashlytics();
-    if (!client) return;
-    void client.setCrashlyticsCollectionEnabled(enabled).catch(() => {});
-    // Opt-out must also drop the pseudonymous user id (uid prefix) so a
-    // later re-enable or native restart cannot resend it. The consent
-    // toggle and decline paths call only this function, not clearUser().
-    if (!enabled) {
-      void Promise.resolve(client.setUserId("")).catch(() => {});
-    }
-  } catch {
-    // Never throw from the crash reporter.
+function result(
+  status: CrashActivationResult["status"],
+  unsentReports: UnsentReportState,
+  canDelete: boolean,
+  sessionReporting: boolean
+): CrashActivationResult {
+  return {
+    ok: status === "enabled" || status === "disabled",
+    status,
+    queuedReportsSeparatelyDeletable: canDelete,
+    unsentReports,
+    preference: false,
+    sessionReporting,
+  };
+}
+
+function canDeleteUnsent(writer: PreferenceWriter | null): boolean {
+  return typeof (getCrashSdkBridge()?.deleteUnsentReports ?? writer?.deleteUnsentReports) === "function";
+}
+
+/**
+ * Close the JS reporting gate synchronously, including when native calls throw.
+ * Native operations are ordered so an older enable cannot finish after the
+ * final disable. Pausing retains cached reports while authority is uncertain.
+ * Explicit withdrawal and account retirement request deletion of unsent reports.
+ * Disable runs immediately, without waiting for an older enable. Already
+ * uploaded reports cannot be recalled by this API.
+ * Enabling does not write the RNFirebase preference true and does not open the
+ * JS gate unless the native bridge accepts the owner/revision-scoped session.
+ */
+export function setCrashReportingEnabled(
+  enabled: boolean,
+  options: CrashStopOptions = {}
+): Promise<CrashActivationResult> {
+  const epoch = ++_activationEpoch;
+  const stillCurrent = () => epoch === _activationEpoch;
+  _enabled = false;
+  if (!enabled && options.deleteUnsentReports) {
+    _cleanupRequired = true;
+    _cleanupEpoch += 1;
   }
+  if (!enabled) {
+    const writer = getCrashlytics();
+    void writeAutoCollectionPreferenceFalse(writer);
+    void setRuntimeSdkCollection(false);
+    if (options.deleteUnsentReports) void requestUnsentReportDeletion(writer);
+    try {
+      void Promise.resolve(writer?.setUserId("")).catch(() => undefined);
+    } catch {
+      // Best effort. The gate is already closed.
+    }
+  }
+  const work = async (): Promise<CrashActivationResult> => {
+    const writer = getCrashlytics();
+    const canDelete = canDeleteUnsent(writer);
+    if (enabled && !stillCurrent()) return result("superseded", "not_applicable", canDelete, false);
+    const preferenceWrite = await writeAutoCollectionPreferenceFalse(writer);
+    if (preferenceWrite === "failed") {
+      if (stillCurrent()) _enabled = false;
+      return result("rejected", enabled ? "not_applicable" : "error", canDelete, false);
+    }
+    try {
+      if (!enabled || _cleanupRequired) {
+        const closed = await setRuntimeSdkCollection(false);
+        if (closed === "failed") return result("rejected", "error", canDelete, false);
+        if (!_cleanupRequired) {
+          return result(stillCurrent() ? "disabled" : "superseded", "retained", canDelete, false);
+        }
+        if (!canDelete) return result("unavailable", "unavailable", false, false);
+        const cleanupEpoch = _cleanupEpoch;
+        const deletion = await requestUnsentReportDeletion(writer);
+        if (deletion === "error") return result("rejected", "error", true, false);
+        if (cleanupEpoch === _cleanupEpoch && deletion === "deletion_requested") _cleanupRequired = false;
+        if (!enabled) {
+          if (deletion !== "deletion_requested") return result("unavailable", "unavailable", false, false);
+          return result(stillCurrent() ? "disabled" : "superseded", "deletion_requested", true, false);
+        }
+      }
+      if (!stillCurrent()) {
+        await setRuntimeSdkCollection(false);
+        return result("superseded", "not_applicable", canDelete, false);
+      }
+      const opened = await setRuntimeSdkCollection(true, options);
+      if (!stillCurrent()) {
+        await setRuntimeSdkCollection(false);
+        return result("superseded", "not_applicable", canDelete, false);
+      }
+      if (opened !== "set") {
+        if (opened === "failed") await setRuntimeSdkCollection(false);
+        _enabled = false;
+        return result(opened === "unavailable" ? "unavailable" : "rejected", "not_applicable", canDelete, false);
+      }
+      _enabled = true;
+      return result("enabled", "not_applicable", canDelete, true);
+    } catch {
+      if (stillCurrent()) _enabled = false;
+      return result("rejected", enabled ? "not_applicable" : "error", canDelete, false);
+    }
+  };
+  const pending = _nativeQueue.then(work, work);
+  _nativeQueue = pending.then(
+    () => undefined,
+    () => undefined
+  );
+  return pending;
 }
 
 export function recordError(error: Error, context?: string): void {
   if (!_enabled) return;
   try {
-    const client = getCrashlytics();
-    if (!client) return;
+    const bridge = getCrashSdkBridge();
+    if (!bridge?.recordDiagnostic) return;
     const safeContext = classifyContext(context);
     const safe = createSafeDiagnosticError(error, safeContext);
-    if (safeContext) client.log(safeContext);
-    client.recordError(safe);
+    if (safeContext && bridge.logDiagnostic) {
+      void Promise.resolve(bridge.logDiagnostic(safeContext)).catch(() => undefined);
+    }
+    void Promise.resolve(bridge.recordDiagnostic(`${safe.name}:${safe.message}`)).catch(() => undefined);
   } catch {
     // Never throw from the crash reporter. Never print the raw input.
   }
@@ -86,8 +210,10 @@ export function setUserId(_uid: string): void {
 export function log(message: string): void {
   if (!_enabled) return;
   try {
+    const bridge = getCrashSdkBridge();
+    if (!bridge?.logDiagnostic) return;
     const safe = classifyContext(message) ?? "app";
-    getCrashlytics()?.log(safe);
+    void Promise.resolve(bridge.logDiagnostic(safe)).catch(() => undefined);
   } catch {
     // Never throw from the crash reporter.
   }

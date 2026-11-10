@@ -28,7 +28,7 @@ export async function persistDeferredPhoneConsent(input: {
   sessionUid?: () => string | null;
   updateProfile: (patch: ProfilePatch) => Promise<unknown>;
   loadPending?: () => Promise<PendingLegalConsent | null>;
-  clearIfUnchanged?: (snapshot: PendingLegalConsent) => Promise<boolean>;
+  clearIfUnchanged?: (snapshot: PendingLegalConsent, owns: () => boolean) => Promise<boolean>;
   rebuildRecord?: LegalConsentRecord;
 }): Promise<DeferredConsentResult> {
   const generation = input.currentGeneration ?? currentAuthMutationGeneration;
@@ -40,17 +40,16 @@ export async function persistDeferredPhoneConsent(input: {
     });
   const clearIfUnchanged =
     input.clearIfUnchanged ??
-    (async (snapshot: PendingLegalConsent) => {
+    (async (snapshot: PendingLegalConsent, owns: () => boolean) => {
       const service = await import("./legalConsentService");
-      return service.clearPendingConsentIfUnchanged(snapshot);
+      return service.clearPendingConsentIfUnchanged(snapshot, owns);
     });
+  const owns = () => generation() === input.generationAtStart &&
+    (!input.sessionUid || input.sessionUid() === input.profile.uid);
   try {
-    if (generation() !== input.generationAtStart) return "skipped";
-    const liveUid = input.sessionUid?.() ?? null;
-    if (liveUid && liveUid !== input.profile.uid) return "skipped";
-
+    if (!owns()) return "skipped";
     const stored = await loadPending();
-    if (generation() !== input.generationAtStart) return "skipped";
+    if (!owns()) return "skipped";
     const rebuild =
       input.rebuildRecord ??
       (await import("./legalConsentService")).buildConsentRecord({
@@ -64,13 +63,12 @@ export async function persistDeferredPhoneConsent(input: {
       rebuild
     );
     if (!patch) return "skipped";
-    if (generation() !== input.generationAtStart) return "skipped";
-    const liveAfterPatch = input.sessionUid?.() ?? null;
-    if (liveAfterPatch && liveAfterPatch !== input.profile.uid) return "skipped";
+    if (!owns()) return "skipped";
 
     await input.updateProfile(patch);
+    if (!owns()) return "skipped";
     if (stored && sameAccount(stored, input.profile)) {
-      await clearIfUnchanged(stored);
+      await clearIfUnchanged(stored, owns);
     }
     return "written";
   } catch (error) {

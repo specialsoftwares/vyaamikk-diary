@@ -1,8 +1,20 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useFocusEffect, useNavigation, useRouter } from "expo-router";
 
-import { Banner, LastRefreshedHint, Screen, SmartHeadline } from "@/components/ui";
+import { Banner, LastRefreshedHint, Screen, SmartHeadline, LocaleUiText } from "@/components/ui";
+import {
+  InitialListSkeleton,
+  OfflineDeviceNotice,
+  ScreenErrorPanel,
+  SlowNetworkStatus,
+  listPhase,
+  screenStateCopy,
+  useOwnedRequest,
+  useOwnedSnapshot,
+} from "@/components/screenState";
+import { displayStoredError } from "@/domain/publicErrors";
+import { currentSessionCommitEpoch } from "@/services/auth/authSessionFence";
 import { SyncStatusBanner } from "@/components/sync/SyncStatusBanner";
 import { ComposerPickerSheet } from "@/components/composer/ComposerPickerSheet";
 import { GlobalSearchBar } from "@/components/search/GlobalSearchBar";
@@ -24,7 +36,7 @@ import { formDraftsRepository } from "@/repositories/formDraftsRepository";
 import { executiveCardDepth, spacing, typography, useTheme, useThemedStyles, DASHBOARD_SECTION_GAP } from "@/theme";
 import { formatEntryDate } from "@/utils/date";
 import { matterLabelKey } from "@/utils/professionalPack/display";
-import { useT } from "@/i18n";
+import { useI18n, useT } from "@/i18n";
 import { consumeComposerPickerReturn, pickerReturnParamForType } from "@/navigation";
 import type { BusinessEntryType } from "@/domain/businessEntry";
 import { getLetterheadDocumentRepository } from "@/services/letterhead/documentRepository";
@@ -34,11 +46,19 @@ import type { CustomerCreditRecord } from "@/domain/customerCredit";
 import { getProfessionalPackRepository } from "@/services/professionalPack";
 import { getCustomerCreditRepository } from "@/services/customerCredit";
 import { subscribeDomainChanges } from "@/services/dataChanges/domainChanges";
-import { sessionStillOwns } from "@/state/diaryListLoad";
 import { useAppRefresh } from "@/hooks/useAppRefresh";
+
+type DashboardExtras = {
+  letterheadDocs: LetterheadDocument[];
+  proPacks: ProfessionalServicePack[];
+  credits: CustomerCreditRecord[];
+  activeDraftCount: number;
+};
 
 export default function YouTab() {
   const t = useT();
+  const { lang } = useI18n();
+  const copy = screenStateCopy(lang);
   const router = useRouter();
   const { user } = useAuth();
   const subscription = useSubscription();
@@ -90,22 +110,9 @@ export default function YouTab() {
 
   const userId = user?.uid ?? null;
   const listOptions = useMemo(() => ({}), []);
-  const { entries, error, refresh } = useDiaryList(userId, listOptions);
+  const { entries, error, refresh, loading: diaryLoading } = useDiaryList(userId, listOptions);
   const { requestDelete, isDeleting } = useRecordDelete(userId);
-  const [letterheadDocs, setLetterheadDocs] = useState<LetterheadDocument[]>([]);
-  const [proPacks, setProPacks] = useState<ProfessionalServicePack[]>([]);
-  const [credits, setCredits] = useState<CustomerCreditRecord[]>([]);
-  const [activeDraftCount, setActiveDraftCount] = useState(0);
-  const ownerRef = useRef(userId);
-  if (ownerRef.current !== userId) {
-    ownerRef.current = userId;
-    if (letterheadDocs.length || proPacks.length || credits.length || activeDraftCount) {
-      setLetterheadDocs([]);
-      setProPacks([]);
-      setCredits([]);
-      setActiveDraftCount(0);
-    }
-  }
+  const { load: extrasLoad, run: runExtras } = useOwnedRequest<DashboardExtras>(userId);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerWorkTeamExpanded, setPickerWorkTeamExpanded] = useState(false);
   const [quotaWarn80, setQuotaWarn80] = useState(false);
@@ -163,79 +170,27 @@ export default function YouTab() {
     return () => parent?.setOptions({ gestureEnabled: true });
   }, [pickerOpen, navigation]);
 
-  const admittedGeneration = useCallback(() => {
-    const admitted = syncSessionOwnership.capture();
-    return admitted && admitted.uid === userId ? admitted.generation : null;
-  }, [userId]);
-
-  const fetchLetterheadDocs = useCallback(async () => {
-    if (!userId) return;
-    const generation = admittedGeneration();
-    try {
-      const list = await getLetterheadDocumentRepository().list(userId);
-      if (!sessionStillOwns(userId, generation)) return;
-      const withPdf = list
-        .filter((d) => d.pdfUri || d.saved)
-        .sort((a, b) => b.updatedAt - a.updatedAt);
-      setLetterheadDocs(withPdf);
-    } catch {
-      // non-fatal
-    }
-  }, [userId, admittedGeneration]);
-
-  const loadProPacks = useCallback(async () => {
-    if (!userId) return;
-    const generation = admittedGeneration();
-    try {
-      const list = await getProfessionalPackRepository().list(userId, {
-        includeDeleted: false,
-      });
-      if (!sessionStillOwns(userId, generation)) return;
-      setProPacks(list);
-    } catch {
-      if (!sessionStillOwns(userId, generation)) return;
-      setProPacks([]);
-    }
-  }, [userId, admittedGeneration]);
-
-  const loadCredits = useCallback(async () => {
-    if (!userId) return;
-    const generation = admittedGeneration();
-    try {
-      const list = await getCustomerCreditRepository().list(userId, {
-        includeDeleted: false,
-      });
-      if (!sessionStillOwns(userId, generation)) return;
-      setCredits(list);
-    } catch {
-      if (!sessionStillOwns(userId, generation)) return;
-      setCredits([]);
-    }
-  }, [userId, admittedGeneration]);
-
-  const fetchDraftCount = useCallback(async () => {
-    if (!userId) return;
-    const generation = admittedGeneration();
-    try {
-      const count = await formDraftsRepository.countActiveUserDrafts(userId);
-      if (!sessionStillOwns(userId, generation)) return;
-      setActiveDraftCount(count);
-    } catch {
-      if (!sessionStillOwns(userId, generation)) return;
-      setActiveDraftCount(0);
-    }
-  }, [userId, admittedGeneration]);
+  const readExtras = useCallback(async (uid: string): Promise<DashboardExtras> => {
+    const [letterhead, packs, credits, drafts] = await Promise.all([
+      getLetterheadDocumentRepository().list(uid),
+      getProfessionalPackRepository().list(uid, { includeDeleted: false }),
+      getCustomerCreditRepository().list(uid, { includeDeleted: false }),
+      formDraftsRepository.countActiveUserDrafts(uid),
+    ]);
+    return {
+      letterheadDocs: letterhead
+        .filter((doc) => doc.pdfUri || doc.saved)
+        .sort((a, b) => b.updatedAt - a.updatedAt),
+      proPacks: packs,
+      credits,
+      activeDraftCount: drafts,
+    };
+  }, []);
 
   const refreshDashboard = useCallback(async () => {
     if (!userId) return;
-    await Promise.all([
-      refresh(),
-      fetchLetterheadDocs(),
-      loadProPacks(),
-      loadCredits(),
-      fetchDraftCount(),
-    ]);
-  }, [userId, refresh, fetchLetterheadDocs, loadProPacks, loadCredits, fetchDraftCount]);
+    await Promise.all([refresh(), runExtras(readExtras)]);
+  }, [userId, refresh, runExtras, readExtras]);
 
   const { refreshing: pullRefreshing, refreshNote, onRefresh } = useAppRefresh({
     onReload: refreshDashboard,
@@ -245,34 +200,59 @@ export default function YouTab() {
     useCallback(() => {
       if (!userId) return;
       void refresh();
-      void fetchLetterheadDocs();
-      void loadProPacks();
-      void loadCredits();
-      void fetchDraftCount();
-    }, [userId, refresh, fetchLetterheadDocs, loadProPacks, loadCredits, fetchDraftCount])
+      void runExtras(readExtras);
+    }, [userId, refresh, runExtras, readExtras])
   );
 
   useEffect(() => {
     if (!userId) return;
     return subscribeDomainChanges((change) => {
       if (change.ownerUid !== userId) return;
-      if (change.source === "customerCredit") void loadCredits();
-      if (change.source === "professionalPack") void loadProPacks();
+      if (change.source === "customerCredit" || change.source === "professionalPack") {
+        void runExtras(readExtras);
+      }
     });
-  }, [userId, loadCredits, loadProPacks]);
+  }, [userId, runExtras, readExtras]);
+
+  const diaryMemory = useOwnedSnapshot({
+    signedInUid: userId,
+    epoch: currentSessionCommitEpoch(),
+    generation: session?.generation ?? null,
+    loading: diaryLoading,
+    failed: Boolean(error),
+    value: entries,
+  });
+  const diaryRows = diaryMemory.accepted && diaryMemory.value ? diaryMemory.value : [];
+  const extrasMemory = useOwnedSnapshot({
+    signedInUid: userId,
+    epoch: currentSessionCommitEpoch(),
+    generation: extrasLoad.claim?.generation ?? null,
+    loading: extrasLoad.loading,
+    failed: Boolean(extrasLoad.error),
+    value: extrasLoad.value,
+    valueClaim: extrasLoad.valueClaim,
+  });
+  const extras = extrasMemory.accepted ? extrasMemory.value : null;
+  const homePhase = listPhase({
+    loading: (diaryLoading && diaryRows.length === 0) || (extrasLoad.loading && !extras),
+    failed: Boolean(error || extrasLoad.error) && diaryRows.length === 0 && !extras,
+    count: diaryRows.length + (extras ? 1 : 0),
+    owned: Boolean(userId) && (diaryMemory.current || extrasMemory.current),
+    pending: diaryMemory.pending && extrasMemory.pending,
+  });
 
   const dashboard = useMemo(
     () =>
       buildYouDashboardViewModel(
-        entries,
-        letterheadDocs,
-        proPacks,
-        activeDraftCount,
+        diaryRows,
+        extras?.letterheadDocs ?? [],
+        extras?.proPacks ?? [],
+        extras?.activeDraftCount ?? 0,
         t,
         Date.now(),
-        credits
+        extras?.credits ?? []
       ),
-    [entries, letterheadDocs, proPacks, activeDraftCount, t, credits]
+    [diaryRows, extras, t]
   );
   const { visibility } = dashboard;
 
@@ -402,14 +382,17 @@ export default function YouTab() {
 
           {!online ? (
             <View style={[styles.banner, styles.topOfflineWrap]}>
-              <Banner tone="warning" message={t("common.offline")} />
+              <OfflineDeviceNotice offline hasRows={diaryRows.length > 0 || Boolean(extras)} />
             </View>
           ) : null}
-          {error ? (
+          {error && diaryRows.length > 0 ? (
             <View style={[styles.banner, styles.topOfflineWrap]}>
-              <Banner tone="danger" message={error} />
+              <Banner tone="danger" message={displayStoredError(error, error)} />
             </View>
           ) : null}
+          <SlowNetworkStatus
+            active={(diaryLoading || extrasLoad.loading) && (diaryRows.length > 0 || Boolean(extras))}
+          />
           {quotaWarn80 ? (
             <Pressable
               style={[styles.banner, styles.topOfflineWrap]}
@@ -424,6 +407,21 @@ export default function YouTab() {
           <LastRefreshedHint message={refreshNote} />
         </View>
 
+        {!userId || homePhase === "hidden" ? (
+          <LocaleUiText>{copy.signedOut}</LocaleUiText>
+        ) : homePhase === "loading" ? (
+          <InitialListSkeleton count={4} />
+        ) : homePhase === "error" ? (
+          <ScreenErrorPanel
+            error={extrasLoad.error ?? error ?? "unknown"}
+            message={
+              extrasLoad.error ??
+              (error ? displayStoredError(error, error) : undefined)
+            }
+            onRetry={() => void refreshDashboard()}
+          />
+        ) : (
+        <>
         <View>
           <SmartHeadline
             title={t("you.summary")}
@@ -528,6 +526,8 @@ export default function YouTab() {
             </View>
           </View>
         ) : null}
+        </>
+        )}
       </View>
       </Screen>
 

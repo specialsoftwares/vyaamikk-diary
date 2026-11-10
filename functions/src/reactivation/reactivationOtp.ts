@@ -11,6 +11,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { automaticRestorationAllowed, type DeletionJobDoc } from "../deletion/deletionJob";
 import { DELETION_GRACE_MS } from "../deletion/finalPurge";
 import { generateEmailOtpCode, verifyBoundOtpDigest, digestBoundOtp } from "../email/otpCrypto";
+import { resolveVerifiedMailbox } from "../email/verifiedMailbox";
 import { EMAIL_OTP_USER_MESSAGES } from "../email/otpPolicy";
 import type { UserProfileDoc } from "../identity/shared";
 import { normalizePhoneE164 } from "../identity/shared";
@@ -36,6 +37,7 @@ export type ReactivationFailure =
   | "unauthenticated"
   | "ineligible"
   | "no_verified_email"
+  | "mailbox_support"
   | "phone_proof_expired"
   | "cooldown"
   | "rate_limited"
@@ -129,19 +131,28 @@ export type ReserveOutcome =
   | ReserveResult
   | { ok: false; failure: ReactivationFailure; retryAfterSeconds?: number };
 
+/** Stored cutoff wins over a later scheduled date. Missing cutoff keeps the legacy deadline. */
+export function reactivationWindowDeadline(profile: {
+  reactivationCutoff?: number | null;
+  deletionScheduledFor?: number | null;
+  deletionRequestedAt?: number | null;
+}): number {
+  const cutoff = Number(profile.reactivationCutoff ?? 0);
+  const scheduled = Number(profile.deletionScheduledFor ?? 0);
+  if (cutoff > 0) return scheduled > 0 ? Math.min(cutoff, scheduled) : cutoff;
+  if (scheduled > 0) return scheduled;
+  return Number(profile.deletionRequestedAt ?? 0) + DELETION_GRACE_MS;
+}
+
 function profileWindowOpen(profile: UserProfileDoc, now: number): boolean {
-  const scheduled =
-    profile.deletionScheduledFor ??
-    (profile.deletionRequestedAt ?? 0) + DELETION_GRACE_MS;
-  return scheduled > now;
+  return reactivationWindowDeadline(profile) > now;
 }
 
 function eligibleProfile(profile: UserProfileDoc, now: number): ReactivationFailure | null {
   if (profile.status === "deleted") return "ineligible";
   if (profile.status !== "pending_deletion") return "ineligible";
   if (!profileWindowOpen(profile, now)) return "ineligible";
-  const email = profile.businessEmail?.trim() || profile.normalizedEmail?.trim() || "";
-  if (!email || profile.emailStatus !== "verified" || !(profile.emailVerifiedAt && profile.emailVerifiedAt > 0)) {
+  if (profile.emailStatus !== "verified" || !(profile.emailVerifiedAt && profile.emailVerifiedAt > 0)) {
     return "no_verified_email";
   }
   const phoneAt = profile.reactivationPhoneVerifiedAt ?? 0;
@@ -235,7 +246,27 @@ export async function reserveReactivationSend(input: {
       }
     }
 
-    const email = (profile.businessEmail || profile.normalizedEmail || "").trim().toLowerCase();
+    const bindingHash = typeof profile.emailHash === "string" ? profile.emailHash : "";
+    const binding = /^[a-f0-9]{64}$/.test(bindingHash)
+      ? await tx.get("emailBindings", bindingHash)
+      : null;
+    const mailbox = resolveVerifiedMailbox(
+      {
+        uid: input.uid,
+        emailStatus: profile.emailStatus,
+        normalizedEmail: profile.normalizedEmail,
+        emailHash: profile.emailHash,
+        emailBindingVersion: profile.emailBindingVersion,
+      },
+      binding
+    );
+    if (!mailbox.ok) {
+      return {
+        ok: false,
+        failure: mailbox.outcome === "verification_required" ? "no_verified_email" : "mailbox_support",
+      };
+    }
+    const email = mailbox.normalizedEmail;
     const challengeId = randomBytes(16).toString("hex");
     const operationId = randomBytes(16).toString("hex");
     const code = generateEmailOtpCode();
@@ -258,6 +289,7 @@ export async function reserveReactivationSend(input: {
       deletionGeneration,
       emailVersion,
       normalizedEmail: email,
+      mailboxVersion: mailbox.bindingVersion,
       otpDigest: digest,
       createdAt: input.now,
       expiresAt,
@@ -400,6 +432,28 @@ export async function verifyReactivationCode(input: {
     if (Number(doc.emailVersion) !== (profile.emailVerifiedAt ?? 0)) {
       bumpGuess();
       return { ok: false as const, failure: "superseded" as const };
+    }
+    const freshBindingHash = typeof profile.emailHash === "string" ? profile.emailHash : "";
+    const freshBinding = /^[a-f0-9]{64}$/.test(freshBindingHash)
+      ? await tx.get("emailBindings", freshBindingHash)
+      : null;
+    const freshMailbox = resolveVerifiedMailbox(
+      {
+        uid: input.uid,
+        emailStatus: profile.emailStatus,
+        normalizedEmail: profile.normalizedEmail,
+        emailHash: profile.emailHash,
+        emailBindingVersion: profile.emailBindingVersion,
+      },
+      freshBinding
+    );
+    if (
+      !freshMailbox.ok ||
+      freshMailbox.bindingVersion !== Number(doc.mailboxVersion) ||
+      freshMailbox.normalizedEmail !== doc.normalizedEmail
+    ) {
+      bumpGuess();
+      return { ok: false as const, failure: "mailbox_support" as const };
     }
 
     const parts = [

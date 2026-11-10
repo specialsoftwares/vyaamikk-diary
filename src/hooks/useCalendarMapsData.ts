@@ -17,6 +17,7 @@ import {
 } from "@/services/dataChanges/domainChanges";
 import { localEntriesRepository } from "@/repositories/localEntriesRepository";
 import { projectDiaryEntries, sessionStillOwns } from "@/state/diaryListLoad";
+import { currentSessionCommitEpoch } from "@/services/auth/authSessionFence";
 import { syncSessionOwnership } from "@/sync/syncSessionOwnership";
 
 export function useCalendarMapsData(
@@ -38,7 +39,8 @@ export function useCalendarMapsData(
   const sourceUserRef = useRef<string | null>(null);
   const removedRef = useRef(new Set<string>());
   const live = syncSessionOwnership.capture();
-  const fenceKey = live ? `${live.uid}#${live.generation}` : `open:${userId ?? ""}`;
+  const epoch = currentSessionCommitEpoch();
+  const fenceKey = live ? `${live.uid}#${live.generation}#${epoch}` : `open:${userId ?? ""}`;
   const fenceRef = useRef(fenceKey);
   userIdRef.current = userId;
   if (fenceRef.current !== fenceKey) {
@@ -69,11 +71,19 @@ export function useCalendarMapsData(
       inFlightRef.current = true;
       const admitted = syncSessionOwnership.capture();
       const sessionGeneration = admitted && admitted.uid === owner ? admitted.generation : null;
+      const epochAtStart = currentSessionCommitEpoch();
+      const requestStillOwns = () => {
+        if (userIdRef.current !== owner) return false;
+        return (
+          generation === loadGenRef.current &&
+          currentSessionCommitEpoch() === epochAtStart &&
+          sessionStillOwns(owner, sessionGeneration)
+        );
+      };
       const revisionAtStart = currentDomainRevision();
       try {
         const businessResult = await loadCalendarMapsSourceData(owner);
-        if (generation !== loadGenRef.current || userIdRef.current !== owner) return;
-        if (!sessionStillOwns(owner, sessionGeneration)) return;
+        if (!requestStillOwns()) return;
         hasLoadedOnceRef.current = true;
         sourceUserRef.current = owner;
         setSource(businessResult.data);
@@ -82,12 +92,15 @@ export function useCalendarMapsData(
         );
         if (currentDomainRevision() !== revisionAtStart) dirtyRef.current = true;
       } catch (e) {
-        if (generation !== loadGenRef.current || userIdRef.current !== owner) return;
-        if (!sessionStillOwns(owner, sessionGeneration)) return;
+        if (!requestStillOwns()) return;
         setError(userFacingMessage(toAppError(e)));
       } finally {
         inFlightRef.current = false;
-        if (generation === loadGenRef.current) {
+        if (
+          generation === loadGenRef.current &&
+          currentSessionCommitEpoch() === epochAtStart &&
+          userIdRef.current === owner
+        ) {
           setLoading(false);
           setRefreshing(false);
           if (dirtyRef.current && userIdRef.current === owner) {
@@ -106,7 +119,7 @@ export function useCalendarMapsData(
 
   useEffect(() => {
     void reload("mount");
-  }, [reload]);
+  }, [reload, epoch]);
 
   useEffect(() => {
     if (!userId) return;

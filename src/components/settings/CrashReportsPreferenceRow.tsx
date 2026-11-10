@@ -2,27 +2,28 @@ import React, { useCallback, useEffect, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { useFocusEffect } from "expo-router";
 
+import { LocaleUiText } from "@/components/ui";
 import { chooseCrashDiagnostics, currentPurposeConsentState, subscribePurposeConsent, reconcilePurposeConsent } from "@/services/consent/purposeConsent";
+import { crashConsentCopy } from "@/services/telemetry/crashConsentCopy";
 import {
-  currentDiagnosticsPreference,
-  type DiagnosticsPreference,
-} from "@/services/telemetry/diagnosticsPreference";
+  crashConsentStatus,
+  initialCrashConsent,
+  type CrashConsentModel,
+} from "@/services/telemetry/crashConsentState";
+import { useI18n } from "@/i18n";
 import { useAuth } from "@/state/auth";
-import { useT } from "@/i18n";
 import { spacing, typography, useThemedStyles } from "@/theme";
 
 import { SettingsPreferenceRow } from "./SettingsPreferenceRow";
-import { LocaleUiText } from "@/components/ui";
 
 export function CrashReportsPreferenceRow() {
-  const t = useT();
+  const { lang } = useI18n();
+  const copy = crashConsentCopy(lang);
   const { user } = useAuth();
-  const [receipt, setReceipt] = useState(currentPurposeConsentState(user?.uid ?? null));
-  useEffect(() => subscribePurposeConsent(() => {
-    setReceipt(currentPurposeConsentState(user?.uid ?? null));
-    setPref(currentDiagnosticsPreference());
-  }), [user?.uid]);
-  const [pref, setPref] = useState<DiagnosticsPreference>(currentDiagnosticsPreference());
+  const uid = user?.uid ?? null;
+  const [consent, setConsent] = useState<CrashConsentModel>(
+    () => currentPurposeConsentState(uid)?.consent ?? initialCrashConsent(uid ?? "")
+  );
   const styles = useThemedStyles((colors) =>
     StyleSheet.create({
       inset: {
@@ -38,11 +39,16 @@ export function CrashReportsPreferenceRow() {
     })
   );
 
+  const read = useCallback(() => {
+    setConsent(currentPurposeConsentState(uid)?.consent ?? initialCrashConsent(uid ?? ""));
+  }, [uid]);
+
+  useEffect(() => subscribePurposeConsent(read), [read]);
+
   const reload = useCallback(async () => {
-    if (user) await reconcilePurposeConsent(user.uid);
-    setReceipt(currentPurposeConsentState(user?.uid ?? null));
-    setPref(currentDiagnosticsPreference());
-  }, [user?.uid]);
+    if (uid) await reconcilePurposeConsent(uid);
+    read();
+  }, [read, uid]);
 
   useFocusEffect(
     useCallback(() => {
@@ -50,34 +56,31 @@ export function CrashReportsPreferenceRow() {
     }, [reload])
   );
 
+  const status = crashConsentStatus(consent);
   const onPress = useCallback(async () => {
-    if (!user) return;
-    const next = !receipt?.localGrant;
-    setPref(await chooseCrashDiagnostics(next, user.uid));
-  }, [receipt?.localGrant, user?.uid]);
+    if (!uid) return;
+    const retryFailed = status === "failed";
+    const turnOn = retryFailed ? consent.choice.decision !== "withdraw" : consent.choice.decision !== "allow";
+    await chooseCrashDiagnostics(turnOn, uid);
+    read();
+  }, [consent.choice.decision, read, status, uid]);
 
-  const enabled = pref.desired === "on" && pref.persisted;
-  const value = enabled ? t("settings.crashReportsOn") : t("settings.crashReportsOff");
+  const value = copy.status[status];
+  const valueTone = status === "active" ? "positive" : status === "failed" ? "warning" : "muted";
 
   return (
     <View style={styles.inset}>
       <SettingsPreferenceRow
         icon="bug-outline"
-        label={t("settings.crashReportsTitle")}
+        label={copy.title}
         value={value}
-        valueTone={enabled ? "positive" : "muted"}
+        valueTone={valueTone}
         onPress={() => void onPress()}
-        accessibilityLabel={`${t("settings.crashReportsTitle")}, ${value}`}
+        accessibilityLabel={`${copy.title}, ${value}`}
       />
-      <LocaleUiText style={styles.note}>{t("settings.crashReportsBody")}</LocaleUiText>
-      {receipt?.sync === "pending" || receipt?.sync === "unknown" ? (
-        <LocaleUiText style={styles.note}>{t("settings.crashReportsPending")}</LocaleUiText>
-      ) : null}
-      {receipt?.sync === "conflict" ? (
-        <LocaleUiText style={styles.note}>{t("settings.crashReportsConflict")}</LocaleUiText>
-      ) : null}
-      {pref.error || receipt?.sync === "storage_error" ? (
-        <LocaleUiText style={styles.note}>{t("settings.crashReportsSaveFailed")}</LocaleUiText>
+      <LocaleUiText style={styles.note}>{copy.detail[status]}</LocaleUiText>
+      {consent.unsentDeletionRequested && consent.choice.decision === "withdraw" ? (
+        <LocaleUiText style={styles.note}>{copy.unsentDeletionRequested}</LocaleUiText>
       ) : null}
     </View>
   );

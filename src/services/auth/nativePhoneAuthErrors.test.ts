@@ -19,6 +19,17 @@ function firebaseLike(code: string, message?: string) {
 }
 
 function run() {
+  const uncertain = formatPhoneAuthDisplayMessage(new AppError("network", "Firebase internal /Users/private token=secret", undefined, { phoneAuthSettlement: "unknown" }));
+  assert.doesNotMatch(uncertain, /Firebase|\/Users\/|token=secret/);
+  const held = formatPhoneAuthDisplayMessage(new AppError("invalid_otp", "raw backend text", undefined, { phoneAuthSettlement: "unknown", diagnosticCode: "PHONE_NATIVE_HELD" }));
+  assert.match(held, /force stop/i);
+  assert.doesNotMatch(held, /incorrect verification code|raw backend text/i);
+  for (const raw of [
+    new Error("[auth/invalid-app-credential] token=private /Users/private"),
+    firebaseLike("auth/operation-not-allowed", "token=private /Users/private"),
+  ]) {
+    assert.doesNotMatch(formatPhoneAuthDisplayMessage(raw), /Firebase|Console|emulator|test phone|token=private|\/Users\//i);
+  }
   // E.164 path used by Auth v2 for the reported beta number.
   assert.equal(
     toE164FromDraft(DEFAULT_AUTH_V2_COUNTRY_CODE, "8076861531"),

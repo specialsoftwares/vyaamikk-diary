@@ -20,6 +20,37 @@ const GENERIC: PublicError = {
   action: "retry",
 };
 
+const PERMISSION: PublicError = {
+  title: "Not allowed",
+  message: "You don't have permission to perform this action.",
+  action: "none",
+};
+
+const SESSION_ENDED: PublicError = {
+  title: "Please sign in again",
+  message: "Your session has ended. Please sign in again to continue.",
+  action: "sign_in",
+};
+
+const THROTTLED: PublicError = {
+  title: "Please wait",
+  message: AUTH_USER_FACING_COPY.tooManyRequests,
+  action: "none",
+};
+
+const OFFLINE_PUBLIC: PublicError = {
+  title: "You are offline",
+  message:
+    "You are offline. Check your connection and try again. Records already saved on this device stay on this device.",
+  action: "retry",
+};
+
+const SERVICE_UNAVAILABLE: PublicError = {
+  title: "Service unavailable",
+  message: "This service is unavailable right now. Please try again later.",
+  action: "retry",
+};
+
 const NETWORK: PublicError = {
   title: "Connection problem",
   message: AUTH_USER_FACING_COPY.network,
@@ -44,6 +75,18 @@ const SESSION_LOST: PublicError = {
   action: "new_code",
 };
 
+const PHONE_RESULT_UNKNOWN: PublicError = {
+  title: "Verification not confirmed",
+  message: "We couldn't confirm the result. You can go back and try again. A timeout does not mean the code was incorrect.",
+  action: "retry",
+};
+
+const PHONE_NATIVE_PENDING: PublicError = {
+  title: "Verification is still finishing",
+  message: "Verification is still finishing. You can go back. If it does not finish, force stop the app in Android Settings and reopen it.",
+  action: "none",
+};
+
 const LOCAL_UNAVAILABLE: PublicError = {
   title: "Unable to open secure storage",
   message:
@@ -61,7 +104,7 @@ const LOCAL_RECOVERY: PublicError = {
 const APP_VERIFY_DEVICE: PublicError = {
   title: "Couldn't send the code",
   message:
-    "Could not verify this app for phone sign-in on this device. On a physical phone use real SMS; for emulator development use a Firebase Console test phone number with test mode enabled.",
+    "Could not verify this app for phone sign-in on this device. Update the app and try again. If this continues, contact support.",
   action: "support",
 };
 
@@ -98,44 +141,36 @@ const CATALOGUE: Readonly<Record<string, PublicError>> = {
   },
   auth_not_configured: {
     title: "Sign-in unavailable",
-    message: "Login service is not configured for this build.",
+    message: "Sign-in is unavailable right now. Please contact support.",
     action: "support",
   },
   "auth/operation-not-allowed": {
     title: "Sign-in unavailable",
-    message: "Phone sign-in is not enabled for this Firebase project. Contact support.",
+    message: "Phone sign-in is unavailable right now. Please contact support.",
     action: "support",
   },
-  session_expired: {
-    title: "Please sign in again",
-    message: "Your session has ended. Please sign in again to continue.",
-    action: "sign_in",
-  },
+  session_expired: SESSION_ENDED,
+  "functions/unauthenticated": SESSION_ENDED,
+  unauthenticated: SESSION_ENDED,
+  UNAUTHENTICATED: SESSION_ENDED,
+  "auth/user-token-expired": SESSION_ENDED,
   session_changed: {
     title: "Sign-in changed",
     message: "Your sign-in changed. Please start this step again.",
     action: "sign_in",
   },
-  too_many_attempts: {
-    title: "Please wait",
-    message: AUTH_USER_FACING_COPY.tooManyRequests,
-    action: "none",
-  },
-  "auth/too-many-requests": {
-    title: "Please wait",
-    message: AUTH_USER_FACING_COPY.tooManyRequests,
-    action: "none",
-  },
+  too_many_attempts: THROTTLED,
+  "auth/too-many-requests": THROTTLED,
+  "functions/resource-exhausted": THROTTLED,
+  "resource-exhausted": THROTTLED,
   not_found: {
     title: "Not found",
     message: "We couldn't find that entry.",
     action: "none",
   },
-  permission_denied: {
-    title: "Not allowed",
-    message: "You don't have permission to perform this action.",
-    action: "none",
-  },
+  permission_denied: PERMISSION,
+  "permission-denied": PERMISSION,
+  "functions/permission-denied": PERMISSION,
   account_pending_deletion: {
     title: "Account deletion is in progress",
     message: "This account is scheduled for deletion.",
@@ -166,12 +201,16 @@ const CATALOGUE: Readonly<Record<string, PublicError>> = {
     message: "Couldn't delete right now. Please try again.",
     action: "retry",
   },
+  offline: OFFLINE_PUBLIC,
   offline_read_only: {
     title: "Connection problem",
     message:
       "You can view existing records, but creating, editing, deleting, PDF generation, sharing, and sync are unavailable until you reconnect and this device is re-validated.",
     action: "retry",
   },
+  unavailable: SERVICE_UNAVAILABLE,
+  "functions/unavailable": SERVICE_UNAVAILABLE,
+  "functions/deadline-exceeded": SERVICE_UNAVAILABLE,
   quota_exhausted: {
     title: "Monthly limit reached",
     message: "Monthly record limit reached. This save was not completed.",
@@ -269,8 +308,16 @@ export function toPublicError(error: unknown, surface: ErrorSurface = "api"): Pu
     seen.add(current);
 
     const details = own(current, "details");
+    if (own(details, "phoneAuthSettlement") === "unknown") {
+      return own(details, "diagnosticCode") === "PHONE_NATIVE_HELD" ? PHONE_NATIVE_PENDING : PHONE_RESULT_UNKNOWN;
+    }
     if (own(current, "code") === "otp_expired" && own(details, "verificationIdPresent") === false) {
       return SESSION_LOST;
+    }
+    const nestedReason = own(details, "reason");
+    if (nestedReason === "session_changed" || nestedReason === "session_expired") {
+      const session = lookup(CATALOGUE, nestedReason);
+      if (session) return session;
     }
     if (surface === "reactivation") {
       const specific = lookup(REACTIVATION, own(details, "code"));
@@ -291,4 +338,74 @@ export function toPublicError(error: unknown, surface: ErrorSurface = "api"): Pu
     current = own(current, "cause");
   }
   return GENERIC;
+}
+
+const KNOWN_PUBLIC_MESSAGES: ReadonlySet<string> = new Set([
+  ...Object.values(CATALOGUE).map((entry) => entry.message),
+  ...Object.values(REACTIVATION).map((entry) => entry.message),
+  GENERIC.message,
+  SESSION_LOST.message,
+  PHONE_RESULT_UNKNOWN.message,
+  PHONE_NATIVE_PENDING.message,
+  APP_VERIFY_DEVICE.message,
+  NETWORK.message,
+  BAD_CODE.message,
+  EXPIRED.message,
+  LOCAL_UNAVAILABLE.message,
+  LOCAL_RECOVERY.message,
+]);
+
+/** True when a string is an exact catalogue sentence. */
+export function isKnownPublicMessage(value: string): boolean {
+  return KNOWN_PUBLIC_MESSAGES.has(value);
+}
+
+/**
+ * True when text must not be shown. This does not log the value.
+ * A stack, transport code, contact, token, or filesystem path is unsafe.
+ */
+export function isUnsafePublicText(value: string): boolean {
+  if (!value) return false;
+  if (value.includes("functions/")) return true;
+  if (value.includes("\n")) return true;
+  if (/\bat\s+\S+\s*\(/.test(value)) return true;
+  if (/auth\/[a-z0-9-]+/i.test(value)) return true;
+  if (/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.test(value)) return true;
+  if (/\/Users\/|\/home\/|node_modules|AIza|Bearer|\beyJ\b/i.test(value)) return true;
+  if (/\bfirebase\b/i.test(value)) return true;
+  if (/\+?\d[\d\s()-]{8,}\d/.test(value)) return true;
+  return false;
+}
+
+/**
+ * Public sentence for a failure. Known codes use the catalogue.
+ * Unknown failures use the generic sentence. Error.message is never returned.
+ */
+export function presentPublicError(error: unknown, surface: ErrorSurface = "api"): string {
+  try {
+    if (typeof error === "string") {
+      if (isKnownPublicMessage(error) && !isUnsafePublicText(error)) return error;
+      return GENERIC.message;
+    }
+    const message = toPublicError(error, surface).message;
+    if (!message || isUnsafePublicText(message) || !isKnownPublicMessage(message)) {
+      return GENERIC.message;
+    }
+    return message;
+  } catch {
+    return GENERIC.message;
+  }
+}
+
+/**
+ * A string already stored by a screen. Catalogue sentences pass through.
+ * Leaks are replaced. Any other stored text uses the screen's existing fallback
+ * so a raw exception is not shown.
+ */
+export function displayStoredError(stored: string, fallback: string): string {
+  if (isUnsafePublicText(stored) || isUnsafePublicText(fallback)) {
+    return presentPublicError(stored);
+  }
+  if (isKnownPublicMessage(stored)) return stored;
+  return fallback;
 }

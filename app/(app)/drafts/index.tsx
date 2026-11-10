@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 
@@ -9,16 +9,27 @@ import {
   LastRefreshedHint,
   Screen,
   EmptyState,
-  SkeletonDraftRow,
-  SkeletonList,
-  SkeletonLoadingPanel,
 } from "@/components/ui";
+import {
+  InitialListSkeleton,
+  OfflineDeviceNotice,
+  ScreenErrorPanel,
+  SlowNetworkStatus,
+  SCREEN_EXISTING_SLOW_MS,
+  listPhase,
+  showsEmpty,
+  useOwnedRequest,
+  useOwnedSnapshot,
+} from "@/components/screenState";
+import { currentSessionCommitEpoch } from "@/services/auth/authSessionFence";
 import { useRecordDelete } from "@/hooks/useRecordDelete";
 import { useAppRefresh } from "@/hooks/useAppRefresh";
 import { formDraftsRepository, type FormDraftRecord } from "@/repositories/formDraftsRepository";
 import { buildDraftTitle } from "@/services/drafts/draftTitle";
 import { hrefForDraft } from "@/services/drafts/draftRoutes";
+import { SkeletonDraftRow } from "@/components/ui/skeleton/SkeletonPresets";
 import { useAuth } from "@/state/auth";
+import { useSync } from "@/state/sync";
 import { useT } from "@/i18n";
 import { spacing, typography, useThemedStyles } from "@/theme";
 import { useSmartBack } from "@/navigation";
@@ -29,11 +40,9 @@ export default function DraftsScreen() {
   const t = useT();
   const router = useRouter();
   const { user } = useAuth();
-  const [drafts, setDrafts] = useState<FormDraftRecord[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const hasLoadedOnceRef = useRef(false);
+  const { status: syncStatus } = useSync();
   const [filter, setFilter] = useState<FilterKey>("all");
+  const { load, run } = useOwnedRequest<FormDraftRecord[]>(user?.uid ?? null);
   const { goBack } = useSmartBack({ from: "you" });
   const { requestDelete, isDeleting } = useRecordDelete(user?.uid ?? null);
 
@@ -54,41 +63,43 @@ export default function DraftsScreen() {
     })
   );
 
-  const load = useCallback(
-    async (mode: "mount" | "refresh" = "mount") => {
-      if (!user) return;
-      if (mode === "refresh" && hasLoadedOnceRef.current) {
-        setRefreshing(true);
-      } else if (!hasLoadedOnceRef.current) {
-        setLoading(true);
-      }
-      try {
-        const list = await formDraftsRepository.listActiveUserDrafts(user.uid);
-        setDrafts(list);
-        hasLoadedOnceRef.current = true;
-      } finally {
-        setLoading(false);
-        setRefreshing(false);
-      }
-    },
-    [user]
-  );
+  const loadDrafts = useCallback(async () => {
+    await run((uid) => formDraftsRepository.listActiveUserDrafts(uid));
+  }, [run]);
 
   const { refreshNote, onRefresh, refreshControl } = useAppRefresh({
-    onReload: () => load("refresh"),
-    externalRefreshing: refreshing,
+    onReload: loadDrafts,
+    externalRefreshing: load.loading,
   });
 
   useFocusEffect(
     useCallback(() => {
-      void load("mount");
-    }, [load])
+      void loadDrafts();
+    }, [loadDrafts])
   );
 
+  const ownedDrafts = useOwnedSnapshot({
+    signedInUid: user?.uid ?? null,
+    epoch: currentSessionCommitEpoch(),
+    generation: load.claim?.generation ?? null,
+    loading: load.loading,
+    failed: Boolean(load.error),
+    value: load.value ?? [],
+    valueClaim: load.valueClaim,
+  });
+  const rows = ownedDrafts.accepted && ownedDrafts.value ? ownedDrafts.value : [];
   const filtered = useMemo(() => {
-    if (filter === "all") return drafts;
-    return drafts.filter((d) => d.draftKind === filter);
-  }, [drafts, filter]);
+    if (filter === "all") return rows;
+    return rows.filter((d) => d.draftKind === filter);
+  }, [rows, filter]);
+  const phase = listPhase({
+    loading: load.loading,
+    failed: Boolean(load.error),
+    count: rows.length,
+    owned: ownedDrafts.current,
+    pending: ownedDrafts.pending,
+  });
+  const offline = syncStatus === "offline";
 
   const filterChips: { key: FilterKey; label: string }[] = [
     { key: "all", label: t("drafts.filterAll") },
@@ -120,16 +131,23 @@ export default function DraftsScreen() {
         ))}
       </View>
       <LastRefreshedHint message={refreshNote} />
-      {loading && drafts.length === 0 ? (
-        <SkeletonLoadingPanel loading slowMessage={t("skeleton.stillLoading")}>
-          <SkeletonList count={7} Item={SkeletonDraftRow} gap={0} />
-        </SkeletonLoadingPanel>
-      ) : filtered.length === 0 ? (
+      {offline && rows.length > 0 ? <OfflineDeviceNotice offline hasRows /> : null}
+      <SlowNetworkStatus active={load.loading && rows.length > 0} slowAfterMs={SCREEN_EXISTING_SLOW_MS} />
+      {phase === "loading" ? (
+        <InitialListSkeleton count={7} Item={SkeletonDraftRow} />
+      ) : phase === "error" ? (
+        <>
+          {offline ? <OfflineDeviceNotice offline hasRows={false} /> : null}
+          <ScreenErrorPanel error={load.error ?? "unknown"} onRetry={() => void loadDrafts()} />
+        </>
+      ) : showsEmpty(phase) ? (
         <EmptyState
           title={t("executive.inlineEmpty.noDrafts")}
           message={t("drafts.empty")}
           iconName="file-edit-outline"
           accentKey="work"
+          actionLabel={t("common.back")}
+          onAction={goBack}
         />
       ) : (
         <FlatList
@@ -149,7 +167,7 @@ export default function DraftsScreen() {
                 recordId={item.id}
                 entityType="form_draft"
                 title={req.title}
-                onDeletePress={() => requestDelete(req, load)}
+                onDeletePress={() => requestDelete(req, loadDrafts)}
                 deleteInProgress={isDeleting(req)}
               >
                 <DraftListRow

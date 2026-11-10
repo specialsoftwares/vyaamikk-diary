@@ -33,6 +33,14 @@ export interface EmailProvider {
   send(input: SendEmailInput): Promise<SendEmailResult>;
 }
 
+let emulatorProvider: EmailProvider | null = null;
+
+/** Fault injection for local emulator tests only; never an environment flag. */
+export function __setEmailProviderForEmulatorTests(provider: EmailProvider | null): void {
+  if (process.env.FUNCTIONS_EMULATOR !== "true") throw new Error("email_provider_test_requires_emulator");
+  emulatorProvider = provider;
+}
+
 /** Resend live keys are `re_…` with no whitespace. */
 export function isPlausibleResendApiKey(apiKey: string): boolean {
   const key = apiKey.trim();
@@ -147,6 +155,9 @@ export function resolveEmailProvider(env: NodeJS.ProcessEnv = process.env): {
   provider: EmailProvider;
   mode: "development" | "production" | "unavailable";
 } {
+  if (env.FUNCTIONS_EMULATOR === "true" && emulatorProvider) {
+    return { provider: emulatorProvider, mode: "production" };
+  }
   const apiKeyRaw = env.EMAIL_PROVIDER_API_KEY?.trim() || env.RESEND_API_KEY?.trim() || "";
   const fromRaw = env.EMAIL_FROM_ADDRESS?.trim() || "";
   const emulator = env.FUNCTIONS_EMULATOR === "true";

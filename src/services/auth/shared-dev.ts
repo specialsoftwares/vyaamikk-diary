@@ -102,7 +102,7 @@ async function allocateUeidInTransaction(tx: Transaction, authUid: string): Prom
 }
 
 export const sharedDevAuthService: AuthService = {
-  async startOtp(phoneE164: PhoneE164): Promise<OtpChallenge> {
+  async startOtp(phoneE164: PhoneE164, _options?: { forceResend?: boolean }): Promise<OtpChallenge> {
     log.info("startOtp", { phone: phoneE164 });
     return {
       verificationId: `sdev_${Date.now()}`,

@@ -25,6 +25,16 @@ receive an entitlement. Do not check Play “full access including premium”.
 Ordinary customers need a separate approval that removes the allowlist
 restriction. That approval is not part of this internal candidate.
 
+**Letterhead creation is retired.** `/(app)/letterhead/create` opens a letter
+saved before creation was removed. The screen reads that letter and can share
+its existing PDF. It does not edit, save, or generate a new letterhead.
+
+
+**Purchase entry.** `internal-grin` sets
+`EXPO_PUBLIC_SUBSCRIPTION_PURCHASE_ENTRY_ENABLED` to `"1"`, so that bundle
+shows the purchase screen. Preview, production, and `internal-grin-apk` keep
+the flag at `"0"`. A visible purchase screen does not deliver a subscription.
+
 ## One-time developer setup (not performed by source assembly)
 
 ### 1. Firebase test phone fixture

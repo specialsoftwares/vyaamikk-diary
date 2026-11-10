@@ -14,7 +14,7 @@ import { contentDataKey } from "../privacy/secrets";
 import { GrinAdminConfigError } from "./productionAdminConfig";
 import type { ComposedGrinCallables } from "./composed";
 import { assertAdmittedCallableUser } from "../identity/admitCallableUser";
-import { assertBusinessAgeAdmitted } from "../identity/businessAdmission";
+import { assertBusinessAccountActive } from "../identity/businessAdmission";
 
 export const PRODUCTION_GRIN_CALLABLE_NAMES = [
   "grinRegisterGoodsReceipt",
@@ -89,7 +89,7 @@ function wrapGrin(method: GrinMethod, loadComposed?: ProductionGrinLoadComposed)
   return onCall({ region: "asia-south1", secrets: [contentDataKey] }, async (request: CallableRequest) => {
     await assertAdmittedCallableUser(request);
     if (!request.auth?.uid) return CONFIG_DENIED;
-    await assertBusinessAgeAdmitted(request.auth.uid);
+    await assertBusinessAccountActive(request.auth.uid);
     const payload = { auth: authFromCallable(request), data: request.data };
     if (loadComposed) return runProductionGrinCallable(method, payload, loadComposed);
     return runProductionGrinCallable(method, payload);

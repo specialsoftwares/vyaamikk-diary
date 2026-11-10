@@ -44,10 +44,11 @@ export function isVerifiedEmailChangeSupportedInSource(): boolean {
 }
 
 export async function startVerifiedPhoneChange(
-  newPhoneE164: PhoneE164
+  newPhoneE164: PhoneE164,
+  options?: { forceResend?: boolean }
 ): Promise<OtpChallenge> {
   void CONTACT_CHANGE_PURPOSE;
-  return getAuthService().startMobileChange(newPhoneE164);
+  return getAuthService().startMobileChange(newPhoneE164, options);
 }
 
 export async function confirmVerifiedPhoneChange(

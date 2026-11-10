@@ -17,6 +17,8 @@ export interface LegalConsentRecord {
 }
 
 export interface PendingLegalConsent {
+  /** Device-only identity of this particular affirmative choice; never a server grant. */
+  choiceRevision?: string;
   record: LegalConsentRecord;
   phoneE164: string;
 }

@@ -17,6 +17,7 @@ import {
   normalizeEmailStrict,
 } from "./otpPolicy";
 import { digestEmailOtp, generateEmailOtpCode, verifyEmailOtpDigest } from "./otpCrypto";
+import { resolveVerifiedMailbox } from "./verifiedMailbox";
 import { resolveEmailProvider } from "./provider";
 import { timeEmailChallengeSpan } from "./challengeTiming";
 import {
@@ -156,6 +157,27 @@ export interface ChallengeDoc {
   status: "active" | "consumed" | "superseded" | "locked";
   idempotencyKey: string | null;
   purpose: "bind" | "change_new" | "change_confirm_old_mobile" | "recovery";
+  /** A replacement challenge belongs to one stepped-up email-change operation. */
+  changeSessionId?: string | null;
+  /** Provider acceptance is not proof of delivery to the recipient's mailbox. */
+  providerAcceptance?: "pending" | "accepted" | "failed";
+}
+
+function assertReplayWasAccepted(challenge: ChallengeDoc, normalizedEmail: string, now: number): void {
+  if (challenge.normalizedEmail !== normalizedEmail) throwEmailOtpError("CONFLICT", "aborted");
+  if (challenge.expiresAt <= now) throwEmailOtpError("EMAIL_OTP_EXPIRED", "deadline-exceeded");
+  // An active digest is a committed intention to send, not evidence that the
+  // provider accepted it. Old rows without this field remain unknown.
+  if (challenge.providerAcceptance !== "accepted") throwEmailOtpError("EMAIL_PROVIDER_UNAVAILABLE");
+  if (challenge.status !== "active") throwEmailOtpError("CONFLICT", "aborted");
+}
+
+/** Onboarding may establish an email, but never replace an established factor. */
+function assertOrdinaryBindAllowed(user: Record<string, unknown>, nextEmail: string): void {
+  if (user.emailStatus !== "verified") return;
+  const current = normalizeEmailStrict(String(user.normalizedEmail ?? user.businessEmail ?? ""));
+  if (!current) throwEmailOtpError("CONFLICT", "aborted");
+  if (current !== nextEmail) throwEmailOtpError("FORBIDDEN", "permission-denied");
 }
 
 async function writeSecurityEvent(
@@ -198,6 +220,7 @@ export async function createOrRotateEmailChallenge(input: {
   purpose?: ChallengeDoc["purpose"];
   idempotencyKey?: string | null;
   requirePhoneVerified?: boolean;
+  changeSessionId?: string;
 }): Promise<{
   challengeId: string;
   maskedEmail: string;
@@ -228,6 +251,25 @@ export async function createOrRotateEmailChallenge(input: {
   const userSnap = await userRef.get();
   if (!userSnap.exists) throwEmailOtpError("FORBIDDEN", "permission-denied");
   const user = userSnap.data() as Record<string, unknown>;
+  if (purpose === "bind") assertOrdinaryBindAllowed(user, normalized);
+  if (purpose === "change_new" && !/^[A-Za-z0-9_-]{1,128}$/.test(input.changeSessionId ?? "")) {
+    throwEmailOtpError("CONFLICT", "aborted");
+  }
+
+  const changeRef = purpose === "change_new"
+    ? db.collection("emailChangeSessions").doc(input.changeSessionId!)
+    : null;
+  const checkChangeSession = (session: Record<string, unknown> | undefined, currentUser: Record<string, unknown>) => {
+    if (!session || session.uid !== authUid) throwEmailOtpError("FORBIDDEN", "permission-denied");
+    if (!["mobile_ok", "awaiting_new_email"].includes(String(session.status)) || !session.mobileFactorAt) {
+      throwEmailOtpError("CONFLICT", "aborted");
+    }
+    if (Number(session.expiresAt) <= now) throwEmailOtpError("EMAIL_OTP_EXPIRED", "deadline-exceeded");
+    if (session.oldEmailHash !== currentUser.emailHash || session.mailboxVersion !== currentUser.emailBindingVersion) {
+      throwEmailOtpError("CONFLICT", "aborted");
+    }
+  };
+  if (changeRef) checkChangeSession((await changeRef.get()).data(), user);
 
   if (input.requirePhoneVerified !== false) {
     const phone = String(user.phoneE164 ?? "");
@@ -275,9 +317,21 @@ export async function createOrRotateEmailChallenge(input: {
   // A different unverified address is a replace, never a conflict.
   {
     const priorAll = await db.collection(PENDING_COLLECTION).where("userId", "==", authUid).get();
-    const active = priorAll.docs
+    const matching = priorAll.docs
       .map((d) => d.data() as ChallengeDoc)
-      .filter((data) => data.purpose === purpose && data.status === "active");
+      .filter((data) => data.purpose === purpose &&
+        (purpose !== "change_new" || data.changeSessionId === input.changeSessionId));
+    const active = matching.filter((data) => data.status === "active");
+    // A retry of an already issued operation does not consume a new send limit
+    // or turn a lost response into a forced resend.
+    const replay = input.idempotencyKey && matching.find((doc) => doc.idempotencyKey === input.idempotencyKey);
+    if (replay) {
+      assertReplayWasAccepted(replay, normalized, now);
+      return {
+        challengeId: replay.challengeId, maskedEmail: mask(normalized), expiresAt: replay.expiresAt,
+        resendAvailableAt: replay.resendAvailableAt, version: replay.version, sent: true,
+      };
+    }
     const picked = pickActivePendingForPolicy(active, normalized, now);
     const action = rotationActionForStart({
       currentVerifiedNormalized: currentVerified,
@@ -296,33 +350,12 @@ export async function createOrRotateEmailChallenge(input: {
 
   await assertSendRateLimits(db, authUid, normalized, now);
 
-  // Idempotent replay: same key + same email within TTL returns existing challenge.
-  if (input.idempotencyKey) {
-    const existing = await db
-      .collection(PENDING_COLLECTION)
-      .where("userId", "==", authUid)
-      .where("idempotencyKey", "==", input.idempotencyKey)
-      .limit(1)
-      .get();
-    if (!existing.empty) {
-      const doc = existing.docs[0]!.data() as ChallengeDoc;
-      if (doc.status === "active" && doc.expiresAt > now && doc.normalizedEmail === normalized) {
-        return {
-          challengeId: doc.challengeId,
-          maskedEmail: mask(normalized),
-          expiresAt: doc.expiresAt,
-          resendAvailableAt: doc.resendAvailableAt,
-          version: doc.version,
-          sent: true,
-        };
-      }
-    }
-  }
-
   const issued = await timeEmailChallengeSpan("challenge_db", () => db.runTransaction(async (tx) => {
     const userSnapTx = await tx.get(userRef);
     if (!userSnapTx.exists) throwEmailOtpError("FORBIDDEN", "permission-denied");
     const userTx = userSnapTx.data() as Record<string, unknown>;
+    if (purpose === "bind") assertOrdinaryBindAllowed(userTx, normalized);
+    if (changeRef) checkChangeSession((await tx.get(changeRef)).data(), userTx);
     const currentVerifiedTx =
       userTx.emailStatus === "verified"
         ? normalizeEmailStrict(String(userTx.normalizedEmail ?? userTx.businessEmail ?? ""))
@@ -330,11 +363,22 @@ export async function createOrRotateEmailChallenge(input: {
 
     const pendingQuery = db.collection(PENDING_COLLECTION).where("userId", "==", authUid);
     const priorAll = await tx.get(pendingQuery);
-    const prior = priorAll.docs.filter((d) => {
+    const matching = priorAll.docs.filter((d) => {
       const data = d.data() as ChallengeDoc;
-      return data.purpose === purpose && data.status === "active";
+      return data.purpose === purpose &&
+        (purpose !== "change_new" || data.changeSessionId === input.changeSessionId);
     });
+    const prior = matching.filter((d) => d.data().status === "active");
     const active = prior.map((d) => d.data() as ChallengeDoc);
+    const replay = input.idempotencyKey && matching.map((d) => d.data() as ChallengeDoc)
+      .find((doc) => doc.idempotencyKey === input.idempotencyKey);
+    if (replay) {
+      assertReplayWasAccepted(replay, normalized, now);
+      return {
+        replay: true as const, challengeId: replay.challengeId, nextVersion: replay.version,
+        expiresAt: replay.expiresAt, resendAvailableAt: replay.resendAvailableAt,
+      };
+    }
     const picked = pickActivePendingForPolicy(active, normalized, now);
     const action = rotationActionForStart({
       currentVerifiedNormalized: currentVerifiedTx,
@@ -387,8 +431,13 @@ export async function createOrRotateEmailChallenge(input: {
       status: "active",
       idempotencyKey: input.idempotencyKey ?? null,
       purpose,
+      changeSessionId: input.changeSessionId ?? null,
+      providerAcceptance: "pending",
     };
     tx.set(db.collection(PENDING_COLLECTION).doc(challengeId), challenge);
+    if (changeRef) tx.update(changeRef, {
+      status: "awaiting_new_email", newEmail: normalized, newEmailHash: emailHash, emailChallengeId: challengeId,
+    });
 
     // Pending fields are disposable onboarding state. Never strip a verified email.
     if (shouldWriteUnverifiedPendingUserFields(currentVerifiedTx)) {
@@ -407,6 +456,11 @@ export async function createOrRotateEmailChallenge(input: {
     return { challengeId, code, nextVersion, expiresAt, resendAvailableAt };
   }));
 
+  if ("replay" in issued) return {
+    challengeId: issued.challengeId, maskedEmail: mask(normalized), expiresAt: issued.expiresAt,
+    resendAvailableAt: issued.resendAvailableAt, version: issued.nextVersion, sent: true,
+  };
+
   const { challengeId, code, nextVersion, expiresAt, resendAvailableAt } = issued;
 
   const sendResult = await timeEmailChallengeSpan(
@@ -421,17 +475,21 @@ export async function createOrRotateEmailChallenge(input: {
     (result) => (result.delivered ? "ok" : "error")
   );
 
-  if (!sendResult.delivered && mode === "production") {
+  if (!sendResult.delivered) {
     try {
       await db.collection(PENDING_COLLECTION).doc(challengeId).update({
         status: "superseded",
         otpDigest: null,
+        providerAcceptance: "failed",
       });
     } catch {
       // Delivery failed; still report provider error. Challenge must not stay active.
     }
     throwEmailOtpError("EMAIL_PROVIDER_UNAVAILABLE");
   }
+  // Record acceptance before returning a successful response. If this write
+  // fails, retries see an unknown outcome and do not claim that mail was sent.
+  await db.collection(PENDING_COLLECTION).doc(challengeId).update({ providerAcceptance: "accepted" });
 
   const emulatorHint =
     process.env.FUNCTIONS_EMULATOR === "true" || process.env.EMAIL_PROVIDER_FORCE_DEV === "1"
@@ -469,12 +527,13 @@ export async function verifyEmailChallengeAndBind(input: {
   const pendingRef = db.collection(PENDING_COLLECTION).doc(input.challengeId);
   const userRef = db.collection(USERS).doc(input.uid);
 
-  const profile = await timeEmailChallengeSpan("verify_db", () => db.runTransaction(async (tx) => {
+  const outcome = await timeEmailChallengeSpan("verify_db", () => db.runTransaction(async (tx) => {
     const pendingSnap = await tx.get(pendingRef);
     if (!pendingSnap.exists) throwEmailOtpError("EMAIL_OTP_EXPIRED", "not-found");
     const pending = pendingSnap.data() as ChallengeDoc;
 
     if (pending.userId !== input.uid) throwEmailOtpError("FORBIDDEN", "permission-denied");
+    if (pending.purpose !== "bind") throwEmailOtpError("CONFLICT", "aborted");
 
     // Idempotent success replay
     if (pending.status === "consumed" && pending.consumedAt) {
@@ -482,7 +541,7 @@ export async function verifyEmailChallengeAndBind(input: {
       if (!userSnap.exists) throwEmailOtpError("FORBIDDEN", "permission-denied");
       const u = userSnap.data() as Record<string, unknown>;
       if (u.emailStatus === "verified" && u.normalizedEmail === pending.normalizedEmail) {
-        return { uid: input.uid, ...u };
+        return { kind: "profile" as const, profile: { uid: input.uid, ...u } };
       }
     }
 
@@ -492,7 +551,11 @@ export async function verifyEmailChallengeAndBind(input: {
     }
     if (pending.expiresAt < Date.now()) {
       tx.update(pendingRef, { status: "superseded", otpDigest: null });
-      throwEmailOtpError("EMAIL_OTP_EXPIRED", "deadline-exceeded");
+      return {
+        kind: "error" as const,
+        errorCode: "EMAIL_OTP_EXPIRED" as const,
+        httpsCode: "deadline-exceeded" as const,
+      };
     }
 
     const ok = verifyEmailOtpDigest(
@@ -522,10 +585,18 @@ export async function verifyEmailChallengeAndBind(input: {
           emailVerificationLockedEmail: pending.normalizedEmail,
           updatedAt: Date.now(),
         });
-        throwEmailOtpError("EMAIL_OTP_LOCKED");
+        return {
+          kind: "error" as const,
+          errorCode: "EMAIL_OTP_LOCKED" as const,
+          httpsCode: "failed-precondition" as const,
+        };
       }
       tx.update(pendingRef, { incorrectAttempts: attempts });
-      throwEmailOtpError("EMAIL_OTP_INVALID");
+      return {
+        kind: "error" as const,
+        errorCode: "EMAIL_OTP_INVALID" as const,
+        httpsCode: "failed-precondition" as const,
+      };
     }
 
     await assertEmailNotBoundElsewhere(tx, db, pending.emailHash, input.uid);
@@ -533,6 +604,24 @@ export async function verifyEmailChallengeAndBind(input: {
     const userSnap = await tx.get(userRef);
     if (!userSnap.exists) throwEmailOtpError("FORBIDDEN", "permission-denied");
     const user = userSnap.data() as Record<string, unknown>;
+    assertOrdinaryBindAllowed(user, pending.normalizedEmail);
+    if (user.emailStatus === "verified") {
+      const currentHash = String(user.emailHash ?? "");
+      const currentBinding = /^[a-f0-9]{64}$/.test(currentHash)
+        ? await tx.get(db.collection(EMAIL_BINDINGS).doc(currentHash))
+        : null;
+      const mailbox = resolveVerifiedMailbox(
+        {
+          uid: input.uid,
+          emailStatus: user.emailStatus,
+          normalizedEmail: user.normalizedEmail,
+          emailHash: user.emailHash,
+          emailBindingVersion: user.emailBindingVersion,
+        },
+        currentBinding?.exists ? (currentBinding.data() as Record<string, unknown>) : null
+      );
+      if (!mailbox.ok) throwEmailOtpError("CONFLICT", "aborted");
+    }
     const now = Date.now();
     const bindingVersion = Number(user.emailBindingVersion ?? 0) + 1;
     const ueid = String(user.ueid ?? "");
@@ -630,8 +719,13 @@ export async function verifyEmailChallengeAndBind(input: {
       otpDigest: null,
     });
 
-    return { uid: input.uid, ...updated };
+    return { kind: "profile" as const, profile: { uid: input.uid, ...updated } };
   }));
+
+  if (outcome.kind === "error") {
+    throwEmailOtpError(outcome.errorCode, outcome.httpsCode);
+  }
+  const profile = outcome.profile;
 
   await writeSecurityEvent(db, input.uid, {
     type: "email_verified_bound",
@@ -686,6 +780,7 @@ export async function resendEmailChallenge(input: {
     uid: input.uid,
     rawEmail: pending.normalizedEmail,
     purpose: pending.purpose,
+    changeSessionId: pending.changeSessionId ?? undefined,
   });
 }
 

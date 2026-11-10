@@ -3,6 +3,8 @@
  * The storage remove waits so a concurrent save can land after the clear's read.
  */
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
+import { __setNativeSecureRandomForTests } from "@/services/accountDeletion/nativeSecureRandom";
 
 import type { PendingLegalConsent } from "@/domain/legalConsent";
 import {
@@ -16,6 +18,7 @@ import {
 
 function choice(acceptedAt: number): PendingLegalConsent {
   return {
+    choiceRevision: acceptedAt.toString(16).padStart(32, "0"),
     phoneE164: "+919999990001",
     record: {
       consentVersion: "1.0.0",
@@ -88,6 +91,7 @@ async function flushUntil(ready: () => boolean): Promise<void> {
 }
 
 async function main() {
+  __setNativeSecureRandomForTests((length) => new Uint8Array(randomBytes(length)));
   const older = choice(10);
   const newer = choice(30);
   const raced = memoryStorage(older);

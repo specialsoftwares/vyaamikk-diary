@@ -46,17 +46,18 @@ test("Firebase FbsBlob only accepts native Blob | ArrayBuffer | Uint8Array", () 
   assert.match(src, /FbsBlob\.getBlob\(preBlobPart, blob, postBlobPart\)/);
 });
 
-test("userStorage upload path uses media REST + uploadAsync, not uploadBytesResumable(File)", () => {
+test("userStorage upload path uses the owner-object gateway, not uploadBytesResumable(File)", () => {
   const storageCode = storageSrc.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  const uploadCode = uploadSrc.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
   assert.doesNotMatch(storageCode, /uploadBytesResumable/);
   assert.doesNotMatch(storageCode, /\buploadString\b/);
   assert.match(storageCode, /uploadLocalFileViaMediaApi/);
-  assert.match(uploadSrc, /uploadAsync/);
-  assert.match(uploadSrc, /FileSystemUploadType\.BINARY_CONTENT/);
+  assert.match(uploadCode, /ownerObjectGateway/);
+  assert.match(uploadCode, /if \(!input\.ports\)/);
   assert.match(coreSrc, /remoteBytes !== localBytes/);
-  assert.match(uploadSrc, /Authorization/);
-  assert.match(uploadSrc, /Bearer/);
-  assert.match(coreSrc, /Refusing production Storage URL while emulator host is set/);
+  const gateway = fs.readFileSync(path.join(import.meta.dirname, "ownerObjectGateway.ts"), "utf8");
+  assert.match(gateway, /httpMethod: \"PUT\"/);
+  assert.doesNotMatch(gateway, /downloadUrl/);
 });
 
 test("production default media request construction (endpoint, query, binary, content-type, auth header)", async () => {

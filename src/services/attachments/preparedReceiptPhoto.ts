@@ -18,6 +18,7 @@ export type PreparedReceiptPhoto =
       reason:
         | "missing_local"
         | "offline"
+        | "unknown"
         | "access_denied"
         | "unsupported"
         | "too_large"

@@ -75,8 +75,9 @@ export async function consentPatchForProfile(
 
 /** Remove the stored grant only when it is still the choice that was written. */
 export async function clearPendingConsentIfUnchanged(
-  snapshot: PendingLegalConsent | null
+  snapshot: PendingLegalConsent | null,
+  owns: () => boolean = () => true
 ): Promise<boolean> {
   const { clearPendingConsentIfUnchanged: clearStored } = await import("./pendingConsentKey");
-  return clearStored(AsyncStorage, snapshot);
+  return clearStored(AsyncStorage, snapshot, owns);
 }

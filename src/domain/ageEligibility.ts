@@ -1,8 +1,9 @@
 /**
- * Self-declared 18+ gate. Asia/Kolkata civil dates, completed years.
+ * Historical self-declared 18+ assessment. Asia/Kolkata civil dates, completed years.
  * The eighteenth birthday is eligible. The day before is not.
  * A 29 February birthday is observed on 1 March in a non-leap year.
- * This is not an identity-document check and it does not verify the date.
+ * This is not an identity-document check, it does not verify the date, and the
+ * result is not an authorization decision.
  */
 
 export const AGE_POLICY_VERSION = "self-declared-dob-18-ist-2026-10";
@@ -102,9 +103,41 @@ export function assessSelfDeclaredDob(input: {
   };
 }
 
-/** Missing and ineligible profiles stay on the gate. Eligible profiles pass. */
+export type SignedInOnboardingContinuation = "email" | "profile" | "dashboard";
+
+/**
+ * Next signed-in step after phone verification. Demographic age and sealed
+ * `ageEligibility` are not routes. Missing age continues; it does not open
+ * the legacy date-of-birth screen.
+ */
+export function resolveSignedInOnboardingContinuation(input: {
+  hasVerifiedEmail: boolean;
+  profileCompletedAt?: number | null;
+  ageEligibility?: string | null;
+  demographicAgeBand?: string | null;
+  /** Legacy demographic field, also never authorization. */
+  demographicAgeRange?: string | null;
+}): SignedInOnboardingContinuation {
+  void input.ageEligibility;
+  void input.demographicAgeBand;
+  if (input.hasVerifiedEmail && input.profileCompletedAt) return "dashboard";
+  if (input.hasVerifiedEmail) return "profile";
+  return "email";
+}
+
+/**
+ * Launch check. Demographic age is not an authentication gate, and a missing
+ * or unassessed sealed eligibility must not redirect to age declaration.
+ * Business authorization is based on the active account, ownership, session,
+ * restore fence, and deletion state; demographic age is not admission.
+ */
 export function profileNeedsAgeGate(
-  profile: { ageEligibility?: string | null } | null | undefined
+  profile: {
+    ageEligibility?: string | null;
+    demographicAgeBand?: string | null;
+    demographicAgeRange?: string | null;
+  } | null | undefined
 ): boolean {
-  return profile?.ageEligibility !== "eligible";
+  void profile;
+  return false;
 }

@@ -9,10 +9,13 @@ import { insightCategoryHint, insightCategoryTitle } from "@/components/insights
 import { InsightsCategoryRow } from "@/components/insights/InsightsCategoryRow";
 import { InsightsOverviewTiles } from "@/components/insights/InsightsOverviewTiles";
 import { SettingsNavGroup } from "@/components/settings/SettingsNavCard";
-import { Header, Loader, Screen, LocaleUiText, ErrorState } from "@/components/ui";
+import { Header, Screen, LocaleUiText } from "@/components/ui";
+import { InitialListSkeleton, OfflineDeviceNotice, ScreenErrorPanel, SlowNetworkStatus, screenStateCopy } from "@/components/screenState";
+import { displayStoredError } from "@/domain/publicErrors";
 import { useBusinessInsightsDashboard } from "@/hooks/useBusinessInsightsDashboard";
 import { useAuth } from "@/state/auth";
-import { useT } from "@/i18n";
+import { useSync } from "@/state/sync";
+import { useI18n, useT } from "@/i18n";
 import {
   INSIGHT_CATEGORY_ORDER,
   INSIGHT_CATEGORY_SLUG,
@@ -36,13 +39,17 @@ const CATEGORY_ICON: Record<InsightCategoryId, IconName> = {
 
 export default function BusinessInsightsScreen() {
   const t = useT();
+  const { lang } = useI18n();
+  const copy = screenStateCopy(lang);
   const router = useRouter();
   const { user } = useAuth();
+  const { status: syncStatus } = useSync();
   const params = useLocalSearchParams<{ fy?: string | string[] }>();
   const [selectedFy, setSelectedFy] = React.useState(() =>
     insightFyFromParam(params.fy, getCurrentFinancialYear())
   );
   const { data, loading, error, reload } = useBusinessInsightsDashboard(user?.uid, user?.ueid, selectedFy);
+  const offline = syncStatus === "offline";
 
   const styles = useThemedStyles((c) =>
     StyleSheet.create({
@@ -93,14 +100,30 @@ export default function BusinessInsightsScreen() {
         availableFys={data?.availableFys ?? [selectedFy]}
         onSelect={onSelectFy}
       />
-      {loading ? (
-        <Loader message={t("common.loading")} />
-      ) : error ? (
-        <ErrorState message={error} onRetry={() => void reload()} retryLabel={t("common.retry")} />
-      ) : !data ? (
-        <Loader message={t("common.loading")} />
-      ) : (
+      {offline && data ? <OfflineDeviceNotice offline hasRows /> : null}
+      <SlowNetworkStatus active={loading && Boolean(data)} />
+      {!user?.uid && !loading ? (
+        <LocaleUiText style={styles.note}>{copy.signedOut}</LocaleUiText>
+      ) : loading && !data ? (
+        <InitialListSkeleton count={4} />
+      ) : error && !data ? (
         <>
+          {offline ? <OfflineDeviceNotice offline hasRows={false} /> : null}
+          <ScreenErrorPanel
+            error={error}
+            message={displayStoredError(error, error)}
+            onRetry={() => void reload()}
+          />
+        </>
+      ) : data ? (
+        <>
+          {error ? (
+            <ScreenErrorPanel
+              error={error}
+              message={displayStoredError(error, error)}
+              onRetry={() => void reload()}
+            />
+          ) : null}
           <LocaleUiText style={styles.freshness}>{freshness}</LocaleUiText>
           <LocaleUiText style={styles.section}>{t("businessInsights.sectionOverview")}</LocaleUiText>
           <InsightsOverviewTiles
@@ -154,7 +177,7 @@ export default function BusinessInsightsScreen() {
 
           <LocaleUiText style={styles.note}>{t("businessInsights.privacyNote")}</LocaleUiText>
         </>
-      )}
+      ) : null}
     </Screen>
   );
 }

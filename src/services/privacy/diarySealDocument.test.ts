@@ -94,7 +94,7 @@ assert.match(diary, /result.outcome === "existing"/);
 assert.match(diary, /getByIdIncludingDeleted/);
 assert.match(storage, /sealAttachmentBase64/);
 assert.match(storage, /readProtectedLocalUri/);
-assert.match(storage, /getDownloadURL/);
+assert.match(storage, /ownerObjectGateway/);
 assert.match(storage, /pdf_cloud_backup_disabled/);
 assert.match(consent, /applyDiagnosticsChoice\(false\)/);
 assert.doesNotMatch(consent, /requestAccountDeletion/);

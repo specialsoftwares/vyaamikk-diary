@@ -8,10 +8,13 @@ import assert from "node:assert/strict";
 import { createFirebaseGrinEvidenceTransport } from "./evidenceTransport";
 import { createFirebaseGrinTransport } from "./firebaseTransport";
 import {
+  GRIN_BEGIN_EVIDENCE_CALLABLE,
   GRIN_MUTATE_CALLABLE,
   GRIN_READ_CALLABLE,
   GRIN_RECONCILE_CALLABLE,
   GRIN_REGISTER_CALLABLE,
+  GRIN_RESERVE_EVIDENCE_CALLABLE,
+  GRIN_UPLOAD_EVIDENCE_CALLABLE,
 } from "./callableNames";
 
 const OWNER = "owner_transport";
@@ -261,6 +264,90 @@ async function main(): Promise<void> {
   });
   assert.equal(afterReadSwitch.ok, false);
   assert.equal(afterReadSwitch.originalDurable, false);
+
+  const objectKey = "abcdEFGH1234_-ab";
+  const storagePath = `users/${OWNER}/grinEvidence/${objectKey}/original`;
+  let sessionGeneration = 1;
+  const sessionCalls: string[] = [];
+  const replacedSession = createFirebaseGrinEvidenceTransport({
+    currentAuth: () => ({ uid: OWNER, sessionGeneration }),
+    readLocalBytes: async () => pdfBytes,
+    putObject: async (input) => {
+      assert.equal(input.ownership?.uid, OWNER);
+      assert.equal(input.ownership?.sessionGeneration, 1);
+      assert.equal(input.grin?.evidenceId, "evidence_t01");
+      sessionGeneration = 2;
+      return { generation: "44" };
+    },
+    call: async (name) => {
+      sessionCalls.push(name);
+      if (name === GRIN_RESERVE_EVIDENCE_CALLABLE) {
+        return { ok: true, storagePath, evidenceId: "evidence_t01" };
+      }
+      if (name === GRIN_BEGIN_EVIDENCE_CALLABLE) return { ok: true };
+      throw new Error("verify must not run for a retired session");
+    },
+  });
+  const retired = await replacedSession.upload({
+    uid: OWNER,
+    ledgerId: "ledger_t",
+    receiptId: "receipt_t01",
+    evidenceId: "evidence_t01",
+    role: "original",
+    localPath: "/tmp/retained-original",
+    claimedSha256: HASH,
+    category: "invoice",
+    sizeBytes: pdfBytes.byteLength,
+  });
+  assert.equal(retired.ok, false);
+  assert.equal(retired.originalDurable, false);
+  assert.deepEqual(sessionCalls, [GRIN_RESERVE_EVIDENCE_CALLABLE, GRIN_BEGIN_EVIDENCE_CALLABLE]);
+
+  const kept = createFirebaseGrinEvidenceTransport({
+    currentAuth: () => ({ uid: OWNER, sessionGeneration: 7 }),
+    readLocalBytes: async () => pdfBytes,
+    putObject: async (input) => {
+      assert.equal(input.ownership?.sessionGeneration, 7);
+      assert.equal(input.grin?.ledgerId, "ledger_t");
+      return { generation: "9007199254740993" };
+    },
+    call: async (name) => {
+      if (name === GRIN_RESERVE_EVIDENCE_CALLABLE) return { ok: true, storagePath, evidenceId: "evidence_t01" };
+      if (name === GRIN_BEGIN_EVIDENCE_CALLABLE) return { ok: true };
+      if (name === GRIN_UPLOAD_EVIDENCE_CALLABLE) {
+        return {
+          ok: true,
+          originalDurable: true,
+          evidenceId: "evidence_t01",
+          receiptId: "receipt_t01",
+          ledgerId: "ledger_t",
+          ownerUid: OWNER,
+          category: "invoice",
+          mime: "application/pdf",
+          sizeBytes: pdfBytes.byteLength,
+          storagePath,
+          generation: "9007199254740993",
+          actualSha256: HASH,
+          claimedSha256: HASH,
+          reservationId: objectKey,
+        };
+      }
+      throw new Error(name);
+    },
+  });
+  const verified = await kept.upload({
+    uid: OWNER,
+    ledgerId: "ledger_t",
+    receiptId: "receipt_t01",
+    evidenceId: "evidence_t01",
+    role: "original",
+    localPath: "/tmp/retained-original",
+    claimedSha256: HASH,
+    category: "invoice",
+    sizeBytes: pdfBytes.byteLength,
+  });
+  assert.equal(verified.ok, true);
+  if (verified.ok) assert.equal(verified.generation, "9007199254740993");
 
   console.log("src/services/grin/transport/firebaseTransport.unit.test.ts: ok (INJECTED / not live deploy)");
 }

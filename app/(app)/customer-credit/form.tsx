@@ -19,7 +19,6 @@ import { Banner,
   Button,
   FormSection,
   Header,
-  Loader,
   Screen,
   SelectField,
   TextField,
@@ -28,7 +27,12 @@ import { useAuth } from "@/state/auth";
 import { useI18n, useT } from "@/i18n";
 import { formDateRowStyle, formFieldLabelStyle, formNestedCardStyle } from "@/theme/formLayer";
 import { spacing, typography, useTheme, useThemeColors, useThemedStyles } from "@/theme";
-import { userFacingMessage } from "@/domain/errors";
+import { presentPublicError, toPublicError } from "@/domain/publicErrors";
+import { InitialListSkeleton, PermissionState, ScreenErrorPanel, SessionHoldNotice, useRequestOwner } from "@/components/screenState";
+import { currentSessionCommitEpoch } from "@/services/auth/authSessionFence";
+import * as ImagePicker from "expo-image-picker";
+import { sessionBlocksWrite } from "@/components/screenState/resolveScreenState";
+import { useSync } from "@/state/sync";
 import { formatShortDate } from "@/utils/date";
 import { formatAmount } from "@/utils/formatters/formatAmount";
 import { requestComposerPickerReturn } from "@/navigation";
@@ -128,6 +132,9 @@ export default function CustomerCreditFormScreen() {
   const router = useRouter();
   const c = useThemeColors();
   const { user } = useAuth();
+  const owner = useRequestOwner(user?.uid ?? null);
+  const sessionEpoch = currentSessionCommitEpoch();
+  const { status: syncStatus } = useSync();
   const { id: editId, fromPicker } = useLocalSearchParams<{ id?: string; fromPicker?: string }>();
   const isEditing = Boolean(editId);
   const locale = lang === "hi" ? "hi-IN" : "en-IN";
@@ -192,6 +199,8 @@ export default function CustomerCreditFormScreen() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [sessionHold, setSessionHold] = useState(false);
+  const [photoBlock, setPhotoBlock] = useState<null | "camera" | "library">(null);
   const [submitting, setSubmitting] = useState(false);
   const saveLockRef = useRef(false);
   const clientRecordIdRef = useRef(
@@ -265,11 +274,13 @@ export default function CustomerCreditFormScreen() {
 
   const load = useCallback(async () => {
     if (!user) return;
+    const claim = owner.capture();
     setLoading(true);
     setLoadError(null);
     try {
       if (editId) {
         const rec = await getCustomerCreditRepository().getById(user.uid, String(editId));
+        if (!owner.owns(claim)) return;
         if (rec) {
           setExisting(rec);
           setMode(rec.mode);
@@ -335,11 +346,12 @@ export default function CustomerCreditFormScreen() {
         }
       }
     } catch (e) {
-      setLoadError(userFacingMessage(e));
+      if (!owner.owns(claim)) return;
+      setLoadError(presentPublicError(e));
     } finally {
-      setLoading(false);
+      if (owner.ownsGeneration(claim)) setLoading(false);
     }
-  }, [user, editId]);
+  }, [user, editId, owner, sessionEpoch]);
 
   useFocusEffect(
     useCallback(() => {
@@ -542,14 +554,18 @@ export default function CustomerCreditFormScreen() {
           setPhotoRemoved(false);
         }
       } catch (e) {
+        if (e instanceof CustomerPhotoError && e.code === "permission") {
+          setPhotoBlock(source);
+          return;
+        }
         if (e instanceof CustomerPhotoError) {
           const key =
             e.code === "too_large"
               ? "customerCredit.photoTooLarge"
-              : e.code === "permission"
-                ? "customerCredit.photoPermission"
-                : "customerCredit.photoFailed";
+              : "customerCredit.photoFailed";
           setSubmitError(t(key));
+        } else {
+          setSubmitError(presentPublicError(e));
         }
       }
     },
@@ -578,7 +594,11 @@ export default function CustomerCreditFormScreen() {
   }, [fromPicker, router]);
 
   const onSubmit = useCallback(async () => {
-    if (!user) return;
+    const blocked = sessionBlocksWrite({ signedIn: Boolean(user), syncStatus });
+    if (!user || blocked) {
+      setSessionHold(true);
+      return;
+    }
     if (submitting || saveLockRef.current) return;
 
     if (!customerName.trim()) return setSubmitError(t("customerCredit.errCustomerName"));
@@ -771,7 +791,8 @@ export default function CustomerCreditFormScreen() {
         setSubmitError(t("customerCredit.errSaveInProgress"));
         return;
       }
-      setSubmitError(userFacingMessage(e) || t("customerCredit.errGenerate"));
+      setSubmitError(presentPublicError(e) || t("customerCredit.errGenerate"));
+      if (toPublicError(e).action === "sign_in") setSessionHold(true);
       if (!isEditing) {
         notifyOrdinaryQuotaUpsell({
           family: "customer_credit",
@@ -793,6 +814,7 @@ export default function CustomerCreditFormScreen() {
     }
   }, [
     user,
+    syncStatus,
     submitting,
     customerName,
     customerMobile,
@@ -938,7 +960,7 @@ export default function CustomerCreditFormScreen() {
     return (
       <Screen>
         <Header title={t("customerCredit.formTitle")} showBack onBackPress={goBack} />
-        <Loader fullscreen message={t("common.loading")} />
+        <InitialListSkeleton count={6} />
       </Screen>
     );
   }
@@ -946,7 +968,7 @@ export default function CustomerCreditFormScreen() {
     return (
       <Screen>
         <Header title={t("customerCredit.formTitle")} showBack onBackPress={goBack} />
-        <Banner tone="danger" message={loadError} />
+        <ScreenErrorPanel error={loadError} message={loadError} onRetry={() => void load()} />
       </Screen>
     );
   }
@@ -959,6 +981,7 @@ export default function CustomerCreditFormScreen() {
         showBack
         onBackPress={goBack}
       />
+      <SessionHoldNotice visible={sessionHold || sessionBlocksWrite({ signedIn: Boolean(user), syncStatus })} />
       <LocaleUiText style={styles.lead}>{t("customerCredit.formIntro")}</LocaleUiText>
 
       {isEditing && existing ? (
@@ -1162,6 +1185,27 @@ export default function CustomerCreditFormScreen() {
             ) : null}
           </View>
         </View>
+        {photoBlock ? (
+          <PermissionState
+            source={photoBlock}
+            onAlternative={() => {
+              const next = photoBlock === "camera" ? "library" : "camera";
+              setPhotoBlock(null);
+              void onPickPhoto(next);
+            }}
+            onDismiss={() => setPhotoBlock(null)}
+            onRecheck={() => {
+              const source = photoBlock;
+              void (async () => {
+                const perm =
+                  source === "camera"
+                    ? await ImagePicker.getCameraPermissionsAsync()
+                    : await ImagePicker.getMediaLibraryPermissionsAsync();
+                if (perm.granted) setPhotoBlock(null);
+              })();
+            }}
+          />
+        ) : null}
         <LocaleUiText style={styles.consentNote}>{t("customerCredit.photoConsentNote")}</LocaleUiText>
       </FormSection>
 

@@ -7,8 +7,9 @@
  * `grinCleanupLists.ts`, not here. Do not add `grinEvidence` to this array
  * as P8 enablement: diary purge is first-level only and this list is not
  * flag-gated, so appending here would miss nested Firestore and could
- * delete live GRIN storage while INCLUDE_GRIN_IN_ACCOUNT_PURGE is false.
- * Enablement is the flag + recursive helper in runFinalAccountPurge.
+ * delete legacy GRIN storage while INCLUDE_GRIN_IN_ACCOUNT_PURGE is false.
+ * runFinalAccountPurge separately selects the recursive helper for version-2
+ * jobs, or for legacy jobs only when that flag is explicitly enabled.
  *
  * Profile logos are device-local only (not uploaded to Storage).
  * Generated PDF file URIs are stripped before Firestore sync; optional

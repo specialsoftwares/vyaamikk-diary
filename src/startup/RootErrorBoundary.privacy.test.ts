@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { __setRuntimeSignalsForTests } from "@/config/env";
 import {
   __resetCrashReportingForTests,
+  __setCrashSdkBridgeForTests,
   __setCrashlyticsClientForTests,
   setCrashReportingEnabled,
 } from "@/services/telemetry/crashReporter";
@@ -31,6 +32,7 @@ function assertClean(value: unknown): void {
   assert.doesNotMatch(blob, /in Fake/);
 }
 
+async function main(): Promise<void> {
 {
   const src = readFileSync(
     join(dirname(fileURLToPath(import.meta.url)), "RootErrorBoundary.tsx"),
@@ -74,13 +76,18 @@ __setRuntimeSignalsForTests({
   __resetCrashReportingForTests();
   __setCrashlyticsClientForTests({
     setCrashlyticsCollectionEnabled: async () => {},
-    log: (message) => calls.push({ kind: "log", payload: message }),
-    recordError: (error) =>
-      calls.push({
-        kind: "recordError",
-        payload: { name: error.name, message: error.message, stack: error.stack },
-      }),
+    log: () => calls.push({ kind: "rnLog", payload: "unused" }),
+    recordError: () => calls.push({ kind: "rnRecord", payload: "unused" }),
     setUserId: () => {},
+  });
+  __setCrashSdkBridgeForTests({
+    setSessionReportingEnabled: async () => {},
+    recordDiagnostic: async (message) => {
+      calls.push({ kind: "recordError", payload: message });
+    },
+    logDiagnostic: async (message) => {
+      calls.push({ kind: "log", payload: message });
+    },
   });
 
   const original = new Error(`render failed for ${EMAIL} ${DOC}`);
@@ -89,7 +96,7 @@ __setRuntimeSignalsForTests({
   assert.equal(calls.length, 0, "disabled: no native log or recordError");
   assert.equal(original.message, frozen);
 
-  setCrashReportingEnabled(true);
+  await setCrashReportingEnabled(true);
   reportUncaughtRenderError(original);
   assert.equal(original.message, frozen, "original Error is not modified");
   assert.equal(original.stack?.includes("render failed"), true);
@@ -104,9 +111,8 @@ __setRuntimeSignalsForTests({
   );
   const recorded = calls.filter((row) => row.kind === "recordError");
   assert.equal(recorded.length, 1);
-  const payload = recorded[0]!.payload as { name: string; message: string };
-  assert.equal(payload.name, "SafeDiagnosticError");
-  assert.equal(payload.message, "diagnostic:unknown");
+  assert.equal(recorded[0]!.payload, "SafeDiagnosticError:diagnostic:unknown");
+  assert.equal(calls.some((row) => row.kind === "rnRecord"), false);
 
   console.error = origError;
   __resetCrashReportingForTests();
@@ -134,14 +140,23 @@ __setRuntimeSignalsForTests({
   __setCrashlyticsClientForTests({
     setCrashlyticsCollectionEnabled: async () => {},
     log: () => {
-      calls.push({ kind: "log" });
+      calls.push({ kind: "rnLog" });
     },
     recordError: () => {
-      calls.push({ kind: "recordError" });
+      calls.push({ kind: "rnRecord" });
     },
     setUserId: () => {},
   });
-  setCrashReportingEnabled(true);
+  __setCrashSdkBridgeForTests({
+    setSessionReportingEnabled: async () => {},
+    recordDiagnostic: async () => {
+      calls.push({ kind: "recordError" });
+    },
+    logDiagnostic: async () => {
+      calls.push({ kind: "log" });
+    },
+  });
+  await setCrashReportingEnabled(true);
   assert.doesNotThrow(() =>
     reportUncaughtRenderError(new Error(`sink ${EMAIL} ${DOC}`))
   );
@@ -155,3 +170,9 @@ __setRuntimeSignalsForTests({
 
 __setRuntimeSignalsForTests(null);
 console.log("RootErrorBoundary.privacy.test.ts: ok (EXECUTED_PRODUCTION_METHOD)");
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

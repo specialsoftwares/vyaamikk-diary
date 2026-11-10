@@ -93,8 +93,7 @@ export const changeVerifiedEmail = onCall(emailOtpCallOpts, async (request) => {
   if (stage === "require_mobile_otp") {
     return startEmailChangeRequireMobile({
       uid,
-      mobileChallengeId: String(request.data?.mobileChallengeId ?? ""),
-      mobileCode: String(request.data?.mobileCode ?? ""),
+      phoneProofToken: String(request.data?.phoneProofToken ?? ""),
     });
   }
   if (stage === "start_new_email") {

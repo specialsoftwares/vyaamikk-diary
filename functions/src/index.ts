@@ -90,6 +90,7 @@ export { appStoreServerNotificationsV2 } from "./billing/callables/appStoreServe
  * discovery or cold starts. Server gate remains default-off
  * (GRIN_GOODS_EVIDENCE_FUNCTIONS must be exactly "true").
  */
+export { ownerObjectTransfer } from "./storage/ownerObjectCallable";
 export {
   grinRegisterGoodsReceipt,
   grinReconcileCommand,

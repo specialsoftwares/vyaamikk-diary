@@ -1,11 +1,17 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
+import { DELETION_GRACE_MS } from "../deletion/finalPurge";
 import { EMPTY_PHASES } from "../deletion/deletionJob";
+import { resolveAuthoritativePhoneAuthIdentity } from "../identity/phoneAuthClaimBinding";
+import { decideCallableAdmission } from "../identity/sessionSecurityPolicy";
+import { routeResolveByPhoneResponse } from "../../../src/services/auth/reactivationRouting";
 import {
   performCompleteAccountReactivation,
   performStartAccountReactivation,
 } from "./accountReactivation";
+import { emailBindingKey } from "../email/emailBindingKey";
 import {
   REACTIVATION_CHALLENGES,
   REACTIVATION_GUESS_WINDOW_MS,
@@ -14,6 +20,7 @@ import {
   REACTIVATION_PHONE_INDEX,
   REACTIVATION_SEND_GAP_MS,
   REACTIVATION_USERS,
+  reactivationWindowDeadline,
   type ReactivationDb,
   type ReactivationMailer,
   type ReactivationTx,
@@ -74,6 +81,8 @@ function seed(db: MemoryDb, now: number, patch: Record<string, unknown> = {}): v
     displayName: "Kept Name",
     businessEmail: EMAIL,
     normalizedEmail: EMAIL,
+    emailHash: emailBindingKey(EMAIL),
+    emailBindingVersion: 1,
     emailStatus: "verified",
     emailVerifiedAt: now - 60_000,
     status: "pending_deletion",
@@ -81,6 +90,12 @@ function seed(db: MemoryDb, now: number, patch: Record<string, unknown> = {}): v
     deletionScheduledFor: now + 10 * 24 * 60 * 60 * 1000,
     reactivationPhoneVerifiedAt: now,
     ...patch,
+  });
+  db.docs.set(`emailBindings/${emailBindingKey(EMAIL)}`, {
+    uid: UID,
+    normalizedEmail: EMAIL,
+    status: "verified",
+    bindingVersion: 1,
   });
   db.docs.set(`${REACTIVATION_PHONE_INDEX}/${PHONE}`, { uid: UID });
   db.docs.set(`${REACTIVATION_JOBS}/${UID}`, {
@@ -92,12 +107,15 @@ function seed(db: MemoryDb, now: number, patch: Record<string, unknown> = {}): v
   });
 }
 
-function capturingMailer(): ReactivationMailer & { sent: string[] } {
+function capturingMailer(): ReactivationMailer & { sent: string[]; to: string[] } {
   const sent: string[] = [];
+  const to: string[] = [];
   return {
     sent,
+    to,
     async send(input) {
       sent.push(input.text);
+      to.push(input.to);
       return "accepted";
     },
   };
@@ -383,6 +401,47 @@ async function testIneligibleAndPurgeRace(): Promise<void> {
   assert.equal(generation.docs.get(`${REACTIVATION_USERS}/${UID}`)?.status, "pending_deletion");
 }
 
+async function testStoredCutoffClosesBeforeLaterSchedule(): Promise<void> {
+  const now = 1_700_000_000_000;
+  const closed = new MemoryDb();
+  seed(closed, now, {
+    reactivationCutoff: now - 1,
+    deletionScheduledFor: now + 20 * 24 * 60 * 60 * 1000,
+  });
+  closed.docs.set(`${REACTIVATION_JOBS}/${UID}`, {
+    ...closed.docs.get(`${REACTIVATION_JOBS}/${UID}`)!,
+    reactivationCutoff: now - 1,
+    graceExpiresAt: now + 20 * 24 * 60 * 60 * 1000,
+  });
+  await assert.rejects(() => start(closed, capturingMailer(), now));
+  assert.equal(closed.docs.get(`${REACTIVATION_USERS}/${UID}`)?.status, "pending_deletion");
+
+  const legacy = new MemoryDb();
+  const requestedAt = now - 10 * 24 * 60 * 60 * 1000;
+  seed(legacy, now, {
+    deletionRequestedAt: requestedAt,
+    deletionScheduledFor: requestedAt + 45 * 24 * 60 * 60 * 1000,
+  });
+  assert.equal(
+    reactivationWindowDeadline({
+      deletionRequestedAt: requestedAt,
+      deletionScheduledFor: requestedAt + 45 * 24 * 60 * 60 * 1000,
+    }),
+    requestedAt + 45 * 24 * 60 * 60 * 1000
+  );
+  const mailer = capturingMailer();
+  const started = await start(legacy, mailer, now);
+  const done = await performCompleteAccountReactivation({
+    db: legacy,
+    uid: UID,
+    challengeId: started.verificationId,
+    code: codeFrom(mailer.sent[0]!),
+    now: now + 1_000,
+    env: ENV,
+  });
+  assert.equal(done.profile.status, "active");
+}
+
 async function testParallelVerifyConsumesOnce(): Promise<void> {
   const db = new MemoryDb();
   const now = 1_700_000_000_000;
@@ -413,6 +472,257 @@ async function testParallelVerifyConsumesOnce(): Promise<void> {
   assert.equal(db.docs.get(`${REACTIVATION_CHALLENGES}/${started.verificationId}`)?.status, "consumed");
 }
 
+/**
+ * Pure decision from the serving resolver
+ * resolveorcreateuserbyphone-00009-ket (source e6f09b6, 21 Sep 2026).
+ * A stored deletionScheduledFor is returned unchanged. The 15-day constant
+ * is only the fallback when that field is absent, and it is not written.
+ */
+const DEPLOYED_RESOLVER_SHA = "e6f09b6a9afb37e6ae88cc39e0e27cc2b90a3aab";
+const DEPLOYED_RESOLVER_GRACE_MS = 15 * 24 * 60 * 60 * 1000;
+
+function deployedDeletionPending(
+  profile: {
+    uid: string;
+    status: string;
+    phoneE164: string;
+    businessEmail?: string | null;
+    deletionScheduledFor?: number | null;
+    deletionRequestedAt?: number | null;
+  },
+  now: number
+): {
+  write: { reactivationPhoneVerifiedAt: number; updatedAt: number };
+  response: {
+    status: "deletion_pending";
+    requiresReactivation: true;
+    requiresEmailVerification: true;
+    maskedEmail: string | null;
+    deletionScheduledFor: number;
+    policyTextVersion: "2026-06";
+    profile: {
+      uid: string;
+      status: string;
+      deletionScheduledFor?: number | null;
+      phoneE164: string;
+    };
+    isNewUser: false;
+  };
+} | null {
+  if (profile.status === "deleted" || profile.status !== "pending_deletion") return null;
+  const scheduled =
+    profile.deletionScheduledFor ??
+    (profile.deletionRequestedAt ?? 0) + DEPLOYED_RESOLVER_GRACE_MS;
+  if (!(scheduled > now)) return null;
+  const email = profile.businessEmail?.trim() ?? "";
+  return {
+    write: { reactivationPhoneVerifiedAt: now, updatedAt: now },
+    response: {
+      status: "deletion_pending",
+      requiresReactivation: true,
+      requiresEmailVerification: true,
+      maskedEmail: email ? "ow***@e***.com" : null,
+      deletionScheduledFor: scheduled,
+      policyTextVersion: "2026-06",
+      profile: {
+        uid: profile.uid,
+        status: profile.status,
+        deletionScheduledFor: profile.deletionScheduledFor,
+        phoneE164: profile.phoneE164,
+      },
+      isNewUser: false,
+    },
+  };
+}
+
+function assertDeployedResolverSource(): void {
+  let source = "";
+  try {
+    source = execFileSync(
+      "git",
+      ["show", `${DEPLOYED_RESOLVER_SHA}:functions/src/identity/resolveOrCreateUserByPhone.ts`],
+      { encoding: "utf8" }
+    );
+  } catch {
+    return;
+  }
+  assert.match(source, /const DELETION_GRACE_MS = 15 \* 24 \* 60 \* 60 \* 1000;/);
+  assert.match(source, /reactivationPhoneVerifiedAt: now/);
+  assert.match(source, /status: "deletion_pending" as const/);
+  assert.equal(source.includes("assertAdmittedCallableUser"), false);
+  assert.equal(source.includes("deletionScheduledFor: now"), false);
+}
+
+async function testDeployedResolverCompatibility(): Promise<void> {
+  assertDeployedResolverSource();
+  assert.notEqual(DEPLOYED_RESOLVER_GRACE_MS, DELETION_GRACE_MS);
+  const now = 1_700_000_000_000;
+  const requestedAt = now - 10 * 24 * 60 * 60 * 1000;
+  const storedDeadline = requestedAt + 45 * 24 * 60 * 60 * 1000;
+  const db = new MemoryDb();
+  seed(db, now, {
+    deletionRequestedAt: requestedAt,
+    deletionScheduledFor: storedDeadline,
+    reactivationPhoneVerifiedAt: 0,
+  });
+  const job = db.docs.get(`${REACTIVATION_JOBS}/${UID}`);
+  assert.ok(job);
+  job.graceExpiresAt = storedDeadline;
+  delete job.reactivationCutoff;
+
+  const profile = db.docs.get(`${REACTIVATION_USERS}/${UID}`)!;
+  const decision = deployedDeletionPending(
+    {
+      uid: UID,
+      status: String(profile.status),
+      phoneE164: PHONE,
+      businessEmail: EMAIL,
+      deletionScheduledFor: storedDeadline,
+      deletionRequestedAt: requestedAt,
+    },
+    now
+  );
+  assert.ok(decision);
+  assert.equal(decision.response.deletionScheduledFor, storedDeadline);
+  assert.equal(decision.response.profile.deletionScheduledFor, storedDeadline);
+  assert.equal("deletionScheduledFor" in decision.write, false);
+  Object.assign(profile, decision.write);
+  assert.equal(profile.deletionScheduledFor, storedDeadline);
+  assert.equal(profile.reactivationPhoneVerifiedAt, now);
+  assert.equal(reactivationWindowDeadline(profile), storedDeadline);
+
+  const bound = resolveAuthoritativePhoneAuthIdentity({
+    authUid: UID,
+    tokenPhoneNumber: PHONE,
+    clientPhoneE164: PHONE,
+  });
+  assert.equal(bound.authUid, UID);
+  assert.equal(bound.phoneE164, PHONE);
+  assert.throws(() =>
+    resolveAuthoritativePhoneAuthIdentity({
+      authUid: UID,
+      tokenPhoneNumber: PHONE,
+      clientPhoneE164: "+919800000099",
+    })
+  );
+  const admitted = decideCallableAdmission({
+    verified: { uid: UID, signInProvider: "phone", authTimeSeconds: Math.floor(now / 1000) },
+    originClaim: null,
+    cutoff: null,
+  });
+  assert.equal(admitted.admit, true);
+  const replaced = decideCallableAdmission({
+    verified: { uid: UID, signInProvider: "phone", authTimeSeconds: Math.floor(now / 1000) },
+    originClaim: null,
+    cutoff: Math.floor(now / 1000),
+  });
+  assert.equal(replaced.admit, false);
+
+  let routed: unknown;
+  try {
+    routeResolveByPhoneResponse(decision.response);
+  } catch (error) {
+    routed = error;
+  }
+  assert.equal((routed as { code?: string }).code, "account_pending_deletion");
+  assert.equal(
+    (routed as { details?: { deletionScheduledFor?: number } }).details?.deletionScheduledFor,
+    storedDeadline
+  );
+
+  const withoutProof = new MemoryDb();
+  seed(withoutProof, now, {
+    deletionRequestedAt: requestedAt,
+    deletionScheduledFor: storedDeadline,
+    reactivationPhoneVerifiedAt: 0,
+  });
+  const staleJob = withoutProof.docs.get(`${REACTIVATION_JOBS}/${UID}`)!;
+  staleJob.graceExpiresAt = storedDeadline;
+  delete staleJob.reactivationCutoff;
+  await assert.rejects(() => start(withoutProof, capturingMailer(), now), /Phone verification expired/);
+
+  const mailer = capturingMailer();
+  const started = await start(db, mailer, now + 1_000);
+  const done = await performCompleteAccountReactivation({
+    db,
+    uid: bound.authUid,
+    challengeId: started.verificationId,
+    code: codeFrom(mailer.sent[0]!),
+    now: now + 2_000,
+    env: ENV,
+  });
+  assert.equal(done.profile.uid, UID);
+  assert.equal(done.profile.status, "active");
+
+  const otherUid = new MemoryDb();
+  seed(otherUid, now, {
+    deletionRequestedAt: requestedAt,
+    deletionScheduledFor: storedDeadline,
+    reactivationPhoneVerifiedAt: now,
+  });
+  await assert.rejects(() =>
+    performStartAccountReactivation({
+      db: otherUid,
+      mailer: capturingMailer(),
+      uid: "other-auth-uid",
+      now,
+      ip: null,
+      env: ENV,
+    })
+  );
+
+  const closed = new MemoryDb();
+  seed(closed, storedDeadline + 1_000, {
+    deletionRequestedAt: requestedAt,
+    deletionScheduledFor: storedDeadline,
+    reactivationPhoneVerifiedAt: storedDeadline,
+  });
+  const closedJob = closed.docs.get(`${REACTIVATION_JOBS}/${UID}`)!;
+  closedJob.graceExpiresAt = storedDeadline;
+  delete closedJob.reactivationCutoff;
+  assert.equal(
+    deployedDeletionPending(
+      {
+        uid: UID,
+        status: "pending_deletion",
+        phoneE164: PHONE,
+        deletionScheduledFor: storedDeadline,
+        deletionRequestedAt: requestedAt,
+      },
+      storedDeadline + 1_000
+    ),
+    null
+  );
+  assert.ok(reactivationWindowDeadline({
+    deletionScheduledFor: storedDeadline,
+    deletionRequestedAt: requestedAt,
+  }) <= storedDeadline + 1_000);
+  await assert.rejects(() => start(closed, capturingMailer(), storedDeadline + 1_000));
+  assert.equal(closed.docs.get(`${REACTIVATION_USERS}/${UID}`)?.status, "pending_deletion");
+
+  const missingSchedule = requestedAt + DEPLOYED_RESOLVER_GRACE_MS;
+  const fallback = deployedDeletionPending(
+    {
+      uid: UID,
+      status: "pending_deletion",
+      phoneE164: PHONE,
+      deletionRequestedAt: requestedAt,
+    },
+    now
+  );
+  assert.equal(fallback?.response.deletionScheduledFor, missingSchedule);
+  assert.equal(
+    reactivationWindowDeadline({ deletionRequestedAt: requestedAt }),
+    requestedAt + DELETION_GRACE_MS
+  );
+  assert.ok(missingSchedule < requestedAt + DELETION_GRACE_MS);
+
+  const reactivation = readFileSync(new URL("./accountReactivation.ts", import.meta.url), "utf8");
+  assert.match(reactivation, /const uid = request\.auth\?\.uid/);
+  assert.equal(reactivation.includes("request.data.uid"), false);
+  assert.equal(reactivation.includes("request.data?.uid"), false);
+}
+
 function testReleaseReachability(): void {
   const reactivation = readFileSync(new URL("./accountReactivation.ts", import.meta.url), "utf8");
   const screen = readFileSync(
@@ -428,6 +738,24 @@ function testReleaseReachability(): void {
   assert.match(limits, /REACTIVATION_PURPOSE = "account_reactivation"/);
 }
 
+async function testMailboxIsNotTheMutableProfile(): Promise<void> {
+  const drifted = new MemoryDb();
+  const now = 1_700_000_000_000;
+  seed(drifted, now, { normalizedEmail: "attacker@example.com", businessEmail: "attacker@example.com" });
+  const driftedMail = capturingMailer();
+  await assert.rejects(
+    () => start(drifted, driftedMail, now),
+    (error: unknown) => failureCode(error) === "mailbox_support"
+  );
+  assert.equal(driftedMail.to.length, 0, "a drifted profile address is not used as the destination");
+
+  const legacy = new MemoryDb();
+  seed(legacy, now, { normalizedEmail: "", businessEmail: "attacker@example.com" });
+  const legacyMail = capturingMailer();
+  await start(legacy, legacyMail, now);
+  assert.deepEqual(legacyMail.to, [EMAIL], "an empty profile address still uses the verified binding");
+}
+
 async function main(): Promise<void> {
   await testHappyPath();
   await testProviderRejectionDoesNotActivate();
@@ -435,7 +763,10 @@ async function main(): Promise<void> {
   await testResendInvalidatesOldCode();
   await testSendLimitAndCrossResendGuesses();
   await testIneligibleAndPurgeRace();
+  await testStoredCutoffClosesBeforeLaterSchedule();
+  await testDeployedResolverCompatibility();
   await testParallelVerifyConsumesOnce();
+  await testMailboxIsNotTheMutableProfile();
   testReleaseReachability();
   console.log("reactivationOtp.unit.test.ts: ok");
 }

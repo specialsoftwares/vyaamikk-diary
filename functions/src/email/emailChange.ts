@@ -1,14 +1,12 @@
 /**
- * Staged verified-email change — server-authoritative factors only.
- * Mobile OTP proof must be established via Firebase Phone Auth / existing
- * mobile change challenge; this module stores signed factor completion.
+ * Staged verified-email change.
+ * The mobile factor is a fresh phone ID token for this account and its current number.
  */
 
 import { FieldValue } from "firebase-admin/firestore";
-import { randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
 
 import { getAdminDb } from "../admin";
-import { emailBindingKey } from "./emailBindingKey";
 import {
   assertEmailNotBoundElsewhere,
   createOrRotateEmailChallenge,
@@ -22,9 +20,21 @@ import {
 } from "./challengeService";
 import { verifyEmailOtpDigest } from "./otpCrypto";
 import { resolveEmailProvider } from "./provider";
-import { normalizeEmailStrict } from "./otpPolicy";
-
+import { EMAIL_OTP_LOCK_MS, EMAIL_OTP_MAX_ATTEMPTS, normalizeEmailStrict } from "./otpPolicy";
+import { resolveVerifiedMailbox } from "./verifiedMailbox";
+import { normalizePhoneE164 } from "../identity/shared";
+import {
+  assessPhoneProof,
+  phoneProofProjectId,
+  phoneProofId,
+  PHONE_FACTOR_PROOFS,
+  readPhoneProofClaims,
+} from "../identity/phoneFactorProof";
 const CHANGE_SESSIONS = "emailChangeSessions";
+
+function assertOperationId(value: string): void {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(value)) throwEmailOtpError("CONFLICT", "aborted");
+}
 
 interface ChangeSession {
   changeSessionId: string;
@@ -33,52 +43,126 @@ interface ChangeSession {
   mobileFactorAt: number | null;
   oldEmail: string;
   oldEmailHash: string;
+  mailboxVersion: number;
   newEmail: string | null;
   newEmailHash: string | null;
+  emailChallengeId?: string;
+  phoneProofId?: string;
   expiresAt: number;
   createdAt: number;
 }
 
-/** Soft check: client must have freshly verified phone via Auth; we record server timestamp. */
+/**
+ * Current-phone reauthentication. The proof is a fresh phone ID token for this
+ * account and its current number. A challenge id, a code length, or a client timestamp is not proof.
+ */
 export async function startEmailChangeRequireMobile(input: {
   uid: string;
-  mobileChallengeId: string;
-  mobileCode: string;
+  phoneProofToken: string;
+  nowMs?: number;
+  projectId?: string;
 }): Promise<{ changeSessionId: string; expiresAt: number }> {
-  // Mobile factor: require non-empty challenge id (native phone reauth token path).
-  // Full phone OTP verification remains with Firebase Auth; we refuse empty proofs.
-  if (!input.mobileChallengeId.trim() || input.mobileCode.trim().length < 6) {
+  const now = input.nowMs ?? Date.now();
+  const projectId = input.projectId || phoneProofProjectId();
+  const claims = await readPhoneProofClaims(input.phoneProofToken ?? "");
+  // Authentication is still verified on every retry. Freshness governs acquiring
+  // a new operation; it must not strand an already-created, unexpired operation
+  // solely because its successful response was lost.
+  if (!claims || claims.uid !== input.uid || claims.projectId !== projectId ||
+      claims.signInProvider !== "phone" || !claims.phoneNumber ||
+      claims.authTimeSeconds == null || !Number.isFinite(claims.authTimeSeconds) ||
+      claims.authTimeSeconds * 1000 > now + 60_000) {
     throwEmailOtpError("FORBIDDEN", "permission-denied");
   }
-
+  const factorId = phoneProofId({
+    projectId, authUid: claims.uid, phoneE164: claims.phoneNumber,
+    authTimeSeconds: claims.authTimeSeconds, purpose: "current_phone_reauth",
+  });
   const db = getAdminDb();
-  const userSnap = await db.collection(USERS).doc(input.uid).get();
-  if (!userSnap.exists) throwEmailOtpError("FORBIDDEN", "permission-denied");
-  const user = userSnap.data() as Record<string, unknown>;
-  if (user.emailStatus !== "verified" || !user.normalizedEmail) {
-    throwEmailOtpError("EMAIL_VERIFICATION_REQUIRED");
-  }
-  if (Number(user.coolingOffUntil ?? 0) > Date.now()) {
-    throwEmailOtpError("FORBIDDEN", "permission-denied");
-  }
+  const userRef = db.collection(USERS).doc(input.uid);
+  // This endpoint has no destination payload: one verified phone proof acquires
+  // exactly one email-change operation. A refreshed token with the same auth_time
+  // retrieves that operation rather than creating another one.
+  const changeSessionId = createHash("sha256").update(`email-change|${input.uid}|${factorId}`).digest("hex");
+  const sessionRef = db.collection(CHANGE_SESSIONS).doc(changeSessionId);
 
-  const now = Date.now();
-  const changeSessionId = randomBytes(16).toString("hex");
-  const oldEmail = normalizeEmailStrict(String(user.normalizedEmail));
-  const session: ChangeSession = {
-    changeSessionId,
-    uid: input.uid,
-    status: "mobile_ok",
-    mobileFactorAt: now,
-    oldEmail,
-    oldEmailHash: emailBindingKey(oldEmail),
-    newEmail: null,
-    newEmailHash: null,
-    expiresAt: now + 30 * 60 * 1000,
-    createdAt: now,
-  };
-  await db.collection(CHANGE_SESSIONS).doc(changeSessionId).set(session);
-  return { changeSessionId, expiresAt: session.expiresAt };
+  return db.runTransaction(async (tx) => {
+    const userSnap = await tx.get(userRef);
+    if (!userSnap.exists) throwEmailOtpError("FORBIDDEN", "permission-denied");
+    const user = userSnap.data() as Record<string, unknown>;
+    if (Number(user.coolingOffUntil ?? 0) > now) throwEmailOtpError("FORBIDDEN", "permission-denied");
+    let expectedPhone = "";
+    try {
+      expectedPhone = normalizePhoneE164(String(user.phoneE164 ?? ""));
+    } catch {
+      throwEmailOtpError("FORBIDDEN", "permission-denied");
+    }
+    if (claims.phoneNumber !== expectedPhone) throwEmailOtpError("FORBIDDEN", "permission-denied");
+    const hash = String(user.emailHash ?? "");
+    const bindingSnap = /^[a-f0-9]{64}$/.test(hash) ? await tx.get(db.collection(EMAIL_BINDINGS).doc(hash)) : null;
+    const mailbox = resolveVerifiedMailbox(
+      {
+        uid: input.uid,
+        emailStatus: user.emailStatus,
+        normalizedEmail: user.normalizedEmail,
+        emailHash: user.emailHash,
+        emailBindingVersion: user.emailBindingVersion,
+      },
+      bindingSnap?.exists ? (bindingSnap.data() as Record<string, unknown>) : null
+    );
+    if (!mailbox.ok) {
+      throwEmailOtpError(mailbox.outcome === "verification_required" ? "EMAIL_VERIFICATION_REQUIRED" : "CONFLICT", mailbox.outcome === "verification_required" ? "failed-precondition" : "aborted");
+    }
+    const proofRef = db.collection(PHONE_FACTOR_PROOFS).doc(factorId);
+    const [proofSnap, priorSessionSnap] = await Promise.all([tx.get(proofRef), tx.get(sessionRef)]);
+    if (proofSnap.exists) {
+      const consumed = proofSnap.data()!;
+      const prior = priorSessionSnap.data() as ChangeSession | undefined;
+      if (consumed.uid !== input.uid || consumed.purpose !== "current_phone_reauth" ||
+          consumed.changeSessionId !== changeSessionId || consumed.phoneE164 !== expectedPhone ||
+          !prior || prior.uid !== input.uid || prior.phoneProofId !== factorId ||
+          !["mobile_ok", "awaiting_new_email"].includes(prior.status) || prior.expiresAt <= now ||
+          prior.oldEmailHash !== mailbox.emailHash || prior.mailboxVersion !== mailbox.bindingVersion) {
+        throwEmailOtpError("FORBIDDEN", "permission-denied");
+      }
+      return { changeSessionId, expiresAt: prior.expiresAt };
+    }
+    if (priorSessionSnap.exists) throwEmailOtpError("CONFLICT", "aborted");
+    const proof = assessPhoneProof({
+      claims,
+      purpose: "current_phone_reauth",
+      accountUid: input.uid,
+      expectedPhoneE164: expectedPhone,
+      nowMs: now,
+      projectId,
+      alreadyConsumed: false,
+    });
+    if (!proof.ok) throwEmailOtpError("FORBIDDEN", "permission-denied");
+
+    const session: ChangeSession = {
+      changeSessionId,
+      uid: input.uid,
+      status: "mobile_ok",
+      mobileFactorAt: now,
+      oldEmail: mailbox.normalizedEmail,
+      oldEmailHash: mailbox.emailHash,
+      mailboxVersion: mailbox.bindingVersion,
+      newEmail: null,
+      newEmailHash: null,
+      expiresAt: now + 30 * 60 * 1000,
+      createdAt: now,
+      phoneProofId: proof.proofId,
+    };
+    tx.set(proofRef, {
+      uid: input.uid,
+      purpose: "current_phone_reauth",
+      phoneE164: expectedPhone,
+      consumedAt: now,
+      changeSessionId,
+    });
+    tx.set(sessionRef, session);
+    return { changeSessionId, expiresAt: session.expiresAt };
+  });
 }
 
 export async function startEmailChangeNewEmailChallenge(input: {
@@ -87,6 +171,7 @@ export async function startEmailChangeNewEmailChallenge(input: {
   newEmail: string;
   idempotencyKey: string | null;
 }) {
+  assertOperationId(input.changeSessionId);
   const db = getAdminDb();
   const sessionRef = db.collection(CHANGE_SESSIONS).doc(input.changeSessionId);
   const sessionSnap = await sessionRef.get();
@@ -103,13 +188,8 @@ export async function startEmailChangeNewEmailChallenge(input: {
     uid: input.uid,
     rawEmail: input.newEmail,
     purpose: "change_new",
-    idempotencyKey: input.idempotencyKey,
-  });
-
-  await sessionRef.update({
-    status: "awaiting_new_email",
-    newEmail: normalizeEmailStrict(input.newEmail),
-    newEmailHash: emailBindingKey(normalizeEmailStrict(input.newEmail)),
+    idempotencyKey: input.idempotencyKey ?? `email-change:${input.changeSessionId}:${normalizeEmailStrict(input.newEmail)}`,
+    changeSessionId: input.changeSessionId,
   });
 
   return { ...challenge, changeSessionId: input.changeSessionId };
@@ -121,13 +201,15 @@ export async function completeEmailChangeTransaction(input: {
   emailChallengeId: string;
   emailCode: string;
 }): Promise<{ profile: Record<string, unknown> }> {
+  assertOperationId(input.changeSessionId);
+  assertOperationId(input.emailChallengeId);
   const db = getAdminDb();
   const secret = resolveOtpHmacSecret();
   const sessionRef = db.collection(CHANGE_SESSIONS).doc(input.changeSessionId);
   const pendingRef = db.collection(PENDING_COLLECTION).doc(input.emailChallengeId);
   const userRef = db.collection(USERS).doc(input.uid);
 
-  const profile = await db.runTransaction(async (tx) => {
+  const outcome = await db.runTransaction(async (tx) => {
     const [sessionSnap, pendingSnap, userSnap] = await Promise.all([
       tx.get(sessionRef),
       tx.get(pendingRef),
@@ -143,8 +225,13 @@ export async function completeEmailChangeTransaction(input: {
     if (session.uid !== input.uid || pending.userId !== input.uid) {
       throwEmailOtpError("FORBIDDEN", "permission-denied");
     }
+    if (session.emailChallengeId !== input.emailChallengeId ||
+        pending.changeSessionId !== input.changeSessionId ||
+        pending.normalizedEmail !== session.newEmail || pending.emailHash !== session.newEmailHash) {
+      throwEmailOtpError("CONFLICT", "aborted");
+    }
     if (session.status === "completed") {
-      return { uid: input.uid, ...user };
+      return { kind: "profile" as const, profile: { uid: input.uid, ...user } };
     }
     if (session.status !== "awaiting_new_email" || !session.mobileFactorAt) {
       throwEmailOtpError("FORBIDDEN", "permission-denied");
@@ -152,7 +239,30 @@ export async function completeEmailChangeTransaction(input: {
     if (session.expiresAt < Date.now() || pending.expiresAt < Date.now()) {
       throwEmailOtpError("EMAIL_OTP_EXPIRED", "deadline-exceeded");
     }
+    if ((pending.lockUntil && pending.lockUntil > Date.now()) || pending.status === "locked") {
+      throwEmailOtpError("EMAIL_OTP_LOCKED");
+    }
     if (pending.purpose !== "change_new" || pending.status !== "active") {
+      throwEmailOtpError("CONFLICT", "aborted");
+    }
+    if (!/^[a-f0-9]{64}$/.test(session.oldEmailHash ?? "")) throwEmailOtpError("CONFLICT", "aborted");
+    const bindingSnap = await tx.get(db.collection(EMAIL_BINDINGS).doc(session.oldEmailHash));
+    const mailbox = resolveVerifiedMailbox(
+      {
+        uid: input.uid,
+        emailStatus: user.emailStatus,
+        normalizedEmail: user.normalizedEmail,
+        emailHash: user.emailHash,
+        emailBindingVersion: user.emailBindingVersion,
+      },
+      bindingSnap.exists ? (bindingSnap.data() as Record<string, unknown>) : null
+    );
+    if (
+      !mailbox.ok ||
+      mailbox.bindingVersion !== session.mailboxVersion ||
+      mailbox.normalizedEmail !== session.oldEmail ||
+      mailbox.emailHash !== session.oldEmailHash
+    ) {
       throwEmailOtpError("CONFLICT", "aborted");
     }
 
@@ -167,7 +277,29 @@ export async function completeEmailChangeTransaction(input: {
       },
       pending.otpDigest
     );
-    if (!ok) throwEmailOtpError("EMAIL_OTP_INVALID");
+    if (!ok) {
+      const attempts = (pending.incorrectAttempts ?? 0) + 1;
+      if (attempts >= EMAIL_OTP_MAX_ATTEMPTS) {
+        const lockUntil = Date.now() + EMAIL_OTP_LOCK_MS;
+        tx.update(pendingRef, {
+          incorrectAttempts: attempts,
+          status: "locked",
+          lockUntil,
+          otpDigest: null,
+        });
+        return {
+          kind: "error" as const,
+          errorCode: "EMAIL_OTP_LOCKED" as const,
+          httpsCode: "failed-precondition" as const,
+        };
+      }
+      tx.update(pendingRef, { incorrectAttempts: attempts });
+      return {
+        kind: "error" as const,
+        errorCode: "EMAIL_OTP_INVALID" as const,
+        httpsCode: "failed-precondition" as const,
+      };
+    }
 
     await assertEmailNotBoundElsewhere(tx, db, pending.emailHash, input.uid);
 
@@ -233,8 +365,13 @@ export async function completeEmailChangeTransaction(input: {
       expireAt: now + 90 * 86_400_000,
     });
 
-    return { uid: input.uid, ...updated };
+    return { kind: "profile" as const, profile: { uid: input.uid, ...updated } };
   });
+
+  if (outcome.kind === "error") {
+    throwEmailOtpError(outcome.errorCode, outcome.httpsCode);
+  }
+  const profile = outcome.profile;
 
   // Mandatory notifications — mutation already committed; failures are retried via events.
   const { provider } = resolveEmailProvider();

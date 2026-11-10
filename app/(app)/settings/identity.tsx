@@ -15,6 +15,7 @@ import { useForm, useWatch, type Control, type FieldValues } from "react-hook-fo
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 
+import { canUseOrdinaryEmailBinding, VERIFIED_EMAIL_CHANGE_SUPPORT_MESSAGE } from "@/auth-v2/verifiedEmailEditAvailability";
 import { IdentityPreviewCard } from "@/components/profile/IdentityPreviewCard";
 import { ProfileIdentityHeroCard } from "@/components/profile/ProfileIdentityHeroCard";
 import { ProfilePolicyGuidanceCard } from "@/components/profile/ProfilePolicyGuidanceCard";
@@ -328,6 +329,10 @@ export default function BusinessIdentityScreen() {
       const newEmail = formSnapshot.businessEmail.trim().toLowerCase() || null;
       const baselineEmail = baseline.businessEmail.trim().toLowerCase() || null;
       const emailChanged = newEmail !== baselineEmail;
+      if (emailChanged && !canUseOrdinaryEmailBinding(user)) {
+        setError(VERIFIED_EMAIL_CHANGE_SUPPORT_MESSAGE);
+        return;
+      }
       const serverEmailBind = emailChanged && newEmail && requiresServerEmailBinding();
 
       if (serverEmailBind) {
@@ -503,7 +508,8 @@ export default function BusinessIdentityScreen() {
   const memberSinceMs = user.createdAt ?? Date.now();
 
   const businessNameLocked = !canEditProfileField(user, "businessName").allowed;
-  const emailLocked = !canEditProfileField(user, "businessEmail").allowed;
+  const verifiedEmailReadOnly = !canUseOrdinaryEmailBinding(user);
+  const emailLocked = verifiedEmailReadOnly || !canEditProfileField(user, "businessEmail").allowed;
   const businessNameRemaining = Math.max(
     0,
     MAX_BUSINESS_NAME_CHANGES - (user.businessNameChangeCount ?? 0)
@@ -600,6 +606,7 @@ export default function BusinessIdentityScreen() {
           displayNameError={displayNameError}
           businessNameLocked={businessNameLocked}
           emailLocked={emailLocked}
+          emailUnavailableMessage={verifiedEmailReadOnly ? VERIFIED_EMAIL_CHANGE_SUPPORT_MESSAGE : undefined}
           businessNameRemaining={businessNameRemaining}
           emailRemaining={emailRemaining}
           displayNameRef={displayNameRef}

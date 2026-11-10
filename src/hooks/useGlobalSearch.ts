@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { captureLoadClaim, emptyOwnedLoad, runOwnedLoad, type OwnedLoad, type RequestClaim } from "@/components/screenState";
+import { currentSessionCommitEpoch } from "@/services/auth/authSessionFence";
+import { presentPublicError } from "@/domain/publicErrors";
 import { useT } from "@/i18n";
 import {
   getRecentRecordsFromIndex,
@@ -17,35 +20,50 @@ const DEBOUNCE_MS = 320;
 export function useGlobalSearch(userId: string | null) {
   const t = useT();
   const [index, setIndex] = useState<IndexedSearchItem[]>([]);
-  const [indexLoading, setIndexLoading] = useState(false);
+  const [indexLoading, setIndexLoading] = useState(Boolean(userId));
   const [indexError, setIndexError] = useState<string | null>(null);
+  const [indexClaim, setIndexClaim] = useState<RequestClaim | null>(null);
+  const [requestClaim, setRequestClaim] = useState<RequestClaim | null>(null);
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [filter, setFilter] = useState<GlobalSearchFilter>("all");
   const [searching, setSearching] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadRef = useRef<OwnedLoad<IndexedSearchItem[]>>(emptyOwnedLoad());
+  const generationRef = useRef(0);
+  const userRef = useRef(userId);
+  userRef.current = userId;
+
+  const publishIndex = useCallback((next: OwnedLoad<IndexedSearchItem[]>) => {
+    loadRef.current = next;
+    setIndexLoading(next.loading);
+    setIndexError(next.error);
+    setRequestClaim(next.claim);
+    setIndexClaim(next.valueClaim);
+    setIndex(next.value ?? []);
+  }, []);
 
   const reloadIndex = useCallback(async () => {
-    if (!userId) {
-      setIndex([]);
+    const owner = userRef.current;
+    if (!owner) {
+      generationRef.current += 1;
+      publishIndex(emptyOwnedLoad());
       return;
     }
-    setIndexLoading(true);
-    setIndexError(null);
-    try {
-      const items = await loadGlobalSearchIndex(userId, t);
-      setIndex(items);
-    } catch {
-      setIndexError("globalSearch.indexError");
-      setIndex([]);
-    } finally {
-      setIndexLoading(false);
-    }
-  }, [userId, t]);
+    const claim = captureLoadClaim(owner, ++generationRef.current);
+    await runOwnedLoad({
+      claim,
+      read: () => loadGlobalSearchIndex(owner, t),
+      readState: () => loadRef.current,
+      writeState: publishIndex,
+      presentError: (error) => presentPublicError(error),
+    });
+  }, [publishIndex, t]);
 
+  const epoch = currentSessionCommitEpoch();
   useEffect(() => {
     void reloadIndex();
-  }, [reloadIndex]);
+  }, [reloadIndex, epoch]);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -89,6 +107,9 @@ export function useGlobalSearch(userId: string | null) {
     recentRecords,
     indexLoading,
     indexError,
+    indexClaim,
+    requestClaim,
+    libraryCount: indexClaim ? index.length : 0,
     searching: searching && isQuerySearchable(query),
     showRecent,
     showEmpty,

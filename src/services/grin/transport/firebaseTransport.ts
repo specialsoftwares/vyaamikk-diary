@@ -40,7 +40,7 @@ import {
 
 const GENERIC_DENY = "denied" as const;
 
-export type GrinAuthSnapshot = { uid: string } | null;
+export type GrinAuthSnapshot = { uid: string; sessionGeneration?: number } | null;
 
 export type GrinHttpsCallableInvoker = (name: string, data: unknown) => Promise<unknown>;
 

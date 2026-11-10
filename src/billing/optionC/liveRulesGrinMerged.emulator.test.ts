@@ -214,7 +214,11 @@ async function main() {
   check("merged firestore adds GRIN ledgers", mergedFs.includes("match /goodsEvidenceLedgers/{ledgerId}"));
   check("merged storage keeps pdfs", mergedSt.includes("match /users/{userId}/pdfs/{recordId}/{fileName}"));
   check("merged storage adds grinEvidence", mergedSt.includes("match /users/{userId}/grinEvidence/{objectKey}/original"));
-  check("repo-root firestore.rules still has no GRIN matchers", !liveFs.includes("goodsEvidence"));
+  check(
+    "repo-root firestore.rules serves selected GRIN reads and denies client writes",
+    liveFs.includes("match /goodsEvidenceLedgers/{ledgerId}") &&
+      liveFs.includes("Reservations, hashes, generations and quota are never client-writable.")
+  );
   check("repo-root storage.rules still has no grinEvidence", !liveSt.includes("grinEvidence"));
   check("firebase.json still points at repo-root rules", firebaseJson.includes('"rules": "firestore.rules"') && firebaseJson.includes('"rules": "storage.rules"'));
   check("firebase.json does not point at proposed-grin", !firebaseJson.includes("proposed-grin"));

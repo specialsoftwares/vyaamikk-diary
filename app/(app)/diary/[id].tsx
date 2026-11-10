@@ -1,21 +1,21 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import { Alert, StyleSheet, Text, View } from "react-native";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 
 import { Banner,
   Button,
   Card,
-  ErrorState,
   Header,
-  Loader,
   PremiumActionButton,
   Screen, LocaleUiText } from "@/components/ui";
+import { SaveOutcomeLabel, ScreenErrorPanel, SessionHoldNotice, InitialListSkeleton, screenStateCopy, useRequestOwner } from "@/components/screenState";
+import { sessionBlocksWrite } from "@/components/screenState/resolveScreenState";
 import { BusinessEntryDetailBody } from "@/components/diary/BusinessEntryDetailBody";
 import type { BusinessEntry, OutwardFreightPayload } from "@/domain/businessEntry";
 import { isComposerEntryType } from "@/domain/composerOptions";
 import { entryHasPdfExport, entryTypeLabelKey } from "@/utils/businessEntry/display";
 import { freightDefaultsFromDispatch } from "@/utils/businessEntry/freightFromDispatch";
-import { userFacingMessage } from "@/domain/errors";
+import { presentPublicError } from "@/domain/publicErrors";
 import { useStuckBusyRecovery } from "@/hooks/useStuckBusyRecovery";
 import { getDiaryRepository } from "@/services/diary";
 import { updateEntryLocalFirst } from "@/services/diary/localFirst";
@@ -25,7 +25,9 @@ import { badgeForLocalRecord } from "@/services/diary/mergeLocalUnsynced";
 import { stripGpsFromLocation } from "@/services/location/locationRecordService";
 import { deleteUserContent } from "@/services/records/userContentDelete";
 import { notifySearchIndexChanged } from "@/services/search";
+import { currentSessionCommitEpoch } from "@/services/auth/authSessionFence";
 import { useAuth } from "@/state/auth";
+import { useSync } from "@/state/sync";
 import { useI18n, useT } from "@/i18n";
 import { radius, spacing, typography, useThemedStyles } from "@/theme";
 import { formatEntryDate, formatRelative } from "@/utils/date";
@@ -41,6 +43,10 @@ export default function EntryDetailScreen() {
   const { lang } = useI18n();
   const router = useRouter();
   const { user } = useAuth();
+  const owner = useRequestOwner(user?.uid ?? null);
+  const sessionEpoch = currentSessionCommitEpoch();
+  const copy = screenStateCopy(lang);
+  const { status: syncStatus } = useSync();
   const { id, from } = useLocalSearchParams<{ id: string; from?: string }>();
   const entryId = String(id ?? "");
 
@@ -53,6 +59,8 @@ export default function EntryDetailScreen() {
   const [linkedDispatchStale, setLinkedDispatchStale] = useState(false);
   const [refreshingLink, setRefreshingLink] = useState(false);
   const [removingGps, setRemovingGps] = useState(false);
+  const [sessionHold, setSessionHold] = useState(false);
+  const entryRef = useRef<BusinessEntry | null>(null);
   const [syncBadge, setSyncBadge] = useState<"pending" | "quota" | "permission" | "error" | "synced">(
     "synced"
   );
@@ -108,18 +116,44 @@ export default function EntryDetailScreen() {
     </View>
   );
 
+  const seenIdentity = useRef(`${user?.uid ?? ""}:${sessionEpoch}`);
+  const identity = `${user?.uid ?? ""}:${sessionEpoch}`;
+  if (identity !== seenIdentity.current) {
+    seenIdentity.current = identity;
+    if (entry) {
+      setEntry(null);
+      setError(null);
+      setLoading(Boolean(user?.uid));
+    }
+  }
+  entryRef.current = entry;
+  const blocked = sessionBlocksWrite({
+    signedIn: Boolean(user),
+    syncStatus,
+  });
+
   const load = useCallback(async () => {
-    if (!user || !entryId) return;
-    setLoading(true);
+    if (!user || !entryId) {
+      setLoading(false);
+      if (!user) setSessionHold(true);
+      return;
+    }
+    const claim = owner.capture();
+    setSessionHold(false);
+    if (!entryRef.current) setLoading(true);
     setError(null);
     try {
       const found =
         (await getDiaryRepository().getById(user.uid, entryId)) ??
         (await localEntriesRepository.getById(user.uid, entryId));
+      if (!owner.owns(claim)) return;
       const localMeta = await localEntriesRepository.getRecord(user.uid, entryId);
+      if (!owner.owns(claim)) return;
       setSyncBadge(localMeta ? badgeForLocalRecord(localMeta) : found ? "synced" : "synced");
       if (!found) {
-        setError(t("errors.notFound"));
+        const missing = presentPublicError({ code: "not_found" });
+        if (entryRef.current) setActionError(missing);
+        else setError(missing);
       } else {
         setEntry(found);
         setLinkedDispatchStale(false);
@@ -127,6 +161,7 @@ export default function EntryDetailScreen() {
           const p = found.payload as unknown as OutwardFreightPayload;
           if (p.linkedDispatchId) {
             const dispatch = await getDiaryRepository().getById(user.uid, p.linkedDispatchId);
+            if (!owner.owns(claim)) return;
             if (
               dispatch &&
               dispatch.updatedAt > (p.linkedDispatchUpdatedAt ?? 0)
@@ -137,11 +172,14 @@ export default function EntryDetailScreen() {
         }
       }
     } catch (e) {
-      setError(userFacingMessage(e));
+      if (!owner.owns(claim)) return;
+      const msg = presentPublicError(e);
+      if (entryRef.current) setActionError(msg);
+      else setError(msg);
     } finally {
-      setLoading(false);
+      if (owner.ownsGeneration(claim)) setLoading(false);
     }
-  }, [user, entryId, t]);
+  }, [user, entryId, owner, sessionEpoch]);
 
   useFocusEffect(
     useCallback(() => {
@@ -177,7 +215,7 @@ export default function EntryDetailScreen() {
       });
     } catch (e) {
       if (!isShareUserCancelled(e)) {
-        setActionError(userFacingMessage(e));
+        setActionError(presentPublicError(e));
       }
     }
   };
@@ -226,7 +264,7 @@ export default function EntryDetailScreen() {
       }
     } catch (e) {
       if (!isShareUserCancelled(e)) {
-        setActionError(userFacingMessage(e) || t("pdf.entryExportFailed"));
+        setActionError(presentPublicError(e) || t("pdf.entryExportFailed"));
       }
     } finally {
       shareRecovery.clearPending();
@@ -251,6 +289,10 @@ export default function EntryDetailScreen() {
       {
         text: t("common.confirm"),
         onPress: async () => {
+          if (!user || blocked) {
+            setSessionHold(true);
+            return;
+          }
           setRefreshingLink(true);
           setActionError(null);
           try {
@@ -287,7 +329,7 @@ export default function EntryDetailScreen() {
             setEntry(updated);
             setLinkedDispatchStale(false);
           } catch (e) {
-            setActionError(userFacingMessage(e));
+            setActionError(presentPublicError(e));
           } finally {
             setRefreshingLink(false);
           }
@@ -297,7 +339,10 @@ export default function EntryDetailScreen() {
   };
 
   const onRemoveGps = async () => {
-    if (!entry || !user) return;
+    if (!entry || !user || blocked) {
+      if (blocked) setSessionHold(true);
+      return;
+    }
     setRemovingGps(true);
     setActionError(null);
     try {
@@ -308,17 +353,22 @@ export default function EntryDetailScreen() {
       setEntry(write.entry);
       notifySearchIndexChanged();
       if (!write.remoteAccepted) {
-        setActionError(t("sync.savedLocallyPending"));
+        setSyncBadge("pending");
+      } else {
+        setSyncBadge("synced");
       }
     } catch (e) {
-      setActionError(userFacingMessage(e));
+      setActionError(presentPublicError(e));
     } finally {
       setRemovingGps(false);
     }
   };
 
   const onDelete = () => {
-    if (!entry || !user) return;
+    if (!entry || !user || blocked) {
+      if (blocked) setSessionHold(true);
+      return;
+    }
     const body = `${t("swipeDelete.confirm.recordBody")}\n\n${t("swipeDelete.confirm.recordSharedPdf")}`;
     Alert.alert(t("swipeDelete.confirm.recordTitle"), body, [
       { text: t("common.cancel"), style: "cancel" },
@@ -337,7 +387,7 @@ export default function EntryDetailScreen() {
             });
             router.back();
           } catch (e) {
-            setActionError(userFacingMessage(e));
+            setActionError(presentPublicError(e));
           } finally {
             setDeleting(false);
           }
@@ -346,20 +396,38 @@ export default function EntryDetailScreen() {
     ]);
   };
 
-  if (loading) {
+  if (!user) {
     return (
       <Screen>
         <Header title={t("diary.detailTitle")} showBack backFrom={from} />
-        <Loader fullscreen message={t("common.loading")} />
+        <LocaleUiText style={{ padding: 24, textAlign: "center" }}>{copy.signedOut}</LocaleUiText>
       </Screen>
     );
   }
 
-  if (error || !entry) {
+  if (loading && !entry) {
     return (
       <Screen>
         <Header title={t("diary.detailTitle")} showBack backFrom={from} />
-        <ErrorState message={error ?? t("errors.notFound")} onRetry={load} />
+        <InitialListSkeleton count={4} />
+      </Screen>
+    );
+  }
+
+  if ((error || !entry) && !entry) {
+    return (
+      <Screen>
+        <Header title={t("diary.detailTitle")} showBack backFrom={from} />
+        <ScreenErrorPanel error={error ?? "unknown"} onRetry={load} />
+      </Screen>
+    );
+  }
+
+  if (!entry) {
+    return (
+      <Screen>
+        <Header title={t("diary.detailTitle")} showBack backFrom={from} />
+        <SessionHoldNotice visible />
       </Screen>
     );
   }
@@ -367,6 +435,8 @@ export default function EntryDetailScreen() {
   return (
     <Screen scroll>
       <Header title={t("diary.detailTitle")} showBack backFrom={from} />
+      <SessionHoldNotice visible={sessionHold || blocked} />
+      <SaveOutcomeLabel confirmed={syncBadge === "synced"} />
 
       {actionError ? (
         <View style={styles.bannerWrap}>
@@ -389,7 +459,10 @@ export default function EntryDetailScreen() {
           <Button
             label={t("sync.retrySync")}
             onPress={() => {
-              if (!user) return;
+              if (!user || blocked) {
+                if (blocked) setSessionHold(true);
+                return;
+              }
               setRetryingSync(true);
               void syncEngine
                 .retryUnsyncedEntry(user.uid, entry.id)

@@ -20,6 +20,7 @@ import {
   REVIEW_PHONE_CHANGE_AVAILABLE,
   reviewEditCopy,
 } from "@/auth-v2/reviewEditCopy";
+import { canUseOrdinaryEmailBinding, VERIFIED_EMAIL_CHANGE_SUPPORT_MESSAGE } from "@/auth-v2/verifiedEmailEditAvailability";
 import { assertReviewContactEditAllowed } from "@/auth-v2/reviewContactEditPolicy";
 import {
   reviewEditAllowsPinLookup,
@@ -339,7 +340,7 @@ export function ReviewSectionEditorScreen({ target }: ReviewSectionEditorScreenP
 
   const contactAdapters: ContactChangeAdapters | null = user
     ? {
-        startPhone: (phoneE164) => {
+        startPhone: (phoneE164, options) => {
           const gate = assertReviewContactEditAllowed({
             channel: "mobile",
             count: user.mobileReviewChangeCount,
@@ -348,20 +349,15 @@ export function ReviewSectionEditorScreen({ target }: ReviewSectionEditorScreenP
           if (!gate.ok) {
             throw new Error(gate.message);
           }
-          return startVerifiedPhoneChange(phoneE164);
+          return startVerifiedPhoneChange(phoneE164, options);
         },
         confirmPhone: (challenge, code) =>
-          confirmVerifiedPhoneChange(user.uid, challenge, code).then(async (profile) => {
-            await applyServerProfile(profile);
-            return profile;
-          }),
+          confirmVerifiedPhoneChange(user.uid, challenge, code),
         retryPhoneServerBind: async () => {
           const { retryServerMobileBindForCurrentSession } = await import(
             "@/services/auth/reconcilePendingMobileContactChange"
           );
-          const profile = await retryServerMobileBindForCurrentSession(user);
-          await applyServerProfile(profile);
-          return profile;
+          return retryServerMobileBindForCurrentSession(user);
         },
         startEmail: (nextEmail) => {
           const gate = assertReviewContactEditAllowed({
@@ -376,17 +372,18 @@ export function ReviewSectionEditorScreen({ target }: ReviewSectionEditorScreenP
         },
         resendEmail: (verificationId, nextEmail) =>
           resendVerifiedEmailChange(user.uid, verificationId, nextEmail),
-        confirmEmail: (verificationId, code, nextEmail) =>
+        confirmEmail: (verificationId, code, nextEmail, publication) =>
           confirmVerifiedEmailChange(user.uid, verificationId, code, async (patch) => {
+            if (!publication.isCurrent()) throw new Error("session_changed");
             const merged = { ...patch, businessEmail: nextEmail, normalizedEmail: nextEmail };
-            return updateProfile(merged);
-          }).then(async (profile) => {
-            await applyServerProfile(profile);
-            return profile;
+            return updateProfile(merged, { user, ownedGeneration: publication.owner.generation, ownedEpoch: publication.owner.epoch, isCurrent: publication.isCurrent });
           }),
-        onAuthoritativePhone: async (profile) => {
+        onAuthoritativePhone: async (profile, publication) => {
           // Ordering: bind success → central auth session → confirm → success UI.
-          const reconciled = await applyServerProfile(profile);
+          if (!publication.isCurrent()) throw new Error("session_changed");
+          const reconciled = await applyServerProfile(profile, publication.owner.generation,
+            () => publication.isCurrent() ? publication.owner.uid : null, publication.owner.epoch);
+          if (!publication.isCurrent()) throw new Error("session_changed");
           const contacts = reviewContactsFromAuthoritativeProfile(
             reconciled,
             hasAuthoritativeVerifiedEmail(reconciled)
@@ -408,8 +405,11 @@ export function ReviewSectionEditorScreen({ target }: ReviewSectionEditorScreenP
             console.log("[review-state] contact committed channel=mobile");
           }
         },
-        onAuthoritativeEmail: async (profile) => {
-          const reconciled = await applyServerProfile(profile);
+        onAuthoritativeEmail: async (profile, publication) => {
+          if (!publication.isCurrent()) throw new Error("session_changed");
+          const reconciled = await applyServerProfile(profile, publication.owner.generation,
+            () => publication.isCurrent() ? publication.owner.uid : null, publication.owner.epoch);
+          if (!publication.isCurrent()) throw new Error("session_changed");
           const contacts = reviewContactsFromAuthoritativeProfile(reconciled, true);
           if (
             !assertContactPropagated({
@@ -511,7 +511,8 @@ export function ReviewSectionEditorScreen({ target }: ReviewSectionEditorScreenP
           email={email}
           emailVerified={emailVerified}
           phoneChangeAvailable={REVIEW_PHONE_CHANGE_AVAILABLE}
-          emailChangeAvailable={REVIEW_EMAIL_CHANGE_AVAILABLE}
+          emailChangeAvailable={REVIEW_EMAIL_CHANGE_AVAILABLE && canUseOrdinaryEmailBinding(user)}
+          emailChangeUnavailableMessage={!canUseOrdinaryEmailBinding(user) ? VERIFIED_EMAIL_CHANGE_SUPPORT_MESSAGE : undefined}
           mobileReviewChangeCount={user.mobileReviewChangeCount ?? 0}
           emailReviewChangeCount={user.emailReviewChangeCount ?? 0}
           profileCompletedAt={user.profileCompletedAt}

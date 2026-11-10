@@ -102,10 +102,13 @@ export interface ProfilePatch {
 export type ProfileWriteClaim = {
   uid: string;
   generation: number;
+  epoch?: number;
+  /** UI operation retirement cannot dispatch follow-up writes after an await. */
+  isCurrent?: () => boolean;
 };
 
 export interface AuthService {
-  startOtp(phoneE164: PhoneE164): Promise<OtpChallenge>;
+  startOtp(phoneE164: PhoneE164, options?: { forceResend?: boolean }): Promise<OtpChallenge>;
   confirmOtp(challenge: OtpChallenge, code: string): Promise<AuthResult>;
   signOut(): Promise<void>;
   /**
@@ -130,7 +133,7 @@ export interface AuthService {
    * @internal Support/admin-only — not exposed in consumer app UI.
    * Begin OTP verification for a proposed new mobile (manual support flow).
    */
-  startMobileChange(newPhoneE164: PhoneE164): Promise<OtpChallenge>;
+  startMobileChange(newPhoneE164: PhoneE164, options?: { forceResend?: boolean }): Promise<OtpChallenge>;
 
   /**
    * @internal Support/admin-only — not exposed in consumer app UI.

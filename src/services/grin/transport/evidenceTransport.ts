@@ -2,9 +2,10 @@
  * Mobile-safe JS evidence transport.
  *
  * Hashing/sniffing use FileHandle reads of HASH_CHUNK_BYTES / 16 bytes.
- * Upload uses Expo `File` (Blob) with Firebase `uploadBytesResumable`.
- * That API slices a Blob per resumable chunk; it does **not** prove bounded
- * JS or native peak memory. Avoidable full-file base64 expansion is removed.
+ * Production upload puts the original through the owner-object gateway.
+ * `putReservedObjectWithJsStorage` remains the emulator helper and still uses
+ * `uploadBytesResumable`. Neither path proves bounded native peak memory.
+ * Avoidable full-file base64 expansion is removed.
  *
  * JS allocations in the production path:
  * - mime sniff: MIME_SNIFF_BYTES (16)
@@ -22,7 +23,7 @@ import { getFunctions, httpsCallable } from "firebase/functions";
 import { getStorage, ref, uploadBytesResumable, getMetadata } from "firebase/storage";
 
 import { env } from "@/config/env";
-import { getFirebaseApp, getFirebaseAuth, getFirebaseStorage } from "@/config/firebase";
+import { getFirebaseApp, getFirebaseAuth } from "@/config/firebase";
 import {
   MIME_SNIFF_BYTES,
   iterateBoundedChunks,
@@ -39,6 +40,8 @@ import {
 } from "@/goodsEvidence/evidence";
 import { createGrinSha256ChunkHasher } from "@/screens/grin/grinOriginalHash";
 import { canonicalFunctionsRegion } from "@/services/auth/authFlowErrorPresentation";
+import { StorageUploadOwnershipError } from "@/services/storage/userStorageUploadCore";
+import { syncSessionOwnership } from "@/sync/syncSessionOwnership";
 import type {
   GrinEvidenceUploadInput,
   GrinEvidenceUploadPort,
@@ -74,6 +77,8 @@ export type EvidenceObjectPutInput = {
   /** Test injection. Production passes `localPath` instead of a JS copy of the file. */
   bytes?: Uint8Array;
   localPath?: string;
+  ownership?: { uid: string; sessionGeneration?: number };
+  grin?: { ledgerId: string; receiptId: string; evidenceId: string };
 };
 
 export type FirebaseGrinEvidenceTransportDeps = FirebaseGrinTransportDeps & {
@@ -188,18 +193,26 @@ async function sha256HexBytes(bytes: Uint8Array): Promise<string | null> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-function stillOwner(deps: FirebaseGrinTransportDeps, uid: string): boolean {
+function stillOwner(
+  deps: FirebaseGrinTransportDeps,
+  uid: string,
+  captured?: GrinAuthSnapshot
+): boolean {
   const current = deps.currentAuth();
-  return current != null && current.uid.length > 0 && current.uid === uid;
+  if (!current || current.uid.length === 0 || current.uid !== uid) return false;
+  if (captured && captured.uid !== uid) return false;
+  if (captured?.sessionGeneration != null && current.sessionGeneration !== captured.sessionGeneration) return false;
+  return true;
 }
 
 async function invoke(
   deps: FirebaseGrinTransportDeps,
   uid: string,
   name: string,
-  payload: unknown
+  payload: unknown,
+  captured?: GrinAuthSnapshot
 ): Promise<{ ok: true; raw: unknown } | { ok: false; retryable: boolean }> {
-  if (!stillOwner(deps, uid)) return { ok: false, retryable: false };
+  if (!stillOwner(deps, uid, captured)) return { ok: false, retryable: false };
   let raw: unknown;
   try {
     raw = await deps.call(name, payload);
@@ -208,7 +221,7 @@ async function invoke(
     if (mapped) return { ok: false, retryable: mapped.code !== "unauthenticated" };
     throw err;
   }
-  if (!stillOwner(deps, uid)) return { ok: false, retryable: false };
+  if (!stillOwner(deps, uid, captured)) return { ok: false, retryable: false };
   return { ok: true, raw };
 }
 
@@ -220,7 +233,8 @@ export function createFirebaseGrinEvidenceTransport(
     transportKind: "FIREBASE_JS_HTTPS_CALLABLE",
     compositionLabel: "not live deploy; fail-closed when unexported",
     async upload(input: GrinEvidenceUploadInput): Promise<GrinEvidenceUploadResult> {
-      if (!stillOwner(deps, input.uid)) return closed(false);
+      const captured = deps.currentAuth();
+      if (!stillOwner(deps, input.uid, captured)) return closed(false);
       if (input.role === "thumbnail" || input.role === "metadata") {
         return closed(true);
       }
@@ -235,7 +249,7 @@ export function createFirebaseGrinEvidenceTransport(
         } catch {
           return closed(true);
         }
-        if (!stillOwner(deps, input.uid)) return closed(false);
+        if (!stillOwner(deps, input.uid, captured)) return closed(false);
         if (bytes.byteLength > MAX_PDF_ORIGINAL_BYTES) return closed(false);
         mime = sniffOriginalMime(bytes);
         sizeBytes = bytes.byteLength;
@@ -252,7 +266,7 @@ export function createFirebaseGrinEvidenceTransport(
         } catch {
           return closed(true);
         }
-        if (!stillOwner(deps, input.uid)) return closed(false);
+        if (!stillOwner(deps, input.uid, captured)) return closed(false);
       }
       if (!mime || !isAllowedOriginalMime(mime)) return closed(false);
       if (originalSizeError(mime, sizeBytes)) return closed(false);
@@ -267,7 +281,7 @@ export function createFirebaseGrinEvidenceTransport(
         claimed = await defaultHashLocalPath(input.localPath, maxBytesForOriginalMime(mime));
       }
       if (!claimed || !isSha256Hex(claimed)) return closed(true);
-      if (!stillOwner(deps, input.uid)) return closed(false);
+      if (!stillOwner(deps, input.uid, captured)) return closed(false);
 
       const reservePayload: GrinHttpsEvidenceReservePayload = {
         ledgerId: input.ledgerId,
@@ -278,7 +292,7 @@ export function createFirebaseGrinEvidenceTransport(
         claimedSha256: claimed,
         claimedByteSize: sizeBytes,
       };
-      const reservedCall = await invoke(deps, input.uid, GRIN_RESERVE_EVIDENCE_CALLABLE, reservePayload);
+      const reservedCall = await invoke(deps, input.uid, GRIN_RESERVE_EVIDENCE_CALLABLE, reservePayload, captured);
       if (!reservedCall.ok) return closed(reservedCall.retryable);
       const reserved = parseReserveResult(reservedCall.raw);
       if (!reserved.ok) return closed(reserved.retryable);
@@ -288,7 +302,7 @@ export function createFirebaseGrinEvidenceTransport(
         receiptId: input.receiptId,
         evidenceId: input.evidenceId,
       };
-      const began = await invoke(deps, input.uid, GRIN_BEGIN_EVIDENCE_CALLABLE, lifecycle);
+      const began = await invoke(deps, input.uid, GRIN_BEGIN_EVIDENCE_CALLABLE, lifecycle, captured);
       if (!began.ok) return closed(began.retryable);
       if (isPlainObject(began.raw) && began.raw.ok === false) {
         return closed(began.raw.retryable === true);
@@ -300,13 +314,23 @@ export function createFirebaseGrinEvidenceTransport(
           contentType: mime,
           bytes: bytes ?? undefined,
           localPath: input.localPath,
+          ownership: captured
+            ? { uid: captured.uid, sessionGeneration: captured.sessionGeneration }
+            : { uid: input.uid },
+          grin: {
+            ledgerId: input.ledgerId,
+            receiptId: input.receiptId,
+            evidenceId: input.evidenceId,
+          },
         });
-      } catch {
-        // Object may already exist from a lost response. Verify still hashes stored bytes.
+      } catch (error) {
+        if (error instanceof StorageUploadOwnershipError) return closed(false);
+        if (!stillOwner(deps, input.uid, captured)) return closed(false);
+        // The same attempt may already hold the bytes after a lost response.
       }
-      if (!stillOwner(deps, input.uid)) return closed(false);
+      if (!stillOwner(deps, input.uid, captured)) return closed(false);
 
-      const verifiedCall = await invoke(deps, input.uid, GRIN_UPLOAD_EVIDENCE_CALLABLE, lifecycle);
+      const verifiedCall = await invoke(deps, input.uid, GRIN_UPLOAD_EVIDENCE_CALLABLE, lifecycle, captured);
       if (!verifiedCall.ok) return closed(verifiedCall.retryable);
       return parseEvidenceUploadResult(verifiedCall.raw);
     },
@@ -322,7 +346,10 @@ function defaultCall(name: string, data: unknown): Promise<unknown> {
 
 function defaultCurrentAuth(): GrinAuthSnapshot {
   const uid = getFirebaseAuth().currentUser?.uid;
-  return uid ? { uid } : null;
+  if (!uid) return null;
+  const session = syncSessionOwnership.capture();
+  if (!session || session.uid !== uid) return null;
+  return { uid, sessionGeneration: session.generation };
 }
 
 async function defaultReadPrefix(localPath: string): Promise<Uint8Array> {
@@ -352,30 +379,33 @@ async function defaultHashLocalPath(localPath: string, maxBytes: number): Promis
 }
 
 async function defaultPutObject(input: EvidenceObjectPutInput): Promise<EvidenceObjectPutResult> {
-  const storage = getFirebaseStorage();
-  const objectRef = ref(storage, input.storagePath);
-  let data: Blob | Uint8Array;
-  if (input.bytes) {
-    if (input.bytes.byteLength > MAX_PDF_ORIGINAL_BYTES) throw new Error("too_large");
-    data = input.bytes;
-  } else if (input.localPath) {
-    const { File } = await import("expo-file-system");
-    data = new File(input.localPath);
-  } else {
-    throw new Error("missing local original");
-  }
-  const task = uploadBytesResumable(objectRef, data, {
+  const { ownerObjectGateway } = await import("@/services/storage/ownerObjectGateway");
+  const gateway = await ownerObjectGateway();
+  if (!input.bytes && !input.localPath) throw new Error("missing local original");
+  if (input.bytes && input.bytes.byteLength > MAX_PDF_ORIGINAL_BYTES) throw new Error("too_large");
+  const uploaded = await gateway.upload({
+    storagePath: input.storagePath,
     contentType: input.contentType,
-    customMetadata: { vydEvidence: "pending" },
+    localUri: input.localPath,
+    bytes: input.bytes,
+    userId: input.ownership?.uid,
+    session:
+      input.ownership?.sessionGeneration == null
+        ? input.ownership
+          ? null
+          : undefined
+        : { uid: input.ownership.uid, generation: input.ownership.sessionGeneration },
+    grin: input.grin,
   });
-  await new Promise<void>((resolve, reject) => {
-    task.on("state_changed", undefined, reject, () => resolve());
-  });
-  const meta = await getMetadata(objectRef);
-  return { generation: String(meta.generation ?? "") };
+  if (!uploaded.generation) throw new Error("object_transfer_unknown");
+  return { generation: uploaded.generation };
 }
 
-/** Production-shaped JS client. Callables remain unexported / undeployed. */
+/**
+ * Production-shaped JS client.
+ * This upload does not attach evidence metadata and does not seal the object.
+ * That protection is a recorded scope gap, not a claim that this client matches it.
+ */
 export function createFirebaseJsGrinEvidenceTransport(): FirebaseGrinEvidenceTransport {
   return createFirebaseGrinEvidenceTransport({
     call: defaultCall,

@@ -25,6 +25,8 @@ export type AppErrorCode =
   | "offline_read_only"
   | "quota_exhausted"
   | "quota_state_invalid"
+  // Historical server code remains classifiable, never an admission flag.
+  | "age_not_admitted"
   | "unknown";
 
 export class AppError extends Error {
@@ -55,3 +57,18 @@ export function toAppError(e: unknown, fallback: AppErrorCode = "unknown"): AppE
 export function userFacingMessage(e: unknown): string {
   return toPublicError(e).message;
 }
+
+// Compatibility catalogue exports for existing typed callers. Display paths
+// use the stricter allowlisted publicErrors implementation above.
+export {
+  PUBLIC_ERROR_CATALOGUE,
+  PUBLIC_ERROR_COPY,
+  PUBLIC_ERROR_MESSAGE_IDS,
+  classifyPublicError,
+  isUnsafePublicText,
+  publicMessage,
+  publicMessageId,
+  type PublicErrorCode,
+  type PublicErrorEntry,
+  type PublicErrorMessageId,
+} from "./publicErrorCatalogue";

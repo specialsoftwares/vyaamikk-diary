@@ -11,7 +11,9 @@ import {
   LastRefreshedHint,
   Pill,
   Screen,
+  SkeletonDashboardPreview,
   SkeletonList,
+  SkeletonLoadingPanel,
 } from "@/components/ui";
 import type { BusinessEntry, BusinessEntryType } from "@/domain/businessEntry";
 import { entryMatchesWorkTeamFilter } from "@/domain/workTeam";
@@ -130,8 +132,10 @@ export default function WorkTeamListScreen() {
         ))}
       </View>
       {loading && entries.length === 0 ? (
-        <SkeletonList count={4} />
-      ) : entries.length === 0 ? (
+        <SkeletonLoadingPanel loading slowMessage={t("skeleton.stillLoading")}>
+          <SkeletonList count={4} Item={SkeletonDashboardPreview} />
+        </SkeletonLoadingPanel>
+      ) : error && entries.length === 0 ? null : entries.length === 0 ? (
         <EmptyState title={t("workTeam.emptyTitle")} message={t("workTeam.emptyBody")} />
       ) : (
         <FlatList

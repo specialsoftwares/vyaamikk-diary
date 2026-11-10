@@ -16,26 +16,47 @@ import { SwipeToDeleteRow } from "@/components/records/SwipeToDeleteRow";
 import { useRecordDelete } from "@/hooks/useRecordDelete";
 import { userDeleteFromSearchResult } from "@/services/records/deleteTargets";
 import { SearchFilterChips } from "@/components/search/SearchFilterChips";
-import { EmptyState, Header, Screen, SkeletonList, SkeletonLoadingPanel, LocaleUiText } from "@/components/ui";
+import { Header, Screen, LocaleUiText } from "@/components/ui";
+import {
+  OfflineDeviceNotice,
+  SCREEN_EXISTING_SLOW_MS,
+  SearchOutcome,
+  SlowNetworkStatus,
+  listPhase,
+  resolveSearchPresentation,
+  screenStateCopy,
+  showsEmpty,
+  useOwnedSnapshot,
+  useRequestOwner,
+  requestSessionsMatch,
+  type RequestClaim,
+} from "@/components/screenState";
 import { useGlobalSearch } from "@/hooks/useGlobalSearch";
+import { currentSessionCommitEpoch } from "@/services/auth/authSessionFence";
 import { useAuth } from "@/state/auth";
-import { useT } from "@/i18n";
+import { useSync } from "@/state/sync";
+import { useI18n, useT } from "@/i18n";
 import {
   invalidateGlobalSearchIndex,
+  isQuerySearchable,
   navigateToSearchResult,
   type GlobalSearchFilter,
   type GlobalSearchResult,
 } from "@/services/search";
 import { readRecentSearches } from "@/services/search/recentSearches";
+import { startRecentSearchRead } from "@/services/search/recentSearchReadOwnership";
 import { radius, spacing, typography, useTheme, useThemedStyles } from "@/theme";
 
 type Section = { title: string; data: GlobalSearchResult[] };
 
 export default function GlobalSearchScreen() {
   const t = useT();
+  const { lang } = useI18n();
+  const copy = screenStateCopy(lang);
   const router = useRouter();
   const { q } = useLocalSearchParams<{ q?: string }>();
   const { user } = useAuth();
+  const { status: syncStatus } = useSync();
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
 
@@ -48,38 +69,53 @@ export default function GlobalSearchScreen() {
     recentRecords,
     indexLoading,
     indexError,
+    indexClaim,
+    requestClaim,
+    libraryCount,
     searching,
     showRecent,
-    showEmpty,
-    showResults,
     reloadIndex,
     commitSearch,
   } = useGlobalSearch(user?.uid ?? null);
   const { requestDelete, isDeleting } = useRecordDelete(user?.uid ?? null);
 
-  const [recentQueries, setRecentQueries] = useState<string[]>([]);
-  const [recentFailure, setRecentFailure] = useState<string | null>(null);
+  const [recentRead, setRecentRead] = useState<{
+    claim: RequestClaim;
+    queries: string[];
+    failed: boolean;
+  } | null>(null);
+  const { capture: captureRecent, owns: ownsRecent } = useRequestOwner(user?.uid ?? null);
+  const sessionEpoch = currentSessionCommitEpoch();
+  // Render ownership changes immediately, before the next focus effect runs.
+  const currentRecent = requestSessionsMatch(
+    user?.uid ? { uid: user.uid, epoch: sessionEpoch } : null,
+    recentRead?.claim
+  ) ? recentRead : null;
+  const recentQueries = currentRecent?.queries ?? [];
+  const recentFailure = currentRecent?.failed ?? false;
 
   useFocusEffect(
     useCallback(() => {
       invalidateGlobalSearchIndex();
       void reloadIndex();
-      if (user?.uid) {
-        void readRecentSearches(user.uid).then((read) => {
-          if (read.state === "ready") {
-            setRecentQueries(read.queries);
-            setRecentFailure(null);
-          } else {
-            setRecentQueries([]);
-            setRecentFailure(read.reason);
-          }
-        });
-      } else {
-        setRecentQueries([]);
-        setRecentFailure(null);
-      }
+      const claim = captureRecent();
+      setRecentRead(null);
+      const pending = claim ? startRecentSearchRead({
+        claim,
+        owns: ownsRecent,
+        read: readRecentSearches,
+        publish: (read, owner) => {
+          setRecentRead({ claim: owner,
+            queries: read.state === "ready" ? read.queries : [],
+            failed: read.state !== "ready" });
+        },
+        fail: (owner) => {
+          setRecentRead({ claim: owner, queries: [], failed: true });
+        },
+      }) : null;
       if (typeof q === "string" && q.trim()) setQuery(q.trim());
-    }, [reloadIndex, q, setQuery, user?.uid])
+      return () => pending?.dispose();
+    }, [reloadIndex, q, setQuery, user?.uid, sessionEpoch, captureRecent, ownsRecent])
   );
 
   const filterLabel = useCallback(
@@ -91,17 +127,6 @@ export default function GlobalSearchScreen() {
     (r: GlobalSearchResult) => t(r.categoryLabelKey),
     [t]
   );
-
-  const sections: Section[] = useMemo(() => {
-    const map = new Map<string, GlobalSearchResult[]>();
-    for (const r of results) {
-      const label = categoryLabel(r);
-      const list = map.get(label) ?? [];
-      list.push(r);
-      map.set(label, list);
-    }
-    return [...map.entries()].map(([title, data]) => ({ title, data }));
-  }, [results, categoryLabel]);
 
   const onSelect = useCallback(
     async (result: GlobalSearchResult) => {
@@ -171,6 +196,55 @@ export default function GlobalSearchScreen() {
   const showSearchSkeleton =
     indexLoading || (searching && query.trim().length >= 2);
 
+  const ownedSearch = useOwnedSnapshot({
+    signedInUid: user?.uid ?? null,
+    epoch: currentSessionCommitEpoch(),
+    generation: requestClaim?.generation ?? null,
+    loading: indexLoading,
+    failed: Boolean(indexError),
+    value: { recent: recentRecords, results, libraryCount },
+    valueClaim: indexClaim,
+  });
+  const visibleSearch = ownedSearch.accepted && ownedSearch.value ? ownedSearch.value : null;
+  const visibleLibraryCount = visibleSearch?.libraryCount ?? 0;
+  const matchCount = isQuerySearchable(query) ? (visibleSearch ? visibleSearch.results.length : 0) : 0;
+  const offline = syncStatus === "offline";
+  const keepVisibleRows = visibleLibraryCount > 0 || matchCount > 0;
+  const presentation = resolveSearchPresentation({
+    query,
+    queryActive: isQuerySearchable(query),
+    matchCount,
+    libraryCount: visibleLibraryCount,
+    loading: ((showSearchSkeleton || ownedSearch.pending) && !keepVisibleRows),
+    failed: Boolean(indexError) && !keepVisibleRows && !ownedSearch.pending,
+  });
+  const showEmptyLibrary = showsEmpty(
+    listPhase({
+      loading: presentation === "loading",
+      failed: presentation === "failure",
+      count: visibleLibraryCount,
+      owned: ownedSearch.current,
+      pending: ownedSearch.pending,
+    })
+  );
+
+  const displaySections: Section[] = useMemo(() => {
+    const source = isQuerySearchable(query)
+      ? (visibleSearch?.results ?? [])
+      : (visibleSearch?.recent ?? []);
+    if (!isQuerySearchable(query)) {
+      return [{ title: t("globalSearch.recentRecords"), data: source }];
+    }
+    const map = new Map<string, GlobalSearchResult[]>();
+    for (const item of source) {
+      const label = categoryLabel(item);
+      const list = map.get(label) ?? [];
+      list.push(item);
+      map.set(label, list);
+    }
+    return [...map.entries()].map(([title, data]) => ({ title, data }));
+  }, [query, visibleSearch, categoryLabel, t]);
+
   const listHeader = (
     <View>
       <View style={styles.filterWrap}>
@@ -198,11 +272,6 @@ export default function GlobalSearchScreen() {
         <LocaleUiText style={styles.hint}>{t("globalSearch.minChars")}</LocaleUiText>
       ) : null}
     </View>
-  );
-
-  const recentSections: Section[] = useMemo(
-    () => [{ title: t("globalSearch.recentRecords"), data: recentRecords }],
-    [recentRecords, t]
   );
 
   return (
@@ -238,33 +307,32 @@ export default function GlobalSearchScreen() {
           ) : null}
         </View>
       </View>
-      {indexError ? (
-        <LocaleUiText style={[styles.hint, { color: colors.danger, paddingHorizontal: spacing.lg }]}>
-          {t(indexError)}
-        </LocaleUiText>
-      ) : null}
-      {showEmpty ? (
-        <EmptyState
-          title={t("globalSearch.emptyTitle")}
-          message={t("globalSearch.emptyMessage")}
+      {offline && keepVisibleRows ? <OfflineDeviceNotice offline hasRows /> : null}
+      <SlowNetworkStatus
+        active={showSearchSkeleton && keepVisibleRows}
+        slowAfterMs={SCREEN_EXISTING_SLOW_MS}
+      />
+      {!user ? (
+        <LocaleUiText style={[styles.hint, { paddingHorizontal: spacing.lg }]}>{copy.signedOut}</LocaleUiText>
+      ) : presentation === "loading" ||
+        presentation === "failure" ||
+        presentation === "no_match" ||
+        (presentation === "empty_library" && showEmptyLibrary) ? (
+        <SearchOutcome
+          presentation={presentation}
+          onClear={() => setQuery("")}
+          onRetry={() => void reloadIndex()}
+          onBack={() => router.back()}
         />
       ) : (
         <SectionList
-          sections={
-            showSearchSkeleton
-              ? []
-              : showResults
-                ? sections
-                : showRecent
-                  ? recentSections
-                  : []
-          }
+          sections={presentation === "results" || presentation === "idle" ? displaySections : []}
           keyExtractor={(item) => item.id}
           stickySectionHeadersEnabled={false}
           ListHeaderComponent={listHeader}
           contentContainerStyle={styles.listContent}
           renderSectionHeader={({ section }) =>
-            showResults || section.data.length > 0 ? (
+            section.data.length > 0 ? (
               <Text style={styles.sectionHeader}>{section.title}</Text>
             ) : null
           }
@@ -301,14 +369,7 @@ export default function GlobalSearchScreen() {
             );
           }}
           ListEmptyComponent={
-            showSearchSkeleton ? (
-              <SkeletonLoadingPanel
-                loading
-                slowMessage={t("skeleton.stillLoading")}
-              >
-                <SkeletonList count={6} />
-              </SkeletonLoadingPanel>
-            ) : !indexLoading && showRecent ? (
+            presentation === "idle" && showRecent ? (
               <LocaleUiText style={styles.hint}>{t("globalSearch.startTyping")}</LocaleUiText>
             ) : null
           }

@@ -20,11 +20,12 @@ import type { OtpChallenge } from "./types";
 import { applyFirebasePhoneAuthTestingSettingsIfAllowed } from "./firebasePhoneAuthTestMode";
 import { phoneAuthFailureToAppError } from "./nativePhoneAuthErrors";
 import {
-  clearNativePhoneAuthSession,
+  clearNativePhoneAuthSessionIfMatches,
   loadNativePhoneAuthSession,
   saveNativePhoneAuthSession,
 } from "./nativePhoneAuthSession";
-import { getNativeAuthPhoneE164, getNativeAuthUid, probeAndroidAuthActivityState } from "./nativePhoneAuth";
+import { getNativeAuthPhoneE164, getNativeAuthUid, probeAndroidAuthActivityState, updateNativeVerifiedPhone, retireNativeVerifiedPhone } from "./nativePhoneAuth";
+import { currentAuthMutationGeneration, currentSessionCommitEpoch } from "./authSessionFence";
 
 const log = createLogger("auth/nativePhoneContactChange");
 
@@ -92,8 +93,26 @@ interface ContactChangePendingSession {
 const pendingByVerificationId = new Map<string, ContactChangePendingSession>();
 let sendInFlight = false;
 let confirmInFlightKey: string | null = null;
+let contactGeneration = 0;
+let testNativeModule: NativeAuthModule | null = null;
+
+export function __installNativePhoneContactChangeModuleForTests(next: NativeAuthModule | null): void {
+  testNativeModule = next;
+}
+
+/** UI retirement blocks late publication; it does not cancel a Firebase task. */
+export function retireNativePhoneContactChange(): void {
+  contactGeneration += 1;
+  retireNativeVerifiedPhone();
+}
+
+export function captureNativePhoneContactChangeCurrent(): () => boolean {
+  const captured = contactGeneration;
+  return () => captured === contactGeneration;
+}
 
 function runtimePlatform(): string {
+  if (testNativeModule) return "android";
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { Platform } = require("react-native") as { Platform: { OS: string } };
@@ -104,6 +123,7 @@ function runtimePlatform(): string {
 }
 
 function tryNativeAuthModule(): NativeAuthModule | null {
+  if (testNativeModule) return testNativeModule;
   const platform = runtimePlatform();
   if (platform === "web" || platform === "node") return null;
   try {
@@ -168,6 +188,10 @@ export async function startNativePhoneContactChangeOtp(
       "A verification code is already being sent. Please wait a moment."
     );
   }
+  const generation = currentAuthMutationGeneration();
+  const epoch = currentSessionCommitEpoch();
+  const operation = contactGeneration;
+  const owned = () => contactGeneration === operation && getNativeAuthUid() === currentUid && currentAuthMutationGeneration() === generation && currentSessionCommitEpoch() === epoch;
 
   const phone = normalizePhoneE164(newPhoneE164);
   if (!/^\+[1-9]\d{7,14}$/.test(phone)) {
@@ -249,6 +273,7 @@ export async function startNativePhoneContactChangeOtp(
         settle(() => reject(e));
       }
     });
+    if (!owned()) throw new Error("session_changed");
 
     const expiresAt = Date.now() + SESSION_TTL_MS;
     pendingByVerificationId.clear();
@@ -269,7 +294,10 @@ export async function startNativePhoneContactChangeOtp(
       phoneE164: phone,
       expiresAt,
       attemptId,
-    });
+      purpose: NATIVE_CONTACT_CHANGE_PURPOSE,
+      expectedUid: currentUid,
+    }, owned);
+    if (!owned()) throw new Error("session_changed");
 
     log.info("contact_change challenge ready", {
       attemptId,
@@ -317,7 +345,7 @@ export async function confirmNativePhoneContactChangeUpdate(
   const phone = normalizePhoneE164(challenge.phoneE164);
   const trimmed = code.trim();
   const inflightKey = `${challenge.verificationId}:${trimmed || "auto"}`;
-  if (confirmInFlightKey === inflightKey) {
+  if (confirmInFlightKey || sendInFlight) {
     throw new AppError(
       "otp_send_failed",
       "Verification is already in progress. Please wait a moment."
@@ -329,6 +357,8 @@ export async function confirmNativePhoneContactChangeUpdate(
     const persisted = await loadNativePhoneAuthSession();
     if (
       persisted &&
+      persisted.purpose === NATIVE_CONTACT_CHANGE_PURPOSE &&
+      persisted.expectedUid === getNativeAuthUid() &&
       persisted.firebaseVerificationId === challenge.verificationId &&
       persisted.phoneE164 === phone
     ) {
@@ -343,7 +373,7 @@ export async function confirmNativePhoneContactChangeUpdate(
         attemptId: persisted.attemptId,
         purpose: NATIVE_CONTACT_CHANGE_PURPOSE,
         autoCode: null,
-        expectedUid: uid,
+        expectedUid: persisted.expectedUid,
       };
       pendingByVerificationId.set(persisted.firebaseVerificationId, row);
     }
@@ -369,6 +399,10 @@ export async function confirmNativePhoneContactChangeUpdate(
       "Your signed-in session changed during mobile verification. Sign in again and retry."
     );
   }
+  const generation = currentAuthMutationGeneration();
+  const epoch = currentSessionCommitEpoch();
+  const operation = contactGeneration;
+  const owned = () => contactGeneration === operation && getNativeAuthUid() === currentUid && currentAuthMutationGeneration() === generation && currentSessionCommitEpoch() === epoch;
 
   const effectiveCode = trimmed || row.autoCode || "";
   if (!effectiveCode) {
@@ -392,7 +426,12 @@ export async function confirmNativePhoneContactChangeUpdate(
       uidSuffix: currentUid.slice(-6),
       phoneSuffix: phoneSuffix(phone),
     });
-    await user.updatePhoneNumber(credential);
+    await updateNativeVerifiedPhone({
+      verificationId: row.firebaseVerificationId, code: effectiveCode, phone,
+      expectedUid: currentUid, isCurrent: owned,
+      fallback: () => user.updatePhoneNumber(credential),
+    });
+    if (!owned()) throw new Error("session_changed");
 
     const afterUid = getNativeAuthUid();
     const afterPhone = getNativeAuthPhoneE164();
@@ -411,9 +450,11 @@ export async function confirmNativePhoneContactChangeUpdate(
 
     // Force-refresh ID token so callables see phone_number = B.
     await user.getIdToken(true);
+    if (!owned()) throw new Error("session_changed");
 
     pendingByVerificationId.delete(challenge.verificationId);
-    await clearNativePhoneAuthSession();
+    await clearNativePhoneAuthSessionIfMatches({ firebaseVerificationId: row.firebaseVerificationId, phoneE164: phone, attemptId: row.attemptId });
+    if (!owned()) throw new Error("session_changed");
 
     log.info("updatePhoneNumber success", {
       attemptId: row.attemptId,
@@ -453,4 +494,5 @@ export function resetNativePhoneContactChangeForTests(): void {
   pendingByVerificationId.clear();
   sendInFlight = false;
   confirmInFlightKey = null;
+  contactGeneration += 1;
 }

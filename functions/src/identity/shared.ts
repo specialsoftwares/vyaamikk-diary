@@ -60,6 +60,7 @@ export interface UserProfileDoc {
   businessEmail: string | null;
   normalizedEmail: string | null;
   emailHash: string | null;
+  emailBindingVersion?: number | null;
   emailStatus: string | null;
   emailLinkedAt: number | null;
   emailVerifiedAt: number | null;

@@ -1,7 +1,7 @@
 /**
- * Flag-gated GRIN Storage + Firestore cleanup. Injected stores for tests.
- * Default INCLUDE_GRIN_IN_ACCOUNT_PURGE = false — live customer GRIN is not
- * purged by scheduledDeletionCleanup / runFinalAccountPurge until flipped.
+ * Policy-selected GRIN Storage + Firestore cleanup. Injected stores for tests.
+ * Default INCLUDE_GRIN_IN_ACCOUNT_PURGE = false preserves legacy-job exclusion.
+ * Version-2 jobs explicitly pass force:true under the approved deletion policy.
  */
 
 import {
@@ -146,7 +146,8 @@ async function countCollectionRecursive(db: GrinFirestoreLike, collectionPath: s
 }
 
 /**
- * Run GRIN cleanup when the flag is on, or when `force` is set (unit tests).
+ * Run GRIN cleanup when the legacy opt-in flag is on, or when `force` is set
+ * by the version-2 policy path (also exercised by injected tests).
  * Failure is reported; the caller retries. Completion requires both trees empty.
  */
 export async function purgeGrinEvidenceIfEnabled(params: {

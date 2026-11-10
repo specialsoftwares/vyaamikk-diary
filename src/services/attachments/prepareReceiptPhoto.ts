@@ -19,7 +19,7 @@ import type { PreparedReceiptPhoto } from "./preparedReceiptPhoto";
 import { decodeBase64, inspectReceiptBytes, type ReceiptByteReject } from "./receiptPhotoBytes";
 import type { DiaryContentSeal } from "@/services/privacy/diarySealDocument";
 
-type DownloadOutcome = "ok" | "offline" | "access_denied" | "missing";
+type DownloadOutcome = "ok" | "offline" | "access_denied" | "missing" | "unknown";
 
 export interface PrepareReceiptPhotoDeps {
   info(uri: string): Promise<{ exists: boolean; size?: number; mtimeMs?: number }>;
@@ -135,6 +135,7 @@ export async function prepareReceiptPhoto(input: {
     owner.assertStillOwner();
     if (downloaded === "access_denied") return { status: "unavailable", reason: "access_denied" };
     if (downloaded === "missing") return { status: "unavailable", reason: "missing_local" };
+    if (downloaded === "unknown") return { status: "unavailable", reason: "unknown" };
     if (downloaded !== "ok") return { status: "unavailable", reason: "offline" };
     staged = true;
     await openEnvelopeBeforeValidation(deps, staging, owner);
@@ -254,11 +255,18 @@ function defaultPrepareDeps(
       if (!isObjectOwnedByUser(uid, storagePath)) return "access_denied";
       assertStillOwner();
       try {
-        const { getDownloadUrlForPath } = await import("@/services/storage/userStorage");
-        const url = await getDownloadUrlForPath(storagePath);
+        const { readOwnedObject } = await import("@/services/storage/userStorage");
+        const opened = await readOwnedObject(storagePath);
         assertStillOwner();
-        if (!url) return "offline";
-        const result = await FileSystem.downloadAsync(url, destUri);
+        if (!opened.ok) {
+          if (opened.code === "denied" || opened.code === "unsupported") return "access_denied";
+          if (opened.code === "not_found") return "missing";
+          if (opened.code === "unknown" || opened.code === "conflict" || opened.code === "expired" || opened.code === "type") {
+            return "unknown";
+          }
+          return "offline";
+        }
+        const result = await FileSystem.downloadAsync(opened.ticket.url, destUri);
         if (result.status === 401 || result.status === 403) return "access_denied";
         if (result.status !== 200) return "offline";
         return "ok";

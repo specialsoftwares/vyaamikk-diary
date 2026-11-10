@@ -470,9 +470,9 @@ export async function runFinalAccountPurge(uid: string): Promise<FinalPurgeResul
     }
 
     // P8 GRIN gate: independent of diary phase-done flags.
-    // Skipped while INCLUDE_GRIN_IN_ACCOUNT_PURGE is false (current production).
-    // After an owner live grant + flag flip, in-flight jobs that already
-    // finished diary storage/firestore still purge GRIN before indexes/Auth.
+    // Approved version-2 jobs include GRIN even while the legacy opt-in flag
+    // stays false. A true flag additionally includes legacy jobs. This phase
+    // remains required after diary completion and before indexes/Auth removal.
     const grinRequired =
       INCLUDE_GRIN_IN_ACCOUNT_PURGE || Number(job.deletionPolicyVersion) >= 2;
     let grinCompleted = !INCLUDE_GRIN_IN_ACCOUNT_PURGE;

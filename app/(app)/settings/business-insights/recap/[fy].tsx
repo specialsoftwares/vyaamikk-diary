@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 
 import type { FyRecapSnapshot } from "@/domain/businessInsight";
-import { Header, Loader, Screen, LocaleUiText } from "@/components/ui";
+import { Header, Screen, SkeletonList, SkeletonLoadingPanel, LocaleUiText } from "@/components/ui";
 import { useAuth } from "@/state/auth";
 import { useT } from "@/i18n";
 import { formatFinancialYearLabel } from "@/utils/financialYear";
@@ -18,17 +18,38 @@ export default function FyRecapScreen() {
   const fyStart = Number(fy);
   const [snap, setSnap] = useState<FyRecapSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
+  const userId = user?.uid ?? null;
+  const ownerRef = useRef(userId);
+  if (ownerRef.current !== userId) {
+    ownerRef.current = userId;
+    if (snap) setSnap(null);
+    if (userId && !loading) setLoading(true);
+  }
 
   useEffect(() => {
-    if (!user?.uid || !Number.isFinite(fyStart)) {
+    let cancelled = false;
+    if (!userId || !Number.isFinite(fyStart)) {
+      setSnap(null);
       setLoading(false);
       return;
     }
-    void loadFyRecapSnapshot(user.uid, fyStart).then((s) => {
-      setSnap(s);
-      setLoading(false);
-    });
-  }, [user?.uid, fyStart]);
+    setLoading(true);
+    void loadFyRecapSnapshot(userId, fyStart).then(
+      (s) => {
+        if (cancelled || ownerRef.current !== userId) return;
+        setSnap(s);
+        setLoading(false);
+      },
+      () => {
+        if (cancelled || ownerRef.current !== userId) return;
+        setSnap(null);
+        setLoading(false);
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, fyStart]);
 
   const styles = useThemedStyles((c) =>
     StyleSheet.create({
@@ -53,8 +74,10 @@ export default function FyRecapScreen() {
         showBack
         onBackPress={() => router.back()}
       />
-      {loading ? (
-        <Loader message={t("common.loading")} />
+      {loading && !snap ? (
+        <SkeletonLoadingPanel loading slowMessage={t("skeleton.stillLoading")}>
+          <SkeletonList count={5} />
+        </SkeletonLoadingPanel>
       ) : !snap ? (
         <LocaleUiText style={styles.status}>{t("businessInsights.recapUnavailable")}</LocaleUiText>
       ) : (

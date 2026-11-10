@@ -3,6 +3,7 @@ import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-na
 
 import { spacing, typography, useThemedStyles } from "@/theme";
 
+import { skeletonPanelMode } from "./skeletonPanelMode";
 import { useLoadingSlowWarning } from "./useLoadingSlowWarning";
 
 export interface SkeletonLoadingPanelProps {
@@ -12,9 +13,13 @@ export interface SkeletonLoadingPanelProps {
   style?: StyleProp<ViewStyle>;
 }
 
+export { skeletonPanelMode } from "./skeletonPanelMode";
+export type { SkeletonPanelMode } from "./skeletonPanelMode";
+
 /**
- * Shows skeleton children while `loading`; after ~6.5s shows a slow-load message instead.
- * Does not render when `loading` is false.
+ * Shows skeleton children while `loading`.
+ * After ~6.5s, keeps those children and adds a slow-load message.
+ * Renders nothing when `loading` is false — children are the skeleton, not page content.
  */
 export const SkeletonLoadingPanel = memo(function SkeletonLoadingPanel({
   loading,
@@ -23,6 +28,7 @@ export const SkeletonLoadingPanel = memo(function SkeletonLoadingPanel({
   style,
 }: SkeletonLoadingPanelProps) {
   const slow = useLoadingSlowWarning(loading);
+  const mode = skeletonPanelMode(loading, slow, false);
   const styles = useThemedStyles((c) =>
     StyleSheet.create({
       slowWrap: {
@@ -39,15 +45,16 @@ export const SkeletonLoadingPanel = memo(function SkeletonLoadingPanel({
     })
   );
 
-  if (!loading) return null;
+  if (mode === "hidden" || mode === "content") return null;
 
-  if (slow) {
-    return (
-      <View style={[styles.slowWrap, style]}>
-        <Text style={styles.slowText}>{slowMessage}</Text>
-      </View>
-    );
-  }
-
-  return <View style={style}>{children}</View>;
+  return (
+    <View style={style}>
+      {children}
+      {mode === "skeleton-and-slow" ? (
+        <View style={styles.slowWrap} accessibilityLiveRegion="polite">
+          <Text style={styles.slowText}>{slowMessage}</Text>
+        </View>
+      ) : null}
+    </View>
+  );
 });

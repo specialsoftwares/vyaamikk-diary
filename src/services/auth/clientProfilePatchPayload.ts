@@ -12,8 +12,6 @@ export const CLIENT_PROFILE_PATCH_ALLOWLIST = [
   "businessName",
   "workType",
   "designation",
-  "businessEmail",
-  "normalizedEmail",
   "language",
   "profileCompletedAt",
   "ueidReleasedAt",
@@ -75,6 +73,17 @@ export const SERVER_OWNED_PROFILE_PATCH_KEYS = [
 ] as const;
 
 /**
+ * Device-only demographic answers. They are stripped from client patches so a
+ * band cannot be uploaded or rewritten as `ageEligibility`. Stripping does not
+ * reject the rest of the patch, so profile save is not blocked on this field.
+ */
+const DEMOGRAPHIC_NON_UPLOAD_KEYS = [
+  "demographicAgeBand",
+  "demographicAgeRange",
+  "demographicAge",
+] as const;
+
+/**
  * Email identity fields bound server-side in production (`verifyAndBindEmail`).
  * Shared-dev and local-mock may still write these via the legacy merge path.
  */
@@ -115,6 +124,9 @@ export function stripServerOwnedProfilePatchKeys(
 ): ProfilePatch {
   const out: ProfilePatch = { ...patch };
   for (const key of SERVER_OWNED_PROFILE_PATCH_KEYS) {
+    delete (out as Record<string, unknown>)[key];
+  }
+  for (const key of DEMOGRAPHIC_NON_UPLOAD_KEYS) {
     delete (out as Record<string, unknown>)[key];
   }
   if (options?.production) {
@@ -171,6 +183,22 @@ export function buildClientProfileFirestoreWrite(
   if (Object.keys(payload).length === 0) return null;
   payload.updatedAt = next.updatedAt;
   return payload;
+}
+
+const CONSENT_ONLY_PATCH_KEYS = new Set(["legalConsents", "updatedAt"]);
+
+/**
+ * True only when the patch carries legal consent and no business or other
+ * profile fields. `updatedAt` may ride along; it is not a sensitive field.
+ */
+export function isConsentOnlyProfilePatch(patch: ProfilePatch): boolean {
+  let sawConsent = false;
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === undefined) continue;
+    if (key === "legalConsents") sawConsent = true;
+    if (!CONSENT_ONLY_PATCH_KEYS.has(key)) return false;
+  }
+  return sawConsent;
 }
 
 /** Shape of the legacy full-document merge (pre-remediation) for rules tests. */

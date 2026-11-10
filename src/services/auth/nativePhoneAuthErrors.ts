@@ -159,7 +159,7 @@ export function mapPhoneAuthFailure(
     case "auth/operation-not-allowed":
       appErrorCode = "auth_not_configured";
       userMessage =
-        "Phone sign-in is not enabled for this Firebase project. Contact support.";
+        "Phone sign-in is unavailable right now. Please contact support.";
       break;
     case "auth/app-not-authorized":
     case "auth/invalid-app-credential":
@@ -169,7 +169,7 @@ export function mapPhoneAuthFailure(
       appErrorCode = phase === "send" ? "otp_send_failed" : "auth_failed";
       if (phase === "send") {
         userMessage =
-          "Could not verify this app for phone sign-in on this device. On a physical phone use real SMS; for emulator development use a Firebase Console test phone number with test mode enabled.";
+          "Could not verify this app for phone sign-in on this device. Update the app and try again. If this continues, contact support.";
       } else {
         userMessage = "Sign-in failed. Please try again.";
       }
@@ -216,10 +216,8 @@ export function phoneAuthDiagnosticId(error: unknown): string | null {
  * Never includes Firebase codes, exception class, activity, or raw phone.
  */
 export function formatPhoneAuthDisplayMessage(error: unknown): string {
-  if (!(error instanceof AppError)) {
-    return mapPhoneAuthFailure(error, "send").userMessage;
-  }
-  return toPublicError(error, "phone").message;
+  const classified = error instanceof AppError ? error : phoneAuthFailureToAppError(error, "send");
+  return toPublicError(classified, "phone").message;
 }
 
 export function formatPhoneAuthCopyDiagnostics(error: unknown): string {

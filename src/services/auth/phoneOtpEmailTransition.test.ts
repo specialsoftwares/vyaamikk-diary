@@ -1,3 +1,6 @@
+import { randomBytes } from "node:crypto";
+import { __setNativeSecureRandomForTests } from "@/services/accountDeletion/nativeSecureRandom";
+__setNativeSecureRandomForTests((length) => new Uint8Array(randomBytes(length)));
 /**
  * Ordering evidence for the phone-OTP to email transition.
  * Deferred promises prove sequence. They are not device timings.
@@ -19,6 +22,7 @@ import {
   savePendingConsentValue,
   type PendingConsentStorage,
 } from "@/services/consent/pendingConsentKey";
+import { createPhoneAuthOperations } from "@/auth-v2/phoneAuthOperation";
 import {
   continueAfterPhoneProfileTransition,
   retryAuthenticatedAccountSetup,
@@ -337,8 +341,10 @@ async function main() {
   const updateStart = firebase.indexOf("async updateProfile");
   const updateEnd = firebase.indexOf("async startMobileChange", updateStart);
   const update = firebase.slice(updateStart, updateEnd);
-  assert.match(update, /userProfileWriteNeedsSeal/);
-  assert.match(update, /if \(needsSeal\)/);
+  assert.match(update, /updateProfileWithIo/);
+  const writer = firebase.slice(firebase.indexOf("export async function updateProfileWithIo"), firebase.indexOf("export const FirebaseAuthService"));
+  assert.match(writer, /userProfileWriteNeedsSeal/);
+  assert.match(writer, /if \(needsSeal\)/);
   assert.match(update, /protectBusinessCloud/);
 
   const email = readFileSync(join(root, "services/auth/emailVerificationService.ts"), "utf8");
@@ -394,6 +400,7 @@ async function main() {
 
   let resolveCalls = 0;
   const inactive = await retryAuthenticatedAccountSetup({
+    ops: createPhoneAuthOperations(),
     phoneE164: profile.phoneE164,
     inFlight: false,
     readLive: () => ({ uid: null, generation: 4 }),
@@ -423,6 +430,7 @@ async function main() {
   let retriedProfile = false;
   let continuedGeneration = -1;
   const accountRetry = retryAuthenticatedAccountSetup({
+    ops: createPhoneAuthOperations(),
     phoneE164: profile.phoneE164,
     inFlight: false,
     readLive: () => opening,
@@ -472,6 +480,7 @@ async function main() {
     let navigated = 0;
     let cleared = false;
     const pendingRetry = retryAuthenticatedAccountSetup({
+      ops: createPhoneAuthOperations(),
       phoneE164: profile.phoneE164,
       inFlight: false,
       readLive: () => live,
@@ -534,6 +543,7 @@ async function main() {
   await savePendingConsentValue(consentStorage, JSON.stringify(retained));
   let foreignPublished = 0;
   const foreignProfile = await retryAuthenticatedAccountSetup({
+    ops: createPhoneAuthOperations(),
     phoneE164: profile.phoneE164,
     inFlight: false,
     readLive: () => ({ uid: profile.uid, generation: 4 }),

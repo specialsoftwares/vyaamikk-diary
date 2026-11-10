@@ -131,6 +131,7 @@ const MESSAGE_EVENTS = new Map<string, MessageMapping>([
   ],
   ["auth stage timed", { event: "auth_stage_timed", summary: "auth stage timed" }],
   ["auth failure reported", { event: "auth_failure_reported", summary: "auth failure reported" }],
+  ["phone auth operation", { event: "phone_auth_operation", summary: "phone auth operation" }],
 ]);
 
 const CALLABLE_FAILED_RE = /^callable ([A-Za-z][A-Za-z0-9_]{1,63}) failed$/;
@@ -229,6 +230,7 @@ const FIREBASE_AUTH_CODES = new Set([
   "auth/invalid-email",
   "auth/missing-verification-id",
   "auth/code-expired",
+  "auth/missing-activity",
 ]);
 
 const ALLOWED_OPS = new Set([
@@ -249,6 +251,21 @@ const ALLOWED_KINDS = new Set([
   "cancelled",
   "verified",
   "already_in_flight",
+  "unknown",
+  "rejected",
+  "stale",
+  "local_failed",
+]);
+
+const PHONE_AUTH_STAGES = new Set(["send", "confirm", "account", "session", "cleanup"]);
+
+const REACTIVATION_STAGES = new Set([
+  "handler",
+  "account",
+  "callable",
+  "session",
+  "navigation",
+  "cleanup",
 ]);
 
 const ERROR_CLASSES = new Set<SafeErrorClass>([
@@ -264,6 +281,8 @@ const ERROR_NAMES = new Set(["AppError", "StartupError", "Error", "LocalKeyUnava
 
 const ALLOWED_REGIONS = new Set(["asia-south1"]);
 
+const ANDROID_ACTIVITY_STATES = new Set(["present", "missing", "unknown", "n/a"]);
+
 type FieldSpec = (value: unknown) => SafeMetaValue | undefined;
 
 const META_FIELDS = new Map<string, FieldSpec>([
@@ -276,6 +295,12 @@ const META_FIELDS = new Map<string, FieldSpec>([
   ],
   ["stage", (v) => asAllowedString(v, STARTUP_STAGES)],
   ["kind", (v) => asAllowedString(v, ALLOWED_KINDS)],
+  ["phoneAuthStage", (v) => asAllowedString(v, PHONE_AUTH_STAGES)],
+  ["reactivationStage", (v) => asAllowedString(v, REACTIVATION_STAGES)],
+  [
+    "attemptId",
+    (v) => (typeof v === "string" && /^[0-9a-f]{16}$/.test(v) ? v : undefined),
+  ],
   ["op", (v) => asAllowedString(v, ALLOWED_OPS)],
   ["callableName", (v) => asAllowedString(v, ALLOWED_CALLABLES)],
   ["functionsRegion", (v) => asAllowedString(v, ALLOWED_REGIONS)],
@@ -288,7 +313,7 @@ const META_FIELDS = new Map<string, FieldSpec>([
   ["retryable", (v) => asBoolean(v)],
   ["recoverable", (v) => asBoolean(v)],
   ["available", (v) => asBoolean(v)],
-  ["androidActivity", (v) => asBoolean(v)],
+  ["androidActivity", (v) => asBoolean(v) ?? asAllowedString(v, ANDROID_ACTIVITY_STATES)],
   ["nativeUidPresent", (v) => asBoolean(v)],
   ["jsUidPresent", (v) => asBoolean(v)],
   ["uidsMatch", (v) => asBoolean(v)],
@@ -436,13 +461,173 @@ function classForFirebaseAuth(code: string): SafeErrorClass {
   return "unknown";
 }
 
-export function createSafeDiagnosticError(error: unknown, context?: string): Error {
-  const classified = classifyError(error);
-  const safeContext = classifyContext(context) ?? "app";
-  const safe = new Error(`diagnostic:${classified.class}`);
-  safe.name = "SafeDiagnosticError";
-  safe.stack = `SafeDiagnosticError: diagnostic:${classified.class}\n    at recordError (${safeContext})`;
-  return safe;
+const FRAME_DENY =
+  /@|AIza|Bearer|\beyJ|age_not_admitted|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|\+?\d[\d\s()-]{8,}\d|\d{8,}/i;
+
+const LABEL_RE = /^[A-Za-z][A-Za-z0-9_./-]{0,63}$/;
+const CORRELATION_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{7,63}$/;
+const CODE_TOKEN_RE = /^[A-Za-z0-9_./-]{1,64}$/;
+
+function isSafeLabel(value: string): boolean {
+  if (!LABEL_RE.test(value)) return false;
+  if (value.includes("..") || value.includes("@") || value.includes("\\")) return false;
+  if (/(^|\/)(Users|home|node_modules)(\/|$)/.test(value)) return false;
+  if (FRAME_DENY.test(value)) return false;
+  return true;
+}
+
+function allowDiagnosticLabel(context: string | undefined): string {
+  try {
+    if (typeof context !== "string") return "app";
+    if (
+      (ALLOWED_CONTEXTS.has(context) ||
+        ALLOWED_OPS.has(context) ||
+        ALLOWED_SCOPES.has(context)) &&
+      isSafeLabel(context)
+    ) {
+      return context;
+    }
+    return "app";
+  } catch {
+    return "app";
+  }
+}
+
+function safeCodeToken(code: string | null): string {
+  if (
+    code &&
+    code !== "age_not_admitted" &&
+    CODE_TOKEN_RE.test(code) &&
+    !code.includes("..") &&
+    !FRAME_DENY.test(code)
+  ) {
+    return code;
+  }
+  return "unknown";
+}
+
+function newCorrelationId(): string {
+  try {
+    const bytes = new Uint8Array(16);
+    const cryptoObj = globalThis.crypto;
+    if (cryptoObj && typeof cryptoObj.getRandomValues === "function") {
+      cryptoObj.getRandomValues(bytes);
+    } else {
+      for (let i = 0; i < bytes.length; i += 1) {
+        bytes[i] = Math.floor(Math.random() * 256);
+      }
+    }
+    const alphabet = "abcdefghjkmnpqrstuvwxyz";
+    let id = "c";
+    for (let i = 0; i < 20; i += 1) {
+      id += alphabet[(bytes[i % bytes.length] ?? 0) % alphabet.length];
+    }
+    return id;
+  } catch {
+    return "cfallbackcorrelationid";
+  }
+}
+
+function acceptCorrelationId(passed: string | undefined): string {
+  if (
+    typeof passed === "string" &&
+    CORRELATION_RE.test(passed) &&
+    !passed.includes("@") &&
+    !passed.includes("/") &&
+    !FRAME_DENY.test(passed)
+  ) {
+    return passed;
+  }
+  return newCorrelationId();
+}
+
+function readStack(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null) return undefined;
+  try {
+    const desc = Object.getOwnPropertyDescriptor(error, "stack");
+    if (desc && typeof desc.get !== "function" && typeof desc.value === "string") {
+      return desc.value;
+    }
+    if (error instanceof Error) {
+      const stack = error.stack;
+      return typeof stack === "string" ? stack : undefined;
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
+function normaliseFrame(line: string): string | null {
+  if (!/^\s*at\s+\S/.test(line)) return null;
+  if (line.includes("node_modules") || FRAME_DENY.test(line)) return null;
+  let next = line.replace(/\/Users\/[^/\s]+/g, "");
+  next = next.replace(/\/home\/[^/\s]+/g, "");
+  next = next.replace(/[A-Za-z]:\\Users\\[^\\\s]+/g, "");
+  next = next.replace(/\?[^)\s]*/g, "");
+  if (next.includes("node_modules") || /\/Users\/|\/home\//.test(next) || FRAME_DENY.test(next)) {
+    return null;
+  }
+  if (!/(?:^|[^\w.-])(src|app)\//.test(next)) return null;
+  return `    ${next.trim()}`;
+}
+
+function buildSafeStack(
+  originalStack: string | undefined,
+  errorClass: string,
+  code: string,
+  context: string,
+  correlationId: string
+): string {
+  const header = `SafeDiagnosticError: diagnostic:${errorClass}`;
+  const meta = `    code=${code} context=${context} correlation=${correlationId}`;
+  const frames: string[] = [];
+  if (typeof originalStack === "string") {
+    for (const line of originalStack.split("\n")) {
+      const kept = normaliseFrame(line);
+      if (!kept) continue;
+      frames.push(kept);
+      if (frames.length >= 12) break;
+    }
+  }
+  if (frames.length === 0) {
+    frames.push(`    at ${code} (${context})`);
+  }
+  return [header, meta, ...frames].join("\n");
+}
+
+export type SafeDiagnosticError = Error & {
+  code: string;
+  context: string;
+  correlationId: string;
+};
+
+export function createSafeDiagnosticError(
+  error: unknown,
+  context?: string,
+  correlationId?: string
+): SafeDiagnosticError {
+  try {
+    const classified = classifyError(error);
+    const safeContext = allowDiagnosticLabel(context);
+    const code = safeCodeToken(classified.code);
+    const correlation = acceptCorrelationId(correlationId);
+    const safe = new Error(`diagnostic:${classified.class}`) as SafeDiagnosticError;
+    safe.name = "SafeDiagnosticError";
+    safe.code = code;
+    safe.context = safeContext;
+    safe.correlationId = correlation;
+    safe.stack = buildSafeStack(readStack(error), classified.class, code, safeContext, correlation);
+    return safe;
+  } catch {
+    const safe = new Error("diagnostic:unknown") as SafeDiagnosticError;
+    safe.name = "SafeDiagnosticError";
+    safe.code = "unknown";
+    safe.context = "app";
+    safe.correlationId = "cfallbackcorrelationid";
+    safe.stack = "SafeDiagnosticError: diagnostic:unknown\n    code=unknown context=app correlation=cfallbackcorrelationid\n    at unknown (app)";
+    return safe;
+  }
 }
 
 function sanitizePlainObject(value: object): Record<string, SafeMetaValue> {
