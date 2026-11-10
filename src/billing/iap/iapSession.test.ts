@@ -175,7 +175,7 @@ function createHarness(args: {
     async validateAndActivateAndroid(input) {
       calls.validateAndroid.push(input);
       if (args.validateAndActivateAndroid) return args.validateAndActivateAndroid(input);
-      return { alreadyProcessed: false, acknowledged: true };
+      return { alreadyProcessed: false, acknowledged: true, entitlementActive: true };
     },
     async prepareIOSBillingAccount() {
       calls.prepareIos += 1;
@@ -185,7 +185,7 @@ function createHarness(args: {
     async validateAndActivateIOS(input) {
       calls.validateIos.push(input);
       if (args.validateAndActivateIOS) return args.validateAndActivateIOS(input);
-      return { alreadyProcessed: false };
+      return { alreadyProcessed: false, entitlementActive: true };
     },
   };
 
@@ -382,14 +382,14 @@ async function testFailedStoreQueryDoesNotValidate() {
       },
       async validateAndActivateAndroid() {
         validates.push("android");
-        return { alreadyProcessed: false, acknowledged: true };
+        return { alreadyProcessed: false, acknowledged: true, entitlementActive: true };
       },
       async prepareIOSBillingAccount() {
         return { appAccountToken: "22222222-2222-4222-8222-222222222222" };
       },
       async validateAndActivateIOS() {
         validates.push("ios");
-        return { alreadyProcessed: false };
+        return { alreadyProcessed: false, entitlementActive: true };
       },
     },
     store,
@@ -532,7 +532,7 @@ async function testFailedConnectionCatalogIsUnavailableNotEndlessLoading() {
   });
   await h.session.setAuth({ status: "signed_in", uid: "uid-a" });
   const catalog = await h.session.loadCatalog();
-  assert.equal(catalog.length, 9);
+  assert.equal(catalog.length, 11);
   assert.equal(
     catalog.every((row) => row.available === false && row.displayPrice == null),
     true
@@ -1144,7 +1144,7 @@ async function testIosATokenDoesNotContaminateBSession() {
         started();
         await g.wait;
       }
-      return { alreadyProcessed: false };
+      return { alreadyProcessed: false, entitlementActive: true };
     },
   });
   await h.session.setAuth({ status: "signed_in", uid: "uid-a" });
@@ -1452,7 +1452,7 @@ async function testRestoreFirstBlocksPurchaseDuringValidation() {
     validateAndActivateAndroid: async () => {
       started();
       await g.wait;
-      return { alreadyProcessed: false, acknowledged: true };
+      return { alreadyProcessed: false, acknowledged: true, entitlementActive: true };
     },
   });
   await h.session.setAuth({ status: "signed_in", uid: "uid-a" });
@@ -1842,7 +1842,7 @@ async function testStaleProcessorSuccessDoesNotClearNewerPending() {
     validateAndActivateAndroid: async () => {
       started();
       await g.wait;
-      return { alreadyProcessed: false, acknowledged: true };
+      return { alreadyProcessed: false, acknowledged: true, entitlementActive: true };
     },
   });
   await h.session.setAuth({ status: "signed_in", uid: "uid-a" });
@@ -1924,7 +1924,7 @@ async function testDelayedCompensationReadDoesNotDeleteNewerEnvelope() {
     validateAndActivateAndroid: async () => {
       validateStarted();
       await validateG.wait;
-      return { alreadyProcessed: false, acknowledged: true };
+      return { alreadyProcessed: false, acknowledged: true, entitlementActive: true };
     },
   });
   await h.session.setAuth({ status: "signed_in", uid: "uid-a" });
@@ -2176,7 +2176,7 @@ async function testStrayPurchasedEventDoesNotOverwriteLaterPurchase() {
     validateAndActivateAndroid: async () => {
       started();
       await g.wait;
-      return { alreadyProcessed: false, acknowledged: true };
+      return { alreadyProcessed: false, acknowledged: true, entitlementActive: true };
     },
   });
   await h.session.setAuth({ status: "signed_in", uid: "uid-a" });
@@ -2373,7 +2373,7 @@ async function testBackgroundIdleValidationFailureCannotReviveAfterLaterCancel()
         await validateG.wait;
         throw new Error("stale background fail");
       }
-      return { alreadyProcessed: false, acknowledged: true };
+      return { alreadyProcessed: false, acknowledged: true, entitlementActive: true };
     },
   });
   await h.session.setAuth({ status: "signed_in", uid: "uid-a" });
@@ -2424,9 +2424,9 @@ async function testBackgroundIdleValidationSuccessCannotOverwriteLaterCancel() {
       if (validates === 2) {
         secondStarted();
         await validateG.wait;
-        return { alreadyProcessed: false, acknowledged: true };
+        return { alreadyProcessed: false, acknowledged: true, entitlementActive: true };
       }
-      return { alreadyProcessed: false, acknowledged: true };
+      return { alreadyProcessed: false, acknowledged: true, entitlementActive: true };
     },
   });
   await h.session.setAuth({ status: "signed_in", uid: "uid-a" });

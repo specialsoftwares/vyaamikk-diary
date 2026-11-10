@@ -85,19 +85,19 @@ function androidProduct(): StoreProductLike {
     },
   });
   return {
-    id: "vyd_professional",
+    id: "vyd_unlimited",
     type: "subs",
     platform: "android",
     displayPrice: "ignore",
     currency: "INR",
-    subscriptionOffers: [offer("monthly"), offer("quarterly"), offer("yearly")],
+    subscriptionOffers: [offer("monthly"), offer("yearly")],
   };
 }
 
 function yearlyPurchase(): StorePurchase {
   return {
     store: "google",
-    productId: "vyd_professional",
+    productId: "vyd_unlimited",
     purchaseState: "purchased",
     purchaseToken: "verify-fail-token",
     nativePurchase: {},
@@ -207,13 +207,13 @@ function createConnectedRuntime(args: {
     async validateAndActivateAndroid(input) {
       validateAndroidCalls += 1;
       if (args.validateAndActivateAndroid) return args.validateAndActivateAndroid(input);
-      return { alreadyProcessed: false, acknowledged: true };
+      return { alreadyProcessed: false, acknowledged: true, entitlementActive: true };
     },
     async prepareIOSBillingAccount() {
       return { appAccountToken: "22222222-2222-4222-8222-222222222222" };
     },
     async validateAndActivateIOS() {
-      return { alreadyProcessed: false };
+      return { alreadyProcessed: false, entitlementActive: true };
     },
   };
 
@@ -262,7 +262,7 @@ async function run(): Promise<void> {
     );
     assert.equal(opened.ok, true);
 
-    const launched = await h.runtime.purchase("vyd_professional_yearly");
+    const launched = await h.runtime.purchase("vyd_unlimited_yearly");
     assert.equal(launched.kind, "sheet_launched");
     assert.equal(h.purchaseRequests.length, 1);
     const afterLaunch = surface(h.runtime, h.session.getView());
@@ -293,7 +293,7 @@ async function run(): Promise<void> {
     const replay = surface(h.runtime, h.session.getView());
     assert.equal(replay.model.errorMessage, null, "dismissed failure is not replayed");
 
-    const retried = await h.runtime.purchase("vyd_professional_yearly");
+    const retried = await h.runtime.purchase("vyd_unlimited_yearly");
     assert.equal(retried.kind, "sheet_launched");
     assert.equal(h.purchaseRequests.length, 2);
 
@@ -314,7 +314,7 @@ async function run(): Promise<void> {
       notifyOrdinaryQuotaUpsell(quotaReq({ session: sessionA, clientRecordId: "diary_verify" })).ok,
       true
     );
-    const launched = await h.runtime.purchase("vyd_professional_yearly");
+    const launched = await h.runtime.purchase("vyd_unlimited_yearly");
     assert.equal(launched.kind, "sheet_launched");
     h.emitPurchase(yearlyPurchase());
     await until(() => h.session.getView().lastResult?.kind === "failed");
@@ -336,7 +336,7 @@ async function run(): Promise<void> {
       notifyOrdinaryQuotaUpsell(quotaReq({ session: sessionA, clientRecordId: "diary_ab" })).ok,
       true
     );
-    const launched = await h.runtime.purchase("vyd_professional_yearly");
+    const launched = await h.runtime.purchase("vyd_unlimited_yearly");
     assert.equal(launched.kind, "sheet_launched");
 
     await h.session.setAuth({ status: "signed_in", uid: "uid-b" });
@@ -359,7 +359,7 @@ async function run(): Promise<void> {
     assert.equal(bSurface.model.errorMessage, null);
     assert.equal(h.runtime.snapshot().visible, true);
 
-    const bLaunch = await h.runtime.purchase("vyd_professional_monthly");
+    const bLaunch = await h.runtime.purchase("vyd_unlimited_monthly");
     assert.equal(bLaunch.kind, "sheet_launched");
     h.emitError({ code: "billing-unavailable", message: "late A error" });
     await until(
@@ -383,7 +383,7 @@ async function run(): Promise<void> {
       notifyOrdinaryQuotaUpsell(quotaReq({ session: sessionA1, clientRecordId: "logout_iap" })).ok,
       true
     );
-    const launched = await h.runtime.purchase("vyd_professional_yearly");
+    const launched = await h.runtime.purchase("vyd_unlimited_yearly");
     assert.equal(launched.kind, "sheet_launched");
     await h.session.setAuth({ status: "signed_out", uid: null });
     syncSessionOwnership.endSession();
@@ -412,7 +412,7 @@ async function run(): Promise<void> {
       notifyOrdinaryQuotaUpsell(quotaReq({ session: sessionA, clientRecordId: "record_first" })).ok,
       true
     );
-    assert.equal((await h.runtime.purchase("vyd_professional_yearly")).kind, "sheet_launched");
+    assert.equal((await h.runtime.purchase("vyd_unlimited_yearly")).kind, "sheet_launched");
     assert.equal(h.purchaseRequests.length, 1);
     h.runtime.dismiss();
     assert.equal(
@@ -434,7 +434,7 @@ async function run(): Promise<void> {
     );
     assert.equal(h.purchaseRequests.length, 1);
 
-    assert.equal((await h.runtime.purchase("vyd_professional_yearly")).kind, "sheet_launched");
+    assert.equal((await h.runtime.purchase("vyd_unlimited_yearly")).kind, "sheet_launched");
     assert.equal(h.purchaseRequests.length, 2);
     h.emitError({ code: "billing-unavailable", message: "second-sheet error" });
     await until(
@@ -460,7 +460,7 @@ async function run(): Promise<void> {
       notifyOrdinaryQuotaUpsell(quotaReq({ session: sessionA, clientRecordId: "same_record" })).ok,
       true
     );
-    assert.equal((await h.runtime.purchase("vyd_professional_yearly")).kind, "sheet_launched");
+    assert.equal((await h.runtime.purchase("vyd_unlimited_yearly")).kind, "sheet_launched");
     h.runtime.dismiss();
     assert.equal(
       notifyOrdinaryQuotaUpsell(quotaReq({ session: sessionA, clientRecordId: "same_record" })).ok,

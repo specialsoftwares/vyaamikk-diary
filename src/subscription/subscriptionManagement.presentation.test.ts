@@ -198,8 +198,7 @@ assert.equal(isKnownGstStateCode("MH"), false);
     join(dirname(fileURLToPath(import.meta.url)), "../../app/(app)/(tabs)/you.tsx"),
     "utf8"
   );
-  assert.match(youTab, /youDashboardQuotaWarning/);
-  assert.match(youTab, /quotaWarn80/);
+  assert.match(youTab, /LifetimeQuotaMeterBanner/);
   assert.match(youTab, /settings\/subscription/);
   assert.doesNotMatch(youTab, /notifyManualUpgrade/);
   assert.doesNotMatch(youTab, /presentUpgrade/);

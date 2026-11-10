@@ -280,7 +280,7 @@ function testMissingFormattedPriceIsNotASuccessfulCatalogPrice() {
 
 function testUnavailableWhenStoreEmpty() {
   const catalog = mapStoreProductsToCatalog({ platform: "android", products: [] });
-  assert.equal(catalog.length, 9);
+  assert.equal(catalog.length, 11);
   for (const row of catalog) {
     assert.equal(row.available, false);
     assert.equal(row.unavailableReason, "store_not_configured");
