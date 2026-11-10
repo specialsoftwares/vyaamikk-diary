@@ -523,10 +523,82 @@ async function reconcile(): Promise<void> {
   assert.equal(raced.state.removed.some((item) => item.generation === REPLACEMENT), false);
 }
 
+function held(): { promise: Promise<void>; release: () => void } {
+  let release = () => undefined;
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { promise, release };
+}
+
+async function acceptanceVersusCompensation(): Promise<void> {
+  const world = ports();
+  world.state.copyMode = "lost";
+  const begun = await performOwnerObjectTransfer(
+    { uid: UID, operation: "begin", path: LETTER, contentType: "image/png" },
+    world.api
+  );
+  if (!begun.ok || begun.operation !== "begin") throw new Error("begin");
+  world.store(begun.stagingPath, "1", PNG);
+  await performOwnerObjectTransfer({ uid: UID, operation: "commit", attemptId: begun.attemptId }, world.api);
+
+  const acceptanceReady = held();
+  const permitAcceptance = held();
+  const deletionReady = held();
+  const permitDeletion = held();
+  const accepting: OwnerObjectPorts = {
+    ...world.api,
+    async transition(id, from, claim, next) {
+      const snapshot = world.state.attempts.get(id)!;
+      if (next({ ...snapshot }).status === "committed") {
+        acceptanceReady.release();
+        await permitAcceptance.promise;
+      }
+      return world.api.transition(id, from, claim, next);
+    },
+  };
+  const denying: OwnerObjectPorts = {
+    ...world.api,
+    async admitSession() {
+      return false;
+    },
+    async removeGeneration(path, generation) {
+      if (path === LETTER) {
+        deletionReady.release();
+        await permitDeletion.promise;
+      }
+      return world.api.removeGeneration(path, generation);
+    },
+  };
+
+  const acceptedPromise = performOwnerObjectTransfer(
+    { uid: UID, operation: "commit", attemptId: begun.attemptId },
+    accepting
+  );
+  await acceptanceReady.promise;
+  const deniedPromise = performOwnerObjectTransfer(
+    { uid: UID, operation: "commit", attemptId: begun.attemptId },
+    denying
+  );
+  await deletionReady.promise;
+  permitAcceptance.release();
+  const accepted = await acceptedPromise;
+  permitDeletion.release();
+  const denied = await deniedPromise;
+  const retainedGens = generations(world.state, LETTER);
+  assert.equal(accepted.ok && retainedGens.length === 0, false);
+  assert.equal(accepted.ok, false);
+  assert.equal(denied.ok, false);
+  if (!denied.ok) assert.equal(denied.code === "denied" || denied.code === "unknown", true);
+  assert.equal(world.state.attempts.get(begun.attemptId)?.status === "committed", false);
+  assert.equal(retainedGens.includes(OURS), false);
+}
+
 async function main(): Promise<void> {
   await missingBytes();
   await deadlineAndStaleDenial();
   await reconcile();
+  await acceptanceVersusCompensation();
   console.log("ownerObjectTransfer.recovery.test.ts: ok");
 }
 

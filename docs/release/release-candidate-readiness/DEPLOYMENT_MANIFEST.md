@@ -1,8 +1,8 @@
-# Deployment manifest — read on 2026-11-10
+# Deployment manifest — read on 2026-11-10, updated for the transfer-correction source
 
 This is a comparison. Nothing in this document was deployed, built, or changed in Google Cloud.
 
-Read by `support.vyd@specialsoftwares.com`, project `vyaamikk-diary` (number `982505811909`), region `asia-south1`. Candidate tree `8922debe56a5d63bae79ff6db67f80236979dac3`. The function source is the CI-passed head `b34232d8ee352e889a1b4d894e2044a676b04d15`; the later commit only records that pass. Compared with main `695833453b9524b34d4ecc857ebdfa58c0bc04b8`.
+Read by `support.vyd@specialsoftwares.com`, project `vyaamikk-diary` (number `982505811909`), region `asia-south1`. Serving inventory was read on 2026-11-10. The corrected candidate source for this manifest is the transfer-contract head that supersedes `b34232d8ee352e889a1b4d894e2044a676b04d15` (see the execution sheet for the certified SHA after canonical CI). Compared with main `695833453b9524b34d4ecc857ebdfa58c0bc04b8`. Selected build profile: `internal-grin`.
 
 ## What is serving
 
@@ -60,7 +60,19 @@ Forty-nine Gen 2 Cloud Run services. Every one is `ACTIVE`, traffic `100%` on it
 | verifyAndBindEmail | verifyandbindemail-00013-viy | nodejs20 | 2026-09-21 | 0d5712a41fd7 |
 | verifyGstinManual | verifygstinmanual-00001-pic | nodejs20 | 2026-09-21 | f544643586ae |
 
-Candidate exports with no service: `ownerObjectTransfer`, `logoutAllDevices`, `readRestoreAuthorityWatermark`, `recordAgeAssessment`, `recordProcessingPurpose`. The app calls the last three from the identity callable path. `logoutAllDevices` stays behind `LOGOUT_ALL_CONTROL_ENABLED = false`. Deploying `ownerObjectTransfer` does not create the other four.
+## Absent callables versus the selected build
+
+Candidate exports with no Cloud Run service:
+
+| Export | Selected-build disposition | Configuration and rules dependencies |
+| --- | --- | --- |
+| `ownerObjectTransfer` | Required. Production letterhead, attachment, PDF, and GRIN original bytes use this path. | No secret. Shared fractional CPU limits. Attempt docs in `ownerObjectTransfers/{id}` (Admin-only; unmatched client path). Does not replace live Storage rules. |
+| `recordProcessingPurpose` | Required. Crash-diagnostics grant and withdraw go through `callRecordProcessingPurpose`. | No secret. Region `asia-south1`. Writes `users/{uid}/processingPurposes/{purpose}` and `processingPurposeEvents/{operationId}` with the Admin SDK. Withdrawal also calls `projectRestoreAuthority` and notes the deletion job. Candidate Firestore allows owner read of `processingPurposes` and denies client writes. The serving Firestore release has no `processingPurposes` matcher, so a direct client snapshot can fail while the callable still works. Deploying that matcher is a Firestore rules decision, not a Storage rules decision. |
+| `readRestoreAuthorityWatermark` | Not required for `internal-grin`. `eas.json` leaves `EXPO_PUBLIC_RESTORE_ADMISSION_REFRESH` unset, so the JS bridge skips the callable. | Required only for profiles that set that flag (for example `acceptance-android`). Depends on restore-authority projection and `restoreControl` documents that are not in the serving Firestore release. |
+| `recordAgeAssessment` | Not required. The `age-declaration` route is retired and does not collect a date of birth or call this export. Demographic age stays optional on profile details. Do not restore an age authorization gate. | Callable remains exported for a separate functions release if a later product path needs it. |
+| `logoutAllDevices` | Not required. `LOGOUT_ALL_CONTROL_ENABLED` is false, so Settings does not render the control. | Enabling it needs the callable, `authSecurity` cutoff writers, and validated Firestore session cutoff rules. Those candidate session fences are not the serving Firestore release. |
+
+Deploying only `ownerObjectTransfer` does not create the other four and does not make recovery, mailbox, quarantine, GRIN, or purpose-consent corrections serving.
 
 The candidate `engines.node` is `22`. A later deploy of a September `nodejs20` function would move that service to Node 22. Reactivation, GRIN, and owner-content are already Node 22.
 
@@ -97,9 +109,21 @@ Both releases were updated on 2026-10-06. The rules files themselves contain a c
 
 Repository `firestore.rules` is `a936f18dc2877b720084f06906af1c5fccb8f8f4dd79c01ede98dd4cc230d52c` (53057 bytes). Repository `storage.rules` is `97ca9f4e607d2b6c201b9517d812060af5a24038e5eb7578a28ebda69e79120c` (4018 bytes). Neither matches the serving release.
 
-Serving Firestore `isActiveUser` is owner plus `status == active`. The candidate adds session, restore, and deletion checks, and it adds party-ledger, billing, processing-purpose, erasure, and restore matchers. Serving Storage allows owner image writes for letterhead and attachments, owner PDF writes, and GRIN original/derivative creates when the serving reservation helpers pass. GRIN update and delete are already false. The repository Storage file has no `grinEvidence` matcher and uses a different letterhead/attachment write predicate, including the content-seal type.
+### Firestore compatibility (separate from Storage)
 
-Do not deploy either rules file with the function set. Replacing the serving Storage release would remove the GRIN create/read paths and change the direct letterhead, attachment, and PDF contract used by installed clients. A 60-second signed read URL remains usable until it expires; a rules deploy would not revoke one that was already issued.
+Serving Firestore `isActiveUser` is owner plus `status == active`. It does not enforce the candidate's session cutoff, restore fence, or deletion fence. The candidate rules add those checks and add party-ledger, billing, processing-purpose, erasure, and restore matchers. Those candidate protections are source on this branch. They are not the serving release. Do not describe them as live.
+
+A later Firestore rules deploy is a reviewed decision of its own. It is not implied by deploying Functions. Until that decision, Admin-backed callables still write purpose and restore documents, and client reads that depend on undeployed matchers can fail under the serving release.
+
+### Storage compatibility (separate from Firestore)
+
+Serving Storage allows owner image writes for letterhead and attachments, owner PDF writes, and GRIN original/derivative creates when the serving reservation helpers pass. GRIN update and delete are already false. The repository `storage.rules` file has no `grinEvidence` matcher and uses a different letterhead/attachment write predicate, including the content-seal type.
+
+Do not deploy root `storage.rules` with the function set. Replacing the serving Storage release would remove the live GRIN create/read paths and change the direct letterhead, attachment, and PDF contract used by installed clients. A 60-second signed read URL remains usable until it expires; a rules deploy would not revoke one that was already issued.
+
+### Direct-access boundary and release disposition
+
+Installed binaries keep calling Storage directly under the 2026-10-06 Storage release. The `internal-grin` candidate uses `ownerObjectTransfer` for new uploads. That gateway does not change an already installed binary. The release disposition is: leave the serving Storage rules unchanged until a reviewed old-client transition; deploy the scoped Functions set, including `ownerObjectTransfer` and `recordProcessingPurpose`, before expecting the new client path to work; treat candidate Firestore session/restore/processingPurpose matchers as undeployed until their own review.
 
 The default Firestore database is Native mode in `asia-south1`, with delete protection disabled. That setting was not changed.
 
@@ -124,16 +148,13 @@ Deploy together, or the new client still depends on an old bundle:
 - Reactivation: `startAccountReactivation`, `completeAccountReactivation`. Rollback revisions are `00007-vih` and `00008-doh`. Keep the GRIN flag and the mail secret versions.
 - Owner content: `openOwnerContent`, `sealOwnerContent`. Rollback revisions are `00002-ban` and `00002-fey`. Keep `CONTENT_DATA_KEY` version 1.
 - GRIN: the seven `grin*` functions. Rollback revisions are `00004-mux`, `00004-dex`, `00004-fev`, `00004-tuv`, `00004-yom`, `00004-sep`, and `00004-hew`. Keep `GRIN_GOODS_EVIDENCE_FUNCTIONS=true`. Attaching `CONTENT_DATA_KEY` version 1 is expected and is not a rotation.
-- New: `ownerObjectTransfer`, with no previous revision. Rollback is to delete that one service. It has no secret. Source limits are `asia-south1`, `256Mi`, 60 seconds, concurrency 1, max instances 3, and the shared fractional CPU.
+- New, required by `internal-grin`: `ownerObjectTransfer` and `recordProcessingPurpose`, each with no previous revision. Rollback for either is to delete that one service. Neither has a secret. `ownerObjectTransfer` source limits are `asia-south1`, `256Mi`, 60 seconds, concurrency 1, max instances 3, and the shared fractional CPU. `recordProcessingPurpose` is `asia-south1` with default callable resources unless a later review pins them to the fleet limits.
+- Outside this scoped set for `internal-grin`: `readRestoreAuthorityWatermark`, `recordAgeAssessment`, and `logoutAllDevices` stay undeployed until a profile or product path that actually calls them is selected.
 
 Each updated service rolls back by returning 100% traffic to the revision named above. Rules do not move with that traffic change.
 
-## Compatibility
-
-Installed binaries keep using direct Storage under the 2026-10-06 Storage release. The candidate app uses `ownerObjectTransfer` for new letterhead, attachment, PDF, and GRIN original bytes. Until that function is serving, that app path has no backend. The gateway does not change an already installed binary, and it does not cancel a signed URL.
-
 Leaving the September contact-change and new-device revisions in place also leaves them on their current admission bundle. They do not pick up `admitCallableUser` until their own deploy. That deploy is not part of this set.
 
-Adding the fiftieth service consumes another `0.1666 × 3` vCPU at its maximum. The regional quota was not read, so the manifest does not claim the quota has room.
+Adding new services consumes another `0.1666 × 3` vCPU per service at its maximum when pinned to the fleet limits. The regional quota was not read, so the manifest does not claim the quota has room.
 
-Play inventory and the upload certificate were not re-read in this pass. Public release remains HOLD.
+Play inventory and the upload certificate were not re-read in this pass. Version codes 34 and 35 stay unused for this candidate. Public release remains HOLD.

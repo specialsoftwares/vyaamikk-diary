@@ -10,6 +10,10 @@
  * pending and the result is unknown. The deadline does not mean the object
  * was deleted. An expired attempt, which the server reaches only when no
  * bytes were published, may be replaced by a later begin.
+ * A same-account session replacement after begin or commit keeps the existing
+ * attempt id. The current session commits that attempt and accepts the result
+ * only when path, generation, and size match. It does not abort a committed or
+ * publishing attempt. A different account never adopts that attempt.
  */
 
 import {
@@ -188,17 +192,27 @@ export function createOwnerObjectGateway(ports: OwnerObjectGatewayPorts) {
       const flightKey = input.storagePath;
       const localBytes = input.bytes ? input.bytes.byteLength : await ports.localBytes(input.localUri ?? "");
       if (!still()) throw new StorageUploadOwnershipError();
+      const ownsPath = Boolean(userId) && input.storagePath.startsWith(`users/${userId}/`);
       const flight = inflight.get(flightKey);
-      if (flight && flight.attemptId !== (input.attemptId || pending.get(pendingKey) || "")) {
+      let attemptId = input.attemptId || pending.get(pendingKey) || "";
+      if (!attemptId && flight) {
         const sameSession = session === undefined || flight.sessionGeneration === (session?.generation ?? null);
-        if (!sameSession) {
+        if (sameSession || ownsPath) {
+          attemptId = flight.attemptId;
+          if (flight.pendingKey !== pendingKey) pending.delete(flight.pendingKey);
+          pending.set(pendingKey, attemptId);
+          inflight.set(flightKey, {
+            attemptId,
+            pendingKey,
+            sessionGeneration: session === undefined ? flight.sessionGeneration : session?.generation ?? null,
+          });
+        } else {
           const cleanup = await abortAttempt(flight.attemptId);
           if (cleanup !== "aborted") throw new OwnerObjectTransferError("unknown", flight.attemptId, true);
           pending.delete(flight.pendingKey);
           inflight.delete(flightKey);
         }
       }
-      let attemptId = input.attemptId || pending.get(pendingKey) || "";
       if (!attemptId) {
         const begun = await call(
           {

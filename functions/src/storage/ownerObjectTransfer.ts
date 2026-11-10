@@ -18,11 +18,15 @@
  * 6. Copy that generation only, destination ifGenerationMatch "0".
  *    The dispatch is recorded before the copy, so a lost response is still
  *    reconciled on the same attempt.
- * 7. Recheck the same authority. If it failed after a proven publish, delete
- *    only that generation. An uncertain delete stays `publishing` with the
+ * 7. Recheck the same authority. If it failed after a proven publish, claim
+ *    compensation for that generation transactionally. Acceptance and
+ *    compensation are mutually exclusive: a commit cannot succeed after
+ *    compensation is claimed, and deletion cannot proceed after the attempt
+ *    has been committed. An uncertain delete stays `publishing` with the
  *    generation recorded. It does not mark the attempt failed or remove a
  *    different generation.
- * 8. Record `committed` only while the publication claim still matches.
+ * 8. Record `committed` only while the publication claim still matches and
+ *    compensation has not been claimed.
  * An unknown copy leaves the attempt `publishing`. The same attempt id is
  * retried. A destination generation is accepted only when a generation-bound
  * read carries this attempt id and the full-content hash. An unversioned
@@ -586,19 +590,31 @@ async function compensatePublished(
 ): Promise<TransferResult> {
   let current = attempt;
   if (!current.compensationGeneration && proven) {
-    const noted = await ports.transition(current.attemptId, ["publishing"], current.publicationClaim, (existing) => ({
-      ...existing,
-      compensationGeneration: proven.generation,
-    }));
+    const noted = await ports.transition(current.attemptId, ["publishing"], current.publicationClaim, (existing) => {
+      if (existing.status === "committed") return existing;
+      if (existing.compensationGeneration && existing.compensationGeneration !== proven.generation) return existing;
+      return {
+        ...existing,
+        compensationGeneration: proven.generation,
+      };
+    });
     if (!noted.applied || !noted.attempt) {
       if (noted.attempt?.status === "failed") return fail("denied");
       if (noted.attempt?.status === "committed") return committedResult(noted.attempt);
       return fail("unknown", true);
     }
+    if (noted.attempt.status === "committed") return committedResult(noted.attempt);
+    if (noted.attempt.compensationGeneration !== proven.generation) return fail("unknown", true);
     current = noted.attempt;
   }
   const generation = current.compensationGeneration;
   if (!generation || !current.stagingGeneration) return fail("unknown", true);
+  const latest = await ports.readAttempt(current.attemptId);
+  if (!latest) return fail("unknown", true);
+  if (latest.status === "committed") return committedResult(latest);
+  if (latest.status !== "publishing" || latest.compensationGeneration !== generation) {
+    return fail("unknown", true);
+  }
   const bound = await ports.readGeneration(current.path, generation);
   if (bound) {
     if (!ownsPublished(current, bound, generation)) return fail("unknown", true);
@@ -607,15 +623,30 @@ async function compensatePublished(
   }
   const stillThere = await ports.readGeneration(current.path, generation);
   if (stillThere) return fail("unknown", true);
+  const afterDelete = await ports.readAttempt(current.attemptId);
+  if (!afterDelete) return fail("unknown", true);
+  if (afterDelete.status === "committed") return fail("unknown", true);
+  if (afterDelete.status === "failed") return fail("denied");
+  if (afterDelete.status !== "publishing" || afterDelete.compensationGeneration !== generation) {
+    return fail("unknown", true);
+  }
   const staging = await ports.removeGeneration(current.stagingPath, current.stagingGeneration);
   if (staging !== "removed" && staging !== "missing") return fail("unknown", true);
-  const failed = await ports.transition(current.attemptId, ["publishing"], current.publicationClaim, (existing) => ({
-    ...existing,
-    status: "failed",
-    publicationClaim: null,
-  }));
-  if (!failed.applied) {
+  const failed = await ports.transition(current.attemptId, ["publishing"], current.publicationClaim, (existing) => {
+    if (existing.compensationGeneration !== generation) return existing;
+    return {
+      ...existing,
+      status: "failed",
+      publicationClaim: null,
+    };
+  });
+  if (!failed.applied || !failed.attempt) {
     if (failed.attempt?.status === "failed") return fail("denied");
+    if (failed.attempt?.status === "committed") return fail("unknown", true);
+    return fail("unknown", true);
+  }
+  if (failed.attempt.status !== "failed") {
+    if (failed.attempt.status === "committed") return fail("unknown", true);
     return fail("unknown", true);
   }
   return fail("denied");
@@ -626,19 +657,28 @@ async function acceptPublished(
   ports: OwnerObjectPorts,
   published: { generation: string; size: number }
 ): Promise<TransferResult> {
+  if (attempt.compensationGeneration) return compensatePublished(attempt, ports, published);
   if (!(await publicationAllowed(attempt, ports))) return compensatePublished(attempt, ports, published);
-  const done = await ports.transition(attempt.attemptId, ["publishing"], attempt.publicationClaim, (current) => ({
-    ...current,
-    status: "committed",
-    publishedGeneration: published.generation,
-    publishedSize: published.size,
-    publicationClaim: null,
-  }));
+  const done = await ports.transition(attempt.attemptId, ["publishing"], attempt.publicationClaim, (current) => {
+    if (current.compensationGeneration) return current;
+    return {
+      ...current,
+      status: "committed",
+      publishedGeneration: published.generation,
+      publishedSize: published.size,
+      publicationClaim: null,
+    };
+  });
   if (!done.applied || !done.attempt) {
     if (done.attempt?.status === "committed" && done.attempt.publishedGeneration === published.generation) {
       await ports.removeGeneration(attempt.stagingPath, attempt.stagingGeneration ?? "");
       return committedResult(done.attempt);
     }
+    if (done.attempt?.compensationGeneration) return compensatePublished(done.attempt, ports, published);
+    return fail("unknown", true);
+  }
+  if (done.attempt.status !== "committed") {
+    if (done.attempt.compensationGeneration) return compensatePublished(done.attempt, ports, published);
     return fail("unknown", true);
   }
   await ports.removeGeneration(attempt.stagingPath, attempt.stagingGeneration ?? "");

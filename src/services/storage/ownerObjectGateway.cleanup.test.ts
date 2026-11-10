@@ -107,6 +107,69 @@ async function main(): Promise<void> {
   assert.equal(sessionCalls.filter((operation) => operation === "begin").length, 1);
   assert.equal(sessionCalls.includes("commit"), false);
 
+  syncSessionOwnership.resetForTests();
+  const firstSession = syncSessionOwnership.beginSession("owner-a");
+  let liveSession = firstSession;
+  let rotateAfterCommit = true;
+  const recoveredCalls: string[] = [];
+  const recovered = createOwnerObjectGateway({
+    waitMs: 40,
+    async call(data) {
+      recoveredCalls.push(String(data.operation));
+      if (data.operation === "begin") {
+        return { ok: true, attemptId: "d".repeat(32), uploadUrl: "https://upload.test/staging", requiredHeaders: HEADERS };
+      }
+      if (data.operation === "abort") {
+        throw Object.assign(new Error("object_conflict"), { code: "aborted" });
+      }
+      if (data.operation === "commit") {
+        const response = {
+          ok: true as const,
+          path: PATH,
+          generation: "9007199254740993",
+          size: 4,
+          contentType: "image/png",
+        };
+        if (rotateAfterCommit) {
+          rotateAfterCommit = false;
+          liveSession = syncSessionOwnership.beginSession("owner-a");
+        }
+        return response;
+      }
+      return { ok: true };
+    },
+    async put() {
+      return 200;
+    },
+    async localBytes() {
+      return 4;
+    },
+  });
+  const lostAck = await recovered
+    .upload({
+      storagePath: PATH,
+      contentType: "image/png",
+      localUri: "file:///tmp/logo.png",
+      userId: "owner-a",
+      session: firstSession,
+    })
+    .then(
+      () => null,
+      (error: unknown) => error
+    );
+  assert.ok(lostAck instanceof StorageUploadOwnershipError);
+  const adopted = await recovered.upload({
+    storagePath: PATH,
+    contentType: "image/png",
+    localUri: "file:///tmp/logo.png",
+    userId: "owner-a",
+    session: liveSession,
+  });
+  assert.equal(adopted.generation, "9007199254740993");
+  assert.equal(recoveredCalls.filter((operation) => operation === "begin").length, 1);
+  assert.equal(recoveredCalls.filter((operation) => operation === "abort").length, 0);
+  assert.equal(recoveredCalls.filter((operation) => operation === "commit").length, 2);
+
   console.log("ownerObjectGateway.cleanup.test.ts: ok");
 }
 
