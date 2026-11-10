@@ -192,6 +192,25 @@ async function main() {
     );
     check("client emailLinkedAt change denied", true);
 
+    await assertFails(
+      updateDoc(doc(authedDb("email-guard"), "users", "email-guard"), {
+        businessEmail: "attacker@example.com",
+        normalizedEmail: "attacker@example.com",
+        updatedAt: Date.now(),
+      })
+    );
+    check("client verified-email address change denied", true);
+
+    await assertSucceeds(
+      updateDoc(doc(authedDb("email-guard"), "users", "email-guard"), {
+        businessName: "Kept Shop",
+        workType: "trade",
+        designation: "owner",
+        updatedAt: Date.now(),
+      })
+    );
+    check("ordinary profile fields stay editable", true);
+
     // --- Legacy W4/W8 enrichment payload denied ---
     await assertFails(
       setDoc(

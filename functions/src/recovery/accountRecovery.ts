@@ -8,12 +8,14 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { getAdminAuth, getAdminDb } from "../admin";
 import {
   createOrRotateEmailChallenge,
+  EMAIL_BINDINGS,
   PENDING_COLLECTION,
   throwEmailOtpError,
   USERS,
   type ChallengeDoc,
 } from "../email/challengeService";
 import { verifyEmailOtpDigest } from "../email/otpCrypto";
+import { resolveVerifiedMailbox } from "../email/verifiedMailbox";
 import { EMAIL_OTP_USER_MESSAGES } from "../email/otpPolicy";
 import { resolveEmailProvider } from "../email/provider";
 import { EMAIL_OTP_RUNTIME_SECRETS } from "../email/secrets";
@@ -23,6 +25,12 @@ import {
   sha256MobileHash,
 } from "../identity/mobileQuarantine";
 import { normalizePhoneE164 } from "../identity/shared";
+import {
+  assessPhoneProof,
+  phoneProofProjectId,
+  PHONE_FACTOR_PROOFS,
+  readPhoneProofClaims,
+} from "../identity/phoneFactorProof";
 import { assertAdmittedCallableUser } from "../identity/admitCallableUser";
 
 const RECOVERY_SESSIONS = "accountRecoverySessions";
@@ -128,8 +136,38 @@ export const startAccountRecovery = onCall(emailOtpCallOpts, async (request) => 
   if (!userSnap.exists) throwEmailOtpError("FORBIDDEN", "permission-denied");
   const user = userSnap.data() as Record<string, unknown>;
 
-  if (user.emailStatus !== "verified" || !user.normalizedEmail) {
-    throwEmailOtpError("EMAIL_VERIFICATION_REQUIRED");
+  const bindingHash = String(user.emailHash ?? "");
+  const bindingSnap = bindingHash
+    ? await db.collection(EMAIL_BINDINGS).doc(bindingHash).get()
+    : null;
+  const mailbox = resolveVerifiedMailbox(
+    {
+      uid,
+      emailStatus: user.emailStatus,
+      normalizedEmail: user.normalizedEmail,
+      emailHash: user.emailHash,
+      emailBindingVersion: user.emailBindingVersion,
+    },
+    bindingSnap?.exists ? (bindingSnap.data() as Record<string, unknown>) : null
+  );
+  if (!mailbox.ok) {
+    if (mailbox.outcome === "verification_required") {
+      throwEmailOtpError("EMAIL_VERIFICATION_REQUIRED");
+    }
+    const caseId = randomBytes(8).toString("hex");
+    await db.collection(SUPPORT_CASES).doc(caseId).set({
+      caseId,
+      uid,
+      status: "open",
+      reason: mailbox.reason,
+      createdAt: Date.now(),
+    });
+    return {
+      mode: "manual_support" as const,
+      caseId,
+      message:
+        "Automated recovery cannot use the saved profile email. A support case was opened. Never send OTPs or secret answers by email.",
+    };
   }
 
   const lockUntil = Number(user.recoveryLockUntil ?? 0);
@@ -156,7 +194,7 @@ export const startAccountRecovery = onCall(emailOtpCallOpts, async (request) => 
 
   const emailChallenge = await createOrRotateEmailChallenge({
     uid,
-    rawEmail: String(user.normalizedEmail),
+    rawEmail: mailbox.normalizedEmail,
     purpose: "recovery",
   });
 
@@ -166,6 +204,9 @@ export const startAccountRecovery = onCall(emailOtpCallOpts, async (request) => 
     uid,
     status: "awaiting_factors",
     emailChallengeId: emailChallenge.challengeId,
+    mailboxEmail: mailbox.normalizedEmail,
+    mailboxHash: mailbox.emailHash,
+    mailboxVersion: mailbox.bindingVersion,
     questions: questions.map((q) => ({ id: q.id, prompt: q.prompt, answerDigest: q.answerDigest })),
     emailFactorAt: null,
     questionsFactorAt: null,
@@ -193,16 +234,14 @@ export const completeAccountRecovery = onCall(emailOtpCallOpts, async (request) 
   const sessionId = String(request.data?.sessionId ?? "");
   const emailCode = String(request.data?.emailCode ?? "");
   const newPhoneE164 = String(request.data?.newPhoneE164 ?? "");
-  const newPhoneVerificationId = String(request.data?.newPhoneVerificationId ?? "");
-  const newPhoneCode = String(request.data?.newPhoneCode ?? "");
   const answers = request.data?.answers as Record<string, string> | undefined;
+  const phoneProofToken = String(request.data?.phoneProofToken ?? "");
 
   if (!sessionId || !emailCode || !newPhoneE164 || !answers) {
     throw new HttpsError("invalid-argument", "Missing recovery fields.");
   }
-  if (!newPhoneVerificationId || newPhoneCode.length < 6) {
-    throwEmailOtpError("FORBIDDEN", "permission-denied");
-  }
+  const phoneClaims = await readPhoneProofClaims(phoneProofToken);
+  const phoneProjectId = phoneProofProjectId();
 
   const db = getAdminDb();
   const secret = resolveOtpSecret();
@@ -217,6 +256,9 @@ export const completeAccountRecovery = onCall(emailOtpCallOpts, async (request) 
       uid: string;
       status: string;
       emailChallengeId: string;
+      mailboxEmail?: string;
+      mailboxHash?: string;
+      mailboxVersion?: number;
       questions: Array<{ id: string; prompt: string; answerDigest: string }>;
       failedAttempts: number;
       expiresAt: number;
@@ -232,6 +274,32 @@ export const completeAccountRecovery = onCall(emailOtpCallOpts, async (request) 
     const pendingSnap = await tx.get(pendingRef);
     if (!pendingSnap.exists) throwEmailOtpError("EMAIL_OTP_EXPIRED", "not-found");
     const pending = pendingSnap.data() as ChallengeDoc;
+    if (pending.userId !== uid || pending.purpose !== "recovery" || pending.status !== "active") {
+      throwEmailOtpError("CONFLICT", "aborted");
+    }
+    if (pending.lockUntil && pending.lockUntil > Date.now()) throwEmailOtpError("EMAIL_OTP_LOCKED");
+    if (pending.expiresAt < Date.now()) throwEmailOtpError("EMAIL_OTP_EXPIRED", "deadline-exceeded");
+
+    const freshBindingSnap = await tx.get(db.collection(EMAIL_BINDINGS).doc(String(user.emailHash ?? "")));
+    const mailbox = resolveVerifiedMailbox(
+      {
+        uid,
+        emailStatus: user.emailStatus,
+        normalizedEmail: user.normalizedEmail,
+        emailHash: user.emailHash,
+        emailBindingVersion: user.emailBindingVersion,
+      },
+      freshBindingSnap.exists ? (freshBindingSnap.data() as Record<string, unknown>) : null
+    );
+    if (
+      !mailbox.ok ||
+      mailbox.bindingVersion !== session.mailboxVersion ||
+      mailbox.normalizedEmail !== session.mailboxEmail ||
+      mailbox.emailHash !== session.mailboxHash ||
+      pending.normalizedEmail !== mailbox.normalizedEmail
+    ) {
+      return { support: true as const, reason: mailbox.ok ? "stale_binding" : mailbox.reason };
+    }
 
     const emailOk = verifyEmailOtpDigest(
       secret,
@@ -270,7 +338,23 @@ export const completeAccountRecovery = onCall(emailOtpCallOpts, async (request) 
         createdAt: Date.now(),
         expireAt: Date.now() + 90 * 86_400_000,
       });
-      return { failed: true as const, attempt: failed, lockUntil };
+      return { failed: true as const, attempt: failed, lockUntil, alertEmail: mailbox.normalizedEmail };
+    }
+
+    const newPhoneNormForProof = normalizePhoneE164(newPhoneE164);
+    const proof = assessPhoneProof({
+      claims: phoneClaims,
+      purpose: "replacement_phone",
+      accountUid: uid,
+      expectedPhoneE164: newPhoneNormForProof,
+      nowMs: Date.now(),
+      projectId: phoneProjectId,
+      alreadyConsumed: false,
+    });
+    const proofRef = proof.ok ? db.collection(PHONE_FACTOR_PROOFS).doc(proof.proofId) : null;
+    const proofSnap = proofRef ? await tx.get(proofRef) : null;
+    if (!proof.ok || proofSnap?.exists) {
+      return { phoneDenied: (!proof.ok ? proof.reason : "replay") as string };
     }
 
     // Phone uniqueness + quarantine (server must enforce; hash never raw E.164)
@@ -294,6 +378,12 @@ export const completeAccountRecovery = onCall(emailOtpCallOpts, async (request) 
         ? request.data.recoveryDeviceId
         : randomBytes(8).toString("hex");
 
+    tx.set(proofRef!, {
+      uid,
+      purpose: "replacement_phone",
+      phoneE164: newPhoneNorm,
+      consumedAt: now,
+    });
     applyDeferredMobileQuarantineRelease(tx, newMobileHash, now, quarantine.releaseDue);
     if (oldPhone && normalizePhoneE164(oldPhone) !== newPhoneNorm) {
       tx.delete(db.collection("phoneIndex").doc(normalizePhoneE164(oldPhone)));
@@ -330,14 +420,19 @@ export const completeAccountRecovery = onCall(emailOtpCallOpts, async (request) 
       coolingOffUntil,
       recoveryDeviceId,
       oldPhone,
-      email: String(user.normalizedEmail),
+      email: mailbox.normalizedEmail,
     };
   });
 
+  if ("support" in result && result.support) {
+    throwEmailOtpError("CONFLICT", "aborted");
+  }
+  if ("phoneDenied" in result) {
+    throwEmailOtpError("FORBIDDEN", "permission-denied");
+  }
   if ("failed" in result && result.failed) {
-    if (result.attempt >= 2) {
-      const userSnap = await userRef.get();
-      const email = String((userSnap.data() as Record<string, unknown>)?.normalizedEmail ?? "");
+    if (result.attempt >= 2 && result.alertEmail) {
+      const email = result.alertEmail;
       if (email) {
         const { provider } = resolveEmailProvider();
         await provider.send({

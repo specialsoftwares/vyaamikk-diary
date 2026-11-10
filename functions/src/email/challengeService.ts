@@ -17,6 +17,7 @@ import {
   normalizeEmailStrict,
 } from "./otpPolicy";
 import { digestEmailOtp, generateEmailOtpCode, verifyEmailOtpDigest } from "./otpCrypto";
+import { resolveVerifiedMailbox } from "./verifiedMailbox";
 import { resolveEmailProvider } from "./provider";
 import { timeEmailChallengeSpan } from "./challengeTiming";
 import {
@@ -469,12 +470,13 @@ export async function verifyEmailChallengeAndBind(input: {
   const pendingRef = db.collection(PENDING_COLLECTION).doc(input.challengeId);
   const userRef = db.collection(USERS).doc(input.uid);
 
-  const profile = await timeEmailChallengeSpan("verify_db", () => db.runTransaction(async (tx) => {
+  const outcome = await timeEmailChallengeSpan("verify_db", () => db.runTransaction(async (tx) => {
     const pendingSnap = await tx.get(pendingRef);
     if (!pendingSnap.exists) throwEmailOtpError("EMAIL_OTP_EXPIRED", "not-found");
     const pending = pendingSnap.data() as ChallengeDoc;
 
     if (pending.userId !== input.uid) throwEmailOtpError("FORBIDDEN", "permission-denied");
+    if (pending.purpose !== "bind") throwEmailOtpError("CONFLICT", "aborted");
 
     // Idempotent success replay
     if (pending.status === "consumed" && pending.consumedAt) {
@@ -482,7 +484,7 @@ export async function verifyEmailChallengeAndBind(input: {
       if (!userSnap.exists) throwEmailOtpError("FORBIDDEN", "permission-denied");
       const u = userSnap.data() as Record<string, unknown>;
       if (u.emailStatus === "verified" && u.normalizedEmail === pending.normalizedEmail) {
-        return { uid: input.uid, ...u };
+        return { kind: "profile" as const, profile: { uid: input.uid, ...u } };
       }
     }
 
@@ -492,7 +494,11 @@ export async function verifyEmailChallengeAndBind(input: {
     }
     if (pending.expiresAt < Date.now()) {
       tx.update(pendingRef, { status: "superseded", otpDigest: null });
-      throwEmailOtpError("EMAIL_OTP_EXPIRED", "deadline-exceeded");
+      return {
+        kind: "error" as const,
+        errorCode: "EMAIL_OTP_EXPIRED" as const,
+        httpsCode: "deadline-exceeded" as const,
+      };
     }
 
     const ok = verifyEmailOtpDigest(
@@ -522,10 +528,18 @@ export async function verifyEmailChallengeAndBind(input: {
           emailVerificationLockedEmail: pending.normalizedEmail,
           updatedAt: Date.now(),
         });
-        throwEmailOtpError("EMAIL_OTP_LOCKED");
+        return {
+          kind: "error" as const,
+          errorCode: "EMAIL_OTP_LOCKED" as const,
+          httpsCode: "failed-precondition" as const,
+        };
       }
       tx.update(pendingRef, { incorrectAttempts: attempts });
-      throwEmailOtpError("EMAIL_OTP_INVALID");
+      return {
+        kind: "error" as const,
+        errorCode: "EMAIL_OTP_INVALID" as const,
+        httpsCode: "failed-precondition" as const,
+      };
     }
 
     await assertEmailNotBoundElsewhere(tx, db, pending.emailHash, input.uid);
@@ -533,6 +547,23 @@ export async function verifyEmailChallengeAndBind(input: {
     const userSnap = await tx.get(userRef);
     if (!userSnap.exists) throwEmailOtpError("FORBIDDEN", "permission-denied");
     const user = userSnap.data() as Record<string, unknown>;
+    if (user.emailStatus === "verified") {
+      const currentHash = String(user.emailHash ?? "");
+      const currentBinding = currentHash
+        ? await tx.get(db.collection(EMAIL_BINDINGS).doc(currentHash))
+        : null;
+      const mailbox = resolveVerifiedMailbox(
+        {
+          uid: input.uid,
+          emailStatus: user.emailStatus,
+          normalizedEmail: user.normalizedEmail,
+          emailHash: user.emailHash,
+          emailBindingVersion: user.emailBindingVersion,
+        },
+        currentBinding?.exists ? (currentBinding.data() as Record<string, unknown>) : null
+      );
+      if (!mailbox.ok) throwEmailOtpError("CONFLICT", "aborted");
+    }
     const now = Date.now();
     const bindingVersion = Number(user.emailBindingVersion ?? 0) + 1;
     const ueid = String(user.ueid ?? "");
@@ -630,8 +661,13 @@ export async function verifyEmailChallengeAndBind(input: {
       otpDigest: null,
     });
 
-    return { uid: input.uid, ...updated };
+    return { kind: "profile" as const, profile: { uid: input.uid, ...updated } };
   }));
+
+  if (outcome.kind === "error") {
+    throwEmailOtpError(outcome.errorCode, outcome.httpsCode);
+  }
+  const profile = outcome.profile;
 
   await writeSecurityEvent(db, input.uid, {
     type: "email_verified_bound",

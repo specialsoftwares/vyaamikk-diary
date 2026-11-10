@@ -12,8 +12,6 @@ export const CLIENT_PROFILE_PATCH_ALLOWLIST = [
   "businessName",
   "workType",
   "designation",
-  "businessEmail",
-  "normalizedEmail",
   "language",
   "profileCompletedAt",
   "ueidReleasedAt",
