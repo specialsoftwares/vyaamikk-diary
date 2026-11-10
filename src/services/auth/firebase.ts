@@ -656,7 +656,8 @@ export const firebaseAuthService: AuthService = {
       if (!contactCurrent() || getNativeAuthUid() !== openingUid || currentAuthMutationGeneration() !== openingGeneration || currentSessionCommitEpoch() !== openingEpoch) throw new Error("session_changed");
     };
     const phone = normalizePhoneE164(newPhoneE164);
-    const { getNativeAuthUid, getNativeAuthPhoneE164 } = await import("./nativePhoneAuth");
+    const { getNativeAuthPhoneE164 } = await import("./nativePhoneAuth");
+    assertCurrent();
     const uid = getNativeAuthUid();
     if (!uid) {
       throw new AppError(
@@ -676,6 +677,7 @@ export const firebaseAuthService: AuthService = {
     const { preflightProductionMobileChange } = await import(
       "./reconcilePendingMobileContactChange"
     );
+    assertCurrent();
     await preflightProductionMobileChange(phone);
     assertCurrent();
 

@@ -75,6 +75,18 @@ const SESSION_LOST: PublicError = {
   action: "new_code",
 };
 
+const PHONE_RESULT_UNKNOWN: PublicError = {
+  title: "Verification not confirmed",
+  message: "We couldn't confirm the result. You can go back and try again. A timeout does not mean the code was incorrect.",
+  action: "retry",
+};
+
+const PHONE_NATIVE_PENDING: PublicError = {
+  title: "Verification is still finishing",
+  message: "Verification is still finishing. You can go back. If it does not finish, force stop the app in Android Settings and reopen it.",
+  action: "none",
+};
+
 const LOCAL_UNAVAILABLE: PublicError = {
   title: "Unable to open secure storage",
   message:
@@ -92,7 +104,7 @@ const LOCAL_RECOVERY: PublicError = {
 const APP_VERIFY_DEVICE: PublicError = {
   title: "Couldn't send the code",
   message:
-    "Could not verify this app for phone sign-in on this device. On a physical phone use real SMS; for emulator development use a Firebase Console test phone number with test mode enabled.",
+    "Could not verify this app for phone sign-in on this device. Update the app and try again. If this continues, contact support.",
   action: "support",
 };
 
@@ -129,12 +141,12 @@ const CATALOGUE: Readonly<Record<string, PublicError>> = {
   },
   auth_not_configured: {
     title: "Sign-in unavailable",
-    message: "Login service is not configured for this build.",
+    message: "Sign-in is unavailable right now. Please contact support.",
     action: "support",
   },
   "auth/operation-not-allowed": {
     title: "Sign-in unavailable",
-    message: "Phone sign-in is not enabled for this Firebase project. Contact support.",
+    message: "Phone sign-in is unavailable right now. Please contact support.",
     action: "support",
   },
   session_expired: SESSION_ENDED,
@@ -296,6 +308,9 @@ export function toPublicError(error: unknown, surface: ErrorSurface = "api"): Pu
     seen.add(current);
 
     const details = own(current, "details");
+    if (own(details, "phoneAuthSettlement") === "unknown") {
+      return own(details, "diagnosticCode") === "PHONE_NATIVE_HELD" ? PHONE_NATIVE_PENDING : PHONE_RESULT_UNKNOWN;
+    }
     if (own(current, "code") === "otp_expired" && own(details, "verificationIdPresent") === false) {
       return SESSION_LOST;
     }
@@ -330,6 +345,8 @@ const KNOWN_PUBLIC_MESSAGES: ReadonlySet<string> = new Set([
   ...Object.values(REACTIVATION).map((entry) => entry.message),
   GENERIC.message,
   SESSION_LOST.message,
+  PHONE_RESULT_UNKNOWN.message,
+  PHONE_NATIVE_PENDING.message,
   APP_VERIFY_DEVICE.message,
   NETWORK.message,
   BAD_CODE.message,
