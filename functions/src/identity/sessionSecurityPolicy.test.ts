@@ -95,6 +95,23 @@ function handlerSlice(text: string, exportName: string): string {
   return text.slice(start, next === -1 ? undefined : next);
 }
 
+// The content callables delegate to production continuations. Check every
+// edge of that delegation; seeing the admission import alone is insufficient.
+function ownerContentEnforcesAdmission(text: string, exportName: string): boolean {
+  const continuation = exportName === "sealOwnerContent" ? "performSealOwnerContent"
+    : exportName === "openOwnerContent" ? "performOpenOwnerContent" : null;
+  if (!continuation) return false;
+  const exported = handlerSlice(text, exportName);
+  const start = text.indexOf(`export async function ${continuation}(`);
+  if (start < 0) return false;
+  const next = text.indexOf("\nexport ", start + 1);
+  const body = text.slice(start, next === -1 ? undefined : next);
+  return exported.includes(`(request) => ${continuation}(request)`)
+    && /const productionGuards: OwnerContentGuards = \{\s*admit: assertAdmittedCallableUser,/.test(text)
+    && /guards: OwnerContentGuards = productionGuards/.test(body)
+    && /\) \{\s*await guards\.admit\(request\);\s*const uid = request\.auth\?\.uid;/.test(body);
+}
+
 async function main() {
   console.log("session security policy (SOURCE)");
 
@@ -436,6 +453,20 @@ async function main() {
       retryStore.current()?.operationId === opB
   );
 
+  const recoveryStore = transactionalStore();
+  await recoveryStore.transact(() => ({
+    next: { operationId: "recovery:owned-operation", revokedBeforeAuthTimeSeconds: now,
+      startedAtSeconds: now, revocationState: "pending" },
+    value: undefined,
+  }));
+  let recoveryRevokes = 0;
+  const recoveryContinuation = await continuePendingLogoutAll({
+    transact: recoveryStore.transact,
+    revokeRefreshTokens: async () => { recoveryRevokes += 1; },
+  });
+  check("generic logout continuation does not repeat a recovery revocation",
+    recoveryContinuation === "idle" && recoveryRevokes === 0 && recoveryStore.current()?.revocationState === "pending");
+
   const admitted = decideCallableAdmission({
     verified: phone,
     originClaim: null,
@@ -469,13 +500,24 @@ async function main() {
       const enforced =
         entry.kind === "wrapGrin"
           ? entry.text.includes("await assertAdmittedCallableUser(request")
-          : slice.includes("await assertAdmittedCallableUser(request");
+          : slice.includes("await assertAdmittedCallableUser(request")
+            || ownerContentEnforcesAdmission(entry.text, entry.name);
       if (!enforced) coverageOk = false;
     } else if (slice.includes("assertAdmittedCallableUser")) {
       coverageOk = false;
     }
   }
   check("enforced entry points consult the cutoff and exclusions do not", coverageOk);
+  const contentSource = readFileSync(resolve(process.cwd(), "functions/src/privacy/ownerContent.ts"), "utf8");
+  for (const name of ["sealOwnerContent", "openOwnerContent"]) {
+    check(`${name} requires its default admission guard`,
+      ownerContentEnforcesAdmission(contentSource, name)
+      && !ownerContentEnforcesAdmission(contentSource.replace("admit: assertAdmittedCallableUser,", "admit: async () => undefined,"), name)
+      && !ownerContentEnforcesAdmission(contentSource.replaceAll("await guards.admit(request);", "void guards.admit(request);"), name)
+      && !ownerContentEnforcesAdmission(contentSource.replaceAll("guards: OwnerContentGuards = productionGuards", "guards: OwnerContentGuards = bypassGuards"), name)
+      && !ownerContentEnforcesAdmission(contentSource.replaceAll("Content(request)", "Content(request, bypassGuards)"), name));
+  }
+
 
   const rtdn = readFileSync(
     resolve(process.cwd(), "functions/src/billing/callables/androidRtdn.ts"),

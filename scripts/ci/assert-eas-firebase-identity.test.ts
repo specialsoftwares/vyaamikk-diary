@@ -12,7 +12,7 @@ import {
   identityLine,
 } from "./assert-eas-firebase-identity.mjs";
 
-const script = path.join(import.meta.dirname, "assert-eas-firebase-identity.mjs");
+const script = path.join(__dirname, "assert-eas-firebase-identity.mjs");
 const marker = "SHOULD_NOT_PRINT";
 
 function fixture(projectId: string, packageName: string) {

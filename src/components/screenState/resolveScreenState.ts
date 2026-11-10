@@ -167,12 +167,18 @@ export function nextOwnedSnapshot<T>(
     return prev;
   }
 
-  const claimMatches =
+  // A cached value retains the generation that produced it. A newer refresh
+  // owns its loading/error outcome without changing the cache's provenance.
+  const valueBelongsToSession =
     input.valueClaim != null &&
     input.valueClaim.uid === uid &&
-    (epoch == null || input.valueClaim.epoch === epoch) &&
-    (generation == null || input.valueClaim.generation === generation);
-  const foreignClaim = input.valueClaim != null && !claimMatches;
+    (epoch == null || input.valueClaim.epoch === epoch);
+  const claimMatches = valueBelongsToSession &&
+    (generation == null || input.valueClaim!.generation === generation);
+  const foreignClaim = input.valueClaim != null && (
+    !valueBelongsToSession ||
+    (generation != null && input.valueClaim.generation > generation)
+  );
   const ownFailure = input.failed && !foreignClaim;
   const armed = !switched && prev.armed;
 

@@ -1058,6 +1058,58 @@ service cloud.firestore {
                         == resource.data.benefitScreenShownAt;
         allow delete: if false;
       }
+      // ---- GRIN evidence: Admin-written, owner-active client reads only.
+      // The shared isActiveUser guard includes session, restore and deletion
+      // fences. Reservations, hashes, generations and quota are never client-writable.
+      match /goodsEvidenceAdmission/{docId} {
+        allow read: if isActiveUser(uid);
+        allow create, update, delete: if false;
+      }
+      match /goodsEvidenceUploadControl/{docId} {
+        allow read, write: if false;
+      }
+      match /grinEvidenceObjectKeys/{objectKey} {
+        allow read: if isActiveUser(uid);
+        allow create, update, delete: if false;
+      }
+      match /grinEvidenceDerivativeKeys/{derivativeKey} {
+        allow read: if isActiveUser(uid);
+        allow create, update, delete: if false;
+      }
+      match /goodsEvidenceLedgers/{ledgerId} {
+        allow read: if isActiveUser(uid);
+        allow create, update, delete: if false;
+
+        match /commands/{commandId} {
+          allow read: if isActiveUser(uid);
+          allow create, update, delete: if false;
+        }
+        match /serials/{fyToken} {
+          allow read: if isActiveUser(uid);
+          allow create, update, delete: if false;
+        }
+        match /evidenceObjects/{evidenceId} {
+          allow read: if isActiveUser(uid);
+          allow create, update, delete: if false;
+        }
+        match /receipts/{receiptId} {
+          allow read: if isActiveUser(uid);
+          allow create, update, delete: if false;
+
+          match /events/{eventId} {
+            allow read: if isActiveUser(uid);
+            allow create, update, delete: if false;
+          }
+          match /evidenceLinks/{evidenceId} {
+            allow read: if isActiveUser(uid);
+            allow create, update, delete: if false;
+          }
+          match /evidenceControl/{docId} {
+            allow read: if isActiveUser(uid);
+            allow create, update, delete: if false;
+          }
+        }
+      }
     }
 
     // ---- Server-owned reverse indexes -----------------------------------

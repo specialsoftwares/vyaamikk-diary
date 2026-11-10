@@ -246,7 +246,7 @@ async function main(): Promise<void> {
   __resetCrashReportingForTests();
   const calls: { kind: string; payload: unknown }[] = [];
   let preference: boolean | null = null;
-  let sdkCollection = false;
+  let sessionReporting = false;
   let userId: string | null = null;
   __setCrashlyticsClientForTests({
     setCrashlyticsCollectionEnabled: async (enabled) => {
@@ -261,8 +261,8 @@ async function main(): Promise<void> {
     },
   });
   __setCrashSdkBridgeForTests({
-    setSdkCollectionEnabled: async (enabled) => {
-      sdkCollection = enabled;
+    setSessionReportingEnabled: async (enabled) => {
+      sessionReporting = enabled;
     },
     recordDiagnostic: async (message) => {
       calls.push({ kind: "recordError", payload: message });
@@ -281,7 +281,7 @@ async function main(): Promise<void> {
     // Enabled with consent.
     await setCrashReportingEnabled(true);
     assert.equal(preference, false);
-    assert.equal(sdkCollection, true);
+    assert.equal(sessionReporting, true);
     assert.equal(
       calls.some((row) => row.kind === "setCollection" && row.payload === true),
       false
@@ -309,7 +309,7 @@ async function main(): Promise<void> {
     // Opt-out (settings toggle / consent decline path calls only this).
     await setCrashReportingEnabled(false);
     assert.equal(preference, false);
-    assert.equal(sdkCollection, false);
+    assert.equal(sessionReporting, false);
     assert.equal(userId, "", "opt-out clears the pseudonymous user id");
 
     // Logout / account switch path.

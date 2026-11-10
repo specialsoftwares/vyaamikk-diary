@@ -1,3 +1,6 @@
+import { randomBytes } from "node:crypto";
+import { __setNativeSecureRandomForTests } from "@/services/accountDeletion/nativeSecureRandom";
+__setNativeSecureRandomForTests((length) => new Uint8Array(randomBytes(length)));
 /**
  * Ordering evidence for the phone-OTP to email transition.
  * Deferred promises prove sequence. They are not device timings.
@@ -338,8 +341,10 @@ async function main() {
   const updateStart = firebase.indexOf("async updateProfile");
   const updateEnd = firebase.indexOf("async startMobileChange", updateStart);
   const update = firebase.slice(updateStart, updateEnd);
-  assert.match(update, /userProfileWriteNeedsSeal/);
-  assert.match(update, /if \(needsSeal\)/);
+  assert.match(update, /updateProfileWithIo/);
+  const writer = firebase.slice(firebase.indexOf("export async function updateProfileWithIo"), firebase.indexOf("export const FirebaseAuthService"));
+  assert.match(writer, /userProfileWriteNeedsSeal/);
+  assert.match(writer, /if \(needsSeal\)/);
   assert.match(update, /protectBusinessCloud/);
 
   const email = readFileSync(join(root, "services/auth/emailVerificationService.ts"), "utf8");

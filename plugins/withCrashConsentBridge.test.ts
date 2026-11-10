@@ -13,6 +13,9 @@ const plugin = require("./withCrashConsentBridge.js") as {
   crashConsentBridgeSourceDir: () => string;
   BRIDGE_IMPORT: string;
   BRIDGE_REGISTER: string;
+  applyCrashConsentManifest: (input: any) => any;
+  applyCrashConsentDependencies: (input: string) => string;
+  assertCrashConsentVersions: (root: string) => void;
 };
 
 const apply = plugin.applyCrashConsentMainApplication;
@@ -39,21 +42,21 @@ class MainApplication : Application() {
   const moduleSource = readFileSync(join(sourceDir, "CrashConsentBridgeModule.kt"), "utf8");
   const packageSource = readFileSync(join(sourceDir, "CrashConsentBridgePackage.kt"), "utf8");
   const executable = moduleSource.replace(/\/\*[\s\S]*?\*\//g, "");
-  assert.match(moduleSource, /Signed-device checks — NOT RUN/);
-  assert.match(moduleSource, /Force-stop, then relaunch, stays disabled until Allow again/);
-  assert.match(moduleSource, /Switching accounts does not keep the previous grant/);
-  assert.match(moduleSource, /preference false/);
-  assert.match(executable, /FirebaseCrashlytics\.getInstance\(\)\.setCrashlyticsCollectionEnabled\(enabled\)/);
-  assert.match(executable, /FirebaseCrashlytics\.getInstance\(\)\.deleteUnsentReports\(\)/);
-  assert.match(executable, /FirebaseCrashlytics\.getInstance\(\)\.recordException\(/);
-  assert.match(executable, /FirebaseCrashlytics\.getInstance\(\)\.log\(/);
-  assert.match(executable, /fun recordDiagnostic/);
-  assert.match(executable, /fun logDiagnostic/);
-  assert.doesNotMatch(executable, /KEY_CRASHLYTICS_AUTO_COLLECTION_ENABLED/);
-  assert.doesNotMatch(executable, /sendUnsentReports/);
-  assert.doesNotMatch(executable, /ReactNativeFirebasePreferences/);
+  assert.match(moduleSource, /Signed-device startup, upgrade and account-switch checks — NOT RUN/);
+  assert.match(executable, /CrashConsentRuntime\.enable\(uid, revision/);
+  assert.match(executable, /CrashConsentRuntime\.disable\(delete = true\)/);
+  assert.match(executable, /CrashConsentRuntime\.record\(message\)/);
+  assert.match(executable, /CrashConsentRuntime\.log\(message\)/);
   assert.match(packageSource, /CrashConsentBridgeModule/);
-  assert.doesNotMatch(packageSource, /setCrashlyticsCollectionEnabled\(true\)/);
+  const bootstrap = readFileSync(join(sourceDir, "CrashConsentBootstrap.kt"), "utf8");
+  assert.match(bootstrap, /"com.google.firebase.crashlytics"/);
+  assert.match(bootstrap, /putBoolean\("firebase_crashlytics_collection_enabled", false\)/);
+  assert.match(bootstrap, /putBoolean\("crashlytics_auto_collection_enabled", false\)/);
+  assert.doesNotMatch(bootstrap, /setCrashlyticsCollectionEnabled\(true\)/);
+  assert.match(bootstrap, /generation != claim/);
+  assert.match(bootstrap, /checkForUnsentReports\(\)/);
+  assert.match(bootstrap, /reportAction == null/);
+
 }
 
 {
@@ -75,3 +78,18 @@ class MainApplication : Application() {
 }
 
 console.log("withCrashConsentBridge.test.ts: ok (CONFIG_PLUGIN_SOURCE, not a signed-device run)");
+
+{
+  const manifest = { manifest: { application: [{ provider: [{ $: { "android:name": "com.google.firebase.provider.FirebaseInitProvider", "android:initOrder": "100" } }] }] } };
+  const once = plugin.applyCrashConsentManifest(manifest);
+  const twice = plugin.applyCrashConsentManifest(once);
+  const providers = twice.manifest.application[0].provider;
+  const boot = providers.filter((p: any) => p.$["android:name"].endsWith("CrashConsentBootstrap"));
+  assert.equal(boot.length, 1);
+  assert.equal(boot[0].$["android:exported"], "false");
+  assert.ok(Number(boot[0].$["android:initOrder"]) > 100);
+  const deps = plugin.applyCrashConsentDependencies("dependencies {\n}");
+  assert.equal(plugin.applyCrashConsentDependencies(deps), deps);
+  assert.match(deps, /firebase-crashlytics:20\.0\.6/);
+  plugin.assertCrashConsentVersions(process.cwd());
+}

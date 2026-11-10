@@ -14,6 +14,8 @@ export interface NativePhoneAuthPersistedSession {
   expiresAt: number;
   attemptId: string;
   savedAt: number;
+  purpose?: "phone_login" | "contact_change";
+  expectedUid?: string;
 }
 
 type Kv = {
@@ -115,6 +117,8 @@ export async function loadNativePhoneAuthSession(): Promise<NativePhoneAuthPersi
     ) {
       return null;
     }
+    if (parsed.purpose != null && parsed.purpose !== "phone_login" && parsed.purpose !== "contact_change") return null;
+    if (parsed.purpose === "contact_change" && (typeof parsed.expectedUid !== "string" || !parsed.expectedUid)) return null;
     // An expired row is unusable, but this read must not delete the key.
     // A newer save can land while this read is in flight; clearing here would
     // remove that newer session. Sign-out and an explicit clear still remove it.
@@ -127,6 +131,8 @@ export async function loadNativePhoneAuthSession(): Promise<NativePhoneAuthPersi
       expiresAt: parsed.expiresAt,
       attemptId: parsed.attemptId,
       savedAt: parsed.savedAt ?? Date.now(),
+      ...(parsed.purpose ? { purpose: parsed.purpose } : {}),
+      ...(parsed.expectedUid ? { expectedUid: parsed.expectedUid } : {}),
     };
   } catch {
     return null;

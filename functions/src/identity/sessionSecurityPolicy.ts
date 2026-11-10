@@ -290,6 +290,9 @@ export async function continuePendingLogoutAll(ports: {
 }): Promise<"complete" | "idle" | "pending"> {
   const captured = await ports.transact((current) => ({ next: null, value: current }));
   if (!captured) return "idle";
+  // Recovery has an operation-specific finalizer which reconciles an ambiguous
+  // Auth RPC before retry. The generic logout continuation must not re-revoke it.
+  if (captured.operationId.startsWith("recovery:")) return "idle";
   if (captured.revocationState === "complete") return "complete";
   try {
     await ports.revokeRefreshTokens();

@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 
-const root = path.join(import.meta.dirname, "../../..");
+const root = path.join(__dirname, "../../..");
 const functionsPackage = JSON.parse(
   fs.readFileSync(path.join(root, "functions/package.json"), "utf8")
 ) as { engines?: { node?: string }; dependencies?: Record<string, string> };

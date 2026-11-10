@@ -2,7 +2,7 @@
  * Decision record for the Android phone-auth slot.
  * The native module in modules/phone-auth-activity is the activity signal.
  * A present module with no current Activity is "missing", never "present".
- * A held slot is released only when that Activity is gone or replaced.
+ * A held operation is released only when it settles. Activity identity is not cancellation.
  */
 
 export type ActivityView = { id: string } | null;
@@ -35,9 +35,7 @@ export function createPhoneAuthNativeSlot() {
     const signal = activitySignal(activity);
     if (!sendPermittedBySignal(signal)) return "refused:missing";
     const activityId = signal.slice("present:".length);
-    const heldGeneration = kind === "send" ? state.sendGeneration : state.confirmGeneration;
-    const heldActivityId = kind === "send" ? state.sendActivityId : state.confirmActivityId;
-    if (heldGeneration !== 0 && heldGeneration !== generation && heldActivityId === activityId) {
+    if (state.sendGeneration !== 0 || state.confirmGeneration !== 0) {
       return "refused:in_flight";
     }
     if (kind === "send") {
@@ -65,20 +63,11 @@ export function createPhoneAuthNativeSlot() {
   }
 
   function recover(kind: "send" | "confirm", activity: ActivityView): string {
-    const heldGeneration = kind === "send" ? state.sendGeneration : state.confirmGeneration;
-    const heldActivityId = kind === "send" ? state.sendActivityId : state.confirmActivityId;
-    if (heldGeneration === 0) return "idle";
-    const signal = activitySignal(activity);
-    const currentId = sendPermittedBySignal(signal) ? signal.slice("present:".length) : "";
-    if (currentId && heldActivityId === currentId) return "held";
-    if (kind === "send") {
-      state.sendGeneration = 0;
-      state.sendActivityId = null;
-    } else {
-      state.confirmGeneration = 0;
-      state.confirmActivityId = null;
-    }
-    return "recovered";
+    // Native credential tasks may outlive their Activity. This model never
+    // uses a missing/different Activity as evidence that a task was cancelled.
+    void kind;
+    void activity;
+    return state.sendGeneration !== 0 || state.confirmGeneration !== 0 ? "held" : "idle";
   }
 
   return { state, claim, release, recover };

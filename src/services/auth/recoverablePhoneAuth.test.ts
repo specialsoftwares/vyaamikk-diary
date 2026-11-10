@@ -399,16 +399,11 @@ async function testPermanentlyPendingNativeSend(): Promise<void> {
   assert.equal(stored, false, "the unfinished send does not persist a challenge");
   assert.equal(native.signOutCalls(), 0, "the unfinished send does not sign out a replacement session");
   activity = { screen: "recreated" };
-  assert.equal(recoverUnsettledNativeSend(), "recovered", "a replaced Activity releases the slot");
-  const next = startNativePhoneOtp(OTHER);
-  void next.then(
-    () => undefined,
-    () => undefined
-  );
-  await flush();
-  assert.equal(native.signInCalls(), 2, "recovery dispatches one new send and leaves the old call pending");
-  assert.equal(stored, false, "the old call still has not published");
-  assert.equal(native.signOutCalls(), 1, "only the recovered send clears the stale session");
+  assert.equal(recoverUnsettledNativeSend(), "held", "a replacement Activity does not cancel native work");
+  await assert.rejects(startNativePhoneOtp(OTHER), AppError);
+  assert.equal(native.signInCalls(), 1, "no overlap before the old native task settles");
+  assert.equal(stored, false);
+  assert.equal(native.signOutCalls(), 0);
   __clearNativePhoneSessions();
   __installNativePhoneAuthModuleForTests(null);
   __installAndroidActivityBridgeForTests(null);
@@ -609,7 +604,7 @@ async function testPermanentlyPendingNativeConfirm(): Promise<void> {
   assert.equal(navigated, false);
   assert.equal(native.signOutCalls(), 0);
   activity = { screen: "recreated" };
-  assert.equal(recoverUnsettledNativeConfirm(), "recovered");
+  assert.equal(recoverUnsettledNativeConfirm(), "held", "Activity replacement cannot cancel a credential task");
   let retired: unknown = null;
   try {
     await withTimeout(confirmNativePhoneOtp(challenge, "123456"), "retired confirmation");

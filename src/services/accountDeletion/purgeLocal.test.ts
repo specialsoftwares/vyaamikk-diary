@@ -78,6 +78,7 @@ function seedOwnerInventory(store: ReturnType<typeof createStore>, uid: string, 
   }
   store.data.set(`vyd_pro_pack_draft_${uid}_1`, "draft");
   store.data.set(demographicAgeStorageKey(uid), band);
+  store.data.set(`vyd_demographic_age_range_v1:${uid}`, band);
 }
 
 async function main(): Promise<void> {
@@ -106,6 +107,8 @@ async function main(): Promise<void> {
   const after = await store.getAllKeys();
   const removed = before.filter((key) => !after.includes(key));
   assert.ok(removed.includes(demographicAgeStorageKey(OWNER_A)));
+  assert.ok(removed.includes(`vyd_demographic_age_range_v1:${OWNER_A}`));
+  assert.equal(store.data.get(`vyd_demographic_age_range_v1:${OWNER_B}`), "55_plus");
   assert.ok(removed.includes("vyd_diary_v2_uid-owner-a"));
   assert.ok(removed.includes("vyd_pro_pack_draft_uid-owner-a_1"));
   for (const key of removed) {
@@ -138,6 +141,33 @@ async function main(): Promise<void> {
   assert.equal(store.data.get("vyd_lang_v1"), "en");
   assert.equal(store.data.get("notes-uid-owner-a"), "keep");
   assert.equal(await store.getItem(demographicAgeStorageKey(OWNER_A)), null);
+
+
+  // A later queued write must not make an earlier delayed write exempt from purge.
+  const raceOwner = "two-write-purge-owner";
+  store.armHang();
+  const older = writeDeviceDemographicAge(raceOwner, "18_24", store);
+  // Let the first store call enter before queuing a newer selection.
+  await Promise.resolve();
+  const newer = writeDeviceDemographicAge(raceOwner, "25_34", store);
+  await removeAsyncStorageKeysForUser(raceOwner, store);
+  store.release();
+  await Promise.all([older, newer]);
+  assert.equal(await store.getItem(demographicAgeStorageKey(raceOwner)), null,
+    "neither pre-purge write may recreate the deleted demographic key");
+
+  // New owner-authorized work after the purge is preserved even when cleanup
+  // of an older write was pending when that work was queued.
+  const restoredOwner = "post-purge-write-owner";
+  store.armHang();
+  const retired = writeDeviceDemographicAge(restoredOwner, "under_18", store);
+  await Promise.resolve();
+  await removeAsyncStorageKeysForUser(restoredOwner, store);
+  const restored = writeDeviceDemographicAge(restoredOwner, "55_plus", store);
+  store.release();
+  await Promise.all([retired, restored]);
+  assert.equal(await store.getItem(demographicAgeStorageKey(restoredOwner)), "55_plus",
+    "retired cleanup cannot remove a later post-purge write");
 
   console.log("purgeLocal.test.ts: ok");
 }

@@ -27,6 +27,9 @@ import {
   screenStateCopy,
   showsEmpty,
   useOwnedSnapshot,
+  useRequestOwner,
+  requestSessionsMatch,
+  type RequestClaim,
 } from "@/components/screenState";
 import { useGlobalSearch } from "@/hooks/useGlobalSearch";
 import { currentSessionCommitEpoch } from "@/services/auth/authSessionFence";
@@ -41,6 +44,7 @@ import {
   type GlobalSearchResult,
 } from "@/services/search";
 import { readRecentSearches } from "@/services/search/recentSearches";
+import { startRecentSearchRead } from "@/services/search/recentSearchReadOwnership";
 import { radius, spacing, typography, useTheme, useThemedStyles } from "@/theme";
 
 type Section = { title: string; data: GlobalSearchResult[] };
@@ -75,29 +79,43 @@ export default function GlobalSearchScreen() {
   } = useGlobalSearch(user?.uid ?? null);
   const { requestDelete, isDeleting } = useRecordDelete(user?.uid ?? null);
 
-  const [recentQueries, setRecentQueries] = useState<string[]>([]);
-  const [recentFailure, setRecentFailure] = useState<string | null>(null);
+  const [recentRead, setRecentRead] = useState<{
+    claim: RequestClaim;
+    queries: string[];
+    failed: boolean;
+  } | null>(null);
+  const { capture: captureRecent, owns: ownsRecent } = useRequestOwner(user?.uid ?? null);
+  const sessionEpoch = currentSessionCommitEpoch();
+  // Render ownership changes immediately, before the next focus effect runs.
+  const currentRecent = requestSessionsMatch(
+    user?.uid ? { uid: user.uid, epoch: sessionEpoch } : null,
+    recentRead?.claim
+  ) ? recentRead : null;
+  const recentQueries = currentRecent?.queries ?? [];
+  const recentFailure = currentRecent?.failed ?? false;
 
   useFocusEffect(
     useCallback(() => {
       invalidateGlobalSearchIndex();
       void reloadIndex();
-      if (user?.uid) {
-        void readRecentSearches(user.uid).then((read) => {
-          if (read.state === "ready") {
-            setRecentQueries(read.queries);
-            setRecentFailure(null);
-          } else {
-            setRecentQueries([]);
-            setRecentFailure(read.reason);
-          }
-        });
-      } else {
-        setRecentQueries([]);
-        setRecentFailure(null);
-      }
+      const claim = captureRecent();
+      setRecentRead(null);
+      const pending = claim ? startRecentSearchRead({
+        claim,
+        owns: ownsRecent,
+        read: readRecentSearches,
+        publish: (read, owner) => {
+          setRecentRead({ claim: owner,
+            queries: read.state === "ready" ? read.queries : [],
+            failed: read.state !== "ready" });
+        },
+        fail: (owner) => {
+          setRecentRead({ claim: owner, queries: [], failed: true });
+        },
+      }) : null;
       if (typeof q === "string" && q.trim()) setQuery(q.trim());
-    }, [reloadIndex, q, setQuery, user?.uid])
+      return () => pending?.dispose();
+    }, [reloadIndex, q, setQuery, user?.uid, sessionEpoch, captureRecent, ownsRecent])
   );
 
   const filterLabel = useCallback(

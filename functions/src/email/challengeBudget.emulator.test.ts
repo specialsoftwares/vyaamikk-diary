@@ -10,6 +10,7 @@ import { getFirestore } from "firebase-admin/firestore";
 
 import { verifyEmailChallengeAndBind, PENDING_COLLECTION, USERS } from "./challengeService";
 import { digestEmailOtp } from "./otpCrypto";
+import { runEmailIdentityFlowRegressions } from "./emailIdentityFlows.emulator.test";
 
 const SECRET = "emulator-only-email-otp-hmac-secret-do-not-use-in-prod";
 process.env.EMAIL_OTP_HMAC_SECRET = SECRET;
@@ -118,6 +119,7 @@ async function main(): Promise<void> {
   assert.equal((await db.collection(PENDING_COLLECTION).doc(recoveryId).get()).get("status"), "active");
   assert.notEqual((await db.collection(USERS).doc(uid).get()).get("emailStatus"), "verified");
   console.log("challengeBudget.emulator.test.ts: ok");
+  await runEmailIdentityFlowRegressions(db);
   await Promise.all(getApps().map((app) => deleteApp(app)));
 }
 

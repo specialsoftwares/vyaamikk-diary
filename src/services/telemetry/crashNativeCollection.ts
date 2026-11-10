@@ -1,28 +1,14 @@
 /**
- * Runtime crash collection vs the persisted RNFirebase auto-collection preference.
- *
- * Signed-device checks — NOT RUN. This file is not evidence that they passed.
- * After a signed build that includes modules/crash-consent:
- * - Allow enables collection only in the current process.
- * - Force-stop, then relaunch, stays disabled until Allow again.
- * - Withdrawal disables collection.
- * - Switching accounts does not keep the previous grant.
- * - logcat or a debug readout must show the RNFirebase auto-collection preference false.
- *
- * @react-native-firebase/crashlytics 24.1.0 Android:
- * setCrashlyticsCollectionEnabled only writes the auto-collection preference and
- * resolves. It does not call FirebaseCrashlytics.setCrashlyticsCollectionEnabled.
- * A resolved preference write is not proof the running SDK changed collection.
- * InitProvider.onCreate applies that preference once, before JavaScript consent.
- * deleteUnsentReports has no completion proof. Never call sendUnsentReports.
- * recordError, log, and setUserId on the RNFirebase module no-op while the
- * preference gate is false. JavaScript reports go through recordDiagnostic
- * and logDiagnostic on this bridge, which call the Firebase SDK directly.
+ * Locked Android delivery: automatic collection is always disabled. The native
+ * bootstrap resets persistent SDK/RNFirebase overrides BEFORE Firebase init.
+ * Account-scoped, revision-acknowledged manual dispatch is separate from local
+ * sanitized recording. A successful bridge call is not an upload receipt.
+ * Signed-device startup/upgrade/withdrawal checks — NOT RUN.
  */
 
 export type CrashSdkBridge = {
-  /** FirebaseCrashlytics.setCrashlyticsCollectionEnabled. Does not touch the preference. */
-  setSdkCollectionEnabled: (enabled: boolean) => Promise<unknown>;
+  /** Opens only the native manual-reporting session; automatic collection stays off. */
+  setSessionReportingEnabled: (enabled: boolean, ownerUid?: string | null, consentRevision?: number | null) => Promise<unknown>;
   /** FirebaseCrashlytics.deleteUnsentReports. Resolving is not a deletion receipt. */
   deleteUnsentReports?: () => Promise<unknown> | void;
   /**
@@ -57,29 +43,21 @@ export function getCrashSdkBridge(): CrashSdkBridge | null {
       NativeModules?: { CrashConsentBridge?: CrashSdkBridge };
     };
     const native = reactNative.NativeModules?.CrashConsentBridge;
-    if (!native || typeof native.setSdkCollectionEnabled !== "function") return null;
+    if (!native || typeof native.setSessionReportingEnabled !== "function") return null;
     return native;
   } catch {
     return null;
   }
 }
 
-/**
- * Next process start, matching InitProvider.isCrashlyticsCollectionEnabled then
- * FirebaseCrashlytics.setCrashlyticsCollectionEnabled once. A stored preference
- * wins over firebase.json and the manifest. The in-memory SDK flag does not survive.
- * Preference false means the next process starts disabled.
- */
+/** Actual SDK precedence before the guarded bootstrap migration runs. */
 export function nextProcessCrashCollectionEnabled(input: {
-  /** null when the preference key is absent. */
+  sdkOverride?: boolean | null;
   preference: boolean | null;
-  /** null when firebase.json has no crashlytics_auto_collection_enabled value. */
   firebaseJson: boolean | null;
-  /** null when manifest meta is absent. */
   manifest: boolean | null;
 }): boolean {
-  if (input.preference !== null) return input.preference;
-  if (input.firebaseJson !== null) return input.firebaseJson;
+  if (input.sdkOverride != null) return input.sdkOverride;
   if (input.manifest !== null) return input.manifest;
   return true;
 }
@@ -97,11 +75,11 @@ export async function writeAutoCollectionPreferenceFalse(
   }
 }
 
-export async function setRuntimeSdkCollection(enabled: boolean): Promise<"set" | "unavailable" | "failed"> {
+export async function setRuntimeSdkCollection(enabled: boolean, scope?: { ownerUid?: string; consentRevision?: number }): Promise<"set" | "unavailable" | "failed"> {
   const bridge = getCrashSdkBridge();
   if (!bridge) return "unavailable";
   try {
-    await bridge.setSdkCollectionEnabled(enabled);
+    await bridge.setSessionReportingEnabled(enabled, scope?.ownerUid ?? null, scope?.consentRevision ?? null);
     return "set";
   } catch {
     return "failed";

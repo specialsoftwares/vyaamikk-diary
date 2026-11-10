@@ -17,6 +17,10 @@ import {
   nextOwnedSnapshot,
   emptyOwned,
   runOwnedLoad,
+  beginOwnedLoad,
+  commitOwnedSuccess,
+  commitOwnedFailure,
+  resolveSearchPresentation,
   type OwnedLoad,
 } from "./resolveScreenState";
 
@@ -164,6 +168,51 @@ __resetAuthSessionFenceForTests();
   assert.deepEqual(state.value, ["row-new"]);
   assert.equal(state.valueClaim?.epoch, epochNew);
   assert.equal(state.loading, false);
+}
+
+
+// Compose the production loader and snapshot decisions just as search does.
+// A new request generation does not make same-session cached rows foreign.
+{
+  beginSessionCommit();
+  const first = captureLoadClaim("refresh-owner", 1);
+  let load: OwnedLoad<string[]> = beginOwnedLoad(emptyOwnedLoad(), first);
+  let memory = nextOwnedSnapshot(emptyOwned<string[]>(), {
+    signedInUid: first.uid, epoch: first.epoch, generation: first.generation,
+    loading: true, failed: false, value: [], valueClaim: null,
+  });
+  load = commitOwnedSuccess(load, first, ["saved record"]);
+  const render = () => {
+    memory = nextOwnedSnapshot(memory, {
+      signedInUid: load.claim!.uid, epoch: load.claim!.epoch,
+      generation: load.claim!.generation, loading: load.loading,
+      failed: Boolean(load.error), value: load.value ?? [], valueClaim: load.valueClaim,
+    });
+    return memory;
+  };
+  assert.deepEqual(render().value, ["saved record"]);
+  const refresh = captureLoadClaim(first.uid, 2);
+  load = beginOwnedLoad(load, refresh);
+  render();
+  load = commitOwnedFailure(load, refresh, "Connection unavailable");
+  render();
+  assert.equal(memory.pending, false, "a settled refresh failure must not leave loading active");
+  assert.deepEqual(memory.value, ["saved record"], "same-session refresh failure retains cache");
+  assert.equal(resolveSearchPresentation({ query: "", queryActive: false,
+    matchCount: 0, libraryCount: memory.value?.length ?? 0,
+    loading: memory.pending, failed: Boolean(load.error) && !memory.accepted,
+  }), "idle");
+  const retry = captureLoadClaim(first.uid, 3);
+  load = beginOwnedLoad(load, retry);
+  render();
+  load = commitOwnedSuccess(load, retry, ["fresh record"]);
+  assert.deepEqual(render().value, ["fresh record"]);
+  const newEpoch = beginSessionCommit();
+  memory = nextOwnedSnapshot(memory, {
+    signedInUid: first.uid, epoch: newEpoch, generation: 1,
+    loading: false, failed: false, value: load.value ?? [], valueClaim: load.valueClaim,
+  });
+  assert.equal(memory.accepted, false, "same UID in a new session cannot inherit cache");
 }
 
 console.log("ownedLoad.test.ts: ok");

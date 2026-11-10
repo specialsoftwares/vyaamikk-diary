@@ -55,6 +55,7 @@ import {
 } from "@/services/accountDeletion/sessionLocalReadiness";
 import { sessionPublicationLive } from "@/services/accountDeletion/sessionPublication";
 import { getNativeAuthUid } from "@/services/auth/nativePhoneAuth";
+import { confirmFailureForOwnedEpoch } from "@/services/auth/profileWriteOwnership";
 import { phoneAuthCopy } from "@/auth-v2/phoneAuthCopy";
 import { PHONE_SESSION_BOUND_MS, raceOwnedPublication } from "@/auth-v2/phoneAuthOperation";
 
@@ -233,7 +234,7 @@ interface AuthApi extends AuthState {
   acknowledgeUEID(): void;
   updateProfile(
     patch: ProfilePatch,
-    opts?: { user?: UserProfile; ownedGeneration?: number }
+    opts?: { user?: UserProfile; ownedGeneration?: number; ownedEpoch?: number; isCurrent?: () => boolean }
   ): Promise<UserProfile>;
   /** Refresh session from a server-returned profile (email bind, reactivation). */
   applyServerProfile(
@@ -504,7 +505,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
         return published.value;
       } catch (e) {
-        throw toAppError(e);
+        if (e instanceof AppError && e.details?.phoneAuthSettlement === "unknown") throw e;
+        throw toAppError(confirmFailureForOwnedEpoch({ ownedEpoch: epoch, currentEpoch: currentSessionCommitEpoch(), error: e }));
       }
     },
     [saveSession, state.user?.uid]
@@ -665,20 +667,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         /** Authoritative user when React session state has not committed yet. */
         user?: UserProfile;
         ownedGeneration?: number;
+        ownedEpoch?: number;
+        isCurrent?: () => boolean;
       }
     ): Promise<UserProfile> => {
       const current = opts?.user ?? state.session?.user;
       if (!current) throw toAppError(new Error("Not signed in."));
       const owned = opts?.ownedGeneration;
+      const ownedEpoch = opts?.ownedEpoch ?? currentSessionCommitEpoch();
       const stillOwned = () =>
-        owned == null ||
+        (opts?.isCurrent?.() ?? true) && currentSessionCommitEpoch() === ownedEpoch && (owned == null ||
         (currentAuthMutationGeneration() === owned &&
-          (sessionRef.current == null || sessionRef.current.user.uid === current.uid));
+          (sessionRef.current == null || sessionRef.current.user.uid === current.uid)));
       try {
         if (!stillOwned()) throw new Error("session_changed");
         const next = await getAuthService().updateProfile(current.uid, patch, {
           uid: current.uid,
           generation: owned ?? currentAuthMutationGeneration(),
+          epoch: ownedEpoch,
+          isCurrent: stillOwned,
         });
         if (!stillOwned()) throw new Error("session_changed");
         const session = await saveSession(next, {
@@ -686,13 +693,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           claim: {
             uid: current.uid,
             generation: owned ?? currentAuthMutationGeneration(),
-            epoch: currentSessionCommitEpoch(),
+            epoch: ownedEpoch,
           },
-          isCurrent: owned == null ? undefined : stillOwned,
+          isCurrent: stillOwned,
         });
         if (!stillOwned()) throw new Error("session_changed");
         setState((s) => {
-          if (owned != null && currentAuthMutationGeneration() !== owned) return s;
+          if (!stillOwned()) return s;
           if (s.session && s.session.user.uid !== current.uid) return s;
           return {
             ...s,

@@ -9,6 +9,11 @@ import { useAuth } from "@/state/auth";
  * and it does not call the age-assessment callable.
  */
 
+/**
+ * Legacy date-of-birth route. Launch and the normal new-user path do not
+ * navigate here. Demographic age is an optional control on profile details.
+ */
+
 export default function AgeDeclarationRoute() {
   const router = useRouter();
   const { user } = useAuth();

@@ -10,7 +10,15 @@ import {
 } from "@/components/insights/insightCategoryCopy";
 import { InsightsCategoryRow } from "@/components/insights/InsightsCategoryRow";
 import { SettingsNavGroup } from "@/components/settings/SettingsNavCard";
-import { ErrorState, Header, Loader, LocaleUiText, Screen } from "@/components/ui";
+import {
+  ErrorState,
+  Header,
+  Loader,
+  LocaleUiText,
+  Screen,
+  SkeletonList,
+  SkeletonLoadingPanel,
+} from "@/components/ui";
 import { useBusinessInsightsDashboard } from "@/hooks/useBusinessInsightsDashboard";
 import { useT } from "@/i18n";
 import {
@@ -75,9 +83,11 @@ export default function BusinessInsightsCategoryScreen() {
       />
       {!category ? (
         <LocaleUiText style={styles.intro}>{insightCategoryUnknown(t)}</LocaleUiText>
-      ) : loading ? (
-        <Loader message={t("common.loading")} />
-      ) : error ? (
+      ) : loading && !data ? (
+        <SkeletonLoadingPanel loading slowMessage={t("skeleton.stillLoading")}>
+          <SkeletonList count={4} />
+        </SkeletonLoadingPanel>
+      ) : error && !data ? (
         <ErrorState message={error} onRetry={() => void reload()} retryLabel={t("common.retry")} />
       ) : !data ? (
         <Loader message={t("common.loading")} />

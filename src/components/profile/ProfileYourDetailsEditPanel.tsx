@@ -26,6 +26,7 @@ interface ProfileYourDetailsEditPanelProps {
   displayNameError: string | null;
   businessNameLocked: boolean;
   emailLocked: boolean;
+  emailUnavailableMessage?: string;
   businessNameRemaining: number;
   emailRemaining: number;
   displayNameRef: React.RefObject<TextInput | null>;
@@ -39,6 +40,7 @@ export function ProfileYourDetailsEditPanel({
   displayNameError,
   businessNameLocked,
   emailLocked,
+  emailUnavailableMessage,
   businessNameRemaining,
   emailRemaining,
   displayNameRef,
@@ -110,7 +112,7 @@ export function ProfileYourDetailsEditPanel({
           tone={emailLocked ? "warning" : "info"}
           message={
             emailLocked
-              ? t("identity.details.lockedEmail")
+              ? emailUnavailableMessage ?? t("identity.details.lockedEmail")
               : t("profilePolicy.emailRemaining", { count: emailRemaining })
           }
         />
@@ -207,7 +209,7 @@ export function ProfileYourDetailsEditPanel({
                 placeholder={t("onboarding.profile.emailPlaceholder")}
                 hint={
                   emailLocked
-                    ? t("identity.details.lockedEmail")
+                    ? emailUnavailableMessage ?? t("identity.details.lockedEmail")
                     : t("onboarding.profile.emailHint")
                 }
                 keyboardType="email-address"

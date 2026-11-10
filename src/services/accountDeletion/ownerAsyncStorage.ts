@@ -42,6 +42,8 @@ export async function removeAsyncStorageKeysForUser(
     `${CUSTOMER_CREDIT}${userId}`,
     `${CUSTOMER_CREDIT_SERIAL}${userId}`,
     demographicAgeStorageKey(userId),
+    // Earlier released builds stored the same optional answer under this key.
+    `vyd_demographic_age_range_v1:${userId}`,
   ]);
   const prefixed = all.filter(
     (key) => exact.has(key) || key.startsWith(`${PRO_PACK_DRAFT_PREFIX}${userId}_`)

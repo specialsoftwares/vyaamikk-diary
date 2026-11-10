@@ -131,11 +131,21 @@ export type ReserveOutcome =
   | ReserveResult
   | { ok: false; failure: ReactivationFailure; retryAfterSeconds?: number };
 
+/** Stored cutoff wins over a later scheduled date. Missing cutoff keeps the legacy deadline. */
+export function reactivationWindowDeadline(profile: {
+  reactivationCutoff?: number | null;
+  deletionScheduledFor?: number | null;
+  deletionRequestedAt?: number | null;
+}): number {
+  const cutoff = Number(profile.reactivationCutoff ?? 0);
+  const scheduled = Number(profile.deletionScheduledFor ?? 0);
+  if (cutoff > 0) return scheduled > 0 ? Math.min(cutoff, scheduled) : cutoff;
+  if (scheduled > 0) return scheduled;
+  return Number(profile.deletionRequestedAt ?? 0) + DELETION_GRACE_MS;
+}
+
 function profileWindowOpen(profile: UserProfileDoc, now: number): boolean {
-  const scheduled =
-    profile.deletionScheduledFor ??
-    (profile.deletionRequestedAt ?? 0) + DELETION_GRACE_MS;
-  return scheduled > now;
+  return reactivationWindowDeadline(profile) > now;
 }
 
 function eligibleProfile(profile: UserProfileDoc, now: number): ReactivationFailure | null {
@@ -236,7 +246,10 @@ export async function reserveReactivationSend(input: {
       }
     }
 
-    const binding = await tx.get("emailBindings", String(profile.emailHash ?? ""));
+    const bindingHash = typeof profile.emailHash === "string" ? profile.emailHash : "";
+    const binding = /^[a-f0-9]{64}$/.test(bindingHash)
+      ? await tx.get("emailBindings", bindingHash)
+      : null;
     const mailbox = resolveVerifiedMailbox(
       {
         uid: input.uid,
@@ -420,7 +433,10 @@ export async function verifyReactivationCode(input: {
       bumpGuess();
       return { ok: false as const, failure: "superseded" as const };
     }
-    const freshBinding = await tx.get("emailBindings", String(profile.emailHash ?? ""));
+    const freshBindingHash = typeof profile.emailHash === "string" ? profile.emailHash : "";
+    const freshBinding = /^[a-f0-9]{64}$/.test(freshBindingHash)
+      ? await tx.get("emailBindings", freshBindingHash)
+      : null;
     const freshMailbox = resolveVerifiedMailbox(
       {
         uid: input.uid,

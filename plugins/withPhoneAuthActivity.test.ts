@@ -6,6 +6,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
+import { fileURLToPath, URL } from "node:url";
+
+const pluginDirectory = fileURLToPath(new URL(".", import.meta.url));
 
 import { createPhoneAuthNativeSlot, sendPermittedBySignal } from "../src/services/auth/phoneAuthNativeSlot";
 
@@ -15,7 +18,14 @@ const plugin = require("./withPhoneAuthActivity.js") as {
   phoneAuthActivitySourceDir: () => string;
   BRIDGE_IMPORT: string;
   BRIDGE_REGISTER: string;
+  applyPhoneAuthDependencies: (contents: string, firebaseBomVersion: string) => string;
 };
+
+const dependencies = plugin.applyPhoneAuthDependencies("plugins {}", "34.14.0");
+assert.match(dependencies, /implementation "com.google.firebase:firebase-auth"/);
+assert.match(dependencies, /firebase-bom:34.14.0/);
+assert.equal(plugin.applyPhoneAuthDependencies(dependencies, "34.14.0"), dependencies);
+assert.throws(() => plugin.applyPhoneAuthDependencies("", ""), /BOM version missing/);
 
 const apply = plugin.applyPhoneAuthActivityMainApplication;
 
@@ -44,9 +54,13 @@ class MainApplication : Application() {
   assert.match(executable, /System\.identityHashCode\(activity\)/);
   assert.match(executable, /return "present:" \+ System\.identityHashCode\(activity\)/);
   assert.match(executable, /"refused:in_flight"/);
-  assert.match(executable, /"recovered"/);
+  assert.doesNotMatch(executable, /"recovered"/);
+  assert.match(executable, /credentialTask/);
+  assert.match(executable, /activeSend !== attempt \|\| attempt.retired/);
+  assert.match(executable, /PhoneAuthProvider\.verifyPhoneNumber/);
+  assert.match(executable, /verificationProof/);
   assert.doesNotMatch(executable, /RNFBAuthModule|module loaded|getConstants/);
-  const appJson = readFileSync(join(import.meta.dirname, "..", "app.json"), "utf8");
+  const appJson = readFileSync(join(pluginDirectory, "..", "app.json"), "utf8");
   assert.match(appJson, /\.\/plugins\/withPhoneAuthActivity\.js/);
 }
 
@@ -61,7 +75,10 @@ class MainApplication : Application() {
   assert.equal(slot.claim("send", 2, { id: "41" }), "refused:in_flight");
   assert.equal(slot.recover("send", { id: "41" }), "held");
   assert.equal(slot.release("send", 2), "stale");
-  assert.equal(slot.recover("send", null), "recovered");
+  assert.equal(slot.recover("send", null), "held");
+  assert.equal(slot.claim("confirm", 1, { id: "41" }), "refused:in_flight");
+  assert.equal(slot.claim("send", 3, { id: "42" }), "refused:in_flight");
+  assert.equal(slot.release("send", 1), "released");
   assert.equal(slot.claim("send", 3, { id: "42" }), "accepted:42");
   assert.equal(slot.release("send", 3), "released");
   assert.equal(slot.recover("send", { id: "42" }), "idle");
@@ -69,7 +86,7 @@ class MainApplication : Application() {
 
 {
   const gate = readFileSync(
-    join(import.meta.dirname, "..", "src", "services", "auth", "nativePhoneAuth.ts"),
+    join(pluginDirectory, "..", "src", "services", "auth", "nativePhoneAuth.ts"),
     "utf8"
   );
   const send = gate.split("export async function startNativePhoneOtp")[1]?.split(

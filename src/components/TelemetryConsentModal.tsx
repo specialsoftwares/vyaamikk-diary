@@ -15,6 +15,8 @@ interface TelemetryConsentModalProps {
   declineLabel: string;
   onAllow: () => void;
   onDecline: () => void;
+  /** Honest outcome after a choice. Absent while the question is still unanswered. */
+  statusMessage?: string | null;
 }
 
 export function TelemetryConsentModal({
@@ -25,6 +27,7 @@ export function TelemetryConsentModal({
   declineLabel,
   onAllow,
   onDecline,
+  statusMessage,
 }: TelemetryConsentModalProps) {
   const [fontsLoaded] = useFonts({
     Barlow_300Light,
@@ -44,6 +47,7 @@ export function TelemetryConsentModal({
           <Text style={[styles.body, bodyFamily ? { fontFamily: bodyFamily } : null]}>
             {body}
           </Text>
+          {statusMessage ? <Text style={styles.status}>{statusMessage}</Text> : null}
           <Pressable
             accessibilityRole="button"
             onPress={onAllow}
@@ -98,6 +102,14 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "300",
     lineHeight: 21,
+    marginBottom: 22,
+  },
+  status: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "600",
+    lineHeight: 20,
+    marginTop: -10,
     marginBottom: 22,
   },
   primary: {

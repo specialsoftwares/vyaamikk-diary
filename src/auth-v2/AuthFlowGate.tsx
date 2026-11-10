@@ -22,6 +22,10 @@ import {
 import { resumeSignedOutPhoneChallenge } from "@/auth-v2/signedOutChallengeResume";
 import { phoneAuthCopy } from "@/auth-v2/phoneAuthCopy";
 import {
+  canUseOrdinaryEmailBinding,
+  VERIFIED_EMAIL_CHANGE_SUPPORT_MESSAGE,
+} from "@/auth-v2/verifiedEmailEditAvailability";
+import {
   createPhoneAuthOperations,
   escapePhoneChallenge,
   isPhoneAttemptUnknown,
@@ -1539,6 +1543,10 @@ export function AuthFlowGate() {
       goToBusinessIdentity({ userInitiated: true });
       return;
     }
+    if (!canUseOrdinaryEmailBinding(user)) {
+      setEmailHint(VERIFIED_EMAIL_CHANGE_SUPPORT_MESSAGE);
+      return;
+    }
 
     // In-flight guard before any navigation/state so rapid taps cannot issue two challenges.
     emailSendInFlightRef.current = true;
@@ -1632,6 +1640,10 @@ export function AuthFlowGate() {
 
   const handleEmailRetrySend = async () => {
     if (!user) return;
+    if (!canUseOrdinaryEmailBinding(user)) {
+      setEmailHint(VERIFIED_EMAIL_CHANGE_SUPPORT_MESSAGE);
+      return;
+    }
     if (emailSendInFlightRef.current) return;
     clearFlowError();
     emailSendInFlightRef.current = true;
@@ -1669,6 +1681,10 @@ export function AuthFlowGate() {
 
   const handleEmailResend = async () => {
     if (!user || !emailVerificationId || emailResendInFlightRef.current) return;
+    if (!canUseOrdinaryEmailBinding(user)) {
+      setEmailHint(VERIFIED_EMAIL_CHANGE_SUPPORT_MESSAGE);
+      return;
+    }
     if (emailResendAvailableAt != null && Date.now() < emailResendAvailableAt) return;
     emailResendInFlightRef.current = true;
     clearFlowError();

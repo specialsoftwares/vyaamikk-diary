@@ -16,7 +16,7 @@ export type DiagnosticsPreference = Readonly<{
   /** Native deletion requested is not a remote recall or a deletion receipt. */
   unsentReports: UnsentReportState;
   /** Running SDK collection. Absent means this record is not bridge proof. */
-  sdkCollection?: boolean;
+  sessionReporting?: boolean;
   /** RNFirebase auto-collection preference. Production leaves this false. */
   preference?: false;
   status?: CrashActivationResult["status"];
@@ -115,7 +115,7 @@ export function applyDiagnosticsChoice(
       const bridgeOn =
         enabled &&
         activation.status === "enabled" &&
-        activation.sdkCollection === true &&
+        activation.sessionReporting === true &&
         activation.preference === false;
       if (!activation.ok || (enabled && !bridgeOn)) {
         const unavailable =
@@ -128,7 +128,7 @@ export function applyDiagnosticsChoice(
           revision: rev,
           error: unavailable ? "unavailable" : "activation_failed",
           unsentReports: activation.unsentReports,
-          sdkCollection: activation.sdkCollection,
+          sessionReporting: activation.sessionReporting,
           preference: false,
           status: unavailable ? "unavailable" : activation.status,
         };
@@ -141,7 +141,7 @@ export function applyDiagnosticsChoice(
         revision: rev,
         error: null,
         unsentReports: activation.unsentReports,
-        sdkCollection: activation.sdkCollection,
+        sessionReporting: activation.sessionReporting,
         preference: false,
         status: activation.status,
       };

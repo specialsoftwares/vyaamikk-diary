@@ -81,7 +81,7 @@ __setRuntimeSignalsForTests({
     setUserId: () => {},
   });
   __setCrashSdkBridgeForTests({
-    setSdkCollectionEnabled: async () => {},
+    setSessionReportingEnabled: async () => {},
     recordDiagnostic: async (message) => {
       calls.push({ kind: "recordError", payload: message });
     },
@@ -148,7 +148,7 @@ __setRuntimeSignalsForTests({
     setUserId: () => {},
   });
   __setCrashSdkBridgeForTests({
-    setSdkCollectionEnabled: async () => {},
+    setSessionReportingEnabled: async () => {},
     recordDiagnostic: async () => {
       calls.push({ kind: "recordError" });
     },

@@ -8,6 +8,8 @@ export { SkeletonSearchResult } from "./SkeletonSearchResult";
 export { SkeletonDashboardPreview } from "./SkeletonDashboardPreview";
 export { SkeletonSettingsSection } from "./SkeletonSettingsSection";
 export { SkeletonLoadingPanel } from "./SkeletonLoadingPanel";
+export { skeletonPanelMode } from "./skeletonPanelMode";
+export type { SkeletonPanelMode } from "./skeletonPanelMode";
 export {
   SkeletonDraftRow,
   SkeletonStatutoryCard,

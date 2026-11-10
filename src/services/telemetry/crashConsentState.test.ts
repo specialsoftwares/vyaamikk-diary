@@ -118,7 +118,7 @@ function createCrashDouble(handlers?: {
 }) {
   const snap = {
     preference: true,
-    sdkCollection: false,
+    sessionReporting: false,
     unsentDeletion: "none" as "none" | "requested",
   };
   const bridge = handlers?.bridge ?? "present";
@@ -138,13 +138,13 @@ function createCrashDouble(handlers?: {
     __setCrashSdkBridgeForTests(null);
   } else {
     __setCrashSdkBridgeForTests({
-      setSdkCollectionEnabled: async (enabled) => {
+      setSessionReportingEnabled: async (enabled) => {
         if (bridge === "fail" && enabled) throw new Error("bridge rejected");
-        snap.sdkCollection = enabled;
+        snap.sessionReporting = enabled;
         try {
           await handlers?.onCollection?.(enabled);
         } catch (error) {
-          if (enabled) snap.sdkCollection = false;
+          if (enabled) snap.sessionReporting = false;
           throw error;
         }
       },
@@ -261,22 +261,22 @@ async function main(): Promise<void> {
   await grantWithoutRuntimeBridge();
   await grantWithBridgeLeavesPreferenceFalse();
   assert.equal(
-    nextProcessCrashCollectionEnabled({ preference: false, firebaseJson: true, manifest: true }),
+    nextProcessCrashCollectionEnabled({ sdkOverride: false, preference: false, firebaseJson: true, manifest: true }),
     false,
-    "preference false means the next process starts disabled"
+    "early bootstrap resets the persistent SDK override before SDK initialization"
   );
   assert.equal(
-    nextProcessCrashCollectionEnabled({ preference: null, firebaseJson: false, manifest: true }),
+    nextProcessCrashCollectionEnabled({ sdkOverride: false, preference: null, firebaseJson: false, manifest: true }),
     false
   );
   assert.equal(nativeFromApply(true, { status: "enabled", preference: false }), "unavailable");
   assert.equal(nativeFromApply(true, { nativeState: "on" }), "unavailable");
   assert.equal(
-    nativeFromApply(true, { status: "enabled", preference: true, sdkCollection: true }),
+    nativeFromApply(true, { status: "enabled", preference: true, sessionReporting: true }),
     "failed"
   );
   assert.equal(
-    nativeFromApply(true, { status: "enabled", preference: false, sdkCollection: true }),
+    nativeFromApply(true, { status: "enabled", preference: false, sessionReporting: true }),
     "enabled"
   );
 
@@ -384,7 +384,7 @@ async function withdrawalDuringActivation(): Promise<void> {
     await Promise.resolve();
   }
   assert.ok(calls.lastIndexOf("disable") > calls.indexOf("enable"));
-  assert.equal(snap.sdkCollection, false, "withdrawal clears the running SDK while enable is in flight");
+  assert.equal(snap.sessionReporting, false, "withdrawal clears the running SDK while enable is in flight");
   assert.equal(snap.preference, false, "withdrawal writes the auto-collection preference false");
   assert.equal(snap.unsentDeletion, "requested");
   recordError(new Error("synthetic"));
@@ -689,7 +689,7 @@ async function delayedDiskAfterAcknowledgedAllow(): Promise<void> {
   assert.ok(allowed);
   assert.equal(allowed.choice.decision, "allow");
   assert.equal(crashConsentStatus(allowed), "active");
-  assert.equal(snap.sdkCollection, true);
+  assert.equal(snap.sessionReporting, true);
   assert.equal(snap.preference, false);
   assert.ok(held.calls() > 1, "the newer choice did not wait on the delayed disk read");
   held.release();
@@ -700,7 +700,7 @@ async function delayedDiskAfterAcknowledgedAllow(): Promise<void> {
   assert.equal(after?.acknowledgement?.revision, allowed.acknowledgement?.revision);
   assert.equal(after?.acknowledgement?.decision, "allow");
   assert.equal(crashConsentStatus(after!), "active");
-  assert.equal(snap.sdkCollection, true);
+  assert.equal(snap.sessionReporting, true);
   assert.equal(snap.preference, false);
   __resetCrashReportingForTests();
 }
@@ -717,7 +717,7 @@ async function delayedDiskAfterWithdrawal(): Promise<void> {
   const withdrawn = queue.state("account-a")?.consent;
   assert.ok(withdrawn);
   assert.equal(withdrawn.choice.decision, "withdraw");
-  assert.equal(snap.sdkCollection, false);
+  assert.equal(snap.sessionReporting, false);
   assert.equal(snap.preference, false);
   assert.equal(snap.unsentDeletion, "requested");
   assert.notEqual(snap.unsentDeletion, "confirmed" as string);
@@ -728,7 +728,7 @@ async function delayedDiskAfterWithdrawal(): Promise<void> {
   assert.equal(after?.choice.uid, "account-a");
   assert.ok((after?.choice.revision ?? 0) > 0);
   assert.notEqual(after?.choice.decision, "allow");
-  assert.equal(snap.sdkCollection, false);
+  assert.equal(snap.sessionReporting, false);
   assert.equal(snap.preference, false);
   assert.notEqual(crashConsentStatus(after!), "active");
   __resetCrashReportingForTests();
@@ -751,7 +751,7 @@ async function accountSwitchDropsPreviousGrant(): Promise<void> {
   assert.equal(other.choice.decision, "unset");
   assert.notEqual(crashConsentStatus(other), "active");
   assert.notEqual(queue.state("account-a")?.consent?.choice.decision, "allow");
-  assert.equal(snap.sdkCollection, false);
+  assert.equal(snap.sessionReporting, false);
   assert.equal(snap.preference, false);
   __resetCrashReportingForTests();
 }
@@ -776,7 +776,7 @@ async function grantWithoutRuntimeBridge(): Promise<void> {
   assert.equal(crashConsentStatus(consent), "unavailable");
   assert.notEqual(crashConsentStatus(consent), "active");
   assert.equal(snap.preference, false);
-  assert.equal(snap.sdkCollection, false);
+  assert.equal(snap.sessionReporting, false);
   recordError(new Error("synthetic"));
   assert.equal(reports, 0);
   __resetCrashReportingForTests();
@@ -794,11 +794,11 @@ async function grantWithBridgeLeavesPreferenceFalse(): Promise<void> {
   const consent = queue.state("account-a")?.consent;
   assert.ok(consent);
   assert.equal(crashConsentStatus(consent), "active");
-  assert.equal(snap.sdkCollection, true);
+  assert.equal(snap.sessionReporting, true);
   assert.equal(snap.preference, false);
   queue.bind("account-b");
   await ticks();
-  assert.equal(snap.sdkCollection, false);
+  assert.equal(snap.sessionReporting, false);
   assert.equal(snap.preference, false);
   assert.equal(queue.state("account-b")?.consent?.choice.decision, "unset");
   assert.notEqual(crashConsentStatus(queue.state("account-b")!.consent!), "active");

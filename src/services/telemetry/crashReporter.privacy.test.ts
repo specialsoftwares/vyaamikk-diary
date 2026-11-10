@@ -43,7 +43,7 @@ __resetCrashReportingForTests();
     setUserId: () => {},
   });
   __setCrashSdkBridgeForTests({
-    setSdkCollectionEnabled: async () => {},
+    setSessionReportingEnabled: async () => {},
     recordDiagnostic: async (message) => {
       calls.push({ kind: "recordError", payload: message });
     },

@@ -88,51 +88,69 @@ async function delRaw(): Promise<void> {
   else if (api.removeItem) await api.removeItem(KEY);
 }
 
+let writeTail: Promise<void> = Promise.resolve();
+
+function enqueueWrite<T>(work: () => Promise<T>): Promise<T> {
+  const run = writeTail.then(work, work);
+  writeTail = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+function parsePending(raw: string | null): PendingMobileContactChange | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<PendingMobileContactChange>;
+    if (typeof parsed?.uid !== "string" || !parsed.uid ||
+      typeof parsed.oldPhoneE164 !== "string" || typeof parsed.newPhoneE164 !== "string" ||
+      typeof parsed.operationId !== "string" || !parsed.operationId ||
+      typeof parsed.authUpdatedAt !== "number" || !Number.isFinite(parsed.authUpdatedAt) ||
+      parsed.purpose !== "contact_change") return null;
+    return {
+      uid: parsed.uid, oldPhoneE164: normalizePhoneE164(parsed.oldPhoneE164),
+      newPhoneE164: normalizePhoneE164(parsed.newPhoneE164), operationId: parsed.operationId,
+      authUpdatedAt: parsed.authUpdatedAt, purpose: "contact_change",
+    };
+  } catch { return null; }
+}
+
 export async function savePendingMobileContactChange(
-  pending: PendingMobileContactChange
+  pending: PendingMobileContactChange,
+  owns: () => boolean = () => true
 ): Promise<void> {
-  await setRaw(
-    JSON.stringify({
+  const raw = JSON.stringify({
       ...pending,
       oldPhoneE164: normalizePhoneE164(pending.oldPhoneE164),
       newPhoneE164: normalizePhoneE164(pending.newPhoneE164),
       purpose: "contact_change",
-    })
-  );
+    });
+  await enqueueWrite(async () => {
+    if (owns()) await setRaw(raw);
+  });
 }
 
 export async function loadPendingMobileContactChange(): Promise<PendingMobileContactChange | null> {
-  const raw = await getRaw();
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as Partial<PendingMobileContactChange>;
-    if (
-      typeof parsed.uid !== "string" ||
-      typeof parsed.oldPhoneE164 !== "string" ||
-      typeof parsed.newPhoneE164 !== "string" ||
-      typeof parsed.operationId !== "string" ||
-      typeof parsed.authUpdatedAt !== "number" ||
-      parsed.purpose !== "contact_change"
-    ) {
-      await delRaw();
-      return null;
-    }
-    return {
-      uid: parsed.uid,
-      oldPhoneE164: normalizePhoneE164(parsed.oldPhoneE164),
-      newPhoneE164: normalizePhoneE164(parsed.newPhoneE164),
-      operationId: parsed.operationId,
-      authUpdatedAt: parsed.authUpdatedAt,
-      purpose: "contact_change",
-    };
-  } catch {
-    await delRaw();
-    return null;
-  }
+  // A read never deletes: a newer valid save may finish while this read waits.
+  return parsePending(await getRaw());
 }
 
 export async function clearPendingMobileContactChange(): Promise<void> {
-  await delRaw();
+  await enqueueWrite(delRaw);
+}
+
+/** An old server acknowledgement cannot remove a newer operation or owner. */
+export async function clearPendingMobileContactChangeIfMatches(
+  expected: PendingMobileContactChange,
+  owns: () => boolean = () => true
+): Promise<boolean> {
+  return enqueueWrite(async () => {
+    const current = parsePending(await getRaw());
+    if (!owns() || !current || current.uid !== expected.uid ||
+      current.operationId !== expected.operationId || current.authUpdatedAt !== expected.authUpdatedAt ||
+      current.oldPhoneE164 !== normalizePhoneE164(expected.oldPhoneE164) ||
+      current.newPhoneE164 !== normalizePhoneE164(expected.newPhoneE164)) return false;
+    await delRaw();
+    return true;
+  });
 }
 
 /**
@@ -171,7 +189,8 @@ export function shouldRetryServerMobileBind(args: {
     return {
       retry: true,
       newerPhoneE164: auth,
-      operationId: args.pending?.operationId ?? `recover_${Date.now()}`,
+      // A saved operation from another account or phone pair is not this bind.
+      operationId: `recover_${Date.now()}`,
     };
   }
 

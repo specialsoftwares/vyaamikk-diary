@@ -1,27 +1,23 @@
 /**
  * First profile save with age skipped.
- * Production patch builder -> profile seal/open -> save and read.
- * The profile writer is not mocked. No demographic band is stored, and the
- * account is not ageEligibility eligible.
+ * Calls the production Firebase profile writer with synthetic I/O, real profile
+ * encryption and the active-account guard. This is not a deployed callable,
+ * Rules emulator, or signed-device acceptance.
+ * No demographic band is stored and age is never authorization.
  */
 
 import assert from "node:assert/strict";
 
 import type { UserProfile } from "@/domain/types";
 import { ageEligibilityFromDemographicAnswer } from "@/onboarding/demographicAge";
-import {
-  buildClientProfileFirestoreWrite,
-  stripServerOwnedProfilePatchKeys,
-} from "@/services/auth/clientProfilePatchPayload";
-import { applyProfilePatch, normaliseUserProfile } from "@/services/auth/normalizeProfile";
-import { issueProfileDocumentIfOwned } from "@/services/auth/profileWriteOwnership";
+import { updateProfileWithIo } from "@/services/auth/firebase";
+import { normaliseUserProfile } from "@/services/auth/normalizeProfile";
 import type { ProfilePatch } from "@/services/auth/types";
 import { cloudPayloadLeaksPlaintext } from "@/services/privacy/diarySealDocument";
 import {
   assertBusinessSealBinding,
   BUSINESS_SENSITIVE_FIELDS,
   sealedBusinessCloud,
-  userProfileWriteNeedsSeal,
 } from "@/services/privacy/businessCloudSeal";
 import { assertBusinessAgeAdmitted } from "../../functions/src/identity/businessAdmission";
 import {
@@ -89,7 +85,6 @@ async function saveSkippedAgeProfile(input: {
   account: Record<string, unknown> | null;
   documents: Map<string, Record<string, unknown>>;
 }): Promise<void> {
-  await assertBusinessAgeAdmitted(input.uid, async () => input.account);
   const existing = ownerProfile(input.uid);
   assert.equal(existing.ageEligibility, undefined);
   assert.equal("demographicAgeBand" in existing, false);
@@ -103,25 +98,19 @@ async function saveSkippedAgeProfile(input: {
     pinDistrict: "New Delhi",
     pinState: "Delhi",
   };
-  let payload: Record<string, unknown> | null = null;
-  await issueProfileDocumentIfOwned({
-    claim: { uid: input.uid, generation: 1 },
-    readLive: () => ({ uid: input.liveUid, generation: 1 }),
-    prepare: async () => {
-      const safe = stripServerOwnedProfilePatchKeys(patch, { production: true });
-      const next = applyProfilePatch(existing, safe);
-      const write = buildClientProfileFirestoreWrite(existing, next, { production: true });
-      if (!write) throw new Error("profile_writer_rejected");
-      assert.equal(write.ageEligibility, undefined);
-      assert.equal("demographicAgeBand" in write, false);
+  let sealedWrites = 0;
+  await updateProfileWithIo(input.uid, patch, {
+    production: true,
+    readAuthUid: () => input.liveUid,
+    requireJsAuthSession: async () => undefined,
+    getUserDoc: async () => ({ exists: true, data: existing as unknown as Record<string, unknown> }),
+    openBusinessCloud: async (_collection, record) => record,
+    protectBusinessCloud: async ({ plain, sensitiveSource, revision }) => {
+      await assertBusinessAgeAdmitted(input.uid, async () => input.account);
+      assert.equal(plain.ageEligibility, undefined);
+      assert.equal("demographicAgeBand" in plain, false);
       assert.equal(ageEligibilityFromDemographicAnswer(null), null);
       assert.equal(ageEligibilityFromDemographicAnswer("skipped"), null);
-      const needsSeal = userProfileWriteNeedsSeal(
-        existing as unknown as Record<string, unknown>,
-        next as unknown as Record<string, unknown>
-      );
-      assert.equal(needsSeal, true);
-      const revision = Number(write.updatedAt);
       assertContentBinding({ collection: "users", purpose: "profile", revision });
       const seal = sealContent({
         key: CONTENT_KEY,
@@ -130,17 +119,17 @@ async function saveSkippedAgeProfile(input: {
         recordId: input.uid,
         revision,
         purpose: "profile",
-        plaintext: Buffer.from(
-          JSON.stringify(sensitiveProfile(next as unknown as Record<string, unknown>))
-        ),
+        plaintext: Buffer.from(JSON.stringify(sensitiveProfile(sensitiveSource!))),
       });
-      payload = sealedBusinessCloud({ collection: "users", plain: write, seal });
+      sealedWrites += 1;
+      return sealedBusinessCloud({ collection: "users", plain, seal });
     },
-    setDoc: async () => {
-      if (!payload) throw new Error("missing_profile_payload");
-      input.documents.set(input.uid, payload);
+    mergeUserDoc: async (uid, payload) => {
+      assert.equal(uid, input.uid);
+      input.documents.set(uid, payload);
     },
   });
+  assert.equal(sealedWrites, 1, "the production first-save path must invoke protection once");
 }
 
 function readSavedProfile(saved: Record<string, unknown>, readerUid: string): Record<string, unknown> {

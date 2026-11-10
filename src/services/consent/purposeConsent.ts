@@ -2,6 +2,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { CRASH_DIAGNOSTICS_PURPOSE, REQUIRED_PROCESSING_PURPOSE, consentAppliesToAccount, withdrawalEffect } from "@/domain/processingPurpose";
 import { currentAuthMutationGeneration } from "@/services/auth/authSessionFence";
+import { setCrashReportingEnabled } from "@/services/telemetry/crashReporter";
 import { applyDiagnosticsChoice, currentDiagnosticsPreference, type DiagnosticsPreference } from "@/services/telemetry/diagnosticsPreference";
 import { createPurposeConsentQueue, type PurposeQueueState } from "./purposeConsentQueue";
 export { PROCESSING_NOTICE_VERSION, PROCESSING_POLICY_VERSION } from "./purposeConsentQueue";
@@ -73,10 +74,14 @@ export const bindPurposeConsentAccount = queue.bind;
 export const currentPurposeConsentState = queue.state;
 export const subscribePurposeConsent = queue.subscribe;
 export async function reconcilePurposeConsent(uid: string): Promise<void> {
-  try { await queue.reconcile(uid); } catch { await applyDiagnosticsChoice(false); }
+  try { await queue.reconcile(uid); } catch { await setCrashReportingEnabled(false); }
 }
 export async function chooseCrashDiagnostics(enabled: boolean, uid: string): Promise<DiagnosticsPreference> {
-  try { await queue.choose(uid, enabled); } catch { await applyDiagnosticsChoice(false); }
+  try { await queue.choose(uid, enabled); }
+  catch {
+    // A thrown allow must not erase a persisted pending Allow by writing a decline.
+    if (!enabled) await applyDiagnosticsChoice(false);
+  }
   return currentDiagnosticsPreference();
 }
 export async function withdrawProcessingPurpose(purpose: string, uid: string): Promise<{ stopsPurposeProcessing: boolean; deletesAccount: boolean }> {

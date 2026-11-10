@@ -14,8 +14,8 @@
 name: CI
 
 on:
+  # Include stacked correction PRs, whose base is another feature branch.
   pull_request:
-    branches: [main, integration, security/firebase-session-hardening]
   push:
     # `develop` is the deferred-rename push hook. Draft PR #42 still heads `integration`.
     branches: [main, integration, develop]
@@ -83,9 +83,12 @@ jobs:
       # Letterhead PDF freshness gate needs a real Chromium (committed pdf/ does not count).
       - name: Install Chromium for letterhead PDF fixtures
         run: |
-          sudo apt-get update
-          sudo apt-get install -y chromium-browser || sudo apt-get install -y chromium
-          CHROME_BIN="$(command -v chromium-browser || command -v chromium || command -v google-chrome || true)"
+          CHROME_BIN="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          if [ -z "$CHROME_BIN" ]; then
+            sudo apt-get update
+            sudo apt-get install -y chromium
+            CHROME_BIN="$(command -v chromium || true)"
+          fi
           echo "LETTERHEAD_CHROME_BIN=${CHROME_BIN}" >> "$GITHUB_ENV"
           test -n "$CHROME_BIN"
           "$CHROME_BIN" --version

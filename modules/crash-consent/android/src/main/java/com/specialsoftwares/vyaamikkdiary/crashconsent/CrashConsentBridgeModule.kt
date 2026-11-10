@@ -4,66 +4,48 @@ import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
-import com.google.firebase.crashlytics.FirebaseCrashlytics
 
 /**
- * Signed-device checks — NOT RUN. This source is not evidence that they passed.
- * After a signed build that includes this module:
- * - Allow enables collection only in the current process.
- * - Force-stop, then relaunch, stays disabled until Allow again.
- * - Withdrawal disables collection.
- * - Switching accounts does not keep the previous grant.
- * - logcat or a debug readout must show the RNFirebase auto-collection preference false.
- *
- * Calls FirebaseCrashlytics.setCrashlyticsCollectionEnabled on the running SDK only.
- * Does not write ReactNativeFirebasePreferences KEY_CRASHLYTICS_AUTO_COLLECTION_ENABLED.
- * deleteUnsentReports() has no completion proof; the JS status stays "deletion requested".
- * Do not call sendUnsentReports. Do not claim uploaded reports were deleted.
+ * Automatic SDK upload stays off. Acknowledged account/revision authorizes the
+ * current process's sanitized records and an exactly owned prior report queue.
+ * Unknown, mixed-owner and withdrawn queues are never sent by a later grant.
+ * send/deleteUnsentReports in locked Crashlytics 20.0.6 return void; resolving
+ * this bridge means the command was accepted, not uploaded/deleted remotely.
+ * Signed-device startup, upgrade and account-switch checks — NOT RUN.
  */
-class CrashConsentBridgeModule(reactContext: ReactApplicationContext) :
-  ReactContextBaseJavaModule(reactContext) {
-
+class CrashConsentBridgeModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
   override fun getName(): String = "CrashConsentBridge"
 
-  @ReactMethod
-  fun setSdkCollectionEnabled(enabled: Boolean, promise: Promise) {
+  @ReactMethod fun setSessionReportingEnabled(enabled: Boolean, uid: String?, revision: Double?, promise: Promise) {
     try {
-      FirebaseCrashlytics.getInstance().setCrashlyticsCollectionEnabled(enabled)
-      promise.resolve(null)
+      if (!enabled) {
+        CrashConsentRuntime.disable()
+        promise.resolve(null)
+      } else {
+        CrashConsentRuntime.enable(uid, revision) { active ->
+          if (active) promise.resolve(null)
+          else promise.reject("crash_consent_unavailable", "Crash reporting could not be activated. Restart the app and try again.")
+        }
+      }
     } catch (error: Throwable) {
-      promise.reject("crash_consent_bridge_failed", "runtime collection update failed", error)
+      promise.reject("crash_consent_bridge_failed", "Crash reporting is unavailable.", error)
     }
   }
 
-  @ReactMethod
-  fun deleteUnsentReports(promise: Promise) {
+  @ReactMethod fun deleteUnsentReports(promise: Promise) {
     try {
-      FirebaseCrashlytics.getInstance().deleteUnsentReports()
+      CrashConsentRuntime.disable(delete = true)
       promise.resolve("deletion_requested")
     } catch (error: Throwable) {
-      promise.reject("crash_consent_bridge_failed", "unsent deletion request failed", error)
+      promise.reject("crash_consent_bridge_failed", "Unsent report deletion could not be requested.", error)
     }
   }
-
-  @ReactMethod
-  fun recordDiagnostic(message: String, promise: Promise) {
-    try {
-      FirebaseCrashlytics.getInstance().recordException(CrashConsentDiagnostic(message.take(200)))
-      promise.resolve(null)
-    } catch (error: Throwable) {
-      promise.reject("crash_consent_bridge_failed", "diagnostic record failed", error)
-    }
+  @ReactMethod fun recordDiagnostic(message: String, promise: Promise) {
+    try { CrashConsentRuntime.record(message); promise.resolve(null) }
+    catch (error: Throwable) { promise.reject("crash_consent_bridge_failed", "Diagnostic unavailable.", error) }
   }
-
-  @ReactMethod
-  fun logDiagnostic(message: String, promise: Promise) {
-    try {
-      FirebaseCrashlytics.getInstance().log(message.take(120))
-      promise.resolve(null)
-    } catch (error: Throwable) {
-      promise.reject("crash_consent_bridge_failed", "diagnostic log failed", error)
-    }
+  @ReactMethod fun logDiagnostic(message: String, promise: Promise) {
+    try { CrashConsentRuntime.log(message); promise.resolve(null) }
+    catch (error: Throwable) { promise.reject("crash_consent_bridge_failed", "Diagnostic unavailable.", error) }
   }
 }
-
-private class CrashConsentDiagnostic(message: String) : Exception(message)

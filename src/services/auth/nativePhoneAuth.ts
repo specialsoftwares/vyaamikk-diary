@@ -78,6 +78,12 @@ type ActivityBridge = {
   recoverConfirmSlot: () => string;
   releaseSendSlot: (generation: number) => string;
   releaseConfirmSlot: (generation: number) => string;
+  startPhoneVerification?: (phone: string, generation: number, forceResend: boolean) => Promise<{ verificationId: string }>;
+  confirmPhoneVerification?: (id: string, code: string, phone: string, generation: number) => Promise<string>;
+  updateVerifiedPhone?: (id: string, code: string, phone: string, expectedUid: string, generation: number) => Promise<string>;
+  verificationProof?: (id: string) => string | null;
+  retireSend?: (generation: number) => boolean;
+  retireConfirm?: (generation: number) => boolean;
 };
 
 let installedActivityBridge: ActivityBridge | null = null;
@@ -141,7 +147,7 @@ function releaseSendLock(generation: number): void {
     activityBridge()?.releaseSendSlot(generation);
   } catch {
     // A failed release leaves the native slot held. The next send stays refused
-    // until the Activity changes or this generation settles again.
+    // until the operation actually settles. Activity replacement is not cancellation.
   }
   if (sendLockGeneration === generation) {
     sendInFlight = false;
@@ -164,6 +170,7 @@ function releaseConfirmLock(generation: number): void {
 /** Drop a late native send without clearing a lock owned by a newer dispatch. */
 export function retireDispatchedNativeSend(): void {
   const retired = nativePhoneSendGeneration;
+  try { activityBridge()?.retireSend?.(retired); } catch { /* Native slot stays fail-closed. */ }
   nativePhoneSendGeneration += 1;
   for (const row of pendingByVerificationId.values()) {
     if (row.sendGeneration == null || row.sendGeneration === retired) {
@@ -174,7 +181,13 @@ export function retireDispatchedNativeSend(): void {
 
 /** Drop a late native confirm without clearing a lock owned by a newer dispatch. */
 export function retireDispatchedNativeConfirm(): void {
+  try { activityBridge()?.retireConfirm?.(nativePhoneConfirmGeneration); } catch { /* Keep the native slot held. */ }
   nativePhoneConfirmGeneration += 1;
+}
+
+/** A contact editor cannot retire a newer login confirmation. */
+export function retireNativeVerifiedPhone(): void {
+  if (confirmInFlightKey?.startsWith("contact:")) retireDispatchedNativeConfirm();
 }
 
 /**
@@ -230,7 +243,13 @@ function activityBridge(): ActivityBridge | null {
       typeof native.claimConfirmSlot !== "function" ||
       typeof native.recoverConfirmSlot !== "function" ||
       typeof native.releaseSendSlot !== "function" ||
-      typeof native.releaseConfirmSlot !== "function"
+      typeof native.releaseConfirmSlot !== "function" ||
+      typeof native.startPhoneVerification !== "function" ||
+      typeof native.confirmPhoneVerification !== "function" ||
+      typeof native.updateVerifiedPhone !== "function" ||
+      typeof native.verificationProof !== "function" ||
+      typeof native.retireSend !== "function" ||
+      typeof native.retireConfirm !== "function"
     ) {
       return null;
     }
@@ -251,10 +270,38 @@ function androidActivitySignal(): string | null {
   }
 }
 
+/** Keep verified-phone mutations inside the same native gate as phone login. */
+export async function updateNativeVerifiedPhone(input: {
+  verificationId: string; code: string; phone: string; expectedUid: string;
+  isCurrent: () => boolean;
+  fallback: () => Promise<void>;
+}): Promise<void> {
+  if (!input.isCurrent()) throw new Error("session_changed");
+  if (sendInFlight || confirmInFlightKey) throw new AppError("auth_failed", "Verification is still finishing. Go back and try again later.", undefined, { phoneAuthSettlement: "unknown" });
+  const generation = ++nativePhoneConfirmGeneration;
+  confirmLockGeneration = generation;
+  confirmInFlightKey = `contact:${generation}`;
+  const bridge = runtimePlatform() === "android" ? activityBridge() : null;
+  try {
+    if (runtimePlatform() === "android") {
+      if (!bridge?.updateVerifiedPhone || !bridge.claimConfirmSlot(generation).startsWith("accepted:")) {
+        throw new AppError("auth_failed", "Verification is still finishing. You can go back. If it does not finish, force stop the app in Android Settings and reopen it.", undefined, { phoneAuthSettlement: "unknown" });
+      }
+      if (!input.isCurrent() || generation !== nativePhoneConfirmGeneration) throw new Error("session_changed");
+      await bridge.updateVerifiedPhone(input.verificationId, input.code, input.phone, input.expectedUid, generation);
+    } else {
+      if (!input.isCurrent()) throw new Error("session_changed");
+      await input.fallback();
+    }
+    if (!input.isCurrent() || generation !== nativePhoneConfirmGeneration) throw new Error("session_changed");
+  } finally {
+    releaseConfirmLock(generation);
+  }
+}
+
 /**
- * Release a native slot only when the Activity that owned it is gone.
- * Clearing the JavaScript lock while that Activity is still current would
- * start a second verifyPhoneNumber on top of the one that has not finished.
+ * Query unresolved native work. Activity replacement never cancels a Firebase
+ * credential task. Only actual native completion makes another attempt safe.
  */
 export function recoverUnsettledNativeSend(): "recovered" | "held" | "idle" | "unavailable" {
   const bridge = activityBridge();
@@ -405,7 +452,7 @@ export async function clearStaleNativeAuthForFreshChallenge(): Promise<void> {
     preSendUidSuffix: snap.uid ? snap.uid.slice(-6) : null,
     preSendPhoneSuffix: snap.phoneE164 ? phoneSuffix(snap.phoneE164) : null,
   });
-  await signOutNativePhoneAuth();
+  await signOutNativePhoneAuth(() => true, false);
 }
 
 /**
@@ -418,7 +465,17 @@ export function subscribeNativeAuthState(
   const mod = tryNativeAuthModule();
   if (!mod) return () => undefined;
   try {
-    return mod.default().onAuthStateChanged((user) => {
+    let removeProofListener: () => void = () => undefined;
+    if (runtimePlatform() === "android" && !installedNativeModule) {
+      const { DeviceEventEmitter } = require("react-native") as {
+        DeviceEventEmitter: { addListener: (event: string, fn: () => void) => { remove: () => void } };
+      };
+      const subscription = DeviceEventEmitter.addListener("VydPhoneVerificationCompleted", () => {
+        listener(getNativeAuthUid(), getNativeAuthPhoneE164());
+      });
+      removeProofListener = () => subscription.remove();
+    }
+    const unsubscribe = mod.default().onAuthStateChanged((user) => {
       let phone: string | null = null;
       if (typeof user?.phoneNumber === "string" && user.phoneNumber.trim()) {
         try {
@@ -429,6 +486,7 @@ export function subscribeNativeAuthState(
       }
       listener(user?.uid ?? null, phone);
     });
+    return () => { unsubscribe(); removeProofListener(); };
   } catch {
     return () => undefined;
   }
@@ -445,6 +503,17 @@ export function observePostSendAuthForChallenge(
   if (!row) return null;
   if (row.sendGeneration != null && row.sendGeneration !== nativePhoneSendGeneration) return null;
   if (row.autoVerify) return row.autoVerify;
+  if (runtimePlatform() === "android") {
+    // An auth-state observer cannot identify which credential operation caused
+    // currentUser to change. Only the native callback owner can attest to it.
+    const encoded = activityBridge()?.verificationProof?.(row.firebaseVerificationId);
+    if (!encoded) return null;
+    try {
+      const proof = JSON.parse(encoded) as { verificationId?: string; uid?: string; phone?: string };
+      if (proof.verificationId !== row.firebaseVerificationId ||
+          proof.uid !== getNativeAuthUid() || !phonesMatchE164(proof.phone, row.phoneE164)) return null;
+    } catch { return null; }
+  }
 
   const evaluated = evaluatePostSendAutoVerification({
     challenge: {
@@ -486,13 +555,12 @@ export async function startNativePhoneOtp(
   if (!mod) {
     throw new AppError("auth_not_configured", "Native phone auth module is not linked.");
   }
-  // A lock left by a call that never settles is released only when the Activity
-  // that owns it is gone. The same Activity keeps the lock and refuses overlap.
   if (runtimePlatform() === "android") recoverUnsettledNativeSend();
-  if (sendInFlight) {
+  if (sendInFlight || confirmInFlightKey) {
     throw new AppError(
       "otp_send_failed",
-      "A verification code is already being sent. Please wait a moment."
+      "Verification is still finishing. You can go back. If it does not finish, force stop the app in Android Settings and reopen it.",
+      undefined, { phoneAuthSettlement: "unknown", diagnosticCode: "PHONE_NATIVE_HELD" }
     );
   }
 
@@ -509,8 +577,8 @@ export async function startNativePhoneOtp(
   // The duplicate check above is synchronous. Take the lock before any await so a
   // second tap cannot pass that check while this send is still preparing.
   // A dispatched signInWithPhoneNumber cannot be cancelled. Retiring the clock
-  // drops a late identity. The native slot stays until that call settles or its
-  // Activity is gone.
+  // drops a late identity. A native credential task stays held until it settles;
+  // replacing an Activity does not make its mutation safe to overlap.
   const sendGeneration = ++nativePhoneSendGeneration;
   sendLockGeneration = sendGeneration;
   sendInFlight = true;
@@ -544,10 +612,10 @@ export async function startNativePhoneOtp(
     throw new AppError(
       "otp_send_failed",
       sendClaim === "refused:in_flight"
-        ? "A verification code is already being sent. Please wait a moment."
+        ? "Verification is still finishing. You can go back. If it does not finish, force stop the app in Android Settings and reopen it."
         : "Phone verification needs the sign-in screen to be open. Go back and try again.",
       undefined,
-      { androidActivity, attemptId, diagnosticCode: sendClaim === "refused:in_flight" ? "PHONE_NATIVE_HELD" : "PHONE_ACTIVITY_MISSING" }
+      { androidActivity, attemptId, ...(sendClaim === "refused:in_flight" ? { phoneAuthSettlement: "unknown" } : {}), diagnosticCode: sendClaim === "refused:in_flight" ? "PHONE_NATIVE_HELD" : "PHONE_ACTIVITY_MISSING" }
     );
   }
   let preSend = snapshotNativeAuthState();
@@ -557,6 +625,13 @@ export async function startNativePhoneOtp(
     // Fresh challenge must not inherit a prior native session as "verified".
     // Capture preSendUid ONLY after this clear — successful fresh flow ⇒ null.
     await clearStaleNativeAuthForFreshChallenge();
+    if (sendGeneration !== nativePhoneSendGeneration) {
+      throw new AppError("otp_send_failed", "This verification request is no longer current.", undefined,
+        { diagnosticCode: "PHONE_SEND_SUPERSEDED", authPhase: "send" });
+    }
+    if (runtimePlatform() === "android" && androidActivitySignal() !== androidSignal) {
+      throw phoneAuthFailureToAppError({ code: "auth/missing-activity" }, "send", { androidActivity: "missing" });
+    }
     preSend = snapshotNativeAuthState();
     log.info("startNativePhoneOtp", {
       attemptId,
@@ -579,10 +654,19 @@ export async function startNativePhoneOtp(
     // A null Activity can return without settling this promise. The SDK's
     // auto-retrieval window is not the authentication deadline; the attempt
     // controller bounds the visible wait and drops a late result.
-    confirmation = await authInstance.signInWithPhoneNumber(
-      firebaseSendPhoneE164,
-      Boolean(options?.forceResend)
-    );
+    const ownedNative = runtimePlatform() === "android" ? activityBridge() : null;
+    if (ownedNative?.startPhoneVerification) {
+      const sent = await ownedNative.startPhoneVerification(firebaseSendPhoneE164, sendGeneration, Boolean(options?.forceResend));
+      // Android confirms through the same native owner; never RNFirebase's
+      // separate ConfirmationResult.confirm/global-currentUser shortcut.
+      confirmation = { verificationId: sent.verificationId } as NativeConfirmation;
+    } else if (runtimePlatform() === "android" && !installedNativeModule) {
+      throw new AppError("auth_not_configured", "Install the updated app to sign in.");
+    } else {
+      // iOS uses the existing adapter. Host-only injected RNFirebase boundaries
+      // retain coverage of controller races; they do not prove Android callbacks.
+      confirmation = await authInstance.signInWithPhoneNumber(firebaseSendPhoneE164, Boolean(options?.forceResend));
+    }
   } catch (e) {
     if (e instanceof AppError) throw e;
     const mapped = phoneAuthFailureToAppError(e, "send", {
@@ -649,6 +733,7 @@ export async function startNativePhoneOtp(
       phoneE164: phone,
       expiresAt,
       attemptId,
+      purpose: "phone_login",
     },
     () => sendGeneration === nativePhoneSendGeneration
   );
@@ -749,11 +834,17 @@ export async function confirmNativePhoneOtp(
   const phone = normalizePhoneE164(challenge.phoneE164);
   const trimmed = code.trim();
 
+  const openingSendGeneration = nativePhoneSendGeneration;
+  const openingConfirmGeneration = nativePhoneConfirmGeneration;
   let row = pendingByVerificationId.get(challenge.verificationId);
   if (!row) {
     const persisted = await loadNativePhoneAuthSession();
+    if (openingSendGeneration !== nativePhoneSendGeneration || openingConfirmGeneration !== nativePhoneConfirmGeneration) {
+      throw new AppError("otp_send_failed", "This verification request is no longer current.", undefined, { diagnosticCode: "PHONE_CONFIRM_SUPERSEDED" });
+    }
     if (
       persisted &&
+      persisted.purpose !== "contact_change" &&
       persisted.firebaseVerificationId === challenge.verificationId &&
       persisted.phoneE164 === phone
     ) {
@@ -766,6 +857,7 @@ export async function confirmNativePhoneOtp(
         startedAtMs: Date.now() - SESSION_TTL_MS,
         preSendUid: null,
         autoVerify: null,
+        sendGeneration: openingSendGeneration,
       };
       pendingByVerificationId.set(persisted.firebaseVerificationId, row);
       log.info("confirmNativePhoneOtp restored SecureStore session", {
@@ -842,7 +934,10 @@ export async function confirmNativePhoneOtp(
     }
     const uid = assertAuthenticatedPhoneMatchesChallenge(phone);
     pendingByVerificationId.delete(row.firebaseVerificationId);
-    await clearNativePhoneAuthSession();
+    await clearNativePhoneAuthSessionIfMatches({ firebaseVerificationId: row.firebaseVerificationId, phoneE164: row.phoneE164, attemptId: row.attemptId });
+    if (openingSendGeneration !== nativePhoneSendGeneration || openingConfirmGeneration !== nativePhoneConfirmGeneration || getNativeAuthUid() !== uid) {
+      throw new AppError("otp_send_failed", "This verification request is no longer current.", undefined, { diagnosticCode: "PHONE_CONFIRM_SUPERSEDED" });
+    }
     log.info("confirmNativePhoneOtp auto-verify ok", {
       attemptId: row.attemptId,
       phoneSuffix: phoneSuffix(phone),
@@ -869,7 +964,7 @@ export async function confirmNativePhoneOtp(
   if (runtimePlatform() === "android") recoverUnsettledNativeConfirm();
 
   const confirmKey = `${challenge.verificationId}:${trimmed.length}`;
-  if (confirmInFlightKey) {
+  if (confirmInFlightKey || sendInFlight) {
     throw new AppError(
       "invalid_otp",
       "Verification is already in progress. Please wait."
@@ -899,11 +994,12 @@ export async function confirmNativePhoneOtp(
     throw new AppError(
       "invalid_otp",
       confirmClaim === "refused:in_flight"
-        ? "Verification is already in progress. Please wait."
+        ? "Verification is still finishing. You can go back. If it does not finish, force stop the app in Android Settings and reopen it."
         : "Phone verification needs the sign-in screen to be open. Go back and try again.",
       undefined,
       {
         attemptId: row.attemptId,
+        ...(confirmClaim === "refused:in_flight" ? { phoneAuthSettlement: "unknown" } : {}),
         diagnosticCode: confirmClaim === "refused:in_flight" ? "PHONE_NATIVE_HELD" : "PHONE_ACTIVITY_MISSING",
         authPhase: "confirm",
       }
@@ -911,7 +1007,12 @@ export async function confirmNativePhoneOtp(
   }
   try {
     let uid: string;
-    if (row.confirmation) {
+    const ownedNative = runtimePlatform() === "android" ? activityBridge() : null;
+    if (ownedNative?.confirmPhoneVerification) {
+      uid = await ownedNative.confirmPhoneVerification(row.firebaseVerificationId, trimmed, phone, confirmGeneration);
+    } else if (runtimePlatform() === "android" && !installedNativeModule) {
+      throw new AppError("auth_not_configured", "Install the updated app to sign in.");
+    } else if (row.confirmation) {
       const cred = await row.confirmation.confirm(trimmed);
       uid = cred.user?.uid ?? "";
       if (!uid) {
@@ -981,9 +1082,14 @@ export async function confirmNativePhoneOtp(
 
 /** Sign out native Firebase Auth (best-effort). */
 export async function signOutNativePhoneAuth(
-  isCurrent: () => boolean = () => true
+  isCurrent: () => boolean = () => true,
+  retireOperations = true
 ): Promise<boolean> {
   if (!isCurrent()) return false;
+  if (retireOperations) {
+    retireDispatchedNativeSend();
+    retireDispatchedNativeConfirm();
+  }
   const mod = tryNativeAuthModule();
   if (!mod) return false;
   try {
@@ -1011,12 +1117,18 @@ export async function restorePendingPhoneSessionForResume(
   verificationId: string,
   phoneE164: string
 ): Promise<boolean> {
+  const openingSendGeneration = nativePhoneSendGeneration;
+  const openingConfirmGeneration = nativePhoneConfirmGeneration;
   purgeExpiredSessions();
   const phone = normalizePhoneE164(phoneE164);
   for (const id of pendingByVerificationId.keys()) {
     if (id !== verificationId) return false;
   }
   const existing = pendingByVerificationId.get(verificationId);
+  if (existing?.sendGeneration != null && existing.sendGeneration !== nativePhoneSendGeneration) {
+    // Do not re-authorize a retired in-memory attempt from its persisted copy.
+    return false;
+  }
   if (
     existing &&
     phonesMatchE164(existing.phoneE164, phone) &&
@@ -1025,8 +1137,13 @@ export async function restorePendingPhoneSessionForResume(
     return true;
   }
   const persisted = await loadNativePhoneAuthSession();
+  if (openingSendGeneration !== nativePhoneSendGeneration || openingConfirmGeneration !== nativePhoneConfirmGeneration) return false;
+  for (const id of pendingByVerificationId.keys()) {
+    if (id !== verificationId) return false;
+  }
   if (
     !persisted ||
+    persisted.purpose === "contact_change" ||
     persisted.firebaseVerificationId !== verificationId ||
     !phonesMatchE164(persisted.phoneE164, phone) ||
     persisted.expiresAt <= Date.now()
@@ -1042,6 +1159,7 @@ export async function restorePendingPhoneSessionForResume(
     startedAtMs: persisted.savedAt,
     preSendUid: null,
     autoVerify: null,
+    sendGeneration: openingSendGeneration,
   });
   return true;
 }

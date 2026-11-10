@@ -13,7 +13,7 @@ import type { ReviewEditTarget } from "@/auth-v2/reviewEditIntent";
  */
 export const REVIEW_PHONE_CHANGE_AVAILABLE = true;
 
-/** Verified email change reuses startBusinessEmailVerification / completeBusinessEmailBind. */
+/** Initial email binding is available. Verified replacement also requires the per-profile capability guard. */
 export const REVIEW_EMAIL_CHANGE_AVAILABLE = true;
 
 export type ReviewEditCopy = {

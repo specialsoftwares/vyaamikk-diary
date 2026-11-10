@@ -171,8 +171,10 @@ export async function readDeviceDemographicAge(
 }
 
 const purgeEpochByUid = new Map<string, number>();
-const latestDemographicWrite = new Map<string, number>();
-let demographicWriteSerial = 0;
+// Serialize this owner's storage writes and their post-purge cleanup. An old
+// write must finish cleaning up before a newer post-purge selection may write.
+// Separate owners do not block each other. This does not hold profile setup.
+const demographicWriteTail = new Map<string, Promise<void>>();
 
 /** Account deletion closes this owner's device band. Ordinary sign-out does not. */
 export function beginDemographicAgePurge(uid: string): void {
@@ -189,14 +191,24 @@ export async function writeDeviceDemographicAge(
   selection: DemographicAgeSelection,
   store: DemographicAgeDeviceStore
 ): Promise<void> {
-  const serial = ++demographicWriteSerial;
-  latestDemographicWrite.set(uid, serial);
   const epoch = demographicAgePurgeEpoch(uid);
   const key = demographicAgeStorageKey(uid);
-  // Device-only. Do not copy this into a profile patch or seal.
-  await store.setItem(key, selection);
-  if (latestDemographicWrite.get(uid) !== serial) return;
-  if (demographicAgePurgeEpoch(uid) !== epoch) {
-    await store.removeItem(key);
+  const run = async () => {
+    // A selection queued before deletion must not begin writing afterward.
+    if (demographicAgePurgeEpoch(uid) !== epoch) return;
+    // Device-only. Do not copy this into a profile patch or seal.
+    await store.setItem(key, selection);
+    if (demographicAgePurgeEpoch(uid) !== epoch) {
+      await store.removeItem(key);
+    }
+  };
+  const previous = demographicWriteTail.get(uid);
+  const pending = previous ? previous.then(run, run) : run();
+  const tail = pending.then(() => undefined, () => undefined);
+  demographicWriteTail.set(uid, tail);
+  try {
+    await pending;
+  } finally {
+    if (demographicWriteTail.get(uid) === tail) demographicWriteTail.delete(uid);
   }
 }

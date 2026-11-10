@@ -115,6 +115,8 @@ export function resolveSignedInOnboardingContinuation(input: {
   profileCompletedAt?: number | null;
   ageEligibility?: string | null;
   demographicAgeBand?: string | null;
+  /** Legacy demographic field, also never authorization. */
+  demographicAgeRange?: string | null;
 }): SignedInOnboardingContinuation {
   void input.ageEligibility;
   void input.demographicAgeBand;

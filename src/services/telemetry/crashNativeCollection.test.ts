@@ -24,7 +24,7 @@ import {
 function installDouble(bridge: "present" | "absent" | "fail") {
   const snap = {
     preference: true,
-    sdkCollection: false,
+    sessionReporting: false,
     unsentDeletion: "none" as "none" | "requested",
   };
   __setCrashlyticsClientForTests({
@@ -42,9 +42,9 @@ function installDouble(bridge: "present" | "absent" | "fail") {
     __setCrashSdkBridgeForTests(null);
   } else {
     __setCrashSdkBridgeForTests({
-      setSdkCollectionEnabled: async (enabled) => {
+      setSessionReportingEnabled: async (enabled) => {
         if (bridge === "fail" && enabled) throw new Error("bridge rejected");
-        snap.sdkCollection = enabled;
+        snap.sessionReporting = enabled;
       },
       deleteUnsentReports: async () => {
         snap.unsentDeletion = "requested";
@@ -65,22 +65,14 @@ async function main(): Promise<void> {
   assert.doesNotMatch(reporter, /setCrashlyticsCollectionEnabled\(\s*true\s*\)/);
   assert.doesNotMatch(reporter, /sendUnsentReports/);
   assert.doesNotMatch(adapter, /sendUnsentReports/);
-  assert.match(adapterRaw, /Signed-device checks — NOT RUN/);
-  assert.match(adapterRaw, /Force-stop, then relaunch, stays disabled until Allow again/);
+  assert.match(adapterRaw, /Signed-device startup\/upgrade\/withdrawal checks — NOT RUN/);
 
-  assert.equal(
-    nextProcessCrashCollectionEnabled({ preference: false, firebaseJson: true, manifest: true }),
-    false
-  );
-  assert.equal(
-    nextProcessCrashCollectionEnabled({ preference: null, firebaseJson: false, manifest: null }),
-    false
-  );
-  assert.equal(
-    nextProcessCrashCollectionEnabled({ preference: true, firebaseJson: false, manifest: false }),
-    true,
-    "a stored true would enable the next process, which is why production never writes it"
-  );
+
+  assert.equal(nextProcessCrashCollectionEnabled({ sdkOverride: true, preference: false, firebaseJson: false, manifest: false }), true,
+    "SDK override survives independently of RNFirebase preference; bootstrap must migrate it before SDK init");
+  assert.equal(nextProcessCrashCollectionEnabled({ sdkOverride: false, preference: true, firebaseJson: true, manifest: true }), false,
+    "the guarded bootstrap reset is the SDK startup gate");
+  assert.equal(nextProcessCrashCollectionEnabled({ sdkOverride: null, preference: false, firebaseJson: false, manifest: false }), false);
 
   __resetCrashReportingForTests();
   const missing = installDouble("absent");
@@ -98,10 +90,10 @@ async function main(): Promise<void> {
   });
   const unavailable = await setCrashReportingEnabled(true);
   assert.equal(unavailable.status, "unavailable");
-  assert.equal(unavailable.sdkCollection, false);
+  assert.equal(unavailable.sessionReporting, false);
   assert.equal(unavailable.preference, false);
   assert.equal(missing.preference, false);
-  assert.equal(missing.sdkCollection, false);
+  assert.equal(missing.sessionReporting, false);
   recordError(new Error("synthetic"));
   assert.equal(rnReports, 0);
   assert.equal(bridgeReports, 0);
@@ -109,8 +101,8 @@ async function main(): Promise<void> {
   __resetCrashReportingForTests();
   const ready = installDouble("present");
   __setCrashSdkBridgeForTests({
-    setSdkCollectionEnabled: async (enabled) => {
-      ready.sdkCollection = enabled;
+    setSessionReportingEnabled: async (enabled) => {
+      ready.sessionReporting = enabled;
     },
     deleteUnsentReports: async () => {
       ready.unsentDeletion = "requested";
@@ -120,11 +112,18 @@ async function main(): Promise<void> {
     },
     logDiagnostic: async () => undefined,
   });
-  const enabled = await setCrashReportingEnabled(true);
+  let scoped: unknown[] = [];
+  __setCrashSdkBridgeForTests({
+    setSessionReportingEnabled: async (on, uid, revision) => { ready.sessionReporting = on; scoped = [uid, revision]; },
+    deleteUnsentReports: async () => { ready.unsentDeletion = "requested"; },
+    recordDiagnostic: async () => { bridgeReports += 1; },
+  });
+  const enabled = await setCrashReportingEnabled(true, { ownerUid: "synthetic-owner", consentRevision: 7 });
+  assert.deepEqual(scoped, ["synthetic-owner", 7]);
   assert.equal(enabled.status, "enabled");
-  assert.equal(enabled.sdkCollection, true);
+  assert.equal(enabled.sessionReporting, true);
   assert.equal(enabled.preference, false);
-  assert.equal(ready.sdkCollection, true);
+  assert.equal(ready.sessionReporting, true);
   assert.equal(ready.preference, false);
   recordError(new Error("synthetic"));
   assert.equal(bridgeReports, 1);
@@ -134,7 +133,7 @@ async function main(): Promise<void> {
   assert.equal(withdrawn.status, "disabled");
   assert.equal(withdrawn.unsentReports, "deletion_requested");
   assert.notEqual(withdrawn.unsentReports, "deleted");
-  assert.equal(ready.sdkCollection, false);
+  assert.equal(ready.sessionReporting, false);
   assert.equal(ready.preference, false);
   assert.equal(ready.unsentDeletion, "requested");
 
@@ -142,9 +141,9 @@ async function main(): Promise<void> {
   const failing = installDouble("fail");
   const rejected = await setCrashReportingEnabled(true);
   assert.equal(rejected.status, "rejected");
-  assert.equal(rejected.sdkCollection, false);
+  assert.equal(rejected.sessionReporting, false);
   assert.equal(failing.preference, false);
-  assert.equal(failing.sdkCollection, false);
+  assert.equal(failing.sessionReporting, false);
 
   let sawTrue = false;
   await writeAutoCollectionPreferenceFalse({

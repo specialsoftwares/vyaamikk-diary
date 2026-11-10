@@ -80,6 +80,7 @@ export async function resumeSignedOutPhoneChallenge(
   const inspected = inspectedIdentity(wrapper);
   const matches =
     native != null &&
+    native.purpose !== "contact_change" &&
     native.firebaseVerificationId === wrapper.verificationId &&
     phonesMatchE164(native.phoneE164, wrapper.phoneE164);
 

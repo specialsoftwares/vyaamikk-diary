@@ -3,7 +3,7 @@
  * Never forwards Firebase / provider exception strings.
  */
 
-import { AppError } from "@/domain/errors";
+import { AppError, classifyPublicError, PUBLIC_ERROR_COPY } from "@/domain/errors";
 
 export const EMAIL_OTP_SEND_USER_COPY = {
   invalidEmail: "Please enter a valid email address.",
@@ -13,10 +13,30 @@ export const EMAIL_OTP_SEND_USER_COPY = {
   cooldown: "Resend is not available yet.",
   session: "Your session has expired. Please verify your phone number again.",
   conflict: "Please use your previous email or start over.",
+  alreadyLinked:
+    "This email cannot be used for this account. Please use another email or contact support.",
+  pendingDeletion:
+    "This email belongs to an account scheduled for deletion. It cannot be reused until deletion is complete.",
 } as const;
 
-function looksLikeInternalException(message: string): boolean {
-  return /firebase|functions\/|https:\/\/|exception|stack|INTERNAL/i.test(message);
+function signalCopy(error: unknown): string {
+  const kind = classifyPublicError(error);
+  if (kind === "age_not_admitted") return PUBLIC_ERROR_COPY.age_not_admitted;
+  if (kind === "network") return PUBLIC_ERROR_COPY.network;
+  if (kind === "too_many_attempts") return EMAIL_OTP_SEND_USER_COPY.rateLimit;
+  if (kind === "session_expired") return EMAIL_OTP_SEND_USER_COPY.session;
+  if (kind === "invalid_otp") return PUBLIC_ERROR_COPY.invalid_otp;
+  if (kind === "otp_expired") return PUBLIC_ERROR_COPY.otp_expired;
+  const msg = error instanceof Error ? error.message : "";
+  if (/valid email/i.test(msg)) return EMAIL_OTP_SEND_USER_COPY.invalidEmail;
+  if (/too many|rate|wait/i.test(msg)) return EMAIL_OTP_SEND_USER_COPY.rateLimit;
+  if (/unauthenticated|session has expired|sign in again/i.test(msg)) {
+    return EMAIL_OTP_SEND_USER_COPY.session;
+  }
+  if (/previous email or start over|something changed/i.test(msg)) {
+    return EMAIL_OTP_SEND_USER_COPY.conflict;
+  }
+  return EMAIL_OTP_SEND_USER_COPY.delivery;
 }
 
 export function presentEmailOtpSendError(error: unknown): string {
@@ -25,9 +45,7 @@ export function presentEmailOtpSendError(error: unknown): string {
       case "save_failed":
         return EMAIL_OTP_SEND_USER_COPY.invalidEmail;
       case "email_otp_cooldown":
-        return error.message && !looksLikeInternalException(error.message)
-          ? error.message
-          : EMAIL_OTP_SEND_USER_COPY.cooldown;
+        return EMAIL_OTP_SEND_USER_COPY.cooldown;
       case "too_many_attempts":
         return EMAIL_OTP_SEND_USER_COPY.rateLimit;
       case "auth_failed":
@@ -36,32 +54,12 @@ export function presentEmailOtpSendError(error: unknown): string {
       case "otp_send_failed":
         return EMAIL_OTP_SEND_USER_COPY.delivery;
       case "email_already_linked":
+        return EMAIL_OTP_SEND_USER_COPY.alreadyLinked;
       case "email_pending_deletion":
-        return looksLikeInternalException(error.message)
-          ? EMAIL_OTP_SEND_USER_COPY.delivery
-          : error.message;
-      case "permission_denied": {
-        const msg = error.message || "";
-        if (/valid email/i.test(msg)) return EMAIL_OTP_SEND_USER_COPY.invalidEmail;
-        if (/too many|rate|wait/i.test(msg)) return EMAIL_OTP_SEND_USER_COPY.rateLimit;
-        if (looksLikeInternalException(msg)) return EMAIL_OTP_SEND_USER_COPY.delivery;
-        return msg || EMAIL_OTP_SEND_USER_COPY.delivery;
-      }
-      default: {
-        const msg = error.message || "";
-        if (/valid email/i.test(msg)) return EMAIL_OTP_SEND_USER_COPY.invalidEmail;
-        if (/unauthenticated|session has expired|sign in again/i.test(msg)) {
-          return EMAIL_OTP_SEND_USER_COPY.session;
-        }
-        if (/previous email or start over|something changed/i.test(msg)) {
-          return EMAIL_OTP_SEND_USER_COPY.conflict;
-        }
-        if (looksLikeInternalException(msg) || !msg) {
-          return EMAIL_OTP_SEND_USER_COPY.delivery;
-        }
-        return msg;
-      }
+        return EMAIL_OTP_SEND_USER_COPY.pendingDeletion;
+      default:
+        return signalCopy(error);
     }
   }
-  return EMAIL_OTP_SEND_USER_COPY.delivery;
+  return signalCopy(error);
 }

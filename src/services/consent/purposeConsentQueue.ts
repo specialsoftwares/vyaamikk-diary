@@ -51,7 +51,7 @@ export type PurposeQueuePorts = {
   save(state: PurposeQueueState): Promise<void>;
   send(input: PurposeMutation | { uid: string; purpose: "crash_diagnostics"; action: "read" }): Promise<PurposeServerState>;
   generation(): number;
-  applyLocal(enabled: boolean, options?: { deleteUnsentReports?: boolean }): Promise<unknown>;
+  applyLocal(enabled: boolean, options?: { deleteUnsentReports?: boolean; ownerUid?: string; consentRevision?: number }): Promise<unknown>;
   operationId(): string;
   observeRemote?(
     uid: string,
@@ -201,7 +201,22 @@ export function createPurposeConsentQueue(ports: PurposeQueuePorts) {
   function closeNative(enabled: boolean, deleteUnsentReports: boolean): Promise<unknown> {
     // Pass the flag explicitly. A default of "delete on every disable" would
     // drop unsent reports while an Allow is only paused.
-    return ports.applyLocal(enabled, { deleteUnsentReports });
+    const owner = activeUid ? states.get(activeUid)?.consent : null;
+    const options = {
+      deleteUnsentReports,
+      ...(enabled && owner && canActivateNative(owner)
+        ? { ownerUid: owner.choice.uid, consentRevision: owner.choice.revision }
+        : {}),
+    };
+    const failed = () => {
+      if (enabled) {
+        try { void Promise.resolve(ports.applyLocal(false, { deleteUnsentReports: false })).catch(() => undefined); }
+        catch { /* Keep the public state failed; never claim native activation. */ }
+      }
+      return { status: "rejected", sessionReporting: false, preference: false };
+    };
+    try { return Promise.resolve(ports.applyLocal(enabled, options)).catch(failed); }
+    catch { return Promise.resolve(failed()); }
   }
   async function flush(uid: string, generation: number, epoch: number) {
     const sequence = ++requestSequence;
@@ -218,11 +233,11 @@ export function createPurposeConsentQueue(ports: PurposeQueuePorts) {
         await persist({
           ...state,
           localGrant: false,
-          pending: null,
+          pending: state.pending,
           sync: "listener_unavailable",
           consent: {
             ...consentAtStart,
-            pending: null,
+            pending: consentAtStart.pending,
             native: "disabled",
             enablingInvalidated: true,
             sessionAcknowledgement: null,
@@ -255,10 +270,6 @@ export function createPurposeConsentQueue(ports: PurposeQueuePorts) {
     // Never transmit a grant whose affirmative choice could not be persisted.
     // A withdrawal still attempts the server stop even if local storage failed.
     if (state.sync === "storage_error" && state.pending?.decision !== "withdraw") return;
-    if (state.consent?.enablingInvalidated && state.pending?.decision !== "withdraw") {
-      await closeNative(false, false);
-      return;
-    }
     let remote: PurposeServerState;
     try {
       remote = await ports.send(state.pending ?? { uid, purpose: "crash_diagnostics", action: "read" });
@@ -347,7 +358,7 @@ export function createPurposeConsentQueue(ports: PurposeQueuePorts) {
     void Promise.resolve().then(async () => {
       if (!owns(uid, generation, epoch)) return;
       const state = states.get(uid);
-      if (!state?.consent || state.consent.enablingInvalidated || state.consent.choice.uid !== uid) return;
+      if (!state?.consent || state.consent.choice.uid !== uid) return;
       if (state.consent.choice.decision !== "allow") return;
       if (
         !state.pending &&
@@ -457,17 +468,17 @@ export function createPurposeConsentQueue(ports: PurposeQueuePorts) {
           void closeNative(false, false);
           const state = states.get(uid);
           if (state?.consent) {
-            const keepWithdraw = state.pending?.decision === "withdraw" ? state.pending : null;
+            const keptChoice = state.pending;
             void persist({
               ...state,
               localGrant: false,
-              pending: keepWithdraw,
+              pending: keptChoice,
               sync: "listener_unavailable",
               consent: {
                 ...state.consent,
                 native: "disabled",
-                enablingInvalidated: keepWithdraw ? state.consent.enablingInvalidated : true,
-                pending: keepWithdraw ? state.consent.pending : null,
+                enablingInvalidated: true,
+                pending: state.consent.pending,
                 sessionAcknowledgement: null,
               },
             });

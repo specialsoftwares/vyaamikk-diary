@@ -1,22 +1,10 @@
 /**
- * Crash reporting service — wraps Firebase Crashlytics.
- * All methods are no-ops if Crashlytics is unavailable or user has not consented.
- * The JS gate opens only after the runtime bridge enables the running SDK.
- * A resolved RNFirebase preference write is not that proof, and this module
- * never writes the auto-collection preference true.
- * A development session does not enable collection on its own. Consent is required.
- *
- * Locked SDK: @react-native-firebase/crashlytics 24.1.0.
- * setCrashlyticsCollectionEnabled only persists KEY_CRASHLYTICS_AUTO_COLLECTION_ENABLED.
- * The running SDK is changed only through CrashConsentBridge.
- * deleteUnsentReports deletes unsent reports only, with no completion proof.
- * It does not delete reports that have already been uploaded.
- * This module does not call sendUnsentReports.
- * If a test double omits deleteUnsentReports, this module does not invent the call.
- *
- * JavaScript reports go through the runtime bridge. The RNFirebase recordError
- * and log methods are not used: they no-op while the preference stays false.
- * The original application Error is never copied or mutated.
+ * Sanitized, account-scoped manual crash reporting. SDK automatic collection
+ * remains off, including before JS startup. Native recording opens only after
+ * durable choice and matching current server acknowledgement. Native dispatch
+ * is restricted to a queue with the same owner and consent revision.
+ * A withdrawal stops new application reports; an already authorized dispatch
+ * cannot be recalled. Public SDK delete/send calls are requests, not receipts.
  */
 
 import {
@@ -40,7 +28,7 @@ type CrashlyticsClient = PreferenceWriter & {
 
 /** A deletion request is not proof that native deletion finished, and it is not a remote recall. */
 export type UnsentReportState = "not_applicable" | "retained" | "deletion_requested" | "unavailable" | "error";
-export type CrashStopOptions = Readonly<{ deleteUnsentReports?: boolean }>;
+export type CrashStopOptions = Readonly<{ deleteUnsentReports?: boolean; ownerUid?: string; consentRevision?: number }>;
 export type CrashActivationResult = Readonly<{
   ok: boolean;
   status: "enabled" | "disabled" | "unavailable" | "rejected" | "superseded";
@@ -48,8 +36,8 @@ export type CrashActivationResult = Readonly<{
   unsentReports: UnsentReportState;
   /** This attempt never writes the auto-collection preference true. */
   preference: false;
-  /** Running SDK collection after the bridge call. False when the bridge did not enable it. */
-  sdkCollection: boolean;
+  /** Native session accepts sanitized reports; SDK automatic upload is still off. */
+  sessionReporting: boolean;
 }>;
 
 let _enabled = false;
@@ -94,7 +82,7 @@ function result(
   status: CrashActivationResult["status"],
   unsentReports: UnsentReportState,
   canDelete: boolean,
-  sdkCollection: boolean
+  sessionReporting: boolean
 ): CrashActivationResult {
   return {
     ok: status === "enabled" || status === "disabled",
@@ -102,7 +90,7 @@ function result(
     queuedReportsSeparatelyDeletable: canDelete,
     unsentReports,
     preference: false,
-    sdkCollection,
+    sessionReporting,
   };
 }
 
@@ -118,7 +106,7 @@ function canDeleteUnsent(writer: PreferenceWriter | null): boolean {
  * Disable runs immediately, without waiting for an older enable. Already
  * uploaded reports cannot be recalled by this API.
  * Enabling does not write the RNFirebase preference true and does not open the
- * JS gate unless the runtime bridge reports the running SDK enabled.
+ * JS gate unless the native bridge accepts the owner/revision-scoped session.
  */
 export function setCrashReportingEnabled(
   enabled: boolean,
@@ -172,7 +160,7 @@ export function setCrashReportingEnabled(
         await setRuntimeSdkCollection(false);
         return result("superseded", "not_applicable", canDelete, false);
       }
-      const opened = await setRuntimeSdkCollection(true);
+      const opened = await setRuntimeSdkCollection(true, options);
       if (!stillCurrent()) {
         await setRuntimeSdkCollection(false);
         return result("superseded", "not_applicable", canDelete, false);

@@ -95,7 +95,7 @@ assert.equal(profile.distribution, undefined);
 assert.equal(profile.android?.buildType, "app-bundle");
 assert.equal(eas.cli?.appVersionSource, "local");
 assert.equal(app.expo.android?.package, "com.specialsoftwares.vyaamikkdiary");
-assert.equal(app.expo.android?.versionCode, 32);
+assert.equal(app.expo.android?.versionCode, 34);
 
 const profileEnv = profile.env ?? {};
 assert.deepEqual(Object.keys(profileEnv).sort(), [

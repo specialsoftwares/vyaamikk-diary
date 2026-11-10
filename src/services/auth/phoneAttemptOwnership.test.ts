@@ -242,7 +242,8 @@ async function main(): Promise<void> {
   assert.match(authProvider, /sessionStillOwned\(claim, readPublicationLive\(\)\)/);
   const firebase = read("src/services/auth/firebase.ts");
   assert.match(firebase, /currentSessionCommitEpoch\(\)/);
-  assert.match(firebase, /issueProfileDocumentIfOwned/);
+  assert.match(firebase, /return updateProfileWithIo\(uid, patch/);
+  assert.match(firebase, /assertProfileWriteOwnership\(owner, io.readAuthUid\(\)\)/);
   const native = read("src/services/auth/nativePhoneAuth.ts");
   assert.match(native, /if \(!isCurrent\(\)\) return false;/);
   assert.match(native, /sendInFlight = true;/);

@@ -332,12 +332,12 @@ export function nativeFromApply(requestedEnable: boolean, result: unknown): Cras
     native?: unknown;
     nativeState?: unknown;
     status?: unknown;
-    sdkCollection?: unknown;
+    sessionReporting?: unknown;
     preference?: unknown;
   };
   // A preference of true is the next process's consent bypass. It is not an active session.
   if (record.preference === true) return "failed";
-  const bridgeEnabled = record.sdkCollection === true;
+  const bridgeEnabled = record.sessionReporting === true;
   if (
     requestedEnable &&
     bridgeEnabled &&
@@ -352,7 +352,7 @@ export function nativeFromApply(requestedEnable: boolean, result: unknown): Cras
     return "failed";
   }
   if (!requestedEnable) {
-    if (record.sdkCollection === true) return "failed";
+    if (record.sessionReporting === true) return "failed";
     if (isNative(record.native) && record.native !== "enabled") return record.native;
     return "disabled";
   }

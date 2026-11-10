@@ -38,10 +38,16 @@ import { spacing, typography } from "@/theme";
 import { formatDisplayPhone, maskMobile } from "@/utils/phone";
 import { useAuthoritativeResendCountdown } from "@/hooks/useAuthoritativeResendCountdown";
 
+import { createContactChangeOperations, CONTACT_RESULT_UNKNOWN, type ContactPublication } from "./contactChangeOperation";
+import { getActiveBackend } from "@/config/env";
+import { getNativeAuthUid } from "@/services/auth/nativePhoneAuth";
+import { retireNativePhoneContactChange } from "@/services/auth/nativePhoneContactChange";
+import { currentAuthMutationGeneration, currentSessionCommitEpoch } from "@/services/auth/authSessionFence";
+
 void CONTACT_CHANGE_PURPOSE;
 
 export type ContactChangeAdapters = {
-  startPhone: (phoneE164: string) => Promise<OtpChallenge>;
+  startPhone: (phoneE164: string, options?: { forceResend?: boolean }) => Promise<OtpChallenge>;
   confirmPhone: (challenge: OtpChallenge, code: string) => Promise<UserProfile>;
   /** After Auth updated but server bind failed — complete bind without new OTP. */
   retryPhoneServerBind?: () => Promise<UserProfile>;
@@ -58,13 +64,13 @@ export type ContactChangeAdapters = {
     resendAvailableAt?: number;
     expiresAt?: number;
   }>;
-  confirmEmail: (verificationId: string, code: string, email: string) => Promise<UserProfile>;
+  confirmEmail: (verificationId: string, code: string, email: string, publication: ContactPublication) => Promise<UserProfile>;
   /**
    * After authoritative bind — reconcile central session/profile BEFORE success UI.
    * May be async; panel awaits before showing verified success.
    */
-  onAuthoritativePhone: (profile: UserProfile) => void | Promise<void>;
-  onAuthoritativeEmail: (profile: UserProfile) => void | Promise<void>;
+  onAuthoritativePhone: (profile: UserProfile, publication: ContactPublication) => void | Promise<void>;
+  onAuthoritativeEmail: (profile: UserProfile, publication: ContactPublication) => void | Promise<void>;
 };
 
 interface VerifiedContactChangePanelProps {
@@ -73,6 +79,7 @@ interface VerifiedContactChangePanelProps {
   emailVerified: boolean;
   phoneChangeAvailable: boolean;
   emailChangeAvailable: boolean;
+  emailChangeUnavailableMessage?: string;
   mobileReviewChangeCount?: number;
   emailReviewChangeCount?: number;
   profileCompletedAt?: number | null;
@@ -91,6 +98,7 @@ export function VerifiedContactChangePanel({
   emailVerified,
   phoneChangeAvailable,
   emailChangeAvailable,
+  emailChangeUnavailableMessage,
   mobileReviewChangeCount = 0,
   emailReviewChangeCount = 0,
   profileCompletedAt = null,
@@ -117,6 +125,11 @@ export function VerifiedContactChangePanel({
   const [displayEmail, setDisplayEmail] = useState(email);
   const [displayEmailVerified, setDisplayEmailVerified] = useState(emailVerified);
   const inFlightRef = useRef(false);
+  const operations = useRef(createContactChangeOperations(
+    () => ({ uid: getNativeAuthUid() ?? (getActiveBackend() === "local-mock" ? "local-mock" : null), generation: currentAuthMutationGeneration(), epoch: currentSessionCommitEpoch() }),
+    retireNativePhoneContactChange
+  )).current;
+  useEffect(() => () => operations.retire(), [operations]);
 
   const emailResend = useAuthoritativeResendCountdown(emailResendAt);
 
@@ -142,6 +155,7 @@ export function VerifiedContactChangePanel({
   );
 
   const resetToOverview = useCallback(() => {
+    operations.retire();
     inFlightRef.current = false;
     setActiveChannel(null);
     setError(null);
@@ -156,7 +170,7 @@ export function VerifiedContactChangePanel({
     setEmailBusy(false);
     setEmailResendAt(null);
     goPhase("overview");
-  }, [goPhase]);
+  }, [goPhase, operations]);
 
   const phoneEditGate = assertReviewContactEditAllowed({
     channel: "mobile",
@@ -197,92 +211,121 @@ export function VerifiedContactChangePanel({
       setError(validated.message);
       return;
     }
+    const operation = operations.begin();
+    if (!operation) return;
     inFlightRef.current = true;
     setPhoneBusy(true);
     setError(null);
     try {
-      const challenge = await adapters.startPhone(validated.phoneE164);
+      const challenge = await operations.run(operation, () => adapters.startPhone(validated.phoneE164));
       setPendingPhone(validated.phoneE164);
       setPhoneChallenge(challenge);
       goPhase("phone_otp");
     } catch (e) {
-      setError(userFacingMessage(e));
+      if (!operations.current(operation)) return;
+      setError(e instanceof AppError && e.details?.phoneAuthSettlement === "unknown" ? CONTACT_RESULT_UNKNOWN : userFacingMessage(e));
     } finally {
-      inFlightRef.current = false;
-      setPhoneBusy(false);
+      if (operations.current(operation)) {
+        operations.finish(operation);
+        inFlightRef.current = false;
+        setPhoneBusy(false);
+      }
     }
   };
 
   const verifyPhoneOtp = async (code: string) => {
     if (!phoneChallenge || !pendingPhone || inFlightRef.current) return;
+    const operation = operations.begin();
+    if (!operation) return;
     inFlightRef.current = true;
     setPhoneBusy(true);
     setError(null);
     goPhase("phone_verifying");
     const started = Date.now();
     try {
-      const profile = await adapters.confirmPhone(phoneChallenge, code);
+      const profile = await operations.run(operation, () => adapters.confirmPhone(phoneChallenge, code));
       const remain = Math.max(
         0,
         CONTACT_CHANGE_MIN_VERIFYING_VISIBLE_MS - (Date.now() - started)
       );
-      if (remain > 0) await new Promise((r) => setTimeout(r, remain));
-      await adapters.onAuthoritativePhone(profile);
+      if (remain > 0) await operations.run(operation, () => new Promise<void>((r) => setTimeout(r, remain)));
+      await operations.run(operation, async () => adapters.onAuthoritativePhone(profile, { owner: operation.owner, isCurrent: () => operations.mayPublish(operation) }));
       setDisplayPhone(profile.phoneE164);
       if (__DEV__) {
         console.log("[review-state] profile reconciled channel=mobile");
       }
       goPhase("phone_verified");
     } catch (e) {
+      if (!operations.current(operation)) return;
       const recovery =
         e instanceof AppError && Boolean(e.details?.mobileChangeRecoveryRequired);
-      setError(userFacingMessage(e));
+      setError(e instanceof AppError && e.details?.phoneAuthSettlement === "unknown" ? CONTACT_RESULT_UNKNOWN : userFacingMessage(e));
       if (recovery) {
         goPhase("phone_recovering");
       } else {
         goPhase("phone_otp");
       }
     } finally {
-      inFlightRef.current = false;
-      setPhoneBusy(false);
+      if (operations.current(operation)) {
+        operations.finish(operation);
+        inFlightRef.current = false;
+        setPhoneBusy(false);
+      }
     }
   };
 
   const retryPhoneBind = async () => {
     if (!adapters.retryPhoneServerBind || inFlightRef.current) return;
+    const operation = operations.begin();
+    if (!operation) return;
     inFlightRef.current = true;
     setPhoneBusy(true);
     setError(null);
     goPhase("phone_verifying");
     try {
-      const profile = await adapters.retryPhoneServerBind();
-      await adapters.onAuthoritativePhone(profile);
+      const profile = await operations.run(operation, () => adapters.retryPhoneServerBind!());
+      await operations.run(operation, async () => adapters.onAuthoritativePhone(profile, { owner: operation.owner, isCurrent: () => operations.mayPublish(operation) }));
       setDisplayPhone(profile.phoneE164);
       goPhase("phone_verified");
     } catch (e) {
-      setError(userFacingMessage(e));
+      if (!operations.current(operation)) return;
+      setError(e instanceof AppError && e.details?.phoneAuthSettlement === "unknown" ? CONTACT_RESULT_UNKNOWN : userFacingMessage(e));
       goPhase("phone_recovering");
     } finally {
-      inFlightRef.current = false;
-      setPhoneBusy(false);
+      if (operations.current(operation)) {
+        operations.finish(operation);
+        inFlightRef.current = false;
+        setPhoneBusy(false);
+      }
     }
   };
 
   const resendPhoneOtp = async () => {
-    if (!pendingPhone || phoneResending) return;
+    if (!pendingPhone || phoneResending || inFlightRef.current) return;
+    if (!phoneChallenge?.resendAvailableAt || Date.now() < phoneChallenge.resendAvailableAt) return;
+    const operation = operations.begin();
+    if (!operation) return;
     setPhoneResending(true);
     setError(null);
     try {
-      const challenge = await adapters.startPhone(pendingPhone);
+      const challenge = await operations.run(operation, () => adapters.startPhone(pendingPhone, { forceResend: true }));
       setPhoneChallenge(challenge);
     } catch (e) {
-      setError(userFacingMessage(e));
+      if (!operations.current(operation)) return;
+      setError(e instanceof AppError && e.details?.phoneAuthSettlement === "unknown" ? CONTACT_RESULT_UNKNOWN : userFacingMessage(e));
     } finally {
-      setPhoneResending(false);
+      if (operations.current(operation)) {
+        operations.finish(operation);
+        setPhoneResending(false);
+      }
     }
   };
 
   const sendEmailOtp = async () => {
+    if (!emailChangeAvailable) {
+      setError(emailChangeUnavailableMessage ?? "Email changes are unavailable.");
+      return;
+    }
     if (inFlightRef.current) return;
     const validated = validateReplacementEmail({
       email: emailInput,
@@ -292,40 +335,48 @@ export function VerifiedContactChangePanel({
       setError(validated.message);
       return;
     }
+    const operation = operations.begin();
+    if (!operation) return;
     inFlightRef.current = true;
     setEmailBusy(true);
     setError(null);
     try {
-      const started = await adapters.startEmail(validated.email);
+      const started = await operations.run(operation, () => adapters.startEmail(validated.email));
       setPendingEmail(validated.email);
       setEmailChallengeId(started.verificationId);
       setEmailResendAt(started.resendAvailableAt ?? Date.now() + 30_000);
       setEmailCode("");
       goPhase("email_otp");
     } catch (e) {
-      setError(userFacingMessage(e));
+      if (!operations.current(operation)) return;
+      setError(e instanceof AppError && e.details?.phoneAuthSettlement === "unknown" ? CONTACT_RESULT_UNKNOWN : userFacingMessage(e));
     } finally {
-      inFlightRef.current = false;
-      setEmailBusy(false);
+      if (operations.current(operation)) {
+        operations.finish(operation);
+        inFlightRef.current = false;
+        setEmailBusy(false);
+      }
     }
   };
 
   const verifyEmailOtp = async () => {
     if (!emailChallengeId || !pendingEmail || emailCode.length !== EMAIL_OTP_LENGTH) return;
     if (inFlightRef.current) return;
+    const operation = operations.begin();
+    if (!operation) return;
     inFlightRef.current = true;
     setEmailBusy(true);
     setError(null);
     goPhase("email_verifying");
     const started = Date.now();
     try {
-      const profile = await adapters.confirmEmail(emailChallengeId, emailCode, pendingEmail);
+      const profile = await operations.run(operation, () => adapters.confirmEmail(emailChallengeId, emailCode, pendingEmail, { owner: operation.owner, isCurrent: () => operations.mayPublish(operation) }));
       const remain = Math.max(
         0,
         CONTACT_CHANGE_MIN_VERIFYING_VISIBLE_MS - (Date.now() - started)
       );
-      if (remain > 0) await new Promise((r) => setTimeout(r, remain));
-      await adapters.onAuthoritativeEmail(profile);
+      if (remain > 0) await operations.run(operation, () => new Promise<void>((r) => setTimeout(r, remain)));
+      await operations.run(operation, async () => adapters.onAuthoritativeEmail(profile, { owner: operation.owner, isCurrent: () => operations.mayPublish(operation) }));
       setDisplayEmail(profile.normalizedEmail ?? profile.businessEmail ?? pendingEmail);
       setDisplayEmailVerified(true);
       if (__DEV__) {
@@ -333,26 +384,36 @@ export function VerifiedContactChangePanel({
       }
       goPhase("email_verified");
     } catch (e) {
-      setError(userFacingMessage(e));
+      if (!operations.current(operation)) return;
+      setError(e instanceof AppError && e.details?.phoneAuthSettlement === "unknown" ? CONTACT_RESULT_UNKNOWN : userFacingMessage(e));
       goPhase("email_otp");
     } finally {
-      inFlightRef.current = false;
-      setEmailBusy(false);
+      if (operations.current(operation)) {
+        operations.finish(operation);
+        inFlightRef.current = false;
+        setEmailBusy(false);
+      }
     }
   };
 
   const resendEmailOtp = async () => {
     if (!emailChallengeId || !pendingEmail || emailResending) return;
+    const operation = operations.begin();
+    if (!operation) return;
     setEmailResending(true);
     setError(null);
     try {
-      const next = await adapters.resendEmail(emailChallengeId, pendingEmail);
+      const next = await operations.run(operation, () => adapters.resendEmail(emailChallengeId, pendingEmail));
       setEmailChallengeId(next.verificationId);
       setEmailResendAt(next.resendAvailableAt ?? Date.now() + 30_000);
     } catch (e) {
-      setError(userFacingMessage(e));
+      if (!operations.current(operation)) return;
+      setError(e instanceof AppError && e.details?.phoneAuthSettlement === "unknown" ? CONTACT_RESULT_UNKNOWN : userFacingMessage(e));
     } finally {
-      setEmailResending(false);
+      if (operations.current(operation)) {
+        operations.finish(operation);
+        setEmailResending(false);
+      }
     }
   };
 
@@ -420,7 +481,11 @@ export function VerifiedContactChangePanel({
           {reviewContactEditLimitMessage("mobile")}
         </Text>
       ) : null}
-      {!emailEditGate.ok ? (
+      {!emailChangeAvailable && emailChangeUnavailableMessage ? (
+        <Text style={[styles.helper, { color: tokens.muted }]} accessibilityRole="text">
+          {emailChangeUnavailableMessage}
+        </Text>
+      ) : !emailEditGate.ok ? (
         <Text style={[styles.helper, { color: tokens.muted }]}>
           {reviewContactEditLimitMessage("email")}
         </Text>
@@ -544,10 +609,12 @@ export function VerifiedContactChangePanel({
         visible={otpModalVisible}
         animationType="slide"
         onRequestClose={() => {
-          // After Auth may have moved to B, do not casually abandon reconciliation.
-          if (phase === "phone_verifying" || phase === "phone_recovering") return;
-          if (phase === "email_verifying") return;
+          if (phase === "phone_verifying" || phase === "phone_recovering" || phase === "email_verifying") {
+            resetToOverview();
+            return;
+          }
           if (phase === "phone_otp") {
+            operations.retire();
             setPhoneChallenge(null);
             setPendingPhone(null);
             goPhase("phone_entry");
@@ -563,6 +630,10 @@ export function VerifiedContactChangePanel({
               onVerify={(code) => void verifyPhoneOtp(code)}
               onResend={() => void resendPhoneOtp()}
               onChangeNumber={() => {
+                operations.retire();
+                inFlightRef.current = false;
+                setPhoneBusy(false);
+                setPhoneResending(false);
                 setPhoneChallenge(null);
                 setPendingPhone(null);
                 goPhase("phone_entry");
@@ -591,8 +662,8 @@ export function VerifiedContactChangePanel({
                 We’re completing the security update
               </Text>
               <Text style={[styles.helper, { color: "#C7CBE8" }]}>
-                Your number was verified. Keep this screen open while we finish updating your
-                account.
+                The result is not confirmed yet. Check your account or retry the account update.
+                No new verification code will be requested by this retry.
               </Text>
               {error ? <Text style={[styles.err, { color: "#FCA5A5" }]}>{error}</Text> : null}
               <AuthV2SecondaryButton
@@ -604,6 +675,7 @@ export function VerifiedContactChangePanel({
                 purpose="retry"
                 testID="contact-change-phone-recover-retry"
               />
+              <AuthTertiaryTextAction label="Back to account" onPress={resetToOverview} purpose="navigate" accessibilityLabel="Back to account" />
             </View>
           ) : null}
           {phase === "phone_verified" ? (

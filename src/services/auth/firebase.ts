@@ -38,6 +38,7 @@ import {
 import {
   buildClientProfileFirestoreWrite,
   findRejectedProductionPatchKeys,
+  isConsentOnlyProfilePatch,
   stripServerOwnedProfilePatchKeys,
 } from "./clientProfilePatchPayload";
 import { profileDocumentMergeFields } from "./profileFirestorePayload";
@@ -47,11 +48,6 @@ import {
   userProfileWriteNeedsSeal,
   BUSINESS_SENSITIVE_FIELDS,
 } from "@/services/privacy/businessCloudSeal";
-import {
-  finalizeDeletionIfDue,
-  isActiveAccount,
-  isPendingDeletionAccount,
-} from "@/services/accountDeletion";
 import { recordRetiredPhone } from "@/services/accountDeletion/retiredIdentity";
 import { throwPendingDeletionLoginBlocked } from "@/services/auth/identityErrors";
 import {
@@ -72,14 +68,19 @@ import {
   confirmNativePhoneOtp,
   signOutNativePhoneAuth,
   startNativePhoneOtp,
+  getNativeAuthUid,
 } from "./nativePhoneAuth";
+import { retryOwnedMobileBind } from "./ownedMobileBindRetry";
+import { captureNativePhoneContactChangeCurrent } from "./nativePhoneContactChange";
 import {
   cleanBothAuthSdks,
   currentAuthMutationGeneration,
   currentSessionCommitEpoch,
 } from "./authSessionFence";
-import { getNativeAuthUid } from "./jsAuthBridge";
-import { authoritativeProfileWriteUid, issueProfileDocumentIfOwned } from "./profileWriteOwnership";
+import {
+  captureProfileWriteOwnership, assertProfileWriteOwnership, readLiveProfileUid,
+  type ProfileWriteOwnership,
+} from "./profileWriteOwnership";
 import { retireNativeCallableAuthReady } from "./nativeCallableAuthGate";
 
 import type {
@@ -95,15 +96,6 @@ const log = createLogger("auth/firebase");
 const USERS_COLLECTION = "users";
 const PHONE_INDEX_COLLECTION = "phoneIndex";
 const UEID_INDEX_COLLECTION = "ueidIndex";
-
-function readRuntimePlatform(): string | null {
-  try {
-    const { Platform } = require("react-native") as { Platform: { OS: string } };
-    return Platform.OS || null;
-  } catch {
-    return null;
-  }
-}
 
 function readJsAuthUid(): string | null {
   try {
@@ -134,6 +126,7 @@ async function resolveOrCreateUser(
   authUid: string,
   phoneE164: PhoneE164
 ): Promise<AuthResult> {
+  const { finalizeDeletionIfDue, isActiveAccount, isPendingDeletionAccount } = await import("@/services/accountDeletion");
   const phone = normalizePhoneE164(phoneE164);
   const existingByPhone = await loadProfileByPhoneFirestore(phone);
   if (existingByPhone) {
@@ -379,6 +372,138 @@ async function swapPhoneNumber(
   return profile;
 }
 
+export type ProfileUpdateIo = {
+  production: boolean;
+  ownership?: ProfileWriteOwnership;
+  readAuthUid: () => string | null;
+  getUserDoc: (uid: string) => Promise<{ exists: boolean; data: Record<string, unknown> | null }>;
+  mergeUserDoc: (uid: string, data: Record<string, unknown>) => Promise<void>;
+  openBusinessCloud: typeof openBusinessCloud;
+  protectBusinessCloud: typeof protectBusinessCloud;
+  requireJsAuthSession?: () => Promise<void>;
+};
+
+function consentOnlyMerge(write: Record<string, unknown> | null): Record<string, unknown> | null {
+  if (!write || !("legalConsents" in write)) return null;
+  return {
+    legalConsents: write.legalConsents,
+    updatedAt: write.updatedAt,
+  };
+}
+
+/**
+ * Production profile write. Consent-only patches merge `legalConsents` and
+ * do not open or seal. Sensitive business fields still seal in production;
+ * the existing allowlist governs ordinary profile metadata.
+ */
+export async function updateProfileWithIo(
+  uid: string,
+  patch: ProfilePatch,
+  io: ProfileUpdateIo
+): Promise<UserProfile> {
+  const owner = io.ownership ?? captureProfileWriteOwnership(uid);
+  const assertCurrent = () => {
+    if (owner.uid !== uid) throw new AppError("permission_denied", "session_changed");
+    assertProfileWriteOwnership(owner, io.readAuthUid());
+  };
+  assertCurrent();
+  if (io.production) {
+    await io.requireJsAuthSession?.();
+    assertCurrent();
+    const rejected = findRejectedProductionPatchKeys(patch);
+    if (rejected.length > 0) {
+      throw new AppError(
+        "permission_denied",
+        "This profile field must be updated through the server identity service."
+      );
+    }
+  }
+
+  const snap = await io.getUserDoc(uid);
+  assertCurrent();
+  if (!snap.exists || !snap.data) throw new AppError("not_found", "User profile not found.");
+  const rawProfile = snap.data;
+  const consentOnly = isConsentOnlyProfilePatch(patch);
+
+  let existing: ReturnType<typeof normaliseUserProfile>;
+  if (consentOnly) {
+    // Demographic age is not eligibility. This consent-only merge does not
+    // set ageEligibility and does not call openBusinessCloud or
+    // protectBusinessCloud. Sensitive writes retain active-account, owner,
+    // session, restore, and deletion authorization on the server.
+    existing = normaliseUserProfile(uid, rawProfile);
+  } else {
+    existing = (await io.openBusinessCloud(
+      "users",
+      normaliseUserProfile(uid, rawProfile) as unknown as Record<string, unknown>,
+      rawProfile
+    )) as unknown as ReturnType<typeof normaliseUserProfile>;
+  }
+
+  const safePatch = io.production
+    ? stripServerOwnedProfilePatchKeys(patch, { production: true })
+    : patch;
+  const linkedPatch =
+    consentOnly || io.production
+      ? safePatch
+      : await enrichPatchWithEmailLink(
+          existing,
+          safePatch,
+          lookupFirestoreEmailIndex,
+          commitFirestoreEmailIndexOps
+        );
+  const next = applyProfilePatch(existing, linkedPatch);
+
+  // Re-read after the document read (and seal open) so a sign-out in that
+  // gap cannot seal or publish.
+  assertCurrent();
+
+  if (io.production) {
+    const write = buildClientProfileFirestoreWrite(existing, next, { production: true });
+    if (consentOnly) {
+      const consentWrite = consentOnlyMerge(write);
+      if (consentWrite) {
+        assertCurrent();
+        await io.mergeUserDoc(uid, consentWrite);
+      }
+    } else if (write) {
+      const needsSeal = userProfileWriteNeedsSeal(existing as unknown as Record<string, unknown>, next as unknown as Record<string, unknown>);
+      let sealed: Record<string, unknown>;
+      if (needsSeal) sealed = await io.protectBusinessCloud({
+        collection: "users",
+        userId: uid,
+        recordId: uid,
+        revision: Number(next.updatedAt),
+        plain: write,
+        sensitiveSource: next as unknown as Record<string, unknown>,
+        existingRaw: rawProfile,
+      });
+      else {
+        for (const key of BUSINESS_SENSITIVE_FIELDS.users) {
+          if (write[key] != null) throw new AppError("save_failed", "This profile change could not be protected.");
+        }
+        sealed = { ...write };
+        delete sealed.contentSeal;
+      }
+      assertCurrent();
+      await io.mergeUserDoc(uid, sealed);
+    }
+  } else if (consentOnly) {
+    const consentWrite = consentOnlyMerge(
+      buildClientProfileFirestoreWrite(existing, next, { production: false })
+    );
+    if (consentWrite) {
+      assertCurrent();
+      await io.mergeUserDoc(uid, consentWrite);
+    }
+  } else {
+    assertCurrent();
+    await io.mergeUserDoc(uid, profileDocumentMergeFields(next));
+  }
+  assertCurrent();
+  return next;
+}
+
 export const firebaseAuthService: AuthService = {
   async startOtp(phoneE164: PhoneE164, options?: { forceResend?: boolean }): Promise<OtpChallenge> {
     return startNativePhoneOtp(phoneE164, options);
@@ -500,134 +625,36 @@ export const firebaseAuthService: AuthService = {
     return cancelAccountDeletion(profile);
   },
 
-  async updateProfile(
-    uid: string,
-    patch: ProfilePatch,
-    claim?: ProfileWriteClaim
-  ): Promise<UserProfile> {
-    const ownedClaim: ProfileWriteClaim = claim ?? {
-      uid,
-      generation: currentAuthMutationGeneration(),
-    };
+  async updateProfile(uid: string, patch: ProfilePatch, claim?: ProfileWriteClaim): Promise<UserProfile> {
     const production = useIdentityCallables();
     const db = getFirebaseDb();
-    const ref = doc(db, USERS_COLLECTION, uid);
-    try {
-      let nextProfile: ReturnType<typeof normaliseUserProfile> | null = null;
-      let payload: Record<string, unknown> | null = null;
-      await issueProfileDocumentIfOwned({
-        claim: ownedClaim,
-        readLive: () => ({
-          generation: currentAuthMutationGeneration(),
-          uid: authoritativeProfileWriteUid({
-            platform: readRuntimePlatform(),
-            nativeUid: getNativeAuthUid(),
-            jsUid: readJsAuthUid(),
-          }),
-        }),
-        prepare: async () => {
-          if (production) {
-            const { requireJsAuthSessionForFirestore } = await import("./jsAuthBridge");
-            await requireJsAuthSessionForFirestore("update_profile");
-            const rejected = findRejectedProductionPatchKeys(patch);
-            if (rejected.length > 0) {
-              throw new AppError(
-                "permission_denied",
-                "This profile field must be updated through the server identity service."
-              );
-            }
-          }
-          const snap = await getDoc(ref);
-          if (!snap.exists()) throw new AppError("not_found", "User profile not found.");
-          const rawProfile = snap.data() as Record<string, unknown>;
-          const existing = (await openBusinessCloud(
-            "users",
-            normaliseUserProfile(uid, rawProfile) as unknown as Record<string, unknown>,
-            rawProfile
-          )) as unknown as ReturnType<typeof normaliseUserProfile>;
-
-          const safePatch = production
-            ? stripServerOwnedProfilePatchKeys(patch, { production: true })
-            : patch;
-
-          const linkedPatch = production
-            ? safePatch
-            : await enrichPatchWithEmailLink(
-                existing,
-                safePatch,
-                lookupFirestoreEmailIndex,
-                commitFirestoreEmailIndexOps
-              );
-
-          const next = applyProfilePatch(existing, linkedPatch);
-          nextProfile = next;
-          if (production) {
-            const write = buildClientProfileFirestoreWrite(existing, next, { production: true });
-            if (!write) return;
-            const needsSeal = userProfileWriteNeedsSeal(
-              existing as unknown as Record<string, unknown>,
-              next as unknown as Record<string, unknown>
-            );
-            if (needsSeal) {
-              payload = await protectBusinessCloud({
-                collection: "users",
-                userId: uid,
-                recordId: uid,
-                revision: Number(next.updatedAt),
-                plain: write,
-                sensitiveSource: next as unknown as Record<string, unknown>,
-                existingRaw: rawProfile,
-              });
-            } else {
-              for (const key of BUSINESS_SENSITIVE_FIELDS.users) {
-                if (write[key] != null) {
-                  throw new AppError(
-                    "save_failed",
-                    "This profile change could not be protected."
-                  );
-                }
-              }
-              const unsealed = { ...write };
-              delete unsealed.contentSeal;
-              payload = unsealed;
-            }
-          } else {
-            payload = profileDocumentMergeFields(next);
-          }
-        },
-        setDoc: async () => {
-          if (!payload) return;
-          await setDoc(ref, payload, { merge: true });
-        },
-      });
-      if (!nextProfile) throw new AppError("not_found", "User profile not found.");
-      return nextProfile;
-    } catch (e) {
-      if (e instanceof AppError) throw e;
-      const code =
-        e && typeof e === "object" && "code" in e
-          ? String((e as { code: string }).code)
-          : "";
-      if (code === "permission-denied" || /insufficient permissions/i.test(String((e as Error)?.message ?? e))) {
-        throw new AppError(
-          "permission_denied",
-          "Cloud profile access was denied. Sign out and try again, or retry after secure session setup.",
-          e,
-          {
-            authPhase: "post_auth",
-            failureDomain: "firestore",
-            operation: "update_profile",
-            pathKind: "users/{uid}",
-            firebaseCode: "permission-denied",
-            phase: "email_onboarding",
-          }
-        );
-      }
-      throw e;
-    }
+    const owner = claim
+      ? { ...claim, epoch: claim.epoch ?? currentSessionCommitEpoch() }
+      : captureProfileWriteOwnership(uid);
+    return updateProfileWithIo(uid, patch, {
+      production, ownership: owner,
+      readAuthUid: () => production ? readLiveProfileUid() : readJsAuthUid(),
+      requireJsAuthSession: production ? async () => {
+        const { requireJsAuthSessionForFirestore } = await import("./jsAuthBridge");
+        await requireJsAuthSessionForFirestore("update_profile");
+      } : undefined,
+      getUserDoc: async profileUid => {
+        const snap = await getDoc(doc(db, USERS_COLLECTION, profileUid));
+        return { exists: snap.exists(), data: snap.exists() ? snap.data() as Record<string, unknown> : null };
+      },
+      mergeUserDoc: async (profileUid, payload) => { await setDoc(doc(db, USERS_COLLECTION, profileUid), payload, { merge: true }); },
+      openBusinessCloud, protectBusinessCloud,
+    });
   },
 
-  async startMobileChange(newPhoneE164: PhoneE164): Promise<OtpChallenge> {
+  async startMobileChange(newPhoneE164: PhoneE164, options?: { forceResend?: boolean }): Promise<OtpChallenge> {
+    const openingUid = getNativeAuthUid();
+    const openingGeneration = currentAuthMutationGeneration();
+    const openingEpoch = currentSessionCommitEpoch();
+    const contactCurrent = captureNativePhoneContactChangeCurrent();
+    const assertCurrent = () => {
+      if (!contactCurrent() || getNativeAuthUid() !== openingUid || currentAuthMutationGeneration() !== openingGeneration || currentSessionCommitEpoch() !== openingEpoch) throw new Error("session_changed");
+    };
     const phone = normalizePhoneE164(newPhoneE164);
     const { getNativeAuthUid, getNativeAuthPhoneE164 } = await import("./nativePhoneAuth");
     const uid = getNativeAuthUid();
@@ -650,11 +677,14 @@ export const firebaseAuthService: AuthService = {
       "./reconcilePendingMobileContactChange"
     );
     await preflightProductionMobileChange(phone);
+    assertCurrent();
 
     const { startNativePhoneContactChangeOtp, NATIVE_CONTACT_CHANGE_PURPOSE } = await import(
       "./nativePhoneContactChange"
     );
-    const challenge = await startNativePhoneContactChangeOtp(phone);
+    assertCurrent();
+    const challenge = await startNativePhoneContactChangeOtp(phone, options);
+    assertCurrent();
     log.info("startMobileChange challenge issued", {
       purpose: NATIVE_CONTACT_CHANGE_PURPOSE,
       uidSuffix: uid.slice(-6),
@@ -667,15 +697,24 @@ export const firebaseAuthService: AuthService = {
     challenge: OtpChallenge,
     code: string
   ): Promise<UserProfile> {
+    const openingGeneration = currentAuthMutationGeneration();
+    const openingEpoch = currentSessionCommitEpoch();
+    const contactCurrent = captureNativePhoneContactChangeCurrent();
+    const assertCurrent = () => {
+      if (!contactCurrent() || getNativeAuthUid() !== currentUid || currentAuthMutationGeneration() !== openingGeneration || currentSessionCommitEpoch() !== openingEpoch) throw new Error("session_changed");
+    };
+    assertCurrent();
     const {
       confirmNativePhoneContactChangeUpdate,
       NATIVE_CONTACT_CHANGE_PURPOSE,
     } = await import("./nativePhoneContactChange");
     const { getNativeAuthPhoneE164 } = await import("./nativePhoneAuth");
+    assertCurrent();
     const oldPhone = getNativeAuthPhoneE164();
 
     // 1) Update CURRENT Firebase Auth user phone to B (preserves UID).
     const updated = await confirmNativePhoneContactChangeUpdate(challenge, code);
+    assertCurrent();
     if (updated.uid !== currentUid) {
       throw new AppError(
         "auth_failed",
@@ -689,40 +728,19 @@ export const firebaseAuthService: AuthService = {
     const { completeServerMobileBindAfterAuthUpdate } = await import(
       "./reconcilePendingMobileContactChange"
     );
-    let lastError: unknown = null;
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      try {
-        const profile = await completeServerMobileBindAfterAuthUpdate({
-          uid: currentUid,
-          oldPhoneE164: (oldPhone ?? challenge.phoneE164) as PhoneE164,
-          newerPhoneE164: updated.phoneE164,
-          operationId: `client_${challenge.verificationId}`,
-        });
-        log.info("confirmMobileChange complete", {
-          purpose: NATIVE_CONTACT_CHANGE_PURPOSE,
-          uidSuffix: profile.uid.slice(-6),
-          ueid: profile.ueid,
-          attempt,
-        });
-        return profile;
-      } catch (e) {
-        lastError = e;
-        await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
-      }
-    }
-    throw new AppError(
-      lastError instanceof AppError ? lastError.code : "unknown",
-      lastError instanceof AppError
-        ? lastError.message
-        : "Your mobile was verified, but account update is still finishing. Keep the app open and retry.",
-      lastError instanceof Error ? lastError : undefined,
-      {
-        ...(lastError instanceof AppError ? lastError.details : {}),
-        purpose: NATIVE_CONTACT_CHANGE_PURPOSE,
-        mobileChangeRecoveryRequired: true,
-        authPhase: "post_auth",
-      }
-    );
+    const profile = await retryOwnedMobileBind({
+      isCurrent: () => {
+        try { assertCurrent(); return true; } catch { return false; }
+      },
+      bind: () => completeServerMobileBindAfterAuthUpdate({
+        uid: currentUid,
+        oldPhoneE164: (oldPhone ?? challenge.phoneE164) as PhoneE164,
+        newerPhoneE164: updated.phoneE164,
+        operationId: `client_${challenge.verificationId}`,
+      }),
+    });
+    log.info("confirmMobileChange complete", { purpose: NATIVE_CONTACT_CHANGE_PURPOSE });
+    return profile;
   },
 };
 

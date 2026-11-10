@@ -17,8 +17,10 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const pkg = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
 
 const EXCLUDE = new Set([
+  "test:selected-grin-firestore-emulator", // real selected Rules gate
   "test:all", // self
   "test:firestore-rules", // emulator suite — separate ci:verify stage
+  "test:live-rules-grin-merged", // emulator suite, run separately by ci:verify
   "test:live-rules-compat", // live-export compatibility emulator — separate ci:verify stage
   "test:storage-rules", // storage emulator suite — separate ci:verify stage
   "test:letterhead-storage-emulator", // letterhead Storage rules emulator — separate ci:verify stage
@@ -26,6 +28,7 @@ const EXCLUDE = new Set([
   "test:cash-receipt-envelope-emulator", // storage emulator receipt recovery — separate ci:verify stage
   "test:credit-revision-emulator", // firestore emulator credit races — separate ci:verify stage
   "test:orphan-purge-emulator", // firestore emulator missing-parent purge — separate ci:verify stage
+  "test:recovery-security-emulator", // Auth + Firestore identity regression gate
   "test:email-challenge-budget-emulator", // firestore emulator wrong-code budget — separate ci:verify stage
   "test:restore-fence-emulator", // firestore emulator restore fence — separate ci:verify stage
   "test:privacy-adapter-emulator", // firestore adapter integration — separate ci:verify stage

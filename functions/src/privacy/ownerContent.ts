@@ -3,10 +3,10 @@
  * Request and response bodies are not logged.
  */
 
-import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { HttpsError, onCall, type CallableRequest } from "firebase-functions/v2/https";
 
 import { assertAdmittedCallableUser } from "../identity/admitCallableUser";
-import { assertBusinessAgeAdmitted } from "../identity/businessAdmission";
+import { assertBusinessAccountActive } from "../identity/businessAdmission";
 import {
   assertContentBinding,
   loadContentKey,
@@ -49,68 +49,87 @@ function requireBinding(data: Record<string, unknown>, uid: string): {
   return { collection, recordId, revision, purpose };
 }
 
+/** Injectable I/O guards; callable exports and regressions execute these same handlers. */
+export type OwnerContentGuards = {
+  admit: (request: CallableRequest) => Promise<unknown>;
+  activeAccount: (uid: string) => Promise<void>;
+  restore: (uid: string) => Promise<void>;
+};
+const productionGuards: OwnerContentGuards = {
+  admit: assertAdmittedCallableUser,
+  activeAccount: assertBusinessAccountActive,
+  restore: assertRestoreTrafficClosed,
+};
+
+export async function performSealOwnerContent(
+  request: CallableRequest, guards: OwnerContentGuards = productionGuards
+) {
+  await guards.admit(request);
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in first.");
+  await guards.activeAccount(uid);
+  await guards.restore(uid);
+  const data = asRecord(request.data);
+  const binding = requireBinding(data, uid);
+  const plaintextBase64 = String(data.plaintextBase64 ?? "");
+  let plaintext: Buffer;
+  try {
+    plaintext = Buffer.from(plaintextBase64, "base64");
+  } catch {
+    throw new HttpsError("invalid-argument", "Content could not be protected.");
+  }
+  if (plaintext.length === 0 || plaintext.length > MAX_PLAINTEXT_BYTES) {
+    throw new HttpsError("invalid-argument", "Content could not be protected.");
+  }
+  const activeKeyId = process.env.CONTENT_DATA_KEY_ID?.trim();
+  let seal: ContentSeal;
+  if (activeKeyId) {
+    const activeKey = loadNamedContentKey(activeKeyId);
+    if (!activeKey) throw new HttpsError("failed-precondition", "Content protection is unavailable.");
+    seal = sealContentV2({ key: activeKey, keyId: activeKeyId, uid, plaintext, ...binding });
+  } else {
+    let key: Buffer;
+    try {
+      key = loadContentKey();
+    } catch {
+      throw new HttpsError("failed-precondition", "Content protection is unavailable.");
+    }
+    seal = sealContent({ key, uid, plaintext, ...binding });
+  }
+  return { seal };
+}
+
+export async function performOpenOwnerContent(
+  request: CallableRequest, guards: OwnerContentGuards = productionGuards
+) {
+  await guards.admit(request);
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in first.");
+  await guards.activeAccount(uid);
+  await guards.restore(uid);
+  const data = asRecord(request.data);
+  const binding = requireBinding(data, uid);
+  const seal = data.seal as ContentSeal | undefined;
+  if (!seal || typeof seal !== "object") {
+    throw new HttpsError("invalid-argument", "Content could not be opened.");
+  }
+  try {
+    const plaintext = openStoredContent({ uid, seal, ...binding });
+    return { plaintextBase64: plaintext.toString("base64") };
+  } catch (error) {
+    const code = error instanceof Error ? error.message : "";
+    if (code === "content_key_unavailable" || code === "unknown_key") {
+      throw new HttpsError("failed-precondition", "Content protection is unavailable.");
+    }
+    throw new HttpsError("permission-denied", "Content could not be opened.");
+  }
+}
+
 export const sealOwnerContent = onCall(
   { region: "asia-south1", secrets: [contentDataKey] },
-  async (request) => {
-    await assertAdmittedCallableUser(request);
-    const uid = request.auth?.uid;
-    if (!uid) throw new HttpsError("unauthenticated", "Sign in first.");
-    await assertBusinessAgeAdmitted(uid);
-    await assertRestoreTrafficClosed(uid);
-    const data = asRecord(request.data);
-    const binding = requireBinding(data, uid);
-    const plaintextBase64 = String(data.plaintextBase64 ?? "");
-    let plaintext: Buffer;
-    try {
-      plaintext = Buffer.from(plaintextBase64, "base64");
-    } catch {
-      throw new HttpsError("invalid-argument", "Content could not be protected.");
-    }
-    if (plaintext.length === 0 || plaintext.length > MAX_PLAINTEXT_BYTES) {
-      throw new HttpsError("invalid-argument", "Content could not be protected.");
-    }
-    const activeKeyId = process.env.CONTENT_DATA_KEY_ID?.trim();
-    let seal: ContentSeal;
-    if (activeKeyId) {
-      const activeKey = loadNamedContentKey(activeKeyId);
-      if (!activeKey) throw new HttpsError("failed-precondition", "Content protection is unavailable.");
-      seal = sealContentV2({ key: activeKey, keyId: activeKeyId, uid, plaintext, ...binding });
-    } else {
-      let key: Buffer;
-      try {
-        key = loadContentKey();
-      } catch {
-        throw new HttpsError("failed-precondition", "Content protection is unavailable.");
-      }
-      seal = sealContent({ key, uid, plaintext, ...binding });
-    }
-    return { seal };
-  }
+  (request) => performSealOwnerContent(request)
 );
-
 export const openOwnerContent = onCall(
   { region: "asia-south1", secrets: [contentDataKey] },
-  async (request) => {
-    await assertAdmittedCallableUser(request);
-    const uid = request.auth?.uid;
-    if (!uid) throw new HttpsError("unauthenticated", "Sign in first.");
-    await assertBusinessAgeAdmitted(uid);
-    await assertRestoreTrafficClosed(uid);
-    const data = asRecord(request.data);
-    const binding = requireBinding(data, uid);
-    const seal = data.seal as ContentSeal | undefined;
-    if (!seal || typeof seal !== "object") {
-      throw new HttpsError("invalid-argument", "Content could not be opened.");
-    }
-    try {
-      const plaintext = openStoredContent({ uid, seal, ...binding });
-      return { plaintextBase64: plaintext.toString("base64") };
-    } catch (error) {
-      const code = error instanceof Error ? error.message : "";
-      if (code === "content_key_unavailable" || code === "unknown_key") {
-        throw new HttpsError("failed-precondition", "Content protection is unavailable.");
-      }
-      throw new HttpsError("permission-denied", "Content could not be opened.");
-    }
-  }
+  (request) => performOpenOwnerContent(request)
 );

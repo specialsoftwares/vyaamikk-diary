@@ -32,6 +32,8 @@ import {
   readPhoneProofClaims,
 } from "../identity/phoneFactorProof";
 import { assertAdmittedCallableUser } from "../identity/admitCallableUser";
+import { AUTH_SECURITY_COLLECTION, ORIGIN_AUTH_TIME_CLAIM, originAuthSeconds } from "../identity/sessionSecurityPolicy";
+import { finalizeCommittedRecovery } from "./recoveryFinalization";
 
 const RECOVERY_SESSIONS = "accountRecoverySessions";
 const SUPPORT_CASES = "manualRecoveryCases";
@@ -135,9 +137,10 @@ export const startAccountRecovery = onCall(emailOtpCallOpts, async (request) => 
   const userSnap = await userRef.get();
   if (!userSnap.exists) throwEmailOtpError("FORBIDDEN", "permission-denied");
   const user = userSnap.data() as Record<string, unknown>;
+  if (user.status !== "active") throwEmailOtpError("FORBIDDEN", "permission-denied");
 
-  const bindingHash = String(user.emailHash ?? "");
-  const bindingSnap = bindingHash
+  const bindingHash = typeof user.emailHash === "string" ? user.emailHash : "";
+  const bindingSnap = /^[a-f0-9]{64}$/.test(bindingHash)
     ? await db.collection(EMAIL_BINDINGS).doc(bindingHash).get()
     : null;
   const mailbox = resolveVerifiedMailbox(
@@ -229,28 +232,67 @@ export const startAccountRecovery = onCall(emailOtpCallOpts, async (request) => 
 });
 
 export const completeAccountRecovery = onCall(emailOtpCallOpts, async (request) => {
-  await assertAdmittedCallableUser(request);
+  const admitted = await assertAdmittedCallableUser(request);
   const uid = requireUid(request);
   const sessionId = String(request.data?.sessionId ?? "");
   const emailCode = String(request.data?.emailCode ?? "");
   const newPhoneE164 = String(request.data?.newPhoneE164 ?? "");
   const answers = request.data?.answers as Record<string, string> | undefined;
   const phoneProofToken = String(request.data?.phoneProofToken ?? "");
+  const requestedDeviceId = request.data?.recoveryDeviceId;
 
-  if (!sessionId || !emailCode || !newPhoneE164 || !answers) {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(sessionId) || !/^\d{6}$/.test(emailCode) ||
+      !newPhoneE164 || !answers || typeof answers !== "object" || Array.isArray(answers)) {
     throw new HttpsError("invalid-argument", "Missing recovery fields.");
   }
+  if (requestedDeviceId != null &&
+      (typeof requestedDeviceId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(requestedDeviceId))) {
+    throw new HttpsError("invalid-argument", "Invalid recovery device.");
+  }
+  const origin = request.auth?.token[ORIGIN_AUTH_TIME_CLAIM];
+  const callerOrigin = originAuthSeconds({
+    signInProvider: admitted!.signInProvider,
+    authTimeSeconds: admitted!.authTimeSeconds,
+    originClaim: typeof origin === "number" ? origin : null,
+  });
   const phoneClaims = await readPhoneProofClaims(phoneProofToken);
   const phoneProjectId = phoneProofProjectId();
+  const requestedPhone = normalizePhoneE164(newPhoneE164);
+  const phoneProof = assessPhoneProof({
+    claims: phoneClaims,
+    purpose: "replacement_phone",
+    accountUid: uid,
+    expectedPhoneE164: requestedPhone,
+    nowMs: Date.now(),
+    projectId: phoneProjectId,
+    alreadyConsumed: false,
+  });
+  if (!phoneProof.ok) throwEmailOtpError("FORBIDDEN", "permission-denied");
+  // Updating Firestore cannot move a phone provider between Firebase Auth users.
+  // Cross-UID transfer has no supported client/protocol in this release. Fail
+  // before any challenge, profile, phoneIndex or proof-consumption mutation.
+  if (phoneProof.authUid !== uid) {
+    throw new HttpsError("failed-precondition", "This phone change needs support. Your account has not been changed.", {
+      code: "RECOVERY_PHONE_SUPPORT_REQUIRED",
+    });
+  }
+  const authUser = await getAdminAuth().getUser(uid);
+  if (authUser.disabled || authUser.phoneNumber !== requestedPhone) {
+    throw new HttpsError("failed-precondition", "The verified phone needs to be checked before recovery can continue. Contact support.", {
+      code: "RECOVERY_PHONE_SUPPORT_REQUIRED",
+    });
+  }
 
   const db = getAdminDb();
   const secret = resolveOtpSecret();
   const sessionRef = db.collection(RECOVERY_SESSIONS).doc(sessionId);
   const userRef = db.collection(USERS).doc(uid);
+  const securityRef = db.collection(AUTH_SECURITY_COLLECTION).doc(uid);
 
   const result = await db.runTransaction(async (tx) => {
     const sessionSnap = await tx.get(sessionRef);
     const userSnap = await tx.get(userRef);
+    const securitySnap = await tx.get(securityRef);
     if (!sessionSnap.exists || !userSnap.exists) throwEmailOtpError("CONFLICT", "aborted");
     const session = sessionSnap.data() as {
       uid: string;
@@ -262,12 +304,23 @@ export const completeAccountRecovery = onCall(emailOtpCallOpts, async (request) 
       questions: Array<{ id: string; prompt: string; answerDigest: string }>;
       failedAttempts: number;
       expiresAt: number;
+      newPhoneE164?: string;
     };
     const user = userSnap.data() as Record<string, unknown>;
     if (session.uid !== uid) throwEmailOtpError("FORBIDDEN", "permission-denied");
-    if (session.status === "completed") {
-      return { alreadyDone: true as const, coolingOffUntil: Number(user.coolingOffUntil ?? 0) };
+    if (user.status !== "active") throwEmailOtpError("FORBIDDEN", "permission-denied");
+    const priorCutoff = Number(securitySnap.get("revokedBeforeAuthTimeSeconds") ?? 0);
+    if (securitySnap.exists && (!Number.isFinite(priorCutoff) || callerOrigin <= priorCutoff)) {
+      throwEmailOtpError("UNAUTHENTICATED", "unauthenticated");
     }
+    if (session.status === "completed" || session.status === "identity_committed") {
+      if (session.newPhoneE164 !== requestedPhone) throwEmailOtpError("FORBIDDEN", "permission-denied");
+      return { resume: true as const };
+    }
+    if (Number(user.recoveryLockUntil ?? 0) > Date.now() || session.status === "failed_attempt") {
+      throwEmailOtpError("RATE_LIMITED", "resource-exhausted");
+    }
+    if (session.status !== "awaiting_factors") throwEmailOtpError("CONFLICT", "aborted");
     if (session.expiresAt < Date.now()) throwEmailOtpError("EMAIL_OTP_EXPIRED", "deadline-exceeded");
 
     const pendingRef = db.collection(PENDING_COLLECTION).doc(session.emailChallengeId);
@@ -280,7 +333,11 @@ export const completeAccountRecovery = onCall(emailOtpCallOpts, async (request) 
     if (pending.lockUntil && pending.lockUntil > Date.now()) throwEmailOtpError("EMAIL_OTP_LOCKED");
     if (pending.expiresAt < Date.now()) throwEmailOtpError("EMAIL_OTP_EXPIRED", "deadline-exceeded");
 
-    const freshBindingSnap = await tx.get(db.collection(EMAIL_BINDINGS).doc(String(user.emailHash ?? "")));
+    const bindingHash = typeof user.emailHash === "string" ? user.emailHash : "";
+    // A missing/malformed legacy binding is a support outcome, never doc("").
+    const freshBindingSnap = /^[a-f0-9]{64}$/.test(bindingHash)
+      ? await tx.get(db.collection(EMAIL_BINDINGS).doc(bindingHash))
+      : null;
     const mailbox = resolveVerifiedMailbox(
       {
         uid,
@@ -289,7 +346,7 @@ export const completeAccountRecovery = onCall(emailOtpCallOpts, async (request) 
         emailHash: user.emailHash,
         emailBindingVersion: user.emailBindingVersion,
       },
-      freshBindingSnap.exists ? (freshBindingSnap.data() as Record<string, unknown>) : null
+      freshBindingSnap?.exists ? (freshBindingSnap.data() as Record<string, unknown>) : null
     );
     if (
       !mailbox.ok ||
@@ -373,10 +430,9 @@ export const completeAccountRecovery = onCall(emailOtpCallOpts, async (request) 
 
     const oldPhone = String(user.phoneE164 ?? "");
     const coolingOffUntil = now + COOLING_OFF_MS;
-    const recoveryDeviceId =
-      typeof request.data?.recoveryDeviceId === "string" && request.data.recoveryDeviceId
-        ? request.data.recoveryDeviceId
-        : randomBytes(8).toString("hex");
+    const cutoff = Math.max(priorCutoff, Math.floor(now / 1000));
+    const securityOperationId = `recovery:${sessionId}`;
+    const recoveryDeviceId = requestedDeviceId ?? randomBytes(8).toString("hex");
 
     tx.set(proofRef!, {
       uid,
@@ -395,7 +451,7 @@ export const completeAccountRecovery = onCall(emailOtpCallOpts, async (request) 
       mobileLinkedAt: now,
       mobileChangedAt: now,
       mobileChangeCount: Number(user.mobileChangeCount ?? 0) + 1,
-      recoveryPending: false,
+      recoveryPending: true,
       coolingOffUntil,
       trustedRecoveryDeviceId: recoveryDeviceId,
       identityUpdatedAt: now,
@@ -403,14 +459,27 @@ export const completeAccountRecovery = onCall(emailOtpCallOpts, async (request) 
     });
     tx.update(pendingRef, { status: "consumed", consumedAt: now, otpDigest: null });
     tx.update(sessionRef, {
-      status: "completed",
-      completedAt: now,
+      status: "identity_committed",
+      identityCommittedAt: now,
       recoveryDeviceId,
       coolingOffUntil,
+      newPhoneE164: newPhoneNorm,
+      recoveryEmail: mailbox.normalizedEmail,
+      securityOperationId,
+      recoveryCutoffSeconds: cutoff,
+      revocationState: "pending",
+      notificationState: "pending",
+    });
+    tx.set(securityRef, {
+      operationId: securityOperationId,
+      revokedBeforeAuthTimeSeconds: cutoff,
+      startedAtSeconds: Math.floor(now / 1000),
+      revocationState: "pending",
+      updatedAt: now,
     });
     tx.set(userRef.collection("securityEvents").doc(), {
-      type: "recovery_completed",
-      result: "success",
+      type: "recovery_identity_committed",
+      result: "pending_finalization",
       createdAt: now,
       expireAt: now + 90 * 86_400_000,
     });
@@ -447,43 +516,32 @@ export const completeAccountRecovery = onCall(emailOtpCallOpts, async (request) 
     throwEmailOtpError("FORBIDDEN", "permission-denied");
   }
 
-  if ("alreadyDone" in result && result.alreadyDone) {
-    return { ok: true, coolingOffUntil: result.coolingOffUntil };
+  const finalized = await finalizeCommittedRecovery({ uid, sessionId });
+  // Notification retry is this owned callable's replay, not an assumed worker.
+  // A mail-provider failure must not reverse or conceal a completed identity change.
+  const finalSession = await sessionRef.get();
+  if (finalSession.get("notificationState") !== "accepted") {
+    try {
+      const { provider } = resolveEmailProvider();
+      const notice = await provider.send({
+        to: String(finalSession.get("recoveryEmail") ?? ""),
+        subject: "Your Vyaamikk Diary mobile number was recovered",
+        textBody:
+          "Account recovery succeeded and your mobile number was updated. A 24-hour cooling-off period now limits high-risk identity actions. If this was not you, contact support immediately.",
+        idempotencyKey: `recovery-complete-email:${sessionId}`,
+      });
+      if (notice.delivered) await sessionRef.update({ notificationState: "accepted", notificationAcceptedAt: Date.now() });
+    } catch {
+      // Keep the durable pending obligation for an authorized retry.
+    }
   }
-
-  // Account-wide token revocation, then mint fresh session for recovery device.
-  await getAdminAuth().revokeRefreshTokens(uid);
-  const { restoreAdmissionForUid } = await import("../deletion/restoreGate");
-  const admission = await restoreAdmissionForUid(uid);
-  if (admission.status === "deny") {
-    throwEmailOtpError("FORBIDDEN", "permission-denied");
-  }
-  if (admission.status === "unavailable") {
-    throw new HttpsError("unavailable", "Restore admission is temporarily unavailable. Try again when the connection returns.");
-  }
-  const { claimsForAdmission } = await import("../deletion/restoreAuthority");
-  const customToken = await getAdminAuth().createCustomToken(
-    uid,
-    claimsForAdmission(
-      { recoveryDeviceId: result.recoveryDeviceId, recoverySession: true },
-      admission
-    )
-  );
-
-  const { provider } = resolveEmailProvider();
-  await provider.send({
-    to: result.email,
-    subject: "Your Vyaamikk Diary mobile number was recovered",
-    textBody:
-      "Account recovery succeeded and your mobile number was updated. A 24-hour cooling-off period now limits high-risk identity actions. If this was not you, contact support immediately.",
-    idempotencyKey: `recovery-complete-email:${sessionId}`,
-  });
 
   return {
     ok: true,
-    coolingOffUntil: result.coolingOffUntil,
-    recoveryDeviceId: result.recoveryDeviceId,
-    customToken,
+    coolingOffUntil: finalized.coolingOffUntil,
+    recoveryDeviceId: finalized.recoveryDeviceId,
+    ...(finalized.customToken ? { customToken: finalized.customToken } : {}),
+    alreadyDone: finalized.alreadyDone,
     note:
       "All prior refresh tokens were revoked. Sign in on this device with the returned customToken (or complete native phone auth for the new number) to restore only the recovery session.",
   };

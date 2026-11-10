@@ -2,7 +2,15 @@ import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 
-import { Header, Loader, Screen, LocaleUiText, ErrorState } from "@/components/ui";
+import {
+  ErrorState,
+  Header,
+  Loader,
+  Screen,
+  SkeletonList,
+  SkeletonLoadingPanel,
+  LocaleUiText,
+} from "@/components/ui";
 import { useBusinessInsightsDashboard } from "@/hooks/useBusinessInsightsDashboard";
 import { useAuth } from "@/state/auth";
 import { useT } from "@/i18n";
@@ -35,9 +43,11 @@ export default function InsightsPartiesScreen() {
   return (
     <Screen scroll>
       <Header title={t("businessInsights.partiesTitle")} showBack onBackPress={() => router.back()} />
-      {loading ? (
-        <Loader message={t("common.loading")} />
-      ) : error ? (
+      {loading && !data ? (
+        <SkeletonLoadingPanel loading slowMessage={t("skeleton.stillLoading")}>
+          <SkeletonList count={6} />
+        </SkeletonLoadingPanel>
+      ) : error && !data ? (
         <ErrorState message={error} onRetry={() => void reload()} retryLabel={t("common.retry")} />
       ) : !data ? (
         <Loader message={t("common.loading")} />

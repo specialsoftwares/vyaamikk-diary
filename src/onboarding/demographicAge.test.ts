@@ -174,7 +174,7 @@ function assertFirestoreHelper(source: string, label: string) {
 
 function assertStorageHelper(source: string, label: string) {
   assert.equal(source.includes(REMOVED_AGE_CONJUNCT), false, label);
-  const start = source.indexOf("function ageEligible(userId)");
+  const start = source.indexOf("function accountActive(userId)");
   assert.ok(start >= 0, label);
   const body = source.slice(start, source.indexOf("function deletionAllowsStorage", start));
   assert.match(body, /firestore\.exists\(userPath\)/);
@@ -182,7 +182,7 @@ function assertStorageHelper(source: string, label: string) {
   assert.doesNotMatch(body, /ageEligibility/);
   assert.match(
     source,
-    /return isOwner\(userId\) && ageEligible\(userId\) && deletionAllowsStorage\(userId\);/
+    /return isOwner\(userId\) && accountActive\(userId\) && deletionAllowsStorage\(userId\);/
   );
   assert.match(source, /match \/users\/\{userId\}\/attachments\/\{recordId\}\/\{fileName\}/);
   assert.equal(source.includes("generationBind"), false, label);
@@ -370,11 +370,11 @@ async function main() {
   }
 
   const grin = readFileSync(resolve("functions/src/goodsEvidence/productionExports.ts"), "utf8");
-  assert.match(grin, /assertBusinessAgeAdmitted/);
+  assert.match(grin, /assertBusinessAccountActive/);
   assert.doesNotMatch(grin, /ageEligibility/);
   const seal = readFileSync(resolve("functions/src/privacy/ownerContent.ts"), "utf8");
   assert.match(seal, /assertAdmittedCallableUser/);
-  assert.match(seal, /assertBusinessAgeAdmitted/);
+  assert.match(seal, /assertBusinessAccountActive/);
   assert.match(seal, /assertRestoreTrafficClosed/);
 
   const revision = { n: 0 };

@@ -15,7 +15,7 @@ export type CrashConsentCopy = {
 const en: CrashConsentCopy = {
   modalTitle: "Help improve Vyaamikk Diary",
   modalBody:
-    "Crash reports stay off until this account's choice is saved, confirmed, and crash reporting is turned on. Reports do not include personal data, business records, or account identifiers. You can change this in Settings.",
+    "Share technical crash diagnostics to help us fix problems. Reporting stays off until this account's choice is saved and confirmed. App diagnostics exclude business records and account identifiers. You can change this in Settings.",
   allow: "Allow crash reports",
   decline: "No thanks",
   title: "Share crash reports",
@@ -28,13 +28,13 @@ const en: CrashConsentCopy = {
   },
   detail: {
     pending: "Your choice is waiting to be saved or confirmed. Crash reporting stays off until then.",
-    active: "Crash reporting is on for this account on this device.",
-    failed: "Crash reporting stayed off. The choice could not be saved or reporting could not be turned on.",
-    unavailable: "Crash reporting is unavailable on this device. The collection bridge is missing or failed, so reporting stays off.",
+    active: "Crash reporting is on for this account. Eligible saved reports are shared after this account reconnects.",
+    failed: "Crash reporting stayed off. Restart the app and try again; your saved choice is retained.",
+    unavailable: "Crash reporting is unavailable on this device. Restart the app and try again. Reporting stays off until it can be activated safely.",
     off: "Crash reporting is off for this account.",
   },
   unsentDeletionRequested:
-    "Deletion of unsent crash reports on this device was requested. Reports already uploaded are not deleted.",
+    "Deletion of unsent crash reports on this device was requested. Reports already uploaded are not deleted, and queued delivery cannot be recalled.",
 };
 
 const hi: CrashConsentCopy = {

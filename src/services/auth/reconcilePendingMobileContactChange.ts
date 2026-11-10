@@ -13,15 +13,25 @@ import {
   callPreflightVerifiedMobileContactChange,
 } from "./identityCallable";
 import {
-  clearPendingMobileContactChange,
+  clearPendingMobileContactChangeIfMatches,
   loadPendingMobileContactChange,
   savePendingMobileContactChange,
   shouldRetryServerMobileBind,
+  type PendingMobileContactChange,
 } from "./pendingMobileContactChange";
 import { getNativeAuthPhoneE164, getNativeAuthUid } from "./nativePhoneAuth";
 import { requireJsAuthSessionForFirestore } from "./jsAuthBridge";
+import { currentAuthMutationGeneration, currentSessionCommitEpoch } from "./authSessionFence";
 
 const log = createLogger("auth/reconcilePendingMobile");
+
+function captureOwner(uid: string, phone: string | null) {
+  const generation = currentAuthMutationGeneration();
+  const epoch = currentSessionCommitEpoch();
+  const owns = () => getNativeAuthUid() === uid && getNativeAuthPhoneE164() === phone &&
+    currentAuthMutationGeneration() === generation && currentSessionCommitEpoch() === epoch;
+  return { owns, assert() { if (!owns()) throw new Error("session_changed"); } };
+}
 
 export async function preflightProductionMobileChange(
   newerPhoneE164: PhoneE164
@@ -51,28 +61,33 @@ export async function completeServerMobileBindAfterAuthUpdate(args: {
       "Verified Auth phone must match the new number before server bind."
     );
   }
-
-  await savePendingMobileContactChange({
+  const owner = captureOwner(args.uid, newer);
+  const pending: PendingMobileContactChange = {
     uid: args.uid,
     oldPhoneE164: normalizePhoneE164(args.oldPhoneE164),
     newPhoneE164: newer,
     operationId: args.operationId,
     authUpdatedAt: Date.now(),
     purpose: "contact_change",
-  });
+  };
+  await savePendingMobileContactChange(pending, owner.owns);
+  owner.assert();
 
   await requireJsAuthSessionForFirestore("mobile_contact_change_bind");
+  owner.assert();
   const profile = await callConfirmVerifiedMobileContactChange({
     newerPhoneE164: newer,
     operationId: args.operationId,
   });
+  owner.assert();
   if (profile.uid !== args.uid) {
     throw new AppError(
       "auth_failed",
       "Server bind returned a different account. No local identity was switched."
     );
   }
-  await clearPendingMobileContactChange();
+  await clearPendingMobileContactChangeIfMatches(pending, owner.owns);
+  owner.assert();
   return profile;
 }
 
@@ -86,8 +101,10 @@ export async function reconcilePendingMobileContactChange(
   const authPhone = getNativeAuthPhoneE164();
   const authUid = getNativeAuthUid();
   if (!authUid || authUid !== profile.uid) return null;
+  const owner = captureOwner(profile.uid, authPhone);
 
   const pending = await loadPendingMobileContactChange();
+  owner.assert();
   const decision = shouldRetryServerMobileBind({
     uid: profile.uid,
     authPhoneE164: authPhone,
@@ -100,7 +117,8 @@ export async function reconcilePendingMobileContactChange(
       const authNorm = authPhone ? normalizePhoneE164(authPhone) : null;
       const profileNorm = normalizePhoneE164(profile.phoneE164);
       if (authNorm && authNorm === profileNorm) {
-        await clearPendingMobileContactChange();
+        await clearPendingMobileContactChangeIfMatches(pending, owner.owns);
+        owner.assert();
       }
     }
     return null;
@@ -122,13 +140,19 @@ export async function reconcilePendingMobileContactChange(
     } catch {
       // best-effort
     }
-
+    owner.assert();
     await requireJsAuthSessionForFirestore("mobile_contact_change_reconcile");
+    owner.assert();
     const next = await callConfirmVerifiedMobileContactChange({
       newerPhoneE164: decision.newerPhoneE164,
       operationId: decision.operationId,
     });
-    await clearPendingMobileContactChange();
+    owner.assert();
+    if (next.uid !== profile.uid) throw new Error("session_changed");
+    if (pending && pending.uid === profile.uid && pending.operationId === decision.operationId) {
+      await clearPendingMobileContactChangeIfMatches(pending, owner.owns);
+      owner.assert();
+    }
     return next;
   } catch (e) {
     log.warn("pending mobile reconcile failed; leaving recoverable pending state", {
@@ -144,12 +168,15 @@ export async function reconcilePendingMobileContactChange(
 export async function retryServerMobileBindForCurrentSession(
   profile: UserProfile
 ): Promise<UserProfile> {
+  const owner = captureOwner(profile.uid, getNativeAuthPhoneE164());
+  owner.assert();
   const next = await reconcilePendingMobileContactChange(profile);
+  owner.assert();
   if (next) return next;
   // Already consistent
   const authPhone = getNativeAuthPhoneE164();
   if (authPhone && normalizePhoneE164(authPhone) === normalizePhoneE164(profile.phoneE164)) {
-    await clearPendingMobileContactChange();
+    // Reconciliation already conditionally cleared its inspected pending row.
     return profile;
   }
   throw new AppError(

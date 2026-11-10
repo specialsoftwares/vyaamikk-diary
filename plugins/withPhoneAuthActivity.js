@@ -1,10 +1,10 @@
 const fs = require("fs");
 const path = require("path");
-const { withDangerousMod, withMainApplication } = require("@expo/config-plugins");
+const { withDangerousMod, withMainApplication, withAppBuildGradle } = require("@expo/config-plugins");
 
 /**
  * Copies the phone-auth activity bridge into the Android app and registers it.
- * The bridge reads the current Activity. It does not start phone authentication.
+ * The bridge owns Android verification callbacks and credential-task publication.
  *
  * A signed binary that includes the copied sources is required before a device
  * check can see the signal. This source is not that check.
@@ -12,6 +12,19 @@ const { withDangerousMod, withMainApplication } = require("@expo/config-plugins"
 const BRIDGE_IMPORT = "import com.specialsoftwares.vyaamikkdiary.phoneauth.PhoneAuthActivityPackage";
 const BRIDGE_REGISTER = "add(PhoneAuthActivityPackage())";
 const PACKAGE_APPLY = "PackageList(this).packages.apply {";
+
+// The bridge is compiled in :app. RNFirebase's implementation dependency does
+// not expose Firebase Auth types to :app's compile classpath. Use the installed
+// RNFirebase BOM, avoiding a second independently chosen Firebase version.
+function applyPhoneAuthDependencies(contents, firebaseBomVersion) {
+  const marker = "// VYD_PHONE_AUTH_DEPENDENCIES";
+  if (contents.includes(marker)) return contents;
+  if (!/^\d+\.\d+\.\d+$/.test(firebaseBomVersion)) {
+    throw new Error("PHONE_AUTH_ACTIVITY: installed Firebase BOM version missing");
+  }
+  const block = `\n${marker}\ndependencies {\n    implementation platform("com.google.firebase:firebase-bom:${firebaseBomVersion}")\n    implementation "com.google.firebase:firebase-auth"\n}\n`;
+  return contents + block;
+}
 
 function phoneAuthActivitySourceDir() {
   return path.join(
@@ -56,6 +69,12 @@ function applyPhoneAuthActivityMainApplication(contents) {
 }
 
 function withPhoneAuthActivity(config) {
+  config = withAppBuildGradle(config, (cfg) => {
+    if (cfg.modResults.language !== "groovy") throw new Error("PHONE_AUTH_ACTIVITY: expected Groovy app build.gradle");
+    const installed = require("@react-native-firebase/app/package.json");
+    cfg.modResults.contents = applyPhoneAuthDependencies(cfg.modResults.contents, installed.sdkVersions?.android?.firebase);
+    return cfg;
+  });
   config = withDangerousMod(config, [
     "android",
     (cfg) => {
@@ -90,3 +109,4 @@ module.exports.applyPhoneAuthActivityMainApplication = applyPhoneAuthActivityMai
 module.exports.phoneAuthActivitySourceDir = phoneAuthActivitySourceDir;
 module.exports.BRIDGE_IMPORT = BRIDGE_IMPORT;
 module.exports.BRIDGE_REGISTER = BRIDGE_REGISTER;
+module.exports.applyPhoneAuthDependencies = applyPhoneAuthDependencies;
