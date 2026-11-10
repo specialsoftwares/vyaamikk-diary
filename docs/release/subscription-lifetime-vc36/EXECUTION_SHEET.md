@@ -1,6 +1,6 @@
 # Subscription lifetime VC36 — execution sheet
 
-Status: **IN PROGRESS — proofs + walkthrough + lifetime rules shape landed; combined-head CI → versionCode 37 → CI → internal-grin AAB next.** Public publication and integration→main remain HOLD. Forward-only live cutover remains HOLD pending owner decision on dry-run counts below.
+Status: **IN PROGRESS — combined-head CI proven; versionCode 37 build commit + CI + internal-grin AAB in flight.** Public publication and integration→main remain HOLD. Forward-only live cutover remains HOLD pending owner decision on dry-run counts below. Device acceptance recorded separately.
 
 Branch: `fix/subscription-lifetime-vc36` (worktree `/Users/shivamsaurav/vyaamikk-subscription-vc36`). Source baseline `c29bcd1`.
 
@@ -97,9 +97,9 @@ Inventory: all 8 Auth/Firestore user docs in `vyaamikk-diary` (2026-11-11). Live
 
 | Field | Value |
 | --- | --- |
-| Final versionCode | _pending — re-read Play+EAS after combined CI (36 used)_ |
-| Final commit SHA | _pending_ |
-| Canonical CI run (combined) | _pending_ |
+| Final versionCode | **37** (EAS list: 36 used by `8d95bd27…`; next unused) |
+| Final commit SHA | _pending version-only commit_ |
+| Canonical CI run (combined) | **PASS** on `7230ba6` (activated rules + lifetime shape; google-services present; email-challenge flake retried clean; remainder through invoice-renderer PASS) |
 | Canonical CI run (version-only) | _pending_ |
 | EAS build id | _pending_ |
 | AAB SHA-256 | _pending_ |
