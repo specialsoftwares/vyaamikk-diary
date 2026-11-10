@@ -127,6 +127,40 @@ function errorCode(error: unknown): number {
   return Number((error as { code: unknown }).code);
 }
 
+type GenerationRequest = {
+  qs?: Record<string, unknown>;
+};
+
+/**
+ * `@google-cloud/storage` stores `file(path, { generation })` with `Number(generation)`.
+ * Generations above 2^53-1 change value. Copy reads `file.generation` when the
+ * request is built; metadata and delete close over the coerced query at construction.
+ * Put the original string back on the file and on the outgoing query.
+ */
+function exactGenerationFile(bucket: ObjectBucket, path: string, generation: string): GenerationFile {
+  const file = bucket.file(path, { generation });
+  const target = file as GenerationFile & {
+    generation?: string | number;
+    interceptors?: Array<{ request: (req: GenerationRequest) => GenerationRequest }>;
+  };
+  target.generation = generation;
+  if (Array.isArray(target.interceptors)) {
+    const coerced = String(Number(generation));
+    target.interceptors.push({
+      request(req) {
+        const qs = (req.qs ??= {});
+        if (qs.generation != null) qs.generation = generation;
+        if (qs.sourceGeneration != null) qs.sourceGeneration = generation;
+        if (qs.ifGenerationMatch != null && coerced !== generation && String(qs.ifGenerationMatch) === coerced) {
+          qs.ifGenerationMatch = generation;
+        }
+        return req;
+      },
+    });
+  }
+  return file;
+}
+
 export async function loadGrinUploadAuthority(
   db: { doc(path: string): { get(): Promise<{ exists: boolean; data(): Record<string, unknown> | undefined }> } },
   uid: string,
@@ -171,7 +205,7 @@ export function createOwnerObjectPorts(deps: {
   const bucket = deps.bucket;
 
   async function readGeneration(path: string, generation: string): Promise<StoredGeneration | null> {
-    const target = bucket.file(path, { generation });
+    const target = exactGenerationFile(bucket, path, generation);
     const [exists] = await target.exists();
     if (!exists) return null;
     const [meta] = await target.getMetadata();
@@ -239,7 +273,7 @@ export function createOwnerObjectPorts(deps: {
       return { url, requiredHeaders };
     },
     async signRead(path, generation, expiresAt) {
-      const [url] = await bucket.file(path, { generation }).getSignedUrl({
+      const [url] = await exactGenerationFile(bucket, path, generation).getSignedUrl({
         version: "v4",
         action: "read",
         expires: expiresAt,
@@ -259,14 +293,14 @@ export function createOwnerObjectPorts(deps: {
     },
     readGeneration,
     async readBytes(path, generation, length) {
-      const target = bucket.file(path, { generation });
+      const target = exactGenerationFile(bucket, path, generation);
       const [exists] = await target.exists();
       if (!exists) return null;
       const [data] = await target.download({ start: 0, end: Math.max(0, length - 1) });
       return new Uint8Array(data.subarray(0, length));
     },
     async hashGeneration(path, generation, maxBytes) {
-      const target = bucket.file(path, { generation });
+      const target = exactGenerationFile(bucket, path, generation);
       const [exists] = await target.exists();
       if (!exists) return null;
       const hash = createHash("sha256");
@@ -282,7 +316,7 @@ export function createOwnerObjectPorts(deps: {
     },
     async copyGeneration(input): Promise<CopyGenerationResult> {
       try {
-        const source = bucket.file(input.from, { generation: input.fromGeneration });
+        const source = exactGenerationFile(bucket, input.from, input.fromGeneration);
         const destination = bucket.file(input.to);
         const [copied, response] = await source.copy(destination, {
           preconditionOpts: { ifGenerationMatch: input.ifGenerationMatch },
@@ -300,7 +334,7 @@ export function createOwnerObjectPorts(deps: {
     },
     async removeGeneration(path, generation) {
       try {
-        await bucket.file(path, { generation }).delete();
+        await exactGenerationFile(bucket, path, generation).delete();
         return "removed";
       } catch (error) {
         const code = errorCode(error);
