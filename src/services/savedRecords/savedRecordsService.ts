@@ -149,8 +149,16 @@ export async function loadSavedRecordsData(userId: string): Promise<SavedRecords
   }
   const creditLatest = [...creditRecords].sort((a, b) => b.serial - a.serial)[0];
 
+  // "All records" spans every billable/saved family (not diary entries alone).
+  const totalRecords =
+    entries.length +
+    savedLetterheads.length +
+    proPacks.length +
+    purchaseOrders.length +
+    creditRecords.length;
+
   return {
-    totalRecords: entries.length,
+    totalRecords,
     byType,
     letterheadCount: savedLetterheads.length,
     letterheadLatestTitle: letterheadLatest?.title ?? null,

@@ -45,6 +45,7 @@ import {
 } from "@/domain/purchaseOrder";
 import { getPurchaseOrderRepository } from "@/services/purchaseOrder";
 import { savePurchaseOrderWithPdf } from "@/services/purchaseOrder/saveWithPdf";
+import { CreationScreenQuotaMeter } from "@/components/billing/CreationScreenQuotaMeter";
 import { notifyOrdinaryQuotaUpsell } from "@/billing/quotaUpsell";
 import { captureAdmissionToken } from "@/sync/syncSessionOwnership";
 import { pdfService } from "@/services/pdf/pdfService";
@@ -744,6 +745,7 @@ export default function PurchaseOrderFormScreen() {
         onBackPress={goBack}
       />
       <LocaleUiText style={styles.lead}>{t("purchaseOrder.formIntro")}</LocaleUiText>
+      <CreationScreenQuotaMeter />
       <SessionHoldNotice
         visible={sessionHold || sessionBlocksWrite({ signedIn: Boolean(user), syncStatus })}
       />

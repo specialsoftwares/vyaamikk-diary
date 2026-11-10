@@ -2589,8 +2589,11 @@
       "draftBody": "This removes only the saved draft, not any finished records.",
       "recordTitle": "Delete permanently?",
       "recordBody": "This will remove the record from Vyaamikk Diary. You will not be able to recover it.",
-      "recordSharedPdf": "PDFs or documents already shared outside the app cannot be recalled."
-    }
+      "recordSharedPdf": "PDFs or documents already shared outside the app cannot be recalled.",
+      "draftTitleNamed": "Delete draft “{{title}}”?",
+      "recordTitleNamed": "Delete “{{title}}” permanently?"
+    },
+    "draftDeleted": "Draft deleted."
   },
   "locationFootprints": {
     "consent": {
@@ -3076,6 +3079,12 @@
           "b2": "Professional Brief",
           "b3": "Business Insights",
           "b4": "Everything in Professional"
+        },
+        "unlimited": {
+          "name": "Unlimited",
+          "b1": "Unlimited record creation and secure cloud save",
+          "b2": "Business Insights and Professional Brief",
+          "b3": "Includes GRIN goods evidence"
         }
       },
       "trialNote": "14-day Professional trial is granted by account policy, not by buying a store plan. This screen cannot start a trial.",

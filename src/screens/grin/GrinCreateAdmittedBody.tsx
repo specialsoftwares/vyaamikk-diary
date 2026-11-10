@@ -28,6 +28,7 @@ import {
   useGrinT,
   useGrinThemedStyles,
 } from "./grinScreenHooks";
+import { CreationScreenQuotaMeter } from "@/components/billing/CreationScreenQuotaMeter";
 import { Banner, Button, FormSection, Header, Screen, SelectField, TextField, View, StyleSheet } from "./grinSurfaces";
 
 /**
@@ -350,6 +351,7 @@ function GrinCreateForm({
     <Screen scroll>
       <View style={styles.wrap}>
         <Header title={t("grin.createTitle")} subtitle={t("grin.createIntro")} showBack />
+        <CreationScreenQuotaMeter />
         <GrinFixtureNotices />
         {error ? <Banner tone="danger" message={error} /> : null}
         {submitted ? (

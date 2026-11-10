@@ -1,8 +1,8 @@
 # Subscription lifetime VC36 — execution sheet
 
-Status: **IN PROGRESS — contracts, shared writers, Streams A–C, and phone session_changed landed; remaining walkthrough defects + CI/AAB still open.** Public publication and integration→main remain HOLD.
+Status: **IN PROGRESS — combined head proofs + walkthrough fixes landed; CI/AAB/versionCode next.** Public publication and integration→main remain HOLD. Forward-only live cutover remains HOLD pending owner decision on dry-run counts below.
 
-Branch commits since `c29bcd1`: `e8d01bf` → `d3ffbda` → `e6d3cac` → `e212a3a` (catalog) → `69ccbfd` (lifetime) → `ed6bbd9` (Insights) → `60b015a` (session_changed).
+Branch: `fix/subscription-lifetime-vc36` (worktree `/Users/shivamsaurav/vyaamikk-subscription-vc36`). Source baseline `c29bcd1`.
 
 ## Baseline
 
@@ -15,84 +15,98 @@ Branch commits since `c29bcd1`: `e8d01bf` → `d3ffbda` → `e6d3cac` → `e212a
 | Draft PRs | Preserve #42 / #54 / #55 / #56 |
 | Expo | SDK 54 |
 
-## Amended contracts (lead-owned)
+## Amended contracts (landed)
 
 | Contract | Path |
 | --- | --- |
-| Entitlement vs purchase progress | `src/subscription/entitlementView.ts` (`e8d01bf`) |
-| Lifetime admission (all families incl. GRIN) | `src/billing/optionC/lifetimeAdmission.ts` (`e8d01bf`) |
-| Shared meter presentation | `src/subscription/lifetimeQuotaMeterPresentation.ts` + `LifetimeQuotaMeterBanner` |
-| Shared translations | `billing.entitlement.*` in `en.ts` / `hi.ts` |
-| Selected rules artifact | `docs/release/rules-compat/proposed-billing-reads/` sha256 `64a57dbd…` |
+| Entitlement vs purchase progress | `src/subscription/entitlementView.ts` |
+| Lifetime admission (all families incl. GRIN) | `src/billing/optionC/lifetimeAdmission.ts` + GRIN `tools/goods-evidence-emulator/quota.ts` |
+| Shared meter | `LifetimeQuotaMeterBanner` + `CreationScreenQuotaMeter` + `useLifetimeQuotaMeter` |
+| Shared translations | `billing.entitlement.*` / swipeDelete named confirms in `en`/`hi` |
+| Selected rules artifact | `docs/release/rules-compat/proposed-billing-reads/` |
 
-Rules in force:
+## Acknowledged meaning (verified)
 
-1. Confirmed free / confirmed paid / unknown are distinct. Paid period-change keeps access (`period_change_pending`). Unreadable plan → Checking your plan / retry; preserve draft. Authoritative paid activation hides the free meter immediately on dashboard and every open creation screen (same publish; no navigate/refresh).
-2. One trusted lifetime admission across diary/composer, PO, Dukaan credit, professional pack, GRIN first issuance. Atomic commit of record + quota + serial. Owner- and family-scoped operation ID. `freeMembershipIds` bounded to 15; durable receipts for retries. Retry after deletion cannot recreate or consume another slot. At 14/15 two devices → one accept + one recoverable draft. Older client writers covered explicitly on the trusted path.
-3. Forward-only accounting is a **migration proposal only**. Dry-run counts (provable / ambiguous / paid-active / empty) required before any live enablement.
-4. Catalog: Monthly ₹136 / Yearly ₹1,832; one Play product `vyd_unlimited` with base plans `monthly` / `yearly`. Preserve legacy benefits including Starter’s existing cap. Trace two VC36 test purchases through verification → entitlement write → owner read. Verify new checkout + restore before retiring legacy sales.
-5. Single writers: shared dashboard meter shell, translations, selected Firestore rules. Canonical CI on final versionCode commit; next unused code from Play+EAS; one `internal-grin` AAB from that SHA. Artifact + handset evidence recorded here. Public release and integration→main stay HOLD.
+Processor proofs in `src/billing/iap/iapAcknowledgedEntitlement.test.ts`:
 
-## Ownership
-
-| Writer | Scope |
+| Case | Result |
 | --- | --- |
-| A — Catalog / purchase | products, iapCatalog*, purchase processor, validate/activate, purchase progress, selling surfaces |
-| B — Lifetime admission | atomicBillableCreate, usageTransition, lifetime wiring, G1 quota, migration dry-run, older writers |
-| C — Insights / VyaaFlow | Insights first-15 membership filter, statutory calendar always on |
-| D — Walkthrough | Phone/session/splash, cash paid & payment request, saved letter inset, records/deletion, dashboard refresh/search |
-| Shared dashboard | You-tab + creation-screen meter mounts consuming `EntitlementView` only |
-| Shared translations | en/hi billing + quota + walkthrough strings |
-| Shared rules | Additive billingDetails / subscriptionBillingHistory (+ lifetime usage) artifact |
-| Lead | Contracts, this sheet, Play owner actions, CI/build/device |
+| New purchase (`acknowledged` + `entitlementActive`) | `verified` |
+| Already-acknowledged restore (`alreadyProcessed` + `entitlementActive`) | `verified` |
+| Same-token renewal (second validate `alreadyProcessed`) | `verified` |
+| Retry after lost response (`awaiting_recovery` → success) | `verified` |
+| Inactive / unacknowledged | not `verified` |
+| `purchaseState: pending` | never validates |
 
-## Walkthrough defects (must remain in plan)
+## VC36 test-purchase trace (before further diagnostics)
 
-- Phone: `session_changed` must not surface as `session_expired` over a successful current session; splash no rewind; Back/Change number/wrong/expired/timeout preserved.
-- Cash paid / Payment request: stable owner deps; bounded reads; form-shaped loading; no dashboard flash; save/reopen + quota on those routes.
-- Saved letter: one scrollable reader + bottom inset; closing field reachable.
-- Records/deletion: “All records” = all families; identify selection in destructive dialogs; “Draft deleted” vs cloud ack; banners clear of next header.
-- Dashboard/search: kill 63px refresh jump / ~78px card flip; Continue distinct after consent; empty-library Create; no keyboard on empty search; no raw errors.
+Owner `kIJYjcK5Q4eryqdr13lX09K5coy1` (Android Play test account):
 
-## Device tests (must remain)
+| Step | Evidence |
+| --- | --- |
+| Purchase 1 activated | `h_android:purchase:GPA.3353-5451-0354-77837` · `vyd_starter_monthly` · 2026-11-10T21:08:30Z |
+| Purchase 2 activated | `h_android:purchase:GPA.3337-0290-9674-00705` · `vyd_business_yearly` · 2026-11-10T21:08:56Z |
+| Renewals preserved | `GPA.3337-…00705..0` and `..1` renewed events |
+| Entitlement write / owner read | `users/…/subscription/status` → `entitlementActive: true`, `plan: business`, `productId: vyd_business`, `basePlanId: yearly`, `currentPeriodEnd` 2026-11-10T22:38:56Z |
 
-Slots 0 / 14 / 15 / 16; two-device race at 14/15; lost response; offline draft; delete/recreate; upgrade/expiry meter removal without navigate; Insights membership; statutory empty/offline/fail; purchase verifying → paid meter hide; restore; VC36 test-purchase trace.
+Legacy Starter activation and Business yearly renewals remain on this owner; no further diagnostic purchase initiated in this pass.
+
+## Lifetime + GRIN proofs
+
+| Proof | Result |
+| --- | --- |
+| Ordinary + GRIN share one 15-slot counter | `lifetimeCrossFeature.emulator.test.ts` |
+| Cross-feature race at 14/15 | one `accept_free` + one `reject_exhausted` (draft) |
+| GRIN server path at 15 | `decideGrinIssuanceQuota` → `lifetime_exhausted` |
+| Older writer cannot skip | exhausted policy rejects; rules still require `usageConsumedForRecord` when enforcement on |
+| Retry after deletion | receipt replay → no recreate / no second slot (`lifetime_receipt_replay`) |
+| Injected GRIN register | `quota.injected.unit.test.ts` ok |
+
+## Meter
+
+Mounted on You dashboard and creation screens: composer (incl. Cash paid / Payment request), purchase-order form, customer-credit form, professional-pack form, GRIN create. Hide-on-paid + never Free/0/15 unknown covered by `lifetimeQuotaMeterHideOnPaid.test.ts`.
+
+## Walkthrough fixes in this head
+
+- Auth: `session_changed` uses AppError code `session_changed` (not `session_expired`)
+- Saved letter: scrollable reader + bottom inset so closing field is reachable
+- Search: no autofocus keyboard on empty library
+- Delete: destructive dialogs name the selection; drafts ack as “Draft deleted”
+- Dashboard pull: Android `progressViewOffset` to stop ~63px refresh jump
+- All records total counts every saved family
+- Composer loading stays form-shaped with meter (no dashboard list flash)
+
+## Forward-only dry-run (HOLD live)
+
+Tool: `npx --yes tsx scripts/lifetime-cutover-dry-run.ts docs/release/subscription-lifetime-vc36/dry-run-accounts.json`  
+Inventory: all 8 Auth/Firestore user docs in `vyaamikk-diary` (2026-11-11). Live enablement: **HOLD**.
+
+| Class | Count |
+| --- | --- |
+| provable_history | **0** |
+| ambiguous_history | **0** |
+| paid_active | **1** |
+| empty | **7** |
+| sampleSize | 8 |
+| enabledLive | false |
+
+## Artifact / CI / handset
+
+| Field | Value |
+| --- | --- |
+| Final versionCode | _pending — re-read Play+EAS after combined CI (36 used)_ |
+| Final commit SHA | _pending_ |
+| Canonical CI run (combined) | _pending_ |
+| Canonical CI run (version-only) | _pending_ |
+| EAS build id | _pending_ |
+| AAB SHA-256 | _pending_ |
+| Device acceptance | _pending — record separately; public HOLD_ |
 
 ## Play Console owner action
 
 | Action | Detail |
 | --- | --- |
 | Create product | `vyd_unlimited` (subscription) |
-| Base plan monthly | `monthly`, P1M, India **₹136**, standard base offer only |
-| Base plan yearly | `yearly`, P1Y, India **₹1,832**, standard base offer only |
+| Base plan monthly | `monthly`, P1M, India **₹136** |
+| Base plan yearly | `yearly`, P1Y, India **₹1,832** |
 | Legacy | Keep existing subscribers; stop offering starter/pro/business to new purchasers |
-| Do not | Silently cancel, reprice, or invalidate active legacy subscriptions |
-
-## Artifact / CI / handset (fill on ship)
-
-| Field | Value |
-| --- | --- |
-| Final versionCode | _pending — re-read Play+EAS after combined CI (36 used)_ |
-| Final commit SHA | _pending_ |
-| Canonical CI run | _pending_ |
-| `ci:verify PASS` timestamp | _pending_ |
-| EAS build id | _pending_ |
-| AAB SHA-256 | _pending_ |
-| Package / cert | _pending_ |
-| Firebase project | `vyaamikk-diary` |
-| Handset | _pending attachment_ |
-| Device acceptance | _pending_ |
-
-## Forward-only dry-run (report before live)
-
-Tool: `npx --yes tsx scripts/lifetime-cutover-dry-run.ts [accounts.json]`
-Methodology: `classifyLifetimeCutoverAccount` / `summarizeLifetimeCutoverDryRun` (`enabledLive: false`).
-
-| Class | Count |
-| --- | --- |
-| provable_history | _pending owner inventory_ |
-| ambiguous_history | _pending owner inventory_ |
-| paid_active | _pending owner inventory_ |
-| empty | _pending owner inventory_ |
-
-Live enablement: **HOLD** until owner approves these counts. Implementation/testing continues in parallel.

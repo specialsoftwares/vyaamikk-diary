@@ -14,6 +14,8 @@ export type AppErrorCode =
   | "too_many_attempts"
   | "auth_not_configured"
   | "session_expired"
+  /** Ownership fence — distinct from session_expired over a live session. */
+  | "session_changed"
   | "not_found"
   | "permission_denied"
   | "account_pending_deletion"

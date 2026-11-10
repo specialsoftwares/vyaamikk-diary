@@ -85,6 +85,7 @@ import { normalizeIndianMobile } from "@/utils/phone";
 import { isValidPan, normalizePan } from "@/utils/pan/pan";
 import { formatINRInWords } from "@/utils/money/inrWords";
 import { saveCustomerCreditWithPdf } from "@/services/customerCredit/saveWithPdf";
+import { CreationScreenQuotaMeter } from "@/components/billing/CreationScreenQuotaMeter";
 import { notifyOrdinaryQuotaUpsell } from "@/billing/quotaUpsell";
 import { captureAdmissionToken } from "@/sync/syncSessionOwnership";
 import { logSaveDiagnostic } from "@/services/records/saveDiagnostics";
@@ -982,6 +983,7 @@ export default function CustomerCreditFormScreen() {
         onBackPress={goBack}
       />
       <SessionHoldNotice visible={sessionHold || sessionBlocksWrite({ signedIn: Boolean(user), syncStatus })} />
+      <CreationScreenQuotaMeter />
       <LocaleUiText style={styles.lead}>{t("customerCredit.formIntro")}</LocaleUiText>
 
       {isEditing && existing ? (

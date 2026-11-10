@@ -11,6 +11,7 @@ import { useI18n, useT } from "@/i18n";
 import { getDiaryRepository } from "@/services/diary";
 import { getProfessionalPackRepository } from "@/services/professionalPack";
 import { saveProfessionalPackWithPdf } from "@/services/professionalPack/saveWithPdf";
+import { CreationScreenQuotaMeter } from "@/components/billing/CreationScreenQuotaMeter";
 import { notifyOrdinaryQuotaUpsell } from "@/billing/quotaUpsell";
 import { captureAdmissionToken } from "@/sync/syncSessionOwnership";
 import { autoPackTitle } from "@/utils/professionalPack/display";
@@ -312,6 +313,7 @@ export default function ProfessionalPackFormScreen() {
         backFrom="you"
         onBackPress={handleHeaderBack}
       />
+      <CreationScreenQuotaMeter />
       {user && initialValues !== null ? (
         <ProfessionalPackForm
           onValuesChange={setFormValues}

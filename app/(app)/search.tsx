@@ -290,7 +290,7 @@ export default function GlobalSearchScreen() {
             onChangeText={setQuery}
             placeholder={t("globalSearch.placeholder")}
             placeholderTextColor={colors.textMuted}
-            autoFocus
+            autoFocus={presentation !== "empty_library"}
             autoCorrect={false}
             autoCapitalize="none"
             returnKeyType="search"

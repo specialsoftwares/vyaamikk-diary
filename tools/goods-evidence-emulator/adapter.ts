@@ -356,12 +356,19 @@ export class GoodsEvidenceRegisterAdapter {
         usageRaw: usageSnap.exists ? usageSnap.data() : undefined,
         recordId: frozen.body.receiptId,
         nowMs: serverMs,
+        ownerUid: uid,
+        intentId: frozen.commandId,
+        recordExists: receiptSnap.exists,
       });
       if (quota.kind === "quota_exhausted") {
-        return deny(
-          "quota_exhausted",
-          "Monthly record limit reached. This save was not completed."
-        );
+        const lifetimeMsg =
+          quota.reason === "lifetime_receipt_replay" ||
+          quota.reason === "lifetime_record_exists"
+            ? "This create was already admitted and cannot consume another slot."
+            : quota.reason === "lifetime_exhausted"
+              ? "Free record limit reached. This save was not completed."
+              : "Monthly record limit reached. This save was not completed.";
+        return deny("quota_exhausted", lifetimeMsg);
       }
       if (quota.kind === "quota_state_invalid") {
         return deny("quota_state_invalid", "Usage state is unreadable. This save was not completed.");

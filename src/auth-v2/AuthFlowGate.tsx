@@ -1240,7 +1240,7 @@ export function AuthFlowGate() {
         "phone_otp"
       );
     } else if (view.settlement === "session_changed") {
-      applyFlowError(new AppError("session_expired", copy.sessionChanged), "phone_otp");
+      applyFlowError(new AppError("session_changed", copy.sessionChanged), "phone_otp");
     } else if (view.settlement === "invalid" || view.settlement === "expired" || view.settlement === "network") {
       const error = view.error instanceof AppError ? view.error : new AppError("invalid_otp", copy.resultUnknown);
       if (error instanceof AppError && error.code === "too_many_attempts") {

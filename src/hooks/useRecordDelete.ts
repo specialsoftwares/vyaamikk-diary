@@ -13,16 +13,22 @@ import type {
 
 function confirmCopy(
   tier: UserDeleteConfirmTier,
-  t: (k: string) => string
+  t: (k: string, vars?: Record<string, string | number>) => string,
+  selectionTitle: string
 ): { title: string; body: string } {
+  const named = selectionTitle.trim();
   if (tier === "draft") {
     return {
-      title: t("swipeDelete.confirm.draftTitle"),
+      title: named
+        ? t("swipeDelete.confirm.draftTitleNamed", { title: named })
+        : t("swipeDelete.confirm.draftTitle"),
       body: t("swipeDelete.confirm.draftBody"),
     };
   }
   return {
-    title: t("swipeDelete.confirm.recordTitle"),
+    title: named
+      ? t("swipeDelete.confirm.recordTitleNamed", { title: named })
+      : t("swipeDelete.confirm.recordTitle"),
     body: `${t("swipeDelete.confirm.recordBody")}\n\n${t("swipeDelete.confirm.recordSharedPdf")}`,
   };
 }
@@ -53,7 +59,7 @@ export function useRecordDelete(userId: string | null) {
       if (pendingRef.current.has(key)) return;
 
       const tier = request.confirmTier ?? (request.entityType === "form_draft" ? "draft" : "record");
-      const { title, body } = confirmCopy(tier, t);
+      const { title, body } = confirmCopy(tier, t, request.title);
 
       Alert.alert(title, body, [
         { text: t("common.cancel"), style: "cancel" },
@@ -67,9 +73,12 @@ export function useRecordDelete(userId: string | null) {
               bump((n) => n + 1);
               try {
                 const result = await deleteUserContent(userId, request, user?.ueid ?? "");
-                const msg = result.syncPending
-                  ? t("swipeDelete.deletedSyncPending")
-                  : t("swipeDelete.deleted");
+                const msg =
+                  tier === "draft"
+                    ? t("swipeDelete.draftDeleted")
+                    : result.syncPending
+                      ? t("swipeDelete.deletedSyncPending")
+                      : t("swipeDelete.deleted");
                 feedback.showSuccess(msg);
                 await onSuccess?.();
               } catch (e) {

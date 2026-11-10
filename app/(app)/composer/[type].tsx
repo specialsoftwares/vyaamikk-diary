@@ -59,6 +59,7 @@ import { updateEntryLocalFirst } from "@/services/diary/localFirst";
 import { presentComposerWriteAcceptance } from "@/services/diary/composerSaveSteps";
 import { saveComposerEntry } from "@/services/diary/saveComposerEntry";
 import type { CreateBusinessEntryInput } from "@/services/diary/types";
+import { CreationScreenQuotaMeter } from "@/components/billing/CreationScreenQuotaMeter";
 import { notifyOrdinaryQuotaUpsell } from "@/billing/quotaUpsell";
 import { captureAdmissionToken, syncSessionOwnership } from "@/sync/syncSessionOwnership";
 import { logSaveDiagnostic } from "@/services/records/saveDiagnostics";
@@ -979,7 +980,7 @@ export default function ComposerScreen() {
 
   if (loading) {
     return (
-      <Screen>
+      <Screen scroll form>
         <Header
           variant="executive"
           title={formTitle}
@@ -987,7 +988,9 @@ export default function ComposerScreen() {
           backFrom="you"
           onBackPress={navigateBack}
         />
-        <InitialListSkeleton count={6} />
+        <CreationScreenQuotaMeter />
+        {/* Form-shaped loading — not a dashboard list flash. */}
+        <InitialListSkeleton count={4} />
       </Screen>
     );
   }
@@ -1066,6 +1069,7 @@ export default function ComposerScreen() {
         rightSlot={saveDraftHeader}
       />
       <SessionHoldNotice visible={sessionHold || blocked} />
+      <CreationScreenQuotaMeter />
       <LocaleUiText style={linkStyles.benefit}>{benefitCopy}</LocaleUiText>
       <BusinessComposerForm
         key={`${entryType}-${activeDraftId ?? "new"}-${editingId ?? ""}`}

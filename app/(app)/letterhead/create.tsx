@@ -103,6 +103,7 @@ function LegacyLetterheadBody({
 
   const styles = useThemedStyles((colors) =>
     StyleSheet.create({
+      readerContent: { paddingBottom: spacing.xxl + spacing.xl },
       lead: { ...typography.body, color: colors.textMuted, marginBottom: spacing.md },
       block: { gap: spacing.xs, marginBottom: spacing.md },
       label: { ...typography.caption, color: colors.textMuted },
@@ -116,7 +117,7 @@ function LegacyLetterheadBody({
     view?.kind === "draft" ? t("letterhead.legacyDraftTitle") : t("letterhead.legacyTitle");
 
   return (
-    <Screen>
+    <Screen scroll padded contentStyle={styles.readerContent}>
       <Header title={title} showBack backFrom="letterhead" />
       {snap.phase !== "ready" && snap.phase !== "error" ? (
         <Loader fullscreen message={t("common.loading")} />

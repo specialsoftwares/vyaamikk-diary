@@ -2599,12 +2599,15 @@ const en = {
     action: "Delete",
     accessibility: "Delete {{title}}",
     deleted: "Record permanently deleted.",
+    draftDeleted: "Draft deleted.",
     deletedSyncPending:
       "Deleted from this device. Cloud deletion will complete when you are online.",
     confirm: {
       draftTitle: "Delete this draft?",
+      draftTitleNamed: "Delete draft “{{title}}”?",
       draftBody: "This removes only the saved draft, not any finished records.",
       recordTitle: "Delete permanently?",
+      recordTitleNamed: "Delete “{{title}}” permanently?",
       recordBody:
         "This will remove the record from Vyaamikk Diary. You will not be able to recover it.",
       recordSharedPdf:

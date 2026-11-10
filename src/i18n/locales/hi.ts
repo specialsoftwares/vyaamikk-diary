@@ -2407,12 +2407,15 @@ const hi: Translations = {
     action: "हटाएं",
     accessibility: "{{title}} हटाएं",
     deleted: "रिकॉर्ड स्थायी रूप से हटा दिया गया।",
+    draftDeleted: "ड्राफ्ट हटा दिया गया।",
     deletedSyncPending:
       "इस डिवाइस से हटा दिया गया। ऑनलाइन होने पर क्लाउड से भी हट जाएगा।",
     confirm: {
       draftTitle: "यह ड्राफ्ट हटाएं?",
+      draftTitleNamed: "ड्राफ्ट “{{title}}” हटाएं?",
       draftBody: "केवल यह सेव ड्राफ्ट हटेगा, पूरे रिकॉर्ड नहीं।",
       recordTitle: "स्थायी रूप से हटाएं?",
+      recordTitleNamed: "“{{title}}” स्थायी रूप से हटाएं?",
       recordBody:
         "यह रिकॉर्ड Vyaamikk Diary से हट जाएगा। आप इसे वापस नहीं ला सकेंगे।",
       recordSharedPdf:

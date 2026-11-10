@@ -171,6 +171,9 @@ export function Screen({
               onRefresh={onRefresh}
               tintColor={colors.primary}
               colors={[colors.primary]}
+              // Android: keep the spinner in the overscroll region so the
+              // dashboard top cluster does not jump ~63px on pull.
+              progressViewOffset={Platform.OS === "android" ? insets.top : undefined}
             />
           ) : undefined
         }

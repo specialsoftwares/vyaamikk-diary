@@ -108,20 +108,27 @@ async function main(): Promise<void> {
       recordsThisMonth: number;
       lastRecordCollection: string;
       lastRecordId: string;
+      lifetimeAcceptedCount: number;
+      freeMembershipIds: string[];
     };
     assert.equal(usage.recordsThisMonth, 1);
     assert.equal(usage.lastRecordCollection, "goodsEvidenceReceipts");
     assert.equal(usage.lastRecordId, "receipt_q03");
+    assert.equal(usage.lifetimeAcceptedCount, 1);
+    assert.deepEqual(usage.freeMembershipIds, ["receipt_q03"]);
     const replay = await adapter.register({ uid: OWNER }, envelope("command_q03", "receipt_q03"));
     assert.equal(replay.ok, true);
     if (replay.ok) assert.equal(replay.replayed, true);
     const usageAfter = JSON.parse(store.snapshot.get(usageCurrentPath(OWNER))!) as {
       recordsThisMonth: number;
+      lifetimeAcceptedCount: number;
     };
     assert.equal(usageAfter.recordsThisMonth, 1, "idempotent register must not increment");
+    assert.equal(usageAfter.lifetimeAcceptedCount, 1);
   }
 
   {
+    // Lifetime free cap (15) — monthly 25 no longer exhausts free admission.
     const store = createInjectedStore();
     seedInjectedOwner(store, OWNER, LEDGER);
     seedStatus(store, {
@@ -129,14 +136,18 @@ async function main(): Promise<void> {
       plan: "free",
       quotaEnforcementEnabled: true,
     });
+    const membershipIds = Array.from({ length: 15 }, (_, i) => `en-${i}`);
     store.snapshot.set(
       usageCurrentPath(OWNER),
       persist({
         monthKey: "2026-09",
-        recordsThisMonth: 25,
+        recordsThisMonth: 15,
         lastRecordCollection: "entries",
-        lastRecordId: "en-25",
+        lastRecordId: "en-14",
         updatedAt: NOW,
+        lifetimeAcceptedCount: 15,
+        freeMembershipIds: membershipIds,
+        admissionReceipts: {},
       })
     );
     const adapter = new GoodsEvidenceRegisterAdapter(store, fixedClock(NOW));
