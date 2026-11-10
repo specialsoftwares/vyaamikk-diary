@@ -72,11 +72,14 @@ export function useCalendarMapsData(
       const admitted = syncSessionOwnership.capture();
       const sessionGeneration = admitted && admitted.uid === owner ? admitted.generation : null;
       const epochAtStart = currentSessionCommitEpoch();
-      const requestStillOwns = () =>
-        generation === loadGenRef.current &&
-        userIdRef.current === owner &&
-        currentSessionCommitEpoch() === epochAtStart &&
-        sessionStillOwns(owner, sessionGeneration);
+      const requestStillOwns = () => {
+        if (userIdRef.current !== owner) return false;
+        return (
+          generation === loadGenRef.current &&
+          currentSessionCommitEpoch() === epochAtStart &&
+          sessionStillOwns(owner, sessionGeneration)
+        );
+      };
       const revisionAtStart = currentDomainRevision();
       try {
         const businessResult = await loadCalendarMapsSourceData(owner);

@@ -62,7 +62,7 @@ A workflow dispatch on `d9a5b8f1179bee9798ce52cdd15b58b4fb41e902` completed in 2
 | Gate | What it proves | Status in this change |
 | --- | --- | --- |
 | Source corrections | Auth recovery, crash consent, screen ownership, age lifecycle, and the delivery configuration are in the commit that contains this section. | Recorded by that commit. Host regressions are not handset delivery. |
-| Exact-head CI | The automatic pull request check into integration, and the canonical CI job, on that same commit. | Not the dispatch above. Record the run id and head SHA when GitHub starts the check. A missing check is a gap, not a pass. |
+| Exact-head CI | The automatic pull request check into integration, and the canonical CI job, on that same commit. | Run [42790044608](https://github.com/specialsoftwares/vyaamikk-diary/actions/runs/42790044608) is a `pull_request` check of `d9c808ad61d89b8dec7c4c5f91440668abdbc3aa`. It failed in `test:owner-surfaces` and is not a pass. The next pull_request run is the check for the commit that contains the calendar ownership guard. |
 | Serving Functions and Rules | The deployed functions runtime and the live ruleset. | Not changed. Node 22 is a source engine pin only. No rules or functions deploy. |
 | Signed artifact | An internal build with a freshly checked unused versionCode. | Not built. Do not reuse versionCode 32 or build from `d9a5b8f`. |
 | Device acceptance | A signed binary on a handset, including SMS delivery and reactivation. | Not run. The missing-SMS incident stays open. |
