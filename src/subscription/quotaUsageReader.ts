@@ -11,7 +11,13 @@ import { getFirebaseDb } from "@/config/firebase";
 import { isFirebaseConfigured } from "@/config/env";
 
 export type QuotaUsageRead =
-  | { kind: "ok"; monthKey: string; recordsThisMonth: number }
+  | {
+      kind: "ok";
+      monthKey: string;
+      recordsThisMonth: number;
+      /** Present when lifetime admission has written the free membership counter. */
+      lifetimeAcceptedCount?: number;
+    }
   | { kind: "malformed" }
   | { kind: "missing" }
   | { kind: "unavailable"; code: string };
@@ -19,6 +25,23 @@ export type QuotaUsageRead =
 export function parseQuotaUsageData(data: Record<string, unknown>): QuotaUsageRead {
   const monthKey = data.monthKey;
   const recordsThisMonth = data.recordsThisMonth;
+  const lifetimeAcceptedCount = data.lifetimeAcceptedCount;
+  const hasLifetime =
+    typeof lifetimeAcceptedCount === "number" &&
+    Number.isInteger(lifetimeAcceptedCount) &&
+    lifetimeAcceptedCount >= 0;
+  // Lifetime-only docs (post cutover) may omit monthly fields.
+  if (hasLifetime && (monthKey == null || recordsThisMonth == null)) {
+    return {
+      kind: "ok",
+      monthKey: typeof monthKey === "string" ? monthKey : "1970-01",
+      recordsThisMonth:
+        typeof recordsThisMonth === "number" && Number.isInteger(recordsThisMonth)
+          ? recordsThisMonth
+          : 0,
+      lifetimeAcceptedCount,
+    };
+  }
   if (!isIstMonthKeyShape(monthKey)) return { kind: "malformed" };
   if (
     typeof recordsThisMonth !== "number" ||
@@ -27,7 +50,12 @@ export function parseQuotaUsageData(data: Record<string, unknown>): QuotaUsageRe
   ) {
     return { kind: "malformed" };
   }
-  return { kind: "ok", monthKey, recordsThisMonth };
+  return {
+    kind: "ok",
+    monthKey,
+    recordsThisMonth,
+    ...(hasLifetime ? { lifetimeAcceptedCount } : {}),
+  };
 }
 
 export async function readOwnerQuotaUsage(uid: string): Promise<QuotaUsageRead> {

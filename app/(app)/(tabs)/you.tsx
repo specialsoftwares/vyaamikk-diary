@@ -28,8 +28,12 @@ import { useAuth } from "@/state/auth";
 import { useIsOnline } from "@/state/network";
 import { useDiaryList } from "@/state/useDiaryList";
 import { useSubscription } from "@/subscription";
+import { LifetimeQuotaMeterBanner } from "@/components/billing/LifetimeQuotaMeterBanner";
+import {
+  buildEntitlementView,
+  type EntitlementView,
+} from "@/subscription/entitlementView";
 import { readOwnerQuotaUsage } from "@/subscription/quotaUsageReader";
-import { youDashboardQuotaWarning } from "@/subscription/youDashboardQuotaWarning";
 import { syncSessionOwnership } from "@/sync/syncSessionOwnership";
 import { buildYouDashboardViewModel } from "@/services/dashboard";
 import { formDraftsRepository } from "@/repositories/formDraftsRepository";
@@ -115,9 +119,52 @@ export default function YouTab() {
   const { load: extrasLoad, run: runExtras } = useOwnedRequest<DashboardExtras>(userId);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerWorkTeamExpanded, setPickerWorkTeamExpanded] = useState(false);
-  const [quotaWarn80, setQuotaWarn80] = useState(false);
+  const [lifetimeUsed, setLifetimeUsed] = useState<number | null>(null);
+  const [usageReadable, setUsageReadable] = useState(false);
   const navigation = useNavigation();
-  const monthlyRecordLimit = subscription.features.monthlyRecordLimit;
+
+  const entitlementView: EntitlementView | null = useMemo(() => {
+    if (!userId) return null;
+    const authError =
+      typeof subscription.error === "string" &&
+      /permission|unauth|denied/i.test(subscription.error);
+    const statusReadable =
+      !subscription.isLoading &&
+      !authError &&
+      (subscription.source === "server" || subscription.source === "cache");
+    const paidActive = subscription.status.entitlementActive === true;
+    // Paid hides the meter from status alone. Free waits for usage so we never
+    // flash 0/15 while lifetime usage is still loading.
+    const freeReadable = statusReadable && !paidActive && usageReadable && lifetimeUsed != null;
+    return buildEntitlementView({
+      uid: userId,
+      status:
+        statusReadable && paidActive
+          ? {
+              statusReadable: true,
+              entitlementActive: true,
+              plan: subscription.status.plan,
+            }
+          : freeReadable
+            ? {
+                statusReadable: true,
+                entitlementActive: false,
+                plan: subscription.status.plan,
+                lifetimeUsed: lifetimeUsed ?? 0,
+              }
+            : { statusReadable: false, entitlementActive: false, plan: null },
+      purchase: { kind: "idle" },
+    });
+  }, [
+    userId,
+    subscription.isLoading,
+    subscription.error,
+    subscription.source,
+    subscription.status.entitlementActive,
+    subscription.status.plan,
+    lifetimeUsed,
+    usageReadable,
+  ]);
 
   useFocusEffect(
     useCallback(() => {
@@ -138,29 +185,38 @@ export default function YouTab() {
       const admittedUid = session?.uid ?? null;
       const admittedGen = session?.generation ?? 0;
       if (!userId || !admittedUid || admittedUid !== userId) {
-        setQuotaWarn80(false);
+        setLifetimeUsed(null);
+        setUsageReadable(false);
         return () => {
           cancelled = true;
         };
       }
-      setQuotaWarn80(false);
       void (async () => {
         const usage = await readOwnerQuotaUsage(userId);
         if (cancelled) return;
         const live = syncSessionOwnership.capture();
         if (!live || live.uid !== admittedUid || live.generation !== admittedGen) return;
-        const warning = youDashboardQuotaWarning({
-          features: subscription.features,
-          usage,
-          nowMs: Date.now(),
-        });
-        setQuotaWarn80(warning.kind === "warn80");
+        // Prefer lifetimeAcceptedCount when Stream B has written it; else fall back
+        // to recordsThisMonth only as a transitional read until lifetime lands.
+        if (usage.kind === "ok") {
+          const used =
+            typeof usage.lifetimeAcceptedCount === "number"
+              ? usage.lifetimeAcceptedCount
+              : usage.recordsThisMonth;
+          setLifetimeUsed(used);
+          setUsageReadable(true);
+        } else if (usage.kind === "missing") {
+          setLifetimeUsed(0);
+          setUsageReadable(true);
+        } else {
+          setLifetimeUsed(null);
+          setUsageReadable(false);
+        }
       })();
       return () => {
         cancelled = true;
       };
-      // Ownership is UID + generation; monthlyRecordLimit is the cap used for 80%.
-    }, [userId, session?.uid, session?.generation, monthlyRecordLimit, subscription.features]) // eslint-disable-line react-hooks/exhaustive-deps -- session object identity is not the key
+    }, [userId, session?.uid, session?.generation]) // eslint-disable-line react-hooks/exhaustive-deps -- session object identity is not the key
   );
 
   useEffect(() => {
@@ -393,16 +449,14 @@ export default function YouTab() {
           <SlowNetworkStatus
             active={(diaryLoading || extrasLoad.loading) && (diaryRows.length > 0 || Boolean(extras))}
           />
-          {quotaWarn80 ? (
-            <Pressable
-              style={[styles.banner, styles.topOfflineWrap]}
-              onPress={() => router.push("/(app)/settings/subscription")}
-              accessibilityRole="button"
-              accessibilityLabel={t("billing.management.quotaWarn80")}
-            >
-              <Banner tone="warning" message={t("billing.management.quotaWarn80")} />
-            </Pressable>
-          ) : null}
+          <LifetimeQuotaMeterBanner
+            view={entitlementView}
+            style={[styles.banner, styles.topOfflineWrap]}
+            onPressUpgrade={() => router.push("/(app)/settings/subscription")}
+            onRetry={() => {
+              void subscription.refresh();
+            }}
+          />
           <View style={styles.topDivider} />
           <LastRefreshedHint message={refreshNote} />
         </View>

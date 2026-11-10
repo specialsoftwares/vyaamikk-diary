@@ -1,6 +1,6 @@
 # Subscription lifetime VC36 — execution sheet
 
-Status: **IN PROGRESS — contracts landed; streams implementing.** Public publication and integration→main remain HOLD.
+Status: **IN PROGRESS — contracts + shared writers landed; streams A–D implementing.** Public publication and integration→main remain HOLD.
 
 ## Baseline
 
@@ -17,8 +17,11 @@ Status: **IN PROGRESS — contracts landed; streams implementing.** Public publi
 
 | Contract | Path |
 | --- | --- |
-| Entitlement vs purchase progress | `src/subscription/entitlementView.ts` |
-| Lifetime admission (all families incl. GRIN) | `src/billing/optionC/lifetimeAdmission.ts` |
+| Entitlement vs purchase progress | `src/subscription/entitlementView.ts` (`e8d01bf`) |
+| Lifetime admission (all families incl. GRIN) | `src/billing/optionC/lifetimeAdmission.ts` (`e8d01bf`) |
+| Shared meter presentation | `src/subscription/lifetimeQuotaMeterPresentation.ts` + `LifetimeQuotaMeterBanner` |
+| Shared translations | `billing.entitlement.*` in `en.ts` / `hi.ts` |
+| Selected rules artifact | `docs/release/rules-compat/proposed-billing-reads/` sha256 `64a57dbd…` |
 
 Rules in force:
 
