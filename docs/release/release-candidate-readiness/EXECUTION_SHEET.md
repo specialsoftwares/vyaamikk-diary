@@ -1,6 +1,6 @@
 # Release candidate readiness — 2026-11-10
 
-Status: **HOLD. No accepted signed release candidate, deployment, Play upload or device acceptance.**
+Status: **HOLD for signed build + device acceptance.** Scoped Functions and proposed-consent Firestore rules are serving. Public publication remains HOLD.
 
 ## Source identity and scope
 
@@ -10,7 +10,7 @@ The branch is published. Draft PR #56 targets `integration`: https://github.com/
 
 PR #54 run `42792860573` was re-read as completed/success, attempt 2, for `9c06e01`. It does not certify this combined candidate. The candidate needs its own automatic pull-request check and exact source SHA.
 
-The merged source currently contains versionCode **34**. EAS has already finished versionCode 35. Neither code may be reused. This is not a version reservation or an uploadable candidate. A new unused code must be established from a fresh Play Console read, together with the EAS inventory above, and changed with both version-contract assertions before a signed build.
+Play Console (aeadmin, app `4972339006118168782`) read on 2026-11-10 shows Internal testing active at versionCode **35**, with uploaded bundles 35/34/33/32/31. EAS finished inventory also tops at 35. Unused code **36** is selected and applied in `app.json` with both version-contract assertions. Do not reuse 34 or 35.
 
 ## Corrections being verified
 
@@ -72,10 +72,10 @@ The merged source currently contains versionCode **34**. EAS has already finishe
 
    Remaining deployment dependency for crash consent: the client requires both `recordProcessingPurpose` and an authorized Firestore listener on `users/{uid}/processingPurposes/crash_diagnostics`. The serving Firestore release has no such matcher. Proposed additive rules artifact is `docs/release/rules-compat/proposed-consent/firestore.rules` (sha256 `d5127a7696118be13e73f328d5bc6dae975c903762a1e1661bfa507ced56c10d`), baseline serving sha256 `551203b8…` / ruleset `5ec37bc5-7407-437f-a567-3faaa6b0bbb7`. Local `npm run test:processing-purpose-rules-emulator` passed owner-read success, foreign/client-write denial, Allow → acknowledged/native-active, withdrawal stop, restart and account-replacement non-restoration. Root Storage rules stay undeployed.
    Review of `87e9c3e` found two gaps, fixed on `b34232d`. Background letterhead migration captures the UID and session generation before its first await and does not write the storage path or the completion mark after a same-UID replacement or an account switch. The production Storage adapter sends generation strings through the real `@google-cloud/storage` client, which otherwise stores `Number(generation)`. Copy, metadata, and delete for `9007199254740993` keep that exact string, including `ifGenerationMatch=0` on the copy.
-3. Source publication and live service reads are separate. Draft PR #56 exists. EAS CLI 16.28.0 is authenticated as `vydspecial2026`. On 2026-11-10 its newest finished Android `internal-grin` build is `31f93ac2-137f-4f45-aea2-027532941e3e`, versionCode 35, source `2b1929d999b7`. Finished EAS codes also include 34, 33, 32, 31, 30, 29, 28, 27, 26, 25, 24 and 23. Play Console was not opened, so no unused versionCode is selected and 34 and 35 stay unused-for-this-candidate. The upload certificate was not re-read.
-4. The serving comparison is recorded in [DEPLOYMENT_MANIFEST.md](./DEPLOYMENT_MANIFEST.md). On 2026-11-10, `support.vyd@specialsoftwares.com` read project `vyaamikk-diary`: 49 active Cloud Run revisions, five unbound candidate exports, the 2026-10-06 Firestore and Storage rules releases, secret names and versions, bucket versioning, and project IAM. No function, rule, secret, or IAM binding was changed. For `internal-grin`, `ownerObjectTransfer` and `recordProcessingPurpose` are required absences; `readRestoreAuthorityWatermark`, `recordAgeAssessment`, and `logoutAllDevices` are demonstrably unreachable. Candidate Firestore session, restore, and processingPurpose matchers are not the serving release. Root Storage rules stay undeployed because replacing them would remove live GRIN create/read paths. Existing secret versions must be reused. Deploying only `ownerObjectTransfer` does not make the earlier corrections serving.
-5. One new signed AAB must be built from the frozen approved source using the verified Firebase file and unused versionCode. Record build ID, source SHA, package, manifest version, certificate and artifact SHA-256.
-6. Install that exact artifact through the accepted testing route and complete normal login/reactivation, wrong/expired code, timeout/Back/change-number, account switch, first save/read, upload/read/delete, consent withdrawal/restart and offline/error/loading checks. Preserve the installed account data; do not manufacture repeated OTP attempts.
+3. Canonical CI on consent-rules head `6cba82b0f4996f37bd169e1237723079f23657ca`: pull-request run `42878953358`, job `verify` (`130049744216`), completed success `2026-11-10T19:11:44Z`: https://github.com/specialsoftwares/vyaamikk-diary/actions/runs/42878953358/job/130049744216. The job log prints `ci:verify PASS` at `2026-11-10T19:11:40.2331426Z`.
+4. Scoped deploy executed after that CI pass (see [DEPLOYMENT_MANIFEST.md](./DEPLOYMENT_MANIFEST.md)): Functions set including `ownerObjectTransfer` and `recordProcessingPurpose`; proposed-consent Firestore rules sha256 `d5127a76…` now serving as ruleset `baf47ef1-8784-4bd5-896a-3ea480b0285f`; Storage ruleset unchanged `a2b0bccc-92b9-43fe-b60f-d0e401963fab`. After Functions deploy cleared `GRIN_GOODS_EVIDENCE_FUNCTIONS`, it was restored to `true` on the eleven required services.
+5. Play+EAS unused versionCode **36** selected. One signed `internal-grin` AAB and device acceptance remain for the version-bump head after its own CI pass.
+6. Device acceptance checklist (after install of that exact artifact): login/reactivation, wrong/expired code, timeout/Back/change-number, account switch, first save/read, upload/read/delete, consent Allow→native-active / withdrawal / restart / account replacement, offline/error/loading. Preserve installed account data; do not manufacture repeated OTP attempts.
 
 Public publication remains HOLD. A successful unauthenticated 401, a passing host suite, an available Play release, or a provider `onCodeSent` callback is not signed-device acceptance or proof of handset SMS receipt.
 
@@ -87,4 +87,4 @@ The earlier GRIN policy-approval concern was resolved by checking the existing a
 
 ## Access and device boundary
 
-EAS CLI 16.28.0 is logged in as `vydspecial2026`. On 2026-11-10, `gcloud` as `support.vyd@specialsoftwares.com` read project `vyaamikk-diary`. The serving comparison is in [DEPLOYMENT_MANIFEST.md](./DEPLOYMENT_MANIFEST.md). A handset is not attached. Play Console was not opened in this pass. Do not paste signing keys, OTPs, tokens or service-account credentials into chat.
+EAS CLI is logged in as `vydspecial2026`. On 2026-11-10, `gcloud` as `support.vyd@specialsoftwares.com` deployed and verified project `vyaamikk-diary`. Play Console was read as `aeadmin@specialsoftwares.com` for version inventory. A handset attachment for device acceptance is still required. Do not paste signing keys, OTPs, tokens or service-account credentials into chat.

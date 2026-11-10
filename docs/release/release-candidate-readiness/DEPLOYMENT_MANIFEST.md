@@ -184,6 +184,17 @@ Adding new services consumes another `0.1666 × 3` vCPU per service at its maxim
 - Functions: return 100% traffic to the named prior revisions; delete `ownerObjectTransfer` / `recordProcessingPurpose` services if those new callables must be withdrawn.
 - Storage: no change in this release; no Storage rollback step.
 
+### Deployed this pass (2026-11-10)
+
+| Item | Evidence |
+| --- | --- |
+| Source CI | Head `6cba82b`, run `42878953358`, job `130049744216`, `ci:verify PASS` |
+| Functions | Scoped set deployed; `ownerObjectTransfer` revision `ownerobjecttransfer-00002-fes` ACTIVE 100%; `recordProcessingPurpose` revision `recordprocessingpurpose-00002-jic` ACTIVE 100% |
+| Firestore rules | Serving ruleset `baf47ef1-8784-4bd5-896a-3ea480b0285f`, sha256 `d5127a7696118be13e73f328d5bc6dae975c903762a1e1661bfa507ced56c10d` (proposed-consent), updated `2026-11-10T19:18:35Z` |
+| Storage rules | Unchanged ruleset `a2b0bccc-92b9-43fe-b60f-d0e401963fab`, sha256 `6b8959929b86ac2eab41fc591dc1fbf5bb03b80a226226d43bf4c8e72391c76b` |
+| GRIN flag | Firebase deploy briefly cleared `GRIN_GOODS_EVIDENCE_FUNCTIONS`; restored to `true` on reactivation, owner-content, and seven GRIN services via `gcloud run services update --update-env-vars` |
+| Secrets | Existing Secret Manager versions reused; temporary untracked dotenv used only for non-secret string params during CLI deploy, then removed |
+
 ### EAS / versionCode note
 
-EAS account `vydspecial2026`. Newest finished Android `internal-grin` build remains `31f93ac2-137f-4f45-aea2-027532941e3e`, versionCode **35**. Finished EAS codes include 34 and 35; neither may be reused. Play Console inventory must still be read to select an unused code before the signed build. Public release remains HOLD. Do not merge `integration` into `main` as part of this step.
+EAS account `vydspecial2026`. Newest finished Android `internal-grin` build remains `31f93ac2-137f-4f45-aea2-027532941e3e`, versionCode **35**. Play Console Latest releases (aeadmin, app `4972339006118168782`) shows Internal testing active at **35**, with uploaded bundles 35–31. Selected unused versionCode: **36**. Public release remains HOLD. Do not merge `integration` into `main` as part of this step.
