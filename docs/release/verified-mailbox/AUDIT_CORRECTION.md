@@ -20,9 +20,15 @@ No shipped app caller or approved signed-out lookup requirement was found. The r
 
 ## GRIN purge
 
-`INCLUDE_GRIN_IN_ACCOUNT_PURGE` is false, and the list comment says scheduled purge must not delete live GRIN until that flag is turned on. `finalPurge` also treats deletion policy version 2 as requiring GRIN cleanup and calls the purge with `force: true` while the flag is still false. New deletion jobs are version 2.
+The approved versioned policy already includes GRIN for new version-2 deletion jobs. `INCLUDE_GRIN_IN_ACCOUNT_PURGE = false` preserves the legacy-job exclusion; it is not a universal purge kill switch. Version-2 jobs intentionally call `purgeGrinEvidenceIfEnabled` with `force: true`. Enabling the global flag would additionally include legacy jobs. Turning off the version-2 path would change the approved policy.
 
-Those two sentences disagree. Turning the force path off would stop a deletion the version-2 code presents as required. This branch does not change the flag or the force path.
+Authority and chronology:
+
+- `docs/privacy-legal-audit/SEVEN_STAGE_FILE_IMPACT.md`, section 6, "Approved decisions (implemented in source)", item 4 explicitly states that policy version 2 includes GRIN while the global flag stays false for legacy jobs. `POLICY_CONTRADICTION_REGISTER.md`, C17 records owner approval of the new-request deletion schedule. These decisions and the version-2 force path exist at `fe330a04a6455d25513143b0763c2085c01134b8` (23 October 2026).
+- `docs/privacy-legal-audit/CONTROLLED_ACTIVATION.md`, "GRIN purge-flag decision", explicitly distinguishes retained legacy GRIN from the existing version-2 purge. That clarification entered in `a8e10834a4aec339fb9b28846829b870a072ac94` (25 October 2026), before the current candidate.
+- `docs/privacy-legal-audit/PRIVACY_CLAIMS_VERIFICATION_2026-10-25.md`, P11, records the same split on merged main `ba317f5`. `src/content/legal/documents.ts`, "Retention & deletion", discloses the versioned new-request schedule and retained-copy exceptions. `src/goodsEvidence/releaseScope.test.ts` checks selection of the version-2 force path; `functions/src/deletion/grinCleanup.unit.test.ts` exercises forced owner-scoped removal and preservation of another owner's data.
+
+The release-candidate correction updates misleading comments only. No flag, policy constant, job or runtime behavior changes. A new policy approval is not required for the already-approved version-2 behavior. Serving function identification, deployment acceptance and deletion evidence remain separate and unverified here; source policy and passing tests do not prove a live purge completed.
 
 ## Invoice renderer
 

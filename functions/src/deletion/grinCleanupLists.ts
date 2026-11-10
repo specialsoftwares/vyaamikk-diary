@@ -6,13 +6,16 @@
  *    DELETION_GRACE_MS = 45 days for a legacy request. A new version-2
  *    request uses the separate 15-day erasure deadline. Not 180. After this
  *    cancellation window, non-GRIN data is actually deleted (Play: freeze
- *    ≠ delete). GRIN omitted until INCLUDE_GRIN_IN_ACCOUNT_PURGE.
+ *    ≠ delete). Version-2 jobs include GRIN; legacy jobs omit it while
+ *    INCLUDE_GRIN_IN_ACCOUNT_PURGE remains false.
  * 2. Owner-requested 180-day hold: SUPERSEDED for this clock; not implemented.
- * 3. Policy ultimately approved for public operation: UNRESOLVED. Do not advertise.
+ * 3. Version-2 policy is approved in SEVEN_STAGE_FILE_IMPACT.md section 6.
+ *    Serving deletion acceptance and public deployment evidence are separate.
  *
- * INCLUDE_GRIN_IN_ACCOUNT_PURGE defaults false so existing
- * scheduledDeletionCleanup / runFinalAccountPurge MUST NOT purge live
- * customer GRIN until a coordinator+owner flips the flag.
+ * INCLUDE_GRIN_IN_ACCOUNT_PURGE defaults false to preserve the legacy-job
+ * exclusion. Version-2 jobs explicitly require the recursive GRIN purge even
+ * while this flag is false. The flag is not a universal kill switch; setting
+ * it true would additionally include legacy jobs and is not part of this change.
  */
 
 export const INCLUDE_GRIN_IN_ACCOUNT_PURGE = false;

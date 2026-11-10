@@ -143,9 +143,9 @@ const SCHEDULER_MAX_PAGES = 25;
  * 1) Promote awaiting_grace jobs whose grace elapsed → ready
  * 2) Run purge for ready / expired-lease jobs (paginated; no permanent starvation)
  *
- * GRIN cleanup rides runFinalAccountPurge and the account-purge flag (default
- * false). Do not add a second GRIN cron. Flag-false: this job must not purge
- * customer GRIN. Flag-true remains an UNAPPROVED live grant.
+ * GRIN cleanup rides runFinalAccountPurge. Version-2 jobs include GRIN under
+ * the approved policy; the default-false flag excludes legacy jobs only.
+ * Do not add a second GRIN cron or opt legacy jobs in as part of this change.
  */
 export const scheduledDeletionCleanup = onSchedule(
   { schedule: "every 24 hours", region: "asia-south1" },
