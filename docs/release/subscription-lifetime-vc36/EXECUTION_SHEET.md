@@ -1,6 +1,6 @@
 # Subscription lifetime VC36 — execution sheet
 
-Status: **IN PROGRESS — contracts + shared writers landed; streams A–D implementing.** Public publication and integration→main remain HOLD.
+Status: **IN PROGRESS — contracts + shared writers landed (`e8d01bf`, `d3ffbda`); streams A–D implementing on this branch.** Public publication and integration→main remain HOLD.
 
 ## Baseline
 
