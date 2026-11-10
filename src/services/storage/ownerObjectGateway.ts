@@ -1,7 +1,10 @@
 /**
  * Client transport for the owner-object callable.
- * A returned URL is a short-lived read or upload ticket. Callers must not store it
- * as the durable object location. The durable location is the canonical storage path.
+ * A returned URL is a short-lived, generation-bound ticket. Callers must not
+ * store it as the durable object location. The ticket remains usable until
+ * its expiry; ending the session does not cancel it.
+ * A timeout leaves the same attempt open. It does not start another attempt
+ * and it does not cancel the server operation.
  */
 
 import {
@@ -11,27 +14,128 @@ import {
 
 import { StorageUploadOwnershipError } from "./userStorageUploadCore";
 
+export const OBJECT_TRANSFER_CLIENT_WAIT_MS = 20_000;
+
+export type OwnerObjectFailureCode =
+  | "denied"
+  | "not_found"
+  | "network"
+  | "unknown"
+  | "conflict"
+  | "expired"
+  | "type"
+  | "unsupported";
+
+const PUBLIC_MESSAGE: Record<OwnerObjectFailureCode, string> = {
+  denied: "You don't have access to this file anymore.",
+  not_found: "That file is no longer available.",
+  network: "The connection dropped before the file finished.",
+  unknown: "The file transfer didn't finish. You can try again.",
+  conflict: "That file changed before it could be saved.",
+  expired: "The upload timed out. Start it again.",
+  type: "This file type can't be saved.",
+  unsupported: "This file has to be opened from the goods record.",
+};
+
+export class OwnerObjectTransferError extends Error {
+  readonly code: OwnerObjectFailureCode;
+  readonly attemptId: string | null;
+  readonly retryable: boolean;
+
+  constructor(code: OwnerObjectFailureCode, attemptId: string | null = null, retryable = false) {
+    super(PUBLIC_MESSAGE[code]);
+    this.name = "OwnerObjectTransferError";
+    this.code = code;
+    this.attemptId = attemptId;
+    this.retryable = retryable;
+  }
+}
+
 export type OwnerObjectCall = (data: Record<string, unknown>) => Promise<unknown>;
-export type OwnerObjectPut = (input: { url: string; localUri?: string; bytes?: Uint8Array; contentType: string }) => Promise<number>;
+export type OwnerObjectPut = (input: {
+  url: string;
+  localUri?: string;
+  bytes?: Uint8Array;
+  contentType: string;
+  headers: Record<string, string>;
+}) => Promise<number>;
 
 export type OwnerObjectGatewayPorts = {
   call: OwnerObjectCall;
   put: OwnerObjectPut;
   localBytes: (localUri: string) => Promise<number>;
+  waitMs?: number;
+};
+
+export type OwnedObjectTicket = {
+  url: string;
+  contentType: string;
+  generation: string;
+  expiresAt: number;
 };
 
 type OkRecord = Record<string, unknown> & { ok: true };
 
 function asOk(value: unknown): OkRecord {
   if (!value || typeof value !== "object" || (value as { ok?: unknown }).ok !== true) {
-    throw new Error("object_transfer_unknown");
+    throw new OwnerObjectTransferError("unknown", null, true);
   }
   return value as OkRecord;
 }
 
+function codeOf(error: unknown): string {
+  if (!error || typeof error !== "object" || !("code" in error)) return "";
+  return String((error as { code: unknown }).code);
+}
+
+export function mapOwnerObjectCallError(error: unknown, attemptId: string | null): OwnerObjectTransferError {
+  if (error instanceof OwnerObjectTransferError) return error;
+  if (error instanceof StorageUploadOwnershipError) throw error;
+  const code = codeOf(error);
+  const message = error instanceof Error ? error.message : "";
+  if (code.endsWith("permission-denied") || message === "object_denied") return new OwnerObjectTransferError("denied", attemptId);
+  if (code.endsWith("not-found") || message === "object_not_found") return new OwnerObjectTransferError("not_found", attemptId);
+  if (code.endsWith("aborted") || message === "object_conflict") return new OwnerObjectTransferError("conflict", attemptId);
+  if (code.endsWith("failed-precondition") || message === "object_transfer_expired") {
+    return new OwnerObjectTransferError("expired", attemptId, true);
+  }
+  if (message.startsWith("object_type") || message === "object_type") return new OwnerObjectTransferError("type", attemptId);
+  if (code === "") return new OwnerObjectTransferError("network", attemptId, true);
+  return new OwnerObjectTransferError("unknown", attemptId, true);
+}
+
+function withBound<T>(work: Promise<T>, waitMs: number, attemptId: string | null): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new OwnerObjectTransferError("unknown", attemptId, true));
+    }, waitMs);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+}
+
+function isGrinPath(path: string): boolean {
+  return path.split("/").includes("grinEvidence");
+}
+
 export function createOwnerObjectGateway(ports: OwnerObjectGatewayPorts) {
-  async function call(data: Record<string, unknown>): Promise<OkRecord> {
-    return asOk(await ports.call(data));
+  const waitMs = ports.waitMs ?? OBJECT_TRANSFER_CLIENT_WAIT_MS;
+  const pending = new Map<string, string>();
+
+  async function call(data: Record<string, unknown>, attemptId: string | null): Promise<OkRecord> {
+    try {
+      return asOk(await withBound(ports.call(data), waitMs, attemptId));
+    } catch (error) {
+      throw mapOwnerObjectCallError(error, attemptId);
+    }
   }
 
   return {
@@ -42,54 +146,104 @@ export function createOwnerObjectGateway(ports: OwnerObjectGatewayPorts) {
       bytes?: Uint8Array;
       userId?: string;
       session?: SyncSessionToken | null;
+      grin?: { ledgerId: string; receiptId: string; evidenceId: string };
+      attemptId?: string;
     }): Promise<{ storagePath: string; generation: string; localBytes: number; remoteBytes: number }> {
-      if (input.session !== undefined && (!input.userId || !mayIssueRemoteWork(input.session, input.userId))) {
-        throw new StorageUploadOwnershipError();
-      }
+      const userId = input.userId;
+      const session = input.session;
+      const still = () => session === undefined || (Boolean(userId) && mayIssueRemoteWork(session, userId ?? ""));
+      if (!still()) throw new StorageUploadOwnershipError();
+      const pendingKey = `${userId ?? ""}#${session?.generation ?? ""}#${input.storagePath}`;
       const localBytes = input.bytes ? input.bytes.byteLength : await ports.localBytes(input.localUri ?? "");
-      const begun = await call({ operation: "begin", path: input.storagePath, contentType: input.contentType });
-      const attemptId = String(begun.attemptId ?? "");
-      const uploadUrl = String(begun.uploadUrl ?? "");
-      if (!attemptId || !uploadUrl) throw new Error("object_transfer_unknown");
-      if (input.session !== undefined && (!input.userId || !mayIssueRemoteWork(input.session, input.userId))) {
-        await ports.call({ operation: "abort", attemptId }).catch(() => undefined);
-        throw new StorageUploadOwnershipError();
+      if (!still()) throw new StorageUploadOwnershipError();
+      let attemptId = input.attemptId || pending.get(pendingKey) || "";
+      if (!attemptId) {
+        const begun = await call(
+          {
+            operation: "begin",
+            path: input.storagePath,
+            contentType: input.contentType,
+            ...(input.grin
+              ? { ledgerId: input.grin.ledgerId, receiptId: input.grin.receiptId, evidenceId: input.grin.evidenceId }
+              : {}),
+          },
+          null
+        );
+        attemptId = String(begun.attemptId ?? "");
+        const uploadUrl = String(begun.uploadUrl ?? "");
+        const headers = begun.requiredHeaders;
+        if (!attemptId || !uploadUrl || !headers || typeof headers !== "object") {
+          throw new OwnerObjectTransferError("unknown", attemptId || null, true);
+        }
+        const requiredHeaders = headers as Record<string, string>;
+        if (requiredHeaders["x-goog-if-generation-match"] !== "0") {
+          throw new OwnerObjectTransferError("unknown", attemptId, true);
+        }
+        pending.set(pendingKey, attemptId);
+        if (!still()) {
+          await ports.call({ operation: "abort", attemptId }).catch(() => undefined);
+          pending.delete(pendingKey);
+          throw new StorageUploadOwnershipError();
+        }
+        let status = 0;
+        try {
+          status = await withBound(
+            ports.put({
+              url: uploadUrl,
+              localUri: input.localUri,
+              bytes: input.bytes,
+              contentType: input.contentType,
+              headers: { "Content-Type": input.contentType, ...requiredHeaders },
+            }),
+            waitMs,
+            attemptId
+          );
+        } catch (error) {
+          if (error instanceof OwnerObjectTransferError && error.code === "unknown") throw error;
+          if (error instanceof StorageUploadOwnershipError) throw error;
+          await ports.call({ operation: "abort", attemptId }).catch(() => undefined);
+          pending.delete(pendingKey);
+          throw mapOwnerObjectCallError(error, attemptId);
+        }
+        if (!still()) throw new StorageUploadOwnershipError();
+        if (status < 200 || status >= 300) {
+          await ports.call({ operation: "abort", attemptId }).catch(() => undefined);
+          pending.delete(pendingKey);
+          throw new OwnerObjectTransferError("unknown", attemptId, true);
+        }
       }
-      let status = 0;
-      try {
-        status = await ports.put({ url: uploadUrl, localUri: input.localUri, bytes: input.bytes, contentType: input.contentType });
-      } catch (error) {
-        await ports.call({ operation: "abort", attemptId }).catch(() => undefined);
-        throw error;
-      }
-      if (status < 200 || status >= 300) {
-        await ports.call({ operation: "abort", attemptId }).catch(() => undefined);
-        throw new Error("object_transfer_unknown");
-      }
-      const committed = await call({ operation: "commit", attemptId });
+      if (!still()) throw new StorageUploadOwnershipError();
+      const committed = await call({ operation: "commit", attemptId }, attemptId);
+      if (!still()) throw new StorageUploadOwnershipError();
       const remoteBytes = Number(committed.size);
-      if (!Number.isFinite(remoteBytes) || remoteBytes !== localBytes) {
-        throw new Error("object_transfer_unknown");
+      const generation = String(committed.generation ?? "");
+      if (!generation || !Number.isFinite(remoteBytes) || remoteBytes !== localBytes) {
+        throw new OwnerObjectTransferError("unknown", attemptId, true);
       }
+      pending.delete(pendingKey);
       return {
         storagePath: String(committed.path ?? input.storagePath),
-        generation: String(committed.generation ?? ""),
+        generation,
         localBytes,
         remoteBytes,
       };
     },
-    async read(path: string): Promise<{ url: string; contentType: string; generation: string } | null> {
+    async read(path: string): Promise<OwnedObjectTicket> {
+      if (isGrinPath(path)) throw new OwnerObjectTransferError("unsupported");
       try {
-        const result = await call({ operation: "read", path });
+        const result = await call({ operation: "read", path }, null);
         const url = String(result.url ?? "");
-        if (!url) return null;
-        return { url, contentType: String(result.contentType ?? ""), generation: String(result.generation ?? "") };
-      } catch {
-        return null;
+        const generation = String(result.generation ?? "");
+        const expiresAt = Number(result.expiresAt);
+        if (!url || !generation || !Number.isFinite(expiresAt)) throw new OwnerObjectTransferError("unknown", null, true);
+        return { url, contentType: String(result.contentType ?? ""), generation, expiresAt };
+      } catch (error) {
+        throw mapOwnerObjectCallError(error, null);
       }
     },
     async remove(path: string, generation?: string): Promise<void> {
-      await call({ operation: "delete", path, generation });
+      if (isGrinPath(path)) throw new OwnerObjectTransferError("unsupported");
+      await call({ operation: "delete", path, generation }, null);
     },
   };
 }
@@ -106,11 +260,11 @@ async function productionPorts(): Promise<OwnerObjectGatewayPorts> {
     },
     async put(input) {
       const FileSystem = await import("expo-file-system/legacy");
-      if (!input.localUri) throw new Error("object_transfer_unknown");
+      if (!input.localUri) throw new OwnerObjectTransferError("unknown", null, true);
       const result = await FileSystem.uploadAsync(input.url, input.localUri, {
         httpMethod: "PUT",
         uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
-        headers: { "Content-Type": input.contentType },
+        headers: input.headers,
       });
       return result.status;
     },
@@ -118,7 +272,7 @@ async function productionPorts(): Promise<OwnerObjectGatewayPorts> {
       const FileSystem = await import("expo-file-system/legacy");
       const info = await FileSystem.getInfoAsync(localUri);
       if (!info.exists || !("size" in info) || typeof info.size !== "number" || info.size <= 0) {
-        throw new Error("Local file missing or size unknown for Storage upload.");
+        throw new OwnerObjectTransferError("unknown", null, true);
       }
       return info.size;
     },

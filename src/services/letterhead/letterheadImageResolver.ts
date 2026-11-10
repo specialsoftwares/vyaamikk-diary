@@ -1,13 +1,15 @@
 import type { LetterheadConfig } from "./types";
 import { getActiveBackend } from "@/config/env";
 import { shouldOpenContentSeals } from "@/constants/contentSeal";
-import { getDownloadUrlForPath, readProtectedLocalUri } from "@/services/storage/userStorage";
+import { readOwnedObject, readProtectedLocalUri } from "@/services/storage/userStorage";
 
 export type LetterheadImageSourceKind = "storage" | "base64" | null;
 
 export interface ResolvedLetterheadImage {
   uri: string | null;
   source: LetterheadImageSourceKind;
+  /** Milliseconds when a storage ticket stops working. Absent for a local image. */
+  expiresAt?: number;
 }
 
 type LetterheadImageFields = Pick<
@@ -29,9 +31,9 @@ export async function resolveLetterheadImageSource(
     if (opened.kind === "unavailable") return { uri: null, source: "storage" };
   }
   if (storagePath) {
-    const url = await getDownloadUrlForPath(storagePath);
-    if (url) {
-      return { uri: url, source: "storage" };
+    const opened = await readOwnedObject(storagePath);
+    if (opened.ok) {
+      return { uri: opened.ticket.url, source: "storage", expiresAt: opened.ticket.expiresAt };
     }
     return { uri: null, source: "storage" };
   }

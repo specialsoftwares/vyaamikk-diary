@@ -6,8 +6,8 @@
  * - `uploadString` and multipart `FbsBlob.getBlob` build ArrayBufferView Blobs
  *   that RN BlobManager rejects.
  * - Expo `File` is not a runtime Blob; its `slice` also hits that path.
- * Uploads therefore use authenticated `FileSystem.uploadAsync` (BINARY_CONTENT)
- * and verify remote size. Same uid-scoped paths and Storage Rules as before.
+ * Uploads use the gateway's create-once PUT and verify the returned size.
+ * Live Storage Rules are unchanged and still serve installed clients.
  */
 
 import * as FileSystem from "expo-file-system/legacy";
@@ -23,9 +23,12 @@ import {
   recordLetterheadSaveDiagnostic,
 } from "@/services/letterhead/letterheadSaveDiagnostics";
 import type { SyncSessionToken } from "@/sync/syncSessionOwnership";
+import { mayIssueRemoteWork } from "@/sync/syncSessionOwnership";
 import { createLogger } from "@/utils/logger";
 
 import { uploadLocalFileViaMediaApi } from "./userStorageUpload";
+import { StorageUploadOwnershipError } from "./userStorageUploadCore";
+import { OwnerObjectTransferError, type OwnedObjectTicket } from "./ownerObjectGateway";
 
 const log = createLogger("storage/user");
 
@@ -157,6 +160,11 @@ export async function uploadLocalFileToPath(
   if (!PDF_CLOUD_BACKUP_ENABLED && storagePath.includes("/pdfs/")) {
     throw new Error("pdf_cloud_backup_disabled");
   }
+  const ownershipUser = ownership?.userId;
+  const ownershipSession = ownership?.session;
+  if (ownershipSession !== undefined && (!ownershipUser || !mayIssueRemoteWork(ownershipSession, ownershipUser))) {
+    throw new StorageUploadOwnershipError();
+  }
   if (shouldSealProductionWrites(getActiveBackend())) {
     const base64 = await FileSystem.readAsStringAsync(localUri, {
       encoding: FileSystem.EncodingType.Base64,
@@ -174,6 +182,9 @@ export async function uploadLocalFileToPath(
       encoding: FileSystem.EncodingType.UTF8,
     });
     try {
+      if (ownershipSession !== undefined && (!ownershipUser || !mayIssueRemoteWork(ownershipSession, ownershipUser))) {
+        throw new StorageUploadOwnershipError();
+      }
       const verified = await uploadLocalFileViaMediaApi({
         storagePath,
         localUri: tmp,
@@ -223,6 +234,10 @@ async function uploadBase64ToPath(
   await FileSystem.writeAsStringAsync(tmp, base64, {
     encoding: FileSystem.EncodingType.Base64,
   });
+  if (ownership?.session !== undefined && (!ownership.userId || !mayIssueRemoteWork(ownership.session, ownership.userId))) {
+    await deleteTempQuietly(tmp);
+    throw new StorageUploadOwnershipError();
+  }
   try {
     return await uploadLocalFileToPath(storagePath, tmp, contentType, ownership);
   } finally {
@@ -344,16 +359,29 @@ export async function uploadRecordAttachmentBase64(
   return { ...uploaded, objectName: allocated.objectName, displayName: allocated.displayName };
 }
 
+export async function readOwnedObject(
+  storagePath: string
+): Promise<{ ok: true; ticket: OwnedObjectTicket } | { ok: false; code: OwnerObjectTransferError["code"] }> {
+  if (!isUserStorageAvailable()) return { ok: false, code: "unknown" };
+  try {
+    const { ownerObjectGateway } = await import("./ownerObjectGateway");
+    const ticket = await (await ownerObjectGateway()).read(storagePath);
+    return { ok: true, ticket };
+  } catch (error) {
+    if (error instanceof OwnerObjectTransferError) return { ok: false, code: error.code };
+    return { ok: false, code: "network" };
+  }
+}
+
 export async function readProtectedLocalUri(
   storagePath: string
 ): Promise<{ kind: "opened"; uri: string } | { kind: "legacy" } | { kind: "unavailable" }> {
   if (!isUserStorageAvailable()) return { kind: "unavailable" };
   try {
-    const { ownerObjectGateway } = await import("./ownerObjectGateway");
-    const opened = await (await ownerObjectGateway()).read(storagePath);
-    if (!opened) return { kind: "unavailable" };
-    if (opened.contentType !== CONTENT_SEAL_MEDIA_TYPE) return { kind: "legacy" };
-    const url = opened.url;
+    const opened = await readOwnedObject(storagePath);
+    if (!opened.ok) return { kind: "unavailable" };
+    if (opened.ticket.contentType !== CONTENT_SEAL_MEDIA_TYPE) return { kind: "legacy" };
+    const url = opened.ticket.url;
     const response = await fetch(url);
     if (!response.ok) return { kind: "unavailable" };
     const text = await response.text();
@@ -376,8 +404,8 @@ export async function readProtectedLocalUri(
 export async function getDownloadUrlForPath(storagePath: string): Promise<string | null> {
   if (!isUserStorageAvailable()) return null;
   try {
-    const { ownerObjectGateway } = await import("./ownerObjectGateway");
-    return (await (await ownerObjectGateway()).read(storagePath))?.url ?? null;
+    const opened = await readOwnedObject(storagePath);
+    return opened.ok ? opened.ticket.url : null;
   } catch (e) {
     log.warn("getDownloadUrlForPath", e);
     return null;
@@ -389,7 +417,8 @@ export async function deleteUserStorageObject(storagePath: string): Promise<void
   try {
     const { ownerObjectGateway } = await import("./ownerObjectGateway");
     await (await ownerObjectGateway()).remove(storagePath);
-  } catch (e) {
-    log.warn("deleteUserStorageObject", e);
+  } catch (error) {
+    if (error instanceof OwnerObjectTransferError && error.code === "unsupported") throw error;
+    log.warn("deleteUserStorageObject", error);
   }
 }

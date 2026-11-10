@@ -58,21 +58,21 @@ The separately added `grin.selectedFirestoreRules.emulator.test.ts` does test th
 
 Use an authenticated server-mediated object endpoint instead of inventing an asynchronously mirrored Storage ACL. Derive the UID from a verified bearer token and reuse the existing admission, session-cutoff, restore, active-account and deletion guards. Keep a strict canonical operation/path allowlist. For GRIN originals, also resolve the existing server-written reservation, ledger and admission state, set pending metadata on the server, enforce MIME/size and create-generation preconditions, and leave trusted hash/seal/generation verification with the existing `grinUploadEvidence` lifecycle. Recheck authority before committing a delayed upload; an uncertain result must remain retryable without authorizing a replacement object.
 
-Current integration points are bounded:
+Current client path:
 
-- `src/services/storage/userStorageUpload.ts` uploads generic owner bytes using Expo `uploadAsync`, then fetches metadata/download URLs through the client Storage SDK. The endpoint can replace this transport without changing stored object paths.
-- `src/services/storage/userStorage.ts` performs metadata reads, protected-envelope downloads, legacy download URL retrieval and object deletion. Move these operations to authenticated server requests; preserve legacy plaintext readability and sealed-envelope handling.
-- `src/services/attachments/prepareReceiptPhoto.ts` and `src/services/letterhead/letterheadImageResolver.ts` consume downloaded/cached URLs. Use authenticated downloads into owner-scoped local files and preserve existing local cache/session fences. Do not persist a local URI as a cloud download URL.
-- `src/services/grin/transport/evidenceTransport.ts` uploads originals via `uploadBytesResumable` plus `getMetadata`. Replace only its production object transfer with the authenticated endpoint. Reservation/begin/verify callables and generation-bound sealing retain their responsibilities. Derivative transport is currently refused by this production client. GRIN export currently consumes local original bytes; it is not evidence of an implemented cloud-original download endpoint.
-- Existing company invoice/report objects remain server-only under their separate authorized download design.
+- `src/services/storage/userStorageUpload.ts` sends the default owner upload through `ownerObjectGateway`. The gateway PUT uses the signed create-once ticket and does not attach a bearer token. An explicit `MediaUploadPorts` injection remains for emulator tests and still uses the older media REST helper.
+- `src/services/storage/userStorage.ts` reads and deletes through the same gateway. Legacy letterhead and attachment bytes remain readable. The durable record stores the storage path, not the ticket.
+- `prepareReceiptPhoto.ts` and `letterheadImageResolver.ts` use the ticket immediately. The resolver keeps `expiresAt` so a later read can request a fresh ticket. Neither stores the ticket as the object location.
+- `evidenceTransport.ts` production `defaultPutObject` uses the gateway and passes the captured uid, session generation, ledger, receipt, and evidence id. Reservation, begin, verify, sealing, and hash checks stay on the GRIN lifecycle. `putReservedObjectWithJsStorage` remains the emulator helper. Generic gateway read and delete of a GRIN original are denied.
+- Company invoice and report objects remain on their separate authorized download design.
 
-A signed/resumable URL is not an equivalent replacement for immediate session/restore checks: possession can outlive a subsequent revocation or account-state change. If such URLs are considered, their revocation semantics need an explicit product/security decision rather than an implicit bypass.
+The read ticket is a bearer URL. The revocation contract is expiry, not an immediate cancel. A 60-second ticket can still be used after the session, account, or deletion state changes, until `expiresAt`. Commit and delete do not trust it. Installed clients are outside this contract: they still call Storage directly, and the live rules stay as they are until a reviewed old-client transition. Do not tighten those rules in the same step as this callable.
 
 ## Why two documents cannot be substituted without migration
 
 `authSecurity/{uid}` plus a new consolidated account document would still omit the global restore fence and GRIN reservation/ledger state. A consolidated ACL needs all relevant authoritative writers to update it transactionally, initialization for existing accounts/reservations, fail-closed behavior on missing/stale ACLs, and restore ordering that cannot resurrect obsolete grants. Background triggers alone leave a window after revocation/deletion. No such schema, writer protocol or backfill exists in this candidate.
 
-The server-mediated design can preserve existing bucket paths and bytes without re-encryption or account-state backfill. Source now contains `ownerObjectTransfer` and the production client gateway described below. It still needs independent review, canonical CI, deployment of that callable only, a signed binary, and a separate decision before any direct Storage rule is tightened. Root `storage.rules` are unchanged. A 60-second read ticket can be used after a later revocation until it expires; commit and delete recheck authority and do not trust the ticket.
+The server-mediated design preserves existing bucket paths and bytes without re-encryption or account-state backfill. Source contains `ownerObjectTransfer` and the production client gateway. It still needs canonical CI on the corrective head, a deployment manifest against the revisions that are actually serving, and a signed binary. Root `storage.rules` are unchanged. Deploying only `ownerObjectTransfer` does not establish that recovery, mailbox, quarantine, or GRIN corrections are serving. A 60-second read ticket remains usable until it expires; it is not immediately revocable.
 
 ## Release and rollout dependencies
 
@@ -83,7 +83,7 @@ The server-mediated design can preserve existing bucket paths and bytes without 
 5. Decide old-client support/retirement before tightening direct Storage Rules. A gateway does not retroactively change installed binaries; disabling their direct access can break uploads and reads. Keep the current live rules unchanged until this compatibility transition is explicitly reviewed.
 6. Verify the signed candidate's complete upload/read/delete and GRIN reserve/upload/verify paths. Do not mark the public release, source configuration or artifact accepted while this blocker remains.
 
-The candidate's Storage files were intentionally left unchanged after identifying this constraint. The selected Firestore GRIN additions do not solve Storage transport authorization.
+The candidate's root Storage rules were left unchanged. The callable and client gateway are source on this branch and are not a live rules deployment. The selected Firestore GRIN additions do not solve Storage transport authorization.
 
 ## Reproduce the selected-policy dependency check locally
 
