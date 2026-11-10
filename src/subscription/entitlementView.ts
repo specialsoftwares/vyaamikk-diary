@@ -83,8 +83,9 @@ function paidPlanFromStatus(input: EntitlementStatusInput): PaidPlanLabel {
     return "legacy_paid";
   }
   // Unlimited product without a recognized legacy plan name.
+  // billingPeriod was already handled above; default Unlimited to monthly.
   if (plan === "unlimited" || plan === "monthly" || plan === "yearly") {
-    return input.billingPeriod === "yearly" ? "yearly" : "monthly";
+    return plan === "yearly" ? "yearly" : "monthly";
   }
   return "legacy_paid";
 }

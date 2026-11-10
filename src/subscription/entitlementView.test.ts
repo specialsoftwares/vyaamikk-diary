@@ -31,7 +31,7 @@ import {
   });
   assert.equal(view.entitlement.kind, "unknown");
   assert.equal(view.quota.kind, "checking");
-  assert.notEqual(view.quota.kind === "meter" && view.quota.used === 0, true);
+  assert.notEqual(view.quota.kind, "meter");
 }
 
 {

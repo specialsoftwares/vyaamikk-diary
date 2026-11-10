@@ -59,8 +59,7 @@ function androidPurchase(over: Partial<StorePurchase> = {}): StorePurchase {
     productId: "vyd_unlimited",
     purchaseState: "purchased",
     purchaseToken: "play-token-vc36-a",
-    id: "order-1",
-    transactionId: null,
+    nativePurchase: { id: "order-1" },
     ...over,
   };
 }
