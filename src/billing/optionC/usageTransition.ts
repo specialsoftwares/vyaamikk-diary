@@ -26,6 +26,10 @@ export interface UsageCurrentWrite {
   lastRecordCollection: QuotaLinkedRecordCollection;
   lastRecordId: string;
   updatedAt: number;
+  /** Lifetime free membership — present after lifetime admission wiring. */
+  lifetimeAcceptedCount?: number;
+  freeMembershipIds?: string[];
+  admissionReceipts?: Record<string, unknown>;
 }
 
 /**

@@ -83,11 +83,14 @@ Slots 0 / 14 / 15 / 16; two-device race at 14/15; lost response; offline draft; 
 
 ## Forward-only dry-run (report before live)
 
+Tool: `npx --yes tsx scripts/lifetime-cutover-dry-run.ts [accounts.json]`
+Methodology: `classifyLifetimeCutoverAccount` / `summarizeLifetimeCutoverDryRun` (`enabledLive: false`).
+
 | Class | Count |
 | --- | --- |
-| provable_history | _pending_ |
-| ambiguous_history | _pending_ |
-| paid_active | _pending_ |
-| empty | _pending_ |
+| provable_history | _pending owner inventory_ |
+| ambiguous_history | _pending owner inventory_ |
+| paid_active | _pending owner inventory_ |
+| empty | _pending owner inventory_ |
 
-Live enablement: **HOLD** until owner approves these counts.
+Live enablement: **HOLD** until owner approves these counts. Implementation/testing continues in parallel.

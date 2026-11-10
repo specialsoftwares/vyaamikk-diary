@@ -5,7 +5,17 @@ import {
   nextUsageWrite,
   readUsageSnapshot,
   type BillableRecordCollection,
+  type QuotaLinkedRecordCollection,
 } from "@/billing/optionC/usageTransition";
+import {
+  decideLifetimeAdmission,
+  emptyLifetimeUsage,
+  isLifetimeConsumingFamily,
+  lifetimeOperationId,
+  mergeLifetimeIntoUsageWrite,
+  readLifetimeUsageSnapshot,
+  type LifetimeConsumingFamily,
+} from "@/billing/optionC/lifetimeAdmission";
 import { wrapAtomicCreateFailure } from "@/billing/optionC/classifyCreateError";
 import {
   readRecoveryStateInTransaction,
@@ -14,6 +24,8 @@ import {
 import {
   monthlyRecordCapFromStatusData,
   quotaEnforcementEnabledFromStatusData,
+  STARTER_MONTHLY_RECORD_CAP,
+  UNLIMITED_MONTHLY_RECORD_CAP,
 } from "@/subscription/monthlyRecordCap";
 import { SaveRetryableError } from "@/services/records/saveLockTypes";
 import { assertDispatchedSession } from "@/sync/syncSessionOwnership";
@@ -62,6 +74,12 @@ export interface AtomicBillableCreateParams<T> {
   collection: BillableRecordCollection;
   /** Stable id generated outside this function. Never regenerated on retry. */
   recordId: string;
+  /**
+   * Owner- and family-scoped operation id. When omitted, derived from
+   * `lifetimeOperationId({ ownerUid, family, intentId: recordId })`.
+   * Retries must reuse the same id.
+   */
+  operationId?: string;
   serialCounter?: SerialCounterId;
   /** Captured outside the transaction so retries keep timestamps/monthKey. */
   nowMs: number;
@@ -103,23 +121,23 @@ function counterRef(db: Firestore, userId: string, counterId: SerialCounterId) {
   return doc(db, "users", userId, "counters", counterId);
 }
 
+function entitlementKindFromStatus(
+  statusData: Record<string, unknown> | undefined,
+  cap: number
+): "free" | "paid" {
+  if (statusData?.entitlementActive !== true) return "free";
+  if (cap === UNLIMITED_MONTHLY_RECORD_CAP) return "paid";
+  if (cap === STARTER_MONTHLY_RECORD_CAP) return "paid";
+  return "free";
+}
+
 /**
  * One Firestore transaction for a billable first CREATE.
  *
- * Reads (all before writes): record, status, usage (if enforcement on),
- * serial counter (if this family allocates at create).
- *
- * Record ID, nowMs and monthKey are captured by the caller before this
- * function; transaction retries reuse them. Existing-record hits return
- * without writes, quota increment, or serial allocation.
- *
- * Status missing → enforcement off (no usageCurrent write). A failed status
- * read throws (never treated as enforcement off). Cached UX entitlement is
- * not consulted.
- *
- * PO / Customer Credit compatibility: serial counter + record (+ usage)
- * now commit in this same transaction. Numbering format and counter schema
- * are unchanged; a rejected create no longer burns a serial.
+ * Trusted path: accepted record + quota consumption + serial allocation
+ * commit together. Free accounts use the lifetime admission policy (15).
+ * Paid accounts (including legacy Starter) do not spend free membership.
+ * Older clients that skip usage still cannot bypass once create rules enforce.
  */
 export async function runAtomicBillableCreate<T>(
   params: AtomicBillableCreateParams<T>
@@ -138,16 +156,22 @@ export async function runAtomicBillableCreate<T>(
     quotaConsumption = "required",
   } = params;
 
+  const family: LifetimeConsumingFamily | null = isLifetimeConsumingFamily(collection)
+    ? collection
+    : null;
+  const operationId =
+    params.operationId ??
+    (family
+      ? lifetimeOperationId({ ownerUid: userId, family, intentId: recordId })
+      : `${userId}:other:${recordId}`);
+
   try {
     let cloudPayload = (payload: Record<string, unknown>) => payload;
     if (hooks?.prepareCloudPayload) {
-      // Replays must work without a new seal or quota increment, including when
-      // new encryption is paused. The transaction repeats this existence check.
       const existing = await getDocFromServer(recordRef(db, userId, collection, recordId));
       if (existing.exists()) {
         return { outcome: "existing", record: parseExisting(existing.id, existing.data()), serial: null };
       }
-      // Serial is operational metadata, never part of the protected body.
       cloudPayload = await hooks.prepareCloudPayload(buildNew(serialCounter ? 1 : null).payload);
     }
     return await runTransaction(db, async (tx) => {
@@ -182,18 +206,24 @@ export async function runAtomicBillableCreate<T>(
           cap = monthlyRecordCapFromStatusData(statusData ?? {});
           const uSnap = await tx.get(usageRef(db, userId));
           usageRaw = uSnap.exists() ? (uSnap.data() as Record<string, unknown>) : undefined;
-          const usage = readUsageSnapshot(usageRaw);
-          usageRecordsThisMonth = usage?.recordsThisMonth ?? null;
-          usageMonthKey = usage?.monthKey ?? null;
+          // Monthly snapshot may be absent on lifetime-only docs; lifetime reader is separate.
+          try {
+            const usage = readUsageSnapshot(usageRaw);
+            usageRecordsThisMonth = usage?.recordsThisMonth ?? null;
+            usageMonthKey = usage?.monthKey ?? null;
+          } catch (err) {
+            // Lifetime-only docs without monthly fields: allow lifetime path; starter monthly still needs valid monthly.
+            if (cap === STARTER_MONTHLY_RECORD_CAP) throw err;
+            usageRecordsThisMonth = null;
+            usageMonthKey = null;
+          }
         }
       }
 
       let counterNext: number | null = null;
-      let counterExists = false;
       if (serialCounter) {
         const cSnap = await tx.get(counterRef(db, userId, serialCounter));
-        counterExists = cSnap.exists();
-        if (counterExists) {
+        if (cSnap.exists()) {
           const rawNext = (cSnap.data() as { next?: unknown }).next;
           if (typeof rawNext !== "number" || !Number.isInteger(rawNext) || rawNext < 0) {
             throw new AppError(
@@ -246,16 +276,97 @@ export async function runAtomicBillableCreate<T>(
             { reason: "letterhead_quota_write_denied" }
           );
         }
-        const usage = readUsageSnapshot(usageRaw);
-        const write = nextUsageWrite({
-          existing: usage,
+        if (!family) {
+          throw new AppError(
+            "save_failed",
+            "This record family cannot consume quota.",
+            undefined,
+            { reason: "quota_family_unsupported" }
+          );
+        }
+
+        const entitlement = entitlementKindFromStatus(statusData, cap ?? 25);
+        const lifetimeParsed = readLifetimeUsageSnapshot(usageRaw);
+        if (lifetimeParsed && "malformed" in lifetimeParsed) {
+          throw new AppError(
+            "quota_state_invalid",
+            "Usage state is unreadable. This save was not completed.",
+            undefined,
+            { reason: "malformed_lifetime_usage" }
+          );
+        }
+        const lifetimeExisting = lifetimeParsed ?? emptyLifetimeUsage();
+        const decision = decideLifetimeAdmission({
+          entitlement,
+          existing: lifetimeExisting,
+          operationId,
+          family,
+          recordId,
+          nowMs,
+          recordExists: false,
+        });
+
+        if (decision.kind === "existing") {
+          // Receipt replay without a live doc should not recreate — fail closed.
+          throw new AppError(
+            "quota_exhausted",
+            "This create was already admitted and cannot consume another slot.",
+            undefined,
+            {
+              reason: "lifetime_receipt_replay",
+              operationId: decision.operationId,
+              recordId: decision.recordId,
+              preserveAsDraft: true,
+            }
+          );
+        }
+        if (decision.kind === "reject_exhausted" || decision.kind === "reject_unknown_entitlement") {
+          throw new AppError(
+            "quota_exhausted",
+            decision.kind === "reject_unknown_entitlement"
+              ? "Your plan could not be confirmed. This save was kept as a draft."
+              : "Free record limit reached. This save was kept as a draft.",
+            undefined,
+            {
+              reason: decision.kind,
+              preserveAsDraft: true,
+              ...(decision.kind === "reject_exhausted"
+                ? { used: decision.used, limit: decision.limit }
+                : {}),
+            }
+          );
+        }
+        if (decision.kind === "reject_receipt_conflict") {
+          throw new AppError(
+            "quota_state_invalid",
+            "This create conflicts with a prior admission receipt.",
+            undefined,
+            { reason: "lifetime_receipt_conflict", ...decision }
+          );
+        }
+
+        // Monthly transition: Starter keeps its existing cap; unlimited still records usage.
+        // Free lifetime does not gate on the legacy monthly 25.
+        const monthlyCap =
+          entitlement === "paid" && cap === STARTER_MONTHLY_RECORD_CAP
+            ? STARTER_MONTHLY_RECORD_CAP
+            : UNLIMITED_MONTHLY_RECORD_CAP;
+        let monthlyExisting = null as ReturnType<typeof readUsageSnapshot>;
+        try {
+          monthlyExisting = readUsageSnapshot(usageRaw);
+        } catch {
+          monthlyExisting = null;
+        }
+        const monthlyWrite = nextUsageWrite({
+          existing: monthlyExisting,
           monthKey,
-          cap: cap ?? 25,
-          collection,
+          cap: monthlyCap,
+          collection: collection as QuotaLinkedRecordCollection,
           recordId,
           updatedAt: nowMs,
         });
-        tx.set(usageRef(db, userId), write);
+        const usageWrite = mergeLifetimeIntoUsageWrite(monthlyWrite, decision.nextUsage);
+        tx.set(usageRef(db, userId), usageWrite);
       }
 
       return {

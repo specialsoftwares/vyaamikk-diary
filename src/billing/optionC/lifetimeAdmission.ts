@@ -383,3 +383,39 @@ export function summarizeLifetimeCutoverDryRun(
     counts,
   };
 }
+
+/** Merge lifetime admission into a monthly usage write (single usageCurrent doc). */
+export function mergeLifetimeIntoUsageWrite(
+  monthly: {
+    monthKey: string;
+    recordsThisMonth: number;
+    lastRecordCollection: string;
+    lastRecordId: string;
+    updatedAt: number;
+  },
+  lifetime: LifetimeUsageSnapshot
+): Record<string, unknown> {
+  return {
+    ...monthly,
+    lifetimeAcceptedCount: lifetime.lifetimeAcceptedCount,
+    freeMembershipIds: [...lifetime.freeMembershipIds],
+    admissionReceipts: { ...lifetime.admissionReceipts },
+  };
+}
+
+/**
+ * Classify one account for the forward-only migration proposal.
+ * Does not invent history — ambiguous when deletes/missing prevent a proof.
+ */
+export function classifyLifetimeCutoverAccount(input: {
+  entitlementActive: boolean;
+  survivingCreateCount: number | null;
+  hasDeleteEvidence: boolean;
+  hasMissingHistoryGaps: boolean;
+}): LifetimeCutoverAccountClass {
+  if (input.entitlementActive) return "paid_active";
+  if (input.survivingCreateCount == null) return "ambiguous_history";
+  if (input.survivingCreateCount === 0 && !input.hasDeleteEvidence) return "empty";
+  if (input.hasDeleteEvidence || input.hasMissingHistoryGaps) return "ambiguous_history";
+  return "provable_history";
+}

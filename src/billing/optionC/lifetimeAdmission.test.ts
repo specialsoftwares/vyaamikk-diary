@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 
 import {
   FREE_LIFETIME_RECORD_LIMIT,
+  classifyLifetimeCutoverAccount,
   decideLifetimeAdmission,
   emptyLifetimeUsage,
   lifetimeOperationId,
+  mergeLifetimeIntoUsageWrite,
   readLifetimeUsageSnapshot,
   resolveConcurrentFreeAdmissions,
   summarizeLifetimeCutoverDryRun,
@@ -203,6 +205,65 @@ const opB = lifetimeOperationId({
     paid_active: 1,
     empty: 1,
   });
+}
+
+{
+  assert.equal(
+    classifyLifetimeCutoverAccount({
+      entitlementActive: true,
+      survivingCreateCount: 3,
+      hasDeleteEvidence: true,
+      hasMissingHistoryGaps: false,
+    }),
+    "paid_active"
+  );
+  assert.equal(
+    classifyLifetimeCutoverAccount({
+      entitlementActive: false,
+      survivingCreateCount: 4,
+      hasDeleteEvidence: false,
+      hasMissingHistoryGaps: false,
+    }),
+    "provable_history"
+  );
+  assert.equal(
+    classifyLifetimeCutoverAccount({
+      entitlementActive: false,
+      survivingCreateCount: 4,
+      hasDeleteEvidence: true,
+      hasMissingHistoryGaps: false,
+    }),
+    "ambiguous_history"
+  );
+  assert.equal(
+    classifyLifetimeCutoverAccount({
+      entitlementActive: false,
+      survivingCreateCount: 0,
+      hasDeleteEvidence: false,
+      hasMissingHistoryGaps: false,
+    }),
+    "empty"
+  );
+}
+
+{
+  const merged = mergeLifetimeIntoUsageWrite(
+    {
+      monthKey: "2026-11",
+      recordsThisMonth: 1,
+      lastRecordCollection: "entries",
+      lastRecordId: "r1",
+      updatedAt: 9,
+    },
+    {
+      lifetimeAcceptedCount: 1,
+      freeMembershipIds: ["r1"],
+      admissionReceipts: {},
+    }
+  );
+  assert.equal(merged.lifetimeAcceptedCount, 1);
+  assert.deepEqual(merged.freeMembershipIds, ["r1"]);
+  assert.equal(merged.monthKey, "2026-11");
 }
 
 console.log("lifetimeAdmission.test.ts: ok");
