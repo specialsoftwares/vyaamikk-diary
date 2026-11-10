@@ -369,7 +369,10 @@ export async function handleOwnerObjectTransfer(
 
 export const ownerObjectTransfer = onCall(
   { region: "asia-south1", timeoutSeconds: 60, memory: "256MiB" },
-  async (request) => handleOwnerObjectTransfer(request)
+  async (request) => {
+    await assertAdmittedCallableUser(request);
+    return handleOwnerObjectTransfer(request);
+  }
 );
 
 export type { TransferAttemptStatus };

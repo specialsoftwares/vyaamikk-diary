@@ -294,12 +294,12 @@ assert.equal(
   const panel = readSrc("src/auth-v2/contactChange/VerifiedContactChangePanel.tsx");
   assert.match(
     panel,
-    /await adapters\.onAuthoritativePhone/,
+    /await operations\.run\(operation, async \(\) => adapters\.onAuthoritativePhone\(/,
     "panel must await central reconcile before success"
   );
   assert.match(
     panel,
-    /await adapters\.onAuthoritativeEmail/,
+    /await operations\.run\(operation, async \(\) => adapters\.onAuthoritativeEmail\(/,
     "panel must await email reconcile before success"
   );
 
@@ -311,7 +311,7 @@ assert.equal(
   );
   assert.match(
     editor,
-    /applyServerProfile\(profile\)/,
+    /await applyServerProfile\(profile, publication\.owner\.generation/,
     "production contact success must update auth session via applyServerProfile"
   );
 

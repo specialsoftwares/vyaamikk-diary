@@ -49,6 +49,7 @@ export const CALLABLE_SESSION_COVERAGE = {
   grinReserveEvidence: "enforced",
   grinBeginEvidenceUpload: "enforced",
   grinUploadEvidence: "enforced",
+  ownerObjectTransfer: "enforced",
   androidRtdn: "Play RTDN authenticates the push with OIDC, not a user ID token.",
   appStoreServerNotificationsV2:
     "App Store server notifications authenticate Apple's signed payload, not a user ID token.",

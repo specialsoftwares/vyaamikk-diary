@@ -538,9 +538,15 @@ async function main() {
     resolve(process.cwd(), "src/services/storage/userStorage.ts"),
     "utf8"
   );
+  const gateway = readFileSync(
+    resolve(process.cwd(), "src/services/storage/ownerObjectGateway.ts"),
+    "utf8"
+  );
   check(
     "download URLs stay a separate bearer capability",
-    download.includes("getDownloadURL")
+    gateway.includes("expiresAt") &&
+      gateway.includes("ending the session does not cancel it") &&
+      !download.includes("getDownloadURL")
   );
 
   if (failures > 0) {
