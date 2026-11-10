@@ -1,6 +1,6 @@
 # Audit correction before the remaining recommendations
 
-This note sits on the follow-up that starts at `d9c808ad61d89b8dec7c4c5f91440668abdbc3aa`. It does not change quarantine rebind, quarantine lookup, GRIN purge, the invoice renderer, the Firebase client key, or dependency versions.
+This note started on the follow-up at `d9c808ad61d89b8dec7c4c5f91440668abdbc3aa`. The release-candidate correction now explicitly disables the two unsupported public quarantine callables in source. Their serving revisions have not been verified or changed. GRIN purge, the invoice renderer, the Firebase client key and dependency versions remain outside this correction.
 
 The mailbox, phone-factor, and wrong-code fixes in this branch are separate. They are not a reason to apply the items below.
 
@@ -8,13 +8,15 @@ The mailbox, phone-factor, and wrong-code fixes in this branch are separate. The
 
 `rebindQuarantinedMobile` updates the old quarantine and writes a binding, then reads the newer quarantine. A Firestore transaction cannot read after it has written, so that later read aborts the transaction and the mutation does not commit.
 
-Moving that read above the writes, by itself, would let the mutation commit. The callable still authorizes `originalUid` when it equals the caller, or a support claim, and it does not require a fresh phone factor for the number being released. Authorization and transaction order have to change together. This branch does not reorder the reads.
+Moving that read above the writes, by itself, would let the mutation commit. The former callable authorized `originalUid` when it equalled the caller, or a support claim, without requiring a fresh phone factor for the released number. The release candidate leaves that internal helper and transaction order untouched. `rebindQuarantinedMobileCallable` now rejects every call before any Admin operation: signed-out calls receive `unauthenticated`; signed-in callers, including support claims, receive the same fixed support-required failure. No shipped app caller was found. This is an explicitly unsupported capability, not an implemented rebind flow.
 
 ## checkMobileQuarantine
 
-`assertAdmittedCallableUser` returns null when `request.auth` is missing, and its comment says the callable's unauthenticated path still runs. `checkMobileQuarantine` ignores that result. It reads the quarantine with the Admin SDK and, when the record is active and `releaseAt` is already due, updates it to released outside a transaction.
+The former `checkMobileQuarantine` ignored the null admission result for signed-out callers. It read the quarantine with the Admin SDK and, when the snapshot was active and due, updated it to released outside a transaction. A later quarantine could be overwritten between that read and write.
 
-Nothing in the callable states that a signed-out lookup is a product requirement. Until that is decided, the lookup and the release should stay apart. A release has to re-read the current record and the deadline inside the transaction that writes it. This branch does not change that callable.
+No shipped app caller or approved signed-out lookup requirement was found. The release candidate now rejects every invocation before any Admin lookup or release, using the same anonymous/signed-in denial contract as rebind. Internal quarantine checks and transactional release used by login, contact change and deletion are unchanged.
+
+`functions/src/identity/mobileQuarantine.disabledCallables.test.ts` invokes both production exported handlers with anonymous, owner and support contexts. Admin Auth and Firestore entry points are fail-fast tripwires. Before the correction, five of six cases failed, including the anonymous lookup reaching Firestore. After the correction, all six deny without an Admin operation. Existing quarantine policy and session-coverage tests remain required. This is source evidence only: a later controlled deployment and serving-revision verification must confirm the old public handlers are no longer serving before this exposure is closed operationally.
 
 ## GRIN purge
 

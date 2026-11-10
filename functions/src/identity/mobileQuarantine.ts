@@ -6,12 +6,11 @@
  */
 
 import { createHash, randomBytes } from "node:crypto";
-import { HttpsError, onCall } from "firebase-functions/v2/https";
+import { HttpsError, onCall, type CallableRequest } from "firebase-functions/v2/https";
 import type { Transaction } from "firebase-admin/firestore";
 
 import { getAdminDb } from "../admin";
 import { normalizePhoneE164 } from "./shared";
-import { assertAdmittedCallableUser } from "./admitCallableUser";
 
 export const MOBILE_QUARANTINE_MS = 21 * 24 * 60 * 60 * 1000;
 
@@ -478,72 +477,26 @@ export function rebindQuarantinedMobilePure(
 // Callables
 // ---------------------------------------------------------------------------
 
+/**
+ * Neither legacy public capability has a supported app flow. Keep the exported
+ * names so deployment cannot silently delete a service, but explicitly deny
+ * every invocation before Admin access. Firebase callable transport validates
+ * a supplied token; no session can authorize this disabled capability.
+ * Internal resolver/contact-change/deletion quarantine enforcement is unchanged.
+ */
+function denyUnsupportedPublicQuarantineOperation(request: Pick<CallableRequest, "auth">): never {
+  if (!request.auth?.uid) throw new HttpsError("unauthenticated", "Sign in first.");
+  throw new HttpsError(
+    "failed-precondition",
+    "This phone-number change requires support. Your account has not been changed.",
+    { code: "MOBILE_QUARANTINE_SUPPORT_REQUIRED" }
+  );
+}
+
 export const checkMobileQuarantine = onCall({ region: "asia-south1" }, async (request) => {
-  await assertAdmittedCallableUser(request);
-  const raw = request.data?.phoneE164 ?? request.data?.mobileHash;
-  if (typeof raw !== "string" || !raw.trim()) {
-    throw new HttpsError("invalid-argument", "phoneE164 or mobileHash is required.");
-  }
-  const mobileHash =
-    /^[a-f0-9]{64}$/i.test(raw.trim()) ? raw.trim().toLowerCase() : sha256MobileHash(raw);
-  const now = Date.now();
-  const db = getAdminDb();
-  const snap = await db.collection(MOBILE_QUARANTINES).doc(mobileHash).get();
-  if (!snap.exists) {
-    return { mobileHash, quarantined: false, status: "absent" as const };
-  }
-  const doc = snap.data() as MobileQuarantineDoc;
-  if (doc.status === "active" && doc.releaseAt <= now) {
-    await db.collection(MOBILE_QUARANTINES).doc(mobileHash).update({
-      status: "released",
-      releasedAt: now,
-    });
-    return { mobileHash, quarantined: false, status: "released" as const };
-  }
-  const status = quarantineStatusAt(doc, now);
-  if (status === "active") {
-    // Neutral: do not leak releaseAt / reason to unauthenticated callers beyond block.
-    throwMobileQuarantined();
-  }
-  return { mobileHash, quarantined: false, status };
+  denyUnsupportedPublicQuarantineOperation(request);
 });
 
-export const rebindQuarantinedMobileCallable = onCall(
-  { region: "asia-south1" },
-  async (request) => {
-    await assertAdmittedCallableUser(request);
-    const authUid = request.auth?.uid;
-    if (!authUid) {
-      throw new HttpsError("unauthenticated", "Sign in first.");
-    }
-    const oldPhone = String(request.data?.oldPhoneE164 ?? "");
-    const newerPhone = String(request.data?.newerPhoneE164 ?? "");
-    const originalUid = String(request.data?.originalUid ?? authUid);
-    if (!oldPhone || !newerPhone) {
-      throw new HttpsError("invalid-argument", "oldPhoneE164 and newerPhoneE164 are required.");
-    }
-    if (originalUid !== authUid && request.auth?.token?.support !== true) {
-      throw new HttpsError("permission-denied", "Not authorized to rebind this mobile.");
-    }
-
-    const oldMobileHash = sha256MobileHash(oldPhone);
-    const newerMobileHash = sha256MobileHash(newerPhone);
-    const now = Date.now();
-    const db = getAdminDb();
-
-    const result = await db.runTransaction(async (tx) =>
-      rebindQuarantinedMobile(tx, {
-        oldMobileHash,
-        newerMobileHash,
-        originalUid,
-        now,
-      })
-    );
-
-    return {
-      ok: true,
-      eventId: result.eventId,
-      quarantineNewerNumber: result.plan.quarantineNewerNumber,
-    };
-  }
-);
+export const rebindQuarantinedMobileCallable = onCall({ region: "asia-south1" }, async (request) => {
+  denyUnsupportedPublicQuarantineOperation(request);
+});
