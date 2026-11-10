@@ -9,12 +9,20 @@ const BRAND_INDIGO = "#3B41C5";
 
 interface TelemetryConsentModalProps {
   visible: boolean;
+  title: string;
+  body: string;
+  allowLabel: string;
+  declineLabel: string;
   onAllow: () => void;
   onDecline: () => void;
 }
 
 export function TelemetryConsentModal({
   visible,
+  title,
+  body,
+  allowLabel,
+  declineLabel,
   onAllow,
   onDecline,
 }: TelemetryConsentModalProps) {
@@ -30,27 +38,25 @@ export function TelemetryConsentModal({
       <View style={styles.backdrop}>
         <View style={styles.card}>
           <Text style={[styles.title, titleFamily ? { fontFamily: titleFamily } : null]}>
-            Help improve Vyaamikk Diary
+            {title}
           </Text>
           <View style={styles.rule} />
           <Text style={[styles.body, bodyFamily ? { fontFamily: bodyFamily } : null]}>
-            We would like to collect anonymous crash reports to help us fix issues faster. No
-            personal data, business records, financial information, or identifiable details are
-            ever included. You can change this anytime in Settings.
+            {body}
           </Text>
           <Pressable
             accessibilityRole="button"
             onPress={onAllow}
             style={styles.primary}
           >
-            <Text style={styles.primaryLabel}>Allow crash reports</Text>
+            <Text style={styles.primaryLabel}>{allowLabel}</Text>
           </Pressable>
           <Pressable
             accessibilityRole="button"
             onPress={onDecline}
             style={styles.secondary}
           >
-            <Text style={styles.secondaryLabel}>No thanks</Text>
+            <Text style={styles.secondaryLabel}>{declineLabel}</Text>
           </Pressable>
         </View>
       </View>

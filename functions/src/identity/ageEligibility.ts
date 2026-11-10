@@ -1,6 +1,8 @@
 /**
- * Server copy of the app age policy. Keep the decisions identical to
- * src/domain/ageEligibility.ts. Functions cannot import the app tree.
+ * Server copy of the historical self-declared date-of-birth policy.
+ * Keep those date decisions identical to src/domain/ageEligibility.ts.
+ * A demographic age band is not an input and never becomes ageEligibility.
+ * Functions cannot import the app tree.
  */
 
 export const AGE_POLICY_VERSION = "self-declared-dob-18-ist-2026-10";
@@ -95,4 +97,9 @@ export function assessSelfDeclaredDob(input: {
     assessedAt: input.nowMs,
     method: "self_declared_dob",
   };
+}
+
+/** Demographic bands, skips, and missing answers are not eligibility. */
+export function ageEligibilityFromDemographicAnswer(_answer: unknown): null {
+  return null;
 }

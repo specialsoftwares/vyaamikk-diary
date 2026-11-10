@@ -12,22 +12,33 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { Banner,
   Button,
   EmptyState,
-  ErrorState,
   Header,
   LastRefreshedHint,
   Screen,
   SkeletonDashboardPreview,
-  SkeletonList,
-  SkeletonLoadingPanel,
   TextField, LocaleUiText } from "@/components/ui";
+import {
+  InitialListSkeleton,
+  OfflineDeviceNotice,
+  SCREEN_EXISTING_SLOW_MS,
+  ScreenErrorPanel,
+  SlowNetworkStatus,
+  listPhase,
+  screenStateCopy,
+  showsEmpty,
+  useOwnedSnapshot,
+} from "@/components/screenState";
 import { EntryRow } from "@/components/diary/EntryRow";
 import { EntryTypeFilter, type DiaryEntryFilterType } from "@/components/diary/EntryTypeFilter";
 import { SwipeToDeleteRow } from "@/components/records/SwipeToDeleteRow";
 import { useRecordDelete } from "@/hooks/useRecordDelete";
 import { useAppRefresh } from "@/hooks/useAppRefresh";
+import { currentSessionCommitEpoch } from "@/services/auth/authSessionFence";
 import { useAuth } from "@/state/auth";
+import { useSync } from "@/state/sync";
 import { useDiaryList } from "@/state/useDiaryList";
-import { useT } from "@/i18n";
+import { syncSessionOwnership } from "@/sync/syncSessionOwnership";
+import { useI18n, useT } from "@/i18n";
 import { spacing, typography, useThemedStyles, useThemeColors } from "@/theme";
 import type { BusinessEntryType } from "@/domain/businessEntry";
 import { isComposerEntryType } from "@/domain/composerOptions";
@@ -39,12 +50,15 @@ const DIARY_PAGE_INCREMENT = 50;
 
 export default function DiaryHistoryScreen() {
   const t = useT();
+  const { lang } = useI18n();
+  const copy = screenStateCopy(lang);
   const router = useRouter();
   const { filter, type: typeParam } = useLocalSearchParams<{
     filter?: string;
     type?: string;
   }>();
   const { user } = useAuth();
+  const { status: syncStatus } = useSync();
   const colors = useThemeColors();
   const insets = useSafeAreaInsets();
   const styles = useThemedStyles((c) =>
@@ -110,17 +124,36 @@ export default function DiaryHistoryScreen() {
     );
   }, [entries, entryTypeFilter]);
 
-  const hasMore = displayedEntries.length >= listLimit;
+  const session = syncSessionOwnership.capture();
+  const ownedEntries = useOwnedSnapshot({
+    signedInUid: user?.uid ?? null,
+    epoch: currentSessionCommitEpoch(),
+    generation: session?.generation ?? null,
+    loading,
+    failed: Boolean(error),
+    value: displayedEntries,
+  });
+  const rows = ownedEntries.accepted && ownedEntries.value ? ownedEntries.value : [];
+  const phase = listPhase({
+    loading,
+    failed: Boolean(error),
+    count: rows.length,
+    owned: ownedEntries.current,
+    pending: ownedEntries.pending,
+  });
+  const offline = syncStatus === "offline";
+
+  const hasMore = rows.length >= listLimit;
   const loadMore = useCallback(() => {
     if (!hasMore || loading || refreshing) return;
     setListLimit((n) => n + DIARY_PAGE_INCREMENT);
   }, [hasMore, loading, refreshing]);
 
   const subtitle = upcomingOnly
-    ? t("diary.historySubtitleUpcoming", { count: displayedEntries.length })
-    : displayedEntries.length === 0
+    ? t("diary.historySubtitleUpcoming", { count: rows.length })
+    : rows.length === 0
       ? t("diary.historySubtitleNone")
-      : t("diary.historySubtitleCount", { count: displayedEntries.length });
+      : t("diary.historySubtitleCount", { count: rows.length });
 
   const openEntry = useCallback(
     (id: string) => {
@@ -222,17 +255,25 @@ export default function DiaryHistoryScreen() {
           </LocaleUiText>
         </Pressable>
         <LastRefreshedHint message={refreshNote} />
+        {offline && rows.length > 0 ? <OfflineDeviceNotice offline hasRows /> : null}
+        <SlowNetworkStatus
+          active={refreshing && rows.length > 0}
+          slowAfterMs={SCREEN_EXISTING_SLOW_MS}
+        />
       </View>
 
-      {loading && entries.length === 0 ? (
-        <SkeletonLoadingPanel loading slowMessage={t("skeleton.stillLoading")}>
-          <SkeletonList count={8} Item={SkeletonDashboardPreview} />
-        </SkeletonLoadingPanel>
-      ) : error ? (
-        <ErrorState message={error} onRetry={reload} />
+      {phase === "loading" ? (
+        <InitialListSkeleton count={8} Item={SkeletonDashboardPreview} />
+      ) : phase === "error" ? (
+        <>
+          {offline ? <OfflineDeviceNotice offline hasRows={false} /> : null}
+          <ScreenErrorPanel error={error ?? "unknown"} onRetry={() => void reload()} />
+        </>
+      ) : phase === "hidden" ? (
+        <LocaleUiText style={{ padding: 24, textAlign: "center" }}>{copy.signedOut}</LocaleUiText>
       ) : (
         <FlatList
-          data={displayedEntries}
+          data={rows}
           keyExtractor={(item) => item.id}
           renderItem={renderItem}
           initialNumToRender={12}
@@ -242,6 +283,7 @@ export default function DiaryHistoryScreen() {
           contentContainerStyle={listPadding}
           refreshControl={refreshControl}
           ListEmptyComponent={
+            showsEmpty(phase) ? (
             <EmptyState
               title={search || entryTypeFilter ? t("diary.noMatches") : t("diary.emptyTitle")}
               message={
@@ -263,6 +305,7 @@ export default function DiaryHistoryScreen() {
                 goNew();
               }}
             />
+            ) : null
           }
           ListHeaderComponent={
             search.length > 0 || entryTypeFilter ? (
@@ -283,7 +326,7 @@ export default function DiaryHistoryScreen() {
                     ]
                       .filter(Boolean)
                       .join(" • ") +
-                    ` • ${t("diary.activeFilterResults", { count: displayedEntries.length })}`
+                    ` • ${t("diary.activeFilterResults", { count: rows.length })}`
                   }
                 />
               </View>
@@ -303,10 +346,10 @@ export default function DiaryHistoryScreen() {
                   {t("diary.showingCount", { count: displayedEntries.length })}
                 </LocaleUiText>
               </View>
-            ) : displayedEntries.length > 0 ? (
+            ) : rows.length > 0 ? (
               <View style={styles.loadMoreWrap}>
                 <LocaleUiText style={styles.loadMoreHint}>
-                  {t("diary.showingCount", { count: displayedEntries.length })}
+                  {t("diary.showingCount", { count: rows.length })}
                 </LocaleUiText>
               </View>
             ) : null

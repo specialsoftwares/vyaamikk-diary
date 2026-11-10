@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 
 import {
   __resetCrashReportingForTests,
+  __setCrashSdkBridgeForTests,
   __setCrashlyticsClientForTests,
   log,
   recordError,
@@ -22,22 +23,33 @@ function assertClean(value: unknown): void {
   assert.doesNotMatch(blob, /SYNTHETIC_VALUE_Q7/);
 }
 
+async function main(): Promise<void> {
 __resetCrashReportingForTests();
 
 {
   const calls: { kind: string; payload: unknown }[] = [];
+  const preferenceWrites: boolean[] = [];
+  let rnRecords = 0;
   __setCrashlyticsClientForTests({
-    setCrashlyticsCollectionEnabled: async () => {},
-    log: (message) => {
-      calls.push({ kind: "log", payload: message });
+    setCrashlyticsCollectionEnabled: async (enabled) => {
+      preferenceWrites.push(enabled);
     },
-    recordError: (error) => {
-      calls.push({
-        kind: "recordError",
-        payload: { name: error.name, message: error.message, stack: error.stack },
-      });
+    log: () => {
+      rnRecords += 1;
+    },
+    recordError: () => {
+      rnRecords += 1;
     },
     setUserId: () => {},
+  });
+  __setCrashSdkBridgeForTests({
+    setSdkCollectionEnabled: async () => {},
+    recordDiagnostic: async (message) => {
+      calls.push({ kind: "recordError", payload: message });
+    },
+    logDiagnostic: async (message) => {
+      calls.push({ kind: "log", payload: message });
+    },
   });
 
   const original = Object.assign(new Error(`enabled path ${EMAIL} ${DOC}`), {
@@ -52,7 +64,7 @@ __resetCrashReportingForTests();
   assert.equal(original.message.includes(EMAIL), true);
   assert.equal(original.cause, cause);
 
-  setCrashReportingEnabled(true);
+  await setCrashReportingEnabled(true);
   recordError(original, "ErrorBoundary");
   log(`invoice ${DOC} ${EMAIL}`);
 
@@ -60,19 +72,19 @@ __resetCrashReportingForTests();
   assert.ok(calls.some((row) => row.kind === "log" && row.payload === "app"));
   const recorded = calls.filter((row) => row.kind === "recordError");
   assert.equal(recorded.length, 1);
-  const payload = recorded[0]!.payload as { name: string; message: string; stack: string };
-  assert.equal(payload.name, "SafeDiagnosticError");
-  assert.equal(payload.message, "diagnostic:unknown");
-  assert.doesNotMatch(payload.stack, /alice\.reviewer|WIDGET-BATCH|customData|cause/);
+  assert.equal(recorded[0]!.payload, "SafeDiagnosticError:diagnostic:unknown");
   assertClean(calls);
+  assert.equal(rnRecords, 0, "RNFirebase record and log stay unused while the preference is false");
   assert.equal(original.message.includes(EMAIL), true, "original Error unchanged");
   assert.equal((original as { customData?: { email?: string } }).customData?.email, EMAIL);
+  assert.equal(preferenceWrites.includes(true), false);
+  assert.equal(preferenceWrites.at(-1), false);
 }
 
 {
   __resetCrashReportingForTests();
   __setCrashlyticsClientForTests(null);
-  setCrashReportingEnabled(true);
+  await setCrashReportingEnabled(true);
   assert.doesNotThrow(() =>
     recordError(new Error(`missing sdk ${EMAIL}`), "ErrorBoundary")
   );
@@ -94,9 +106,15 @@ __resetCrashReportingForTests();
       throw new Error("native uid");
     },
   });
-  assert.doesNotThrow(() => setCrashReportingEnabled(true));
+  await setCrashReportingEnabled(true);
   assert.doesNotThrow(() => recordError(new Error(`reject ${EMAIL}`), "ErrorBoundary"));
 }
 
 __resetCrashReportingForTests();
 console.log("crashReporter.privacy.test.ts: ok (EXECUTED_PRODUCTION_METHOD)");
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

@@ -13,8 +13,9 @@ const gateSrc = readFileSync(join(root, "src/auth-v2/AuthFlowGate.tsx"), "utf8")
 const otpSrc = readFileSync(join(root, "src/auth-v2/screens/OtpVerificationScreen.tsx"), "utf8");
 const emailSrc = readFileSync(join(root, "src/auth-v2/screens/EmailEntryScreen.tsx"), "utf8");
 
-assert.match(otpSrc, /onVerifyStart/);
+assert.equal(otpSrc.includes("onVerifyStart?.("), false);
 assert.match(gateSrc, /beginVerificationProcess\("mobile"\)/);
+assert.match(gateSrc, /onAccepted/);
 assert.match(gateSrc, /clearFlowError\(\)/);
 assert.match(gateSrc, /errorVisibleOnSurface\(errorSurface, "email"\)/);
 assert.equal(gateSrc.includes("goBackFromEmail"), false);

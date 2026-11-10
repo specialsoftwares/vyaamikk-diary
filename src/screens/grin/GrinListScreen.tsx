@@ -1,4 +1,7 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
+
+import { captureLoadClaim } from "@/components/screenState/resolveScreenState";
+import { currentSessionCommitEpoch } from "@/services/auth/authSessionFence";
 
 import type { GrinApplicationListItem } from "@/services/grin/repository";
 import {
@@ -24,6 +27,7 @@ import {
   useGrinThemedStyles,
 } from "./grinScreenHooks";
 import {
+  Banner,
   Button,
   Card,
   EmptyState,
@@ -53,6 +57,9 @@ export function GrinListAdmittedBody({ session }: { session: GrinDispatchSession
   const router = useGrinRouter();
   const insets = useSafeAreaInsets();
   const [items, setItems] = useState<GrinApplicationListItem[]>([]);
+  const [phase, setPhase] = useState<"loading" | "ready" | "error">("loading");
+  const [error, setError] = useState<string | null>(null);
+  const generation = useRef(0);
 
   const styles = useGrinThemedStyles((c) =>
     StyleSheet.create({
@@ -85,16 +92,25 @@ export function GrinListAdmittedBody({ session }: { session: GrinDispatchSession
   );
 
   const load = useCallback(() => {
+    const claim = captureLoadClaim(session.ownerUid, ++generation.current);
+    const stillThisRequest = () =>
+      generation.current === claim.generation &&
+      currentSessionCommitEpoch() === claim.epoch &&
+      session.ownerUid === claim.uid;
     try {
-      setItems(originRepo(origin).list());
+      const next = originRepo(origin).list();
+      if (!stillThisRequest()) return;
+      setItems(next);
+      setError(null);
+      setPhase("ready");
     } catch (caught) {
-      if (grinMutationErrorMessage(caught, t, "grin.errSave").retired) {
-        setItems([]);
-        return;
-      }
-      setItems([]);
+      if (generation.current !== claim.generation) return;
+      const mapped = grinMutationErrorMessage(caught, t, "grin.errSave");
+      if (mapped.retired || !stillThisRequest()) setItems([]);
+      setError(mapped.retired ? t("grin.errSessionRetired") : mapped.message);
+      setPhase("error");
     }
-  }, [origin, t]);
+  }, [origin, session.ownerUid, t]);
 
   useGrinFocusEffect(
     useCallback(() => {
@@ -177,21 +193,29 @@ export function GrinListAdmittedBody({ session }: { session: GrinDispatchSession
         <Header title={t("grin.listTitle")} subtitle={t("grin.listSubtitle")} showBack />
         <GrinFixtureNotices />
         <Button label={t("grin.newAction")} onPress={goNew} style={styles.newBtn} />
+        {phase === "error" && error ? (
+          <>
+            <Banner tone="danger" message={error} />
+            <Button label={t("common.retry")} onPress={load} variant="secondary" />
+          </>
+        ) : null}
       </View>
       <FlatList
-        data={items}
+        data={phase === "ready" || items.length > 0 ? items : []}
         keyExtractor={(d: GrinApplicationListItem) => d.receiptId}
         renderItem={renderItem}
         initialNumToRender={10}
         removeClippedSubviews={Platform.OS === "android"}
         contentContainerStyle={listPadding}
         ListEmptyComponent={
-          <EmptyState
-            title={t("grin.emptyTitle")}
-            message={t("grin.emptyMessage")}
-            actionLabel={t("grin.newAction")}
-            onAction={goNew}
-          />
+          phase === "ready" ? (
+            <EmptyState
+              title={t("grin.emptyTitle")}
+              message={t("grin.emptyMessage")}
+              actionLabel={t("grin.newAction")}
+              onAction={goNew}
+            />
+          ) : null
         }
       />
     </Screen>

@@ -13,7 +13,7 @@ import {
 } from "@/auth-v2/otp/onboardingOtpModel";
 import { onboardingMark } from "@/auth-v2/onboardingPerfProbe";
 import { useAuthV2Theme } from "@/auth-v2/hooks/useAuthV2Theme";
-import { useT } from "@/i18n";
+import { useI18n, useT } from "@/i18n";
 import { spacing, typography } from "@/theme";
 import { useIsOnline } from "@/state/network";
 import { LocaleUiText } from "@/components/ui";
@@ -25,6 +25,8 @@ import {
 } from "@/hooks/useAuthoritativeResendCountdown";
 import { formatOtpCountdownMmSs } from "@/utils/otpCountdownFormat";
 import { MOBILE_OTP_LENGTH } from "@/services/auth/mobileOtpConstants";
+import { presentedPhoneResend } from "@/services/auth/phoneVerificationPlan";
+import { phoneAuthCopy } from "@/auth-v2/phoneAuthCopy";
 
 interface OtpVerificationScreenProps {
   phoneE164: string;
@@ -34,8 +36,6 @@ interface OtpVerificationScreenProps {
   expiresAt?: number | null;
   resendAvailableAt?: number | null;
   onVerify: (code: string) => void;
-  /** Paint verifying overlay immediately — before awaited Firebase/server work. */
-  onVerifyStart?: () => void;
   onResend: () => void;
   onChangeNumber: () => void;
   loading?: boolean;
@@ -64,7 +64,6 @@ export function OtpVerificationScreen({
   phoneE164,
   resendAvailableAt = null,
   onVerify,
-  onVerifyStart,
   onResend,
   onChangeNumber,
   loading = false,
@@ -83,6 +82,8 @@ export function OtpVerificationScreen({
   changeNumberLabel,
 }: OtpVerificationScreenProps) {
   const t = useT();
+  const { lang } = useI18n();
+  const copy = phoneAuthCopy(lang);
   const online = useIsOnline();
   const { tokens } = useAuthV2Theme();
   const [code, setCode] = useState(initialDigits);
@@ -114,7 +115,6 @@ export function OtpVerificationScreen({
     verifyInFlightRef.current = true;
     onboardingMark("otpComplete");
     onboardingMark("verifyStarted");
-    onVerifyStart?.();
     try {
       onVerify(nextCode);
     } finally {
@@ -230,21 +230,30 @@ export function OtpVerificationScreen({
       />
 
       <View style={styles.resendRow}>
-        {resendRemaining > 0 ? (
+        {resendRemaining > 0 || resendAvailableAt == null ? (
           <LocaleUiText
             style={[styles.resendHint, { color: tokens.secondaryActionMuted }]}
-            accessibilityLabel={t("otp.resendCountdown", {
-              time: formatOtpCountdownMmSs(resendRemaining),
-            })}
+            accessibilityLabel={
+              resendAvailableAt == null
+                ? copy.resendWait
+                : t("otp.resendCountdown", { time: formatOtpCountdownMmSs(resendRemaining) })
+            }
           >
-            {t("otp.resendCountdown", { time: formatOtpCountdownMmSs(resendRemaining) })}
+            {resendAvailableAt == null
+              ? copy.resendWait
+              : t("otp.resendCountdown", { time: formatOtpCountdownMmSs(resendRemaining) })}
           </LocaleUiText>
         ) : (
           <AuthTertiaryTextAction
             label={resending ? t("otp.resending") : t("otp.resend")}
             onPress={() => {
-              if (!canResend && resendAvailableAt != null) return;
-              if (resending || loading) return;
+              const decision = presentedPhoneResend({
+                resendAvailableAt,
+                now: Date.now(),
+                resending,
+                loading,
+              });
+              if (!decision.invoke || !decision.forceResend) return;
               setDigits("");
               onResend();
             }}

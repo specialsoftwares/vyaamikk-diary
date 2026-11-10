@@ -16,6 +16,7 @@ import { dedupeProfessionalPacks } from "@/services/professionalPack/dedupe";
 import { maskedInsightData } from "@/services/insights/insightAccountGuard";
 import { sessionStillOwns } from "@/state/diaryListLoad";
 import { useSync } from "@/state/sync";
+import { currentSessionCommitEpoch } from "@/services/auth/authSessionFence";
 import { syncSessionOwnership } from "@/sync/syncSessionOwnership";
 import { createLogger } from "@/utils/logger";
 import { useT } from "@/i18n";
@@ -48,7 +49,12 @@ export function useBusinessInsightsDashboard(
     const requestUserId = userId;
     const admitted = syncSessionOwnership.capture();
     const sessionGeneration = admitted && admitted.uid === userId ? admitted.generation : null;
+    const epochAtStart = currentSessionCommitEpoch();
     const requestId = ++requestIdRef.current;
+    const stillOwns = () =>
+      requestId === requestIdRef.current &&
+      currentSessionCommitEpoch() === epochAtStart &&
+      sessionStillOwns(requestUserId, sessionGeneration);
     setLoading(true);
     setFailure(null);
 
@@ -78,27 +84,25 @@ export function useBusinessInsightsDashboard(
         selectedFy,
         { offline }
       );
-      if (requestId !== requestIdRef.current) return;
-      if (!sessionStillOwns(requestUserId, sessionGeneration)) return;
+      if (!stillOwns()) return;
       setSnapshot({ userId: requestUserId, data: next });
       scheduleInsightRebuild(requestUserId, ueid);
     } catch {
-      if (requestId !== requestIdRef.current) return;
-      if (!sessionStillOwns(requestUserId, sessionGeneration)) return;
+      if (!stillOwns()) return;
       log.warn("dashboard load failed");
-      setSnapshot(null);
       setFailure({ userId: requestUserId, message: t("businessInsights.loadError") });
     } finally {
-      if (requestId === requestIdRef.current) {
+      if (requestId === requestIdRef.current && currentSessionCommitEpoch() === epochAtStart) {
         setLoading(false);
       }
     }
   }, [userId, ueid, selectedFy, t, offline]);
 
+  const epoch = currentSessionCommitEpoch();
   useFocusEffect(
     useCallback(() => {
       void load();
-    }, [load])
+    }, [load, epoch])
   );
 
   const syncStamp = `${status}:${pendingCount}:${userId ?? ""}`;

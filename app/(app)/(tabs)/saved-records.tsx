@@ -7,10 +7,22 @@ import type { ComponentProps } from "react";
 import { PartyLedgerList } from "@/components/partyLedger/PartyLedgerList";
 import { RecordsPartySwitch } from "@/components/partyLedger/RecordsPartySwitch";
 import { Banner, LastRefreshedHint, Screen, SmartHeadline, LocaleUiText } from "@/components/ui";
+import {
+  InitialListSkeleton,
+  OfflineDeviceNotice,
+  ScreenErrorPanel,
+  SlowNetworkStatus,
+  listPhase,
+  screenStateCopy,
+  useOwnedRequest,
+  useOwnedSnapshot,
+} from "@/components/screenState";
+import { currentSessionCommitEpoch } from "@/services/auth/authSessionFence";
 import { GlobalSearchBar } from "@/components/search/GlobalSearchBar";
 import { useAuth } from "@/state/auth";
+import { useSync } from "@/state/sync";
 import { useAppRefresh } from "@/hooks/useAppRefresh";
-import { useT } from "@/i18n";
+import { useI18n, useT } from "@/i18n";
 import { LuxuryPressable } from "@/components/ui/LuxuryPressable";
 import {
   DASHBOARD_SECTION_GAP,
@@ -43,14 +55,16 @@ interface HubCategory {
 
 export default function SavedRecordsTab() {
   const t = useT();
+  const { lang } = useI18n();
+  const copy = screenStateCopy(lang);
   const router = useRouter();
   const { user } = useAuth();
+  const { status: syncStatus } = useSync();
   const { resolvedMode } = useTheme();
   const userId = user?.uid ?? null;
 
-  const [data, setData] = useState<SavedRecordsData | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [pane, setPane] = useState<"records" | "partyLedger">("records");
+  const { load, run } = useOwnedRequest<SavedRecordsData>(userId);
 
   const isDark = resolvedMode === "dark";
 
@@ -99,17 +113,29 @@ export default function SavedRecordsTab() {
   );
 
   const reload = useCallback(async () => {
-    if (!userId) return;
-    setError(null);
-    try {
-      const next = await loadSavedRecordsData(userId);
-      setData(next);
-    } catch {
-      setError(t("savedRecords.loadError"));
-    }
-  }, [userId, t]);
+    await run((uid) => loadSavedRecordsData(uid));
+  }, [run]);
 
   const { refreshing, refreshNote, onRefresh } = useAppRefresh({ onReload: reload });
+
+  const ownedRecords = useOwnedSnapshot({
+    signedInUid: userId,
+    epoch: currentSessionCommitEpoch(),
+    generation: load.claim?.generation ?? null,
+    loading: load.loading,
+    failed: Boolean(load.error),
+    value: load.value,
+    valueClaim: load.valueClaim,
+  });
+  const visible = ownedRecords.accepted ? ownedRecords.value : null;
+  const phase = listPhase({
+    loading: load.loading,
+    failed: Boolean(load.error),
+    count: visible ? 1 : 0,
+    owned: ownedRecords.current,
+    pending: ownedRecords.pending,
+  });
+  const offline = syncStatus === "offline";
 
   useFocusEffect(
     useCallback(() => {
@@ -124,7 +150,7 @@ export default function SavedRecordsTab() {
   );
 
   const categories: HubCategory[] = useMemo(() => {
-    const d = data;
+    const d = visible;
     const b = (type: BusinessEntryType) => d?.byType[type];
     return [
       {
@@ -268,7 +294,7 @@ export default function SavedRecordsTab() {
           router.push({ pathname: "/(app)/diary", params: { filter: "upcoming" } }),
       },
     ];
-  }, [data, router, goType, t]);
+  }, [visible, router, goType, t]);
 
   const partySwitch = (
     <RecordsPartySwitch
@@ -306,11 +332,23 @@ export default function SavedRecordsTab() {
           <View style={styles.searchWrap}>
             <GlobalSearchBar />
           </View>
-          {error ? <Banner tone="danger" message={error} /> : null}
+          {load.error && visible ? <Banner tone="danger" message={load.error} /> : null}
           <View style={styles.divider} />
           <LastRefreshedHint message={refreshNote} />
+          {offline && visible ? <OfflineDeviceNotice offline hasRows /> : null}
+          <SlowNetworkStatus active={load.loading && Boolean(visible)} />
         </View>
 
+        {phase === "loading" ? (
+          <InitialListSkeleton count={6} />
+        ) : phase === "error" ? (
+          <>
+            {offline ? <OfflineDeviceNotice offline hasRows={false} /> : null}
+            <ScreenErrorPanel error={load.error ?? "unknown"} onRetry={() => void reload()} />
+          </>
+        ) : !visible ? (
+          <LocaleUiText>{copy.signedOut}</LocaleUiText>
+        ) : (
         <View style={styles.grid}>
           {categories.map((cat) => {
             const accent = getCategoryAccent(cat.accentKey, resolvedMode);
@@ -344,6 +382,7 @@ export default function SavedRecordsTab() {
             );
           })}
         </View>
+        )}
       </View>
     </Screen>
   );

@@ -19,6 +19,7 @@ import {
   savePendingConsentValue,
   type PendingConsentStorage,
 } from "@/services/consent/pendingConsentKey";
+import { createPhoneAuthOperations } from "@/auth-v2/phoneAuthOperation";
 import {
   continueAfterPhoneProfileTransition,
   retryAuthenticatedAccountSetup,
@@ -394,6 +395,7 @@ async function main() {
 
   let resolveCalls = 0;
   const inactive = await retryAuthenticatedAccountSetup({
+    ops: createPhoneAuthOperations(),
     phoneE164: profile.phoneE164,
     inFlight: false,
     readLive: () => ({ uid: null, generation: 4 }),
@@ -423,6 +425,7 @@ async function main() {
   let retriedProfile = false;
   let continuedGeneration = -1;
   const accountRetry = retryAuthenticatedAccountSetup({
+    ops: createPhoneAuthOperations(),
     phoneE164: profile.phoneE164,
     inFlight: false,
     readLive: () => opening,
@@ -472,6 +475,7 @@ async function main() {
     let navigated = 0;
     let cleared = false;
     const pendingRetry = retryAuthenticatedAccountSetup({
+      ops: createPhoneAuthOperations(),
       phoneE164: profile.phoneE164,
       inFlight: false,
       readLive: () => live,
@@ -534,6 +538,7 @@ async function main() {
   await savePendingConsentValue(consentStorage, JSON.stringify(retained));
   let foreignPublished = 0;
   const foreignProfile = await retryAuthenticatedAccountSetup({
+    ops: createPhoneAuthOperations(),
     phoneE164: profile.phoneE164,
     inFlight: false,
     readLive: () => ({ uid: profile.uid, generation: 4 }),

@@ -6,7 +6,7 @@
  * one. Record-keeping only — no lending / recovery workflow.
  */
 
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useMemo } from "react";
 import { FlatList, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
@@ -15,16 +15,26 @@ import { Banner,
   Button,
   Card,
   EmptyState,
-  ErrorState,
   Header,
   LastRefreshedHint,
-  Loader,
   Screen, LocaleUiText } from "@/components/ui";
+import {
+  InitialListSkeleton,
+  OfflineDeviceNotice,
+  ScreenErrorPanel,
+  SlowNetworkStatus,
+  listPhase,
+  showsEmpty,
+  screenStateCopy,
+  useOwnedRequest,
+  useOwnedSnapshot,
+} from "@/components/screenState";
+import { currentSessionCommitEpoch } from "@/services/auth/authSessionFence";
 import { useAuth } from "@/state/auth";
+import { useSync } from "@/state/sync";
 import { useAppRefresh } from "@/hooks/useAppRefresh";
-import { useT } from "@/i18n";
+import { useI18n, useT } from "@/i18n";
 import { radius, spacing, typography, useThemedStyles } from "@/theme";
-import { userFacingMessage } from "@/domain/errors";
 import { formatShortDate } from "@/utils/date";
 import { formatAmount } from "@/utils/formatters/formatAmount";
 import { requestComposerPickerReturn } from "@/navigation";
@@ -53,15 +63,15 @@ function statusKey(status: CustomerCreditStatus): string {
 
 export default function CustomerCreditListScreen() {
   const t = useT();
+  const { lang } = useI18n();
+  const copy = screenStateCopy(lang);
   const router = useRouter();
   const { user } = useAuth();
+  const { status: syncStatus } = useSync();
   const insets = useSafeAreaInsets();
   const { fromPicker } = useLocalSearchParams<{ fromPicker?: string }>();
 
-  const [records, setRecords] = useState<CustomerCreditRecord[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const hasLoadedOnce = useRef(false);
+  const { load, run } = useOwnedRequest<CustomerCreditRecord[]>(user?.uid ?? null);
 
   const styles = useThemedStyles((c) =>
     StyleSheet.create({
@@ -89,30 +99,35 @@ export default function CustomerCreditListScreen() {
     })
   );
 
-  const load = useCallback(
-    async (mode: "mount" | "refresh" = "mount") => {
-      if (!user) return;
-      if (!hasLoadedOnce.current) setLoading(true);
-      setError(null);
-      try {
-        const list = await getCustomerCreditRepository().list(user.uid);
-        setRecords(list);
-        hasLoadedOnce.current = true;
-      } catch (e) {
-        setError(userFacingMessage(e));
-      } finally {
-        setLoading(false);
-      }
-    },
-    [user]
-  );
+  const loadRecords = useCallback(async () => {
+    await run((uid) => getCustomerCreditRepository().list(uid));
+  }, [run]);
 
-  const { refreshNote, refreshControl } = useAppRefresh({ onReload: () => load("refresh") });
+  const { refreshing, refreshNote, refreshControl } = useAppRefresh({ onReload: loadRecords });
+
+  const ownedRecords = useOwnedSnapshot({
+    signedInUid: user?.uid ?? null,
+    epoch: currentSessionCommitEpoch(),
+    generation: load.claim?.generation ?? null,
+    loading: load.loading,
+    failed: Boolean(load.error),
+    value: load.value ?? [],
+    valueClaim: load.valueClaim,
+  });
+  const rows = ownedRecords.accepted && ownedRecords.value ? ownedRecords.value : [];
+  const phase = listPhase({
+    loading: load.loading,
+    failed: Boolean(load.error),
+    count: rows.length,
+    owned: ownedRecords.current,
+    pending: ownedRecords.pending,
+  });
+  const offline = syncStatus === "offline";
 
   useFocusEffect(
     useCallback(() => {
-      void load("mount");
-    }, [load])
+      void loadRecords();
+    }, [loadRecords])
   );
 
   const fmtMoney = useCallback(
@@ -189,22 +204,29 @@ export default function CustomerCreditListScreen() {
           showBack
           onBackPress={goBack}
         />
-        {error ? (
+        {load.error && rows.length > 0 ? (
           <View style={styles.banner}>
-            <Banner tone="danger" message={error} />
+            <Banner tone="danger" message={load.error} />
           </View>
         ) : null}
         <Button label={t("customerCredit.newAction")} onPress={goNew} style={styles.newBtn} />
         <LastRefreshedHint message={refreshNote} />
+        {offline && rows.length > 0 ? <OfflineDeviceNotice offline hasRows /> : null}
+        <SlowNetworkStatus active={(refreshing || load.loading) && rows.length > 0} />
       </View>
 
-      {loading && records.length === 0 ? (
-        <Loader fullscreen message={t("common.loading")} />
-      ) : error && records.length === 0 ? (
-        <ErrorState message={error} onRetry={() => void load("mount")} />
+      {phase === "loading" ? (
+        <InitialListSkeleton count={6} />
+      ) : phase === "error" ? (
+        <>
+          {offline ? <OfflineDeviceNotice offline hasRows={false} /> : null}
+          <ScreenErrorPanel error={load.error ?? "unknown"} onRetry={() => void loadRecords()} />
+        </>
+      ) : phase === "hidden" ? (
+        <LocaleUiText style={{ padding: 24, textAlign: "center" }}>{copy.signedOut}</LocaleUiText>
       ) : (
         <FlatList
-          data={records}
+          data={rows}
           keyExtractor={(d) => d.id}
           renderItem={renderItem}
           refreshControl={refreshControl}
@@ -212,12 +234,14 @@ export default function CustomerCreditListScreen() {
           removeClippedSubviews={Platform.OS === "android"}
           contentContainerStyle={listPadding}
           ListEmptyComponent={
+            showsEmpty(phase) ? (
             <EmptyState
               title={t("customerCredit.emptyTitle")}
               message={t("customerCredit.emptyMessage")}
               actionLabel={t("customerCredit.newAction")}
               onAction={goNew}
             />
+            ) : null
           }
         />
       )}

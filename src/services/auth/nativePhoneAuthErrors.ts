@@ -219,6 +219,9 @@ export function formatPhoneAuthDisplayMessage(error: unknown): string {
   if (!(error instanceof AppError)) {
     return mapPhoneAuthFailure(error, "send").userMessage;
   }
+  if (error.details?.phoneAuthSettlement === "unknown" && error.message.trim().length > 0) {
+    return error.message;
+  }
   return toPublicError(error, "phone").message;
 }
 

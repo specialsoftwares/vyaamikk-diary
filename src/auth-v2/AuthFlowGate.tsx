@@ -15,11 +15,23 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import {
   clearAuthWrapperChallenge,
   clearAuthWrapperProgress,
-  loadAuthWrapperChallenge,
   markAuthWrapperEmailComplete,
   markAuthWrapperEmailPending,
   saveAuthWrapperChallenge,
 } from "@/auth-v2/authWrapperProgress";
+import { resumeSignedOutPhoneChallenge } from "@/auth-v2/signedOutChallengeResume";
+import { phoneAuthCopy } from "@/auth-v2/phoneAuthCopy";
+import {
+  createPhoneAuthOperations,
+  escapePhoneChallenge,
+  isPhoneAttemptUnknown,
+  leaveAuthenticatedPhoneChallenge,
+  openRestoredPhoneChallenge,
+  PHONE_CLEANUP_BOUND_MS,
+  PHONE_NATIVE_SEND_BOUND_MS,
+  submitPhoneResend,
+  submitPhoneVerification,
+} from "@/auth-v2/phoneAuthOperation";
 import {
   phoneFallbackMayClaimSessionExpired,
   resolveAuthFlowGateRenderBranch,
@@ -36,6 +48,7 @@ import { PhoneEntryScreen } from "@/auth-v2/screens/PhoneEntryScreen";
 import { onboardingMark, onboardingMeasure } from "@/auth-v2/onboardingPerfProbe";
 import { sendOtpForWrapper } from "@/auth-v2/services/authWrapperService";
 import {
+  adoptRestoredPhoneChallenge,
   beginPhoneOtpSend,
   beginPhoneOtpVerify,
   completePhoneOtpSend,
@@ -54,6 +67,11 @@ import {
   getNativeAuthUid,
   isChallengeAutoVerified,
   observePostSendAuthForChallenge,
+  restorePendingPhoneSessionForResume,
+  recoverUnsettledNativeConfirm,
+  recoverUnsettledNativeSend,
+  retireDispatchedNativeConfirm,
+  retireDispatchedNativeSend,
   subscribeNativeAuthState,
 } from "@/services/auth/nativePhoneAuth";
 import { phonesMatchE164 } from "@/services/auth/phoneChallengeAuthInvariant";
@@ -62,6 +80,17 @@ import {
   resolveFreshPhoneSendTarget,
   resolveResendPhoneSendTarget,
 } from "@/services/auth/phoneSendProvenance";
+import {
+  presentedPhoneResend,
+  sharedPhoneResendDeadline,
+} from "@/services/auth/phoneVerificationPlan";
+import { formatDisplayPhone } from "@/utils/phone";
+import { routeAccountSetupFailure } from "@/services/auth/reactivationRouting";
+import {
+  beginSessionCommit,
+  currentAuthMutationGeneration,
+  currentSessionCommitEpoch,
+} from "@/services/auth/authSessionFence";
 import {
   DEFAULT_AUTH_V2_COUNTRY_CODE,
   type AuthV2PhoneDraft,
@@ -91,17 +120,16 @@ import {
   phoneAuthDiagnosticId,
 } from "@/services/auth/nativePhoneAuthErrors";
 import * as Clipboard from "expo-clipboard";
-import { profileNeedsAgeGate } from "@/domain/ageEligibility";
 import { useAuth } from "@/state/auth";
-import { useT } from "@/i18n";
+import { useI18n, useT } from "@/i18n";
 import { savePendingConsent } from "@/services/consent/legalConsentService";
 import { persistDeferredPhoneConsent } from "@/services/consent/deferredConsentPersist";
 import {
   continueAfterPhoneProfileTransition,
   phoneProfileOwnershipHeld,
   retryAuthenticatedAccountSetup,
+  type PhoneProfileOwnership,
 } from "@/auth-v2/phoneProfileContinuation";
-import { currentAuthMutationGeneration } from "@/services/auth/authSessionFence";
 import {
   completeBusinessEmailBind,
   resendBusinessEmailVerification,
@@ -148,6 +176,7 @@ import type { OtpChallenge } from "@/services/auth/types";
 import { EMAIL_OTP_LENGTH } from "@/services/auth/emailOtpConstants";
 
 const authFlowLog = createLogger("auth/flowGate");
+const phoneAuthLog = createLogger("auth/nativePhone");
 
 function localDigitsFromE164(e164: string): string {
   const digits = e164.replace(/\D/g, "");
@@ -192,6 +221,8 @@ function uiStepToWizard(step: AuthV2Step | "email_verify"): OnboardingWizardStep
  */
 export function AuthFlowGate() {
   const t = useT();
+  const { lang } = useI18n();
+  const copy = phoneAuthCopy(lang);
   const router = useRouter();
   const {
     step: paramStep,
@@ -226,12 +257,14 @@ export function AuthFlowGate() {
   const [mobileResendAvailableAt, setMobileResendAvailableAt] = useState<number | null>(null);
   const [mobileLockUntil, setMobileLockUntil] = useState<number | null>(null);
   const [mobileOtpDigits, setMobileOtpDigits] = useState("");
+  const [phoneOtpRestored, setPhoneOtpRestored] = useState(false);
   const [verificationVisual, setVerificationVisual] = useState<null | {
     kind: "mobile" | "email";
     phase: "verifying" | "success";
   }>(null);
   const [reduceMotion, setReduceMotion] = useState(false);
   const afterAckRef = useRef<(() => void) | null>(null);
+  const ackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ackConsumedRef = useRef(false);
   const verifyStartedAtRef = useRef(0);
   const emailVerifyInFlightRef = useRef(false);
@@ -252,6 +285,8 @@ export function AuthFlowGate() {
   const [phoneAuthError, setPhoneAuthError] = useState<AppError | null>(null);
   const [otpFormEpoch, setOtpFormEpoch] = useState(0);
   const phoneOtpRef = useRef(createPhoneOtpChallengeMachine());
+  const phoneOpsRef = useRef(createPhoneAuthOperations());
+  const phoneOpIdRef = useRef<string | null>(null);
   const stepRef = useRef(step);
   stepRef.current = step;
   const [termsAccepted, setTermsAccepted] = useState(false);
@@ -286,12 +321,14 @@ export function AuthFlowGate() {
   }, []);
 
   const abortVerificationProcess = useCallback(() => {
+    if (ackTimerRef.current) clearTimeout(ackTimerRef.current);
+    ackTimerRef.current = null;
     afterAckRef.current = null;
     setVerificationVisual(null);
   }, []);
 
   const resolveVerificationSuccess = useCallback(
-    (kind: "mobile" | "email", then: () => void) => {
+    (kind: "mobile" | "email", then: () => void, stillCurrent: () => boolean = () => true) => {
       ackConsumedRef.current = false;
       afterAckRef.current = then;
       const minVisible = reduceMotion
@@ -299,11 +336,13 @@ export function AuthFlowGate() {
         : ONBOARDING_MIN_VERIFYING_VISIBLE_MS;
       const wait = Math.max(0, minVisible - (Date.now() - verifyStartedAtRef.current));
       const reveal = () => {
+        ackTimerRef.current = null;
+        if (!stillCurrent()) return;
         onboardingMark(kind === "mobile" ? "mobileVerifiedUI" : "emailVerifiedUI");
         setVerificationVisual({ kind, phase: "success" });
       };
       if (wait === 0) reveal();
-      else setTimeout(reveal, wait);
+      else ackTimerRef.current = setTimeout(reveal, wait);
     },
     [reduceMotion]
   );
@@ -394,10 +433,6 @@ export function AuthFlowGate() {
     (opts?: { userInitiated?: boolean }) => {
       // Hydration/boot must not steal a review session. User Continue must proceed.
       if (!opts?.userInitiated && isReviewIntentActive()) {
-        return;
-      }
-      if (user && profileNeedsAgeGate(user)) {
-        router.replace("/(auth)/age-declaration");
         return;
       }
       if (user) {
@@ -515,11 +550,6 @@ export function AuthFlowGate() {
 
         // Fully past email+profile gates → leave auth wrapper (boot continues).
         if (hasAuthoritativeVerifiedEmail(user) && user.profileCompletedAt && !reviewRequested) {
-          if (profileNeedsAgeGate(user)) {
-            router.replace("/(auth)/age-declaration");
-            if (!cancelled) setHydrated(true);
-            return;
-          }
           clearWizardNavigationSession();
           if (!cancelled) handoffToApp();
           return;
@@ -595,20 +625,59 @@ export function AuthFlowGate() {
         return;
       }
 
-      const snap = await loadAuthWrapperChallenge();
-      if (snap && !cancelled) {
-        setPhoneE164(snap.phoneE164);
-        setChallenge({
-          verificationId: snap.verificationId,
-          phoneE164: snap.phoneE164,
-          devCodeHint: snap.devCodeHint,
+      const launchGeneration = phoneOtpRef.current.generation;
+      const resumed = await resumeSignedOutPhoneChallenge({
+        isCurrent: () => !cancelled && phoneOtpRef.current.generation === launchGeneration,
+      });
+      if (!cancelled && phoneOtpRef.current.generation === launchGeneration && resumed.action === "resume") {
+        const restored = await restorePendingPhoneSessionForResume(resumed.verificationId, resumed.phoneE164);
+        const opened = openRestoredPhoneChallenge({
+          action: resumed.action,
+          restored,
+          expiresAt: resumed.expiresAt,
+          resendAvailableAt: resumed.resendAvailableAt,
+          now: Date.now(),
         });
-        setDevHint(snap.devCodeHint);
-        setStep("otp");
-        setPhoneDraft({
-          countryCode: DEFAULT_AUTH_V2_COUNTRY_CODE,
-          localNumber: localDigitsFromE164(snap.phoneE164),
-        });
+        const adopted = opened.openOtp
+          ? adoptRestoredPhoneChallenge(phoneOtpRef.current, resumed.verificationId)
+          : phoneOtpRef.current;
+        if (
+          opened.openOtp &&
+          adopted.verificationId === resumed.verificationId &&
+          adopted.generation > 0 &&
+          !cancelled &&
+          phoneOtpRef.current.generation === launchGeneration
+        ) {
+          phoneOtpRef.current = adopted;
+          const deadline = sharedPhoneResendDeadline(opened.resendAvailableAt, Date.now());
+          setPhoneE164(resumed.phoneE164);
+          setChallenge({
+            verificationId: resumed.verificationId,
+            phoneE164: resumed.phoneE164,
+            devCodeHint: resumed.devCodeHint,
+            resendAvailableAt: deadline,
+            expiresAt: opened.expiresAt ?? undefined,
+          });
+          setMobileResendAvailableAt(deadline);
+          setMobileExpiresAt(opened.expiresAt);
+          setPhoneOtpRestored(true);
+          setDevHint(resumed.devCodeHint);
+          setStep("otp");
+          setPhoneDraft({
+            countryCode: DEFAULT_AUTH_V2_COUNTRY_CODE,
+            localNumber: localDigitsFromE164(resumed.phoneE164),
+          });
+        } else if (!cancelled && phoneOtpRef.current.generation === launchGeneration && !phoneOpsRef.current.view().busy) {
+          setPhoneOtpRestored(false);
+          const inspected = { phoneE164: resumed.phoneE164, verificationId: resumed.verificationId };
+          void escapePhoneChallenge({
+            ops: phoneOpsRef.current,
+            clear: () =>
+              clearAuthWrapperChallenge(inspected, () => phoneOtpRef.current.generation === launchGeneration),
+          });
+        }
+      } else if (!cancelled) {
+        setPhoneOtpRestored(false);
       }
       if (!cancelled) setHydrated(true);
     })();
@@ -653,10 +722,7 @@ export function AuthFlowGate() {
           setStep("phone");
           return true;
         }
-        void (async () => {
-          clearFlowError();
-          await resetToPhone();
-        })();
+        resetToPhone();
         return true;
       }
       if (action === "email_from_email_otp") {
@@ -681,6 +747,7 @@ export function AuthFlowGate() {
     emailSendMachine,
     phoneChallengeProven,
     phoneE164,
+    challenge,
     paramFrom,
     paramIntent,
   ]);
@@ -765,14 +832,23 @@ export function AuthFlowGate() {
 
   const handleConfirmSend = async () => {
     if (!termsAccepted || !privacyAccepted) return;
+    const accepted = phoneOpsRef.current.accept("send", PHONE_NATIVE_SEND_BOUND_MS);
+    if (!accepted.accepted) return;
     const started = beginPhoneOtpSend(phoneOtpRef.current);
-    if (!started) return;
+    if (!started) {
+      phoneOpsRef.current.settle(accepted.id, "off");
+      return;
+    }
     phoneOtpRef.current = started;
     const generation = started.generation;
+    phoneOpIdRef.current = accepted.id;
     setLoading(true);
     authPerfMark("T0_continue_tap");
     authPerfMark("T1_local_validation");
     onboardingMark("sendStarted");
+    const stillSend = () =>
+      isCurrentPhoneChallenge(phoneOtpRef.current, generation) &&
+      phoneOpsRef.current.sameAttempt(accepted.id);
     try {
       const confirmedFromDraft = toE164FromDraft(
         phoneDraft.countryCode,
@@ -790,8 +866,31 @@ export function AuthFlowGate() {
 
       authPerfMark("T2_native_send_begin");
       void savePendingConsent(sendPhone, "auth_v2_phone_confirm");
-      const next = await sendOtpForWrapper(sendPhone);
-      if (!isCurrentPhoneChallenge(phoneOtpRef.current, generation)) return;
+      const sendWork = sendOtpForWrapper(sendPhone);
+      const boundedSend = await phoneOpsRef.current.bounded(
+        accepted.id,
+        sendWork,
+        PHONE_NATIVE_SEND_BOUND_MS
+      );
+      if (boundedSend.status === "unknown") {
+        void sendWork.then(
+          () => undefined,
+          () => undefined
+        );
+        retireDispatchedNativeSend();
+        phoneOpsRef.current.settle(accepted.id, "off");
+        const failed = failPhoneOtpSend(phoneOtpRef.current, generation);
+        if (failed) phoneOtpRef.current = failed;
+        if (isCurrentPhoneChallenge(phoneOtpRef.current, generation)) {
+          applyFlowError(
+            new AppError("otp_send_failed", copy.resultUnknown, undefined, { phoneAuthSettlement: "unknown" }),
+            "phone"
+          );
+        }
+        return;
+      }
+      if (boundedSend.status !== "ok" || !stillSend()) return;
+      const next = boundedSend.value;
       if (!phonesMatchE164(next.phoneE164, sendPhone)) {
         throw new AppError(
           "auth_failed",
@@ -814,12 +913,21 @@ export function AuthFlowGate() {
       if (completed) phoneOtpRef.current = completed;
       authPerfMark("T3_firebase_challenge");
       clearFlowError();
-      setChallenge({ ...next, devCodeHint: null });
+      const expiresAt =
+        typeof next.expiresAt === "number" && Number.isFinite(next.expiresAt) ? next.expiresAt : null;
+      const deadline = sharedPhoneResendDeadline(next.resendAvailableAt ?? null, Date.now());
+      setChallenge({
+        ...next,
+        devCodeHint: null,
+        resendAvailableAt: deadline,
+        expiresAt: expiresAt ?? undefined,
+      });
       setDevHint(null);
       setPhoneChallengeProven(false);
+      setPhoneOtpRestored(false);
       autoVerifyHandledRef.current = null;
-      setMobileExpiresAt(next.expiresAt ?? Date.now() + 10 * 60_000);
-      setMobileResendAvailableAt(next.resendAvailableAt ?? Date.now() + 30_000);
+      setMobileExpiresAt(expiresAt);
+      setMobileResendAvailableAt(deadline);
       setMobileLockUntil(null);
       setMobileOtpDigits("");
       setOtpFormEpoch((n) => n + 1);
@@ -832,27 +940,35 @@ export function AuthFlowGate() {
         ["T2_native_send_begin", "T3_firebase_challenge", "firebase_send_ms"],
         ["T0_continue_tap", "T4_otp_screen_requested", "tap_to_otp_screen_ms"],
       ]);
-      // Retry after paint — first save is off the critical path and may miss disk.
       void savePendingConsent(sendPhone, "auth_v2_phone_confirm");
-      void saveAuthWrapperChallenge({
-        phoneE164: next.phoneE164,
-        verificationId: next.verificationId,
-        devCodeHint: null,
-      });
+      void saveAuthWrapperChallenge(
+        {
+          phoneE164: next.phoneE164,
+          verificationId: next.verificationId,
+          devCodeHint: null,
+        },
+        stillSend
+      );
       void markContinuingWizardStep("phoneOtp", user?.uid ?? null, {
         phoneE164: next.phoneE164,
       });
-      void import("@/services/auth/mobileOtpSecureDigits").then(
-        ({ saveMobileOtpDigitSnapshot }) =>
-          saveMobileOtpDigitSnapshot({
-            phoneE164: next.phoneE164,
-            verificationId: next.verificationId,
-            digits: "",
-            expiresAt: next.expiresAt ?? Date.now() + 10 * 60_000,
-            resendAvailableAt: next.resendAvailableAt ?? Date.now() + 30_000,
-          })
-      );
+      if (expiresAt != null) {
+        void import("@/services/auth/mobileOtpSecureDigits").then(({ saveMobileOtpDigitSnapshot }) =>
+          saveMobileOtpDigitSnapshot(
+            {
+              phoneE164: next.phoneE164,
+              verificationId: next.verificationId,
+              digits: "",
+              expiresAt,
+              resendAvailableAt: deadline,
+            },
+            stillSend
+          )
+        );
+      }
+      phoneOpsRef.current.settle(accepted.id, "off");
     } catch (e) {
+      if (phoneOpsRef.current.sameAttempt(accepted.id)) phoneOpsRef.current.settle(accepted.id, "off");
       const failed = failPhoneOtpSend(phoneOtpRef.current, generation);
       if (failed) phoneOtpRef.current = failed;
       if (!isCurrentPhoneChallenge(phoneOtpRef.current, generation)) return;
@@ -867,7 +983,7 @@ export function AuthFlowGate() {
   const continueAfterPhoneProfile = useCallback(
     async (
       profile: import("@/domain/types").UserProfile,
-      ownership?: { uid: string; generation: number }
+      ownership?: PhoneProfileOwnership
     ) => {
       authPerfMark("V7_session_reconcile_begin");
       // Authoritative profile from confirm — do not wait for React session commit.
@@ -877,18 +993,32 @@ export function AuthFlowGate() {
       // Retry passes the ownership captured before resolution. A later generation
       // must not legitimise that earlier profile.
       const ownedGeneration = ownership?.generation ?? currentAuthMutationGeneration();
+      const ownedEpoch = ownership?.epoch;
+      const attemptId = phoneOpIdRef.current;
+      const ownedChallenge = challenge
+        ? { phoneE164: challenge.phoneE164, verificationId: challenge.verificationId }
+        : null;
+      const attemptCurrent = () =>
+        (attemptId == null || phoneOpsRef.current.sameAttempt(attemptId)) &&
+        currentAuthMutationGeneration() === ownedGeneration &&
+        (ownedEpoch == null || currentSessionCommitEpoch() === ownedEpoch);
+      const readLiveUid = () => {
+        if (!attemptCurrent()) return null;
+        return getNativeAuthUid();
+      };
       const liveOwnership = () => ({
-        uid: getNativeAuthUid(),
+        uid: readLiveUid(),
         generation: currentAuthMutationGeneration(),
       });
-      if (ownership && !phoneProfileOwnershipHeld(ownership, liveOwnership(), profile.uid)) return;
-      await applyServerProfile(
-        profile,
-        ownedGeneration,
-        ownership ? () => getNativeAuthUid() : undefined
-      );
-      if (currentAuthMutationGeneration() !== ownedGeneration) return;
-      if (ownership && !phoneProfileOwnershipHeld(ownership, liveOwnership(), profile.uid)) return;
+      if (!attemptCurrent()) throw new Error("session_changed");
+      if (ownership && !phoneProfileOwnershipHeld(ownership, liveOwnership(), profile.uid)) {
+        throw new Error("session_changed");
+      }
+      await applyServerProfile(profile, ownedGeneration, readLiveUid, ownedEpoch);
+      if (!attemptCurrent()) throw new Error("session_changed");
+      if (ownership && !phoneProfileOwnershipHeld(ownership, liveOwnership(), profile.uid)) {
+        throw new Error("session_changed");
+      }
       const nextProfile = profile;
       const route =
         hasAuthoritativeVerifiedEmail(nextProfile) && nextProfile.profileCompletedAt
@@ -924,132 +1054,237 @@ export function AuthFlowGate() {
           authPerfMark("V8_session_reconciled");
         },
         scheduleAfterAcknowledgement: (navigate) => {
-          resolveVerificationSuccess("mobile", navigate);
+          resolveVerificationSuccess("mobile", navigate, attemptCurrent);
         },
         navigateToApp: () => {
-          void (async () => {
-            clearWizardNavigationSession();
-            await clearAuthWrapperChallenge();
-            setChallenge(null);
-            handoffToApp();
-          })();
+          void leaveAuthenticatedPhoneChallenge({
+            stillCurrent: attemptCurrent,
+            boundMs: PHONE_CLEANUP_BOUND_MS,
+            navigate: () => {
+              clearWizardNavigationSession();
+              handoffToApp();
+              if (attemptCurrent()) setChallenge(null);
+            },
+            clear: () => clearAuthWrapperChallenge(ownedChallenge, attemptCurrent),
+          });
         },
         navigateToBusiness: () => {
-          void (async () => {
-            goToBusinessIdentity({ userInitiated: true });
-            await clearAuthWrapperChallenge();
-            setChallenge(null);
-          })();
+          void leaveAuthenticatedPhoneChallenge({
+            stillCurrent: attemptCurrent,
+            boundMs: PHONE_CLEANUP_BOUND_MS,
+            navigate: () => {
+              goToBusinessIdentity({ userInitiated: true });
+              if (attemptCurrent()) setChallenge(null);
+            },
+            clear: () => clearAuthWrapperChallenge(ownedChallenge, attemptCurrent),
+          });
         },
         navigateToEmail: () => {
-          void (async () => {
-            authPerfMark("V9_email_nav_requested");
-            authPerfMark("V10_email_screen_requested");
-            onboardingMeasure(
-              "mobileVerifiedUI",
-              "emailScreenVisible",
-              "mobileVerifiedUI → emailScreenVisible"
-            );
-            authPerfSummary("otp_verify", [
-              ["V0_otp_complete", "V1_verifying_overlay", "overlay_ms"],
-              ["V2_firebase_confirm_begin", "V3_firebase_auth_ok", "firebase_confirm_ms"],
-              ["V5_resolver_begin", "V6_resolver_ok", "resolver_ms"],
-              ["V7_session_reconcile_begin", "V8_session_reconciled", "session_ms"],
-              ["V0_otp_complete", "V9_email_nav_requested", "otp_to_email_nav_ms"],
-            ]);
-            setStep("email");
-            await clearAuthWrapperChallenge();
-            setChallenge(null);
-            const { clearMobileOtpDigitSnapshot } = await import(
-              "@/services/auth/mobileOtpSecureDigits"
-            );
-            await clearMobileOtpDigitSnapshot();
-          })();
+          void leaveAuthenticatedPhoneChallenge({
+            stillCurrent: attemptCurrent,
+            boundMs: PHONE_CLEANUP_BOUND_MS,
+            navigate: () => {
+              authPerfMark("V9_email_nav_requested");
+              authPerfMark("V10_email_screen_requested");
+              onboardingMeasure(
+                "mobileVerifiedUI",
+                "emailScreenVisible",
+                "mobileVerifiedUI → emailScreenVisible"
+              );
+              authPerfSummary("otp_verify", [
+                ["V0_otp_complete", "V1_verifying_overlay", "overlay_ms"],
+                ["V2_firebase_confirm_begin", "V3_firebase_auth_ok", "firebase_confirm_ms"],
+                ["V5_resolver_begin", "V6_resolver_ok", "resolver_ms"],
+                ["V7_session_reconcile_begin", "V8_session_reconciled", "session_ms"],
+                ["V0_otp_complete", "V9_email_nav_requested", "otp_to_email_nav_ms"],
+              ]);
+              setStep("email");
+              if (attemptCurrent()) setChallenge(null);
+            },
+            clear: async () => {
+              await clearAuthWrapperChallenge(ownedChallenge, attemptCurrent);
+              if (!attemptCurrent()) return;
+              const { clearMobileOtpDigitSnapshot } = await import(
+                "@/services/auth/mobileOtpSecureDigits"
+              );
+              await clearMobileOtpDigitSnapshot(ownedChallenge, attemptCurrent);
+            },
+          });
         },
       });
     },
-    [applyServerProfile, goToBusinessIdentity, handoffToApp, resolveVerificationSuccess, updateProfile]
+    [applyServerProfile, challenge, goToBusinessIdentity, handoffToApp, resolveVerificationSuccess, updateProfile]
   );
 
   const handleVerifyOtp = async (code: string) => {
     if (!challenge) return;
-    if (mobileVerifyInFlightRef.current) return;
     const generation = phoneOtpRef.current.generation;
     const locked = beginPhoneOtpVerify(phoneOtpRef.current, generation);
     if (!locked) return;
     phoneOtpRef.current = locked;
-    mobileVerifyInFlightRef.current = true;
-    clearFlowError();
-    authPerfMark("V0_otp_complete");
-    beginVerificationProcess("mobile");
-    setLoading(true);
-    try {
-      authPerfMark("V2_firebase_confirm_begin");
-      const profile = await confirmOtp(challenge, code);
-      if (!isCurrentPhoneChallenge(phoneOtpRef.current, generation)) return;
-      authPerfMark("V3_firebase_auth_ok");
-      authPerfMark("V7_session_reconcile_begin");
-      if (
-        phoneE164 &&
-        profile.phoneE164 &&
-        !phonesMatchE164(profile.phoneE164, phoneE164)
-      ) {
-        throw new AppError(
-          "auth_failed",
-          "This device signed in with a different mobile number than the one being verified. Sign out and start again.",
-          undefined,
-          {
-            authPhase: "post_auth",
-            diagnosticCode: "AUTH_PHONE_CHALLENGE_MISMATCH",
-            failureDomain: "auth",
-          }
+    const submitted = code;
+    const ownedChallenge = challenge;
+    let operationId = "";
+    const view = await submitPhoneVerification({
+      ops: phoneOpsRef.current,
+      code: submitted,
+      phoneE164: ownedChallenge.phoneE164,
+      confirm: () => {
+        authPerfMark("V2_firebase_confirm_begin");
+        const deadlineAt = phoneOpsRef.current.attemptDeadline(phoneOpIdRef.current ?? "");
+        return confirmOtp(
+          ownedChallenge,
+          submitted,
+          deadlineAt == null ? undefined : { deadlineAt }
         );
-      }
-      clearFlowError();
-      await continueAfterPhoneProfile(profile);
-    } catch (e) {
-      if (!isCurrentPhoneChallenge(phoneOtpRef.current, generation)) return;
-      if (e instanceof AppError && e.code === "account_pending_deletion") {
-        abortVerificationProcess();
-        router.replace({
-          pathname: "/(auth)/account-pending-deletion",
-          params: {
-            phoneE164: String(e.details?.phoneE164 ?? challenge.phoneE164),
-            deletionScheduledFor: String(e.details?.deletionScheduledFor ?? ""),
-            deletionPolicyVersion: String(e.details?.deletionPolicyVersion ?? ""),
-            maskedEmail: String(e.details?.maskedEmail ?? ""),
-          },
+      },
+      onAccepted: (acceptedId) => {
+        operationId = acceptedId;
+        phoneOpIdRef.current = acceptedId;
+        mobileVerifyInFlightRef.current = true;
+        clearFlowError();
+        authPerfMark("V0_otp_complete");
+        authPerfMark("V1_verifying_overlay");
+        beginVerificationProcess("mobile");
+        setLoading(true);
+        phoneAuthLog.warn("phone auth operation", {
+          attemptId: acceptedId,
+          kind: "retryable",
+          ms: 0,
         });
-        return;
-      }
-      if (e instanceof AppError && e.code === "too_many_attempts") {
-        const until = e.details?.lockUntil;
+      },
+      continueAccount: async (profile) => {
+        if (
+          !isCurrentPhoneChallenge(phoneOtpRef.current, generation) ||
+          !phoneOpsRef.current.sameAttempt(operationId)
+        ) {
+          return { navigate: null, settlement: "session_changed" };
+        }
+        authPerfMark("V3_firebase_auth_ok");
+        if (phoneE164 && profile.phoneE164 && !phonesMatchE164(profile.phoneE164, phoneE164)) {
+          throw new AppError(
+            "auth_failed",
+            "This device signed in with a different mobile number than the one being verified. Sign out and start again.",
+            undefined,
+            {
+              authPhase: "post_auth",
+              diagnosticCode: "AUTH_PHONE_CHALLENGE_MISMATCH",
+              failureDomain: "auth",
+            }
+          );
+        }
+        const ownership = {
+          uid: profile.uid,
+          generation: currentAuthMutationGeneration(),
+          epoch: currentSessionCommitEpoch(),
+        };
+        try {
+          await continueAfterPhoneProfile(profile, ownership);
+          return { navigate: "account" as const };
+        } catch (error) {
+          if (!isCurrentPhoneChallenge(phoneOtpRef.current, generation)) {
+            return { navigate: null, settlement: "session_changed" as const, error };
+          }
+          if (!phoneOpsRef.current.sameAttempt(operationId)) {
+            return { navigate: null, settlement: "session_changed" as const, error };
+          }
+          if (error instanceof Error && error.message === "session_changed") {
+            return { navigate: null, settlement: "session_changed" as const, error };
+          }
+          const pendingRoute = routeAccountSetupFailure({
+            error,
+            stillCurrent: true,
+            fallbackPhoneE164: String(ownedChallenge.phoneE164),
+          });
+          if (pendingRoute.kind === "stale") {
+            return { navigate: null, settlement: "session_changed" as const, error };
+          }
+          if (pendingRoute.kind === "reactivation") {
+            return {
+              navigate: "reactivation" as const,
+              reactivation: {
+                phoneE164: pendingRoute.params.phoneE164,
+                deletionScheduledFor: pendingRoute.params.deletionScheduledFor,
+                deletionPolicyVersion: pendingRoute.params.deletionPolicyVersion,
+                maskedEmail: pendingRoute.params.maskedEmail,
+              },
+            };
+          }
+          throw error;
+        }
+      },
+    });
+    const finished = finishPhoneOtpVerify(phoneOtpRef.current, generation);
+    if (finished) phoneOtpRef.current = finished;
+    if (!view.applied) return;
+    if (!phoneOpsRef.current.sameAttempt(view.operationId)) return;
+    if (view.overlay === "off") abortVerificationProcess();
+    setLoading(false);
+    mobileVerifyInFlightRef.current = false;
+    if (view.clearCode) {
+      setMobileOtpDigits("");
+      setOtpFormEpoch((n) => n + 1);
+    }
+    if (view.settlement === "unknown") {
+      autoVerifyHandledRef.current = ownedChallenge.verificationId;
+      retireDispatchedNativeSend();
+      retireDispatchedNativeConfirm();
+      beginSessionCommit();
+      phoneOpsRef.current.retire();
+      applyFlowError(
+        new AppError("otp_send_failed", copy.resultUnknown, undefined, { phoneAuthSettlement: "unknown" }),
+        "phone_otp"
+      );
+    } else if (view.settlement === "session_changed") {
+      applyFlowError(new AppError("session_expired", copy.sessionChanged), "phone_otp");
+    } else if (view.settlement === "invalid" || view.settlement === "expired" || view.settlement === "network") {
+      const error = view.error instanceof AppError ? view.error : new AppError("invalid_otp", copy.resultUnknown);
+      if (error instanceof AppError && error.code === "too_many_attempts") {
+        const until = error.details?.lockUntil;
         if (typeof until === "number") setMobileLockUntil(until);
       }
-      if (e instanceof AppError && (e.code === "otp_expired" || e.code === "invalid_otp")) {
-        setMobileOtpDigits("");
-        setOtpFormEpoch((n) => n + 1);
-      }
+      applyFlowError(error, "phone_otp");
+    } else if (view.settlement === "account_failed") {
+      const base = view.error instanceof AppError ? view.error : null;
+      applyFlowError(
+        new AppError(
+          base?.code ?? "save_failed",
+          base?.message || copy.accountSetupFailed,
+          base ?? undefined,
+          {
+            ...(base?.details ?? {}),
+            authPhase: "post_auth",
+            firebaseSignInSucceeded: true,
+            retryAccountSetup: true,
+          }
+        ),
+        "phone_otp"
+      );
+    }
+    if (
+      view.navigate === "reactivation" &&
+      view.reactivation &&
+      isCurrentPhoneChallenge(phoneOtpRef.current, generation)
+    ) {
       abortVerificationProcess();
-      applyFlowError(e, "phone_otp");
-    } finally {
-      const finished = finishPhoneOtpVerify(phoneOtpRef.current, generation);
-      if (finished) phoneOtpRef.current = finished;
-      if (phoneOtpRef.current.generation === generation) {
-        setLoading(false);
-        mobileVerifyInFlightRef.current = false;
-      }
+      router.replace({
+        pathname: "/(auth)/account-pending-deletion",
+        params: view.reactivation,
+      });
     }
   };
 
   /** Post-auth identity retry — reuses Firebase session; does not resend SMS. */
   const handleRetryAccountSetup = async () => {
     await retryAuthenticatedAccountSetup({
+      ops: phoneOpsRef.current,
       phoneE164,
       inFlight: mobileVerifyInFlightRef.current,
+      captureEpoch: () => beginSessionCommit(),
       readLive: () => ({
         uid: getNativeAuthUid(),
         generation: currentAuthMutationGeneration(),
+        epoch: currentSessionCommitEpoch(),
       }),
       begin: () => {
         mobileVerifyInFlightRef.current = true;
@@ -1071,7 +1306,15 @@ export function AuthFlowGate() {
         await requireJsAuthSessionForFirestore("retry_account_setup");
       },
       applyServerProfile: (next, ownership) =>
-        applyServerProfile(next, ownership.generation, () => getNativeAuthUid()),
+        applyServerProfile(
+          next,
+          ownership.generation,
+          () => {
+            if (ownership.epoch != null && currentSessionCommitEpoch() !== ownership.epoch) return null;
+            return getNativeAuthUid();
+          },
+          ownership.epoch
+        ),
       continueAfterProfile: (next, ownership) => continueAfterPhoneProfile(next, ownership),
       onInactiveSession: () => {
         applyFlowError(
@@ -1089,7 +1332,34 @@ export function AuthFlowGate() {
         );
       },
       onFailure: (error) => {
+        const pendingRoute = routeAccountSetupFailure({
+          error,
+          stillCurrent:
+            phoneOpIdRef.current == null || phoneOpsRef.current.sameAttempt(phoneOpIdRef.current),
+          fallbackPhoneE164: phoneE164 ?? "",
+        });
+        if (pendingRoute.kind === "stale") return;
+        if (pendingRoute.kind === "reactivation") {
+          abortVerificationProcess();
+          router.replace({
+            pathname: "/(auth)/account-pending-deletion",
+            params: {
+              phoneE164: pendingRoute.params.phoneE164,
+              deletionScheduledFor: pendingRoute.params.deletionScheduledFor,
+              deletionPolicyVersion: pendingRoute.params.deletionPolicyVersion,
+              maskedEmail: pendingRoute.params.maskedEmail,
+            },
+          });
+          return;
+        }
         abortVerificationProcess();
+        if (isPhoneAttemptUnknown(error)) {
+          applyFlowError(
+            new AppError("otp_send_failed", copy.resultUnknown, undefined, { phoneAuthSettlement: "unknown" }),
+            "phone_otp"
+          );
+          return;
+        }
         applyFlowError(error, "phone_otp");
       },
     });
@@ -1123,22 +1393,61 @@ export function AuthFlowGate() {
 
   const handleResend = async () => {
     if (!challenge?.phoneE164) return;
-    const started = beginPhoneOtpSend(phoneOtpRef.current);
-    if (!started) return;
-    phoneOtpRef.current = started;
-    const generation = started.generation;
-    autoVerifyHandledRef.current = null;
+    const storedDeadline = mobileResendAvailableAt ?? challenge.resendAvailableAt ?? null;
+    const resendDecision = presentedPhoneResend({
+      resendAvailableAt: storedDeadline,
+      now: Date.now(),
+    });
+    if (!resendDecision.invoke || !resendDecision.forceResend) {
+      if (storedDeadline == null) {
+        const deadline = sharedPhoneResendDeadline(null, Date.now());
+        setMobileResendAvailableAt(deadline);
+        applyFlowError(new AppError("otp_send_failed", copy.resendWait), "phone_otp");
+      }
+      return;
+    }
+    let generation = phoneOtpRef.current.generation;
+    let sendPhone = challenge.phoneE164;
+    let sendStarted = false;
     setResending(true);
     try {
-      const provenance = resolveResendPhoneSendTarget({
-        activeChallengePhoneE164: challenge.phoneE164,
-        statePhoneE164: phoneE164,
+      const sent = await submitPhoneResend({
+        ops: phoneOpsRef.current,
+        invoke: true,
+        forceResend: true,
+        send: async () => {
+          const provenance = resolveResendPhoneSendTarget({
+            activeChallengePhoneE164: challenge.phoneE164,
+            statePhoneE164: phoneE164,
+          });
+          assertPhoneSendProvenance(provenance);
+          sendPhone = provenance.firebaseSendPhoneE164;
+          const started = beginPhoneOtpSend(phoneOtpRef.current);
+          if (!started) {
+            throw new AppError("otp_send_failed", copy.resendWait);
+          }
+          phoneOtpRef.current = started;
+          generation = started.generation;
+          sendStarted = true;
+          autoVerifyHandledRef.current = null;
+          setPhoneE164(sendPhone);
+          return startOtp(sendPhone, { forceResend: true });
+        },
       });
-      assertPhoneSendProvenance(provenance);
-      const sendPhone = provenance.firebaseSendPhoneE164;
-      setPhoneE164(sendPhone);
-
-      const next = await startOtp(sendPhone);
+      if (sent.ignored) return;
+      if (sent.unknown || !sent.sent || !sent.value) {
+        if (sent.unknown) retireDispatchedNativeSend();
+        if (sendStarted) {
+          const failed = failPhoneOtpSend(phoneOtpRef.current, generation);
+          if (failed) phoneOtpRef.current = failed;
+        }
+        applyFlowError(
+          new AppError("otp_send_failed", copy.resultUnknown, undefined, { phoneAuthSettlement: "unknown" }),
+          "phone_otp"
+        );
+        return;
+      }
+      const next = sent.value;
       if (!isCurrentPhoneChallenge(phoneOtpRef.current, generation)) return;
       if (!phonesMatchE164(next.phoneE164, sendPhone)) {
         throw new AppError(
@@ -1159,28 +1468,45 @@ export function AuthFlowGate() {
       );
       if (completed) phoneOtpRef.current = completed;
       clearFlowError();
-      setChallenge({ ...next, devCodeHint: null });
+      setPhoneOtpRestored(false);
+      const expiresAt =
+        typeof next.expiresAt === "number" && Number.isFinite(next.expiresAt) ? next.expiresAt : null;
+      const deadline = sharedPhoneResendDeadline(next.resendAvailableAt ?? null, Date.now());
+      setChallenge({
+        ...next,
+        devCodeHint: null,
+        resendAvailableAt: deadline,
+        expiresAt: expiresAt ?? undefined,
+      });
       setDevHint(null);
       setMobileOtpDigits("");
       setOtpFormEpoch((n) => n + 1);
-      setMobileExpiresAt(next.expiresAt ?? Date.now() + 10 * 60_000);
-      setMobileResendAvailableAt(next.resendAvailableAt ?? Date.now() + 30_000);
+      setMobileExpiresAt(expiresAt);
+      setMobileResendAvailableAt(deadline);
       setMobileLockUntil(null);
-      void saveAuthWrapperChallenge({
-        phoneE164: next.phoneE164,
-        verificationId: next.verificationId,
-        devCodeHint: null,
-      });
-      void import("@/services/auth/mobileOtpSecureDigits").then(
-        ({ saveMobileOtpDigitSnapshot }) =>
-          saveMobileOtpDigitSnapshot({
-            phoneE164: next.phoneE164,
-            verificationId: next.verificationId,
-            digits: "",
-            expiresAt: next.expiresAt ?? Date.now() + 10 * 60_000,
-            resendAvailableAt: next.resendAvailableAt ?? Date.now() + 30_000,
-          })
+      const stillResend = () => isCurrentPhoneChallenge(phoneOtpRef.current, generation);
+      void saveAuthWrapperChallenge(
+        {
+          phoneE164: next.phoneE164,
+          verificationId: next.verificationId,
+          devCodeHint: null,
+        },
+        stillResend
       );
+      if (expiresAt != null) {
+        void import("@/services/auth/mobileOtpSecureDigits").then(({ saveMobileOtpDigitSnapshot }) =>
+          saveMobileOtpDigitSnapshot(
+            {
+              phoneE164: next.phoneE164,
+              verificationId: next.verificationId,
+              digits: "",
+              expiresAt,
+              resendAvailableAt: deadline,
+            },
+            stillResend
+          )
+        );
+      }
     } catch (e) {
       const failed = failPhoneOtpSend(phoneOtpRef.current, generation);
       if (failed) phoneOtpRef.current = failed;
@@ -1433,29 +1759,60 @@ export function AuthFlowGate() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fire on completed code + challenge only
   }, [emailCode, step, emailSendMachine.state, emailVerificationId]);
 
-  const resetToPhone = async () => {
+  const resetToPhone = () => {
+    const oldChallenge = challenge
+      ? { phoneE164: challenge.phoneE164, verificationId: challenge.verificationId }
+      : null;
+    const leavingOperationId = phoneOpsRef.current.view().operationId;
+    retireDispatchedNativeSend();
+    retireDispatchedNativeConfirm();
+    // The JavaScript lock stays while the same Activity can still finish
+    // verifyPhoneNumber. It is cleared only when that Activity is gone.
+    recoverUnsettledNativeSend();
+    recoverUnsettledNativeConfirm();
+    beginSessionCommit();
+    phoneOpsRef.current.retire();
+    abortVerificationProcess();
+    setLoading(false);
+    mobileVerifyInFlightRef.current = false;
+    setResending(false);
     phoneOtpRef.current = retirePhoneChallenge(phoneOtpRef.current);
+    const resetGeneration = phoneOtpRef.current.generation;
+    const isResetCurrent = () => phoneOtpRef.current.generation === resetGeneration;
     autoVerifyHandledRef.current = null;
+    setPhoneOtpRestored(false);
     setStep("phone");
     setChallenge(null);
     clearFlowError();
-    await clearAuthWrapperChallenge();
-    // "Change number" from OTP before sign-in — stay local.
     if (status !== "signed_in") {
       setPhoneE164(null);
-      return;
-    }
-    // Signed-in review: keep session; user must confirm to switch numbers later.
-    if (user?.phoneE164) {
+    } else if (user?.phoneE164) {
       setPhoneE164(user.phoneE164);
       setPhoneDraft({
         countryCode: DEFAULT_AUTH_V2_COUNTRY_CODE,
         localNumber: localDigitsFromE164(user.phoneE164),
       });
+      reviewingRef.current = true;
+      markReviewingWizardStep("mobileEntry", user?.uid ?? null, {
+        phoneE164: user.phoneE164,
+      });
     }
-    reviewingRef.current = true;
-    markReviewingWizardStep("mobileEntry", user?.uid ?? null, {
-      phoneE164: user?.phoneE164 ?? null,
+    void escapePhoneChallenge({
+      ops: phoneOpsRef.current,
+      operationId: leavingOperationId,
+      boundMs: PHONE_CLEANUP_BOUND_MS,
+      clear: async () => {
+        if (!oldChallenge) return;
+        try {
+          const { localMockCancelMobileOtp } = await import("@/services/auth/localMockMobileOtp");
+          if (isResetCurrent()) localMockCancelMobileOtp(oldChallenge.phoneE164);
+        } catch {
+          // Cancel is best-effort and must not hold the phone screen.
+        }
+        const { clearMobileOtpDigitSnapshot } = await import("@/services/auth/mobileOtpSecureDigits");
+        await clearMobileOtpDigitSnapshot(oldChallenge, isResetCurrent);
+        await clearAuthWrapperChallenge(oldChallenge, isResetCurrent);
+      },
     });
   };
 
@@ -1530,41 +1887,36 @@ export function AuthFlowGate() {
         resendAvailableAt={mobileResendAvailableAt ?? challenge.resendAvailableAt ?? null}
         lockUntil={mobileLockUntil}
         initialDigits={mobileOtpDigits}
+        subtitle={
+          phoneOtpRestored
+            ? copy.restoredCode(formatDisplayPhone(challenge.phoneE164))
+            : undefined
+        }
         onDigitsChange={(digits) => {
+          const digitGeneration = phoneOtpRef.current.generation;
           setMobileOtpDigits(digits);
+          if (typeof mobileExpiresAt !== "number") return;
+          const expiresAt = mobileExpiresAt;
           void (async () => {
             const { saveMobileOtpDigitSnapshot } = await import(
               "@/services/auth/mobileOtpSecureDigits"
             );
-            await saveMobileOtpDigitSnapshot({
-              phoneE164,
-              verificationId: challenge.verificationId,
-              digits,
-              expiresAt: mobileExpiresAt ?? Date.now() + 10 * 60_000,
-              resendAvailableAt: mobileResendAvailableAt ?? Date.now() + 30_000,
-            });
+            await saveMobileOtpDigitSnapshot(
+              {
+                phoneE164,
+                verificationId: challenge.verificationId,
+                digits,
+                expiresAt,
+                resendAvailableAt: mobileResendAvailableAt ?? expiresAt,
+              },
+              () => isCurrentPhoneChallenge(phoneOtpRef.current, digitGeneration)
+            );
           })();
         }}
         onVerify={(code) => void handleVerifyOtp(code)}
-        onVerifyStart={() => beginVerificationProcess("mobile")}
         onResend={() => void handleResend()}
         onChangeNumber={() => {
-          void (async () => {
-            clearFlowError();
-            try {
-              const { localMockCancelMobileOtp } = await import(
-                "@/services/auth/localMockMobileOtp"
-              );
-              localMockCancelMobileOtp(phoneE164);
-            } catch {
-              // Cancel is best-effort — never block editing the number.
-            }
-            const { clearMobileOtpDigitSnapshot } = await import(
-              "@/services/auth/mobileOtpSecureDigits"
-            );
-            await clearMobileOtpDigitSnapshot();
-            await resetToPhone();
-          })();
+          resetToPhone();
         }}
         loading={loading}
         resending={resending}

@@ -1,33 +1,42 @@
 /**
- * Age admission for protected business operations.
+ * Active-account admission for protected business operations.
+ * Age is an optional demographic field, never authorization. Historical age
+ * assessments stay on the profile and are not consulted. Authentication,
+ * owner, and restore checks run in callers.
  * Assessment, authentication, support, privacy, sign-out, deletion, and
  * account recovery do not call this helper.
+ * seal/open and GRIN production callables call `assertBusinessAgeAdmitted`.
+ * A missing band must not be turned into a login or first-save failure here.
  */
 
 import { HttpsError } from "firebase-functions/v2/https";
 
 import { getAdminDb } from "../admin";
 
-export type BusinessAgeDecision = "eligible" | "unassessed" | "ineligible" | "inactive";
+export type BusinessAgeDecision = "active" | "missing" | "inactive";
 
 export function decideBusinessAge(
-  profile: { ageEligibility?: unknown; status?: unknown } | null | undefined
+  profile: {
+    status?: unknown;
+    ageEligibility?: unknown;
+    demographicAgeBand?: unknown;
+  } | null | undefined
 ): BusinessAgeDecision {
-  if (!profile) return "unassessed";
+  if (!profile) return "missing";
+  // Preserve the existing legacy status default. An explicit inactive status
+  // is never admitted, regardless of any historical age assertion or band.
+  void profile.ageEligibility;
+  void profile.demographicAgeBand;
   const status = profile.status == null ? "active" : String(profile.status);
-  if (status !== "active") return "inactive";
-  if (profile.ageEligibility === "ineligible") return "ineligible";
-  if (profile.ageEligibility === "eligible") return "eligible";
-  return "unassessed";
+  return status === "active" ? "active" : "inactive";
 }
 
 export async function assertBusinessAgeAdmitted(
   uid: string,
   readProfile: (uid: string) => Promise<Record<string, unknown> | null> = readUserProfile
 ): Promise<void> {
-  const decision = decideBusinessAge(await readProfile(uid));
-  if (decision !== "eligible") {
-    throw new HttpsError("failed-precondition", "age_not_admitted");
+  if (decideBusinessAge(await readProfile(uid)) !== "active") {
+    throw new HttpsError("failed-precondition", "account_not_active");
   }
 }
 

@@ -7,7 +7,7 @@
  * button creates one.
  */
 
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { Alert, FlatList, Platform, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
@@ -16,17 +16,28 @@ import { Banner,
   Button,
   Card,
   EmptyState,
-  ErrorState,
   Header,
   LastRefreshedHint,
-  Loader,
   Screen, LocaleUiText } from "@/components/ui";
+import {
+  InitialListSkeleton,
+  OfflineDeviceNotice,
+  ScreenErrorPanel,
+  SlowNetworkStatus,
+  listPhase,
+  screenStateCopy,
+  showsEmpty,
+  useOwnedRequest,
+  useOwnedSnapshot,
+} from "@/components/screenState";
+import { presentPublicError } from "@/domain/publicErrors";
+import { currentSessionCommitEpoch } from "@/services/auth/authSessionFence";
 import { useAuth } from "@/state/auth";
+import { useSync } from "@/state/sync";
 import { useAppRefresh } from "@/hooks/useAppRefresh";
 import { useStuckBusyRecovery } from "@/hooks/useStuckBusyRecovery";
 import { useI18n, useT } from "@/i18n";
 import { radius, spacing, typography, useThemedStyles } from "@/theme";
-import { userFacingMessage } from "@/domain/errors";
 import { useAppFeedback } from "@/feedback/AppFeedback";
 import { deleteRecordPermanently } from "@/services/records/permanentDeletion";
 import { formatShortDate } from "@/utils/date";
@@ -44,19 +55,18 @@ import { readProfileLogoDataUri } from "@/services/profileLogo/storage";
 export default function PurchaseOrderListScreen() {
   const t = useT();
   const { lang } = useI18n();
+  const copy = screenStateCopy(lang);
   const router = useRouter();
   const { user } = useAuth();
+  const { status: syncStatus } = useSync();
   const insets = useSafeAreaInsets();
   const pdfLocale = lang === "hi" ? "hi-IN" : "en-IN";
   const { fromPicker } = useLocalSearchParams<{ fromPicker?: string }>();
 
-  const [orders, setOrders] = useState<PurchaseOrder[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const hasLoadedOnce = useRef(false);
   const feedback = useAppFeedback();
+  const { load, run } = useOwnedRequest<PurchaseOrder[]>(user?.uid ?? null);
   // Recover `busyId` if the iOS share-sheet promise never settles.
   const shareRecovery = useStuckBusyRecovery(
     useCallback(() => setBusyId(null), [])
@@ -87,33 +97,38 @@ export default function PurchaseOrderListScreen() {
     })
   );
 
-  const load = useCallback(
-    async (mode: "mount" | "refresh" = "mount") => {
-      if (!user) return;
-      if (!hasLoadedOnce.current) setLoading(true);
-      setError(null);
-      try {
-        const list = await getPurchaseOrderRepository().list(user.uid);
-        setOrders(list);
-        hasLoadedOnce.current = true;
-      } catch (e) {
-        setError(userFacingMessage(e));
-      } finally {
-        setLoading(false);
-      }
-    },
-    [user]
-  );
+  const loadOrders = useCallback(async () => {
+    await run((uid) => getPurchaseOrderRepository().list(uid));
+  }, [run]);
 
   const { refreshNote, refreshControl } = useAppRefresh({
-    onReload: () => load("refresh"),
+    onReload: loadOrders,
   });
 
   useFocusEffect(
     useCallback(() => {
-      void load("mount");
-    }, [load])
+      void loadOrders();
+    }, [loadOrders])
   );
+
+  const ownedOrders = useOwnedSnapshot({
+    signedInUid: user?.uid ?? null,
+    epoch: currentSessionCommitEpoch(),
+    generation: load.claim?.generation ?? null,
+    loading: load.loading,
+    failed: Boolean(load.error),
+    value: load.value ?? [],
+    valueClaim: load.valueClaim,
+  });
+  const orders = ownedOrders.accepted && ownedOrders.value ? ownedOrders.value : [];
+  const phase = listPhase({
+    loading: load.loading,
+    failed: Boolean(load.error),
+    count: orders.length,
+    owned: ownedOrders.current,
+    pending: ownedOrders.pending,
+  });
+  const offline = syncStatus === "offline";
 
   // Highest serial = the only PO eligible for hard delete.
   const maxSerial = useMemo(
@@ -156,7 +171,7 @@ export default function PurchaseOrderListScreen() {
           // dismissed
         }
       } catch (e) {
-        setActionError(userFacingMessage(e) || t("purchaseOrder.errGenerate"));
+        setActionError(presentPublicError(e));
       } finally {
         shareRecovery.clearPending();
         setBusyId(null);
@@ -177,9 +192,9 @@ export default function PurchaseOrderListScreen() {
             setBusyId(po.id);
             try {
               await getPurchaseOrderRepository().cancel(user.uid, po.id);
-              await load("mount");
+              await loadOrders();
             } catch (e) {
-              setActionError(userFacingMessage(e));
+              setActionError(presentPublicError(e));
             } finally {
               setBusyId(null);
             }
@@ -187,7 +202,7 @@ export default function PurchaseOrderListScreen() {
         },
       ]);
     },
-    [user, t, load]
+    [user, t, loadOrders]
   );
 
   const onDelete = useCallback(
@@ -211,9 +226,9 @@ export default function PurchaseOrderListScreen() {
                 ? t("swipeDelete.deletedSyncPending")
                 : t("swipeDelete.deleted");
               feedback.showSuccess(msg);
-              await load("mount");
+              await loadOrders();
             } catch (e) {
-              setActionError(userFacingMessage(e));
+              setActionError(presentPublicError(e));
             } finally {
               setBusyId(null);
             }
@@ -221,7 +236,7 @@ export default function PurchaseOrderListScreen() {
         },
       ]);
     },
-    [user, t, load, feedback]
+    [user, t, loadOrders, feedback]
   );
 
   const goNew = useCallback(() => {
@@ -327,12 +342,19 @@ export default function PurchaseOrderListScreen() {
         ) : null}
         <Button label={t("purchaseOrder.newAction")} onPress={goNew} style={styles.newBtn} />
         <LastRefreshedHint message={refreshNote} />
+        {offline && orders.length > 0 ? <OfflineDeviceNotice offline hasRows /> : null}
+        <SlowNetworkStatus active={load.loading && orders.length > 0} />
       </View>
 
-      {loading && orders.length === 0 ? (
-        <Loader fullscreen message={t("common.loading")} />
-      ) : error ? (
-        <ErrorState message={error} onRetry={() => void load("mount")} />
+      {phase === "loading" ? (
+        <InitialListSkeleton count={6} />
+      ) : phase === "error" ? (
+        <>
+          {offline ? <OfflineDeviceNotice offline hasRows={false} /> : null}
+          <ScreenErrorPanel error={load.error ?? "unknown"} onRetry={() => void loadOrders()} />
+        </>
+      ) : phase === "hidden" ? (
+        <LocaleUiText style={{ padding: 24, textAlign: "center" }}>{copy.signedOut}</LocaleUiText>
       ) : (
         <FlatList
           data={orders}
@@ -343,12 +365,14 @@ export default function PurchaseOrderListScreen() {
           removeClippedSubviews={Platform.OS === "android"}
           contentContainerStyle={listPadding}
           ListEmptyComponent={
+            showsEmpty(phase) ? (
             <EmptyState
               title={t("purchaseOrder.emptyTitle")}
               message={t("purchaseOrder.emptyMessage")}
               actionLabel={t("purchaseOrder.newAction")}
               onAction={goNew}
             />
+            ) : null
           }
         />
       )}

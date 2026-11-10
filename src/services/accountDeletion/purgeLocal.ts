@@ -16,20 +16,17 @@ import { clearMasterDataSessionCache, masterDataRepository } from "@/services/ma
 import { clearLocationFootprintPreferences } from "@/services/location/locationFootprintPreferences";
 import { clearRecentSearches } from "@/services/search/recentSearches";
 import { clearPendingPurchaseIfUid } from "@/billing/iap/iapPendingPurchase";
+import { beginDemographicAgePurge } from "@/onboarding/demographicAge";
+import {
+  removeAsyncStorageKeysForUser,
+  type OwnerAsyncKeyStore,
+} from "@/services/accountDeletion/ownerAsyncStorage";
 import { createLogger } from "@/utils/logger";
 
-const log = createLogger("accountDeletion/purgeLocal");
+export type { OwnerAsyncKeyStore };
+export { removeAsyncStorageKeysForUser };
 
-const DIARY_V2 = "vyd_diary_v2_";
-const DIARY_V1 = "vyd_diary_v1_";
-const PRO_PACK = "vyd_pro_pack_v1_";
-const LETTERHEAD = "vyd_letterhead_v1_";
-const LETTERHEAD_DOCS = "vyd_letterhead_docs_v1_";
-const PRO_PACK_DRAFT_PREFIX = "vyd_pro_pack_draft_";
-const PURCHASE_ORDER = "vyd_po_v1_";
-const PURCHASE_ORDER_SERIAL = "vyd_po_serial_v1_";
-const CUSTOMER_CREDIT = "vyd_credit_v1_";
-const CUSTOMER_CREDIT_SERIAL = "vyd_credit_serial_v1_";
+const log = createLogger("accountDeletion/purgeLocal");
 
 async function cancelScheduledReminders(userId: string): Promise<void> {
   try {
@@ -70,37 +67,12 @@ function purgeSqliteUserData(userId: string): void {
   }
 }
 
-async function removeAsyncStorageKeysForUser(userId: string): Promise<void> {
-  const all = await AsyncStorage.getAllKeys();
-  const exact = [
-    `${DIARY_V2}${userId}`,
-    `${DIARY_V1}${userId}`,
-    `${PRO_PACK}${userId}`,
-    `${LETTERHEAD}${userId}`,
-    `${LETTERHEAD_DOCS}${userId}`,
-    `${PURCHASE_ORDER}${userId}`,
-    `${PURCHASE_ORDER_SERIAL}${userId}`,
-    `${CUSTOMER_CREDIT}${userId}`,
-    `${CUSTOMER_CREDIT_SERIAL}${userId}`,
-  ];
-  const prefixed = all.filter(
-    (k) =>
-      exact.includes(k) || k.startsWith(`${PRO_PACK_DRAFT_PREFIX}${userId}_`)
-  );
-  if (prefixed.length > 0) {
-    await AsyncStorage.multiRemove(prefixed);
-  }
-}
-
-/**
- * Wipes all account-linked data on this device for `userId`.
- * Safe to call before server deletion; idempotent.
- */
 export async function purgeLocalAccountData(input: {
   userId: string;
   profileLogo?: ProfileLogoRef | null;
 }): Promise<void> {
   const { userId, profileLogo } = input;
+  beginDemographicAgePurge(userId);
   log.info("purge local start", { userId });
 
   await cancelScheduledReminders(userId);
@@ -114,7 +86,7 @@ export async function purgeLocalAccountData(input: {
   masterDataRepository.purgeUser(userId);
   clearMasterDataSessionCache();
   await clearLocationFootprintPreferences(userId);
-  await removeAsyncStorageKeysForUser(userId);
+  await removeAsyncStorageKeysForUser(userId, AsyncStorage);
   await clearPendingPurchaseIfUid(AsyncStorage, userId);
   await clearRecentSearches(userId);
 

@@ -15,7 +15,7 @@ import { BusinessComposerForm } from "@/components/composer/BusinessComposerForm
 import { ComposerSaveSuccess } from "@/components/composer/ComposerSaveSuccess";
 import { DraftSavedSuccess } from "@/components/drafts/DraftSavedSuccess";
 import { DraftUnsavedSheet } from "@/components/drafts/DraftUnsavedSheet";
-import { Header, Loader, Screen, LocaleUiText } from "@/components/ui";
+import { Header, Screen, LocaleUiText } from "@/components/ui";
 import { composerOptionForType, isComposerEntryType } from "@/domain/composerOptions";
 import type {
   AttachmentRef,
@@ -40,9 +40,14 @@ import {
 import { uploadCashPaidPhotoToStorage } from "@/services/attachments/cashPaidPhotoStorage";
 import type { ComposerSaveStatus } from "@/services/diary/composerSaveStatus";
 import { createSaveStageTimer, monotonicNow } from "@/services/diary/saveStageTiming";
-import { userFacingMessage } from "@/domain/errors";
+import { AppError } from "@/domain/errors";
+import { presentPublicError, toPublicError } from "@/domain/publicErrors";
+import { InitialListSkeleton, SaveOutcomeLabel, ScreenErrorPanel, SessionHoldNotice, useRequestOwner } from "@/components/screenState";
+import { currentSessionCommitEpoch } from "@/services/auth/authSessionFence";
+import { sessionBlocksWrite } from "@/components/screenState/resolveScreenState";
 import { useAppFeedback } from "@/feedback/AppFeedback";
 import { useAuth } from "@/state/auth";
+import { useSync } from "@/state/sync";
 import { useI18n, useT } from "@/i18n";
 import { useFormAutosave } from "@/hooks/useFormAutosave";
 import {
@@ -89,6 +94,10 @@ export default function ComposerScreen() {
   const router = useRouter();
   const feedback = useAppFeedback();
   const { user } = useAuth();
+  const owner = useRequestOwner(user?.uid ?? null);
+  const sessionEpoch = currentSessionCommitEpoch();
+  const [loadNonce, setLoadNonce] = useState(0);
+  const { status: syncStatus } = useSync();
   const {
     type: typeParam,
     linkedDispatchId: linkedDispatchParam,
@@ -105,6 +114,7 @@ export default function ComposerScreen() {
     from?: string;
   }>();
   const [error, setError] = useState<string | null>(null);
+  const [sessionHold, setSessionHold] = useState(false);
   const [saving, setSaving] = useState(false);
   const [draftSaving, setDraftSaving] = useState(false);
   const [loading, setLoading] = useState(
@@ -219,8 +229,11 @@ export default function ComposerScreen() {
       : undefined,
   });
 
+  const blocked = sessionBlocksWrite({ signedIn: Boolean(user), syncStatus });
+
   const persistUserDraft = useCallback(async (): Promise<FormDraftRecord> => {
-    if (!user || !entryType) throw new Error("Not signed in");
+    if (!user) throw new AppError("session_expired", "session");
+    if (!entryType) throw new AppError("unknown", "missing");
     if (!isDraftPayloadMeaningful(formValues)) {
       throw new Error(t("drafts.nothingToSave"));
     }
@@ -272,14 +285,21 @@ export default function ComposerScreen() {
       setDraftSaveResult(saved);
       feedback.showSuccess(t("drafts.savedTitle"));
     } catch (e) {
-      const msg = e instanceof Error ? e.message : userFacingMessage(e);
+      const quiet = t("drafts.nothingToSave");
+      if (e instanceof Error && e.message === quiet) {
+        setError(quiet);
+        feedback.showError(quiet);
+        return;
+      }
+      const msg = presentPublicError(e);
+      if (!user || toPublicError(e).action === "sign_in") setSessionHold(true);
       feedback.showError(msg);
       setError(msg);
     } finally {
       setDraftSaving(false);
       draftSaveLockRef.current = false;
     }
-  }, [persistUserDraft, feedback, t]);
+  }, [persistUserDraft, feedback, t, user]);
 
   const { performBack } = useSmartBack({
     from: fromParam ?? "you",
@@ -356,6 +376,8 @@ export default function ComposerScreen() {
   useEffect(() => {
     if (!user || !entryType) return;
     let cancelled = false;
+    const claim = owner.capture();
+    const current = () => !cancelled && owner.owns(claim);
 
     const load = async () => {
       setLoading(true);
@@ -367,10 +389,10 @@ export default function ComposerScreen() {
             String(draftIdParam)
           );
           if (!draft || draft.status !== "active" || draft.scopeKey !== entryType) {
-            if (!cancelled) setError(t("errors.notFound"));
+            if (current()) setError(t("errors.notFound"));
             return;
           }
-          if (!cancelled) {
+          if (current()) {
             setActiveDraftId(draft.id);
             setInitialValues(draft.payload);
             setSavedBaseline(JSON.stringify(draft.payload));
@@ -379,7 +401,7 @@ export default function ComposerScreen() {
                 user.uid,
                 draft.entryId
               );
-              if (!cancelled && existing && existing.entryType === entryType) {
+              if (current() && existing && existing.entryType === entryType) {
                 savedLocationRef.current = existing.location ?? null;
                 setEditMeta({
                   recordCreatedAtMs: existing.createdAt,
@@ -394,11 +416,19 @@ export default function ComposerScreen() {
         if (editingId) {
           const existing = await getDiaryRepository().getById(user.uid, editingId);
           if (!existing || existing.entryType !== entryType) {
-            if (!cancelled) setError(t("errors.notFound"));
+            if (current()) setError(t("errors.notFound"));
             return;
           }
+          if (!current()) return;
           const base = formValuesFromEntry(existing);
-          if (!cancelled) savedLocationRef.current = existing.location ?? null;
+          const recovery = await formDraftsRepository.loadRecovery({
+            userId: user.uid,
+            draftKind: "composer",
+            scopeKey: entryType,
+            entryId: editingId,
+          });
+          if (!current()) return;
+          savedLocationRef.current = existing.location ?? null;
           editingAttachmentsRef.current = existing.attachments ?? [];
           const cashPhoto = cashPaidPhotoAttachment(existing.attachments);
           setExistingCashPhotoUri(cashPhoto?.uri ?? null);
@@ -407,17 +437,9 @@ export default function ComposerScreen() {
             recordCreatedAtMs: existing.createdAt,
             datePolicyOptions: datePolicyOptionsFromEntry(existing),
           });
-          const recovery = await formDraftsRepository.loadRecovery({
-            userId: user.uid,
-            draftKind: "composer",
-            scopeKey: entryType,
-            entryId: editingId,
-          });
           const merged = recovery?.payload ? { ...base, ...recovery.payload } : base;
-          if (!cancelled) {
-            setInitialValues(merged);
-            setSavedBaseline(JSON.stringify(base));
-          }
+          setInitialValues(merged);
+          setSavedBaseline(JSON.stringify(base));
           return;
         }
 
@@ -426,7 +448,7 @@ export default function ComposerScreen() {
             user.uid,
             linkedDispatchId
           );
-          if (dispatch?.entryType === "material_dispatched" && !cancelled) {
+          if (dispatch?.entryType === "material_dispatched" && current()) {
             const defaults = freightDefaultsFromDispatch(dispatch);
             setInitialValues(defaults);
             setSavedBaseline(JSON.stringify(defaults));
@@ -440,14 +462,14 @@ export default function ComposerScreen() {
           scopeKey: entryType,
           entryId: null,
         });
-        if (recovery?.payload && !cancelled) {
+        if (recovery?.payload && current()) {
           setInitialValues(recovery.payload);
           setSavedBaseline("");
         }
       } catch (e) {
-        if (!cancelled) setError(userFacingMessage(e));
+        if (current()) setError(presentPublicError(e));
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled && owner.ownsGeneration(claim)) setLoading(false);
       }
     };
 
@@ -455,7 +477,7 @@ export default function ComposerScreen() {
     return () => {
       cancelled = true;
     };
-  }, [user, entryType, editingId, linkedDispatchId, draftIdParam, t]);
+  }, [user, entryType, editingId, linkedDispatchId, draftIdParam, t, owner, sessionEpoch, loadNonce]);
 
   useEffect(() => {
     if (!user || editingId) return;
@@ -479,7 +501,10 @@ export default function ComposerScreen() {
 
   const onSubmit = useCallback(
     async (values: Record<string, unknown>) => {
-      if (!user || !entryType) return;
+      if (!user || !entryType || blocked) {
+        if (!user || blocked) setSessionHold(true);
+        return;
+      }
       if (saving || saveLockRef.current) return;
       saveLockRef.current = true;
       localAckedRef.current = false;
@@ -865,7 +890,8 @@ export default function ComposerScreen() {
             ? t("composer.cashPaidPhotoOwnerChanged")
             : e instanceof CashPaidPhotoError && e.code === "too_large"
               ? t("composer.cashPaidPhotoTooLarge")
-              : userFacingMessage(e);
+              : presentPublicError(e);
+        if (toPublicError(e).action === "sign_in") setSessionHold(true);
         setError(msg);
         feedback.showError(msg);
       } finally {
@@ -885,6 +911,7 @@ export default function ComposerScreen() {
       clearRecovery,
       activeDraftId,
       cashPaidPhotoState,
+      blocked,
     ]
   );
 
@@ -960,7 +987,29 @@ export default function ComposerScreen() {
           backFrom="you"
           onBackPress={navigateBack}
         />
-        <Loader fullscreen message={t("common.loading")} />
+        <InitialListSkeleton count={6} />
+      </Screen>
+    );
+  }
+
+  if (error && initialValues === undefined && (editingId || draftIdParam)) {
+    return (
+      <Screen>
+        <Header
+          variant="executive"
+          title={formTitle}
+          showBack
+          backFrom="you"
+          onBackPress={navigateBack}
+        />
+        <ScreenErrorPanel
+          error={error}
+          message={error}
+          onRetry={() => {
+            setError(null);
+            setLoadNonce((n) => n + 1);
+          }}
+        />
       </Screen>
     );
   }
@@ -969,6 +1018,7 @@ export default function ComposerScreen() {
     return (
       <Screen scroll padded>
         <Header title={formTitle} showBack backFrom="you" onBackPress={navigateBack} />
+        <SaveOutcomeLabel confirmed={false} />
         <DraftSavedSuccess
           draft={draftSaveResult}
           onContinueEditing={() => {
@@ -986,6 +1036,7 @@ export default function ComposerScreen() {
     return (
       <Screen scroll padded>
         <Header title={formTitle} showBack backFrom="you" onBackPress={navigateBack} />
+        <SaveOutcomeLabel confirmed={saveResult.cloudAccepted === true} />
         <ComposerSaveSuccess
           entry={saveResult.entry}
           pdfFailed={saveResult.pdfFailed}
@@ -1014,6 +1065,7 @@ export default function ComposerScreen() {
         onBackPress={tryBack}
         rightSlot={saveDraftHeader}
       />
+      <SessionHoldNotice visible={sessionHold || blocked} />
       <LocaleUiText style={linkStyles.benefit}>{benefitCopy}</LocaleUiText>
       <BusinessComposerForm
         key={`${entryType}-${activeDraftId ?? "new"}-${editingId ?? ""}`}

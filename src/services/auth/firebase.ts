@@ -73,7 +73,11 @@ import {
   signOutNativePhoneAuth,
   startNativePhoneOtp,
 } from "./nativePhoneAuth";
-import { cleanBothAuthSdks, currentAuthMutationGeneration } from "./authSessionFence";
+import {
+  cleanBothAuthSdks,
+  currentAuthMutationGeneration,
+  currentSessionCommitEpoch,
+} from "./authSessionFence";
 import { getNativeAuthUid } from "./jsAuthBridge";
 import { authoritativeProfileWriteUid, issueProfileDocumentIfOwned } from "./profileWriteOwnership";
 import { retireNativeCallableAuthReady } from "./nativeCallableAuthGate";
@@ -376,8 +380,8 @@ async function swapPhoneNumber(
 }
 
 export const firebaseAuthService: AuthService = {
-  async startOtp(phoneE164: PhoneE164): Promise<OtpChallenge> {
-    return startNativePhoneOtp(phoneE164);
+  async startOtp(phoneE164: PhoneE164, options?: { forceResend?: boolean }): Promise<OtpChallenge> {
+    return startNativePhoneOtp(phoneE164, options);
   },
 
   async confirmOtp(challenge: OtpChallenge, code: string): Promise<AuthResult> {
@@ -457,22 +461,30 @@ export const firebaseAuthService: AuthService = {
     const uid = getFirebaseAuth().currentUser?.uid ?? null;
     // Local sign-out already retired this generation. A second bump would
     // look like a newer login and skip the profile clear that still owns it.
+    // Same-UID replacement bumps the commit epoch without the bridge generation.
     const retired = currentAuthMutationGeneration();
+    const epoch = currentSessionCommitEpoch();
+    const stillThisSignOut = () =>
+      currentAuthMutationGeneration() === retired && currentSessionCommitEpoch() === epoch;
     retireNativeCallableAuthReady();
     const result = await cleanBothAuthSdks(retired, {
-      signOutJs: () => getFirebaseAuth().signOut(),
+      signOutJs: async () => {
+        if (!stillThisSignOut()) throw new Error("session_changed");
+        await getFirebaseAuth().signOut();
+      },
       signOutNative: async () => {
-        const cleared = await signOutNativePhoneAuth();
+        const cleared = await signOutNativePhoneAuth(stillThisSignOut);
         if (!cleared) throw new Error("native sign-out incomplete");
       },
     });
-    if (!result.skippedBecauseNewerSession && (!result.jsCleared || !result.nativeCleared)) {
+    if (result.skippedBecauseNewerSession || !stillThisSignOut()) return;
+    if (!result.jsCleared || !result.nativeCleared) {
       log.warn("signOut partial", {
         jsCleared: result.jsCleared,
         nativeCleared: result.nativeCleared,
       });
     }
-    if (uid) {
+    if (uid && stillThisSignOut()) {
       const { clearTransientPendingEmailState } = await import("./pendingEmailVerification");
       clearTransientPendingEmailState(uid);
     }

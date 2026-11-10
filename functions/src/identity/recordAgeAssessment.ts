@@ -1,6 +1,8 @@
 /**
- * Records the 18+ result. The submitted date is not written to the profile.
- * A client-supplied eligibility flag is rejected.
+ * Records a historical self-declared date-of-birth result. The submitted date
+ * is not written to the profile. A client-supplied eligibility flag or
+ * demographic age band is rejected and is never stored as ageEligibility.
+ * This write is not an authorization decision.
  */
 
 import { HttpsError, onCall } from "firebase-functions/v2/https";
@@ -9,7 +11,15 @@ import { getAdminDb } from "../admin";
 import { assertAdmittedCallableUser } from "./admitCallableUser";
 import { assessSelfDeclaredDob } from "./ageEligibility";
 
-const FORGED_FIELDS = ["ageEligibility", "eligible", "nowMs", "assessedAt", "policyVersion"];
+const FORGED_FIELDS = [
+  "ageEligibility",
+  "eligible",
+  "nowMs",
+  "assessedAt",
+  "policyVersion",
+  "demographicAgeBand",
+  "demographicAgeRange",
+];
 
 export const recordAgeAssessment = onCall({ region: "asia-south1" }, async (request) => {
   await assertAdmittedCallableUser(request);

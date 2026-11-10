@@ -53,10 +53,10 @@ service firebase.storage {
       return isSignedIn() && request.auth.uid == userId && restoreClaimAllows();
     }
 
+    // Account is present and active. Demographic age is not authorization.
     function ageEligible(userId) {
       let userPath = /databases/(default)/documents/users/$(userId);
       return firestore.exists(userPath)
-        && firestore.get(userPath).data.get('ageEligibility', '') == 'eligible'
         && firestore.get(userPath).data.get('status', 'active') == 'active';
     }
 

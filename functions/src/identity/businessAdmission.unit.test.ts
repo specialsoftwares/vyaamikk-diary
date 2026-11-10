@@ -7,19 +7,34 @@ import { HttpsError } from "firebase-functions/v2/https";
 import { assertBusinessAgeAdmitted, decideBusinessAge } from "./businessAdmission";
 import { processingPurposeReceipt } from "../privacy/processingPurpose";
 
-assert.equal(decideBusinessAge(null), "unassessed");
-assert.equal(decideBusinessAge({ status: "active" }), "unassessed");
-assert.equal(decideBusinessAge({ status: "active", ageEligibility: "unassessed" }), "unassessed");
-assert.equal(decideBusinessAge({ status: "active", ageEligibility: "ineligible" }), "ineligible");
-assert.equal(decideBusinessAge({ status: "active", ageEligibility: "eligible" }), "eligible");
+assert.equal(decideBusinessAge(null), "missing");
+assert.equal(decideBusinessAge({}), "active");
+assert.equal(decideBusinessAge({ status: "active" }), "active");
+assert.equal(decideBusinessAge({ status: "active", ageEligibility: "unassessed" }), "active");
+assert.equal(decideBusinessAge({ status: "active", ageEligibility: "ineligible" }), "active");
+assert.equal(decideBusinessAge({ status: "active", ageEligibility: "eligible" }), "active");
+assert.equal(decideBusinessAge({ status: "active", demographicAgeBand: "skipped" }), "active");
+assert.equal(decideBusinessAge({ status: "active", demographicAgeBand: "under_18" }), "active");
+assert.equal(decideBusinessAge({ status: "active", demographicAgeBand: "prefer_not_to_say" }), "active");
 assert.equal(decideBusinessAge({ status: "pending_deletion", ageEligibility: "eligible" }), "inactive");
+assert.equal(decideBusinessAge({ status: "deleted", demographicAgeBand: "55_plus" }), "inactive");
 
 async function main() {
+await assertBusinessAgeAdmitted("owner", async () => ({ status: "active" }));
+await assertBusinessAgeAdmitted("owner", async () => ({ status: "active", demographicAgeBand: "skipped" }));
+await assertBusinessAgeAdmitted("owner", async () => ({
+  status: "active",
+  ageEligibility: "ineligible",
+  demographicAgeBand: "prefer_not_to_say",
+}));
 await assert.rejects(
-  () => assertBusinessAgeAdmitted("young", async () => ({ status: "active" })),
+  () => assertBusinessAgeAdmitted("gone", async () => null),
   (error: unknown) => error instanceof HttpsError && error.code === "failed-precondition"
 );
-await assertBusinessAgeAdmitted("adult", async () => ({ status: "active", ageEligibility: "eligible" }));
+await assert.rejects(
+  () => assertBusinessAgeAdmitted("pending", async () => ({ status: "pending_deletion", ageEligibility: "eligible" })),
+  (error: unknown) => error instanceof HttpsError && error.code === "failed-precondition"
+);
 
 const serverNow = 1_700_000_000_000;
 const receipt = processingPurposeReceipt(
