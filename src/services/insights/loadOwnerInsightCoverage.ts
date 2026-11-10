@@ -44,7 +44,10 @@ export async function loadOwnerInsightCoverage(
   userId: string,
   fy: number,
   now = Date.now(),
-  options?: { offline?: boolean }
+  options?: {
+    offline?: boolean;
+    membershipScope?: import("./freeMembershipInsightFilter").FreeMembershipInsightScope;
+  }
 ): Promise<OwnerInsightCoverage> {
   const reads = readyInsightReads();
   const [diary, purchaseOrders, credits, letterheads, packs, drafts, grin] = await Promise.all([
@@ -85,6 +88,7 @@ export async function loadOwnerInsightCoverage(
     pendingDiaryCount: diary.pendingDiaryCount,
     offline: options?.offline === true,
     diaryServerUnread: diary.serverUnread,
+    membershipScope: options?.membershipScope,
   });
 }
 

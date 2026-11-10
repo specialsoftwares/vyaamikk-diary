@@ -152,6 +152,8 @@ export function useCalendarMapsData(
     });
   }, [reload, userId]);
 
+  // Statutory markers are always available for Free (incl. 15/15), Monthly, and
+  // Yearly. Private business markers may be empty without collapsing statutory.
   const statutoryCalendar = useMemo(() => {
     const [year, month] = visibleMonthKey.split("-").map((part) => Number(part));
     const anchor =

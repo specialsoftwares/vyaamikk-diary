@@ -34,6 +34,11 @@ import {
   renderInsightPhrases,
   type InsightPhrase,
 } from "@/services/insights/insightPhrases";
+import {
+  filterFactsByFreeMembership,
+  filterGrinByFreeMembership,
+  type FreeMembershipInsightScope,
+} from "@/services/insights/freeMembershipInsightFilter";
 import { formatAmount } from "@/utils/formatters/formatAmount";
 import {
   formatFinancialYearLabel,
@@ -259,6 +264,11 @@ export interface OwnerInsightCoverageInput {
   offline?: boolean;
   /** The server diary list failed and on-device rows were used instead. */
   diaryServerUnread?: boolean;
+  /**
+   * Free Insights scope. When `free`, filter by freeMembershipIds before
+   * aggregates. When omitted or paid, include all loaded facts.
+   */
+  membershipScope?: FreeMembershipInsightScope;
 }
 
 export interface OwnerInsightCoverage {
@@ -1071,20 +1081,22 @@ export function buildOwnerInsightCoverage(input: OwnerInsightCoverageInput): Own
   const { startMs, endMs } = getFinancialYearRange(input.fy);
   const monthStart = startOfMonthMs(now);
   const reads = input.reads;
-  const diary = dedupe(input.diary);
-  const purchaseOrders = dedupe(input.purchaseOrders);
-  const credits = dedupe(input.credits);
-  const letterheads = dedupe(input.letterheads);
-  const packs = dedupe(input.packs);
-  const drafts = dedupe(input.drafts);
+  const scope = input.membershipScope ?? { kind: "paid" as const };
+  const diary = filterFactsByFreeMembership(dedupe(input.diary), scope);
+  const purchaseOrders = filterFactsByFreeMembership(dedupe(input.purchaseOrders), scope);
+  const credits = filterFactsByFreeMembership(dedupe(input.credits), scope);
+  const letterheads = filterFactsByFreeMembership(dedupe(input.letterheads), scope);
+  const packs = filterFactsByFreeMembership(dedupe(input.packs), scope);
+  const drafts = filterFactsByFreeMembership(dedupe(input.drafts), scope);
   const grinSeen = new Set<string>();
-  const grin: GrinCoverageFact[] = [];
+  const grinRaw: GrinCoverageFact[] = [];
   for (const fact of input.grin) {
     const id = fact.receiptId.trim();
     if (!id || grinSeen.has(id)) continue;
     grinSeen.add(id);
-    grin.push({ ...fact, receiptId: id });
+    grinRaw.push({ ...fact, receiptId: id });
   }
+  const grin = filterGrinByFreeMembership(grinRaw, scope);
 
   const freightLinks = new Set<string>();
   for (const fact of diary) {
