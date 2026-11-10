@@ -3,8 +3,13 @@
  * No fixture prices, no client entitlement writes, no invented eligibility.
  */
 
-import { ALL_CANONICAL_SKUS, getClientCatalogEntry, isCanonicalSku } from "@/billing/iap/iapCatalog";
-import type { CanonicalSku, IapView } from "@/billing/iap/iapTypes";
+import {
+  NEW_PURCHASE_SKUS,
+  getClientCatalogEntry,
+  isCanonicalSku,
+  isNewPurchaseSku,
+} from "@/billing/iap/iapCatalog";
+import type { CanonicalSku, IapView, NewPurchaseSku } from "@/billing/iap/iapTypes";
 import type {
   UpgradeCatalogPeriod,
   UpgradeCatalogState,
@@ -21,6 +26,7 @@ const PLAN_NAME_KEYS: Record<VyaamikkPlan, string> = {
   starter: "billing.upgrade.plans.starter.name",
   professional: "billing.upgrade.plans.professional.name",
   business: "billing.upgrade.plans.business.name",
+  unlimited: "billing.upgrade.plans.unlimited.name",
 };
 
 export type QuotaUpsellCatalogSource = Pick<
@@ -69,24 +75,25 @@ export function entitlementLabel(
 }
 
 function offerForSku(
-  sku: CanonicalSku,
+  sku: NewPurchaseSku,
   catalog: QuotaUpsellCatalogSource["catalog"],
   catalogState: UpgradeCatalogState
 ): UpgradePlanOffer {
   const entry = getClientCatalogEntry(sku);
+  const period = entry.period as UpgradeCatalogPeriod;
   const row = catalog.find((item) => item.canonicalSku === sku);
   if (catalogState === "loading" && (!row || row.displayPrice == null)) {
-    return { planId: entry.plan, period: entry.period, sku, offer: { status: "loading" } };
+    return { planId: "unlimited", period, sku, offer: { status: "loading" } };
   }
   if (row?.available && row.displayPrice) {
     return {
-      planId: entry.plan,
-      period: entry.period,
+      planId: "unlimited",
+      period,
       sku,
       offer: { status: "ready", displayPrice: row.displayPrice },
     };
   }
-  return { planId: entry.plan, period: entry.period, sku, offer: { status: "unavailable" } };
+  return { planId: "unlimited", period, sku, offer: { status: "unavailable" } };
 }
 
 export function catalogStateFromIap(iap: QuotaUpsellCatalogSource): UpgradeCatalogState {
@@ -143,13 +150,16 @@ export function mapUpgradeSheetModel(input: {
   triggerContext?: UpgradeTriggerContext;
 }): MappedUpgradeSheetModel {
   const catalogState = catalogStateFromIap(input.iap);
-  const offers = ALL_CANONICAL_SKUS.map((sku) => offerForSku(sku, input.iap.catalog, catalogState));
+  // Selling surface: Monthly/Yearly unlimited only. Legacy SKUs stay in restore.
+  const offers = NEW_PURCHASE_SKUS.map((sku) => offerForSku(sku, input.iap.catalog, catalogState));
   const anyReady = offers.some((offer) => offer.offer.status === "ready");
   const purchaseAvailable = input.iap.available && anyReady;
   const restoreAvailable = input.iap.available;
   const purchaseState = operationStateFromIap(input.iap, input.hostPurchaseState, true);
   const restoreState = operationStateFromIap(input.iap, input.hostRestoreState, false);
   const defaultReady = offers.find((offer) => offer.offer.status === "ready");
+  const defaultPeriod: UpgradeCatalogPeriod =
+    defaultReady?.period === "yearly" ? "yearly" : "monthly";
   return {
     triggerContext: input.triggerContext ?? "recordLimitReached",
     currentPlanLabel: currentPlanLabel(input.t, input.subscription.plan),
@@ -166,10 +176,15 @@ export function mapUpgradeSheetModel(input: {
     errorMessage: input.hostErrorMessage,
     errorRetryEnabled: Boolean(input.hostErrorMessage) && input.errorRecoverable === true,
     defaultSku: defaultReady?.sku ?? null,
-    defaultPeriod: defaultReady?.period ?? "monthly",
+    defaultPeriod,
   };
 }
 
 export function asCanonicalPurchaseSku(sku: string): CanonicalSku | null {
   return isCanonicalSku(sku) ? sku : null;
+}
+
+/** New checkout may only purchase unlimited monthly/yearly. */
+export function asNewPurchaseSku(sku: string): NewPurchaseSku | null {
+  return isNewPurchaseSku(sku) ? sku : null;
 }

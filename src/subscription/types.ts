@@ -9,7 +9,12 @@
  * This client model is consumption + UX gating only — never security.
  */
 
-export type VyaamikkPlan = "free" | "starter" | "professional" | "business";
+export type VyaamikkPlan =
+  | "free"
+  | "starter"
+  | "professional"
+  | "business"
+  | "unlimited";
 
 export type BillingLifecycleStatus =
   | "trial"
@@ -62,6 +67,7 @@ export const VYAAMIKK_PLANS: readonly VyaamikkPlan[] = [
   "starter",
   "professional",
   "business",
+  "unlimited",
 ];
 
 export const BILLING_LIFECYCLE_STATUSES: readonly BillingLifecycleStatus[] = [
@@ -95,6 +101,7 @@ export const PLAN_MONTHLY_RECORD_LIMITS: Record<VyaamikkPlan, number> = {
   starter: 100,
   professional: UNLIMITED_RECORDS,
   business: UNLIMITED_RECORDS,
+  unlimited: UNLIMITED_RECORDS,
 };
 
 export const DEFAULT_CLIENT_SUBSCRIPTION: ClientSubscriptionStatus = {

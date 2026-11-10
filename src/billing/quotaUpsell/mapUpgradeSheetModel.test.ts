@@ -49,13 +49,18 @@ const readyCatalog: CanonicalSkuAvailability[] = ALL_CANONICAL_SKUS.map((sku) =>
   assert.equal(model.triggerContext, "recordLimitReached");
   assert.equal(model.trialActionAvailable, false);
   assert.equal(model.trialEligible, false);
-  assert.equal(model.offers.length, 9);
+  assert.equal(model.offers.length, 2);
   assert.equal(model.catalogState, "ready");
   assert.equal(model.purchaseAvailable, true);
   assert.equal(model.restoreAvailable, true);
   assert.equal(
-    model.offers.find((o) => o.sku === "vyd_starter_monthly")?.offer.status,
+    model.offers.find((o) => o.sku === "vyd_unlimited_monthly")?.offer.status,
     "ready"
+  );
+  assert.equal(
+    model.offers.find((o) => o.sku === "vyd_starter_monthly"),
+    undefined,
+    "legacy SKUs must not appear on the selling surface"
   );
   assert.equal(model.currentPlanLabel, "billing.upgrade.freePlanName");
   assert.equal(model.entitlementLabel, "billing.upgrade.entitlementInactive");
@@ -115,8 +120,8 @@ const readyCatalog: CanonicalSkuAvailability[] = ALL_CANONICAL_SKUS.map((sku) =>
         version: 1,
         uid: "uid-a",
         platform: "android",
-        canonicalSku: "vyd_starter_monthly",
-        productId: "vyd_starter",
+        canonicalSku: "vyd_unlimited_monthly",
+        productId: "vyd_unlimited",
         stage: "store_pending",
         initiatedAt: 1,
         updatedAt: 1,
@@ -147,8 +152,8 @@ const readyCatalog: CanonicalSkuAvailability[] = ALL_CANONICAL_SKUS.map((sku) =>
         version: 1,
         uid: "uid-a",
         platform: "android",
-        canonicalSku: "vyd_starter_monthly",
-        productId: "vyd_starter",
+        canonicalSku: "vyd_unlimited_monthly",
+        productId: "vyd_unlimited",
         stage: "verifying",
         initiatedAt: 1,
         updatedAt: 1,

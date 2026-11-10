@@ -24,8 +24,17 @@
 // Plans and billing lifecycle
 // ---------------------------------------------------------------------------
 
-/** Canonical Vyaamikk plans. `free` is the implicit plan when no status doc exists. */
-export type VyaamikkPlan = "free" | "starter" | "professional" | "business";
+/**
+ * Canonical Vyaamikk plans. `free` is the implicit plan when no status doc exists.
+ * `unlimited` is the new Monthly/Yearly Play product. Legacy starter /
+ * professional / business remain for existing subscribers.
+ */
+export type VyaamikkPlan =
+  | "free"
+  | "starter"
+  | "professional"
+  | "business"
+  | "unlimited";
 
 /**
  * Billing lifecycle status. NEVER use this alone to decide access —
@@ -154,6 +163,7 @@ export const PLAN_MONTHLY_RECORD_LIMITS: Record<VyaamikkPlan, number> = {
   starter: 100,
   professional: UNLIMITED_RECORDS,
   business: UNLIMITED_RECORDS,
+  unlimited: UNLIMITED_RECORDS,
 };
 
 // ---------------------------------------------------------------------------

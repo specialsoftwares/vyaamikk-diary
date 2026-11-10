@@ -41,6 +41,7 @@ const PLAN_NAME_KEYS: Record<VyaamikkPlan, string> = {
   starter: "billing.upgrade.plans.starter.name",
   professional: "billing.upgrade.plans.professional.name",
   business: "billing.upgrade.plans.business.name",
+  unlimited: "billing.upgrade.plans.unlimited.name",
 };
 
 export function managementPlanNameKey(plan: VyaamikkPlan): string {

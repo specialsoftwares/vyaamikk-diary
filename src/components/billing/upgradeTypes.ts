@@ -15,10 +15,11 @@ export const UPGRADE_TRIGGER_CONTEXTS = [
 
 export type UpgradeTriggerContext = (typeof UPGRADE_TRIGGER_CONTEXTS)[number];
 
-export const UPGRADE_PLAN_IDS = ["starter", "professional", "business"] as const;
+/** New-purchase selling surface — one Unlimited plan, two periods. */
+export const UPGRADE_PLAN_IDS = ["unlimited"] as const;
 export type UpgradePlanId = (typeof UPGRADE_PLAN_IDS)[number];
 
-export const UPGRADE_PERIODS = ["monthly", "quarterly", "yearly"] as const;
+export const UPGRADE_PERIODS = ["monthly", "yearly"] as const;
 export type UpgradeCatalogPeriod = (typeof UPGRADE_PERIODS)[number];
 
 export type UpgradeOfferStatus = "ready" | "loading" | "unavailable";

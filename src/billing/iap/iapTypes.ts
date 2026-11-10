@@ -6,6 +6,8 @@
  */
 
 export type CanonicalSku =
+  | "vyd_unlimited_monthly"
+  | "vyd_unlimited_yearly"
   | "vyd_starter_monthly"
   | "vyd_starter_quarterly"
   | "vyd_starter_yearly"
@@ -16,7 +18,9 @@ export type CanonicalSku =
   | "vyd_business_quarterly"
   | "vyd_business_yearly";
 
-export type PaidPlan = "starter" | "professional" | "business";
+export type NewPurchaseSku = "vyd_unlimited_monthly" | "vyd_unlimited_yearly";
+
+export type PaidPlan = "unlimited" | "starter" | "professional" | "business";
 export type BillingPeriod = "monthly" | "quarterly" | "yearly";
 export type IapPlatform = "android" | "ios";
 export type IapStore = "google" | "apple" | "unknown" | "horizon" | "amazon";
@@ -44,12 +48,13 @@ export interface ClientCatalogEntry {
   plan: PaidPlan;
   period: BillingPeriod;
   android: {
-    productId: "vyd_starter" | "vyd_professional" | "vyd_business";
+    productId: "vyd_unlimited" | "vyd_starter" | "vyd_professional" | "vyd_business";
     basePlanId: BillingPeriod;
   };
   ios: {
     productId: string;
   };
+  availableForNewPurchase: boolean;
 }
 
 export interface AndroidSubscriptionOfferLike {

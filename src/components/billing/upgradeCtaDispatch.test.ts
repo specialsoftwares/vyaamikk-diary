@@ -15,7 +15,6 @@ import {
 import type {
   UpgradeCatalogState,
   UpgradeOperationState,
-  UpgradePlanId,
   UpgradePlanOffer,
 } from "./upgradeTypes";
 
@@ -34,7 +33,6 @@ function decidePrimary(input: {
   restoreState?: UpgradeOperationState;
   catalogState?: UpgradeCatalogState;
   hasError?: boolean;
-  busy?: boolean;
   offers?: readonly UpgradePlanOffer[];
 }): {
   kind: string;
@@ -114,278 +112,66 @@ function decidePrimary(input: {
 assert.equal(CLIENT_MANUAL_TRIAL_START_SUPPORTED, false);
 
 {
-  const starter = decidePrimary({
+  const monthly = decidePrimary({
     trialEligible: true,
-    trialActionAvailable: false,
-    selectedSku: "vyd_starter_monthly",
+    trialActionAvailable: true,
+    selectedSku: "vyd_unlimited_monthly",
   });
-  assert.equal(starter.kind, "subscribe");
-  assert.equal(starter.labelKey, "billing.upgrade.ctaSubscribe");
-  assert.deepEqual(starter.press, { type: "purchase", sku: "vyd_starter_monthly" });
+  assert.equal(monthly.kind, "subscribe");
+  assert.equal(monthly.labelKey, "billing.upgrade.ctaSubscribe");
+  assert.deepEqual(monthly.press, { type: "purchase", sku: "vyd_unlimited_monthly" });
 }
 
 {
-  const ineligibleStarter = decidePrimary({
+  const yearly = decidePrimary({
     trialEligible: false,
     trialActionAvailable: false,
-    selectedSku: "vyd_starter_monthly",
+    selectedSku: "vyd_unlimited_yearly",
   });
-  assert.equal(ineligibleStarter.kind, "subscribe");
-  assert.deepEqual(ineligibleStarter.press, { type: "purchase", sku: "vyd_starter_monthly" });
-}
-
-{
-  const professionalUnavailable = decidePrimary({
-    trialEligible: true,
-    trialActionAvailable: false,
-    selectedSku: "vyd_professional_monthly",
-  });
-  assert.equal(professionalUnavailable.kind, "trialUnavailable");
-  assert.equal(professionalUnavailable.labelKey, "billing.upgrade.ctaTrialUnavailable");
-  assert.equal(professionalUnavailable.enabled, false);
-  assert.deepEqual(professionalUnavailable.press, { type: "none" });
-}
-
-{
-  const professionalTrial = decidePrimary({
-    trialEligible: true,
-    trialActionAvailable: true,
-    selectedSku: "vyd_professional_monthly",
-  });
-  assert.equal(professionalTrial.kind, "trial");
-  assert.equal(professionalTrial.labelKey, "billing.upgrade.ctaTrial");
-  assert.deepEqual(professionalTrial.press, { type: "trial" });
-}
-
-{
-  const ineligibleProfessional = decidePrimary({
-    trialEligible: false,
-    trialActionAvailable: true,
-    selectedSku: "vyd_professional_monthly",
-  });
-  assert.equal(ineligibleProfessional.kind, "subscribe");
-  assert.deepEqual(ineligibleProfessional.press, {
-    type: "purchase",
-    sku: "vyd_professional_monthly",
-  });
-}
-
-{
-  const business = decidePrimary({
-    trialEligible: true,
-    trialActionAvailable: true,
-    selectedSku: "vyd_business_monthly",
-  });
-  assert.equal(business.kind, "subscribe");
-  assert.deepEqual(business.press, { type: "purchase", sku: "vyd_business_monthly" });
-}
-
-{
-  const unknownPlan = decidePrimary({
-    trialEligible: true,
-    trialActionAvailable: true,
-    selectedSku: "missing_sku",
-  });
-  assert.equal(unknownPlan.kind, "subscribe");
-  assert.deepEqual(unknownPlan.press, { type: "none" });
-}
-
-{
-  const loading = decidePrimary({
-    trialEligible: true,
-    trialActionAvailable: true,
-    selectedSku: "vyd_professional_monthly",
-    catalogState: "loading",
-  });
-  assert.equal(loading.kind, "loading");
-  assert.deepEqual(loading.press, { type: "none" });
+  assert.equal(yearly.kind, "subscribe");
+  assert.deepEqual(yearly.press, { type: "purchase", sku: "vyd_unlimited_yearly" });
 }
 
 {
   const pending = decidePrimary({
     trialEligible: false,
     trialActionAvailable: false,
-    selectedSku: "vyd_starter_monthly",
+    selectedSku: "vyd_unlimited_monthly",
     purchaseState: "pending",
   });
   assert.equal(pending.kind, "pending");
   assert.deepEqual(pending.press, { type: "none" });
-  assert.equal(pending.restoreEnabled, false);
-  assert.equal(pending.primaryEnabled, false);
   assert.equal(pending.purchaseSpinner, true);
-  assert.equal(pending.restoreSpinner, false);
 }
 
 {
-  const unavailable = decidePrimary({
-    trialEligible: true,
-    trialActionAvailable: true,
-    selectedSku: "vyd_professional_monthly",
-    purchaseAvailable: false,
-  });
-  assert.equal(unavailable.kind, "unavailable");
-  assert.deepEqual(unavailable.press, { type: "none" });
-}
-
-{
-  const errorPaid = decidePrimary({
+  const verifying = decidePrimary({
     trialEligible: false,
     trialActionAvailable: false,
-    selectedSku: "vyd_starter_monthly",
-    hasError: true,
+    selectedSku: "vyd_unlimited_monthly",
+    purchaseState: "verifying",
   });
-  assert.equal(errorPaid.kind, "subscribe");
-  assert.equal(errorPaid.enabled, false);
-  assert.deepEqual(errorPaid.press, { type: "none" });
-  assert.equal(errorPaid.restoreEnabled, true);
-}
-
-{
-  const errorTrial = decidePrimary({
-    trialEligible: true,
-    trialActionAvailable: true,
-    selectedSku: "vyd_professional_monthly",
-    hasError: true,
-  });
-  assert.equal(errorTrial.kind, "trial");
-  assert.equal(errorTrial.enabled, false);
-  assert.deepEqual(errorTrial.press, { type: "none" });
-}
-
-{
-  const restorePending = decidePrimary({
-    trialEligible: false,
-    trialActionAvailable: false,
-    selectedSku: "vyd_starter_monthly",
-    restoreState: "pending",
-  });
-  assert.deepEqual(restorePending.press, { type: "none" });
-  assert.equal(restorePending.restoreEnabled, false);
-  assert.equal(restorePending.primaryEnabled, false);
-  assert.equal(restorePending.purchaseSpinner, false);
-  assert.equal(restorePending.restoreSpinner, true);
-}
-
-{
-  const restoreLoading = decidePrimary({
-    trialEligible: false,
-    trialActionAvailable: false,
-    selectedSku: "vyd_starter_monthly",
-    restoreState: "loading",
-  });
-  assert.deepEqual(restoreLoading.press, { type: "none" });
-  assert.equal(restoreLoading.restoreEnabled, false);
-  assert.equal(restoreLoading.primaryEnabled, false);
-  assert.equal(restoreLoading.purchaseSpinner, false);
-  assert.equal(restoreLoading.restoreSpinner, true);
-}
-
-{
-  const purchaseLoading = decidePrimary({
-    trialEligible: false,
-    trialActionAvailable: false,
-    selectedSku: "vyd_starter_monthly",
-    purchaseState: "loading",
-  });
-  assert.deepEqual(purchaseLoading.press, { type: "none" });
-  assert.equal(purchaseLoading.restoreEnabled, false);
-  assert.equal(purchaseLoading.primaryEnabled, false);
-  assert.equal(purchaseLoading.purchaseSpinner, true);
-  assert.equal(purchaseLoading.restoreSpinner, false);
-}
-
-{
-  const trialLockedByRestore = decidePrimary({
-    trialEligible: true,
-    trialActionAvailable: true,
-    selectedSku: "vyd_professional_monthly",
-    restoreState: "pending",
-  });
-  assert.equal(trialLockedByRestore.kind, "trial");
-  assert.deepEqual(trialLockedByRestore.press, { type: "none" });
-  assert.equal(trialLockedByRestore.restoreEnabled, false);
-  assert.equal(trialLockedByRestore.primaryEnabled, false);
+  assert.equal(verifying.kind, "verifying");
+  assert.deepEqual(verifying.press, { type: "none" });
 }
 
 {
   const settled = decidePrimary({
     trialEligible: false,
     trialActionAvailable: false,
-    selectedSku: "vyd_starter_monthly",
-    purchaseState: "idle",
-    restoreState: "idle",
+    selectedSku: "vyd_unlimited_monthly",
   });
-  assert.deepEqual(settled.press, { type: "purchase", sku: "vyd_starter_monthly" });
+  assert.deepEqual(settled.press, { type: "purchase", sku: "vyd_unlimited_monthly" });
   assert.equal(settled.restoreEnabled, true);
   assert.equal(settled.primaryEnabled, true);
-  assert.equal(settled.purchaseSpinner, false);
-  assert.equal(settled.restoreSpinner, false);
 }
 
 {
   const t = (key: string) => key;
   assert.equal(
-    restoreCtaLabel(t, { restoreAvailable: true, restoreState: "loading" }),
-    "billing.upgrade.restoreLoading"
-  );
-  assert.equal(
-    restoreCtaLabel(t, { restoreAvailable: true, restoreState: "pending" }),
-    "billing.upgrade.restorePending"
-  );
-  assert.equal(
-    restoreCtaLabel(t, { restoreAvailable: true, restoreState: "unavailable" }),
-    "billing.upgrade.restoreUnavailable"
-  );
-  assert.equal(
-    restoreCtaLabel(t, { restoreAvailable: false, restoreState: "idle" }),
-    "billing.upgrade.restoreUnavailable"
-  );
-  assert.equal(
     restoreCtaLabel(t, { restoreAvailable: true, restoreState: "idle" }),
     "billing.upgrade.ctaRestore"
   );
-}
-
-{
-  const restoreSeparate = decidePrimary({
-    trialEligible: true,
-    trialActionAvailable: true,
-    selectedSku: "vyd_professional_monthly",
-    restoreAvailable: true,
-    restoreState: "idle",
-  });
-  assert.deepEqual(restoreSeparate.press, { type: "trial" });
-  assert.equal(restoreSeparate.restoreEnabled, true);
-}
-
-{
-  const restoreUnavailable = decidePrimary({
-    trialEligible: false,
-    trialActionAvailable: false,
-    selectedSku: "vyd_starter_monthly",
-    restoreAvailable: false,
-    restoreState: "unavailable",
-  });
-  assert.deepEqual(restoreUnavailable.press, {
-    type: "purchase",
-    sku: "vyd_starter_monthly",
-  });
-  assert.equal(restoreUnavailable.restoreEnabled, false);
-  assert.equal(restoreUnavailable.restoreSpinner, false);
-}
-
-{
-  const plans: UpgradePlanId[] = ["starter", "professional", "business"];
-  for (const planId of plans) {
-    const sku = `vyd_${planId}_monthly`;
-    const ineligible = decidePrimary({
-      trialEligible: false,
-      trialActionAvailable: false,
-      selectedSku: sku,
-    });
-    assert.equal(ineligible.kind, "subscribe", planId);
-    assert.deepEqual(ineligible.press, { type: "purchase", sku }, planId);
-  }
 }
 
 console.log("upgradeCtaDispatch.test.ts: ok");

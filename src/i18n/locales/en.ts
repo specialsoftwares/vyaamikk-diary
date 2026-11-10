@@ -2887,6 +2887,12 @@ const en = {
         },
       },
       plans: {
+        unlimited: {
+          name: "Unlimited",
+          b1: "Unlimited record creation and secure cloud save",
+          b2: "Business Insights and Professional Brief",
+          b3: "Includes GRIN goods evidence",
+        },
         starter: {
           name: "Starter",
           b1: "Up to 100 records each month",

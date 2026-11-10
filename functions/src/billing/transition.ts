@@ -127,7 +127,12 @@ export interface DerivedTransition {
   resultSummary: string;
 }
 
-const PAID: ReadonlySet<VyaamikkPlan> = new Set(["starter", "professional", "business"]);
+const PAID: ReadonlySet<VyaamikkPlan> = new Set([
+  "starter",
+  "professional",
+  "business",
+  "unlimited",
+]);
 
 function catalogEntryOrNull(sku: string): CatalogEntry | null {
   return (SUBSCRIPTION_CATALOG as Record<string, CatalogEntry | undefined>)[sku] ?? null;

@@ -12,7 +12,13 @@ import {
   type VyaamikkPlan,
 } from "./types";
 
-const PLANS: ReadonlySet<string> = new Set(["free", "starter", "professional", "business"]);
+const PLANS: ReadonlySet<string> = new Set([
+  "free",
+  "starter",
+  "professional",
+  "business",
+  "unlimited",
+]);
 const STATUSES: ReadonlySet<string> = new Set([
   "trial",
   "active",
@@ -21,7 +27,12 @@ const STATUSES: ReadonlySet<string> = new Set([
   "cancelled",
   "expired",
 ]);
-const PAID_PLANS: ReadonlySet<string> = new Set(["starter", "professional", "business"]);
+const PAID_PLANS: ReadonlySet<string> = new Set([
+  "starter",
+  "professional",
+  "business",
+  "unlimited",
+]);
 
 export interface EntitlementSnapshot {
   billingStatus: unknown;

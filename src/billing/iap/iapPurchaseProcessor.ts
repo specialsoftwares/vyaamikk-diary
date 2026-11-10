@@ -305,8 +305,32 @@ export async function processStorePurchase(args: {
         pending,
       };
     }
-    void validation.acknowledged;
-    void validation.entitlementActive;
+    // STORE EVENT != ENTITLEMENT. Gate verified on server acknowledgment +
+    // entitlementActive so VC36 cannot mark verified while status is still free.
+    const entitlementReady =
+      validation.entitlementActive === true &&
+      (validation.acknowledged === true || validation.alreadyProcessed === true);
+    if (!entitlementReady) {
+      if (!stillCurrent(deps)) {
+        return {
+          result: {
+            kind: "failed",
+            recoverable: true,
+            message: "Purchase is still verifying on this account.",
+          },
+          pending: args.pending,
+        };
+      }
+      pending = await patchPending(deps, pending, "awaiting_recovery");
+      return {
+        result: {
+          kind: "failed",
+          recoverable: true,
+          message: "Purchase is still verifying on this account.",
+        },
+        pending,
+      };
+    }
     args.processedTokens.add(purchase.purchaseToken);
     if (pending && pending.productId !== purchase.productId) {
       return { result: { kind: "verified" }, pending };
@@ -344,8 +368,9 @@ export async function processStorePurchase(args: {
       pending = await patchPending(deps, pending, "verifying");
     }
     const hint = expectedCanonicalSkuHint(pending, purchase);
+    let iosValidation;
     try {
-      await deps.backend.validateAndActivateIOS({
+      iosValidation = await deps.backend.validateAndActivateIOS({
         signedTransactionInfo: purchase.purchaseToken,
         expectedCanonicalSku: hint,
       });
@@ -376,6 +401,27 @@ export async function processStorePurchase(args: {
           kind: "failed",
           recoverable: true,
           message: "Couldn't verify this purchase.",
+        },
+        pending,
+      };
+    }
+    if (iosValidation.entitlementActive !== true && iosValidation.alreadyProcessed !== true) {
+      if (!stillCurrent(deps)) {
+        return {
+          result: {
+            kind: "failed",
+            recoverable: true,
+            message: "Purchase is still verifying on this account.",
+          },
+          pending: args.pending,
+        };
+      }
+      pending = await patchPending(deps, pending, "awaiting_recovery");
+      return {
+        result: {
+          kind: "failed",
+          recoverable: true,
+          message: "Purchase is still verifying on this account.",
         },
         pending,
       };

@@ -86,8 +86,6 @@ export function upgradePeriodLabel(t: TranslateFn, period: UpgradeCatalogPeriod)
   switch (period) {
     case "monthly":
       return t("billing.upgrade.periodMonthly");
-    case "quarterly":
-      return t("billing.upgrade.periodQuarterly");
     case "yearly":
       return t("billing.upgrade.periodYearly");
   }
@@ -98,31 +96,13 @@ function planCardCopy(
   planId: UpgradePlanId
 ): { name: string; benefits: string[] } {
   switch (planId) {
-    case "starter":
+    case "unlimited":
       return {
-        name: t("billing.upgrade.plans.starter.name"),
+        name: t("billing.upgrade.plans.unlimited.name"),
         benefits: [
-          t("billing.upgrade.plans.starter.b1"),
-          t("billing.upgrade.plans.starter.b2"),
-        ],
-      };
-    case "professional":
-      return {
-        name: t("billing.upgrade.plans.professional.name"),
-        benefits: [
-          t("billing.upgrade.plans.professional.b1"),
-          t("billing.upgrade.plans.professional.b2"),
-          t("billing.upgrade.plans.professional.b3"),
-        ],
-      };
-    case "business":
-      return {
-        name: t("billing.upgrade.plans.business.name"),
-        benefits: [
-          t("billing.upgrade.plans.business.b1"),
-          t("billing.upgrade.plans.business.b2"),
-          t("billing.upgrade.plans.business.b3"),
-          t("billing.upgrade.plans.business.b4"),
+          t("billing.upgrade.plans.unlimited.b1"),
+          t("billing.upgrade.plans.unlimited.b2"),
+          t("billing.upgrade.plans.unlimited.b3"),
         ],
       };
   }
@@ -208,33 +188,11 @@ export function resolveUpgradeCta(input: {
     };
   }
 
-  const professionalTrialSelected =
-    input.trialEligible === true && input.selectedPlanId === "professional";
-
-  if (professionalTrialSelected) {
-    if (input.trialActionAvailable !== true) {
-      return {
-        kind: "trialUnavailable",
-        enabled: false,
-        labelKey: "billing.upgrade.ctaTrialUnavailable",
-        dispatch: "none",
-      };
-    }
-    if (input.hasError) {
-      return {
-        kind: "trial",
-        enabled: false,
-        labelKey: "billing.upgrade.ctaTrial",
-        dispatch: "none",
-      };
-    }
-    return {
-      kind: "trial",
-      enabled: true,
-      labelKey: "billing.upgrade.ctaTrial",
-      dispatch: "trial",
-    };
-  }
+  // New selling surface does not offer trial CTAs. Legacy trial eligibility
+  // stays server-owned and is not started from this sheet.
+  void input.trialEligible;
+  void input.trialActionAvailable;
+  void input.selectedPlanId;
 
   return {
     kind: "subscribe",

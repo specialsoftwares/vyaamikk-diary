@@ -43,7 +43,7 @@ function catalogRow(
     canonicalSku: sku,
     available: ready,
     unavailableReason: ready ? null : "products_unavailable",
-    storeProductId: ready ? "vyd_starter" : sku,
+    storeProductId: ready ? "vyd_unlimited" : sku,
     androidBasePlanId: ready ? "monthly" : undefined,
     displayPrice: ready ? "₹store-monthly" : null,
     currency: ready ? "INR" : null,
@@ -51,9 +51,9 @@ function catalogRow(
   };
 }
 
-/** Only Starter monthly has a store price. Other plans stay unpurchasable. */
+/** Only Unlimited monthly has a store price. Other SKUs stay unpurchasable. */
 const starterMonthlyCatalog: CanonicalSkuAvailability[] = ALL_CANONICAL_SKUS.map((sku) =>
-  catalogRow(sku, sku === "vyd_starter_monthly")
+  catalogRow(sku, sku === "vyd_unlimited_monthly")
 );
 
 const unpricedCatalog: CanonicalSkuAvailability[] = ALL_CANONICAL_SKUS.map((sku) =>
@@ -158,13 +158,13 @@ async function run(): Promise<void> {
     assert.equal(capable.snap.triggerContext, "manualUpgrade");
     assert.equal(capable.model.catalogState, "ready");
     assert.equal(capable.model.purchaseAvailable, true);
-    assert.equal(capable.model.defaultSku, "vyd_starter_monthly");
+    assert.equal(capable.model.defaultSku, "vyd_unlimited_monthly");
     assert.equal(
-      capable.model.offers.find((offer) => offer.sku === "vyd_starter_monthly")?.offer.status,
+      capable.model.offers.find((offer) => offer.sku === "vyd_unlimited_monthly")?.offer.status,
       "ready"
     );
     for (const offer of capable.model.offers) {
-      if (offer.sku === "vyd_starter_monthly") continue;
+      if (offer.sku === "vyd_unlimited_monthly") continue;
       assert.equal(offer.offer.status, "unavailable", `${offer.sku} must stay unpriced`);
     }
     assert.equal(capable.cta.kind, "subscribe");
@@ -173,7 +173,7 @@ async function run(): Promise<void> {
     assert.equal(capable.cta.dispatch, "purchase");
     assert.deepEqual(capable.sheet.primaryPress, {
       type: "purchase",
-      sku: "vyd_starter_monthly",
+      sku: "vyd_unlimited_monthly",
     });
     assert.equal(purchaseCalls.length, 0, "presenting the sheet must not purchase");
 

@@ -56,7 +56,9 @@ export function monthlyRecordCapFromStatusData(statusData: Record<string, unknow
   const entitled = statusData.entitlementActive === true;
   const plan = entitled ? statusData.plan : "free";
   if (plan === "starter") return STARTER_MONTHLY_RECORD_CAP;
-  if (plan === "professional" || plan === "business") return UNLIMITED_MONTHLY_RECORD_CAP;
+  if (plan === "professional" || plan === "business" || plan === "unlimited") {
+    return UNLIMITED_MONTHLY_RECORD_CAP;
+  }
   return FREE_MONTHLY_RECORD_CAP;
 }
 

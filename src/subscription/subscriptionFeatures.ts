@@ -22,13 +22,14 @@ import {
 
 /**
  * Explicit plan rank. Do not use lexical/string ordering.
- * free < starter < professional < business
+ * free < starter < professional < business ≤ unlimited
  */
 export const SUBSCRIPTION_PLAN_RANK: Record<VyaamikkPlan, number> = {
   free: 0,
   starter: 1,
   professional: 2,
   business: 3,
+  unlimited: 3,
 };
 
 export function subscriptionPlanRank(plan: VyaamikkPlan): number {
