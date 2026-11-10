@@ -27,8 +27,9 @@ import {
   SCREEN_EXISTING_SLOW_MS,
   ScreenErrorPanel,
   SlowNetworkStatus,
-  showsEmpty,
   listPhase,
+  screenStateCopy,
+  showsEmpty,
 } from "@/components/screenState";
 import { displayStoredError } from "@/domain/publicErrors";
 import { useCalendarMapsData } from "@/hooks/useCalendarMapsData";
@@ -36,7 +37,7 @@ import { useVyaaflowCopy } from "@/content/vyaaflow/useVyaaflowCopy";
 import { useAppRefresh } from "@/hooks/useAppRefresh";
 import { useAuth } from "@/state/auth";
 import { useSync } from "@/state/sync";
-import { useT } from "@/i18n";
+import { useI18n, useT } from "@/i18n";
 import type { CalendarMapRecord, CalendarMarkedDots } from "@/services/calendarMaps";
 import { navigateToCalendarMapRecord } from "@/services/calendarMaps/calendarMapsRouting";
 import { dayKey, formatEntryDate } from "@/utils/date";
@@ -56,6 +57,8 @@ const AGENDA_FILTERS: VyaaflowAgendaFilter[] = ["all", "business", "statutory"];
 
 export default function CalendarMapsTab() {
   const t = useT();
+  const { lang } = useI18n();
+  const copy = screenStateCopy(lang);
   const vyaaflowCopy = useVyaaflowCopy();
   const router = useRouter();
   const { mode: requestedMode } = useLocalSearchParams<{ mode?: string | string[] }>();
@@ -226,8 +229,8 @@ export default function CalendarMapsTab() {
   const offline = syncStatus === "offline";
   const dayPhase = listPhase({
     loading,
-    failed: Boolean(error) && sections.length === 0,
-    count: sections.length,
+    failed: Boolean(error) && dayView.totalCount === 0,
+    count: dayView.totalCount,
     owned: Boolean(user?.uid),
   });
 
@@ -298,6 +301,7 @@ export default function CalendarMapsTab() {
         <LocaleUiText style={styles.dateTitle}>
           {t("calendar.entriesOn", { date: selectedDateLabel })}
         </LocaleUiText>
+        {!user ? <LocaleUiText style={styles.dateTitle}>{copy.signedOut}</LocaleUiText> : null}
 
         {error ? (
           <ScreenErrorPanel
@@ -314,8 +318,8 @@ export default function CalendarMapsTab() {
           active={refreshing && sections.length > 0}
           slowAfterMs={SCREEN_EXISTING_SLOW_MS}
         />
-        {loading && dayView.isEmpty ? (
-          <SkeletonLoadingPanel loading slowMessage={t("skeleton.stillLoading")}>
+        {loading && dayView.isEmpty && !error ? (
+          <SkeletonLoadingPanel loading slowMessage={copy.slow}>
             <SkeletonList count={4} />
           </SkeletonLoadingPanel>
         ) : null}
@@ -331,6 +335,9 @@ export default function CalendarMapsTab() {
       error,
       loading,
       dayView.isEmpty,
+      copy.signedOut,
+      copy.slow,
+      user,
       reload,
       agendaFilter,
       filterLabel,

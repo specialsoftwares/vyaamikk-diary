@@ -8,7 +8,7 @@ import { Banner,
   Header,
   PremiumActionButton,
   Screen, LocaleUiText } from "@/components/ui";
-import { SaveOutcomeLabel, ScreenErrorPanel, SessionHoldNotice, InitialListSkeleton } from "@/components/screenState";
+import { SaveOutcomeLabel, ScreenErrorPanel, SessionHoldNotice, InitialListSkeleton, screenStateCopy, useRequestOwner } from "@/components/screenState";
 import { sessionBlocksWrite } from "@/components/screenState/resolveScreenState";
 import { BusinessEntryDetailBody } from "@/components/diary/BusinessEntryDetailBody";
 import type { BusinessEntry, OutwardFreightPayload } from "@/domain/businessEntry";
@@ -25,6 +25,7 @@ import { badgeForLocalRecord } from "@/services/diary/mergeLocalUnsynced";
 import { stripGpsFromLocation } from "@/services/location/locationRecordService";
 import { deleteUserContent } from "@/services/records/userContentDelete";
 import { notifySearchIndexChanged } from "@/services/search";
+import { currentSessionCommitEpoch } from "@/services/auth/authSessionFence";
 import { useAuth } from "@/state/auth";
 import { useSync } from "@/state/sync";
 import { useI18n, useT } from "@/i18n";
@@ -42,6 +43,9 @@ export default function EntryDetailScreen() {
   const { lang } = useI18n();
   const router = useRouter();
   const { user } = useAuth();
+  const owner = useRequestOwner(user?.uid ?? null);
+  const sessionEpoch = currentSessionCommitEpoch();
+  const copy = screenStateCopy(lang);
   const { status: syncStatus } = useSync();
   const { id, from } = useLocalSearchParams<{ id: string; from?: string }>();
   const entryId = String(id ?? "");
@@ -112,6 +116,16 @@ export default function EntryDetailScreen() {
     </View>
   );
 
+  const seenIdentity = useRef(`${user?.uid ?? ""}:${sessionEpoch}`);
+  const identity = `${user?.uid ?? ""}:${sessionEpoch}`;
+  if (identity !== seenIdentity.current) {
+    seenIdentity.current = identity;
+    if (entry) {
+      setEntry(null);
+      setError(null);
+      setLoading(Boolean(user?.uid));
+    }
+  }
   entryRef.current = entry;
   const blocked = sessionBlocksWrite({
     signedIn: Boolean(user),
@@ -124,6 +138,7 @@ export default function EntryDetailScreen() {
       if (!user) setSessionHold(true);
       return;
     }
+    const claim = owner.capture();
     setSessionHold(false);
     if (!entryRef.current) setLoading(true);
     setError(null);
@@ -131,7 +146,9 @@ export default function EntryDetailScreen() {
       const found =
         (await getDiaryRepository().getById(user.uid, entryId)) ??
         (await localEntriesRepository.getById(user.uid, entryId));
+      if (!owner.owns(claim)) return;
       const localMeta = await localEntriesRepository.getRecord(user.uid, entryId);
+      if (!owner.owns(claim)) return;
       setSyncBadge(localMeta ? badgeForLocalRecord(localMeta) : found ? "synced" : "synced");
       if (!found) {
         const missing = presentPublicError({ code: "not_found" });
@@ -144,6 +161,7 @@ export default function EntryDetailScreen() {
           const p = found.payload as unknown as OutwardFreightPayload;
           if (p.linkedDispatchId) {
             const dispatch = await getDiaryRepository().getById(user.uid, p.linkedDispatchId);
+            if (!owner.owns(claim)) return;
             if (
               dispatch &&
               dispatch.updatedAt > (p.linkedDispatchUpdatedAt ?? 0)
@@ -154,13 +172,14 @@ export default function EntryDetailScreen() {
         }
       }
     } catch (e) {
+      if (!owner.owns(claim)) return;
       const msg = presentPublicError(e);
       if (entryRef.current) setActionError(msg);
       else setError(msg);
     } finally {
-      setLoading(false);
+      if (owner.ownsGeneration(claim)) setLoading(false);
     }
-  }, [user, entryId]);
+  }, [user, entryId, owner, sessionEpoch]);
 
   useFocusEffect(
     useCallback(() => {
@@ -376,6 +395,15 @@ export default function EntryDetailScreen() {
       },
     ]);
   };
+
+  if (!user) {
+    return (
+      <Screen>
+        <Header title={t("diary.detailTitle")} showBack backFrom={from} />
+        <LocaleUiText style={{ padding: 24, textAlign: "center" }}>{copy.signedOut}</LocaleUiText>
+      </Screen>
+    );
+  }
 
   if (loading && !entry) {
     return (

@@ -15,7 +15,6 @@ import { Banner,
   Button,
   FormSection,
   Header,
-  Loader,
   Screen,
   SelectField,
   TextField,
@@ -25,7 +24,8 @@ import { useI18n, useT } from "@/i18n";
 import { formDateRowStyle, formFieldLabelStyle, formNestedCardStyle } from "@/theme/formLayer";
 import { spacing, typography, useTheme, useThemedStyles } from "@/theme";
 import { presentPublicError, toPublicError } from "@/domain/publicErrors";
-import { SessionHoldNotice } from "@/components/screenState";
+import { InitialListSkeleton, ScreenErrorPanel, SessionHoldNotice, useRequestOwner } from "@/components/screenState";
+import { currentSessionCommitEpoch } from "@/services/auth/authSessionFence";
 import { sessionBlocksWrite } from "@/components/screenState/resolveScreenState";
 import { useSync } from "@/state/sync";
 import { formatShortDate } from "@/utils/date";
@@ -121,6 +121,8 @@ export default function PurchaseOrderFormScreen() {
   const { lang } = useI18n();
   const router = useRouter();
   const { user } = useAuth();
+  const owner = useRequestOwner(user?.uid ?? null);
+  const sessionEpoch = currentSessionCommitEpoch();
   const { status: syncStatus } = useSync();
   const { id: editId, fromPicker } = useLocalSearchParams<{
     id?: string;
@@ -255,11 +257,13 @@ export default function PurchaseOrderFormScreen() {
 
   const load = useCallback(async () => {
     if (!user) return;
+    const claim = owner.capture();
     setLoading(true);
     setLoadError(null);
     try {
       if (editId) {
         const po = await getPurchaseOrderRepository().getById(user.uid, String(editId));
+        if (!owner.owns(claim)) return;
         if (po) {
           setExisting(po);
           setPoDate(po.poDate);
@@ -330,17 +334,19 @@ export default function PurchaseOrderFormScreen() {
           return;
         }
       }
+      if (!owner.owns(claim)) return;
       // Create defaults — prefill buyer identity from profile.
       setBuyerName(user.businessName || user.displayName || "");
       setAuthorizedBy(user.displayName || "");
       setAuthorizedDesignation(user.designation || "");
       setUseLogo(hasLogo && user.pdfBranding?.includeProfileLogo !== false);
     } catch (e) {
+      if (!owner.owns(claim)) return;
       setLoadError(presentPublicError(e));
     } finally {
-      setLoading(false);
+      if (owner.ownsGeneration(claim)) setLoading(false);
     }
-  }, [user, editId, hasLogo]);
+  }, [user, editId, hasLogo, owner, sessionEpoch]);
 
   useFocusEffect(
     useCallback(() => {
@@ -715,7 +721,7 @@ export default function PurchaseOrderFormScreen() {
     return (
       <Screen>
         <Header title={t("purchaseOrder.formTitle")} showBack onBackPress={goBack} />
-        <Loader fullscreen message={t("common.loading")} />
+        <InitialListSkeleton count={6} />
       </Screen>
     );
   }
@@ -724,7 +730,7 @@ export default function PurchaseOrderFormScreen() {
     return (
       <Screen>
         <Header title={t("purchaseOrder.formTitle")} showBack onBackPress={goBack} />
-        <Banner tone="danger" message={loadError} />
+        <ScreenErrorPanel error={loadError} message={loadError} onRetry={() => void load()} />
       </Screen>
     );
   }

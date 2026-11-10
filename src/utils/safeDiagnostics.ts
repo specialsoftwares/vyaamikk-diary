@@ -230,6 +230,7 @@ const FIREBASE_AUTH_CODES = new Set([
   "auth/invalid-email",
   "auth/missing-verification-id",
   "auth/code-expired",
+  "auth/missing-activity",
 ]);
 
 const ALLOWED_OPS = new Set([
@@ -280,6 +281,8 @@ const ERROR_NAMES = new Set(["AppError", "StartupError", "Error", "LocalKeyUnava
 
 const ALLOWED_REGIONS = new Set(["asia-south1"]);
 
+const ANDROID_ACTIVITY_STATES = new Set(["present", "missing", "unknown", "n/a"]);
+
 type FieldSpec = (value: unknown) => SafeMetaValue | undefined;
 
 const META_FIELDS = new Map<string, FieldSpec>([
@@ -310,7 +313,7 @@ const META_FIELDS = new Map<string, FieldSpec>([
   ["retryable", (v) => asBoolean(v)],
   ["recoverable", (v) => asBoolean(v)],
   ["available", (v) => asBoolean(v)],
-  ["androidActivity", (v) => asBoolean(v)],
+  ["androidActivity", (v) => asBoolean(v) ?? asAllowedString(v, ANDROID_ACTIVITY_STATES)],
   ["nativeUidPresent", (v) => asBoolean(v)],
   ["jsUidPresent", (v) => asBoolean(v)],
   ["uidsMatch", (v) => asBoolean(v)],

@@ -33,9 +33,11 @@ import { EntryTypeFilter, type DiaryEntryFilterType } from "@/components/diary/E
 import { SwipeToDeleteRow } from "@/components/records/SwipeToDeleteRow";
 import { useRecordDelete } from "@/hooks/useRecordDelete";
 import { useAppRefresh } from "@/hooks/useAppRefresh";
+import { currentSessionCommitEpoch } from "@/services/auth/authSessionFence";
 import { useAuth } from "@/state/auth";
 import { useSync } from "@/state/sync";
 import { useDiaryList } from "@/state/useDiaryList";
+import { syncSessionOwnership } from "@/sync/syncSessionOwnership";
 import { useI18n, useT } from "@/i18n";
 import { spacing, typography, useThemedStyles, useThemeColors } from "@/theme";
 import type { BusinessEntryType } from "@/domain/businessEntry";
@@ -122,8 +124,11 @@ export default function DiaryHistoryScreen() {
     );
   }, [entries, entryTypeFilter]);
 
+  const session = syncSessionOwnership.capture();
   const ownedEntries = useOwnedSnapshot({
     signedInUid: user?.uid ?? null,
+    epoch: currentSessionCommitEpoch(),
+    generation: session?.generation ?? null,
     loading,
     failed: Boolean(error),
     value: displayedEntries,
@@ -133,7 +138,8 @@ export default function DiaryHistoryScreen() {
     loading,
     failed: Boolean(error),
     count: rows.length,
-    owned: ownedEntries.accepted,
+    owned: ownedEntries.current,
+    pending: ownedEntries.pending,
   });
   const offline = syncStatus === "offline";
 

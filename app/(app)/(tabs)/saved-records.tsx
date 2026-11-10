@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import { useFocusEffect, useRouter } from "expo-router";
@@ -14,9 +14,10 @@ import {
   SlowNetworkStatus,
   listPhase,
   screenStateCopy,
+  useOwnedRequest,
   useOwnedSnapshot,
 } from "@/components/screenState";
-import { presentPublicError } from "@/domain/publicErrors";
+import { currentSessionCommitEpoch } from "@/services/auth/authSessionFence";
 import { GlobalSearchBar } from "@/components/search/GlobalSearchBar";
 import { useAuth } from "@/state/auth";
 import { useSync } from "@/state/sync";
@@ -62,11 +63,8 @@ export default function SavedRecordsTab() {
   const { resolvedMode } = useTheme();
   const userId = user?.uid ?? null;
 
-  const [data, setData] = useState<SavedRecordsData | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const loadedUid = useRef<string | null>(null);
   const [pane, setPane] = useState<"records" | "partyLedger">("records");
+  const { load, run } = useOwnedRequest<SavedRecordsData>(userId);
 
   const isDark = resolvedMode === "dark";
 
@@ -115,37 +113,27 @@ export default function SavedRecordsTab() {
   );
 
   const reload = useCallback(async () => {
-    if (!userId) {
-      setLoading(false);
-      return;
-    }
-    if (loadedUid.current !== userId) setLoading(true);
-    setError(null);
-    try {
-      const next = await loadSavedRecordsData(userId);
-      loadedUid.current = userId;
-      setData(next);
-    } catch (e) {
-      setError(presentPublicError(e));
-    } finally {
-      setLoading(false);
-    }
-  }, [userId]);
+    await run((uid) => loadSavedRecordsData(uid));
+  }, [run]);
 
   const { refreshing, refreshNote, onRefresh } = useAppRefresh({ onReload: reload });
 
   const ownedRecords = useOwnedSnapshot({
     signedInUid: userId,
-    loading,
-    failed: Boolean(error),
-    value: data,
+    epoch: currentSessionCommitEpoch(),
+    generation: load.claim?.generation ?? null,
+    loading: load.loading,
+    failed: Boolean(load.error),
+    value: load.value,
+    valueClaim: load.valueClaim,
   });
   const visible = ownedRecords.accepted ? ownedRecords.value : null;
   const phase = listPhase({
-    loading,
-    failed: Boolean(error),
+    loading: load.loading,
+    failed: Boolean(load.error),
     count: visible ? 1 : 0,
-    owned: ownedRecords.accepted,
+    owned: ownedRecords.current,
+    pending: ownedRecords.pending,
   });
   const offline = syncStatus === "offline";
 
@@ -344,11 +332,11 @@ export default function SavedRecordsTab() {
           <View style={styles.searchWrap}>
             <GlobalSearchBar />
           </View>
-          {error && visible ? <Banner tone="danger" message={error} /> : null}
+          {load.error && visible ? <Banner tone="danger" message={load.error} /> : null}
           <View style={styles.divider} />
           <LastRefreshedHint message={refreshNote} />
           {offline && visible ? <OfflineDeviceNotice offline hasRows /> : null}
-          <SlowNetworkStatus active={refreshing && Boolean(visible)} />
+          <SlowNetworkStatus active={load.loading && Boolean(visible)} />
         </View>
 
         {phase === "loading" ? (
@@ -356,7 +344,7 @@ export default function SavedRecordsTab() {
         ) : phase === "error" ? (
           <>
             {offline ? <OfflineDeviceNotice offline hasRows={false} /> : null}
-            <ScreenErrorPanel error={error ?? "unknown"} onRetry={() => void reload()} />
+            <ScreenErrorPanel error={load.error ?? "unknown"} onRetry={() => void reload()} />
           </>
         ) : !visible ? (
           <LocaleUiText>{copy.signedOut}</LocaleUiText>

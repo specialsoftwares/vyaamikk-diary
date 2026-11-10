@@ -4,7 +4,7 @@ This matrix is what the UI pass actually wired. It is not a claim that every ada
 
 Public errors live in `src/domain/publicErrors.ts` only. `presentPublicError` returns a catalogue sentence for a known code and the generic sentence otherwise. It does not return `Error.message`, a stack, or a `functions/` identifier. `auth/session-expired` stays the one-time-code recovery. Account session recovery uses `session_expired`, `functions/unauthenticated`, `unauthenticated`, `UNAUTHENTICATED`, and `auth/user-token-expired`. No timeout length is stated.
 
-Shared decisions are in `src/components/screenState/`. Empty is only `listPhase` `"empty"`: an owned, finished, successful read with nothing in it. Cached rows render only when the cache owner uid matches the signed-in uid. Strings are English and Hindi in `screenStateCopy.ts`. Reduced motion uses the existing `AccessibilityInfo` API and turns off the skeleton pulse. No new animation library, route, permission request, progress percent, or lighter-content toggle was added.
+Shared decisions are in `src/components/screenState/`. Empty is only `listPhase` `"empty"`: an owned, finished, successful read with nothing in it. A signed-in request that has not settled stays `pending`, so the screen shows a skeleton. It does not show the signed-out sentence, and it does not treat an unsettled library as empty. Cached rows render only when the cache owner uid matches the signed-in uid. An unclaimed success is accepted only after that request has loaded or failed. Strings are English and Hindi in `screenStateCopy.ts`. Reduced motion uses the existing `AccessibilityInfo` API and turns off the skeleton pulse. No new animation library, route, permission request, progress percent, or lighter-content toggle was added.
 
 | Area | Screen | Empty | Loading | Error | Offline | Slow | Search | Permission | Session | Validation | Success |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -19,10 +19,11 @@ Shared decisions are in `src/components/screenState/`. Empty is only `listPhase`
 | Composer | `app/(app)/composer/[type].tsx` | Absent | Absent | Wired | Absent | Absent | Absent | Absent | Wired | Absent | Wired |
 | Customer credit form | `app/(app)/customer-credit/form.tsx` | Absent | Absent | Wired | Absent | Absent | Absent | Wired | Wired | Absent | Absent |
 | Purchase order form | `app/(app)/purchase-order/form.tsx` | Absent | Absent | Wired | Absent | Absent | Absent | Absent | Wired | Wired | Absent |
-| Dashboard | `app/(app)/(tabs)` home | Not wired | Not wired | Not wired | Not wired | Not wired | Not wired | Not wired | Not wired | Not wired | Not wired |
-| Professional packs | `app/(app)/professional-pack/history.tsx` | Not wired | Not wired | Not wired | Not wired | Not wired | Not wired | Not wired | Not wired | Not wired | Not wired |
-| GRIN and attachments | `app/(app)/grin/index.tsx` | Not wired | Not wired | Not wired | Not wired | Not wired | Not wired | Not wired | Not wired | Not wired | Not wired |
-| Settings | `app/(app)/settings` | Not wired | Not wired | Not wired | Not wired | Not wired | Not wired | Not wired | Not wired | Not wired | Not wired |
+| Dashboard | `app/(app)/(tabs)/you.tsx` | Existing zero stats | Wired | Wired | Wired | Wired | Absent | Absent | Absent | Absent | Absent |
+| Professional packs | `app/(app)/professional-pack/history.tsx` | Wired | Wired | Wired | Wired | Wired | Wired | Absent | Absent | Absent | Absent |
+| Purchase orders | `app/(app)/purchase-order/index.tsx` | Wired | Wired | Wired | Wired | Wired | Absent | Absent | Absent | Absent | Absent |
+| GRIN list and attachments | `src/screens/grin/GrinListScreen.tsx`, `GrinAttachmentsAdmittedBody.tsx` | Empty only after a ready local read | Local list, so no network skeleton | Public error and retry | Absent | Absent | Absent | Camera or library alternative, then recheck | Session-retired copy | Absent | Absent |
+| Settings | `app/(app)/(tabs)/settings.tsx` | Absent | Existing settings skeleton | Absent | Absent | Wired | Absent | Absent | Sign-out busy flag is generation-fenced | Absent | Absent |
 | Onboarding profile | `src/auth-v2/screens/BusinessIdentityScreen.tsx` | Not wired here | Not wired here | Not wired here | Not wired here | Not wired here | Not wired here | Not wired here | Not wired here | Owned by onboarding | Not wired here |
 
 ## What "wired" means on each screen

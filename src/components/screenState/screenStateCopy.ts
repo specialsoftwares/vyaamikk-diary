@@ -20,6 +20,8 @@ export interface ScreenStateCopy {
   permissionTitle: string;
   permissionCameraBody: string;
   permissionLibraryBody: string;
+  grinPermissionCameraBody: string;
+  grinPermissionLibraryBody: string;
   openSettings: string;
   usePhotosInstead: string;
   useCameraInstead: string;
@@ -51,6 +53,10 @@ const EN: ScreenStateCopy = {
     "The camera is used only when you choose to attach an optional photo of this customer to the record. That photo stays on this device.",
   permissionLibraryBody:
     "Your photos are used only when you choose an existing picture to attach to this customer record. That copy stays on this device.",
+  grinPermissionCameraBody:
+    "The camera is used only to photograph an original document for this goods receipt. The picture stays with that receipt on this device.",
+  grinPermissionLibraryBody:
+    "Your files are used only when you choose an original document to attach to this goods receipt. That file stays with the receipt on this device.",
   openSettings: "Open Settings",
   usePhotosInstead: "Choose a photo instead",
   useCameraInstead: "Take a photo instead",
@@ -83,6 +89,10 @@ const HI: ScreenStateCopy = {
     "कैमरा तभी इस्तेमाल होता है जब आप इस ग्राहक की वैकल्पिक फ़ोटो रिकॉर्ड में जोड़ना चुनते हैं। वह फ़ोटो इस डिवाइस पर रहती है।",
   permissionLibraryBody:
     "आपकी फ़ोटो तभी इस्तेमाल होती हैं जब आप इस ग्राहक के रिकॉर्ड में कोई मौजूदा चित्र जोड़ना चुनते हैं। वह प्रति इस डिवाइस पर रहती है।",
+  grinPermissionCameraBody:
+    "कैमरा तभी इस्तेमाल होता है जब आप इस माल रसीद का मूल दस्तावेज़ फ़ोटो में लेते हैं। वह चित्र इस रसीद के साथ इस डिवाइस पर रहता है।",
+  grinPermissionLibraryBody:
+    "आपकी फ़ाइलें तभी इस्तेमाल होती हैं जब आप इस माल रसीद में कोई मूल दस्तावेज़ जोड़ना चुनते हैं। वह फ़ाइल इस रसीद के साथ इस डिवाइस पर रहती है।",
   openSettings: "सेटिंग्स खोलें",
   usePhotosInstead: "इसके बजाय फ़ोटो चुनें",
   useCameraInstead: "इसके बजाय फ़ोटो लें",

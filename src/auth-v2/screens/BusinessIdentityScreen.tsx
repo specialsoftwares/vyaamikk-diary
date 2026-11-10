@@ -61,7 +61,8 @@ import { demographicAgeCopy } from "@/onboarding/demographicAgeCopy";
 import {
   DEMOGRAPHIC_AGE_BANDS,
   DEMOGRAPHIC_AGE_SKIPPED,
-  readDeviceDemographicAge,
+  shouldApplyDemographicAgeRead,
+  watchDeviceDemographicAge,
   writeDeviceDemographicAge,
   type DemographicAgeSelection,
 } from "@/onboarding/demographicAge";
@@ -115,6 +116,7 @@ export function BusinessIdentityScreen({
   const latestPinRequestIdRef = useRef(0);
   const pinLookupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const continueGuardRef = useRef(createGenerationGuard());
+  const ageRevisionRef = useRef(0);
 
   const readOnly = user ? isOnboardingIdentityLocked(user) : false;
 
@@ -159,10 +161,8 @@ export function BusinessIdentityScreen({
       ) {
         loaded = { ...loaded, businessName: user.businessName.trim() };
       }
-      const storedAge = await readDeviceDemographicAge(user.uid, AsyncStorage).catch(() => null);
       if (cancelled) return;
       syncDraft(loaded);
-      setAgeSelection(storedAge);
       if (loaded.confirmedLocation && loaded.confirmedLocation.pinCode === loaded.pinCode) {
         setPinUi({ status: "confirmed", location: loaded.confirmedLocation });
       } else if (loaded.pinCode.length === 6) {
@@ -183,6 +183,29 @@ export function BusinessIdentityScreen({
       cancelled = true;
     };
   }, [user?.uid, router, syncDraft, user]);
+
+  useEffect(() => {
+    const uid = user?.uid;
+    if (!uid) return;
+    let cancelled = false;
+    const revisionAtStart = ageRevisionRef.current;
+    setAgeSelection(null);
+    watchDeviceDemographicAge({
+      uid,
+      store: AsyncStorage,
+      revisionAtStart,
+      currentRevision: () => ageRevisionRef.current,
+      onSelection: (selection) => {
+        if (cancelled) return;
+        if (!shouldApplyDemographicAgeRead(revisionAtStart, ageRevisionRef.current)) return;
+        setAgeSelection(selection);
+      },
+    });
+    return () => {
+      cancelled = true;
+      ageRevisionRef.current += 1;
+    };
+  }, [user?.uid]);
 
   useEffect(() => {
     if (!user || readOnly || !draft) return;
@@ -283,6 +306,7 @@ export function BusinessIdentityScreen({
   const ageCopy = demographicAgeCopy(lang);
   const onChooseAge = (next: DemographicAgeSelection) => {
     // Device-only. Never written as ageEligibility and never required to continue.
+    ageRevisionRef.current += 1;
     setAgeSelection(next);
     void writeDeviceDemographicAge(user.uid, next, AsyncStorage).catch(() => undefined);
   };

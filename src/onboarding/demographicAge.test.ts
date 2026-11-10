@@ -18,7 +18,10 @@ import {
   demographicAnswerAllowsProfileCompletion,
   profileCompletionRequiresDemographicAge,
   readDeviceDemographicAge,
+  shouldApplyDemographicAgeRead,
+  watchDeviceDemographicAge,
   writeDeviceDemographicAge,
+  type DemographicAgeClock,
   type DemographicAgeDeviceStore,
   type DemographicAgeSelection,
 } from "@/onboarding/demographicAge";
@@ -53,7 +56,44 @@ function memoryStore(): DemographicAgeDeviceStore & { data: Map<string, string> 
     setItem: async (key, value) => {
       data.set(key, value);
     },
+    removeItem: async (key) => {
+      data.delete(key);
+    },
   };
+}
+
+function manualClock(start = 1_700_000_000_000): DemographicAgeClock & { advance(ms: number): void } {
+  let now = start;
+  const waiters: { at: number; resolve: () => void; cancelled: boolean }[] = [];
+  return {
+    now: () => now,
+    delay(ms: number) {
+      let resolve!: () => void;
+      const done = new Promise<void>((ready) => {
+        resolve = ready;
+      });
+      const waiter = { at: now + ms, resolve, cancelled: false };
+      waiters.push(waiter);
+      return {
+        done,
+        cancel() {
+          waiter.cancelled = true;
+        },
+      };
+    },
+    advance(ms: number) {
+      now += ms;
+      for (const waiter of waiters) {
+        if (!waiter.cancelled && waiter.at <= now) waiter.resolve();
+      }
+    },
+  };
+}
+
+async function flushMicrotasks(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
 }
 
 function profile(over: Partial<UserProfile> = {}): UserProfile {
@@ -151,6 +191,17 @@ function assertStorageHelper(source: string, label: string) {
 async function main() {
   const moduleSource = readFileSync(resolve("src/onboarding/demographicAge.ts"), "utf8");
   assert.match(moduleSource, /not uploaded/);
+  assert.match(moduleSource, /not company analytics/);
+  assert.match(moduleSource, /age-band metric was requested for understanding who uses the product/);
+  assert.match(moduleSource, /only on the device for the signed-in owner/);
+  assert.match(moduleSource, /consent-aware count with no user id/);
+  assert.match(moduleSource, /no record contents/);
+  assert.match(moduleSource, /non-blocking write/);
+  assert.equal(/analytics/i.test(DEMOGRAPHIC_AGE_COPY.en.title), false);
+  assert.equal(/analytics/i.test(DEMOGRAPHIC_AGE_COPY.en.helper), false);
+  assert.equal(/analytics/i.test(DEMOGRAPHIC_AGE_COPY.en.skip), false);
+  assert.equal(/analytics/i.test(DEMOGRAPHIC_AGE_COPY.hi.title), false);
+  assert.equal(/analytics/i.test(DEMOGRAPHIC_AGE_COPY.hi.helper), false);
   const retiredRoute = readFileSync(resolve("app/(auth)/age-declaration.tsx"), "utf8");
   assert.equal(retiredRoute.includes("AgeDeclarationScreen"), false);
   assert.equal(retiredRoute.includes("callRecordAgeAssessment"), false);
@@ -325,6 +376,158 @@ async function main() {
   assert.match(seal, /assertAdmittedCallableUser/);
   assert.match(seal, /assertBusinessAgeAdmitted/);
   assert.match(seal, /assertRestoreTrafficClosed/);
+
+  const revision = { n: 0 };
+  const clock = manualClock();
+  let releaseRead: ((value: string | null) => void) | undefined;
+  let chosen: DemographicAgeSelection | null = null;
+  const hung = watchDeviceDemographicAge({
+    uid: "uid-owner-a",
+    store: {
+      getItem: () =>
+        new Promise<string | null>((resolveRead) => {
+          releaseRead = resolveRead;
+        }),
+    },
+    boundMs: 300,
+    clock,
+    revisionAtStart: 0,
+    currentRevision: () => revision.n,
+    onSelection: (selection) => {
+      chosen = selection;
+    },
+  });
+  const hungWrite = buildClientProfileFirestoreWrite(
+    profile(),
+    profile({ displayName: "Ada Lovelace", profileCompletedAt: 50, updatedAt: 50 }),
+    { production: true }
+  );
+  assert.equal(hungWrite?.displayName, "Ada Lovelace");
+  assert.equal(hungWrite?.profileCompletedAt, 50);
+  assert.equal(hungWrite?.ageEligibility, undefined);
+  assert.equal(hungWrite != null && "demographicAgeBand" in hungWrite, false);
+  assert.equal(profileCompletionRequiresDemographicAge(), false);
+  clock.advance(300);
+  assert.equal(await hung.settled, "timeout");
+  assert.equal(chosen, null);
+  chosen = "prefer_not_to_say";
+  revision.n = 1;
+  releaseRead?.("under_18");
+  await flushMicrotasks();
+  assert.equal(chosen, "prefer_not_to_say");
+  assert.equal(shouldApplyDemographicAgeRead(0, revision.n), false);
+
+  const lateClock = manualClock();
+  let releaseLate: ((value: string | null) => void) | undefined;
+  const lateSeen: Array<DemographicAgeSelection | null> = [];
+  const late = watchDeviceDemographicAge({
+    uid: "uid-owner-a",
+    store: {
+      getItem: () =>
+        new Promise<string | null>((resolveRead) => {
+          releaseLate = resolveRead;
+        }),
+    },
+    boundMs: 300,
+    clock: lateClock,
+    revisionAtStart: 4,
+    currentRevision: () => 4,
+    onSelection: (selection) => {
+      lateSeen.push(selection);
+    },
+  });
+  lateClock.advance(300);
+  assert.equal(await late.settled, "timeout");
+  releaseLate?.(DEMOGRAPHIC_AGE_SKIPPED);
+  await flushMicrotasks();
+  assert.deepEqual(lateSeen, [DEMOGRAPHIC_AGE_SKIPPED]);
+
+  const preferClock = manualClock();
+  let releasePrefer: ((value: string | null) => void) | undefined;
+  const preferRevision = { n: 0 };
+  let preferChosen: DemographicAgeSelection | null = "prefer_not_to_say";
+  const prefer = watchDeviceDemographicAge({
+    uid: "uid-owner-a",
+    store: {
+      getItem: () =>
+        new Promise<string | null>((resolveRead) => {
+          releasePrefer = resolveRead;
+        }),
+    },
+    boundMs: 300,
+    clock: preferClock,
+    revisionAtStart: 0,
+    currentRevision: () => preferRevision.n,
+    onSelection: (selection) => {
+      preferChosen = selection;
+    },
+  });
+  preferRevision.n = 1;
+  releasePrefer?.("18_24");
+  assert.equal(await prefer.settled, "stale");
+  await flushMicrotasks();
+  assert.equal(preferChosen, "prefer_not_to_say");
+
+  const skipClock = manualClock();
+  const skipRevision = { n: 2 };
+  let skipChosen: DemographicAgeSelection | null = DEMOGRAPHIC_AGE_SKIPPED;
+  const skipped = watchDeviceDemographicAge({
+    uid: "uid-owner-a",
+    store: {
+      getItem: async () => "55_plus",
+    },
+    boundMs: 300,
+    clock: skipClock,
+    revisionAtStart: 2,
+    currentRevision: () => skipRevision.n,
+    onSelection: (selection) => {
+      skipChosen = selection;
+    },
+  });
+  skipRevision.n = 3;
+  assert.equal(await skipped.settled, "stale");
+  await flushMicrotasks();
+  assert.equal(skipChosen, DEMOGRAPHIC_AGE_SKIPPED);
+
+  let failedCalled = false;
+  const failedClock = manualClock();
+  const failed = watchDeviceDemographicAge({
+    uid: "uid-owner-a",
+    store: {
+      getItem: async () => {
+        throw new Error("demographic-storage-down");
+      },
+    },
+    boundMs: 300,
+    clock: failedClock,
+    revisionAtStart: 0,
+    currentRevision: () => 0,
+    onSelection: () => {
+      failedCalled = true;
+    },
+  });
+  assert.equal(await failed.settled, "failed");
+  assert.equal(failedCalled, false);
+  assert.equal(clock.now(), 1_700_000_000_300);
+
+  const savedClock = manualClock();
+  const savedSeen: Array<DemographicAgeSelection | null> = [];
+  const saved = watchDeviceDemographicAge({
+    uid: "uid-owner-a",
+    store: {
+      getItem: async () => "25_34",
+    },
+    boundMs: 300,
+    clock: savedClock,
+    revisionAtStart: 0,
+    currentRevision: () => 0,
+    onSelection: (selection) => {
+      savedSeen.push(selection);
+    },
+  });
+  assert.equal(await saved.settled, "ready");
+  assert.deepEqual(savedSeen, ["25_34"]);
+  assert.equal(savedClock.now(), 1_700_000_000_000);
 
   console.log("demographicAge.test.ts: ok");
 }

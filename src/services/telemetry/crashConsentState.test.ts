@@ -22,10 +22,13 @@ import {
   crashReportingActive,
   hydrateCrashConsent,
   initialCrashConsent,
+  nativeFromApply,
   relaunchCrashConsent,
 } from "./crashConsentState";
+import { nextProcessCrashCollectionEnabled } from "./crashNativeCollection";
 import {
   __resetCrashReportingForTests,
+  __setCrashSdkBridgeForTests,
   __setCrashlyticsClientForTests,
   recordError,
   setCrashReportingEnabled,
@@ -107,22 +110,64 @@ function harness() {
   };
 }
 
+function createCrashDouble(handlers?: {
+  onCollection?: (enabled: boolean) => Promise<void> | void;
+  onDelete?: () => Promise<void> | void;
+  onRecord?: () => void;
+  bridge?: "present" | "absent" | "fail";
+}) {
+  const snap = {
+    preference: true,
+    sdkCollection: false,
+    unsentDeletion: "none" as "none" | "requested",
+  };
+  const bridge = handlers?.bridge ?? "present";
+  __setCrashlyticsClientForTests({
+    setCrashlyticsCollectionEnabled: async (enabled) => {
+      snap.preference = enabled;
+    },
+    deleteUnsentReports: async () => {
+      snap.unsentDeletion = "requested";
+      await handlers?.onDelete?.();
+    },
+    recordError: () => undefined,
+    log: () => undefined,
+    setUserId: () => undefined,
+  });
+  if (bridge === "absent") {
+    __setCrashSdkBridgeForTests(null);
+  } else {
+    __setCrashSdkBridgeForTests({
+      setSdkCollectionEnabled: async (enabled) => {
+        if (bridge === "fail" && enabled) throw new Error("bridge rejected");
+        snap.sdkCollection = enabled;
+        try {
+          await handlers?.onCollection?.(enabled);
+        } catch (error) {
+          if (enabled) snap.sdkCollection = false;
+          throw error;
+        }
+      },
+      recordDiagnostic: async () => {
+        handlers?.onRecord?.();
+      },
+      logDiagnostic: async () => undefined,
+      deleteUnsentReports: async () => {
+        snap.unsentDeletion = "requested";
+        await handlers?.onDelete?.();
+      },
+    });
+  }
+  return snap;
+}
+
 function installClient(handlers?: {
   onCollection?: (enabled: boolean) => Promise<void> | void;
   onDelete?: () => Promise<void> | void;
   onRecord?: () => void;
+  bridge?: "present" | "absent" | "fail";
 }) {
-  __setCrashlyticsClientForTests({
-    setCrashlyticsCollectionEnabled: async (enabled) => {
-      await handlers?.onCollection?.(enabled);
-    },
-    deleteUnsentReports: async () => {
-      await handlers?.onDelete?.();
-    },
-    recordError: () => handlers?.onRecord?.(),
-    log: () => undefined,
-    setUserId: () => undefined,
-  });
+  return createCrashDouble(handlers);
 }
 
 async function main(): Promise<void> {
@@ -210,6 +255,30 @@ async function main(): Promise<void> {
   await storedWithdrawalRetriesUnsentDeletion();
   await failedPersistIsNotActive();
   await legacyFlagDoesNotEnable();
+  await delayedDiskAfterAcknowledgedAllow();
+  await delayedDiskAfterWithdrawal();
+  await accountSwitchDropsPreviousGrant();
+  await grantWithoutRuntimeBridge();
+  await grantWithBridgeLeavesPreferenceFalse();
+  assert.equal(
+    nextProcessCrashCollectionEnabled({ preference: false, firebaseJson: true, manifest: true }),
+    false,
+    "preference false means the next process starts disabled"
+  );
+  assert.equal(
+    nextProcessCrashCollectionEnabled({ preference: null, firebaseJson: false, manifest: true }),
+    false
+  );
+  assert.equal(nativeFromApply(true, { status: "enabled", preference: false }), "unavailable");
+  assert.equal(nativeFromApply(true, { nativeState: "on" }), "unavailable");
+  assert.equal(
+    nativeFromApply(true, { status: "enabled", preference: true, sdkCollection: true }),
+    "failed"
+  );
+  assert.equal(
+    nativeFromApply(true, { status: "enabled", preference: false, sdkCollection: true }),
+    "enabled"
+  );
 
   console.log("crashConsentState.test.ts: ok");
 }
@@ -290,19 +359,17 @@ async function withdrawalDuringActivation(): Promise<void> {
   const calls: string[] = [];
   const enableGate = deferred<void>();
   const withdrawSend = deferred<void>();
-  __setCrashlyticsClientForTests({
-    setCrashlyticsCollectionEnabled: async (enabled) => {
+  const snap = createCrashDouble({
+    onCollection: async (enabled) => {
       calls.push(enabled ? "enable" : "disable");
       if (enabled) await enableGate.promise;
     },
-    deleteUnsentReports: async () => {
+    onDelete: () => {
       calls.push("delete");
     },
-    recordError: () => {
+    onRecord: () => {
       reports += 1;
     },
-    log: () => undefined,
-    setUserId: () => undefined,
   });
   const world = harness();
   world.holdWithdraw(withdrawSend.promise);
@@ -313,8 +380,13 @@ async function withdrawalDuringActivation(): Promise<void> {
   for (let i = 0; i < 40 && !calls.includes("enable"); i += 1) await Promise.resolve();
   assert.ok(calls.includes("enable"));
   const withdraw = queue.choose("account-a", false);
-  for (let i = 0; i < 40 && calls.at(-1) !== "disable"; i += 1) await Promise.resolve();
-  assert.equal(calls.at(-1), "disable");
+  for (let i = 0; i < 40 && calls.lastIndexOf("disable") < calls.indexOf("enable"); i += 1) {
+    await Promise.resolve();
+  }
+  assert.ok(calls.lastIndexOf("disable") > calls.indexOf("enable"));
+  assert.equal(snap.sdkCollection, false, "withdrawal clears the running SDK while enable is in flight");
+  assert.equal(snap.preference, false, "withdrawal writes the auto-collection preference false");
+  assert.equal(snap.unsentDeletion, "requested");
   recordError(new Error("synthetic"));
   assert.equal(reports, 0, "withdrawal closes the gate while activation is in flight");
   for (
@@ -558,6 +630,179 @@ async function legacyFlagDoesNotEnable(): Promise<void> {
     resetDiagnosticsPreferenceForTests();
     __resetCrashReportingForTests();
   }
+}
+
+function storedChoice(uid: string, decision: "allow" | "withdraw"): PurposeQueueState {
+  return {
+    uid,
+    revision: 9,
+    localGrant: false,
+    hasChoice: true,
+    pending: null,
+    sync: "synced",
+    consent: {
+      choice: { decision, revision: 9, uid },
+      pending: null,
+      acknowledgement: { revision: 9, decision, serverRevision: 9 },
+      native: "disabled",
+      enablingInvalidated: false,
+      unsentDeletionRequested: false,
+      sessionAcknowledgement: null,
+    },
+  };
+}
+
+function heldFirstLoad(world: ReturnType<typeof harness>, stale: PurposeQueueState | null) {
+  let calls = 0;
+  let release: (value: PurposeQueueState | null) => void = () => {
+    throw new Error("the delayed disk read was not started");
+  };
+  const ports = {
+    ...world.ports,
+    load: async (uid: string): Promise<PurposeQueueState | null> => {
+      calls += 1;
+      if (calls === 1) {
+        return await new Promise<PurposeQueueState | null>((done) => {
+          release = () => done(stale && stale.uid === uid ? stale : stale);
+        });
+      }
+      return world.disk.get(uid) ?? null;
+    },
+  };
+  return {
+    ports,
+    calls: () => calls,
+    release: () => release(stale),
+  };
+}
+
+async function delayedDiskAfterAcknowledgedAllow(): Promise<void> {
+  __resetCrashReportingForTests();
+  const snap = createCrashDouble();
+  const world = harness();
+  const held = heldFirstLoad(world, storedChoice("account-a", "withdraw"));
+  const queue = createPurposeConsentQueue(held.ports);
+  queue.bind("account-a");
+  world.health("server");
+  await queue.choose("account-a", true);
+  const allowed = queue.state("account-a")?.consent;
+  assert.ok(allowed);
+  assert.equal(allowed.choice.decision, "allow");
+  assert.equal(crashConsentStatus(allowed), "active");
+  assert.equal(snap.sdkCollection, true);
+  assert.equal(snap.preference, false);
+  assert.ok(held.calls() > 1, "the newer choice did not wait on the delayed disk read");
+  held.release();
+  await ticks(20);
+  const after = queue.state("account-a")?.consent;
+  assert.equal(after?.choice.decision, "allow");
+  assert.equal(after?.choice.revision, allowed.choice.revision);
+  assert.equal(after?.acknowledgement?.revision, allowed.acknowledgement?.revision);
+  assert.equal(after?.acknowledgement?.decision, "allow");
+  assert.equal(crashConsentStatus(after!), "active");
+  assert.equal(snap.sdkCollection, true);
+  assert.equal(snap.preference, false);
+  __resetCrashReportingForTests();
+}
+
+async function delayedDiskAfterWithdrawal(): Promise<void> {
+  __resetCrashReportingForTests();
+  const snap = createCrashDouble();
+  const world = harness();
+  const held = heldFirstLoad(world, storedChoice("account-a", "allow"));
+  const queue = createPurposeConsentQueue(held.ports);
+  queue.bind("account-a");
+  world.health("server");
+  await queue.choose("account-a", false);
+  const withdrawn = queue.state("account-a")?.consent;
+  assert.ok(withdrawn);
+  assert.equal(withdrawn.choice.decision, "withdraw");
+  assert.equal(snap.sdkCollection, false);
+  assert.equal(snap.preference, false);
+  assert.equal(snap.unsentDeletion, "requested");
+  assert.notEqual(snap.unsentDeletion, "confirmed" as string);
+  held.release();
+  await ticks(20);
+  const after = queue.state("account-a")?.consent;
+  assert.equal(after?.choice.decision, "withdraw");
+  assert.equal(after?.choice.uid, "account-a");
+  assert.ok((after?.choice.revision ?? 0) > 0);
+  assert.notEqual(after?.choice.decision, "allow");
+  assert.equal(snap.sdkCollection, false);
+  assert.equal(snap.preference, false);
+  assert.notEqual(crashConsentStatus(after!), "active");
+  __resetCrashReportingForTests();
+}
+
+async function accountSwitchDropsPreviousGrant(): Promise<void> {
+  __resetCrashReportingForTests();
+  const snap = createCrashDouble();
+  const world = harness();
+  const held = heldFirstLoad(world, storedChoice("account-a", "allow"));
+  const queue = createPurposeConsentQueue(held.ports);
+  queue.bind("account-a");
+  queue.bind("account-b");
+  world.health("listening");
+  held.release();
+  await ticks(20);
+  const other = queue.state("account-b")?.consent;
+  assert.ok(other);
+  assert.equal(other.choice.uid, "account-b");
+  assert.equal(other.choice.decision, "unset");
+  assert.notEqual(crashConsentStatus(other), "active");
+  assert.notEqual(queue.state("account-a")?.consent?.choice.decision, "allow");
+  assert.equal(snap.sdkCollection, false);
+  assert.equal(snap.preference, false);
+  __resetCrashReportingForTests();
+}
+
+async function grantWithoutRuntimeBridge(): Promise<void> {
+  __resetCrashReportingForTests();
+  let reports = 0;
+  const snap = createCrashDouble({
+    bridge: "absent",
+    onRecord: () => {
+      reports += 1;
+    },
+  });
+  const world = harness();
+  const queue = createPurposeConsentQueue(world.ports);
+  queue.bind("account-a");
+  world.health("server");
+  await queue.choose("account-a", true);
+  const consent = queue.state("account-a")?.consent;
+  assert.ok(consent);
+  assert.equal(consent.choice.decision, "allow");
+  assert.equal(crashConsentStatus(consent), "unavailable");
+  assert.notEqual(crashConsentStatus(consent), "active");
+  assert.equal(snap.preference, false);
+  assert.equal(snap.sdkCollection, false);
+  recordError(new Error("synthetic"));
+  assert.equal(reports, 0);
+  __resetCrashReportingForTests();
+}
+
+async function grantWithBridgeLeavesPreferenceFalse(): Promise<void> {
+  __resetCrashReportingForTests();
+  const snap = createCrashDouble();
+  assert.equal(snap.preference, true, "the double starts with a poisoned preference");
+  const world = harness();
+  const queue = createPurposeConsentQueue(world.ports);
+  queue.bind("account-a");
+  world.health("server");
+  await queue.choose("account-a", true);
+  const consent = queue.state("account-a")?.consent;
+  assert.ok(consent);
+  assert.equal(crashConsentStatus(consent), "active");
+  assert.equal(snap.sdkCollection, true);
+  assert.equal(snap.preference, false);
+  queue.bind("account-b");
+  await ticks();
+  assert.equal(snap.sdkCollection, false);
+  assert.equal(snap.preference, false);
+  assert.equal(queue.state("account-b")?.consent?.choice.decision, "unset");
+  assert.notEqual(crashConsentStatus(queue.state("account-b")!.consent!), "active");
+  __resetCrashReportingForTests();
 }
 
 main().catch((error) => {

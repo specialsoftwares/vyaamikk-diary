@@ -55,6 +55,8 @@ import {
 } from "@/services/accountDeletion/sessionLocalReadiness";
 import { sessionPublicationLive } from "@/services/accountDeletion/sessionPublication";
 import { getNativeAuthUid } from "@/services/auth/nativePhoneAuth";
+import { phoneAuthCopy } from "@/auth-v2/phoneAuthCopy";
+import { PHONE_SESSION_BOUND_MS, raceOwnedPublication } from "@/auth-v2/phoneAuthOperation";
 
 function readPublicationLive(): SessionLive {
   let jsUid: string | null = null;
@@ -79,7 +81,7 @@ function readPublicationLive(): SessionLive {
 }
 import { markAuthStage } from "@/services/auth/authStageTiming";
 import { retireNativeCallableAuthReady } from "@/services/auth/nativeCallableAuthGate";
-import { toAppError } from "@/domain/errors";
+import { AppError, toAppError } from "@/domain/errors";
 import { clearMasterDataSessionCache } from "@/services/masterData";
 import { createLogger } from "@/utils/logger";
 import {
@@ -214,12 +216,20 @@ interface AuthApi extends AuthState {
   /** DEV: force-clear SecureStore session + in-memory auth (after dev reset). */
   hardDevSignOut(): Promise<void>;
   startOtp(phoneE164: PhoneE164, options?: { forceResend?: boolean }): Promise<OtpChallenge>;
-  confirmOtp(challenge: OtpChallenge, code: string): Promise<UserProfile>;
+  confirmOtp(
+    challenge: OtpChallenge,
+    code: string,
+    opts?: { deadlineAt?: number }
+  ): Promise<UserProfile>;
   signOut(): Promise<LocalSignOutResult>;
   requestAccountDeletion(): Promise<import("@/domain/accountDeletion").AccountDeletionResult>;
   cancelAccountDeletion(phoneE164: PhoneE164): Promise<UserProfile>;
   /** Save session after production account reactivation (post email verify). */
-  finishReactivation(profile: UserProfile): Promise<UserProfile>;
+  finishReactivation(
+    profile: UserProfile,
+    claim?: SessionClaim,
+    stillCurrent?: () => boolean
+  ): Promise<UserProfile>;
   acknowledgeUEID(): void;
   updateProfile(
     patch: ProfilePatch,
@@ -229,7 +239,8 @@ interface AuthApi extends AuthState {
   applyServerProfile(
     profile: UserProfile,
     ownedGeneration?: number,
-    readLiveUid?: () => string | null
+    readLiveUid?: () => string | null,
+    ownedEpoch?: number
   ): Promise<UserProfile>;
   /** Persist usage heartbeat (`lastActiveAt` only — never login fields). */
   touchLastActive(): Promise<void>;
@@ -440,7 +451,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const confirmOtp = useCallback(
-    async (challenge: OtpChallenge, code: string) => {
+    async (challenge: OtpChallenge, code: string, opts?: { deadlineAt?: number }) => {
       bootAttemptRef.current += 1;
       const epoch = beginSessionCommit();
       try {
@@ -450,33 +461,53 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           generation: currentAuthMutationGeneration(),
           epoch,
         };
-        if (state.user?.uid && state.user.uid !== profile.uid) {
-          clearMasterDataSessionCache();
-        }
-        if (!sessionStillOwned(claim, readPublicationLive())) throw sessionChangedError();
-        const session = await saveSession(profile, { claim });
-        if (!sessionStillOwned(claim, readPublicationLive())) throw sessionChangedError();
-        setState((current) => {
-          if (!sessionStillOwned(claim, readPublicationLive())) return current;
-          if (current.session && current.session.user.uid === profile.uid && currentSessionCommitEpoch() !== claim.epoch) {
-            return current;
-          }
-          return {
-            status: "signed_in",
-            session,
-            user: session.user,
-            justCreated: isNewUser,
-          };
+        const remaining =
+          opts?.deadlineAt != null ? Math.max(0, opts.deadlineAt - Date.now()) : PHONE_SESSION_BOUND_MS;
+        const sessionBudget = Math.min(PHONE_SESSION_BOUND_MS, remaining);
+        const published = await raceOwnedPublication({
+          budgetMs: sessionBudget,
+          retireClaim: () => {
+            beginSessionCommit();
+          },
+          run: async () => {
+            if (state.user?.uid && state.user.uid !== profile.uid) {
+              clearMasterDataSessionCache();
+            }
+            if (!sessionStillOwned(claim, readPublicationLive())) throw sessionChangedError();
+            const session = await saveSession(profile, { claim });
+            if (!sessionStillOwned(claim, readPublicationLive())) throw sessionChangedError();
+            setState((current) => {
+              if (!sessionStillOwned(claim, readPublicationLive())) return current;
+              if (current.session && current.session.user.uid === profile.uid && currentSessionCommitEpoch() !== claim.epoch) {
+                return current;
+              }
+              return {
+                status: "signed_in",
+                session,
+                user: session.user,
+                justCreated: isNewUser,
+              };
+            });
+            void import("@/services/device/trustedDeviceRegistry").then((m) =>
+              m.recordTrustedDeviceLogin(profile)
+            );
+            return profile;
+          },
         });
-        void import("@/services/device/trustedDeviceRegistry").then((m) =>
-          m.recordTrustedDeviceLogin(profile)
-        );
-        return profile;
+        if (published.status === "unknown") {
+          throw new AppError(
+            "otp_send_failed",
+            phoneAuthCopy("en").resultUnknown,
+            undefined,
+            { phoneAuthSettlement: "unknown", authPhase: "session" }
+          );
+        }
+        return published.value;
       } catch (e) {
         throw toAppError(e);
       }
     },
-    [saveSession]
+    [saveSession, state.user?.uid]
   );
 
   const signOut = useCallback(async () => {
@@ -584,22 +615,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const finishReactivation = useCallback(
-    async (profile: UserProfile) => {
-      const epoch = beginSessionCommit();
-      if (getActiveBackend() === "firebase-production") {
-        const bridge = await import("@/services/auth/jsAuthBridge");
-        await bridge.ensureJsAuthSession();
-      }
-      const claim: SessionClaim = {
+    async (profile: UserProfile, supplied?: SessionClaim, stillCurrent?: () => boolean) => {
+      const epoch = supplied?.epoch ?? beginSessionCommit();
+      const claim: SessionClaim = supplied ?? {
         uid: profile.uid,
         generation: currentAuthMutationGeneration(),
         epoch,
       };
-      if (!sessionStillOwned(claim, readPublicationLive())) throw sessionChangedError();
-      const session = await saveSession(profile, { claim });
-      if (!sessionStillOwned(claim, readPublicationLive())) throw sessionChangedError();
+      const stillOwned = () =>
+        (stillCurrent?.() ?? true) && sessionStillOwned(claim, readPublicationLive());
+      if (claim.uid !== profile.uid) throw sessionChangedError();
+      if (!stillOwned()) throw sessionChangedError();
+      if (getActiveBackend() === "firebase-production") {
+        const bridge = await import("@/services/auth/jsAuthBridge");
+        await bridge.ensureJsAuthSession();
+        if (!stillOwned()) throw sessionChangedError();
+      }
+      if (!stillOwned()) throw sessionChangedError();
+      const session = await saveSession(profile, { claim, isCurrent: stillOwned });
+      if (!stillOwned()) throw sessionChangedError();
       setState((current) => {
-        if (!sessionStillOwned(claim, readPublicationLive())) return current;
+        if (!stillOwned()) return current;
         if (current.session && current.session.user.uid === profile.uid && currentSessionCommitEpoch() !== claim.epoch) {
           return current;
         }
@@ -677,10 +713,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async (
       profile: UserProfile,
       ownedGeneration?: number,
-      readLiveUid?: () => string | null
+      readLiveUid?: () => string | null,
+      ownedEpoch?: number
     ): Promise<UserProfile> => {
-      const isCurrent = ownedGeneration == null ? undefined : () => {
-        if (currentAuthMutationGeneration() !== ownedGeneration) return false;
+      const epoch = ownedEpoch ?? currentSessionCommitEpoch();
+      const isCurrent = ownedGeneration == null && ownedEpoch == null ? undefined : () => {
+        if (ownedGeneration != null && currentAuthMutationGeneration() !== ownedGeneration) return false;
+        if (ownedEpoch != null && currentSessionCommitEpoch() !== ownedEpoch) return false;
         if (readLiveUid) {
           const liveUid = readLiveUid();
           if (!liveUid || liveUid !== profile.uid) return false;
@@ -693,7 +732,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const claim: SessionClaim = {
         uid: profile.uid,
         generation: ownedGeneration ?? currentAuthMutationGeneration(),
-        epoch: currentSessionCommitEpoch(),
+        epoch,
       };
       const session = await saveSession(profile, { preserveSignedInAt: true, claim, isCurrent });
       if (isCurrent && !isCurrent()) throw new Error("session_changed");

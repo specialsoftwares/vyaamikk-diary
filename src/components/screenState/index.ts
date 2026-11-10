@@ -9,15 +9,31 @@ export { SlowNetworkStatus, SCREEN_EXISTING_SLOW_MS } from "./SlowNetworkStatus"
 export { screenStateCopy } from "./screenStateCopy";
 export {
   SCREEN_SLOW_MS,
+  beginOwnedLoad,
+  captureLoadClaim,
+  commitOwnedFailure,
+  commitOwnedSuccess,
   emptyOwned,
+  emptyOwnedLoad,
+  finishOwnedLoad,
   listPhase,
   nextOwnedSnapshot,
   renderOfflineCache,
+  requestClaimsMatch,
+  requestSessionsMatch,
   resolveSearchPresentation,
+  runOwnedLoad,
   sessionBlocksWrite,
   showsEmpty,
   visibleCachedRows,
 } from "./resolveScreenState";
-export type { ListPhase, OwnedMemory, SearchPresentation } from "./resolveScreenState";
+export type {
+  ListPhase,
+  OwnedLoad,
+  OwnedMemory,
+  RequestClaim,
+  SearchPresentation,
+} from "./resolveScreenState";
+export { useOwnedRequest, useRequestOwner } from "./useOwnedRequest";
 export { useOwnedSnapshot } from "./useOwnedSnapshot";
 export { usePrefersReducedMotion } from "./usePrefersReducedMotion";

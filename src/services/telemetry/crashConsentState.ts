@@ -325,17 +325,42 @@ export function crashConsentForAccount(
 }
 
 export function nativeFromApply(requestedEnable: boolean, result: unknown): CrashNative {
-  if (result && typeof result === "object") {
-    const record = result as { native?: unknown; nativeState?: unknown; status?: unknown };
-    if (isNative(record.native)) return record.native;
-    if (record.nativeState === "on") return "enabled";
-    if (record.nativeState === "off") return "disabled";
-    if (record.nativeState === "unavailable" || record.status === "unavailable") return "unavailable";
-    if (record.nativeState === "error" || record.status === "rejected") return "failed";
-    if (record.status === "enabled") return "enabled";
-    if (record.status === "disabled" || record.status === "superseded") return "disabled";
+  if (!result || typeof result !== "object") {
+    return requestedEnable ? "unavailable" : "disabled";
   }
-  return requestedEnable ? "enabled" : "disabled";
+  const record = result as {
+    native?: unknown;
+    nativeState?: unknown;
+    status?: unknown;
+    sdkCollection?: unknown;
+    preference?: unknown;
+  };
+  // A preference of true is the next process's consent bypass. It is not an active session.
+  if (record.preference === true) return "failed";
+  const bridgeEnabled = record.sdkCollection === true;
+  if (
+    requestedEnable &&
+    bridgeEnabled &&
+    (record.status === "enabled" || record.nativeState === "on" || record.native === "enabled")
+  ) {
+    return "enabled";
+  }
+  if (record.native === "unavailable" || record.nativeState === "unavailable" || record.status === "unavailable") {
+    return "unavailable";
+  }
+  if (record.native === "failed" || record.nativeState === "error" || record.status === "rejected") {
+    return "failed";
+  }
+  if (!requestedEnable) {
+    if (record.sdkCollection === true) return "failed";
+    if (isNative(record.native) && record.native !== "enabled") return record.native;
+    return "disabled";
+  }
+  if (record.status === "superseded" || record.native === "disabled" || record.nativeState === "off") {
+    return "disabled";
+  }
+  if (isNative(record.native) && record.native !== "enabled") return record.native;
+  return "unavailable";
 }
 
 export function unsentDeletionWasRequested(result: unknown): boolean {

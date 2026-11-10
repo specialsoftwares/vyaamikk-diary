@@ -19,7 +19,6 @@ import { Banner,
   Button,
   FormSection,
   Header,
-  Loader,
   Screen,
   SelectField,
   TextField,
@@ -29,7 +28,9 @@ import { useI18n, useT } from "@/i18n";
 import { formDateRowStyle, formFieldLabelStyle, formNestedCardStyle } from "@/theme/formLayer";
 import { spacing, typography, useTheme, useThemeColors, useThemedStyles } from "@/theme";
 import { presentPublicError, toPublicError } from "@/domain/publicErrors";
-import { PermissionState, SessionHoldNotice } from "@/components/screenState";
+import { InitialListSkeleton, PermissionState, ScreenErrorPanel, SessionHoldNotice, useRequestOwner } from "@/components/screenState";
+import { currentSessionCommitEpoch } from "@/services/auth/authSessionFence";
+import * as ImagePicker from "expo-image-picker";
 import { sessionBlocksWrite } from "@/components/screenState/resolveScreenState";
 import { useSync } from "@/state/sync";
 import { formatShortDate } from "@/utils/date";
@@ -131,6 +132,8 @@ export default function CustomerCreditFormScreen() {
   const router = useRouter();
   const c = useThemeColors();
   const { user } = useAuth();
+  const owner = useRequestOwner(user?.uid ?? null);
+  const sessionEpoch = currentSessionCommitEpoch();
   const { status: syncStatus } = useSync();
   const { id: editId, fromPicker } = useLocalSearchParams<{ id?: string; fromPicker?: string }>();
   const isEditing = Boolean(editId);
@@ -271,11 +274,13 @@ export default function CustomerCreditFormScreen() {
 
   const load = useCallback(async () => {
     if (!user) return;
+    const claim = owner.capture();
     setLoading(true);
     setLoadError(null);
     try {
       if (editId) {
         const rec = await getCustomerCreditRepository().getById(user.uid, String(editId));
+        if (!owner.owns(claim)) return;
         if (rec) {
           setExisting(rec);
           setMode(rec.mode);
@@ -341,11 +346,12 @@ export default function CustomerCreditFormScreen() {
         }
       }
     } catch (e) {
+      if (!owner.owns(claim)) return;
       setLoadError(presentPublicError(e));
     } finally {
-      setLoading(false);
+      if (owner.ownsGeneration(claim)) setLoading(false);
     }
-  }, [user, editId]);
+  }, [user, editId, owner, sessionEpoch]);
 
   useFocusEffect(
     useCallback(() => {
@@ -954,7 +960,7 @@ export default function CustomerCreditFormScreen() {
     return (
       <Screen>
         <Header title={t("customerCredit.formTitle")} showBack onBackPress={goBack} />
-        <Loader fullscreen message={t("common.loading")} />
+        <InitialListSkeleton count={6} />
       </Screen>
     );
   }
@@ -962,7 +968,7 @@ export default function CustomerCreditFormScreen() {
     return (
       <Screen>
         <Header title={t("customerCredit.formTitle")} showBack onBackPress={goBack} />
-        <Banner tone="danger" message={loadError} />
+        <ScreenErrorPanel error={loadError} message={loadError} onRetry={() => void load()} />
       </Screen>
     );
   }
@@ -1188,6 +1194,16 @@ export default function CustomerCreditFormScreen() {
               void onPickPhoto(next);
             }}
             onDismiss={() => setPhotoBlock(null)}
+            onRecheck={() => {
+              const source = photoBlock;
+              void (async () => {
+                const perm =
+                  source === "camera"
+                    ? await ImagePicker.getCameraPermissionsAsync()
+                    : await ImagePicker.getMediaLibraryPermissionsAsync();
+                if (perm.granted) setPhotoBlock(null);
+              })();
+            }}
           />
         ) : null}
         <LocaleUiText style={styles.consentNote}>{t("customerCredit.photoConsentNote")}</LocaleUiText>

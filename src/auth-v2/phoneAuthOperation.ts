@@ -9,6 +9,7 @@
  */
 
 import { AppError } from "@/domain/errors";
+import { routeAccountSetupFailure } from "@/services/auth/reactivationRouting";
 
 export const PHONE_AUTH_USER_BOUND_MS = 45_000;
 export const PHONE_NATIVE_SEND_BOUND_MS = 20_000;
@@ -56,10 +57,29 @@ type LiveAttempt = {
   id: string;
   generation: number;
   stage: PhoneAuthStage;
+  startedAt: number;
+  /** Attempt start plus PHONE_AUTH_USER_BOUND_MS. Stages cannot run past this. */
+  overallDeadline: number;
   deadline: number;
   busy: boolean;
   overlay: PhoneAuthOverlay;
 };
+
+export type PhoneAuthWait = (ms: number) => { promise: Promise<void>; cancel: () => void };
+
+function defaultWait(ms: number): { promise: Promise<void>; cancel: () => void } {
+  let timer: ReturnType<typeof setTimeout>;
+  const promise = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, ms);
+  });
+  return { promise, cancel: () => clearTimeout(timer!) };
+}
+
+export function isPhoneAttemptUnknown(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const details = (error as { details?: { phoneAuthSettlement?: unknown } }).details;
+  return details?.phoneAuthSettlement === "unknown";
+}
 
 function attemptId(): string {
   const bytes = new Uint8Array(8);
@@ -71,7 +91,10 @@ function attemptId(): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-export function createPhoneAuthOperations(now: () => number = Date.now) {
+export function createPhoneAuthOperations(
+  now: () => number = Date.now,
+  wait: PhoneAuthWait = defaultWait
+) {
   let generation = 0;
   let live: LiveAttempt | null = null;
   let successTimer: ReturnType<typeof setTimeout> | null = null;
@@ -100,15 +123,28 @@ export function createPhoneAuthOperations(now: () => number = Date.now) {
     clearSuccessTimer();
     generation += 1;
     const id = attemptId();
+    const startedAt = now();
     live = {
       id,
       generation,
       stage,
-      deadline: now() + boundMs,
+      startedAt,
+      overallDeadline: startedAt + PHONE_AUTH_USER_BOUND_MS,
+      deadline: startedAt + boundMs,
       busy: true,
       overlay: stage === "cleanup" ? "off" : "verifying",
     };
     return { accepted: true, id, generation };
+  }
+
+  function stageBudget(id: string, boundMs: number): number {
+    if (!sameAttempt(id) || !live) return 0;
+    return Math.min(boundMs, Math.max(0, live.overallDeadline - now()));
+  }
+
+  function attemptDeadline(id: string): number | null {
+    if (!sameAttempt(id) || !live) return null;
+    return live.overallDeadline;
   }
 
   function settle(id: string, overlay: PhoneAuthOverlay): boolean {
@@ -137,23 +173,40 @@ export function createPhoneAuthOperations(now: () => number = Date.now) {
     | { status: "unknown" }
     | { status: "cancelled" }
   > {
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const timeout = new Promise<{ status: "unknown" }>((resolve) => {
-      timer = setTimeout(() => resolve({ status: "unknown" }), timeoutMs);
-    });
+    const limit = stageBudget(id, timeoutMs);
+    if (!sameAttempt(id)) {
+      void work.then(
+        () => undefined,
+        () => undefined
+      );
+      return { status: "cancelled" };
+    }
+    if (limit <= 0) {
+      void work.then(
+        () => undefined,
+        () => undefined
+      );
+      return { status: "unknown" };
+    }
+    const handle = wait(limit);
+    const observed = work.then((value) => ({ status: "ok" as const, value }));
+    void observed.then(
+      () => undefined,
+      () => undefined
+    );
     try {
       const result = await Promise.race([
-        work.then((value) => ({ status: "ok" as const, value })),
-        timeout,
+        observed,
+        handle.promise.then(() => ({ status: "unknown" as const })),
       ]);
       if (!sameAttempt(id) || live?.busy === false) return result.status === "ok" ? { status: "cancelled" } : result;
       return result;
     } finally {
-      if (timer) clearTimeout(timer);
+      handle.cancel();
     }
   }
 
-  return { accept, settle, retire, sameAttempt, view, armSuccess, bounded };
+  return { accept, settle, retire, sameAttempt, view, armSuccess, bounded, stageBudget, attemptDeadline };
 }
 
 export type PhoneAuthOperations = ReturnType<typeof createPhoneAuthOperations>;
@@ -174,6 +227,7 @@ function idleView(settlement: PhoneAuthSettlement, error: unknown = null): Phone
 }
 
 export function classifyPhoneAuthError(error: unknown): PhoneAuthSettlement {
+  if (isPhoneAttemptUnknown(error)) return "unknown";
   if (error instanceof Error && error.message === "session_changed") return "session_changed";
   if (error instanceof AppError) {
     if (error.code === "invalid_otp") return "invalid";
@@ -203,21 +257,53 @@ export async function submitPhoneVerification<TProfile>(input: {
   onAccepted?: (operationId: string) => void;
   confirmBoundMs?: number;
   accountBoundMs?: number;
+  phoneE164?: string;
+  prepareSession?: () => Promise<void>;
 }): Promise<PhoneVerificationView> {
   const accepted = input.ops.accept("confirm", input.confirmBoundMs ?? PHONE_NATIVE_CONFIRM_BOUND_MS);
   if (!accepted.accepted) return idleView("ignored");
   input.onAccepted?.(accepted.id);
   const confirmWork = input.confirm();
-  let confirmed: { status: "ok"; value: TProfile } | { status: "unknown" } | { status: "cancelled" };
-  try {
-    confirmed = await input.ops.bounded(
-      accepted.id,
-      confirmWork,
-      input.confirmBoundMs ?? PHONE_NATIVE_CONFIRM_BOUND_MS
-    );
-  } catch (error) {
-    if (!input.ops.sameAttempt(accepted.id)) return { ...idleView("cancelled"), operationId: accepted.id, error };
+  const failureView = (error: unknown): PhoneVerificationView => {
+    const pending = routeAccountSetupFailure({
+      error,
+      stillCurrent: input.ops.sameAttempt(accepted.id),
+      fallbackPhoneE164: input.phoneE164 ?? "",
+    });
+    if (pending.kind === "stale") {
+      return { ...idleView("cancelled", error), operationId: accepted.id };
+    }
+    if (pending.kind === "reactivation") {
+      input.ops.settle(accepted.id, "off");
+      return {
+        applied: true,
+        busy: false,
+        overlay: "off",
+        settlement: "reactivation",
+        clearCode: false,
+        navigate: "reactivation",
+        operationId: accepted.id,
+        stage: "confirm",
+        error,
+        reactivation: pending.params,
+      };
+    }
     const settlement = classifyPhoneAuthError(error);
+    if (settlement === "unknown") {
+      input.ops.settle(accepted.id, "off");
+      return {
+        applied: true,
+        busy: false,
+        overlay: "off",
+        settlement: "unknown",
+        clearCode: false,
+        navigate: null,
+        operationId: accepted.id,
+        stage: "session",
+        error,
+        reactivation: null,
+      };
+    }
     input.ops.settle(accepted.id, "off");
     return {
       applied: true,
@@ -231,6 +317,17 @@ export async function submitPhoneVerification<TProfile>(input: {
       error,
       reactivation: null,
     };
+  };
+  let confirmed: { status: "ok"; value: TProfile } | { status: "unknown" } | { status: "cancelled" };
+  try {
+    confirmed = await input.ops.bounded(
+      accepted.id,
+      confirmWork,
+      input.confirmBoundMs ?? PHONE_NATIVE_CONFIRM_BOUND_MS
+    );
+  } catch (error) {
+    if (!input.ops.sameAttempt(accepted.id)) return { ...idleView("cancelled"), operationId: accepted.id, error };
+    return failureView(error);
   }
   if (confirmed.status === "cancelled") return { ...idleView("cancelled"), applied: false, operationId: accepted.id };
   if (confirmed.status === "unknown") {
@@ -298,6 +395,36 @@ export async function submitPhoneVerification<TProfile>(input: {
         reactivation: null,
       };
     }
+    if (outcome.navigate === "account" && input.prepareSession) {
+      const sessionWork = input.prepareSession();
+      const prepared = await input.ops.bounded(
+        accepted.id,
+        sessionWork,
+        PHONE_SESSION_BOUND_MS
+      );
+      if (!input.ops.sameAttempt(accepted.id) || prepared.status === "cancelled") {
+        return { ...idleView("cancelled"), operationId: accepted.id };
+      }
+      if (prepared.status === "unknown") {
+        void sessionWork.then(
+          () => undefined,
+          () => undefined
+        );
+        input.ops.settle(accepted.id, "off");
+        return {
+          applied: true,
+          busy: false,
+          overlay: "off",
+          settlement: "unknown",
+          clearCode: false,
+          navigate: null,
+          operationId: accepted.id,
+          stage: "session",
+          error: null,
+          reactivation: null,
+        };
+      }
+    }
     const revealed = input.ops.settle(accepted.id, outcome.navigate === "account" ? "success" : "off");
     if (!revealed) return { ...idleView("cancelled"), operationId: accepted.id };
     return {
@@ -314,21 +441,72 @@ export async function submitPhoneVerification<TProfile>(input: {
     };
   } catch (error) {
     if (!input.ops.sameAttempt(accepted.id)) return { ...idleView("cancelled"), operationId: accepted.id, error };
-    const settlement = classifyPhoneAuthError(error);
-    input.ops.settle(accepted.id, "off");
-    return {
-      applied: true,
-      busy: false,
-      overlay: "off",
-      settlement,
-      clearCode: settlement === "invalid" || settlement === "expired",
-      navigate: null,
-      operationId: accepted.id,
-      stage: "confirm",
-      error,
-      reactivation: null,
-    };
+    return failureView(error);
   }
+}
+
+export async function raceOwnedPublication<T>(input: {
+  budgetMs: number;
+  wait?: PhoneAuthWait;
+  retireClaim: () => void;
+  run: () => Promise<T>;
+}): Promise<{ status: "ok"; value: T } | { status: "unknown" }> {
+  const wait = input.wait ?? defaultWait;
+  if (input.budgetMs <= 0) {
+    input.retireClaim();
+    void input.run().then(
+      () => undefined,
+      () => undefined
+    );
+    return { status: "unknown" };
+  }
+  const handle = wait(input.budgetMs);
+  let won = false;
+  const observed = input.run().then((value) => ({ status: "ok" as const, value }));
+  void observed.then(
+    () => undefined,
+    () => undefined
+  );
+  try {
+    const result = await Promise.race([
+      observed,
+      handle.promise.then(() => {
+        if (!won) input.retireClaim();
+        return { status: "unknown" as const };
+      }),
+    ]);
+    won = true;
+    return result;
+  } finally {
+    handle.cancel();
+  }
+}
+
+export async function leaveAuthenticatedPhoneChallenge(input: {
+  stillCurrent: () => boolean;
+  navigate: () => void;
+  clear: () => Promise<void>;
+  boundMs?: number;
+  wait?: PhoneAuthWait;
+}): Promise<"left" | "stale"> {
+  if (!input.stillCurrent()) return "stale";
+  input.navigate();
+  const wait = input.wait ?? defaultWait;
+  const handle = wait(input.boundMs ?? PHONE_CLEANUP_BOUND_MS);
+  try {
+    await Promise.race([
+      input.clear().then(
+        () => "ok" as const,
+        () => "failed" as const
+      ),
+      handle.promise.then(() => "timeout" as const),
+    ]);
+  } catch {
+    // Navigation already happened. A rejected cleanup must not strand the user.
+  } finally {
+    handle.cancel();
+  }
+  return "left";
 }
 
 export async function submitPhoneResend<T>(input: {

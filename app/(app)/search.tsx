@@ -29,6 +29,7 @@ import {
   useOwnedSnapshot,
 } from "@/components/screenState";
 import { useGlobalSearch } from "@/hooks/useGlobalSearch";
+import { currentSessionCommitEpoch } from "@/services/auth/authSessionFence";
 import { useAuth } from "@/state/auth";
 import { useSync } from "@/state/sync";
 import { useI18n, useT } from "@/i18n";
@@ -64,6 +65,9 @@ export default function GlobalSearchScreen() {
     recentRecords,
     indexLoading,
     indexError,
+    indexClaim,
+    requestClaim,
+    libraryCount,
     searching,
     showRecent,
     reloadIndex,
@@ -176,29 +180,33 @@ export default function GlobalSearchScreen() {
 
   const ownedSearch = useOwnedSnapshot({
     signedInUid: user?.uid ?? null,
+    epoch: currentSessionCommitEpoch(),
+    generation: requestClaim?.generation ?? null,
     loading: indexLoading,
     failed: Boolean(indexError),
-    value: { recent: recentRecords, results },
+    value: { recent: recentRecords, results, libraryCount },
+    valueClaim: indexClaim,
   });
   const visibleSearch = ownedSearch.accepted && ownedSearch.value ? ownedSearch.value : null;
-  const libraryCount = visibleSearch?.recent.length ?? 0;
+  const visibleLibraryCount = visibleSearch?.libraryCount ?? 0;
   const matchCount = isQuerySearchable(query) ? (visibleSearch ? visibleSearch.results.length : 0) : 0;
   const offline = syncStatus === "offline";
-  const keepVisibleRows = libraryCount > 0 || matchCount > 0;
+  const keepVisibleRows = visibleLibraryCount > 0 || matchCount > 0;
   const presentation = resolveSearchPresentation({
     query,
     queryActive: isQuerySearchable(query),
     matchCount,
-    libraryCount,
-    loading: showSearchSkeleton && !keepVisibleRows,
-    failed: Boolean(indexError) && !keepVisibleRows,
+    libraryCount: visibleLibraryCount,
+    loading: ((showSearchSkeleton || ownedSearch.pending) && !keepVisibleRows),
+    failed: Boolean(indexError) && !keepVisibleRows && !ownedSearch.pending,
   });
   const showEmptyLibrary = showsEmpty(
     listPhase({
       loading: presentation === "loading",
       failed: presentation === "failure",
-      count: libraryCount,
-      owned: ownedSearch.accepted,
+      count: visibleLibraryCount,
+      owned: ownedSearch.current,
+      pending: ownedSearch.pending,
     })
   );
 
@@ -288,13 +296,12 @@ export default function GlobalSearchScreen() {
       />
       {!user ? (
         <LocaleUiText style={[styles.hint, { paddingHorizontal: spacing.lg }]}>{copy.signedOut}</LocaleUiText>
-      ) : !ownedSearch.accepted ||
-        presentation === "loading" ||
+      ) : presentation === "loading" ||
         presentation === "failure" ||
         presentation === "no_match" ||
         (presentation === "empty_library" && showEmptyLibrary) ? (
         <SearchOutcome
-          presentation={!ownedSearch.accepted || presentation === "loading" ? "loading" : presentation}
+          presentation={presentation}
           onClear={() => setQuery("")}
           onRetry={() => void reloadIndex()}
           onBack={() => router.back()}

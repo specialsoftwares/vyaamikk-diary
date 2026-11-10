@@ -16,7 +16,8 @@ import { getAuthEntryHref } from "@/config/authWrapper";
 import { openPublicLinkOrExplain } from "@/config/publicLinks";
 import { useAuth } from "@/state/auth";
 import { useIsOnline } from "@/state/network";
-import { useT } from "@/i18n";
+import { screenStateCopy } from "@/components/screenState";
+import { useI18n, useT } from "@/i18n";
 import { callLogoutAllDevices } from "@/services/auth/identityCallable";
 import { currentAuthMutationGeneration } from "@/services/auth/authSessionFence";
 import {
@@ -30,6 +31,9 @@ import { spacing, typography, useThemedStyles } from "@/theme";
 
 export default function SettingsTab() {
   const t = useT();
+  const { lang } = useI18n();
+  const copy = screenStateCopy(lang);
+  const busyGeneration = useRef(0);
   const router = useRouter();
   const { signOut, status, user } = useAuth();
   const online = useIsOnline();
@@ -93,12 +97,14 @@ export default function SettingsTab() {
         text: t("settings.logout"),
         style: "destructive",
         onPress: async () => {
+          const generation = ++busyGeneration.current;
           setSigningOut(true);
           try {
             await signOut();
+            if (busyGeneration.current !== generation) return;
             router.replace(getAuthEntryHref());
           } finally {
-            setSigningOut(false);
+            if (busyGeneration.current === generation) setSigningOut(false);
           }
         },
       },
@@ -138,6 +144,7 @@ export default function SettingsTab() {
         text: t("settings.logoutAllConfirm"),
         style: "destructive",
         onPress: () => {
+          const generation = ++busyGeneration.current;
           const confirmedIdentity = {
             uid: liveUid.current ?? "",
             generation: currentAuthMutationGeneration(),
@@ -171,7 +178,9 @@ export default function SettingsTab() {
             presentOutcome: (remote) => {
               Alert.alert(t("settings.logoutAllPrompt"), logoutAllMessage(remote));
             },
-            setBusy: setSigningOut,
+            setBusy: (busy: boolean) => {
+              if (busyGeneration.current === generation) setSigningOut(busy);
+            },
           });
         },
       },
@@ -212,7 +221,7 @@ export default function SettingsTab() {
     return (
       <Screen scroll tabBarInset>
         <SettingsInfoHero />
-        <SkeletonLoadingPanel loading slowMessage={t("skeleton.stillLoading")}>
+        <SkeletonLoadingPanel loading slowMessage={copy.slow}>
           <SkeletonSettingsSection />
         </SkeletonLoadingPanel>
       </Screen>

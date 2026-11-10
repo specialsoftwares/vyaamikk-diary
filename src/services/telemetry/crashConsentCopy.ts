@@ -30,7 +30,7 @@ const en: CrashConsentCopy = {
     pending: "Your choice is waiting to be saved or confirmed. Crash reporting stays off until then.",
     active: "Crash reporting is on for this account on this device.",
     failed: "Crash reporting stayed off. The choice could not be saved or reporting could not be turned on.",
-    unavailable: "Crash reporting is unavailable on this device. It stays off.",
+    unavailable: "Crash reporting is unavailable on this device. The collection bridge is missing or failed, so reporting stays off.",
     off: "Crash reporting is off for this account.",
   },
   unsentDeletionRequested:
@@ -55,7 +55,7 @@ const hi: CrashConsentCopy = {
     pending: "आपकी पसंद सहेजने या पुष्टि होने की प्रतीक्षा में है। तब तक क्रैश रिपोर्टिंग बंद रहेगी।",
     active: "इस खाते के लिए इस डिवाइस पर क्रैश रिपोर्टिंग चालू है।",
     failed: "क्रैश रिपोर्टिंग बंद रही। पसंद सहेजी नहीं जा सकी या रिपोर्टिंग चालू नहीं हो सकी।",
-    unavailable: "इस डिवाइस पर क्रैश रिपोर्टिंग उपलब्ध नहीं है। यह बंद रहेगी।",
+    unavailable: "इस डिवाइस पर क्रैश रिपोर्टिंग उपलब्ध नहीं है। संग्रह ब्रिज नहीं है या विफल रहा, इसलिए रिपोर्टिंग बंद रहेगी।",
     off: "इस खाते के लिए क्रैश रिपोर्टिंग बंद है।",
   },
   unsentDeletionRequested:

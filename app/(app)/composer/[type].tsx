@@ -15,7 +15,7 @@ import { BusinessComposerForm } from "@/components/composer/BusinessComposerForm
 import { ComposerSaveSuccess } from "@/components/composer/ComposerSaveSuccess";
 import { DraftSavedSuccess } from "@/components/drafts/DraftSavedSuccess";
 import { DraftUnsavedSheet } from "@/components/drafts/DraftUnsavedSheet";
-import { Header, Loader, Screen, LocaleUiText } from "@/components/ui";
+import { Header, Screen, LocaleUiText } from "@/components/ui";
 import { composerOptionForType, isComposerEntryType } from "@/domain/composerOptions";
 import type {
   AttachmentRef,
@@ -42,7 +42,8 @@ import type { ComposerSaveStatus } from "@/services/diary/composerSaveStatus";
 import { createSaveStageTimer, monotonicNow } from "@/services/diary/saveStageTiming";
 import { AppError } from "@/domain/errors";
 import { presentPublicError, toPublicError } from "@/domain/publicErrors";
-import { SaveOutcomeLabel, SessionHoldNotice } from "@/components/screenState";
+import { InitialListSkeleton, SaveOutcomeLabel, ScreenErrorPanel, SessionHoldNotice, useRequestOwner } from "@/components/screenState";
+import { currentSessionCommitEpoch } from "@/services/auth/authSessionFence";
 import { sessionBlocksWrite } from "@/components/screenState/resolveScreenState";
 import { useAppFeedback } from "@/feedback/AppFeedback";
 import { useAuth } from "@/state/auth";
@@ -93,6 +94,9 @@ export default function ComposerScreen() {
   const router = useRouter();
   const feedback = useAppFeedback();
   const { user } = useAuth();
+  const owner = useRequestOwner(user?.uid ?? null);
+  const sessionEpoch = currentSessionCommitEpoch();
+  const [loadNonce, setLoadNonce] = useState(0);
   const { status: syncStatus } = useSync();
   const {
     type: typeParam,
@@ -372,6 +376,8 @@ export default function ComposerScreen() {
   useEffect(() => {
     if (!user || !entryType) return;
     let cancelled = false;
+    const claim = owner.capture();
+    const current = () => !cancelled && owner.owns(claim);
 
     const load = async () => {
       setLoading(true);
@@ -383,10 +389,10 @@ export default function ComposerScreen() {
             String(draftIdParam)
           );
           if (!draft || draft.status !== "active" || draft.scopeKey !== entryType) {
-            if (!cancelled) setError(t("errors.notFound"));
+            if (current()) setError(t("errors.notFound"));
             return;
           }
-          if (!cancelled) {
+          if (current()) {
             setActiveDraftId(draft.id);
             setInitialValues(draft.payload);
             setSavedBaseline(JSON.stringify(draft.payload));
@@ -395,7 +401,7 @@ export default function ComposerScreen() {
                 user.uid,
                 draft.entryId
               );
-              if (!cancelled && existing && existing.entryType === entryType) {
+              if (current() && existing && existing.entryType === entryType) {
                 savedLocationRef.current = existing.location ?? null;
                 setEditMeta({
                   recordCreatedAtMs: existing.createdAt,
@@ -410,11 +416,19 @@ export default function ComposerScreen() {
         if (editingId) {
           const existing = await getDiaryRepository().getById(user.uid, editingId);
           if (!existing || existing.entryType !== entryType) {
-            if (!cancelled) setError(t("errors.notFound"));
+            if (current()) setError(t("errors.notFound"));
             return;
           }
+          if (!current()) return;
           const base = formValuesFromEntry(existing);
-          if (!cancelled) savedLocationRef.current = existing.location ?? null;
+          const recovery = await formDraftsRepository.loadRecovery({
+            userId: user.uid,
+            draftKind: "composer",
+            scopeKey: entryType,
+            entryId: editingId,
+          });
+          if (!current()) return;
+          savedLocationRef.current = existing.location ?? null;
           editingAttachmentsRef.current = existing.attachments ?? [];
           const cashPhoto = cashPaidPhotoAttachment(existing.attachments);
           setExistingCashPhotoUri(cashPhoto?.uri ?? null);
@@ -423,17 +437,9 @@ export default function ComposerScreen() {
             recordCreatedAtMs: existing.createdAt,
             datePolicyOptions: datePolicyOptionsFromEntry(existing),
           });
-          const recovery = await formDraftsRepository.loadRecovery({
-            userId: user.uid,
-            draftKind: "composer",
-            scopeKey: entryType,
-            entryId: editingId,
-          });
           const merged = recovery?.payload ? { ...base, ...recovery.payload } : base;
-          if (!cancelled) {
-            setInitialValues(merged);
-            setSavedBaseline(JSON.stringify(base));
-          }
+          setInitialValues(merged);
+          setSavedBaseline(JSON.stringify(base));
           return;
         }
 
@@ -442,7 +448,7 @@ export default function ComposerScreen() {
             user.uid,
             linkedDispatchId
           );
-          if (dispatch?.entryType === "material_dispatched" && !cancelled) {
+          if (dispatch?.entryType === "material_dispatched" && current()) {
             const defaults = freightDefaultsFromDispatch(dispatch);
             setInitialValues(defaults);
             setSavedBaseline(JSON.stringify(defaults));
@@ -456,14 +462,14 @@ export default function ComposerScreen() {
           scopeKey: entryType,
           entryId: null,
         });
-        if (recovery?.payload && !cancelled) {
+        if (recovery?.payload && current()) {
           setInitialValues(recovery.payload);
           setSavedBaseline("");
         }
       } catch (e) {
-        if (!cancelled) setError(presentPublicError(e));
+        if (current()) setError(presentPublicError(e));
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled && owner.ownsGeneration(claim)) setLoading(false);
       }
     };
 
@@ -471,7 +477,7 @@ export default function ComposerScreen() {
     return () => {
       cancelled = true;
     };
-  }, [user, entryType, editingId, linkedDispatchId, draftIdParam, t]);
+  }, [user, entryType, editingId, linkedDispatchId, draftIdParam, t, owner, sessionEpoch, loadNonce]);
 
   useEffect(() => {
     if (!user || editingId) return;
@@ -981,7 +987,29 @@ export default function ComposerScreen() {
           backFrom="you"
           onBackPress={navigateBack}
         />
-        <Loader fullscreen message={t("common.loading")} />
+        <InitialListSkeleton count={6} />
+      </Screen>
+    );
+  }
+
+  if (error && initialValues === undefined && (editingId || draftIdParam)) {
+    return (
+      <Screen>
+        <Header
+          variant="executive"
+          title={formTitle}
+          showBack
+          backFrom="you"
+          onBackPress={navigateBack}
+        />
+        <ScreenErrorPanel
+          error={error}
+          message={error}
+          onRetry={() => {
+            setError(null);
+            setLoadNonce((n) => n + 1);
+          }}
+        />
       </Screen>
     );
   }

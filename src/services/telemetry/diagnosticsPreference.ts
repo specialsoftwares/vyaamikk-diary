@@ -15,6 +15,11 @@ export type DiagnosticsPreference = Readonly<{
   error: string | null;
   /** Native deletion requested is not a remote recall or a deletion receipt. */
   unsentReports: UnsentReportState;
+  /** Running SDK collection. Absent means this record is not bridge proof. */
+  sdkCollection?: boolean;
+  /** RNFirebase auto-collection preference. Production leaves this false. */
+  preference?: false;
+  status?: CrashActivationResult["status"];
 }>;
 
 let revision = 0;
@@ -107,24 +112,38 @@ export function applyDiagnosticsChoice(
       if (rev !== revision) return latest;
       const activation = await setCrashReportingEnabled(enabled, options);
       if (rev !== revision) return latest;
-      if (!activation.ok) {
+      const bridgeOn =
+        enabled &&
+        activation.status === "enabled" &&
+        activation.sdkCollection === true &&
+        activation.preference === false;
+      if (!activation.ok || (enabled && !bridgeOn)) {
+        const unavailable =
+          activation.status === "unavailable" ||
+          (enabled && !bridgeOn && activation.status !== "rejected");
         latest = {
           desired: enabled ? "on" : "off",
           persisted: true,
-          nativeState: nativeFailure(activation),
+          nativeState: unavailable ? "unavailable" : nativeFailure(activation),
           revision: rev,
-          error: activation.status === "unavailable" ? "unavailable" : "activation_failed",
+          error: unavailable ? "unavailable" : "activation_failed",
           unsentReports: activation.unsentReports,
+          sdkCollection: activation.sdkCollection,
+          preference: false,
+          status: unavailable ? "unavailable" : activation.status,
         };
         return latest;
       }
       latest = {
         desired: enabled ? "on" : "off",
         persisted: true,
-        nativeState: enabled ? "on" : "off",
+        nativeState: bridgeOn ? "on" : "off",
         revision: rev,
         error: null,
         unsentReports: activation.unsentReports,
+        sdkCollection: activation.sdkCollection,
+        preference: false,
+        status: activation.status,
       };
     } catch {
       if (rev !== revision) return latest;

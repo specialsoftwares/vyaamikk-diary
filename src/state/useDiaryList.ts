@@ -6,6 +6,7 @@ import { getDiaryRepository } from "@/services/diary";
 import { localEntriesRepository } from "@/repositories/localEntriesRepository";
 import type { DiarySyncBadge } from "@/services/diary/mergeLocalUnsynced";
 import { subscribeDomainChanges } from "@/services/dataChanges/domainChanges";
+import { currentSessionCommitEpoch } from "@/services/auth/authSessionFence";
 import { syncSessionOwnership } from "@/sync/syncSessionOwnership";
 
 import {
@@ -61,7 +62,8 @@ export function useDiaryList(
   const [state, setState] = useState<DiaryListState>(() => emptyState(userId));
 
   const live = syncSessionOwnership.capture();
-  const fenceKey = live ? `${live.uid}#${live.generation}` : `open:${userId ?? ""}`;
+  const epoch = currentSessionCommitEpoch();
+  const fenceKey = live ? `${live.uid}#${live.generation}#${epoch}` : `open:${userId ?? ""}`;
   const fenceRef = useRef(fenceKey);
   if (fenceRef.current !== fenceKey || userIdRef.current !== userId) {
     fenceRef.current = fenceKey;
@@ -86,6 +88,8 @@ export function useDiaryList(
       }
       const admitted = syncSessionOwnership.capture();
       const sessionGeneration = admitted && admitted.uid === owner ? admitted.generation : null;
+      const epochAtStart = currentSessionCommitEpoch();
+      const epochStillOwns = () => currentSessionCommitEpoch() === epochAtStart;
       const keyAtStart = queryKeyRef.current;
       setState((current) => ({
         ...current,
@@ -112,11 +116,12 @@ export function useDiaryList(
             generation === loadGenRef.current &&
             userIdRef.current === owner &&
             queryKeyRef.current === keyAtStart &&
+            epochStillOwns() &&
             sessionStillOwns(owner, sessionGeneration),
           onPublish: (published) => {
             if (generation !== loadGenRef.current || userIdRef.current !== owner) return;
             if (queryKeyRef.current !== keyAtStart) return;
-            if (!sessionStillOwns(owner, sessionGeneration)) return;
+            if (!epochStillOwns() || !sessionStillOwns(owner, sessionGeneration)) return;
             hasLoadedOnceRef.current = true;
             setState({
               entries: published.entries,
@@ -130,7 +135,7 @@ export function useDiaryList(
         if (!result.stale && includeRemote) remoteRef.current = result.remote;
       } catch (error) {
         if (generation !== loadGenRef.current || userIdRef.current !== owner) return;
-        if (!sessionStillOwns(owner, sessionGeneration)) return;
+        if (!epochStillOwns() || !sessionStillOwns(owner, sessionGeneration)) return;
         hasLoadedOnceRef.current = true;
         setState((current) => ({
           ...current,
@@ -146,7 +151,7 @@ export function useDiaryList(
 
   useEffect(() => {
     void run(true);
-  }, [run, userId, queryKey]);
+  }, [run, userId, queryKey, epoch]);
 
   useEffect(() => {
     if (!userId) return;

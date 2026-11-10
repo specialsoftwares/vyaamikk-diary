@@ -222,4 +222,17 @@ function assertNoSensitive(value: unknown): void {
   assert.equal(classified.code, "permission_denied");
 }
 
+{
+  const meta = sanitizeLogMetadata({
+    firebaseAuthCode: "auth/missing-activity",
+    androidActivity: "missing",
+    attemptId: "send_not_a_hex_attempt",
+  });
+  assert.equal(meta?.firebaseAuthCode, "auth/missing-activity");
+  assert.equal(meta?.androidActivity, "missing");
+  assert.equal(meta?.attemptId, undefined);
+  const classified = classifyError({ name: "Error", code: "auth/missing-activity" });
+  assert.equal(classified.code, "auth/missing-activity");
+}
+
 console.log("safeDiagnostics.test.ts: ok (PURE_HELPER)");

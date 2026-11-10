@@ -6,6 +6,7 @@
  */
 
 import type { UserProfile } from "@/domain/types";
+import { PHONE_AUTH_USER_BOUND_MS } from "@/auth-v2/phoneAuthOperation";
 
 export const REACTIVATION_VERIFY_BOUND_MS = 20_000;
 
@@ -62,6 +63,8 @@ type SubmitInput = {
   timeoutMs?: number;
   now?: () => number;
   record?: (event: ReactivationVerifyRecord) => void;
+  /** Bumps the publication claim when local preparation or finish times out. */
+  retireClaim?: () => void;
 };
 
 function attemptId(): string {
@@ -86,9 +89,20 @@ function isUnknownWait(error: unknown): boolean {
   );
 }
 
-function bounded<T>(work: Promise<T>, ms: number): Promise<T> {
+function bounded<T>(work: Promise<T>, ms: number, onTimeout?: () => void): Promise<T> {
+  if (ms <= 0) {
+    onTimeout?.();
+    void work.then(
+      () => undefined,
+      () => undefined
+    );
+    return Promise.reject(unknownWait());
+  }
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(unknownWait()), ms);
+    const timer = setTimeout(() => {
+      onTimeout?.();
+      reject(unknownWait());
+    }, ms);
     work.then(
       (value) => {
         clearTimeout(timer);
@@ -158,9 +172,21 @@ export function createReactivationEmailVerification() {
 
       inFlight = true;
       const started = (input.now ?? Date.now)();
+      const overallDeadline = started + PHONE_AUTH_USER_BOUND_MS;
       const id = attemptId();
       const timeoutMs = input.timeoutMs ?? REACTIVATION_VERIFY_BOUND_MS;
+      const stageLimit = (requested: number) => {
+        const remaining = Math.max(0, overallDeadline - (input.now ?? Date.now)());
+        return Math.min(requested, remaining);
+      };
       let stage: ReactivationVerifyStage = "handler";
+      let publicationRetired = false;
+      const retirePublication = () => {
+        if (publicationRetired) return;
+        publicationRetired = true;
+        if (generation === ticket) generation += 1;
+        input.retireClaim?.();
+      };
       const emit = (view: ReactivationVerifyView): ReactivationVerifyView => {
         input.record?.({
           attemptId: id,
@@ -172,7 +198,7 @@ export function createReactivationEmailVerification() {
       };
       const readBounded = async (): Promise<ReactivationAccountView> => {
         try {
-          return await bounded(input.readAccount(), timeoutMs);
+          return await bounded(input.readAccount(), stageLimit(timeoutMs));
         } catch {
           return { status: "unknown" };
         }
@@ -181,8 +207,12 @@ export function createReactivationEmailVerification() {
         stage = "session";
         if (!still()) return emit(settled({ outcome: "stale", stage }));
         try {
-          await bounded(input.finish(profile, still), timeoutMs);
+          await bounded(input.finish(profile, still), stageLimit(timeoutMs), retirePublication);
         } catch (error) {
+          if (isUnknownWait(error)) {
+            awaitingReconciliation = true;
+            return emit(settled({ outcome: "unknown", stage, error: input.unknownMessage }));
+          }
           if (!still()) return emit(settled({ outcome: "stale", stage }));
           awaitingReconciliation = true;
           return emit(settled({ outcome: "local_failed", stage, error: input.localFailureMessage }));
@@ -209,7 +239,7 @@ export function createReactivationEmailVerification() {
         stage = "callable";
         let profile: UserProfile;
         try {
-          profile = await bounded(input.complete(input.challengeId, code), timeoutMs);
+          profile = await bounded(input.complete(input.challengeId, code), stageLimit(timeoutMs));
         } catch (error) {
           if (!still()) return emit(settled({ outcome: "stale", stage }));
           if (!isUnknownWait(error)) {
@@ -229,14 +259,47 @@ export function createReactivationEmailVerification() {
         return await finishProfile(profile);
       } finally {
         stage = "cleanup";
-        if (generation === ticket) inFlight = false;
+        if (generation === ticket || (publicationRetired && generation === ticket + 1)) inFlight = false;
       }
     },
   };
 }
 
+export type ReactivationServerRead =
+  | {
+      source: "server" | "cache";
+      exists: boolean;
+      uid: string;
+      data: Record<string, unknown> | null;
+    }
+  | "unavailable";
+
+let reactivationServerReadForTests: (() => Promise<ReactivationServerRead>) | null = null;
+
+/** Test seam. Production reads with getDocFromServer when this is null. */
+export function __setReactivationServerReadForTests(
+  read: (() => Promise<ReactivationServerRead>) | null
+): void {
+  reactivationServerReadForTests = read;
+}
+
+export async function reactivationAccountFromServerRead(
+  read: ReactivationServerRead
+): Promise<ReactivationAccountView> {
+  if (read === "unavailable" || read.source !== "server" || !read.exists || !read.data) {
+    return { status: "unknown" };
+  }
+  if (read.data.status === "pending_deletion") return { status: "pending_deletion" };
+  if (read.data.status !== "active") return { status: "unknown" };
+  const { normaliseUserProfile } = await import("@/services/auth/normalizeProfile");
+  return { status: "active", profile: normaliseUserProfile(read.uid, { ...read.data, uid: read.uid }) };
+}
+
 export async function readAuthoritativeReactivationAccount(): Promise<ReactivationAccountView> {
   try {
+    if (reactivationServerReadForTests) {
+      return await reactivationAccountFromServerRead(await reactivationServerReadForTests());
+    }
     const { Platform } = await import("react-native");
     const { getNativeAuthUid } = await import("@/services/auth/nativePhoneAuth");
     const { authoritativeProfileWriteUid } = await import("@/services/auth/profileWriteOwnership");
@@ -257,15 +320,15 @@ export async function readAuthoritativeReactivationAccount(): Promise<Reactivati
     if (!uid) return { status: "unknown" };
     const { ensureJsAuthSession } = await import("@/services/auth/jsAuthBridge");
     if (!(await ensureJsAuthSession())) return { status: "unknown" };
-    const { doc, getDoc } = await import("firebase/firestore");
+    const { doc, getDocFromServer } = await import("firebase/firestore");
     const { getFirebaseDb } = await import("@/config/firebase");
-    const snap = await getDoc(doc(getFirebaseDb(), "users", uid));
-    if (!snap.exists()) return { status: "unknown" };
-    const data = snap.data() as Record<string, unknown>;
-    if (data.status === "pending_deletion") return { status: "pending_deletion" };
-    if (data.status !== "active") return { status: "unknown" };
-    const { normaliseUserProfile } = await import("@/services/auth/normalizeProfile");
-    return { status: "active", profile: normaliseUserProfile(uid, { ...data, uid }) };
+    const snap = await getDocFromServer(doc(getFirebaseDb(), "users", uid));
+    return await reactivationAccountFromServerRead({
+      source: snap.metadata.fromCache ? "cache" : "server",
+      exists: snap.exists(),
+      uid,
+      data: snap.exists() ? (snap.data() as Record<string, unknown>) : null,
+    });
   } catch {
     return { status: "unknown" };
   }

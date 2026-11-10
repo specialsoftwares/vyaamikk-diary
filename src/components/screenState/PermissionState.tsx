@@ -1,5 +1,5 @@
-import React from "react";
-import { Linking, StyleSheet, View } from "react-native";
+import React, { useEffect } from "react";
+import { AppState, Linking, StyleSheet, View } from "react-native";
 
 import { Button } from "@/components/ui/Button";
 import { LocaleUiText } from "@/components/ui/LocaleUiText";
@@ -12,13 +12,26 @@ export function PermissionState({
   source,
   onAlternative,
   onDismiss,
+  body,
+  onRecheck,
 }: {
   source: "camera" | "library";
   onAlternative: () => void;
   onDismiss: () => void;
+  /** Replaces the default purpose sentence when this screen's permission is not a customer photo. */
+  body?: string;
+  /** Called when the app becomes active again, so a return from Settings can be rechecked. */
+  onRecheck?: () => void;
 }) {
   const { lang } = useI18n();
   const copy = screenStateCopy(lang);
+  useEffect(() => {
+    if (!onRecheck) return;
+    const sub = AppState.addEventListener("change", (next) => {
+      if (next === "active") onRecheck();
+    });
+    return () => sub.remove();
+  }, [onRecheck]);
   const styles = useThemedStyles((c) =>
     StyleSheet.create({
       wrap: { gap: spacing.sm, paddingVertical: spacing.sm },
@@ -31,7 +44,7 @@ export function PermissionState({
     <View style={styles.wrap}>
       <LocaleUiText style={styles.title}>{copy.permissionTitle}</LocaleUiText>
       <LocaleUiText style={styles.body}>
-        {source === "camera" ? copy.permissionCameraBody : copy.permissionLibraryBody}
+        {body ?? (source === "camera" ? copy.permissionCameraBody : copy.permissionLibraryBody)}
       </LocaleUiText>
       <View style={styles.actions}>
         <Button

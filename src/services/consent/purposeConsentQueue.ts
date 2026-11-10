@@ -77,6 +77,8 @@ export function createPurposeConsentQueue(ports: PurposeQueuePorts) {
   let requestSequence = 0;
   let tail: Promise<unknown> = Promise.resolve();
   const states = new Map<string, PurposeQueueState>();
+  /** Bumps on every committed publish or hydration for that account. */
+  const memoryVersion = new Map<string, number>();
   const listeners = new Set<() => void>();
   let stopObserve: (() => void) | null = null;
   let observedGeneration = -1;
@@ -94,10 +96,28 @@ export function createPurposeConsentQueue(ports: PurposeQueuePorts) {
     consent: initialCrashConsent(uid),
   });
   const notify = () => listeners.forEach((listener) => listener());
+  function bumpMemory(uid: string) {
+    memoryVersion.set(uid, (memoryVersion.get(uid) ?? 0) + 1);
+  }
   function publish(state: PurposeQueueState) {
     const consent = crashConsentForAccount(state.consent, state.uid);
+    bumpMemory(state.uid);
     states.set(state.uid, { ...state, consent });
     notify();
+  }
+  function hydrationStamp(uid: string) {
+    const consent = states.get(uid)?.consent;
+    const own = consent && consent.choice.uid === uid ? consent : null;
+    return {
+      account: activeUid,
+      epoch: choiceEpoch,
+      version: memoryVersion.get(uid) ?? 0,
+      revision: own?.choice.revision ?? -1,
+      decision: own?.choice.decision ?? ("unset" as const),
+      acknowledgement: own?.acknowledgement?.revision ?? null,
+      sessionAcknowledgement: own?.sessionAcknowledgement ?? null,
+      pendingOperation: own?.pending?.operationId ?? null,
+    };
   }
   function owns(uid: string, generation: number, epoch: number) {
     return activeUid === uid && ports.generation() === generation && choiceEpoch === epoch;
@@ -126,8 +146,37 @@ export function createPurposeConsentQueue(ports: PurposeQueuePorts) {
   async function load(uid: string): Promise<PurposeQueueState> {
     const cached = states.get(uid);
     if (cached?.consent?.choice.uid === uid) return cached;
+    // bind() reads outside the queue. choose() can persist a newer choice
+    // before that read returns. Compare account, choice epoch, and consent
+    // stamp; a moved choice discards the disk snapshot.
+    const captured = hydrationStamp(uid);
     const stored = await ports.load(uid);
-    const state = hydrate(uid, stored, true);
+    const moved = () => {
+      const now = hydrationStamp(uid);
+      return (
+        now.account !== captured.account ||
+        now.epoch !== captured.epoch ||
+        now.version !== captured.version ||
+        now.revision !== captured.revision ||
+        now.decision !== captured.decision ||
+        now.acknowledgement !== captured.acknowledgement ||
+        now.sessionAcknowledgement !== captured.sessionAcknowledgement ||
+        now.pendingOperation !== captured.pendingOperation
+      );
+    };
+    if (moved()) {
+      const current = states.get(uid);
+      if (current?.consent?.choice.uid === uid) return current;
+      return current ?? initial(uid);
+    }
+    const hydrated = hydrate(uid, stored, true);
+    if (moved()) {
+      const current = states.get(uid);
+      if (current?.consent?.choice.uid === uid) return current;
+      return current ?? initial(uid);
+    }
+    const state = { ...hydrated, uid, consent: crashConsentForAccount(hydrated.consent, uid) };
+    bumpMemory(uid);
     states.set(uid, state);
     return state;
   }

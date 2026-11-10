@@ -27,6 +27,7 @@ import { createLogger } from "@/utils/logger";
 import { spacing, typography, useThemedStyles } from "@/theme";
 import { maskMobile } from "@/utils/phone";
 import {
+  beginSessionCommit,
   currentAuthMutationGeneration,
   currentSessionCommitEpoch,
 } from "@/services/auth/authSessionFence";
@@ -219,7 +220,15 @@ export default function AccountPendingDeletionScreen() {
         if (currentSessionCommitEpoch() !== epochAtStart) {
           throw new Error("session_changed");
         }
-        await finishReactivation(profile);
+        const claim = {
+          uid: profile.uid,
+          generation: currentAuthMutationGeneration(),
+          epoch: beginSessionCommit(),
+        };
+        await finishReactivation(profile, claim, stillCurrent);
+      },
+      retireClaim: () => {
+        beginSessionCommit();
       },
       readAccount: readAuthoritativeReactivationAccount,
       messageFor: reactivationMessage,

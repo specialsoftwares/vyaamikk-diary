@@ -21,6 +21,7 @@ import { createLogger } from "@/utils/logger";
 
 import {
   __resetCrashReportingForTests,
+  __setCrashSdkBridgeForTests,
   __setCrashlyticsClientForTests,
   clearUser,
   log as crashLog,
@@ -244,19 +245,30 @@ async function main(): Promise<void> {
   const cap = captureConsole();
   __resetCrashReportingForTests();
   const calls: { kind: string; payload: unknown }[] = [];
-  let collectionEnabled: boolean | null = null;
+  let preference: boolean | null = null;
+  let sdkCollection = false;
   let userId: string | null = null;
   __setCrashlyticsClientForTests({
     setCrashlyticsCollectionEnabled: async (enabled) => {
-      collectionEnabled = enabled;
+      preference = enabled;
       calls.push({ kind: "setCollection", payload: enabled });
     },
-    log: (message) => calls.push({ kind: "log", payload: message }),
-    recordError: (error) =>
-      calls.push({ kind: "recordError", payload: { name: error.name, message: error.message, stack: error.stack } }),
+    log: () => calls.push({ kind: "rnLog", payload: "unused" }),
+    recordError: () => calls.push({ kind: "rnRecord", payload: "unused" }),
     setUserId: (id) => {
       userId = id;
       calls.push({ kind: "setUserId", payload: id });
+    },
+  });
+  __setCrashSdkBridgeForTests({
+    setSdkCollectionEnabled: async (enabled) => {
+      sdkCollection = enabled;
+    },
+    recordDiagnostic: async (message) => {
+      calls.push({ kind: "recordError", payload: message });
+    },
+    logDiagnostic: async (message) => {
+      calls.push({ kind: "log", payload: message });
     },
   });
   try {
@@ -268,7 +280,12 @@ async function main(): Promise<void> {
 
     // Enabled with consent.
     await setCrashReportingEnabled(true);
-    assert.equal(collectionEnabled, true);
+    assert.equal(preference, false);
+    assert.equal(sdkCollection, true);
+    assert.equal(
+      calls.some((row) => row.kind === "setCollection" && row.payload === true),
+      false
+    );
     setUserId(UID_A);
     assert.equal(userId, "", "app-supplied account ids are not sent");
     assert.notEqual(userId, UID_A);
@@ -280,19 +297,19 @@ async function main(): Promise<void> {
     const recorded = calls.filter((c) => c.kind === "recordError");
     assert.equal(recorded.length, 2);
     for (const row of recorded) {
-      const payload = row.payload as { name: string; message: string; stack: string };
-      assert.equal(payload.name, "SafeDiagnosticError");
-      assert.match(payload.message, /^diagnostic:(unknown|unauthenticated|permission|unavailable|invalid|conflict)$/);
+      assert.match(String(row.payload), /^SafeDiagnosticError:diagnostic:(unknown|unauthenticated|permission|unavailable|invalid|conflict)$/);
     }
     const logged = calls.filter((c) => c.kind === "log").map((c) => c.payload);
     for (const message of logged) {
       assert.ok(["ErrorBoundary", "startup", "app"].includes(String(message)), `crash log classified: ${String(message)}`);
     }
+    assert.equal(calls.some((row) => row.kind === "rnRecord" || row.kind === "rnLog"), false);
     assertNoSentinels(serialize(calls), "crashlytics port");
 
     // Opt-out (settings toggle / consent decline path calls only this).
     await setCrashReportingEnabled(false);
-    assert.equal(collectionEnabled, false);
+    assert.equal(preference, false);
+    assert.equal(sdkCollection, false);
     assert.equal(userId, "", "opt-out clears the pseudonymous user id");
 
     // Logout / account switch path.

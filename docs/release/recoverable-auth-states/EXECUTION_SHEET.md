@@ -53,6 +53,28 @@ Coordinator follow-up: a 16-hex attempt id, phone-auth stage, and reactivation s
 
 Coordinator follow-up: the combined tree typecheck is clean. A stale grant acknowledgement cannot be compared as if it were an unset choice. The local Firebase auth stub now includes the SDK's optional resend flag. Reactivation route params are passed as a plain object.
 
+## CI on the reviewed head
+
+A workflow dispatch on `d9a5b8f1179bee9798ce52cdd15b58b4fb41e902` completed in 20m20s: https://github.com/specialsoftwares/vyaamikk-diary/actions/runs/42707638255. That run is not verification of the corrections in this sheet. It was not an automatic pull request check into integration, and it does not include the native-lock, consent, screen-ownership, or age-lifecycle corrections.
+
+## Acceptance of this correction
+
+| Gate | What it proves | Status in this change |
+| --- | --- | --- |
+| Source corrections | Auth recovery, crash consent, screen ownership, age lifecycle, and the delivery configuration are in the commit that contains this section. | Recorded by that commit. Host regressions are not handset delivery. |
+| Exact-head CI | The automatic pull request check into integration, and the canonical CI job, on that same commit. | Not the dispatch above. Record the run id and head SHA when GitHub starts the check. A missing check is a gap, not a pass. |
+| Serving Functions and Rules | The deployed functions runtime and the live ruleset. | Not changed. Node 22 is a source engine pin only. No rules or functions deploy. |
+| Signed artifact | An internal build with a freshly checked unused versionCode. | Not built. Do not reuse versionCode 32 or build from `d9a5b8f`. |
+| Device acceptance | A signed binary on a handset, including SMS delivery and reactivation. | Not run. The missing-SMS incident stays open. |
+
+## Native lock that never settles
+
+`signInWithPhoneNumber` on Android calls `verifyPhoneNumber` only when `getCurrentActivity()` is non-null. A null activity leaves the JavaScript promise pending forever. The visible 45s and 20s deadlines stop the busy UI and leave Change number and Back usable. They do not cancel that native call.
+
+The send and confirm slot lives in `PhoneAuthActivity`, which reads `ReactApplicationContext.currentActivity` and returns `missing` or `present:` plus that Activity's identity hash. Module presence is not a signal. While the same Activity is current, the slot stays `held` and a second `verifyPhoneNumber` is refused. The slot becomes `recovered` only when that Activity is gone or replaced, because the unfinished callback can no longer be delivered there. The next send is then the first native call on the new Activity. Clearing the JavaScript busy flag while the same Activity is still current does not start another native authentication.
+
+Installed binaries do not contain this module until a later signed build. This sheet does not approve that build.
+
 ## Ownership
 
 - Authentication: phone attempt controller, restoration, resend, reactivation, session publication.
