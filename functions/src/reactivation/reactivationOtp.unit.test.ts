@@ -6,6 +6,7 @@ import {
   performCompleteAccountReactivation,
   performStartAccountReactivation,
 } from "./accountReactivation";
+import { emailBindingKey } from "../email/emailBindingKey";
 import {
   REACTIVATION_CHALLENGES,
   REACTIVATION_GUESS_WINDOW_MS,
@@ -74,6 +75,8 @@ function seed(db: MemoryDb, now: number, patch: Record<string, unknown> = {}): v
     displayName: "Kept Name",
     businessEmail: EMAIL,
     normalizedEmail: EMAIL,
+    emailHash: emailBindingKey(EMAIL),
+    emailBindingVersion: 1,
     emailStatus: "verified",
     emailVerifiedAt: now - 60_000,
     status: "pending_deletion",
@@ -81,6 +84,12 @@ function seed(db: MemoryDb, now: number, patch: Record<string, unknown> = {}): v
     deletionScheduledFor: now + 10 * 24 * 60 * 60 * 1000,
     reactivationPhoneVerifiedAt: now,
     ...patch,
+  });
+  db.docs.set(`emailBindings/${emailBindingKey(EMAIL)}`, {
+    uid: UID,
+    normalizedEmail: EMAIL,
+    status: "verified",
+    bindingVersion: 1,
   });
   db.docs.set(`${REACTIVATION_PHONE_INDEX}/${PHONE}`, { uid: UID });
   db.docs.set(`${REACTIVATION_JOBS}/${UID}`, {
@@ -92,12 +101,15 @@ function seed(db: MemoryDb, now: number, patch: Record<string, unknown> = {}): v
   });
 }
 
-function capturingMailer(): ReactivationMailer & { sent: string[] } {
+function capturingMailer(): ReactivationMailer & { sent: string[]; to: string[] } {
   const sent: string[] = [];
+  const to: string[] = [];
   return {
     sent,
+    to,
     async send(input) {
       sent.push(input.text);
+      to.push(input.to);
       return "accepted";
     },
   };
@@ -428,6 +440,24 @@ function testReleaseReachability(): void {
   assert.match(limits, /REACTIVATION_PURPOSE = "account_reactivation"/);
 }
 
+async function testMailboxIsNotTheMutableProfile(): Promise<void> {
+  const drifted = new MemoryDb();
+  const now = 1_700_000_000_000;
+  seed(drifted, now, { normalizedEmail: "attacker@example.com", businessEmail: "attacker@example.com" });
+  const driftedMail = capturingMailer();
+  await assert.rejects(
+    () => start(drifted, driftedMail, now),
+    (error: unknown) => failureCode(error) === "mailbox_support"
+  );
+  assert.equal(driftedMail.to.length, 0, "a drifted profile address is not used as the destination");
+
+  const legacy = new MemoryDb();
+  seed(legacy, now, { normalizedEmail: "", businessEmail: "attacker@example.com" });
+  const legacyMail = capturingMailer();
+  await start(legacy, legacyMail, now);
+  assert.deepEqual(legacyMail.to, [EMAIL], "an empty profile address still uses the verified binding");
+}
+
 async function main(): Promise<void> {
   await testHappyPath();
   await testProviderRejectionDoesNotActivate();
@@ -436,6 +466,7 @@ async function main(): Promise<void> {
   await testSendLimitAndCrossResendGuesses();
   await testIneligibleAndPurgeRace();
   await testParallelVerifyConsumesOnce();
+  await testMailboxIsNotTheMutableProfile();
   testReleaseReachability();
   console.log("reactivationOtp.unit.test.ts: ok");
 }

@@ -85,10 +85,12 @@ function httpsFor(failure: ReactivationFailure, retryAfterSeconds?: number): Htt
       retryAfterSeconds: retry,
     });
   }
-  if (failure === "no_verified_email") {
+  if (failure === "no_verified_email" || failure === "mailbox_support") {
     return new HttpsError(
       "failed-precondition",
-      "This account has no verified email. Contact support to recover it.",
+      failure === "mailbox_support"
+        ? "The verified email on this account needs to be checked before a code can be sent. Contact support."
+        : "This account has no verified email. Contact support to recover it.",
       { code: failure }
     );
   }

@@ -132,8 +132,6 @@ service cloud.firestore {
         'businessName',
         'workType',
         'designation',
-        'businessEmail',
-        'normalizedEmail',
         'language',
         'profileCompletedAt',
         'ueidReleasedAt',
@@ -149,8 +147,8 @@ service cloud.firestore {
         'lastProfileEditedAt',
         'legalConsents',
         'updatedAt',
-        // emailStatus / emailLinkedAt / emailVerifiedAt are server-authoritative
-        // (startEmailVerification / verifyAndBindEmail). Clients must not self-assert.
+        // businessEmail / normalizedEmail / emailStatus / emailLinkedAt / emailVerifiedAt
+        // are server-authoritative. Ordinary profile fields above stay editable.
         'accountKind',
         'pinCode',
         'pinLocality',
