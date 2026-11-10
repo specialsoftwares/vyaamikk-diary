@@ -1,8 +1,6 @@
-# Deployment manifest — read on 2026-11-10, updated for the transfer-correction source
+# Deployment manifest — read on 2026-11-10, updated for consent rules + transfer closure
 
-This is a comparison. Nothing in this document was deployed, built, or changed in Google Cloud.
-
-Read by `support.vyd@specialsoftwares.com`, project `vyaamikk-diary` (number `982505811909`), region `asia-south1`. Serving inventory was read on 2026-11-10. The corrected candidate source for this manifest is the transfer-contract head that supersedes `b34232d8ee352e889a1b4d894e2044a676b04d15` (see the execution sheet for the certified SHA after canonical CI). Compared with main `695833453b9524b34d4ecc857ebdfa58c0bc04b8`. Selected build profile: `internal-grin`.
+Serving inventory was read by `support.vyd@specialsoftwares.com`, project `vyaamikk-diary` (number `982505811909`), region `asia-south1`. Compared with main `695833453b9524b34d4ecc857ebdfa58c0bc04b8`. Selected build profile: `internal-grin`. Reviewed transfer source `75b2f7cbce9739d4f7602ee579216198121d3b8d` remains the transfer baseline; acceptance-versus-compensation and same-account session recovery are closed by independent review and permanent regressions. This pass adds the exact Firestore consent-rules artifact required for the crash-consent listener. Until the scoped deploy section below is executed and verified, nothing in this document claims a live change.
 
 ## What is serving
 
@@ -67,8 +65,8 @@ Candidate exports with no Cloud Run service:
 | Export | Selected-build disposition | Configuration and rules dependencies |
 | --- | --- | --- |
 | `ownerObjectTransfer` | Required. Production letterhead, attachment, PDF, and GRIN original bytes use this path. | No secret. Shared fractional CPU limits. Attempt docs in `ownerObjectTransfers/{id}` (Admin-only; unmatched client path). Does not replace live Storage rules. |
-| `recordProcessingPurpose` | Required. Crash-diagnostics grant and withdraw go through `callRecordProcessingPurpose`. | No secret. Region `asia-south1`. Writes `users/{uid}/processingPurposes/{purpose}` and `processingPurposeEvents/{operationId}` with the Admin SDK. Withdrawal also calls `projectRestoreAuthority` and notes the deletion job. Candidate Firestore allows owner read of `processingPurposes` and denies client writes. The serving Firestore release has no `processingPurposes` matcher, so a direct client snapshot can fail while the callable still works. Deploying that matcher is a Firestore rules decision, not a Storage rules decision. |
-| `readRestoreAuthorityWatermark` | Not required for `internal-grin`. `eas.json` leaves `EXPO_PUBLIC_RESTORE_ADMISSION_REFRESH` unset, so the JS bridge skips the callable. | Required only for profiles that set that flag (for example `acceptance-android`). Depends on restore-authority projection and `restoreControl` documents that are not in the serving Firestore release. |
+| `recordProcessingPurpose` | Required. Crash-diagnostics grant and withdraw go through `callRecordProcessingPurpose`. | No secret. Region `asia-south1`. Writes `users/{uid}/processingPurposes/{purpose}` and `processingPurposeEvents/{operationId}` with the Admin SDK. Withdrawal also calls `projectRestoreAuthority` and notes the deletion job. The client also requires an authorized listener on `users/{uid}/processingPurposes/crash_diagnostics`. Serving Firestore has no such matcher, so `purposeConsentQueue` keeps native reporting disabled after `listener_unavailable` even when the callable acknowledges a grant. Deploy the proposed-consent Firestore artifact below with this callable. Do not bypass the listener-health gate. |
+| `readRestoreAuthorityWatermark` | Not required for `internal-grin`. Verified unreachable for that profile. | Re-verified 2026-11-10: `eas.json` `internal-grin` uses EAS environment `production` and does not set `EXPO_PUBLIC_RESTORE_ADMISSION_REFRESH`. The resolved production environment variable list (EAS CLI as `vydspecial2026`) also has no `EXPO_PUBLIC_RESTORE_ADMISSION_REFRESH` entry. `jsAuthBridge` therefore returns early and never calls the watermark callable. Required only for profiles that set the flag (for example `acceptance-android`). |
 | `recordAgeAssessment` | Not required. The `age-declaration` route is retired and does not collect a date of birth or call this export. Demographic age stays optional on profile details. Do not restore an age authorization gate. | Callable remains exported for a separate functions release if a later product path needs it. |
 | `logoutAllDevices` | Not required. `LOGOUT_ALL_CONTROL_ENABLED` is false, so Settings does not render the control. | Enabling it needs the callable, `authSecurity` cutoff writers, and validated Firestore session cutoff rules. Those candidate session fences are not the serving Firestore release. |
 
@@ -111,9 +109,22 @@ Repository `firestore.rules` is `a936f18dc2877b720084f06906af1c5fccb8f8f4dd79c01
 
 ### Firestore compatibility (separate from Storage)
 
-Serving Firestore `isActiveUser` is owner plus `status == active`. It does not enforce the candidate's session cutoff, restore fence, or deletion fence. The candidate rules add those checks and add party-ledger, billing, processing-purpose, erasure, and restore matchers. Those candidate protections are source on this branch. They are not the serving release. Do not describe them as live.
+Serving Firestore `isActiveUser` is owner plus `status == active`. It does not enforce the larger candidate root `firestore.rules` session cutoff, restore fence, or deletion fence. Those full-candidate protections remain source only and are **not** this release.
 
-A later Firestore rules deploy is a reviewed decision of its own. It is not implied by deploying Functions. Until that decision, Admin-backed callables still write purpose and restore documents, and client reads that depend on undeployed matchers can fail under the serving release.
+#### Exact compatible Firestore rules release (consent listener)
+
+| Field | Value |
+| --- | --- |
+| Baseline | Serving ruleset `5ec37bc5-7407-437f-a567-3faaa6b0bbb7`, sha256 `551203b8b11991fc1d49d42aa6a818fedeca8530654f7505de949b62a1ae298b` (identical to `docs/release/rules-compat/proposed-grin/firestore.rules`) |
+| Artifact | `docs/release/rules-compat/proposed-consent/firestore.rules` |
+| Artifact sha256 | `d5127a7696118be13e73f328d5bc6dae975c903762a1e1661bfa507ced56c10d` |
+| Additive matchers only | `users/{uid}/processingPurposes/{purposeId}` → owner read, write denied; `users/{uid}/processingPurposeEvents/{operationId}` → deny |
+| Preserved | Owner profile/entry access, active-user writes, deletionJobs deny, mailbox/index denies, GRIN owner-read matchers from the serving baseline |
+| Explicitly excluded | Root `firestore.rules` session/restore suite; root `storage.rules` |
+| Emulator gate | `npm run test:processing-purpose-rules-emulator` — owner read succeeds; foreign reads and client writes fail; Allow reaches acknowledged/native-active; withdrawal stops reporting; restart and account replacement do not restore an obsolete grant |
+| Rollback | Republish serving ruleset `5ec37bc5-7407-437f-a567-3faaa6b0bbb7` |
+
+Deploy this artifact with `firebase deploy --only firestore:rules` from `docs/release/rules-compat/proposed-consent/` using `firebase.rules-only.json` (or an equivalent rules-only config that points at that file). Do not deploy repository-root `firestore.rules`.
 
 ### Storage compatibility (separate from Firestore)
 
@@ -123,7 +134,7 @@ Do not deploy root `storage.rules` with the function set. Replacing the serving 
 
 ### Direct-access boundary and release disposition
 
-Installed binaries keep calling Storage directly under the 2026-10-06 Storage release. The `internal-grin` candidate uses `ownerObjectTransfer` for new uploads. That gateway does not change an already installed binary. The release disposition is: leave the serving Storage rules unchanged until a reviewed old-client transition; deploy the scoped Functions set, including `ownerObjectTransfer` and `recordProcessingPurpose`, before expecting the new client path to work; treat candidate Firestore session/restore/processingPurpose matchers as undeployed until their own review.
+Installed binaries keep calling Storage directly under the 2026-10-06 Storage release. The `internal-grin` candidate uses `ownerObjectTransfer` for new uploads. That gateway does not change an already installed binary. The release disposition is: leave the serving Storage rules unchanged; deploy the scoped Functions set (including `ownerObjectTransfer` and `recordProcessingPurpose`) and the proposed-consent Firestore artifact above before expecting crash-consent native activation; leave the larger candidate Firestore session/restore suite undeployed.
 
 The default Firestore database is Native mode in `asia-south1`, with delete protection disabled. That setting was not changed.
 
@@ -137,7 +148,9 @@ Project IAM has 27 bindings and no public member. `support.vyd@specialsoftwares.
 
 ## Later deploy set
 
-Not deployed. The set is the candidate source that differs from main and is not already represented by the serving revision. Billing, new-device, and verified-contact-change functions are outside it. Their serving revisions stay the rollback baseline as well as the current baseline.
+### Required Functions (runtime dependencies)
+
+The set is the candidate source that differs from main and is not already represented by the serving revision. Billing, new-device, and verified-contact-change functions are outside it. Their serving revisions stay the rollback baseline as well as the current baseline.
 
 Deploy together, or the new client still depends on an old bundle:
 
@@ -149,12 +162,28 @@ Deploy together, or the new client still depends on an old bundle:
 - Owner content: `openOwnerContent`, `sealOwnerContent`. Rollback revisions are `00002-ban` and `00002-fey`. Keep `CONTENT_DATA_KEY` version 1.
 - GRIN: the seven `grin*` functions. Rollback revisions are `00004-mux`, `00004-dex`, `00004-fev`, `00004-tuv`, `00004-yom`, `00004-sep`, and `00004-hew`. Keep `GRIN_GOODS_EVIDENCE_FUNCTIONS=true`. Attaching `CONTENT_DATA_KEY` version 1 is expected and is not a rotation.
 - New, required by `internal-grin`: `ownerObjectTransfer` and `recordProcessingPurpose`, each with no previous revision. Rollback for either is to delete that one service. Neither has a secret. `ownerObjectTransfer` source limits are `asia-south1`, `256Mi`, 60 seconds, concurrency 1, max instances 3, and the shared fractional CPU. `recordProcessingPurpose` is `asia-south1` with default callable resources unless a later review pins them to the fleet limits.
-- Outside this scoped set for `internal-grin`: `readRestoreAuthorityWatermark`, `recordAgeAssessment`, and `logoutAllDevices` stay undeployed until a profile or product path that actually calls them is selected.
+- Outside this scoped set for `internal-grin`: `readRestoreAuthorityWatermark`, `recordAgeAssessment`, and `logoutAllDevices` stay undeployed. For `readRestoreAuthorityWatermark`, that absence is intentional after the resolved EAS production / `internal-grin` env verification above, not an unverified guess.
 
-Each updated service rolls back by returning 100% traffic to the revision named above. Rules do not move with that traffic change.
+Each updated service rolls back by returning 100% traffic to the revision named above.
 
 Leaving the September contact-change and new-device revisions in place also leaves them on their current admission bundle. They do not pick up `admitCallableUser` until their own deploy. That deploy is not part of this set.
 
 Adding new services consumes another `0.1666 × 3` vCPU per service at its maximum when pinned to the fleet limits. The regional quota was not read, so the manifest does not claim the quota has room.
 
-Play inventory and the upload certificate were not re-read in this pass. Version codes 34 and 35 stay unused for this candidate. Public release remains HOLD.
+### Deployment order
+
+1. Build Functions from the certified PR head (`npm --prefix functions run build`).
+2. Deploy the scoped Functions set above (`ownerObjectTransfer` and `recordProcessingPurpose` must be included). Keep existing secret versions. Do not deploy Storage rules.
+3. Deploy proposed-consent Firestore rules only (`docs/release/rules-compat/proposed-consent/`, sha256 `d5127a76…`). Verify the live ruleset content hash matches that artifact.
+4. Serving verification: Cloud Run services for the scoped set are ACTIVE at 100%; `ownerObjectTransfer` and `recordProcessingPurpose` exist; Firestore rules sha256 equals the proposed-consent artifact; Storage ruleset remains `a2b0bccc-92b9-43fe-b60f-d0e401963fab`.
+5. Only then: one signed `internal-grin` build with a newly verified unused versionCode (not 34 or 35), then device acceptance.
+
+### Rules rollback
+
+- Firestore consent rules: republish ruleset `5ec37bc5-7407-437f-a567-3faaa6b0bbb7`.
+- Functions: return 100% traffic to the named prior revisions; delete `ownerObjectTransfer` / `recordProcessingPurpose` services if those new callables must be withdrawn.
+- Storage: no change in this release; no Storage rollback step.
+
+### EAS / versionCode note
+
+EAS account `vydspecial2026`. Newest finished Android `internal-grin` build remains `31f93ac2-137f-4f45-aea2-027532941e3e`, versionCode **35**. Finished EAS codes include 34 and 35; neither may be reused. Play Console inventory must still be read to select an unused code before the signed build. Public release remains HOLD. Do not merge `integration` into `main` as part of this step.

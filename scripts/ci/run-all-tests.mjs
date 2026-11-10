@@ -21,6 +21,7 @@ const EXCLUDE = new Set([
   "test:all", // self
   "test:firestore-rules", // emulator suite — separate ci:verify stage
   "test:live-rules-grin-merged", // emulator suite, run separately by ci:verify
+  "test:processing-purpose-rules-emulator", // consent listener rules emulator — separate ci:verify stage
   "test:live-rules-compat", // live-export compatibility emulator — separate ci:verify stage
   "test:storage-rules", // storage emulator suite — separate ci:verify stage
   "test:letterhead-storage-emulator", // letterhead Storage rules emulator — separate ci:verify stage
