@@ -11,6 +11,7 @@ export const PUBLIC_ERROR_MESSAGE_IDS = {
   otp_expired: "errors.otpExpired",
   too_many_attempts: "errors.tooManyAttempts",
   session_expired: "errors.sessionExpired",
+  session_changed: "errors.sessionChanged",
   age_not_admitted: "errors.ageNotAdmitted",
   unknown: "errors.unknown",
 } as const;
@@ -26,6 +27,7 @@ export const PUBLIC_ERROR_COPY: Record<PublicErrorCode, string> = {
   otp_expired: "That code has expired. Please request a new one.",
   too_many_attempts: "Too many attempts. Please wait a few minutes and try again.",
   session_expired: "Your session has expired. Please sign in again.",
+  session_changed: "Your sign-in changed. Please start this step again.",
   age_not_admitted: "We could not save that yet. Check your connection and try again.",
   unknown: "Something went wrong. Please try again.",
 };
@@ -69,6 +71,7 @@ const CODE_TO_PUBLIC: Record<string, PublicErrorCode> = {
   "functions/unauthenticated": "session_expired",
   unauthenticated: "session_expired",
   UNAUTHENTICATED: "session_expired",
+  session_changed: "session_changed",
   age_not_admitted: "age_not_admitted",
 };
 
@@ -150,6 +153,11 @@ function classifyFromText(message: string): PublicErrorCode | null {
   if (!trimmed) return null;
   const exact = CODE_TO_PUBLIC[trimmed];
   if (exact) return exact;
+  // Exact ownership fence — must never present as session_expired while the
+  // current account session is still successful.
+  if (trimmed === "session_changed" || /\bsession_changed\b/.test(trimmed)) {
+    return "session_changed";
+  }
   if (AGE_TOKEN.test(trimmed)) return "age_not_admitted";
   if (
     /functions\/unauthenticated|auth\/session-expired|auth\/user-token-expired|\bUNAUTHENTICATED\b/.test(

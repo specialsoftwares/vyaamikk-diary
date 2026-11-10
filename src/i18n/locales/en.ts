@@ -73,6 +73,7 @@ const en = {
     tooManyAttempts: "Too many attempts. Please wait a few minutes and try again.",
     authNotConfigured: "Login service is not configured for this build.",
     sessionExpired: "Your session expired. Please log in again.",
+    sessionChanged: "Your sign-in changed. Please start this step again.",
     notFound: "We couldn't find that entry.",
     permissionDenied: "You don't have permission to perform this action.",
     saveFailed: "Couldn't save right now. Please try again.",

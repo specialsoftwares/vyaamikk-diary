@@ -33,7 +33,7 @@ function assertNoLeak(value: string): void {
 }
 
 {
-  assert.equal(PUBLIC_ERROR_CATALOGUE.length, 7);
+  assert.equal(PUBLIC_ERROR_CATALOGUE.length, 8);
   for (const entry of PUBLIC_ERROR_CATALOGUE) {
     assert.equal(entry.messageId, PUBLIC_ERROR_MESSAGE_IDS[entry.code]);
     assert.equal(entry.message, PUBLIC_ERROR_COPY[entry.code]);
@@ -110,6 +110,21 @@ function assertNoLeak(value: string): void {
     publicMessage({ code: "functions/internal", message: `Firebase: callable ${CALLABLE} failed` }),
     PUBLIC_ERROR_COPY.unknown
   );
+}
+
+{
+  // session_changed must not surface as session_expired over a live session fence.
+  assert.equal(classifyPublicError(new Error("session_changed")), "session_changed");
+  assert.equal(publicMessage(new Error("session_changed")), PUBLIC_ERROR_COPY.session_changed);
+  assert.notEqual(publicMessage(new Error("session_changed")), PUBLIC_ERROR_COPY.session_expired);
+  assert.equal(
+    classifyPublicError(
+      new AppError("permission_denied", "raw", undefined, { reason: "session_changed" })
+    ),
+    "session_changed"
+  );
+  assert.match(publicMessage(new Error("session_changed")), /sign-in changed/i);
+  assert.equal(/expired/i.test(publicMessage(new Error("session_changed"))), false);
 }
 
 {
