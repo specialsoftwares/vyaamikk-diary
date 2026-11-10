@@ -16,13 +16,21 @@
  * 5. Recheck session cutoff, restore closure, account, deletion, and any
  *    GRIN reservation.
  * 6. Copy that generation only, destination ifGenerationMatch "0".
- * 7. Recheck the same authority. If it failed, delete only the generation
- *    this attempt just wrote.
+ *    The dispatch is recorded before the copy, so a lost response is still
+ *    reconciled on the same attempt.
+ * 7. Recheck the same authority. If it failed after a proven publish, delete
+ *    only that generation. An uncertain delete stays `publishing` with the
+ *    generation recorded. It does not mark the attempt failed or remove a
+ *    different generation.
  * 8. Record `committed` only while the publication claim still matches.
  * An unknown copy leaves the attempt `publishing`. The same attempt id is
  * retried. A destination generation is accepted only when a generation-bound
  * read carries this attempt id and the full-content hash. An unversioned
  * stat is not identity, and equal size plus a shared prefix is not identity.
+ * Commit with no staging object stays `validating` until the upload deadline.
+ * Bytes that arrive on that same attempt can still publish. After the
+ * deadline, with still no bytes, the attempt becomes `expired`. A new begin
+ * is a different attempt. A `publishing` attempt is never replaced that way.
  *
  * Generic read and delete do not serve GRIN originals. New GRIN bytes still
  * require the production reservation, ledger, receipt, and new-command
@@ -80,6 +88,9 @@ export type TransferAttempt = {
   contentType: string | null;
   publishedGeneration: string | null;
   publishedSize: number | null;
+  copyDispatched: boolean;
+  compensationGeneration: string | null;
+  revision: number;
   grin: GrinTransferScope | null;
 };
 
@@ -408,6 +419,9 @@ async function begin(request: TransferRequest, ports: OwnerObjectPorts): Promise
     contentType: null,
     publishedGeneration: null,
     publishedSize: null,
+    copyDispatched: false,
+    compensationGeneration: null,
+    revision: 0,
     grin: object.objectClass === "grin_original" ? request.grin ?? null : null,
   };
   if (attempt.objectClass === "grin_original" && !(await ports.authorizeGrin(attempt))) return fail("denied");
@@ -438,14 +452,10 @@ async function commit(request: TransferRequest, ports: OwnerObjectPorts): Promis
   const loaded = await loadOwnAttempt(request, ports);
   if (!isAttempt(loaded)) return loaded;
   if (loaded.status === "committed") return committedResult(loaded);
-  if (loaded.status === "aborted" || loaded.status === "failed" || loaded.status === "expired") return fail("conflict");
+  if (loaded.status === "expired") return fail("expired", true);
+  if (loaded.status === "aborted") return fail("conflict");
+  if (loaded.status === "failed") return reconcileFailed(loaded, ports);
   if (loaded.status === "publishing") return finishPublish(loaded, ports);
-  if (loaded.status === "open" && loaded.expiresAt <= ports.now()) {
-    await ports.transition(loaded.attemptId, ["open"], null, (current) => ({ ...current, status: "expired" }));
-    const listed = await ports.listGenerations(loaded.stagingPath);
-    await deleteGenerations(loaded.stagingPath, listed.map((item) => item.generation), ports);
-    return fail("expired", true);
-  }
   const claim = ports.newClaim();
   const claimed = await ports.transition(loaded.attemptId, [loaded.status === "validating" ? "validating" : "open"], null, (current) => ({
     ...current,
@@ -457,15 +467,52 @@ async function commit(request: TransferRequest, ports: OwnerObjectPorts): Promis
     if (!current) return fail("not_found");
     if (current.status === "committed") return committedResult(current);
     if (current.status === "publishing") return finishPublish(current, ports);
-    if (current.status === "aborted" || current.status === "failed" || current.status === "expired") return fail("conflict");
+    if (current.status === "expired") return fail("expired", true);
+    if (current.status === "aborted") return fail("conflict");
+    if (current.status === "failed") return reconcileFailed(current, ports);
     return fail("unknown", true);
   }
   return validateAndPublish(claimed.attempt, ports);
 }
 
+async function expireWithoutBytes(attempt: TransferAttempt, ports: OwnerObjectPorts): Promise<TransferResult> {
+  const again = await ports.listGenerations(attempt.stagingPath);
+  if (again.length > 0) return validateListed(attempt, ports, again);
+  const expired = await ports.transition(attempt.attemptId, ["validating"], attempt.publicationClaim, (current) => ({
+    ...current,
+    status: "expired",
+    publicationClaim: null,
+  }));
+  if (!expired.applied || !expired.attempt) {
+    const current = expired.attempt;
+    if (current?.status === "expired") return fail("expired", true);
+    if (current?.status === "committed") return committedResult(current);
+    if (current?.status === "publishing") return finishPublish(current, ports);
+    if (current?.status === "aborted" || current?.status === "failed") return fail("conflict");
+    return fail("unknown", true);
+  }
+  const late = await ports.listGenerations(attempt.stagingPath);
+  for (const item of late) {
+    const removed = await ports.removeGeneration(attempt.stagingPath, item.generation);
+    if (removed === "unknown") return fail("unknown", true);
+  }
+  return fail("expired", true);
+}
+
 async function validateAndPublish(attempt: TransferAttempt, ports: OwnerObjectPorts): Promise<TransferResult> {
   const listed = await ports.listGenerations(attempt.stagingPath);
-  if (listed.length === 0) return fail("unknown", true);
+  if (listed.length === 0) {
+    if (ports.now() >= attempt.expiresAt) return expireWithoutBytes(attempt, ports);
+    return fail("unknown", true);
+  }
+  return validateListed(attempt, ports, listed);
+}
+
+async function validateListed(
+  attempt: TransferAttempt,
+  ports: OwnerObjectPorts,
+  listed: StoredGeneration[]
+): Promise<TransferResult> {
   if (listed.length !== 1) {
     await markFailed(attempt, ports);
     await deleteGenerations(attempt.stagingPath, listed.map((item) => item.generation), ports);
@@ -524,60 +571,62 @@ async function recoverPublished(attempt: TransferAttempt, ports: OwnerObjectPort
   return null;
 }
 
-async function finishPublish(attempt: TransferAttempt, ports: OwnerObjectPorts): Promise<TransferResult> {
-  if (!attempt.publicationClaim || !attempt.stagingGeneration || !attempt.contentSha256 || !attempt.contentType) {
-    return fail("unknown", true);
-  }
-  if (!(await publicationAllowed(attempt, ports))) {
-    await markFailed(attempt, ports);
-    await ports.removeGeneration(attempt.stagingPath, attempt.stagingGeneration);
-    return fail("denied");
-  }
-  const source = await ports.readGeneration(attempt.stagingPath, attempt.stagingGeneration);
-  if (!source || source.generation !== attempt.stagingGeneration) {
-    await markFailed(attempt, ports);
-    return fail("conflict");
-  }
-  const copied = await ports.copyGeneration({
-    from: attempt.stagingPath,
-    fromGeneration: attempt.stagingGeneration,
-    to: attempt.path,
-    ifGenerationMatch: OBJECT_TRANSFER_CREATE_HEADER_VALUE,
-    contentType: attempt.contentType,
-    metadata: {
-      vydAttempt: attempt.attemptId,
-      vydSha256: attempt.contentSha256,
-      ...(attempt.objectClass === "grin_original" ? { vydEvidence: "pending" } : {}),
-    },
-  });
-  if (copied.outcome === "unknown") return fail("unknown", true);
-  let published: { generation: string; size: number } | null = null;
-  if (copied.outcome === "copied") {
-    const bound = await ports.readGeneration(attempt.path, copied.generation);
-    if (
-      bound &&
-      bound.generation === copied.generation &&
-      bound.metadata.vydAttempt === attempt.attemptId &&
-      bound.metadata.vydSha256 === attempt.contentSha256
-    ) {
-      published = { generation: bound.generation, size: bound.size };
-    } else {
+function ownsPublished(attempt: TransferAttempt, bound: StoredGeneration, generation: string): boolean {
+  return (
+    bound.generation === generation &&
+    bound.metadata.vydAttempt === attempt.attemptId &&
+    bound.metadata.vydSha256 === attempt.contentSha256
+  );
+}
+
+async function compensatePublished(
+  attempt: TransferAttempt,
+  ports: OwnerObjectPorts,
+  proven: { generation: string; size: number } | null
+): Promise<TransferResult> {
+  let current = attempt;
+  if (!current.compensationGeneration && proven) {
+    const noted = await ports.transition(current.attemptId, ["publishing"], current.publicationClaim, (existing) => ({
+      ...existing,
+      compensationGeneration: proven.generation,
+    }));
+    if (!noted.applied || !noted.attempt) {
+      if (noted.attempt?.status === "failed") return fail("denied");
+      if (noted.attempt?.status === "committed") return committedResult(noted.attempt);
       return fail("unknown", true);
     }
-  } else {
-    published = await recoverPublished(attempt, ports);
-    if (!published) {
-      await markFailed(attempt, ports);
-      await ports.removeGeneration(attempt.stagingPath, attempt.stagingGeneration);
-      return fail("conflict");
-    }
+    current = noted.attempt;
   }
-  if (!(await publicationAllowed(attempt, ports))) {
-    await ports.removeGeneration(attempt.path, published.generation);
-    await markFailed(attempt, ports);
-    await ports.removeGeneration(attempt.stagingPath, attempt.stagingGeneration);
-    return fail("denied");
+  const generation = current.compensationGeneration;
+  if (!generation || !current.stagingGeneration) return fail("unknown", true);
+  const bound = await ports.readGeneration(current.path, generation);
+  if (bound) {
+    if (!ownsPublished(current, bound, generation)) return fail("unknown", true);
+    const removed = await ports.removeGeneration(current.path, generation);
+    if (removed !== "removed" && removed !== "missing") return fail("unknown", true);
   }
+  const stillThere = await ports.readGeneration(current.path, generation);
+  if (stillThere) return fail("unknown", true);
+  const staging = await ports.removeGeneration(current.stagingPath, current.stagingGeneration);
+  if (staging !== "removed" && staging !== "missing") return fail("unknown", true);
+  const failed = await ports.transition(current.attemptId, ["publishing"], current.publicationClaim, (existing) => ({
+    ...existing,
+    status: "failed",
+    publicationClaim: null,
+  }));
+  if (!failed.applied) {
+    if (failed.attempt?.status === "failed") return fail("denied");
+    return fail("unknown", true);
+  }
+  return fail("denied");
+}
+
+async function acceptPublished(
+  attempt: TransferAttempt,
+  ports: OwnerObjectPorts,
+  published: { generation: string; size: number }
+): Promise<TransferResult> {
+  if (!(await publicationAllowed(attempt, ports))) return compensatePublished(attempt, ports, published);
   const done = await ports.transition(attempt.attemptId, ["publishing"], attempt.publicationClaim, (current) => ({
     ...current,
     status: "committed",
@@ -587,13 +636,133 @@ async function finishPublish(attempt: TransferAttempt, ports: OwnerObjectPorts):
   }));
   if (!done.applied || !done.attempt) {
     if (done.attempt?.status === "committed" && done.attempt.publishedGeneration === published.generation) {
-      await ports.removeGeneration(attempt.stagingPath, attempt.stagingGeneration);
+      await ports.removeGeneration(attempt.stagingPath, attempt.stagingGeneration ?? "");
       return committedResult(done.attempt);
     }
     return fail("unknown", true);
   }
-  await ports.removeGeneration(attempt.stagingPath, attempt.stagingGeneration);
+  await ports.removeGeneration(attempt.stagingPath, attempt.stagingGeneration ?? "");
   return committedResult(done.attempt);
+}
+
+async function finishPublish(attempt: TransferAttempt, ports: OwnerObjectPorts): Promise<TransferResult> {
+  if (!attempt.publicationClaim || !attempt.stagingGeneration || !attempt.contentSha256 || !attempt.contentType) {
+    return fail("unknown", true);
+  }
+  if (attempt.compensationGeneration) return compensatePublished(attempt, ports, null);
+  const previouslyDispatched = attempt.copyDispatched;
+  const allowed = await publicationAllowed(attempt, ports);
+  if (previouslyDispatched) {
+    const proven = await recoverPublished(attempt, ports);
+    if (proven) {
+      if (!allowed) return compensatePublished(attempt, ports, proven);
+      return acceptPublished(attempt, ports, proven);
+    }
+    if (!allowed) return fail("unknown", true);
+  } else if (!allowed) {
+    return failPublication(attempt, attempt.revision, ports, "denied");
+  }
+  const source = await ports.readGeneration(attempt.stagingPath, attempt.stagingGeneration);
+  if (!source || source.generation !== attempt.stagingGeneration) {
+    if (previouslyDispatched) return fail("unknown", true);
+    await markFailed(attempt, ports);
+    return fail("conflict");
+  }
+  let publishing = attempt;
+  if (!previouslyDispatched) {
+    const noted = await ports.transition(attempt.attemptId, ["publishing"], attempt.publicationClaim, (current) => ({
+      ...current,
+      copyDispatched: true,
+      revision: current.revision + 1,
+    }));
+    if (!noted.applied || !noted.attempt) {
+      if (noted.attempt?.status === "committed") return committedResult(noted.attempt);
+      if (noted.attempt?.status === "publishing" && noted.attempt.copyDispatched) return finishPublish(noted.attempt, ports);
+      return fail("unknown", true);
+    }
+    publishing = noted.attempt;
+  }
+  const copied = await ports.copyGeneration({
+    from: publishing.stagingPath,
+    fromGeneration: publishing.stagingGeneration ?? "",
+    to: publishing.path,
+    ifGenerationMatch: OBJECT_TRANSFER_CREATE_HEADER_VALUE,
+    contentType: publishing.contentType ?? "",
+    metadata: {
+      vydAttempt: publishing.attemptId,
+      vydSha256: publishing.contentSha256 ?? "",
+      ...(publishing.objectClass === "grin_original" ? { vydEvidence: "pending" } : {}),
+    },
+  });
+  if (copied.outcome === "unknown") return fail("unknown", true);
+  if (copied.outcome === "copied") {
+    const bound = await ports.readGeneration(publishing.path, copied.generation);
+    if (!bound || !ownsPublished(publishing, bound, copied.generation)) return fail("unknown", true);
+    return acceptPublished(publishing, ports, { generation: bound.generation, size: bound.size });
+  }
+  const recovered = await recoverPublished(publishing, ports);
+  if (recovered) return acceptPublished(publishing, ports, recovered);
+  const listed = await ports.listGenerations(publishing.path);
+  const foreignOnly =
+    listed.length > 0 &&
+    listed.every((item) => item.metadata.vydAttempt !== publishing.attemptId || item.metadata.vydSha256 !== publishing.contentSha256);
+  if (!foreignOnly) return fail("unknown", true);
+  return failPublication(publishing, publishing.revision, ports, "conflict");
+}
+
+async function reconcileFailed(attempt: TransferAttempt, ports: OwnerObjectPorts): Promise<TransferResult> {
+  if (attempt.compensationGeneration) {
+    const claim = attempt.publicationClaim ?? ports.newClaim();
+    const reopened = await ports.transition(attempt.attemptId, ["failed"], null, (current) => ({
+      ...current,
+      status: "publishing",
+      publicationClaim: claim,
+    }));
+    if (!reopened.applied || !reopened.attempt) return fail("unknown", true);
+    return compensatePublished(reopened.attempt, ports, null);
+  }
+  const proven = await recoverPublished(attempt, ports);
+  if (!proven) return fail("conflict");
+  const reopened = await ports.transition(attempt.attemptId, ["failed"], null, (current) => ({
+    ...current,
+    status: "publishing",
+    publicationClaim: ports.newClaim(),
+    compensationGeneration: proven.generation,
+  }));
+  if (!reopened.applied || !reopened.attempt) {
+    if (reopened.attempt?.status === "publishing") return compensatePublished(reopened.attempt, ports, proven);
+    return fail("unknown", true);
+  }
+  return compensatePublished(reopened.attempt, ports, proven);
+}
+
+async function failPublication(
+  attempt: TransferAttempt,
+  seenRevision: number,
+  ports: OwnerObjectPorts,
+  code: "denied" | "conflict"
+): Promise<TransferResult> {
+  const proven = await recoverPublished(attempt, ports);
+  if (proven) return compensatePublished(attempt, ports, proven);
+  const closed = await ports.transition(
+    attempt.attemptId,
+    ["validating", "publishing"],
+    attempt.publicationClaim,
+    (current) => {
+      if (current.revision !== seenRevision || current.compensationGeneration) return current;
+      return { ...current, status: "failed", publicationClaim: null };
+    }
+  );
+  const current = closed.attempt;
+  if (!current) return fail("unknown", true);
+  if (current.status !== "failed") return finishPublish(current, ports);
+  const after = await recoverPublished(attempt, ports);
+  if (after) return reconcileFailed({ ...current, compensationGeneration: after.generation }, ports);
+  if (attempt.stagingGeneration) {
+    const removed = await ports.removeGeneration(attempt.stagingPath, attempt.stagingGeneration);
+    if (removed === "unknown") return fail("unknown", true);
+  }
+  return fail(code);
 }
 
 async function abort(request: TransferRequest, ports: OwnerObjectPorts): Promise<TransferResult> {

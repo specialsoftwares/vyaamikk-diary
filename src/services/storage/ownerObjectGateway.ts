@@ -5,6 +5,11 @@
  * its expiry; ending the session does not cancel it.
  * A timeout leaves the same attempt open. It does not start another attempt
  * and it does not cancel the server operation.
+ * Abort after a retired session, a failed PUT, or a non-success status uses
+ * the same wait bound. If that abort does not settle, the attempt stays
+ * pending and the result is unknown. The deadline does not mean the object
+ * was deleted. An expired attempt, which the server reaches only when no
+ * bytes were published, may be replaced by a later begin.
  */
 
 import {
@@ -129,6 +134,7 @@ function isGrinPath(path: string): boolean {
 export function createOwnerObjectGateway(ports: OwnerObjectGatewayPorts) {
   const waitMs = ports.waitMs ?? OBJECT_TRANSFER_CLIENT_WAIT_MS;
   const pending = new Map<string, string>();
+  const inflight = new Map<string, { attemptId: string; pendingKey: string; sessionGeneration: number | null }>();
 
   async function call(data: Record<string, unknown>, attemptId: string | null): Promise<OkRecord> {
     try {
@@ -136,6 +142,31 @@ export function createOwnerObjectGateway(ports: OwnerObjectGatewayPorts) {
     } catch (error) {
       throw mapOwnerObjectCallError(error, attemptId);
     }
+  }
+
+  async function abortAttempt(attemptId: string): Promise<"aborted" | "unknown"> {
+    try {
+      const value = await withBound(ports.call({ operation: "abort", attemptId }), waitMs, attemptId);
+      if (!value || typeof value !== "object" || (value as { ok?: unknown }).ok !== true) return "unknown";
+      return "aborted";
+    } catch {
+      return "unknown";
+    }
+  }
+
+  function finishCleanup(
+    attemptId: string,
+    pendingKey: string,
+    flightKey: string,
+    cleanup: "aborted" | "unknown",
+    settled: Error
+  ): never {
+    if (cleanup === "aborted") {
+      pending.delete(pendingKey);
+      inflight.delete(flightKey);
+    }
+    if (cleanup === "unknown") throw new OwnerObjectTransferError("unknown", attemptId, true);
+    throw settled;
   }
 
   return {
@@ -154,8 +185,19 @@ export function createOwnerObjectGateway(ports: OwnerObjectGatewayPorts) {
       const still = () => session === undefined || (Boolean(userId) && mayIssueRemoteWork(session, userId ?? ""));
       if (!still()) throw new StorageUploadOwnershipError();
       const pendingKey = `${userId ?? ""}#${session?.generation ?? ""}#${input.storagePath}`;
+      const flightKey = input.storagePath;
       const localBytes = input.bytes ? input.bytes.byteLength : await ports.localBytes(input.localUri ?? "");
       if (!still()) throw new StorageUploadOwnershipError();
+      const flight = inflight.get(flightKey);
+      if (flight && flight.attemptId !== (input.attemptId || pending.get(pendingKey) || "")) {
+        const sameSession = session === undefined || flight.sessionGeneration === (session?.generation ?? null);
+        if (!sameSession) {
+          const cleanup = await abortAttempt(flight.attemptId);
+          if (cleanup !== "aborted") throw new OwnerObjectTransferError("unknown", flight.attemptId, true);
+          pending.delete(flight.pendingKey);
+          inflight.delete(flightKey);
+        }
+      }
       let attemptId = input.attemptId || pending.get(pendingKey) || "";
       if (!attemptId) {
         const begun = await call(
@@ -180,10 +222,9 @@ export function createOwnerObjectGateway(ports: OwnerObjectGatewayPorts) {
           throw new OwnerObjectTransferError("unknown", attemptId, true);
         }
         pending.set(pendingKey, attemptId);
+        inflight.set(flightKey, { attemptId, pendingKey, sessionGeneration: session?.generation ?? null });
         if (!still()) {
-          await ports.call({ operation: "abort", attemptId }).catch(() => undefined);
-          pending.delete(pendingKey);
-          throw new StorageUploadOwnershipError();
+          finishCleanup(attemptId, pendingKey, flightKey, await abortAttempt(attemptId), new StorageUploadOwnershipError());
         }
         let status = 0;
         try {
@@ -201,19 +242,27 @@ export function createOwnerObjectGateway(ports: OwnerObjectGatewayPorts) {
         } catch (error) {
           if (error instanceof OwnerObjectTransferError && error.code === "unknown") throw error;
           if (error instanceof StorageUploadOwnershipError) throw error;
-          await ports.call({ operation: "abort", attemptId }).catch(() => undefined);
-          pending.delete(pendingKey);
-          throw mapOwnerObjectCallError(error, attemptId);
+          const mapped = error instanceof OwnerObjectTransferError ? error : mapOwnerObjectCallError(error, attemptId);
+          finishCleanup(attemptId, pendingKey, flightKey, await abortAttempt(attemptId), mapped);
         }
-        if (!still()) throw new StorageUploadOwnershipError();
-        if (status < 200 || status >= 300) {
-          await ports.call({ operation: "abort", attemptId }).catch(() => undefined);
-          pending.delete(pendingKey);
-          throw new OwnerObjectTransferError("unknown", attemptId, true);
+        if (!still() || status < 200 || status >= 300) {
+          const reason = !still()
+            ? new StorageUploadOwnershipError()
+            : new OwnerObjectTransferError("unknown", attemptId, true);
+          finishCleanup(attemptId, pendingKey, flightKey, await abortAttempt(attemptId), reason);
         }
       }
       if (!still()) throw new StorageUploadOwnershipError();
-      const committed = await call({ operation: "commit", attemptId }, attemptId);
+      let committed: OkRecord;
+      try {
+        committed = await call({ operation: "commit", attemptId }, attemptId);
+      } catch (error) {
+        if (error instanceof OwnerObjectTransferError && error.code === "expired") {
+          pending.delete(pendingKey);
+          inflight.delete(flightKey);
+        }
+        throw error;
+      }
       if (!still()) throw new StorageUploadOwnershipError();
       const remoteBytes = Number(committed.size);
       const generation = String(committed.generation ?? "");
@@ -221,6 +270,7 @@ export function createOwnerObjectGateway(ports: OwnerObjectGatewayPorts) {
         throw new OwnerObjectTransferError("unknown", attemptId, true);
       }
       pending.delete(pendingKey);
+      inflight.delete(flightKey);
       return {
         storagePath: String(committed.path ?? input.storagePath),
         generation,

@@ -87,31 +87,50 @@ function fakeBucket(options: { holdHash: Promise<void> | null; holdCopy: Promise
       },
       async copy(
         _destination: unknown,
-        copyOptions: { preconditionOpts: { ifGenerationMatch: string }; metadata: { contentType: string; metadata: Record<string, string> } }
+        copyOptions: {
+          preconditionOpts?: { ifGenerationMatch?: string };
+          contentType?: string;
+          metadata?: Record<string, string>;
+        }
       ) {
-        copies.push({ fromGeneration: generation ?? "", ifGenerationMatch: copyOptions.preconditionOpts.ifGenerationMatch });
+        const ifGenerationMatch = String(copyOptions.preconditionOpts?.ifGenerationMatch ?? "");
+        copies.push({ fromGeneration: generation ?? "", ifGenerationMatch });
         if (options.holdCopy) await options.holdCopy;
         if (generations(path).length > 0 && generation == null) {
           throw Object.assign(new Error("precondition"), { code: 412 });
         }
         const source = generations(path).find((item) => item.generation === generation);
-        if (!source) return [{ name: path, metadata: {} }, undefined] as [{ name: string; metadata: Record<string, unknown> }, undefined];
+        if (!source) {
+          return [file(path, generation), { done: false }] as [ReturnType<typeof file>, { done: false }];
+        }
         const published = "9007199254740993";
         const destPath = (_destination as { name?: string }).name ?? LETTER;
         const next = generations(destPath);
-        if (next.length > 0 && copyOptions.preconditionOpts.ifGenerationMatch === "0") {
+        if (next.length > 0 && ifGenerationMatch === "0") {
           throw Object.assign(new Error("precondition"), { code: 412 });
         }
+        const metadata = { ...(copyOptions.metadata ?? {}) };
         next.push({
           path: destPath,
           generation: published,
           bytes: source.bytes,
-          contentType: copyOptions.metadata.contentType,
-          metadata: copyOptions.metadata.metadata,
+          contentType: copyOptions.contentType ?? "",
+          metadata,
         });
         files.set(destPath, next);
-        const copied = file(destPath, published);
-        return [copied, { generation: published }] as [typeof copied, { generation: string }];
+        return [
+          file(destPath, published),
+          {
+            kind: "storage#rewriteResponse",
+            done: true,
+            resource: {
+              generation: published,
+              size: String(source.bytes.byteLength),
+              contentType: copyOptions.contentType ?? "",
+              metadata,
+            },
+          },
+        ] as [ReturnType<typeof file>, { done: true; resource: { generation: string } }];
       },
       async delete() {
         if (!generation) return;

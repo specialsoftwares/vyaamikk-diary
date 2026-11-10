@@ -41,6 +41,17 @@ type FileMetadata = {
   metadata?: Record<string, string>;
 };
 
+type RewriteResponse = {
+  done?: unknown;
+  rewriteToken?: unknown;
+  resource?: {
+    generation?: unknown;
+    size?: unknown;
+    contentType?: unknown;
+    metadata?: unknown;
+  };
+};
+
 type GenerationFile = {
   exists(): Promise<[boolean]>;
   getMetadata(): Promise<[FileMetadata]>;
@@ -57,9 +68,10 @@ type GenerationFile = {
     destination: GenerationFile,
     options: {
       preconditionOpts: { ifGenerationMatch: string };
-      metadata: { contentType: string; metadata: Record<string, string> };
+      contentType: string;
+      metadata: Record<string, string>;
     }
-  ): Promise<[GenerationFile, { generation?: string | number } | undefined]>;
+  ): Promise<[GenerationFile, RewriteResponse | undefined]>;
   delete(): Promise<unknown>;
   name?: string;
   metadata?: FileMetadata;
@@ -99,6 +111,21 @@ function metadataOf(meta: FileMetadata | undefined): Record<string, string> {
 function generationOf(meta: FileMetadata | undefined): string {
   if (meta?.generation == null) return "";
   return String(meta.generation);
+}
+
+/**
+ * Objects.rewrite completes with `done: true` and the new object under `resource`.
+ * Generation is an int64 string. A numeric value has already been coerced, so it
+ * is not accepted. An unfinished rewrite token is not a published generation.
+ */
+function generationFromRewrite(response: unknown): string | null {
+  if (!response || typeof response !== "object") return null;
+  const body = response as RewriteResponse;
+  if (body.done !== true) return null;
+  if (typeof body.rewriteToken === "string" && body.rewriteToken.length > 0) return null;
+  const generation = body.resource?.generation;
+  if (typeof generation !== "string" || !/^[0-9]+$/.test(generation)) return null;
+  return generation;
 }
 
 function storedFrom(file: GenerationFile, meta: FileMetadata): StoredGeneration | null {
@@ -318,11 +345,12 @@ export function createOwnerObjectPorts(deps: {
       try {
         const source = exactGenerationFile(bucket, input.from, input.fromGeneration);
         const destination = bucket.file(input.to);
-        const [copied, response] = await source.copy(destination, {
+        const [, response] = await source.copy(destination, {
           preconditionOpts: { ifGenerationMatch: input.ifGenerationMatch },
-          metadata: { contentType: input.contentType, metadata: input.metadata },
+          contentType: input.contentType,
+          metadata: input.metadata,
         });
-        const generation = generationOf(copied.metadata) || (response?.generation == null ? "" : String(response.generation));
+        const generation = generationFromRewrite(response);
         if (!generation) return { outcome: "unknown" };
         const bound = await readGeneration(input.to, generation);
         if (!bound || bound.generation !== generation) return { outcome: "unknown" };
