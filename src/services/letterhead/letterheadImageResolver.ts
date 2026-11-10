@@ -29,10 +29,6 @@ export async function resolveLetterheadImageSource(
     if (opened.kind === "unavailable") return { uri: null, source: "storage" };
   }
   if (storagePath) {
-    const cached = config.letterheadImageDownloadUrl?.trim();
-    if (cached) {
-      return { uri: cached, source: "storage" };
-    }
     const url = await getDownloadUrlForPath(storagePath);
     if (url) {
       return { uri: url, source: "storage" };

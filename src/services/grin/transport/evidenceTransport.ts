@@ -22,7 +22,7 @@ import { getFunctions, httpsCallable } from "firebase/functions";
 import { getStorage, ref, uploadBytesResumable, getMetadata } from "firebase/storage";
 
 import { env } from "@/config/env";
-import { getFirebaseApp, getFirebaseAuth, getFirebaseStorage } from "@/config/firebase";
+import { getFirebaseApp, getFirebaseAuth } from "@/config/firebase";
 import {
   MIME_SNIFF_BYTES,
   iterateBoundedChunks,
@@ -352,27 +352,18 @@ async function defaultHashLocalPath(localPath: string, maxBytes: number): Promis
 }
 
 async function defaultPutObject(input: EvidenceObjectPutInput): Promise<EvidenceObjectPutResult> {
-  const storage = getFirebaseStorage();
-  const objectRef = ref(storage, input.storagePath);
-  let data: Blob | Uint8Array;
-  if (input.bytes) {
-    if (input.bytes.byteLength > MAX_PDF_ORIGINAL_BYTES) throw new Error("too_large");
-    data = input.bytes;
-  } else if (input.localPath) {
-    const { File } = await import("expo-file-system");
-    data = new File(input.localPath);
-  } else {
-    throw new Error("missing local original");
-  }
-  const task = uploadBytesResumable(objectRef, data, {
+  const { ownerObjectGateway } = await import("@/services/storage/ownerObjectGateway");
+  const gateway = await ownerObjectGateway();
+  if (!input.bytes && !input.localPath) throw new Error("missing local original");
+  if (input.bytes && input.bytes.byteLength > MAX_PDF_ORIGINAL_BYTES) throw new Error("too_large");
+  const uploaded = await gateway.upload({
+    storagePath: input.storagePath,
     contentType: input.contentType,
-    customMetadata: { vydEvidence: "pending" },
+    localUri: input.localPath,
+    bytes: input.bytes,
   });
-  await new Promise<void>((resolve, reject) => {
-    task.on("state_changed", undefined, reject, () => resolve());
-  });
-  const meta = await getMetadata(objectRef);
-  return { generation: String(meta.generation ?? "") };
+  if (!uploaded.generation) throw new Error("object_transfer_unknown");
+  return { generation: uploaded.generation };
 }
 
 /**

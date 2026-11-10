@@ -92,6 +92,7 @@
     "test:invoice-renderer-docker": "bash scripts/ci/build-invoice-renderer-docker.sh",
     "test:letterhead-media-rest-emulator": "firebase emulators:exec --only firestore,storage --project vyaamikk-diary-storage-rules-test \"npx --yes tsx src/services/storage/letterheadMediaRest.emulator.test.ts\"",
     "test:letterhead-storage-emulator": "firebase emulators:exec --only firestore,storage --project vyaamikk-diary-storage-rules-test \"npx --yes tsx src/services/storage/letterheadStorage.emulator.test.ts\"",
+    "test:owner-object-transfer": "npx --yes tsx functions/src/storage/ownerObjectTransfer.test.ts && npx --yes tsx src/services/storage/ownerObjectGateway.test.ts",
     "test:storage-rules": "firebase emulators:exec --only firestore,storage --project vyaamikk-diary-storage-rules-test \"npx --yes tsx storage.rules.test.ts\" && firebase emulators:exec --only firestore,storage --project demo-vyaamikk-storage-activated \"npx --yes tsx storage.activatedRestore.emulator.test.ts\"",
     "test:financial-year": "npx --yes tsx src/utils/financialYear.test.ts",
     "test:deletion": "npx --yes tsx src/services/records/permanentDeletion.test.ts",

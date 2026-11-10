@@ -72,7 +72,7 @@ A signed/resumable URL is not an equivalent replacement for immediate session/re
 
 `authSecurity/{uid}` plus a new consolidated account document would still omit the global restore fence and GRIN reservation/ledger state. A consolidated ACL needs all relevant authoritative writers to update it transactionally, initialization for existing accounts/reservations, fail-closed behavior on missing/stale ACLs, and restore ordering that cannot resurrect obsolete grants. Background triggers alone leave a window after revocation/deletion. No such schema, writer protocol or backfill exists in this candidate.
 
-The server-mediated design can preserve existing bucket paths and bytes without re-encryption or account-state backfill. It still requires implementation, security review, endpoint and client tests, runtime size/memory/timeout validation, and deployment. It is not implemented in this corrective candidate.
+The server-mediated design can preserve existing bucket paths and bytes without re-encryption or account-state backfill. Source now contains `ownerObjectTransfer` and the production client gateway described below. It still needs independent review, canonical CI, deployment of that callable only, a signed binary, and a separate decision before any direct Storage rule is tightened. Root `storage.rules` are unchanged. A 60-second read ticket can be used after a later revocation until it expires; commit and delete recheck authority and do not trust the ticket.
 
 ## Release and rollout dependencies
 

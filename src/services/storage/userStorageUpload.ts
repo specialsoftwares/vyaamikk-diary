@@ -1,8 +1,8 @@
 /**
  * Authenticated Firebase Storage upload that never constructs RN Blobs.
  *
- * Production path: Expo legacy `uploadAsync` BINARY_CONTENT → Storage media
- * REST with the signed-in user's ID token. Size verified via getMetadata.
+ * Production path: ownerObjectTransfer begin, a short-lived staging PUT, then commit.
+ * Explicit media ports remain for emulator tests and are not the default.
  *
  * Ports are injectable for execution tests (see userStorageUploadCore.ts).
  * When FIREBASE_STORAGE_EMULATOR_HOST is set, URLs target the emulator —
@@ -124,8 +124,24 @@ export async function uploadLocalFileViaMediaApi(input: {
   session?: SyncSessionToken | null;
   ports?: MediaUploadPorts;
 }): Promise<VerifiedStorageUpload> {
+  if (!input.ports) {
+    const { ownerObjectGateway } = await import("./ownerObjectGateway");
+    const gateway = await ownerObjectGateway();
+    const uploaded = await gateway.upload({
+      storagePath: input.storagePath,
+      localUri: input.localUri,
+      contentType: input.contentType,
+      userId: input.userId,
+      session: input.session,
+    });
+    return {
+      storagePath: uploaded.storagePath,
+      localBytes: uploaded.localBytes,
+      remoteBytes: uploaded.remoteBytes,
+    };
+  }
   return uploadViaPorts({
     ...input,
-    ports: input.ports ?? createDefaultMediaUploadPorts(),
+    ports: input.ports,
   });
 }

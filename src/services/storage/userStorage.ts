@@ -1,6 +1,6 @@
 /**
- * Per-user Firebase Storage helpers (firebase/storage JS SDK for reads/delete;
- * uploads via media REST + Expo FileSystem — see userStorageUpload.ts).
+ * Per-user object helpers. Production upload, read, and delete go through the
+ * owner-object gateway. An explicit media-port injection remains for emulator tests.
  *
  * React Native note (RN ≥ 0.74 / firebase 12.14.0):
  * - `uploadString` and multipart `FbsBlob.getBlob` build ArrayBufferView Blobs
@@ -11,13 +11,12 @@
  */
 
 import * as FileSystem from "expo-file-system/legacy";
-import { deleteObject, getDownloadURL, getMetadata, ref } from "firebase/storage";
 
 import { env, getActiveBackend, isFirebaseConfigured } from "@/config/env";
 import { CONTENT_SEAL_MEDIA_TYPE, shouldSealProductionWrites } from "@/constants/contentSeal";
 import { PDF_CLOUD_BACKUP_ENABLED } from "@/constants/pdfPrivacy";
 import { isDiaryContentSeal } from "@/services/privacy/diarySealDocument";
-import { FirebaseNotConfiguredError, getFirebaseStorage } from "@/config/firebase";
+import { FirebaseNotConfiguredError } from "@/config/firebase";
 import { allocateOpaqueUserStoragePath, objectNameEmbedsPrivateContent } from "@/services/storage/userOwnedStoragePaths";
 import {
   describeLetterheadSaveFailure,
@@ -103,10 +102,6 @@ export function inferContentType(fileName: string, fallback = "application/octet
   if (lower.endsWith(".gif")) return "image/gif";
   if (lower.endsWith(".pdf")) return "application/pdf";
   return fallback;
-}
-
-function storageRefForPath(storagePath: string) {
-  return ref(getFirebaseStorage(), storagePath);
 }
 
 function parseDataUri(dataUri: string): { mime: string; base64: string } | null {
@@ -354,10 +349,11 @@ export async function readProtectedLocalUri(
 ): Promise<{ kind: "opened"; uri: string } | { kind: "legacy" } | { kind: "unavailable" }> {
   if (!isUserStorageAvailable()) return { kind: "unavailable" };
   try {
-    const storageRef = storageRefForPath(storagePath);
-    const meta = await getMetadata(storageRef);
-    if (meta.contentType !== CONTENT_SEAL_MEDIA_TYPE) return { kind: "legacy" };
-    const url = await getDownloadURL(storageRef);
+    const { ownerObjectGateway } = await import("./ownerObjectGateway");
+    const opened = await (await ownerObjectGateway()).read(storagePath);
+    if (!opened) return { kind: "unavailable" };
+    if (opened.contentType !== CONTENT_SEAL_MEDIA_TYPE) return { kind: "legacy" };
+    const url = opened.url;
     const response = await fetch(url);
     if (!response.ok) return { kind: "unavailable" };
     const text = await response.text();
@@ -380,7 +376,8 @@ export async function readProtectedLocalUri(
 export async function getDownloadUrlForPath(storagePath: string): Promise<string | null> {
   if (!isUserStorageAvailable()) return null;
   try {
-    return await getDownloadURL(storageRefForPath(storagePath));
+    const { ownerObjectGateway } = await import("./ownerObjectGateway");
+    return (await (await ownerObjectGateway()).read(storagePath))?.url ?? null;
   } catch (e) {
     log.warn("getDownloadUrlForPath", e);
     return null;
@@ -390,7 +387,8 @@ export async function getDownloadUrlForPath(storagePath: string): Promise<string
 export async function deleteUserStorageObject(storagePath: string): Promise<void> {
   if (!isUserStorageAvailable()) return;
   try {
-    await deleteObject(storageRefForPath(storagePath));
+    const { ownerObjectGateway } = await import("./ownerObjectGateway");
+    await (await ownerObjectGateway()).remove(storagePath);
   } catch (e) {
     log.warn("deleteUserStorageObject", e);
   }

@@ -56,6 +56,7 @@ assert.doesNotMatch(stripComments(transport), /as GrinReconcileResult/);
 
 const evidence = stripComments(readFileSync(join(dir, "evidenceTransport.ts"), "utf8"));
 assert.match(evidence, /httpsCallable/);
+assert.match(evidence, /ownerObjectGateway/);
 assert.match(evidence, /uploadBytesResumable/);
 assert.match(evidence, /readLocalBytes/);
 assert.match(evidence, /iterateBoundedChunks/);
