@@ -34,6 +34,8 @@ import {
 import {
   crashConsentStatus,
   crashReportingActive,
+  initialCrashConsent,
+  type CrashConsentModel,
 } from "../telemetry/crashConsentState";
 import {
   __resetCrashReportingForTests,
@@ -59,8 +61,16 @@ function sha256(text: string): string {
   return createHash("sha256").update(text, "utf8").digest("hex");
 }
 
-function purposeRef(db: Firestore, uid: string) {
-  return doc(db, "users", uid, "processingPurposes", PURPOSE);
+function asFirestore(db: unknown): Firestore {
+  return db as Firestore;
+}
+
+function purposeRef(db: unknown, uid: string) {
+  return doc(asFirestore(db), "users", uid, "processingPurposes", PURPOSE);
+}
+
+function consentOf(state: PurposeQueueState | null | undefined, uid: string): CrashConsentModel {
+  return state?.consent ?? initialCrashConsent(uid);
 }
 
 async function waitFor<T>(predicate: () => T | null | undefined, label: string): Promise<T> {
@@ -92,7 +102,7 @@ async function main(): Promise<void> {
   try {
     await env.clearFirestore();
     await env.withSecurityRulesDisabled(async (context) => {
-      const admin = context.firestore();
+      const admin = asFirestore(context.firestore());
       await setDoc(doc(admin, "users", OWNER), { status: "active", uid: OWNER });
       await setDoc(doc(admin, "users", OTHER), { status: "active", uid: OTHER });
       await setDoc(purposeRef(admin, OWNER), {
@@ -104,9 +114,9 @@ async function main(): Promise<void> {
       });
     });
 
-    const ownerDb = env.authenticatedContext(OWNER).firestore();
-    const otherDb = env.authenticatedContext(OTHER).firestore();
-    const anonDb = env.unauthenticatedContext().firestore();
+    const ownerDb = asFirestore(env.authenticatedContext(OWNER).firestore());
+    const otherDb = asFirestore(env.authenticatedContext(OTHER).firestore());
+    const anonDb = asFirestore(env.unauthenticatedContext().firestore());
 
     await assertSucceeds(getDoc(purposeRef(ownerDb, OWNER)));
     await assertFails(getDoc(purposeRef(otherDb, OWNER)));
@@ -134,15 +144,10 @@ async function main(): Promise<void> {
       setCrashlyticsCollectionEnabled: async (enabled: boolean) => {
         preference.enabled = enabled;
       },
-      isCrashlyticsCollectionEnabled: async () => preference.enabled === true,
-      log: async () => undefined,
-      recordError: async () => undefined,
-      setAttribute: async () => undefined,
-      setUserId: async () => undefined,
-      checkForUnsentReports: async () => false,
-      sendUnsentReports: async () => undefined,
       deleteUnsentReports: async () => undefined,
-      crash: () => undefined,
+      log: () => undefined,
+      recordError: () => undefined,
+      setUserId: () => undefined,
     });
     __setCrashSdkBridgeForTests({
       setSessionReportingEnabled: async (enabled, ownerUid, consentRevision) => {
@@ -184,7 +189,7 @@ async function main(): Promise<void> {
           events.add(input.operationId);
           remote = transition.state;
           await env.withSecurityRulesDisabled(async (context) => {
-            await setDoc(purposeRef(context.firestore(), input.uid), {
+            await setDoc(purposeRef(asFirestore(context.firestore()), input.uid), {
               decision: remote.decision,
               revision: remote.revision,
               receivedAt: remote.receivedAt,
@@ -198,7 +203,7 @@ async function main(): Promise<void> {
       observeRemote(uid, _generation, onRemote, onHealth) {
         stopListen?.();
         listenerHealth = "none";
-        const db = env.authenticatedContext(uid).firestore();
+        const db = asFirestore(env.authenticatedContext(uid).firestore());
         stopListen = onSnapshot(
           purposeRef(db, uid),
           { includeMetadataChanges: true },
@@ -238,10 +243,11 @@ async function main(): Promise<void> {
     await queue.choose(OWNER, true);
     await waitFor(() => {
       const state = queue?.state(OWNER);
+      const consent = consentOf(state, OWNER);
       return state &&
-        crashConsentStatus(state.consent) === "active" &&
-        crashReportingActive(state.consent) &&
-        state.consent?.acknowledgement?.decision === "allow"
+        crashConsentStatus(consent) === "active" &&
+        crashReportingActive(consent) &&
+        consent.acknowledgement?.decision === "allow"
         ? state
         : null;
     }, "allow becomes acknowledged and native-active");
@@ -256,7 +262,7 @@ async function main(): Promise<void> {
         : null;
     }, "withdrawal stops reporting");
     assert.equal(session.enabled, false);
-    assert.equal(crashReportingActive(queue.state(OWNER)?.consent ?? null), false);
+    assert.equal(crashReportingActive(consentOf(queue.state(OWNER), OWNER)), false);
 
     // Restart with the same account must not restore the withdrawn grant.
     queue.bind(null);
@@ -264,17 +270,17 @@ async function main(): Promise<void> {
     queue.bind(OWNER);
     await waitFor(() => (listenerHealth === "server" ? true : null), "restart listener reaches server");
     await waitFor(() => (queue?.state(OWNER)?.consent?.choice.decision === "withdraw" ? true : null), "restart keeps withdraw");
-    assert.equal(crashReportingActive(queue.state(OWNER)?.consent ?? null), false);
+    assert.equal(crashReportingActive(consentOf(queue.state(OWNER), OWNER)), false);
     assert.equal(session.enabled, false);
 
     // Account replacement must not revive the prior owner's allow.
     await queue.choose(OWNER, true);
-    await waitFor(() => (crashReportingActive(queue?.state(OWNER)?.consent ?? null) ? true : null), "re-allow");
+    await waitFor(() => (crashReportingActive(consentOf(queue?.state(OWNER), OWNER)) ? true : null), "re-allow");
     assert.equal(session.enabled, true);
     queue.bind(OTHER);
     await waitFor(() => (listenerHealth === "server" ? true : null), "replacement listener reaches server");
     await waitFor(() => (session.enabled === false ? true : null), "replacement disables native");
-    assert.equal(crashReportingActive(queue.state(OTHER)?.consent ?? null), false);
+    assert.equal(crashReportingActive(consentOf(queue.state(OTHER), OTHER)), false);
     assert.notEqual(queue.state(OTHER)?.consent?.choice.decision, "allow");
 
     console.log("processingPurposeRules.emulator.test.ts: ok");
