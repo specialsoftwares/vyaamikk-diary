@@ -1,6 +1,6 @@
 # Subscription lifetime VC36 — execution sheet
 
-Status: **IN PROGRESS — combined-head CI proven; versionCode 37 build commit + CI + internal-grin AAB in flight.** Public publication and integration→main remain HOLD. Forward-only live cutover remains HOLD pending owner decision on dry-run counts below. Device acceptance recorded separately.
+Status: **INTERNAL AAB READY — versionCode 37 on `42ff8df`; public publication and integration→main remain HOLD.** Forward-only live cutover remains HOLD pending owner decision on dry-run counts below. Device acceptance recorded separately (not started here).
 
 Branch: `fix/subscription-lifetime-vc36` (worktree `/Users/shivamsaurav/vyaamikk-subscription-vc36`). Source baseline `c29bcd1`.
 
@@ -97,13 +97,14 @@ Inventory: all 8 Auth/Firestore user docs in `vyaamikk-diary` (2026-11-11). Live
 
 | Field | Value |
 | --- | --- |
-| Final versionCode | **37** (EAS list: 36 used by `8d95bd27…`; next unused) |
-| Final commit SHA | _pending version-only commit_ |
+| Final versionCode | **37** (EAS list: 36 used by `8d95bd27…`) |
+| Final commit SHA | `42ff8df0795f4ac4a2bb19894bbee3ed8cef3f98` |
 | Canonical CI run (combined) | **PASS** on `7230ba6` (activated rules + lifetime shape; google-services present; email-challenge flake retried clean; remainder through invoice-renderer PASS) |
-| Canonical CI run (version-only) | _pending_ |
-| EAS build id | _pending_ |
-| AAB SHA-256 | _pending_ |
-| Device acceptance | _pending — record separately; public HOLD_ |
+| Canonical CI run (version-only) | **PASS** on `42ff8df` (`npm run ci:verify` → `ci:verify PASS`) |
+| EAS build id | `061c5eb0-e260-4f28-bd3c-362810fcb647` (internal-grin, versionCode **37**, commit `42ff8df`) |
+| AAB URL | https://expo.dev/artifacts/eas/SBX6UC6dlL1yq_ml6f7J_2FJWEnFBTxEcwZoR_myKwY.aab |
+| AAB SHA-256 | `d381034e48ff3f54962cad6c833662b8179ec8ea042a9846775627fca81160ee` |
+| Device acceptance | **HOLD — record separately**; public HOLD |
 
 ## Play Console owner action
 
